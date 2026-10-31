@@ -6,10 +6,9 @@ import {
   TabsList,
   TabsTrigger,
 } from "@odentia/ui"
-import { EmptyState, ErrorState, LoadingState, PageHeader, PageShell, useListSearch } from "@odentia/ui-patterns"
+import { EmptyState, ErrorState, PageHeader, PageShell, SkeletonRegion, useListSearch } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { Plus } from "lucide-react"
 import * as React from "react"
 import { BranchSwitcher } from "../../components/branch-switcher"
 import { CountView } from "../../components/inventory/count-view"
@@ -33,9 +32,11 @@ import { ReceiveDrawer } from "../../components/inventory/receive-form"
 import { StockActionDrawer } from "../../components/inventory/stock-actions"
 import { SupplierFormDrawer } from "../../components/inventory/supplier-form"
 import { SuppliersTab } from "../../components/inventory/suppliers-tab"
+import { InventoryBodySkeleton, InventoryPageSkeleton } from "../../components/skeletons/inventory"
 import { useActiveBranch } from "../../lib/active-branch"
 import { apiFetch } from "../../lib/api"
-import { usePermission } from "../../lib/crm"
+import { useCan, usePermission } from "../../lib/crm"
+import { inventoryAccess, inventoryCounting, inventoryHeader } from "../../lib/screen-rules"
 import { hasPrices, type ProductDetail, type PurchaseOrderDetail, type PurchaseOrderView, type SupplierItem } from "../../lib/inventory"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { useOrgProfile } from "../../lib/org"
@@ -77,6 +78,7 @@ export const Route = createFileRoute("/_org/inventory")({
     }
     return out as InventorySearch
   },
+  pendingComponent: InventoryPageSkeleton,
   component: InventoryPage,
 })
 
@@ -104,9 +106,8 @@ function InventoryPage() {
 }
 
 function InventoryWorkspace() {
-  const canPrices = usePermission("inventory.read")
-  const canWrite = usePermission("inventory.write")
-  const canReceive = usePermission("inventory.receive") || canWrite
+  const access = inventoryAccess(useCan())
+  const { prices: canPrices, write: canWrite, receive: canReceive } = access
   const canPay = usePermission("finance.write")
   const canFinance = usePermission("finance.read")
   const canClinical = usePermission("clinical.read")
@@ -125,7 +126,7 @@ function InventoryWorkspace() {
   const branchId = sede.branchId ?? sede.branches[0]?.id ?? ""
   const branchName = sede.branches.find((item) => item.id === branchId)?.name ?? ""
   const tab = tabOf(get("tab"))
-  const counting = get("contar") === "si" && canWrite
+  const counting = inventoryCounting(get("contar"), access)
 
   const [productForm, setProductForm] = React.useState<{ product: ProductDetail | null; seq: number } | null>(null)
   // Lo que se abre al lado queda en la sede donde se abrió: cambiar de sede en la página no lo mueve.
@@ -185,7 +186,8 @@ function InventoryWorkspace() {
   if (!branchId) {
     return (
       <PageShell className="flex flex-col gap-4">
-        <PageHeader title="Inventario" />
+        {/* La acción de la pestaña sigue a la vista, deshabilitada, mientras llega la sede: no aparece, se va y vuelve. */}
+        <PageHeader title="Inventario" {...(branchesQuery.isPending ? inventoryHeader(tab, access) : {})} />
         {branchesQuery.isError ? (
           <ErrorState
             title="No pudimos cargar las sedes"
@@ -193,7 +195,9 @@ function InventoryWorkspace() {
             onRetry={() => void branchesQuery.refetch()}
           />
         ) : branchesQuery.isPending ? (
-          <LoadingState message="Cargando la sede…" />
+          <SkeletonRegion message="Cargando la sede…">
+            <InventoryBodySkeleton tab={tab} />
+          </SkeletonRegion>
         ) : (
           <EmptyState
             title="Aún no hay sedes activas"
@@ -210,25 +214,21 @@ function InventoryWorkspace() {
   }
 
   // Lo que la pestaña de Productos ofrece aparte de su acción principal va al menú ⋯.
-  const menu: Array<{ label: string; onSelect: () => void }> = []
-  if (canWrite) menu.push({ label: "Contar", onSelect: open.count })
-  if (canWrite) menu.push({ label: "Ajustar", onSelect: () => open.action("ajustar") })
-  if (canWrite && sede.branches.length > 1) menu.push({ label: "Trasladar", onSelect: () => open.action("trasladar") })
-  if (canReceive) menu.push({ label: "Registrar uso", onSelect: () => open.action("uso") })
-  if (canWrite) menu.push({ label: "Agregar sin compra", onSelect: () => open.action("agregar") })
-  if (canWrite) menu.push({ label: "Pegar mi lista", onSelect: open.paste })
-
   // La acción principal es crear lo que cada pestaña lista (producto, compra o proveedor).
-  const headerPrimary =
-    tab === "productos"
-      ? canWrite
-        ? { label: "Producto", icon: <Plus aria-hidden />, onClick: () => open.productForm() }
-        : undefined
-      : tab === "compras" && canWrite
-        ? { label: "Compra", icon: <Plus aria-hidden />, onClick: () => open.purchase() }
-        : tab === "proveedores" && canWrite
-          ? { label: "Proveedor", icon: <Plus aria-hidden />, onClick: () => open.supplier() }
-          : undefined
+  const { primary: headerPrimary, menu } = inventoryHeader(tab, access, {
+    manyBranches: sede.branches.length > 1,
+    run: {
+      product: () => open.productForm(),
+      purchase: () => open.purchase(),
+      supplier: () => open.supplier(),
+      count: open.count,
+      adjust: () => open.action("ajustar"),
+      transfer: () => open.action("trasladar"),
+      use: () => open.action("uso"),
+      add: () => open.action("agregar"),
+      paste: open.paste,
+    },
+  })
 
   return (
     <InventoryProvider value={scope}>
@@ -241,7 +241,7 @@ function InventoryWorkspace() {
               title="Inventario"
               subtitle={subtitle}
               primary={headerPrimary}
-              menu={tab === "productos" && menu.length > 0 ? menu : undefined}
+              menu={menu}
             />
             {profile.isError && !profile.data ? (
               // Sin el perfil no se sabe la moneda: no se confunde con «configura la moneda».

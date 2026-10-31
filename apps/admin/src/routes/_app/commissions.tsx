@@ -9,19 +9,26 @@ import {
   EmptyState,
   ErrorState,
   FormDrawer,
-  LoadingState,
   PageHeader,
   PageShell,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { requireAdminRole } from "../../lib/session"
 import { Plus } from "lucide-react"
 import { useState } from "react"
+import {
+  CommissionsPageSkeleton,
+  PendingCommissionsSkeleton,
+  SellersSkeleton,
+  SettlementsSkeleton,
+} from "../../components/skeletons/commissions"
 import { ApiError, api } from "../../lib/api"
 
 export const Route = createFileRoute("/_app/commissions")({
   beforeLoad: requireAdminRole,
+  pendingComponent: CommissionsPageSkeleton,
   component: CommissionsPage,
 })
 
@@ -129,7 +136,9 @@ function CommissionsPage() {
           Vendedores
         </h2>
         {sellers.isPending ? (
-          <LoadingState message="Cargando vendedores…" />
+          <SkeletonRegion message="Cargando vendedores…">
+            <SellersSkeleton />
+          </SkeletonRegion>
         ) : sellers.isError ? (
           <ErrorState
             title="No se pudieron cargar los vendedores"
@@ -180,7 +189,9 @@ function CommissionsPage() {
           Por liquidar
         </h2>
         {pending.isPending ? (
-          <LoadingState message="Cargando comisiones…" />
+          <SkeletonRegion message="Cargando comisiones…">
+            <PendingCommissionsSkeleton />
+          </SkeletonRegion>
         ) : pending.isError ? (
           <ErrorState
             title="No se pudieron cargar las comisiones"
@@ -222,7 +233,9 @@ function CommissionsPage() {
           Liquidaciones
         </h2>
         {settlements.isPending ? (
-          <LoadingState message="Cargando liquidaciones…" />
+          <SkeletonRegion message="Cargando liquidaciones…">
+            <SettlementsSkeleton />
+          </SkeletonRegion>
         ) : settlements.isError ? (
           <ErrorState
             title="No se pudieron cargar las liquidaciones"

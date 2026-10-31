@@ -2161,6 +2161,10 @@ export const patientCharge = pgTable(
     index("patient_charge_org_patient_idx").on(table.organizationId, table.patientId),
     index("patient_charge_item_idx").on(table.organizationId, table.planItemId),
     index("patient_charge_budget_item_idx").on(table.organizationId, table.budgetItemId),
+    // Lo que se cobró de cada procedimiento (comisiones y Reportes › Finanzas).
+    index("patient_charge_encounter_procedure_idx")
+      .on(table.organizationId, table.encounterProcedureId)
+      .where(sql`"encounter_procedure_id" IS NOT NULL`),
     check("patient_charge_amount_check", sql`${table.amountCents} > 0`),
     check(
       "patient_charge_tax_check",

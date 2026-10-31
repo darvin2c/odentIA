@@ -1,5 +1,5 @@
-import { Alert, AlertDescription, AlertTitle, Checkbox, Skeleton, toast } from "@odentia/ui"
-import { PageHeader, SubmitButton } from "@odentia/ui-patterns"
+import { Alert, AlertDescription, AlertTitle, Checkbox, toast } from "@odentia/ui"
+import { PageHeader, SubmitButton, SkeletonRegion } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { type ReactNode, useEffect, useId, useState } from "react"
@@ -14,8 +14,10 @@ import {
   type PortalPolicyInput,
   savePortalPolicyApi,
 } from "../../lib/portal"
+import { PatientPortalPageSkeleton, PatientPortalSkeleton } from "../../components/skeletons/settings"
 
 export const Route = createFileRoute("/_org/settings/patient-access")({
+  pendingComponent: PatientPortalPageSkeleton,
   component: PatientPortalPage,
 })
 
@@ -37,29 +39,6 @@ function PatientPortalPage() {
     )
   }
   return <PortalSettings />
-}
-
-/** El hueco de la pantalla mientras carga: sus tarjetas. */
-function PortalSkeleton() {
-  return (
-    <div className="flex flex-col gap-6">
-      <p role="status" className="sr-only">
-        Cargando el portal del paciente…
-      </p>
-      <div className={CARD} aria-hidden>
-        <Skeleton className="h-5 w-56" />
-        <Skeleton className="h-4 w-full max-w-md" />
-      </div>
-      <div className={CARD} aria-hidden>
-        <Skeleton className="h-5 w-64" />
-        <Skeleton className="h-4 w-32" />
-        <Skeleton className="h-4 w-40" />
-        <Skeleton className="h-4 w-36" />
-        <Skeleton className="h-4 w-32" />
-      </div>
-      <Skeleton className="h-11 w-full rounded-xl" aria-hidden />
-    </div>
-  )
 }
 
 /** Una casilla del formulario con su explicación debajo. Se guarda con «Guardar». */
@@ -144,7 +123,9 @@ function PortalSettings() {
         {policyQuery.isError ? (
           <SettingsLoadError what="el portal del paciente" onRetry={() => void policyQuery.refetch()} />
         ) : (
-          <PortalSkeleton />
+          <SkeletonRegion message="Cargando el portal del paciente…">
+            <PatientPortalSkeleton />
+          </SkeletonRegion>
         )}
       </div>
     )

@@ -1,5 +1,12 @@
 import { cn } from "@odentia/ui"
-import type * as React from "react"
+import * as React from "react"
+
+const InsidePageShell = React.createContext(false)
+
+/** Si ya hay un `PageShell` arriba: lo que se monta dentro no pone otro. */
+export function useInsidePageShell(): boolean {
+  return React.useContext(InsidePageShell)
+}
 
 export interface PageShellProps {
   children: React.ReactNode
@@ -37,7 +44,7 @@ export function PageShell({ children, className, maxWidth, fill }: PageShellProp
           className,
         )}
       >
-        {children}
+        <InsidePageShell.Provider value={true}>{children}</InsidePageShell.Provider>
       </div>
     </div>
   )

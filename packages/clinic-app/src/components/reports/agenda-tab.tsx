@@ -7,8 +7,8 @@
  * tabla»; el profesional se elige sin volver a preguntar al servidor.
  */
 import { Button, cn, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@odentia/ui"
-import { ColumnChart, EmptyState, HeatmapGrid, LoadingState, Sparkline } from "@odentia/ui-patterns"
-import { useQuery } from "@tanstack/react-query"
+import { ColumnChart, EmptyState, HeatmapGrid, SkeletonRegion, Sparkline } from "@odentia/ui-patterns"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { ArrowDown, ArrowUp } from "lucide-react"
 import { type ReactNode, useId, useMemo, useState } from "react"
@@ -33,7 +33,8 @@ import {
 } from "../../lib/reports"
 import { ChoiceButtons } from "../choice-buttons"
 import { ChoiceSelect } from "../ui/choice-select"
-import { type Better, ChangeLine, EmptyLine, ReportCard } from "./report-parts"
+import { AgendaTabSkeleton } from "../skeletons/reports"
+import { type Better, ChangeLine, EmptyLine, ReportCard, ReportBody } from "./report-parts"
 import { appWords } from "../../lib/product-words"
 
 /** Lo que se aparta de la clínica más de estos puntos (o la mitad, en minutos) lleva su marca. */
@@ -68,8 +69,13 @@ export function AgendaTab({ query, onOpenList, advice }: { query: ReportQuery; o
   const navigate = useNavigate()
   const canAgenda = usePermission("appointments.read")
   const canSchedules = usePermission("settings.write")
-  const report = useQuery({ queryKey: reportKey("agenda", query), queryFn: () => fetchReport<AgendaReport>("agenda", query), retry: false })
-  if (report.isPending) return <LoadingState />
+  const report = useQuery({ queryKey: reportKey("agenda", query), queryFn: () => fetchReport<AgendaReport>("agenda", query), placeholderData: keepPreviousData, retry: false })
+  if (report.isPending)
+    return (
+      <SkeletonRegion message="Cargando las cifras…">
+        <AgendaTabSkeleton />
+      </SkeletonRegion>
+    )
   if (report.isError)
     return <QueryErrorState error={report.error} onRetry={() => void report.refetch()} notFound="La sede elegida ya no está disponible. Elige otra sede." />
   const data = report.data.data
@@ -84,13 +90,13 @@ export function AgendaTab({ query, onOpenList, advice }: { query: ReportQuery; o
       />
     )
   return (
-    <div className="flex min-w-0 flex-col gap-4">
+    <ReportBody stale={report.isPlaceholderData}>
       <AgendaCards data={data} onOpenList={onOpenList} />
       {advice}
       <AppointmentsChart data={data} />
       <FreeHours data={data} />
       <Professionals data={data} />
-    </div>
+    </ReportBody>
   )
 }
 

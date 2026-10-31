@@ -334,6 +334,8 @@ export interface ProductRecordSection {
   parent?: string
   /** Necesita la ficha cargada: la página la pide antes de mostrarla. */
   needsRecord?: boolean
+  /** Su esqueleto de carga: se ve mientras llega la página o la ficha. Sin él, un bloque genérico. */
+  skeleton?: ReactNode
   render(props: RecordSectionProps): ReactNode
 }
 

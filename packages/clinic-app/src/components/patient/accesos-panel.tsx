@@ -1,4 +1,4 @@
-import { DataTable, EmptyState, LoadingState } from "@odentia/ui-patterns"
+import { DataTable, EmptyState, SkeletonRegion } from "@odentia/ui-patterns"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"
@@ -7,6 +7,7 @@ import { apiFetch } from "../../lib/api"
 import { formatDateTime } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { QueryErrorState } from "../../lib/query-error"
+import { AccessLogSkeleton } from "../skeletons/person-sections"
 
 /** Sin identificador propio: la franja es la clave y la tabla usa el índice de fila. */
 interface AccessItem {
@@ -50,7 +51,12 @@ export function AccesosPanel({ patientId }: { patientId: string }) {
     enabled: canAudit,
     retry: false,
   })
-  if (query.isPending) return <LoadingState message="Cargando consultas…" />
+  if (query.isPending)
+    return (
+      <SkeletonRegion message="Cargando consultas…">
+        <AccessLogSkeleton />
+      </SkeletonRegion>
+    )
   if (query.isError && !query.data)
     return <QueryErrorState error={query.error} onRetry={() => void query.refetch()} />
   const rows = query.data?.data ?? []

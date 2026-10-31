@@ -1,5 +1,4 @@
 import { Button } from "@odentia/ui"
-import { LoadingState } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { apiFetch } from "@odentia/clinic-app/lib/api"
@@ -8,6 +7,7 @@ import type { OdontogramState } from "../../lib/dental/odontogram"
 import { QueryErrorState } from "@odentia/clinic-app/lib/query-error"
 import { OdontogramStudio } from "./odontogram-studio"
 import { NewEncounterButton } from "@odentia/clinic-app/components/patient/new-encounter-button"
+import { OdontogramLoading } from "./odontogram-skeleton"
 
 const CLOSED = new Set(["realizado", "cancelado"])
 const DISCARDED = new Set(["rechazado", "reemplazado"])
@@ -63,7 +63,7 @@ export function OdontogramaTab({
     dirty.current = value
   }, [])
 
-  if (chart.isPending) return <LoadingState message="Cargando odontograma…" />
+  if (chart.isPending) return <OdontogramLoading />
   if (chart.isError)
     return <QueryErrorState error={chart.error} onRetry={() => void chart.refetch()} />
 

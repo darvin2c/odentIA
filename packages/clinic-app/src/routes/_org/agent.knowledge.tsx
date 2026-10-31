@@ -38,8 +38,10 @@ import { PageDraftGuard, sameDraft } from "../../lib/page-draft-guard"
 import { activeOrgLocale } from "../../lib/locale"
 import { useReceptionName } from "../../lib/agent-names"
 import { isAmbiguousMutationError, mutationErrorMessage } from "../../lib/query-error"
+import { KnowledgePageSkeleton } from "../../components/skeletons/agent"
 
 export const Route = createFileRoute("/_org/agent/knowledge")({
+  pendingComponent: KnowledgePageSkeleton,
   component: AgentKnowledgePage,
 })
 

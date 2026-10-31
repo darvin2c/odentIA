@@ -5,11 +5,12 @@
  * agentes, sin importes (decisión D4, ADR 0094).
  */
 import { Button } from "@odentia/ui"
-import { ErrorState, LoadingState } from "@odentia/ui-patterns"
+import { ErrorState, SkeletonRegion } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { api } from "../lib/api"
 import { cost, money, plural } from "../lib/cost-format"
 import type { ClinicCostMargin } from "./cost-margin"
+import { OrgSummarySkeleton } from "./skeletons/organization-detail"
 import type { SpendingAgent } from "./org-spending"
 
 interface AgentCounts {
@@ -214,7 +215,11 @@ export function OrgSummary({
   })
 
   if (counts.isPending || (isAdmin && (margin.isPending || billing.isPending)))
-    return <LoadingState message="Cargando el resumen…" />
+    return (
+      <SkeletonRegion message="Cargando el resumen…">
+        <OrgSummarySkeleton />
+      </SkeletonRegion>
+    )
   if (counts.isError)
     return <ErrorState title="No se pudo cargar el resumen" onRetry={() => void counts.refetch()} />
   if (isAdmin && margin.isError)

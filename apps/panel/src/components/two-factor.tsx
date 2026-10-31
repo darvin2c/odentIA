@@ -10,7 +10,6 @@ import {
   FieldError,
   FieldLabel,
   Input,
-  Skeleton,
   toast,
 } from "@odentia/ui"
 import {
@@ -22,6 +21,7 @@ import {
   totpDigits,
   totpSecret,
 } from "@odentia/ui-patterns"
+import { TwoFactorSkeleton } from "./skeletons/profile"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Check, ChevronDown } from "lucide-react"
@@ -83,7 +83,7 @@ export function TwoFactorRow() {
     },
     onError: () => toast.error(common.errors.generic),
   })
-  if (status.isPending) return <Skeleton className="h-16 w-full" />
+  if (status.isPending) return <TwoFactorSkeleton />
   if (status.isError) return <p className="text-sm text-muted-foreground">No pudimos cargar tu verificación en dos pasos.</p>
   const value = status.data
   const badge = (

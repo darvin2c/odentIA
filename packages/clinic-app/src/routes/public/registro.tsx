@@ -1,9 +1,10 @@
-import { EmptyState, ErrorState, LoadingState, PageShell } from "@odentia/ui-patterns"
+import { EmptyState, ErrorState, PageShell } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { CircleCheck } from "lucide-react"
 import { useMemo, useState } from "react"
 import { RegistrationQuestionnaire } from "../../components/patient/registration-questionnaire"
+import { RegistroPageSkeleton } from "../../components/skeletons/public-registro"
 import { publicAddressSource } from "../../lib/address-suggestions"
 import { ApiError } from "../../lib/api"
 import { orgSlugFromHostname, requestHostname } from "../../lib/host"
@@ -21,6 +22,7 @@ export const Route = createFileRoute("/registro")({
       { name: "referrer", content: "no-referrer" },
     ],
   }),
+  pendingComponent: RegistroPageSkeleton,
   component: PublicRegistrationPage,
 })
 
@@ -79,11 +81,7 @@ function PublicRegistrationPage() {
   }
 
   if (infoQuery.isPending) {
-    return (
-      <PageShell maxWidth="md">
-        <LoadingState message="Cargando el formulario de registro…" />
-      </PageShell>
-    )
+    return <RegistroPageSkeleton />
   }
 
   if (infoQuery.isError) {

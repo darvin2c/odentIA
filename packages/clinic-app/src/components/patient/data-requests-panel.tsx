@@ -14,7 +14,8 @@ import {
   toast,
 } from "@odentia/ui"
 import { formatMoney } from "@odentia/clinical"
-import { ConfirmDialog, EmptyState, ErrorState, FormDrawer, LoadingState, PastDateInput } from "@odentia/ui-patterns"
+import { ConfirmDialog, EmptyState, ErrorState, FormDrawer, LoadingState, PastDateInput, SkeletonRegion } from "@odentia/ui-patterns"
+import { DataRequestsSkeleton } from "../skeletons/person-sections"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { FileText, MessageSquareOff, PencilLine, Trash2 } from "lucide-react"
 import { useState } from "react"
@@ -85,7 +86,12 @@ export function DataRequestsPanel({ patientId }: { patientId: string }) {
         description="Los pedidos de una persona sobre sus datos los atienden Recepción y Administración."
       />
     )
-  if (query.isPending) return <LoadingState message="Cargando sus pedidos…" />
+  if (query.isPending)
+    return (
+      <SkeletonRegion message="Cargando sus pedidos…">
+        <DataRequestsSkeleton />
+      </SkeletonRegion>
+    )
   if (query.isError)
     return (
       <ErrorState

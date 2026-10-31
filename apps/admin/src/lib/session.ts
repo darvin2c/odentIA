@@ -1,4 +1,4 @@
-import { redirect } from "@tanstack/react-router"
+import { getRouteApi, redirect } from "@tanstack/react-router"
 import { z } from "zod"
 import { ApiError, api } from "./api"
 import { loginUrl } from "./host"
@@ -29,4 +29,20 @@ export async function requireAdminSession(): Promise<AdminSession> {
  */
 export function requireAdminRole({ context }: { context: { adminSession: AdminSession } }): void {
   if (context.adminSession.actor.role !== "admin") throw redirect({ to: "/" })
+}
+
+const appRoute = getRouteApi("/_app")
+
+/**
+ * Si quien mira es de la administración, sin ningún pedido: lo trae el
+ * `beforeLoad` de `/_app`, y una pantalla (o su esqueleto) solo se pinta dentro
+ * de ese layout, que ya lo tiene. Decide qué se muestra, no qué se permite.
+ */
+export function useIsAdmin(): boolean {
+  return appRoute.useRouteContext().adminSession.actor.role === "admin"
+}
+
+/** Quién es quien mira, del mismo lugar que `useIsAdmin`. */
+export function useAdminUserId(): string {
+  return appRoute.useRouteContext().adminSession.actor.userId
 }

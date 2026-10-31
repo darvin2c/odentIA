@@ -4,7 +4,7 @@
  * «A favor»), que abre sus compras. Desactivar confirma su consecuencia.
  */
 import { Button, toast } from "@odentia/ui"
-import { ConfirmDialog, DataTable, DataTableSkeleton, EmptyState, RowActions, SearchInput, internationalText, isValidE164, useListSearch } from "@odentia/ui-patterns"
+import { ConfirmDialog, DataTable, EmptyState, RowActions, SearchInput, SkeletonRegion, internationalText, isValidE164, useListSearch } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { Truck } from "lucide-react"
@@ -20,6 +20,7 @@ import {
   type SupplierItem,
 } from "../../lib/inventory"
 import { QueryErrorState } from "../../lib/query-error"
+import { SupplierRowsSkeleton } from "../skeletons/inventory"
 import { Chip } from "./fields"
 import { useInventory } from "./inventory-scope"
 
@@ -147,13 +148,15 @@ export function SuppliersTab() {
 
   return (
     <div className="flex flex-col gap-3">
-      {rows.length > 0 || q ? (
+      {rows.length > 0 || q || query.isPending ? (
         <div className="flex flex-wrap items-center gap-2 rounded-md bg-card p-3">
           <SearchInput label="Buscar en proveedores" placeholder="Buscar por nombre o documento" expandable isFetching={query.isFetching && q !== ""} />
         </div>
       ) : null}
       {query.isPending ? (
-        <DataTableSkeleton columnCount={can.prices ? 4 : 3} label="Cargando proveedores…" />
+        <SkeletonRegion message="Cargando proveedores…">
+          <SupplierRowsSkeleton prices={can.prices} write={can.write} />
+        </SkeletonRegion>
       ) : query.isError && rows.length === 0 ? (
         <QueryErrorState error={query.error} onRetry={() => void query.refetch()} />
       ) : rows.length === 0 ? (

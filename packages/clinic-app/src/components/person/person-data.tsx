@@ -1,5 +1,5 @@
 import { Badge, Button, Field, FieldLabel, Input } from "@odentia/ui"
-import { DatePickerButton, FormDrawer, internationalText, LoadingState } from "@odentia/ui-patterns"
+import { DatePickerButton, FormDrawer, internationalText, LoadingState, SkeletonRegion } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { type ReactNode, useMemo, useState } from "react"
@@ -16,6 +16,7 @@ import { FiliacionSectionDrawer, type FiliacionSectionKey } from "../patient/fil
 import { MessagePermissionsSection } from "../patient/message-permissions-section"
 import { PhoneWhatsAppNote } from "./phone-whatsapp"
 import { TagsInput } from "../patient/tags-input"
+import { FiliacionSkeleton } from "../skeletons/person-sections"
 import { ChoiceSelect } from "../ui/choice-select"
 
 const PREFERRED_LABELS: Record<string, string> = {
@@ -83,7 +84,9 @@ export function PersonData({ person, detail }: { person: PersonPage; detail?: Pa
             phoneNote={<PhoneWhatsAppNote contactId={person.id} value={person.phoneWhatsApp} />}
           />
         ) : (
-          <LoadingState message="Cargando sus datos…" />
+          <SkeletonRegion message="Cargando sus datos…">
+            <FiliacionSkeleton canEdit={can("patients.write")} />
+          </SkeletonRegion>
         )}
         <PersonCrmCard person={person} />
       </div>

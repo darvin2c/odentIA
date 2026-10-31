@@ -6,10 +6,10 @@
  */
 import { unitFor } from "@odentia/clinical"
 import { Button, Checkbox, Field, FieldLabel, toast } from "@odentia/ui"
-import { ConfirmDialog, DataTable, DataTableSkeleton, EmptyState, PageHeader, SearchInput, SubmitButton, ViewTabs, normalizeSearchText, useListSearch } from "@odentia/ui-patterns"
+import { ConfirmDialog, DataTable, EmptyState, PageHeader, SearchInput, SkeletonRegion, SubmitButton, ViewTabs, normalizeSearchText, useListSearch } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
-import { ClipboardList, LogOut } from "lucide-react"
+import { ClipboardList } from "lucide-react"
 import * as React from "react"
 import {
   countStock,
@@ -24,6 +24,8 @@ import {
 } from "../../lib/inventory"
 import { usePageDraftGuard } from "../../lib/page-draft-guard"
 import { QueryErrorState } from "../../lib/query-error"
+import { inventoryCountPrimary } from "../../lib/screen-rules"
+import { CountRowsSkeleton } from "../skeletons/inventory"
 import { QuantityInput } from "./fields"
 import { useInventory } from "./inventory-scope"
 import { appWords } from "../../lib/product-words"
@@ -218,17 +220,13 @@ export function CountView({ subtitle, onExit }: { subtitle: React.ReactNode; onE
       <PageHeader
         title="Contar lo que hay"
         subtitle={subtitle}
-        primary={{
-          label: "Salir sin guardar",
-          icon: <LogOut aria-hidden />,
-          onClick: () => {
-            if (written.length === 0) onExit()
-            else {
-              setDiscard(false)
-              setLeaving(true)
-            }
-          },
-        }}
+        primary={inventoryCountPrimary(() => {
+          if (written.length === 0) onExit()
+          else {
+            setDiscard(false)
+            setLeaving(true)
+          }
+        })}
       />
       <form
         ref={container}
@@ -261,7 +259,9 @@ export function CountView({ subtitle, onExit }: { subtitle: React.ReactNode; onE
         </div>
 
         {products.isPending ? (
-          <DataTableSkeleton columnCount={4} label="Cargando productos…" />
+          <SkeletonRegion message="Cargando productos…">
+            <CountRowsSkeleton systemLabel={`${appWords().name} tiene`} />
+          </SkeletonRegion>
         ) : products.isError && items.length === 0 ? (
           <QueryErrorState error={products.error} onRetry={() => void products.refetch()} />
         ) : items.length === 0 ? (

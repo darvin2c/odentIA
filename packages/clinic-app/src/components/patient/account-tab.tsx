@@ -21,7 +21,8 @@ import {
   Input,
   Textarea,
 } from "@odentia/ui"
-import { DetailDrawer, EmptyState, ErrorState, FormDrawer, LoadingState, SubmitButton } from "@odentia/ui-patterns"
+import { DetailDrawer, EmptyState, ErrorState, FormDrawer, SkeletonRegion, SubmitButton } from "@odentia/ui-patterns"
+import { AccountSkeleton } from "../skeletons/person-sections"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { Plus } from "lucide-react"
@@ -239,7 +240,11 @@ export function AccountTab({
     )
   }
   if (account.isPending || profile.isPending) {
-    return <LoadingState message="Cuenta del paciente" />
+    return (
+      <SkeletonRegion message="Cuenta del paciente">
+        <AccountSkeleton canWrite={canWrite} />
+      </SkeletonRegion>
+    )
   }
   if (account.isError || !account.data) {
     return (

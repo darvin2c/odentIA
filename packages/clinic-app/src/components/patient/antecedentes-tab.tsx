@@ -20,7 +20,8 @@ import {
   SelectValue,
   Textarea,
 } from "@odentia/ui"
-import { EmptyState, ErrorState, FormDrawer, LoadingState } from "@odentia/ui-patterns"
+import { EmptyState, ErrorState, FormDrawer, SkeletonRegion } from "@odentia/ui-patterns"
+import { AntecedentesSkeleton } from "../skeletons/person-sections"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown, HeartPulse } from "lucide-react"
 import type { ReactNode } from "react"
@@ -463,7 +464,12 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
     markDirty()
   }
 
-  if (healthQuery.isPending) return <LoadingState />
+  if (healthQuery.isPending)
+    return (
+      <SkeletonRegion message="Cargando antecedentes…">
+        <AntecedentesSkeleton canWrite={canWrite} />
+      </SkeletonRegion>
+    )
   if (healthQuery.isError || !health) {
     return (
       <ErrorState

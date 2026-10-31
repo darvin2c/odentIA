@@ -5,10 +5,10 @@
  * dirección (`?tab`, `?period`, `?branch`, `?lista`): se puede compartir el
  * enlace y volver a él.
  */
-import { cn } from "@odentia/ui"
-import { ErrorState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
+import { cn, Skeleton } from "@odentia/ui"
+import { ErrorState, LoadingState, PageHeader, PageShell, SkeletonRegion } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
+import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { Settings } from "lucide-react"
 import { type ReactNode, useState } from "react"
 import { AdminRecommendationDrawer } from "../../components/agent/admin-recommendation"
@@ -21,11 +21,13 @@ import { PatientsTab } from "../../components/reports/patients-tab"
 import { ReportListDrawer } from "../../components/reports/report-list-drawer"
 import { ReportPeriodPicker } from "../../components/reports/report-period"
 import { AdminWatch, SummaryTab } from "../../components/reports/summary-tab"
+import { ReportsBodySkeleton, ReportsPageSkeleton } from "../../components/skeletons/reports"
 import { ChoiceSelect } from "../../components/ui/choice-select"
 import { EmptyState } from "@odentia/ui-patterns"
 import { currentMonthIn } from "../../lib/commissions"
 import { usePermission } from "../../lib/crm"
-import { useBranchesOptions, useOrgFinanceProfile } from "../../lib/finance-collect"
+import { useBranchesOptions } from "../../lib/finance-collect"
+import { useOrgProfile } from "../../lib/org"
 import { QueryErrorState } from "../../lib/query-error"
 import {
   comparedWith,
@@ -33,6 +35,8 @@ import {
   isReportList,
   isReportPeriod,
   periodLabel,
+  REPORT_PRESET_LABELS,
+  type ReportPreset,
   reportKey,
   type ReportAdviceTab,
   type ReportListKey,
@@ -94,16 +98,23 @@ export const Route = createFileRoute("/_org/reports")({
       ...(search.vista === "promociones" ? { vista: "promociones" as const } : {}),
     }
   },
+  pendingComponent: ReportsPageSkeleton,
   component: ReportsPage,
 })
+
+const orgRouteApi = getRouteApi("/_org")
 
 function ReportsPage() {
   const allowed = usePermission("reports.read")
   const search = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
-  const profile = useOrgFinanceProfile()
+  // La región ya llegó con la página: filtros, pestañas y pedidos no esperan al perfil.
+  const { region } = orgRouteApi.useRouteContext()
+  const profile = useOrgProfile()
   const branches = useBranchesOptions()
-  const region = profile.data?.data ?? null
+  const timezone = profile.data?.timezone ?? region.timeZone
+  // Sin perfil la clínica no se ha configurado; mientras no se sabe, se espera a saberlo.
+  const configured = profile.data !== undefined ? profile.data !== null : region.timeZone ? true : undefined
 
   const tab = search.tab ?? "resumen"
   const period = search.period ?? DEFAULT_PERIOD
@@ -112,12 +123,12 @@ function ReportsPage() {
   const head = useQuery({
     queryKey: reportKey("summary", query),
     queryFn: () => fetchReport<ReportSummary>("summary", query),
-    enabled: allowed && region !== null,
+    enabled: allowed && configured === true,
     retry: false,
   })
 
   // Los avisos del Administrador acompañan a su cifra; la recomendación se abre al lado con su lista y su acción.
-  const advice = useReportAdvice(query, allowed && region !== null)
+  const advice = useReportAdvice(query, allowed && configured === true)
   const notices = advice.data?.data.notices
   const [recommendation, setRecommendation] = useState<string | null>(null)
   const adviceNote = (item: ReportTab): ReactNode => {
@@ -144,31 +155,39 @@ function ReportsPage() {
   }
 
   const data = head.data?.data
-  const locale = data?.locale ?? region?.locale ?? "es"
+  const locale = data?.locale ?? profile.data?.locale ?? region.locale ?? "es"
   const branchList = branches.data?.data ?? []
 
   return (
     <PageShell className="flex flex-col gap-4">
       <PageHeader title="Reportes" />
-      {profile.isPending ? (
-        <LoadingState />
-      ) : profile.isError ? (
-        <QueryErrorState error={profile.error} onRetry={() => void profile.refetch()} />
-      ) : !region ? (
+      {configured === false ? (
         <ConfigureClinic />
+      ) : configured === undefined || !timezone ? (
+        profile.isError ? (
+          <QueryErrorState error={profile.error} onRetry={() => void profile.refetch()} />
+        ) : (
+          <SkeletonRegion message="Cargando Reportes…">
+            <ReportsBodySkeleton tab={tab} promotions={search.vista === "promociones"} />
+          </SkeletonRegion>
+        )
       ) : (
         <>
           {/* Periodo y sede juntos, bajo el título: valen para toda la pantalla. */}
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <ReportPeriodPicker
               value={period}
-              label={data ? periodLabel(data.period, locale) : "Periodo"}
-              currentMonth={currentMonthIn(region.timezone)}
-              today={todayIn(region.timezone)}
+              label={data ? periodLabel(data.period, locale) : (REPORT_PRESET_LABELS[period as ReportPreset] ?? "Periodo")}
+              currentMonth={currentMonthIn(timezone)}
+              today={todayIn(timezone)}
               locale={locale}
               onChange={(next) => setSearch({ period: next === DEFAULT_PERIOD ? undefined : next, lista: undefined })}
             />
-            {branchList.length > 1 ? (
+            {branches.isPending ? (
+              <div className="max-sm:basis-full">
+                <Skeleton className="h-9 w-48 rounded-full" />
+              </div>
+            ) : branchList.length > 1 ? (
               <ChoiceSelect
                 aria-label="Sede"
                 className="w-48"
@@ -183,7 +202,7 @@ function ReportsPage() {
                 ))}
               </ChoiceSelect>
             ) : null}
-            {data ? <span className="text-sm text-muted-foreground">Comparado con {comparedWith(data, locale)}</span> : null}
+            {data ? <span className="text-sm text-muted-foreground">Comparado con {comparedWith(data, locale)}</span> : <div className="max-sm:basis-full"><Skeleton className="h-4 w-56 max-w-full" /></div>}
             {/* Pregunta con el periodo y la sede de arriba (D7); la respuesta se abre en el panel de Argos. */}
             <ArgosReportField
               query={query}
@@ -242,7 +261,7 @@ function ReportsPage() {
                           ))}
                         </div>
                       ) : (
-                        <p className="text-sm text-muted-foreground">{advice.isPending ? "Revisando…" : "Nada que atender en estas cifras."}</p>
+                        advice.isPending ? <LoadingState message="Revisando…" /> : <p className="text-sm text-muted-foreground">Nada que atender en estas cifras.</p>
                       )}
                     </AdminWatch>
                   }

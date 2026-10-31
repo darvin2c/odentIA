@@ -18,7 +18,6 @@ import { Switch } from "@odentia/ui/components/switch"
 import {
   ConfirmDialog,
   ErrorState,
-  LoadingState,
   PageHeader,
   PageShell,
   SideColumn,
@@ -27,6 +26,7 @@ import {
   useDetailMode,
   useSideColumnWidth,
   useSideDock,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link } from "@tanstack/react-router"
@@ -54,10 +54,13 @@ import {
 import { AGENT_NAME_REASONS, RECEPTION_DEFAULT_NAME, useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { type AgentConfig, usePermission } from "../../lib/crm"
+import { RECEPTION_TEST_COLUMN } from "../../lib/screen-rules"
 import { useOrgProfile } from "../../lib/org"
 import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
+import { ReceptionPageSkeleton, ReceptionSkeleton } from "../../components/skeletons/agent"
 
 export const Route = createFileRoute("/_org/agent/recepcion")({
+  pendingComponent: ReceptionPageSkeleton,
   component: ReceptionPage,
 })
 const orgRouteApi = getRouteApi("/_org")
@@ -352,10 +355,18 @@ function ReceptionPage() {
       <PageShell className="flex flex-col gap-6">
         <PageHeader title={title} />
         {pending ? (
-          <LoadingState message={`Cargando a ${receptionName}…`} />
+          <SkeletonRegion message={`Cargando a ${receptionName}…`}>
+            <ReceptionSkeleton />
+          </SkeletonRegion>
         ) : (
           <QueryErrorState error={failed?.error} onRetry={() => void (failed ?? rolesQuery).refetch()} />
         )}
+        {/* «Probar» no depende de estos datos: su columna ya ocupa su sitio y la página no salta al llegar. */}
+        {pending && canWrite && docked ? (
+          <SideDockPortal fallback={null}>
+            <TestColumn />
+          </SideDockPortal>
+        ) : null}
       </PageShell>
     )
   }
@@ -717,7 +728,7 @@ function ReceptionPage() {
 }
 
 /** La columna de «Probar»: ancho de un chat, que se puede cambiar como el de cualquier panel. */
-const TEST_COLUMN: SideColumnWidth = { initial: 416, min: 352, max: 560 }
+const TEST_COLUMN: SideColumnWidth = RECEPTION_TEST_COLUMN
 
 /** «Probar» en la columna lateral (ADR 0094): fija a la derecha, a todo el alto; la página sigue al lado. */
 function TestColumn() {

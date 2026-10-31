@@ -17,7 +17,6 @@ import {
 import {
   ConfirmDialog,
   DataTable,
-  DataTableSkeleton,
   EmptyState,
   FilterBar,
   FormDrawer,
@@ -28,15 +27,17 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
-import { Plus } from "lucide-react"
 import { type FormEvent, useId, useMemo, useState } from "react"
 import { SettingsLoadError } from "../../components/settings/load-error"
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { DiscardDraftDialog, useReportDirty, useSideForm } from "../../components/settings/side-form"
 import { ApiError, apiFetch } from "../../lib/api"
-import { type FieldDef, usePermission } from "../../lib/crm"
+import { type FieldDef, useCan, usePermission } from "../../lib/crm"
+import { settingsPrimary } from "../../lib/screen-rules"
+import { ContactFieldsPageSkeleton, ContactFieldsSkeleton } from "../../components/skeletons/settings"
 
 export const Route = createFileRoute("/_org/settings/fields")({
+  pendingComponent: ContactFieldsPageSkeleton,
   component: ContactFieldsPage,
 })
 
@@ -76,6 +77,7 @@ function errorText(error: unknown, fallback: string): string {
  */
 function ContactFieldsPage() {
   const queryClient = useQueryClient()
+  const can = useCan()
   const canConfigure = usePermission("settings.read")
   const canSell = usePermission("crm.read")
   const canRead = canConfigure || canSell
@@ -186,13 +188,11 @@ function ContactFieldsPage() {
       <PageHeader
         title={TITLE}
         subtitle={SUBTITLE}
-        primary={
-          canWrite ? { label: "Nuevo campo", icon: <Plus aria-hidden />, onClick: () => openForm(null) } : undefined
-        }
+        primary={settingsPrimary("fields", can, () => openForm(null))}
       />
 
       {listQuery.isPending ? (
-        <DataTableSkeleton columnCount={4} rowCount={4} label="Cargando los campos de contacto…" />
+        <ContactFieldsSkeleton />
       ) : neverLoaded ? (
         <SettingsLoadError what="los campos de contacto" onRetry={() => void listQuery.refetch()} />
       ) : (

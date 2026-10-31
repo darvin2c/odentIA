@@ -11,11 +11,12 @@ import {
   DataRefreshMarker,
   DetailDrawer,
   EmptyState,
-  LoadingState,
+  SkeletonRegion,
   SearchInput,
   useListSearch,
 } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { DocumentRowsSkeleton } from "../skeletons/person-sections"
 import { Link, useRouter } from "@tanstack/react-router"
 import {
   ChevronDown,
@@ -816,7 +817,8 @@ export function DocumentosSection({
       ) : (
         <>
           <div className="flex flex-wrap items-center gap-2">
-            {current.length > 0 || narrowed || filter ? (
+            {/* Mientras llegan los papeles, el buscador ya está: no depende de ellos. */}
+            {allPending || current.length > 0 || narrowed || filter ? (
               <>
                 <SearchInput placeholder="Buscar un papel" className="min-w-0 flex-1 basis-56" />
                 <PlaceSelect
@@ -853,7 +855,9 @@ export function DocumentosSection({
       )}
 
       {allPending ? (
-        <LoadingState message="Cargando documentos…" />
+        <SkeletonRegion message="Cargando documentos…" className="flex flex-col gap-4">
+          <DocumentRowsSkeleton />
+        </SkeletonRegion>
       ) : (
         <>
           {failed.length > 0 ? (

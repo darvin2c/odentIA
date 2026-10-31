@@ -21,7 +21,8 @@ import {
   Input,
   Textarea,
 } from "@odentia/ui"
-import { ConfirmDialog, EmptyState, ErrorState, FormDrawer, LoadingState, SubmitButton } from "@odentia/ui-patterns"
+import { ConfirmDialog, EmptyState, ErrorState, FormDrawer, LoadingState, SkeletonRegion, SubmitButton } from "@odentia/ui-patterns"
+import { BudgetListSkeleton } from "../../skeletons/person-sections"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
@@ -146,7 +147,12 @@ export function PlanBudgets({
     onError: (err) => setPrepareError(mutationMessage(err)),
   })
 
-  if (budgetsQuery.isPending) return <LoadingState message="Cargando presupuestos…" />
+  if (budgetsQuery.isPending)
+    return (
+      <SkeletonRegion message="Cargando presupuestos…">
+        <BudgetListSkeleton />
+      </SkeletonRegion>
+    )
   if (budgetsQuery.isError)
     return (
       <ErrorState

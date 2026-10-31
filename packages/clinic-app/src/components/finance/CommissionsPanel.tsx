@@ -36,8 +36,8 @@ import {
   DetailDrawer,
   EmptyState,
   FormDrawer,
-  LoadingState,
   PersonAvatar,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
@@ -71,6 +71,7 @@ import { useOrgMembers, usePermission } from "../../lib/crm"
 import { financeErrorMessage } from "../../lib/finance"
 import { useOrgEvents } from "../../lib/org-events"
 import { isAmbiguousMutationError, QueryErrorState } from "../../lib/query-error"
+import { CommissionsMonthSkeleton, MyCommissionsSkeleton } from "../skeletons/commissions"
 import { ChoiceSelect } from "../ui/choice-select"
 
 // La ruta de Comisiones lo importa desde aquí.
@@ -186,7 +187,9 @@ export function CommissionsAdminPanel({
   return (
     <div className="flex min-w-0 flex-col gap-4">
       {monthQuery.isPending ? (
-        <LoadingState />
+        <SkeletonRegion message="Cargando comisiones…">
+          <CommissionsMonthSkeleton />
+        </SkeletonRegion>
       ) : monthQuery.isError ? (
         <QueryErrorState error={monthQuery.error} onRetry={() => void monthQuery.refetch()} />
       ) : nobodyHasRate ? (
@@ -1017,7 +1020,13 @@ export function MyCommissionsPanel({
     void queryClient.invalidateQueries({ queryKey: commissionKeys.all })
   })
 
-  if (query.isPending) return <LoadingState />
+  if (query.isPending) {
+    return (
+      <SkeletonRegion message="Cargando comisiones…">
+        <MyCommissionsSkeleton />
+      </SkeletonRegion>
+    )
+  }
   if (query.isError) {
     return <QueryErrorState error={query.error} onRetry={() => void query.refetch()} />
   }

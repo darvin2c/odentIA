@@ -4,10 +4,11 @@
  * Administrador). La pantalla no deduce el paso: lo muestra y, si el rol puede,
  * ofrece el botón.
  */
-import { Skeleton } from "@odentia/ui"
+import { SkeletonRegion } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { fetchPlanNextStep } from "../../../lib/budgets"
 import { QueryErrorState } from "../../../lib/query-error"
+import { PlanNextSkeleton } from "../../skeletons/person-sections"
 import { NextStepButton } from "./next-step-action"
 
 export function usePlanNextStep(patientId: string, enabled = true) {
@@ -30,9 +31,9 @@ export function PlanNextCard({
   const query = usePlanNextStep(patientId)
   if (query.isPending)
     return (
-      <div className="rounded-xl border bg-card p-4" aria-busy="true">
-        <Skeleton className="h-5 w-2/3" />
-      </div>
+      <SkeletonRegion message="Cargando qué sigue…">
+        <PlanNextSkeleton />
+      </SkeletonRegion>
     )
   if (query.isError) return <QueryErrorState error={query.error} onRetry={() => void query.refetch()} />
   const step = query.data.data

@@ -1,9 +1,10 @@
 import { Button, FieldLabel, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
-import { EmptyState, ErrorState, ExpandableText, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
+import { EmptyState, ErrorState, ExpandableText, PageHeader, PageShell, SkeletonRegion } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 import { z } from "zod"
+import { AccountCaseSkeleton, AccountCasesSkeleton, AccountSupportPageSkeleton } from "../../components/skeletons/support"
 import { apiFetch } from "../../lib/api"
 import { accountOrganizationsQuery } from "../../lib/account-organizations"
 import { API_URL } from "../../lib/auth-client"
@@ -12,6 +13,7 @@ export const Route = createFileRoute("/_app/support")({
   // `?caso=<id>`: el enlace del aviso por correo abre ese caso.
   validateSearch: (search: Record<string, unknown>): { caso?: string } =>
     typeof search.caso === "string" && search.caso ? { caso: search.caso } : {},
+  pendingComponent: AccountSupportPageSkeleton,
   component: AccountSupportPage,
 })
 
@@ -309,7 +311,9 @@ function AccountSupportPage() {
           <section aria-label="Tus casos" className="flex flex-col gap-2">
             <h2 className="text-sm font-bold">Tus casos</h2>
             {cases.isPending ? (
-              <LoadingState message="Cargando tus casos…" />
+              <SkeletonRegion message="Cargando tus casos…">
+                <AccountCasesSkeleton />
+              </SkeletonRegion>
             ) : cases.isError ? (
               <ErrorState message="No pude cargar tus casos." onRetry={() => void cases.refetch()} />
             ) : items.length === 0 ? (
@@ -351,7 +355,9 @@ function AccountSupportPage() {
             ← Todos los casos
           </Button>
           {detail.isPending ? (
-            <LoadingState message="Cargando la conversación…" />
+            <SkeletonRegion message="Cargando la conversación…" className="flex flex-col gap-3">
+              <AccountCaseSkeleton />
+            </SkeletonRegion>
           ) : (
             <ErrorState message="No pude cargar este caso." onRetry={() => void detail.refetch()} />
           )}
@@ -365,7 +371,9 @@ function AccountSupportPage() {
             <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-bold">{STATUS_LABEL[kase.status]}</span>
           </div>
           {detail.isPending ? (
-            <LoadingState message="Cargando la conversación…" />
+            <SkeletonRegion message="Cargando la conversación…" className="flex flex-col gap-3">
+              <AccountCaseSkeleton />
+            </SkeletonRegion>
           ) : detail.isError ? (
             <ErrorState message="No pude cargar este caso." onRetry={() => void detail.refetch()} />
           ) : (

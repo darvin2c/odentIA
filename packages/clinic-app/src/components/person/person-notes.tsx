@@ -1,5 +1,6 @@
 import { Button, Field, FieldLabel, Textarea } from "@odentia/ui"
-import { AgentMark, FormDrawer, LoadingState } from "@odentia/ui-patterns"
+import { AgentMark, FormDrawer, LoadingState, SkeletonRegion } from "@odentia/ui-patterns"
+import { NotesListSkeleton } from "../skeletons/person-sections"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useId, useState } from "react"
 import { useReceptionName } from "../../lib/agent-names"
@@ -78,7 +79,9 @@ export function PersonNotes({ personId }: { personId: string }) {
       }
     >
       {notes.isPending ? (
-        <LoadingState message="Cargando notas…" />
+        <SkeletonRegion message="Cargando notas…">
+          <NotesListSkeleton />
+        </SkeletonRegion>
       ) : notes.isError && list.length === 0 ? (
         <QueryErrorState error={notes.error} onRetry={() => void notes.refetch()} />
       ) : list.length === 0 ? (

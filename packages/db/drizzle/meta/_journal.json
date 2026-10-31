@@ -169,6 +169,13 @@
       "when": 1793385092067,
       "tag": "0023_acciones_del_agente_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1793395606272,
+      "tag": "0024_adorable_slapstick",
+      "breakpoints": true
     }
   ]
 }

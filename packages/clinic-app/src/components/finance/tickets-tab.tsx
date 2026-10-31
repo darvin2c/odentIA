@@ -12,17 +12,18 @@ import { Badge, Button, Spinner } from "@odentia/ui"
 import {
   common,
   DataTable,
-  DataTableSkeleton,
   EmptyState,
   ErrorState,
   FilterBar,
   type FilterDef,
+  SkeletonRegion,
   useListSearch,
 } from "@odentia/ui-patterns"
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { useEffect, useMemo } from "react"
 import { PersonLink } from "../person-link"
+import { TicketRowsSkeleton } from "../skeletons/finance"
 import { apiFetch } from "../../lib/api"
 import { plainAmount } from "../../lib/commissions"
 import { financeErrorMessage } from "../../lib/finance"
@@ -283,7 +284,9 @@ export function TicketsTab({
         </div>
       ) : null}
       {tickets.isPending ? (
-        <DataTableSkeleton label="Consultando los cobros" />
+        <SkeletonRegion message="Consultando los cobros">
+          <TicketRowsSkeleton />
+        </SkeletonRegion>
       ) : tickets.isError && rows.length === 0 ? (
         <ErrorState
           title="No se pudieron consultar los cobros"

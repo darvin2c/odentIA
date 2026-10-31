@@ -28,7 +28,7 @@ export function PlanRedirect({ organizationId, path }: { organizationId: string;
       {organizations.isError ? (
         <ErrorState title="No se pudo abrir Plan y pagos" error={organizations.error} onRetry={() => void organizations.refetch()} />
       ) : (
-        <LoadingState message="Abriendo Plan y pagos de tu clínica…" />
+        <LoadingState kind="indeterminate" message="Abriendo Plan y pagos de tu clínica…" />
       )}
     </PageShell>
   )

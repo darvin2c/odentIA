@@ -32,19 +32,18 @@ import {
   useIsMobile,
 } from "@odentia/ui"
 import {
-  DataTableSkeleton,
   DetailDrawer,
   EmptyState,
   ErrorState,
   FilterBar,
-  LoadingState,
   PageHeader,
   PageShell,
+  SkeletonRegion,
   useListSearch,
 } from "@odentia/ui-patterns"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
-import { ArrowLeft, Banknote, Lock, Plus } from "lucide-react"
+import { ArrowLeft } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { BranchSwitcher } from "../../components/branch-switcher"
 import {
@@ -65,9 +64,18 @@ import { TicketPanel } from "../../components/finance/ticket-panel"
 import { TicketView, ticketDisplayNumber } from "../../components/finance/ticket-view"
 import { TicketsTab } from "../../components/finance/tickets-tab"
 import { VoidDrawer } from "../../components/finance/void-drawer"
+import {
+  AttendedRowsSkeleton,
+  CashFiguresSkeleton,
+  ClosureRowsSkeleton,
+  FinanceBodySkeleton,
+  FinancePageSkeleton,
+  MovementRowsSkeleton,
+} from "../../components/skeletons/finance"
 import { useActiveBranch } from "../../lib/active-branch"
 import { compareMonths, FIRST_YEAR, plainAmount } from "../../lib/commissions"
-import { usePermission } from "../../lib/crm"
+import { useCan, usePermission } from "../../lib/crm"
+import { COMMISSIONS_ADMIN_SUBTITLE, financeAccess, financeHeader, financePhoneActions } from "../../lib/screen-rules"
 import { financeErrorMessage } from "../../lib/finance"
 import {
   CLOSURES_PAGE,
@@ -182,6 +190,7 @@ export const Route = createFileRoute("/_org/finance")({
     ...textOf(search, "profesional"),
     ...Object.assign({}, ...LIST_KEYS.map((key) => textOf(search, key))),
   }),
+  pendingComponent: FinancePageSkeleton,
   component: FinancePage,
 })
 
@@ -264,12 +273,8 @@ function FinanceWorkspace() {
   const sede = useActiveBranch()
   const profile = useOrgFinanceProfile()
   const isMobile = useIsMobile()
-  const canWrite = usePermission("finance.write")
-  const canClose = usePermission("finance.close")
-  const canCommissions = usePermission("commissions.read")
-  const canCommissionsWrite = usePermission("commissions.write")
-  const canSettings = usePermission("settings.write")
-  const canReports = usePermission("reports.read")
+  const access = financeAccess(useCan())
+  const { write: canWrite, close: canClose, commissions: canCommissions, commissionsWrite: canCommissionsWrite, settings: canSettings, reports: canReports } = access
   const [panel, setPanel] = useState<Panel | null>(null)
   const [ticket, setTicket] = useState<{ result: CollectResultBody; patientId: string } | null>(null)
   // Cierre recién hecho: la hoja que se abre lo dice (y si ya estaba cerrada).
@@ -345,69 +350,30 @@ function FinanceWorkspace() {
       <MonthPicker value={period} onChange={setPeriod} max={thisMonth} locale={prof.locale} />
     ) : null
 
-  const collectButton = (mobile: boolean) =>
-    canWrite ? (
-      <Button className={mobile ? "h-12 flex-1 text-base" : undefined} onClick={() => collect()}>
-        Cobrar
-      </Button>
-    ) : null
-  const closeButton = (mobile: boolean) =>
-    canClose ? (
-      <Button
-        variant="outline"
-        className={mobile ? "h-12 flex-1 text-base" : undefined}
-        onClick={() => setPanel({ kind: "cerrar" })}
-      >
-        Cerrar caja
-      </Button>
-    ) : null
-  const expenseButton = (mobile: boolean, primary: boolean) =>
-    canWrite ? (
-      <Button
-        variant={primary ? "default" : "outline"}
-        className={mobile ? "h-12 flex-1 text-base" : undefined}
-        onClick={() => setPanel({ kind: "gasto" })}
-      >
-        Registrar gasto
-      </Button>
-    ) : null
-
-  // Acciones de la sección: en la cabecera cuando caben y, en el teléfono,
-  // en una barra siempre a la vista (cobrar y cerrar sin desplazarse).
-  const actions = (mobile: boolean) => {
-    if (!ws) return null
-    if (view === "caja" && (canWrite || canClose)) {
-      return (
-        <>
-          {mobile ? null : expenseButton(false, false)}
-          {closeButton(mobile)}
-          {collectButton(mobile)}
-        </>
-      )
-    }
-    if ((view === "cobros" || view === "deudas") && canWrite) return collectButton(mobile)
-    if (view === "gastos" && canWrite) return expenseButton(mobile, true)
-    return null
+  const runAction = {
+    collect: () => collect(),
+    close: () => setPanel({ kind: "cerrar" }),
+    expense: () => setPanel({ kind: "gasto" }),
   }
-  const mobileActions = isMobile ? actions(true) : null
+  // Acciones de la sección: en el teléfono, en una barra siempre a la vista (cobrar y cerrar sin desplazarse).
+  const phoneActions = isMobile && ws ? financePhoneActions(view, access) : []
+  const mobileActions =
+    phoneActions.length > 0
+      ? phoneActions.map((item) => (
+          <Button key={item.key} variant={item.filled ? "default" : "outline"} className="h-12 flex-1 text-base" onClick={runAction[item.key]}>
+            {item.label}
+          </Button>
+        ))
+      : null
   // En el escritorio, la cabecera trae la acción principal de la sección y lo demás en ⋯; en el teléfono, las acciones van en la barra de abajo.
   const headerOn = !isMobile && ws !== null
-  const headerPrimary = !headerOn
-    ? undefined
-    : (view === "caja" || view === "cobros" || view === "deudas") && canWrite
-      ? { label: "Cobrar", icon: <Banknote aria-hidden />, onClick: () => collect() }
-      : view === "caja" && canClose
-        ? { label: "Cerrar caja", icon: <Lock aria-hidden />, onClick: () => setPanel({ kind: "cerrar" }) }
-        : view === "gastos" && canWrite
-          ? { label: "Registrar gasto", icon: <Plus aria-hidden />, onClick: () => setPanel({ kind: "gasto" }) }
-          : undefined
-  const headerMenu =
-    headerOn && view === "caja" && canWrite
-      ? [
-          { label: "Registrar gasto", icon: <Plus aria-hidden />, onSelect: () => setPanel({ kind: "gasto" }) },
-          ...(canClose ? [{ label: "Cerrar caja", icon: <Lock aria-hidden />, onSelect: () => setPanel({ kind: "cerrar" }) }] : []),
-        ]
-      : []
+  // Mientras llegan la sede y el perfil, la acción sigue a la vista, deshabilitada: no aparece, se va y vuelve.
+  const headerWaiting = !isMobile && ws === null && (profile.isPending || sede.branches.length === 0)
+  const { primary: headerPrimary, menu: headerMenu } = headerOn
+    ? financeHeader(view, access, runAction)
+    : headerWaiting
+      ? financeHeader(view, access)
+      : { primary: undefined, menu: [] }
 
   return (
     <PageShell className="flex flex-col gap-4">
@@ -417,7 +383,7 @@ function FinanceWorkspace() {
           <>
             {view === "comisiones" ? (
               <p className="min-w-0">
-                {canCommissionsWrite ? "Lo que le corresponde a cada profesional por lo que atendió y ya se cobró" : "Mis comisiones"}
+                {canCommissionsWrite ? COMMISSIONS_ADMIN_SUBTITLE : "Mis comisiones"}
               </p>
             ) : sede.branches.length > 0 && branchId ? (
               <BranchSwitcher
@@ -437,7 +403,9 @@ function FinanceWorkspace() {
       />
 
       {profile.isPending || branchZone.isPending ? (
-        <LoadingState message="Preparando la caja…" />
+        <SkeletonRegion message="Preparando la caja…">
+          <FinanceBodySkeleton view={view} />
+        </SkeletonRegion>
       ) : profile.isError ? (
         isForbidden(profile.error) ? (
           <AccessDenied message={financeErrorMessage(profile.error)} />
@@ -944,11 +912,9 @@ function CashTab({
       </div>
 
       {cash.isPending ? (
-        <div role="status" aria-busy aria-label="Consultando la caja" className="flex flex-wrap gap-3">
-          <Skeleton className="h-32 grow-[2] basis-full rounded-xl sm:basis-80" />
-          <Skeleton className="h-32 min-w-36 flex-1 rounded-xl" />
-          <Skeleton className="h-32 min-w-36 flex-1 rounded-xl" />
-        </div>
+        <SkeletonRegion message="Consultando la caja">
+          <CashFiguresSkeleton />
+        </SkeletonRegion>
       ) : cash.isError || !state ? (
         <ErrorState
           title="No se pudo consultar la caja"
@@ -1014,9 +980,9 @@ function CashTab({
           ) : null}
         </div>
         {debts.isPending ? (
-          <div className="mt-3">
-            <DataTableSkeleton view="list" rowCount={2} label="Consultando quién salió hoy con algo por pagar" />
-          </div>
+          <SkeletonRegion message="Consultando quién salió hoy con algo por pagar">
+            <AttendedRowsSkeleton />
+          </SkeletonRegion>
         ) : debts.isError ? (
           <ErrorState
             className="mt-3"
@@ -1107,7 +1073,9 @@ function CashTab({
           ) : null}
         </div>
         {movements.isPending ? (
-          <DataTableSkeleton view="list" rowCount={4} label="Consultando los movimientos de hoy" />
+          <SkeletonRegion message="Consultando los movimientos de hoy">
+            <MovementRowsSkeleton />
+          </SkeletonRegion>
         ) : movements.isError ? (
           <ErrorState
             title="No se pudieron consultar los movimientos"
@@ -1349,7 +1317,9 @@ function ClosuresView({
         resetKeys={["resultado"]}
       />
       {closures.isPending ? (
-        <DataTableSkeleton view="list" rowCount={4} label="Consultando los cierres" />
+        <SkeletonRegion message="Consultando los cierres">
+          <ClosureRowsSkeleton />
+        </SkeletonRegion>
       ) : closures.isError ? (
         isForbidden(closures.error) ? (
           <AccessDenied message={financeErrorMessage(closures.error)} />

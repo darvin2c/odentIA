@@ -1,6 +1,6 @@
 import { Badge, Button } from "@odentia/ui"
 import { Switch } from "@odentia/ui/components/switch"
-import { ErrorState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
+import { ErrorState, PageHeader, PageShell, SkeletonRegion } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { type ReactNode, useEffect, useRef } from "react"
@@ -15,6 +15,7 @@ import { apiFetch } from "../../lib/api"
 import { ARGOS_ALLOWANCE_KEY } from "../../lib/argos"
 import { usePermission } from "../../lib/crm"
 import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
+import { AdministratorPageSkeleton, AdministratorSkeleton } from "../../components/skeletons/agent"
 
 interface AdminSearch {
   /** Línea abierta: llega aquí desde una recomendación o un aviso. */
@@ -28,6 +29,7 @@ export const Route = createFileRoute("/_org/agent/administrador")({
     ...(typeof search.linea === "string" && search.linea ? { linea: search.linea } : {}),
     ...(search.ver === "no-pudo" ? { ver: "no-pudo" as const } : {}),
   }),
+  pendingComponent: AdministratorPageSkeleton,
   component: AdministratorPage,
 })
 
@@ -333,7 +335,9 @@ function AdministratorPage() {
       {role ? <p className="-mt-2 max-w-prose text-sm">{role.role}</p> : null}
 
       {pageQuery.isPending || rolesQuery.isPending ? (
-        <LoadingState message={`Cargando a ${ADMIN_NAME}…`} />
+        <SkeletonRegion message={`Cargando a ${ADMIN_NAME}…`}>
+          <AdministratorSkeleton />
+        </SkeletonRegion>
       ) : pageQuery.isError || !page || !role ? (
         <QueryErrorState error={pageQuery.error ?? rolesQuery.error} onRetry={() => void (pageQuery.isError ? pageQuery : rolesQuery).refetch()} />
       ) : (

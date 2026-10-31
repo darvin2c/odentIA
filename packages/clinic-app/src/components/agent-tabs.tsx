@@ -3,14 +3,8 @@ import { useQuery } from "@tanstack/react-query"
 import { Link, useRouterState } from "@tanstack/react-router"
 import type { AgentOverview, AgentPanelSummary } from "../lib/agent"
 import { apiFetch } from "../lib/api"
-import { usePermission } from "../lib/crm"
-
-const TABS = [
-  { label: "Resumen", to: "/agent", permission: "read" },
-  { label: "Esperan su sí", to: "/agent/pendientes", permission: "decide", phoneLast: true },
-  { label: "Aprender", to: "/agent/learn", permission: "read" },
-  { label: "Conocimiento", to: "/agent/knowledge", permission: "write" },
-] as const
+import { useCan, usePermission } from "../lib/crm"
+import { agentTabsFor } from "../lib/screen-rules"
 
 /**
  * Secciones del agente como pestañas de página. Son rutas, no paneles de una
@@ -38,7 +32,7 @@ export function AgentTabs({ learnPending }: { learnPending?: number } = {}) {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const canRead = usePermission("agent.read")
   const canDecide = usePermission("agent.decide")
-  const canWrite = usePermission("agent.write")
+  const can = useCan()
   // Sin escucha propia de eventos: se refresca al navegar y cuando una pantalla
   // invalida el resumen tras decidir algo. Sin el permiso de lectura no hay números.
   const overview = useQuery({
@@ -63,14 +57,8 @@ export function AgentTabs({ learnPending }: { learnPending?: number } = {}) {
   const awaiting = panel.data?.data.awaitingAnswer
   if (awaiting !== undefined) pending["/agent/pendientes"] = awaiting
   if (learnPending !== undefined) pending["/agent/learn"] = learnPending
-  const visible = TABS.filter((tab) =>
-    tab.permission === "decide"
-      ? canDecide || canRead
-      : tab.permission === "read"
-        ? canRead
-        : canWrite,
-  )
-  if (visible.length < 2) return null
+  const visible = agentTabsFor(can)
+  if (visible.length === 0) return null
   return (
     <ScrollArea horizontal className="-mt-2 min-w-0">
       <nav aria-label="Secciones del agente" className={cn(tabsListVariants(), "h-11 max-w-full justify-start")}>

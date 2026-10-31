@@ -7,14 +7,12 @@ import {
   FieldError,
   FieldLabel,
   Input,
-  Skeleton,
   Textarea,
   toast,
 } from "@odentia/ui"
-import { ConfirmDialog, EmptyState, FormDrawer, PageHeader } from "@odentia/ui-patterns"
+import { ConfirmDialog, EmptyState, FormDrawer, PageHeader, SkeletonRegion } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
-import { Plus } from "lucide-react"
 import { type FormEvent, useEffect, useId, useRef, useState } from "react"
 import { SettingsLoadError } from "../../components/settings/load-error"
 import { SettingsNoAccess } from "../../components/settings/no-access"
@@ -28,10 +26,13 @@ import {
   saveSpecialtyProfessionals,
   updateSpecialty,
 } from "../../lib/clinical-forms"
-import { useMyRole, useOrgMembers, usePermission } from "../../lib/crm"
+import { useCan, useMyRole, useOrgMembers, usePermission } from "../../lib/crm"
+import { settingsPrimary } from "../../lib/screen-rules"
 import { appRoleLabel, appWords } from "../../lib/product-words"
+import { SpecialtiesPageSkeleton, SpecialtiesSkeleton } from "../../components/skeletons/settings"
 
 export const Route = createFileRoute("/_org/settings/specialties")({
+  pendingComponent: SpecialtiesPageSkeleton,
   component: SpecialtiesPage,
 })
 
@@ -71,6 +72,7 @@ interface FormTarget {
  */
 function SpecialtiesPage() {
   const queryClient = useQueryClient()
+  const can = useCan()
   const canRead = usePermission("settings.read")
   const canAdmin = usePermission("settings.write")
   const canOpenServices = useCanOpen("/services")
@@ -114,13 +116,13 @@ function SpecialtiesPage() {
       <PageHeader
         title={TITLE}
         subtitle={SUBTITLE}
-        primary={
-          canAdmin ? { label: "Agregar especialidad", icon: <Plus aria-hidden />, onClick: () => openForm(null) } : undefined
-        }
+        primary={settingsPrimary("specialties", can, () => openForm(null))}
       />
 
       {listQuery.isPending ? (
-        <SpecialtiesSkeleton />
+        <SkeletonRegion message="Cargando las especialidades…">
+          <SpecialtiesSkeleton />
+        </SkeletonRegion>
       ) : neverLoaded ? (
         <SettingsLoadError what="las especialidades" onRetry={() => void listQuery.refetch()} />
       ) : (
@@ -252,23 +254,6 @@ function SpecialtyRow({
         )
       ) : null}
     </li>
-  )
-}
-
-/** El hueco de la pantalla mientras carga: una lista de filas. */
-function SpecialtiesSkeleton() {
-  return (
-    <div className="elevated flex flex-col divide-y rounded-xl border bg-card">
-      <p role="status" className="sr-only">
-        Cargando las especialidades…
-      </p>
-      {["w-40", "w-32", "w-44", "w-36"].map((width) => (
-        <div key={width} className="flex flex-col gap-2 px-4 py-3" aria-hidden>
-          <Skeleton className={`h-4 ${width}`} />
-          <Skeleton className="h-3 w-64 max-w-full" />
-        </div>
-      ))}
-    </div>
   )
 }
 

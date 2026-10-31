@@ -1,5 +1,5 @@
 import { Badge, Button, buttonVariants } from "@odentia/ui"
-import { EmptyState, LoadingState } from "@odentia/ui-patterns"
+import { EmptyState, SkeletonRegion } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { MessageCircle } from "lucide-react"
@@ -14,6 +14,7 @@ import { QueryErrorState } from "../../lib/query-error"
 import { OpportunityDrawer } from "../crm/opportunity-drawer"
 import { SummaryCard } from "../patient/resumen-tab"
 import { PersonLink } from "../person-link"
+import { ConversationRowsSkeleton, OpportunityRowsSkeleton } from "../skeletons/person-sections"
 import { WriteToPersonDialog } from "../write-to-person"
 import { usePersonConversations } from "./person-summary"
 
@@ -62,7 +63,9 @@ export function PersonConversations({ person }: { person: PersonPage }) {
           }
         >
           {conversations.isPending ? (
-            <LoadingState message="Cargando conversaciones…" />
+            <SkeletonRegion message="Cargando conversaciones…">
+              <ConversationRowsSkeleton />
+            </SkeletonRegion>
           ) : conversations.isError ? (
             <QueryErrorState
               error={conversations.error}
@@ -149,7 +152,9 @@ export function PersonConversations({ person }: { person: PersonPage }) {
           }
         >
           {opportunities.isPending ? (
-            <LoadingState message="Cargando oportunidades…" />
+            <SkeletonRegion message="Cargando oportunidades…">
+              <OpportunityRowsSkeleton />
+            </SkeletonRegion>
           ) : opportunities.isError ? (
             <QueryErrorState
               error={opportunities.error}

@@ -18,17 +18,20 @@ import {
   EmptyState,
   ErrorState,
   FormDrawer,
-  LoadingState,
   PageHeader,
   PageShell,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { Plus } from "lucide-react"
 import { useState } from "react"
+import { TeamPageSkeleton, TeamSkeleton } from "../../components/skeletons/team"
 import { ApiError, api } from "../../lib/api"
+import { useAdminUserId, useIsAdmin } from "../../lib/session"
 
 export const Route = createFileRoute("/_app/team")({
+  pendingComponent: TeamPageSkeleton,
   component: TeamPage,
 })
 
@@ -52,11 +55,6 @@ interface InvitationRow {
 interface TeamData {
   staff: StaffRow[]
   invitations: InvitationRow[]
-}
-
-interface AccessSession {
-  actor: { userId: string; role: "admin" | "support" }
-  verified: boolean
 }
 
 interface InviteResult {
@@ -83,10 +81,8 @@ function TeamPage() {
     queryKey: ["admin-team"],
     queryFn: () => api<TeamData>("/api/admin/access/team"),
   })
-  const session = useQuery({
-    queryKey: ["admin-access-session"],
-    queryFn: () => api<AccessSession>("/api/admin/access/session"),
-  })
+  const isManager = useIsAdmin()
+  const myUserId = useAdminUserId()
   const [inviteOpen, setInviteOpen] = useState(false)
   const [inviteEmail, setInviteEmail] = useState("")
   const [inviteRole, setInviteRole] = useState<"admin" | "support">("support")
@@ -198,7 +194,6 @@ function TeamPage() {
     onError: (error) => toast.error(apiMessage(error)),
   })
 
-  const isManager = session.data?.actor.role === "admin"
   const confirmReason =
     confirm?.kind === "deactivate" || confirm?.kind === "reset" || confirm?.kind === "resend"
       ? confirm.reason
@@ -217,8 +212,10 @@ function TeamPage() {
           isManager ? { label: "Invitar", icon: <Plus aria-hidden />, onClick: () => setInviteOpen(true) } : undefined
         }
       />
-      {team.isPending || session.isPending ? (
-        <LoadingState message="Cargando equipo…" />
+      {team.isPending ? (
+        <SkeletonRegion message="Cargando equipo…">
+          <TeamSkeleton />
+        </SkeletonRegion>
       ) : team.isError ? (
         <ErrorState
           message={apiMessage(team.error)}
@@ -269,7 +266,7 @@ function TeamPage() {
                     </div>
                     <Badge>{row.role === "admin" ? "Administración" : "Soporte"}</Badge>
                     {row.active ? null : <Badge>Desactivado</Badge>}
-                    {isManager && session.data && row.userId !== session.data.actor.userId ? (
+                    {isManager && row.userId !== myUserId ? (
                       reactivate?.row.userId === row.userId ? (
                         <form
                           className="flex w-full flex-wrap items-center gap-2"

@@ -1,9 +1,11 @@
 import { PageShell, SectionNav, type SectionNavItem } from "@odentia/ui-patterns"
 import { createFileRoute, Outlet, useRouterState } from "@tanstack/react-router"
 import { BadgePercent, Library, Tag } from "lucide-react"
+import { ServicesLayoutSkeleton } from "../../components/skeletons/services"
 import { RouterLink } from "../../lib/router-link"
 
 export const Route = createFileRoute("/_org/services")({
+  pendingComponent: ServicesLayoutSkeleton,
   component: ServicesLayout,
 })
 

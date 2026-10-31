@@ -13,7 +13,6 @@ import {
 import {
   ConfirmDialog,
   DataTable,
-  DataTableSkeleton,
   DetailDrawer,
   DetailField,
   DetailList,
@@ -37,6 +36,7 @@ import { z } from "zod"
 import { ApiError, api } from "../../lib/api"
 import { countByProduct, matchesProduct, type ProductChoice, ProductFilter, ProductMark } from "../../components/product"
 import { webUrl } from "../../lib/host"
+import { WaitlistKpisSkeleton, WaitlistPageSkeleton, WaitlistSkeleton } from "../../components/skeletons/waitlist"
 
 type StatusFilter = "por_revisar" | "invitada" | "entro" | "descartada" | "todas"
 
@@ -57,6 +57,7 @@ export const Route = createFileRoute("/_app/waitlist")({
     ...((typeof search.q === "string" && search.q) || typeof search.q === "number" ? { q: String(search.q) } : {}),
     ...(typeof search.solicitud === "string" ? { solicitud: search.solicitud } : {}),
   }),
+  pendingComponent: WaitlistPageSkeleton,
   component: WaitlistPage,
 })
 
@@ -275,7 +276,9 @@ function WaitlistPage() {
           )
         }
       />
-      {list.data ? (
+      {list.isPending ? (
+        <WaitlistKpisSkeleton />
+      ) : list.data ? (
         <div className="grid gap-3 sm:grid-cols-3">
           <KpiCard title="Por revisar" value={counts.por_revisar ?? 0} />
           {product !== "todos" ? (
@@ -339,7 +342,7 @@ function WaitlistPage() {
       </div>
 
       {list.isPending ? (
-        <DataTableSkeleton columnCount={7} rowCount={4} label="Cargando las solicitudes" />
+        <WaitlistSkeleton />
       ) : list.isError && !list.data ? (
         <ErrorState
           title="No pude cargar la lista de espera"

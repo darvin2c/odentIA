@@ -104,6 +104,8 @@ export {
   type DataRefreshMarkerProps,
   LoadingState,
   type LoadingStateProps,
+  PagePending,
+  SkeletonRegion,
 } from "./loading-state.js"
 export {
   type DetailMode,
@@ -147,7 +149,7 @@ export {
   useSideDockScope,
   useSidebarWidth,
 } from "./side-dock.js"
-export { PageShell, type PageShellProps } from "./page-shell.js"
+export { PageShell, type PageShellProps, useInsidePageShell } from "./page-shell.js"
 export * from "./phone/index.js"
 export {
   type RowActionItem,

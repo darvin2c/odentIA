@@ -24,9 +24,9 @@ import {
   EmptyState,
   ErrorState,
   FormDrawer,
-  LoadingState,
   PageHeader,
   PageShell,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Plus } from "lucide-react"
@@ -40,9 +40,19 @@ import { matchesProduct, type ProductChoice, ProductFilter, ProductMark, useOrgP
 import { type AdminPlan, PlanDrawer } from "../../components/plan-drawer"
 import { NegotiationsSection } from "../../components/billing-terms"
 import { CommercialTermsSection } from "../../components/commercial-terms"
+import {
+  BillingHistorySkeleton,
+  BillingMethodsSkeleton,
+  BillingPageSkeleton,
+  BillingPendingSkeleton,
+  BillingPlansSkeleton,
+  BillingSignupSkeleton,
+  BillingSubscriptionsSkeleton,
+} from "../../components/skeletons/billing"
 
 export const Route = createFileRoute("/_app/billing")({
   beforeLoad: requireAdminRole,
+  pendingComponent: BillingPageSkeleton,
   component: BillingPage,
 })
 
@@ -278,7 +288,9 @@ function BillingPage() {
           Comprobantes por confirmar
         </h2>
         {pending.isPending ? (
-          <LoadingState message="Cargando comprobantes…" />
+          <SkeletonRegion message="Cargando comprobantes…">
+            <BillingPendingSkeleton />
+          </SkeletonRegion>
         ) : pending.isError ? (
           <ErrorState
             title="No se pudieron cargar los comprobantes"
@@ -368,7 +380,9 @@ function BillingPage() {
           </div>
         </div>
         {overview.isPending ? (
-          <LoadingState message="Cargando suscripciones…" />
+          <SkeletonRegion message="Cargando suscripciones…">
+            <BillingSubscriptionsSkeleton />
+          </SkeletonRegion>
         ) : overview.isError ? (
           <ErrorState
             title="No se pudieron cargar las suscripciones"
@@ -434,7 +448,9 @@ function BillingPage() {
           Planes
         </h2>
         {plans.isPending ? (
-          <LoadingState message="Cargando planes…" />
+          <SkeletonRegion message="Cargando planes…" className="flex flex-col gap-2">
+            <BillingPlansSkeleton />
+          </SkeletonRegion>
         ) : plans.isError ? (
           <ErrorState
             title="No se pudieron cargar los planes"
@@ -513,7 +529,9 @@ function BillingPage() {
           Medios de pago
         </h2>
         {methods.isPending ? (
-          <LoadingState message="Cargando medios…" />
+          <SkeletonRegion message="Cargando medios…">
+            <BillingMethodsSkeleton />
+          </SkeletonRegion>
         ) : methods.isError ? (
           <ErrorState
             title="No se pudieron cargar los medios"
@@ -826,8 +844,8 @@ function UnassignedSection({
         e instanceof ApiError ? (e.shape.message ?? "No se pudo asignar") : "No se pudo asignar",
       ),
   })
-  if (isPending) return <LoadingState message="Buscando clínicas sin plan…" />
-  if (!orgs || orgs.length === 0) return null
+  // Casi siempre no hay ninguna: mientras se sabe no se reserva sitio, para que lo de abajo no salte.
+  if (isPending || !orgs || orgs.length === 0) return null
   const activePlans = plans.filter((plan) => plan.isActive)
   return (
     <section aria-labelledby="sin-plan" className="flex flex-col gap-2">
@@ -1115,7 +1133,9 @@ function HistorySection({
           Elige una clínica para ver sus pagos confirmados, reversos y devoluciones.
         </p>
       ) : payments.isPending ? (
-        <LoadingState message="Cargando pagos…" />
+        <SkeletonRegion message="Cargando pagos…">
+          <BillingHistorySkeleton />
+        </SkeletonRegion>
       ) : payments.isError ? (
         <ErrorState
           title="No se pudieron cargar los pagos"
@@ -1213,7 +1233,9 @@ function SignupModeSection({ products }: { products: readonly ClinicalProduct[] 
         <p className="text-sm text-muted-foreground">Cada producto decide si se entra solo con invitación o libre.</p>
       </div>
       {mode.isPending ? (
-        <LoadingState message="Cargando…" />
+        <SkeletonRegion message="Cargando…">
+          <BillingSignupSkeleton />
+        </SkeletonRegion>
       ) : mode.isError ? (
         <ErrorState title="No se pudo leer cómo se abren clínicas" message={errorMessage(mode.error)} onRetry={() => void mode.refetch()} />
       ) : (

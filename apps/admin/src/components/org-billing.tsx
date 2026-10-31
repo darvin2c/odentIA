@@ -5,11 +5,12 @@
  * del mes están en Resumen y Gastos. Solo la administración (ADR 0094).
  */
 import { Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
-import { DatePickerButton, ErrorState, LoadingState } from "@odentia/ui-patterns"
+import { DatePickerButton, ErrorState, SkeletonRegion } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 import { ApiError, api } from "../lib/api"
 import { centsToMajor, majorToCents } from "./billing-fields"
+import { OrgBillingSkeleton } from "./skeletons/organization-detail"
 
 type Kind = "conversacion" | "consulta" | "cita"
 
@@ -178,7 +179,12 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
     onError: (e) => setMessage(errorText(e)),
   })
 
-  if (terms.isPending) return <LoadingState message="Cargando el cobro…" />
+  if (terms.isPending)
+    return (
+      <SkeletonRegion message="Cargando el cobro…">
+        <OrgBillingSkeleton />
+      </SkeletonRegion>
+    )
   if (terms.isError) return <ErrorState title="No se pudo cargar el cobro" onRetry={() => void terms.refetch()} />
   const data = terms.data
   if (!data) return <p className="text-sm text-muted-foreground">Esta clínica no tiene suscripción: no se le cuenta ni se le cobra.</p>

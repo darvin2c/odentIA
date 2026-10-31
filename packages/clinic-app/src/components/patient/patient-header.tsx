@@ -32,7 +32,8 @@ import { useState } from "react"
 import { allergyName } from "../../lib/allergies"
 import { ApiError, apiFetch } from "../../lib/api"
 import { fetchResponsibilities } from "../../lib/clinical-journey"
-import { usePermission } from "../../lib/crm"
+import { useCan, usePermission } from "../../lib/crm"
+import { personHeaderRules } from "../../lib/screen-rules"
 import { label } from "../../lib/glossary"
 import type { PatientSectionId } from "../../lib/patient-areas"
 import { sexLabel } from "../../lib/patient-overview"
@@ -164,17 +165,11 @@ export function PersonHeader({
   const isMobile = useIsMobile()
   const queryClient = useQueryClient()
   const canRead = usePermission("patients.read")
-  const canEditPatient = usePermission("patients.write")
-  const canEditPerson = usePermission("crm.write")
+  const can = useCan()
   const canMessage = usePermission("conversations.write")
   const canReadChats = usePermission("conversations.read")
-  const canBook = usePermission("appointments.write")
   const canCrm = usePermission("crm.read")
-  const canCharge = usePermission("finance.write")
-  const canEncounter = usePermission("clinical.write")
   const patient = person.patient
-  // Cambiar a la persona: con ficha, quien edita la filiación; sin ella, también quien lleva el CRM.
-  const canEdit = patient ? canEditPatient : canEditPatient || canEditPerson
   const [editing, setEditing] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [archiveOpen, setArchiveOpen] = useState(false)
@@ -212,17 +207,7 @@ export function PersonHeader({
   const representatives = (responsibilities.data?.data ?? []).filter(
     (row) => row.isCurrent && row.kind === "representante_legal",
   )
-  const primary = patient
-    ? canEncounter
-      ? "encounter"
-      : canBook
-        ? "book"
-        : canCharge
-          ? "charge"
-          : null
-    : canMessage
-      ? "write"
-      : null
+  const { primary, book: canBook, edit: canEdit } = personHeaderRules(can, Boolean(patient))
   const docLabel = person.docNumber ? documentText(person.docType, person.docNumber) : null
   const facts = [
     patient ? hcLabel(patient.patientNumber) : null,

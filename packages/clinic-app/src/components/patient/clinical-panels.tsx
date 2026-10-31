@@ -14,7 +14,8 @@ import {
   followUpRepeatWords,
 } from "@odentia/clinical"
 import { Badge, Button, buttonVariants, Field, FieldDescription, FieldLabel, Input, Textarea, toast } from "@odentia/ui"
-import { addDays, DatePickerButton, EmptyState, FormDrawer, regionToday } from "@odentia/ui-patterns"
+import { addDays, DatePickerButton, EmptyState, FormDrawer, regionToday, SkeletonRegion } from "@odentia/ui-patterns"
+import { ControlRowsSkeleton } from "../skeletons/person-sections"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useEffect, useId, useState } from "react"
@@ -238,7 +239,9 @@ export function ControlesPanel({
       </div>
 
       {list.isPending ? (
-        <p className="text-sm text-muted-foreground">Cargando controles…</p>
+        <SkeletonRegion message="Cargando controles…">
+          <ControlRowsSkeleton />
+        </SkeletonRegion>
       ) : list.isError ? (
         <p role="alert" className="text-sm text-destructive">
           No se pudieron cargar los controles.{" "}

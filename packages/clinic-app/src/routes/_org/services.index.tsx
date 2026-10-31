@@ -32,6 +32,7 @@ import {
   FormPanel,
   fieldErrorMessages,
   LoadingState,
+  SkeletonRegion,
   MasterDetail,
   PageHeader,
   RowActions,
@@ -42,7 +43,7 @@ import { useForm, useStore } from "@tanstack/react-form"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, useNavigate } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
-import { ChevronDown, Plus, Tag } from "lucide-react"
+import { ChevronDown, Tag } from "lucide-react"
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { formatMoney, formatMoneyInput, parseMoney } from "@odentia/clinical"
@@ -55,11 +56,13 @@ import {
   ServicesWithoutMaterialsCard,
 } from "../../components/service-materials"
 import { ServiceSelect } from "../../components/service-select"
+import { ServicesListPageSkeleton, ServicesListSkeleton } from "../../components/skeletons/services"
 import { RadioChips } from "../../components/ui/radio-chips"
 import { useReceptionName } from "../../lib/agent-names"
 import { ApiError } from "../../lib/api"
 import { useClinicSpecialties } from "../../lib/clinical-forms"
 import { useCan, usePermission } from "../../lib/crm"
+import { hasPlaces, servicesAccess, servicesHeader } from "../../lib/screen-rules"
 import { financeErrorMessage } from "../../lib/finance"
 import {
   draftLineOf,
@@ -103,6 +106,7 @@ export const Route = createFileRoute("/_org/services/")({
     ...search,
     especialidad: typeof search.especialidad === "string" ? search.especialidad : undefined,
   }),
+  pendingComponent: ServicesListPageSkeleton,
   component: TarifarioPage,
 })
 
@@ -118,15 +122,6 @@ const TARIFARIO_SORT_OPTIONS = [
   { value: "precio", label: "Precio" },
   { value: "ambito", label: "Ámbito" },
 ]
-
-/**
- * Si el producto registra dónde se hace un servicio (odentIA: pieza, caras,
- * cuadrante…). En latidIA todo es general (decisión 4 del issue 229): el
- * ámbito no se elige ni se muestra.
- */
-function hasPlaces(): boolean {
-  return productUi().site !== null
-}
 
 const BILLING_OPTIONS: ReadonlyArray<{ value: BillingMode; label: string }> = [
   { value: "treatment", label: BILLING_MODE_LABELS.treatment },
@@ -172,8 +167,7 @@ function TarifarioPage() {
   // Materiales de cada servicio (ADR 0067): los ve quien ve Inventario y los
   // configura quien lo lleva. La API decide qué llega en cada fila.
   const can = useCan()
-  const seesMaterials = can("inventory.read") || can("inventory.stock")
-  const canWriteMaterials = can("inventory.write")
+  const { seesMaterials, writeMaterials: canWriteMaterials } = servicesAccess(can)
   /** Moneda y formato de la clínica: los importes se leen con su locale. */
   const profileQuery = useOrgProfile()
   const profileLocale = profileQuery.data?.locale
@@ -570,12 +564,7 @@ function TarifarioPage() {
         <PageHeader
           title="Servicios y precios"
           subtitle={`${org.name} · lo que ofrece la clínica y cuánto cuesta`}
-          primary={
-            canManage
-              ? { label: "Agregar servicios", icon: <Plus aria-hidden />, onClick: () => void navigate({ to: "/services/biblioteca" }) }
-              : undefined
-          }
-          menu={canManage ? [{ label: "Crear un servicio propio", onSelect: () => openOffer(null) }] : undefined}
+          {...servicesHeader(can, { add: () => void navigate({ to: "/services/biblioteca" }), own: () => openOffer(null) })}
         />
         {canWriteMaterials && profileLocale !== undefined ? (
           <ServicesWithoutMaterialsCard locale={profileLocale} onOpen={(id) => void openOfferById(id)} />
@@ -595,7 +584,9 @@ function TarifarioPage() {
         />
 
         {pagesQuery.isPending ? (
-          <LoadingState />
+          <SkeletonRegion message="Cargando los servicios…">
+            <ServicesListSkeleton select={canManage} code={usesInternalCode} places={hasPlaces()} materials={seesMaterials} actions={canManage} />
+          </SkeletonRegion>
         ) : pagesQuery.isError ? (
           <ErrorState
             error={pagesQuery.error instanceof ApiError ? pagesQuery.error.shape : null}

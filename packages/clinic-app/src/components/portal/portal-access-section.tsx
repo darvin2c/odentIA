@@ -1,5 +1,6 @@
 import { Badge, Button, Checkbox, Field, FieldDescription, FieldLabel, FieldLegend, FieldSet, RadioGroup, RadioGroupItem } from "@odentia/ui"
-import { ConfirmDialog, EmptyState, ErrorState, FormDrawer, LoadingState } from "@odentia/ui-patterns"
+import { ConfirmDialog, EmptyState, ErrorState, FormDrawer, LoadingState, SkeletonRegion } from "@odentia/ui-patterns"
+import { PortalAccessSkeleton } from "../skeletons/person-sections"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
@@ -65,7 +66,12 @@ export function PatientPortalAccessSection({ patientId }: { patientId: string })
   if (!canManage) {
     return <EmptyState title="Acceso al portal" description="El acceso de un paciente al portal lo gestiona quien puede editar su ficha." />
   }
-  if (query.isPending) return <LoadingState message="Cargando el acceso al portal…" />
+  if (query.isPending)
+    return (
+      <SkeletonRegion message="Cargando el acceso al portal…">
+        <PortalAccessSkeleton />
+      </SkeletonRegion>
+    )
   if (query.isError) return <ErrorState title="No pudimos cargar el acceso al portal" message={problemOf(query.error) ?? ""} onRetry={() => void query.refetch()} />
   const summary = query.data
   if (!summary.enabled) {

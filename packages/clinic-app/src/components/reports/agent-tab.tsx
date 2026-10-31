@@ -9,8 +9,8 @@
  */
 import { formatMoney } from "@odentia/clinical"
 import { Button } from "@odentia/ui"
-import { ColumnChart, EmptyState, LoadingState, ShareBar, type SharePart } from "@odentia/ui-patterns"
-import { useQuery } from "@tanstack/react-query"
+import { ColumnChart, EmptyState, ShareBar, type SharePart, SkeletonRegion } from "@odentia/ui-patterns"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { ArrowRight, Bot } from "lucide-react"
 import { useId } from "react"
@@ -38,7 +38,8 @@ import {
   spanLabel,
 } from "../../lib/reports"
 import { ReceptionOffNotice } from "../agent/reception-off-notice"
-import { ChangeLine, during, EmptyLine, FooterButton, ReportCard, SummaryFigure, travel, WHOLE_CLINIC } from "./report-parts"
+import { ChangeLine, during, EmptyLine, FooterButton, ReportCard, SummaryFigure, travel, WHOLE_CLINIC, ReportBody } from "./report-parts"
+import { AgentTabSkeleton } from "../skeletons/reports"
 import { appWords } from "../../lib/product-words"
 
 
@@ -87,9 +88,14 @@ export function AgentTab({ query, onOpenList }: { query: ReportQuery; onOpenList
   const navigate = useNavigate()
   const canAgent = usePermission("agent.read")
   const receptionName = useReceptionName()
-  const report = useQuery({ queryKey: reportKey("agent", query), queryFn: () => fetchReport<ReportAgent>("agent", query), retry: false })
+  const report = useQuery({ queryKey: reportKey("agent", query), queryFn: () => fetchReport<ReportAgent>("agent", query), placeholderData: keepPreviousData, retry: false })
 
-  if (report.isPending) return <LoadingState />
+  if (report.isPending)
+    return (
+      <SkeletonRegion message="Cargando las cifras…">
+        <AgentTabSkeleton />
+      </SkeletonRegion>
+    )
   if (report.isError)
     return <QueryErrorState error={report.error} onRetry={() => void report.refetch()} notFound="La sede elegida ya no está disponible. Elige otra sede." />
 
@@ -126,7 +132,7 @@ export function AgentTab({ query, onOpenList }: { query: ReportQuery; onOpenList
 
   // Las columnas siguen al ancho de la pestaña (`@container`), no al de la ventana: con una lista abierta al lado, caben menos.
   return (
-    <div className="@container flex min-w-0 flex-col gap-4">
+    <ReportBody stale={report.isPlaceholderData} className="@container">
       <section aria-label="Lo que hizo el agente" className="grid min-w-0 gap-3.5 @xl:grid-cols-2 @5xl:grid-cols-4">
         <SummaryFigure
           title="Conversaciones que atendió"
@@ -178,7 +184,7 @@ export function AgentTab({ query, onOpenList }: { query: ReportQuery; onOpenList
         <BookedChart data={data} />
         <Responses data={data} period={period} phrase={phrase} onOpenList={onOpenList} />
       </div>
-    </div>
+    </ReportBody>
   )
 }
 

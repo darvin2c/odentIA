@@ -1,5 +1,5 @@
 import { Field, FieldDescription, FieldError, FieldLabel, Input, toast } from "@odentia/ui"
-import { DataTable, DataTableSkeleton, FormDrawer, PageHeader, RowActions } from "@odentia/ui-patterns"
+import { DataTable, FormDrawer, PageHeader, RowActions } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
@@ -10,8 +10,10 @@ import { DiscardDraftDialog, useReportDirty, useSideForm } from "../../component
 import { ChoiceSelect } from "../../components/ui/choice-select"
 import { ApiError, apiFetch } from "../../lib/api"
 import { type Pipeline, SALE_MOMENT_HINT, type Stage, usePermission } from "../../lib/crm"
+import { PipelinesPageSkeleton, PipelinesSkeleton } from "../../components/skeletons/settings"
 
 export const Route = createFileRoute("/_org/settings/pipelines")({
+  pendingComponent: PipelinesPageSkeleton,
   component: SalesStagesPage,
 })
 
@@ -112,7 +114,7 @@ function SalesStagesPage() {
         }
       />
       {listQuery.isPending ? (
-        <DataTableSkeleton columnCount={3} rowCount={4} label="Cargando las etapas de venta…" />
+        <PipelinesSkeleton />
       ) : neverLoaded ? (
         <SettingsLoadError what="las etapas de venta" onRetry={() => void listQuery.refetch()} />
       ) : (

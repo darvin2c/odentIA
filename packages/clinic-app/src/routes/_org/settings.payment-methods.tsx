@@ -6,21 +6,21 @@ import {
   FieldDescription,
   FieldLabel,
   Input,
-  Skeleton,
   toast,
 } from "@odentia/ui"
 import { FISCAL_DISCLAIMER } from "@odentia/clinical"
 import { Switch } from "@odentia/ui/components/switch"
-import { common, EmptyState, ErrorState, FormDrawer, PageHeader } from "@odentia/ui-patterns"
+import { common, EmptyState, ErrorState, FormDrawer, PageHeader, SkeletonRegion } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
-import { ArrowDown, ArrowUp, Plus, Wallet } from "lucide-react"
+import { ArrowDown, ArrowUp, Wallet } from "lucide-react"
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react"
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { ChoiceSelect } from "../../components/ui/choice-select"
 import { useReceptionName } from "../../lib/agent-names"
 import { ApiError } from "../../lib/api"
-import { usePermission } from "../../lib/crm"
+import { useCan, usePermission } from "../../lib/crm"
+import { settingsPrimary } from "../../lib/screen-rules"
 import { type OrgProfile, saveOrgPrinting, useOrgProfile } from "../../lib/org"
 import {
   createPaymentMethodApi,
@@ -33,8 +33,10 @@ import {
   paymentTypeLabel,
   updatePaymentMethodApi,
 } from "../../lib/payment-methods"
+import { PaymentMethodRowsSkeleton, PaymentMethodsPageSkeleton, TicketRowsSkeleton } from "../../components/skeletons/settings"
 
 export const Route = createFileRoute("/_org/settings/payment-methods")({
+  pendingComponent: PaymentMethodsPageSkeleton,
   component: PaymentMethodsPage,
 })
 
@@ -69,6 +71,7 @@ function typeBehavior(typeCode: string): string {
  */
 function PaymentMethodsPage() {
   const receptionName = useReceptionName()
+  const can = useCan()
   const canRead = usePermission("settings.read")
   const canWrite = usePermission("settings.write")
   const queryClient = useQueryClient()
@@ -162,11 +165,7 @@ function PaymentMethodsPage() {
       <PageHeader
         title="Medios de pago y ticket"
         subtitle={SUBTITLE}
-        primary={
-          canWrite && methods && methods.length > 0
-            ? { label: "Agregar medio de pago", icon: <Plus aria-hidden />, onClick: () => setMethodForm("new") }
-            : undefined
-        }
+        primary={methods && methods.length > 0 ? settingsPrimary("paymentMethods", can, () => setMethodForm("new")) : undefined}
       />
 
       <section aria-labelledby="payment-methods-title" className={CARD}>
@@ -187,7 +186,9 @@ function PaymentMethodsPage() {
             />
           </div>
         ) : methods === undefined ? (
-          <MethodsSkeleton />
+          <SkeletonRegion message="Cargando los medios de pago…">
+            <PaymentMethodRowsSkeleton />
+          </SkeletonRegion>
         ) : methods.length === 0 ? (
           <div className="px-4 pb-4">
             <EmptyState
@@ -322,26 +323,6 @@ function PaymentMethodsPage() {
   )
 }
 
-const SKELETON_ROWS = ["uno", "dos", "tres", "cuatro"]
-
-/** Filas de espera con la forma de las reales: la tarjeta no salta al llegar la lista. */
-function MethodsSkeleton() {
-  return (
-    <ul role="status" aria-busy aria-label="Cargando los medios de pago…" className="flex flex-col">
-      {SKELETON_ROWS.map((row) => (
-        <li key={row} aria-hidden className="flex items-center gap-3 border-t px-4 py-3">
-          <div className="flex min-w-0 flex-1 flex-col gap-2">
-            <Skeleton className="h-4 w-32" />
-            <Skeleton className="h-3.5 w-56 max-w-full" />
-          </div>
-          <Skeleton className="h-5 w-9 shrink-0 rounded-full" />
-          <Skeleton className="h-8 w-16 shrink-0 rounded-full" />
-        </li>
-      ))}
-    </ul>
-  )
-}
-
 function TicketRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-0.5 border-t px-4 py-3 sm:flex-row sm:items-baseline sm:gap-4">
@@ -394,14 +375,9 @@ function TicketCard({
           />
         </div>
       ) : profile === undefined ? (
-        <div role="status" aria-busy aria-label="Cargando el ticket…" className="flex flex-col">
-          {[0, 1, 2].map((row) => (
-            <div key={row} aria-hidden className="flex gap-4 border-t px-4 py-3">
-              <Skeleton className="h-4 w-40" />
-              <Skeleton className="h-4 w-48 max-w-full" />
-            </div>
-          ))}
-        </div>
+        <SkeletonRegion message="Cargando el ticket…">
+          <TicketRowsSkeleton />
+        </SkeletonRegion>
       ) : profile === null ? (
         <p className="border-t px-4 py-3 text-sm text-muted-foreground">
           Faltan los datos de la clínica: con ellos se sabe la moneda y el papel.{" "}

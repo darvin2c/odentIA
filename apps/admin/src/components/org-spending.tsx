@@ -5,13 +5,14 @@
  * qué se compone. Solo lo ve el rol admin (ADR 0094).
  */
 import { Badge, Button, ScrollArea, Tabs, TabsList, TabsTrigger } from "@odentia/ui"
-import { ColumnChart, EmptyState, ErrorState, LoadingState } from "@odentia/ui-patterns"
+import { ColumnChart, EmptyState, ErrorState, LoadingState, SkeletonRegion } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { ReceiptText } from "lucide-react"
 import { Fragment, type ReactNode, useState } from "react"
 import { api } from "../lib/api"
 import { cost, costNumber, money, plural, priceNumber } from "../lib/cost-format"
 import type { ClinicCostMargin } from "./cost-margin"
+import { OrgSpendingSkeleton } from "./skeletons/organization-detail"
 
 export type SpendingAgent = "todo" | "sofi" | "clio" | "argos" | "sin_cobro"
 export type SpendingMonth = "actual" | "anterior"
@@ -886,7 +887,12 @@ export function OrgSpending({
     placeholderData: (previous) => previous,
   })
 
-  if (margin.isPending || list.isPending) return <LoadingState message="Cargando los gastos…" />
+  if (margin.isPending || list.isPending)
+    return (
+      <SkeletonRegion message="Cargando los gastos…">
+        <OrgSpendingSkeleton overview={search.agente === "todo"} />
+      </SkeletonRegion>
+    )
   if (margin.isError)
     return <ErrorState title="No se pudo cargar el costo" onRetry={() => void margin.refetch()} />
   if (list.isError)

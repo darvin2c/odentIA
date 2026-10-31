@@ -10,7 +10,6 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Skeleton,
   toast,
 } from "@odentia/ui"
 import {
@@ -22,6 +21,7 @@ import {
   fieldErrorMessages,
   PageHeader,
   PageShell,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -29,13 +29,14 @@ import { createFileRoute } from "@tanstack/react-router"
 import { ShieldAlert, UserSearch } from "lucide-react"
 import { useState } from "react"
 import { z } from "zod"
+import { UserDetailSkeleton, UsersPageSkeleton, UsersSkeleton } from "../../components/skeletons/users"
 import { ApiError, api } from "../../lib/api"
+import { useIsAdmin } from "../../lib/session"
 
 export const Route = createFileRoute("/_app/users")({
+  pendingComponent: UsersPageSkeleton,
   component: UsersPage,
 })
-
-const sessionSchema = z.object({ actor: z.object({ userId: z.string(), role: z.string() }) })
 
 const userItemSchema = z.object({
   id: z.string(),
@@ -121,11 +122,7 @@ function UsersPage() {
   const [closeReason, setCloseReason] = useState("")
   const [recoveryOpen, setRecoveryOpen] = useState(false)
 
-  const sessionQuery = useQuery({
-    queryKey: ["admin-session"],
-    queryFn: async () => sessionSchema.parse(await api<unknown>("/api/admin/access/session")),
-  })
-  const isAdmin = sessionQuery.data?.actor.role === "admin"
+  const isAdmin = useIsAdmin()
 
   const listQuery = useQuery({
     queryKey: ["admin-users", activeSearch, status],
@@ -302,10 +299,9 @@ function UsersPage() {
       </form>
 
       {listQuery.isPending ? (
-        <div className="flex flex-col gap-3">
-          <Skeleton className="h-14 w-full" />
-          <Skeleton className="h-14 w-full" />
-        </div>
+        <SkeletonRegion message="Cargando los usuarios…">
+          <UsersSkeleton />
+        </SkeletonRegion>
       ) : listQuery.isError ? (
         <ErrorState error={listQuery.error} onRetry={() => void listQuery.refetch()} />
       ) : items.length === 0 ? (
@@ -315,7 +311,7 @@ function UsersPage() {
           description="Nadie coincide con este criterio."
         />
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
           <ul className="flex flex-col gap-2">
             {items.map((item) => (
               <li key={item.id}>
@@ -348,7 +344,9 @@ function UsersPage() {
                 description="Selecciona un usuario para ver su ficha y ayudarle."
               />
             ) : detailQuery.isPending ? (
-              <Skeleton className="h-40 w-full" />
+              <SkeletonRegion message="Cargando la ficha…">
+                <UserDetailSkeleton />
+              </SkeletonRegion>
             ) : detailQuery.isError ? (
               <ErrorState error={detailQuery.error} onRetry={() => void detailQuery.refetch()} />
             ) : detail ? (

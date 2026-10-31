@@ -1,5 +1,5 @@
 import { Badge, Field, FieldLabel, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
-import { DataTable, DataTableSkeleton, EmptyState, PageHeader, SubmitButton } from "@odentia/ui-patterns"
+import { DataTable, EmptyState, PageHeader, SubmitButton } from "@odentia/ui-patterns"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
@@ -10,6 +10,7 @@ import { SettingsNoAccess } from "../../components/settings/no-access"
 import { ApiError, apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { activeOrgTimeZone, useOrgLocale } from "../../lib/locale"
+import { TeamActivityPageSkeleton, TeamActivitySkeleton } from "../../components/skeletons/settings"
 
 interface AuditSearch {
   /** Área elegida en el filtro; sin ella, todas. */
@@ -19,6 +20,7 @@ interface AuditSearch {
 export const Route = createFileRoute("/_org/settings/audit")({
   validateSearch: (search: Record<string, unknown>): AuditSearch =>
     typeof search.area === "string" && /^[a-z]{1,40}$/.test(search.area) ? { area: search.area } : {},
+  pendingComponent: TeamActivityPageSkeleton,
   component: TeamActivityPage,
 })
 
@@ -165,7 +167,7 @@ function TeamActivityPage() {
       ) : null}
 
       {query.isPending ? (
-        <DataTableSkeleton columnCount={4} rowCount={8} label="Cargando la actividad del equipo…" />
+        <TeamActivitySkeleton />
       ) : neverLoaded ? (
         <SettingsLoadError what="la actividad del equipo" onRetry={() => void query.refetch()} />
       ) : (

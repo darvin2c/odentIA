@@ -1,8 +1,9 @@
 import { Button } from "@odentia/ui"
-import { LoadingState } from "@odentia/ui-patterns"
+import { LoadingState, SkeletonRegion } from "@odentia/ui-patterns"
 import { useState } from "react"
 import { QueryErrorState } from "../../lib/query-error"
 import { gapFrequency, type KnowledgeGap, TOUCH } from "./knowledge-model"
+import { KnowledgeGapsSkeleton } from "../skeletons/agent"
 
 /** Preguntas a la vista; el resto, con «Ver las N». */
 const PREVIEW = 3
@@ -52,7 +53,9 @@ export function KnowledgeGaps({
         <p className="text-sm text-muted-foreground">Respóndelas una vez y ya las sabe.</p>
       </div>
       {isPending ? (
-        <LoadingState message="Cargando preguntas…" />
+        <SkeletonRegion message="Cargando preguntas…">
+          <KnowledgeGapsSkeleton />
+        </SkeletonRegion>
       ) : error ? (
         <QueryErrorState error={error} onRetry={onRetry} />
       ) : gaps.length === 0 ? (

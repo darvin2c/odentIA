@@ -7,7 +7,6 @@ import {
   FieldLabel,
   Input,
   Separator,
-  Skeleton,
   toast,
 } from "@odentia/ui"
 import {
@@ -22,6 +21,7 @@ import {
   PageShell,
   PersonAvatar,
   renderAdjustedImage,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useForm, useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -29,6 +29,7 @@ import { createFileRoute, getRouteApi, Link, useNavigate, useSearch } from "@tan
 import { Monitor, Smartphone } from "lucide-react"
 import { useState } from "react"
 import { z } from "zod"
+import { ClinicsSkeleton, ProfilePageSkeleton, SessionsSkeleton } from "../../components/skeletons/profile"
 import { apiFetch } from "../../lib/api"
 import { API_URL, authClient } from "../../lib/auth-client"
 import { tenantUrl } from "../../lib/host"
@@ -58,6 +59,7 @@ export const Route = createFileRoute("/_app/profile")({
       ...(typeof search.next === "string" ? { next: search.next } : {}),
     }
   },
+  pendingComponent: ProfilePageSkeleton,
   component: ProfilePage,
 })
 
@@ -388,10 +390,9 @@ function SessionsCard() {
       </div>
       <div>
         {sessionsQuery.isPending ? (
-          <div className="flex flex-col gap-3">
-            <Skeleton className="h-12 w-full" />
-            <Skeleton className="h-12 w-full" />
-          </div>
+          <SkeletonRegion message="Cargando tus sesiones…">
+            <SessionsSkeleton />
+          </SkeletonRegion>
         ) : sessionsQuery.isError ? (
           <ErrorState
             error={sessionsQuery.error}
@@ -780,9 +781,9 @@ function MyClinicsCard() {
         <p className="text-sm text-muted-foreground">Clínicas a las que perteneces y tu rol en cada una.</p>
       </div>
       {orgsQuery.isPending ? (
-        <div className="flex flex-col gap-3">
-          <Skeleton className="h-12 w-full" />
-        </div>
+        <SkeletonRegion message="Cargando tus clínicas…">
+          <ClinicsSkeleton />
+        </SkeletonRegion>
       ) : orgsQuery.isError ? (
         <ErrorState
           error={orgsQuery.error}

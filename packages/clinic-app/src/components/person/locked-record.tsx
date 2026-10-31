@@ -1,6 +1,7 @@
 import { documentText } from "@odentia/clinical"
 import { Badge, Button, Field, FieldDescription, FieldLabel, Textarea, toast } from "@odentia/ui"
-import { ErrorState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
+import { ErrorState, PageHeader, PageShell } from "@odentia/ui-patterns"
+import { LockedRecordPageSkeleton } from "../skeletons/people"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Lock } from "lucide-react"
@@ -64,12 +65,7 @@ export function LockedRecordPage({ personId }: { personId: string }) {
       await queryClient.invalidateQueries({ queryKey: lockedRecordKey(personId) })
     },
   })
-  if (query.isPending)
-    return (
-      <PageShell>
-        <LoadingState message="Cargando…" />
-      </PageShell>
-    )
+  if (query.isPending) return <LockedRecordPageSkeleton />
   if (query.isError)
     return (
       <PageShell>

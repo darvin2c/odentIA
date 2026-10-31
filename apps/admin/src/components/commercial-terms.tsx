@@ -4,11 +4,12 @@
  * Frases, campos, límites y desde cuándo rige cada cambio los entrega el
  * servidor; el servidor comprueba lo mismo al guardar.
  */
-import { Button, FieldLabel, Input, Skeleton, Textarea, toast } from "@odentia/ui"
-import { DetailDrawer, ErrorState, FormDrawer } from "@odentia/ui-patterns"
+import { Button, FieldLabel, Input, Textarea, toast } from "@odentia/ui"
+import { DetailDrawer, ErrorState, FormDrawer, SkeletonRegion } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Fragment, useState } from "react"
 import { ApiError, api } from "../lib/api"
+import { CommercialTermsSkeleton } from "./skeletons/billing"
 
 interface TermField {
   key: string
@@ -109,19 +110,9 @@ export function CommercialTermsSection() {
         aquí.
       </p>
       {terms.isPending ? (
-        <div
-          className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,17rem),1fr))] gap-2"
-          aria-busy="true"
-          aria-label="Cargando las condiciones"
-        >
-          {Array.from({ length: 5 }, (_, index) => (
-            <div key={index} className="flex flex-col gap-2 rounded-lg border p-4">
-              <Skeleton className="h-4 w-1/2" />
-              <Skeleton className="h-3 w-full" />
-              <Skeleton className="h-3 w-4/5" />
-            </div>
-          ))}
-        </div>
+        <SkeletonRegion message="Cargando las condiciones">
+          <CommercialTermsSkeleton />
+        </SkeletonRegion>
       ) : terms.isError ? (
         <ErrorState
           title="No se pudieron cargar las condiciones"

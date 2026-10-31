@@ -4,7 +4,9 @@ import {
   FormDrawer,
   normalizeCountry,
   PhoneInput,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
+import { ChannelRowsSkeleton } from "../skeletons/person-sections"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
@@ -141,7 +143,9 @@ export function PersonChannels({ person }: { person: PersonPage }) {
         </p>
       ) : null}
       {contact.isPending ? (
-        <p className="text-sm text-muted-foreground">Cargando…</p>
+        <SkeletonRegion message="Cargando…">
+          <ChannelRowsSkeleton />
+        </SkeletonRegion>
       ) : contact.isError ? (
         <QueryErrorState error={contact.error} onRetry={() => void contact.refetch()} />
       ) : identities.length === 0 ? (

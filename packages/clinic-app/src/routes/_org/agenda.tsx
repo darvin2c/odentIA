@@ -29,7 +29,6 @@ import {
   formatSpan,
   freeMinutesOf,
   hourLabel,
-  LoadingState,
   type MinuteRange,
   minutesToInstant,
   PageHeader,
@@ -56,6 +55,7 @@ import {
   ScheduleToolbar,
   ScheduleWeekOverview,
   scheduleToneAt,
+  SkeletonRegion,
   subtractRanges,
   useListSearch,
   useMediaQuery,
@@ -68,13 +68,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import {
   Armchair,
-  CalendarCheck,
   CalendarClock,
   CalendarDays,
   CalendarX2,
   ChevronDown,
   Clock,
-  Plus,
 } from "lucide-react"
 import * as React from "react"
 import {
@@ -90,6 +88,7 @@ import { dayShort, errorMessage, shortName } from "../../components/agenda/share
 import { useAttendAppointment } from "../../components/patient/new-encounter-button"
 import { MyCalendarDrawer } from "../../components/agenda/my-calendar-drawer"
 import { BranchSwitcher } from "../../components/branch-switcher"
+import { AgendaPageSkeleton, AgendaSkeleton } from "../../components/skeletons/agenda"
 import { useActiveBranch } from "../../lib/active-branch"
 import {
   type AgendaAppointment,
@@ -101,7 +100,8 @@ import {
   visitStage,
 } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
-import { useMyUserId, usePermission } from "../../lib/crm"
+import { useCan, useMyUserId, usePermission } from "../../lib/crm"
+import { agendaHeader } from "../../lib/screen-rules"
 import { fetchCrmContext } from "../../lib/crm-workspace"
 import { activeOrgTimeZone } from "../../lib/locale"
 import { appWords, upperFirst } from "../../lib/product-words"
@@ -138,6 +138,7 @@ export const Route = createFileRoute("/_org/agenda")({
     planItems: typeof search.planItems === "string" && search.planItems.length <= 1200 ? search.planItems : undefined,
     serviceId: typeof search.serviceId === "string" && UUID_RE.test(search.serviceId) ? search.serviceId : undefined,
   }),
+  pendingComponent: AgendaPageSkeleton,
   component: AgendaPage,
 })
 
@@ -209,6 +210,7 @@ function AgendaPage() {
   const small = useMediaQuery(SCHEDULE_SMALL_QUERY)
   // En teléfono, la tira de días y las fichas de profesionales van en este cajón.
   const [resourcesOpen, setResourcesOpen] = React.useState(false)
+  const can = useCan()
   const canWrite = usePermission("appointments.write")
   const canConfigure = usePermission("settings.write")
   const canAttend = usePermission("clinical.write")
@@ -1086,12 +1088,7 @@ function AgendaPage() {
             ) : null}
           </>
         }
-        secondary={
-          canAttend
-            ? { label: "Mi calendario", icon: <CalendarCheck aria-hidden />, onClick: () => setParam("calendario", "1") }
-            : undefined
-        }
-        primary={canWrite ? { label: "Nueva cita", icon: <Plus aria-hidden />, onClick: () => openBooking() } : undefined}
+        {...agendaHeader(can, { book: () => openBooking(), calendar: () => setParam("calendario", "1") })}
       />
       {canAttend ? (
         <MyCalendarDrawer open={get("calendario") === "1"} onClose={() => setParam("calendario", undefined)} />
@@ -1252,7 +1249,9 @@ function AgendaPage() {
           />,
         )
       ) : loading ? (
-        framed(<LoadingState message="Cargando agenda…" />)
+        <SkeletonRegion message="Cargando agenda…" className="flex min-h-0 flex-1 flex-col">
+          <AgendaSkeleton view={view} />
+        </SkeletonRegion>
       ) : setupMissing ? (
         framed(setupState)
       ) : view === "lista" ? (

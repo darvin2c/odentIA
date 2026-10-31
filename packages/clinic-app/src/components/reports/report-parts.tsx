@@ -173,6 +173,7 @@ export function ReportCard({
   note,
   action,
   className,
+  stale = false,
   children,
 }: {
   title: string
@@ -181,11 +182,13 @@ export function ReportCard({
   /** Lo que se hace con la tarjeta entera, a la derecha del título: «Descargar». */
   action?: ReactNode
   className?: string
+  /** Lo que se ve aún es del periodo anterior: el nuevo viene en camino. */
+  stale?: boolean
   children: ReactNode
 }) {
   const id = useId()
   return (
-    <section aria-labelledby={id} className={cn("elevated flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-[18px]", className)}>
+    <section aria-labelledby={id} aria-busy={stale || undefined} className={cn("elevated flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-[18px] transition-opacity", stale && "opacity-60", className)}>
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
         <h3 id={id} className="font-semibold">
           {title}
@@ -274,6 +277,23 @@ export function EmptyLine({ children, action }: { children: ReactNode; action?: 
       <span>{children}</span>
       {action}
     </p>
+  )
+}
+
+/**
+ * Al cambiar de periodo o de sede, las cifras anteriores siguen a la vista,
+ * atenuadas, hasta que llegan las nuevas: la pantalla no se vacía ni salta.
+ */
+export function ReportBody({ stale, className, children }: { stale: boolean; className?: string; children: ReactNode }) {
+  return (
+    <div aria-busy={stale || undefined} className={cn("flex min-w-0 flex-col gap-4 transition-opacity", stale && "opacity-60", className)}>
+      {stale ? (
+        <span role="status" className="sr-only">
+          Actualizando las cifras…
+        </span>
+      ) : null}
+      {children}
+    </div>
   )
 }
 

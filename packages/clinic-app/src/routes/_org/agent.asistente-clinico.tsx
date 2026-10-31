@@ -1,6 +1,6 @@
 import { Badge, Field, FieldDescription, FieldLabel, Textarea } from "@odentia/ui"
 import { Switch } from "@odentia/ui/components/switch"
-import { ErrorState, LoadingState, PageHeader, PageShell, SubmitButton } from "@odentia/ui-patterns"
+import { ErrorState, PageHeader, PageShell, SubmitButton, SkeletonRegion } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { type ReactNode, useState } from "react"
@@ -11,8 +11,10 @@ import { type AgentConfig, usePermission } from "../../lib/crm"
 import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
 import { productUi } from "../../product/product-ui"
 import { DICTATION_KIND_LABEL, type DictationKind } from "../../components/patient/dictation-session"
+import { ClinicalAssistantPageSkeleton, ClinicalAssistantSkeleton } from "../../components/skeletons/agent"
 
 export const Route = createFileRoute("/_org/agent/asistente-clinico")({
+  pendingComponent: ClinicalAssistantPageSkeleton,
   component: ClinicalAssistantPage,
 })
 
@@ -116,7 +118,9 @@ function ClinicalAssistantPage() {
       {role ? <p className="-mt-2 max-w-prose text-sm">{role.role}</p> : null}
 
       {configQuery.isPending || rolesQuery.isPending ? (
-        <LoadingState message={`Cargando a ${CLINICAL_NAME}…`} />
+        <SkeletonRegion message={`Cargando a ${CLINICAL_NAME}…`}>
+          <ClinicalAssistantSkeleton />
+        </SkeletonRegion>
       ) : configQuery.isError || !config || !role ? (
         <QueryErrorState error={configQuery.error ?? rolesQuery.error} onRetry={() => void configQuery.refetch()} />
       ) : (

@@ -12,7 +12,6 @@ import {
   Badge,
   Button,
   ScrollArea,
-  Skeleton,
   Tabs,
   TabsList,
   TabsTrigger,
@@ -28,28 +27,27 @@ import { OrgImport } from "../../components/org-import"
 import { OrgSpending, type SpendingAgent, type SpendingSearch } from "../../components/org-spending"
 import { type BillingSummary, OrgSummary } from "../../components/org-summary"
 import { ProductMark } from "../../components/product"
+import {
+  OrganizationDetailPageSkeleton,
+  OrganizationDetailSkeleton,
+} from "../../components/skeletons/organization-detail"
 import { ApiError, api } from "../../lib/api"
 import { plural } from "../../lib/cost-format"
 import { DemoBand, DemoShowcase, useDemoOfOrganization, useOpenDemo } from "../../components/demos"
 import { domainOf, platformUrl } from "../../lib/host"
+import {
+  ORGANIZATION_TAB_NAMES,
+  ORGANIZATION_TABS,
+  type OrganizationTab,
+  openOrganizationTab,
+  organizationTabsFor,
+} from "../../lib/organization-tabs"
 import { rememberedOrganizationsSearch } from "../../lib/organizations-search"
-
-const TABS = ["resumen", "gastos", "precio", "equipo", "actividad", "carga"] as const
-type Tab = (typeof TABS)[number]
-const TAB_NAMES: Record<Tab, string> = {
-  resumen: "Resumen",
-  gastos: "Gastos",
-  precio: "Precio y prueba",
-  equipo: "Equipo",
-  actividad: "Actividad",
-  carga: "Cargar datos",
-}
-/** Lo que soporte no abre: importes y precios (decisión D4) y los datos de pacientes que se cargan. */
-const ADMIN_TABS: Tab[] = ["gastos", "precio", "carga"]
+import { useIsAdmin } from "../../lib/session"
 
 /** Todo es opcional en la dirección: lo que falta es lo de siempre (Resumen, este mes, todo). */
 const searchSchema = z.object({
-  tab: z.enum(TABS).optional().catch(undefined),
+  tab: z.enum(ORGANIZATION_TABS).optional().catch(undefined),
   agente: z.enum(["todo", "sofi", "clio", "argos", "sin_cobro"]).optional().catch(undefined),
   mes: z.enum(["actual", "anterior"]).optional().catch(undefined),
   profesional: z.string().optional().catch(undefined),
@@ -59,6 +57,7 @@ const searchSchema = z.object({
 type DetailSearch = z.infer<typeof searchSchema>
 
 export const Route = createFileRoute("/_app/organizations_/$organizationId")({
+  pendingComponent: OrganizationDetailPageSkeleton,
   component: OrganizationPage,
   validateSearch: (search: Record<string, unknown>): DetailSearch => searchSchema.parse(search),
 })
@@ -162,14 +161,7 @@ function OrganizationPage() {
   const queryClient = useQueryClient()
   const [cancelTarget, setCancelTarget] = useState<{ id: string; email: string } | null>(null)
 
-  const session = useQuery({
-    queryKey: ["admin-session"],
-    queryFn: async () =>
-      z
-        .object({ actor: z.object({ role: z.string() }) })
-        .parse(await api<unknown>("/api/admin/access/session")),
-  })
-  const isAdmin = session.data?.actor.role === "admin"
+  const isAdmin = useIsAdmin()
   const detail = useQuery({
     queryKey: ["admin-organization", organizationId],
     queryFn: async () =>
@@ -228,9 +220,8 @@ function OrganizationPage() {
     ...(search.canal ? { canal: search.canal } : {}),
   }
   // Soporte no abre lo que tiene importes, aunque llegue con el enlace (la API tampoco se lo da).
-  const tabs = TABS.filter((tab) => isAdmin || !ADMIN_TABS.includes(tab))
-  const wanted = search.tab ?? "resumen"
-  const tab: Tab = session.isPending ? "resumen" : tabs.includes(wanted) ? wanted : "resumen"
+  const tabs = organizationTabsFor(isAdmin)
+  const tab = openOrganizationTab(search.tab, isAdmin)
   const back = (
     <Link
       to="/organizations"
@@ -245,9 +236,7 @@ function OrganizationPage() {
     return (
       <PageShell className="flex flex-col gap-4">
         {back}
-        <Skeleton className="h-10 w-72" />
-        <Skeleton className="h-9 w-full max-w-lg" />
-        <Skeleton className="h-48 w-full" />
+        <OrganizationDetailSkeleton wanted={search.tab} overview={spending.agente === "todo"} />
       </PageShell>
     )
   if (detail.isError)
@@ -320,21 +309,20 @@ function OrganizationPage() {
         />
       ) : null}
 
-      <Tabs value={tab} onValueChange={(value) => go({ tab: value as Tab })}>
+      <Tabs value={tab} onValueChange={(value) => go({ tab: value as OrganizationTab })}>
         <ScrollArea horizontal className="min-w-0 max-w-full">
           <TabsList aria-label="Secciones de la clínica" className="max-w-full justify-start">
             {tabs.map((item) => (
               <TabsTrigger key={item} value={item}>
-                {TAB_NAMES[item]}
+                {ORGANIZATION_TAB_NAMES[item]}
               </TabsTrigger>
             ))}
           </TabsList>
         </ScrollArea>
       </Tabs>
 
-      {session.isPending ? <Skeleton className="h-64 w-full" /> : null}
-      {!session.isPending && tab === "resumen" && demo.data ? <DemoShowcase demo={demo.data} /> : null}
-      {!session.isPending && tab === "resumen" ? (
+      {tab === "resumen" && demo.data ? <DemoShowcase demo={demo.data} /> : null}
+      {tab === "resumen" ? (
         <OrgSummary
           organizationId={org.id}
           isAdmin={isAdmin}
