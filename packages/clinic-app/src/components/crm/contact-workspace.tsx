@@ -342,24 +342,22 @@ export function ContactWorkspace({ conversationId, section, onSectionChange, onR
 function CitasSection({ context, conversationId }: { context: ConversationContext; conversationId: string }) {
   const can = useCan()
   const { patientId, contactId, name } = context
+  // Quien ya es paciente reserva desde su panel, sin salir de la Bandeja.
+  if (patientId) return <CitasPanel patientId={patientId} patientName={name} conversationId={conversationId} />
   return (
     <>
       {can("appointments.write") ? (
         <Link
           to="/agenda"
-          search={{ ...(patientId ? { patientId } : {}), contactId, conversationId }}
+          search={{ contactId, conversationId }}
           className="w-fit rounded-full bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90"
         >
           Reservar cita
         </Link>
       ) : null}
-      {patientId ? (
-        <CitasPanel patientId={patientId} patientName={name} />
-      ) : (
-        <p className="text-xs text-muted-foreground">
-          {name.split(/\s+/)[0]} todavía no es paciente: al reservar se crea su ficha con nombre y teléfono, y lo que falte queda pendiente en su página.
-        </p>
-      )}
+      <p className="text-xs text-muted-foreground">
+        {name.split(/\s+/)[0]} todavía no es paciente: al reservar se crea su ficha con nombre y teléfono, y lo que falte queda pendiente en su página.
+      </p>
     </>
   )
 }

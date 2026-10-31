@@ -1,4 +1,5 @@
 import { configureZodMessages } from "@odentia/clinical"
+import { RouteErrorScreen } from "@odentia/ui-patterns"
 import { createRouter } from "@tanstack/react-router"
 import { routeTree } from "./routeTree.gen"
 
@@ -8,6 +9,7 @@ configureZodMessages()
 export function getRouter() {
   return createRouter({
     routeTree,
+    defaultErrorComponent: RouteErrorScreen,
     scrollRestoration: true,
   })
 }
