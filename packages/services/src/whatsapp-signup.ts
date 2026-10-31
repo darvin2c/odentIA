@@ -35,6 +35,7 @@ import {
   type ProviderCheck,
   BUSINESS_APP_SYNC_HOURS,
   SIGNUP_STEPS,
+  SIGNUP_TOKEN_DEAD,
   type SignupOrigin,
   type SignupStep,
   signupStepsDone,
@@ -723,10 +724,6 @@ async function lockSignupWithToken(
   const config = decryptConfig(secretsKey, row.configEncrypted)
   return config["accessToken"] === token ? { signup: row.signup, config } : null
 }
-
-/** La clave ya no sirve: solo la repone volver a conectar. */
-const SIGNUP_TOKEN_DEAD =
-  "La clave que dio Meta ya no sirve: venció o la retiraron. Vuelve a conectar con Facebook para que los mensajes sigan saliendo."
 
 /** Anota lo que Meta dijo de la clave: cuándo vence, que no vence o que ya no sirve. */
 export async function noteSignupTokenState(

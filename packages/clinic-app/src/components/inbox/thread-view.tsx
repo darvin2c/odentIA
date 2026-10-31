@@ -523,12 +523,12 @@ export function ThreadView({
       }
     },
   })
-  const actionError =
-    actionMutation.error instanceof ApiError
+  // Un fallo del servidor dice «Error interno», que no orienta a quien lo lee: ahí, la frase general.
+  const actionError = !actionMutation.error
+    ? null
+    : actionMutation.error instanceof ApiError && actionMutation.error.status < 500 && actionMutation.error.shape.message
       ? actionMutation.error.shape.message
-      : actionMutation.error
-        ? "No se pudo completar la acción. Inténtalo de nuevo."
-        : null
+      : "No se pudo completar la acción. Inténtalo de nuevo."
   // Resolver y cerrar sin resolver confirman antes con lo que dice el servidor que pasará.
   const [confirming, setConfirming] = useState<"close" | "deleteTest" | null>(null)
   const previewQuery = useQuery({
@@ -799,7 +799,16 @@ export function ThreadView({
                   }]
                 : []),
               // Una prueba del chat web se borra entera (fase 6 del pulido).
-              ...(canWrite && conv.isTest ? [{ key: "borrar-prueba", label: "Borrar esta prueba", onSelect: () => setConfirming("deleteTest") }] : []),
+              ...(canWrite && conv.isTest
+                ? [{
+                    key: "borrar-prueba",
+                    label: "Borrar esta prueba",
+                    onSelect: () => {
+                      actionMutation.reset()
+                      setConfirming("deleteTest")
+                    },
+                  }]
+                : []),
               ...(!canWrite
                 ? []
                 : closed
@@ -857,6 +866,7 @@ export function ThreadView({
         confirmLabel="Borrar esta prueba"
         variant="destructive"
         pending={busy}
+        error={actionError}
         onClose={() => setConfirming(null)}
         onConfirm={() =>
           actionMutation.mutate(

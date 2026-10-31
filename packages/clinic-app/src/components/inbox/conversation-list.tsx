@@ -56,7 +56,7 @@ export function StateLabel({ words, className = "" }: { words: ConversationWords
 
 /**
  * La segunda línea de la fila dice una sola cosa, en este orden: lo que pide a
- * una persona, cómo se cerró, lo último que hizo el agente, en qué está y, si no,
+ * una persona, cómo se cerró, lo que no se pudo enviar, lo último que hizo el agente, en qué está y, si no,
  * el último mensaje. Todo sale de lo que entrega el servidor.
  */
 function rowLine(item: ConversationListItem, myUserId: string, receptionName: string): ConversationWords {
@@ -71,6 +71,8 @@ function rowLine(item: ConversationListItem, myUserId: string, receptionName: st
   }
   const words = conversationWords({ ...item, myUserId, receptionName })
   if (words?.tone === "closed") return words
+  // Lo que no salió va antes que lo último que hizo el agente: es lo que hay que resolver.
+  if (item.attention?.sendFailed) return { text: `No se pudo enviar · «${previewWords(item.preview)}»`, tone: "team" }
   const action = item.lastAction
   if (action) {
     const what = action.what ? ` · ${action.what}` : ""

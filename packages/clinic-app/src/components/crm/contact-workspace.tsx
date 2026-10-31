@@ -63,7 +63,10 @@ interface ConversationContext {
   contactId: string
   patientId: string | null
   name: string
+  /** Para mostrar: su teléfono o, sin él, el número de su WhatsApp. */
   phone: string | null
+  /** Solo el de su ficha: el único que un formulario puede traer escrito. */
+  declaredPhone: string | null
   email: string | null
   nextAppointment: CrmNextAppointment | null
   lines: Partial<Record<"plan" | "alertas" | "cobros" | "ventas" | "datos" | "recuerda", string>>
@@ -342,7 +345,7 @@ export function ContactWorkspace({ conversationId, section, onSectionChange, onR
 /** Sus citas y «Reservar cita»: quien aún no es paciente se reserva con su ficha mínima (la crea la Agenda). */
 function CitasSection({ context, conversationId }: { context: ConversationContext; conversationId: string }) {
   const can = useCan()
-  const { patientId, contactId, name, phone, nextAppointment } = context
+  const { patientId, contactId, name, declaredPhone, nextAppointment } = context
   // La próxima cita puede ser de a quien lleva: la que anuncia la fila también se ve al entrar.
   const carried = nextAppointment && nextAppointment.patientId !== patientId ? nextAppointment : null
   // Quien ya es paciente reserva desde su panel, sin salir de la Bandeja.
@@ -355,7 +358,8 @@ function CitasSection({ context, conversationId }: { context: ConversationContex
           type="button"
           size="sm"
           className="w-fit"
-          onClick={() => openBookingAnywhere({ person: { contactId, name, phone }, lockedPatient: true, conversationId })}
+          // El teléfono escrito aquí se guarda en su ficha: va solo el declarado, nunca el número de su WhatsApp.
+          onClick={() => openBookingAnywhere({ person: { contactId, name, phone: declaredPhone }, lockedPatient: true, conversationId })}
         >
           Reservar cita
         </Button>

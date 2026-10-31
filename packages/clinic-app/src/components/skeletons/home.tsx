@@ -107,6 +107,25 @@ function TodayPatientsSkeleton() {
   )
 }
 
+/** La tarjeta de quien dirige y atiende: hasta saber si hoy tiene citas propias, sin título ni enlace que luego cambien. */
+function TodayUndecidedSkeleton() {
+  return (
+    <section className={TODAY_CARD}>
+      <div className="flex h-[26px] items-center">
+        <Skeleton className="h-4 w-40" />
+      </div>
+      <ul className="flex flex-col divide-y">
+        {TODAY_ROWS.map((width) => (
+          <TodayRow key={width} width={width} />
+        ))}
+      </ul>
+      <span className="inline-flex min-h-11 items-center self-start sm:min-h-8">
+        <Skeleton className="h-3.5 w-40" />
+      </span>
+    </section>
+  )
+}
+
 /** «Caja de hoy» de quien solo cobra: lo cobrado y a quién falta cobrar. */
 function TodayCashSkeleton() {
   return (
@@ -175,7 +194,15 @@ export function HomeSkeleton() {
       </div>
       {today.card ? (
         <div className="flex min-w-0 flex-[2_1_21rem] flex-col gap-4">
-          {today.card === "patients" ? <TodayPatientsSkeleton /> : today.card === "agenda" ? <TodayAgendaSkeleton /> : <TodayCashSkeleton />}
+          {today.card === "patients" ? (
+            <TodayPatientsSkeleton />
+          ) : today.card === "agenda" ? (
+            <TodayAgendaSkeleton />
+          ) : today.card === "undecided" ? (
+            <TodayUndecidedSkeleton />
+          ) : (
+            <TodayCashSkeleton />
+          )}
           {today.cashLine ? <CashLineSkeleton /> : null}
         </div>
       ) : null}

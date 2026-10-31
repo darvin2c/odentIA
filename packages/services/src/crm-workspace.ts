@@ -24,6 +24,7 @@ import { invalidField, notFound, validation } from "./errors.js"
 import {
   agentAttendingSql,
   handoffOpenExistsSql,
+  lastIsFailedOutSql,
   proposalPendingExistsSql,
 } from "./conversation-state.js"
 import { handoffOpenSql } from "./handoff-state.js"
@@ -314,6 +315,7 @@ async function resolveAgentState(
       pending: sql<boolean>`${proposalPendingExistsSql(conv)}`,
       handoff: sql<boolean>`${handoffOpenExistsSql(conv)}`,
       attending: sql<boolean>`${agentAttendingSql(conv)}`,
+      sendFailed: sql<boolean>`${lastIsFailedOutSql(conv)}`,
     })
     .from(conversation)
     .where(and(eq(conversation.id, convRow.id), eq(conversation.organizationId, orgId)))
@@ -390,7 +392,8 @@ async function resolveAgentState(
     state: "agent",
     enabled: true,
     conversationId: convRow.id,
-    reason: `Atiende ${sofi}`,
+    // Como la Bandeja: lo último no salió, así que no se dice que ya lo atiende el agente.
+    reason: shared.sendFailed ? "No se pudo enviar el último mensaje" : `Atiende ${sofi}`,
     pendingProposalIds: [],
     awaitingContact: false,
   }

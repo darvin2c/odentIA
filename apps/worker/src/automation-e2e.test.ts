@@ -89,7 +89,7 @@ it.each(PRODUCTS)("Argos programa el aviso, Sofi escribe, el worker lo envía; y
   const [queued] = await ownerDb.select().from(message).where(eq(message.id, hers!.sentMessageId!))
   expect(queued).toMatchObject({ senderKind: "agent", status: "queued" })
   const job: { msg_id: number; read_ct: number; message: OutboundMessageJob } = { msg_id: 1, read_ct: 0, message: { orgId: ORG, messageId: queued!.id } }
-  expect(await processOutbound(appDb, { storage: storageStub, fetch, secretsKey: KEY, senderMode: "mock" }, job)).toBe("done")
+  expect(await processOutbound(appDb, { storage: storageStub, fetch, secretsKey: KEY, senderMode: "mock", ownerDb }, job)).toBe("done")
   const [sent] = await ownerDb.select({ status: message.status }).from(message).where(eq(message.id, queued!.id))
   expect(sent?.status).toBe("sent")
 

@@ -99,6 +99,18 @@ export function lastIsAcceptedOutSql(conv: SQL): SQL {
 }
 
 /**
+ * El último mensaje del hilo es un saliente que no salió (`failed`): de agente,
+ * equipo o una línea del Administrador. Nadie recibió lo último que se le quiso
+ * decir, así que no lo está atendiendo nadie y pide a una persona.
+ */
+export function lastIsFailedOutSql(conv: SQL): SQL {
+  return sql`exists (select 1 from (select m_fail.direction, m_fail.status from message m_fail
+      where m_fail.organization_id = ${conv}.organization_id and m_fail.conversation_id = ${conv}.id
+      order by m_fail.created_at desc, m_fail.id desc limit 1) as last_fail
+    where last_fail.direction = 'out' and last_fail.status = 'failed')`
+}
+
+/**
  * Desde cuándo se espera al paciente: abierta, el último mensaje es un
  * saliente aceptado y no hay derivación abierta. Cuenta desde el primer
  * saliente aceptado después de su último entrante. Nulo si no.
@@ -119,10 +131,13 @@ export function awaitingPatientSql(conv: SQL): SQL {
 /**
  * «Por atender» (ADR 0050): abierta y con un tema sin resolver, o una que el
  * agente no atiende (apagado en el hilo, en la clínica o en ese canal) y no
- * espera al paciente. Es lo único que pide a una persona.
+ * espera al paciente, o una cuyo último mensaje no salió, aunque el agente la
+ * atienda o una propuesta espere su sí: esa respuesta nunca le llegó. Es lo
+ * único que pide a una persona.
  */
 export function needsPersonSql(conv: SQL): SQL {
   return sql`(${conv}.status = 'open' and (${handoffOpenExistsSql(conv)}
+    or ${lastIsFailedOutSql(conv)}
     or (not ${agentAttendingSql(conv)} and not ${awaitingPatientSql(conv)})))`
 }
 

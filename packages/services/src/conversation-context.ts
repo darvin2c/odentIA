@@ -4,6 +4,7 @@ import { contact, conversation } from "@odentia/db/schema/crm"
 import { and, eq } from "drizzle-orm"
 import { listPersonFacts } from "./agent-person-memory.js"
 import { activeAllergies } from "./allergies.js"
+import { whatsappNumberOf } from "./contacts.js"
 import { type CrmNextAppointment, listContactTasks, nextAppointmentOf } from "./crm-workspace.js"
 import { notFound } from "./errors.js"
 import { getOrgLocale } from "./locale.js"
@@ -23,7 +24,10 @@ export interface ConversationContext {
   contactId: string
   patientId: string | null
   name: string
+  /** Para mostrar: su teléfono o, sin él, el número de su WhatsApp. */
   phone: string | null
+  /** Solo el de su ficha: lo que un formulario puede traer escrito y guardar como dato de la persona. */
+  declaredPhone: string | null
   email: string | null
   nextAppointment: CrmNextAppointment | null
   lines: {
@@ -55,6 +59,9 @@ export async function getConversationContext(tx: Db, orgId: string, conversation
   const attention: ConversationContext["attention"] = []
   // Sin leer el CRM solo se habla de quien ya es paciente: odontología y caja no ven a los demás.
   const nextAppointment = can("appointments.read") ? await nextAppointmentOf(tx, orgId, row.id) : null
+  // Por la misma razón, el número de su WhatsApp no se le da a quien no lee el CRM si aún no es paciente.
+  const seesNumber = can("crm.read") || (patientId !== null && can("patients.read"))
+  const phone = row.phone ?? (seesNumber ? await whatsappNumberOf(tx, orgId, row.id) : null)
   if (patientId) {
     if (can("clinical.read") || can("budgets.read") || can("appointments.read")) {
       lines.plan = (await getPlanNextStep(tx, orgId, patientId, can)).text
@@ -87,7 +94,7 @@ export async function getConversationContext(tx: Db, orgId: string, conversation
         : "Nada abierto"
     const facts = await listPersonFacts(tx, orgId, row.id)
     lines.recuerda = facts[0]?.text ?? "Todavía nada"
-    if (!patientId) lines.datos = row.phone || row.email ? "Aún no es paciente" : "Sin datos de contacto"
+    if (!patientId) lines.datos = phone || row.email ? "Aún no es paciente" : "Sin datos de contacto"
   }
-  return { contactId: row.id, patientId, name: row.displayName, phone: row.phone, email: row.email, nextAppointment, lines, attention }
+  return { contactId: row.id, patientId, name: row.displayName, phone, declaredPhone: row.phone, email: row.email, nextAppointment, lines, attention }
 }

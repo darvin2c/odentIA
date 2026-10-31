@@ -161,7 +161,7 @@ function PaymentMethodsPage() {
       <PageHeader
         title="Medios de pago y ticket"
         subtitle={SUBTITLE}
-        primary={methods && methods.length > 0 ? settingsPrimary("paymentMethods", can, () => setMethodForm("new")) : undefined}
+        primary={settingsPrimary("paymentMethods", can, () => setMethodForm("new"))}
       />
 
       <section aria-labelledby="payment-methods-title" className={CARD}>

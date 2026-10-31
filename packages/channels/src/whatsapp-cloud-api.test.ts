@@ -443,6 +443,8 @@ it("un envío rechazado porque la clave de Meta venció lo dice en palabras, con
     "WhatsApp no envió el mensaje porque la conexión con Meta venció o fue retirada. Vuelve a conectar con Facebook en Configuración › Integraciones › WhatsApp.",
   )
   await expect(sent).rejects.not.toThrow(/Session has expired/)
+  // Con su código, para no tener que comparar textos.
+  await expect(sent).rejects.toMatchObject({ name: "ProviderRejectedError", code: 190 })
 })
 
 it("el aviso de un envío fallido trae el motivo: en palabras si se conoce, con su código si no", () => {

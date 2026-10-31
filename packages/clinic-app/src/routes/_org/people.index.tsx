@@ -48,6 +48,8 @@ import {
   type PersonListItem,
   attentionWords,
   daysSince,
+  personShapeKey,
+  personShapeOf,
   situationAction,
   situationText,
 } from "../../lib/people"
@@ -168,6 +170,11 @@ function PeoplePage() {
     staleTime: 60_000,
   })
   const rows = query.data?.data ?? []
+  const queryClient = useQueryClient()
+  // Abrir a alguien de la lista ya muestra sus pestañas y sus botones.
+  useEffect(() => {
+    for (const row of query.data?.data ?? []) queryClient.setQueryData(personShapeKey(row.id), personShapeOf(row))
+  }, [query.data, queryClient])
   const nextCursor = query.data?.nextCursor ?? null
   const porRegistrar = query.data?.counts.porRegistrar
   const shortcuts = shortcutsQuery.data ?? null

@@ -19,6 +19,7 @@ La configuración de Meta que usa el botón (plantilla «Configuración de regis
   - Soporte de odentIA recibe el caso automático «Clave de Meta sin renovar», con lo que dijo Meta. Es uno por motivo, con cada clínica afectada, como «Modelo sin responder»;
   - se reintenta mientras la clave siga vigente;
   - si Meta ya no acepta la clave, no se insiste: solo volver a conectar la repone.
+- **Lo mismo si Meta rechaza un envío con el código 190** (2026-10-31): la clave retirada antes de tiempo no espera a la revisión de cada 12 horas, que además no pregunta por una clave con vencimiento lejano. Solo en conexiones hechas con el botón.
 - **Cada renovación queda en la actividad de la clínica** como algo automático, sin la clave.
 
 ## Alternativas descartadas

@@ -408,6 +408,42 @@ describe("el ciclo: insistir una vez y cerrar por silencio", () => {
     expect(await c.messages(conv.id)).toHaveLength(before)
   })
 
+  it("si lo último no salió no se despide ni cierra: queda en «Por atender» hasta que un envío se acepte", async () => {
+    const c = await clinic()
+    const nudgedAt = new Date("2026-10-12T17:05:00Z")
+    const conv = await c.thread("Inés Rojas", { lastInboundAt: IN, lastMessageAt: nudgedAt, attentionStartedAt: IN, nudgedAt })
+    await c.say(conv.id, "in", "¿Atienden sábados?", IN)
+    await c.say(conv.id, "out", "Sí, de 9 a 13. ¿Te busco un horario?", OUT)
+    const [rejected] = await c.say(conv.id, "out", "Inés, ¿pudiste ver lo que te comenté?", nudgedAt)
+    await ownerDb.update(message).set({ status: "failed", externalId: null, error: "WhatsApp send falló" }).where(eq(message.id, rejected!.id))
+    const before = (await c.messages(conv.id)).length
+    // A la hora en que, con el recordatorio entregado, se despide y cierra.
+    const closeTime = new Date("2026-10-13T01:00:00Z")
+    expect(await tick(c, closeTime)).toEqual({ nudged: 0, closed: 0 })
+    expect(await c.messages(conv.id)).toHaveLength(before)
+    expect((await c.row(conv.id)).status).toBe("open")
+    const inAttend = async () => (await c.run((tx) => listInboxConversations(tx, c.orgId, { view: "attend" }))).items.some((item) => item.id === conv.id)
+    expect(await inAttend()).toBe(true)
+    // El equipo la retoma y su envío sale: vuelve a la regla de siempre.
+    const retaken = new Date("2026-10-12T21:30:00Z")
+    await c.say(conv.id, "out", "Inés, te escribo de la clínica", retaken, "user")
+    await ownerDb.update(conversation).set({ lastMessageAt: retaken }).where(eq(conversation.id, conv.id))
+    expect(await inAttend()).toBe(false)
+    expect(await tick(c, closeTime)).toMatchObject({ closed: 1 })
+    expect(await c.row(conv.id)).toMatchObject({ status: "closed", closeReason: "sin_respuesta" })
+  })
+
+  it("sin ventana y con lo último sin salir tampoco cierra sin mensaje", async () => {
+    const c = await clinic({ provider: "whatsapp_cloud_api" })
+    const conv = await c.thread("Mario", { lastInboundAt: new Date("2026-10-09T14:00:00Z"), lastMessageAt: OUT, attentionStartedAt: IN })
+    await c.say(conv.id, "in", "Hola", new Date("2026-10-09T14:00:00Z"))
+    await c.say(conv.id, "out", "Hola Mario", new Date("2026-10-09T14:01:00Z"))
+    const [rejected] = await c.say(conv.id, "out", "Mario, ¿confirmas tu cita?", OUT)
+    await ownerDb.update(message).set({ status: "failed", externalId: null }).where(eq(message.id, rejected!.id))
+    expect(await tick(c, new Date("2026-10-13T02:00:00Z"))).toEqual({ nudged: 0, closed: 0 })
+    expect((await c.row(conv.id)).status).toBe("open")
+  })
+
   it("con una persona a cargo no se cierra ni avisa en la campana: la muestra «Te espera» a quien la lleva", async () => {
     const c = await clinic()
     // Una persona la lleva entera: apagó al agente en el hilo (ADR 0050; asignar ya no lo hace).
