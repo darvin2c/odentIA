@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { buildWebchatInbound, createWebchatToken, webChatAdapter } from "@odentia/channels"
 import { type Db, withOrgContext } from "@odentia/db"
-import { agentAnswerTrace, agentLesson, agentReviewItem } from "@odentia/db/schema/agent"
+import { agentAnswerTrace, agentLesson, agentReviewItem, agentRunLedger } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
 import {
   agentConfig,
@@ -13,8 +13,8 @@ import {
   message,
 } from "@odentia/db/schema/crm"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
-import { and, asc, eq } from "drizzle-orm"
-import { describe, expect, it } from "vitest"
+import { and, asc, eq, sql } from "drizzle-orm"
+import { describe, expect, it, vi } from "vitest"
 import { createHandoff } from "./agent-operations.js"
 import { createBookingLink } from "./booking-links.js"
 import { type IngestDeps, ingestInbound } from "./conversations.js"
@@ -602,5 +602,46 @@ describe("la prueba de Configuración no se cobra ni cuenta", () => {
     expect(
       await ownerDb.select().from(conversation).where(eq(conversation.id, old.conversationId)),
     ).toEqual([])
+  })
+
+  it("se borra aunque Sofi esté anotando su corrida en ese momento", async () => {
+    const c = await clinic()
+    const { sessionId } = await c.run((tx) => openWebchatTest(tx, c.orgId, KEY, c.ownerId))
+    const said = await c.visitorSays(sessionId, "Hola, es una prueba")
+    // La corrida del worker, escrita y aún sin confirmar.
+    let written = () => {}
+    let commit = () => {}
+    const isWritten = new Promise<void>((resolve) => {
+      written = resolve
+    })
+    const mayCommit = new Promise<void>((resolve) => {
+      commit = resolve
+    })
+    const run = c.run(async (tx) => {
+      await tx.insert(agentRunLedger).values({
+        organizationId: c.orgId,
+        conversationId: said.conversationId,
+        model: "prueba",
+        status: "ok",
+        startedAt: new Date(),
+      })
+      written()
+      await mayCommit
+    })
+    await isWritten
+    const deleting = c.run((tx) => deleteWebchatTest(tx, c.orgId, { sessionId }))
+    // Se confirma con el borrado ya esperando: es el orden que lo tumbaba con 23503.
+    await vi.waitFor(
+      async () => {
+        const waiting = await ownerDb.execute(sql`select 1 from pg_stat_activity where wait_event_type = 'Lock' and datname = current_database()`)
+        expect(waiting.length).toBeGreaterThan(0)
+      },
+      { timeout: 5_000 },
+    )
+    commit()
+    await run
+    await expect(deleting).resolves.toBe(true)
+    expect(await ownerDb.select().from(agentRunLedger).where(eq(agentRunLedger.conversationId, said.conversationId))).toEqual([])
+    expect(await ownerDb.select().from(conversation).where(eq(conversation.id, said.conversationId))).toEqual([])
   })
 })

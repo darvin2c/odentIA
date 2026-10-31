@@ -760,9 +760,19 @@ export async function openWebchatTest(
 }
 
 /**
- * «Borrar esta prueba»: la conversación de prueba de esa sesión, con todo lo
- * que dejó (`delete_webchat_test`, solo una prueba de esta clínica).
+ * Borra una prueba de esta clínica con todo lo que dejó (`delete_webchat_test`).
+ * Antes toma la conversación: lo que Sofi esté anotando en ella termina primero y
+ * se borra también, o espera y ya no la encuentra. Tiene que ser `for update`: es
+ * el único que choca con el `for key share` de las llaves foráneas; sin él, una
+ * corrida anotada a mitad del borrado lo tumba con 23503.
  */
+export async function deleteTestConversation(tx: Db, orgId: string, conversationId: string): Promise<boolean> {
+  await tx.execute(sql`select 1 from "conversation" where "id" = ${conversationId}::uuid and "organization_id" = ${orgId} and "is_test" for update`)
+  const [result] = await tx.execute<{ deleted: boolean }>(sql`select public.delete_webchat_test(${conversationId}::uuid) as deleted`)
+  return result?.deleted === true
+}
+
+/** «Borrar esta prueba»: la conversación de prueba de esa sesión, con todo lo que dejó. */
 export async function deleteWebchatTest(tx: Db, orgId: string, input: { sessionId?: string; conversationId?: string }): Promise<boolean> {
   let conversationId = input.conversationId ?? null
   if (!conversationId && input.sessionId) {
@@ -771,8 +781,7 @@ export async function deleteWebchatTest(tx: Db, orgId: string, input: { sessionI
     conversationId = conv?.id ?? null
   }
   if (!conversationId) return false
-  const [result] = await tx.execute<{ deleted: boolean }>(sql`select public.delete_webchat_test(${conversationId}::uuid) as deleted`)
-  if (!result?.deleted) throw new ServiceError("NOT_A_TEST", 409, "Solo se borra una prueba del chat web")
+  if (!(await deleteTestConversation(tx, orgId, conversationId))) throw new ServiceError("NOT_A_TEST", 409, "Solo se borra una prueba del chat web")
   return true
 }
 
@@ -783,7 +792,7 @@ export async function purgeOldWebchatTests(tx: Db, orgId: string, now: Date): Pr
     .from(conversation)
     .where(and(eq(conversation.organizationId, orgId), eq(conversation.isTest, true), lt(conversation.createdAt, new Date(now.getTime() - TEST_KEEP_MS))))
     .limit(50)
-  for (const row of old) await tx.execute(sql`select public.delete_webchat_test(${row.id}::uuid)`)
+  for (const row of old) await deleteTestConversation(tx, orgId, row.id)
   return old.length
 }
 
