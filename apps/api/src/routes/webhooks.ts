@@ -289,6 +289,9 @@ export function createWebhooksRoute(deps: WebhookDeps) {
     ) {
       return c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404)
     }
+    // Un id mal formado es una conexión que no existe; en la consulta sería un error de Postgres.
+    const connectionId = z.uuid().safeParse(c.req.param("connectionId"))
+    if (!connectionId.success) return c.json(errorBody(c, "FORBIDDEN", "Verificación inválida"), 403)
     const [connection] = await deps.ownerDb
       .select({
         id: channelConnection.id,
@@ -297,7 +300,7 @@ export function createWebhooksRoute(deps: WebhookDeps) {
         webhookSecret: channelConnection.webhookSecret,
       })
       .from(channelConnection)
-      .where(eq(channelConnection.id, c.req.param("connectionId")))
+      .where(eq(channelConnection.id, connectionId.data))
       .limit(1)
     if (!connection || connection.provider !== parsed.data) {
       return c.json(errorBody(c, "FORBIDDEN", "Verificación inválida"), 403)
@@ -329,10 +332,13 @@ export function createWebhooksRoute(deps: WebhookDeps) {
     // 400 para distinguirlo del 200 de dedupe/desactivada.
     if (!adapter) return c.json(errorBody(c, "VALIDATION", "Proveedor no registrado"), 400)
 
+    // Un id mal formado es una conexión que no existe; un 500 haría reintentar al proveedor.
+    const connectionId = z.uuid().safeParse(c.req.param("connectionId"))
+    if (!connectionId.success) return c.json({ ok: true }, 200)
     const [connection] = await deps.ownerDb
       .select()
       .from(channelConnection)
-      .where(eq(channelConnection.id, c.req.param("connectionId")))
+      .where(eq(channelConnection.id, connectionId.data))
       .limit(1)
     // 200 aunque no exista/desactivada: el proveedor no debe reintentar.
     if (!connection || connection.status !== "active" || connection.provider !== provider) {

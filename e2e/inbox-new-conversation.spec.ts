@@ -65,7 +65,10 @@ test("«Nueva conversación»: crea a la persona con su número, abre su WhatsAp
   await expect(context.getByRole("button", { name: /^Plan y presupuesto/ })).toHaveCount(0)
   await context.getByRole("button", { name: /^Datos/ }).click()
   await expect(context).toContainText("Novedades y promociones: aún no se le preguntó")
+  // Con teclado no se pierde: entrar lleva al título de la sección; volver, a la fila de la que salió.
+  await expect(context.getByRole("heading", { name: "Datos", exact: true })).toBeFocused()
   await context.getByRole("button", { name: "Volver al contexto" }).click()
+  await expect(context.getByRole("button", { name: /^Datos/ })).toBeFocused()
   await context.getByRole("button", { name: /^Citas/ }).click()
   await expect(context.getByRole("link", { name: "Reservar cita", exact: true })).toHaveAttribute("href", new RegExp(`contactId=${detail.contact.id}`))
   await expect(context).toContainText("todavía no es paciente")

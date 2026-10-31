@@ -1232,7 +1232,7 @@ export function ThreadView({
                     aria-label="Mensaje"
                     rows={1}
                     className="max-sm:min-h-10"
-                    placeholder={replyTopic ? "Escribe tu respuesta… (Enter envía y resuelve)" : "Escribe un mensaje… (Enter para enviar)"}
+                    placeholder={replyTopic ? "Tu respuesta… (Enter envía y resuelve)" : "Escribe un mensaje… (Enter para enviar)"}
                     value={composer}
                     onChange={(e) => {
                       setComposer(e.target.value)
@@ -1240,8 +1240,8 @@ export function ThreadView({
                     }}
                   />
                 </PromptInputBody>
-                <PromptInputFooter>
-                  <PromptInputTools className="min-w-0 flex-1">
+                <PromptInputFooter className="flex-wrap max-sm:gap-y-1">
+                  <PromptInputTools className="min-w-0 flex-1 basis-24">
                     {/* Una respuesta por entregar es solo texto: un adjunto no espera a «Ver respuesta». */}
                     {holdReply || viaWhatsapp ? null : (
                       <PromptInputActionMenu>
@@ -1274,13 +1274,14 @@ export function ThreadView({
                       </Button>
                     ) : null}
                   </PromptInputTools>
-                  <div className="flex shrink-0 items-center gap-1.5">
+                  {/* En celular los dos botones de un tema no caben junto a las herramientas: van en su propia fila, a todo el ancho. */}
+                  <div className={`ml-auto flex shrink-0 items-center gap-1.5${replyTopic ? " max-sm:w-full max-sm:flex-wrap" : ""}`}>
                     {replyTopic ? (
                       <Button
                         type="submit"
                         variant="outline"
                         size="sm"
-                        className="min-h-11 sm:min-h-8"
+                        className="min-h-11 max-sm:flex-1 max-sm:px-1.5 max-sm:text-[13px] sm:min-h-8"
                         disabled={sendMutation.isPending || uploading || switching}
                         onClick={() => {
                           keepPendingRef.current = true
@@ -1292,13 +1293,13 @@ export function ThreadView({
                     {replyTopic ? (
                       <PromptInputSubmit
                         size="sm"
-                        className="min-h-11 sm:min-h-8"
+                        className="min-h-11 max-sm:flex-1 max-sm:px-1.5 max-sm:text-[13px] sm:min-h-8"
                         aria-label="Enviar y resolver"
                         title="Enviar y resolver (Enter)"
                         disabled={sendMutation.isPending || uploading || switching}
                       >
                         Enviar y resolver
-                        <CornerDownLeft className="size-4" aria-hidden />
+                        <CornerDownLeft className="size-4 max-sm:hidden" aria-hidden />
                       </PromptInputSubmit>
                     ) : (
                       <PromptInputSubmit aria-label="Enviar" title="Enviar (Enter)" disabled={sendMutation.isPending || uploading || switching} />
