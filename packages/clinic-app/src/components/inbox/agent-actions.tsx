@@ -7,7 +7,8 @@ import { permissionForAction, proposalErrorMessage, type AgentProposal } from ".
 import { useReceptionName } from "../../lib/agent-names"
 import { ApiError, apiFetch } from "../../lib/api"
 import { clockWords } from "../../lib/conversation-state"
-import { usePermission } from "../../lib/crm"
+import { useCan, usePermission } from "../../lib/crm"
+import { canConfirmByPhone } from "../../lib/screen-rules"
 import { invalidateAgentPanelQueries } from "../agent-panel"
 
 /** Lo que hizo el agente con esta persona, como lo entrega el servidor. */
@@ -104,7 +105,8 @@ export function AgentActionCard({
       }
     },
   })
-  const canPhone = canRegister && item.state === "espera" && item.action !== null && PHONE_CONFIRMABLE.has(item.action)
+  const canPhone =
+    canConfirmByPhone(useCan()) && !!item.proposalId && item.state === "espera" && item.action !== null && PHONE_CONFIRMABLE.has(item.action)
   const done = byPhone.data ?? confirm.data
   const failedRun = byPhone.error ?? confirm.error
   const failed = done ? proposalErrorMessage(done.data) : null

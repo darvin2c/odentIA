@@ -617,7 +617,7 @@ function ReceptionPage() {
 
           <Card
             title="Qué sabe"
-            hint="Solo responde con esto. Si el dato no está aquí, lo dice y pasa a una persona."
+            hint="Lee tus datos en el momento y lo que le enseñaste. Si algo no está, lo dice y pasa a una persona."
             phone={{
               summary: `${count(knows.answers, "respuesta", "respuestas")} · ${count(knows.servicesWithPrice, "precio que dice", "precios que dice")} · ${count(knows.branches, "sede", "sedes")} · lo que recuerda de cada persona`,
               to: canWrite ? "/agent/knowledge" : undefined,

@@ -101,7 +101,7 @@ function rows(sources: Sources, receptionName: string): Row[] {
         : promotions.length === 0
           ? "Ninguna vigente"
           : promotions.length === 1 && promotion
-            ? `1 vigente: ${promotion.name}${promotion.endsAt ? `, hasta el ${dayLabel(promotion.endsAt.slice(0, 10))}` : ""}`
+            ? `1 vigente: ${promotion.name}${promotion.endsOn ? `, hasta el ${dayLabel(promotion.endsOn)}` : ""}`
             : `${promotions.length} vigentes`,
       action: "Promociones",
     },

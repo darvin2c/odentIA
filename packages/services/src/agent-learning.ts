@@ -149,6 +149,8 @@ export async function countActiveRules(tx: Db, orgId: string, scope: string): Pr
 
 /** Que una regla más no pase del tope: si no cabe, se dice qué hacer. */
 export async function assertRuleRoom(tx: Db, orgId: string, scope: string, doing: "aprobar" | "agregar" | "restaurar"): Promise<void> {
+  // Dos aprobaciones a la vez con 39 reglas no pueden dejar 41: se cuenta de a una, hasta el fin de la transacción.
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`agent_rules:${orgId}:${scope}`}))`)
   if ((await countActiveRules(tx, orgId, scope)) < LESSON_RULE_LIMIT) return
   throw new ServiceError(
     "RULE_LIMIT",

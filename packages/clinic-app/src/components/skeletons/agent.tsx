@@ -334,7 +334,7 @@ export function ReceptionSkeleton() {
           </div>
         </ReceptionCard>
 
-        <ReceptionCard title="Qué sabe" hint="Solo responde con esto. Si el dato no está aquí, lo dice y pasa a una persona." phone>
+        <ReceptionCard title="Qué sabe" hint="Lee tus datos en el momento y lo que le enseñaste. Si algo no está, lo dice y pasa a una persona." phone>
           <ul className="flex flex-col divide-y overflow-hidden rounded-xl border">
             <ReceptionEntry label="Respuestas oficiales" />
             <ReceptionEntry label="Servicios y precios" />

@@ -74,10 +74,18 @@ export async function wantedSearchItems(tx: Db, orgId: string): Promise<WantedIt
   const professionals = await listAgentProfessionals(tx, orgId)
   const answers = await listActiveKnowledge(tx, orgId)
   // Los ejemplos se buscan por la pregunta que los originó: es lo que se parece a la del turno.
+  // Solo los de recepción, el único agente que los busca: los de otro no le quitan lugar en el orden.
   const examples = await tx
     .select({ id: agentLesson.id, title: agentLesson.title, question: agentLesson.question })
     .from(agentLesson)
-    .where(and(eq(agentLesson.organizationId, orgId), eq(agentLesson.status, "activa"), eq(agentLesson.kind, "ejemplo")))
+    .where(
+      and(
+        eq(agentLesson.organizationId, orgId),
+        eq(agentLesson.status, "activa"),
+        eq(agentLesson.kind, "ejemplo"),
+        eq(agentLesson.scope, "recepcion"),
+      ),
+    )
   return [
     ...services.map((s) => ({ kind: "servicio" as const, refId: s.id, text: serviceText(s.name, s.specialty, s.kind, kindWords) })),
     ...promotions.map((p) => ({
@@ -189,7 +197,7 @@ export interface MeaningRank {
   promotions: string[]
   professionals: string[]
   answers: string[]
-  /** Ejemplos aprobados, de cualquier agente: quien los usa filtra los suyos. */
+  /** Ejemplos aprobados de recepción. */
   examples: string[]
 }
 

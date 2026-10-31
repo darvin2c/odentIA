@@ -691,7 +691,8 @@ export interface AgentDataSources {
   team: { professionals: number; specialties: number }
   /** `priced`: los que dicen su precio («exacto» o «desde»); `withDuration`: los que dicen cuánto duran. */
   services: { total: number; priced: number; withDuration: number }
-  promotions: Array<{ name: string; endsAt: string | null }>
+  /** `endsOn`: el último día en que vale, en la zona de la clínica (AAAA-MM-DD). */
+  promotions: Array<{ name: string; endsOn: string | null }>
   paymentMethods: string[]
   /** La clínica registró su teléfono para urgencias (ADR 0084). */
   emergencyPhone: boolean
@@ -724,7 +725,15 @@ export async function getAgentDataSources(tx: Db, orgId: string): Promise<AgentD
       priced: services.filter((item) => item.price.disclosure !== "evaluacion" && item.price.priceCents > 0).length,
       withDuration: services.filter((item) => item.durationMin !== null).length,
     },
-    promotions: promotions.map((item) => ({ name: item.name, endsAt: item.endsAt })),
+    // El día de la clínica, no el de UTC: una promoción que termina de noche en Lima no pasa al día siguiente.
+    promotions: promotions.map((item) => ({
+      name: item.name,
+      endsOn: item.endsAt
+        ? new Intl.DateTimeFormat("en-CA", { timeZone: snapshot.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(
+            new Date(item.endsAt),
+          )
+        : null,
+    })),
     paymentMethods: snapshot.paymentMethods.map((method) => method.name),
     emergencyPhone: Boolean(snapshot.emergencyPhone),
     informs: !cfg.disabledFunctions.includes("informar"),

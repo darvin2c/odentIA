@@ -64,7 +64,8 @@ export interface KnowledgeSources {
   branches: { total: number; withAddress: number; withPhone: number }
   team: { professionals: number; specialties: number }
   services: { total: number; priced: number; withDuration: number }
-  promotions: Array<{ name: string; endsAt: string | null }>
+  /** `endsOn`: el último día en que vale, en la zona de la clínica. */
+  promotions: Array<{ name: string; endsOn: string | null }>
   paymentMethods: string[]
   emergencyPhone: boolean
   /** «Informar» encendido: apagado, no le llegan precios, promociones, equipo ni medios de pago. */

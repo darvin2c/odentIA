@@ -1038,7 +1038,7 @@ export async function answerKnowledgeGaps(
       kind: "faq",
       title: input.title,
       body: input.body,
-      basicKey: input.basicKey ?? null,
+      basicKey: cleanBasicKey(input.basicKey),
     })
     await setKnowledgeStatus(tx, orgId, actorUserId, created.id, "publicada")
     entryId = created.id
