@@ -1,13 +1,15 @@
 import {
   AppShell,
   type AppShellNavEntry,
+  PagePending,
   type ShellLinkComponent,
   SideDockProvider,
   SideDockSlot,
 } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute, getRouteApi, Link, Outlet, useRouterState } from "@tanstack/react-router"
+import { createFileRoute, getRouteApi, Link, Outlet, useMatches, useRouter, useRouterState } from "@tanstack/react-router"
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@odentia/ui"
+import type { ComponentType, ReactNode } from "react"
 import {
   ArrowLeft,
   BookOpen,
@@ -27,13 +29,14 @@ import { api } from "../lib/api"
 import { authClient } from "../lib/auth-client"
 import { DraftGuard } from "../lib/draft-guard"
 import { panelUrl } from "../lib/host"
-import { requireAdminSession } from "../lib/session"
+import { type AdminSession, rememberSeenSession, requireAdminSession, useSeenSession } from "../lib/session"
 
 export const Route = createFileRoute("/_app")({
   // Sin SSR: si el código hace falta lo decide la API con la cookie del equipo
   // y el país de quien mira (ADR 0090), y eso solo lo tiene su navegador.
   ssr: false,
   beforeLoad: async () => ({ adminSession: await requireAdminSession() }),
+  pendingComponent: AdminPending,
   component: AdminLayout,
 })
 
@@ -42,10 +45,28 @@ const RouterLink: ShellLinkComponent = ({ to, search, ...props }) => (
 )
 const appRoute = getRouteApi("/_app")
 
+/**
+ * Al recargar, mientras la API confirma la sesión: el esqueleto de la pantalla de
+ * la dirección y, si este navegador ya vio a esta persona, su marco. Sin números
+ * en el menú: esos sí se piden, y con la sesión confirmada.
+ */
+function AdminPending() {
+  const router = useRouter()
+  const leaf = useMatches({ select: (matches) => matches.at(-1)?.routeId })
+  const own = leaf ? (router.routesById as unknown as Record<string, { options: { pendingComponent?: unknown } }>)[leaf]?.options.pendingComponent : undefined
+  const Screen = (own ?? PagePending) as ComponentType
+  const seen = useSeenSession()
+  return seen ? (
+    <AdminFrame session={seen}>
+      <Screen />
+    </AdminFrame>
+  ) : (
+    <Screen />
+  )
+}
+
 function AdminLayout() {
   const { adminSession } = appRoute.useRouteContext()
-  const pathname = useRouterState({ select: (state) => state.location.pathname })
-  const queryClient = useQueryClient()
   // Hojas sin responder: el número rojo del menú (decisión 6 del lienzo).
   const complaints = useQuery({
     queryKey: ["admin", "complaints-summary"],
@@ -62,12 +83,22 @@ function AdminLayout() {
     select: (data) => data.items.find((item) => item.key === "waitlist")?.count ?? 0,
     staleTime: 60_000,
   })
+  return (
+    <AdminFrame session={adminSession} waitlist={waitlist.data} complaints={complaints.data?.pending}>
+      <Outlet />
+    </AdminFrame>
+  )
+}
+
+function AdminFrame({ session, waitlist, complaints, children }: { session: AdminSession; waitlist?: number; complaints?: number; children: ReactNode }) {
+  const pathname = useRouterState({ select: (state) => state.location.pathname })
+  const queryClient = useQueryClient()
   const items: AppShellNavEntry[] = [
     { label: "Inicio", to: "/", icon: Home },
-    { label: "Lista de espera", to: "/waitlist", icon: ListChecks, badge: waitlist.data || undefined },
+    { label: "Lista de espera", to: "/waitlist", icon: ListChecks, badge: waitlist || undefined },
     { label: "Organizaciones", to: "/organizations", icon: Building2 },
     { label: "Usuarios", to: "/users", icon: Users },
-    ...(adminSession.actor.role === "admin"
+    ...(session.actor.role === "admin"
       ? [
           { label: "Cobros y planes", to: "/billing", icon: CreditCard },
           { label: "Comisiones", to: "/commissions", icon: Coins },
@@ -78,9 +109,9 @@ function AdminLayout() {
       label: "Libro de Reclamaciones",
       to: "/complaints",
       icon: BookOpen,
-      badge: complaints.data?.pending || undefined,
+      badge: complaints || undefined,
     },
-    ...(adminSession.actor.role === "admin"
+    ...(session.actor.role === "admin"
       ? [{ label: "Equipo y actividad", to: "/team", icon: ShieldCheck }]
       : []),
   ]
@@ -90,9 +121,9 @@ function AdminLayout() {
       LinkComponent={RouterLink}
       pathname={pathname}
       user={{
-        name: adminSession.user.name,
-        email: adminSession.user.email,
-        avatarUrl: adminSession.user.image ?? undefined,
+        name: session.user.name,
+        email: session.user.email,
+        avatarUrl: session.user.image ?? undefined,
       }}
       userMenuItems={[
         { label: "Mi cuenta", icon: UserRound, href: panelUrl("/profile") },
@@ -119,15 +150,14 @@ function AdminLayout() {
       }
       onSignOut={async () => {
         await authClient.signOut()
+        rememberSeenSession(null)
         queryClient.clear()
         window.location.assign(panelUrl("/login"))
       }}
     >
       <SideDockProvider draftGuard={DraftGuard}>
         <div className="flex min-w-0 flex-1">
-          <div className="flex min-w-0 flex-1 flex-col">
-            <Outlet />
-          </div>
+          <div className="flex min-w-0 flex-1 flex-col">{children}</div>
           <SideDockSlot />
         </div>
       </SideDockProvider>

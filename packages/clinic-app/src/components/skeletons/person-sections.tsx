@@ -63,15 +63,27 @@ export function NotesListSkeleton() {
   )
 }
 
-/** `PersonSummary`: las cuatro tarjetas de quien lee la clínica, los datos, pendientes, notas y lo que recuerda. */
-export function PersonSummarySkeleton({ clinical, can }: { clinical: boolean; can: SkeletonCan }) {
+/**
+ * `PersonSummary`: las cuatro tarjetas de quien lee la clínica, los datos, pendientes, notas y lo que recuerda.
+ * `unknown`: quien lee la clínica abre a alguien que quizá aún no es paciente; arriba, sin títulos que luego se vayan.
+ */
+export function PersonSummarySkeleton({ clinical, can }: { clinical: boolean | "unknown"; can: SkeletonCan }) {
   const chats = can("conversations.read")
   const crm = can("crm.read")
   const finance = can("finance.read")
-  const showFacts = !clinical || finance || chats || crm
+  const showFacts = clinical !== "unknown" && (!clinical || finance || chats || crm)
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      {clinical ? (
+      {clinical === "unknown" ? (
+        <section className="elevated grid min-w-0 grid-cols-1 gap-x-8 gap-y-4 rounded-xl border bg-card p-6 sm:grid-cols-2 lg:grid-cols-3">
+          {[0, 1, 2].map((slot) => (
+            <div key={slot} className="flex flex-col gap-1">
+              <Line size="xs" className="w-20" />
+              <Line className="w-40" />
+            </div>
+          ))}
+        </section>
+      ) : clinical ? (
         <div className="grid min-w-0 gap-4 md:grid-cols-2">
           <SummaryCardShape title="Alergias y alertas" action={<WaitingButton>Antecedentes</WaitingButton>}>
             <ul className="flex flex-col gap-2">
@@ -791,8 +803,8 @@ export function PersonSectionSkeleton({
 }: {
   section: string
   can: SkeletonCan
-  /** El Resumen es el clínico: quien lo ve lee la historia y la persona ya es paciente. */
-  clinicalSummary: boolean
+  /** El Resumen es el clínico: quien lo ve lee la historia y la persona ya es paciente. `unknown`: aún no se sabe si lo es. */
+  clinicalSummary: boolean | "unknown"
   /** Cómo se llama un lugar en el producto («Pieza»), si registra dónde. */
   placeLabel?: string
   /** En este producto el presupuesto es opcional (latidIA). */

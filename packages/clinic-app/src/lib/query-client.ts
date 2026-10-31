@@ -1,4 +1,5 @@
-import { QueryCache, QueryClient } from "@tanstack/react-query"
+import { toast } from "@odentia/ui"
+import { MutationCache, QueryCache, QueryClient } from "@tanstack/react-query"
 import { ApiError } from "./api"
 
 /**
@@ -11,11 +12,12 @@ import { ApiError } from "./api"
  * Si la clínica empieza a pedir verificación en dos pasos con la pantalla
  * abierta (ADR 0107), la primera consulta que lo dice recarga: el layout
  * muestra entonces cómo seguir. Un guardado que falla por eso no recarga: lo
- * escrito se conserva y el error lo dice.
+ * escrito se conserva, y el aviso ofrece seguir cuando la persona quiera.
  */
 export function createQueryClient(): QueryClient {
   return new QueryClient({
     queryCache: new QueryCache({ onError: reloadWhenTwoFactorRequired }),
+    mutationCache: new MutationCache({ onError: offerTwoFactorStep }),
     defaultOptions: {
       queries: {
         staleTime: 10_000,
@@ -25,11 +27,24 @@ export function createQueryClient(): QueryClient {
   })
 }
 
+function asksTwoFactor(error: unknown): error is ApiError {
+  return error instanceof ApiError && (error.shape.code === "TWO_FACTOR_REQUIRED" || error.shape.code === "TWO_FACTOR_CODE_REQUIRED")
+}
+
 let reloading = false
 function reloadWhenTwoFactorRequired(error: unknown): void {
   if (reloading || typeof window === "undefined") return
-  if (error instanceof ApiError && (error.shape.code === "TWO_FACTOR_REQUIRED" || error.shape.code === "TWO_FACTOR_CODE_REQUIRED")) {
+  if (asksTwoFactor(error)) {
     reloading = true
     window.location.reload()
   }
+}
+
+function offerTwoFactorStep(error: unknown): void {
+  if (!asksTwoFactor(error)) return
+  toast.error(error.message, {
+    id: "verificacion-en-dos-pasos",
+    duration: Number.POSITIVE_INFINITY,
+    action: { label: "Verificar ahora", onClick: () => window.location.reload() },
+  })
 }

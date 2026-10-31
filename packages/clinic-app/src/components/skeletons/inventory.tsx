@@ -6,6 +6,7 @@
 import { ParamTabs } from "./param-tabs"
 import { ScrollArea, Skeleton, TabsContent, TabsList, TabsTrigger } from "@odentia/ui"
 import { ViewTabs } from "@odentia/ui-patterns"
+import { useQueryClient } from "@tanstack/react-query"
 import { useCan } from "../../lib/crm"
 import { appWords } from "../../lib/product-words"
 import { inventoryAccess, inventoryCountPrimary, inventoryCounting, inventoryHeader, purchaseViews } from "../../lib/screen-rules"
@@ -255,6 +256,7 @@ export function InventoryPageSkeleton() {
   const tab: InventoryTab = wanted === "compras" || wanted === "movimientos" || wanted === "proveedores" ? wanted : wanted === "catalogos" ? "proveedores" : "productos"
   const access = inventoryAccess(useCan())
   const contar = useSearchValue("contar")
+  const queryClient = useQueryClient()
   if (inventoryCounting(contar, access)) {
     return (
       <PageLoading title="Contar lo que hay" primary={inventoryCountPrimary()}>
@@ -267,7 +269,9 @@ export function InventoryPageSkeleton() {
       </PageLoading>
     )
   }
-  const header = inventoryHeader(tab, access)
+  // Las sedes ya traídas por otra pantalla: con ellas, su menú es el mismo que tendrá la pantalla.
+  const branches = queryClient.getQueryData<{ data: Array<{ isActive: boolean }> }>(["branches", "activas"])?.data
+  const header = inventoryHeader(tab, access, { manyBranches: (branches ?? []).filter((branch) => branch.isActive).length > 1 })
   return (
     <PageLoading title="Inventario" primary={header.primary} menu={header.menu}>
       <div className="flex flex-col gap-4">

@@ -40,11 +40,11 @@ import type { personHeaderRules } from "../../lib/screen-rules"
 import { Line } from "./person-parts"
 
 export interface PersonSkeletonNav {
-  /** Las pestañas que el rol ve y la abierta. */
-  areas: ReadonlyArray<{ id: string; label: string; target?: string }>
+  /** Las pestañas que el rol ve y la abierta. `unsure`: depende de la persona, y va como hueco hasta saberlo. */
+  areas: ReadonlyArray<{ id: string; label: string; target?: string; unsure?: boolean }>
   area: string
   /** Las secciones de la pestaña abierta (Clínica, Datos) y la elegida. */
-  entries: ReadonlyArray<{ value: string; label: string; group?: string }>
+  entries: ReadonlyArray<{ value: string; label: string; group?: string; unsure?: boolean }>
   current: string
   /** Sus secciones van en el menú lateral (Datos), no en una barra. */
   sideNav: boolean
@@ -52,8 +52,17 @@ export interface PersonSkeletonNav {
   mobileLabel: string
 }
 
-/** El enlace de la miga a Pacientes y lo que el rol podrá hacer: los pone quien usa el esqueleto. */
-export function PersonHeaderSkeleton({ crumb, actions }: { crumb?: ReactElement; actions: ReturnType<typeof personHeaderRules> }) {
+/** Una pestaña que depende de la persona, mientras no se sabe: el hueco, sin el nombre. */
+function TabSlot() {
+  return <Skeleton className="mx-1 h-7 w-20 shrink-0 self-center rounded-full" />
+}
+
+/**
+ * El enlace de la miga a Pacientes y lo que el rol podrá hacer: los pone quien usa
+ * el esqueleto. `unsure`: lo que se le ofrece depende también de la persona
+ * (archivada no tiene Escribirle ni Reservar), así que van los huecos, sin nombre.
+ */
+export function PersonHeaderSkeleton({ crumb, actions, unsure = false }: { crumb?: ReactElement; actions: ReturnType<typeof personHeaderRules>; unsure?: boolean }) {
   const utilities = useHeaderUtilities()
   const sidebar = useSidebarOptional()
   const isMobile = useIsMobile()
@@ -93,6 +102,15 @@ export function PersonHeaderSkeleton({ crumb, actions }: { crumb?: ReactElement;
               <Line className="w-64" />
             </div>
           </div>
+          {unsure ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {actions.message ? <Skeleton className="h-9 w-28 rounded-full" /> : null}
+              {actions.book ? <Skeleton className="h-9 w-32 rounded-full" /> : null}
+              {actions.primary === "charge" ? <Skeleton className="h-9 w-20 rounded-full" /> : null}
+              {actions.encounter ? <Skeleton className="h-9 w-24 rounded-full" /> : null}
+              {actions.edit ? <Skeleton className="size-9 rounded-full" /> : null}
+            </div>
+          ) : (
           <div className="flex flex-wrap items-center gap-2">
             {actions.message ? (
               <Button type="button" variant={actions.primary === "write" ? "default" : "outline"} disabled>
@@ -118,6 +136,7 @@ export function PersonHeaderSkeleton({ crumb, actions }: { crumb?: ReactElement;
               </Button>
             ) : null}
           </div>
+          )}
         </div>
       </div>
     </header>
@@ -139,7 +158,11 @@ function SideNavShape({ entries, current }: { entries: PersonSkeletonNav["entrie
           {group.title ? (
             <p className="mt-3 mb-1 px-3 text-xs font-semibold tracking-wide text-muted-foreground uppercase">{group.title}</p>
           ) : null}
-          {group.items.map((item) => (
+          {group.items.map((item) => item.unsure ? (
+            <span key={item.value} className="flex min-h-9 items-center px-3 py-2">
+              <Skeleton className="h-4 w-28 max-w-full" />
+            </span>
+          ) : (
             <span
               key={item.value}
               className={cn(
@@ -161,12 +184,14 @@ export function PersonPageSkeleton({
   nav,
   crumb,
   actions,
+  actionsUnsure,
   onOpen,
   children,
 }: {
   nav: PersonSkeletonNav
   crumb?: ReactElement
   actions: ReturnType<typeof personHeaderRules>
+  actionsUnsure?: boolean
   /** Las pestañas ya a la vista responden aunque sus datos no hayan llegado. */
   onOpen?: (section: string) => void
   children: ReactNode
@@ -181,11 +206,15 @@ export function PersonPageSkeleton({
       <Tabs className="min-w-0 w-full gap-4" value={nav.current} onValueChange={(value) => onOpen?.(String(value))}>
         <ScrollArea horizontal className="hidden sm:block max-w-full pb-1">
           <TabsList className="w-max flex-nowrap justify-start" aria-label="Secciones de la página">
-            {nav.entries.map((item) => (
-              <TabsTrigger key={item.value} value={item.value}>
-                {item.label}
-              </TabsTrigger>
-            ))}
+            {nav.entries.map((item) =>
+              item.unsure ? (
+                <TabSlot key={item.value} />
+              ) : (
+                <TabsTrigger key={item.value} value={item.value}>
+                  {item.label}
+                </TabsTrigger>
+              ),
+            )}
           </TabsList>
         </ScrollArea>
         <TabsContent value={nav.current}>{children}</TabsContent>
@@ -196,7 +225,7 @@ export function PersonPageSkeleton({
   return (
     <PageShell className="flex min-w-0 flex-col gap-6">
       <SkeletonRegion message="Cargando…" className="flex min-w-0 flex-col gap-6">
-        <PersonHeaderSkeleton crumb={crumb} actions={actions} />
+        <PersonHeaderSkeleton crumb={crumb} actions={actions} unsure={actionsUnsure} />
         <Tabs
           className="min-w-0 w-full"
           value={nav.area}
@@ -215,11 +244,15 @@ export function PersonPageSkeleton({
           </div>
           <ScrollArea horizontal className="hidden sm:block max-w-full pb-1">
             <TabsList className="w-max flex-nowrap justify-start" aria-label="Pestañas de la página">
-              {nav.areas.map((area) => (
-                <TabsTrigger key={area.id} value={area.id}>
-                  {area.label}
-                </TabsTrigger>
-              ))}
+              {nav.areas.map((area) =>
+                area.unsure ? (
+                  <TabSlot key={area.id} />
+                ) : (
+                  <TabsTrigger key={area.id} value={area.id}>
+                    {area.label}
+                  </TabsTrigger>
+                ),
+              )}
             </TabsList>
           </ScrollArea>
           <TabsContent value={nav.area} className="pt-4">

@@ -61,7 +61,7 @@ import {
   visibleSections,
 } from "../../lib/patient-areas"
 import type { PatientFull, PatientSummary } from "../../lib/patients"
-import { personOfPatientKey, rememberPatientSection, rememberPersonOfPatient, usePerson } from "../../lib/people"
+import { personOfPatientKey, personShapeOf, rememberPatientSection, rememberPersonOfPatient, usePerson } from "../../lib/people"
 import { QueryErrorState } from "../../lib/query-error"
 import { isRecordLocked, LockedRecordNotice, LockedRecordPage } from "../../components/person/locked-record"
 import { productUi } from "../../product/product-ui"
@@ -170,7 +170,7 @@ function PersonPageRoute() {
   const patientId = person?.patient?.id ?? null
   const isPatient = Boolean(patientId)
   // Lo que la página muestra depende de lo que es la persona: con ficha, por registrar o solo responsable.
-  const pageOf: PageOf = isPatient ? true : person?.kind === "responsable" ? "responsable" : false
+  const pageOf: PageOf = person ? personShapeOf(person).pageOf : false
   const section = resolveSection(tab, can, pageOf)
   // Los enlaces internos de la ficha conocen al paciente: su persona queda en caché.
   useEffect(() => {
