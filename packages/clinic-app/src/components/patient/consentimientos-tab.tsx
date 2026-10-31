@@ -29,19 +29,27 @@ import {
   generateConsentPdf,
   revokeConsent,
 } from "../../lib/clinical-forms"
-import { DiagnosisSearch } from "./diagnosis-search"
-import { ConsentSheet } from "./consent-sheet"
-import { ConsentSigningScreen, PaperSignDrawer, type SignerChoice, useSignerChoices } from "./consent-signing"
-import { FirmaPad } from "./firma-pad"
 import { activeOrgLocale } from "../../lib/locale"
-import { ConsentLinkActions, consentLinkWords } from "./consent-link-actions"
 import { appWords } from "../../lib/product-words"
+import { ConsentLinkActions, consentLinkWords } from "./consent-link-actions"
+import {
+  ConsentSigningScreen,
+  PaperSignDrawer,
+  type SignerChoice,
+  useSignerChoices,
+} from "./consent-signing"
+import { DiagnosisSearch } from "./diagnosis-search"
+import { FirmaPad } from "./firma-pad"
 
 const cancelSchema = z.object({
-  reason: z.string().trim().min(1, "Escribe el motivo").max(2000, "Escribe como mucho 2000 caracteres."),
+  reason: z
+    .string()
+    .trim()
+    .min(1, "Escribe el motivo")
+    .max(2000, "Escribe como mucho 2000 caracteres."),
 })
 
-const EVENT_LABELS: Record<string, string> = {
+export const CONSENT_EVENT_LABELS: Record<string, string> = {
   pendiente: "Creado (pendiente de firma)",
   informado: "Informado por el profesional",
   firmado: "Firmado",
@@ -105,7 +113,11 @@ export function NewConsentDrawer({
       // Desde la atención o el tratamiento, el procedimiento ya va unido; si no, se escribe.
       onSubmit: newConsentSchema.superRefine((value, ctx) => {
         if (!encounterId && !planItemId && !value.procedureRef.trim())
-          ctx.addIssue({ code: "custom", path: ["procedureRef"], message: "Indica el procedimiento al que aplica" })
+          ctx.addIssue({
+            code: "custom",
+            path: ["procedureRef"],
+            message: "Indica el procedimiento al que aplica",
+          })
       }),
     },
     onSubmit: async ({ value }) => {
@@ -119,7 +131,12 @@ export function NewConsentDrawer({
         diagnosisSystem: value.diagnosisCode ? value.diagnosisSystem : null,
       })
       toast.success("Consentimiento generado: pendiente de firma")
-      form.reset({ templateId: "", procedureRef: "", diagnosisCode: "", diagnosisSystem: value.diagnosisSystem })
+      form.reset({
+        templateId: "",
+        procedureRef: "",
+        diagnosisCode: "",
+        diagnosisSystem: value.diagnosisSystem,
+      })
       await onCreated(result.data.id)
     },
   })
@@ -186,190 +203,6 @@ export function NewConsentDrawer({
   )
 }
 
-export function ConsentDetail({
-  document,
-  canWrite,
-  onChanged,
-}: {
-  document: ConsentDocument
-  canWrite: boolean
-  onChanged: () => Promise<void>
-}) {
-  const historyQuery = useQuery({
-    queryKey: ["consent-history", document.id, document.status],
-    queryFn: () => fetchConsentHistory(document.id),
-  })
-  const [cancelOpen, setCancelOpen] = useState(false)
-  const [revokeOpen, setRevokeOpen] = useState(false)
-  const [signing, setSigning] = useState(false)
-  const [paperOpen, setPaperOpen] = useState(false)
-  const [actionError, setActionError] = useState<string | null>(null)
-  const signatureWords = consentSignatureWords(document)
-  const cancel = useMutation({ mutationFn: (reason: string) => cancelConsent(document.id, reason) })
-  const cancelForm = useAppForm({
-    defaultValues: { reason: "" },
-    validators: { onSubmit: cancelSchema },
-    onSubmit: async ({ value }) => {
-      await cancel.mutateAsync(value.reason.trim())
-      setCancelOpen(false)
-      toast.success("Consentimiento anulado")
-      await onChanged()
-    },
-  })
-  const cancelError = useFormSubmitError(cancelForm)
-  const cancelPending = useStore(cancelForm.store, (state) => state.isSubmitting)
-  // Revocado, el PDF que se ve es el de la revocación (lleva el documento entero).
-  const pdfIdOf = (doc: ConsentDocument) =>
-    doc.status === "revocado" ? (doc.revokePdfDocumentId ?? null) : doc.pdfDocumentId
-  const pdfId = pdfIdOf(document)
-  const pdf = useMutation({
-    mutationFn: async () => {
-      const id = pdfId ?? pdfIdOf((await generateConsentPdf(document.id)).data)
-      if (!id) throw new Error("Sin PDF")
-      const signed = await apiFetch<{ data: { url: string } }>(
-        `/api/patients/${document.patientId}/documents/${id}/url`,
-      )
-      return { url: signed.data.url, generated: !pdfId }
-    },
-    onSuccess: async ({ url, generated }) => {
-      window.open(url, "_blank", "noopener")
-      if (generated) await onChanged()
-    },
-    onError: (e) => setActionError(submitErrorMessage(e)),
-  })
-  const signed = document.status === "firmado" || document.status === "revocado"
-
-  return (
-    <div className="flex flex-col gap-4 border-t p-3">
-      <ConsentSheet document={document} />
-      <div className="flex flex-wrap gap-2">
-        <Link
-          to="/patients/$patientId/consents/$consentId/print"
-          params={{ patientId: document.patientId, consentId: document.id }}
-          className={buttonVariants({ size: "sm", variant: "outline" })}
-        >
-          {document.status === "pendiente" ? "Imprimir para firma en papel" : "Imprimir"}
-        </Link>
-        {signed ? (
-          <Button size="sm" variant="outline" disabled={pdf.isPending} onClick={() => pdf.mutate()}>
-            {pdfId ? "Ver PDF" : pdf.isPending ? "Generando PDF…" : "Generar PDF"}
-          </Button>
-        ) : null}
-        {canWrite && document.status === "pendiente" ? (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              cancelForm.reset()
-              setCancelOpen(true)
-            }}
-          >
-            Anular pendiente…
-          </Button>
-        ) : null}
-        {canWrite && document.status === "firmado" && !revokeOpen ? (
-          <Button
-            size="sm"
-            variant="outline"
-            className="text-destructive"
-            onClick={() => setRevokeOpen(true)}
-          >
-            Revocar…
-          </Button>
-        ) : null}
-      </div>
-      {actionError ? (
-        <p role="alert" className="text-sm text-destructive">
-          {actionError}
-        </p>
-      ) : null}
-      {canWrite && document.status === "pendiente" ? (
-        <div className="flex flex-col gap-2 rounded-md border p-3">
-          <p className="text-sm">
-            {consentLinkWords(document) ??
-              `Falta la firma. En la ${appWords().room.one}, la persona firma con el dedo en pantalla completa y tú confirmas con tu perfil; si la firmó en papel, sube la foto de la hoja. También puedes enviárselo para que lo firme desde su teléfono.`}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {/* Si ya lo firmó desde su enlace, solo falta confirmarlo: no se firma dos veces. */}
-            {document.personSignedAt ? null : (
-              <>
-                <Button size="sm" onClick={() => setSigning(true)}>
-                  Firmar ahora
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => setPaperOpen(true)}>
-                  Firmado en papel
-                </Button>
-              </>
-            )}
-            <ConsentLinkActions document={document} onChanged={onChanged} />
-          </div>
-        </div>
-      ) : null}
-      {signatureWords ? <p className="text-xs text-muted-foreground">{signatureWords}</p> : null}
-      <ConsentSigningScreen
-        open={signing}
-        documents={[document]}
-        patientId={document.patientId}
-        onClose={() => setSigning(false)}
-        onSigned={onChanged}
-      />
-      <PaperSignDrawer
-        open={paperOpen}
-        document={document}
-        patientId={document.patientId}
-        encounterId={document.encounterId}
-        onClose={() => setPaperOpen(false)}
-        onSigned={onChanged}
-      />
-      {canWrite && document.status === "firmado" && revokeOpen ? (
-        <RevokeForm
-          document={document}
-          onCancel={() => setRevokeOpen(false)}
-          onChanged={onChanged}
-        />
-      ) : null}
-      <section aria-label="Historia del documento">
-        <h4 className="text-sm font-semibold">Historia del documento</h4>
-        <ol className="mt-1 flex flex-col gap-1 text-sm text-muted-foreground">
-          {(historyQuery.data?.data ?? []).map((event) => (
-            <li key={event.id}>
-              {new Date(event.createdAt).toLocaleString(activeOrgLocale(), {
-                dateStyle: "medium",
-                timeStyle: "short",
-              })}{" "}
-              · {EVENT_LABELS[event.toStatus] ?? event.toStatus}
-              {event.reason && event.reason !== "Documento creado" ? ` · ${event.reason}` : ""}
-            </li>
-          ))}
-        </ol>
-      </section>
-      <ConfirmDialog
-        open={cancelOpen}
-        title="Anular consentimiento pendiente"
-        description="Desaparece de los pendientes y no cuenta como consentimiento. Queda en la historia con el motivo."
-        confirmLabel="Anular"
-        pending={cancelPending}
-        error={cancelError}
-        onClose={() => {
-          if (!cancelPending) setCancelOpen(false)
-        }}
-        onConfirm={() => void submitForm(cancelForm)}
-      >
-        <cancelForm.AppField name="reason">
-          {(field) => (
-            <field.TextareaField
-              label="Motivo"
-              aria-required
-              maxLength={2000}
-              placeholder="p. ej. Plantilla equivocada"
-            />
-          )}
-        </cancelForm.AppField>
-      </ConfirmDialog>
-    </div>
-  )
-}
-
 interface RevokeValues {
   revokerContactId: string
   reason: string
@@ -388,7 +221,7 @@ const revokeSchema = z.object({
 })
 
 /** Quién puede revocar llega del servidor; el formulario empieza cuando se sabe. */
-function RevokeForm({
+export function RevokeForm({
   document,
   onCancel,
   onChanged,
@@ -434,7 +267,8 @@ function RevokeFields({
   const ids = useId()
   const formRef = useRef<HTMLFormElement>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
-  const nameOf = (contactId: string) => (choices.find((c) => c.contactId === contactId) ?? choices[0])?.name ?? ""
+  const nameOf = (contactId: string) =>
+    (choices.find((c) => c.contactId === contactId) ?? choices[0])?.name ?? ""
   const revoke = useMutation({
     mutationFn: (value: RevokeValues) =>
       revokeConsent(document.id, {
@@ -443,7 +277,11 @@ function RevokeFields({
         signatureData: { strokes: value.signatureData },
       }),
   })
-  const defaultValues: RevokeValues = { revokerContactId: initialContactId, reason: "", signatureData: [] }
+  const defaultValues: RevokeValues = {
+    revokerContactId: initialContactId,
+    reason: "",
+    signatureData: [],
+  }
   const form = useAppForm({
     defaultValues,
     validators: {

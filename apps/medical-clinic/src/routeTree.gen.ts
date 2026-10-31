@@ -30,6 +30,7 @@ import { Route as SettingsRouteImport } from './../../../packages/clinic-app/src
 import { Route as TasksRouteImport } from './../../../packages/clinic-app/src/routes/_org/tasks'
 import { Route as BajaDottokenRouteImport } from './../../../packages/clinic-app/src/routes/public/baja.$token'
 import { Route as CDottokenRouteImport } from './../../../packages/clinic-app/src/routes/public/c.$token'
+import { Route as ComprobarDottokenRouteImport } from './../../../packages/clinic-app/src/routes/public/comprobar.$token'
 import { Route as EmbedDotindexRouteImport } from './../../../packages/clinic-app/src/routes/public/embed.index'
 import { Route as EmbedDotconnectionIdRouteImport } from './../../../packages/clinic-app/src/routes/public/embed.$connectionId'
 import { Route as LlegarDotbranchRouteImport } from './../../../packages/clinic-app/src/routes/public/llegar.$branch'
@@ -199,6 +200,11 @@ const BajaDottokenRoute = BajaDottokenRouteImport.update({
 const CDottokenRoute = CDottokenRouteImport.update({
   id: '/c/$token',
   path: '/c/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ComprobarDottokenRoute = ComprobarDottokenRouteImport.update({
+  id: '/comprobar/$token',
+  path: '/comprobar/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
 const EmbedDotindexRoute = EmbedDotindexRouteImport.update({
@@ -519,6 +525,7 @@ export interface FileRoutesByFullPath {
   '/tasks': typeof TasksRoute
   '/baja/$token': typeof BajaDottokenRoute
   '/c/$token': typeof CDottokenRoute
+  '/comprobar/$token': typeof ComprobarDottokenRoute
   '/embed/$connectionId': typeof EmbedDotconnectionIdRoute
   '/llegar/$branch': typeof LlegarDotbranchRoute
   '/embed/': typeof EmbedDotindexRoute
@@ -591,6 +598,7 @@ export interface FileRoutesByTo {
   '/tasks': typeof TasksRoute
   '/baja/$token': typeof BajaDottokenRoute
   '/c/$token': typeof CDottokenRoute
+  '/comprobar/$token': typeof ComprobarDottokenRoute
   '/embed/$connectionId': typeof EmbedDotconnectionIdRoute
   '/llegar/$branch': typeof LlegarDotbranchRoute
   '/embed': typeof EmbedDotindexRoute
@@ -667,6 +675,7 @@ export interface FileRoutesById {
   '/_org/tasks': typeof TasksRoute
   '/baja/$token': typeof BajaDottokenRoute
   '/c/$token': typeof CDottokenRoute
+  '/comprobar/$token': typeof ComprobarDottokenRoute
   '/embed/$connectionId': typeof EmbedDotconnectionIdRoute
   '/llegar/$branch': typeof LlegarDotbranchRoute
   '/embed/': typeof EmbedDotindexRoute
@@ -743,6 +752,7 @@ export interface FileRouteTypes {
     | '/tasks'
     | '/baja/$token'
     | '/c/$token'
+    | '/comprobar/$token'
     | '/embed/$connectionId'
     | '/llegar/$branch'
     | '/embed/'
@@ -815,6 +825,7 @@ export interface FileRouteTypes {
     | '/tasks'
     | '/baja/$token'
     | '/c/$token'
+    | '/comprobar/$token'
     | '/embed/$connectionId'
     | '/llegar/$branch'
     | '/embed'
@@ -890,6 +901,7 @@ export interface FileRouteTypes {
     | '/_org/tasks'
     | '/baja/$token'
     | '/c/$token'
+    | '/comprobar/$token'
     | '/embed/$connectionId'
     | '/llegar/$branch'
     | '/embed/'
@@ -953,6 +965,7 @@ export interface RootRouteChildren {
   ReservaRoute: typeof ReservaRoute
   BajaDottokenRoute: typeof BajaDottokenRoute
   CDottokenRoute: typeof CDottokenRoute
+  ComprobarDottokenRoute: typeof ComprobarDottokenRoute
   EmbedDotconnectionIdRoute: typeof EmbedDotconnectionIdRoute
   LlegarDotbranchRoute: typeof LlegarDotbranchRoute
   EmbedDotindexRoute: typeof EmbedDotindexRoute
@@ -1106,6 +1119,13 @@ declare module '@tanstack/react-router' {
       path: '/c/$token'
       fullPath: '/c/$token'
       preLoaderRoute: typeof CDottokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/comprobar/$token': {
+      id: '/comprobar/$token'
+      path: '/comprobar/$token'
+      fullPath: '/comprobar/$token'
+      preLoaderRoute: typeof ComprobarDottokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/embed/': {
@@ -1655,6 +1675,7 @@ const rootRouteChildren: RootRouteChildren = {
   ReservaRoute: ReservaRoute,
   BajaDottokenRoute: BajaDottokenRoute,
   CDottokenRoute: CDottokenRoute,
+  ComprobarDottokenRoute: ComprobarDottokenRoute,
   EmbedDotconnectionIdRoute: EmbedDotconnectionIdRoute,
   LlegarDotbranchRoute: LlegarDotbranchRoute,
   EmbedDotindexRoute: EmbedDotindexRoute,

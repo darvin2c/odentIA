@@ -10,6 +10,7 @@ import {
   jsonb,
   pgTable,
   primaryKey,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -17,83 +18,105 @@ import {
 } from "drizzle-orm/pg-core"
 import { organization } from "./auth.js"
 
-export const orgProfile = pgTable("org_profile", {
+export const orgProfile = pgTable(
+  "org_profile",
+  {
+    organizationId: text("organization_id")
+      .primaryKey()
+      .references(() => organization.id),
+    legalName: text("legal_name").notNull(),
+    /**
+     * El nombre que ve la persona en todo (decisión 19): WhatsApp, «Su enlace»,
+     * el portal, el registro, el chat web y los PDF. Obligatorio: vacío, la base
+     * pone la razón social (respaldo de datos viejos) y lo copia en
+     * `organization.name`. La razón social va solo en el comprobante y lo legal.
+     */
+    tradeName: text("trade_name").notNull().default(""),
+    // Tipo de identificador fiscal tal como lo nombra el país de la clínica
+    // (texto libre); null mientras la clínica no lo tenga.
+    fiscalDocType: text("fiscal_doc_type"),
+    fiscalDocNumber: text("fiscal_doc_number"),
+    fiscalAddress: text("fiscal_address"),
+    // Perfil regional (ISO 3166-1, ISO 4217, IANA, BCP 47): sin valores por
+    // defecto, porque el núcleo no asume ningún país; quien crea el perfil los
+    // pasa siempre (el alta los deriva del país con `regionPresetForCountry`).
+    countryCode: char("country_code", { length: 2 }).notNull(),
+    currency: char("currency", { length: 3 }).notNull(),
+    timezone: text("timezone").notNull(),
+    locale: text("locale").notNull(),
+    // Lista de diagnósticos de la clínica (decisión 26 de la fase 4): CIE-10 o
+    // CIE-11. Nula en perfiles creados sin ella: vale la que recomienda su país
+    // (`clinicalProfileFor(...).diagnosis.recommended`); el alta la guarda.
+    diagnosisSystem: text("diagnosis_system"),
+    // Producto de la clínica (ADR 0079): qué app la atiende y qué hace lo común
+    // en cada momento (`services/src/products.ts`). Las de hoy son dentales.
+    product: text("product").notNull().default("dental"),
+    // Impresión del ticket y hoja de cierre: térmica de 58 o 80 mm.
+    receiptWidth: text("receipt_width").notNull().default("80"),
+    // Tamaño de hoja para el presupuesto: A4 (ISO 216) o Carta.
+    sheetSize: text("sheet_size").notNull().default("A4"),
+    // Frase al pie del ticket; por defecto recibo interno sin validez fiscal.
+    ticketFooter: text("ticket_footer")
+      .notNull()
+      .default("Recibo interno. No es un documento fiscal."),
+    // Presupuesto: días de vigencia al entregarlo y sus dos textos, que edita cada
+    // clínica; vacíos, esa sección no sale. El texto inicial, también el de las
+    // clínicas nuevas, es dato de la base (su migración): el código no lo escribe.
+    budgetValidDays: smallint("budget_valid_days").notNull().default(30),
+    budgetPaymentTerms: text("budget_payment_terms").default(
+      "Cada tratamiento se paga cuando se realiza. Puede dejar un adelanto, que se descuenta de lo siguiente que deba.",
+    ),
+    budgetChangeTerms: text("budget_change_terms").default(
+      "Solo por algo que no se podía ver antes de empezar. Se le explica y le entregamos un presupuesto nuevo para que decida; nada se cobra sin su aceptación.",
+    ),
+    // Teléfono para urgencias de la clínica (también cuando está cerrada): lo da
+    // el agente ante una urgencia, junto con el número de emergencias del país
+    // (ADR 0084). Nulo: el agente da solo ese número.
+    emergencyPhone: text("emergency_phone"),
+    // Impuestos de lo que cobra la clínica (ADR 0083): vale lo que propone su
+    // país (`resolveOrgTaxes` de @odentia/clinical); aquí solo queda lo que la
+    // clínica cambió, con la categoría de UN/CEFACT 5305 y la tasa en puntos
+    // básicos. Nulo es «lo del país». La forma de la clínica solo la pregunta un
+    // país donde el impuesto de la atención depende de ella (México).
+    taxLegalForm: text("tax_legal_form"),
+    servicesTaxCategory: text("services_tax_category"),
+    servicesTaxBps: integer("services_tax_bps"),
+    productsTaxCategory: text("products_tax_category"),
+    productsTaxBps: integer("products_tax_bps"),
+    // Verificación en dos pasos a todo el equipo (ADR 0107): encendida, la API
+    // no deja operar en esta clínica a quien no la tiene activa.
+    requireTwoFactor: boolean("require_two_factor").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "org_profile_services_tax_check",
+      sql`(${table.servicesTaxCategory} IS NULL) = (${table.servicesTaxBps} IS NULL) AND (${table.servicesTaxCategory} IS NULL OR (${table.servicesTaxCategory} = 'S' AND ${table.servicesTaxBps} BETWEEN 1 AND 5000) OR (${table.servicesTaxCategory} IN ('E','O','Z') AND ${table.servicesTaxBps} = 0))`,
+    ),
+    check(
+      "org_profile_products_tax_check",
+      sql`(${table.productsTaxCategory} IS NULL) = (${table.productsTaxBps} IS NULL) AND (${table.productsTaxCategory} IS NULL OR (${table.productsTaxCategory} = 'S' AND ${table.productsTaxBps} BETWEEN 1 AND 5000) OR (${table.productsTaxCategory} IN ('E','O','Z') AND ${table.productsTaxBps} = 0))`,
+    ),
+    check("org_profile_receipt_width_check", sql`${table.receiptWidth} IN ('58','80')`),
+    check("org_profile_budget_valid_days_check", sql`${table.budgetValidDays} BETWEEN 1 AND 365`),
+    check("org_profile_product_check", sql`${table.product} IN ('dental','medical')`),
+    check("org_profile_sheet_size_check", sql`${table.sheetSize} IN ('A4','Letter')`),
+    check(
+      "org_profile_diagnosis_system_check",
+      sql`${table.diagnosisSystem} IS NULL OR ${table.diagnosisSystem} IN ('ICD-10','ICD-11','ICD-10-PE')`,
+    ),
+    check(
+      "org_profile_ticket_footer_check",
+      sql`length(trim(${table.ticketFooter})) BETWEEN 1 AND 280`,
+    ),
+  ],
+)
+
+export const patientRegistrationConfig = pgTable("patient_registration_config", {
   organizationId: text("organization_id")
     .primaryKey()
     .references(() => organization.id),
-  legalName: text("legal_name").notNull(),
-  /**
-   * El nombre que ve la persona en todo (decisión 19): WhatsApp, «Su enlace»,
-   * el portal, el registro, el chat web y los PDF. Obligatorio: vacío, la base
-   * pone la razón social (respaldo de datos viejos) y lo copia en
-   * `organization.name`. La razón social va solo en el comprobante y lo legal.
-   */
-  tradeName: text("trade_name").notNull().default(""),
-  // Tipo de identificador fiscal tal como lo nombra el país de la clínica
-  // (texto libre); null mientras la clínica no lo tenga.
-  fiscalDocType: text("fiscal_doc_type"),
-  fiscalDocNumber: text("fiscal_doc_number"),
-  fiscalAddress: text("fiscal_address"),
-  // Perfil regional (ISO 3166-1, ISO 4217, IANA, BCP 47): sin valores por
-  // defecto, porque el núcleo no asume ningún país; quien crea el perfil los
-  // pasa siempre (el alta los deriva del país con `regionPresetForCountry`).
-  countryCode: char("country_code", { length: 2 }).notNull(),
-  currency: char("currency", { length: 3 }).notNull(),
-  timezone: text("timezone").notNull(),
-  locale: text("locale").notNull(),
-  // Lista de diagnósticos de la clínica (decisión 26 de la fase 4): CIE-10 o
-  // CIE-11. Nula en perfiles creados sin ella: vale la que recomienda su país
-  // (`clinicalProfileFor(...).diagnosis.recommended`); el alta la guarda.
-  diagnosisSystem: text("diagnosis_system"),
-  // Producto de la clínica (ADR 0079): qué app la atiende y qué hace lo común
-  // en cada momento (`services/src/products.ts`). Las de hoy son dentales.
-  product: text("product").notNull().default("dental"),
-  // Impresión del ticket y hoja de cierre: térmica de 58 o 80 mm.
-  receiptWidth: text("receipt_width").notNull().default("80"),
-  // Tamaño de hoja para el presupuesto: A4 (ISO 216) o Carta.
-  sheetSize: text("sheet_size").notNull().default("A4"),
-  // Frase al pie del ticket; por defecto recibo interno sin validez fiscal.
-  ticketFooter: text("ticket_footer").notNull().default("Recibo interno. No es un documento fiscal."),
-  // Teléfono para urgencias de la clínica (también cuando está cerrada): lo da
-  // el agente ante una urgencia, junto con el número de emergencias del país
-  // (ADR 0084). Nulo: el agente da solo ese número.
-  emergencyPhone: text("emergency_phone"),
-  // Impuestos de lo que cobra la clínica (ADR 0083): vale lo que propone su
-  // país (`resolveOrgTaxes` de @odentia/clinical); aquí solo queda lo que la
-  // clínica cambió, con la categoría de UN/CEFACT 5305 y la tasa en puntos
-  // básicos. Nulo es «lo del país». La forma de la clínica solo la pregunta un
-  // país donde el impuesto de la atención depende de ella (México).
-  taxLegalForm: text("tax_legal_form"),
-  servicesTaxCategory: text("services_tax_category"),
-  servicesTaxBps: integer("services_tax_bps"),
-  productsTaxCategory: text("products_tax_category"),
-  productsTaxBps: integer("products_tax_bps"),
-  // Verificación en dos pasos a todo el equipo (ADR 0107): encendida, la API
-  // no deja operar en esta clínica a quien no la tiene activa.
-  requireTwoFactor: boolean("require_two_factor").notNull().default(false),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-}, (table) => [
-  check(
-    "org_profile_services_tax_check",
-    sql`(${table.servicesTaxCategory} IS NULL) = (${table.servicesTaxBps} IS NULL) AND (${table.servicesTaxCategory} IS NULL OR (${table.servicesTaxCategory} = 'S' AND ${table.servicesTaxBps} BETWEEN 1 AND 5000) OR (${table.servicesTaxCategory} IN ('E','O','Z') AND ${table.servicesTaxBps} = 0))`,
-  ),
-  check(
-    "org_profile_products_tax_check",
-    sql`(${table.productsTaxCategory} IS NULL) = (${table.productsTaxBps} IS NULL) AND (${table.productsTaxCategory} IS NULL OR (${table.productsTaxCategory} = 'S' AND ${table.productsTaxBps} BETWEEN 1 AND 5000) OR (${table.productsTaxCategory} IN ('E','O','Z') AND ${table.productsTaxBps} = 0))`,
-  ),
-  check("org_profile_receipt_width_check", sql`${table.receiptWidth} IN ('58','80')`),
-  check("org_profile_product_check", sql`${table.product} IN ('dental','medical')`),
-  check("org_profile_sheet_size_check", sql`${table.sheetSize} IN ('A4','Letter')`),
-  check(
-    "org_profile_diagnosis_system_check",
-    sql`${table.diagnosisSystem} IS NULL OR ${table.diagnosisSystem} IN ('ICD-10','ICD-11','ICD-10-PE')`,
-  ),
-  check("org_profile_ticket_footer_check", sql`length(trim(${table.ticketFooter})) BETWEEN 1 AND 280`),
-])
-
-export const patientRegistrationConfig = pgTable("patient_registration_config", {
-  organizationId: text("organization_id").primaryKey().references(() => organization.id),
   version: integer("version").notNull().default(1),
   enabled: boolean("enabled").notNull().default(false),
   fields: jsonb("fields").$type<RegistrationConfig["fields"]>().notNull(),

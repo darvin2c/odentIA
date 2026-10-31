@@ -1,4 +1,4 @@
-import { currencyFractionDigits } from "@odentia/clinical"
+import { currencyFractionDigits, type PatientGuide } from "@odentia/clinical"
 import { apiFetch } from "./api"
 import { amountFromCents } from "./workspace"
 
@@ -29,6 +29,10 @@ export interface ServiceCatalogItem {
   /** Código propio en la lista del país (ADR 0069); uno de la biblioteca usa el de su tratamiento. */
   procedureSystem: string | null
   procedureCode: string | null
+  /** Lo que se le explica al paciente; solo lo guardado llega a un presupuesto. */
+  patientGuide?: PatientGuide | null
+  patientGuideReviewedAt?: string | null
+  patientGuideReviewedBy?: string | null
   isActive: boolean
   /**
    * Sus materiales («3 · S/ 2.18» o «Sin materiales», ADR 0067). Solo llega en
@@ -205,6 +209,15 @@ export function fetchTreatmentTemplate(id: string): Promise<{ data: TreatmentTem
   )
 }
 
+/** El texto sugerido por la biblioteca: un punto de partida, nunca sale a un paciente. */
+export function fetchTemplatePatientGuide(
+  templateId: string,
+): Promise<{ data: { suggestion: PatientGuide | null } }> {
+  return apiFetch<{ data: { suggestion: PatientGuide | null } }>(
+    `/api/services/templates/${encodeURIComponent(templateId)}/patient-guide`,
+  )
+}
+
 export interface CreateServiceBody {
   templateId?: string | null
   name?: string | null
@@ -232,6 +245,8 @@ export function createServiceApi(body: CreateServiceBody): Promise<{ data: Servi
 }
 
 export interface UpdateServiceBody {
+  /** Lo que se le explica al paciente; null la quita. */
+  patientGuide?: PatientGuide | null
   templateId?: string | null
   name?: string
   specialtyId?: string
@@ -264,10 +279,22 @@ export type BillingMode = "treatment" | "session"
 export type PriceDisclosure = "exacto" | "desde" | "evaluacion"
 
 /** Cada opción con lo que diría el agente, para que se entienda antes de elegirla. */
-export const PRICE_DISCLOSURE_OPTIONS: ReadonlyArray<{ value: PriceDisclosure; label: string; says: string }> = [
+export const PRICE_DISCLOSURE_OPTIONS: ReadonlyArray<{
+  value: PriceDisclosure
+  label: string
+  says: string
+}> = [
   { value: "exacto", label: "Precio exacto", says: "Dice el precio de la tarifa tal cual." },
-  { value: "desde", label: "Desde", says: "Lo dice como mínimo, con «desde», y aclara que el precio final se define en la evaluación." },
-  { value: "evaluacion", label: "Solo con evaluación", says: "No dice ningún número y ofrece la evaluación." },
+  {
+    value: "desde",
+    label: "Desde",
+    says: "Lo dice como mínimo, con «desde», y aclara que el precio final se define en la evaluación.",
+  },
+  {
+    value: "evaluacion",
+    label: "Solo con evaluación",
+    says: "No dice ningún número y ofrece la evaluación.",
+  },
 ]
 
 /** Etiqueta junto al precio en la lista: solo cuando no es exacto. */
@@ -392,7 +419,9 @@ export const SERVICE_MATERIALS_MAX = 50
 export const MATERIAL_QUANTITY_MAX = 9999
 
 export function fetchServiceMaterials(serviceId: string): Promise<{ data: ServiceMaterials }> {
-  return apiFetch<{ data: ServiceMaterials }>(`/api/services/${encodeURIComponent(serviceId)}/materials`)
+  return apiFetch<{ data: ServiceMaterials }>(
+    `/api/services/${encodeURIComponent(serviceId)}/materials`,
+  )
 }
 
 /** Reemplaza la lista entera de materiales del servicio (es de quien lleva el inventario). */
@@ -400,10 +429,13 @@ export function saveServiceMaterialsApi(
   serviceId: string,
   items: Array<{ productId: string; quantity: number }>,
 ): Promise<{ data: ServiceMaterials }> {
-  return apiFetch<{ data: ServiceMaterials }>(`/api/services/${encodeURIComponent(serviceId)}/materials`, {
-    method: "PUT",
-    body: JSON.stringify({ items }),
-  })
+  return apiFetch<{ data: ServiceMaterials }>(
+    `/api/services/${encodeURIComponent(serviceId)}/materials`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ items }),
+    },
+  )
 }
 
 /** «Empieza por estos 5»: los servicios más hechos que aún no tienen materiales. */
@@ -428,7 +460,10 @@ export interface MaterialProductOption {
   unit: string
 }
 
-export function fetchMaterialProducts(q: string, limit = 20): Promise<{ data: MaterialProductOption[] }> {
+export function fetchMaterialProducts(
+  q: string,
+  limit = 20,
+): Promise<{ data: MaterialProductOption[] }> {
   const search = new URLSearchParams({ limit: String(limit) })
   if (q.trim()) search.set("q", q.trim())
   return apiFetch<{ data: MaterialProductOption[] }>(`/api/services/material-products?${search}`)

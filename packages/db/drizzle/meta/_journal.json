@@ -176,6 +176,13 @@
       "when": 1793390257419,
       "tag": "0024_enlace_para_alguien_nuevo",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1793399859386,
+      "tag": "0025_documentos_formales",
+      "breakpoints": true
     }
   ]
 }

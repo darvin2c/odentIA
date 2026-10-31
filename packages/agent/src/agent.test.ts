@@ -3,91 +3,89 @@ process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 import { randomUUID } from "node:crypto"
 import { once } from "node:events"
 import { createServer } from "node:http"
+import { BaseChatModel } from "@langchain/core/language_models/chat_models"
+import { AIMessage, type BaseMessage, SystemMessage, type ToolMessage } from "@langchain/core/messages"
+import type { ChatResult } from "@langchain/core/outputs"
 import { buildWebchatInbound, telegramBotApiAdapter, webChatAdapter } from "@odentia/channels"
 import { createAppDb, createOwnerDb, type Db, sendAgentRun, withOrgContext } from "@odentia/db"
-import { contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
+import { supportCase, supportMessage } from "@odentia/db/schema/admin-support"
+import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { agentDecisionLog, agentHandoff, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
+import { user } from "@odentia/db/schema/auth"
 import { automationJob } from "@odentia/db/schema/automation"
+import { contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
+import { auditEvent, branch } from "@odentia/db/schema/org"
+import { workspaceNotification } from "@odentia/db/schema/workspace"
 import {
-  sendOutbound,
+  AGENT_ROLES,
+  addAgentGuidance,
   addContactIdentity,
-  createRoom,
-  createConnection,
-  createContact,
-  createAppointment,
-  deleteProbar,
-  findFreeGaps,
-  getProbar,
-  listAgentContextCandidates,
-  listAvailableSlots,
-  openProbar,
-  moveAppointment,
   approveLesson,
   claimHandoff,
+  closeConversationWith,
+  configurePublicLinks,
   correctAnswer,
-  discardLesson,
-  getLesson,
-  withdrawLesson,
+  createAppointment,
+  createConnection,
+  createContact,
   createHandoff,
   createKnowledgeEntry,
-  setKnowledgeStatus,
-  updateTask,
+  createRoom,
+  createTask,
+  deleteProbar,
+  discardLesson,
+  findFreeGaps,
   getAgentCaseState,
   getAgentConfig,
-  listAnswerTraces,
-  listKnowledgeGaps,
-  listPersonFacts,
-  removePersonFact,
-  operationAgentFields,
-  AGENT_ROLES,
-  READ_TOOLS,
-  TOOL_OPERATION,
-  TOOLS_WITHOUT_OPERATION,
+  getLesson,
+  getPatientRegistrationConfig,
+  getProbar,
   ingestInbound,
+  listAgentContextCandidates,
+  listAnswerTraces,
+  listAvailableSlots,
   listHandoffs,
-  createTask,
-  listProposals,
+  listKnowledgeGaps,
   listOpportunities,
+  listPersonFacts,
+  listProposals,
+  moveAppointment,
   moveContactIdentity,
   nextPatientNumber,
   noteSandboxTurn,
-  secretsKeyFromEnv,
-  setPatientContact,
-  setProfessionalSchedule,
-  upsertAgentConfig,
-  addAgentGuidance,
-  removeAgentGuidance,
-} from "@odentia/services"
-import {
-  closeConversationWith,
-  configurePublicLinks,
-  getPatientRegistrationConfig,
+  openProbar,
+  operationAgentFields,
   professionalRef,
+  READ_TOOLS,
+  removeAgentGuidance,
+  removePersonFact,
   reserveBookingLink,
   resolvePersonalLink,
   resolvePersonalLinkRefs,
   savePatientRegistrationConfig,
+  secretsKeyFromEnv,
+  sendOutbound,
+  setKnowledgeStatus,
+  setPatientContact,
+  setProfessionalSchedule,
+  TOOL_OPERATION,
+  TOOLS_WITHOUT_OPERATION,
+  updateTask,
+  upsertAgentConfig,
+  withdrawLesson,
 } from "@odentia/services"
+import { insertTestPatients } from "@odentia/services/test-patient"
 import { and, desc, eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
 import { afterAll, beforeAll, expect, it, onTestFinished } from "vitest"
 import { createFakeDecisionModel, DecisionError, type DecisionModel } from "./decision/index.js"
 import { offTopicReply } from "./decision/route.js"
-import { supportCase, supportMessage } from "@odentia/db/schema/admin-support"
-import { FAKE_REPLY_TEXT } from "./fake-model.js"
-import { type AgentRuntime, previewLesson, processAgentRun } from "./run.js"
-import { compileAgentGraph, UNSENT_TEXT } from "./graph.js"
 import { extractDictation } from "./extract-dictation.js"
-import { makeAgentTools, TOOL_SOURCES, type AgentToolCtx } from "./tools.js"
-import { BaseChatModel } from "@langchain/core/language_models/chat_models"
-import { AIMessage, SystemMessage, type BaseMessage, type ToolMessage } from "@langchain/core/messages"
-import type { ChatResult } from "@langchain/core/outputs"
-import { user } from "@odentia/db/schema/auth"
-import { branch, auditEvent } from "@odentia/db/schema/org"
-import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
-import { workspaceNotification } from "@odentia/db/schema/workspace"
-import { insertTestPatients } from "@odentia/services/test-patient"
+import { FAKE_REPLY_TEXT } from "./fake-model.js"
+import { compileAgentGraph, UNSENT_TEXT } from "./graph.js"
+import { type AgentRuntime, previewLesson, processAgentRun } from "./run.js"
+import { type AgentToolCtx, makeAgentTools, TOOL_SOURCES } from "./tools.js"
 
 const IMAGE = "dentalagent-postgres:18.6"
 const KEY = secretsKeyFromEnv("aa".repeat(31) + "ab")
@@ -2549,17 +2547,15 @@ it("en el chat web no dice que guardó su WhatsApp sin guardarlo, ni cuando guar
   expect(lastToolText(saves, 2)).toContain("Guardado: le avisaremos por WhatsApp")
   expect(await agentMessages(first.conversationId)).toEqual([SAVED])
 
-  // Ese número ya es de otra persona: guardar_contacto lo rechaza y decir que lo guardó no sale.
+  // Ese número ya es de otra persona: guardar_contacto lo acepta igual y el visitante oye lo mismo
+  // (decirle que no sirve le revelaría quién es de la clínica); el equipo lo ve en la Bandeja.
   const second = await writeAs(actors[1]!, "mi WhatsApp es 987 654 321")
-  const refused = new ScriptedModel((_messages, call) =>
-    call === 1
-      ? toolCall("guardar_contacto", { whatsapp: "987 654 321" }, "r-guarda")
-      : toolCall("send_reply", { text: call === 2 ? "Listo, ya guardé tu WhatsApp." : "No podemos avisarte por ese WhatsApp. ¿Me dejas otro número o tu correo?" }, `r-envio-${call}`),
+  const held = new ScriptedModel((_messages, call) =>
+    call === 1 ? toolCall("guardar_contacto", { whatsapp: "987 654 321" }, "r-guarda") : toolCall("send_reply", { text: SAVED }, `r-envio-${call}`),
   )
-  expect(await runScripted(refused, second.conversationId, second.messageId)).toBe("done")
-  expect(lastToolText(refused, 1)).toContain("No se guardó: No podemos avisarte por ese WhatsApp")
-  expect(lastToolText(refused, 2)).toContain("No enviado: dices que guardaste su WhatsApp o su correo")
-  expect(await agentMessages(second.conversationId)).toEqual(["No podemos avisarte por ese WhatsApp. ¿Me dejas otro número o tu correo?"])
+  expect(await runScripted(held, second.conversationId, second.messageId)).toBe("done")
+  expect(lastToolText(held, 1)).toContain("Guardado: le avisaremos por WhatsApp")
+  expect(await agentMessages(second.conversationId)).toEqual([SAVED])
 
   // Con el caso ya en el equipo (una señal de alarma lo pasa): no se le nombra guardar_contacto,
   // que ese camino no trae, y el turno vuelve al modelo en vez de cerrar con el aviso fijo.

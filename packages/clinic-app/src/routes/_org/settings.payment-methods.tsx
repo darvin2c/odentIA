@@ -1,5 +1,5 @@
-import { Badge, Button, cn, Skeleton, toast } from "@odentia/ui"
 import { FISCAL_DISCLAIMER } from "@odentia/clinical"
+import { Badge, Button, cn, FieldGroup, FieldLegend, FieldSet, Skeleton, toast } from "@odentia/ui"
 import { Switch } from "@odentia/ui/components/switch"
 import {
   common,
@@ -158,7 +158,11 @@ function PaymentMethodsPage() {
         subtitle={SUBTITLE}
         primary={
           canWrite && methods && methods.length > 0
-            ? { label: "Agregar medio de pago", icon: <Plus aria-hidden />, onClick: () => setMethodForm("new") }
+            ? {
+                label: "Agregar medio de pago",
+                icon: <Plus aria-hidden />,
+                onClick: () => setMethodForm("new"),
+              }
             : undefined
         }
       />
@@ -169,7 +173,8 @@ function PaymentMethodsPage() {
             Medios de pago
           </h2>
           <p className="text-sm text-muted-foreground">
-            Caja ofrece los encendidos, en este orden, y {receptionName} responde con esta misma lista.
+            Caja ofrece los encendidos, en este orden, y {receptionName} responde con esta misma
+            lista.
           </p>
         </div>
         {neverLoaded ? (
@@ -369,7 +374,8 @@ function TicketCard({
             Ticket e impresión
           </h2>
           <p className="text-sm text-muted-foreground">
-            El ticket y la hoja de cierre salen en térmica; el presupuesto, en hoja.
+            El ticket y la hoja de cierre salen en térmica; el presupuesto, en hoja, con sus
+            condiciones.
           </p>
         </div>
         {profile && onEdit ? (
@@ -415,6 +421,15 @@ function TicketCard({
             {SHEET_SIZES[profile.sheetSize === "Letter" ? "Letter" : "A4"]}
           </TicketRow>
           <TicketRow label="Frase al pie del ticket">{profile.ticketFooter}</TicketRow>
+          <TicketRow label="Días de vigencia del presupuesto">
+            {profile.budgetValidDays ?? 30}
+          </TicketRow>
+          <TicketRow label="Cómo se paga">
+            {profile.budgetPaymentTerms || "Sin texto: no sale en el presupuesto"}
+          </TicketRow>
+          <TicketRow label="Si el importe cambia">
+            {profile.budgetChangeTerms || "Sin texto: no sale en el presupuesto"}
+          </TicketRow>
         </dl>
       )}
     </section>
@@ -526,6 +541,14 @@ const ticketSchema = z.object({
     .trim()
     .min(1, "Escribe la frase al pie del ticket")
     .max(280, "La frase al pie admite hasta 280 caracteres"),
+  budgetValidDays: z
+    .string()
+    .refine(
+      (value) => /^\d+$/.test(value.trim()) && Number(value) >= 1 && Number(value) <= 365,
+      "Escribe un número de 1 a 365.",
+    ),
+  budgetPaymentTerms: z.string().max(2000, "Escribe como mucho 2000 caracteres."),
+  budgetChangeTerms: z.string().max(2000, "Escribe como mucho 2000 caracteres."),
 })
 
 /** Ancho del ticket, tamaño de hoja y frase al pie, en la superficie lateral. */
@@ -544,10 +567,27 @@ function TicketForm({
       receiptWidth: profile.receiptWidth === "58" ? ("58" as const) : ("80" as const),
       sheetSize: profile.sheetSize === "Letter" ? ("Letter" as const) : ("A4" as const),
       ticketFooter: profile.ticketFooter,
-    } as { receiptWidth: "58" | "80"; sheetSize: "A4" | "Letter"; ticketFooter: string },
+      budgetValidDays: String(profile.budgetValidDays ?? 30),
+      budgetPaymentTerms: profile.budgetPaymentTerms ?? "",
+      budgetChangeTerms: profile.budgetChangeTerms ?? "",
+    } as {
+      receiptWidth: "58" | "80"
+      sheetSize: "A4" | "Letter"
+      ticketFooter: string
+      budgetValidDays: string
+      budgetPaymentTerms: string
+      budgetChangeTerms: string
+    },
     validators: { onSubmit: ticketSchema },
     onSubmit: async ({ value }) => {
-      await save.mutateAsync({ ...value, ticketFooter: value.ticketFooter.trim() })
+      await save.mutateAsync({
+        receiptWidth: value.receiptWidth,
+        sheetSize: value.sheetSize,
+        ticketFooter: value.ticketFooter.trim(),
+        budgetValidDays: Number(value.budgetValidDays),
+        budgetPaymentTerms: value.budgetPaymentTerms.trim() || null,
+        budgetChangeTerms: value.budgetChangeTerms.trim() || null,
+      })
       toast.success("Ticket guardado")
       await onSaved()
     },
@@ -559,9 +599,10 @@ function TicketForm({
       {...surface}
       open
       title="Ticket e impresión"
-      description="Vale para los tickets y presupuestos que se impriman desde ahora."
+      description="Vale para los tickets y presupuestos que se impriman desde ahora. Lo ya entregado no cambia."
       onClose={onClose}
       submitLabel={common.actions.save}
+      className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(36rem,calc(100vw-2rem))]"
     >
       <div className="flex flex-col gap-4">
         <form.AppField name="receiptWidth">
@@ -578,7 +619,9 @@ function TicketForm({
                   aria-describedby={control.describedBy}
                   value={field.state.value}
                   onBlur={control.onBlur}
-                  onChange={(event) => field.handleChange(event.target.value === "58" ? "58" : "80")}
+                  onChange={(event) =>
+                    field.handleChange(event.target.value === "58" ? "58" : "80")
+                  }
                 >
                   <option value="80">{RECEIPT_WIDTHS["80"]}</option>
                   <option value="58">{RECEIPT_WIDTHS["58"]}</option>
@@ -598,7 +641,9 @@ function TicketForm({
                   aria-describedby={control.describedBy}
                   value={field.state.value}
                   onBlur={control.onBlur}
-                  onChange={(event) => field.handleChange(event.target.value === "Letter" ? "Letter" : "A4")}
+                  onChange={(event) =>
+                    field.handleChange(event.target.value === "Letter" ? "Letter" : "A4")
+                  }
                 >
                   <option value="A4">{SHEET_SIZES.A4}</option>
                   <option value="Letter">{SHEET_SIZES.Letter}</option>
@@ -616,6 +661,41 @@ function TicketForm({
             />
           )}
         </form.AppField>
+        <FieldSet>
+          <FieldLegend>Condiciones del presupuesto</FieldLegend>
+          <FieldGroup>
+            <form.AppField name="budgetValidDays">
+              {(field) => (
+                <field.TextField
+                  label="Días de vigencia del presupuesto"
+                  inputMode="numeric"
+                  inputClassName="max-w-32"
+                  description="Con esto se propone su fecha; se puede cambiar en cada uno."
+                />
+              )}
+            </form.AppField>
+            <form.AppField name="budgetPaymentTerms">
+              {(field) => (
+                <field.TextareaField
+                  label="Cómo se paga"
+                  rows={3}
+                  maxLength={2000}
+                  description="Vacío, esa parte no sale en el presupuesto."
+                />
+              )}
+            </form.AppField>
+            <form.AppField name="budgetChangeTerms">
+              {(field) => (
+                <field.TextareaField
+                  label="Si el importe cambia"
+                  rows={3}
+                  maxLength={2000}
+                  description="Vacío, esa parte no sale en el presupuesto."
+                />
+              )}
+            </form.AppField>
+          </FieldGroup>
+        </FieldSet>
       </div>
     </FormDrawer>
   )

@@ -7,9 +7,9 @@ import {
 import type { Db } from "@odentia/db"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
-import { ServiceError, invalidField, notFound } from "./errors.js"
-import { ensureDefaultPaymentMethods } from "./payment-methods.js"
 import { type OrgTaxInput, taxColumnsFor } from "./clinic-taxes.js"
+import { invalidField, notFound, ServiceError } from "./errors.js"
+import { ensureDefaultPaymentMethods } from "./payment-methods.js"
 
 type OrgProfileRow = typeof orgProfile.$inferSelect
 
@@ -44,38 +44,146 @@ export interface RegionDefaults {
 /** Moneda de curso legal por país (CLDR `currencyData`, vigente). */
 const COUNTRY_CURRENCY: Record<string, string> = {
   // América
-  AR: "ARS", BB: "BBD", BO: "BOB", BR: "BRL", BS: "BSD", BZ: "BZD", CA: "CAD", CL: "CLP",
-  CO: "COP", CR: "CRC", CU: "CUP", DO: "DOP", EC: "USD", GT: "GTQ", GY: "GYD", HN: "HNL",
-  HT: "HTG", JM: "JMD", MX: "MXN", NI: "NIO", PA: "PAB", PE: "PEN", PR: "USD", PY: "PYG",
-  SR: "SRD", SV: "USD", TT: "TTD", US: "USD", UY: "UYU", VE: "VES",
+  AR: "ARS",
+  BB: "BBD",
+  BO: "BOB",
+  BR: "BRL",
+  BS: "BSD",
+  BZ: "BZD",
+  CA: "CAD",
+  CL: "CLP",
+  CO: "COP",
+  CR: "CRC",
+  CU: "CUP",
+  DO: "DOP",
+  EC: "USD",
+  GT: "GTQ",
+  GY: "GYD",
+  HN: "HNL",
+  HT: "HTG",
+  JM: "JMD",
+  MX: "MXN",
+  NI: "NIO",
+  PA: "PAB",
+  PE: "PEN",
+  PR: "USD",
+  PY: "PYG",
+  SR: "SRD",
+  SV: "USD",
+  TT: "TTD",
+  US: "USD",
+  UY: "UYU",
+  VE: "VES",
   // Zona euro y quienes usan el euro
-  AD: "EUR", AT: "EUR", BE: "EUR", BG: "EUR", CY: "EUR", DE: "EUR", EE: "EUR", ES: "EUR",
-  FI: "EUR", FR: "EUR", GR: "EUR", HR: "EUR", IE: "EUR", IT: "EUR", LT: "EUR", LU: "EUR",
-  LV: "EUR", MC: "EUR", ME: "EUR", MT: "EUR", NL: "EUR", PT: "EUR", SI: "EUR", SK: "EUR",
-  SM: "EUR", VA: "EUR", XK: "EUR",
+  AD: "EUR",
+  AT: "EUR",
+  BE: "EUR",
+  BG: "EUR",
+  CY: "EUR",
+  DE: "EUR",
+  EE: "EUR",
+  ES: "EUR",
+  FI: "EUR",
+  FR: "EUR",
+  GR: "EUR",
+  HR: "EUR",
+  IE: "EUR",
+  IT: "EUR",
+  LT: "EUR",
+  LU: "EUR",
+  LV: "EUR",
+  MC: "EUR",
+  ME: "EUR",
+  MT: "EUR",
+  NL: "EUR",
+  PT: "EUR",
+  SI: "EUR",
+  SK: "EUR",
+  SM: "EUR",
+  VA: "EUR",
+  XK: "EUR",
   // Resto de Europa
-  CH: "CHF", CZ: "CZK", DK: "DKK", GB: "GBP", HU: "HUF", IS: "ISK", NO: "NOK", PL: "PLN",
-  RO: "RON", RS: "RSD", RU: "RUB", SE: "SEK", TR: "TRY", UA: "UAH",
+  CH: "CHF",
+  CZ: "CZK",
+  DK: "DKK",
+  GB: "GBP",
+  HU: "HUF",
+  IS: "ISK",
+  NO: "NOK",
+  PL: "PLN",
+  RO: "RON",
+  RS: "RSD",
+  RU: "RUB",
+  SE: "SEK",
+  TR: "TRY",
+  UA: "UAH",
   // África, Asia y Oceanía
-  AE: "AED", AU: "AUD", CN: "CNY", EG: "EGP", GQ: "XAF", HK: "HKD", ID: "IDR", IL: "ILS",
-  IN: "INR", JP: "JPY", KE: "KES", KR: "KRW", KW: "KWD", MA: "MAD", MY: "MYR", NG: "NGN",
-  NZ: "NZD", PH: "PHP", QA: "QAR", SA: "SAR", SG: "SGD", TH: "THB", TW: "TWD", VN: "VND",
+  AE: "AED",
+  AU: "AUD",
+  CN: "CNY",
+  EG: "EGP",
+  GQ: "XAF",
+  HK: "HKD",
+  ID: "IDR",
+  IL: "ILS",
+  IN: "INR",
+  JP: "JPY",
+  KE: "KES",
+  KR: "KRW",
+  KW: "KWD",
+  MA: "MAD",
+  MY: "MYR",
+  NG: "NGN",
+  NZ: "NZD",
+  PH: "PHP",
+  QA: "QAR",
+  SA: "SAR",
+  SG: "SGD",
+  TH: "THB",
+  TW: "TWD",
+  VN: "VND",
   ZA: "ZAR",
 }
 
 /** Países donde la hoja habitual es Carta (CLDR `paperSize` US-Letter); el resto usa A4 (ISO 216). */
 const LETTER_COUNTRIES = new Set([
-  "BZ", "CA", "CL", "CO", "CR", "GT", "MX", "NI", "PA", "PH", "PR", "SV", "US", "VE",
+  "BZ",
+  "CA",
+  "CL",
+  "CO",
+  "CR",
+  "GT",
+  "MX",
+  "NI",
+  "PA",
+  "PH",
+  "PR",
+  "SV",
+  "US",
+  "VE",
 ])
 
 /** Zona horaria cuando el país tiene una sola de uso general. */
 const COUNTRY_TIMEZONE: Record<string, string> = {
-  AR: "America/Argentina/Buenos_Aires", BO: "America/La_Paz", CL: "America/Santiago",
-  CO: "America/Bogota", CR: "America/Costa_Rica", CU: "America/Havana",
-  DO: "America/Santo_Domingo", EC: "America/Guayaquil", ES: "Europe/Madrid",
-  GT: "America/Guatemala", HN: "America/Tegucigalpa", NI: "America/Managua",
-  PA: "America/Panama", PE: "America/Lima", PR: "America/Puerto_Rico", PY: "America/Asuncion",
-  SV: "America/El_Salvador", UY: "America/Montevideo", VE: "America/Caracas",
+  AR: "America/Argentina/Buenos_Aires",
+  BO: "America/La_Paz",
+  CL: "America/Santiago",
+  CO: "America/Bogota",
+  CR: "America/Costa_Rica",
+  CU: "America/Havana",
+  DO: "America/Santo_Domingo",
+  EC: "America/Guayaquil",
+  ES: "Europe/Madrid",
+  GT: "America/Guatemala",
+  HN: "America/Tegucigalpa",
+  NI: "America/Managua",
+  PA: "America/Panama",
+  PE: "America/Lima",
+  PR: "America/Puerto_Rico",
+  PY: "America/Asuncion",
+  SV: "America/El_Salvador",
+  UY: "America/Montevideo",
+  VE: "America/Caracas",
 }
 
 /** Lo que se propone al elegir país. */
@@ -111,7 +219,10 @@ function assertLocale(value: string | null | undefined): string {
     const canonical = Intl.getCanonicalLocales(locale)[0]
     if (!canonical) throw new Error("Idioma vacío")
     if (new Intl.Locale(canonical).language !== "es")
-      throw invalidField("locale", "odentIA está en español: el formato es el español del país de la clínica")
+      throw invalidField(
+        "locale",
+        "odentIA está en español: el formato es el español del país de la clínica",
+      )
     return canonical
   } catch (error) {
     if (error instanceof ServiceError) throw error
@@ -121,7 +232,8 @@ function assertLocale(value: string | null | undefined): string {
 
 function assertTimezone(value: string | null | undefined): string {
   const zone = (value ?? "").trim()
-  if (!zone || zone.length > 80) throw invalidField("timezone", "Elige la zona horaria de la clínica")
+  if (!zone || zone.length > 80)
+    throw invalidField("timezone", "Elige la zona horaria de la clínica")
   try {
     Intl.DateTimeFormat("en", { timeZone: zone })
   } catch {
@@ -132,20 +244,23 @@ function assertTimezone(value: string | null | undefined): string {
 
 function assertReceiptWidth(value: string | null | undefined): ReceiptWidth {
   const width = (value ?? "80").trim()
-  if (width !== "58" && width !== "80") throw invalidField("receiptWidth", "Elige el ancho del ticket: 58 u 80 mm")
+  if (width !== "58" && width !== "80")
+    throw invalidField("receiptWidth", "Elige el ancho del ticket: 58 u 80 mm")
   return width
 }
 
 function assertSheetSize(value: string | null | undefined): SheetSize {
   const size = (value ?? "A4").trim()
-  if (size !== "A4" && size !== "Letter") throw invalidField("sheetSize", "Elige el tamaño de hoja: A4 o Carta")
+  if (size !== "A4" && size !== "Letter")
+    throw invalidField("sheetSize", "Elige el tamaño de hoja: A4 o Carta")
   return size
 }
 
 function assertTicketFooter(value: string | null | undefined): string {
   const footer = (value ?? "Recibo interno. No es un documento fiscal.").trim()
   if (!footer) throw invalidField("ticketFooter", "Escribe la frase al pie del ticket")
-  if (footer.length > 280) throw invalidField("ticketFooter", "La frase al pie admite hasta 280 caracteres")
+  if (footer.length > 280)
+    throw invalidField("ticketFooter", "La frase al pie admite hasta 280 caracteres")
   return footer
 }
 
@@ -157,6 +272,11 @@ export interface UpdateOrgRegionInput {
   receiptWidth?: string | null
   sheetSize?: string | null
   ticketFooter?: string | null
+  /** Días de vigencia del presupuesto al entregarlo (1 a 365). */
+  budgetValidDays?: number | null
+  /** «Cómo se paga» y «Si el importe cambia»: vacíos, esa sección no sale. */
+  budgetPaymentTerms?: string | null
+  budgetChangeTerms?: string | null
   /** Al cambiar de país se proponen moneda/formato/papel; todo se puede cambiar. */
   applyCountryPreset?: boolean
   /** Impuestos de lo cobrado (ADR 0083): null en una cifra es volver a lo del país. */
@@ -180,7 +300,10 @@ export interface InitialOrgRegion {
  * puede deducir (moneda desconocida, país con varias zonas) se exige.
  */
 export function initialOrgRegion(
-  input: Pick<UpdateOrgRegionInput, "countryCode" | "currency" | "timezone" | "locale" | "sheetSize">,
+  input: Pick<
+    UpdateOrgRegionInput,
+    "countryCode" | "currency" | "timezone" | "locale" | "sheetSize"
+  >,
 ): InitialOrgRegion {
   if (!input.countryCode?.trim()) throw invalidField("countryCode", "Indica el país de la clínica")
   const countryCode = assertCountryCode(input.countryCode)
@@ -189,7 +312,10 @@ export function initialOrgRegion(
     throw invalidField("currency", "Indica la moneda de la clínica: no la conocemos para ese país")
   }
   if (!input.timezone && !preset.timezone) {
-    throw invalidField("timezone", "Indica la zona horaria de la clínica: ese país tiene más de una")
+    throw invalidField(
+      "timezone",
+      "Indica la zona horaria de la clínica: ese país tiene más de una",
+    )
   }
   return {
     countryCode,
@@ -218,13 +344,22 @@ export async function assertNoForeignCurrencyHistory(
   orgId: string,
   nextCurrency: string,
 ): Promise<void> {
-  const tables = ["patient_charge", "patient_payment", "treatment_budget", "cash_shift", "expense", "service_catalog", "treatment_plan_item"] as const
+  const tables = [
+    "patient_charge",
+    "patient_payment",
+    "treatment_budget",
+    "cash_shift",
+    "expense",
+    "service_catalog",
+    "treatment_plan_item",
+  ] as const
   for (const table of tables) {
     const rows = await tx.execute<{ found: number }>(sql`
       select 1 as "found" from ${sql.identifier(table)}
       where "organization_id" = ${orgId} and "currency" <> ${nextCurrency} limit 1`)
     if (rows.length > 0) {
-      const message = "La clínica ya tiene movimientos en otra moneda: el cambio requiere migración explícita"
+      const message =
+        "La clínica ya tiene movimientos en otra moneda: el cambio requiere migración explícita"
       throw new ServiceError("CURRENCY_HISTORY_EXISTS", 409, message, { currency: message })
     }
   }
@@ -263,13 +398,19 @@ export async function updateOrgRegion(
       set.currency = preset.currency
       fields.push("currency")
     } else if (!input.currency) {
-      throw invalidField("currency", "Indica la moneda de la clínica: no la conocemos para ese país")
+      throw invalidField(
+        "currency",
+        "Indica la moneda de la clínica: no la conocemos para ese país",
+      )
     }
     if (preset.timezone) {
       set.timezone = preset.timezone
       fields.push("timezone")
     } else if (!input.timezone) {
-      throw invalidField("timezone", "Indica la zona horaria de la clínica: ese país tiene más de una")
+      throw invalidField(
+        "timezone",
+        "Indica la zona horaria de la clínica: ese país tiene más de una",
+      )
     }
     set.locale = preset.locale
     set.sheetSize = preset.sheetSize
@@ -294,6 +435,24 @@ export async function updateOrgRegion(
   if (input.sheetSize !== undefined && input.sheetSize !== null) {
     set.sheetSize = assertSheetSize(input.sheetSize)
     fields.push("sheetSize")
+  }
+  if (input.budgetValidDays !== undefined && input.budgetValidDays !== null) {
+    if (
+      !Number.isInteger(input.budgetValidDays) ||
+      input.budgetValidDays < 1 ||
+      input.budgetValidDays > 365
+    )
+      throw invalidField("budgetValidDays", "La vigencia del presupuesto va de 1 a 365 días")
+    set.budgetValidDays = input.budgetValidDays
+    fields.push("budgetValidDays")
+  }
+  if (input.budgetPaymentTerms !== undefined) {
+    set.budgetPaymentTerms = input.budgetPaymentTerms?.trim() || null
+    fields.push("budgetPaymentTerms")
+  }
+  if (input.budgetChangeTerms !== undefined) {
+    set.budgetChangeTerms = input.budgetChangeTerms?.trim() || null
+    fields.push("budgetChangeTerms")
   }
   if (input.ticketFooter !== undefined && input.ticketFooter !== null) {
     set.ticketFooter = assertTicketFooter(input.ticketFooter)

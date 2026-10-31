@@ -12,11 +12,10 @@ import {
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Lock, Plus, X } from "lucide-react"
-import { useEffect, useId, useRef, useState } from "react"
-import { flushSync } from "react-dom"
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react"
 import { z } from "zod"
-import { apiFetch } from "../../lib/api"
 import { useReceptionName } from "../../lib/agent-names"
+import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { QueryErrorState } from "../../lib/query-error"
 
@@ -120,10 +119,22 @@ export function PersonMemoryDrawer({
   const baseId = useId()
   const [editing, setEditing] = useState<Editing | null>(null)
   const addButton = useRef<HTMLButtonElement>(null)
+  /** Al cerrar el campo de un dato nuevo, el foco vuelve al botón que lo abrió. */
+  const refocusAdd = useRef(false)
   // biome-ignore lint/correctness/useExhaustiveDependencies: el borrador se vacía al cambiar de persona.
   useEffect(() => {
     setEditing(null)
   }, [contactId])
+  // biome-ignore lint/correctness/useExhaustiveDependencies: se ejecuta cuando el campo se cierra.
+  useLayoutEffect(() => {
+    if (editing === null && refocusAdd.current) {
+      refocusAdd.current = false
+      // En el mismo commit que quita el campo: el cajón modal, al perder el foco
+      // al body, lo toma para sí en una microtarea (y otra vez en el cuadro
+      // siguiente); con el foco ya en el botón no lo hace. Un rAF perdía esa carrera.
+      addButton.current?.focus()
+    }
+  }, [editing])
 
   const query = useQuery({
     queryKey: ["agent-person-memory", contactId],
@@ -134,11 +145,8 @@ export function PersonMemoryDrawer({
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ["agent-person-memory", contactId] })
   const fixing = editing?.mode === "fix" ? editing.fact : null
   function closeEditor() {
-    const wasAdding = editing?.mode === "add"
-    // Al cerrar el campo de un dato nuevo, el foco vuelve al botón que lo abrió, en
-    // el mismo paso: si el foco queda un instante sin dueño, el cajón modal se lo lleva.
-    flushSync(() => setEditing(null))
-    if (wasAdding) addButton.current?.focus()
+    refocusAdd.current = editing?.mode === "add"
+    setEditing(null)
   }
   const save = useMutation({
     retry: false,

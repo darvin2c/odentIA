@@ -90,6 +90,8 @@ async function rasterize(
 export async function renderAdjustedImage(
   value: ImageAdjustValue,
   size = ADJUSTED_IMAGE_SIZE,
+  /** PNG siempre: lo que también se imprime en un PDF, que no lee WebP (el logo de la clínica). */
+  options: { png?: boolean } = {},
 ): Promise<{ blob: Blob; ext: "webp" | "jpg" | "png" }> {
   const image = await loadImage(value.source)
   const { area } = value
@@ -115,6 +117,11 @@ export async function renderAdjustedImage(
     canvas.width,
     canvas.height,
   )
+  if (options.png) {
+    const png = await canvasBlob(canvas, "image/png", 1)
+    if (!png) throw new Error("No se pudo generar la imagen.")
+    return { blob: png, ext: "png" }
+  }
   const webp = await canvasBlob(canvas, "image/webp", 0.86)
   if (webp?.type === "image/webp") return { blob: webp, ext: "webp" }
   const fallbackType = value.shape === "person" ? "image/jpeg" : "image/png"

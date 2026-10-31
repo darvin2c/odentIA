@@ -1,10 +1,10 @@
 import {
   CORE_VITAL_KEYS,
   DENTAL_IMAGING_TYPES,
-  SUGGESTED_CONSENT_TEMPLATES,
   diagnosisCodeLabel,
   findingDiagnosisCode,
   isDiagnosisSystem,
+  SUGGESTED_CONSENT_TEMPLATES,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { encounterPlanItem, treatmentPlanItem } from "@odentia/db/schema/clinical"
@@ -25,12 +25,17 @@ import {
   pendingProbingWords,
   phaseForKind,
   SIGNED_ODONTOGRAM_PURPOSE_LABELS,
+  TREATMENT_PHASE_LABELS,
   TREATMENT_PHASES,
 } from "@odentia/dental"
 import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm"
 import { notFound } from "../errors.js"
 import type { TimelineItem } from "../patient-history.js"
 import { DENTAL_PRESCRIBING, type DiagnosisCandidate, type ProductHooks } from "../product-hooks.js"
+import { dentalCatalog } from "./catalog.js"
+import { DENTAL_DICTATION } from "./dictation.js"
+import { dentalExamination } from "./examination.js"
+import { dentalInterview } from "./interview.js"
 import {
   type ClosingOdontogram,
   closingOdontogramOf,
@@ -41,10 +46,6 @@ import {
 } from "./odontogram.js"
 import { latestPeriodontalBrief, periodontalBriefsByEncounter } from "./periodontal.js"
 import { findingsOf, linkPlanItemFinding, withPlanItemDental } from "./plan-finding.js"
-import { dentalCatalog } from "./catalog.js"
-import { DENTAL_DICTATION } from "./dictation.js"
-import { dentalExamination } from "./examination.js"
-import { dentalInterview } from "./interview.js"
 import { dentalProductSite, siteColumns } from "./site.js"
 import { drawTreatedFinding, voidLeftFindings } from "./treated-findings.js"
 
@@ -315,6 +316,32 @@ export const dentalHooks: ProductHooks = {
 
   planPhases: TREATMENT_PHASES,
   phaseFor: (kind) => phaseForKind(kind),
+  phaseWords: (phase) =>
+    TREATMENT_PHASE_LABELS[phase as keyof typeof TREATMENT_PHASE_LABELS] ?? null,
+
+  // El odontograma firmado no cambia ni se anula: si existe, está vigente.
+  async documentCheck(tx, orgId, type, id) {
+    if (type !== "signed_odontogram") return null
+    const [row] = await tx
+      .select()
+      .from(odontogramAssessment)
+      .where(and(eq(odontogramAssessment.id, id), eq(odontogramAssessment.organizationId, orgId)))
+      .limit(1)
+    if (!row) return null
+    return {
+      patientId: row.patientId,
+      state: "vigente",
+      label: "Odontograma firmado",
+      issuedAt: row.createdAt,
+      validUntil: null,
+      voidedAt: null,
+      signer: {
+        name: row.examinerName,
+        title: row.examinerTitle,
+        registration: row.registrationNumber,
+      },
+    }
+  },
 
   async templateSurfaceLimits(tx, templateId) {
     const [rule] = await tx

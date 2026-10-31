@@ -1,3 +1,4 @@
+import { activeOrgLocale, activeOrgTimeZone } from "@odentia/clinic-app/lib/locale"
 import {
   conditionLabel,
   FDI_ADULT_ROWS,
@@ -7,9 +8,8 @@ import {
   surfaceLabel,
   toothTypeOf,
 } from "@odentia/dental"
-import { useId } from "react"
+import { type ReactNode, useId } from "react"
 import type { OdontogramEntry } from "../../lib/dental/odontogram"
-import { activeOrgLocale, activeOrgTimeZone } from "@odentia/clinic-app/lib/locale"
 
 export interface OdontogramDocumentProps {
   entries: OdontogramEntry[]
@@ -23,6 +23,11 @@ export interface OdontogramDocumentProps {
   examinerTitle?: string
   registrationNumber?: string
   patientName?: string
+  /**
+   * Dentro de una hoja que ya dice la clínica, la persona y la fecha: sin el
+   * encabezado propio, y con su firma en lugar de la línea «Firma y sello».
+   */
+  embedded?: { signature: ReactNode }
 }
 
 const RED = "#dc2626"
@@ -753,8 +758,9 @@ function formatDate(raw?: string): string {
  * siglas, coronas cuadradas de 5 zonas, raíces y overlays continuos de parejas
  * y tramos. El gráfico va en negro (5.17) y los hallazgos en rojo o azul
  * (5.12 y 5.13). Respeta los entries recibidos (el servidor entrega la
- * instantánea firmada). Se firma con el perfil, sin trazo: en papel queda la
- * línea «Firma y sello» (5.3). Componente puro, sin mutaciones ni queries; no
+ * instantánea firmada). Se firma con el perfil, sin trazo (5.3): la hoja firmada
+ * lleva la firma electrónica con su QR, y la vista previa, la línea «Firma y
+ * sello». Componente puro, sin mutaciones ni queries; no
  * es la vista de boca, que es la misma en todos los países.
  */
 export function OdontogramDocument({
@@ -767,6 +773,7 @@ export function OdontogramDocument({
   examinerTitle,
   registrationNumber,
   patientName,
+  embedded,
 }: OdontogramDocumentProps) {
   const rows: Array<{ teeth: readonly number[]; upper: boolean; caption: string }> = [
     { teeth: FDI_ADULT_ROWS[0] ?? [], upper: true, caption: "Dentición permanente superior" },
@@ -798,19 +805,21 @@ export function OdontogramDocument({
         role="img"
         aria-label={`Odontograma normativo de ${patientName ?? "la historia clínica"} con ${entries.length} hallazgos registrados.`}
       >
-        <header className="mb-3 flex items-start justify-between gap-4 border-b-2 border-gray-900 pb-2">
-          <div>
-            <h2 className="text-lg font-bold tracking-wide">ODONTOGRAMA</h2>
-            <p className="text-[11px] text-gray-700">{standard} · Gráfico oficial</p>
-            {patientName ? (
-              <p className="mt-1 text-sm font-semibold">Paciente: {patientName}</p>
-            ) : null}
-          </div>
-          <p className="shrink-0 text-sm">
-            <span className="font-semibold">FECHA: </span>
-            {formatDate(date)}
-          </p>
-        </header>
+        {embedded ? null : (
+          <header className="mb-3 flex items-start justify-between gap-4 border-b-2 border-gray-900 pb-2">
+            <div>
+              <h2 className="text-lg font-bold tracking-wide">ODONTOGRAMA</h2>
+              <p className="text-[11px] text-gray-700">{standard} · Gráfico oficial</p>
+              {patientName ? (
+                <p className="mt-1 text-sm font-semibold">Paciente: {patientName}</p>
+              ) : null}
+            </div>
+            <p className="shrink-0 text-sm">
+              <span className="font-semibold">FECHA: </span>
+              {formatDate(date)}
+            </p>
+          </header>
+        )}
 
         <div className="flex flex-col gap-3">
           {rows.map((row) => (
@@ -839,23 +848,27 @@ export function OdontogramDocument({
           </div>
         </div>
 
-        <footer className="mt-4 flex flex-wrap items-end justify-between gap-4 border-t border-gray-400 pt-3">
-          <div className="text-xs">
-            <p>
-              <span className="font-semibold">Examinador: </span>
-              {examinerName || ""}
-              {examinerTitle ? ` · ${examinerTitle}` : ""}
-            </p>
-            <p className="mt-1">
-              <span className="font-semibold">Colegiatura: </span>
-              {registrationNumber || ""}
-            </p>
-          </div>
-          <div className="text-center">
-            <div className="h-20 w-64 border-b border-gray-800" aria-hidden="true" />
-            <p className="mt-1 text-[11px] text-gray-700">Firma y sello</p>
-          </div>
-        </footer>
+        {embedded ? (
+          embedded.signature
+        ) : (
+          <footer className="mt-4 flex flex-wrap items-end justify-between gap-4 border-t border-gray-400 pt-3">
+            <div className="text-xs">
+              <p>
+                <span className="font-semibold">Examinador: </span>
+                {examinerName || ""}
+                {examinerTitle ? ` · ${examinerTitle}` : ""}
+              </p>
+              <p className="mt-1">
+                <span className="font-semibold">Colegiatura: </span>
+                {registrationNumber || ""}
+              </p>
+            </div>
+            <div className="text-center">
+              <div className="h-20 w-64 border-b border-gray-800" aria-hidden="true" />
+              <p className="mt-1 text-[11px] text-gray-700">Firma y sello</p>
+            </div>
+          </footer>
+        )}
         <p className="mt-3 text-center text-[10px] text-gray-600">
           Fuente: Dirección de Salud Bucal - Dirección General de Intervenciones Estratégicas en
           Salud Pública

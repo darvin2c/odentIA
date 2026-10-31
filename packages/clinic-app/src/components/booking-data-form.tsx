@@ -1,7 +1,7 @@
 import {
   type ClinicalCountryProfile,
-  clinicalProfileFor,
   CONTACT_RELATIONSHIP_LABELS,
+  clinicalProfileFor,
   composeDisplayName,
   DOC_TYPE_LABELS,
   documentNumberError,
@@ -38,9 +38,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@odentia/ui"
-import { BirthDateInput, ErrorState, internationalText, LoadingState, PhoneInput, SubmitButton } from "@odentia/ui-patterns"
+import {
+  BirthDateInput,
+  clearSubmitErrors,
+  ErrorState,
+  internationalText,
+  LoadingState,
+  PhoneInput,
+  SubmitButton,
+  type SubmitOptions,
+  useAppForm,
+  useFieldContext,
+  useFieldControl,
+  useFormSurface,
+  withFieldGroup,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { type FormEvent, type InputHTMLAttributes, useEffect, useState } from "react"
+import { useEffect, useState } from "react"
 import { ApiError } from "../lib/api"
 import {
   type BookingRegistrationForm,
@@ -52,6 +67,7 @@ import {
 } from "../lib/booking-link"
 import { fetchPublicPrivacyNotice } from "../lib/patient-registration"
 import { asksDocumentCountry, countryChoices } from "../lib/person-data"
+import { placeErrors } from "./patient/form-errors"
 import { SearchSelect } from "./settings/search-select"
 
 type Relationship = "guardian" | "family" | "other"
@@ -68,27 +84,28 @@ const SEX_OPTIONS: ReadonlyArray<readonly [Exclude<PersonSex, "">, string]> = [
   ["F", SEX_LABELS.F],
   ["M", SEX_LABELS.M],
 ]
-/** La primera opción del sexo: recibe el foco si falta elegir. */
-const FIRST_SEX = "F"
 const PROMOTION_OPTIONS: ReadonlyArray<readonly ["si" | "no", string]> = [
   ["si", "Sí, quiero"],
   ["no", "No, gracias"],
 ]
+const WHO_OPTIONS: ReadonlyArray<readonly ["patient" | "representative", string]> = [
+  ["patient", "Para mí"],
+  ["representative", "Para otra persona"],
+]
 
 /**
  * Pocas opciones en tarjetas, como «¿Para quién es la cita?»: un grupo de
- * radios con su leyenda, su ayuda y su error junto al grupo. Nada viene
- * elegido si `value` es null. Cada opción tiene el id `${id}-${valor}`: la
- * primera recibe el foco cuando falta elegir.
+ * radios con su leyenda, su ayuda y el error de su campo (`form.AppField`)
+ * junto al grupo. Nada viene elegido si `value` es null. Cada opción tiene el
+ * id `${id}-${valor}`.
  */
-export function ChoiceCards<T extends string>({
+function ChoiceCards<T extends string>({
   id,
   legend,
   description,
   options,
   value,
   onChange,
-  error,
   strong = false,
 }: {
   id: string
@@ -97,26 +114,31 @@ export function ChoiceCards<T extends string>({
   options: ReadonlyArray<readonly [T, string]>
   value: T | null
   onChange: (value: T) => void
-  error?: string
   /** La pregunta es el contenido (novedades), no la etiqueta de un dato. */
   strong?: boolean
 }) {
+  const { control, errors, descriptionId, errorId } = useFieldControl({ id, hasDescription: Boolean(description) })
   const legendId = `${id}-legend`
-  const hintId = `${id}-hint`
-  const errorId = `${id}-error`
   return (
-    <FieldSet className="gap-2" data-invalid={error ? true : undefined}>
+    <FieldSet
+      className="gap-2"
+      data-invalid={control.invalid || undefined}
+      onBlur={(event) => {
+        // Se da por visitado al salir del grupo, no al pasar de una opción a otra.
+        if (!event.currentTarget.contains(event.relatedTarget)) control.onBlur()
+      }}
+    >
       <FieldLegend id={legendId} variant="label" className={cn("mb-0", strong && "text-base font-semibold")}>
         {legend}
       </FieldLegend>
       {description ? (
-        <FieldDescription id={hintId} className="-mt-1">
+        <FieldDescription id={descriptionId} className="-mt-1">
           {description}
         </FieldDescription>
       ) : null}
       <RadioGroup
         aria-labelledby={legendId}
-        aria-describedby={[description ? hintId : null, error ? errorId : null].filter(Boolean).join(" ") || undefined}
+        aria-describedby={control.describedBy}
         value={value}
         onValueChange={(next) => {
           if (typeof next === "string") onChange(next as T)
@@ -129,12 +151,12 @@ export function ChoiceCards<T extends string>({
             htmlFor={`${id}-${option}`}
             className="flex min-h-11 min-w-0 cursor-pointer items-center gap-2 rounded-xl border bg-card px-3 py-2 text-sm font-medium has-[[data-checked]]:border-primary has-[[data-checked]]:bg-primary-soft has-[[data-checked]]:text-primary-soft-foreground"
           >
-            <RadioGroupItem id={`${id}-${option}`} value={option} aria-invalid={error ? true : undefined} />
+            <RadioGroupItem id={`${id}-${option}`} value={option} aria-invalid={control.invalid || undefined} />
             {label}
           </label>
         ))}
       </RadioGroup>
-      {error ? <FieldError id={errorId}>{error}</FieldError> : null}
+      {control.invalid ? <FieldError id={errorId} errors={errors.map((message) => ({ message }))} /> : null}
     </FieldSet>
   )
 }
@@ -142,21 +164,12 @@ export function ChoiceCards<T extends string>({
 /**
  * «¿Quieres recibir novedades y promociones…?»: se responde una sola vez, en
  * todo camino donde aún no respondió. Nunca viene marcada: así no valdría.
- * «Sí, quiero» va primero.
+ * «Sí, quiero» va primero. Va dentro del `form.AppField` de la respuesta
+ * (`boolean | null`).
  */
-export function PromotionsQuestion({
-  id,
-  clinicName,
-  value,
-  onChange,
-  error,
-}: {
-  id: string
-  clinicName: string
-  value: boolean | null
-  onChange: (accepts: boolean) => void
-  error?: string
-}) {
+export function PromotionsQuestion({ id, clinicName }: { id: string; clinicName: string }) {
+  const field = useFieldContext<boolean | null>()
+  const value = field.state.value
   return (
     <ChoiceCards
       id={id}
@@ -165,38 +178,30 @@ export function PromotionsQuestion({
       description={`Descuentos y campañas de ${clinicName}. Puedes darte de baja cuando quieras.`}
       options={PROMOTION_OPTIONS}
       value={value === null ? null : value ? "si" : "no"}
-      onChange={(next) => onChange(next === "si")}
-      error={error}
+      onChange={(next) => field.handleChange(next === "si")}
     />
   )
 }
 
-/** El control de las novedades que recibe el foco si falta responder. */
-export const promotionsFocusId = (id: string) => `${id}-si`
-
 /**
  * «Acepto el aviso de privacidad de…», obligatoria, con «Ver el aviso de
  * privacidad». Quien ya es paciente no trae el aviso en su enlace: se lee el
- * vigente de la clínica al abrirlo.
+ * vigente de la clínica al abrirlo. Va dentro del `form.AppField` de la casilla.
  */
-export function PrivacyCheck({
+function PrivacyCheck({
   id,
   slug,
   clinicName,
   notice,
-  checked,
-  onChange,
-  error,
 }: {
   id: string
   slug: string
   clinicName: string
   /** El texto del aviso, si ya llegó con el formulario. */
   notice?: string
-  checked: boolean
-  onChange: (accepted: boolean) => void
-  error?: string
 }) {
+  const field = useFieldContext<boolean>()
+  const { control, errors, errorId } = useFieldControl({ id, hasDescription: false })
   const [open, setOpen] = useState(false)
   const fetched = useQuery({
     queryKey: ["public-privacy-notice", slug],
@@ -210,15 +215,16 @@ export function PrivacyCheck({
     <div className="flex flex-col gap-1">
       <div className="flex items-start gap-3">
         <Checkbox
-          id={id}
+          id={control.id}
           className="mt-3.5"
-          checked={checked}
-          onCheckedChange={(next) => onChange(next === true)}
-          aria-invalid={error ? true : undefined}
-          aria-describedby={error ? `${id}-error` : undefined}
+          checked={field.state.value}
+          onCheckedChange={(next) => field.handleChange(next === true)}
+          onBlur={control.onBlur}
+          aria-invalid={control.invalid || undefined}
+          aria-describedby={control.describedBy}
         />
         <div className="flex min-w-0 flex-col items-start">
-          <label htmlFor={id} className="flex min-h-11 cursor-pointer items-center text-sm">
+          <label htmlFor={control.id} className="flex min-h-11 cursor-pointer items-center text-sm">
             Acepto el aviso de privacidad de {clinicName}.
           </label>
           <Button type="button" variant="link" className="h-auto min-h-11 p-0 text-sm" onClick={() => setOpen(true)}>
@@ -226,7 +232,7 @@ export function PrivacyCheck({
           </Button>
         </div>
       </div>
-      {error ? <FieldError id={`${id}-error`}>{error}</FieldError> : null}
+      {control.invalid ? <FieldError id={errorId} errors={errors.map((message) => ({ message }))} /> : null}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
@@ -250,164 +256,70 @@ export function PrivacyCheck({
   )
 }
 
-/** El tipo elegido o, sin elegir, el primero de los que se usan en el país de la clínica. */
-const docTypeOf = (profile: ClinicalCountryProfile, docType: IdentityDocType | ""): IdentityDocType =>
-  docType || profile.documentTypes[0]!.code
+/**
+ * «Celular» con el aviso de WhatsApp debajo. Lo escrito a medias deja el
+ * número vacío y lo dice `onIncomplete`; cualquier cambio quita lo que se dijo
+ * del campo, también mientras el número sigue a medias.
+ */
+function CellField({ id, description, onIncomplete }: { id: string; description?: string; onIncomplete: (incomplete: boolean) => void }) {
+  const field = useFieldContext<string | null>()
+  const { control, errors, descriptionId, errorId } = useFieldControl({ id, hasDescription: Boolean(description) })
+  return (
+    <Field data-invalid={control.invalid || undefined}>
+      <FieldLabel htmlFor={control.id}>Celular</FieldLabel>
+      <PhoneInput
+        id={control.id}
+        name={control.name}
+        className="[&_[data-slot=input-group]]:min-h-11 [&_[data-slot=select-trigger]]:min-h-11"
+        value={field.state.value}
+        invalid={control.invalid}
+        aria-describedby={control.describedBy}
+        onBlur={control.onBlur}
+        onChange={(next, meta) => {
+          field.handleChange(next)
+          onIncomplete(meta.digits.length > 0 && next === null)
+          clearSubmitErrors(field.form, (name) => name === field.name)
+        }}
+      />
+      {control.invalid ? <FieldError id={errorId} errors={errors.map((message) => ({ message }))} /> : null}
+      {/* El aviso previo que pide WhatsApp para los mensajes de servicio (ADR 0040): queda guardado. */}
+      {description ? (
+        <FieldDescription id={descriptionId} className="text-foreground">
+          {description}
+        </FieldDescription>
+      ) : null}
+    </Field>
+  )
+}
 
-/** Tipo y número de documento (y el país que lo emitió, solo si hace falta: `asksDocumentCountry`). */
-function DocumentFields({
-  idOf,
-  profile,
-  docType: chosenType,
-  docNumber,
-  docCountry,
-  numberError,
-  countryError,
-  onChange,
-}: {
-  idOf: (part: "docType" | "docNumber" | "docCountry") => string
-  profile: ClinicalCountryProfile
-  docType: IdentityDocType | ""
-  docNumber: string
-  docCountry: string
-  numberError: string | undefined
-  countryError: string | undefined
-  onChange: (patch: { docType?: IdentityDocType; docNumber?: string; docCountry?: string }) => void
-}) {
-  const typeId = idOf("docType")
-  const numberId = idOf("docNumber")
-  const countryId = idOf("docCountry")
-  const docType = docTypeOf(profile, chosenType)
+/** El número del documento: su error ocupa la fila entera, bajo el tipo y el número. */
+function DocumentNumberField({ id, onChanged }: { id: string; onChanged: () => void }) {
+  const field = useFieldContext<string>()
+  const { control, errors, errorId } = useFieldControl({ id, hasDescription: false })
   return (
     <>
-      <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-x-2 gap-y-3">
-        <Field>
-          <FieldLabel htmlFor={typeId}>Documento</FieldLabel>
-          <Select<IdentityDocType>
-            value={docType}
-            onValueChange={(next) => {
-              if (next) onChange({ docType: next, docCountry: "" })
-            }}
-          >
-            <SelectTrigger id={typeId} aria-label="Tipo de documento" className="min-h-11 w-full min-w-0">
-              <SelectValue>{DOC_TYPE_LABELS[docType]}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {profile.documentTypes.map(({ code }) => (
-                <SelectItem key={code} value={code}>
-                  {DOC_TYPE_LABELS[code]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-        <Field data-invalid={numberError ? true : undefined}>
-          <FieldLabel htmlFor={numberId}>Número</FieldLabel>
-          <Input
-            id={numberId}
-            className="min-h-11"
-            autoComplete="off"
-            maxLength={20}
-            value={docNumber}
-            onChange={(event) => onChange({ docNumber: event.target.value })}
-            aria-invalid={numberError ? true : undefined}
-            aria-describedby={numberError ? `${numberId}-error` : undefined}
-          />
-        </Field>
-        {numberError ? (
-          <FieldError id={`${numberId}-error`} className="col-span-2">
-            {numberError}
-          </FieldError>
-        ) : null}
-      </div>
-      {asksDocumentCountry(profile, docType) ? (
-        <Field data-invalid={countryError ? true : undefined}>
-          <FieldLabel htmlFor={countryId}>País que emitió el documento</FieldLabel>
-          <SearchSelect
-            id={countryId}
-            label="País que emitió el documento"
-            placeholder="Buscar país…"
-            value={docCountry}
-            options={countryChoices(profile.country)}
-            invalid={Boolean(countryError)}
-            aria-describedby={countryError ? `${countryId}-error` : undefined}
-            onChange={(next) => onChange({ docCountry: next })}
-          />
-          {countryError ? <FieldError id={`${countryId}-error`}>{countryError}</FieldError> : null}
-        </Field>
-      ) : null}
+      <Field data-invalid={control.invalid || undefined}>
+        <FieldLabel htmlFor={control.id}>Número</FieldLabel>
+        <Input
+          {...control.props}
+          className="min-h-11"
+          autoComplete="off"
+          maxLength={20}
+          value={field.state.value}
+          onChange={(event) => {
+            field.handleChange(event.target.value)
+            onChanged()
+          }}
+        />
+      </Field>
+      {control.invalid ? <FieldError id={errorId} className="col-span-2" errors={errors.map((message) => ({ message }))} /> : null}
     </>
   )
 }
 
-function TextField({
-  id,
-  label,
-  value,
-  onChange,
-  error,
-  hint,
-  ...input
-}: {
-  id: string
-  label: string
-  value: string
-  onChange: (value: string) => void
-  error: string | undefined
-  hint?: string
-} & Omit<InputHTMLAttributes<HTMLInputElement>, "id" | "value" | "onChange">) {
-  return (
-    <Field data-invalid={error ? true : undefined}>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <Input
-        id={id}
-        className="min-h-11"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={error ? `${id}-error` : hint ? `${id}-hint` : undefined}
-        {...input}
-      />
-      {error ? <FieldError id={`${id}-error`}>{error}</FieldError> : hint ? <FieldDescription id={`${id}-hint`}>{hint}</FieldDescription> : null}
-    </Field>
-  )
-}
-
-function BirthDateField({
-  id,
-  today,
-  countryCode,
-  value,
-  error,
-  hint,
-  onChange,
-}: {
-  id: string
-  today: string
-  countryCode: string | null
-  value: string
-  error: string | undefined
-  hint?: string
-  onChange: (value: string) => void
-}) {
-  return (
-    <Field data-invalid={error ? true : undefined}>
-      <FieldLabel htmlFor={id}>Fecha de nacimiento</FieldLabel>
-      {/* El mismo control del registro de pacientes: una fecha de nacimiento se escribe, en el orden de la clínica. */}
-      <BirthDateInput
-        id={id}
-        className="[&_input]:min-h-11"
-        today={today}
-        country={countryCode}
-        value={value}
-        invalid={Boolean(error)}
-        aria-describedby={error ? `${id}-error` : hint ? `${id}-hint` : undefined}
-        onChange={onChange}
-      />
-      {error ? <FieldError id={`${id}-error`}>{error}</FieldError> : hint ? <FieldDescription id={`${id}-hint`}>{hint}</FieldDescription> : null}
-    </Field>
-  )
-}
+/** El tipo elegido o, sin elegir, el primero de los que se usan en el país de la clínica. */
+const docTypeOf = (profile: ClinicalCountryProfile, docType: IdentityDocType | ""): IdentityDocType =>
+  docType || profile.documentTypes[0]!.code
 
 /** Nombre, documento y lo demás que se pide de una persona. */
 interface PersonDraft {
@@ -423,15 +335,193 @@ interface PersonDraft {
   email: string
 }
 
+const emptyPerson = (): PersonDraft => ({ givenNames: "", familyName: "", docType: "", docNumber: "", docCountry: "", birthDate: "", sex: "", email: "" })
+
+/** Lo que se pide de la persona: nombres, apellidos y documento, y lo demás si hace falta. */
+interface PersonAsks {
+  givenNames: boolean
+  familyName: boolean
+  document: boolean
+  birthDate: boolean
+  sex: boolean
+  email: boolean
+}
+
+/**
+ * Nombres, apellidos, documento (con el país que lo emitió solo si hace falta:
+ * `asksDocumentCountry`) y, si se piden, fecha de nacimiento, sexo y correo de
+ * una persona, en el formulario de quien es nueva (`fields="me"`/`"other"`) y
+ * en el de quien ya es paciente. Cambiar cualquier parte del documento quita
+ * lo que se dijo del número y del país.
+ */
+const PersonFields = withFieldGroup({
+  defaultValues: emptyPerson(),
+  props: {} as {
+    /** Cada campo tiene el id `${idPrefix}-${dato}`. */
+    idPrefix: string
+    profile: ClinicalCountryProfile
+    asks: PersonAsks
+    /** Los datos son de quien escribe: el navegador puede proponerlos. */
+    mine: boolean
+    today: string
+    countryCode: string | null
+    /** De dónde salió el nombre que ya viene escrito. */
+    nameHint?: string
+    birthHint?: string
+    /** `clearSubmitErrors` del formulario que la contiene: el del grupo no tiene el tipo de un formulario cualquiera. */
+    clearErrors: (which: (name: string) => boolean) => void
+    /** Lo que depende de la fecha de nacimiento (la relación con un menor). */
+    onBirthDateChange?: () => void
+  },
+  render: function PersonFieldsRender({ group, idPrefix, profile, asks, mine, today, countryCode, nameHint, birthHint, clearErrors, onBirthDateChange }) {
+    const idOf = (key: keyof PersonDraft) => `${idPrefix}-${key}`
+    const docType = docTypeOf(profile, useStore(group.store, (state) => state.values.docType))
+    const clearDocument = () => {
+      const number = group.getFormFieldName("docNumber")
+      const country = group.getFormFieldName("docCountry")
+      clearErrors((name) => name === number || name === country)
+    }
+    return (
+      <>
+        {asks.givenNames ? (
+          <group.AppField name="givenNames">
+            {(field) => (
+              <field.TextField id={idOf("givenNames")} label="Nombres" inputClassName="min-h-11" autoComplete={mine ? "given-name" : "off"} maxLength={100} />
+            )}
+          </group.AppField>
+        ) : null}
+        {asks.familyName ? (
+          <group.AppField name="familyName">
+            {(field) => (
+              <field.TextField
+                id={idOf("familyName")}
+                label="Apellidos"
+                description={nameHint}
+                inputClassName="min-h-11"
+                autoComplete={mine ? "family-name" : "off"}
+                maxLength={200}
+              />
+            )}
+          </group.AppField>
+        ) : null}
+        {asks.document ? (
+          <>
+            <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-x-2 gap-y-3">
+              <group.AppField name="docType">
+                {(field) => (
+                  <Field>
+                    <FieldLabel htmlFor={idOf("docType")}>Documento</FieldLabel>
+                    <Select<IdentityDocType>
+                      value={docType}
+                      onValueChange={(next) => {
+                        if (!next) return
+                        field.handleChange(next)
+                        group.setFieldValue("docCountry", "")
+                        clearDocument()
+                      }}
+                    >
+                      <SelectTrigger id={idOf("docType")} aria-label="Tipo de documento" className="min-h-11 w-full min-w-0">
+                        <SelectValue>{DOC_TYPE_LABELS[docType]}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {profile.documentTypes.map(({ code }) => (
+                          <SelectItem key={code} value={code}>
+                            {DOC_TYPE_LABELS[code]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                )}
+              </group.AppField>
+              <group.AppField name="docNumber">{() => <DocumentNumberField id={idOf("docNumber")} onChanged={clearDocument} />}</group.AppField>
+            </div>
+            {asksDocumentCountry(profile, docType) ? (
+              <group.AppField name="docCountry">
+                {(field) => (
+                  <field.Control id={idOf("docCountry")} label="País que emitió el documento">
+                    {(control) => (
+                      <SearchSelect
+                        id={control.id}
+                        label="País que emitió el documento"
+                        placeholder="Buscar país…"
+                        value={field.state.value}
+                        options={countryChoices(profile.country)}
+                        invalid={control.invalid}
+                        aria-describedby={control.describedBy}
+                        onChange={(next) => {
+                          field.handleChange(next)
+                          clearDocument()
+                        }}
+                      />
+                    )}
+                  </field.Control>
+                )}
+              </group.AppField>
+            ) : null}
+          </>
+        ) : null}
+        {asks.birthDate ? (
+          <group.AppField name="birthDate">
+            {(field) => (
+              <field.Control id={idOf("birthDate")} label="Fecha de nacimiento" description={birthHint}>
+                {(control) => (
+                  // El mismo control del registro de pacientes: una fecha de nacimiento se escribe, en el orden de la clínica.
+                  <BirthDateInput
+                    id={control.id}
+                    className="[&_input]:min-h-11"
+                    today={today}
+                    country={countryCode}
+                    value={field.state.value}
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    onChange={(next) => {
+                      field.handleChange(next)
+                      onBirthDateChange?.()
+                    }}
+                  />
+                )}
+              </field.Control>
+            )}
+          </group.AppField>
+        ) : null}
+        {asks.sex ? (
+          <group.AppField name="sex">
+            {(field) => (
+              <ChoiceCards id={idOf("sex")} legend="Sexo" options={SEX_OPTIONS} value={field.state.value || null} onChange={(sex) => field.handleChange(sex)} />
+            )}
+          </group.AppField>
+        ) : null}
+        {asks.email ? (
+          <group.AppField name="email">
+            {(field) => (
+              <field.TextField
+                id={idOf("email")}
+                label="Correo"
+                type="email"
+                inputMode="email"
+                placeholder="nombre@correo.com"
+                inputClassName="min-h-11"
+                autoComplete={mine ? "email" : "off"}
+                maxLength={200}
+              />
+            )}
+          </group.AppField>
+        ) : null}
+      </>
+    )
+  },
+})
+
 /** Lo escrito en «Revisa y reserva». Vive en la página para no perderse al cambiar de horario ni si el envío falla. */
 export interface BookingDataDraft {
   /** Ya se escribió lo que sabíamos de quien escribe (una sola vez: lo que corrija manda). */
   known: boolean
   /** Quien escribe y reserva. */
   me: PersonDraft
-  /** `null` mientras la persona no lo toque: entonces vale el celular que el sistema conoce, si conoce alguno. */
+  /** Al llegar, el celular que el sistema conoce, si conoce alguno; después, lo que escriba la persona. */
   phone: string | null
-  phoneTouched: boolean
   /** Hay dígitos escritos que aún no forman un número. */
   phoneIncomplete: boolean
   who: "patient" | "representative"
@@ -443,14 +533,11 @@ export interface BookingDataDraft {
   privacyAccepted: boolean
 }
 
-const emptyPerson = (): PersonDraft => ({ givenNames: "", familyName: "", docType: "", docNumber: "", docCountry: "", birthDate: "", sex: "", email: "" })
-
 export function emptyBookingDataDraft(): BookingDataDraft {
   return {
     known: false,
     me: emptyPerson(),
     phone: null,
-    phoneTouched: false,
     phoneIncomplete: false,
     who: "patient",
     other: emptyPerson(),
@@ -472,6 +559,8 @@ function withKnown(draft: BookingDataDraft, info: BookingRegistrationForm): Book
   return {
     ...draft,
     known: true,
+    // El celular solo se propone si el sistema lo conoce de verdad; lo que la persona escriba manda.
+    phone: draft.phone ?? info.phone,
     // Quien ya tiene su registro reserva para otra persona: no se le pregunta para quién es.
     ...(info.ownRecord ? { who: "representative" as const } : {}),
     me: {
@@ -488,32 +577,86 @@ function withKnown(draft: BookingDataDraft, info: BookingRegistrationForm): Book
 
 type PersonField = "givenNames" | "familyName" | "docNumber" | "docCountry" | "birthDate" | "sex" | "email"
 type FieldKey = `me.${PersonField}` | `other.${PersonField}` | "phone" | "relationship" | "promotions" | "privacyAccepted"
-/** En el orden de la pantalla: el primero con error recibe el foco. */
-const FIELD_ORDER: readonly FieldKey[] = [
-  "me.givenNames",
-  "me.familyName",
-  "me.docNumber",
-  "me.docCountry",
-  "me.birthDate",
-  "me.sex",
-  "me.email",
-  "phone",
-  "other.givenNames",
-  "other.familyName",
-  "other.docNumber",
-  "other.docCountry",
-  "other.birthDate",
-  "other.sex",
-  "relationship",
-  "promotions",
-  "privacyAccepted",
-]
-type Errors = Partial<Record<FieldKey, string>>
 const fieldId = (key: string) => `reserva-datos-${key.replace(".", "-")}`
-/** Lo que recibe el foco: el campo o, en las tarjetas, su primera opción. */
-const focusId = (key: FieldKey) =>
-  key.endsWith(".sex") ? `${fieldId(key)}-${FIRST_SEX}` : key === "promotions" ? promotionsFocusId(fieldId(key)) : fieldId(key)
 const asksCountry = (profile: ClinicalCountryProfile, person: PersonDraft) => asksDocumentCountry(profile, docTypeOf(profile, person.docType))
+/** Lo que deja de valer al cambiar para quién es la cita. */
+const WHO_CLEARS: Partial<Record<string, true>> = {
+  "me.docNumber": true,
+  "me.birthDate": true,
+  "me.sex": true,
+  "me.email": true,
+  "other.givenNames": true,
+  "other.familyName": true,
+  "other.docNumber": true,
+  "other.docCountry": true,
+  "other.birthDate": true,
+  "other.sex": true,
+  relationship: true,
+}
+
+/**
+ * Lo que la regla del registro señala (`demographics.familyName`), en el
+ * campo de esta pantalla donde se escribió; en el orden en que se dice si dos
+ * reglas señalan el mismo campo. Lo que no tiene campo aquí, nada.
+ */
+const RULE_SOURCES = [
+  "representative.docNumber",
+  "representative.docType",
+  "representative.relationship",
+  "demographics.givenNames",
+  "demographics.displayName",
+  "demographics.familyName",
+  "demographics.docNumber",
+  "demographics.docType",
+  "demographics.docCountry",
+  "demographics.birthDate",
+  "demographics.sex",
+  "demographics.email",
+  "demographics.phone",
+  "representative.phone",
+] as const
+
+function ruleField(source: string, forOther: boolean): FieldKey | undefined {
+  const patient = forOther ? "other" : "me"
+  switch (source) {
+    // De quien escribe, el registro solo exige el documento si representa a un menor.
+    case "representative.docNumber":
+    case "representative.docType":
+      return forOther ? "me.docNumber" : undefined
+    case "representative.relationship":
+      return forOther ? "relationship" : undefined
+    case "demographics.givenNames":
+    case "demographics.displayName":
+      return `${patient}.givenNames`
+    case "demographics.familyName":
+      return `${patient}.familyName`
+    case "demographics.docNumber":
+    case "demographics.docType":
+      return `${patient}.docNumber`
+    case "demographics.docCountry":
+      return `${patient}.docCountry`
+    case "demographics.birthDate":
+      return `${patient}.birthDate`
+    case "demographics.sex":
+      return `${patient}.sex`
+    case "demographics.email":
+      return forOther ? undefined : "me.email"
+    case "demographics.phone":
+    case "representative.phone":
+      return "phone"
+    default:
+      return undefined
+  }
+}
+
+/** Lo que rechaza el servidor por su nombre en el cuerpo (`answers.demographics.familyName`), en su campo. */
+function answerField(key: string, forOther: boolean): FieldKey | undefined {
+  if (!key.startsWith("answers.")) return undefined
+  const source = key.slice("answers.".length)
+  if (source === "privacyAccepted") return "privacyAccepted"
+  if (source === "acceptsMessages") return "promotions"
+  return ruleField(source, forOther)
+}
 
 /**
  * Las respuestas del registro de pacientes que salen de este formulario: lo
@@ -574,104 +717,6 @@ function buildAnswers(
   }
 }
 
-/** Nombres, apellidos, documento y, si se piden, fecha de nacimiento, sexo y correo de una persona. */
-function PersonFields({
-  scope,
-  profile,
-  person,
-  errors,
-  mine,
-  asks,
-  today,
-  countryCode,
-  nameHint,
-  birthHint,
-  onChange,
-}: {
-  scope: "me" | "other"
-  profile: ClinicalCountryProfile
-  person: PersonDraft
-  errors: Errors
-  /** Los datos son de quien escribe: el navegador puede proponerlos. */
-  mine: boolean
-  asks: { birthDate: boolean; sex: boolean; email: boolean }
-  today: string
-  countryCode: string | null
-  /** De dónde salió el nombre que ya viene escrito. */
-  nameHint?: string
-  birthHint?: string
-  onChange: (patch: Partial<PersonDraft>, ...cleared: PersonField[]) => void
-}) {
-  return (
-    <>
-      <TextField
-        id={fieldId(`${scope}.givenNames`)}
-        label="Nombres"
-        autoComplete={mine ? "given-name" : "off"}
-        maxLength={100}
-        value={person.givenNames}
-        error={errors[`${scope}.givenNames`]}
-        onChange={(givenNames) => onChange({ givenNames }, "givenNames")}
-      />
-      <TextField
-        id={fieldId(`${scope}.familyName`)}
-        label="Apellidos"
-        autoComplete={mine ? "family-name" : "off"}
-        maxLength={200}
-        value={person.familyName}
-        error={errors[`${scope}.familyName`]}
-        hint={nameHint}
-        onChange={(familyName) => onChange({ familyName }, "familyName")}
-      />
-      <DocumentFields
-        idOf={(part) => fieldId(`${scope}.${part}`)}
-        profile={profile}
-        docType={person.docType}
-        docNumber={person.docNumber}
-        docCountry={person.docCountry}
-        numberError={errors[`${scope}.docNumber`]}
-        countryError={errors[`${scope}.docCountry`]}
-        onChange={(patch) => onChange(patch, "docNumber", "docCountry")}
-      />
-      {asks.birthDate ? (
-        <BirthDateField
-          id={fieldId(`${scope}.birthDate`)}
-          today={today}
-          countryCode={countryCode}
-          value={person.birthDate}
-          error={errors[`${scope}.birthDate`]}
-          hint={birthHint}
-          onChange={(birthDate) => onChange({ birthDate }, "birthDate")}
-        />
-      ) : null}
-      {asks.sex ? (
-        <ChoiceCards
-          id={fieldId(`${scope}.sex`)}
-          legend="Sexo"
-          options={SEX_OPTIONS}
-          value={person.sex || null}
-          error={errors[`${scope}.sex`]}
-          onChange={(sex) => onChange({ sex }, "sex")}
-        />
-      ) : null}
-      {asks.email ? (
-        <TextField
-          id={fieldId(`${scope}.email`)}
-          label="Correo"
-          type="email"
-          inputMode="email"
-          placeholder="nombre@correo.com"
-          autoComplete={mine ? "email" : "off"}
-          maxLength={200}
-          value={person.email}
-          error={errors[`${scope}.email`]}
-          onChange={(email) => onChange({ email }, "email")}
-        />
-      ) : null}
-    </>
-  )
-}
-
 /**
  * «Revisa y reserva» de quien aún no es paciente: lo que la clínica necesita
  * para atenderla, en una sola pantalla y una sola vez. Lo que ya sabemos viene
@@ -681,16 +726,7 @@ function PersonFields({
  * la identidad los resuelve el servidor. Lo demás que pide la clínica, «Tus
  * datos» lo pide justo después de reservar.
  */
-export function BookingDataForm({
-  slug,
-  token,
-  clinicName,
-  submissionId,
-  draft,
-  onDraftChange,
-  reserving,
-  onRegistered,
-}: {
+export function BookingDataForm(props: {
   slug: string
   token: string
   clinicName: string
@@ -701,10 +737,7 @@ export function BookingDataForm({
   reserving: boolean
   onRegistered: () => void
 }) {
-  const queryClient = useQueryClient()
-  const [errors, setErrors] = useState<Errors>({})
-  const [submitError, setSubmitError] = useState<string | null>(null)
-  const [submitting, setSubmitting] = useState(false)
+  const { slug, token, reserving, onRegistered } = props
   const infoKey = ["booking-registration", slug, token]
   const infoQuery = useQuery({
     queryKey: infoKey,
@@ -712,12 +745,6 @@ export function BookingDataForm({
     retry: false,
     staleTime: 30_000,
   })
-  const loaded = infoQuery.data?.data
-  // Lo que ya sabemos se escribe una sola vez, al llegar: después manda lo que la persona corrija.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: solo cuando llegan los datos o se reinicia el borrador.
-  useEffect(() => {
-    if (loaded && !draft.known) onDraftChange(withKnown(draft, loaded))
-  }, [loaded, draft.known])
 
   if (infoQuery.isPending) return <LoadingState kind="indeterminate" message="Cargando…" />
   if (infoQuery.isError) {
@@ -734,67 +761,64 @@ export function BookingDataForm({
     }
     return <ErrorState title="No pudimos abrir tus datos" message="Vuelve a intentarlo en un momento o escríbenos por el chat." onRetry={() => void infoQuery.refetch()} />
   }
-  const info = infoQuery.data.data
+  return <BookingDataFields {...props} info={infoQuery.data.data} infoKey={infoKey} />
+}
+
+function BookingDataFields({
+  slug,
+  token,
+  clinicName,
+  submissionId,
+  draft,
+  onDraftChange,
+  reserving,
+  onRegistered,
+  info,
+  infoKey,
+}: {
+  slug: string
+  token: string
+  clinicName: string
+  submissionId: string
+  draft: BookingDataDraft
+  onDraftChange: (next: BookingDataDraft) => void
+  reserving: boolean
+  onRegistered: () => void
+  info: BookingRegistrationForm
+  infoKey: readonly unknown[]
+}) {
+  const queryClient = useQueryClient()
   const profile = clinicalProfileFor(info.countryCode)
   const reserveLabel = info.ownRecord ? "Reservar la cita" : "Reservar mi cita"
-  const forOther = draft.who === "representative"
-  const patientScope = forOther ? "other" : "me"
-  const minor = forOther && isRealDate(draft.other.birthDate) && isMinor(draft.other.birthDate, info.today)
-  // El celular solo se propone si el sistema lo conoce de verdad; lo que la persona escriba manda.
-  const phone = draft.phoneTouched ? draft.phone : (draft.phone ?? info.phone)
-  const busy = submitting || reserving
   // Lo que la clínica marca «Obligatorio» de lo que esta pantalla pide; del correo de otra persona responde tu celular.
   const asks = {
     sex: info.config.fields.sex === "required",
     email: info.config.fields.email === "required",
     promotions: info.asksPromotions,
   }
-  // A quien ya tiene su registro, su nombre le viene de ahí: no se le dice de dónde salió.
-  const nameHint = info.ownRecord
-    ? undefined
-    : info.known.from === "conversacion"
-      ? "Lo tomamos de nuestra conversación. Corrígelo si hace falta."
-      : info.known.from === "perfil"
-        ? "Lo tomamos de tu WhatsApp. Corrígelo si hace falta."
-        : undefined
-
-  const set = (patch: Partial<BookingDataDraft>, ...cleared: FieldKey[]) => {
-    onDraftChange({ ...draft, ...patch })
-    if (cleared.some((key) => errors[key])) {
-      const next = { ...errors }
-      for (const key of cleared) delete next[key]
-      setErrors(next)
-    }
-  }
+  const minorOf = (value: BookingDataDraft) =>
+    value.who === "representative" && isRealDate(value.other.birthDate) && isMinor(value.other.birthDate, info.today)
 
   /**
    * Las reglas son las del registro de pacientes; aquí solo se reparten por
    * campo y se dicen con las palabras de la pantalla. Lo que la regla rechaza
    * y esta pantalla no sabe ubicar se dice al pie, sin enviar.
    */
-  const validate = (answers: RegistrationAnswers): { errors: Errors; loose: string | null } => {
+  const validate = (value: BookingDataDraft, answers: RegistrationAnswers): { errors: Partial<Record<FieldKey, string>>; loose: string | null } => {
     const found = validateRegistrationAnswers(info.config, answers, { mode: "public", today: info.today, scope: "essentials", countryCode: info.countryCode })
-    const next: Errors = {}
+    const forOther = value.who === "representative"
+    const patientScope = forOther ? "other" : "me"
+    const next: Partial<Record<FieldKey, string>> = {}
     const used = new Set<string>()
     const put = (key: FieldKey, message: string | undefined) => {
       if (message && !next[key]) next[key] = message
     }
-    const take = (key: FieldKey, ...sources: string[]) => {
-      for (const source of sources) {
-        if (!found[source]) continue
-        used.add(source)
-        put(key, found[source])
-      }
-    }
-    const patient = draft[patientScope]
-    if (!draft.me.givenNames.trim()) put("me.givenNames", "Escribe tus nombres")
-    if (!draft.me.familyName.trim()) put("me.familyName", "Escribe tus apellidos")
+    const patient = value[patientScope]
+    if (!value.me.givenNames.trim()) put("me.givenNames", "Escribe tus nombres")
+    if (!value.me.familyName.trim()) put("me.familyName", "Escribe tus apellidos")
     if (forOther) {
-      if (!draft.other.givenNames.trim()) put("other.givenNames", "Escribe sus nombres")
-      if (!draft.other.familyName.trim()) put("other.familyName", "Escribe sus apellidos")
-      // De quien escribe, el registro solo exige el documento si representa a un menor.
-      take("me.docNumber", "representative.docNumber", "representative.docType")
-      take("relationship", "representative.relationship")
+      if (!value.other.givenNames.trim()) put("other.givenNames", "Escribe sus nombres")
+      if (!value.other.familyName.trim()) put("other.familyName", "Escribe sus apellidos")
     }
     if (!patient.docNumber.trim()) put(`${patientScope}.docNumber`, "Escribe el número de documento")
     if (!patient.birthDate) put(`${patientScope}.birthDate`, forOther ? "Escribe su fecha de nacimiento" : "Escribe tu fecha de nacimiento")
@@ -806,106 +830,110 @@ export function BookingDataForm({
     }
     if (asks.sex && !patient.sex) put(`${patientScope}.sex`, "Elige una opción")
     if (!forOther && asks.email) {
-      const email = draft.me.email.trim()
+      const email = value.me.email.trim()
       if (!email) put("me.email", "Escribe tu correo")
       else if (!EMAIL.test(email)) put("me.email", "Escribe el correo completo, como nombre@correo.com")
     }
-    take(`${patientScope}.givenNames`, "demographics.givenNames", "demographics.displayName")
-    take(`${patientScope}.familyName`, "demographics.familyName")
-    take(`${patientScope}.docNumber`, "demographics.docNumber", "demographics.docType")
-    take(`${patientScope}.docCountry`, "demographics.docCountry")
-    take(`${patientScope}.birthDate`, "demographics.birthDate")
-    take(`${patientScope}.sex`, "demographics.sex")
-    if (!forOther) take("me.email", "demographics.email")
-    if (draft.phoneIncomplete) put("phone", "Revisa el celular: está incompleto")
-    if (!phone) put("phone", "Escribe un celular para avisarte de tu cita")
-    take("phone", "demographics.phone", "representative.phone")
-    if (asks.promotions && draft.promotions === null) put("promotions", "Elige una opción")
+    if (value.phoneIncomplete) put("phone", "Revisa el celular: está incompleto")
+    if (!value.phone) put("phone", "Escribe un celular para avisarte de tu cita")
+    for (const source of RULE_SOURCES) {
+      const key = found[source] ? ruleField(source, forOther) : undefined
+      if (!key) continue
+      used.add(source)
+      put(key, found[source])
+    }
+    if (asks.promotions && value.promotions === null) put("promotions", "Elige una opción")
     used.add("privacyAccepted")
-    if (!draft.privacyAccepted) put("privacyAccepted", "Para reservar necesitamos que aceptes el aviso de privacidad")
+    if (!value.privacyAccepted) put("privacyAccepted", "Para reservar necesitamos que aceptes el aviso de privacidad")
     const loose = Object.entries(found).find(([key]) => !used.has(key))?.[1] ?? null
     return { errors: next, loose }
   }
 
-  const submit = async (event: FormEvent) => {
-    event.preventDefault()
-    if (busy) return
-    const answers = buildAnswers(profile, draft, phone, minor, asks)
-    const found = validate(answers)
-    setErrors(found.errors)
-    setSubmitError(null)
-    const first = FIELD_ORDER.find((key) => found.errors[key])
-    if (first) {
-      document.getElementById(focusId(first))?.focus()
-      return
-    }
-    if (found.loose) {
-      setSubmitError(found.loose)
-      return
-    }
-    setSubmitting(true)
-    try {
-      await submitBookingRegistration(slug, { token, submissionId, formVersion: info.config.version, answers })
-      onRegistered()
-    } catch (error) {
-      const shape = error instanceof ApiError ? error.shape : null
-      if (shape?.code === "BOOKING_ALREADY_PATIENT") {
-        // Un envío anterior sí llegó: los datos ya están guardados y solo falta reservar.
+  // Lo que ya sabemos se escribe una sola vez, al llegar: después manda lo que la persona corrija.
+  const [initial] = useState(() => (draft.known ? draft : withKnown(draft, info)))
+  const form = useAppForm({
+    defaultValues: initial,
+    validators: {
+      onSubmit: ({ value, formApi }) => {
+        const found = validate(value, buildAnswers(profile, value, value.phone, minorOf(value), asks))
+        const errors = Object.fromEntries(Object.entries(found.errors).filter((entry): entry is [string, string] => !!entry[1]))
+        if (Object.keys(errors).length > 0) return placeErrors(formApi, errors)
+        return found.loose ? { form: found.loose, fields: {} } : undefined
+      },
+    },
+    onSubmit: async ({ value }) => {
+      const answers = buildAnswers(profile, value, value.phone, minorOf(value), asks)
+      try {
+        await submitBookingRegistration(slug, { token, submissionId, formVersion: info.config.version, answers })
         onRegistered()
-      } else if (shape?.code === "FORM_CHANGED") {
-        await queryClient.invalidateQueries({ queryKey: infoKey })
-        setSubmitError(`${clinicName} actualizó su aviso de privacidad. Revísalo y vuelve a tocar «${reserveLabel}».`)
-      } else if (shape?.message) {
-        setSubmitError(shape.message)
-      } else {
-        setSubmitError("No pudimos guardar tus datos. Revisa tu conexión y vuelve a intentarlo.")
+      } catch (error) {
+        const code = error instanceof ApiError ? error.shape.code : null
+        // Un envío anterior sí llegó: los datos ya están guardados y solo falta reservar.
+        if (code === "BOOKING_ALREADY_PATIENT") {
+          onRegistered()
+          return
+        }
+        if (code === "FORM_CHANGED") await queryClient.invalidateQueries({ queryKey: infoKey })
+        throw error
       }
-    } finally {
-      setSubmitting(false)
-    }
-  }
+    },
+  })
+  const values = useStore(form.store, (state) => state.values)
+  // Lo escrito vive en la página: no se pierde al cambiar de horario.
+  useEffect(() => onDraftChange(values), [values, onDraftChange])
 
-  const setPerson = (scope: "me" | "other") => (patch: Partial<PersonDraft>, ...cleared: PersonField[]) => {
-    const keys = cleared.map((key): FieldKey => `${scope}.${key}`)
-    // De la edad de quien se atiende depende la relación y el documento de quien escribe.
-    if (scope === "other" && patch.birthDate !== undefined) keys.push("relationship", "me.docNumber")
-    set({ [scope]: { ...draft[scope], ...patch } }, ...keys)
+  const forOther = values.who === "representative"
+  const minor = minorOf(values)
+  const submitOptions: SubmitOptions = {
+    fieldMap: (key) => answerField(key, forOther),
+    formMessage: (error) => {
+      if (!(error instanceof ApiError)) return "No pudimos guardar tus datos. Revisa tu conexión y vuelve a intentarlo."
+      if (error.shape.code === "FORM_CHANGED") return `${clinicName} actualizó su aviso de privacidad. Revísalo y vuelve a tocar «${reserveLabel}».`
+      return error.shape.message ?? "No pudimos guardar tus datos. Revisa tu conexión y vuelve a intentarlo."
+    },
   }
-  const phoneId = fieldId("phone")
-  const relationshipId = fieldId("relationship")
+  const surface = useFormSurface(form, submitOptions)
+  const busy = surface.isSubmitting || reserving
+  // A quien ya tiene su registro, su nombre le viene de ahí: no se le dice de dónde salió.
+  const nameHint = info.ownRecord
+    ? undefined
+    : info.known.from === "conversacion"
+      ? "Lo tomamos de nuestra conversación. Corrígelo si hace falta."
+      : info.known.from === "perfil"
+        ? "Lo tomamos de tu WhatsApp. Corrígelo si hace falta."
+        : undefined
   const whatsappLine = `Te escribiremos por WhatsApp a este número sobre ${forOther ? "la" : "tu"} cita: la confirmación, los recordatorios y los cambios.`
 
   return (
-    <form onSubmit={(event) => void submit(event)} noValidate className="flex flex-col gap-4">
+    <form
+      onSubmit={(event) => {
+        if (busy) {
+          event.preventDefault()
+          return
+        }
+        surface.onSubmit(event)
+      }}
+      noValidate
+      className="flex flex-col gap-4"
+    >
       <FieldGroup className="gap-4">
         {info.ownRecord ? (
           <p className="text-sm">Ya tienes tu registro en {clinicName}. Aquí registras a la persona que se va a atender.</p>
         ) : (
-          <ChoiceCards
-            id={fieldId("who")}
-            legend="¿Para quién es la cita?"
-            options={[
-              ["patient", "Para mí"],
-              ["representative", "Para otra persona"],
-            ]}
-            value={draft.who}
-            onChange={(next) =>
-              set(
-                { who: next },
-                "me.docNumber",
-                "me.birthDate",
-                "me.sex",
-                "me.email",
-                "other.givenNames",
-                "other.familyName",
-                "other.docNumber",
-                "other.docCountry",
-                "other.birthDate",
-                "other.sex",
-                "relationship",
-              )
-            }
-          />
+          <form.AppField name="who">
+            {(field) => (
+              <ChoiceCards
+                id={fieldId("who")}
+                legend="¿Para quién es la cita?"
+                options={WHO_OPTIONS}
+                value={field.state.value}
+                onChange={(next) => {
+                  field.handleChange(next)
+                  clearSubmitErrors(form, (name) => WHO_CLEARS[name] === true)
+                }}
+              />
+            )}
+          </form.AppField>
         )}
 
         <div className="flex flex-col gap-1">
@@ -913,34 +941,23 @@ export function BookingDataForm({
           <p className="text-sm text-muted-foreground">Revisa lo que ya tenemos y completa lo que falta.</p>
         </div>
         <PersonFields
-          scope="me"
+          form={form}
+          fields="me"
+          idPrefix={fieldId("me")}
+          clearErrors={(which) => clearSubmitErrors(form, which)}
           profile={profile}
-          person={draft.me}
-          errors={errors}
+          asks={{ givenNames: true, familyName: true, document: true, birthDate: !forOther, sex: !forOther && asks.sex, email: !forOther && asks.email }}
           mine
-          asks={{ birthDate: !forOther, sex: !forOther && asks.sex, email: !forOther && asks.email }}
           today={info.today}
           countryCode={info.countryCode}
           nameHint={nameHint}
-          onChange={setPerson("me")}
         />
 
-        <Field data-invalid={errors.phone ? true : undefined}>
-          <FieldLabel htmlFor={phoneId}>Celular</FieldLabel>
-          <PhoneInput
-            id={phoneId}
-            className="[&_[data-slot=input-group]]:min-h-11 [&_[data-slot=select-trigger]]:min-h-11"
-            value={phone}
-            invalid={Boolean(errors.phone)}
-            aria-describedby={errors.phone ? `${phoneId}-error ${phoneId}-hint` : `${phoneId}-hint`}
-            onChange={(next, meta) => set({ phone: next, phoneTouched: true, phoneIncomplete: meta.digits.length > 0 && next === null }, "phone")}
-          />
-          {errors.phone ? <FieldError id={`${phoneId}-error`}>{errors.phone}</FieldError> : null}
-          {/* El aviso previo que pide WhatsApp para los mensajes de servicio (ADR 0040): queda guardado. */}
-          <FieldDescription id={`${phoneId}-hint`} className="text-foreground">
-            {whatsappLine}
-          </FieldDescription>
-        </Field>
+        <form.AppField name="phone">
+          {() => (
+            <CellField id={fieldId("phone")} description={whatsappLine} onIncomplete={(incomplete) => form.setFieldValue("phoneIncomplete", incomplete)} />
+          )}
+        </form.AppField>
 
         {forOther ? (
           <FieldSet className="gap-4 rounded-2xl border bg-card p-4">
@@ -948,72 +965,71 @@ export function BookingDataForm({
               La persona que se va a atender
             </FieldLegend>
             <PersonFields
-              scope="other"
+              form={form}
+              fields="other"
+              idPrefix={fieldId("other")}
+              clearErrors={(which) => clearSubmitErrors(form, which)}
               profile={profile}
-              person={draft.other}
-              errors={errors}
+              asks={{ givenNames: true, familyName: true, document: true, birthDate: true, sex: asks.sex, email: false }}
               mine={false}
-              asks={{ birthDate: true, sex: asks.sex, email: false }}
               today={info.today}
               countryCode={info.countryCode}
               birthHint="Si es menor de edad, quedas como su responsable."
-              onChange={setPerson("other")}
+              // De la edad de quien se atiende depende la relación y el documento de quien escribe.
+              onBirthDateChange={() => clearSubmitErrors(form, (name) => name === "relationship" || name === "me.docNumber")}
             />
-            <Field data-invalid={errors.relationship ? true : undefined}>
-              <FieldLabel htmlFor={relationshipId}>Tu relación con esa persona</FieldLabel>
-              <Select<Relationship>
-                value={minor ? "guardian" : draft.relationship}
-                disabled={minor}
-                onValueChange={(next) => {
-                  if (next) set({ relationship: next }, "relationship")
-                }}
-              >
-                <SelectTrigger id={relationshipId} className="min-h-11 w-full">
-                  <SelectValue>{CONTACT_RELATIONSHIP_LABELS[minor ? "guardian" : draft.relationship]}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {RELATIONSHIPS.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {CONTACT_RELATIONSHIP_LABELS[value]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {errors.relationship ? (
-                <FieldError>{errors.relationship}</FieldError>
-              ) : minor ? (
-                <FieldDescription>Es menor de edad: quedas como su tutor o responsable, con tu documento.</FieldDescription>
-              ) : null}
-            </Field>
+            <form.AppField name="relationship">
+              {(field) => (
+                <field.Control
+                  id={fieldId("relationship")}
+                  label="Tu relación con esa persona"
+                  description={minor ? "Es menor de edad: quedas como su tutor o responsable, con tu documento." : undefined}
+                >
+                  {(control) => (
+                    <Select<Relationship>
+                      value={minor ? "guardian" : field.state.value}
+                      disabled={minor}
+                      onValueChange={(next) => {
+                        if (next) field.handleChange(next)
+                      }}
+                    >
+                      <SelectTrigger
+                        id={control.id}
+                        aria-invalid={control.invalid || undefined}
+                        aria-describedby={control.describedBy}
+                        className="min-h-11 w-full"
+                      >
+                        <SelectValue>{CONTACT_RELATIONSHIP_LABELS[minor ? "guardian" : field.state.value]}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {RELATIONSHIPS.map((value) => (
+                          <SelectItem key={value} value={value}>
+                            {CONTACT_RELATIONSHIP_LABELS[value]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </field.Control>
+              )}
+            </form.AppField>
           </FieldSet>
         ) : null}
 
         {asks.promotions ? (
-          <PromotionsQuestion
-            id={fieldId("promotions")}
-            clinicName={clinicName}
-            value={draft.promotions}
-            error={errors.promotions}
-            onChange={(promotions) => set({ promotions }, "promotions")}
-          />
+          <form.AppField name="promotions">{() => <PromotionsQuestion id={fieldId("promotions")} clinicName={clinicName} />}</form.AppField>
         ) : null}
 
-        <PrivacyCheck
-          id={fieldId("privacyAccepted")}
-          slug={slug}
-          clinicName={clinicName}
-          notice={info.config.privacyNotice}
-          checked={draft.privacyAccepted}
-          error={errors.privacyAccepted}
-          onChange={(privacyAccepted) => set({ privacyAccepted }, "privacyAccepted")}
-        />
+        <form.AppField name="privacyAccepted">
+          {() => <PrivacyCheck id={fieldId("privacyAccepted")} slug={slug} clinicName={clinicName} notice={info.config.privacyNotice} />}
+        </form.AppField>
       </FieldGroup>
 
       {/* En teléfono el botón queda a la vista mientras se llena el formulario. */}
       <div className="sticky bottom-0 -mx-4 flex flex-col gap-2 border-t bg-canvas p-4 sm:static sm:mx-0 sm:border-t-0 sm:p-0">
-        {submitError ? (
+        {surface.error ? (
           <p role="alert" className="text-sm text-destructive">
-            {submitError}
+            {surface.error}
           </p>
         ) : null}
         <SubmitButton type="submit" className="min-h-12 w-full text-base" pending={busy}>
@@ -1054,15 +1070,24 @@ export interface YouDraft {
   privacy: boolean
 }
 
-export function emptyYouDraft(): YouDraft {
+function emptyYouDraft(): YouDraft {
   return { givenNames: "", familyName: "", docType: "", docNumber: "", docCountry: "", birthDate: "", sex: "", email: "", phone: null, phoneIncomplete: false, promotions: null, privacy: false }
 }
 
 type YouKey = Exclude<YouField, "document"> | "docNumber" | "docCountry" | "promotions" | "privacy"
 export type YouErrors = Partial<Record<YouKey, string>>
-const YOU_ORDER: readonly YouKey[] = ["givenNames", "familyName", "docNumber", "docCountry", "birthDate", "sex", "email", "phone", "promotions", "privacy"]
 const youId = (key: string) => `reserva-tu-${key}`
-const youFocusId = (key: YouKey) => (key === "sex" ? `${youId(key)}-${FIRST_SEX}` : key === "promotions" ? promotionsFocusId(youId(key)) : youId(key))
+/** Los datos de la persona en el formulario de quien ya es paciente: con el mismo nombre. */
+const YOU_PERSON = {
+  givenNames: "givenNames",
+  familyName: "familyName",
+  docType: "docType",
+  docNumber: "docNumber",
+  docCountry: "docCountry",
+  birthDate: "birthDate",
+  sex: "sex",
+  email: "email",
+} as const
 
 /** Lo pendiente de quien ya es paciente: lo que falta de lo que este paso pide, y lo que aún no aceptó o respondió. */
 export function checkYou(
@@ -1101,13 +1126,24 @@ export function checkYou(
   return errors
 }
 
-/** Lleva el foco al primer dato con error; dice si había alguno. */
-export function focusFirstYouError(errors: YouErrors): boolean {
-  const first = YOU_ORDER.find((key) => errors[key])
-  if (!first) return false
-  document.getElementById(youFocusId(first))?.focus()
-  return true
+/**
+ * El formulario de lo que escribe quien ya es paciente al reservar, cambiar o
+ * agendar: vive en la página, que decide qué pide (`validate`, con
+ * `checkYou`) y qué hace al enviar (`submit`, que lanza si el servidor lo
+ * rechaza).
+ */
+export function useYouForm({ validate, submit }: { validate: (value: YouDraft) => YouErrors; submit: (value: YouDraft) => Promise<void> }) {
+  const [defaultValues] = useState(emptyYouDraft)
+  return useAppForm({
+    defaultValues,
+    validators: {
+      onSubmit: ({ value, formApi }) =>
+        placeErrors(formApi, Object.fromEntries(Object.entries(validate(value)).filter((entry): entry is [string, string] => !!entry[1]))),
+    },
+    onSubmit: ({ value }) => submit(value),
+  })
 }
+export type YouForm = ReturnType<typeof useYouForm>
 
 /** Lo que guarda la reserva junto con la cita: lo que faltaba y lo que acepta o responde. */
 export function youInput(
@@ -1150,9 +1186,7 @@ export function YouReview({
   you,
   fields,
   pending,
-  draft,
-  errors,
-  onChange,
+  form,
   profile,
   today,
   countryCode,
@@ -1162,10 +1196,7 @@ export function YouReview({
   you: NonNullable<PersonalLinkView["you"]>
   fields: readonly YouField[]
   pending: { privacy: boolean; promotions: boolean } | null
-  draft: YouDraft
-  errors: YouErrors
-  /** Lo que cambió y los errores que deja de tener. */
-  onChange: (patch: Partial<YouDraft>, ...cleared: YouKey[]) => void
+  form: YouForm
   profile: ClinicalCountryProfile
   today: string
   countryCode: string | null
@@ -1190,87 +1221,28 @@ export function YouReview({
           <FieldLegend variant="label" className="mb-0 text-base font-semibold">
             {fields.length === 1 ? "Nos falta un dato:" : `Nos faltan ${fields.length} datos:`}
           </FieldLegend>
-          {asks("givenNames") ? (
-            <TextField
-              id={youId("givenNames")}
-              label="Nombres"
-              autoComplete="given-name"
-              maxLength={100}
-              value={draft.givenNames}
-              error={errors.givenNames}
-              onChange={(givenNames) => onChange({ givenNames }, "givenNames")}
-            />
-          ) : null}
-          {asks("familyName") ? (
-            <TextField
-              id={youId("familyName")}
-              label="Apellidos"
-              autoComplete="family-name"
-              maxLength={200}
-              value={draft.familyName}
-              error={errors.familyName}
-              onChange={(familyName) => onChange({ familyName }, "familyName")}
-            />
-          ) : null}
-          {asks("document") ? (
-            <DocumentFields
-              idOf={(part) => youId(part)}
-              profile={profile}
-              docType={draft.docType}
-              docNumber={draft.docNumber}
-              docCountry={draft.docCountry}
-              numberError={errors.docNumber}
-              countryError={errors.docCountry}
-              onChange={(patch) => onChange(patch, "docNumber", "docCountry")}
-            />
-          ) : null}
-          {asks("birthDate") ? (
-            <BirthDateField
-              id={youId("birthDate")}
-              today={today}
-              countryCode={countryCode}
-              value={draft.birthDate}
-              error={errors.birthDate}
-              onChange={(birthDate) => onChange({ birthDate }, "birthDate")}
-            />
-          ) : null}
-          {asks("sex") ? (
-            <ChoiceCards
-              id={youId("sex")}
-              legend="Sexo"
-              options={SEX_OPTIONS}
-              value={draft.sex || null}
-              error={errors.sex}
-              onChange={(sex) => onChange({ sex }, "sex")}
-            />
-          ) : null}
-          {asks("email") ? (
-            <TextField
-              id={youId("email")}
-              label="Correo"
-              type="email"
-              inputMode="email"
-              placeholder="nombre@correo.com"
-              autoComplete="email"
-              maxLength={200}
-              value={draft.email}
-              error={errors.email}
-              onChange={(email) => onChange({ email }, "email")}
-            />
-          ) : null}
+          <PersonFields
+            form={form}
+            fields={YOU_PERSON}
+            idPrefix="reserva-tu"
+            clearErrors={(which) => clearSubmitErrors(form, which)}
+            profile={profile}
+            asks={{
+              givenNames: asks("givenNames"),
+              familyName: asks("familyName"),
+              document: asks("document"),
+              birthDate: asks("birthDate"),
+              sex: asks("sex"),
+              email: asks("email"),
+            }}
+            mine
+            today={today}
+            countryCode={countryCode}
+          />
           {asks("phone") ? (
-            <Field data-invalid={errors.phone ? true : undefined}>
-              <FieldLabel htmlFor={youId("phone")}>Celular</FieldLabel>
-              <PhoneInput
-                id={youId("phone")}
-                className="[&_[data-slot=input-group]]:min-h-11 [&_[data-slot=select-trigger]]:min-h-11"
-                value={draft.phone}
-                invalid={Boolean(errors.phone)}
-                aria-describedby={errors.phone ? `${youId("phone")}-error` : undefined}
-                onChange={(next, meta) => onChange({ phone: next, phoneIncomplete: meta.digits.length > 0 && next === null }, "phone")}
-              />
-              {errors.phone ? <FieldError id={`${youId("phone")}-error`}>{errors.phone}</FieldError> : null}
-            </Field>
+            <form.AppField name="phone">
+              {() => <CellField id={youId("phone")} onIncomplete={(incomplete) => form.setFieldValue("phoneIncomplete", incomplete)} />}
+            </form.AppField>
           ) : null}
         </FieldSet>
       ) : null}
@@ -1279,27 +1251,14 @@ export function YouReview({
       <p className="text-sm">{whatsappLine}</p>
 
       {pending?.promotions ? (
-        <PromotionsQuestion
-          id={youId("promotions")}
-          clinicName={clinicName}
-          value={draft.promotions}
-          error={errors.promotions}
-          onChange={(promotions) => onChange({ promotions }, "promotions")}
-        />
+        <form.AppField name="promotions">{() => <PromotionsQuestion id={youId("promotions")} clinicName={clinicName} />}</form.AppField>
       ) : null}
       {pending?.privacy ? (
-        <PrivacyCheck
-          id={youId("privacy")}
-          slug={slug}
-          clinicName={clinicName}
-          checked={draft.privacy}
-          error={errors.privacy}
-          onChange={(privacy) => onChange({ privacy }, "privacy")}
-        />
+        <form.AppField name="privacy">{() => <PrivacyCheck id={youId("privacy")} slug={slug} clinicName={clinicName} />}</form.AppField>
       ) : null}
     </FieldGroup>
   )
 }
 
-/** La pregunta de novedades al cambiar la cita o agendar lo aceptado: su id, para el foco. */
+/** La pregunta de novedades al cambiar la cita o agendar lo aceptado: su id. */
 export const youPromotionsId = youId("promotions")

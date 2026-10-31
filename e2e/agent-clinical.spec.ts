@@ -21,7 +21,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   const apiPath = `/api/patients/${patient.id}`
   // La clínica nace con las especialidades de la biblioteca: el servicio apunta a la suya (ADR 0039).
   const specialties = await call<Array<{ id: string; key: string }>>(page, "GET", "/api/clinical-forms/specialties", org.slug)
-  await call(page, "POST", "/api/services", org.slug, {
+  const endodontics = await call<{ id: string }>(page, "POST", "/api/services", org.slug, {
     name: "Endodoncia multirradicular", specialtyId: specialties.find((item) => item.key === "endodoncia")!.id, scope: "tooth", priceCents: 65000, currency: "PEN",
     // En el Perú cada servicio propio lleva su código CPMS (ADR 0069).
     officialCode: "D3330",
@@ -282,6 +282,15 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await page.getByRole("dialog").getByRole("button", { name: "Cancelar" }).click()
 
   // --- Una sugerencia sin confirmar: al firmar viene marcada; desmarcada, no entra a la historia ---
+  // Con un consentimiento por firmar (la endodoncia de hoy pide el suyo, aún sin publicar): firmar
+  // con lo dictado no pide el motivo, que no está en ese diálogo; sigue al cierre para darlo.
+  const consent = await call<{ id: string }>(page, "POST", "/api/clinical-forms/consent-templates", org.slug, {
+    key: `endodoncia-${crypto.randomUUID().slice(0, 8)}`,
+    title: "Endodoncia",
+    body: "Tratamiento de conductos de la pieza indicada, con anestesia local, en una o más citas.",
+  }, 201)
+  await call(page, "PUT", `/api/clinical-forms/consent-templates/${consent.id}/services`, org.slug, { serviceIds: [endodontics.id] })
+  await call(page, "POST", `${apiPath}/encounters/${encounter.id}/procedures`, org.slug, { serviceId: endodontics.id, toothNumber: 26 }, 201)
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}/encounters/${encounter.id}`))
   await expect(closing).toContainText("Si quedan sugerencias sin revisar, te lo pregunta antes de firmar.")
@@ -300,6 +309,16 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await dictated.getByRole("checkbox").click()
   await expect(dictated).toContainText("desmarcada: no entra")
   await sign.getByRole("button", { name: "Firmar sin lo dictado" }).click()
+  const closingDialog = page.getByRole("dialog", { name: "Finalizar y firmar" })
+  await expect(sign).toBeHidden()
+  await expect(closingDialog).toContainText("Esta clínica aún no publicó el consentimiento de «Endodoncia»")
+  // Lo dictado ya se resolvió: lo desmarcado no entró y no se vuelve a preguntar.
+  expect((await dictation()).suggestions).toEqual([])
+  expect((await detail()).encounter.status).toBe("borrador")
+  await closingDialog.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
+  await expect(closingDialog.getByText("Escribe por qué sigues sin el consentimiento, o fírmalo ahora")).toBeVisible()
+  await closingDialog.getByLabel("Seguir sin él: ¿por qué?").fill("Urgencia: se firmará en la próxima cita")
+  await closingDialog.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
   await expect.poll(async () => (await detail()).encounter.status, { timeout: 30_000 }).toBe("finalizada")
   const final = await detail()
   expect(final.diagnoses).toHaveLength(1)

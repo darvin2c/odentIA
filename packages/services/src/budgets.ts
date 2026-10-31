@@ -1,41 +1,57 @@
+import {
+  BUDGET_OPTIONS_MAX,
+  budgetOptionLabel,
+  budgetStateText,
+  type ConsentSections,
+  diagnosisCodeLabel,
+  isClinicalProduct,
+  type PatientGuide,
+  type ProductWords,
+  parsePatientGuide,
+  productWords,
+  sumAcceptedCents,
+} from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import {
-  orgCounter,
+  type BudgetDeliveredSnapshot,
+  diagnosisCatalog,
   encounterProcedure,
+  orgCounter,
   patient,
+  patientAllergy,
   patientCharge,
   patientPaymentApplication,
+  serviceCatalog,
   treatmentBudget,
   treatmentBudgetItem,
   treatmentBudgetOption,
   treatmentPlan,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
-import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
+import { consentTemplate, consentTemplateService } from "@odentia/db/schema/clinical-forms"
+import { contact } from "@odentia/db/schema/crm"
+import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { promotion as promotionTable } from "@odentia/db/schema/promotions"
-import {
-  BUDGET_OPTIONS_MAX,
-  budgetOptionLabel,
-  budgetStateText,
-  sumAcceptedCents,
-} from "@odentia/clinical"
-import { and, asc, eq, inArray, isNull, type SQL, type SQLWrapper, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNull, type SQL, type SQLWrapper, sql } from "drizzle-orm"
+import { livePersonalLinkToken } from "./booking-links.js"
 import { budgetAwaitsAnswer } from "./budget-awaiting.js"
+import { documentSecretsKey } from "./document-check.js"
+import { type DocumentClinic, loadDocumentClinic } from "./document-clinic.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
-import { requireOrgCurrency } from "./locale.js"
+import { NEUTRAL_TIMEZONE, requireOrgCurrency } from "./locale.js"
 import { decideBudgetOpportunity, linkPresentedBudget } from "./opportunities.js"
-import { requirePatient } from "./patients.js"
-import type { PlanItemDecision } from "./plan.js"
-import { requireProfessionalSignature } from "./professional-profiles.js"
-import { isPromotionLive, requirePromotionPrice } from "./promotions.js"
-
-import { branchAddressColumns, branchAddressWriter } from "./branches.js"
-import { requireDecisionContact } from "./responsibilities.js"
-import { assertExecutableCodings } from "./procedure-codings.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
+import { requirePatient } from "./patients.js"
+import { listPaymentMethods } from "./payment-methods.js"
+import type { PlanItemDecision } from "./plan.js"
+import { assertExecutableCodings } from "./procedure-codings.js"
 import type { ProductSite, SiteFields } from "./product-hooks.js"
 import { productHooks } from "./products.js"
+import { requireProfessionalSignature } from "./professional-profiles.js"
+import { isPromotionLive, requirePromotionPrice } from "./promotions.js"
+import { personalLinkUrl } from "./public-links.js"
+import { requireDecisionContact } from "./responsibilities.js"
 
 /**
  * Documento económico de un plan clínico: cabecera con decisión auditada +
@@ -95,6 +111,10 @@ export interface BudgetOptionWithTotals {
   position: number
   /** «Opción A». */
   label: string
+  /** «Conservar el molar» y qué pesar al elegirla; nulos si no se escribieron. */
+  name: string | null
+  pros: string | null
+  cons: string | null
   isRecommended: boolean
   /** `pendiente` mientras decide, `elegida` o `no_elegida`. */
   decision: string
@@ -106,7 +126,10 @@ export interface BudgetOptionWithTotals {
 }
 
 /** Visitas que cuenta una línea: las previstas si se cobra por sesión; si no, una. */
-export function budgetLineUnits(line: { billingMode: string; sessionsPlanned: number | null }): number {
+export function budgetLineUnits(line: {
+  billingMode: string
+  sessionsPlanned: number | null
+}): number {
   return line.billingMode === "session" ? Math.max(line.sessionsPlanned ?? 1, 1) : 1
 }
 
@@ -121,8 +144,15 @@ function lineTotal(
   return total
 }
 
+/**
+ * Lo que se dice de un presupuesto sin ser su hoja: `findings` es dato clínico y nunca
+ * viaja aquí (ni al agente ni a lo público). Se lee con `getBudgetPresentation`, si
+ * quien pregunta puede, o sale en su hoja a quien corresponde.
+ */
+export type BudgetPublicRow = Omit<BudgetRow, "findings">
+
 /** Presupuesto con líneas snapshot y totales enteros (null = precio desconocido). */
-export type BudgetWithTotals = BudgetRow & {
+export type BudgetWithTotals = BudgetPublicRow & {
   /** Todas las líneas, de todas las opciones (cada una dice su `optionId`). */
   items: BudgetLineWithStatus[]
   /** Las opciones, en orden; con una sola, la pantalla no habla de opciones. */
@@ -137,6 +167,8 @@ export type BudgetWithTotals = BudgetRow & {
   tariffTotalCents: number | null
   /** Rebaja total acordada (tarifa − final; null si algún precio es desconocido). */
   discountCents: number | null
+  /** Hay texto de «Lo que encontramos», sin decir cuál. */
+  hasFindings: boolean
   /** Espera la respuesta de quien decide (`budgetAwaitsAnswer`): la pantalla no lo deduce del estado. */
   awaitsAnswer: boolean
   /** El estado dicho con un solo nombre en toda la aplicación (`budgetStateText`). */
@@ -194,16 +226,30 @@ async function assertOwnBudget(
   const [own] = await tx
     .select({ id: treatmentBudget.id })
     .from(treatmentBudget)
-    .where(and(eq(treatmentBudget.id, budgetId), eq(treatmentBudget.organizationId, orgId), ownBudgetSql(actorUserId)))
+    .where(
+      and(
+        eq(treatmentBudget.id, budgetId),
+        eq(treatmentBudget.organizationId, orgId),
+        ownBudgetSql(actorUserId),
+      ),
+    )
     .limit(1)
   if (!own) throw new ServiceError("BUDGET_NOT_OWN_PLAN", 403, message)
 }
 
 /** El odontólogo solo presupuesta lo que él indicó. */
-function assertOwnItems(items: ReadonlyArray<{ createdBy: string | null }>, actorUserId: string, memberRole?: string): void {
+function assertOwnItems(
+  items: ReadonlyArray<{ createdBy: string | null }>,
+  actorUserId: string,
+  memberRole?: string,
+): void {
   if (!isProfessional(memberRole)) return
   if (items.some((item) => item.createdBy !== actorUserId)) {
-    throw new ServiceError("BUDGET_NOT_OWN_PLAN", 403, "Solo puedes presupuestar lo que indicaste tú")
+    throw new ServiceError(
+      "BUDGET_NOT_OWN_PLAN",
+      403,
+      "Solo puedes presupuestar lo que indicaste tú",
+    )
   }
 }
 
@@ -218,7 +264,14 @@ export async function requireOwnBudget(
   actorUserId: string,
   memberRole?: string,
 ): Promise<void> {
-  await assertOwnBudget(tx, orgId, budgetId, actorUserId, memberRole, "Solo puedes actuar sobre presupuestos de lo que indicaste tú")
+  await assertOwnBudget(
+    tx,
+    orgId,
+    budgetId,
+    actorUserId,
+    memberRole,
+    "Solo puedes actuar sobre presupuestos de lo que indicaste tú",
+  )
 }
 
 /**
@@ -235,7 +288,10 @@ export async function readBillingModes(
   const ids = [...new Set(serviceIds.filter((id) => typeof id === "string" && id))].sort()
   if (ids.length === 0) return out
   const rows = await tx.execute(
-    sql`select "id", "billing_mode" from "service_catalog" where "organization_id" = ${orgId} and "id" in (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})`,
+    sql`select "id", "billing_mode" from "service_catalog" where "organization_id" = ${orgId} and "id" in (${sql.join(
+      ids.map((id) => sql`${id}`),
+      sql`, `,
+    )})`,
   )
   for (const row of rows as unknown as Array<{ id: string; billing_mode: string }>) {
     out[row.id] = row.billing_mode === "session" ? "session" : "treatment"
@@ -379,7 +435,12 @@ async function listOptions(tx: Db, orgId: string, budgetIds: string[]): Promise<
   return tx
     .select()
     .from(treatmentBudgetOption)
-    .where(and(eq(treatmentBudgetOption.organizationId, orgId), inArray(treatmentBudgetOption.budgetId, budgetIds)))
+    .where(
+      and(
+        eq(treatmentBudgetOption.organizationId, orgId),
+        inArray(treatmentBudgetOption.budgetId, budgetIds),
+      ),
+    )
     .orderBy(asc(treatmentBudgetOption.position))
 }
 
@@ -482,7 +543,9 @@ function sumCents(values: Array<number | null>): number | null {
 }
 
 /** La opción que vale: la elegida o, mientras decide, la recomendada (o la primera). */
-export function valueOptionOf<T extends { decision: string; isRecommended: boolean }>(options: readonly T[]): T | null {
+export function valueOptionOf<T extends { decision: string; isRecommended: boolean }>(
+  options: readonly T[],
+): T | null {
   return (
     options.find((option) => option.decision === "elegida") ??
     options.find((option) => option.isRecommended) ??
@@ -505,11 +568,17 @@ export function budgetValueOptionSql(budget: { id: SQLWrapper; organizationId: S
 }
 
 /** Las visitas que cuenta una línea (`budgetLineUnits`), en SQL sobre el alias de la línea. */
-export function budgetLineUnitsSql(line: { billingMode: SQLWrapper; sessionsPlanned: SQLWrapper }): SQL {
+export function budgetLineUnitsSql(line: {
+  billingMode: SQLWrapper
+  sessionsPlanned: SQLWrapper
+}): SQL {
   return sql`(case when ${line.billingMode} = 'session' then greatest(coalesce(${line.sessionsPlanned}, 1), 1) else 1 end)`
 }
 
-function optionTotals(option: BudgetOptionRow, items: BudgetLineWithStatus[]): BudgetOptionWithTotals {
+function optionTotals(
+  option: BudgetOptionRow,
+  items: BudgetLineWithStatus[],
+): BudgetOptionWithTotals {
   const lines = items.filter((line) => line.optionId === option.id)
   const totalCents = sumCents(lines.map((line) => line.lineTotalCents))
   const tariffTotalCents = sumCents(lines.map((line) => line.tariffLineTotalCents))
@@ -517,23 +586,40 @@ function optionTotals(option: BudgetOptionRow, items: BudgetLineWithStatus[]): B
     id: option.id,
     position: option.position,
     label: budgetOptionLabel(option.position),
+    name: option.name,
+    pros: option.pros,
+    cons: option.cons,
     isRecommended: option.isRecommended,
     decision: option.decision,
     lineCount: lines.length,
     totalCents,
     acceptedCents: sumAcceptedCents(lines),
     tariffTotalCents,
-    discountCents: totalCents == null || tariffTotalCents == null ? null : tariffTotalCents - totalCents,
+    discountCents:
+      totalCents == null || tariffTotalCents == null ? null : tariffTotalCents - totalCents,
   }
 }
 
-function withTotals(budget: BudgetRow, items: BudgetLineWithStatus[], optionRows: BudgetOptionRow[]): BudgetWithTotals {
+/** Sin el texto clínico: lo que puede salir de aquí a cualquiera con `budgets.read`. */
+function withoutFindings<T extends { findings: string | null }>(row: T): Omit<T, "findings"> {
+  const { findings: _clinical, ...rest } = row
+  return rest
+}
+
+function withTotals(
+  fullBudget: BudgetRow,
+  items: BudgetLineWithStatus[],
+  optionRows: BudgetOptionRow[],
+): BudgetWithTotals {
+  const budget = withoutFindings(fullBudget)
+  const hasFindings = !!fullBudget.findings
   const options = optionRows.map((option) => optionTotals(option, items))
   // El presupuesto vale lo de una sola opción (la elegida o la recomendada): lo
   // que se cobra por sesión cuenta todas sus visitas previstas.
   const value = valueOptionOf(options)
   return {
     ...budget,
+    hasFindings,
     items,
     options,
     totalCents: value ? value.totalCents : 0,
@@ -547,20 +633,31 @@ function withTotals(budget: BudgetRow, items: BudgetLineWithStatus[], optionRows
   }
 }
 
-async function loadBudget(tx: Db, orgId: string, patientId: string, budget: BudgetRow): Promise<BudgetWithTotals> {
-  return withTotals(budget, await listBudgetLines(tx, orgId, patientId, budget.id), await listOptions(tx, orgId, [budget.id]))
+async function loadBudget(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  budget: BudgetRow,
+): Promise<BudgetWithTotals> {
+  return withTotals(
+    budget,
+    await listBudgetLines(tx, orgId, patientId, budget.id),
+    await listOptions(tx, orgId, [budget.id]),
+  )
 }
 
 function assertTitle(title: string | null | undefined, fallback: string): string {
   const value = (title?.trim() || fallback.trim()) ?? ""
-  if (!value || value.length > 200) throw invalidField("title", "Escribe un título de 1 a 200 caracteres.")
+  if (!value || value.length > 200)
+    throw invalidField("title", "Escribe un título de 1 a 200 caracteres.")
   return value
 }
 
 function assertPatchTitle(title: string | undefined): string | undefined {
   if (title === undefined) return undefined
   const value = title.trim()
-  if (!value || value.length > 200) throw invalidField("title", "Escribe un título de 1 a 200 caracteres.")
+  if (!value || value.length > 200)
+    throw invalidField("title", "Escribe un título de 1 a 200 caracteres.")
   return value
 }
 
@@ -748,7 +845,13 @@ async function insertDraftLines(
 }
 
 /** Un tratamiento sin líneas en el presupuesto deja de apuntarlo: vuelve a quedar sin presupuestar. */
-async function releaseOrphanItems(tx: Db, orgId: string, patientId: string, budgetId: string, itemIds: string[]): Promise<void> {
+async function releaseOrphanItems(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  budgetId: string,
+  itemIds: string[],
+): Promise<void> {
   if (itemIds.length === 0) return
   const still = await tx
     .select({ planItemId: treatmentBudgetItem.planItemId })
@@ -777,7 +880,12 @@ async function releaseOrphanItems(tx: Db, orgId: string, patientId: string, budg
 }
 
 /** La opción pedida del presupuesto, o todas si no se pide ninguna. */
-async function targetOptions(tx: Db, orgId: string, budgetId: string, optionId?: string | null): Promise<BudgetOptionRow[]> {
+async function targetOptions(
+  tx: Db,
+  orgId: string,
+  budgetId: string,
+  optionId?: string | null,
+): Promise<BudgetOptionRow[]> {
   const options = await listOptions(tx, orgId, [budgetId])
   if (!optionId) return options
   const option = options.find((row) => row.id === optionId)
@@ -787,13 +895,13 @@ async function targetOptions(tx: Db, orgId: string, budgetId: string, optionId?:
 
 function assertDraftOwnItems(current: BudgetRow): void {
   if (current.status !== "borrador") {
-    throw conflict("BUDGET_STATUS", "Solo a un presupuesto en borrador se le cambian los tratamientos")
+    throw conflict(
+      "BUDGET_STATUS",
+      "Solo a un presupuesto en borrador se le cambian los tratamientos",
+    )
   }
   if (current.supersedesBudgetId) {
-    throw conflict(
-      "BUDGET_REVISION_ITEMS",
-      "Los tratamientos de una revisión se eligen al crearla",
-    )
+    throw conflict("BUDGET_REVISION_ITEMS", "Los tratamientos de una revisión se eligen al crearla")
   }
 }
 
@@ -822,10 +930,26 @@ export async function addBudgetItems(
   const current = await lockForWrite(tx, orgId, patientId, budgetId)
   await assertOwnBudget(tx, orgId, budgetId, actorUserId, opts.memberRole)
   assertDraftOwnItems(current)
-  const items = await requireQuotableItems(tx, orgId, patientId, current.planId, input.itemIds, budgetId)
+  const items = await requireQuotableItems(
+    tx,
+    orgId,
+    patientId,
+    current.planId,
+    input.itemIds,
+    budgetId,
+  )
   assertOwnItems(items, actorUserId, opts.memberRole)
-  const added = await addLinesToOptions(tx, orgId, actorUserId, patientId, current, items, input.optionId)
-  if (added === 0) throw conflict("ITEM_ALREADY_QUOTED", "El tratamiento ya está en ese presupuesto")
+  const added = await addLinesToOptions(
+    tx,
+    orgId,
+    actorUserId,
+    patientId,
+    current,
+    items,
+    input.optionId,
+  )
+  if (added === 0)
+    throw conflict("ITEM_ALREADY_QUOTED", "El tratamiento ya está en ese presupuesto")
   await audit(tx, orgId, actorUserId, "budget.items_added", budgetId, {
     patientId,
     itemIds: items.map((item) => item.id),
@@ -858,7 +982,12 @@ async function addLinesToOptions(
   const present = await tx
     .select({ optionId: treatmentBudgetItem.optionId, planItemId: treatmentBudgetItem.planItemId })
     .from(treatmentBudgetItem)
-    .where(and(eq(treatmentBudgetItem.organizationId, orgId), eq(treatmentBudgetItem.budgetId, budget.id)))
+    .where(
+      and(
+        eq(treatmentBudgetItem.organizationId, orgId),
+        eq(treatmentBudgetItem.budgetId, budget.id),
+      ),
+    )
   // Lo que ya está en una opción no se repite en ella.
   let added = 0
   for (const option of options) {
@@ -866,7 +995,17 @@ async function addLinesToOptions(
       (item) => !present.some((row) => row.optionId === option.id && row.planItemId === item.id),
     )
     added += missing.length
-    await insertDraftLines(tx, orgId, actorUserId, patientId, budget.planId, budget.id, option.id, missing, billingModes)
+    await insertDraftLines(
+      tx,
+      orgId,
+      actorUserId,
+      patientId,
+      budget.planId,
+      budget.id,
+      option.id,
+      missing,
+      billingModes,
+    )
   }
   return added
 }
@@ -902,9 +1041,11 @@ export async function removeBudgetItems(
   const options = await targetOptions(tx, orgId, budgetId, input.optionId)
   const lines = await listBudgetLines(tx, orgId, patientId, budgetId)
   const removed = lines.filter(
-    (line) => ids.includes(line.planItemId) && options.some((option) => option.id === line.optionId),
+    (line) =>
+      ids.includes(line.planItemId) && options.some((option) => option.id === line.optionId),
   )
-  if (new Set(removed.map((line) => line.planItemId)).size !== ids.length) throw notFound("Línea del presupuesto")
+  if (new Set(removed.map((line) => line.planItemId)).size !== ids.length)
+    throw notFound("Línea del presupuesto")
   if (isProfessional(opts.memberRole)) {
     const owners = await tx
       .select({ createdBy: treatmentPlanItem.createdBy })
@@ -912,16 +1053,17 @@ export async function removeBudgetItems(
       .where(and(eq(treatmentPlanItem.organizationId, orgId), inArray(treatmentPlanItem.id, ids)))
     assertOwnItems(owners, actorUserId, opts.memberRole)
   }
-  await tx
-    .delete(treatmentBudgetItem)
-    .where(
-      and(
-        eq(treatmentBudgetItem.organizationId, orgId),
-        eq(treatmentBudgetItem.patientId, patientId),
-        eq(treatmentBudgetItem.budgetId, budgetId),
-        inArray(treatmentBudgetItem.id, removed.map((line) => line.id)),
+  await tx.delete(treatmentBudgetItem).where(
+    and(
+      eq(treatmentBudgetItem.organizationId, orgId),
+      eq(treatmentBudgetItem.patientId, patientId),
+      eq(treatmentBudgetItem.budgetId, budgetId),
+      inArray(
+        treatmentBudgetItem.id,
+        removed.map((line) => line.id),
       ),
-    )
+    ),
+  )
   await releaseOrphanItems(tx, orgId, patientId, budgetId, ids)
   await audit(tx, orgId, actorUserId, "budget.items_removed", budgetId, {
     patientId,
@@ -943,7 +1085,11 @@ export async function removeBudgetItems(
 }
 
 /** El borrador de la persona (uno solo, salvo el de una revisión). */
-export async function findDraftBudget(tx: Db, orgId: string, patientId: string): Promise<BudgetRow | null> {
+export async function findDraftBudget(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+): Promise<BudgetRow | null> {
   const [row] = await tx
     .select()
     .from(treatmentBudget)
@@ -989,7 +1135,14 @@ async function insertDraftBudget(
   if (!budget) throw new Error("No se pudo crear el presupuesto")
   const [option] = await tx
     .insert(treatmentBudgetOption)
-    .values({ organizationId: orgId, patientId, budgetId: budget.id, position: 1, isRecommended: true, createdBy: actorUserId })
+    .values({
+      organizationId: orgId,
+      patientId,
+      budgetId: budget.id,
+      position: 1,
+      isRecommended: true,
+      createdBy: actorUserId,
+    })
     .returning()
   if (!option) throw new Error("No se pudo crear la opción del presupuesto")
   await audit(tx, orgId, actorUserId, "budget.created", budget.id, {
@@ -1021,17 +1174,32 @@ export async function createBudget(
   const draft = await findDraftBudget(tx, orgId, patientId)
   if (draft) {
     if (draft.planId !== plan.id) {
-      throw conflict("BUDGET_PLAN_MISMATCH", "La persona ya tiene un presupuesto por enviar de otro plan: envíalo o anúlalo antes")
+      throw conflict(
+        "BUDGET_PLAN_MISMATCH",
+        "La persona ya tiene un presupuesto por enviar de otro plan: envíalo o anúlalo antes",
+      )
     }
     // Lo que ya está en el borrador no se vuelve a añadir: preparar otra vez es sumar lo nuevo.
     const present = await tx
       .selectDistinct({ planItemId: treatmentBudgetItem.planItemId })
       .from(treatmentBudgetItem)
-      .where(and(eq(treatmentBudgetItem.organizationId, orgId), eq(treatmentBudgetItem.budgetId, draft.id)))
+      .where(
+        and(
+          eq(treatmentBudgetItem.organizationId, orgId),
+          eq(treatmentBudgetItem.budgetId, draft.id),
+        ),
+      )
     const fresh = ids.filter((id) => !present.some((row) => row.planItemId === id))
     if (fresh.length === 0) {
       // Devolver el borrador también es leerlo: el odontólogo solo el que es suyo.
-      await assertOwnBudget(tx, orgId, draft.id, actorUserId, opts.memberRole, "Solo puedes presupuestar lo que indicaste tú")
+      await assertOwnBudget(
+        tx,
+        orgId,
+        draft.id,
+        actorUserId,
+        opts.memberRole,
+        "Solo puedes presupuestar lo que indicaste tú",
+      )
       return getBudgetDetail(tx, orgId, patientId, draft.id)
     }
     return addBudgetItems(tx, orgId, actorUserId, patientId, draft.id, { itemIds: fresh }, opts)
@@ -1040,18 +1208,41 @@ export async function createBudget(
   assertOwnItems(items, actorUserId, opts.memberRole)
   // La moneda es la de sus tratamientos (una sola); nunca la de un país fijo.
   const currency = items[0]?.currency ?? (await requireOrgCurrency(tx, orgId))
-  const { budget, option } = await insertDraftBudget(tx, orgId, actorUserId, patientId, plan, currency, input)
+  const { budget, option } = await insertDraftBudget(
+    tx,
+    orgId,
+    actorUserId,
+    patientId,
+    plan,
+    currency,
+    input,
+  )
   const billingModes = await readBillingModes(
     tx,
     orgId,
     items.map((item) => item.serviceId).filter((id): id is string => id !== null),
   )
-  await insertDraftLines(tx, orgId, actorUserId, patientId, plan.id, budget.id, option.id, items, billingModes)
+  await insertDraftLines(
+    tx,
+    orgId,
+    actorUserId,
+    patientId,
+    plan.id,
+    budget.id,
+    option.id,
+    items,
+    billingModes,
+  )
   await notifyBudget(tx, orgId)
   return loadBudget(tx, orgId, patientId, budget)
 }
 
-async function planOfItems(tx: Db, orgId: string, patientId: string, itemIds: string[]): Promise<string> {
+async function planOfItems(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  itemIds: string[],
+): Promise<string> {
   const rows = await tx
     .selectDistinct({ planId: treatmentPlanItem.planId })
     .from(treatmentPlanItem)
@@ -1115,7 +1306,11 @@ export async function assembleEncounterBudget(
         eq(treatmentPlanItem.decisionStatus, required ? "pendiente" : "aceptado"),
       ),
     )
-    .orderBy(asc(treatmentPlanItem.sortOrder), asc(treatmentPlanItem.createdAt), asc(treatmentPlanItem.id))
+    .orderBy(
+      asc(treatmentPlanItem.sortOrder),
+      asc(treatmentPlanItem.createdAt),
+      asc(treatmentPlanItem.id),
+    )
   const quotable = candidates.filter((item) => {
     if (item.priceCents === null) return false
     try {
@@ -1130,12 +1325,23 @@ export async function assembleEncounterBudget(
     // Un borrador por plan: lo de otro plan espera a que se envíe el que hay.
     const planId = draft?.planId ?? quotable[0]!.planId
     const sameCurrency = draft?.currency ?? quotable[0]!.currency
-    const items = quotable.filter((item) => item.planId === planId && item.currency === sameCurrency)
+    const items = quotable.filter(
+      (item) => item.planId === planId && item.currency === sameCurrency,
+    )
     if (items.length > 0) {
       const plan = await lockPlan(tx, orgId, patientId, planId)
-      if (!draft) draft = (await insertDraftBudget(tx, orgId, actorUserId, patientId, plan, sameCurrency, {})).budget
+      if (!draft)
+        draft = (await insertDraftBudget(tx, orgId, actorUserId, patientId, plan, sameCurrency, {}))
+          .budget
       const locked = await lockBudgetRow(tx, orgId, patientId, draft.id)
-      const ready = await requireQuotableItems(tx, orgId, patientId, planId, items.map((item) => item.id), locked.id)
+      const ready = await requireQuotableItems(
+        tx,
+        orgId,
+        patientId,
+        planId,
+        items.map((item) => item.id),
+        locked.id,
+      )
       await addLinesToOptions(tx, orgId, actorUserId, patientId, locked, ready)
       await audit(tx, orgId, actorUserId, "budget.items_added", locked.id, {
         patientId,
@@ -1167,7 +1373,7 @@ export async function updateBudgetDraft(
   budgetId: string,
   input: UpdateBudgetDraftInput,
   opts: BudgetActorOpts = {},
-): Promise<BudgetRow> {
+): Promise<BudgetPublicRow> {
   await requirePatient(tx, orgId, patientId)
   const current = await lockForWrite(tx, orgId, patientId, budgetId)
   await assertOwnBudget(tx, orgId, budgetId, actorUserId, opts.memberRole)
@@ -1199,7 +1405,235 @@ export async function updateBudgetDraft(
   if (!updated) throw notFound("Presupuesto")
   await audit(tx, orgId, actorUserId, "budget.updated", budgetId, { patientId, fields })
   await notifyBudget(tx, orgId)
-  return updated
+  return withoutFindings(updated)
+}
+
+// ---------------------------------------------------------- lo que explica ---
+
+export const BUDGET_TEXT_MAX = 4000
+export const BUDGET_OPTION_NAME_MAX = 120
+export const BUDGET_OPTION_TEXT_MAX = 1000
+
+export interface BudgetPresentationInput {
+  /** Nulo o vacío lo borra; sin la clave no se toca. */
+  findings?: string | null
+  proposal?: string | null
+  /** AAAA-MM-DD; nulo: se calcula al entregar con los días de la clínica. */
+  validUntil?: string | null
+  options?: Array<{
+    optionId: string
+    name?: string | null
+    pros?: string | null
+    cons?: string | null
+  }>
+  /** El ajuste solo para este paciente; nulo vuelve a la explicación del servicio. */
+  lines?: Array<{ lineId: string; patientGuide: unknown }>
+}
+
+export interface BudgetPresentation {
+  budgetId: string
+  status: string
+  /** Solo para quien lee lo clínico; null para los demás. */
+  findings: string | null
+  /** Hay texto, aunque quien pregunta no pueda leerlo. */
+  hasFindings: boolean
+  proposal: string | null
+  validUntil: string | null
+  options: Array<{
+    id: string
+    label: string
+    name: string | null
+    pros: string | null
+    cons: string | null
+  }>
+  lines: Array<{
+    id: string
+    optionId: string
+    planItemId: string
+    title: string
+    /** El ajuste, o lo congelado al entregar. */
+    patientGuide: PatientGuide | null
+    /** La del servicio hoy: la que saldrá si no hay ajuste. */
+    serviceGuide: PatientGuide | null
+  }>
+}
+
+function assertLongText(
+  value: string | null | undefined,
+  label: string,
+  max: number,
+): string | null {
+  const text = value?.trim() ?? ""
+  if (text.length > max) throw validation(`${label}: hasta ${max} caracteres`)
+  return text || null
+}
+
+function assertCivilDate(value: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`)))
+    throw validation("La vigencia debe ser una fecha AAAA-MM-DD")
+  return value
+}
+
+async function servicesOf(tx: Db, orgId: string, serviceIds: Array<string | null>) {
+  const ids = [...new Set(serviceIds.filter((id): id is string => !!id))]
+  if (ids.length === 0)
+    return new Map<string, { patientGuide: PatientGuide | null; durationMin: number | null }>()
+  const rows = await tx
+    .select({
+      id: serviceCatalog.id,
+      patientGuide: serviceCatalog.patientGuide,
+      durationMin: serviceCatalog.durationMin,
+    })
+    .from(serviceCatalog)
+    .where(and(eq(serviceCatalog.organizationId, orgId), inArray(serviceCatalog.id, ids)))
+  return new Map(
+    rows.map((row) => [
+      row.id,
+      { patientGuide: parsePatientGuide(row.patientGuide), durationMin: row.durationMin },
+    ]),
+  )
+}
+
+/** Lo que explica el presupuesto, para editarlo o mirarlo. */
+export async function getBudgetPresentation(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  budgetId: string,
+  opts: BudgetActorOpts & { actorUserId?: string; clinicalAccess: boolean },
+): Promise<BudgetPresentation> {
+  const budget = await requireBudget(tx, orgId, patientId, budgetId)
+  if (opts.actorUserId) {
+    await assertOwnBudget(
+      tx,
+      orgId,
+      budgetId,
+      opts.actorUserId,
+      opts.memberRole,
+      "Solo puedes ver presupuestos de lo que indicaste tú",
+    )
+  }
+  const lines = await listBudgetLines(tx, orgId, patientId, budgetId)
+  const options = await listOptions(tx, orgId, [budgetId])
+  const services = await servicesOf(
+    tx,
+    orgId,
+    lines.map((line) => line.serviceId),
+  )
+  return {
+    budgetId,
+    status: budget.status,
+    findings: opts.clinicalAccess ? budget.findings : null,
+    hasFindings: !!budget.findings,
+    proposal: budget.proposal,
+    validUntil: budget.validUntil,
+    options: options.map((option) => ({
+      id: option.id,
+      label: budgetOptionLabel(option.position),
+      name: option.name,
+      pros: option.pros,
+      cons: option.cons,
+    })),
+    lines: lines.map((line) => ({
+      id: line.id,
+      optionId: line.optionId,
+      planItemId: line.planItemId,
+      title: line.title,
+      patientGuide: parsePatientGuide(line.patientGuide),
+      serviceGuide: (line.serviceId && services.get(line.serviceId)?.patientGuide) || null,
+    })),
+  }
+}
+
+/**
+ * Guarda lo que explica un presupuesto en borrador: lo encontrado, lo propuesto, la
+ * vigencia, el nombre y lo que pesar en cada opción y el ajuste de una línea para este
+ * paciente. Entregado, ya no cambia (también lo impiden sus guardas en la base).
+ */
+export async function updateBudgetPresentation(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  budgetId: string,
+  input: BudgetPresentationInput,
+  opts: BudgetActorOpts & { clinicalAccess: boolean },
+): Promise<BudgetPresentation> {
+  await requirePatient(tx, orgId, patientId)
+  const current = await lockForWrite(tx, orgId, patientId, budgetId)
+  await assertOwnBudget(tx, orgId, budgetId, actorUserId, opts.memberRole)
+  if (current.status !== "borrador")
+    throw conflict("BUDGET_STATUS", "Lo entregado no cambia: solo se edita un borrador")
+  const fields: string[] = []
+  const set: Partial<typeof treatmentBudget.$inferInsert> = {}
+  if (input.findings !== undefined) {
+    set.findings = assertLongText(input.findings, "Lo que encontramos", BUDGET_TEXT_MAX)
+    fields.push("findings")
+  }
+  if (input.proposal !== undefined) {
+    set.proposal = assertLongText(input.proposal, "Lo que le proponemos", BUDGET_TEXT_MAX)
+    fields.push("proposal")
+  }
+  if (input.validUntil !== undefined) {
+    set.validUntil = input.validUntil ? assertCivilDate(input.validUntil) : null
+    fields.push("validUntil")
+  }
+  if (fields.length > 0) {
+    await tx
+      .update(treatmentBudget)
+      .set({ ...set, updatedAt: new Date() })
+      .where(and(eq(treatmentBudget.id, budgetId), eq(treatmentBudget.organizationId, orgId)))
+  }
+  if (input.options?.length) {
+    const known = new Set((await listOptions(tx, orgId, [budgetId])).map((option) => option.id))
+    for (const option of input.options) {
+      if (!known.has(option.optionId)) throw notFound("Opción del presupuesto")
+      const patch: Partial<typeof treatmentBudgetOption.$inferInsert> = {}
+      if (option.name !== undefined)
+        patch.name = assertLongText(option.name, "El nombre de la opción", BUDGET_OPTION_NAME_MAX)
+      if (option.pros !== undefined)
+        patch.pros = assertLongText(option.pros, "A favor", BUDGET_OPTION_TEXT_MAX)
+      if (option.cons !== undefined)
+        patch.cons = assertLongText(option.cons, "A considerar", BUDGET_OPTION_TEXT_MAX)
+      await tx
+        .update(treatmentBudgetOption)
+        .set({ ...patch, updatedAt: new Date() })
+        .where(
+          and(
+            eq(treatmentBudgetOption.organizationId, orgId),
+            eq(treatmentBudgetOption.id, option.optionId),
+          ),
+        )
+    }
+    fields.push("options")
+  }
+  if (input.lines?.length) {
+    const known = new Set(
+      (await listBudgetLines(tx, orgId, patientId, budgetId)).map((line) => line.id),
+    )
+    for (const line of input.lines) {
+      if (!known.has(line.lineId)) throw notFound("Línea del presupuesto")
+      await tx
+        .update(treatmentBudgetItem)
+        .set({ patientGuide: parsePatientGuide(line.patientGuide), updatedAt: new Date() })
+        .where(
+          and(
+            eq(treatmentBudgetItem.organizationId, orgId),
+            eq(treatmentBudgetItem.id, line.lineId),
+          ),
+        )
+    }
+    fields.push("lines")
+  }
+  if (fields.length === 0) throw validation("Sin cambios: patch vacío")
+  await audit(tx, orgId, actorUserId, "budget.presentation_updated", budgetId, {
+    patientId,
+    fields,
+  })
+  await notifyBudget(tx, orgId)
+  return getBudgetPresentation(tx, orgId, patientId, budgetId, {
+    clinicalAccess: opts.clinicalAccess,
+  })
 }
 
 // ------------------------------------------------------------- opciones ---
@@ -1226,15 +1660,27 @@ export async function duplicateBudgetOption(
   const source = options.find((option) => option.id === optionId)
   if (!source) throw notFound("Opción del presupuesto")
   if (options.length >= BUDGET_OPTIONS_MAX) {
-    throw conflict("BUDGET_OPTIONS_MAX", `Un presupuesto admite hasta ${BUDGET_OPTIONS_MAX} opciones`)
+    throw conflict(
+      "BUDGET_OPTIONS_MAX",
+      `Un presupuesto admite hasta ${BUDGET_OPTIONS_MAX} opciones`,
+    )
   }
   const position = Math.max(...options.map((option) => option.position)) + 1
   const [created] = await tx
     .insert(treatmentBudgetOption)
-    .values({ organizationId: orgId, patientId, budgetId, position, isRecommended: false, createdBy: actorUserId })
+    .values({
+      organizationId: orgId,
+      patientId,
+      budgetId,
+      position,
+      isRecommended: false,
+      createdBy: actorUserId,
+    })
     .returning()
   if (!created) throw new Error("No se pudo crear la opción")
-  const lines = (await listBudgetLines(tx, orgId, patientId, budgetId)).filter((line) => line.optionId === source.id)
+  const lines = (await listBudgetLines(tx, orgId, patientId, budgetId)).filter(
+    (line) => line.optionId === source.id,
+  )
   for (const line of lines) {
     await tx.insert(treatmentBudgetItem).values({
       organizationId: orgId,
@@ -1260,6 +1706,7 @@ export async function duplicateBudgetOption(
       sessionsPlanned: line.sessionsPlanned,
       currency: line.currency,
       decision: "pendiente",
+      patientGuide: line.patientGuide,
       createdBy: actorUserId,
     })
   }
@@ -1286,17 +1733,25 @@ export async function recommendBudgetOption(
   await requirePatient(tx, orgId, patientId)
   const current = await lockForWrite(tx, orgId, patientId, budgetId)
   await assertOwnBudget(tx, orgId, budgetId, actorUserId, opts.memberRole)
-  if (current.status !== "borrador") throw conflict("BUDGET_STATUS", "La recomendada se elige antes de enviar")
+  if (current.status !== "borrador")
+    throw conflict("BUDGET_STATUS", "La recomendada se elige antes de enviar")
   const options = await listOptions(tx, orgId, [budgetId])
   if (!options.some((option) => option.id === optionId)) throw notFound("Opción del presupuesto")
   await tx
     .update(treatmentBudgetOption)
     .set({ isRecommended: false, updatedAt: new Date() })
-    .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.budgetId, budgetId)))
+    .where(
+      and(
+        eq(treatmentBudgetOption.organizationId, orgId),
+        eq(treatmentBudgetOption.budgetId, budgetId),
+      ),
+    )
   await tx
     .update(treatmentBudgetOption)
     .set({ isRecommended: true, updatedAt: new Date() })
-    .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.id, optionId)))
+    .where(
+      and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.id, optionId)),
+    )
   await audit(tx, orgId, actorUserId, "budget.option_recommended", budgetId, {
     patientId,
     position: options.find((option) => option.id === optionId)?.position ?? null,
@@ -1326,7 +1781,8 @@ export async function removeBudgetOption(
   const options = await listOptions(tx, orgId, [budgetId])
   const gone = options.find((option) => option.id === optionId)
   if (!gone) throw notFound("Opción del presupuesto")
-  if (options.length === 1) throw conflict("BUDGET_LAST_OPTION", "El presupuesto necesita al menos una opción")
+  if (options.length === 1)
+    throw conflict("BUDGET_LAST_OPTION", "El presupuesto necesita al menos una opción")
   const lines = await tx
     .delete(treatmentBudgetItem)
     .where(
@@ -1339,15 +1795,32 @@ export async function removeBudgetOption(
     .returning({ planItemId: treatmentBudgetItem.planItemId })
   await tx
     .delete(treatmentBudgetOption)
-    .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.id, optionId)))
-  await releaseOrphanItems(tx, orgId, patientId, budgetId, lines.map((line) => line.planItemId))
+    .where(
+      and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.id, optionId)),
+    )
+  await releaseOrphanItems(
+    tx,
+    orgId,
+    patientId,
+    budgetId,
+    lines.map((line) => line.planItemId),
+  )
   // Letras seguidas: se renumera de menor a mayor, así cada posición ya está libre.
   const rest = options.filter((option) => option.id !== optionId)
   for (const [index, option] of rest.entries()) {
     await tx
       .update(treatmentBudgetOption)
-      .set({ position: index + 1, isRecommended: gone.isRecommended ? index === 0 : option.isRecommended, updatedAt: new Date() })
-      .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.id, option.id)))
+      .set({
+        position: index + 1,
+        isRecommended: gone.isRecommended ? index === 0 : option.isRecommended,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(treatmentBudgetOption.organizationId, orgId),
+          eq(treatmentBudgetOption.id, option.id),
+        ),
+      )
   }
   await audit(tx, orgId, actorUserId, "budget.option_removed", budgetId, {
     patientId,
@@ -1372,7 +1845,7 @@ export async function deliverBudget(
   patientId: string,
   budgetId: string,
   opts: BudgetActorOpts = {},
-): Promise<BudgetRow> {
+): Promise<BudgetPublicRow> {
   await requirePatient(tx, orgId, patientId)
   const current = await lockForWrite(tx, orgId, patientId, budgetId)
   await assertOwnBudget(tx, orgId, budgetId, actorUserId, opts.memberRole)
@@ -1384,7 +1857,9 @@ export async function deliverBudget(
   const options = await listOptions(tx, orgId, [budgetId])
   for (const option of options) {
     if (!lines.some((line) => line.optionId === option.id)) {
-      throw validation(`La ${budgetOptionLabel(option.position).toLowerCase()} no tiene tratamientos: quítala o agrégale alguno`)
+      throw validation(
+        `La ${budgetOptionLabel(option.position).toLowerCase()} no tiene tratamientos: quítala o agrégale alguno`,
+      )
     }
   }
   // El borrador pudo esperar días: al entregarlo, cada promoción debe seguir
@@ -1402,9 +1877,33 @@ export async function deliverBudget(
       throw error
     }
   }
+  // Lo entregado no cambia: cada línea se queda con su explicación de hoy (la del
+  // servicio, salvo que se ajustara para este paciente), y el presupuesto con su vigencia.
+  // Va antes de cambiar el estado: las guardas de la base ya no lo admitirían después.
+  const services = await servicesOf(
+    tx,
+    orgId,
+    lines.map((line) => line.serviceId),
+  )
+  for (const line of lines) {
+    const guide = line.serviceId ? services.get(line.serviceId)?.patientGuide : null
+    if (line.patientGuide || !guide) continue
+    await tx
+      .update(treatmentBudgetItem)
+      .set({ patientGuide: guide, updatedAt: new Date() })
+      .where(
+        and(eq(treatmentBudgetItem.organizationId, orgId), eq(treatmentBudgetItem.id, line.id)),
+      )
+  }
+  const validUntil = current.validUntil ?? (await defaultBudgetValidUntil(tx, orgId))
+  const deliveredSnapshot = await budgetDeliveredFacts(
+    tx,
+    orgId,
+    lines.map((line) => line.serviceId),
+  )
   const [updated] = await tx
     .update(treatmentBudget)
-    .set({ status: "presentado", presentedAt: new Date(), updatedAt: new Date() })
+    .set({ status: "presentado", presentedAt: new Date(), updatedAt: new Date(), validUntil, deliveredSnapshot })
     .where(
       and(
         eq(treatmentBudget.id, budgetId),
@@ -1419,12 +1918,30 @@ export async function deliverBudget(
     if (!["presentado", "aceptado", "parcial", "pospuesto"].includes(previous.status)) {
       throw conflict("BUDGET_STATUS", "La propuesta anterior ya no admite sustitución")
     }
-    await assertRetainedExecutedItems(tx, orgId, patientId, previous.id, lines.map(l => l.planItemId))
-    await tx.update(treatmentBudget).set({ status: "sustituido", updatedAt: new Date() })
+    await assertRetainedExecutedItems(
+      tx,
+      orgId,
+      patientId,
+      previous.id,
+      lines.map((l) => l.planItemId),
+    )
+    await tx
+      .update(treatmentBudget)
+      .set({ status: "sustituido", updatedAt: new Date() })
       .where(and(eq(treatmentBudget.id, previous.id), eq(treatmentBudget.organizationId, orgId)))
-    await tx.update(treatmentPlanItem).set({ budgetId, updatedAt: new Date() })
-      .where(and(eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.patientId, patientId),
-        inArray(treatmentPlanItem.id, lines.map(l => l.planItemId))))
+    await tx
+      .update(treatmentPlanItem)
+      .set({ budgetId, updatedAt: new Date() })
+      .where(
+        and(
+          eq(treatmentPlanItem.organizationId, orgId),
+          eq(treatmentPlanItem.patientId, patientId),
+          inArray(
+            treatmentPlanItem.id,
+            lines.map((l) => l.planItemId),
+          ),
+        ),
+      )
   }
   await audit(tx, orgId, actorUserId, "budget.delivered", budgetId, {
     patientId,
@@ -1438,12 +1955,32 @@ export async function deliverBudget(
   await linkPresentedBudget(tx, orgId, {
     patientId,
     budgetId,
-    serviceIds: [...new Set(lines.map((line) => line.serviceId).filter((id): id is string => !!id))],
+    serviceIds: [
+      ...new Set(lines.map((line) => line.serviceId).filter((id): id is string => !!id)),
+    ],
     by: opts.by,
     total: { cents: full.totalCents, currency: updated.currency },
   })
   await notifyBudget(tx, orgId)
-  return updated
+  return withoutFindings(updated)
+}
+
+/** Hoy, en la zona de la clínica, más los días de vigencia de la clínica. */
+async function defaultBudgetValidUntil(tx: Db, orgId: string): Promise<string> {
+  const [profile] = await tx
+    .select({ days: orgProfile.budgetValidDays, timezone: orgProfile.timezone })
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, orgId))
+    .limit(1)
+  const today = new Intl.DateTimeFormat("en-CA", {
+    timeZone: profile?.timezone ?? NEUTRAL_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date())
+  const date = new Date(`${today}T00:00:00Z`)
+  date.setUTCDate(date.getUTCDate() + (profile?.days ?? 30))
+  return date.toISOString().slice(0, 10)
 }
 export interface AdjustBudgetLineInput {
   planItemId: string
@@ -1511,10 +2048,13 @@ export async function adjustBudgetLines(
   const changes: Array<Record<string, unknown>> = []
   for (const [index, patch] of input.lines.entries()) {
     const targets = lines.filter(
-      (line) => line.planItemId === patch.planItemId && (!patch.optionId || line.optionId === patch.optionId),
+      (line) =>
+        line.planItemId === patch.planItemId &&
+        (!patch.optionId || line.optionId === patch.optionId),
     )
     if (targets.length === 0) throw notFound("Línea del presupuesto")
-    for (const line of targets) changes.push(await adjustOneLine(tx, orgId, line, patch, now, `lines[${index}]`))
+    for (const line of targets)
+      changes.push(await adjustOneLine(tx, orgId, line, patch, now, `lines[${index}]`))
   }
   await audit(tx, orgId, actorUserId, "budget.prices_adjusted", budgetId, {
     patientId,
@@ -1542,8 +2082,15 @@ async function adjustOneLine(
   let sessionsPlanned = line.sessionsPlanned
   if (patch.sessionsPlanned !== undefined) {
     if (line.billingMode !== "session")
-      throw invalidField(`${at}.sessionsPlanned`, "Las visitas previstas solo aplican a lo que se cobra por sesión")
-    if (!Number.isInteger(patch.sessionsPlanned) || patch.sessionsPlanned < 1 || patch.sessionsPlanned > 200)
+      throw invalidField(
+        `${at}.sessionsPlanned`,
+        "Las visitas previstas solo aplican a lo que se cobra por sesión",
+      )
+    if (
+      !Number.isInteger(patch.sessionsPlanned) ||
+      patch.sessionsPlanned < 1 ||
+      patch.sessionsPlanned > 200
+    )
       throw invalidField(`${at}.sessionsPlanned`, "Las visitas previstas van de 1 a 200")
     sessionsPlanned = patch.sessionsPlanned
   }
@@ -1580,22 +2127,30 @@ async function adjustOneLine(
     }
   }
   if (patch.priceCents !== undefined && patch.priceCents !== null) {
-    if (!Number.isSafeInteger(patch.priceCents) || patch.priceCents < 0 || patch.priceCents > 2147483647) {
+    if (
+      !Number.isSafeInteger(patch.priceCents) ||
+      patch.priceCents < 0 ||
+      patch.priceCents > 2147483647
+    ) {
       throw invalidField(`${at}.priceCents`, "El precio debe ser un importe de 0 o más")
     }
     priceCents = patch.priceCents
   }
-  if (priceCents == null) throw invalidField(`${at}.priceCents`, "La línea no tiene precio acordado")
+  if (priceCents == null)
+    throw invalidField(`${at}.priceCents`, "La línea no tiene precio acordado")
   if (promotionMode === "fixed" && promotionId && line.serviceId) {
     const snapshot = await requirePromotionPrice(tx, orgId, promotionId, line.serviceId, undefined)
     if (priceCents !== snapshot.priceCents) {
       const message = "El precio fijo de la promoción no se negocia"
-      throw new ServiceError("PROMOTION_FIXED_PRICE", 409, message, { [`${at}.priceCents`]: message })
+      throw new ServiceError("PROMOTION_FIXED_PRICE", 409, message, {
+        [`${at}.priceCents`]: message,
+      })
     }
   }
   const reference =
     promotionMode === "from" && promotionId && line.serviceId
-      ? (await requirePromotionPrice(tx, orgId, promotionId, line.serviceId, priceCents)).floorCents ?? line.tariffPriceCents
+      ? ((await requirePromotionPrice(tx, orgId, promotionId, line.serviceId, priceCents))
+          .floorCents ?? line.tariffPriceCents)
       : (line.tariffPriceCents ?? priceCents)
   if (promotionId === null || promotionMode === "from") {
     if (priceCents < (reference ?? priceCents)) {
@@ -1607,13 +2162,16 @@ async function adjustOneLine(
   lineTotal({ billingMode: line.billingMode, sessionsPlanned }, priceCents)
   await tx
     .update(treatmentBudgetItem)
-    .set({ priceCents, priceReason, promotionId, promotionName, promotionMode, sessionsPlanned, updatedAt: now })
-    .where(
-      and(
-        eq(treatmentBudgetItem.id, line.id),
-        eq(treatmentBudgetItem.organizationId, orgId),
-      ),
-    )
+    .set({
+      priceCents,
+      priceReason,
+      promotionId,
+      promotionName,
+      promotionMode,
+      sessionsPlanned,
+      updatedAt: now,
+    })
+    .where(and(eq(treatmentBudgetItem.id, line.id), eq(treatmentBudgetItem.organizationId, orgId)))
   // El motivo se sobrescribe en la línea: la auditoría conserva cada cambio.
   return {
     lineId: line.id,
@@ -1652,13 +2210,14 @@ export async function decideBudget(
   patientId: string,
   budgetId: string,
   input: DecideBudgetInput,
-  opts: BudgetActorOpts & { skipOwnPlan?: boolean; via?: string } = {},
+  opts: BudgetActorOpts & { skipOwnPlan?: boolean; via?: "enlace" | "portal" | "conversacion" } = {},
 ): Promise<BudgetWithTotals> {
   await requirePatient(tx, orgId, patientId)
   const prev = await requireBudget(tx, orgId, patientId, budgetId)
   await lockPlan(tx, orgId, patientId, prev.planId)
   if (!opts.skipOwnPlan) {
-    if (actorUserId === null) throw new Error("Sin alguien del equipo, decideBudget exige skipOwnPlan")
+    if (actorUserId === null)
+      throw new Error("Sin alguien del equipo, decideBudget exige skipOwnPlan")
     await assertOwnBudget(tx, orgId, budgetId, actorUserId, opts.memberRole)
   }
   const current = await lockBudgetRow(tx, orgId, patientId, budgetId)
@@ -1690,18 +2249,32 @@ export async function decideBudget(
   if (!Array.isArray(input.decisions) || input.decisions.length !== lines.length) {
     throw invalidField("decisions", "Debe decidir cada línea exactamente una vez")
   }
-  const decisions = new Map(input.decisions.map(d => [d.planItemId, d.decision]))
-  if (decisions.size !== lines.length || lines.some(l => !decisions.has(l.planItemId)) ||
-    input.decisions.some(d => !["aceptado", "rechazado", "pospuesto"].includes(d.decision))) {
+  const decisions = new Map(input.decisions.map((d) => [d.planItemId, d.decision]))
+  if (
+    decisions.size !== lines.length ||
+    lines.some((l) => !decisions.has(l.planItemId)) ||
+    input.decisions.some((d) => !["aceptado", "rechazado", "pospuesto"].includes(d.decision))
+  ) {
     throw invalidField("decisions", "Debe decidir cada línea exactamente una vez")
   }
   // La respuesta de un tratamiento en el cuerpo (`decisions[1].decision`), para decir el rechazo junto a ella.
   const decisionField = (planItemId: string) =>
     `decisions[${input.decisions.findIndex((d) => d.planItemId === planItemId)}].decision`
   const representative = input.decidedByContactId
-    ? await requireDecisionContact(tx, orgId, patientId, input.decidedByContactId, "decidedByContactId") : null
+    ? await requireDecisionContact(
+        tx,
+        orgId,
+        patientId,
+        input.decidedByContactId,
+        "decidedByContactId",
+      )
+    : null
   if (isFollowUp) {
-    if (current.decisionContactId && representative && current.decisionContactId !== representative.id) {
+    if (
+      current.decisionContactId &&
+      representative &&
+      current.decisionContactId !== representative.id
+    ) {
       const message = "Solo quien decidió puede completar su respuesta"
       throw new ServiceError("BUDGET_DECISION_OWNER", 409, message, { decidedByContactId: message })
     }
@@ -1710,15 +2283,25 @@ export async function decideBudget(
         const next = decisions.get(line.planItemId)
         if (next !== line.decision) {
           const message = "Lo ya decidido no se reescribe al completar"
-          throw new ServiceError("BUDGET_DECISION_FINAL", 409, message, { [decisionField(line.planItemId)]: message })
+          throw new ServiceError("BUDGET_DECISION_FINAL", 409, message, {
+            [decisionField(line.planItemId)]: message,
+          })
         }
       }
     }
   }
-  const items = await tx.select().from(treatmentPlanItem).where(and(
-    eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.patientId, patientId),
-    eq(treatmentPlanItem.planId, current.planId),
-  )).orderBy(asc(treatmentPlanItem.id)).for("update")
+  const items = await tx
+    .select()
+    .from(treatmentPlanItem)
+    .where(
+      and(
+        eq(treatmentPlanItem.organizationId, orgId),
+        eq(treatmentPlanItem.patientId, patientId),
+        eq(treatmentPlanItem.planId, current.planId),
+      ),
+    )
+    .orderBy(asc(treatmentPlanItem.id))
+    .for("update")
   const chosenItems = new Set(lines.map((line) => line.planItemId))
   for (const item of items) {
     const decision = decisions.get(item.id)
@@ -1733,7 +2316,9 @@ export async function decideBudget(
     }
     if (["en_curso", "realizado"].includes(item.status) && decision !== "aceptado") {
       const message = "No puede retirar la aceptación de un tratamiento ejecutado"
-      throw new ServiceError("ITEM_IN_EXECUTION", 409, message, { [decisionField(item.id)]: message })
+      throw new ServiceError("ITEM_IN_EXECUTION", 409, message, {
+        [decisionField(item.id)]: message,
+      })
     }
   }
   const now = new Date()
@@ -1744,47 +2329,130 @@ export async function decideBudget(
   }
   for (const line of lines) {
     const decision = decisions.get(line.planItemId)!
-    await tx.update(treatmentBudgetItem).set({ decision, updatedAt: now })
-      .where(and(eq(treatmentBudgetItem.id, line.id), eq(treatmentBudgetItem.organizationId, orgId)))
-    await tx.update(treatmentPlanItem).set({ decisionStatus: decision, decisionNote, ...who, updatedAt: now })
-      .where(and(eq(treatmentPlanItem.id, line.planItemId), eq(treatmentPlanItem.organizationId, orgId),
-        eq(treatmentPlanItem.patientId, patientId)))
+    await tx
+      .update(treatmentBudgetItem)
+      .set({ decision, updatedAt: now })
+      .where(
+        and(eq(treatmentBudgetItem.id, line.id), eq(treatmentBudgetItem.organizationId, orgId)),
+      )
+    await tx
+      .update(treatmentPlanItem)
+      .set({ decisionStatus: decision, decisionNote, ...who, updatedAt: now })
+      .where(
+        and(
+          eq(treatmentPlanItem.id, line.planItemId),
+          eq(treatmentPlanItem.organizationId, orgId),
+          eq(treatmentPlanItem.patientId, patientId),
+        ),
+      )
   }
   if (!already) {
     // Elegir una opción: las demás quedan «No elegida» solas, y lo que solo
     // estaba en ellas también (no es un «no»: nunca lo vio como su camino).
-    await tx.update(treatmentBudgetOption).set({ decision: "elegida", updatedAt: now })
-      .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.id, chosen.id)))
+    await tx
+      .update(treatmentBudgetOption)
+      .set({ decision: "elegida", updatedAt: now })
+      .where(
+        and(
+          eq(treatmentBudgetOption.organizationId, orgId),
+          eq(treatmentBudgetOption.id, chosen.id),
+        ),
+      )
     const others = options.filter((option) => option.id !== chosen.id)
     if (others.length > 0) {
-      await tx.update(treatmentBudgetOption).set({ decision: "no_elegida", updatedAt: now })
-        .where(and(eq(treatmentBudgetOption.organizationId, orgId), inArray(treatmentBudgetOption.id, others.map((o) => o.id))))
+      await tx
+        .update(treatmentBudgetOption)
+        .set({ decision: "no_elegida", updatedAt: now })
+        .where(
+          and(
+            eq(treatmentBudgetOption.organizationId, orgId),
+            inArray(
+              treatmentBudgetOption.id,
+              others.map((o) => o.id),
+            ),
+          ),
+        )
       const notChosen = allLines.filter((line) => line.optionId !== chosen.id)
       if (notChosen.length > 0) {
-        await tx.update(treatmentBudgetItem).set({ decision: "no_elegida", updatedAt: now })
-          .where(and(eq(treatmentBudgetItem.organizationId, orgId), inArray(treatmentBudgetItem.id, notChosen.map((l) => l.id))))
+        await tx
+          .update(treatmentBudgetItem)
+          .set({ decision: "no_elegida", updatedAt: now })
+          .where(
+            and(
+              eq(treatmentBudgetItem.organizationId, orgId),
+              inArray(
+                treatmentBudgetItem.id,
+                notChosen.map((l) => l.id),
+              ),
+            ),
+          )
       }
-      const onlyThere = [...new Set(notChosen.map((line) => line.planItemId))].filter((id) => !chosenItems.has(id))
-      const open = items.filter((item) => onlyThere.includes(item.id) && !["realizado", "en_curso", "cancelado", "reemplazado"].includes(item.status))
+      const onlyThere = [...new Set(notChosen.map((line) => line.planItemId))].filter(
+        (id) => !chosenItems.has(id),
+      )
+      const open = items.filter(
+        (item) =>
+          onlyThere.includes(item.id) &&
+          !["realizado", "en_curso", "cancelado", "reemplazado"].includes(item.status),
+      )
       if (open.length > 0) {
-        await tx.update(treatmentPlanItem).set({ decisionStatus: "no_elegida", decisionNote: "Opción no elegida", ...who, updatedAt: now })
-          .where(and(eq(treatmentPlanItem.organizationId, orgId), inArray(treatmentPlanItem.id, open.map((item) => item.id))))
+        await tx
+          .update(treatmentPlanItem)
+          .set({
+            decisionStatus: "no_elegida",
+            decisionNote: "Opción no elegida",
+            ...who,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(treatmentPlanItem.organizationId, orgId),
+              inArray(
+                treatmentPlanItem.id,
+                open.map((item) => item.id),
+              ),
+            ),
+          )
       }
     }
   }
-  const acceptedCount = input.decisions.filter(d => d.decision === "aceptado").length
-  const status: BudgetStatus = acceptedCount === lines.length ? "aceptado" : acceptedCount > 0 ? "parcial"
-    : input.decisions.some(d => d.decision === "pospuesto") ? "pospuesto" : "rechazado"
-  const [updated] = await tx.update(treatmentBudget).set({
-    status, acceptedByName: representative?.displayName ?? null,
-    decisionContactId: representative?.id ?? null, decisionNote, decidedAt: now,
-    decidedBy: actorUserId, updatedAt: now,
-  }).where(and(eq(treatmentBudget.id, budgetId), eq(treatmentBudget.organizationId, orgId),
-    eq(treatmentBudget.patientId, patientId))).returning()
+  const acceptedCount = input.decisions.filter((d) => d.decision === "aceptado").length
+  const status: BudgetStatus =
+    acceptedCount === lines.length
+      ? "aceptado"
+      : acceptedCount > 0
+        ? "parcial"
+        : input.decisions.some((d) => d.decision === "pospuesto")
+          ? "pospuesto"
+          : "rechazado"
+  const [updated] = await tx
+    .update(treatmentBudget)
+    .set({
+      status,
+      acceptedByName: representative?.displayName ?? null,
+      decisionContactId: representative?.id ?? null,
+      decisionNote,
+      decidedAt: now,
+      decidedBy: actorUserId,
+      // Sin canal y con alguien del equipo: lo anotó la clínica.
+      decidedVia: opts.via ?? (actorUserId ? "clinica" : null),
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(treatmentBudget.id, budgetId),
+        eq(treatmentBudget.organizationId, orgId),
+        eq(treatmentBudget.patientId, patientId),
+      ),
+    )
+    .returning()
   if (!updated) throw notFound("Presupuesto")
   const auditActor = actorUserId ?? (representative ? `contact:${representative.id}` : null)
   await audit(tx, orgId, auditActor, "budget.decision", budgetId, {
-    patientId, status, acceptedCount, decisionContactId: representative?.id ?? null,
+    patientId,
+    status,
+    acceptedCount,
+    decisionContactId: representative?.id ?? null,
     ...(options.length > 1 ? { option: chosen.position } : {}),
     ...(opts.via ? { via: opts.via } : {}),
   })
@@ -1793,10 +2461,17 @@ export async function decideBudget(
     patientId,
     budgetId,
     status,
-    serviceIds: [...new Set(lines.map((line) => line.serviceId).filter((id): id is string => !!id))],
+    serviceIds: [
+      ...new Set(lines.map((line) => line.serviceId).filter((id): id is string => !!id)),
+    ],
     // Lo que de verdad aceptó: el valor de la oportunidad ganada (en parte, lo aceptado).
     accepted: {
-      cents: sumAcceptedCents(lines.map((line) => ({ lineTotalCents: line.lineTotalCents, decision: decisions.get(line.planItemId) }))),
+      cents: sumAcceptedCents(
+        lines.map((line) => ({
+          lineTotalCents: line.lineTotalCents,
+          decision: decisions.get(line.planItemId),
+        })),
+      ),
       currency: updated.currency,
     },
   })
@@ -1811,7 +2486,7 @@ export async function cancelBudget(
   patientId: string,
   budgetId: string,
   opts: BudgetActorOpts = {},
-): Promise<BudgetRow> {
+): Promise<BudgetPublicRow> {
   await requirePatient(tx, orgId, patientId)
   const current = await lockForWrite(tx, orgId, patientId, budgetId)
   await assertOwnBudget(tx, orgId, budgetId, actorUserId, opts.memberRole)
@@ -1853,13 +2528,14 @@ export async function cancelBudget(
         ),
       )
   }
+  // Quien anula no necesariamente lee lo clínico: lo encontrado no sale en la respuesta.
   await audit(tx, orgId, actorUserId, "budget.cancelled", budgetId, {
     patientId,
     from: current.status,
     itemCount: itemIds.length,
   })
   await notifyBudget(tx, orgId)
-  return updated
+  return withoutFindings(updated)
 }
 
 /**
@@ -1877,12 +2553,18 @@ export async function listBudgetsForPatients(
   const budgets = await tx
     .select()
     .from(treatmentBudget)
-    .where(and(eq(treatmentBudget.organizationId, orgId), inArray(treatmentBudget.patientId, patientIds)))
+    .where(
+      and(
+        eq(treatmentBudget.organizationId, orgId),
+        inArray(treatmentBudget.patientId, patientIds),
+      ),
+    )
     .orderBy(asc(treatmentBudget.budgetNumber), asc(treatmentBudget.revisionNumber))
   const ids = budgets.map((budget) => budget.id)
   const [options, lines] = [await listOptions(tx, orgId, ids), await budgetLinesOf(tx, orgId, ids)]
   const optionsOf = new Map<string, BudgetOptionRow[]>()
-  for (const option of options) optionsOf.set(option.budgetId, [...(optionsOf.get(option.budgetId) ?? []), option])
+  for (const option of options)
+    optionsOf.set(option.budgetId, [...(optionsOf.get(option.budgetId) ?? []), option])
   for (const budget of budgets) {
     const list = out.get(budget.patientId) ?? []
     list.push(withTotals(budget, lines.get(budget.id) ?? [], optionsOf.get(budget.id) ?? []))
@@ -1904,13 +2586,18 @@ export async function listBudgets(
     eq(treatmentBudget.organizationId, orgId),
   ]
   if (planId) conditions.push(eq(treatmentBudget.planId, planId))
-  if (isProfessional(opts.memberRole) && opts.actorUserId) conditions.push(ownBudgetSql(opts.actorUserId))
+  if (isProfessional(opts.memberRole) && opts.actorUserId)
+    conditions.push(ownBudgetSql(opts.actorUserId))
   const budgets = await tx
     .select()
     .from(treatmentBudget)
     .where(and(...conditions))
     .orderBy(asc(treatmentBudget.budgetNumber), asc(treatmentBudget.revisionNumber))
-  const options = await listOptions(tx, orgId, budgets.map((budget) => budget.id))
+  const options = await listOptions(
+    tx,
+    orgId,
+    budgets.map((budget) => budget.id),
+  )
   const result: BudgetWithTotals[] = []
   for (const budget of budgets) {
     result.push(
@@ -1933,7 +2620,14 @@ export async function getBudgetDetail(
 ): Promise<BudgetWithTotals> {
   const budget = await requireBudget(tx, orgId, patientId, budgetId)
   if (opts.actorUserId) {
-    await assertOwnBudget(tx, orgId, budgetId, opts.actorUserId, opts.memberRole, "Solo puedes ver presupuestos de lo que indicaste tú")
+    await assertOwnBudget(
+      tx,
+      orgId,
+      budgetId,
+      opts.actorUserId,
+      opts.memberRole,
+      "Solo puedes ver presupuestos de lo que indicaste tú",
+    )
   }
   return loadBudget(tx, orgId, patientId, budget)
 }
@@ -1943,23 +2637,62 @@ export async function getBudgetDetail(
  * económicos. Lo quitado no está en el cuerpo: el rechazo va a la lista
  * (`itemIds`) y nombra cada tratamiento.
  */
-async function assertRetainedExecutedItems(tx: Db, orgId: string, patientId: string, budgetId: string, itemIds: string[]) {
+async function assertRetainedExecutedItems(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  budgetId: string,
+  itemIds: string[],
+) {
   const lines = await listBudgetLines(tx, orgId, patientId, budgetId)
-  const removed = lines.filter(l => !itemIds.includes(l.planItemId))
+  const removed = lines.filter((l) => !itemIds.includes(l.planItemId))
   if (removed.length === 0) return
-  const procedures = await tx.selectDistinct({ planItemId: encounterProcedure.planItemId }).from(encounterProcedure)
-    .where(and(eq(encounterProcedure.organizationId, orgId),
-      inArray(encounterProcedure.planItemId, removed.map(l => l.planItemId))))
-  const charges = await tx.selectDistinct({ budgetItemId: patientCharge.budgetItemId }).from(patientCharge)
-    .where(and(eq(patientCharge.organizationId, orgId), eq(patientCharge.patientId, patientId),
-      inArray(patientCharge.budgetItemId, removed.map(l => l.id)), isNull(patientCharge.voidedAt)))
-  const applications = await tx.selectDistinct({ budgetItemId: patientCharge.budgetItemId }).from(patientPaymentApplication)
+  const procedures = await tx
+    .selectDistinct({ planItemId: encounterProcedure.planItemId })
+    .from(encounterProcedure)
+    .where(
+      and(
+        eq(encounterProcedure.organizationId, orgId),
+        inArray(
+          encounterProcedure.planItemId,
+          removed.map((l) => l.planItemId),
+        ),
+      ),
+    )
+  const charges = await tx
+    .selectDistinct({ budgetItemId: patientCharge.budgetItemId })
+    .from(patientCharge)
+    .where(
+      and(
+        eq(patientCharge.organizationId, orgId),
+        eq(patientCharge.patientId, patientId),
+        inArray(
+          patientCharge.budgetItemId,
+          removed.map((l) => l.id),
+        ),
+        isNull(patientCharge.voidedAt),
+      ),
+    )
+  const applications = await tx
+    .selectDistinct({ budgetItemId: patientCharge.budgetItemId })
+    .from(patientPaymentApplication)
     .innerJoin(patientCharge, eq(patientCharge.id, patientPaymentApplication.chargeId))
-    .where(and(eq(patientPaymentApplication.organizationId, orgId), eq(patientPaymentApplication.patientId, patientId),
-      inArray(patientCharge.budgetItemId, removed.map(l => l.id)), isNull(patientPaymentApplication.voidedAt)))
+    .where(
+      and(
+        eq(patientPaymentApplication.organizationId, orgId),
+        eq(patientPaymentApplication.patientId, patientId),
+        inArray(
+          patientCharge.budgetItemId,
+          removed.map((l) => l.id),
+        ),
+        isNull(patientPaymentApplication.voidedAt),
+      ),
+    )
   const usedPlanItems = new Set(procedures.map((row) => row.planItemId))
   const usedLines = new Set([...charges, ...applications].map((row) => row.budgetItemId))
-  const blocked = removed.filter((line) => usedPlanItems.has(line.planItemId) || usedLines.has(line.id))
+  const blocked = removed.filter(
+    (line) => usedPlanItems.has(line.planItemId) || usedLines.has(line.id),
+  )
   if (blocked.length === 0) return
   const titles = [...new Set(blocked.map((line) => `«${line.title}»`))].join(", ")
   const message = `No puede retirar líneas con ejecución o movimientos económicos: ${titles}`
@@ -1972,7 +2705,12 @@ async function assertRetainedExecutedItems(tx: Db, orgId: string, patientId: str
  * (la elegida o la recomendada) para los tratamientos que se mantienen.
  */
 export async function reviseBudget(
-  tx: Db, orgId: string, actorUserId: string, patientId: string, budgetId: string, input: ReviseBudgetInput,
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  budgetId: string,
+  input: ReviseBudgetInput,
   opts: BudgetActorOpts = {},
 ): Promise<BudgetWithTotals> {
   await requirePatient(tx, orgId, patientId)
@@ -1982,38 +2720,86 @@ export async function reviseBudget(
     throw conflict("BUDGET_STATUS", "Esta propuesta no admite revisión")
   }
   const reason = input.reason?.trim()
-  if (!reason || reason.length > 2000) throw invalidField("reason", "El motivo debe tener 1–2000 caracteres")
-  if (!input.itemIds?.length || input.itemIds.length > 200 || new Set(input.itemIds).size !== input.itemIds.length) {
+  if (!reason || reason.length > 2000)
+    throw invalidField("reason", "El motivo debe tener 1–2000 caracteres")
+  if (
+    !input.itemIds?.length ||
+    input.itemIds.length > 200 ||
+    new Set(input.itemIds).size !== input.itemIds.length
+  ) {
     throw invalidField("itemIds", "itemIds debe contener entre 1 y 200 identificadores únicos")
   }
-  const [successor] = await tx.select({ id: treatmentBudget.id }).from(treatmentBudget)
-    .where(and(eq(treatmentBudget.organizationId, orgId), eq(treatmentBudget.supersedesBudgetId, budgetId))).limit(1)
+  const [successor] = await tx
+    .select({ id: treatmentBudget.id })
+    .from(treatmentBudget)
+    .where(
+      and(
+        eq(treatmentBudget.organizationId, orgId),
+        eq(treatmentBudget.supersedesBudgetId, budgetId),
+      ),
+    )
+    .limit(1)
   if (successor) throw conflict("BUDGET_REVISION_EXISTS", "La propuesta ya tiene una revisión")
   await assertRetainedExecutedItems(tx, orgId, patientId, budgetId, input.itemIds)
-  const items = await tx.select().from(treatmentPlanItem).where(and(
-    eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.patientId, patientId),
-    eq(treatmentPlanItem.planId, current.planId), inArray(treatmentPlanItem.id, input.itemIds),
-  )).orderBy(asc(treatmentPlanItem.id)).for("update")
+  const items = await tx
+    .select()
+    .from(treatmentPlanItem)
+    .where(
+      and(
+        eq(treatmentPlanItem.organizationId, orgId),
+        eq(treatmentPlanItem.patientId, patientId),
+        eq(treatmentPlanItem.planId, current.planId),
+        inArray(treatmentPlanItem.id, input.itemIds),
+      ),
+    )
+    .orderBy(asc(treatmentPlanItem.id))
+    .for("update")
   if (items.length !== input.itemIds.length) throw notFound("Ítem del plan")
   for (const item of items) {
     // La casilla del tratamiento en el cuerpo (`itemIds[2]`): el rechazo se dice junto a ella.
     const field = `itemIds[${input.itemIds.indexOf(item.id)}]`
-    const reject = (code: string, message: string) => new ServiceError(code, 409, message, { [field]: message })
-    if (["cancelado", "reemplazado"].includes(item.status)) throw reject("ITEM_CLOSED", "La indicación está cerrada")
-    if (item.priceCents == null || item.currency !== current.currency) throw reject("BUDGET_CURRENCY_MIX", "Todas las líneas requieren precio en la moneda de la propuesta")
-    if (item.budgetId && item.budgetId !== current.id) throw reject("ITEM_ALREADY_QUOTED", "La indicación pertenece a otra propuesta")
+    const reject = (code: string, message: string) =>
+      new ServiceError(code, 409, message, { [field]: message })
+    if (["cancelado", "reemplazado"].includes(item.status))
+      throw reject("ITEM_CLOSED", "La indicación está cerrada")
+    if (item.priceCents == null || item.currency !== current.currency)
+      throw reject(
+        "BUDGET_CURRENCY_MIX",
+        "Todas las líneas requieren precio en la moneda de la propuesta",
+      )
+    if (item.budgetId && item.budgetId !== current.id)
+      throw reject("ITEM_ALREADY_QUOTED", "La indicación pertenece a otra propuesta")
     assertExecutableCodings(item.codings)
   }
-  const [revision] = await tx.insert(treatmentBudget).values({
-    organizationId: orgId, patientId, planId: current.planId, budgetNumber: current.budgetNumber,
-    revisionNumber: current.revisionNumber + 1, supersedesBudgetId: current.id,
-    title: assertTitle(input.title, current.title), notes: assertNotes(input.notes) ?? current.notes,
-    currency: current.currency, createdBy: actorUserId,
-  }).returning()
+  const [revision] = await tx
+    .insert(treatmentBudget)
+    .values({
+      organizationId: orgId,
+      patientId,
+      planId: current.planId,
+      budgetNumber: current.budgetNumber,
+      revisionNumber: current.revisionNumber + 1,
+      supersedesBudgetId: current.id,
+      title: assertTitle(input.title, current.title),
+      notes: assertNotes(input.notes) ?? current.notes,
+      findings: current.findings,
+      proposal: current.proposal,
+      currency: current.currency,
+      createdBy: actorUserId,
+    })
+    .returning()
   if (!revision) throw new Error("No se pudo crear la revisión")
-  const [option] = await tx.insert(treatmentBudgetOption).values({
-    organizationId: orgId, patientId, budgetId: revision.id, position: 1, isRecommended: true, createdBy: actorUserId,
-  }).returning()
+  const [option] = await tx
+    .insert(treatmentBudgetOption)
+    .values({
+      organizationId: orgId,
+      patientId,
+      budgetId: revision.id,
+      position: 1,
+      isRecommended: true,
+      createdBy: actorUserId,
+    })
+    .returning()
   if (!option) throw new Error("No se pudo crear la opción de la revisión")
   const previousOptions = await listOptions(tx, orgId, [current.id])
   const valued = valueOptionOf(previousOptions)
@@ -2028,8 +2814,8 @@ export async function reviseBudget(
   )
   const revisedAt = new Date()
   for (const item of items) {
-    const snapshot = oldLines.find(l => l.planItemId === item.id) ?? item
-    const carried = "tariffPriceCents" in snapshot ? snapshot as BudgetLineWithStatus : null
+    const snapshot = oldLines.find((l) => l.planItemId === item.id) ?? item
+    const carried = "tariffPriceCents" in snapshot ? (snapshot as BudgetLineWithStatus) : null
     // La revisión conserva lo acordado, salvo una promoción que ya terminó:
     // esa línea vuelve a su tarifa y queda a la vista en el borrador.
     let promotion = carried?.promotionId
@@ -2050,10 +2836,19 @@ export async function reviseBudget(
       }
     }
     await tx.insert(treatmentBudgetItem).values({
-      organizationId: orgId, patientId, planId: current.planId, budgetId: revision.id, optionId: option.id,
-      planItemId: item.id, serviceId: snapshot.serviceId, title: snapshot.title,
-      scope: snapshot.scope, siteSystem: snapshot.siteSystem, siteCode: snapshot.siteCode,
-      siteQualifiers: snapshot.siteQualifiers, codings: snapshot.codings,
+      organizationId: orgId,
+      patientId,
+      planId: current.planId,
+      budgetId: revision.id,
+      optionId: option.id,
+      planItemId: item.id,
+      serviceId: snapshot.serviceId,
+      title: snapshot.title,
+      scope: snapshot.scope,
+      siteSystem: snapshot.siteSystem,
+      siteCode: snapshot.siteCode,
+      siteQualifiers: snapshot.siteQualifiers,
+      codings: snapshot.codings,
       priceCents,
       tariffPriceCents: carried?.tariffPriceCents ?? item.priceCents,
       priceReason,
@@ -2061,17 +2856,27 @@ export async function reviseBudget(
       promotionName: promotion?.name ?? null,
       promotionMode: promotion?.mode ?? null,
       billingMode:
-        carried?.billingMode ?? (item.serviceId ? (billingModes[item.serviceId] ?? "treatment") : "treatment"),
+        carried?.billingMode ??
+        (item.serviceId ? (billingModes[item.serviceId] ?? "treatment") : "treatment"),
       sessionsPlanned: carried?.sessionsPlanned ?? item.plannedSessions,
-      currency: snapshot.currency, createdBy: actorUserId,
+      patientGuide: carried?.patientGuide ?? null,
+      currency: snapshot.currency,
+      createdBy: actorUserId,
     })
   }
-  await audit(tx, orgId, actorUserId, "budget.revised", revision.id, { patientId, reason, supersedesBudgetId: current.id })
+  await audit(tx, orgId, actorUserId, "budget.revised", revision.id, {
+    patientId,
+    reason,
+    supersedesBudgetId: current.id,
+  })
   await notifyBudget(tx, orgId)
   return loadBudget(tx, orgId, patientId, revision)
 }
 
 export interface BudgetPrintLine {
+  /** La línea y el tratamiento del plan del que sale. */
+  id: string
+  planItemId: string
   title: string
   detail: string | null
   /** Precio de referencia de la unidad (tarifa, o lo acordado si es mayor). */
@@ -2089,11 +2894,24 @@ export interface BudgetPrintLine {
   billingMode: string
   sessionsPlanned: number | null
   decision: string
+  /** Fase, orden y sesiones del plan. */
+  phase: string | null
+  sortOrder: number
+  plannedSessions: number | null
+  /** La duración del servicio, para lo que no tiene explicación. */
+  durationMin: number | null
+  /** Lo congelado al entregar; en borrador, el ajuste o la del servicio. */
+  guide: PatientGuide | null
+  /** Solo si quien lo recibe puede leer lo clínico. */
+  diagnosis: { label: string; title: string | null } | null
 }
 
 /** Una opción en la hoja: sus líneas y su total, nunca sumado con las demás. */
 export interface BudgetPrintOption {
   label: string
+  name: string | null
+  pros: string | null
+  cons: string | null
   isRecommended: boolean
   /** `pendiente`, `elegida` o `no_elegida`. */
   decision: string
@@ -2101,6 +2919,14 @@ export interface BudgetPrintOption {
   subtotalCents: number | null
   discountCents: number | null
   totalCents: number | null
+}
+
+/** Lo que pesa de un consentimiento unido a un servicio del presupuesto. */
+export interface BudgetConsentFacts {
+  title: string
+  risks: string[]
+  alternatives: string[]
+  consequences: string
 }
 
 export interface BudgetPrintPayload {
@@ -2121,8 +2947,18 @@ export interface BudgetPrintPayload {
   locale: string
   timezone: string
   issuedAt: Date
+  /** AAAA-MM-DD; imprimirlo vencido no cambia nada: solo se dice. */
+  validUntil: string | null
   clinic: { name: string; branchName: string | null; address: string | null; phone: string | null }
-  patient: { displayName: string; docType: string | null; docNumber: string | null }
+  /** La clínica como la dice el papel (logo y documento fiscal incluidos). */
+  documentClinic: DocumentClinic
+  patient: {
+    displayName: string
+    docType: string | null
+    docNumber: string | null
+    patientNumber: number
+    birthDate: string | null
+  }
   professional: { name: string; title: string | null; registration: string | null } | null
   /** Las líneas de la opción que vale (con una sola opción, todas). */
   lines: BudgetPrintLine[]
@@ -2131,20 +2967,55 @@ export interface BudgetPrintPayload {
   subtotalCents: number | null
   discountCents: number | null
   totalCents: number | null
+  /** Nombres de la hoja para el producto de la clínica. */
+  words: ProductWords["budgetPaper"]
+  /** Solo para quien puede leer lo clínico; si no, nulo o vacío. */
+  findings: string | null
+  allergies: string[]
+  /** La grilla del sitio (odentIA: piezas FDI); nula sin marcas o sin permiso. */
+  chart: { label: string; rows: Array<Array<{ label: string; marked: boolean }>> } | null
+  proposal: string | null
+  /** Las fases del producto, en orden; vacías si el producto no habla de etapas. */
+  phases: Array<{ key: string; label: string }>
+  terms: { payment: string | null; change: string | null }
+  paymentMethods: string[]
+  consents: BudgetConsentFacts[]
+  /** Cómo respondió, si ya respondió: «Aceptó por su enlace». */
+  decisionWords: { text: string; by: string | null; at: Date | null } | null
+  /** Su enlace vivo, si ya tiene uno; generar uno no es algo que haga un papel. */
+  personalLinkUrl: string | null
 }
 
-function printLine(site: ProductSite, line: BudgetLineWithStatus): BudgetPrintLine {
+function printLine(
+  site: ProductSite,
+  line: BudgetLineWithStatus,
+  extras: {
+    plan: Map<
+      string,
+      {
+        phase: string
+        sortOrder: number
+        plannedSessions: number
+        diagnosis: BudgetPrintLine["diagnosis"]
+      }
+    >
+    services: Map<string, { patientGuide: PatientGuide | null; durationMin: number | null }>
+    isDraft: boolean
+  },
+): BudgetPrintLine {
   const units = budgetLineUnits(line)
   const unitCents = line.priceCents
   // La referencia nunca queda por debajo de lo acordado: un precio mayor
   // que la tarifa no se imprime como «descuento negativo».
   const listUnitCents =
-    unitCents == null
-      ? null
-      : Math.max(line.tariffPriceCents ?? unitCents, unitCents)
+    unitCents == null ? null : Math.max(line.tariffPriceCents ?? unitCents, unitCents)
   const totalCents = unitCents == null ? null : unitCents * units
   const listTotalCents = listUnitCents == null ? null : listUnitCents * units
+  const plan = extras.plan.get(line.planItemId)
+  const service = line.serviceId ? extras.services.get(line.serviceId) : null
   return {
+    id: line.id,
+    planItemId: line.planItemId,
     title: line.title,
     detail: site.words(line, "short"),
     listUnitCents,
@@ -2158,23 +3029,140 @@ function printLine(site: ProductSite, line: BudgetLineWithStatus): BudgetPrintLi
     billingMode: line.billingMode,
     sessionsPlanned: line.sessionsPlanned,
     decision: line.decision,
+    phase: plan?.phase ?? null,
+    sortOrder: plan?.sortOrder ?? 0,
+    plannedSessions: plan?.plannedSessions ?? null,
+    durationMin: service?.durationMin ?? null,
+    // Lo entregado es lo congelado: lo que se cambie en el servicio después no le llega.
+    guide:
+      parsePatientGuide(line.patientGuide) ??
+      (extras.isDraft ? (service?.patientGuide ?? null) : null),
+    diagnosis: plan?.diagnosis ?? null,
   }
 }
 
 /**
- * Contenido de la hoja del presupuesto (lo que imprime el PDF): precios
- * finales acordados, referencia del descuento y código de cotización 310.
- * Con varias opciones, cada una con su total. Moneda, formato, zona y papel
- * salen del perfil de la clínica.
+ * Lo que pesa antes de decidir, de los consentimientos unidos a estos servicios: la
+ * última versión publicada de cada uno. Sin consentimiento, esa parte no sale.
+ */
+async function consentFactsOf(
+  tx: Db,
+  orgId: string,
+  serviceIds: Array<string | null>,
+): Promise<BudgetConsentFacts[]> {
+  const ids = [...new Set(serviceIds.filter((id): id is string => !!id))]
+  if (ids.length === 0) return []
+  const links = await tx
+    .select({ key: consentTemplateService.templateKey })
+    .from(consentTemplateService)
+    .where(
+      and(
+        eq(consentTemplateService.organizationId, orgId),
+        inArray(consentTemplateService.serviceId, ids),
+      ),
+    )
+  const keys = [...new Set(links.map((link) => link.key))]
+  if (keys.length === 0) return []
+  const rows = await tx
+    .select({
+      key: consentTemplate.key,
+      title: consentTemplate.title,
+      sections: consentTemplate.sections,
+      version: consentTemplate.version,
+    })
+    .from(consentTemplate)
+    .where(
+      and(
+        eq(consentTemplate.organizationId, orgId),
+        eq(consentTemplate.status, "publicado"),
+        inArray(consentTemplate.key, keys),
+      ),
+    )
+    .orderBy(asc(consentTemplate.key), desc(consentTemplate.version))
+  const facts: BudgetConsentFacts[] = []
+  const seen = new Set<string>()
+  for (const row of rows) {
+    if (seen.has(row.key)) continue
+    seen.add(row.key)
+    const sections = row.sections as ConsentSections | null
+    if (!sections) continue
+    facts.push({
+      title: row.title,
+      risks: sections.risks,
+      alternatives: sections.alternatives,
+      consequences: sections.consequences,
+    })
+  }
+  return facts
+}
+
+/** Condiciones, medios de pago y lo que pesa de los consentimientos, hoy. */
+async function budgetDeliveredFacts(
+  tx: Db,
+  orgId: string,
+  serviceIds: Array<string | null>,
+): Promise<BudgetDeliveredSnapshot> {
+  const [profile] = await tx
+    .select({ payment: orgProfile.budgetPaymentTerms, change: orgProfile.budgetChangeTerms })
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, orgId))
+    .limit(1)
+  return {
+    terms: { payment: profile?.payment?.trim() || null, change: profile?.change?.trim() || null },
+    paymentMethods: (await listPaymentMethods(tx, orgId)).map((method) => method.name),
+    consents: await consentFactsOf(tx, orgId, serviceIds),
+  }
+}
+
+const DECIDED_VIA_WORDS: Record<string, string> = {
+  enlace: "por su enlace",
+  portal: "por el portal",
+  conversacion: "por la conversación",
+  clinica: "en la clínica",
+}
+
+function decisionWordsOf(
+  budget: BudgetWithTotals,
+  deciderName: string | null,
+): BudgetPrintPayload["decisionWords"] {
+  if (
+    !budget.decidedAt ||
+    !["aceptado", "parcial", "rechazado", "pospuesto"].includes(budget.status)
+  )
+    return null
+  const verb: Record<string, string> = {
+    aceptado: "Aceptó",
+    parcial: "Aceptó una parte",
+    rechazado: "No aceptó",
+    pospuesto: "Lo dejó para después",
+  }
+  // Lo decidido antes de guardar por dónde no dice canal: no se supone uno.
+  const where = budget.decidedVia ? DECIDED_VIA_WORDS[budget.decidedVia] : null
+  return {
+    text: [verb[budget.status] ?? "Respondió", where].filter(Boolean).join(" "),
+    by: budget.acceptedByName ?? deciderName,
+    at: budget.decidedAt,
+  }
+}
+
+/**
+ * Contenido de la hoja del presupuesto (lo que imprime el PDF): precios finales
+ * acordados, referencia del descuento, código de cotización 310 y lo que explica
+ * cada línea. Con varias opciones, cada una con su total. Moneda, formato, zona y
+ * papel salen del perfil de la clínica.
+ *
+ * `clinicalAccess` decide si lleva lo encontrado, los diagnósticos y las alergias: solo
+ * quien lee lo clínico, o el papel que va a la propia persona o a su representante.
  */
 export async function getBudgetPrintPayload(
   tx: Db,
   orgId: string,
   patientId: string,
   budgetId: string,
-  opts: BudgetActorOpts & { actorUserId?: string } = {},
+  opts: BudgetActorOpts & { actorUserId?: string; clinicalAccess?: boolean; linkContactId?: string | null } = {},
 ): Promise<BudgetPrintPayload> {
   const budget = await getBudgetDetail(tx, orgId, patientId, budgetId, opts)
+  const clinicalAccess = opts.clinicalAccess === true
   const [profile] = await tx
     .select()
     .from(orgProfile)
@@ -2186,6 +3174,8 @@ export async function getBudgetPrintPayload(
       displayName: patientPerson.displayName,
       docType: patientPerson.docType,
       docNumber: patientPerson.docNumber,
+      patientNumber: patient.patientNumber,
+      birthDate: patientPerson.birthDate,
     })
     .from(patient)
     .innerJoin(patientPerson, joinPatientPerson(patientPerson))
@@ -2197,7 +3187,8 @@ export async function getBudgetPrintPayload(
     .from(treatmentPlan)
     .where(and(eq(treatmentPlan.id, budget.planId), eq(treatmentPlan.organizationId, orgId)))
     .limit(1)
-  const site = (await productHooks(tx, orgId)).site
+  const hooks = await productHooks(tx, orgId)
+  const site = hooks.site
   // Firma quien preparó el presupuesto; si no consta, quien abrió el plan.
   const author = budget.createdBy ?? planRow?.createdBy ?? null
   let professional: BudgetPrintPayload["professional"] = null
@@ -2221,34 +3212,150 @@ export async function getBudgetPrintPayload(
       }
     }
   }
-  // El presupuesto no pertenece a una sede. Si la clínica tiene una sola, la
-  // hoja lleva su nombre, dirección y teléfono; con varias, los de la clínica.
-  const branches = await tx
-    .select({ name: branch.name, address: branchAddressColumns, phone: branch.phone })
-    .from(branch)
-    .where(and(eq(branch.organizationId, orgId), eq(branch.isActive, true)))
-    .limit(2)
-  const onlyBranch = branches.length === 1 ? branches[0]! : null
+  const documentClinic = await loadDocumentClinic(tx, orgId)
+  const isDraft = budget.status === "borrador"
+  // Fase, orden, sesiones y diagnóstico de cada línea salen del plan.
+  const planItems = budget.items.length
+    ? await tx
+        .select({
+          id: treatmentPlanItem.id,
+          phase: treatmentPlanItem.phase,
+          sortOrder: treatmentPlanItem.sortOrder,
+          plannedSessions: treatmentPlanItem.plannedSessions,
+          diagnosisSystem: treatmentPlanItem.diagnosisSystem,
+          diagnosisCode: treatmentPlanItem.diagnosisCode,
+        })
+        .from(treatmentPlanItem)
+        .where(
+          and(
+            eq(treatmentPlanItem.organizationId, orgId),
+            inArray(
+              treatmentPlanItem.id,
+              budget.items.map((line) => line.planItemId),
+            ),
+          ),
+        )
+    : []
+  const codes = clinicalAccess
+    ? [
+        ...new Set(
+          planItems
+            .filter((item) => item.diagnosisCode)
+            .map((item) => `${item.diagnosisSystem}|${item.diagnosisCode}`),
+        ),
+      ]
+    : []
+  const titles = new Map<string, string>()
+  if (codes.length > 0) {
+    const found = await tx
+      .select({
+        system: diagnosisCatalog.systemKey,
+        code: diagnosisCatalog.code,
+        title: diagnosisCatalog.title,
+      })
+      .from(diagnosisCatalog)
+      .where(
+        inArray(
+          diagnosisCatalog.code,
+          codes.map((code) => code.split("|")[1] ?? ""),
+        ),
+      )
+    for (const row of found) titles.set(`${row.system}|${row.code}`, row.title)
+  }
+  const plan = new Map(
+    planItems.map((item) => [
+      item.id,
+      {
+        phase: item.phase,
+        sortOrder: item.sortOrder,
+        plannedSessions: item.plannedSessions,
+        diagnosis:
+          clinicalAccess && item.diagnosisCode
+            ? {
+                label: diagnosisCodeLabel(item.diagnosisSystem, item.diagnosisCode),
+                title: titles.get(`${item.diagnosisSystem}|${item.diagnosisCode}`) ?? null,
+              }
+            : null,
+      },
+    ]),
+  )
+  const services = await servicesOf(
+    tx,
+    orgId,
+    budget.items.map((line) => line.serviceId),
+  )
+  const toLine = (line: BudgetLineWithStatus) => printLine(site, line, { plan, services, isDraft })
   const value = valueOptionOf(budget.options)
-  const lines = budget.items.filter((line) => !value || line.optionId === value.id).map((line) => printLine(site, line))
+  const lines = budget.items.filter((line) => !value || line.optionId === value.id).map(toLine)
   const subtotalCents = sumCents(lines.map((line) => line.listTotalCents))
   const options: BudgetPrintOption[] =
     budget.options.length > 1
       ? budget.options.map((option) => {
-          const optionLines = budget.items.filter((line) => line.optionId === option.id).map((line) => printLine(site, line))
+          const optionLines = budget.items.filter((line) => line.optionId === option.id).map(toLine)
           const optionSubtotal = sumCents(optionLines.map((line) => line.listTotalCents))
           return {
             label: option.label,
+            name: option.name,
+            pros: option.pros,
+            cons: option.cons,
             isRecommended: option.isRecommended,
             decision: option.decision,
             lines: optionLines,
             subtotalCents: optionSubtotal,
             discountCents:
-              optionSubtotal == null || option.totalCents == null ? null : optionSubtotal - option.totalCents,
+              optionSubtotal == null || option.totalCents == null
+                ? null
+                : optionSubtotal - option.totalCents,
             totalCents: option.totalCents,
           }
         })
       : []
+  // Lo clínico solo si corresponde; `findings` se lee aquí, nunca viaja en el detalle.
+  const [clinical] = clinicalAccess
+    ? await tx
+        .select({ findings: treatmentBudget.findings })
+        .from(treatmentBudget)
+        .where(and(eq(treatmentBudget.id, budgetId), eq(treatmentBudget.organizationId, orgId)))
+        .limit(1)
+    : []
+  const allergies = clinicalAccess
+    ? await tx
+        .select({ substance: patientAllergy.substance })
+        .from(patientAllergy)
+        .where(
+          and(
+            eq(patientAllergy.organizationId, orgId),
+            eq(patientAllergy.patientId, patientId),
+            eq(patientAllergy.isActive, true),
+          ),
+        )
+    : []
+  const phases = hooks.phaseWords
+    ? hooks.planPhases.flatMap((key) => {
+        const label = hooks.phaseWords?.(key)
+        return label ? [{ key, label }] : []
+      })
+    : []
+  const [decider] = budget.decisionContactId
+    ? await tx
+        .select({ name: contact.displayName })
+        .from(contact)
+        .where(and(eq(contact.id, budget.decisionContactId), eq(contact.organizationId, orgId)))
+        .limit(1)
+    : []
+  // El enlace de quien decide y recibe este papel, si ya tiene uno vivo: un papel no
+  // crea ni renueva enlaces. Sin `linkContactId` no lleva QR (`buildBudgetSnapshot`).
+  let personalLinkUrlOf: string | null = null
+  const key = documentSecretsKey()
+  if (key && !isDraft && opts.linkContactId) {
+    const token = await livePersonalLinkToken(
+      tx,
+      orgId,
+      { contactId: opts.linkContactId, patientId },
+      { secretsKey: key },
+    )
+    if (token) personalLinkUrlOf = await personalLinkUrl(tx, orgId, token)
+  }
   return {
     quotationCode: "310",
     paper: profile.sheetSize,
@@ -2258,18 +3365,20 @@ export async function getBudgetPrintPayload(
     planTitle: planRow?.title ?? budget.title,
     status: budget.status,
     stateText: budget.stateText,
-    isDraft: budget.status === "borrador",
+    isDraft,
     notes: budget.notes,
     currency: budget.currency,
     locale: profile.locale,
     timezone: profile.timezone,
     issuedAt: budget.presentedAt ?? budget.createdAt,
+    validUntil: budget.validUntil,
     clinic: {
-      name: profile.tradeName || profile.legalName || "",
-      branchName: onlyBranch?.name ?? null,
-      address: (onlyBranch ? (await branchAddressWriter(tx, orgId))(onlyBranch.address) : null) ?? profile.fiscalAddress ?? null,
-      phone: onlyBranch?.phone ?? null,
+      name: documentClinic.tradeName,
+      branchName: documentClinic.branchName,
+      address: documentClinic.address,
+      phone: documentClinic.phone,
     },
+    documentClinic,
     patient: patientRow,
     professional,
     lines,
@@ -2278,5 +3387,16 @@ export async function getBudgetPrintPayload(
     discountCents:
       subtotalCents == null || budget.totalCents == null ? null : subtotalCents - budget.totalCents,
     totalCents: budget.totalCents,
+    words: productWords(isClinicalProduct(profile.product) ? profile.product : "dental")
+      .budgetPaper,
+    findings: clinical?.findings ?? null,
+    allergies: allergies.map((row) => row.substance),
+    chart: clinicalAccess && site.chart ? site.chart(budget.items) : null,
+    proposal: budget.proposal,
+    phases,
+    // Lo entregado dice lo que se entregó; lo entregado antes de congelarlo, lo vigente.
+    ...(budget.deliveredSnapshot ?? (await budgetDeliveredFacts(tx, orgId, budget.items.map((line) => line.serviceId)))),
+    decisionWords: decisionWordsOf(budget, decider?.name ?? null),
+    personalLinkUrl: personalLinkUrlOf,
   }
 }

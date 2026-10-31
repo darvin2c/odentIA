@@ -30,6 +30,8 @@ import { usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
 import { type PlanItem, planStatusLabel } from "../../lib/patients"
 import { type ServiceCatalogItem, TREATMENT_SCOPE_LABELS } from "../../lib/services"
+import { productUi } from "../../product/product-ui"
+import { partNames } from "../../product/site-fields"
 import { ControlesPanel } from "./clinical-panels"
 import { DiagnosisSearch } from "./diagnosis-search"
 import { EncounterTreatments } from "./encounter-treatments"
@@ -38,8 +40,6 @@ import { BudgetSendButton } from "./plan/budget-send"
 import { BudgetShowActions } from "./plan/budget-show"
 import { usePlanNextStep } from "./plan/plan-next"
 import { ServicePicker } from "./service-picker"
-import { productUi } from "../../product/product-ui"
-import { partNames } from "../../product/site-fields"
 
 const QUADRANT_LABELS: Record<string, string> = {
   "1": "Cuadrante 1 · superior derecho",
@@ -60,7 +60,10 @@ const ARCH_OPTIONS = [
   { value: "upper", label: "Superior" },
   { value: "lower", label: "Inferior" },
 ]
-const SCOPE_OPTIONS = Object.entries(TREATMENT_SCOPE_LABELS).map(([value, label]) => ({ value, label }))
+const SCOPE_OPTIONS = Object.entries(TREATMENT_SCOPE_LABELS).map(([value, label]) => ({
+  value,
+  label,
+}))
 
 interface IndicationValues {
   scope: string
@@ -112,7 +115,10 @@ function BlockPart({
   children: React.ReactNode
 }): React.JSX.Element {
   return (
-    <section aria-label={title} className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6">
+    <section
+      aria-label={title}
+      className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6"
+    >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="font-heading text-base font-medium">{title}</h3>
         {action}
@@ -185,7 +191,10 @@ export function EncounterPlanPanel({
         ) : (
           <ul className="flex flex-col divide-y">
             {brief.map((item) => (
-              <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+              <li
+                key={item.id}
+                className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"
+              >
                 <span className="flex min-w-0 flex-col">
                   <span className="font-medium">
                     {item.title}
@@ -217,7 +226,11 @@ export function EncounterPlanPanel({
           </ul>
         )}
         {canWrite ? (
-          <Collapsible open={indicating} onOpenChange={setIndicating} className="flex flex-col gap-3">
+          <Collapsible
+            open={indicating}
+            onOpenChange={setIndicating}
+            className="flex flex-col gap-3"
+          >
             <CollapsibleTrigger
               render={
                 <Button
@@ -266,7 +279,11 @@ export function EncounterPlanPanel({
         heading="Próximo control"
       />
 
-      <EncounterBudgetSend patientId={patientId} patientName={patientName} beforeWrite={beforeWrite} />
+      <EncounterBudgetSend
+        patientId={patientId}
+        patientName={patientName}
+        beforeWrite={beforeWrite}
+      />
     </div>
   )
 }
@@ -300,8 +317,19 @@ export function EncounterBudgetSend({
           Presupuesto por enviar{step.detail ? ` · ${step.detail}` : ""}
         </span>
         <div className="flex flex-wrap items-center gap-2">
-          <BudgetShowActions patientId={patientId} budgetId={step.action.budgetId} patientName={patientName} beforeWrite={beforeWrite} />
-          <BudgetSendButton patientId={patientId} budgetId={step.action.budgetId} size="sm" beforeSend={beforeWrite} />
+          <BudgetShowActions
+            patientId={patientId}
+            budgetId={step.action.budgetId}
+            patientName={patientName}
+            beforeWrite={beforeWrite}
+          />
+          <BudgetSendButton
+            patientId={patientId}
+            budgetId={step.action.budgetId}
+            size="sm"
+            beforeSend={beforeWrite}
+            reviewable
+          />
         </div>
       </div>
     )
@@ -317,8 +345,14 @@ export function EncounterBudgetSend({
           budgetId={step.action.budgetId}
           size="sm"
           beforeSend={beforeWrite}
+          reviewable
         />
-        <BudgetShowActions patientId={patientId} budgetId={step.action.budgetId} patientName={patientName} beforeWrite={beforeWrite} />
+        <BudgetShowActions
+          patientId={patientId}
+          budgetId={step.action.budgetId}
+          patientName={patientName}
+          beforeWrite={beforeWrite}
+        />
       </div>
     </BlockPart>
   )
@@ -377,13 +411,19 @@ function IndicationForm({
           body: JSON.stringify(body),
         })
         await Promise.all(
-          ["treatment-plans", "treatment-plan", "plan-items", "patient-summary", "plan-next"].map((key) =>
-            queryClient.invalidateQueries({ queryKey: [key, patientId] }),
+          ["treatment-plans", "treatment-plan", "plan-items", "patient-summary", "plan-next"].map(
+            (key) => queryClient.invalidateQueries({ queryKey: [key, patientId] }),
           ),
         )
         await onChanged()
         // Se conserva el ámbito y el sitio para indicar el siguiente.
-        form.reset({ ...value, service: null, detail: "", diagnosisCode: "", odontogramEntryId: "" })
+        form.reset({
+          ...value,
+          service: null,
+          detail: "",
+          diagnosisCode: "",
+          odontogramEntryId: "",
+        })
       } finally {
         onPendingChange(false)
       }
@@ -412,7 +452,12 @@ function IndicationForm({
         {site ? (
           <form.AppField name="scope">
             {(field) => (
-              <field.SelectField id={`${uid}-scope`} label="Ámbito" options={SCOPE_OPTIONS} disabled={blocked} />
+              <field.SelectField
+                id={`${uid}-scope`}
+                label="Ámbito"
+                options={SCOPE_OPTIONS}
+                disabled={blocked}
+              />
             )}
           </form.AppField>
         ) : null}
@@ -494,7 +539,10 @@ function IndicationForm({
               {(control) => (
                 <div className="flex flex-wrap gap-2">
                   {validSurfaces.map((surface, index) => (
-                    <FieldLabel key={surface} className="flex items-center gap-1.5 text-sm font-normal">
+                    <FieldLabel
+                      key={surface}
+                      className="flex items-center gap-1.5 text-sm font-normal"
+                    >
                       <Checkbox
                         id={index === 0 ? control.id : undefined}
                         checked={field.state.value.includes(surface)}
@@ -543,13 +591,21 @@ function IndicationForm({
         <p className="text-sm text-muted-foreground" aria-live="polite">
           Precio de la tarifa:{" "}
           {orgLocale ? formatMoney(service.priceCents, service.currency, orgLocale) : "…"}
-          {site && service.scope ? ` · ${TREATMENT_SCOPE_LABELS[service.scope] ?? service.scope}` : ""}
+          {site && service.scope
+            ? ` · ${TREATMENT_SCOPE_LABELS[service.scope] ?? service.scope}`
+            : ""}
         </p>
       ) : null}
 
       <form.AppField name="detail">
         {(field) => (
-          <field.TextareaField id={`${uid}-detail`} label="Detalle" rows={2} maxLength={4000} disabled={blocked} />
+          <field.TextareaField
+            id={`${uid}-detail`}
+            label="Detalle"
+            rows={2}
+            maxLength={4000}
+            disabled={blocked}
+          />
         )}
       </form.AppField>
       <form.AppField name="diagnosisCode">
@@ -575,7 +631,9 @@ function IndicationForm({
           type="button"
           className="self-start"
           disabled={blocked}
-          onClick={() => void submitForm(form, { root: rootRef.current, fieldMap: INDICATION_FIELD_MAP })}
+          onClick={() =>
+            void submitForm(form, { root: rootRef.current, fieldMap: INDICATION_FIELD_MAP })
+          }
         >
           {pending ? "Añadiendo…" : "Añadir al plan"}
         </Button>
@@ -586,8 +644,8 @@ function IndicationForm({
         ) : null}
         {productUi().plan.budgetRequired ? (
           <p className="text-xs text-muted-foreground">
-            Se conserva la pieza elegida para indicar el siguiente. Al firmar la atención, lo indicado
-            se suma al presupuesto por enviar.
+            Se conserva la pieza elegida para indicar el siguiente. Al firmar la atención, lo
+            indicado se suma al presupuesto por enviar.
           </p>
         ) : (
           // latidIA (decisión 15 del issue 229): sin «dónde» que conservar ni presupuesto que esperar.

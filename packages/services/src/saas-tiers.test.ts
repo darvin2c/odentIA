@@ -451,7 +451,9 @@ describe("la cita que reservó Sofi", () => {
   describe("cita recuperada: lo decide si ya tenía su cita", () => {
     it("no cuenta si tenía otra cita por venir cuando Argos le escribió", async () => {
       const item = await scene({ source: "agent", adminMessageDaysAgo: 3 })
-      const startsAt = new Date(Date.now() + 5 * DAY)
+      // Entre dos horas exactas: la cita de `scene` cae en una hora exacta al azar (30 min) y,
+      // con el mismo profesional, no deben chocar (`appointment_no_overlap_professional`).
+      const startsAt = new Date(Date.now() + 5 * DAY + 40 * 60_000)
       await ownerDb.insert(appointment).values({
         organizationId: ORG,
         branchId: item.site.id,
@@ -459,8 +461,8 @@ describe("la cita que reservó Sofi", () => {
         professionalUserId: item.fx.actor,
         patientId: item.fx.patient.id,
         startsAt,
-        endsAt: new Date(startsAt.getTime() + 30 * 60_000),
-        durationMin: 30,
+        endsAt: new Date(startsAt.getTime() + 15 * 60_000),
+        durationMin: 15,
         status: "programada",
         source: "recepcion",
         createdAt: new Date(Date.now() - 20 * DAY),

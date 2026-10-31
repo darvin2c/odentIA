@@ -1,0 +1,395 @@
+{
+  "blanqueamiento-externo-por-arcada": {
+    "visits": "1 a 3",
+    "visitLength": "45 a 90 minutos",
+    "how": "Se protegen las encías y se aplica un gel aclarador sobre los dientes de una arcada (los de arriba o los de abajo), en la clínica, con férulas en casa o combinando ambos. Antes se revisa que no haya caries ni encías inflamadas. Avise antes si está embarazada o dando de lactar: suele posponerse.",
+    "includes": "la protección de las encías y la aplicación del gel en la arcada indicada.",
+    "excludes": "La otra arcada, si no figura en el presupuesto\nCambiar resinas, coronas o carillas, que no se aclaran con el gel\nTratar caries o hacer una limpieza previa, si hicieran falta",
+    "aftercare": "es común sentir los dientes sensibles al frío o al calor por unos días. Por 24 a 48 horas conviene evitar café, té, vino, gaseosas oscuras y tabaco. Cuánto aclaran varía de una persona a otra y el color se va perdiendo con el tiempo. Avise si la sensibilidad es muy fuerte o la encía sigue irritada."
+  },
+  "colocacion-de-implante-endooseo": {
+    "visits": "2 a 3",
+    "visitLength": "hasta 90 minutos",
+    "how": "Con anestesia local, se coloca en el hueso un pequeño tornillo, generalmente de titanio, que reemplaza la raíz del diente perdido. Luego se espera a que se una al hueso antes de poner el diente definitivo. Avise antes si toma anticoagulantes (para «adelgazar la sangre») o medicamentos para los huesos, si tiene diabetes, si fuma, si está embarazada o si recibió radioterapia en la cabeza o el cuello. No suspenda ningún medicamento por su cuenta.",
+    "includes": "la anestesia local y la colocación del implante.",
+    "excludes": "La corona y la pieza que la une al implante (pilar)\nTomografía u otros estudios de imagen\nInjerto de hueso, si hiciera falta",
+    "aftercare": "son normales la hinchazón, algún moretón, la molestia y un poco de sangrado los primeros días. Ayuda poner frío sobre la cara las primeras horas, comer blando y no masticar sobre la zona. Evite fumar y limpie la zona como le indiquen. Tome solo los medicamentos que le indique el odontólogo.",
+    "schedule": [
+      { "when": "Antes de la cirugía", "what": "Evaluación, radiografías o tomografía y plan del implante." },
+      { "when": "Día de la cirugía", "what": "Colocación del implante con anestesia local." },
+      { "when": "1 a 2 semanas después", "what": "Control de la cicatrización del implante y retiro de puntos, si los hay." },
+      { "when": "Habitualmente 2 a 6 meses", "what": "Espera para que el implante se una al hueso. Varía según cada caso; a veces se coloca un diente provisional." },
+      { "when": "Al terminar la espera", "what": "Se toma la medida y se coloca la corona u otra prótesis sobre el implante." }
+    ],
+    "warnings": "Sangrado abundante que no para después de morder una gasa durante 30 minutos.\nDolor que aumenta después del segundo o tercer día.\nHinchazón que sigue creciendo después del tercer día.\nFiebre o pus en la zona.\nDificultad para respirar o tragar, o hinchazón que llega al ojo o al cuello.\nAdormecimiento del labio, el mentón o la lengua que sigue al día siguiente.\nImplante que se mueve."
+  },
+  "consulta-odontologica-general": {
+    "visits": "1",
+    "visitLength": "20 a 40 minutos",
+    "how": "El odontólogo conversa sobre su molestia, pregunta por su salud y revisa sus dientes, encías y boca. Luego explica lo que encontró y las opciones. Conviene traer la lista de sus medicamentos y radiografías anteriores, y avisar si está embarazada.",
+    "excludes": "Radiografías, si hicieran falta\nLos tratamientos que se decidan después"
+  },
+  "control-de-ortodoncia": {
+    "visits": "1",
+    "visitLength": "15 a 30 minutos",
+    "how": "Se revisa cómo se han movido los dientes y se ajusta el tratamiento: cambio de ligas o arcos en los brackets, o revisión y entrega de los siguientes alineadores.",
+    "includes": "la revisión y los ajustes de ese control.",
+    "excludes": "Los aparatos, los alineadores y los retenedores\nReponer piezas rotas o perdidas",
+    "aftercare": "puede sentir presión o molestia por 2 a 3 días; ayuda comer blando esos días. Mantenga un cepillado cuidadoso. Avise sin esperar al próximo control si un alambre pincha, se suelta un bracket o una llaga no mejora.",
+    "schedule": [
+      { "when": "Habitualmente cada 4 a 8 semanas", "what": "Un control de ortodoncia mientras dure el tratamiento. El odontólogo indica la fecha de cada uno." }
+    ]
+  },
+  "corona-de-porcelana": {
+    "visits": "2 a 3",
+    "visitLength": "45 a 90 minutos",
+    "how": "Se desgasta el diente para dar espacio y se toma una medida o un escaneo; si hace falta, queda una corona provisional. En otra cita se prueba y se pega la corona: una funda de porcelana, sin metal, que cubre toda la parte visible del diente.",
+    "includes": "la preparación del diente, la medida, la prueba, el pegado y el ajuste de la mordida.",
+    "excludes": "Endodoncia, poste y muñón o reconstrucción previa, si hicieran falta",
+    "aftercare": "el diente puede estar sensible por unos días. Con la corona provisional, evite lo duro y lo pegajoso. Con la definitiva, no muerda hielo ni objetos duros, porque la porcelana puede romperse, y siga con el cepillado y el hilo dental: el diente debajo aún puede tener caries. Avise si la mordida queda alta, duele al morder o la corona se mueve o se despega; guárdela y no la pegue por su cuenta."
+  },
+  "corona-metal-ceramica-metal-base": {
+    "visits": "2 a 3",
+    "visitLength": "45 a 90 minutos",
+    "how": "Se desgasta el diente y se toma una medida o un escaneo; si hace falta, queda una corona provisional. En otra cita se prueba y se pega la corona: una estructura interna de metal cubierta con cerámica del color del diente. Avise antes si tiene alergia a algún metal, como el níquel.",
+    "includes": "la preparación del diente, la medida, la prueba, el pegado y el ajuste de la mordida.",
+    "excludes": "Endodoncia, poste y muñón o reconstrucción previa, si hicieran falta",
+    "aftercare": "el diente puede estar sensible por unos días. Con la corona provisional, evite lo duro y lo pegajoso. Con la definitiva, siga con el cepillado y el hilo dental: el diente debajo aún puede tener caries. Con el tiempo puede notarse una línea oscura junto a la encía. Avise si la mordida queda alta, duele al morder o la corona se mueve o se despega; guárdela y no la pegue por su cuenta."
+  },
+  "endodoncia-anterior-vital": {
+    "visits": "1 a 2",
+    "visitLength": "45 a 90 minutos",
+    "how": "Con anestesia local, se retira el nervio dañado, que todavía está vivo, de un diente de adelante (incisivo o colmillo). Estos dientes suelen tener un solo conducto, que se limpia, se rellena y se sella.",
+    "includes": "anestesia local, radiografías durante el tratamiento y sellado temporal del diente.",
+    "excludes": "La resina o corona final del diente\nPoste y muñón, si hiciera falta",
+    "aftercare": "es normal una molestia al morder por unos días. No muerda cosas duras con ese diente y no postergue la restauración final. Con los años, el diente puede oscurecerse. Avise si hay hinchazón, dolor fuerte que aumenta, fiebre o si se sale el sellado temporal."
+  },
+  "endodoncia-bicuspide-vital": {
+    "visits": "1 a 2",
+    "visitLength": "60 a 90 minutos",
+    "how": "Con anestesia local, se retira el nervio dañado, que todavía está vivo, de un premolar (el diente entre el colmillo y las muelas). Estos dientes suelen tener uno o dos conductos, que se limpian, se rellenan y se sellan.",
+    "includes": "anestesia local, radiografías durante el tratamiento y sellado temporal del diente.",
+    "excludes": "La resina o corona final del diente\nPoste y muñón, si hiciera falta",
+    "aftercare": "es normal una molestia al morder por unos días. No mastique cosas duras de ese lado hasta tener la restauración final, que en un premolar suele ser una corona, y no la postergue: el diente puede fracturarse. Avise si hay hinchazón, dolor fuerte que aumenta, fiebre o si se sale el sellado temporal."
+  },
+  "endodoncia-de-bicuspide-dos-raices": {
+    "visits": "1 a 2",
+    "visitLength": "60 a 120 minutos",
+    "how": "Con anestesia local si hace falta, se retira el nervio dañado o el tejido infectado de un premolar (el diente entre el colmillo y las muelas) que tiene dos raíces. Cada raíz tiene su conducto, que se limpia, se rellena y se sella.",
+    "includes": "anestesia local si hace falta, radiografías durante el tratamiento y sellado temporal del diente.",
+    "excludes": "La resina o corona final del diente\nPoste y muñón, si hiciera falta",
+    "aftercare": "es normal una molestia al morder por unos días. No mastique cosas duras de ese lado hasta tener la restauración final, que en un premolar suele ser una corona, y no la postergue: el diente puede fracturarse. Avise si hay hinchazón, dolor fuerte que aumenta, fiebre o si se sale el sellado temporal."
+  },
+  "endodoncia-de-bicuspide-una-raiz": {
+    "visits": "1 a 2",
+    "visitLength": "45 a 90 minutos",
+    "how": "Con anestesia local si hace falta, se retira el nervio dañado o el tejido infectado de un premolar (el diente entre el colmillo y las muelas) que tiene una sola raíz. Esa raíz puede tener uno o dos conductos, que se limpian, se rellenan y se sellan.",
+    "includes": "anestesia local si hace falta, radiografías durante el tratamiento y sellado temporal del diente.",
+    "excludes": "La resina o corona final del diente\nPoste y muñón, si hiciera falta",
+    "aftercare": "es normal una molestia al morder por unos días. No mastique cosas duras de ese lado hasta tener la restauración final, que en un premolar suele ser una corona, y no la postergue: el diente puede fracturarse. Avise si hay hinchazón, dolor fuerte que aumenta, fiebre o si se sale el sellado temporal."
+  },
+  "endodoncia-posterior-vital": {
+    "visits": "1 a 3",
+    "visitLength": "60 a 120 minutos",
+    "how": "Con anestesia local, se retira el nervio dañado, que todavía está vivo, de una muela. Las muelas tienen varios conductos, habitualmente tres o cuatro, y cada uno se limpia, se rellena y se sella.",
+    "includes": "anestesia local, radiografías durante el tratamiento y sellado temporal del diente.",
+    "excludes": "La corona final de la muela\nPoste y muñón, si hiciera falta",
+    "aftercare": "es normal una molestia al morder por unos días. No mastique cosas duras de ese lado hasta tener la corona y no la postergue: una muela con endodoncia y sin corona puede fracturarse. Avise si hay hinchazón, dolor fuerte que aumenta, fiebre o si se sale el sellado temporal."
+  },
+  "evaluacion-oral-completa": {
+    "visits": "1",
+    "visitLength": "30 a 60 minutos",
+    "how": "Se revisan todos los dientes, las encías, la mordida y el resto de la boca (lengua, paladar y mejillas), y se anota el estado de cada diente en un mapa llamado odontograma. Con eso, el odontólogo explica lo que encontró y propone un plan de tratamiento.",
+    "excludes": "Radiografías, si hicieran falta\nLos tratamientos del plan"
+  },
+  "exodoncia-de-diente-permanente-multirradicular": {
+    "visits": "1",
+    "visitLength": "30 a 60 minutos",
+    "how": "Con anestesia local, se afloja y se retira una pieza de varias raíces, por lo general una muela. A veces hay que separar las raíces para sacarlas una por una. Avise antes si toma anticoagulantes (para «adelgazar la sangre») o medicamentos para los huesos, si tiene diabetes, si está embarazada o si alguna vez le indicaron antibiótico antes de ir al odontólogo. No suspenda ningún medicamento por su cuenta.",
+    "includes": "la anestesia local y la extracción de la pieza.",
+    "excludes": "Reponer el diente perdido (implante, puente o prótesis)",
+    "aftercare": "muerda la gasa unos 30 minutos. Las primeras 24 horas no se enjuague, no escupa con fuerza ni use cañita, y evite fumar, el alcohol y el esfuerzo físico. Coma blando y frío o tibio, y cepille con cuidado cerca de la herida. Son normales algo de hinchazón y molestia unos días. Si era una muela superior, por unos días evite sonarse la nariz con fuerza. Tome solo los medicamentos que le indique el odontólogo. Si lleva puntos, le dirán cuándo retirarlos.",
+    "warnings": "Sangrado abundante que no para después de morder una gasa durante 30 minutos.\nDolor que aumenta después del segundo o tercer día.\nHinchazón que sigue creciendo después del tercer día.\nFiebre o pus en la zona.\nDificultad para respirar o tragar, o hinchazón que llega al ojo o al cuello.\nLíquido que pasa de la boca a la nariz al beber, si la pieza era una muela superior."
+  },
+  "exodoncia-de-diente-permanente-unirradicular": {
+    "visits": "1",
+    "visitLength": "20 a 45 minutos",
+    "how": "Con anestesia local, se afloja y se retira un diente de una sola raíz, como un incisivo, un colmillo o la mayoría de los premolares. Avise antes si toma anticoagulantes (para «adelgazar la sangre») o medicamentos para los huesos, si tiene diabetes, si está embarazada o si alguna vez le indicaron antibiótico antes de ir al odontólogo. No suspenda ningún medicamento por su cuenta.",
+    "includes": "la anestesia local y la extracción de la pieza.",
+    "excludes": "Reponer el diente perdido (implante, puente o prótesis)",
+    "aftercare": "muerda la gasa unos 30 minutos. Las primeras 24 horas no se enjuague, no escupa con fuerza ni use cañita, y evite fumar, el alcohol y el esfuerzo físico. Coma blando y frío o tibio, y cepille con cuidado cerca de la herida. Son normales algo de hinchazón y molestia unos días. Tome solo los medicamentos que le indique el odontólogo.",
+    "warnings": "Sangrado abundante que no para después de morder una gasa durante 30 minutos.\nDolor que aumenta después del segundo o tercer día.\nHinchazón que sigue creciendo después del tercer día.\nFiebre o pus en la zona.\nDificultad para respirar o tragar, o hinchazón que llega al ojo o al cuello."
+  },
+  "exodoncia-de-pieza-impactada-en-hueso": {
+    "visits": "2",
+    "visitLength": "hasta 90 minutos",
+    "how": "Es una cirugía para retirar un diente que quedó atrapado en el hueso, a menudo una muela del juicio. Con anestesia, se abre la encía, se retira algo de hueso, a veces se divide el diente en partes y se cierra con puntos. Avise antes si toma anticoagulantes (para «adelgazar la sangre») o medicamentos para los huesos, si tiene diabetes, si está embarazada o si alguna vez le indicaron antibiótico antes de ir al odontólogo. No suspenda ningún medicamento por su cuenta.",
+    "includes": "la anestesia local, la cirugía y los puntos.",
+    "excludes": "Radiografía panorámica o tomografía previa\nSedación, si se indicara",
+    "aftercare": "son normales la hinchazón, algún moretón y que cueste abrir la boca; suelen ser mayores a los 2 o 3 días. Ayuda poner frío sobre la cara el primer día y dormir con la cabeza más alta. Muerda la gasa unos 30 minutos. Las primeras 24 horas no se enjuague, no escupa con fuerza ni use cañita, y evite fumar, el alcohol y el esfuerzo físico. Coma blando. Tome solo los medicamentos que le indique el odontólogo.",
+    "schedule": [
+      { "when": "Antes de la cirugía", "what": "Evaluación con radiografía o tomografía de la pieza impactada." },
+      { "when": "Día de la cirugía", "what": "Retiro de la pieza impactada con anestesia." },
+      { "when": "Unos 7 a 10 días después", "what": "Control de la herida de la pieza impactada y retiro de puntos, si hace falta." }
+    ],
+    "warnings": "Sangrado abundante que no para después de morder una gasa durante 30 minutos.\nDolor que aumenta después del segundo o tercer día.\nHinchazón que sigue creciendo después del tercer día.\nFiebre o pus en la zona.\nDificultad para respirar o tragar, o hinchazón que llega al ojo o al cuello.\nAdormecimiento del labio, el mentón o la lengua que sigue al día siguiente."
+  },
+  "exodoncia-quirurgica-con-colgajo-pieza-erupcionada": {
+    "visits": "2",
+    "visitLength": "hasta 60 minutos",
+    "how": "Es una cirugía para retirar un diente que está a la vista, pero que no se puede sacar de la forma simple, por ejemplo porque está muy destruido. Con anestesia local, se levanta la encía para llegar a la raíz, a veces se retira algo de hueso y se cierra con puntos. Avise antes si toma anticoagulantes (para «adelgazar la sangre») o medicamentos para los huesos, si tiene diabetes, si está embarazada o si alguna vez le indicaron antibiótico antes de ir al odontólogo. No suspenda ningún medicamento por su cuenta.",
+    "includes": "la anestesia local, la cirugía y los puntos.",
+    "excludes": "Reponer el diente perdido (implante, puente o prótesis)",
+    "aftercare": "son normales algo de hinchazón y molestia unos días. Ayuda poner frío sobre la cara el primer día. Muerda la gasa unos 30 minutos. Las primeras 24 horas no se enjuague, no escupa con fuerza ni use cañita, y evite fumar, el alcohol y el esfuerzo físico. Coma blando. Tome solo los medicamentos que le indique el odontólogo.",
+    "schedule": [
+      { "when": "Día de la cirugía", "what": "Retiro de la pieza con anestesia local y puntos en la encía." },
+      { "when": "Unos 7 a 10 días después", "what": "Control de la herida y retiro de puntos de la pieza operada, si hace falta." }
+    ],
+    "warnings": "Sangrado abundante que no para después de morder una gasa durante 30 minutos.\nDolor que aumenta después del segundo o tercer día.\nHinchazón que sigue creciendo después del tercer día.\nFiebre o pus en la zona.\nDificultad para respirar o tragar, o hinchazón que llega al ojo o al cuello."
+  },
+  "exodoncia-simple": {
+    "visits": "1",
+    "visitLength": "20 a 45 minutos",
+    "how": "Con anestesia local, se afloja y se retira un diente que está a la vista, sin abrir la encía. Avise antes si toma anticoagulantes (para «adelgazar la sangre») o medicamentos para los huesos, si tiene diabetes, si está embarazada o si alguna vez le indicaron antibiótico antes de ir al odontólogo. No suspenda ningún medicamento por su cuenta.",
+    "includes": "la anestesia local y la extracción de la pieza.",
+    "excludes": "Reponer el diente perdido (implante, puente o prótesis)\nCirugía, si la pieza no sale de la forma simple",
+    "aftercare": "muerda la gasa unos 30 minutos. Las primeras 24 horas no se enjuague, no escupa con fuerza ni use cañita, y evite fumar, el alcohol y el esfuerzo físico. Coma blando y frío o tibio, y cepille con cuidado cerca de la herida. Son normales algo de hinchazón y molestia unos días. Tome solo los medicamentos que le indique el odontólogo.",
+    "warnings": "Sangrado abundante que no para después de morder una gasa durante 30 minutos.\nDolor que aumenta después del segundo o tercer día.\nHinchazón que sigue creciendo después del tercer día.\nFiebre o pus en la zona.\nDificultad para respirar o tragar, o hinchazón que llega al ojo o al cuello."
+  },
+  "fluor-barniz": {
+    "visits": "1",
+    "visitLength": "10 a 15 minutos",
+    "how": "Se secan los dientes y se pinta sobre ellos un barniz con flúor, que se endurece con la saliva y ayuda a fortalecer el esmalte frente a la caries. Avise antes si tiene alergias o tuvo una reacción a un barniz dental.",
+    "aftercare": "por unas horas coma blando y evite bebidas calientes. No se cepille hasta la hora que le indiquen. Los dientes pueden verse algo amarillos hasta el siguiente cepillado. Cada cuánto repetirlo lo indica el odontólogo según su riesgo de caries."
+  },
+  "poste-y-munon": {
+    "visits": "1 a 2",
+    "visitLength": "30 a 60 minutos",
+    "how": "En un diente con endodoncia al que le queda poca estructura, se coloca un poste dentro de la raíz y sobre él se reconstruye un muñón. El poste sirve para sostener esa reconstrucción, sobre la que luego irá la corona.",
+    "includes": "la preparación del conducto y la colocación del poste y el muñón.",
+    "excludes": "La corona final\nLa endodoncia, si aún no está hecha",
+    "aftercare": "hasta tener la corona, no muerda cosas duras con ese diente y no la postergue. Avise si el poste se mueve o se sale, si duele al morder o si hay hinchazón."
+  },
+  "profilaxis": {
+    "visits": "1",
+    "visitLength": "30 a 45 minutos",
+    "how": "Es una limpieza profesional: se retiran la placa, las manchas y el sarro superficial, y se pulen los dientes. Si hace falta, se le indica cómo mejorar el cepillado.",
+    "excludes": "Tratamiento de la enfermedad de las encías (raspado y alisado)",
+    "aftercare": "las encías pueden estar sensibles o sangrar un poco por uno o dos días. Cada cuánto repetirla lo indica el odontólogo según el estado de su boca."
+  },
+  "protesis-completa-inferior": {
+    "visits": "4 a 6",
+    "visitLength": "30 a 60 minutos",
+    "how": "Es una dentadura removible que reemplaza todos los dientes de abajo. Se toman medidas de la encía, se registra cómo cierra la boca, se prueba con dientes en cera y se entrega con sus ajustes. La de abajo suele moverse más que la de arriba, porque la lengua la empuja y tiene menos apoyo.",
+    "includes": "las medidas, las pruebas, la entrega y los ajustes de las primeras semanas.",
+    "excludes": "Extracciones o tratamientos previos, si hicieran falta\nLa prótesis de arriba, si no figura en el presupuesto\nImplantes para sujetarla",
+    "aftercare": "al principio son normales los roces, más saliva y cierta dificultad para hablar y comer; empiece con comida blanda en trozos pequeños. Cepíllela a diario con cepillo suave y jabón neutro, sin agua caliente ni lejía, y limpie también sus encías. Quítesela para dormir, salvo otra indicación, y guárdela en agua. No la lime ni la ajuste por su cuenta. La boca cambia con los años: acuda a controles. Una llaga que no cierra en 2 semanas debe revisarse."
+  },
+  "protesis-completa-superior": {
+    "visits": "4 a 6",
+    "visitLength": "30 a 60 minutos",
+    "how": "Es una dentadura removible que reemplaza todos los dientes de arriba y se apoya en la encía y el paladar. Se toman medidas, se registra cómo cierra la boca, se prueba con dientes en cera y se entrega con sus ajustes.",
+    "includes": "las medidas, las pruebas, la entrega y los ajustes de las primeras semanas.",
+    "excludes": "Extracciones o tratamientos previos, si hicieran falta\nLa prótesis de abajo, si no figura en el presupuesto",
+    "aftercare": "al principio son normales los roces, más saliva, algo de náusea por cubrir el paladar y cierta dificultad para hablar y comer; empiece con comida blanda en trozos pequeños. Cepíllela a diario con cepillo suave y jabón neutro, sin agua caliente ni lejía, y limpie también sus encías y su paladar. Quítesela para dormir, salvo otra indicación, y guárdela en agua. No la lime ni la ajuste por su cuenta. La boca cambia con los años: acuda a controles. Una llaga que no cierra en 2 semanas debe revisarse."
+  },
+  "pulpotomia": {
+    "visits": "1",
+    "visitLength": "20 a 45 minutos",
+    "how": "Con anestesia local, se retira la parte del nervio que está en la corona del diente y se conserva la de la raíz, cubriéndola con un material protector. Se hace sobre todo en dientes de leche y, a veces, en dientes permanentes jóvenes.",
+    "includes": "la anestesia local y el material que protege el nervio.",
+    "excludes": "La corona o resina final del diente",
+    "aftercare": "mientras dure la anestesia, cuide que el niño no se muerda el labio ni la mejilla y que espere para comer. Puede haber una molestia leve. El diente se revisa en los controles. Avise si hay dolor que aumenta, hinchazón, fiebre o una bolita en la encía cerca del diente."
+  },
+  "radiografia-de-aleta-bitewing": {
+    "visits": "1",
+    "visitLength": "5 a 10 minutos",
+    "how": "Se muerde una pequeña pestaña que sostiene la placa y se toma la imagen en segundos. Muestra juntas las partes visibles de las muelas de arriba y de abajo, y ayuda a ver caries entre los dientes y el nivel del hueso. Avise si está o podría estar embarazada."
+  },
+  "radiografia-panoramica": {
+    "visits": "1",
+    "visitLength": "5 a 10 minutos",
+    "how": "Muestra en una sola imagen todos los dientes, sus raíces, las muelas del juicio y los huesos de la mandíbula. Se apoya el mentón y se mantiene quieto mientras el equipo gira alrededor de la cabeza; antes se retiran aretes, collares, lentes y prótesis removibles. Avise si está o podría estar embarazada.",
+    "excludes": "Radiografías de mayor detalle o tomografía, si hicieran falta"
+  },
+  "radiografia-periapical": {
+    "visits": "1",
+    "visitLength": "5 a 10 minutos",
+    "how": "Muestra uno o pocos dientes completos, desde la corona hasta la punta de la raíz, y el hueso que los rodea. Se coloca una pequeña placa dentro de la boca y la imagen se toma en segundos. Avise si está o podría estar embarazada."
+  },
+  "radiografia-periapical-dientes-anteriores-inferiores": {
+    "visits": "1",
+    "visitLength": "5 a 10 minutos",
+    "how": "Muestra los dientes de adelante de abajo, desde la corona hasta la punta de la raíz, y el hueso que los rodea. Se coloca una pequeña placa bajo la lengua y la imagen se toma en segundos. Avise si está o podría estar embarazada."
+  },
+  "radiografia-periapical-dientes-anteriores-superiores": {
+    "visits": "1",
+    "visitLength": "5 a 10 minutos",
+    "how": "Muestra los dientes de adelante de arriba, desde la corona hasta la punta de la raíz, y el hueso que los rodea. Se coloca una pequeña placa contra el paladar y la imagen se toma en segundos. Avise si está o podría estar embarazada."
+  },
+  "radiografia-periapical-molares": {
+    "visits": "1",
+    "visitLength": "5 a 10 minutos",
+    "how": "Muestra las muelas de una zona, desde la corona hasta la punta de las raíces, y el hueso que las rodea. La placa se coloca al fondo de la boca y la imagen se toma en segundos; avise si le provoca náuseas. Avise también si está o podría estar embarazada."
+  },
+  "radiografia-periapical-premolares": {
+    "visits": "1",
+    "visitLength": "5 a 10 minutos",
+    "how": "Muestra los premolares de una zona (los dientes entre el colmillo y las muelas), desde la corona hasta la punta de la raíz, y el hueso que los rodea. Se coloca una pequeña placa dentro de la boca y la imagen se toma en segundos. Avise si está o podría estar embarazada."
+  },
+  "radiografia-periapical-zona-de-caninos": {
+    "visits": "1",
+    "visitLength": "5 a 10 minutos",
+    "how": "Muestra el colmillo y los dientes vecinos, desde la corona hasta la punta de la raíz, y el hueso que los rodea. Se coloca una pequeña placa dentro de la boca y la imagen se toma en segundos. Avise si está o podría estar embarazada."
+  },
+  "raspado-dental-destartraje": {
+    "visits": "1 a 2",
+    "visitLength": "30 a 60 minutos",
+    "how": "Se retira el sarro (la placa endurecida) que se acumula sobre los dientes y junto a la encía, con instrumentos de mano o de ultrasonido. Avise antes si toma anticoagulantes (para «adelgazar la sangre») o si alguna vez le indicaron antibiótico antes de ir al odontólogo.",
+    "excludes": "Limpieza profunda de las raíces debajo de la encía (raspado y alisado radicular)",
+    "aftercare": "por unos días los dientes pueden estar sensibles al frío y las encías sangrar un poco. Al salir el sarro, los espacios entre los dientes pueden notarse más. Use cepillo suave e hilo dental. Avise si el sangrado no para o hay hinchazón o dolor que aumenta."
+  },
+  "raspado-y-alisado-radicular-1-a-3-dientes": {
+    "visits": "1",
+    "visitLength": "30 a 45 minutos",
+    "how": "Es una limpieza profunda para tratar la enfermedad de las encías. Con anestesia local, se retira el sarro debajo de la encía y se alisan las raíces de 1 a 3 dientes de un cuadrante (una de las cuatro partes de la boca). Avise antes si toma anticoagulantes (para «adelgazar la sangre»), si tiene diabetes, si está embarazada o si alguna vez le indicaron antibiótico antes de ir al odontólogo.",
+    "includes": "la anestesia local y la limpieza de los dientes indicados de ese cuadrante.",
+    "excludes": "Otros cuadrantes, si no figuran en el presupuesto\nMantenimiento periódico de las encías\nCirugía de encías, si hiciera falta",
+    "aftercare": "por unos días puede tener molestia, sangrado leve y sensibilidad al frío. Al desinflamarse la encía, los dientes pueden verse más largos. Use cepillo suave y limpie entre los dientes como le indiquen. Algunas semanas después se revisa cómo respondieron las encías. Avise si hay hinchazón, fiebre o dolor que aumenta."
+  },
+  "raspado-y-alisado-radicular-4-o-mas-dientes": {
+    "visits": "1",
+    "visitLength": "45 a 90 minutos",
+    "how": "Es una limpieza profunda para tratar la enfermedad de las encías. Con anestesia local, se retira el sarro debajo de la encía y se alisan las raíces de 4 o más dientes de un cuadrante (una de las cuatro partes de la boca). Avise antes si toma anticoagulantes (para «adelgazar la sangre»), si tiene diabetes, si está embarazada o si alguna vez le indicaron antibiótico antes de ir al odontólogo.",
+    "includes": "la anestesia local y la limpieza de los dientes indicados de ese cuadrante.",
+    "excludes": "Otros cuadrantes, si no figuran en el presupuesto\nMantenimiento periódico de las encías\nCirugía de encías, si hiciera falta",
+    "aftercare": "por unos días puede tener molestia, sangrado leve y sensibilidad al frío. Al desinflamarse la encía, los dientes pueden verse más largos. Use cepillo suave y limpie entre los dientes como le indiquen. Algunas semanas después se revisa cómo respondieron las encías. Avise si hay hinchazón, fiebre o dolor que aumenta."
+  },
+  "resina-fotocurable-1-superficie-anterior": {
+    "visits": "1",
+    "visitLength": "20 a 40 minutos",
+    "how": "Se retira la caries o la parte dañada de una cara de un diente de adelante y se rellena con resina del color del diente, que se endurece con una luz.",
+    "includes": "anestesia local si hace falta, ajuste de la mordida y pulido.",
+    "aftercare": "puede haber sensibilidad al frío por unos días. La resina puede mancharse con el tiempo con café, té o tabaco. Avise si duele sin motivo o si la resina se desprende."
+  },
+  "resina-fotocurable-1-superficie-posterior": {
+    "visits": "1",
+    "visitLength": "20 a 45 minutos",
+    "how": "Se retira la caries o la parte dañada de una cara de un premolar o una muela, por lo general la de masticar, y se rellena con resina del color del diente, que se endurece con una luz.",
+    "includes": "anestesia local si hace falta, ajuste de la mordida y pulido.",
+    "aftercare": "mientras dure la anestesia, no mastique de ese lado. Puede haber sensibilidad al frío o al morder por unos días. Avise si la mordida queda alta, si duele sin motivo o si la resina se desprende."
+  },
+  "resina-fotocurable-2-superficies-anterior": {
+    "visits": "1",
+    "visitLength": "30 a 45 minutos",
+    "how": "Se retira la caries o la parte dañada de dos caras de un diente de adelante, a menudo un costado y la cara de atrás o la de adelante. Se rellena con resina del color del diente, que se moldea y se endurece con una luz.",
+    "includes": "anestesia local si hace falta, ajuste de la mordida y pulido.",
+    "excludes": "Endodoncia, si la caries llega al nervio",
+    "aftercare": "puede haber sensibilidad al frío por unos días. La resina puede mancharse con el tiempo con café, té o tabaco. Evite morder uñas, hilo u objetos duros con ese diente. Avise si duele sin motivo o si la resina se desprende."
+  },
+  "resina-fotocurable-2-superficies-posterior": {
+    "visits": "1",
+    "visitLength": "30 a 60 minutos",
+    "how": "Se retira la caries o la parte dañada de dos caras de un premolar o una muela, a menudo la de masticar y un costado. Se rellena con resina del color del diente, que se endurece con una luz, y se cuida el contacto con el diente vecino.",
+    "includes": "anestesia local si hace falta, ajuste de la mordida y pulido.",
+    "excludes": "Endodoncia, si la caries llega al nervio",
+    "aftercare": "mientras dure la anestesia, no mastique de ese lado. Puede haber sensibilidad al frío o al morder por unos días. Avise si la mordida queda alta, si se atora el hilo dental o se queda comida entre esos dientes, si duele sin motivo o si la resina se desprende."
+  },
+  "resina-fotocurable-3-superficies-anterior": {
+    "visits": "1",
+    "visitLength": "30 a 60 minutos",
+    "how": "Se repara con resina del color del diente una zona amplia de un diente de adelante, que abarca tres caras y a veces el borde. La resina se moldea para recuperar la forma y se endurece con una luz.",
+    "includes": "anestesia local si hace falta, ajuste de la mordida y pulido.",
+    "excludes": "Endodoncia o corona, si el daño es mayor de lo previsto",
+    "aftercare": "puede haber sensibilidad al frío por unos días. La resina puede mancharse con el tiempo con café, té o tabaco. Evite morder uñas, hilo u objetos duros con ese diente, porque una reparación amplia puede fracturarse. Avise si duele sin motivo o si la resina se rompe o se desprende."
+  },
+  "resina-fotocurable-3-superficies-posterior": {
+    "visits": "1",
+    "visitLength": "45 a 75 minutos",
+    "how": "Se repara con resina del color del diente una zona amplia de un premolar o una muela, que abarca tres caras. Se endurece con una luz. Si queda poco diente, el odontólogo puede recomendar otra opción, como una corona.",
+    "includes": "anestesia local si hace falta, ajuste de la mordida y pulido.",
+    "excludes": "Endodoncia o corona, si el daño es mayor de lo previsto",
+    "aftercare": "mientras dure la anestesia, no mastique de ese lado. Puede haber sensibilidad al frío o al morder por unos días. Evite morder cosas muy duras con ese diente, porque una reparación amplia puede fracturarse. Avise si la mordida queda alta, si se queda comida entre los dientes, si duele sin motivo o si la resina se rompe o se desprende."
+  },
+  "sellante": {
+    "visits": "1",
+    "visitLength": "10 a 20 minutos",
+    "how": "Se limpia y se seca el diente, y se aplica un material fluido sobre los surcos de la cara de masticar, que se endurece con una luz. Ayuda a evitar que la comida y las bacterias se queden en esos surcos. Por lo general no necesita anestesia.",
+    "aftercare": "siga con el cepillado y el hilo dental, porque el sellante no protege los costados del diente. Se revisa en los controles: puede desgastarse o desprenderse, y entonces se evalúa reponerlo."
+  },
+  "consulta-medicina-general": {
+    "visits": "1",
+    "visitLength": "20 a 40 minutos",
+    "how": "El médico conversa sobre sus molestias, sus antecedentes y sus medicamentos, hace el examen físico y explica lo que encuentra y los pasos a seguir. Conviene traer la lista de sus medicamentos y sus resultados anteriores.",
+    "excludes": "Análisis, ecografías y otros estudios\nMedicamentos y procedimientos",
+    "aftercare": "siga las indicaciones que le den. Consulte de nuevo si no mejora, si empeora o si aparece algo nuevo."
+  },
+  "consulta-de-control": {
+    "visits": "1",
+    "visitLength": "15 a 30 minutos",
+    "how": "Se revisa cómo ha evolucionado desde la última consulta, sus resultados y sus medicamentos, y se ajusta el plan si hace falta. Traiga sus análisis, estudios y recetas.",
+    "excludes": "Análisis y estudios nuevos\nMedicamentos y procedimientos"
+  },
+  "consulta-medicina-familiar": {
+    "visits": "1",
+    "visitLength": "20 a 40 minutos",
+    "how": "El médico de familia atiende problemas de salud de cualquier edad y hace seguimiento a lo largo del tiempo, teniendo en cuenta sus antecedentes y su entorno familiar. También revisa lo que conviene para prevenir enfermedades. Conviene traer la lista de sus medicamentos y sus resultados anteriores.",
+    "excludes": "Análisis, ecografías y otros estudios\nMedicamentos y procedimientos",
+    "aftercare": "siga las indicaciones que le den. Consulte de nuevo si no mejora, si empeora o si aparece algo nuevo."
+  },
+  "consulta-medicina-interna": {
+    "visits": "1",
+    "visitLength": "30 a 45 minutos",
+    "how": "El internista atiende a personas adultas, en especial con enfermedades de larga duración, varias a la vez o síntomas que necesitan más estudio. Revisa su historia, sus medicamentos y sus resultados, hace el examen físico y explica el plan. Traiga la lista de sus medicamentos y sus análisis o estudios anteriores.",
+    "excludes": "Análisis, ecografías y otros estudios\nMedicamentos y procedimientos",
+    "aftercare": "siga las indicaciones que le den y no cambie sus medicamentos por su cuenta. Consulte de nuevo si no mejora, si empeora o si aparece algo nuevo."
+  },
+  "consulta-pediatria": {
+    "visits": "1",
+    "visitLength": "20 a 40 minutos",
+    "how": "El pediatra atiende a niños y adolescentes: conversa sobre sus molestias, examina al niño, revisa su peso, talla y desarrollo, y explica los pasos a seguir. Traiga el carné de vacunación y la lista de medicamentos que recibe.",
+    "excludes": "Análisis y otros estudios\nVacunas y medicamentos",
+    "aftercare": "siga las indicaciones que le den. Vuelva antes si el niño empeora y vaya a emergencia si le cuesta respirar, está muy decaído o no quiere tomar líquidos."
+  },
+  "consulta-ginecologia": {
+    "visits": "1",
+    "visitLength": "20 a 40 minutos",
+    "how": "El ginecólogo conversa sobre sus molestias, su regla, sus embarazos y los métodos anticonceptivos. Si hace falta, examina las mamas y la zona pélvica; antes le explica cada examen y usted puede pedir que se detenga. Conviene recordar la fecha de su última regla y traer sus resultados anteriores.",
+    "excludes": "Papanicolaou, ecografías y análisis, si se indican\nMedicamentos y procedimientos"
+  },
+  "nebulizacion": {
+    "visits": "1",
+    "visitLength": "10 a 20 minutos",
+    "how": "Con indicación médica, se respira por una mascarilla o boquilla un medicamento convertido en una neblina fina, que llega a los pulmones. Avise antes si tiene alergias a medicamentos o algún problema del corazón.",
+    "includes": "la aplicación de la nebulización.",
+    "excludes": "La consulta médica, si hiciera falta",
+    "aftercare": "según el medicamento, puede sentir un temblor leve o palpitaciones por un rato. Si le indican enjuagarse la boca después, hágalo. Siga las indicaciones sobre cuántas nebulizaciones necesita.",
+    "warnings": "Dificultad para respirar que no mejora con la nebulización.\nFalta de aire que no deja terminar una frase.\nLabios o uñas de color morado.\nDolor de pecho.\nEn un niño, costillas que se hunden al respirar o mucho decaimiento."
+  },
+  "inyectable-intramuscular": {
+    "visits": "1",
+    "visitLength": "5 a 15 minutos",
+    "how": "Con indicación médica, se aplica el medicamento con una aguja en un músculo (glúteo, brazo o muslo) o bajo la piel, con material estéril de un solo uso. Traiga su receta. Avise antes si tiene alergias a medicamentos, si toma anticoagulantes (para «adelgazar la sangre») o si está embarazada.",
+    "includes": "la aplicación del inyectable.",
+    "excludes": "El medicamento, salvo que se indique lo contrario\nLa consulta médica, si hiciera falta",
+    "aftercare": "es normal un dolor leve o un pequeño moretón en la zona. Si le piden esperar unos minutos antes de irse, hágalo.",
+    "warnings": "Ronchas, hinchazón de la cara o los labios, o dificultad para respirar.\nMareo intenso o desmayo.\nEnrojecimiento que crece, calor o pus en la zona de la inyección.\nFiebre.\nDolor u hormigueo que baja por la pierna."
+  },
+  "electrocardiograma": {
+    "visits": "1",
+    "visitLength": "10 a 15 minutos",
+    "how": "Se colocan unos electrodos adhesivos en el pecho, los brazos y las piernas para registrar, en reposo, la actividad eléctrica del corazón. No duele ni da corriente. Conviene usar ropa fácil de abrir, no ponerse cremas ese día y avisar si usa marcapasos o qué medicamentos toma.",
+    "includes": "el registro del electrocardiograma.",
+    "excludes": "Prueba de esfuerzo o Holter (registro de 24 horas)",
+    "aftercare": "puede seguir con sus actividades normales, salvo otra indicación. Un resultado normal no descarta todos los problemas del corazón: el médico lo interpreta junto con sus síntomas.",
+    "warnings": "Dolor o presión en el pecho.\nFalta de aire, desmayo o palpitaciones fuertes."
+  },
+  "papanicolaou": {
+    "visits": "1",
+    "visitLength": "10 a 20 minutos",
+    "how": "Con un instrumento llamado espéculo se abre con suavidad la vagina y, con un pequeño cepillo, se toman células del cuello del útero para analizarlas en el laboratorio. Puede ser incómodo, pero dura pocos minutos. Conviene programarlo fuera de la regla y evitar relaciones sexuales, duchas vaginales, óvulos y cremas vaginales durante las 48 horas previas. Avise si está embarazada.",
+    "includes": "la toma de la muestra.",
+    "excludes": "Prueba de VPH y otros análisis, si se indican",
+    "aftercare": "puede tener un manchado leve por un día. Pregunte cuándo y cómo recibirá su resultado, y no deje de recogerlo: ayuda a detectar cambios en las células, pero no es un diagnóstico definitivo. Avise si hay sangrado abundante, dolor fuerte, fiebre o flujo con mal olor."
+  }
+}

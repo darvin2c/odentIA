@@ -17,8 +17,8 @@ import { invalidField, notFound, ServiceError } from "./errors.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
 import type { ProductPrescribing } from "./product-hooks.js"
-import { requireProfessionalSignature } from "./professional-profiles.js"
 import { productHooks } from "./products.js"
+import { requireProfessionalSignature } from "./professional-profiles.js"
 
 /**
  * Medicamento de la receta con los datos de la Guía de la buena prescripción
@@ -60,7 +60,8 @@ export interface CreatePrescriptionInput {
 /** `path`: el nombre del dato en el cuerpo (`items[0].dose`), para decirlo junto a su campo. */
 function field(value: string | null | undefined, name: string, path: string, max = 200) {
   const text = value?.trim()
-  if (!text) throw invalidField(path, `Completa ${name.charAt(0).toLocaleLowerCase("es")}${name.slice(1)}.`)
+  if (!text)
+    throw invalidField(path, `Completa ${name.charAt(0).toLocaleLowerCase("es")}${name.slice(1)}.`)
   if (text.length > max) throw invalidField(path, `${name} tiene como mucho ${max} caracteres.`)
   return text
 }
@@ -85,7 +86,12 @@ function scoped(orgId: string, patientId: string, id: string) {
 async function blockedFields(
   prescribing: ProductPrescribing,
   tx: Db,
-  moment: { orgId: string; patientId: string; items: ReadonlyArray<{ genericName: string }>; weightKg: number | null },
+  moment: {
+    orgId: string
+    patientId: string
+    items: ReadonlyArray<{ genericName: string }>
+    weightKg: number | null
+  },
 ): Promise<Record<string, string>> {
   const fields: Record<string, string> = {}
   // Sin medicamentos, la revisión solo mira el peso.
@@ -93,7 +99,11 @@ async function blockedFields(
   if (weight.errors.length > 0) fields.patientWeightKg = weight.errors.join(" ")
   for (const [index, item] of moment.items.entries()) {
     // Con un peso cualquiera, la revisión de un medicamento solo dice lo suyo.
-    const own = await prescribing.review(tx, { ...moment, items: [item], weightKg: moment.weightKg ?? 1 })
+    const own = await prescribing.review(tx, {
+      ...moment,
+      items: [item],
+      weightKg: moment.weightKg ?? 1,
+    })
     const lines = own.errors.filter((line) => !weight.errors.includes(line))
     if (lines.length > 0) fields[`items[${index}].genericName`] = lines.join(" ")
   }
@@ -142,14 +152,20 @@ export async function createPrescription(
   const diagnosis = await resolveOptionalDiagnosisCode(
     tx,
     orgId,
-    { code: optional(input.diagnosisCode, "El diagnóstico", "diagnosisCode", 10), system: input.diagnosisSystem },
+    {
+      code: optional(input.diagnosisCode, "El diagnóstico", "diagnosisCode", 10),
+      system: input.diagnosisSystem,
+    },
     "diagnosisCode",
   )
   // La lista y las reglas de la receta son las del producto de la clínica (issue 229).
   const prescribing = (await productHooks(tx, orgId)).prescribing
   let weightKg: number | null = null
   if (input.patientWeightKg != null) {
-    if (typeof input.patientWeightKg !== "number" || !(input.patientWeightKg >= 0.5 && input.patientWeightKg <= 400))
+    if (
+      typeof input.patientWeightKg !== "number" ||
+      !(input.patientWeightKg >= 0.5 && input.patientWeightKg <= 400)
+    )
       throw invalidField("patientWeightKg", "Escribe el peso en kilos, de 0,5 a 400.")
     weightKg = Math.round(input.patientWeightKg * 10) / 10
   }
@@ -228,7 +244,10 @@ export async function createPrescription(
     throw new ServiceError("ALLERGY_CONFLICT", 409, message, { allergyOverrideReason: message })
   }
   if (overrideReason && overrideReason.length > 500)
-    throw invalidField("allergyOverrideReason", "El motivo para recetar igual tiene como mucho 500 caracteres.")
+    throw invalidField(
+      "allergyOverrideReason",
+      "El motivo para recetar igual tiene como mucho 500 caracteres.",
+    )
   const signer = await requireProfessionalSignature(tx, orgId, actorUserId)
   const [counter] = await tx
     .insert(orgCounter)
@@ -314,7 +333,8 @@ export async function cancelPrescription(
   input: { reason: string },
 ) {
   const reason = input.reason?.trim()
-  if (!reason || reason.length > 2000) throw invalidField("reason", "Escribe el motivo, como mucho 2000 caracteres.")
+  if (!reason || reason.length > 2000)
+    throw invalidField("reason", "Escribe el motivo, como mucho 2000 caracteres.")
   const [current] = await tx
     .select()
     .from(prescription)
@@ -384,10 +404,22 @@ export async function getPrescriptionPrint(tx: Db, orgId: string, patientId: str
             ),
           )
       : []
+  // Las alergias activas van a la vista en la receta: es lo que evita un error al dispensar.
+  const allergies = await tx
+    .select({ substance: patientAllergy.substance })
+    .from(patientAllergy)
+    .where(
+      and(
+        eq(patientAllergy.organizationId, orgId),
+        eq(patientAllergy.patientId, patientId),
+        eq(patientAllergy.isActive, true),
+      ),
+    )
   return {
     prescription: detail,
     diagnosisDescription: dx?.description ?? null,
     patient: person,
     establishment: org ?? null,
+    allergies: allergies.map((row) => row.substance),
   }
 }

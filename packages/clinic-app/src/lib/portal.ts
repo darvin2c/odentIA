@@ -1,13 +1,13 @@
-import { formatMoney, formatMoneyAmount } from "@odentia/clinical"
-import type { FormSchemaDef } from "./clinical-forms"
+import { formatMoney, formatMoneyAmount, type PatientGuide } from "@odentia/clinical"
 import type {
   AuthenticationResponseJSON,
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
   RegistrationResponseJSON,
 } from "@simplewebauthn/browser"
-import { API_URL } from "./auth-client"
 import { ApiError, apiFetch, saveDownload } from "./api"
+import { API_URL } from "./auth-client"
+import type { FormSchemaDef } from "./clinical-forms"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
 
 /** Alcance autorizado congelado en enlace/sesión (UX en español, claves estables). */
@@ -94,6 +94,8 @@ export interface PortalBudgetLine {
   currency: string
   decision: string
   itemStatus: string
+  /** Cómo se hace, qué incluye y qué sigue, congelado al entregar; null: sale solo con nombre y precio. */
+  patientGuide?: PatientGuide | null
 }
 
 export interface PortalBudget {
@@ -118,8 +120,24 @@ export interface PortalBudget {
   decisionNote: string | null
   /** El estado con el nombre de siempre, del servidor. */
   stateText: string
+  /** AAAA-MM-DD. Vencido no impide aceptar. */
+  validUntil?: string | null
+  /** «Lo que encontramos»: solo para la propia persona o su representante. */
+  findings?: string | null
+  proposal?: string | null
+  /** Las condiciones de la clínica; vacías, esa parte no sale. */
+  terms?: { payment: string | null; change: string | null }
   /** Con más de una, la persona elige una (decisión 13); cada una con su total. */
-  options: Array<{ id: string; label: string; isRecommended: boolean; decision: string; totalCents: number | null }>
+  options: Array<{
+    id: string
+    label: string
+    name?: string | null
+    pros?: string | null
+    cons?: string | null
+    isRecommended: boolean
+    decision: string
+    totalCents: number | null
+  }>
   items: PortalBudgetLine[]
 }
 
@@ -201,7 +219,10 @@ export interface PortalExchange {
   contactName: string
 }
 
-export async function exchangePortalTokenApi(linkToken: string, pin: string): Promise<PortalExchange> {
+export async function exchangePortalTokenApi(
+  linkToken: string,
+  pin: string,
+): Promise<PortalExchange> {
   const res = await portalFetch<{ data: PortalExchange }>("", "/exchange", {
     method: "POST",
     body: JSON.stringify({ token: linkToken, pin }),
@@ -232,15 +253,28 @@ export async function confirmPortalAppointmentApi(
 }
 
 /** «Añadir al calendario» de una cita: el `.ics` que arma el servidor (issue 46). */
-export async function downloadPortalCalendar(sessionToken: string, appointmentId: string): Promise<void> {
-  const response = await fetch(`${API_URL}/api/public/portal/appointments/${encodeURIComponent(appointmentId)}/calendar`, {
-    headers: { authorization: `Bearer ${sessionToken}` },
-  })
+export async function downloadPortalCalendar(
+  sessionToken: string,
+  appointmentId: string,
+): Promise<void> {
+  const response = await fetch(
+    `${API_URL}/api/public/portal/appointments/${encodeURIComponent(appointmentId)}/calendar`,
+    {
+      headers: { authorization: `Bearer ${sessionToken}` },
+    },
+  )
   await saveDownload(response, "cita.ics")
 }
 
-export async function cancelPortalAppointmentApi(sessionToken: string, appointmentId: string): Promise<PortalAppointment> {
-  const res = await portalFetch<{ data: PortalAppointment }>(sessionToken, `/appointments/${appointmentId}/cancel`, { method: "POST" })
+export async function cancelPortalAppointmentApi(
+  sessionToken: string,
+  appointmentId: string,
+): Promise<PortalAppointment> {
+  const res = await portalFetch<{ data: PortalAppointment }>(
+    sessionToken,
+    `/appointments/${appointmentId}/cancel`,
+    { method: "POST" },
+  )
   return res.data
 }
 
@@ -292,7 +326,10 @@ export async function decidePortalBudgetApi(
 }
 
 /** «Lo vio en el portal el …»: al abrir «Ver y responder». */
-export async function markPortalBudgetSeenApi(sessionToken: string, budgetId: string): Promise<void> {
+export async function markPortalBudgetSeenApi(
+  sessionToken: string,
+  budgetId: string,
+): Promise<void> {
   await portalFetch(sessionToken, `/budgets/${budgetId}/seen`, { method: "POST" })
 }
 
@@ -349,8 +386,14 @@ export async function closePortalSessionApi(sessionToken: string): Promise<void>
 }
 
 /** Si el teléfono no puede guardar la llave: esta sesión se recuerda 30 días. */
-export async function rememberPortalSessionApi(sessionToken: string): Promise<{ expiresAt: string }> {
-  const res = await portalFetch<{ data: { expiresAt: string } }>(sessionToken, "/session/remember", { method: "POST" })
+export async function rememberPortalSessionApi(
+  sessionToken: string,
+): Promise<{ expiresAt: string }> {
+  const res = await portalFetch<{ data: { expiresAt: string } }>(
+    sessionToken,
+    "/session/remember",
+    { method: "POST" },
+  )
   return res.data
 }
 
@@ -454,7 +497,10 @@ export interface PortalSessionView {
 }
 
 /** Una sesión sirve mientras no venza ni se haya cerrado. */
-export function isPortalSessionActive(session: Pick<PortalSessionView, "expiresAt" | "revokedAt">, now = Date.now()): boolean {
+export function isPortalSessionActive(
+  session: Pick<PortalSessionView, "expiresAt" | "revokedAt">,
+  now = Date.now(),
+): boolean {
   return !session.revokedAt && new Date(session.expiresAt).getTime() > now
 }
 
@@ -531,7 +577,9 @@ export interface PortalAccessGiven {
 }
 
 export async function fetchPortalAccessApi(patientId: string): Promise<PortalAccessSummary> {
-  const res = await apiFetch<{ data: PortalAccessSummary }>(`/api/portal/access?patientId=${encodeURIComponent(patientId)}`)
+  const res = await apiFetch<{ data: PortalAccessSummary }>(
+    `/api/portal/access?patientId=${encodeURIComponent(patientId)}`,
+  )
   return res.data
 }
 
@@ -542,16 +590,28 @@ export async function givePortalAccessApi(input: {
   identityChecked: boolean
   delivery: "qr" | "whatsapp"
 }): Promise<PortalAccessGiven> {
-  const res = await apiFetch<{ data: PortalAccessGiven }>("/api/portal/access", { method: "POST", body: JSON.stringify(input) })
+  const res = await apiFetch<{ data: PortalAccessGiven }>("/api/portal/access", {
+    method: "POST",
+    body: JSON.stringify(input),
+  })
   return res.data
 }
 
-export async function changePortalAccessApi(grantId: string, scope: PortalAccessScopeDraft): Promise<PortalGrant> {
-  const res = await apiFetch<{ data: PortalGrant }>(`/api/portal/access/${grantId}`, { method: "PATCH", body: JSON.stringify({ scope }) })
+export async function changePortalAccessApi(
+  grantId: string,
+  scope: PortalAccessScopeDraft,
+): Promise<PortalGrant> {
+  const res = await apiFetch<{ data: PortalGrant }>(`/api/portal/access/${grantId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ scope }),
+  })
   return res.data
 }
 
-export async function resendPortalAccessApi(grantId: string, delivery: "qr" | "whatsapp"): Promise<PortalAccessGiven> {
+export async function resendPortalAccessApi(
+  grantId: string,
+  delivery: "qr" | "whatsapp",
+): Promise<PortalAccessGiven> {
   const res = await apiFetch<{ data: PortalAccessGiven }>(`/api/portal/access/${grantId}/resend`, {
     method: "POST",
     body: JSON.stringify({ delivery }),
@@ -560,7 +620,9 @@ export async function resendPortalAccessApi(grantId: string, delivery: "qr" | "w
 }
 
 export async function revokePortalAccessApi(grantId: string): Promise<PortalGrant> {
-  const res = await apiFetch<{ data: PortalGrant }>(`/api/portal/access/${grantId}/revoke`, { method: "POST" })
+  const res = await apiFetch<{ data: PortalGrant }>(`/api/portal/access/${grantId}/revoke`, {
+    method: "POST",
+  })
   return res.data
 }
 
@@ -628,10 +690,14 @@ export async function verifyPasskeyRegistrationApi(
   orgSlug: string,
   input: { challengeId: string; response: RegistrationResponseJSON },
 ): Promise<PortalPasskeyInfo> {
-  const res = await portalFetch<{ data: PortalPasskeyInfo }>(sessionToken, "/passkeys/register/verify", {
-    method: "POST",
-    body: JSON.stringify({ orgSlug, ...input }),
-  })
+  const res = await portalFetch<{ data: PortalPasskeyInfo }>(
+    sessionToken,
+    "/passkeys/register/verify",
+    {
+      method: "POST",
+      body: JSON.stringify({ orgSlug, ...input }),
+    },
+  )
   return res.data
 }
 
@@ -647,10 +713,9 @@ export async function verifyPasskeyAuthApi(
   orgSlug: string,
   input: { challengeId: string; response: AuthenticationResponseJSON },
 ): Promise<{ sessionToken: string; session: PortalSessionView }> {
-  const res = await publicPortalFetch<{ data: { sessionToken: string; session: PortalSessionView } }>(
-    "/passkeys/auth/verify",
-    { method: "POST", body: JSON.stringify({ orgSlug, ...input }) },
-  )
+  const res = await publicPortalFetch<{
+    data: { sessionToken: string; session: PortalSessionView }
+  }>("/passkeys/auth/verify", { method: "POST", body: JSON.stringify({ orgSlug, ...input }) })
   return res.data
 }
 

@@ -394,6 +394,8 @@ const JOB_KIND_LINE: Record<string, AdminLineKey> = {
   recordatorio_cita_datos: "recordatorio_cita",
   // El recordatorio sin «Confirmar», cuando la cita ya está confirmada (ADR 0109).
   recordatorio_cita_confirmada: "recordatorio_cita",
+  // «¿Vienes en camino?», si no llegó a la hora (ADR 0113).
+  cita_sin_llegar: "recordatorio_cita",
   aviso_cita_movida: "recordatorio_cita",
   aviso_cita_cancelada: "recordatorio_cita",
 }
