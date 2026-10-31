@@ -38,7 +38,7 @@ export async function seedAgent(
     {
       id: "00000000-0000-4000-8000-00000000a602",
       kind: "faq",
-      // Los medios de pago salen de caja (ADR 0119): aquí va lo que no está en ningún dato.
+      // Los medios de pago salen de caja (ADR 0120): aquí va lo que no está en ningún dato.
       title: "¿Se puede pagar en cuotas?",
       body: "Los tratamientos de varias sesiones se pagan por partes, según el avance. Lo dejamos acordado en tu presupuesto antes de empezar.",
       branchId: null,
@@ -49,7 +49,7 @@ export async function seedAgent(
     },
     {
       id: "00000000-0000-4000-8000-00000000a603",
-      // El horario sale de los turnos del equipo (ADR 0119): el borrador es de lo que solo sabe la sede.
+      // El horario sale de los turnos del equipo (ADR 0120): el borrador es de lo que solo sabe la sede.
       kind: "info_sede",
       title: "¿Tienen estacionamiento?",
       body: "Confirmar con la sede cuántas plazas hay antes de publicarlo.",

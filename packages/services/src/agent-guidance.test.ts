@@ -154,7 +154,7 @@ describe("al aprobar una regla que contradice otra, se avisa antes", () => {
   })
 })
 
-describe("las reglas no pasan del tope ni del largo (ADR 0118)", () => {
+describe("las reglas no pasan del tope ni del largo (ADR 0119)", () => {
   it("con 40 activas no se agrega otra, la que se aprueba reemplaza una y lo largo no entra", async () => {
     const c = await clinic()
     const added: Array<{ id: string }> = []

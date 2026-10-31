@@ -6,7 +6,7 @@
  * se puede ver el plan y registrar el comprobante.
  */
 import { Button } from "@odentia/ui"
-import { EmptyState, ErrorState, LoadingState, PageHeader, submitErrorMessage } from "@odentia/ui-patterns"
+import { EmptyState, ErrorState, PageHeader, submitErrorMessage, SkeletonRegion } from "@odentia/ui-patterns"
 import { seesBilling } from "@odentia/auth/permissions"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, useNavigate } from "@tanstack/react-router"
@@ -25,8 +25,10 @@ import { ARGOS_ALLOWANCE_KEY } from "../../lib/argos"
 import { useMyRole } from "../../lib/crm"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { appWords } from "../../lib/product-words"
+import { PlanChargesSkeleton, PlanConsumptionSkeleton, PlanOffersSkeleton, PlanPageSkeleton, PlanPaymentsSkeleton, PlanReceiptSkeleton, PlanSkeleton } from "../../components/skeletons/settings"
 
 export const Route = createFileRoute("/_org/settings/plan/")({
+  pendingComponent: PlanPageSkeleton,
   component: PlanPage,
 })
 
@@ -161,10 +163,12 @@ function PlanContent() {
 
   if (subscription.isPending) {
     return (
-      <>
+      <div className="flex flex-col gap-6">
         {header}
-        <LoadingState message="Cargando tu plan…" />
-      </>
+        <SkeletonRegion message="Cargando tu plan…">
+          <PlanSkeleton />
+        </SkeletonRegion>
+      </div>
     )
   }
   if (subscription.isError) {
@@ -222,7 +226,9 @@ function PlanContent() {
 
       <SubscriptionStatusCard summary={summary} />
       {consumption.isPending ? (
-        <LoadingState message="Cargando lo que hicieron tus agentes…" />
+        <SkeletonRegion message="Cargando lo que hicieron tus agentes…">
+          <PlanConsumptionSkeleton />
+        </SkeletonRegion>
       ) : consumption.isError ? (
         <ErrorState title="No se pudo cargar lo que hicieron tus agentes" error={consumption.error} onRetry={() => void consumption.refetch()} />
       ) : (
@@ -264,7 +270,9 @@ function PlanContent() {
             antes, escríbenos desde Ayuda.
           </p>
         ) : plans.isPending ? (
-          <LoadingState message="Cargando planes…" />
+          <SkeletonRegion message="Cargando planes…">
+            <PlanOffersSkeleton />
+          </SkeletonRegion>
         ) : plans.isError ? (
           <ErrorState title="No se pudieron cargar los planes" error={plans.error} onRetry={() => void plans.refetch()} />
         ) : plans.data.length === 0 ? (
@@ -298,7 +306,9 @@ function PlanContent() {
           Tus cargos
         </h2>
         {charges.isPending ? (
-          <LoadingState message="Cargando cargos…" />
+          <SkeletonRegion message="Cargando cargos…">
+            <PlanChargesSkeleton />
+          </SkeletonRegion>
         ) : charges.isError ? (
           <ErrorState title="No se pudieron cargar los cargos" error={charges.error} onRetry={() => void charges.refetch()} />
         ) : (
@@ -311,7 +321,9 @@ function PlanContent() {
           Registrar comprobante
         </h2>
         {charges.isPending || methods.isPending ? (
-          <LoadingState message="Cargando cargos…" />
+          <SkeletonRegion message="Cargando cargos…">
+            <PlanReceiptSkeleton />
+          </SkeletonRegion>
         ) : charges.isError || methods.isError ? (
           <ErrorState
             title="No se pudieron cargar los cargos o los medios de pago"
@@ -331,7 +343,9 @@ function PlanContent() {
           Historial de pagos
         </h2>
         {payments.isPending ? (
-          <LoadingState message="Cargando pagos…" />
+          <SkeletonRegion message="Cargando pagos…">
+            <PlanPaymentsSkeleton />
+          </SkeletonRegion>
         ) : payments.isError ? (
           <ErrorState title="No se pudieron cargar los pagos" error={payments.error} onRetry={() => void payments.refetch()} />
         ) : payments.data.length === 0 ? (

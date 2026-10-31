@@ -1,7 +1,8 @@
 import { Button } from "@odentia/ui"
-import { EmptyState, ErrorState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
+import { EmptyState, ErrorState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
+import { DigestStopPageSkeleton } from "../../components/skeletons/public-baja"
 import { ApiError } from "../../lib/api"
 import { confirmReportDigestStop, fetchReportDigestStop } from "../../lib/public-automations"
 
@@ -12,6 +13,7 @@ export const Route = createFileRoute("/resumen-lunes/baja/$token")({
       { name: "referrer", content: "no-referrer" },
     ],
   }),
+  pendingComponent: DigestStopPageSkeleton,
   component: ReportDigestStopPage,
 })
 
@@ -41,11 +43,7 @@ function ReportDigestStopPage() {
     )
   }
   if (info.isPending) {
-    return (
-      <PageShell maxWidth="md">
-        <LoadingState />
-      </PageShell>
-    )
+    return <DigestStopPageSkeleton />
   }
   if (info.isError) {
     return (

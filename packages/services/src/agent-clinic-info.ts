@@ -121,7 +121,7 @@ function mergeRanges(ranges: Array<[number, number]>): Array<[number, number]> {
  * Horario de atención de cada sede activa, derivado de los horarios del equipo,
  * y sus próximos cierres. Es el mismo que dice el agente y el que muestra
  * «Horarios y ausencias» (`branchId`: solo esa sede): no hay otro horario de
- * la sede que se escriba aparte (ADR 0117).
+ * la sede que se escriba aparte (ADR 0118).
  */
 export async function getBranchHours(
   tx: Db,
@@ -679,7 +679,7 @@ export async function getAgentClinicData(tx: Db, orgId: string, informs: boolean
 
 /**
  * Lo que el agente de recepción lee de los datos de la clínica, contado para
- * mostrarlo en Conocimiento (ADR 0119): las mismas fuentes que su prompt
+ * mostrarlo en Conocimiento (ADR 0120): las mismas fuentes que su prompt
  * (`getAgentClinicData`, `getClinicInfoSnapshot`), así la pantalla dice lo
  * que de verdad recibe. Nada se escribe dos veces: cada fila se edita donde
  * vive.

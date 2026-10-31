@@ -51,7 +51,7 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   for (const name of ["Clío", "Argos"]) {
     await expect(agents.getByRole("listitem").filter({ hasText: name })).toContainText("Apagado")
   }
-  // Lo que solo sabe la clínica es opcional (ADR 0119): la ficha cuenta solo lo que no supo responder.
+  // Lo que solo sabe la clínica es opcional (ADR 0120): la ficha cuenta solo lo que no supo responder.
   await expect(page.getByRole("region", { name: "Necesita de ti" }).getByRole("link", { name: /Preguntas sin respuesta/ })).toContainText("Encontró respuesta a todo lo que buscó.")
   await expect(page.getByRole("region", { name: "Cómo le fue esta semana" })).toContainText("Está apagado")
   // Un solo horario, el de recontacto (ADR 0084): para escribir primero; cuando la persona escribe, responde siempre.
@@ -190,7 +190,7 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await expect(knowsMust).toContainText("Despídete recordando la dirección.")
   await expect(knowsMust.getByRole("tab", { name: /^Escritas por la clínica · 2/ })).toBeVisible()
 
-  // Le llegan todas en cada mensaje: hay un tope y se dice cuánto falta (ADR 0118).
+  // Le llegan todas en cada mensaje: hay un tope y se dice cuánto falta (ADR 0119).
   await expect(knowsMust).toContainText("2 de 40 reglas.")
   for (let index = 0; index < 38; index++) {
     await call(page, "POST", "/api/agent/learning/guidance", org.slug, { body: `Regla de relleno ${index + 1}.` }, 201)

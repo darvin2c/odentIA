@@ -102,7 +102,7 @@ test("panel del agente: casos que esperan a una persona, citas que esperan al pa
     201,
   )
 
-  // Desde Inicio: el número del caso va en el botón que abre el panel donde se toma (ADR 0117), no
+  // Desde Inicio: el número del caso va en el botón que abre el panel donde se toma (ADR 0118), no
   // en el menú, que cuenta lo que se resuelve dentro de Agente.
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, "/home"))
@@ -237,7 +237,7 @@ test("panel del agente: casos que esperan a una persona, citas que esperan al pa
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}`))
   await expect(agentButton(page)).toBeVisible()
 
-  // «Esperan su sí» se retiró (ADR 0117): la cita propuesta se ve en su conversación y en
+  // «Esperan su sí» se retiró (ADR 0118): la cita propuesta se ve en su conversación y en
   // este panel, y la dirección vieja lleva a la Bandeja.
   await gotoHydrated(page, tenant(org.slug, "/agent/pendientes"))
   await expect(page).toHaveURL(tenantPattern(org.slug, "/inbox"))

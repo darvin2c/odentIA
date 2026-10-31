@@ -9,6 +9,7 @@ import { EncounterDocumentsBlock } from "../../components/patient/encounter-docu
 import { EncounterDetailView } from "../../components/patient/encounter-detail-view"
 import { EncounterEditor } from "../../components/patient/encounter-editor"
 import { EncounterHandoff } from "../../components/patient/encounter-handoff"
+import { EncounterLoading } from "../../components/person/person-loading"
 import { apiFetch } from "../../lib/api"
 import { useMemberName, usePermission } from "../../lib/crm"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
@@ -30,6 +31,7 @@ function encounterWhen(start: string, end: string | null): string {
 }
 
 export const Route = createFileRoute("/_org/patients/$patientId/encounters/$encounterId")({
+  pendingComponent: EncounterLoading,
   component: EncounterPage,
 })
 
@@ -78,13 +80,7 @@ function EncounterPage() {
     )
   }
 
-  if (patientQuery.isLoading || encounterQuery.isLoading) {
-    return (
-      <PageShell>
-        <p className="text-sm text-muted-foreground">Cargando atención…</p>
-      </PageShell>
-    )
-  }
+  if (patientQuery.isLoading || encounterQuery.isLoading) return <EncounterLoading />
   if (!patientQuery.data || !encounterQuery.data) {
     return (
       <PageShell className="flex flex-col gap-4">

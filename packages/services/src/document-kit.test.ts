@@ -1,6 +1,6 @@
 /** El kit sin base: varias páginas sin perder el pie, carácter sin glifo, A4, Carta y térmica. */
 import { PDFDocument } from "pdf-lib"
-import { expect, it } from "vitest"
+import { expect, it, vi } from "vitest"
 import {
   type DocumentClinic,
   DocumentKit,
@@ -92,4 +92,26 @@ it("un logo dañado no rompe el papel: salen las iniciales", async () => {
     },
   )
   expect((await kit.finish()).byteLength).toBeGreaterThan(500)
+})
+
+it("en el rollo angosto, lo que va bajo la raya de firmar no se pisa con lo que sigue", async () => {
+  const roll = await DocumentKit.open({ ...clinic, receiptWidth: "58" }, ticketFormat({ ...clinic, receiptWidth: "58" }), {
+    title: "T",
+    docLabel: "T",
+  })
+  const startAt = roll.y
+  roll.signLine("Recibí", "Fecha")
+  const shortEnd = roll.y
+  roll.y = startAt
+  roll.signLine("Recibí conforme el importe devuelto", "Fecha")
+  expect(roll.y).toBeLessThan(shortEnd)
+})
+
+it("la firma guardada conserva su proporción aunque la columna sea más ancha", async () => {
+  const kit = await DocumentKit.open(clinic, documentFormat(clinic), { title: "T", docLabel: "T" })
+  const draw = vi.spyOn(kit.page, "drawLine")
+  kit.penSignatures([{ heading: "Quien revoca", strokes: [[[0, 0], [1000, 0]]], lines: [] }])
+  const stroke = draw.mock.calls[0]?.[0]
+  expect(stroke).toBeDefined()
+  expect((stroke!.end.x as number) - (stroke!.start.x as number)).toBeCloseTo((66 * 22) / 7, 1)
 })

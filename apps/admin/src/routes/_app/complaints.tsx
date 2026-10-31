@@ -12,7 +12,6 @@ import {
 import {
   ConfirmDialog,
   DataTable,
-  DataTableSkeleton,
   DetailDrawer,
   DetailField,
   DetailList,
@@ -43,6 +42,7 @@ import {
 import { BookOpen, CircleAlert, Clock } from "lucide-react"
 import * as React from "react"
 import { z } from "zod"
+import { ComplaintsKpisSkeleton, ComplaintsPageSkeleton, ComplaintsSkeleton } from "../../components/skeletons/complaints"
 import { ApiError, api } from "../../lib/api"
 import { webUrl } from "../../lib/host"
 
@@ -60,6 +60,7 @@ export const Route = createFileRoute("/_app/complaints")({
     ...(typeof search.q === "string" && search.q ? { q: search.q } : {}),
     ...(typeof search.hoja === "string" ? { hoja: search.hoja } : {}),
   }),
+  pendingComponent: ComplaintsPageSkeleton,
   component: ComplaintsPage,
 })
 
@@ -306,7 +307,9 @@ function ComplaintsPage() {
         title="Libro de Reclamaciones"
         subtitle="Las hojas que llegan desde las webs de odentIA y latidIA. Cada una se responde por correo en un plazo de 15 días hábiles que no se puede ampliar."
       />
-      {list.data ? (
+      {list.isPending ? (
+        <ComplaintsKpisSkeleton />
+      ) : list.data ? (
         <div className="grid gap-3 sm:grid-cols-3">
           <KpiCard title="Por responder" value={list.data.summary.pending} />
           <KpiCard title="Vencen en 5 días hábiles o menos" value={list.data.summary.dueSoon} />
@@ -348,7 +351,7 @@ function ComplaintsPage() {
       </div>
 
       {list.isPending ? (
-        <DataTableSkeleton columnCount={6} rowCount={4} label="Cargando las hojas" />
+        <ComplaintsSkeleton />
       ) : list.isError && !list.data ? (
         <ErrorState
           title="No pude cargar las hojas"

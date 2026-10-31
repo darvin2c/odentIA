@@ -32,7 +32,8 @@ import {
 import { contact, conversation, contactIdentity, channelConnection, crmTask, registrationHold } from "@odentia/db/schema/crm"
 import { auditEvent, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { createHash, randomBytes, randomUUID } from "node:crypto"
-import { and, eq, inArray, sql, type SQL } from "drizzle-orm"
+import { appointmentBookingLink } from "@odentia/db/schema/agenda"
+import { and, eq, inArray, isNotNull, sql, type SQL } from "drizzle-orm"
 import { z } from "zod"
 import { addAgentCaseNote, CASE_NOTE_CHARS } from "./agent-case.js"
 import { fieldsError, invalidField, issueFields, notFound, ServiceError, validation } from "./errors.js"
@@ -54,7 +55,7 @@ import { applyMessagePermissions } from "./data-consents.js"
 import { consentStatusOf } from "./message-permission.js"
 import { createPerson, findPersonByDocument, setPersonArchived } from "./people.js"
 import { grantResponsibility } from "./responsibilities.js"
-import { claimWhatsAppNumber, isDirectThread, lockRegistrationContacts } from "./contacts.js"
+import { claimWhatsAppNumber, hasWhatsappNumber, isDirectThread, lockRegistrationContacts, whatsappNumberOf, whatsappNumbersOf } from "./contacts.js"
 import { completeTask, createTask, discardTask, settleTask } from "./tasks.js"
 
 const LINK_TTL_MS = 72 * 60 * 60 * 1000
@@ -192,13 +193,47 @@ export async function getPatientRegistrationConfig(
   return row ? rowToConfig(row) : cloneDefaultConfig()
 }
 
+/** Quien habla por ella cuenta si se la puede ubicar: teléfono, correo o el número de su WhatsApp. */
+function spokespersonReachable(orgId: string) {
+  return sql`(${contact.phone} is not null or ${contact.email} is not null or ${hasWhatsappNumber(orgId, contact.id)})`
+}
+
 /**
  * «Faltan datos para atenderla» de una ficha (decisión 10 de la fase 3): lo
  * necesario para atender más lo que «Registro de pacientes» marca
  * obligatorio, con la regla de `missingPersonData`. Se calcula aquí, en el
  * servidor, para la página de la persona; el teléfono o el correo de quien
- * habla por ella (un vínculo activo que no es ella) cuentan como suyos.
+ * habla por ella (un vínculo activo que no es ella) cuentan como suyos. A quien
+ * escribe desde un número no se le pide un teléfono: el de su WhatsApp cuenta,
+ * sin pasar a ser el «Teléfono» de su ficha (`whatsappNumbersOf`).
  */
+export async function clinicAsksHealth(tx: Db, orgId: string): Promise<boolean> {
+  const config = await getPatientRegistrationConfig(tx, orgId)
+  return (["allergies", "conditions", "medications"] as const).some((key) => config.fields[key] !== "hidden")
+}
+
+/**
+ * Hay algo que preguntarle a la persona antes de su cita aunque no le falte
+ * ningún dato: su salud, si la clínica la pregunta, nadie la registró y aún no
+ * envió «Tus datos» (lo dejó en blanco porque es opcional: no se le insiste).
+ */
+export async function patientHealthToAsk(tx: Db, orgId: string, patientId: string): Promise<boolean> {
+  if (!(await clinicAsksHealth(tx, orgId))) return false
+  if ((await getPatientHealth(tx, orgId, patientId)).revision > 0) return false
+  const [sent] = await tx
+    .select({ id: appointmentBookingLink.id })
+    .from(appointmentBookingLink)
+    .where(
+      and(
+        eq(appointmentBookingLink.organizationId, orgId),
+        eq(appointmentBookingLink.patientId, patientId),
+        isNotNull(appointmentBookingLink.dataSubmittedAt),
+      ),
+    )
+    .limit(1)
+  return !sent
+}
+
 export async function getPatientMissingData(
   tx: Db,
   orgId: string,
@@ -216,7 +251,7 @@ export async function getPatientMissingData(
         eq(patientContact.patientId, patientId),
         sql`${patientContact.relationship} <> 'self'`,
         eq(contact.isActive, true),
-        sql`(${contact.phone} is not null or ${contact.email} is not null)`,
+        spokespersonReachable(orgId),
       ),
     )
     .limit(1)
@@ -236,14 +271,19 @@ export async function getPatientMissingData(
     .limit(1)
   return missingPersonData(
     config,
-    { ...row, emergencyContactName: emergency?.name ?? null, emergencyContactPhone: emergency?.phone ?? null },
+    {
+      ...row,
+      phone: row.phone ?? (await whatsappNumberOf(tx, orgId, row.personId)),
+      emergencyContactName: emergency?.name ?? null,
+      emergencyContactPhone: emergency?.phone ?? null,
+    },
     { representativeContact: !!spokesperson },
   )
 }
 
 /**
  * Lo mismo que `getPatientMissingData` para muchos pacientes a la vez, con la
- * misma regla (`missingPersonData`): cuatro consultas en total, no cuatro por
+ * misma regla (`missingPersonData`): cinco consultas en total, no cinco por
  * paciente. Sin `patientIds`, todos los activos (el atajo «Faltan datos»).
  */
 export async function patientsMissingData(tx: Db, orgId: string, patientIds?: string[]): Promise<Set<string>> {
@@ -267,7 +307,7 @@ export async function patientsMissingData(tx: Db, orgId: string, patientIds?: st
         inArray(patientContact.patientId, ids),
         sql`${patientContact.relationship} <> 'self'`,
         eq(contact.isActive, true),
-        sql`(${contact.phone} is not null or ${contact.email} is not null)`,
+        spokespersonReachable(orgId),
       ),
     )
   const emergencies = await tx
@@ -288,12 +328,18 @@ export async function patientsMissingData(tx: Db, orgId: string, patientIds?: st
     )
   const represented = new Set(spokespeople.map((row) => row.patientId))
   const emergencyOf = new Map(emergencies.map((row) => [row.patientId, row]))
+  const numbers = await whatsappNumbersOf(tx, orgId, rows.filter((row) => row.phone === null).map((row) => row.personId))
   const out = new Set<string>()
   for (const row of rows) {
     const emergency = emergencyOf.get(row.id)
     const missing = missingPersonData(
       config,
-      { ...row, emergencyContactName: emergency?.name ?? null, emergencyContactPhone: emergency?.phone ?? null },
+      {
+        ...row,
+        phone: row.phone ?? numbers.get(row.personId) ?? null,
+        emergencyContactName: emergency?.name ?? null,
+        emergencyContactPhone: emergency?.phone ?? null,
+      },
       { representativeContact: represented.has(row.id) },
     )
     if (missing.length > 0) out.add(row.id)

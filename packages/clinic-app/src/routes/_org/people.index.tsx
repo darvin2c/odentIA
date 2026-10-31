@@ -9,7 +9,6 @@ import {
 } from "@odentia/ui"
 import {
   DataTable,
-  DataTableSkeleton,
   EmptyState,
   ErrorState,
   FilterBar,
@@ -19,19 +18,22 @@ import {
   PageShell,
   PersonAvatar,
   ScrollingTabsList,
+  SkeletonRegion,
   useListSearch,
 } from "@odentia/ui-patterns"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
-import { Plus } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { NewPatientDrawer, type NewPatientTarget } from "../../components/patient/new-patient-drawer"
 import { NextStepButton } from "../../components/patient/plan/next-step-action"
 import { ContactNextAction } from "../../components/person/contact-next-action"
 import { NewPersonDrawer } from "../../components/person/new-person-drawer"
+import { PeopleLoading, visiblePeopleViews } from "../../components/person/person-loading"
+import { PeopleSkeleton } from "../../components/skeletons/people"
 import { apiFetch } from "../../lib/api"
 import { timeAgo, useCan, usePermission } from "../../lib/crm"
+import { peopleHeader, peopleSubtitle } from "../../lib/screen-rules"
 import { fetchLockedRecords, LOCKED_RECORDS_KEY } from "../../lib/locked-records"
 import { channelLabel } from "../../lib/channels"
 import { activeOrgLocale } from "../../lib/locale"
@@ -40,13 +42,14 @@ import {
   isPeopleShortcut,
   isPeopleView,
   PEOPLE_SHORTCUTS,
-  PEOPLE_VIEWS,
   PERSON_KIND_LABELS,
   type PeopleShortcutCounts,
   type PeopleView,
   type PersonListItem,
   attentionWords,
   daysSince,
+  personShapeKey,
+  personShapeOf,
   situationAction,
   situationText,
 } from "../../lib/people"
@@ -67,6 +70,7 @@ export const Route = createFileRoute("/_org/people/")({
     q: typeof search.q === "string" ? search.q : undefined,
     nuevo: typeof search.nuevo === "string" ? search.nuevo : undefined,
   }),
+  pendingComponent: PeopleLoading,
   component: PeoplePage,
 })
 
@@ -127,7 +131,7 @@ function PeoplePage() {
   }, [nuevo, canRegister, navigate])
   // Quien aún no es paciente solo lo ven recepción y quien dirige; caja y odontología, solo pacientes.
   const seesAll = can("crm.read")
-  const views = PEOPLE_VIEWS.filter((item) => seesAll || item.id !== "por_registrar")
+  const views = visiblePeopleViews(seesAll)
   const view: PeopleView = ((v) =>
     isPeopleView(v) && views.some((item) => item.id === v) ? v : "pacientes")(listSearch.get("ver"))
   const search = listSearch.get("q") ?? ""
@@ -166,6 +170,11 @@ function PeoplePage() {
     staleTime: 60_000,
   })
   const rows = query.data?.data ?? []
+  const queryClient = useQueryClient()
+  // Abrir a alguien de la lista ya muestra sus pestañas y sus botones.
+  useEffect(() => {
+    for (const row of query.data?.data ?? []) queryClient.setQueryData(personShapeKey(row.id), personShapeOf(row))
+  }, [query.data, queryClient])
   const nextCursor = query.data?.nextCursor ?? null
   const porRegistrar = query.data?.counts.porRegistrar
   const shortcuts = shortcutsQuery.data ?? null
@@ -328,19 +337,8 @@ function PeoplePage() {
     <PageShell>
       <PageHeader
         title="Pacientes"
-        subtitle={
-          seesAll
-            ? "Todas las personas de la clínica: pacientes, contactos nuevos y sus familiares"
-            : "Los pacientes de la clínica"
-        }
-        primary={
-          canRegister
-            ? { label: "Nuevo paciente", icon: <Plus aria-hidden />, onClick: () => setRegistering(true) }
-            : canCreate
-              ? { label: "Nuevo contacto", icon: <Plus aria-hidden />, onClick: () => setCreating(true) }
-              : undefined
-        }
-        menu={canRegister ? [{ label: "Nuevo contacto", onSelect: () => setCreating(true) }] : undefined}
+        subtitle={peopleSubtitle(can)}
+        {...peopleHeader(can, { patient: () => setRegistering(true), contact: () => setCreating(true) })}
       />
       <div className="flex flex-col gap-2 py-4">
         {/* Elegir qué personas ver cambia la lista entera: es pestaña, igual que Finanzas. */}
@@ -373,7 +371,9 @@ function PeoplePage() {
         <p className="text-xs text-muted-foreground">Una sola búsqueda en toda la clínica.</p>
       </div>
       {query.isPending && rows.length === 0 ? (
-        <DataTableSkeleton label="Cargando personas…" />
+        <SkeletonRegion message="Cargando personas…">
+          <PeopleSkeleton columns={columns.map((column) => String(column.header))} />
+        </SkeletonRegion>
       ) : query.isError && rows.length === 0 ? (
         <ErrorState
           error={query.error instanceof Error ? query.error : String(query.error)}

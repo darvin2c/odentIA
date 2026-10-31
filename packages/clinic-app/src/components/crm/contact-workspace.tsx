@@ -9,10 +9,11 @@ import {
   useAppForm,
   useFormSubmit,
   useFormSubmitError,
+  useDraftBlocker,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link, useBlocker } from "@tanstack/react-router"
+import { Link } from "@tanstack/react-router"
 import { ChevronLeft, ChevronRight, Plus, RefreshCw, X } from "lucide-react"
 import { lazy, type ReactNode, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { z } from "zod"
@@ -39,6 +40,7 @@ import { usePerson } from "../../lib/people"
 import { amountFromCents } from "../../lib/workspace"
 import { productUi } from "../../product/product-ui"
 import { PersonMemoryDrawer } from "../agent/person-memory"
+import { openBookingAnywhere } from "../agenda/schedule-host"
 import { CitasPanel } from "../patient/citas-panel"
 import { PersonData } from "../person/person-data"
 import { dueWords, isOverdue } from "./crm-helpers"
@@ -61,7 +63,10 @@ interface ConversationContext {
   contactId: string
   patientId: string | null
   name: string
+  /** Para mostrar: su teléfono o, sin él, el número de su WhatsApp. */
   phone: string | null
+  /** Solo el de su ficha: el único que un formulario puede traer escrito. */
+  declaredPhone: string | null
   email: string | null
   nextAppointment: CrmNextAppointment | null
   lines: Partial<Record<"plan" | "alertas" | "cobros" | "ventas" | "datos" | "recuerda", string>>
@@ -140,10 +145,9 @@ export function ContactWorkspace({ conversationId, section, onSectionChange, onR
   // Borrador local sin storage: cambiar de hilo, cerrar el contexto móvil o
   // salir de la bandeja con borrador bloquea la navegación del router y pide
   // confirmación real. Drawers y secciones son estado local y nunca navegan.
-  const draftBlocker = useBlocker({
+  const draftBlocker = useDraftBlocker({
     disabled: !noteDirty,
     enableBeforeUnload: false,
-    withResolver: true,
     shouldBlockFn: ({ current, next }) => {
       if (!noteDirtyRef.current) return false
       if (next.routeId !== "/_org/inbox") return true
@@ -341,7 +345,7 @@ export function ContactWorkspace({ conversationId, section, onSectionChange, onR
 /** Sus citas y «Reservar cita»: quien aún no es paciente se reserva con su ficha mínima (la crea la Agenda). */
 function CitasSection({ context, conversationId }: { context: ConversationContext; conversationId: string }) {
   const can = useCan()
-  const { patientId, contactId, name, nextAppointment } = context
+  const { patientId, contactId, name, declaredPhone, nextAppointment } = context
   // La próxima cita puede ser de a quien lleva: la que anuncia la fila también se ve al entrar.
   const carried = nextAppointment && nextAppointment.patientId !== patientId ? nextAppointment : null
   // Quien ya es paciente reserva desde su panel, sin salir de la Bandeja.
@@ -350,13 +354,15 @@ function CitasSection({ context, conversationId }: { context: ConversationContex
   ) : (
     <>
       {can("appointments.write") ? (
-        <Link
-          to="/agenda"
-          search={{ contactId, conversationId }}
-          className="w-fit rounded-full bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90"
+        <Button
+          type="button"
+          size="sm"
+          className="w-fit"
+          // El teléfono escrito aquí se guarda en su ficha: va solo el declarado, nunca el número de su WhatsApp.
+          onClick={() => openBookingAnywhere({ person: { contactId, name, phone: declaredPhone }, lockedPatient: true, conversationId })}
         >
           Reservar cita
-        </Link>
+        </Button>
       ) : null}
       <p className="text-xs text-muted-foreground">
         {name.split(/\s+/)[0]} todavía no es paciente: al reservar se crea su ficha con nombre y teléfono, y lo que falte queda pendiente en su página.

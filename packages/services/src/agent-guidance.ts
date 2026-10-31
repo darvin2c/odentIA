@@ -49,7 +49,7 @@ function clean(value: unknown): string {
   if (typeof value !== "string") throw invalidField("body", "Escribe qué debe saber el agente")
   const text = value.trim().replace(/\s+/g, " ")
   if (!text) throw invalidField("body", "Escribe qué debe saber el agente")
-  // Va entera en cada mensaje (ADR 0118): lo más largo va mejor como ejemplo o respuesta oficial.
+  // Va entera en cada mensaje (ADR 0119): lo más largo va mejor como ejemplo o respuesta oficial.
   if (text.length > RULE_BODY_CHARS) throw invalidField("body", `Como mucho ${RULE_BODY_CHARS} caracteres`)
   return text
 }
@@ -207,7 +207,7 @@ export interface RuleConflict {
   /** Cómo se detectó: con el modelo de decisión o con la comparación simple. */
   method: "modelo" | "comparacion"
   /**
-   * Con el tope de reglas lleno (ADR 0118), las activas de ese agente, para
+   * Con el tope de reglas lleno (ADR 0119), las activas de ese agente, para
    * elegir cuál reemplaza la nueva; nulo si cabe una más.
    */
   full: { limit: number; rules: Array<{ id: string; body: string }> } | null

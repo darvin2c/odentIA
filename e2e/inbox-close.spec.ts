@@ -197,7 +197,7 @@ test("bandeja: lo que cerró el agente se dice en la fila y en la franja del hil
 test("agente: las direcciones viejas de «Esperan su sí» llevan a la Bandeja y recepción no tiene el menú Agente", async ({ owner, fixtureDb }) => {
   const { page, org } = owner
   await page.setViewportSize({ width: 1440, height: 900 })
-  // Lo que espera el sí de la persona vive en su conversación (ADR 0117).
+  // Lo que espera el sí de la persona vive en su conversación (ADR 0118).
   await gotoHydrated(page, tenant(org.slug, "/agent/approvals?status=ejecutada"))
   await expect(page).toHaveURL(tenantPattern(org.slug, "/inbox"))
   await gotoHydrated(page, tenant(org.slug, "/agent"))

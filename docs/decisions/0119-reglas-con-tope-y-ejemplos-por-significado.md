@@ -1,4 +1,4 @@
-# 0118 · Reglas con tope y ejemplos buscados por significado
+# 0119 · Reglas con tope y ejemplos buscados por significado
 
 Fecha: 2026-10-31 · Estado: aceptada · Precisa [0009](0009-el-agente-aprende-por-lecciones-aprobadas.md) y el «Revisar» de su cierre
 

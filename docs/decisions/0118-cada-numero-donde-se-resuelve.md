@@ -1,4 +1,4 @@
-# 0117 · Cada número donde se resuelve, y el horario de la sede a la vista
+# 0118 · Cada número donde se resuelve, y el horario de la sede a la vista
 
 Fecha: 2026-10-31 · Estado: aceptada · Ajusta a [0025](0025-un-pendiente-un-lugar.md) (el contador del menú del Agente)
 

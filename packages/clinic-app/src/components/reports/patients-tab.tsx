@@ -6,8 +6,8 @@
  */
 import { REFERRAL_KIND_LABELS, REFERRAL_KINDS, type ReferralKind } from "@odentia/clinical"
 import { Button, cn } from "@odentia/ui"
-import { BarList, type BarListRow, EmptyState, LoadingState, Sparkline } from "@odentia/ui-patterns"
-import { useQuery } from "@tanstack/react-query"
+import { BarList, type BarListRow, EmptyState, SkeletonRegion, Sparkline } from "@odentia/ui-patterns"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { AlertTriangle } from "lucide-react"
 import { type ReactNode, useId } from "react"
@@ -32,7 +32,8 @@ import {
   type ReportQuery,
   spanLabel,
 } from "../../lib/reports"
-import { during, EmptyLine, Figure, ReportCard, unlessEmpty, WHOLE_CLINIC } from "./report-parts"
+import { FunnelBodySkeleton, PatientsTabSkeleton } from "../skeletons/reports"
+import { during, EmptyLine, Figure, ReportCard, unlessEmpty, WHOLE_CLINIC, ReportBody } from "./report-parts"
 
 // --- El embudo, para la pestaña y para el Resumen ---------------------------------------
 
@@ -213,7 +214,7 @@ function DropCallout({
 
 /** Resumen › «Dónde se caen los pacientes»: el embudo corto, dónde se caen más y el enlace a la pestaña. */
 export function FunnelCard({ query, onOpenList }: { query: ReportQuery; onOpenList: (list: ReportListKey) => void }) {
-  const report = useQuery({ queryKey: reportKey("funnel", query), queryFn: () => fetchPatientsReport<ReportFunnel>("funnel", query), retry: false })
+  const report = useQuery({ queryKey: reportKey("funnel", query), queryFn: () => fetchPatientsReport<ReportFunnel>("funnel", query), placeholderData: keepPreviousData, retry: false })
   const stageNames = useStageNames()
   const id = useId()
   const header = (
@@ -231,12 +232,17 @@ export function FunnelCard({ query, onOpenList }: { query: ReportQuery; onOpenLi
     </div>
   )
   const card = (children: ReactNode) => (
-    <section aria-labelledby={id} className="elevated flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-[18px]">
+    <section aria-labelledby={id} aria-busy={report.isPlaceholderData || undefined} className={cn("elevated flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-[18px] transition-opacity", report.isPlaceholderData && "opacity-60")}>
       {header}
       {children}
     </section>
   )
-  if (report.isPending) return card(<LoadingState />)
+  if (report.isPending)
+    return card(
+      <SkeletonRegion message="Cargando el embudo…" className="flex min-w-0 flex-col gap-3">
+        <FunnelBodySkeleton />
+      </SkeletonRegion>,
+    )
   if (report.isError) return card(<QueryErrorState error={report.error} onRetry={() => void report.refetch()} />)
   const data = report.data.data
   const { funnel, locale } = data
@@ -274,10 +280,15 @@ function FooterButton({ onClick, children }: { onClick: () => void; children: Re
 
 export function PatientsTab({ query, onOpenList, advice }: { query: ReportQuery; onOpenList: (list: ReportListKey) => void; advice?: ReactNode }) {
   const navigate = useNavigate()
-  const report = useQuery({ queryKey: reportKey("patients", query), queryFn: () => fetchPatientsReport<ReportPatients>("patients", query), retry: false })
+  const report = useQuery({ queryKey: reportKey("patients", query), queryFn: () => fetchPatientsReport<ReportPatients>("patients", query), placeholderData: keepPreviousData, retry: false })
   const stageNames = useStageNames()
 
-  if (report.isPending) return <LoadingState />
+  if (report.isPending)
+    return (
+      <SkeletonRegion message="Cargando las cifras…">
+        <PatientsTabSkeleton />
+      </SkeletonRegion>
+    )
   if (report.isError)
     return <QueryErrorState error={report.error} onRetry={() => void report.refetch()} notFound="La sede elegida ya no está disponible. Elige otra sede." />
 
@@ -305,7 +316,7 @@ export function PatientsTab({ query, onOpenList, advice }: { query: ReportQuery;
   const drop = biggestDrop(funnel.current, funnel.steps)
 
   return (
-    <div className="flex min-w-0 flex-col gap-4">
+    <ReportBody stale={report.isPlaceholderData}>
       <section aria-label="Cifras de pacientes" className="grid min-w-0 gap-3.5 @xl:grid-cols-2 @5xl:grid-cols-4">
         <Figure
           title="Nos buscaron por primera vez"
@@ -448,7 +459,7 @@ export function PatientsTab({ query, onOpenList, advice }: { query: ReportQuery;
       </div>
 
       <Returns data={data} onOpenList={onOpenList} />
-    </div>
+    </ReportBody>
   )
 }
 

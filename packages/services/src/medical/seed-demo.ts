@@ -45,6 +45,7 @@ import { addPlanItem } from "../plan.js"
 import { setProfessionalProfile } from "../professional-profiles.js"
 import { seedOperation, seedPromotions } from "../seed-operation.js"
 import { fromTemplates, updateService } from "../service-catalog.js"
+import { ensureClinicConsents } from "../clinical-forms.js"
 import { ensureClinicSpecialties } from "../specialties.js"
 import { MEDICAL_DEMO_KINDS } from "./demo-kinds.js"
 
@@ -612,6 +613,7 @@ export async function seedMedicalDemo(
     seed: 20_261_029,
   }
   await db.transaction(async (tx) => {
+    await ensureClinicConsents(tx, ORG, VELA_ID)
     await seedPromotions(tx, operation)
     await seedOperation(tx, operation)
   })

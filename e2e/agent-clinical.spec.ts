@@ -311,7 +311,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await sign.getByRole("button", { name: "Firmar sin lo dictado" }).click()
   const closingDialog = page.getByRole("dialog", { name: "Finalizar y firmar" })
   await expect(sign).toBeHidden()
-  await expect(closingDialog).toContainText("Esta clínica aún no publicó el consentimiento de «Endodoncia»")
+  await expect(closingDialog).toContainText("Esta clínica aún no activó el consentimiento de «Endodoncia»")
   // Lo dictado ya se resolvió: lo desmarcado no entró y no se vuelve a preguntar.
   expect((await dictation()).suggestions).toEqual([])
   expect((await detail()).encounter.status).toBe("borrador")

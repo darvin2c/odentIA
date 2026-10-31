@@ -23,10 +23,25 @@ export function paperPdfPath(patientId: string, type: PaperType, id: string): st
   return `/api/patients/${patientId}/health-document-pdf?documentType=${type}&documentId=${id}`
 }
 
+/** Los bytes de un PDF en una dirección `blob:`, que se retira al cerrar. */
+export function usePdfUrl(bytes: ArrayBuffer | undefined): string | null {
+  const [url, setUrl] = useState<string | null>(null)
+  useEffect(() => {
+    if (!bytes) {
+      setUrl(null)
+      return
+    }
+    const made = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }))
+    setUrl(made)
+    return () => URL.revokeObjectURL(made)
+  }, [bytes])
+  return url
+}
+
 /**
  * El PDF en una dirección `blob:`: la API pide la sesión y un `iframe` no manda
- * sus cabeceras. Se retira al cerrar. `revision` cambia con el estado del papel,
- * para volver a pedirlo tras anularlo o firmarlo (lleva sello o el firmado).
+ * sus cabeceras. `revision` cambia con el estado del papel, para volver a pedirlo
+ * tras anularlo o firmarlo (lleva sello o el firmado).
  */
 function usePaperPdf(path: string, revision: string) {
   const query = useQuery({
@@ -38,16 +53,7 @@ function usePaperPdf(path: string, revision: string) {
     retry: false,
     refetchOnWindowFocus: false,
   })
-  const [url, setUrl] = useState<string | null>(null)
-  useEffect(() => {
-    if (!query.data) {
-      setUrl(null)
-      return
-    }
-    const made = URL.createObjectURL(new Blob([query.data], { type: "application/pdf" }))
-    setUrl(made)
-    return () => URL.revokeObjectURL(made)
-  }, [query.data])
+  const url = usePdfUrl(query.data)
   return {
     url,
     failed: query.isError,

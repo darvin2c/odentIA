@@ -17,10 +17,10 @@ import {
   EmptyState,
   ErrorState,
   FormDrawer,
-  LoadingState,
   SubmitButton,
   useAppForm,
   useFormSurface,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -58,6 +58,7 @@ import {
 } from "../../lib/finance-collect"
 import { useOrgEvents } from "../../lib/org-events"
 import type { PatientFull } from "../../lib/patients"
+import { AccountSkeleton } from "../skeletons/person-sections"
 
 const MAX_REASON = 2000
 
@@ -294,7 +295,11 @@ export function AccountTab({
     )
   }
   if (account.isPending || profile.isPending) {
-    return <LoadingState message="Cuenta del paciente" />
+    return (
+      <SkeletonRegion message="Cuenta del paciente">
+        <AccountSkeleton canWrite={canWrite} />
+      </SkeletonRegion>
+    )
   }
   if (account.isError || !account.data) {
     return (

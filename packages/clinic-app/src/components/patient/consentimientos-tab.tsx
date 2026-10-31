@@ -163,7 +163,7 @@ export function NewConsentDrawer({
               options={templates.map((t) => ({ value: t.id, label: t.title }))}
               description={
                 templatesQuery.isSuccess && templates.length === 0
-                  ? "No hay plantillas publicadas. Se publican en Configuración → Formularios y consentimientos."
+                  ? "No hay consentimientos activos. Se encienden en Configuración → Consentimientos."
                   : undefined
               }
             />

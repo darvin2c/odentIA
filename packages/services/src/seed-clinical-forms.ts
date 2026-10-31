@@ -19,7 +19,9 @@ import {
   listConsentTemplates,
   listFormResponses,
   listFormTemplates,
+  linkServicesToSuggestedConsents,
   listSpecialties,
+  markConsentTemplateReviewed,
   publishConsentTemplate,
   publishFormTemplate,
   setConsentTemplateServices,
@@ -126,6 +128,11 @@ export async function seedClinicalForms(
     )
   }
   const consentTpl = consentTemplates.get("endodoncia")!
+  // La demo muestra el avance: dos ya revisados, los demás con su texto sugerido.
+  for (const key of ["endodoncia", "exodoncia"]) {
+    await markConsentTemplateReviewed(tx, orgId, ownerUserId, consentTemplates.get(key)!.id)
+  }
+  await linkServicesToSuggestedConsents(tx, orgId, ownerUserId)
 
   // Captura de ejemplo sobre el paciente semilla (borrador → finalizado).
   const existing = await listFormResponses(tx, orgId, { patientId, templateId: template.id })

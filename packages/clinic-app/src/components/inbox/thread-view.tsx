@@ -42,7 +42,8 @@ import {
   PromptInputTools,
   usePromptInputAttachments,
 } from "@odentia/ui/components/ai-elements/prompt-input"
-import { ConfirmDialog, EmptyState, ErrorState, LoadingState, RowActions, SpeechInput } from "@odentia/ui-patterns"
+import { ConfirmDialog, EmptyState, ErrorState, RowActions, SpeechInput } from "@odentia/ui-patterns"
+import { ThreadSkeleton } from "../skeletons/inbox"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Bot, CheckCircle2, ChevronDown, ChevronLeft, Copy, CornerDownLeft, Hand, PanelRight } from "lucide-react"
@@ -217,6 +218,18 @@ export function ThreadView({
   // Los canales de la persona (fase 4 del pulido); sin el dato, solo este.
   const personChannels: PersonChannel[] = detail?.person?.channels ?? []
   const personIds = personChannels.length > 0 ? personChannels.map((item) => item.conversationId) : [id]
+  // Por una conexión apagada en Configuración no sale nada: «Responder por» no la ofrece.
+  const replyable = personChannels.filter((item) => item.connectionActive)
+  // Abierta por un canal apagado: se pasa a uno activo de la persona, si tiene, antes de escribir.
+  const landing =
+    !detailQuery.isPlaceholderData && personChannels.find((item) => item.conversationId === id)?.connectionActive === false
+      ? replyable[0]?.conversationId
+      : undefined
+  useEffect(() => {
+    if (!landing) return
+    switchingRef.current = true
+    setId(landing)
+  }, [landing])
 
   // En qué se basó cada respuesta del agente, en todos sus canales: solo se ofrece en los mensajes que la tienen.
   const tracesQuery = useQuery({
@@ -510,12 +523,12 @@ export function ThreadView({
       }
     },
   })
-  const actionError =
-    actionMutation.error instanceof ApiError
+  // Un fallo del servidor dice «Error interno», que no orienta a quien lo lee: ahí, la frase general.
+  const actionError = !actionMutation.error
+    ? null
+    : actionMutation.error instanceof ApiError && actionMutation.error.status < 500 && actionMutation.error.shape.message
       ? actionMutation.error.shape.message
-      : actionMutation.error
-        ? "No se pudo completar la acción. Inténtalo de nuevo."
-        : null
+      : "No se pudo completar la acción. Inténtalo de nuevo."
   // Resolver y cerrar sin resolver confirman antes con lo que dice el servidor que pasará.
   const [confirming, setConfirming] = useState<"close" | "deleteTest" | null>(null)
   const previewQuery = useQuery({
@@ -552,7 +565,7 @@ export function ThreadView({
   // Sin detalle aún no hay estructura que anticipar; con detalle en caché el
   // refetch (automático o manual) nunca lo retira: sigue visible abajo.
   if (detailQuery.isPending && !detail) {
-    return <LoadingState className="min-h-0 flex-1" message="Cargando la conversación…" />
+    return <ThreadSkeleton showBack={showBack} onBack={onBack} />
   }
   if (!detail) {
     // Solo 404/403 dicen que no está o que no hay acceso; otro fallo (red, servidor) se reintenta.
@@ -645,7 +658,7 @@ export function ThreadView({
   const switching = detailQuery.isPlaceholderData
   // Dos conversaciones del mismo canal (dos hilos de correo) se distinguen por su cuenta o su hora.
   const channelName = (item: PersonChannel) => {
-    const twins = personChannels.filter((other) => other.channel === item.channel)
+    const twins = replyable.filter((other) => other.channel === item.channel)
     if (twins.length < 2) return channelLabel(item.channel)
     const sameAccount = twins.some((other) => other !== item && other.connectionName === item.connectionName)
     return `${channelLabel(item.channel)} · ${sameAccount ? listTimeWords(item.lastMessageAt) : item.connectionName}`
@@ -786,7 +799,16 @@ export function ThreadView({
                   }]
                 : []),
               // Una prueba del chat web se borra entera (fase 6 del pulido).
-              ...(canWrite && conv.isTest ? [{ key: "borrar-prueba", label: "Borrar esta prueba", onSelect: () => setConfirming("deleteTest") }] : []),
+              ...(canWrite && conv.isTest
+                ? [{
+                    key: "borrar-prueba",
+                    label: "Borrar esta prueba",
+                    onSelect: () => {
+                      actionMutation.reset()
+                      setConfirming("deleteTest")
+                    },
+                  }]
+                : []),
               ...(!canWrite
                 ? []
                 : closed
@@ -844,6 +866,7 @@ export function ThreadView({
         confirmLabel="Borrar esta prueba"
         variant="destructive"
         pending={busy}
+        error={actionError}
         onClose={() => setConfirming(null)}
         onConfirm={() =>
           actionMutation.mutate(
@@ -896,17 +919,20 @@ export function ThreadView({
         >
           <span className="min-w-0 flex-1">
             {item.topics === 1 ? "Tiene un tema por responder" : `Tiene ${item.topics} temas por responder`} en{" "}
-            {channelLabel(item.channel)}: se responde por ahí.
+            {channelLabel(item.channel)}
+            {item.connectionActive ? ": se responde por ahí." : `, pero ${item.connectionName} está apagado en Configuración.`}
           </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-auto min-h-11 px-2 py-1 text-xs font-semibold text-primary sm:min-h-0"
-            onClick={() => switchTo(item.conversationId)}
-          >
-            Responder por {channelLabel(item.channel)}
-          </Button>
+          {item.connectionActive ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-auto min-h-11 px-2 py-1 text-xs font-semibold text-primary sm:min-h-0"
+              onClick={() => switchTo(item.conversationId)}
+            >
+              Responder por {channelLabel(item.channel)}
+            </Button>
+          ) : null}
         </div>
       ))}
       <MessageScrollerProvider autoScroll defaultScrollPosition="end">
@@ -1167,7 +1193,7 @@ export function ThreadView({
                 className="h-auto min-h-10 items-end bg-background"
                 onSubmit={handleComposerSubmit}
               >
-                {multiChannel && !blocked ? (
+                {replyable.length > 1 && !blocked ? (
                   <PromptInputHeader className="w-full flex-nowrap pb-0 text-xs">
                     <span className="shrink-0">Responder por:</span>
                     <DropdownMenu>
@@ -1181,7 +1207,7 @@ export function ThreadView({
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="start" className="w-auto">
                         {/* Base UI: el elemento del menú responde a `onClick`. */}
-                        {personChannels.map((item) => (
+                        {replyable.map((item) => (
                           <DropdownMenuItem key={item.conversationId} onClick={() => switchTo(item.conversationId)}>
                             <span className="whitespace-nowrap">
                               <span className="font-medium">{channelName(item)}</span>

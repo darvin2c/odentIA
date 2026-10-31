@@ -236,13 +236,20 @@ export async function renderConsentPdf(
   const words = CONSENT_SIGNATURE_WORDS[method] ?? CONSENT_SIGNATURE_WORDS.clinica
   const note = consentSignatureNote(clinicalProfileFor(data.establishment?.country).signatureLaw)
   const qrSize = 54
-  const needed = 44 + (checkUrl ? 10 : 0)
+  // Con QR, el código y sus tres textos no se separan de página.
+  const needed = 44 + (checkUrl ? 26 : 0)
   kit.ensure(needed)
   const top = kit.y
   const textWidth = checkUrl ? kit.width - qrSize - 15 : kit.width
   kit.text(words, { size: SIZE.second, face: "sansSemi", width: textWidth })
   kit.text(note, { size: SIZE.label, tone: "gray", width: textWidth, leading: 1.4 })
   if (checkUrl) {
+    kit.text("Escanee el código para comprobar que sigue vigente.", {
+      size: SIZE.label,
+      tone: "gray",
+      width: textWidth,
+      leading: 1.4,
+    })
     kit.qr(checkUrl, kit.right - qrSize, top, qrSize)
     kit.y = Math.min(kit.y, top - qrSize)
   }
@@ -285,6 +292,33 @@ export async function renderConsentPaperPdf(
     },
   ])
   return kit.finish()
+}
+
+/**
+ * Cómo queda un consentimiento de la clínica antes de usarlo: la misma hoja que se
+ * firma, con una persona de ejemplo. No toca ninguna ficha ni se guarda.
+ */
+export async function renderConsentPreviewPdf(
+  clinic: DocumentClinic,
+  draft: { title: string; sections: ConsentSections; body: string; version: number },
+): Promise<Uint8Array> {
+  const sample = {
+    document: {
+      titleSnapshot: draft.title,
+      templateVersion: draft.version,
+      procedureRef: null,
+      sectionsSnapshot: draft.sections,
+      bodySnapshot: draft.body,
+      diagnosisCode: null,
+      declarationSnapshot: null,
+      informerName: null,
+      informerTitle: null,
+      informerRegistration: null,
+      signedAt: null,
+    },
+    patient: { displayName: "Paciente de ejemplo", docType: null, docNumber: null, patientNumber: 1 },
+  } as unknown as ConsentPrint
+  return renderConsentPaperPdf(sample, clinic)
 }
 
 /**

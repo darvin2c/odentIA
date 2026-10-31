@@ -103,7 +103,7 @@ export type ClosingForm = ReturnType<typeof useClosingForm>
 function consentLine(need: ConsentNeed, who: string): { title: string; detail: string } {
   if (need.status === "sin_publicar")
     return {
-      title: `Esta clínica aún no publicó el consentimiento de «${need.title}»`,
+      title: `Esta clínica aún no activó el consentimiento de «${need.title}»`,
       detail: "Fírmalo en papel y súbelo, o sigue sin él diciendo por qué",
     }
   if (need.status === "sin_preparar")

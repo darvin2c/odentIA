@@ -1,4 +1,4 @@
-# 0119 · Lo que sabe Sofi sale de los datos; se escribe solo lo que solo sabe la clínica
+# 0120 · Lo que sabe Sofi sale de los datos; se escribe solo lo que solo sabe la clínica
 
 Fecha: 2026-10-31 · Estado: aceptada · Precisa [0021](0021-el-agente-siempre-responde-y-sabe-todo-lo-de-la-clinica.md) y [0043](0043-un-dato-un-lugar.md)
 
@@ -17,7 +17,7 @@ Conocimiento pedía responder «25 preguntas básicas» y marcaba solo 5 como cu
 ## Alternativas descartadas
 
 - *Marcar como cubiertas por los datos más de las 25*: seguía presentando como tarea lo que no lo es, y mezclaba datos con textos en una sola cuenta.
-- *Un horario de la sede escrito aparte*: dos fuentes del mismo dato (ADR 0117).
+- *Un horario de la sede escrito aparte*: dos fuentes del mismo dato (ADR 0118).
 - *Quitar la lista entera*: las ocho que quedan son preguntas reales que ningún dato responde; ofrecerlas ahorra que el agente pase a una persona algo que la clínica puede dejar escrito.
 
 ## Consecuencias

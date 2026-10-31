@@ -13,7 +13,7 @@ import { QueryErrorState } from "../../lib/query-error"
 import { appWords } from "../../lib/product-words"
 
 /**
- * Lo que mide una regla (`RULE_BODY_CHARS` de los servicios, ADR 0118): va
+ * Lo que mide una regla (`RULE_BODY_CHARS` de los servicios, ADR 0119): va
  * entera en cada mensaje. Una anterior más larga se edita aquí hasta acortarla.
  */
 const GUIDANCE_CHARS = 300
@@ -77,7 +77,7 @@ export function AgentGuidance({ canWrite }: { canWrite: boolean }) {
     },
   })
   const data = query.data?.data
-  // Todas llegan en cada mensaje: hay un tope (ADR 0118) y se dice cuánto falta.
+  // Todas llegan en cada mensaje: hay un tope (ADR 0119) y se dice cuánto falta.
   const full = data ? data.counts.all >= data.limits.rules : false
   const options: Array<{ value: Filter; label: string; count: number | undefined }> = [
     { value: "todas", label: "Todas", count: data?.counts.all },

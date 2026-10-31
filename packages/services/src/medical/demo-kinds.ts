@@ -265,7 +265,7 @@ const MEDICAL_INVENTORY: DemoKindRecipe["inventory"] = {
 
 /**
  * Lo que Sofi ya tiene respondido en un consultorio: solo lo que no está en los
- * datos (ADR 0119). El horario sale del equipo de la demo y una urgencia la
+ * datos (ADR 0120). El horario sale del equipo de la demo y una urgencia la
  * atiende la red de señales de alarma (ADR 0084): no se escriben aquí.
  */
 const MEDICAL_KNOWLEDGE: DemoKindRecipe["knowledge"] = [

@@ -35,7 +35,7 @@ function CheckDocumentPage() {
   if (query.isPending)
     return (
       <PageShell maxWidth="md">
-        <LoadingState message="Comprobando el documento…" />
+        <LoadingState kind="indeterminate" message="Comprobando el documento…" />
       </PageShell>
     )
   return query.data ? <DocumentCheckResult check={query.data} /> : <DocumentCheckUnavailable />

@@ -41,7 +41,7 @@ const LESSON_BODY_CHARS = 2000
 const LESSON_TITLE_CHARS = 200
 /**
  * Reglas activas de un agente: todas le llegan en cada mensaje (decisión 17 de
- * la fase 4), así que no se pasa de este tope (ADR 0118). La regla que
+ * la fase 4), así que no se pasa de este tope (ADR 0119). La regla que
  * sobraría se aprueba reemplazando otra; agregar o restaurar una pide quitar
  * otra antes. Una clínica que ya tenía más conserva las suyas: van las más
  * recientes y el agente y «Aprender» dicen cuántas quedaron fuera.
@@ -49,7 +49,7 @@ const LESSON_TITLE_CHARS = 200
 export const LESSON_RULE_LIMIT = 40
 /**
  * Lo que mide una regla, como mucho. Va entera en cada mensaje: una regla
- * larga casi siempre es un ejemplo o una respuesta oficial (ADR 0118).
+ * larga casi siempre es un ejemplo o una respuesta oficial (ADR 0119).
  */
 export const RULE_BODY_CHARS = 300
 /** Ejemplos que acompañan un turno: solo los parecidos a lo que se pregunta. */
@@ -977,7 +977,7 @@ const EXAMPLES_BY_WORDS = 200
  * Lo que el agente ha aprendido y aplica a este turno. Las reglas van todas
  * (son pocas y cortas); de los ejemplos, solo los parecidos a la pregunta:
  * primero los que trajo la búsqueda por significado entre todos
- * (`rankedExampleIds`, de `rankByMeaning`; ADR 0118) y, si falta, los
+ * (`rankedExampleIds`, de `rankByMeaning`; ADR 0119) y, si falta, los
  * parecidos por palabras entre los más recientes. `skipIds` y `extra` sirven
  * para probar cómo respondería sin una lección o con una que todavía no se
  * aprobó.

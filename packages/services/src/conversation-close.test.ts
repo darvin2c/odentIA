@@ -294,7 +294,7 @@ describe("el ciclo: insistir una vez y cerrar por silencio", () => {
     expect((await c.messages(conv.id)).at(-1)?.body).toBe("Hugo, cuando quieras retomar, escríbenos por aquí: estamos atentos para ayudarte.")
   })
 
-  it("si en la atención quedó una cita, cierra sin «cuando quieras retomar»: le escribe su recordatorio (ADR 0113)", async () => {
+  it("si en la atención quedó una cita, a la hora sin mensajes la da por resuelta, sin despedida: le escribe su recordatorio (ADR 0113)", async () => {
     const c = await clinic()
     const conv = await c.thread("Carlos Ramos", { lastInboundAt: IN, lastMessageAt: OUT, attentionStartedAt: IN })
     await c.say(conv.id, "in", "Sí, el jueves a las 5", IN)
@@ -308,9 +308,14 @@ describe("el ciclo: insistir una vez y cerrar por silencio", () => {
       startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30, status: "confirmada", source: "enlace",
       conversationId: conv.id, createdAt: new Date("2026-10-12T14:00:30Z"),
     })
-    expect(await tick(c, new Date("2026-10-13T01:00:00Z"))).toMatchObject({ closed: 1 })
-    expect(await c.row(conv.id)).toMatchObject({ status: "closed", closeReason: "sin_respuesta" })
+    // A los 50 minutos todavía no: puede que quiera decir algo más.
+    expect(await tick(c, new Date("2026-10-12T14:51:00Z"))).toEqual({ nudged: 0, closed: 0 })
+    expect(await tick(c, new Date("2026-10-12T15:02:00Z"))).toMatchObject({ closed: 1 })
+    expect(await c.row(conv.id)).toMatchObject({ status: "closed", closeReason: "resuelta" })
     expect((await c.messages(conv.id)).at(-1)?.body).toBe("Listo: tu cita quedó para el jueves a las 5:00 p. m.")
+    // La atención siguiente sabe cómo terminó esta.
+    const [memory] = await ownerDb.select().from(agentCaseMemory).where(eq(agentCaseMemory.conversationId, conv.id))
+    expect(memory?.notes[0]?.text).toContain("terminó con su cita reservada")
   })
 
   it("sin algo por responder no insiste, fuera de horario tampoco, y cierra a la hora configurada", async () => {
@@ -401,6 +406,42 @@ describe("el ciclo: insistir una vez y cerrar por silencio", () => {
     expect(await tick(c, new Date("2026-10-13T02:00:00Z"))).toMatchObject({ closed: 1 })
     expect(await c.row(conv.id)).toMatchObject({ status: "closed", closeReason: "sin_respuesta" })
     expect(await c.messages(conv.id)).toHaveLength(before)
+  })
+
+  it("si lo último no salió no se despide ni cierra: queda en «Por atender» hasta que un envío se acepte", async () => {
+    const c = await clinic()
+    const nudgedAt = new Date("2026-10-12T17:05:00Z")
+    const conv = await c.thread("Inés Rojas", { lastInboundAt: IN, lastMessageAt: nudgedAt, attentionStartedAt: IN, nudgedAt })
+    await c.say(conv.id, "in", "¿Atienden sábados?", IN)
+    await c.say(conv.id, "out", "Sí, de 9 a 13. ¿Te busco un horario?", OUT)
+    const [rejected] = await c.say(conv.id, "out", "Inés, ¿pudiste ver lo que te comenté?", nudgedAt)
+    await ownerDb.update(message).set({ status: "failed", externalId: null, error: "WhatsApp send falló" }).where(eq(message.id, rejected!.id))
+    const before = (await c.messages(conv.id)).length
+    // A la hora en que, con el recordatorio entregado, se despide y cierra.
+    const closeTime = new Date("2026-10-13T01:00:00Z")
+    expect(await tick(c, closeTime)).toEqual({ nudged: 0, closed: 0 })
+    expect(await c.messages(conv.id)).toHaveLength(before)
+    expect((await c.row(conv.id)).status).toBe("open")
+    const inAttend = async () => (await c.run((tx) => listInboxConversations(tx, c.orgId, { view: "attend" }))).items.some((item) => item.id === conv.id)
+    expect(await inAttend()).toBe(true)
+    // El equipo la retoma y su envío sale: vuelve a la regla de siempre.
+    const retaken = new Date("2026-10-12T21:30:00Z")
+    await c.say(conv.id, "out", "Inés, te escribo de la clínica", retaken, "user")
+    await ownerDb.update(conversation).set({ lastMessageAt: retaken }).where(eq(conversation.id, conv.id))
+    expect(await inAttend()).toBe(false)
+    expect(await tick(c, closeTime)).toMatchObject({ closed: 1 })
+    expect(await c.row(conv.id)).toMatchObject({ status: "closed", closeReason: "sin_respuesta" })
+  })
+
+  it("sin ventana y con lo último sin salir tampoco cierra sin mensaje", async () => {
+    const c = await clinic({ provider: "whatsapp_cloud_api" })
+    const conv = await c.thread("Mario", { lastInboundAt: new Date("2026-10-09T14:00:00Z"), lastMessageAt: OUT, attentionStartedAt: IN })
+    await c.say(conv.id, "in", "Hola", new Date("2026-10-09T14:00:00Z"))
+    await c.say(conv.id, "out", "Hola Mario", new Date("2026-10-09T14:01:00Z"))
+    const [rejected] = await c.say(conv.id, "out", "Mario, ¿confirmas tu cita?", OUT)
+    await ownerDb.update(message).set({ status: "failed", externalId: null }).where(eq(message.id, rejected!.id))
+    expect(await tick(c, new Date("2026-10-13T02:00:00Z"))).toEqual({ nudged: 0, closed: 0 })
+    expect((await c.row(conv.id)).status).toBe("open")
   })
 
   it("con una persona a cargo no se cierra ni avisa en la campana: la muestra «Te espera» a quien la lleva", async () => {

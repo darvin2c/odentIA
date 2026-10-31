@@ -265,7 +265,7 @@ export function createFinancialDocumentsRoute(
             confirmOtherEmail: parsed.data.confirmOtherEmail,
             patientId,
           },
-          { storage: deps.storage },
+          { storage: deps.storage, secretsKey: deps.secretsKey },
         ),
       ),
     )

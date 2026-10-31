@@ -1,6 +1,6 @@
 import type { ConsentSections } from "@odentia/clinical"
 import { useQuery } from "@tanstack/react-query"
-import { apiFetch } from "./api"
+import { apiFetch, apiFetchBytes } from "./api"
 
 /**
  * Especialidad de la clínica: la única lista (ADR 0039). Nace con las de la
@@ -117,6 +117,9 @@ export interface ConsentTemplate {
   version: number
   status: "borrador" | "publicado" | "archivado"
   publishedAt: string | null
+  /** Nulo: es un texto sugerido que nadie de la clínica ha revisado. */
+  reviewedAt: string | null
+  reviewerName?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -424,33 +427,25 @@ export function fetchConsentTemplates(
   return apiFetch<{ data: ConsentTemplate[] }>(`${BASE}/consent-templates${toSearch(query)}`)
 }
 
-export function createConsentTemplate(body: {
-  key?: string
-  title: string
-  sections?: ConsentSections
-  body?: string
-  specialtyId?: string | null
-}) {
-  return post<ConsentTemplate>(`${BASE}/consent-templates`, body)
+export function saveConsentTemplate(body: { key?: string; title: string; sections: ConsentSections }) {
+  return post<ConsentTemplate>(`${BASE}/consent-templates/save`, body)
 }
 
-export function updateConsentTemplate(
-  id: string,
-  body: { title?: string; sections?: ConsentSections; body?: string; specialtyId?: string | null },
-) {
-  return patch<ConsentTemplate>(`${BASE}/consent-templates/${id}`, body)
+export function setConsentTemplateActive(id: string, active: boolean) {
+  return put<ConsentTemplate>(`${BASE}/consent-templates/${id}/active`, { active })
 }
 
-export function publishConsentTemplate(id: string) {
-  return post<ConsentTemplate>(`${BASE}/consent-templates/${id}/publish`, {})
+export function markConsentTemplateReviewed(id: string) {
+  return post<ConsentTemplate>(`${BASE}/consent-templates/${id}/reviewed`, {})
 }
 
-export function archiveConsentTemplate(id: string) {
-  return post<ConsentTemplate>(`${BASE}/consent-templates/${id}/archive`, {})
-}
-
-export function createSuggestedConsentTemplates() {
-  return post<ConsentTemplate[]>(`${BASE}/consent-templates/suggested`, {})
+/** La hoja como saldría, con una persona de ejemplo: nada se guarda. */
+export function fetchConsentPreview(draft: { title: string; sections: ConsentSections; version?: number }) {
+  return apiFetchBytes(`${BASE}/consent-templates/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(draft),
+  })
 }
 
 export function fetchConsents(query: { patientId: string; status?: string }) {

@@ -198,9 +198,10 @@ export function setupStep(state: { webhookVerifiedAt?: string | null; lastInboun
 /**
  * Lo que le falta a una conexión activa para estar terminada. `own-app`: algo
  * que odentIA no pudo hacer en Meta. `meta-removed`: Meta cortó la conexión y
- * hay que volver a conectar con el botón.
+ * hay que volver a conectar con el botón. `token-dead`: Meta ya no acepta la
+ * clave; también se vuelve a conectar con el botón.
  */
-export type ConnectionPending = "address" | "first-message" | "signup" | "own-app" | "meta-removed" | null
+export type ConnectionPending = "address" | "first-message" | "signup" | "own-app" | "meta-removed" | "token-dead" | null
 
 /* ---------- La app propia de la clínica en Meta ---------- */
 
@@ -321,6 +322,7 @@ export function connectionPending(
   if (connection.status !== "active") return null
   // Lo que Meta cortó va antes que cualquier paso: hasta volver a conectar no llega ni sale nada.
   if (connection.signup?.metaRemoved) return "meta-removed"
+  if (connection.signup?.tokenDead) return "token-dead"
   if (connection.signup) return connection.signup.pending.length > 0 ? "signup" : null
   if (ownAppUnfinished(connection.ownApp) || ownAppSignatureProblem(connection.ownApp, setup?.lastInboundAt ?? connection.lastInboundAt)) {
     return "own-app"
@@ -396,6 +398,15 @@ export function connectionWords(connection: ConnectionItem, since: Since, pendin
       tone: "pending",
       status: "Se desconectó de Meta.",
       detail: "No recibe ni envía mensajes hasta volver a conectar con Facebook. Las conversaciones que ya tienes se conservan.",
+      facts: [],
+    }
+  }
+  if (pending === "token-dead") {
+    return {
+      title,
+      tone: "pending",
+      status: "Hay que volver a conectarlo.",
+      detail: "La conexión con Meta venció o fue retirada: los mensajes no salen hasta volver a conectar con Facebook. Las conversaciones que ya tienes se conservan.",
       facts: [],
     }
   }

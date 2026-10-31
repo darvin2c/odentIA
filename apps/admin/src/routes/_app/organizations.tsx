@@ -7,7 +7,6 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Skeleton,
   toast,
 } from "@odentia/ui"
 import {
@@ -20,6 +19,7 @@ import {
   PageShell,
   useAppForm,
   useFormSurface,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { CLINICAL_PRODUCTS, type ClinicalProduct, productWords } from "@odentia/clinical"
 import { useStore } from "@tanstack/react-form"
@@ -30,8 +30,10 @@ import { useEffect, useMemo, useState } from "react"
 import { z } from "zod"
 import { ApiError, api } from "../../lib/api"
 import { rememberOrganizationsSearch } from "../../lib/organizations-search"
+import { useAdminUserId, useIsAdmin } from "../../lib/session"
 import { CreateDemoDrawer, DemoBadge, type DemoItem, DemoProgressDrawer, demoLine, PendingDemoCard, useDemos } from "../../components/demos"
 import { type ProductChoice, ProductFilter, ProductMark } from "../../components/product"
+import { OrganizationsPageSkeleton, OrganizationsSkeleton } from "../../components/skeletons/organizations"
 
 interface ListSearch {
   q?: string
@@ -44,6 +46,7 @@ interface ListSearch {
 }
 
 export const Route = createFileRoute("/_app/organizations")({
+  pendingComponent: OrganizationsPageSkeleton,
   component: OrganizationsPage,
   // La búsqueda y los filtros viven en la dirección: al volver de una ficha siguen como estaban.
   validateSearch: (search: Record<string, unknown>): ListSearch => ({
@@ -195,14 +198,8 @@ function OrganizationsPage() {
   const [demoProgress, setDemoProgress] = useState<string | null>(null)
   const kindFilter = listSearch.clase
 
-  const sessionQuery = useQuery({
-    queryKey: ["admin-session"],
-    queryFn: async () =>
-      z
-        .object({ actor: z.object({ role: z.string(), userId: z.string().optional() }) })
-        .parse(await api<unknown>("/api/admin/access/session")),
-  })
-  const isAdmin = sessionQuery.data?.actor.role === "admin"
+  const isAdmin = useIsAdmin()
+  const myUserId = useAdminUserId()
 
   const sellersSchema = z.array(z.object({ id: z.string(), displayName: z.string() }))
   const sellersQuery = useQuery({
@@ -442,11 +439,9 @@ function OrganizationsPage() {
       </form>
 
       {listQuery.isPending ? (
-        <div className="flex flex-col gap-3">
-          <Skeleton className="h-16 w-full" />
-          <Skeleton className="h-16 w-full" />
-          <Skeleton className="h-16 w-full" />
-        </div>
+        <SkeletonRegion message="Cargando las clínicas…">
+          <OrganizationsSkeleton />
+        </SkeletonRegion>
       ) : listQuery.isError ? (
         <ErrorState error={listQuery.error} onRetry={() => void listQuery.refetch()} />
       ) : items.length === 0 && pendingDemos.length === 0 ? (
@@ -456,7 +451,7 @@ function OrganizationsPage() {
           description="Aún no hay clínicas registradas con este criterio."
         />
       ) : (
-        <ul className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+        <ul className="grid grid-cols-[minmax(0,1fr)] gap-2 md:grid-cols-2 xl:grid-cols-3">
           {pendingDemos.map((demo) => (
             <li key={demo.id}>
               <PendingDemoCard demo={demo} onOpen={() => setDemoProgress(demo.id)} />
@@ -495,7 +490,7 @@ function OrganizationsPage() {
       <CreateDemoDrawer
         open={demoOpen}
         onClose={() => setDemoOpen(false)}
-        currentUserId={sessionQuery.data?.actor.userId ?? null}
+        currentUserId={myUserId}
         onCreated={(id) => {
           setDemoOpen(false)
           setDemoProgress(id)

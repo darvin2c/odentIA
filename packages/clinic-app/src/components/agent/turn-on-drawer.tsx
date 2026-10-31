@@ -165,7 +165,7 @@ export function TurnOnDrawer({
           }
         />
         <Check ok={modelOk} checking={checking} title="El modelo responde" detail={modelDetail} action={modelAction} />
-        {/* Lo que dice sale de los datos (ADR 0119): sin horario del equipo ni servicios no sabe cuándo atiende ni qué hace. */}
+        {/* Lo que dice sale de los datos (ADR 0120): sin horario del equipo ni servicios no sabe cuándo atiende ni qué hace. */}
         <Check
           ok={knows.branchesWithHours > 0 && knows.services > 0}
           title="Sabe tu horario y tus servicios"

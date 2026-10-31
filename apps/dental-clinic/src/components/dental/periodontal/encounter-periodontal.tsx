@@ -55,9 +55,11 @@ import {
 } from "../../../lib/dental/periodontal"
 import { QueryErrorState } from "@odentia/clinic-app/lib/query-error"
 import { ChoiceSelect } from "@odentia/clinic-app/components/ui/choice-select"
-import { PeriodontalCapture } from "./periodontal-capture"
-import { PeriodontalChart } from "./periodontal-chart"
+import { lazyPart } from "../../../product/dental/lazy-part"
 import { PeriodontalTiles } from "./periodontal-views"
+
+const PeriodontalCapture = lazyPart(() => import("./periodontal-capture").then((m) => m.PeriodontalCapture))
+const PeriodontalChart = lazyPart(() => import("./periodontal-chart").then((m) => m.PeriodontalChart))
 
 const STAGE_WORDS = ["", "I", "II", "III", "IV"]
 const MISSING_WORDS: Record<PeriodontalMissingInput, string> = {

@@ -5,7 +5,7 @@
  * (`?orden=`). Recepción ve lo que llega, sin precios ni pagos.
  */
 import { Button, Spinner } from "@odentia/ui"
-import { DataTable, DataTableSkeleton, EmptyState, useListSearch, ViewTabs } from "@odentia/ui-patterns"
+import { DataTable, EmptyState, SkeletonRegion, useListSearch, ViewTabs } from "@odentia/ui-patterns"
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { ShoppingCart, X } from "lucide-react"
@@ -26,6 +26,8 @@ import {
   clinicDayOf,
 } from "../../lib/inventory"
 import { QueryErrorState } from "../../lib/query-error"
+import { purchaseViews } from "../../lib/screen-rules"
+import { PurchaseRowsSkeleton } from "../skeletons/inventory"
 import { Chip } from "./fields"
 import { useInventory } from "./inventory-scope"
 
@@ -114,12 +116,9 @@ export function PurchasesTab() {
   const table = useReactTable({ data: rows, columns, autoResetPageIndex: false, getCoreRowModel: getCoreRowModel(), getRowId: (row) => row.id })
 
   const counts = first?.counts
-  const views: Array<{ value: PurchaseView; label: string; count?: number }> = [
-    { value: "por_llegar", label: "Por llegar", count: counts?.por_llegar },
-    ...(can.prices ? [{ value: "por_pagar" as const, label: "Por pagar", count: counts?.por_pagar }] : []),
-    ...(can.write ? [{ value: "borradores" as const, label: "Borradores", count: counts?.borradores }] : []),
-    { value: "todas", label: "Todas" },
-  ]
+  const views: Array<{ value: PurchaseView; label: string; count?: number }> = purchaseViews(can).map((item) =>
+    item.value === "todas" ? item : { ...item, count: counts?.[item.value] },
+  )
   const empty: Record<PurchaseView, { title: string; description: string }> = {
     por_llegar: { title: "Nada por llegar", description: "Las compras pedidas aparecen aquí hasta que llega todo." },
     por_pagar: { title: "Nada por pagar", description: "Lo recibido de cada compra ya está pagado." },
@@ -146,7 +145,9 @@ export function PurchasesTab() {
       </div>
 
       {query.isPending ? (
-        <DataTableSkeleton columnCount={can.prices ? 3 : 2} label="Cargando compras…" />
+        <SkeletonRegion message="Cargando compras…">
+          <PurchaseRowsSkeleton prices={can.prices} />
+        </SkeletonRegion>
       ) : query.isError && rows.length === 0 ? (
         <QueryErrorState error={query.error} onRetry={() => void query.refetch()} />
       ) : rows.length === 0 ? (

@@ -111,7 +111,7 @@ export interface PageHeaderProps {
    * Una segunda acción a la vista, junto a la principal y con borde. En el
    * teléfono no cabe: pasa al menú ⋯.
    */
-  secondary?: { label: string; icon: React.ReactNode; onClick: () => void }
+  secondary?: { label: string; icon: React.ReactNode; onClick?: () => void; disabled?: boolean }
   /** Lo demás que la página ofrece: va en el menú ⋯. */
   menu?: PageHeaderMenuItem[]
   className?: string
@@ -127,7 +127,7 @@ export function PageHeader({ title, subtitle, primary, secondary, menu, classNam
   )
   const menuItems =
     secondary && isMobile
-      ? [{ label: secondary.label, icon: secondary.icon, onSelect: secondary.onClick }, ...(menu ?? [])]
+      ? [{ label: secondary.label, icon: secondary.icon, onSelect: secondary.onClick, disabled: secondary.disabled }, ...(menu ?? [])]
       : menu
 
   const primaryContent = primary ? (
@@ -153,6 +153,7 @@ export function PageHeader({ title, subtitle, primary, secondary, menu, classNam
               title={secondary.label}
               className="shrink-0 gap-2 @max-4xl/page-header:size-9 @max-4xl/page-header:rounded-full @max-4xl/page-header:px-0"
               onClick={secondary.onClick}
+              disabled={secondary.disabled}
             >
               {secondary.icon}
               <span className="@max-4xl/page-header:sr-only">{secondary.label}</span>

@@ -289,10 +289,17 @@ export interface OutboundMessage {
 /**
  * El proveedor contestó que no acepta el envío: no salió. A diferencia de una
  * caída de la red o de un error del proveedor, no es un efecto ambiguo y el
- * mensaje queda como no entregado, con este motivo.
+ * mensaje queda como no entregado, con este motivo. `code` es el código de error
+ * del proveedor, si el adaptador lo entrega: el motivo son palabras para la clínica.
  */
 export class ProviderRejectedError extends Error {
   override readonly name: string = "ProviderRejectedError"
+  readonly code: number | null
+
+  constructor(message: string, code: number | null = null) {
+    super(message)
+    this.code = code
+  }
 }
 
 /**

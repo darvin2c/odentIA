@@ -124,7 +124,7 @@ function rows(sources: Sources, receptionName: string): Row[] {
 }
 
 /**
- * «Lo que toma de tus datos» (ADR 0119): todo lo que el agente lee del sistema
+ * «Lo que toma de tus datos» (ADR 0120): todo lo que el agente lee del sistema
  * en el momento, con cuánto hay y dónde se edita. Sale de las mismas fuentes
  * que su prompt (`/api/agent/knowledge/sources`), así lo que dice la pantalla
  * es lo que recibe. Lo que falta y necesita va en ámbar, con su texto: no solo

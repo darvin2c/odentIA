@@ -10,8 +10,9 @@ import {
   treatmentTemplate,
 } from "@odentia/db/schema/clinical"
 import { and, eq, sql } from "drizzle-orm"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { configureDocumentChecks } from "./document-check.js"
+import { DocumentKit } from "./document-kit.js"
 import { livePersonalLinkToken, issuePersonalLink } from "./booking-links.js"
 import { createContact } from "./contacts.js"
 import { portalBudgetContext, toPortalBudget } from "./portal.js"
@@ -22,6 +23,7 @@ import {
   createBudget,
   decideBudget,
   deliverBudget,
+  duplicateBudgetOption,
   getBudgetDetail,
   getBudgetPresentation,
   updateBudgetPresentation,
@@ -223,6 +225,52 @@ it("el ajuste para este paciente manda sobre la del servicio", async () => {
   await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
   const snap = await f.run((tx) => buildBudgetSnapshot(tx, "org_a", f.patient.id, budget.id))
   expect(snap.lines[0]?.guide).toEqual({ how: "Solo para ella" })
+})
+
+describe("lo que dice el PDF", () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  /** Todo lo que la hoja escribe, sin depender de cómo guarda las fuentes. */
+  async function printedText(snap: Parameters<typeof renderBudgetPdf>[0]): Promise<string> {
+    const lay = vi.spyOn(DocumentKit.prototype, "lay")
+    await renderBudgetPdf(snap)
+    return JSON.stringify(lay.mock.calls.map((call) => call[0]))
+  }
+
+  it("con varias opciones explica cada tratamiento, y lo repetido solo una vez", async () => {
+    const { f, budget, serviceId } = await budgetWithGuide()
+    await f.run((tx) =>
+      updateService(tx, "org_a", f.args[1], serviceId, { patientGuide: { how: "Se limpia y se sella" } }),
+    )
+    await f.run((tx) => duplicateBudgetOption(tx, ...f.args, budget.id, budget.options[0]!.id))
+    const snap = await f.run((tx) => buildBudgetSnapshot(tx, "org_a", f.patient.id, budget.id))
+    expect(snap.options).toHaveLength(2)
+    const text = await printedText(snap)
+    expect(text).toContain("Se limpia y se sella")
+    expect(text).toContain("Cómo se hace: ver Opción A.")
+  })
+
+  it("no remite a una explicación que la hoja no imprimió", async () => {
+    const { f, budget, serviceId } = await budgetWithGuide()
+    await f.run((tx) => updateService(tx, "org_a", f.args[1], serviceId, { patientGuide: { visits: "2" } }))
+    await f.run((tx) => duplicateBudgetOption(tx, ...f.args, budget.id, budget.options[0]!.id))
+    const snap = await f.run((tx) => buildBudgetSnapshot(tx, "org_a", f.patient.id, budget.id))
+    expect(await printedText(snap)).not.toContain("Cómo se hace: ver")
+  })
+
+  it("si una línea no dice sus visitas, el total lo dice como un mínimo", async () => {
+    const { f, budget } = await budgetWithGuide()
+    const snap = await f.run((tx) => buildBudgetSnapshot(tx, "org_a", f.patient.id, budget.id))
+    const line = snap.lines[0]!
+    const text = await printedText({
+      ...snap,
+      lines: [
+        { ...line, id: randomUUID(), plannedSessions: 1, guide: { how: "Uno", visits: "2" } },
+        { ...line, id: randomUUID(), plannedSessions: 1, guide: { how: "Otro" } },
+      ],
+    })
+    expect(text).toContain("2 o más visitas")
+  })
 })
 
 it("lo encontrado: según el rol y el destinatario; nunca en el detalle del presupuesto", async () => {

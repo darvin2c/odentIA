@@ -70,7 +70,7 @@ export const configuracion: SectionNavItem[] = [
   ["Equipo y permisos", "/members"],
   ["Disponibilidad", "/settings/availability"],
   ["Especialidades", "/settings/specialties"],
-  ["Formularios y consentimientos", "/settings/forms"],
+  ["Consentimientos", "/settings/forms"],
   ["Canales", "/settings/channels"],
   ["Chat web", "/settings/webchat"],
   ["Correo", "/settings/mail"],
@@ -102,7 +102,7 @@ export const configuracionGrupos: SectionNavGroup[] = [
     label: "Atención",
     items: [
       { label: "Especialidades", to: "/settings/specialties" },
-      { label: "Formularios y consentimientos", to: "/settings/forms" },
+      { label: "Consentimientos", to: "/settings/forms" },
     ],
   },
   {

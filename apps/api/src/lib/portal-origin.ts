@@ -2,16 +2,16 @@ import { type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
 import { orgProfile } from "@odentia/db/schema/org"
-import { clinicOrigin, type PublicLinkConfig } from "@odentia/services"
+import { clinicOrigin } from "@odentia/services"
 import { eq } from "drizzle-orm"
 
 /**
  * El origen WebAuthn nace de configuración del servidor, nunca de Origin/Host
- * del cliente: el de la clínica, en el dominio de su producto (decisión 9 del
- * issue 229).
+ * del cliente: el de la clínica, en el dominio de su producto, el mismo que fija
+ * `configurePublicLinks` al arrancar (decisión 9 del issue 229).
  */
-export function portalOrigin(config: PublicLinkConfig, org: { slug: string; product: ClinicalProduct }): string {
-  return clinicOrigin(org.slug, org.product, config) ?? new URL(config.webURL).origin
+export function portalOrigin(config: { webURL: string }, org: { slug: string; product: ClinicalProduct }): string {
+  return clinicOrigin(org.slug, org.product) ?? new URL(config.webURL).origin
 }
 
 /** La clínica del portal por su subdominio, con su producto. Con la conexión de dueño: aún no hay clínica en contexto. */

@@ -14,7 +14,7 @@ import { productHooks } from "./products.js"
  * vector. Solo sirve para encontrar: precio, vigencia y condiciones se leen de
  * su tabla al responder. El texto nunca lleva precios ni fechas; solo nombres,
  * especialidades, condiciones, respuestas oficiales y la pregunta de cada
- * ejemplo aprobado (ADR 0118), que es lo que escribió alguien y ya está en su
+ * ejemplo aprobado (ADR 0119), que es lo que escribió alguien y ya está en su
  * lección.
  *
  * Conciliar (`syncSearchItems`) es solo base de datos; vectorizar es una

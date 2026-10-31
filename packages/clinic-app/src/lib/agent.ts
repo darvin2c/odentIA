@@ -592,7 +592,7 @@ export interface GuidanceItem {
 export interface GuidanceList {
   items: GuidanceItem[]
   counts: { all: number; escrita: number; aprendida: number }
-  /** Cuántas reglas puede tener activas y cuánto mide cada una (ADR 0118). */
+  /** Cuántas reglas puede tener activas y cuánto mide cada una (ADR 0119). */
   limits: { rules: number; chars: number }
 }
 

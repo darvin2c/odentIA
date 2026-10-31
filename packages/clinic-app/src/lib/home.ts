@@ -247,7 +247,7 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
       }
     case "consentToPublish":
       return {
-        title: `Publicar el consentimiento de «${row.title}»`,
+        title: `Activar el consentimiento de «${row.title}»`,
         detail: row.requestedByName ? `Lo pidió ${row.requestedByName}` : "Lo pidió una atención",
         action: "Abrir los consentimientos",
       }

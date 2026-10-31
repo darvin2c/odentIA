@@ -8,13 +8,14 @@
 import { formatMoney } from "@odentia/clinical"
 import { Button, cn } from "@odentia/ui"
 import { ToggleGroup, ToggleGroupItem } from "@odentia/ui/components/toggle-group"
-import { EmptyState, LoadingState } from "@odentia/ui-patterns"
+import { EmptyState, SkeletonRegion } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { AlertTriangle, ArrowLeft, Check } from "lucide-react"
 import { useState } from "react"
 import { usePermission } from "../../lib/crm"
 import { QueryErrorState } from "../../lib/query-error"
 import { fetchReport, rateOf, reportKey, type ReportPromotions, type ReportQuery, spanLabel } from "../../lib/reports"
+import { PromotionsCardBodySkeleton, PromotionsViewSkeleton } from "../skeletons/reports"
 import { EmptyLine, ReportCard, WHOLE_CLINIC } from "./report-parts"
 import { Link } from "@tanstack/react-router"
 
@@ -63,7 +64,9 @@ export function PromotionsCard({ query, onOpen }: { query: ReportQuery; onOpen: 
   if (report.isPending)
     return (
       <ReportCard title="Promociones y descuentos">
-        <LoadingState />
+        <SkeletonRegion message="Cargando las promociones…" className="flex min-w-0 flex-col gap-3">
+          <PromotionsCardBodySkeleton />
+        </SkeletonRegion>
       </ReportCard>
     )
   if (report.isError)
@@ -141,9 +144,11 @@ export function PromotionsView({ query, onBack }: { query: ReportQuery; onBack: 
   )
   if (report.isPending)
     return (
-      <div className="flex flex-col gap-3">
+      <div className="flex min-w-0 flex-col gap-4">
         {back}
-        <LoadingState />
+        <SkeletonRegion message="Cargando las promociones…">
+          <PromotionsViewSkeleton />
+        </SkeletonRegion>
       </div>
     )
   if (report.isError)

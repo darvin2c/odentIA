@@ -82,7 +82,7 @@ test("conocimiento: lo que no supo responder, lo que solo tú sabes, respuestas 
   await gaps.getByRole("button", { name: "Ver las 4" }).click()
   await expect(gaps.getByRole("button", { name: "Responder", exact: true })).toHaveCount(3)
 
-  // Conocimiento es de Sofi (ADR 0119).
+  // Conocimiento es de Sofi (ADR 0120).
   await expect(page.getByText("Es lo que usa para responder a pacientes. Clío y Argos no lo usan.")).toBeVisible()
 
   // Lo que solo tú sabes: ocho preguntas opcionales, cada una dice si tiene respuesta, y una sola acción.

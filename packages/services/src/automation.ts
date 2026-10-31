@@ -76,9 +76,9 @@ import { patientCreditSql } from "./payments.js"
 import { findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
 import { lapsedToInvite, recordInvitation } from "./return-invites.js"
 import { updateOpportunity } from "./opportunities.js"
-import { getPatientMissingData } from "./patient-registration.js"
+import { getPatientMissingData, patientHealthToAsk } from "./patient-registration.js"
 import { personalLinkRef } from "./personal-link-token.js"
-import { listDecisionRecipients, patientAge } from "./responsibilities.js"
+import { contactDecides, listDecisionRecipients, patientAge } from "./responsibilities.js"
 import { clinicOriginOf, personalLinkMessageUrl, personalLinkUrl, publicLinksConfigured } from "./public-links.js"
 import { createTask, settleTask } from "./tasks.js"
 import { upsertWorkspaceNotification } from "./workspace.js"
@@ -1790,7 +1790,13 @@ async function dataNoticeFor(
     .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, job.appointmentId)))
     .limit(1)
   if (!row) return null
-  if ((await getPatientMissingData(tx, orgId, row.patientId)).length === 0) return null
+  // Solo a quien puede completarlos: a otro, su enlace no le mostraría nada que hacer.
+  if (!(await contactDecides(tx, orgId, row.patientId, contactId))) return null
+  // La salud es opcional: se pregunta al reservar, y el recordatorio no insiste por ella.
+  const pending =
+    (await getPatientMissingData(tx, orgId, row.patientId)).length > 0 ||
+    (key === APPOINTMENT_DATA_NOTICE_KEY && (await patientHealthToAsk(tx, orgId, row.patientId)))
+  if (!pending) return null
   const issued = await issuePersonalLink(
     tx,
     orgId,

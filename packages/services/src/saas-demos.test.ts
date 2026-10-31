@@ -360,7 +360,7 @@ describe("una demo de Pediatría en Colombia", () => {
     expect(opportunities.map((row) => row.status).sort()).toEqual(["lost", "open", "open", "open", "won"])
 
     // Sofi ya tiene publicadas las de «Lo que solo tú sabes» y la de su tipo; el horario sale del
-    // equipo de la demo, no de un texto (ADR 0119).
+    // equipo de la demo, no de un texto (ADR 0120).
     const answers = await ownerDb
       .select({ basicKey: agentKnowledgeEntry.basicKey, title: agentKnowledgeEntry.title })
       .from(agentKnowledgeEntry)

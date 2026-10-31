@@ -34,10 +34,12 @@ import {
   webchatRows,
 } from "../../lib/integrations"
 import { activeOrgTimeZone, useOrgLocale } from "../../lib/locale"
+import { IntegrationsPageSkeleton } from "../../components/skeletons/settings"
 
 export const Route = createFileRoute("/_org/settings/integrations/")({
   // El proveedor de correo vuelve aquí tras autorizar, con el resultado en la dirección.
   validateSearch: validateIntegrationsSearch,
+  pendingComponent: IntegrationsPageSkeleton,
   component: IntegrationsPage,
 })
 

@@ -17,6 +17,7 @@ import {
 } from "@odentia/db/schema/clinical"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, eq, getTableColumns, inArray, isNotNull, or, sql } from "drizzle-orm"
+import { linkServicesToSuggestedConsents } from "./clinical-forms.js"
 import { invalidField, isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { orgClinicalProfile, orgProduct, orgProfileRequired } from "./locale.js"
 import {
@@ -908,6 +909,7 @@ export async function createService(
     priceCents: row.priceCents,
     currency: row.currency,
   })
+  await linkServicesToSuggestedConsents(tx, orgId, actorUserId, { serviceIds: [row.id] })
   return row
 }
 
@@ -1311,6 +1313,7 @@ export async function fromTemplates(
       priceDisclosure: row.priceDisclosure,
     })
   }
+  await linkServicesToSuggestedConsents(tx, orgId, actorUserId, { serviceIds: created.map((row) => row.id) })
   return { created, existing: owned }
 }
 

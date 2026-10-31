@@ -1,5 +1,5 @@
 import { clinicalProfileFor, DIAGNOSIS_SYSTEM_INFO } from "@odentia/clinical"
-import { Button, Skeleton, toast } from "@odentia/ui"
+import { Button, toast } from "@odentia/ui"
 import {
   common,
   countryOptions,
@@ -14,6 +14,7 @@ import {
   useFormSubmit,
   useFormSubmitError,
   zonesForCountry,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
@@ -57,6 +58,7 @@ import {
   regionPreview,
 } from "../../lib/region-format"
 import { productUi } from "../../product/product-ui"
+import { ClinicProfilePageSkeleton, ClinicProfileSkeleton } from "../../components/skeletons/settings"
 
 export const Route = createFileRoute("/_org/settings/")({
   // El perfil son datos de configuración: el loader lo trae una vez —también en
@@ -72,6 +74,7 @@ export const Route = createFileRoute("/_org/settings/")({
       return { profile: null, loaded: false }
     }
   },
+  pendingComponent: ClinicProfilePageSkeleton,
   component: OrgProfilePage,
 })
 
@@ -238,7 +241,9 @@ function OrgProfilePage() {
             onRetry={() => void profileQuery.refetch()}
           />
         ) : (
-          <ProfileSkeleton />
+          <SkeletonRegion message="Cargando los datos de la clínica…">
+            <ClinicProfileSkeleton />
+          </SkeletonRegion>
         )
       ) : (
         <>
@@ -257,38 +262,6 @@ function OrgProfilePage() {
           ) : null}
         </>
       )}
-    </div>
-  )
-}
-
-/** Las dos tarjetas del formulario y sus campos, para reservar su hueco. */
-const SKELETON_CARDS = [
-  { id: "identidad", fields: ["razon", "comercial", "documento", "numero", "direccion"] },
-  { id: "region", fields: ["pais", "zona", "moneda"] },
-]
-
-/** El hueco del formulario mientras llega el perfil: las dos tarjetas con sus campos. */
-function ProfileSkeleton() {
-  return (
-    <div
-      role="status"
-      aria-busy
-      aria-label="Cargando los datos de la clínica…"
-      className="flex max-w-3xl flex-col gap-4"
-    >
-      {SKELETON_CARDS.map((card) => (
-        <div key={card.id} aria-hidden className={CARD}>
-          <Skeleton className="h-5 w-32" />
-          <div className="grid gap-4 sm:grid-cols-2">
-            {card.fields.map((field) => (
-              <div key={field} className="flex flex-col gap-2">
-                <Skeleton className="h-4 w-28" />
-                <Skeleton className="h-9 w-full" />
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
     </div>
   )
 }

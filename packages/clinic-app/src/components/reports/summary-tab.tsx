@@ -6,9 +6,9 @@
  * solo con color.
  */
 import { formatMoney } from "@odentia/clinical"
-import { cn, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@odentia/ui"
-import { ColumnChart, EmptyState, LoadingState } from "@odentia/ui-patterns"
-import { useQuery } from "@tanstack/react-query"
+import { cn, Skeleton, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@odentia/ui"
+import { ColumnChart, EmptyState, SkeletonRegion } from "@odentia/ui-patterns"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ArrowDown, ArrowUp, Bot } from "lucide-react"
 import { type ReactNode, useState } from "react"
@@ -35,7 +35,8 @@ import {
 } from "../../lib/reports"
 import { downloadReportTable, type ReportGoalMetric } from "../../lib/reports-ask"
 import { FunnelCard } from "./patients-tab"
-import { DownloadButton, EmptyLine, FooterButton, ReportCard, SummaryFigure, travel, WHOLE_CLINIC } from "./report-parts"
+import { CollectedChartSkeleton, ProfessionalsBodySkeleton, SummaryFiguresSkeleton } from "../skeletons/reports"
+import { DownloadButton, EmptyLine, FooterButton, ReportBody, ReportCard, SummaryFigure, travel, WHOLE_CLINIC } from "./report-parts"
 import { GoalDrawer, GoalLine, MondayDigestCard, PinnedAnswers } from "./summary-extras"
 import { ADMIN_NAME } from "../../lib/agent-names"
 
@@ -75,14 +76,70 @@ export function SummaryTab({
   /** Argos encendido: con él se pregunta y se fija una respuesta en el Resumen. */
   argosEnabled?: boolean
 }) {
-  const report = useQuery({ queryKey: reportKey("summary", query), queryFn: () => fetchReport<ReportSummary>("summary", query), retry: false })
+  const report = useQuery({ queryKey: reportKey("summary", query), queryFn: () => fetchReport<ReportSummary>("summary", query), placeholderData: keepPreviousData, retry: false })
   const [goalMetric, setGoalMetric] = useState<ReportGoalMetric | null>(null)
 
-  if (report.isPending) return <LoadingState />
   if (report.isError)
     return <QueryErrorState error={report.error} onRetry={() => void report.refetch()} notFound="La sede elegida ya no está disponible. Elige otra sede." />
 
-  const data = report.data.data
+  const data = report.data?.data
+  // «Sin movimiento» se dice de lo pedido, no de lo que aún muestra la sede o el periodo anterior.
+  if (data && !report.isPlaceholderData && hasNoMovement(data)) {
+    return (
+      <EmptyState
+        title="Todavía no hay movimiento que mostrar"
+        description="Cuando la clínica atienda, cobre y presente presupuestos, aquí verás cómo va el negocio mes a mes."
+      />
+    )
+  }
+
+  // Cada tarjeta pide lo suyo desde el primer momento: ninguna espera a las seis cifras.
+  return (
+    <ReportBody stale={report.isPlaceholderData}>
+      {data ? (
+        <>
+          <SummaryFigures data={data} onOpenList={onOpenList} onEditGoal={setGoalMetric} />
+          <CollectedChart data={data} />
+        </>
+      ) : (
+        <SkeletonRegion message="Cargando las cifras…" className="flex min-w-0 flex-col gap-4">
+          <SummaryFiguresSkeleton />
+          <CollectedChartSkeleton />
+        </SkeletonRegion>
+      )}
+
+      {/* Dónde se caen los pacientes, al lado de lo que vio el Administrador (tablero 1); si no caben, una debajo de la otra. */}
+      <div className="flex min-w-0 flex-wrap gap-4">
+        <div className="flex min-w-0 flex-[1.5_1_30rem] flex-col *:flex-1">
+          <FunnelCard query={query} onOpenList={onOpenList} />
+        </div>
+        <div className="flex min-w-0 flex-[1_1_22.5rem] flex-col *:flex-1">{advice}</div>
+      </div>
+
+      <Professionals query={query} />
+
+      <PinnedAnswers query={query} argosEnabled={argosEnabled} />
+      <MondayDigestCard />
+      {data ? <GoalDrawer metric={goalMetric} goals={data.goals} currency={data.currency} locale={data.locale} onClose={() => setGoalMetric(null)} /> : null}
+    </ReportBody>
+  )
+}
+
+/** Ni movimiento en el periodo ni en los 12 meses: la clínica aún no tiene nada que mostrar. */
+function hasNoMovement(data: ReportSummary): boolean {
+  const nothing = data.collected.current === 0 && data.newPatients.current === 0 && data.noShow.current.total === 0 && data.acceptance.current.presented === 0
+  return nothing && data.collected.months.every((value) => value === 0)
+}
+
+function SummaryFigures({
+  data,
+  onOpenList,
+  onEditGoal,
+}: {
+  data: ReportSummary
+  onOpenList: (list: ReportListKey) => void
+  onEditGoal: (metric: ReportGoalMetric) => void
+}) {
   const { locale, currency } = data
   const phrase = previousPhrase(data, locale)
   const money = (cents: number): string => formatMoney(cents, currency, locale)
@@ -96,20 +153,8 @@ export function SummaryTab({
   const acceptanceMonths = data.acceptance.months.map((month) => rateOf(month.accepted, month.presented))
   const noShowMonths = data.noShow.months.map((month) => rateOf(month.noShow, month.total))
   const percent = (value: number): string => `${value} %`
-  const nothing =
-    data.collected.current === 0 && data.newPatients.current === 0 && data.noShow.current.total === 0 && data.acceptance.current.presented === 0
-
-  if (nothing && data.collected.months.every((value) => value === 0)) {
-    return (
-      <EmptyState
-        title="Todavía no hay movimiento que mostrar"
-        description="Cuando la clínica atienda, cobre y presente presupuestos, aquí verás cómo va el negocio mes a mes."
-      />
-    )
-  }
 
   return (
-    <div className="flex min-w-0 flex-col gap-4">
       <section aria-label="Las seis cifras" className="grid min-w-0 gap-3.5 @xl:grid-cols-2 @4xl:grid-cols-3">
         <SummaryFigure
           title="Cobrado"
@@ -120,7 +165,7 @@ export function SummaryTab({
           change={data.collected.current === 0 && data.collected.previous === 0 ? undefined : relativeChange(data.collected.current, data.collected.previous, phrase, locale)}
           better="up"
           detail={data.collected.others.length > 0 ? `Además, ${data.collected.others.map((item) => formatMoney(item.current, item.currency, locale)).join(" y ")}` : undefined}
-          goal={<GoalLine metric="cobrado" goals={data.goals} currency={currency} locale={locale} onEdit={setGoalMetric} />}
+          goal={<GoalLine metric="cobrado" goals={data.goals} currency={currency} locale={locale} onEdit={onEditGoal} />}
           footer={<FooterLink to="finanzas">Ver en Finanzas</FooterLink>}
         />
         <SummaryFigure
@@ -131,7 +176,7 @@ export function SummaryTab({
           sparkLabel={`Pacientes nuevos ${twelve}: ${travel(data.newPatients.months, String)}`}
           change={data.newPatients.current === 0 && data.newPatients.previous === 0 ? undefined : absoluteChange(data.newPatients.current, data.newPatients.previous, phrase, locale)}
           better="up"
-          goal={<GoalLine metric="pacientes_nuevos" goals={data.goals} currency={currency} locale={locale} onEdit={setGoalMetric} />}
+          goal={<GoalLine metric="pacientes_nuevos" goals={data.goals} currency={currency} locale={locale} onEdit={onEditGoal} />}
           footer={data.newPatients.current > 0 ? <FooterButton onClick={() => onOpenList("new_patients")}>Ver quiénes</FooterButton> : undefined}
         />
         <SummaryFigure
@@ -192,23 +237,6 @@ export function SummaryTab({
           footer={data.overdue.current.people > 0 ? <FooterButton onClick={() => onOpenList("debts_overdue")}>Ver quiénes</FooterButton> : undefined}
         />
       </section>
-
-      <CollectedChart data={data} />
-
-      {/* Dónde se caen los pacientes, al lado de lo que vio el Administrador (tablero 1); si no caben, una debajo de la otra. */}
-      <div className="flex min-w-0 flex-wrap gap-4">
-        <div className="flex min-w-0 flex-[1.5_1_30rem] flex-col *:flex-1">
-          <FunnelCard query={query} onOpenList={onOpenList} />
-        </div>
-        <div className="flex min-w-0 flex-[1_1_22.5rem] flex-col *:flex-1">{advice}</div>
-      </div>
-
-      <Professionals query={query} />
-
-      <PinnedAnswers query={query} argosEnabled={argosEnabled} />
-      <MondayDigestCard />
-      <GoalDrawer metric={goalMetric} goals={data.goals} currency={currency} locale={locale} onClose={() => setGoalMetric(null)} />
-    </div>
   )
 }
 
@@ -267,11 +295,13 @@ function Apart({ value, clinic, worse }: { value: number | null; clinic: number 
 }
 
 function Professionals({ query }: { query: ReportQuery }) {
-  const report = useQuery({ queryKey: reportKey("professionals", query), queryFn: () => fetchReport<ReportProfessionals>("professionals", query), retry: false })
+  const report = useQuery({ queryKey: reportKey("professionals", query), queryFn: () => fetchReport<ReportProfessionals>("professionals", query), placeholderData: keepPreviousData, retry: false })
   if (report.isPending)
     return (
-      <ReportCard title="Por profesional">
-        <LoadingState />
+      <ReportCard title="Por profesional" action={<Skeleton className="h-11 w-28 sm:h-8" />}>
+        <SkeletonRegion message="Cargando por profesional…" className="flex min-w-0 flex-col gap-3">
+          <ProfessionalsBodySkeleton />
+        </SkeletonRegion>
       </ReportCard>
     )
   if (report.isError)
@@ -294,7 +324,7 @@ function Professionals({ query }: { query: ReportQuery }) {
   const legend = `Las flechas marcan lo que se aparta más de ${APART_POINTS} puntos de la clínica${clinicNoShow !== null ? ` (no vinieron ${clinicNoShow} %` : ""}${clinicAcceptance !== null ? `${clinicNoShow !== null ? ", " : " ("}aceptaron ${clinicAcceptance} %` : ""}${clinicBusy !== null ? `${clinicNoShow !== null || clinicAcceptance !== null ? ", " : " ("}ocupado ${clinicBusy} %` : ""}${clinicNoShow !== null || clinicAcceptance !== null || clinicBusy !== null ? ")" : ""}.`
   const amount = (cents: number): string => plainAmount(cents, currency, locale)
   return (
-    <ReportCard title="Por profesional" note={`Ordenado por lo cobrado · ${currency}`} action={<DownloadButton onDownload={() => downloadReportTable("professionals", query)} />}>
+    <ReportCard title="Por profesional" stale={report.isPlaceholderData} note={`Ordenado por lo cobrado · ${currency}`} action={<DownloadButton onDownload={() => downloadReportTable("professionals", query)} />}>
       {/* En teléfono, una fila por profesional: la tabla no cabe sin desbordar. */}
       <ul className="flex min-w-0 flex-col divide-y sm:hidden">
         {rows.map((row) => (

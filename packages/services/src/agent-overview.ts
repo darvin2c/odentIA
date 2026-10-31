@@ -68,7 +68,7 @@ export interface AgentOverview {
   /**
    * `branchesWithHours`: sedes con horario de atención (el de su equipo) y
    * `services`: servicios activos. Sin ellos no puede decir cuándo atiende ni
-   * qué hace la clínica (ADR 0119).
+   * qué hace la clínica (ADR 0120).
    */
   knows: { answers: number; servicesWithPrice: number; services: number; branches: number; branchesWithHours: number }
   /**

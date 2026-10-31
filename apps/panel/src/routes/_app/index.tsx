@@ -1,17 +1,19 @@
 import { Avatar, AvatarFallback, AvatarImage, Button, Input, toast } from "@odentia/ui"
-import { ConfirmDialog, EmptyState, ErrorState, LoadingState, RowActions, type RowActionItem, submitErrorMessage } from "@odentia/ui-patterns"
+import { ConfirmDialog, EmptyState, ErrorState, LoadingState, RowActions, type RowActionItem, submitErrorMessage, SkeletonRegion } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react-router"
-import { ChevronRight, LogOut, Plus, Search, ShieldCheck } from "lucide-react"
+import { ChevronRight, LogOut, Plus, Search } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { accountInvitationsQuery, accountOrganizationsQuery, billingStatusSchema, clinicNoticeSchema, type AccountInvitation, type AccountOrganization } from "../../lib/account-organizations"
 import { adminAccessQuery } from "../../lib/admin-access"
+import { OrganizationsPageSkeleton, OrganizationsSkeleton } from "../../components/skeletons/home"
+import { StaffEntry } from "../../components/staff-entry"
 import { apiFetch } from "../../lib/api"
 import { API_URL, authClient, authFetch } from "../../lib/auth-client"
 import { authError } from "../../lib/auth-error"
 import { storedInvitation } from "../../lib/founders"
-import { adminUrl, domainOf, tenantUrl, webUrl } from "../../lib/host"
+import { domainOf, tenantUrl, webUrl } from "../../lib/host"
 import { panelWords } from "../../lib/brand"
 
 const appRouteApi = getRouteApi("/_app")
@@ -21,6 +23,7 @@ export const Route = createFileRoute("/_app/")({
   validateSearch: (search: Record<string, unknown>) => ({
     ...(String(search.cambiar) === "1" ? { cambiar: 1 as const } : {}),
   }),
+  pendingComponent: OrganizationsPageSkeleton,
   component: OrgsPage,
 })
 
@@ -252,11 +255,11 @@ function OrgsPage() {
         <h1 className="text-xl font-semibold">Elige tu clínica</h1>
         <p className="text-sm text-muted-foreground">Entraste como {session.email}</p>
       </div>
-      {staff.data?.staff && <a href={adminUrl()} className="flex items-center gap-3 rounded-xl border bg-card p-4 hover:bg-muted"><ShieldCheck className="size-5" aria-hidden /><div><p className="font-medium">Administración de odentIA</p><p className="text-sm text-muted-foreground">Organizaciones clientes, cobros y soporte</p></div></a>}
+      <StaffEntry />
       {invitations.isError && <ErrorState title="No se pudieron cargar tus invitaciones" error={invitations.error} onRetry={() => void invitations.refetch()} />}
       {pendientes.length > 0 && <section aria-labelledby="invitations-title" className="space-y-3"><h2 id="invitations-title" className="text-sm font-semibold">Invitaciones pendientes</h2><ul className="space-y-3">{pendientes.map((invitation) => <InvitationItem key={invitation.id} invitation={invitation} onRespond={() => setBloquearAuto(true)} />)}</ul></section>}
       <section aria-label="Clínicas" className="space-y-3">
-        {organizations.isPending ? <LoadingState message="Cargando clínicas…" /> : organizations.isError ? <ErrorState title="No se pudieron cargar tus clínicas" error={organizations.error} onRetry={() => void organizations.refetch()} /> : todas.length === 0 ? (!politicaLista && founderToken === null ? (signUp.isError ? <ErrorState title="No se pudo comprobar cómo crear una clínica" error={signUp.error} onRetry={() => void signUp.refetch()} /> : <LoadingState message="Comprobando cómo crear una clínica…" />) : canCreate ? <EmptyState title="Todavía no perteneces a una clínica" description="Acepta una invitación o crea la cuenta de tu clínica. Si necesitas ayuda, puedes escribir a soporte." /> : <NoInvitation email={session.email} />) : (
+        {organizations.isPending ? <SkeletonRegion message="Cargando clínicas…"><OrganizationsSkeleton /></SkeletonRegion> : organizations.isError ? <ErrorState title="No se pudieron cargar tus clínicas" error={organizations.error} onRetry={() => void organizations.refetch()} /> : todas.length === 0 ? (!politicaLista && founderToken === null ? (signUp.isError ? <ErrorState title="No se pudo comprobar cómo crear una clínica" error={signUp.error} onRetry={() => void signUp.refetch()} /> : <LoadingState message="Comprobando cómo crear una clínica…" />) : canCreate ? <EmptyState title="Todavía no perteneces a una clínica" description="Acepta una invitación o crea la cuenta de tu clínica. Si necesitas ayuda, puedes escribir a soporte." /> : <NoInvitation email={session.email} />) : (
           <>
             {todas.length >= BUSCADOR_DESDE && (
               <div className="relative">

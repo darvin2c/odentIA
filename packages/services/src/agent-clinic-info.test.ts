@@ -125,7 +125,7 @@ describe("lo que sabe Informar", () => {
     expect(centro?.closures[0]?.reason).toBe("Feriado")
   })
 
-  it("lo que toma de tus datos cuenta lo mismo que recibe el agente (ADR 0119)", async () => {
+  it("lo que toma de tus datos cuenta lo mismo que recibe el agente (ADR 0120)", async () => {
     const sources = await run((tx) => getAgentDataSources(tx, ORG))
     const data = await run((tx) => getAgentClinicData(tx, ORG, true))
     expect(sources.hours).toEqual(data.hours)
@@ -318,7 +318,7 @@ describe("búsqueda por significado", () => {
     expect(formatAgentPrice(again.services[0]!.price, ZONE)).toMatch(/550\.00/)
   })
 
-  it("un ejemplo aprobado se encuentra por significado aunque haya cientos más nuevos (ADR 0118)", async () => {
+  it("un ejemplo aprobado se encuentra por significado aunque haya cientos más nuevos (ADR 0119)", async () => {
     const example = (question: string, minutesAgo: number) => ({
       organizationId: ORG,
       kind: "ejemplo" as const,

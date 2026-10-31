@@ -11,10 +11,10 @@ import {
   applySubmitError,
   clearSubmitErrors,
   FormDrawer,
-  LoadingState,
   submitErrorMessage,
   useAppForm,
   useFormSurface,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId } from "react"
@@ -39,6 +39,7 @@ import {
 } from "../../lib/reports-ask"
 import { ArgosShownView } from "../argos/argos-panel"
 import { MoneyInput } from "../finance/collect-drawer"
+import { PinnedGridSkeleton } from "../skeletons/reports"
 import { AnswerChart } from "./ask-argos"
 import { ReportCard } from "./report-parts"
 
@@ -288,7 +289,9 @@ export function PinnedAnswers({ query, argosEnabled }: { query: ReportQuery; arg
         <p className="text-sm text-muted-foreground">Respuestas de {ADMIN_NAME} que alguien fijó. Se vuelven a calcular cada vez que abres el Resumen.</p>
       </div>
       {pins.isPending ? (
-        <LoadingState />
+        <SkeletonRegion message="Cargando las fijadas…">
+          <PinnedGridSkeleton />
+        </SkeletonRegion>
       ) : pins.isError ? (
         <QueryErrorState error={pins.error} onRetry={() => void pins.refetch()} />
       ) : (

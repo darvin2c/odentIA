@@ -1,5 +1,5 @@
 import { Badge, Button } from "@odentia/ui"
-import { EmptyState, LoadingState } from "@odentia/ui-patterns"
+import { EmptyState, SkeletonRegion } from "@odentia/ui-patterns"
 import { CalendarDays } from "lucide-react"
 import { useId } from "react"
 import { type AgendaAppointment, visitName } from "../../lib/agenda"
@@ -11,6 +11,7 @@ import {
 } from "../../lib/patient-appointments"
 import { QueryErrorState } from "../../lib/query-error"
 import { openAppointmentAnywhere, openBookingAnywhere } from "../agenda/schedule-host"
+import { CitasSkeleton } from "../skeletons/person-sections"
 
 function statusVariant(appointment: AgendaAppointment): "success" | "warning" | "outline" | "soft" {
   if (appointment.status === "confirmada" || appointment.status === "atendida") return "success"
@@ -51,7 +52,20 @@ export function CitasPanel({ patientId, patientName, conversationId }: { patient
   // «Nueva cita» al lado: la pestaña Citas sigue a la vista.
   const book = () => openBookingAnywhere({ patient: { id: patientId, name: patientName }, lockedPatient: true, conversationId })
 
-  if (query.isPending) return <LoadingState message="Cargando citas…" />
+  if (query.isPending)
+    return (
+      <SkeletonRegion message="Cargando citas…">
+        <CitasSkeleton
+          action={
+            canWrite ? (
+              <Button size="sm" onClick={book}>
+                Reservar cita
+              </Button>
+            ) : undefined
+          }
+        />
+      </SkeletonRegion>
+    )
   if (query.isError)
     return <QueryErrorState error={query.error} onRetry={() => void query.refetch()} />
 

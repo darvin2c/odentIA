@@ -32,6 +32,7 @@ import { z } from "zod"
 import { ApiError, api } from "../lib/api"
 import { authClient } from "../lib/auth-client"
 import { panelUrl } from "../lib/host"
+import { rememberSeenSession } from "../lib/session"
 import {
   AUTHENTICATOR_STORES,
   backupCodesText,
@@ -125,6 +126,7 @@ function useTouchDevice(): boolean {
 
 async function signOut() {
   await authClient.signOut()
+  rememberSeenSession(null)
   window.location.assign(panelUrl("/login"))
 }
 
@@ -173,14 +175,14 @@ function SecurityPage() {
   const failure = session.error
   if (failure instanceof ApiError && failure.status === 401) {
     window.location.assign(panelUrl(`/login?next=${encodeURIComponent(window.location.href)}`))
-    return <LoadingState message="Redirigiendo al inicio de sesión…" />
+    return <LoadingState kind="indeterminate" message="Redirigiendo al inicio de sesión…" />
   }
   const notStaff =
     failure instanceof ApiError && failure.status === 403 && failure.shape.code === "STAFF_ONLY"
 
   let content: ReactNode
   if (session.isPending) {
-    content = <LoadingState message="Verificando tu sesión…" />
+    content = <LoadingState kind="indeterminate" message="Verificando tu sesión…" />
   } else if (session.isError) {
     content =
       notStaff && invitation ? (

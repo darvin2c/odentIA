@@ -3,18 +3,14 @@ import { useQuery } from "@tanstack/react-query"
 import { Link, useRouterState } from "@tanstack/react-router"
 import type { AgentOverview } from "../lib/agent"
 import { apiFetch } from "../lib/api"
-import { usePermission } from "../lib/crm"
-
-const TABS = [
-  { label: "Resumen", to: "/agent", permission: "read" },
-  { label: "Aprender", to: "/agent/learn", permission: "read" },
-  { label: "Conocimiento", to: "/agent/knowledge", permission: "write" },
-] as const
+import { useCan, usePermission } from "../lib/crm"
+import { agentTabsFor } from "../lib/screen-rules"
 
 /**
  * Secciones del agente como pestañas de página. Son rutas, no paneles de una
  * misma vista: se anuncian como navegación con `aria-current`, y cada pestaña
- * aparece solo con el permiso que su ruta ya exige en el servidor.
+ * aparece solo con el permiso que su ruta ya exige en el servidor
+ * (`agentTabsFor`, la misma regla que su esqueleto).
  *
  * Se dibujan con el mismo control que Pacientes (`tabsTriggerClassName`): la
  * activa es la píldora blanca y lo que espera a una persona va después del
@@ -24,7 +20,7 @@ const TABS = [
  * del mismo resumen que «Necesita de ti» (`/api/agent/overview`, consulta
  * compartida con esa pantalla) y suman el número del menú «Agente». Lo que
  * espera el sí de la persona y los casos que el agente pasó al equipo no están
- * aquí: se ven en la Bandeja y en el panel del agente.
+ * aquí: se ven en la Bandeja y en el panel del agente (ADR 0118).
  *
  * `learnPending`: «Aprender» concilia su lista al cargarla, así que esa pantalla
  * pasa lo que ya muestra y la pestaña no dice otra cosa mientras el resumen se
@@ -33,7 +29,7 @@ const TABS = [
 export function AgentTabs({ learnPending }: { learnPending?: number } = {}) {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const canRead = usePermission("agent.read")
-  const canWrite = usePermission("agent.write")
+  const can = useCan()
   // Sin escucha propia de eventos: se refresca al navegar y cuando una pantalla
   // invalida el resumen tras decidir algo. Sin el permiso de lectura no hay números.
   const overview = useQuery({
@@ -48,8 +44,8 @@ export function AgentTabs({ learnPending }: { learnPending?: number } = {}) {
     ? { "/agent/learn": needs.review + needs.lessons, "/agent/knowledge": needs.gaps }
     : {}
   if (learnPending !== undefined) pending["/agent/learn"] = learnPending
-  const visible = TABS.filter((tab) => (tab.permission === "read" ? canRead : canWrite))
-  if (visible.length < 2) return null
+  const visible = agentTabsFor(can)
+  if (visible.length === 0) return null
   return (
     <ScrollArea horizontal className="-mt-2 min-w-0">
       <nav aria-label="Secciones del agente" className={cn(tabsListVariants(), "h-11 max-w-full justify-start")}>

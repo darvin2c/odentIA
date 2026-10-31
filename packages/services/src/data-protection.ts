@@ -303,7 +303,7 @@ export async function getDataProtectionView(tx: Db, orgId: string): Promise<Data
   }
 }
 
-/** «Registro de actividades de tratamiento»: el PDF de una página para la autoridad (tablero 10). */
+/** «Registro de actividades de tratamiento»: el PDF para la autoridad (tablero 10). */
 export async function renderDataProtectionPdf(
   view: DataProtectionView,
   clinic: DocumentClinic,

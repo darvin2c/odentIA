@@ -32,7 +32,7 @@ export interface KnowledgeRevision {
   createdAt: string
 }
 
-/** Una de «Lo que solo tú sabes» (ADR 0119): lo que no está en ningún dato. */
+/** Una de «Lo que solo tú sabes» (ADR 0120): lo que no está en ningún dato. */
 export interface KnowledgeBasicItem {
   key: string
   question: string

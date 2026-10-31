@@ -8,17 +8,18 @@ import { Button, Label, Select, SelectContent, SelectItem, SelectTrigger, Select
 import {
   DatePickerButton,
   ErrorState,
-  LoadingState,
   submitErrorMessage,
   useAppForm,
   useFormSubmit,
   useFormSubmitError,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { z } from "zod"
 import { api } from "../lib/api"
 import { centsToMajor, majorToCents } from "./billing-fields"
+import { OrgBillingSkeleton } from "./skeletons/organization-detail"
 
 type Kind = "conversacion" | "consulta" | "cita"
 
@@ -153,7 +154,12 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
     },
   })
 
-  if (terms.isPending) return <LoadingState message="Cargando el cobro…" />
+  if (terms.isPending)
+    return (
+      <SkeletonRegion message="Cargando el cobro…">
+        <OrgBillingSkeleton />
+      </SkeletonRegion>
+    )
   if (terms.isError) return <ErrorState title="No se pudo cargar el cobro" onRetry={() => void terms.refetch()} />
   const data = terms.data
   if (!data) return <p className="text-sm text-muted-foreground">Esta clínica no tiene suscripción: no se le cuenta ni se le cobra.</p>

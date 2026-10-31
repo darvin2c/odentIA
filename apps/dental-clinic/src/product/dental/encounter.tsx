@@ -3,7 +3,6 @@ import { conditionLabel, SIGNED_ODONTOGRAM_PURPOSE_LABELS, surfaceLabel } from "
 import { Badge, Button, buttonVariants } from "@odentia/ui"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
-import { OdontogramStudio } from "../../components/dental/odontogram-studio"
 import {
   EncounterPeriodontalBlock,
   PeriodontalCaptureHost,
@@ -12,6 +11,7 @@ import {
 } from "../../components/dental/periodontal/encounter-periodontal"
 import { useOdontogram } from "../../lib/dental/use-odontogram"
 import { dentalExamination } from "./examination"
+import { lazyPart } from "./lazy-part"
 import { ApiError } from "@odentia/clinic-app/lib/api"
 import type { ClosingCheck, ClosingOdontogram } from "@odentia/clinic-app/lib/encounters"
 import { type EncounterDetail, statusLabel } from "@odentia/clinic-app/lib/patients"
@@ -20,6 +20,8 @@ import type {
   ProductEncounterBlocks,
   ProductEncounterUi,
 } from "@odentia/clinic-app/product/product-ui"
+
+const OdontogramStudio = lazyPart(() => import("../../components/dental/odontogram-studio").then((m) => m.OdontogramStudio))
 
 /** Lo dictado de una pieza se revisa en su bloque y entra como al tocarla (issue 109). */
 const NO_FINDINGS = "Sin hallazgos en esta atención"

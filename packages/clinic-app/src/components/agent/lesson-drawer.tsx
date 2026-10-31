@@ -55,7 +55,7 @@ const SECTION_TITLE = "text-xs font-bold tracking-wider text-muted-foreground up
 const LESSON_QUERIES = ["agent-learning", "agent-lesson", "agent-overview", "agent-panel", "agent-knowledge", "agent-knowledge-basics"]
 
 /** Lo que admite `PATCH /api/agent/learning/lessons/:id`, con sus mismas palabras. */
-/** Lo que mide una regla (`RULE_BODY_CHARS`, ADR 0118): va entera en cada mensaje. */
+/** Lo que mide una regla (`RULE_BODY_CHARS`, ADR 0119): va entera en cada mensaje. */
 const RULE_CHARS = 300
 
 const lessonSchema = z
@@ -436,7 +436,7 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
   }
   /** La regla activa con la que choca la que se va a aprobar (decisión 24). */
   const [conflict, setConflict] = useState<{ id: string; body: string } | null>(null)
-  /** Con el tope de reglas lleno (ADR 0118): las activas, y cuál reemplaza la nueva. */
+  /** Con el tope de reglas lleno (ADR 0119): las activas, y cuál reemplaza la nueva. */
   const [full, setFull] = useState<RuleCheck["full"]>(null)
   const [replacing, setReplacing] = useState("")
   const act = useMutation({

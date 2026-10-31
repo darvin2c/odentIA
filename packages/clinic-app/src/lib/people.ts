@@ -2,6 +2,7 @@ import type { ContactScreenView } from "./crm"
 import { useQuery } from "@tanstack/react-query"
 import { apiFetch } from "./api"
 import type { PlanNextStep } from "./budgets"
+import type { PageOf } from "./patient-areas"
 import type { PhoneWhatsApp } from "./phone-whatsapp"
 
 /**
@@ -178,6 +179,23 @@ export interface PersonNote {
 
 export function personQueryKey(personId: string) {
   return ["person", personId] as const
+}
+
+/**
+ * Lo que decide las pestañas y los botones de su página. La lista lo deja en la
+ * caché, así la página que se abre desde ella los muestra desde el primer pintado.
+ */
+export interface PersonShape {
+  pageOf: PageOf
+  archived: boolean
+}
+
+export function personShapeKey(personId: string) {
+  return ["person-shape", personId] as const
+}
+
+export function personShapeOf(person: { kind: PersonKind; archived: boolean; patient: { id: string } | null }): PersonShape {
+  return { pageOf: person.patient ? true : person.kind === "responsable" ? "responsable" : false, archived: person.archived }
 }
 
 export function fetchPerson(personId: string): Promise<{ data: PersonPage }> {

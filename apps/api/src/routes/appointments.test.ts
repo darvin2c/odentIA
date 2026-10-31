@@ -158,7 +158,7 @@ it("recursos: reception lee; member no crea unidad dental ni lee agenda, owner s
     }
   }
   expect(body.data.timeZone).toBe("America/Lima")
-  // El horario de atención de la sede: el mismo que dice el agente, sin escribirse aparte (ADR 0117).
+  // El horario de atención de la sede: el mismo que dice el agente, sin escribirse aparte (ADR 0118).
   const hours = await reception.request(`/agenda/hours?branchId=${branchId}`)
   expect(hours.status).toBe(200)
   expect(((await hours.json()) as { data: { id: string; week: unknown[] } }).data).toMatchObject({ id: branchId, week: expect.any(Array) })

@@ -9,8 +9,9 @@
  * el profesional que informa se toman del contexto clínico al generar el
  * documento, no de la plantilla.
  *
- * Los textos sugeridos son un punto de partida editable: cada organización
- * debe revisarlos con su asesoría antes de publicarlos.
+ * Los textos sugeridos nacen activos para que la clínica no empiece en papel, y
+ * quedan marcados «sin revisar» hasta que alguien de ella los lea: no bloquean,
+ * pero la pantalla dice cuáles faltan.
  */
 
 export interface ConsentSections {
@@ -101,9 +102,15 @@ export interface SuggestedConsentTemplate {
   key: string
   title: string
   sections: ConsentSections
+  /**
+   * Comienzo de la clave, en la biblioteca, de los tratamientos que lo piden.
+   * Sin ellos (la anestesia, las radiografías) no se pide solo: esos actos van
+   * dentro de otros y pedirlo en cada uno solo agregaría firmas.
+   */
+  servicePrefixes?: readonly string[]
 }
 
-/** Plantillas sugeridas por procedimiento: se crean como borrador para revisión. */
+/** Plantillas sugeridas por procedimiento: cada clínica nace con ellas activas. */
 export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = [
   {
     key: "anestesia-local",
@@ -130,6 +137,7 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
   {
     key: "exodoncia",
     title: "Exodoncia simple o quirúrgica",
+    servicePrefixes: ["exodoncia-"],
     sections: {
       procedure:
         "Extracción de la pieza dentaria indicada con anestesia local; puede requerir separar la encía, retirar hueso, dividir la pieza y suturar.",
@@ -151,6 +159,7 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
   {
     key: "endodoncia",
     title: "Tratamiento de conductos (endodoncia)",
+    servicePrefixes: ["endodoncia-", "retratamiento-de-endodoncia-"],
     sections: {
       procedure:
         "Limpieza, conformación y sellado de los conductos radiculares de la pieza indicada, con anestesia local y aislamiento.",
@@ -168,6 +177,7 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
   {
     key: "periodoncia",
     title: "Tratamiento periodontal",
+    servicePrefixes: ["raspado-y-alisado-radicular-", "curetaje-subgingival", "cirugia-periodontal-", "colgajo-con-alisado-radicular-"],
     sections: {
       procedure:
         "Raspado y alisado radicular para retirar sarro y placa bajo la encía, con anestesia local cuando sea necesario.",
@@ -187,6 +197,7 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
   {
     key: "implante",
     title: "Implante dental",
+    servicePrefixes: ["colocacion-de-implante-"],
     sections: {
       procedure:
         "Colocación quirúrgica de un implante en el hueso maxilar para reponer una pieza ausente; requiere período de integración antes de la corona.",
@@ -208,6 +219,7 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
   {
     key: "ortodoncia",
     title: "Tratamiento de ortodoncia",
+    servicePrefixes: ["ortodoncia-integral-", "ortodoncia-limitada-", "ortodoncia-interceptiva-", "aparatologia-"],
     sections: {
       procedure:
         "Colocación de aparatos fijos o removibles para mover las piezas dentarias y corregir la mordida durante el tiempo estimado del tratamiento.",
@@ -225,6 +237,7 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
   {
     key: "blanqueamiento",
     title: "Blanqueamiento dental",
+    servicePrefixes: ["blanqueamiento-"],
     sections: {
       procedure:
         "Aplicación de un agente blanqueador sobre el esmalte en consultorio o con férulas en casa, según indicación.",
@@ -241,6 +254,7 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
   {
     key: "protesis",
     title: "Prótesis dental",
+    servicePrefixes: ["corona-de-", "corona-metal-", "protesis-completa-", "protesis-parcial-", "puente-"],
     sections: {
       procedure:
         "Preparación de piezas, toma de impresiones y adaptación de una prótesis fija o removible para reponer piezas ausentes.",

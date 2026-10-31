@@ -670,18 +670,20 @@ export function createAdminCoreRoute(deps: CoreDeps) {
  * Enlace admin en el panel (`/api/account/admin-access`, lo monta el parent).
  * Sesión actual, sin factor y sin datos globales: solo si la propia cuenta es
  * personal activo. Sin sesión responde `{ staff: false }` (nada que revelar).
+ * `registered` cuenta también a quien se desactivó: es lo que mira la frontera
+ * de factor, y con ella Mi perfil dice que su verificación no se maneja ahí.
  */
 export function createAccountAdminAccessRoute(deps: Pick<CoreDeps, "auth" | "ownerDb">) {
   const app = new Hono()
   app.get("/", async (c) => {
     const session = await deps.auth.api.getSession({ headers: c.req.raw.headers })
-    if (!session) return c.json({ data: { staff: false } }, 200)
+    if (!session) return c.json({ data: { staff: false, registered: false } }, 200)
     const [row] = await deps.ownerDb
       .select({ active: adminStaff.active })
       .from(adminStaff)
       .where(eq(adminStaff.userId, session.user.id))
       .limit(1)
-    return c.json({ data: { staff: row?.active === true } }, 200)
+    return c.json({ data: { staff: row?.active === true, registered: Boolean(row) } }, 200)
   })
   return app
 }

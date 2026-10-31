@@ -181,6 +181,8 @@ export function PersonalDataForm({
         onSubmit={async (answers) => {
           const input = toInput(answers, form.pending)
           if (!sendsSomething(input)) {
+            // Queda dicho que ya respondió, para no volver a pedírselo; si falla, no pasa nada.
+            if (form.missing.length === 0) void submitPersonalData(slug, token, input).catch(() => undefined)
             setNothingToTell(true)
             return
           }

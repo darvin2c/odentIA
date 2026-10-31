@@ -3,7 +3,6 @@ import {
   ConfirmDialog,
   common,
   DataTable,
-  DataTableSkeleton,
   EmptyState,
   ErrorState,
   FilterBar,
@@ -27,7 +26,7 @@ import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
-import { Building2, MapPin, Plus } from "lucide-react"
+import { Building2, MapPin } from "lucide-react"
 import { useCallback, useMemo, useState } from "react"
 import { z } from "zod"
 import {
@@ -44,13 +43,16 @@ import { SearchSelect } from "../../components/settings/search-select"
 import { ChoiceSelect } from "../../components/ui/choice-select"
 import { staffAddressSource } from "../../lib/address-suggestions"
 import { apiFetch } from "../../lib/api"
-import { usePermission } from "../../lib/crm"
+import { usePermission, useCan } from "../../lib/crm"
 import { useClinicalProfile, useOrgProfile } from "../../lib/org"
 import { PageDraftGuard } from "../../lib/page-draft-guard"
 import { countryChoices } from "../../lib/person-data"
 import { appWords } from "../../lib/product-words"
+import { BranchesPageSkeleton, BranchesSkeleton } from "../../components/skeletons/settings"
+import { settingsPrimary } from "../../lib/screen-rules"
 
 export const Route = createFileRoute("/_org/settings/branches")({
+  pendingComponent: BranchesPageSkeleton,
   component: BranchesPage,
 })
 
@@ -182,6 +184,7 @@ function BranchesPage() {
   const estadoFilter = listSearch.get("estado")
   const sort = listSearch.get("sort")
   const hasCriteria = search !== "" || estadoFilter !== undefined
+  const can = useCan()
   const canRead = usePermission("settings.read")
   const canWrite = usePermission("settings.write")
   // Los almacenes de cada sede los lleva quien lleva el inventario (ADR 0067).
@@ -655,11 +658,7 @@ function BranchesPage() {
         <PageHeader
           title="Sedes"
           subtitle={SUBTITLE}
-          primary={
-            canWrite
-              ? { label: "Nueva sede", icon: <Plus aria-hidden />, onClick: () => openBranchForm(null) }
-              : undefined
-          }
+          primary={settingsPrimary("branches", can, () => openBranchForm(null))}
         />
         <FilterBar
           filters={[
@@ -686,7 +685,7 @@ function BranchesPage() {
             onRetry={() => void branchesQuery.refetch()}
           />
         ) : branches === undefined ? (
-          <DataTableSkeleton columnCount={5} rowCount={3} label="Cargando las sedes…" />
+          <BranchesSkeleton />
         ) : filtered.length === 0 ? (
           hasCriteria ? (
             <EmptyState

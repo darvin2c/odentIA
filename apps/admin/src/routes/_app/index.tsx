@@ -1,4 +1,4 @@
-import { EmptyState, ErrorState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
+import { EmptyState, ErrorState, PageHeader, PageShell, SkeletonRegion } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { ArrowRight } from "lucide-react"
@@ -6,9 +6,10 @@ import { useState } from "react"
 import { z } from "zod"
 import { api } from "../../lib/api"
 import { matchesProduct, type ProductChoice, ProductFilter, ProductMark, useOrgProducts } from "../../components/product"
+import { HomePageSkeleton, HomeSkeleton } from "../../components/skeletons/home"
 import { TodayBilling } from "../../components/today-billing"
 
-export const Route = createFileRoute("/_app/")({ component: AdminHome })
+export const Route = createFileRoute("/_app/")({ pendingComponent: HomePageSkeleton, component: AdminHome })
 const overviewSchema = z.object({
   items: z.array(
     z.object({
@@ -61,7 +62,9 @@ function AdminHome() {
       <PageHeader title="Hoy" subtitle="Lo que necesita atención del equipo, en los dos productos." />
       <ProductFilter value={product} onChange={setProduct} />
       {overview.isPending ? (
-        <LoadingState message="Consultando pendientes…" />
+        <SkeletonRegion message="Consultando pendientes…">
+          <HomeSkeleton />
+        </SkeletonRegion>
       ) : overview.isError ? (
         <ErrorState error={overview.error} onRetry={() => void overview.refetch()} />
       ) : pending.length === 0 ? (
@@ -99,7 +102,7 @@ function AdminHome() {
               return (
                 <li key={`${item.kind}-${item.organizationId}`} className="flex flex-wrap items-center gap-3 p-4">
                   <span className="min-w-0 flex-1">
-                    <span className="flex flex-wrap items-center gap-2 font-medium">
+                    <span className="flex flex-wrap items-center gap-2 font-medium [overflow-wrap:anywhere]">
                       {item.organizationName}
                       {products[item.organizationId] ? <ProductMark product={products[item.organizationId]} /> : null}
                     </span>

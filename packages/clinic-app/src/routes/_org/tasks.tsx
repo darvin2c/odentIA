@@ -2,7 +2,6 @@ import { Badge, Button, Spinner, Tabs, TabsList, TabsTrigger } from "@odentia/ui
 import {
   common,
   DataTable,
-  DataTableSkeleton,
   EmptyState,
   ExpandableText,
   ErrorState,
@@ -10,22 +9,25 @@ import {
   PageHeader,
   PageShell,
   RowActions,
+  SkeletonRegion,
   useListSearch,
 } from "@odentia/ui-patterns"
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
-import { Check, Plus } from "lucide-react"
+import { Check } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { HandoffUrgency } from "../../components/agent/handoff-badges"
 import { dueWords, formatDueAt, isOverdue } from "../../components/crm/crm-helpers"
 import { useCompleteTask } from "../../components/crm/resolve-preview"
 import { TaskDrawer } from "../../components/crm/task-drawer"
 import { PersonLink } from "../../components/person-link"
+import { TasksPageSkeleton, TasksSkeleton } from "../../components/skeletons/tasks"
 import { agentCaseRow } from "../../lib/agent"
 import { ADMIN_NAME, useReceptionName, withReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
-import { TASK_AREA_LABEL, type TaskItem, useMemberName, usePermission } from "../../lib/crm"
+import { TASK_AREA_LABEL, type TaskItem, useCan, useMemberName, usePermission } from "../../lib/crm"
+import { tasksFilters, tasksPrimary } from "../../lib/screen-rules"
 import { useOrgEvents } from "../../lib/org-events"
 
 export const Route = createFileRoute("/_org/tasks")({
@@ -34,6 +36,7 @@ export const Route = createFileRoute("/_org/tasks")({
     ...search,
     task: typeof search.task === "string" ? search.task : undefined,
   }),
+  pendingComponent: TasksPageSkeleton,
   component: TasksPage,
 })
 
@@ -69,6 +72,7 @@ function TasksPage() {
   const queryClient = useQueryClient()
   const memberName = useMemberName()
   const receptionName = useReceptionName()
+  const can = useCan()
   const canWrite = usePermission("tasks.write")
   const canAll = usePermission("tasks.all")
   const canReadCrm = usePermission("crm.read")
@@ -268,7 +272,7 @@ function TasksPage() {
       <PageHeader
         title="Tareas"
         subtitle={wholeClinic ? "Las de toda la clínica" : `Las tuyas y las de tu parte del equipo, las deje una persona, ${receptionName} o ${ADMIN_NAME}`}
-        primary={canWrite ? { label: "Nueva tarea", icon: <Plus aria-hidden />, onClick: () => { setEditTaskId(null); setDrawerOpen(true) } } : undefined}
+        primary={tasksPrimary(can, () => { setEditTaskId(null); setDrawerOpen(true) })}
       />
       {actionError || completion.error ? (
         <p role="alert" className="rounded-md border border-destructive/40 p-2 text-sm text-destructive">
@@ -296,11 +300,7 @@ function TasksPage() {
           </TabsList>
         </Tabs>
         <FilterBar
-          filters={
-            canAll
-              ? [{ key: "alcance", label: "Alcance", type: "select", options: [{ value: "clinica", label: "Toda la clínica" }] }]
-              : []
-          }
+          filters={tasksFilters(can)}
           sortOptions={view.api === "hechas" ? [] : [
             { value: "vence", label: "Vence primero" },
             { value: "recientes", label: "Más recientes" },
@@ -310,7 +310,9 @@ function TasksPage() {
         />
       </div>
       {tasksQuery.isLoading && tasks.length === 0 ? (
-        <DataTableSkeleton />
+        <SkeletonRegion message="Cargando tareas…">
+          <TasksSkeleton />
+        </SkeletonRegion>
       ) : tasksQuery.isError && tasks.length === 0 ? (
         <ErrorState error={tasksQuery.error instanceof Error ? tasksQuery.error : String(tasksQuery.error)} onRetry={() => void tasksQuery.refetch()} />
       ) : tasks.length === 0 ? (

@@ -14,6 +14,7 @@ import {
   configureDocumentLogos,
   configurePublicLinks,
   createBranch,
+  ensureClinicConsents,
   ensureClinicSpecialties,
   getAgentConfig,
   getBackofficeOverview,
@@ -384,7 +385,10 @@ export function createApp(deps: AppDeps) {
   app.notFound((c) => c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404))
 
   app.get("/health", async (c) => {
+    const start = performance.now()
     await db.execute(sql`select 1`)
+    // Lo que tarda la base, aparte del viaje: separa el servidor de la distancia hasta él.
+    c.header("Server-Timing", `db;dur=${(performance.now() - start).toFixed(1)}`)
     return c.json({ ok: true })
   })
 
@@ -474,7 +478,6 @@ export function createApp(deps: AppDeps) {
       ownerDb: deps.ownerDb,
       storage: deps.storage,
       webURL: deps.webURL,
-      cookieDomain: deps.cookieDomain,
     }),
   )
   // Oferta de prueba y versión de los documentos, para la pantalla de crear cuenta.
@@ -798,6 +801,8 @@ export function createApp(deps: AppDeps) {
         if (!current) await turnOnNewClinicLines(tx, orgId, userId)
         // Y nace con las especialidades de su país, que puede renombrar (ADR 0039 y 0069).
         if (!current) await ensureClinicSpecialties(tx, orgId)
+        // Y con sus consentimientos activos, para firmar por la web desde el primer día.
+        if (!current) await ensureClinicConsents(tx, orgId, userId)
         await tx.insert(auditEvent).values({
           organizationId: orgId,
           actorUserId: userId,
@@ -1041,7 +1046,7 @@ export function createApp(deps: AppDeps) {
   guarded.route("/clinical-forms", createClinicalFormsRoute(crmDeps))
   guarded.route(
     "/portal",
-    createPortalRoute({ db, webURL: deps.webURL, cookieDomain: deps.cookieDomain }),
+    createPortalRoute({ db, webURL: deps.webURL }),
   )
   guarded.route("/channels/webchat", createWebchatAdminRoute(crmDeps))
   app.route("/api", guarded)

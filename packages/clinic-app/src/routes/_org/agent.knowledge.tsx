@@ -45,11 +45,12 @@ import { AgentTabs } from "../../components/agent-tabs"
 import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
-import { activeOrgLocale } from "../../lib/locale"
 import { PageDraftGuard } from "../../lib/page-draft-guard"
 import { isAmbiguousMutationError } from "../../lib/query-error"
+import { KnowledgePageSkeleton } from "../../components/skeletons/agent"
 
 export const Route = createFileRoute("/_org/agent/knowledge")({
+  pendingComponent: KnowledgePageSkeleton,
   component: AgentKnowledgePage,
 })
 
@@ -420,7 +421,7 @@ function AgentKnowledgePage() {
         subtitle={`Lo que ${receptionName} sabe para atender. Lo de tus datos lo lee en el momento; aquí agregas lo que solo tú sabes.`}
       />
       <AgentTabs />
-      {/* Conocimiento es de recepción (ADR 0119): Clío y Argos no lo usan. */}
+      {/* Conocimiento es de recepción (ADR 0120): Clío y Argos no lo usan. */}
       <p className="-mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
         <Badge variant="soft">Solo {receptionName}</Badge>
         Es lo que usa para responder a pacientes. Clío y Argos no lo usan.
@@ -717,7 +718,7 @@ function AgentKnowledgePage() {
                   </div>
                 </FieldSet>
                 {basicsRun ? (
-                  // Lo que ya está en los datos no se escribe otra vez (ADR 0119).
+                  // Lo que ya está en los datos no se escribe otra vez (ADR 0120).
                   <div className="flex flex-col gap-1 rounded-xl border border-agent-border bg-agent-soft px-3.5 py-3 text-sm text-primary-soft-foreground">
                     <span className="font-semibold">Esto ya lo sabe por tus datos</span>
                     <span>

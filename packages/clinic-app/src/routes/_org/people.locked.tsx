@@ -1,9 +1,10 @@
 import { documentText } from "@odentia/clinical"
-import { EmptyState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
+import { EmptyState, PageHeader, PageShell, SkeletonRegion } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { Lock } from "lucide-react"
 import { LockedRecordsNoAccess } from "../../components/person/locked-record"
+import { LockedRecordsPageSkeleton, LockedRecordsSkeleton } from "../../components/skeletons/people"
 import { formatDate } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { fetchLockedRecords, LOCKED_RECORDS_KEY } from "../../lib/locked-records"
@@ -16,6 +17,7 @@ import { QueryErrorState } from "../../lib/query-error"
  * las listas las muestran.
  */
 export const Route = createFileRoute("/_org/people/locked")({
+  pendingComponent: LockedRecordsPageSkeleton,
   component: LockedRecordsPage,
 })
 
@@ -35,7 +37,9 @@ function LockedRecordsPage() {
       {!canSee ? (
         <LockedRecordsNoAccess />
       ) : query.isPending ? (
-        <LoadingState message="Cargando…" />
+        <SkeletonRegion message="Cargando…">
+          <LockedRecordsSkeleton />
+        </SkeletonRegion>
       ) : query.isError ? (
         <QueryErrorState error={query.error} onRetry={() => void query.refetch()} />
       ) : query.data.length === 0 ? (

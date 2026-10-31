@@ -440,6 +440,12 @@ export function WhatsAppConnection({
             ) : null}
           </Note>
         ) : null}
+        {/* Meta ya no acepta la clave: el botón para volver a conectar es el de abajo, para quien administra. */}
+        {active && pending === "token-dead" && !canWrite ? (
+          <p className="rounded-xl bg-warning-soft px-3.5 py-3 text-sm text-warning">
+            Quien administra la configuración puede volver a conectarlo.
+          </p>
+        ) : null}
         {/* Hecha con el botón: lo que haya quedado pendiente, con «Reintentar», y volver a conectar con él. */}
         {canWrite && byButton && active ? (
           <FacebookSignupPending

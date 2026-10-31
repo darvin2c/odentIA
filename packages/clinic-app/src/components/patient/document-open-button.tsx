@@ -44,12 +44,13 @@ export function DocumentOpenButton({
       type="button"
       size="sm"
       variant="outline"
+      className="max-w-full"
       disabled={!url}
       onClick={() => {
         if (url) window.open(url, "_blank", "noopener")
       }}
     >
-      {signed.isPending ? "Obteniendo documento…" : `Abrir ${label}`}
+      <span className="truncate">{signed.isPending ? "Obteniendo documento…" : `Abrir ${label}`}</span>
     </Button>
   )
 }

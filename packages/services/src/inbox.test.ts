@@ -86,7 +86,7 @@ it("cada conversación trae su estado de atención y su cierre, y las vistas cue
     withOrgContext(appDb, orgId, (tx) => listInboxConversations(tx, orgId, input))
   const { items } = await list()
   const of = (id: string) => items.find((item) => item.id === id)?.attention
-  const base = { pendingContact: 0, handoffPriority: null, unanswered: false, awaitingPatientSince: null, nudgedAt: null, assignedName: null, teamLive: false, topics: [], unreachable: false, othersPhone: null }
+  const base = { pendingContact: 0, handoffPriority: null, unanswered: false, sendFailed: false, awaitingPatientSince: null, nudgedAt: null, assignedName: null, teamLive: false, topics: [], unreachable: false, othersPhone: null }
   expect(of(waiting.id)).toEqual({ ...base, agentAttending: true, unanswered: true })
   expect(of(answered.id)).toEqual({ ...base, agentAttending: true, awaitingPatientSince: outAt.toISOString(), nudgedAt: "2026-10-15T12:00:00.000Z" })
   // Sus dos temas, el urgente primero; sin mensajes no hay mensaje citado.
@@ -142,6 +142,58 @@ it("cada conversación trae su estado de atención y su cierre, y las vistas cue
   await ownerDb.update(agentConfig).set({ enabled: false }).where(eq(agentConfig.organizationId, orgId))
   expect(await ids({ view: "agent" })).toEqual([])
   expect((await list()).items.every((item) => !item.attention.agentAttending)).toBe(true)
+})
+
+it("lo último que no salió pasa a «Por atender» sin contarse dos veces, y sale al enviar con éxito", async () => {
+  const { orgId, thread, proposal } = await seedInbox()
+  const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000)
+  const out = (conversationId: string, status: string, createdAt: Date) =>
+    ownerDb.insert(message).values({ organizationId: orgId, conversationId, direction: "out", senderKind: "agent", body: "Te escribo", status, externalId: status === "sent" ? randomUUID() : null, createdAt })
+  // La respuesta a lo que preguntó no salió.
+  const rejected = await thread("Rechazada")
+  await ownerDb.insert(message).values({ organizationId: orgId, conversationId: rejected.id, direction: "in", senderKind: "contact", body: "Hola", status: "received", createdAt: at(10) })
+  await out(rejected.id, "failed", at(9))
+  // Se le respondió, pero lo siguiente no salió; y una cita esperaba su sí.
+  const afterAnswer = await thread("Falló después")
+  await out(afterAnswer.id, "sent", at(9))
+  await out(afterAnswer.id, "failed", at(8))
+  await proposal(afterAnswer, "reservar_cita")
+  // Lo que no se sabe si salió no cambia de vista: no es un rechazo.
+  const unknown = await thread("No se sabe")
+  await out(unknown.id, "unknown", at(9))
+  // Un fallo viejo con algo aceptado después ya no cuenta.
+  const recovered = await thread("Recuperada")
+  await out(recovered.id, "failed", at(9))
+  await out(recovered.id, "sent", at(8))
+  // Una cerrada con lo último fallido sigue en «Cerradas».
+  const closed = await thread("Cerrada", { status: "closed", closeReason: "manual", closedAt: new Date() })
+  await out(closed.id, "failed", at(9))
+
+  const ids = async (view: "attend" | "agent" | "awaiting_patient" | "closed") =>
+    (await withOrgContext(appDb, orgId, (tx) => listInboxConversations(tx, orgId, { view }))).items.map((item) => item.id).sort()
+  expect(await ids("attend")).toEqual([rejected.id, afterAnswer.id].sort())
+  expect(await ids("agent")).toEqual([unknown.id])
+  expect(await ids("awaiting_patient")).toEqual([recovered.id])
+  expect(await ids("closed")).toEqual([closed.id])
+  // Los totales suman: nadie está en dos pestañas.
+  expect(await withOrgContext(appDb, orgId, (tx) => summarizeInbox(tx, orgId, {}))).toEqual({ open: 4, attend: 2, agent: 1, awaitingPatient: 1, closed: 1, spam: 0 })
+
+  const { items } = await withOrgContext(appDb, orgId, (tx) => listInboxConversations(tx, orgId, {}))
+  const of = (id: string) => items.find((item) => item.id === id)?.attention
+  // El agente sigue encendido: lo que la persona escriba lo atiende.
+  expect(of(rejected.id)).toMatchObject({ sendFailed: true, agentAttending: true, unanswered: true })
+  expect(of(afterAnswer.id)).toMatchObject({ sendFailed: true, agentAttending: true, pendingContact: 1 })
+  expect(of(recovered.id)?.sendFailed).toBe(false)
+  expect(of(unknown.id)?.sendFailed).toBe(false)
+  expect(of(closed.id)?.sendFailed).toBe(false)
+
+  // Un envío aceptado después la saca de «Por atender».
+  await out(rejected.id, "sent", at(1))
+  expect(await ids("attend")).toEqual([afterAnswer.id])
+  expect(await ids("awaiting_patient")).toEqual([rejected.id, recovered.id].sort())
+  // Si la persona vuelve a escribir, la vuelve a atender el agente.
+  await ownerDb.insert(message).values({ organizationId: orgId, conversationId: afterAnswer.id, direction: "in", senderKind: "contact", body: "¿Sigue?", status: "received", createdAt: at(0) })
+  expect(await ids("attend")).toEqual([])
 })
 
 it("las vistas viejas y un estado desconocido no se aceptan", async () => {
@@ -221,6 +273,13 @@ it("una fila por persona: sus canales juntos, en su estado más urgente, y un gr
     [tg.id, "telegram", null, 0],
   ])
   expect(detail.person.unreadCount).toBe(3)
+  expect(detail.person.channels.map((item) => item.connectionActive)).toEqual([true, true])
+  // Apagado en Configuración: su historial sigue en el hilo, pero por ahí ya no se le responde.
+  await ownerDb.update(channelConnection).set({ status: "disabled" }).where(eq(channelConnection.id, telegram.id))
+  const off = await withOrgContext(appDb, orgId, (tx) => getInboxConversationDetail(tx, orgId, wa.id))
+  expect(off.person.channels.map((item) => [item.channel, item.connectionActive])).toEqual([["whatsapp", true], ["telegram", false]])
+  expect(off.messages).toHaveLength(3)
+  await ownerDb.update(channelConnection).set({ status: "active" }).where(eq(channelConnection.id, telegram.id))
   // Un enlace viejo al canal de Telegram abre a la misma persona.
   const fromTelegram = await withOrgContext(appDb, orgId, (tx) => getInboxConversationDetail(tx, orgId, tg.id))
   expect(fromTelegram.conversation.id).toBe(tg.id)
@@ -264,4 +323,24 @@ it("en «Por atender» la fila de la persona muestra la conversación del tema, 
   const row = items.find((item) => item.contact.id === rosa.id)
   expect(row?.id).toBe(withTopic.id)
   expect(row?.attention.topics).toHaveLength(1)
+})
+
+it("buscar encuentra a la persona como el buscador general, y por lo que escribió, en cualquier pestaña", async () => {
+  const { orgId, thread } = await seedInbox()
+  const corona = await thread("Lucía Quispe Huamán")
+  await ownerDb.update(contact).set({ docNumber: "45678912", email: "lucia.q@example.com" }).where(eq(contact.id, corona.contactId))
+  await ownerDb.insert(message).values({ organizationId: orgId, conversationId: corona.id, direction: "in", senderKind: "contact", body: "Se me cayó la corona que me pusieron", status: "received" })
+  const closed = await thread("Jorge Ramos", { status: "closed", closeReason: "manual", closedAt: new Date() })
+  await ownerDb.insert(message).values({ organizationId: orgId, conversationId: closed.id, direction: "in", senderKind: "contact", body: "¿Atienden emergencias el domingo?", status: "received" })
+  const found = async (q: string) =>
+    (await withOrgContext(appDb, orgId, (tx) => listInboxConversations(tx, orgId, { q }))).items.map((item) => item.id).sort()
+  // Sin tildes y por palabras, por documento y por correo: la misma regla que el buscador general.
+  expect(await found("lucia huaman")).toEqual([corona.id])
+  expect(await found("45678912")).toEqual([corona.id])
+  expect(await found("lucia.q@")).toEqual([corona.id])
+  // Por lo que escribió, aunque su conversación esté cerrada: sin vista se busca en toda la Bandeja.
+  expect(await found("corona")).toEqual([corona.id])
+  expect(await found("emergencias domingo")).toEqual([closed.id])
+  // Palabras cortas no traen a todos.
+  expect(await found("se")).toEqual([])
 })

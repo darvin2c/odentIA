@@ -23,9 +23,9 @@ import {
   EmptyState,
   ErrorState,
   FormDrawer,
-  LoadingState,
   useAppForm,
   useFormSurface,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -66,6 +66,7 @@ import {
 } from "./patient-health-fields"
 import { activeOrgLocale } from "../../lib/locale"
 import { productUi, type SubFieldErrors } from "../../product/product-ui"
+import { AntecedentesSkeleton } from "../skeletons/person-sections"
 
 type Rec = Record<string, unknown>
 
@@ -589,7 +590,12 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
     if (Object.keys(serverInterviewErrors).length > 0) setServerInterviewErrors({})
   }
 
-  if (healthQuery.isPending) return <LoadingState />
+  if (healthQuery.isPending)
+    return (
+      <SkeletonRegion message="Cargando antecedentes…">
+        <AntecedentesSkeleton canWrite={canWrite} />
+      </SkeletonRegion>
+    )
   if (healthQuery.isError || !health || !saved) {
     return (
       <ErrorState

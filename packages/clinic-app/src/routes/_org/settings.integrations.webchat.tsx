@@ -7,6 +7,7 @@ import {
   useAppForm,
   useFormSubmit,
   useFormSubmitError,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -19,8 +20,10 @@ import { IntegrationsCrumbWithText } from "../../components/integrations/integra
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
+import { WebchatPageSkeleton, WebchatSkeleton } from "../../components/skeletons/settings"
 
 export const Route = createFileRoute("/_org/settings/integrations/webchat")({
+  pendingComponent: WebchatPageSkeleton,
   component: WebchatSettingsPage,
 })
 
@@ -136,10 +139,9 @@ function WebchatSettingsPage() {
       {query.isError ? (
         <ErrorState title="No pudimos cargar el chat web" message="Revisa tu conexión." retryLabel="Reintentar" onRetry={() => void query.refetch()} />
       ) : !chat ? (
-        <div className="flex flex-col gap-4" aria-busy>
-          <div className="h-24 animate-pulse rounded-xl bg-muted" />
-          <div className="h-40 animate-pulse rounded-xl bg-muted" />
-        </div>
+        <SkeletonRegion message="Cargando el chat web…">
+          <WebchatSkeleton />
+        </SkeletonRegion>
       ) : (
         <div className="flex flex-wrap items-start gap-6">
           <div className="flex min-w-0 flex-[3_1_26rem] flex-col gap-6">

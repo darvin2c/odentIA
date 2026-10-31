@@ -4,7 +4,8 @@
  * controles con «Reservar cita». Nunca diagnósticos, piezas, importes ni notas.
  */
 import { Badge, Button } from "@odentia/ui"
-import { LoadingState } from "@odentia/ui-patterns"
+import { SkeletonRegion } from "@odentia/ui-patterns"
+import { CoordinationRowsSkeleton } from "../../skeletons/person-sections"
 import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 import { planDecisionLabel } from "../../../lib/budgets"
@@ -37,7 +38,12 @@ export function useTreatmentCoordination(patientId: string, enabled: boolean) {
 export function CoordinationTreatments({ patientId }: { patientId: string }): React.JSX.Element {
   const canRead = usePermission("appointments.read")
   const query = useTreatmentCoordination(patientId, canRead)
-  if (query.isPending) return <LoadingState message="Cargando tratamientos…" />
+  if (query.isPending)
+    return (
+      <SkeletonRegion message="Cargando tratamientos…">
+        <CoordinationRowsSkeleton />
+      </SkeletonRegion>
+    )
   if (query.isError) return <QueryErrorState error={query.error} onRetry={() => void query.refetch()} />
   const { treatments } = query.data.data
   if (treatments.length === 0)
@@ -79,7 +85,12 @@ export function CoordinationControls({
       ? (followUps.find((row) => row.id === scheduleFollowUpId) ?? null)
       : null
   const open = scheduling ?? requested
-  if (query.isPending) return <LoadingState message="Cargando controles…" />
+  if (query.isPending)
+    return (
+      <SkeletonRegion message="Cargando controles…">
+        <CoordinationRowsSkeleton />
+      </SkeletonRegion>
+    )
   if (query.isError) return <QueryErrorState error={query.error} onRetry={() => void query.refetch()} />
   return (
     <>

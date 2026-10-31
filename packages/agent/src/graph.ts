@@ -885,7 +885,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
 
   /**
    * Los ejemplos de Recepción parecidos por significado, entre todos los que
-   * tiene (ADR 0118). La frase se vectoriza fuera de la transacción y se espera
+   * tiene (ADR 0119). La frase se vectoriza fuera de la transacción y se espera
    * poco; sin vectorizador, sin ejemplos o si falla, `lessonsForTurn` los busca
    * por palabras.
    */

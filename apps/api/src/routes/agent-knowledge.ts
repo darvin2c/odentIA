@@ -101,7 +101,7 @@ export function createAgentKnowledgeRoute(deps: CrmDeps) {
     return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getKnowledgeBasics(tx, orgId)))
   })
 
-  /** «Lo que toma de tus datos»: lo que el agente lee en el momento, contado (ADR 0119). */
+  /** «Lo que toma de tus datos»: lo que el agente lee en el momento, contado (ADR 0120). */
   app.get("/sources", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "agent.read")) return c.json(errorBody(c, "FORBIDDEN", "Sin acceso al agente"), 403)

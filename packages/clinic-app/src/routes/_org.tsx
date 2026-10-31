@@ -75,6 +75,7 @@ import { ApiError, apiFetch } from "../lib/api"
 import { adminRedirectFor, legalLinks, orgSlugFromHostname, panelUrl, requestHostname, tenantUrl } from "../lib/host"
 import { notifyOrgLocale, setOrgLocale } from "../lib/locale"
 import { fetchOrgProfile, useOrgProfile } from "../lib/org"
+import { type FullOrganization, type OrgRegion, orgChecks, readOrganization, rememberServerChecks } from "../lib/org-access"
 import { productUi } from "../product/product-ui"
 import { appRoleLabel } from "../lib/product-words"
 import { useOrgEvents } from "../lib/org-events"
@@ -83,24 +84,12 @@ import { RouterLink } from "../lib/router-link"
 import { PLAN_PATH } from "../lib/billing"
 
 /**
- * Formato regional de la clínica, conocido antes del primer render para que
- * ninguna fecha se pinte con otro formato. En el navegador se pide una vez por
- * sesión de pantalla (el host es de una sola clínica); después lo mantiene al
- * día la consulta del perfil que observa el layout. Sin perfil: `undefined`,
- * el formato del navegador.
+ * En el navegador el formato regional se pide una vez por sesión de pantalla
+ * (el host es de una sola clínica); después lo mantiene al día la consulta del
+ * perfil que observa el layout.
  */
-interface OrgRegion {
-  locale: string | undefined
-  timeZone: string | undefined
-  country: string | undefined
-  /** El producto de la clínica: si no es el de esta app, se abre en su dominio. */
-  product?: string | undefined
-  /** La clínica pide verificación en dos pasos (ADR 0107): activarla, o el código de esta sesión. */
-  twoFactorRequired?: "activar" | "codigo"
-}
-let orgRegionLoaded: OrgRegion | null = null
 async function loadOrgRegion(): Promise<OrgRegion> {
-  if (typeof window !== "undefined" && orgRegionLoaded) return orgRegionLoaded
+  if (typeof window !== "undefined" && orgChecks.region) return orgChecks.region
   try {
     const profile = await fetchOrgProfile()
     const region = {
@@ -110,7 +99,7 @@ async function loadOrgRegion(): Promise<OrgRegion> {
       product: profile?.product,
     }
     if (typeof window !== "undefined") {
-      orgRegionLoaded = region
+      orgChecks.region = region
       setOrgLocale(region.locale, region.timeZone, region.country)
     }
     return region
@@ -124,17 +113,6 @@ async function loadOrgRegion(): Promise<OrgRegion> {
   }
 }
 
-function readOrganization(slug: string, fetchOptions: ReturnType<typeof ssrFetchOptions>) {
-  return authClient.organization.getFullOrganization({ query: { organizationSlug: slug }, fetchOptions })
-}
-type FullOrganization = NonNullable<Awaited<ReturnType<typeof readOrganization>>["data"]>
-interface OrgAccess {
-  slug: string
-  at: number
-  session: SessionInfo
-  org: FullOrganization
-}
-
 /**
  * Cuánto vale en el navegador lo comprobado al entrar. `beforeLoad` corre en cada
  * navegación, también cuando solo cambia la búsqueda (el día de la Agenda, la
@@ -143,12 +121,11 @@ interface OrgAccess {
  * decide qué pantalla mostrar, y un cambio de rol o del equipo se ve a los 2 minutos.
  */
 const ORG_ACCESS_FRESH_MS = 120_000
-let orgAccessChecked: OrgAccess | null = null
 
 /** Sesión verificada, términos aceptados y la clínica del host, o el redirect que toque. */
 async function checkOrgAccess(location: { href: string }): Promise<{ session: SessionInfo; org: FullOrganization }> {
   const slug = orgSlugFromHostname(requestHostname())
-  const cached = orgAccessChecked
+  const cached = orgChecks.access
   if (typeof window !== "undefined" && cached && cached.slug === slug && Date.now() - cached.at < ORG_ACCESS_FRESH_MS) {
     return cached
   }
@@ -170,7 +147,7 @@ async function checkOrgAccess(location: { href: string }): Promise<{ session: Se
     const { data: orgs } = await authClient.organization.list({ fetchOptions })
     throw redirect({ href: panelUrl(orgs && orgs.length > 0 ? "/?cambiar=1" : "/onboarding") })
   }
-  if (typeof window !== "undefined") orgAccessChecked = { slug, at: Date.now(), session, org: data }
+  if (typeof window !== "undefined") orgChecks.access = { slug, at: Date.now(), session, org: data }
   return { session, org: data }
 }
 
@@ -190,14 +167,15 @@ export const Route = createFileRoute("/_org")({
     const elsewhere =
       region.product && region.product !== productUi().product ? tenantUrl(data.slug, location.href, region.product) : null
     if (elsewhere && new URL(elsewhere).hostname !== requestHostname()) throw redirect({ href: elsewhere })
-    return { session, org: data, region }
+    return { session, org: data, region, checkedAt: Date.now() }
   },
   component: OrgGate,
 })
 
 /** Sin la verificación que pide la clínica, su pantalla en vez de la aplicación. */
 function OrgGate() {
-  const { org, region } = orgRouteApi.useRouteContext()
+  const { org, region, session, checkedAt } = orgRouteApi.useRouteContext()
+  rememberServerChecks({ org, region, session, checkedAt })
   if (region.twoFactorRequired) return <TwoFactorRequiredPage org={org} need={region.twoFactorRequired} />
   return <OrgLayout />
 }
@@ -367,7 +345,7 @@ function OrgLayout() {
   })
   // Contador ligero del menú; la misma consulta alimenta el panel y su botón.
   const agentSummary = useAgentPanelSummary(canAccess(role, "agent.read"))
-  // Cada número donde se resuelve (ADR 0117): el menú cuenta lo que se
+  // Cada número donde se resuelve (ADR 0118): el menú cuenta lo que se
   // resuelve dentro de Agente, la suma de sus pestañas. Los casos que pasó el
   // agente van en el botón «Agente» de la cabecera.
   const toResolve = agentSummary.data?.data.toResolve ?? 0

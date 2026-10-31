@@ -2,7 +2,6 @@ import { documentText } from "@odentia/clinical"
 import { Badge, Button, toast } from "@odentia/ui"
 import {
   ErrorState,
-  LoadingState,
   PageHeader,
   PageShell,
   useAppForm,
@@ -28,6 +27,7 @@ import {
 import { hcLabel } from "../../lib/patients"
 import { QueryErrorState } from "../../lib/query-error"
 import { ChoiceButtons } from "../choice-buttons"
+import { LockedRecordPageSkeleton } from "../skeletons/people"
 
 /** Lo que exige `openLockedRecord`, dicho en su campo: el motivo y, con «Otro», cuál. */
 const openSchema = z
@@ -91,12 +91,7 @@ export function LockedRecordPage({ personId }: { personId: string }) {
   const submitError = useFormSubmitError(form)
   const reason = useStore(form.store, (state) => state.values.reason)
   const submitting = useStore(form.store, (state) => state.isSubmitting)
-  if (query.isPending)
-    return (
-      <PageShell>
-        <LoadingState message="Cargando…" />
-      </PageShell>
-    )
+  if (query.isPending) return <LockedRecordPageSkeleton />
   if (query.isError)
     return (
       <PageShell>

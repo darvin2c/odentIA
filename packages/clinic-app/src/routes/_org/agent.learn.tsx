@@ -1,5 +1,5 @@
 import { Badge, Button, Collapsible, CollapsibleContent, CollapsibleTrigger, cn, useIsMobile } from "@odentia/ui"
-import { AgentSurface, EmptyState, ErrorState, LoadingState, PageHeader, PageShell, RowActions, submitErrorMessage, ViewTabs } from "@odentia/ui-patterns"
+import { AgentSurface, EmptyState, ErrorState, PageHeader, PageShell, RowActions, submitErrorMessage, ViewTabs, SkeletonRegion } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { ChevronRight } from "lucide-react"
@@ -26,11 +26,14 @@ import {
 import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
-import { type AgentConfig, usePermission } from "../../lib/crm"
+import { type AgentConfig, useCan, usePermission } from "../../lib/crm"
+import { canCorrectAgent } from "../../lib/screen-rules"
 import { useOrgEvents } from "../../lib/org-events"
 import { QueryErrorState } from "../../lib/query-error"
+import { LearnPageSkeleton, LearnSkeleton } from "../../components/skeletons/agent"
 
 export const Route = createFileRoute("/_org/agent/learn")({
+  pendingComponent: LearnPageSkeleton,
   component: AgentLearnPage,
 })
 
@@ -138,9 +141,8 @@ function AgentLearnPage() {
   const navigate = useNavigate()
   const isMobile = useIsMobile()
   const canRead = usePermission("agent.read")
-  const canDecide = usePermission("agent.decide")
   const canWrite = usePermission("agent.write")
-  const canCorrect = canDecide || canWrite
+  const canCorrect = canCorrectAgent(useCan())
   const receptionName = useReceptionName()
   const [agent, setAgent] = useState<string | null>(null)
   const [correcting, setCorrecting] = useState<CorrectionTarget | null>(null)
@@ -263,7 +265,9 @@ function AgentLearnPage() {
       <PageHeader title="Agente" subtitle="Revisas lo dudoso y apruebas lo que propone aprender. Lo demás no necesita tu tiempo." />
       <AgentTabs learnPending={data ? data.review.length + data.proposed.length : undefined} />
       {query.isPending ? (
-        <LoadingState message="Cargando lo que hay por revisar…" />
+        <SkeletonRegion message="Cargando lo que hay por revisar…">
+          <LearnSkeleton />
+        </SkeletonRegion>
       ) : query.isError || !data ? (
         <QueryErrorState error={query.error} onRetry={() => void query.refetch()} />
       ) : (

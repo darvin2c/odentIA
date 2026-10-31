@@ -1,4 +1,5 @@
 import { createFileRoute, redirect } from "@tanstack/react-router"
+import { PersonLoading } from "../../components/person/person-loading"
 
 /**
  * La página de contacto ya no existe: la persona tiene una sola página
@@ -6,6 +7,7 @@ import { createFileRoute, redirect } from "@tanstack/react-router"
  * porque hay avisos y enlaces guardados con ella: solo redirige.
  */
 export const Route = createFileRoute("/_org/contacts/$contactId")({
+  pendingComponent: PersonLoading,
   beforeLoad: ({ params, location }) => {
     throw redirect({
       to: "/people/$personId",

@@ -1,0 +1,1 @@
+CREATE INDEX "patient_charge_encounter_procedure_idx" ON "patient_charge" USING btree ("organization_id","encounter_procedure_id") WHERE "encounter_procedure_id" IS NOT NULL;

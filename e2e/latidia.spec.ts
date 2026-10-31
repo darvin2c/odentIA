@@ -183,6 +183,14 @@ test("latidIA: su dominio, su sesión, un consultorio médico con su marca y sus
   await shot("agenda-oscuro")
   await page.evaluate(() => document.documentElement.classList.remove("dark"))
 
+  // Nace con los consentimientos de un consultorio, activos: no los de odentIA.
+  await gotoHydrated(page, latidiaUrl(slug, "/settings/forms"))
+  await expect(page.getByRole("heading", { level: 1, name: "Consentimientos" })).toBeVisible()
+  await expect(page.getByText("Procedimiento menor en consultorio")).toBeVisible()
+  await expect(page.getByRole("switch", { name: /activo$/ })).toHaveCount(3)
+  await expect(page.getByText("Implante dental")).toHaveCount(0)
+  await shot("consentimientos")
+
   // En el dominio de odentIA, con su propia sesión, el consultorio se abre en el suyo.
   await gotoHydrated(page, hostUrl("app", "/login"))
   expect(

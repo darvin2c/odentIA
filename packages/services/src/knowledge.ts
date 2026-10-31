@@ -29,7 +29,7 @@ const ASK_FORM_LIMIT = 20
 const ASK_FORM_CHARS = 120
 
 /**
- * «Lo que solo tú sabes» (ADR 0119): lo que los pacientes preguntan seguido y
+ * «Lo que solo tú sabes» (ADR 0120): lo que los pacientes preguntan seguido y
  * no está en ningún dato del sistema. Es opcional: sin respuesta, el agente
  * dice que lo confirma y pasa la pregunta al equipo. Lo que sí está en los
  * datos (horario, sedes, equipo, servicios, precios, medios de pago, cómo

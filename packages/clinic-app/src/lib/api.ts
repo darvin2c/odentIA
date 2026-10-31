@@ -3,6 +3,7 @@ import { createIsomorphicFn } from "@tanstack/react-start"
 import { getRequestHeaders } from "@tanstack/react-start/server"
 import { API_URL } from "./auth-client"
 import { orgSlugFromHostname, requestHostname } from "./host"
+import { apiTransport } from "./ssr-fetch"
 
 export class ApiError extends Error {
   shape: ApiErrorShape
@@ -39,7 +40,7 @@ function contextHeaders(): Record<string, string> {
 
 /** Fetch a la API con cookies de sesión y slug de tenant del host; errores en forma ApiErrorShape. */
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await apiTransport(`${API_URL}${path}`, {
     ...init,
     credentials: "include",
     headers: {
@@ -96,10 +97,11 @@ export async function apiLines(path: string, init: RequestInit, onLine: (line: u
 }
 
 /** Descarga binaria autenticada (p. ej. un DICOM para el visor). */
-export async function apiFetchBytes(path: string): Promise<ArrayBuffer> {
+export async function apiFetchBytes(path: string, init?: RequestInit): Promise<ArrayBuffer> {
   const response = await fetch(`${API_URL}${path}`, {
+    ...init,
     credentials: "include",
-    headers: contextHeaders(),
+    headers: { ...contextHeaders(), ...init?.headers },
   })
   if (!response.ok) {
     let shape: ApiErrorShape = {}

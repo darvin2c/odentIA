@@ -3,7 +3,7 @@ import { upperFirst } from "./product-words"
 
 /**
  * El horario de atención de una sede: la suma de los horarios de su equipo
- * (`getBranchHours` de los servicios, ADR 0117). Es el mismo que dice el
+ * (`getBranchHours` de los servicios, ADR 0118). Es el mismo que dice el
  * agente; aquí solo se dice en pantalla.
  */
 export interface BranchHours {

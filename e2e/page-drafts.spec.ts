@@ -176,6 +176,32 @@ test("Portal del paciente conserva lo marcado con fallo de guardado y navegació
   await confirmation.getByRole("button", { name: "Descartar y salir" }).click()
   await expect(page).toHaveURL(/\/people\/?$/)
   await expect(page.getByRole("heading", { level: 1, name: "Pacientes" })).toBeVisible()
+  await expect(page.getByText("Sin pacientes todavía")).toBeVisible()
   await page.evaluate(() => window.history.back())
   await expect(documents).toBeChecked({ checked: next })
+})
+
+test("volver mientras carga el destino, tras descartar, lleva de verdad a la pantalla anterior", async ({ createOwner }) => {
+  const { page, org } = await createOwner("page-volver")
+  await gotoHydrated(page, tenant(org.slug, "/settings"))
+  await page.getByRole("link", { name: "Portal del paciente", exact: true }).click()
+  const documents = page.getByRole("checkbox", { name: "Documentos", exact: true })
+  await documents.click()
+  // El código del destino tarda: al volver, la navegación a Pacientes sigue en curso.
+  await page.route(/\/assets\/.*\.js$/, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    await route.continue().catch(() => undefined)
+  })
+  await page.getByRole("link", { name: "Pacientes", exact: true }).click()
+  await page.getByRole("alertdialog").getByRole("button", { name: "Descartar y salir" }).click()
+  await expect(page).toHaveURL(/\/people\/?$/)
+  await page.evaluate(() => window.history.back())
+  await expect(page).toHaveURL(/\/settings\/patient-access/)
+  await expect(page.getByRole("heading", { level: 1, name: "Portal del paciente" })).toBeVisible()
+  await expect(documents).toBeVisible()
+  await expect(page.getByRole("alertdialog")).toHaveCount(0)
+  // Dirección y pantalla siguen de acuerdo: nada volvió a llevarla a Pacientes.
+  await page.waitForTimeout(1_000)
+  await expect(page).toHaveURL(/\/settings\/patient-access/)
+  await expect(documents).toBeVisible()
 })

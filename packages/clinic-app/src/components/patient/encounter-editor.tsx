@@ -1974,7 +1974,7 @@ export function EncounterEditor({
                   </span>
                   <span>
                     {need.status === "sin_publicar"
-                      ? `Esta clínica aún no publicó el consentimiento de «${need.title}»`
+                      ? `Esta clínica aún no activó el consentimiento de «${need.title}»`
                       : `Consentimiento sin firmar: «${need.title}»`}
                     <span className="sr-only">: no impide cerrar; el cierre pide el motivo</span>
                   </span>

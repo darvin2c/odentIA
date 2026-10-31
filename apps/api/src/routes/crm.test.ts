@@ -1175,7 +1175,7 @@ it("«Horario de recontacto», el número del menú y «Lo que el agente debe sa
   expect(saved.status).toBe(200)
   expect(((await saved.json()) as { data: { week: unknown } }).data.week).toEqual(week)
   // Recepción decide por el agente: ve el panel con sus casos, pero el número del menú
-  // (lo que se resuelve dentro de Agente) es solo de quien lo supervisa (ADR 0117).
+  // (lo que se resuelve dentro de Agente) es solo de quien lo supervisa (ADR 0118).
   const panelOf = async (app: typeof owner) =>
     ((await (await app.request("/agent/panel")).json()) as { data: { toResolve: number } }).data
   expect(await panelOf(reception)).toMatchObject({ toResolve: 0 })

@@ -253,7 +253,7 @@ const DENTAL_INVENTORY: DemoKindRecipe["inventory"] = {
 
 /**
  * Lo que Sofi ya tiene respondido en una clínica dental: solo lo que no está en
- * los datos (ADR 0119). El horario sale del equipo de la demo y la salud la
+ * los datos (ADR 0120). El horario sale del equipo de la demo y la salud la
  * atiende un profesional: no se escriben aquí.
  */
 const DENTAL_KNOWLEDGE: DemoKindRecipe["knowledge"] = [

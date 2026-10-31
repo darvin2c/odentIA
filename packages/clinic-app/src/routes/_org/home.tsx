@@ -4,13 +4,13 @@ import {
   DetailDrawer,
   EmptyState,
   ErrorState,
-  LoadingState,
   PageHeader,
   PageShell,
   submitErrorMessage,
   submitForm,
   useAppForm,
   useFormSubmitError,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -29,6 +29,7 @@ import { RegistrationHoldDrawer } from "../../components/home/registration-hold-
 import { AgendaLine, type BranchChoice, CashLine, TodayAgenda, TodayCash, TodayPatients } from "../../components/home/today"
 import { WaitingList } from "../../components/home/waiting-list"
 import { ReportListDrawer } from "../../components/reports/report-list-drawer"
+import { HomePageSkeleton, HomeSkeleton } from "../../components/skeletons/home"
 import { invalidateAppointmentQueries } from "../../lib/agenda"
 import { HomeStart, needsSetup } from "../../components/home-start"
 import { useActiveBranch } from "../../lib/active-branch"
@@ -47,6 +48,7 @@ export const Route = createFileRoute("/_org/home")({
   validateSearch: (search: Record<string, unknown>): { branch?: string } => ({
     ...(typeof search.branch === "string" && search.branch ? { branch: search.branch } : {}),
   }),
+  pendingComponent: HomePageSkeleton,
   component: HomePage,
 })
 
@@ -238,7 +240,9 @@ function HomePage() {
     {query.isError && !data ? (
       <ErrorState title="No pudimos cargar tu jornada" message="Revisa tu conexión." retryLabel="Reintentar" onRetry={() => void query.refetch()} />
     ) : !data || !context ? (
-      <LoadingState />
+      <SkeletonRegion>
+        <HomeSkeleton />
+      </SkeletonRegion>
     ) : !hasWork(data.access) ? (
       <EmptyState title="Aún no tienes nada asignado" description="Pide a la administración los permisos que necesitas para tu trabajo." />
     ) : needsSetup(data) && data.setup ? (

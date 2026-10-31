@@ -1,5 +1,5 @@
 import { Button } from "@odentia/ui"
-import { AgentMark, FormDrawer, LoadingState, useAppForm, useFormSurface } from "@odentia/ui-patterns"
+import { AgentMark, FormDrawer, LoadingState, useAppForm, useFormSurface, SkeletonRegion } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { z } from "zod"
@@ -11,6 +11,7 @@ import type { PersonNote } from "../../lib/people"
 import { QueryErrorState } from "../../lib/query-error"
 import { SummaryCard } from "../patient/resumen-tab"
 import { appWords } from "../../lib/product-words"
+import { NotesListSkeleton } from "../skeletons/person-sections"
 
 interface MemoryFact {
   id: string
@@ -89,7 +90,9 @@ export function PersonNotes({ personId }: { personId: string }) {
       }
     >
       {notes.isPending ? (
-        <LoadingState message="Cargando notas…" />
+        <SkeletonRegion message="Cargando notas…">
+          <NotesListSkeleton />
+        </SkeletonRegion>
       ) : notes.isError && list.length === 0 ? (
         <QueryErrorState error={notes.error} onRetry={() => void notes.refetch()} />
       ) : list.length === 0 ? (

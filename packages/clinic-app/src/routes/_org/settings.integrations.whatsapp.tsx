@@ -1,5 +1,4 @@
-import { Skeleton } from "@odentia/ui"
-import { EmptyState, ErrorState, PageHeader } from "@odentia/ui-patterns"
+import { EmptyState, ErrorState, PageHeader, SkeletonRegion } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { MessageCircle } from "lucide-react"
@@ -11,6 +10,7 @@ import { SettingsNoAccess } from "../../components/settings/no-access"
 import { apiFetch } from "../../lib/api"
 import { type ConnectionItem, usePermission } from "../../lib/crm"
 import { type ConnectResult, whatsappNumbers } from "../../lib/whatsapp"
+import { WhatsAppPageSkeleton, WhatsAppSkeleton } from "../../components/skeletons/settings"
 
 export const Route = createFileRoute("/_org/settings/integrations/whatsapp")({
   // `?mensaje=` abre ese mensaje: «Cambiar el texto» de «Te espera» llega así (ADR 0040).
@@ -19,6 +19,7 @@ export const Route = createFileRoute("/_org/settings/integrations/whatsapp")({
     mensaje: typeof search.mensaje === "string" && search.mensaje ? search.mensaje : undefined,
     ...(typeof search.conectado === "string" && search.conectado ? { conectado: search.conectado } : {}),
   }),
+  pendingComponent: WhatsAppPageSkeleton,
   component: WhatsAppPage,
 })
 
@@ -32,42 +33,6 @@ interface Fresh {
   byButton: boolean
   /** A mano: ya se leyó qué número se encontró. */
   read: boolean
-}
-
-/** La página mientras llega la primera respuesta: el título ya está; debajo, la forma de lo que viene. */
-function WhatsAppSkeleton() {
-  return (
-    <>
-      <p role="status" className="sr-only">
-        Cargando WhatsApp…
-      </p>
-      <div aria-hidden className="flex flex-col gap-4">
-        <div className="elevated flex items-center gap-3.5 rounded-xl border bg-card p-4">
-          <Skeleton className="hidden size-11 shrink-0 rounded-xl sm:block" />
-          <div className="flex min-w-0 flex-1 flex-col gap-2">
-            <Skeleton className="h-4 w-56" />
-            <Skeleton className="h-3.5 w-4/5" />
-          </div>
-          <Skeleton className="h-9 w-28 shrink-0 rounded-full" />
-        </div>
-        <div className="elevated flex flex-col rounded-xl border bg-card">
-          <div className="flex flex-col gap-2 px-4 py-4 sm:px-5">
-            <Skeleton className="h-4 w-28" />
-            <Skeleton className="h-3.5 w-3/5" />
-          </div>
-          {Array.from({ length: 5 }, (_, index) => (
-            <div key={index} className="flex items-center gap-3 border-t px-4 py-3 sm:px-5">
-              <div className="flex min-w-0 flex-1 flex-col gap-2">
-                <Skeleton className="h-4 w-44" />
-                <Skeleton className="h-3.5 w-4/5" />
-              </div>
-              <Skeleton className="h-5 w-24 shrink-0 rounded-md" />
-            </div>
-          ))}
-        </div>
-      </div>
-    </>
-  )
 }
 
 /**
@@ -137,7 +102,9 @@ function WhatsAppPage() {
       <PageHeader title={TITLE} subtitle={<IntegrationsCrumbWithText current={TITLE} text={SUBTITLE} />} />
 
       {listQuery.isPending ? (
-        <WhatsAppSkeleton />
+        <SkeletonRegion message="Cargando WhatsApp…">
+          <WhatsAppSkeleton />
+        </SkeletonRegion>
       ) : listQuery.isError && listQuery.data === undefined ? (
         <ErrorState
           title="No pudimos cargar WhatsApp"

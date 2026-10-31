@@ -816,7 +816,7 @@ export const pgVector = customType<{ data: number[]; driverData: string }>({
 })
 
 /** Qué se puede encontrar por significado. */
-// `ejemplo`: la pregunta de un ejemplo aprobado de un agente (ADR 0118).
+// `ejemplo`: la pregunta de un ejemplo aprobado de un agente (ADR 0119).
 export const SEARCH_ITEM_KINDS = ["servicio", "promocion", "profesional", "respuesta", "ejemplo"] as const
 export type SearchItemKind = (typeof SEARCH_ITEM_KINDS)[number]
 

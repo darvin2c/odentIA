@@ -90,7 +90,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Bandeja",
     parent: null,
     purpose:
-      "Todas las conversaciones con pacientes y contactos, de todos los canales, en un solo lugar, en cuatro pestañas que no se pisan: «Por atender» (lo que Sofi te pasó y lo que espera a una persona del equipo), «Las atiende Sofi», «Esperan al paciente» y «Cerradas». Cada persona sale una vez, aunque escriba por WhatsApp y por Telegram, y al abrirla ves lo que dijo por todos sus canales. Se buscan por nombre o por teléfono. Lo que Sofi no puede responder queda como un tema: lo respondes con «Responder» y ella sigue con lo demás; «Contexto» muestra a la persona, su próxima cita y te deja reservarle una. Ninguna queda abierta: Sofi la cierra con una despedida cuando termina o cuando la persona deja de responder, y cualquier mensaje suyo la vuelve a abrir.",
+      "Todas las conversaciones con pacientes y contactos, de todos los canales, en un solo lugar, en cuatro pestañas que no se pisan: «Por atender» (lo que Sofi te pasó, lo que espera a una persona del equipo y lo que no se pudo enviar), «Las atiende Sofi», «Esperan al paciente» y «Cerradas». Cada persona sale una vez, aunque escriba por WhatsApp y por Telegram, y al abrirla ves lo que dijo por todos sus canales. Se buscan por nombre, teléfono, documento o algo que hayan escrito, en todas las pestañas a la vez. Lo que Sofi no puede responder queda como un tema: lo respondes con «Responder» y ella sigue con lo demás; «Contexto» muestra a la persona, su próxima cita y te deja reservarle una. Ninguna queda abierta: Sofi la cierra con una despedida cuando termina o cuando la persona deja de responder, y cualquier mensaje suyo la vuelve a abrir.",
     terms: [
       "mensajes",
       "chats",
@@ -127,7 +127,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Por qué canal le llega mi respuesta?",
-        a: "Por donde preguntó: si respondes un tema, por el canal de ese tema; si no, por el de la conversación que la lista te muestra, la que más pide o la de su último mensaje. Arriba de donde escribes, «Responder por» dice cada canal y si está abierto, y te deja cambiarlo sin perder lo que escribiste. Si tiene un tema en otro canal, arriba lo dice con «Responder por» ese canal.",
+        a: "Por donde preguntó: si respondes un tema, por el canal de ese tema; si no, por el de la conversación que la lista te muestra, la que más pide o la de su último mensaje. Arriba de donde escribes, «Responder por» dice cada canal por el que se le puede escribir y si está abierto, y te deja cambiarlo sin perder lo que escribiste. Un canal apagado en Configuración no aparece: su historial sigue en el hilo. Si tiene un tema en otro canal, arriba lo dice con «Responder por» ese canal.",
       },
       {
         q: "¿Qué pasa si nadie responde un tema?",
@@ -366,7 +366,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Por qué la atención me dice «Necesita consentimiento»?",
-        a: "Porque registraste o indicaste un servicio para el que tu clínica pide un consentimiento (Configuración › Formularios y consentimientos › «Se pide para»). «Preparar» lo genera lleno. Si la clínica aún no lo publicó, fírmalo en papel; quien configura lo verá en «Te espera».",
+        a: "Porque registraste o indicaste un servicio para el que tu clínica pide un consentimiento (Configuración › Consentimientos › «Se pide para»). «Preparar» lo genera lleno. Si la clínica aún no lo activó, fírmalo en papel; quien configura lo verá en «Te espera».",
       },
       {
         q: "¿Puedo cerrar sin el consentimiento firmado?",
@@ -950,10 +950,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
   {
     id: "formularios",
     path: "/settings/forms",
-    title: "Formularios y consentimientos",
+    title: "Consentimientos",
     parent: SETTINGS,
     purpose:
-      "Las plantillas de consentimientos informados y de cuestionarios que usa tu clínica, con sus versiones, y para qué servicios se pide cada consentimiento.",
+      "Los consentimientos informados de tu clínica: vienen activos con un texto sugerido, y aquí se leen, se cambian sobre la misma hoja, se ve cómo quedan y se elige para qué servicios se pide cada uno. También se crean formularios propios, para preguntas que solo tu clínica hace.",
     terms: [
       "consentimiento informado",
       "anamnesis",
@@ -965,8 +965,16 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     writePermission: "settings.write",
     faqs: [
       {
+        q: "¿Puedo usar un consentimiento sin revisarlo?",
+        a: "Sí: los sugeridos vienen activos para que no empieces en papel. Son textos de partida, así que pide a un profesional de tu clínica que los lea, porque es lo que firma el paciente. Cada uno dice «Sin revisar» hasta que alguien lo marca o guarda un cambio.",
+      },
+      {
+        q: "Si cambio el texto, ¿qué pasa con lo ya firmado?",
+        a: "No cambia: cada consentimiento firmado conserva el texto que se firmó. Los nuevos usan el que guardaste. Apagar uno tampoco toca lo firmado: solo deja de ofrecerse.",
+      },
+      {
         q: "¿Para qué sirve «Se pide para»?",
-        a: "Para que la atención proponga sola el consentimiento: al registrar o indicar uno de esos servicios aparece «Necesita consentimiento · Preparar», lleno con lo de la atención. Vale para la plantilla y todas sus versiones. Si un servicio lo pide y la plantilla aún no está publicada, la atención se firma en papel y te lo recordamos en «Te espera».",
+        a: "Para que la atención proponga sola el consentimiento: al registrar o indicar uno de esos servicios aparece «Necesita consentimiento · Preparar», lleno con lo de la atención. Los sugeridos ya vienen unidos a los servicios de la biblioteca que les corresponden. Los servicios propios se eligen a mano.",
       },
       {
         q: "¿Las alergias que el paciente escribe en el cuestionario llegan a su ficha?",

@@ -69,7 +69,7 @@ import { renderHealthDocumentPdf } from "./health-documents.js"
 import { findOrgCountry, findOrgLocale } from "./locale.js"
 import { openRoute, previewRoute } from "./message-gate.js"
 import { consentStatusOf } from "./message-permission.js"
-import { getPatientMissingData, getPatientRegistrationConfig } from "./patient-registration.js"
+import { clinicAsksHealth, getPatientMissingData, getPatientRegistrationConfig } from "./patient-registration.js"
 import {
   patientOrganizationToday,
   patientPersonId,
@@ -210,12 +210,9 @@ async function healthPendingOf(
   link: ResolvedPersonalLink,
 ): Promise<boolean> {
   if (!link.patientId || !link.decides || link.row.dataSubmittedAt || link.expired) return false
-  const config = await getPatientRegistrationConfig(tx, orgId)
-  if (!HEALTH_KEYS.some((key) => config.fields[key] !== "hidden")) return false
+  if (!(await clinicAsksHealth(tx, orgId))) return false
   return healthNeverRecorded(tx, orgId, link.patientId)
 }
-
-const HEALTH_KEYS = ["allergies", "conditions", "medications"] as const
 
 /** «DNI ••••8912»: el documento abreviado, para que reconozca el suyo sin mostrarlo entero. */
 function shortDocument(docType: string | null, docNumber: string | null): string | null {
@@ -835,7 +832,8 @@ export async function submitPersonalLinkData(
     throw new ServiceError("DATA_ALREADY_SENT", 409, "Tus datos ya están en la clínica.")
   }
   await saveLinkData(tx, orgId, link, patientId, missing ?? [], input, {
-    requireSomething: true,
+    // Si solo quedaba su salud, que es opcional, enviarla en blanco también es responder.
+    requireSomething: Boolean(missing),
     toldWhatsApp: input.acceptsReminders === true && !!input.data.phone?.trim(),
   })
   // «Tus datos» se envían una sola vez: después dice «Recibido».

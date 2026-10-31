@@ -1,12 +1,13 @@
 import { Button, cn } from "@odentia/ui"
-import { LoadingState } from "@odentia/ui-patterns"
+import { SkeletonRegion } from "@odentia/ui-patterns"
 import { Check } from "lucide-react"
 import { useReceptionName } from "../../lib/agent-names"
 import { QueryErrorState } from "../../lib/query-error"
+import { KnowledgeBasicsSkeleton } from "../skeletons/agent"
 import type { KnowledgeBasics as Basics } from "./knowledge-model"
 
 /**
- * «Lo que solo tú sabes» (ADR 0119): lo que los pacientes preguntan seguido y
+ * «Lo que solo tú sabes» (ADR 0120): lo que los pacientes preguntan seguido y
  * no está en ningún dato del sistema. Es opcional, así que no se presenta como
  * algo que falta: cada pregunta dice si ya tiene respuesta, con su marca y no
  * solo con el color. Lo que sí está en los datos va en «Lo que toma de tus datos».
@@ -44,7 +45,9 @@ export function KnowledgeBasics({
         ) : null}
       </div>
       {isPending ? (
-        <LoadingState message="Cargando…" />
+        <SkeletonRegion message="Cargando…">
+          <KnowledgeBasicsSkeleton />
+        </SkeletonRegion>
       ) : error || !basics ? (
         <QueryErrorState error={error} onRetry={onRetry} />
       ) : (

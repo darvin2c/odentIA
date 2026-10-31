@@ -137,7 +137,7 @@ test("bandeja: el estado del agente por conversación, las vistas con su total y
   const card = page.getByRole("article", { name: "Sofi propuso una cita" })
   await expect(card).toContainText("Espera su sí")
   await expect(card).toContainText(/Espera el sí de \S+ en esta conversación\./)
-  // Si dijo que sí por otra vía, se anota aquí (antes, en «Esperan su sí»; ADR 0117).
+  // Si dijo que sí por otra vía, se anota aquí (antes, en «Esperan su sí»; ADR 0118).
   await expect(card.getByRole("button", { name: "Confirmó por teléfono" })).toBeVisible()
   await info.attach("hilo-con-tarjeta", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await proposeAppointment(derived, "Cita el miércoles 4 de noviembre a las 11:00")
@@ -198,7 +198,7 @@ test("bandeja: el estado del agente por conversación, las vistas con su total y
   await derivedRow.click()
   await expect(page.getByRole("region", { name: "Lo que te toca contestar" })).toBeVisible()
   await expect(chip("Por atender 1")).toBeHidden()
-  await expect(page.getByPlaceholder("Buscar por nombre o teléfono")).toHaveCount(0)
+  await expect(page.getByRole("searchbox", { name: /Nombre, teléfono/ })).toHaveCount(0)
   await info.attach("hilo-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await page.getByRole("button", { name: "Volver" }).click()
   await expect(chip("Por atender 1")).toBeVisible()

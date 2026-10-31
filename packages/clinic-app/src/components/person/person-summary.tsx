@@ -1,6 +1,6 @@
 import { formatMoney } from "@odentia/clinical"
 import { Alert, AlertDescription, AlertTitle, Button } from "@odentia/ui"
-import { internationalText } from "@odentia/ui-patterns"
+import { internationalText, SkeletonRegion } from "@odentia/ui-patterns"
 import { type UseQueryResult, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
@@ -46,6 +46,7 @@ import {
 } from "../patient/resumen-clinico"
 import { PatientPendingCard, SummaryCard } from "../patient/resumen-tab"
 import { PersonLink } from "../person-link"
+import { LastVisitLinesSkeleton } from "../skeletons/person-sections"
 import { WriteToPersonDialog } from "../write-to-person"
 import { PersonAgentMemory, PersonNotes } from "./person-notes"
 import { PersonTomographies } from "./person-tomographies"
@@ -232,7 +233,9 @@ export function PersonSummary({
               <QueryErrorState error={summary.error} onRetry={() => void summary.refetch()} />
             ) : (
               <SummaryCard title="Última atención">
-                <p className="text-sm text-muted-foreground">Consultando…</p>
+                <SkeletonRegion message="Consultando…">
+                  <LastVisitLinesSkeleton />
+                </SkeletonRegion>
               </SummaryCard>
             )}
             <UpcomingCard

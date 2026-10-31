@@ -7,7 +7,6 @@ import { Badge, Button, ScrollArea, Spinner } from "@odentia/ui"
 import {
   DataRefreshMarker,
   DataTable,
-  DataTableSkeleton,
   EmptyState,
   ErrorState,
   ExpandableText,
@@ -16,18 +15,20 @@ import {
   PageShell,
   RowActions,
   type RowActionItem,
+  SkeletonRegion,
   useListSearch,
   ViewTabs,
 } from "@odentia/ui-patterns"
 import { type InfiniteData, useInfiniteQuery, useIsFetching, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
-import { ArrowRight, Bot, CalendarClock, Check, Circle, Columns3, GripVertical, List, Plus, Undo2, UserRound, X } from "lucide-react"
+import { ArrowRight, Bot, CalendarClock, Check, Circle, Columns3, GripVertical, List, Undo2, UserRound, X } from "lucide-react"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { type CloseTarget, CloseOpportunityDialog } from "../../components/crm/close-opportunity-dialog"
 import { dueWords, isOverdue, moneyText } from "../../components/crm/crm-helpers"
 import { OpportunityDrawer } from "../../components/crm/opportunity-drawer"
 import { OpportunityPanel } from "../../components/crm/opportunity-panel"
+import { OpportunityCardSkeleton, PIPELINE_FILTERS, PipelineListSkeleton, PipelinePageSkeleton } from "../../components/skeletons/pipeline"
 import { apiFetch } from "../../lib/api"
 import {
   type OpportunityListItem,
@@ -36,8 +37,10 @@ import {
   TASK_AREA_LABEL,
   useMemberName,
   useMyUserId,
+  useCan,
   usePermission,
 } from "../../lib/crm"
+import { pipelinePrimary } from "../../lib/screen-rules"
 import { useOrgEvents } from "../../lib/org-events"
 import { useOrgProfile } from "../../lib/org"
 
@@ -47,6 +50,7 @@ export const Route = createFileRoute("/_org/pipeline")({
     ...search,
     oportunidad: typeof search.oportunidad === "string" ? search.oportunidad : undefined,
   }),
+  pendingComponent: PipelinePageSkeleton,
   component: PipelinePage,
 })
 
@@ -120,6 +124,7 @@ function PipelinePage() {
   const memberName = useMemberName()
   const profile = useOrgProfile()
   const orgLocale = profile.data?.locale
+  const can = useCan()
   const canWrite = usePermission("crm.write")
   const listSearch = useListSearch()
   const q = listSearch.get("q") ?? ""
@@ -296,9 +301,7 @@ function PipelinePage() {
 
   if (pipelinesQuery.isLoading) {
     return (
-      <PageShell>
-        <DataTableSkeleton label="Cargando el tablero…" />
-      </PageShell>
+      <PipelinePageSkeleton primary={pipelinePrimary(can)} />
     )
   }
   if (!pipeline) {
@@ -321,7 +324,7 @@ function PipelinePage() {
       <PageHeader
         title="Oportunidades"
         subtitle={pipelines.length > 1 && summary ? `${pipeline.name} · ${subtitle}` : subtitle}
-        primary={canWrite ? { label: "Nueva oportunidad", icon: <Plus aria-hidden />, onClick: () => setCreateOpen(true) } : undefined}
+        primary={pipelinePrimary(can, () => setCreateOpen(true))}
       />
       <div className="flex items-center gap-2 rounded-xl bg-card p-2">
         <FilterBar
@@ -331,34 +334,7 @@ function PipelinePage() {
             ...(pipelines.length > 1
               ? [{ key: "embudo", label: "Embudo", type: "select" as const, options: pipelines.map((p) => ({ value: p.id, label: p.name })) }]
               : []),
-            {
-              key: "asignado",
-              label: "Quién la lleva",
-              type: "select",
-              options: [
-                { value: "todas", label: "Todas" },
-                { value: "mias", label: "Las mías" },
-                { value: "recepcion", label: "Recepción, sin tomar" },
-              ],
-            },
-            {
-              key: "movio",
-              label: "Quién lo movió",
-              type: "select",
-              options: [
-                { value: "todas", label: "Todas" },
-                { value: "agente", label: "Movidas por el agente" },
-              ],
-            },
-            {
-              key: "tarea",
-              label: "Tarea",
-              type: "select",
-              options: [
-                { value: "todas", label: "Todas" },
-                { value: "vencida", label: "Con la tarea vencida" },
-              ],
-            },
+            ...PIPELINE_FILTERS,
           ]}
           sortOptions={[]}
           searchPlaceholder="Buscar por persona o interés…" searchLabel="Buscar en oportunidades"
@@ -702,14 +678,11 @@ function StageLoader({
         )}
         {cardsQuery.isFetching && !cardsQuery.isLoading && !cardsQuery.isFetchingNextPage ? <DataRefreshMarker /> : null}
         {cardsQuery.isLoading && cards.length === 0 ? (
-          <div aria-label="Cargando oportunidades" className="flex flex-col gap-3">
+          <SkeletonRegion message="Cargando oportunidades" className="flex flex-col gap-3">
             {[0, 1, 2].map((row) => (
-              <div key={row} className="h-32 rounded-xl bg-background/70 p-4 motion-safe:animate-pulse">
-                <div className="h-3 w-3/4 rounded bg-muted" />
-                <div className="mt-3 h-2.5 w-1/2 rounded bg-muted" />
-              </div>
+              <OpportunityCardSkeleton key={row} />
             ))}
-          </div>
+          </SkeletonRegion>
         ) : cardsQuery.isError && cards.length === 0 ? (
           <div role="alert" className="rounded-xl bg-background p-4 text-sm">
             <p>No se pudo cargar este paso.</p>
@@ -1034,7 +1007,13 @@ function PipelineListView({
     [stages, memberName, actions, orgLocale],
   )
   const table = useReactTable({ data: rows, columns, getCoreRowModel: getCoreRowModel() })
-  if (listQuery.isLoading && rows.length === 0) return <DataTableSkeleton />
+  if (listQuery.isLoading && rows.length === 0) {
+    return (
+      <SkeletonRegion message="Cargando oportunidades">
+        <PipelineListSkeleton />
+      </SkeletonRegion>
+    )
+  }
   if (listQuery.isError && rows.length === 0) {
     return <ErrorState error={listQuery.error instanceof Error ? listQuery.error : String(listQuery.error)} onRetry={() => void listQuery.refetch()} />
   }

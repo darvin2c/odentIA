@@ -78,6 +78,8 @@ export interface ConversationAttention {
    * no lo entregue, la fila no dice «Espera respuesta».
    */
   unanswered?: boolean
+  /** El último mensaje del hilo no salió: pide a una persona aunque el agente la atienda. */
+  sendFailed?: boolean
 }
 
 /** Motivos de cierre (`conversation.close_reason`). */
@@ -291,6 +293,8 @@ export interface PersonChannel {
   status: string
   /** WhatsApp, Instagram y Messenger: si escribió en las últimas 24 horas. Nulo en los demás. */
   replyWindow: "open" | "closed" | null
+  /** Si su conexión está activa: por una apagada en Configuración no sale nada. */
+  connectionActive: boolean
   /** Temas sin resolver en ese canal. */
   topics: number
   lastMessageAt: string | null
@@ -641,6 +645,8 @@ export interface ConnectionItem {
      * servidor: no llegan ni salen mensajes hasta volver a conectar. Ausente en respuestas antiguas.
      */
     metaRemoved?: { at: string; why: string } | null
+    /** Meta ya no acepta la clave: no salen mensajes hasta volver a conectar. Ausente en respuestas antiguas. */
+    tokenDead?: boolean
   } | null
   /** Solo en WhatsApp con la app propia de la clínica: lo que odentIA hizo en Meta y sabe de sus claves. */
   ownApp?: OwnAppState | null

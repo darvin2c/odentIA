@@ -187,8 +187,29 @@
     {
       "idx": 26,
       "version": "7",
-      "when": 1793462363484,
-      "tag": "0026_ejemplos_en_el_indice",
+      "when": 1793456547916,
+      "tag": "0026_indice_cobro_por_procedimiento",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1793462851176,
+      "tag": "0027_consentimiento_revisado",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1793462852541,
+      "tag": "0028_consentimientos_activos",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1793468202182,
+      "tag": "0029_ejemplos_en_el_indice",
       "breakpoints": true
     }
   ]

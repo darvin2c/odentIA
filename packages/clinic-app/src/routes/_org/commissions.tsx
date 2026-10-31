@@ -4,7 +4,8 @@
  * en el enlace (`?year=&month=`), así el aviso de pago lleva al mes pagado; sin
  * él se muestra el mes en curso de la clínica.
  */
-import { EmptyState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
+import { Skeleton } from "@odentia/ui"
+import { EmptyState, PageHeader, PageShell, SkeletonRegion } from "@odentia/ui-patterns"
 import { createFileRoute, Navigate, useNavigate } from "@tanstack/react-router"
 import { Settings } from "lucide-react"
 import {
@@ -12,10 +13,13 @@ import {
   MonthPicker,
   MyCommissionsPanel,
 } from "../../components/finance/CommissionsPanel"
+import { CommissionsMonthSkeleton, MyCommissionsSkeleton } from "../../components/skeletons/commissions"
+import { CommissionsPageSkeleton } from "../../components/skeletons/finance"
 import { compareMonths, currentMonthIn, FIRST_YEAR, type YearMonth } from "../../lib/commissions"
-import { useMyUserId, useOrgMembers, usePermission } from "../../lib/crm"
+import { useCan, useMyUserId, useOrgMembers, usePermission } from "../../lib/crm"
 import { useOrgFinanceProfile } from "../../lib/finance-collect"
 import { QueryErrorState } from "../../lib/query-error"
+import { COMMISSIONS_ADMIN_SUBTITLE, commissionsHeading } from "../../lib/screen-rules"
 
 interface CommissionsSearch {
   year?: number
@@ -43,10 +47,9 @@ export const Route = createFileRoute("/_org/commissions")({
         : {}),
     }
   },
+  pendingComponent: CommissionsPageSkeleton,
   component: CommissionsPage,
 })
-
-const ADMIN_SUBTITLE = "Lo que le corresponde a cada profesional por lo que atendió y ya se cobró"
 
 /**
  * Comisiones es una sección de Finanzas: quien ve Finanzas llega ahí con el
@@ -64,7 +67,7 @@ function CommissionsPage() {
 
 function OwnCommissionsPage() {
   const allowed = usePermission("commissions.read")
-  const canWrite = usePermission("commissions.write")
+  const can = useCan()
   const canSettings = usePermission("settings.write")
   const myUserId = useMyUserId()
   const members = useOrgMembers()
@@ -73,14 +76,13 @@ function OwnCommissionsPage() {
   const goTo = useNavigate()
   const profile = useOrgFinanceProfile()
 
-  const title = canWrite ? "Comisiones" : "Mis comisiones"
   const myName = members.find((member) => member.userId === myUserId)?.user.name
-  const subtitle = canWrite ? ADMIN_SUBTITLE : myName
+  const { canWrite, title, subtitle } = commissionsHeading(can, myName)
 
   if (!allowed) {
     return (
       <PageShell className="flex flex-col gap-6">
-        <PageHeader title="Comisiones" subtitle={ADMIN_SUBTITLE} />
+        <PageHeader title="Comisiones" subtitle={COMMISSIONS_ADMIN_SUBTITLE} />
         <EmptyState
           title="Sin acceso a comisiones"
           description="Tu rol no tiene permiso para ver comisiones. Pide el acceso a la administración de la clínica."
@@ -91,8 +93,18 @@ function OwnCommissionsPage() {
   if (profile.isPending) {
     return (
       <PageShell className="flex flex-col gap-6">
-        <PageHeader title={title} subtitle={subtitle} />
-        <LoadingState />
+        <PageHeader
+          title={title}
+          subtitle={
+            <>
+              {subtitle ? <p className="min-w-0">{subtitle}</p> : null}
+              <Skeleton className="h-9 w-40 rounded-full" />
+            </>
+          }
+        />
+        <SkeletonRegion message="Cargando comisiones…">
+          {canWrite ? <CommissionsMonthSkeleton /> : <MyCommissionsSkeleton />}
+        </SkeletonRegion>
       </PageShell>
     )
   }

@@ -383,6 +383,15 @@ describe("la conexión, en palabras", () => {
     expect(connectionPending(connection({ signup }))).toBeNull()
   })
 
+  it("si Meta ya no acepta la clave no dice «Conectado»: pide volver a conectar, antes que cualquier paso", () => {
+    const signup = { grantedAt: minutesAgo(60), subscribedAt: minutesAgo(60), registeredAt: minutesAgo(60), pending: [] }
+    const dead = connection({ lastInboundAt: minutesAgo(30), health: { quality: "alta", dailyLimit: 1000 }, signup: { ...signup, tokenDead: true } })
+    expect(connectionPending(dead)).toBe("token-dead")
+    expect(connectionWords(dead, since, "token-dead")).toMatchObject({ tone: "pending", status: "Hay que volver a conectarlo.", facts: [] })
+    expect(connectionPending(connection({ signup: { ...signup, pending: [{ step: "suscribir", title: "Falta…", problem: null }], tokenDead: true } }))).toBe("token-dead")
+    expect(connectionPending(connection({ signup: { ...signup, tokenDead: false } }))).toBeNull()
+  })
+
   it("la cuenta que encontró WhatsApp se dice con lo que entregue", () => {
     expect(accountWords({ number: "+51 999 111 222", name: "Clínica Dental Smile" })).toBe("+51 999 111 222 · Clínica Dental Smile")
     expect(accountWords({ number: null, name: "Clínica Dental Smile" })).toBe("Clínica Dental Smile")

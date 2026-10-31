@@ -8,7 +8,7 @@
  * resto de Plan y pagos, dentro de la clínica (ADR 0065).
  */
 import { Badge, Button, Tabs, TabsList, TabsTrigger } from "@odentia/ui"
-import { DataTable, EmptyState, ErrorState, LoadingState, PageHeader, RowActions } from "@odentia/ui-patterns"
+import { DataTable, EmptyState, ErrorState, PageHeader, RowActions } from "@odentia/ui-patterns"
 import { seesBilling } from "@odentia/auth/permissions"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link } from "@tanstack/react-router"
@@ -25,8 +25,10 @@ import { apiFetch } from "../../lib/api"
 import { PLAN_PATH, useClinicLine } from "../../lib/billing"
 import { useMyRole } from "../../lib/crm"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
+import { PlanActionsPageSkeleton, PlanActionsSkeleton } from "../../components/skeletons/settings"
 
 export const Route = createFileRoute("/_org/settings/plan/acciones")({
+  pendingComponent: PlanActionsPageSkeleton,
   component: ActionsGate,
 })
 
@@ -348,7 +350,7 @@ function ActionsPage() {
         </Tabs>
       </div>
       {actions.isPending ? (
-        <LoadingState message="Cargando las acciones…" />
+        <PlanActionsSkeleton />
       ) : actions.isError ? (
         <ErrorState title="No se pudieron cargar las acciones" message="Reintenta en un momento." onRetry={() => void actions.refetch()} />
       ) : total === 0 ? (

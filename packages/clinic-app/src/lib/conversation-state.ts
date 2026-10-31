@@ -41,8 +41,8 @@ function since(iso: string): string {
 
 /**
  * La palabra de la fila y de la cabecera del hilo (ADR 0050). Orden: cerrada;
- * su tema más urgente (de quién es: nadie, tú u otra persona); sin responder y
- * sin el agente; espera al paciente; la atiende el agente. Sin `attention`
+ * su tema más urgente (de quién es: nadie, tú u otra persona); lo último que no
+ * salió; sin responder y sin el agente; espera al paciente; la atiende el agente. Sin `attention`
  * (respuesta antigua en caché) una abierta no dice nada. El color sigue la
  * regla de la Bandeja: ámbar lo que pide a una persona, rojo solo «Ahora»,
  * turquesa lo que hace el agente y gris lo demás.
@@ -70,6 +70,8 @@ export function conversationWords(input: {
       tone: attention.handoffPriority === "alta" ? "urgent" : "team",
     }
   }
+  // Como en «Por atender»: va antes que esperar al paciente o que la atienda el agente.
+  if (attention.sendFailed) return { text: "No se pudo enviar", tone: "team" }
   // Solo si el agente la atiende tiene sentido decir que espera.
   if (attention.teamLive && attention.agentAttending) return { text: `Conversa alguien del equipo · ${agent} espera`, tone: "team" }
   // Mismo orden que las pestañas del servidor: esperar al paciente va antes que «Por responder».

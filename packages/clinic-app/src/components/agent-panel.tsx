@@ -357,7 +357,7 @@ function useCanSeePanel(): boolean {
 /**
  * Botón «Agente» de la cabecera: abre el panel desde cualquier página. Lleva
  * el número de los casos que el agente pasó a quien mira (lo que nadie tomó
- * más lo suyo): se toman en este panel (ADR 0117), como en «Te espera».
+ * más lo suyo): se toman en este panel (ADR 0118), como en «Te espera».
  */
 export function AgentPanelButton() {
   const canSee = useCanSeePanel()

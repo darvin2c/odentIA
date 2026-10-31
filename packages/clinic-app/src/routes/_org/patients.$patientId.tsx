@@ -1,8 +1,9 @@
 import { canAccess } from "@odentia/auth/permissions"
-import { ErrorState, LoadingState, PageShell } from "@odentia/ui-patterns"
+import { ErrorState, PageShell } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Outlet, redirect, useChildMatches, useNavigate } from "@tanstack/react-router"
 import { useEffect } from "react"
+import { PatientRoutePending, PersonLoading } from "../../components/person/person-loading"
 import { usePermission } from "../../lib/crm"
 import { fetchPersonOfPatient, personIdOfPatient, personOfPatientKey } from "../../lib/people"
 import { QueryErrorState } from "../../lib/query-error"
@@ -26,6 +27,7 @@ export const Route = createFileRoute("/_org/patients/$patientId")({
     const personId = await personIdOfPatient(params.patientId).catch(() => null)
     if (personId) throw redirect({ to: "/people/$personId", params: { personId }, search: search as never, replace: true })
   },
+  pendingComponent: PatientRoutePending,
   component: PatientRoute,
 })
 
@@ -74,9 +76,5 @@ function PatientToPerson() {
         />
       </PageShell>
     )
-  return (
-    <PageShell>
-      <LoadingState message="Abriendo su página…" />
-    </PageShell>
-  )
+  return <PersonLoading />
 }

@@ -35,6 +35,7 @@ import { invalidField, isUniqueViolation, issueFields, ServiceError } from "./er
 // ---------------------------------------------------------------------------
 
 import { initialOrgRegion } from "./organization-profile.js"
+import { ensureClinicConsents } from "./clinical-forms.js"
 import { ensureClinicSpecialties } from "./specialties.js"
 import type { OrganizationBillingSummary } from "./saas-billing.js"
 
@@ -818,6 +819,8 @@ export async function createAssistedOrganization(
   })
   // La clínica nace con las especialidades de su país (ADR 0039 y 0069).
   await ensureClinicSpecialties(tx, organizationId)
+  // Y con sus consentimientos activos; los crea odentIA, no alguien de la clínica.
+  await ensureClinicConsents(tx, organizationId, null)
   if (loaders.startTrial) {
     await loaders.startTrial(tx, organizationId, {
       planCode: input.planCode,

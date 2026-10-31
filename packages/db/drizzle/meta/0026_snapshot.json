@@ -1,5 +1,5 @@
 {
-  "id": "fbfef6d5-29af-4826-89ca-3cab5b5be96f",
+  "id": "377c020f-7edd-4aaa-9921-55bc440dbf23",
   "prevId": "93ac8f34-df90-4108-83d2-99cf19ac67c9",
   "version": "7",
   "dialect": "postgresql",
@@ -6412,7 +6412,7 @@
       "checkConstraints": {
         "agent_search_item_kind_check": {
           "name": "agent_search_item_kind_check",
-          "value": "\"agent_search_item\".\"kind\" in ('servicio','promocion','profesional','respuesta','ejemplo')"
+          "value": "\"agent_search_item\".\"kind\" in ('servicio','promocion','profesional','respuesta')"
         }
       },
       "isRLSEnabled": false
@@ -15580,6 +15580,28 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "patient_charge_encounter_procedure_idx": {
+          "name": "patient_charge_encounter_procedure_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "encounter_procedure_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"encounter_procedure_id\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}

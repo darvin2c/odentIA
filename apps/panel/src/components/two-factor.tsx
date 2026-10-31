@@ -5,7 +5,6 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
   Input,
-  Skeleton,
   toast,
 } from "@odentia/ui"
 import {
@@ -31,6 +30,7 @@ import { authClient } from "../lib/auth-client"
 import { type AuthErrorRoute, authError, authFormMessage } from "../lib/auth-error"
 import { panelWords } from "../lib/brand"
 import { totpQrDataUrl } from "../lib/totp"
+import { TwoFactorSkeleton } from "./skeletons/profile"
 
 /**
  * Verificación en dos pasos de la persona (ADR 0107): solo app autenticadora.
@@ -98,7 +98,7 @@ export function TwoFactorRow() {
     },
     onError: (error) => toast.error(submitErrorMessage(error)),
   })
-  if (status.isPending) return <Skeleton className="h-16 w-full" />
+  if (status.isPending) return <TwoFactorSkeleton />
   if (status.isError) return <p className="text-sm text-muted-foreground">No pudimos cargar tu verificación en dos pasos.</p>
   const value = status.data
   const badge = (

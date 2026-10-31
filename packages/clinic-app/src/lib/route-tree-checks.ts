@@ -89,7 +89,7 @@ export const MOVED_SCREENS: Readonly<Record<string, string>> = {
   "/settings/mail": "/settings/integrations",
   "/settings/webchat": "/settings/integrations/webchat",
   "/settings/agent": "/settings/integrations",
-  // Lo que el agente propuso se ve en la Bandeja (ADR 0117).
+  // Lo que el agente propuso se ve en la Bandeja (ADR 0118).
   "/agent/approvals": "/inbox",
   "/agent/pendientes": "/inbox",
   // Una persona, una página (ADR 0029): Contactos y la ficha redirigen a la persona.

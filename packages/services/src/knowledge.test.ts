@@ -257,7 +257,7 @@ describe("bloque de conocimiento del prompt", () => {
   })
 })
 
-it("lo que solo tú sabes cuenta lo cubierto por respuestas vigentes; lo que está en los datos no se pregunta (ADR 0119)", async () => {
+it("lo que solo tú sabes cuenta lo cubierto por respuestas vigentes; lo que está en los datos no se pregunta (ADR 0120)", async () => {
   const before = await run((tx) => getKnowledgeBasics(tx, ORG))
   expect(before.total).toBe(KNOWLEDGE_BASICS.length)
   expect(before.total).toBe(8)

@@ -58,7 +58,7 @@ const PHONE_CONFIRMABLE = new Set(["reservar_cita", "reprogramar_cita", "cancela
  * Lo que cambia algo que el equipo o la persona van a usar. El hilo nunca aprueba
  * nada: con una cita que espera, «Registrar confirmación» deja constancia del sí
  * que la persona ya dio en el chat, y «Confirmó por teléfono», del que dio por
- * otra vía (ADR 0117: aquí vive lo que antes estaba en «Esperan su sí»). Las dos
+ * otra vía (ADR 0118: aquí vive lo que antes estaba en «Esperan su sí»). Las dos
  * reservan con la misma operación que el agente.
  */
 export function AgentActionCard({

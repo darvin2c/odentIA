@@ -24,7 +24,7 @@ import {
   fieldErrorMessages,
   FilterBar,
   FormDrawer,
-  LoadingState,
+  SkeletonRegion,
   PageHeader,
   SubmitButton,
   setSubmitErrors,
@@ -33,12 +33,13 @@ import {
   useFormSubmitError,
   useFormSurface,
   useListSearch,
+  useDraftBlocker,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute, useBlocker, useNavigate } from "@tanstack/react-router"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
-import { Library, Plus } from "lucide-react"
+import { Library } from "lucide-react"
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { productUi } from "../../product/product-ui"
@@ -47,7 +48,8 @@ import { ChoiceSelect } from "../../components/ui/choice-select"
 import { RadioChips } from "../../components/ui/radio-chips"
 import { useReceptionName } from "../../lib/agent-names"
 import { ApiError } from "../../lib/api"
-import { usePermission } from "../../lib/crm"
+import { useCan, usePermission } from "../../lib/crm"
+import { libraryHeading, libraryPrimary } from "../../lib/screen-rules"
 import { useClinicalProfile, useOrgProfile } from "../../lib/org"
 import {
   BILLING_MODE_LABELS,
@@ -66,8 +68,10 @@ import {
   type TreatmentTemplateItem,
 } from "../../lib/services"
 import { useClinicSpecialties } from "../../lib/clinical-forms"
+import { LibraryBodySkeleton, LibraryPageSkeleton, LibraryRowsSkeleton } from "../../components/skeletons/services"
 
 export const Route = createFileRoute("/_org/services/biblioteca")({
+  pendingComponent: LibraryPageSkeleton,
   component: AddServicesPage,
 })
 
@@ -269,7 +273,8 @@ function checkName(raw: string): string | null {
  */
 function AddServicesPage() {
   const receptionName = useReceptionName()
-  const canIncorporate = usePermission("settings.write")
+  const can = useCan()
+  const { canIncorporate, title, subtitle } = libraryHeading(can)
   const canViewLibrary =
     canIncorporate ||
     usePermission("catalog.read") ||
@@ -725,11 +730,6 @@ function AddServicesPage() {
     listSearch.setParam("cursor", previous || undefined)
   }
 
-  const title = canIncorporate ? "Agregar servicios" : "Biblioteca de procedimientos"
-  const subtitle = canIncorporate
-    ? "Elige de la biblioteca o crea los tuyos, y pon el precio aquí mismo. Lo que guardes queda activo."
-    : "Lo que la clínica puede agregar a sus servicios. Los agrega quien administra la clínica."
-
   if (!canViewLibrary) {
     return (
       <div className="flex flex-col gap-4">
@@ -780,7 +780,9 @@ function AddServicesPage() {
     )
 
   const body = !regional ? null : activeQuery.isPending || (syncing && rows.length === 0) ? (
-    <LoadingState />
+    <SkeletonRegion message="Cargando la biblioteca…">
+      <LibraryRowsSkeleton canIncorporate={canIncorporate} />
+    </SkeletonRegion>
   ) : activeQuery.isError ? (
     <ErrorState
       error={activeQuery.error instanceof ApiError ? activeQuery.error.shape : null}
@@ -833,10 +835,12 @@ function AddServicesPage() {
       <PageHeader
         title={title}
         subtitle={subtitle}
-        primary={canIncorporate && regional ? { label: "Crear un servicio propio", icon: <Plus aria-hidden />, onClick: openOwn } : undefined}
+        primary={regional ? libraryPrimary(can, openOwn) : profileQuery.isPending ? libraryPrimary(can) : undefined}
       />
       {profileQuery.isPending ? (
-        <LoadingState />
+        <SkeletonRegion message="Cargando la biblioteca…" className="flex min-w-0 flex-col gap-4">
+          <LibraryBodySkeleton canIncorporate={canIncorporate} />
+        </SkeletonRegion>
       ) : profileQuery.isError ? (
         <ErrorState
           message="No se pudo cargar la moneda de la clínica"
@@ -1268,10 +1272,9 @@ function OwnServiceDrawer({
  * filtrar o paginar cambian la URL de esta misma pantalla y no cuentan como salir.
  */
 function LeaveGuard({ dirty }: { dirty: boolean }) {
-  const blocker = useBlocker({
+  const blocker = useDraftBlocker({
     disabled: !dirty,
     enableBeforeUnload: () => dirty,
-    withResolver: true,
     shouldBlockFn: ({ current, next }) => current.pathname !== next.pathname,
   })
   return (

@@ -26,6 +26,7 @@ import {
   submitErrorMessage,
   useAppForm,
   useFormSurface,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
@@ -74,6 +75,7 @@ import {
 import { BudgetResponse } from "./budget-response"
 import { BudgetReviewDrawer } from "./budget-review"
 import { BudgetSendButton } from "./budget-send"
+import { BudgetListSkeleton } from "../../skeletons/person-sections"
 
 /** Lo que ya no es vigente: se ve en «Anteriores». */
 const PAST = ["cancelado", "sustituido"]
@@ -165,7 +167,12 @@ export function PlanBudgets({
     onError: (err) => setPrepareError(submitErrorMessage(err)),
   })
 
-  if (budgetsQuery.isPending) return <LoadingState message="Cargando presupuestos…" />
+  if (budgetsQuery.isPending)
+    return (
+      <SkeletonRegion message="Cargando presupuestos…">
+        <BudgetListSkeleton />
+      </SkeletonRegion>
+    )
   if (budgetsQuery.isError)
     return (
       <ErrorState

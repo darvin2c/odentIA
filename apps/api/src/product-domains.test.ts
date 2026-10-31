@@ -4,6 +4,7 @@ import type { Mailer } from "@odentia/mail"
 import type { Storage } from "@odentia/services"
 import { describe, expect, it } from "vitest"
 import { createApp } from "./app.js"
+import { portalOrigin } from "./lib/portal-origin.js"
 
 /**
  * Una instalación para los dos dominios (decisión 9 del issue 229): la sesión
@@ -64,4 +65,16 @@ describe("los dos dominios en la API", () => {
     expect(await allowed("https://evil.test")).toBe(false)
     expect(await allowed("https://latidia.test.evil.test")).toBe(false)
   })
+})
+
+it("el enlace y la llave del portal van en el dominio del producto de la clínica", () => {
+  // `app` fija los dominios al crearse: sin eso, una clínica de latidIA abriría en odentIA.
+  expect(app).toBeDefined()
+  const config = { webURL: "https://app.odentia.test" }
+  expect(portalOrigin(config, { slug: "sanmartin", product: "medical" })).toBe(
+    "https://sanmartin.latidia.test",
+  )
+  expect(portalOrigin(config, { slug: "sonrisa", product: "dental" })).toBe(
+    "https://sonrisa.odentia.test",
+  )
 })
