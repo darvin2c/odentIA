@@ -916,7 +916,7 @@ it("conexiones: la lista dice cómo está cada una; el alta a mano, la clave y l
     webhookVerifiedAt: null,
     health: null,
     // Los cinco con el botón de «Su enlace» no se piden sin la dirección pública de la clínica.
-    messages: { aprobados: 0, enRevision: 12, rechazados: 0, pausados: 0, retirados: 0, sinPedir: 5 },
+    messages: { aprobados: 0, enRevision: 13, rechazados: 0, pausados: 0, retirados: 0, sinPedir: 5 },
   })
   expect(typeof wa?.["lastInboundAt"]).toBe("string")
   expect((await reception.request("/channels/connections")).status).toBe(403)
@@ -971,6 +971,7 @@ it("mensajes de WhatsApp: ver es de quien abre Configuración; comprobar, cambia
     ["recordatorio_cita", "agente"],
     ["recordatorio_cita_datos", "agente"],
     ["recordatorio_cita_confirmada", "agente"],
+    ["cita_sin_llegar", "agente"],
     ["aviso_cita_reservada", "agente"],
     ["aviso_cita_reservada_datos", "agente"],
     ["aviso_cita_movida", "agente"],
@@ -1026,7 +1027,7 @@ it("mensajes de WhatsApp: ver es de quien abre Configuración; comprobar, cambia
   const removed = await send(app, "DELETE", `${base}/${own.id}`)
   expect(removed.status).toBe(200)
   expect(await removed.json()).toEqual({ data: { ok: true } })
-  expect(((await (await app.request(base)).json()) as { data: unknown[] }).data).toHaveLength(17)
+  expect(((await (await app.request(base)).json()) as { data: unknown[] }).data).toHaveLength(18)
 })
 
 it("bandeja, pasadas las 24 horas: lo dice antes de escribir y ofrece el mensaje aprobado", async () => {

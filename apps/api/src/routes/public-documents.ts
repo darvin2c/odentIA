@@ -10,7 +10,7 @@ const MAX_PER_WINDOW = 60
 const MAX_BUCKETS = 10_000
 
 /**
- * Comprobar un documento con su QR, sin cuenta (ADR 0112). Ruta terminal: solo responde
+ * Comprobar un documento con su QR, sin cuenta (ADR 0115). Ruta terminal: solo responde
  * si sigue vigente y los datos del papel que no dicen nada de salud (`DocumentCheck`).
  * Un token inválido o de un documento que no está es el mismo 404: no se distingue por
  * qué. El padre monta en `/api/public/documents`.

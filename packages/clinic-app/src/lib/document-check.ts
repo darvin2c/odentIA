@@ -2,7 +2,7 @@ import { API_URL } from "./auth-client"
 
 export type DocumentCheckState = "vigente" | "anulado" | "revocado" | "vencido"
 
-/** Lo que la API dice de un papel con su QR (ADR 0112): su estado y lo mínimo para cotejarlo. */
+/** Lo que la API dice de un papel con su QR (ADR 0115): su estado y lo mínimo para cotejarlo. */
 export interface DocumentCheck {
   state: DocumentCheckState
   label: string

@@ -19,7 +19,7 @@ export const Route = createFileRoute("/comprobar/$token")({
 })
 
 /**
- * Comprobar un papel con su QR (ADR 0112), sin cuenta: lo abre quien lo tiene en
+ * Comprobar un papel con su QR (ADR 0115), sin cuenta: lo abre quien lo tiene en
  * la mano. Un código inválido y un documento que no está dicen lo mismo.
  */
 function CheckDocumentPage() {

@@ -22,7 +22,7 @@ export const Route = createFileRoute("/_org/patients/$patientId/odontogram/$asse
  * Hoja de un odontograma firmado (solo en clínicas de Perú, NTS 188; ADR 0036)
  * para imprimir y entregar: la clínica, la persona, el momento y su instantánea
  * en el gráfico de la norma, en negro (5.17), con la firma electrónica de quien
- * lo firmó y el QR para comprobarlo (ADR 0112).
+ * lo firmó y el QR para comprobarlo (ADR 0115).
  */
 function SignedOdontogramPrintPage() {
   const { patientId, assessmentId } = Route.useParams()

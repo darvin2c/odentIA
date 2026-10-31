@@ -1,5 +1,5 @@
 /**
- * El kit único de los papeles del paciente (ADR 0112): receta, orden, descanso,
+ * El kit único de los papeles del paciente (ADR 0115): receta, orden, descanso,
  * consentimiento, presupuesto, ticket, devolución, historia y registro de
  * actividades salen de aquí, con el mismo membrete, pie, tablas y firma.
  *

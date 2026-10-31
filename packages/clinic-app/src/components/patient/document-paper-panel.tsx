@@ -86,7 +86,7 @@ export interface DocumentPaperPanelProps {
 }
 
 /**
- * Ver un papel (ADR 0112): el PDF, que es la única hoja, con «Enviar» como acción
+ * Ver un papel (ADR 0115): el PDF, que es la única hoja, con «Enviar» como acción
  * principal, «Descargar PDF», «Imprimir» y «…». Se abre al lado. En el teléfono
  * un PDF dentro de la página no es de fiar: las acciones quedan fijas al pie y
  * «Abrir PDF» lo abre aparte.

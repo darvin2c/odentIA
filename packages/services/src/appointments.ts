@@ -1460,7 +1460,9 @@ export async function setAppointmentStatus(
       const at = new Date()
       if (!(await countRecoveredAppointment(tx, orgId, id, at))) await countAgendaUpgrade(tx, orgId, id, at)
     }
-    await cancelPendingForAppointment(tx, orgId, id, `cita ${next}`)
+    // Confirmar no deja a la persona sin el aviso de poco antes: «Te esperamos» sale
+    // igual, ya sin «Confirmar» (ADR 0113). Lo demás termina la cita y sus avisos.
+    if (next !== "confirmada") await cancelPendingForAppointment(tx, orgId, id, `cita ${next}`)
     await invalidateAppointmentTokens(tx, orgId, id)
     const notice =
       next === "cancelada" && detail?.notice !== false && !current.isTest

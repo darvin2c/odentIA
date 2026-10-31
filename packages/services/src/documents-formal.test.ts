@@ -1,5 +1,5 @@
 /**
- * Los documentos del paciente (ADR 0112): el QR público no dice nada de salud, lo
+ * Los documentos del paciente (ADR 0115): el QR público no dice nada de salud, lo
  * clínico del presupuesto sale solo a quien corresponde, y lo entregado queda congelado.
  */
 import { randomUUID } from "node:crypto"

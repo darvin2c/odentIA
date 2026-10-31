@@ -1,5 +1,5 @@
 /**
- * La hoja del presupuesto (ADR 0112): lo que encontramos, lo que le proponemos, cómo
+ * La hoja del presupuesto (ADR 0115): lo que encontramos, lo que le proponemos, cómo
  * se haría, lo que debe saber antes de decidir y su decisión. Una opción, o la tabla
  * comparativa de dos o tres; en odentIA por etapas, en latidIA sin ellas. El flujo pasa
  * de página con su encabezado corto: nunca se corta un contenido por ajustarlo.

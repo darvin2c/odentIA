@@ -75,7 +75,7 @@ export function SheetLetterhead({ establishment }: { establishment: PrintEstabli
 
 /**
  * «Firmado electrónicamente» con los datos congelados y el QR para comprobarlo
- * (ADR 0112): la misma firma de los PDF, sin línea para firmar a mano. Sin
+ * (ADR 0115): la misma firma de los PDF, sin línea para firmar a mano. Sin
  * dirección pública el papel sale sin QR y no promete nada.
  */
 export function SheetSignature({

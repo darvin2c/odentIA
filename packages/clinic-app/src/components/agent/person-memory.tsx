@@ -12,10 +12,10 @@ import {
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Lock, Plus, X } from "lucide-react"
-import { useEffect, useId, useRef, useState } from "react"
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react"
 import { z } from "zod"
-import { apiFetch } from "../../lib/api"
 import { useReceptionName } from "../../lib/agent-names"
+import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { QueryErrorState } from "../../lib/query-error"
 
@@ -126,12 +126,13 @@ export function PersonMemoryDrawer({
     setEditing(null)
   }, [contactId])
   // biome-ignore lint/correctness/useExhaustiveDependencies: se ejecuta cuando el campo se cierra.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (editing === null && refocusAdd.current) {
       refocusAdd.current = false
-      // Tras el repintado: el cajón modal, al ver desaparecer el botón que tenía
-      // el foco, se lo lleva a sí mismo en el cuadro siguiente; esto va después.
-      requestAnimationFrame(() => addButton.current?.focus())
+      // En el mismo commit que quita el campo: el cajón modal, al perder el foco
+      // al body, lo toma para sí en una microtarea (y otra vez en el cuadro
+      // siguiente); con el foco ya en el botón no lo hace. Un rAF perdía esa carrera.
+      addButton.current?.focus()
     }
   }, [editing])
 

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { accessLinkTemplate, type Mailer, type MailBrand, passwordChangedTemplate } from "@odentia/mail"
+import { accessLinkTemplate, type MailBrand, type Mailer, passwordChangedTemplate } from "@odentia/mail"
 import type { BetterAuthPlugin } from "better-auth"
 import { APIError, createAuthEndpoint, sessionMiddleware } from "better-auth/api"
 import { setSessionCookie } from "better-auth/cookies"
@@ -182,15 +182,21 @@ export const accessLink = (options: AccessLinkOptions) => {
           const url = new URL(`${ctx.context.baseURL}/access-link/verify`)
           url.searchParams.set("token", token)
           const firstName = (user as { firstName?: string }).firstName || user.name.split(" ")[0]
-          await options.mailer.send({
-            to: user.email,
-            ...accessLinkTemplate({
-              firstName,
-              url: url.toString(),
-              expiresText: expiresText(expiresAt, ctx.body.timeZone),
-              brand: options.brand,
-            }),
-          })
+          // El envío no se espera: con cuenta o sin ella se responde igual y a la vez, también
+          // si el correo falla (un 500 solo con cuenta la delataría). La falla queda en el registro.
+          ctx.context.runInBackground(
+            options.mailer
+              .send({
+                to: user.email,
+                ...accessLinkTemplate({
+                  firstName,
+                  url: url.toString(),
+                  expiresText: expiresText(expiresAt, ctx.body.timeZone),
+                  brand: options.brand,
+                }),
+              })
+              .catch((error: unknown) => ctx.context.logger.error("No se pudo enviar el enlace de acceso", error)),
+          )
           return ctx.json({ status: true })
         },
       ),

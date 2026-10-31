@@ -33,7 +33,7 @@ import { appointment, appointmentBookingLink, scheduleRoom } from "@odentia/db/s
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { and, asc, avg, count, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, or, type SQL, sql, sum } from "drizzle-orm"
 import { type TopicKind, topicIsUrgent, topicKindOf, topicUrgentAt } from "./topic-urgency.js"
-import { listAvailableSlots, validateAvailability, zonedTimeToUtc } from "./availability.js"
+import { listAvailableSlots, selfBookingNotBefore, validateAvailability, zonedTimeToUtc } from "./availability.js"
 import { professionalRef, resolveProfessionalRef } from "./agent-clinic-info.js"
 import {
   createAppointment,
@@ -1146,8 +1146,8 @@ export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): 
     from: from.toISOString(),
     to: to.toISOString(),
     ...(durationMin === undefined ? {} : { durationMin }),
-    // El agente nunca ofrece una hora que ya pasó.
-    notBefore: new Date().toISOString(),
+    // El agente nunca ofrece una hora que ya pasó ni una a la que no alcanza a llegar.
+    notBefore: selfBookingNotBefore(),
     perProfessionalPerDay: GAPS_PER_PROFESSIONAL_PER_DAY,
     ...(input.forTest ? { forTest: true } : {}),
   })

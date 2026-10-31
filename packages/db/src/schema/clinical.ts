@@ -1354,7 +1354,7 @@ export const treatmentPlan = pgTable(
  * actual; el contenido cotizado vive en `treatment_budget_item` (snapshot),
  * no en un join mutable a la oferta vigente. Un solo borrador por persona
  * (salvo el de una revisión): crece con cada atención (decisión 12). */
-/** Lo que se congela al entregar un presupuesto (ADR 0112). */
+/** Lo que se congela al entregar un presupuesto (ADR 0115). */
 export interface BudgetDeliveredSnapshot {
   terms: { payment: string | null; change: string | null }
   paymentMethods: string[]

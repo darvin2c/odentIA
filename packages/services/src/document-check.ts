@@ -1,5 +1,5 @@
 /**
- * Comprobar un documento con su QR, sin cuenta (ADR 0112): quien lo tiene en la mano
+ * Comprobar un documento con su QR, sin cuenta (ADR 0115): quien lo tiene en la mano
  * ve si sigue vigente. El token es firmado y no se guarda: lleva la clínica, el tipo
  * y el id, y se recalcula con la clave del servidor.
  *

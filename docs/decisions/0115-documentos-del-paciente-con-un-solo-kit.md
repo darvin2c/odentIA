@@ -1,4 +1,4 @@
-# 0112 · Los documentos del paciente: un solo kit, firma al emitir, QR y explicación por servicio
+# 0115 · Los documentos del paciente: un solo kit, firma al emitir, QR y explicación por servicio
 
 Fecha: 2026-10-30. Estado: aceptada.
 

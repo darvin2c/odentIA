@@ -16,7 +16,7 @@ import { addAgentCaseNote } from "./agent-case.js"
 import { createProposal, expireBookingProposals } from "./agent-operations.js"
 import { appointmentCalendarDownload } from "./appointment-calendar.js"
 import { createAppointment } from "./appointments.js"
-import { listAvailableSlots } from "./availability.js"
+import { listAvailableSlots, selfBookingNotBefore } from "./availability.js"
 import { branchAddressColumns, branchAddressWriter, branchDirectionsWriter } from "./branches.js"
 import { branchNotFound, invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry, findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
@@ -892,7 +892,7 @@ export async function listWeekSlots(
   if (to.getTime() - from.getTime() > SLOT_RANGE_DAYS * 86_400_000)
     throw validation(`El rango máximo es de ${SLOT_RANGE_DAYS} días`)
   // El paso de las horas lo decide la Agenda (`bookingStepMin`): el mismo que ofrece el agente.
-  const notBefore = new Date().toISOString()
+  const notBefore = selfBookingNotBefore()
   // Día por día: la Agenda recorta cada consulta a un tope de huecos, y con
   // varios profesionales una semana entera dejaría sin horarios los últimos días.
   const slots: BookingLinkSlot[] = []
@@ -1064,7 +1064,7 @@ export async function listBookingLinkProfessionals(
     ...(rules.durationMin ? { durationMin: rules.durationMin } : {}),
     from: now.toISOString(),
     to: until.toISOString(),
-    notBefore: now.toISOString(),
+    notBefore: selfBookingNotBefore(now),
     firstPerProfessional: true,
     ...(rules.forTest ? { forTest: true } : {}),
   })
