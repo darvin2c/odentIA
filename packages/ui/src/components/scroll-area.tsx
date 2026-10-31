@@ -23,13 +23,19 @@ function ScrollArea({
   return (
     <ScrollAreaPrimitive.Root
       data-slot="scroll-area"
-      className={cn("relative", className)}
+      // Desviación del registry: sin recortar la raíz, lo ancho que se desliza
+      // ensanchaba la página entera en el teléfono (576 px en uno de 375). El
+      // anillo de foco va por dentro para que el recorte no lo oculte.
+      className={cn("relative", horizontal && "overflow-hidden", className)}
       {...props}
     >
       <ScrollAreaPrimitive.Viewport
         ref={viewportRef}
         data-slot="scroll-area-viewport"
-        className="size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1"
+        className={cn(
+          "size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1",
+          horizontal && "focus-visible:ring-inset",
+        )}
       >
         {children}
       </ScrollAreaPrimitive.Viewport>

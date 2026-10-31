@@ -112,6 +112,14 @@ const reserveBody = z.strictObject({
       data: linkData,
       privacyAccepted: z.boolean().optional(),
       acceptsPromotions: z.boolean().optional(),
+      // Su nombre, si el de su ficha no es el suyo; con documento guardado, el documento entero.
+      name: z
+        .strictObject({
+          givenNames: shortText(100).min(1),
+          familyName: shortText(200).min(1),
+          docNumber: shortText(20).optional(),
+        })
+        .optional(),
     })
     .optional(),
 })

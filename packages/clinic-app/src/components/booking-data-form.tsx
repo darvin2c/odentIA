@@ -1067,14 +1067,49 @@ export interface YouDraft {
   phoneIncomplete: boolean
   /** Novedades y promociones: null mientras no responda. */
   promotions: boolean | null
+  /** Dijo que no a novedades antes y ahora marca la casilla que se le ofrece. */
+  promotionsOptIn: boolean
   privacy: boolean
+  /** Corrige su nombre («Corregir»); con documento en su ficha, se le pide entero. */
+  renaming: boolean
+  renameWithDocument: boolean
+  renameGivenNames: string
+  renameFamilyName: string
+  renameDocNumber: string
 }
 
 function emptyYouDraft(): YouDraft {
-  return { givenNames: "", familyName: "", docType: "", docNumber: "", docCountry: "", birthDate: "", sex: "", email: "", phone: null, phoneIncomplete: false, promotions: null, privacy: false }
+  return {
+    givenNames: "",
+    familyName: "",
+    docType: "",
+    docNumber: "",
+    docCountry: "",
+    birthDate: "",
+    sex: "",
+    email: "",
+    phone: null,
+    phoneIncomplete: false,
+    promotions: null,
+    promotionsOptIn: false,
+    privacy: false,
+    renaming: false,
+    renameWithDocument: false,
+    renameGivenNames: "",
+    renameFamilyName: "",
+    renameDocNumber: "",
+  }
 }
 
-type YouKey = Exclude<YouField, "document"> | "docNumber" | "docCountry" | "promotions" | "privacy"
+type YouKey =
+  | Exclude<YouField, "document">
+  | "docNumber"
+  | "docCountry"
+  | "promotions"
+  | "privacy"
+  | "renameGivenNames"
+  | "renameFamilyName"
+  | "renameDocNumber"
 export type YouErrors = Partial<Record<YouKey, string>>
 const youId = (key: string) => `reserva-tu-${key}`
 /** Los datos de la persona en el formulario de quien ya es paciente: con el mismo nombre. */
@@ -1093,11 +1128,16 @@ const YOU_PERSON = {
 export function checkYou(
   draft: YouDraft,
   fields: readonly YouField[],
-  pending: { privacy: boolean; promotions: boolean } | null,
+  pending: PersonalLinkView["pending"],
   profile: ClinicalCountryProfile,
 ): YouErrors {
   const errors: YouErrors = {}
   const asks = (field: YouField) => fields.includes(field)
+  if (draft.renaming) {
+    if (!draft.renameGivenNames.trim()) errors.renameGivenNames = "Escribe tus nombres"
+    if (!draft.renameFamilyName.trim()) errors.renameFamilyName = "Escribe tus apellidos"
+    if (draft.renameWithDocument && !draft.renameDocNumber.trim()) errors.renameDocNumber = "Escribe tu documento completo"
+  }
   if (asks("givenNames") && !draft.givenNames.trim()) errors.givenNames = "Escribe tus nombres"
   if (asks("familyName") && !draft.familyName.trim()) errors.familyName = "Escribe tus apellidos"
   if (asks("document")) {
@@ -1149,7 +1189,7 @@ export type YouForm = ReturnType<typeof useYouForm>
 export function youInput(
   draft: YouDraft,
   fields: readonly YouField[],
-  pending: { privacy: boolean; promotions: boolean } | null,
+  pending: PersonalLinkView["pending"],
   profile: ClinicalCountryProfile,
 ): BookingYou {
   const data: Partial<Record<string, string>> = {}
@@ -1172,15 +1212,27 @@ export function youInput(
     data,
     ...(pending?.privacy ? { privacyAccepted: draft.privacy } : {}),
     ...(pending?.promotions && draft.promotions !== null ? { acceptsPromotions: draft.promotions } : {}),
+    ...(pending?.promotionsOffer && draft.promotionsOptIn ? { acceptsPromotions: true } : {}),
+    ...(draft.renaming
+      ? {
+          name: {
+            givenNames: draft.renameGivenNames.trim(),
+            familyName: draft.renameFamilyName.trim().replace(/\s+/g, " "),
+            ...(draft.renameWithDocument ? { docNumber: draft.renameDocNumber.trim() } : {}),
+          },
+        }
+      : {}),
   }
 }
 
 /**
  * «Revisa y reserva» de quien ya es paciente: lo que ya sabemos (el documento
- * abreviado; no se editan datos guardados desde el enlace, que prueba que
- * tiene su chat, no quién es), lo que le falta de lo que este paso sabe pedir,
- * los mensajes de su cita y, si aún no respondió o no aceptó, las novedades y
- * el aviso de privacidad. Se guarda con la cita, al tocar «Reservar mi cita».
+ * abreviado: el enlace prueba que tiene su chat, no quién es), lo que le falta
+ * de lo que este paso sabe pedir, los mensajes de su cita y, si aún no
+ * respondió o no aceptó, las novedades y el aviso de privacidad. De lo
+ * guardado solo corrige su nombre («Corregir»), con su documento entero si la
+ * ficha lo tiene; a quien dijo que no a novedades se le ofrece la casilla. Se
+ * guarda con la cita, al tocar «Reservar mi cita».
  */
 export function YouReview({
   you,
@@ -1195,7 +1247,7 @@ export function YouReview({
 }: {
   you: NonNullable<PersonalLinkView["you"]>
   fields: readonly YouField[]
-  pending: { privacy: boolean; promotions: boolean } | null
+  pending: PersonalLinkView["pending"]
   form: YouForm
   profile: ClinicalCountryProfile
   today: string
@@ -1208,11 +1260,72 @@ export function YouReview({
   const whatsappLine = asks("phone")
     ? "Te escribiremos por WhatsApp a este número sobre esta cita: la confirmación, los recordatorios y los cambios."
     : `Te escribiremos por WhatsApp ${phoneShown ? `al ${phoneShown}` : "a tu número"} sobre esta cita: la confirmación, los recordatorios y los cambios.`
+  // Corregir el nombre solo si ya hay uno; si falta, se pide abajo como cualquier dato.
+  const canRename = !asks("givenNames") && !asks("familyName")
+  const renaming = useStore(form.store, (state) => state.values.renaming)
+  // «DNI ••••4243» → «DNI».
+  const documentName = you.document?.split(" ")[0] ?? "documento"
+  const startRename = () => {
+    form.setFieldValue("renameGivenNames", you.givenNames ?? you.name)
+    form.setFieldValue("renameFamilyName", you.familyName ?? "")
+    form.setFieldValue("renameDocNumber", "")
+    form.setFieldValue("renameWithDocument", !!you.document)
+    form.setFieldValue("renaming", true)
+  }
+  const stopRename = () => {
+    form.setFieldValue("renaming", false)
+    clearSubmitErrors(form, (name) => name.startsWith("rename"))
+  }
   return (
     <FieldGroup className="gap-4">
       <section aria-label="Tus datos" className="flex flex-col gap-1 rounded-2xl border bg-card px-4 py-3.5">
-        <h3 className="text-sm font-semibold text-muted-foreground">Tus datos</h3>
-        <p className="font-semibold">{you.name}</p>
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-sm font-semibold text-muted-foreground">Tus datos</h3>
+          {canRename && !renaming ? (
+            <Button
+              type="button"
+              variant="link"
+              className="-my-2 h-auto min-h-11 p-0 font-semibold underline"
+              aria-label="Corregir tu nombre"
+              onClick={startRename}
+            >
+              Corregir
+            </Button>
+          ) : null}
+        </div>
+        {renaming ? (
+          <FieldSet className="mt-2 gap-4">
+            <FieldLegend variant="label" className="mb-0">
+              Tu nombre, como en tu documento
+            </FieldLegend>
+            <form.AppField name="renameGivenNames">
+              {(field) => <field.TextField id={youId("renameGivenNames")} label="Nombres" inputClassName="min-h-11" autoComplete="given-name" maxLength={100} />}
+            </form.AppField>
+            <form.AppField name="renameFamilyName">
+              {(field) => <field.TextField id={youId("renameFamilyName")} label="Apellidos" inputClassName="min-h-11" autoComplete="family-name" maxLength={200} />}
+            </form.AppField>
+            {you.document ? (
+              <form.AppField name="renameDocNumber">
+                {(field) => (
+                  <field.TextField
+                    id={youId("renameDocNumber")}
+                    label={`Tu ${documentName} completo`}
+                    description={`Para confirmar que es tu ficha: termina en ${you.document?.slice(-4)}.`}
+                    inputClassName="min-h-11"
+                    autoComplete="off"
+                    maxLength={20}
+                  />
+                )}
+              </form.AppField>
+            ) : null}
+            <p className="text-sm text-muted-foreground">Se guarda con tu cita. Si esta ficha no es tuya, escríbenos por el chat.</p>
+            <Button type="button" variant="link" className="h-auto min-h-11 self-start p-0" onClick={stopRename}>
+              Dejar el nombre como estaba
+            </Button>
+          </FieldSet>
+        ) : (
+          <p className="font-semibold">{you.name}</p>
+        )}
         {you.document || phoneShown ? <p className="text-sm text-muted-foreground">{[you.document, phoneShown].filter(Boolean).join(" · ")}</p> : null}
       </section>
 
@@ -1252,6 +1365,17 @@ export function YouReview({
 
       {pending?.promotions ? (
         <form.AppField name="promotions">{() => <PromotionsQuestion id={youId("promotions")} clinicName={clinicName} />}</form.AppField>
+      ) : null}
+      {/* Dijo que no antes: se le ofrece sin marcar y sin pedirle respuesta. */}
+      {pending?.promotionsOffer ? (
+        <form.AppField name="promotionsOptIn">
+          {(field) => (
+            <field.CheckboxField
+              id={youId("promotionsOptIn")}
+              label={`Quiero recibir novedades y promociones de ${clinicName} por WhatsApp. Puedo darme de baja cuando quiera.`}
+            />
+          )}
+        </form.AppField>
       ) : null}
       {pending?.privacy ? (
         <form.AppField name="privacy">{() => <PrivacyCheck id={youId("privacy")} slug={slug} clinicName={clinicName} />}</form.AppField>

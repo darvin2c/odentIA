@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto"
 import { readFile } from "node:fs/promises"
 import { agentHandoff, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
+import { member, user } from "@odentia/db/schema/auth"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { automationConsent } from "@odentia/db/schema/automation"
 import { opportunityEvent } from "@odentia/db/schema/opportunities"
@@ -623,11 +624,22 @@ test("reserva por enlace: la persona elige su cita viendo los horarios libres, s
       privacyAccepted: false,
     },
   }, 201)
-  await call(page, "PUT", "/api/agenda/schedules", org.slug, {
-    branchId: owner.branchId,
-    professionalUserId: owner.user.id,
-    rules: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, startMin: 7 * 60, endMin: 22 * 60 })),
-  }, 200)
+  // Tres personas atienden: con «Cualquiera», la fila de «¿Con quién?» no cabe en el teléfono y se desliza.
+  const milagros = `${org.id}-milagros`
+  const silvia = `${org.id}-silvia`
+  const colleagues = [milagros, silvia]
+  await fixtureDb.insert(user).values([
+    { id: milagros, name: "Dra. Milagros Díaz", email: `${milagros}@crm.test`, emailVerified: true },
+    { id: silvia, name: "Dra. Silvia Rojas", email: `${silvia}@crm.test`, emailVerified: true },
+  ])
+  await fixtureDb.insert(member).values(colleagues.map((userId) => ({ id: randomUUID(), organizationId: org.id, userId, role: "clinician", createdAt: new Date() })))
+  for (const professionalUserId of [owner.user.id, ...colleagues]) {
+    await call(page, "PUT", "/api/agenda/schedules", org.slug, {
+      branchId: owner.branchId,
+      professionalUserId,
+      rules: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, startMin: 7 * 60, endMin: 22 * 60 })),
+    }, 200)
+  }
   const tg = await createTelegramConnection(page, org.slug)
   const tgUser = nextEventId()
   expect(await simulateTelegramInbound(page, API, tg.id, tg.webhookSecret, { fromId: tgUser, chatId: tgUser, text: "Quiero una cita", updateId: nextEventId() })).toBe(200)
@@ -653,6 +665,9 @@ test("reserva por enlace: la persona elige su cita viendo los horarios libres, s
   // Una sola sede: dos pasos, con quién y cuándo, y revisar.
   await expect(page.getByText(/Paso 1 de 2 · Con quién y cuándo/)).toBeVisible()
   await expect(page.getByRole("heading", { name: "¿Con quién?" })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Cualquiera/ })).toBeVisible()
+  // Lo que no cabe se desliza dentro de su fila: la página no se ensancha.
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
   // Los 7 días siguientes siempre tienen horarios: los de hoy dependen de la hora en que corre la prueba.
   await page.getByRole("button", { name: "Los 7 días siguientes", exact: true }).click()
   const slots = page.getByRole("group", { name: /Mañana|Tarde/ }).first()
@@ -686,6 +701,12 @@ test("reserva por enlace: la persona elige su cita viendo los horarios libres, s
   await expect(yourData).toContainText("DNI ••••8902")
   await expect(yourData).not.toContainText("45678902")
   await expect(page.getByText("Nos falta un dato:", { exact: true })).toBeVisible()
+  // Si el nombre de su ficha no es el suyo, lo corrige ahí mismo: con su documento entero, porque el enlace prueba su chat, no quién es.
+  await yourData.getByRole("button", { name: "Corregir tu nombre" }).click()
+  await expect(yourData.getByLabel("Nombres")).toHaveValue("Eva")
+  await expect(yourData.getByLabel("Apellidos")).toHaveValue("Rojas")
+  await yourData.getByLabel("Nombres").fill("Eva María")
+  await yourData.getByLabel("Tu DNI completo").fill("45678902")
   await expect(page.getByText(/^Te escribiremos por WhatsApp al .+ sobre esta cita: la confirmación, los recordatorios y los cambios\.$/)).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
   // Sin lo que falta no reserva: lo dice junto a cada campo y lleva el foco al primero.
@@ -716,8 +737,9 @@ test("reserva por enlace: la persona elige su cita viendo los horarios libres, s
   const rows = await fixtureDb.select().from(appointment).where(eq(appointment.patientId, patient.id))
   expect(rows.map((row) => [row.status, row.source, row.conversationId])).toEqual([["confirmada", "enlace", conversation.id]])
   // Lo que faltaba y lo que aceptó se guardó en el mismo paso: su fecha, los mensajes de su cita y las novedades.
-  const saved = await call<{ patient: { birthDate: string | null } }>(page, "GET", `/api/patients/${patient.id}`, org.slug)
+  const saved = await call<{ patient: { birthDate: string | null; displayName: string } }>(page, "GET", `/api/patients/${patient.id}`, org.slug)
   expect(saved.patient.birthDate).toBe("1990-02-14")
+  expect(saved.patient.displayName).toBe("Eva María Rojas")
   const permissions = await fixtureDb.select().from(automationConsent).where(eq(automationConsent.contactId, conversation.contact.id))
   expect(permissions.map((row) => [row.purpose, row.status])).toEqual(
     expect.arrayContaining([

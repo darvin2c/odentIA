@@ -56,6 +56,7 @@ import {
   issueAgendaLink,
   latestOpenTopic,
   listAgentContextCandidates,
+  reportPatientNameMismatch,
   listContactChannelHistory,
   listContactNotes,
   listOpportunities,
@@ -1164,8 +1165,15 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       if (ctx.dryRun) return "[SIMULACIÓN] Se actualizaría el contacto."
       const naming = Boolean(displayName || givenNames || familyName)
       // El nombre de un paciente lo cambia el equipo en su ficha; aquí, solo el de quien aún no lo es.
-      if (naming && (await inOrg((tx) => listAgentContextCandidates(tx, ctx.orgId, contactId))).some((item) => item.relationship === "self")) {
-        return "Es paciente: su nombre no se cambia por aquí. Úsalo tal como figura."
+      // Si dijo otro, su ficha no cambia y recepción la revisa (ADR 0116).
+      if (naming) {
+        const said = [givenNames?.trim(), familyName?.trim()].filter(Boolean).join(" ") || displayName || ""
+        const outcome = await inOrg((tx) => reportPatientNameMismatch(tx, ctx.orgId, { contactId, conversationId: ctx.conversationId, said }))
+        if (outcome === "avisado") {
+          await noteAction("datos", "avisó a recepción que su nombre no es el de su ficha")
+          return "Es paciente y su ficha dice otro nombre: por aquí no se cambia y quedó una tarea para que recepción la revise. Háblale por el nombre que te dijo, sin decirle cómo figura en su ficha. Si le das su enlace para reservar, dile que ahí puede corregir su nombre."
+        }
+        if (outcome !== "no_es_paciente") return "Es paciente: su nombre no se cambia por aquí. Úsalo tal como figura."
       }
       // Solo sus nombres también se guardan: «Soy Carla» ya es saber con quién habla.
       const names = givenNames?.trim() && familyName?.trim()
