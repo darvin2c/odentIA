@@ -530,7 +530,8 @@ function InboxPage() {
               </TabsTrigger>
             </ScrollingTabsList>
           </Tabs>
-          {/* En la misma fila que las pestañas: acotan la lista y no compiten con ellas. */}
+          {/* En la misma fila que las pestañas: acotan la lista y no compiten con ellas. El buscador
+              se angosta si falta lugar: nunca tapa «Spam» ni «Bloqueados». */}
           <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
             <FilterBar
               filters={[
@@ -544,7 +545,7 @@ function InboxPage() {
                   })),
                 },
               ]}
-              className="min-w-0 flex-1 bg-transparent p-0 [&>[data-filter-row=desktop]]:justify-end [&_[data-filter-row=desktop]>div:first-child]:w-52 [&_[data-filter-row=desktop]>div:first-child]:focus-within:w-72"
+              className="min-w-0 flex-1 bg-transparent p-0 [&>[data-filter-row=desktop]]:justify-end [&_[data-filter-row=desktop]>div:first-child]:w-52 [&_[data-filter-row=desktop]>div:first-child]:min-w-28 [&_[data-filter-row=desktop]>div:first-child]:shrink [&_[data-filter-row=desktop]>div:first-child]:focus-within:w-72"
               sortOptions={[]}
               searchPlaceholder="Nombre, teléfono, documento o lo que escribió" searchLabel="Buscar en la Bandeja"
               searchPending={listQuery.isFetching && !listQuery.isFetchingNextPage}
