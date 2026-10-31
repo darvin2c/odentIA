@@ -230,6 +230,12 @@ export const consentTemplate = pgTable(
     status: text("status").notNull().default("borrador"),
     createdBy: text("created_by").references(() => user.id),
     publishedAt: timestamp("published_at", { withTimezone: true }),
+    /**
+     * Quién de la clínica leyó este texto. Lo sugerido nace activo y sin revisar:
+     * se puede usar mientras tanto, y la pantalla dice cuáles faltan.
+     */
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    reviewedBy: text("reviewed_by").references(() => user.id),
     ...timestamps,
   },
   (table) => [

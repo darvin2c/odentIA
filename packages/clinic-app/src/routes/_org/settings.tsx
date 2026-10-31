@@ -33,7 +33,7 @@ const grupos: SectionNavGroup[] = [
     label: "Atención",
     items: [
       { label: "Especialidades", to: "/settings/specialties" },
-      { label: "Formularios y consentimientos", to: "/settings/forms" },
+      { label: "Consentimientos", to: "/settings/forms" },
     ],
   },
   {

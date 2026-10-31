@@ -18,7 +18,6 @@ import {
   createFormResponse,
   createFormTemplate,
   createSpecialty,
-  createSuggestedConsentTemplates,
   discardFormResponse,
   finalizeFormResponse,
   formResponsePatientId,
@@ -32,6 +31,13 @@ import {
   listConsentEvents,
   listConsentTemplateServices,
   listConsentTemplates,
+  loadDocumentClinic,
+  markConsentTemplateReviewed,
+  parseConsentDraft,
+  renderConsentPreviewPdf,
+  saveConsentTemplate,
+  ServiceError,
+  setConsentTemplateActive,
   listFormAddenda,
   listFormResponses,
   listFormTemplates,
@@ -258,6 +264,24 @@ const consentTemplatePatch = z
     specialtyId: uuid.nullish(),
   })
   .strict()
+
+const consentTemplateSave = z
+  .object({
+    key: keySchema,
+    title: z.string().trim().min(1, "Escribe el título").max(200),
+    sections: consentSections,
+  })
+  .strict()
+
+const consentTemplatePreview = z
+  .object({
+    title: z.string().trim().min(1, "Escribe el título").max(200),
+    sections: consentSections,
+    version: z.number().int().min(1).optional(),
+  })
+  .strict()
+
+const consentTemplateActive = z.object({ active: z.boolean() }).strict()
 
 const consentCreate = z
   .object({
@@ -785,13 +809,66 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     )
   })
 
-  app.post("/consent-templates/suggested", async (c) => {
+  // La hoja: guardar es una sola acción, sin borrador ni publicar aparte.
+  app.post("/consent-templates/save", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) {
-      return forbidden(c, "Solo administración diseña consentimientos")
+      return forbidden(c, "Solo administración edita consentimientos")
     }
-    return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) => createSuggestedConsentTemplates(tx, orgId, userId)),
+    const parsed = consentTemplateSave.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => saveConsentTemplate(tx, orgId, userId, parsed.data)),
+    )
+  })
+
+  // Lo que aún no se guardó, como saldría: con una persona de ejemplo y sin guardar nada.
+  app.post("/consent-templates/preview", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.read")) return forbidden(c, "Sin acceso a los consentimientos")
+    const parsed = consentTemplatePreview.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    try {
+      const draft = parseConsentDraft(parsed.data)
+      const clinic = await withOrgContext(deps.db, orgId, (tx) => loadDocumentClinic(tx, orgId))
+      const bytes = await renderConsentPreviewPdf(clinic, { ...draft, version: parsed.data.version ?? 1 })
+      return new Response(Buffer.from(bytes), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": 'inline; filename="consentimiento-ejemplo.pdf"',
+          "Cache-Control": "no-store",
+        },
+      })
+    } catch (error) {
+      if (error instanceof ServiceError) return c.json(errorBody(c, error.code, error.message, error.fields), error.status)
+      throw error
+    }
+  })
+
+  app.put("/consent-templates/:id/active", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return forbidden(c, "Solo administración enciende o apaga consentimientos")
+    }
+    const parsed = consentTemplateActive.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        setConsentTemplateActive(tx, orgId, userId, c.req.param("id"), parsed.data.active),
+      ),
+    )
+  })
+
+  app.post("/consent-templates/:id/reviewed", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return forbidden(c, "Solo administración marca un consentimiento como revisado")
+    }
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        markConsentTemplateReviewed(tx, orgId, userId, c.req.param("id")),
+      ),
     )
   })
 

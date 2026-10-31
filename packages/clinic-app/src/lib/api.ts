@@ -97,10 +97,11 @@ export async function apiLines(path: string, init: RequestInit, onLine: (line: u
 }
 
 /** Descarga binaria autenticada (p. ej. un DICOM para el visor). */
-export async function apiFetchBytes(path: string): Promise<ArrayBuffer> {
+export async function apiFetchBytes(path: string, init?: RequestInit): Promise<ArrayBuffer> {
   const response = await fetch(`${API_URL}${path}`, {
+    ...init,
     credentials: "include",
-    headers: contextHeaders(),
+    headers: { ...contextHeaders(), ...init?.headers },
   })
   if (!response.ok) {
     let shape: ApiErrorShape = {}

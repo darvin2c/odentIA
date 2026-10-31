@@ -2,7 +2,9 @@ import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { TextDecoder } from "node:util"
+import { SUGGESTED_CONSENT_TEMPLATES, type SuggestedConsentTemplate } from "@odentia/clinical"
 import { TREATMENT_KIND_KEYS, TREATMENT_SCOPES, validateLeavesFinding } from "@odentia/dental"
+import { MEDICAL_CONSENT_TEMPLATES } from "@odentia/medical"
 import { expect, it } from "vitest"
 import { loadPatientGuides } from "./procedure-codes.js"
 
@@ -312,4 +314,22 @@ it("las explicaciones sugeridas: una clave que no es de la biblioteca falla ante
       .map((line) => line.split(",")[0]!),
   )
   expect(() => loadPatientGuides(keys)).not.toThrow()
+})
+
+it("cada consentimiento sugerido se une a tratamientos que existen en su biblioteca", () => {
+  const keysOf = (file: string) =>
+    readFileSync(join(here, "..", "seeds", file), "utf8")
+      .split(/\r?\n/)
+      .slice(1)
+      .map((line) => line.split(",")[0] ?? "")
+      .filter(Boolean)
+  const check = (keys: string[], suggestions: readonly SuggestedConsentTemplate[]) => {
+    for (const suggestion of suggestions) {
+      for (const prefix of suggestion.servicePrefixes ?? []) {
+        expect(keys.some((key) => key.startsWith(prefix)), `${suggestion.key}: ${prefix}`).toBe(true)
+      }
+    }
+  }
+  check(keysOf("biblioteca.csv"), SUGGESTED_CONSENT_TEMPLATES)
+  check(keysOf("biblioteca_medica.csv"), MEDICAL_CONSENT_TEMPLATES)
 })

@@ -12,7 +12,7 @@ const SECTIONS: Array<[string, string]> = [
   ["Horarios y ausencias", "/settings/availability"],
   ["Protección de datos", "/settings/data-protection"],
   ["Especialidades", "/settings/specialties"],
-  ["Formularios y consentimientos", "/settings/forms"],
+  ["Consentimientos", "/settings/forms"],
   ["Registro de pacientes", "/settings/patient-registration"],
   ["Portal del paciente", "/settings/patient-access"],
   ["Medios de pago y ticket", "/settings/payment-methods"],

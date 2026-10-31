@@ -3,13 +3,13 @@ import type { SuggestedConsentTemplate } from "@odentia/clinical"
 /**
  * Los consentimientos que latidIA sugiere a un consultorio (issue 229, entrega
  * 6): los procedimientos que suelen hacerse en la consulta de medicina
- * general. Como los de odentIA, se crean como borrador: la clínica revisa el
- * texto antes de publicarlo.
+ * general. Como los de odentIA, nacen activos y sin revisar.
  */
 export const MEDICAL_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = [
   {
     key: "procedimiento-menor",
     title: "Procedimiento menor en consultorio",
+    servicePrefixes: ["sutura-simple", "drenaje-de-absceso", "extraccion-de-una"],
     sections: {
       procedure:
         "Procedimiento menor en el consultorio, con anestesia local: por ejemplo, la sutura de una herida, el drenaje de un absceso o el retiro de una lesión pequeña de la piel.",
@@ -34,6 +34,7 @@ export const MEDICAL_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = [
   {
     key: "inyectables",
     title: "Aplicación de medicamentos inyectables",
+    servicePrefixes: ["inyectable-"],
     sections: {
       procedure:
         "Aplicación de un medicamento por vía intramuscular, subcutánea o endovenosa en el consultorio.",
@@ -51,6 +52,7 @@ export const MEDICAL_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = [
   {
     key: "toma-de-muestras",
     title: "Toma de muestras",
+    servicePrefixes: ["toma-de-muestra-de-sangre"],
     sections: {
       procedure:
         "Toma de una muestra de sangre, orina o secreción para estudiarla en el laboratorio.",

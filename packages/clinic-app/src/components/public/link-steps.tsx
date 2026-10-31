@@ -1,3 +1,4 @@
+import type { ConsentSections } from "@odentia/clinical"
 import { ScrollArea } from "@odentia/ui"
 import { ErrorState, LoadingState, SubmitButton, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
@@ -23,6 +24,47 @@ function Done({ title, text, onBack }: { title: string; text: string; onBack: ()
       <SubmitButton type="button" variant="outline" className="mt-2 min-h-11" pending={false} onClick={onBack}>
         Volver a lo pendiente
       </SubmitButton>
+    </div>
+  )
+}
+
+/** Lo que lee el paciente antes de firmar; la clínica lo ve igual en su vista previa. */
+export function ConsentReading({
+  sections,
+  body,
+}: {
+  sections: Partial<ConsentSections> | null | undefined
+  body: string | null | undefined
+}) {
+  const list = (title: string, items: string[] | undefined) =>
+    items && items.length > 0 ? (
+      <div>
+        <p className="font-semibold">{title}</p>
+        <ul className="list-disc pl-5">
+          {items.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      </div>
+    ) : null
+  return (
+    <div className="flex flex-col gap-3 p-4 text-sm">
+      {sections?.procedure ? (
+        <div>
+          <p className="font-semibold">Qué te van a hacer</p>
+          <p>{sections.procedure}</p>
+        </div>
+      ) : null}
+      {list("Beneficios", sections?.benefits)}
+      {list("Riesgos", sections?.risks)}
+      {list("Otras opciones", sections?.alternatives)}
+      {sections?.consequences ? (
+        <div>
+          <p className="font-semibold">Si no te lo haces</p>
+          <p>{sections.consequences}</p>
+        </div>
+      ) : null}
+      {body ? <p className="whitespace-pre-wrap">{body}</p> : null}
     </div>
   )
 }
@@ -66,40 +108,11 @@ export function LinkConsentStep({ slug, token, consentId, onBack }: { slug: stri
   if (query.isPending) return <LoadingState kind="indeterminate" message="Abriendo el consentimiento…" />
   if (query.isError) return <ErrorState title="No pudimos abrir el consentimiento" message={problemOf(query.error, "Vuelve a intentarlo.")} onRetry={() => void query.refetch()} />
   const consent = query.data.data
-  const sections = consent.sections
-  const list = (title: string, items: string[] | undefined) =>
-    items && items.length > 0 ? (
-      <div>
-        <p className="font-semibold">{title}</p>
-        <ul className="list-disc pl-5">
-          {items.map((item) => (
-            <li key={item}>{item}</li>
-          ))}
-        </ul>
-      </div>
-    ) : null
   return (
     <form className="flex flex-col gap-4" onSubmit={submit} noValidate>
       <h2 className="text-lg font-semibold">{consent.title}</h2>
       <ScrollArea className="flex max-h-[50svh] flex-col rounded-2xl border bg-card">
-        <div className="flex flex-col gap-3 p-4 text-sm">
-          {sections?.procedure ? (
-            <div>
-              <p className="font-semibold">Qué te van a hacer</p>
-              <p>{sections.procedure}</p>
-            </div>
-          ) : null}
-          {list("Beneficios", sections?.benefits)}
-          {list("Riesgos", sections?.risks)}
-          {list("Otras opciones", sections?.alternatives)}
-          {sections?.consequences ? (
-            <div>
-              <p className="font-semibold">Si no te lo haces</p>
-              <p>{sections.consequences}</p>
-            </div>
-          ) : null}
-          {consent.body ? <p className="whitespace-pre-wrap">{consent.body}</p> : null}
-        </div>
+        <ConsentReading sections={consent.sections} body={consent.body} />
       </ScrollArea>
       <p className="text-sm text-muted-foreground">
         Firma {consent.signer.name}

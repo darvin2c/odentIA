@@ -37,6 +37,7 @@ import { resolvePersonalLinkRefs } from "./personal-link-token.js"
 import { getPortalAppointmentCalendar, reschedulePortalAppointment } from "./portal.js"
 import { configurePublicLinks } from "./public-links.js"
 import { secretsKeyFromEnv } from "./secrets.js"
+import { getPatientMissingData } from "./patient-registration.js"
 import { getPersonalLinkView } from "./su-enlace.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 import { insertTestPatients } from "./test-patient.js"
@@ -233,6 +234,29 @@ describe("al cambiar la cita, el agente le avisa", () => {
       const view = await run(c, (tx) => getPersonalLinkView(tx, c.orgId, token))
       expect(view.appointment).toMatchObject({ canChange: true, branchName: "Centro" })
       expect(view.data?.missing.map((item) => item.key)).toContain("birthDate")
+    } finally {
+      configurePublicLinks(null)
+    }
+  })
+
+  it("a quien no le falta ningún dato pero nadie le preguntó su salud, el aviso también lleva su enlace", async () => {
+    configurePublicLinks({ webURL: "https://app.odentia.test", cookieDomain: "odentia.test" })
+    try {
+      const c = await clinic()
+      await lineOn(c)
+      const pedro = await person(c, "Pedro Ríos", { consent: ["recordatorio"], openWindow: true })
+      await ownerDb
+        .update(contact)
+        .set({ givenNames: "Pedro", familyName: "Ríos", birthDate: "1990-05-10", phone: "+51999111222" })
+        .where(and(eq(contact.organizationId, c.orgId), eq(contact.id, pedro.contactId)))
+      expect(await run(c, (tx) => getPatientMissingData(tx, c.orgId, pedro.patientId))).toEqual([])
+      await book(c, pedro.patientId, later(3 * DAY))
+      expect((await deliver(c)).map((result) => result.outcome)).toEqual(["enviado"])
+      const [job] = await jobsOf(c)
+      const body = resolvePersonalLinkRefs(await bodyOf(job!.sentMessageId), KEY)
+      const token = /token=([0-9a-f]{64})/.exec(body)![1]!
+      const view = await run(c, (tx) => getPersonalLinkView(tx, c.orgId, token))
+      expect(view.data).toEqual({ missing: [], health: true })
     } finally {
       configurePublicLinks(null)
     }
