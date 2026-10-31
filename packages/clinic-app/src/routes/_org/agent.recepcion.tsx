@@ -18,7 +18,6 @@ import { Switch } from "@odentia/ui/components/switch"
 import {
   ConfirmDialog,
   ErrorState,
-  LoadingState,
   PageHeader,
   PageShell,
   SideColumn,
@@ -28,6 +27,7 @@ import {
   useDetailMode,
   useSideColumnWidth,
   useSideDock,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link } from "@tanstack/react-router"
@@ -55,10 +55,13 @@ import {
 import { AGENT_NAME_REASONS, RECEPTION_DEFAULT_NAME, useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { type AgentConfig, usePermission } from "../../lib/crm"
+import { RECEPTION_TEST_COLUMN } from "../../lib/screen-rules"
 import { useOrgProfile } from "../../lib/org"
 import { QueryErrorState } from "../../lib/query-error"
+import { ReceptionPageSkeleton, ReceptionSkeleton } from "../../components/skeletons/agent"
 
 export const Route = createFileRoute("/_org/agent/recepcion")({
+  pendingComponent: ReceptionPageSkeleton,
   component: ReceptionPage,
 })
 const orgRouteApi = getRouteApi("/_org")
@@ -366,14 +369,25 @@ function ReceptionPage() {
 
   if (pending || failed || !roles || !overview || !config || !role) {
     return (
+      <>
+      {/* «Probar» no depende de estos datos: su columna ya ocupa su sitio y la página no salta al llegar.
+          Va primero en las dos ramas, en el mismo lugar: al llegar los datos conserva lo que ya se escribió. */}
+      {pending && canWrite && docked ? (
+        <SideDockPortal fallback={null}>
+          <TestColumn />
+        </SideDockPortal>
+      ) : null}
       <PageShell className="flex flex-col gap-6">
         <PageHeader title={title} />
         {pending ? (
-          <LoadingState message={`Cargando a ${receptionName}…`} />
+          <SkeletonRegion message={`Cargando a ${receptionName}…`}>
+            <ReceptionSkeleton />
+          </SkeletonRegion>
         ) : (
           <QueryErrorState error={failed?.error} onRetry={() => void (failed ?? rolesQuery).refetch()} />
         )}
       </PageShell>
+      </>
     )
   }
 
@@ -415,6 +429,14 @@ function ReceptionPage() {
     ) : null
 
   return (
+    <>
+    {canWrite && docked ? (
+      <SideDockPortal fallback={<TestDrawer open={testing} onClose={() => setTesting(false)} returnFocus={openerOfTest} />}>
+        <TestColumn />
+      </SideDockPortal>
+    ) : canWrite ? (
+      <TestDrawer open={testing} onClose={() => setTesting(false)} returnFocus={openerOfTest} />
+    ) : null}
     <PageShell className={`flex flex-col gap-6 ${canWrite && !testing ? "max-sm:pb-24" : ""}`}>
       <PageHeader
         title={title}
@@ -686,14 +708,6 @@ function ReceptionPage() {
         </div>
       ) : null}
 
-      {canWrite && docked ? (
-        <SideDockPortal fallback={<TestDrawer open={testing} onClose={() => setTesting(false)} returnFocus={openerOfTest} />}>
-          <TestColumn />
-        </SideDockPortal>
-      ) : canWrite ? (
-        <TestDrawer open={testing} onClose={() => setTesting(false)} returnFocus={openerOfTest} />
-      ) : null}
-
       <FunctionNoteDrawer fn={noteFor} config={config} onClose={() => setNoteFor(null)} />
       <LimitsDrawer section={limits} onClose={() => setLimits(null)} config={config} />
       <AgentBaseDrawer
@@ -734,11 +748,12 @@ function ReceptionPage() {
         ) : null}
       </ConfirmDialog>
     </PageShell>
+    </>
   )
 }
 
 /** La columna de «Probar»: ancho de un chat, que se puede cambiar como el de cualquier panel. */
-const TEST_COLUMN: SideColumnWidth = { initial: 416, min: 352, max: 560 }
+const TEST_COLUMN: SideColumnWidth = RECEPTION_TEST_COLUMN
 
 /** «Probar» en la columna lateral (ADR 0094): fija a la derecha, a todo el alto; la página sigue al lado. */
 function TestColumn() {

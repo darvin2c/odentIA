@@ -15,6 +15,7 @@ import {
   TabsTrigger,
 } from "@odentia/ui"
 import { EmptyState, LoadingState } from "@odentia/ui-patterns"
+import { PeriodontogramLoading } from "../odontogram-skeleton"
 import { useQuery } from "@tanstack/react-query"
 import { ArrowLeft, Activity } from "lucide-react"
 import { useEffect, useId, useMemo, useState } from "react"
@@ -60,7 +61,7 @@ export function PeriodontogramaTab({
     if (initialChartId) setView({ mode: "chart", chartId: initialChartId })
   }, [initialChartId])
 
-  if (list.isPending) return <LoadingState message="Cargando el periodontograma…" />
+  if (list.isPending) return <PeriodontogramLoading />
   if (list.isError) return <QueryErrorState error={list.error} onRetry={() => void list.refetch()} />
   // Del más antiguo al más reciente: así se nombran «Inicial» y «Reevaluación».
   const visits = [...list.data.data].reverse()

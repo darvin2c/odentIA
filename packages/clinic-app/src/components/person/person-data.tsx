@@ -7,6 +7,7 @@ import {
   LoadingState,
   useAppForm,
   useFormSurface,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -26,6 +27,7 @@ import { FiliacionSectionDrawer, type FiliacionSectionKey } from "../patient/fil
 import { MessagePermissionsSection } from "../patient/message-permissions-section"
 import { PhoneWhatsAppNote } from "./phone-whatsapp"
 import { TAGS_INPUT_HELP, TagsCount, TagsInput } from "../patient/tags-input"
+import { FiliacionSkeleton } from "../skeletons/person-sections"
 
 /** Las mismas reglas de `normalizeTags` que aplica la ruta, dichas en el campo. */
 const tagsSchema = z.object({
@@ -146,7 +148,9 @@ export function PersonData({ person, detail }: { person: PersonPage; detail?: Pa
             phoneNote={<PhoneWhatsAppNote contactId={person.id} value={person.phoneWhatsApp} />}
           />
         ) : (
-          <LoadingState message="Cargando sus datos…" />
+          <SkeletonRegion message="Cargando sus datos…">
+            <FiliacionSkeleton canEdit={can("patients.write")} />
+          </SkeletonRegion>
         )}
         <PersonCrmCard person={person} />
       </div>

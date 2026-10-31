@@ -1,5 +1,5 @@
 import { Badge, Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
-import { EmptyState, type FilterDef, FilterDrawer, LoadingState, SearchInput, useListSearch } from "@odentia/ui-patterns"
+import { EmptyState, type FilterDef, FilterDrawer, SearchInput, useListSearch, SkeletonRegion } from "@odentia/ui-patterns"
 import { BookOpen, ChevronRight, SlidersHorizontal } from "lucide-react"
 import { useMemo, useState } from "react"
 import { QueryErrorState } from "../../lib/query-error"
@@ -14,6 +14,7 @@ import {
   STATE_LABEL,
   STATE_VARIANT,
 } from "./knowledge-model"
+import { KnowledgeAnswerRowsSkeleton } from "../skeletons/agent"
 
 /** Respuestas a la vista; el resto, con «Ver las N». */
 const PREVIEW = 5
@@ -154,9 +155,9 @@ export function KnowledgeAnswers({
         ) : null}
       </div>
       {isPending ? (
-        <div className="px-4 pb-4 sm:px-5">
-          <LoadingState message="Cargando respuestas…" />
-        </div>
+        <SkeletonRegion message="Cargando respuestas…">
+          <KnowledgeAnswerRowsSkeleton />
+        </SkeletonRegion>
       ) : error ? (
         <div className="px-4 pb-4 sm:px-5">
           <QueryErrorState error={error} onRetry={onRetry} />

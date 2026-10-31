@@ -16,7 +16,6 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Skeleton,
   Tabs,
   TabsContent,
   TabsList,
@@ -34,6 +33,7 @@ import {
   submitErrorMessage,
   useAppForm,
   useFormSurface,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -68,11 +68,13 @@ import {
 import { usePermission } from "../../lib/crm"
 import { fetchConsentTemplateServices, saveConsentTemplateServices } from "../../lib/encounter-documents"
 import { fetchServices } from "../../lib/services"
+import { FormTemplatesPageSkeleton, TemplatesSkeleton } from "../../components/skeletons/settings"
 
 export const Route = createFileRoute("/_org/settings/forms")({
   // «Te espera» abre directo la pestaña de consentimientos (?tab=consentimientos).
   validateSearch: (search: Record<string, unknown>): { tab?: "formularios" | "consentimientos" } =>
     search.tab === "consentimientos" || search.tab === "formularios" ? { tab: search.tab } : {},
+  pendingComponent: FormTemplatesPageSkeleton,
   component: FormulariosPage,
 })
 
@@ -124,24 +126,6 @@ function FormulariosPage() {
           <ConsentTemplatesPanel />
         </TabsContent>
       </Tabs>
-    </div>
-  )
-}
-
-/** El hueco de la lista mientras carga: el mismo en las dos pestañas. */
-function TemplatesSkeleton({ label }: { label: string }) {
-  return (
-    <div className="flex flex-col gap-3">
-      <p role="status" className="sr-only">
-        {label}
-      </p>
-      {["w-56", "w-44", "w-64"].map((width) => (
-        <div key={width} className={CARD} aria-hidden>
-          <Skeleton className={`h-5 max-w-full ${width}`} />
-          <Skeleton className="h-4 w-40" />
-          <Skeleton className="h-8 w-48" />
-        </div>
-      ))}
     </div>
   )
 }
@@ -244,7 +228,9 @@ function FormTemplatesPanel() {
       ) : null}
 
       {listQuery.isPending ? (
-        <TemplatesSkeleton label="Cargando las plantillas de formularios…" />
+        <SkeletonRegion message="Cargando las plantillas de formularios…">
+          <TemplatesSkeleton />
+        </SkeletonRegion>
       ) : neverLoaded ? (
         <SettingsLoadError what="las plantillas de formularios" onRetry={() => void listQuery.refetch()} />
       ) : (
@@ -1268,7 +1254,9 @@ function ConsentTemplatesPanel() {
       ) : null}
 
       {listQuery.isPending ? (
-        <TemplatesSkeleton label="Cargando las plantillas de consentimientos…" />
+        <SkeletonRegion message="Cargando las plantillas de consentimientos…">
+          <TemplatesSkeleton />
+        </SkeletonRegion>
       ) : neverLoaded ? (
         <SettingsLoadError what="las plantillas de consentimientos" onRetry={() => void listQuery.refetch()} />
       ) : (

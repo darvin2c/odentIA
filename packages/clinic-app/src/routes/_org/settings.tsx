@@ -1,12 +1,15 @@
 import { canAccessAny, platformPathPermission, seesBilling } from "@odentia/auth/permissions"
 import { PageShell, SectionNav, type SectionNavGroup, type SectionNavItem } from "@odentia/ui-patterns"
 import { createFileRoute, Outlet, useRouterState } from "@tanstack/react-router"
+import type { ReactNode } from "react"
+import { SettingsContentSkeleton } from "../../components/skeletons/settings"
 import { useMyRole } from "../../lib/crm"
 import { PLAN_PATH } from "../../lib/billing"
 import { RouterLink } from "../../lib/router-link"
 import { appWords } from "../../lib/product-words"
 
 export const Route = createFileRoute("/_org/settings")({
+  pendingComponent: SettingsLayoutPending,
   component: SettingsLayout,
 })
 
@@ -68,13 +71,34 @@ const sueltas: SectionNavItem[] = [
   { label: "Actividad del equipo", to: "/settings/audit" },
 ]
 
+function SettingsLayout() {
+  return (
+    <SettingsFrame>
+      <Outlet />
+    </SettingsFrame>
+  )
+}
+
+/**
+ * Al entrar desde fuera, mientras llega el código: la misma lista, que no
+ * depende de ningún dato, y el esqueleto de la pantalla que se abre.
+ */
+function SettingsLayoutPending() {
+  const pathname = useRouterState({ select: (state) => state.location.pathname })
+  return (
+    <SettingsFrame>
+      <SettingsContentSkeleton pathname={pathname} />
+    </SettingsFrame>
+  )
+}
+
 /**
  * Configuración de la organización: los apartados viven en el nav de sección
  * (riel en web, selector en tablet y móvil) y cada página aporta su
  * `PageHeader` y su contenido. El `PageShell` es de este layout, para no anidar
  * fondos ni paddings.
  */
-function SettingsLayout() {
+function SettingsFrame({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const role = useMyRole()
   // Un apartado solo se ofrece a quien puede abrirlo, con la misma regla que el guard.
@@ -96,7 +120,7 @@ function SettingsLayout() {
         pathname={pathname}
         LinkComponent={RouterLink}
       >
-        <Outlet />
+        {children}
       </SectionNav>
     </PageShell>
   )

@@ -12,7 +12,6 @@ import {
   EmptyState,
   ErrorState,
   FilterBar,
-  LoadingState,
   PageHeader,
   PageShell,
   ScrollingTabsList,
@@ -24,7 +23,7 @@ import {
 } from "@odentia/ui-patterns"
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, useNavigate } from "@tanstack/react-router"
-import { Ban, SquarePen } from "lucide-react"
+import { Ban } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   useAgentPanel,
@@ -37,6 +36,7 @@ import { NewConversationDialog } from "../../components/inbox-new-conversation"
 import { conversationTarget, type ScreenTarget, UnblockDialog, useContactScreenActions } from "../../components/inbox-contact-screen"
 import { ConversationList, isRowOf, type SideView } from "../../components/inbox/conversation-list"
 import { ThreadView } from "../../components/inbox/thread-view"
+import { InboxPageSkeleton } from "../../components/skeletons/inbox"
 import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
@@ -44,9 +44,11 @@ import {
   type ConversationDetail,
   type ConversationListItem,
   type InboxSummary,
+  useCan,
   usePermission,
   useMyUserId,
 } from "../../lib/crm"
+import { inboxPrimary } from "../../lib/screen-rules"
 import { isReceiptOnly, useOrgEvents } from "../../lib/org-events"
 
 export const Route = createFileRoute("/_org/inbox")({
@@ -63,6 +65,7 @@ export const Route = createFileRoute("/_org/inbox")({
       ? { contexto: true as const }
       : {}),
   }),
+  pendingComponent: InboxPageSkeleton,
   component: InboxPage,
 })
 const orgRouteApi = getRouteApi("/_org")
@@ -121,6 +124,7 @@ function InboxPage() {
   const receptionName = useReceptionName()
   const { org } = orgRouteApi.useRouteContext()
   const myUserId = useMyUserId()
+  const can = useCan()
   const canRead = usePermission("conversations.read")
   const canWrite = usePermission("conversations.write")
   const canRegister = usePermission("crm.write")
@@ -444,11 +448,7 @@ function InboxPage() {
       {mode === "panel" || !selectedId ? (
         <PageHeader
           title="Bandeja"
-          primary={
-            canWrite && canReadCrm
-              ? { label: "Nueva conversación", icon: <SquarePen className="size-4" aria-hidden />, onClick: () => setNewConversation(true) }
-              : undefined
-          }
+          primary={inboxPrimary(can, () => setNewConversation(true))}
         />
       ) : (
         <h1 className="sr-only">Bandeja</h1>

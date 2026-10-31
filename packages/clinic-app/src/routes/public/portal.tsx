@@ -10,6 +10,7 @@ import {
   useAppForm,
   useFormSubmit,
   useFormSubmitError,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser"
 import { useStore } from "@tanstack/react-form"
@@ -71,6 +72,7 @@ import {
 } from "../../lib/portal"
 import { appWords } from "../../lib/product-words"
 import { productUi } from "../../product/product-ui"
+import { PortalAccountSkeleton, PortalAppointmentSkeleton, PortalBudgetsSkeleton, PortalDocumentsSkeleton, PortalPageSkeleton } from "../../components/skeletons/public-portal"
 
 /**
  * El portal del paciente (ADR 0037): lo privado, todo junto y cuando quiera.
@@ -103,6 +105,7 @@ export const Route = createFileRoute("/portal")({
       { name: "referrer", content: "no-referrer" },
     ],
   }),
+  pendingComponent: PortalPageSkeleton,
   component: PortalPage,
 })
 
@@ -514,11 +517,7 @@ function PortalDashboard({
   }, [ended])
 
   if (sessionQuery.isPending) {
-    return (
-      <PageShell maxWidth="md">
-        <LoadingState message="Abriendo tu portal…" />
-      </PageShell>
-    )
+    return <PortalPageSkeleton />
   }
   if (sessionQuery.isError && !ended) {
     return (
@@ -605,7 +604,12 @@ function NextAppointment({ sessionToken }: { sessionToken: string }) {
   const done = () => void queryClient.invalidateQueries({ queryKey: key })
   const confirm = useMutation({ mutationFn: (id: string) => confirmPortalAppointmentApi(sessionToken, id), onSuccess: done })
   const cancel = useMutation({ mutationFn: (id: string) => cancelPortalAppointmentApi(sessionToken, id), onSuccess: done })
-  if (query.isPending) return <LoadingState message="Cargando tu cita…" />
+  if (query.isPending)
+    return (
+      <SkeletonRegion message="Cargando tu cita…">
+        <PortalAppointmentSkeleton title="Tu próxima cita" />
+      </SkeletonRegion>
+    )
   if (query.isError) return <ErrorState title="No pudimos cargar tus citas" message={portalErrorMessage(query.error)} onRetry={() => void query.refetch()} />
   const upcoming = query.data
     .filter((appt) => (appt.status === "programada" || appt.status === "confirmada") && new Date(appt.endsAt).getTime() > Date.now())
@@ -743,7 +747,12 @@ function BudgetsBlock({ sessionToken }: { sessionToken: string }) {
       void queryClient.invalidateQueries({ queryKey: key })
     },
   })
-  if (query.isPending) return <LoadingState message="Cargando tus presupuestos…" />
+  if (query.isPending)
+    return (
+      <SkeletonRegion message="Cargando tus presupuestos…">
+        <PortalBudgetsSkeleton title="Por decidir" />
+      </SkeletonRegion>
+    )
   if (query.isError) return <ErrorState title="No pudimos cargar tus presupuestos" message={portalErrorMessage(query.error)} onRetry={() => void query.refetch()} />
   const awaiting = query.data.filter((budget) => AWAITING.has(budget.status))
   const decided = query.data.filter((budget) => !AWAITING.has(budget.status))
@@ -1005,7 +1014,12 @@ function DocumentsBlock({ sessionToken }: { sessionToken: string }) {
   const [opening, setOpening] = useState("")
   const [openError, setOpenError] = useState<string | null>(null)
 
-  if (documentsQuery.isPending) return <LoadingState message="Cargando tus documentos…" />
+  if (documentsQuery.isPending)
+    return (
+      <SkeletonRegion message="Cargando tus documentos…">
+        <PortalDocumentsSkeleton />
+      </SkeletonRegion>
+    )
   if (documentsQuery.isError) {
     return <ErrorState title="No pudimos cargar tus documentos" message={portalErrorMessage(documentsQuery.error)} onRetry={() => documentsQuery.refetch()} />
   }
@@ -1056,7 +1070,12 @@ function AccountBlock({ sessionToken }: { sessionToken: string }) {
     queryFn: () => fetchPortalAccount(sessionToken),
     retry: false,
   })
-  if (accountQuery.isPending) return <LoadingState message="Cargando tu cuenta…" />
+  if (accountQuery.isPending)
+    return (
+      <SkeletonRegion message="Cargando tu cuenta…">
+        <PortalAccountSkeleton />
+      </SkeletonRegion>
+    )
   if (accountQuery.isError) {
     return <ErrorState title="No pudimos cargar tu cuenta" message={portalErrorMessage(accountQuery.error)} onRetry={() => accountQuery.refetch()} />
   }

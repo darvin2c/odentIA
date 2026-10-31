@@ -15,16 +15,22 @@ import {
 } from "@odentia/dental"
 import { FindingChoices, PlanSiteChoices } from "../../components/dental/dictation-finding-choices"
 import { LeavesFindingField, leavesFindingBody } from "../../components/dental/leaves-finding-field"
-import { SignedOdontogramFact } from "../../components/dental/odontogram-assessments"
 import { useSignedOdontogramPapers } from "../../components/dental/signed-odontogram-papers"
-import { OdontogramaTab } from "../../components/dental/odontograma-tab"
-import { PeriodontogramaTab } from "../../components/dental/periodontal/periodontograma-tab"
-import { ToothSelector } from "../../components/dental/tooth-selector"
-import { ToothSiteSelector } from "../../components/dental/tooth-site-selector"
 import { useActiveFindings } from "../../lib/dental/use-odontogram"
 import type { PrescribingRulesUi, ProductSiteUi, ProductUi } from "@odentia/clinic-app/product/product-ui"
 import { dentalEncounter } from "./encounter"
 import { dentalHealth } from "./health"
+import { OdontogramLoading, OdontogramSkeleton, PeriodontogramLoading, PeriodontogramSkeleton } from "../../components/dental/odontogram-skeleton"
+import { lazyPart } from "./lazy-part"
+
+const OdontogramaTab = lazyPart(() => import("../../components/dental/odontograma-tab").then((m) => m.OdontogramaTab), <OdontogramLoading />)
+const PeriodontogramaTab = lazyPart(
+  () => import("../../components/dental/periodontal/periodontograma-tab").then((m) => m.PeriodontogramaTab),
+  <PeriodontogramLoading />,
+)
+const SignedOdontogramFact = lazyPart(() => import("../../components/dental/odontogram-assessments").then((m) => m.SignedOdontogramFact))
+const ToothSelector = lazyPart(() => import("../../components/dental/tooth-selector").then((m) => m.ToothSelector))
+const ToothSiteSelector = lazyPart(() => import("../../components/dental/tooth-site-selector").then((m) => m.ToothSiteSelector))
 
 /** El «dónde» de odentIA: la pieza en FDI (ISO 3950) y sus caras. */
 const dentalSite: ProductSiteUi = {
@@ -71,6 +77,7 @@ export const dentalUi: ProductUi = {
         id: "odontograma",
         label: "Odontograma",
         needsRecord: true,
+        skeleton: <OdontogramSkeleton />,
         render: ({ patientId, record, place, openSection }) => (
           <OdontogramaTab
             patientId={patientId}
@@ -86,6 +93,7 @@ export const dentalUi: ProductUi = {
         id: "periodontograma",
         label: "Periodontograma",
         parent: "odontograma",
+        skeleton: <PeriodontogramSkeleton />,
         render: ({ patientId, opened, openSection }) => (
           <PeriodontogramaTab
             patientId={patientId}

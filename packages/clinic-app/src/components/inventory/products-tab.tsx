@@ -5,7 +5,7 @@
  * falta» cuando algo hace falta. Recepción ve la misma lista sin «Pedir».
  */
 import { Button, cn, toast } from "@odentia/ui"
-import { DataTable, DataTableSkeleton, EmptyState, RowActions, type RowActionItem, SearchInput, useListSearch, ViewTabs } from "@odentia/ui-patterns"
+import { DataTable, EmptyState, RowActions, type RowActionItem, SearchInput, SkeletonRegion, useListSearch, ViewTabs } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { Package } from "lucide-react"
@@ -27,6 +27,7 @@ import {
   writeOffExpired,
 } from "../../lib/inventory"
 import { isAmbiguousMutationError, QueryErrorState } from "../../lib/query-error"
+import { ProductRowsSkeleton } from "../skeletons/inventory"
 import { Chip } from "./fields"
 import { type PurchasePreset, useInventory } from "./inventory-scope"
 import { appWords } from "../../lib/product-words"
@@ -275,7 +276,9 @@ export function ProductsTab() {
       )}
 
       {query.isPending ? (
-        <DataTableSkeleton columnCount={5} label="Cargando productos…" />
+        <SkeletonRegion message="Cargando productos…">
+          <ProductRowsSkeleton />
+        </SkeletonRegion>
       ) : query.isError && !list ? (
         <QueryErrorState error={query.error} onRetry={() => void query.refetch()} />
       ) : nothingYet ? (

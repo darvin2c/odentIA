@@ -10,6 +10,7 @@ import {
   useAppForm,
   useFormSubmit,
   useFormSubmitError,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
@@ -21,11 +22,13 @@ import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { type ConversationListItem, usePermission } from "../../lib/crm"
 import { useOrgEvents } from "../../lib/org-events"
+import { AgentDecisionsSkeleton, AgentLogPageSkeleton, AgentLogStatsSkeleton, AgentRunsSkeleton } from "../../components/skeletons/agent"
 
 export const Route = createFileRoute("/_org/agent/registro")({
   validateSearch: (search: Record<string, unknown>): { conversation?: string } => ({
     conversation: typeof search.conversation === "string" ? search.conversation : undefined,
   }),
+  pendingComponent: AgentLogPageSkeleton,
   component: AgentSupervisionPage,
 })
 
@@ -287,7 +290,12 @@ function AgentSupervisionPage() {
       <Link to="/agent" className="-mt-3 inline-flex min-h-11 w-fit items-center text-sm font-semibold text-primary hover:underline sm:min-h-0">
         Volver al resumen del agente
       </Link>
-      {statsQuery.isPending ? <LoadingState /> : statsQuery.isError ? <div role="alert"><p>No pudimos cargar la actividad del agente.</p><Button variant="outline" onClick={() => void statsQuery.refetch()}>Volver a intentar</Button></div> : null}
+      {statsQuery.isError ? <div role="alert"><p>No pudimos cargar la actividad del agente.</p><Button variant="outline" onClick={() => void statsQuery.refetch()}>Volver a intentar</Button></div> : null}
+      {statsQuery.isPending ? (
+        <SkeletonRegion message="Cargando la actividad del agente…">
+          <AgentLogStatsSkeleton />
+        </SkeletonRegion>
+      ) : (
       <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <KpiCard
           title="Ejecuciones"
@@ -336,6 +344,7 @@ function AgentSupervisionPage() {
           </div>
         </div>
       </div>
+      )}
       {stats && stats.topTools.length > 0 ? (
         <div className="elevated rounded-xl border bg-card p-6">
           <div className="text-sm font-medium text-muted-foreground">Herramientas más usadas</div>
@@ -350,7 +359,7 @@ function AgentSupervisionPage() {
       ) : null}
       <div className="elevated rounded-xl border bg-card p-6">
         <h2 className="font-heading text-base font-medium">Últimas 50 ejecuciones</h2>
-        {runsQuery.isPending ? <LoadingState /> : runsQuery.isError ? <div role="alert"><p>No pudimos cargar las ejecuciones.</p><Button variant="outline" onClick={() => void runsQuery.refetch()}>Volver a intentar</Button></div> : runs.length === 0 ? (
+        {runsQuery.isPending ? <AgentRunsSkeleton /> : runsQuery.isError ? <div role="alert"><p>No pudimos cargar las ejecuciones.</p><Button variant="outline" onClick={() => void runsQuery.refetch()}>Volver a intentar</Button></div> : runs.length === 0 ? (
           <EmptyState title="Sin ejecuciones" description="Aún no hay actividad registrada." />
         ) : (
           <DataTable table={runsTable} />
@@ -384,7 +393,7 @@ function AgentSupervisionPage() {
           Lo que decidió sobre cada mensaje entrante y con qué confianza. Elegir el camino o el conocimiento sí cambia la
           respuesta; «en sombra» solo se registra. Ninguna acredita acierto por sí sola.
         </p>
-        {decisionsQuery.isPending ? <LoadingState /> : decisionsQuery.isError ? <div role="alert"><p>No pudimos cargar las decisiones.</p><Button variant="outline" onClick={() => void decisionsQuery.refetch()}>Volver a intentar</Button></div> : decisionsQuery.data.data.length === 0 ? (
+        {decisionsQuery.isPending ? <SkeletonRegion message="Cargando las decisiones…"><AgentDecisionsSkeleton /></SkeletonRegion> : decisionsQuery.isError ? <div role="alert"><p>No pudimos cargar las decisiones.</p><Button variant="outline" onClick={() => void decisionsQuery.refetch()}>Volver a intentar</Button></div> : decisionsQuery.data.data.length === 0 ? (
           <EmptyState title="Sin decisiones registradas" description="Elige un modelo de decisión en Configuración › Integraciones › Modelo del agente; cada mensaje entrante dejará aquí lo que decidió." />
         ) : (
           <ul className="mt-3 flex flex-col divide-y">

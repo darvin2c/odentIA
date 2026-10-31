@@ -44,11 +44,12 @@ import { AgentTabs } from "../../components/agent-tabs"
 import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
-import { activeOrgLocale } from "../../lib/locale"
 import { PageDraftGuard } from "../../lib/page-draft-guard"
 import { isAmbiguousMutationError } from "../../lib/query-error"
+import { KnowledgePageSkeleton } from "../../components/skeletons/agent"
 
 export const Route = createFileRoute("/_org/agent/knowledge")({
+  pendingComponent: KnowledgePageSkeleton,
   component: AgentKnowledgePage,
 })
 

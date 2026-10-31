@@ -8,7 +8,7 @@ import {
   AlertDialogTitle,
   Button,
 } from "@odentia/ui"
-import { useBlocker } from "@tanstack/react-router"
+import { useDraftBlocker } from "@odentia/ui-patterns"
 import { useEffect, useRef, useState } from "react"
 
 /** Compara valores de formulario, no metadatos de interacción ni orden de claves. */
@@ -29,10 +29,9 @@ export function usePageDraftGuard(dirty: boolean) {
   const [leave, setLeave] = useState<(() => void) | null>(null)
   const editedField = useRef<HTMLElement | null>(null)
   const restoreFocus = useRef(false)
-  const blocker = useBlocker({
+  const blocker = useDraftBlocker({
     disabled: !dirty,
     enableBeforeUnload: false,
-    withResolver: true,
     shouldBlockFn: () => dirtyRef.current,
   })
 

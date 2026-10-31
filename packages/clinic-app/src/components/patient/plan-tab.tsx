@@ -21,7 +21,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@odentia/ui"
-import { DetailDrawer, EmptyState, LoadingState } from "@odentia/ui-patterns"
+import { DetailDrawer, EmptyState, SkeletonRegion } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { ChevronDown, ClipboardList } from "lucide-react"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
@@ -30,6 +30,7 @@ import { fetchTreatmentPlans } from "../../lib/budgets"
 import { usePermission } from "../../lib/crm"
 import type { PatientSummary, PlanItem } from "../../lib/patients"
 import { QueryErrorState } from "../../lib/query-error"
+import { PlanPhasesSkeleton } from "../skeletons/person-sections"
 import { productUi } from "../../product/product-ui"
 import { ControlesPanel } from "./clinical-panels"
 import { NewEncounterButton } from "./new-encounter-button"
@@ -132,7 +133,9 @@ export function PlanTab({
           description="Por fases y en orden. Se indican dentro de una atención; «Ver» abre su recorrido al lado."
         >
           {itemsQuery.isPending || plansQuery.isPending ? (
-            <LoadingState message="Cargando tratamientos…" />
+            <SkeletonRegion message="Cargando tratamientos…">
+              <PlanPhasesSkeleton />
+            </SkeletonRegion>
           ) : itemsQuery.isError ? (
             <QueryErrorState error={itemsQuery.error} onRetry={() => void itemsQuery.refetch()} />
           ) : openItems.length === 0 ? (

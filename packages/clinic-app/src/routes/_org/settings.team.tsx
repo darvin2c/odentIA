@@ -9,7 +9,6 @@ import {
   ConfirmDialog,
   common,
   DataTable,
-  DataTableSkeleton,
   EmptyState,
   ErrorState,
   type FieldControl,
@@ -26,7 +25,7 @@ import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
-import { CalendarCheck, Plus, Users } from "lucide-react"
+import { CalendarCheck, Users } from "lucide-react"
 import { useMemo, useState } from "react"
 import { z } from "zod"
 import { ProfessionalProfileDrawer } from "../../components/professional-profile-drawer"
@@ -36,15 +35,18 @@ import { ChoiceSelect } from "../../components/ui/choice-select"
 import { ApiError } from "../../lib/api"
 import { authClient } from "../../lib/auth-client"
 import { fetchTeamCalendarFeeds, revokeTeamCalendarFeed, TEAM_CALENDAR_KEY, whenWords } from "../../lib/calendar-feed"
-import { useMyRole, usePermission } from "../../lib/crm"
+import { useCan, useMyRole, usePermission } from "../../lib/crm"
+import { settingsPrimary } from "../../lib/screen-rules"
 import { appRoleLabel } from "../../lib/product-words"
 import {
   fetchProfessionalProfiles,
   type ProfessionalProfile,
   registrationLabel,
 } from "../../lib/encounters"
+import { TeamPageSkeleton, TeamSkeleton } from "../../components/skeletons/settings"
 
 export const Route = createFileRoute("/_org/settings/team")({
+  pendingComponent: TeamPageSkeleton,
   component: TeamPage,
 })
 
@@ -165,6 +167,7 @@ function TeamPage() {
 
   const { org: routeOrg, session } = orgRouteApi.useRouteContext()
   const myRole = useMyRole()
+  const can = useCan()
   const canView = usePermission("settings.read")
   const canManage = usePermission("settings.write")
   const assignable = useMemo(() => assignableRoles(myRole), [myRole])
@@ -509,9 +512,7 @@ function TeamPage() {
       <PageHeader
         title="Equipo"
         subtitle={TEAM_SUBTITLE}
-        primary={
-          canManage ? { label: "Invitar al equipo", icon: <Plus aria-hidden />, onClick: openInvite } : undefined
-        }
+        primary={settingsPrimary("team", can, openInvite)}
       />
       <TeamTwoFactorCard canManage={canManage} myUserId={session.userId} />
       <FilterBar
@@ -538,7 +539,7 @@ function TeamPage() {
             onRetry={() => void orgQuery.refetch()}
           />
         ) : (
-          <DataTableSkeleton columnCount={6} rowCount={4} label="Cargando el equipo…" />
+          <TeamSkeleton />
         )
       ) : (
         <>

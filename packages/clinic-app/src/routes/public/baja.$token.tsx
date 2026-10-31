@@ -1,8 +1,9 @@
 import { Button } from "@odentia/ui"
-import { EmptyState, ErrorState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
+import { EmptyState, ErrorState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { useState } from "react"
+import { BajaPageSkeleton } from "../../components/skeletons/public-baja"
 import { ApiError } from "../../lib/api"
 import { fetchAutomationLink, submitAutomationLink } from "../../lib/public-automations"
 
@@ -13,6 +14,7 @@ export const Route = createFileRoute("/baja/$token")({
       { name: "referrer", content: "no-referrer" },
     ],
   }),
+  pendingComponent: BajaPageSkeleton,
   component: PublicUnsubscribePage,
 })
 
@@ -49,11 +51,7 @@ function PublicUnsubscribePage() {
   }
 
   if (infoQuery.isPending) {
-    return (
-      <PageShell maxWidth="md">
-        <LoadingState message="Cargando la solicitud de baja…" />
-      </PageShell>
-    )
+    return <BajaPageSkeleton />
   }
 
   if (infoQuery.isError) {

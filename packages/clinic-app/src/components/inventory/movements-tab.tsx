@@ -4,7 +4,7 @@
  * cuánto y quién. Las páginas las hace el servidor, con «Cargar más».
  */
 import { Button, Spinner } from "@odentia/ui"
-import { DataTable, DataTableSkeleton, EmptyState, SearchInput, useListSearch } from "@odentia/ui-patterns"
+import { DataTable, EmptyState, SearchInput, SkeletonRegion, useListSearch } from "@odentia/ui-patterns"
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { History, X } from "lucide-react"
@@ -22,6 +22,7 @@ import {
   whenText,
 } from "../../lib/inventory"
 import { QueryErrorState } from "../../lib/query-error"
+import { MovementRowsSkeleton } from "../skeletons/inventory"
 import { ChoiceSelect } from "../ui/choice-select"
 import { useInventory } from "./inventory-scope"
 import { MovementWhat, movementAmount } from "./movement-words"
@@ -147,7 +148,9 @@ export function MovementsTab() {
       </div>
 
       {query.isPending ? (
-        <DataTableSkeleton columnCount={5} label="Cargando movimientos…" />
+        <SkeletonRegion message="Cargando movimientos…">
+          <MovementRowsSkeleton />
+        </SkeletonRegion>
       ) : query.isError && rows.length === 0 ? (
         <QueryErrorState error={query.error} onRetry={() => void query.refetch()} />
       ) : rows.length === 0 ? (

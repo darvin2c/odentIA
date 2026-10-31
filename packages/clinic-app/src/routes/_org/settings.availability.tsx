@@ -25,6 +25,7 @@ import {
   scheduleToneAt,
   submitErrorMessage,
   zonedDateOf,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
@@ -47,12 +48,14 @@ import { ApiError, apiFetch } from "../../lib/api"
 import { useMyRole, usePermission } from "../../lib/crm"
 import { usePageDraftGuard } from "../../lib/page-draft-guard"
 import { appWords, upperFirst } from "../../lib/product-words"
+import { AvailabilityPageSkeleton, AvailabilitySkeleton } from "../../components/skeletons/settings"
 
 export const Route = createFileRoute("/_org/settings/availability")({
   validateSearch: (search: Record<string, unknown>): { branch?: string } => ({
     ...search,
     branch: typeof search.branch === "string" ? search.branch : undefined,
   }),
+  pendingComponent: AvailabilityPageSkeleton,
   component: AvailabilityPage,
 })
 
@@ -643,7 +646,9 @@ function AvailabilityPage() {
           onRetry={() => void resourcesQuery.refetch()}
         />
       ) : (
-        <AvailabilitySkeleton />
+        <SkeletonRegion message="Cargando horarios y ausencias…">
+          <AvailabilitySkeleton />
+        </SkeletonRegion>
       )}
       {roomForm && resources ? (
         <RoomForm
@@ -730,48 +735,6 @@ function roomConsequence(room: RoomSetting, activeCount: number): string {
   if (activeCount <= 1)
     parts.push(`Es la única ${word} activa de la sede: sin una no se puede reservar.`)
   return parts.join(" ")
-}
-
-/** Una fila por día del horario semanal, para reservar su hueco. */
-const WEEK_SLOTS = ["lun", "mar", "mie", "jue", "vie", "sab", "dom"]
-
-/** El hueco de la pantalla mientras llega la sede: sus dos grupos y sus tarjetas. */
-function AvailabilitySkeleton() {
-  return (
-    <div role="status" aria-busy aria-label="Cargando horarios y ausencias…" className="grid gap-4">
-      <div aria-hidden className="grid gap-4">
-        <div className="mt-2 grid gap-1.5">
-          <Skeleton className="h-6 w-52" />
-          <Skeleton className="h-4 w-72 max-w-full" />
-        </div>
-        <Skeleton className="h-10 w-64 max-w-full rounded-full" />
-        <div className={CARD}>
-          <Skeleton className="h-5 w-60 max-w-full" />
-          {WEEK_SLOTS.map((day) => (
-            <Skeleton key={day} className="h-10 w-full" />
-          ))}
-        </div>
-        <div className={CARD}>
-          <Skeleton className="h-5 w-48" />
-          <Skeleton className="h-9 w-full" />
-        </div>
-        <div className="mt-2 grid gap-1.5">
-          <Skeleton className="h-6 w-32" />
-          <Skeleton className="h-4 w-64 max-w-full" />
-        </div>
-        <div className="grid gap-4 lg:grid-cols-2">
-          <div className={CARD}>
-            <Skeleton className="h-5 w-24" />
-            <Skeleton className="h-9 w-full" />
-          </div>
-          <div className={CARD}>
-            <Skeleton className="h-5 w-56 max-w-full" />
-            <Skeleton className="h-10 w-full" />
-          </div>
-        </div>
-      </div>
-    </div>
-  )
 }
 
 /** «Del lunes 12 de octubre al viernes 16 de octubre» o «Lunes 12 de octubre, de 12:00 a 14:00». */

@@ -1,7 +1,8 @@
 import { Button } from "@odentia/ui"
-import { LoadingState } from "@odentia/ui-patterns"
+import { SkeletonRegion } from "@odentia/ui-patterns"
 import { QueryErrorState } from "../../lib/query-error"
 import type { KnowledgeBasics as Basics } from "./knowledge-model"
+import { KnowledgeBasicsSkeleton } from "../skeletons/agent"
 
 /** Preguntas pendientes a la vista como etiquetas; el resto se resume en «y N más». */
 const CHIPS = 4
@@ -47,7 +48,9 @@ export function KnowledgeBasics({
         ) : null}
       </div>
       {isPending ? (
-        <LoadingState message="Cargando…" />
+        <SkeletonRegion message="Cargando…">
+          <KnowledgeBasicsSkeleton />
+        </SkeletonRegion>
       ) : error || !basics ? (
         <QueryErrorState error={error} onRetry={onRetry} />
       ) : (

@@ -6,6 +6,7 @@ import {
   submitErrorMessage,
   useAppForm,
   useFormSurface,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -19,6 +20,7 @@ import type { PersonPage } from "../../lib/people"
 import { QueryErrorState } from "../../lib/query-error"
 import { SummaryCard } from "../patient/resumen-tab"
 import { PersonPicker, type PickedPerson } from "../person-picker"
+import { ChannelRowsSkeleton } from "../skeletons/person-sections"
 
 type Identity = ContactFull["identities"][number]
 
@@ -179,7 +181,9 @@ export function PersonChannels({ person }: { person: PersonPage }) {
         </p>
       ) : null}
       {contact.isPending ? (
-        <p className="text-sm text-muted-foreground">Cargando…</p>
+        <SkeletonRegion message="Cargando…">
+          <ChannelRowsSkeleton />
+        </SkeletonRegion>
       ) : contact.isError ? (
         <QueryErrorState error={contact.error} onRetry={() => void contact.refetch()} />
       ) : identities.length === 0 ? (

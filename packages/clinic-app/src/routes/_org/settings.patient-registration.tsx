@@ -12,7 +12,6 @@ import {
   Checkbox,
   cn,
   ScrollArea,
-  Skeleton,
   toast,
 } from "@odentia/ui"
 import { Switch } from "@odentia/ui/components/switch"
@@ -23,6 +22,7 @@ import {
   submitForm,
   useAppForm,
   useFormSubmitError,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -44,8 +44,10 @@ import { useClinicalProfile, useOrgProfile } from "../../lib/org"
 import { PageDraftGuard } from "../../lib/page-draft-guard"
 import { fetchRegistrationConfig, saveRegistrationConfig } from "../../lib/patient-registration"
 import { brandedQrDataUrl, brandedQrPng, registrationSheetPng } from "../../lib/branded-qr"
+import { PatientRegistrationPageSkeleton, PatientRegistrationSkeleton } from "../../components/skeletons/settings"
 
 export const Route = createFileRoute("/_org/settings/patient-registration")({
+  pendingComponent: PatientRegistrationPageSkeleton,
   component: PatientRegistrationSettingsPage,
 })
 
@@ -106,25 +108,6 @@ function PatientRegistrationSettingsPage() {
     )
   }
   return <RegistrationSettings />
-}
-
-/** El hueco de la pantalla mientras carga: tarjetas con sus campos. */
-function RegistrationSkeleton() {
-  return (
-    <div className="flex flex-col gap-6">
-      <p role="status" className="sr-only">
-        Cargando el registro de pacientes…
-      </p>
-      {["a", "b", "c"].map((key) => (
-        <div key={key} className={CARD} aria-hidden>
-          <Skeleton className="h-5 w-40" />
-          <Skeleton className="h-9 w-full" />
-          <Skeleton className="h-9 w-full" />
-          <Skeleton className="h-9 w-2/3" />
-        </div>
-      ))}
-    </div>
-  )
 }
 
 function RegistrationSettings() {
@@ -207,7 +190,7 @@ function RegistrationSettings() {
 
   if (!ready) {
     return (
-      <div className="flex max-w-3xl flex-col gap-6">
+      <div className="flex max-w-6xl flex-col gap-6">
         <PageHeader title={TITLE} subtitle={SUBTITLE} />
         {configQuery.isError ? (
           <SettingsLoadError
@@ -215,7 +198,9 @@ function RegistrationSettings() {
             onRetry={() => void configQuery.refetch()}
           />
         ) : (
-          <RegistrationSkeleton />
+          <SkeletonRegion message="Cargando el registro de pacientes…">
+            <PatientRegistrationSkeleton />
+          </SkeletonRegion>
         )}
       </div>
     )

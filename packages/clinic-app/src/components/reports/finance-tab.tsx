@@ -8,11 +8,11 @@
  */
 import { formatMoney } from "@odentia/clinical"
 import { Button, cn, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, toast } from "@odentia/ui"
-import { ColumnChart, EmptyState, LoadingState, ShareBar, WaterfallChart, type WaterfallStep } from "@odentia/ui-patterns"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { ColumnChart, EmptyState, ShareBar, SkeletonRegion, WaterfallChart, type WaterfallStep } from "@odentia/ui-patterns"
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { AlertTriangle, ArrowDown, Bot } from "lucide-react"
-import { type ReactNode, useId, useMemo, useState } from "react"
+import { type ReactNode, useEffect, useId, useMemo, useState } from "react"
 import { plainAmount } from "../../lib/commissions"
 import { usePermission } from "../../lib/crm"
 import { cashErrorMessage, dismissExpenseGapApi, type ExpenseCategory } from "../../lib/finance-cash"
@@ -38,7 +38,8 @@ import {
 import { amountFromCents } from "../../lib/workspace"
 import { ExpenseFormDrawer, type ExpenseDraft, type ExpensePlace } from "../finance/expense-form-drawer"
 import { PromotionsCard, PromotionsView } from "./promotions-view"
-import { BarRows, type Better, ChangeLine, DownloadButton, EmptyLine, ReportCard, WHOLE_CLINIC } from "./report-parts"
+import { BarRows, type Better, ChangeLine, DownloadButton, EmptyLine, ReportBody, ReportCard, WHOLE_CLINIC } from "./report-parts"
+import { CommissionsBodySkeleton, FinanceTabSkeleton, OutlookBodySkeleton } from "../skeletons/reports"
 import { downloadReportTable } from "../../lib/reports-ask"
 import { ADMIN_NAME } from "../../lib/agent-names"
 
@@ -108,8 +109,20 @@ function FinanceMain({
 }) {
   const navigate = useNavigate()
   const canFinance = usePermission("finance.read")
-  const report = useQuery({ queryKey: reportKey("finance", query), queryFn: () => fetchReport<ReportFinance>("finance", query), retry: false })
-  if (report.isPending) return <LoadingState />
+  const report = useQuery({ queryKey: reportKey("finance", query), queryFn: () => fetchReport<ReportFinance>("finance", query), placeholderData: keepPreviousData, retry: false })
+  const queryClient = useQueryClient()
+  // Lo que se pinta debajo de las cifras se pide a la vez que ellas, no después.
+  useEffect(() => {
+    for (const section of ["finance/commissions", "finance/outlook", "finance/promotions"] as const) {
+      void queryClient.prefetchQuery({ queryKey: reportKey(section, { period: query.period, branchId: query.branchId }), queryFn: () => fetchReport(section, { period: query.period, branchId: query.branchId }), retry: false })
+    }
+  }, [queryClient, query.period, query.branchId])
+  if (report.isPending)
+    return (
+      <SkeletonRegion message="Cargando las cifras…">
+        <FinanceTabSkeleton />
+      </SkeletonRegion>
+    )
   if (report.isError)
     return <QueryErrorState error={report.error} onRetry={() => void report.refetch()} notFound="La sede elegida ya no está disponible. Elige otra sede." />
   const data = report.data.data
@@ -132,7 +145,7 @@ function FinanceMain({
       />
     )
   return (
-    <div className="flex min-w-0 flex-col gap-4">
+    <ReportBody stale={report.isPlaceholderData}>
       <FinanceCards data={data} />
       {data.otherCurrencies.length > 0 ? (
         <p className="text-sm text-muted-foreground">
@@ -152,7 +165,7 @@ function FinanceMain({
         <MethodsCard data={data} />
         <PromotionsCard query={query} onOpen={() => onView("promociones")} />
       </div>
-    </div>
+    </ReportBody>
   )
 }
 
@@ -586,7 +599,12 @@ function CommissionsSection({ query, data }: { query: ReportQuery; data: ReportF
     </Link>
   )
   const body = () => {
-    if (report.isPending) return <LoadingState />
+    if (report.isPending)
+      return (
+        <SkeletonRegion message="Cargando las comisiones…" className="flex min-w-0 flex-col gap-3">
+          <CommissionsBodySkeleton />
+        </SkeletonRegion>
+      )
     if (report.isError) return <QueryErrorState error={report.error} onRetry={() => void report.refetch()} />
     const rows = report.data.data.rows
     if (rows.length === 0) return <EmptyLine>Nadie atendió ni cobró en este periodo.</EmptyLine>
@@ -906,7 +924,9 @@ function OutlookCard({ query, onOpenList }: { query: ReportQuery; onOpenList: (l
   if (report.isPending)
     return (
       <ReportCard title="Lo que viene">
-        <LoadingState />
+        <SkeletonRegion message="Cargando lo que viene…" className="flex min-w-0 flex-col gap-3">
+          <OutlookBodySkeleton />
+        </SkeletonRegion>
       </ReportCard>
     )
   if (report.isError)

@@ -21,6 +21,7 @@ import {
   useAppForm,
   useFormSubmitError,
   useFormSurface,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -62,6 +63,7 @@ import {
 } from "../../lib/data-requests"
 import { useOrgLocale } from "../../lib/locale"
 import { appWords } from "../../lib/product-words"
+import { DataRequestsSkeleton } from "../skeletons/person-sections"
 
 /** Por qué no se pudo cargar algo (la lista, el resumen de lo que se borra). */
 function problemOf(error: unknown): string | null {
@@ -119,7 +121,12 @@ export function DataRequestsPanel({ patientId }: { patientId: string }) {
         description="Los pedidos de una persona sobre sus datos los atienden Recepción y Administración."
       />
     )
-  if (query.isPending) return <LoadingState message="Cargando sus pedidos…" />
+  if (query.isPending)
+    return (
+      <SkeletonRegion message="Cargando sus pedidos…">
+        <DataRequestsSkeleton />
+      </SkeletonRegion>
+    )
   if (query.isError)
     return (
       <ErrorState

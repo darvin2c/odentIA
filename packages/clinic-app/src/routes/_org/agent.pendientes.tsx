@@ -1,5 +1,5 @@
 import { Button } from "@odentia/ui"
-import { EmptyState, LoadingState, PageHeader, PageShell, SubmitButton } from "@odentia/ui-patterns"
+import { EmptyState, PageHeader, PageShell, SubmitButton, SkeletonRegion } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { useState } from "react"
@@ -7,9 +7,11 @@ import { AgentTabs } from "../../components/agent-tabs"
 import { AWAITING_ANSWER_KEY, type AwaitingAnswerList } from "../../lib/agent"
 import { ApiError, apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
-import { timeAgo, usePermission } from "../../lib/crm"
+import { timeAgo, useCan, usePermission } from "../../lib/crm"
+import { canConfirmByPhone } from "../../lib/screen-rules"
 import { useOrgEvents } from "../../lib/org-events"
 import { useReceptionName } from "../../lib/agent-names"
+import { AwaitingAnswerPageSkeleton, AwaitingAnswerSkeleton } from "../../components/skeletons/agent"
 
 /**
  * Agente › «Esperan su sí» (decisión 21, tablero 2c): solo las citas que el
@@ -20,6 +22,7 @@ import { useReceptionName } from "../../lib/agent-names"
  * regla que la del agente.
  */
 export const Route = createFileRoute("/_org/agent/pendientes")({
+  pendingComponent: AwaitingAnswerPageSkeleton,
   component: AwaitingAnswerPage,
 })
 
@@ -31,9 +34,7 @@ function AwaitingAnswerPage() {
   const canSupervise = usePermission("agent.read")
   const canDecide = usePermission("agent.decide")
   const canRead = canSupervise || canDecide
-  const canConversations = usePermission("conversations.write")
-  const canAgenda = usePermission("appointments.write")
-  const canConfirm = canDecide && canConversations && canAgenda
+  const canConfirm = canConfirmByPhone(useCan())
   const receptionName = useReceptionName()
   /** Lo que pasó con la última «Confirmó por teléfono», dicho junto a su fila. */
   const [outcome, setOutcome] = useState<{ id: string; text: string; ok: boolean } | null>(null)
@@ -80,7 +81,9 @@ function AwaitingAnswerPage() {
             </p>
           </div>
           {query.isPending ? (
-            <LoadingState message="Cargando…" />
+            <SkeletonRegion message="Cargando…">
+              <AwaitingAnswerSkeleton />
+            </SkeletonRegion>
           ) : query.isError || !data ? (
             <div role="alert" className="flex flex-wrap items-center gap-3 text-sm">
               <p>No pudimos cargar las citas que esperan respuesta.</p>

@@ -1,6 +1,7 @@
 import { Badge, Button, ScrollArea, Spinner } from "@odentia/ui"
-import { DataRefreshMarker, EmptyState, LoadingState, personInitials } from "@odentia/ui-patterns"
+import { DataRefreshMarker, EmptyState, personInitials, SkeletonRegion } from "@odentia/ui-patterns"
 import { Bot } from "lucide-react"
+import { ConversationRowsSkeleton } from "../skeletons/inbox"
 import { useReceptionName } from "../../lib/agent-names"
 import { channelIcon } from "../../lib/channels"
 import { screenReasonWords } from "../../lib/contact-screen"
@@ -216,7 +217,11 @@ export function ConversationList({
             <DataRefreshMarker />
           </div>
         ) : null}
-        {isLoading && !hasItems && <LoadingState className="m-3" message="Cargando conversaciones…" />}
+        {isLoading && !hasItems && (
+          <SkeletonRegion message="Cargando conversaciones…">
+            <ConversationRowsSkeleton />
+          </SkeletonRegion>
+        )}
         {isError && !hasItems && !isLoading && (
           <div className="flex flex-wrap items-center gap-2 p-4">
             <p className="text-sm text-destructive" role="alert">

@@ -18,8 +18,8 @@ import {
   DataRefreshMarker,
   EmptyState,
   ErrorState,
-  LoadingState,
   PageShell,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
@@ -34,6 +34,7 @@ import { PersonHeader } from "../../components/patient/patient-header"
 import { PersonChannels } from "../../components/person/person-channels"
 import { PersonConversations } from "../../components/person/person-conversations"
 import { PersonData } from "../../components/person/person-data"
+import { PersonLoading, PersonSectionLoading } from "../../components/person/person-loading"
 import { PersonLinks } from "../../components/person/person-links"
 import { PersonSummary } from "../../components/person/person-summary"
 import { PatientPortalAccessSection } from "../../components/portal/portal-access-section"
@@ -148,6 +149,7 @@ export function validatePersonSearch(search: Record<string, unknown>): PersonSea
  */
 export const Route = createFileRoute("/_org/people/$personId")({
   validateSearch: validatePersonSearch,
+  pendingComponent: PersonLoading,
   component: PersonPageRoute,
 })
 
@@ -239,12 +241,7 @@ function PersonPageRoute() {
         />
       </PageShell>
     )
-  if (personQuery.isPending && !person)
-    return (
-      <PageShell>
-        <LoadingState message="Cargando…" />
-      </PageShell>
-    )
+  if (personQuery.isPending && !person) return <PersonLoading />
   // Historia bloqueada (ADR 0080): Administración ve por qué y la abre con motivo; los demás, 404.
   // También al bloquearla con la página abierta, o al vencer la hora para leerla.
   if (isRecordLocked(personQuery.error)) return <LockedRecordPage personId={personId} />
@@ -272,7 +269,11 @@ function PersonPageRoute() {
     if (!patientDetail) {
       if (detail.isError)
         return <QueryErrorState error={detail.error} onRetry={() => void detail.refetch()} />
-      return <LoadingState message="Cargando la ficha…" />
+      return (
+        <SkeletonRegion message="Cargando la ficha…">
+          <PersonSectionLoading section={section} pageOf={pageOf} />
+        </SkeletonRegion>
+      )
     }
     return render(patientId, patientDetail)
   }
@@ -302,7 +303,17 @@ function PersonPageRoute() {
       node
     )
 
-  const content = (): ReactNode => <Suspense fallback={<LoadingState message="Cargando…" />}>{sectionContent()}</Suspense>
+  const content = (): ReactNode => (
+    <Suspense
+      fallback={
+        <SkeletonRegion message="Cargando…">
+          <PersonSectionLoading section={section} pageOf={pageOf} />
+        </SkeletonRegion>
+      }
+    >
+      {sectionContent()}
+    </Suspense>
+  )
   const sectionContent = (): ReactNode => {
     switch (section) {
       case "resumen":

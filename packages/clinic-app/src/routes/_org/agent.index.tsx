@@ -1,7 +1,7 @@
 import { Alert, AlertDescription, AlertTitle, Badge, Button, buttonVariants, cn } from "@odentia/ui"
 import { Switch } from "@odentia/ui/components/switch"
 import { CapReachedNotice } from "../../components/agent/reception-off-notice"
-import { AgentMark, AgentSurface, ConfirmDialog, EmptyState, LoadingState, PageHeader, PageShell, submitErrorMessage } from "@odentia/ui-patterns"
+import { AgentMark, AgentSurface, ConfirmDialog, EmptyState, PageHeader, PageShell, submitErrorMessage, SkeletonRegion } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { ArrowRight, ChevronRight, CircleHelp, Lightbulb, Lock, MessageCircle, Mic } from "lucide-react"
@@ -17,8 +17,10 @@ import { channelLabel } from "../../lib/channels"
 import { type AgentConfig, timeAgo, usePermission } from "../../lib/crm"
 import { useOrgEvents } from "../../lib/org-events"
 import { QueryErrorState } from "../../lib/query-error"
+import { AgentOverviewPageSkeleton, AgentOverviewSkeleton } from "../../components/skeletons/agent"
 
 export const Route = createFileRoute("/_org/agent/")({
+  pendingComponent: AgentOverviewPageSkeleton,
   component: AgentSummaryPage,
 })
 const orgRouteApi = getRouteApi("/_org")
@@ -170,7 +172,9 @@ function AgentSummaryPage() {
       <CapReachedNotice />
       <AgentTabs />
       {overviewQuery.isPending || rolesQuery.isPending ? (
-        <LoadingState message="Cargando el resumen…" />
+        <SkeletonRegion message="Cargando el resumen…">
+          <AgentOverviewSkeleton />
+        </SkeletonRegion>
       ) : overviewQuery.isError || !overview ? (
         <QueryErrorState error={overviewQuery.error} onRetry={() => void overviewQuery.refetch()} />
       ) : (

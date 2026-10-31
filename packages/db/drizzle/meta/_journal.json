@@ -183,6 +183,13 @@
       "when": 1793399859386,
       "tag": "0025_documentos_formales",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1793456547916,
+      "tag": "0026_indice_cobro_por_procedimiento",
+      "breakpoints": true
     }
   ]
 }

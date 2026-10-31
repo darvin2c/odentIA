@@ -10,17 +10,18 @@ import { Alert, AlertDescription, AlertTitle, Badge, Button, cn, toast } from "@
 import {
   common,
   DataTable,
-  DataTableSkeleton,
   EmptyState,
   ErrorState,
   FilterBar,
   type FilterDef,
+  SkeletonRegion,
   useListSearch,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { useMemo, useState } from "react"
+import { ExpenseRowsSkeleton, ExpensesTotalSkeleton } from "../skeletons/finance"
 import { VoidDrawer } from "./void-drawer"
 import { plainAmount } from "../../lib/commissions"
 import { usePermission } from "../../lib/crm"
@@ -250,6 +251,8 @@ export function ExpensesTab({
             </dl>
           ) : null}
         </section>
+      ) : expenses.isPending ? (
+        <ExpensesTotalSkeleton />
       ) : null}
 
       {unpaid && (unpaid.orders > 0 || unpaid.otherCurrencies.length > 0) ? (
@@ -290,7 +293,9 @@ export function ExpensesTab({
       ) : null}
 
       {expenses.isPending ? (
-        <DataTableSkeleton label="Consultando los gastos del mes" />
+        <SkeletonRegion message="Consultando los gastos del mes">
+          <ExpenseRowsSkeleton />
+        </SkeletonRegion>
       ) : expenses.isError || !data ? (
         <ErrorState
           title="No se pudieron consultar los gastos"

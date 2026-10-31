@@ -10,7 +10,7 @@
  */
 
 import { Badge, Button } from "@odentia/ui"
-import { DatePickerButton, EmptyState, FormDrawer, useAppForm, useFormSurface, zonedDateOf } from "@odentia/ui-patterns"
+import { DatePickerButton, EmptyState, FormDrawer, useAppForm, useFormSurface, zonedDateOf, SkeletonRegion } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
@@ -29,6 +29,7 @@ import { activeOrgTimeZone } from "../../lib/locale"
 import { usePermission } from "../../lib/crm"
 import type { PatientDocument, PatientFull } from "../../lib/patients"
 import { type PickedPerson, PersonPicker } from "../person-picker"
+import { ResponsibleRowsSkeleton } from "../skeletons/person-sections"
 
 const MAX_TEXT = 2000
 
@@ -186,7 +187,9 @@ export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX
       </div>
 
       {list.isPending ? (
-        <p className="text-sm text-muted-foreground">Cargando responsables…</p>
+        <SkeletonRegion message="Cargando responsables…">
+          <ResponsibleRowsSkeleton />
+        </SkeletonRegion>
       ) : rows.length === 0 ? (
         <EmptyState
           title="Sin responsables"

@@ -42,7 +42,7 @@ function DirectionsPage() {
   if (!found) {
     return (
       <PageShell maxWidth="md">
-        <LoadingState message="Abriendo el mapa…" />
+        <LoadingState kind="indeterminate" message="Abriendo el mapa…" />
       </PageShell>
     )
   }

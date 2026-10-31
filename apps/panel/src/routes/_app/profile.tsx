@@ -1,4 +1,4 @@
-import { Badge, Button, FieldGroup, Separator, Skeleton, toast } from "@odentia/ui"
+import { Badge, Button, FieldGroup, Separator, toast } from "@odentia/ui"
 import {
   ConfirmDialog,
   common,
@@ -15,6 +15,7 @@ import {
   useAppForm,
   useFormSurface,
   usePasswordRequirements,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -39,6 +40,7 @@ import {
   TwoFactorSetupDrawer,
   useTwoFactorStatus,
 } from "../../components/two-factor"
+import { ClinicsSkeleton, ProfilePageSkeleton, SessionsSkeleton } from "../../components/skeletons/profile"
 
 type ProfileEdit = "profile" | "password" | "email" | TwoFactorEdit
 
@@ -52,6 +54,7 @@ export const Route = createFileRoute("/_app/profile")({
       ...(typeof search.next === "string" ? { next: search.next } : {}),
     }
   },
+  pendingComponent: ProfilePageSkeleton,
   component: ProfilePage,
 })
 
@@ -388,10 +391,9 @@ function SessionsCard() {
       </div>
       <div>
         {sessionsQuery.isPending ? (
-          <div className="flex flex-col gap-3">
-            <Skeleton className="h-12 w-full" />
-            <Skeleton className="h-12 w-full" />
-          </div>
+          <SkeletonRegion message="Cargando tus sesiones…">
+            <SessionsSkeleton />
+          </SkeletonRegion>
         ) : sessionsQuery.isError ? (
           <ErrorState
             error={sessionsQuery.error}
@@ -677,9 +679,9 @@ function MyClinicsCard() {
         <p className="text-sm text-muted-foreground">Clínicas a las que perteneces y tu rol en cada una.</p>
       </div>
       {orgsQuery.isPending ? (
-        <div className="flex flex-col gap-3">
-          <Skeleton className="h-12 w-full" />
-        </div>
+        <SkeletonRegion message="Cargando tus clínicas…">
+          <ClinicsSkeleton />
+        </SkeletonRegion>
       ) : orgsQuery.isError ? (
         <ErrorState
           error={orgsQuery.error}

@@ -1,6 +1,7 @@
-import { EmptyState, ErrorState, LoadingState, PageShell } from "@odentia/ui-patterns"
+import { EmptyState, ErrorState, PageShell } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
+import { AvisoPageSkeleton } from "../../components/skeletons/public-aviso"
 import { ApiError } from "../../lib/api"
 import { orgSlugFromHostname, requestHostname } from "../../lib/host"
 import { fetchPublicPrivacyNotice } from "../../lib/patient-registration"
@@ -18,6 +19,7 @@ export const Route = createFileRoute("/aviso")({
       { name: "referrer", content: "no-referrer" },
     ],
   }),
+  pendingComponent: AvisoPageSkeleton,
   component: PrivacyNoticePage,
 })
 
@@ -39,11 +41,7 @@ function PrivacyNoticePage() {
     )
   }
   if (query.isPending) {
-    return (
-      <PageShell maxWidth="md">
-        <LoadingState message="Cargando el aviso de privacidad…" />
-      </PageShell>
-    )
+    return <AvisoPageSkeleton />
   }
   if (query.isError) {
     return (

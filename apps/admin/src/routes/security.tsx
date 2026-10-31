@@ -173,14 +173,14 @@ function SecurityPage() {
   const failure = session.error
   if (failure instanceof ApiError && failure.status === 401) {
     window.location.assign(panelUrl(`/login?next=${encodeURIComponent(window.location.href)}`))
-    return <LoadingState message="Redirigiendo al inicio de sesión…" />
+    return <LoadingState kind="indeterminate" message="Redirigiendo al inicio de sesión…" />
   }
   const notStaff =
     failure instanceof ApiError && failure.status === 403 && failure.shape.code === "STAFF_ONLY"
 
   let content: ReactNode
   if (session.isPending) {
-    content = <LoadingState message="Verificando tu sesión…" />
+    content = <LoadingState kind="indeterminate" message="Verificando tu sesión…" />
   } else if (session.isError) {
     content =
       notStaff && invitation ? (

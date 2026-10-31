@@ -11,17 +11,18 @@ import { Badge, Button, Spinner } from "@odentia/ui"
 import {
   common,
   DataTable,
-  DataTableSkeleton,
   EmptyState,
   ErrorState,
   FilterBar,
   type FilterDef,
+  SkeletonRegion,
   useListSearch,
 } from "@odentia/ui-patterns"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { useMemo, useState } from "react"
 import { PersonLink } from "../person-link"
+import { DebtRowsSkeleton } from "../skeletons/finance"
 import { WriteToPersonDialog } from "../write-to-person"
 import { plainAmount } from "../../lib/commissions"
 import { usePermission } from "../../lib/crm"
@@ -251,7 +252,9 @@ export function DebtsTab({
         </div>
       ) : null}
       {debts.isPending ? (
-        <DataTableSkeleton label="Consultando quién debe" />
+        <SkeletonRegion message="Consultando quién debe">
+          <DebtRowsSkeleton />
+        </SkeletonRegion>
       ) : debts.isError && rows.length === 0 ? (
         <ErrorState
           title="No se pudieron consultar las deudas"

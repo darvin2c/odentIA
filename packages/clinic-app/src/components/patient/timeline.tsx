@@ -18,7 +18,8 @@ import {
   Field,
   FieldLabel,
 } from "@odentia/ui"
-import { ViewTabs } from "@odentia/ui-patterns"
+import { SkeletonRegion, ViewTabs } from "@odentia/ui-patterns"
+import { TimelineItemsSkeleton } from "../skeletons/person-sections"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ClipboardList, FileText, Image as ImageIcon } from "lucide-react"
@@ -243,7 +244,7 @@ function DocumentCard({ patientId, item }: { patientId: string; item: TimelineIt
           {item.encounterId ? " · vinculado a atención" : ""}
         </AttachmentDescription>
       </AttachmentContent>
-      <AttachmentActions className="pr-2">
+      <AttachmentActions className="max-w-full min-w-0 shrink pr-2">
         <DocumentOpenButton patientId={patientId} documentId={item.refId} label={item.title} />
       </AttachmentActions>
     </Attachment>
@@ -570,7 +571,9 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
       ) : null}
 
       {feed.isPending ? (
-        <p className="text-sm text-muted-foreground">Cargando historia clínica…</p>
+        <SkeletonRegion message="Cargando historia clínica…" className="flex flex-col gap-4">
+          <TimelineItemsSkeleton />
+        </SkeletonRegion>
       ) : null}
 
       {feed.isError ? (

@@ -42,7 +42,8 @@ import {
   PromptInputTools,
   usePromptInputAttachments,
 } from "@odentia/ui/components/ai-elements/prompt-input"
-import { ConfirmDialog, EmptyState, ErrorState, LoadingState, RowActions, SpeechInput } from "@odentia/ui-patterns"
+import { ConfirmDialog, EmptyState, ErrorState, RowActions, SpeechInput } from "@odentia/ui-patterns"
+import { ThreadSkeleton } from "../skeletons/inbox"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Bot, CheckCircle2, ChevronDown, ChevronLeft, Copy, CornerDownLeft, Hand, PanelRight } from "lucide-react"
@@ -552,7 +553,7 @@ export function ThreadView({
   // Sin detalle aún no hay estructura que anticipar; con detalle en caché el
   // refetch (automático o manual) nunca lo retira: sigue visible abajo.
   if (detailQuery.isPending && !detail) {
-    return <LoadingState className="min-h-0 flex-1" message="Cargando la conversación…" />
+    return <ThreadSkeleton showBack={showBack} onBack={onBack} />
   }
   if (!detail) {
     // Solo 404/403 dicen que no está o que no hay acceso; otro fallo (red, servidor) se reintenta.

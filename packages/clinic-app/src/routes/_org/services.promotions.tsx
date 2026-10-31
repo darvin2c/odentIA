@@ -28,7 +28,7 @@ import {
   EmptyState,
   ErrorState,
   FormDrawer,
-  LoadingState,
+  SkeletonRegion,
   PageHeader,
   submitErrorMessage,
   useAppForm,
@@ -40,14 +40,15 @@ import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
-import { BadgePercent, Plus } from "lucide-react"
+import { BadgePercent } from "lucide-react"
 import { useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { ChoiceSelect } from "../../components/ui/choice-select"
 import { RadioChips } from "../../components/ui/radio-chips"
 import { useReceptionName } from "../../lib/agent-names"
 import { ApiError } from "../../lib/api"
-import { usePermission } from "../../lib/crm"
+import { useCan, usePermission } from "../../lib/crm"
+import { promotionsPrimary } from "../../lib/screen-rules"
 import { useOrgProfile } from "../../lib/org"
 import {
   createPromotionApi,
@@ -68,8 +69,10 @@ import {
   type PriceDisclosure,
   type ServiceCatalogItem,
 } from "../../lib/services"
+import { PromotionsListSkeleton, PromotionsPageSkeleton } from "../../components/skeletons/services"
 
 export const Route = createFileRoute("/_org/services/promotions")({
+  pendingComponent: PromotionsPageSkeleton,
   component: PromotionsPage,
 })
 
@@ -172,6 +175,7 @@ function moneyText(promotion: PromotionWithMetrics, locale: string): string | nu
  */
 function PromotionsPage() {
   const receptionName = useReceptionName()
+  const can = useCan()
   const canConfigure = usePermission("settings.write")
   const canView = canConfigure || usePermission("catalog.read")
   const navigate = useNavigate()
@@ -269,7 +273,7 @@ function PromotionsPage() {
     <PageHeader
       title="Promociones"
       subtitle={`Un nombre, unas fechas y el precio de cada servicio. Caja y ${receptionName} las leen de aquí.`}
-      primary={canConfigure && regional ? { label: "Nueva promoción", icon: <Plus aria-hidden />, onClick: () => open(null) } : undefined}
+      primary={regional ? promotionsPrimary(can, () => open(null)) : profileQuery.isPending ? promotionsPrimary(can) : undefined}
     />
   )
 
@@ -289,7 +293,9 @@ function PromotionsPage() {
     <div className="flex min-w-0 flex-col gap-4">
       {header}
       {profileQuery.isPending || listQuery.isPending ? (
-        <LoadingState />
+        <SkeletonRegion message="Cargando las promociones…" className="flex min-w-0 flex-col gap-4">
+          <PromotionsListSkeleton />
+        </SkeletonRegion>
       ) : profileQuery.isError ? (
         <ErrorState
           message="No se pudo cargar el formato de la clínica"

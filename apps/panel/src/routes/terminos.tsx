@@ -1,8 +1,9 @@
-import { AuthAside, AuthSplit, LoadingState, SubmitButton, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
+import { AuthAside, AuthSplit, SubmitButton, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { z } from "zod"
+import { TerminosPageSkeleton, TerminosSkeleton } from "../components/skeletons/terminos"
 import { accountInvitationsQuery } from "../lib/account-organizations"
 import { API_URL, authClient } from "../lib/auth-client"
 import { authError, authFailureOf, authFormMessage } from "../lib/auth-error"
@@ -20,6 +21,7 @@ export const Route = createFileRoute("/terminos")({
   validateSearch: (search: Record<string, unknown>) => ({
     ...(typeof search.next === "string" ? { next: search.next } : {}),
   }),
+  pendingComponent: TerminosPageSkeleton,
   component: TermsStepPage,
 })
 
@@ -132,7 +134,7 @@ function TermsStepPage() {
         {status.isError ? (
           <AuthAlert>No pudimos cargar los documentos. Recarga la página.</AuthAlert>
         ) : (
-          <LoadingState message="Cargando…" />
+          <TerminosSkeleton />
         )}
       </AuthSplit>
     )

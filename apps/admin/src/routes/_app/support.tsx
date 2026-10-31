@@ -7,19 +7,28 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@odentia/ui"
-import { EmptyState, ErrorState, ExpandableText, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
+import { EmptyState, ErrorState, ExpandableText, PageHeader, PageShell, SkeletonRegion } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { useRef, useState } from "react"
 import { z } from "zod"
+import {
+  SupportCaseSkeleton,
+  SupportCasesSkeleton,
+  SupportKnowledgeSkeleton,
+  SupportMetricsSkeleton,
+  SupportPageSkeleton,
+} from "../../components/skeletons/support"
 import { caseReview, SupportCaseReview } from "../../components/support-review"
 import { api } from "../../lib/api"
 import { API_URL } from "../../lib/auth-client"
+import { useAdminUserId, useIsAdmin } from "../../lib/session"
 
 export const Route = createFileRoute("/_app/support")({
   // `?caso=<id>`: el enlace del aviso por correo abre ese caso.
   validateSearch: (search: Record<string, unknown>): { caso?: string } =>
     typeof search.caso === "string" && search.caso ? { caso: search.caso } : {},
+  pendingComponent: SupportPageSkeleton,
   component: SupportPage,
 })
 
@@ -139,7 +148,6 @@ const metricsPayload = z.object({
 })
 
 const casesPayload = z.object({ items: z.array(caseItem), total: z.number() })
-const sessionPayload = z.object({ actor: z.object({ userId: z.string(), role: z.string() }) })
 const assigneePayload = z.object({
   userId: z.string(),
   name: z.string(),
@@ -198,12 +206,8 @@ function SupportPage() {
       api("/api/admin/support/metrics").then((body: unknown) => metricsPayload.parse(body)),
     enabled: tab === "metricas",
   })
-  const session = useQuery({
-    queryKey: ["admin-session"],
-    queryFn: () =>
-      api("/api/admin/access/session").then((body: unknown) => sessionPayload.parse(body)),
-    retry: false,
-  })
+  const myUserId = useAdminUserId()
+  const isAdmin = useIsAdmin()
   const assignees = useQuery({
     queryKey: ["admin-support-assignees"],
     queryFn: () =>
@@ -297,8 +301,6 @@ function SupportPage() {
   const kase = detail.data ?? null
   const checkedCases = items.filter((item) => checked.includes(item.id))
   const recipientOrgs = checkedCases.map((item) => item.organizationId)
-  const myUserId = session.data?.actor.userId ?? null
-  const isAdmin = session.data?.actor.role === "admin"
   const assigneeName = (userId: string | null): string | null =>
     userId === null
       ? null
@@ -335,7 +337,9 @@ function SupportPage() {
       {tab === "metricas" ? (
         <section aria-label="Métricas de soporte" className="flex flex-col gap-2">
           {metrics.isPending ? (
-            <LoadingState message="Cargando métricas…" />
+            <SkeletonRegion message="Cargando métricas…">
+              <SupportMetricsSkeleton />
+            </SkeletonRegion>
           ) : metrics.isError ? (
             <ErrorState
               message="No pude cargar las métricas."
@@ -378,7 +382,9 @@ function SupportPage() {
             sin mezclar datos de organizaciones.
           </p>
           {knowledge.isPending ? (
-            <LoadingState message="Cargando agrupación…" />
+            <SkeletonRegion message="Cargando agrupación…">
+              <SupportKnowledgeSkeleton />
+            </SkeletonRegion>
           ) : knowledge.isError ? (
             <ErrorState
               message="No pude cargar la agrupación."
@@ -436,7 +442,9 @@ function SupportPage() {
           </div>
 
           {cases.isPending ? (
-            <LoadingState message="Cargando casos…" />
+            <SkeletonRegion message="Cargando casos…">
+              <SupportCasesSkeleton />
+            </SkeletonRegion>
           ) : cases.isError ? (
             <ErrorState message="No pude cargar los casos." onRetry={() => void cases.refetch()} />
           ) : items.length === 0 ? (
@@ -743,17 +751,15 @@ function SupportPage() {
                     ))}
                   </SelectContent>
                 </Select>
-                {myUserId ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="min-h-11 sm:min-h-9"
-                    disabled={assign.isPending}
-                    onClick={() => assign.mutate(myUserId)}
-                  >
-                    Asignarme
-                  </Button>
-                ) : null}
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="min-h-11 sm:min-h-9"
+                  disabled={assign.isPending}
+                  onClick={() => assign.mutate(myUserId)}
+                >
+                  Asignarme
+                </Button>
                 {/* Una «Revisión de cobro» se resuelve al decidirla (ADR 0054). */}
                 {STATUSES.filter((value) => value !== kase.status && !(value === "resuelto" && kase.review?.status === "pendiente")).map((value) => (
                   <Button
@@ -891,7 +897,9 @@ function SupportPage() {
                 </Button>
               </div>
               {detail.isPending ? (
-                <LoadingState message="Cargando el caso…" />
+                <SkeletonRegion message="Cargando el caso…" className="flex flex-col gap-3">
+                  <SupportCaseSkeleton />
+                </SkeletonRegion>
               ) : (
                 <ErrorState
                   message="No pude cargar este caso."

@@ -13,7 +13,7 @@ import {
   FOLLOW_UP_REPEAT_MONTHS,
   followUpRepeatWords,
 } from "@odentia/clinical"
-import { Badge, Button, buttonVariants, FieldLegend, FieldSet, Input, toast } from "@odentia/ui"
+import { Badge, Button, FieldLegend, FieldSet, Input, toast } from "@odentia/ui"
 import {
   addDays,
   DatePickerButton,
@@ -25,6 +25,7 @@ import {
   useAppForm,
   useFieldContext,
   useFormSurface,
+  SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -35,7 +36,6 @@ import { invalidateAppointmentQueries } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
 import {
   cancelFollowUpApi,
-  cancelPrescriptionApi,
   completeFollowUpApi,
   createFollowUpApi,
   createPrescriptionApi,
@@ -61,6 +61,7 @@ import { ChoiceSelect } from "../ui/choice-select"
 import { DiagnosisSearch } from "./diagnosis-search"
 import { PrescriptionPaper } from "./document-papers"
 import { FollowUpScheduler } from "./follow-up-scheduler"
+import { ControlRowsSkeleton } from "../skeletons/person-sections"
 
 const MAX_TITLE = 200
 const MAX_TEXT = 2000
@@ -360,7 +361,9 @@ export function ControlesPanel({
       </div>
 
       {list.isPending ? (
-        <p className="text-sm text-muted-foreground">Cargando controles…</p>
+        <SkeletonRegion message="Cargando controles…">
+          <ControlRowsSkeleton />
+        </SkeletonRegion>
       ) : list.isError ? (
         <p role="alert" className="text-sm text-destructive">
           No se pudieron cargar los controles.{" "}

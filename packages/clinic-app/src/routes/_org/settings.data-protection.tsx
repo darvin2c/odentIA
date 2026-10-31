@@ -1,5 +1,5 @@
 import { ScrollArea } from "@odentia/ui"
-import { LoadingState, PageHeader } from "@odentia/ui-patterns"
+import { PageHeader, SkeletonRegion } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { Download } from "lucide-react"
@@ -11,8 +11,10 @@ import { formatDate } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { legalLinks, orgSlugFromHostname, requestHostname } from "../../lib/host"
 import { appWords } from "../../lib/product-words"
+import { DataProtectionPageSkeleton, DataProtectionSkeleton } from "../../components/skeletons/settings"
 
 export const Route = createFileRoute("/_org/settings/data-protection")({
+  pendingComponent: DataProtectionPageSkeleton,
   component: DataProtectionPage,
 })
 
@@ -95,7 +97,9 @@ function DataProtectionPage() {
       {!allowed ? (
         <SettingsNoAccess />
       ) : query.isPending ? (
-        <LoadingState message="Armando el registro…" />
+        <SkeletonRegion message="Armando el registro…">
+          <DataProtectionSkeleton />
+        </SkeletonRegion>
       ) : query.isError && !query.data ? (
         <SettingsLoadError what="la protección de datos" onRetry={() => void query.refetch()} />
       ) : (

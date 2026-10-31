@@ -5,8 +5,25 @@ import { useActiveBranch } from "../../lib/active-branch"
 import { type AgendaAppointment, type AgendaResources, invalidateAppointmentQueries } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
-import { AppointmentDrawer } from "./appointment-drawer"
-import { BookingDrawer, type BookingSeed } from "./booking-drawer"
+import type { AppointmentDrawer as AppointmentDrawerComponent } from "./appointment-drawer"
+import type { BookingDrawer as BookingDrawerComponent, BookingSeed } from "./booking-drawer"
+
+type AppointmentDrawerType = typeof AppointmentDrawerComponent
+type BookingDrawerType = typeof BookingDrawerComponent
+
+// Se montan en todas las pantallas pero se abren de vez en cuando: su código baja al abrirlos.
+// Si no baja, el cajón lo dice: la pantalla de atrás y lo que tenga a medio llenar siguen ahí.
+const CODE_ERROR = "No se pudo abrir. Ciérralo y recarga la página."
+const AppointmentDrawer = React.lazy(() =>
+  import("./appointment-drawer")
+    .then((m) => ({ default: m.AppointmentDrawer }))
+    .catch(() => ({ default: (({ onClose }) => <Waiting title="Cita" error={CODE_ERROR} onClose={onClose} />) as AppointmentDrawerType })),
+)
+const BookingDrawer = React.lazy(() =>
+  import("./booking-drawer")
+    .then((m) => ({ default: m.BookingDrawer }))
+    .catch(() => ({ default: (({ onClose }) => <Waiting title="Nueva cita" error={CODE_ERROR} onClose={onClose} />) as BookingDrawerType })),
+)
 
 /**
  * La cita y «Nueva cita» abiertas desde cualquier pantalla, sin ir a la Agenda
@@ -113,6 +130,7 @@ function AppointmentHost({
   if (!item || !resources.data) return <Waiting title="Cita" onClose={onClose} />
   const timeZone = resources.data.data.timeZone
   return (
+    <React.Suspense fallback={<Waiting title="Cita" onClose={onClose} />}>
     <AppointmentDrawer
       appointment={item}
       canWrite={canWrite}
@@ -130,6 +148,7 @@ function AppointmentHost({
       }}
       onRebook={onRebook}
     />
+    </React.Suspense>
   )
 }
 
@@ -144,6 +163,7 @@ function BookingHost({ seed, onClose }: { seed: BookingSeed; onClose: () => void
   if (!resources.data) return <Waiting title="Nueva cita" onClose={onClose} />
   const data = resources.data.data
   return (
+    <React.Suspense fallback={<Waiting title="Nueva cita" onClose={onClose} />}>
     <BookingDrawer
       seed={seed}
       branchId={data.branchId}
@@ -160,6 +180,7 @@ function BookingHost({ seed, onClose }: { seed: BookingSeed; onClose: () => void
         announce(created)
       }}
     />
+    </React.Suspense>
   )
 }
 

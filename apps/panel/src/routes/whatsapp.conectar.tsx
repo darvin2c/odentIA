@@ -1,5 +1,5 @@
 import { Button } from "@odentia/ui"
-import { AuthAside, AuthSplit, LoadingState } from "@odentia/ui-patterns"
+import { AuthAside, AuthSplit } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { useState } from "react"
@@ -9,6 +9,7 @@ import {
   type FacebookSignupConfig,
   type FacebookSignupConnection,
 } from "../components/whatsapp/facebook-signup"
+import { WhatsAppConnectPageSkeleton, WhatsAppConnectSkeleton } from "../components/skeletons/whatsapp-conectar"
 import { accountOrganizationsQuery } from "../lib/account-organizations"
 import { ApiError, apiFetch } from "../lib/api"
 import { AuthAlert, AuthLegal } from "../lib/auth-screens"
@@ -38,6 +39,7 @@ export const Route = createFileRoute("/whatsapp/conectar")({
       ? { reconectar: search.reconectar }
       : {}),
   }),
+  pendingComponent: WhatsAppConnectPageSkeleton,
   component: WhatsAppConnectPage,
 })
 
@@ -92,8 +94,8 @@ function WhatsAppConnectPage() {
 
   if (organizations.isPending || (clinic && config.isPending)) {
     return (
-      <AuthSplit title={title} aside={aside} legal={<AuthLegal />}>
-        <LoadingState message="Cargando…" />
+      <AuthSplit title={title} aside={aside} legal={<AuthLegal />} footer={back}>
+        <WhatsAppConnectSkeleton />
       </AuthSplit>
     )
   }
