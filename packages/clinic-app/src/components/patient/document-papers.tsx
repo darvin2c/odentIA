@@ -26,6 +26,7 @@ import {
   type ConsentDocument,
   cancelConsent,
   consentSignatureWords,
+  consentStatusWord,
   fetchConsentHistory,
   ORDER_KIND_TITLES,
   ORDER_STATUS_LABELS,
@@ -378,7 +379,7 @@ function ConsentHistoryDrawer({
   onClose: () => void
 }) {
   const history = useQuery({
-    queryKey: ["consent-history", document.id, document.status],
+    queryKey: ["consent-history", document.id, document.status, document.linkSentAt, document.personSignedAt],
     queryFn: () => fetchConsentHistory(document.id),
   })
   return (
@@ -480,7 +481,7 @@ export function ConsentPaper({
       type="consent"
       documentId={document.id}
       title={`Consentimiento · ${document.titleSnapshot}`}
-      status={`${CONSENT_STATUS_LABELS[document.status]} · ${formatDate(document.signedAt ?? document.createdAt)}`}
+      status={`${consentStatusWord(document)} · ${formatDate(document.signedAt ?? document.personSignedAt ?? document.createdAt)}`}
       send={
         !canWrite
           ? null
@@ -489,7 +490,9 @@ export function ConsentPaper({
             : pending
               ? {
                   kind: "blocked",
-                  reason: "Se envía cuando esté firmado. Esta hoja es para firmar en papel.",
+                  reason: document.personSignedAt
+                    ? "Se envía cuando lo confirmes."
+                    : "Se envía cuando esté firmado. Esta hoja es para firmar en papel.",
                 }
               : {
                   kind: "blocked",
@@ -497,7 +500,7 @@ export function ConsentPaper({
                 }
       }
       menu={menu}
-      revision={`${document.status}-${document.pdfDocumentId ?? ""}-${document.revokePdfDocumentId ?? ""}`}
+      revision={`${document.status}-${document.personSignedAt ?? ""}-${document.pdfDocumentId ?? ""}-${document.revokePdfDocumentId ?? ""}`}
       page={page}
       onClose={onClose}
       notice={

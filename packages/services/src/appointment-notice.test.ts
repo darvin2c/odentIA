@@ -4,7 +4,7 @@ import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
 import { automationConsent, automationJob, automationRule } from "@odentia/db/schema/automation"
 import { patientContact, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
-import { agentConfig, contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
+import { agentConfig, channelTemplate, contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { portalSession } from "@odentia/db/schema/portal"
 import { and, asc, eq } from "drizzle-orm"
@@ -32,7 +32,14 @@ import { createContact, listContacts } from "./contacts.js"
 import { listConversations, writeToPerson } from "./conversations.js"
 import { getContactWorkspace } from "./crm-workspace.js"
 import { nextPatientNumber } from "./patients.js"
-import { getBookingLinkCalendar, issuePersonalLink } from "./booking-links.js"
+import {
+  cancelBookingLinkAppointment,
+  changeBookingLinkAppointment,
+  confirmBookingLinkAppointment,
+  getBookingLinkCalendar,
+  issuePersonalLink,
+  reserveBookingLink,
+} from "./booking-links.js"
 import { resolvePersonalLinkRefs } from "./personal-link-token.js"
 import { getPortalAppointmentCalendar, reschedulePortalAppointment } from "./portal.js"
 import { configurePublicLinks } from "./public-links.js"
@@ -422,6 +429,107 @@ describe("al cambiar la cita, el agente le avisa", () => {
     const theirs = (await jobsOf(c)).find((job) => job.contactId === ana.contactId)
     expect(theirs).toMatchObject({ status: "omitido", cause: "sin_permiso", taskId: null })
     expect(await ownerDb.select().from(crmTask).where(eq(crmTask.organizationId, c.orgId))).toEqual([])
+  })
+})
+
+describe("lo que la persona hace con su cita desde su enlace, pasadas las 24 horas", () => {
+  const noticesOf = async (c: Clinic) =>
+    (await jobsOf(c)).filter((job) => job.kind.startsWith("aviso_cita_")).map((job) => job.kind)
+  const agentMessages = (conversationId: string) =>
+    ownerDb
+      .select({ contentType: message.contentType, templateName: message.templateName })
+      .from(message)
+      .where(and(eq(message.conversationId, conversationId), eq(message.senderKind, "agent")))
+  /** Quedó pedido a WhatsApp al conectar: aquí lo aprueba. */
+  const approveLinkReceived = (c: Clinic) =>
+    ownerDb
+      .update(channelTemplate)
+      .set({ status: "aprobada" })
+      .where(and(eq(channelTemplate.connectionId, c.whatsappId!), eq(channelTemplate.name, "odentia_enlace_recibido_v1")))
+  /** Escribió hace dos días: WhatsApp ya no deja responderle con texto. */
+  const quietPerson = async (c: Clinic, name: string) => {
+    const someone = await person(c, name, { consent: ["recordatorio"], openWindow: true })
+    await ownerDb
+      .update(conversation)
+      .set({ lastInboundAt: new Date(Date.now() - 2 * DAY) })
+      .where(eq(conversation.id, someone.conversationId!))
+    return { ...someone, conversationId: someone.conversationId! }
+  }
+
+  it("reservar, mover y cancelar salen con el aviso de su cita, que dice la fecha", async () => {
+    const c = await clinic({ approved: ["aviso_cita_reservada", "aviso_cita_movida", "aviso_cita_cancelada"] })
+    await lineOn(c)
+    const rosa = await quietPerson(c, "Rosa Quispe")
+    const link = await run(c, (tx) =>
+      issuePersonalLink(tx, c.orgId, { contactId: rosa.contactId, patientId: rosa.patientId, conversationId: rosa.conversationId, booking: true }, { secretsKey: KEY }),
+    )
+    await run(c, (tx) =>
+      reserveBookingLink(
+        tx, c.orgId, link.token,
+        { branchId: c.branchId, startsAt: later(3 * DAY).toISOString(), professionalUserId: c.professionalId, roomId: c.roomId },
+        { secretsKey: KEY },
+      ),
+    )
+    expect(await noticesOf(c)).toEqual(["aviso_cita_reservada"])
+    // No se intentó el texto, que WhatsApp rechazaría: el aviso es lo único que sale.
+    expect(await agentMessages(rosa.conversationId)).toEqual([])
+    expect((await deliver(c)).map((result) => result.outcome)).toEqual(["enviado"])
+    const [reserved] = await jobsOf(c)
+    expect(reserved).toMatchObject({ kind: "aviso_cita_reservada", status: "enviado", via: "plantilla" })
+
+    await run(c, (tx) =>
+      changeBookingLinkAppointment(tx, c.orgId, link.token, { startsAt: later(4 * DAY).toISOString(), professionalUserId: c.professionalId }, { secretsKey: KEY }),
+    )
+    expect(await noticesOf(c)).toContain("aviso_cita_movida")
+    await run(c, (tx) => cancelBookingLinkAppointment(tx, c.orgId, link.token, { secretsKey: KEY }))
+    expect(await noticesOf(c)).toContain("aviso_cita_cancelada")
+  })
+
+  it("con «Recordar la cita» apagada no sale el aviso de la cita: sale «Recibido desde su enlace»", async () => {
+    const c = await clinic({ approved: ["aviso_cita_movida"] })
+    const ana = await quietPerson(c, "Ana Torres")
+    await approveLinkReceived(c)
+    const booked = await book(c, ana.patientId, later(3 * DAY), { notice: false })
+    const link = await run(c, (tx) =>
+      issuePersonalLink(tx, c.orgId, { contactId: ana.contactId, patientId: ana.patientId, conversationId: ana.conversationId, appointmentId: booked.id }, { secretsKey: KEY }),
+    )
+    const moved = await run(c, (tx) =>
+      changeBookingLinkAppointment(tx, c.orgId, link.token, { startsAt: later(4 * DAY).toISOString(), professionalUserId: c.professionalId }, { secretsKey: KEY }),
+    )
+    expect(new Date(moved.startsAt).getTime()).toBe(later(4 * DAY).getTime())
+    expect(await noticesOf(c)).toEqual([])
+    expect(await agentMessages(ana.conversationId)).toEqual([{ contentType: "template", templateName: "odentia_enlace_recibido_v1" }])
+  })
+
+  it("si responderle falla, lo que hizo en su enlace vale igual", async () => {
+    const c = await clinic()
+    await lineOn(c)
+    const pedro = await quietPerson(c, "Pedro Ríos")
+    await approveLinkReceived(c)
+    const booked = await book(c, pedro.patientId, later(3 * DAY), { notice: false })
+    const link = await run(c, (tx) =>
+      issuePersonalLink(tx, c.orgId, { contactId: pedro.contactId, patientId: pedro.patientId, conversationId: pedro.conversationId, appointmentId: booked.id }, { secretsKey: KEY }),
+    )
+    // Sin un nombre con el que armar el mensaje, renderMessage falla.
+    await ownerDb.update(contact).set({ givenNames: null, displayName: " " }).where(eq(contact.id, pedro.contactId))
+    await run(c, (tx) => confirmBookingLinkAppointment(tx, c.orgId, link.token, { secretsKey: KEY }))
+    const [row] = await ownerDb.select({ status: appointment.status }).from(appointment).where(eq(appointment.id, booked.id))
+    expect(row?.status).toBe("confirmada")
+    expect(await agentMessages(pedro.conversationId)).toEqual([])
+  })
+
+  it("confirmar no tiene aviso propio: sale «Recibido desde su enlace»", async () => {
+    const c = await clinic()
+    await lineOn(c)
+    const pedro = await quietPerson(c, "Pedro Ríos")
+    await approveLinkReceived(c)
+    const booked = await book(c, pedro.patientId, later(3 * DAY), { notice: false })
+    const link = await run(c, (tx) =>
+      issuePersonalLink(tx, c.orgId, { contactId: pedro.contactId, patientId: pedro.patientId, conversationId: pedro.conversationId, appointmentId: booked.id }, { secretsKey: KEY }),
+    )
+    await run(c, (tx) => confirmBookingLinkAppointment(tx, c.orgId, link.token, { secretsKey: KEY }))
+    expect(await agentMessages(pedro.conversationId)).toEqual([{ contentType: "template", templateName: "odentia_enlace_recibido_v1" }])
+    expect(await noticesOf(c)).toEqual([])
   })
 })
 

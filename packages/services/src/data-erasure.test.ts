@@ -363,11 +363,12 @@ it("abrirla con motivo es solo leer por una hora; «vuelve a atenderse» la desb
 })
 
 it("bloqueada no deja tarea con su nombre por su deuda ni por su atención sin firmar; si vuelve a atenderse sí, sin ofrecerle otra fecha", async () => {
-  const { f, run, patientId, personId, branchId } = await patientWithHistory()
+  const { f, run, patientId, personId } = await patientWithHistory()
   const DAY = 86_400_000
   const former = randomUUID()
   await ownerDb.insert(user).values({ id: former, name: "Dr. Luis Paz", email: `${former}@example.test`, emailVerified: true })
-  await ownerDb.insert(encounter).values({ organizationId: "org_a", patientId, professionalUserId: former, branchId, startedAt: new Date(Date.now() - 5 * DAY) })
+  // Su atención abierta queda de alguien que ya no atiende: es la que deja esa tarea.
+  await ownerDb.update(encounter).set({ professionalUserId: former, startedAt: new Date(Date.now() - 5 * DAY) }).where(eq(encounter.patientId, patientId))
   await ownerDb.insert(patientCharge).values({ organizationId: "org_a", patientId, description: "Corona", amountCents: 50000, currency: "PEN", createdAt: new Date(Date.now() - 45 * DAY) })
   for (const key of ["cobranza_vencida", "atenciones_sin_firmar", "cita_cancelada"]) {
     const rule = await run((tx) => setLine(tx, "org_a", f.actor, key, { enabled: true }))

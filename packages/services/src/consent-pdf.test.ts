@@ -1,6 +1,6 @@
 import { consentSectionsToText, SUGGESTED_CONSENT_TEMPLATES } from "@odentia/clinical"
 import { afterEach, expect, it, vi } from "vitest"
-import { renderConsentPreviewPdf } from "./consent-pdf.js"
+import { renderConsentPdf, renderConsentPreviewPdf } from "./consent-pdf.js"
 import { type DocumentClinic, DocumentKit, documentFormat } from "./document-kit.js"
 
 const clinic = {
@@ -44,6 +44,54 @@ it("las firmas nunca quedan solas en otra hoja: la declaración pasa con ellas, 
     })
     expect(pages.signatures, `con ${extra} riesgos más`).toBe(pages.panel)
   }
+})
+
+it("firmado en su enlace y sin confirmar: lleva su firma y dice que falta confirmar, sin darlo por firmado", async () => {
+  const stateBox = vi.spyOn(DocumentKit.prototype, "stateBox")
+  const penSignatures = vi.spyOn(DocumentKit.prototype, "penSignatures")
+  const text = vi.spyOn(DocumentKit.prototype, "text")
+  const strokes = [[[10, 10], [200, 120]]]
+  const personSignedAt = new Date("2026-10-30T15:00:00Z")
+  const bytes = await renderConsentPdf(
+    {
+      document: {
+        status: "pendiente",
+        titleSnapshot: "Exodoncia",
+        procedureRef: null,
+        sectionsSnapshot: base,
+        bodySnapshot: "",
+        diagnosisCode: null,
+        declarationSnapshot: "He leído y comprendido la información.",
+        signatureMethod: "enlace",
+        signerKind: "paciente",
+        signerName: "Rosa Rojas",
+        signerDoc: "DNI 40000004",
+        signatureData: { strokes },
+        personSignedAt,
+        personSignedIp: "203.0.113.7",
+        personSignedUserAgent: "Mozilla/5.0 (Android)",
+        signedAt: null,
+        informerName: null,
+        informerTitle: null,
+        informerRegistration: null,
+        informedAt: null,
+      },
+      patient: { displayName: "Rosa Rojas", docType: "DNI", docNumber: "40000004", patientNumber: 7 },
+      diagnosisDescription: null,
+      establishment: null,
+    } as never,
+    clinic,
+  )
+  expect(Buffer.from(bytes.slice(0, 5)).toString("latin1")).toBe("%PDF-")
+  expect(stateBox).toHaveBeenCalledWith(expect.objectContaining({ title: "FALTA CONFIRMAR" }))
+  const [signer] = penSignatures.mock.calls[0]?.[0] ?? []
+  expect(signer).toMatchObject({ heading: "Paciente", strokes })
+  // La fecha en que firmó la persona, y el profesional aún sin nombre ni «firmado».
+  expect(signer?.lines.at(-1)?.text).toMatch(/^Firmó el .*30/)
+  const written = text.mock.calls.map(([line]) => line)
+  expect(written).toContain("Falta su confirmación")
+  expect(written).not.toContain("Firmado electrónicamente")
+  expect(written.join(" ")).toContain("IP 203.0.113.7")
 })
 
 it("lo que se calcula de antemano es lo que de verdad ocupa", async () => {

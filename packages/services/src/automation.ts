@@ -2933,7 +2933,8 @@ const APPOINTMENT_NOTICE_KINDS: ReadonlySet<string> = new Set(Object.values(NOTI
  * persona que la cita quedó reservada, que cambió de fecha o que se canceló
  * (con la opción de reservar otra). Venga de recepción, de la Agenda, de la
  * ficha o del portal. No avisa lo que el agente hizo en la conversación ni lo
- * que la persona hizo desde su enlace de reserva: ahí ya se le dijo.
+ * que la persona hizo desde su enlace de reserva: ahí ya se le dijo, salvo que
+ * WhatsApp ya no deje responderle por el chat (`tellConversation`, ADR 0129).
  *
  * Es un caso más de la línea (`automation_job`), con su permiso de
  * recordatorios, el horario de silencio y la vía que corresponda (respuesta,
@@ -3782,9 +3783,9 @@ export async function requestNeededTemplates(
 
 interface NoticeWords {
   title: string
-  /** Mientras tanto, en un mensaje que envía el agente. */
+  /** Mientras tanto, en un mensaje que sale solo o con otra acción. */
   agent: string
-  /** Mientras tanto, en uno que se envía desde la Bandeja. */
+  /** Mientras tanto, en uno que se elige en la Bandeja. */
   inbox: string
 }
 
@@ -3845,7 +3846,9 @@ export async function applyTemplateUpdates(
     const reason = templateReasonWords(template.reason)
     const why = reason ? `Motivo: ${reason}. ` : ""
     let title = `${notice.title}: «${owner.title}»`
-    let body = `${why}${owner.origin === "agente" ? notice.agent : notice.inbox}`
+    // Solo «Retomar» y los propios se eligen en la Bandeja (`sendables`).
+    const inInbox = owner.origin === "bandeja" || owner.origin === "clinica"
+    let body = `${why}${inInbox ? notice.inbox : notice.agent}`
     if (owner.isPending && !owner.isCurrent) {
       // Un cambio de texto: el anterior sigue saliendo hasta que aprueben el nuevo.
       if (template.status === "aprobada") {

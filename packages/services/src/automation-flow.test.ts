@@ -19,7 +19,7 @@ import { adminLineOf } from "./admin-lines.js"
 import { type AdminDecider, interpretAdminRequest, keywordAdminDecider, readNumbers } from "./admin-request.js"
 import { getAdminLine, getAdminPage, getAdminRecommendation, listAdminLinePeople, runAdminLineOnce } from "./agent-admin.js"
 import { confirmAppointmentByContact, confirmProposalByPhone, createProposal } from "./agent-operations.js"
-import { AUTOMATION_MESSAGES, type AutomationMessageKey, replyId } from "./automation-messages.js"
+import { AUTOMATION_MESSAGES, type AutomationMessageKey, LINK_RECEIVED_MESSAGE, replyId } from "./automation-messages.js"
 import {
   applyTemplateUpdates,
   automationReplyOf,
@@ -48,7 +48,7 @@ import {
   unsubscribeByToken,
 } from "./automation.js"
 import { assertTemplateSendable, listChannelTemplates, syncConnectionTemplates } from "./channel-templates.js"
-import { saveMessageText } from "./clinic-messages.js"
+import { saveMessageText, sendLinkReceivedNotice } from "./clinic-messages.js"
 import { createConnection } from "./connections.js"
 import { setAppointmentStatus } from "./appointments.js"
 import { closeConversationWith } from "./conversation-close.js"
@@ -1043,7 +1043,7 @@ async function forgetTemplate(c: Clinic, key: AutomationMessageKey) {
 }
 
 describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
-  it("al conectar quedan pedidos los dieciocho, sin esperar a que se prenda una línea", async () => {
+  it("al conectar quedan pedidos los diecinueve, sin esperar a que se prenda una línea", async () => {
     const c = await clinic()
     expect((await run(c, (tx) => listChannelTemplates(tx, c.orgId, c.whatsappId!))).map((item) => [item.name, item.status, item.messageKey])).toEqual([
       ["odentia_aviso_cita_cancelada_v2", "en_revision", "aviso_cita_cancelada"],
@@ -1052,6 +1052,7 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
       ["odentia_aviso_cita_reservada_v2", "en_revision", "aviso_cita_reservada"],
       ["odentia_cita_cancelada_v1", "en_revision", "cita_cancelada"],
       ["odentia_cita_sin_llegar_v1", "en_revision", "cita_sin_llegar"],
+      ["odentia_enlace_recibido_v1", "en_revision", "enlace_recibido"],
       ["odentia_invitar_a_volver_v1", "en_revision", "invitar_a_volver"],
       ["odentia_presupuesto_listo_v2", "en_revision", "presupuesto_listo"],
       ["odentia_recordatorio_cita_confirmada_v1", "en_revision", "recordatorio_cita_confirmada"],
@@ -1069,6 +1070,61 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
     const meta = fakeMeta()
     expect(await run(c, (tx) => requestNeededTemplates(tx, c.orgId, KEY, NOW, { fetch: meta.fetch }))).toBe(0)
     expect(meta.calls).toHaveLength(0)
+  })
+
+  it("«Recibido desde su enlace» entra solo a una clínica ya conectada: se pide, se avisa lo que dice WhatsApp y sale al aprobarlo", async () => {
+    const c = await clinic()
+    // Se conectó antes de que existiera este mensaje.
+    await ownerDb
+      .delete(channelTemplate)
+      .where(and(eq(channelTemplate.connectionId, c.whatsappId!), eq(channelTemplate.name, LINK_RECEIVED_MESSAGE.template)))
+    const meta = fakeMeta({ json: { id: "951", status: "PENDING", category: "UTILITY" } })
+    expect(await run(c, (tx) => requestNeededTemplates(tx, c.orgId, KEY, NOW, { fetch: meta.fetch }))).toBe(1)
+    expect(meta.calls).toHaveLength(1)
+    expect(meta.calls[0]).toMatchObject({
+      method: "POST",
+      body: {
+        name: "odentia_enlace_recibido_v1",
+        language: "es",
+        category: "UTILITY",
+        components: [{ type: "BODY", text: LINK_RECEIVED_MESSAGE.body, example: { body_text: [["Lucía", "Clínica Sonríe"]] } }],
+      },
+    })
+    expect(JSON.stringify(meta.calls[0]?.body)).not.toContain("BUTTONS")
+
+    // En revisión todavía no sale.
+    const p = await person(c, "Lucía Paredes", { openWindow: true })
+    const conversationId = p.conversationId!
+    const update = { externalId: "951", name: LINK_RECEIVED_MESSAGE.template, language: "es" }
+    expect(await run(c, (tx) => sendLinkReceivedNotice(tx, c.orgId, conversationId, NOW))).toBe("sin_aprobar")
+
+    // Lo rechaza: quien administra se entera, y no le dicen que depende de la Bandeja.
+    await run(c, (tx) => applyTemplateUpdates(tx, c.orgId, c.whatsappId!, [{ ...update, status: "rechazada" as const, reason: "INVALID_FORMAT" }]))
+    const rejected = (await noticesOf(c)).find((notice) => notice.title === "WhatsApp rechazó un mensaje: «Recibido desde su enlace»")
+    expect(rejected?.body).toContain("Mientras tanto solo sale como respuesta o por correo.")
+    expect(rejected?.body).not.toContain("Bandeja")
+    expect(await run(c, (tx) => sendLinkReceivedNotice(tx, c.orgId, conversationId, NOW))).toBe("sin_aprobar")
+
+    // Lo aprueba: se avisa y desde ahí se envía.
+    await run(c, (tx) => applyTemplateUpdates(tx, c.orgId, c.whatsappId!, [{ ...update, status: "aprobada" as const, reason: null }]))
+    const approved = (await noticesOf(c)).find((notice) => notice.title === "WhatsApp aprobó un mensaje: «Recibido desde su enlace»")
+    expect(approved?.body).toBe("Ya puede salir a quien no escribió en las últimas 24 horas.")
+    expect(await run(c, (tx) => sendLinkReceivedNotice(tx, c.orgId, conversationId, NOW))).toBe("enviado")
+    expect(await run(c, (tx) => sendLinkReceivedNotice(tx, c.orgId, conversationId, NOW))).toBe("ya_enviado")
+
+    // Cambiarle el texto no reinicia el tope: Meta cobraría un segundo mensaje el mismo día.
+    const edited = "Hola, {{persona}}. Muchas gracias: {{clinica}} ya recibió lo que completó desde su enlace, y le avisaremos si hace falta algo más."
+    await run(c, (tx) =>
+      saveMessageText(tx, c.orgId, c.whatsappId!, c.ownerId, "enlace_recibido", edited, { fetch: fakeMeta({ json: { id: "952", status: "PENDING", category: "UTILITY" } }).fetch, validateExternal: false, secretsKey: KEY }),
+    )
+    const [version] = await ownerDb.select({ templateName: clinicMessageVersion.templateName }).from(clinicMessageVersion).where(eq(clinicMessageVersion.organizationId, c.orgId))
+    await run(c, (tx) => applyTemplateUpdates(tx, c.orgId, c.whatsappId!, [{ externalId: "952", name: version!.templateName, language: "es", status: "aprobada" as const, reason: null }]))
+    expect(await run(c, (tx) => sendLinkReceivedNotice(tx, c.orgId, conversationId, NOW))).toBe("ya_enviado")
+    const [sent] = await ownerDb
+      .select({ templateName: message.templateName, status: message.status })
+      .from(message)
+      .where(eq(message.conversationId, conversationId))
+    expect(sent).toEqual({ templateName: "odentia_enlace_recibido_v1", status: "queued" })
   })
 
   it("el ciclo pide lo que faltó una sola vez, y sale cuando WhatsApp lo aprueba", async () => {
@@ -1194,6 +1250,7 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
       ["odentia_aviso_cita_reservada_v2", "en_revision", "aviso_cita_reservada", 3],
       ["odentia_cita_cancelada_v1", "en_revision", "cita_cancelada", 3],
       ["odentia_cita_sin_llegar_v1", "en_revision", "cita_sin_llegar", 3],
+      ["odentia_enlace_recibido_v1", "en_revision", "enlace_recibido", 2],
       ["odentia_invitar_a_volver_v1", "en_revision", "invitar_a_volver", 2],
       ["odentia_presupuesto_listo_v2", "en_revision", "presupuesto_listo", 2],
       ["odentia_recordatorio_cita_confirmada_v1", "en_revision", "recordatorio_cita_confirmada", 3],
@@ -1213,7 +1270,7 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
       run(c, (tx) => assertTemplateSendable(tx, c.orgId, c.whatsappId!, { name: "bienvenida", language: "es", params: 0, category: "marketing", contactId: null })),
     ).rejects.toThrow("La plantilla «bienvenida» lleva 1 dato y se enviaron 0")
     const rows = await ownerDb.select().from(channelTemplate).where(eq(channelTemplate.connectionId, c.whatsappId!))
-    expect(rows).toHaveLength(19)
+    expect(rows).toHaveLength(20)
   })
 })
 

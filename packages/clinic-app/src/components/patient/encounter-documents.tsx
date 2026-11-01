@@ -149,6 +149,8 @@ export function useEncounterDocuments(
     unpublished: needList.filter((need) => need.status === "sin_publicar"),
     consents: ownConsents,
     pendingSignatures,
+    /** Lo que aún no firmó; lo firmado en su enlace solo falta confirmarlo. */
+    toSign: pendingSignatures.filter((doc) => !doc.personSignedAt),
     orders: ownOrders,
     prescriptions: ownPrescriptions,
     forms: ownForms,
@@ -287,7 +289,7 @@ export function EncounterDocumentsBlock({
     setCreating(kind)
   }
 
-  const pendingTitles = docs.pendingSignatures.map((doc) => doc.titleSnapshot)
+  const pendingTitles = docs.toSign.map((doc) => doc.titleSnapshot)
 
   return (
     <div className="flex flex-col gap-4">
@@ -369,7 +371,7 @@ export function EncounterDocumentsBlock({
       ))}
 
       <ul className="flex flex-col divide-y rounded-lg border">
-        {docs.pendingSignatures.length > 0 ? (
+        {docs.toSign.length > 0 ? (
           <li className="flex flex-wrap items-center justify-between gap-3 p-3">
             <div className="flex min-w-0 flex-col">
               <span className="text-sm font-medium">
@@ -387,16 +389,14 @@ export function EncounterDocumentsBlock({
                 type="button"
                 size="sm"
                 disabled={disabled}
-                onClick={() =>
-                  setSigning(docs.pendingSignatures.filter((doc) => !doc.personSignedAt))
-                }
+                onClick={() => setSigning(docs.toSign)}
               >
                 Firmar ahora
               </Button>
               <RowActions
                 label="Otras formas de firmar"
-                items={docs.pendingSignatures.flatMap((doc) => [
-                  ...(doc.linkSentAt || doc.personSignedAt
+                items={docs.toSign.flatMap((doc) => [
+                  ...(doc.linkSentAt
                     ? []
                     : [
                         {
@@ -446,7 +446,21 @@ export function EncounterDocumentsBlock({
                 <span className="text-sm font-medium">Consentimiento · {doc.titleSnapshot}</span>
                 <span className="text-xs text-muted-foreground">{consentLinkWords(doc)}</span>
               </div>
-              {canWrite ? <ConsentLinkActions document={doc} onChanged={refresh} /> : null}
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Antes de confirmar se puede ver lo que firmó. */}
+                {doc.personSignedAt ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    aria-label={`Ver ${doc.titleSnapshot}`}
+                    onClick={() => setViewing({ kind: "consent", document: doc })}
+                  >
+                    Ver
+                  </Button>
+                ) : null}
+                {canWrite ? <ConsentLinkActions document={doc} onChanged={refresh} /> : null}
+              </div>
             </li>
           ))}
         {docs.consents
