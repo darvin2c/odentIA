@@ -5,7 +5,7 @@ import { channelConnection, contact, conversation, message } from "@odentia/db/s
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, asc, desc, eq, inArray, isNull, type SQL, sql } from "drizzle-orm"
 import { getAdminRecommendations, getAdminUnreached } from "./agent-admin.js"
-import { countOpenHandoffs, listHandoffs } from "./agent-operations.js"
+import { countOpenHandoffs, type HandoffScope, listHandoffs, openHandoffPeopleSql } from "./agent-operations.js"
 import { type AppointmentVisit, appointmentVisit } from "./appointments.js"
 import { checkEncounterClosing } from "./encounters.js"
 import { AUDIT_AREA_LABELS, AUDIT_AREAS, type AuditArea, auditSubjectsOf, describeAuditEvent } from "./audit-words.js"
@@ -13,7 +13,7 @@ import { adminRuntime, remindedUnconfirmedSql } from "./automation.js"
 import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
 import { listRecategorizedMessages } from "./clinic-messages.js"
 import { listConsentsToPublish } from "./clinical-forms.js"
-import { handoffOpenExistsSql, screenedSql, stillOpenWithPersonSql, testContactSql, unansweredSinceSql } from "./conversation-state.js"
+import { handoffOpenExistsSql, screenedSql, stillOpenWithPersonSql, testContactSql, unansweredSinceSql, unansweredSql } from "./conversation-state.js"
 import { dueDataRequests } from "./data-requests.js"
 import { notFound, validation } from "./errors.js"
 import { getCashToday } from "./finance.js"
@@ -512,6 +512,15 @@ async function shutConversations(tx: Db, orgId: string, ids: string[]): Promise<
  * corte va después de ordenar, y `total` cuenta todos: los más viejos nunca
  * quedan fuera sin decirlo.
  */
+/** Lo suyo se filtra antes del límite: con una cola grande, sus pagos y sus dudas clínicas no quedan fuera. */
+function waitingCaseScope(userId: string, all: boolean, scope: { onlyMine?: boolean; onlyPayments?: boolean }): HandoffScope {
+  const only =
+    scope.onlyMine || scope.onlyPayments
+      ? { ...(scope.onlyMine ? { assignee: userId } : {}), ...(scope.onlyPayments ? { kinds: ["pago"] } : {}) }
+      : undefined
+  return { ...(all ? {} : { visibleTo: userId }), ...(only ? { only } : {}) }
+}
+
 async function waitingCases(
   tx: Db,
   orgId: string,
@@ -523,17 +532,11 @@ async function waitingCases(
   // Quien no ve los casos del agente (el odontólogo) recibe solo los temas que
   // le pasaron, como una duda clínica de su paciente (ADR 0050); caja, los de
   // pagos (R3 y decisión 3 del pulido).
-  // Lo suyo se filtra antes del límite: con una cola grande, sus pagos y sus dudas clínicas no quedan fuera.
-  const only =
-    scope.onlyMine || scope.onlyPayments
-      ? { ...(scope.onlyMine ? { assignee: userId } : {}), ...(scope.onlyPayments ? { kinds: ["pago"] } : {}) }
-      : undefined
   const rows = await listHandoffs(tx, orgId, {
     limit: 100,
     open: true,
     order: "urgencia",
-    ...(all ? {} : { visibleTo: userId }),
-    ...(only ? { only } : {}),
+    ...waitingCaseScope(userId, all, scope),
   })
   // Se responde desde Inicio lo propio y lo que nadie tomó: responder lo toma al
   // enviar (ADR 0127); caja, solo los pagos. No donde Instagram o Messenger ya no
@@ -571,33 +574,43 @@ async function waitingCases(
   return { items, total }
 }
 
+/** Qué conversaciones pueden esperar respuesta: la misma definición para listarlas y para contarlas. */
+function pendingConversationsWhere(orgId: string, assignedTo: string | null): SQL {
+  const conv = sql.raw("c")
+  return sql`c.organization_id=${orgId} and c.status='open'
+        and not ${screenedSql(conv)} and c.test_by_user_id is null
+        and not ${handoffOpenExistsSql(conv)}
+        ${assignedTo ? sql`and c.assigned_user_id = ${assignedTo}` : sql``}`
+}
+
 /**
- * Conversaciones que esperan respuesta (la vista «Esperan respuesta» de la
- * Bandeja, con su misma definición): cuántas son y, de las que más llevan, con
- * quién y qué pidió. Sin las que tienen un caso abierto del agente: esas ya son
- * su propia fila y no se cuentan dos veces. Con `assignedTo`, solo las que lleva
+ * Personas con conversaciones que esperan respuesta (la vista «Esperan
+ * respuesta» de la Bandeja, con su misma definición): cuántas son y, de las que
+ * más llevan, todas sus conversaciones: la primera es su fila y las demás, «También».
+ * Sin las que tienen un caso abierto del agente: esas ya son su propia fila y no se
+ * cuentan dos veces. Con `assignedTo`, solo las que lleva
  * esa persona: quien atiende no recibe la cuenta de toda la clínica.
  */
 async function waitingConversations(tx: Db, orgId: string, assignedTo: string | null): Promise<{ waiting: number; items: WaitingPerson[] }> {
   const conv = sql.raw("c")
   const rows = await tx.execute<{ conversationId: string; contactId: string; contactName: string | null; channel: string | null; since: string; quote: string | null; total: number }>(sql`
-    with pending as (
-      select c.id, c.contact_id, c.channel_connection_id, ${unansweredSinceSql(conv)} as since from conversation c where c.organization_id=${orgId} and c.status='open'
-        and not ${screenedSql(conv)} and c.test_by_user_id is null
-        and not ${handoffOpenExistsSql(conv)}
-        ${assignedTo ? sql`and c.assigned_user_id = ${assignedTo}` : sql``}
+    with waiting as (
+      select c.id, c.contact_id, c.channel_connection_id, ${unansweredSinceSql(conv)} as since from conversation c where ${pendingConversationsWhere(orgId, assignedTo)}
+    ), pending as (
+      select f.*, dense_rank() over (order by f.first_since, f.contact_id) as place
+      from (select w.*, min(w.since) over (partition by w.contact_id) as first_since from waiting w where w.since is not null) f
     )
     select p.id as "conversationId", p.contact_id as "contactId", ct.display_name as "contactName", ch.channel,
       ${iso(sql`p.since`)} as since,
       (select left(regexp_replace(m.body, '[[:space:]]+', ' ', 'g'), 280) from message m
         where m.organization_id = ${orgId} and m.conversation_id = p.id and m.direction = 'in' and m.body is not null
         order by m.created_at desc, m.id desc limit 1) as quote,
-      count(*) over ()::int as total
+      (select max(place) from pending)::int as total
     from pending p
     join contact ct on ct.id = p.contact_id and ct.organization_id = ${orgId}
     left join channel_connection ch on ch.id = p.channel_connection_id and ch.organization_id = ${orgId}
-    where p.since is not null
-    order by p.since, p.id limit ${WAITING_LIMITS.conversations}`)
+    where p.place <= ${WAITING_LIMITS.conversations}
+    order by p.since, p.id`)
   const shut = await shutConversations(tx, orgId, rows.map((row) => row.conversationId))
   const items: WaitingPerson[] = []
   for (const { total: _total, ...row } of rows) {
@@ -611,16 +624,22 @@ async function waitingConversations(tx: Db, orgId: string, assignedTo: string | 
  * Cuántas personas esperan a quien mira: el único número del menú, en «Inicio».
  * Los casos del agente sin tomar o suyos, más las conversaciones que esperan
  * respuesta y no son un caso; nunca lo que ya tiene otra persona, aunque quien
- * dirige lo vea en «Te espera».
+ * dirige lo vea en «Te espera». Cada persona cuenta una vez, como su fila.
  */
 export async function countWorkspaceWaiting(tx: Db, orgId: string, userId: string, access: WorkspaceAccess): Promise<number> {
-  const cases = access.agent
-    ? await countOpenHandoffs(tx, orgId, { forUserId: userId })
-    : access.conversations || access.topics
-      ? (await waitingCases(tx, orgId, userId, false, { onlyMine: true, onlyPayments: !access.conversations && access.topics === true })).total
-      : 0
-  const conversations = access.conversations ? (await waitingConversations(tx, orgId, access.agent ? null : userId)).waiting : 0
-  return cases + conversations
+  const sources: SQL[] = []
+  // Sin ver los casos del agente, los que le pasaron; caja, además, los pagos sin tomar.
+  if (access.agent) sources.push(openHandoffPeopleSql(orgId, waitingCaseScope(userId, false, {})))
+  else if (access.conversations || access.topics) {
+    sources.push(openHandoffPeopleSql(orgId, waitingCaseScope(userId, false, { onlyMine: true, onlyPayments: !access.conversations && access.topics === true })))
+  }
+  if (access.conversations) {
+    const conv = sql.raw("c")
+    sources.push(sql`select c.contact_id::text as person from conversation c where ${pendingConversationsWhere(orgId, access.agent ? null : userId)} and ${unansweredSql(conv)}`)
+  }
+  if (sources.length === 0) return 0
+  const [row] = await tx.execute<{ people: number }>(sql`select count(distinct person)::int as people from (${sql.join(sources, sql` union all `)}) waiting`)
+  return row?.people ?? 0
 }
 
 /**

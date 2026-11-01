@@ -532,6 +532,52 @@ it("un caso del agente sale una sola vez: ni su tarea ni su conversación se rep
   expect(await waitingFor(tomas, { ...access, agent: false })).toBe(1)
   // Un rol sin conversaciones ni casos no cuenta nada.
   expect(await waitingFor(rita, restricted)).toBe(0)
+  // Un número por persona, como las filas: Lucía, con su caso y otra conversación que espera, cuenta una vez.
+  const [ofLucia] = await ownerDb.select({ contactId: conversation.contactId, connectionId: conversation.channelConnectionId }).from(conversation).where(eq(conversation.id, lucia))
+  const [second] = await ownerDb.insert(conversation).values({
+    organizationId: orgId, contactId: ofLucia!.contactId, channelConnectionId: ofLucia!.connectionId, externalThreadId: `t:${randomUUID()}`, status: "open",
+  }).returning({ id: conversation.id })
+  await ownerDb.insert(message).values({
+    organizationId: orgId, conversationId: second!.id, direction: "in", senderKind: "contact", body: "Otra cosa", status: "received",
+    externalId: `ext-${randomUUID()}`, createdAt: new Date(Date.now() - 3_600_000),
+  })
+  expect(await waitingFor(tomas, access)).toBe(2)
+  // Varias conversaciones de una persona son una fila, y «N más» no la cuenta otra vez.
+  const [ofJorge] = await ownerDb.select({ contactId: conversation.contactId, connectionId: conversation.channelConnectionId }).from(conversation).where(eq(conversation.id, jorge))
+  const [otherOfJorge] = await ownerDb.insert(conversation).values({
+    organizationId: orgId, contactId: ofJorge!.contactId, channelConnectionId: ofJorge!.connectionId, externalThreadId: `t:${randomUUID()}`, status: "open",
+  }).returning({ id: conversation.id })
+  await ownerDb.insert(message).values({
+    organizationId: orgId, conversationId: otherOfJorge!.id, direction: "in", senderKind: "contact", body: "Otra", status: "received",
+    externalId: `ext-${randomUUID()}`, createdAt: new Date(Date.now() - 1_800_000),
+  })
+  const withJorge = (await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, tomas, { ...access, allTasks: false }))).waiting
+  expect(withJorge.filter(row => row.kind === "person" && row.contactId === ofJorge!.contactId)).toMatchObject([{ conversationId: jorge, also: [{ conversationId: otherOfJorge!.id }] }])
+  expect(withJorge.filter(row => row.kind === "more" && row.of === "conversations")).toEqual([])
+  expect(await waitingFor(tomas, access)).toBe(2)
+  // La persona de un caso es la de su conversación: reasignar una identidad mueve la conversación, no el caso.
+  const moved = await thread("Se reasigna")
+  await withOrgContext(appDb, orgId, tx => createHandoff(tx, orgId, null, { conversationId: moved, reason: "Una duda", summary: "Una duda", priority: "media", createdBy: "agent" }))
+  const beforeMove = await waitingFor(tomas, access)
+  await ownerDb.update(conversation).set({ contactId: ofJorge!.contactId }).where(eq(conversation.id, moved))
+  expect(await waitingFor(tomas, access)).toBe(beforeMove - 1)
+  // Un caso sin persona es su propia fila: dos cuentan dos.
+  const beforeNoPerson = await waitingFor(tomas, access)
+  await ownerDb.insert(agentHandoff).values([1, 2].map(n => ({ organizationId: orgId, reason: `Sin persona ${n}`, summary: "Sin persona", priority: "media" })))
+  expect(await waitingFor(tomas, access)).toBe(beforeNoPerson + 2)
+  // Caja: lo suyo y los pagos sin tomar; nunca un pago de otra persona ni otro tema.
+  const cashierView: WorkspaceAccess = { ...access, agent: false, conversations: false, topics: true }
+  expect(await waitingFor(rita, cashierView)).toBe(0)
+  const topicOf = async (name: string, kind: string, assigneeUserId: string | null) => {
+    const topic = await withOrgContext(appDb, orgId, async tx => createHandoff(tx, orgId, null, { conversationId: await thread(name), reason: name, summary: name, priority: "media", createdBy: "agent" }))
+    await ownerDb.update(agentHandoff).set({ kind, assigneeUserId }).where(eq(agentHandoff.id, topic.id))
+  }
+  await topicOf("Pago libre", "pago", null)
+  await topicOf("Pago de otra persona", "pago", tomas)
+  await topicOf("Una duda clínica", "clinico", null)
+  expect(await waitingFor(rita, cashierView)).toBe(1)
+  await topicOf("Pago suyo", "pago", rita)
+  expect(await waitingFor(rita, cashierView)).toBe(2)
 })
 
 it("la campana: nadie recibe aviso de lo suyo, «Marcar todo leído» y cada aviso llega con el permiso que declara", async () => {
