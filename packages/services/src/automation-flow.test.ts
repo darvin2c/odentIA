@@ -967,6 +967,37 @@ describe("quién lo hace: el agente, una persona o los dos", () => {
   })
 })
 
+describe("una historia bloqueada", () => {
+  it("no programa nada, y si vuelve a atenderse se programa como siempre", async () => {
+    const c = await clinic()
+    await ruleOn(c, "seguimiento_presupuesto", new Date(NOW.getTime() - HOUR))
+    await ruleOn(c, "recordatorio_control", new Date(NOW.getTime() - HOUR))
+    const p = await person(c, "Bloqueada", { consent: ["recordatorio", "seguimiento"] })
+    await dueBudget(c, p.patientId)
+    await ownerDb.insert(clinicalFollowUp).values({
+      organizationId: c.orgId, patientId: p.patientId, kind: "mantenimiento", title: "Control de ortodoncia", dueAt: new Date(NOW.getTime() + DAY),
+    })
+    const sync = async () => {
+      await run(c, (tx) => syncBudgetFollowUps(tx, c.orgId, NOW))
+      await run(c, (tx) => syncCheckupReminders(tx, c.orgId, NOW))
+    }
+    const lock = (lockedAt: Date | null) =>
+      ownerDb
+        .update(contact)
+        .set({ recordLockedAt: lockedAt, recordLockedBy: lockedAt ? c.ownerId : null, isActive: lockedAt === null })
+        .where(eq(contact.id, p.contactId))
+
+    await lock(NOW)
+    await sync()
+    // Ni un trabajo: las listas de la línea no la nombran y no queda nada que impida programarlo después.
+    expect(await jobsOf(c)).toEqual([])
+
+    await lock(null)
+    await sync()
+    expect((await jobsOf(c)).map((job) => job.kind).sort()).toEqual(["recordatorio_control", "seguimiento_presupuesto"])
+  })
+})
+
 describe("retirar un permiso", () => {
   it("cancela lo que estaba por salir de ese tipo y deja lo demás", async () => {
     const c = await clinic()

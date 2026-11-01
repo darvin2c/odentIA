@@ -6,6 +6,7 @@
  * su identidad (`PatientRow`), para que quien lee un paciente no tenga que
  * saber dónde vive cada dato.
  */
+import type { Db } from "@odentia/db"
 import { patient } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
 import { and, eq, getTableColumns, type SQL } from "drizzle-orm"
@@ -19,6 +20,17 @@ type PersonTable = typeof contact | typeof patientPerson
 /** Une la ficha con su persona (la misma organización, por la clave compuesta). */
 export function joinPatientPerson(person: PersonTable = contact): SQL {
   return and(eq(person.organizationId, patient.organizationId), eq(person.id, patient.personId))!
+}
+
+/** Si la historia de este paciente está bloqueada (ADR 0080): para los demás, no existe. */
+export async function isPatientLocked(tx: Db, orgId: string, patientId: string): Promise<boolean> {
+  const [row] = await tx
+    .select({ lockedAt: contact.recordLockedAt })
+    .from(patient)
+    .innerJoin(contact, joinPatientPerson())
+    .where(and(eq(patient.organizationId, orgId), eq(patient.id, patientId)))
+    .limit(1)
+  return Boolean(row?.lockedAt)
 }
 
 /** Las columnas de identidad, leídas de la persona, con los nombres que tenían en la ficha. */
