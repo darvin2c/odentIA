@@ -402,7 +402,7 @@ function ReceptionPage() {
   ].join(" · ")
   const lessons = learningQuery.data?.data.learned.filter((lesson) => lesson.agent === "recepcion").length
   const { today, knows } = overview
-  const gaps = overview.needsYou.gaps
+  const toReview = overview.needsYou.review
   const status = overview.enabled ? "Encendido" : "Apagado"
   /** Al cerrar el cajón, el foco vuelve al botón que lo abre: el del resumen o, en el teléfono, el del pie. */
   const openerOfTest = () => [phoneTestButtonRef.current, testButtonRef.current].find((button) => button?.offsetParent) ?? null
@@ -413,18 +413,16 @@ function ReceptionPage() {
     else setTesting(true)
   }
 
-  const gapNotice =
-    gaps > 0 ? (
+  const reviewNotice =
+    toReview > 0 ? (
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl bg-warning-soft px-4 py-3 text-sm">
         <div className="min-w-0 flex-1 basis-48">
-          <p className="font-semibold">{count(gaps, "pregunta que no supo responder", "preguntas que no supo responder")}</p>
-          <p className="text-muted-foreground max-sm:hidden">{gaps === 1 ? "Respóndela una vez y ya la sabe." : "Respóndelas una vez y ya las sabe."}</p>
+          <p className="font-semibold">{count(toReview, "respuesta por revisar", "respuestas por revisar")}</p>
+          <p className="text-muted-foreground max-sm:hidden">Las dudosas, lo que no encontró y una muestra al azar.</p>
         </div>
-        {canWrite ? (
-          <Link to="/agent/knowledge" className={LINK}>
-            Enseñarle
-          </Link>
-        ) : null}
+        <Link to="/agent/learn" className={LINK}>
+          Revisar
+        </Link>
       </div>
     ) : null
 
@@ -622,7 +620,7 @@ function ReceptionPage() {
               summary: `${count(knows.answers, "respuesta", "respuestas")} · ${count(knows.servicesWithPrice, "precio que dice", "precios que dice")} · ${count(knows.branches, "sede", "sedes")} · lo que recuerda de cada persona`,
               to: canWrite ? "/agent/knowledge" : undefined,
             }}
-            phoneExtra={gapNotice ? <div className="sm:hidden">{gapNotice}</div> : null}
+            phoneExtra={reviewNotice ? <div className="sm:hidden">{reviewNotice}</div> : null}
           >
             <ul className="flex flex-col divide-y overflow-hidden rounded-xl border">
               <li>
@@ -667,7 +665,7 @@ function ReceptionPage() {
                 información clínica.
               </p>
             </div>
-            {gapNotice}
+            {reviewNotice}
           </Card>
 
           <Card

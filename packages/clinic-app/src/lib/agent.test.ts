@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { type LessonPreview, lessonScopeChip, lessonScopeFor, lessonUsage, previewCounts, previewSummary } from "./agent"
+import { askedWords, type LessonPreview, lessonUsage, previewCounts, previewSummary } from "./agent"
 
 const DAY = 86_400_000
 const NOW = Date.parse("2026-10-11T12:00:00Z")
@@ -42,14 +42,10 @@ describe("el resultado de probar una lección", () => {
   })
 })
 
-describe("alcance de una lección", () => {
-  it("la clínica entera o el agente, sin «Solo»", () => {
-    expect(lessonScopeChip("clinica", "Sofi")).toBe("Toda la clínica")
-    expect(lessonScopeChip("recepcion", "Sofi")).toBe("Sofi")
-    expect(lessonScopeChip("recepcion", "Ana")).toBe("Ana")
-    expect(lessonScopeChip("administrador", "Ana")).toBe("Argos")
-    expect(lessonScopeFor("clinica", "Sofi")).toBe("Para toda la clínica")
-    expect(lessonScopeFor("recepcion", "Sofi")).toBe("Solo para Sofi")
-    expect(lessonScopeFor("asistente_clinico", "Sofi")).toBe("Solo para Clío")
+describe("cuántas veces se buscó lo mismo", () => {
+  it("dice esta semana solo si pasó esta semana", () => {
+    expect(askedWords({ total: 1, week: 1 })).toBe("1 vez esta semana")
+    expect(askedWords({ total: 5, week: 4 })).toBe("4 veces esta semana")
+    expect(askedWords({ total: 3, week: 0 })).toBe("3 veces")
   })
 })

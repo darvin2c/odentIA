@@ -1,4 +1,6 @@
+import { agentKnowledgeGap } from "@odentia/db/schema/agent"
 import { member } from "@odentia/db/schema/auth"
+import { message } from "@odentia/db/schema/crm"
 import type { Page } from "@playwright/test"
 import { and, eq } from "drizzle-orm"
 import { simulateTelegramInbound } from "./channels"
@@ -12,7 +14,7 @@ const QUESTION = "¿Atienden a niños de 2 años?"
 const TEAM_REPLY = "Atendemos niños desde los 3 años. Para los más pequeños te recomendamos un odontopediatra."
 
 interface Learning {
-  review: Array<{ id: string; reason: string; question: string; teamReply: string | null }>
+  review: Array<{ id: string; reason: string; question: string; query: string | null; teamReply: string | null }>
   proposed: Array<{ id: string; kind: string; title: string; body: string; question: string }>
   learned: Array<{ id: string; title: string }>
   withdrawn: Array<{ id: string }>
@@ -20,9 +22,11 @@ interface Learning {
 }
 
 interface Knowledge {
+  id: string
   title: string
   body: string
   state: string
+  askForms: string[]
 }
 
 const overflow = (page: Page) =>
@@ -62,7 +66,6 @@ test("aprender: revisar, corregir, aprobar la lección, retirarla y corregir des
   const learned = page.getByRole("region", { name: /^Lo aprendido/ })
   await expect(review.getByRole("heading", { level: 2 })).toHaveText("Por revisar · 1")
   const item = review.getByRole("listitem").first()
-  await expect(item).toContainText("Sofi")
   await expect(item).toContainText("El equipo tomó la conversación")
   await expect(item).toContainText(QUESTION)
   await expect(item).toContainText(FAKE_REPLY)
@@ -73,20 +76,12 @@ test("aprender: revisar, corregir, aprobar la lección, retirarla y corregir des
   await expect(tabs.getByRole("link", { name: /^Aprender/ })).toHaveText(/Aprender · 1 pendiente/)
   // Lo que espera el sí de la persona está en la Bandeja, no aquí (ADR 0118).
   await expect(tabs.getByRole("link", { name: /Esperan su sí/ })).toHaveCount(0)
-  // De qué agente: Recepción con lo que espera; los que están apagados lo dicen y no se eligen.
-  const agents = page.getByRole("tablist", { name: "De qué agente" })
-  await expect(agents.getByRole("tab", { name: "Todos los agentes" })).toHaveAttribute("aria-selected", "true")
-  await expect(agents.getByRole("tab", { name: "Clío · apagado" })).toBeDisabled()
-  await expect(agents.getByRole("tab", { name: "Argos · apagado" })).toBeDisabled()
-  await agents.getByRole("tab", { name: "Sofi · 1" }).click()
-  await expect(agents.getByRole("tab", { name: "Sofi · 1" })).toHaveAttribute("aria-selected", "true")
-  await expect(review.getByRole("heading", { level: 2 })).toHaveText("Por revisar · 1")
-  await agents.getByRole("tab", { name: "Todos los agentes" }).click()
+  // Lo que se aprende es de Sofi: no hay de qué agente elegir.
+  await expect(page.getByRole("tablist", { name: "De qué agente" })).toHaveCount(0)
   // La fila decide con dos botones; lo demás queda en su menú.
   await expect(item.getByRole("button")).toHaveText(["", "Estuvo bien", "Corregir"])
   await item.getByRole("button", { name: /^Más acciones/ }).click()
   await expect(page.getByRole("menuitem", { name: "Abrir la conversación" })).toBeVisible()
-  await expect(page.getByRole("menuitem", { name: "Estuvo bien: guardar como ejemplo" })).toBeVisible()
   await page.keyboard.press("Escape")
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("aprender-por-revisar", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
@@ -94,7 +89,7 @@ test("aprender: revisar, corregir, aprobar la lección, retirarla y corregir des
   // --- Teléfono: la tarjeta y la corrección, con lo justo ---
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, "/agent/learn"))
-  await expect(item).toContainText("Sofi · el equipo tomó la conversación")
+  await expect(item).toContainText("El equipo tomó la conversación")
   for (const name of ["Estuvo bien", "Corregir"]) {
     expect((await item.getByRole("button", { name, exact: true }).boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
   }
@@ -109,7 +104,9 @@ test("aprender: revisar, corregir, aprobar la lección, retirarla y corregir des
   await expect(mobileCorrecting).toContainText(QUESTION)
   await expect(mobileCorrecting).toContainText("Sofi respondió")
   await expect(mobileCorrecting).toContainText("En qué se basó")
-  await expect(mobileCorrecting.getByLabel("¿Cómo debió responder?")).toHaveValue(TEAM_REPLY)
+  // Lo que escribió el equipo se ofrece; no viene puesto.
+  await expect(mobileCorrecting.getByLabel("¿Cómo debió responder?")).toHaveValue("")
+  await expect(mobileCorrecting.getByRole("button", { name: "Usar este texto" })).toBeVisible()
   await expect(mobileCorrecting).not.toContainText("Por qué está aquí")
   await expect(mobileCorrecting.getByRole("button", { name: "Estuvo bien, quitar de la lista" })).toHaveCount(0)
   const mobileSend = mobileCorrecting.getByRole("button", { name: "Enviar corrección" })
@@ -123,7 +120,7 @@ test("aprender: revisar, corregir, aprobar la lección, retirarla y corregir des
   await mobileCorrecting.getByRole("button", { name: "Cancelar" }).click()
   await expect(mobileCorrecting).toBeHidden()
 
-  // --- Corregir: parte de lo que respondió el equipo y no cambia nada todavía ---
+  // --- Corregir: se puede partir de lo que respondió el equipo y no cambia nada todavía ---
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, "/agent/learn"))
   await item.getByRole("button", { name: "Corregir", exact: true }).click()
@@ -133,8 +130,10 @@ test("aprender: revisar, corregir, aprobar la lección, retirarla y corregir des
   await expect(correcting).toContainText("Alguien de tu equipo escribió justo después")
   await expect(correcting).toContainText("No había precio, fecha ni hora que verificar.")
   await expect(correcting).toContainText("No usó ninguna lección tuya.")
+  await expect(correcting.getByLabel("¿Cómo debió responder?")).toHaveValue("")
+  await correcting.getByRole("button", { name: "Usar este texto" }).click()
   await expect(correcting.getByLabel("¿Cómo debió responder?")).toHaveValue(TEAM_REPLY)
-  await expect(correcting).toContainText("Puse lo que respondió tu equipo.")
+  await expect(correcting).toContainText("Puse lo que escribió tu equipo.")
   // La fila abierta se marca y deja de ofrecer sus botones.
   await expect(item).toContainText("Abierta al lado")
   await expect(item.getByRole("button", { name: "Corregir", exact: true })).toHaveCount(0)
@@ -144,6 +143,8 @@ test("aprender: revisar, corregir, aprobar la lección, retirarla y corregir des
   await expect(correcting.getByRole("group", { name: "¿Qué falló?" })).toContainText("Elige qué falló")
   await correcting.getByRole("button", { name: "Le faltó un dato" }).click()
   await expect(correcting.getByRole("button", { name: "Le faltó un dato" })).toHaveAttribute("aria-pressed", "true")
+  // El pie dice en qué se convierte antes de enviarla.
+  await expect(correcting).toContainText("Se propone como respuesta oficial")
   await info.attach("corregir", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await correcting.getByRole("button", { name: "Enviar corrección" }).click()
 
@@ -154,7 +155,6 @@ test("aprender: revisar, corregir, aprobar la lección, retirarla y corregir des
   await expect(lesson).toContainText("De una corrección de hoy")
   await expect(lesson).toContainText("a una respuesta de Sofi")
   await expect(lesson).toContainText("Respuesta oficial")
-  await expect(lesson).toContainText("Toda la clínica")
   await expect(lesson).toContainText(FAKE_REPLY)
   await expect(lesson).toContainText(TEAM_REPLY)
   await expect(lesson).toContainText("Todavía no tienes casos de prueba")
@@ -187,7 +187,6 @@ test("aprender: revisar, corregir, aprobar la lección, retirarla y corregir des
   await expect(review.getByRole("button", { name: "Ir a la Bandeja" })).toBeVisible()
   await expect(learned.getByRole("heading", { level: 2 })).toHaveText("Lo aprendido · 1")
   await expect(learned).toContainText("Atención a niños")
-  await expect(learned).toContainText("Toda la clínica")
   await expect(learned).toContainText("Sin usar todavía")
   await expect(learned).toContainText("1 caso de prueba guardado")
   expect(await overflow(page)).toBeLessThanOrEqual(0)
@@ -298,4 +297,163 @@ test("aprender: revisar, corregir, aprobar la lección, retirarla y corregir des
   expect((await api(page, "POST", `/api/agent/learning/lessons/${pending!.id}/approve`, org.slug)).status).toBe(403)
   expect((await api(page, "POST", `/api/agent/learning/lessons/${active!.id}/withdraw`, org.slug, {})).status).toBe(403)
   expect((await api(page, "POST", `/api/agent/learning/lessons/${pending!.id}/preview`, org.slug)).status).toBe(403)
+})
+
+test("aprender: lo que buscó y no encontró se revisa aquí y se decide como cualquier otra respuesta", async ({
+  owner,
+  fixtureDb,
+  nextEventId,
+}, info) => {
+  test.setTimeout(240_000)
+  const { page, org } = owner
+  const learning = () => call<Learning>(page, "GET", "/api/agent/learning", org.slug)
+  const knowledge = () => call<Knowledge[]>(page, "GET", "/api/agent/knowledge", org.slug)
+  const tg = await call<{ id: string; webhookSecret: string }>(page, "POST", "/api/channels/connections", org.slug, {
+    channel: "telegram", provider: "telegram_bot_api", displayName: "Bot E2E", config: { botToken: "e2e" },
+  }, 201)
+  await call(page, "PUT", "/api/agent/config", org.slug, { enabled: true })
+  const conversations = () => call<Array<{ id: string }>>(page, "GET", "/api/conversations", org.slug)
+  // El modelo de pruebas no usa herramientas: lo que no encontró se anota como lo hace el
+  // agente al buscar sin resultado; la pregunta y su respuesta salen por el recorrido real.
+  const ask = async (text: string, query: string) => {
+    const before = (await conversations()).map((row) => row.id)
+    const from = nextEventId()
+    expect(await simulateTelegramInbound(page, API, tg.id, tg.webhookSecret, { fromId: from, chatId: from, text, updateId: nextEventId() })).toBe(200)
+    await expect.poll(async () => (await conversations()).length, { timeout: 30_000 }).toBe(before.length + 1)
+    const conversationId = (await conversations()).find((row) => !before.includes(row.id))!.id
+    await expect
+      .poll(async () => (await call<Array<{ id: string }>>(page, "GET", `/api/agent/answer-traces?conversationId=${conversationId}`, org.slug)).length, { timeout: 45_000 })
+      .toBe(1)
+    const [asked] = await fixtureDb
+      .select({ id: message.id, createdAt: message.createdAt })
+      .from(message)
+      .where(and(eq(message.conversationId, conversationId), eq(message.direction, "in")))
+    await fixtureDb.insert(agentKnowledgeGap).values({
+      organizationId: org.id, conversationId, triggerMessageId: asked!.id, question: text, query, createdAt: asked!.createdAt,
+    })
+  }
+  await ask("¿Trabajan con alineadores invisibles?", "alineadores invisibles")
+  await ask("¿Tienen alineadores invisibles?", "alineadores invisibles")
+  await ask("¿Tienen wifi para pacientes?", "wifi")
+  await ask("¿Dónde dejo mi bici?", "dejar bicicleta")
+
+  // El número ya está al día sin haber abierto la lista: lo mismo en el resumen, la pestaña y la sección.
+  const needsYou = () => call<{ needsYou: { review: number; lessons: number } }>(page, "GET", "/api/agent/overview", org.slug).then((row) => row.needsYou)
+  expect(await needsYou()).toEqual({ review: 3, lessons: 0 })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await gotoHydrated(page, tenant(org.slug, "/agent/learn"))
+  const review = page.getByRole("region", { name: /^Por revisar/ })
+  const toApprove = page.getByRole("region", { name: /^Lecciones por aprobar/ })
+  const learned = page.getByRole("region", { name: /^Lo aprendido/ })
+  const tabs = page.getByRole("navigation", { name: "Secciones del agente" })
+  await expect(review.getByRole("heading", { level: 2 })).toHaveText("Por revisar · 3")
+  await expect(tabs.getByRole("link", { name: /^Aprender/ })).toHaveText(/Aprender · 3 pendientes/)
+  await expect(tabs.getByRole("link", { name: /^Conocimiento/ })).toHaveText("Conocimiento")
+  expect(await needsYou()).toEqual({ review: 3, lessons: 0 })
+
+  // La fila dice lo que escribió, lo que buscó, lo que respondió y cuántas veces lo preguntaron.
+  const rowOf = (query: string) => review.getByRole("listitem").filter({ hasText: query })
+  const aligners = rowOf("alineadores invisibles")
+  await expect(aligners).toHaveCount(1)
+  await expect(aligners).toContainText("Buscó y no encontró")
+  await expect(aligners).toContainText("2 veces esta semana")
+  await expect(aligners).toContainText(FAKE_REPLY)
+  await expect(aligners.getByRole("button")).toHaveText(["", "Estuvo bien", "Corregir"])
+  expect(await overflow(page)).toBeLessThanOrEqual(0)
+  await info.attach("no-encontro-fila", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+
+  // «Estuvo bien» dice que nada cambia y se puede deshacer; se guarda como ejemplo desde su aviso.
+  await aligners.getByRole("button", { name: "Estuvo bien", exact: true }).click()
+  await expect(review.getByRole("heading", { level: 2 })).toHaveText("Por revisar · 2")
+  const notice = review.getByRole("status").filter({ hasText: "alineadores invisibles" })
+  await expect(notice).toContainText("Sofi sigue respondiendo igual.")
+  await info.attach("no-encontro-estuvo-bien", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+  await notice.getByRole("button", { name: "Deshacer" }).click()
+  await expect(review.getByRole("heading", { level: 2 })).toHaveText("Por revisar · 3")
+  await expect(aligners.getByRole("button", { name: "Estuvo bien", exact: true })).toBeVisible()
+  await expect(notice).toHaveCount(0)
+  await aligners.getByRole("button", { name: "Estuvo bien", exact: true }).click()
+  await notice.getByRole("button", { name: "Guardar como ejemplo" }).click()
+  await expect(notice).toContainText("quedó como ejemplo por aprobar")
+  await expect(toApprove.getByRole("heading", { level: 2 })).toHaveText("Lecciones por aprobar · 1")
+  expect((await learning()).proposed).toEqual([expect.objectContaining({ kind: "ejemplo" })])
+
+  // Corregir: la conversación arriba, qué falló ya elegido y la pregunta para que se encuentre.
+  await rowOf("dejar bicicleta").getByRole("button", { name: "Corregir", exact: true }).click()
+  const correcting = sideSurface(page, { name: "Corregir una respuesta de Sofi", exact: true })
+  await expect(correcting.getByRole("region", { name: "La conversación" })).toContainText("¿Dónde dejo mi bici?")
+  await expect(correcting.getByRole("region", { name: "La conversación" })).toContainText(FAKE_REPLY)
+  await expect(correcting).toContainText("Buscó «dejar bicicleta» y no encontró nada.")
+  await expect(correcting.getByRole("button", { name: "Le faltó un dato" })).toHaveAttribute("aria-pressed", "true")
+  await expect(correcting.getByLabel("La pregunta", { exact: true })).toHaveValue("dejar bicicleta")
+  await correcting.getByLabel("La pregunta", { exact: true }).fill("Dónde dejar la bicicleta")
+  await correcting.getByLabel("¿Cómo debió responder?").fill("Hay un bicicletero en la entrada.")
+  await expect(correcting).toContainText("Se propone como respuesta oficial")
+  await info.attach("no-encontro-corregir", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+  await correcting.getByRole("button", { name: "Enviar corrección" }).click()
+
+  // Nada se publica hasta aprobarla; aprobada, se retira desde «Lo aprendido».
+  const lesson = sideSurface(page, { name: "Lección propuesta", exact: true })
+  await expect(lesson.getByRole("heading", { level: 3, name: "Dónde dejar la bicicleta" })).toBeVisible()
+  await expect(lesson).not.toContainText("A quién se aplica")
+  expect(await knowledge()).toEqual([])
+  await lesson.getByRole("button", { name: "Aprobar y activar" }).click()
+  await expect(lesson).toBeHidden()
+  await expect.poll(async () => (await knowledge()).map((entry) => [entry.title, entry.state, entry.askForms])).toEqual([
+    ["Dónde dejar la bicicleta", "vigente", ["dejar bicicleta"]],
+  ])
+  await learned.getByRole("button", { name: "Retirar «Dónde dejar la bicicleta»" }).click()
+  const withdrawing = page.getByRole("alertdialog", { name: "Retirar «Dónde dejar la bicicleta»" })
+  await withdrawing.getByRole("button", { name: "Retirar la respuesta" }).click()
+  await expect(withdrawing).toBeHidden()
+  await expect.poll(async () => (await knowledge())[0]?.state).toBe("borrador")
+  await learned.getByRole("button", { name: "Retiradas · 1, se pueden restaurar" }).click()
+  await learned.getByRole("button", { name: "Restaurar «Dónde dejar la bicicleta»" }).click()
+  const restoring = sideSurface(page, { name: "Restaurar «Dónde dejar la bicicleta»", exact: true })
+  await restoring.getByRole("button", { name: "Restaurar" }).click()
+  await expect(restoring).toBeHidden()
+  await expect.poll(async () => (await knowledge())[0]?.state).toBe("vigente")
+
+  // Sumarla a una respuesta que ya existe no cambia su texto ni deja otra lección.
+  await gotoHydrated(page, tenant(org.slug, "/agent/learn"))
+  await rowOf("wifi").getByRole("button", { name: "Corregir", exact: true }).click()
+  await correcting.getByRole("combobox", { name: "¿Ya tienes una respuesta para esto?" }).click()
+  await page.getByRole("option", { name: "Dónde dejar la bicicleta", exact: true }).click()
+  await expect(correcting.getByLabel("¿Cómo debió responder?")).toHaveCount(0)
+  await expect(correcting).toContainText("Su texto no cambia.")
+  await correcting.getByRole("button", { name: "Sumar a esa respuesta" }).click()
+  await expect(correcting).toBeHidden()
+  await expect(review.getByRole("status").filter({ hasText: "wifi" })).toContainText("se sumó a «Dónde dejar la bicicleta»")
+  await expect(review.getByRole("heading", { level: 2 })).toHaveText("Por revisar")
+  await expect.poll(async () => (await knowledge())[0]).toMatchObject({ body: "Hay un bicicletero en la entrada.", askForms: ["dejar bicicleta", "wifi"] })
+  expect((await learning()).proposed).toHaveLength(1)
+  // Lo que ya no está por revisar no se vuelve a contar.
+  expect(await needsYou()).toEqual({ review: 0, lessons: 1 })
+
+  // Teléfono: la fila entra sin desbordes, con botones que se tocan bien.
+  await ask("¿Hacen carillas de porcelana?", "carillas porcelana")
+  await page.setViewportSize({ width: 390, height: 844 })
+  await gotoHydrated(page, tenant(org.slug, "/agent/learn"))
+  const mobile = rowOf("carillas porcelana")
+  await expect(mobile).toContainText("Buscó y no encontró · 1 vez esta semana")
+  for (const name of ["Estuvo bien", "Corregir"]) {
+    expect((await mobile.getByRole("button", { name, exact: true }).boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
+  }
+  expect(await overflow(page)).toBeLessThanOrEqual(0)
+  await info.attach("no-encontro-movil", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+  await mobile.getByRole("button", { name: "Corregir", exact: true }).click()
+  const mobileCorrecting = page.getByRole("dialog", { name: "Corregir una respuesta de Sofi" })
+  await expect(mobileCorrecting.getByRole("button", { name: "Enviar corrección" })).toBeInViewport({ ratio: 1 })
+  expect(await overflow(page)).toBeLessThanOrEqual(0)
+  await info.attach("no-encontro-corregir-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+  await mobileCorrecting.getByRole("button", { name: "Cancelar" }).click()
+  await expect(mobileCorrecting).toBeHidden()
+
+  // Recepción lee la conversación y corrige, pero no suma a una respuesta: lo decide el servidor.
+  const [pending] = (await learning()).review
+  await fixtureDb.update(member).set({ role: "reception" })
+    .where(and(eq(member.organizationId, org.id), eq(member.userId, owner.user.id)))
+  expect((await api(page, "GET", `/api/agent/learning/review/${pending!.id}/conversation`, org.slug)).status).toBe(200)
+  expect((await api(page, "POST", `/api/agent/learning/review/${pending!.id}/add-to-answer`, org.slug, { entryId: pending!.id })).status).toBe(403)
+  expect((await api(page, "POST", "/api/agent/learning/guidance/check", org.slug, { body: "Una regla." })).status).toBe(403)
 })

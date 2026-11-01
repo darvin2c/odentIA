@@ -212,7 +212,7 @@ export function AnswerTraceDrawer({
           <div className="flex flex-col gap-1 text-sm">
             {ok.isSuccess ? (
               <p role="status" className="font-semibold">
-                Quedó marcada como una buena respuesta.
+                Quedó marcada como una buena respuesta. {agentName(trace.agent, receptionName)} sigue respondiendo igual.
               </p>
             ) : (
               <p className="font-semibold">¿Estuvo bien esta respuesta?</p>

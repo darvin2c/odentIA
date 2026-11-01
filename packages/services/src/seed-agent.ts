@@ -276,15 +276,45 @@ export async function seedAgent(
         ],
       })
       .onConflictDoNothing({ target: [agentCaseMemory.organizationId, agentCaseMemory.conversationId] })
-    // Lo que no supo responder: una pregunta pendiente para la pantalla de Conocimiento.
+    // Lo que buscó y no encontró: entra a «Por revisar» con lo que escribió, lo que
+    // buscó y el aviso que dejó. Días atrás, para no cambiar cómo termina el hilo.
+    const askedAt = new Date(Date.now() - 3 * 86_400_000)
+    const askedId = "00000000-0000-4000-8000-00000000f011"
+    await tx
+      .insert(message)
+      .values([
+        {
+          id: askedId,
+          organizationId: orgId,
+          conversationId: first.id,
+          direction: "in",
+          senderKind: "contact",
+          status: "received",
+          body: "¿Tienen estacionamiento para bicicletas?",
+          createdAt: askedAt,
+        },
+        {
+          id: "00000000-0000-4000-8000-00000000f012",
+          organizationId: orgId,
+          conversationId: first.id,
+          direction: "out",
+          senderKind: "agent",
+          status: "sent",
+          body: "Eso no lo tengo a la mano. Se lo confirma el equipo por aquí.",
+          createdAt: new Date(askedAt.getTime() + 60_000),
+        },
+      ])
+      .onConflictDoNothing({ target: message.id })
     await tx
       .insert(agentKnowledgeGap)
       .values({
         id: "00000000-0000-4000-8000-00000000f001",
         organizationId: orgId,
         conversationId: first.id,
+        triggerMessageId: askedId,
         question: "¿Tienen estacionamiento para bicicletas?",
         query: "estacionamiento bicicletas",
+        createdAt: new Date(askedAt.getTime() + 30_000),
       })
       .onConflictDoNothing({ target: agentKnowledgeGap.id })
   }

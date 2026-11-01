@@ -16,11 +16,11 @@ import { agentTabsFor } from "../lib/screen-rules"
  * activa es la píldora blanca y lo que espera a una persona va después del
  * nombre, con «·».
  *
- * Aprender y Conocimiento dicen cuánto espera a una persona. Los números salen
- * del mismo resumen que «Necesita de ti» (`/api/agent/overview`, consulta
- * compartida con esa pantalla) y suman el número del menú «Agente». Lo que
- * espera el sí de la persona y los casos que el agente pasó al equipo no están
- * aquí: se ven en la Bandeja y en el panel del agente (ADR 0118).
+ * Aprender dice cuánto espera a una persona: lo mismo que el número del menú
+ * «Agente». Sale del mismo resumen que «Necesita de ti» (`/api/agent/overview`,
+ * consulta compartida con esa pantalla). Lo que espera el sí de la persona y los
+ * casos que el agente pasó al equipo no están aquí: se ven en la Bandeja y en el
+ * panel del agente (ADR 0118).
  *
  * `learnPending`: «Aprender» concilia su lista al cargarla, así que esa pantalla
  * pasa lo que ya muestra y la pestaña no dice otra cosa mientras el resumen se
@@ -40,9 +40,7 @@ export function AgentTabs({ learnPending }: { learnPending?: number } = {}) {
     staleTime: 30_000,
   })
   const needs = overview.data?.data.needsYou
-  const pending: Record<string, number> = needs
-    ? { "/agent/learn": needs.review + needs.lessons, "/agent/knowledge": needs.gaps }
-    : {}
+  const pending: Record<string, number> = needs ? { "/agent/learn": needs.review + needs.lessons } : {}
   if (learnPending !== undefined) pending["/agent/learn"] = learnPending
   const visible = agentTabsFor(can)
   if (visible.length === 0) return null

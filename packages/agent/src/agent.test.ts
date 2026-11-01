@@ -10,7 +10,7 @@ import { buildWebchatInbound, telegramBotApiAdapter, webChatAdapter } from "@ode
 import { createAppDb, createOwnerDb, type Db, sendAgentRun, withOrgContext } from "@odentia/db"
 import { supportCase, supportMessage } from "@odentia/db/schema/admin-support"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
-import { agentDecisionLog, agentHandoff, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
+import { agentDecisionLog, agentHandoff, agentKnowledgeGap, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
 import { user } from "@odentia/db/schema/auth"
 import { automationJob } from "@odentia/db/schema/automation"
 import { contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
@@ -45,7 +45,6 @@ import {
   listAnswerTraces,
   listAvailableSlots,
   listHandoffs,
-  listKnowledgeGaps,
   listOpportunities,
   listPersonFacts,
   listProposals,
@@ -58,7 +57,6 @@ import {
   operationAgentFields,
   professionalRef,
   READ_TOOLS,
-  removeAgentGuidance,
   removePersonFact,
   reserveBookingLink,
   resolvePersonalLink,
@@ -953,7 +951,7 @@ it("cada turno arma el contexto desde la base sin crecer por copia ni conservar 
   const written = await withOrgContext(appDb, "org_a", (tx) => addAgentGuidance(tx, "org_a", "u_indicaciones", "PROMPT-TURNO-DOS"))
   toolCtx.draftText = "segundo turno"
   await compileAgentGraph(model, toolCtx).invoke({ messages: [], turnCount: 0 })
-  await withOrgContext(appDb, "org_a", (tx) => removeAgentGuidance(tx, "org_a", "u_indicaciones", written.id))
+  await withOrgContext(appDb, "org_a", (tx) => withdrawLesson(tx, "org_a", "u_indicaciones", written.id))
   expect(model.seen).toHaveLength(2)
   const first = model.seen[0] ?? []
   const second = model.seen[1] ?? []
@@ -2157,10 +2155,9 @@ it("el agente recibe todas las respuestas vigentes, no la vencida, y anota lo qu
     for (let i = 1; i <= 14; i++) expect(system).toContain(`- Tema completo ${i}: Respuesta completa ${i}.`)
     expect(system).not.toContain("Promoción vencida")
     expect(found).toContain("Sin respuesta oficial")
-    const gaps = await withOrgContext(appDb, "org_a", (tx) => listKnowledgeGaps(tx, "org_a"))
-    const mine = gaps.filter((gap) => gap.conversationId === conversationId)
+    const mine = await ownerDb.select().from(agentKnowledgeGap).where(eq(agentKnowledgeGap.conversationId, conversationId))
     // Una entrada por pregunta del interlocutor, aunque el agente buscara dos veces.
-    expect(mine).toMatchObject([{ question, count: 1, teamAnswer: null }])
+    expect(mine).toMatchObject([{ question, status: "abierta" }])
   } finally {
     await unpublishKnowledge(ids)
   }

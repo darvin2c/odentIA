@@ -2,11 +2,14 @@ import { createRuleConflictModel, isProviderConfigError, meterAiUse, type Platfo
 import { type Db, withOrgContext } from "@odentia/db"
 import {
   addAgentGuidance,
+  addReviewToAnswer,
   approveLesson,
   editAgentGuidance,
   findRuleConflict,
+  findTextConflict,
+  getAnswerConversation,
+  getReviewConversation,
   listAgentGuidance,
-  removeAgentGuidance,
   correctAnswer,
   discardLesson,
   getLearningOverview,
@@ -15,6 +18,8 @@ import {
   listTestCases,
   markAnswerOk,
   markReviewOk,
+  proposeExampleFromReview,
+  reopenReviewItem,
   restoreLesson,
   RULE_BODY_CHARS,
   saveTestCase,
@@ -36,6 +41,7 @@ const correctionInput = z
     traceId: z.string().uuid().optional(),
     failure: z.enum(["dato_equivocado", "falto_dato", "tono", "no_debio_responder", "otra_cosa"], { error: "Elige qué falló" }),
     correctedReply: z.string().max(2000, "La respuesta admite hasta 2000 caracteres").optional(),
+    question: z.string().max(200, "La pregunta admite hasta 200 caracteres").optional(),
   })
   .refine((input) => Boolean(input.reviewItemId) !== Boolean(input.traceId), "Indica una sola respuesta que corregir")
 
@@ -50,10 +56,11 @@ const caseInput = z.object({ question: z.string().trim().min(1).max(2000), expec
 
 const withdrawInput = z.object({ withdrawCase: z.boolean().optional() })
 
-const guidanceInput = z.object({
-  body: z.string().trim().min(1, "Escribe qué debe saber el agente").max(RULE_BODY_CHARS, `Como mucho ${RULE_BODY_CHARS} caracteres`),
-})
+const guidanceBody = z.string().trim().min(1, "Escribe qué debe saber el agente").max(RULE_BODY_CHARS, `Como mucho ${RULE_BODY_CHARS} caracteres`)
+const guidanceInput = z.object({ body: guidanceBody, replaceId: z.string().uuid().optional() })
+const guidanceCheckInput = z.object({ body: guidanceBody, id: z.string().uuid().optional() })
 const approveInput = z.object({ replaceId: z.string().uuid().optional() })
+const addToAnswerInput = z.object({ entryId: z.string({ error: "Elige una respuesta" }).uuid("Elige una respuesta") })
 
 export interface AgentLearningDeps extends CrmDeps {
   llm: PlatformLlm
@@ -93,15 +100,50 @@ export function createAgentLearningRoute(deps: AgentLearningDeps) {
     return runService(c, 201, () => withOrgContext(deps.db, orgId, (tx) => saveTestCase(tx, orgId, userId, parsed.data)))
   })
 
-  app.post("/review/:id/ok", async (c) => {
+  // Revisar una respuesta y lo que hizo con ella: quien decide por el agente.
+  for (const [path, action] of [
+    ["ok", markReviewOk],
+    ["reopen", reopenReviewItem],
+  ] as const) {
+    app.post(`/review/:id/${path}`, async (c) => {
+      const { orgId, memberRole, userId } = orgContextOf(c)
+      if (!canAccessAny(memberRole, ["agent.decide", "agent.write"])) return forbidden(c)
+      return runService(c, 200, async () => {
+        await withOrgContext(deps.db, orgId, (tx) => action(tx, orgId, userId, c.req.param("id")))
+        return { ok: true }
+      })
+    })
+  }
+
+  // «Guardar como ejemplo»: queda propuesta; la aprueba quien administra.
+  app.post("/review/:id/example", async (c) => {
     const { orgId, memberRole, userId } = orgContextOf(c)
     if (!canAccessAny(memberRole, ["agent.decide", "agent.write"])) return forbidden(c)
-    const parsed = z.object({ asExample: z.boolean().optional() }).safeParse(await c.req.json().catch(() => ({})))
+    return runService(c, 201, () => withOrgContext(deps.db, orgId, (tx) => proposeExampleFromReview(tx, orgId, userId, c.req.param("id"))))
+  })
+
+  // Sumar lo buscado a una respuesta oficial la cambia al instante: es de quien administra.
+  app.post("/review/:id/add-to-answer", async (c) => {
+    const { orgId, memberRole, userId } = orgContextOf(c)
+    if (!canAccess(memberRole, "agent.write")) return forbidden(c)
+    const parsed = addToAnswerInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, async () => ({
-      // Con `asExample`, la respuesta queda propuesta como ejemplo para preguntas parecidas.
-      lesson: await withOrgContext(deps.db, orgId, (tx) => markReviewOk(tx, orgId, userId, c.req.param("id"), parsed.data)),
-    }))
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => addReviewToAnswer(tx, orgId, userId, c.req.param("id"), parsed.data.entryId)),
+    )
+  })
+
+  // Lo que había alrededor de una respuesta, para juzgarla: de quien puede ver la conversación o supervisa al agente.
+  app.get("/review/:id/conversation", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccessAny(memberRole, ["conversations.read", "agent.read"])) return forbidden(c)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getReviewConversation(tx, orgId, c.req.param("id"))))
+  })
+
+  app.get("/answers/:traceId/conversation", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccessAny(memberRole, ["conversations.read", "agent.read"])) return forbidden(c)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getAnswerConversation(tx, orgId, c.req.param("traceId"))))
   })
 
   // Marcar una respuesta desde la Bandeja (bien o por corregir) es de quien
@@ -161,7 +203,24 @@ export function createAgentLearningRoute(deps: AgentLearningDeps) {
     if (!canAccess(memberRole, "agent.write")) return forbidden(c)
     const parsed = guidanceInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 201, () => withOrgContext(deps.db, orgId, (tx) => addAgentGuidance(tx, orgId, userId, parsed.data.body)))
+    const { body, replaceId } = parsed.data
+    return runService(c, 201, () => withOrgContext(deps.db, orgId, (tx) => addAgentGuidance(tx, orgId, userId, body, replaceId ? { replaceId } : {})))
+  })
+
+  /**
+   * Antes de guardar lo que se escribe o se edita: ¿contradice otra regla? Solo
+   * lee y avisa; quien administra decide si reemplaza o mantiene las dos.
+   */
+  app.post("/guidance/check", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "agent.write")) return forbidden(c)
+    const parsed = guidanceCheckInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const { body, id } = parsed.data
+    return runService(c, 200, async () => {
+      const model = await createRuleConflictModel(deps.db, { secretsKey: deps.secretsKey, platform: deps.llm, ...(deps.decisions ? { decisions: deps.decisions } : {}) }, orgId).catch(() => null)
+      return withOrgContext(deps.db, orgId, (tx) => findTextConflict(tx, orgId, body, { model, ...(id ? { excludeId: id } : {}) }))
+    })
   })
 
   app.patch("/guidance/:id", async (c) => {
@@ -169,18 +228,10 @@ export function createAgentLearningRoute(deps: AgentLearningDeps) {
     if (!canAccess(memberRole, "agent.write")) return forbidden(c)
     const parsed = guidanceInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
+    const { body, replaceId } = parsed.data
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => editAgentGuidance(tx, orgId, userId, c.req.param("id"), parsed.data.body)),
+      withOrgContext(deps.db, orgId, (tx) => editAgentGuidance(tx, orgId, userId, c.req.param("id"), body, replaceId ? { replaceId } : {})),
     )
-  })
-
-  app.delete("/guidance/:id", async (c) => {
-    const { orgId, memberRole, userId } = orgContextOf(c)
-    if (!canAccess(memberRole, "agent.write")) return forbidden(c)
-    return runService(c, 200, async () => {
-      await withOrgContext(deps.db, orgId, (tx) => removeAgentGuidance(tx, orgId, userId, c.req.param("id")))
-      return { ok: true }
-    })
   })
 
   /**

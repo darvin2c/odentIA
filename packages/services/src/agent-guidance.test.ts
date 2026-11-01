@@ -9,8 +9,8 @@ import {
   addAgentGuidance,
   editAgentGuidance,
   findRuleConflict,
+  findTextConflict,
   listAgentGuidance,
-  removeAgentGuidance,
   simpleRulesConflict,
 } from "./agent-guidance.js"
 import {
@@ -19,8 +19,10 @@ import {
   LESSON_RULE_LIMIT,
   lessonsForTurn,
   listLessons,
+  listTestCases,
   RULE_BODY_CHARS,
   restoreLesson,
+  withdrawLesson,
 } from "./agent-learning.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -86,7 +88,7 @@ describe("una sola lista con su origen", () => {
     expect((await c.run((tx) => listLessons(tx, c.orgId, "activa"))).map((lesson) => lesson.id)).toEqual([learnedId])
   })
 
-  it("todas se editan y se borran igual, y al agente le llega una sola lista, primero lo de la clínica", async () => {
+  it("todas se editan y se retiran igual, y al agente le llega una sola lista, primero lo de la clínica", async () => {
     const c = await clinic()
     const learnedId = await c.proposedRule("Si preguntan por estacionamiento, di que hay uno frente a la sede.")
     await c.run((tx) => approveLesson(tx, c.orgId, c.ownerId, learnedId))
@@ -96,14 +98,37 @@ describe("una sola lista con su origen", () => {
     const turn = await c.run((tx) => lessonsForTurn(tx, c.orgId, "recepcion", "hola"))
     expect(turn.rules.map((rule) => rule.body)).toEqual(["Despídete recordando la dirección.", "Hay estacionamiento gratis frente a la sede Centro."])
     expect(formatLessonRules(turn.rules)).toMatch(/^Lo que debes saber de tu clínica/)
-    await c.run((tx) => removeAgentGuidance(tx, c.orgId, c.ownerId, written.id))
-    await c.run((tx) => removeAgentGuidance(tx, c.orgId, c.ownerId, learnedId))
+    await c.run((tx) => withdrawLesson(tx, c.orgId, c.ownerId, written.id))
+    await c.run((tx) => withdrawLesson(tx, c.orgId, c.ownerId, learnedId))
     expect((await c.run((tx) => lessonsForTurn(tx, c.orgId, "recepcion", "hola"))).rules).toEqual([])
-    expect((await c.run((tx) => listAgentGuidance(tx, c.orgId))).counts).toEqual({ all: 0, escrita: 0, aprendida: 0 })
-    // Borrar no pierde la historia: la aprendida queda retirada.
+    const after = await c.run((tx) => listAgentGuidance(tx, c.orgId))
+    expect(after.counts).toEqual({ all: 0, escrita: 0, aprendida: 0 })
+    // Retirar no pierde la historia: las dos quedan al pie, también con un filtro por origen.
+    expect(after.withdrawn.map((item) => item.id).sort()).toEqual([written.id, learnedId].sort())
+    expect((await c.run((tx) => listAgentGuidance(tx, c.orgId, { source: "aprendida" }))).withdrawn).toHaveLength(2)
     const [row] = await ownerDb.select({ status: agentLesson.status }).from(agentLesson).where(eq(agentLesson.id, learnedId))
     expect(row?.status).toBe("retirada")
     await expect(c.run((tx) => editAgentGuidance(tx, c.orgId, c.ownerId, written.id, "otra"))).rejects.toMatchObject({ code: "NOT_FOUND" })
+    // Una escrita también vuelve, y el texto sigue siendo el suyo.
+    await c.run((tx) => restoreLesson(tx, c.orgId, c.ownerId, written.id))
+    const back = await c.run((tx) => listAgentGuidance(tx, c.orgId))
+    expect(back.items).toEqual([expect.objectContaining({ id: written.id, source: "escrita", body: "Despídete recordando la dirección." })])
+    expect(back.withdrawn.map((item) => item.id)).toEqual([learnedId])
+  })
+
+  it("retirar una aprendida también retira su caso de prueba, como en «Aprender»", async () => {
+    const c = await clinic()
+    const [row] = await ownerDb
+      .insert(agentLesson)
+      .values({
+        organizationId: c.orgId, kind: "regla", scope: "recepcion", title: "No dar precios", body: "No des precios por aquí.", failure: "no_debio_responder",
+        question: "¿Cuánto cuesta?", status: "propuesta", conversationId: c.conversationId, proposedBy: c.receptionId,
+      })
+      .returning({ id: agentLesson.id })
+    await c.run((tx) => approveLesson(tx, c.orgId, c.ownerId, row!.id))
+    expect(await c.run((tx) => listTestCases(tx, c.orgId))).toHaveLength(1)
+    await c.run((tx) => withdrawLesson(tx, c.orgId, c.ownerId, row!.id, { withdrawCase: true }))
+    expect(await c.run((tx) => listTestCases(tx, c.orgId))).toEqual([])
   })
 })
 
@@ -154,6 +179,49 @@ describe("al aprobar una regla que contradice otra, se avisa antes", () => {
   })
 })
 
+describe("al escribir o editar una regla que contradice otra, también se avisa", () => {
+  it("dice con cuál choca, sin contarse a sí misma, y no impide guardar", async () => {
+    const c = await clinic()
+    const old = await c.run((tx) => addAgentGuidance(tx, c.orgId, c.ownerId, "No ofrezcas citas los sábados."))
+    expect(await c.run((tx) => findTextConflict(tx, c.orgId, "Los sábados atiende la Dra. Ana."))).toEqual({
+      conflictWith: { id: old.id, body: old.body },
+      method: "comparacion",
+    })
+    expect((await c.run((tx) => findTextConflict(tx, c.orgId, "Los sábados atiende la Dra. Ana.", { excludeId: old.id }))).conflictWith).toBeNull()
+    expect((await c.run((tx) => findTextConflict(tx, c.orgId, "Responde en español."))).conflictWith).toBeNull()
+    // Con modelo de decisión, le pregunta a él; si falla, la comparación simple.
+    expect(await c.run((tx) => findTextConflict(tx, c.orgId, "Los sábados atiende la Dra. Ana.", { model: async () => false }))).toEqual({ conflictWith: null, method: "modelo" })
+    expect((await c.run((tx) => findTextConflict(tx, c.orgId, "Los sábados atiende la Dra. Ana.", { model: () => Promise.reject(new Error("sin modelo")) }))).method).toBe("comparacion")
+    // «Mantener las dos»: se guarda igual.
+    await c.run((tx) => addAgentGuidance(tx, c.orgId, c.ownerId, "Los sábados atiende la Dra. Ana."))
+    expect((await c.run((tx) => listAgentGuidance(tx, c.orgId))).counts.all).toBe(2)
+  })
+
+  it("«Reemplazar» deja solo la nueva y la otra queda en «Retiradas», también con el tope lleno", async () => {
+    const c = await clinic()
+    const old = await c.run((tx) => addAgentGuidance(tx, c.orgId, c.ownerId, "No ofrezcas citas los sábados."))
+    const added = await c.run((tx) => addAgentGuidance(tx, c.orgId, c.ownerId, "Los sábados atiende la Dra. Ana.", { replaceId: old.id }))
+    let list = await c.run((tx) => listAgentGuidance(tx, c.orgId))
+    expect(list.items.map((item) => item.id)).toEqual([added.id])
+    expect(list.withdrawn.map((item) => item.id)).toEqual([old.id])
+    // Lo mismo al editar: la que se edita sigue y la otra se retira.
+    const third = await c.run((tx) => addAgentGuidance(tx, c.orgId, c.ownerId, "Responde en español."))
+    await c.run((tx) => editAgentGuidance(tx, c.orgId, c.ownerId, third.id, "Los sábados no hay citas.", { replaceId: added.id }))
+    list = await c.run((tx) => listAgentGuidance(tx, c.orgId))
+    expect(list.items.map((item) => item.id)).toEqual([third.id])
+    // Lo que ya no está activo no se reemplaza, y una regla no se reemplaza a sí misma.
+    await expect(c.run((tx) => addAgentGuidance(tx, c.orgId, c.ownerId, "Otra.", { replaceId: old.id }))).rejects.toMatchObject({ code: "LESSON_NOT_ACTIVE" })
+    await expect(c.run((tx) => editAgentGuidance(tx, c.orgId, c.ownerId, third.id, "Otra.", { replaceId: third.id }))).rejects.toMatchObject({ code: "VALIDATION" })
+
+    for (let index = 1; index < LESSON_RULE_LIMIT; index++) {
+      await c.run((tx) => addAgentGuidance(tx, c.orgId, c.ownerId, `Regla número ${index}.`))
+    }
+    await expect(c.run((tx) => addAgentGuidance(tx, c.orgId, c.ownerId, "Una más."))).rejects.toMatchObject({ code: "RULE_LIMIT" })
+    await c.run((tx) => addAgentGuidance(tx, c.orgId, c.ownerId, "Una más.", { replaceId: third.id }))
+    expect((await c.run((tx) => listAgentGuidance(tx, c.orgId))).counts.all).toBe(LESSON_RULE_LIMIT)
+  })
+})
+
 describe("las reglas no pasan del tope ni del largo (ADR 0119)", () => {
   it("con 40 activas no se agrega otra, la que se aprueba reemplaza una y lo largo no entra", async () => {
     const c = await clinic()
@@ -175,7 +243,7 @@ describe("las reglas no pasan del tope ni del largo (ADR 0119)", () => {
     await expect(c.run((tx) => restoreLesson(tx, c.orgId, c.ownerId, first.id))).rejects.toMatchObject({ code: "RULE_LIMIT" })
     // Lo largo no se escribe ni se aprueba: llegaría cortado.
     const long = "a".repeat(RULE_BODY_CHARS + 1)
-    await c.run((tx) => removeAgentGuidance(tx, c.orgId, c.ownerId, added[1]!.id))
+    await c.run((tx) => withdrawLesson(tx, c.orgId, c.ownerId, added[1]!.id))
     await expect(c.run((tx) => addAgentGuidance(tx, c.orgId, c.ownerId, long))).rejects.toMatchObject({ fields: { body: expect.any(String) } })
     const longRule = await c.proposedRule(long)
     await expect(c.run((tx) => approveLesson(tx, c.orgId, c.ownerId, longRule))).rejects.toMatchObject({ fields: { body: expect.any(String) } })

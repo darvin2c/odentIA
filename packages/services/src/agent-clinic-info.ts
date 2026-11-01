@@ -627,7 +627,7 @@ export function asksPriceOrAvailability(text: string): boolean {
   return PRICE_OR_AVAILABILITY.test(text)
 }
 
-/** ¿La búsqueda no encontró nada? Entonces la pregunta queda en «Preguntas sin respuesta». */
+/** ¿La búsqueda no encontró nada? Entonces la pregunta entra a «Por revisar», en Aprender. */
 export function clinicSearchFoundNothing(result: ClinicSearchResult): boolean {
   return !result.services.length && !result.promotions.length && !result.professionals.length
 }

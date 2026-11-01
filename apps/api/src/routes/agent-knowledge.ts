@@ -1,13 +1,10 @@
 import { withOrgContext } from "@odentia/db"
 import {
-  answerKnowledgeGaps,
   createKnowledgeEntry,
-  discardKnowledgeGaps,
   getAgentDataSources,
   getKnowledgeBasics,
   getKnowledgeEntry,
   listKnowledgePage,
-  listKnowledgeGaps,
   listKnowledgeRevisions,
   setKnowledgeStatus,
   updateKnowledgeEntry,
@@ -46,26 +43,6 @@ const updateInput = z.object({
   body: body.optional(),
   ...catalog,
 })
-
-const gapIds = z.array(z.string().uuid()).min(1).max(100)
-/**
- * Cerrar preguntas sin respuesta: con una respuesta que ya existe (`entryId`)
- * o con una nueva. Un solo objeto (no una unión) para que cada error diga su
- * campo: sin `entryId`, la pregunta y la respuesta son obligatorias.
- */
-const answerGapsInput = z
-  .object({
-    ids: gapIds,
-    entryId: z.string().uuid().optional(),
-    title: title.optional(),
-    body: body.optional(),
-    basicKey,
-  })
-  .superRefine((input, ctx) => {
-    if (input.entryId) return
-    if (input.title === undefined) ctx.addIssue({ code: "custom", path: ["title"], message: "Escribe la pregunta." })
-    if (input.body === undefined) ctx.addIssue({ code: "custom", path: ["body"], message: "Escribe la respuesta." })
-  })
 
 const statusInput = z.object({ status: z.enum(["borrador", "publicada"]) })
 
@@ -106,43 +83,6 @@ export function createAgentKnowledgeRoute(deps: CrmDeps) {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "agent.read")) return c.json(errorBody(c, "FORBIDDEN", "Sin acceso al agente"), 403)
     return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getAgentDataSources(tx, orgId)))
-  })
-
-  /** Lo que el agente no supo responder, agrupado, con lo que respondió el equipo. */
-  app.get("/gaps", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "agent.read")) return c.json(errorBody(c, "FORBIDDEN", "Sin acceso al agente"), 403)
-    const parsed = z
-      .object({
-        status: z.enum(["abierta", "resuelta", "descartada"]).optional(),
-        limit: z.coerce.number().int().min(1).max(100).optional(),
-      })
-      .safeParse(c.req.query())
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => listKnowledgeGaps(tx, orgId, parsed.data)))
-  })
-
-  app.post("/gaps/answer", async (c) => {
-    const { orgId, memberRole, userId } = orgContextOf(c)
-    if (!canAccess(memberRole, "agent.write")) return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin"), 403)
-    const parsed = answerGapsInput.safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    const { ids, entryId, title, body, basicKey } = parsed.data
-    const answer = entryId ? { entryId } : { title: title ?? "", body: body ?? "", basicKey: basicKey ?? null }
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => answerKnowledgeGaps(tx, orgId, userId, ids, answer)),
-    )
-  })
-
-  app.post("/gaps/discard", async (c) => {
-    const { orgId, memberRole, userId } = orgContextOf(c)
-    if (!canAccess(memberRole, "agent.write")) return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin"), 403)
-    const parsed = z.object({ ids: gapIds }).safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, async () => {
-      await withOrgContext(deps.db, orgId, (tx) => discardKnowledgeGaps(tx, orgId, userId, parsed.data.ids))
-      return { discarded: parsed.data.ids.length }
-    })
   })
 
   app.post("/", async (c) => {

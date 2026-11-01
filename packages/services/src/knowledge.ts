@@ -5,13 +5,10 @@ import {
   agentKnowledgeGap,
   agentKnowledgeRevision,
   agentLesson,
-  KNOWLEDGE_GAP_STATUSES,
-  type KnowledgeGapStatus,
   type KnowledgeKind,
   type KnowledgeStatus,
 } from "@odentia/db/schema/agent"
 import { serviceCatalog } from "@odentia/db/schema/clinical"
-import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, count, desc, eq, gt, inArray, or, sql } from "drizzle-orm"
 import { foldedWordsMatch } from "./search-text.js"
@@ -25,8 +22,8 @@ import { listClinicPromotionSummaries } from "./promotions.js"
 const KINDS = ["faq", "info_sede", "politica"] as const
 const STATUSES = ["borrador", "publicada"] as const
 const MAX_LIMIT = 100
-const ASK_FORM_LIMIT = 20
-const ASK_FORM_CHARS = 120
+export const ASK_FORM_LIMIT = 20
+export const ASK_FORM_CHARS = 120
 
 /**
  * «Lo que solo tú sabes» (ADR 0120): lo que los pacientes preguntan seguido y
@@ -871,16 +868,16 @@ export async function getKnowledgeBasics(tx: Db, orgId: string): Promise<Knowled
   return { items, covered: items.filter((item) => item.covered).length, total: items.length }
 }
 
-/* ---------- Lo que el agente no supo responder ---------- */
+/* ---------- Lo que el agente buscó sin encontrar nada ---------- */
 
 const GAP_QUESTION_CHARS = 500
 const GAP_DEDUPE_MS = 24 * 60 * 60 * 1000
-const GAP_WEEK_MS = 7 * 24 * 60 * 60 * 1000
 const UUID = /^[0-9a-f-]{36}$/i
 
 /**
- * Deja constancia de una búsqueda sin resultado. La misma pregunta en el mismo
- * hilo no se repite durante un día: una ráfaga no llena la lista.
+ * Deja constancia de una búsqueda sin resultado: una persona la mira en «Por
+ * revisar» (`syncReviewQueue`). La misma pregunta en el mismo hilo no se repite
+ * durante un día: una ráfaga no llena la lista.
  */
 export async function recordKnowledgeGap(
   tx: Db,
@@ -917,138 +914,22 @@ export async function recordKnowledgeGap(
   return row?.id ?? null
 }
 
-export interface KnowledgeGapItem {
-  /** Todas las veces que se hizo la misma pregunta, la más reciente primero. */
-  ids: string[]
-  question: string
-  count: number
-  /** De esas veces, cuántas en los últimos siete días. */
-  weekCount: number
-  lastAt: string
-  conversationId: string
-  status: KnowledgeGapStatus
-  /** Lo primero que respondió una persona del equipo en ese hilo después; nulo si nadie respondió. */
-  teamAnswer: string | null
-}
-
 /**
- * Preguntas sin respuesta agrupadas por texto (la misma pregunta de varias
- * personas cuenta una vez con su total), con lo que respondió el equipo.
+ * Suma a una respuesta que ya existe las formas en que se buscó lo que no
+ * encontró: la próxima vez el agente la encuentra. Su texto no cambia.
  */
-export async function listKnowledgeGaps(
-  tx: Db,
-  orgId: string,
-  input: { status?: string; limit?: number } = {},
-): Promise<KnowledgeGapItem[]> {
-  const status = input.status ?? "abierta"
-  if (!(KNOWLEDGE_GAP_STATUSES as readonly string[]).includes(status)) throw validation("status inválido")
-  const rows = await tx
-    .select({
-      id: agentKnowledgeGap.id,
-      question: agentKnowledgeGap.question,
-      conversationId: agentKnowledgeGap.conversationId,
-      createdAt: agentKnowledgeGap.createdAt,
-      // Columnas de la consulta exterior escritas con su tabla: sin ella, dentro
-      // de la subconsulta se resolverían contra el propio mensaje.
-      teamAnswer: sql<string | null>`(
-        select m.body from ${message} m
-        where m.organization_id = ${orgId}
-          and m.conversation_id = "agent_knowledge_gap"."conversation_id"
-          and m.direction = 'out' and m.sender_kind = 'user' and m.body is not null
-          and m.created_at > "agent_knowledge_gap"."created_at"
-        order by m.created_at asc limit 1)`,
-    })
-    .from(agentKnowledgeGap)
-    .where(and(eq(agentKnowledgeGap.organizationId, orgId), eq(agentKnowledgeGap.status, status)))
-    .orderBy(desc(agentKnowledgeGap.createdAt), asc(agentKnowledgeGap.id))
-    .limit(300)
-  const groups = new Map<string, KnowledgeGapItem>()
-  const weekStart = Date.now() - GAP_WEEK_MS
-  for (const row of rows) {
-    const key = normalizeForSearch(row.question)
-    const group = groups.get(key)
-    const thisWeek = row.createdAt.getTime() > weekStart ? 1 : 0
-    if (group) {
-      group.ids.push(row.id)
-      group.count += 1
-      group.weekCount += thisWeek
-      group.teamAnswer ??= row.teamAnswer
-      continue
-    }
-    groups.set(key, {
-      ids: [row.id],
-      question: row.question,
-      count: 1,
-      weekCount: thisWeek,
-      lastAt: row.createdAt.toISOString(),
-      conversationId: row.conversationId,
-      status: status as KnowledgeGapStatus,
-      teamAnswer: row.teamAnswer,
-    })
-  }
-  const limit = Math.min(Math.max(input.limit ?? 50, 1), 100)
-  return [...groups.values()].slice(0, limit)
-}
-
-export async function countOpenKnowledgeGaps(tx: Db, orgId: string): Promise<number> {
-  return (await listKnowledgeGaps(tx, orgId, { status: "abierta", limit: 100 })).length
-}
-
-async function closeGaps(
+export async function addAskFormsToAnswer(
   tx: Db,
   orgId: string,
   actorUserId: string | null,
-  ids: string[],
-  patch: { status: KnowledgeGapStatus; resolvedEntryId: string | null },
-): Promise<string[]> {
-  if (!ids.length) throw validation("Indica qué pregunta sin respuesta cierras")
-  if (ids.some((id) => !UUID.test(id))) throw validation("Identificador de pregunta inválido")
-  const closed = await tx
-    .update(agentKnowledgeGap)
-    .set({ ...patch, resolvedBy: actorUserId, resolvedAt: new Date() })
-    .where(
-      and(
-        eq(agentKnowledgeGap.organizationId, orgId),
-        inArray(agentKnowledgeGap.id, ids),
-        eq(agentKnowledgeGap.status, "abierta"),
-      ),
-    )
-    .returning({ question: agentKnowledgeGap.question })
-  if (!closed.length) throw notFound("Pregunta sin respuesta")
-  return closed.map((row) => row.question)
-}
-
-/**
- * Cierra preguntas sin respuesta con una respuesta oficial: una nueva (queda
- * publicada) o una que ya existía. En ambos casos la pregunta se suma a las
- * formas de preguntar de esa respuesta: la próxima vez el agente la encuentra.
- */
-export async function answerKnowledgeGaps(
-  tx: Db,
-  orgId: string,
-  actorUserId: string | null,
-  ids: string[],
-  input: { entryId: string } | { title: string; body: string; basicKey?: string | null },
+  entryId: string,
+  forms: string[],
 ): Promise<KnowledgeEntryItem> {
-  let entryId: string
-  if ("entryId" in input) {
-    entryId = (await requireEntry(tx, orgId, input.entryId)).id
-  } else {
-    const created = await createKnowledgeEntry(tx, orgId, actorUserId, {
-      kind: "faq",
-      title: input.title,
-      body: input.body,
-      basicKey: cleanBasicKey(input.basicKey),
-    })
-    await setKnowledgeStatus(tx, orgId, actorUserId, created.id, "publicada")
-    entryId = created.id
-  }
-  const questions = await closeGaps(tx, orgId, actorUserId, ids, { status: "resuelta", resolvedEntryId: entryId })
   const current = await requireEntry(tx, orgId, entryId)
   const merged = [...current.askForms]
   const seen = new Set([normalizeForSearch(current.title), ...merged.map(normalizeForSearch)])
-  for (const question of questions) {
-    const form = question.slice(0, ASK_FORM_CHARS)
+  for (const raw of forms) {
+    const form = raw.slice(0, ASK_FORM_CHARS)
     const key = normalizeForSearch(form)
     if (!key || seen.has(key) || merged.length >= ASK_FORM_LIMIT) continue
     seen.add(key)
@@ -1060,11 +941,6 @@ export async function answerKnowledgeGaps(
       .set({ askForms: merged, updatedAt: new Date() })
       .where(eq(agentKnowledgeEntry.id, entryId))
   }
-  await audit(tx, orgId, actorUserId, "agent.knowledge_gap_answered", entryId, { gaps: ids.length })
+  await audit(tx, orgId, actorUserId, "agent.knowledge_gap_answered", entryId, { forms: forms.length })
   return getKnowledgeEntry(tx, orgId, entryId)
-}
-
-/** Descarta preguntas que no corresponde responder (ruido, fuera de tema). */
-export async function discardKnowledgeGaps(tx: Db, orgId: string, actorUserId: string | null, ids: string[]): Promise<void> {
-  await closeGaps(tx, orgId, actorUserId, ids, { status: "descartada", resolvedEntryId: null })
 }
