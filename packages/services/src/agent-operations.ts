@@ -3262,20 +3262,21 @@ export type HandoffStatus = "abierta" | "tomada" | "resuelta"
 type HandoffRow = typeof agentHandoff.$inferSelect
 
 async function enrichHandoffs(tx: Db, rows: HandoffRow[]): Promise<HandoffItem[]> {
-  const contactIds = [...new Set(rows.map((r) => r.contactId).filter((v): v is string => !!v))]
   const conversationIds = [...new Set(rows.map((r) => r.conversationId).filter((v): v is string => !!v))]
   const taskIds = [...new Set(rows.map((r) => r.taskId).filter((v): v is string => !!v))]
-  const [contacts, convs] = await Promise.all([
-    contactIds.length
-      ? tx.select({ id: contact.id, displayName: contact.displayName }).from(contact).where(inArray(contact.id, contactIds))
-      : [],
-    conversationIds.length
-      ? tx
-          .select({ id: conversation.id, connectionId: conversation.channelConnectionId })
-          .from(conversation)
-          .where(inArray(conversation.id, conversationIds))
-      : [],
-  ])
+  const convs = conversationIds.length
+    ? await tx
+        .select({ id: conversation.id, connectionId: conversation.channelConnectionId, contactId: conversation.contactId })
+        .from(conversation)
+        .where(inArray(conversation.id, conversationIds))
+    : []
+  // La persona de un caso es la de su conversación: reasignar una identidad mueve la conversación, no el caso.
+  const contactByConv = new Map(convs.map((c) => [c.id, c.contactId]))
+  const personOf = (row: HandoffRow) => (row.conversationId ? contactByConv.get(row.conversationId) : undefined) ?? row.contactId
+  const contactIds = [...new Set(rows.map(personOf).filter((v): v is string => !!v))]
+  const contacts = contactIds.length
+    ? await tx.select({ id: contact.id, displayName: contact.displayName }).from(contact).where(inArray(contact.id, contactIds))
+    : []
   const contactById = new Map(contacts.map((c) => [c.id, c.displayName]))
   const dueByTask = new Map<string, Date>()
   const statusByTask = new Map<string, string>()
@@ -3301,11 +3302,12 @@ async function enrichHandoffs(tx: Db, rows: HandoffRow[]): Promise<HandoffItem[]
   }
   return rows.map((row) => {
     const connectionId = row.conversationId ? connectionByConv.get(row.conversationId) : undefined
+    const contactId = personOf(row)
     return {
       id: row.id,
       conversationId: row.conversationId,
-      contactId: row.contactId,
-      contactName: row.contactId ? (contactById.get(row.contactId) ?? null) : null,
+      contactId,
+      contactName: contactId ? (contactById.get(contactId) ?? null) : null,
       channel: connectionId ? (channelByConnection.get(connectionId) ?? null) : null,
       reason: row.reason,
       summary: row.summary,
@@ -3334,14 +3336,14 @@ async function enrichHandoffs(tx: Db, rows: HandoffRow[]): Promise<HandoffItem[]
 }
 
 /** Un tema de una prueba de «Probar»: se sigue en su panel (ADR 0094). `h` es `agent_handoff` o su alias. */
-export function probarHandoffSql(h: SQL): SQL {
+function probarHandoffSql(h: SQL): SQL {
   return sql`exists (select 1 from conversation t_probar where t_probar.id = ${h}.conversation_id and t_probar.test_by_user_id is not null)`
 }
 
 /**
- * Casos que pasó el agente y siguen sin resolver. Con `forUserId`, el único
- * contador de la aplicación (el del menú del Agente): lo que nadie ha tomado
- * más lo que es de esa persona; lo que tomó otra no la espera.
+ * Casos que pasó el agente y siguen sin resolver. Con `forUserId`, lo que nadie
+ * ha tomado más lo que es de esa persona; lo que tomó otra no la espera. El número
+ * del menú cuenta personas: `countWorkspaceWaiting`.
  */
 export async function countOpenHandoffs(tx: Db, orgId: string, opts: { forUserId?: string } = {}): Promise<number> {
   const [row] = await tx.execute<{ count: number }>(sql`
@@ -3407,8 +3409,8 @@ export interface AgentSummary {
   /** Propuestas que esperan el sí del interlocutor; se ven, el equipo no las decide. */
   awaitingContact: number
   /**
-   * Casos que pasó el agente y esperan a quien mira: sin tomar o suyos. Cuentan
-   * en el número de «Inicio» del menú (`countWorkspaceWaiting`).
+   * Casos que pasó el agente y esperan a quien mira: sin tomar o suyos. El número
+   * de «Inicio» del menú cuenta sus personas (`countWorkspaceWaiting`).
    */
   openHandoffs: number
   /**
@@ -3825,34 +3827,55 @@ export async function annotateHandoff(
  * más viejos ni a los urgentes. `visibleTo`: solo los sin tomar y los de esa
  * persona (la misma regla que `countOpenHandoffs`).
  */
+/** A quién le toca un caso: la misma regla para listarlos y para contarlos. */
+export interface HandoffScope {
+  visibleTo?: string
+  /** Solo los de esta persona o de estos tipos (Inicio de caja y del odontólogo), antes del límite. */
+  only?: { assignee?: string; kinds?: string[] }
+}
+
+function handoffScopeConditions(scope: HandoffScope): SQL[] {
+  const conditions: SQL[] = []
+  if (scope.only) {
+    const either = [
+      ...(scope.only.assignee ? [eq(agentHandoff.assigneeUserId, scope.only.assignee)] : []),
+      ...(scope.only.kinds?.length ? [inArray(agentHandoff.kind, scope.only.kinds)] : []),
+    ]
+    if (either.length > 0) conditions.push(or(...either)!)
+  }
+  if (scope.visibleTo) {
+    conditions.push(or(isNull(agentHandoff.assigneeUserId), eq(agentHandoff.assigneeUserId, scope.visibleTo))!)
+  }
+  return conditions
+}
+
+/**
+ * La persona de cada caso abierto, para contarlas: la de su conversación, como en
+ * `enrichHandoffs`. Un caso sin persona cuenta por sí mismo.
+ */
+export function openHandoffPeopleSql(orgId: string, scope: HandoffScope): SQL {
+  return sql`select coalesce(c_person.contact_id::text, ${agentHandoff.contactId}::text, ${agentHandoff.id}::text) as person
+    from ${agentHandoff}
+    left join conversation c_person on c_person.organization_id = ${agentHandoff.organizationId} and c_person.id = ${agentHandoff.conversationId}
+    where ${and(eq(agentHandoff.organizationId, orgId), sql`not ${probarHandoffSql(sql.raw('"agent_handoff"'))}`, handoffStillOpen(), ...handoffScopeConditions(scope))}`
+}
+
 export async function listHandoffs(
   tx: Db,
   orgId: string,
-  input: {
+  input: HandoffScope & {
     conversationId?: string
     limit?: number
     open?: boolean
     order?: "reciente" | "urgencia"
-    visibleTo?: string
-    /** Solo los de esta persona o de estos tipos (Inicio de caja y del odontólogo), antes del límite. */
-    only?: { assignee?: string; kinds?: string[] }
   } = {},
 ): Promise<HandoffItem[]> {
   const conditions = [eq(agentHandoff.organizationId, orgId)]
   if (input.conversationId) conditions.push(eq(agentHandoff.conversationId, input.conversationId))
   // Lo que pasa a una persona en «Probar» se ve en la prueba, no en «Te espera» (ADR 0094).
   else conditions.push(sql`not ${probarHandoffSql(sql.raw('"agent_handoff"'))}`)
-  if (input.only) {
-    const either = [
-      ...(input.only.assignee ? [eq(agentHandoff.assigneeUserId, input.only.assignee)] : []),
-      ...(input.only.kinds?.length ? [inArray(agentHandoff.kind, input.only.kinds)] : []),
-    ]
-    if (either.length > 0) conditions.push(or(...either)!)
-  }
+  conditions.push(...handoffScopeConditions(input))
   if (input.open) conditions.push(handoffStillOpen())
-  if (input.visibleTo) {
-    conditions.push(or(isNull(agentHandoff.assigneeUserId), eq(agentHandoff.assigneeUserId, input.visibleTo))!)
-  }
   const limit = input.limit === undefined ? 50 : Math.min(Math.max(input.limit, 1), 100)
   const order =
     input.order === "urgencia"
