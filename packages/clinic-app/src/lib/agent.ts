@@ -503,7 +503,10 @@ export interface LessonImpact {
 }
 
 export interface LearningOverview {
+  /** Las más recientes; la lista tiene tope. */
   review: ReviewItem[]
+  /** Todas las que esperan: el mismo número del menú. */
+  reviewTotal: number
   proposed: Array<LessonItem & { impact: LessonImpact }>
   learned: LessonItem[]
   withdrawn: LessonItem[]

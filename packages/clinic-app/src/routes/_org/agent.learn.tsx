@@ -287,7 +287,7 @@ function AgentLearnPage() {
   return (
     <PageShell className="flex flex-col gap-5">
       <PageHeader title="Agente" subtitle={`Revisas lo dudoso de ${receptionName} y apruebas lo que propone aprender. Lo demás no necesita tu tiempo.`} />
-      <AgentTabs learnPending={data ? data.review.length + data.proposed.length : undefined} />
+      <AgentTabs learnPending={data ? data.reviewTotal + data.proposed.length : undefined} />
       {query.isPending ? (
         <SkeletonRegion message="Cargando lo que hay por revisar…">
           <LearnSkeleton />
@@ -298,7 +298,7 @@ function AgentLearnPage() {
         <>
           <Section
             id="por-revisar"
-            title={review.length > 0 ? `Por revisar · ${review.length}` : "Por revisar"}
+            title={data.reviewTotal > 0 ? `Por revisar · ${data.reviewTotal}` : "Por revisar"}
             hint="Las que algo hizo dudar y una muestra al azar."
           >
             {rows.length === 0 ? (
@@ -437,6 +437,11 @@ function AgentLearnPage() {
               <Button type="button" variant="link" className={cn(LINK, "self-start")} onClick={() => setAllReview(true)}>
                 {review.length - PREVIEW === 1 ? "Ver la otra" : `Ver las otras ${review.length - PREVIEW}`}
               </Button>
+            ) : null}
+            {data.reviewTotal > review.length ? (
+              <p className="text-sm text-muted-foreground">
+                Se muestran las {review.length} más recientes de {data.reviewTotal}. Al decidirlas aparecen las demás.
+              </p>
             ) : null}
           </Section>
 

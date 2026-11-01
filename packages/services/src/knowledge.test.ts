@@ -357,6 +357,8 @@ it("sumar formas de preguntar a una respuesta no cambia su texto, no repite y re
 
   const many = Array.from({ length: ASK_FORM_LIMIT + 5 }, (_, index) => `forma ${index}`)
   expect((await run((tx) => addAskFormsToAnswer(tx, ORG, OWNER, entry.id, many))).askForms).toHaveLength(ASK_FORM_LIMIT)
+  // Sin lugar para ninguna, lo dice: no se da por sumada.
+  await expect(run((tx) => addAskFormsToAnswer(tx, ORG, OWNER, entry.id, ["una más"]))).rejects.toMatchObject({ code: "ASK_FORMS_FULL" })
   // Solo de la propia organización.
   await expect(withOrgContext(appDb, OTHER, (tx) => addAskFormsToAnswer(tx, OTHER, OWNER, entry.id, ["otra"]))).rejects.toMatchObject({ code: "NOT_FOUND" })
 })

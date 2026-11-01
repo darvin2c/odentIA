@@ -24,6 +24,7 @@ import type { KnowledgeEntry } from "./knowledge-model"
 
 const CORRECTED_REPLY_CHARS = 2000
 const QUESTION_CHARS = 200
+const ANSWERS_SHOWN = 100
 
 /**
  * Lo que pide `POST /api/agent/learning/corrections`, con sus mismas palabras.
@@ -133,11 +134,13 @@ export function CorrectDrawer({
   })
   const answersQuery = useQuery({
     queryKey: ["agent-knowledge-published"],
-    queryFn: () => apiFetch<{ data: KnowledgeEntry[] }>("/api/agent/knowledge?status=publicada&limit=100"),
+    queryFn: () => apiFetch<{ data: KnowledgeEntry[]; total: number }>(`/api/agent/knowledge?status=publicada&limit=${ANSWERS_SHOWN}`),
     enabled: notFound && canWrite,
     retry: false,
   })
-  const answers = answersQuery.data?.data ?? []
+  // Solo las que Sofi usa: sumar a una vencida no le serviría para encontrarla.
+  const answers = (answersQuery.data?.data ?? []).filter((entry) => entry.state === "vigente")
+  const answersCut = (answersQuery.data?.total ?? 0) > ANSWERS_SHOWN
   const messages = conversationQuery.data?.data.messages ?? []
   const lessonKinds = conversationQuery.data?.data.lessonKinds
   const team = messages.find((message) => message.role === "equipo")
@@ -189,7 +192,8 @@ export function CorrectDrawer({
     form.reset({
       failure: target.reason === "no_encontro" ? "falto_dato" : "",
       correctedReply: "",
-      question: target.query ?? "",
+      // Lo buscado puede ser más largo que lo que admite la pregunta.
+      question: (target.query ?? "").slice(0, QUESTION_CHARS),
       existingId: "",
       asksQuestion: target.reason === "no_encontro",
     })
@@ -354,6 +358,8 @@ export function CorrectDrawer({
                           onClick={() => {
                             field.handleChange(option.value)
                             field.handleBlur()
+                            // Sumar a una respuesta solo existe para una respuesta oficial: lo elegido no queda oculto y activo.
+                            if (lessonKinds?.[option.value] !== "respuesta_oficial") form.setFieldValue("existingId", "")
                           }}
                         >
                           {option.label}
@@ -372,7 +378,7 @@ export function CorrectDrawer({
                 <field.SelectField
                   id="corregir-existente"
                   label="¿Ya tienes una respuesta para esto?"
-                  description="Si eliges una, esta forma de preguntar se suma a esa respuesta y no se crea otra."
+                  description={`Si eliges una, esta forma de preguntar se suma a esa respuesta y no se crea otra.${answersCut ? ` Se muestran las ${ANSWERS_SHOWN} más recientes.` : ""}`}
                   options={[{ value: "", label: "No, escribir una nueva" }, ...answers.map((entry) => ({ value: entry.id, label: entry.title }))]}
                 />
               )}

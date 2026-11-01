@@ -421,11 +421,21 @@ test("aprender: lo que buscó y no encontró se revisa aquí y se decide como cu
   await page.getByRole("option", { name: "Dónde dejar la bicicleta", exact: true }).click()
   await expect(correcting.getByLabel("¿Cómo debió responder?")).toHaveCount(0)
   await expect(correcting).toContainText("Su texto no cambia.")
+  // Otra falla no suma: lo elegido no queda oculto y activo.
+  await correcting.getByRole("button", { name: "El tono" }).click()
+  await expect(correcting.getByRole("button", { name: "Enviar corrección" })).toBeVisible()
+  await correcting.getByRole("button", { name: "Le faltó un dato" }).click()
+  await expect(correcting.getByRole("button", { name: "Enviar corrección" })).toBeVisible()
+  await correcting.getByRole("combobox", { name: "¿Ya tienes una respuesta para esto?" }).click()
+  await page.getByRole("option", { name: "Dónde dejar la bicicleta", exact: true }).click()
   await correcting.getByRole("button", { name: "Sumar a esa respuesta" }).click()
   await expect(correcting).toBeHidden()
   await expect(review.getByRole("status").filter({ hasText: "wifi" })).toContainText("se sumó a «Dónde dejar la bicicleta»")
   await expect(review.getByRole("heading", { level: 2 })).toHaveText("Por revisar")
-  await expect.poll(async () => (await knowledge())[0]).toMatchObject({ body: "Hay un bicicletero en la entrada.", askForms: ["dejar bicicleta", "wifi"] })
+  await expect.poll(async () => (await knowledge())[0]).toMatchObject({
+    body: "Hay un bicicletero en la entrada.",
+    askForms: ["dejar bicicleta", "¿Tienen wifi para pacientes?", "wifi"],
+  })
   expect((await learning()).proposed).toHaveLength(1)
   // Lo que ya no está por revisar no se vuelve a contar.
   expect(await needsYou()).toEqual({ review: 0, lessons: 1 })

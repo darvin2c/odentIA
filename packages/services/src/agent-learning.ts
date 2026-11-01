@@ -19,13 +19,14 @@ import {
 import { user } from "@odentia/db/schema/auth"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, count, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm"
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import {
   addAskFormsToAnswer,
   ASK_FORM_CHARS,
   ASK_FORM_LIMIT,
   createKnowledgeEntry,
+  getKnowledgeEntry,
   type KnowledgeEntryItem,
   listActiveKnowledge,
   normalizeForSearch,
@@ -207,10 +208,14 @@ async function audit(tx: Db, orgId: string, actorUserId: string | null, action: 
   await tx.insert(auditEvent).values({ organizationId: orgId, actorUserId, action, entity, entityId, metadata })
 }
 
+function wordsOf(text: string): Set<string> {
+  return new Set(normalizeForSearch(text).split(" ").filter((word) => word.length >= 3))
+}
+
 /** Dos textos preguntan lo mismo si comparten casi todas sus palabras. */
 function sameQuestion(a: string, b: string): boolean {
-  const left = new Set(normalizeForSearch(a).split(" ").filter((word) => word.length >= 3))
-  const right = new Set(normalizeForSearch(b).split(" ").filter((word) => word.length >= 3))
+  const left = wordsOf(a)
+  const right = wordsOf(b)
   if (left.size === 0 || right.size === 0) return false
   let shared = 0
   for (const word of left) if (right.has(word)) shared += 1
@@ -219,19 +224,39 @@ function sameQuestion(a: string, b: string): boolean {
 
 /* ---------- Por revisar ---------- */
 
-/** Todo lo que el interlocutor escribió seguido hasta el mensaje `q`: sin nada de la clínica en medio. */
+/**
+ * Lo que el interlocutor escribió seguido hasta el mensaje `q`, sin nada de la
+ * clínica en medio: sus últimos mensajes, los mismos que se muestran al corregir.
+ */
 const WRITTEN_UP_TO_Q = sql`(
-  select string_agg(b.body, E'\n' order by b.created_at) from message b
-  where b.organization_id = q.organization_id and b.conversation_id = q.conversation_id
-    and b.direction = 'in' and b.body is not null and b.created_at <= q.created_at
-    and not exists (
-      select 1 from message o
-      where o.organization_id = q.organization_id and o.conversation_id = q.conversation_id
-        and o.direction = 'out' and o.created_at > b.created_at and o.created_at < q.created_at))`
+  select string_agg(w.body, E'\n' order by w.created_at) from (
+    select b.body, b.created_at from message b
+    where b.organization_id = q.organization_id and b.conversation_id = q.conversation_id
+      and b.direction = 'in' and b.body is not null and b.created_at <= q.created_at
+      and not exists (
+        select 1 from message o
+        where o.organization_id = q.organization_id and o.conversation_id = q.conversation_id
+          and o.direction = 'out' and o.created_at > b.created_at and o.created_at < q.created_at)
+    order by b.created_at desc limit 12
+  ) w)`
 
-/** Dos preguntas abiertas son la misma si se buscó lo mismo o se preguntó lo mismo. */
+/**
+ * Lo escrito se guarda hasta este largo. Si pasa, se conserva lo último: es lo
+ * que se respondió.
+ */
+const WRITTEN_CHARS = 2000
+
+/**
+ * Dos preguntas abiertas son la misma si se buscó lo mismo o se escribió lo
+ * mismo. Lo corto no agrupa: el «Si» de dos personas no es la misma pregunta.
+ */
 function gapKeys(gap: { query: string; question: string }): string[] {
-  return [`buscado:${normalizeForSearch(gap.query)}`, `escrito:${normalizeForSearch(gap.question)}`]
+  const searched = normalizeForSearch(gap.query)
+  const written = normalizeForSearch(gap.question)
+  return [
+    ...(searched ? [`buscado:${searched}`] : []),
+    ...(written.split(" ").length > SHORT_MESSAGE_WORDS ? [`escrito:${written}`] : []),
+  ]
 }
 
 /**
@@ -292,6 +317,8 @@ async function syncGapsIntoReview(tx: Db, orgId: string): Promise<number> {
       select m.body from message m
       where m.organization_id = g.organization_id and m.conversation_id = g.conversation_id
         and m.direction = 'out' and m.sender_kind = 'agent' and m.body is not null and m.created_at > g.created_at
+        -- Pasado el plazo ya no es la respuesta a esto: puede ser otro tema, días después.
+        and m.created_at <= g.created_at + make_interval(mins => ${GAP_REPLY_WAIT_MINUTES})
       order by m.created_at asc limit 1
     ) reply on true
     left join lateral (
@@ -302,7 +329,8 @@ async function syncGapsIntoReview(tx: Db, orgId: string): Promise<number> {
     ) team on true
     left join lateral (
       select t.id from agent_answer_trace t
-      where t.organization_id = g.organization_id and t.trigger_message_id = g.trigger_message_id and t.outcome = 'enviada'
+      where t.organization_id = g.organization_id and t.conversation_id = g.conversation_id
+        and t.trigger_message_id = g.trigger_message_id and t.outcome = 'enviada'
       order by t.created_at desc limit 1
     ) tr on true
     where ${unreviewedGap(orgId)}
@@ -324,7 +352,15 @@ async function syncGapsIntoReview(tx: Db, orgId: string): Promise<number> {
             .where(and(eq(agentReviewItem.organizationId, orgId), eq(agentReviewItem.traceId, gap.trace_id)))
             .limit(1)
         : []
-      if (taken?.status === "pendiente") {
+      if (taken && taken.status !== "pendiente") {
+        // Esa respuesta ya se decidió: la pregunta sigue la suerte de su fila y no se revisa dos veces.
+        await tx
+          .update(agentKnowledgeGap)
+          .set({ reviewItemId: taken.id, status: taken.status === "bien" ? "descartada" : "resuelta", resolvedAt: new Date() })
+          .where(eq(agentKnowledgeGap.id, gap.id))
+        continue
+      }
+      if (taken) {
         await tx
           .update(agentReviewItem)
           .set({ reason: "no_encontro", query: gap.query, triggerMessageId: gap.trigger_message_id })
@@ -337,11 +373,11 @@ async function syncGapsIntoReview(tx: Db, orgId: string): Promise<number> {
             organizationId: orgId,
             agent: gap.agent,
             conversationId: gap.conversation_id,
-            traceId: taken ? null : gap.trace_id,
+            traceId: gap.trace_id,
             triggerMessageId: gap.trigger_message_id,
             reason: "no_encontro",
             query: gap.query,
-            question: (gap.written ?? gap.question).slice(0, 2000),
+            question: (gap.written ?? gap.question).slice(-WRITTEN_CHARS),
             reply: gap.reply ?? "",
             teamReply: gap.team_reply?.slice(0, 4000) ?? null,
             createdAt: new Date(gap.created_at),
@@ -422,7 +458,7 @@ export async function syncReviewQueue(tx: Db, orgId: string): Promise<number> {
         conversationId: row.conversation_id,
         traceId: row.id,
         reason,
-        question: (row.written ?? question).slice(0, 2000),
+        question: (row.written ?? question).slice(-WRITTEN_CHARS),
         reply: row.reply_text,
         teamReply: reason === "equipo_tomo" ? (row.next_body?.slice(0, 4000) ?? null) : null,
       })
@@ -581,7 +617,13 @@ async function conversationAround(
         inThread,
         input.replyMessageId
           ? eq(message.id, input.replyMessageId)
-          : and(eq(message.direction, "out"), eq(message.senderKind, "agent"), sql`${message.createdAt} > ${timeOf(trigger.id)}`),
+          : and(
+              eq(message.direction, "out"),
+              eq(message.senderKind, "agent"),
+              sql`${message.createdAt} > ${timeOf(trigger.id)}`,
+              // Pasado el plazo ya no es la respuesta a esto, como en la fila.
+              sql`${message.createdAt} <= ${timeOf(trigger.id)} + make_interval(mins => ${GAP_REPLY_WAIT_MINUTES})`,
+            ),
       ),
     )
     .orderBy(asc(message.createdAt))
@@ -675,21 +717,28 @@ export async function markReviewOk(tx: Db, orgId: string, actorUserId: string, i
   await audit(tx, orgId, actorUserId, "agent.review_ok", "agent_review_item", id)
 }
 
-/** «Deshacer»: una respuesta marcada como bien vuelve a la lista, salvo que ya haya dejado una lección. */
-export async function reopenReviewItem(tx: Db, orgId: string, actorUserId: string, id: string): Promise<void> {
-  const item = await requireReviewItem(tx, orgId, id)
+/** La lección que sigue en pie de esa fila; una descartada ya no cuenta. */
+async function liveLessonOf(tx: Db, orgId: string, reviewItemId: string): Promise<{ id: string } | undefined> {
   const [lesson] = await tx
     .select({ id: agentLesson.id })
     .from(agentLesson)
-    .where(and(eq(agentLesson.organizationId, orgId), eq(agentLesson.reviewItemId, id)))
+    .where(and(eq(agentLesson.organizationId, orgId), eq(agentLesson.reviewItemId, reviewItemId), ne(agentLesson.status, "descartada")))
     .limit(1)
-  if (item.status !== "bien" || lesson) {
+  return lesson
+}
+
+/** «Deshacer»: una respuesta marcada como bien vuelve a la lista, salvo que ya haya dejado una lección. */
+export async function reopenReviewItem(tx: Db, orgId: string, actorUserId: string, id: string): Promise<void> {
+  await requireReviewItem(tx, orgId, id)
+  if (await liveLessonOf(tx, orgId, id)) {
     throw new ServiceError("REVIEW_NOT_REOPENABLE", 409, "Esa respuesta ya no se puede volver a abrir: dejó una lección")
   }
-  await tx
+  const [row] = await tx
     .update(agentReviewItem)
     .set({ status: "pendiente", decidedBy: null, decidedAt: null })
     .where(and(eq(agentReviewItem.organizationId, orgId), eq(agentReviewItem.id, id), eq(agentReviewItem.status, "bien")))
+    .returning({ id: agentReviewItem.id })
+  if (!row) throw new ServiceError("REVIEW_NOT_REOPENABLE", 409, "Esa respuesta ya no está marcada como bien")
   await moveReviewGaps(tx, orgId, actorUserId, id, "abierta")
   await audit(tx, orgId, actorUserId, "agent.review_reopened", "agent_review_item", id)
 }
@@ -703,12 +752,7 @@ export async function proposeExampleFromReview(tx: Db, orgId: string, actorUserI
   const item = await requireReviewItem(tx, orgId, id)
   if (!item.question.trim() || !item.reply.trim()) throw validation("Esa respuesta no tiene una pregunta que sirva de ejemplo")
   if (item.status === "corregida") throw new ServiceError("REVIEW_NOT_PENDING", 409, "Esa respuesta ya se revisó")
-  const [already] = await tx
-    .select({ id: agentLesson.id })
-    .from(agentLesson)
-    .where(and(eq(agentLesson.organizationId, orgId), eq(agentLesson.reviewItemId, id)))
-    .limit(1)
-  if (already) throw new ServiceError("REVIEW_NOT_PENDING", 409, "Esa respuesta ya dejó una lección")
+  if (await liveLessonOf(tx, orgId, id)) throw new ServiceError("REVIEW_NOT_PENDING", 409, "Esa respuesta ya dejó una lección")
   if (item.status === "pendiente") await markReviewOk(tx, orgId, actorUserId, id)
   const [lesson] = await tx
     .insert(agentLesson)
@@ -741,6 +785,17 @@ export async function markAnswerOk(tx: Db, orgId: string, actorUserId: string, t
   await markReviewOk(tx, orgId, actorUserId, item.id)
 }
 
+/** Las preguntas abiertas que dejó ese mensaje y aún no tienen fila. */
+function gapsOfTrigger(orgId: string, conversationId: string, triggerMessageId: string) {
+  return and(
+    eq(agentKnowledgeGap.organizationId, orgId),
+    eq(agentKnowledgeGap.conversationId, conversationId),
+    eq(agentKnowledgeGap.triggerMessageId, triggerMessageId),
+    eq(agentKnowledgeGap.status, "abierta"),
+    isNull(agentKnowledgeGap.reviewItemId),
+  )
+}
+
 /** Una persona marca una respuesta desde la Bandeja para corregirla; devuelve su entrada en la lista. */
 export async function flagAnswerForReview(tx: Db, orgId: string, actorUserId: string, traceId: string): Promise<ReviewItem> {
   const [trace] = await tx
@@ -756,13 +811,18 @@ export async function flagAnswerForReview(tx: Db, orgId: string, actorUserId: st
     .limit(1)
   if (existing) return requireReviewItem(tx, orgId, existing.id)
   let question = ""
+  let searched: { query: string } | undefined
   if (trace.triggerMessageId) {
-    const [asked] = await tx
-      .select({ body: message.body })
-      .from(message)
-      .where(and(eq(message.organizationId, orgId), eq(message.id, trace.triggerMessageId)))
+    const [asked] = await tx.execute<{ written: string | null }>(sql`
+      select ${WRITTEN_UP_TO_Q} as written from message q
+      where q.organization_id = ${orgId} and q.id = ${trace.triggerMessageId}`)
+    question = asked?.written ?? ""
+    const [gap] = await tx
+      .select({ query: agentKnowledgeGap.query })
+      .from(agentKnowledgeGap)
+      .where(gapsOfTrigger(orgId, trace.conversationId, trace.triggerMessageId))
       .limit(1)
-    question = asked?.body ?? ""
+    searched = gap
   }
   const [row] = await tx
     .insert(agentReviewItem)
@@ -771,12 +831,20 @@ export async function flagAnswerForReview(tx: Db, orgId: string, actorUserId: st
       agent: trace.agent,
       conversationId: trace.conversationId,
       traceId,
-      reason: "marcada",
-      question: question.slice(0, 2000),
+      reason: searched ? "no_encontro" : "marcada",
+      ...(searched ? { query: searched.query, triggerMessageId: trace.triggerMessageId } : {}),
+      question: question.slice(-WRITTEN_CHARS),
       reply: trace.replyText,
     })
     .returning({ id: agentReviewItem.id })
   if (!row) throw new Error("No se pudo marcar la respuesta")
+  // Si además buscó sin encontrar, la pregunta sigue la suerte de esta fila: la lista no la vuelve a traer.
+  if (searched && trace.triggerMessageId) {
+    await tx
+      .update(agentKnowledgeGap)
+      .set({ reviewItemId: row.id })
+      .where(gapsOfTrigger(orgId, trace.conversationId, trace.triggerMessageId))
+  }
   await audit(tx, orgId, actorUserId, "agent.review_flagged", "agent_review_item", row.id, { traceId })
   return requireReviewItem(tx, orgId, row.id)
 }
@@ -1017,6 +1085,9 @@ export async function correctAnswer(tx: Db, orgId: string, actorUserId: string, 
 export async function addReviewToAnswer(tx: Db, orgId: string, actorUserId: string, id: string, entryId: string): Promise<KnowledgeEntryItem> {
   const item = await requireReviewItem(tx, orgId, id)
   if (item.reason !== "no_encontro") throw validation("Solo lo que no encontró se suma a una respuesta")
+  // Solo la que Sofi puede encontrar: sumarla a un borrador o a una vencida no le serviría de nada.
+  const target = await getKnowledgeEntry(tx, orgId, entryId)
+  if (target.state !== "vigente") throw invalidField("entryId", "Esa respuesta no está vigente: elige otra")
   const [claimed] = await tx
     .update(agentReviewItem)
     .set({ status: "corregida", decidedBy: actorUserId, decidedAt: new Date() })
@@ -1032,14 +1103,22 @@ export async function addReviewToAnswer(tx: Db, orgId: string, actorUserId: stri
   return entry
 }
 
-/** Lo que se buscó sin encontrar en esa fila de «Por revisar». */
+/**
+ * Cómo se preguntó lo que no encontró esa fila: lo que se buscó y, si habla de
+ * eso, lo que escribió la persona. En una ráfaga el último mensaje puede ser de
+ * otro tema, y como forma de preguntar llevaría a Sofi a la respuesta equivocada.
+ */
 async function searchedFor(tx: Db, orgId: string, reviewItemId: string | null): Promise<string[]> {
   if (!reviewItemId) return []
   const rows = await tx
-    .select({ query: agentKnowledgeGap.query })
+    .select({ query: agentKnowledgeGap.query, question: agentKnowledgeGap.question })
     .from(agentKnowledgeGap)
     .where(and(eq(agentKnowledgeGap.organizationId, orgId), eq(agentKnowledgeGap.reviewItemId, reviewItemId)))
-  return rows.map((row) => row.query)
+  return rows.flatMap((row) => {
+    const searched = wordsOf(row.query)
+    const onTopic = !row.question.includes("\n") && [...wordsOf(row.question)].some((word) => searched.has(word))
+    return onTopic ? [row.question, row.query] : [row.query]
+  })
 }
 
 export interface UpdateLessonInput {
@@ -1079,25 +1158,32 @@ export async function updateLesson(tx: Db, orgId: string, actorUserId: string, i
 }
 
 /**
- * Pone en el conocimiento lo que dice una lección de respuesta oficial; devuelve
- * la entrada y lo que había. Lo que se buscó sin encontrar queda como forma de
- * preguntarla, para que la próxima vez la encuentre. Un mensaje de varias líneas
+ * Las formas de preguntar que deja una lección: su pregunta y lo que se buscó sin
+ * encontrar, para que la próxima vez la encuentre. Un mensaje de varias líneas
  * no: mezcla temas.
  */
+async function askFormsOfLesson(tx: Db, orgId: string, lesson: typeof agentLesson.$inferSelect): Promise<string[]> {
+  const seen = new Set([normalizeForSearch(lesson.title)])
+  const forms: string[] = []
+  for (const raw of [lesson.question, ...(await searchedFor(tx, orgId, lesson.reviewItemId))]) {
+    if (raw.includes("\n")) continue
+    const form = shorten(raw, ASK_FORM_CHARS)
+    const key = normalizeForSearch(form)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    forms.push(form)
+  }
+  return forms.slice(0, ASK_FORM_LIMIT)
+}
+
+/** Pone en el conocimiento lo que dice una lección de respuesta oficial; devuelve la entrada y lo que había. */
 async function applyOfficialAnswer(
   tx: Db,
   orgId: string,
   actorUserId: string,
   lesson: typeof agentLesson.$inferSelect,
 ): Promise<{ entryId: string; previousBody: string | null }> {
-  const title = normalizeForSearch(lesson.title)
-  const askForms = [
-    ...new Set(
-      [...(lesson.question.includes("\n") ? [] : [lesson.question]), ...(await searchedFor(tx, orgId, lesson.reviewItemId))]
-        .map((form) => shorten(form, ASK_FORM_CHARS))
-        .filter((form) => form && normalizeForSearch(form) !== title),
-    ),
-  ].slice(0, ASK_FORM_LIMIT)
+  const askForms = await askFormsOfLesson(tx, orgId, lesson)
   if (lesson.knowledgeEntryId) {
     const [entry] = await tx
       .select()
@@ -1214,15 +1300,31 @@ export async function discardLesson(tx: Db, orgId: string, actorUserId: string, 
   const lesson = await lockLesson(tx, orgId, id)
   if (lesson.status !== "propuesta") throw new ServiceError("LESSON_NOT_PROPOSED", 409, `La lección ya está ${lesson.status}`)
   await tx.update(agentLesson).set({ status: "descartada", updatedAt: new Date() }).where(eq(agentLesson.id, id))
+  // Descartar la corrección no responde la pregunta: lo que no encontró vuelve a la lista.
+  if (lesson.reviewItemId) {
+    const [back] = await tx
+      .update(agentReviewItem)
+      .set({ status: "pendiente", decidedBy: null, decidedAt: null })
+      .where(
+        and(
+          eq(agentReviewItem.organizationId, orgId),
+          eq(agentReviewItem.id, lesson.reviewItemId),
+          eq(agentReviewItem.reason, "no_encontro"),
+          eq(agentReviewItem.status, "corregida"),
+        ),
+      )
+      .returning({ id: agentReviewItem.id })
+    if (back) await moveReviewGaps(tx, orgId, actorUserId, back.id, "abierta")
+  }
   await audit(tx, orgId, actorUserId, "agent.lesson_discarded", "agent_lesson", id)
   return getLesson(tx, orgId, id)
 }
 
 /**
  * Retirar deja de usar la lección al instante y devuelve el conocimiento a
- * como estaba: restaura el texto anterior de la respuesta que cambió, o
- * despublica la que creó. Si alguien cambió esa respuesta después, no se toca:
- * manda lo último que escribió una persona.
+ * como estaba: restaura el texto anterior de la respuesta que cambió, sin las
+ * formas de preguntar que le sumó, o despublica la que creó. Si alguien cambió
+ * esa respuesta después, no se toca: manda lo último que escribió una persona.
  */
 export async function withdrawLesson(
   tx: Db,
@@ -1240,8 +1342,13 @@ export async function withdrawLesson(
       .where(and(eq(agentKnowledgeEntry.organizationId, orgId), eq(agentKnowledgeEntry.id, lesson.knowledgeEntryId)))
       .limit(1)
     if (entry && entry.body === lesson.body) {
-      if (lesson.previousBody !== null) await updateKnowledgeEntry(tx, orgId, actorUserId, entry.id, { body: lesson.previousBody })
-      else await setKnowledgeStatus(tx, orgId, actorUserId, entry.id, "borrador")
+      if (lesson.previousBody !== null) {
+        const added = new Set((await askFormsOfLesson(tx, orgId, lesson)).map(normalizeForSearch))
+        await updateKnowledgeEntry(tx, orgId, actorUserId, entry.id, {
+          body: lesson.previousBody,
+          askForms: entry.askForms.filter((form) => !added.has(normalizeForSearch(form))),
+        })
+      } else await setKnowledgeStatus(tx, orgId, actorUserId, entry.id, "borrador")
     }
   }
   await tx
@@ -1529,7 +1636,10 @@ export async function noteLessonUse(tx: Db, orgId: string, input: { lessonIds?: 
 /* ---------- La pantalla «Aprender» ---------- */
 
 export interface LearningOverview {
+  /** Las más recientes, hasta `REVIEW_PENDING_LIMIT`. */
   review: ReviewItem[]
+  /** Todas las que esperan: el mismo número del menú, aunque la lista se corte. */
+  reviewTotal: number
   proposed: Array<LessonItem & { impact: LessonImpact }>
   learned: LessonItem[]
   withdrawn: LessonItem[]
@@ -1547,8 +1657,13 @@ export async function getLearningOverview(tx: Db, orgId: string): Promise<Learni
     .where(and(eq(agentTestCase.organizationId, orgId), eq(agentTestCase.status, "activo")))
   const withImpact: LearningOverview["proposed"] = []
   for (const lesson of proposed) withImpact.push({ ...lesson, impact: await lessonImpact(tx, orgId, lesson) })
+  const [waiting] = await tx
+    .select({ total: count() })
+    .from(agentReviewItem)
+    .where(and(eq(agentReviewItem.organizationId, orgId), eq(agentReviewItem.status, "pendiente")))
   return {
     review: await listReviewItems(tx, orgId),
+    reviewTotal: waiting?.total ?? 0,
     proposed: withImpact,
     learned: await listLessons(tx, orgId, "activa"),
     withdrawn: await listLessons(tx, orgId, "retirada"),
@@ -1571,15 +1686,25 @@ export async function countLearningPending(tx: Db, orgId: string): Promise<{ rev
     .select({ total: count() })
     .from(agentLesson)
     .where(and(eq(agentLesson.organizationId, orgId), eq(agentLesson.status, "propuesta")))
-  const unreviewed = await tx.execute<{ query: string; question: string }>(
-    sql`select g.query, g.question from agent_knowledge_gap g where ${unreviewedGap(orgId)} order by g.created_at asc limit 300`,
-  )
-  const seen = new Set((await pendingGapKeys(tx, orgId)).keys())
+  const unreviewed = await tx.execute<{ query: string; question: string }>(sql`
+    select g.query, g.question from agent_knowledge_gap g
+    where ${unreviewedGap(orgId)}
+      -- Su respuesta ya tiene fila: al conciliar se queda en ella, no suma otra.
+      and not exists (
+        select 1 from agent_answer_trace t
+        join agent_review_item r on r.organization_id = t.organization_id and r.trace_id = t.id
+        where t.organization_id = g.organization_id and t.conversation_id = g.conversation_id
+          and t.trigger_message_id = g.trigger_message_id)
+    order by g.created_at asc
+    limit 300`)
   let searched = 0
-  for (const gap of unreviewed) {
-    const keys = gapKeys(gap)
-    if (!keys.some((key) => seen.has(key))) searched += 1
-    for (const key of keys) seen.add(key)
+  if (unreviewed.length > 0) {
+    const seen = new Set((await pendingGapKeys(tx, orgId)).keys())
+    for (const gap of unreviewed) {
+      const keys = gapKeys(gap)
+      if (!keys.some((key) => seen.has(key))) searched += 1
+      for (const key of keys) seen.add(key)
+    }
   }
   return { review: (review?.total ?? 0) + searched, lessons: lessons?.total ?? 0 }
 }

@@ -14,7 +14,7 @@ import { and, asc, count, desc, eq, gt, inArray, or, sql } from "drizzle-orm"
 import { foldedWordsMatch } from "./search-text.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { branchDirectionsWriter, branchShortLinkWriter } from "./branches.js"
-import { branchNotFound, invalidField, notFound, validation } from "./errors.js"
+import { branchNotFound, invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { getOrgLocale, NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { listPaymentMethods } from "./payment-methods.js"
 import { listClinicPromotionSummaries } from "./promotions.js"
@@ -928,12 +928,21 @@ export async function addAskFormsToAnswer(
   const current = await requireEntry(tx, orgId, entryId)
   const merged = [...current.askForms]
   const seen = new Set([normalizeForSearch(current.title), ...merged.map(normalizeForSearch)])
+  let full = false
   for (const raw of forms) {
     const form = raw.slice(0, ASK_FORM_CHARS)
     const key = normalizeForSearch(form)
-    if (!key || seen.has(key) || merged.length >= ASK_FORM_LIMIT) continue
+    if (!key || seen.has(key)) continue
+    if (merged.length >= ASK_FORM_LIMIT) {
+      full = true
+      continue
+    }
     seen.add(key)
     merged.push(form)
+  }
+  // Sin lugar para ninguna, no se da por sumada: el agente seguiría sin encontrarla.
+  if (full && merged.length === current.askForms.length) {
+    throw new ServiceError("ASK_FORMS_FULL", 409, `Esa respuesta ya tiene ${ASK_FORM_LIMIT} formas de preguntar: quita una para sumar esta`)
   }
   if (merged.length !== current.askForms.length) {
     await tx
