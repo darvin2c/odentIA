@@ -34,7 +34,7 @@ BEGIN
     WHERE ("conversation_id" = ANY(v_convs) OR "contact_id" = v_contact) AND "task_id" IS NOT NULL)
     || ARRAY(SELECT "id" FROM "task" WHERE "organization_id" = v_org AND ("contact_id" = v_contact
       OR "conversation_id" = ANY(v_convs) OR "patient_id" = p_patient OR "opportunity_id" = ANY(v_opps)));
-  -- Un pase solo se cierra con su tarea: sin ella quedaría abierto para siempre, también en la conversación de otra persona.
+  -- Un pase se va con su tarea: cuenta un caso de este paciente, aunque esté en la conversación de otra persona.
   DELETE FROM "agent_handoff" WHERE "conversation_id" = ANY(v_convs) OR "contact_id" = v_contact OR "task_id" = ANY(v_tasks);
   DELETE FROM "agent_proposal" WHERE "conversation_id" = ANY(v_convs) OR "contact_id" = v_contact OR "patient_id" = p_patient;
   UPDATE "agent_lesson" SET "review_item_id" = NULL WHERE "review_item_id" IN (
@@ -53,10 +53,8 @@ BEGIN
     SELECT "id" FROM "patient_registration_link" WHERE "conversation_id" = ANY(v_convs) OR "contact_id" = v_contact);
   DELETE FROM "patient_registration_link" WHERE "conversation_id" = ANY(v_convs) OR "contact_id" = v_contact;
   DELETE FROM "task" WHERE "id" = ANY(v_tasks);
-  DELETE FROM "crm_note" WHERE "contact_id" = v_contact OR "opportunity_id" IN (
-    SELECT "id" FROM "opportunity" WHERE "patient_id" = p_patient AND "organization_id" = v_org);
+  DELETE FROM "crm_note" WHERE "contact_id" = v_contact OR "opportunity_id" = ANY(v_opps);
   UPDATE "crm_note" SET "conversation_id" = NULL WHERE "conversation_id" = ANY(v_convs);
-  UPDATE "crm_note" SET "opportunity_id" = NULL WHERE "opportunity_id" = ANY(v_opps);
   DELETE FROM "opportunity" WHERE "id" = ANY(v_opps);
   UPDATE "opportunity" SET "conversation_id" = NULL WHERE "conversation_id" = ANY(v_convs);
   DELETE FROM "conversation" WHERE "id" = ANY(v_convs);

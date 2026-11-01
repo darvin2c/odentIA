@@ -8,7 +8,8 @@ import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
 import { agentHandoff, agentPersonFact, agentProposal } from "@odentia/db/schema/agent"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
-import { automationConsent, automationJob } from "@odentia/db/schema/automation"
+import { user } from "@odentia/db/schema/auth"
+import { automationConsent, automationJob, automationRule } from "@odentia/db/schema/automation"
 import { encounter, patient, patientCharge, patientContact } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, contactIdentity, conversation, crmTask as task, message } from "@odentia/db/schema/crm"
 import { crmNote } from "@odentia/db/schema/crm-workspace"
@@ -17,7 +18,8 @@ import { branch } from "@odentia/db/schema/org"
 import { and, eq, inArray } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { createRoom, listAppointments } from "./appointments.js"
-import { deliverJob, setLine } from "./automation.js"
+import { syncTeamLines } from "./agent-admin.js"
+import { deliverJob, setLine, syncCancelledAppointments } from "./automation.js"
 import { issuePersonalLink, resolvePersonalLink } from "./booking-links.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import {
@@ -310,7 +312,7 @@ it("lo del paciente se borra aunque lo lleve quien habla por él; lo de esa pers
   expect(await idsOf(agentProposal, [own.proposal])).toEqual([own.proposal])
   expect(await idsOf(automationJob, [own.job])).toEqual([own.job])
   expect(await ownerDb.select({ id: conversation.id }).from(conversation).where(eq(conversation.id, threadId))).toHaveLength(1)
-  // Un pase solo se cierra con su tarea: se va con ella, o quedaría abierto para siempre en la conversación de su mamá.
+  // Un pase se va con su tarea: cuenta un caso de su hijo, aunque esté en la conversación de su mamá.
   expect(await ownerDb.select().from(agentHandoff).where(eq(agentHandoff.id, passed!.id))).toEqual([])
   // Su nota se va con su oportunidad; la de su mamá queda.
   expect((await ownerDb.select({ id: crmNote.id }).from(crmNote).where(inArray(crmNote.id, [opportunityNote!.id, ownNote!.id]))).map((row) => row.id)).toEqual([ownNote!.id])
@@ -358,4 +360,34 @@ it("abrirla con motivo es solo leer por una hora; «vuelve a atenderse» la desb
   expect(person).toMatchObject({ isActive: true, recordLockedAt: null })
   const patients = await run((tx) => listPatients(tx, "org_a", { limit: 100 }))
   expect(patients.items.map((p) => p.id)).toContain(patientId)
+})
+
+it("bloqueada no deja tarea con su nombre por su deuda ni por su atención sin firmar; si vuelve a atenderse sí, sin ofrecerle otra fecha", async () => {
+  const { f, run, patientId, personId, branchId } = await patientWithHistory()
+  const DAY = 86_400_000
+  const former = randomUUID()
+  await ownerDb.insert(user).values({ id: former, name: "Dr. Luis Paz", email: `${former}@example.test`, emailVerified: true })
+  await ownerDb.insert(encounter).values({ organizationId: "org_a", patientId, professionalUserId: former, branchId, startedAt: new Date(Date.now() - 5 * DAY) })
+  await ownerDb.insert(patientCharge).values({ organizationId: "org_a", patientId, description: "Corona", amountCents: 50000, currency: "PEN", createdAt: new Date(Date.now() - 45 * DAY) })
+  for (const key of ["cobranza_vencida", "atenciones_sin_firmar", "cita_cancelada"]) {
+    const rule = await run((tx) => setLine(tx, "org_a", f.actor, key, { enabled: true }))
+    await ownerDb.update(automationRule).set({ enabledAt: new Date(Date.now() - 46 * DAY) }).where(eq(automationRule.id, rule.id))
+  }
+  const request = await run((tx) =>
+    createDataRequest(tx, "org_a", f.actor, patientId, { kind: "borrar", requesterContactId: personId, channel: "clinica" }),
+  )
+  await run((tx) => verifyDataRequest(tx, "org_a", f.actor, patientId, request.id, { how: "documento" }))
+  await run((tx) => eraseForDataRequest(tx, "org_a", f.actor, patientId, request.id))
+
+  const check = async () => {
+    await run((tx) => syncTeamLines(tx, "org_a", new Date()))
+    // Pasada la espera de la línea: su cita se canceló al borrar y esa cancelación no fue de ella.
+    await run((tx) => syncCancelledAppointments(tx, "org_a", new Date(Date.now() + 2 * 3_600_000)))
+    const jobs = await ownerDb.select({ kind: automationJob.kind }).from(automationJob).where(eq(automationJob.patientId, patientId))
+    return jobs.map((job) => job.kind).sort()
+  }
+  expect(await check()).toEqual([])
+
+  await run((tx) => openLockedRecord(tx, "org_a", f.actor, patientId, { reason: "vuelve" }))
+  expect(await check()).toEqual(["atenciones_sin_firmar", "cobranza_vencida"])
 })

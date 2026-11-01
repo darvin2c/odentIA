@@ -1418,7 +1418,7 @@ export async function syncCancelledAppointments(tx: Db, orgId: string, now: Date
         eq(appointment.status, "cancelada"),
         sql`${CANCELLED_BY_PERSON} between ${(since > oldest ? since : oldest).toISOString()}::timestamptz and ${cutoff.toISOString()}::timestamptz`,
         notYetQueued(orgId, "cita_cancelada", appointment.id),
-        // Borrar sus datos cancela sus citas sin avisarle: tampoco se le invita a otra.
+        // Si canceló y después pidió borrar sus datos, tampoco se le invita a otra.
         patientNotLocked(appointment.patientId),
         // «Recordar la cita» ya le avisó la cancelación con la misma pregunta: no se repite.
         sql`not exists (select 1 from automation_job a where a.organization_id = ${orgId}
@@ -1519,16 +1519,6 @@ const CONTROL_STATUS_WORDS: Record<string, string> = {
 
 const LOCKED_RECORD = "Sus datos se borraron a su pedido"
 
-/**
- * De una historia bloqueada no se le escribe a nadie, aunque su presupuesto o su
- * control sigan en pie y quien habla por ella siga activa (ADR 0080). Los buscadores
- * ya no la programan; esto cubre lo que estaba programado. La cobranza sigue: la
- * deuda se mantiene en Caja y esa línea solo le deja la tarea.
- */
-async function writesAboutLockedRecord(tx: Db, orgId: string, job: JobRow): Promise<boolean> {
-  return job.kind !== "cobranza_vencida" && job.patientId !== null && isPatientLocked(tx, orgId, job.patientId)
-}
-
 /** Verifica que el motivo del caso siga en pie; si ya se resolvió, no se hace nada. */
 async function stillValid(
   tx: Db,
@@ -1536,6 +1526,9 @@ async function stillValid(
   job: JobRow,
   now: Date,
 ): Promise<{ valid: boolean; reason?: string }> {
+  // De una historia bloqueada no se le escribe a nadie, aunque su presupuesto o su control sigan en pie
+  // y quien habla por ella siga activa (ADR 0080). Los buscadores ya no la programan; esto cubre lo que estaba programado.
+  if (job.patientId && (await isPatientLocked(tx, orgId, job.patientId))) return { valid: false, reason: LOCKED_RECORD }
   if (job.kind === "recordatorio_cita" && job.appointmentId) {
     const [appt] = await tx
       .select({ status: appointment.status, startsAt: appointment.startsAt })
@@ -2360,9 +2353,7 @@ export async function deliverJob(
   }
   const runtime = await adminRuntime(tx, orgId)
   const tz = payload.timeZone ?? (await timezoneOf(tx, orgId, null))
-  const validity = (await writesAboutLockedRecord(tx, orgId, job))
-    ? { valid: false, reason: LOCKED_RECORD }
-    : await stillValid(tx, orgId, job, now)
+  const validity = await stillValid(tx, orgId, job, now)
   if (!validity.valid) {
     await close([job.id], "cancelado", validity.reason)
     return { jobId: job.id, outcome: "cancelado", detail: validity.reason }
@@ -2547,9 +2538,7 @@ export async function deliverJob(
       .orderBy(asc(automationJob.scheduledFor), asc(automationJob.id))
       .for("update", { skipLocked: true })
     for (const sibling of siblings) {
-      const check = (await writesAboutLockedRecord(tx, orgId, sibling))
-        ? { valid: false, reason: LOCKED_RECORD }
-        : await stillValid(tx, orgId, sibling, now)
+      const check = await stillValid(tx, orgId, sibling, now)
       if (check.valid) group.push(sibling)
       else await close([sibling.id], "cancelado", check.reason)
     }

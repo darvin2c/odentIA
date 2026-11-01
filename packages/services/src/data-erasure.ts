@@ -92,7 +92,7 @@ export async function erasurePreview(tx: Db, orgId: string, patientId: string): 
         or id in (select task_id from agent_handoff where organization_id = ${orgId} and task_id is not null
           and (contact_id = ${person.personId} or conversation_id in (select id from own_conversation))))) as tasks,
       (select count(*)::int from crm_note where organization_id = ${orgId} and (contact_id = ${person.personId}
-        or opportunity_id in (select id from opportunity where organization_id = ${orgId} and patient_id = ${patientId}))) as notes,
+        or opportunity_id in (select id from own_opportunity))) as notes,
       (select count(*)::int from patient_contact where organization_id = ${orgId} and patient_id = ${patientId}
         and contact_id <> ${person.personId}) as "linkedPeople"`)
   const row = counts[0]!
@@ -166,7 +166,8 @@ export async function eraseForDataRequest(
   const preview = await erasurePreview(tx, orgId, patientId)
   for (const item of preview.futureAppointments)
     await setAppointmentStatus(tx, orgId, actorUserId, item.id, "cancelada", {
-      cancelReason: "paciente",
+      // No canceló esa cita: «paciente» le ofrecería otra fecha si vuelve a atenderse esa semana.
+      cancelReason: "otro",
       cancelNote: "Pidió borrar sus datos",
       notice: false,
     })
