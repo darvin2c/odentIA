@@ -895,6 +895,24 @@ test("latidIA: Clío dicta la consulta, los signos vitales, el examen y el desca
   await page.getByRole("switch", { name: "Encender a Clío" }).click()
   await expect(page.getByRole("switch", { name: "Apagar a Clío" })).toBeChecked()
 
+  // Atender a alguien sin motivo: ningún formulario tapa a Clío.
+  const walkIn = await request<{ data: { id: string } }>(page, api, "POST", "/api/patients", slug, {
+    submissionId: randomUUID(),
+    answers: {
+      demographics: { displayName: "Mateo Salas", docType: "DNI", docNumber: "40221134", birthDate: "1988-03-14" },
+      respondent: "staff",
+      privacyAccepted: false,
+    },
+  })
+  expect(walkIn.status).toBe(201)
+  await gotoHydrated(page, latidiaUrl(slug, `/patients/${walkIn.body.data.id}`))
+  await page.getByRole("button", { name: "Atender", exact: true }).first().click()
+  await expect(page).toHaveURL(/\/encounters\//)
+  await expect(page.getByRole("region", { name: "Dictado de la atención" }).getByRole("button", { name: "Dictar", exact: true })).toBeVisible()
+  await expect(page.getByRole("region", { name: "Consulta" }).getByRole("button", { name: "Abrir", exact: true })).toHaveAttribute("aria-expanded", "false")
+  await expect(page.getByLabel("Motivo", { exact: true })).toHaveCount(0)
+  await shot("clio-atender-sin-motivo")
+
   // En la atención: lo dictado va a cada bloque, también al examen físico y a los documentos.
   await gotoHydrated(page, latidiaUrl(slug, `/patients/${patientId}/encounters/${encounterId}`))
   const idle = page.getByRole("region", { name: "Dictado de la atención" })

@@ -375,9 +375,10 @@ export function EncounterEditor({
   const [teeth, setTeeth] = useState<number[]>(() => sortTeeth(detail.teeth))
   const [examination, setExamination] = useState<unknown>(() => exam.draft(encounter.examination))
   // Bloque en edición; `null` colapsa el detalle y deja la lista a todo el ancho.
-  // «Consulta» se abre sola solo si falta el motivo: volver a una atención ya
-  // empezada no tapa la pantalla con lo que ya está escrito.
-  const [openSection, setOpenSection] = useState<SectionKey | null>(encounter.reason?.trim() ? null : "consulta")
+  // Al entrar no hay ninguno abierto: la atención y, si está encendida, Clío quedan a la
+  // vista. El motivo se dicta o se escribe en «Consulta»; si falta, «Finalizar y firmar»
+  // lleva a su campo.
+  const [openSection, setOpenSection] = useState<SectionKey | null>(null)
   const [addedSections, setAddedSections] = useState<ReadonlySet<SectionKey>>(() => new Set())
 
   const [saveState, setSaveState] = useState<SaveState>("saved")
@@ -1398,8 +1399,8 @@ export function EncounterEditor({
                 disabled={locked}
                 maxLength={MAX_REASON}
                 placeholder="Motivo de la consulta…"
-                // Al entrar sin motivo, el cursor ya está aquí: es lo primero que se escribe.
-                autoFocus={!encounter.reason?.trim()}
+                // Al abrirla sin motivo, el cursor ya está aquí: es lo primero que se escribe.
+                autoFocus={!field.state.value.trim()}
                 onChange={(event) => {
                   field.handleChange(event.target.value)
                   rememberText("reason", event.target.value)
