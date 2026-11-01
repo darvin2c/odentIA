@@ -1444,7 +1444,7 @@ export function argosFiguresText(key: ArgosKey, words: ArgosFigureWords): string
 export interface ArgosNames {
   sedes: string[]
   equipo: string[]
-  /** Del equipo, quienes atienden pacientes: tienen horario o citas como profesional (como `equipo.atiende`), lleven o no «Dr.». */
+  /** Del equipo, quienes atienden pacientes: pueden atender y tienen horario o citas (como `equipo.atiende`), lleven o no «Dr.». */
   atienden: string[]
   especialidades: string[]
   servicios: Array<{ name: string; specialty: string | null }>

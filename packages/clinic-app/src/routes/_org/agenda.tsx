@@ -664,9 +664,9 @@ function AgendaPage() {
     stage: visitStage(item.visit),
     stateLabel: visitLabel(item, { now, timeZone: TZ }),
   })
-  /** Citas en pie de quien ya no atiende: hay que pasarlas a otra persona. */
+  /** Citas por venir de quien ya no atiende: hay que pasarlas a otra persona. Lo que ya pasó se cierra, no se pasa. */
   const noLongerAttends = (item: AgendaAppointment): string | undefined =>
-    standing(item.status) && !canStillAttend(item.professionalUserId)
+    standing(item.status) && Date.parse(item.endsAt) > Date.parse(now) && !canStillAttend(item.professionalUserId)
       ? `${shortName(item.professionalName)} ya no atiende: pásala a otra persona`
       : undefined
   const entries = appointments.map(

@@ -72,7 +72,16 @@ interface TeamAttendance {
   userId: string
   schedules: Array<{ branchName: string; weekdays: number[] }>
   upcomingAppointments: number
+  next: { date: string; branchId: string } | null
 }
+
+/** A su próxima cita: la Agenda abre una sede y unos días; sin decírselos, no la encontraría. */
+const theirNextAppointment = (attendance: TeamAttendance) => ({
+  view: "lista",
+  who: attendance.userId,
+  date: attendance.next?.date,
+  branch: attendance.next?.branchId,
+})
 
 const LINK = "font-medium text-primary underline-offset-4 hover:underline"
 
@@ -257,11 +266,11 @@ function TeamPage() {
     )
   /** Le quedan citas por pasar a otra persona: el aviso lleva ahí. */
   const toTheirAppointments = (member: Membership) => {
-    const count = attendanceByUser.get(member.userId)?.upcomingAppointments ?? 0
-    return count > 0 && can("appointments.read")
+    const attendance = attendanceByUser.get(member.userId)
+    return attendance?.next && can("appointments.read")
       ? {
           label: "Ver sus citas",
-          onClick: () => void navigate({ to: "/agenda", search: { view: "lista", who: member.userId } }),
+          onClick: () => void navigate({ to: "/agenda", search: theirNextAppointment(attendance) }),
         }
       : undefined
   }
@@ -452,21 +461,21 @@ function TeamPage() {
           }
           if (!canAttend(role)) {
             // Citas de antes de esta regla, o de cuando sí atendía: siguen por mover.
-            const count = attendance?.upcomingAppointments ?? 0
-            return count > 0 && can("appointments.read") ? (
+            return attendance?.next && can("appointments.read") ? (
               <Link
                 to="/agenda"
-                search={{ view: "lista", who: userId }}
+                search={theirNextAppointment(attendance)}
                 className="font-bold text-warning underline-offset-4 hover:underline"
               >
-                {appointmentsWord(count)} por mover
+                {appointmentsWord(attendance.upcomingAppointments)} por mover
               </Link>
             ) : (
               noAttends
             )
           }
-          // Quien atiende de oficio y no tiene horario no se puede reservar; quien dirige, sin horario, no atiende.
-          return role === "clinician" ? (
+          // Quien atiende de oficio y no tiene horario no se puede reservar; quien dirige, sin horario
+          // ni citas, no atiende. Con citas sí atiende, aunque sean excepciones.
+          return role === "clinician" || attendance?.next ? (
             <Link to="/settings/availability" search={{ profesional: userId }} className={LINK}>
               Sin horario
             </Link>
@@ -485,9 +494,10 @@ function TeamPage() {
           // Sin las listas no se sabe: no se afirma que falte.
           if (!profilesLoaded || !attendanceLoaded) return <span className="text-muted-foreground">—</span>
           // Solo a quien atiende le falta para firmar: quien dirige y no tiene horario no firma.
+          const attendance = attendanceByUser.get(row.original.userId)
           const attends =
             row.original.role === "clinician" ||
-            (canAttend(row.original.role) && Boolean(attendanceByUser.get(row.original.userId)?.schedules.length))
+            (canAttend(row.original.role) && Boolean(attendance?.schedules.length || attendance?.next))
           return attends ? (
             <span className="text-muted-foreground">Sin registrar</span>
           ) : (

@@ -268,7 +268,7 @@ export async function setProfessionalSchedule(
   input: { branchId: string; professionalUserId: string; rules: ScheduleRuleInput[] },
 ): Promise<ProfessionalScheduleView> {
   const resolved = await requireBranch(tx, orgId, input.branchId)
-  await requireCanAttend(tx, orgId, input.professionalUserId, "professionalUserId")
+  await requireCanAttend(tx, orgId, input.professionalUserId, "professionalUserId", { lock: true })
   const seen = new Set<string>()
   // Cada rechazo lleva la ruta del turno en el cuerpo (`rules[3].endMin`): se dice en ese turno.
   for (const [index, rule] of input.rules.entries()) {

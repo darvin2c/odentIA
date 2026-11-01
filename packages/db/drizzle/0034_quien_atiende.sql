@@ -29,7 +29,7 @@ $$;--> statement-breakpoint
 REVOKE ALL ON FUNCTION public.close_professional_schedule(text, text) FROM PUBLIC;--> statement-breakpoint
 
 -- Los roles son `ATTENDING_ROLES` de `packages/auth/src/permissions.ts`; `quien-atiende.test.ts`
--- recorre todos los roles y exige que esta lista diga lo mismo.
+-- recorre todos los roles y exige que esta lista, y la de `argos.equipo` abajo, digan lo mismo.
 CREATE FUNCTION public.close_schedule_of_who_stops_attending() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public', 'pg_temp'
@@ -45,6 +45,37 @@ $$;--> statement-breakpoint
 REVOKE ALL ON FUNCTION public.close_schedule_of_who_stops_attending() FROM PUBLIC;--> statement-breakpoint
 CREATE TRIGGER member_close_schedule AFTER DELETE OR UPDATE OF "role" ON public.member
     FOR EACH ROW EXECUTE FUNCTION public.close_schedule_of_who_stops_attending();--> statement-breakpoint
+
+-- Argos: quien atiende, además de tener horario o citas, puede atender. Las columnas son las mismas.
+CREATE OR REPLACE VIEW argos.equipo AS
+ SELECT u.name AS profesional,
+    array_to_string(ARRAY( SELECT
+                CASE TRIM(BOTH FROM r.r)
+                    WHEN 'owner'::text THEN 'propietario'::text
+                    WHEN 'admin'::text THEN 'administración'::text
+                    WHEN 'clinician'::text THEN
+                    CASE
+                        WHEN (op.product = 'medical'::text) THEN 'medicina'::text
+                        ELSE 'odontología'::text
+                    END
+                    WHEN 'reception'::text THEN 'recepción'::text
+                    WHEN 'cashier'::text THEN 'caja'::text
+                    ELSE 'otro'::text
+                END AS "case"
+           FROM unnest(string_to_array(m.role, ','::text)) r(r)), ', '::text) AS rol,
+    ( SELECT string_agg(s.name, ', '::text ORDER BY s.name) AS string_agg
+           FROM (public.professional_specialty ps
+             JOIN public.org_specialty s ON (((s.organization_id = ps.organization_id) AND (s.id = ps.specialty_id))))
+          WHERE ((ps.organization_id = m.organization_id) AND (ps.user_id = m.user_id))) AS especialidades,
+    ((m.role = ANY (ARRAY['owner'::text, 'admin'::text, 'clinician'::text])) AND ((EXISTS ( SELECT 1
+           FROM public.professional_schedule s
+          WHERE ((s.organization_id = m.organization_id) AND (s.professional_user_id = m.user_id)))) OR (EXISTS ( SELECT 1
+           FROM public.appointment a
+          WHERE ((a.organization_id = m.organization_id) AND (a.professional_user_id = m.user_id)))))) AS atiende
+   FROM ((public.member m
+     JOIN auth."user" u ON ((u.id = m.user_id)))
+     LEFT JOIN public.org_profile op ON ((op.organization_id = m.organization_id)))
+  WHERE (m.organization_id = NULLIF(current_setting('app.org_id'::text, true), ''::text));--> statement-breakpoint
 
 -- Lo que ya había: quien hoy tiene horario sin poder atender o sin seguir en la clínica.
 -- Las filas cerradas quedan con su `valid_until`: se pueden revisar y volver a abrir.

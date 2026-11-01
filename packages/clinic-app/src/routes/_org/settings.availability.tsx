@@ -205,8 +205,12 @@ function AvailabilityPage() {
   const schedule = useWeeklySchedule({
     branchId: resources?.branchId,
     professionalUserId: professionalId,
-    // El horario de la sede es la suma de los del equipo: cambia con cada uno.
-    onSaved: () => queryClient.invalidateQueries({ queryKey: ["branch-hours"] }),
+    // El horario de la sede es la suma de los del equipo: cambia con cada uno, y Equipo dice sus días.
+    onSaved: async () => {
+      await Promise.all(
+        ["branch-hours", "team-attendance"].map((key) => queryClient.invalidateQueries({ queryKey: [key] })),
+      )
+    },
   })
   const hoursQuery = useQuery({
     queryKey: ["branch-hours", resources?.branchId],

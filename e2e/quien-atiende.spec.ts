@@ -42,7 +42,8 @@ test("quién atiende: agenda, horarios, equipo y quien sale del equipo", async (
     },
     201,
   )
-  const date = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date())
+  // Tres semanas adelante: siempre por venir, y fuera de los días que la Agenda carga al abrirse.
+  const date = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date(Date.now() + 21 * 86_400_000))
   const weekday = new Date(`${date}T17:00:00Z`).getUTCDay()
   const startsAt = `${date}T23:00:00.000Z`
   const endsAt = `${date}T23:45:00.000Z`
@@ -142,6 +143,7 @@ test("quién atiende: agenda, horarios, equipo y quien sale del equipo", async (
   // El aviso lleva a sus citas, marcadas para pasarlas a otra persona.
   await page.getByRole("button", { name: "Ver sus citas" }).click()
   await expect(page).toHaveURL(tenantPattern(slug, "/agenda"))
+  expect(new URL(page.url()).searchParams.get("date")).toBe(date)
   await expect(page.getByText("ya no atiende: pásala a otra persona")).toBeVisible()
   await shot("sus-citas")
 

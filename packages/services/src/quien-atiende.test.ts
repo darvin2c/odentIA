@@ -7,6 +7,8 @@ import { branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import { getBranchHours, listAgentProfessionals } from "./agent-clinic-info.js"
+import { listArgosNames } from "./argos-figures.js"
+import { runArgosQuery } from "./argos-query.js"
 import { createAppointment, createRoom, listScheduleResources, moveAppointment, setAppointmentStatus } from "./appointments.js"
 import { listTeamAttendance } from "./attending.js"
 import {
@@ -262,7 +264,11 @@ describe("deja de atender: la base cierra su horario", () => {
     expect(await activeSchedule(id)).toHaveLength(0)
     // Lo que dice Equipo: sin horario y con una cita por mover.
     const attendance = await run((tx) => listTeamAttendance(tx, ORG))
-    expect(attendance.find((item) => item.userId === id)).toMatchObject({ schedules: [], upcomingAppointments: 1 })
+    expect(attendance.find((item) => item.userId === id)).toMatchObject({
+      schedules: [],
+      upcomingAppointments: 1,
+      next: { date: tuesday, branchId: centro },
+    })
     expect(attendance.find((item) => item.userId === DOCTOR)?.schedules).toEqual([{ branchName: "Centro", weekdays: [2] }])
 
     // Se puede confirmar o cancelar como siempre; lo que no, moverla sin cambiar de persona.
@@ -274,6 +280,42 @@ describe("deja de atender: la base cierra su horario", () => {
       moveAppointment(tx, ORG, OWNER, cita.id, { expectedVersion: confirmed.version, professionalUserId: DOCTOR, startsAt: at(12 * 60), endsAt: at(12 * 60 + 30) }),
     )
     expect(moved.professionalUserId).toBe(DOCTOR)
+  })
+
+  it("quien le cambia el rol espera a que termine de guardarse su horario, y lo cierra", async () => {
+    const id = "qa-a-la-vez"
+    await hire(id, "clinician", "Dr. A La Vez")
+    let changed = false
+    let change: Promise<unknown> = Promise.resolve()
+    await run(async (tx) => {
+      await setProfessionalSchedule(tx, ORG, OWNER, { branchId: centro, professionalUserId: id, rules: MORNING })
+      change = ownerDb
+        .update(member)
+        .set({ role: "cashier" })
+        .where(eq(member.id, `m-${id}`))
+        .then(() => {
+          changed = true
+        })
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      expect(changed).toBe(false)
+    })
+    await change
+    expect(changed).toBe(true)
+    expect(await activeSchedule(id)).toHaveLength(0)
+  })
+
+  it("Argos dice lo mismo, en su vista y en sus nombres, con cada rol", async () => {
+    const id = "qa-argos"
+    await hire(id, "clinician", "Dra. Argos")
+    await run((tx) => setProfessionalSchedule(tx, ORG, OWNER, { branchId: centro, professionalUserId: id, rules: MORNING }))
+    await backdateSchedule(id)
+    for (const role of ORG_ROLES) {
+      await ownerDb.update(member).set({ role }).where(eq(member.id, `m-${id}`))
+      const { rows } = await runArgosQuery(appDb, { orgId: ORG, memberRole: "owner", query: "select profesional, atiende from equipo" })
+      expect(rows.find((row) => row.profesional === "Dra. Argos")?.atiende, `la vista con el rol ${role}`).toBe(canAttend(role))
+      const names = await run((tx) => listArgosNames(tx, ORG, "gestion"))
+      expect(names.atienden.includes("Dra. Argos"), `los nombres con el rol ${role}`).toBe(canAttend(role))
+    }
   })
 
   it("una especialidad ya no se queda con quien dejó de atender", async () => {

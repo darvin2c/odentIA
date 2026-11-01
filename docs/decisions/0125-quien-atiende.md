@@ -13,7 +13,7 @@ El resultado se veía en la clínica: caja y recepción salían en «No atienden
 - **Dos preguntas, una respuesta para cada una.**
   - **Puede atender:** sigue en la clínica y su rol escribe en la historia (`canAttend`, `ATTENDING_ROLES` de `permissions.ts`). Lo exige el servidor (`requireCanAttend`) al poner horario o ausencia, dar o reasignar una cita, adscribir a una especialidad, fijar una comisión, registrar la colegiatura y nombrar al responsable de un formulario.
   - **Atiende:** además tiene horario activo en esa sede. Es lo que leen la agenda, Sofi, el enlace y el horario de la sede.
-- **Un horario activo siempre es de quien puede atender, y lo garantiza la base.** Un disparador sobre `member` cierra el horario de quien sale o cambia a un rol que no atiende, por cualquier vía: Equipo, irse por su cuenta o la administración. Así ninguna lectura repite la regla. Se cierra como un cambio de horario (ADR 0060): lo de antes queda para Reportes. La migración cierra lo que ya había.
+- **Un horario activo siempre es de quien puede atender.** El servicio lo exige al guardarlo, con la fila de la persona bloqueada para que un cambio simultáneo espere, y un disparador sobre `member` cierra el horario de quien sale o cambia a un rol que no atiende, por cualquier vía: Equipo, irse por su cuenta o la administración. Así ninguna lectura repite la regla. Se cierra como un cambio de horario (ADR 0060): lo de antes queda para Reportes. La migración cierra lo que ya había.
 - **Sus citas no se tocan.** Siguen en la Agenda, marcadas para pasarlas a otra persona, y Equipo las dice antes de confirmar. Se pueden confirmar o cancelar; moverlas exige elegir a quien atienda.
 - **Quien dirige no atiende hasta que tiene horario.** Propietario y administrador pueden atender, pero un menú de la agenda no los ofrece sin horario y Equipo dice «No atiende». Quien atiende de oficio y no tiene horario dice «Sin horario», que es un pendiente.
 - **Equipo lo dice a la vista**, en la columna «Atiende»: un rol por persona no dice que la dueña también atiende.
@@ -28,7 +28,7 @@ El resultado se veía en la clínica: caja y recepción salían en «No atienden
 ## Consecuencias
 
 - Beneficio: lo que ven los pacientes y el equipo sale de quien de verdad atiende, en los dos productos.
-- Sacrificio: la lista de roles se repite en el disparador; `quien-atiende.test.ts` recorre todos los roles y falla si dejan de coincidir. Quien vuelve a poder atender empieza sin horario.
+- Sacrificio: la lista de roles se repite en el disparador y en `argos.equipo`; `quien-atiende.test.ts` recorre todos los roles y falla si dejan de coincidir. Quien vuelve a poder atender empieza sin horario.
 - Sacrificio: una recepción que abre antes que el primer profesional sigue sin cómo decirlo (0118). Si una clínica lo pide, se revisa con un horario propio de recepción.
 - Revisar si una clínica necesita a alguien que atiende sin escribir en la historia, como una asistente con citas propias.
 

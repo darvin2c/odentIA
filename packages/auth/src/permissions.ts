@@ -255,8 +255,8 @@ export function canAttend(role: string): boolean {
 
 /**
  * Los roles que pueden atender, para filtrar en una consulta. El disparador
- * `close_schedule_of_who_stops_attending` de la base repite esta lista y
- * `quien-atiende.test.ts` exige que digan lo mismo.
+ * `close_schedule_of_who_stops_attending` y la vista `argos.equipo` de la base
+ * repiten esta lista, y `quien-atiende.test.ts` exige que digan lo mismo.
  */
 export const ATTENDING_ROLES: readonly OrgRole[] = ORG_ROLES.filter(canAttend);
 
