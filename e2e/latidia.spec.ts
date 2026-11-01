@@ -257,6 +257,17 @@ test("latidIA: en la Bandeja cada tema se responde por su cuenta", async ({ brow
   await page.getByRole("button", { name: "Dejar pendiente" }).click()
   await expect(list).toContainText("2 temas por atender")
   await page.screenshot({ path: testInfo.outputPath("dejar-pendiente.png") })
+
+  // Un mensaje que el canal rechazó dice por qué y qué hacer; el motivo de Meta no llega a la clínica.
+  const rejected = await request<{ data: { id: string } }>(page, api, "POST", `/api/conversations/${thread}/messages`, slug, { text: "Este no sale" })
+  expect(rejected.status).toBe(201)
+  const rejectedId = rejected.body.data.id
+  await expect.poll(async () => (await fixtureDb.select({ status: message.status }).from(message).where(eq(message.id, rejectedId)))[0]?.status, { timeout: 30_000 }).not.toBe("queued")
+  await fixtureDb.update(message).set({ status: "failed", error: "WhatsApp send falló: 400 (#131009) Parameter value is not valid" }).where(eq(message.id, rejectedId))
+  await gotoHydrated(page, latidiaUrl(slug, `/inbox?conversation=${thread}`))
+  await expect(page.getByText(/^No se entregó: el canal no lo aceptó\./)).toBeVisible()
+  await expect(page.getByText(/Parameter value/)).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath("no-se-entrego.png") })
   await context.close()
 })
 

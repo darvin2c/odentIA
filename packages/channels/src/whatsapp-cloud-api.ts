@@ -1090,7 +1090,9 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
     if (status >= 400 || !id) {
       const error = graphErrorOf(json)
       const words = typeof error?.code === "number" ? WHATSAPP_SEND_ERROR_WORDS[error.code] : undefined
-      const detail = words ?? `WhatsApp send falló: ${status} ${graphError(status, json)}`
+      // Su `details` dice qué dato rechazó: sin él, un #131009 no dice nada.
+      const details = text(error?.error_data?.details)
+      const detail = words ?? `WhatsApp send falló: ${status} ${graphError(status, json)}${details ? `: ${details}` : ""}`
       // Meta contestó con su error: no lo aceptó. Un 5xx o una respuesta sin
       // id no dicen si salió, y se tratan como ambiguos.
       if (status >= 400 && status < 500 && error) {

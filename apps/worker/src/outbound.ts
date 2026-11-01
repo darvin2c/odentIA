@@ -309,7 +309,8 @@ export async function processOutbound(
       await withOrgContext(db, orgId, async (tx) => {
         await tx
           .update(message)
-          .set({ status: "failed", error: detail.slice(0, 500) })
+          // No llegó a intentarse con el canal: la Bandeja no se lo atribuye.
+          .set({ status: "failed", error: `interno: ${detail.slice(0, 490)}` })
           .where(and(eq(message.id, messageId), eq(message.organizationId, orgId)))
         await tx.insert(auditEvent).values({
           organizationId: orgId,

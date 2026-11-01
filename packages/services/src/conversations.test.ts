@@ -373,7 +373,6 @@ it("nota de voz entrante se transcribe al body", async () => {
   const msg = detail.messages[0]
   expect(msg?.contentType).toBe("audio")
   expect(msg?.body).toBe("hola, quiero cita")
-  expect(msg?.error).toBeNull()
   expect(msg?.attachments).toHaveLength(1)
 })
 
@@ -432,7 +431,6 @@ it("fallo de transcripción no pierde la ingesta del audio", async () => {
   const msg = detail.messages[0]
   expect(msg?.contentType).toBe("audio")
   expect(msg?.body).toBeNull()
-  expect(msg?.error).toBeNull()
   expect(msg?.attachments).toHaveLength(1)
 })
 
@@ -486,7 +484,10 @@ it("applyStatus guarda el motivo de un envío fallido tal como lo dice el adapta
     applyStatus(tx, "org_a", [{ externalMessageId: "wamid.fail", status: "failed", error: reason }]),
   )
   const messages = await withOrgContext(appDb, "org_a", (tx) => listMessages(tx, "org_a", conversationId, {}))
-  expect(messages.items.find((m) => m.id === out.id)).toMatchObject({ status: "failed", error: reason })
+  const item = messages.items.find((m) => m.id === out.id)
+  expect(item).toMatchObject({ status: "failed", deliveryNote: reason })
+  // Lo guardado tal cual, a veces con texto de Meta, no sale hacia el navegador.
+  expect(item).not.toHaveProperty("error")
 })
 
 it("ingesta con conexión inexistente falla", async () => {
