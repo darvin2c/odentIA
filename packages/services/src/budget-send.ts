@@ -27,7 +27,7 @@ import {
   type MessageSpec,
   NOTICE_PURPOSE,
   renderMessage,
-  replyId,
+  replyButtons,
   withLinkLine,
 } from "./automation-messages.js"
 import { clinicName, firstName } from "./automation-routing.js"
@@ -361,10 +361,7 @@ export async function sendBudget(
       language: route.template.language,
       params,
       category: spec.category,
-      buttons: spec.buttons.map((button) => ({
-        id: replyId(button.action, input.budgetId),
-        title: button.title,
-      })),
+      buttons: replyButtons(spec.buttons, input.budgetId),
       ...(link ? { link: personalLinkRef(link.linkId) } : {}),
       preview: text,
     })

@@ -841,6 +841,10 @@ it("lo que Meta rechaza con su error es un rechazo claro; un 5xx o una respuesta
   await expect(down).rejects.not.toBeInstanceOf(ProviderRejectedError)
   await expect(send({ status: 200, json: {} })).rejects.not.toBeInstanceOf(ProviderRejectedError)
   await expect(rejected).rejects.not.toBeInstanceOf(ProviderThrottledError)
+  // Lo que Meta explica en `details` se guarda: sin eso, el motivo no se puede averiguar después.
+  await expect(
+    send({ status: 400, json: { error: { message: "(#131009) Parameter value is not valid", code: 131009, error_data: { messaging_product: "whatsapp", details: "Dato rechazado" } } } }),
+  ).rejects.toThrow("WhatsApp send falló: 400 (#131009) Parameter value is not valid: Dato rechazado")
 })
 
 it("un límite de ritmo de Meta no salió y se puede reintentar; el de calidad del número, no", async () => {
