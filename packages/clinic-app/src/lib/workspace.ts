@@ -205,6 +205,8 @@ export interface WaitingPromotion {
   connectionId?: string
   noticeText?: string | null
   inReview?: boolean
+  /** WhatsApp no aceptó el texto de aviso: hay que escribir otro. */
+  rejected?: boolean
 }
 
 /** Una fila de la lista: su grupo y lo demás de esa persona, si su rol puede verlo. */

@@ -26,7 +26,7 @@ Fecha: 2026-10-31 · Estado: aceptada · Ajusta a [0025](0025-un-pendiente-un-lu
 - **Ayudas en la caja, sin modelo:** horarios libres con quien la atendió y precios de su lista, en textos fijos que se pueden cambiar y respetando cómo se dice cada precio. Tocar un horario no lo aparta.
 - **«Enseñárselo a Sofi»** deja una lección por aprobar en Aprender. Nunca lo clínico ni lo de un pago: el servidor lo rechaza.
 - **La colegiatura se escribe una vez**, desde el panel de la atención.
-- **Los avisos que WhatsApp clasificó como publicidad van juntos en una fila**, que dice la consecuencia: no le llegan a todos. El panel trae un texto solo de aviso preparado por odentIA, listo para pedir otra revisión. WhatsApp decide: la pantalla nunca lo da por hecho. «Invitar a volver» se pide como promoción, porque lo es.
+- **Los avisos que WhatsApp clasificó como publicidad van juntos en una fila**, que dice la consecuencia: no le llegan a todos. El panel trae un texto solo de aviso preparado por odentIA, listo para pedir otra revisión. WhatsApp decide: la pantalla nunca lo da por hecho. «Invitar a volver» se pide como promoción, porque lo es, y con plantilla solo sale a quien aceptó novedades: la categoría manda, aunque su permiso sea el de controles y seguimiento.
 
 Quien trabaja debería ver a la persona, no al tipo de fila; empezar por lo más urgente, con el color y las palabras diciéndole por dónde; y resolver sin salir de Inicio, con lo que hace falta a la vista.
 

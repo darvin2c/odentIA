@@ -32,6 +32,7 @@ import {
   revertMessageText,
   saveMessageText,
   sendApprovedMessage,
+  listRecategorizedMessages,
 } from "./clinic-messages.js"
 import {
   changeConnectionCredentials,
@@ -427,9 +428,14 @@ describe("cambiar el texto nunca deja a la clínica sin mensaje", () => {
       body: "Motivo: El formato del texto no cumple las reglas de WhatsApp. Sigue saliendo el texto anterior. Puedes cambiarlo y pedirlo de nuevo.",
     })
     await expect(save(c, "recordatorio_cita", FORMAL)).rejects.toThrow("Ese es el texto que WhatsApp rechazó: cámbialo antes de pedirlo de nuevo.")
+    // En «Te espera», lo rechazado no sigue «en revisión»: hay que escribir otro.
+    await ownerDb.update(channelTemplate).set({ category: "marketing" }).where(and(eq(channelTemplate.organizationId, c.orgId), eq(channelTemplate.name, "odentia_recordatorio_cita_v2")))
+    const promotions = () => withOrgContext(appDb, c.orgId, (tx) => listRecategorizedMessages(tx, c.orgId))
+    expect(await promotions()).toMatchObject([{ messageId: "recordatorio_cita", inReview: false, rejected: true }])
     const again = await save(c, "recordatorio_cita", FORMAL.replace("Estimada", "Hola,"))
     expect(again.current.body).toBe(REMINDER)
     expect(again.pending).toMatchObject({ status: "en_revision" })
+    expect(await promotions()).toMatchObject([{ messageId: "recordatorio_cita", inReview: true, rejected: false }])
     // De un texto que ya fue reemplazado no se avisa.
     const before = (await noticesOf(c)).length
     await whatsappSays(c, first!.templateName, "aprobada")

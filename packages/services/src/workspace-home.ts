@@ -317,6 +317,8 @@ export interface WaitingPromotion {
   noticeText?: string | null
   /** Ya se envió a revisión con ese texto y WhatsApp no ha respondido. */
   inReview?: boolean
+  /** WhatsApp no aceptó el texto de aviso: hay que escribir otro. */
+  rejected?: boolean
 }
 
 /**
@@ -453,8 +455,10 @@ function personOf(row: WaitingRow): string | null {
     case "unsentBudget":
     case "possibleDuplicate":
     case "portalReentry":
-    case "task":
       return row.personId ?? null
+    // La que cuenta las demás tareas no se pliega: con ella se irían su número y su enlace.
+    case "task":
+      return row.more > 0 ? null : (row.personId ?? null)
     default:
       return null
   }
@@ -541,8 +545,9 @@ export function composeWaiting(parts: WaitingParts): WaitingEntry[] {
   if (parts.acceptedUnbooked && parts.acceptedUnbooked.patients > 0) rows.push({ kind: "acceptedUnbooked", ...parts.acceptedUnbooked })
 
   // Lo que dejaron «Su enlace» y el portal para recepción (ADR 0037).
-  for (const item of (parts.portalReentries ?? []).slice(0, WAITING_LIMITS.otherCases)) rows.push({ kind: "portalReentry", ...item })
-  for (const item of (parts.possibleDuplicates ?? []).slice(0, WAITING_LIMITS.otherCases)) rows.push({ kind: "possibleDuplicate", ...item })
+  // Esta es su única lista (no están en Tareas): van todos.
+  for (const item of parts.portalReentries ?? []) rows.push({ kind: "portalReentry", ...item })
+  for (const item of parts.possibleDuplicates ?? []) rows.push({ kind: "possibleDuplicate", ...item })
 
   if (parts.unreached && parts.unreached.total > 0) rows.push({ kind: "unreached", ...parts.unreached })
 

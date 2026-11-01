@@ -52,8 +52,11 @@ export interface PersonPanel {
   known: CaseBrief["known"] | null
   /** Lo que el agente dejó propuesto o ya hizo. */
   proposals: CaseBrief["proposals"]
-  /** Hasta cuándo se le puede escribir: Instagram y Messenger cierran; WhatsApp deja el mensaje por entregar. */
-  reply: { allowed: boolean; closedChannel: boolean; windowOpen: boolean }
+  /**
+   * Hasta cuándo se le puede escribir: Instagram y Messenger cierran; WhatsApp deja el mensaje por
+   * entregar, citando lo último que dijo (`holdOn`). Los demás canales no tienen ventana.
+   */
+  reply: { allowed: boolean; closedChannel: boolean; windowOpen: boolean; holdOn: string | null }
   /** Sus citas; nulo si el rol no ve la agenda o no es paciente. */
   appointments: { next: PanelAppointment | null; last: PanelAppointment | null } | null
   /** Sus alergias activas; nulo si el rol no las lee o no es paciente. */
@@ -89,7 +92,7 @@ export async function getPersonPanel(
     .limit(1)
   if (!conv) throw notFound("Conversación")
 
-  const handoffs = await listHandoffs(tx, orgId, { conversationId: input.conversationId, limit: 10 })
+  const handoffs = await listHandoffs(tx, orgId, { conversationId: input.conversationId, limit: 100 })
   const topicRow =
     (input.topicId ? handoffs.find((item) => item.id === input.topicId) : handoffs.find((item) => item.status !== "resuelta")) ?? null
   if (input.topicId && !topicRow) throw notFound("Tema")
@@ -123,7 +126,18 @@ export async function getPersonPanel(
     select ch.provider from conversation c left join channel_connection ch on ch.id = c.channel_connection_id and ch.organization_id = c.organization_id
     where c.organization_id = ${orgId} and c.id = ${input.conversationId}`)
   const open = windowOpen(conv.lastInboundAt)
-  const closedChannel = !open && (channel?.provider === "instagram" || channel?.provider === "messenger")
+  const whatsapp = channel?.provider === "whatsapp_cloud_api"
+  const [lastInbound] =
+    whatsapp && !open
+      ? await tx
+          .select({ id: message.id })
+          .from(message)
+          .where(and(eq(message.organizationId, orgId), eq(message.conversationId, input.conversationId), eq(message.direction, "in")))
+          .orderBy(desc(message.createdAt), desc(message.id))
+          .limit(1)
+      : []
+  // Por entregar necesita algo que responder: si nunca escribió, es como un canal cerrado.
+  const closedChannel = !open && (channel?.provider === "instagram" || channel?.provider === "messenger" || (whatsapp && !lastInbound && !topicRow?.sourceMessageId))
 
   const patientId = await selfPatientOf(tx, orgId, conv.contactId)
   const clinicalReader = can("clinical.read")
@@ -173,7 +187,7 @@ export async function getPersonPanel(
           createdAt: topicRow.createdAt,
         }
       : null,
-    thread: recent
+    thread: [...recent]
       .reverse()
       .map((row) => ({
         from: row.direction === "in" ? ("person" as const) : row.senderKind === "agent" ? ("agent" as const) : ("team" as const),
@@ -182,7 +196,7 @@ export async function getPersonPanel(
       })),
     known: readsThread || can("crm.read") ? brief.known : null,
     proposals: readsThread ? brief.proposals : [],
-    reply: { allowed: !closedChannel && (can("conversations.write") || can("conversations.topics")), closedChannel, windowOpen: open },
+    reply: { allowed: !closedChannel && (can("conversations.write") || can("conversations.topics")), closedChannel, windowOpen: open || !whatsapp, holdOn: lastInbound?.id ?? null },
     appointments,
     allergies,
     lastEncounter,

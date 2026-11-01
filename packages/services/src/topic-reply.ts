@@ -1,5 +1,7 @@
 import type { Db } from "@odentia/db"
+import { canAccess } from "@odentia/auth/permissions"
 import { agentHandoff } from "@odentia/db/schema/agent"
+import { member } from "@odentia/db/schema/auth"
 import { message } from "@odentia/db/schema/crm"
 import { channelConnection, contact, conversation } from "@odentia/db/schema/crm"
 import { and, eq, sql } from "drizzle-orm"
@@ -229,7 +231,9 @@ export async function replyToTopic(
     senderKind: "user",
     senderUserId: input.userId,
     content: { type: "text", text: input.text },
+    holdIfClosed: true,
   })
+  if (sent.held) await offerInSavepoint(tx, orgId, topic.conversationId)
   if (topic.taskId) await updateTask(tx, orgId, topic.taskId, { status: "done", actorUserId: input.userId })
   return { ...sent, topicId: topic.id, topicResolved: topic.taskId !== null }
 }
@@ -329,12 +333,20 @@ export async function reopenTopic(
   input: { conversationId: string; topicId: string; userId: string },
 ): Promise<void> {
   const [topic] = await tx
-    .select({ taskId: agentHandoff.taskId, status: conversation.status, open: sql<boolean>`${handoffOpenSql(sql.raw('"agent_handoff"'))}` })
+    .select({ taskId: agentHandoff.taskId, kind: agentHandoff.kind, assigneeUserId: agentHandoff.assigneeUserId, status: conversation.status, open: sql<boolean>`${handoffOpenSql(sql.raw('"agent_handoff"'))}` })
     .from(agentHandoff)
     .innerJoin(conversation, eq(conversation.id, agentHandoff.conversationId))
     .where(and(eq(agentHandoff.id, input.topicId), eq(agentHandoff.organizationId, orgId), eq(agentHandoff.conversationId, input.conversationId)))
     .limit(1)
   if (!topic?.taskId) throw notFound("Tema")
+  // Como al tomarlo (`claimHandoff`): quien no escribe en conversaciones, solo un pago suyo o sin tomar.
+  const [membership] = await tx
+    .select({ role: member.role })
+    .from(member)
+    .where(and(eq(member.organizationId, orgId), eq(member.userId, input.userId)))
+    .limit(1)
+  const allowed = membership && (canAccess(membership.role, "conversations.write") || (topic.kind === "pago" && canAccess(membership.role, "conversations.topics") && (topic.assigneeUserId === null || topic.assigneeUserId === input.userId)))
+  if (!allowed) throw new ServiceError("FORBIDDEN", 403, "No tienes permiso para dejar pendiente este tema")
   if (topic.open) return
   if (topic.status === "closed") throw validation("La conversación ya se cerró: escríbele para retomarla.")
   await updateTask(tx, orgId, topic.taskId, { status: "open", actorUserId: input.userId })

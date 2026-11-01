@@ -43,7 +43,8 @@ import { useActiveBranch } from "../../lib/active-branch"
 import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { createReorderDrafts } from "../../lib/inventory"
-import { usePermission } from "../../lib/crm"
+import { useMyUserId, usePermission } from "../../lib/crm"
+import { hasPanelDraft } from "../../lib/panel-draft"
 import { type DebtRow, invalidateFinance } from "../../lib/finance-cash"
 import { type CollectResultBody, useOrgFinanceProfile } from "../../lib/finance-collect"
 import { daysAgo, longDay, repliable, replyName, waitingKey } from "../../lib/home"
@@ -99,6 +100,7 @@ function hasWork(access: WorkspaceHome["access"]): boolean {
 
 function HomePage() {
   const queryClient = useQueryClient()
+  const myUserId = useMyUserId()
   const sede = useActiveBranch()
   const query = useQuery({
     queryKey: ["workspace-home", sede.branchId ?? null],
@@ -253,6 +255,9 @@ function HomePage() {
   function openRow(row: WaitingRow) {
     // Al cerrar, el foco vuelve a la fila que lo abrió. «Siguiente» se abre desde el panel: se queda la primera.
     if (!opened && document.activeElement instanceof HTMLElement) opener.current = document.activeElement
+    // Una superficie a la vez: lo que se abre desde «También» reemplaza al panel.
+    setPerson(null)
+    setOpened(null)
     switch (row.kind) {
       case "case":
         if (row.conversationId) setPerson({ conversationId: row.conversationId, topicId: row.id, name: row.contactName ?? "Interlocutor" })
@@ -323,11 +328,14 @@ function HomePage() {
     if (back?.isConnected) requestAnimationFrame(() => back.focus({ preventScroll: true }))
   }
   // Lo demás de la persona abierta, leído de la lista: lo que se resuelve desaparece.
-  const openedEntry: WaitingEntry | null = opened ? (data?.waiting.find((row) => waitingKey(row) === waitingKey(opened)) ?? null) : null
-  const openedAlso = openedEntry?.also?.length && context ? <AlsoList rows={openedEntry.also} context={context} onRun={runRow} /> : null
+  // Abierta desde «También», la fila vive dentro de la de su persona: lo demás incluye esa fila.
+  const openedKey = opened ? waitingKey(opened) : null
+  const openedEntry: WaitingEntry | null = openedKey ? (data?.waiting.find((row) => waitingKey(row) === openedKey || row.also?.some((item) => waitingKey(item) === openedKey)) ?? null) : null
+  const openedRest = openedEntry ? [openedEntry, ...(openedEntry.also ?? [])].filter((row) => waitingKey(row) !== openedKey) : []
+  const openedAlso = openedRest.length > 0 && context ? <AlsoList rows={openedRest} context={context} onRun={runRow} /> : null
   // «Siguiente: Rosa Quispe»: la próxima fila que se puede responder, nunca solo.
   const nextRow = opened
-    ? (data?.waiting.slice((data.waiting.findIndex((row) => waitingKey(row) === waitingKey(opened)) ?? -1) + 1).find((row) => repliable(row)) ?? null)
+    ? (data?.waiting.slice(data.waiting.findIndex((row) => row === openedEntry) + 1).find((row) => repliable(row)) ?? null)
     : null
   const next = nextRow ? { name: replyName(nextRow) ?? "la siguiente persona", open: () => openRow(nextRow) } : null
   // La lista sale de lo último que llegó: lo que se anota se va de ella.
@@ -360,6 +368,7 @@ function HomePage() {
                 ? (row) => arrival.mutate({ id: row.appointmentId, arrived: true, patient: { id: row.patientId, name: row.patientName } })
                 : undefined,
               busyKey,
+              hasDraft: (conversationId) => hasPanelDraft(myUserId, conversationId),
             }}
           />
         </div>

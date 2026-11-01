@@ -48,7 +48,7 @@ interface PersonPanelData {
   thread: Array<{ from: "person" | "agent" | "team"; text: string; at: string }>
   known: Array<{ label: string | null; text: string; origin: "caso" | "persona" | "ficha"; notedBy: "agente" | "equipo" | null }> | null
   proposals: Array<{ label: string; summary: string; status: string; at: string }>
-  reply: { allowed: boolean; closedChannel: boolean; windowOpen: boolean }
+  reply: { allowed: boolean; closedChannel: boolean; windowOpen: boolean; holdOn: string | null }
   appointments: { next: PanelAppointment | null; last: PanelAppointment | null } | null
   allergies: string[] | null
   lastEncounter: { startedAt: string; professionalName: string | null } | null
@@ -144,7 +144,7 @@ export function PersonPanel({
 
   // Cada persona con lo suyo: al cambiar de fila, su borrador y nada de la anterior.
   useEffect(() => {
-    setText(conversationId ? readPanelDraft(conversationId) : "")
+    setText(conversationId ? readPanelDraft(myUserId, conversationId) : "")
     setFieldError(null)
     setProblem(null)
     setTakenBy(null)
@@ -153,7 +153,7 @@ export function PersonPanel({
     setSent(null)
     setReopened(false)
     setTaught(false)
-  }, [conversationId, target?.topicId])
+  }, [conversationId, target?.topicId, myUserId])
 
   const settled = () => {
     void queryClient.invalidateQueries({ queryKey: ["conversations"] })
@@ -176,10 +176,11 @@ export function PersonPanel({
           })
         : apiFetch<{ data: { held?: boolean; topicResolved?: boolean; topicId?: string | null } }>(`/api/conversations/${conversationId}/messages`, {
             method: "POST",
-            body: JSON.stringify({ text: body }),
+            // Pasadas las 24 horas, responder a lo último que dijo es lo que deja el mensaje por entregar.
+            body: JSON.stringify({ text: body, ...(panel?.reply.holdOn ? { replyToMessageId: panel.reply.holdOn } : {}) }),
           }),
     onSuccess: (result, body) => {
-      if (conversationId) writePanelDraft(conversationId, "")
+      if (conversationId) writePanelDraft(myUserId, conversationId, "")
       setText("")
       setProblem(null)
       setTakenBy(null)
@@ -235,6 +236,8 @@ export function PersonPanel({
   const question = panel?.topic?.quote ?? panel?.thread.filter((item) => item.from === "person").at(-1)?.text ?? ""
 
   const submit = () => {
+    // Enter no pasa por el botón: mientras sale el mensaje, otro Enter le llegaría dos veces.
+    if (send.isPending) return
     const body = text.trim()
     if (!body) {
       setFieldError("Escribe tu respuesta.")
@@ -252,7 +255,7 @@ export function PersonPanel({
   const change = (value: string) => {
     setText(value)
     setFieldError(null)
-    writePanelDraft(conversationId, value)
+    writePanelDraft(myUserId, conversationId, value)
   }
 
   const menu = [
@@ -356,7 +359,7 @@ export function PersonPanel({
               // Enter envía, como en la Bandeja; Mayús + Enter baja de línea.
               if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault()
-                submit()
+                if (!event.repeat) submit()
               }
             }}
           />

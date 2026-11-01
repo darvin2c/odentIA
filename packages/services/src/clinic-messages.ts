@@ -2038,7 +2038,7 @@ export async function resumeConversationBySystem(
 export async function listRecategorizedMessages(
   tx: Db,
   orgId: string,
-): Promise<Array<{ messageId: string; title: string; connectionId: string; noticeText: string | null; inReview: boolean }>> {
+): Promise<Array<{ messageId: string; title: string; connectionId: string; noticeText: string | null; inReview: boolean; rejected: boolean }>> {
   const [primary] = await activeWhatsApps(tx, orgId)
   if (!primary) return []
   const { defs } = await loadMessages(tx, orgId)
@@ -2048,11 +2048,16 @@ export async function listRecategorizedMessages(
       const template = templates.get(currentText(def).templateName)
       return template?.status === "aprobada" && isPromotionFor(template, def.category)
     })
-    .map((def) => ({
-      messageId: def.id,
-      title: def.title,
-      connectionId: primary,
-      noticeText: NOTICE_TEXTS[def.id] ?? null,
-      inReview: def.row?.pendingVersion != null,
-    }))
+    .map((def) => {
+      const pending = pendingText(def)
+      const rejected = !!pending && statusIn(templates, pending) === "rechazada"
+      return {
+        messageId: def.id,
+        title: def.title,
+        connectionId: primary,
+        noticeText: NOTICE_TEXTS[def.id] ?? null,
+        inReview: !!pending && !rejected,
+        rejected,
+      }
+    })
 }

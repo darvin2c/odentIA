@@ -1,5 +1,5 @@
 import { expect, it } from "vitest"
-import { composeWaiting, WAITING_LIMITS, type WaitingCase, type WaitingParts, type WaitingPerson, type WaitingTask, type WaitingUnclosed, type WaitingUnconfirmed } from "./workspace-home.js"
+import { composeWaiting, WAITING_LIMITS, type WaitingCase, type WaitingParts, type WaitingPerson, type WaitingPossibleDuplicate, type WaitingTask, type WaitingUnclosed, type WaitingUnconfirmed } from "./workspace-home.js"
 
 // «Ahora» lo dice `urgent` (decisión 1 del pulido): aquí, la prioridad alta.
 const caseOf = (id: string, priority: string): WaitingCase => ({
@@ -15,6 +15,9 @@ const unconfirmedOf = (id: string): WaitingUnconfirmed => ({
 })
 const personOf = (id: string): WaitingPerson => ({
   conversationId: id, contactId: `contacto-${id}`, contactName: id, channel: "whatsapp", quote: "¿Atienden hoy?", since: "2026-10-12T13:00:00.000Z", urgent: false, windowClosed: false,
+})
+const duplicateOf = (id: string): WaitingPossibleDuplicate => ({
+  id, source: "enlace", patientId: `p-${id}`, personId: `persona-${id}`, patientName: id, personName: null, detail: "", createdAt: "2026-10-12T13:00:00.000Z",
 })
 const nothing: WaitingParts = {
   cases: [], conversations: null, overdueTasks: [], nextTask: null, openTasks: 0, advice: [], budgets: null,
@@ -159,4 +162,16 @@ it("lo que puede esperar va en «Sin apuro», salvo las citas de mañana sin rec
   expect(rows.map((row) => [row.kind, row.band])).toEqual([["advice", "hoy"], ["promotions", "sin_apuro"], ["advice", "sin_apuro"]])
   // Los avisos de WhatsApp van juntos en una fila.
   expect(rows[1]).toMatchObject({ kind: "promotions", items: [{ messageId: "a" }, { messageId: "b" }] })
+})
+
+it("la tarea que cuenta las demás no se pliega, aunque esa persona tenga otra fila", () => {
+  const task = { ...taskOf("t", "later"), personId: "contacto-a" }
+  const rows = composeWaiting({ ...nothing, nextTask: task, openTasks: 12, conversations: { waiting: 1, items: [personOf("a")] } })
+  expect(rows.find((row) => row.kind === "task")).toMatchObject({ id: "t", more: 11 })
+  expect(rows.find((row) => row.kind === "person")?.also).toBeUndefined()
+})
+
+it("lo que dejó el sistema va entero: no está en ninguna otra lista", () => {
+  const items = ["a", "b", "c", "d", "e"].map(duplicateOf)
+  expect(composeWaiting({ ...nothing, possibleDuplicates: items }).map((row) => ("id" in row ? row.id : null))).toEqual(["a", "b", "c", "d", "e"])
 })

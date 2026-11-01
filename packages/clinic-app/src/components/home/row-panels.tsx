@@ -10,6 +10,7 @@ import { type HomeTextContext, sentence, waitingKey, waitingText } from "../../l
 import { createReorderDrafts } from "../../lib/inventory"
 import { activeOrgLocale } from "../../lib/locale"
 import { useOrgProfile } from "../../lib/org"
+import { whatsappMessagesKey } from "../../lib/whatsapp"
 import type { WaitingPromotion, WaitingRow } from "../../lib/workspace"
 import { productUi } from "../../product/product-ui"
 import { useAppointmentVisitStatus } from "../agenda/arrival"
@@ -565,7 +566,9 @@ const shownText = (body: string) => body.replace(/\{\{([a-z_]+)\}\}/g, "[$1]")
  */
 export function PromotionPanel({ items, onClose, onChanged }: { items: WaitingPromotion[]; onClose: () => void; onChanged: () => void }) {
   const queryClient = useQueryClient()
-  const ready = items.filter((item) => item.noticeText && item.connectionId && !item.inReview)
+  // Si uno falla, los anteriores ya están en revisión: reintentar sigue con los que faltan.
+  const [sent, setSent] = useState<string[]>([])
+  const ready = items.filter((item) => item.noticeText && item.connectionId && !item.inReview && !item.rejected && !sent.includes(item.messageId))
   const [done, setDone] = useState(false)
   const send = useMutation({
     retry: false,
@@ -575,11 +578,12 @@ export function PromotionPanel({ items, onClose, onChanged }: { items: WaitingPr
           method: "PUT",
           body: JSON.stringify({ body: item.noticeText }),
         })
+        setSent((current) => [...current, item.messageId])
       }
     },
-    onSuccess: () => {
-      setDone(true)
-      void queryClient.invalidateQueries({ queryKey: ["clinic-messages"] })
+    onSuccess: () => setDone(true),
+    onSettled: () => {
+      for (const item of items) if (item.connectionId) void queryClient.invalidateQueries({ queryKey: whatsappMessagesKey(item.connectionId) })
       onChanged()
     },
   })
@@ -616,7 +620,8 @@ export function PromotionPanel({ items, onClose, onChanged }: { items: WaitingPr
           {items.map((item) => (
             <li key={item.messageId} className="flex flex-col gap-1 py-2.5">
               <span className="font-bold">{item.title}</span>
-              {item.inReview ? <span className="text-[13px] text-muted-foreground">En revisión de WhatsApp.</span> : null}
+              {item.rejected ? <span className="text-[13px] text-destructive">WhatsApp no lo aceptó como aviso: cambia el texto para pedirlo de nuevo.</span> : null}
+              {item.inReview || sent.includes(item.messageId) ? <span className="text-[13px] text-muted-foreground">En revisión de WhatsApp.</span> : null}
               {item.noticeText ? <span className="text-[13px] text-muted-foreground">Texto nuevo: «{shownText(item.noticeText)}»</span> : <span className="text-[13px] text-muted-foreground">Es un mensaje propio de la clínica: el texto lo escribes tú.</span>}
               <Link to="/settings/integrations/whatsapp" search={{ mensaje: item.messageId }} className="inline-flex min-h-11 items-center self-start text-[13px] font-semibold text-primary hover:underline sm:min-h-8">
                 {item.noticeText ? "Editar" : "Cambiar el texto"}

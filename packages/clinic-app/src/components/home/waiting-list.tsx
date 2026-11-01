@@ -5,7 +5,6 @@ import { CalendarClock, CalendarX2, CheckCircle2, ChevronDown, FileText, Lightbu
 import { type ReactElement, type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { dayKeyOf } from "../../lib/finance-cash"
 import { alsoWords, type HomeTextContext, PHONE_ROWS, waitingKey, waitingText } from "../../lib/home"
-import { hasPanelDraft } from "../../lib/panel-draft"
 import type { WaitingBand, WaitingEntry, WaitingRow } from "../../lib/workspace"
 
 type RowOf<K extends WaitingRow["kind"]> = Extract<WaitingRow, { kind: K }>
@@ -21,6 +20,8 @@ export interface WaitingHandlers {
   onDone?: (row: RowOf<"task">) => void
   /** La fila cuya acción está en curso: su botón dice que trabaja. */
   busyKey?: string | null
+  /** ¿Quien mira dejó algo escrito a medias para esa conversación? */
+  hasDraft?: (conversationId: string) => boolean
 }
 
 function TypeIcon({ icon: Icon }: { icon: LucideIcon }) {
@@ -157,7 +158,7 @@ function WaitingRowItem({ row, context, handlers, className }: { row: WaitingEnt
         <span className="font-bold">{text.title}</span>
         {text.ask ? <span className="line-clamp-2 text-foreground">{text.ask}</span> : null}
         <span className="text-[13px] text-muted-foreground">
-          {[text.detail, ...also.slice(0, 1).map((item) => `también ${alsoWords(item)}`), conversationId && hasPanelDraft(conversationId) ? "tienes un borrador sin enviar" : null]
+          {[text.detail, ...also.slice(0, 1).map((item) => `también ${alsoWords(item)}`), conversationId && handlers.hasDraft?.(conversationId) ? "tienes un borrador sin enviar" : null]
             .filter(Boolean)
             .join(" · ")}
         </span>

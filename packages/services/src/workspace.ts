@@ -816,7 +816,7 @@ async function waitingSystemTasks(
     where t.organization_id = ${orgId} and t.status = 'open' and t.kind is not null
       and (t.patient_id is not null or t.contact_id is not null) and not ${testContactSql(sql`t.contact_id`)}
       and (${access.allTasks} or t.assignee_user_id = ${userId} ${areas})
-    order by t.created_at, t.id limit 20`)
+    order by t.created_at, t.id limit 100`)
   const SOURCE: Record<string, WaitingPossibleDuplicate["source"]> = {
     ficha_repetida: "enlace",
     registro_con_documento: "registro",
