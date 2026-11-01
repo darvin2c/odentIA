@@ -634,6 +634,48 @@ it("pasadas las 24 horas, en latidIA sale el mismo mensaje aprobado", async () =
   expect((await sentToChat(lucia.conversationId)).map((row) => row.templateName)).toEqual(["odentia_enlace_recibido_v1"])
 })
 
+it("un enlace sin conversación, como el de un recordatorio o un presupuesto, se responde por su WhatsApp", async () => {
+  const f = await clinicalFixture()
+  const lucia = await consentInChat(f, TWO_DAYS_AGO())
+  await approveLinkReceived()
+  const link = await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: lucia.personId, patientId: lucia.patientId, createdBy: f.actor }, { secretsKey: KEY }),
+  )
+  await signWith(f, link.token, lucia)
+  expect((await sentToChat(lucia.conversationId)).map((row) => row.templateName)).toEqual(["odentia_enlace_recibido_v1"])
+  const [memory] = await ownerDb.select().from(agentCaseMemory).where(eq(agentCaseMemory.conversationId, lucia.conversationId))
+  expect(JSON.stringify(memory?.notes)).toContain("Firmó un consentimiento desde su enlace")
+})
+
+it("el último envío decide por qué conversación se le responde", async () => {
+  const f = await clinicalFixture()
+  const lucia = await consentInChat(f, new Date())
+  const older = await chatOf(lucia.personId, new Date())
+  await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: lucia.personId, patientId: lucia.patientId, conversationId: older }, { secretsKey: KEY }),
+  )
+  const link = await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: lucia.personId, patientId: lucia.patientId, conversationId: lucia.conversationId }, { secretsKey: KEY }),
+  )
+  await signWith(f, link.token, lucia)
+  expect(await agentTexts(older)).toEqual([])
+  expect((await agentTexts(lucia.conversationId))[0]).toContain("Gracias por firmar el consentimiento")
+})
+
+it("repetir la misma petición de envío no agrega otro paso a la historia", async () => {
+  const f = await clinicalFixture()
+  const lucia = await consentInChat(f, new Date())
+  const requestId = randomUUID()
+  for (let time = 0; time < 2; time++) {
+    await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, lucia.consentId, { requestId }))
+  }
+  const history = await f.run((tx) => listConsentEvents(tx, ORG, lucia.consentId))
+  expect(history.map((event) => event.toStatus)).toEqual(["pendiente", "enlace_enviado"])
+  // Otra petición sí es otro envío.
+  await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, lucia.consentId, { requestId: randomUUID() }))
+  expect(await f.run((tx) => listConsentEvents(tx, ORG, lucia.consentId))).toHaveLength(3)
+})
+
 it("dentro de las 24 horas sigue saliendo el texto, que no usa el mensaje aprobado", async () => {
   const f = await clinicalFixture()
   const lucia = await consentInChat(f, new Date())

@@ -1682,6 +1682,16 @@ function momentWords(date: Date, now: Date, zone: { timezone: string; locale: st
   return `${dayWords(date, now, zone)} a las ${time}`
 }
 
+/** Las plantillas que tuvo «Recibido desde su enlace»: la de odentIA y las de cada texto de la clínica. */
+async function linkReceivedTemplates(tx: Db, orgId: string): Promise<string[]> {
+  const versions = await tx
+    .select({ name: clinicMessageVersion.templateName })
+    .from(clinicMessageVersion)
+    .innerJoin(clinicMessage, eq(clinicMessage.id, clinicMessageVersion.messageId))
+    .where(and(eq(clinicMessage.organizationId, orgId), eq(clinicMessage.key, LINK_RECEIVED_MESSAGE_KEY)))
+  return [...catalogTemplatesOf(LINK_RECEIVED_MESSAGE_KEY), ...versions.map((version) => version.name)]
+}
+
 async function sendables(
   tx: Db,
   orgId: string,
@@ -1711,13 +1721,8 @@ async function sendables(
     }
   }
   const zone = await findOrgLocale(tx, orgId)
-  const { defs, known } = await loadMessages(tx, orgId)
   // «Recibido desde su enlace» responde a lo que la persona hizo: no le quita a recepción poder escribirle.
-  const linkReceived = defs.find((def) => def.id === LINK_RECEIVED_MESSAGE_KEY)
-  const answers = [
-    ...catalogTemplatesOf(LINK_RECEIVED_MESSAGE_KEY),
-    ...(linkReceived?.versions.map((version) => version.templateName) ?? []),
-  ]
+  const answers = await linkReceivedTemplates(tx, orgId)
   // Un segundo mensaje aprobado espera a que la persona responda o a que pase un día.
   const [last] = await tx
     .select({ createdAt: message.createdAt })
@@ -1744,6 +1749,7 @@ async function sendables(
       fixable: false,
     }
   }
+  const { defs, known } = await loadMessages(tx, orgId)
   const all = await listChannelTemplates(tx, orgId, row.connectionId)
   const templates = byName(all)
   const values = {
@@ -2084,7 +2090,8 @@ export async function sendLinkReceivedNotice(
         eq(message.organizationId, orgId),
         eq(message.conversationId, conversationId),
         eq(message.direction, "out"),
-        eq(message.templateName, template.name),
+        // También los de un texto anterior: cambiarlo no reinicia el tope.
+        inArray(message.templateName, await linkReceivedTemplates(tx, orgId)),
         ne(message.status, "failed"),
         gt(message.createdAt, new Date(now.getTime() - LINK_RECEIVED_EVERY_MS)),
       ),

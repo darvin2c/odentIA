@@ -999,7 +999,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
-        const consent = await markConsentSentByLink(tx, orgId, userId, c.req.param("id"))
+        const consent = await markConsentSentByLink(tx, orgId, userId, c.req.param("id"), { requestId: parsed.data.requestId ?? null })
         return sendPersonalLink(
           tx,
           orgId,

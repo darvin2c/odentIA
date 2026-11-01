@@ -1424,7 +1424,7 @@ export async function submitPersonalLinkQuestionnaire(
     {
       note: "Envió su cuestionario desde su enlace.",
       message: `Gracias, ya recibimos el cuestionario. El ${clinician.one} lo revisará antes de la cita.`,
-      key: `enlace-cuestionario:${link.row.id}`,
+      key: `enlace-cuestionario:${link.row.id}:${link.appointment?.id ?? ""}`,
       reason: "La persona envió su cuestionario desde su enlace",
       kind: "enlace",
       title: "recibió su cuestionario",

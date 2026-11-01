@@ -1299,14 +1299,26 @@ export function EncounterEditor({
     }
   }
   const signer = firstNameOf(patient)
+  const confirmingRef = useRef(false)
   /** «Firmar ahora» desde el cierre: prepara lo que falta y abre la firma en la unidad dental. */
   const signConsentsNow = async (need: ConsentNeed) => {
     try {
       // Ya lo firmó en su enlace: solo falta que quien atiende lo confirme.
       if (need.personSigned && need.documentId) {
-        await confirmLinkSignedConsent(need.documentId)
-        await refreshClosing()
-        await onChanged()
+        // Un segundo toque recibiría «no espera tu confirmación» aunque el primero sí la dejó.
+        if (confirmingRef.current) return
+        confirmingRef.current = true
+        try {
+          await confirmLinkSignedConsent(need.documentId)
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ["consent-needs", patientId, encounterId] }),
+            queryClient.invalidateQueries({ queryKey: ["consents", patientId] }),
+            refreshClosing(),
+          ])
+          await onChanged()
+        } finally {
+          confirmingRef.current = false
+        }
         return
       }
       if (need.status === "sin_preparar") {

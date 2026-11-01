@@ -1080,6 +1080,15 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
     expect(approved?.body).toBe("Ya puede salir a quien no escribió en las últimas 24 horas.")
     expect(await run(c, (tx) => sendLinkReceivedNotice(tx, c.orgId, conversationId, NOW))).toBe("enviado")
     expect(await run(c, (tx) => sendLinkReceivedNotice(tx, c.orgId, conversationId, NOW))).toBe("ya_enviado")
+
+    // Cambiarle el texto no reinicia el tope: Meta cobraría un segundo mensaje el mismo día.
+    const edited = "Hola, {{persona}}. Muchas gracias: {{clinica}} ya recibió lo que completó desde su enlace, y le avisaremos si hace falta algo más."
+    await run(c, (tx) =>
+      saveMessageText(tx, c.orgId, c.whatsappId!, c.ownerId, "enlace_recibido", edited, { fetch: fakeMeta({ json: { id: "952", status: "PENDING", category: "UTILITY" } }).fetch, validateExternal: false, secretsKey: KEY }),
+    )
+    const [version] = await ownerDb.select({ templateName: clinicMessageVersion.templateName }).from(clinicMessageVersion).where(eq(clinicMessageVersion.organizationId, c.orgId))
+    await run(c, (tx) => applyTemplateUpdates(tx, c.orgId, c.whatsappId!, [{ externalId: "952", name: version!.templateName, language: "es", status: "aprobada" as const, reason: null }]))
+    expect(await run(c, (tx) => sendLinkReceivedNotice(tx, c.orgId, conversationId, NOW))).toBe("ya_enviado")
     const [sent] = await ownerDb
       .select({ templateName: message.templateName, status: message.status })
       .from(message)

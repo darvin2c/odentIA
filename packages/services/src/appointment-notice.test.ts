@@ -440,6 +440,12 @@ describe("lo que la persona hace con su cita desde su enlace, pasadas las 24 hor
       .select({ contentType: message.contentType, templateName: message.templateName })
       .from(message)
       .where(and(eq(message.conversationId, conversationId), eq(message.senderKind, "agent")))
+  /** Quedó pedido a WhatsApp al conectar: aquí lo aprueba. */
+  const approveLinkReceived = (c: Clinic) =>
+    ownerDb
+      .update(channelTemplate)
+      .set({ status: "aprobada" })
+      .where(and(eq(channelTemplate.connectionId, c.whatsappId!), eq(channelTemplate.name, "odentia_enlace_recibido_v1")))
   /** Escribió hace dos días: WhatsApp ya no deja responderle con texto. */
   const quietPerson = async (c: Clinic, name: string) => {
     const someone = await person(c, name, { consent: ["recordatorio"], openWindow: true })
@@ -479,9 +485,10 @@ describe("lo que la persona hace con su cita desde su enlace, pasadas las 24 hor
     expect(await noticesOf(c)).toContain("aviso_cita_cancelada")
   })
 
-  it("con «Recordar la cita» apagada no sale el aviso: la clínica lo decidió y su página ya se lo confirmó", async () => {
+  it("con «Recordar la cita» apagada no sale el aviso de la cita: sale «Recibido desde su enlace»", async () => {
     const c = await clinic({ approved: ["aviso_cita_movida"] })
     const ana = await quietPerson(c, "Ana Torres")
+    await approveLinkReceived(c)
     const booked = await book(c, ana.patientId, later(3 * DAY), { notice: false })
     const link = await run(c, (tx) =>
       issuePersonalLink(tx, c.orgId, { contactId: ana.contactId, patientId: ana.patientId, conversationId: ana.conversationId, appointmentId: booked.id }, { secretsKey: KEY }),
@@ -491,18 +498,31 @@ describe("lo que la persona hace con su cita desde su enlace, pasadas las 24 hor
     )
     expect(new Date(moved.startsAt).getTime()).toBe(later(4 * DAY).getTime())
     expect(await noticesOf(c)).toEqual([])
-    expect(await agentMessages(ana.conversationId)).toEqual([])
+    expect(await agentMessages(ana.conversationId)).toEqual([{ contentType: "template", templateName: "odentia_enlace_recibido_v1" }])
+  })
+
+  it("si responderle falla, lo que hizo en su enlace vale igual", async () => {
+    const c = await clinic()
+    await lineOn(c)
+    const pedro = await quietPerson(c, "Pedro Ríos")
+    await approveLinkReceived(c)
+    const booked = await book(c, pedro.patientId, later(3 * DAY), { notice: false })
+    const link = await run(c, (tx) =>
+      issuePersonalLink(tx, c.orgId, { contactId: pedro.contactId, patientId: pedro.patientId, conversationId: pedro.conversationId, appointmentId: booked.id }, { secretsKey: KEY }),
+    )
+    // Sin un nombre con el que armar el mensaje, renderMessage falla.
+    await ownerDb.update(contact).set({ givenNames: null, displayName: " " }).where(eq(contact.id, pedro.contactId))
+    await run(c, (tx) => confirmBookingLinkAppointment(tx, c.orgId, link.token, { secretsKey: KEY }))
+    const [row] = await ownerDb.select({ status: appointment.status }).from(appointment).where(eq(appointment.id, booked.id))
+    expect(row?.status).toBe("confirmada")
+    expect(await agentMessages(pedro.conversationId)).toEqual([])
   })
 
   it("confirmar no tiene aviso propio: sale «Recibido desde su enlace»", async () => {
     const c = await clinic()
     await lineOn(c)
     const pedro = await quietPerson(c, "Pedro Ríos")
-    // Quedó pedido a WhatsApp al conectar: aquí lo aprueba.
-    await ownerDb
-      .update(channelTemplate)
-      .set({ status: "aprobada" })
-      .where(and(eq(channelTemplate.connectionId, c.whatsappId!), eq(channelTemplate.name, "odentia_enlace_recibido_v1")))
+    await approveLinkReceived(c)
     const booked = await book(c, pedro.patientId, later(3 * DAY), { notice: false })
     const link = await run(c, (tx) =>
       issuePersonalLink(tx, c.orgId, { contactId: pedro.contactId, patientId: pedro.patientId, conversationId: pedro.conversationId, appointmentId: booked.id }, { secretsKey: KEY }),

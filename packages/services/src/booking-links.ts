@@ -10,7 +10,7 @@ import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { organization, user } from "@odentia/db/schema/auth"
 import { professionalSchedule } from "@odentia/db/schema/availability"
 import { patient, serviceCatalog, treatmentPlanItem } from "@odentia/db/schema/clinical"
-import { agentConfig, channelConnection, contact, contactIdentity, conversation } from "@odentia/db/schema/crm"
+import { channelConnection, contact, contactIdentity, conversation } from "@odentia/db/schema/crm"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm"
 import { recordAgentAction } from "./agent-actions.js"
@@ -18,7 +18,7 @@ import { addAgentCaseNote } from "./agent-case.js"
 import { createProposal, expireBookingProposals } from "./agent-operations.js"
 import { appointmentCalendarDownload } from "./appointment-calendar.js"
 import { createAppointment } from "./appointments.js"
-import { type AppointmentChange, enqueueAppointmentNotice } from "./automation.js"
+import { adminRuntime, type AppointmentChange, enqueueAppointmentNotice } from "./automation.js"
 import { listAvailableSlots, selfBookingNotBefore } from "./availability.js"
 import { branchAddressColumns, branchAddressWriter, branchDirectionsWriter } from "./branches.js"
 import { sendLinkReceivedNotice } from "./clinic-messages.js"
@@ -210,7 +210,8 @@ export async function issuePersonalLink(
       expiresAt: live.expiresAt > expiresAt ? live.expiresAt : expiresAt,
     }
     if (input.appointmentId) patch.appointmentId = input.appointmentId
-    if (input.conversationId && !live.conversationId) patch.conversationId = input.conversationId
+    // El último envío manda: por ahí se le responde lo que haga en el enlace.
+    if (input.conversationId) patch.conversationId = input.conversationId
     if (input.createdBy) patch.createdBy = input.createdBy
     if (input.booking) {
       // Vuelve a ofrecer reservar: la cita que ya reservó sigue apareciendo como su cita.
@@ -1353,12 +1354,34 @@ async function whenText(
 }
 
 /**
+ * Su WhatsApp, para un enlace que no salió de una conversación: el de un
+ * recordatorio, un presupuesto o su código. Quien nunca tuvo uno no tiene chat
+ * al que avisar: lo hecho queda en la auditoría a nombre de la persona.
+ */
+async function whatsappThreadOf(tx: Db, orgId: string, contactId: string): Promise<string | null> {
+  const [thread] = await tx
+    .select({ id: conversation.id })
+    .from(conversation)
+    .innerJoin(channelConnection, eq(channelConnection.id, conversation.channelConnectionId))
+    .where(
+      and(
+        eq(conversation.organizationId, orgId),
+        eq(conversation.contactId, contactId),
+        eq(channelConnection.channel, "whatsapp"),
+        eq(channelConnection.status, "active"),
+      ),
+    )
+    .orderBy(desc(conversation.lastMessageAt))
+    .limit(1)
+  return thread?.id ?? null
+}
+
+/**
  * Deja constancia en el caso y avisa por la conversación del enlace, con la
- * misma política que cualquier mensaje del agente. Un enlace que no salió de
- * una conversación no tiene caso ni chat al que avisar: lo hecho queda en la
- * auditoría a nombre de la persona. Con Sofi apagada nadie habla en su nombre:
- * queda solo la nota del caso. Tocar el botón del enlace no abre las 24 horas de
- * WhatsApp: pasadas, sale lo aprobado (ADR 0129).
+ * misma política que cualquier mensaje del agente. Con Sofi apagada nadie habla
+ * en su nombre: queda solo la nota del caso. Tocar el botón del enlace no abre
+ * las 24 horas de WhatsApp: pasadas, sale lo aprobado (ADR 0129). El cambio ya
+ * está hecho: que nada de esto salga no lo deshace.
  */
 export async function tellConversation(
   tx: Db,
@@ -1376,49 +1399,55 @@ export async function tellConversation(
   },
   deps: { secretsKey?: Buffer },
 ): Promise<void> {
-  if (!link.conversationId) return
-  await addAgentCaseNote(tx, orgId, link.conversationId, input.note)
-  const [agent] = await tx
-    .select({ enabled: agentConfig.enabled })
-    .from(agentConfig)
-    .where(eq(agentConfig.organizationId, orgId))
-    .limit(1)
-  if (!agent?.enabled) return
-  // Lo que la persona hizo en el enlace que le dio Sofi es parte de su atención: el hilo y
-  // la fila de la Bandeja lo dicen como lo que hizo Sofi, y así se cobra (ADR 0085).
-  const { locale } = await findOrgLocale(tx, orgId)
-  await recordAgentAction(tx, orgId, {
-    conversationId: link.conversationId,
-    kind: input.done.kind ?? "cita",
-    title: input.done.title,
-    detail: `${formatZonedShort(new Date(input.done.at), { timezone: input.done.timeZone, locale })} · desde su enlace`,
-  })
-  const [thread] = await tx
-    .select({ lastInboundAt: conversation.lastInboundAt, provider: channelConnection.provider })
-    .from(conversation)
-    .innerJoin(channelConnection, eq(channelConnection.id, conversation.channelConnectionId))
-    .where(and(eq(conversation.id, link.conversationId), eq(conversation.organizationId, orgId)))
-    .limit(1)
-  if (
-    thread &&
-    channelAdapters[thread.provider as ChannelProvider]?.capabilities.templates &&
-    !windowOpen(thread.lastInboundAt)
-  ) {
-    if (input.notice) await enqueueAppointmentNotice(tx, orgId, input.notice.appointmentId, input.notice.change)
-    else await sendLinkReceivedNotice(tx, orgId, link.conversationId)
-    return
-  }
-  await createProposal(tx, orgId, {
-    conversationId: link.conversationId,
-    action: "enviar_mensaje",
-    payload: { kind: "text", text: input.message },
-    reason: input.reason,
-    idempotencyKey: input.key,
-    ...(deps.secretsKey ? { secretsKey: deps.secretsKey } : {}),
-  }).catch((error: unknown) => {
-    // El cambio ya está hecho: que el aviso no salga no lo deshace. Queda la nota del caso.
-    if (!(error instanceof ServiceError)) throw error
-  })
+  const conversationId = link.conversationId ?? (await whatsappThreadOf(tx, orgId, link.contactId))
+  if (!conversationId) return
+  // Punto de retorno: un fallo aquí no se lleva la firma, la respuesta ni la cita.
+  await tx
+    .transaction(async (inner) => {
+      await addAgentCaseNote(inner, orgId, conversationId, input.note)
+      if (!(await adminRuntime(inner, orgId)).receptionOn) return
+      // Lo que la persona hizo en el enlace que le dio Sofi es parte de su atención: el hilo y
+      // la fila de la Bandeja lo dicen como lo que hizo Sofi, y así se cobra (ADR 0085).
+      const { locale } = await findOrgLocale(inner, orgId)
+      await recordAgentAction(inner, orgId, {
+        conversationId,
+        kind: input.done.kind ?? "cita",
+        title: input.done.title,
+        detail: `${formatZonedShort(new Date(input.done.at), { timezone: input.done.timeZone, locale })} · desde su enlace`,
+      })
+      const [thread] = await inner
+        .select({ lastInboundAt: conversation.lastInboundAt, provider: channelConnection.provider })
+        .from(conversation)
+        .innerJoin(channelConnection, eq(channelConnection.id, conversation.channelConnectionId))
+        .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
+        .limit(1)
+      if (
+        thread &&
+        channelAdapters[thread.provider as ChannelProvider]?.capabilities.templates &&
+        !windowOpen(thread.lastInboundAt)
+      ) {
+        const notice = input.notice
+          ? await enqueueAppointmentNotice(inner, orgId, input.notice.appointmentId, input.notice.change)
+          : { queued: false }
+        if (!notice.queued) await sendLinkReceivedNotice(inner, orgId, conversationId)
+        return
+      }
+      await createProposal(inner, orgId, {
+        conversationId,
+        action: "enviar_mensaje",
+        payload: { kind: "text", text: input.message },
+        reason: input.reason,
+        idempotencyKey: input.key,
+        ...(deps.secretsKey ? { secretsKey: deps.secretsKey } : {}),
+      }).catch((error: unknown) => {
+        // Sin el mensaje queda la nota del caso.
+        if (!(error instanceof ServiceError)) throw error
+      })
+    })
+    .catch((error: unknown) => {
+      if (error instanceof ServiceError) return
+      console.warn(`[enlace] no se pudo responder en ${conversationId}: ${error instanceof Error ? error.message : String(error)}`)
+    })
 }
 
 /**
@@ -1660,7 +1689,7 @@ export async function confirmBookingLinkAppointment(
       {
         note: `Confirmó desde su enlace su cita del ${when} en ${view.branchName}.`,
         message: `Listo: la cita del ${when} quedó confirmada.`,
-        key: `enlace-confirma:${link.row.id}:${current.id}`,
+        key: `enlace-confirma:${link.row.id}:${current.id}:${view.startsAt}`,
         reason: "La persona confirmó su cita desde su enlace",
         done: { title: "confirmó una cita", at: view.startsAt, timeZone: view.timeZone },
       },

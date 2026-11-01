@@ -2347,6 +2347,7 @@ export async function markConsentSentByLink(
   orgId: string,
   actorUserId: string,
   documentId: string,
+  options: { requestId?: string | null } = {},
 ): Promise<ConsentDocumentRow> {
   const [current] = await tx
     .select()
@@ -2357,6 +2358,22 @@ export async function markConsentSentByLink(
   if (!current) throw notFound("Consentimiento")
   if (current.status !== "pendiente") throw conflict("SIGNED", "El consentimiento ya no está pendiente")
   if (current.personSignedAt) throw conflict("SIGNED", "La persona ya lo firmó en su enlace: falta que lo confirmes en la cita")
+  // La misma petición repetida no vuelve a enviarse (`sendPersonalLink`): la historia no dice otro envío.
+  if (options.requestId) {
+    const [previous] = await tx
+      .select({ id: auditEvent.id })
+      .from(auditEvent)
+      .where(
+        and(
+          eq(auditEvent.organizationId, orgId),
+          eq(auditEvent.action, "consent.sent_to_sign"),
+          eq(auditEvent.entityId, documentId),
+          sql`${auditEvent.metadata}->>'requestId' = ${options.requestId}`,
+        ),
+      )
+      .limit(1)
+    if (previous) return current
+  }
   const [row] = await tx
     .update(consentDocument)
     .set({ linkSentAt: new Date(), updatedAt: new Date() })
@@ -2370,7 +2387,9 @@ export async function markConsentSentByLink(
     toStatus: "enlace_enviado",
     actorUserId,
   })
-  await audit(tx, orgId, actorUserId, "consent.sent_to_sign", "consent_document", documentId, {})
+  await audit(tx, orgId, actorUserId, "consent.sent_to_sign", "consent_document", documentId, {
+    ...(options.requestId ? { requestId: options.requestId } : {}),
+  })
   return row
 }
 

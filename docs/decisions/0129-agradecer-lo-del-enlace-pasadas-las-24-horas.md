@@ -9,10 +9,11 @@ Lo que la persona hace en su enlace (firmar, responder un presupuesto, enviar su
 ## Decisión y motivo
 
 - **Pasadas las 24 horas sale lo aprobado, no el texto.** Lo decide `tellConversation`, con la misma regla de ventana de siempre (`windowOpen`) y solo en los canales con plantillas. Dentro de las 24 horas no cambia nada. Con Sofi apagada, tampoco esto: nadie habla en su nombre.
-- **Reservar, mover y cancelar salen con el aviso de su cita** (`enqueueAppointmentNotice`): ya está aprobado, dice la fecha, por correo lleva la invitación y respeta que la clínica apague «Recordar la cita».
-- **Lo demás, con un mensaje nuevo, «Recibido desde su enlace»** (`sendLinkReceivedNotice`). Lo envía el sistema, sin modelo (0040), y es un aviso de lo que pasó: solo lo frena «No quiero ningún mensaje».
+- **El chat es el del último envío que lo dijo y, si no hay, su WhatsApp.** Así también se responde el enlace de un recordatorio o de un presupuesto, que no guardan conversación.
+- **Reservar, mover y cancelar salen con el aviso de su cita** (`enqueueAppointmentNotice`): ya está aprobado y dice la fecha. Va a quien recibe los avisos de esa cita, que puede no ser quien la tocó.
+- **Lo demás, o si ese aviso no sale, con un mensaje nuevo, «Recibido desde su enlace»** (`sendLinkReceivedNotice`). Lo envía el sistema, sin modelo (0040), y es un aviso de lo que pasó: solo lo frena «No quiero ningún mensaje».
 - **Uno solo, sin decir qué se recibió, y a lo sumo uno al día por conversación.** Quien hace varias cosas seguidas las hace en una sola visita: un mensaje le basta, y cada plantilla se cobra. Sin un dato con «lo recibido», el texto no nombra el procedimiento (recepción lee la conversación y no la historia) y es más fácil que Meta lo apruebe como utilidad.
-- **Mientras Meta no lo apruebe, o si lo rechaza, no sale nada más**: lo hecho vale, la nota queda en el caso y su página se lo confirma. Una respuesta nunca traba lo que la persona hizo.
+- **Mientras Meta no lo apruebe, o si lo rechaza, no sale nada más**: lo hecho vale, la nota queda en el caso y su página se lo confirma. Una respuesta nunca traba ni deshace lo que la persona hizo: si falla, se anota en el registro y lo hecho queda.
 - **No le quita a recepción poder escribirle.** En la Bandeja un mensaje aprobado hace esperar un día al siguiente (`sendables`), pero este responde a lo que la persona hizo: no cuenta. Tampoco cuenta como su mensaje del día de las automatizaciones.
 
 ## Alternativas descartadas
