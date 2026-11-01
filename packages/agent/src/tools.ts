@@ -2,7 +2,7 @@ import { createHash } from "node:crypto"
 import { tool } from "@langchain/core/tools"
 import { type Db, withOrgContext } from "@odentia/db"
 import type { AnswerBasisItem, AnswerCheck, AnswerTraceOutcome } from "@odentia/db/schema/agent"
-import { channelConnection, conversation } from "@odentia/db/schema/crm"
+import { channelConnection, contact, conversation } from "@odentia/db/schema/crm"
 import type { MeaningRank, OpportunityDetail, OrgLocale, ProposalItem, PublicLinkConfig, SearchEmbedder, Storage } from "@odentia/services"
 import {
   type AgentPatientBudgets,
@@ -181,7 +181,7 @@ export const TOOL_ACTION_LABEL: Record<string, string> = {
   update_followup: "Dejó la tarea de una oportunidad.",
   close_opportunity: "Propuso cerrar una oportunidad.",
   add_tags: "Etiquetó el contacto.",
-  update_contact: "Actualizó datos del contacto.",
+  update_contact: "Anotó su nombre.",
   create_task: "Dejó una tarea a tu equipo.",
   anotar_caso: "Anotó un dato del caso para después.",
   recordar_dato: "Guardó un dato de la persona para próximas conversaciones.",
@@ -1160,27 +1160,38 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       familyName?: string
     }) => {
       const contactId = ctx.contactId
-      if (ctx.dryRun) return "[SIMULACIÓN] Se actualizaría el contacto."
-      const naming = Boolean(displayName || givenNames || familyName)
+      const given = givenNames?.trim()
+      const family = familyName?.trim()
+      if (!given && !family && !displayName) return "No se guardó nada: no venía un nombre."
       // El nombre de un paciente lo cambia el equipo en su ficha; aquí, solo el de quien aún no lo es.
-      // Si dijo otro, su ficha no cambia y recepción la revisa (ADR 0116).
-      if (naming) {
-        const said = [givenNames?.trim(), familyName?.trim()].filter(Boolean).join(" ") || displayName || ""
-        const outcome = await inOrg((tx) => reportPatientNameMismatch(tx, ctx.orgId, { contactId, conversationId: ctx.conversationId, said }))
-        if (outcome === "avisado") {
-          await noteAction("datos", "avisó a recepción que su nombre no es el de su ficha")
-          return "Es paciente y su ficha dice otro nombre: por aquí no se cambia y quedó una tarea para que recepción la revise. Háblale por el nombre que te dijo, sin decirle cómo figura en su ficha. Si le das su enlace para reservar, dile que ahí puede corregir su nombre."
-        }
-        if (outcome !== "no_es_paciente") return "Es paciente: su nombre no se cambia por aquí. Úsalo tal como figura."
+      // Si dijo otro, su ficha no cambia y recepción la revisa (ADR 0116). La simulación mira lo mismo, sin dejar la tarea.
+      const said = [given, family].filter(Boolean).join(" ") || displayName || ""
+      const outcome = await inOrg((tx) => reportPatientNameMismatch(tx, ctx.orgId, { contactId, conversationId: ctx.conversationId, said, dryRun: ctx.dryRun }))
+      if (outcome === "avisado") {
+        if (ctx.dryRun) return "[SIMULACIÓN] Es paciente y su ficha dice otro nombre: por aquí no se cambia y quedaría una tarea para que recepción la revise."
+        await noteAction("datos", "avisó a recepción que su nombre no es el de su ficha")
+        return "Es paciente y su ficha dice otro nombre: por aquí no se cambia y quedó una tarea para que recepción la revise. Háblale por el nombre que te dijo, sin decirle cómo figura en su ficha. Si le das su enlace para reservar, dile que ahí puede corregir su nombre."
       }
-      // Solo sus nombres también se guardan: «Soy Carla» ya es saber con quién habla.
-      const names = givenNames?.trim() && familyName?.trim()
-        ? { givenNames: givenNames.trim(), familyName: familyName.trim(), displayName: displayName ?? `${givenNames.trim()} ${familyName.trim()}` }
-        : givenNames?.trim()
-          ? { givenNames: givenNames.trim(), displayName: displayName ?? givenNames.trim() }
-          : displayName ? { displayName } : {}
-      if (!Object.keys(names).length) return "No se guardó nada: no venía un nombre."
-      await inOrg((tx) => updateContact(tx, ctx.orgId, contactId, names, { userId: null, origin: "agent" }))
+      if (outcome !== "no_es_paciente") return "Es paciente: su nombre no se cambia por aquí. Úsalo tal como figura."
+      if (ctx.dryRun) return "[SIMULACIÓN] Se actualizaría el contacto."
+      // Se guarda lo que dijo: «Soy Carla» ya es saber con quién habla, y «Quispe» completa a quien ya dijo sus nombres.
+      const names = {
+        ...(given ? { givenNames: given } : {}),
+        ...(family ? { familyName: family } : {}),
+        ...(displayName ? { displayName } : given ? { displayName: [given, family].filter(Boolean).join(" ") } : {}),
+      }
+      await inOrg(async (tx) => {
+        // Solo el apellido: con sus nombres guardados, el visible se arma con ellos; sin ellos, se queda el que tiene.
+        const [saved] = family && !given && !displayName
+          ? await tx
+              .select({ givenNames: contact.givenNames, displayName: contact.displayName })
+              .from(contact)
+              .where(and(eq(contact.organizationId, ctx.orgId), eq(contact.id, contactId)))
+              .limit(1)
+          : []
+        const visible = saved && !saved.givenNames?.trim() ? { displayName: saved.displayName } : {}
+        await updateContact(tx, ctx.orgId, contactId, { ...names, ...visible }, { userId: null, origin: "agent" })
+      })
       await noteAction("datos", "anotó su nombre")
       return "Contacto actualizado."
     },

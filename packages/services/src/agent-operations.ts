@@ -297,11 +297,12 @@ const nameWords = (value: string): string[] =>
  * corregirlo al reservar desde su enlace, con su documento entero.
  * `no_es_paciente`: su nombre se guarda como siempre; `mismo_nombre`: lo que
  * dijo ya está en su ficha; `prueba`: la persona de «Probar», que no se avisa.
+ * Con `dryRun` responde lo mismo sin dejar la tarea: la simulación no cambia nada.
  */
 export async function reportPatientNameMismatch(
   tx: Db,
   orgId: string,
-  input: { contactId: string; conversationId: string | null; said: string },
+  input: { contactId: string; conversationId: string | null; said: string; dryRun?: boolean },
 ): Promise<"no_es_paciente" | "mismo_nombre" | "prueba" | "avisado"> {
   const own = (await listPatientsByContact(tx, orgId, input.contactId)).find((item) => item.relationship === "self")
   if (!own) return "no_es_paciente"
@@ -314,6 +315,7 @@ export async function reportPatientNameMismatch(
     .where(and(eq(contact.organizationId, orgId), eq(contact.id, input.contactId)))
     .limit(1)
   if (person?.isTest) return "prueba"
+  if (input.dryRun) return "avisado"
   const spoken = input.said.trim().replace(/\s+/g, " ")
   await createTask(tx, orgId, {
     title: `Revisar su nombre: ${own.displayName}`,

@@ -156,7 +156,7 @@ const TOOL_WORDS: Record<string, string> = {
   reenviar_presupuesto: "Reenvió el presupuesto",
   anotar_respuesta_presupuesto: "Anotó su respuesta al presupuesto",
   enviar_comprobante: "Envió el comprobante",
-  update_contact: "Actualizó sus datos",
+  update_contact: "Anotó su nombre",
   request_human_handoff: "Pasó el caso al equipo",
   create_task: "Dejó una tarea al equipo",
   despedirse_y_cerrar: "Se despidió y cerró",

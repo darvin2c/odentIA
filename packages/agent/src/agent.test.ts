@@ -1657,6 +1657,62 @@ it("si un paciente dice que se llama distinto, su ficha no cambia y recepción r
   expect(await withOrgContext(appDb, "org_a", (tx) => pendingSpokenName(tx, "org_a", contactId))).toBe("Darvin")
   await ownerDb.update(crmTask).set({ status: "done" }).where(eq(crmTask.id, tasks[0]!.id))
   expect(await withOrgContext(appDb, "org_a", (tx) => pendingSpokenName(tx, "org_a", contactId))).toBeNull()
+
+  // La simulación responde lo que respondería de verdad, sin dejar otra tarea ni tocar la ficha.
+  const simulated = makeAgentTools({ ...ctx, dryRun: true }).find((t) => t.name === "update_contact")!
+  expect(String(await simulated.invoke({ givenNames: "paciente" }))).toContain("Úsalo tal como figura")
+  expect(String(await simulated.invoke({ givenNames: "Marcos" }))).toContain("[SIMULACIÓN] Es paciente y su ficha dice otro nombre")
+  expect(await tasksOf()).toHaveLength(1)
+})
+
+it("update_contact guarda el apellido que le dijeron, sin perder el nombre que ya tenía", async () => {
+  const { conversationId } = await ingestText("tg:apellido", "evt-apellido", "Hola")
+  const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
+  const contactId = conv!.contactId
+  const ctx: AgentToolCtx = {
+    db: appDb, orgId: "org_a", conversationId, contactId,
+    triggerId: "trig-apellido", secretsKey: KEY, dryRun: false, handedOff: false, replySettled: false,
+    toolsUsed: [], usage: emptyUsage(),
+  }
+  const tool = makeAgentTools(ctx).find((t) => t.name === "update_contact")!
+  const simulated = makeAgentTools({ ...ctx, dryRun: true }).find((t) => t.name === "update_contact")!
+  const person = async () => {
+    const [row] = await withOrgContext(appDb, "org_a", (tx) => tx.select().from(contact).where(eq(contact.id, contactId)))
+    return row!
+  }
+  const setNames = (names: { displayName: string; givenNames: string | null; familyName: string | null }) =>
+    ownerDb.update(contact).set(names).where(eq(contact.id, contactId))
+
+  // Sin nombre no se guarda nada, tampoco en la simulación.
+  await setNames({ displayName: "Anita", givenNames: null, familyName: null })
+  expect(String(await tool.invoke({}))).toContain("No se guardó nada")
+  expect(String(await simulated.invoke({}))).toContain("No se guardó nada")
+  // La simulación dice lo que haría y no cambia nada.
+  expect(String(await simulated.invoke({ familyName: "Quispe" }))).toContain("[SIMULACIÓN] Se actualizaría")
+  expect(await person()).toMatchObject({ displayName: "Anita", familyName: null })
+
+  // Sin nombres guardados, el apellido se guarda y el nombre visible no queda solo en «Quispe».
+  expect(String(await tool.invoke({ familyName: "Quispe" }))).toBe("Contacto actualizado.")
+  expect(await person()).toMatchObject({ displayName: "Anita", givenNames: null, familyName: "Quispe" })
+
+  // Con sus nombres guardados, el apellido los completa.
+  await setNames({ displayName: "Carla", givenNames: "Carla", familyName: null })
+  expect(String(await tool.invoke({ familyName: "Quispe" }))).toBe("Contacto actualizado.")
+  expect(await person()).toMatchObject({ displayName: "Carla Quispe", givenNames: "Carla", familyName: "Quispe" })
+
+  // El nombre visible con el apellido aparte: se guardan los dos.
+  await setNames({ displayName: "Ana", givenNames: null, familyName: null })
+  expect(String(await tool.invoke({ displayName: "Ana Rojas", familyName: "Rojas" }))).toBe("Contacto actualizado.")
+  expect(await person()).toMatchObject({ displayName: "Ana Rojas", familyName: "Rojas" })
+
+  // Lo de siempre sigue igual.
+  await setNames({ displayName: "Luz", givenNames: null, familyName: null })
+  await tool.invoke({ givenNames: "Luz María", familyName: "Paz" })
+  expect(await person()).toMatchObject({ displayName: "Luz María Paz", givenNames: "Luz María", familyName: "Paz" })
+  await setNames({ displayName: "Eva", givenNames: null, familyName: null })
+  await tool.invoke({ givenNames: "Eva" })
+  expect(await person()).toMatchObject({ displayName: "Eva", givenNames: "Eva", familyName: null })
 })
 
 it("create_task no duplica en reentrega y las escrituras directas auditan su origen agente", async () => {
