@@ -2,7 +2,7 @@ import type { Db } from "@odentia/db"
 import { channelConnection, contact, contactIdentity, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, eq, gt, isNull, ne, or, sql } from "drizzle-orm"
-import { ANSWER_READY_MESSAGE_KEY, NOTICE_PURPOSE, renderMessage, replyId } from "./automation-messages.js"
+import { ANSWER_READY_MESSAGE_KEY, NOTICE_PURPOSE, renderMessage, replyButtons, replyId } from "./automation-messages.js"
 import { clinicName } from "./automation-routing.js"
 import { greetingName } from "./conversation-close.js"
 import { currentCatalogMessage, findMessageTemplate } from "./clinic-messages.js"
@@ -117,7 +117,7 @@ export async function offerHeldReplies(
     language: template.language,
     params,
     category: spec.category,
-    buttons: spec.buttons.map((item) => ({ id: replyId(item.action, conversationId), title: item.title })),
+    buttons: replyButtons(spec.buttons, conversationId),
     preview: text,
   })
   return "enviado"

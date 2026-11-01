@@ -14,7 +14,7 @@ import {
   type MessageVariable,
   placePhrase,
   renderMessage,
-  replyId,
+  replyButtons,
 } from "./automation-messages.js"
 import { findTemplateByName, isPromotionFor, type TemplateItem } from "./channel-templates.js"
 import { isDirectThread } from "./contacts.js"
@@ -235,7 +235,7 @@ export async function composeJobMessage(
     params,
     text,
     subject: `${spec.subject} · ${clinic}`,
-    buttons: spec.buttons.map((button) => ({ id: replyId(button.action, lead.id), title: button.title })),
+    buttons: replyButtons(spec.buttons, lead.id),
   }
 }
 

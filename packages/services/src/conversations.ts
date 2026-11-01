@@ -164,12 +164,13 @@ export interface MessageItem {
 
 /**
  * Por qué no llegó, en palabras: el motivo del canal si lo dio así (pago, clave
- * vencida, número sin WhatsApp); el de Meta tal cual no es para la clínica.
+ * vencida, número sin WhatsApp); el de Meta tal cual no es para la clínica, que
+ * igual necesita saber de quién fue y qué puede hacer.
  */
 export function deliveryNoteOf(status: string, error: string | null): string | null {
   if (status === "failed") {
     if (error === "connection-disabled") return "No se entregó: la conexión del canal estaba desactivada."
-    return whatsappFailureWords(error) ?? "No se entregó."
+    return whatsappFailureWords(error) ?? "No se entregó: el canal no lo aceptó. No se reenvía solo: escríbele de nuevo o llámale."
   }
   if (status === "unknown") {
     return "No sabemos si llegó: el canal no confirmó el envío. No se reenvía solo, para no mandarlo dos veces."
