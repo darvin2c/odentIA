@@ -18,22 +18,29 @@ test("atender sin motivo: ningún formulario tapa a Clío y el motivo se pide al
     answers: { demographics: { displayName: "Cyndy Cotrina", docType: "DNI", docNumber: "45678123" }, respondent: "staff", privacyAccepted: false },
     contacts: [],
   }, 201)
-  await call(page, "PUT", "/api/agent/config", org.slug, { clinicalAssistantEnabled: true })
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}`))
   await page.getByRole("button", { name: "Atender", exact: true }).first().click()
   await expect(page).toHaveURL(/\/encounters\//)
 
   const idle = page.getByRole("region", { name: "Dictado de la atención" })
+  const consulta = page.getByRole("region", { name: "Consulta" }).getByRole("button", { name: "Abrir", exact: true })
   const reason = page.getByLabel("Motivo", { exact: true })
+  // Con Clío apagada tampoco se abre: «Consulta» espera a que la pidan.
+  await expect(consulta).toHaveAttribute("aria-expanded", "false")
+  await expect(reason).toHaveCount(0)
+  await expect(idle).toHaveCount(0)
+
+  await call(page, "PUT", "/api/agent/config", org.slug, { clinicalAssistantEnabled: true })
+  await gotoHydrated(page, page.url())
   await expect(idle.getByRole("button", { name: "Dictar", exact: true })).toBeVisible()
-  await expect(page.getByRole("region", { name: "Consulta" }).getByRole("button", { name: "Abrir", exact: true })).toHaveAttribute("aria-expanded", "false")
+  await expect(consulta).toHaveAttribute("aria-expanded", "false")
   await expect(reason).toHaveCount(0)
   await info.attach("atender-sin-motivo", { body: await page.screenshot(), contentType: "image/png" })
 
   // En el teléfono tampoco se abre el cajón encima.
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.reload()
+  await gotoHydrated(page, page.url())
   await expect(idle.getByRole("button", { name: "Dictar", exact: true })).toBeVisible()
   await expect(page.getByRole("dialog", { name: "Consulta" })).toHaveCount(0)
   await info.attach("atender-sin-motivo-movil", { body: await page.screenshot(), contentType: "image/png" })
@@ -44,6 +51,15 @@ test("atender sin motivo: ningún formulario tapa a Clío y el motivo se pide al
   await expect(reason).toHaveAttribute("aria-invalid", "true")
   await expect(reason).toBeFocused()
   await expect(page.getByText("Escribe el motivo: es obligatorio para cerrar")).toBeVisible()
+
+  // Ya escrito, volver a abrir «Consulta» no lleva el cursor ahí: en el teléfono subiría el teclado.
+  await reason.fill("Dolor en una muela")
+  await expect(page.getByText(/^Guardado /)).toBeVisible()
+  await page.getByRole("complementary", { name: "Panel lateral" }).getByRole("region", { name: "Consulta" }).getByRole("button", { name: "Cerrar" }).click()
+  await expect(reason).toHaveCount(0)
+  await consulta.click()
+  await expect(reason).toHaveValue("Dolor en una muela")
+  await expect(reason).not.toBeFocused()
 })
 
 test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloque mientras se dicta, revisión y aviso antes de firmar", async ({ owner, fixtureDb }, info) => {
