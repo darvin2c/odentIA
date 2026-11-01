@@ -131,8 +131,10 @@ import {
 } from "../clinical.js"
 import {
   createClinicalOrder,
+  createConsentDocument,
   markConsentSentByLink,
   setProfessionalSpecialties,
+  signConsentByLink,
   signConsentDocument,
 } from "../clinical-forms.js"
 import { createConnection } from "../connections.js"
@@ -4313,6 +4315,38 @@ if (pedroRiosPerson) {
     .limit(1)
   if (exodonciaPending)
     await db.transaction((tx) => markConsentSentByLink(tx, ORG_A, ANA_ID, exodonciaPending.id))
+  // Y otro que ya firmó desde su teléfono: se ve con su firma y falta confirmarlo.
+  const [implant] = await db
+    .select({ id: consentTemplate.id })
+    .from(consentTemplate)
+    .where(
+      and(
+        eq(consentTemplate.organizationId, ORG_A),
+        eq(consentTemplate.key, "implante"),
+        eq(consentTemplate.status, "publicado"),
+      ),
+    )
+    .limit(1)
+  const [rosaDocument] = await db
+    .select({ docNumber: contact.docNumber })
+    .from(contact)
+    .where(and(eq(contact.organizationId, ORG_A), eq(contact.id, domainSeed.contactId)))
+    .limit(1)
+  if (implant && rosaDocument?.docNumber) {
+    await db.transaction(async (tx) => {
+      const signed = await createConsentDocument(tx, ORG_A, ANA_ID, {
+        templateId: implant.id,
+        patientId: domainSeed.patientId,
+        procedureRef: "Implante pieza 36",
+      })
+      await markConsentSentByLink(tx, ORG_A, ANA_ID, signed.id)
+      await signConsentByLink(tx, ORG_A, domainSeed.contactId, signed.id, {
+        docNumber: rosaDocument.docNumber ?? "",
+        comprehensionConfirmed: true,
+        signatureData: { strokes: [[[90, 580], [240, 340], [360, 620], [520, 380], [680, 600]]] },
+      }, { ip: "190.235.10.20", userAgent: "Mozilla/5.0 (Linux; Android 14) Chrome/128 Mobile" })
+    })
+  }
 }
 // Consentimientos firmados en la semilla: su PDF con huella, como al firmar
 // desde la API (mismo generador).

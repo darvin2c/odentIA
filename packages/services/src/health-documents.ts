@@ -244,7 +244,8 @@ const CHECK_TYPE: Record<HealthDocumentType, CheckableDocument> = {
  * El PDF de un papel de salud: el mismo para enviarlo, para «Tus papeles» y para
  * que el equipo lo vea. Receta, orden y descanso se generan, con su sello si se
  * anularon (enviarlos sigue prohibido: `loadHealthMeta`). El consentimiento firmado
- * es el guardado, el de la huella; el pendiente es la hoja para firmar en papel.
+ * es el guardado, el de la huella; el pendiente es la hoja para firmar en papel o,
+ * si ya lo firmó en su enlace, lo que firmó, a la espera de que lo confirmen.
  */
 export async function renderHealthDocumentPdf(
   tx: Db,
@@ -290,8 +291,11 @@ export async function renderHealthDocumentPdf(
   if (data.document.patientId !== patientId) throw notFound("Consentimiento")
   const doc = data.document
   if (doc.status === "pendiente") {
+    const clinic = await loadDocumentClinic(tx, orgId)
     return {
-      bytes: await renderConsentPaperPdf(data, await loadDocumentClinic(tx, orgId)),
+      bytes: doc.personSignedAt
+        ? await renderConsentPdf(data, clinic)
+        : await renderConsentPaperPdf(data, clinic),
       filename: `Consentimiento-${doc.titleSnapshot}.pdf`,
       label: `Consentimiento · ${doc.titleSnapshot}`,
     }

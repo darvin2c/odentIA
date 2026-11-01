@@ -642,6 +642,8 @@ test("reserva por enlace: la persona elige su cita viendo los horarios libres, s
 
   // Quien escribe ya es paciente: su ficha está vinculada a esta persona (sin ese vínculo no hay enlace).
   await call(page, "PUT", `/api/patients/${patient.id}/contacts/${conversation.contact.id}`, org.slug, { relationship: "self", isPreferred: true }, 200)
+  // Con Sofi encendida le confirma por su conversación; apagada, nadie escribe en su nombre.
+  await call(page, "PUT", "/api/agent/config", org.slug, { enabled: true }, 200)
   // El enlace que entrega el agente: del enlace solo se guarda la huella.
   const token = randomBytes(32).toString("hex")
   await fixtureDb.insert(appointmentBookingLink).values({

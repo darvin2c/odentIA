@@ -613,6 +613,12 @@ export const CONSENT_STATUS_LABELS: Record<ConsentDocument["status"], string> = 
   anulado: "Anulado",
 }
 
+/** El estado en palabras: lo que la persona firmó en su enlace ya no espera su firma. */
+export function consentStatusWord(document: Pick<ConsentDocument, "status" | "personSignedAt">): string {
+  if (document.status === "pendiente" && document.personSignedAt) return "Falta confirmar"
+  return CONSENT_STATUS_LABELS[document.status]
+}
+
 /** «Enviar para firmar»: el consentimiento aparece en «Su enlace» y se le envía. */
 export async function sendConsentByLink(
   consentId: string,
