@@ -77,6 +77,25 @@ export function ScheduleOccupancyLegend({ className }: { className?: string }) {
   )
 }
 
+/** La barra de una jornada: libre, ocupado y sin atención. Decorativa: lo libre se dice con palabras. */
+export function ScheduleDayBar({ segments, className }: { segments: DaySegment[]; className?: string }) {
+  return (
+    <span aria-hidden className={cn("flex h-3 w-full gap-0.5 overflow-hidden rounded-full", className)}>
+      {segments.map((segment) => (
+        <span
+          key={`${segment.kind}-${segment.startMinutes}`}
+          data-kind={segment.kind}
+          className={SEGMENT_CLASS[segment.kind]}
+          style={{
+            flex: `${segment.endMinutes - segment.startMinutes} 1 0`,
+            backgroundImage: segment.kind === "closed" ? HATCH : undefined,
+          }}
+        />
+      ))}
+    </span>
+  )
+}
+
 export function ScheduleWeekOverview({
   days,
   today,
@@ -127,19 +146,7 @@ export function ScheduleWeekOverview({
                         : "Sin atención"}
                 </span>
               </span>
-              <span aria-hidden className="flex h-3 w-full gap-0.5 overflow-hidden rounded-full">
-                {day.segments.map((segment) => (
-                  <span
-                    key={`${segment.kind}-${segment.startMinutes}`}
-                    data-kind={segment.kind}
-                    className={SEGMENT_CLASS[segment.kind]}
-                    style={{
-                      flex: `${segment.endMinutes - segment.startMinutes} 1 0`,
-                      backgroundImage: segment.kind === "closed" ? HATCH : undefined,
-                    }}
-                  />
-                ))}
-              </span>
+              <ScheduleDayBar segments={day.segments} />
             </button>
           </li>
         )

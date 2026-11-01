@@ -189,6 +189,22 @@ describe("ScheduleGrid", () => {
     expect(onCreate).toHaveBeenCalledTimes(1)
   })
 
+  it("con excepciones, lo gris y lo bloqueado se tocan; lo ocupado y lo pasado, no", () => {
+    const onCreate = vi.fn()
+    const onCreateException = vi.fn()
+    const { container } = render(
+      <ScheduleGrid {...baseProps} now={scheduleInstant(10, 20)} onCreate={onCreate} onCreateException={onCreateException} />,
+    )
+    fireEvent.click(lane(container, "luis"), { clientY: 320 }) // 13:20: sin atención
+    expect(onCreateException).toHaveBeenLastCalledWith(expect.objectContaining({ columnId: "luis" }))
+    fireEvent.click(lane(container, "elena"), { clientY: 250 }) // 12:10: bloqueo «Reunión»
+    expect(onCreateException).toHaveBeenCalledTimes(2)
+    fireEvent.click(lane(container, "elena"), { clientY: 440 }) // 15:20: cita de Sofía
+    fireEvent.click(lane(container, "ana"), { clientY: 125 }) // 10:05: ya pasó
+    expect(onCreateException).toHaveBeenCalledTimes(2)
+    expect(onCreate).not.toHaveBeenCalled()
+  })
+
   it("lo que ya pasó hoy no se ofrece", () => {
     const onCreate = vi.fn()
     const { container } = render(

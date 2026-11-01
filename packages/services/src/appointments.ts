@@ -29,6 +29,7 @@ import { and, asc, desc, eq, gt, gte, inArray, lt, ne, or, sql } from "drizzle-o
 import { foldedWordsMatch } from "./search-text.js"
 import { alias } from "drizzle-orm/pg-core"
 import { appointmentConflict, exclusionTarget, validateAvailability } from "./availability.js"
+import { createWorkspaceNotification } from "./workspace.js"
 import { TEST_KEEP_MS } from "./conversation-state.js"
 import { type PhoneWhatsApp, phoneWhatsAppState } from "./contacts.js"
 import {
@@ -810,6 +811,35 @@ async function pickFreeRoom(
   return free.id
 }
 
+/**
+ * Le avisa al profesional de una excepción que no hizo él: una cita fuera de su
+ * horario, sobre un bloqueo o junto a otra. Sin esto podría no enterarse y dejar
+ * esperando a la persona. La campana no le avisa a quien la hizo.
+ */
+async function noticeException(
+  tx: Db,
+  orgId: string,
+  input: { appointmentId: string; professionalUserId: string; actorUserId: string; startsAt: Date; timeZone: string; moved: boolean },
+): Promise<void> {
+  const when = new Intl.DateTimeFormat("es", {
+    timeZone: input.timeZone,
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(input.startsAt)
+  await createWorkspaceNotification(tx, orgId, {
+    userId: input.professionalUserId,
+    actorUserId: input.actorUserId,
+    dedupeKey: `cita-excepcion:${input.appointmentId}:${input.startsAt.toISOString()}`,
+    title: input.moved ? "Te movieron una cita fuera de tu agenda habitual" : "Te dieron una cita fuera de tu agenda habitual",
+    body: `Es el ${when}. Revísala para que nadie te espere.`,
+    href: `/agenda?appointmentId=${input.appointmentId}`,
+    permission: "appointments.read",
+  })
+}
+
 export interface CreateAppointmentInput {
   branchId?: string
   patientId: string
@@ -824,8 +854,10 @@ export interface CreateAppointmentInput {
   reason?: string
   source?: string
   conversationId?: string
-  /** Urgencia: reservar aunque el horario del profesional no cubra esa hora. */
+  /** Excepción del equipo: reservar aunque el horario del profesional no cubra esa hora. */
   outsideSchedule?: boolean
+  /** Excepción del equipo: reservar sobre un bloqueo, una ausencia u otra cita del profesional. */
+  overrideBusy?: boolean
   /**
    * Persona del equipo que figura como autora de la cita. Quien llama lo
    * indica cuando el actor no es un usuario (el agente o el interlocutor que
@@ -937,6 +969,7 @@ export async function createAppointment(
       startsAt,
       endsAt,
       allowOutsideSchedule: input.outsideSchedule === true,
+      allowBusy: input.overrideBusy === true,
       forTest,
     })
   }
@@ -961,6 +994,7 @@ export async function createAppointment(
         reason: input.reason?.trim() || null,
         source: input.source ?? "recepcion",
         conversationId: input.conversationId ?? null,
+        overlapAllowed: input.overrideBusy === true,
         createdBy: input.createdByUserId === undefined ? actorUserId : input.createdByUserId,
       })
       .returning({ id: appointment.id })
@@ -983,8 +1017,19 @@ export async function createAppointment(
       roomId,
       startsAt: startsAt.toISOString(),
       ...(input.outsideSchedule ? { outsideSchedule: true } : {}),
+      ...(input.overrideBusy ? { overrideBusy: true } : {}),
       ...(planItemIds.length > 0 ? { planItemIds } : {}),
     })
+    if (standing && !forTest && (input.outsideSchedule || input.overrideBusy)) {
+      await noticeException(tx, orgId, {
+        appointmentId: created.id,
+        professionalUserId: input.professionalUserId,
+        actorUserId,
+        startsAt,
+        timeZone: resolved.timeZone,
+        moved: false,
+      })
+    }
     // Una cita de prueba no sale hacia afuera: ni aviso ni recordatorios (ADR 0094).
     const notice =
       input.notice === false || !standing || forTest ? null : await enqueueAppointmentNotice(tx, orgId, created.id, "reservada")
@@ -1018,6 +1063,10 @@ export interface MoveAppointmentInput {
   endsAt?: string
   professionalUserId?: string
   roomId?: string
+  /** Excepción del equipo: mover o alargar fuera del horario del profesional. */
+  outsideSchedule?: boolean
+  /** Excepción del equipo: mover sobre un bloqueo, una ausencia u otra cita del profesional. */
+  overrideBusy?: boolean
 }
 
 /**
@@ -1079,6 +1128,8 @@ export async function moveAppointment(
       startsAt,
       endsAt,
       ignoreAppointmentId: id,
+      allowOutsideSchedule: input.outsideSchedule === true,
+      allowBusy: input.overrideBusy === true,
       forTest: current.isTest,
     })
   }
@@ -1096,6 +1147,7 @@ export async function moveAppointment(
         durationMin: Math.round((endsAt.getTime() - startsAt.getTime()) / 60000),
         professionalUserId,
         roomId,
+        overlapAllowed: input.overrideBusy === true,
         ...(arrivalCleared ? { arrivedAt: null, arrivedBy: null } : {}),
         version: current.version + 1,
         updatedAt: new Date(),
@@ -1119,8 +1171,20 @@ export async function moveAppointment(
       professionalUserId,
       roomId,
       ...(arrivalCleared ? { arrivalCleared: true } : {}),
+      ...(input.outsideSchedule ? { outsideSchedule: true } : {}),
+      ...(input.overrideBusy ? { overrideBusy: true } : {}),
     })
     await invalidateAppointmentTokens(tx, orgId, id)
+    if (active && !current.isTest && (input.outsideSchedule || input.overrideBusy)) {
+      await noticeException(tx, orgId, {
+        appointmentId: id,
+        professionalUserId,
+        actorUserId,
+        startsAt,
+        timeZone: await branchZone(tx, orgId, current.branchId),
+        moved: true,
+      })
+    }
     const moved = startsAt.getTime() !== current.startsAt.getTime()
     if (moved) await rescheduleAppointmentReminders(tx, orgId, id, startsAt)
     const notice =
@@ -1185,7 +1249,10 @@ export async function updateAppointment(
     set.roomId = roomId
   }
   // «Editar» revisa la agenda igual que «Mover» (`moveAppointment`): quien
-  // atiende debe tener horario, y ni un bloqueo ni otra cita pueden pisarla.
+  // atiende debe tener horario, y ni un bloqueo ni otra cita pueden pisarla,
+  // salvo que la cita ya sea una excepción aceptada por una persona del equipo
+  // y siga con el mismo profesional.
+  const sameProfessional = professionalUserId === current.professionalUserId
   const active = current.status === "programada" || current.status === "confirmada"
   const changesPlace =
     professionalUserId !== current.professionalUserId || roomId !== current.roomId || endsAt.getTime() !== current.endsAt.getTime()
@@ -1203,8 +1270,12 @@ export async function updateAppointment(
       startsAt: current.startsAt,
       endsAt,
       ignoreAppointmentId: id,
+      // Con otro profesional se revisa todo de nuevo: su horario, sus bloqueos y sus citas.
+      allowOutsideSchedule: sameProfessional,
+      allowBusy: sameProfessional && current.overlapAllowed,
       forTest: current.isTest,
     })
+    if (!sameProfessional) set.overlapAllowed = false
   }
   // La palabra va antes del intento: si la base lo rechaza, la transacción ya no admite consultas.
   const roomName = (await roomWord(tx, orgId)).one

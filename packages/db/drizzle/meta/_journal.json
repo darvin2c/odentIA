@@ -211,6 +211,20 @@
       "when": 1793468202182,
       "tag": "0029_ejemplos_en_el_indice",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1793485113155,
+      "tag": "0030_excepciones_de_agenda",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1793485114867,
+      "tag": "0031_excepciones_de_agenda_reglas",
+      "breakpoints": true
     }
   ]
 }

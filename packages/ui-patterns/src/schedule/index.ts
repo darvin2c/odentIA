@@ -10,12 +10,21 @@ export {
   type ScheduleAgendaItem,
   ScheduleAgendaList,
   type ScheduleAgendaListProps,
+  ScheduleDayHeader,
 } from "./agenda-list.js"
 export { conflictLabel, findScheduleConflicts, type ScheduleConflict } from "./conflicts.js"
 export { type AxisTarget, type UseAxisDragConfig, useAxisDrag } from "./axis-drag.js"
 export { entryAccessibleName } from "./block.js"
 export { ScheduleCard, type ScheduleCardProps } from "./card.js"
-export { ScheduleDayStrip, type ScheduleDayStripProps } from "./day-strip.js"
+export { type ScheduleDayLoad, ScheduleDayStrip, type ScheduleDayStripProps } from "./day-strip.js"
+export { ScheduleSnapPager, type ScheduleSnapPagerProps } from "./snap-pager.js"
+export {
+  type ScheduleTeamDay,
+  type ScheduleTeamRow,
+  ScheduleTeamWeek,
+  ScheduleTeamWeekList,
+  type ScheduleTeamWeekProps,
+} from "./team-week.js"
 export {
   type DragGeometry,
   DragLiveRegion,
@@ -98,6 +107,7 @@ export type {
 } from "./types.js"
 export { SCHEDULE_DEFAULT_WINDOW } from "./types.js"
 export {
+  ScheduleDayBar,
   ScheduleOccupancyLegend,
   type ScheduleWeekDay,
   ScheduleWeekOverview,

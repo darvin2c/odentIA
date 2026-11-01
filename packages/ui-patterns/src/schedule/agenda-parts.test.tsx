@@ -7,6 +7,7 @@ import { ScheduleDayStrip } from "./day-strip.js"
 import { daySegments } from "./occupancy.js"
 import { ScheduleResourceChips } from "./resource-chips.js"
 import { ScheduleStatusSummary } from "./status-summary.js"
+import { ScheduleTeamWeek } from "./team-week.js"
 import { setupScheduleDom } from "./test-utils.js"
 import { addDays, minutesToInstant, zonedDateOf } from "./time.js"
 import { initialsOf, scheduleToneAt } from "./tone.js"
@@ -84,7 +85,7 @@ const TODAY_ITEMS: ScheduleAgendaItem[] = AGENDA_ENTRIES.filter(
 describe("ScheduleAgendaList", () => {
   it("pone delante a quien está en la clínica y lo que viene, y pliega lo que ya pasó", () => {
     render(<ScheduleAgendaList items={TODAY_ITEMS} timeZone={TZ} now={AGENDA_NOW} />)
-    expect(screen.getByText("Ahora · 10:20")).toBeTruthy()
+    expect(screen.getByText("En la clínica · 2")).toBeTruthy()
     const current = within(screen.getByRole("list", { name: "En la clínica" }))
     expect(current.getAllByRole("listitem")).toHaveLength(2)
     expect(current.getByText("Llegó 9:58 · espera 22 min")).toBeTruthy()
@@ -241,6 +242,60 @@ describe("recursos y días", () => {
     fireEvent.click(screen.getByRole("button", { name: "Semana siguiente" }))
     expect(onPrevious).toHaveBeenCalledTimes(1)
     expect(onNext).toHaveBeenCalledTimes(1)
+  })
+
+  it("los puntos de la franja dicen qué tan lleno está el día y el número va en su nombre", () => {
+    render(
+      <ScheduleDayStrip
+        dates={AGENDA_WEEK}
+        value={AGENDA_TODAY}
+        onChange={() => {}}
+        load={(date) => (date === AGENDA_WEEK[1] ? { level: 3, count: 14 } : date === AGENDA_WEEK[2] ? { level: 0, count: 0 } : undefined)}
+      />,
+    )
+    const full = screen.getByRole("button", { name: /Martes 13 de octubre, 14 citas/ })
+    expect(full.querySelector("[data-dots='3']")).toBeTruthy()
+    const empty = screen.getByRole("button", { name: /Miércoles 14 de octubre, sin citas/ })
+    expect(empty.querySelector("[data-dots]")).toBeNull()
+  })
+
+  it("la semana del equipo dice las horas libres y tocar un día avisa con quién y cuándo", () => {
+    const onPick = vi.fn()
+    const window = { startMinutes: 480, endMinutes: 840 }
+    render(
+      <ScheduleTeamWeek
+        rows={[
+          {
+            id: "ana",
+            label: "Dra. Ana Torres",
+            tone: 0,
+            days: [
+              {
+                date: AGENDA_TODAY,
+                count: 1,
+                segments: daySegments({ window, open: [window], busy: [{ startMinutes: 540, endMinutes: 600 }] }),
+              },
+              { date: AGENDA_WEEK[1] ?? "", count: 0, segments: daySegments({ window, open: [], busy: [] }) },
+              {
+                date: AGENDA_WEEK[2] ?? "",
+                count: 0,
+                away: "Vacaciones",
+                awayNote: "Hasta el vie 16",
+                segments: daySegments({ window, open: [], busy: [] }),
+              },
+            ],
+          },
+        ]}
+        dates={AGENDA_WEEK.slice(0, 3)}
+        onPick={onPick}
+      />,
+    )
+    const monday = screen.getByRole("button", { name: /Lunes 12 de octubre: 5 h libres\. Huecos desde las 8:00|Lunes 12 de octubre: 5 h libres\. Huecos desde las 08:00/ })
+    expect(monday.textContent).toMatch(/0?8:00, 10:00/)
+    expect(screen.getByRole("button", { name: /Martes 13 de octubre: No atiende/ })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /Miércoles 14 de octubre: Vacaciones/ }).textContent).toContain("Hasta el vie 16")
+    fireEvent.click(monday)
+    expect(onPick).toHaveBeenCalledWith("ana", AGENDA_TODAY)
   })
 
   it("la semana en teléfono dice cuánto hay libre cada día y lleva al día", () => {

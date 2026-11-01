@@ -52,6 +52,7 @@ export {
 } from "./components/alert-dialog.js";
 export {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
