@@ -360,13 +360,16 @@ function countryErrors(
  * los documentos, los seguros y las regiones que se aceptan, y con él se
  * reconoce un teléfono nacional escrito sin prefijo. `previous` son los datos
  * ya guardados: lo que no cambia no se vuelve a juzgar por el país. Los
- * errores dicen qué arreglar, nunca «formato inválido».
+ * errores dicen qué arreglar, nunca «formato inválido». `partialName`: quien
+ * aún no es paciente puede tener solo sus nombres o solo sus apellidos, lo que
+ * se sepa (ADR 0130); un paciente lleva los dos.
  */
 export function validateDemographics(
   value: unknown,
   today?: string,
   countryCode?: string | null,
   previous?: Partial<Record<string, unknown>>,
+  options?: { partialName?: boolean },
 ): Record<string, string> {
   const errors: Record<string, string> = {}
   const parsed = demographicsSchema.safeParse(value)
@@ -389,8 +392,10 @@ export function validateDemographics(
     errors.insuranceType ??= "Elige el tipo de seguro"
   for (const key of ["phone", "emergencyContactPhone"] as const)
     if (data[key] && !normalizePhone(data[key], countryCode)) errors[key] = phoneFormatError(countryCode)
-  if (data.givenNames && !data.familyName) errors.familyName = "Escribe los apellidos"
-  if (data.familyName && !data.givenNames) errors.givenNames = "Escribe los nombres"
+  if (!options?.partialName) {
+    if (data.givenNames && !data.familyName) errors.familyName = "Escribe los apellidos"
+    if (data.familyName && !data.givenNames) errors.givenNames = "Escribe los nombres"
+  }
   countryErrors(data, profile, previous, errors)
   return errors
 }

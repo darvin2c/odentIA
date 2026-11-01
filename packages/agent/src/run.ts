@@ -1063,8 +1063,8 @@ function messageText(msg: BaseMessage): string {
 
 /**
  * Simula un solo turno con el modelo y las instrucciones vigentes, sin
- * efectos externos ni persistencia: las herramientas corren en dryRun (describen, no escriben), el mensaje
- * hipotético no se persiste y no se escribe el libro. Solo lecturas RLS.
+ * efectos externos ni persistencia: las herramientas corren en dryRun (describen, y lo que escriben se
+ * deshace en su misma transacción), el mensaje hipotético no se persiste y no se escribe el libro.
  * No reproduce activaciones ni derivaciones previas ni la memoria de la
  * atención real: el resultado es orientativo, no una equivalencia total.
  */

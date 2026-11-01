@@ -220,6 +220,52 @@ describe("un solo formulario de datos, con las reglas de la ficha", () => {
     ).rejects.toMatchObject({ status: 400 })
   })
 
+  it("quien aún no es paciente queda con lo que se sabe de su nombre, sin perder lo que ya se sabe", async () => {
+    const c = await clinic()
+    const person = await c.run((tx) => createContact(tx, c.orgId, { displayName: "Carlita" }))
+    const change = (patch: Parameters<typeof updatePersonIdentity>[4]) =>
+      c.run((tx) => updatePersonIdentity(tx, c.orgId, { userId: c.actor }, person.id, patch))
+    const row = async () => {
+      const [found] = await ownerDb.select().from(contact).where(eq(contact.id, person.id))
+      return found!
+    }
+
+    await change({ givenNames: "Carla" })
+    expect(await row()).toMatchObject({ displayName: "Carla", givenNames: "Carla", familyName: null })
+
+    // Editar otro dato no toca el nombre visible que alguien escribió aparte.
+    await change({ displayName: "Carlita" })
+    await change({ email: "carla@example.test" })
+    expect(await row()).toMatchObject({ displayName: "Carlita", givenNames: "Carla", email: "carla@example.test" })
+
+    // Volver a mandar lo mismo tampoco; ni deja a la persona por revisar.
+    await change({ givenNames: "Carla" })
+    expect(await row()).toMatchObject({ displayName: "Carlita", givenNames: "Carla" })
+
+    await change({ familyName: "Quispe" })
+    expect(await row()).toMatchObject({ displayName: "Carla Quispe", givenNames: "Carla", familyName: "Quispe" })
+
+    // El equipo puede quitar lo que quedó mal, sin inventar lo que no sabe.
+    await change({ familyName: null })
+    expect(await row()).toMatchObject({ displayName: "Carla", givenNames: "Carla", familyName: null })
+  })
+
+  it("un paciente que quedó con una parte de su nombre edita lo demás, y al escribir su nombre van los dos", async () => {
+    const c = await clinic()
+    const created = await c.run((tx) => createPatient(tx, c.orgId, c.actor, { displayName: "Carla" }))
+    const person = await personOf(created.id)
+    await ownerDb.update(contact).set({ givenNames: "Carla", familyName: null }).where(eq(contact.id, person))
+
+    await c.run((tx) => updatePatient(tx, c.orgId, c.actor, created.id, { email: "carla@example.test" }))
+    await expect(
+      c.run((tx) => updatePatient(tx, c.orgId, c.actor, created.id, { givenNames: "Carla María" })),
+    ).rejects.toMatchObject({ status: 400, fields: { familyName: "Escribe los apellidos" } })
+    await c.run((tx) => updatePatient(tx, c.orgId, c.actor, created.id, { familyName: "Quispe" }))
+
+    const [row] = await ownerDb.select().from(contact).where(eq(contact.id, person))
+    expect(row).toMatchObject({ displayName: "Carla Quispe", email: "carla@example.test" })
+  })
+
   it("desde el CRM también rige la regla del menor de la ficha", async () => {
     const c = await clinic()
     const adult = await c.run((tx) =>

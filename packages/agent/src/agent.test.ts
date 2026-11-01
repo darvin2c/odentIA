@@ -69,6 +69,7 @@ import {
   setProfessionalSchedule,
   TOOL_OPERATION,
   TOOLS_WITHOUT_OPERATION,
+  updateContact,
   updateTask,
   upsertAgentConfig,
   withdrawLesson,
@@ -1657,6 +1658,77 @@ it("si un paciente dice que se llama distinto, su ficha no cambia y recepción r
   expect(await withOrgContext(appDb, "org_a", (tx) => pendingSpokenName(tx, "org_a", contactId))).toBe("Darvin")
   await ownerDb.update(crmTask).set({ status: "done" }).where(eq(crmTask.id, tasks[0]!.id))
   expect(await withOrgContext(appDb, "org_a", (tx) => pendingSpokenName(tx, "org_a", contactId))).toBeNull()
+
+  // La simulación responde lo que respondería de verdad, sin dejar otra tarea ni tocar la ficha.
+  const simulated = makeAgentTools({ ...ctx, dryRun: true }).find((t) => t.name === "update_contact")!
+  expect(String(await simulated.invoke({ givenNames: "paciente" }))).toContain("Úsalo tal como figura")
+  expect(String(await simulated.invoke({ givenNames: "Marcos" }))).toContain("[SIMULACIÓN] Es paciente y su ficha dice otro nombre")
+  expect(await tasksOf()).toHaveLength(1)
+})
+
+it("update_contact guarda lo que sabe de su nombre y lo demás se completa después", async () => {
+  const { conversationId } = await ingestText("tg:apellido", "evt-apellido", "Hola")
+  const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
+  const contactId = conv!.contactId
+  const ctx: AgentToolCtx = {
+    db: appDb, orgId: "org_a", conversationId, contactId,
+    triggerId: "trig-apellido", secretsKey: KEY, dryRun: false, handedOff: false, replySettled: false,
+    toolsUsed: [], usage: emptyUsage(),
+  }
+  const tool = makeAgentTools(ctx).find((t) => t.name === "update_contact")!
+  const simulated = makeAgentTools({ ...ctx, dryRun: true }).find((t) => t.name === "update_contact")!
+  const person = async () => {
+    const [row] = await withOrgContext(appDb, "org_a", (tx) => tx.select().from(contact).where(eq(contact.id, contactId)))
+    return row!
+  }
+  const setNames = (names: { displayName: string; givenNames: string | null; familyName: string | null }) =>
+    ownerDb.update(contact).set(names).where(eq(contact.id, contactId))
+
+  // Sin nombre no se guarda nada, tampoco en la simulación.
+  await setNames({ displayName: "Anita", givenNames: null, familyName: null })
+  expect(String(await tool.invoke({}))).toContain("No se guardó nada")
+  expect(String(await simulated.invoke({}))).toContain("No se guardó nada")
+
+  // Un nombre en blanco no es un nombre.
+  expect(String(await tool.invoke({ displayName: "   " }))).toContain("No se guardó nada")
+
+  // «Soy Carla»: la simulación dice lo que haría sin cambiar nada, y de verdad se guarda.
+  expect(String(await simulated.invoke({ givenNames: "Carla" }))).toContain("[SIMULACIÓN] Se actualizaría")
+  expect(await person()).toMatchObject({ displayName: "Anita", givenNames: null, familyName: null })
+  expect(String(await tool.invoke({ givenNames: "Carla" }))).toBe("Contacto actualizado.")
+  expect(await person()).toMatchObject({ displayName: "Carla", givenNames: "Carla", familyName: null })
+  // Guardar otro dato no le pide los apellidos que nadie le dijo.
+  await withOrgContext(appDb, "org_a", (tx) => updateContact(tx, "org_a", contactId, { email: "carla@example.test" }))
+  expect(await person()).toMatchObject({ displayName: "Carla", email: "carla@example.test" })
+  // Y sus apellidos, cuando los dice, los completan.
+  expect(String(await tool.invoke({ familyName: "Quispe" }))).toBe("Contacto actualizado.")
+  expect(await person()).toMatchObject({ displayName: "Carla Quispe", givenNames: "Carla", familyName: "Quispe" })
+
+  // Solo sus apellidos también se guardan; lo que se ve es lo que se sabe de su nombre.
+  await setNames({ displayName: "Anita", givenNames: null, familyName: null })
+  expect(String(await tool.invoke({ familyName: "Rojas" }))).toBe("Contacto actualizado.")
+  expect(await person()).toMatchObject({ displayName: "Rojas", givenNames: null, familyName: "Rojas" })
+
+  // Lo que trae de más el nombre entero no se reparte («María José» no tiene apellido): se le dice qué no quedó.
+  await setNames({ displayName: "Anita", givenNames: null, familyName: null })
+  const short = String(await tool.invoke({ givenNames: "Carla", displayName: "Carla Quispe" }))
+  expect(short).toContain("Figura como «Carla» y no quedó el resto de «Carla Quispe»")
+  expect(short).toContain("sus apellidos, guárdalos en familyName")
+  expect(await person()).toMatchObject({ displayName: "Carla", givenNames: "Carla", familyName: null })
+  expect(String(await tool.invoke({ familyName: "Quispe", displayName: "Carla Quispe" }))).toBe("Contacto actualizado.")
+  expect(await person()).toMatchObject({ displayName: "Carla Quispe", givenNames: "Carla", familyName: "Quispe" })
+  // La misma palabra sin tilde no es algo de más, y la simulación dice lo mismo.
+  await setNames({ displayName: "Anita", givenNames: null, familyName: null })
+  expect(String(await tool.invoke({ givenNames: "María", displayName: "Maria" }))).toBe("Contacto actualizado.")
+  await setNames({ displayName: "Anita", givenNames: null, familyName: null })
+  expect(String(await simulated.invoke({ familyName: "Rojas", displayName: "Ana Rojas" }))).toContain("[SIMULACIÓN] Se actualizaría el contacto. Figura como «Rojas»")
+  expect(await person()).toMatchObject({ displayName: "Anita", familyName: null })
+
+  // Lo de siempre sigue igual.
+  await setNames({ displayName: "Luz", givenNames: null, familyName: null })
+  await tool.invoke({ givenNames: "Luz María", familyName: "Paz" })
+  expect(await person()).toMatchObject({ displayName: "Luz María Paz", givenNames: "Luz María", familyName: "Paz" })
 })
 
 it("create_task no duplica en reentrega y las escrituras directas auditan su origen agente", async () => {

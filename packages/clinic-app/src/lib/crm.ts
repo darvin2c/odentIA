@@ -432,6 +432,8 @@ export interface ContactPatientLink {
 export interface ContactFull {
   patients: ContactPatientLink[]
   contact: ContactListItem & {
+    givenNames: string | null
+    familyName: string | null
     docType: string | null
     docNumber: string | null
     birthDate: string | null
