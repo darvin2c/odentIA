@@ -82,7 +82,6 @@ import {
   contact,
   contactIdentity,
   conversation,
-  customFieldDef,
   message,
   pipeline,
   pipelineStage,
@@ -160,7 +159,6 @@ import {
   updateEncounterDraft,
   voidEncounter,
 } from "../encounters.js"
-import { createFieldDef } from "../fields.js"
 import { setCommissionRate } from "../finance.js"
 import {
   cancelFollowUp,
@@ -596,7 +594,6 @@ async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USER
   await db.delete(channelConnection).where(inArray(channelConnection.organizationId, orgs))
   // Los mensajes de WhatsApp son de la organización, no de la conexión; sus versiones se van en cascada.
   await db.delete(clinicMessage).where(inArray(clinicMessage.organizationId, orgs))
-  await db.delete(customFieldDef).where(inArray(customFieldDef.organizationId, orgs))
   // El índice de búsqueda del agente apunta a la organización: se borra antes.
   await db.delete(agentSearchItem).where(inArray(agentSearchItem.organizationId, orgs))
   await db.delete(agentConfig).where(inArray(agentConfig.organizationId, orgs))
@@ -893,19 +890,6 @@ await db.insert(branch).values([{ organizationId: ORG_B, name: "Sede Lima", coun
 // --- CRM con servicios ---
 const pipeA = await ensureDefaultPipeline(db, ORG_A)
 const pipeB = await ensureDefaultPipeline(db, ORG_B)
-
-await createFieldDef(db, ORG_A, { key: "dni", label: "DNI", type: "text" })
-await createFieldDef(db, ORG_A, {
-  key: "fecha_nacimiento",
-  label: "Fecha de nacimiento",
-  type: "date",
-})
-await createFieldDef(db, ORG_A, {
-  key: "aseguradora",
-  label: "Aseguradora",
-  type: "select",
-  options: ["Rimac", "Pacifico", "Particular"],
-})
 
 const connA = await createConnection(
   db,

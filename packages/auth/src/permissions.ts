@@ -6,7 +6,7 @@
  * consume con `canAccess` y la plataforma con `usePermission`.
  *
  * Dominios: patients (filiación administrativa), clinical (ficha clínica),
- * appointments (agenda operativa), crm (contactos, oportunidades, campos),
+ * appointments (agenda operativa), crm (contactos, oportunidades),
  * conversations (bandeja y mensajes), tasks (tareas), finance (caja y cobros),
  * inventory (existencias), reports (reportes), settings (configuración),
  * audit (auditoría), agent (agente IA). Cada dominio tiene `.read`/`.write`,
@@ -308,11 +308,10 @@ const PLATFORM_PATH_RULES: PlatformPathRule[] = [
   { prefix: "/agent/approvals", permissions: ["agent.read", "agent.decide"] },
   { prefix: "/agent", permissions: ["agent.read"] },
 
-  // Reglas específicas antes de la genérica: etapas de venta y campos de
-  // contacto son parte del trabajo diario de ventas; los define también quien
-  // trabaja con oportunidades y contactos (`crm.write`), no solo quien configura.
+  // Regla específica antes de la genérica: las etapas de venta son parte del
+  // trabajo diario de ventas; las define también quien trabaja con oportunidades
+  // y contactos (`crm.write`), no solo quien configura.
   { prefix: "/settings/pipelines", permissions: ["settings.read", "crm.write"] },
-  { prefix: "/settings/fields", permissions: ["settings.read", "crm.write"] },
   // Sedes, Equipo e Integraciones viven bajo Configuración: los cubre esta regla.
   { prefix: "/settings", permissions: ["settings.read"] },
   // Direcciones antiguas de Equipo y Sedes: solo redirigen a `/settings/team` y

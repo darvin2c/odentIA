@@ -23,7 +23,6 @@ import { createAgentOpsRoute } from "./agent-ops.js"
 import { createConnectionsRoute } from "./connections.js"
 import { createContactsRoute } from "./contacts.js"
 import { createConversationsRoute } from "./conversations.js"
-import { createFieldsRoute } from "./fields.js"
 import type { CrmDeps } from "./helpers.js"
 import { createOpportunitiesRoute } from "./opportunities.js"
 import { createPipelinesRoute } from "./pipelines.js"
@@ -85,7 +84,6 @@ function buildApp(role: string, llm: PlatformLlm = { fake: true }): Hono {
   app.route("/agent", createAgentRoute({ ...deps, llm, ownerDb }))
   app.route("/agent", createAgentOpsRoute({ ...deps, llm, ownerDb }))
   app.route("/tasks", createTasksRoute(deps))
-  app.route("/fields", createFieldsRoute(deps))
   return app
 }
 
@@ -417,7 +415,7 @@ it("conexiones listan webhookUrl sin secretos; agente con gating", async () => {
   expect(forbidden.status).toBe(403)
 })
 
-it("tareas y campos van de punta a punta", async () => {
+it("tareas van de punta a punta", async () => {
   const app = buildApp("owner")
   const task = await app.request("/tasks", {
     method: "POST",
@@ -434,66 +432,21 @@ it("tareas y campos van de punta a punta", async () => {
   expect((await app.request("/tasks?scope=clinica")).status).toBe(200)
   expect((await buildApp("reception").request("/tasks?scope=clinica")).status).toBe(403)
   expect((await buildApp("reception").request("/tasks?view=vencidas")).status).toBe(200)
-
-  const field = await app.request("/fields", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ key: "sede", label: "Sede", type: "select", options: ["a"] }),
-  })
-  expect(field.status).toBe(201)
-  const fields = await app.request("/fields")
-  expect(((await fields.json()) as { data: unknown[] }).data).toHaveLength(1)
 })
 
-it("etapas y campos: los lee y los define quien trabaja con ventas; quien atiende, no", async () => {
+it("etapas: las lee y las renombra quien trabaja con ventas; quien atiende, no", async () => {
   const json = { "content-type": "application/json" }
   const reception = buildApp("reception")
   const professional = buildApp("clinician")
-  // Recepción los usa en el tablero y en la ficha del contacto, y también los define: es trabajo diario de ventas.
+  // Recepción las usa en el tablero y también las renombra: es trabajo diario de ventas.
   expect((await reception.request("/pipelines")).status).toBe(200)
-  expect((await reception.request("/fields")).status).toBe(200)
-  for (const [path, body] of [
-    ["/fields", { label: "Origen", type: "text" }],
-  ] as const) {
-    const denied = await professional.request(path, { method: "POST", headers: json, body: JSON.stringify(body) })
-    expect(denied.status, path).toBe(403)
-  }
-  const byReception = await reception.request("/fields", { method: "POST", headers: json, body: JSON.stringify({ label: "Canal preferido", type: "text" }) })
-  expect(byReception.status).toBe(201)
 
   const owner = buildApp("owner")
-  // Solo se escribe el nombre: la clave la genera el servidor.
-  const created = await owner.request("/fields", {
-    method: "POST",
-    headers: json,
-    body: JSON.stringify({ label: "Cómo nos conoció", type: "select", options: ["Redes"] }),
-  })
-  expect(created.status).toBe(201)
-  const field = ((await created.json()) as { data: { id: string; key: string } }).data
-  expect(field.key).toBe("como_nos_conocio")
-  const repeated = await owner.request("/fields", {
-    method: "POST",
-    headers: json,
-    body: JSON.stringify({ label: "cómo nos conoció", type: "text" }),
-  })
-  expect(repeated.status).toBe(409)
-
-  // Un campo se edita: nombre y opciones; la clave no cambia.
-  const edit = { label: "Origen", options: ["Redes", "Recomendación"] }
-  const refused = await professional.request(`/fields/${field.id}`, { method: "PATCH", headers: json, body: JSON.stringify(edit) })
-  expect(refused.status).toBe(403)
-  const edited = await owner.request(`/fields/${field.id}`, { method: "PATCH", headers: json, body: JSON.stringify(edit) })
-  expect(edited.status).toBe(200)
-  expect(((await edited.json()) as { data: unknown }).data).toMatchObject({ key: "como_nos_conocio", ...edit })
-
   const pipelines = ((await (await owner.request("/pipelines")).json()) as { data: { id: string; stages: { id: string }[] }[] }).data
   const stageId = pipelines[0]?.stages[0]?.id ?? ""
   const rename = { method: "PATCH", headers: json, body: JSON.stringify({ name: "Recién llegado" }) }
   expect((await professional.request(`/pipelines/stages/${stageId}`, rename)).status).toBe(403)
   expect((await reception.request(`/pipelines/stages/${stageId}`, rename)).status).toBe(200)
-
-  expect((await professional.request(`/fields/${field.id}`, { method: "DELETE" })).status).toBe(403)
-  expect((await owner.request(`/fields/${field.id}`, { method: "DELETE" })).status).toBe(200)
 })
 
 it("contactos: filtro isActive, alta sin isActive y PATCH con gating", async () => {

@@ -536,7 +536,7 @@ async function waitingCases(
     ...(only ? { only } : {}),
   })
   // Se responde desde Inicio lo propio y lo que nadie tomó: responder lo toma al
-  // enviar (ADR 0126); caja, solo los pagos. No donde Instagram o Messenger ya no
+  // enviar (ADR 0127); caja, solo los pagos. No donde Instagram o Messenger ya no
   // dejan escribir: eso es «Escribirle» por otro canal.
   const mayReply = (row: (typeof rows)[number]) =>
     row.conversationId !== null && (row.assigneeUserId === userId || (row.assigneeUserId === null && (!scope.onlyPayments || row.kind === "pago")))

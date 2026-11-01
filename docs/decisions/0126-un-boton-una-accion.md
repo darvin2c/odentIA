@@ -1,6 +1,6 @@
-# 0125 · Un botón, una acción, y se resuelve en el sitio
+# 0126 · Un botón, una acción, y se resuelve en el sitio
 
-Fecha: 2026-10-31 · Estado: aceptada · Complementa a [0025](0025-un-pendiente-un-lugar.md) y [0124](0124-sin-panel-del-agente.md)
+Fecha: 2026-10-31 · Estado: aceptada · Complementa a [0025](0025-un-pendiente-un-lugar.md) y [0125](0125-sin-panel-del-agente.md)
 
 ## Problema
 

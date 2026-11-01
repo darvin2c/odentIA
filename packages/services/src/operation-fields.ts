@@ -653,7 +653,7 @@ export const TOOLS_WITHOUT_OPERATION: Record<string, string> = {
   guardar_contacto: "Los mismos dos campos y reglas que «¿Dónde te avisamos?» del chat web (`saveWebchatContactForConversation`): su WhatsApp o su correo.",
   cancelar_cita: "En la pantalla cancelar es un cambio de estado; el agente propone con la cita y un motivo.",
   add_tags: "Pendiente: las etiquetas se normalizan en la ruta de contactos, que aún declara sus campos.",
-  update_contact: "Pendiente: la ruta de contactos aún declara sus campos; el agente solo toca nombre y campos personalizados.",
+  update_contact: "Pendiente: la ruta de contactos aún declara sus campos; el agente solo toca el nombre.",
 }
 
 /** Herramientas que solo leen: sus parámetros son filtros de una consulta, no campos de una operación. */

@@ -20,7 +20,7 @@ import { agentTabsFor } from "../lib/screen-rules"
  * «Agente». Sale del mismo resumen que «Necesita de ti» (`/api/agent/overview`,
  * consulta compartida con esa pantalla). Lo que espera el sí de la persona está
  * en la Bandeja y los casos que el agente pasó al equipo, en «Te espera» (ADR 0118
- * y 0124). «Actividad» es para saber, y la ve también quien solo decide por el
+ * y 0125). «Actividad» es para saber, y la ve también quien solo decide por el
  * agente.
  *
  * `learnPending`: «Aprender» concilia su lista al cargarla, así que esa pantalla

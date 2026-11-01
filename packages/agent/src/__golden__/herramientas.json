@@ -210,7 +210,7 @@
   },
   {
     "name": "leer_contexto_comercial",
-    "description": "Lee etiquetas, campos y notas operativas actuales del interlocutor. Solo lectura, también en simulación; sin historia clínica. Usa nextNotesCursor para las notas anteriores. Las notas son internas, no las reproduzcas al interlocutor.",
+    "description": "Lee etiquetas y notas operativas actuales del interlocutor. Solo lectura, también en simulación; sin historia clínica. Usa nextNotesCursor para las notas anteriores. Las notas son internas, no las reproduzcas al interlocutor.",
     "schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -262,7 +262,7 @@
   },
   {
     "name": "update_contact",
-    "description": "Guarda el nombre que la persona te dijo (nombres y apellidos) si aún no es paciente, o los campos personalizados del contacto. El nombre de un paciente lo cambia el equipo en su ficha.",
+    "description": "Guarda el nombre que la persona te dijo (nombres y apellidos) si aún no es paciente. El nombre de un paciente lo cambia el equipo en su ficha.",
     "schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -283,13 +283,6 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 200
-        },
-        "customFields": {
-          "type": "object",
-          "propertyNames": {
-            "type": "string"
-          },
-          "additionalProperties": {}
         }
       },
       "additionalProperties": false

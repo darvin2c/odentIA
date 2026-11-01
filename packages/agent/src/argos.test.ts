@@ -336,11 +336,11 @@ describe("Argos sobre las vistas", () => {
     const model = new ScriptedModel([COBRADO_MES])
     const answer = await ask(model, "¿Cuánto cobramos comparado con el mes anterior?")
     if (answer.kind !== "respuesta") throw new Error(answer.kind)
-    // El día 1 el periodo es un solo día: «Hoy se cobró…».
-    expect(answer.text).toMatch(/^(Hoy|(Del|El) .+) se cobró S\/\s?1,250\.50; en los mismos días de .+, S\/\s?0\.00\.$/)
+    // El día 1, «este mes» es solo hoy.
+    expect(answer.text).toMatch(/^(?:(?:Del|El) .+|Hoy) se cobró S\/\s?1,250\.50; en los mismos días de .+, S\/\s?0\.00\.$/)
     // El periodo no es una cifra: no va destacado.
     expect(answer.sentence.filter((part) => part.strong).map((part) => part.text)).toHaveLength(2)
-    expect(answer.how).toMatch(/^Lo cobrado (hoy|(del|el) .+), contra lo cobrado en los mismos días de .+\.$/)
+    expect(answer.how).toMatch(/^Lo cobrado (?:(?:del|el) .+|hoy), contra lo cobrado en los mismos días de .+\.$/)
     expect(answer.period).toMatchObject({
       value: "este_mes",
       grain: "mes",

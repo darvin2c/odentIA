@@ -21,7 +21,7 @@ export interface PanelAppointment {
 
 /**
  * Lo que abre una fila de una persona en Inicio y «Ver el caso» en la Bandeja:
- * qué pasó, qué se sabe y la caja para responder (ADR 0126). Cada parte sale
+ * qué pasó, qué se sabe y la caja para responder (ADR 0127). Cada parte sale
  * solo si el rol la puede leer: lo decide aquí el servidor, no la pantalla.
  * Caja ve solo la pregunta de un pago y su deuda.
  */

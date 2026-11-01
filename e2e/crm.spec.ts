@@ -307,7 +307,7 @@ test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({
   await info.attach("resumen-del-caso-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await page.setViewportSize({ width: 1280, height: 720 })
 
-  // El número del caso va en «Inicio» del menú (ADR 0124).
+  // El número del caso va en «Inicio» del menú (ADR 0125).
   await gotoHydrated(page, tenant(org.slug, "/home"))
   await expect(page.getByRole("navigation").getByRole("link", { name: "Inicio", exact: true }).locator("..")).toContainText(/persona/)
 

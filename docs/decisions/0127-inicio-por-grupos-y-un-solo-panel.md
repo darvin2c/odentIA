@@ -1,4 +1,4 @@
-# 0126 · Inicio: una fila por persona, tres grupos y un solo panel para responder
+# 0127 · Inicio: una fila por persona, tres grupos y un solo panel para responder
 
 Fecha: 2026-10-31 · Estado: aceptada · Ajusta a [0025](0025-un-pendiente-un-lugar.md) (la lista de «Te espera») y a [0050](0050-el-agente-nunca-se-calla.md) (quién puede responder un tema)
 

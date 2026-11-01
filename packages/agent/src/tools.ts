@@ -1154,12 +1154,10 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       displayName,
       givenNames,
       familyName,
-      customFields,
     }: {
       displayName?: string
       givenNames?: string
       familyName?: string
-      customFields?: Record<string, unknown>
     }) => {
       const contactId = ctx.contactId
       if (ctx.dryRun) return "[SIMULACIÓN] Se actualizaría el contacto."
@@ -1181,20 +1179,19 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         : givenNames?.trim()
           ? { givenNames: givenNames.trim(), displayName: displayName ?? givenNames.trim() }
           : displayName ? { displayName } : {}
-      if (!Object.keys(names).length && !customFields) return "No se guardó nada: no venía un nombre ni un campo."
-      await inOrg((tx) => updateContact(tx, ctx.orgId, contactId, { ...names, customFields }, { userId: null, origin: "agent" }))
-      await noteAction("datos", Object.keys(names).length > 0 ? "anotó su nombre" : "actualizó sus datos")
+      if (!Object.keys(names).length) return "No se guardó nada: no venía un nombre."
+      await inOrg((tx) => updateContact(tx, ctx.orgId, contactId, names, { userId: null, origin: "agent" }))
+      await noteAction("datos", "anotó su nombre")
       return "Contacto actualizado."
     },
     {
       name: "update_contact",
       description:
-        "Guarda el nombre que la persona te dijo (nombres y apellidos) si aún no es paciente, o los campos personalizados del contacto. El nombre de un paciente lo cambia el equipo en su ficha.",
+        "Guarda el nombre que la persona te dijo (nombres y apellidos) si aún no es paciente. El nombre de un paciente lo cambia el equipo en su ficha.",
       schema: z.object({
         givenNames: z.string().min(1).max(120).optional().describe("Sus nombres, como los dijo."),
         familyName: z.string().min(1).max(120).optional().describe("Sus apellidos, como los dijo."),
         displayName: z.string().min(1).max(200).optional(),
-        customFields: z.record(z.string(), z.unknown()).optional(),
       }),
     },
   )
@@ -2357,14 +2354,13 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       return {
         name: full.contact.displayName,
         tags: full.contact.tags,
-        customFields: full.contact.customFields,
         operationalNotes: notes.items,
         nextNotesCursor: notes.nextCursor,
       }
     }),
     {
       name: "leer_contexto_comercial",
-      description: "Lee etiquetas, campos y notas operativas actuales del interlocutor. Solo lectura, también en simulación; sin historia clínica. Usa nextNotesCursor para las notas anteriores. Las notas son internas, no las reproduzcas al interlocutor.",
+      description: "Lee etiquetas y notas operativas actuales del interlocutor. Solo lectura, también en simulación; sin historia clínica. Usa nextNotesCursor para las notas anteriores. Las notas son internas, no las reproduzcas al interlocutor.",
       schema: z.object({ notesCursor: z.string().optional() }),
     },
   )

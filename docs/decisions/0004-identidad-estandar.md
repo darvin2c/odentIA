@@ -21,7 +21,7 @@ Se eligió fijar los catálogos en la base porque el valor de la filiación est�
 ## Alternativas descartadas
 
 - **Usar el DNI como número de historia.** Deja sin número a quien no lo tiene y obliga a renumerar si cambia el documento.
-- **Campos personalizados por organización** para la filiación. Ya existen para contactos y no resuelven la estandarización: cada clínica inventaría su catálogo.
+- **Campos personalizados por organización** para la filiación. No resuelven la estandarización: cada clínica inventaría su catálogo.
 - **Una sola columna «nombre completo» con parseo en la vista.** No permite ordenar, buscar ni imprimir formatos oficiales.
 
 ## Consecuencias

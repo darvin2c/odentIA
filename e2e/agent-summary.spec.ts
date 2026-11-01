@@ -99,7 +99,7 @@ test("agente: el resumen dice cómo le fue, qué aprendió y qué pasa cuando no
   for (const [index, name] of ["Respuestas por revisar", "Lecciones por aprobar"].entries()) {
     await expect(tiles.nth(index)).toContainText(name)
   }
-  // Los casos del agente se cuentan en «Inicio» del menú (ADR 0124): el resumen no los repite.
+  // Los casos del agente se cuentan en «Inicio» del menú (ADR 0125): el resumen no los repite.
   await expect(needs.getByRole("link", { name: /Esperan su sí|Pendientes/ })).toHaveCount(0)
   const agents = page.getByRole("region", { name: "Tus agentes" })
   await expect(agents).toContainText("La base que comparten los tres")

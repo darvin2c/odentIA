@@ -344,7 +344,7 @@ function OrgLayout() {
     }
     if (kind !== "appointment.updated") invalidateAgentWork(queryClient)
   })
-  // Cada número donde se resuelve (ADR 0118 y 0124): «Inicio» cuenta las personas que te esperan
+  // Cada número donde se resuelve (ADR 0118 y 0125): «Inicio» cuenta las personas que te esperan
   // (lo cuenta el servidor para quien mira) y «Agente» lo que se resuelve dentro de él.
   const waiting = useQuery({
     queryKey: ["workspace-waiting"],

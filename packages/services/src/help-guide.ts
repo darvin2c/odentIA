@@ -1118,16 +1118,6 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     writePermission: "settings.write",
   },
   {
-    id: "campos",
-    path: "/settings/fields",
-    title: "Campos de contacto",
-    parent: SETTINGS,
-    purpose:
-      "Los datos propios que tu clínica quiere guardar de cada contacto, además de los que ya trae el sistema.",
-    terms: ["campos personalizados", "datos adicionales", "campo nuevo", "información extra"],
-    writePermission: "settings.write",
-  },
-  {
     // Conserva el identificador de «Canales»: sigue siendo donde se conecta por dónde te escriben.
     id: "canales",
     path: "/settings/integrations",

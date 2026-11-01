@@ -63,7 +63,6 @@ import { Route as SettingsDotavailabilityRouteImport } from './../../../packages
 import { Route as SettingsDotbranchesRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.branches'
 import { Route as SettingsDotchannelsRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.channels'
 import { Route as SettingsDotdataProtectionRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.data-protection'
-import { Route as SettingsDotfieldsRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.fields'
 import { Route as SettingsDotformsRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.forms'
 import { Route as SettingsDotmailRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.mail'
 import { Route as SettingsDotpatientAccessRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.patient-access'
@@ -390,11 +389,6 @@ const SettingsDotdataProtectionRoute =
     path: '/data-protection',
     getParentRoute: () => SettingsRoute,
   } as any)
-const SettingsDotfieldsRoute = SettingsDotfieldsRouteImport.update({
-  id: '/fields',
-  path: '/fields',
-  getParentRoute: () => SettingsRoute,
-} as any)
 const SettingsDotformsRoute = SettingsDotformsRouteImport.update({
   id: '/forms',
   path: '/forms',
@@ -559,7 +553,6 @@ export interface FileRoutesByFullPath {
   '/settings/branches': typeof SettingsDotbranchesRoute
   '/settings/channels': typeof SettingsDotchannelsRoute
   '/settings/data-protection': typeof SettingsDotdataProtectionRoute
-  '/settings/fields': typeof SettingsDotfieldsRoute
   '/settings/forms': typeof SettingsDotformsRoute
   '/settings/mail': typeof SettingsDotmailRoute
   '/settings/patient-access': typeof SettingsDotpatientAccessRoute
@@ -633,7 +626,6 @@ export interface FileRoutesByTo {
   '/settings/branches': typeof SettingsDotbranchesRoute
   '/settings/channels': typeof SettingsDotchannelsRoute
   '/settings/data-protection': typeof SettingsDotdataProtectionRoute
-  '/settings/fields': typeof SettingsDotfieldsRoute
   '/settings/forms': typeof SettingsDotformsRoute
   '/settings/mail': typeof SettingsDotmailRoute
   '/settings/patient-access': typeof SettingsDotpatientAccessRoute
@@ -711,7 +703,6 @@ export interface FileRoutesById {
   '/_org/settings/branches': typeof SettingsDotbranchesRoute
   '/_org/settings/channels': typeof SettingsDotchannelsRoute
   '/_org/settings/data-protection': typeof SettingsDotdataProtectionRoute
-  '/_org/settings/fields': typeof SettingsDotfieldsRoute
   '/_org/settings/forms': typeof SettingsDotformsRoute
   '/_org/settings/mail': typeof SettingsDotmailRoute
   '/_org/settings/patient-access': typeof SettingsDotpatientAccessRoute
@@ -789,7 +780,6 @@ export interface FileRouteTypes {
     | '/settings/branches'
     | '/settings/channels'
     | '/settings/data-protection'
-    | '/settings/fields'
     | '/settings/forms'
     | '/settings/mail'
     | '/settings/patient-access'
@@ -863,7 +853,6 @@ export interface FileRouteTypes {
     | '/settings/branches'
     | '/settings/channels'
     | '/settings/data-protection'
-    | '/settings/fields'
     | '/settings/forms'
     | '/settings/mail'
     | '/settings/patient-access'
@@ -940,7 +929,6 @@ export interface FileRouteTypes {
     | '/_org/settings/branches'
     | '/_org/settings/channels'
     | '/_org/settings/data-protection'
-    | '/_org/settings/fields'
     | '/_org/settings/forms'
     | '/_org/settings/mail'
     | '/_org/settings/patient-access'
@@ -1365,13 +1353,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsDotdataProtectionRouteImport
       parentRoute: typeof SettingsRoute
     }
-    '/_org/settings/fields': {
-      id: '/_org/settings/fields'
-      path: '/fields'
-      fullPath: '/settings/fields'
-      preLoaderRoute: typeof SettingsDotfieldsRouteImport
-      parentRoute: typeof SettingsRoute
-    }
     '/_org/settings/forms': {
       id: '/_org/settings/forms'
       path: '/forms'
@@ -1538,7 +1519,6 @@ interface SettingsRouteChildren {
   SettingsDotbranchesRoute: typeof SettingsDotbranchesRoute
   SettingsDotchannelsRoute: typeof SettingsDotchannelsRoute
   SettingsDotdataProtectionRoute: typeof SettingsDotdataProtectionRoute
-  SettingsDotfieldsRoute: typeof SettingsDotfieldsRoute
   SettingsDotformsRoute: typeof SettingsDotformsRoute
   SettingsDotmailRoute: typeof SettingsDotmailRoute
   SettingsDotpatientAccessRoute: typeof SettingsDotpatientAccessRoute
@@ -1563,7 +1543,6 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsDotbranchesRoute: SettingsDotbranchesRoute,
   SettingsDotchannelsRoute: SettingsDotchannelsRoute,
   SettingsDotdataProtectionRoute: SettingsDotdataProtectionRoute,
-  SettingsDotfieldsRoute: SettingsDotfieldsRoute,
   SettingsDotformsRoute: SettingsDotformsRoute,
   SettingsDotmailRoute: SettingsDotmailRoute,
   SettingsDotpatientAccessRoute: SettingsDotpatientAccessRoute,

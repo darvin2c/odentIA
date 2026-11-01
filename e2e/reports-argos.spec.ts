@@ -103,8 +103,8 @@ for (const width of [1440, 390]) {
       const panel = panelOf(page)
       const answers = answersOf(page)
       // El periodo lo dice odentIA: en la frase y en el botón de arriba, con las palabras de Reportes.
-      // El primer día del mes, «este mes» es solo hoy.
-      await expect(answers.getByText(/^(Hoy|(Del|El) .+) se cobró S\/\s?400\.00\.$/)).toBeVisible()
+      // El día 1, «este mes» es solo hoy.
+      await expect(answers.getByText(/^(?:(?:Del|El) .+|Hoy) se cobró S\/\s?400\.00\.$/)).toBeVisible()
       await expect(answers.getByText("Así lo calculé:")).toBeVisible()
       // De dónde sale (D21): el modelo de demostración consulta por su cuenta.
       await expect(answers.getByText("Cálculo de Argos")).toBeVisible()
@@ -116,7 +116,7 @@ for (const width of [1440, 390]) {
       const follow = panel.getByRole("button", { name: "Por medio de pago" })
       await follow.click()
       await expect(follow).toHaveAttribute("aria-pressed", "true")
-      await expect(answers.getByText(/^(Hoy|(Del|El) .+), por medio de pago: Efectivo \(S\/\s?400\.00\)\.$/)).toBeVisible()
+      await expect(answers.getByText(/^(?:(?:Del|El) .+|Hoy), por medio de pago: Efectivo \(S\/\s?400\.00\)\.$/)).toBeVisible()
       await expect(panel.getByRole("status")).toHaveText(/, por medio de pago: Efectivo/)
 
       // Otro periodo: la misma consulta con otras fechas, sin preguntar otra vez. El mes pasado no tuvo cobros.
@@ -129,7 +129,7 @@ for (const width of [1440, 390]) {
       await observe(page, info, "otro periodo")
       await lastMonthButton.click()
       await page.getByRole("button", { name: /^Este mes/ }).click()
-      await expect(answers.getByText(/^(Hoy|(Del|El) .+), por medio de pago: Efectivo \(S\/\s?400\.00\)\.$/)).toBeVisible()
+      await expect(answers.getByText(/^(?:(?:Del|El) .+|Hoy), por medio de pago: Efectivo \(S\/\s?400\.00\)\.$/)).toBeVisible()
 
       // Descargar trae esa misma respuesta, en CSV.
       const file = await csvOf(page, () => panel.getByRole("button", { name: "Descargar" }).click())
@@ -234,7 +234,7 @@ test("una lista se descarga entera en CSV, con el teléfono", async ({ owner, fi
   const page = owner.page
   await gotoHydrated(page, tenant(owner.org.slug, "/reports?period=mes_pasado&lista=no_show"))
   const list = page.getByRole("region", { name: "No vinieron" }).or(page.getByRole("dialog", { name: "No vinieron" })).filter({ hasText: "Cómo se calcula" }).first()
-  await expect(list.getByRole("button", { name: "Diego Ruiz" })).toBeVisible()
+  await expect(list.getByRole("link", { name: "Diego Ruiz" })).toBeVisible()
   const file = await csvOf(page, () => list.getByRole("button", { name: "Descargar" }).click())
   expect(file.name).toMatch(/^no-vinieron-\d{4}-\d{2}\.csv$/)
   expect(file.body).toContain("Fecha,Persona,Teléfono,Canal,Detalle,Profesional,Sede,Importe,Moneda,Ya tiene otra cita")
