@@ -222,6 +222,7 @@ export function ImageAdjust({
 
   const rotate = async () => {
     if (!source) return
+    setError(null)
     setBusy(true)
     try {
       setSource(own(await rasterize(source, { rotateQuarter: true })))
@@ -355,7 +356,10 @@ export function ImageAdjust({
                 type="button"
                 variant="outline"
                 disabled={locked}
-                onClick={() => setCameraOpen(true)}
+                onClick={() => {
+                  setError(null)
+                  setCameraOpen(true)
+                }}
               >
                 <Camera aria-hidden />
                 Tomar la foto
@@ -602,6 +606,26 @@ function PreviewRow({ children }: { children: React.ReactNode }) {
   )
 }
 
+/**
+ * Por qué no abrió la cámara, según el error estándar de `getUserMedia`. Cada causa
+ * se resuelve distinto: sin cámara conectada el navegador ni siquiera pregunta por
+ * el permiso, así que culpar al permiso mandaría a buscar en un ajuste que está bien.
+ */
+function cameraErrorMessage(error: unknown): string {
+  switch (error instanceof DOMException ? error.name : null) {
+    case "NotFoundError":
+      return "No se encontró ninguna cámara en este equipo. Revisa que esté conectada y encendida, o elige un archivo."
+    case "NotAllowedError":
+    case "SecurityError":
+      return "La cámara no tiene permiso. Actívalo desde el ícono junto a la dirección o en los ajustes del equipo y vuelve a intentar, o elige un archivo."
+    case "NotReadableError":
+    case "AbortError":
+      return "La cámara no respondió. Si otra aplicación la está usando, ciérrala y vuelve a intentar; si no, elige un archivo."
+    default:
+      return "No se pudo abrir la cámara en este navegador. Elige un archivo."
+  }
+}
+
 /** La cámara del equipo, solo cuando se pide: se apaga al tomar la foto o al salir. */
 function CameraCapture({
   disabled,
@@ -635,11 +659,8 @@ function CameraCapture({
             track.stop()
           })
         else setStream(opened)
-      } catch {
-        if (!cancelled)
-          onErrorRef.current(
-            "No se pudo abrir la cámara. Revisa el permiso del navegador o elige un archivo.",
-          )
+      } catch (error) {
+        if (!cancelled) onErrorRef.current(cameraErrorMessage(error))
       }
     })()
     return () => {
