@@ -25,7 +25,7 @@ import {
 } from "@odentia/db/schema/clinical"
 import { member } from "@odentia/db/schema/auth"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { canAccess } from "@odentia/auth/permissions"
+import { canAttend } from "@odentia/auth/permissions"
 import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm"
 import { markArrivedOnAttend, notifyAppointmentChanged, setAppointmentStatus } from "./appointments.js"
 import { listEncounterDocuments, type PatientDocumentWithContext } from "./clinical.js"
@@ -558,7 +558,7 @@ export async function createEncounter(
       .where(and(eq(member.organizationId, orgId), eq(member.userId, input.professionalUserId)))
       .limit(1)
     if (!membership) throw notFound("Profesional")
-    if (!canAccess(membership.role, "clinical.write"))
+    if (!canAttend(membership.role))
       throw validation(
         "Quien atiende debe poder escribir en la historia clínica: elige a un profesional clínico",
       )

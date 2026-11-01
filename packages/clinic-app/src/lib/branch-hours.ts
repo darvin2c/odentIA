@@ -18,6 +18,28 @@ export interface BranchHours {
 /** La semana empieza en lunes, como en la Agenda. */
 const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0]
 const DAY_NAMES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"]
+const SHORT_DAY_NAMES = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"]
+
+/** «Lun a vie», «Lun, mié y vie» o «Todos los días»: los días seguidos van juntos. */
+export function weekdaysLabel(weekdays: readonly number[]): string {
+  if (WEEK_ORDER.every((weekday) => weekdays.includes(weekday))) return "Todos los días"
+  const runs: Array<{ first: number; last: number; at: number }> = []
+  WEEK_ORDER.forEach((weekday, at) => {
+    if (!weekdays.includes(weekday)) return
+    const previous = runs[runs.length - 1]
+    if (previous && previous.at === at - 1) {
+      previous.last = weekday
+      previous.at = at
+    } else runs.push({ first: weekday, last: weekday, at })
+  })
+  const names = runs.map((run) =>
+    run.first === run.last
+      ? (SHORT_DAY_NAMES[run.first] ?? "")
+      : `${SHORT_DAY_NAMES[run.first]} a ${SHORT_DAY_NAMES[run.last]}`,
+  )
+  const last = names.pop() ?? ""
+  return upperFirst(names.length > 0 ? `${names.join(", ")} y ${last}` : last)
+}
 
 /**
  * «Lunes a viernes: 09:00 – 13:00 y 15:00 – 19:00»: los días seguidos con los

@@ -30,12 +30,13 @@ import {
   orgSpecialty,
   professionalSpecialty,
 } from "@odentia/db/schema/clinical-forms"
-import { canAccess } from "@odentia/auth/permissions"
+import { ATTENDING_ROLES, canAttend } from "@odentia/auth/permissions"
 import { member, user } from "@odentia/db/schema/auth"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, getTableColumns, inArray, isNull, or, sql } from "drizzle-orm"
 import { foldedWordsMatch } from "./search-text.js"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
+import { requireCanAttend } from "./attending.js"
 import { fieldsError, invalidField, isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { addDeclaredAllergies, type DeclaredAllergy } from "./clinical.js"
 import { requirePatient } from "./patients.js"
@@ -146,17 +147,6 @@ async function requireSpecialty(tx: Db, orgId: string, specialtyId: string) {
     .limit(1)
   if (!row) throw notFound("Especialidad")
   return row
-}
-
-/** `field`: el nombre del dato en el cuerpo, para decir el rechazo junto a él. */
-async function requireMemberUserId(tx: Db, orgId: string, userId: string, field?: string): Promise<void> {
-  const [row] = await tx
-    .select({ userId: member.userId })
-    .from(member)
-    .where(and(eq(member.organizationId, orgId), eq(member.userId, userId)))
-    .limit(1)
-  const message = "El profesional debe ser miembro de la organización"
-  if (!row) throw field ? invalidField(field, message) : validation(message)
 }
 
 // ---------------------------------------------------------------------------
@@ -323,7 +313,7 @@ export async function setProfessionalSpecialties(
   userId: string,
   specialtyIds: string[],
 ): Promise<{ userId: string; specialtyIds: string[] }> {
-  await requireMemberUserId(tx, orgId, userId)
+  await requireCanAttend(tx, orgId, userId)
   const unique = [...new Set(specialtyIds)]
   if (unique.length > 20) throw validation("Máximo 20 especialidades por profesional")
   for (const id of unique) await requireSpecialty(tx, orgId, id)
@@ -401,7 +391,7 @@ export async function setSpecialtyProfessionals(
   await requireSpecialty(tx, orgId, specialtyId)
   const unique = [...new Set(userIds)]
   if (unique.length > 100) throw invalidField("userIds", "Marca como mucho 100 personas")
-  for (const userId of unique) await requireMemberUserId(tx, orgId, userId, "userIds")
+  for (const userId of unique) await requireCanAttend(tx, orgId, userId, "userIds")
   await tx
     .delete(professionalSpecialty)
     .where(
@@ -440,8 +430,15 @@ export async function listSpecialtiesOverview(tx: Db, orgId: string): Promise<Sp
     .select({ specialtyId: professionalSpecialty.specialtyId, userId: professionalSpecialty.userId, name: user.name })
     .from(professionalSpecialty)
     .innerJoin(user, eq(user.id, professionalSpecialty.userId))
-    // Solo quien sigue en la clínica.
-    .innerJoin(member, and(eq(member.userId, professionalSpecialty.userId), eq(member.organizationId, orgId)))
+    // Solo quien sigue en la clínica y puede atender.
+    .innerJoin(
+      member,
+      and(
+        eq(member.userId, professionalSpecialty.userId),
+        eq(member.organizationId, orgId),
+        inArray(member.role, [...ATTENDING_ROLES]),
+      ),
+    )
     .where(eq(professionalSpecialty.organizationId, orgId))
     .orderBy(asc(user.name))
   const counts = await tx
@@ -1243,7 +1240,7 @@ export async function createFormResponse(
   }
   let professionalUserId: string | null = null
   if (input.professionalUserId) {
-    await requireMemberUserId(tx, orgId, input.professionalUserId, "professionalUserId")
+    await requireCanAttend(tx, orgId, input.professionalUserId, "professionalUserId")
     professionalUserId = input.professionalUserId
   } else if (attendingUserId) {
     // Desde la atención, el responsable por defecto es quien atiende.
@@ -1305,7 +1302,10 @@ export async function updateFormResponseDraft(
     if (input.professionalUserId === null) {
       professionalUserId = null
     } else {
-      await requireMemberUserId(tx, orgId, input.professionalUserId, "professionalUserId")
+      // El que ya estaba se conserva aunque hoy no atienda: se puede seguir llenando.
+      if (input.professionalUserId !== current.professionalUserId) {
+        await requireCanAttend(tx, orgId, input.professionalUserId, "professionalUserId")
+      }
       professionalUserId = input.professionalUserId
     }
   }
@@ -3384,7 +3384,7 @@ export async function createClinicalOrder(
       .limit(1)
     if (!colleague) throw invalidField("recipientUserId", "El colega debe ser miembro de la clínica")
     // Solo a quien atiende: recepción y caja no reciben una derivación clínica.
-    if (!canAccess(colleague.role, "clinical.write"))
+    if (!canAttend(colleague.role))
       throw invalidField("recipientUserId", "Deriva a un profesional que atiende, no a recepción ni a caja")
     recipientUserId = input.recipientUserId
     recipientName = colleague.name

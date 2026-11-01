@@ -499,6 +499,14 @@ function AgendaPage() {
     const index = new Map((resources?.professionals ?? []).map((item, at) => [item.id, at]))
     return (id: string) => scheduleToneAt(index.get(id) ?? 0)
   }, [resources])
+  /**
+   * Quien ya no puede atender (salió del equipo o cambió de rol, ADR 0128) conserva
+   * sus citas a la vista para moverlas, pero no recibe otras. Sin las fichas aún, no se afirma.
+   */
+  const canStillAttend = React.useCallback(
+    (id: string) => !resources || resources.professionals.some((item) => item.id === id),
+    [resources],
+  )
   /** Quienes atienden en la sede, más quien tenga citas esta semana sin horario. */
   const team = React.useMemo((): ScheduleColumn[] => {
     const known = new Map<string, string>()
@@ -654,6 +662,11 @@ function AgendaPage() {
     stage: visitStage(item.visit),
     stateLabel: visitLabel(item, { now, timeZone: TZ }),
   })
+  /** Citas por venir de quien ya no atiende: hay que pasarlas a otra persona. Lo que ya pasó se cierra, no se pasa. */
+  const noLongerAttends = (item: AgendaAppointment): string | undefined =>
+    standing(item.status) && Date.parse(item.endsAt) > Date.parse(now) && !canStillAttend(item.professionalUserId)
+      ? `${shortName(item.professionalName)} ya no atiende: pásala a otra persona`
+      : undefined
   const entries = appointments.map(
     (item): ScheduleEntry => ({
       id: item.id,
@@ -665,7 +678,7 @@ function AgendaPage() {
       status: item.status,
       ...stateOf(item),
       // Una prueba no ocupa el horario de nadie (ADR 0094): no es un choque.
-      warning: item.test ? undefined : (conflictLabel(conflicts.get(item.id), appWords().room.one) ?? insideAbsence(item) ?? outsideHours(item)),
+      warning: item.test ? undefined : (conflictLabel(conflicts.get(item.id), appWords().room.one) ?? noLongerAttends(item) ?? insideAbsence(item) ?? outsideHours(item)),
       test: Boolean(item.test),
     }),
   )
@@ -690,22 +703,23 @@ function AgendaPage() {
   )
   /** Quienes no atienden ese día y se sumaron a la vista para darles una cita. */
   const addedColumns: ScheduleColumn[] = added.flatMap((id) => {
-    if (dayTeam.some((item) => item.id === id)) return []
+    if (dayTeam.some((item) => item.id === id) || !canStillAttend(id)) return []
     const label =
       team.find((item) => item.id === id)?.label ?? resources?.professionals.find((item) => item.id === id)?.label
     return label ? [{ id, label, tone: toneOf(id) }] : []
   })
   const absent = team
-    .filter((item) => !dayTeam.includes(item) && !added.includes(item.id))
+    .filter((item) => !dayTeam.includes(item) && !added.includes(item.id) && canStillAttend(item.id))
     .map((item) => ({ ...item, absence: absenceOn(item.id, day) }))
-  /** Lo que el menú de profesionales ofrece sumar: del equipo de la sede o quien aún no tiene horario. */
-  const canAdd: ScheduleColumn[] = [
-    ...new Map(
-      [...team, ...(resources?.professionals ?? []).map((item) => ({ id: item.id, label: item.label, tone: toneOf(item.id) }))].map(
-        (item) => [item.id, item] as const,
-      ),
-    ).values(),
-  ].filter((item) => !dayTeam.some((other) => other.id === item.id) && !added.includes(item.id))
+  /**
+   * Lo que el menú de profesionales ofrece sumar: quien tiene horario en la sede y
+   * quien atiende de oficio aunque aún no lo tenga. Quien dirige entra al ponerle
+   * horario: dirigir no es atender (ADR 0128).
+   */
+  const canAdd: ScheduleColumn[] = (resources?.professionals ?? [])
+    .filter((item) => item.role === "clinician" || team.some((other) => other.id === item.id))
+    .filter((item) => !dayTeam.some((other) => other.id === item.id) && !added.includes(item.id))
+    .map((item) => ({ id: item.id, label: item.label, tone: toneOf(item.id) }))
   /** Todos los que atendían ese día están ausentes por lo mismo (feriado, cierre de la sede). */
   const closedReason =
     absent.length > 0 && absent.every((item) => item.absence !== null)
@@ -1012,6 +1026,8 @@ function AgendaPage() {
           status: item.status,
           ...stateOf(item),
           test: Boolean(item.test),
+          // Aquí se llega desde Equipo para pasarlas a otra persona: que se vea cuáles son.
+          warning: item.test ? undefined : noLongerAttends(item),
         },
         resourceLabel: item.professionalName,
         resourceShortLabel: shortName(item.professionalName),
@@ -1230,13 +1246,18 @@ function AgendaPage() {
     if (exception) setPendingMove({ ...full, exception, why: exception.why })
     else moveMutation.mutate(full)
   }
-  const bookOn = (target: { columnId: string; start: string; date: string }) =>
+  const bookOn = (target: { columnId: string; start: string; date: string }) => {
+    if (!canStillAttend(target.columnId)) {
+      toast.error(`${shortName(dayColumns.find((item) => item.id === target.columnId)?.label ?? "Esa persona")} ya no atiende: elige a quien atienda.`)
+      return
+    }
     openBooking({
       professionalUserId: target.columnId,
       professionalLabel: dayColumns.find((item) => item.id === target.columnId)?.label,
       startsAt: target.start,
       date: target.date,
     })
+  }
 
   const gridOf = (lanes: ScheduleLane[], label: string) => (
     <ScheduleGrid
@@ -1334,7 +1355,8 @@ function AgendaPage() {
   const showDays = small && view !== "semana"
   /** Tocar un día en la semana abre la reserva con esa persona y ese día, con sus horas libres. */
   const pickTeamDay = (columnId: string, date: string) => {
-    if (!canWrite) {
+    // Quien ya no atiende no recibe citas: su día sirve para pasar las que tiene.
+    if (!canWrite || !canStillAttend(columnId)) {
       setParams({ date: date === today ? undefined : date, view: undefined, who: columnId })
       return
     }

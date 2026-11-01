@@ -1,4 +1,5 @@
-import { member } from "@odentia/db/schema/auth"
+import { randomUUID } from "node:crypto"
+import { member, user as users } from "@odentia/db/schema/auth"
 import type { Locator, Page } from "@playwright/test"
 import { and, eq } from "drizzle-orm"
 import { API, tenant, tenantPattern } from "./env"
@@ -567,7 +568,11 @@ for (const role of ["reception", "clinician", "cashier"] as const) {
 }
 test("recepción coordina el control sin leer la ficha clínica", async ({ owner, fixtureDb }) => {
   const ids = await buildClinicalBase(owner)
-  await enableAgenda(owner)
+  // Recepción reserva con quien atiende: la dueña, al pasar a recepción, deja de hacerlo.
+  const professional = randomUUID()
+  await fixtureDb.insert(users).values({ id: professional, name: "Dra. Control", email: `${professional}@example.test`, emailVerified: true })
+  await fixtureDb.insert(member).values({ id: randomUUID(), organizationId: owner.org.id, userId: professional, role: "clinician", createdAt: new Date() })
+  await enableAgenda(owner, professional)
   const { page } = owner
   const slug = owner.org.slug
   const apiPath = patientApiPath(ids.patientId)
