@@ -1,4 +1,4 @@
-# 0129 · Se guarda lo que se sabe del nombre
+# 0130 · Se guarda lo que se sabe del nombre
 
 Fecha: 2026-11-01 · Estado: aceptada · Precisa [0058](0058-nombres-y-apellidos-en-dos-campos.md).
 

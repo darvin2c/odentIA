@@ -8,14 +8,18 @@ import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { automationLinkToken } from "@odentia/db/schema/automation"
 import { patient, patientContact, patientResponsibility } from "@odentia/db/schema/clinical"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
-import { contact, crmTask } from "@odentia/db/schema/crm"
+import { agentActionLog, agentCaseMemory } from "@odentia/db/schema/agent"
+import { agentConfig, channelConnection, channelTemplate, contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { crmNote } from "@odentia/db/schema/crm-workspace"
-import { branch } from "@odentia/db/schema/org"
+import { branch, orgProfile } from "@odentia/db/schema/org"
+import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, eq } from "drizzle-orm"
 import { createHash } from "node:crypto"
-import { expect, it } from "vitest"
+import { expect, it, onTestFinished, vi } from "vitest"
 import { createRoom } from "./appointments.js"
-import { issuePersonalLink, listBookingLinkSlots, reserveBookingLink, revokePersonalLinks } from "./booking-links.js"
+import { setMessageChoice } from "./automation.js"
+import { listApprovedMessages } from "./clinic-messages.js"
+import { confirmBookingLinkAppointment, issuePersonalLink, listBookingLinkSlots, reserveBookingLink, revokePersonalLinks } from "./booking-links.js"
 import { setProfessionalSchedule } from "./availability.js"
 import { hidePersonalLinkRefs, personalLinkRef, personalLinkToken, resolvePersonalLinkRefs } from "./personal-link-token.js"
 import { createBudget, deliverBudget } from "./budgets.js"
@@ -23,11 +27,16 @@ import {
   confirmLinkSignedConsent,
   createConsentDocument,
   createConsentTemplate,
+  createFormTemplate,
+  listConsentEvents,
   markConsentSentByLink,
   publishConsentTemplate,
+  publishFormTemplate,
 } from "./clinical-forms.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { getPatientHealth } from "./clinical.js"
+import { DocumentKit } from "./document-kit.js"
+import { renderHealthDocumentPdf } from "./health-documents.js"
 import { addPlanItem } from "./plan.js"
 import { getPatientRegistrationConfig, savePatientRegistrationConfig } from "./patient-registration.js"
 import { createPatient, patientPersonId, requirePatient, setPatientContact } from "./patients.js"
@@ -39,8 +48,10 @@ import {
   getPersonalLinkDataForm,
   getPersonalLinkView,
   personalLinkForEmailToken,
+  sendPersonalLink,
   signPersonalLinkConsent,
   submitPersonalLinkData,
+  submitPersonalLinkQuestionnaire,
 } from "./su-enlace.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
@@ -312,6 +323,505 @@ it("el consentimiento se firma en su enlace con su documento y el profesional lo
   await f.run((tx) => confirmLinkSignedConsent(tx, ORG, f.actor, consent.id))
   const [confirmed] = await ownerDb.select().from(consentDocument).where(eq(consentDocument.id, consent.id))
   expect(confirmed).toMatchObject({ status: "firmado", signatureMethod: "enlace", signatureLevel: "simple", informedBy: f.actor })
+})
+
+/** Sofi encendida o apagada, en la clínica que comparten las pruebas de este archivo. */
+async function setSofi(enabled: boolean) {
+  await ownerDb
+    .insert(agentConfig)
+    .values({ organizationId: ORG, enabled })
+    .onConflictDoUpdate({ target: agentConfig.organizationId, set: { enabled } })
+}
+
+/** Su conversación de WhatsApp, con Sofi encendida; `wrote`: cuándo escribió por última vez. */
+async function chatOf(contactId: string, wrote: Date | null) {
+  const phone = `519${randomUUID().replace(/\D/g, "").padEnd(8, "0").slice(0, 8)}`
+  await setSofi(true)
+  // Un solo número por clínica: las pruebas de este archivo comparten el suyo.
+  const [existing] = await ownerDb
+    .select({ id: channelConnection.id })
+    .from(channelConnection)
+    .where(and(eq(channelConnection.organizationId, ORG), eq(channelConnection.channel, "whatsapp")))
+  const [connection] = existing
+    ? [existing]
+    : await ownerDb
+        .insert(channelConnection)
+        .values({
+          organizationId: ORG, channel: "whatsapp", provider: "whatsapp_cloud_api", displayName: "WA",
+          externalId: `wa-${randomUUID().slice(0, 8)}`, configEncrypted: "prueba", webhookSecret: "prueba", status: "active",
+        })
+        .returning({ id: channelConnection.id })
+  const [identity] = await ownerDb
+    .insert(contactIdentity)
+    .values({ organizationId: ORG, contactId, channel: "whatsapp", externalUserId: phone, isPrimary: true })
+    .returning({ id: contactIdentity.id })
+  const [thread] = await ownerDb
+    .insert(conversation)
+    .values({
+      organizationId: ORG, contactId, contactIdentityId: identity!.id, channelConnectionId: connection!.id,
+      externalThreadId: phone, lastInboundAt: wrote,
+    })
+    .returning({ id: conversation.id })
+  return thread!.id
+}
+
+/** Una persona con un consentimiento por firmar y su conversación de WhatsApp; `wrote`: cuándo escribió por última vez. */
+async function consentInChat(f: Awaited<ReturnType<typeof clinicalFixture>>, wrote: Date | null) {
+  const digits = randomUUID().replace(/\D/g, "").padEnd(16, "0")
+  const docNumber = digits.slice(0, 8)
+  const phone = `519${digits.slice(8, 16)}`
+  const lucia = await f.run((tx) =>
+    createPatient(tx, ORG, f.actor, {
+      displayName: "Lucía Fernández",
+      givenNames: "Lucía",
+      familyName: "Fernández",
+      birthDate: "1995-07-30",
+      docType: "DNI",
+      docNumber,
+      phone: `+${phone}`,
+    }),
+  )
+  const personId = (await f.run((tx) => patientPersonId(tx, ORG, lucia.id)))!
+  const draft = await f.run((tx) =>
+    createConsentTemplate(tx, ORG, f.actor, {
+      key: `t-${randomUUID().slice(0, 8)}`,
+      title: "Exodoncia",
+      sections: {
+        procedure: "Extracción de la pieza dentaria con anestesia local.",
+        benefits: ["Quitar el dolor"],
+        risks: ["Sangrado los primeros días"],
+        alternatives: ["Tratamiento de conductos"],
+        consequences: "La infección puede avanzar.",
+      },
+    }),
+  )
+  const template = await f.run((tx) => publishConsentTemplate(tx, ORG, f.actor, draft.id))
+  const consent = await f.run((tx) =>
+    createConsentDocument(tx, ORG, f.actor, { templateId: template.id, patientId: lucia.id, procedureRef: "Exodoncia de la pieza 38" }),
+  )
+  const conversationId = await chatOf(personId, wrote)
+  return { patientId: lucia.id, personId, docNumber, consentId: consent.id, conversationId, templateId: template.id }
+}
+
+const FINGER = { strokes: [[[10, 10], [200, 120]]] }
+
+async function agentTexts(conversationId: string) {
+  const rows = await ownerDb
+    .select({ body: message.body })
+    .from(message)
+    .where(and(eq(message.conversationId, conversationId), eq(message.senderKind, "agent")))
+  return rows.map((row) => row.body ?? "")
+}
+
+it("firmar en su enlace: la historia y el PDF lo dicen, se avisa a quien lo generó y Sofi le agradece por su chat", async () => {
+  const f = await clinicalFixture()
+  const lucia = await consentInChat(f, new Date())
+  const link = await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: lucia.personId, patientId: lucia.patientId, conversationId: lucia.conversationId }, { secretsKey: KEY }),
+  )
+  await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, lucia.consentId))
+  const penSignatures = vi.spyOn(DocumentKit.prototype, "penSignatures")
+  const stateBox = vi.spyOn(DocumentKit.prototype, "stateBox")
+  const open = () =>
+    f.run((tx) => renderHealthDocumentPdf(tx, ORG, lucia.patientId, "consent", lucia.consentId, {}, { viewing: true }))
+  try {
+    // Sin firmar: la hoja para firmar en papel, con los recuadros vacíos.
+    await open()
+    expect(penSignatures.mock.lastCall?.[0][0]?.strokes).toBeNull()
+    expect(stateBox).not.toHaveBeenCalled()
+
+    await f.run((tx) =>
+      signPersonalLinkConsent(
+        tx, ORG, link.token, lucia.consentId,
+        { docNumber: lucia.docNumber, comprehensionConfirmed: true, signatureData: FINGER },
+        {},
+        { secretsKey: KEY },
+      ),
+    )
+
+    // Firmado por la persona: su trazo y que falta confirmarlo.
+    await open()
+    expect(penSignatures.mock.lastCall?.[0][0]?.strokes).toEqual(FINGER.strokes)
+    expect(stateBox).toHaveBeenCalledWith(expect.objectContaining({ title: "FALTA CONFIRMAR" }))
+  } finally {
+    penSignatures.mockRestore()
+    stateBox.mockRestore()
+  }
+
+  const history = await f.run((tx) => listConsentEvents(tx, ORG, lucia.consentId))
+  expect(history.map((event) => event.toStatus)).toEqual(["pendiente", "enlace_enviado", "enlace_firmado"])
+  expect(history.at(-1)).toMatchObject({ actorUserId: null, reason: "paciente: Lucía Fernández" })
+
+  // Sofi agradece sin nombrar el procedimiento: recepción lee la conversación y no la historia.
+  const [thanks, ...others] = await agentTexts(lucia.conversationId)
+  expect(others).toEqual([])
+  expect(thanks).toBe("Gracias por firmar el consentimiento. El odontólogo lo revisará antes de empezar.")
+  expect(thanks).not.toContain("Exodoncia")
+  const actions = await ownerDb.select().from(agentActionLog).where(eq(agentActionLog.conversationId, lucia.conversationId))
+  expect(actions).toEqual([expect.objectContaining({ kind: "enlace", title: "recibió la firma de un consentimiento" })])
+  expect(JSON.stringify(actions)).not.toContain("Exodoncia")
+
+  const notices = await ownerDb.select().from(workspaceNotification).where(eq(workspaceNotification.userId, f.actor))
+  expect(notices.map((notice) => notice.title)).toContain("Firmaron un consentimiento desde su enlace")
+
+  // La atención lo sabe: no se le pide otra firma, se confirma.
+  await f.run((tx) => confirmLinkSignedConsent(tx, ORG, f.actor, lucia.consentId))
+  const after = await f.run((tx) => listConsentEvents(tx, ORG, lucia.consentId))
+  expect(after.map((event) => event.toStatus)).toEqual(["pendiente", "enlace_enviado", "enlace_firmado", "informado", "firmado"])
+  expect(await agentTexts(lucia.conversationId)).toHaveLength(1)
+})
+
+it("en latidIA, Sofi agradece con las palabras de su producto", async () => {
+  const f = await clinicalFixture()
+  const lucia = await consentInChat(f, new Date())
+  const link = await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: lucia.personId, patientId: lucia.patientId, conversationId: lucia.conversationId }, { secretsKey: KEY }),
+  )
+  await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, lucia.consentId))
+  await ownerDb.update(orgProfile).set({ product: "medical" }).where(eq(orgProfile.organizationId, ORG))
+  try {
+    await f.run((tx) =>
+      signPersonalLinkConsent(
+        tx, ORG, link.token, lucia.consentId,
+        { docNumber: lucia.docNumber, comprehensionConfirmed: true, signatureData: FINGER },
+        {},
+        { secretsKey: KEY },
+      ),
+    )
+  } finally {
+    await ownerDb.update(orgProfile).set({ product: "dental" }).where(eq(orgProfile.organizationId, ORG))
+  }
+  expect((await agentTexts(lucia.conversationId))[0]).toContain("El médico lo revisará")
+})
+
+it("con Sofi apagada nadie escribe en su nombre: la firma vale y queda la nota del caso", async () => {
+  const f = await clinicalFixture()
+  const lucia = await consentInChat(f, new Date())
+  const link = await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: lucia.personId, patientId: lucia.patientId, conversationId: lucia.conversationId }, { secretsKey: KEY }),
+  )
+  await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, lucia.consentId))
+  await setSofi(false)
+  try {
+    await f.run((tx) =>
+      signPersonalLinkConsent(
+        tx, ORG, link.token, lucia.consentId,
+        { docNumber: lucia.docNumber, comprehensionConfirmed: true, signatureData: FINGER },
+        {},
+        { secretsKey: KEY },
+      ),
+    )
+  } finally {
+    await setSofi(true)
+  }
+  const [signed] = await ownerDb.select().from(consentDocument).where(eq(consentDocument.id, lucia.consentId))
+  expect(signed?.personSignedAt).toBeInstanceOf(Date)
+  expect(await agentTexts(lucia.conversationId)).toEqual([])
+  expect(await ownerDb.select().from(agentActionLog).where(eq(agentActionLog.conversationId, lucia.conversationId))).toEqual([])
+  const [memory] = await ownerDb.select().from(agentCaseMemory).where(eq(agentCaseMemory.conversationId, lucia.conversationId))
+  expect(JSON.stringify(memory?.notes)).toContain("Firmó un consentimiento desde su enlace")
+})
+
+/** Meta aprobó «Recibido desde su enlace» en el número de la clínica, solo durante esta prueba. */
+async function approveLinkReceived() {
+  const [connection] = await ownerDb
+    .select({ id: channelConnection.id })
+    .from(channelConnection)
+    .where(and(eq(channelConnection.organizationId, ORG), eq(channelConnection.channel, "whatsapp")))
+  await ownerDb.insert(channelTemplate).values({
+    organizationId: ORG,
+    connectionId: connection!.id,
+    name: "odentia_enlace_recibido_v1",
+    language: "es",
+    status: "aprobada",
+    category: "utility",
+    body: "Hola, {{1}}. {{2}} ya recibió lo que completaste desde tu enlace. Gracias por tu tiempo.",
+    variables: 2,
+  })
+  onTestFinished(async () => {
+    await ownerDb
+      .delete(channelTemplate)
+      .where(and(eq(channelTemplate.organizationId, ORG), eq(channelTemplate.name, "odentia_enlace_recibido_v1")))
+  })
+}
+
+const TWO_DAYS_AGO = () => new Date(Date.now() - 48 * 3_600_000)
+
+async function sentToChat(conversationId: string) {
+  return ownerDb
+    .select({ body: message.body, contentType: message.contentType, templateName: message.templateName, params: message.templateParams, status: message.status })
+    .from(message)
+    .where(and(eq(message.conversationId, conversationId), eq(message.senderKind, "agent")))
+}
+
+async function signWith(f: Awaited<ReturnType<typeof clinicalFixture>>, token: string, lucia: { consentId: string; docNumber: string }) {
+  await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, lucia.consentId))
+  await f.run((tx) =>
+    signPersonalLinkConsent(
+      tx, ORG, token, lucia.consentId,
+      { docNumber: lucia.docNumber, comprehensionConfirmed: true, signatureData: FINGER },
+      {},
+      { secretsKey: KEY },
+    ),
+  )
+}
+
+it("pasadas las 24 horas, la firma se agradece con el mensaje aprobado, uno solo al día y sin nombrar el procedimiento", async () => {
+  const f = await clinicalFixture()
+  const lucia = await consentInChat(f, TWO_DAYS_AGO())
+  await approveLinkReceived()
+  const link = await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: lucia.personId, patientId: lucia.patientId, conversationId: lucia.conversationId }, { secretsKey: KEY }),
+  )
+  await signWith(f, link.token, lucia)
+  const [thanks, ...others] = await sentToChat(lucia.conversationId)
+  expect(others).toEqual([])
+  expect(thanks).toMatchObject({ contentType: "template", templateName: "odentia_enlace_recibido_v1", status: "queued" })
+  expect(thanks?.params).toEqual(["Lucía", expect.any(String)])
+  expect(thanks?.body).toMatch(/^Hola, Lucía\. .+ ya recibió lo que completaste desde tu enlace\. Gracias por tu tiempo\.$/)
+  expect(thanks?.body).not.toContain("Exodoncia")
+  const actions = await ownerDb.select().from(agentActionLog).where(eq(agentActionLog.conversationId, lucia.conversationId))
+  expect(actions).toEqual([expect.objectContaining({ kind: "enlace", title: "recibió la firma de un consentimiento" })])
+
+  // Otra firma el mismo día: Meta cobra cada mensaje y el primero ya sirve para todo.
+  const second = await f.run((tx) =>
+    createConsentDocument(tx, ORG, f.actor, { templateId: lucia.templateId, patientId: lucia.patientId, procedureRef: "Exodoncia de la pieza 18" }),
+  )
+  await signWith(f, link.token, { consentId: second.id, docNumber: lucia.docNumber })
+  const [signedAgain] = await ownerDb.select().from(consentDocument).where(eq(consentDocument.id, second.id))
+  expect(signedAgain?.personSignedAt).toBeInstanceOf(Date)
+  expect(await sentToChat(lucia.conversationId)).toHaveLength(1)
+  // Queda anotada igual: el caso dice las dos.
+  expect(await ownerDb.select().from(agentActionLog).where(eq(agentActionLog.conversationId, lucia.conversationId))).toHaveLength(2)
+
+  // El agradecimiento no le quita a recepción poder escribirle: otro mensaje aprobado sale igual.
+  const [connection] = await ownerDb
+    .select({ id: channelConnection.id })
+    .from(channelConnection)
+    .where(and(eq(channelConnection.organizationId, ORG), eq(channelConnection.channel, "whatsapp")))
+  await ownerDb.insert(channelTemplate).values({
+    organizationId: ORG,
+    connectionId: connection!.id,
+    name: "odentia_retomar_conversacion_v1",
+    language: "es",
+    status: "aprobada",
+    category: "utility",
+    body: "Hola, {{1}}. Te escribimos de {{2}} para continuar con tu consulta. ¿Seguimos por aquí?",
+    variables: 2,
+  })
+  onTestFinished(async () => {
+    await ownerDb
+      .delete(channelTemplate)
+      .where(and(eq(channelTemplate.organizationId, ORG), eq(channelTemplate.name, "odentia_retomar_conversacion_v1")))
+  })
+  const approved = await f.run((tx) => listApprovedMessages(tx, ORG, lucia.conversationId, () => true))
+  expect(approved.data.map((item) => item.id)).toEqual(["retomar_conversacion"])
+})
+
+it("pasadas las 24 horas, en latidIA sale el mismo mensaje aprobado", async () => {
+  const f = await clinicalFixture()
+  const lucia = await consentInChat(f, TWO_DAYS_AGO())
+  await approveLinkReceived()
+  const link = await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: lucia.personId, patientId: lucia.patientId, conversationId: lucia.conversationId }, { secretsKey: KEY }),
+  )
+  await ownerDb.update(orgProfile).set({ product: "medical" }).where(eq(orgProfile.organizationId, ORG))
+  try {
+    await signWith(f, link.token, lucia)
+  } finally {
+    await ownerDb.update(orgProfile).set({ product: "dental" }).where(eq(orgProfile.organizationId, ORG))
+  }
+  expect((await sentToChat(lucia.conversationId)).map((row) => row.templateName)).toEqual(["odentia_enlace_recibido_v1"])
+})
+
+it("un enlace sin conversación, como el de un recordatorio o un presupuesto, se responde por su WhatsApp", async () => {
+  const f = await clinicalFixture()
+  const lucia = await consentInChat(f, TWO_DAYS_AGO())
+  await approveLinkReceived()
+  const link = await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: lucia.personId, patientId: lucia.patientId, createdBy: f.actor }, { secretsKey: KEY }),
+  )
+  await signWith(f, link.token, lucia)
+  expect((await sentToChat(lucia.conversationId)).map((row) => row.templateName)).toEqual(["odentia_enlace_recibido_v1"])
+  const [memory] = await ownerDb.select().from(agentCaseMemory).where(eq(agentCaseMemory.conversationId, lucia.conversationId))
+  expect(JSON.stringify(memory?.notes)).toContain("Firmó un consentimiento desde su enlace")
+})
+
+it("el último envío decide por qué conversación se le responde", async () => {
+  const f = await clinicalFixture()
+  const lucia = await consentInChat(f, new Date())
+  const older = await chatOf(lucia.personId, new Date())
+  await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: lucia.personId, patientId: lucia.patientId, conversationId: older }, { secretsKey: KEY }),
+  )
+  const link = await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: lucia.personId, patientId: lucia.patientId, conversationId: lucia.conversationId }, { secretsKey: KEY }),
+  )
+  await signWith(f, link.token, lucia)
+  expect(await agentTexts(older)).toEqual([])
+  expect((await agentTexts(lucia.conversationId))[0]).toContain("Gracias por firmar el consentimiento")
+})
+
+it("repetir la misma petición de envío no agrega otro paso a la historia", async () => {
+  const f = await clinicalFixture()
+  const lucia = await consentInChat(f, new Date())
+  const requestId = randomUUID()
+  for (let time = 0; time < 2; time++) {
+    await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, lucia.consentId, { requestId }))
+  }
+  const history = await f.run((tx) => listConsentEvents(tx, ORG, lucia.consentId))
+  expect(history.map((event) => event.toStatus)).toEqual(["pendiente", "enlace_enviado"])
+  // Otra petición sí es otro envío.
+  await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, lucia.consentId, { requestId: randomUUID() }))
+  expect(await f.run((tx) => listConsentEvents(tx, ORG, lucia.consentId))).toHaveLength(3)
+})
+
+it("dentro de las 24 horas sigue saliendo el texto, que no usa el mensaje aprobado", async () => {
+  const f = await clinicalFixture()
+  const lucia = await consentInChat(f, new Date())
+  await approveLinkReceived()
+  const link = await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: lucia.personId, patientId: lucia.patientId, conversationId: lucia.conversationId }, { secretsKey: KEY }),
+  )
+  await signWith(f, link.token, lucia)
+  const [thanks, ...others] = await sentToChat(lucia.conversationId)
+  expect(others).toEqual([])
+  expect(thanks).toMatchObject({ contentType: "text", templateName: null })
+  expect(thanks?.body).toContain("Gracias por firmar el consentimiento")
+})
+
+it("pasadas las 24 horas, «No quiero ningún mensaje» y Sofi apagada también lo frenan: la firma vale", async () => {
+  const f = await clinicalFixture()
+  await approveLinkReceived()
+
+  const refused = await consentInChat(f, TWO_DAYS_AGO())
+  await f.run((tx) => setMessageChoice(tx, ORG, f.actor, refused.personId, { choice: "ninguno", receive: false, source: "telefono" }))
+  const refusedLink = await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: refused.personId, patientId: refused.patientId, conversationId: refused.conversationId }, { secretsKey: KEY }),
+  )
+  await signWith(f, refusedLink.token, refused)
+  expect(await sentToChat(refused.conversationId)).toEqual([])
+
+  const quiet = await consentInChat(f, TWO_DAYS_AGO())
+  const quietLink = await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: quiet.personId, patientId: quiet.patientId, conversationId: quiet.conversationId }, { secretsKey: KEY }),
+  )
+  await setSofi(false)
+  try {
+    await signWith(f, quietLink.token, quiet)
+  } finally {
+    await setSofi(true)
+  }
+  expect(await sentToChat(quiet.conversationId)).toEqual([])
+  for (const id of [refused.consentId, quiet.consentId]) {
+    const [signed] = await ownerDb.select().from(consentDocument).where(eq(consentDocument.id, id))
+    expect(signed?.personSignedAt).toBeInstanceOf(Date)
+  }
+})
+
+it("responder el presupuesto, enviar sus datos o el cuestionario y confirmar la cita también se le reconocen por su chat", async () => {
+  const f = await clinicalFixture()
+
+  // Su presupuesto: una respuesta, un mensaje; repetirla no vuelve a escribir.
+  const personId = (await f.run((tx) => patientPersonId(tx, ORG, f.patient.id)))!
+  const budgetChat = await chatOf(personId, new Date())
+  const item = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }),
+  )
+  const budget = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [item.id] }))
+  await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
+  const budgetLink = await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: personId, patientId: f.patient.id, conversationId: budgetChat }, { secretsKey: KEY }),
+  )
+  const answer = { decisions: [{ planItemId: item.id, decision: "aceptado" as const }] }
+  await f.run((tx) => decidePersonalLinkBudget(tx, ORG, budgetLink.token, budget.id, answer, { secretsKey: KEY }))
+  await f.run((tx) => decidePersonalLinkBudget(tx, ORG, budgetLink.token, budget.id, answer, { secretsKey: KEY }))
+  expect(await agentTexts(budgetChat)).toEqual(["Gracias, ya recibimos la respuesta al presupuesto."])
+  const [budgetAction] = await ownerDb.select().from(agentActionLog).where(eq(agentActionLog.conversationId, budgetChat))
+  expect(budgetAction).toMatchObject({ kind: "presupuesto", title: "recibió su respuesta al presupuesto" })
+
+  // Sus datos.
+  const pedro = await minimal(f, { given: "Pedro", surname: "Ríos" })
+  const dataChat = await chatOf(pedro.personId, new Date())
+  const dataLink = await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: pedro.personId, patientId: pedro.patientId, conversationId: dataChat }, { secretsKey: KEY }),
+  )
+  await f.run((tx) =>
+    submitPersonalLinkData(tx, ORG, dataLink.token, { data: { birthDate: "1988-02-14", docType: "DNI", docNumber: "47120836" } }, { secretsKey: KEY }),
+  )
+  expect(await agentTexts(dataChat)).toEqual(["Gracias, ya recibimos los datos."])
+
+  // Con su cita por venir: confirmarla y enviar el cuestionario.
+  const ana = await minimal(f, { given: "Ana", surname: "Soto" })
+  const visitChat = await chatOf(ana.personId, new Date())
+  const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
+  const room = await f.run((tx) => createRoom(tx, ORG, { branchId: site!.id, name: "Unidad dental 1" }))
+  const startsAt = new Date(Date.now() + 3 * 86_400_000)
+  const [visit] = await ownerDb
+    .insert(appointment)
+    .values({
+      organizationId: ORG, branchId: site!.id, patientId: ana.patientId, professionalUserId: f.actor, roomId: room.id,
+      startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30,
+    })
+    .returning({ id: appointment.id })
+  const visitLink = await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: ana.personId, patientId: ana.patientId, conversationId: visitChat, appointmentId: visit!.id }, { secretsKey: KEY }),
+  )
+  const form = await f.run((tx) =>
+    createFormTemplate(tx, ORG, f.actor, {
+      title: "Cuestionario previo",
+      respondent: "portal",
+      schema: { sections: [{ id: "salud", title: "Salud", fields: [{ id: "medicamentos", label: "Medicamentos que tomas", type: "texto_largo" }] }] },
+    }),
+  )
+  await f.run((tx) => publishFormTemplate(tx, ORG, f.actor, form.id))
+  await f.run((tx) => submitPersonalLinkQuestionnaire(tx, ORG, visitLink.token, { medicamentos: "Ninguno" }, { secretsKey: KEY }))
+  await f.run((tx) => confirmBookingLinkAppointment(tx, ORG, visitLink.token, { secretsKey: KEY }))
+  // Confirmarla de nuevo no dice nada más: ya estaba.
+  await f.run((tx) => confirmBookingLinkAppointment(tx, ORG, visitLink.token, { secretsKey: KEY }))
+  const said = await agentTexts(visitChat)
+  expect(said).toHaveLength(2)
+  expect(said).toContain("Gracias, ya recibimos el cuestionario. El odontólogo lo revisará antes de la cita.")
+  expect(said.find((text) => text.startsWith("Listo: la cita del"))).toMatch(/quedó confirmada\.$/)
+})
+
+it("si WhatsApp ya no deja escribirle y Meta no aprobó el mensaje, la firma vale igual: no sale nada y queda en el caso", async () => {
+  const f = await clinicalFixture()
+  const lucia = await consentInChat(f, new Date(Date.now() - 48 * 3_600_000))
+  const link = await f.run((tx) =>
+    issuePersonalLink(tx, ORG, { contactId: lucia.personId, patientId: lucia.patientId, conversationId: lucia.conversationId }, { secretsKey: KEY }),
+  )
+  await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, lucia.consentId))
+  await f.run((tx) =>
+    signPersonalLinkConsent(
+      tx, ORG, link.token, lucia.consentId,
+      { docNumber: lucia.docNumber, comprehensionConfirmed: true, signatureData: FINGER },
+      {},
+      { secretsKey: KEY },
+    ),
+  )
+  const [signed] = await ownerDb.select().from(consentDocument).where(eq(consentDocument.id, lucia.consentId))
+  expect(signed?.personSignedAt).toBeInstanceOf(Date)
+  expect(await agentTexts(lucia.conversationId)).toEqual([])
+  const [memory] = await ownerDb.select().from(agentCaseMemory).where(eq(agentCaseMemory.conversationId, lucia.conversationId))
+  expect(JSON.stringify(memory?.notes)).toContain("Firmó un consentimiento desde su enlace")
+})
+
+it("el enlace que envía el equipo queda unido a su conversación: lo que haga ahí se le responde por ese chat", async () => {
+  configurePublicLinks({ webURL: "https://app.odentia.test", cookieDomain: "odentia.test" })
+  try {
+    const f = await clinicalFixture()
+    const lucia = await consentInChat(f, new Date())
+    await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, lucia.consentId))
+    await f.run((tx) => sendPersonalLink(tx, ORG, f.actor, { patientId: lucia.patientId }, { secretsKey: KEY }))
+    const [link] = await ownerDb
+      .select()
+      .from(appointmentBookingLink)
+      .where(and(eq(appointmentBookingLink.organizationId, ORG), eq(appointmentBookingLink.patientId, lucia.patientId)))
+    expect(link?.conversationId).toBe(lucia.conversationId)
+  } finally {
+    configurePublicLinks(null)
+  }
 })
 
 it("«Ver y responder»: el presupuesto aparece en el mismo enlace, se responde y deja de servir al decidirlo", async () => {

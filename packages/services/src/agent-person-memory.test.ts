@@ -5,12 +5,12 @@ import { member, user } from "@odentia/db/schema/auth"
 import { automationConsent } from "@odentia/db/schema/automation"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { patient, patientDataConsent, patientRegistration, patientRegistrationLink } from "@odentia/db/schema/clinical"
-import { channelConnection, contact, contactIdentity, conversation } from "@odentia/db/schema/crm"
+import { agentConfig, channelConnection, contact, contactIdentity, conversation } from "@odentia/db/schema/crm"
 import { branch } from "@odentia/db/schema/org"
 import { auditEvent } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { randomUUID } from "node:crypto"
-import { beforeAll, describe, expect, it } from "vitest"
+import { beforeAll, describe, expect, it, onTestFinished } from "vitest"
 import {
   addPersonFact,
   formatPersonMemoryForPrompt,
@@ -331,6 +331,11 @@ describe("reservar desde un enlace", () => {
   }
 
   it("reserva una vez, con la operación de Agenda, y deja constancia en el caso", async () => {
+    // El enlace lo dio Sofi: está encendida. Apagada, queda solo la nota del caso.
+    await ownerDb.insert(agentConfig).values({ organizationId: ORG, enabled: true }).onConflictDoUpdate({ target: agentConfig.organizationId, set: { enabled: true } })
+    onTestFinished(async () => {
+      await ownerDb.update(agentConfig).set({ enabled: false }).where(eq(agentConfig.organizationId, ORG))
+    })
     const eva = await person("eva-enlace")
     // Aún no es paciente y la clínica no tiene activo el registro en línea: no hay con qué pedirle sus datos.
     await expect(run((tx) => createBookingLink(tx, ORG, { conversationId: eva.conversationId }, { secretsKey: KEY }))).rejects.toMatchObject({ code: "BOOKING_NEEDS_PATIENT" })

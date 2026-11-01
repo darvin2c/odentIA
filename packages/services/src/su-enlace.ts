@@ -10,6 +10,7 @@ import {
   type MissingPersonDatum,
   normalizePhone,
   phoneFormatError,
+  productWords,
   type RegistrationConfig,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
@@ -51,6 +52,7 @@ import {
   requireLiveLink,
   reserveBookingLink,
   resolvePersonalLink,
+  tellConversation,
 } from "./booking-links.js"
 import { serviceRecipient } from "./budget-send.js"
 import { listBudgets } from "./budgets.js"
@@ -66,7 +68,7 @@ import { createContactNote } from "./crm-workspace.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { buildTicketSnapshot, renderTicketPdf } from "./financial-document-pdf.js"
 import { renderHealthDocumentPdf } from "./health-documents.js"
-import { findOrgCountry, findOrgLocale } from "./locale.js"
+import { findOrgCountry, findOrgLocale, orgProduct } from "./locale.js"
 import { openRoute, previewRoute } from "./message-gate.js"
 import { consentStatusOf } from "./message-permission.js"
 import { clinicAsksHealth, getPatientMissingData, getPatientRegistrationConfig } from "./patient-registration.js"
@@ -822,6 +824,7 @@ export async function submitPersonalLinkData(
   orgId: string,
   token: string,
   input: PersonalLinkDataInput,
+  deps: { secretsKey?: Buffer } = {},
 ): Promise<{ received: true }> {
   const link = await requireLiveLink(tx, orgId, token, true)
   const missing = await missingOf(tx, orgId, link)
@@ -846,6 +849,20 @@ export async function submitPersonalLinkData(
         eq(appointmentBookingLink.id, link.row.id),
       ),
     )
+  await thankInChat(
+    tx,
+    orgId,
+    link,
+    {
+      note: "Completó sus datos desde su enlace.",
+      message: "Gracias, ya recibimos los datos.",
+      key: `enlace-datos:${link.row.id}`,
+      reason: "La persona completó sus datos desde su enlace",
+      kind: "datos",
+      title: "recibió sus datos",
+    },
+    deps,
+  )
   return { received: true }
 }
 
@@ -1216,6 +1233,7 @@ export async function decidePersonalLinkBudget(
   token: string,
   budgetId: string,
   input: DecidePortalBudgetInput,
+  deps: { secretsKey?: Buffer } = {},
 ): Promise<PersonalLinkBudgetAnswer> {
   const link = await requireLiveLink(tx, orgId, token, true)
   const patientId = requireLinkDecider(link)
@@ -1235,6 +1253,20 @@ export async function decidePersonalLinkBudget(
       entityId: budgetId,
       metadata: { status: result.budget.status, origin: "paciente" },
     })
+    await thankInChat(
+      tx,
+      orgId,
+      link,
+      {
+        note: `Respondió su presupuesto desde su enlace: ${result.budget.status}.`,
+        message: "Gracias, ya recibimos la respuesta al presupuesto.",
+        key: `enlace-presupuesto:${budgetId}:${result.budget.status}`,
+        reason: "La persona respondió su presupuesto desde su enlace",
+        kind: "presupuesto",
+        title: "recibió su respuesta al presupuesto",
+      },
+      deps,
+    )
   }
   const context = await portalBudgetContext(tx, orgId, [budgetId], true)
   return {
@@ -1304,6 +1336,30 @@ export async function getPersonalLinkConsent(
   }
 }
 
+/**
+ * Lo que hizo en su enlace se le agradece por su conversación, sin decir qué
+ * procedimiento es: recepción lee la conversación y no la historia. Las palabras
+ * sirven igual a quien se trata de tú o de usted. Pasadas las 24 horas de WhatsApp
+ * sale «Recibido desde su enlace» en su lugar (ADR 0129).
+ */
+async function thankInChat(
+  tx: Db,
+  orgId: string,
+  link: ResolvedPersonalLink,
+  input: { note: string; message: string; key: string; reason: string; kind: string; title: string },
+  deps: { secretsKey?: Buffer },
+): Promise<void> {
+  const { kind, title, ...said } = input
+  const { timezone } = await findOrgLocale(tx, orgId)
+  await tellConversation(
+    tx,
+    orgId,
+    link.row,
+    { ...said, done: { kind, title, at: new Date().toISOString(), timeZone: timezone } },
+    deps,
+  )
+}
+
 /** Firma en su enlace: escribe su documento y firma con el dedo; el profesional confirma en la cita. */
 export async function signPersonalLinkConsent(
   tx: Db,
@@ -1312,11 +1368,27 @@ export async function signPersonalLinkConsent(
   consentId: string,
   input: { docNumber: string; comprehensionConfirmed: boolean; signatureData: unknown },
   evidence: SignatureEvidence = {},
+  deps: { secretsKey?: Buffer } = {},
 ): Promise<{ signed: true }> {
   const link = await requireLiveLink(tx, orgId, token, true)
   if (!link.patientId) throw linkExpired()
   await requireLinkConsent(tx, orgId, link, consentId)
   await signConsentByLink(tx, orgId, link.row.contactId, consentId, input, evidence)
+  const { clinician } = productWords(await orgProduct(tx, orgId))
+  await thankInChat(
+    tx,
+    orgId,
+    link,
+    {
+      note: "Firmó un consentimiento desde su enlace: falta que el profesional lo confirme en su cita.",
+      message: `Gracias por firmar el consentimiento. El ${clinician.one} lo revisará antes de empezar.`,
+      key: `enlace-firma:${consentId}`,
+      reason: "La persona firmó un consentimiento desde su enlace",
+      kind: "enlace",
+      title: "recibió la firma de un consentimiento",
+    },
+    deps,
+  )
   return { signed: true }
 }
 
@@ -1335,14 +1407,31 @@ export async function submitPersonalLinkQuestionnaire(
   orgId: string,
   token: string,
   answers: unknown,
+  deps: { secretsKey?: Buffer } = {},
 ): Promise<{ submitted: true }> {
   const link = await requireLiveLink(tx, orgId, token, true)
   if (!link.patientId || !(await questionnaireOf(tx, orgId, link))) throw linkExpired()
-  return submitQuestionnaireFromLink(
+  const submitted = await submitQuestionnaireFromLink(
     tx,
     { orgId, patientId: link.patientId, contactId: link.row.contactId },
     answers,
   )
+  const { clinician } = productWords(await orgProduct(tx, orgId))
+  await thankInChat(
+    tx,
+    orgId,
+    link,
+    {
+      note: "Envió su cuestionario desde su enlace.",
+      message: `Gracias, ya recibimos el cuestionario. El ${clinician.one} lo revisará antes de la cita.`,
+      key: `enlace-cuestionario:${link.row.id}:${link.appointment?.id ?? ""}`,
+      reason: "La persona envió su cuestionario desde su enlace",
+      kind: "enlace",
+      title: "recibió su cuestionario",
+    },
+    deps,
+  )
+  return submitted
 }
 
 // ------------------------------------------------- enviarle su enlace ---
@@ -1502,9 +1591,11 @@ export async function sendPersonalLink(
     tx,
     orgId,
     // «Ver lo pendiente»: abre lo que tiene pendiente, no una reserva sin usar.
+    // Con su conversación: lo que haga en el enlace se le responde por ese chat.
     {
       contactId: recipient.contactId,
       patientId: input.patientId,
+      conversationId: route.conversationId,
       createdBy: actorUserId,
       booking: false,
     },

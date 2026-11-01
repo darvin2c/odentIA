@@ -258,7 +258,7 @@ async function adoptIdentity(
       })
       .where(and(eq(contact.organizationId, orgId), eq(contact.id, personId)))
     // El nombre de un canal se reemplaza sin más; uno que alguien guardó (Sofi o el equipo) queda dicho.
-    // Completar la parte que faltaba no es cambiar de nombre: es lo esperado (ADR 0129).
+    // Completar la parte que faltaba no es cambiar de nombre: es lo esperado (ADR 0130).
     const sameName = (a?: string | null, b?: string | null) => nameWords(a ?? "").join(" ") === nameWords(b ?? "").join(" ")
     const completes =
       (!current.familyName && sameName(current.givenNames, identity.givenNames)) ||
@@ -1085,7 +1085,7 @@ export async function updatePatient(
   const demographics = Object.fromEntries(Object.keys(demographicsSchema.shape).map(key => [key, current[key as keyof PatientRow]]))
   const countryCode = await findOrgCountry(tx, orgId)
   // Lo guardado que no cambia no se vuelve a juzgar por el país de la clínica. Nombres y apellidos
-  // van juntos al escribirlos: editar otro dato no pide los que nadie le dijo (ADR 0129).
+  // van juntos al escribirlos: editar otro dato no pide los que nadie le dijo (ADR 0130).
   const errors = validateDemographics({ ...demographics, ...demographicPatch }, await patientOrganizationToday(tx, orgId), countryCode, demographics, {
     partialName: !("givenNames" in demographicPatch || "familyName" in demographicPatch),
   })

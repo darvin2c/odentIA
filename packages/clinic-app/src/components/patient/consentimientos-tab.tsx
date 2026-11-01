@@ -51,6 +51,8 @@ const cancelSchema = z.object({
 
 export const CONSENT_EVENT_LABELS: Record<string, string> = {
   pendiente: "Creado (pendiente de firma)",
+  enlace_enviado: "Enviado para firmar desde su teléfono",
+  enlace_firmado: "Firmó desde su enlace",
   informado: "Informado por el profesional",
   firmado: "Firmado",
   revocado: "Revocado",

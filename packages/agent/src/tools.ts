@@ -1168,7 +1168,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       const display = displayName?.trim()
       if (!given && !family && !display) return "No se guardó nada: no venía un nombre."
       const said = composeDisplayName({ givenNames: given, familyName: family }) || display || ""
-      // Se guarda lo que dijo: «Soy Carla» ya es saber con quién habla, y lo demás lo completa al registrarse (ADR 0129).
+      // Se guarda lo que dijo: «Soy Carla» ya es saber con quién habla, y lo demás lo completa al registrarse (ADR 0130).
       // El nombre visible lo arma la base con sus nombres y apellidos; el suelto vale solo si no viene ninguno.
       const names = {
         ...(given ? { givenNames: given } : {}),

@@ -950,7 +950,7 @@ export async function updatePersonIdentity(
     .join(" ")
   if (composed && trimmed.displayName === undefined) merged.displayName = composed
   if (!merged.displayName) throw validation("Escribe el nombre de la persona")
-  // Aún no es paciente: se guarda lo que se sabe de su nombre y lo demás lo completa al registrarse (ADR 0129).
+  // Aún no es paciente: se guarda lo que se sabe de su nombre y lo demás lo completa al registrarse (ADR 0130).
   const errors = validateDemographics(
     merged,
     await patientOrganizationToday(tx, orgId),

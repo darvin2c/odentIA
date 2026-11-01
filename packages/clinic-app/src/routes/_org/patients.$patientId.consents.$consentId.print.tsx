@@ -10,7 +10,7 @@ export const Route = createFileRoute("/_org/patients/$patientId/consents/$consen
 })
 
 /**
- * El consentimiento en su propia dirección: pendiente, la hoja para firmar en papel; firmado, el guardado.
+ * El consentimiento en su propia dirección: pendiente, la hoja para firmar en papel o lo que firmó en su enlace; firmado, el guardado.
  * Queda porque hay enlaces guardados; la hoja es el PDF, como en la superficie lateral.
  */
 function ConsentPrintPage() {

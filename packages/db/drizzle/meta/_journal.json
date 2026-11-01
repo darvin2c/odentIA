@@ -267,6 +267,13 @@
       "when": 1793519349252,
       "tag": "0037_no_es_representante",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1793543992348,
+      "tag": "0038_historia_de_la_firma_por_enlace",
+      "breakpoints": true
     }
   ]
 }

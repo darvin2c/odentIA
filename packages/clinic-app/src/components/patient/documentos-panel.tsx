@@ -36,8 +36,8 @@ import { useBudgetPapers } from "../../lib/budget-papers"
 import { type BudgetWithTotals, budgetNumberLabel, valueOption } from "../../lib/budgets"
 import {
   type ClinicalOrder,
-  CONSENT_STATUS_LABELS,
   type ConsentDocument,
+  consentStatusWord,
   type FormResponse,
   fetchConsents,
   fetchFormResponses,
@@ -589,7 +589,7 @@ export function DocumentosSection({
         }
       }),
     ...(consents.data?.data ?? []).map((consent): Row => {
-      const date = consent.signedAt ?? consent.createdAt
+      const date = consent.signedAt ?? consent.personSignedAt ?? consent.createdAt
       return {
         key: `consentimiento-${consent.id}`,
         kind: "consentimiento",
@@ -605,7 +605,7 @@ export function DocumentosSection({
         }`,
         date,
         status: {
-          label: CONSENT_STATUS_LABELS[consent.status],
+          label: consentStatusWord(consent),
           tone:
             consent.status === "firmado"
               ? "success"

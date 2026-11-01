@@ -121,6 +121,8 @@ function consentKit(data: ConsentPrint, clinic: DocumentClinic) {
  * con su trazo (persona y profesional), testigo, nivel de firma, huella y, con
  * `revocation`, la revocación. El firmado se guarda sin ella; la revocación es otro
  * PDF. La huella SHA-256 se calcula sobre estos bytes; los ya guardados no se tocan.
+ * Firmado en su enlace y aún pendiente: lo que firmó, con el aviso de que falta que el
+ * profesional lo confirme. Ese no se guarda ni se envía.
  */
 export async function renderConsentPdf(
   data: ConsentPrint,
@@ -140,6 +142,16 @@ export async function renderConsentPdf(
     consentBody(kit, data)
     return kit.finish()
   }
+  // Lo firmó en su enlace y el profesional aún no lo confirma: firmado por la persona no es firmado.
+  const awaitingConfirmation = doc.status === "pendiente"
+  if (awaitingConfirmation) {
+    kit.gap(14)
+    kit.stateBox({
+      kind: "draft",
+      title: "FALTA CONFIRMAR",
+      detail: "Lo firmó desde su enlace. Falta que el profesional le informe y lo confirme.",
+    })
+  }
   if (revocation && doc.status === "revocado") {
     kit.gap(14)
     kit.stateBox({
@@ -150,7 +162,9 @@ export async function renderConsentPdf(
   }
   const method = (doc.signatureMethod ?? "clinica") as keyof typeof CONSENT_SIGNATURE_WORDS
   const signerHeading = doc.signerKind === "representante" ? "Representante legal" : "Paciente"
-  const signedAt = doc.signedAt ? `Firmó el ${dayTimeWords(doc.signedAt, zone)}` : ""
+  // Por enlace, `signedAt` es cuando el profesional confirmó: la persona firmó antes.
+  const signerSignedAt = doc.personSignedAt ?? doc.signedAt
+  const signedAt = signerSignedAt ? `Firmó el ${dayTimeWords(signerSignedAt, zone)}` : ""
   const signerLines = [
     { text: doc.signerName, strong: true },
     ...(doc.signerDoc ? [{ text: doc.signerDoc }] : []),
@@ -164,14 +178,16 @@ export async function renderConsentPdf(
   ]
   // El profesional confirma con su perfil (nombre y colegiatura), sin trazo: firma electrónica.
   const professionalStrokes = strokesOf(doc.professionalSignature)
-  const informerLines = [
-    { text: doc.informerName ?? "-", strong: true },
-    ...(credentialOf(doc.informerTitle, doc.informerRegistration)
-      ? [{ text: credentialOf(doc.informerTitle, doc.informerRegistration) ?? "" }]
-      : []),
-    { text: doc.informedAt ? `Informó el ${dayTimeWords(doc.informedAt, zone)}` : "" },
-    ...(professionalStrokes ? [] : [{ text: "Firmado electrónicamente" }]),
-  ]
+  const informerLines: { text: string; strong?: boolean }[] = awaitingConfirmation
+    ? [{ text: "Falta su confirmación" }]
+    : [
+        { text: doc.informerName ?? "-", strong: true },
+        ...(credentialOf(doc.informerTitle, doc.informerRegistration)
+          ? [{ text: credentialOf(doc.informerTitle, doc.informerRegistration) ?? "" }]
+          : []),
+        { text: doc.informedAt ? `Informó el ${dayTimeWords(doc.informedAt, zone)}` : "" },
+        ...(professionalStrokes ? [] : [{ text: "Firmado electrónicamente" }]),
+      ]
   const signatures = professionalStrokes
     ? [
         { heading: signerHeading, strokes: strokesOf(doc.signatureData), lines: signerLines },
