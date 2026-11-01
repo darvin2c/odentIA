@@ -482,3 +482,20 @@ for (const width of [1440, 390]) {
     }
   })
 }
+
+test("«Ver N más» de los casos lleva adonde se ven todos", async ({ owner, fixtureDb }) => {
+  const organizationId = owner.org.id
+  const names = ["Caso Uno", "Caso Dos", "Caso Tres", "Caso Cuatro", "Caso Cinco"]
+  for (const name of names) {
+    const [person] = await fixtureDb.insert(contact).values({ organizationId, displayName: name }).returning({ id: contact.id })
+    // Son de recepción: no aparecen en «Mías y de mi área» de quien dirige.
+    const [task] = await fixtureDb.insert(crmTask).values({ organizationId, title: `Te lo pasó Sofi: ${name}`, area: "recepcion", contactId: person!.id, createdBy: "agent" }).returning({ id: crmTask.id })
+    await fixtureDb.insert(agentHandoff).values({ organizationId, contactId: person!.id, taskId: task!.id, reason: name, summary: name, priority: "media" })
+  }
+  const page = owner.page
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await gotoHydrated(page, tenant(owner.org.slug, "/home"))
+  await page.getByRole("region", { name: "Te espera" }).getByRole("listitem").filter({ hasText: "casos más de" }).getByRole("link").click()
+  await expect(page).toHaveURL(/\/tasks\?.*alcance=clinica/)
+  for (const name of names) await expect(page.getByText(`Te lo pasó Sofi: ${name}`)).toBeVisible()
+})

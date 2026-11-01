@@ -109,7 +109,7 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): WaitingT
       const missing = row.missing.map((key) => CLOSING_WORDS[key] ?? key)
       return {
         title: row.patientName,
-        ask: `Su atención de ${daysAgo(row.startedAt, context)} ${formatClock(row.startedAt, context.locale, context.timezone)} quedó sin firmar`,
+        ask: `Su atención de ${daysAgo(row.startedAt, context)} a las ${formatClock(row.startedAt, context.locale, context.timezone)} quedó sin firmar`,
         detail: missing.length > 0 ? `Falta ${listed(missing)}` : "Lista para firmar",
         action: "Revisar",
       }

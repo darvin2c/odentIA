@@ -64,6 +64,8 @@ interface PersonPanelData {
   canTeach: boolean
 }
 
+const oneLine = (text: string) => text.replace(/s+/g, " ").trim()
+
 export interface PersonPanelTarget {
   conversationId: string
   /** El tema que se responde; sin él, un mensaje normal. */
@@ -234,6 +236,11 @@ export function PersonPanel({
   const channel = panel?.channel ? channelLabel(panel.channel) : null
   const description = [panel?.patientId ? "Paciente" : null, channel, panel?.topic ? timeAgo(panel.topic.createdAt) : null].filter(Boolean).join(" · ")
   const question = panel?.topic?.quote ?? panel?.thread.filter((item) => item.from === "person").at(-1)?.text ?? ""
+  const saidByPerson = new Set(panel?.thread.filter((item) => item.from === "person").map((item) => oneLine(item.text)) ?? [])
+  // Lo que preguntó puede ser anterior a los últimos mensajes: es lo que se va a citar, así que se dice.
+  const quoteHidden = !!panel?.topic?.quote && panel.thread.length > 0 && !saidByPerson.has(oneLine(panel.topic.quote))
+  // Un motivo que solo repite lo que dijo no explica nada.
+  const reasonAdds = !!panel?.topic && oneLine(panel.topic.reason) !== oneLine(panel.topic.quote ?? "") && !saidByPerson.has(oneLine(panel.topic.reason))
 
   const submit = () => {
     // Enter no pasa por el botón: mientras sale el mensaje, otro Enter le llegaría dos veces.
@@ -477,10 +484,11 @@ export function PersonPanel({
               <p className="self-start rounded-2xl bg-primary-soft px-3 py-2 text-sm">«{panel.topic.quote}»</p>
             ) : null}
 
-            {panel.topic ? (
+            {panel.topic && (reasonAdds || quoteHidden || panel.topic.asks || panel.topic.pending) ? (
               <div className="rounded-xl border border-primary/25 bg-primary-soft/40 p-3 text-sm">
                 <p className="text-[13px] font-bold text-primary-soft-foreground">Por qué te lo pasó {receptionName}</p>
-                <p>{panel.topic.reason}</p>
+                {reasonAdds ? <p>{panel.topic.reason}</p> : null}
+                {quoteHidden ? <p className={reasonAdds ? "mt-1" : undefined}>Preguntó: «{panel.topic.quote}»</p> : null}
                 {panel.topic.asks ? <p className="mt-1">Pide: {panel.topic.asks}</p> : null}
                 {panel.topic.pending ? <p className="mt-1 font-semibold">Falta: {panel.topic.pending}</p> : null}
               </div>

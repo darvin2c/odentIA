@@ -100,7 +100,7 @@ describe("textos de «Te espera»", () => {
     const text = waitingText(stale, context)
     expect(text).toMatchObject({ title: "Lucía Fernández", action: "Revisar", detail: "Falta el diagnóstico y la evolución" })
     // La hora va en el formato de la clínica; el día, contado en su zona.
-    expect(text.ask).toMatch(/^Su atención de ayer 10:04.* quedó sin firmar$/)
+    expect(text.ask).toMatch(/^Su atención de ayer a las 10:04.* quedó sin firmar$/)
     expect(waitingText({ ...stale, missing: [] }, context).detail).toBe("Lista para firmar")
   })
 
