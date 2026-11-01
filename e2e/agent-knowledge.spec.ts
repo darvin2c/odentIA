@@ -1,10 +1,9 @@
-import { agentKnowledgeGap, agentLesson } from "@odentia/db/schema/agent"
+import { agentLesson } from "@odentia/db/schema/agent"
 import { member } from "@odentia/db/schema/auth"
 import { branch } from "@odentia/db/schema/org"
 import type { Page } from "@playwright/test"
 import { and, eq } from "drizzle-orm"
-import { simulateTelegramInbound } from "./channels"
-import { API, tenant } from "./env"
+import { tenant } from "./env"
 import { api, call, chooseDay, expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import { surface as sideSurface } from "./surface"
@@ -27,62 +26,26 @@ const day = (offset: number) =>
 const QUESTION = "¿Tienen estacionamiento para bicicletas?"
 const TEAM_ANSWER = "Sí, hay un bicicletero en la entrada."
 
-test("conocimiento: lo que no supo responder, lo que solo tú sabes, respuestas en filas con su detalle y lo que toma de los datos", async ({
+test("conocimiento: lo que solo tú sabes, respuestas en filas con su detalle y lo que toma de los datos", async ({
   owner,
   fixtureDb,
-  nextEventId,
 }, info) => {
   test.setTimeout(240_000)
   const { page, org } = owner
-  const tg = await call<{ id: string; webhookSecret: string }>(page, "POST", "/api/channels/connections", org.slug, {
-    channel: "telegram", provider: "telegram_bot_api", displayName: "Bot E2E", config: { botToken: "e2e" },
-  }, 201)
-  const user = nextEventId()
-  expect(await simulateTelegramInbound(page, API, tg.id, tg.webhookSecret, {
-    fromId: user, chatId: user, text: QUESTION, updateId: nextEventId(),
-  })).toBe(200)
-  const conversations = () => call<Array<{ id: string }>>(page, "GET", "/api/conversations", org.slug)
-  await expect.poll(async () => (await conversations()).length, { timeout: 30_000 }).toBe(1)
-  const conversationId = (await conversations())[0]!.id
-  // Las preguntas sin respuesta se registran como lo hace el agente al buscar
-  // sin resultado (el modelo de pruebas no usa herramientas); la respuesta del
-  // equipo sí sale por el recorrido real. Las que se registran después de esa
-  // respuesta quedan sin nadie que las haya respondido.
-  const gap = { organizationId: org.id, conversationId }
-  await fixtureDb.insert(agentKnowledgeGap).values({ ...gap, question: QUESTION, query: "estacionamiento bicicletas" })
-  await call(page, "POST", `/api/conversations/${conversationId}/messages`, org.slug, { text: TEAM_ANSWER }, 201)
-  await fixtureDb.insert(agentKnowledgeGap).values([
-    { ...gap, question: "¿Venden cepillos?", query: "cepillos" },
-    { ...gap, question: "¿Tienen wifi?", query: "wifi" },
-    { ...gap, question: "¿Puedo ir con mi perro?", query: "perro" },
-  ])
   // Segunda sede: el filtro por sede solo tiene sentido con más de una.
   const [first] = await fixtureDb.select({ id: branch.id, name: branch.name }).from(branch).where(eq(branch.organizationId, org.id))
   await fixtureDb.insert(branch).values({ organizationId: org.id, name: "Miraflores", timezone: "America/Lima" })
 
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, "/agent/knowledge"))
-  const gaps = page.getByRole("region", { name: /^No supo responder/ })
   const basics = page.getByRole("region", { name: "Lo que solo tú sabes" })
   const answers = page.getByRole("region", { name: /^Respuestas oficiales/ })
   const sources = page.getByRole("region", { name: "Lo que toma de tus datos" })
   const rows = answers.getByRole("listitem")
   const row = (title: string) => rows.filter({ hasText: title })
 
-  // No supo responder: lo que el equipo ya respondió se guarda con un toque o se edita antes; lo demás se responde.
-  await expect(gaps.getByRole("heading")).toHaveText("No supo responder · 4")
-  const answeredGap = gaps.getByRole("listitem").filter({ hasText: QUESTION })
-  await expect(answeredGap).toContainText("Tu equipo respondió")
-  await expect(answeredGap).toContainText(`«${TEAM_ANSWER}»`)
-  await expect(answeredGap).toContainText("1 vez esta semana")
-  await expect(answeredGap.getByRole("button", { name: "Editar antes" })).toBeVisible()
-  await expect(gaps.getByRole("button", { name: "Guardar como respuesta oficial" })).toHaveCount(1)
-  // Solo las primeras quedan a la vista.
-  await expect(gaps.getByRole("button", { name: "Responder", exact: true })).toHaveCount(2)
-  await gaps.getByRole("button", { name: "Ver las 4" }).click()
-  await expect(gaps.getByRole("button", { name: "Responder", exact: true })).toHaveCount(3)
-
-  // Conocimiento es de Sofi (ADR 0120).
+  // Conocimiento es de Sofi (ADR 0120), y solo muestra lo que sabe: lo que no encontró se revisa en Aprender (ADR 0123).
+  await expect(page.getByRole("region", { name: /^No supo responder/ })).toHaveCount(0)
   await expect(page.getByText("Es lo que usa para responder a pacientes. Clío y Argos no lo usan.")).toBeVisible()
 
   // Lo que solo tú sabes: ocho preguntas opcionales, cada una dice si tiene respuesta, y una sola acción.
@@ -138,36 +101,19 @@ test("conocimiento: lo que no supo responder, lo que solo tú sabes, respuestas 
   await basicForm.getByRole("button", { name: "Cancelar" }).click()
   await expect(basicForm).toBeHidden()
 
-  // «Editar antes» abre el formulario con la pregunta y lo que respondió el equipo; guardar tal cual no pide nada más.
-  await answeredGap.getByRole("button", { name: "Editar antes" }).click()
-  const answerForm = sideSurface(page, { name: "Guardar como respuesta oficial", exact: true })
-  await expect(answerForm.getByLabel("La pregunta", { exact: true })).toHaveValue(QUESTION)
-  await expect(answerForm.getByLabel("La respuesta", { exact: true })).toHaveValue(TEAM_ANSWER)
-  await expect(answerForm.getByRole("link", { name: "Ver la conversación" })).toBeVisible()
-  await answerForm.getByRole("button", { name: "Cancelar" }).click()
-  await expect(answerForm).toBeHidden()
-  await gaps.getByRole("button", { name: "Guardar como respuesta oficial" }).click()
-  await expect(gaps.getByRole("heading")).toHaveText("No supo responder · 3")
-  await expect(row(QUESTION)).toContainText("Publicada")
-  await expect(gaps.getByRole("button", { name: "Guardar como respuesta oficial" })).toHaveCount(0)
-
-  // «Responder» una sin respuesta: la forma en que la preguntaron queda como otra forma de pedirla.
-  await gaps.getByRole("listitem").filter({ hasText: "¿Venden cepillos?" }).getByRole("button", { name: "Responder", exact: true }).click()
-  await expect(answerForm.getByLabel("La respuesta", { exact: true })).toHaveValue("")
-  await answerForm.getByLabel("La pregunta", { exact: true }).fill("Venta de cepillos")
-  await answerForm.getByLabel("La respuesta", { exact: true }).fill("Sí, en recepción.")
-  await answerForm.getByRole("button", { name: "Guardar y publicar" }).click()
-  await expect(answerForm).toBeHidden()
-  await expect(row("Venta de cepillos")).toContainText("También la piden como «¿Venden cepillos?»")
-  // Lo que no corresponde responder se descarta desde el mismo formulario.
-  await gaps.getByRole("listitem").filter({ hasText: "¿Puedo ir con mi perro?" }).getByRole("button", { name: "Responder", exact: true }).click()
-  await answerForm.getByRole("button", { name: "No hace falta responderla: descartar" }).click()
-  await expect(answerForm).toBeHidden()
-  await expect(gaps.getByRole("heading")).toHaveText("No supo responder · 1")
+  // Dos respuestas nuevas: para todas las sedes y sin vencimiento.
+  const promoForm = sideSurface(page, { name: "Nueva respuesta", exact: true })
+  for (const [title, body] of [[QUESTION, TEAM_ANSWER], ["Venta de cepillos", "Sí, en recepción."]] as const) {
+    await answers.getByRole("button", { name: "Nueva respuesta", exact: true }).click()
+    await promoForm.getByLabel("La pregunta", { exact: true }).fill(title)
+    await promoForm.getByLabel("La respuesta", { exact: true }).fill(body)
+    await promoForm.getByRole("button", { name: "Guardar", exact: true }).click()
+    await expect(promoForm).toBeHidden()
+    await expect(row(title)).toContainText("Publicada")
+  }
 
   // Nueva respuesta de una sede y ya vencida: la fila dice sede, vencimiento y estado.
   await answers.getByRole("button", { name: "Nueva respuesta", exact: true }).click()
-  const promoForm = sideSurface(page, { name: "Nueva respuesta", exact: true })
   await promoForm.getByLabel("La pregunta", { exact: true }).fill("Promoción de blanqueamiento")
   await promoForm.getByLabel("La respuesta", { exact: true }).fill("Dos por uno hasta fin de mes.")
   await promoForm.getByRole("combobox", { name: "Sede" }).click()
@@ -272,7 +218,6 @@ test("conocimiento: lo que no supo responder, lo que solo tú sabes, respuestas 
     "¿Tienen estacionamiento?:vigente",
   ].sort())
   expect(listed.find((entry) => entry.title === "¿Tienen estacionamiento?")?.basicKey).toBe("estacionamiento")
-  expect(listed.find((entry) => entry.title === "Venta de cepillos")?.askForms).toEqual(["¿Venden cepillos?"])
 
   // Teléfono: «Nueva respuesta» fija al pie, lo que solo tú sabes con su acción a todo el ancho y filas de dos líneas, sin desbordes.
   await page.setViewportSize({ width: 390, height: 844 })
@@ -287,7 +232,6 @@ test("conocimiento: lo que no supo responder, lo que solo tú sabes, respuestas 
   expect((await basicsButton.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
   await expect(rows.first()).toContainText(/Publicada · todas las sedes|Vence el|Cambio por aprobar · todas las sedes/)
   expect((await rows.first().getByRole("button").boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
-  expect((await gaps.getByRole("button", { name: "Responder", exact: true }).boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("conocimiento-movil", { body: await page.screenshot({ fullPage: true, path: info.outputPath("conocimiento-movil.png") }), contentType: "image/png" })
   // Cada fila de datos se toca entera.
@@ -311,8 +255,6 @@ test("conocimiento: lo que no supo responder, lo que solo tú sabes, respuestas 
   // Quien solo decide por el agente (recepción) no administra el conocimiento: lo decide el servidor.
   await fixtureDb.update(member).set({ role: "reception" })
     .where(and(eq(member.organizationId, org.id), eq(member.userId, owner.user.id)))
-  expect((await api(page, "GET", "/api/agent/knowledge/gaps", org.slug)).status).toBe(403)
   expect((await api(page, "GET", "/api/agent/knowledge/basics", org.slug)).status).toBe(403)
   expect((await api(page, "GET", "/api/agent/knowledge/sources", org.slug)).status).toBe(403)
-  expect((await api(page, "POST", "/api/agent/knowledge/gaps/discard", org.slug, { ids: [listed[0]!.id] })).status).toBe(403)
 })

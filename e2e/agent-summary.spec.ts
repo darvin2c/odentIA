@@ -95,8 +95,8 @@ test("agente: el resumen dice cómo le fue, qué aprendió y qué pasa cuando no
   await expect(page.getByRole("heading", { level: 1, name: "Agente" })).toBeVisible()
   const needs = page.getByRole("region", { name: "Necesita de ti" })
   const tiles = needs.getByRole("link")
-  await expect(tiles).toHaveCount(3)
-  for (const [index, name] of ["Respuestas por revisar", "Lecciones por aprobar", "Preguntas sin respuesta"].entries()) {
+  await expect(tiles).toHaveCount(2)
+  for (const [index, name] of ["Respuestas por revisar", "Lecciones por aprobar"].entries()) {
     await expect(tiles.nth(index)).toContainText(name)
   }
   // Los casos del agente se cuentan en el botón de la cabecera (ADR 0118): el resumen no los repite.
@@ -137,13 +137,11 @@ test("agente: el resumen dice cómo le fue, qué aprendió y qué pasa cuando no
   // --- Teléfono: fichas de dos en dos, cada agente en una fila que navega y «Pendientes» al final de las pestañas ---
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, "/agent"))
-  await expect(tiles).toHaveCount(3)
-  const tileBoxes = await Promise.all([0, 1, 2].map((index) => box(tiles.nth(index))))
-  const [first, second, third] = tileBoxes
-  if (!first || !second || !third) throw new Error("Faltan fichas")
+  await expect(tiles).toHaveCount(2)
+  const tileBoxes = await Promise.all([0, 1].map((index) => box(tiles.nth(index))))
+  const [first, second] = tileBoxes
+  if (!first || !second) throw new Error("Faltan fichas")
   expect(Math.abs(first.y - second.y)).toBeLessThan(2)
-  expect(third.y).toBeGreaterThan(first.y + first.height - 1)
-  expect(Math.abs(first.x - third.x)).toBeLessThan(2)
   expect(second.x).toBeGreaterThan(first.x + first.width - 1)
   for (const tile of tileBoxes) expect(tile.height).toBeGreaterThanOrEqual(44)
   const tabs = page.getByRole("navigation", { name: "Secciones del agente" })

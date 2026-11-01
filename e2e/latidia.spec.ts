@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto"
 import { LEGAL } from "@odentia/auth/legal"
 import type { Db } from "@odentia/db"
+import { agentKnowledgeGap } from "@odentia/db/schema/agent"
 import { account, user as users } from "@odentia/db/schema/auth"
 import { encounter, patientPayment, serviceCatalog } from "@odentia/db/schema/clinical"
+import { message } from "@odentia/db/schema/crm"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import type { Page } from "@playwright/test"
-import { eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import { simulateWhatsAppInbound } from "./channels"
 import { hostUrl, latidiaUrl, tenant } from "./env"
 import { chooseOption, expect, PASSWORD, test } from "./fixtures"
@@ -254,6 +256,66 @@ test("latidIA: en la Bandeja cada tema se responde por su cuenta", async ({ brow
   await page.getByRole("button", { name: "Dejar pendiente" }).click()
   await expect(list).toContainText("2 temas por atender")
   await page.screenshot({ path: testInfo.outputPath("dejar-pendiente.png") })
+  await context.close()
+})
+
+test("latidIA: lo que el agente buscó y no encontró se revisa en Aprender y se enseña con una lección", async ({ browser, fixtureDb, passwordHash }, testInfo) => {
+  const vela = await createVela(fixtureDb, passwordHash)
+  const context = await browser.newContext({ ignoreHTTPSErrors: true })
+  const page = await context.newPage()
+  await gotoHydrated(page, latidiaUrl("app", "/login"))
+  const { api, slug, orgId } = await openConsultorio(page, vela)
+  const connection = await request<{ data: { id: string } }>(page, api, "POST", "/api/channels/connections", slug, {
+    channel: "whatsapp",
+    provider: "whatsapp_cloud_api",
+    displayName: "WA latidIA",
+    config: { phoneNumberId: "E2E-LATIDIA", wabaId: "E2E-WABA", accessToken: "e2e", appSecret: "e2e-secret", templates: [] },
+  })
+  expect(connection.status).toBe(201)
+  const question = "¿Atienden a recién nacidos?"
+  expect(await simulateWhatsAppInbound(page, api, connection.body.data.id, "e2e-secret", {
+    from: "51911100010", phoneNumberId: "E2E-LATIDIA", text: question, wamid: `wamid.${randomUUID()}`,
+  })).toBe(200)
+  const threadOf = async () => {
+    const listed = await request<{ data: Array<{ id: string; preview: { body: string | null } | null }> }>(page, api, "GET", "/api/conversations?status=open", slug)
+    return listed.body.data.find((row) => row.preview?.body === question)?.id ?? ""
+  }
+  await expect.poll(threadOf, { timeout: 30_000 }).not.toBe("")
+  const conversationId = await threadOf()
+  // Lo anota el agente al buscar sin resultado y su aviso de pase no deja traza; aquí, como lo dejan ellos.
+  const [asked] = await fixtureDb
+    .select({ id: message.id, createdAt: message.createdAt })
+    .from(message)
+    .where(and(eq(message.conversationId, conversationId), eq(message.direction, "in")))
+  const reply = "Se lo confirma el equipo por aquí."
+  await fixtureDb.insert(agentKnowledgeGap).values({
+    organizationId: orgId, conversationId, triggerMessageId: asked!.id, question, query: "recien nacidos", createdAt: asked!.createdAt,
+  })
+  await fixtureDb.insert(message).values({
+    organizationId: orgId, conversationId, direction: "out", senderKind: "agent", status: "sent", body: reply,
+  })
+
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await gotoHydrated(page, latidiaUrl(slug, "/agent/learn"))
+  await expect(page.locator("html")).toHaveAttribute("data-brand", "latidia")
+  const review = page.getByRole("region", { name: /^Por revisar/ })
+  await expect(review.getByRole("heading", { level: 2 })).toHaveText("Por revisar · 1")
+  const row = review.getByRole("listitem").filter({ hasText: question })
+  await expect(row).toContainText("Buscó y no encontró")
+  await expect(row).toContainText(reply)
+  await page.screenshot({ path: testInfo.outputPath("no-encontro.png") })
+  await row.getByRole("button", { name: "Corregir", exact: true }).click()
+  const correcting = surface(page, { name: /^Corregir una respuesta/ })
+  await correcting.getByLabel("La pregunta", { exact: true }).fill("Atención a recién nacidos")
+  await correcting.getByLabel("¿Cómo debió responder?").fill("Sí, desde el primer día de vida.")
+  await correcting.getByRole("button", { name: "Enviar corrección" }).click()
+  const lesson = surface(page, { name: "Lección propuesta", exact: true })
+  await lesson.getByRole("button", { name: "Aprobar y activar" }).click()
+  await expect(lesson).toBeHidden()
+  await expect(page.getByRole("region", { name: /^Lo aprendido/ })).toContainText("Atención a recién nacidos")
+  const knowledge = await request<{ data: Array<{ title: string; state: string; askForms: string[] }> }>(page, api, "GET", "/api/agent/knowledge", slug)
+  expect(knowledge.body.data).toEqual([expect.objectContaining({ title: "Atención a recién nacidos", state: "vigente" })])
+  expect(knowledge.body.data[0]?.askForms).toContain("recien nacidos")
   await context.close()
 })
 

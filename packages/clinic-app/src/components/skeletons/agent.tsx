@@ -75,7 +75,7 @@ function BackLink() {
 // Agente: resumen
 // ---------------------------------------------------------------------------
 
-const NEED_TILES = ["Respuestas por revisar", "Lecciones por aprobar", "Preguntas sin respuesta"]
+const NEED_TILES = ["Respuestas por revisar", "Lecciones por aprobar"]
 
 export function AgentOverviewSkeleton() {
   return (
@@ -88,7 +88,7 @@ export function AgentOverviewSkeleton() {
             <p className="text-sm text-muted-foreground max-sm:hidden">Lo que solo una persona puede decidir.</p>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-3">
+        <div className="grid grid-cols-2 gap-2 sm:gap-3">
           {NEED_TILES.map((title) => (
             <div key={title} className="flex min-h-11 flex-col rounded-xl border bg-card px-3 py-2.5 sm:gap-0.5 sm:p-4">
               <Skeleton className="my-1 h-6 w-8 sm:h-7" />
@@ -670,13 +670,6 @@ export function LearnSkeleton() {
   const canCorrect = canCorrectAgent(useCan())
   return (
     <div aria-hidden className="flex flex-col gap-5">
-      <div className="-mt-1 flex flex-col gap-1.5">
-        <Skeleton className="h-11 w-[30rem] max-w-full rounded-lg sm:h-9" />
-        <p className="text-sm text-muted-foreground">
-          Cada agente aprende lo suyo y no se mezcla con los otros. Solo el conocimiento de la clínica es de todos.
-        </p>
-      </div>
-
       <section className="flex min-w-0 flex-col gap-2.5">
         <div className="flex flex-wrap items-baseline gap-x-2">
           <h2 className="font-heading text-base font-bold">Por revisar</h2>
@@ -693,13 +686,12 @@ export function LearnSkeleton() {
                 <Line className="w-full" />
               </div>
               <div className="hidden flex-wrap items-center gap-2 md:flex">
-                <Skeleton className="h-5.5 w-20 rounded-full" />
                 <Skeleton className="h-5.5 w-28 rounded-full" />
                 <Line className="w-56" />
               </div>
               <div className="hidden gap-1.5 md:grid">
                 <div className="flex gap-2.5">
-                  <span className="w-18 shrink-0 text-muted-foreground">Preguntó</span>
+                  <span className="w-18 shrink-0 text-muted-foreground">Escribió</span>
                   <Line className="min-w-0 flex-1" />
                 </div>
                 <div className="flex gap-2.5">
@@ -730,7 +722,6 @@ export function LearnSkeleton() {
               <AgentSurface className="flex h-full flex-col items-start gap-2 p-4 text-sm">
                 <Skeleton className="h-5.5 w-20 rounded-full" />
                 <BaseLine className="w-3/4" />
-                <Line className="w-40" />
                 <Line className="w-full" />
                 <Skeleton className="h-11 w-32 rounded-md sm:h-9" />
               </AgentSurface>
@@ -741,8 +732,8 @@ export function LearnSkeleton() {
 
       <LearnFoldSection
         title="Lo aprendido"
-        hint="Cada una dice de quién es y cuánto se usa. Cualquiera se puede retirar."
-        phoneHint="De cada agente. Cualquiera se puede retirar."
+        hint="Cada una dice cuánto se usa. Cualquiera se puede retirar."
+        phoneHint="Cualquiera se puede retirar."
       >
         <div className="elevated flex flex-col rounded-xl border bg-card">
           <ul className="flex flex-col">
@@ -766,7 +757,8 @@ export function LearnPageSkeleton() {
   return (
     <PageLoading title="Agente" className="flex flex-col gap-5">
       <div className="flex flex-col gap-5">
-        <Subtitle>Revisas lo dudoso y apruebas lo que propone aprender. Lo demás no necesita tu tiempo.</Subtitle>
+        {/* Dice el nombre de recepción de la clínica: se pinta con él al llegar. */}
+        <Line className="w-[36rem] max-w-full" />
         <TabsLoading active="aprender" />
         <LearnSkeleton />
       </div>
@@ -803,24 +795,6 @@ export function KnowledgeAnswerRowsSkeleton() {
         </li>
       ))}
     </ul>
-  )
-}
-
-/** «No supo responder»: las preguntas, dentro de su tarjeta. */
-export function KnowledgeGapsSkeleton() {
-  const canWrite = usePermission("agent.write")
-  return (
-    <div aria-hidden className="flex flex-col gap-3">
-      {slots(1).map((row) => (
-        <div key={row} className="flex min-w-0 items-center justify-between gap-3">
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <BaseLine className="w-4/5" />
-            <Line className="w-24" />
-          </div>
-          {canWrite ? <Skeleton className="h-9 w-24 shrink-0 rounded-full" /> : null}
-        </div>
-      ))}
-    </div>
   )
 }
 
@@ -874,22 +848,13 @@ export function KnowledgePageSkeleton() {
         <Line className="w-[36rem] max-w-full" />
         <TabsLoading active="conocimiento" />
         <Line className="-mt-2 w-96 max-w-full" />
-        <div className="grid min-w-0 items-stretch gap-4 xl:grid-cols-2">
-          <section className="elevated flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-5 sm:p-6">
-            <div className="min-w-0">
-              <h2 className="font-heading text-base font-semibold">No supo responder</h2>
-              <p className="text-sm text-muted-foreground">Respóndelas una vez y ya las sabe.</p>
-            </div>
-            <KnowledgeGapsSkeleton />
-          </section>
-          <section className="elevated flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-4 sm:p-6">
-            <div className="min-w-0">
-              <h2 className="font-heading text-base font-semibold">Lo que solo tú sabes</h2>
-              <p className="text-sm text-muted-foreground">Lo que preguntan seguido y no está en tus datos. Es opcional.</p>
-            </div>
-            <KnowledgeBasicsSkeleton />
-          </section>
-        </div>
+        <section className="elevated flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-4 sm:p-6">
+          <div className="min-w-0">
+            <h2 className="font-heading text-base font-semibold">Lo que solo tú sabes</h2>
+            <p className="text-sm text-muted-foreground">Lo que preguntan seguido y no está en tus datos. Es opcional.</p>
+          </div>
+          <KnowledgeBasicsSkeleton />
+        </section>
         <section className="elevated flex min-w-0 flex-col overflow-hidden rounded-xl border bg-card">
           <div className="flex flex-wrap items-center gap-2.5 px-4 pt-4 pb-3 sm:px-5">
             <h2 className="min-w-0 flex-1 basis-48 font-heading text-base font-semibold">Respuestas oficiales</h2>

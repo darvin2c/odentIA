@@ -199,11 +199,11 @@ function AgentSummaryPage() {
                 <p className="text-sm text-muted-foreground max-sm:hidden">Lo que solo una persona puede decidir.</p>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-3">
+            <div className="grid grid-cols-2 gap-2 sm:gap-3">
               <NeedTile
                 count={overview.needsYou.review}
                 title="Respuestas por revisar"
-                pending="Las dudosas y una muestra al azar."
+                pending="Las dudosas, lo que no encontró y una muestra al azar."
                 done="Nada dudoso por revisar."
                 to="/agent/learn"
               />
@@ -213,14 +213,6 @@ function AgentSummaryPage() {
                 pending="Lo que propone aprender de tus correcciones."
                 done="Ninguna lección espera tu aprobación."
                 to="/agent/learn"
-              />
-              {/* «Lo que solo tú sabes» es opcional (ADR 0120): no se cuenta como algo que necesita de ti. */}
-              <NeedTile
-                count={overview.needsYou.gaps}
-                title="Preguntas sin respuesta"
-                pending="Lo que le preguntaron y no sabía."
-                done="Encontró respuesta a todo lo que buscó."
-                to="/agent/knowledge"
               />
             </div>
           </AgentSurface>

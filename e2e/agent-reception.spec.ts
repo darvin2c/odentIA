@@ -51,8 +51,8 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   for (const name of ["Clío", "Argos"]) {
     await expect(agents.getByRole("listitem").filter({ hasText: name })).toContainText("Apagado")
   }
-  // Lo que solo sabe la clínica es opcional (ADR 0120): la ficha cuenta solo lo que no supo responder.
-  await expect(page.getByRole("region", { name: "Necesita de ti" }).getByRole("link", { name: /Preguntas sin respuesta/ })).toContainText("Encontró respuesta a todo lo que buscó.")
+  // Lo que solo sabe la clínica es opcional (ADR 0120): no cuenta como algo que necesita de ti.
+  await expect(page.getByRole("region", { name: "Necesita de ti" }).getByRole("link", { name: /Respuestas por revisar/ })).toContainText("Nada dudoso por revisar.")
   await expect(page.getByRole("region", { name: "Cómo le fue esta semana" })).toContainText("Está apagado")
   // Un solo horario, el de recontacto (ADR 0084): para escribir primero; cuando la persona escribe, responde siempre.
   const recontact = page.getByRole("region", { name: "Horario de recontacto" })
@@ -190,18 +190,61 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await expect(knowsMust).toContainText("Despídete recordando la dirección.")
   await expect(knowsMust.getByRole("tab", { name: /^Escritas por la clínica · 2/ })).toBeVisible()
 
+  // Escribir algo que contradice otra regla avisa antes; lo que se reemplaza o se retira se puede restaurar (ADR 0123).
+  const clash = "Ofrece descuentos a quien pague en efectivo."
+  await knowsMust.getByRole("button", { name: "Agregar" }).first().click()
+  const clashForm = sideSurface(page, { name: "Agregar a lo que debe saber", exact: true })
+  await clashForm.getByLabel("Qué debe saber", { exact: true }).fill(clash)
+  await clashForm.getByRole("button", { name: "Guardar" }).click()
+  const contradiction = page.getByRole("alertdialog", { name: "Contradice otra regla" })
+  await expect(contradiction).toContainText("No ofrezcas descuentos ni promociones.")
+  // Pasar el cursor espera a que el diálogo termine de abrir: la captura lo muestra entero.
+  await contradiction.getByRole("button", { name: "Reemplazar" }).hover()
+  await info.attach("regla-contradice", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+  await contradiction.getByRole("button", { name: "Seguir editando" }).click()
+  await expect(contradiction).toBeHidden()
+  await expect(clashForm.getByLabel("Qué debe saber", { exact: true })).toHaveValue(clash)
+  await clashForm.getByRole("button", { name: "Guardar" }).click()
+  await contradiction.getByRole("button", { name: "Reemplazar" }).click()
+  await expect(clashForm).toBeHidden()
+  const mustRow = (text: string) => knowsMust.getByRole("listitem").filter({ hasText: text })
+  await expect(mustRow(clash)).toBeVisible()
+  await expect(mustRow("No ofrezcas descuentos ni promociones.")).toHaveCount(0)
+  await knowsMust.getByRole("button", { name: `Retirar: ${clash}` }).click()
+  const retiring = page.getByRole("alertdialog", { name: /^Retirar/ })
+  await expect(retiring).toContainText("La escribió")
+  await retiring.getByRole("button", { name: /^Retirar/ }).click()
+  await expect(retiring).toBeHidden()
+  await expect(mustRow(clash)).toHaveCount(0)
+  await knowsMust.getByRole("button", { name: "Retiradas · 2, se pueden restaurar" }).click()
+  await knowsMust.getByRole("button", { name: "Restaurar: No ofrezcas descuentos ni promociones." }).click()
+  await expect(knowsMust.getByRole("button", { name: "Retiradas · 1, se pueden restaurar" })).toBeVisible()
+  await expect(mustRow("No ofrezcas descuentos ni promociones.")).toContainText("Escrita por la clínica")
+  // «Mantener las dos» guarda la nueva sin tocar la otra.
+  const both = "Ofrece descuentos a quien venga en grupo."
+  await knowsMust.getByRole("button", { name: "Agregar" }).first().click()
+  await clashForm.getByLabel("Qué debe saber", { exact: true }).fill(both)
+  await clashForm.getByRole("button", { name: "Guardar" }).click()
+  await contradiction.getByRole("button", { name: "Mantener las dos" }).click()
+  await expect(clashForm).toBeHidden()
+  await expect(mustRow(both)).toBeVisible()
+  await expect(mustRow("No ofrezcas descuentos ni promociones.")).toBeVisible()
+  await knowsMust.getByRole("button", { name: `Retirar: ${both}` }).click()
+  await retiring.getByRole("button", { name: /^Retirar/ }).click()
+  await expect(mustRow(both)).toHaveCount(0)
+
   // Le llegan todas en cada mensaje: hay un tope y se dice cuánto falta (ADR 0119).
   await expect(knowsMust).toContainText("2 de 40 reglas.")
   for (let index = 0; index < 38; index++) {
     await call(page, "POST", "/api/agent/learning/guidance", org.slug, { body: `Regla de relleno ${index + 1}.` }, 201)
   }
   await gotoHydrated(page, tenant(org.slug, "/agent/recepcion"))
-  await expect(knowsMust).toContainText("40 de 40 reglas: para agregar otra, quita o une una.")
+  await expect(knowsMust).toContainText("40 de 40 reglas: para agregar otra, retira o une una.")
   await knowsMust.getByRole("button", { name: "Agregar" }).first().click()
   const fullForm = sideSurface(page, { name: "Agregar a lo que debe saber", exact: true })
   await fullForm.getByLabel("Qué debe saber", { exact: true }).fill("Una más.")
   await fullForm.getByRole("button", { name: "Guardar" }).click()
-  await expect(fullForm).toContainText("Ya hay 40 reglas: quita o une una antes de agregar otra")
+  await expect(fullForm).toContainText("Ya hay 40 reglas: retira o une una antes de agregar otra")
   await fullForm.getByRole("button", { name: "Cancelar" }).click()
   await expect(fullForm).toBeHidden()
   // Aprobar una regla nueva con el tope lleno pide elegir cuál reemplaza.

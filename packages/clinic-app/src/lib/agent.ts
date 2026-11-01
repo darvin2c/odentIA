@@ -112,7 +112,7 @@ export interface AgentPanelSummary {
   awaitingContact: number
   /** Casos que el agente pasó a quien mira y siguen sin resolver: el número del botón «Agente» de la cabecera. */
   openHandoffs: number
-  /** Lo que se resuelve dentro de Agente (por revisar, lecciones y lo que no supo): el número del menú. */
+  /** Lo que se resuelve dentro de Agente (por revisar y lecciones): el número del menú. */
   toResolve: number
   /** Corridas de hoy que respondieron o derivaron. */
   interventionsToday: number
@@ -297,7 +297,7 @@ export const MODEL_CHECK_TEXT = {
 
 export interface AgentOverview {
   enabled: boolean
-  needsYou: { gaps: number; review: number; lessons: number }
+  needsYou: { review: number; lessons: number }
   today: AgentOutcomes
   week: AgentOutcomes
   learned: AgentLearned
@@ -389,14 +389,21 @@ export function voicePreview(input: {
 
 /* ---------- Aprender: por revisar, lecciones y casos de prueba ---------- */
 
-export type ReviewReason = "equipo_tomo" | "repitio_pregunta" | "muestra" | "marcada"
+export type ReviewReason = "no_encontro" | "equipo_tomo" | "repitio_pregunta" | "muestra" | "marcada"
 
 export interface ReviewItem {
   id: string
   agent: string
   conversationId: string
-  traceId: string
+  traceId: string | null
   reason: ReviewReason
+  /** Lo que buscó sin encontrar nada (`no_encontro`). */
+  query: string | null
+  /** Las veces que se buscó lo mismo (`no_encontro`). */
+  asked: { total: number; week: number } | null
+  /** Lo último que se le dijo, si lo que escribió es tan corto que no se entiende solo. */
+  before: string | null
+  /** Lo que la persona escribió seguido antes de esa respuesta. */
   question: string
   reply: string
   teamReply: string | null
@@ -409,6 +416,7 @@ export interface ReviewItem {
 }
 
 export const REVIEW_REASON_LABEL: Record<ReviewReason, string> = {
+  no_encontro: "Buscó y no encontró",
   equipo_tomo: "El equipo tomó la conversación",
   repitio_pregunta: "El paciente repitió la pregunta",
   muestra: "Muestra al azar",
@@ -433,11 +441,27 @@ export const LESSON_KIND_LABEL: Record<LessonKind, string> = {
   ejemplo: "Ejemplo",
 }
 
-/** A quién se aplica una lección, dicho para la clínica. */
-export function lessonScopeLabel(scope: string, receptionName: string): string {
-  if (scope === "clinica") return "Toda la clínica"
-  if (scope === "recepcion" || scope in AGENT_NAME) return `Solo ${agentName(scope, receptionName)}`
-  return scope
+/** «4 veces esta semana» solo si pasó esta semana; si no, el total sin decir cuándo. */
+export function askedWords(asked: { total: number; week: number }): string {
+  const times = (count: number) => (count === 1 ? "1 vez" : `${count} veces`)
+  return asked.week > 0 ? `${times(asked.week)} esta semana` : times(asked.total)
+}
+
+/** La conversación alrededor de una respuesta, como la entrega `/api/agent/learning/…/conversation`. */
+export interface AnswerConversation {
+  messages: Array<{
+    id: string
+    role: "antes" | "escribio" | "respondio" | "equipo"
+    from: "persona" | "agente" | "equipo"
+    body: string
+    at: string
+  }>
+  lessonKinds: Record<CorrectionFailure, LessonKind>
+}
+
+/** «jueves, 21:13»: cuándo fue una respuesta, para quien la revisa. */
+export function reviewWhen(iso: string): string {
+  return new Date(iso).toLocaleString("es", { weekday: "long", hour: "2-digit", minute: "2-digit" })
 }
 
 /** De dónde sale una lección: una corrección o una respuesta que se dio por buena. */
@@ -446,6 +470,8 @@ export type LessonOrigin = "correccion" | "respuesta_buena"
 export interface LessonItem {
   id: string
   kind: LessonKind
+  /** `escrita`: la escribió la clínica; `aprendida`: salió de una corrección o de una respuesta buena. */
+  source: "escrita" | "aprendida"
   scope: string
   /** El agente cuya respuesta la originó. */
   agent: string
@@ -477,7 +503,10 @@ export interface LessonImpact {
 }
 
 export interface LearningOverview {
+  /** Las más recientes; la lista tiene tope. */
   review: ReviewItem[]
+  /** Todas las que esperan: el mismo número del menú. */
+  reviewTotal: number
   proposed: Array<LessonItem & { impact: LessonImpact }>
   learned: LessonItem[]
   withdrawn: LessonItem[]
@@ -517,16 +546,6 @@ const AGENT_NAME: Record<string, string> = {
 export function agentName(agent: string, receptionName: string): string {
   if (agent === "recepcion") return receptionName
   return AGENT_NAME[agent] ?? agent
-}
-
-/** Alcance de una lección como etiqueta corta: «Toda la clínica» o el agente. */
-export function lessonScopeChip(scope: string, receptionName: string): string {
-  return scope === "clinica" ? "Toda la clínica" : agentName(scope, receptionName)
-}
-
-/** Alcance de una lección como frase: «Para toda la clínica» o «Solo para Sofi». */
-export function lessonScopeFor(scope: string, receptionName: string): string {
-  return scope === "clinica" ? "Para toda la clínica" : `Solo para ${agentName(scope, receptionName)}`
 }
 
 const UNUSED_AFTER_MS = 30 * 86_400_000
@@ -591,6 +610,8 @@ export interface GuidanceItem {
 
 export interface GuidanceList {
   items: GuidanceItem[]
+  /** Las que se retiraron: se pueden restaurar. */
+  withdrawn: GuidanceItem[]
   counts: { all: number; escrita: number; aprendida: number }
   /** Cuántas reglas puede tener activas y cuánto mide cada una (ADR 0119). */
   limits: { rules: number; chars: number }

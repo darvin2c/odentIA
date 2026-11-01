@@ -91,7 +91,7 @@ test("bandeja: cada respuesta del agente dice en qué se basó", async ({ owner,
   // Quien atiende conversaciones dice si estuvo bien; repetirlo no hace falta.
   await expect(detail).toContainText("¿Estuvo bien esta respuesta?")
   await detail.getByRole("button", { name: "Sí, estuvo bien" }).click()
-  await expect(detail.getByRole("status")).toHaveText("Quedó marcada como una buena respuesta.")
+  await expect(detail.getByRole("status")).toHaveText("Quedó marcada como una buena respuesta. Sofi sigue respondiendo igual.")
   await expect(detail.getByRole("button", { name: "Sí, estuvo bien" })).toBeHidden()
   await page.keyboard.press("Escape")
 

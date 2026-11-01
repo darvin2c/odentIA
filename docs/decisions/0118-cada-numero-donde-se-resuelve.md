@@ -10,7 +10,7 @@ Fecha: 2026-10-31 · Estado: aceptada · Ajusta a [0025](0025-un-pendiente-un-lu
 
 ## Decisión y motivo
 
-- **El menú «Agente» cuenta lo que se resuelve dentro de Agente**: respuestas por revisar, lecciones por aprobar y lo que no supo responder (`countAgentWork`). Es la suma de los números de sus pestañas, y solo lo ve quien supervisa al agente (`agent.read`).
+- **El menú «Agente» cuenta lo que se resuelve dentro de Agente**: respuestas por revisar y lecciones por aprobar (`countAgentWork`); desde la [0123](0123-lo-que-no-encontro-se-revisa-en-aprender.md), lo que no supo responder es parte de «por revisar». Es el número de Aprender, y solo lo ve quien supervisa al agente (`agent.read`).
 - **Los casos que pasó el agente van en el botón «Agente» de la cabecera**, que abre el panel donde se toman (lo que nadie tomó más lo propio, como contaba 0025). Sigue siendo un solo número por asunto: el de los casos no se repite en el menú.
 - **Se retira «Esperan su sí»**. Lo que espera el sí de la persona se ve y se registra en su conversación de la Bandeja y en el panel. Las direcciones viejas (`/agent/pendientes`, `/agent/approvals`) llevan a la Bandeja. Recepción, que solo decide (`agent.decide`), deja de ver la entrada «Agente» del menú: lo suyo está en la Bandeja, en «Te espera» y en el panel.
 - **El horario de atención de la sede se muestra donde se forma**: «Horarios y ausencias» › «De la sede» lo dice tal como lo dice el agente (`getBranchHours`). No se agrega un horario de la sede escrito aparte: con nadie del equipo en ese tramo, el agente ofrecería horas que no existen (0097).

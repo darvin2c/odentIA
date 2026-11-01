@@ -24,7 +24,7 @@ Conocimiento pedía responder «25 preguntas básicas» y marcaba solo 5 como cu
 
 - La pantalla dice lo que el agente recibe de verdad; corregir un dato es ir a donde vive.
 - Las clínicas que ya escribieron una respuesta con una clave retirada (por ejemplo «horario») la conservan publicada; conviene revisarla, porque puede contradecir los datos.
-- Revisar la lista si «No supo responder» muestra seguido otra pregunta que ningún dato cubre.
+- Revisar la lista si «Por revisar» muestra seguido, como «Buscó y no encontró» ([0123](0123-lo-que-no-encontro-se-revisa-en-aprender.md)), otra pregunta que ningún dato cubre.
 
 ## Referencias
 

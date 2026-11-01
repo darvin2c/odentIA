@@ -1,32 +1,27 @@
 import { Badge, Button, Collapsible, CollapsibleContent, CollapsibleTrigger, cn, useIsMobile } from "@odentia/ui"
-import { AgentSurface, EmptyState, ErrorState, PageHeader, PageShell, RowActions, submitErrorMessage, ViewTabs, SkeletonRegion } from "@odentia/ui-patterns"
+import { AgentSurface, EmptyState, ErrorState, PageHeader, PageShell, RowActions, submitErrorMessage, SkeletonRegion } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { ChevronRight } from "lucide-react"
+import { Check, ChevronRight } from "lucide-react"
 import { type ReactNode, useState } from "react"
-import type { AdminOverview } from "../../lib/admin"
 import { CorrectDrawer, type CorrectionTarget } from "../../components/agent/correct-drawer"
 import { LessonDrawer, lessonOriginText, WithdrawLessonDialog } from "../../components/agent/lesson-drawer"
 import { AgentTabs } from "../../components/agent-tabs"
 import {
-  type AgentOverview,
-  type AgentRoles,
-  agentName,
+  askedWords,
   impactSummary,
   type LearningOverview,
   LESSON_KIND_LABEL,
   type LessonItem,
-  lessonScopeChip,
-  lessonScopeFor,
-  namedAgentRoles,
   lessonUsage,
   REVIEW_REASON_LABEL,
   type ReviewItem,
+  reviewWhen,
 } from "../../lib/agent"
 import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
-import { type AgentConfig, useCan, usePermission } from "../../lib/crm"
+import { useCan, usePermission } from "../../lib/crm"
 import { canCorrectAgent } from "../../lib/screen-rules"
 import { useOrgEvents } from "../../lib/org-events"
 import { QueryErrorState } from "../../lib/query-error"
@@ -39,18 +34,25 @@ export const Route = createFileRoute("/_org/agent/learn")({
 
 const PREVIEW = 3
 const LINK = "h-auto min-h-11 p-0 sm:min-h-8"
-
-function when(iso: string): string {
-  return new Date(iso).toLocaleString("es", { weekday: "long", hour: "2-digit", minute: "2-digit" })
-}
+const LABEL = "w-18 shrink-0 text-muted-foreground"
 
 /** Por qué una respuesta entró a revisión, dicho en una frase para quien la corrige. */
 function whyHere(item: ReviewItem): string {
-  if (item.reason === "equipo_tomo") return "Alguien de tu equipo escribió justo después y respondió otra cosa."
+  if (item.reason === "no_encontro") return `Buscó «${item.query ?? ""}» y no encontró nada. Eso no significa que haya respondido mal.`
+  if (item.reason === "equipo_tomo") return "Alguien de tu equipo escribió justo después."
   if (item.reason === "repitio_pregunta") return "La persona volvió a preguntar lo mismo después de esta respuesta."
   if (item.reason === "muestra") return "Es una muestra al azar: nada indica que esté mal."
   return REVIEW_REASON_LABEL[item.reason]
 }
+
+/** Cómo se nombra una respuesta en su aviso: lo que buscó o lo que escribió, en corto. */
+function shortName(item: ReviewItem): string {
+  const text = (item.query ?? item.question).replace(/\s+/g, " ").trim()
+  return text.length <= 60 ? text : `${text.slice(0, 59).trimEnd()}…`
+}
+
+/** Lo que ya se decidió en esta visita: queda a la vista con lo que sigue haciendo o lo que se puede deshacer. */
+type Decided = { item: ReviewItem } & ({ state: "bien" } | { state: "ejemplo" } | { state: "sumada"; answer: string })
 
 /**
  * Sección de la pantalla. En ventana ancha, título y contenido a la vista. En
@@ -113,12 +115,10 @@ function Section({
 }
 
 function LearnedRow({ lesson, usage, action, warn = false, onOpen }: { lesson: LessonItem; usage?: { text: string; stale: boolean }; action: string; warn?: boolean; onOpen: () => void }) {
-  const receptionName = useReceptionName()
   return (
     <li className="flex min-h-13 flex-wrap items-center gap-x-2.5 gap-y-1 border-t px-4 py-2 first:border-t-0 sm:px-5">
       <span className="w-full text-xs font-bold text-muted-foreground sm:w-32 sm:shrink-0">{LESSON_KIND_LABEL[lesson.kind]}</span>
       <span className="min-w-0 flex-1 basis-56 font-semibold">{lesson.title}</span>
-      <Badge variant={lesson.scope === "clinica" ? "secondary" : "soft"}>{lessonScopeChip(lesson.scope, receptionName)}</Badge>
       {usage ? (
         <span className={cn("text-sm sm:w-32 sm:shrink-0", usage.stale ? "font-bold text-warning" : "text-muted-foreground")}>{usage.text}</span>
       ) : null}
@@ -136,6 +136,61 @@ function LearnedRow({ lesson, usage, action, warn = false, onOpen }: { lesson: L
   )
 }
 
+/** El aviso que queda en el lugar de una respuesta ya decidida: dice qué pasó y qué se puede hacer todavía. */
+function DecidedRow({
+  decided,
+  receptionName,
+  pending,
+  onExample,
+  onUndo,
+}: {
+  decided: Decided
+  receptionName: string
+  pending: boolean
+  onExample: () => void
+  onUndo: () => void
+}) {
+  const name = shortName(decided.item)
+  const canBeExample = Boolean(decided.item.question.trim() && decided.item.reply.trim())
+  return (
+    <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-card px-4 py-2.5 text-sm">
+      <Check className="size-4 shrink-0 text-success" aria-hidden />
+      <p className="min-w-0 flex-1 basis-56">
+        {decided.state === "bien" ? (
+          <>
+            <span className="font-semibold">«{name}» quedó como bien.</span>{" "}
+            <span className="text-muted-foreground">{receptionName} sigue respondiendo igual.</span>
+          </>
+        ) : decided.state === "ejemplo" ? (
+          <>
+            <span className="font-semibold">«{name}» quedó como ejemplo por aprobar.</span>{" "}
+            <span className="text-muted-foreground">{receptionName} lo usa cuando se apruebe.</span>
+          </>
+        ) : (
+          <>
+            <span className="font-semibold">
+              «{name}» se sumó a «{decided.answer}».
+            </span>{" "}
+            <span className="text-muted-foreground">{receptionName} la encuentra desde ahora.</span>
+          </>
+        )}
+      </p>
+      {decided.state === "bien" ? (
+        <div className="flex flex-wrap items-center gap-2 max-sm:w-full">
+          {canBeExample ? (
+            <Button type="button" variant="outline" size="sm" className="min-h-11 max-sm:flex-1 sm:min-h-9" disabled={pending} onClick={onExample}>
+              Guardar como ejemplo
+            </Button>
+          ) : null}
+          <Button type="button" variant="link" className={LINK} disabled={pending} onClick={onUndo}>
+            Deshacer
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function AgentLearnPage() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -144,13 +199,13 @@ function AgentLearnPage() {
   const canWrite = usePermission("agent.write")
   const canCorrect = canCorrectAgent(useCan())
   const receptionName = useReceptionName()
-  const [agent, setAgent] = useState<string | null>(null)
   const [correcting, setCorrecting] = useState<CorrectionTarget | null>(null)
   const [lessonId, setLessonId] = useState<string | null>(null)
   const [withdrawId, setWithdrawId] = useState<string | null>(null)
   const [allReview, setAllReview] = useState(false)
   const [allLearned, setAllLearned] = useState(false)
   const [showWithdrawn, setShowWithdrawn] = useState(false)
+  const [decided, setDecided] = useState<Decided[]>([])
 
   const query = useQuery({
     queryKey: ["agent-learning"],
@@ -163,47 +218,34 @@ function AgentLearnPage() {
     enabled: canRead,
     retry: false,
   })
-  // De qué agente: las fichas dan los nombres y cada agente dice si está encendido
-  // donde ya lo dice el Resumen (mismas consultas, compartidas con esa pantalla).
-  const rolesQuery = useQuery({
-    queryKey: ["agent-roles"],
-    queryFn: () => apiFetch<{ data: AgentRoles }>("/api/agent/roles"),
-    select: (body) => ({ data: namedAgentRoles(body.data, receptionName) }),
-    enabled: canRead,
-    staleTime: Number.POSITIVE_INFINITY,
-  })
-  const overviewQuery = useQuery({
-    queryKey: ["agent-overview"],
-    queryFn: () => apiFetch<{ data: AgentOverview }>("/api/agent/overview"),
-    enabled: canRead,
-    retry: false,
-    staleTime: 30_000,
-  })
-  const configQuery = useQuery({
-    queryKey: ["agent-config"],
-    queryFn: () => apiFetch<{ data: AgentConfig }>("/api/agent/config"),
-    enabled: canRead,
-  })
-  const adminQuery = useQuery({
-    queryKey: ["agent-admin", "overview"],
-    queryFn: () => apiFetch<{ data: AdminOverview }>("/api/agent/admin/overview"),
-    enabled: canRead,
-    retry: false,
-  })
   useOrgEvents(["agent.run.recorded", "agent.proposal.decided", "stream.reconnected"], () => {
     void queryClient.invalidateQueries({ queryKey: ["agent-learning"] })
   })
+  const refresh = () => Promise.all(["agent-learning", "agent-overview", "agent-panel"].map((key) => queryClient.invalidateQueries({ queryKey: [key] })))
+  const decide = (next: Decided) => setDecided((current) => [...current.filter((row) => row.item.id !== next.item.id), next])
   const markOk = useMutation({
     retry: false,
-    mutationFn: (input: { id: string; asExample?: boolean }) =>
-      apiFetch(`/api/agent/learning/review/${input.id}/ok`, {
-        method: "POST",
-        body: JSON.stringify(input.asExample ? { asExample: true } : {}),
-      }),
-    onSettled: () => {
-      for (const key of ["agent-learning", "agent-overview", "agent-panel"]) void queryClient.invalidateQueries({ queryKey: [key] })
+    mutationFn: (item: ReviewItem) => apiFetch(`/api/agent/learning/review/${item.id}/ok`, { method: "POST", body: "{}" }),
+    onSuccess: (_, item) => decide({ item, state: "bien" }),
+    onSettled: () => refresh(),
+  })
+  const saveExample = useMutation({
+    retry: false,
+    mutationFn: (item: ReviewItem) => apiFetch(`/api/agent/learning/review/${item.id}/example`, { method: "POST", body: "{}" }),
+    onSuccess: (_, item) => decide({ item, state: "ejemplo" }),
+    onSettled: () => refresh(),
+  })
+  const undo = useMutation({
+    retry: false,
+    mutationFn: (item: ReviewItem) => apiFetch(`/api/agent/learning/review/${item.id}/reopen`, { method: "POST", body: "{}" }),
+    // Primero vuelve a la lista y después se va el aviso: la fila no salta.
+    onSuccess: async (_, item) => {
+      await refresh()
+      setDecided((current) => current.filter((row) => row.item.id !== item.id))
     },
   })
+  const deciding = markOk.isPending || saveExample.isPending || undo.isPending
+  const decideError = markOk.error ?? saveExample.error ?? undo.error
 
   if (!canRead) {
     return (
@@ -218,6 +260,9 @@ function AgentLearnPage() {
     setCorrecting({
       reviewItemId: item.id,
       agent: item.agent,
+      reason: item.reason,
+      query: item.query,
+      context: [item.contactName ?? "Interlocutor", item.channel ? channelLabel(item.channel) : null, reviewWhen(item.createdAt)].filter(Boolean).join(" · "),
       question: item.question,
       reply: item.reply,
       teamReply: item.teamReply,
@@ -226,44 +271,23 @@ function AgentLearnPage() {
       why: whyHere(item),
     })
 
-  // Encendido o apagado según quien lo sabe; sin el dato no se afirma ninguno de los dos.
-  const isOn = (id: string): boolean | undefined =>
-    id === "recepcion"
-      ? overviewQuery.data?.data.enabled
-      : id === "asistente_clinico"
-        ? configQuery.data?.data.clinicalAssistantEnabled
-        : id === "administrador"
-          ? adminQuery.data?.data.enabled
-          : undefined
-  const ofAgent = (lesson: LessonItem) => agent === null || lesson.agent === agent || lesson.scope === "clinica"
-  const review = (data?.review ?? []).filter((item) => agent === null || item.agent === agent)
-  const proposed = (data?.proposed ?? []).filter(ofAgent)
-  const learned = (data?.learned ?? []).filter(ofAgent)
-  // Las reglas son de cada agente: pasado el tope, las más antiguas dejan de llegarle. Cuenta el que más tiene.
-  const rulesOfAgent = Math.max(
-    0,
-    ...Object.values(
-      learned
-        .filter((lesson) => lesson.kind === "regla")
-        .reduce<Record<string, number>>((byAgent, lesson) => ({ ...byAgent, [lesson.scope]: (byAgent[lesson.scope] ?? 0) + 1 }), {}),
-    ),
-  )
-  const withdrawn = (data?.withdrawn ?? []).filter(ofAgent)
-  // Los agentes que la clínica enciende o apaga: son los que aprenden de ella.
-  const agents = (rolesQuery.data?.data.roles ?? [])
-    .filter((role) => role.switchable)
-    .map((role) => {
-      const pending = (data?.review ?? []).filter((item) => item.agent === role.id).length + (data?.proposed ?? []).filter((lesson) => lesson.agent === role.id).length
-      const own = pending + [...(data?.learned ?? []), ...(data?.withdrawn ?? [])].filter((lesson) => lesson.agent === role.id).length
-      const off = !role.available || isOn(role.id) === false
-      return { id: role.id as string, name: role.name, pending, off, disabled: off && own === 0 }
-    })
+  const review = data?.review ?? []
+  const proposed = data?.proposed ?? []
+  const learned = data?.learned ?? []
+  const withdrawn = data?.withdrawn ?? []
+  // Las reglas le llegan todas: pasado el tope, las más antiguas dejan de llegarle.
+  const rulesLearned = learned.filter((lesson) => lesson.kind === "regla").length
   const openId = correcting?.reviewItemId ?? null
+  // Lo decidido en esta visita queda en su lugar, en el orden de la lista; lo que vuelve a estar pendiente manda.
+  const rows: Array<{ item: ReviewItem; decided?: Decided }> = [
+    ...(allReview ? review : review.slice(0, PREVIEW)).map((item) => ({ item })),
+    ...decided.filter((row) => !review.some((item) => item.id === row.item.id)).map((row) => ({ item: row.item, decided: row })),
+  ].sort((a, b) => b.item.createdAt.localeCompare(a.item.createdAt))
 
   return (
     <PageShell className="flex flex-col gap-5">
-      <PageHeader title="Agente" subtitle="Revisas lo dudoso y apruebas lo que propone aprender. Lo demás no necesita tu tiempo." />
-      <AgentTabs learnPending={data ? data.review.length + data.proposed.length : undefined} />
+      <PageHeader title="Agente" subtitle={`Revisas lo dudoso de ${receptionName} y apruebas lo que propone aprender. Lo demás no necesita tu tiempo.`} />
+      <AgentTabs learnPending={data ? data.reviewTotal + data.proposed.length : undefined} />
       {query.isPending ? (
         <SkeletonRegion message="Cargando lo que hay por revisar…">
           <LearnSkeleton />
@@ -272,55 +296,38 @@ function AgentLearnPage() {
         <QueryErrorState error={query.error} onRetry={() => void query.refetch()} />
       ) : (
         <>
-          <div className="-mt-1 flex flex-col gap-1.5">
-            {agents.length > 0 ? (
-              <ViewTabs
-                label="De qué agente"
-                value={agent ?? "todos"}
-                options={[
-                  { value: "todos", label: "Todos los agentes" },
-                  ...agents.map((item) => ({
-                    value: item.id,
-                    label: item.off ? `${item.name} · apagado` : item.name,
-                    count: item.pending > 0 ? item.pending : undefined,
-                    disabled: item.disabled,
-                  })),
-                ]}
-                onValueChange={(next) => setAgent(next === "todos" ? null : next)}
-              />
-            ) : null}
-            <p className="text-sm text-muted-foreground">
-              Cada agente aprende lo suyo y no se mezcla con los otros. Solo el conocimiento de la clínica es de todos.
-            </p>
-          </div>
-
           <Section
             id="por-revisar"
-            title={review.length > 0 ? `Por revisar · ${review.length}` : "Por revisar"}
+            title={data.reviewTotal > 0 ? `Por revisar · ${data.reviewTotal}` : "Por revisar"}
             hint="Las que algo hizo dudar y una muestra al azar."
           >
-            {review.length === 0 ? (
-              agent !== null && data.review.length > 0 ? (
-                <div className="flex flex-wrap items-center gap-x-3 rounded-xl border bg-card px-4 py-3 text-sm">
-                  <p className="min-w-0 flex-1 basis-48 text-muted-foreground">Nada por revisar de {agentName(agent, receptionName)}.</p>
-                  <Button type="button" variant="link" className={LINK} onClick={() => setAgent(null)}>
-                    Ver todos los agentes
-                  </Button>
-                </div>
-              ) : (
-                <EmptyState
-                  title="Nada por revisar"
-                  description="Cuando tu equipo retome una conversación tras una respuesta del agente, o alguien repita una pregunta, aparecerá aquí. También puedes corregir cualquier respuesta desde la Bandeja, en «En qué se basó»."
-                  actionLabel="Ir a la Bandeja"
-                  onAction={() => void navigate({ to: "/inbox", search: { conversation: undefined } })}
-                />
-              )
+            {rows.length === 0 ? (
+              <EmptyState
+                title="Nada por revisar"
+                description="Aparece aquí lo que busque y no encuentre, y lo que tu equipo retome o alguien repita tras una respuesta del agente. También puedes corregir cualquier respuesta desde la Bandeja, en «En qué se basó»."
+                actionLabel="Ir a la Bandeja"
+                onAction={() => void navigate({ to: "/inbox", search: { conversation: undefined } })}
+              />
             ) : (
               <ul className="flex flex-col gap-2.5">
-                {(allReview ? review : review.slice(0, PREVIEW)).map((item) => {
+                {rows.map(({ item, decided: done }) => {
+                  if (done) {
+                    return (
+                      <li key={item.id}>
+                        <DecidedRow
+                          decided={done}
+                          receptionName={receptionName}
+                          pending={deciding}
+                          onExample={() => saveExample.mutate(item)}
+                          onUndo={() => undo.mutate(item)}
+                        />
+                      </li>
+                    )
+                  }
                   const open = openId === item.id
                   const reason = REVIEW_REASON_LABEL[item.reason]
                   const who = item.contactName ?? "Interlocutor"
+                  const times = item.asked ? askedWords(item.asked) : null
                   const more = (
                     <RowActions
                       label={`Más acciones de la respuesta a ${who}`}
@@ -330,16 +337,6 @@ function AgentLearnPage() {
                           label: "Abrir la conversación",
                           onSelect: () => void navigate({ to: "/inbox", search: { conversation: item.conversationId } }),
                         },
-                        ...(canCorrect && item.question
-                          ? [
-                              {
-                                key: "ejemplo",
-                                label: "Estuvo bien: guardar como ejemplo",
-                                disabled: markOk.isPending,
-                                onSelect: () => markOk.mutate({ id: item.id, asExample: true }),
-                              },
-                            ]
-                          : []),
                       ]}
                     />
                   )
@@ -356,35 +353,48 @@ function AgentLearnPage() {
                             <div className="flex items-start gap-2">
                               <p className="min-w-0 flex-1 pt-2.5">
                                 <Badge variant={item.reason === "muestra" ? "secondary" : "warning"} className="h-auto min-h-5.5 whitespace-normal">
-                                  {agentName(item.agent, receptionName)} · {reason.charAt(0).toLowerCase()}
-                                  {reason.slice(1)}
+                                  {times ? `${reason} · ${times}` : reason}
                                 </Badge>
                               </p>
                               {more}
                             </div>
+                            {item.before ? <p className="text-muted-foreground">Antes: {item.before}</p> : null}
                             <p className="font-bold whitespace-pre-wrap">{item.question || "—"}</p>
-                            <p className="whitespace-pre-wrap text-muted-foreground">Respondió: {item.reply}</p>
+                            {item.query ? <p>Buscó: {item.query}</p> : null}
+                            <p className="whitespace-pre-wrap text-muted-foreground">Respondió: {item.reply || "—"}</p>
                           </>
                         ) : (
                           <>
                             <div className="flex flex-wrap items-center gap-2">
-                              <Badge variant="soft">{agentName(item.agent, receptionName)}</Badge>
                               <Badge variant={item.reason === "muestra" ? "secondary" : "warning"}>{reason}</Badge>
                               <span className="min-w-0 flex-1 basis-40 text-muted-foreground">
                                 {who}
-                                {item.channel ? ` · ${channelLabel(item.channel)}` : ""} · {when(item.createdAt)}
+                                {item.channel ? ` · ${channelLabel(item.channel)}` : ""} · {reviewWhen(item.createdAt)}
+                                {times ? ` · ${times}` : ""}
                               </span>
                               {open ? <Badge variant="soft">Abierta al lado</Badge> : null}
                               {more}
                             </div>
                             <dl className="grid gap-1.5">
+                              {item.before ? (
+                                <div className="flex gap-2.5">
+                                  <dt className={LABEL}>Antes</dt>
+                                  <dd className="min-w-0 whitespace-pre-wrap text-muted-foreground">{item.before}</dd>
+                                </div>
+                              ) : null}
                               <div className="flex gap-2.5">
-                                <dt className="w-18 shrink-0 text-muted-foreground">Preguntó</dt>
+                                <dt className={LABEL}>Escribió</dt>
                                 <dd className="min-w-0 font-semibold whitespace-pre-wrap">{item.question || "—"}</dd>
                               </div>
+                              {item.query ? (
+                                <div className="flex gap-2.5">
+                                  <dt className={LABEL}>Buscó</dt>
+                                  <dd className="min-w-0">{item.query}</dd>
+                                </div>
+                              ) : null}
                               <div className="flex gap-2.5">
-                                <dt className="w-18 shrink-0 text-muted-foreground">Respondió</dt>
-                                <dd className="min-w-0 whitespace-pre-wrap">{item.reply}</dd>
+                                <dt className={LABEL}>Respondió</dt>
+                                <dd className="min-w-0 [overflow-wrap:anywhere] whitespace-pre-wrap">{item.reply || "—"}</dd>
                               </div>
                             </dl>
                           </>
@@ -396,8 +406,8 @@ function AgentLearnPage() {
                               variant="outline"
                               size="sm"
                               className="min-h-11 max-sm:flex-1 sm:min-h-9"
-                              disabled={markOk.isPending}
-                              onClick={() => markOk.mutate({ id: item.id })}
+                              disabled={deciding}
+                              onClick={() => markOk.mutate(item)}
                             >
                               Estuvo bien
                             </Button>
@@ -418,15 +428,20 @@ function AgentLearnPage() {
                 })}
               </ul>
             )}
-            {markOk.isError ? (
+            {decideError ? (
               <p role="alert" className="text-sm text-destructive">
-                {submitErrorMessage(markOk.error)}
+                {submitErrorMessage(decideError)}
               </p>
             ) : null}
             {!allReview && review.length > PREVIEW ? (
               <Button type="button" variant="link" className={cn(LINK, "self-start")} onClick={() => setAllReview(true)}>
                 {review.length - PREVIEW === 1 ? "Ver la otra" : `Ver las otras ${review.length - PREVIEW}`}
               </Button>
+            ) : null}
+            {data.reviewTotal > review.length ? (
+              <p className="text-sm text-muted-foreground">
+                Se muestran las {review.length} más recientes de {data.reviewTotal}. Al decidirlas aparecen las demás.
+              </p>
             ) : null}
           </Section>
 
@@ -439,7 +454,7 @@ function AgentLearnPage() {
           >
             {proposed.length === 0 ? (
               <p className="rounded-xl border bg-card px-4 py-3 text-sm text-muted-foreground">
-                No hay lecciones esperando. Aparecen cuando corriges una respuesta o cambias un borrador antes de aprobarlo.
+                No hay lecciones esperando. Aparecen cuando corriges una respuesta o guardas una como ejemplo.
               </p>
             ) : (
               <ul className="grid grid-cols-[repeat(auto-fit,minmax(min(300px,100%),1fr))] gap-3">
@@ -450,7 +465,6 @@ function AgentLearnPage() {
                         {LESSON_KIND_LABEL[lesson.kind]}
                       </Badge>
                       <h3 className="font-heading text-base leading-snug font-bold">{lesson.title}</h3>
-                      <p className="font-bold text-primary-soft-foreground">{lessonScopeFor(lesson.scope, receptionName)}</p>
                       <p className="flex-1">
                         {lessonOriginText(lesson, receptionName, { short: true })} {impactSummary(lesson.impact)}
                       </p>
@@ -472,13 +486,13 @@ function AgentLearnPage() {
           <Section
             id="lo-aprendido"
             title={learned.length > 0 ? `Lo aprendido · ${learned.length}` : "Lo aprendido"}
-            hint={isMobile ? "De cada agente. Cualquiera se puede retirar." : "Cada una dice de quién es y cuánto se usa. Cualquiera se puede retirar."}
+            hint={isMobile ? "Cualquiera se puede retirar." : "Cada una dice cuánto se usa. Cualquiera se puede retirar."}
             fold={isMobile}
           >
             <div className="elevated flex flex-col rounded-xl border bg-card">
-              {data && rulesOfAgent > data.ruleLimit ? (
+              {data && rulesLearned > data.ruleLimit ? (
                 <p role="status" className="border-b px-4 py-3 text-sm sm:px-5">
-                  El agente usa tus {data.ruleLimit} reglas más recientes: las {rulesOfAgent - data.ruleLimit} más antiguas ya no le
+                  El agente usa tus {data.ruleLimit} reglas más recientes: las {rulesLearned - data.ruleLimit} más antiguas ya no le
                   llegan. Retira las que ya no hagan falta para que vuelvan a entrar todas.
                 </p>
               ) : null}
@@ -536,7 +550,19 @@ function AgentLearnPage() {
           </Section>
         </>
       )}
-      <CorrectDrawer target={correcting} onClose={() => setCorrecting(null)} onCorrected={(lesson) => canWrite && setLessonId(lesson.id)} />
+      <CorrectDrawer
+        target={correcting}
+        onClose={() => setCorrecting(null)}
+        onCorrected={(lesson) => canWrite && setLessonId(lesson.id)}
+        onMarkedOk={(id) => {
+          const item = review.find((row) => row.id === id)
+          if (item) decide({ item, state: "bien" })
+        }}
+        onAddedToAnswer={(id, answer) => {
+          const item = review.find((row) => row.id === id)
+          if (item) decide({ item, state: "sumada", answer })
+        }}
+      />
       <LessonDrawer lessonId={lessonId} canWrite={canWrite} onClose={() => setLessonId(null)} />
       <WithdrawLessonDialog lessonId={withdrawId} onClose={() => setWithdrawId(null)} />
     </PageShell>
