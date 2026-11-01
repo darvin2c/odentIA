@@ -164,7 +164,7 @@ test("la fila la decide la pregunta: lo de cómo se usa va primero a la Ayuda y 
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(owner.org.slug, "/home"))
   await openSearch(page, 1440, "dónde configuro los horarios")
-  await expect(dialogOf(page).getByRole("option", { name: /Preguntarle a Ayuda/ })).toHaveAttribute("aria-selected", "true")
+  await expect(dialogOf(page).getByRole("option", { name: /Preguntarle a Ariadna/ })).toHaveAttribute("aria-selected", "true")
   await expect(dialogOf(page).getByRole("option", { name: /Preguntarle a Argos/ })).toBeVisible()
 
   await page.getByRole("combobox", { name: "Buscar en todo" }).fill("Ana Paz")
@@ -207,7 +207,7 @@ test("recepción no ve a Argos en el buscador y el servidor se lo niega", async 
   await setRole(fixtureDb, owner, "reception")
   await gotoHydrated(page, tenant(owner.org.slug, "/home"))
   await openSearch(page, 1440, "¿cuánto cobramos este mes?")
-  await expect(dialogOf(page).getByRole("option", { name: /Preguntarle a Ayuda/ })).toBeVisible()
+  await expect(dialogOf(page).getByRole("option", { name: /Preguntarle a Ariadna/ })).toBeVisible()
   await expect(dialogOf(page).getByRole("option", { name: /Argos/ })).toHaveCount(0)
   expect((await api(page, "POST", "/api/reports/argos", owner.org.slug, { text: "¿cuánto cobramos?" })).status).toBe(403)
   expect((await api(page, "POST", "/api/reports/argos/route", owner.org.slug, { text: "¿cuánto cobramos?" })).status).toBe(403)

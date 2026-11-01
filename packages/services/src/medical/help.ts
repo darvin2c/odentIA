@@ -1,4 +1,4 @@
-import { HELP_TOPICS, type HelpTopic } from "../help-guide.js"
+import { HELP_TOPICS, type HelpFaq, type HelpTopic } from "../help-guide.js"
 
 /*
  * ---------- La guía de la Ayuda en latidIA (issue 229, entrega 11) ----------
@@ -22,7 +22,7 @@ const WORDS: ReadonlyArray<readonly [RegExp, string]> = [
 const say = (text: string) =>
   WORDS.reduce((out, [word, replacement]) => out.replace(word, replacement), text)
 
-type Faq = NonNullable<HelpTopic["faqs"]>[number]
+type Faq = HelpFaq
 
 /** Lo que en un consultorio es otra cosa, por tema: sus palabras de búsqueda y sus preguntas. */
 const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
@@ -117,7 +117,7 @@ function medicalTopic(topic: HelpTopic): HelpTopic {
     ...topic,
     purpose: say(topic.purpose),
     terms: topic.terms.map(say),
-    ...(topic.faqs ? { faqs: topic.faqs.map((faq) => ({ q: say(faq.q), a: say(faq.a) })) } : {}),
+    ...(topic.faqs ? { faqs: topic.faqs.map((faq) => ({ ...faq, q: say(faq.q), a: say(faq.a) })) } : {}),
   }
   return EDITS[topic.id]?.(worded) ?? worded
 }

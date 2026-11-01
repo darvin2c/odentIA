@@ -44,11 +44,11 @@ export interface AgentFunction {
 
 export interface AgentRole {
   id: AgentRoleId
-  /** Su nombre (issue 183): Sofi, Clío, Argos; Ayuda sigue siendo Ayuda. El de Sofi lo puede cambiar cada clínica. */
+  /** Su nombre (issue 183): Sofi, Clío, Argos y Ariadna. El de Sofi lo puede cambiar cada clínica. */
   name: string
-  /** El rol que acompaña al nombre la primera vez: «tu agente de recepción». Ayuda no lo lleva. */
+  /** El rol que acompaña al nombre la primera vez: «tu agente de recepción». */
   roleWords?: string
-  /** El porqué del nombre, de subtítulo en su página. Ayuda no lo lleva. */
+  /** El porqué del nombre, de subtítulo en su página. */
   nameReason?: string
   audience: string
   /** Una frase: para qué existe. */
@@ -272,11 +272,13 @@ function adminFunctions(recallMonths: number): AgentFunction[] {
   ]
 }
 
-/** La Ayuda, con el nombre del producto: enseña a usar el sistema de la clínica y le envía lo que no sabe. */
+/** Ariadna, con el nombre del producto: responde en Ayuda, enseña a usar el sistema y le envía lo que no sabe. */
 function helpRole(name: string): AgentRole {
   return {
     id: "ayuda",
-    name: "Ayuda",
+    name: AGENT_NAMES.ayuda,
+    roleWords: AGENT_ROLE_WORDS.ayuda,
+    nameReason: AGENT_NAME_REASONS.ayuda,
     audience: "Para todo el equipo, en todas las pantallas",
     role: `Ayuda a usar ${name}: dónde está cada cosa, qué se puede hacer y por qué algo no se puede.`,
     available: true,

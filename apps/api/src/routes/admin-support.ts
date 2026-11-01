@@ -23,6 +23,7 @@ import {
   staffAttachToSupportCase,
   staffSupportAttachmentUrl,
   supportKnowledgeGroups,
+  supportHelpStats,
   supportMetrics,
 } from "@odentia/services"
 import type { Context } from "hono"
@@ -328,6 +329,11 @@ export function createAdminSupportRoute(deps: AdminSupportDeps) {
   app.get("/metrics", async (c) => {
     return runService(c, 200, () => supportMetrics(deps.ownerDb, staffOf(c)))
   })
+  /** Lo que Ariadna no supo: conteos por pantalla y tema, nunca lo que se preguntó. */
+  app.get("/help-stats", async (c) => {
+    return runService(c, 200, () => supportHelpStats(deps.ownerDb, staffOf(c)))
+  })
+
   /** Equipo asignable: id y nombre del staff activo, sin datos sensibles. */
   app.get("/assignees", async (c) => {
     return runService(c, 200, () => {

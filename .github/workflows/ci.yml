@@ -107,6 +107,11 @@ jobs:
           exit "$(cat "$RUNNER_TEMP/postgres.exit")"
       - if: steps.pruebas.outputs.total != '0'
         run: pnpm exec turbo run test ${{ steps.alcance.outputs.afectados }} ${{ matrix.paquetes }} ${{ matrix.opciones }}
+      # Una pantalla que cambia no afecta a servicios, pero sí a la guía de Ariadna:
+      # sin esto, el PR pasa y la prueba falla recién en main, sin desplegar.
+      - name: Comparar la guía de Ariadna con las pantallas
+        if: matrix.parte == 'interfaz'
+        run: pnpm --filter @odentia/services exec vitest run src/help-guide.test.ts
 
   # Recorridos E2E con el supervisor de `e2e/run.ts`: cada parte levanta su
   # propio entorno efímero (PostgreSQL, RustFS, Mailpit, proxy y builds) y corre

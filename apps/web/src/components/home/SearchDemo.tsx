@@ -377,7 +377,7 @@ export default function SearchDemo({
       case "argos":
         return setOpened(go(`${data.agent} responde a un lado, con los datos que tú puedes ver.`))
       case "help":
-        return setOpened(go(`se abre Ayuda, que te enseña a usar ${p}.`))
+        return setOpened(go(`responde Ariadna, que te enseña a usar ${p}.`))
       case "screen":
         return setOpened(go(`Ir a ${row.label}.`))
       case "recent":
@@ -552,7 +552,7 @@ export default function SearchDemo({
               <Icon name="help" />
             </span>
             <span className="sd-grow sd-two">
-              <span className="sd-title">Preguntarle a Ayuda: «{text}»</span>
+              <span className="sd-title">Preguntarle a Ariadna: «{text}»</span>
               <span className="sd-sub">Te enseña a usar {data.product}; no conoce cifras</span>
             </span>
           </div>

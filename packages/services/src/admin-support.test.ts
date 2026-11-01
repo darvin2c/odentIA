@@ -1,5 +1,6 @@
 import { type Db, withOrgContext } from "@odentia/db"
 import { member, user } from "@odentia/db/schema/auth"
+import { helpAsk } from "@odentia/db/schema/workspace"
 import { beforeAll, describe, expect, it } from "vitest"
 import type { AdminActor } from "./admin-core.js"
 import {
@@ -26,6 +27,7 @@ import {
   setSupportCaseStatus,
   staffAttachToSupportCase,
   type SupportCaseListItem,
+  supportHelpStats,
 } from "./admin-support.js"
 import { sendHelpRequest } from "./help.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
@@ -66,6 +68,31 @@ beforeAll(async () => {
     { id: "m-support-owner-a", userId: OWNER, organizationId: ORG, role: "owner", createdAt: new Date() },
     { id: "m-support-b", userId: OTHER_CLIENT, organizationId: OTHER, role: "owner", createdAt: new Date() },
   ])
+})
+
+describe("lo que Ariadna no supo", () => {
+  it("cuenta por pantalla y por tema, sin el texto de nadie", async () => {
+    await ownerDb.insert(helpAsk).values([
+      { organizationId: ORG, userId: CLIENT, screen: "/agenda", topicId: null },
+      { organizationId: OTHER, userId: OTHER_CLIENT, screen: "/agenda", topicId: null },
+      { organizationId: ORG, userId: CLIENT, screen: "/people/123", topicId: null },
+      { organizationId: ORG, userId: CLIENT, screen: "/home", topicId: "finanzas", helpful: false },
+      { organizationId: ORG, userId: CLIENT, screen: "/home", topicId: "agenda", helpful: true },
+      // Lo de hace más de 30 días ya no cuenta.
+      { organizationId: ORG, userId: CLIENT, screen: "/tasks", topicId: null, createdAt: new Date(Date.now() - 40 * 86_400_000) },
+    ])
+    expect(await supportHelpStats(ownerDb, staff)).toEqual({
+      days: 30,
+      asked: 5,
+      unanswered: 3,
+      notHelpful: 1,
+      unansweredByScreen: [
+        { name: "Agenda", total: 2 },
+        { name: "Pacientes", total: 1 },
+      ],
+      notHelpfulByTopic: [{ name: "Finanzas", total: 1 }],
+    })
+  })
 })
 
 describe("conversación del caso", () => {

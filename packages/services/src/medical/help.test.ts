@@ -31,6 +31,7 @@ describe("la guía de latidIA", () => {
     expect(vitals?.faq?.a).toContain("Examen físico")
     const [leave] = matchHelpTopics("¿Cómo emito un descanso médico?", MEDICAL_HELP_TOPICS)
     expect(leave?.faq?.q).toBe("¿Cómo emito un descanso médico?")
+    expect(matchHelpTopics("¿Quién es Ariadna?", MEDICAL_HELP_TOPICS)[0]?.faq?.a).toContain("guía virtual de latidIA")
   })
 
   it("la de odentIA no cambia", () => {

@@ -16,7 +16,7 @@ import { ArrowRight, Check, Download, LoaderCircle, Pin, Search } from "lucide-r
 import { useEffect, useRef, useState } from "react"
 import { z } from "zod"
 import { ApiError } from "../../lib/api"
-import { ADMIN_NAME } from "../../lib/agent-names"
+import { ADMIN_NAME, HELP_NAME } from "../../lib/agent-names"
 import {
   ARGOS_ALLOWANCE_KEY,
   ARGOS_SCREEN_LINKS,
@@ -642,7 +642,7 @@ function ArgosReply({ exchange, onRetry, onClose }: { exchange: Exchange; onRetr
             askHelp(exchange.question)
           }}
         >
-          Abrir Ayuda con esta pregunta
+          Preguntarle a {HELP_NAME}
         </Button>
       ) : null}
     </div>

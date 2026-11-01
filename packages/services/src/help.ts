@@ -15,17 +15,18 @@ import {
   helpTopic,
   helpTopicForScreen,
   helpTopicLabel,
+  helpSmallTalk,
   matchHelpTopics,
 } from "./help-guide.js"
 import { normalizeForSearch } from "./knowledge.js"
-import { receptionName } from "./agent-names.js"
+import { RECEPTION_DEFAULT_NAME, receptionName } from "./agent-names.js"
 import { roomWord } from "./locale.js"
 import { productHelpTopics } from "./products.js"
 
-/* ---------- Ayuda de odentIA: dónde está cada cosa, qué se puede y por qué algo no ---------- */
+/* ---------- Ariadna, la que responde en Ayuda: dónde está cada cosa, qué se puede y por qué algo no ---------- */
 
 /**
- * La Ayuda responde con la guía del sistema, no con un modelo: el tema lo
+ * Ariadna responde con la guía del sistema, no con un modelo: el tema lo
  * eligen las palabras de la pregunta y la respuesta es un texto escrito y
  * revisado. No cambia nada, no lee conversaciones ni historia clínica y, si no
  * sabe, lo dice. El tope diario protege el servicio; hoy no hay coste por uso.
@@ -46,8 +47,10 @@ export interface HelpAnswer {
 
 export interface HelpReply {
   askId: string
-  /** `guia`: respondió con un tema. `estado`: dijo qué falta en esa pantalla. `nada`: no lo sabe. */
-  kind: "guia" | "estado" | "nada"
+  /** `guia`: respondió con un tema. `estado`: dijo qué falta en esa pantalla. `nada`: no lo sabe. `charla`: un saludo o un gracias. */
+  kind: "guia" | "estado" | "nada" | "charla"
+  /** Lo que dice cuando es `charla`. */
+  say: string | null
   answers: HelpAnswer[]
   /** Lo que falta de verdad en la pantalla, cuando se preguntó por qué algo no se puede. */
   blockers: Array<{ text: string; where: string | null; path: string | null }>
@@ -69,12 +72,23 @@ const WHY_NOT = /\b(por que no|porque no|no puedo|no me deja|no me permite|no ap
 
 const list = (items: string[]) => (items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} y ${items[items.length - 1]}`)
 
+/** Los permisos que dejan cambiar cosas en esa pantalla: basta uno. */
+const writePermissionsOf = (topic: HelpTopic): readonly string[] =>
+  typeof topic.writePermission === "string" ? [topic.writePermission] : (topic.writePermission ?? [])
+
+const canChange = (topic: HelpTopic, asker: HelpAsker): boolean => {
+  const needed = writePermissionsOf(topic)
+  return needed.length === 0 || needed.some((permission) => asker.can(permission))
+}
+
+const whoCanChange = (topic: HelpTopic, asker: HelpAsker): string[] => [...new Set(writePermissionsOf(topic).flatMap((permission) => asker.whoCan(permission)))]
+
 function restrictionFor(topic: HelpTopic, asker: HelpAsker): { path: string | null; restriction: string | null } {
   if (!asker.canOpen(topic.path)) {
     return { path: null, restriction: `Tu rol (${asker.roleLabel}) no tiene acceso a esa pantalla. Pídeselo a quien administra la clínica.` }
   }
-  if (topic.writePermission && !asker.can(topic.writePermission)) {
-    const roles = asker.whoCan(topic.writePermission)
+  if (!canChange(topic, asker)) {
+    const roles = whoCanChange(topic, asker)
     return {
       path: topic.path,
       restriction: `Tu rol (${asker.roleLabel}) puede verla, pero no cambiarla.${roles.length ? ` Pueden hacerlo: ${list(roles)}.` : ""}`,
@@ -101,8 +115,8 @@ async function screenBlockers(
     return target && asker.canOpen(target.path) ? { where: helpTopicLabel(target), path: target.path } : { where: target ? helpTopicLabel(target) : null, path: null }
   }
   if (!topic) return out
-  if (topic.writePermission && !asker.can(topic.writePermission)) {
-    const roles = asker.whoCan(topic.writePermission)
+  if (!canChange(topic, asker)) {
+    const roles = whoCanChange(topic, asker)
     out.push({ text: `Tu rol (${asker.roleLabel}) puede ver ${topic.title}, pero no cambiar nada ahí.${roles.length ? ` Pueden hacerlo: ${list(roles)}.` : ""}`, where: null, path: null })
   }
   const total = async (query: Promise<Array<{ total: number }>>) => Number((await query)[0]?.total ?? 0)
@@ -116,7 +130,7 @@ async function screenBlockers(
     const schedules = await total(
       tx.select({ total: count() }).from(professionalSchedule).where(and(eq(professionalSchedule.organizationId, orgId), eq(professionalSchedule.isActive, true))),
     )
-    if (schedules === 0) out.push({ text: "Ningún profesional tiene horario de atención. Sin horario no aparecen en la agenda ni se les puede reservar.", ...at("disponibilidad") })
+    if (schedules === 0) out.push({ text: "Ningún profesional tiene horario de atención. Sin horario, ni el agente ni el enlace ofrecen citas; el equipo puede reservar igual, con una advertencia.", ...at("disponibilidad") })
     const services = await total(tx.select({ total: count() }).from(serviceCatalog).where(and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.isActive, true))))
     if (services === 0) out.push({ text: "Todavía no hay servicios en la clínica; las citas se pueden reservar, pero sin servicio ni duración sugerida.", ...at("servicios") })
   }
@@ -124,9 +138,10 @@ async function screenBlockers(
     const channels = await total(tx.select({ total: count() }).from(channelConnection).where(and(eq(channelConnection.organizationId, orgId), eq(channelConnection.status, "active"))))
     if (channels === 0) out.push({ text: "No hay ningún canal conectado: no pueden llegar ni salir mensajes.", ...at("canales") })
   }
-  if (topic.id === "agente" || topic.id === "bandeja") {
-    const [cfg] = await tx.select({ enabled: agentConfig.enabled, personaName: agentConfig.personaName }).from(agentConfig).where(eq(agentConfig.organizationId, orgId)).limit(1)
-    if (topic.id === "agente" && !cfg?.enabled) out.push({ text: `${receptionName(cfg?.personaName)} está apagada: no responde hasta que la enciendas.`, ...at("agente") })
+  if (topic.id === "agente" || topic.id === "administrador") {
+    const [cfg] = await tx.select({ enabled: agentConfig.enabled, personaName: agentConfig.personaName, advisor: agentConfig.advisor }).from(agentConfig).where(eq(agentConfig.organizationId, orgId)).limit(1)
+    if (!cfg?.enabled) out.push({ text: `${receptionName(cfg?.personaName)} está apagada: no responde ni escribe hasta que la enciendas.`, ...at("agente") })
+    if (topic.id === "administrador" && cfg?.advisor?.enabled !== true) out.push({ text: "Argos está apagado: no sale ningún recordatorio ni seguimiento hasta que lo enciendas.", ...at("administrador") })
   }
   return out
 }
@@ -138,8 +153,15 @@ async function requireDailyRoom(tx: Db, orgId: string, userId: string): Promise<
     .from(helpAsk)
     .where(and(eq(helpAsk.organizationId, orgId), eq(helpAsk.userId, userId), gte(helpAsk.createdAt, since)))
   if (Number(row?.total ?? 0) >= HELP_DAILY_LIMIT) {
-    throw new ServiceError("HELP_LIMIT", 429, "Llegaste al tope de preguntas a la Ayuda por hoy. Mañana vuelve a estar disponible.")
+    throw new ServiceError("HELP_LIMIT", 429, "Llegaste al tope de preguntas a Ariadna por hoy. Mañana vuelve a estar disponible.")
   }
+}
+
+/** La pregunta con «Sofi» donde la clínica dice el nombre que le puso a su agente de recepción. */
+function withGuideName(question: string, personaName: string | null | undefined): string {
+  const name = normalizeForSearch(personaName ?? "")
+  if (!name || name === normalizeForSearch(RECEPTION_DEFAULT_NAME)) return question
+  return ` ${normalizeForSearch(question)} `.replace(` ${name} `, ` ${RECEPTION_DEFAULT_NAME} `).trim()
 }
 
 /**
@@ -151,6 +173,9 @@ export async function askHelp(tx: Db, orgId: string, asker: HelpAsker, input: { 
   if (typeof input.question !== "string" || input.question.trim().length < 3) throw invalidField("question", "Escribe tu pregunta: al menos 3 caracteres.")
   const question = input.question.trim().slice(0, QUESTION_CHARS)
   const screen = typeof input.screen === "string" ? input.screen.slice(0, 200) : "/"
+  const talk = helpSmallTalk(question)
+  // Un saludo no es una consulta: no gasta del tope ni cuenta como algo que no supo.
+  if (talk) return { askId: "", kind: "charla", say: talk, answers: [], blockers: [], basedOn: "" }
   await requireDailyRoom(tx, orgId, asker.userId)
   const topics = await productHelpTopics(tx, orgId)
   const here = helpTopicForScreen(screen, topics)
@@ -160,25 +185,32 @@ export async function askHelp(tx: Db, orgId: string, asker: HelpAsker, input: { 
     return row.id
   }
 
-  // «¿Por qué no puedo…?»: primero lo que falta de verdad en la pantalla donde está.
+  // La guía dice «Sofi»: una clínica que le puso otro nombre pregunta con el suyo.
+  const [config] = await tx.select({ personaName: agentConfig.personaName }).from(agentConfig).where(eq(agentConfig.organizationId, orgId)).limit(1)
+  const matches = matchHelpTopics(withGuideName(question, config?.personaName), topics)
+
+  // «¿Por qué no puedo…?»: lo que falta de verdad en lo que preguntó; si no nombró nada, en la pantalla donde está.
   if (WHY_NOT.test(normalizeForSearch(question))) {
-    const blockers = await screenBlockers(tx, orgId, here, asker, topics)
+    const about = matches[0]?.topic ?? here
+    const blockers = await screenBlockers(tx, orgId, about, asker, topics)
     if (blockers.length > 0) {
       return {
-        askId: await log(here?.id ?? null),
+        askId: await log(about?.id ?? null),
         kind: "estado",
+        say: null,
         answers: [],
         blockers,
-        basedOn: `Lo que tu clínica tiene configurado ahora y lo que tu rol puede hacer${here ? ` en ${here.title}` : ""}.`,
+        basedOn: `Lo que tu clínica tiene configurado ahora y lo que tu rol puede hacer${about ? ` en ${about.title}` : ""}.`,
       }
     }
   }
 
-  const matches = matchHelpTopics(question, topics)
   if (matches.length === 0) {
-    return { askId: await log(null), kind: "nada", answers: [], blockers: [], basedOn: "" }
+    return { askId: await log(null), kind: "nada", say: null, answers: [], blockers: [], basedOn: "" }
   }
   const answers = matches.map(({ topic, faq }) => {
+    // Lo que no es de una pantalla (quién es Ariadna, su contraseña) no lleva a ninguna.
+    if (faq?.general) return { topicId: topic.id, where: "", text: faq.a, path: null, restriction: null }
     const access = restrictionFor(topic, asker)
     return {
       topicId: topic.id,
@@ -188,12 +220,14 @@ export async function askHelp(tx: Db, orgId: string, asker: HelpAsker, input: { 
       restriction: access.restriction,
     }
   })
+  const places = answers.map((answer) => answer.where).filter(Boolean)
   return {
     askId: await log(matches[0]?.topic.id ?? null),
     kind: "guia",
+    say: null,
     answers,
     blockers: [],
-    basedOn: `El mapa del sistema: ${answers.map((answer) => answer.where).join(" y ")}.`,
+    basedOn: places.length > 0 ? `El mapa del sistema: ${places.join(" y ")}.` : "La guía del sistema.",
   }
 }
 

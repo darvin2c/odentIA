@@ -147,6 +147,16 @@ const metricsPayload = z.object({
   avgFirstReplyMinutes: z.number().nullable(),
 })
 
+const helpStatsRow = z.object({ name: z.string(), total: z.number() })
+const helpStatsPayload = z.object({
+  days: z.number(),
+  asked: z.number(),
+  unanswered: z.number(),
+  notHelpful: z.number(),
+  unansweredByScreen: z.array(helpStatsRow),
+  notHelpfulByTopic: z.array(helpStatsRow),
+})
+
 const casesPayload = z.object({ items: z.array(caseItem), total: z.number() })
 const assigneePayload = z.object({
   userId: z.string(),
@@ -198,6 +208,12 @@ function SupportPage() {
       api("/api/admin/support/knowledge").then((body: unknown) =>
         z.array(knowledgeGroup).parse(body),
       ),
+    enabled: tab === "conocimiento",
+  })
+  const helpStats = useQuery({
+    queryKey: ["admin-support-help-stats"],
+    queryFn: () =>
+      api("/api/admin/support/help-stats").then((body: unknown) => helpStatsPayload.parse(body)),
     enabled: tab === "conocimiento",
   })
   const metrics = useQuery({
@@ -372,6 +388,53 @@ function SupportPage() {
               </div>
             </dl>
           )}
+        </section>
+      ) : null}
+
+      {tab === "conocimiento" ? (
+        <section aria-label="Lo que Ariadna no supo" className="flex flex-col gap-2">
+          <h2 className="font-heading text-base font-semibold">Lo que Ariadna no supo</h2>
+          {helpStats.isPending ? (
+            <SkeletonRegion message="Cargando lo que Ariadna no supo…">
+              <SupportKnowledgeSkeleton />
+            </SkeletonRegion>
+          ) : helpStats.isError ? (
+            <ErrorState message="No pude cargar lo que Ariadna no supo." onRetry={() => void helpStats.refetch()} />
+          ) : helpStats.data ? (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Últimos {helpStats.data.days} días, en todas las clínicas: {helpStats.data.asked}{" "}
+                {helpStats.data.asked === 1 ? "pregunta" : "preguntas"}, {helpStats.data.unanswered} sin respuesta y{" "}
+                {helpStats.data.notHelpful} que no sirvieron. Lo que se preguntó no se guarda, salvo que la persona lo envíe.
+              </p>
+              {helpStats.data.unansweredByScreen.length > 0 || helpStats.data.notHelpfulByTopic.length > 0 ? (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {(
+                    [
+                      ["No supo responder, por pantalla", helpStats.data.unansweredByScreen],
+                      ["Respondió y no sirvió, por tema", helpStats.data.notHelpfulByTopic],
+                    ] as const
+                  ).map(([title, rows]) => (
+                    <div key={title} className="flex flex-col gap-1 rounded-xl border px-3 py-2.5 text-sm">
+                      <h3 className="font-semibold">{title}</h3>
+                      {rows.length === 0 ? (
+                        <p className="text-muted-foreground">Sin casos.</p>
+                      ) : (
+                        <ul className="flex flex-col gap-0.5">
+                          {rows.map((row) => (
+                            <li key={row.name} className="flex justify-between gap-3">
+                              <span className="min-w-0">{row.name}</span>
+                              <span className="tabular-nums">{row.total}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </>
+          ) : null}
         </section>
       ) : null}
 

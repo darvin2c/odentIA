@@ -1,4 +1,4 @@
-import { ADMIN_NAME, CLINICAL_NAME, RECEPTION_DEFAULT_NAME, withReceptionNameIn } from "./agent-names"
+import { ADMIN_NAME, CLINICAL_NAME, HELP_NAME, RECEPTION_DEFAULT_NAME, withReceptionNameIn } from "./agent-names"
 import { appWords } from "./product-words"
 
 
@@ -509,7 +509,7 @@ const AGENT_NAME: Record<string, string> = {
   asistente_clinico: CLINICAL_NAME,
   clinico: CLINICAL_NAME,
   administrador: ADMIN_NAME,
-  ayuda: "Ayuda",
+  ayuda: HELP_NAME,
 }
 
 /**
