@@ -9,7 +9,7 @@ Con cita, «Atender» abría la atención en un clic (0032). Sin cita, abría an
 ## Decisión y motivo
 
 - **«Atender» es siempre un clic**, con cita o sin ella. Abre la atención a nombre de quien pulsa (el servidor ya lo ponía por defecto) y en la sede activa, la misma que muestra la Agenda.
-- **El motivo no se pide al abrir.** Se escribe dentro, en «Consulta», que se abre sola cuando falta. El cierre lo sigue exigiendo, como desde una cita.
+- **El motivo no se pide al abrir.** Se dicta a Clío o se escribe dentro, en «Consulta». El cierre lo sigue exigiendo, como desde una cita. Al principio «Consulta» se abría sola cuando faltaba; se quitó (2026-11-01) porque tapaba a Clío, que es la vía que se quiere.
 - **Si atiende otro profesional**, pulsa él «Atender» o «Tomar el relevo» dentro de la atención. No hace falta elegirlo antes.
 
 ## Alternativas descartadas

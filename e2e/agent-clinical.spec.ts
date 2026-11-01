@@ -11,6 +11,41 @@ const overflow = (page: Page) =>
 const DICTATION =
   "Viene por dolor al masticar del lado derecho. En la dieciséis hay caries en dentina. En la dieciséis hacemos endodoncia. Se realizó apertura cameral sin complicaciones. Control en 6 meses."
 
+test("atender sin motivo: ningún formulario tapa a Clío y el motivo se pide al firmar", async ({ owner }, info) => {
+  const { page, org } = owner
+  const patient = await call<{ id: string }>(page, "POST", "/api/patients", org.slug, {
+    submissionId: crypto.randomUUID(),
+    answers: { demographics: { displayName: "Cyndy Cotrina", docType: "DNI", docNumber: "45678123" }, respondent: "staff", privacyAccepted: false },
+    contacts: [],
+  }, 201)
+  await call(page, "PUT", "/api/agent/config", org.slug, { clinicalAssistantEnabled: true })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}`))
+  await page.getByRole("button", { name: "Atender", exact: true }).first().click()
+  await expect(page).toHaveURL(/\/encounters\//)
+
+  const idle = page.getByRole("region", { name: "Dictado de la atención" })
+  const reason = page.getByLabel("Motivo", { exact: true })
+  await expect(idle.getByRole("button", { name: "Dictar", exact: true })).toBeVisible()
+  await expect(page.getByRole("region", { name: "Consulta" }).getByRole("button", { name: "Abrir", exact: true })).toHaveAttribute("aria-expanded", "false")
+  await expect(reason).toHaveCount(0)
+  await info.attach("atender-sin-motivo", { body: await page.screenshot(), contentType: "image/png" })
+
+  // En el teléfono tampoco se abre el cajón encima.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.reload()
+  await expect(idle.getByRole("button", { name: "Dictar", exact: true })).toBeVisible()
+  await expect(page.getByRole("dialog", { name: "Consulta" })).toHaveCount(0)
+  await info.attach("atender-sin-motivo-movil", { body: await page.screenshot(), contentType: "image/png" })
+
+  // Si no lo dictó ni lo escribió, «Finalizar y firmar» lleva a su campo con el cursor ahí.
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
+  await expect(reason).toHaveAttribute("aria-invalid", "true")
+  await expect(reason).toBeFocused()
+  await expect(page.getByText("Escribe el motivo: es obligatorio para cerrar")).toBeVisible()
+})
+
 test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloque mientras se dicta, revisión y aviso antes de firmar", async ({ owner, fixtureDb }, info) => {
   const { page, org } = owner
   const patient = await call<{ id: string }>(page, "POST", "/api/patients", org.slug, {
@@ -247,8 +282,6 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   // --- Teléfono: dictar y revisar con las acciones fijas al pie, sin desbordes ---
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}/encounters/${encounter.id}`))
-  // Con el motivo ya escrito, volver a la atención no abre «Consulta» encima: se ve la atención.
-  await expect(page.getByRole("dialog", { name: "Consulta" })).toHaveCount(0)
   const dictate = idle.getByRole("button", { name: "Dictar", exact: true })
   expect((await dictate.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
   await dictate.click()
