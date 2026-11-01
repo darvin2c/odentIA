@@ -17,6 +17,7 @@ import {
   formatSpan,
   hourLabel,
   minutesToInstant,
+  overlapsAny,
   type ScheduleAvailability,
   type ScheduleColumn,
   ScheduleDayStrip,
@@ -26,6 +27,7 @@ import {
   scheduleRangeState,
   type ScheduleRangeValue,
   ScheduleResourceChips,
+  subtractRanges,
   useFieldControl,
   weekDates,
   withFieldGroup,
@@ -36,6 +38,7 @@ import { CalendarDays, ChevronDown } from "lucide-react"
 import * as React from "react"
 import type { AgendaAvailability } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
+import { appWords } from "../../lib/product-words"
 import { rangeSaid, shortName } from "./shared"
 
 /** El bloque se mueve de cuarto en cuarto de hora, como en la rejilla. */
@@ -66,10 +69,21 @@ export interface WhenInput {
    * dónde está y el bloque se propone en otro sitio.
    */
   moving?: { id: string; professionalUserId: string; startsAt: string; endsAt: string }
+  /**
+   * Nombre de quien se eligió, para poder reservar con alguien que no tiene
+   * horario en la sede: no llega con la disponibilidad.
+   */
+  professionalLabel?: string
   /** Falso mientras el «cuándo» no está a la vista: no se consulta nada. */
   enabled?: boolean
   /** Con servicio, la agenda ofrece solo a quien lo atiende (ADR 0039). */
   serviceId?: string
+}
+
+/** Una excepción de la agenda: fuera del horario, sobre algo ocupado o las dos. */
+export interface AgendaException {
+  outside: boolean
+  busy: boolean
 }
 
 export interface WhenState {
@@ -84,6 +98,10 @@ export interface WhenState {
   /** Lo elegido, si sigue valiendo para el día y el profesional que se miran. */
   shown: ScheduleRangeValue | null
   state: ScheduleRangeState | null
+  /** Lo elegido ya empezó: ni como excepción se reserva lo que pasó. */
+  past: boolean
+  /** Si lo elegido se sale de lo libre, y cómo. */
+  exception: AgendaException | null
   professional: ScheduleColumn | undefined
   chosenMinutes: number
   /** Próximo hueco de quien se eligió, desde ahora. */
@@ -138,15 +156,19 @@ export function useWhen(input: WhenInput): WhenState {
     placeholderData: (previous) => previous,
   })
   const availability = availabilityQuery.data?.data
-  const team = React.useMemo(
-    (): ScheduleColumn[] =>
-      (availability?.professionals ?? []).map((item) => ({
-        id: item.id,
-        label: item.label,
-        tone: toneOf(item.id),
-      })),
-    [availability, toneOf],
-  )
+  const seedProfessional = input.professionalUserId
+  const seedLabel = input.professionalLabel
+  const team = React.useMemo((): ScheduleColumn[] => {
+    const listed: ScheduleColumn[] = (availability?.professionals ?? []).map((item) => ({
+      id: item.id,
+      label: item.label,
+      tone: toneOf(item.id),
+    }))
+    // Con servicio elegido manda quién lo atiende: no se vuelve a sumar a quien no lo hace (ADR 0039).
+    return !serviceId && seedProfessional && seedLabel && !listed.some((item) => item.id === seedProfessional)
+      ? [...listed, { id: seedProfessional, label: seedLabel, tone: toneOf(seedProfessional) }]
+      : listed
+  }, [availability, toneOf, seedProfessional, seedLabel, serviceId])
   // Si quien se miraba no atiende el servicio elegido, se ve a quienes sí lo atienden.
   const lanes = React.useMemo(
     () =>
@@ -277,6 +299,22 @@ export function useWhen(input: WhenInput): WhenState {
       : undefined
   }, [moving, date, timeZone])
 
+  const state = shown ? scheduleRangeState(shown, { free, open, timeZone }) : null
+  const past = shown !== null && Date.parse(shown.start) < Date.parse(input.now)
+  /** Lo que es fuera de lo libre: fuera de horario, sobre algo ocupado o las dos cosas a la vez. */
+  const exception = ((): AgendaException | null => {
+    if (!shown || past || !state || state === "free") return null
+    if (state === "taken") return { outside: false, busy: true }
+    // «Fuera de horario» también lo da un bloque que solo sobresale: puede pisar además otra cita.
+    const range = dayRangeOf(shown.start, shown.end, date, timeZone)
+    const onDay = (items: ScheduleAvailability[]) =>
+      items.flatMap((item) => {
+        const hit = item.columnId === shown.columnId ? dayRangeOf(item.start, item.end, date, timeZone) : null
+        return hit ? [hit] : []
+      })
+    return { outside: true, busy: range !== null && overlapsAny(range, subtractRanges(onDay(open), onDay(free))) }
+  })()
+
   return {
     input,
     team,
@@ -287,7 +325,9 @@ export function useWhen(input: WhenInput): WhenState {
     week,
     professionalFilter,
     shown,
-    state: shown ? scheduleRangeState(shown, { free, open, timeZone }) : null,
+    state,
+    past,
+    exception,
     professional: team.find((item) => item.id === shown?.columnId),
     chosenMinutes: shown ? minutesBetween(shown.start, shown.end) : duration,
     nextFree:
@@ -324,6 +364,16 @@ export function useWhen(input: WhenInput): WhenState {
   }
 }
 
+/** Lo que se le dice al servidor de una excepción ya avisada: solo lo que se avisó. */
+export function exceptionFlags(
+  exception: AgendaException | null | undefined,
+): { outsideSchedule?: true; overrideBusy?: true } {
+  return {
+    ...(exception?.outside ? { outsideSchedule: true as const } : {}),
+    ...(exception?.busy ? { overrideBusy: true as const } : {}),
+  }
+}
+
 /** El «cuándo» en el formulario que lo usa (bajo `when`): los datos se llaman como en el cuerpo. */
 export interface WhenValues {
   startsAt: string
@@ -346,15 +396,12 @@ export const WHEN_FIELD_MAP: Record<string, string> = {
 
 /** Lo que impide enviar el hueco elegido, dicho junto a las horas; nada si se puede. */
 function slotProblem(when: WhenState): string | undefined {
-  const { shown, state, professional } = when
+  const { shown } = when
   const moving = when.input.moving
+  if (when.past) return "Esa hora ya pasó. Elige una hora de ahora en adelante."
   if (!shown) return moving ? "Elige la nueva hora: toca un hueco libre." : "Elige la hora: toca un hueco libre."
-  if (state === "taken") return `A esa hora ${professional?.label ?? "el profesional"} ya está ocupado. Mueve el bloque a una zona blanca.`
+  // Fuera de horario o sobre algo ocupado no es un error: se avisa junto a las horas y se puede seguir.
   if (!moving) return undefined
-  // Al reprogramar no hay urgencia: fuera del horario no se mueve.
-  if (state === "outside") {
-    return `Esa hora queda fuera del horario de ${professional?.label ?? "su profesional"}: ahí no se puede mover la cita.`
-  }
   if (
     shown.columnId === moving.professionalUserId &&
     Date.parse(shown.start) === Date.parse(moving.startsAt) &&
@@ -450,7 +497,7 @@ function WhenProfessional({ when }: { when: WhenState }) {
 function WhenSlot({ when }: { when: WhenState }) {
   const { control, errors, errorId } = useFieldControl({ hasDescription: false })
   const { timeZone, today, now, duration } = when.input
-  const { date, week, shown, state, professional } = when
+  const { date, week, shown, professional } = when
   const moving = when.input.moving != null
   return (
     <div className="grid gap-2">
@@ -501,6 +548,7 @@ function WhenSlot({ when }: { when: WhenState }) {
           defaultMinutes={duration}
           resizable={!moving}
           marker={when.marker}
+          marginMinutes={120}
           now={now}
         />
       )}
@@ -548,16 +596,47 @@ function WhenSlot({ when }: { when: WhenState }) {
       {/* Tras enviar, lo que impide reservar o mover se dice aquí una sola vez, unido a las horas. */}
       {control.invalid ? (
         <FieldError id={errorId} errors={errors.map((message) => ({ message }))} />
-      ) : state === "taken" ? (
-        <p role="alert" className="text-sm text-destructive">
-          A esa hora {professional?.label} ya está ocupado. Mueve el bloque a una zona blanca.
-        </p>
-      ) : state === "outside" ? (
-        <p role="status" className="text-sm text-warning">
-          {moving
-            ? `Esa hora queda fuera del horario de ${professional?.label}: ahí no se puede mover la cita.`
-            : `Esa hora queda fuera del horario de ${professional?.label}.`}
-        </p>
+      ) : when.exception ? (
+        <div role="status" className="grid gap-1.5 rounded-xl bg-warning-soft p-3 text-sm text-warning">
+          <p>
+            <strong className="font-bold">
+              {when.exception.outside
+                ? `Es fuera del horario de ${professional?.label}.`
+                : `A esa hora ${professional?.label} tiene otra cita o está bloqueado.`}
+            </strong>{" "}
+            {when.exception.outside
+              ? when.hoursThatDay.length > 0
+                ? `Ese día atiende de ${when.hoursThatDay.join(" y de ")}. `
+                : "Ese día no atiende. "
+              : ""}
+            {when.exception.outside && when.exception.busy ? "Además, parte de ese tiempo tiene otra cita o un bloqueo. " : ""}
+            {when.exception.busy
+              ? `Se reserva igual en otra ${appWords().room.one}, queda marcada y le llega un aviso.`
+              : "Se reserva igual, queda marcada y le llega un aviso."}
+          </p>
+          {when.nextFree ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="-ml-2.5 justify-self-start text-warning"
+              onClick={() => {
+                const next = when.nextFree
+                if (!next || !shown) return
+                when.goToDate(zonedDateOf(next.startsAt, timeZone))
+                when.choose({
+                  columnId: shown.columnId,
+                  start: next.startsAt,
+                  end: new Date(
+                    Math.min(Date.parse(next.startsAt) + when.chosenMinutes * 60000, Date.parse(next.endsAt)),
+                  ).toISOString(),
+                })
+              }}
+            >
+              Usar su próximo hueco: {rangeSaid(when.nextFree.startsAt, when.nextFree.endsAt, timeZone, today)}
+            </Button>
+          ) : null}
+        </div>
       ) : null}
       {when.failed ? (
         <p role="alert" className="text-sm text-destructive">

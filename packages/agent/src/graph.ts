@@ -46,8 +46,10 @@ import {
   formatKnowledgeEntry,
   type KnowledgeEntryItem,
   knowledgeFitsPrompt,
+  hasActiveExamples,
   lessonsForTurn,
   listPublishedForPrompt,
+  rankByMeaning,
   noteLessonUse,
   type OrgLocale,
   recordAgentCaseLookup,
@@ -81,6 +83,7 @@ import {
   makeAgentTools,
   noticeAfterHandoff,
   performHandoff,
+  QUERY_EMBED_MS,
   TOOL_SOURCES,
   agentTexts,
   roomWord,
@@ -880,6 +883,32 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     }
   }
 
+  /**
+   * Los ejemplos de Recepción parecidos por significado, entre todos los que
+   * tiene (ADR 0119). La frase se vectoriza fuera de la transacción y se espera
+   * poco; sin vectorizador, sin ejemplos o si falla, `lessonsForTurn` los busca
+   * por palabras.
+   */
+  async function examplesByMeaning(text: string): Promise<string[] | undefined> {
+    const embedder = toolCtx.embedder
+    if (!embedder || !text.trim()) return undefined
+    try {
+      const any = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) => hasActiveExamples(tx, toolCtx.orgId, "recepcion"))
+      if (!any) return undefined
+      const [embedding] = await Promise.race([
+        embedder.embed([text]),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("vectores: sin respuesta a tiempo")), QUERY_EMBED_MS)),
+      ])
+      if (!embedding?.length) return undefined
+      const ranked = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) =>
+        rankByMeaning(tx, toolCtx.orgId, { model: embedder.model, embedding }),
+      )
+      return ranked.examples
+    } catch {
+      return undefined
+    }
+  }
+
   async function loadContext(): Promise<{ messages: BaseMessage[] }> {
     const zone = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) => getOrgLocale(tx, toolCtx.orgId))
     const { contactBlock, crossBlock, caseBlock, items, state, startedAt, givenName } = await readThread(zone)
@@ -892,6 +921,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     const asked = draft ?? trailingBurst(items) ?? latestInbound
     const overrides = toolCtx.lessonOverrides
     const hiddenEntries = new Set(overrides?.skipEntryIds ?? [])
+    const rankedExampleIds = await examplesByMeaning(asked ?? "")
     const { cfg, snapshot, clinicData, faqs, lessons } = await withOrgContext(
       toolCtx.db,
       toolCtx.orgId,
@@ -913,6 +943,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
           lessons: await lessonsForTurn(tx, toolCtx.orgId, "recepcion", asked ?? "", {
             skipIds: overrides?.skipIds ?? [],
             extra: overrides?.extra ?? [],
+            ...(rankedExampleIds ? { rankedExampleIds } : {}),
           }),
         }
       },

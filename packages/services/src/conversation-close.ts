@@ -732,21 +732,27 @@ export async function tickConversationCare(
   }
 
   /**
-   * Resuelve los temas del hilo que una persona del equipo ya respondió (un
-   * saliente suyo aceptado después de crearse el tema y de la última vez que
-   * la persona volvió a preguntar) cuando la persona lleva `closeAfterHours`
-   * sin escribir. Devuelve si ya no le queda ningún tema abierto.
+   * Resuelve el tema del hilo que una persona del equipo ya respondió (un
+   * saliente suyo aceptado después de crearse el tema, de la última vez que la
+   * persona volvió a preguntar y de que alguien lo dejara pendiente) cuando la
+   * persona lleva `closeAfterHours` sin escribir. Lo que cita otro mensaje no
+   * responde este tema y, con varios temas abiertos, no se sabe cuál respondió
+   * un mensaje sin cita: lo dice el equipo (ADR 0122). Devuelve si ya no le queda
+   * ningún tema abierto.
    */
   async function settleAnsweredTopics(inner: Db, row: CareRow): Promise<boolean> {
     const silentSince = row.lastInboundAt ?? row.attentionStartedAt
     if (now.getTime() - silentSince.getTime() < cfg.closeAfterHours * HOUR_MS) return false
+    const open = await countOpenHandoffsOf(inner, orgId, row.id)
+    if (open !== 1) return open === 0
     const answered = await inner.execute<{ task_id: string }>(sql`
       select h.task_id from agent_handoff h
       where h.organization_id = ${orgId} and h.conversation_id = ${row.id} and h.task_id is not null
         and ${handoffOpenSql(sql.raw("h"))}
         and exists (select 1 from message m where m.organization_id = h.organization_id and m.conversation_id = h.conversation_id
           and m.sender_kind = 'user' and ${acceptedOutSql(sql.raw("m"))}
-          and m.created_at > greatest(h.created_at, coalesce(h.asked_again_at, '-infinity'::timestamptz)))`)
+          and m.created_at > greatest(h.created_at, coalesce(h.asked_again_at, '-infinity'::timestamptz), coalesce(h.kept_pending_at, '-infinity'::timestamptz))
+          and (m.reply_to_message_id is null or m.reply_to_message_id = h.source_message_id or h.asked_message_ids ? m.reply_to_message_id::text))`)
     for (const item of answered) {
       await updateTask(inner, orgId, item.task_id, { status: "done" })
       await inner

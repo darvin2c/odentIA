@@ -79,6 +79,7 @@ import { getAccountSummary } from "./payments.js"
 import { cancelOwnAppointment, confirmOwnAppointment, moveOwnAppointment } from "./own-appointment.js"
 import { handoffOpenSql } from "./handoff-state.js"
 import { CONFIRM_TTL_HOURS, proposalPendingSql } from "./proposal-state.js"
+import { countAgentWork } from "./agent-overview.js"
 import {
   formatOrgMoney,
   formatZoned,
@@ -2465,8 +2466,12 @@ const YES_COMPANY = new Set([
   "va", "una", "ahi", "alla", "alli", "voy", "nos", "vemos", "tambien", "muy", "senorita", "amiga",
 ])
 
-export function isAffirmative(text: string | null): boolean {
-  if (!text || text.includes("?")) return false
+/** Lo que asiente sin llegar a ser un sí: no confirma nada, pero tampoco pide nada. */
+const COURTESY_WORDS = new Set(["gracias", "entendido", "entendida", "ya", "aja", "ah", "oh", "bueno", "buenisimo", "vemos", "\u{1f64f}", "\u{1f60a}"])
+
+/** Las palabras de un mensaje corto, sin tildes ni signos; ninguna si pregunta algo o es largo. */
+function plainWords(text: string | null): string[] {
+  if (!text || text.includes("?")) return []
   const normal = text
     .toLowerCase()
     .normalize("NFD")
@@ -2474,10 +2479,22 @@ export function isAffirmative(text: string | null): boolean {
     .replace(/[¡!¿?.,;:()"'-]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
-  if (!normal || normal.length > 80) return false
-  const words = normal.split(" ")
+  if (!normal || normal.length > 80) return []
+  return normal.split(" ")
+}
+
+export function isAffirmative(text: string | null): boolean {
+  const words = plainWords(text)
   // Cada palabra es un sí o lo acompaña, y hay al menos un sí: «no», «pero», «mejor», «otro»… no están.
   return words.every((word) => YES_WORDS.has(word) || YES_COMPANY.has(word)) && words.some((word) => YES_WORDS.has(word))
+}
+
+/** Solo asiente o agradece: «Si», «ok», «gracias», «entendido». No sirve para confirmar: eso es `isAffirmative`. */
+export function onlyCourtesy(text: string | null): boolean {
+  const words = plainWords(text)
+  const says = (word: string) => YES_WORDS.has(word) || COURTESY_WORDS.has(word)
+  // Lo que solo acompaña no basta: «por favor» o «a la una» sí piden algo.
+  return words.every((word) => says(word) || YES_COMPANY.has(word)) && words.some(says)
 }
 
 /**
@@ -2637,46 +2654,13 @@ export async function confirmProposalByContact(
   return executeProposal(tx, orgId, decidedBy, id, { secretsKey: opts.secretsKey, consentMessageId: confirmationId })
 }
 
-/* ------------------------------ «Esperan su sí» ------------------------------ */
+/* -------------------------- «Confirmó por teléfono» -------------------------- */
 
 /** Las propuestas que esperan el sí de la persona: las citas. */
 export const APPOINTMENT_PROPOSAL_ACTIONS = ["reservar_cita", "reprogramar_cita", "cancelar_cita"] as const
-type AppointmentProposalAction = (typeof APPOINTMENT_PROPOSAL_ACTIONS)[number]
 
 /** Lo que dice recepción cuando el horario propuesto ya no está libre. */
 export const SLOT_TAKEN_WORDS = "Ese horario ya no está libre: elige otro en la Agenda"
-
-export interface AwaitingAnswerItem {
-  id: string
-  conversationId: string
-  contactId: string | null
-  contactName: string | null
-  channel: string | null
-  action: AppointmentProposalAction
-  /** «Le propuse el jueves 22 a las 16:30 con la Dra. Rojas». */
-  text: string
-  createdAt: string
-  /** El horario propuesto se ocupó (o la cita cambió) mientras esperaba. */
-  taken: boolean
-}
-
-export interface AwaitingAnswerList {
-  items: AwaitingAnswerItem[]
-  /** Todas las abiertas, también las que no caben en la lista. */
-  total: number
-}
-
-/** «jueves 22 a las 16:30», en la zona de la clínica. */
-function dayAndHour(value: unknown, zone: Pick<OrgLocale, "timezone" | "locale">): string | null {
-  if (typeof value !== "string") return null
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return null
-  const day = new Intl.DateTimeFormat(zone.locale, { timeZone: zone.timezone, weekday: "long", day: "numeric" })
-    .format(date)
-    .replace(",", "")
-  const hour = new Intl.DateTimeFormat(zone.locale, { timeZone: zone.timezone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(date)
-  return `${day} a las ${hour}`
-}
 
 /**
  * ¿Sigue libre el horario de una cita propuesta? La misma regla que al
@@ -2717,71 +2701,6 @@ async function proposedSlotFree(tx: Db, orgId: string, payload: Record<string, u
     if (error instanceof ServiceError) return false
     throw error
   }
-}
-
-/**
- * Agente › «Esperan su sí» (decisión 21, tablero 2c): solo las citas que el
- * agente propuso y esperan respuesta de la persona. Para saber, no para hacer:
- * lo ya hecho se ve en la conversación y en la cita. Cada fila dice lo que se
- * le propuso y si ese horario se ocupó mientras esperaba.
- */
-export async function listAwaitingAnswer(
-  tx: Db,
-  orgId: string,
-  input: { limit?: number } = {},
-): Promise<AwaitingAnswerList> {
-  await expireDueProposals(tx, orgId)
-  const limit = Math.min(Math.max(input.limit ?? 100, 1), 200)
-  const open = and(
-    eq(agentProposal.organizationId, orgId),
-    inArray(agentProposal.action, [...APPOINTMENT_PROPOSAL_ACTIONS]),
-    proposalPendingSql(sql.raw('"agent_proposal"')),
-  )
-  const [counted] = await tx.select({ total: count() }).from(agentProposal).where(open)
-  // Las más viejas primero: llevan más tiempo esperando.
-  const rows = await tx.select().from(agentProposal).where(open).orderBy(asc(agentProposal.createdAt), asc(agentProposal.id)).limit(limit)
-  const zone = await getOrgLocale(tx, orgId)
-  const enriched = await enrichProposals(tx, orgId, rows)
-  const items: AwaitingAnswerItem[] = []
-  for (const proposal of enriched) {
-    const action = proposal.action as AppointmentProposalAction
-    const when = dayAndHour(proposal.payload.startsAt, zone)
-    const professional = proposal.context.professionalName
-    let text: string
-    let taken: boolean
-    if (action === "reservar_cita") {
-      text = `Le propuse el ${when ?? "horario que eligió"}${professional ? ` con ${professional}` : ""}`
-      taken = !(await proposedSlotFree(tx, orgId, proposal.payload))
-    } else if (action === "reprogramar_cita") {
-      text = `Le propuse mover su cita al ${when ?? "nuevo horario"}`
-      taken = proposal.context.isStale === true
-    } else {
-      text = `Le propuse cancelar su cita${proposal.context.currentSummary ? ` (${proposal.context.currentSummary.replace(/^Cita actual: /, "")})` : ""}`
-      taken = proposal.context.isStale === true
-    }
-    items.push({
-      id: proposal.id,
-      conversationId: proposal.conversationId,
-      contactId: proposal.contactId,
-      contactName: proposal.context.contactName,
-      channel: proposal.context.channel,
-      action,
-      text,
-      createdAt: proposal.createdAt,
-      taken,
-    })
-  }
-  return { items, total: Number(counted?.total ?? 0) }
-}
-
-/** Cuántas citas esperan el sí de la persona: el número junto a la pestaña «Esperan su sí». */
-export async function countAwaitingAnswer(tx: Db, orgId: string): Promise<number> {
-  const [row] = await tx.execute<{ n: number }>(sql`
-    select count(*)::int as n from agent_proposal p
-    where p.organization_id = ${orgId}
-      and p.action in (${sql.join(APPOINTMENT_PROPOSAL_ACTIONS.map((action) => sql`${action}`), sql`, `)})
-      and ${proposalPendingSql(sql.raw("p"))}`)
-  return row?.n ?? 0
 }
 
 /**
@@ -3487,13 +3406,16 @@ export interface AgentSummary {
   enabled: boolean
   /** Propuestas que esperan el sí del interlocutor; se ven, el equipo no las decide. */
   awaitingContact: number
-  /** Citas propuestas que esperan el sí de la persona: el número de la pestaña «Esperan su sí». */
-  awaitingAnswer: number
   /**
    * Casos que pasó el agente y esperan a quien mira: sin tomar o suyos. Cuentan
    * en el número de «Inicio» del menú (`countWorkspaceWaiting`).
    */
   openHandoffs: number
+  /**
+   * Lo que se resuelve dentro de Agente (`countAgentWork`): el número del menú.
+   * Solo para quien supervisa al agente; para los demás, 0.
+   */
+  toResolve: number
   /** Corridas de hoy que respondieron o derivaron (zona de la organización). */
   interventionsToday: number
   /** Corridas de hoy con error o sin respuesta: no se presentan como intervenciones. */
@@ -3505,8 +3427,14 @@ export interface AgentSummary {
 /**
  * Resumen ligero del agente para quien atiende: legible
  * con `agent.decide` (recepción) sin exponer configuración ni modelo.
+ * `supervises`: quien mira tiene `agent.read` y ve el menú «Agente».
  */
-export async function getAgentSummary(tx: Db, orgId: string, userId: string): Promise<AgentSummary> {
+export async function getAgentSummary(
+  tx: Db,
+  orgId: string,
+  userId: string,
+  opts: { supervises?: boolean } = {},
+): Promise<AgentSummary> {
   await expireDueProposals(tx, orgId)
   const { locale, timezone } = await getOrgLocale(tx, orgId)
   const [cfg] = await tx
@@ -3518,8 +3446,8 @@ export async function getAgentSummary(tx: Db, orgId: string, userId: string): Pr
   return {
     enabled: cfg?.enabled ?? false,
     awaitingContact: await countAwaitingContact(tx, orgId),
-    awaitingAnswer: await countAwaitingAnswer(tx, orgId),
     openHandoffs: await countOpenHandoffs(tx, orgId, { forUserId: userId }),
+    toResolve: opts.supervises ? await countAgentWork(tx, orgId) : 0,
     interventionsToday: today.ok + today.handoff,
     failedToday: today.error + today.sinRespuesta,
     locale,
@@ -4116,17 +4044,55 @@ export async function latestOpenTopic(
 /** Cuánto atrás un tema abierto cuenta como «el mismo» que vuelve a pedir. */
 const SAME_TOPIC_MS = 12 * 60 * 60 * 1000
 
+/**
+ * Un «Si», un «ok» o un «gracias» no le piden nada nuevo a nadie: no entran a un
+ * tema ni le abren uno (ADR 0122). La excepción es el que contesta una pregunta
+ * del equipo: alguien espera ese sí para actuar.
+ */
+export async function asksNothingNew(tx: Db, orgId: string, conversationId: string, messageId: string): Promise<boolean> {
+  const [said] = await tx
+    .select({ body: conversationMessage.body, contentType: conversationMessage.contentType, replyTo: conversationMessage.replyToMessageId, createdAt: conversationMessage.createdAt })
+    .from(conversationMessage)
+    .where(and(eq(conversationMessage.id, messageId), eq(conversationMessage.organizationId, orgId), eq(conversationMessage.conversationId, conversationId)))
+    .limit(1)
+  // Una foto con «Listo» trae algo: un comprobante, por ejemplo.
+  if (!said || said.contentType !== "text" || !onlyCourtesy(said.body)) return false
+  // A qué contesta: lo que citó o, si no citó nada, lo último que se le dijo. Lo que
+  // escribió justo antes cuenta: «¿ya me dicen?» y «gracias» en una ráfaga sí preguntan.
+  const before = await tx
+    .select({ direction: conversationMessage.direction, senderKind: conversationMessage.senderKind, body: conversationMessage.body })
+    .from(conversationMessage)
+    .where(
+      and(
+        eq(conversationMessage.organizationId, orgId),
+        eq(conversationMessage.conversationId, conversationId),
+        said.replyTo ? eq(conversationMessage.id, said.replyTo) : lt(conversationMessage.createdAt, said.createdAt),
+      ),
+    )
+    .orderBy(desc(conversationMessage.createdAt))
+    .limit(10)
+  for (const item of before) {
+    // El «?» de un enlace no es una pregunta.
+    if (item.direction === "out") return !(item.senderKind === "user" && (item.body ?? "").replace(/https?:\/\/\S+/g, "").includes("?"))
+    if (!onlyCourtesy(item.body)) return false
+  }
+  return true
+}
+
 export async function recordTopicAskedAgain(
   tx: Db,
   orgId: string,
   input: { handoffId: string; messageId: string | null },
-): Promise<{ assigneeName: string | null; reason: string; raised: boolean }> {
+): Promise<{ assigneeName: string | null; reason: string; raised: boolean; noted: boolean }> {
   const [row] = await tx
     .select()
     .from(agentHandoff)
     .where(and(eq(agentHandoff.id, input.handoffId), eq(agentHandoff.organizationId, orgId), handoffStillOpen()))
     .limit(1)
   if (!row) throw notFound("Tema")
+  if (input.messageId && row.conversationId && (await asksNothingNew(tx, orgId, row.conversationId, input.messageId))) {
+    return { assigneeName: null, reason: row.reason, raised: false, noted: false }
+  }
   const asked = new Set(row.askedMessageIds ?? [])
   if (input.messageId) {
     const [msg] = await tx
@@ -4159,7 +4125,7 @@ export async function recordTopicAskedAgain(
       permission: "conversations.read",
     })
   }
-  return { assigneeName, reason: row.reason, raised }
+  return { assigneeName, reason: row.reason, raised, noted: true }
 }
 
 /** Cuántas veces vuelve a preguntar por lo mismo antes de que su tema pase a urgente. */

@@ -16,7 +16,6 @@ import {
 import { type AgentModelCheck, getAgentConfig, MODEL_NOT_RESPONDING, upsertAgentConfig } from "./agentConfig.js"
 import { createConnection } from "./connections.js"
 import { type IngestDeps, ingestInbound } from "./conversations.js"
-import { KNOWLEDGE_BASICS } from "./knowledge.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import type { Storage } from "./storage.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
@@ -159,7 +158,7 @@ describe("voz, funciones y límites de la clínica", () => {
 describe("resumen del agente", () => {
   let connectionId: string
 
-  it("una clínica que no tocó nada: apagado y con lo básico por responder", async () => {
+  it("una clínica que no tocó nada: apagado y sin horario ni servicios que decir", async () => {
     const overview = await run((tx) => getAgentOverview(tx, OTHER), OTHER)
     expect(overview).toMatchObject({
       enabled: false,
@@ -169,8 +168,9 @@ describe("resumen del agente", () => {
       provider: { problem: null, at: null },
       readiness: { channels: [], receivers: [], sandboxTurns: 0 },
     })
-    expect(overview.knows.basicsTotal).toBe(KNOWLEDGE_BASICS.length)
-    expect(overview.needsYou.basicsMissing).toBe(overview.knows.basicsTotal - overview.knows.basicsCovered)
+    // Lo que dice sale de sus datos: sin horario del equipo ni servicios, no sabe cuándo atiende ni qué hace.
+    expect(overview.knows).toMatchObject({ answers: 0, services: 0, branchesWithHours: 0 })
+    expect(overview.needsYou).not.toHaveProperty("basicsMissing")
   })
 
   it("dice quién recibe los casos, los canales conectados y si ya se probó", async () => {

@@ -38,9 +38,10 @@ import {
 } from "@odentia/ui/components/ai-elements/prompt-input"
 import { ConfirmDialog, EmptyState, ErrorState, RowActions, SpeechInput } from "@odentia/ui-patterns"
 import { ThreadSkeleton } from "../skeletons/inbox"
+import { TopicList } from "./topic-list"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { Bot, CheckCircle2, ChevronDown, ChevronLeft, Copy, CornerDownLeft, Hand, PanelRight } from "lucide-react"
+import { Bot, CheckCircle2, ChevronDown, ChevronLeft, Copy, CornerDownLeft, Hand, PanelRight, X } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { AnswerTrace } from "../../lib/agent"
 import { useReceptionName } from "../../lib/agent-names"
@@ -265,16 +266,15 @@ export function ThreadView({
   const canOpenPeople = usePermission("patients.read")
   const canSeeNonPatients = usePermission("crm.read")
   const [briefFor, setBriefFor] = useState<string | null>(null)
-  // Temas (ADR 0050): a qué mensaje responde la caja (undefined = el tema pendiente
-  // más antiguo de quien mira; null = mensaje nuevo, sin tema), si se ve solo el
-  // tema y si el último envío lo dejó resuelto.
+  // Temas (ADR 0050 y 0122): a qué mensaje responde la caja (undefined = al abrir, el
+  // único tema de quien mira; null = a nada) y qué tema se acaba de resolver, para
+  // poder dejarlo pendiente.
   const [replyTo, setReplyTo] = useState<string | null | undefined>(undefined)
   // «Es spam» y «Bloquear a esta persona…» (ADR 0054).
   const screenActions = useContactScreenActions()
   const [blocking, setBlocking] = useState(false)
   const [passing, setPassing] = useState<InboxTopic | null>(null)
-  const [doneTopic, setDoneTopic] = useState(false)
-  const keepPendingRef = useRef(false)
+  const [doneTopic, setDoneTopic] = useState<string | null>(null)
   // Pasadas las 24 horas: elegir un mensaje aprobado en vez de responder el tema
   // (R1), o escribirle por WhatsApp desde Instagram o Messenger (tablero 4b).
   const [useApproved, setUseApproved] = useState(false)
@@ -303,7 +303,7 @@ export function ThreadView({
     setCorrecting(null)
     setConfirming(null)
     setReplyTo(undefined)
-    setDoneTopic(false)
+    setDoneTopic(null)
     setBlocking(false)
     setUseApproved(false)
     setViaWhatsapp(false)
@@ -396,20 +396,20 @@ export function ThreadView({
   }, [prepareRegistration, canRegister, detail])
 
   const sendMutation = useMutation({
-    mutationFn: (input: { text: string; replyToMessageId: string | null; keepPending: boolean; viaWhatsapp?: boolean }) =>
-      apiFetch<{ data: ChatMessage & { topicResolved: boolean; conversationId?: string } }>(`/api/conversations/${id}/messages${input.viaWhatsapp ? "/whatsapp" : ""}`, {
+    mutationFn: (input: { text: string; replyToMessageId: string | null; viaWhatsapp?: boolean }) =>
+      apiFetch<{ data: ChatMessage & { topicId: string | null; topicResolved: boolean; conversationId?: string } }>(`/api/conversations/${id}/messages${input.viaWhatsapp ? "/whatsapp" : ""}`, {
         method: "POST",
         body: JSON.stringify({
           text: input.text,
           ...(input.replyToMessageId ? { replyToMessageId: input.replyToMessageId } : {}),
-          ...(input.keepPending ? { keepPending: true } : {}),
         }),
       }),
     onSuccess: (result, input) => {
       setComposer("")
       setWindowClosed(false)
       setSendError(null)
-      setReplyTo(undefined)
+      // Después de enviar la caja no elige otro tema: un segundo mensaje seguido lo citaría y lo cerraría.
+      setReplyTo(null)
       if (input.viaWhatsapp) {
         setViaWhatsapp(false)
         setSentToWhatsapp(result.data.conversationId ?? null)
@@ -417,23 +417,26 @@ export function ThreadView({
           result.data.held ? "Quedó en su WhatsApp: le llega con «Ver respuesta»." : "Se le envió por WhatsApp.",
         )
       }
-      if (result.data.topicResolved) setDoneTopic(true)
+      if (result.data.topicResolved) setDoneTopic(result.data.topicId)
       invalidate()
       invalidateAgentWork(queryClient)
     },
     onError: sendFailed,
   })
 
-  // «Tomar este tema», «Pasar este tema a…» y «Marcar resuelto» (ADR 0050).
+  // «Tomar este tema», «Pasar este tema a…», «Resolver» y «Dejar pendiente» (ADR 0050 y 0122).
   const topicMutation = useMutation({
     retry: false,
-    mutationFn: ({ topicId, path, body }: { topicId: string; path: "take" | "resolve"; body?: unknown }) =>
+    mutationFn: ({ topicId, path, body }: { topicId: string; path: "take" | "resolve" | "reopen"; body?: unknown }) =>
       apiFetch(`/api/conversations/${id}/topics/${topicId}/${path}`, {
         method: "POST",
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       }),
     onSuccess: (_result, variables) => {
-      if (variables.path === "resolve") setDoneTopic(true)
+      if (variables.path === "resolve") setDoneTopic(variables.topicId)
+      if (variables.path === "reopen") setDoneTopic(null)
+      // Tampoco elige sola lo que queda ni lo que se acaba de dejar pendiente.
+      if (variables.path !== "take") setReplyTo(null)
       invalidate()
       invalidateAgentWork(queryClient)
       for (const key of ["agent-case-brief", "crm-context", "workspace-home"]) {
@@ -476,7 +479,6 @@ export function ThreadView({
         await sendMutation.mutateAsync({
           text,
           replyToMessageId: effectiveReplyTo,
-          keepPending: keepPendingRef.current,
           ...(viaWhatsapp ? { viaWhatsapp: true } : {}),
         })
       }
@@ -494,7 +496,6 @@ export function ThreadView({
       sendFailed(error)
       throw error
     } finally {
-      keepPendingRef.current = false
       setUploading(false)
     }
   }
@@ -616,9 +617,10 @@ export function ThreadView({
   const topics = threadAttention?.topics ?? []
   const forMe = (topic: InboxTopic) => !topic.assigneeUserId || topic.assigneeUserId === myUserId
   const orderedTopics = [...topics.filter(forMe), ...topics.filter((topic) => !forMe(topic))]
-  const defaultTopic = [...topics.filter(forMe)].sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0] ?? null
-  // La caja responde por defecto a la pregunta pendiente más antigua de quien mira.
-  const effectiveReplyTo = replyTo === undefined ? (defaultTopic?.source?.id ?? null) : replyTo
+  // Al abrir, la caja elige sola solo si no hay duda: un único tema y de quien mira. Con
+  // varios lo dice quien responde: una cita equivocada le llega a la persona (ADR 0122).
+  const soleTopic = topics.length === 1 && topics[0] && forMe(topics[0]) ? topics[0] : null
+  const effectiveReplyTo = replyTo === undefined ? (soleTopic?.source?.id ?? null) : replyTo
   const replyMessage = effectiveReplyTo ? (messages.find((item) => item.id === effectiveReplyTo) ?? null) : null
   const replyTopic = effectiveReplyTo
     ? (topics.find((topic) => topic.source?.id === effectiveReplyTo || topic.askedMessageIds.includes(effectiveReplyTo)) ?? null)
@@ -632,14 +634,19 @@ export function ThreadView({
   const metaShut = metaWindow !== null && !metaWindow.open
   const firstName = detail.contact.displayName.split(/\s+/)[0] ?? detail.contact.displayName
   const metaChannel = detail.connection.provider === "messenger" ? "Messenger" : "Instagram"
-  // Mensajes del tema: los que lo originaron o volvieron a preguntar por él.
-  const topicMessageIds = new Set(topics.flatMap((topic) => [topic.source?.id, ...topic.askedMessageIds].filter((item): item is string => !!item)))
-  const focusTopic = defaultTopic ?? orderedTopics[0] ?? null
+  // Mensajes de cada tema: los que lo originaron o volvieron a preguntar por él.
+  const topicOfMessage = new Map(
+    topics.flatMap((topic) => [topic.source?.id, ...topic.askedMessageIds].filter((item): item is string => !!item).map((item) => [item, topic] as const)),
+  )
   const jumpTo = (messageId: string) => {
     window.setTimeout(() => document.getElementById(`mensaje-${messageId}`)?.scrollIntoView({ block: "center", behavior: "smooth" }), 50)
   }
-  // Promete responder después: se sugiere dejar el tema pendiente.
-  const promises = replyTopic !== null && /\b(te (confirmo|aviso|escribo|respondo|cuento|averiguo)|consult|averigu|lo veo)/i.test(composer)
+  // Elegir a qué responder lleva a la caja, como «R».
+  const replyToMessage = (messageId: string) => {
+    setUseApproved(false)
+    setReplyTo(messageId)
+    window.setTimeout(() => document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Mensaje"]')?.focus(), 0)
+  }
   // Caja también, para devolverle un pago (decisión 3): `TopicBand` se lo ofrece solo en los pagos.
   // «Responder por» (decisión 6 del pulido): otro canal de la persona, sin perder lo escrito.
   const switchTo = (next: string) => {
@@ -683,9 +690,8 @@ export function ThreadView({
     return since ? `${who} · ${since}` : who
   }
   // Un solo aviso a la vez: del que cambia lo que pasa al enviar al que solo informa.
-  const notice: { text: string; warn?: boolean; agent?: boolean } | null = promises
-    ? { text: "Prometes responder después: usa «Enviar, sigue pendiente» para que el tema no se dé por resuelto.", warn: true }
-    : threadAttention?.unreachable === true && topics.length > 0
+  const notice: { text: string; warn?: boolean; agent?: boolean } | null =
+    threadAttention?.unreachable === true && topics.length > 0
       ? {
           text: threadAttention.othersPhone
             ? `Sin forma de avisarle: el WhatsApp que dejó (${threadAttention.othersPhone}) ya es de otra persona de la clínica, y no se usa sin confirmar quién es. Al visitante no se le dijo. Si cierra la pestaña del chat, no le llega la respuesta.`
@@ -697,25 +703,13 @@ export function ThreadView({
         : threadAttention?.teamLive && threadAttention.agentAttending && !doneTopic
           ? { text: `Estás conversando en vivo: ${receptionName} espera 15 minutos después del último mensaje del equipo y luego sigue con lo demás.`, agent: true }
           : null
-  const topicMenu = [
-    ...(replyTopic?.source ? [{ key: "ver", label: "Ver en la conversación", onSelect: () => jumpTo(replyTopic.source?.id ?? "") }] : []),
-    // A qué responde la caja: otro tema, uno de sus últimos mensajes o nada.
-    ...orderedTopics
-      .filter((topic) => topic.source && topic.source.id !== effectiveReplyTo)
-      .map((topic) => ({ key: `tema-${topic.id}`, label: `Responder a «${topicQuote(topic, 48)}»`, onSelect: () => setReplyTo(topic.source?.id ?? null) })),
-    ...[...messages]
-      .reverse()
-      .filter((item) => item.direction === "in" && (item.conversationId ?? id) === id && !topicMessageIds.has(item.id) && item.id !== effectiveReplyTo)
-      .slice(0, 3)
-      .map((item) => ({ key: `mensaje-${item.id}`, label: `Responder a «${(item.body ?? attachmentWords({ contentType: item.contentType, mimeType: item.attachments[0]?.mimeType })).slice(0, 48)}»`, onSelect: () => setReplyTo(item.id) })),
-    ...(effectiveReplyTo !== null ? [{ key: "sin-tema", label: "Mensaje nuevo, sin tema", onSelect: () => setReplyTo(null) }] : []),
-    ...(replyTopic && canWrite
+  const topicMenu =
+    replyTopic && canWrite
       ? [
           { key: "pasar", label: "Pasar este tema a…", disabled: topicMutation.isPending, onSelect: () => setPassing(replyTopic) },
           { key: "resuelto", label: "Marcar resuelto", disabled: topicMutation.isPending, onSelect: () => topicMutation.mutate({ topicId: replyTopic.id, path: "resolve" as const }) },
         ]
-      : []),
-  ]
+      : []
 
   return (
     <div className="elevated flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card">
@@ -978,7 +972,12 @@ export function ThreadView({
                         conversationId={entry.msg.conversationId ?? id}
                         channel={multiChannel ? channelOf(entry.msg.conversationId) : null}
                         orgSlug={orgSlug}
-                        highlight={topicMessageIds.has(entry.msg.id) ? (focusTopic?.urgent ? "urgent" : "topic") : undefined}
+                        highlight={topicOfMessage.get(entry.msg.id)?.urgent ? "urgent" : topicOfMessage.has(entry.msg.id) ? "topic" : undefined}
+                        selected={entry.msg.id === effectiveReplyTo}
+                        // Otro canal se responde por ese canal: «Responder por» lo ofrece.
+                        {...(canWrite && !blocked && entry.msg.direction === "in" && (entry.msg.conversationId ?? id) === id
+                          ? { onReply: () => replyToMessage(entry.msg.id) }
+                          : {})}
                         quote={quoteOf(entry.msg, messages, jumpTo)}
                         senderName={entry.msg.senderUserId ? (members.find((member) => member.userId === entry.msg.senderUserId)?.user.name ?? null) : null}
                         personFirstName={firstName}
@@ -1089,16 +1088,39 @@ export function ThreadView({
               </Button>
             </div>
           )}
-          {doneTopic ? (
+          {doneTopic && !closed ? (
             <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-success/40 bg-success-soft px-3 py-2 text-sm">
               <CheckCircle2 className="size-4 text-success" aria-hidden />
               <span className="min-w-0 flex-1">Tema resuelto. {receptionName} sigue con lo demás.</span>
-              {onNextTopic ? (
+              <Button
+                variant="link"
+                size="sm"
+                className="h-auto min-h-11 p-0 font-semibold sm:min-h-8"
+                disabled={topicMutation.isPending}
+                onClick={() => topicMutation.mutate({ topicId: doneTopic, path: "reopen" })}
+              >
+                Dejar pendiente
+              </Button>
+              {onNextTopic && topics.length === 0 ? (
                 <Button size="sm" className="min-h-11 sm:min-h-8" onClick={onNextTopic}>
                   Siguiente tema por atender
                 </Button>
               ) : null}
             </div>
+          ) : null}
+          {canWrite && !blocked && topics.length > 0 && effectiveReplyTo === null ? (
+            <TopicList
+              topics={orderedTopics}
+              myUserId={myUserId}
+              receptionName={receptionName}
+              busy={topicMutation.isPending || switching}
+              onPick={(topic) => {
+                if (!topic.source) return
+                replyToMessage(topic.source.id)
+                jumpTo(topic.source.id)
+              }}
+              onResolve={(topic) => topicMutation.mutate({ topicId: topic.id, path: "resolve" })}
+            />
           ) : null}
           {!canWrite ? (
             <p className="rounded-2xl bg-input/50 px-3 py-3 text-sm text-muted-foreground">Tu rol puede leer esta conversación, pero no escribir en ella.</p>
@@ -1107,17 +1129,14 @@ export function ThreadView({
             <p className="rounded-2xl bg-input/50 px-3 py-3 text-sm text-muted-foreground">No puedes escribirle mientras esté bloqueada.</p>
           ) : windowShut && !holdReply ? (
             <div className="flex flex-col gap-1.5">
-              {defaultTopic?.source ? (
-                // Hay una pregunta sin responder: se le puede responder igual y le llega con «Ver respuesta» (R1).
+              {effectiveReplyTo !== null ? (
+                // Eligió un mensaje aprobado con una pregunta elegida: se le puede responder igual y le llega con «Ver respuesta» (R1).
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   className="min-h-11 w-fit sm:min-h-8"
-                  onClick={() => {
-                    setUseApproved(false)
-                    setReplyTo(defaultTopic.source?.id ?? null)
-                  }}
+                  onClick={() => setUseApproved(false)}
                 >
                   Responder su pregunta
                 </Button>
@@ -1214,19 +1233,31 @@ export function ThreadView({
                     </DropdownMenu>
                   </PromptInputHeader>
                 ) : null}
-                {effectiveReplyTo !== null || topics.length > 0 ? (
-                  <PromptInputHeader className="w-full flex-nowrap pb-0 pr-1 text-[13px] font-normal text-foreground">
-                    <section aria-label="Lo que te toca contestar" className="flex min-w-0 flex-1 items-center gap-2">
-                      {replyTopic ? (
-                        <span
-                          aria-hidden
-                          className={replyTopic.urgent ? "size-2 shrink-0 rounded-full bg-destructive" : replyTopicMine ? "size-2 shrink-0 rounded-[2px] bg-warning" : "size-2 shrink-0 rounded-[2px] bg-muted-foreground"}
-                        />
-                      ) : null}
-                      <span className={`shrink-0 font-semibold ${replyTopic?.urgent ? "text-destructive" : replyTopic && replyTopicMine ? "text-warning" : "text-muted-foreground"}`}>
-                        {replyTopic ? topicHead(replyTopic) : effectiveReplyTo !== null ? "Respondiendo a:" : "Mensaje nuevo, sin tema"}
+                {effectiveReplyTo !== null ? (
+                  <PromptInputHeader className="w-full flex-nowrap items-start pb-0 pr-1 text-[13px] font-normal text-foreground">
+                    <section aria-label="Lo que te toca contestar" className="flex min-w-0 flex-1 flex-col">
+                      <span className="flex min-w-0 flex-wrap items-center gap-x-2">
+                        {replyTopic ? (
+                          <span
+                            aria-hidden
+                            className={replyTopic.urgent ? "size-2 shrink-0 rounded-full bg-destructive" : replyTopicMine ? "size-2 shrink-0 rounded-[2px] bg-warning" : "size-2 shrink-0 rounded-[2px] bg-muted-foreground"}
+                          />
+                        ) : null}
+                        <span className={`font-semibold ${replyTopic?.urgent ? "text-destructive" : replyTopic && replyTopicMine ? "text-warning" : "text-muted-foreground"}`}>
+                          {replyTopic ? topicHead(replyTopic) : "Respondiendo a este mensaje"}
+                        </span>
+                        <span className="text-muted-foreground">{replyTopic ? "Se resuelve al enviar" : "Ningún tema se resuelve"}</span>
                       </span>
-                      {effectiveReplyTo !== null && replyText ? <span className="min-w-0 flex-1 truncate">«{replyText}»</span> : <span className="flex-1" />}
+                      {replyText ? (
+                        <button
+                          type="button"
+                          onClick={() => jumpTo(effectiveReplyTo)}
+                          aria-label={`Ver en la conversación: ${replyText}`}
+                          className="min-h-6 min-w-0 truncate rounded text-left outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          «{replyText}»
+                        </button>
+                      ) : null}
                     </section>
                     {replyTopic && !replyTopicMine ? (
                       <Button
@@ -1241,7 +1272,18 @@ export function ThreadView({
                         Tomar este tema
                       </Button>
                     ) : null}
-                    <RowActions label="Más acciones del tema" items={topicMenu} />
+                    {topicMenu.length > 0 ? <RowActions label="Más acciones del tema" items={topicMenu} /> : null}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Quitar la cita"
+                      title="Quitar la cita"
+                      className="max-sm:size-11"
+                      onClick={() => setReplyTo(null)}
+                    >
+                      <X className="size-4" aria-hidden />
+                    </Button>
                   </PromptInputHeader>
                 ) : null}
                 <PromptInputBody>
@@ -1292,36 +1334,17 @@ export function ThreadView({
                       </Button>
                     ) : null}
                   </PromptInputTools>
-                  {/* En celular los dos botones de un tema no caben junto a las herramientas: van en su propia fila, a todo el ancho. */}
-                  <div className={`ml-auto flex shrink-0 items-center gap-1.5${replyTopic ? " max-sm:w-full max-sm:flex-wrap" : ""}`}>
-                    {replyTopic ? (
-                      <Button
-                        type="submit"
-                        variant="outline"
-                        size="sm"
-                        className="min-h-11 max-sm:flex-1 max-sm:px-1.5 max-sm:text-[13px] sm:min-h-8"
-                        disabled={sendMutation.isPending || uploading || switching}
-                        onClick={() => {
-                          keepPendingRef.current = true
-                        }}
-                      >
-                        Enviar, sigue pendiente
-                      </Button>
-                    ) : null}
-                    {replyTopic ? (
-                      <PromptInputSubmit
-                        size="sm"
-                        className="min-h-11 max-sm:flex-1 max-sm:px-1.5 max-sm:text-[13px] sm:min-h-8"
-                        aria-label="Enviar y resolver"
-                        title="Enviar y resolver (Enter)"
-                        disabled={sendMutation.isPending || uploading || switching}
-                      >
-                        Enviar y resolver
-                        <CornerDownLeft className="size-4 max-sm:hidden" aria-hidden />
-                      </PromptInputSubmit>
-                    ) : (
-                      <PromptInputSubmit aria-label="Enviar" title="Enviar (Enter)" disabled={sendMutation.isPending || uploading || switching} />
-                    )}
+                  <div className="ml-auto flex shrink-0 items-center gap-1.5">
+                    <PromptInputSubmit
+                      size="sm"
+                      className="min-h-11 sm:min-h-8"
+                      aria-label="Enviar"
+                      title="Enviar (Enter)"
+                      disabled={sendMutation.isPending || uploading || switching}
+                    >
+                      Enviar
+                      <CornerDownLeft className="size-4 max-sm:hidden" aria-hidden />
+                    </PromptInputSubmit>
                   </div>
                 </PromptInputFooter>
               </PromptInput>

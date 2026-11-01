@@ -1,7 +1,7 @@
 import { productWords } from "@odentia/clinical"
 import { type Db, withOrgContext } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
-import { agentSearchItem, type SearchItemKind } from "@odentia/db/schema/agent"
+import { agentLesson, agentSearchItem, type SearchItemKind } from "@odentia/db/schema/agent"
 import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm"
 import { listAgentPromotions, listAgentProfessionals, listAgentServices } from "./agent-clinic-info.js"
 import { listActiveKnowledge } from "./knowledge.js"
@@ -12,8 +12,10 @@ import { productHooks } from "./products.js"
  * Índice de la búsqueda por significado (ADR 0021). Cada cosa de la clínica
  * que el agente puede encontrar tiene una fila con su texto descriptivo y su
  * vector. Solo sirve para encontrar: precio, vigencia y condiciones se leen de
- * su tabla al responder. El texto nunca lleva precios, fechas ni datos de una
- * persona; solo nombres, especialidades, condiciones y respuestas oficiales.
+ * su tabla al responder. El texto nunca lleva precios ni fechas; solo nombres,
+ * especialidades, condiciones, respuestas oficiales y la pregunta de cada
+ * ejemplo aprobado (ADR 0119), que es lo que escribió alguien y ya está en su
+ * lección.
  *
  * Conciliar (`syncSearchItems`) es solo base de datos; vectorizar es una
  * llamada externa y va fuera de toda transacción (`refreshAgentSearch`).
@@ -27,6 +29,8 @@ export interface SearchEmbedder {
 
 /** Tope del texto de una respuesta oficial en el índice: el arranque basta para reconocer el tema. */
 const ANSWER_CHARS = 600
+/** Tope de la pregunta de un ejemplo en el índice. */
+const EXAMPLE_CHARS = 300
 /** Cuántas filas se vectorizan por llamada al proveedor. */
 const EMBED_BATCH = 64
 /**
@@ -69,6 +73,19 @@ export async function wantedSearchItems(tx: Db, orgId: string): Promise<WantedIt
   const promotions = await listAgentPromotions(tx, orgId)
   const professionals = await listAgentProfessionals(tx, orgId)
   const answers = await listActiveKnowledge(tx, orgId)
+  // Los ejemplos se buscan por la pregunta que los originó: es lo que se parece a la del turno.
+  // Solo los de recepción, el único agente que los busca: los de otro no le quitan lugar en el orden.
+  const examples = await tx
+    .select({ id: agentLesson.id, title: agentLesson.title, question: agentLesson.question })
+    .from(agentLesson)
+    .where(
+      and(
+        eq(agentLesson.organizationId, orgId),
+        eq(agentLesson.status, "activa"),
+        eq(agentLesson.kind, "ejemplo"),
+        eq(agentLesson.scope, "recepcion"),
+      ),
+    )
   return [
     ...services.map((s) => ({ kind: "servicio" as const, refId: s.id, text: serviceText(s.name, s.specialty, s.kind, kindWords) })),
     ...promotions.map((p) => ({
@@ -91,6 +108,11 @@ export async function wantedSearchItems(tx: Db, orgId: string): Promise<WantedIt
       kind: "respuesta" as const,
       refId: a.id,
       text: [`Información de la clínica: ${a.title}`, ...a.askForms, a.body.slice(0, ANSWER_CHARS)].join(". "),
+    })),
+    ...examples.map((e) => ({
+      kind: "ejemplo" as const,
+      refId: e.id,
+      text: (e.question.trim() || e.title).slice(0, EXAMPLE_CHARS),
     })),
   ]
 }
@@ -175,6 +197,8 @@ export interface MeaningRank {
   promotions: string[]
   professionals: string[]
   answers: string[]
+  /** Ejemplos aprobados de recepción. */
+  examples: string[]
 }
 
 /**
@@ -200,7 +224,13 @@ export async function rankByMeaning(
     where position <= ${limit} and distance <= ${maxDistance}
     order by kind, distance`)) as unknown as Array<{ kind: SearchItemKind; ref_id: string }>
   const of = (kind: SearchItemKind) => rows.filter((row) => row.kind === kind).map((row) => row.ref_id)
-  return { services: of("servicio"), promotions: of("promocion"), professionals: of("profesional"), answers: of("respuesta") }
+  return {
+    services: of("servicio"),
+    promotions: of("promocion"),
+    professionals: of("profesional"),
+    answers: of("respuesta"),
+    examples: of("ejemplo"),
+  }
 }
 
 /**

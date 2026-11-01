@@ -29,38 +29,22 @@ const ASK_FORM_LIMIT = 20
 const ASK_FORM_CHARS = 120
 
 /**
- * Lo que una clínica debería tener respondido antes de dejar al agente
- * atender solo. `auto` se cubre con datos que ya están en el sistema (sedes,
- * servicios y medios de pago); el resto, con una respuesta oficial vigente
- * marcada con su clave.
+ * «Lo que solo tú sabes» (ADR 0120): lo que los pacientes preguntan seguido y
+ * no está en ningún dato del sistema. Es opcional: sin respuesta, el agente
+ * dice que lo confirma y pasa la pregunta al equipo. Lo que sí está en los
+ * datos (horario, sedes, equipo, servicios, precios, medios de pago, cómo
+ * cambiar una cita) no se escribe aquí: se lee al momento (`getAgentDataSources`).
+ * Las preguntas de salud tampoco: esas siempre pasan a un profesional.
  */
-export const KNOWLEDGE_BASICS: ReadonlyArray<{ key: string; question: string; auto?: string }> = [
-  { key: "horario", question: "¿Cuál es el horario de atención?" },
-  { key: "ubicacion", question: "¿Dónde están y cómo llego?", auto: "Sedes con dirección" },
-  { key: "telefono", question: "¿A qué número puedo llamar?", auto: "Sedes con teléfono" },
-  { key: "estacionamiento", question: "¿Tienen estacionamiento?" },
-  { key: "accesibilidad", question: "¿El local es accesible para silla de ruedas?" },
-  { key: "servicios", question: "¿Qué tratamientos ofrecen?", auto: "Servicios activos" },
-  { key: "precios", question: "¿Cuánto cuesta una consulta o un tratamiento?", auto: "Precios de los servicios" },
-  { key: "presupuesto", question: "¿Cómo obtengo un presupuesto?" },
-  { key: "medios_pago", question: "¿Qué medios de pago aceptan?", auto: "Medios de pago activos" },
-  { key: "cuotas", question: "¿Se puede pagar en cuotas?" },
-  { key: "seguros", question: "¿Trabajan con seguros o convenios?" },
-  // Neutral respecto del país: cada uno llama distinto a su comprobante (boleta, factura, recibo…).
-  { key: "comprobante", question: "¿Emiten comprobante de pago?" },
-  { key: "sin_cita", question: "¿Atienden sin cita?" },
-  { key: "urgencias", question: "¿Atienden urgencias?" },
-  { key: "primera_cita", question: "¿Qué necesito llevar a mi primera cita?" },
-  { key: "duracion", question: "¿Cuánto dura una cita?" },
-  { key: "cambiar_cita", question: "¿Cómo cambio o cancelo mi cita?" },
-  { key: "tardanza", question: "¿Qué pasa si llego tarde o no puedo ir?" },
-  { key: "ninos", question: "¿Atienden a niños? ¿Desde qué edad?" },
-  { key: "embarazo", question: "¿Atienden a embarazadas?" },
-  { key: "especialistas", question: "¿Qué especialistas atienden?" },
-  { key: "dolor", question: "¿El tratamiento duele? ¿Usan anestesia?" },
-  { key: "radiografias", question: "¿Toman radiografías en la clínica?" },
-  { key: "garantia", question: "¿Los tratamientos tienen garantía?" },
-  { key: "reclamos", question: "¿Dónde presento una queja o una sugerencia?" },
+export const KNOWLEDGE_BASICS: ReadonlyArray<{ key: string; question: string; label: string }> = [
+  { key: "estacionamiento", question: "¿Tienen estacionamiento?", label: "Estacionamiento" },
+  { key: "accesibilidad", question: "¿El local es accesible para silla de ruedas?", label: "Accesibilidad" },
+  { key: "cuotas", question: "¿Se puede pagar en cuotas?", label: "Pago en cuotas" },
+  { key: "seguros", question: "¿Trabajan con seguros o convenios?", label: "Seguros y convenios" },
+  { key: "sin_cita", question: "¿Atienden sin cita?", label: "Atención sin cita" },
+  { key: "primera_cita", question: "¿Qué necesito llevar a mi primera cita?", label: "Primera cita" },
+  { key: "tardanza", question: "¿Qué pasa si llego tarde o no puedo ir?", label: "Si llega tarde" },
+  { key: "presupuesto", question: "¿Cómo obtengo un presupuesto?", label: "Presupuesto" },
 ]
 
 /** `vigente` es lo único que llega al agente. */
@@ -183,8 +167,10 @@ function cleanAskForms(value: unknown, title: string): string[] {
   return forms
 }
 
-function cleanBasicKey(value: string | null | undefined): string | null {
+/** `kept`: la clave que ya tenía la respuesta; una de antes de la lista actual se conserva al editarla. */
+function cleanBasicKey(value: string | null | undefined, kept: string | null = null): string | null {
   if (value === null || value === undefined || value === "") return null
+  if (value === kept) return value
   if (!KNOWLEDGE_BASICS.some((item) => item.key === value)) throw validation("basicKey no es una pregunta básica conocida")
   return value
 }
@@ -318,7 +304,7 @@ export async function updateKnowledgeEntry(
   const validUntil = input.validUntil === undefined ? current.validUntil : cleanDate(input.validUntil, "validUntil")
   assertValidity(validFrom, validUntil)
   const askForms = cleanAskForms(input.askForms === undefined ? current.askForms : input.askForms, title)
-  const basicKey = input.basicKey === undefined ? current.basicKey : cleanBasicKey(input.basicKey)
+  const basicKey = input.basicKey === undefined ? current.basicKey : cleanBasicKey(input.basicKey, current.basicKey)
   let branchId = current.branchId
   let branchName: string | null = null
   if (input.branchId !== undefined) {
@@ -857,17 +843,16 @@ export async function listPublishedForPrompt(tx: Db, orgId: string): Promise<Kno
   return listActiveKnowledge(tx, orgId)
 }
 
-/* ---------- Lo básico de una clínica ---------- */
+/* ---------- Lo que solo tú sabes ---------- */
 
 export interface KnowledgeBasicItem {
   key: string
   question: string
+  /** Cómo se nombra en una etiqueta: «Pago en cuotas». */
+  label: string
+  /** Hay una respuesta oficial vigente marcada con su clave. */
   covered: boolean
-  /** `respuesta`: hay una respuesta oficial vigente; `datos`: lo cubre lo que ya está en el sistema. */
-  coveredBy: "respuesta" | "datos" | null
   entryId: string | null
-  /** De qué datos sale cuando no hace falta escribir nada. */
-  dataSource: string | null
 }
 
 export interface KnowledgeBasics {
@@ -876,30 +861,12 @@ export interface KnowledgeBasics {
   total: number
 }
 
-/** Qué preguntas básicas ya puede responder el agente y cuáles faltan. */
+/** Cuáles de las preguntas que solo sabe la clínica ya tienen respuesta. */
 export async function getKnowledgeBasics(tx: Db, orgId: string): Promise<KnowledgeBasics> {
   const active = await listActiveKnowledge(tx, orgId)
-  const snapshot = await getClinicInfoSnapshot(tx, orgId)
-  const sources = await getKnowledgeDataSources(tx, orgId)
-  const fromData: Record<string, boolean> = {
-    ubicacion: snapshot.branches.some((b) => Boolean(b.address?.trim())),
-    telefono: snapshot.branches.some((b) => Boolean(b.phone?.trim())),
-    servicios: sources.services > 0,
-    // Solo cuentan los precios que el agente puede decir: con todo «Solo con evaluación» no da ninguno.
-    precios: sources.pricedServices > 0,
-    medios_pago: snapshot.paymentMethods.length > 0,
-  }
   const items = KNOWLEDGE_BASICS.map((basic): KnowledgeBasicItem => {
     const entry = active.find((item) => item.basicKey === basic.key)
-    const data = fromData[basic.key] === true
-    return {
-      key: basic.key,
-      question: basic.question,
-      covered: Boolean(entry) || data,
-      coveredBy: entry ? "respuesta" : data ? "datos" : null,
-      entryId: entry?.id ?? null,
-      dataSource: basic.auto ?? null,
-    }
+    return { key: basic.key, question: basic.question, label: basic.label, covered: Boolean(entry), entryId: entry?.id ?? null }
   })
   return { items, covered: items.filter((item) => item.covered).length, total: items.length }
 }
@@ -1071,7 +1038,7 @@ export async function answerKnowledgeGaps(
       kind: "faq",
       title: input.title,
       body: input.body,
-      basicKey: input.basicKey ?? null,
+      basicKey: cleanBasicKey(input.basicKey),
     })
     await setKnowledgeStatus(tx, orgId, actorUserId, created.id, "publicada")
     entryId = created.id

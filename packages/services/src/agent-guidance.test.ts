@@ -13,7 +13,15 @@ import {
   removeAgentGuidance,
   simpleRulesConflict,
 } from "./agent-guidance.js"
-import { approveLesson, formatLessonRules, lessonsForTurn, listLessons } from "./agent-learning.js"
+import {
+  approveLesson,
+  formatLessonRules,
+  LESSON_RULE_LIMIT,
+  lessonsForTurn,
+  listLessons,
+  RULE_BODY_CHARS,
+  restoreLesson,
+} from "./agent-learning.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 /**
@@ -114,6 +122,7 @@ describe("al aprobar una regla que contradice otra, se avisa antes", () => {
     expect(await c.run((tx) => findRuleConflict(tx, c.orgId, candidate))).toEqual({
       conflictWith: { id: old.id, body: "No ofrezcas citas los sábados." },
       method: "comparacion",
+      full: null,
     })
     await c.run((tx) => approveLesson(tx, c.orgId, c.ownerId, candidate, { replaceId: old.id }))
     expect((await c.run((tx) => listAgentGuidance(tx, c.orgId))).items.map((item) => item.id).sort()).toEqual([candidate, unrelated.id].sort())
@@ -132,14 +141,43 @@ describe("al aprobar una regla que contradice otra, se avisa antes", () => {
     expect(await c.run((tx) => findRuleConflict(tx, c.orgId, candidate, says(true)))).toEqual({
       conflictWith: { id: old.id, body: old.body },
       method: "modelo",
+      full: null,
     })
     expect(asked).toEqual(["No ofrezcas citas los sábados."])
     // El modelo dice que no chocan: «Mantener las dos» no hace falta preguntarlo.
-    expect(await c.run((tx) => findRuleConflict(tx, c.orgId, candidate, says(false)))).toEqual({ conflictWith: null, method: "modelo" })
+    expect(await c.run((tx) => findRuleConflict(tx, c.orgId, candidate, says(false)))).toEqual({ conflictWith: null, method: "modelo", full: null })
     const failing = async () => Promise.reject(new Error("sin modelo"))
     expect((await c.run((tx) => findRuleConflict(tx, c.orgId, candidate, failing))).method).toBe("comparacion")
     // «Mantener las dos»: se aprueba sin reemplazar.
     await c.run((tx) => approveLesson(tx, c.orgId, c.ownerId, candidate))
     expect((await c.run((tx) => listAgentGuidance(tx, c.orgId))).counts).toEqual({ all: 3, escrita: 2, aprendida: 1 })
+  })
+})
+
+describe("las reglas no pasan del tope ni del largo (ADR 0119)", () => {
+  it("con 40 activas no se agrega otra, la que se aprueba reemplaza una y lo largo no entra", async () => {
+    const c = await clinic()
+    const added: Array<{ id: string }> = []
+    for (let index = 0; index < LESSON_RULE_LIMIT; index++) {
+      added.push(await c.run((tx) => addAgentGuidance(tx, c.orgId, c.ownerId, `Regla número ${index + 1}.`)))
+    }
+    await expect(c.run((tx) => addAgentGuidance(tx, c.orgId, c.ownerId, "Una más."))).rejects.toMatchObject({ code: "RULE_LIMIT" })
+    // Aprobar una regla nueva pide elegir cuál reemplaza: la lista llega con el aviso.
+    const candidate = await c.proposedRule("Despídete con el nombre de la clínica.")
+    const check = await c.run((tx) => findRuleConflict(tx, c.orgId, candidate))
+    expect(check.full).toMatchObject({ limit: LESSON_RULE_LIMIT })
+    expect(check.full?.rules).toHaveLength(LESSON_RULE_LIMIT)
+    await expect(c.run((tx) => approveLesson(tx, c.orgId, c.ownerId, candidate))).rejects.toMatchObject({ code: "RULE_LIMIT" })
+    const first = added[0]!
+    await c.run((tx) => approveLesson(tx, c.orgId, c.ownerId, candidate, { replaceId: first.id }))
+    expect((await c.run((tx) => listAgentGuidance(tx, c.orgId))).counts.all).toBe(LESSON_RULE_LIMIT)
+    // Restaurar la reemplazada tampoco pasa del tope.
+    await expect(c.run((tx) => restoreLesson(tx, c.orgId, c.ownerId, first.id))).rejects.toMatchObject({ code: "RULE_LIMIT" })
+    // Lo largo no se escribe ni se aprueba: llegaría cortado.
+    const long = "a".repeat(RULE_BODY_CHARS + 1)
+    await c.run((tx) => removeAgentGuidance(tx, c.orgId, c.ownerId, added[1]!.id))
+    await expect(c.run((tx) => addAgentGuidance(tx, c.orgId, c.ownerId, long))).rejects.toMatchObject({ fields: { body: expect.any(String) } })
+    const longRule = await c.proposedRule(long)
+    await expect(c.run((tx) => approveLesson(tx, c.orgId, c.ownerId, longRule))).rejects.toMatchObject({ fields: { body: expect.any(String) } })
   })
 })

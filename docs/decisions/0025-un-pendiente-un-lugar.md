@@ -1,6 +1,6 @@
 # 0025 · Un pendiente, un lugar
 
-Fecha: 2026-10-15 · Estado: aceptada · Ajusta a [0024](0024-ninguna-conversacion-queda-abierta.md) (el aviso de la conversación que sigue abierta)
+Fecha: 2026-10-15 · Estado: aceptada · Ajusta a [0024](0024-ninguna-conversacion-queda-abierta.md) (el aviso de la conversación que sigue abierta) · El contador lo ajusta [0118](0118-cada-numero-donde-se-resuelve.md)
 
 ## Problema
 
@@ -10,7 +10,7 @@ Un mismo caso que el agente pasaba al equipo aparecía en unos diez sitios: dos 
 
 - **«Te espera» es la única lista de lo que hay que hacer**, una fila por asunto. El caso y su tarea son una sola fila; la conversación del caso no cuenta en «esperan respuesta». También entran ahí la cita que sigue sin confirmar tras el primer recordatorio del agente («no confirmó · llamar») y la conversación que sigue abierta con una persona a cargo (antes era un aviso, ver 0024).
 - **La campana es solo para enterarse.** No trae nada de lo que está en «Te espera». Abrir un aviso lo marca leído y hay «Marcar todo leído». Un aviso con asunto se retira solo cuando el asunto se resuelve, con una sola regla en el servidor (`settleWorkspaceNotifications`), y vuelve si el asunto vuelve. Nadie recibe aviso de lo que hizo. Cada aviso llega a quien tiene el permiso que declara, sea de lectura o de escritura.
-- **Un solo contador y un solo nombre.** El número va solo en el menú (desde [0118](0118-sin-panel-del-agente.md), en «Inicio») y cuenta lo que nadie tomó más lo propio. En pantalla, «Te lo pasó el agente» en cada fila y «Casos del agente» como lista; la urgencia es siempre «Ahora / Hoy / Sin apuro».
+- **Un solo contador y un solo nombre.** ~~El número va solo en el menú del Agente~~ (desde [0123](0123-sin-panel-del-agente.md), en «Inicio» del menú) y cuenta lo que nadie tomó más lo propio. En pantalla, «Te lo pasó el agente» en cada fila y «Casos del agente» como lista; la urgencia es siempre «Ahora / Hoy / Sin apuro».
 - ~~Terminar un caso avisa igual en todas partes.~~ Dejó de aplicar con [0050](0050-el-agente-nunca-se-calla.md): completar la tarea de un tema no cierra la conversación, así que no hay nada que avisar.
 
 El equipo de una clínica mediana trabaja desde una lista, no desde varias que se contradicen; lo repetido se ignora y lo que se ignora deja de servir.

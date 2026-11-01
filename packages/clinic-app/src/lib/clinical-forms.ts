@@ -440,7 +440,7 @@ export function markConsentTemplateReviewed(id: string) {
 }
 
 /** La hoja como saldría, con una persona de ejemplo: nada se guarda. */
-export function fetchConsentPreview(draft: { title: string; sections: ConsentSections; version?: number }) {
+export function fetchConsentPreview(draft: { title: string; sections: ConsentSections }) {
   return apiFetchBytes(`${BASE}/consent-templates/preview`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

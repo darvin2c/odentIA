@@ -7,7 +7,8 @@ import { branch } from "@odentia/db/schema/org"
 import { and, asc, eq, gt, inArray, isNull, lt } from "drizzle-orm"
 import { alias } from "drizzle-orm/pg-core"
 import { createHash } from "node:crypto"
-import { normalizeForSearch } from "./knowledge.js"
+import { getAgentConfig } from "./agentConfig.js"
+import { getClinicInfoSnapshot, normalizeForSearch } from "./knowledge.js"
 import { findOrgCountry, formatOrgMoney, type OrgLocale } from "./locale.js"
 import { kindOfSpecialty } from "./product-catalog.js"
 import { productHooks } from "./products.js"
@@ -116,12 +117,28 @@ function mergeRanges(ranges: Array<[number, number]>): Array<[number, number]> {
   return out
 }
 
-/** Horario de atención de cada sede activa, derivado de los horarios del equipo, y sus próximos cierres. */
-export async function getBranchHours(tx: Db, orgId: string, now = new Date()): Promise<AgentBranchHours[]> {
+/**
+ * Horario de atención de cada sede activa, derivado de los horarios del equipo,
+ * y sus próximos cierres. Es el mismo que dice el agente y el que muestra
+ * «Horarios y ausencias» (`branchId`: solo esa sede): no hay otro horario de
+ * la sede que se escriba aparte (ADR 0118).
+ */
+export async function getBranchHours(
+  tx: Db,
+  orgId: string,
+  now = new Date(),
+  opts: { branchId?: string } = {},
+): Promise<AgentBranchHours[]> {
   const branches = await tx
     .select({ id: branch.id, name: branch.name })
     .from(branch)
-    .where(and(eq(branch.organizationId, orgId), eq(branch.isActive, true)))
+    .where(
+      and(
+        eq(branch.organizationId, orgId),
+        eq(branch.isActive, true),
+        opts.branchId ? eq(branch.id, opts.branchId) : undefined,
+      ),
+    )
     .orderBy(asc(branch.name), asc(branch.id))
   if (!branches.length) return []
   const ids = branches.map((row) => row.id)
@@ -655,6 +672,71 @@ export async function getAgentClinicData(tx: Db, orgId: string, informs: boolean
     services: await listAgentServices(tx, orgId),
     promotions: await listAgentPromotions(tx, orgId),
     informs,
+  }
+}
+
+/* ---------- Lo que toma de tus datos ---------- */
+
+/**
+ * Lo que el agente de recepción lee de los datos de la clínica, contado para
+ * mostrarlo en Conocimiento (ADR 0120): las mismas fuentes que su prompt
+ * (`getAgentClinicData`, `getClinicInfoSnapshot`), así la pantalla dice lo
+ * que de verdad recibe. Nada se escribe dos veces: cada fila se edita donde
+ * vive.
+ */
+export interface AgentDataSources {
+  /** Horario de atención de cada sede (la suma de los horarios del equipo) y sus cierres de los próximos días. */
+  hours: AgentBranchHours[]
+  branches: { total: number; withAddress: number; withPhone: number }
+  team: { professionals: number; specialties: number }
+  /** `priced`: los que dicen su precio («exacto» o «desde»); `withDuration`: los que dicen cuánto duran. */
+  services: { total: number; priced: number; withDuration: number }
+  /** `endsOn`: el último día en que vale, en la zona de la clínica (AAAA-MM-DD). */
+  promotions: Array<{ name: string; endsOn: string | null }>
+  paymentMethods: string[]
+  /** La clínica registró su teléfono para urgencias (ADR 0084). */
+  emergencyPhone: boolean
+  /**
+   * «Informar» encendido. Apagado, no le llegan precios, promociones,
+   * profesionales ni medios de pago (ADR 0021): la pantalla lo dice en esas filas.
+   */
+  informs: boolean
+}
+
+export async function getAgentDataSources(tx: Db, orgId: string): Promise<AgentDataSources> {
+  const cfg = await getAgentConfig(tx, orgId)
+  const snapshot = await getClinicInfoSnapshot(tx, orgId)
+  const professionals = await listAgentProfessionals(tx, orgId)
+  const services = await listAgentServices(tx, orgId)
+  const promotions = await listAgentPromotions(tx, orgId)
+  return {
+    hours: await getBranchHours(tx, orgId),
+    branches: {
+      total: snapshot.branches.length,
+      withAddress: snapshot.branches.filter((branch) => Boolean(branch.address?.trim())).length,
+      withPhone: snapshot.branches.filter((branch) => Boolean(branch.phone?.trim())).length,
+    },
+    team: {
+      professionals: professionals.length,
+      specialties: new Set(professionals.flatMap((item) => item.specialties)).size,
+    },
+    services: {
+      total: services.length,
+      priced: services.filter((item) => item.price.disclosure !== "evaluacion" && item.price.priceCents > 0).length,
+      withDuration: services.filter((item) => item.durationMin !== null).length,
+    },
+    // El día de la clínica, no el de UTC: una promoción que termina de noche en Lima no pasa al día siguiente.
+    promotions: promotions.map((item) => ({
+      name: item.name,
+      endsOn: item.endsAt
+        ? new Intl.DateTimeFormat("en-CA", { timeZone: snapshot.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(
+            new Date(item.endsAt),
+          )
+        : null,
+    })),
+    paymentMethods: snapshot.paymentMethods.map((method) => method.name),
+    emergencyPhone: Boolean(snapshot.emergencyPhone),
+    informs: !cfg.disabledFunctions.includes("informar"),
   }
 }
 

@@ -8,6 +8,7 @@ import { contact, crmTask, message } from "@odentia/db/schema/crm"
 import { and, eq } from "drizzle-orm"
 import { beforeAll, expect, it } from "vitest"
 import { listAgentActivity } from "./agent-activity.js"
+import { countAgentWork } from "./agent-overview.js"
 import {
   claimHandoff,
   countAwaitingContact,
@@ -116,6 +117,10 @@ it("el resumen cuenta lo que espera al paciente y los casos por atender, y no cu
     awaitingContact: 1, openHandoffs: 1, interventionsToday: 2, failedToday: 2, enabled: false,
   })
   expect(summary).not.toHaveProperty("pendingProposals")
+  // Lo que se resuelve dentro de Agente se cuenta solo para quien lo supervisa.
+  expect(summary.toResolve).toBe(0)
+  const supervised = await run((tx) => getAgentSummary(tx, ORG, OWNER, { supervises: true }))
+  expect(supervised.toResolve).toBe(await run((tx) => countAgentWork(tx, ORG)))
   expect(summary.timezone).toBeTruthy()
   expect(summary.locale).toBeTruthy()
 })

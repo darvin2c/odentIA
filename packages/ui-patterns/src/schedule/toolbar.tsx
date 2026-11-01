@@ -1,7 +1,8 @@
 /**
- * Barra de la agenda: cuándo se está mirando (flechas, «Hoy» y el periodo
- * rotulado con su resumen) y cómo (conmutador de vista y filtros). Lo que más
- * se usa, a la izquierda; lo que se cambia poco, a la derecha.
+ * Barra de la agenda, en una sola fila: dónde y cuándo se mira (sede, flechas,
+ * «Hoy» y el periodo rotulado con su resumen) y, a la derecha, cómo (filtros y
+ * conmutador de vista). Lo que no cabe salta de línea; en el teléfono la pantalla
+ * deja solo el periodo y el conmutador.
  *
  * El conmutador de vista son pestañas (`Tabs`), la misma pieza que Finanzas e
  * Inventario: cambiar de vista es siempre una pestaña.
@@ -19,7 +20,7 @@ export interface ScheduleViewOption {
 }
 
 export interface ScheduleToolbarProps {
-  /** Contexto de la vista: sede y zona, ya rotulados. */
+  /** Contexto de la vista: la sede. */
   context?: React.ReactNode
   /** Periodo visible, ya rotulado («Lunes 21 de setiembre»). */
   rangeLabel: string
@@ -28,8 +29,8 @@ export interface ScheduleToolbarProps {
    * (un botón con el mismo texto que abre el calendario).
    */
   rangeControl?: React.ReactNode
-  /** Lo que conviene saber del periodo («18 citas · 5 por confirmar»). */
-  summary?: string
+  /** Lo que conviene saber del periodo («11 citas · 4 por confirmar»). */
+  summary?: React.ReactNode
   /** Se están volviendo a pedir datos que ya están en pantalla: lo dice sin quitarlos. */
   refreshing?: boolean
   onPrevious?: () => void
@@ -41,9 +42,7 @@ export interface ScheduleToolbarProps {
   views?: ScheduleViewOption[]
   view?: string
   onViewChange?: (id: string) => void
-  /** El conmutador ocupa todo el ancho (teléfono). */
-  stretchViews?: boolean
-  /** Filtros de la vista, tras el conmutador. */
+  /** Búsqueda y filtros de la vista, antes del conmutador. */
   filters?: React.ReactNode
   /** La única acción sólida de la pantalla («Nueva cita»). */
   action?: React.ReactNode
@@ -64,15 +63,14 @@ export function ScheduleToolbar({
   views,
   view,
   onViewChange,
-  stretchViews = false,
   filters,
   action,
   className,
 }: ScheduleToolbarProps) {
   const hasViews = views != null && views.length > 0
   return (
-    <div className={cn("flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2", className)}>
-      {context ? <div className="flex min-w-0 flex-col gap-0.5">{context}</div> : null}
+    <div className={cn("flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2", className)}>
+      {context ? <div className="flex min-w-0 items-center gap-2">{context}</div> : null}
 
       {onPrevious || onNext || onToday ? (
         <div className="flex shrink-0 items-center gap-1">
@@ -106,42 +104,32 @@ export function ScheduleToolbar({
         </div>
       ) : null}
 
-      <div className="flex min-w-0 flex-wrap items-baseline gap-x-3">
+      {/* El periodo cede sitio antes de que la barra salte a otra fila; con una columna al lado, sí salta. */}
+      <div className="flex min-w-0 flex-1 basis-0 items-center gap-x-2 overflow-hidden p-0.5 sm:min-w-60">
         {rangeControl ?? (
           <span className="min-w-0 truncate text-lg font-bold tracking-tight">{rangeLabel}</span>
         )}
-        {summary ? <span className="text-sm text-muted-foreground">{summary}</span> : null}
+        {summary ? <span className="flex min-w-0 items-center gap-1 text-sm text-muted-foreground">{summary}</span> : null}
         {refreshing ? <DataRefreshMarker /> : null}
       </div>
 
-      {hasViews ? (
-        <Tabs
-          value={view ?? null}
-          onValueChange={(next) => onViewChange?.(String(next))}
-          className={cn(stretchViews ? "w-full" : "ml-auto")}
-        >
-          <TabsList aria-label="Vista de la agenda" className={cn(stretchViews && "w-full")}>
-            {views.map((option) => (
-              <TabsTrigger
-                key={option.id}
-                value={option.id}
-                className={cn(stretchViews && "h-10")}
-              >
-                {option.icon}
-                {option.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
-      ) : null}
-
-      {filters ? (
-        <div className={cn("flex min-w-0 items-center gap-2", !hasViews && "ml-auto")}>
-          {filters}
-        </div>
-      ) : null}
-
-      {action ? <div className={hasViews || filters ? "" : "ml-auto"}>{action}</div> : null}
+      <div className="ml-auto flex shrink-0 items-center gap-2">
+        {filters}
+        {hasViews ? (
+          <Tabs value={view ?? null} onValueChange={(next) => onViewChange?.(String(next))}>
+            <TabsList aria-label="Vista de la agenda">
+              {views.map((option) => (
+                <TabsTrigger key={option.id} value={option.id} className="px-2 sm:px-2.5">
+                  {/* En el teléfono no caben ícono y texto junto a la fecha: queda el texto. */}
+                  {option.icon ? <span className="contents max-sm:hidden">{option.icon}</span> : null}
+                  {option.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        ) : null}
+        {action}
+      </div>
     </div>
   )
 }

@@ -1,7 +1,7 @@
 import { cn, ScrollArea, tabsListVariants, tabsTriggerClassName } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
 import { Link, useRouterState } from "@tanstack/react-router"
-import type { AgentOverview, AgentSummary } from "../lib/agent"
+import type { AgentOverview } from "../lib/agent"
 import { apiFetch } from "../lib/api"
 import { useCan, usePermission } from "../lib/crm"
 import { agentTabsFor } from "../lib/screen-rules"
@@ -9,7 +9,8 @@ import { agentTabsFor } from "../lib/screen-rules"
 /**
  * Secciones del agente como pestañas de página. Son rutas, no paneles de una
  * misma vista: se anuncian como navegación con `aria-current`, y cada pestaña
- * aparece solo con el permiso que su ruta ya exige en el servidor.
+ * aparece solo con el permiso que su ruta ya exige en el servidor
+ * (`agentTabsFor`, la misma regla que su esqueleto).
  *
  * Se dibujan con el mismo control que Pacientes (`tabsTriggerClassName`): la
  * activa es la píldora blanca y lo que espera a una persona va después del
@@ -17,12 +18,10 @@ import { agentTabsFor } from "../lib/screen-rules"
  *
  * Aprender y Conocimiento dicen cuánto espera a una persona. Los números salen
  * del mismo resumen que «Necesita de ti» (`/api/agent/overview`, consulta
- * compartida con esa pantalla): no hay otra cuenta. «Esperan su sí» cuenta
- * solo las citas propuestas que esperan respuesta (`awaitingAnswer` del resumen
- * del agente): los casos se cuentan en «Te espera» y en «Inicio» del menú. En teléfono
- * «Esperan su sí» pasa al final de la fila (`phoneLast`): ahí el recorrido es
- * Resumen, Actividad, Aprender, Conocimiento. El orden del documento, y con él el del
- * teclado, es el mismo en todos los anchos.
+ * compartida con esa pantalla) y suman el número del menú «Agente». Lo que
+ * espera el sí de la persona está en la Bandeja y los casos que el agente pasó
+ * al equipo, en «Te espera» (ADR 0118 y 0123). «Actividad» es para saber, y la
+ * ve también quien solo decide por el agente.
  *
  * `learnPending`: «Aprender» concilia su lista al cargarla, así que esa pantalla
  * pasa lo que ya muestra y la pestaña no dice otra cosa mientras el resumen se
@@ -31,7 +30,6 @@ import { agentTabsFor } from "../lib/screen-rules"
 export function AgentTabs({ learnPending }: { learnPending?: number } = {}) {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const canRead = usePermission("agent.read")
-  const canDecide = usePermission("agent.decide")
   const can = useCan()
   // Sin escucha propia de eventos: se refresca al navegar y cuando una pantalla
   // invalida el resumen tras decidir algo. Sin el permiso de lectura no hay números.
@@ -42,20 +40,10 @@ export function AgentTabs({ learnPending }: { learnPending?: number } = {}) {
     retry: false,
     staleTime: 30_000,
   })
-  // El resumen del agente: lo leen también quienes solo deciden.
-  const panel = useQuery({
-    queryKey: ["agent-summary"],
-    queryFn: () => apiFetch<{ data: AgentSummary }>("/api/agent/summary"),
-    enabled: canDecide || canRead,
-    retry: false,
-    staleTime: 30_000,
-  })
   const needs = overview.data?.data.needsYou
   const pending: Record<string, number> = needs
     ? { "/agent/learn": needs.review + needs.lessons, "/agent/knowledge": needs.gaps }
     : {}
-  const awaiting = panel.data?.data.awaitingAnswer
-  if (awaiting !== undefined) pending["/agent/pendientes"] = awaiting
   if (learnPending !== undefined) pending["/agent/learn"] = learnPending
   const visible = agentTabsFor(can)
   if (visible.length === 0) return null
@@ -72,11 +60,7 @@ export function AgentTabs({ learnPending }: { learnPending?: number } = {}) {
               activeOptions={{ exact: true }}
               aria-current={active ? "page" : undefined}
               data-active={active ? "" : undefined}
-              className={cn(
-                tabsTriggerClassName,
-                "shrink-0 min-h-11 sm:min-h-9",
-                "phoneLast" in tab && "max-sm:order-1",
-              )}
+              className={cn(tabsTriggerClassName, "shrink-0 min-h-11 sm:min-h-9")}
             >
               {tab.label}
               {count > 0 ? (

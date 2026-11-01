@@ -16,6 +16,7 @@ import {
   markAnswerOk,
   markReviewOk,
   restoreLesson,
+  RULE_BODY_CHARS,
   saveTestCase,
   updateLesson,
   withdrawLesson,
@@ -50,7 +51,7 @@ const caseInput = z.object({ question: z.string().trim().min(1).max(2000), expec
 const withdrawInput = z.object({ withdrawCase: z.boolean().optional() })
 
 const guidanceInput = z.object({
-  body: z.string().trim().min(1, "Escribe qué debe saber el agente").max(2000, "Como mucho 2000 caracteres"),
+  body: z.string().trim().min(1, "Escribe qué debe saber el agente").max(RULE_BODY_CHARS, `Como mucho ${RULE_BODY_CHARS} caracteres`),
 })
 const approveInput = z.object({ replaceId: z.string().uuid().optional() })
 

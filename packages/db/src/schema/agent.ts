@@ -269,10 +269,14 @@ export const agentHandoff = pgTable(
     /**
      * Cuándo pasa a «Ahora»: dos horas de clínica abierta desde que espera una
      * respuesta del equipo (decisión 1 del pulido). Vuelve a contar si el equipo
-     * responde con «Enviar, sigue pendiente». Una sola regla para la Bandeja,
-     * Inicio y Agente.
+     * lo deja pendiente. Una sola regla para la Bandeja e Inicio.
      */
     urgentAt: timestamp("urgent_at", { withTimezone: true }),
+    /**
+     * Cuándo alguien del equipo lo dejó pendiente (ADR 0122): lo que el equipo
+     * escribió antes de esta hora no lo da por respondido.
+     */
+    keptPendingAt: timestamp("kept_pending_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -816,7 +820,8 @@ export const pgVector = customType<{ data: number[]; driverData: string }>({
 })
 
 /** Qué se puede encontrar por significado. */
-export const SEARCH_ITEM_KINDS = ["servicio", "promocion", "profesional", "respuesta"] as const
+// `ejemplo`: la pregunta de un ejemplo aprobado de un agente (ADR 0119).
+export const SEARCH_ITEM_KINDS = ["servicio", "promocion", "profesional", "respuesta", "ejemplo"] as const
 export type SearchItemKind = (typeof SEARCH_ITEM_KINDS)[number]
 
 /**
@@ -842,6 +847,6 @@ export const agentSearchItem = pgTable(
   (table) => [
     uniqueIndex("agent_search_item_ref_uidx").on(table.organizationId, table.kind, table.refId),
     index("agent_search_item_pending_idx").on(table.organizationId).where(sql`${table.embedding} is null`),
-    check("agent_search_item_kind_check", sql`${table.kind} in ('servicio','promocion','profesional','respuesta')`),
+    check("agent_search_item_kind_check", sql`${table.kind} in ('servicio','promocion','profesional','respuesta','ejemplo')`),
   ],
 )

@@ -167,10 +167,10 @@ export function KnowledgeAnswers({
           <EmptyState
             icon={BookOpen}
             title="Todavía no le has enseñado nada"
-            description="Empieza por las preguntas que casi todos los pacientes hacen."
+            description="Lo de tus datos ya lo sabe. Empieza por lo que preguntan seguido y solo tú sabes."
             {...(canWrite
               ? canStartBasics
-                ? { actionLabel: "Empezar con lo básico", onAction: onStartBasics }
+                ? { actionLabel: "Responder lo que solo tú sabes", onAction: onStartBasics }
                 : { actionLabel: "Nueva respuesta", onAction: onCreate }
               : {})}
           />

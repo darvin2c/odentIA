@@ -308,10 +308,9 @@ test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({
   await info.attach("resumen-del-caso-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await page.setViewportSize({ width: 1280, height: 720 })
 
-  // «Esperan su sí» (decisión 21) solo lista citas propuestas: el caso no está ahí.
-  await gotoHydrated(page, tenant(org.slug, "/agent/pendientes"))
-  await expect(page.getByRole("heading", { name: "Esperan su sí" })).toBeVisible()
-  await expect(page.getByText("El interlocutor pidió atención humana")).toHaveCount(0)
+  // El número del caso va en «Inicio» del menú (ADR 0123).
+  await gotoHydrated(page, tenant(org.slug, "/home"))
+  await expect(page.getByRole("navigation").getByRole("link", { name: "Inicio", exact: true }).locator("..")).toContainText(/persona/)
 
   // El caso vive en «Te espera» de Inicio: una fila con quién lo pasó, hace cuánto y qué tan pronto atenderlo.
   await gotoHydrated(page, tenant(org.slug, "/home"))

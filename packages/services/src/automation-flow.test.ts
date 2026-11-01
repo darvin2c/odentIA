@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { channelAdapters } from "@odentia/channels"
 import { type Db, withOrgContext } from "@odentia/db"
+import { agentProposal } from "@odentia/db/schema/agent"
 import { appointment, appointmentBookingLink, scheduleRoom } from "@odentia/db/schema/agenda"
 import { professionalSchedule } from "@odentia/db/schema/availability"
 import { member, user } from "@odentia/db/schema/auth"
@@ -17,7 +18,7 @@ import { applyAdminDraft, deleteAdminLine, discardAdminDraft, saveAdminDraft, se
 import { adminLineOf } from "./admin-lines.js"
 import { type AdminDecider, interpretAdminRequest, keywordAdminDecider, readNumbers } from "./admin-request.js"
 import { getAdminLine, getAdminPage, getAdminRecommendation, listAdminLinePeople, runAdminLineOnce } from "./agent-admin.js"
-import { confirmAppointmentByContact, confirmProposalByPhone, countAwaitingAnswer, createHandoff, createProposal, listAwaitingAnswer } from "./agent-operations.js"
+import { confirmAppointmentByContact, confirmProposalByPhone, createProposal } from "./agent-operations.js"
 import { AUTOMATION_MESSAGES, type AutomationMessageKey, replyId } from "./automation-messages.js"
 import {
   applyTemplateUpdates,
@@ -1860,7 +1861,7 @@ describe("el horario de recontacto", () => {
   })
 })
 
-describe("«Esperan su sí» y «Confirmó por teléfono» (decisión 21)", () => {
+describe("«Confirmó por teléfono» (decisión 21)", () => {
   /** Una cita propuesta por el agente en la conversación de la persona, con el profesional que atiende ese día. */
   async function proposed(c: Clinic, startsAt: string) {
     // El profesional atiende todos los días de 8:00 a 20:00 en la sede.
@@ -1878,21 +1879,6 @@ describe("«Esperan su sí» y «Confirmó por teléfono» (decisión 21)", () =
     return { p, proposal }
   }
 
-  it("muestra solo las citas propuestas abiertas, con lo que se le propuso, y cuenta solo esas", async () => {
-    const c = await clinic({ anyHour: true })
-    const startsAt = new Date(Date.now() + 3 * DAY)
-    startsAt.setUTCHours(21, 30, 0, 0) // 16:30 en Lima
-    const { p, proposal } = await proposed(c, startsAt.toISOString())
-    const list = await run(c, (tx) => listAwaitingAnswer(tx, c.orgId))
-    expect(list.total).toBe(1)
-    expect(list.items).toMatchObject([{ id: proposal.id, conversationId: p.conversationId, contactName: "Pedro Ruiz", action: "reservar_cita", taken: false }])
-    expect(list.items[0]!.text).toMatch(/^Le propuse el \S+ \d+ a las 16:30 con Dra\. Ana Torres$/)
-    expect(await run(c, (tx) => countAwaitingAnswer(tx, c.orgId))).toBe(1)
-    // Un caso derivado no está aquí ni en el número.
-    await run(c, (tx) => createHandoff(tx, c.orgId, null, { conversationId: p.conversationId!, reason: "Dolor", summary: "Dolor", createdBy: "agent" }))
-    expect(await run(c, (tx) => countAwaitingAnswer(tx, c.orgId))).toBe(1)
-  })
-
   it("«Confirmó por teléfono» reserva con la misma regla que el agente; si el horario se ocupó, lo dice y no hace nada", async () => {
     const c = await clinic({ anyHour: true })
     const startsAt = new Date(Date.now() + 3 * DAY)
@@ -1902,7 +1888,6 @@ describe("«Esperan su sí» y «Confirmó por teléfono» (decisión 21)", () =
     expect(done.status).toBe("ejecutada")
     const booked = await ownerDb.select().from(appointment).where(eq(appointment.patientId, p.patientId))
     expect(booked).toMatchObject([{ startsAt, roomId: c.roomId, professionalUserId: c.professionalId, status: "confirmada" }])
-    expect(await run(c, (tx) => listAwaitingAnswer(tx, c.orgId))).toEqual({ items: [], total: 0 })
     // Otra persona: le proponen el mismo horario, que ya no está libre.
     const other = await person(c, "Ana Gómez", { openWindow: true })
     const late = await run(c, (tx) =>
@@ -1912,13 +1897,12 @@ describe("«Esperan su sí» y «Confirmó por teléfono» (decisión 21)", () =
         idempotencyKey: `prueba:${randomUUID()}`,
       }),
     )
-    expect((await run(c, (tx) => listAwaitingAnswer(tx, c.orgId))).items).toMatchObject([{ id: late.id, taken: true }])
     await expect(run(c, (tx) => confirmProposalByPhone(tx, c.orgId, c.ownerId, late.id))).rejects.toMatchObject({
       code: "SLOT_TAKEN",
       message: "Ese horario ya no está libre: elige otro en la Agenda",
     })
     // La propuesta sigue esperando; nada quedó a medias.
-    expect((await run(c, (tx) => listAwaitingAnswer(tx, c.orgId))).items.map((item) => item.id)).toEqual([late.id])
+    expect((await ownerDb.select().from(agentProposal).where(eq(agentProposal.id, late.id)))[0]?.status).toBe("propuesta")
     expect(await ownerDb.select().from(appointment).where(eq(appointment.patientId, other.patientId))).toHaveLength(0)
   })
 })

@@ -40,12 +40,18 @@ const REVIEW_PENDING_LIMIT = 50
 const LESSON_BODY_CHARS = 2000
 const LESSON_TITLE_CHARS = 200
 /**
- * Reglas que llegan al agente: todas, hasta este tope (decisión 17 de la fase
- * 4). Una regla que no se olvida vale más que el pequeño costo de llevarla.
- * Pasado el tope van las más recientes y el agente y «Aprender» dicen cuántas
- * quedaron fuera.
+ * Reglas activas de un agente: todas le llegan en cada mensaje (decisión 17 de
+ * la fase 4), así que no se pasa de este tope (ADR 0119). La regla que
+ * sobraría se aprueba reemplazando otra; agregar o restaurar una pide quitar
+ * otra antes. Una clínica que ya tenía más conserva las suyas: van las más
+ * recientes y el agente y «Aprender» dicen cuántas quedaron fuera.
  */
 export const LESSON_RULE_LIMIT = 40
+/**
+ * Lo que mide una regla, como mucho. Va entera en cada mensaje: una regla
+ * larga casi siempre es un ejemplo o una respuesta oficial (ADR 0119).
+ */
+export const RULE_BODY_CHARS = 300
 /** Ejemplos que acompañan un turno: solo los parecidos a lo que se pregunta. */
 export const LESSON_EXAMPLE_LIMIT = 2
 /** Puntuación mínima para decir que una pregunta toca el tema de una lección o de un caso. */
@@ -130,6 +136,36 @@ function cleanText(value: unknown, field: string, label: string, max: number): s
 function shorten(text: string, max: number): string {
   const clean = text.replace(/[ \t\r\n]+/g, " ").trim()
   return clean.length <= max ? clean : `${clean.slice(0, max - 1).trimEnd()}…`
+}
+
+/** Reglas activas de un agente. */
+export async function countActiveRules(tx: Db, orgId: string, scope: string): Promise<number> {
+  const [row] = await tx
+    .select({ total: count() })
+    .from(agentLesson)
+    .where(and(eq(agentLesson.organizationId, orgId), eq(agentLesson.status, "activa"), eq(agentLesson.kind, "regla"), eq(agentLesson.scope, scope)))
+  return row?.total ?? 0
+}
+
+/** Que una regla más no pase del tope: si no cabe, se dice qué hacer. */
+export async function assertRuleRoom(tx: Db, orgId: string, scope: string, doing: "aprobar" | "agregar" | "restaurar"): Promise<void> {
+  // Dos aprobaciones a la vez con 39 reglas no pueden dejar 41: se cuenta de a una, hasta el fin de la transacción.
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`agent_rules:${orgId}:${scope}`}))`)
+  if ((await countActiveRules(tx, orgId, scope)) < LESSON_RULE_LIMIT) return
+  throw new ServiceError(
+    "RULE_LIMIT",
+    409,
+    doing === "aprobar"
+      ? `Ya hay ${LESSON_RULE_LIMIT} reglas: elige cuál reemplaza esta`
+      : `Ya hay ${LESSON_RULE_LIMIT} reglas: quita o une una antes de ${doing} otra`,
+  )
+}
+
+/** Una regla larga no se activa: llegaría cortada. */
+function assertRuleLength(body: string, field: string): void {
+  if (body.length > RULE_BODY_CHARS) {
+    throw invalidField(field, `Una regla admite hasta ${RULE_BODY_CHARS} caracteres: lo más largo va mejor como ejemplo o respuesta oficial`)
+  }
 }
 
 function scopeOf(kind: LessonKind, agent: string): string {
@@ -572,6 +608,8 @@ export async function correctAnswer(tx: Db, orgId: string, actorUserId: string, 
   const corrected = typeof input.correctedReply === "string" ? input.correctedReply.trim() : ""
   if (!corrected && failure !== "no_debio_responder") throw invalidField("correctedReply", "Escribe cómo debió responder")
   if (corrected.length > LESSON_BODY_CHARS) throw invalidField("correctedReply", `La respuesta admite hasta ${LESSON_BODY_CHARS} caracteres`)
+  // «No debió responder» propone una regla: lo que escribe es la regla misma.
+  if (failure === "no_debio_responder") assertRuleLength(corrected, "correctedReply")
   let item: ReviewItem
   if (input.reviewItemId) item = await requireReviewItem(tx, orgId, input.reviewItemId)
   else if (input.traceId) item = await flagAnswerForReview(tx, orgId, actorUserId, input.traceId)
@@ -611,11 +649,14 @@ export async function updateLesson(tx: Db, orgId: string, actorUserId: string, i
   let knowledgeEntryId = current.knowledgeEntryId
   if (kind !== "respuesta_oficial" || input.knowledgeEntryId === null) knowledgeEntryId = null
   else if (kind !== current.kind) knowledgeEntryId = await matchingAnswer(tx, orgId, current.question)
+  const body = input.body === undefined ? current.body : cleanText(input.body, "body", "El texto", LESSON_BODY_CHARS)
+  // También al pasarla a regla sin tocar el texto.
+  if (kind === "regla") assertRuleLength(body, "body")
   await tx
     .update(agentLesson)
     .set({
       title: input.title === undefined ? current.title : cleanText(input.title, "title", "El título", LESSON_TITLE_CHARS),
-      body: input.body === undefined ? current.body : cleanText(input.body, "body", "El texto", LESSON_BODY_CHARS),
+      body,
       kind,
       scope: scopeOf(kind, agent),
       knowledgeEntryId,
@@ -707,6 +748,11 @@ export async function approveLesson(
 ): Promise<LessonItem> {
   const lesson = await lockLesson(tx, orgId, id)
   if (lesson.status !== "propuesta") throw new ServiceError("LESSON_NOT_PROPOSED", 409, `La lección ya está ${lesson.status}`)
+  if (lesson.kind === "regla") {
+    assertRuleLength(lesson.body, "body")
+    // Reemplazando otra, el total no cambia.
+    if (!opts.replaceId) await assertRuleRoom(tx, orgId, lesson.scope, "aprobar")
+  }
   if (opts.replaceId) {
     if (lesson.kind !== "regla") throw validation("Solo una regla reemplaza a otra")
     const replaced = await lockLesson(tx, orgId, opts.replaceId)
@@ -789,6 +835,10 @@ export async function withdrawLesson(
 export async function restoreLesson(tx: Db, orgId: string, actorUserId: string, id: string): Promise<LessonItem> {
   const lesson = await lockLesson(tx, orgId, id)
   if (lesson.status !== "retirada") throw new ServiceError("LESSON_NOT_WITHDRAWN", 409, "Solo se restaura una lección retirada")
+  if (lesson.kind === "regla") {
+    assertRuleLength(lesson.body, "body")
+    await assertRuleRoom(tx, orgId, lesson.scope, "restaurar")
+  }
   const applied = lesson.kind === "respuesta_oficial" ? await applyOfficialAnswer(tx, orgId, actorUserId, lesson) : null
   await tx
     .update(agentLesson)
@@ -912,18 +962,38 @@ export interface TurnLessons {
   matched: Array<{ id: string; kind: LessonKind; title: string }>
 }
 
+/** ¿Tiene el agente algún ejemplo activo? Sin ninguno no hace falta buscarlos por significado. */
+export async function hasActiveExamples(tx: Db, orgId: string, agent: string): Promise<boolean> {
+  const rows = await tx
+    .select({ id: agentLesson.id })
+    .from(agentLesson)
+    .where(and(eq(agentLesson.organizationId, orgId), eq(agentLesson.status, "activa"), eq(agentLesson.kind, "ejemplo"), eq(agentLesson.scope, agent)))
+    .limit(1)
+  return rows.length > 0
+}
+
+/** Ejemplos que se comparan por palabras cuando no hay búsqueda por significado: los más recientes. */
+const EXAMPLES_BY_WORDS = 200
+
 /**
  * Lo que el agente ha aprendido y aplica a este turno. Las reglas van todas
- * (son pocas y cortas); de los ejemplos, solo los parecidos a la pregunta.
- * `skipIds` y `extra` sirven para probar cómo respondería sin una lección o
- * con una que todavía no se aprobó.
+ * (son pocas y cortas); de los ejemplos, solo los parecidos a la pregunta:
+ * primero los que trajo la búsqueda por significado entre todos
+ * (`rankedExampleIds`, de `rankByMeaning`; ADR 0119) y, si falta, los
+ * parecidos por palabras entre los más recientes. `skipIds` y `extra` sirven
+ * para probar cómo respondería sin una lección o con una que todavía no se
+ * aprobó.
  */
 export async function lessonsForTurn(
   tx: Db,
   orgId: string,
   agent: string,
   latestText: string,
-  opts: { skipIds?: readonly string[]; extra?: Array<{ id: string; kind: LessonKind; title: string; question: string; body: string }> } = {},
+  opts: {
+    skipIds?: readonly string[]
+    extra?: Array<{ id: string; kind: LessonKind; title: string; question: string; body: string }>
+    rankedExampleIds?: readonly string[]
+  } = {},
 ): Promise<TurnLessons> {
   const columns = { id: agentLesson.id, kind: agentLesson.kind, title: agentLesson.title, question: agentLesson.question, body: agentLesson.body }
   const active = and(eq(agentLesson.organizationId, orgId), eq(agentLesson.status, "activa"), eq(agentLesson.scope, agent))
@@ -944,7 +1014,15 @@ export async function lessonsForTurn(
     .from(agentLesson)
     .where(and(active, eq(agentLesson.kind, "ejemplo")))
     .orderBy(desc(agentLesson.approvedAt))
-    .limit(200)
+    .limit(EXAMPLES_BY_WORDS)
+  const ranked = opts.rankedExampleIds ?? []
+  // Lo que encontró el significado puede ser más antiguo que los recientes: se lee aparte, solo de este agente.
+  const rankedRows = ranked.length
+    ? await tx
+        .select(columns)
+        .from(agentLesson)
+        .where(and(active, eq(agentLesson.kind, "ejemplo"), inArray(agentLesson.id, [...ranked])))
+    : []
   const rows = [...ruleRows, ...exampleRows]
   const skip = new Set(opts.skipIds ?? [])
   const all = [...(opts.extra ?? []).filter((item) => item.kind !== "respuesta_oficial"), ...rows.filter((row) => !skip.has(row.id))]
@@ -956,9 +1034,15 @@ export async function lessonsForTurn(
   }))
   const allRules = scored.filter((item) => item.lesson.kind === "regla")
   const rules = allRules.slice(0, LESSON_RULE_LIMIT)
-  const examples = scored
+  const byMeaning = ranked
+    .map((id) => rankedRows.find((row) => row.id === id))
+    .filter((row): row is (typeof rankedRows)[number] => row !== undefined && !skip.has(row.id))
+    .map((lesson) => ({ lesson, score: TOPIC_SCORE }))
+  const byWords = scored
     .filter((item) => item.lesson.kind === "ejemplo" && item.score >= TOPIC_SCORE)
     .sort((a, b) => b.score - a.score)
+  const examples = [...byMeaning, ...byWords]
+    .filter((item, index, list) => list.findIndex((other) => other.lesson.id === item.lesson.id) === index)
     .slice(0, LESSON_EXAMPLE_LIMIT)
   const matched = [...rules.filter((item) => item.score >= TOPIC_SCORE), ...examples].map((item) => item.lesson)
   return {
@@ -974,7 +1058,8 @@ export function formatLessonRules(rules: TurnLessons["rules"], leftOut = 0): str
   if (rules.length === 0) return ""
   return [
     "Lo que debes saber de tu clínica (lo escribió la clínica o lo aprobó al corregirte). Cúmplelo siempre; si choca con los principios de arriba, ganan los principios:",
-    ...rules.map((rule) => `- ${shorten(rule.body, 300)}`),
+    // Lo nuevo ya no pasa de `RULE_BODY_CHARS`; una regla anterior a ese tope llega cortada.
+    ...rules.map((rule) => `- ${shorten(rule.body, RULE_BODY_CHARS)}`),
     leftOut > 0 ? `(La clínica tiene ${leftOut} reglas más antiguas que no caben aquí; si algo no está en estas, no lo supongas.)` : null,
   ]
     .filter(Boolean)

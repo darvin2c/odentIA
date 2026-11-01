@@ -119,7 +119,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo respondo yo en vez de Sofi?",
-        a: "Lo que Sofi no puede responder te llega como un tema: la caja de mensaje te dice a qué estás respondiendo. Escribe y pulsa «Enviar y resolver» o Enter: tu respuesta sale citando su pregunta y el tema queda resuelto; si prometes responder después, usa «Enviar, sigue pendiente». Sofi nunca deja de atender lo demás: mientras conversas en vivo espera 15 minutos. Si el tema lo tiene otra persona, la caja ofrece «Tomar este tema»; pasarlo a alguien o marcarlo resuelto está en su «…». Con el teclado, J y K pasan entre conversaciones y R lleva a la caja.",
+        a: "Lo que Sofi no puede responder te llega como un tema. Con un solo tema, la caja ya te dice a qué estás respondiendo; con varios, tocas el que quieres responder y el hilo baja hasta su mensaje. Escribe y pulsa «Enviar» o Enter: tu respuesta sale citando su pregunta y el tema queda resuelto; si le debes algo más, pulsa «Dejar pendiente». Lo que no necesita respuesta se cierra con «Resolver», sin enviarle nada. A cualquier otro mensaje le respondes con «Responder», junto a él. Un «sí» o un «gracias» que le dicen a Sofi no te piden nada: no entran a ningún tema. Sofi nunca deja de atender lo demás: mientras conversas en vivo espera 15 minutos. Si el tema lo tiene otra persona, la caja ofrece «Tomar este tema»; pasarlo a alguien está en su «…». Con el teclado, J y K pasan entre conversaciones y R lleva a la caja.",
       },
       {
         q: "¿Y si ya pasaron 24 horas desde que escribió?",
@@ -143,7 +143,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo dejo constancia de que la persona aceptó lo que le propuso Sofi?",
-        a: "En la banda de la conversación, «Registrar confirmación», si ya dijo que sí en el chat; el equipo no aprueba nada por ella. Si te lo dijo por teléfono, en Agente › Esperan su sí, «Confirmó por teléfono».",
+        a: "En la banda de la conversación, «Registrar confirmación», si ya dijo que sí en el chat; el equipo no aprueba nada por ella. Si te lo dijo por teléfono, en esa misma banda, «Confirmó por teléfono».",
       },
       {
         q: "¿Cómo veo en qué se basó una respuesta de Sofi?",
@@ -157,7 +157,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Agenda",
     parent: null,
     purpose:
-      "Las citas por día, por semana o en lista, de cada profesional; un odontólogo la abre en su columna. Desde ahí reservas, mueves y cancelas citas, marcas «Llegó» cuando la persona está en la clínica y, quien atiende, pulsa «Atender». Cada cita dice en palabras cómo va (Por confirmar, Confirmada, Llegó, En atención, Atendida, No vino o Cancelada), el teléfono de la persona, de qué conversación salió y cuándo le pedirá Sofi que confirme, y te deja escribirle.",
+      "Las citas por día, la semana de todo el equipo con sus horas libres y la vista Agenda, que las lista día por día; un odontólogo la abre en su columna. Desde ahí reservas, mueves y cancelas citas, marcas «Llegó» cuando la persona está en la clínica y, quien atiende, pulsa «Atender». Cada cita dice en palabras cómo va (Por confirmar, Confirmada, Llegó, En atención, Atendida, No vino o Cancelada), el teléfono de la persona, de qué conversación salió y cuándo le pedirá Sofi que confirme, y te deja escribirle.",
     terms: [
       "citas",
       "calendario",
@@ -181,11 +181,15 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     faqs: [
       {
         q: "¿Cómo bloqueo un horario?",
-        a: "En Configuración › Horarios y ausencias: registra una ausencia del profesional (de uno o varios días) o un feriado o cierre de la sede. En ese tramo no se puede reservar; las citas que ya estaban no se mueven solas.",
+        a: "En Configuración › Horarios y ausencias: registra una ausencia del profesional (de uno o varios días) o un feriado o cierre de la sede. En ese tramo Sofi y el enlace de la persona no reservan; alguien del equipo sí puede, con una advertencia. Las citas que ya estaban no se mueven solas.",
       },
       {
         q: "¿Por qué no aparece un profesional en la agenda?",
-        a: "Un profesional aparece cuando tiene un horario definido en Configuración › Horarios y ausencias. Sin horario explícito no se le pueden reservar citas.",
+        a: "En el día aparece quien atiende ese día, según su horario en Configuración › Horarios y ausencias. Para darle una cita a quien no atiende ese día, elígelo en «Profesionales» › «No atienden este día» y su columna se suma a la vista.",
+      },
+      {
+        q: "¿Puedo dar una cita fuera de horario o a una hora ocupada?",
+        a: "Sí. Toca lo gris en el día, o elige esa hora en «Nueva cita»: te avisa y puedes reservar igual. La cita queda marcada y al profesional le llega un aviso. También puedes dar dos citas a la misma hora con un profesional, cada una en su sala o unidad; lo único que no se puede es poner a dos personas en la misma. Estas excepciones las hace siempre alguien del equipo: Sofi y el enlace de la persona solo reservan lo libre.",
       },
       {
         q: "¿Cómo le reservo una cita desde la conversación?",
@@ -449,7 +453,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Agente",
     parent: null,
     purpose:
-      "El resumen de tus agentes (Sofi, tu agente de recepción; Clío, tu agente clínico, y Argos, tu agente administrador): cómo van, qué necesita de ti y la entrada para configurar cada uno, el «Horario de recontacto», las citas que «Esperan su sí», lo que aprenden y su conocimiento. Los casos que te pasa Sofi están en «Te espera». En «Actividad» ves lo que envió, propuso o te pasó. El número junto a Inicio en el menú cuenta las personas que te esperan.",
+      "El resumen de tus agentes (Sofi, tu agente de recepción; Clío, tu agente clínico, y Argos, tu agente administrador): cómo van, qué necesita de ti y la entrada para configurar cada uno, el «Horario de recontacto», lo que aprenden y lo que sabe Sofi. El número junto a Agente en el menú cuenta lo que se resuelve aquí: respuestas por revisar, lecciones por aprobar y lo que no supo responder. Los casos que te pasa Sofi están en «Te espera», y el número junto a Inicio cuenta las personas que te esperan. En «Actividad» ves lo que envió, propuso o te pasó; lo que espera el sí de una persona, en su conversación de la Bandeja.",
     terms: [
       "sofi",
       "clío",
@@ -481,7 +485,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     faqs: [
       {
         q: "¿Cómo enciendo el agente?",
-        a: "En Agente, en la fila de Sofi, usa el interruptor. Te muestra cinco comprobaciones (canal, que el modelo responda, lo básico de tu clínica, si lo probaste y quién recibe los casos); lo que falta te lleva a donde se resuelve. Sin un canal o sin un modelo que responda no se enciende.",
+        a: "En Agente, en la fila de Sofi, usa el interruptor. Te muestra cinco comprobaciones (canal, que el modelo responda, que sepa tu horario y tus servicios, si lo probaste y quién recibe los casos); lo que falta te lleva a donde se resuelve. Sin un canal o sin un modelo que responda no se enciende.",
       },
       {
         q: "¿Qué hago si el modelo no responde?",
@@ -493,7 +497,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo le enseño algo al agente?",
-        a: "Los datos de tu clínica (precios, horarios, políticas) van en Agente › Conocimiento. Cómo quieres que atienda va en Agente › Sofi, en «Lo que el agente debe saber»: una sola lista con lo que escribe la clínica («Escrita por la clínica», con quién y cuándo) y lo que aprendió de tus correcciones («Aprendida», con la conversación de la que salió y quién la aprobó). Todas se editan y se borran igual. Si respondió mal, corrígelo en Agente › Aprender; al aprobar una regla que contradice otra te lo dice antes, con «Reemplazar», «Mantener las dos» o «Descartar».",
+        a: "Sofi lee al momento los datos de tu clínica: horario del equipo, sedes, servicios y precios, promociones y medios de pago; se editan donde viven y Agente › Conocimiento te muestra todo lo que toma. Ahí agregas lo que solo tú sabes (estacionamiento, cuotas, seguros…). Cómo quieres que atienda va en Agente › Sofi, en «Lo que el agente debe saber»: una sola lista con lo que escribe la clínica («Escrita por la clínica», con quién y cuándo) y lo que aprendió de tus correcciones («Aprendida», con la conversación de la que salió y quién la aprobó). Todas se editan y se borran igual. Si respondió mal, corrígelo en Agente › Aprender; al aprobar una regla que contradice otra te lo dice antes, con «Reemplazar», «Mantener las dos» o «Descartar».",
       },
       {
         q: "¿A qué hora le escribe odentIA a una persona?",
@@ -504,8 +508,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         a: "Hay dos y cada uno sirve para algo distinto. De atención: la agenda y las horas que se ofrecen para reservar (Configuración › Horarios y ausencias). De recontacto: cuándo Sofi escribe primero (Agente). Para responder no hay horario: cuando la persona escribe, Sofi responde siempre.",
       },
       {
-        q: "¿Qué es «Esperan su sí»?",
-        a: "Las citas que Sofi le propuso a alguien y esperan su respuesta, por ejemplo «Le propuse el jueves 22 a las 16:30 con la Dra. Rojas · hace 20 min». Es para saber, no para hacer: si responde «sí», la cita se reserva sola. Si te confirma por teléfono, pulsa «Confirmó por teléfono» y se reserva con la misma regla que la de Sofi; si el horario ya no está libre, te lo dice para que elijas otro en la Agenda. Si no responde, Sofi insiste una vez y, al despedirse, le dice que dejó libre ese horario.",
+        q: "¿Dónde veo las citas que esperan el sí de alguien?",
+        a: "En su conversación de la Bandeja: la fila dice «Espera su sí» y la banda de Sofi tiene «Registrar confirmación» (si dijo que sí en el chat) y «Confirmó por teléfono» (si lo dijo por otra vía); las dos reservan con la misma regla que Sofi y, si el horario ya no está libre, te lo dicen. También están en el panel del botón «Agente», en «Esperan». Si no responde, Sofi insiste una vez y, al despedirse, le dice que dejó libre ese horario.",
       },
     ],
   },

@@ -53,7 +53,7 @@ import {
 } from "lucide-react"
 import { useEffect } from "react"
 import { NoticesColumnProvider } from "../components/notices-column"
-import { AGENT_WORK_EVENTS, invalidateAgentWork } from "../lib/agent-work"
+import { AGENT_WORK_EVENTS, invalidateAgentWork, useAgentSummary } from "../lib/agent-work"
 import { GlobalSearchButton, GlobalSearchProvider, type GlobalSearchScreen } from "../components/global-search"
 import { ArgosPanel } from "../components/argos/argos-panel"
 import { ScheduleHost } from "../components/agenda/schedule-host"
@@ -201,8 +201,9 @@ const navDefinitions: NavDefinition[] = [
   { label: "Agenda", to: "/agenda", icon: CalendarDays, permission: "appointments.read" },
   { label: "Tareas", to: "/tasks", icon: ListTodo, permission: "tasks.read" },
   // El agente es una sola entrada, junto al trabajo diario; sus secciones
-  // (pendientes, aprender, conocimiento) son pestañas de página. El destino se
-  // resuelve por permiso: quien solo decide entra directo a Pendientes.
+  // (resumen, aprender, conocimiento) son pestañas de página. Es de quien lo
+  // supervisa: quien solo decide (recepción) atiende lo del agente en la
+  // Bandeja y en el panel del botón «Agente» de la cabecera.
   { label: "Agente", to: "/agent", icon: Bot, permissionsAny: ["agent.read", "agent.decide"] },
   {
     label: "Personas",
@@ -343,7 +344,8 @@ function OrgLayout() {
     }
     if (kind !== "appointment.updated") invalidateAgentWork(queryClient)
   })
-  // El único contador del menú: cuántas personas te esperan (lo cuenta el servidor para quien mira).
+  // Cada número donde se resuelve (ADR 0118 y 0123): «Inicio» cuenta las personas que te esperan
+  // (lo cuenta el servidor para quien mira) y «Agente» lo que se resuelve dentro de él.
   const waiting = useQuery({
     queryKey: ["workspace-waiting"],
     queryFn: () => apiFetch<{ data: { people: number } }>("/api/workspace/waiting"),
@@ -351,11 +353,13 @@ function OrgLayout() {
   })
   const waitingPeople = waiting.data?.data.people ?? 0
   const waitingLabel = waitingPeople === 1 ? "persona espera" : "personas esperan"
-  // «Inicio» lleva el contador; al agente, quien solo decide entra por Pendientes.
+  const toResolve = useAgentSummary(canAccess(role, "agent.read")).data?.data.toResolve ?? 0
   const withNavState = <T extends AppShellNavItem>(item: T): T => {
     if (item.to === "/home") return waitingPeople > 0 ? { ...item, badge: waitingPeople, badgeLabel: waitingLabel } : item
     if (item.to !== "/agent") return item
-    return canAccess(role, "agent.read") ? item : { ...item, to: "/agent/pendientes" }
+    // Quien solo decide por el agente entra a su Actividad.
+    if (!canAccess(role, "agent.read")) return { ...item, to: "/agent/actividad" }
+    return toResolve > 0 ? { ...item, badge: toResolve } : item
   }
   // Filtra entradas y subentradas por permiso: cada grupo muestra solo las hijas autorizadas.
   const navItems = navDefinitions.flatMap((item): AppShellNavEntry[] => {

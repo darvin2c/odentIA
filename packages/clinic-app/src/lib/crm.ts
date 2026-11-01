@@ -174,8 +174,8 @@ export interface InboxTopic {
   createdAt: string
   dueAt: string | null
   taskId: string | null
-  /** El mensaje de la persona que se responde, citado. */
-  source: { id: string; body: string | null; createdAt: string } | null
+  /** El mensaje de la persona que se responde, citado. `onlyCourtesy`: un «Si» no dice de qué trata; lo dice el motivo. */
+  source: { id: string; body: string | null; createdAt: string; onlyCourtesy: boolean } | null
   /** Mensajes en que volvió a preguntar por el tema. */
   askedMessageIds: string[]
   askedAgainAt: string | null

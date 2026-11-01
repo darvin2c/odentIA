@@ -1,14 +1,5 @@
 import { composeDisplayName, pendingRegistrationFields, type RegistrationConfig } from "@odentia/clinical"
-import {
-  Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  FieldTitle,
-  toast,
-} from "@odentia/ui"
+import { Button, FieldTitle, toast } from "@odentia/ui"
 import {
   dayMinutesIn,
   FormDrawer,
@@ -17,10 +8,8 @@ import {
   type ScheduleColumn,
   type SchedulePreview,
   type ScheduleRangeValue,
-  SubmitButton,
   type SubmitOptions,
   submitErrorOf,
-  submitForm,
   useAppForm,
   useFormSurface,
 } from "@odentia/ui-patterns"
@@ -39,7 +28,7 @@ import { fetchService } from "../../lib/services"
 import { PersonPicker } from "../person-picker"
 import { ServiceSelect } from "../service-select"
 import { whenSaid } from "./shared"
-import { EMPTY_WHEN, useWhen, WHEN_FIELD_MAP, WhenFields, type WhenValues } from "./when"
+import { type AgendaException, EMPTY_WHEN, exceptionFlags, useWhen, WHEN_FIELD_MAP, WhenFields, type WhenValues } from "./when"
 
 /** Con qué se abre «Nueva cita»: nada, un hueco tocado en la rejilla o un paciente. */
 export interface BookingSeed {
@@ -53,6 +42,8 @@ export interface BookingSeed {
   lockedPatient?: boolean
   conversationId?: string
   professionalUserId?: string | null
+  /** Su nombre, por si no tiene horario en la sede (se sumó a la vista para una excepción). */
+  professionalLabel?: string
   /** Instante del hueco ya elegido. */
   startsAt?: string
   /** Día en que se abre el selector. */
@@ -174,13 +165,9 @@ export function BookingDrawer({
   const whatsappNote = React.useRef<string | null>(null)
   // El paso en curso: un rechazo del registro dice a quién no se pudo registrar.
   const phase = React.useRef<"registro" | "cita">("cita")
-  // Lo que se eligió en el aviso de fuera de horario: otro hueco o reservar igual.
-  const choice = React.useRef<{ range: ScheduleRangeValue; outsideSchedule?: boolean } | null>(null)
-  const [urgent, setUrgent] = React.useState(false)
-  const [urgentPick, setUrgentPick] = React.useState<"next" | "anyway" | null>(null)
 
   const save = useMutation({
-    mutationFn: (input: { patientId: string; value: BookingValues; range: ScheduleRangeValue; outsideSchedule?: boolean }) =>
+    mutationFn: (input: { patientId: string; value: BookingValues; range: ScheduleRangeValue; exception: AgendaException | null }) =>
       apiFetch<{ data: AgendaAppointment & { reminderReach?: ReminderReach | null } }>("/api/appointments", {
         method: "POST",
         body: JSON.stringify({
@@ -195,7 +182,8 @@ export function BookingDrawer({
           reason: input.value.reason.trim() || undefined,
           conversationId: seed.conversationId,
           source: seed.conversationId ? "conversacion" : "recepcion",
-          outsideSchedule: input.outsideSchedule,
+          // Lo que se avisó al elegir la hora: una excepción que decide una persona del equipo.
+          ...exceptionFlags(input.exception),
         }),
       }),
   })
@@ -310,16 +298,9 @@ export function BookingDrawer({
     })(),
     validators: { onSubmit: schema },
     onSubmit: async ({ value }) => {
-      const picked = choice.current
-      choice.current = null
-      const range = picked?.range ?? when.shown
+      const range = when.shown
       // El «cuándo» ya validó que hay un hueco elegido.
       if (!range) return
-      // Fuera del horario no se reserva sin más: se pregunta si es una urgencia.
-      if (!picked && when.state === "outside") {
-        setUrgent(true)
-        return
-      }
       try {
         let patientId = value.patientId
         if (registering) {
@@ -332,7 +313,12 @@ export function BookingDrawer({
           setRegistering(false)
         }
         phase.current = "cita"
-        const result = await save.mutateAsync({ patientId, value, range, outsideSchedule: picked?.outsideSchedule })
+        const result = await save.mutateAsync({
+          patientId,
+          value,
+          range,
+          exception: when.exception,
+        })
         // Si «Recordar la cita» está prendida, el agente le avisa solo: recepción no escribe nada.
         toast.success(`Cita reservada ${whenSaid(result.data.startsAt, timeZone, today)}`, {
           description:
@@ -351,7 +337,6 @@ export function BookingDrawer({
         }
         await onSaved(result.data)
       } catch (cause) {
-        setUrgent(false)
         // Si alguien tomó el hueco, lo libre se vuelve a pedir.
         when.refetch()
         throw cause
@@ -414,11 +399,12 @@ export function BookingDrawer({
     duration,
     date: seed.date,
     professionalUserId: seed.professionalUserId,
+    professionalLabel: seed.professionalLabel,
     startsAt: seed.startsAt,
     // Con servicio, la agenda ofrece solo a quien lo atiende (ADR 0039).
     serviceId: serviceId || undefined,
   })
-  const { shown, professional, chosenMinutes, nextFree, hoursThatDay, free } = when
+  const { shown } = when
 
   React.useEffect(() => {
     onPreview(
@@ -475,17 +461,12 @@ export function BookingDrawer({
     form.setFieldValue("patientId", patient.id)
     setRegistering(false)
   }
-  /** Desde el aviso de fuera de horario: se reserva lo elegido allí. */
-  const bookFromNotice = async (pick: "next" | "anyway", range: ScheduleRangeValue) => {
-    choice.current = { range, outsideSchedule: pick === "anyway" || undefined }
-    setUrgentPick(pick)
-    const ok = await submitForm(form, submitOptions)
-    setUrgentPick(null)
-    // Lo que falló se dice en el formulario: el aviso no lo tapa.
-    if (!ok) setUrgent(false)
-  }
   const submitLabel = !shown
     ? "Reservar cita"
+    : when.state === "outside"
+      ? "Reservar fuera de horario"
+      : when.state === "taken"
+        ? "Reservar igual"
     : registering
       ? // El día ya se lee justo encima: el botón tiene que caber junto a «Cancelar».
         `Registrar y reservar a las ${hourLabel(dayMinutesIn(shown.start, timeZone))}`
@@ -694,69 +675,6 @@ export function BookingDrawer({
           </form.AppField>
         </div>
       </FormDrawer>
-
-      <Dialog open={urgent} onOpenChange={(next) => (next ? undefined : setUrgent(false))}>
-        <DialogContent showCloseButton={false} className="gap-3.5 sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{professional?.label} no atiende a esa hora</DialogTitle>
-            <DialogDescription>
-              {hoursThatDay.length > 0
-                ? `Ese día atiende de ${hoursThatDay.join(" y de ")}`
-                : "Ese día no atiende"}
-              {shown
-                ? ` y quieres reservar a las ${hourLabel(dayMinutesIn(shown.start, timeZone))}.`
-                : "."}
-              {nextFree
-                ? ` Su próximo hueco es ${whenSaid(nextFree.startsAt, timeZone, today)}.`
-                : ""}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-2">
-            {nextFree && shown ? (
-              <SubmitButton
-                className="h-11"
-                disabled={surface.isSubmitting}
-                pending={surface.isSubmitting && urgentPick === "next"}
-                onClick={() =>
-                  void bookFromNotice("next", {
-                    columnId: shown.columnId,
-                    start: nextFree.startsAt,
-                    end: new Date(
-                      Math.min(
-                        Date.parse(nextFree.startsAt) + chosenMinutes * 60000,
-                        Date.parse(
-                          free.find(
-                            (item) =>
-                              item.columnId === shown.columnId &&
-                              item.start === nextFree.startsAt,
-                          )?.end ?? nextFree.endsAt,
-                        ),
-                      ),
-                    ).toISOString(),
-                  })
-                }
-              >
-                Reservar {whenSaid(nextFree.startsAt, timeZone, today)}
-              </SubmitButton>
-            ) : null}
-            <Button variant="outline" className="h-11" onClick={() => setUrgent(false)}>
-              Ver otros huecos
-            </Button>
-          </div>
-          <div className="flex items-center gap-2 border-t pt-3">
-            <span className="flex-1 text-sm text-muted-foreground">¿Es una urgencia?</span>
-            <SubmitButton
-              variant="ghost"
-              className="text-warning"
-              disabled={surface.isSubmitting}
-              pending={surface.isSubmitting && urgentPick === "anyway"}
-              onClick={() => shown && void bookFromNotice("anyway", shown)}
-            >
-              Reservar igual a las {shown ? hourLabel(dayMinutesIn(shown.start, timeZone)) : ""}
-            </SubmitButton>
-          </div>
-        </DialogContent>
-      </Dialog>
     </>
   )
 }

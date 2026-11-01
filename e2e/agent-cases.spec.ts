@@ -4,7 +4,7 @@ import { member } from "@odentia/db/schema/auth"
 import type { Page } from "@playwright/test"
 import { and, eq } from "drizzle-orm"
 import { simulateTelegramInbound } from "./channels"
-import { API, tenant } from "./env"
+import { API, tenant, tenantPattern } from "./env"
 import { api, call, expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import { surface } from "./surface"
@@ -196,18 +196,9 @@ test("agente sin panel: el caso en Inicio, la cita en «Esperan su sí» y lo he
   await expect(page.locator("main").getByText("1 persona espera")).toBeAttached()
   await page.setViewportSize({ width: 1440, height: 900 })
 
-  // «Esperan su sí» (decisión 21): solo la cita propuesta; los casos están en «Te espera».
-  // La unidad dental de la propuesta no existe: el horario ya no está libre y no se ofrece confirmarla.
+  // «Esperan su sí» se retiró (ADR 0118): la cita propuesta se ve en su conversación, y la dirección vieja lleva a la Bandeja.
   await gotoHydrated(page, tenant(org.slug, "/agent/pendientes"))
-  await expect(page.getByRole("heading", { name: "Esperan su sí" })).toBeVisible()
-  await expect(page.getByRole("heading", { name: "Casos del agente" })).toHaveCount(0)
-  await expect(page.getByRole("link", { name: /^Esperan su sí/ })).toContainText("1")
-  const approvalCard = page.getByRole("listitem").filter({ hasText: "Le propuse el" })
-  await expect(approvalCard).toContainText("Ese horario se ocupó")
-  await expect(approvalCard.getByRole("link", { name: "Ver la conversación" })).toBeVisible()
-  await expect(approvalCard.getByRole("button", { name: "Confirmó por teléfono" })).toHaveCount(0)
-  await expect(page.getByText(/Aprobada|Ejecutada|interlocutor|Ejecutar cambio aprobado/)).toHaveCount(0)
-  await expect(page.getByRole("button", { name: /Revisar y aprobar|Rechazar/ })).toHaveCount(0)
+  await expect(page).toHaveURL(tenantPattern(org.slug, "/inbox"))
   // Nadie decide por el paciente: no hay ruta para aprobar o rechazar.
   const decision = await api(page, "POST", `/api/agent/proposals/${randomUUID()}/decision`, org.slug, { decision: "aprobada" })
   expect(decision.status).toBe(404)
@@ -279,7 +270,7 @@ test("Actividad del agente: recepción la ve, otros roles no y el servidor lo ni
   await page.getByRole("button", { name: "Reintentar" }).click()
   await expect(page.getByText("Sin actividad")).toBeVisible()
   const tabs = page.getByRole("navigation", { name: "Secciones del agente" })
-  await expect(tabs.getByRole("link")).toHaveText(["Esperan su sí", "Actividad"])
+  await expect(tabs.getByRole("link")).toHaveText(["Actividad"])
 
   // Odontología y caja: sin entrada en el sidebar y 403 en servidor; el número de Inicio sí les responde.
   for (const role of ["clinician", "cashier"]) {

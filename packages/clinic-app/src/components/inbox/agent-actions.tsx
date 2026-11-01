@@ -7,7 +7,8 @@ import { permissionForAction, proposalErrorMessage, type AgentProposal } from ".
 import { useReceptionName } from "../../lib/agent-names"
 import { ApiError, apiFetch } from "../../lib/api"
 import { clockWords } from "../../lib/conversation-state"
-import { usePermission } from "../../lib/crm"
+import { useCan, usePermission } from "../../lib/crm"
+import { canConfirmByPhone } from "../../lib/screen-rules"
 import { invalidateAgentWork } from "../../lib/agent-work"
 
 /** Lo que hizo el agente con esta persona, como lo entrega el servidor. */
@@ -51,10 +52,15 @@ const OPEN_WORDS: Record<NonNullable<AgentActionItem["opens"]>, string> = {
   ventas: "Ver",
 }
 
+/** Las propuestas que la persona puede confirmar por otra vía: las citas. */
+const PHONE_CONFIRMABLE = new Set(["reservar_cita", "reprogramar_cita", "cancelar_cita"])
+
 /**
  * Lo que cambia algo que el equipo o la persona van a usar. El hilo nunca aprueba
  * nada: con una cita que espera, «Registrar confirmación» deja constancia del sí
- * que la persona ya dio en el chat, con la misma operación que Pendientes.
+ * que la persona ya dio en el chat, y «Confirmó por teléfono», del que dio por
+ * otra vía (ADR 0118: aquí vive lo que antes estaba en «Esperan su sí»). Las dos
+ * reservan con la misma operación que el agente.
  */
 export function AgentActionCard({
   item,
@@ -90,13 +96,28 @@ export function AgentActionCard({
       }
     },
   })
-  const failed = confirm.data ? proposalErrorMessage(confirm.data.data) : null
+  const byPhone = useMutation({
+    mutationFn: () => apiFetch<{ data: AgentProposal }>(`/api/agent/proposals/${item.proposalId}/phone-confirm`, { method: "POST" }),
+    onSuccess: () => {
+      invalidateAgentWork(queryClient)
+      for (const key of ["agent-actions", "agent-proposals", "conversations", "conversation", "crm-context", "conversation-context", "workspace-home", "appointments"]) {
+        void queryClient.invalidateQueries({ queryKey: [key] })
+      }
+    },
+  })
+  const canPhone =
+    canConfirmByPhone(useCan()) && !!item.proposalId && item.state === "espera" && item.action !== null && PHONE_CONFIRMABLE.has(item.action)
+  const done = byPhone.data ?? confirm.data
+  const failedRun = byPhone.error ?? confirm.error
+  const failed = done ? proposalErrorMessage(done.data) : null
+  // Si el horario ya no está libre, lo dice el servidor con qué hacer: se muestra tal cual.
   const error =
-    confirm.error instanceof ApiError
-      ? (confirm.error.shape.message ?? "No se pudo registrar la confirmación.")
-      : confirm.error
+    failedRun instanceof ApiError
+      ? (failedRun.shape.message ?? "No se pudo registrar la confirmación.")
+      : failedRun
         ? "No se pudo registrar la confirmación."
         : failed
+  const busy = confirm.isPending || byPhone.isPending
   const state = item.state ? STATE_WORDS[item.state] : null
   const needsPerson = item.state === "no_se_pudo"
   const firstName = personName.split(/\s+/)[0] || personName
@@ -125,8 +146,26 @@ export function AgentActionCard({
           {item.state === "espera" ? <p className="text-[13px] text-muted-foreground">Espera el sí de {firstName} en esta conversación.</p> : null}
         </div>
         {canRegister ? (
-          <SubmitButton size="sm" className="min-h-11 rounded-full sm:min-h-8" pending={confirm.isPending} onClick={() => confirm.mutate()}>
+          <SubmitButton
+            size="sm"
+            className="min-h-11 rounded-full sm:min-h-8"
+            pending={confirm.isPending}
+            disabled={busy}
+            onClick={() => confirm.mutate()}
+          >
             Registrar confirmación
+          </SubmitButton>
+        ) : null}
+        {canPhone ? (
+          <SubmitButton
+            size="sm"
+            variant="outline"
+            className="min-h-11 rounded-full border-agent-border bg-card sm:min-h-8"
+            pending={byPhone.isPending}
+            disabled={busy}
+            onClick={() => byPhone.mutate()}
+          >
+            Confirmó por teléfono
           </SubmitButton>
         ) : null}
         {item.opens && onOpen ? (

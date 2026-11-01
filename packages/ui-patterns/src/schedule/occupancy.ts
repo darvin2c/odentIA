@@ -145,10 +145,10 @@ export function daySegments(input: DaySegmentsInput): DaySegment[] {
     { startMinutes: input.window.startMinutes, endMinutes: input.window.endMinutes },
   ]
   const open = subtractRanges(clipRanges(input.open, input.window), input.blocked ?? [])
-  const closed = subtractRanges(whole, open)
   const busy = clipRanges(mergeRanges(input.busy), input.window)
-  const openBusy = open.flatMap((range) => clipRanges(busy, range))
-  const idle = subtractRanges(open, openBusy)
+  // Una cita fuera de horario también ocupa: no se pierde en lo cerrado.
+  const closed = subtractRanges(subtractRanges(whole, open), busy)
+  const idle = subtractRanges(open, busy)
   const cutoff = input.nowMinutes
   const past =
     cutoff === undefined
@@ -157,7 +157,7 @@ export function daySegments(input: DaySegmentsInput): DaySegment[] {
   const free = subtractRanges(idle, past)
   const tagged: DaySegment[] = [
     ...closed.map((range) => ({ ...range, kind: "closed" as const })),
-    ...openBusy.map((range) => ({ ...range, kind: "busy" as const })),
+    ...busy.map((range) => ({ ...range, kind: "busy" as const })),
     ...past.map((range) => ({ ...range, kind: "past" as const })),
     ...free.map((range) => ({ ...range, kind: "free" as const })),
   ].sort((a, b) => a.startMinutes - b.startMinutes)

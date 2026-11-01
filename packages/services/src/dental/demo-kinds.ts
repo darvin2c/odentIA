@@ -251,14 +251,12 @@ const DENTAL_INVENTORY: DemoKindRecipe["inventory"] = {
   ],
 }
 
-/** Lo que Sofi ya tiene respondido en una clínica dental, con el horario del equipo de la demo. */
+/**
+ * Lo que Sofi ya tiene respondido en una clínica dental: solo lo que no está en
+ * los datos (ADR 0120). El horario sale del equipo de la demo y la salud la
+ * atiende un profesional: no se escriben aquí.
+ */
 const DENTAL_KNOWLEDGE: DemoKindRecipe["knowledge"] = [
-  {
-    title: "Horario de atención",
-    body: "Atendemos de lunes a viernes de 9:00 a. m. a 1:00 p. m. y de 2:00 p. m. a 6:00 p. m., y los sábados de 9:00 a. m. a 1:00 p. m. Domingos y feriados no atendemos.",
-    basicKey: "horario",
-    askForms: ["¿A qué hora abren?", "¿Atienden los sábados?"],
-  },
   {
     title: "¿Atienden sin cita?",
     body: "Atendemos con cita. Si tienes dolor o se te rompió un diente, escríbenos y te damos el primer espacio libre del día.",
@@ -266,9 +264,9 @@ const DENTAL_KNOWLEDGE: DemoKindRecipe["knowledge"] = [
     askForms: ["¿Puedo ir sin reservar?"],
   },
   {
-    title: "¿Cómo cambio o cancelo mi cita?",
-    body: "Escríbenos por este chat y la cambiamos al día que te acomode. Si no puedes venir, avísanos con unas horas de anticipación para darle el espacio a otro paciente.",
-    basicKey: "cambiar_cita",
+    title: "¿Qué pasa si llego tarde o no puedo ir?",
+    body: "Si no puedes venir, avísanos por este chat con unas horas de anticipación y la cambiamos al día que te acomode. Si llegas más de 15 minutos tarde, te damos el siguiente espacio libre del día.",
+    basicKey: "tardanza",
   },
   {
     title: "¿Qué necesito llevar a mi primera cita?",
@@ -280,11 +278,6 @@ const DENTAL_KNOWLEDGE: DemoKindRecipe["knowledge"] = [
     body: "En los tratamientos de varias sesiones pagas por partes, según el avance. Lo dejamos acordado en tu presupuesto antes de empezar.",
     basicKey: "cuotas",
     askForms: ["¿Puedo pagar en partes?"],
-  },
-  {
-    title: "¿El tratamiento duele?",
-    body: "Usamos anestesia local en los tratamientos que lo necesitan. Si sientes molestia, avísale al odontólogo y se detiene.",
-    basicKey: "dolor",
   },
 ]
 
@@ -677,7 +670,6 @@ export const DENTAL_DEMO_KINDS: readonly DemoKindRecipe[] = [
       {
         title: "¿Atienden a niños? ¿Desde qué edad?",
         body: "Sí, atendemos niños desde que les sale el primer diente. Un adulto responsable los acompaña durante toda la consulta.",
-        basicKey: "ninos",
         askForms: ["¿Puedo entrar con mi hijo?"],
       },
     ],

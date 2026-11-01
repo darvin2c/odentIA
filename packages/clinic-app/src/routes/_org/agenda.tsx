@@ -1,11 +1,7 @@
 import {
   Button,
-  Drawer,
-  DrawerContent,
-  DrawerDescription,
-  DrawerHeader,
-  DrawerTitle,
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -16,6 +12,7 @@ import {
 } from "@odentia/ui"
 import {
   addDays,
+  ConfirmDialog,
   conflictLabel,
   DatePickerButton,
   dayMinutesIn,
@@ -29,8 +26,10 @@ import {
   formatSpan,
   freeMinutesOf,
   hourLabel,
+  isCovered,
   type MinuteRange,
   minutesToInstant,
+  overlapsAny,
   PageHeader,
   PageShell,
   type RowActionItem,
@@ -43,6 +42,8 @@ import {
   type ScheduleAvailability,
   type ScheduleBlocked,
   type ScheduleColumn,
+  ScheduleDayHeader,
+  type ScheduleDayLoad,
   ScheduleDayStrip,
   type ScheduleEntry,
   ScheduleGrid,
@@ -50,10 +51,14 @@ import {
   ScheduleOccupancyLegend,
   type SchedulePreview,
   ScheduleResourceChips,
+  ScheduleSnapPager,
   type ScheduleStatus,
   ScheduleStatusSummary,
+  type ScheduleTeamRow,
+  ScheduleTeamWeek,
+  ScheduleTeamWeekList,
   ScheduleToolbar,
-  ScheduleWeekOverview,
+  type ScheduleWindow,
   scheduleToneAt,
   submitErrorMessage,
   isUnconfirmedSubmit,
@@ -72,9 +77,11 @@ import {
   Armchair,
   CalendarClock,
   CalendarDays,
+  CalendarRange,
   CalendarX2,
   ChevronDown,
-  Clock,
+  ChevronLeft,
+  ListChecks,
 } from "lucide-react"
 import * as React from "react"
 import {
@@ -87,6 +94,7 @@ import { ScheduleDrawer } from "../../components/agenda/schedule-editor"
 import { RoomForm } from "../../components/agenda/room-form"
 import { useAppointmentArrival, useAppointmentVisitStatus } from "../../components/agenda/arrival"
 import { dayShort, shortName } from "../../components/agenda/shared"
+import { type AgendaException, exceptionFlags } from "../../components/agenda/when"
 import { useAttendAppointment } from "../../components/patient/new-encounter-button"
 import { MyCalendarDrawer } from "../../components/agenda/my-calendar-drawer"
 import { BranchSwitcher } from "../../components/branch-switcher"
@@ -139,6 +147,8 @@ export const Route = createFileRoute("/_org/agenda")({
     date?: string
     branch?: string
     who?: string
+    /** Quienes no atienden ese día y se sumaron a la vista, separados por coma. */
+    sumar?: string
     group?: string
     status?: string
     /** «Mi calendario» abierto (lo abre también el aviso de la campana). */
@@ -165,11 +175,36 @@ function planItemIdsOf(value: string | undefined): string[] {
 type AgendaView = "dia" | "semana" | "lista"
 type GroupMode = "professionals" | "rooms"
 
+/** Mover o alargar una cita desde la rejilla. */
+interface MoveRequest {
+  id: string
+  expectedVersion: number
+  startsAt: string
+  endsAt: string
+  professionalUserId?: string
+  roomId?: string
+  /** Cae fuera de lo libre y una persona del equipo lo aceptó. */
+  exception?: AgendaException | null
+  /** Por qué es una excepción, para confirmarla antes de enviar. */
+  why?: string
+  /** Dónde estaba, para «Deshacer». */
+  back?: { startsAt: string; endsAt: string; professionalUserId: string; roomId: string }
+  /** Este movimiento ya es un «Deshacer»: no ofrece otro. */
+  undoOf?: string
+}
+
+/** La vista «Agenda» conserva `lista` en la dirección: hay enlaces guardados con ella. */
 const VIEWS = [
-  { id: "dia", label: "Día" },
-  { id: "semana", label: "Semana" },
-  { id: "lista", label: "Lista" },
+  { id: "dia", label: "Día", icon: <CalendarDays aria-hidden /> },
+  { id: "semana", label: "Semana", icon: <CalendarRange aria-hidden /> },
+  { id: "lista", label: "Agenda", icon: <ListChecks aria-hidden /> },
 ]
+/** Lo que se ve al pedir más horas que la jornada: para una cita muy temprano o muy tarde. */
+const WIDE_WINDOW: ScheduleWindow = { startMinutes: 6 * 60, endMinutes: 22 * 60 }
+/** Días que la vista Agenda muestra desde el elegido. */
+const AGENDA_DAYS = 8
+/** Sin horario conocido ese día, los puntos miden contra una jornada común. */
+const COMMON_DAY_MINUTES = 8 * 60
 const DATE = /^\d{4}-\d{2}-\d{2}$/
 const STATUSES: AppointmentStatus[] = [
   "programada",
@@ -219,8 +254,6 @@ function AgendaPage() {
   const queryClient = useQueryClient()
   const { get, setParam, setParams } = useListSearch()
   const small = useMediaQuery(SCHEDULE_SMALL_QUERY)
-  // En teléfono, la tira de días y las fichas de profesionales van en este cajón.
-  const [resourcesOpen, setResourcesOpen] = React.useState(false)
   const can = useCan()
   const canWrite = usePermission("appointments.write")
   const canConfigure = usePermission("settings.write")
@@ -263,16 +296,27 @@ function AgendaPage() {
   const [roomForm, setRoomForm] = React.useState(false)
   const [scheduleForm, setScheduleForm] = React.useState(false)
   const [message, setMessage] = React.useState("")
+  /** «Ver de 6:00 a 22:00»: la rejilla enseña más horas que la jornada. */
+  const [wide, setWide] = React.useState(false)
+  /** Un arrastre que cae fuera de lo libre: espera a que se confirme. */
+  const [pendingMove, setPendingMove] = React.useState<MoveRequest | null>(null)
+  /** Teléfono: la semana que muestra la tira, si se deslizó a otra. */
+  const [stripDay, setStripDay] = React.useState<string | null>(null)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: al cambiar de día la tira vuelve a su semana.
+  React.useEffect(() => setStripDay(null), [day])
 
   // ----- Datos -----
   const week = React.useMemo(() => weekDates(day), [day])
-  const range = React.useMemo(
-    () => ({
-      from: minutesToInstant(week[0] ?? day, 0, TZ),
-      to: minutesToInstant(addDays(week[6] ?? day, 1), 0, TZ),
-    }),
-    [week, day, TZ],
-  )
+  const range = React.useMemo(() => {
+    // Un día a cada lado, para que al deslizar ya esté pintado el vecino;
+    // la vista Agenda necesita además los días que siguen al elegido.
+    const weekEnd = addDays(week[6] ?? day, 2)
+    const agendaEnd = addDays(day, AGENDA_DAYS)
+    return {
+      from: minutesToInstant(addDays(week[0] ?? day, -1), 0, TZ),
+      to: minutesToInstant(view === "lista" && agendaEnd > weekEnd ? agendaEnd : weekEnd, 0, TZ),
+    }
+  }, [week, day, TZ, view])
   const appointmentsQuery = useQuery({
     queryKey: ["agenda", branchId, range.from, range.to],
     enabled: branchId != null,
@@ -296,6 +340,30 @@ function AgendaPage() {
     placeholderData: (previous, last) => (last?.queryKey[1] === branchId ? previous : undefined),
   })
   const availability = availabilityQuery.data?.data
+
+  // La tira del teléfono en otra semana: solo para sus puntos.
+  const stripDates = React.useMemo(() => weekDates(stripDay ?? day), [stripDay, day])
+  const stripRange = {
+    from: minutesToInstant(stripDates[0] ?? day, 0, TZ),
+    to: minutesToInstant(addDays(stripDates[6] ?? day, 1), 0, TZ),
+  }
+  const stripOutside = small && stripDay !== null && !week.includes(stripDay)
+  const stripAppointments = useQuery({
+    queryKey: ["agenda", branchId, stripRange.from, stripRange.to],
+    enabled: branchId != null && stripOutside,
+    queryFn: () =>
+      apiFetch<{ data: AgendaAppointment[] }>(
+        `/api/appointments?branchId=${branchId ?? ""}&from=${encodeURIComponent(stripRange.from)}&to=${encodeURIComponent(stripRange.to)}`,
+      ),
+  })
+  const stripAvailability = useQuery({
+    queryKey: ["agenda-availability", branchId, stripRange.from, stripRange.to],
+    enabled: branchId != null && stripOutside,
+    queryFn: () =>
+      apiFetch<{ data: AgendaAvailability }>(
+        `/api/agenda/availability?branchId=${branchId ?? ""}&from=${encodeURIComponent(stripRange.from)}&to=${encodeURIComponent(stripRange.to)}`,
+      ),
+  })
 
   const invalidate = React.useCallback(
     () => invalidateAppointmentQueries(queryClient),
@@ -442,7 +510,14 @@ function AgendaPage() {
   }, [availability, appointments, toneOf])
   // Un odontólogo abre la Agenda en su columna (tablero 7); «todos» la abre entera.
   const ownColumn = canAttend && group === "professionals" && team.some((item) => item.id === myUserId) ? myUserId : null
-  const who = whoParam === WHO_ALL ? null : (whoParam ?? ownColumn)
+  // `?who=` admite varios, separados por coma; `?sumar=` son quienes no atienden ese día y se sumaron a la vista.
+  const whoList = React.useMemo(
+    () => (whoParam === WHO_ALL ? [] : whoParam ? whoParam.split(",").filter(Boolean) : ownColumn ? [ownColumn] : []),
+    [whoParam, ownColumn],
+  )
+  const who = whoList.length === 1 ? (whoList[0] ?? null) : null
+  const addedParam = get("sumar") ?? ""
+  const added = React.useMemo(() => addedParam.split(",").filter(Boolean), [addedParam])
   const rooms = React.useMemo(
     (): ScheduleColumn[] =>
       (resources?.rooms ?? []).map((item, index) => ({
@@ -534,6 +609,45 @@ function AgendaPage() {
     )
     return hit ? `Dentro de una ausencia: ${hit.label ?? "sin motivo"}` : undefined
   }
+  /** Citas en pie fuera del horario de su profesional: una excepción que queda a la vista. */
+  const outsideHours = (item: AgendaAppointment): string | undefined => {
+    if (!standing(item.status)) return undefined
+    const date = zonedDateOf(item.startsAt, TZ)
+    const range = dayRangeOf(item.startsAt, item.endsAt, date, TZ)
+    return range && !isCovered(range, rangesOn(open, item.professionalUserId, date, TZ)) ? "Fuera de horario" : undefined
+  }
+  /** Si mover una cita ahí sería una excepción: cómo y por qué, todo lo que se pisa. Nada si cae en lo libre. */
+  const moveException = (
+    item: AgendaAppointment,
+    start: string,
+    end: string,
+    professionalId: string,
+  ): (AgendaException & { why: string }) | null => {
+    const date = zonedDateOf(start, TZ)
+    const range = dayRangeOf(start, end, date, TZ)
+    if (!range) return null
+    const name = shortName(team.find((member) => member.id === professionalId)?.label ?? item.professionalName)
+    const outside = !isCovered(range, rangesOn(open, professionalId, date, TZ))
+    const blocked = overlapsAny(range, rangesOn(absences, professionalId, date, TZ))
+    const clash = appointments.some(
+      (other) =>
+        other.id !== item.id &&
+        !other.test &&
+        standing(other.status) &&
+        other.professionalUserId === professionalId &&
+        Date.parse(other.startsAt) < Date.parse(end) &&
+        Date.parse(other.endsAt) > Date.parse(start),
+    )
+    if (!outside && !blocked && !clash) return null
+    const why = [
+      outside ? `Queda fuera del horario de ${name}.` : null,
+      blocked ? `Esa hora de ${name} está bloqueada.` : null,
+      clash ? `${name} ya tiene otra cita a esa hora.` : null,
+    ]
+      .filter(Boolean)
+      .join(" ")
+    return { outside, busy: blocked || clash, why }
+  }
 
   /** Llegó o en atención, dicho con su hora: el estado real, no el reloj. */
   const stateOf = (item: AgendaAppointment) => ({
@@ -551,7 +665,7 @@ function AgendaPage() {
       status: item.status,
       ...stateOf(item),
       // Una prueba no ocupa el horario de nadie (ADR 0094): no es un choque.
-      warning: item.test ? undefined : (conflictLabel(conflicts.get(item.id), appWords().room.one) ?? insideAbsence(item)),
+      warning: item.test ? undefined : (conflictLabel(conflicts.get(item.id), appWords().room.one) ?? insideAbsence(item) ?? outsideHours(item)),
       test: Boolean(item.test),
     }),
   )
@@ -574,37 +688,56 @@ function AgendaPage() {
     (item) =>
       attends(item.id, day) && (absenceOn(item.id, day) === null || hasAppointments(item.id, day)),
   )
+  /** Quienes no atienden ese día y se sumaron a la vista para darles una cita. */
+  const addedColumns: ScheduleColumn[] = added.flatMap((id) => {
+    if (dayTeam.some((item) => item.id === id)) return []
+    const label =
+      team.find((item) => item.id === id)?.label ?? resources?.professionals.find((item) => item.id === id)?.label
+    return label ? [{ id, label, tone: toneOf(id) }] : []
+  })
   const absent = team
-    .filter((item) => !dayTeam.includes(item))
+    .filter((item) => !dayTeam.includes(item) && !added.includes(item.id))
     .map((item) => ({ ...item, absence: absenceOn(item.id, day) }))
+  /** Lo que el menú de profesionales ofrece sumar: del equipo de la sede o quien aún no tiene horario. */
+  const canAdd: ScheduleColumn[] = [
+    ...new Map(
+      [...team, ...(resources?.professionals ?? []).map((item) => ({ id: item.id, label: item.label, tone: toneOf(item.id) }))].map(
+        (item) => [item.id, item] as const,
+      ),
+    ).values(),
+  ].filter((item) => !dayTeam.some((other) => other.id === item.id) && !added.includes(item.id))
   /** Todos los que atendían ese día están ausentes por lo mismo (feriado, cierre de la sede). */
   const closedReason =
     absent.length > 0 && absent.every((item) => item.absence !== null)
       ? (absent[0]?.absence?.label ?? null)
       : null
-  const dayColumns = group === "rooms" ? rooms : dayTeam
-  /** Semana, y Día en teléfono: de quién es la agenda. */
-  const focus =
-    (who && team.some((item) => item.id === who) ? who : null) ??
-    dayTeam[0]?.id ??
-    team[0]?.id ??
-    null
-  const dayFocus = dayColumns.find((item) => item.id === who)?.id ?? dayColumns[0]?.id ?? null
-  /** Día y Lista en escritorio: a quién se ve (null = todos). */
-  const filter = who && dayColumns.some((item) => item.id === who) ? who : null
+  const dayColumns = group === "rooms" ? rooms : [...dayTeam, ...addedColumns]
+  /**
+   * Semana: de quién se mira la semana por horas, solo si se pidió. Abre en todo
+   * el equipo también para quien atiende: su columna propia es la del Día.
+   */
+  const focus = whoParam && whoList.length === 1 && who && team.some((item) => item.id === who) ? who : null
+  /** Teléfono: de quién es la agenda; un día sin nadie sigue mostrando a alguien, para poder deslizar. */
+  const phoneColumns = dayColumns.length > 0 ? dayColumns : team
+  const dayFocus = phoneColumns.find((item) => item.id === who)?.id ?? phoneColumns[0]?.id ?? null
+  /** Día y Agenda en escritorio: a quiénes se ve (vacío = todos). */
+  // La vista Agenda abarca varios días: se elige entre todo el equipo, no entre quienes atienden el elegido.
+  const menuColumns = view === "lista" ? team : dayColumns
+  const chosen = whoList.filter((id) => menuColumns.some((item) => item.id === id))
+  const isChosen = (id: string) => chosen.length === 0 || chosen.includes(id)
 
   // ----- Carriles -----
-  const dayLanes: ScheduleLane[] = (
-    small ? dayColumns.filter((item) => item.id === dayFocus) : dayColumns
-  )
-    .filter((item) => small || !filter || item.id === filter)
-    .map((item) => ({
-      id: item.id,
-      columnId: item.id,
-      date: day,
-      label: item.label,
-      tone: item.tone,
-    }))
+  const lanesOf = (date: string): ScheduleLane[] =>
+    (small ? phoneColumns.filter((item) => item.id === dayFocus) : dayColumns)
+      .filter((item) => small || isChosen(item.id) || added.includes(item.id))
+      .map((item) => ({
+        id: item.id,
+        columnId: item.id,
+        date,
+        label: item.label,
+        tone: item.tone,
+      }))
+  const dayLanes = lanesOf(day)
 
   const focusEntries = active.filter((entry) => entry.columnId === focus)
   const weekDays = week.filter(
@@ -666,17 +799,76 @@ function AgendaPage() {
       }))
     : []
 
+  // La semana del equipo: una fila por profesional, con el mismo reparto de la jornada.
+  const teamDates = week.filter(
+    (date, index) =>
+      index < 6 ||
+      team.some((item) => rangesOn(open, item.id, date, TZ).length > 0) ||
+      active.some((entry) => zonedDateOf(entry.start, TZ) === date),
+  )
+  const teamWindow = windowCovering(
+    teamDates.flatMap((date) =>
+      team.flatMap((item) => [...rangesOn(open, item.id, date, TZ), ...rangesOn(active, item.id, date, TZ)]),
+    ),
+    SCHEDULE_DEFAULT_WINDOW,
+  )
+  const teamRows: ScheduleTeamRow[] = team.map((member) => ({
+    ...member,
+    days: teamDates.map((date) => {
+      const absence = absenceOn(member.id, date)
+      return {
+        date,
+        count: active.filter((entry) => entry.columnId === member.id && zonedDateOf(entry.start, TZ) === date).length,
+        ...(absence
+          ? {
+              away: absence.label,
+              ...(absence.until ? { awayNote: `Hasta el ${dayShort(absence.until)}` } : {}),
+            }
+          : {}),
+        segments: daySegments({
+          window: teamWindow,
+          open: rangesOn(open, member.id, date, TZ),
+          busy: rangesOn(active, member.id, date, TZ),
+          blocked: rangesOn(absences, member.id, date, TZ),
+          nowMinutes:
+            date === today ? dayMinutesIn(now, TZ) : date < today ? teamWindow.endMinutes : undefined,
+        }),
+      }
+    }),
+  }))
+
+  /** Qué tan lleno está un día de quien se mira, para los puntos de la tira del teléfono. */
+  const loadOf = (date: string): ScheduleDayLoad | undefined => {
+    const inMain = zonedDateOf(range.from, TZ) <= date && date < zonedDateOf(range.to, TZ)
+    const list = inMain ? appointments : stripAppointments.data?.data
+    const hours = inMain ? availability : stripAvailability.data?.data
+    if (!list || !hours) return undefined
+    const mine = list.filter(
+      (item) =>
+        occupies(item.status) &&
+        !item.test &&
+        zonedDateOf(item.startsAt, TZ) === date &&
+        (group === "rooms" ? item.roomId : item.professionalUserId) === dayFocus,
+    )
+    if (mine.length === 0) return { level: 0, count: 0 }
+    const openMinutes = hours.open
+      .filter((item) => item.professionalUserId === dayFocus)
+      .reduce((total, item) => {
+        const hoursRange = dayRangeOf(item.startsAt, item.endsAt, date, TZ)
+        return total + (hoursRange ? hoursRange.endMinutes - hoursRange.startMinutes : 0)
+      }, 0)
+    const busy = mine.reduce((total, item) => {
+      const busyRange = dayRangeOf(item.startsAt, item.endsAt, date, TZ)
+      return total + (busyRange ? busyRange.endMinutes - busyRange.startMinutes : 0)
+    }, 0)
+    const share = busy / (openMinutes > 0 ? openMinutes : COMMON_DAY_MINUTES)
+    return { level: share < 1 / 3 ? 1 : share < 2 / 3 ? 2 : 3, count: mine.length }
+  }
+
   // ----- Acciones -----
   const statusMutation = useAppointmentVisitStatus({ onDone: setMessage })
   const moveMutation = useMutation({
-    mutationFn: (input: {
-      id: string
-      expectedVersion: number
-      startsAt: string
-      endsAt: string
-      professionalUserId?: string
-      roomId?: string
-    }) =>
+    mutationFn: (input: MoveRequest) =>
       apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${input.id}/move`, {
         method: "POST",
         body: JSON.stringify({
@@ -685,11 +877,28 @@ function AgendaPage() {
           endsAt: input.endsAt,
           professionalUserId: input.professionalUserId,
           roomId: input.roomId,
+          ...exceptionFlags(input.exception),
         }),
       }),
-    onSuccess: async (result) => {
-      const text = `Cita de ${result.data.patientName} reprogramada`
-      toast.success(text)
+    onSuccess: async (result, input) => {
+      const text = input.undoOf ? `Cita de ${result.data.patientName} de vuelta en su sitio` : `Cita de ${result.data.patientName} reprogramada`
+      const back = input.back
+      toast.success(text, {
+        // Arrastrar se hace rápido: volver atrás es un toque, sin buscar la hora de antes.
+        action: back
+          ? {
+              label: "Deshacer",
+              onClick: () =>
+                moveMutation.mutate({
+                  ...back,
+                  id: result.data.id,
+                  expectedVersion: result.data.version,
+                  exception: moveException(result.data, back.startsAt, back.endsAt, back.professionalUserId),
+                  undoOf: input.id,
+                }),
+            }
+          : undefined,
+      })
       setMessage(text)
       await invalidate()
     },
@@ -782,104 +991,130 @@ function AgendaPage() {
       : null
   }
 
-  const listItems: ScheduleAgendaItem[] = dayAppointments
-    .filter((item) => !filter || item.professionalUserId === filter)
-    .filter((item) => !statusFilter || item.status === statusFilter)
-    .map((item) => ({
-      entry: {
-        id: item.id,
+  // La vista Agenda: el día elegido y los que le siguen, cada uno con su encabezado.
+  const agendaAppointments = appointments.filter((item) => {
+    const date = zonedDateOf(item.startsAt, TZ)
+    return date >= day && date < addDays(day, AGENDA_DAYS) && isChosen(item.professionalUserId)
+  })
+  const agendaDates = [...new Set(agendaAppointments.map((item) => zonedDateOf(item.startsAt, TZ)))].sort()
+  const itemsOn = (date: string): ScheduleAgendaItem[] =>
+    agendaAppointments
+      .filter((item) => zonedDateOf(item.startsAt, TZ) === date)
+      .filter((item) => !statusFilter || item.status === statusFilter)
+      .map((item) => ({
+        entry: {
+          id: item.id,
         columnId: item.professionalUserId,
-        title: item.patientName,
-        subtitle: item.serviceName ?? item.reason ?? undefined,
-        start: item.startsAt,
-        end: item.endsAt,
-        status: item.status,
-        ...stateOf(item),
-        test: Boolean(item.test),
-      },
-      resourceLabel: item.professionalName,
-      resourceShortLabel: shortName(item.professionalName),
-      resourceTone: toneOf(item.professionalUserId),
-      resourceDetail: item.roomName,
-    }))
+          title: item.patientName,
+          subtitle: item.serviceName ?? item.reason ?? undefined,
+          start: item.startsAt,
+          end: item.endsAt,
+          status: item.status,
+          ...stateOf(item),
+          test: Boolean(item.test),
+        },
+        resourceLabel: item.professionalName,
+        resourceShortLabel: shortName(item.professionalName),
+        resourceTone: toneOf(item.professionalUserId),
+        resourceDetail: item.roomName,
+      }))
+  const agendaDays = agendaDates.flatMap((date) => {
+    const items = itemsOn(date)
+    if (items.length === 0) return []
+    const waiting = items.filter((item) => item.entry.status === "programada").length
+    const summary = `${items.length} ${items.length === 1 ? "cita" : "citas"}${
+      waiting > 0 && statusFilter !== "programada" ? ` · ${waiting} por confirmar` : ""
+    }`
+    return [{ date, items, summary }]
+  })
   const counts: Partial<Record<ScheduleStatus, number>> = {}
-  for (const item of dayAppointments) {
-    if (filter && item.professionalUserId !== filter) continue
+  for (const item of agendaAppointments) {
     counts[item.status] = (counts[item.status] ?? 0) + 1
   }
 
   // ----- Composición -----
   const step = view === "semana" ? 7 : 1
   const goTo = (date: string) => setParam("date", date === today ? undefined : date)
-  const dayTitle =
-    day === today ? `Hoy, ${formatDateLong(day).toLocaleLowerCase("es")}` : formatDateLong(day)
   const rangeLabel =
-    view === "semana" ? weekLabel(weekDays) : small ? capitalize(dayTitle) : formatDateLong(day)
+    view === "semana"
+      ? small
+        ? `${Number((week[0] ?? day).slice(8, 10))}–${Number((week[6] ?? day).slice(8, 10))} ${formatMonthLong(week[6] ?? day).slice(0, 3)}`
+        : weekLabel(weekDays)
+      : small
+        ? // Corto: comparte fila con las tres vistas.
+          capitalize(`${day === today ? "hoy, " : ""}${dayShort(day)} de ${formatMonthLong(day).slice(0, 3)}`)
+        : formatDateLong(day)
   const selected = detail
     ? (byId.get(detail.id) ??
       (linkedAppointment.data?.data.id === detail.id ? linkedAppointment.data.data : null))
     : null
 
-  const resourceMenu = (
-    current: string | null,
-    options: ScheduleColumn[],
-    onPick: (id: string | null) => void,
-    allLabel: string | null,
-  ) => {
-    const chosen = options.find((item) => item.id === current)
-    return (
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <Button variant="outline" className="gap-2">
-              {chosen ? (
-                <ResourceAvatar
-                  label={chosen.label}
-                  tone={chosen.tone}
-                  size="sm"
-                  className="-ml-1.5"
-                />
-              ) : null}
-              {chosen ? chosen.label : (allLabel ?? "Elegir")}
-              <ChevronDown aria-hidden />
-            </Button>
-          }
-        />
-        <DropdownMenuContent align="end">
-          {allLabel ? (
-            <DropdownMenuItem onClick={() => onPick(null)}>{allLabel}</DropdownMenuItem>
-          ) : null}
-          {options.map((item) => (
-            <DropdownMenuItem key={item.id} onClick={() => onPick(item.id)}>
-              <ResourceAvatar label={item.label} tone={item.tone} size="sm" />
-              {item.label}
-            </DropdownMenuItem>
-          ))}
-          {view === "dia" && rooms.length > 0 ? (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={() =>
-                  setParams({
-                    group: group === "rooms" ? undefined : "rooms",
-                    who: undefined,
-                  })
-                }
-              >
-                {group === "rooms" ? "Ver por profesional" : `Ver por ${appWords().room.one}`}
-              </DropdownMenuItem>
-            </>
-          ) : null}
-        </DropdownMenuContent>
-      </DropdownMenu>
-    )
-  }
-  const pickWho = (id: string | null) => setParam("who", id ?? (ownColumn ? WHO_ALL : undefined))
-  // Las fichas del teléfono: quiénes son según la vista y cuál está elegida; la fila dice el nombre.
+  const pickWho = (ids: string[]) =>
+    setParam("who", ids.length > 0 ? ids.join(",") : ownColumn ? WHO_ALL : undefined)
   const resourceTitle = group === "rooms" ? upperFirst(appWords().room.many) : "Profesionales"
-  const phoneResources = view === "semana" ? team : view === "dia" ? dayColumns : dayTeam
-  const phoneValue = view === "lista" ? filter : view === "semana" ? focus : dayFocus
-  const resourceChosen = phoneResources.find((item) => item.id === phoneValue)?.label ?? "todos"
+  const onlyChosen = chosen.length === 1 ? menuColumns.find((item) => item.id === chosen[0]) : undefined
+  const resourceMenu = (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button variant="outline" className="gap-2">
+            {onlyChosen ? (
+              <ResourceAvatar label={onlyChosen.label} tone={onlyChosen.tone} size="sm" className="-ml-1.5" />
+            ) : null}
+            {onlyChosen
+              ? group === "rooms"
+                ? onlyChosen.label
+                : shortName(onlyChosen.label)
+              : chosen.length > 1
+                ? `${resourceTitle}: ${chosen.length}`
+                : resourceTitle}
+            <ChevronDown aria-hidden />
+          </Button>
+        }
+      />
+      <DropdownMenuContent align="end" className="min-w-72">
+        {chosen.length > 0 ? <DropdownMenuItem onClick={() => pickWho([])}>Ver a todos</DropdownMenuItem> : null}
+        {menuColumns.map((item) => (
+          <DropdownMenuCheckboxItem
+            key={item.id}
+            checked={chosen.includes(item.id)}
+            onCheckedChange={(checked) =>
+              pickWho(checked ? [...chosen, item.id] : chosen.filter((id) => id !== item.id))
+            }
+          >
+            <ResourceAvatar label={item.label} tone={item.tone} size="sm" />
+            {item.label}
+          </DropdownMenuCheckboxItem>
+        ))}
+        {canWrite && view === "dia" && group === "professionals" && canAdd.length > 0 ? (
+          <>
+            <DropdownMenuSeparator />
+            <p className="px-2 py-1 text-xs font-bold text-muted-foreground">No atienden este día</p>
+            {canAdd.map((item) => (
+              <DropdownMenuItem
+                key={item.id}
+                onClick={() => setParam("sumar", [...added, item.id].join(","))}
+              >
+                <ResourceAvatar label={item.label} tone={item.tone} size="sm" />
+                <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                <span className="text-xs font-bold text-primary-soft-foreground">Añadir a la vista</span>
+              </DropdownMenuItem>
+            ))}
+          </>
+        ) : null}
+        {view === "dia" && rooms.length > 0 ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() => setParams({ group: group === "rooms" ? undefined : "rooms", who: undefined, sumar: undefined })}
+            >
+              {group === "rooms" ? "Ver por profesional" : `Ver por ${appWords().room.one}`}
+            </DropdownMenuItem>
+          </>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
 
   const loading =
     !resources || appointmentsQuery.data == null || availabilityQuery.data == null
@@ -962,15 +1197,16 @@ function AgendaPage() {
       onSecondaryAction={canWrite ? () => openBooking() : undefined}
     />
   )
-  const filtered = Boolean(statusFilter || filter)
+  // Abrir en la columna propia no es un filtro que se haya puesto: no se ofrece quitarlo.
+  const filtered = Boolean(statusFilter || (whoParam && whoParam !== WHO_ALL && chosen.length > 0))
   const emptyList = (
     <EmptyState
       icon={CalendarDays}
-      title={filtered ? "No hay citas con ese filtro" : "No hay citas este día"}
+      title={filtered ? "No hay citas con ese filtro" : "No hay citas en estos días"}
       description={
         filtered
-          ? "Quita el filtro para ver todas las citas del día."
-          : "Cuando se reserve una cita para este día aparecerá aquí."
+          ? "Quita el filtro para ver todas las citas."
+          : "Cuando se reserve una cita para estos días aparecerá aquí."
       }
       actionLabel={filtered ? "Quitar filtros" : canWrite ? "Nueva cita" : undefined}
       onAction={
@@ -983,18 +1219,35 @@ function AgendaPage() {
     />
   )
 
-  const grid = (
+  /** Mover o alargar: lo libre se envía de una vez; fuera de eso, primero se confirma. */
+  const requestMove = (item: AgendaAppointment, request: MoveRequest) => {
+    const professionalId = request.professionalUserId ?? item.professionalUserId
+    const exception = moveException(item, request.startsAt, request.endsAt, professionalId)
+    const full: MoveRequest = {
+      ...request,
+      back: { startsAt: item.startsAt, endsAt: item.endsAt, professionalUserId: item.professionalUserId, roomId: item.roomId },
+    }
+    if (exception) setPendingMove({ ...full, exception, why: exception.why })
+    else moveMutation.mutate(full)
+  }
+  const bookOn = (target: { columnId: string; start: string; date: string }) =>
+    openBooking({
+      professionalUserId: target.columnId,
+      professionalLabel: dayColumns.find((item) => item.id === target.columnId)?.label,
+      startsAt: target.start,
+      date: target.date,
+    })
+
+  const gridOf = (lanes: ScheduleLane[], label: string) => (
     <ScheduleGrid
       className="min-h-0 flex-1"
-      label={
-        view === "dia" ? `Agenda del ${formatDateLong(day)}` : `Semana del ${weekLabel(weekDays)}`
-      }
-      lanes={view === "dia" ? dayLanes : weekLanes}
+      label={label}
+      lanes={lanes}
       timeZone={TZ}
       entries={active}
       availability={group === "rooms" ? undefined : open}
       blocked={blocked}
-      window={view === "semana" ? weekWindow : undefined}
+      window={view === "semana" ? weekWindow : wide ? WIDE_WINDOW : undefined}
       hourHeight={small ? 88 : view === "semana" ? 96 : 72}
       minLaneWidth={view === "semana" ? 132 : 168}
       hideHeader={small && view === "dia"}
@@ -1008,7 +1261,7 @@ function AgendaPage() {
           ? (entry, move) => {
               const item = byId.get(entry.id)
               if (!item) return
-              moveMutation.mutate({
+              requestMove(item, {
                 id: item.id,
                 expectedVersion: item.version,
                 startsAt: move.start,
@@ -1028,7 +1281,7 @@ function AgendaPage() {
           ? (entry, resize) => {
               const item = byId.get(entry.id)
               if (!item) return
-              moveMutation.mutate({
+              requestMove(item, {
                 id: item.id,
                 expectedVersion: item.version,
                 startsAt: resize.start,
@@ -1037,47 +1290,73 @@ function AgendaPage() {
             }
           : undefined
       }
-      onCreate={
-        canWrite && group === "professionals"
-          ? (target) =>
-              openBooking({
-                professionalUserId: target.columnId,
-                startsAt: target.start,
-                date: target.date,
-              })
-          : undefined
+      onCreate={canWrite && group === "professionals" ? bookOn : undefined}
+      onCreateException={canWrite && group === "professionals" ? bookOn : undefined}
+      footer={
+        view === "dia" ? (
+          <Button variant="ghost" size="sm" className="text-primary" onClick={() => setWide((value) => !value)}>
+            {wide ? "Ver solo la jornada" : "Ver de 6:00 a 22:00"}
+          </Button>
+        ) : undefined
       }
       emptyLabel="Nadie atiende este día en la sede."
     />
   )
 
+  const branchSwitcher = resources ? (
+    <BranchSwitcher
+      branches={sede.branches}
+      value={resources.branchId}
+      fallbackName={resources.branchName}
+      onChange={(id) => sede.choose(id, { who: undefined, group: undefined, sumar: undefined })}
+    />
+  ) : (
+    <Skeleton className="h-4 w-28" />
+  )
+  const appointmentSearch = resources ? (
+    <AppointmentSearch
+      compact={small}
+      timeZone={TZ}
+      today={today}
+      canBook={canWrite}
+      onOpen={(appointment) => setParam("appointmentId", appointment.id)}
+      onBook={(patient) => openBooking({ patient })}
+    />
+  ) : null
+  const statusChips = (
+    <ScheduleStatusSummary
+      withAll={false}
+      counts={counts}
+      value={statusFilter}
+      onChange={(next) => setParam("status", next ?? undefined)}
+    />
+  )
+  const showDays = small && view !== "semana"
+  /** Tocar un día en la semana abre la reserva con esa persona y ese día, con sus horas libres. */
+  const pickTeamDay = (columnId: string, date: string) => {
+    if (!canWrite) {
+      setParams({ date: date === today ? undefined : date, view: undefined, who: columnId })
+      return
+    }
+    openBooking({
+      professionalUserId: columnId,
+      professionalLabel: team.find((item) => item.id === columnId)?.label,
+      date,
+    })
+  }
+
   return (
     <PageShell fill className="gap-3 text-foreground">
       <PageHeader
         title="Agenda"
+        // En el teléfono la sede y la lupa van bajo el título; en escritorio, en la barra.
         subtitle={
-          <>
-            {resources ? (
-              <BranchSwitcher
-                branches={sede.branches}
-                value={resources.branchId}
-                fallbackName={resources.branchName}
-                onChange={(id) => sede.choose(id, { who: undefined, group: undefined })}
-              />
-            ) : (
-              <Skeleton className="h-4 w-28" />
-            )}
-            {resources ? (
-              <AppointmentSearch
-                compact={small}
-                timeZone={TZ}
-                today={today}
-                canBook={canWrite}
-                onOpen={(appointment) => setParam("appointmentId", appointment.id)}
-                onBook={(patient) => openBooking({ patient })}
-              />
-            ) : null}
-          </>
+          small ? (
+            <>
+              {branchSwitcher}
+              {appointmentSearch}
+            </>
+          ) : undefined
         }
         {...agendaHeader(can, { book: () => openBooking(), calendar: () => setParam("calendario", "1") })}
       />
@@ -1104,25 +1383,53 @@ function AgendaPage() {
       )}
 
       <ScheduleToolbar
+        context={small ? undefined : branchSwitcher}
         rangeLabel={rangeLabel}
         rangeControl={
-          <DatePickerButton
-            value={day}
-            onChange={goTo}
-            variant="ghost"
-            aria-label={`${rangeLabel}. Ir a otra fecha`}
-            className="-mx-2 h-9 min-w-0 gap-1.5 px-2 text-lg font-bold tracking-tight"
-          >
-            <span className="truncate">{rangeLabel}</span>
-            <ChevronDown aria-hidden className="shrink-0" />
-          </DatePickerButton>
+          !small && view === "lista" ? (
+            // El encabezado de cada día ya dice la fecha: aquí van los filtros de estado.
+            statusChips
+          ) : (
+            <DatePickerButton
+              value={day}
+              onChange={goTo}
+              variant="ghost"
+              aria-label={`${rangeLabel}. Ir a otra fecha`}
+              className={
+                small
+                  ? "-mx-2 h-9 min-w-0 gap-1 px-2 text-base font-bold tracking-tight"
+                  : "h-9 min-w-0 gap-1 px-1 text-base font-bold tracking-tight 2xl:text-lg"
+              }
+            >
+              <span className="truncate">{rangeLabel}</span>
+              <ChevronDown aria-hidden className="shrink-0" />
+            </DatePickerButton>
+          )
         }
         summary={
-          view === "semana" ? undefined : `${dayStanding} ${dayStanding === 1 ? "cita" : "citas"}`
+          view !== "dia" || small ? undefined : (
+            <>
+              <span className="truncate">
+                {dayStanding} {dayStanding === 1 ? "cita" : "citas"}
+                {pending > 0 ? " ·" : ""}
+              </span>
+              {/* Si falta sitio, lo que se recorta es el total: esto pide hacer algo. */}
+              {pending > 0 ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 shrink-0 px-1 font-semibold text-warning"
+                  onClick={() => setParams({ view: "lista", status: "programada" })}
+                >
+                  {pending} por confirmar
+                </Button>
+              ) : null}
+            </>
+          )
         }
         refreshing={refreshing}
-        onPrevious={small && view !== "semana" ? undefined : () => goTo(addDays(day, -step))}
-        onNext={small && view !== "semana" ? undefined : () => goTo(addDays(day, step))}
+        onPrevious={showDays ? undefined : () => goTo(addDays(day, -step))}
+        onNext={showDays ? undefined : () => goTo(addDays(day, step))}
         onToday={small ? undefined : () => goTo(today)}
         previousLabel={view === "semana" ? "Semana anterior" : "Día anterior"}
         nextLabel={view === "semana" ? "Semana siguiente" : "Día siguiente"}
@@ -1131,96 +1438,76 @@ function AgendaPage() {
         onViewChange={(next) =>
           setParams({ view: next === "dia" ? undefined : next, status: undefined })
         }
-        stretchViews={small}
         filters={
           small ? undefined : (
             <>
-              {view !== "semana" && pending > 0 ? (
-                <Button
-                  variant="outline"
-                  onClick={() => setParams({ view: "lista", status: "programada" })}
-                >
-                  <Clock aria-hidden className="text-warning" />
-                  {pending} por confirmar
-                </Button>
-              ) : null}
-              {view === "semana"
-                ? resourceMenu(focus, team, pickWho, null)
-                : resourceMenu(
-                    filter,
-                    dayColumns,
-                    pickWho,
-                    group === "rooms" ? `${upperFirst(appWords().room.many)}: todas` : "Profesionales: todos",
-                  )}
+              {appointmentSearch}
+              {view === "semana" ? (
+                focus ? (
+                  <Button variant="outline" onClick={() => setParam("who", undefined)}>
+                    <ChevronLeft aria-hidden />
+                    Todo el equipo
+                  </Button>
+                ) : null
+              ) : (
+                resourceMenu
+              )}
             </>
           )
         }
       />
 
-      {small ? (
-        <>
-          <Button
-            variant="outline"
-            className="h-11 w-full justify-between px-4 font-semibold"
-            onClick={() => setResourcesOpen(true)}
-          >
-            <span className="min-w-0 truncate">{`${resourceTitle}: ${resourceChosen}`}</span>
-            <ChevronDown aria-hidden className="shrink-0" />
-          </Button>
-          <Drawer
-            open={resourcesOpen}
-            onOpenChange={setResourcesOpen}
-            swipeDirection="down"
-            showSwipeHandle
-          >
-            <DrawerContent>
-              <DrawerHeader className="gap-1 border-b border-border px-6 py-4 text-left">
-                <DrawerTitle>{view === "semana" ? resourceTitle : "Días y profesionales"}</DrawerTitle>
-                <DrawerDescription className="sr-only">{resourceTitle}</DrawerDescription>
-              </DrawerHeader>
-              <ScrollArea className="min-h-0 flex-1">
-                <div className="space-y-5 px-6 py-4">
-                  {view !== "semana" ? (
-                    <ScheduleDayStrip
-                      dates={week.slice(0, 6).includes(day) ? week.slice(0, 6) : week}
-                      value={day}
-                      today={today}
-                      onChange={(date) => {
-                        goTo(date)
-                        setResourcesOpen(false)
-                      }}
-                      onPrevious={() => goTo(addDays(day, -7))}
-                      onNext={() => goTo(addDays(day, 7))}
-                    />
-                  ) : null}
-                  {view === "dia" && rooms.length > 0 ? (
-                    <Button
-                      variant="outline"
-                      className="w-full"
-                      onClick={() =>
-                        setParams({ group: group === "rooms" ? undefined : "rooms", who: undefined })
-                      }
-                    >
-                      {group === "rooms" ? "Ver por profesional" : `Ver por ${appWords().room.one}`}
-                    </Button>
-                  ) : null}
-                  <ScheduleResourceChips
-                    aria-label={resourceTitle}
-                    wrap
-                    resources={phoneResources}
-                    formatLabel={(item) => (group === "rooms" ? item.label : shortName(item.label))}
-                    value={phoneValue}
-                    allLabel={view === "lista" ? "Todos" : undefined}
-                    onChange={(id) => {
-                      pickWho(id)
-                      setResourcesOpen(false)
-                    }}
-                  />
-                </div>
-              </ScrollArea>
-            </DrawerContent>
-          </Drawer>
-        </>
+      {showDays ? (
+        <div className="flex shrink-0 flex-col gap-2">
+          <ScheduleSnapPager
+            aria-label="Semanas"
+            position={stripDates[0] ?? day}
+            onStep={(direction) => setStripDay(addDays(stripDates[0] ?? day, direction * 7))}
+            renderPane={(offset) => (
+              <ScheduleDayStrip
+                dates={stripDates.map((date) => addDays(date, offset * 7))}
+                value={day}
+                today={today}
+                load={loadOf}
+                onChange={goTo}
+              />
+            )}
+          />
+          {view === "dia" ? (
+            <div className="flex items-center gap-2">
+              <ScheduleResourceChips
+                aria-label={resourceTitle}
+                className="flex-1"
+                resources={phoneColumns}
+                formatLabel={(item) => (group === "rooms" ? item.label : shortName(item.label))}
+                value={dayFocus}
+                onChange={(id) => pickWho(id ? [id] : [])}
+              />
+              {rooms.length > 0 ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-11 shrink-0 text-primary"
+                  onClick={() => setParams({ group: group === "rooms" ? undefined : "rooms", who: undefined, sumar: undefined })}
+                >
+                  {group === "rooms" ? "Ver por profesional" : `Ver por ${appWords().room.one}`}
+                </Button>
+              ) : null}
+            </div>
+          ) : (
+            <>
+              <ScheduleResourceChips
+                aria-label={resourceTitle}
+                resources={team}
+                formatLabel={(item) => shortName(item.label)}
+                allLabel="Todos"
+                value={chosen.length === 1 ? (chosen[0] ?? null) : null}
+                onChange={(id) => pickWho(id ? [id] : [])}
+              />
+              {statusChips}
+            </>
+          )}
+        </div>
       ) : null}
 
       {stale ? (
@@ -1248,49 +1535,107 @@ function AgendaPage() {
       ) : view === "lista" ? (
         <ScrollArea className="-mr-2 min-h-0 flex-1">
           <div className="flex flex-col gap-3 pr-2">
-            <ScheduleStatusSummary
-              counts={counts}
-              value={statusFilter}
-              onChange={(next) => setParam("status", next ?? undefined)}
-            />
-            {listItems.length === 0 ? (
-              framed(emptyList)
-            ) : (
-            <ScheduleAgendaList
-              items={listItems}
-              timeZone={TZ}
-              now={day === today ? now : undefined}
-              onOpen={(entry) => setDetail({ id: entry.id, mode: "view" })}
-              primaryAction={({ entry }) => {
-                const item = byId.get(entry.id)
-                return item ? primaryFor(item) : null
-              }}
-              menuItems={({ entry }) => menuFor(entry)}
-            />
-            )}
+            {agendaDays.length === 0
+              ? framed(emptyList)
+              : agendaDays.map((agendaDay) => (
+                  <section key={agendaDay.date} className="flex flex-col gap-2">
+                    <ScheduleDayHeader date={agendaDay.date} today={today} summary={agendaDay.summary} />
+                    <ScheduleAgendaList
+                      items={agendaDay.items}
+                      timeZone={TZ}
+                      now={agendaDay.date === today ? now : undefined}
+                      onOpen={(entry) => setDetail({ id: entry.id, mode: "view" })}
+                      primaryAction={({ entry }) => {
+                        const item = byId.get(entry.id)
+                        return item ? primaryFor(item) : null
+                      }}
+                      menuItems={({ entry }) => menuFor(entry)}
+                    />
+                  </section>
+                ))}
           </div>
         </ScrollArea>
-      ) : small && view === "semana" ? (
-        <ScrollArea className="min-h-0 flex-1">
-          <div className="flex flex-col gap-2.5">
-            <div className="flex items-center gap-2">
-              <ScheduleOccupancyLegend className="flex-1" />
-              <span className="text-xs font-semibold text-muted-foreground tabular-nums">
-                {hourLabel(weekWindow.startMinutes)} a {hourLabel(weekWindow.endMinutes)}
-              </span>
+      ) : view === "semana" && (small || !focus) ? (
+        <ScrollArea horizontal className={small ? "min-h-0 flex-1" : "elevated min-h-0 flex-1 rounded-2xl border bg-card"}>
+          {small ? (
+            <div className="flex flex-col gap-2.5 pr-2">
+              <div className="flex items-center gap-2">
+                <ScheduleOccupancyLegend className="flex-1" />
+                <span className="text-xs font-semibold text-muted-foreground tabular-nums">
+                  {hourLabel(teamWindow.startMinutes)} a {hourLabel(teamWindow.endMinutes)}
+                </span>
+              </div>
+              <ScheduleTeamWeekList
+                rows={teamRows}
+                dates={teamDates}
+                today={today}
+                pickLabel={canWrite ? "Reservar" : "Abrir el día"}
+                onPick={(columnId, date) => pickTeamDay(columnId, date)}
+              />
             </div>
-            <ScheduleWeekOverview
-              days={weekModel}
-              today={today}
-              onSelect={(date) => setParams({ date: date === today ? undefined : date, view: undefined })}
-            />
-          </div>
+          ) : (
+            <>
+              <ScheduleTeamWeek
+                label={`Semana del ${weekLabel(teamDates)}`}
+                rows={teamRows}
+                dates={teamDates}
+                today={today}
+                selected={
+                  booking?.professionalUserId && booking.date && !booking.startsAt
+                    ? { columnId: booking.professionalUserId, date: booking.date }
+                    : null
+                }
+                onPick={(columnId, date) => pickTeamDay(columnId, date)}
+                pickLabel={canWrite ? "Reservar" : "Abrir el día"}
+                onResource={(id) => pickWho([id])}
+              />
+              <div className="flex items-center gap-4 border-t px-4 py-2.5">
+                <ScheduleOccupancyLegend />
+                <span className="text-xs font-semibold text-muted-foreground tabular-nums">
+                  De {hourLabel(teamWindow.startMinutes)} a {hourLabel(teamWindow.endMinutes)}. Debajo, cuándo empieza cada hueco.
+                </span>
+                {canWrite ? <span className="ml-auto text-[13px] font-semibold whitespace-nowrap">Toca un día para reservar</span> : null}
+              </div>
+            </>
+          )}
         </ScrollArea>
+      ) : view === "dia" && small && phoneColumns.length > 0 ? (
+        <ScheduleSnapPager
+          aria-label="Días"
+          position={day}
+          className="min-h-0 flex-1"
+          paneClassName="flex min-h-0"
+          onStep={(direction) => goTo(addDays(day, direction))}
+          renderPane={(offset) => {
+            const date = addDays(day, offset)
+            // Solo el día actual se nombra como la agenda: los vecinos están ahí para verse al deslizar.
+            return gridOf(lanesOf(date), offset === 0 ? `Agenda del ${formatDateLong(date)}` : formatDateLong(date))
+          }}
+        />
       ) : view === "dia" && dayLanes.length === 0 ? (
         framed(emptyDay)
+      ) : view === "dia" ? (
+        gridOf(dayLanes, `Agenda del ${formatDateLong(day)}`)
       ) : (
-        grid
+        gridOf(weekLanes, `Semana del ${weekLabel(weekDays)}`)
       )}
+
+      <ConfirmDialog
+        open={pendingMove !== null}
+        variant="default"
+        title={
+          pendingMove
+            ? `¿Mover a las ${hourLabel(dayMinutesIn(pendingMove.startsAt, TZ))}?`
+            : ""
+        }
+        description={pendingMove?.why ?? ""}
+        confirmLabel="Mover"
+        onClose={() => setPendingMove(null)}
+        onConfirm={() => {
+          if (pendingMove) moveMutation.mutate(pendingMove)
+          setPendingMove(null)
+        }}
+      />
 
       {!small &&
       !failed &&
@@ -1322,7 +1667,7 @@ function AgendaPage() {
 
       {booking && resources && branchId ? (
         <BookingDrawer
-          key={`${booking.patient?.id ?? ""}:${booking.startsAt ?? ""}:${booking.professionalUserId ?? ""}`}
+          key={`${booking.patient?.id ?? ""}:${booking.startsAt ?? ""}:${booking.professionalUserId ?? ""}:${booking.date ?? ""}`}
           seed={booking}
           branchId={branchId}
           timeZone={TZ}

@@ -251,7 +251,6 @@ export function ConsentTemplatesList() {
                             setPreview({
                               title: template.title,
                               sections: template.sections as ConsentSections,
-                              version: template.version,
                             })
                           }
                         >
@@ -330,7 +329,6 @@ export function ConsentTemplatesList() {
 interface ConsentPreviewDraft {
   title: string
   sections: ConsentSections
-  version?: number
 }
 
 /**
@@ -716,7 +714,6 @@ function ConsentSheet({ group }: { group: ConsentGroup | null }) {
     setPreview({
       title: values.title.trim(),
       sections: consentSectionsOf(values),
-      ...(template ? { version: template.version } : {}),
     })
   }
 

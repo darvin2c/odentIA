@@ -307,9 +307,9 @@ export function settingsPrimary(screen: keyof typeof SETTINGS_PRIMARY, can: Can,
 
 // --- Agente ---------------------------------------------------------------------------------
 
+// Lo que espera el sí de la persona vive en la Bandeja, no en una pestaña (ADR 0118).
 const AGENT_TABS = [
   { label: "Resumen", to: "/agent", key: "resumen", permission: "read" },
-  { label: "Esperan su sí", to: "/agent/pendientes", key: "pendientes", permission: "decide", phoneLast: true },
   { label: "Actividad", to: "/agent/actividad", key: "actividad", permission: "decide" },
   { label: "Aprender", to: "/agent/learn", key: "aprender", permission: "read" },
   { label: "Conocimiento", to: "/agent/knowledge", key: "conocimiento", permission: "write" },
@@ -317,9 +317,7 @@ const AGENT_TABS = [
 
 /** Cada pestaña aparece solo con el permiso que su ruta exige. Con una sola no hay pestañas. */
 export function agentTabsFor(can: Can) {
-  const visible = AGENT_TABS.filter((tab) =>
-    tab.permission === "decide" ? can("agent.decide") || can("agent.read") : tab.permission === "read" ? can("agent.read") : can("agent.write"),
-  )
+  const visible = AGENT_TABS.filter((tab) => (tab.permission === "read" ? can("agent.read") : can("agent.write")))
   return visible.length < 2 ? [] : visible
 }
 

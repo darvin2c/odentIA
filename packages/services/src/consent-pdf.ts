@@ -33,8 +33,17 @@ import type { Storage } from "./storage.js"
 
 type ConsentPrint = Awaited<ReturnType<typeof getConsentPrint>>
 
-/** El encabezado y las secciones de lo que se consiente: iguales firmado o por firmar. */
-function consentBody(kit: DocumentKit, data: ConsentPrint) {
+/** Entre la declaración y las firmas. */
+const SIGNATURES_GAP = 20
+/** Lo que ocupa el aviso «Menor de edad» con su separación, de sobra. */
+const MINOR_NOTE_HEIGHT = 60
+
+/**
+ * El encabezado y las secciones de lo que se consiente: iguales firmado o por firmar.
+ * `signaturesHeight`: lo que ocupan las firmas que siguen. La declaración pasa de hoja
+ * con ellas: una firma sola en otra hoja no dice qué se firmó.
+ */
+function consentBody(kit: DocumentKit, data: ConsentPrint, signaturesHeight = 0) {
   const { document: doc, patient } = data
   const sectionStyle = {
     face: "sansBold" as const,
@@ -47,10 +56,7 @@ function consentBody(kit: DocumentKit, data: ConsentPrint) {
   kit.text("Consentimiento informado", { size: SIZE.second, face: "sansSemi", tone: "gray" })
   kit.gap(1)
   kit.text(doc.titleSnapshot, { face: "serif", size: SIZE.titleBudget, leading: 1.2 })
-  kit.text([`Plantilla v${doc.templateVersion}`, doc.procedureRef].filter(Boolean).join(" · "), {
-    size: SIZE.second,
-    tone: "gray",
-  })
+  if (doc.procedureRef) kit.text(doc.procedureRef, { size: SIZE.second, tone: "gray" })
   kit.gap(12)
   kit.facts(
     [
@@ -90,12 +96,14 @@ function consentBody(kit: DocumentKit, data: ConsentPrint) {
     kit.text(doc.bodySnapshot, { size: SIZE.read })
   }
   kit.gap(16)
-  kit.panel({
+  const declaration = {
     title: "Declaración",
     // La que aceptó al firmar; lo firmado antes de copiarla, la de siempre.
     body: doc.declarationSnapshot ?? CONSENT_DECLARATION,
     size: SIZE.read,
-  })
+  }
+  if (signaturesHeight > 0) kit.ensure(kit.panelHeight(declaration) + SIGNATURES_GAP + signaturesHeight)
+  kit.panel(declaration)
 }
 
 function consentKit(data: ConsentPrint, clinic: DocumentClinic) {
@@ -140,8 +148,6 @@ export async function renderConsentPdf(
       detail: `${doc.revokerName ?? "-"} · ${doc.revokedAt ? dayTimeWords(doc.revokedAt, zone) : "-"} · Motivo: ${doc.revokeReason ?? "-"}`,
     })
   }
-  consentBody(kit, data)
-  kit.gap(20)
   const method = (doc.signatureMethod ?? "clinica") as keyof typeof CONSENT_SIGNATURE_WORDS
   const signerHeading = doc.signerKind === "representante" ? "Representante legal" : "Paciente"
   const signedAt = doc.signedAt ? `Firmó el ${dayTimeWords(doc.signedAt, zone)}` : ""
@@ -166,6 +172,15 @@ export async function renderConsentPdf(
     { text: doc.informedAt ? `Informó el ${dayTimeWords(doc.informedAt, zone)}` : "" },
     ...(professionalStrokes ? [] : [{ text: "Firmado electrónicamente" }]),
   ]
+  const signatures = professionalStrokes
+    ? [
+        { heading: signerHeading, strokes: strokesOf(doc.signatureData), lines: signerLines },
+        { heading: "Profesional que informa", strokes: professionalStrokes, lines: informerLines },
+      ]
+    : [{ heading: signerHeading, strokes: strokesOf(doc.signatureData), lines: signerLines }]
+  // En papel, la firma está en la hoja de la foto: aquí solo van los nombres.
+  consentBody(kit, data, method === "papel" ? 0 : kit.penSignaturesHeight(signatures))
+  kit.gap(SIGNATURES_GAP)
   if (method === "papel") {
     kit.subheading(signerHeading, { size: SIZE.table })
     for (const line of signerLines)
@@ -183,14 +198,9 @@ export async function renderConsentPdf(
         tone: line.strong ? "ink" : "gray",
       })
   } else if (professionalStrokes) {
-    kit.penSignatures([
-      { heading: signerHeading, strokes: strokesOf(doc.signatureData), lines: signerLines },
-      { heading: "Profesional que informa", strokes: professionalStrokes, lines: informerLines },
-    ])
+    kit.penSignatures(signatures)
   } else {
-    kit.penSignatures([
-      { heading: signerHeading, strokes: strokesOf(doc.signatureData), lines: signerLines },
-    ])
+    kit.penSignatures(signatures)
     kit.gap(12)
     kit.subheading("Profesional que informa", { size: SIZE.table })
     for (const line of informerLines)
@@ -266,14 +276,8 @@ export async function renderConsentPaperPdf(
 ): Promise<Uint8Array> {
   const { document: doc, patient } = data
   const kit = await consentKit(data, clinic)
-  consentBody(kit, data)
-  kit.gap(20)
   const minor = "minor" in patient && patient.minor === true
-  if (minor) {
-    kit.stateBox({ kind: "note", title: "Menor de edad", detail: "Firma su representante legal." })
-    kit.gap(10)
-  }
-  kit.penSignatures([
+  const signatures = [
     {
       heading: minor ? "Representante legal" : "Paciente",
       strokes: null,
@@ -290,7 +294,15 @@ export async function renderConsentPaperPdf(
         { text: "Fecha y hora" },
       ],
     },
-  ])
+  ]
+  // El aviso de menor va entre la declaración y las firmas: cuenta como parte de ellas.
+  consentBody(kit, data, kit.penSignaturesHeight(signatures) + (minor ? MINOR_NOTE_HEIGHT : 0))
+  kit.gap(SIGNATURES_GAP)
+  if (minor) {
+    kit.stateBox({ kind: "note", title: "Menor de edad", detail: "Firma su representante legal." })
+    kit.gap(10)
+  }
+  kit.penSignatures(signatures)
   return kit.finish()
 }
 
@@ -300,12 +312,11 @@ export async function renderConsentPaperPdf(
  */
 export async function renderConsentPreviewPdf(
   clinic: DocumentClinic,
-  draft: { title: string; sections: ConsentSections; body: string; version: number },
+  draft: { title: string; sections: ConsentSections; body: string },
 ): Promise<Uint8Array> {
   const sample = {
     document: {
       titleSnapshot: draft.title,
-      templateVersion: draft.version,
       procedureRef: null,
       sectionsSnapshot: draft.sections,
       bodySnapshot: draft.body,

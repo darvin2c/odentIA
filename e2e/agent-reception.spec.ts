@@ -1,3 +1,4 @@
+import { agentLesson } from "@odentia/db/schema/agent"
 import { member } from "@odentia/db/schema/auth"
 import type { Locator, Page } from "@playwright/test"
 import { and, eq } from "drizzle-orm"
@@ -50,8 +51,8 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   for (const name of ["Clío", "Argos"]) {
     await expect(agents.getByRole("listitem").filter({ hasText: name })).toContainText("Apagado")
   }
-  // Lo básico que falta se dice en la ficha de las preguntas sin respuesta: se responde en el mismo sitio.
-  await expect(page.getByRole("region", { name: "Necesita de ti" }).getByRole("link", { name: /Preguntas sin respuesta/ })).toContainText("preguntas básicas")
+  // Lo que solo sabe la clínica es opcional (ADR 0120): la ficha cuenta solo lo que no supo responder.
+  await expect(page.getByRole("region", { name: "Necesita de ti" }).getByRole("link", { name: /Preguntas sin respuesta/ })).toContainText("Encontró respuesta a todo lo que buscó.")
   await expect(page.getByRole("region", { name: "Cómo le fue esta semana" })).toContainText("Está apagado")
   // Un solo horario, el de recontacto (ADR 0084): para escribir primero; cuando la persona escribe, responde siempre.
   const recontact = page.getByRole("region", { name: "Horario de recontacto" })
@@ -70,6 +71,10 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await expect(turnOn).toContainText("Sin un canal conectado no le llega ningún mensaje.")
   await expect(turnOn.getByRole("link", { name: "Conectar un canal" })).toBeVisible()
   await expect(turnOn.getByRole("button", { name: "Encender a Sofi" })).toBeDisabled()
+  // Lo que dice sale de los datos: sin horario del equipo lo avisa y lleva a cargarlo, sin impedir encender.
+  await expect(turnOn).toContainText("Sabe tu horario y tus servicios")
+  await expect(turnOn).toContainText("Nadie del equipo tiene horario")
+  await expect(turnOn.getByRole("link", { name: "Cargar horarios" })).toHaveAttribute("href", /\/settings\/availability$/)
   await info.attach("encender-sin-canal", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await turnOn.getByRole("button", { name: "Ahora no" }).click()
   await expect(turnOn).toBeHidden()
@@ -156,7 +161,7 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   for (const [name, href] of [
     ["Respuestas oficiales", "/agent/knowledge"],
     ["Servicios y precios", "/services"],
-    ["Sedes y horarios", "/settings/branches"],
+    ["Horario y sedes", "/settings/availability"],
     ["Lo que aprendió de tus correcciones", "/agent/learn"],
   ] as const) {
     await expect(knows.getByRole("link", { name: new RegExp(`^${name}`) })).toHaveAttribute("href", new RegExp(`${href}$`))
@@ -184,6 +189,40 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await expect(knowsMust).toContainText("No ofrezcas descuentos ni promociones.")
   await expect(knowsMust).toContainText("Despídete recordando la dirección.")
   await expect(knowsMust.getByRole("tab", { name: /^Escritas por la clínica · 2/ })).toBeVisible()
+
+  // Le llegan todas en cada mensaje: hay un tope y se dice cuánto falta (ADR 0119).
+  await expect(knowsMust).toContainText("2 de 40 reglas.")
+  for (let index = 0; index < 38; index++) {
+    await call(page, "POST", "/api/agent/learning/guidance", org.slug, { body: `Regla de relleno ${index + 1}.` }, 201)
+  }
+  await gotoHydrated(page, tenant(org.slug, "/agent/recepcion"))
+  await expect(knowsMust).toContainText("40 de 40 reglas: para agregar otra, quita o une una.")
+  await knowsMust.getByRole("button", { name: "Agregar" }).first().click()
+  const fullForm = sideSurface(page, { name: "Agregar a lo que debe saber", exact: true })
+  await fullForm.getByLabel("Qué debe saber", { exact: true }).fill("Una más.")
+  await fullForm.getByRole("button", { name: "Guardar" }).click()
+  await expect(fullForm).toContainText("Ya hay 40 reglas: quita o une una antes de agregar otra")
+  await fullForm.getByRole("button", { name: "Cancelar" }).click()
+  await expect(fullForm).toBeHidden()
+  // Aprobar una regla nueva con el tope lleno pide elegir cuál reemplaza.
+  await fixtureDb.insert(agentLesson).values({
+    organizationId: org.id, kind: "regla", scope: "recepcion", title: "Saluda con el nombre de la clínica",
+    body: "Saluda con el nombre de la clínica.", failure: "otra_cosa", status: "propuesta", proposedBy: owner.user.id,
+  })
+  await gotoHydrated(page, tenant(org.slug, "/agent/learn"))
+  await page.getByRole("region", { name: /^Lecciones por aprobar/ }).getByRole("button", { name: /^Ver y aprobar/ }).click()
+  const proposedRule = sideSurface(page, { name: "Lección propuesta", exact: true })
+  await proposedRule.getByRole("button", { name: "Aprobar y activar" }).click()
+  const replace = page.getByRole("alertdialog", { name: "Ya hay 40 reglas" })
+  await expect(replace.getByRole("radio")).toHaveCount(40)
+  await replace.getByRole("radio", { name: "Regla de relleno 1." }).click()
+  await info.attach("reemplazar-una-regla", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+  await replace.getByRole("button", { name: "Reemplazar" }).click()
+  await expect(replace).toBeHidden()
+  await gotoHydrated(page, tenant(org.slug, "/agent/recepcion"))
+  await expect(knowsMust).toContainText("Saluda con el nombre de la clínica.")
+  await expect(knowsMust.getByRole("listitem").filter({ hasText: "Regla de relleno 1." })).toHaveCount(0)
+  await expect(knowsMust).toContainText("40 de 40 reglas")
 
   // La base: lo fijo no se edita; la voz sí, con su muestra.
   await behaves.getByRole("button", { name: "Editar la base" }).click()

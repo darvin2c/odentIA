@@ -1,0 +1,1 @@
+ALTER TABLE "agent_handoff" ADD COLUMN "kept_pending_at" timestamp with time zone;

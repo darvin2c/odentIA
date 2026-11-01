@@ -1,0 +1,2 @@
+ALTER TABLE "agent_search_item" DROP CONSTRAINT "agent_search_item_kind_check";--> statement-breakpoint
+ALTER TABLE "agent_search_item" ADD CONSTRAINT "agent_search_item_kind_check" CHECK ("agent_search_item"."kind" in ('servicio','promocion','profesional','respuesta','ejemplo'));

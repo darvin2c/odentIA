@@ -246,8 +246,8 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
 
   // Búsqueda: por documento, y abre la cita encontrada.
   await page.getByRole("button", { name: "Buscar la cita de un paciente" }).click()
-  await page.getByLabel("Paciente", { exact: true }).fill("45678901")
-  const found = page.getByRole("dialog").getByRole("button", { name: /Confirmada/ })
+  await page.getByRole("textbox", { name: "Buscar la cita de un paciente" }).fill("45678901")
+  const found = page.getByRole("region", { name: "Resultados de la búsqueda" }).getByRole("button", { name: /Confirmada/ })
   await expect(found).toBeVisible()
   await shot("buscar")
   await found.click()
@@ -324,39 +324,45 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
   // La lista de espera ya no existe: ni en la cabecera ni al cancelar.
   await expect(page.getByRole("button", { name: /espera/i })).toHaveCount(0)
 
-  // Lista y Semana.
-  await page.getByRole("tab", { name: "Lista", exact: true }).click()
-  await expect(page.getByRole("button", { name: /Todas/ })).toBeVisible()
+  // Agenda y Semana.
+  await page.getByRole("tab", { name: "Agenda", exact: true }).click()
+  await expect(page.getByRole("button", { name: /1\s*Cancelada$/ })).toBeVisible()
   await expect(page.getByText("Micaela Ríos").first()).toBeVisible()
-  await shot("lista-escritorio")
+  await shot("agenda-escritorio")
   await page.getByRole("tab", { name: "Semana", exact: true }).click()
-  await expect(page.getByRole("region", { name: /^Semana del/ })).toBeVisible()
+  // La semana es de todo el equipo; tocar un día abre la reserva con esa persona.
+  const teamWeek = page.getByRole("table", { name: /^Semana del/ })
+  await expect(teamWeek).toBeVisible()
   await shot("semana-escritorio")
+  await teamWeek.getByRole("button", { name: /Reservar$/ }).first().click()
+  await expect(page.getByRole("group", { name: /^Horas del/ })).toBeVisible()
+  await shot("semana-reserva")
+  await page.getByRole("button", { name: "Cancelar" }).click()
 
-  // Teléfono: un profesional a la vez, elegido en la hoja de abajo; lo libre se ve
-  // en la rejilla, no en la ficha.
+  // Teléfono: un profesional a la vez, en una fila que se desliza, con los días siempre a la vista.
   await page.setViewportSize({ width: 390, height: 844 })
   await page.getByRole("tab", { name: "Día", exact: true }).click()
-  await expect(page.getByRole("button", { name: /^Profesionales: / })).toContainText("Ana")
+  await expect(page.getByRole("group", { name: "Profesionales" })).toContainText("Ana")
+  await expect(page.getByRole("navigation", { name: "Días de la semana" }).first()).toBeVisible()
   await expect(page.getByRole("region", { name: /^Agenda del/ })).toBeVisible()
   await shot("dia-telefono")
-  await page.getByRole("button", { name: /^Profesionales: / }).click()
-  const sheet = page.getByRole("dialog", { name: "Días y profesionales" })
-  await expect(sheet.getByRole("group", { name: "Profesionales" })).toContainText("Ana")
-  await expect(sheet.getByRole("group", { name: "Profesionales" })).not.toContainText("Libre")
+  // Deslizar lleva al día siguiente: el mismo gesto que el dedo, con el scroll del panel.
+  const dayBefore = new URL(page.url()).searchParams.get("date")
+  await page.locator('[aria-label="Días"]').evaluate((node) => {
+    node.scrollLeft = node.clientWidth * 2
+  })
+  await expect.poll(() => new URL(page.url()).searchParams.get("date")).not.toBe(dayBefore)
+  await shot("dia-telefono-deslizado")
   // En teléfono también se puede ver por unidad dental.
-  await sheet.getByRole("button", { name: "Ver por unidad dental" }).click()
-  await expect(sheet.getByRole("group", { name: "Unidades dentales" })).toContainText("Unidad dental 1")
+  await page.getByRole("button", { name: "Ver por unidad dental" }).click()
+  await expect(page.getByRole("group", { name: "Unidades dentales" })).toContainText("Unidad dental 1")
   await shot("dia-telefono-unidades")
-  await sheet.getByRole("button", { name: "Ver por profesional" }).click()
-  await expect(sheet.getByRole("group", { name: "Profesionales" })).toBeVisible()
-  await page.keyboard.press("Escape")
-  await expect(sheet).toBeHidden()
-  await page.getByRole("tab", { name: "Lista", exact: true }).click()
-  await expect(page.getByRole("button", { name: /Todas/ })).toBeVisible()
-  await shot("lista-telefono")
+  await page.getByRole("button", { name: "Ver por profesional" }).click()
+  await expect(page.getByRole("group", { name: "Profesionales" })).toBeVisible()
+  await page.getByRole("tab", { name: "Agenda", exact: true }).click()
+  await expect(page.getByRole("heading", { name: /noviembre|diciembre|enero|febrero|marzo|abril|mayo|junio|julio|agosto|setiembre|octubre/i }).or(page.getByText("No hay citas en estos días")).first()).toBeVisible()
+  await shot("agenda-telefono")
   await page.getByRole("tab", { name: "Semana", exact: true }).click()
-  await expect(page.getByRole("button", { name: /Todas/ })).toHaveCount(0)
   await expect(page.getByText(/libres?/).first()).toBeVisible()
   await shot("semana-telefono")
 
@@ -418,6 +424,12 @@ test("agenda: lo que falta se dice con su acción, y la sede se elige en un solo
   await expect(
     page.getByRole("heading", { name: `Horario semanal de ${owner.user.name}` }),
   ).toBeVisible()
+  // El horario de atención de la sede sale de lo recién guardado: no se escribe aparte (ADR 0118).
+  const branchHours = page.getByRole("region", { name: "Horario de atención" })
+  await expect(branchHours).toContainText("Lunes")
+  await expect(branchHours).toContainText("15:00 – 19:00")
+  await branchHours.scrollIntoViewIfNeeded()
+  await shot("horario-de-la-sede")
   await expect(page.getByLabel("lunes, desde").first()).toContainText("09:00")
   await expect(page.getByLabel("lunes, desde")).toHaveCount(2)
   await expect(page.getByRole("heading", { name: "Unidades dentales" })).toBeVisible()
@@ -696,29 +708,54 @@ test("agenda: duración de una cita regular, paciente nuevo y urgencia fuera de 
   const rosaFicha = await call<{ patient: { birthDate: string | null; identityNeedsReview: boolean } }>(page, "GET", `/api/patients/${people[0]!.id}`, owner.org.slug)
   expect(rosaFicha.patient).toMatchObject({ birthDate: null, identityNeedsReview: false })
 
-  // Urgencia: fuera del horario no se reserva sin más; se pregunta y queda dicho.
+  // Excepción: fuera del horario se reserva con la advertencia a la vista, sin otra ventana.
   await openBooking(page)
   await page.getByLabel("Paciente", { exact: true }).fill("Rosa")
   await page.getByRole("option", { name: /Rosa Quispe/ }).click()
   // Se abre en el día que se estaba viendo: el primer hueco es el que sigue a su cita.
   await expect(block).toHaveAccessibleName(/^De 09:30 a 10:00 con /)
-  // Encima de su propia cita no deja reservar.
+  // Encima de otra cita lo advierte y el botón lo dice.
   await block.press("ArrowUp")
-  await expect(page.getByText(/ya está ocupado/)).toBeVisible()
-  // Reservar ahí no envía nada: lo dice junto a las horas y marca el bloque.
-  await page.getByRole("button", { name: /^Reservar (hoy|mañana|el )/ }).click()
-  await expect(page.getByRole("alert").filter({ hasText: /ya está ocupado/ })).toBeVisible()
-  await expect(block).toHaveAttribute("aria-invalid", "true")
-  // Antes de que abra, sí: como urgencia.
+  await expect(page.getByText(/tiene otra cita o está bloqueado/)).toBeVisible()
+  await expect(page.getByRole("button", { name: "Reservar igual" })).toBeVisible()
+  // Antes de que abra: fuera de horario, también a la vista.
   for (let step = 0; step < 5; step++) await block.press("ArrowUp")
   await expect(block).toHaveAccessibleName(/^De 08:00 a 08:30 con /)
-  await expect(page.getByText(/queda fuera del horario/)).toBeVisible()
-  await page.getByRole("button", { name: /^Reservar (hoy|mañana|el )/ }).click()
-  const urgent = page.getByRole("dialog", { name: /no atiende a esa hora/ })
-  await expect(urgent).toContainText("atiende de 09:00 a 13:00")
-  await shot("urgencia-fuera-de-horario")
-  await urgent.getByRole("button", { name: "Reservar igual a las 08:00" }).click()
+  const warned = page.getByRole("status").filter({ hasText: /Es fuera del horario/ })
+  await expect(warned).toContainText("atiende de 09:00 a 13:00")
+  await shot("fuera-de-horario")
+  await page.getByRole("button", { name: "Reservar fuera de horario" }).click()
   await expect(grid.getByRole("button", { name: /^Cita de Rosa Quispe/ })).toHaveCount(2)
+  // Queda marcada en la rejilla.
+  const marked = grid.getByRole("button", { name: /Atención: Fuera de horario/ })
+  await expect(marked).toBeVisible()
+  await shot("fuera-de-horario-marcada")
+  // Arrastrarla sigue fuera de horario: se confirma, se mueve y se puede deshacer.
+  const markedBox = await marked.boundingBox()
+  if (!markedBox) throw new Error("La cita no está en pantalla")
+  const dragX = markedBox.x + markedBox.width / 2
+  const dragY = markedBox.y + markedBox.height / 2
+  await page.mouse.move(dragX, dragY)
+  await page.mouse.down()
+  await page.mouse.move(dragX, dragY + 9, { steps: 4 })
+  await page.mouse.move(dragX, dragY + 18, { steps: 4 })
+  await page.mouse.up()
+  const confirmMove = page.getByRole("alertdialog", { name: /^¿Mover a las/ })
+  await expect(confirmMove).toContainText("fuera del horario")
+  await shot("mover-fuera-de-horario")
+  await confirmMove.getByRole("button", { name: "Mover" }).click()
+  const undoMove = page.getByRole("button", { name: "Deshacer" })
+  await expect(undoMove).toBeVisible()
+  await undoMove.click()
+  await expect(page.getByText(/de vuelta en su sitio/).first()).toBeVisible()
+  // Tocar lo gris abre la misma reserva, con la advertencia ya dicha.
+  await expect(async () => {
+    // A las 08:45: la cita de las 08:00 ya terminó y aún no abre.
+    await grid.locator("[data-closed]").first().click({ position: { x: 40, y: 54 } })
+    await expect(page.getByRole("button", { name: "Reservar fuera de horario" })).toBeVisible({ timeout: 1500 })
+  }).toPass()
+  await shot("reservar-en-lo-gris")
+  await page.getByRole("button", { name: "Cancelar" }).click()
   const from = new Date(Date.now() - 86_400_000).toISOString()
   const to = new Date(Date.now() + 16 * 86_400_000).toISOString()
   const rows = await call<{ startsAt: string; endsAt: string }[]>(
