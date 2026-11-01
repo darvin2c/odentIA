@@ -1173,25 +1173,25 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         return "Es paciente y su ficha dice otro nombre: por aquí no se cambia y quedó una tarea para que recepción la revise. Háblale por el nombre que te dijo, sin decirle cómo figura en su ficha. Si le das su enlace para reservar, dile que ahí puede corregir su nombre."
       }
       if (outcome !== "no_es_paciente") return "Es paciente: su nombre no se cambia por aquí. Úsalo tal como figura."
+      // Sus apellidos no se guardan sin sus nombres (la regla de la ficha): con los ya guardados, los completan.
+      if (family && !given) {
+        const [saved] = await inOrg((tx) =>
+          tx
+            .select({ givenNames: contact.givenNames })
+            .from(contact)
+            .where(and(eq(contact.organizationId, ctx.orgId), eq(contact.id, contactId)))
+            .limit(1),
+        )
+        if (!saved?.givenNames?.trim()) return "No se guardó nada: sus apellidos se guardan junto con sus nombres. Envía givenNames y familyName; si no sabes sus nombres, pídeselos."
+      }
       if (ctx.dryRun) return "[SIMULACIÓN] Se actualizaría el contacto."
-      // Se guarda lo que dijo: «Soy Carla» ya es saber con quién habla, y «Quispe» completa a quien ya dijo sus nombres.
+      // Se guarda lo que dijo: «Soy Carla» ya es saber con quién habla.
       const names = {
         ...(given ? { givenNames: given } : {}),
         ...(family ? { familyName: family } : {}),
         ...(displayName ? { displayName } : given ? { displayName: [given, family].filter(Boolean).join(" ") } : {}),
       }
-      await inOrg(async (tx) => {
-        // Solo el apellido: con sus nombres guardados, el visible se arma con ellos; sin ellos, se queda el que tiene.
-        const [saved] = family && !given && !displayName
-          ? await tx
-              .select({ givenNames: contact.givenNames, displayName: contact.displayName })
-              .from(contact)
-              .where(and(eq(contact.organizationId, ctx.orgId), eq(contact.id, contactId)))
-              .limit(1)
-          : []
-        const visible = saved && !saved.givenNames?.trim() ? { displayName: saved.displayName } : {}
-        await updateContact(tx, ctx.orgId, contactId, { ...names, ...visible }, { userId: null, origin: "agent" })
-      })
+      await inOrg((tx) => updateContact(tx, ctx.orgId, contactId, names, { userId: null, origin: "agent" }))
       await noteAction("datos", "anotó su nombre")
       return "Contacto actualizado."
     },

@@ -1665,7 +1665,7 @@ it("si un paciente dice que se llama distinto, su ficha no cambia y recepción r
   expect(await tasksOf()).toHaveLength(1)
 })
 
-it("update_contact guarda el apellido que le dijeron, sin perder el nombre que ya tenía", async () => {
+it("update_contact guarda el apellido de quien ya dijo sus nombres y, si faltan, dice que los pida", async () => {
   const { conversationId } = await ingestText("tg:apellido", "evt-apellido", "Hola")
   const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
@@ -1688,21 +1688,23 @@ it("update_contact guarda el apellido que le dijeron, sin perder el nombre que y
   await setNames({ displayName: "Anita", givenNames: null, familyName: null })
   expect(String(await tool.invoke({}))).toContain("No se guardó nada")
   expect(String(await simulated.invoke({}))).toContain("No se guardó nada")
-  // La simulación dice lo que haría y no cambia nada.
-  expect(String(await simulated.invoke({ familyName: "Quispe" }))).toContain("[SIMULACIÓN] Se actualizaría")
-  expect(await person()).toMatchObject({ displayName: "Anita", familyName: null })
 
-  // Sin nombres guardados, el apellido se guarda y el nombre visible no queda solo en «Quispe».
-  expect(String(await tool.invoke({ familyName: "Quispe" }))).toBe("Contacto actualizado.")
-  expect(await person()).toMatchObject({ displayName: "Anita", givenNames: null, familyName: "Quispe" })
+  // Sin sus nombres, el apellido no se guarda (la regla de la ficha) y lo dice: nada de fingir que se guardó.
+  for (const said of [{ familyName: "Quispe" }, { displayName: "Ana Quispe", familyName: "Quispe" }]) {
+    expect(String(await tool.invoke(said))).toContain("sus apellidos se guardan junto con sus nombres")
+    expect(String(await simulated.invoke(said))).toContain("sus apellidos se guardan junto con sus nombres")
+  }
+  expect(await person()).toMatchObject({ displayName: "Anita", givenNames: null, familyName: null })
 
-  // Con sus nombres guardados, el apellido los completa.
+  // Con sus nombres guardados, la simulación dice lo que haría sin cambiar nada, y el apellido los completa.
   await setNames({ displayName: "Carla", givenNames: "Carla", familyName: null })
+  expect(String(await simulated.invoke({ familyName: "Quispe" }))).toContain("[SIMULACIÓN] Se actualizaría")
+  expect(await person()).toMatchObject({ displayName: "Carla", familyName: null })
   expect(String(await tool.invoke({ familyName: "Quispe" }))).toBe("Contacto actualizado.")
   expect(await person()).toMatchObject({ displayName: "Carla Quispe", givenNames: "Carla", familyName: "Quispe" })
 
   // El nombre visible con el apellido aparte: se guardan los dos.
-  await setNames({ displayName: "Ana", givenNames: null, familyName: null })
+  await setNames({ displayName: "Ana", givenNames: "Ana", familyName: null })
   expect(String(await tool.invoke({ displayName: "Ana Rojas", familyName: "Rojas" }))).toBe("Contacto actualizado.")
   expect(await person()).toMatchObject({ displayName: "Ana Rojas", familyName: "Rojas" })
 
