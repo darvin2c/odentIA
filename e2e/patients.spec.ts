@@ -14,6 +14,7 @@ import {
   patientApiPath,
   setupAggregation,
 } from "./patients-fixture"
+import { putAndRemovePhoto } from "./patient-photo"
 import { surface } from "./surface"
 
 /** La persona (contacto) de un paciente: la dirección de su página (ADR 0029). */
@@ -121,6 +122,14 @@ test("paciente: ficha inicial y hallazgo visibles en el recorrido", async ({ own
       .filter({ hasText: /^Por decidir$/ })
       .first(),
   ).toBeVisible()
+})
+
+test("paciente: la foto se pone y se quita desde su página", async ({ owner }) => {
+  const ids = await buildClinicalBase(owner)
+  const { page } = owner
+  const personPath = `/people/${await personOf(page, owner.org.slug, ids.patientId)}`
+  await gotoHydrated(page, tenant(owner.org.slug, personPath))
+  await putAndRemovePhoto(page, "Lucía Quispe", "LQ")
 })
 
 test("paciente: responsabilidad y decisión de la propuesta", async ({ owner }) => {

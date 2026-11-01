@@ -12,6 +12,7 @@ import { simulateWhatsAppInbound } from "./channels"
 import { hostUrl, latidiaUrl, tenant } from "./env"
 import { chooseOption, expect, PASSWORD, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
+import { putAndRemovePhoto } from "./patient-photo"
 import { latestLinkFor } from "./mailpit"
 import { surface } from "./surface"
 
@@ -316,6 +317,34 @@ test("latidIA: lo que el agente buscó y no encontró se revisa en Aprender y se
   const knowledge = await request<{ data: Array<{ title: string; state: string; askForms: string[] }> }>(page, api, "GET", "/api/agent/knowledge", slug)
   expect(knowledge.body.data).toEqual([expect.objectContaining({ title: "Atención a recién nacidos", state: "vigente" })])
   expect(knowledge.body.data[0]?.askForms).toContain("recien nacidos")
+  await context.close()
+})
+
+test("latidIA: la foto del paciente se pone y se quita desde su página", async ({ browser, fixtureDb, passwordHash }) => {
+  const vela = await createVela(fixtureDb, passwordHash)
+  const context = await browser.newContext({ ignoreHTTPSErrors: true })
+  const page = await context.newPage()
+  await gotoHydrated(page, latidiaUrl("app", "/login"))
+  const { api, slug } = await openConsultorio(page, vela)
+  const patient = await request<{ data: { id: string } }>(page, api, "POST", "/api/patients", slug, {
+    submissionId: randomUUID(),
+    answers: {
+      demographics: { displayName: "Rosa Paredes", docType: "DNI", docNumber: "40112233", birthDate: "1980-03-14" },
+      respondent: "staff",
+      privacyAccepted: false,
+    },
+  })
+  expect(patient.status).toBe(201)
+  const person = await request<{ data: { personId: string } }>(
+    page,
+    api,
+    "GET",
+    `/api/people/by-patient/${patient.body.data.id}`,
+    slug,
+  )
+  expect(person.status).toBe(200)
+  await gotoHydrated(page, latidiaUrl(slug, `/people/${person.body.data.personId}`))
+  await putAndRemovePhoto(page, "Rosa Paredes", "RP")
   await context.close()
 })
 

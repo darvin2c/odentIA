@@ -70,6 +70,7 @@ import {
   savePatientHealth,
   scheduleFollowUpFromCoordination,
   setDiagnosisStatus,
+  removePatientAvatar,
   setPatientAvatar,
   setPatientContact,
   setPlanItemStatus,
@@ -1215,6 +1216,22 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
         await deps.storage.deleteAttachment(ref.objectKey).catch(() => {})
         throw e
       }
+    })
+  })
+  app.delete("/:id/avatar", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const patientId = c.req.param("id")
+    return runService(c, 200, async () => {
+      const { previousStorageKey } = await withOrgContext(deps.db, orgId, (tx) =>
+        removePatientAvatar(tx, orgId, userId, patientId),
+      )
+      // La ficha ya no apunta al archivo. Aquí borrarlo es lo que se pidió: si falla,
+      // queda dicho en el registro, con su clave, para poder retirarlo.
+      if (previousStorageKey)
+        await deps.storage.deleteAttachment(previousStorageKey).catch((error: unknown) => {
+          console.error(`No se pudo borrar del almacenamiento: ${previousStorageKey}`, error)
+        })
+      return { removed: previousStorageKey !== null }
     })
   })
   app.get("/:id/avatar-url", async (c) => {

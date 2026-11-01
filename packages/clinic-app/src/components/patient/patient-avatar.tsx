@@ -25,7 +25,8 @@ export function PatientAvatar({
   const canRead = usePermission("patients.read")
   const [open, setOpen] = useState(false)
   const photo = useQuery({
-    queryKey: ["patient-avatar", patientId],
+    // Con la clave de la foto: otra foto, o ninguna, nunca reutiliza una dirección ya firmada.
+    queryKey: ["patient-avatar", patientId, storageKey],
     queryFn: () => apiFetch<{ data: { url: string } }>(`/api/patients/${patientId}/avatar-url`),
     enabled: canRead && Boolean(storageKey),
     staleTime: 10 * 60_000,
@@ -58,7 +59,13 @@ export function PatientAvatar({
       >
         {avatar}
       </Button>
-      <AvatarDrawer patientId={patientId} name={name} open={open} onOpenChange={setOpen} />
+      <AvatarDrawer
+        patientId={patientId}
+        name={name}
+        hasPhoto={Boolean(storageKey)}
+        open={open}
+        onOpenChange={setOpen}
+      />
     </>
   )
 }
