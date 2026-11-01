@@ -537,7 +537,12 @@ for (const role of ["reception", "clinician", "cashier"] as const) {
     }
     if (role === "cashier") {
       await expect(areas).toHaveText(["Resumen", "Plan", "Cobros", "Datos"])
-      await expect(page.getByRole("button", { name: "Cobrar", exact: true })).toBeVisible()
+      // «Cobrar» de la cabecera abre el cobro, no solo la cuenta.
+      await page.getByRole("button", { name: "Cobrar", exact: true }).first().click()
+      const collect = surface(page, { name: "Cobrar", exact: true })
+      await expect(collect).toBeVisible()
+      await page.keyboard.press("Escape")
+      await expect(collect).toBeHidden()
       await expect(allergy).toHaveCount(0)
       expect(health.status).toBe(403)
       expect(account.status).toBe(200)

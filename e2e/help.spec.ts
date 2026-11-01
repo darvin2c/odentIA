@@ -131,8 +131,6 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   const mobileButton = page.getByRole("button", { name: "Más opciones", exact: true })
   expect((await mobileButton.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
   await mobileButton.click()
-  // «Agente» tampoco cabe en la fila del teléfono: va en el mismo menú.
-  await expect(page.getByRole("menuitem", { name: "Agente", exact: true })).toBeVisible()
   await page.getByRole("menuitem", { name: "Ayuda", exact: true }).click()
   const sheet = page.getByRole("dialog", { name: "Ayuda" })
   await sheet.getByRole("button", { name: "¿Cómo bloqueo un horario?" }).click()

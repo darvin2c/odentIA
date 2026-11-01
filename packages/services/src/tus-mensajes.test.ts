@@ -20,6 +20,7 @@ import {
   syncAppointmentReminders,
   syncBudgetFollowUps,
 } from "./automation.js"
+import { previewMessageRoute } from "./automation-routing.js"
 import { issuePersonalLink } from "./booking-links.js"
 import { applyTemplateCategories, assertTemplateSendable } from "./channel-templates.js"
 import { listRecategorizedMessages, resumeConversationBySystem } from "./clinic-messages.js"
@@ -285,7 +286,7 @@ describe("la categoría manda y los retomar piden el sí", () => {
     await run(c, (tx) =>
       applyTemplateCategories(tx, c.orgId, c.whatsappId, [{ externalId: null, name, language: "es", category: "marketing", previous: "utility" }]),
     )
-    expect(await run(c, (tx) => listRecategorizedMessages(tx, c.orgId))).toEqual([{ messageId: "recordatorio_cita", title: "Recordar la cita" }])
+    expect(await run(c, (tx) => listRecategorizedMessages(tx, c.orgId))).toMatchObject([{ messageId: "recordatorio_cita", title: "Recordar la cita", inReview: false, rejected: false }])
     await ruleOn(c, "recordatorio_cita")
     const cold = await person(c, "No escribió")
     const yes = await person(c, "Aceptó novedades")
@@ -306,6 +307,20 @@ describe("la categoría manda y los retomar piden el sí", () => {
     await expect(
       run(c, (tx) => assertTemplateSendable(tx, c.orgId, c.whatsappId, { name, language: "es", params: 3, category: "utility", contactId: cold.contactId })),
     ).rejects.toMatchObject({ code: "TEMPLATE_IS_PROMOTION" })
+  })
+
+  it("«Invitar a volver» se pide como promoción: no es un cambio de WhatsApp, pero con plantilla solo sale a quien aceptó novedades", async () => {
+    const spec = AUTOMATION_MESSAGES.invitar_a_volver
+    const c = await clinic({ approved: [spec.template] })
+    await run(c, (tx) =>
+      applyTemplateCategories(tx, c.orgId, c.whatsappId, [{ externalId: null, name: spec.template, language: "es", category: "marketing", previous: "utility" }]),
+    )
+    expect(await run(c, (tx) => listRecategorizedMessages(tx, c.orgId))).toEqual([])
+    const cold = await person(c, "No escribió")
+    const yes = await person(c, "Aceptó novedades")
+    await ownerDb.insert(automationConsent).values({ organizationId: c.orgId, contactId: yes.contactId, purpose: "novedades", status: "granted", source: "presencial" })
+    expect(await run(c, (tx) => previewMessageRoute(tx, c.orgId, cold.contactId, spec))).toMatchObject({ cause: "promocion" })
+    expect(await run(c, (tx) => previewMessageRoute(tx, c.orgId, yes.contactId, spec))).toMatchObject({ via: "plantilla" })
   })
 
   it("una plantilla de la cuenta con encabezado se ve, pero no se puede enviar", async () => {

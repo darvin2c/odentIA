@@ -14,7 +14,7 @@ import {
   countAwaitingContact,
   createHandoff,
   createProposal,
-  getAgentPanelSummary,
+  getAgentSummary,
   getAgentPatientSummary,
   listHandoffs,
 } from "./agent-operations.js"
@@ -112,14 +112,14 @@ it("el resumen cuenta lo que espera al paciente y los casos por atender, y no cu
     { organizationId: ORG, model: "prueba", status: "omitida", startedAt: new Date() },
   ])
   expect(await run((tx) => countAwaitingContact(tx, ORG))).toBe(1)
-  const summary = await run((tx) => getAgentPanelSummary(tx, ORG, RECEP))
+  const summary = await run((tx) => getAgentSummary(tx, ORG, RECEP))
   expect(summary).toMatchObject({
     awaitingContact: 1, openHandoffs: 1, interventionsToday: 2, failedToday: 2, enabled: false,
   })
   expect(summary).not.toHaveProperty("pendingProposals")
   // Lo que se resuelve dentro de Agente se cuenta solo para quien lo supervisa.
   expect(summary.toResolve).toBe(0)
-  const supervised = await run((tx) => getAgentPanelSummary(tx, ORG, OWNER, { supervises: true }))
+  const supervised = await run((tx) => getAgentSummary(tx, ORG, OWNER, { supervises: true }))
   expect(supervised.toResolve).toBe(await run((tx) => countAgentWork(tx, ORG)))
   expect(summary.timezone).toBeTruthy()
   expect(summary.locale).toBeTruthy()

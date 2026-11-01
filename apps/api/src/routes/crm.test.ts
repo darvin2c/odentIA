@@ -1127,13 +1127,13 @@ it("«Horario de recontacto», el número del menú y «Lo que el agente debe sa
   const saved = await owner.request("/agent/writing-hours", { method: "PUT", headers: json, body: JSON.stringify({ week }) })
   expect(saved.status).toBe(200)
   expect(((await saved.json()) as { data: { week: unknown } }).data.week).toEqual(week)
-  // Recepción decide por el agente: ve el panel con sus casos, pero el número del menú
-  // (lo que se resuelve dentro de Agente) es solo de quien lo supervisa (ADR 0118).
-  const panelOf = async (app: typeof owner) =>
-    ((await (await app.request("/agent/panel")).json()) as { data: { toResolve: number } }).data
-  expect(await panelOf(reception)).toMatchObject({ toResolve: 0 })
-  expect(typeof (await panelOf(owner)).toResolve).toBe("number")
-  expect((await member.request("/agent/panel")).status).toBe(403)
+  // Recepción decide por el agente, pero el número del menú (lo que se resuelve
+  // dentro de Agente) es solo de quien lo supervisa (ADR 0118).
+  const summaryOf = async (app: typeof owner) =>
+    ((await (await app.request("/agent/summary")).json()) as { data: { toResolve: number } }).data
+  expect(await summaryOf(reception)).toMatchObject({ toResolve: 0 })
+  expect(typeof (await summaryOf(owner)).toResolve).toBe("number")
+  expect((await member.request("/agent/summary")).status).toBe(403)
   // Lo que debe saber: lo escribe quien administra el agente.
   expect((await reception.request("/agent/learning/guidance", { method: "POST", headers: json, body: JSON.stringify({ body: "No ofrezcas descuentos." }) })).status).toBe(403)
   const added = await owner.request("/agent/learning/guidance", { method: "POST", headers: json, body: JSON.stringify({ body: "No ofrezcas descuentos." }) })

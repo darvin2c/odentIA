@@ -244,7 +244,7 @@ export function canAccessAny(role: string, permissions: readonly string[]): bool
 }
 
 /**
- * ¿Puede atender pacientes quien tiene `role`? La única definición (ADR 0125):
+ * ¿Puede atender pacientes quien tiene `role`? La única definición (ADR 0128):
  * quien escribe en la historia clínica. Decide a quién se le pone horario, se le
  * da una cita, se le deriva o se le adscribe a una especialidad. Ojo: poder
  * atender no es atender; quien atiende, además, tiene horario activo.
@@ -319,6 +319,8 @@ const PLATFORM_PATH_RULES: PlatformPathRule[] = [
   // Regla específica antes de la genérica: las aprobaciones operativas las
   // resuelve quien decide (`agent.decide`), no solo quien supervisa.
   { prefix: "/agent/pendientes", permissions: ["agent.read", "agent.decide"] },
+  // Lo que hizo el agente: quien decide por él también lo ve (recepción).
+  { prefix: "/agent/actividad", permissions: ["agent.read", "agent.decide"] },
   // La dirección vieja de «Pendientes» solo redirige; conserva la misma regla.
   { prefix: "/agent/approvals", permissions: ["agent.read", "agent.decide"] },
   { prefix: "/agent", permissions: ["agent.read"] },

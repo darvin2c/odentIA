@@ -1,5 +1,5 @@
 /**
- * Quién puede atender (ADR 0125). Hay dos preguntas y cada una tiene una sola
+ * Quién puede atender (ADR 0128). Hay dos preguntas y cada una tiene una sola
  * respuesta:
  *
  * - **Puede atender**: sigue en la clínica y su rol escribe en la historia

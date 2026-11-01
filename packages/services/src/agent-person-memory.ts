@@ -354,7 +354,7 @@ export async function getPersonMemory(
     if (first && visits.length === USUAL_BRANCH_VISITS && visits.every((visit) => visit.branchId === first.branchId)) {
       derived.push({
         label: "Sede",
-        text: `Suele atenderse en la sede ${first.branchName}`,
+        text: `Suele atenderse en ${/^sede\b/i.test(first.branchName) ? first.branchName : `la sede ${first.branchName}`}`,
         origin: `Por sus ${USUAL_BRANCH_VISITS} últimas citas`,
         managedIn: "agenda",
       })

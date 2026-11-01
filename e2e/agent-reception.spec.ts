@@ -94,14 +94,14 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   const knows = page.getByRole("region", { name: "Qué sabe" })
   const behaves = page.getByRole("region", { name: "Cómo se comporta" })
 
-  // Hoy: las cifras del resumen, por conversación. «Ver qué hizo» abre la actividad del agente.
+  // Hoy: las cifras del resumen, por conversación. «Ver qué hizo» lleva a la pestaña Actividad.
   await expect(today).toContainText("0 conversaciones atendidas")
   await expect(today).toContainText("0 citas reservadas")
   await expect(today).toContainText("0 pasadas a una persona")
-  await today.getByRole("button", { name: "Ver qué hizo" }).click()
-  await expect(page.getByRole("tab", { name: "Actividad" })).toHaveAttribute("aria-selected", "true")
-  await page.getByRole("button", { name: "Cerrar el panel del agente" }).click()
-  await expect(page.getByRole("tab", { name: "Actividad" })).toBeHidden()
+  await today.getByRole("link", { name: "Ver qué hizo" }).click()
+  await expect(page).toHaveURL(/\/agent\/actividad/)
+  await page.goBack()
+  await expect(today).toBeVisible()
 
   // Las dos funciones fijas se ven, sin interruptor.
   await expect(does.getByRole("listitem").filter({ hasText: "Ordenar el caso" })).toContainText("Siempre")

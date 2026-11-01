@@ -19,7 +19,7 @@ import { Check } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { HandoffUrgency } from "../../components/agent/handoff-badges"
 import { dueWords, formatDueAt, isOverdue } from "../../components/crm/crm-helpers"
-import { useCompleteTask } from "../../components/crm/resolve-preview"
+import { useCompleteTask } from "../../components/crm/complete-task"
 import { TaskDrawer } from "../../components/crm/task-drawer"
 import { PersonLink } from "../../components/person-link"
 import { TasksPageSkeleton, TasksSkeleton } from "../../components/skeletons/tasks"
@@ -279,7 +279,7 @@ function TasksPage() {
           No se pudo actualizar la tarea: {actionError ?? completion.error}
         </p>
       ) : null}
-      {completion.dialog}
+      
       <div className="flex flex-col gap-2">
         {/* Las vistas se excluyen entre sí: son pestañas, como en Pacientes. «Toda la clínica» acota cualquiera: es un filtro. */}
         <Tabs

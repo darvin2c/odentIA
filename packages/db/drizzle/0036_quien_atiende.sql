@@ -1,4 +1,4 @@
--- Un horario activo es de quien puede atender (ADR 0125). La agenda, Sofi, el enlace
+-- Un horario activo es de quien puede atender (ADR 0128). La agenda, Sofi, el enlace
 -- de reserva y el horario de la sede leen el horario activo, así que quien sale de la
 -- clínica o cambia a un rol que no atiende deja de ofrecerse aquí, sea cual sea la vía
 -- del cambio: el equipo, irse por su cuenta o la administración.

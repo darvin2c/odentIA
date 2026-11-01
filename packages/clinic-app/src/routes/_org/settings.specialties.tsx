@@ -288,7 +288,7 @@ function SpecialtyForm({
   onSaved: () => void
 }) {
   const specialty = target?.specialty ?? null
-  // Solo quien puede atender se adscribe a una especialidad (ADR 0125).
+  // Solo quien puede atender se adscribe a una especialidad (ADR 0128).
   const members = useOrgMembers().filter((member) => canAttend(member.role))
   const canOpenTeam = useCanOpen("/settings/team")
   const queryClient = useQueryClient()

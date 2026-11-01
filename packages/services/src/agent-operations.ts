@@ -3402,13 +3402,13 @@ export async function countAwaitingContact(tx: Db, orgId: string): Promise<numbe
   return row?.count ?? 0
 }
 
-export interface AgentPanelSummary {
+export interface AgentSummary {
   enabled: boolean
   /** Propuestas que esperan el sí del interlocutor; se ven, el equipo no las decide. */
   awaitingContact: number
   /**
-   * Casos que pasó el agente y esperan a quien mira: sin tomar o suyos. Va en
-   * el botón «Agente» de la cabecera, que abre el panel donde se toman.
+   * Casos que pasó el agente y esperan a quien mira: sin tomar o suyos. Cuentan
+   * en el número de «Inicio» del menú (`countWorkspaceWaiting`).
    */
   openHandoffs: number
   /**
@@ -3425,16 +3425,16 @@ export interface AgentPanelSummary {
 }
 
 /**
- * Resumen ligero para el botón y la cabecera del panel del agente: legible
+ * Resumen ligero del agente para quien atiende: legible
  * con `agent.decide` (recepción) sin exponer configuración ni modelo.
  * `supervises`: quien mira tiene `agent.read` y ve el menú «Agente».
  */
-export async function getAgentPanelSummary(
+export async function getAgentSummary(
   tx: Db,
   orgId: string,
   userId: string,
   opts: { supervises?: boolean } = {},
-): Promise<AgentPanelSummary> {
+): Promise<AgentSummary> {
   await expireDueProposals(tx, orgId)
   const { locale, timezone } = await getOrgLocale(tx, orgId)
   const [cfg] = await tx
@@ -3965,7 +3965,11 @@ export async function claimHandoff(
   const [actor] = await tx.select({ name: user.name }).from(user).where(eq(user.id, userId)).limit(1)
   const who = await topicPersonName(tx, orgId, claimed.contactId)
   const href = claimed.conversationId ? `/inbox?conversation=${claimed.conversationId}` : "/inbox"
-  if (before?.assigneeUserId && before.assigneeUserId !== target) {
+  // Quien ya no está en el equipo no recibe avisos: el tema pasa igual.
+  const [stillHere] = before?.assigneeUserId
+    ? await tx.select({ id: member.id }).from(member).where(and(eq(member.organizationId, orgId), eq(member.userId, before.assigneeUserId))).limit(1)
+    : []
+  if (before?.assigneeUserId && before.assigneeUserId !== target && stillHere) {
     await createWorkspaceNotification(tx, orgId, {
       userId: before.assigneeUserId,
       dedupeKey: `tema:${claimed.id}:tomado:${target}`,

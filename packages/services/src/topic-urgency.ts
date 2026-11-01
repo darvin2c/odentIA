@@ -11,7 +11,7 @@ import { addOpportuneMinutes, type MinuteRange, type OpportuneSchedule } from ".
  * que pasa con la clínica cerrada no cuenta: un tema del sábado a las 18:30 no
  * amanece en rojo el lunes; pasa a «Ahora» el lunes a las 11:00 si abre a las
  * 9:00. Se guarda en el tema (`urgent_at`) para que la Bandeja, Inicio y el
- * panel del agente digan lo mismo con una sola regla.
+ * Agente digan lo mismo con una sola regla.
  */
 export const TOPIC_URGENT_AFTER_MINUTES = 120
 

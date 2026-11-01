@@ -157,7 +157,7 @@ export function AgentGuidance({ canWrite }: { canWrite: boolean }) {
               <div className="flex flex-wrap items-center gap-3">
                 {item.conversationId ? (
                   <Link to="/inbox" search={{ conversation: item.conversationId }} className={LINK}>
-                    Ver conversación
+                    Ver la conversación
                   </Link>
                 ) : null}
                 {canWrite ? (

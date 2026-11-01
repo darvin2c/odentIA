@@ -21,7 +21,7 @@ import {
   type ReportQuery,
   spanLabel,
 } from "../../lib/reports"
-import { openBookingAnywhere, useAppointmentSaved } from "../agenda/schedule-host"
+import { openAppointmentAnywhere, openBookingAnywhere, useAppointmentSaved } from "../agenda/schedule-host"
 import { PatientQuickView, type QuickViewContext } from "../patient/patient-quick-view"
 import { DownloadButton, during } from "./report-parts"
 import { ADMIN_NAME } from "../../lib/agent-names"
@@ -43,7 +43,7 @@ interface ListCopy {
   how: (period: string, list: ReportList) => string
   where: { to: "/agenda" | "/people" | "/finance" | "/inbox"; label: string }
   /** La fila lleva a la sección del paciente donde se resuelve. */
-  patientTab?: "plan" | "cobros"
+  patientTab?: "plan" | "cuenta"
   /** «Ya tiene otra cita» solo importa donde alguien va a llamar. */
   showNext: boolean
   /** Cómo se dice que tiene una cita por venir cuando la fila no es una cita: no es «otra». */
@@ -141,8 +141,8 @@ const LISTS: Record<ReportListKey, ListCopy> = {
       paysAfterComing()
         ? `De quienes nos buscaron por primera vez en ${period}, los que vinieron y pagaron algo desde entonces: la consulta cobrada.`
         : `De quienes nos buscaron por primera vez en ${period}, los que aceptaron su presupuesto y pagaron algo desde entonces.`,
-    where: { to: "/finance", label: "Ir a Finanzas" },
-    patientTab: "cobros",
+    where: { to: "/finance", label: "Abrir Finanzas" },
+    patientTab: "cuenta",
     showNext: false,
   },
   funnel_lost_booked: {
@@ -188,8 +188,8 @@ const LISTS: Record<ReportListKey, ListCopy> = {
       paysAfterComing()
         ? `De quienes nos buscaron por primera vez en ${period}, los que vinieron y todavía no pagaron nada.`
         : `De quienes nos buscaron por primera vez en ${period}, los que aceptaron su presupuesto y todavía no pagaron nada.`,
-    where: { to: "/finance", label: "Ir a Finanzas" },
-    patientTab: "cobros",
+    where: { to: "/finance", label: "Abrir Finanzas" },
+    patientTab: "cuenta",
     showNext: false,
   },
   funnel_stopped: {
@@ -231,8 +231,8 @@ const LISTS: Record<ReportListKey, ListCopy> = {
     noun: { one: "persona", many: "personas" },
     how: (period, list) =>
       `${owedAt(period, list)}: lo que suman sus conceptos por cobrar menos lo que pagó y lo que tiene a favor, si su concepto sin pagar más antiguo se anotó hace más de 30 días. Es la misma regla de «Saldo vencido» de ${ADMIN_NAME}.`,
-    where: { to: "/finance", label: "Ir a Finanzas" },
-    patientTab: "cobros",
+    where: { to: "/finance", label: "Abrir Finanzas" },
+    patientTab: "cuenta",
     showNext: false,
   },
   agent_booked: {
@@ -276,8 +276,8 @@ function agingLists(): Record<"debts_age_0_30" | "debts_age_31_60" | "debts_age_
     noun: { one: "persona", many: "personas" },
     how: (period, list) =>
       `${owedAt(period, list)} y cuyo concepto sin pagar más antiguo se anotó ${range}. Lo que debe es lo que suman sus conceptos por cobrar menos lo que pagó y lo que tiene a favor, como en «Saldo vencido».`,
-    where: { to: "/finance", label: "Ir a Finanzas" },
-    patientTab: "cobros",
+    where: { to: "/finance", label: "Abrir Finanzas" },
+    patientTab: "cuenta",
     showNext: false,
   })
   return {
@@ -325,6 +325,7 @@ export function ReportListDrawer({ list, query, onClose }: { list: ReportListKey
     retry: false,
   })
   const canBook = usePermission("appointments.write")
+  const canReadAgenda = usePermission("appointments.read")
   // Lo reservado desde esta lista se queda en ella, marcado, hasta que se cierra: así se ve el avance.
   const [booked, setBooked] = useState<Record<string, AgendaAppointment>>({})
   const [quick, setQuick] = useState<QuickViewContext | null>(null)
@@ -352,6 +353,7 @@ export function ReportListDrawer({ list, query, onClose }: { list: ReportListKey
 
   if (list === null) return null
   const bookable = list === "upcoming_unbooked"
+  const appointmentRows = list === "no_show" || list === "cancelled" || list === "unmarked"
   const copy = LISTS[list]
   const data = report.data?.data
   const period = data ? spanLabel(data.period, data.locale) : ""
@@ -451,7 +453,12 @@ export function ReportListDrawer({ list, query, onClose }: { list: ReportListKey
                         ) : null}
                       </span>
                       <span className="flex min-w-0 flex-1 flex-col">
-                        {row.conversationId ? (
+                        {appointmentRows && canReadAgenda ? (
+                          // Quien no vino, canceló o quedó sin marcar: su cita, al lado.
+                          <Button type="button" variant="link" className="h-auto min-h-0 justify-start truncate p-0 text-left font-semibold" onClick={() => openAppointmentAnywhere(row.id)}>
+                            {row.personName}
+                          </Button>
+                        ) : row.conversationId ? (
                           <Link to="/inbox" search={{ conversation: row.conversationId }} className="truncate font-semibold hover:underline">
                             {row.personName}
                           </Link>

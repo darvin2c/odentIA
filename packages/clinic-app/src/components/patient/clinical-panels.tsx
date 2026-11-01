@@ -416,7 +416,7 @@ export function ControlesPanel({
                   className="h-auto w-fit p-0 text-sm"
                   onClick={() => row.appointment && openAppointmentAnywhere(row.appointment.id)}
                 >
-                  Ver cita
+                  Ver la cita
                 </Button>
               ) : null}
               {planItemLabel(row.planItemId) ? (

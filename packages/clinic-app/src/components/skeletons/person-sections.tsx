@@ -203,7 +203,7 @@ function AppointmentRows({ rows }: { rows: number }) {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Skeleton className="h-5 w-20 rounded-full" />
-            <WaitingButton>Ver cita</WaitingButton>
+            <WaitingButton>Ver la cita</WaitingButton>
           </div>
         </li>
       ))}

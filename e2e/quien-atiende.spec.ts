@@ -1,5 +1,5 @@
 /**
- * Quién atiende (ADR 0125), en pantalla: caja y recepción no salen como
+ * Quién atiende (ADR 0128), en pantalla: caja y recepción no salen como
  * profesionales ni el servidor las acepta, Equipo dice quién atiende y qué días,
  * y quien sale del equipo deja de ofrecerse con sus citas a la vista para
  * pasarlas a otra persona.

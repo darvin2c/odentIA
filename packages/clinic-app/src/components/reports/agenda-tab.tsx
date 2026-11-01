@@ -85,7 +85,7 @@ export function AgendaTab({ query, onOpenList, advice }: { query: ReportQuery; o
       <EmptyState
         title={`Sin citas ni horarios en ${spanLabel(data.period, data.locale)}`}
         description="Cuando los profesionales tengan su horario y la agenda sus citas, aquí verás cuánto se ocupa y cuándo queda libre."
-        actionLabel={canSchedules ? "Ir a los horarios" : canAgenda ? "Ir a la Agenda" : undefined}
+        actionLabel={canSchedules ? "Ir a los horarios" : canAgenda ? "Abrir la Agenda" : undefined}
         onAction={() => void navigate({ to: canSchedules ? "/settings/availability" : "/agenda" })}
       />
     )

@@ -30,6 +30,8 @@ export interface DetailSurfaceProps {
   /** En carga, el esqueleto del shell reemplaza a `children`. */
   isLoading?: boolean
   error?: string | null
+  /** Al abrir, el foco pasa al título (ver `SurfaceShell`). */
+  focusTitle?: boolean
   /** El contenedor (región o dialog) toma su nombre accesible de estos ids. */
   titleId: string
   descriptionId: string
@@ -59,6 +61,7 @@ export function DetailSurface({
   showClose = true,
   isLoading = false,
   error,
+  focusTitle,
   titleId,
   descriptionId,
 }: DetailSurfaceProps) {
@@ -74,6 +77,7 @@ export function DetailSurface({
       descriptionId={descriptionId}
       isLoading={isLoading}
       error={error}
+      focusTitle={focusTitle}
       bodyClassName="@container"
       onClose={showClose ? onClose : undefined}
       footer={

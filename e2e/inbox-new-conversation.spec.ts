@@ -122,7 +122,7 @@ test("«Nueva conversación»: crea a la persona con su número, abre su WhatsAp
   await expect(page).toHaveURL(new RegExp(`/inbox\\?conversation=${conversationId}`))
   await expect(page.getByText(/No se pudo registrar/)).toHaveCount(0)
   // Reservar no navega: se espera a que quede guardada (la cita aparece en su Contexto, ya como paciente).
-  await expect(reception.getByRole("button", { name: "Ver cita", disabled: false })).toBeVisible()
+  await expect(reception.getByRole("button", { name: "Ver la cita", disabled: false })).toBeVisible()
   await expect(reception.getByRole("button", { name: "Reservar cita", exact: true })).toHaveCount(1)
   const [registered] = await call<{ id: string; displayName: string }[]>(page, "GET", "/api/patients?q=Rosa&limit=5", org.slug)
   expect(registered?.displayName).toBe("Rosa Quispe")
@@ -184,7 +184,7 @@ test("«Contexto» de quien lleva a un paciente: la cita que anuncia la fila tam
 
   // Se ve la cita del hijo, cada reserva bajo el nombre de quien la recibe, y sin salir de la Bandeja.
   await expect(context.getByRole("heading", { name: "Lucas Salas", exact: true })).toBeVisible()
-  await expect(context.getByRole("button", { name: "Ver cita", exact: true })).toHaveCount(1)
+  await expect(context.getByRole("button", { name: "Ver la cita", exact: true })).toHaveCount(1)
   await expect(context.getByRole("heading", { name: "Marta Salas", exact: true })).toBeVisible()
   await expect(context).toContainText("Marta todavía no es paciente")
   await expect(page).toHaveURL(new RegExp(`/inbox\\?conversation=${conversationId}`))

@@ -494,6 +494,7 @@ function PersonPageRoute() {
         detail={patientDetail}
         summary={summary.data?.data}
         onSection={openTab}
+        onCollect={() => void navigate({ search: (prev) => ({ ...prev, tab: "cuenta", cobrar: true }) })}
       />
       {/* En Spam o bloqueada: el mismo aviso de la Bandeja, con «No es spam» o «Desbloquear» (ADR 0054). */}
       <ContactScreenBanner

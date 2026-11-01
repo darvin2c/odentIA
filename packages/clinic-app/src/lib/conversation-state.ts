@@ -1,6 +1,6 @@
 import { agentCaseRow, urgencyWord } from "./agent"
 import { channelLabel } from "./channels"
-import type { ConversationAttention, ConversationClosure, InboxTopic, ResolvePreview } from "./crm"
+import type { ConversationAttention, ConversationClosure, InboxTopic } from "./crm"
 import { timeAgo } from "./crm"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
 
@@ -223,24 +223,6 @@ export function closureBand(closure: ConversationClosure, receptionName: string,
   const when = whenWords(closure.at, now)
   const words = closureWords(closure, receptionName)
   return when ? `${words} · ${when}` : words
-}
-
-/**
- * Lo que dice la confirmación de «Resolver», con lo que devuelve
- * `resolve-preview`: a quién, si se le escribe la despedida y qué más se cierra.
- */
-export function resolveWords(
-  name: string,
-  preview: ResolvePreview,
-  receptionName: string,
-): { description: string; also: string[] } {
-  const description = preview.farewell
-    ? `Se cerrará la conversación con ${name}, se le enviará la despedida de la clínica y ${receptionName} volverá a atenderla si escribe de nuevo.`
-    : `Se cerrará la conversación con ${name} sin enviarle nada: ya no se le puede escribir, porque su último mensaje fue hace casi 24 horas o más.`
-  return {
-    description,
-    also: pendingWords(preview.handoffs, preview.pendingContact, "resolver", receptionName),
-  }
 }
 
 /** Lo que pasa con lo pendiente del hilo al resolver o al cerrar sin resolver. */

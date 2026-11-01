@@ -48,6 +48,8 @@ export type AppShellNavItem = {
   to: string
   icon: NavIcon
   badge?: string | number
+  /** Qué cuenta el número, para el lector de pantalla y el tooltip del menú en íconos. */
+  badgeLabel?: string
   external?: boolean
 }
 
@@ -169,7 +171,7 @@ function NavItemButton({
     <SidebarMenuItem>
       <SidebarMenuButton
         isActive={active}
-        tooltip={item.label}
+        tooltip={item.badge && item.badgeLabel ? `${item.label}: ${item.badge} ${item.badgeLabel}` : item.label}
         aria-current={active ? "page" : undefined}
         className={cn(
           "h-10 [&>svg]:text-muted-foreground",
@@ -198,9 +200,14 @@ function NavItemButton({
         {item.external ? <ExternalLink className="ml-auto size-3 opacity-60" /> : null}
       </SidebarMenuButton>
       {item.badge ? (
-        <SidebarMenuBadge className="top-2.5! h-5 min-w-5 rounded-full bg-secondary px-1.5 text-xs font-semibold">
-          {item.badge}
-        </SidebarMenuBadge>
+        <>
+          <SidebarMenuBadge className="top-2.5! h-5 min-w-5 rounded-full bg-secondary px-1.5 text-xs font-semibold">
+            {item.badge}
+            {item.badgeLabel ? <span className="sr-only"> {item.badgeLabel}</span> : null}
+          </SidebarMenuBadge>
+          {/* Con el menú en íconos el número no cabe: queda un punto sobre el icono. */}
+          <span aria-hidden className="pointer-events-none absolute top-1.5 right-1.5 hidden size-2 rounded-full bg-primary group-data-[collapsible=icon]:block" />
+        </>
       ) : null}
     </SidebarMenuItem>
   )

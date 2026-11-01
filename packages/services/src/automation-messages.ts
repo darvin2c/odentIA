@@ -301,7 +301,8 @@ export const AUTOMATION_MESSAGES: Record<AutomationMessageKey, AutomationMessage
   invitar_a_volver: {
     key: "invitar_a_volver",
     purpose: "seguimiento",
-    category: "utility",
+    // Invita a volver: se pide como lo que es, y WhatsApp no tiene nada que reclasificar.
+    category: "marketing",
     template: "odentia_invitar_a_volver_v1",
     body: "Hola, {{1}}. Hace más de seis meses que no te vemos en {{2}}. ¿Te buscamos un horario para tu control?",
     variables: ["persona", "clinica"],
@@ -515,6 +516,27 @@ export function withLinkLine(text: string, link: { title: string } | undefined, 
 
 /** Idioma de las plantillas: el de los textos del producto, sin variante de país. */
 export const AUTOMATION_MESSAGE_LANGUAGE = "es"
+
+/**
+ * El texto solo de aviso de cada mensaje de servicio, preparado por odentIA para
+ * cuando WhatsApp lo clasifica como publicidad: dice lo que pasó, sin invitar a
+ * nada. WhatsApp decide si lo acepta: la pantalla nunca lo da por hecho. Los datos
+ * van por nombre, como en cualquier texto que se edita.
+ */
+export const NOTICE_TEXTS: Partial<Record<string, string>> = {
+  recordatorio_cita: "Hola, {{persona}}. Este es el aviso de tu cita en {{lugar}}: {{citas}}. Para cambiarla, responde a este mensaje.",
+  recordatorio_cita_datos: "Hola, {{persona}}. Este es el aviso de tu cita en {{lugar}}: {{citas}}. Faltan tus datos para atenderte: complétalos antes de venir.",
+  recordatorio_cita_confirmada: "Hola, {{persona}}. Tu cita es {{citas}} en {{lugar}}. Para cambiarla, responde a este mensaje.",
+  cita_sin_llegar: "Hola, {{persona}}. Tu cita en {{lugar}} es {{citas}}. Si no puedes llegar, responde a este mensaje.",
+  recordatorio_control: "Hola, {{persona}}. En {{clinica}} tienes este control pendiente: {{control}}. Responde a este mensaje para agendarlo.",
+  seguimiento_no_asistencia: "Hola, {{persona}}. Tu cita del {{cita_pasada}} en {{clinica}} quedó sin atender. Responde a este mensaje para agendar otra.",
+  cita_cancelada: "Hola, {{persona}}. La cita del {{cita_pasada}} en {{clinica}} se canceló. Responde a este mensaje para agendar otra.",
+  aviso_cita_reservada: "Hola, {{persona}}. Tu cita en {{lugar}} quedó reservada: {{citas}}. Para cambiarla, responde a este mensaje.",
+  aviso_cita_reservada_datos: "Hola, {{persona}}. Tu cita en {{lugar}} es {{citas}}. Faltan tus datos: complétalos antes de venir.",
+  aviso_cita_movida: "Hola, {{persona}}. Tu cita en {{lugar}} cambió: ahora es {{citas}}. Si no te queda bien, responde a este mensaje.",
+  aviso_cita_cancelada: "Hola, {{persona}}. Tu cita del {{cita_pasada}} en {{clinica}} quedó cancelada. Responde a este mensaje para agendar otra.",
+  presupuesto_listo: "Hola, {{persona}}. Tu presupuesto ya está listo: {{resumen_presupuesto}}. Puedes verlo aquí.",
+}
 
 /**
  * WhatsApp rechaza una variable con saltos de línea, tabulaciones o más de

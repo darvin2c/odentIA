@@ -1,4 +1,4 @@
-# 0125 · Quién puede atender y quién atiende
+# 0128 · Quién puede atender y quién atiende
 
 Fecha: 2026-11-01 · Estado: aceptada · Precisa [0039](0039-un-solo-catalogo-de-especialidades.md) y [0118](0118-cada-numero-donde-se-resuelve.md)
 
@@ -34,4 +34,4 @@ El resultado se veía en la clínica: caja y recepción salían en «No atienden
 
 ## Referencias
 
-- `packages/auth/src/permissions.ts`, `packages/services/src/attending.ts`, migración `0034_quien_atiende.sql`, `packages/services/src/quien-atiende.test.ts`, `packages/clinic-app/src/routes/_org/settings.team.tsx`.
+- `packages/auth/src/permissions.ts`, `packages/services/src/attending.ts`, migración `0036_quien_atiende.sql`, `packages/services/src/quien-atiende.test.ts`, `packages/clinic-app/src/routes/_org/settings.team.tsx`.

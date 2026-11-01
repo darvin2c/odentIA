@@ -401,7 +401,7 @@ function ProfessionalDetailBody({
         <EmptyState
           title="Sin cobros este mes"
           description="Cuando se cobre algo de lo que atendió, aparece aquí con su comisión."
-          actionLabel={canFinance ? "Ir a Finanzas" : undefined}
+          actionLabel={canFinance ? "Abrir Finanzas" : undefined}
           onAction={() => void navigate({ to: "/finance" })}
         />
       ) : (

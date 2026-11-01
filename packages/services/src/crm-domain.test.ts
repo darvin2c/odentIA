@@ -25,7 +25,7 @@ import {
 } from "./opportunities.js"
 import { createPatient } from "./patients.js"
 import { ensureDefaultPipeline } from "./pipelines.js"
-import { completeTask, createTask, getTask, listTasks, updateTask } from "./tasks.js"
+import { completeTask, createTask, getTask, listTasks, pageTasks, updateTask } from "./tasks.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 
@@ -560,6 +560,17 @@ it("tareas: filtros por vínculos, vencidas y responsable", async () => {
     listTasks(tx, "org_a", { conversationId: conv }),
   )
   expect(byConv).toEqual([])
+  // Lo que dejó el sistema se decide en su fila de «Te espera»: ni Tareas ni Contexto le ofrecen «Hecha».
+  const fromSystem = await withOrgContext(appDb, "org_a", (tx) =>
+    createTask(tx, "org_a", { title: `Del sistema ${TAG}`, contactId: a.id, kind: "ficha_repetida", createdBy: "user" }),
+  )
+  const ofContact = await withOrgContext(appDb, "org_a", (tx) => listTasks(tx, "org_a", { contactId: a.id }))
+  expect(ofContact.map((t) => t.id)).not.toContain(fromSystem.id)
+  const paged = await withOrgContext(appDb, "org_a", (tx) =>
+    pageTasks(tx, "org_a", { q: TAG, viewer: { userId: ACTOR_A, all: true, areas: [] } }),
+  )
+  expect(paged.items.map((t) => t.id)).not.toContain(fromSystem.id)
+  expect(paged.items.map((t) => t.id)).toContain(overdue.id)
   const byAssignee = await withOrgContext(appDb, "org_a", (tx) =>
     listTasks(tx, "org_a", { assignee: ACTOR_A }),
   )
