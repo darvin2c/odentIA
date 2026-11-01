@@ -1,7 +1,7 @@
 import { ATTENDING_ROLES, canAttend, ORG_ROLES } from "@odentia/auth/permissions"
 import { withOrgContext } from "@odentia/db"
-import { seedOdentiaCatalog } from "@odentia/db/dental"
 import { member, user } from "@odentia/db/schema/auth"
+import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { professionalSchedule } from "@odentia/db/schema/availability"
 import { branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
@@ -23,6 +23,7 @@ import {
   createClinicalOrder,
   createFormResponse,
   createFormTemplate,
+  createSpecialty,
   listSpecialtiesOverview,
   publishFormTemplate,
   setProfessionalSpecialties,
@@ -33,8 +34,6 @@ import { createEncounter } from "./encounters.js"
 import { setCommissionRate } from "./finance.js"
 import { listProfessionalProfiles, setProfessionalProfile } from "./professional-profiles.js"
 import { secretsKeyFromEnv } from "./secrets.js"
-import { createService } from "./service-catalog.js"
-import { librarySpecialtyIds } from "./specialties.js"
 import { insertTestPatients } from "./test-patient.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -59,6 +58,7 @@ let centro = ""
 let roomId = ""
 let patientId = ""
 let tuesday = ""
+let specialtyId = ""
 
 function nextTuesday(): string {
   const now = new Date()
@@ -94,7 +94,6 @@ const backdateSchedule = (userId: string) =>
 beforeAll(async () => {
   tuesday = nextTuesday()
   await insertOrg(ownerDb, ORG, "quien-atiende")
-  await seedOdentiaCatalog(ownerDb)
   const [row] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "Centro", timezone: ZONE }).returning({ id: branch.id })
   centro = row!.id
   await hire(OWNER, "owner", "Dueña")
@@ -106,6 +105,7 @@ beforeAll(async () => {
   patientId = patient!.id
   await run(async (tx) => {
     roomId = (await createRoom(tx, ORG, { branchId: centro, name: "Unidad 1" })).id
+    specialtyId = (await createSpecialty(tx, ORG, OWNER, { name: "Endodoncia" })).id
     await setProfessionalSchedule(tx, ORG, OWNER, { branchId: centro, professionalUserId: DOCTOR, rules: MORNING })
   })
 })
@@ -141,7 +141,6 @@ describe("puede atender: el servidor lo exige", () => {
   })
 
   it("tampoco reciben especialidad, comisión, colegiatura ni un formulario a su nombre", async () => {
-    const specialtyId = await run(async (tx) => (await librarySpecialtyIds(tx, ORG, ["endodoncia"])).get("endodoncia")!)
     const templateId = await run(async (tx) => {
       const draft = await createFormTemplate(tx, ORG, OWNER, {
         title: "Evaluación",
@@ -321,11 +320,11 @@ describe("deja de atender: la base cierra su horario", () => {
   it("una especialidad ya no se queda con quien dejó de atender", async () => {
     const id = "qa-especialista"
     await hire(id, "clinician", "Dra. Especialista")
-    const specialtyId = await run(async (tx) => (await librarySpecialtyIds(tx, ORG, ["endodoncia"])).get("endodoncia")!)
-    const serviceId = await run(
-      async (tx) =>
-        (await createService(tx, ORG, OWNER, { name: "Endodoncia", specialtyId, scope: "tooth", priceCents: 45000, durationMin: 60, officialCode: "D3310" })).id,
-    )
+    const [service] = await ownerDb
+      .insert(serviceCatalog)
+      .values({ organizationId: ORG, name: "Endodoncia", source: "custom", priceCents: 45000, currency: "PEN", durationMin: 60, specialtyId })
+      .returning({ id: serviceCatalog.id })
+    const serviceId = service!.id
     await run((tx) => setProfessionalSchedule(tx, ORG, OWNER, { branchId: centro, professionalUserId: id, rules: MORNING }))
     await run((tx) => setSpecialtyProfessionals(tx, ORG, OWNER, specialtyId, [id]))
     const offeredFor = async () =>
