@@ -1,7 +1,9 @@
 process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 
 import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
+import { patient } from "@odentia/db/schema/clinical"
 import { contactIdentity, conversation } from "@odentia/db/schema/crm"
+import { auditEvent } from "@odentia/db/schema/org"
 import {
   createConnection,
   createContact,
@@ -11,12 +13,12 @@ import {
   savePatientRegistrationConfig,
   secretsKeyFromEnv,
 } from "@odentia/services"
-import { sql } from "drizzle-orm"
+import { and, eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import type { Context } from "hono"
 import { Hono, type Next } from "hono"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
-import { afterAll, beforeAll, expect, it } from "vitest"
+import { afterAll, beforeAll, expect, it, vi } from "vitest"
 import { createDiagnosisCodesRoute } from "./diagnosis-codes.js"
 import type { CrmDeps } from "./helpers.js"
 import { createPatientsRoute } from "./patients.js"
@@ -692,6 +694,82 @@ it("avatar privado: subida y URL firmada; rechaza tipo y tamaño inválidos", as
   expect(
     (await app.request(`/patients/${p.id}/avatar`, { method: "POST", body: huge })).status,
   ).toBe(400)
+})
+
+it("quitar el avatar: solo con permiso, borra el archivo, audita y repetirlo no hace nada", async () => {
+  const app = buildApp("admin")
+  const p = await withOrgContext(appDb, "org_a", (tx) =>
+    createPatient(tx, "org_a", "u-1", { displayName: "Con foto" }),
+  )
+  const path = `/patients/${p.id}/avatar`
+  const image = new FormData()
+  image.set(
+    "file",
+    new File([new Uint8Array([255, 216, 255, 217])], "portrait.jpg", { type: "image/jpeg" }),
+  )
+  expect((await app.request(path, { method: "POST", body: image })).status).toBe(201)
+  const stored = async () => {
+    const [row] = await ownerDb
+      .select({ key: patient.avatarStorageKey })
+      .from(patient)
+      .where(eq(patient.id, p.id))
+    return row?.key
+  }
+  const key = await stored()
+  expect(key).toEqual(expect.stringContaining("/avatar/"))
+  const deleted = vi.spyOn(storageStub, "deleteAttachment")
+
+  // Caja lee la ficha pero no la cambia: la foto sigue y el archivo también.
+  expect((await buildApp("cashier").request(path, { method: "DELETE" })).status).toBe(403)
+  expect(await stored()).toBe(key)
+  expect(deleted).not.toHaveBeenCalled()
+
+  const removed = await app.request(path, { method: "DELETE" })
+  expect(removed.status).toBe(200)
+  expect(await removed.json()).toMatchObject({ data: { removed: true } })
+  expect(await stored()).toBeNull()
+  expect(deleted).toHaveBeenCalledExactlyOnceWith(key)
+  const url = await app.request(`/patients/${p.id}/avatar-url`)
+  expect(url.status).toBe(404)
+  expect(await url.json()).toMatchObject({ error: { code: "NO_AVATAR" } })
+
+  // Otra pestaña que aún la veía: responde bien sin borrar ni auditar otra vez.
+  const again = await app.request(path, { method: "DELETE" })
+  expect(again.status).toBe(200)
+  expect(await again.json()).toMatchObject({ data: { removed: false } })
+  expect(deleted).toHaveBeenCalledTimes(1)
+  const audited = await ownerDb
+    .select({ id: auditEvent.id })
+    .from(auditEvent)
+    .where(and(eq(auditEvent.entityId, p.id), eq(auditEvent.action, "patient.avatar_removed")))
+  expect(audited).toHaveLength(1)
+  deleted.mockRestore()
+})
+
+it("quitar el avatar: si borrar el archivo falla, la ficha queda sin foto y el fallo se registra", async () => {
+  const app = buildApp("admin")
+  const p = await withOrgContext(appDb, "org_a", (tx) =>
+    createPatient(tx, "org_a", "u-1", { displayName: "Almacenamiento caído" }),
+  )
+  const path = `/patients/${p.id}/avatar`
+  const image = new FormData()
+  image.set(
+    "file",
+    new File([new Uint8Array([255, 216, 255, 217])], "portrait.jpg", { type: "image/jpeg" }),
+  )
+  expect((await app.request(path, { method: "POST", body: image })).status).toBe(201)
+  const deleted = vi.spyOn(storageStub, "deleteAttachment").mockRejectedValueOnce(new Error("caído"))
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {})
+
+  const removed = await app.request(path, { method: "DELETE" })
+  expect(removed.status).toBe(200)
+  expect((await app.request(`/patients/${p.id}/avatar-url`)).status).toBe(404)
+  expect(logged).toHaveBeenCalledWith(
+    expect.stringContaining(`/${p.id}/avatar/`),
+    expect.objectContaining({ message: "caído" }),
+  )
+  deleted.mockRestore()
+  logged.mockRestore()
 })
 
 it("filiación PATCH edita el nombre del paciente y el de su propia persona", async () => {

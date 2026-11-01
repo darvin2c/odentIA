@@ -42,6 +42,35 @@ it("la pregunta de novedades lleva el nombre de la clínica y su trato; sin nomb
   expect(isGeneralPermissionQuestion("¿Te podemos escribir mañana?")).toBe(false)
 })
 
+it("cada botón de cada mensaje lleva su propio id y se lee de vuelta; los ya enviados se siguen leyendo", async () => {
+  const { AUTOMATION_MESSAGES, parseReplyId, replyButtons, replyId } = await import("./automation-messages.js")
+  const job = "cefd3697-35fd-4a6f-bdcf-84021ecbaf21"
+  for (const spec of Object.values(AUTOMATION_MESSAGES)) {
+    const buttons = replyButtons(spec.buttons, job)
+    expect(new Set(buttons.map((button) => button.id)).size, spec.key).toBe(buttons.length)
+    expect(new Set(buttons.map((button) => button.title)).size, spec.key).toBe(buttons.length)
+    expect(buttons.map((button) => parseReplyId(button.id)), spec.key).toEqual(spec.buttons.map((button) => ({ action: button.action, jobId: job })))
+  }
+  // Dos que hacen lo mismo: el primero conserva el id de siempre.
+  expect(replyButtons(AUTOMATION_MESSAGES.cita_sin_llegar.buttons, job).map((button) => button.id)).toEqual([
+    replyId("responder", job),
+    `${replyId("responder", job)}:2`,
+    replyId("baja", job),
+  ])
+  for (const bad of [`${replyId("responder", job)}:x`, `${replyId("responder", job)}:1`, `${replyId("responder", job)}:4`, `${replyId("responder", job)}:2:3`, "odentia:responder:j1"]) expect(parseReplyId(bad), bad).toBeNull()
+})
+
+it("lo que no salió dice de quién fue y qué hacer; el motivo de Meta tal cual no llega a la clínica", async () => {
+  const { deliveryNoteOf } = await import("./conversations.js")
+  const rejected = deliveryNoteOf("failed", "WhatsApp send falló: 400 (#131009) Parameter value is not valid")
+  expect(rejected).toBe("No se entregó: el canal no lo aceptó. Si es importante, avísale por otra vía.")
+  expect(deliveryNoteOf("failed", null)).toBe(rejected)
+  // Lo que falló antes de salir no fue del canal.
+  expect(deliveryNoteOf("failed", "interno: Mensaje media sin adjunto válido")).toBe("No se entregó: el sistema no pudo enviarlo. Si es importante, avísale por otra vía.")
+  expect(deliveryNoteOf("failed", "connection-disabled")).toBe("No se entregó: la conexión del canal estaba desactivada.")
+  expect(deliveryNoteOf("delivered", null)).toBeNull()
+})
+
 it("el recordatorio de una cita confirmada no pide confirmar y no termina en un dato", async () => {
   const { AUTOMATION_MESSAGES, REMINDER_CONFIRMED_KEY, renderMessage } = await import("./automation-messages.js")
   const spec = AUTOMATION_MESSAGES[REMINDER_CONFIRMED_KEY]
