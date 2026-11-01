@@ -248,7 +248,7 @@ export function WhatsAppConnection({
     setSurface({ kind: "message", id, opening: openings.current })
   }
 
-  // «Cambiar el texto» desde «Te espera»: el mensaje se abre una sola vez al llegar.
+  // «Cambiar el texto» o «Editar» desde el panel de «Te espera»: el mensaje se abre una sola vez al llegar.
   const openedInitial = useRef(false)
   useEffect(() => {
     if (openedInitial.current || !initialMessageId || !items) return

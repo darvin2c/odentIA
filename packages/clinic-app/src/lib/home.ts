@@ -5,7 +5,7 @@
  * en este archivo.
  */
 import { formatMoney } from "@odentia/clinical"
-import { agentCaseRow, urgencyWord } from "./agent"
+import { agentCaseRow } from "./agent"
 import { ADMIN_NAME, withReceptionName } from "./agent-names"
 import { channelLabel } from "./channels"
 import { dayWords } from "./data-requests"
@@ -13,8 +13,8 @@ import { timeAgo } from "./crm"
 import { dayKeyOf, daysBetween, formatClock, formatWeekdayDay } from "./finance-cash"
 import type { WaitingRow, WorkspaceTodaySummary } from "./workspace"
 
-/** Filas de «Te espera» a la vista en teléfono; el resto se abre con «Ver las otras N». */
-export const PHONE_ROWS = 5
+/** Filas de «Hoy» a la vista en teléfono; el resto se abre con «Ver los otros N de hoy». */
+export const PHONE_ROWS = 3
 
 /** Lo que pidió, dicho en la fila de «Te espera»: «Rosa Quispe pidió una copia de su historia». */
 const DATA_REQUEST_PHRASE = {
@@ -84,85 +84,91 @@ function listed(parts: string[]): string {
   return `${parts.slice(0, -1).join(", ")} y ${parts[parts.length - 1]}`
 }
 
-/** Título, detalle y acción de una fila de «Te espera». */
-export function waitingText(row: WaitingRow, context: HomeTextContext): { title: string; detail: string; action: string } {
+/** Lo que se escribe en una fila: quién, qué pidió o qué pasa, lo demás y su único botón. */
+export interface WaitingText {
+  title: string
+  /** Lo que pidió o lo que pasa, en una frase. */
+  ask?: string | null
+  detail: string
+  /** Lo que dice su botón; vacío si quien mira no puede hacer nada (lo tiene otra persona). */
+  action: string
+}
+
+/** Lo que dice cada fila de «Te espera». */
+export function waitingText(row: WaitingRow, context: HomeTextContext): WaitingText {
   switch (row.kind) {
     case "registrationDone":
       return {
-        title: `${row.patientName} terminó su registro`,
-        detail: joined([
-          `Por su enlace ${ago(row.sentAt)}`,
-          `Tiene cita hoy a las ${formatClock(row.startsAt, context.locale, context.timezone)}${row.professionalName ? ` con ${row.professionalName}` : ""}`,
-        ]),
-        action: "Ver la cita",
+        title: row.patientName,
+        ask: "Terminó su registro",
+        detail: `Tiene cita hoy a las ${formatClock(row.startsAt, context.locale, context.timezone)}${row.professionalName ? ` con ${row.professionalName}` : ""}`,
+        action: "Llegó",
       }
     case "staleEncounter": {
       const missing = row.missing.map((key) => CLOSING_WORDS[key] ?? key)
       return {
-        title: `La atención de ${row.patientName} quedó sin cerrar`,
-        detail: joined([
-          `${daysAgo(row.startedAt, context)} ${formatClock(row.startedAt, context.locale, context.timezone)}`,
-          missing.length > 0 ? `le falta ${listed(missing)}` : "lista para firmar",
-        ]),
-        action: "Continuar la atención",
+        title: row.patientName,
+        ask: `Su atención de ${daysAgo(row.startedAt, context)} ${formatClock(row.startedAt, context.locale, context.timezone)} quedó sin firmar`,
+        detail: missing.length > 0 ? `Falta ${listed(missing)}` : "Lista para firmar",
+        action: "Revisar",
       }
     }
     case "case":
       return {
-        // El motivo lo escribe el servidor y nombra a «Sofi».
-        title: withReceptionName(row.contactName ? `${row.contactName} · ${row.reason}` : row.reason, context.receptionName),
-        // Un solo nombre y una sola escala: «Te lo pasó Sofi hace 25 min · Ahora».
-        // «Ahora» lo dice el servidor (decisión 1 del pulido de la Bandeja).
-        detail: joined([`${agentCaseRow(context.receptionName)} ${ago(row.createdAt)}`, urgencyWord(row.urgent ? "alta" : row.priority), row.channel ? channelLabel(row.channel) : null]),
-        action: !row.conversationId ? "Ver la tarea" : row.canReply ? "Responder" : row.unclaimed ? "Tomar este tema" : "Ver el caso",
+        title: row.contactName ?? withReceptionName(row.reason, context.receptionName),
+        // Lo que preguntó dice más que el motivo; el motivo lo escribe el servidor y nombra a «Sofi».
+        ask: row.quote ?? (row.contactName ? withReceptionName(row.reason, context.receptionName) : null),
+        // «Te lo pasó Sofi hace 25 min · WhatsApp»; la urgencia ya la dice el grupo.
+        detail: joined([`${agentCaseRow(context.receptionName)} ${ago(row.createdAt)}`, row.channel ? channelLabel(row.channel) : null, row.assigneeName ? `Con ${row.assigneeName}` : null]),
+        action: !row.conversationId ? "Ver la tarea" : row.canReply ? "Responder" : row.windowClosed && !row.assigneeName ? "Escribirle" : row.assigneeName ? "" : "Ver el caso",
+      }
+    case "person":
+      return {
+        title: row.contactName ?? "Persona sin nombre",
+        ask: row.quote,
+        detail: joined([`Escribió ${ago(row.since)}`, row.channel ? channelLabel(row.channel) : null]),
+        action: row.windowClosed ? "Escribirle" : "Responder",
       }
     case "unconfirmed":
       // Quien no recibe recordatorios se llama el día antes (ADR 0040).
-      if (row.why === "sin_recordatorios") {
-        return {
-          title: `${row.patientName} no recibe recordatorios: llámala para confirmar su cita de mañana ${formatClock(row.startsAt, context.locale, context.timezone)}`,
-          detail: joined([row.phone, row.serviceName, row.branchName]),
-          action: "Ver la cita",
-        }
-      }
       return {
-        title: `${row.patientName} no confirmó · llamar`,
-        detail: joined([row.phone, `Cita ${appointmentWhen(row.startsAt, context)}`, row.serviceName, row.branchName]),
-        action: "Ver la cita",
+        title: row.patientName,
+        ask:
+          row.why === "sin_recordatorios"
+            ? `No recibe recordatorios: confirma su cita de ${appointmentWhen(row.startsAt, context)}`
+            : `No confirmó su cita de ${appointmentWhen(row.startsAt, context)}`,
+        detail: joined([row.phone, row.serviceName, row.branchName]),
+        action: "Llamar",
       }
     case "unclosed": {
-      // «de ayer 10:00», «de hace 3 días 15:30»: sin cerrar, la cita no cuenta ni como atendida ni como «no vino».
-      const day = daysAgo(row.startsAt, context)
+      // Sin cerrar, la cita no cuenta ni como atendida ni como «no vino».
       const who = context.canAttend === false && row.professionalName ? `Si vino, la registra ${row.professionalName}` : row.professionalName
       return {
-        title: `La cita de ${row.patientName} de ${day} ${formatClock(row.startsAt, context.locale, context.timezone)} quedó sin cerrar`,
-        detail: joined([who, row.serviceName, row.branchName]),
-        action: "Ver la cita",
+        title: row.patientName,
+        ask: `Su cita de ${daysAgo(row.startsAt, context)} a las ${formatClock(row.startsAt, context.locale, context.timezone)} quedó sin cerrar`,
+        detail: joined([who, row.serviceName]),
+        action: "¿Vino?",
       }
     }
     case "acceptedUnbooked":
       return {
         title: plural(row.patients, "persona aceptó su presupuesto y no tiene cita", "personas aceptaron su presupuesto y no tienen cita"),
-        detail: `${formatMoney(row.cents, row.currency, context.locale)} aceptados por hacer`,
-        action: "Ver la lista",
-      }
-    case "conversations":
-      return {
-        title: row.waiting === 1 ? "1 persona espera respuesta" : `${row.waiting} personas esperan respuesta`,
-        detail: row.oldestAt ? `${row.waiting === 1 ? "Escribió" : "La más antigua,"} ${ago(row.oldestAt)}` : "Sin responder en la Bandeja",
-        action: "Abrir la Bandeja",
+        detail: `${formatMoney(row.cents, row.currency, context.locale)} por hacer`,
+        action: "Agendar",
       }
     case "stillOpen":
-      return {
-        title: row.total === 1 && row.contactName
-          ? `La conversación con ${row.contactName} sigue abierta`
-          : `${row.total} conversaciones siguen abiertas`,
-        detail: joined([
-          row.quietSince ? `Sin mensajes desde ${ago(row.quietSince)}` : null,
-          row.total === 1 ? "escríbele o ciérrala" : "escríbeles o ciérralas",
-        ]),
-        action: row.total === 1 ? "Ver la conversación" : "Abrir la Bandeja",
-      }
+      return row.total === 1 && row.contactName
+        ? {
+            title: row.contactName,
+            ask: "Su conversación sigue abierta",
+            detail: joined([row.quietSince ? `Sin mensajes desde ${ago(row.quietSince)}` : null, "escríbele o ciérrala"]),
+            action: "Revisar",
+          }
+        : {
+            title: `${row.total} conversaciones siguen abiertas`,
+            detail: joined([row.quietSince ? `Sin mensajes desde ${ago(row.quietSince)}` : null, "escríbeles o ciérralas"]),
+            action: "Abrir la Bandeja",
+          }
     case "task":
       return {
         title: row.title,
@@ -179,7 +185,7 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
         title: row.title,
         // Dice quién lo haría si se prende: Argos (con sus líneas) o una persona del equipo.
         detail: joined([`Lo recomienda ${ADMIN_NAME}`, row.actor === "agente" ? `puede escribirles ${context.receptionName}` : "le tocaría a tu equipo", row.detail]),
-        action: row.actor === "agente" ? "Ver la propuesta" : "Ver la lista",
+        action: "Ver",
       }
     case "unreached":
       return {
@@ -193,58 +199,57 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
         detail: row.oldestPresentedAt
           ? `${row.total === 1 ? "Se presentó" : "El más antiguo se presentó"} ${daysAgo(row.oldestPresentedAt, context)}`
           : "Aún sin fecha de presentación",
-        action: "Ver cuáles",
+        action: "Ver",
       }
     case "unsentBudget":
       return {
-        title: `Presupuesto de ${row.patientName} sin enviar`,
+        title: row.patientName,
+        ask: "Su presupuesto sigue sin enviar",
         detail: joined([
           `Armado ${daysAgo(row.since, context)}`,
           plural(row.itemCount, "tratamiento", "tratamientos"),
           row.totalCents != null ? formatMoney(row.totalCents, row.currency, context.locale) : null,
           row.options > 1 ? `${row.options} opciones` : null,
         ]),
-        action: "Ver el presupuesto",
+        action: "Enviar",
       }
     case "possibleDuplicate":
-      if (row.source === "registro" && row.held) {
-        return {
-          title: `Se registró por el código QR: ¿es ${row.patientName}?`,
-          detail: joined([`Desde el código QR ${ago(row.createdAt)}`, row.detail]),
-          action: `Ver a ${row.patientName}`,
-        }
-      }
       if (row.source === "registro") {
         return {
-          title: `Alguien se registró con el documento de ${row.patientName}: revisa si es ella`,
-          detail: joined([`Desde el registro en línea ${ago(row.createdAt)}`, row.detail]),
-          action: `Ver a ${row.patientName}`,
+          title: row.patientName,
+          ask: row.held ? "Se registró por el código QR: ¿es la misma persona?" : "Alguien se registró con su documento: revisa si es la misma persona",
+          detail: `${row.held ? "Desde el código QR" : "Desde el registro en línea"} ${ago(row.createdAt)}`,
+          action: "Revisar",
         }
       }
       if (row.source === "representante") {
         return {
-          title: `¿${row.personName ?? "Esta persona"} es representante de ${row.patientName}?`,
-          detail: joined([`Desde el registro en línea ${ago(row.createdAt)}`, row.detail]),
-          action: "Ver la ficha",
+          title: row.personName ?? "Esta persona",
+          ask: `¿Es representante de ${row.patientName}?`,
+          detail: `Desde el registro en línea ${ago(row.createdAt)}`,
+          action: "Revisar",
         }
       }
       return {
-        title: `Posible ficha repetida: ${row.patientName}`,
-        detail: joined([`Desde su enlace ${ago(row.createdAt)}`, row.detail]),
-        action: "Ver la ficha",
+        title: row.patientName,
+        ask: "Posible ficha repetida",
+        detail: `Desde su enlace ${ago(row.createdAt)}`,
+        action: "Revisar",
       }
     case "dataRequest":
       return {
-        title: `${row.patientName} pidió ${DATA_REQUEST_PHRASE[row.request]}`,
+        title: row.patientName,
+        ask: `Pidió ${DATA_REQUEST_PHRASE[row.request]}`,
         detail: joined([
-          `Responder hasta el ${dayWords(row.dueOn, context.locale)}`,
+          row.dueOn < context.today ? `Venció el ${dayWords(row.dueOn, context.locale)}` : `Responder hasta el ${dayWords(row.dueOn, context.locale)}`,
           row.verified ? null : "falta comprobar que es ella",
         ]),
         action: "Atender el pedido",
       }
     case "portalReentry":
       return {
-        title: `${row.contactName} quiere volver a entrar al portal`,
+        title: row.contactName,
+        ask: "Quiere volver a entrar al portal",
         detail: joined([`Lo pidió ${ago(row.createdAt)}`, "su acceso sigue vigente"]),
         action: "Enviar nuevo enlace",
       }
@@ -252,108 +257,111 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
       return {
         title: `Activar el consentimiento de «${row.title}»`,
         detail: row.requestedByName ? `Lo pidió ${row.requestedByName}` : "Lo pidió una atención",
-        action: "Abrir los consentimientos",
+        action: "Activar",
       }
     case "inventory": {
       const needed = row.needed > 0 ? `${plural(row.needed, "producto hace falta", "productos hacen falta")}` : null
       const expired = row.expiredLots > 0 ? `${plural(row.expiredLots, "lote venció", "lotes vencieron")}` : null
-      const names = row.neededNames.length
-        ? `${listed(row.neededNames)}${row.needed > row.neededNames.length ? ` y ${row.needed - row.neededNames.length} más` : ""}`
-        : null
-      const firstExpired = row.expired[0]
       return {
-        title: `Inventario de ${row.branchName}: ${listed([needed, expired].filter((part): part is string => part !== null))}`,
-        detail: joined([
-          names,
-          firstExpired
-            ? `${firstExpired.productName} venció el ${new Date(`${firstExpired.expiresAt}T12:00:00Z`).toLocaleDateString(context.locale, { day: "numeric", month: "short", timeZone: "UTC" }).replace(".", "")}`
-            : null,
-        ]),
-        action: row.needed > 0 ? "Ver qué hace falta" : "Ver lo vencido",
+        title: `Inventario de ${row.branchName}`,
+        detail: listed([needed, expired].filter((part): part is string => part !== null)),
+        action: row.needed > 0 ? "Pedir" : "Ver",
       }
     }
-    case "promotion":
+    case "promotions":
       return {
-        title: `WhatsApp considera "${row.title}" como promoción: solo se enviará a quien aceptó novedades.`,
-        detail: "Cambia el texto para que sea solo el aviso.",
-        action: "Cambiar el texto",
+        title: row.items.length === 1 ? "1 mensaje automático no le llega a todos" : `${row.items.length} mensajes automáticos no le llegan a todos`,
+        detail: "WhatsApp los clasificó como publicidad",
+        action: "Arreglar",
       }
     case "more":
       if (row.of === "cases") {
         return {
           title: row.count === 1 ? `1 caso más de ${context.receptionName}` : `${row.count} casos más de ${context.receptionName}`,
           detail: "Siguen sin resolver",
-          action: "Ver todos",
+          action: `Ver ${row.count} más`,
+        }
+      }
+      if (row.of === "conversations") {
+        return {
+          title: row.count === 1 ? "1 persona más espera respuesta" : `${row.count} personas más esperan respuesta`,
+          detail: "En la Bandeja",
+          action: `Ver ${row.count} más`,
         }
       }
       if (row.of === "unconfirmed") {
         return {
           title: row.count === 1 ? "1 cita más sin confirmar" : `${row.count} citas más sin confirmar`,
           detail: "Tras el recordatorio del agente",
-          action: "Abrir la Agenda",
+          action: `Ver ${row.count} más`,
         }
       }
       if (row.of === "unclosed") {
         return {
           title: row.count === 1 ? "1 cita más sin cerrar" : `${row.count} citas más sin cerrar`,
           detail: "De días anteriores: ¿vinieron?",
-          action: "Abrir la Agenda",
+          action: `Ver ${row.count} más`,
         }
       }
       if (row.of === "unsentBudgets") {
         return {
           title: row.count === 1 ? "1 presupuesto más sin enviar" : `${row.count} presupuestos más sin enviar`,
           detail: "Se envían desde el Plan de cada persona",
-          action: "Ver personas",
+          action: `Ver ${row.count} más`,
         }
       }
       return {
         title: row.count === 1 ? "1 tarea más" : `${row.count} tareas más`,
         detail: context.allTasks ? "Abiertas en el equipo" : "Tuyas y de tu área",
-        action: "Ver tareas",
+        action: `Ver ${row.count} más`,
       }
   }
 }
 
-/**
- * Lo que hace pulsar la fila cuando la acción rápida («Tomar», «Hecha») va en
- * su propio botón: la fila sigue nombrando a dónde lleva, también para el
- * lector de pantalla. Un caso se abre con «Ver el caso» aunque nadie lo haya
- * tomado: tomarlo es el botón de al lado.
- */
-export function waitingOpenText(row: WaitingRow, context: HomeTextContext): string {
-  if (row.kind === "case" && row.conversationId) return "Ver el caso"
-  return waitingText(row, context).action
+/** Lo que se dice de una fila plegada en otra: «también su cita sin cerrar». */
+export function alsoWords(row: WaitingRow): string {
+  switch (row.kind) {
+    case "case":
+    case "person":
+      return "una pregunta"
+    case "unclosed":
+      return "su cita sin cerrar"
+    case "unconfirmed":
+      return "su cita sin confirmar"
+    case "staleEncounter":
+      return "su atención sin firmar"
+    case "unsentBudget":
+      return "su presupuesto sin enviar"
+    case "registrationDone":
+      return "su registro"
+    case "portalReentry":
+      return "volver al portal"
+    case "possibleDuplicate":
+      return "una revisión"
+    case "task":
+      return "una tarea"
+    default:
+      return "algo más"
+  }
 }
 
-type DuplicateRow = Extract<WaitingRow, { kind: "possibleDuplicate" }>
+/** ¿Quien mira puede responder a esta fila? Sobre ella va «Siguiente» al enviar. */
+export function repliable(row: WaitingRow): boolean {
+  return (row.kind === "case" && row.canReply === true) || (row.kind === "person" && !row.windowClosed)
+}
 
-/**
- * Los botones de una fila de documento repetido, además de la fila que lleva
- * a la persona: el representante por confirmar ofrece «Confirmar» y «No es
- * representante»; quien se registró con el documento de otra, «Descartar»; la posible
- * ficha repetida de «Su enlace», «Revisada».
- */
-export function duplicateActions(row: DuplicateRow): { id: "confirmar" | "descartar" | "revisada" | "revisar"; label: string; primary: boolean }[] {
-  if (row.source === "representante") {
-    return [
-      { id: "confirmar", label: "Confirmar", primary: true },
-      { id: "descartar", label: "No es representante", primary: false },
-    ]
-  }
-  // Con lo que escribió guardado, «Revisar» abre «¿Es la misma persona?»; sin ello, solo descartar.
-  if (row.source === "registro" && row.held) return [{ id: "revisar", label: "Revisar", primary: true }]
-  if (row.source === "registro") return [{ id: "descartar", label: "Descartar", primary: false }]
-  return [{ id: "revisada", label: "Revisada", primary: false }]
+/** El nombre con que se dice a quién: «Responder: Carlos Paredes». */
+export function replyName(row: WaitingRow): string | null {
+  return row.kind === "case" || row.kind === "person" ? row.contactName : null
 }
 
 /** Identidad estable de una fila para React. */
 export function waitingKey(row: WaitingRow): string {
   if (row.kind === "case" || row.kind === "task" || row.kind === "unconfirmed" || row.kind === "unclosed" || row.kind === "staleEncounter" || row.kind === "unsentBudget" || row.kind === "possibleDuplicate" || row.kind === "portalReentry" || row.kind === "dataRequest") return `${row.kind}:${row.id}`
   if (row.kind === "registrationDone") return `registrationDone:${row.appointmentId}`
+  if (row.kind === "person") return `person:${row.conversationId}`
   if (row.kind === "advice") return `advice:${row.key}`
   if (row.kind === "consentToPublish") return `consentToPublish:${row.templateKey}`
-  if (row.kind === "promotion") return `promotion:${row.messageId}`
   if (row.kind === "inventory") return `inventory:${row.branchId}`
   if (row.kind === "more") return `more:${row.of}`
   return row.kind

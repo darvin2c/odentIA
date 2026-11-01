@@ -57,7 +57,9 @@ import {
   REMINDER_CONFIRMED_KEY,
   RESUME_MESSAGE_KEY,
   replyId,
-  splitNamedBody, messageExampleValues } from "./automation-messages.js"
+  splitNamedBody, messageExampleValues,
+  NOTICE_TEXTS,
+} from "./automation-messages.js"
 import { clinicName, findClinicName, firstName } from "./automation-routing.js"
 import {
   connectionWithAdapter,
@@ -2033,7 +2035,10 @@ export async function resumeConversationBySystem(
  * la fila de «Te espera» de quien administra los mensajes; sale del estado y
  * se va sola cuando el texto vigente vuelve a ser de servicio.
  */
-export async function listRecategorizedMessages(tx: Db, orgId: string): Promise<Array<{ messageId: string; title: string }>> {
+export async function listRecategorizedMessages(
+  tx: Db,
+  orgId: string,
+): Promise<Array<{ messageId: string; title: string; connectionId: string; noticeText: string | null; inReview: boolean }>> {
   const [primary] = await activeWhatsApps(tx, orgId)
   if (!primary) return []
   const { defs } = await loadMessages(tx, orgId)
@@ -2043,5 +2048,11 @@ export async function listRecategorizedMessages(tx: Db, orgId: string): Promise<
       const template = templates.get(currentText(def).templateName)
       return template?.status === "aprobada" && isPromotionFor(template, def.category)
     })
-    .map((def) => ({ messageId: def.id, title: def.title }))
+    .map((def) => ({
+      messageId: def.id,
+      title: def.title,
+      connectionId: primary,
+      noticeText: NOTICE_TEXTS[def.id] ?? null,
+      inReview: def.row?.pendingVersion != null,
+    }))
 }

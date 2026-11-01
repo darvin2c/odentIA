@@ -196,7 +196,7 @@ export async function replyByWhatsApp(
 export async function replyToTopic(
   tx: Db,
   orgId: string,
-  input: { topicId: string; userId: string; text: string },
+  input: { topicId: string; userId: string; text: string; takeOver?: boolean },
 ): Promise<MessageItem & { topicId: string | null; topicResolved: boolean }> {
   const [topic] = await tx
     .select({
@@ -210,7 +210,7 @@ export async function replyToTopic(
     .where(and(eq(agentHandoff.id, input.topicId), eq(agentHandoff.organizationId, orgId), handoffOpenSql(sql.raw('"agent_handoff"'))))
     .limit(1)
   if (!topic?.conversationId) throw notFound("Tema")
-  if (topic.assigneeUserId !== null && topic.assigneeUserId !== input.userId) {
+  if (topic.assigneeUserId !== null && topic.assigneeUserId !== input.userId && !input.takeOver) {
     throw new ServiceError("TOPIC_TAKEN", 409, "Este tema ya lo tiene otra persona del equipo.")
   }
   // Primero se toma este tema: `claimHandoff` dice si quien responde puede tenerlo.

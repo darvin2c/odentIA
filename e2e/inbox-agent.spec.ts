@@ -165,10 +165,10 @@ test("bandeja: el estado del agente por conversación, las vistas con su total y
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("inicio-movil", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
   // La fila del caso abre su resumen, sin salir de Inicio.
-  await homeCase.getByRole("button", { name: /Ver el caso$/ }).click()
-  await expect(page.getByRole("heading", { name: "Resumen del caso" })).toBeVisible()
+  await homeCase.getByRole("button", { name: /^Responder/ }).click()
+  await expect(page.getByText("Por qué te lo pasó Sofi")).toBeVisible()
   await page.keyboard.press("Escape")
-  await expect(page.getByRole("heading", { name: "Resumen del caso" })).toBeHidden()
+  await expect(page.getByText("Por qué te lo pasó Sofi")).toBeHidden()
 
   // Bandeja en móvil: una vista por vez; con el hilo abierto ceden la pantalla vistas y filtros.
   await gotoHydrated(page, tenant(org.slug, "/inbox"))

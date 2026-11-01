@@ -3,11 +3,12 @@
  * como función pura: cada parte llega ya filtrada por lo que el rol puede ver
  * (lo decide `getWorkspaceHome`), y esta función no consulta nada.
  *
- * Cada asunto ocupa una sola fila: el caso que pasó el agente no se repite como
- * tarea ni dentro de «N personas esperan respuesta» (eso lo quita la consulta).
- * Lo que aparece aquí no llega a la campana, que es solo para enterarse.
+ * Cada asunto ocupa una sola fila y cada persona también: lo demás de esa
+ * persona va como «También» (`also`), si su rol puede verlo. La lista se agrupa
+ * con la escala de siempre: Ahora, Hoy y Sin apuro (`band`, ADR 0125). Lo que
+ * aparece aquí no llega a la campana, que es solo para enterarse.
  *
- * El orden es fijo y sin puntajes: casos «Ahora», atenciones de días
+ * Dentro de cada grupo, el orden es fijo y sin puntajes: casos «Ahora», atenciones de días
  * anteriores sin cerrar de quien mira, citas que siguen sin confirmar tras el
  * primer recordatorio del agente, los presupuestos armados que nadie envió
  * desde el día anterior (para quien habla con la persona, decisión 12), lo
@@ -26,7 +27,7 @@
  */
 
 /** Tope de filas por tipo: lo demás se resume en una fila «y N más». */
-export const WAITING_LIMITS = { urgentCases: 5, overdueTasks: 3, otherCases: 3, unconfirmed: 3, unclosed: 3, unsentBudgets: 3 } as const
+export const WAITING_LIMITS = { urgentCases: 5, overdueTasks: 3, otherCases: 3, unconfirmed: 3, unclosed: 3, unsentBudgets: 3, conversations: 5 } as const
 
 /**
  * Terminó de completar sus datos por su enlace hoy y tiene cita hoy, aún sin
@@ -37,6 +38,7 @@ export interface WaitingRegistrationDone {
   /** Su cita de hoy. */
   appointmentId: string
   patientId: string
+  personId?: string | null
   patientName: string
   /** Cuándo envió sus datos. */
   sentAt: string
@@ -44,8 +46,13 @@ export interface WaitingRegistrationDone {
   professionalName: string | null
 }
 
+/** Los grupos de «Te espera», del más urgente al que puede esperar. */
+export type WaitingBand = "ahora" | "hoy" | "sin_apuro"
+
 export interface WaitingCase {
   id: string
+  /** La persona: una fila por persona; lo demás suyo va como «También». */
+  contactId?: string | null
   /** `media` es «Hoy» y `baja` «Sin apuro»; «Ahora» lo dice `urgent`. */
   priority: string
   /** «Ahora»: alta, o ya pasaron dos horas de clínica abierta esperando (decisión 1 del pulido). */
@@ -53,12 +60,17 @@ export interface WaitingCase {
   /** De qué trata (R3): un pago le llega a caja, una duda clínica al odontólogo. */
   topicKind: string
   /**
-   * Quien mira lo responde desde Inicio, sin entrar a la Bandeja: es suyo, o es
-   * un pago sin tomar y quien mira es caja (decisión 3 del pulido).
+   * Quien mira lo responde desde Inicio: nadie lo tomó o es suyo, y a caja solo
+   * sus pagos. Responder lo toma al enviar (ADR 0125). No donde ya no se puede
+   * escribirle (`windowClosed`) ni lo que ya tiene otra persona.
    */
   canReply: boolean
-  /** Lo que preguntó, para responderlo ahí mismo; solo si `canReply`. */
+  /** Lo que preguntó: la fila lo dice, en vez del número o el motivo. */
   quote: string | null
+  /** Instagram o Messenger ya no dejan escribirle: se le escribe por otro canal. */
+  windowClosed?: boolean
+  /** Quien lo tiene, si no es quien mira: «Con Dr. Luis Prado». */
+  assigneeName?: string | null
   reason: string
   contactName: string | null
   channel: string | null
@@ -70,8 +82,27 @@ export interface WaitingCase {
   unclaimed: boolean
 }
 
+/**
+ * Una conversación que espera respuesta y no es un caso: con quién y qué pidió,
+ * como cualquier otra fila. Pasa a «Ahora» con la misma regla de los temas.
+ */
+export interface WaitingPerson {
+  conversationId: string
+  contactId: string
+  contactName: string | null
+  channel: string | null
+  /** Lo último que escribió. */
+  quote: string | null
+  since: string
+  urgent: boolean
+  /** Instagram o Messenger ya no dejan escribirle. */
+  windowClosed: boolean
+}
+
 export interface WaitingTask {
   id: string
+  /** La persona de la tarea, si es de alguien. */
+  personId?: string | null
   title: string
   dueAt: string | null
   /** Respecto al día de la clínica: vencida, para hoy, más adelante o sin fecha. */
@@ -114,6 +145,7 @@ export interface WaitingUnsentBudget {
   /** El presupuesto. */
   id: string
   patientId: string
+  personId?: string | null
   patientName: string
   /** Desde cuándo está armado. */
   since: string
@@ -180,6 +212,7 @@ export interface WaitingPortalReentry {
   /** La tarea que lo recuerda. */
   id: string
   patientId: string
+  personId?: string | null
   contactName: string
   /** Su acceso vigente: «Enviar nuevo enlace» es de él. */
   grantId: string | null
@@ -196,6 +229,7 @@ export interface WaitingUnconfirmed {
   why: "sin_confirmar" | "sin_recordatorios"
   id: string
   patientId: string
+  personId?: string | null
   patientName: string
   phone: string | null
   startsAt: string
@@ -212,6 +246,7 @@ export interface WaitingStaleEncounter {
   /** La atención. */
   id: string
   patientId: string
+  personId?: string | null
   patientName: string
   startedAt: string
   /** Lo que falta para cerrarla, como claves (`ClosingRequirement`); los nombres los pone la interfaz. */
@@ -228,6 +263,7 @@ export interface WaitingStaleEncounter {
 export interface WaitingUnclosed {
   id: string
   patientId: string
+  personId?: string | null
   patientName: string
   startsAt: string
   professionalUserId: string
@@ -267,14 +303,20 @@ export interface WaitingConsentToPublish {
 
 /**
  * Un aviso de servicio que WhatsApp pasó a promoción (ADR 0040): solo sale a
- * quien aceptó novedades. Para quien administra los mensajes, con «Cambiar el
- * texto». Sale del estado de la plantilla y se va sola cuando el texto nuevo se
- * aprueba como servicio.
+ * quien aceptó novedades. Para quien administra los mensajes, todos juntos en
+ * una fila. Sale del estado de la plantilla y se va sola cuando el texto nuevo
+ * se aprueba como servicio.
  */
 export interface WaitingPromotion {
   /** El mensaje (clave del catálogo o id del propio). */
   messageId: string
   title: string
+  /** La conexión de WhatsApp donde se pide la revisión. */
+  connectionId?: string
+  /** El texto solo de aviso que prepara odentIA; nulo en un mensaje propio de la clínica. */
+  noticeText?: string | null
+  /** Ya se envió a revisión con ese texto y WhatsApp no ha respondido. */
+  inReview?: boolean
 }
 
 /**
@@ -296,7 +338,7 @@ export type WaitingRow =
   | ({ kind: "case" } & WaitingCase)
   | ({ kind: "inventory" } & WaitingInventory)
   | ({ kind: "consentToPublish" } & WaitingConsentToPublish)
-  | ({ kind: "promotion" } & WaitingPromotion)
+  | { kind: "promotions"; items: WaitingPromotion[] }
   | ({ kind: "staleEncounter" } & WaitingStaleEncounter)
   | ({ kind: "registrationDone" } & WaitingRegistrationDone)
   | ({ kind: "unconfirmed" } & WaitingUnconfirmed)
@@ -307,7 +349,7 @@ export type WaitingRow =
   | ({ kind: "portalReentry" } & WaitingPortalReentry)
   | ({ kind: "dataRequest" } & WaitingDataRequest)
   | ({ kind: "unreached" } & WaitingUnreached)
-  | { kind: "conversations"; waiting: number; oldestAt: string | null }
+  | ({ kind: "person" } & WaitingPerson)
   | ({ kind: "stillOpen" } & WaitingStillOpen)
   /** `more`: tareas abiertas que no tienen fila propia; solo la lleva la última. */
   | ({ kind: "task"; more: number } & WaitingTask)
@@ -315,7 +357,10 @@ export type WaitingRow =
   | ({ kind: "budgets" } & WaitingBudgets)
   /** Lo que no cupo de un tipo, con su total. */
   /** `startsAt`: en «citas más sin cerrar», la primera que no cupo (la Agenda abre en su día). */
-  | { kind: "more"; of: "cases" | "tasks" | "unconfirmed" | "unclosed" | "unsentBudgets"; count: number; startsAt?: string | null }
+  | { kind: "more"; of: "cases" | "tasks" | "unconfirmed" | "unclosed" | "unsentBudgets" | "conversations"; count: number; startsAt?: string | null }
+
+/** Una fila de la lista: su grupo y lo demás de esa persona. */
+export type WaitingEntry = WaitingRow & { band: WaitingBand; also?: WaitingRow[] }
 
 export interface WaitingParts {
   /** Casos que pasó el agente y siguen sin resolver, del que más lleva esperando al más reciente. */
@@ -340,7 +385,8 @@ export interface WaitingParts {
   portalReentries?: WaitingPortalReentry[]
   /** Pedidos sobre sus datos que vencen pronto o ya vencieron, del plazo más cercano al más lejano. */
   dataRequests?: WaitingDataRequest[]
-  conversations: { waiting: number; oldestAt: string | null } | null
+  /** Conversaciones que esperan respuesta: las que más llevan y cuántas son en total. */
+  conversations: { waiting: number; items: WaitingPerson[] } | null
   stillOpen?: WaitingStillOpen | null
   /** Tareas vencidas, de la que venció antes a la más reciente. */
   overdueTasks: WaitingTask[]
@@ -357,9 +403,103 @@ export interface WaitingParts {
   consentsToPublish?: WaitingConsentToPublish[]
   /** Avisos que WhatsApp cuenta como promoción (solo para quien administra los mensajes). */
   promotions?: WaitingPromotion[]
+  /** El día de la clínica: un pedido sobre sus datos vencido va en «Ahora». */
+  today?: string
 }
 
-export function composeWaiting(parts: WaitingParts): WaitingRow[] {
+/** La recomendación de recordar las citas de mañana: eso sí es de hoy; las demás pueden esperar. */
+const ADVICE_OF_TODAY = "recordatorio_cita"
+
+/** En qué grupo va cada fila: la escala que la app ya usa, no otra. */
+function bandOf(row: WaitingRow, today: string | undefined): WaitingBand {
+  switch (row.kind) {
+    case "case":
+      return row.urgent ? "ahora" : row.priority === "baja" ? "sin_apuro" : "hoy"
+    case "person":
+      return row.urgent ? "ahora" : "hoy"
+    case "dataRequest":
+      // Tiene plazo: nunca va plegado.
+      return today && row.dueOn < today ? "ahora" : "hoy"
+    case "task":
+      return row.due === "overdue" || row.due === "today" ? "hoy" : "sin_apuro"
+    case "advice":
+      return row.key === ADVICE_OF_TODAY ? "hoy" : "sin_apuro"
+    case "staleEncounter":
+    case "registrationDone":
+    case "unconfirmed":
+    case "unclosed":
+    case "acceptedUnbooked":
+    case "unsentBudget":
+    case "possibleDuplicate":
+    case "portalReentry":
+      return "hoy"
+    case "more":
+      return row.of === "tasks" ? "sin_apuro" : "hoy"
+    default:
+      return "sin_apuro"
+  }
+}
+
+/** De quién es la fila, si es de una persona. Un pedido sobre sus datos no se pliega: tiene plazo. */
+function personOf(row: WaitingRow): string | null {
+  switch (row.kind) {
+    case "case":
+    case "person":
+      return row.contactId ?? null
+    case "staleEncounter":
+    case "unconfirmed":
+    case "unclosed":
+    case "registrationDone":
+    case "unsentBudget":
+    case "possibleDuplicate":
+    case "portalReentry":
+    case "task":
+      return row.personId ?? null
+    default:
+      return null
+  }
+}
+
+const BAND_RANK: Record<WaitingBand, number> = { ahora: 0, hoy: 1, sin_apuro: 2 }
+/** A igual urgencia, abre la fila lo que alguien escribió: es lo que espera respuesta. */
+const talks = (row: WaitingRow) => row.kind === "case" || row.kind === "person"
+
+/**
+ * Agrupa y deja una fila por persona: la más urgente y, si empatan, lo que
+ * alguien escribió. Lo demás suyo va como «También». «N más» cierra su grupo.
+ */
+export function bandWaiting(rows: WaitingRow[], today?: string): WaitingEntry[] {
+  const entries = rows.map((row, index) => ({ row, index, band: bandOf(row, today) }))
+  const best = new Map<string, (typeof entries)[number]>()
+  for (const entry of entries) {
+    const person = personOf(entry.row)
+    if (!person) continue
+    const current = best.get(person)
+    const better =
+      !current ||
+      BAND_RANK[entry.band] < BAND_RANK[current.band] ||
+      (BAND_RANK[entry.band] === BAND_RANK[current.band] && talks(entry.row) && !talks(current.row))
+    if (better) best.set(person, entry)
+  }
+  return entries
+    .filter((entry) => {
+      const person = personOf(entry.row)
+      return !person || best.get(person) === entry
+    })
+    .sort(
+      (a, b) =>
+        BAND_RANK[a.band] - BAND_RANK[b.band] ||
+        Number(a.row.kind === "more") - Number(b.row.kind === "more") ||
+        a.index - b.index,
+    )
+    .map(({ row, band }) => {
+      const person = personOf(row)
+      const also = person ? entries.filter((entry) => entry.row !== row && personOf(entry.row) === person).map((entry) => entry.row) : []
+      return also.length > 0 ? { ...row, band, also } : { ...row, band }
+    })
+}
+
+export function composeWaiting(parts: WaitingParts): WaitingEntry[] {
   const rows: WaitingRow[] = []
   const urgent = parts.cases.filter((item) => item.urgent)
   const urgentShown = urgent.slice(0, WAITING_LIMITS.urgentCases)
@@ -406,7 +546,12 @@ export function composeWaiting(parts: WaitingParts): WaitingRow[] {
 
   if (parts.unreached && parts.unreached.total > 0) rows.push({ kind: "unreached", ...parts.unreached })
 
-  if (parts.conversations && parts.conversations.waiting > 0) rows.push({ kind: "conversations", ...parts.conversations })
+  // Cada persona que espera es una fila, las que más llevan primero; las demás se ven en la Bandeja.
+  if (parts.conversations && parts.conversations.waiting > 0) {
+    for (const item of parts.conversations.items) rows.push({ kind: "person", ...item })
+    const left = parts.conversations.waiting - parts.conversations.items.length
+    if (left > 0) rows.push({ kind: "more", of: "conversations", count: left })
+  }
 
   const overdue = parts.overdueTasks.slice(0, WAITING_LIMITS.overdueTasks)
   for (const item of overdue) rows.push({ kind: "task", ...item, more: 0 })
@@ -432,10 +577,10 @@ export function composeWaiting(parts: WaitingParts): WaitingRow[] {
   for (const item of (parts.consentsToPublish ?? []).slice(0, WAITING_LIMITS.otherCases))
     rows.push({ kind: "consentToPublish", ...item })
 
-  // Un aviso que WhatsApp pasó a promoción: hay que cambiarle el texto (ADR 0040).
-  for (const item of (parts.promotions ?? []).slice(0, WAITING_LIMITS.otherCases)) rows.push({ kind: "promotion", ...item })
+  // Los avisos que WhatsApp pasó a promoción, juntos: se arreglan de una vez (ADR 0040).
+  if (parts.promotions?.length) rows.push({ kind: "promotions", items: parts.promotions })
 
   for (const item of parts.advice) rows.push({ kind: "advice", ...item })
   if (parts.budgets && parts.budgets.total > 0) rows.push({ kind: "budgets", ...parts.budgets })
-  return rows
+  return bandWaiting(rows, parts.today)
 }

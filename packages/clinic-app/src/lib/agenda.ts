@@ -129,6 +129,13 @@ export function professionalSaid(name: string, options: { full?: boolean } = {})
   return said
 }
 
+/** Más de una hora se dice en horas: «espera 388 min» no se entiende. */
+function waitWords(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`
+  const rest = minutes % 60
+  return rest > 0 ? `${Math.floor(minutes / 60)} h ${rest} min` : `${Math.floor(minutes / 60)} h`
+}
+
 /** Minutos enteros de espera desde la llegada, nunca negativos. */
 export function waitMinutes(arrivedAt: string, now: string): number {
   return Math.max(0, Math.floor((Date.parse(now) - Date.parse(arrivedAt)) / 60_000))
@@ -145,7 +152,7 @@ export function visitLabel(
 ): string {
   const clock = (iso: string) => hourLabel(dayMinutesIn(iso, context.timeZone))
   if (appointment.visit === "llego" && appointment.arrivedAt) {
-    return `Llegó ${clock(appointment.arrivedAt)} · espera ${waitMinutes(appointment.arrivedAt, context.now)} min`
+    return `Llegó ${clock(appointment.arrivedAt)} · espera ${waitWords(waitMinutes(appointment.arrivedAt, context.now))}`
   }
   if (appointment.visit === "en_atencion" && appointment.encounter) {
     return `En atención · con ${professionalSaid(appointment.encounter.professionalName)} desde ${clock(appointment.encounter.startedAt)}`

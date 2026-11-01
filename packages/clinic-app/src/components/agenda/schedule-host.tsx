@@ -37,10 +37,10 @@ const OPEN_EVENT = "odentia:abrir-agenda"
 /** Avisa a quien abrió la cita o la reserva de cómo quedó, para marcar su fila. */
 export const APPOINTMENT_SAVED_EVENT = "odentia:cita-guardada"
 
-type ScheduleRequest = { kind: "cita"; appointmentId: string } | { kind: "reserva"; seed: BookingSeed }
+type ScheduleRequest = { kind: "cita"; appointmentId: string; mode?: "move" } | { kind: "reserva"; seed: BookingSeed }
 
-export function openAppointmentAnywhere(appointmentId: string): void {
-  window.dispatchEvent(new CustomEvent<ScheduleRequest>(OPEN_EVENT, { detail: { kind: "cita", appointmentId } }))
+export function openAppointmentAnywhere(appointmentId: string, mode?: "move"): void {
+  window.dispatchEvent(new CustomEvent<ScheduleRequest>(OPEN_EVENT, { detail: { kind: "cita", appointmentId, ...(mode ? { mode } : {}) } }))
 }
 
 export function openBookingAnywhere(seed: BookingSeed): void {
@@ -97,6 +97,7 @@ export function ScheduleHost() {
       <AppointmentHost
         key={request.appointmentId}
         appointmentId={request.appointmentId}
+        initialMode={request.mode}
         canWrite={canWrite}
         onClose={() => setRequest(null)}
         onRebook={(patient) => setRequest({ kind: "reserva", seed: { patient, lockedPatient: true } })}
@@ -108,11 +109,14 @@ export function ScheduleHost() {
 
 function AppointmentHost({
   appointmentId,
+  initialMode,
   canWrite,
   onClose,
   onRebook,
 }: {
   appointmentId: string
+  /** «Quiere otra hora»: abre directo en reprogramar. */
+  initialMode?: "move"
   canWrite: boolean
   onClose: () => void
   onRebook: (patient: { id: string; name: string }) => void
@@ -133,6 +137,7 @@ function AppointmentHost({
     <React.Suspense fallback={<Waiting title="Cita" onClose={onClose} />}>
     <AppointmentDrawer
       appointment={item}
+      initialMode={initialMode}
       canWrite={canWrite}
       timeZone={timeZone}
       today={zonedDateOf(now, timeZone)}

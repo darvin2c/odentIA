@@ -306,8 +306,9 @@ it("la primera respuesta usa aceptación real y excluye colas, fallos y simulaci
   const report = await withOrgContext(appDb, orgId, tx => getReportAgent(tx, orgId, { period: "2026-09" }))
   expect(report.responses.current).toEqual({ conversations: 5, responded: 2, byAgent: 0, byTeam: 2, agentMedianSeconds: null, teamMedianSeconds: 30 })
   const home = await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, recipient, full))
-  // Una sola fila: cuántas esperan y desde cuándo la más antigua; la misma cuenta que «Sin responder» de la Bandeja.
-  expect(rowsOf(home.waiting, "conversations")).toEqual([{ kind: "conversations", waiting: 3, oldestAt: inboundAt.toISOString() }])
+  // Cada persona es una fila, con desde cuándo espera: la misma cuenta que «Sin responder» de la Bandeja.
+  expect(rowsOf(home.waiting, "person")).toHaveLength(3)
+  expect(rowsOf(home.waiting, "person")[0]).toMatchObject({ kind: "person", since: inboundAt.toISOString() })
   // Con el agente atendiendo, esperan respuesta pero no piden a una persona: van en «Las atiende el agente».
   const inbox = await withOrgContext(appDb, orgId, tx => countConversationViews(tx, orgId, { status: "open" }, ["attend", "agent"]))
   expect(inbox.attend + inbox.agent).toBeGreaterThanOrEqual(3)
@@ -505,12 +506,12 @@ it("un caso del agente sale una sola vez: ni su tarea ni su conversación se rep
   expect(rowsOf(home.waiting, "case")).toMatchObject([{ id: handoff.id, reason: "Pregunta por un reembolso", unclaimed: true }])
   expect(rowsOf(home.waiting, "task").map(row => row.id)).not.toContain(handoff.taskId)
   // Lucía ya es su propia fila: solo Jorge espera respuesta.
-  expect(rowsOf(home.waiting, "conversations")).toMatchObject([{ waiting: 1 }])
+  expect(rowsOf(home.waiting, "person")).toMatchObject([{ conversationId: jorge }])
   // Sin acceso a los casos (odontología), solo las que lleva: no recibe la cuenta de toda la clínica.
   const clinician = () => withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, rita, { ...access, agent: false }))
-  expect(rowsOf((await clinician()).waiting, "conversations")).toEqual([])
+  expect(rowsOf((await clinician()).waiting, "person")).toEqual([])
   await ownerDb.update(conversation).set({ assignedUserId: rita }).where(eq(conversation.id, jorge))
-  expect(rowsOf((await clinician()).waiting, "conversations")).toMatchObject([{ waiting: 1 }])
+  expect(rowsOf((await clinician()).waiting, "person")).toMatchObject([{ conversationId: jorge }])
   // La campana no repite el caso.
   const notices = await withOrgContext(appDb, orgId, tx => listWorkspaceNotifications(tx, orgId, rita, ["tasks.read", "conversations.read", "agent.decide"]))
   expect(notices.items).toEqual([])

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
-import { agentProposal } from "@odentia/db/schema/agent"
-import { member } from "@odentia/db/schema/auth"
+import { agentHandoff, agentProposal } from "@odentia/db/schema/agent"
+import { member, user } from "@odentia/db/schema/auth"
 import type { Page } from "@playwright/test"
 import { and, eq } from "drizzle-orm"
 import { simulateTelegramInbound } from "./channels"
@@ -117,9 +117,32 @@ test("agente sin panel: el caso en Inicio, la cita en «Esperan su sí» y lo he
   await expect(home).not.toContainText("espera tu aprobación")
   await expect(home).not.toContainText("Cita el jueves a las 10:00")
 
-  // «Tomar este tema» se hace en la fila, sin salir de Inicio.
-  await caseRow.getByRole("button", { name: /^Tomar este tema/ }).click()
-  await expect(caseRow.getByRole("button", { name: /^Tomar este tema/ })).toHaveCount(0)
+  // «Responder» abre todo el contexto al lado, con la caja al pie. No hay «Tomar este tema»: el tema queda con quien envía.
+  await expect(caseRow.getByRole("button", { name: /^Tomar/ })).toHaveCount(0)
+  await caseRow.getByRole("button", { name: /^Responder/ }).click()
+  const panel = surface(page, { name: conversation.contact.displayName })
+  await expect(panel).toContainText("Nadie lo ha tomado")
+  await expect(panel).toContainText("Ahora")
+  await expect(panel).toContainText("Quiero una cita")
+  await expect(panel).toContainText("Por qué te lo pasó Sofi")
+  await expect(page).toHaveURL(/\/home/)
+  const box = panel.getByLabel(/^Tu respuesta para/)
+  await box.fill("Te ayudo por aquí")
+  // Lo escrito queda como borrador al cerrar: la fila lo dice y al volver sigue ahí.
+  await panel.getByRole("button", { name: "Cerrar", exact: true }).first().click()
+  await expect(panel).toBeHidden()
+  await expect(caseRow).toContainText("tienes un borrador sin enviar")
+  await caseRow.getByRole("button", { name: /^Responder/ }).click()
+  await expect(box).toHaveValue("Te ayudo por aquí")
+  await box.press("Enter")
+  await expect(panel).toContainText("Le respondiste a")
+  await expect(panel).toContainText("Tema resuelto")
+  await expect(caseRow).toHaveCount(0)
+  // Resolver se corrige: «Dejar pendiente» aparece después de enviar.
+  await panel.getByRole("button", { name: "Dejar pendiente" }).click()
+  await expect(panel).toContainText("sigue pendiente")
+  await panel.getByRole("button", { name: "Cerrar", exact: true }).first().click()
+  await expect(panel).toBeHidden()
   await expect
     .poll(async () => {
       const open = await call<Array<{ id: string; status: string }>>(page, "GET", "/api/agent/handoffs?open=1", org.slug)
@@ -224,18 +247,19 @@ test("agente sin panel: el caso en Inicio, la cita en «Esperan su sí» y lo he
   // Un caso se pasa o se resuelve desde su resumen, sin ir a la Bandeja.
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, "/home"))
-  await caseRow.getByRole("button").first().click()
-  const brief = surface(page, { name: "Resumen del caso" })
+  await caseRow.getByRole("button", { name: /^Responder/ }).click()
+  const brief = surface(page, { name: conversation.contact.displayName })
   await expect(brief).toBeVisible()
   await expect(page).toHaveURL(/\/home/)
-  // Dice lo mismo que su fila y quién lo tiene.
-  await expect(brief).toContainText("Ahora")
+  // Dice quién lo tiene.
   await expect(brief).toContainText("Lo tienes tú")
-  await brief.getByRole("button", { name: "Pasar este tema a…" }).click()
+  await brief.getByRole("button", { name: /^Más sobre/ }).click()
+  await page.getByRole("menuitem", { name: "Pasar este tema a…" }).click()
   await expect(page.getByRole("dialog", { name: "Pasar este tema a…" })).toContainText("Pide hablar con una persona")
   await page.keyboard.press("Escape")
   await expect(page.getByRole("dialog", { name: "Pasar este tema a…" })).toBeHidden()
-  await brief.getByRole("button", { name: "Marcar resuelto" }).click()
+  await brief.getByRole("button", { name: /^Más sobre/ }).click()
+  await page.getByRole("menuitem", { name: "Marcar resuelto" }).click()
   await expect(brief).toBeHidden()
   await expect(page).toHaveURL(/\/home/)
   await expect(caseRow).toHaveCount(0)
@@ -282,4 +306,76 @@ test("Actividad del agente: recepción la ve, otros roles no y el servidor lo ni
       expect((await api(page, "GET", path, org.slug)).status, `${role} ${path}`).toBe(403)
     }
   }
+})
+
+test("panel de una persona: cada rol ve lo suyo, lo decide el servidor, y lo clínico no se le enseña a Sofi", async ({ owner, fixtureDb, nextEventId }) => {
+  const { page, org } = owner
+  const tg = await call<{ id: string; webhookSecret: string }>(page, "POST", "/api/channels/connections", org.slug, { channel: "telegram", provider: "telegram_bot_api", displayName: "Bot E2E", config: { botToken: "e2e" } }, 201)
+  const tgUser = nextEventId()
+  await simulateTelegramInbound(page, API, tg.id, tg.webhookSecret, { fromId: tgUser, chatId: tgUser, text: "¿A qué hora abren?", updateId: nextEventId() })
+  const conversation = await conversationFor(page, org.slug, tg.id)
+  const topic = await call<{ id: string }>(page, "POST", "/api/agent/handoffs", org.slug, { conversationId: conversation.id, reason: "Pregunta el horario", summary: "Escribió: «¿A qué hora abren?»", priority: "media" }, 201)
+  const setRole = (role: string) => fixtureDb.update(member).set({ role }).where(and(eq(member.organizationId, org.id), eq(member.userId, owner.user.id)))
+  const panelUrl = `/api/workspace/person-panel?conversationId=${conversation.id}&topicId=${topic.id}`
+  type Panel = { thread: unknown[]; known: unknown[] | null; debts: unknown; opportunities: unknown; canTeach: boolean; reply: { allowed: boolean } }
+
+  await setRole("reception")
+  const reception = await call<Panel>(page, "GET", panelUrl, org.slug)
+  expect(reception.thread.length).toBeGreaterThan(0)
+  expect(reception.debts).toBeNull()
+  expect(reception.canTeach).toBe(true)
+  // Enseñárselo a Sofi: queda por aprobar en Aprender; recepción no lo aprueba.
+  await call(page, "POST", "/api/workspace/teach", org.slug, { conversationId: conversation.id, question: "¿A qué hora abren?", answer: "Abrimos a las 9:00." }, 201)
+
+  await setRole("clinician")
+  const clinician = await call<Panel>(page, "GET", panelUrl, org.slug)
+  expect(clinician.debts).toBeNull()
+  expect(clinician.opportunities).toBeNull()
+
+  // Caja: ni este tema ni enseñar. Con un pago, solo la pregunta.
+  await setRole("cashier")
+  expect((await api(page, "GET", panelUrl, org.slug)).status).toBe(403)
+  expect((await api(page, "POST", "/api/workspace/teach", org.slug, { conversationId: conversation.id, question: "x", answer: "y" })).status).toBe(403)
+  await fixtureDb.update(agentHandoff).set({ kind: "pago" }).where(eq(agentHandoff.id, topic.id))
+  const cashier = await call<Panel>(page, "GET", panelUrl, org.slug)
+  expect(cashier.thread).toEqual([])
+  expect(cashier.known).toBeNull()
+  expect(cashier.opportunities).toBeNull()
+  expect(cashier.canTeach).toBe(false)
+
+  // Una duda clínica no se le enseña, aunque lo pida quien puede enseñar.
+  await setRole("reception")
+  await fixtureDb.update(agentHandoff).set({ kind: "clinico" }).where(eq(agentHandoff.id, topic.id))
+  expect((await call<Panel>(page, "GET", panelUrl, org.slug)).canTeach).toBe(false)
+  expect((await api(page, "POST", "/api/workspace/teach", org.slug, { conversationId: conversation.id, question: "¿Puedo tomar ibuprofeno?", answer: "Sí." })).status).toBeGreaterThanOrEqual(400)
+})
+
+test("«Responder yo»: lo que tiene otra persona se dice, y al enviar pasa a quien escribe", async ({ owner, fixtureDb, nextEventId }) => {
+  const { page, org } = owner
+  const tg = await call<{ id: string; webhookSecret: string }>(page, "POST", "/api/channels/connections", org.slug, { channel: "telegram", provider: "telegram_bot_api", displayName: "Bot E2E", config: { botToken: "e2e" } }, 201)
+  const tgUser = nextEventId()
+  await simulateTelegramInbound(page, API, tg.id, tg.webhookSecret, { fromId: tgUser, chatId: tgUser, text: "Necesito hablar con alguien", updateId: nextEventId() })
+  const conversation = await conversationFor(page, org.slug, tg.id)
+  const topic = await call<{ id: string }>(page, "POST", "/api/agent/handoffs", org.slug, { conversationId: conversation.id, reason: "Pide hablar con una persona", summary: "Prefiere atención humana.", priority: "alta" }, 201)
+  // Lo tiene otra persona del equipo.
+  const otherId = randomUUID()
+  await fixtureDb.insert(user).values({ id: otherId, name: "Dr. Otro Prado", email: `${otherId}@inicio.test`, emailVerified: true })
+  await fixtureDb.update(agentHandoff).set({ assigneeUserId: otherId }).where(eq(agentHandoff.id, topic.id))
+  // Sin «Responder yo» el servidor no deja pisarlo.
+  const refused = await api(page, "POST", `/api/workspace/topics/${topic.id}/reply`, org.slug, { text: "Hola" })
+  expect(refused.status).toBe(409)
+
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await gotoHydrated(page, tenant(org.slug, "/home"))
+  const row = page.getByRole("region", { name: /^Te espera/ }).getByRole("listitem").filter({ hasText: "Pide hablar con una persona" })
+  await expect(row).toContainText("Con Dr. Otro Prado")
+  // Sin botón: tocar la fila abre el panel, que lo dice y ofrece «Responder yo».
+  await expect(row.getByRole("button", { name: /^Responder/ })).toHaveCount(0)
+  await row.getByRole("button", { name: /^Ver el caso/ }).click()
+  const panel = surface(page, { name: conversation.contact.displayName })
+  await expect(panel).toContainText("Sigue en manos de")
+  await panel.getByRole("button", { name: "Responder yo" }).click()
+  await panel.getByLabel(/^Tu respuesta para/).fill("Yo te ayudo")
+  await panel.getByRole("button", { name: "Enviar", exact: true }).click()
+  await expect(panel).toContainText("Le respondiste a")
 })

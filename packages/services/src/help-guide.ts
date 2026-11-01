@@ -40,7 +40,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Inicio",
     parent: null,
     purpose:
-      "Lo que te toca hoy. «Te espera» es la única lista de lo que hay que hacer, una fila por asunto y por orden de urgencia: lo que te pasó el agente (con «Tomar este tema», o «Responder» ahí mismo si es tuyo: una duda clínica al odontólogo, un pago a caja), tu atención de otro día que quedó sin cerrar (con «Continuar» o «Anular con motivo»), las citas de días anteriores que nadie cerró (con «Registrar la atención» si atiendes y «No vino»; si atiendes, te salen las tuyas), las citas que no se confirmaron tras el recordatorio (para llamar), quienes aceptaron su presupuesto y no tienen cita (para quien ve Reportes, con «Ver la lista», para agendarlos desde ahí), las conversaciones sin responder (si atiendes, las que llevas), las tareas (con «Hecha»), lo que recomienda Argos y las personas a las que Sofi no pudo escribir. Al lado, tu día: si hoy atiendes, «Mis pacientes de hoy» con la sala de espera, lo que estás atendiendo y lo que viene más tarde (con «Atender»); si no, la agenda de la sede, donde recepción marca «Llegó», o la caja, según tu trabajo. La campana de avisos es solo para enterarte: no repite nada de «Te espera».",
+      "Lo que te toca hoy. «Te espera» es la única lista de lo que hay que hacer, una fila por persona, en tres grupos: Ahora, Hoy y Sin apuro, que va plegado. Cada fila tiene un solo botón y abre al lado lo que necesitas para resolverla, con sus mensajes y la caja para responder: lo que te pasó el agente (con «Tomar este tema», o «Responder» ahí mismo si es tuyo: una duda clínica al odontólogo, un pago a caja), tu atención de otro día que quedó sin cerrar (con «Continuar» o «Anular con motivo»), las citas de días anteriores que nadie cerró (con «Registrar la atención» si atiendes y «No vino»; si atiendes, te salen las tuyas), las citas que no se confirmaron tras el recordatorio (para llamar), quienes aceptaron su presupuesto y no tienen cita (para quien ve Reportes, con «Ver la lista», para agendarlos desde ahí), las conversaciones sin responder (si atiendes, las que llevas), las tareas (con «Hecha»), lo que recomienda Argos y las personas a las que Sofi no pudo escribir. Al lado, tu día: si hoy atiendes, «Mis pacientes de hoy» con la sala de espera, lo que estás atendiendo y lo que viene más tarde (con «Atender»); si no, la agenda de la sede, donde recepción marca «Llegó», o la caja, según tu trabajo. La campana de avisos es solo para enterarte: no repite nada de «Te espera».",
     terms: [
       "resumen del día",
       "pendientes",
@@ -76,7 +76,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Por qué me aparece una atención de ayer?",
-        a: "Porque quedó en borrador y la ficha de esa persona sigue trabada. La fila dice lo que le falta para cerrarse: «Continuar» la abre para terminarla y «Anular con motivo» la descarta dejando constancia de por qué.",
+        a: "Porque quedó en borrador y la ficha de esa persona sigue trabada. Al abrirla te dice lo que tiene y lo que le falta para cerrarse: «Continuar la atención» la abre para terminarla y «Anular con motivo» la descarta dejando constancia de por qué.",
       },
       {
         q: "¿Cómo respondo lo que me pasó Sofi sin entrar a la Bandeja?",

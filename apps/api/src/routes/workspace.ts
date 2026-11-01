@@ -4,7 +4,10 @@ import {
   AUDIT_AREAS,
   claimHandoff,
   countWorkspaceWaiting,
+  getPersonPanel,
   getWorkspaceHome,
+  proposeLessonFromReply,
+  reopenTopic,
   replyToTopic,
   listWorkspaceAudit,
   listWorkspaceNotifications,
@@ -103,14 +106,49 @@ export function createWorkspaceRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => claimHandoff(tx, orgId, userId, parsed.data, { takeOver: true })))
   })
+  // El panel de una persona (ADR 0125): cada parte, solo si el rol la lee; caja, solo su pago.
+  app.get("/person-panel", async c => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccessAny(memberRole, ["conversations.read", "conversations.topics"])) return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para abrir esta conversación"), 403)
+    const parsed = z.object({ conversationId: z.string().uuid(), topicId: z.string().uuid().optional() }).safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, tx =>
+        getPersonPanel(tx, orgId, { ...parsed.data, userId, can: permission => canAccess(memberRole, permission as Permission) }),
+      ),
+    )
+  })
+  // «Dejar pendiente» después de responder (ADR 0122), también para caja.
+  app.post("/topics/:id/reopen", async c => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccessAny(memberRole, ["conversations.write", "conversations.topics"])) return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para responder temas"), 403)
+    const id = z.string().uuid().safeParse(c.req.param("id"))
+    const body = z.object({ conversationId: z.string().uuid() }).strict().safeParse(await c.req.json().catch(() => null))
+    if (!id.success) return validationError(c, id.error.issues)
+    if (!body.success) return validationError(c, body.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async tx => {
+        await reopenTopic(tx, orgId, { conversationId: body.data.conversationId, topicId: id.data, userId })
+        return { ok: true }
+      }),
+    )
+  })
+  // «Enseñárselo a Sofi»: queda por aprobar en Aprender. Lo aprueba quien administra el agente.
+  app.post("/teach", async c => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "conversations.write")) return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para enseñarle al agente"), 403)
+    const body = z.object({ conversationId: z.string().uuid(), question: z.string().trim().min(1).max(2000), answer: z.string().trim().min(1).max(2000) }).strict().safeParse(await c.req.json().catch(() => null))
+    if (!body.success) return validationError(c, body.error.issues)
+    return runService(c, 201, () => withOrgContext(deps.db, orgId, tx => proposeLessonFromReply(tx, orgId, userId, body.data)))
+  })
   app.post("/topics/:id/reply", async c => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccessAny(memberRole, ["conversations.write", "conversations.topics"])) return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para atender temas"), 403)
     const id = z.string().uuid().safeParse(c.req.param("id"))
-    const body = z.object({ text: z.string().trim().min(1).max(4000) }).strict().safeParse(await c.req.json().catch(() => null))
+    const body = z.object({ text: z.string().trim().min(1).max(4000), takeOver: z.boolean().optional() }).strict().safeParse(await c.req.json().catch(() => null))
     if (!id.success) return validationError(c, id.error.issues)
     if (!body.success) return validationError(c, body.error.issues)
-    return runService(c, 201, () => withOrgContext(deps.db, orgId, tx => replyToTopic(tx, orgId, { topicId: id.data, userId, text: body.data.text })))
+    return runService(c, 201, () => withOrgContext(deps.db, orgId, tx => replyToTopic(tx, orgId, { topicId: id.data, userId, text: body.data.text, takeOver: body.data.takeOver === true && canAccess(memberRole, "conversations.write") })))
   })
   app.get("/audit", async c => {
     const { orgId, memberRole } = orgContextOf(c)

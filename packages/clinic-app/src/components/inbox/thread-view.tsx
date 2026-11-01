@@ -77,7 +77,7 @@ import { activeOrgLocale } from "../../lib/locale"
 import { createPersonalLinkForContact, createRegistrationLink } from "../../lib/patient-registration"
 import { filiationGapsText } from "../../lib/patients"
 import { AnswerTraceDrawer } from "../agent/answer-trace"
-import { CaseBriefDrawer } from "../agent/case-brief"
+import { PersonPanel } from "../person/person-panel"
 import { CorrectDrawer, type CorrectionTarget } from "../agent/correct-drawer"
 import { LessonDrawer } from "../agent/lesson-drawer"
 import { invalidateAgentWork } from "../../lib/agent-work"
@@ -260,7 +260,6 @@ export function ThreadView({
   const [lessonId, setLessonId] = useState<string | null>(null)
   const [correcting, setCorrecting] = useState<CorrectionTarget | null>(null)
   // Resumen del caso para quien lo toma; guarda la conversación para que no siga abierto al cambiar de hilo.
-  const canTakeCase = usePermission("conversations.write")
   const myUserId = useMyUserId()
   // Quien aún no es paciente solo lo ven recepción y quien dirige (`crm.read`); caja y odontología, solo pacientes.
   const canOpenPeople = usePermission("patients.read")
@@ -439,7 +438,7 @@ export function ThreadView({
       if (variables.path !== "take") setReplyTo(null)
       invalidate()
       invalidateAgentWork(queryClient)
-      for (const key of ["agent-case-brief", "crm-context", "workspace-home"]) {
+      for (const key of ["person-panel", "crm-context", "workspace-home"]) {
         void queryClient.invalidateQueries({ queryKey: [key] })
       }
     },
@@ -514,7 +513,7 @@ export function ThreadView({
       invalidate()
       // Tomar y resolver también cambian sus casos derivados y las citas propuestas.
       invalidateAgentWork(queryClient)
-      for (const key of ["agent-case-brief", "crm-context", "crm-activity"]) {
+      for (const key of ["person-panel", "crm-context", "crm-activity"]) {
         void queryClient.invalidateQueries({ queryKey: [key] })
       }
     },
@@ -1006,11 +1005,8 @@ export function ThreadView({
         </MessageScroller>
       </MessageScrollerProvider>
 
-      <CaseBriefDrawer
-        conversationId={briefFor === conv.id ? conv.id : null}
-        name={detail.contact.displayName}
-        canTake={canTakeCase}
-        inConversation
+      <PersonPanel
+        target={briefFor === conv.id ? { conversationId: conv.id, name: detail.contact.displayName } : null}
         onClose={() => setBriefFor(null)}
         onChanged={() => void detailQuery.refetch()}
       />

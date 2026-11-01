@@ -150,14 +150,17 @@ for (const width of [1440, 390]) {
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
       const waiting = page.getByRole("region", { name: "Te espera" })
       // El título dice cuántos asuntos esperan, también al lector de pantalla.
-      await expect(waiting.getByRole("heading", { name: "Te espera 2 asuntos", exact: true })).toBeInViewport()
+      await expect(waiting.getByRole("heading", { name: "Te espera", exact: true })).toBeInViewport()
       await expect(page.getByRole("region", { name: "Siguiente paso" })).toHaveCount(0)
       // El caso «Ahora» va antes que la tarea: el orden lo entrega el servidor. Nada espera tu aprobación.
+      // «Sin apuro» va plegado: la tarea sin fecha se ve al abrirlo.
+      await waiting.getByRole("button", { name: /^Sin apuro/ }).click()
       const rows = waiting.getByRole("listitem")
       await expect(rows).toHaveCount(2)
-      await expect(rows.nth(0)).toContainText("Interlocutor pendiente · Pide hablar con una persona")
+      await expect(rows.nth(0)).toContainText("Interlocutor pendiente")
+      await expect(rows.nth(0)).toContainText("Pide hablar con una persona")
       await expect(rows.nth(0)).toContainText("Te lo pasó Sofi")
-      await expect(rows.nth(0).getByRole("link", { name: /Ver la tarea$/ })).toBeVisible()
+      await expect(rows.nth(0).getByRole("link", { name: /^Ver la tarea/ })).toBeVisible()
       await expect(waiting).not.toContainText("espera tu aprobación")
       await expect(rows.nth(1)).toContainText("Confirmar seguimiento pendiente")
       await expect(rows.nth(1)).toContainText("Sin fecha")
@@ -344,8 +347,8 @@ for (const width of [1440, 390]) {
       await observe(page, info, "nada-espera")
       await call(page, "PATCH", `/api/tasks/${task.id}`, owner.org.slug, { status: "open" })
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
-      await expect(waiting.getByText("Nada te espera por ahora", { exact: true })).toHaveCount(0)
-      // La tarea se abre al lado, sin salir de Inicio.
+      // Sin fecha puede esperar: sigue abajo, plegada, y se abre al lado sin salir de Inicio.
+      await waiting.getByRole("button", { name: /^Sin apuro/ }).click()
       await waiting.getByRole("button", { name: /Revisar caso/ }).first().click()
       await expect(surface(page).getByRole("textbox", { name: "Qué hay que hacer" })).toHaveValue("Revisar caso")
       await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/home"))

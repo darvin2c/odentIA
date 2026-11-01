@@ -1,4 +1,4 @@
-import { Button, toast } from "@odentia/ui"
+import { Button, buttonVariants, toast } from "@odentia/ui"
 import {
   ConfirmDialog,
   DetailDrawer,
@@ -14,11 +14,14 @@ import {
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute, useNavigate } from "@tanstack/react-router"
+import { Link, createFileRoute } from "@tanstack/react-router"
 import { useState } from "react"
 import { z } from "zod"
 import { AdminRecommendationDrawer, AdminUnreachedDrawer } from "../../components/agent/admin-recommendation"
-import { CaseBriefDrawer } from "../../components/agent/case-brief"
+import { openAppointmentAnywhere } from "../../components/agenda/schedule-host"
+import { AlsoList, CallPanel, DuplicatePanel, EncounterPanel, InventoryPanel, PromotionPanel, VisitPanel } from "../../components/home/row-panels"
+import { BudgetReviewDrawer } from "../../components/patient/plan/budget-review"
+import { PersonPanel, type PersonPanelTarget } from "../../components/person/person-panel"
 import { invalidateAgentWork } from "../../lib/agent-work"
 import { useCompleteTask } from "../../components/crm/complete-task"
 import { TaskDrawer } from "../../components/crm/task-drawer"
@@ -43,9 +46,9 @@ import { createReorderDrafts } from "../../lib/inventory"
 import { usePermission } from "../../lib/crm"
 import { type DebtRow, invalidateFinance } from "../../lib/finance-cash"
 import { type CollectResultBody, useOrgFinanceProfile } from "../../lib/finance-collect"
-import { daysAgo, longDay, waitingKey } from "../../lib/home"
+import { daysAgo, longDay, repliable, replyName, waitingKey } from "../../lib/home"
 import { isReceiptOnly, useOrgEvents } from "../../lib/org-events"
-import type { WaitingRow, WorkspaceCash, WorkspaceHome } from "../../lib/workspace"
+import type { WaitingEntry, WaitingRow, WorkspaceCash, WorkspaceHome } from "../../lib/workspace"
 
 export const Route = createFileRoute("/_org/home")({
   /** La sede de la agenda y la caja viaja en el enlace, como en las demás pantallas por sede. */
@@ -96,7 +99,6 @@ function hasWork(access: WorkspaceHome["access"]): boolean {
 
 function HomePage() {
   const queryClient = useQueryClient()
-  const canTake = usePermission("conversations.write")
   const sede = useActiveBranch()
   const query = useQuery({
     queryKey: ["workspace-home", sede.branchId ?? null],
@@ -111,15 +113,8 @@ function HomePage() {
   })
 
   const canDoTasks = usePermission("tasks.write")
-  // «Tomar este tema» desde la fila: la misma acción que en la Bandeja (toma el tema, no la conversación).
-  const take = useMutation({
-    mutationFn: (row: CaseRow) => apiFetch(`/api/workspace/topics/${row.id}/take`, { method: "POST" }),
-    onSuccess: () => {
-      invalidateAgentWork(queryClient)
-      refresh()
-    },
-  })
-  // «Hecha»: si la tarea resolviera una conversación, antes se muestra lo mismo que «Resolver».
+  const canOrder = usePermission("inventory.write")
+  // «Hecha» en la fila.
   const completion = useCompleteTask(refresh)
   // «Confirmar» el representante que nombró un registro en línea: vínculo y rol a nombre de quien confirma.
   const canWritePatients = usePermission("patients.write")
@@ -149,53 +144,22 @@ function HomePage() {
       refresh()
     },
   })
-  // «Pedir lo que falta»: un borrador por proveedor con lo que hace falta en esa sede (ADR 0067);
-  // se revisan y confirman en Compras.
-  const navigate = useNavigate()
-  const canOrder = usePermission("inventory.write")
-  const reorder = useMutation({
-    mutationFn: (row: InventoryRow) => createReorderDrafts(row.branchId),
-    onSuccess: (result, row) => {
-      const drafts = result.drafts.length
-      const loose = result.withoutSupplier.length
-      toast.success(
-        drafts === 0
-          ? loose > 0
-            ? `Lo que falta en ${row.branchName} no tiene proveedor: elígelo en la compra.`
-            : `Lo que falta en ${row.branchName} ya está en un borrador.`
-          : `${drafts === 1 ? "Quedó 1 borrador" : `Quedaron ${drafts} borradores`} de compra para ${row.branchName}${loose > 0 ? `; ${loose === 1 ? "1 producto no tiene" : `${loose} productos no tienen`} proveedor` : ""}. Revísalos y confírmalos.`,
-      )
-      void queryClient.invalidateQueries({ queryKey: ["inventory"] })
-      refresh()
-      void navigate({ to: "/inventory", search: { tab: "compras", branch: row.branchId, ver: "borradores" } })
-    },
-  })
-  const busyKey = take.isPending && take.variables
-    ? waitingKey(take.variables)
-    : confirmRepresentative.isPending && confirmRepresentative.variables
-      ? waitingKey(confirmRepresentative.variables)
-      : discardRegistration.isPending && discardRegistration.variables
-        ? waitingKey(discardRegistration.variables)
-        : reorder.isPending && reorder.variables
-          ? waitingKey(reorder.variables)
-          : visitStatus.isPending && visitStatus.variables
-          ? `${visitStatus.variables.status === "no_asistio" ? "unclosed" : "unconfirmed"}:${visitStatus.variables.id}`
-          : arrival.isPending && arrival.variables
-          ? `registrationDone:${arrival.variables.id}`
-          : attend.isPending && attend.variables
-          ? `unclosed:${attend.variables.appointment.id}`
-          : completion.pendingId
+  const busyKey = confirmRepresentative.isPending && confirmRepresentative.variables
+    ? waitingKey(confirmRepresentative.variables)
+    : discardRegistration.isPending && discardRegistration.variables
+      ? waitingKey(discardRegistration.variables)
+      : arrival.isPending && arrival.variables
+        ? `registrationDone:${arrival.variables.id}`
+        : completion.pendingId
           ? `task:${completion.pendingId}`
           : null
-  const busyAction = discardRegistration.isPending ? "descartar" : visitStatus.isPending ? (visitStatus.variables?.status === "no_asistio" ? "no-vino" : "confirmar") : attend.isPending ? "registrar" : null
   const actionError =
-    (take.error ? submitErrorMessage(take.error) : null) ??
     (confirmRepresentative.error ? submitErrorMessage(confirmRepresentative.error) : null) ??
     (discardRegistration.error ? submitErrorMessage(discardRegistration.error) : null) ??
-    (reorder.error ? submitErrorMessage(reorder.error) : null) ??
     completion.error
 
-  const [briefFor, setBriefFor] = useState<{ conversationId: string; name: string } | null>(null)
+  // Lo que la fila abre al lado. Sus datos salen de lo último que llegó: lo que se resuelve se va de la lista.
+  const [opened, setOpened] = useState<WaitingRow | null>(null)
   // «¿Es la misma persona?»: la fila del registro por el código QR que se revisa.
   const [holdTask, setHoldTask] = useState<string | null>(null)
   const [advice, setAdvice] = useState<string | null>(null)
@@ -205,6 +169,9 @@ function HomePage() {
   const [answering, setAnswering] = useState<{ patientId: string; budgetId: string } | null>(null)
   const canAnswerBudgets = usePermission("budgets.write")
   const canSendBudgets = usePermission("budgets.send")
+  // Para quién es lo que se abre al lado de una persona.
+  const [person, setPerson] = useState<PersonPanelTarget | null>(null)
+  const [reviewing, setReviewing] = useState<{ patientId: string; budgetId: string } | null>(null)
   // La tarea que se abre al lado desde su fila.
   const canReadTasks = usePermission("tasks.read")
   const [openTask, setOpenTask] = useState<string | null>(null)
@@ -244,8 +211,117 @@ function HomePage() {
     ? { today: data.date, timezone: data.timezone, locale: data.locale, allTasks: data.access.allTasks, receptionName, canAttend }
     : null
   const choice = { branches: sede.branches, onChange: (id: string) => sede.choose(id) }
+  // ¿Esta fila abre algo al lado? Si no, lleva a donde se resuelve.
+  function opensBeside(row: WaitingRow): boolean {
+    switch (row.kind) {
+      case "case":
+        return row.conversationId !== null ? true : row.taskId !== null && canReadTasks
+      case "person":
+      case "advice":
+      case "unreached":
+      case "budgets":
+      case "acceptedUnbooked":
+      case "unconfirmed":
+      case "unclosed":
+      case "staleEncounter":
+      case "registrationDone":
+      case "promotions":
+        return true
+      case "stillOpen":
+        return row.conversationId !== null
+      case "unsentBudget":
+        return canSendBudgets
+      case "possibleDuplicate":
+        return canDoTasks
+      case "dataRequest":
+        return canWritePatients
+      case "portalReentry":
+        return canWritePatients && row.grantId !== null
+      case "inventory":
+        return canOrder
+      case "task":
+        return row.more === 0 && canReadTasks && row.href.startsWith("/tasks")
+      default:
+        return false
+    }
+  }
+  /** Abre al lado lo que la fila pide resolver. Lo demás de la persona sigue en la lista y en «También». */
+  function openRow(row: WaitingRow) {
+    switch (row.kind) {
+      case "case":
+        if (row.conversationId) setPerson({ conversationId: row.conversationId, topicId: row.id, name: row.contactName ?? "Interlocutor" })
+        else if (row.taskId) setOpenTask(row.taskId)
+        setOpened(row)
+        return
+      case "person":
+        setPerson({ conversationId: row.conversationId, name: row.contactName ?? "Interlocutor" })
+        setOpened(row)
+        return
+      case "stillOpen":
+        if (row.conversationId) setPerson({ conversationId: row.conversationId, name: row.contactName ?? "Interlocutor" })
+        setOpened(row)
+        return
+      case "registrationDone":
+        openAppointmentAnywhere(row.appointmentId)
+        return
+      case "advice":
+        setAdvice(row.key)
+        return
+      case "unreached":
+        setUnreached(true)
+        return
+      case "budgets":
+        setBudgetsOpen(true)
+        return
+      case "acceptedUnbooked":
+        setAcceptedList(true)
+        return
+      case "unsentBudget":
+        setReviewing({ patientId: row.patientId, budgetId: row.id })
+        return
+      case "possibleDuplicate":
+        if (row.source === "registro" && row.held && canWritePatients) setHoldTask(row.id)
+        else setOpened(row)
+        return
+      case "dataRequest":
+        setDataRequest({ patientId: row.patientId, requestId: row.id })
+        return
+      case "portalReentry":
+        if (row.grantId) setPortalResend({ patientId: row.patientId, grantId: row.grantId })
+        return
+      case "task":
+        setOpenTask(row.id)
+        return
+      default:
+        setOpened(row)
+    }
+  }
+  /** Lo que hace el botón de «También»: lo de la fila, o su acción directa. */
+  function runRow(row: WaitingRow) {
+    if (row.kind === "registrationDone" && canWriteAppointments) {
+      arrival.mutate({ id: row.appointmentId, arrived: true, patient: { id: row.patientId, name: row.patientName } })
+      return
+    }
+    if (row.kind === "task" && canDoTasks) {
+      void completion.complete(row.id)
+      return
+    }
+    openRow(row)
+  }
+  const closePanel = () => {
+    setOpened(null)
+    setPerson(null)
+  }
+  // Lo demás de la persona abierta, leído de la lista: lo que se resuelve desaparece.
+  const openedEntry: WaitingEntry | null = opened ? (data?.waiting.find((row) => waitingKey(row) === waitingKey(opened)) ?? null) : null
+  const openedAlso = openedEntry?.also?.length && context ? <AlsoList rows={openedEntry.also} context={context} onRun={runRow} /> : null
+  // «Siguiente: Rosa Quispe»: la próxima fila que se puede responder, nunca solo.
+  const nextRow = opened
+    ? (data?.waiting.slice((data.waiting.findIndex((row) => waitingKey(row) === waitingKey(opened)) ?? -1) + 1).find((row) => repliable(row)) ?? null)
+    : null
+  const next = nextRow ? { name: replyName(nextRow) ?? "la siguiente persona", open: () => openRow(nextRow) } : null
   // La lista sale de lo último que llegó: lo que se anota se va de ella.
-  const budgets = budgetsOpen ? (data?.waiting.find((row): row is Extract<WaitingRow, { kind: "budgets" }> => row.kind === "budgets") ?? null) : null
+  const budgets = budgetsOpen ? (data?.waiting.find((row): row is Extract<WaitingEntry, { kind: "budgets" }> => row.kind === "budgets") ?? null) : null
   return <PageShell className="flex flex-col gap-4">
     <PageHeader title="Inicio" subtitle={data ? longDay(data.date, data.locale) : "Lo que te toca hoy"} />
     <AwayLine canSeeAgenda={data?.access.appointments ?? false} />
@@ -267,53 +343,13 @@ function HomePage() {
             context={context}
             error={actionError}
             handlers={{
-              onCase: (row) => row.conversationId && setBriefFor({ conversationId: row.conversationId, name: row.contactName ?? "Interlocutor" }),
-              onAdvice: (row) => setAdvice(row.key),
-              onUnreached: () => setUnreached(true),
-              onBudgets: () => setBudgetsOpen(true),
-              onTake: canTake ? (row) => take.mutate(row) : undefined,
-              noCaseBrief: !data.access.conversations && !data.access.agent,
-              // Responder sin entrar a la Bandeja: el odontólogo su duda clínica, caja un pago (R3 y decisión 3).
-              onReply: async (row, text) => {
-                // Si el servidor lo rechaza, lanza: la respuesta lo dice junto a su campo o a sus botones.
-                const sent = await apiFetch<{ data: { held?: boolean } }>(`/api/workspace/topics/${row.id}/reply`, {
-                  method: "POST",
-                  body: JSON.stringify({ text }),
-                })
-                const first = row.contactName?.trim().split(/\s+/)[0] || "la persona"
-                toast.success(sent.data.held ? `Quedó por entregar: a ${first} le llega con «Ver respuesta».` : `Le respondiste a ${first}. Tema resuelto.`)
-                invalidateAgentWork(queryClient)
-                refresh()
-              },
+              onOpen: openRow,
+              opensBeside,
               onDone: canDoTasks ? (row) => void completion.complete(row.id) : undefined,
-              onReviewed: canDoTasks ? (row) => void completion.complete(row.id) : undefined,
-              onConfirmRepresentative: canWritePatients && canDoTasks ? (row) => confirmRepresentative.mutate(row) : undefined,
-              onDiscard: canDoTasks ? (row) => discardRegistration.mutate(row) : undefined,
-              onReviewRegistration: canWritePatients && canDoTasks ? (row) => setHoldTask(row.id) : undefined,
-              onReorder: canOrder ? (row) => reorder.mutate(row) : undefined,
               onArrived: canWriteAppointments
                 ? (row) => arrival.mutate({ id: row.appointmentId, arrived: true, patient: { id: row.patientId, name: row.patientName } })
                 : undefined,
-              onRegisterVisit: canAttend
-                ? (row) =>
-                    attend.mutate({
-                      patientId: row.patientId,
-                      appointment: { id: row.id, professionalUserId: row.professionalUserId, professionalName: row.professionalName ?? "otro profesional" },
-                    })
-                : undefined,
-              onNoShow: canWriteAppointments ? (row) => visitStatus.mutate({ id: row.id, status: "no_asistio" }, { onSuccess: refresh }) : undefined,
-              onConfirmAppointment: canWriteAppointments ? (row) => visitStatus.mutate({ id: row.id, status: "confirmada" }, { onSuccess: refresh }) : undefined,
-              onOpenTask: canReadTasks ? setOpenTask : undefined,
-              onDataRequest: canWritePatients ? (row) => setDataRequest({ patientId: row.patientId, requestId: row.id }) : undefined,
-              onPortalReentry: canWritePatients ? (row) => row.grantId && setPortalResend({ patientId: row.patientId, grantId: row.grantId }) : undefined,
-              onBudgetSent: canSendBudgets ? refresh : undefined,
-              onAcceptedList: () => setAcceptedList(true),
-              onVoidEncounter: (row) => {
-                discardForm.reset({ reason: "" })
-                setDiscarding(row)
-              },
               busyKey,
-              busyAction,
             }}
           />
         </div>
@@ -363,7 +399,66 @@ function HomePage() {
       </discardForm.AppField>
     </ConfirmDialog>
     <RegistrationHoldDrawer taskId={holdTask} onClose={() => setHoldTask(null)} />
-    <CaseBriefDrawer conversationId={briefFor?.conversationId ?? null} name={briefFor?.name ?? "Interlocutor"} canTake={canTake} onClose={() => setBriefFor(null)} onChanged={refresh} />
+    <PersonPanel target={person} also={openedAlso} next={next} onClose={closePanel} onChanged={refresh} />
+    {context && opened?.kind === "unclosed" ? (
+      <VisitPanel row={opened} also={openedAlso} context={context} canAttend={canAttend} canWrite={canWriteAppointments} onClose={closePanel} onChanged={refresh} />
+    ) : null}
+    {context && opened?.kind === "unconfirmed" ? (
+      <CallPanel row={opened} also={openedAlso} context={context} canWrite={canWriteAppointments} onClose={closePanel} onChanged={refresh} />
+    ) : null}
+    {context && opened?.kind === "staleEncounter" ? (
+      <EncounterPanel
+        row={opened}
+        also={openedAlso}
+        context={context}
+        canVoid
+        onClose={closePanel}
+        onChanged={refresh}
+        onVoid={() => {
+          const row = opened
+          closePanel()
+          discardForm.reset({ reason: "" })
+          setDiscarding(row)
+        }}
+      />
+    ) : null}
+    {context && opened?.kind === "possibleDuplicate" ? (
+      <DuplicatePanel
+        row={opened}
+        also={openedAlso}
+        context={context}
+        pending={confirmRepresentative.isPending || discardRegistration.isPending || completion.pendingId !== null}
+        error={actionError}
+        onClose={closePanel}
+        onConfirm={canWritePatients && canDoTasks ? () => confirmRepresentative.mutate(opened, { onSuccess: closePanel }) : undefined}
+        onDiscard={canDoTasks ? () => discardRegistration.mutate(opened, { onSuccess: closePanel }) : undefined}
+        onReviewed={canDoTasks ? () => void completion.complete(opened.id).then(closePanel) : undefined}
+        compareLink={
+          opened.patientId ? (
+            <Link to="/patients/$patientId" params={{ patientId: opened.patientId }} search={{ tab: "filiacion" }} className={buttonVariants({ variant: "ghost" })}>
+              Ver la ficha
+            </Link>
+          ) : opened.personId ? (
+            <Link to="/people/$personId" params={{ personId: opened.personId }} className={buttonVariants({ variant: "ghost" })}>
+              Ver la ficha
+            </Link>
+          ) : null
+        }
+      />
+    ) : null}
+    {opened?.kind === "inventory" ? <InventoryPanel row={opened} onClose={closePanel} onChanged={refresh} /> : null}
+    {opened?.kind === "promotions" ? <PromotionPanel items={opened.items} onClose={closePanel} onChanged={refresh} /> : null}
+    {reviewing ? (
+      <BudgetReviewDrawer
+        patientId={reviewing.patientId}
+        budgetId={reviewing.budgetId}
+        onClose={() => setReviewing(null)}
+        onSent={() => {
+          setReviewing(null)
+          refresh()
+        }}
+      />
+    ) : null}
     <AdminRecommendationDrawer recommendationKey={advice} onClose={() => setAdvice(null)} />
       {/* «Ver la lista»: se agenda desde cada fila sin salir de Inicio (tablero 12). */}
       {acceptedList ? (

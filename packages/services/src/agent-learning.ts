@@ -13,11 +13,13 @@ import {
   type LessonKind,
   type LessonStatus,
   type ReviewReason,
+  agentHandoff,
 } from "@odentia/db/schema/agent"
 import { user } from "@odentia/db/schema/auth"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, count, desc, eq, inArray, isNull, sql } from "drizzle-orm"
+import { looksClinical } from "./agent-person-memory.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import {
   createKnowledgeEntry,
@@ -588,6 +590,41 @@ async function insertLesson(
   const [item] = await toLessonItems(tx, orgId, [row])
   if (!item) throw new Error("No se pudo leer la lección")
   return item
+}
+
+/**
+ * «Enseñárselo a Sofi» desde lo que respondió el equipo: queda una respuesta
+ * oficial por aprobar en Aprender y, cuando se aprueba, esa pregunta deja de
+ * volver. No cambia nada por sí sola. Lo clínico no se enseña: Sofi no da
+ * consejos clínicos, y un pago lo responde caja con lo que ve en su caja.
+ */
+export async function proposeLessonFromReply(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  input: { conversationId: string; question: string; answer: string },
+): Promise<LessonItem> {
+  const question = input.question.trim()
+  const answer = input.answer.trim()
+  if (!question || !answer) throw validation("Falta la pregunta o la respuesta para enseñárselo.")
+  const [topic] = await tx
+    .select({ kind: agentHandoff.kind })
+    .from(agentHandoff)
+    .where(and(eq(agentHandoff.organizationId, orgId), eq(agentHandoff.conversationId, input.conversationId)))
+    .orderBy(desc(agentHandoff.createdAt))
+    .limit(1)
+  if (topic?.kind === "clinico" || topic?.kind === "pago" || looksClinical(question) || looksClinical(answer)) {
+    throw validation("Esto no se le enseña: es clínico o de un pago, y lo sigue viendo una persona.")
+  }
+  return insertLesson(tx, orgId, actorUserId, {
+    agent: "recepcion",
+    failure: "falto_dato",
+    question,
+    corrected: answer,
+    originalReply: "",
+    reviewItemId: null,
+    conversationId: input.conversationId,
+  })
 }
 
 export interface CorrectAnswerInput {

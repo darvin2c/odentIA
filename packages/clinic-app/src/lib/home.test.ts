@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { agendaSummary, attendedPercent, daysAgo, duplicateActions, longDay, patientsSummary, waitingKey, waitingOpenText, waitingText, type HomeTextContext } from "./home"
+import { agendaSummary, attendedPercent, daysAgo, longDay, patientsSummary, repliable, waitingKey, waitingText, type HomeTextContext } from "./home"
 import type { WaitingRow } from "./workspace"
 
 const context: HomeTextContext = { today: "2026-10-12", timezone: "America/Lima", locale: "es-PE", allTasks: false, receptionName: "Sofi" }
@@ -25,8 +25,8 @@ describe("textos de «Te espera»", () => {
       kind: "unclosed", id: "a1", patientId: "p1", patientName: "Elena Huamán", startsAt: "2026-10-11T15:00:00.000Z",
       professionalUserId: "u1", professionalName: "Dra. Ana Torres", serviceName: "Control", branchName: "Miraflores",
     }
-    expect(waitingText(row, { ...context, canAttend: true }).detail).toBe("Dra. Ana Torres · Control · Miraflores")
-    expect(waitingText(row, { ...context, canAttend: false }).detail).toBe("Si vino, la registra Dra. Ana Torres · Control · Miraflores")
+    expect(waitingText(row, { ...context, canAttend: true }).detail).toBe("Dra. Ana Torres · Control")
+    expect(waitingText(row, { ...context, canAttend: false }).detail).toBe("Si vino, la registra Dra. Ana Torres · Control")
   })
 
   it("un pedido sobre sus datos dice qué pidió, hasta cuándo y si falta comprobar que es ella (ADR 0080)", () => {
@@ -34,7 +34,8 @@ describe("textos de «Te espera»", () => {
       kind: "dataRequest", id: "r1", patientId: "p1", patientName: "Rosa Quispe", request: "copia", dueOn: "2026-10-15", verified: false,
     }
     expect(waitingText(row, context)).toEqual({
-      title: "Rosa Quispe pidió una copia de su historia",
+      title: "Rosa Quispe",
+      ask: "Pidió una copia de su historia",
       detail: "Responder hasta el jueves 15 oct · falta comprobar que es ella",
       action: "Atender el pedido",
     })
@@ -42,45 +43,44 @@ describe("textos de «Te espera»", () => {
     expect(waitingKey(row)).toBe("dataRequest:r1")
   })
 
-  it("un caso del agente se llama siempre igual y dice su urgencia con palabras", () => {
+  it("un caso del agente dice quién, qué preguntó y quién se lo pasó; la urgencia la dice su grupo", () => {
     const row: WaitingRow = {
       kind: "case", id: "h1", priority: "alta", reason: "pregunta por un reembolso", contactName: "Lucía Paredes", channel: null,
-      createdAt: new Date(Date.now() - 25 * 60_000).toISOString(), conversationId: "c1", taskId: "t1", unclaimed: true,
+      createdAt: new Date(Date.now() - 25 * 60_000).toISOString(), conversationId: "c1", taskId: "t1", unclaimed: true, canReply: true,
     }
     expect(waitingText(row, context)).toEqual({
-      title: "Lucía Paredes · pregunta por un reembolso", detail: "Te lo pasó Sofi hace 25 min · Ahora", action: "Tomar este tema",
+      title: "Lucía Paredes", ask: "pregunta por un reembolso", detail: "Te lo pasó Sofi hace 25 min", action: "Responder",
     })
-    expect(waitingText({ ...row, priority: "baja", unclaimed: false }, context)).toMatchObject({ action: "Ver el caso" })
-    expect(waitingText({ ...row, priority: "baja" }, context).detail).toContain("Sin apuro")
-    // «Ahora» lo dice el servidor: dos horas de clínica abierta esperando, aunque sea «Hoy» (decisión 1 del pulido).
-    expect(waitingText({ ...row, priority: "media", urgent: true }, context).detail).toContain("Ahora")
-    // Lo que se responde aquí mismo (una duda clínica, un pago de caja) dice «Responder».
-    expect(waitingText({ ...row, canReply: true }, context)).toMatchObject({ action: "Responder" })
+    // Lo que preguntó dice más que el motivo.
+    expect(waitingText({ ...row, quote: "¿Me devuelven lo que pagué?" }, context).ask).toBe("¿Me devuelven lo que pagué?")
+    expect(repliable(row)).toBe(true)
+    expect(repliable({ ...row, canReply: false })).toBe(false)
   })
 
-  it("con «Tomar» o «Hecha» en su propio botón, la fila sigue diciendo a dónde lleva", () => {
+  it("un caso dice «Responder» si se puede; si lo tiene otra persona, con quién está y ningún botón", () => {
     const row: WaitingRow = {
       kind: "case", id: "h1", priority: "alta", reason: "pregunta por un reembolso", contactName: "Lucía Paredes", channel: null,
       createdAt: new Date().toISOString(), conversationId: "c1", taskId: "t1", unclaimed: true,
     }
-    // Sin tomar, «Tomar» es el botón de al lado: pulsar la fila abre el caso.
-    expect(waitingOpenText(row, context)).toBe("Ver el caso")
-    expect(waitingOpenText({ ...row, unclaimed: false }, context)).toBe("Ver el caso")
-    // Sin conversación la fila lleva a los casos del agente.
-    expect(waitingOpenText({ ...row, conversationId: null }, context)).toBe("Ver la tarea")
-    expect(waitingOpenText(task({}), context)).toBe("Abrir")
+    expect(waitingText({ ...row, canReply: true }, context).action).toBe("Responder")
+    expect(waitingText({ ...row, canReply: false, windowClosed: true }, context).action).toBe("Escribirle")
+    const other = waitingText({ ...row, unclaimed: false, assigneeName: "Dr. Luis Prado" }, context)
+    expect(other.action).toBe("")
+    expect(other.detail).toContain("Con Dr. Luis Prado")
+    // Sin conversación, lo que se abre es su tarea.
+    expect(waitingText({ ...row, conversationId: null }, context).action).toBe("Ver la tarea")
+    expect(waitingText(task({}), context).action).toBe("Abrir")
   })
 
   it("una cita que no confirmó tras el recordatorio pide llamar, con el teléfono a la vista", () => {
-    expect(waitingText({
+    const text = waitingText({
       kind: "unconfirmed", why: "sin_confirmar", id: "a1", patientId: "p1", patientName: "Rosa Quispe", phone: "+51 987 654 100",
       startsAt: "2026-10-13T15:30:00.000Z", branchName: "Centro", serviceName: "Evaluación",
-    }, context)).toMatchObject({ title: "Rosa Quispe no confirmó · llamar", action: "Ver la cita" })
+    }, context)
+    expect(text).toMatchObject({ title: "Rosa Quispe", action: "Llamar" })
     // La hora sale con el formato de la clínica; el día, en su zona.
-    expect(waitingText({
-      kind: "unconfirmed", why: "sin_confirmar", id: "a1", patientId: "p1", patientName: "Rosa Quispe", phone: "+51 987 654 100",
-      startsAt: "2026-10-13T15:30:00.000Z", branchName: "Centro", serviceName: "Evaluación",
-    }, context).detail).toMatch(/^\+51 987 654 100 · Cita mañana 10:30.* · Evaluación · Centro$/)
+    expect(text.ask).toMatch(/^No confirmó su cita de mañana 10:30/)
+    expect(text.detail).toBe("+51 987 654 100 · Evaluación · Centro")
   })
 
   it("quien no recibe recordatorios sale el día antes para llamarla (ADR 0040)", () => {
@@ -88,8 +88,8 @@ describe("textos de «Te espera»", () => {
       kind: "unconfirmed", why: "sin_recordatorios", id: "a1", patientId: "p1", patientName: "Lucía", phone: "+51 987 654 100",
       startsAt: "2026-10-13T15:00:00.000Z", branchName: "Centro", serviceName: null,
     }, context)
-    expect(row.title).toMatch(/^Lucía no recibe recordatorios: llámala para confirmar su cita de mañana 10:00/)
-    expect(row.action).toBe("Ver la cita")
+    expect(row.ask).toMatch(/^No recibe recordatorios: confirma su cita de mañana 10:00/)
+    expect(row.action).toBe("Llamar")
   })
 
   it("una atención de otro día sin cerrar dice de quién es, cuándo empezó y qué le falta", () => {
@@ -98,10 +98,10 @@ describe("textos de «Te espera»", () => {
       startedAt: "2026-10-11T15:04:00.000Z", missing: ["diagnosis", "evolution"],
     }
     const text = waitingText(stale, context)
-    expect(text).toMatchObject({ title: "La atención de Lucía Fernández quedó sin cerrar", action: "Continuar la atención" })
+    expect(text).toMatchObject({ title: "Lucía Fernández", action: "Revisar", detail: "Falta el diagnóstico y la evolución" })
     // La hora va en el formato de la clínica; el día, contado en su zona.
-    expect(text.detail).toMatch(/^ayer 10:04.* · le falta el diagnóstico y la evolución$/)
-    expect(waitingText({ ...stale, missing: [] }, context).detail).toMatch(/ · lista para firmar$/)
+    expect(text.ask).toMatch(/^Su atención de ayer 10:04.* quedó sin firmar$/)
+    expect(waitingText({ ...stale, missing: [] }, context).detail).toBe("Lista para firmar")
   })
 
   it("un presupuesto armado que nadie envió dice de quién es, desde cuándo y cuánto: «Enviar»", () => {
@@ -110,7 +110,7 @@ describe("textos de «Te espera»", () => {
       since: "2026-10-11T20:00:00.000Z", itemCount: 3, totalCents: 54000, currency: "PEN", options: 1,
     }
     const text = waitingText(unsent, context)
-    expect(text).toMatchObject({ title: "Presupuesto de Lucía Fernández sin enviar", action: "Ver el presupuesto" })
+    expect(text).toMatchObject({ title: "Lucía Fernández", ask: "Su presupuesto sigue sin enviar", action: "Enviar" })
     expect(text.detail).toMatch(/^Armado ayer · 3 tratamientos · S\/\s?540\.00$/)
     expect(waitingText({ ...unsent, options: 2 }, context).detail).toMatch(/ · 2 opciones$/)
     expect(waitingText({ kind: "more", of: "unsentBudgets", count: 2 }, context).title).toBe("2 presupuestos más sin enviar")
@@ -123,29 +123,22 @@ describe("textos de «Te espera»", () => {
       detail: "El documento ya está en otra ficha", createdAt,
     }
     expect(waitingText(duplicate, context)).toEqual({
-      title: "Posible ficha repetida: Pedro Ríos", detail: "Desde su enlace hace 20 min · El documento ya está en otra ficha", action: "Ver la ficha",
+      title: "Pedro Ríos", ask: "Posible ficha repetida", detail: "Desde su enlace hace 20 min", action: "Revisar",
     })
     // Alguien se registró en línea con el documento de una persona que ya estaba.
     const held: WaitingRow = { ...duplicate, id: "t3", source: "registro", patientId: null, personId: "c1", patientName: "Rosa Ochoa", detail: "Escribió: Juan, +51999" }
     expect(waitingText(held, context)).toEqual({
-      title: "Alguien se registró con el documento de Rosa Ochoa: revisa si es ella",
-      detail: "Desde el registro en línea hace 20 min · Escribió: Juan, +51999",
-      action: "Ver a Rosa Ochoa",
+      title: "Rosa Ochoa",
+      ask: "Alguien se registró con su documento: revisa si es la misma persona",
+      detail: "Desde el registro en línea hace 20 min",
+      action: "Revisar",
     })
-    // La fila lleva a la persona; el botón la descarta.
-    expect(duplicateActions(held as Extract<WaitingRow, { kind: "possibleDuplicate" }>).map((action) => action.label)).toEqual(["Descartar"])
     // El registro de un menor nombró como representante a alguien que ya estaba.
     const representative: WaitingRow = { ...duplicate, id: "t4", source: "representante", personId: "c2", personName: "Rosa Ochoa", patientName: "Sofía Ochoa", detail: "" }
-    expect(waitingText(representative, context).title).toBe("¿Rosa Ochoa es representante de Sofía Ochoa?")
-    // Confirmar la vincula; «No es representante» la descarta sin vincular.
-    expect(duplicateActions(representative as Extract<WaitingRow, { kind: "possibleDuplicate" }>)).toEqual([
-      { id: "confirmar", label: "Confirmar", primary: true },
-      { id: "descartar", label: "No es representante", primary: false },
-    ])
-    expect(duplicateActions(duplicate as Extract<WaitingRow, { kind: "possibleDuplicate" }>).map((action) => action.id)).toEqual(["revisada"])
+    expect(waitingText(representative, context)).toMatchObject({ title: "Rosa Ochoa", ask: "¿Es representante de Sofía Ochoa?" })
     const reentry: WaitingRow = { kind: "portalReentry", id: "t2", patientId: "p2", contactName: "Lucía Fernández", grantId: "g1", createdAt }
     expect(waitingText(reentry, context)).toEqual({
-      title: "Lucía Fernández quiere volver a entrar al portal", detail: "Lo pidió hace 20 min · su acceso sigue vigente", action: "Enviar nuevo enlace",
+      title: "Lucía Fernández", ask: "Quiere volver a entrar al portal", detail: "Lo pidió hace 20 min · su acceso sigue vigente", action: "Enviar nuevo enlace",
     })
     expect(waitingKey(reentry)).toBe("portalReentry:t2")
   })
@@ -157,14 +150,12 @@ describe("textos de «Te espera»", () => {
       expiredLots: 1, expired: [{ productName: "Lidocaína 2%", expiresAt: "2026-10-09" }],
     }
     expect(waitingText(row, context)).toEqual({
-      title: "Inventario de Sede Miraflores: 4 productos hacen falta y 1 lote venció",
-      detail: "Guantes de nitrilo, Resina A2 y Rollos de algodón y 1 más · Lidocaína 2% venció el 9 oct",
-      action: "Ver qué hace falta",
+      title: "Inventario de Sede Miraflores",
+      detail: "4 productos hacen falta y 1 lote venció",
+      action: "Pedir",
     })
-    // Solo lo vencido: la fila lleva a lo que vence.
-    expect(waitingText({ ...row, needed: 0, neededNames: [] }, context)).toMatchObject({
-      title: "Inventario de Sede Miraflores: 1 lote venció", action: "Ver lo vencido",
-    })
+    // Solo lo vencido: no hay nada que pedir.
+    expect(waitingText({ ...row, needed: 0, neededNames: [] }, context)).toMatchObject({ detail: "1 lote venció", action: "Ver" })
     expect(waitingKey(row)).toBe("inventory:b1")
   })
 
@@ -176,14 +167,14 @@ describe("textos de «Te espera»", () => {
   })
 
   it("los resúmenes concuerdan en número", () => {
-    expect(waitingText({ kind: "conversations", waiting: 1, oldestAt: null }, context).title).toBe("1 persona espera respuesta")
-    expect(waitingText({ kind: "conversations", waiting: 5, oldestAt: null }, context).title).toBe("5 personas esperan respuesta")
+    expect(waitingText({ kind: "more", of: "conversations", count: 1 }, context).title).toBe("1 persona más espera respuesta")
+    expect(waitingText({ kind: "more", of: "conversations", count: 5 }, context).title).toBe("5 personas más esperan respuesta")
     expect(waitingText({ kind: "budgets", total: 4, oldestPresentedAt: "2026-10-03T15:00:00.000Z", items: [] }, context)).toEqual({
-      title: "4 presupuestos esperan respuesta", detail: "El más antiguo se presentó hace 9 días", action: "Ver cuáles",
+      title: "4 presupuestos esperan respuesta", detail: "El más antiguo se presentó hace 9 días", action: "Ver",
     })
     expect(waitingText({ kind: "more", of: "cases", count: 1 }, context).title).toBe("1 caso más de Sofi")
-    expect(waitingText({ kind: "conversations", waiting: 3, oldestAt: new Date(Date.now() - 2 * 3_600_000).toISOString() }, context)).toMatchObject({
-      detail: "La más antigua, hace 2 h", action: "Abrir la Bandeja",
+    expect(waitingText({ kind: "person", conversationId: "c", contactId: "p", contactName: "Rosa Quispe", channel: "whatsapp", quote: "¿Atienden hoy?", since: new Date(Date.now() - 2 * 3_600_000).toISOString(), urgent: false, windowClosed: false }, context)).toMatchObject({
+      title: "Rosa Quispe", ask: "¿Atienden hoy?", action: "Responder",
     })
     expect(waitingText({ kind: "more", of: "tasks", count: 4 }, context).detail).toBe("Tuyas y de tu área")
   })

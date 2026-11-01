@@ -1,6 +1,6 @@
 # 0025 · Un pendiente, un lugar
 
-Fecha: 2026-10-15 · Estado: aceptada · Ajusta a [0024](0024-ninguna-conversacion-queda-abierta.md) (el aviso de la conversación que sigue abierta) · El contador lo ajusta [0118](0118-cada-numero-donde-se-resuelve.md)
+Fecha: 2026-10-15 · Estado: aceptada; la forma de la lista la ajusta [0125](0125-inicio-por-grupos-y-un-solo-panel.md) · Ajusta a [0024](0024-ninguna-conversacion-queda-abierta.md) (el aviso de la conversación que sigue abierta) · El contador lo ajusta [0118](0118-cada-numero-donde-se-resuelve.md)
 
 ## Problema
 

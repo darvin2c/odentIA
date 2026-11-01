@@ -10,7 +10,7 @@ import { PageLoading } from "./page-loading"
 
 /** Como `PHONE_ROWS` de `lib/home`: en el teléfono no se ven las demás. */
 const PHONE_ROWS = 5
-/** Cuáles traen una acción rápida («Tomar», «Hecha»). */
+/** Cuáles traen su botón pequeño. */
 const WAITING_ROWS = [
   { title: "w-3/5", detail: "w-4/5", action: true },
   { title: "w-2/5", detail: "w-3/5", action: false },

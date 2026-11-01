@@ -452,7 +452,7 @@ describe("el ciclo: insistir una vez y cerrar por silencio", () => {
     // Nora la lleva la dueña: a ella le espera; a recepción no. Omar espera respuesta: es otra fila.
     const ownerHome = await c.run((tx) => getWorkspaceHome(tx, c.orgId, c.ownerId, access))
     expect(ownerHome.waiting.find((row) => row.kind === "stillOpen")).toMatchObject({ total: 1, conversationId: mine.id, contactName: "Nora Paz" })
-    expect(ownerHome.waiting.find((row) => row.kind === "conversations")).toMatchObject({ waiting: 1 })
+    expect(ownerHome.waiting.filter((row) => row.kind === "person")).toHaveLength(1)
     const receptionHome = await c.run((tx) => getWorkspaceHome(tx, c.orgId, c.receptionId, access))
     expect(receptionHome.waiting.find((row) => row.kind === "stillOpen")).toBeUndefined()
     // Con Recepción apagada nada se cierra solo, así que no hay nada que recordar.
