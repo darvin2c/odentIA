@@ -204,7 +204,7 @@ function SummaryFigures({
           change={noShow === null ? undefined : absoluteChange(noShow, previousNoShow, phrase, locale, POINTS)}
           better="down"
           detail={data.noShow.current.total > 0 ? `${data.noShow.current.noShow} de ${data.noShow.current.total} ${data.noShow.current.total === 1 ? "cita que ya pasó" : "citas que ya pasaron"}` : undefined}
-          footer={data.noShow.current.noShow > 0 ? <FooterButton onClick={() => onOpenList("no_show")}>Ver quiénes</FooterButton> : <FooterLink to="agenda">Ver en Agenda</FooterLink>}
+          footer={data.noShow.current.noShow > 0 ? <FooterButton onClick={() => onOpenList("no_show")}>Ver quiénes</FooterButton> : <FooterLink to="agenda">Abrir la Agenda</FooterLink>}
         />
         <SummaryFigure
           title="Citas que agendó el agente"

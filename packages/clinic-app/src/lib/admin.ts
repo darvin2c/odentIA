@@ -211,6 +211,6 @@ export const ADMIN_LINE_WHERE: Record<string, { to: string; label: string }> = {
   seguimiento_no_asistencia: { to: "/agenda", label: "Abrir la agenda" },
   presupuestos_sin_cita: { to: "/agenda", label: "Abrir la agenda" },
   atenciones_sin_firmar: { to: "/people", label: "Abrir pacientes" },
-  cobranza_vencida: { to: "/finance", label: "Abrir finanzas" },
+  cobranza_vencida: { to: "/finance", label: "Abrir Finanzas" },
   cita_cancelada: { to: "/agenda", label: "Abrir la agenda" },
 }

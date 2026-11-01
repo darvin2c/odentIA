@@ -73,7 +73,7 @@ export function DebtsTab({
   onCollect: (patient?: { id: string; name: string } | null) => void
 }) {
   const listSearch = useListSearch()
-  const canMessage = usePermission("conversations.read")
+  const canMessage = usePermission("conversations.write")
   // Sin conversación abierta: se elige por dónde escribirle.
   const [writeTo, setWriteTo] = useState<DebtListRow | null>(null)
   const age = listSearch.get("antiguedad")

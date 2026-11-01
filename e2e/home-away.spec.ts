@@ -57,7 +57,7 @@ for (const viewport of [
     await gotoHydrated(owner.page, tenant(owner.org.slug, "/home"))
     const line = owner.page.getByRole("region", { name: "Mientras no estabas" })
     await expect(line).toContainText("Mientras no estabas, tus agentes agendaron 1 cita.")
-    await expect(line.getByRole("link", { name: "Ver la agenda" })).toBeVisible()
+    await expect(line.getByRole("link", { name: "Abrir la Agenda" })).toBeVisible()
     await owner.page.screenshot({
       path: info.outputPath("inicio-mientras-no-estabas.png"),
       fullPage: true,

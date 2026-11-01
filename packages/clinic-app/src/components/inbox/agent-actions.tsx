@@ -9,7 +9,7 @@ import { ApiError, apiFetch } from "../../lib/api"
 import { clockWords } from "../../lib/conversation-state"
 import { useCan, usePermission } from "../../lib/crm"
 import { canConfirmByPhone } from "../../lib/screen-rules"
-import { invalidateAgentPanelQueries } from "../agent-panel"
+import { invalidateAgentWork } from "../../lib/agent-work"
 
 /** Lo que hizo el agente con esta persona, como lo entrega el servidor. */
 export interface AgentActionItem {
@@ -90,7 +90,7 @@ export function AgentActionCard({
         body: JSON.stringify({ contactId: item.contactId }),
       }),
     onSuccess: () => {
-      invalidateAgentPanelQueries(queryClient)
+      invalidateAgentWork(queryClient)
       for (const key of ["agent-actions", "agent-proposals", "conversations", "conversation", "crm-context", "conversation-context", "workspace-home"]) {
         void queryClient.invalidateQueries({ queryKey: [key] })
       }
@@ -99,7 +99,7 @@ export function AgentActionCard({
   const byPhone = useMutation({
     mutationFn: () => apiFetch<{ data: AgentProposal }>(`/api/agent/proposals/${item.proposalId}/phone-confirm`, { method: "POST" }),
     onSuccess: () => {
-      invalidateAgentPanelQueries(queryClient)
+      invalidateAgentWork(queryClient)
       for (const key of ["agent-actions", "agent-proposals", "conversations", "conversation", "crm-context", "conversation-context", "workspace-home", "appointments"]) {
         void queryClient.invalidateQueries({ queryKey: [key] })
       }

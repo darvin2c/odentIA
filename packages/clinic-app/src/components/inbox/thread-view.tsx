@@ -1,16 +1,10 @@
 import {
   Badge,
   Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-  Input,
   MessageScroller,
   MessageScrollerContent,
   MessageScrollerItem,
@@ -83,12 +77,13 @@ import { activeOrgLocale } from "../../lib/locale"
 import { createPersonalLinkForContact, createRegistrationLink } from "../../lib/patient-registration"
 import { filiationGapsText } from "../../lib/patients"
 import { AnswerTraceDrawer } from "../agent/answer-trace"
-import { CaseBriefDrawer } from "../agent/case-brief"
+import { PersonPanel } from "../person/person-panel"
 import { CorrectDrawer, type CorrectionTarget } from "../agent/correct-drawer"
 import { LessonDrawer } from "../agent/lesson-drawer"
-import { invalidateAgentPanelQueries } from "../agent-panel"
+import { invalidateAgentWork } from "../../lib/agent-work"
 import { BlockPersonDialog, ContactScreenBanner, conversationTarget, useContactScreenActions } from "../inbox-contact-screen"
 import { InboxApprovedMessages } from "../integrations/whatsapp/inbox-approved-messages"
+import { PassTopicDialog } from "./pass-topic-dialog"
 import { AgentActionCard, type AgentActionItem, AgentActionLines, useAgentActions } from "./agent-actions"
 import { StateLabel } from "./conversation-list"
 import { MessageBubble } from "./message-bubble"
@@ -265,7 +260,6 @@ export function ThreadView({
   const [lessonId, setLessonId] = useState<string | null>(null)
   const [correcting, setCorrecting] = useState<CorrectionTarget | null>(null)
   // Resumen del caso para quien lo toma; guarda la conversación para que no siga abierto al cambiar de hilo.
-  const canTakeCase = usePermission("conversations.write")
   const myUserId = useMyUserId()
   // Quien aún no es paciente solo lo ven recepción y quien dirige (`crm.read`); caja y odontología, solo pacientes.
   const canOpenPeople = usePermission("patients.read")
@@ -424,7 +418,7 @@ export function ThreadView({
       }
       if (result.data.topicResolved) setDoneTopic(result.data.topicId)
       invalidate()
-      invalidateAgentPanelQueries(queryClient)
+      invalidateAgentWork(queryClient)
     },
     onError: sendFailed,
   })
@@ -443,8 +437,8 @@ export function ThreadView({
       // Tampoco elige sola lo que queda ni lo que se acaba de dejar pendiente.
       if (variables.path !== "take") setReplyTo(null)
       invalidate()
-      invalidateAgentPanelQueries(queryClient)
-      for (const key of ["agent-case-brief", "crm-context", "workspace-home"]) {
+      invalidateAgentWork(queryClient)
+      for (const key of ["person-panel", "crm-context", "workspace-home"]) {
         void queryClient.invalidateQueries({ queryKey: [key] })
       }
     },
@@ -518,8 +512,8 @@ export function ThreadView({
       setConfirming(null)
       invalidate()
       // Tomar y resolver también cambian sus casos derivados y las citas propuestas.
-      invalidateAgentPanelQueries(queryClient)
-      for (const key of ["agent-case-brief", "crm-context", "crm-activity"]) {
+      invalidateAgentWork(queryClient)
+      for (const key of ["person-panel", "crm-context", "crm-activity"]) {
         void queryClient.invalidateQueries({ queryKey: [key] })
       }
     },
@@ -653,7 +647,6 @@ export function ThreadView({
     window.setTimeout(() => document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Mensaje"]')?.focus(), 0)
   }
   // Caja también, para devolverle un pago (decisión 3): `TopicBand` se lo ofrece solo en los pagos.
-  const conversers = members.filter((member) => ["owner", "admin", "reception", "clinician", "cashier"].includes(member.role))
   // «Responder por» (decisión 6 del pulido): otro canal de la persona, sin perder lo escrito.
   const switchTo = (next: string) => {
     if (next === id) return
@@ -779,7 +772,7 @@ export function ThreadView({
               // En el celular «Contexto» no cabe junto al nombre: va primero en «…».
               ...(onToggleContext && showBack ? [{ key: "contexto", label: "Contexto", onSelect: onToggleContext }] : []),
               ...(topics.length > 0 || threadAttention?.handoffPriority
-                ? [{ key: "resumen", label: "Resumen del caso", onSelect: () => setBriefFor(conv.id) }]
+                ? [{ key: "resumen", label: "Ver el caso", onSelect: () => setBriefFor(conv.id) }]
                 : []),
               // Quien ya tiene su ficha no se registra otra vez: su enlace es para un familiar.
               ...(canRegister
@@ -1012,13 +1005,10 @@ export function ThreadView({
         </MessageScroller>
       </MessageScrollerProvider>
 
-      <CaseBriefDrawer
-        conversationId={briefFor === conv.id ? conv.id : null}
-        name={detail.contact.displayName}
-        canTake={canTakeCase}
-        inConversation
+      <PersonPanel
+        target={briefFor === conv.id ? { conversationId: conv.id, name: detail.contact.displayName } : null}
         onClose={() => setBriefFor(null)}
-        onClaimed={() => void detailQuery.refetch()}
+        onChanged={() => void detailQuery.refetch()}
       />
       <AnswerTraceDrawer
         trace={openTrace}
@@ -1047,14 +1037,12 @@ export function ThreadView({
       <CorrectDrawer target={correcting} onClose={() => setCorrecting(null)} />
       <LessonDrawer lessonId={lessonId} canWrite={canManageAgent} onClose={() => setLessonId(null)} />
       <PassTopicDialog
-        topic={passing}
-        members={conversers}
-        myUserId={myUserId}
+        topic={passing ? { id: passing.id, kind: passing.kind, assigneeUserId: passing.assigneeUserId, quote: topicQuote(passing, 120) } : null}
         pending={topicMutation.isPending}
         onClose={() => setPassing(null)}
-        onPass={(topic, userId) => {
+        onPass={(topic, userId, toMe) => {
           setPassing(null)
-          if (userId === myUserId) topicMutation.mutate({ topicId: topic.id, path: "take" })
+          if (toMe) topicMutation.mutate({ topicId: topic.id, path: "take" })
           else topicMutation.mutate({ topicId: topic.id, path: "take", body: { toUserId: userId } })
         }}
       />
@@ -1366,72 +1354,6 @@ export function ThreadView({
         </div>
       </ScrollArea>
     </div>
-  )
-}
-
-/** «Pasar este tema a…»: con muchas personas en el equipo se busca, sin llenar el menú del tema. */
-function PassTopicDialog({
-  topic,
-  members,
-  myUserId,
-  pending,
-  onClose,
-  onPass,
-}: {
-  topic: InboxTopic | null
-  members: Member[]
-  myUserId: string
-  pending: boolean
-  onClose: () => void
-  onPass: (topic: InboxTopic, userId: string) => void
-}) {
-  const [query, setQuery] = useState("")
-  const text = query.trim().toLowerCase()
-  const options = topic
-    ? members
-        // Caja solo recibe pagos (decisión 3); el servidor también lo exige.
-        .filter((member) => member.userId !== topic.assigneeUserId && (member.role !== "cashier" || topic.kind === "pago"))
-        .filter((member) => member.user.name.toLowerCase().includes(text))
-    : []
-  return (
-    <Dialog
-      open={topic !== null}
-      onOpenChange={(open) => {
-        if (!open) {
-          setQuery("")
-          onClose()
-        }
-      }}
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Pasar este tema a…</DialogTitle>
-          {topic ? <DialogDescription>«{topicQuote(topic, 120)}»</DialogDescription> : null}
-        </DialogHeader>
-        <Input aria-label="Buscar en el equipo" placeholder="Buscar en el equipo" value={query} onChange={(event) => setQuery(event.target.value)} />
-        <ScrollArea className="max-h-64 [&_[data-slot=scroll-area-viewport]]:max-h-64">
-        <ul className="flex flex-col gap-0.5">
-          {options.map((member) => (
-            <li key={member.userId}>
-              <Button
-                type="button"
-                variant="ghost"
-                className="min-h-11 w-full justify-start sm:min-h-9"
-                disabled={pending}
-                onClick={() => {
-                  setQuery("")
-                  if (topic) onPass(topic, member.userId)
-                }}
-              >
-                {member.userId === myUserId ? "Pasármelo" : member.user.name}
-              </Button>
-            </li>
-          ))}
-          {options.length === 0 ? <li className="px-3 py-2 text-sm text-muted-foreground">Nadie coincide con la búsqueda.</li> : null}
-        </ul>
-        </ScrollArea>
-      </DialogContent>
-    </Dialog>
   )
 }
 

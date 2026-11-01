@@ -3,13 +3,13 @@ import { PageNotice } from "@odentia/ui-patterns"
 import { Link } from "@tanstack/react-router"
 import { useReceptionName, withReceptionName } from "../../lib/agent-names"
 import { usePermission } from "../../lib/crm"
-import { useAgentPanelSummary } from "../agent-panel"
+import { useAgentSummary } from "../../lib/agent-work"
 import { useClinicNotices, useRaiseCap } from "../clinic-notices"
 
 /**
  * «Sofi no está atendiendo», para la Bandeja: quien atiende sabe que nadie más
- * responde. El estado sale del resumen del panel del agente (la misma consulta
- * que ya mantiene el layout), así que lo ve quien decide o supervisa al agente.
+ * responde. El estado sale del resumen del agente, así que lo ve quien decide o
+ * supervisa al agente.
  * La acción solo aparece para quien lo administra; el resto lee a quién pedirlo.
  * Mientras no se sabe el estado no se dice nada. Es un aviso de esta pantalla
  * (`PageNotice`), no de la franja: solo importa donde se atienden conversaciones.
@@ -19,7 +19,7 @@ export function ReceptionOffNotice({ className }: { className?: string }) {
   const canDecide = usePermission("agent.decide")
   const canManage = usePermission("agent.write")
   const receptionName = useReceptionName()
-  const summary = useAgentPanelSummary(canSee || canDecide)
+  const summary = useAgentSummary(canSee || canDecide)
   if (summary.data?.data.enabled !== false) return null
   return (
     <PageNotice

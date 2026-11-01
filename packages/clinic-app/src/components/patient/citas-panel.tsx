@@ -35,7 +35,7 @@ function AppointmentRow({ appointment }: { appointment: AgendaAppointment }) {
         <Badge variant={statusVariant(appointment)}>{visitName(appointment.visit)}</Badge>
         {/* La cita se abre al lado, con sus acciones de siempre: la pestaña sigue a la vista. */}
         <Button type="button" size="sm" variant="outline" onClick={() => openAppointmentAnywhere(appointment.id)}>
-          Ver cita
+          Ver la cita
         </Button>
       </div>
     </li>

@@ -35,6 +35,7 @@ import { Route as EmbedDotindexRouteImport } from './../../../packages/clinic-ap
 import { Route as EmbedDotconnectionIdRouteImport } from './../../../packages/clinic-app/src/routes/public/embed.$connectionId'
 import { Route as LlegarDotbranchRouteImport } from './../../../packages/clinic-app/src/routes/public/llegar.$branch'
 import { Route as AgentDotindexRouteImport } from './../../../packages/clinic-app/src/routes/_org/agent.index'
+import { Route as AgentDotactividadRouteImport } from './../../../packages/clinic-app/src/routes/_org/agent.actividad'
 import { Route as AgentDotadministradorRouteImport } from './../../../packages/clinic-app/src/routes/_org/agent.administrador'
 import { Route as AgentDotapprovalsRouteImport } from './../../../packages/clinic-app/src/routes/_org/agent.approvals'
 import { Route as AgentDotasistenteClinicoRouteImport } from './../../../packages/clinic-app/src/routes/_org/agent.asistente-clinico'
@@ -226,6 +227,12 @@ const LlegarDotbranchRoute = LlegarDotbranchRouteImport.update({
 const AgentDotindexRoute = AgentDotindexRouteImport.update({
   id: '/agent/',
   path: '/agent/',
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
+} as any)
+const AgentDotactividadRoute = AgentDotactividadRouteImport.update({
+  id: '/agent/actividad',
+  path: '/agent/actividad',
   getParentRoute: () =>
     DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
@@ -537,6 +544,7 @@ export interface FileRoutesByFullPath {
   '/embed/$connectionId': typeof EmbedDotconnectionIdRoute
   '/llegar/$branch': typeof LlegarDotbranchRoute
   '/embed/': typeof EmbedDotindexRoute
+  '/agent/actividad': typeof AgentDotactividadRoute
   '/agent/administrador': typeof AgentDotadministradorRoute
   '/agent/approvals': typeof AgentDotapprovalsRoute
   '/agent/asistente-clinico': typeof AgentDotasistenteClinicoRoute
@@ -611,6 +619,7 @@ export interface FileRoutesByTo {
   '/embed/$connectionId': typeof EmbedDotconnectionIdRoute
   '/llegar/$branch': typeof LlegarDotbranchRoute
   '/embed': typeof EmbedDotindexRoute
+  '/agent/actividad': typeof AgentDotactividadRoute
   '/agent/administrador': typeof AgentDotadministradorRoute
   '/agent/approvals': typeof AgentDotapprovalsRoute
   '/agent/asistente-clinico': typeof AgentDotasistenteClinicoRoute
@@ -689,6 +698,7 @@ export interface FileRoutesById {
   '/embed/$connectionId': typeof EmbedDotconnectionIdRoute
   '/llegar/$branch': typeof LlegarDotbranchRoute
   '/embed/': typeof EmbedDotindexRoute
+  '/_org/agent/actividad': typeof AgentDotactividadRoute
   '/_org/agent/administrador': typeof AgentDotadministradorRoute
   '/_org/agent/approvals': typeof AgentDotapprovalsRoute
   '/_org/agent/asistente-clinico': typeof AgentDotasistenteClinicoRoute
@@ -767,6 +777,7 @@ export interface FileRouteTypes {
     | '/embed/$connectionId'
     | '/llegar/$branch'
     | '/embed/'
+    | '/agent/actividad'
     | '/agent/administrador'
     | '/agent/approvals'
     | '/agent/asistente-clinico'
@@ -841,6 +852,7 @@ export interface FileRouteTypes {
     | '/embed/$connectionId'
     | '/llegar/$branch'
     | '/embed'
+    | '/agent/actividad'
     | '/agent/administrador'
     | '/agent/approvals'
     | '/agent/asistente-clinico'
@@ -918,6 +930,7 @@ export interface FileRouteTypes {
     | '/embed/$connectionId'
     | '/llegar/$branch'
     | '/embed/'
+    | '/_org/agent/actividad'
     | '/_org/agent/administrador'
     | '/_org/agent/approvals'
     | '/_org/agent/asistente-clinico'
@@ -1168,6 +1181,13 @@ declare module '@tanstack/react-router' {
       path: '/agent'
       fullPath: '/agent/'
       preLoaderRoute: typeof AgentDotindexRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
+    }
+    '/_org/agent/actividad': {
+      id: '/_org/agent/actividad'
+      path: '/agent/actividad'
+      fullPath: '/agent/actividad'
+      preLoaderRoute: typeof AgentDotactividadRouteImport
       parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
     '/_org/agent/administrador': {
@@ -1630,6 +1650,7 @@ interface DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteChildren {
   ServicesRoute: typeof ServicesRouteWithChildren
   SettingsRoute: typeof SettingsRouteWithChildren
   TasksRoute: typeof TasksRoute
+  AgentDotactividadRoute: typeof AgentDotactividadRoute
   AgentDotadministradorRoute: typeof AgentDotadministradorRoute
   AgentDotapprovalsRoute: typeof AgentDotapprovalsRoute
   AgentDotasistenteClinicoRoute: typeof AgentDotasistenteClinicoRoute
@@ -1665,6 +1686,7 @@ const DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteChildren: DotDot
     ServicesRoute: ServicesRouteWithChildren,
     SettingsRoute: SettingsRouteWithChildren,
     TasksRoute: TasksRoute,
+    AgentDotactividadRoute: AgentDotactividadRoute,
     AgentDotadministradorRoute: AgentDotadministradorRoute,
     AgentDotapprovalsRoute: AgentDotapprovalsRoute,
     AgentDotasistenteClinicoRoute: AgentDotasistenteClinicoRoute,

@@ -169,7 +169,7 @@ test("plan y pagos: el spam se devuelve al instante; lo demás lo decide odentIA
   await gotoHydrated(page, tenant(org.slug, "/settings/plan/acciones"))
   await expect(page.getByRole("heading", { name: "Cada acción de tus agentes" })).toBeVisible()
   const rowOf = (name: string) => page.getByRole("row").filter({ hasText: name })
-  await expect(rowOf("Carmen Huamán").getByRole("link", { name: "Ver conversación" })).toHaveAttribute("href", new RegExp(`conversation=${real.id}`))
+  await expect(rowOf("Carmen Huamán").getByRole("link", { name: "Ver la conversación" })).toHaveAttribute("href", new RegExp(`conversation=${real.id}`))
 
   // Spam de quien no es paciente: se devuelve al instante y pasa a Spam.
   await rowOf("Préstamos Ya").getByRole("button", { name: /^Acciones de la fila/ }).click()

@@ -28,7 +28,6 @@ import {
 } from "./automation.js"
 import { automationMessageOf, MESSAGE_VARIABLES, renderMessage } from "./automation-messages.js"
 import { chooseVia } from "./automation-routing.js"
-import { isPromotionFor } from "./channel-templates.js"
 import { currentAutomationMessageOf, findMessageTemplate } from "./clinic-messages.js"
 import { mayWriteFirstSql } from "./message-permission.js"
 import { windowOpen } from "./message-window.js"
@@ -452,7 +451,7 @@ export async function testAdminLine(
   const template = whatsapp && spec ? await findMessageTemplate(tx, orgId, whatsapp.id, spec.key) : null
   const approved = template?.status === "aprobada"
   // Si WhatsApp lo cuenta como promoción, solo sale con plantilla a quien aceptó novedades (ADR 0040).
-  const promotion = !!template && !!spec && isPromotionFor(template, spec.category)
+  const promotion = !!template && !!spec && template.category === "marketing"
   const now = new Date()
   const count: Record<LineTestRoute, number> = { respuesta: 0, plantilla: 0, correo: 0, no_pudo: 0, tarea: 0 }
   for (const row of rows) {

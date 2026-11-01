@@ -52,14 +52,8 @@ import {
   Wallet,
 } from "lucide-react"
 import { useEffect } from "react"
-import {
-  AGENT_PANEL_EVENTS,
-  AgentPanelButton,
-  AgentPanelMenuItem,
-  AgentPanelProvider,
-  invalidateAgentPanelQueries,
-  useAgentPanelSummary,
-} from "../components/agent-panel"
+import { NoticesColumnProvider } from "../components/notices-column"
+import { AGENT_WORK_EVENTS, invalidateAgentWork, useAgentSummary } from "../lib/agent-work"
 import { GlobalSearchButton, GlobalSearchProvider, type GlobalSearchScreen } from "../components/global-search"
 import { ArgosPanel } from "../components/argos/argos-panel"
 import { ScheduleHost } from "../components/agenda/schedule-host"
@@ -78,7 +72,7 @@ import { fetchOrgProfile, useOrgProfile } from "../lib/org"
 import { type FullOrganization, type OrgRegion, orgChecks, readOrganization, rememberServerChecks } from "../lib/org-access"
 import { productUi } from "../product/product-ui"
 import { appRoleLabel } from "../lib/product-words"
-import { useOrgEvents } from "../lib/org-events"
+import { isReceiptOnly, useOrgEvents } from "../lib/org-events"
 import { PageDraftGuard } from "../lib/page-draft-guard"
 import { RouterLink } from "../lib/router-link"
 import { PLAN_PATH } from "../lib/billing"
@@ -198,6 +192,9 @@ type NavDefinition =
       children: NavChild[]
     })
 
+/** Lo que cambia cuántas personas esperan sin pasar por el agente: alguien escribe o se le responde. */
+const WAITING_EVENTS = ["message.created", "message.updated", "conversation.updated"]
+
 const navDefinitions: NavDefinition[] = [
   { label: "Inicio", to: "/home", icon: Home },
   { label: "Bandeja", to: "/inbox", icon: Inbox, permission: "conversations.read" },
@@ -207,7 +204,7 @@ const navDefinitions: NavDefinition[] = [
   // (resumen, aprender, conocimiento) son pestañas de página. Es de quien lo
   // supervisa: quien solo decide (recepción) atiende lo del agente en la
   // Bandeja y en el panel del botón «Agente» de la cabecera.
-  { label: "Agente", to: "/agent", icon: Bot, permission: "agent.read" },
+  { label: "Agente", to: "/agent", icon: Bot, permissionsAny: ["agent.read", "agent.decide"] },
   {
     label: "Personas",
     children: [
@@ -331,8 +328,12 @@ function OrgLayout() {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const role = org.members.find((member) => member.userId === session?.userId)?.role ?? "member"
   const queryClient = useQueryClient()
-  // Una sola suscripción SSE para el layout: agenda y panel del agente.
-  useOrgEvents(["appointment.updated", "saas.subscription.updated", ...AGENT_PANEL_EVENTS], (kind) => {
+  // Una sola suscripción SSE para el layout: agenda, trabajo del agente y el número de «Inicio».
+  useOrgEvents(["appointment.updated", "saas.subscription.updated", ...AGENT_WORK_EVENTS, ...WAITING_EVENTS], (kind, data) => {
+    if (WAITING_EVENTS.includes(kind)) {
+      if (!isReceiptOnly(kind, data)) void queryClient.invalidateQueries({ queryKey: ["workspace-waiting"] })
+      return
+    }
     if (kind === "appointment.updated" || kind === "stream.reconnected") {
       void invalidateAppointmentQueries(queryClient)
     }
@@ -341,22 +342,31 @@ function OrgLayout() {
       void queryClient.invalidateQueries({ queryKey: ["saas", org.id] })
       if (kind === "saas.subscription.updated") return
     }
-    if (kind !== "appointment.updated") invalidateAgentPanelQueries(queryClient)
+    if (kind !== "appointment.updated") invalidateAgentWork(queryClient)
   })
-  // Contador ligero del menú; la misma consulta alimenta el panel y su botón.
-  const agentSummary = useAgentPanelSummary(canAccess(role, "agent.read"))
-  // Cada número donde se resuelve (ADR 0118): el menú cuenta lo que se
-  // resuelve dentro de Agente, la suma de sus pestañas. Los casos que pasó el
-  // agente van en el botón «Agente» de la cabecera.
-  const toResolve = agentSummary.data?.data.toResolve ?? 0
-  const withAgentState = <T extends AppShellNavItem>(item: T): T =>
-    item.to === "/agent" && toResolve > 0 ? { ...item, badge: toResolve } : item
+  // Cada número donde se resuelve (ADR 0118 y 0125): «Inicio» cuenta las personas que te esperan
+  // (lo cuenta el servidor para quien mira) y «Agente» lo que se resuelve dentro de él.
+  const waiting = useQuery({
+    queryKey: ["workspace-waiting"],
+    queryFn: () => apiFetch<{ data: { people: number } }>("/api/workspace/waiting"),
+    refetchInterval: 60_000,
+  })
+  const waitingPeople = waiting.data?.data.people ?? 0
+  const waitingLabel = waitingPeople === 1 ? "persona espera" : "personas esperan"
+  const toResolve = useAgentSummary(canAccess(role, "agent.read")).data?.data.toResolve ?? 0
+  const withNavState = <T extends AppShellNavItem>(item: T): T => {
+    if (item.to === "/home") return waitingPeople > 0 ? { ...item, badge: waitingPeople, badgeLabel: waitingLabel } : item
+    if (item.to !== "/agent") return item
+    // Quien solo decide por el agente entra a su Actividad.
+    if (!canAccess(role, "agent.read")) return { ...item, to: "/agent/actividad" }
+    return toResolve > 0 ? { ...item, badge: toResolve } : item
+  }
   // Filtra entradas y subentradas por permiso: cada grupo muestra solo las hijas autorizadas.
   const navItems = navDefinitions.flatMap((item): AppShellNavEntry[] => {
     const selfVisible =
       (!item.permission || canAccess(role, item.permission)) &&
       (!item.permissionsAny || canAccessAny(role, item.permissionsAny))
-    if (!item.children) return selfVisible ? [withAgentState(item)] : []
+    if (!item.children) return selfVisible ? [withNavState(item)] : []
     const children = item.children
       .filter(
         (child) =>
@@ -364,7 +374,7 @@ function OrgLayout() {
           (!child.permissionsAny || canAccessAny(role, child.permissionsAny)) &&
           !(child.unlessPermission && canAccess(role, child.unlessPermission)),
       )
-      .map(withAgentState)
+      .map(withNavState)
     if (children.length === 0) return []
     if (!selfVisible) return []
     return [{ ...item, children }]
@@ -415,7 +425,7 @@ function OrgLayout() {
       }}
     >
       <SideDockProvider draftGuard={PageDraftGuard}>
-        <AgentPanelProvider notices={(frame) => <NoticesPanel {...frame} />}>
+        <NoticesColumnProvider notices={(frame) => <NoticesPanel {...frame} />}>
           <GlobalSearchProvider orgId={org.id} screens={searchScreens}>
           <HeaderUtilitiesProvider
             value={{
@@ -424,15 +434,10 @@ function OrgLayout() {
                   <GlobalSearchButton />
                   <HelpButton />
                   <WorkspaceNotifications />
-                  <AgentPanelButton />
                 </>
               ),
-              menuItems: (
-                <>
-                  <HeaderHelpMenuItem />
-                  <AgentPanelMenuItem />
-                </>
-              ),
+              menuItems: <HeaderHelpMenuItem />,
+              attention: waitingPeople > 0 ? { count: waitingPeople, label: waitingLabel } : undefined,
             }}
           >
             <Outlet />
@@ -443,7 +448,7 @@ function OrgLayout() {
           {/* La cita y «Nueva cita» desde cualquier pantalla: Argos, listas e Inicio las abren al lado. */}
           <ScheduleHost />
           </GlobalSearchProvider>
-        </AgentPanelProvider>
+        </NoticesColumnProvider>
       </SideDockProvider>
       {/* Después de entrar con el enlace de acceso: pide la nueva contraseña. */}
       <AccessLinkPasswordGate request={authFetch} />

@@ -23,7 +23,7 @@ import {
   openProbar,
   type ProbarState,
   probarSession,
-  getAgentPanelSummary,
+  getAgentSummary,
   getAgentRunStats,
   getProposal,
   listAgentActivity,
@@ -266,7 +266,7 @@ const simulateInput = z.object({
 
   // Resumen y actividad legible del panel: quien decide (recepción) los lee
   // sin acceder a configuración ni al libro técnico.
-  app.get("/panel", async (c) => {
+  app.get("/summary", async (c) => {
     const { orgId, memberRole, userId } = orgContextOf(c)
     if (!canAccessAny(memberRole, ["agent.read", "agent.decide"]))
       return forbidden(c, "agent.decide")
@@ -274,7 +274,7 @@ const simulateInput = z.object({
     // resuelve dentro de Agente, solo para quien lo supervisa.
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        getAgentPanelSummary(tx, orgId, userId, { supervises: canAccess(memberRole, "agent.read") }),
+        getAgentSummary(tx, orgId, userId, { supervises: canAccess(memberRole, "agent.read") }),
       ),
     )
   })

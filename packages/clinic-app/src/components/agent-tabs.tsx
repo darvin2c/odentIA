@@ -18,9 +18,10 @@ import { agentTabsFor } from "../lib/screen-rules"
  *
  * Aprender dice cuánto espera a una persona: lo mismo que el número del menú
  * «Agente». Sale del mismo resumen que «Necesita de ti» (`/api/agent/overview`,
- * consulta compartida con esa pantalla). Lo que espera el sí de la persona y los
- * casos que el agente pasó al equipo no están aquí: se ven en la Bandeja y en el
- * panel del agente (ADR 0118).
+ * consulta compartida con esa pantalla). Lo que espera el sí de la persona está
+ * en la Bandeja y los casos que el agente pasó al equipo, en «Te espera» (ADR 0118
+ * y 0125). «Actividad» es para saber, y la ve también quien solo decide por el
+ * agente.
  *
  * `learnPending`: «Aprender» concilia su lista al cargarla, así que esa pantalla
  * pasa lo que ya muestra y la pestaña no dice otra cosa mientras el resumen se

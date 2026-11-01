@@ -83,8 +83,8 @@ test("control clínico: reserva real, mover reprograma y cancelaciones coherente
   await dialog.getByRole("button", { name: /^Reservar (hoy|mañana|el )/ }).click()
   await expect(page.getByText(/Cita reservada/)).toBeVisible({ timeout: 15_000 })
 
-  // «Ver cita» abre esa cita al lado, sin salir de la ficha.
-  await page.getByRole("button", { name: "Ver cita", exact: true, disabled: false }).click()
+  // «Ver la cita» abre esa cita al lado, sin salir de la ficha.
+  await page.getByRole("button", { name: "Ver la cita", exact: true, disabled: false }).click()
   await expect(page).toHaveURL(/\/(patients|people)\//)
   await expect(surface(page, { name: /Lucía Quispe/ })).toBeVisible()
   await page.keyboard.press("Escape")

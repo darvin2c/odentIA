@@ -140,7 +140,7 @@ function FinanceMain({
       <EmptyState
         title={`Sin movimientos en ${spanLabel(data.period, data.locale)}`}
         description="Cuando la clínica cobre y registre sus gastos, aquí verás cuánto deja cada mes y en qué se va lo cobrado."
-        actionLabel={query.period !== "este_mes" ? "Ver este mes" : canFinance ? "Ir a Finanzas" : undefined}
+        actionLabel={query.period !== "este_mes" ? "Ver este mes" : canFinance ? "Abrir Finanzas" : undefined}
         onAction={query.period !== "este_mes" ? onShowCurrentMonth : () => void navigate({ to: "/finance" })}
       />
     )

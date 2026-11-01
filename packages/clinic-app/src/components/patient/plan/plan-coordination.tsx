@@ -116,7 +116,7 @@ export function CoordinationControls({
                     variant="outline"
                     onClick={() => control.appointment && openAppointmentAnywhere(control.appointment.id)}
                   >
-                    Ver cita
+                    Ver la cita
                   </Button>
                 ) : canBook && control.status === "pendiente" ? (
                   <Button size="sm" onClick={() => setScheduling(control)}>

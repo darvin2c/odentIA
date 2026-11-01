@@ -52,7 +52,7 @@ const WITHOUT_LABEL: Record<LessonKind, string> = {
   ejemplo: "Sin el ejemplo",
 }
 const SECTION_TITLE = "text-xs font-bold tracking-wider text-muted-foreground uppercase"
-const LESSON_QUERIES = ["agent-learning", "agent-lesson", "agent-overview", "agent-panel", "agent-knowledge", "agent-knowledge-basics", GUIDANCE_KEY[0]]
+const LESSON_QUERIES = ["agent-learning", "agent-lesson", "agent-overview", "agent-summary", "agent-knowledge", "agent-knowledge-basics", GUIDANCE_KEY[0]]
 
 /** Lo que admite `PATCH /api/agent/learning/lessons/:id`, con sus mismas palabras. */
 /** Lo que mide una regla (`RULE_BODY_CHARS`, ADR 0119): va entera en cada mensaje. */

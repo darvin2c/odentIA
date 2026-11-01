@@ -202,7 +202,7 @@ export interface MasterDetailProps {
  *
  * Con columna lateral en el layout (`SideDockProvider`), el detalle no va en
  * un group dentro de la página: se monta en esa columna, a todo el alto de la
- * ventana y pegado al borde derecho, igual que el panel del agente. La lista
+ * ventana y pegado al borde derecho, igual que los Avisos. La lista
  * queda como en modo `drawer` (ancho completo, scroll de página) y
  * `listScroll` no aplica. El detalle se desmonta al cerrar.
  */

@@ -281,58 +281,54 @@ test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({
   // En la Bandeja, quien abre el caso ve el resumen sin releer el hilo: qué pide, lo que ya se sabe y lo que falta.
   await call(page, "POST", `/api/contacts/${conversation.contact.id}/agent-memory`, org.slug, { text: "Prefiere citas por la tarde" }, 201)
   await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${conversation.id}`))
-  // «Resumen del caso» está en «…» de la conversación: el único botón principal es el del tema.
+  // «Ver el caso» está en «…» de la conversación: el único botón principal es el del tema.
   await page.getByRole("button", { name: "Más acciones de la conversación" }).click()
-  await page.getByRole("menuitem", { name: "Resumen del caso" }).click()
-  const brief = surface(page, { name: "Resumen del caso" })
+  await page.getByRole("menuitem", { name: "Ver el caso" }).click()
+  const brief = surface(page, { name: conversation.contact.displayName })
   await expect(brief).toContainText("Ahora")
   await expect(brief).toContainText("El interlocutor pidió atención humana")
-  await expect(brief.getByRole("heading", { level: 3 })).toHaveText(["Qué pide", "Lo que ya se sabe", "Lo que ya hizo Sofi", "Lo que falta"])
+  await expect(brief.getByRole("heading", { level: 3 })).toHaveText(["Lo que ya se sabe"])
   await expect(brief).toContainText("Que la atiendan hoy: tiene la cara hinchada desde anoche.")
-  // Sus mensajes quedan a un toque, en orden.
-  await brief.getByRole("button", { name: "Ver sus 3 mensajes" }).click()
-  await expect(brief.getByRole("list").first().getByRole("listitem")).toHaveText(["Hola", "Tengo la cara hinchada desde anoche", "Necesito hablar con recepción"])
+  // Sus mensajes, en orden, sin releer el hilo.
+  await expect(brief).toContainText("Necesito hablar con recepción")
   await expect(brief).toContainText("Prefiere citas por la tarde")
-  await expect(brief).toContainText("Le dijo: «Ya avisé al equipo como urgencia; una persona te escribe en los próximos minutos.»")
   await expect(brief).toContainText("Saber si puede venir hoy y darle una hora.")
-  await expect(brief.getByRole("button", { name: "Tomar este tema", exact: true })).toBeVisible()
-  await expect(brief.getByRole("button", { name: "Ver la conversación completa" })).toBeVisible()
+  // Es el mismo panel de Inicio: con la caja al pie y lo demás en su menú.
+  await expect(brief.getByLabel(/^Tu respuesta para/)).toBeVisible()
+  await expect(brief.getByRole("button", { name: "Enviar", exact: true })).toBeVisible()
   await info.attach("resumen-del-caso", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${conversation.id}`))
-  // «Resumen del caso» está en «…» de la conversación: el único botón principal es el del tema.
+  // «Ver el caso» está en «…» de la conversación: el único botón principal es el del tema.
   await page.getByRole("button", { name: "Más acciones de la conversación" }).click()
-  await page.getByRole("menuitem", { name: "Resumen del caso" }).click()
-  await expect(page.getByRole("dialog", { name: "Resumen del caso" })).toContainText("Lo que ya se sabe")
+  await page.getByRole("menuitem", { name: "Ver el caso" }).click()
+  await expect(page.getByRole("dialog", { name: conversation.contact.displayName })).toContainText("Lo que ya se sabe")
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
   await info.attach("resumen-del-caso-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await page.setViewportSize({ width: 1280, height: 720 })
 
-  // El número del caso va en el botón «Agente» de la cabecera, que abre el panel donde se toma (ADR 0118).
+  // El número del caso va en «Inicio» del menú (ADR 0125).
   await gotoHydrated(page, tenant(org.slug, "/home"))
-  await expect(page.locator("header").getByRole("button", { name: /^Agente: \d+ casos? por tomar$/ })).toBeVisible()
+  await expect(page.getByRole("navigation").getByRole("link", { name: "Inicio", exact: true }).locator("..")).toContainText(/persona/)
 
-  // El caso vive en «Te espera» de Inicio: una fila con quién lo pasó, hace cuánto y qué tan pronto atenderlo.
+  // El caso vive en «Te espera» de Inicio: una fila con quién lo pasó, hace cuánto y en su grupo.
   await gotoHydrated(page, tenant(org.slug, "/home"))
   const waiting = page.getByRole("region", { name: /^Te espera/ })
-  const caseRow = waiting.getByRole("listitem").filter({ hasText: "El interlocutor pidió atención humana" })
+  const caseRow = waiting.getByRole("listitem").filter({ hasText: conversation.contact.displayName })
   await expect(caseRow).toHaveCount(1)
   await expect(caseRow).toContainText("Te lo pasó Sofi")
-  // El plazo se dice con palabra además de color: prioridad alta es «Ahora».
-  await expect(caseRow).toContainText("Ahora")
-  const takeButton = caseRow.getByRole("button", { name: /^Tomar/ })
-  await expect(takeButton).toBeVisible()
+  // El grupo lo dice con palabra además de color: prioridad alta es «Ahora».
+  await expect(waiting.getByRole("heading", { name: /^Ahora/ })).toBeVisible()
   await info.attach("derivacion-te-espera", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
-  // La fila abre el resumen del caso sin entrar a la conversación.
-  await caseRow.getByRole("button").filter({ hasNotText: /^Tomar/ }).first().click()
-  const fromRow = surface(page, { name: "Resumen del caso" })
+  // «Responder» abre el panel sin entrar a la conversación.
+  await caseRow.getByRole("button", { name: /^Responder/ }).click()
+  const fromRow = surface(page, { name: conversation.contact.displayName })
   await expect(fromRow).toContainText("Saber si puede venir hoy y darle una hora.")
-  await expect(fromRow.getByRole("link", { name: "Ver la conversación completa" })).toBeVisible()
-  await page.keyboard.press("Escape")
+  await expect(fromRow.getByRole("link", { name: "Ver toda la conversación" })).toBeVisible()
+  await fromRow.getByRole("button", { name: "Cerrar", exact: true }).first().click()
   await expect(fromRow).toBeHidden()
-  // «Tomar este tema» toma el tema, no la conversación: el caso queda con responsable.
-  await takeButton.click()
-  await expect(caseRow.getByRole("button", { name: /^Tomar/ })).toHaveCount(0)
+  // Tomar el tema sigue en la Bandeja: toma el tema, no la conversación.
+  await call(page, "POST", `/api/workspace/topics/${handoff.id}/take`, org.slug)
 
   const persisted = await call<Array<{ id: string; assigneeUserId: string | null }>>(
     page,

@@ -475,7 +475,7 @@ it("un anónimo se registra con el DNI de una madre existente: no cambia su corr
   expect(afterDiscard.contact).toMatchObject({ displayName: "Madre Real Ochoa", email: "madre.real@example.com", phone: "+51977600001" })
 })
 
-it("«No es ella»: el representante que nombró el registro en línea no se vincula y la tarea queda cerrada con su motivo", async () => {
+it("«No es representante»: el representante que nombró el registro en línea no se vincula y la tarea queda cerrada con su motivo", async () => {
   await publish("org_a")
   const version = await publishedVersion("org_a")
   // Una persona de la clínica con su DNI (la registró el equipo).

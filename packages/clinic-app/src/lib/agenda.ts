@@ -129,6 +129,13 @@ export function professionalSaid(name: string, options: { full?: boolean } = {})
   return said
 }
 
+/** Más de una hora se dice en horas: «espera 388 min» no se entiende. */
+function waitWords(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`
+  const rest = minutes % 60
+  return rest > 0 ? `${Math.floor(minutes / 60)} h ${rest} min` : `${Math.floor(minutes / 60)} h`
+}
+
 /** Minutos enteros de espera desde la llegada, nunca negativos. */
 export function waitMinutes(arrivedAt: string, now: string): number {
   return Math.max(0, Math.floor((Date.parse(now) - Date.parse(arrivedAt)) / 60_000))
@@ -145,7 +152,7 @@ export function visitLabel(
 ): string {
   const clock = (iso: string) => hourLabel(dayMinutesIn(iso, context.timeZone))
   if (appointment.visit === "llego" && appointment.arrivedAt) {
-    return `Llegó ${clock(appointment.arrivedAt)} · espera ${waitMinutes(appointment.arrivedAt, context.now)} min`
+    return `Llegó ${clock(appointment.arrivedAt)} · espera ${waitWords(waitMinutes(appointment.arrivedAt, context.now))}`
   }
   if (appointment.visit === "en_atencion" && appointment.encounter) {
     return `En atención · con ${professionalSaid(appointment.encounter.professionalName)} desde ${clock(appointment.encounter.startedAt)}`
@@ -258,4 +265,24 @@ export function minutesLabel(minutes: number): string {
   const hours = Math.floor(minutes / 60)
   const rest = minutes % 60
   return `${String(hours).padStart(2, "0")}:${String(rest).padStart(2, "0")}`
+}
+
+/** «Confirmar cita» deja paso a «Llegó» desde una hora antes de la cita. */
+const ARRIVAL_WINDOW_MS = 60 * 60_000
+
+/**
+ * El paso de una cita que aún no llega, con la misma regla en la lista de la
+ * Agenda, su cajón e Inicio: pasada su hora se cierra («Registrar la atención»
+ * o «No vino»); hoy, cerca de la hora, «Llegó»; y antes, confirmarla.
+ */
+export function stepBeforeArrival(
+  item: { visit: AppointmentVisit; startsAt: string; endsAt: string },
+  now: string,
+  isToday: boolean,
+): "cerrar" | "llego" | "confirmar" | null {
+  if (item.visit !== "por_confirmar" && item.visit !== "confirmada") return null
+  if (Date.parse(item.endsAt) <= Date.parse(now)) return "cerrar"
+  const soon = isToday && Date.parse(item.startsAt) - Date.parse(now) <= ARRIVAL_WINDOW_MS
+  if (item.visit === "por_confirmar" && !soon) return "confirmar"
+  return isToday ? "llego" : null
 }
