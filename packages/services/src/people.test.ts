@@ -238,13 +238,16 @@ describe("un solo formulario de datos, con las reglas de la ficha", () => {
     await change({ email: "carla@example.test" })
     expect(await row()).toMatchObject({ displayName: "Carlita", givenNames: "Carla", email: "carla@example.test" })
 
+    // Volver a mandar lo mismo tampoco; ni deja a la persona por revisar.
+    await change({ givenNames: "Carla" })
+    expect(await row()).toMatchObject({ displayName: "Carlita", givenNames: "Carla" })
+
     await change({ familyName: "Quispe" })
     expect(await row()).toMatchObject({ displayName: "Carla Quispe", givenNames: "Carla", familyName: "Quispe" })
 
-    // Se puede no saber una parte, no vaciar por error la que ya se sabe.
-    await expect(change({ familyName: null })).rejects.toMatchObject({ status: 400, fields: { familyName: "Escribe los apellidos" } })
-    await expect(change({ givenNames: null })).rejects.toMatchObject({ status: 400, fields: { givenNames: "Escribe los nombres" } })
-    expect(await row()).toMatchObject({ givenNames: "Carla", familyName: "Quispe" })
+    // El equipo puede quitar lo que quedó mal, sin inventar lo que no sabe.
+    await change({ familyName: null })
+    expect(await row()).toMatchObject({ displayName: "Carla", givenNames: "Carla", familyName: null })
   })
 
   it("un paciente que quedó con una parte de su nombre edita lo demás, y al escribir su nombre van los dos", async () => {

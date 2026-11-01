@@ -11,9 +11,9 @@ La regla de la ficha exige nombres y apellidos juntos. Desde el 28 de octubre, S
 - **Quien aún no es paciente puede quedar con solo sus nombres o solo sus apellidos.** Lo que se sabe se guarda; no se pierde por no estar completo. Lo guarda Sofi o el equipo al editar; «Nuevo contacto» sigue pidiendo los dos, porque ahí se escribe un alta y no un dato suelto.
 - **Registrarse como paciente sigue pidiendo los dos.** Ahí se completa lo que falta, con lo guardado ya escrito en el enlace y en el cajón de registro.
 - **Editar otro dato nunca pide lo que falta.** La regla mira lo guardado más lo que cambia: si solo la relajara Sofi, editar el teléfono de Carla le pediría a recepción unos apellidos que nadie conoce. Vale también para un paciente que quedó con una parte: al escribir sus nombres lleva los dos.
-- **Se puede no saber una parte, no borrar la que ya se sabe.** Vaciar «Apellidos» por error sigue dando error.
-- **Lo que Sofi escribió entero no se pierde.** Si manda «Carla» y aparte «Carla Quispe», lo demás son los apellidos. No se adivina: es el resto de lo que ella misma dio como nombre entero, y un nombre visible solo sigue sin repartirse (ADR 0058).
-- **Completar no es cambiar de nombre.** Pasar de «Carla» a «Carla Quispe» al registrarse no deja nota; registrarse con otro nombre sí.
+- **El equipo puede quitar lo que quedó mal.** Vaciar «Apellidos» de quien aún no es paciente se guarda: es una acción a la vista, y la alternativa es obligarlo a inventar uno.
+- **Nada se reparte.** Si Sofi manda «Carla» y aparte «Carla Quispe», queda «Carla» y la herramienta le dice qué no quedó, para que ella mande los apellidos. Solo ella sabe si «María José» trae un apellido (ADR 0058). Si ya envió su respuesta en ese mismo paso no lo lee, y los apellidos se piden después.
+- **Completar no es cambiar de nombre.** Pasar de «carla» a «Carla Quispe» al registrarse no deja nota; registrarse con otro nombre sí. Un nombre a medias no se mezcla con otro: si recepción dice que es la misma persona, va entero el que escribió, salvo que elija los apellidos guardados.
 
 ## Alternativas descartadas
 
@@ -24,6 +24,7 @@ La regla de la ficha exige nombres y apellidos juntos. Desde el 28 de octubre, S
 
 - Con solo apellidos, el nombre visible pasa a ser esos apellidos, porque la base lo deriva de lo guardado, y se pierde el nombre de perfil que había. Sofi sigue sin saber cómo se llama y puede preguntarlo, y los avisos saludan por ese apellido. Es un caso raro: no apareció en esas 120 conversaciones.
 - El registro de un paciente sigue pidiendo los dos. Si una vía interna deja a un paciente con una parte, «Faltan datos» lo dice y no le impide editar lo demás.
+- Si Sofi manda solo el nombre visible de alguien con una parte guardada, ese visible queda por revisar y los apellidos siguen sin guardarse, así que puede volver a preguntarlos. Es raro: de 96 llamadas, 2 traían solo el nombre visible.
 
 ## Referencias
 

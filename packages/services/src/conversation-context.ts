@@ -24,6 +24,9 @@ export interface ConversationContext {
   contactId: string
   patientId: string | null
   name: string
+  /** Lo que se sabe de su nombre por separado, para que un formulario lo traiga escrito sin repartir `name`. */
+  givenNames: string | null
+  familyName: string | null
   /** Para mostrar: su teléfono o, sin él, el número de su WhatsApp. */
   phone: string | null
   /** Solo el de su ficha: lo que un formulario puede traer escrito y guardar como dato de la persona. */
@@ -96,5 +99,5 @@ export async function getConversationContext(tx: Db, orgId: string, conversation
     lines.recuerda = facts[0]?.text ?? "Todavía nada"
     if (!patientId) lines.datos = phone || row.email ? "Aún no es paciente" : "Sin datos de contacto"
   }
-  return { contactId: row.id, patientId, name: row.displayName, phone, declaredPhone: row.phone, email: row.email, nextAppointment, lines, attention }
+  return { contactId: row.id, patientId, name: row.displayName, givenNames: row.givenNames, familyName: row.familyName, phone, declaredPhone: row.phone, email: row.email, nextAppointment, lines, attention }
 }

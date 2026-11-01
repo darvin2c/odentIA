@@ -1,5 +1,5 @@
 import { canAccess } from "@odentia/auth/permissions"
-import { IDENTITY_DOC_TYPES } from "@odentia/clinical"
+import { IDENTITY_DOC_TYPES, nameWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   agentHandoff,
@@ -277,17 +277,10 @@ export async function listAgentContextCandidates(tx: Db, orgId: string, contactI
   }))
 }
 
+export { composeDisplayName, nameWords } from "@odentia/clinical"
+
 /** La clave de la tarea «Revisar su nombre», por paciente y nombre dicho. */
 const NAME_REVIEW_KEY = "nombre-distinto:"
-
-/** Sus palabras sin tildes y en minúsculas: «José» y «jose» son la misma. */
-const nameWords = (value: string): string[] =>
-  value
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "")
-    .toLowerCase()
-    .split(/[^\p{L}]+/u)
-    .filter(Boolean)
 
 /**
  * Quien ya es paciente dice en el chat que se llama distinto de como figura

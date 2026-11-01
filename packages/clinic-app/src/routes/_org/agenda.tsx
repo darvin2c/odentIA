@@ -439,7 +439,13 @@ function AgendaPage() {
         self
           ? { patient: { id: self.id, name: self.displayName }, lockedPatient: true, conversationId: requested.conversationId }
           : {
-              person: { contactId: person.contact.id, name: person.contact.displayName, phone: person.contact.phone },
+              person: {
+                contactId: person.contact.id,
+                name: person.contact.displayName,
+                givenNames: person.contact.givenNames,
+                familyName: person.contact.familyName,
+                phone: person.contact.phone,
+              },
               lockedPatient: true,
               conversationId: requested.conversationId,
             },

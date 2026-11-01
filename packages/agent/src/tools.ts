@@ -92,6 +92,8 @@ import {
   sendReceiptInConversation,
   topicKindOf,
   updateContact,
+  composeDisplayName,
+  nameWords,
   webchatHandoffWhere,
   webchatReplyRoutes,
 } from "@odentia/services"
@@ -1161,49 +1163,44 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       familyName?: string
     }) => {
       const contactId = ctx.contactId
-      let given = givenNames?.trim()
-      let family = familyName?.trim()
+      const given = givenNames?.trim()
+      const family = familyName?.trim()
       const display = displayName?.trim()
       if (!given && !family && !display) return "No se guardó nada: no venía un nombre."
-      // «Carla Quispe» con solo «Carla» aparte: lo demás del nombre visible es la otra parte. Si no, se perdería,
-      // porque la base arma el visible con lo que viene por separado.
-      const whole = display ?? ""
-      const spoken = whole.toLocaleLowerCase()
-      if (given && !family && spoken.startsWith(`${given.toLocaleLowerCase()} `)) family = whole.slice(given.length).trim()
-      else if (family && !given && spoken.endsWith(` ${family.toLocaleLowerCase()}`)) given = whole.slice(0, -family.length).trim()
+      const said = composeDisplayName({ givenNames: given, familyName: family }) || display || ""
+      // Se guarda lo que dijo: «Soy Carla» ya es saber con quién habla, y lo demás lo completa al registrarse (ADR 0129).
+      // El nombre visible lo arma la base con sus nombres y apellidos; el suelto vale solo si no viene ninguno.
+      const names = {
+        ...(given ? { givenNames: given } : {}),
+        ...(family ? { familyName: family } : {}),
+        ...(display && !given && !family ? { displayName: display } : {}),
+      }
       // La simulación corre la operación real y la deshace: así dice lo que de verdad pasaría, sin copiar sus reglas.
       const undone = Symbol("simulación")
-      const attempt = async <T,>(fn: (tx: Db) => Promise<T>): Promise<T> => {
-        if (!ctx.dryRun) return inOrg(fn)
-        let result!: T
-        await inOrg(async (tx) => {
-          result = await fn(tx)
-          throw undone
-        }).catch((error: unknown) => {
-          if (error !== undone) throw error
-        })
-        return result
-      }
-      // El nombre de un paciente lo cambia el equipo en su ficha; aquí, solo el de quien aún no lo es.
-      // Si dijo otro, su ficha no cambia y recepción la revisa (ADR 0116).
-      const said = [given, family].filter(Boolean).join(" ") || display || ""
-      const outcome = await attempt((tx) => reportPatientNameMismatch(tx, ctx.orgId, { contactId, conversationId: ctx.conversationId, said }))
+      let outcome!: Awaited<ReturnType<typeof reportPatientNameMismatch>>
+      let shown = ""
+      await inOrg(async (tx) => {
+        // El nombre de un paciente lo cambia el equipo en su ficha; aquí, solo el de quien aún no lo es.
+        // Si dijo otro, su ficha no cambia y recepción la revisa (ADR 0116).
+        outcome = await reportPatientNameMismatch(tx, ctx.orgId, { contactId, conversationId: ctx.conversationId, said })
+        if (outcome === "no_es_paciente") shown = (await updateContact(tx, ctx.orgId, contactId, names, { userId: null, origin: "agent" })).contact.displayName
+        if (ctx.dryRun) throw undone
+      }).catch((error: unknown) => {
+        if (error !== undone) throw error
+      })
       if (outcome === "avisado") {
         await noteAction("datos", "avisó a recepción que su nombre no es el de su ficha")
         return `${ctx.dryRun ? "[SIMULACIÓN] " : ""}Es paciente y su ficha dice otro nombre: por aquí no se cambia y ${ctx.dryRun ? "quedaría" : "quedó"} una tarea para que recepción la revise. Háblale por el nombre que te dijo, sin decirle cómo figura en su ficha. Si le das su enlace para reservar, dile que ahí puede corregir su nombre.`
       }
       if (outcome !== "no_es_paciente") return "Es paciente: su nombre no se cambia por aquí. Úsalo tal como figura."
-      // Se guarda lo que dijo: «Soy Carla» ya es saber con quién habla, y lo demás lo completa al registrarse (ADR 0129).
-      // El nombre visible lo arma el servicio con sus nombres y apellidos, también con los ya guardados.
-      const names = {
-        ...(given ? { givenNames: given } : {}),
-        ...(family ? { familyName: family } : {}),
-        ...(display ? { displayName: display } : {}),
-      }
-      await attempt((tx) => updateContact(tx, ctx.orgId, contactId, names, { userId: null, origin: "agent" }))
-      if (ctx.dryRun) return "[SIMULACIÓN] Se actualizaría el contacto."
+      // Si el nombre entero traía algo más, no se reparte («María José» no tiene apellido): lo sabe quien lo escuchó (ADR 0058).
+      const kept = new Set(nameWords(shown))
+      const leftOut = !!display && !!given !== !!family && nameWords(display).some((word) => !kept.has(word))
+      const other = family ? "sus nombres, guárdalos en givenNames" : "sus apellidos, guárdalos en familyName"
+      const told = leftOut ? ` Figura como «${shown}» y no quedó el resto de «${display}». Si ahí te dijo ${other}.` : ""
+      if (ctx.dryRun) return `[SIMULACIÓN] Se actualizaría el contacto.${told}`
       await noteAction("datos", "anotó su nombre")
-      return "Contacto actualizado."
+      return `Contacto actualizado.${told}`
     },
     {
       name: "update_contact",

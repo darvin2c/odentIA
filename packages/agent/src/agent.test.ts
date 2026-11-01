@@ -1710,17 +1710,20 @@ it("update_contact guarda lo que sabe de su nombre y lo demás se completa despu
   expect(String(await tool.invoke({ familyName: "Rojas" }))).toBe("Contacto actualizado.")
   expect(await person()).toMatchObject({ displayName: "Rojas", givenNames: null, familyName: "Rojas" })
 
-  // Lo que escribió entero no se pierde: lo demás es la otra parte, venga cuál venga.
+  // Lo que trae de más el nombre entero no se reparte («María José» no tiene apellido): se le dice qué no quedó.
   await setNames({ displayName: "Anita", givenNames: null, familyName: null })
-  await tool.invoke({ givenNames: "Carla", displayName: "Carla Quispe" })
-  expect(await person()).toMatchObject({ displayName: "Carla Quispe", givenNames: "Carla", familyName: "Quispe" })
-  await setNames({ displayName: "Anita", givenNames: null, familyName: null })
-  await tool.invoke({ familyName: "Quispe Rojas", displayName: "Carla Quispe Rojas" })
-  expect(await person()).toMatchObject({ displayName: "Carla Quispe Rojas", givenNames: "Carla", familyName: "Quispe Rojas" })
-  // Un nombre visible que no empieza por la parte que dio no se reparte.
-  await setNames({ displayName: "Anita", givenNames: null, familyName: null })
-  await tool.invoke({ givenNames: "Carla", displayName: "Carlita Quispe" })
+  const short = String(await tool.invoke({ givenNames: "Carla", displayName: "Carla Quispe" }))
+  expect(short).toContain("Figura como «Carla» y no quedó el resto de «Carla Quispe»")
+  expect(short).toContain("sus apellidos, guárdalos en familyName")
   expect(await person()).toMatchObject({ displayName: "Carla", givenNames: "Carla", familyName: null })
+  expect(String(await tool.invoke({ familyName: "Quispe", displayName: "Carla Quispe" }))).toBe("Contacto actualizado.")
+  expect(await person()).toMatchObject({ displayName: "Carla Quispe", givenNames: "Carla", familyName: "Quispe" })
+  // La misma palabra sin tilde no es algo de más, y la simulación dice lo mismo.
+  await setNames({ displayName: "Anita", givenNames: null, familyName: null })
+  expect(String(await tool.invoke({ givenNames: "María", displayName: "Maria" }))).toBe("Contacto actualizado.")
+  await setNames({ displayName: "Anita", givenNames: null, familyName: null })
+  expect(String(await simulated.invoke({ familyName: "Rojas", displayName: "Ana Rojas" }))).toContain("[SIMULACIÓN] Se actualizaría el contacto. Figura como «Rojas»")
+  expect(await person()).toMatchObject({ displayName: "Anita", familyName: null })
 
   // Lo de siempre sigue igual.
   await setNames({ displayName: "Luz", givenNames: null, familyName: null })

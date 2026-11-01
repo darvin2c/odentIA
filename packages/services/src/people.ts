@@ -958,9 +958,6 @@ export async function updatePersonIdentity(
     stored,
     { partialName: true },
   )
-  // Se puede no saber una parte, no borrar sin querer la que ya se sabe.
-  if (locked.familyName && !merged.familyName) errors.familyName = "Escribe los apellidos"
-  if (locked.givenNames && !merged.givenNames) errors.givenNames = "Escribe los nombres"
   const failed = fieldsError(errors)
   if (failed) throw failed
   const set: Partial<typeof contact.$inferInsert> = { updatedAt: new Date() }
@@ -975,8 +972,6 @@ export async function updatePersonIdentity(
     set.docCountry = merged.docCountry
     await assertDocumentFree(tx, orgId, merged, { exceptContactId: contactId })
   }
-  // Solo si cambian los nombres: editar otro dato no recorta el visible de quien tiene su nombre a medias.
-  if ((keys.includes("givenNames") || keys.includes("familyName")) && !keys.includes("displayName") && composed) set.displayName = composed
   try {
     await tx
       .update(contact)

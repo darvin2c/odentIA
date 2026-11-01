@@ -342,7 +342,7 @@ function PersonPageRoute() {
             }
             onAction={
               can("appointments.write") && can("crm.read") && !person.archived
-                ? () => openBookingAnywhere({ person: { contactId: person.id, name: person.displayName, phone: person.phone } })
+                ? () => openBookingAnywhere({ person: { contactId: person.id, name: person.displayName, givenNames: person.givenNames, familyName: person.familyName, phone: person.phone } })
                 : undefined
             }
           />

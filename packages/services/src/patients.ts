@@ -5,6 +5,7 @@ import {
   isMinor,
   KINSHIP,
   normalizePersonData,
+  nameWords,
   normalizePhone,
   registrationContactInputSchema,
   SEX_CODES,
@@ -235,8 +236,9 @@ async function adoptIdentity(
     const otherName = !!identity.displayName && identity.displayName !== current.displayName
     const keepsName = !!current.docNumber && current.docNumber !== identity.docNumber
     if (keepsName && otherName) told.push(`nombre ${identity.displayName}`)
-    // El nombre va entero: los nombres y apellidos de antes no se mezclan con el escrito, ni cuando solo había una parte.
-    const names = keepsName && (current.givenNames || current.familyName)
+    // El nombre va entero: los nombres y apellidos de antes no se mezclan con el escrito. Tampoco si no había
+    // ninguno: escribirlos haría que la base cambiara el nombre que se conserva.
+    const names = keepsName
       ? { givenNames: current.givenNames, familyName: current.familyName }
       : { givenNames: identity.givenNames ?? null, familyName: identity.familyName ?? null }
     const takesDocument = !current.docNumber && withDocument
@@ -257,9 +259,10 @@ async function adoptIdentity(
       .where(and(eq(contact.organizationId, orgId), eq(contact.id, personId)))
     // El nombre de un canal se reemplaza sin más; uno que alguien guardó (Sofi o el equipo) queda dicho.
     // Completar la parte que faltaba no es cambiar de nombre: es lo esperado (ADR 0129).
+    const sameName = (a?: string | null, b?: string | null) => nameWords(a ?? "").join(" ") === nameWords(b ?? "").join(" ")
     const completes =
-      (!current.familyName && current.givenNames === identity.givenNames) ||
-      (!current.givenNames && current.familyName === identity.familyName)
+      (!current.familyName && sameName(current.givenNames, identity.givenNames)) ||
+      (!current.givenNames && sameName(current.familyName, identity.familyName))
     const renamed = !keepsName && otherName && !!(current.givenNames || current.familyName) && !completes
     const body = [
       renamed ? `Se registró como ${identity.displayName}; antes figuraba como ${current.displayName}.` : null,

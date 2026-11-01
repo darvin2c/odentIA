@@ -872,7 +872,8 @@ describe("reservar desde un enlace quien recién se contacta", () => {
     const agent = { userId: null, origin: "agent" as const }
 
     const carla = await person("parte-carla")
-    await run((tx) => updateContact(tx, ORG, carla.contactId, { givenNames: "Carla" }, agent))
+    // Como lo escribió en el chat: «carla» y «Carla» son el mismo nombre.
+    await run((tx) => updateContact(tx, ORG, carla.contactId, { givenNames: "carla" }, agent))
     const completed = await register(carla, "Carla", "Quispe", "47651235")
     expect(completed.person).toMatchObject({ displayName: "Carla Quispe", givenNames: "Carla", familyName: "Quispe" })
     expect(completed.notes.join(" ")).not.toContain("antes figuraba")
@@ -890,5 +891,12 @@ describe("reservar desde un enlace quien recién se contacta", () => {
     expect(kept.person).toMatchObject({ displayName: "Lucía", givenNames: "Lucía", familyName: null, docNumber: "41239877" })
     expect(kept.notes).toContain(
       "En el registro escribió otros datos, que no se guardaron: documento 47651237, nombre Ana Ríos Vega. Revisa cuáles valen.")
+
+    // Sin nombres separados tampoco: su documento no queda bajo el nombre de otra.
+    const perfil = await person("parte-perfil")
+    await run((tx) =>
+      updateContact(tx, ORG, perfil.contactId, { docType: "DNI", docNumber: "41239878" }, { userId: OWNER }))
+    const profileKept = await register(perfil, "Ana", "Ríos Vega", "47651238")
+    expect(profileKept.person).toMatchObject({ displayName: "parte-perfil", givenNames: null, familyName: null, docNumber: "41239878" })
   })
 })

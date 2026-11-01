@@ -313,6 +313,15 @@ export function identityDocumentError(
   }
 }
 
+/** Sus palabras sin tildes y en minúsculas: «José» y «jose» son la misma. */
+export const nameWords = (value: string): string[] =>
+  value
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .split(/[^\p{L}]+/u)
+    .filter(Boolean)
+
 /** «Rosa María» + «Quispe Huamán» → «Rosa María Quispe Huamán». */
 export function composeDisplayName(parts: { givenNames?: string | null; familyName?: string | null }): string {
   return [parts.givenNames, parts.familyName]
