@@ -76,7 +76,6 @@ export const configuracion: SectionNavItem[] = [
   ["Correo", "/settings/mail"],
   ["Agente", "/settings/agent"],
   ["Pipelines", "/settings/pipelines"],
-  ["Campos", "/settings/fields"],
   ["Registro de pacientes", "/settings/patient-registration"],
   ["Acceso de pacientes", "/settings/patient-access"],
   ["Auditoría", "/settings/audit"],
@@ -117,7 +116,6 @@ export const configuracionGrupos: SectionNavGroup[] = [
     items: [
       { label: "Medios de pago y ticket", to: "/settings/payment-methods" },
       { label: "Etapas de venta", to: "/settings/pipelines" },
-      { label: "Campos de contacto", to: "/settings/fields" },
     ],
   },
 ]

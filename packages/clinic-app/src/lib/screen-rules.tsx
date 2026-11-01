@@ -295,8 +295,6 @@ const SETTINGS_PRIMARY = {
   branches: { permission: "settings.write", label: "Nueva sede" },
   team: { permission: "settings.write", label: "Invitar al equipo" },
   specialties: { permission: "settings.write", label: "Agregar especialidad" },
-  /** Campos y etapas de venta los define también quien trabaja con ventas. */
-  fields: { permission: "crm.write", label: "Nuevo campo" },
   paymentMethods: { permission: "settings.write", label: "Agregar medio de pago" },
 } as const
 

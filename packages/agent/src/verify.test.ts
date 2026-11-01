@@ -67,7 +67,7 @@ it("las cifras de una dirección web no sustentan un precio; el importe junto a 
   }
   // Una respuesta oficial con un enlace sigue sustentando su importe, también en el JSON de una herramienta.
   const official = { source: "Respuestas oficiales", text: "Limpieza en promoción: S/ 120. Reserva en https://sonrisa.example/promo-99." }
-  const contact = { source: "Ficha del contacto", text: JSON.stringify({ customFields: { web: "https://sonrisa.example/promo-99", convenio: 120 } }) }
+  const contact = { source: "Ficha del contacto", text: JSON.stringify({ datos: { web: "https://sonrisa.example/promo-99", convenio: 120 } }) }
   for (const evidence of [official, contact]) {
     expect(check("La limpieza cuesta S/ 120.", [evidence]).ok).toBe(true)
     expect(unsupportedOf("La limpieza cuesta S/ 99.", [evidence])).toEqual(["S/ 99"])
@@ -110,7 +110,7 @@ it("las cifras del cursor de una lista no sustentan un precio", () => {
     JSON.stringify({ ts: "2026-10-09T21:14:05.000Z", id: "7c1e9d02-4b6a-4f3e-8d21-5a9c0e7b3f64" }),
   ).toString("base64url")
   const opportunities = { source: "Oportunidades del contacto", text: `- Ortodoncia: S/ 2,500.00\nHay más oportunidades: vuelve a llamar con cursor "${cursor}".` }
-  const contact = { source: "Ficha del contacto", text: JSON.stringify({ name: "Ana", customFields: { convenio: 120 }, nextNotesCursor: cursor }) }
+  const contact = { source: "Ficha del contacto", text: JSON.stringify({ name: "Ana", datos: { convenio: 120 }, nextNotesCursor: cursor }) }
   for (const evidence of [opportunities, contact]) {
     for (const invented of ["S/ 2", "S/ 5", "S/ 6"]) {
       expect(unsupportedOf(`La consulta cuesta ${invented}.`, [evidence])).toEqual([invented])

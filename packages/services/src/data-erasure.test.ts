@@ -47,7 +47,7 @@ async function patientWithHistory() {
     email: `elena-${randomUUID()}@example.com`,
     birthDate: "1988-03-02",
   })
-  await ownerDb.update(contact).set({ tags: ["vip"], customFields: { origen: "feria" } }).where(eq(contact.id, personId))
+  await ownerDb.update(contact).set({ tags: ["vip"] }).where(eq(contact.id, personId))
   const [conn] = await ownerDb
     .insert(channelConnection)
     .values({
@@ -143,7 +143,7 @@ it("borra lo no clínico, guarda la historia y los cobros, cancela su cita sin a
   expect(await ownerDb.select().from(crmNote).where(eq(crmNote.contactId, personId))).toEqual([])
   expect(await ownerDb.select().from(agentPersonFact).where(eq(agentPersonFact.contactId, personId))).toEqual([])
   const [person] = await ownerDb.select().from(contact).where(eq(contact.id, personId))
-  expect(person).toMatchObject({ email: null, tags: [], customFields: {}, isActive: false, recordLockedBy: f.actor })
+  expect(person).toMatchObject({ email: null, tags: [], isActive: false, recordLockedBy: f.actor })
   // Nombre, documento y teléfono quedan, dentro de la historia.
   expect(person!.displayName).toBeTruthy()
   // Todos sus mensajes apagados.

@@ -48,7 +48,6 @@ const grupos: SectionNavGroup[] = [
     items: [
       { label: "Medios de pago y ticket", to: "/settings/payment-methods" },
       { label: "Etapas de venta", to: "/settings/pipelines" },
-      { label: "Campos de contacto", to: "/settings/fields" },
     ],
   },
 ]
