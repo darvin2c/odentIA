@@ -294,7 +294,7 @@ it("lo del paciente se borra aunque lo lleve quien habla por él; lo de esa pers
   expect(await run((tx) => erasurePreview(tx, "org_a", patientId))).toMatchObject({ opportunities: 1, tasks: 3, notes: 2, linkedPeople: 1 })
   const erased = await run((tx) => eraseForDataRequest(tx, "org_a", f.actor, patientId, request.id))
   // La constancia no dice que se borró todo: lo de su mamá es de ella.
-  expect(erased.request.resolution).toMatch(/no se borró: es de esa persona/)
+  expect(erased.request.resolution).toMatch(/no se borró: es de ellas/)
 
   const idsOf = async (table: typeof opportunity | typeof task | typeof appointmentBookingLink | typeof agentProposal | typeof automationJob, ids: string[]) =>
     (await ownerDb.select({ id: table.id }).from(table as typeof task).where(inArray(table.id, ids))).map((row) => row.id)

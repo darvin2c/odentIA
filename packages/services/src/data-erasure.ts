@@ -36,7 +36,7 @@ export interface ErasurePreview {
   opportunities: number
   tasks: number
   notes: number
-  /** Quienes hablan por ella: lo que tienen por su cuenta, como sus conversaciones, es suyo y no se borra. */
+  /** Sus personas vinculadas: lo que tienen por su cuenta, como sus conversaciones, es suyo y no se borra. */
   linkedPeople: number
   /** Citas por venir: se cancelan sin avisarle. */
   futureAppointments: Array<{ id: string; startsAt: string }>
@@ -76,7 +76,7 @@ export async function erasurePreview(tx: Db, orgId: string, patientId: string): 
     linkedPeople: number
   }>(sql`
     with own_opportunity as (
-      select id, patient_id from opportunity
+      select id from opportunity
       where organization_id = ${orgId} and (contact_id = ${person.personId} or patient_id = ${patientId})
     ), own_conversation as (
       select id from conversation where organization_id = ${orgId} and contact_id = ${person.personId}
@@ -92,7 +92,7 @@ export async function erasurePreview(tx: Db, orgId: string, patientId: string): 
         or id in (select task_id from agent_handoff where organization_id = ${orgId} and task_id is not null
           and (contact_id = ${person.personId} or conversation_id in (select id from own_conversation))))) as tasks,
       (select count(*)::int from crm_note where organization_id = ${orgId} and (contact_id = ${person.personId}
-        or opportunity_id in (select id from own_opportunity where patient_id = ${patientId}))) as notes,
+        or opportunity_id in (select id from opportunity where organization_id = ${orgId} and patient_id = ${patientId}))) as notes,
       (select count(*)::int from patient_contact where organization_id = ${orgId} and patient_id = ${patientId}
         and contact_id <> ${person.personId}) as "linkedPeople"`)
   const row = counts[0]!
@@ -139,7 +139,7 @@ export function erasureResolution(preview: ErasurePreview): string {
   const appointments = preview.futureAppointments.length
     ? ` Se cancelaron ${plural(preview.futureAppointments.length, "cita", "citas")} sin avisarle.`
     : ""
-  const others = preview.linkedPeople ? " Lo que quien habla por ella tiene por su cuenta, como sus conversaciones, no se borró: es de esa persona." : ""
+  const others = preview.linkedPeople ? " Lo que sus personas vinculadas tienen por su cuenta, como sus conversaciones, no se borró: es de ellas." : ""
   return `Se borraron ${parts.join(", ")} y lo que el agente recordaba de ella.${appointments} La historia clínica, los cobros y los comprobantes quedaron bloqueados.${others}`
 }
 

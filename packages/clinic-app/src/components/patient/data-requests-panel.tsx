@@ -897,7 +897,7 @@ function ErasureSummary({ preview, locale }: { preview: ErasurePreview; locale: 
       </div>
       {preview.linkedPeople ? (
         <p className="text-muted-foreground">
-          Lo que quien habla por ella tiene por su cuenta, como sus conversaciones, no se borra: es de esa persona.
+          Lo que sus personas vinculadas tienen por su cuenta, como sus conversaciones, no se borra: es de ellas.
         </p>
       ) : null}
       {appointments.length || debts.length ? (

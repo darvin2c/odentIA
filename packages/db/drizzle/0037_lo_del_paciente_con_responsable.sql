@@ -54,7 +54,7 @@ BEGIN
   DELETE FROM "patient_registration_link" WHERE "conversation_id" = ANY(v_convs) OR "contact_id" = v_contact;
   DELETE FROM "task" WHERE "id" = ANY(v_tasks);
   DELETE FROM "crm_note" WHERE "contact_id" = v_contact OR "opportunity_id" IN (
-    SELECT "id" FROM "opportunity" WHERE "id" = ANY(v_opps) AND "patient_id" = p_patient);
+    SELECT "id" FROM "opportunity" WHERE "patient_id" = p_patient AND "organization_id" = v_org);
   UPDATE "crm_note" SET "conversation_id" = NULL WHERE "conversation_id" = ANY(v_convs);
   UPDATE "crm_note" SET "opportunity_id" = NULL WHERE "opportunity_id" = ANY(v_opps);
   DELETE FROM "opportunity" WHERE "id" = ANY(v_opps);
