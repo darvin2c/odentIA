@@ -10,10 +10,10 @@ import { createConnection } from "./connections.js"
 import { formatOrgMoney } from "./locale.js"
 import { type IngestDeps, ingestInbound, sendOutbound } from "./conversations.js"
 import {
-  answerKnowledgeGaps,
+  addAskFormsToAnswer,
+  ASK_FORM_LIMIT,
   type ClinicInfoSnapshot,
   createKnowledgeEntry,
-  discardKnowledgeGaps,
   formatKnowledgeForPrompt,
   getClinicInfoSnapshot,
   getKnowledgeBasics,
@@ -24,7 +24,6 @@ import {
   knowledgeFitsPrompt,
   listActiveKnowledge,
   listKnowledgeEntries,
-  listKnowledgeGaps,
   listKnowledgePage,
   listKnowledgeRevisions,
   recordKnowledgeGap,
@@ -335,7 +334,7 @@ it("lo que toma de tus datos cuenta los precios que el agente puede decir y las 
   })
 })
 
-it("lo que no supo responder se agrupa, muestra lo que respondió el equipo y se cierra con una respuesta oficial", async () => {
+it("lo que no encontró se anota una vez por hilo, aislado por organización y sin borrado", async () => {
   const first = await openConversation("gap-1")
   const second = await openConversation("gap-2")
   const question = "¿Tienen estacionamiento para bicicletas?"
@@ -343,48 +342,25 @@ it("lo que no supo responder se agrupa, muestra lo que respondió el equipo y se
   expect(one).toBeTruthy()
   // La misma pregunta en el mismo hilo no se repite; en otro hilo suma.
   expect(await run((tx) => recordKnowledgeGap(tx, ORG, { conversationId: first, question: "¿tienen estacionamiento para bicicletas?", query: "bicis" }))).toBeNull()
-  await run((tx) => recordKnowledgeGap(tx, ORG, { conversationId: second, question, query: "bicicletas" }))
-  const other = await run((tx) => recordKnowledgeGap(tx, ORG, { conversationId: second, question: "¿Venden cepillos?", query: "cepillos" }))
-  // Una persona del equipo responde después en el primer hilo.
-  await run((tx) => sendOutbound(tx, ORG, {
-    conversationId: first, senderKind: "user", senderUserId: OWNER,
-    content: { type: "text", text: "Sí, hay un bicicletero en la entrada." },
-  }))
-  const open = await run((tx) => listKnowledgeGaps(tx, ORG))
-  const group = open.find((item) => item.question === question)
-  expect(group).toMatchObject({ count: 2, weekCount: 2, teamAnswer: "Sí, hay un bicicletero en la entrada.", status: "abierta" })
-  // «Esta semana» cuenta solo los últimos siete días; el total sigue contando todo.
-  await ownerDb.update(agentKnowledgeGap).set({ createdAt: new Date(Date.now() - 8 * 86_400_000) }).where(eq(agentKnowledgeGap.id, one!))
-  expect((await run((tx) => listKnowledgeGaps(tx, ORG))).find((item) => item.question === question)).toMatchObject({ count: 2, weekCount: 1 })
-  expect(open.find((item) => item.question === "¿Venden cepillos?")).toMatchObject({ count: 1, teamAnswer: null })
+  expect(await run((tx) => recordKnowledgeGap(tx, ORG, { conversationId: second, question, query: "bicicletas" }))).toBeTruthy()
 
-  // Guardar como respuesta oficial: queda publicada y recuerda cómo se preguntó.
-  const answered = await run((tx) => answerKnowledgeGaps(tx, ORG, OWNER, group!.ids, {
-    title: "Estacionamiento para bicicletas", body: "Sí, hay un bicicletero en la entrada.",
-  }))
-  expect(answered).toMatchObject({ status: "publicada", state: "vigente", askForms: [question] })
-  expect((await run((tx) => searchPublishedKnowledge(tx, ORG, "tienen estacionamiento para bicicletas")))[0]?.id).toBe(answered.id)
-  expect((await run((tx) => listKnowledgeGaps(tx, ORG))).map((item) => item.question)).not.toContain(question)
-  expect((await run((tx) => listKnowledgeGaps(tx, ORG, { status: "resuelta" }))).find((item) => item.question === question)?.count).toBe(2)
-  // Ya cerradas no se cierran dos veces.
-  await expect(run((tx) => answerKnowledgeGaps(tx, ORG, OWNER, group!.ids, { entryId: answered.id }))).rejects.toMatchObject({ code: "NOT_FOUND" })
-
-  // Enlazar a una respuesta que ya existía suma la forma de preguntar; descartar no crea nada.
-  const third = await openConversation("gap-3")
-  const again = await run((tx) => recordKnowledgeGap(tx, ORG, { conversationId: third, question: "¿Dónde dejo mi bici?", query: "bici" }))
-  const linked = await run((tx) => answerKnowledgeGaps(tx, ORG, OWNER, [again!], { entryId: answered.id }))
-  expect(linked.askForms).toEqual([question, "¿Dónde dejo mi bici?"])
-  expect(linked.version).toBe(1)
-  await run((tx) => discardKnowledgeGaps(tx, ORG, OWNER, [other!]))
-  expect((await run((tx) => listKnowledgeGaps(tx, ORG))).map((item) => item.question)).not.toContain("¿Venden cepillos?")
-  const [discarded] = await run((tx) => tx.select().from(agentKnowledgeGap).where(eq(agentKnowledgeGap.id, other!)))
-  expect(discarded).toMatchObject({ status: "descartada", resolvedBy: OWNER, resolvedEntryId: null })
-
-  // Aislado por organización y sin borrado.
   expect([...(await withOrgContext(appDb, OTHER, (tx) => tx.execute(sql`select id from agent_knowledge_gap`)))]).toEqual([])
-  await expect(run((tx) => tx.delete(agentKnowledgeGap).where(eq(agentKnowledgeGap.id, other!)))).rejects.toThrow()
-  await expect(withOrgContext(appDb, OTHER, (tx) => getKnowledgeEntry(tx, OTHER, answered.id))).rejects.toMatchObject({ code: "NOT_FOUND" })
-  expect((await run((tx) => tx.select({ id: agentKnowledgeEntry.id }).from(agentKnowledgeEntry).where(eq(agentKnowledgeEntry.id, answered.id)))).length).toBe(1)
+  await expect(run((tx) => tx.delete(agentKnowledgeGap).where(eq(agentKnowledgeGap.id, one!)))).rejects.toThrow()
+})
+
+it("sumar formas de preguntar a una respuesta no cambia su texto, no repite y respeta el tope", async () => {
+  const entry = await run((tx) => createKnowledgeEntry(tx, ORG, OWNER, { kind: "faq", title: "Bicicletero", body: "Hay un bicicletero en la entrada." }))
+  const published = await run((tx) => setKnowledgeStatus(tx, ORG, OWNER, entry.id, "publicada"))
+  const linked = await run((tx) => addAskFormsToAnswer(tx, ORG, OWNER, entry.id, ["dejar la bici", "Dejar la bici", "bicicletero"]))
+  expect(linked).toMatchObject({ body: published.body, version: published.version, askForms: ["dejar la bici"] })
+  expect((await run((tx) => searchPublishedKnowledge(tx, ORG, "dejar la bici")))[0]?.id).toBe(entry.id)
+
+  const many = Array.from({ length: ASK_FORM_LIMIT + 5 }, (_, index) => `forma ${index}`)
+  expect((await run((tx) => addAskFormsToAnswer(tx, ORG, OWNER, entry.id, many))).askForms).toHaveLength(ASK_FORM_LIMIT)
+  // Sin lugar para ninguna, lo dice: no se da por sumada.
+  await expect(run((tx) => addAskFormsToAnswer(tx, ORG, OWNER, entry.id, ["una más"]))).rejects.toMatchObject({ code: "ASK_FORMS_FULL" })
+  // Solo de la propia organización.
+  await expect(withOrgContext(appDb, OTHER, (tx) => addAskFormsToAnswer(tx, OTHER, OWNER, entry.id, ["otra"]))).rejects.toMatchObject({ code: "NOT_FOUND" })
 })
 
 it("Conocimiento pagina: la respuesta 101 también se abre, y la búsqueda va al servidor", async () => {

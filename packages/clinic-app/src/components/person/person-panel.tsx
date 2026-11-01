@@ -87,7 +87,7 @@ const appointmentLine = (item: PanelAppointment) => [when(item.startsAt), item.p
 
 /**
  * Lo que abre una fila de una persona: qué pasó, qué se sabe y qué hacer, con la
- * caja de respuesta al pie (ADR 0125). Es uno solo en Inicio y en la Bandeja. La
+ * caja de respuesta al pie (ADR 0126). Es uno solo en Inicio y en la Bandeja. La
  * × cierra; lo escrito queda guardado como borrador de esa persona.
  *
  * Responder cuenta como en la Bandeja (ADR 0122): un solo «Enviar», y «Dejar

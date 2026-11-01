@@ -453,7 +453,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Agente",
     parent: null,
     purpose:
-      "El resumen de tus agentes (Sofi, tu agente de recepción; Clío, tu agente clínico, y Argos, tu agente administrador): cómo van, qué necesita de ti y la entrada para configurar cada uno, el «Horario de recontacto», lo que aprenden y lo que sabe Sofi. El número junto a Agente en el menú cuenta lo que se resuelve aquí: respuestas por revisar, lecciones por aprobar y lo que no supo responder. Los casos que te pasa Sofi están en «Te espera», y el número junto a Inicio cuenta las personas que te esperan. En «Actividad» ves lo que envió, propuso o te pasó; lo que espera el sí de una persona, en su conversación de la Bandeja.",
+      "El resumen de tus agentes (Sofi, tu agente de recepción; Clío, tu agente clínico, y Argos, tu agente administrador): cómo van, qué necesita de ti y la entrada para configurar cada uno, el «Horario de recontacto», lo que aprenden y lo que sabe Sofi. El número junto a Agente en el menú cuenta lo que se resuelve aquí: respuestas por revisar y lecciones por aprobar. Los casos que te pasa Sofi están en «Te espera», y el número junto a Inicio cuenta las personas que te esperan. En «Actividad» ves lo que envió, propuso o te pasó; lo que espera el sí de una persona, en su conversación de la Bandeja.",
     terms: [
       "sofi",
       "clío",
@@ -497,7 +497,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo le enseño algo al agente?",
-        a: "Sofi lee al momento los datos de tu clínica: horario del equipo, sedes, servicios y precios, promociones y medios de pago; se editan donde viven y Agente › Conocimiento te muestra todo lo que toma. Ahí agregas lo que solo tú sabes (estacionamiento, cuotas, seguros…). Cómo quieres que atienda va en Agente › Sofi, en «Lo que el agente debe saber»: una sola lista con lo que escribe la clínica («Escrita por la clínica», con quién y cuándo) y lo que aprendió de tus correcciones («Aprendida», con la conversación de la que salió y quién la aprobó). Todas se editan y se borran igual. Si respondió mal, corrígelo en Agente › Aprender; al aprobar una regla que contradice otra te lo dice antes, con «Reemplazar», «Mantener las dos» o «Descartar».",
+        a: "Sofi lee al momento los datos de tu clínica: horario del equipo, sedes, servicios y precios, promociones y medios de pago; se editan donde viven y Agente › Conocimiento te muestra todo lo que toma. Ahí agregas lo que solo tú sabes (estacionamiento, cuotas, seguros…). Cómo quieres que atienda va en Agente › Sofi, en «Lo que el agente debe saber»: una sola lista con lo que escribe la clínica («Escrita por la clínica», con quién y cuándo) y lo que aprendió de tus correcciones («Aprendida», con la conversación de la que salió y quién la aprobó). Todas se editan y se retiran igual, y lo retirado se puede restaurar. Si respondió mal o buscó algo y no lo encontró, está en Agente › Aprender, en «Por revisar»: lo corriges o lo das por bueno, y lo que apruebes se puede retirar después. Al aprobar o escribir una regla que contradice otra te lo dice antes, y eliges cuál queda.",
       },
       {
         q: "¿A qué hora le escribe odentIA a una persona?",

@@ -1,4 +1,4 @@
-# 0123 · Sin panel del agente: el trabajo va en Inicio y la actividad en su página
+# 0124 · Sin panel del agente: el trabajo va en Inicio y la actividad en su página
 
 Fecha: 2026-10-31 · Estado: aceptada · Ajusta a [0025](0025-un-pendiente-un-lugar.md) y [0118](0118-cada-numero-donde-se-resuelve.md) (dónde va el número de los casos)
 

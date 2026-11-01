@@ -9,7 +9,7 @@ import type { PersonCan } from "./people.js"
 /**
  * Horarios libres y precios de la lista para escribir en la respuesta: datos del
  * servidor en textos fijos, sin modelo, y siempre editables en la caja. Tocar un
- * horario no lo aparta (ADR 0125).
+ * horario no lo aparta (ADR 0126).
  */
 export interface PanelSuggestions {
   professionalName: string | null

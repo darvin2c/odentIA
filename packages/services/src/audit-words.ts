@@ -421,6 +421,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "agent.lesson_withdrawn": say("Retiró una lección de Sofi"),
   "agent.review_flagged": say("Marcó una respuesta de Sofi para corregirla"),
   "agent.review_ok": say("Marcó una respuesta de Sofi como correcta"),
+  "agent.review_reopened": say("Volvió a poner por revisar una respuesta de Sofi"),
   "agent.test_case_saved": say("Guardó un caso de prueba de Sofi"),
   "agent.knowledge_created": say("Creó una respuesta oficial"),
   "agent.knowledge_updated": say("Cambió una respuesta oficial"),

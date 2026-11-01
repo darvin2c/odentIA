@@ -1,12 +1,13 @@
 import type { ChannelAdapter, NormalizedInbound } from "@odentia/channels"
 import { type Db, type InboundMessageJob, withOrgContext } from "@odentia/db"
-import { agentLesson, agentReviewItem } from "@odentia/db/schema/agent"
+import { agentKnowledgeGap, agentLesson, agentReviewItem } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
-import { message } from "@odentia/db/schema/crm"
+import { conversation, message } from "@odentia/db/schema/crm"
 import { and, desc, eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import { recordAnswerTrace } from "./agent-case.js"
 import {
+  addReviewToAnswer,
   approveLesson,
   correctAnswer,
   countLearningPending,
@@ -14,15 +15,21 @@ import {
   flagAnswerForReview,
   formatLessonExamples,
   formatLessonRules,
+  getAnswerConversation,
   getLearningOverview,
   getLesson,
+  getReviewConversation,
+  LESSON_KIND_BY_FAILURE,
   LESSON_RULE_LIMIT,
   lessonImpact,
   lessonsForTurn,
   listReviewItems,
   listTestCases,
+  markAnswerOk,
   markReviewOk,
   noteLessonUse,
+  proposeExampleFromReview,
+  reopenReviewItem,
   restoreLesson,
   saveTestCase,
   syncReviewQueue,
@@ -31,7 +38,15 @@ import {
 } from "./agent-learning.js"
 import { createConnection } from "./connections.js"
 import { type IngestDeps, ingestInbound, sendOutbound } from "./conversations.js"
-import { createKnowledgeEntry, getKnowledgeEntry, listActiveKnowledge, setKnowledgeStatus, updateKnowledgeEntry } from "./knowledge.js"
+import {
+  createKnowledgeEntry,
+  getKnowledgeEntry,
+  listActiveKnowledge,
+  recordKnowledgeGap,
+  searchPublishedKnowledge,
+  setKnowledgeStatus,
+  updateKnowledgeEntry,
+} from "./knowledge.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import type { Storage } from "./storage.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
@@ -168,12 +183,391 @@ describe("por revisar", () => {
     const asked = await inbound("ejemplo-bueno", "¿Aceptan pago con tarjeta?")
     const traceId = await agentReplies(asked.conversationId, asked.messageId, "Sí, aceptamos tarjeta de crédito y débito.")
     const item = await run((tx) => flagAnswerForReview(tx, ORG, OWNER, traceId))
-    const lesson = await run((tx) => markReviewOk(tx, ORG, OWNER, item.id, { asExample: true }))
+    // Primero se da por buena; el ejemplo se propone después, desde su aviso.
+    await run((tx) => markReviewOk(tx, ORG, OWNER, item.id))
+    const lesson = await run((tx) => proposeExampleFromReview(tx, ORG, OWNER, item.id))
     expect(lesson).toMatchObject({
-      kind: "ejemplo", scope: "recepcion", agent: "recepcion", status: "propuesta",
+      kind: "ejemplo", source: "aprendida", scope: "recepcion", agent: "recepcion", status: "propuesta",
       origin: "respuesta_buena", contactName: "ejemplo-bueno", body: "Sí, aceptamos tarjeta de crédito y débito.",
     })
-    await run((tx) => discardLesson(tx, ORG, OWNER, lesson!.id))
+    // Una sola vez, y con su lección ya no se puede deshacer.
+    await expect(run((tx) => proposeExampleFromReview(tx, ORG, OWNER, item.id))).rejects.toMatchObject({ code: "REVIEW_NOT_PENDING" })
+    await expect(run((tx) => reopenReviewItem(tx, ORG, OWNER, item.id))).rejects.toMatchObject({ code: "REVIEW_NOT_REOPENABLE" })
+    await run((tx) => discardLesson(tx, ORG, OWNER, lesson.id))
+  })
+
+  it("«deshacer» la devuelve a la lista, y una respuesta dada por buena todavía se puede corregir", async () => {
+    const asked = await inbound("deshacer", "¿Atienden los domingos?")
+    const traceId = await agentReplies(asked.conversationId, asked.messageId, "Sí, todos los días.")
+    const item = await run((tx) => flagAnswerForReview(tx, ORG, OWNER, traceId))
+    await run((tx) => markReviewOk(tx, ORG, OWNER, item.id))
+    await run((tx) => reopenReviewItem(tx, ORG, OWNER, item.id))
+    expect(await reviewOf(traceId)).toMatchObject({ status: "pendiente", decidedBy: null, decidedAt: null })
+    // Solo se deshace lo que estaba como bien.
+    await expect(run((tx) => reopenReviewItem(tx, ORG, OWNER, item.id))).rejects.toMatchObject({ code: "REVIEW_NOT_REOPENABLE" })
+
+    await run((tx) => markReviewOk(tx, ORG, OWNER, item.id))
+    const lesson = await run((tx) => correctAnswer(tx, ORG, OWNER, { traceId, failure: "dato_equivocado", correctedReply: "Los domingos no atendemos." }))
+    expect(lesson).toMatchObject({ kind: "respuesta_oficial", status: "propuesta" })
+    expect((await reviewOf(traceId))?.status).toBe("corregida")
+    await run((tx) => discardLesson(tx, ORG, OWNER, lesson.id))
+  })
+
+  it("lo corto dice lo que se le dijo antes, y lo escrito seguido se muestra entero", async () => {
+    const asked = await inbound("seguido", "Hola")
+    await agentReplies(asked.conversationId, asked.messageId, "¿Le envío el enlace para elegir su cita?")
+    const yes = await inbound("seguido", "Si")
+    const yesTrace = await agentReplies(yes.conversationId, yes.messageId, "Aquí tiene su enlace.")
+    const item = await run((tx) => flagAnswerForReview(tx, ORG, OWNER, yesTrace))
+    const listed = (await run((tx) => listReviewItems(tx, ORG))).find((row) => row.id === item.id)
+    expect(listed).toMatchObject({ question: "Si", before: "¿Le envío el enlace para elegir su cita?", query: null, asked: null })
+
+    // La conversación alrededor: lo anterior, lo que escribió, la respuesta y lo que el equipo escribió después.
+    await run((tx) => sendOutbound(tx, ORG, {
+      conversationId: yes.conversationId, senderKind: "user", senderUserId: OWNER,
+      content: { type: "text", text: "Te escribo yo." },
+    }))
+    const around = await run((tx) => getAnswerConversation(tx, ORG, yesTrace))
+    expect(around.messages.map((row) => [row.role, row.from, row.body])).toEqual([
+      ["antes", "agente", "¿Le envío el enlace para elegir su cita?"],
+      ["escribio", "persona", "Si"],
+      ["respondio", "agente", "Aquí tiene su enlace."],
+      ["equipo", "equipo", "Te escribo yo."],
+    ])
+    expect(around.lessonKinds).toEqual(LESSON_KIND_BY_FAILURE)
+    expect((await run((tx) => getReviewConversation(tx, ORG, item.id))).messages).toEqual(around.messages)
+    await expect(run((tx) => getReviewConversation(tx, OTHER, item.id), OTHER)).rejects.toMatchObject({ code: "NOT_FOUND" })
+
+    // Lo que entra por una señal lleva todo lo que escribió seguido, no solo el último mensaje.
+    const first = await inbound("rafaga", "¿Tienen alineadores?")
+    const second = await inbound("rafaga", "¿Y brackets?")
+    const burstTrace = await agentReplies(second.conversationId, second.messageId, "Sí, brackets metálicos.")
+    expect(first.conversationId).toBe(second.conversationId)
+    await run((tx) => sendOutbound(tx, ORG, {
+      conversationId: second.conversationId, senderKind: "user", senderUserId: OWNER,
+      content: { type: "text", text: "Alineadores no." },
+    }))
+    await run((tx) => syncReviewQueue(tx, ORG))
+    expect((await reviewOf(burstTrace))?.question).toBe("¿Tienen alineadores?\n¿Y brackets?")
+  })
+})
+
+describe("lo que buscó y no encontró", () => {
+  const gapsOf = (reviewItemId: string) =>
+    ownerDb.select().from(agentKnowledgeGap).where(eq(agentKnowledgeGap.reviewItemId, reviewItemId))
+  const rowOf = async (query: string) => (await run((tx) => listReviewItems(tx, ORG))).find((row) => row.query === query)
+
+  it("entra a «Por revisar» aunque su aviso sea un pase al equipo, sin traza, y se cuenta sin abrir la lista", async () => {
+    const asked = await inbound("sin-traza", "¿Tienen estacionamiento para motos?")
+    await run((tx) => recordKnowledgeGap(tx, ORG, {
+      conversationId: asked.conversationId, triggerMessageId: asked.messageId,
+      question: "¿Tienen estacionamiento para motos?", query: "estacionamiento motos",
+    }))
+    const pending = (await run((tx) => countLearningPending(tx, ORG))).review
+    // Sofi aún no responde: la fila espera su respuesta, y el número también.
+    await run((tx) => syncReviewQueue(tx, ORG))
+    expect(await rowOf("estacionamiento motos")).toBeUndefined()
+    expect((await run((tx) => countLearningPending(tx, ORG))).review).toBe(pending)
+
+    // El aviso de un pase sale como cualquier mensaje del agente y no deja traza.
+    await run((tx) => sendOutbound(tx, ORG, {
+      conversationId: asked.conversationId, senderKind: "agent",
+      content: { type: "text", text: "Se lo confirma el equipo por aquí." },
+    }))
+    expect((await run((tx) => countLearningPending(tx, ORG))).review).toBe(pending + 1)
+    await run((tx) => syncReviewQueue(tx, ORG))
+    const row = await rowOf("estacionamiento motos")
+    expect(row).toMatchObject({
+      reason: "no_encontro", traceId: null, status: "pendiente", question: "¿Tienen estacionamiento para motos?",
+      reply: "Se lo confirma el equipo por aquí.", asked: { total: 1, week: 1 }, contactName: "sin-traza",
+    })
+    // El mismo número antes y después de abrir la lista.
+    expect((await run((tx) => countLearningPending(tx, ORG))).review).toBe(pending + 1)
+    expect((await run((tx) => getReviewConversation(tx, ORG, row!.id))).messages.map((message) => message.role)).toEqual(["escribio", "respondio"])
+    // Conciliar otra vez no duplica.
+    expect(await run((tx) => syncReviewQueue(tx, ORG))).toBe(0)
+  })
+
+  it("no se queda esperando para siempre: pasado el plazo entra sin respuesta", async () => {
+    const asked = await inbound("sin-respuesta", "¿Hacen implantes cigomáticos?")
+    const id = await run((tx) => recordKnowledgeGap(tx, ORG, {
+      conversationId: asked.conversationId, triggerMessageId: asked.messageId,
+      question: "¿Hacen implantes cigomáticos?", query: "implantes cigomaticos",
+    }))
+    await ownerDb.update(agentKnowledgeGap).set({ createdAt: new Date(Date.now() - 11 * 60_000) }).where(eq(agentKnowledgeGap.id, id!))
+    await run((tx) => syncReviewQueue(tx, ORG))
+    expect(await rowOf("implantes cigomaticos")).toMatchObject({ reason: "no_encontro", reply: "" })
+  })
+
+  it("la misma búsqueda de varias personas es una fila, con las veces que se preguntó", async () => {
+    const first = await inbound("misma-1", "¿Tienen wifi en la sala?")
+    const second = await inbound("misma-2", "¿Hay wifi?")
+    const third = await inbound("misma-3", "¿Tienen wifi en la sala?")
+    for (const [asked, question, query] of [
+      [first, "¿Tienen wifi en la sala?", "wifi sede"],
+      [second, "¿Hay wifi?", "wifi sede"],
+      [third, "¿Tienen wifi en la sala?", "internet"],
+    ] as const) {
+      await run((tx) => recordKnowledgeGap(tx, ORG, { conversationId: asked.conversationId, triggerMessageId: asked.messageId, question, query }))
+      await run((tx) => sendOutbound(tx, ORG, { conversationId: asked.conversationId, senderKind: "agent", content: { type: "text", text: "No tengo ese dato." } }))
+    }
+    await run((tx) => syncReviewQueue(tx, ORG))
+    const rows = (await run((tx) => listReviewItems(tx, ORG))).filter((row) => row.query === "wifi sede" || row.query === "internet")
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.asked).toEqual({ total: 3, week: 3 })
+  })
+
+  it("el «Si» de dos personas no es la misma pregunta: lo corto no agrupa", async () => {
+    const before = (await run((tx) => countLearningPending(tx, ORG))).review
+    for (const [sender, question, query] of [
+      ["si-1", "Si", "estacionamiento motos 2"],
+      ["si-2", "Si", "seguro dental"],
+      ["si-3", "👍", "pago en cuotas"],
+      ["si-4", "👍", "sala de lactancia"],
+    ] as const) {
+      const asked = await inbound(sender, question)
+      await run((tx) => recordKnowledgeGap(tx, ORG, { conversationId: asked.conversationId, triggerMessageId: asked.messageId, question, query }))
+      await run((tx) => sendOutbound(tx, ORG, { conversationId: asked.conversationId, senderKind: "agent", content: { type: "text", text: "No tengo ese dato." } }))
+    }
+    expect((await run((tx) => countLearningPending(tx, ORG))).review).toBe(before + 4)
+    await run((tx) => syncReviewQueue(tx, ORG))
+    expect((await run((tx) => countLearningPending(tx, ORG))).review).toBe(before + 4)
+    for (const query of ["estacionamiento motos 2", "seguro dental", "pago en cuotas", "sala de lactancia"]) {
+      expect(await rowOf(query)).toMatchObject({ reason: "no_encontro", asked: { total: 1, week: 1 } })
+    }
+  })
+
+  it("lo que llega pasado el plazo no es su respuesta, y lo escrito conserva lo último", async () => {
+    const long = "x".repeat(1200)
+    await inbound("plazo", `${long} primero`)
+    await inbound("plazo", `${long} segundo`)
+    const asked = await inbound("plazo", "¿Tienen tópico de emergencias?")
+    const id = await run((tx) => recordKnowledgeGap(tx, ORG, {
+      conversationId: asked.conversationId, triggerMessageId: asked.messageId, question: "¿Tienen tópico de emergencias?", query: "topico emergencias",
+    }))
+    await ownerDb.update(agentKnowledgeGap).set({ createdAt: new Date(Date.now() - 20 * 60_000) }).where(eq(agentKnowledgeGap.id, id!))
+    await run((tx) => sendOutbound(tx, ORG, { conversationId: asked.conversationId, senderKind: "agent", content: { type: "text", text: "Mañana abrimos a las 9." } }))
+    await run((tx) => syncReviewQueue(tx, ORG))
+    const row = await rowOf("topico emergencias")
+    expect(row?.reply).toBe("")
+    expect(row?.question.endsWith("¿Tienen tópico de emergencias?")).toBe(true)
+    expect(row?.question.length).toBeLessThanOrEqual(2000)
+  })
+
+  it("decidir la respuesta desde la Bandeja también cierra la pregunta: no se revisa dos veces", async () => {
+    const asked = await inbound("bandeja-bien", "¿Tienen rampa de acceso?")
+    const traceId = await agentReplies(asked.conversationId, asked.messageId, "Sí, en la entrada.")
+    const gapId = await run((tx) => recordKnowledgeGap(tx, ORG, {
+      conversationId: asked.conversationId, triggerMessageId: asked.messageId, question: "¿Tienen rampa de acceso?", query: "rampa acceso",
+    }))
+    await ownerDb.update(agentKnowledgeGap).set({ createdAt: new Date(Date.now() - 60_000) }).where(eq(agentKnowledgeGap.id, gapId!))
+    const before = (await run((tx) => countLearningPending(tx, ORG))).review
+    await run((tx) => markAnswerOk(tx, ORG, OWNER, traceId))
+    expect((await run((tx) => countLearningPending(tx, ORG))).review).toBe(before - 1)
+    await run((tx) => syncReviewQueue(tx, ORG))
+    expect(await rowOf("rampa acceso")).toBeUndefined()
+    const [gap] = await ownerDb.select().from(agentKnowledgeGap).where(eq(agentKnowledgeGap.id, gapId!))
+    expect(gap).toMatchObject({ status: "descartada" })
+    expect(await reviewOf(traceId)).toMatchObject({ status: "bien", reason: "no_encontro" })
+  })
+
+  it("si la respuesta ya estaba decidida, la pregunta se cierra con ella y no vuelve a la lista", async () => {
+    const asked = await inbound("ya-decidida", "¿Tienen consultorio en Surco?")
+    const traceId = await agentReplies(asked.conversationId, asked.messageId, "No tengo ese dato.")
+    await run((tx) => markAnswerOk(tx, ORG, OWNER, traceId))
+    const before = (await run((tx) => countLearningPending(tx, ORG))).review
+    const gapId = await run((tx) => recordKnowledgeGap(tx, ORG, {
+      conversationId: asked.conversationId, triggerMessageId: asked.messageId, question: "¿Tienen consultorio en Surco?", query: "consultorio surco",
+    }))
+    await ownerDb.update(agentKnowledgeGap).set({ createdAt: new Date(Date.now() - 60_000) }).where(eq(agentKnowledgeGap.id, gapId!))
+    expect((await run((tx) => countLearningPending(tx, ORG))).review).toBe(before)
+    await run((tx) => syncReviewQueue(tx, ORG))
+    expect(await rowOf("consultorio surco")).toBeUndefined()
+    expect((await ownerDb.select().from(agentKnowledgeGap).where(eq(agentKnowledgeGap.id, gapId!)))[0]?.status).toBe("descartada")
+    expect((await run((tx) => countLearningPending(tx, ORG))).review).toBe(before)
+  })
+
+  it("una respuesta que ya estaba por otra señal queda en esa fila, con este motivo", async () => {
+    const asked = await inbound("ya-marcada", "¿Hacen carillas de porcelana?")
+    const traceId = await agentReplies(asked.conversationId, asked.messageId, "No tengo ese dato.")
+    const flagged = await run((tx) => flagAnswerForReview(tx, ORG, OWNER, traceId))
+    await run((tx) => recordKnowledgeGap(tx, ORG, {
+      conversationId: asked.conversationId, triggerMessageId: asked.messageId,
+      question: "¿Hacen carillas de porcelana?", query: "carillas porcelana",
+    }))
+    await ownerDb.update(agentKnowledgeGap).set({ createdAt: new Date(Date.now() - 60_000) }).where(eq(agentKnowledgeGap.query, "carillas porcelana"))
+    // Ya tiene su fila: el número es el mismo antes y después de abrir la lista.
+    const pending = (await run((tx) => countLearningPending(tx, ORG))).review
+    await run((tx) => syncReviewQueue(tx, ORG))
+    expect((await run((tx) => countLearningPending(tx, ORG))).review).toBe(pending)
+    expect(await reviewOf(traceId)).toMatchObject({ id: flagged.id, reason: "no_encontro", query: "carillas porcelana" })
+    expect((await gapsOf(flagged.id)).map((gap) => gap.query)).toEqual(["carillas porcelana"])
+  })
+
+  it("una prueba del chat web no entra", async () => {
+    const asked = await inbound("prueba-chat", "¿Tienen sala de juegos?")
+    await run((tx) => recordKnowledgeGap(tx, ORG, {
+      conversationId: asked.conversationId, triggerMessageId: asked.messageId, question: "¿Tienen sala de juegos?", query: "sala de juegos",
+    }))
+    await ownerDb.update(conversation).set({ isTest: true }).where(eq(conversation.id, asked.conversationId))
+    const before = (await run((tx) => countLearningPending(tx, ORG))).review
+    await ownerDb.update(agentKnowledgeGap).set({ createdAt: new Date(Date.now() - 11 * 60_000) }).where(eq(agentKnowledgeGap.query, "sala de juegos"))
+    await run((tx) => syncReviewQueue(tx, ORG))
+    expect(await rowOf("sala de juegos")).toBeUndefined()
+    expect((await run((tx) => countLearningPending(tx, ORG))).review).toBe(before)
+  })
+
+  /** Una fila lista para decidir. */
+  async function searchedRow(sender: string, question: string, query: string) {
+    const asked = await inbound(sender, question)
+    await run((tx) => recordKnowledgeGap(tx, ORG, { conversationId: asked.conversationId, triggerMessageId: asked.messageId, question, query }))
+    await run((tx) => sendOutbound(tx, ORG, { conversationId: asked.conversationId, senderKind: "agent", content: { type: "text", text: "No tengo ese dato." } }))
+    await run((tx) => syncReviewQueue(tx, ORG))
+    return (await rowOf(query))!
+  }
+
+  it("«estuvo bien» la cierra sin enseñar nada, y «deshacer» la vuelve a abrir", async () => {
+    const row = await searchedRow("alineadores", "¿Trabajan con alineadores invisibles?", "alineadores invisibles")
+    await run((tx) => markReviewOk(tx, ORG, OWNER, row.id))
+    expect((await gapsOf(row.id))[0]).toMatchObject({ status: "descartada", resolvedBy: OWNER })
+    expect(await rowOf("alineadores invisibles")).toBeUndefined()
+    await run((tx) => reopenReviewItem(tx, ORG, OWNER, row.id))
+    expect((await gapsOf(row.id))[0]).toMatchObject({ status: "abierta", resolvedBy: null, resolvedAt: null })
+    expect(await rowOf("alineadores invisibles")).toMatchObject({ id: row.id })
+    await run((tx) => markReviewOk(tx, ORG, OWNER, row.id))
+    // Si vuelven a preguntar, vuelve a entrar: para que no vuelva, se le enseña.
+    const again = await searchedRow("alineadores-2", "¿Tienen alineadores invisibles?", "alineadores invisibles")
+    expect(again.id).not.toBe(row.id)
+    await run((tx) => markReviewOk(tx, ORG, OWNER, again.id))
+  })
+
+  it("corregirla pasa por una lección: al aprobarla, lo buscado se encuentra y se retira desde «Lo aprendido»", async () => {
+    const row = await searchedRow("ortodoncia", "¿Y una extracción de la muela del juicio?", "ortodoncia invisible")
+    const lesson = await run((tx) => correctAnswer(tx, ORG, OWNER, {
+      reviewItemId: row.id, failure: "falto_dato", question: "Ortodoncia invisible", correctedReply: "No trabajamos con ortodoncia invisible.",
+    }))
+    expect(lesson).toMatchObject({ kind: "respuesta_oficial", status: "propuesta", title: "Ortodoncia invisible", question: "Ortodoncia invisible" })
+    expect((await gapsOf(row.id))[0]).toMatchObject({ status: "resuelta", resolvedEntryId: null })
+    // Nada se publica hasta aprobarla.
+    expect((await run((tx) => listActiveKnowledge(tx, ORG))).map((entry) => entry.title)).not.toContain("Ortodoncia invisible")
+
+    const active = await run((tx) => approveLesson(tx, ORG, OWNER, lesson.id))
+    expect((await gapsOf(row.id))[0]?.resolvedEntryId).toBe(active.knowledgeEntryId)
+    const entry = await run((tx) => getKnowledgeEntry(tx, ORG, active.knowledgeEntryId!))
+    // Lo buscado es igual a su título: no se repite como otra forma de preguntar.
+    expect(entry.askForms).toEqual([])
+    expect((await run((tx) => searchPublishedKnowledge(tx, ORG, "ortodoncia invisible")))[0]?.id).toBe(entry.id)
+    expect((await run((tx) => getLearningOverview(tx, ORG))).learned.map((item) => item.id)).toContain(lesson.id)
+
+    await run((tx) => withdrawLesson(tx, ORG, OWNER, lesson.id, { withdrawCase: true }))
+    expect((await run((tx) => listActiveKnowledge(tx, ORG))).map((item) => item.title)).not.toContain("Ortodoncia invisible")
+  })
+
+  it("lo buscado queda como otra forma de preguntar, también al cambiar una respuesta que ya existía", async () => {
+    const row = await searchedRow("bicis", "¿Dónde dejo mi bici?", "dejar bicicleta")
+    const lesson = await run((tx) => correctAnswer(tx, ORG, OWNER, {
+      reviewItemId: row.id, failure: "falto_dato", question: "Bicicletero", correctedReply: "Hay un bicicletero en la entrada.",
+    }))
+    const active = await run((tx) => approveLesson(tx, ORG, OWNER, lesson.id))
+    const entry = await run((tx) => getKnowledgeEntry(tx, ORG, active.knowledgeEntryId!))
+    expect(entry.askForms).toEqual(["dejar bicicleta"])
+    await run((tx) => withdrawLesson(tx, ORG, OWNER, lesson.id, { withdrawCase: true }))
+  })
+
+  it("lo que escribió queda como forma de preguntar solo si habla de lo que se buscó", async () => {
+    const onTopic = await searchedRow("tema-si", "¿Tienen estacionamiento para bicicletas?", "estacionamiento bicicletas")
+    const lesson = await run((tx) => correctAnswer(tx, ORG, OWNER, {
+      reviewItemId: onTopic.id, failure: "falto_dato", question: "Parqueo de bicicletas", correctedReply: "Sí, en la entrada.",
+    }))
+    const active = await run((tx) => approveLesson(tx, ORG, OWNER, lesson.id))
+    expect((await run((tx) => getKnowledgeEntry(tx, ORG, active.knowledgeEntryId!))).askForms).toEqual([
+      "¿Tienen estacionamiento para bicicletas?",
+      "estacionamiento bicicletas",
+    ])
+    await run((tx) => withdrawLesson(tx, ORG, OWNER, lesson.id, { withdrawCase: true }))
+  })
+
+  it("retirar la lección que cambió una respuesta le quita también las formas de preguntar que sumó", async () => {
+    const entry = await run((tx) => createKnowledgeEntry(tx, ORG, OWNER, { kind: "faq", title: "Horario de farmacia", body: "Hasta las 8.", askForms: ["¿A qué hora cierran?"] }))
+    await run((tx) => setKnowledgeStatus(tx, ORG, OWNER, entry.id, "publicada"))
+    const row = await searchedRow("cambia-forma", "¿Tienen farmacia abierta?", "farmacia abierta")
+    const lesson = await run((tx) => correctAnswer(tx, ORG, OWNER, {
+      reviewItemId: row.id, failure: "falto_dato", question: "Horario de farmacia", correctedReply: "Hasta las 9.",
+    }))
+    expect(lesson.knowledgeEntryId).toBe(entry.id)
+    await run((tx) => approveLesson(tx, ORG, OWNER, lesson.id))
+    expect(await run((tx) => getKnowledgeEntry(tx, ORG, entry.id))).toMatchObject({
+      body: "Hasta las 9.",
+      askForms: ["¿A qué hora cierran?", "¿Tienen farmacia abierta?", "farmacia abierta"],
+    })
+    await run((tx) => withdrawLesson(tx, ORG, OWNER, lesson.id, { withdrawCase: true }))
+    expect(await run((tx) => getKnowledgeEntry(tx, ORG, entry.id))).toMatchObject({ body: "Hasta las 8.", askForms: ["¿A qué hora cierran?"] })
+    // Restaurarla las vuelve a sumar.
+    await run((tx) => restoreLesson(tx, ORG, OWNER, lesson.id))
+    expect((await run((tx) => getKnowledgeEntry(tx, ORG, entry.id))).askForms).toContain("farmacia abierta")
+    await run((tx) => withdrawLesson(tx, ORG, OWNER, lesson.id, { withdrawCase: true }))
+  })
+
+  it("descartar la corrección la devuelve a la lista: la pregunta sigue sin responderse", async () => {
+    const row = await searchedRow("descartada", "¿Hacen ortopedia maxilar?", "ortopedia maxilar")
+    const lesson = await run((tx) => correctAnswer(tx, ORG, OWNER, {
+      reviewItemId: row.id, failure: "falto_dato", correctedReply: "Texto que no convence.",
+    }))
+    expect(await rowOf("ortopedia maxilar")).toBeUndefined()
+    await run((tx) => discardLesson(tx, ORG, OWNER, lesson.id))
+    expect(await rowOf("ortopedia maxilar")).toMatchObject({ id: row.id, status: "pendiente" })
+    expect((await gapsOf(row.id))[0]).toMatchObject({ status: "abierta", resolvedBy: null })
+    // La lección descartada no estorba: se decide de nuevo, y se puede deshacer.
+    await run((tx) => markReviewOk(tx, ORG, OWNER, row.id))
+    await run((tx) => reopenReviewItem(tx, ORG, OWNER, row.id))
+    const again = await run((tx) => correctAnswer(tx, ORG, OWNER, {
+      reviewItemId: row.id, failure: "falto_dato", correctedReply: "Este sí.",
+    }))
+    await run((tx) => discardLesson(tx, ORG, OWNER, again.id))
+    await run((tx) => markReviewOk(tx, ORG, OWNER, row.id))
+    // Una corrección de otra señal sigue como antes: descartarla no la devuelve.
+    const asked = await inbound("descartada-otra", "¿Abren feriados?")
+    const traceId = await agentReplies(asked.conversationId, asked.messageId, "Sí.")
+    const other = await run((tx) => correctAnswer(tx, ORG, OWNER, { traceId, failure: "dato_equivocado", correctedReply: "No." }))
+    await run((tx) => discardLesson(tx, ORG, OWNER, other.id))
+    expect((await reviewOf(traceId))?.status).toBe("corregida")
+  })
+
+  it("sumarla a una respuesta que ya existe no cambia su texto y no deja lección", async () => {
+    const entry = await run((tx) => createKnowledgeEntry(tx, ORG, OWNER, { kind: "faq", title: "Convenios", body: "Trabajamos con Pacífico." }))
+    await run((tx) => setKnowledgeStatus(tx, ORG, OWNER, entry.id, "publicada"))
+    const row = await searchedRow("seguro", "¿Aceptan mi seguro?", "aceptan seguro privado")
+    const linked = await run((tx) => addReviewToAnswer(tx, ORG, OWNER, row.id, entry.id))
+    expect(linked).toMatchObject({ body: "Trabajamos con Pacífico.", version: 1, askForms: ["¿Aceptan mi seguro?", "aceptan seguro privado"] })
+    expect((await gapsOf(row.id))[0]).toMatchObject({ status: "resuelta", resolvedEntryId: entry.id, resolvedBy: OWNER })
+    expect((await ownerDb.select().from(agentReviewItem).where(eq(agentReviewItem.id, row.id)))[0]?.status).toBe("corregida")
+    expect(await ownerDb.select().from(agentLesson).where(eq(agentLesson.reviewItemId, row.id))).toEqual([])
+    await expect(run((tx) => addReviewToAnswer(tx, ORG, OWNER, row.id, entry.id))).rejects.toMatchObject({ code: "REVIEW_NOT_PENDING" })
+  })
+
+  it("no se suma a una respuesta que Sofi no puede usar ni a una sin lugar: la fila sigue esperando", async () => {
+    const row = await searchedRow("sin-lugar", "¿Dan factura electrónica?", "factura electronica")
+    const draft = await run((tx) => createKnowledgeEntry(tx, ORG, OWNER, { kind: "faq", title: "Comprobantes", body: "Boleta o factura." }))
+    await expect(run((tx) => addReviewToAnswer(tx, ORG, OWNER, row.id, draft.id))).rejects.toMatchObject({ code: "VALIDATION" })
+    const full = await run((tx) => createKnowledgeEntry(tx, ORG, OWNER, {
+      kind: "faq", title: "Pagos", body: "Todos los medios.", askForms: Array.from({ length: 20 }, (_, index) => `forma ${index}`),
+    }))
+    await run((tx) => setKnowledgeStatus(tx, ORG, OWNER, full.id, "publicada"))
+    await expect(run((tx) => addReviewToAnswer(tx, ORG, OWNER, row.id, full.id))).rejects.toMatchObject({ code: "ASK_FORMS_FULL" })
+    expect(await rowOf("factura electronica")).toMatchObject({ id: row.id, status: "pendiente" })
+  })
+
+  it("el total dice todas las que esperan, aunque la lista tenga tope", async () => {
+    const overview = await run((tx) => getLearningOverview(tx, ORG))
+    expect(overview.reviewTotal).toBe((await run((tx) => countLearningPending(tx, ORG))).review)
+    expect(overview.reviewTotal).toBeGreaterThanOrEqual(overview.review.length)
+  })
+
+  it("solo lo que no encontró se suma a una respuesta", async () => {
+    const asked = await inbound("no-suma", "¿Abren tarde?")
+    const traceId = await agentReplies(asked.conversationId, asked.messageId, "Hasta las 8.")
+    const item = await run((tx) => flagAnswerForReview(tx, ORG, OWNER, traceId))
+    await expect(run((tx) => addReviewToAnswer(tx, ORG, OWNER, item.id, item.id))).rejects.toMatchObject({ code: "VALIDATION" })
   })
 })
 

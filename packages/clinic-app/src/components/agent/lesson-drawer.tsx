@@ -20,13 +20,13 @@ import { type FormEvent, type ReactNode, useEffect, useState } from "react"
 import { z } from "zod"
 import {
   agentName,
+  GUIDANCE_KEY,
   impactSummary,
   LESSON_KIND_LABEL,
   type LessonImpact,
   type LessonItem,
   type LessonKind,
   type LessonPreview,
-  lessonScopeChip,
   lessonUsage,
   previewCounts,
   previewSummary,
@@ -36,10 +36,10 @@ import { ApiError, apiFetch } from "../../lib/api"
 import { SURFACE_ACTIONS } from "./correct-drawer"
 
 const KINDS: LessonKind[] = ["respuesta_oficial", "regla", "ejemplo"]
-const SCOPE_WHY: Record<LessonKind, string> = {
-  respuesta_oficial: "Es un dato de la clínica: lo usa cualquier agente que lo necesite.",
-  regla: "Es una regla de comportamiento: vale solo para este agente.",
-  ejemplo: "Es un ejemplo de cómo responder: lo usa solo este agente, en preguntas parecidas.",
+const KIND_WHY: Record<LessonKind, string> = {
+  respuesta_oficial: "Es un dato de la clínica: lo usa al responder a pacientes.",
+  regla: "Es una regla de comportamiento: la tiene presente en cada mensaje.",
+  ejemplo: "Es un ejemplo de cómo responder: lo usa en preguntas parecidas.",
 }
 const WITHDRAW_LABEL: Record<LessonKind, string> = {
   respuesta_oficial: "Retirar la respuesta",
@@ -52,7 +52,7 @@ const WITHOUT_LABEL: Record<LessonKind, string> = {
   ejemplo: "Sin el ejemplo",
 }
 const SECTION_TITLE = "text-xs font-bold tracking-wider text-muted-foreground uppercase"
-const LESSON_QUERIES = ["agent-learning", "agent-lesson", "agent-overview", "agent-panel", "agent-knowledge", "agent-knowledge-basics"]
+const LESSON_QUERIES = ["agent-learning", "agent-lesson", "agent-overview", "agent-summary", "agent-knowledge", "agent-knowledge-basics", GUIDANCE_KEY[0]]
 
 /** Lo que admite `PATCH /api/agent/learning/lessons/:id`, con sus mismas palabras. */
 /** Lo que mide una regla (`RULE_BODY_CHARS`, ADR 0119): va entera en cada mensaje. */
@@ -275,16 +275,6 @@ function LessonTest({
   )
 }
 
-function Chips({ lesson }: { lesson: LessonItem }) {
-  const receptionName = useReceptionName()
-  return (
-    <>
-      <Badge variant="secondary">{LESSON_KIND_LABEL[lesson.kind]}</Badge>
-      <Badge variant={lesson.scope === "clinica" ? "secondary" : "soft"}>{lessonScopeChip(lesson.scope, receptionName)}</Badge>
-    </>
-  )
-}
-
 function useLesson(lessonId: string | null) {
   return useQuery({
     queryKey: ["agent-lesson", lessonId],
@@ -309,7 +299,9 @@ export function WithdrawLessonDialog({ lessonId, onClose, onWithdrawn }: { lesso
   useEffect(() => {
     setWithdrawCase(true)
   }, [lessonId])
+  // Lo que escribió la clínica no sale de una pregunta: sin caso propio, y sin nada que probar si no toca otros.
   const hasCase = Boolean(lesson?.question.trim())
+  const canTest = hasCase || (impact?.touched.length ?? 0) > 0
   const withdraw = useMutation({
     retry: false,
     mutationFn: () =>
@@ -329,7 +321,7 @@ export function WithdrawLessonDialog({ lessonId, onClose, onWithdrawn }: { lesso
   }
   const approved =
     lesson?.approvedByName && lesson.approvedAt
-      ? `La aprobó ${lesson.approvedByName} el ${new Date(lesson.approvedAt).toLocaleDateString("es", { weekday: "long", day: "numeric", month: "long" })}`
+      ? `${lesson.source === "escrita" ? "La escribió" : "La aprobó"} ${lesson.approvedByName} el ${new Date(lesson.approvedAt).toLocaleDateString("es", { weekday: "long", day: "numeric", month: "long" })}`
       : null
   const usage = lesson ? lessonUsage(lesson).text : ""
   const description = !lesson
@@ -358,18 +350,20 @@ export function WithdrawLessonDialog({ lessonId, onClose, onWithdrawn }: { lesso
         <ScrollArea className="-mx-1 flex max-h-[50dvh] flex-col">
           <div className="flex flex-col gap-3 px-1 text-left text-sm">
             <p className="flex flex-wrap items-center justify-center gap-1.5">
-              <Chips lesson={lesson} />
+              <Badge variant="secondary">{LESSON_KIND_LABEL[lesson.kind]}</Badge>
             </p>
-            <LessonTest
-              lessonId={lesson.id}
-              impact={impact}
-              title="Qué pasa si la retiras"
-              summary={impact?.total === 0 ? "No tienes otros casos de prueba: ninguno cambia al retirarla." : undefined}
-              runLabel="Ver cómo respondería sin ella"
-              beforeLabel="Hoy"
-              afterLabel={WITHOUT_LABEL[lesson.kind]}
-              canRun={lesson.status === "activa"}
-            />
+            {canTest ? (
+              <LessonTest
+                lessonId={lesson.id}
+                impact={impact}
+                title="Qué pasa si la retiras"
+                summary={impact?.total === 0 ? "No tienes otros casos de prueba: ninguno cambia al retirarla." : undefined}
+                runLabel="Ver cómo respondería sin ella"
+                beforeLabel="Hoy"
+                afterLabel={WITHOUT_LABEL[lesson.kind]}
+                canRun={lesson.status === "activa"}
+              />
+            ) : null}
             {hasCase ? (
               <Field orientation="horizontal" className="min-h-11">
                 <Checkbox
@@ -550,7 +544,7 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
             <>
               <form.AppField name="kind">
                 {(field) => (
-                  <field.Group legend="Qué clase de lección es" description={SCOPE_WHY[draftKind]}>
+                  <field.Group legend="Qué clase de lección es" description={KIND_WHY[draftKind]}>
                     {(control) => (
                       <div className="flex flex-wrap gap-1.5" aria-describedby={control.describedBy}>
                         {KINDS.map((kind) => (
@@ -608,13 +602,6 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
                     {active ? ` ${lessonUsage(lesson).text}.` : ""}
                   </p>
                 ) : null}
-              </Block>
-
-              <Block id="leccion-alcance" title="A quién se aplica">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant={lesson.scope === "clinica" ? "secondary" : "soft"}>{lessonScopeChip(lesson.scope, receptionName)}</Badge>
-                  <p className="min-w-0 flex-1 basis-48 text-muted-foreground">{SCOPE_WHY[lesson.kind]}</p>
-                </div>
               </Block>
 
               <Block id="leccion-cambio" title={proposed ? "Qué cambia" : "Qué dice"}>

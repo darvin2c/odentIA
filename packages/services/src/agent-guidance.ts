@@ -13,8 +13,10 @@ import { invalidField, notFound, ServiceError, validation } from "./errors.js"
  * alguien aprobó. Cada línea dice de dónde viene. Todas son reglas activas de
  * Recepción (`agent_lesson`, `kind = regla`): las escritas nacen activas; las
  * aprendidas pasan por «Aprender» y, al aprobarlas, se avisa si contradicen
- * otra. Al agente le llega una sola lista (`lessonsForTurn`), primero lo
- * escrito por la clínica. Todas se editan y se borran igual.
+ * otra, igual que al escribirlas o editarlas (`findTextConflict`). Al agente le
+ * llega una sola lista (`lessonsForTurn`), primero lo escrito por la clínica.
+ * Todas se editan y se retiran igual (`withdrawLesson`), y las retiradas vuelven
+ * con `restoreLesson`.
  */
 
 const AGENT = "recepcion"
@@ -37,13 +39,16 @@ export interface GuidanceItem {
 
 export interface GuidanceList {
   items: GuidanceItem[]
+  /** Las que se retiraron, para restaurarlas; no dependen del filtro por origen. */
+  withdrawn: GuidanceItem[]
   counts: { all: number; escrita: number; aprendida: number }
   /** Cuántas reglas puede tener activas (`LESSON_RULE_LIMIT`) y cuánto mide cada una (`RULE_BODY_CHARS`). */
   limits: { rules: number; chars: number }
 }
 
-const activeRules = (orgId: string) =>
-  and(eq(agentLesson.organizationId, orgId), eq(agentLesson.status, "activa"), eq(agentLesson.kind, "regla"), eq(agentLesson.scope, AGENT))
+const rulesIn = (orgId: string, status: "activa" | "retirada") =>
+  and(eq(agentLesson.organizationId, orgId), eq(agentLesson.status, status), eq(agentLesson.kind, "regla"), eq(agentLesson.scope, AGENT))
+const activeRules = (orgId: string) => rulesIn(orgId, "activa")
 
 function clean(value: unknown): string {
   if (typeof value !== "string") throw invalidField("body", "Escribe qué debe saber el agente")
@@ -70,17 +75,24 @@ export async function listAgentGuidance(tx: Db, orgId: string, input: { source?:
     .groupBy(agentLesson.source)
   const escrita = Number(totals.find((row) => row.source === "escrita")?.total ?? 0)
   const aprendida = Number(totals.find((row) => row.source === "aprendida")?.total ?? 0)
+  const columns = {
+    id: agentLesson.id,
+    body: agentLesson.body,
+    source: agentLesson.source,
+    proposedBy: agentLesson.proposedBy,
+    approvedBy: agentLesson.approvedBy,
+    approvedAt: agentLesson.approvedAt,
+    createdAt: agentLesson.createdAt,
+    conversationId: agentLesson.conversationId,
+  }
+  const retired = await tx
+    .select(columns)
+    .from(agentLesson)
+    .where(rulesIn(orgId, "retirada"))
+    .orderBy(desc(agentLesson.withdrawnAt), asc(agentLesson.id))
+    .limit(LIST_LIMIT)
   const rows = await tx
-    .select({
-      id: agentLesson.id,
-      body: agentLesson.body,
-      source: agentLesson.source,
-      proposedBy: agentLesson.proposedBy,
-      approvedBy: agentLesson.approvedBy,
-      approvedAt: agentLesson.approvedAt,
-      createdAt: agentLesson.createdAt,
-      conversationId: agentLesson.conversationId,
-    })
+    .select(columns)
     .from(agentLesson)
     .where(and(activeRules(orgId), input.source ? eq(agentLesson.source, input.source as LessonSource) : undefined))
     // Lo escrito por la clínica primero y en su orden; después lo aprendido, lo último arriba.
@@ -91,11 +103,12 @@ export async function listAgentGuidance(tx: Db, orgId: string, input: { source?:
       asc(agentLesson.id),
     )
     .limit(LIST_LIMIT)
-  const people = [...new Set(rows.flatMap((row) => [row.source === "escrita" ? row.proposedBy : row.approvedBy]).filter((id): id is string => !!id))]
+  const all = [...rows, ...retired]
+  const people = [...new Set(all.flatMap((row) => [row.source === "escrita" ? row.proposedBy : row.approvedBy]).filter((id): id is string => !!id))]
   const names = people.length
     ? new Map((await tx.select({ id: user.id, name: user.name }).from(user).where(inArray(user.id, people))).map((row) => [row.id, row.name]))
     : new Map<string, string>()
-  const threads = [...new Set(rows.map((row) => row.conversationId).filter((id): id is string => !!id))]
+  const threads = [...new Set(all.map((row) => row.conversationId).filter((id): id is string => !!id))]
   const contacts = threads.length
     ? new Map(
         (
@@ -107,25 +120,48 @@ export async function listAgentGuidance(tx: Db, orgId: string, input: { source?:
         ).map((row) => [row.id, row.name]),
       )
     : new Map<string, string | null>()
+  const toItem = (row: (typeof all)[number]): GuidanceItem => ({
+    id: row.id,
+    body: row.body,
+    source: row.source,
+    byName: names.get(row.source === "escrita" ? row.proposedBy : (row.approvedBy ?? "")) ?? null,
+    at: (row.source === "escrita" ? row.createdAt : (row.approvedAt ?? row.createdAt)).toISOString(),
+    conversationId: row.conversationId,
+    contactName: row.conversationId ? (contacts.get(row.conversationId) ?? null) : null,
+  })
   return {
-    items: rows.map((row) => ({
-      id: row.id,
-      body: row.body,
-      source: row.source,
-      byName: names.get(row.source === "escrita" ? row.proposedBy : (row.approvedBy ?? "")) ?? null,
-      at: (row.source === "escrita" ? row.createdAt : (row.approvedAt ?? row.createdAt)).toISOString(),
-      conversationId: row.conversationId,
-      contactName: row.conversationId ? (contacts.get(row.conversationId) ?? null) : null,
-    })),
+    items: rows.map(toItem),
+    withdrawn: retired.map(toItem),
     counts: { all: escrita + aprendida, escrita, aprendida },
     limits: { rules: LESSON_RULE_LIMIT, chars: RULE_BODY_CHARS },
   }
 }
 
-/** «Agregar»: lo que escribe la clínica vale desde que se guarda, si cabe en el tope de reglas. */
-export async function addAgentGuidance(tx: Db, orgId: string, actorUserId: string, body: unknown): Promise<GuidanceItem> {
+/** «Reemplazar»: la regla que contradecía deja de valer en el mismo paso. Queda en «Retiradas». */
+async function retireReplaced(tx: Db, orgId: string, actorUserId: string, replaceId: string, by: string | null): Promise<void> {
+  const [replaced] = await tx
+    .update(agentLesson)
+    .set({ status: "retirada", withdrawnBy: actorUserId, withdrawnAt: new Date(), updatedAt: new Date() })
+    .where(and(eq(agentLesson.id, replaceId), activeRules(orgId)))
+    .returning({ id: agentLesson.id })
+  if (!replaced) throw new ServiceError("LESSON_NOT_ACTIVE", 409, "La regla que se iba a reemplazar ya no está activa")
+  await audit(tx, orgId, actorUserId, "agent.lesson_replaced", replaceId, { by })
+}
+
+/**
+ * «Agregar»: lo que escribe la clínica vale desde que se guarda, si cabe en el
+ * tope de reglas. Con `replaceId` reemplaza a otra, así que el total no cambia.
+ */
+export async function addAgentGuidance(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  body: unknown,
+  opts: { replaceId?: string } = {},
+): Promise<GuidanceItem> {
   const text = clean(body)
-  await assertRuleRoom(tx, orgId, AGENT, "agregar")
+  if (opts.replaceId) await retireReplaced(tx, orgId, actorUserId, opts.replaceId, null)
+  else await assertRuleRoom(tx, orgId, AGENT, "agregar")
   const now = new Date()
   const [row] = await tx
     .insert(agentLesson)
@@ -148,30 +184,26 @@ export async function addAgentGuidance(tx: Db, orgId: string, actorUserId: strin
 }
 
 /** «Editar»: igual para lo escrito y lo aprendido; queda auditado el texto anterior. */
-export async function editAgentGuidance(tx: Db, orgId: string, actorUserId: string, id: string, body: unknown): Promise<GuidanceItem> {
+export async function editAgentGuidance(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  id: string,
+  body: unknown,
+  opts: { replaceId?: string } = {},
+): Promise<GuidanceItem> {
   const text = clean(body)
   const current = await lockRule(tx, orgId, id)
+  if (opts.replaceId) {
+    if (opts.replaceId === id) throw validation("Una regla no se reemplaza a sí misma")
+    await retireReplaced(tx, orgId, actorUserId, opts.replaceId, id)
+  }
   await tx
     .update(agentLesson)
     .set({ body: text, title: text.slice(0, TITLE_CHARS), updatedAt: new Date() })
     .where(and(eq(agentLesson.id, id), eq(agentLesson.organizationId, orgId)))
   await audit(tx, orgId, actorUserId, "agent.guidance_edited", id, { previous: current.body.slice(0, 500), source: current.source })
   return requireGuidance(tx, orgId, id)
-}
-
-/**
- * «Borrar»: deja de llegarle al agente al instante. No se pierde la historia:
- * una aprendida queda retirada (se puede restaurar desde «Aprender»), igual
- * que una escrita.
- */
-export async function removeAgentGuidance(tx: Db, orgId: string, actorUserId: string, id: string): Promise<void> {
-  const current = await lockRule(tx, orgId, id)
-  const now = new Date()
-  await tx
-    .update(agentLesson)
-    .set({ status: "retirada", withdrawnBy: actorUserId, withdrawnAt: now, updatedAt: now })
-    .where(and(eq(agentLesson.id, id), eq(agentLesson.organizationId, orgId)))
-  await audit(tx, orgId, actorUserId, "agent.guidance_removed", id, { source: current.source })
 }
 
 async function lockRule(tx: Db, orgId: string, id: string) {
@@ -287,10 +319,49 @@ export function simpleRulesConflict(candidate: string, existing: string): boolea
 const MODEL_CHECKS = 5
 
 /**
- * ¿La regla que se va a aprobar contradice otra activa? Con el modelo de
- * decisión de la clínica si está configurado; si no (o si falla), con la
- * comparación simple. Solo mira las que hablan de lo mismo.
+ * ¿Ese texto contradice otra regla activa? Con el modelo de decisión de la
+ * clínica si está configurado; si no (o si falla), con la comparación simple.
+ * Solo mira las que hablan de lo mismo.
  */
+async function conflictWithRules(
+  tx: Db,
+  orgId: string,
+  body: string,
+  opts: { excludeId?: string; model: RuleConflictModel | null },
+): Promise<Pick<RuleConflict, "conflictWith" | "method">> {
+  const others = await tx
+    .select({ id: agentLesson.id, body: agentLesson.body })
+    .from(agentLesson)
+    .where(and(activeRules(orgId), opts.excludeId ? ne(agentLesson.id, opts.excludeId) : undefined))
+    .orderBy(desc(agentLesson.approvedAt))
+  const related = others.filter((other) => shareTopic(body, other.body))
+  if (opts.model) {
+    try {
+      for (const other of related.slice(0, MODEL_CHECKS)) {
+        if (await opts.model(body, other.body)) return { conflictWith: other, method: "modelo" }
+      }
+      return { conflictWith: null, method: "modelo" }
+    } catch {
+      // Sin respuesta del modelo, la comparación simple.
+    }
+  }
+  return { conflictWith: related.find((other) => simpleRulesConflict(body, other.body)) ?? null, method: "comparacion" }
+}
+
+/**
+ * Antes de guardar lo que se escribe o se edita: ¿contradice otra regla? Avisa y
+ * no impide guardar. Al editar, `excludeId` es la propia regla.
+ */
+export async function findTextConflict(
+  tx: Db,
+  orgId: string,
+  body: unknown,
+  opts: { excludeId?: string; model?: RuleConflictModel | null } = {},
+): Promise<Pick<RuleConflict, "conflictWith" | "method">> {
+  return conflictWithRules(tx, orgId, clean(body), { ...(opts.excludeId ? { excludeId: opts.excludeId } : {}), model: opts.model ?? null })
+}
+
+/** Antes de aprobar una regla: ¿contradice otra activa?, y si ya no cabe otra, entre cuáles elegir. */
 export async function findRuleConflict(
   tx: Db,
   orgId: string,
@@ -306,22 +377,5 @@ export async function findRuleConflict(
   if (lesson.kind !== "regla") return { conflictWith: null, method: model ? "modelo" : "comparacion", full: null }
   if (lesson.status !== "propuesta") throw new ServiceError("LESSON_NOT_PROPOSED", 409, `La lección ya está ${lesson.status}`)
   const full = await fullRules(tx, orgId, lesson.scope)
-  const others = await tx
-    .select({ id: agentLesson.id, body: agentLesson.body })
-    .from(agentLesson)
-    .where(and(activeRules(orgId), ne(agentLesson.id, lessonId)))
-    .orderBy(desc(agentLesson.approvedAt))
-  const related = others.filter((other) => shareTopic(lesson.body, other.body))
-  if (model) {
-    try {
-      for (const other of related.slice(0, MODEL_CHECKS)) {
-        if (await model(lesson.body, other.body)) return { conflictWith: other, method: "modelo", full }
-      }
-      return { conflictWith: null, method: "modelo", full }
-    } catch {
-      // Sin respuesta del modelo, la comparación simple.
-    }
-  }
-  const found = related.find((other) => simpleRulesConflict(lesson.body, other.body)) ?? null
-  return { conflictWith: found, method: "comparacion", full }
+  return { ...(await conflictWithRules(tx, orgId, lesson.body, { excludeId: lessonId, model })), full }
 }

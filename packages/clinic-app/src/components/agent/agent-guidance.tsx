@@ -3,7 +3,7 @@ import { ConfirmDialog, FormDrawer, LoadingState, submitErrorMessage, useAppForm
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Plus } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { z } from "zod"
 import { GUIDANCE_KEY, type GuidanceItem, type GuidanceList } from "../../lib/agent"
 import { useReceptionName } from "../../lib/agent-names"
@@ -11,6 +11,7 @@ import { apiFetch } from "../../lib/api"
 import { activeOrgLocale } from "../../lib/locale"
 import { QueryErrorState } from "../../lib/query-error"
 import { appWords } from "../../lib/product-words"
+import { WithdrawLessonDialog } from "./lesson-drawer"
 
 /**
  * Lo que mide una regla (`RULE_BODY_CHARS` de los servicios, ADR 0119): va
@@ -49,8 +50,9 @@ function originDetail(item: GuidanceItem): string {
 /**
  * «Lo que el agente debe saber» (decisión 24): una sola lista con lo que
  * escribió la clínica y las reglas que aprendió y alguien aprobó, cada una con
- * su origen. Todas se editan y se borran igual; las aprendidas llevan «Ver
- * conversación». Lo que llega al agente es esta misma lista.
+ * su origen. Todas se editan y se retiran igual; las aprendidas llevan «Ver
+ * conversación». Lo que llega al agente es esta misma lista. Lo retirado queda
+ * al pie y se puede restaurar.
  */
 export function AgentGuidance({ canWrite }: { canWrite: boolean }) {
   const queryClient = useQueryClient()
@@ -58,7 +60,8 @@ export function AgentGuidance({ canWrite }: { canWrite: boolean }) {
   const receptionName = useReceptionName()
   const [filter, setFilter] = useState<Filter>("todas")
   const [editing, setEditing] = useState<GuidanceItem | "nueva" | null>(null)
-  const [removing, setRemoving] = useState<GuidanceItem | null>(null)
+  const [withdrawing, setWithdrawing] = useState<string | null>(null)
+  const [showWithdrawn, setShowWithdrawn] = useState(false)
   const query = useQuery({
     queryKey: [...GUIDANCE_KEY, filter],
     queryFn: () =>
@@ -68,13 +71,10 @@ export function AgentGuidance({ canWrite }: { canWrite: boolean }) {
     void queryClient.invalidateQueries({ queryKey: GUIDANCE_KEY })
     void queryClient.invalidateQueries({ queryKey: ["agent-learning"] })
   }
-  const remove = useMutation({
+  const restore = useMutation({
     retry: false,
-    mutationFn: (item: GuidanceItem) => apiFetch(`/api/agent/learning/guidance/${item.id}`, { method: "DELETE" }),
-    onSuccess: () => {
-      setRemoving(null)
-      refresh()
-    },
+    mutationFn: (item: GuidanceItem) => apiFetch(`/api/agent/learning/lessons/${item.id}/restore`, { method: "POST" }),
+    onSuccess: refresh,
   })
   const data = query.data?.data
   // Todas llegan en cada mensaje: hay un tope (ADR 0119) y se dice cuánto falta.
@@ -84,6 +84,7 @@ export function AgentGuidance({ canWrite }: { canWrite: boolean }) {
     { value: "escrita", label: "Escritas por la clínica", count: data?.counts.escrita },
     { value: "aprendida", label: "Aprendidas", count: data?.counts.aprendida },
   ]
+  const withdrawn = data?.withdrawn ?? []
 
   return (
     <section aria-labelledby="lo-que-debe-saber" className="elevated flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-4 sm:p-6">
@@ -93,13 +94,13 @@ export function AgentGuidance({ canWrite }: { canWrite: boolean }) {
             Lo que {receptionName} debe saber
           </h2>
           <p className="text-sm text-muted-foreground">
-            Lo que le pide la clínica y lo que aprendió de sus correcciones, en una sola lista. Le llega todo en cada mensaje. Los datos
-            concretos (precios, horarios) van en Conocimiento.
+            Lo que le pide la clínica y las reglas que aprendió de sus correcciones. Le llega todo en cada mensaje. Los datos concretos (precios,
+            horarios) van en Conocimiento.
           </p>
           {data ? (
             <p className={`text-sm ${full ? "font-semibold text-warning" : "text-muted-foreground"}`}>
               {data.counts.all} de {data.limits.rules} reglas
-              {full ? ": para agregar otra, quita o une una." : "."}
+              {full ? ": para agregar otra, retira o une una." : "."}
             </p>
           ) : null}
         </div>
@@ -119,7 +120,7 @@ export function AgentGuidance({ canWrite }: { canWrite: boolean }) {
         <div className="flex flex-col items-start gap-2 rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
           <p>
             {filter === "aprendida"
-              ? "Todavía no aprendió nada de tus correcciones. Cuando corrijas una respuesta y apruebes la regla, aparece aquí."
+              ? "Todavía no aprendió reglas de tus correcciones. Aparecen cuando corriges con «No debió responder» y lo apruebas."
               : filter === "escrita"
                 ? "La clínica todavía no le escribió nada. Con la base y lo que sabe ya puede atender."
                 : "Todavía no hay nada aquí. Con la base y lo que sabe ya puede atender."}
@@ -173,13 +174,13 @@ export function AgentGuidance({ canWrite }: { canWrite: boolean }) {
                     </Button>
                     <Button
                       type="button"
-                      variant="link"
+                      variant="outline"
                       size="sm"
-                      className="h-auto min-h-11 p-0 text-destructive sm:min-h-8"
-                      aria-label={`Borrar: ${item.body.slice(0, 60)}`}
-                      onClick={() => setRemoving(item)}
+                      className="min-h-11 sm:min-h-8"
+                      aria-label={`Retirar: ${item.body.slice(0, 60)}`}
+                      onClick={() => setWithdrawing(item.id)}
                     >
-                      Borrar
+                      Retirar
                     </Button>
                   </>
                 ) : null}
@@ -188,32 +189,63 @@ export function AgentGuidance({ canWrite }: { canWrite: boolean }) {
           ))}
         </ul>
       )}
+      {withdrawn.length > 0 ? (
+        <div className="flex flex-col gap-1">
+          <Button
+            type="button"
+            variant="link"
+            className="h-auto min-h-11 self-start p-0 text-muted-foreground sm:min-h-8"
+            aria-expanded={showWithdrawn}
+            aria-controls="saber-retiradas"
+            onClick={() => setShowWithdrawn((value) => !value)}
+          >
+            Retiradas · {withdrawn.length}, se pueden restaurar
+          </Button>
+          {showWithdrawn ? (
+            <ul id="saber-retiradas" aria-label="Retiradas" className="flex flex-col divide-y rounded-xl border">
+              {withdrawn.map((item) => (
+                <li key={item.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3">
+                  <p className="min-w-0 flex-1 basis-56 break-words text-muted-foreground">{item.body}</p>
+                  {canWrite ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="min-h-11 sm:min-h-8"
+                      aria-label={`Restaurar: ${item.body.slice(0, 60)}`}
+                      disabled={restore.isPending}
+                      onClick={() => restore.mutate(item)}
+                    >
+                      Restaurar
+                    </Button>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {restore.isError ? (
+            <p role="alert" className="text-sm text-destructive">
+              {submitErrorMessage(restore.error)}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       <GuidanceDrawer target={editing} onClose={() => setEditing(null)} onSaved={refresh} />
-      <ConfirmDialog
-        open={removing !== null}
-        title="Borrar de lo que debe saber"
-        description={
-          removing
-            ? `«${removing.body.slice(0, 160)}» deja de llegarle a ${receptionName} desde ahora.${removing.source === "aprendida" ? " La regla queda retirada en Aprender y se puede restaurar." : ""}`
-            : ""
-        }
-        confirmLabel="Borrar"
-        variant="destructive"
-        pending={remove.isPending}
-        onClose={() => {
-          if (!remove.isPending) {
-            remove.reset()
-            setRemoving(null)
-          }
-        }}
-        onConfirm={() => removing && remove.mutate(removing)}
-        error={remove.isError ? submitErrorMessage(remove.error) : null}
-      />
+      <WithdrawLessonDialog lessonId={withdrawing} onClose={() => setWithdrawing(null)} />
     </section>
   )
 }
 
-/** Agregar o editar una línea: una idea por línea. */
+/** Lo que dice `POST /api/agent/learning/guidance/check`: la regla activa con la que choca, si hay una. */
+interface TextCheck {
+  conflictWith: { id: string; body: string } | null
+}
+
+/**
+ * Agregar o editar una línea: una idea por línea. Si contradice otra regla, lo
+ * dice antes de guardar y deja decidir. Avisa y no impide guardar; si no se pudo
+ * comprobar, guarda igual.
+ */
 function GuidanceDrawer({
   target,
   onClose,
@@ -224,55 +256,104 @@ function GuidanceDrawer({
   onSaved: () => void
 }) {
   const saved = target && target !== "nueva" ? target.body : ""
+  const [conflict, setConflict] = useState<{ id: string; body: string } | null>(null)
+  /** El texto que espera la decisión del aviso. */
+  const pendingBody = useRef("")
   const save = useMutation({
     retry: false,
-    mutationFn: (body: string) =>
+    mutationFn: ({ body, replaceId }: { body: string; replaceId?: string }) =>
       target && target !== "nueva"
-        ? apiFetch(`/api/agent/learning/guidance/${target.id}`, { method: "PATCH", body: JSON.stringify({ body }) })
-        : apiFetch("/api/agent/learning/guidance", { method: "POST", body: JSON.stringify({ body }) }),
+        ? apiFetch(`/api/agent/learning/guidance/${target.id}`, { method: "PATCH", body: JSON.stringify({ body, replaceId }) })
+        : apiFetch("/api/agent/learning/guidance", { method: "POST", body: JSON.stringify({ body, replaceId }) }),
+    onSuccess: () => {
+      setConflict(null)
+      onSaved()
+      onClose()
+    },
   })
   const form = useAppForm({
     defaultValues: { body: saved },
     validators: { onSubmit: guidanceSchema },
     onSubmit: async ({ value }) => {
-      await save.mutateAsync(value.body.trim())
-      onSaved()
-      onClose()
+      const body = value.body.trim()
+      if (body !== saved) {
+        const check = await apiFetch<{ data: TextCheck }>("/api/agent/learning/guidance/check", {
+          method: "POST",
+          body: JSON.stringify({ body, ...(target && target !== "nueva" ? { id: target.id } : {}) }),
+        }).catch(() => null)
+        if (check?.data.conflictWith) {
+          pendingBody.current = body
+          setConflict(check.data.conflictWith)
+          return
+        }
+      }
+      await save.mutateAsync({ body })
     },
   })
   // Al abrir otra línea (o «Agregar»), el borrador empieza con su texto.
   // biome-ignore lint/correctness/useExhaustiveDependencies: solo al cambiar de línea, para no pisar lo que se está escribiendo.
   useEffect(() => {
     form.reset({ body: saved })
+    setConflict(null)
   }, [target])
   const surface = useFormSurface(form)
   return (
-    <FormDrawer
-      {...surface}
-      open={target !== null}
-      onClose={onClose}
-      title={target === "nueva" ? "Agregar a lo que debe saber" : "Editar"}
-      description="Cómo quieres que atienda. Los datos concretos (precios, horarios, políticas) van en Conocimiento."
-      submitLabel="Guardar"
-      cancelLabel="Cancelar"
-    >
-      <form.AppField name="body">
-        {(field) => (
-          <field.TextareaField
-            id="lo-que-debe-saber-texto"
-            label="Qué debe saber"
-            rows={4}
-            maxLength={GUIDANCE_CHARS}
-            placeholder="Si alguien llega con dolor, ofrece la primera cita disponible del día."
-            description={
-              <>
-                Una idea corta, hasta {GUIDANCE_CHARS} caracteres. No puede contradecir lo que fija {appWords().name}: ante un choque, gana la
-                base.
-              </>
-            }
-          />
-        )}
-      </form.AppField>
-    </FormDrawer>
+    <>
+      <FormDrawer
+        {...surface}
+        open={target !== null}
+        onClose={onClose}
+        title={target === "nueva" ? "Agregar a lo que debe saber" : "Editar"}
+        description="Cómo quieres que atienda. Los datos concretos (precios, horarios, políticas) van en Conocimiento."
+        submitLabel="Guardar"
+        cancelLabel="Cancelar"
+      >
+        <form.AppField name="body">
+          {(field) => (
+            <field.TextareaField
+              id="lo-que-debe-saber-texto"
+              label="Qué debe saber"
+              rows={4}
+              maxLength={GUIDANCE_CHARS}
+              placeholder="Si alguien llega con dolor, ofrece la primera cita disponible del día."
+              description={
+                <>
+                  Una idea corta, hasta {GUIDANCE_CHARS} caracteres. No puede contradecir lo que fija {appWords().name}: ante un choque, gana la
+                  base.
+                </>
+              }
+            />
+          )}
+        </form.AppField>
+      </FormDrawer>
+      <ConfirmDialog
+        open={conflict !== null}
+        title="Contradice otra regla"
+        description={conflict ? `Esto contradice «${conflict.body}». ¿Cuál vale?` : ""}
+        confirmLabel="Reemplazar"
+        cancelLabel="Seguir editando"
+        variant="default"
+        pending={save.isPending}
+        error={conflict && save.isError ? submitErrorMessage(save.error) : null}
+        onClose={() => {
+          if (!save.isPending) {
+            save.reset()
+            setConflict(null)
+          }
+        }}
+        onConfirm={() => conflict && save.mutate({ body: pendingBody.current, replaceId: conflict.id })}
+      >
+        <p className="text-sm text-muted-foreground">«Reemplazar» deja solo la nueva, y la otra queda en Retiradas. Si mantienes las dos, le llegan las dos.</p>
+        <Button
+          type="button"
+          variant="outline"
+          className="min-h-11 self-start sm:min-h-9"
+          disabled={save.isPending}
+          onClick={() => save.mutate({ body: pendingBody.current })}
+        >
+          Mantener las dos
+        </Button>
+      </ConfirmDialog>
+    </>
   )
 }

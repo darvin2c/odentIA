@@ -5,7 +5,7 @@
  *
  * Cada asunto ocupa una sola fila y cada persona también: lo demás de esa
  * persona va como «También» (`also`), si su rol puede verlo. La lista se agrupa
- * con la escala de siempre: Ahora, Hoy y Sin apuro (`band`, ADR 0125). Lo que
+ * con la escala de siempre: Ahora, Hoy y Sin apuro (`band`, ADR 0126). Lo que
  * aparece aquí no llega a la campana, que es solo para enterarse.
  *
  * Dentro de cada grupo, el orden es fijo y sin puntajes: casos «Ahora», atenciones de días
@@ -61,7 +61,7 @@ export interface WaitingCase {
   topicKind: string
   /**
    * Quien mira lo responde desde Inicio: nadie lo tomó o es suyo, y a caja solo
-   * sus pagos. Responder lo toma al enviar (ADR 0125). No donde ya no se puede
+   * sus pagos. Responder lo toma al enviar (ADR 0126). No donde ya no se puede
    * escribirle (`windowClosed`) ni lo que ya tiene otra persona.
    */
   canReply: boolean

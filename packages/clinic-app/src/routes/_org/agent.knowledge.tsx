@@ -24,20 +24,17 @@ import {
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute, Link } from "@tanstack/react-router"
+import { createFileRoute } from "@tanstack/react-router"
 import { type FormEvent, useRef, useState } from "react"
 import { z } from "zod"
 import { KnowledgeAnswers } from "../../components/agent/knowledge-answers"
 import { KnowledgeBasics } from "../../components/agent/knowledge-basics"
 import { KnowledgeDetail } from "../../components/agent/knowledge-detail"
-import { KnowledgeGaps } from "../../components/agent/knowledge-gaps"
 import {
   type KnowledgeBasics as Basics,
-  type KnowledgeGap as Gap,
   type KnowledgeBasicItem,
   type KnowledgeEntry,
   type KnowledgeSources as Sources,
-  TOUCH,
 } from "../../components/agent/knowledge-model"
 import { KnowledgeSources } from "../../components/agent/knowledge-sources"
 import { LessonDrawer } from "../../components/agent/lesson-drawer"
@@ -71,10 +68,6 @@ interface Draft {
   askForms: string
   basicKey: string
   publish: boolean
-  /** Al cerrar una pregunta sin respuesta: usar una respuesta que ya existe en vez de escribir otra. */
-  existingId: string
-  /** Se está cerrando una pregunta sin respuesta: no se piden formas, sede ni vigencia. */
-  answering: boolean
 }
 
 const EMPTY_DRAFT: Draft = {
@@ -87,15 +80,9 @@ const EMPTY_DRAFT: Draft = {
   askForms: "",
   basicKey: "",
   publish: true,
-  existingId: "",
-  answering: false,
 }
 
-/**
- * Lo que se revisa al guardar, con las palabras y los límites del servidor.
- * Lo que no está en pantalla en un modo (formas al cerrar una pregunta, la
- * pregunta y la respuesta al usar una existente) siempre pasa.
- */
+/** Lo que se revisa al guardar, con las palabras y los límites del servidor. */
 const draftSchema = z
   .object({
     kind: z.string(),
@@ -107,23 +94,18 @@ const draftSchema = z
     askForms: z.string(),
     basicKey: z.string(),
     publish: z.boolean(),
-    existingId: z.string(),
-    answering: z.boolean(),
   })
   .superRefine((draft, ctx) => {
-    if (!(draft.answering && draft.existingId)) {
-      const title = draft.title.trim()
-      if (!title) ctx.addIssue({ code: "custom", path: ["title"], message: "Escribe la pregunta." })
-      else if (title.length > TITLE_CHARS) {
-        ctx.addIssue({ code: "custom", path: ["title"], message: `Escribe como mucho ${TITLE_CHARS} caracteres.` })
-      }
-      const body = draft.body.trim()
-      if (!body) ctx.addIssue({ code: "custom", path: ["body"], message: "Escribe la respuesta." })
-      else if (body.length > BODY_CHARS) {
-        ctx.addIssue({ code: "custom", path: ["body"], message: `Escribe como mucho ${BODY_CHARS} caracteres.` })
-      }
+    const title = draft.title.trim()
+    if (!title) ctx.addIssue({ code: "custom", path: ["title"], message: "Escribe la pregunta." })
+    else if (title.length > TITLE_CHARS) {
+      ctx.addIssue({ code: "custom", path: ["title"], message: `Escribe como mucho ${TITLE_CHARS} caracteres.` })
     }
-    if (draft.answering) return
+    const body = draft.body.trim()
+    if (!body) ctx.addIssue({ code: "custom", path: ["body"], message: "Escribe la respuesta." })
+    else if (body.length > BODY_CHARS) {
+      ctx.addIssue({ code: "custom", path: ["body"], message: `Escribe como mucho ${BODY_CHARS} caracteres.` })
+    }
     // El servidor junta los espacios de cada forma antes de medirla.
     const lines = draft.askForms.split("\n").map((line) => line.replace(/\s+/g, " ").trim())
     const long = lines.findIndex((line) => line.length > ASK_FORM_CHARS)
@@ -155,12 +137,11 @@ function AgentKnowledgePage() {
   const [lessonId, setLessonId] = useState<string | null>(null)
   const [editing, setEditing] = useState<KnowledgeEntry | null>(null)
   const [creating, setCreating] = useState(false)
-  const [answering, setAnswering] = useState<Gap | null>(null)
   /** «Responder las que faltan»: al guardar una pregunta básica se pasa a la siguiente. */
   const [basicsRun, setBasicsRun] = useState(false)
   /** Valores con los que se abrió el cajón: el formulario vuelve a ellos al reiniciarse. */
   const [draftStart, setDraftStart] = useState<Draft>(EMPTY_DRAFT)
-  const formOpen = creating || editing !== null || answering !== null
+  const formOpen = creating || editing !== null
 
   // Por páginas (topes de la fase 4): la respuesta 101 también se abre. La
   // búsqueda va al servidor; la sede y el estado se filtran sobre lo cargado.
@@ -184,12 +165,6 @@ function AgentKnowledgePage() {
     enabled: canRead,
     retry: false,
   })
-  const gapsQuery = useQuery({
-    queryKey: ["agent-knowledge-gaps"],
-    queryFn: () => apiFetch<{ data: Gap[] }>("/api/agent/knowledge/gaps"),
-    enabled: canRead,
-    retry: false,
-  })
   const sourcesQuery = useQuery({
     queryKey: ["agent-knowledge-sources"],
     queryFn: () => apiFetch<{ data: Sources }>("/api/agent/knowledge/sources"),
@@ -205,22 +180,13 @@ function AgentKnowledgePage() {
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ["agent-knowledge"] })
     void queryClient.invalidateQueries({ queryKey: ["agent-knowledge-basics"] })
-    void queryClient.invalidateQueries({ queryKey: ["agent-knowledge-gaps"] })
-    // El número del menú «Agente» cuenta lo que no supo responder.
-    void queryClient.invalidateQueries({ queryKey: ["agent-summary"] })
   }
 
   /** Alta cuya publicación falló: reintentar la corrige y la publica, no crea otra. */
   const createdId = useRef<string | null>(null)
   const saveMutation = useMutation({
     retry: false,
-    mutationFn: async ({ draft, editingId, gapIds }: { draft: Draft; editingId: string | null; gapIds: string[] | null }) => {
-      if (gapIds) {
-        const answer = draft.existingId
-          ? { ids: gapIds, entryId: draft.existingId }
-          : { ids: gapIds, title: draft.title, body: draft.body, basicKey: draft.basicKey || null }
-        return apiFetch("/api/agent/knowledge/gaps/answer", { method: "POST", body: JSON.stringify(answer) })
-      }
+    mutationFn: async ({ draft, editingId }: { draft: Draft; editingId: string | null }) => {
       const payload = {
         title: draft.title,
         body: draft.body,
@@ -254,17 +220,16 @@ function AgentKnowledgePage() {
   })
 
   /** Lo que el envío necesita saber de la pantalla al guardar (se actualiza en cada render). */
-  const submitContext = useRef<{ editing: KnowledgeEntry | null; answering: Gap | null; next: Draft | null }>({
+  const submitContext = useRef<{ editing: KnowledgeEntry | null; next: Draft | null }>({
     editing: null,
-    answering: null,
     next: null,
   })
   const form = useAppForm({
     defaultValues: draftStart,
     validators: { onSubmit: draftSchema },
     onSubmit: async ({ value, formApi }) => {
-      const { editing: entry, answering: gap, next } = submitContext.current
-      await saveMutation.mutateAsync({ draft: value, editingId: entry?.id ?? null, gapIds: gap?.ids ?? null })
+      const { editing: entry, next } = submitContext.current
+      await saveMutation.mutateAsync({ draft: value, editingId: entry?.id ?? null })
       createdId.current = null
       // `next`: la pregunta básica que sigue cuando se están respondiendo las que faltan.
       if (next) {
@@ -276,7 +241,7 @@ function AgentKnowledgePage() {
   })
   const surface = useFormSurface(form, {
     // Cada forma de preguntar que el servidor señala (`askForms[2]`) va al campo de formas.
-    fieldMap: (key) => (key.startsWith("askForms") ? "askForms" : key === "entryId" ? "existingId" : undefined),
+    fieldMap: (key) => (key.startsWith("askForms") ? "askForms" : undefined),
   })
   const values = useStore(form.store, (state) => state.values)
   const formDirty = formOpen && surface.isDirty
@@ -291,32 +256,9 @@ function AgentKnowledgePage() {
     onSuccess: () => invalidate(),
   })
 
-  // Lo que el equipo ya respondió se guarda tal cual. Repetirlo es seguro: una
-  // pregunta ya cerrada no se cierra dos veces ni crea otra respuesta.
-  const quickSaveMutation = useMutation({
-    retry: false,
-    mutationFn: (gap: Gap) =>
-      apiFetch("/api/agent/knowledge/gaps/answer", {
-        method: "POST",
-        body: JSON.stringify({ ids: gap.ids, title: gap.question, body: gap.teamAnswer }),
-      }),
-    onSettled: () => invalidate(),
-  })
-
-  const discardMutation = useMutation({
-    retry: false,
-    mutationFn: (gap: Gap) =>
-      apiFetch("/api/agent/knowledge/gaps/discard", { method: "POST", body: JSON.stringify({ ids: gap.ids }) }),
-    onSuccess: () => {
-      closeForm()
-      invalidate()
-    },
-  })
-
   const entries = entriesQuery.data?.pages.flatMap((page) => page.data) ?? []
   const entriesTotal = entriesQuery.data?.pages[0]?.total ?? entries.length
   const basics = basicsQuery.data?.data ?? null
-  const gaps = gapsQuery.data?.data ?? []
   const branches = (branchesQuery.data?.data ?? []).filter((branch) => branch.isActive !== false)
 
   if (!canRead) {
@@ -330,17 +272,14 @@ function AgentKnowledgePage() {
   const missing = basics?.items.filter((item) => !item.covered) ?? []
   const detail = entries.find((entry) => entry.id === detailId) ?? null
 
-  function open(next: Draft, target: { entry?: KnowledgeEntry; gap?: Gap; basicsRun?: boolean }) {
+  function open(next: Draft, target: { entry?: KnowledgeEntry; basicsRun?: boolean }) {
     saveMutation.reset()
-    discardMutation.reset()
     createdId.current = null
     setDetailId(null)
-    const start = { ...next, answering: target.gap !== undefined }
-    setDraftStart(start)
-    form.reset(start)
+    setDraftStart(next)
+    form.reset(next)
     setEditing(target.entry ?? null)
-    setAnswering(target.gap ?? null)
-    setCreating(!target.entry && !target.gap)
+    setCreating(!target.entry)
     setBasicsRun(target.basicsRun === true)
   }
 
@@ -373,21 +312,9 @@ function AgentKnowledgePage() {
     )
   }
 
-  function openAnswer(gap: Gap) {
-    quickSaveMutation.reset()
-    open({ ...EMPTY_DRAFT, title: gap.question.slice(0, TITLE_CHARS), body: gap.teamAnswer ?? "" }, { gap })
-  }
-
-  function quickSave(gap: Gap) {
-    // Una pregunta más larga que un título se acorta a mano, no a ciegas.
-    if (gap.question.length > TITLE_CHARS) openAnswer(gap)
-    else quickSaveMutation.mutate(gap)
-  }
-
   function closeForm() {
     setEditing(null)
     setCreating(false)
-    setAnswering(null)
     setBasicsRun(false)
   }
 
@@ -395,7 +322,7 @@ function AgentKnowledgePage() {
   const runRest = basicsRun ? missing.filter((item) => item.key !== values.basicKey) : []
   const runIndex = missing.findIndex((item) => item.key === values.basicKey)
   const runNext = runRest.length > 0 ? (missing.slice(runIndex + 1).find((item) => item.key !== values.basicKey) ?? runRest[0]) : undefined
-  submitContext.current = { editing, answering, next: runNext ? basicDraft(runNext) : null }
+  submitContext.current = { editing, next: runNext ? basicDraft(runNext) : null }
 
   // Una respuesta perdida tras guardar no se sabe si quedó: no se vuelve a enviar a ciegas.
   const ambiguous = isAmbiguousMutationError(saveMutation.error)
@@ -407,8 +334,6 @@ function AgentKnowledgePage() {
     surface.onSubmit(event)
   }
 
-  const usesExisting = answering !== null && values.existingId !== ""
-  const publishedEntries = entries.filter((entry) => entry.status === "publicada")
   const branchOptions = editing?.branchId && editing.branchName && !branches.some((branch) => branch.id === editing.branchId)
     ? [...branches, { id: editing.branchId, name: editing.branchName }]
     : branches
@@ -427,28 +352,14 @@ function AgentKnowledgePage() {
         Es lo que usa para responder a pacientes. Clío y Argos no lo usan.
       </p>
 
-      <div className="grid min-w-0 items-stretch gap-4 xl:grid-cols-2">
-        <KnowledgeGaps
-          gaps={gaps}
-          isPending={gapsQuery.isPending}
-          error={gapsQuery.isError ? gapsQuery.error : null}
-          onRetry={() => void gapsQuery.refetch()}
-          canWrite={canWrite}
-          savingId={quickSaveMutation.isPending ? (quickSaveMutation.variables?.ids[0] ?? null) : null}
-          blocked={quickSaveMutation.isPending}
-          saveError={quickSaveMutation.error ? submitErrorMessage(quickSaveMutation.error) : null}
-          onSave={quickSave}
-          onEdit={openAnswer}
-        />
-        <KnowledgeBasics
-          basics={basics}
-          isPending={basicsQuery.isPending}
-          error={basicsQuery.isError ? basicsQuery.error : null}
-          onRetry={() => void basicsQuery.refetch()}
-          canWrite={canWrite}
-          onAnswerMissing={startBasics}
-        />
-      </div>
+      <KnowledgeBasics
+        basics={basics}
+        isPending={basicsQuery.isPending}
+        error={basicsQuery.isError ? basicsQuery.error : null}
+        onRetry={() => void basicsQuery.refetch()}
+        canWrite={canWrite}
+        onAnswerMissing={startBasics}
+      />
 
       <KnowledgeAnswers
         entries={entries}
@@ -505,82 +416,23 @@ function AgentKnowledgePage() {
         <FormDrawer
           open={formOpen}
           onClose={closeForm}
-          title={
-            answering
-              ? "Guardar como respuesta oficial"
-              : editing
-                ? "Editar respuesta"
-                : basicsRun
-                  ? "Responder lo que solo tú sabes"
-                  : "Nueva respuesta"
-          }
+          title={editing ? "Editar respuesta" : basicsRun ? "Responder lo que solo tú sabes" : "Nueva respuesta"}
           description={
-            answering
-              ? `La próxima vez que lo pregunten, ${receptionName} responderá con esto.`
-              : basicsRun
-                ? runNext
-                  ? `Faltan ${missing.length}. Al guardar pasas a la siguiente; puedes dejar cualquiera sin responder.`
-                  : "Es la última que falta."
-                : `${receptionName} la cita tal cual. Escríbela como se la dirías a un paciente.`
+            basicsRun
+              ? runNext
+                ? `Faltan ${missing.length}. Al guardar pasas a la siguiente; puedes dejar cualquiera sin responder.`
+                : "Es la última que falta."
+              : `${receptionName} la cita tal cual. Escríbela como se la dirías a un paciente.`
           }
           {...surface}
           onSubmit={submit}
-          submitLabel={answering ? "Guardar y publicar" : runNext ? "Guardar y seguir" : "Guardar"}
+          submitLabel={runNext ? "Guardar y seguir" : "Guardar"}
           cancelLabel="Cancelar"
           submitDisabled={ambiguous}
           // Mientras no se pueda volver a guardar, el porqué sigue a la vista aunque se escriba.
           error={ambiguous ? submitErrorMessage(saveMutation.error) : surface.error}
         >
           <FieldGroup>
-            {answering ? (
-              <>
-                <div className="flex flex-col gap-2 rounded-lg bg-muted/60 px-3 py-2 text-sm">
-                  <p className="[overflow-wrap:anywhere]">
-                    <span className="font-semibold">Preguntaron:</span> «{answering.question}»
-                    {answering.count > 1 ? ` · ${answering.count} veces` : ""}
-                  </p>
-                  <div className="flex flex-wrap items-center gap-x-4">
-                    <Link
-                      to="/inbox"
-                      search={{ conversation: answering.conversationId }}
-                      className="inline-flex min-h-11 items-center font-semibold text-primary hover:underline sm:min-h-8"
-                    >
-                      Ver la conversación
-                    </Link>
-                    <Button
-                      type="button"
-                      variant="link"
-                      size="sm"
-                      className={`h-auto p-0 text-muted-foreground ${TOUCH}`}
-                      disabled={discardMutation.isPending || saveMutation.isPending}
-                      onClick={() => discardMutation.mutate(answering)}
-                    >
-                      No hace falta responderla: descartar
-                    </Button>
-                  </div>
-                  {discardMutation.isError ? (
-                    <p role="alert" className="text-destructive">
-                      {submitErrorMessage(discardMutation.error)}
-                    </p>
-                  ) : null}
-                </div>
-                {publishedEntries.length > 0 ? (
-                  <form.AppField name="existingId">
-                    {(field) => (
-                      <field.SelectField
-                        id="nc-existente"
-                        label="¿Ya tienes una respuesta para esto?"
-                        description="Si eliges una, esta forma de preguntar se suma a esa respuesta y no se crea otra."
-                        options={[
-                          { value: "", label: "No, escribir una nueva" },
-                          ...publishedEntries.map((entry) => ({ value: entry.id, label: entry.title })),
-                        ]}
-                      />
-                    )}
-                  </form.AppField>
-                ) : null}
-              </>
-            ) : null}
             {basicsRun && missing.length > 1 ? (
               <form.AppField name="basicKey">
                 {(field) => (
@@ -617,8 +469,6 @@ function AgentKnowledgePage() {
                 )}
               </form.AppField>
             ) : null}
-            {usesExisting ? null : (
-              <>
                 {creating && !basicsRun ? (
                   <form.AppField name="kind">
                     {(field) => (
@@ -646,10 +496,6 @@ function AgentKnowledgePage() {
                     />
                   )}
                 </form.AppField>
-              </>
-            )}
-            {answering ? null : (
-              <>
                 <form.AppField name="askForms">
                   {(field) => (
                     <field.TextareaField
@@ -755,8 +601,6 @@ function AgentKnowledgePage() {
                     )}
                   </form.AppField>
                 ) : null}
-              </>
-            )}
           </FieldGroup>
         </FormDrawer>
       ) : null}

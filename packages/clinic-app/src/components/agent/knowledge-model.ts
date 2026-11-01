@@ -48,16 +48,6 @@ export interface KnowledgeBasics {
   total: number
 }
 
-export interface KnowledgeGap {
-  ids: string[]
-  question: string
-  count: number
-  weekCount: number
-  lastAt: string
-  conversationId: string
-  teamAnswer: string | null
-}
-
 /** «Lo que toma de tus datos»: lo que entrega `/api/agent/knowledge/sources` (`getAgentDataSources`). */
 export interface KnowledgeSources {
   hours: BranchHours[]
@@ -142,9 +132,4 @@ export function entrySubtitle(entry: KnowledgeEntry): string | null {
   if (!first) return null
   if (rest.length === 0) return `También la piden como «${first}»`
   return `También la piden como «${first}» y ${rest.length === 1 ? "1 forma más" : `${rest.length} formas más`}`
-}
-
-/** «4 veces esta semana» solo si pasó esta semana; si no, el total sin decir cuándo. */
-export function gapFrequency(gap: Pick<KnowledgeGap, "count" | "weekCount">): string {
-  return gap.weekCount > 0 ? `${times(gap.weekCount)} esta semana` : times(gap.count)
 }

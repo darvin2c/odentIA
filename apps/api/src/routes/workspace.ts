@@ -106,7 +106,7 @@ export function createWorkspaceRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => claimHandoff(tx, orgId, userId, parsed.data, { takeOver: true })))
   })
-  // El panel de una persona (ADR 0125): cada parte, solo si el rol la lee; caja, solo su pago.
+  // El panel de una persona (ADR 0126): cada parte, solo si el rol la lee; caja, solo su pago.
   app.get("/person-panel", async c => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccessAny(memberRole, ["conversations.read", "conversations.topics"])) return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para abrir esta conversación"), 403)

@@ -91,9 +91,10 @@ export const KNOWLEDGE_GAP_STATUSES = ["abierta", "resuelta", "descartada"] as c
 export type KnowledgeGapStatus = (typeof KNOWLEDGE_GAP_STATUSES)[number]
 
 /**
- * Lo que el agente no supo responder: buscó en el conocimiento y no encontró
- * nada. Queda abierto hasta que alguien lo convierte en respuesta oficial, lo
- * enlaza a una que ya existía o lo descarta.
+ * Lo que el agente buscó sin encontrar nada. Se anota al salir vacía la
+ * búsqueda, antes de que responda, así que no dice si respondió bien o mal: una
+ * persona lo mira en «Por revisar» (`review_item_id`). Queda abierto hasta que
+ * esa fila se decide.
  */
 export const agentKnowledgeGap = pgTable(
   "agent_knowledge_gap",
@@ -109,6 +110,8 @@ export const agentKnowledgeGap = pgTable(
     question: text("question").notNull(),
     /** Lo que el agente buscó sin resultado. */
     query: text("query").notNull(),
+    /** Su fila en «Por revisar»: la misma búsqueda de varias personas comparte una. */
+    reviewItemId: uuid("review_item_id").references(() => agentReviewItem.id, { onDelete: "set null" }),
     status: text("status").notNull().default("abierta"),
     resolvedEntryId: uuid("resolved_entry_id").references(() => agentKnowledgeEntry.id),
     resolvedBy: text("resolved_by"),
@@ -118,6 +121,7 @@ export const agentKnowledgeGap = pgTable(
   (table) => [
     index("agent_knowledge_gap_org_idx").on(table.organizationId, table.status, table.createdAt),
     index("agent_knowledge_gap_conversation_idx").on(table.conversationId),
+    index("agent_knowledge_gap_review_idx").on(table.reviewItemId),
     check("agent_knowledge_gap_status_check", sql`${table.status} in ('abierta','resuelta','descartada')`),
   ],
 )
@@ -593,14 +597,14 @@ export const agentActionLog = pgTable(
 /* ---------- Aprender: lo que se revisa, lo que se corrige y lo que queda aprendido ---------- */
 
 /** Por qué una respuesta entró en «Por revisar». */
-export const REVIEW_REASONS = ["equipo_tomo", "repitio_pregunta", "muestra", "marcada"] as const
+export const REVIEW_REASONS = ["no_encontro", "equipo_tomo", "repitio_pregunta", "muestra", "marcada"] as const
 export type ReviewReason = (typeof REVIEW_REASONS)[number]
 
 /**
- * Una respuesta del agente que conviene que una persona mire: porque el
- * equipo tomó la conversación justo después, porque el interlocutor repitió la
- * pregunta, por muestra al azar o porque alguien la marcó. Una fila por
- * respuesta.
+ * Una respuesta del agente que conviene que una persona mire: porque buscó algo
+ * y no lo encontró, porque el equipo tomó la conversación justo después, porque
+ * el interlocutor repitió la pregunta, por muestra al azar o porque alguien la
+ * marcó. Una fila por respuesta; lo que no encontró, una por búsqueda.
  */
 export const agentReviewItem = pgTable(
   "agent_review_item",
@@ -611,11 +615,14 @@ export const agentReviewItem = pgTable(
     conversationId: uuid("conversation_id")
       .notNull()
       .references(() => conversation.id),
-    traceId: uuid("trace_id")
-      .notNull()
-      .references(() => agentAnswerTrace.id),
+    /** Nula en lo que no encontró si su aviso fue un pase al equipo: esos no dejan traza. */
+    traceId: uuid("trace_id").references(() => agentAnswerTrace.id),
+    /** El mensaje que respondió, cuando no hay traza que lo diga. */
+    triggerMessageId: uuid("trigger_message_id"),
     reason: text("reason").$type<ReviewReason>().notNull(),
-    /** Lo que preguntó el interlocutor y lo que respondió el agente, tal como quedaron. */
+    /** Lo que buscó sin encontrar nada (`no_encontro`). */
+    query: text("query"),
+    /** Lo que escribió el interlocutor seguido y lo que respondió el agente, tal como quedaron. */
     question: text("question").notNull().default(""),
     reply: text("reply").notNull(),
     /** Lo que respondió el equipo después, si lo hubo: punto de partida de la corrección. */
@@ -628,7 +635,7 @@ export const agentReviewItem = pgTable(
   (table) => [
     uniqueIndex("agent_review_item_trace_uidx").on(table.organizationId, table.traceId),
     index("agent_review_item_org_idx").on(table.organizationId, table.status, table.createdAt),
-    check("agent_review_item_reason_check", sql`${table.reason} in ('equipo_tomo','repitio_pregunta','muestra','marcada')`),
+    check("agent_review_item_reason_check", sql`${table.reason} in ('no_encontro','equipo_tomo','repitio_pregunta','muestra','marcada')`),
     check("agent_review_item_status_check", sql`${table.status} in ('pendiente','bien','corregida')`),
   ],
 )

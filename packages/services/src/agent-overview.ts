@@ -6,20 +6,20 @@ import { and, asc, count, desc, eq, gte, inArray, sql } from "drizzle-orm"
 import { getBranchHours } from "./agent-clinic-info.js"
 import { countLearningPending } from "./agent-learning.js"
 import { type AgentModelCheck, getAgentConfig } from "./agentConfig.js"
-import { countOpenKnowledgeGaps, getKnowledgeDataSources, listActiveKnowledge } from "./knowledge.js"
+import { getKnowledgeDataSources, listActiveKnowledge } from "./knowledge.js"
 import { getOrgLocale } from "./locale.js"
 
 /* ---------- Resumen del agente: cómo va y qué necesita de la clínica ---------- */
 
 /**
- * Lo que se resuelve dentro de Agente: respuestas por revisar, lecciones por
- * aprobar y lo que no supo responder. Es el número del menú «Agente» y la
- * suma de los números de sus pestañas; los casos que el agente pasó al equipo
+ * Lo que se resuelve dentro de Agente: lo que hay por revisar, también lo que
+ * buscó sin encontrar, y las lecciones por aprobar. Es el número del menú
+ * «Agente» y el de la pestaña Aprender; los casos que el agente pasó al equipo
  * se cuentan donde se toman (el botón «Agente» de la cabecera).
  */
 export async function countAgentWork(tx: Db, orgId: string): Promise<number> {
   const learning = await countLearningPending(tx, orgId)
-  return learning.review + learning.lessons + (await countOpenKnowledgeGaps(tx, orgId))
+  return learning.review + learning.lessons
 }
 
 export interface AgentOutcomes {
@@ -54,11 +54,12 @@ export type AgentProviderProblem = "rechazado" | "sin_saldo" | "sin_configurar"
 export interface AgentOverview {
   enabled: boolean
   /**
-   * `review` y `lessons`: respuestas por revisar y lecciones por aprobar en
-   * Aprender. Los casos que pasó el agente no se cuentan aquí: cuentan en el
-   * número de «Inicio» del menú (`countWorkspaceWaiting`).
+   * `review` y `lessons`: lo que hay por revisar, también lo que buscó sin
+   * encontrar, y las lecciones por aprobar en Aprender. Los casos que pasó el
+   * agente no se cuentan aquí: cuentan en el número de «Inicio» del menú
+   * (`countWorkspaceWaiting`).
    */
-  needsYou: { gaps: number; review: number; lessons: number }
+  needsYou: { review: number; lessons: number }
   today: AgentOutcomes
   week: AgentOutcomes
   /** Lo que aprendió en los últimos siete días. */
@@ -244,10 +245,7 @@ export async function getAgentOverview(
   const weekAgo = new Date(Date.now() - 7 * 86_400_000)
   return {
     enabled: cfg.enabled,
-    needsYou: {
-      gaps: await countOpenKnowledgeGaps(tx, orgId),
-      ...(await countLearningPending(tx, orgId)),
-    },
+    needsYou: await countLearningPending(tx, orgId),
     today: await agentOutcomes(tx, orgId, await startOfOrgDay(tx, zone.timezone)),
     week: await agentOutcomes(tx, orgId, weekAgo),
     learned: await learnedSince(tx, orgId, weekAgo),
