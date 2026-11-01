@@ -1237,6 +1237,7 @@ it("QR con el celular de quien solo dijo su nombre: «es la misma» guarda el no
       answers: {
         demographics: { displayName: "Ana Ríos Vega", givenNames: "Ana", familyName: "Ríos Vega", birthDate: "1991-03-12", phone: "+51987654377", docType: "DNI", docNumber: "45129877" },
         respondent: "patient",
+        health: { ...emptyClinical(), allergies: { state: "recorded", items: [{ substance: "Penicilina", severity: "desconocida" }] } },
         privacyAccepted: true,
       },
     }),
