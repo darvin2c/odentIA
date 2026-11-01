@@ -5,7 +5,7 @@ import { member, user } from "@odentia/db/schema/auth"
 import { automationConsent } from "@odentia/db/schema/automation"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { patient, patientDataConsent, patientRegistration, patientRegistrationLink } from "@odentia/db/schema/clinical"
-import { channelConnection, contactIdentity, conversation } from "@odentia/db/schema/crm"
+import { channelConnection, contact, contactIdentity, conversation } from "@odentia/db/schema/crm"
 import { branch } from "@odentia/db/schema/org"
 import { auditEvent } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
@@ -863,8 +863,9 @@ describe("reservar desde un enlace quien recién se contacta", () => {
       }
       expect(await run((tx) =>
         registerFromBookingLink(tx, ORG, link.token, { submissionId: randomUUID(), formVersion: config.version, answers: { demographics, respondent: "patient" as const, privacyAccepted: true } }))).toEqual({ registered: true })
+      const [row] = await ownerDb.select().from(contact).where(eq(contact.id, who.contactId))
       return {
-        person: (await run((tx) => getContact(tx, ORG, who.contactId))).contact,
+        person: row!,
         notes: (await run((tx) => listPersonNotes(tx, ORG, who.contactId))).map((note) => note.body),
       }
     }
