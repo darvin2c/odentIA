@@ -1201,3 +1201,35 @@ export async function setPatientAvatar(
   })
   return { patient: updated, previousStorageKey: current.avatarStorageKey }
 }
+
+/**
+ * Quita la foto: la ficha vuelve a sus iniciales. Sin foto no cambia ni audita
+ * nada, así que repetirlo (doble clic, otra pestaña) es inofensivo.
+ */
+export async function removePatientAvatar(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+): Promise<{ previousStorageKey: string | null }> {
+  const [current] = await tx
+    .select({ avatarStorageKey: patient.avatarStorageKey })
+    .from(patient)
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+    .for("update")
+  if (!current) throw notFound("Paciente")
+  if (!current.avatarStorageKey) return { previousStorageKey: null }
+  await tx
+    .update(patient)
+    .set({ avatarStorageKey: null, updatedAt: new Date() })
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId,
+    action: "patient.avatar_removed",
+    entity: "patient",
+    entityId: patientId,
+    metadata: { storageKey: current.avatarStorageKey },
+  })
+  return { previousStorageKey: current.avatarStorageKey }
+}

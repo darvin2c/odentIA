@@ -208,6 +208,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "patient.created": say("Registró a un paciente"),
   "patient.updated": say("Cambió los datos de un paciente"),
   "patient.avatar_updated": say("Cambió la foto de un paciente"),
+  "patient.avatar_removed": say("Quitó la foto de un paciente"),
   "patient.contact_set": say("Vinculó a un paciente con un contacto"),
   "patient.contact_removed": say("Quitó el vínculo entre un paciente y un contacto"),
   "patient.person_replaced": say("Cambió la persona a la que pertenece una ficha"),

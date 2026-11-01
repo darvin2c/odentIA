@@ -196,7 +196,6 @@ export interface ChatMessage {
   attachments: { objectKey: string; mimeType: string; filename: string; size: number }[]
   externalId: string | null
   status: string
-  error: string | null
   /** Por qué no llegó, en palabras; nulo si llegó o va en camino. Ausente en respuestas antiguas. */
   deliveryNote?: string | null
   templateName: string | null

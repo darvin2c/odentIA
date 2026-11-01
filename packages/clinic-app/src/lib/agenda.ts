@@ -21,6 +21,8 @@ export async function invalidateAppointmentQueries(client: QueryClient): Promise
       "follow-up-appointments",
       "follow-ups",
       "patient-appointments",
+      // Equipo cuenta las citas por venir de cada persona.
+      "team-attendance",
       "patient-summary",
       // «Qué sigue» y la lista de Pacientes cambian al reservar desde la ficha.
       "plan-next",
@@ -183,7 +185,8 @@ export interface AgendaResources {
   branchId: string
   branchName: string
   timeZone: string
-  professionals: { id: string; label: string }[]
+  /** Quienes pueden atender (ADR 0128); `role` separa a quien atiende de oficio de quien dirige. */
+  professionals: { id: string; label: string; role: string }[]
   rooms: { id: string; label: string }[]
   /** Lo que dura una cita regular en la sede, en minutos. */
   defaultDurationMin: number

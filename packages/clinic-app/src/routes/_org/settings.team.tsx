@@ -1,5 +1,6 @@
 import {
   assignableRoles,
+  canAttend,
   ORG_ROLES,
   type OrgRole,
   ROLE_DESCRIPTIONS,
@@ -23,7 +24,7 @@ import {
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute, getRouteApi } from "@tanstack/react-router"
+import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { CalendarCheck, Users } from "lucide-react"
 import { useMemo, useState } from "react"
@@ -32,8 +33,9 @@ import { ProfessionalProfileDrawer } from "../../components/professional-profile
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { ResetTwoFactorDialog, TeamTwoFactorCard, TwoFactorBadge, useTeamTwoFactor } from "../../components/settings/team-two-factor"
 import { ChoiceSelect } from "../../components/ui/choice-select"
-import { ApiError } from "../../lib/api"
+import { ApiError, apiFetch } from "../../lib/api"
 import { authClient } from "../../lib/auth-client"
+import { weekdaysLabel } from "../../lib/branch-hours"
 import { fetchTeamCalendarFeeds, revokeTeamCalendarFeed, TEAM_CALENDAR_KEY, whenWords } from "../../lib/calendar-feed"
 import { useCan, useMyRole, usePermission } from "../../lib/crm"
 import { settingsPrimary } from "../../lib/screen-rules"
@@ -64,6 +66,46 @@ interface FullOrganization {
 
 type Membership = FullOrganization["members"][number]
 type Invitation = FullOrganization["invitations"][number]
+
+/** Lo que dice `/api/agenda/team` de cada persona: dónde atiende y qué citas tiene por venir. */
+interface TeamAttendance {
+  userId: string
+  schedules: Array<{ branchName: string; weekdays: number[] }>
+  upcomingAppointments: number
+  next: { date: string; branchId: string } | null
+}
+
+/** A su próxima cita: la Agenda abre una sede y unos días; sin decírselos, no la encontraría. */
+const theirNextAppointment = (attendance: TeamAttendance) => ({
+  view: "lista",
+  who: attendance.userId,
+  date: attendance.next?.date,
+  branch: attendance.next?.branchId,
+})
+
+const LINK = "font-medium text-primary underline-offset-4 hover:underline"
+
+/** «Lun a sáb», o con la sede si atiende en más de una: «Centro: lun a vie · Norte: sáb». */
+function attendanceWords(schedules: TeamAttendance["schedules"]): string {
+  const [only] = schedules
+  if (only && schedules.length === 1) return weekdaysLabel(only.weekdays)
+  return schedules.map((item) => `${item.branchName}: ${weekdaysLabel(item.weekdays).toLocaleLowerCase("es")}`).join(" · ")
+}
+
+const appointmentsWord = (count: number) => (count === 1 ? "1 cita" : `${count} citas`)
+
+/** Lo que le pasa a quien deja de atender, para decirlo antes de confirmar. Nada si no le pasa nada. */
+function stopsAttendingWords(attendance: TeamAttendance | undefined): string {
+  const count = attendance?.upcomingAppointments ?? 0
+  return [
+    attendance?.schedules.length ? "Su horario se cierra y deja de ofrecerse para citas." : null,
+    count > 0
+      ? `Tiene ${appointmentsWord(count)} por venir: ${count === 1 ? "sigue" : "siguen"} en la Agenda, ${count === 1 ? "marcada" : "marcadas"} para pasarlas a otra persona.`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" ")
+}
 
 // Los roles de `@odentia/auth`, no una copia.
 const ASSIGNABLE_SCHEMA_ROLES = ORG_ROLES
@@ -150,6 +192,7 @@ function RoleSelect({
  */
 function TeamPage() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const listSearch = useListSearch()
   const search = listSearch.get("q") ?? ""
   const roleFilter = listSearch.get("rol")
@@ -182,6 +225,17 @@ function TeamPage() {
     [profilesQuery.data],
   )
   const profilesLoaded = profilesQuery.data !== undefined
+  // Quién atiende y qué días (ADR 0128). Sin la lista no se afirma nada de nadie.
+  const attendanceQuery = useQuery({
+    queryKey: ["team-attendance"],
+    queryFn: () => apiFetch<{ data: TeamAttendance[] }>("/api/agenda/team"),
+    enabled: canView,
+  })
+  const attendanceByUser = useMemo(
+    () => new Map((attendanceQuery.data?.data ?? []).map((item) => [item.userId, item])),
+    [attendanceQuery.data],
+  )
+  const attendanceLoaded = attendanceQuery.data !== undefined
 
   const orgQuery = useQuery({
     queryKey: ["full-org", routeOrg.id],
@@ -203,6 +257,23 @@ function TeamPage() {
     [twoFactorQuery.data],
   )
   const refreshTeam = () => queryClient.invalidateQueries({ queryKey: ["full-org"] })
+  /** Cambiar quién puede atender cambia lo que ofrecen la agenda, los horarios y las listas de quien atiende. */
+  const refreshAttendance = () =>
+    Promise.all(
+      ["team-attendance", "agenda-resources", "agenda-availability", "branch-hours", "professional-profiles"].map((key) =>
+        queryClient.invalidateQueries({ queryKey: [key] }),
+      ),
+    )
+  /** Le quedan citas por pasar a otra persona: el aviso lleva ahí. */
+  const toTheirAppointments = (member: Membership) => {
+    const attendance = attendanceByUser.get(member.userId)
+    return attendance?.next && can("appointments.read")
+      ? {
+          label: "Ver sus citas",
+          onClick: () => void navigate({ to: "/agenda", search: theirNextAppointment(attendance) }),
+        }
+      : undefined
+  }
 
   const inviteMutation = useMutation({
     mutationFn: async (values: z.infer<typeof inviteSchema>) => {
@@ -250,8 +321,9 @@ function TeamPage() {
     onSuccess: async (_result, { member, role }) => {
       setConfirmingRole(false)
       setRoleMember(null)
-      toast.success(`${member.user.name} ahora es ${roleLabel(role)}`)
-      await refreshTeam()
+      const stops = canAttend(member.role) && !canAttend(role)
+      toast.success(`${member.user.name} ahora es ${roleLabel(role)}`, { action: stops ? toTheirAppointments(member) : undefined })
+      await Promise.all([refreshTeam(), refreshAttendance()])
     },
   })
 
@@ -284,8 +356,8 @@ function TeamPage() {
     },
     onSuccess: async (_result, member) => {
       setRemoving(null)
-      toast.success(`${member.user.name} ya no forma parte del equipo`)
-      await refreshTeam()
+      toast.success(`${member.user.name} ya no forma parte del equipo`, { action: toTheirAppointments(member) })
+      await Promise.all([refreshTeam(), refreshAttendance()])
     },
   })
 
@@ -337,6 +409,9 @@ function TeamPage() {
                 {row.original.user.name}
                 {row.original.userId === session.userId ? <Badge variant="secondary">Tú</Badge> : null}
               </span>
+              <span className="max-w-56 truncate text-xs text-muted-foreground" title={row.original.user.email}>
+                {row.original.user.email}
+              </span>
               {feed ? (
                 <span className="flex items-center gap-1 text-xs text-muted-foreground">
                   <CalendarCheck aria-hidden className="size-3.5" />
@@ -354,12 +429,6 @@ function TeamPage() {
         },
       },
       {
-        accessorKey: "user.email",
-        header: "Correo",
-        meta: { view: { primary: true } },
-        cell: ({ row }) => row.original.user.email,
-      },
-      {
         accessorKey: "role",
         header: "Rol",
         meta: { view: { primary: true } },
@@ -373,16 +442,63 @@ function TeamPage() {
         ),
       },
       {
+        id: "attends",
+        header: "Atiende",
+        // También en la tarjeta del teléfono: es lo que distingue a quien atiende.
+        meta: { view: { primary: true } },
+        cell: ({ row }) => {
+          const { userId, role } = row.original
+          // Sin la lista no se sabe: no se afirma que falte.
+          if (!attendanceLoaded) return <span className="text-muted-foreground">—</span>
+          const noAttends = <span className="text-muted-foreground">No atiende</span>
+          const attendance = attendanceByUser.get(userId)
+          if (attendance?.schedules.length) {
+            return (
+              <Link to="/settings/availability" search={{ profesional: userId }} className={LINK}>
+                {attendanceWords(attendance.schedules)}
+              </Link>
+            )
+          }
+          if (!canAttend(role)) {
+            // Citas de antes de esta regla, o de cuando sí atendía: siguen por mover.
+            return attendance?.next && can("appointments.read") ? (
+              <Link
+                to="/agenda"
+                search={theirNextAppointment(attendance)}
+                className="font-bold text-warning underline-offset-4 hover:underline"
+              >
+                {appointmentsWord(attendance.upcomingAppointments)} por mover
+              </Link>
+            ) : (
+              noAttends
+            )
+          }
+          // Quien atiende de oficio y no tiene horario no se puede reservar; quien dirige, sin horario
+          // ni citas, no atiende. Con citas sí atiende, aunque sean excepciones.
+          return role === "clinician" || attendance?.next ? (
+            <Link to="/settings/availability" search={{ profesional: userId }} className={LINK}>
+              Sin horario
+            </Link>
+          ) : (
+            noAttends
+          )
+        },
+      },
+      {
         id: "registration",
         header: "Colegiatura",
         cell: ({ row }) => {
           const profile = profileByUser.get(row.original.userId)
           const label = profile ? registrationLabel(profile) : null
           if (label) return label
-          // Sin la lista de perfiles no se sabe: no se afirma que falte.
-          if (!profilesLoaded) return <span className="text-muted-foreground">—</span>
-          // Solo a quien atiende le falta para firmar; al resto no le aplica.
-          return ["clinician", "owner", "admin"].includes(row.original.role) ? (
+          // Sin las listas no se sabe: no se afirma que falte.
+          if (!profilesLoaded || !attendanceLoaded) return <span className="text-muted-foreground">—</span>
+          // Solo a quien atiende le falta para firmar: quien dirige y no tiene horario no firma.
+          const attendance = attendanceByUser.get(row.original.userId)
+          const attends =
+            row.original.role === "clinician" ||
+            (canAttend(row.original.role) && Boolean(attendance?.schedules.length || attendance?.next))
+          return attends ? (
             <span className="text-muted-foreground">Sin registrar</span>
           ) : (
             <span className="text-muted-foreground">—</span>
@@ -456,7 +572,7 @@ function TeamPage() {
         },
       },
     ],
-    [assignable, canManage, ownerCount, session.userId, profileByUser, profilesLoaded, feedByUser, twoFactorByUser, myRole, roleForm],
+    [assignable, canManage, ownerCount, session.userId, profileByUser, profilesLoaded, attendanceByUser, attendanceLoaded, can, feedByUser, twoFactorByUser, myRole, roleForm],
   )
   const filteredMembers = useMemo(() => {
     const needle = search.toLowerCase()
@@ -682,7 +798,14 @@ function TeamPage() {
         title={`Cambiar el rol de ${roleMember?.user.name ?? ""}`}
         description={
           roleMember
-            ? `Pasa de ${roleLabel(roleMember.role)} a ${roleLabel(chosenRole)}. Como ${roleLabel(chosenRole)}: ${roleDescription(chosenRole)}`
+            ? [
+                `Pasa de ${roleLabel(roleMember.role)} a ${roleLabel(chosenRole)}. Como ${roleLabel(chosenRole)}: ${roleDescription(chosenRole)}`,
+                canAttend(roleMember.role) && !canAttend(chosenRole)
+                  ? stopsAttendingWords(attendanceByUser.get(roleMember.userId))
+                  : "",
+              ]
+                .filter(Boolean)
+                .join(" ")
             : ""
         }
         confirmLabel="Cambiar rol"
@@ -699,7 +822,12 @@ function TeamPage() {
         }}
         onConfirm={() => removing && removeMutation.mutate(removing)}
         title={`Quitar a ${removing?.user.name ?? ""} del equipo`}
-        description="Dejará de entrar a esta clínica con su cuenta. Lo que ya registró se conserva."
+        description={[
+          "Dejará de entrar a esta clínica con su cuenta. Lo que ya registró se conserva.",
+          removing ? stopsAttendingWords(attendanceByUser.get(removing.userId)) : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
         confirmLabel="Quitar del equipo"
         variant="destructive"
         pending={removeMutation.isPending}
