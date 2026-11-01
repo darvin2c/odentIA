@@ -68,8 +68,8 @@ beforeAll(async () => {
   await ownerDb.execute(sql`
     insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
       ('m-agenda-actor', ${ORG}, ${ACTOR}, 'owner', now()),
-      ('m-agenda-professional', ${ORG}, ${PROFESSIONAL}, 'member', now()),
-      ('m-agenda-professional-2', ${ORG}, ${PROFESSIONAL_2}, 'member', now())`)
+      ('m-agenda-professional', ${ORG}, ${PROFESSIONAL}, 'clinician', now()),
+      ('m-agenda-professional-2', ${ORG}, ${PROFESSIONAL_2}, 'clinician', now())`)
   const [createdPatient] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Paciente Agenda", patientNumber: 9101 })
   patientId = createdPatient!.id
   const [service] = await ownerDb
@@ -370,7 +370,7 @@ it("«Editar» revisa la agenda igual que «Mover»: unidad bloqueada, quien no 
   expect(new Date(edited.endsAt).getTime() - new Date(edited.startsAt).getTime()).toBe(45 * 60_000)
 })
 
-it("listScheduleResources devuelve miembros, unidades dentales y la zona de la sede", async () => {
+it("listScheduleResources devuelve quienes pueden atender, unidades dentales y la zona de la sede", async () => {
   const resources = await run((tx) => listScheduleResources(tx, ORG, {}))
   expect(resources.branchId).toBe(branchId)
   expect(resources.timeZone).toBe("America/Lima")

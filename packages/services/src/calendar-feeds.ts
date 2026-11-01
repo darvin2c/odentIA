@@ -15,7 +15,7 @@
  * - Deja de servir solo si la persona ya no es del equipo o ya no atiende.
  */
 import { createHash, createHmac } from "node:crypto"
-import { canAccess } from "@odentia/auth/permissions"
+import { canAttend } from "@odentia/auth/permissions"
 import { productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { appointment, calendarFeed, calendarFeedUse, scheduleRoom } from "@odentia/db/schema/agenda"
@@ -34,8 +34,6 @@ import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { clinicOriginOf } from "./public-links.js"
 import { createWorkspaceNotification } from "./workspace.js"
 
-/** Quien atiende pacientes: el mismo permiso que abre la Agenda en su columna. */
-export const CALENDAR_FEED_PERMISSION = "clinical.write"
 export const CALENDAR_FEED_DAYS_AHEAD = 90
 export const CALENDAR_USE_KEEP_DAYS = 90
 /** Lo que muestra el panel de quién usa el enlace. */
@@ -121,7 +119,7 @@ async function attends(tx: Db, orgId: string, userId: string): Promise<boolean> 
     .select({ role: member.role })
     .from(member)
     .where(and(eq(member.organizationId, orgId), eq(member.userId, userId)))
-  return rows.some((row) => canAccess(row.role, CALENDAR_FEED_PERMISSION))
+  return rows.some((row) => canAttend(row.role))
 }
 
 async function requireAttends(tx: Db, orgId: string, userId: string): Promise<void> {

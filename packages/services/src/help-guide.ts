@@ -185,7 +185,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Por qué no aparece un profesional en la agenda?",
-        a: "En el día aparece quien atiende ese día, según su horario en Configuración › Horarios y ausencias. Para darle una cita a quien no atiende ese día, elígelo en «Profesionales» › «No atienden este día» y su columna se suma a la vista.",
+        a: "En el día aparece quien atiende ese día, según su horario en Configuración › Horarios y ausencias. Para darle una cita a quien no atiende ese día, elígelo en «Profesionales» › «No atienden este día» y su columna se suma a la vista. Recepción y caja no atienden, así que no aparecen; un propietario o administrador aparece cuando le pones horario.",
       },
       {
         q: "¿Puedo dar una cita fuera de horario o a una hora ocupada?",
@@ -860,6 +860,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         q: "¿Cómo invito a alguien a mi equipo?",
         a: "En Configuración › Equipo, pulsa «Invitar al equipo», escribe su correo y elige su rol. Le llega una invitación para crear su cuenta.",
       },
+      {
+        q: "¿Cómo sé quién atiende pacientes?",
+        a: "En Configuración › Equipo, la columna «Atiende» dice qué días atiende cada persona. Un profesional que aún no tiene horario dice «Sin horario». Un propietario o administrador atiende solo si le pones horario. Si alguien deja de atender, porque sale del equipo o cambia de rol, su horario se cierra y sus citas por venir quedan en la Agenda, marcadas para pasarlas a otra persona.",
+      },
     ],
   },
   {
@@ -889,6 +893,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         q: "¿Dónde configuro los horarios?",
         a: "En Configuración › Horarios y ausencias. Ahí defines, por profesional y sede, los días y las horas de atención.",
+      },
+      {
+        q: "¿Por qué recepción o caja no aparecen en Horarios y ausencias?",
+        a: "Porque no atienden pacientes: un horario aquí hace que esa persona se ofrezca para citas, también en Sofi y en el enlace de reserva. Solo llevan horario quienes pueden atender: los profesionales, los propietarios y los administradores.",
       },
     ],
   },

@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { ALL_PERMISSIONS, canAccess, canAccessAny, platformPathPermission, roleLabel } from "./permissions.js"
+import { ALL_PERMISSIONS, ATTENDING_ROLES, canAccess, canAccessAny, canAttend, platformPathPermission, roleLabel } from "./permissions.js"
+
+describe("quien puede atender (ADR 0124)", () => {
+  it("son quien atiende de oficio y quien dirige; recepción, caja y miembro no", () => {
+    expect([...ATTENDING_ROLES].sort()).toEqual(["admin", "clinician", "owner"])
+    for (const role of ["reception", "cashier", "member", "nadie"]) expect(canAttend(role)).toBe(false)
+  })
+})
 
 describe("el nombre del rol según el producto (entrega 3 del issue 229)", () => {
   it("quien atiende es «Odontólogo» en odentIA y «Médico» en latidIA; los demás roles no cambian", () => {
