@@ -17,7 +17,6 @@ const SECTIONS: Array<[string, string]> = [
   ["Portal del paciente", "/settings/patient-access"],
   ["Medios de pago y ticket", "/settings/payment-methods"],
   ["Etapas de venta", "/settings/pipelines"],
-  ["Campos de contacto", "/settings/fields"],
   // Solo para quien ve Facturación (ADR 0065); la dueña la ve.
   ["Plan y pagos", "/settings/plan"],
   ["Integraciones", "/settings/integrations"],
@@ -77,7 +76,6 @@ test("configuración: lista por grupos, cada apartado con su nombre y direccione
   await expect(nav.getByRole("group", { name: "Ventas y cobros", exact: true }).getByRole("link")).toHaveText([
     "Medios de pago y ticket",
     "Etapas de venta",
-    "Campos de contacto",
   ])
 
   // El nombre de la lista es el título de la página, y la lista sigue ahí al entrar

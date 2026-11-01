@@ -59,7 +59,6 @@ const patchInput = z.object({
   sex: z.string().max(1).nullable().optional(),
   isActive: z.boolean().optional(),
   tags: rawTags,
-  customFields: z.record(z.string(), z.unknown()).optional(),
 })
 
 export function createContactsRoute(deps: CrmDeps) {

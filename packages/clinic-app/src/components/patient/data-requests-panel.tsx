@@ -830,7 +830,7 @@ function ErasureSummary({ preview, locale }: { preview: ErasurePreview; locale: 
       : null,
     preview.opportunities + preview.tasks > 0 ? `Sus oportunidades y tareas: ${preview.opportunities + preview.tasks}` : null,
     preview.notes ? `Sus notas: ${preview.notes}` : null,
-    "Correo, etiquetas y campos propios",
+    "Correo y etiquetas",
     "Lo que el agente recuerda de ella",
     "Sus permisos de mensajes: no se le escribe más",
   ].filter((item): item is string => item !== null)

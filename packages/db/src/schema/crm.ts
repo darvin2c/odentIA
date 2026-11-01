@@ -432,7 +432,6 @@ export const contact = pgTable("contact", {
   // Las notas de la persona son `crm_note` (con autor y fecha); el responsable,
   // el de su conversación u oportunidad (fase 4, «un dato, un lugar»).
   tags: text("tags").array().notNull().default(sql`'{}'`),
-  customFields: jsonb("custom_fields").notNull().default(sql`'{}'::jsonb`),
   lastInteractionAt: timestamp("last_interaction_at", { withTimezone: true }),
   ...timestamps,
 }, table => [
@@ -805,21 +804,6 @@ export const registrationHold = pgTable(
     foreignKey({ columns: [table.organizationId, table.taskId], foreignColumns: [crmTask.organizationId, crmTask.id] }).onDelete("cascade"),
     uniqueIndex("registration_hold_task_uidx").on(table.organizationId, table.taskId),
   ],
-)
-
-export const customFieldDef = pgTable(
-  "custom_field_def",
-  {
-    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    organizationId: orgFk("organization_id"),
-    key: text("key").notNull(),
-    label: text("label").notNull(),
-    type: text("type").notNull(),
-    options: jsonb("options"),
-    position: integer("position").notNull().default(0),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => [uniqueIndex("custom_field_def_org_key_uidx").on(table.organizationId, table.key)],
 )
 
 /**
