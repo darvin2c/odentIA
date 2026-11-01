@@ -20,7 +20,7 @@ import {
   message,
 } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, ne, notInArray, sql } from "drizzle-orm"
 import { templateTitle } from "./message-words.js"
 import {
   adminLineOf,
@@ -54,7 +54,10 @@ import {
   positionalBody,
   PERSONAL_LINK_MESSAGE_KEY,
   ANSWER_READY_MESSAGE_KEY,
+  LINK_RECEIVED_MESSAGE_KEY,
+  NOTICE_PURPOSE,
   REMINDER_CONFIRMED_KEY,
+  renderMessage,
   RESUME_MESSAGE_KEY,
   replyId,
   splitNamedBody, messageExampleValues,
@@ -214,6 +217,7 @@ function catalogTitle(key: CatalogMessageKey): string {
   if (key === BUDGET_READY_MESSAGE_KEY) return "Presupuesto listo"
   if (key === PERSONAL_LINK_MESSAGE_KEY) return "Su enlace"
   if (key === ANSWER_READY_MESSAGE_KEY) return "Ver respuesta"
+  if (key === LINK_RECEIVED_MESSAGE_KEY) return "Recibido desde su enlace"
   return NOTICE_TITLES[key] ?? adminLineOf(key)?.name ?? key
 }
 
@@ -231,7 +235,10 @@ function catalogDef(
     origin:
       key === RESUME_MESSAGE_KEY
         ? "bandeja"
-        : key === BUDGET_READY_MESSAGE_KEY || key === PERSONAL_LINK_MESSAGE_KEY || key === ANSWER_READY_MESSAGE_KEY
+        : key === BUDGET_READY_MESSAGE_KEY ||
+            key === PERSONAL_LINK_MESSAGE_KEY ||
+            key === ANSWER_READY_MESSAGE_KEY ||
+            key === LINK_RECEIVED_MESSAGE_KEY
           ? "plan"
           : "agente",
     title: catalogTitle(key),
@@ -1020,6 +1027,8 @@ function meanwhileOf(
     return "Mientras tanto su enlace sale escrito a quien escribió en las últimas 24 horas, o por correo."
   if (def.id === ANSWER_READY_MESSAGE_KEY)
     return "Mientras tanto la respuesta queda por entregar y sale sola cuando la persona vuelve a escribir."
+  if (def.id === LINK_RECEIVED_MESSAGE_KEY)
+    return "Mientras tanto se le agradece por el chat solo a quien escribió en las últimas 24 horas; a los demás se lo confirma la página de su enlace."
   if (def.origin === "plan")
     return "Mientras tanto el presupuesto sale con su PDF a quien escribió en las últimas 24 horas, o por correo."
   if (def.origin !== "agente") return "Mientras tanto no se ofrece en la Bandeja."
@@ -1088,6 +1097,8 @@ function itemOf(
         ? "Cuando recepción pulsa «Enviarle su enlace» o envía un consentimiento para firmar antes de la cita."
         : def.id === ANSWER_READY_MESSAGE_KEY
           ? "Cuando alguien del equipo responde un tema pasadas las 24 horas: la respuesta queda por entregar y le llega este aviso para verla."
+        : def.id === LINK_RECEIVED_MESSAGE_KEY
+          ? "Cuando la persona completa algo desde su enlace y lleva más de 24 horas sin escribir, con Sofi encendida. Uno al día, aunque complete varias cosas."
         : def.origin === "plan"
           ? "Al entregar un presupuesto: desde Plan, al cerrar la atención o cuando la persona lo pide por el chat."
           : null,
@@ -1700,6 +1711,13 @@ async function sendables(
     }
   }
   const zone = await findOrgLocale(tx, orgId)
+  const { defs, known } = await loadMessages(tx, orgId)
+  // «Recibido desde su enlace» responde a lo que la persona hizo: no le quita a recepción poder escribirle.
+  const linkReceived = defs.find((def) => def.id === LINK_RECEIVED_MESSAGE_KEY)
+  const answers = [
+    ...catalogTemplatesOf(LINK_RECEIVED_MESSAGE_KEY),
+    ...(linkReceived?.versions.map((version) => version.templateName) ?? []),
+  ]
   // Un segundo mensaje aprobado espera a que la persona responda o a que pase un día.
   const [last] = await tx
     .select({ createdAt: message.createdAt })
@@ -1710,6 +1728,7 @@ async function sendables(
         eq(message.conversationId, conversationId),
         eq(message.direction, "out"),
         eq(message.contentType, "template"),
+        notInArray(message.templateName, answers),
         ne(message.status, "failed"),
         gt(message.createdAt, new Date(now.getTime() - APPROVED_WAIT_MS)),
         ...(row.lastInboundAt ? [gt(message.createdAt, row.lastInboundAt)] : []),
@@ -1725,7 +1744,6 @@ async function sendables(
       fixable: false,
     }
   }
-  const { defs, known } = await loadMessages(tx, orgId)
   const all = await listChannelTemplates(tx, orgId, row.connectionId)
   const templates = byName(all)
   const values = {
@@ -2025,6 +2043,74 @@ export async function resumeConversationBySystem(
     preview: option.body.replace(/\{\{(\d+)\}\}/g, (_, position: string) => params[Number(position) - 1] ?? ""),
   })
   return { sent: true, messageId: sent.id }
+}
+
+/** Meta cobra cada uno y el primero sirve para todo lo que hizo: uno al día (ADR 0129). */
+const LINK_RECEIVED_EVERY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * «Recibido desde su enlace»: la persona hizo algo en su enlace y WhatsApp ya no
+ * deja responderle con texto (ADR 0129). Si no se puede enviar, no pasa nada más:
+ * lo que hizo ya vale, la nota está en el caso y su página se lo confirma.
+ */
+export async function sendLinkReceivedNotice(
+  tx: Db,
+  orgId: string,
+  conversationId: string,
+  now: Date = new Date(),
+): Promise<"enviado" | "ya_enviado" | "sin_permiso" | "sin_aprobar" | "no_salio"> {
+  // Dos cosas hechas a la vez no envían dos mensajes.
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`enlace-recibido:${conversationId}`}))`)
+  const [person] = await tx
+    .select({
+      contactId: contact.id,
+      givenNames: contact.givenNames,
+      displayName: contact.displayName,
+      connectionId: conversation.channelConnectionId,
+    })
+    .from(conversation)
+    .innerJoin(contact, eq(contact.id, conversation.contactId))
+    .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
+    .limit(1)
+  if (!person) throw notFound("Conversación")
+  if (!(await mayWriteFirst(tx, orgId, person.contactId, NOTICE_PURPOSE))) return "sin_permiso"
+  const template = await findMessageTemplate(tx, orgId, person.connectionId, LINK_RECEIVED_MESSAGE_KEY)
+  if (template?.status !== "aprobada") return "sin_aprobar"
+  const [sent] = await tx
+    .select({ id: message.id })
+    .from(message)
+    .where(
+      and(
+        eq(message.organizationId, orgId),
+        eq(message.conversationId, conversationId),
+        eq(message.direction, "out"),
+        eq(message.templateName, template.name),
+        ne(message.status, "failed"),
+        gt(message.createdAt, new Date(now.getTime() - LINK_RECEIVED_EVERY_MS)),
+      ),
+    )
+    .limit(1)
+  if (sent) return "ya_enviado"
+  const spec = await currentCatalogMessage(tx, orgId, LINK_RECEIVED_MESSAGE_KEY)
+  const { params, text } = renderMessage(spec, { persona: firstName(person), clinica: await clinicName(tx, orgId) })
+  try {
+    // Punto de retorno: que el aviso no salga no deshace lo que la persona hizo.
+    await tx.transaction((inner) =>
+      sendTemplateOutbound(inner, orgId, Buffer.alloc(0), {
+        conversationId,
+        senderKind: "agent",
+        name: template.name,
+        language: template.language,
+        params,
+        category: spec.category,
+        preview: text,
+      }),
+    )
+  } catch (error) {
+    if (!(error instanceof ServiceError)) throw error
+    return "no_salio"
+  }
+  return "enviado"
 }
 
 // --------------------------------------- «Meta lo considera promoción» ---

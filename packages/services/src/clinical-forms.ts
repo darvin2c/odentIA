@@ -2363,6 +2363,13 @@ export async function markConsentSentByLink(
     .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
     .returning()
   if (!row) throw notFound("Consentimiento")
+  await tx.insert(consentEvent).values({
+    organizationId: orgId,
+    documentId,
+    fromStatus: "pendiente",
+    toStatus: "enlace_enviado",
+    actorUserId,
+  })
   await audit(tx, orgId, actorUserId, "consent.sent_to_sign", "consent_document", documentId, {})
   return row
 }
@@ -2455,11 +2462,30 @@ export async function signConsentByLink(
     .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
     .returning()
   if (!row) throw notFound("Consentimiento")
+  // Sigue pendiente, pero ya firmó: la historia lo dice. Quien firma es la persona, no un usuario.
+  await tx.insert(consentEvent).values({
+    organizationId: orgId,
+    documentId,
+    fromStatus: "pendiente",
+    toStatus: "enlace_firmado",
+    reason: `${signerKind}: ${row.signerName}`,
+    createdAt: now,
+  })
   await audit(tx, orgId, `contact:${signerContactId}`, "consent.person_signed", "consent_document", documentId, {
     signerKind,
     minor,
     method: "enlace",
   })
+  // Como al firmar en la clínica, se avisa a quien lo generó: aquí nadie del equipo lo vio firmar.
+  if (row.authorUserId) {
+    await notifyUser(tx, orgId, row.authorUserId, {
+      dedupeKey: `consent-${row.id}-firmo-enlace`,
+      title: "Firmaron un consentimiento desde su enlace",
+      body: "Un consentimiento que generaste ya tiene la firma de la persona: confírmalo antes de empezar.",
+      href: `/patients/${row.patientId}?tab=documentos`,
+      actorUserId: `contact:${signerContactId}`,
+    })
+  }
   return row
 }
 
@@ -2517,6 +2543,8 @@ export async function confirmLinkSignedConsent(
       toStatus: "firmado",
       actorUserId,
       reason: `${current.signerKind}: ${current.signerName} · ${CONSENT_SIGNATURE_WORDS.enlace}`,
+      // La misma hora que «informado»: a igual hora, la historia va en el orden del flujo.
+      createdAt: now,
     },
   ])
   await audit(tx, orgId, actorUserId, "consent.sign", "consent_document", documentId, {
@@ -2801,7 +2829,7 @@ export async function listConsentEvents(
     // A igual hora, el orden del flujo: informar precede a firmar.
     .orderBy(
       asc(consentEvent.createdAt),
-      sql`array_position(array['pendiente','informado','firmado','revocado','anulado'], ${consentEvent.toStatus})`,
+      sql`array_position(array['pendiente','enlace_enviado','enlace_firmado','informado','firmado','revocado','anulado'], ${consentEvent.toStatus})`,
     )
 }
 
@@ -2919,6 +2947,8 @@ export interface ConsentNeed {
   templateId: string | null
   /** Documento pendiente o firmado que lo cubre. */
   documentId: string | null
+  /** Pendiente, pero ya lo firmó en su enlace: se confirma, no se vuelve a firmar. */
+  personSigned: boolean
   /** «Exodoncia simple · pieza 38»: lo que se registró o indicó en la atención. */
   procedureRef: string | null
   planItemId: string | null
@@ -3075,6 +3105,7 @@ export async function getEncounterConsentNeeds(
       diagnosisCode: consentDocument.diagnosisCode,
       diagnosisSystem: consentDocument.diagnosisSystem,
       templateId: consentDocument.templateId,
+      personSignedAt: consentDocument.personSignedAt,
     })
     .from(consentDocument)
     .innerJoin(consentTemplate, eq(consentTemplate.id, consentDocument.templateId))
@@ -3152,6 +3183,7 @@ export async function getEncounterConsentNeeds(
       status,
       templateId: doc?.templateId ?? published?.id ?? null,
       documentId: doc?.id ?? null,
+      personSigned: status === "pendiente" && !!doc?.personSignedAt,
       procedureRef,
       planItemId: doc?.planItemId ?? (mine.length === 1 ? (first?.planItemId ?? null) : null),
       ...(doc?.diagnosisCode
@@ -3173,6 +3205,7 @@ export async function getEncounterConsentNeeds(
       status: "pendiente",
       templateId: doc.templateId,
       documentId: doc.id,
+      personSigned: !!doc.personSignedAt,
       procedureRef: doc.procedureRef,
       planItemId: doc.planItemId,
       diagnosisCode: doc.diagnosisCode,

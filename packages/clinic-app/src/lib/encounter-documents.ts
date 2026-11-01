@@ -18,6 +18,8 @@ export interface ConsentNeed {
   status: ConsentNeedStatus
   templateId: string | null
   documentId: string | null
+  /** Pendiente, pero ya lo firmó en su enlace: se confirma, no se vuelve a firmar. */
+  personSigned: boolean
   procedureRef: string | null
   planItemId: string | null
   diagnosisCode: string | null

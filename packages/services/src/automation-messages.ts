@@ -475,6 +475,23 @@ export const PERSONAL_LINK_MESSAGE: MessageSpec = {
 export const PERSONAL_LINK_SUBJECT = "Lo que tienes pendiente con la clínica"
 
 /**
+ * «Recibido desde su enlace» (ADR 0129): la persona hizo algo en su enlace y
+ * WhatsApp ya no deja responderle con texto, porque el botón que abre el enlace
+ * no abre las 24 horas. Lo envía el sistema, nunca un modelo (ADR 0040), y uno
+ * solo al día, que sirve para todo lo que hizo. Es un aviso de lo que pasó: solo
+ * lo frena «No quiero ningún mensaje».
+ */
+export const LINK_RECEIVED_MESSAGE_KEY = "enlace_recibido"
+export const LINK_RECEIVED_MESSAGE: MessageSpec = {
+  key: LINK_RECEIVED_MESSAGE_KEY,
+  category: "utility",
+  template: "odentia_enlace_recibido_v1",
+  body: "Hola, {{1}}. {{2}} ya recibió lo que completaste desde tu enlace. Gracias por tu tiempo.",
+  variables: ["persona", "clinica"],
+  buttons: [],
+}
+
+/**
  * El tipo de los avisos que no son de una línea: «Presupuesto listo», «Su
  * enlace», «Retomar la conversación» y los papeles (receta y comprobante).
  * Salen siempre y solo los frena «No quiero ningún mensaje» (ADR 0040).
@@ -488,6 +505,7 @@ export const CATALOG_MESSAGE_KEYS = [
   BUDGET_READY_MESSAGE_KEY,
   PERSONAL_LINK_MESSAGE_KEY,
   ANSWER_READY_MESSAGE_KEY,
+  LINK_RECEIVED_MESSAGE_KEY,
 ] as const
 export type CatalogMessageKey = (typeof CATALOG_MESSAGE_KEYS)[number]
 
@@ -496,6 +514,7 @@ export function catalogMessageOf(key: string, product: ClinicalProduct = "dental
   if (key === BUDGET_READY_MESSAGE_KEY) return BUDGET_READY_MESSAGE
   if (key === PERSONAL_LINK_MESSAGE_KEY) return PERSONAL_LINK_MESSAGE
   if (key === ANSWER_READY_MESSAGE_KEY) return ANSWER_READY_MESSAGE
+  if (key === LINK_RECEIVED_MESSAGE_KEY) return LINK_RECEIVED_MESSAGE
   return automationMessageOf(key, product)
 }
 

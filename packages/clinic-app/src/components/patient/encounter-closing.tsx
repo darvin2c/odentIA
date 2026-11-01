@@ -111,6 +111,11 @@ function consentLine(need: ConsentNeed, who: string): { title: string; detail: s
       title: `Falta el consentimiento de «${need.title}»`,
       detail: "Puedes firmarlo ahora o seguir sin él, diciendo por qué",
     }
+  if (need.personSigned)
+    return {
+      title: `«${need.title}»: lo firmó desde su enlace y falta confirmarlo`,
+      detail: "Confírmalo si ya le informaste, o sigue sin él diciendo por qué",
+    }
   return {
     title: `Falta la firma de ${who} en «${need.title}»`,
     detail: "Puedes firmarlo ahora o seguir sin él, diciendo por qué",
@@ -257,7 +262,7 @@ export function EncounterClosingDialog({
                   </div>
                   {need.status !== "sin_publicar" ? (
                     <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => onSignNow(need)}>
-                      Firmar ahora
+                      {need.personSigned ? "Confirmar" : "Firmar ahora"}
                     </Button>
                   ) : null}
                 </div>

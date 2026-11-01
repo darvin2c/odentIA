@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import { LEGAL } from "@odentia/auth/legal"
 import type { Db } from "@odentia/db"
 import { agentKnowledgeGap } from "@odentia/db/schema/agent"
-import { account, user as users } from "@odentia/db/schema/auth"
+import { account, organization, user as users } from "@odentia/db/schema/auth"
 import { encounter, patientPayment, serviceCatalog } from "@odentia/db/schema/clinical"
 import { message } from "@odentia/db/schema/crm"
 import { branch, orgProfile } from "@odentia/db/schema/org"
@@ -11,6 +11,7 @@ import { and, eq } from "drizzle-orm"
 import { simulateWhatsAppInbound } from "./channels"
 import { hostUrl, latidiaUrl, tenant } from "./env"
 import { chooseOption, expect, PASSWORD, test } from "./fixtures"
+import { consentLinkJourney } from "./consent-link-journey"
 import { gotoHydrated } from "./hydration"
 import { latestLinkFor } from "./mailpit"
 import { surface } from "./surface"
@@ -210,6 +211,33 @@ test("latidIA: su dominio, su sesión, un consultorio médico con su marca y sus
   )
   await context.close()
 })
+
+for (const longAgo of [false, true]) {
+  const title = longAgo ? "latidIA: consentimiento por enlace, a quien escribió hace dos días" : "latidIA: consentimiento por enlace, con sus palabras"
+  test(title, async ({ browser, fixtureDb, passwordHash, nextEventId }, testInfo) => {
+    const vela = await createVela(fixtureDb, passwordHash)
+    const context = await browser.newContext({ ignoreHTTPSErrors: true })
+    const page = await context.newPage()
+    await gotoHydrated(page, latidiaUrl("app", "/login"))
+    const { api, slug } = await openConsultorio(page, vela)
+    const [org] = await fixtureDb.select({ id: organization.id }).from(organization).where(eq(organization.slug, slug))
+    await consentLinkJourney({
+      page,
+      browser,
+      info: testInfo,
+      slug,
+      orgId: org!.id,
+      apiBase: api,
+      userId: vela.id,
+      url: (path) => latidiaUrl(slug, path),
+      templateKey: "procedimiento-menor",
+      clinician: "médico",
+      nextEventId,
+      ...(longAgo ? { wroteLongAgo: { db: fixtureDb } } : {}),
+    })
+    await context.close()
+  })
+}
 
 test("latidIA: en la Bandeja cada tema se responde por su cuenta", async ({ browser, fixtureDb, passwordHash }, testInfo) => {
   const vela = await createVela(fixtureDb, passwordHash)

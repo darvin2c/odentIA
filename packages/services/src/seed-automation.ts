@@ -42,7 +42,7 @@ export async function seedChannelTemplates(
       })
   }
 
-  // Los dieciocho con los que viene la clínica, en estados distintos.
+  // Los diecinueve con los que viene la clínica, en estados distintos.
   const states: Record<CatalogMessageKey, { status: string; reason?: string; since?: Date; category?: string }> = {
     recordatorio_cita: { status: "aprobada", since: lastWeek },
     recordatorio_control: { status: "aprobada", since: lastWeek },
@@ -71,6 +71,8 @@ export async function seedChannelTemplates(
     su_enlace: { status: "en_revision" },
     // Aprobado: la respuesta del equipo a un tema pasadas las 24 horas sale con «Ver respuesta» (R1).
     ver_respuesta: { status: "aprobada", since: lastWeek },
+    // Aprobado: quien completa algo en su enlace pasadas las 24 horas recibe el agradecimiento.
+    enlace_recibido: { status: "aprobada", since: lastWeek },
   }
   for (const key of CATALOG_MESSAGE_KEYS) {
     const spec = catalogMessageOf(key)

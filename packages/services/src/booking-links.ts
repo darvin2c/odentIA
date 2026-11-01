@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto"
+import { type ChannelProvider, channelAdapters } from "@odentia/channels"
 import {
   normalizePhone,
   type RegistrationAnswers,
@@ -9,7 +10,7 @@ import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { organization, user } from "@odentia/db/schema/auth"
 import { professionalSchedule } from "@odentia/db/schema/availability"
 import { patient, serviceCatalog, treatmentPlanItem } from "@odentia/db/schema/clinical"
-import { channelConnection, contact, contactIdentity, conversation } from "@odentia/db/schema/crm"
+import { agentConfig, channelConnection, contact, contactIdentity, conversation } from "@odentia/db/schema/crm"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm"
 import { recordAgentAction } from "./agent-actions.js"
@@ -17,11 +18,14 @@ import { addAgentCaseNote } from "./agent-case.js"
 import { createProposal, expireBookingProposals } from "./agent-operations.js"
 import { appointmentCalendarDownload } from "./appointment-calendar.js"
 import { createAppointment } from "./appointments.js"
+import { type AppointmentChange, enqueueAppointmentNotice } from "./automation.js"
 import { listAvailableSlots, selfBookingNotBefore } from "./availability.js"
 import { branchAddressColumns, branchAddressWriter, branchDirectionsWriter } from "./branches.js"
+import { sendLinkReceivedNotice } from "./clinic-messages.js"
 import { branchNotFound, invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry, findOrgLocale, formatZonedShort, NEUTRAL_TIMEZONE } from "./locale.js"
 import { consentStatusOf } from "./message-permission.js"
+import { windowOpen } from "./message-window.js"
 import {
   assertOwnAppointmentChangeable,
   cancelOwnAppointment,
@@ -1352,26 +1356,58 @@ async function whenText(
  * Deja constancia en el caso y avisa por la conversación del enlace, con la
  * misma política que cualquier mensaje del agente. Un enlace que no salió de
  * una conversación no tiene caso ni chat al que avisar: lo hecho queda en la
- * auditoría a nombre de la persona.
+ * auditoría a nombre de la persona. Con Sofi apagada nadie habla en su nombre:
+ * queda solo la nota del caso. Tocar el botón del enlace no abre las 24 horas de
+ * WhatsApp: pasadas, sale lo aprobado (ADR 0129).
  */
-async function tellConversation(
+export async function tellConversation(
   tx: Db,
   orgId: string,
   link: LinkRow,
-  input: { note: string; message: string; key: string; reason: string; done: { title: string; at: string; timeZone: string } },
+  input: {
+    note: string
+    message: string
+    key: string
+    reason: string
+    /** `kind`: cómo se ve en el hilo (`AGENT_ACTION_KINDS`); sin decirlo, una cita. */
+    done: { title: string; at: string; timeZone: string; kind?: string }
+    /** Pasadas las 24 horas: el aviso de su cita, que dice la fecha. Sin él, «Recibido desde su enlace». */
+    notice?: { appointmentId: string; change: AppointmentChange }
+  },
   deps: { secretsKey?: Buffer },
 ): Promise<void> {
   if (!link.conversationId) return
   await addAgentCaseNote(tx, orgId, link.conversationId, input.note)
+  const [agent] = await tx
+    .select({ enabled: agentConfig.enabled })
+    .from(agentConfig)
+    .where(eq(agentConfig.organizationId, orgId))
+    .limit(1)
+  if (!agent?.enabled) return
   // Lo que la persona hizo en el enlace que le dio Sofi es parte de su atención: el hilo y
   // la fila de la Bandeja lo dicen como lo que hizo Sofi, y así se cobra (ADR 0085).
   const { locale } = await findOrgLocale(tx, orgId)
   await recordAgentAction(tx, orgId, {
     conversationId: link.conversationId,
-    kind: "cita",
+    kind: input.done.kind ?? "cita",
     title: input.done.title,
     detail: `${formatZonedShort(new Date(input.done.at), { timezone: input.done.timeZone, locale })} · desde su enlace`,
   })
+  const [thread] = await tx
+    .select({ lastInboundAt: conversation.lastInboundAt, provider: channelConnection.provider })
+    .from(conversation)
+    .innerJoin(channelConnection, eq(channelConnection.id, conversation.channelConnectionId))
+    .where(and(eq(conversation.id, link.conversationId), eq(conversation.organizationId, orgId)))
+    .limit(1)
+  if (
+    thread &&
+    channelAdapters[thread.provider as ChannelProvider]?.capabilities.templates &&
+    !windowOpen(thread.lastInboundAt)
+  ) {
+    if (input.notice) await enqueueAppointmentNotice(tx, orgId, input.notice.appointmentId, input.notice.change)
+    else await sendLinkReceivedNotice(tx, orgId, link.conversationId)
+    return
+  }
   await createProposal(tx, orgId, {
     conversationId: link.conversationId,
     action: "enviar_mensaje",
@@ -1452,7 +1488,7 @@ export async function reserveBookingLink(
     ...(link.row.conversationId ? { conversationId: link.row.conversationId } : {}),
     // Quien reserva es la propia persona, no alguien del equipo: la cita queda sin autora.
     createdByUserId: null,
-    // Se le confirma en la página y, si salió de una conversación, por ese chat: no se repite.
+    // Se le confirma en la página y, si salió de una conversación, por ese chat (`tellConversation`): no se repite.
     notice: false,
   })
   await tx
@@ -1482,6 +1518,7 @@ export async function reserveBookingLink(
       key: `enlace-reserva:${link.row.id}:${created.id}`,
       reason: "La persona reservó desde su enlace",
       done: { title: "reservó una cita", at: view.startsAt, timeZone: view.timeZone },
+      notice: { appointmentId: created.id, change: "reservada" },
     },
     deps,
   )
@@ -1549,6 +1586,7 @@ export async function changeBookingLinkAppointment(
       key: `enlace-cambio:${link.row.id}:${view.startsAt}`,
       reason: "La persona cambió su cita desde su enlace",
       done: { title: "movió una cita", at: view.startsAt, timeZone: view.timeZone },
+      notice: { appointmentId: current.id, change: "movida" },
     },
     deps,
   )
@@ -1594,6 +1632,7 @@ export async function cancelBookingLinkAppointment(
       key: `enlace-cancela:${link.row.id}:${current.id}`,
       reason: "La persona canceló su cita desde su enlace",
       done: { title: "canceló una cita", at: before.startsAt, timeZone: before.timeZone },
+      notice: { appointmentId: current.id, change: "cancelada" },
     },
     deps,
   )
@@ -1605,11 +1644,28 @@ export async function confirmBookingLinkAppointment(
   tx: Db,
   orgId: string,
   token: string,
+  deps: { secretsKey?: Buffer } = {},
 ): Promise<BookingLinkAppointment> {
   const link = await requireLiveLink(tx, orgId, token, true, { ownAppointment: true })
   const current = changeableAppointment(link)
-  await confirmOwnAppointment(tx, orgId, `contact:${link.row.contactId}`, current, "enlace")
+  const { already } = await confirmOwnAppointment(tx, orgId, `contact:${link.row.contactId}`, current, "enlace")
   const view = await appointmentView(tx, orgId, current.id)
   if (!view) throw notFound("Cita")
+  if (!already) {
+    const when = await whenText(tx, orgId, view.startsAt, view.timeZone)
+    await tellConversation(
+      tx,
+      orgId,
+      link.row,
+      {
+        note: `Confirmó desde su enlace su cita del ${when} en ${view.branchName}.`,
+        message: `Listo: la cita del ${when} quedó confirmada.`,
+        key: `enlace-confirma:${link.row.id}:${current.id}`,
+        reason: "La persona confirmó su cita desde su enlace",
+        done: { title: "confirmó una cita", at: view.startsAt, timeZone: view.timeZone },
+      },
+      deps,
+    )
+  }
   return view
 }

@@ -39,7 +39,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useId, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { PLAN_QUERY_KEYS } from "../../lib/budgets"
-import { type ConsentDocument, fetchConsents } from "../../lib/clinical-forms"
+import { type ConsentDocument, confirmLinkSignedConsent, fetchConsents } from "../../lib/clinical-forms"
 import {
   clinicDateTimeValue,
   fetchFollowUps,
@@ -432,6 +432,7 @@ export function EncounterEditor({
   })
   const needsRegistration = closingQuery.isSuccess && closingQuery.data.data.missing.includes("signature")
   const unsignedConsents: ConsentNeed[] = closingQuery.data?.data.consents ?? []
+  const missingConsentSignatures = unsignedConsents.filter((need) => !need.personSigned).length
   // Firmar con lo dictado: las sugerencias marcadas se confirman dentro del mismo envío del cierre.
   const signIdsRef = useRef<string[] | null>(null)
   const closingForm = useClosingForm({
@@ -1129,8 +1130,9 @@ export function EncounterEditor({
       summary:
         [
           docs.total === 0 ? "Sin documentos" : counted(docs.total, "documento", "documentos"),
-          docs.pendingSignatures.length > 0
-            ? `${docs.pendingSignatures.length} sin firmar`
+          docs.toSign.length > 0 ? `${docs.toSign.length} sin firmar` : "",
+          docs.pendingSignatures.length > docs.toSign.length
+            ? `falta confirmar ${docs.pendingSignatures.length - docs.toSign.length}`
             : "",
           docs.toPrepare.length > 0 ? "necesita consentimiento" : "",
         ]
@@ -1300,6 +1302,13 @@ export function EncounterEditor({
   /** «Firmar ahora» desde el cierre: prepara lo que falta y abre la firma en la unidad dental. */
   const signConsentsNow = async (need: ConsentNeed) => {
     try {
+      // Ya lo firmó en su enlace: solo falta que quien atiende lo confirme.
+      if (need.personSigned && need.documentId) {
+        await confirmLinkSignedConsent(need.documentId)
+        await refreshClosing()
+        await onChanged()
+        return
+      }
       if (need.status === "sin_preparar") {
         await flush()
         await prepareConsents(patientId, encounterId, [need.templateKey])
@@ -1309,7 +1318,9 @@ export function EncounterEditor({
         queryFn: () => fetchConsents({ patientId }),
         staleTime: 0,
       })
-      const pending = list.data.filter((doc) => doc.encounterId === encounterId && doc.status === "pendiente")
+      const pending = list.data.filter(
+        (doc) => doc.encounterId === encounterId && doc.status === "pendiente" && !doc.personSignedAt,
+      )
       if (pending.length > 0) setSigningDocs(pending)
     } catch (err) {
       // Desde el cierre, el aviso va en el cierre (el diálogo tapa la página).
@@ -1701,9 +1712,11 @@ export function EncounterEditor({
         ? "Listo para firmar · falta tu colegiatura, se pide al firmar"
         : !closingReady
           ? `${missing.length === 1 ? "Falta 1" : `Faltan ${missing.length}`} para cerrar: ${listWords(missing.map((m) => CLOSING_SHORT[m]))}`
-        : unsignedConsents.length > 0
-          ? `Listo para firmar · falta${unsignedConsents.length === 1 ? "" : "n"} ${unsignedConsents.length} firma${unsignedConsents.length === 1 ? "" : "s"} de ${signer}`
-          : "Listo para firmar"
+        : missingConsentSignatures > 0
+          ? `Listo para firmar · falta${missingConsentSignatures === 1 ? "" : "n"} ${missingConsentSignatures} firma${missingConsentSignatures === 1 ? "" : "s"} de ${signer}`
+          : unsignedConsents.length > 0
+            ? "Listo para firmar · falta confirmar lo que firmó en su enlace"
+            : "Listo para firmar"
 
   return (
     <div
@@ -1975,7 +1988,9 @@ export function EncounterEditor({
                   <span>
                     {need.status === "sin_publicar"
                       ? `Esta clínica aún no activó el consentimiento de «${need.title}»`
-                      : `Consentimiento sin firmar: «${need.title}»`}
+                      : need.personSigned
+                        ? `Lo firmó desde su enlace, falta confirmarlo: «${need.title}»`
+                        : `Consentimiento sin firmar: «${need.title}»`}
                     <span className="sr-only">: no impide cerrar; el cierre pide el motivo</span>
                   </span>
                   {need.status !== "sin_publicar" ? (
@@ -1987,7 +2002,7 @@ export function EncounterEditor({
                       disabled={!attending || locked}
                       onClick={() => void signConsentsNow(need)}
                     >
-                      Firmar ahora
+                      {need.personSigned ? "Confirmar" : "Firmar ahora"}
                     </Button>
                   ) : null}
                 </li>

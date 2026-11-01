@@ -327,7 +327,7 @@ export function createPublicBookingRoute(deps: {
   app.post("/:slug/confirm", async (c) => {
     const body = z.strictObject({ token }).safeParse(await bodyOf(c))
     if (!body.success) return unavailable(c)
-    return answer(c, 200, () => inOrg(c, (tx, orgId) => confirmBookingLinkAppointment(tx, orgId, body.data.token)))
+    return answer(c, 200, () => inOrg(c, (tx, orgId) => confirmBookingLinkAppointment(tx, orgId, body.data.token, { secretsKey: deps.secretsKey })))
   })
 
   // Tus datos: solo lo que falta, una sola vez.
@@ -343,7 +343,7 @@ export function createPublicBookingRoute(deps: {
     if (!body.success) return c.json(errorBody(c, "VALIDATION", "Revisa tus datos", issueFields(body.error.issues.filter((issue) => issue.path[0] !== "token"))), 400)
     const { token: linkToken, ...input } = body.data
     return answer(c, 201, () =>
-      inOrg(c, (tx, orgId) => submitPersonalLinkData(tx, orgId, linkToken, input)).catch((error: unknown) => {
+      inOrg(c, (tx, orgId) => submitPersonalLinkData(tx, orgId, linkToken, input, { secretsKey: deps.secretsKey })).catch((error: unknown) => {
         // Un documento que resultó ser de otra persona no se le dice a quien escribe (ni de quién es): texto neutro.
         if (error instanceof ServiceError && error.code === "DUPLICATE_DOCUMENT") {
           throw new ServiceError("DATA_NOT_SAVED", 409, "No pudimos guardar tus datos. Escríbenos por el chat y te ayudamos.")
@@ -359,7 +359,7 @@ export function createPublicBookingRoute(deps: {
     const body = decisionBody.safeParse(await bodyOf(c))
     if (!params.success || !body.success) return c.json(errorBody(c, "VALIDATION", "Revisa tu respuesta"), 400)
     const { token: linkToken, ...decision } = body.data
-    return answer(c, 200, () => inOrg(c, (tx, orgId) => decidePersonalLinkBudget(tx, orgId, linkToken, params.data.budgetId, decision)))
+    return answer(c, 200, () => inOrg(c, (tx, orgId) => decidePersonalLinkBudget(tx, orgId, linkToken, params.data.budgetId, decision, { secretsKey: deps.secretsKey })))
   })
 
   // Tu consentimiento: leer, escribir su documento y firmar.
@@ -380,7 +380,9 @@ export function createPublicBookingRoute(deps: {
     // Desde dónde firma: la evidencia de una firma a distancia (#47).
     const evidence = { ip: address(c) ?? null, userAgent: c.req.header("user-agent") ?? null }
     return answer(c, 200, () =>
-      inOrg(c, (tx, orgId) => signPersonalLinkConsent(tx, orgId, linkToken, params.data.consentId, input, evidence)),
+      inOrg(c, (tx, orgId) =>
+        signPersonalLinkConsent(tx, orgId, linkToken, params.data.consentId, input, evidence, { secretsKey: deps.secretsKey }),
+      ),
     )
   })
 
@@ -394,7 +396,7 @@ export function createPublicBookingRoute(deps: {
   app.post("/:slug/questionnaire", async (c) => {
     const body = questionnaireBody.safeParse(await bodyOf(c))
     if (!body.success) return c.json(errorBody(c, "VALIDATION", "Revisa tus respuestas"), 400)
-    return answer(c, 201, () => inOrg(c, (tx, orgId) => submitPersonalLinkQuestionnaire(tx, orgId, body.data.token, body.data.answers)))
+    return answer(c, 201, () => inOrg(c, (tx, orgId) => submitPersonalLinkQuestionnaire(tx, orgId, body.data.token, body.data.answers, { secretsKey: deps.secretsKey })))
   })
 
   // «Tus mensajes»: los tres interruptores de quien recibe sus mensajes.
