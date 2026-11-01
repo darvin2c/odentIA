@@ -52,6 +52,8 @@ export interface SurfaceShellProps {
   onClose?: () => void
   /** La «×» no responde mientras se guarda. */
   closeDisabled?: boolean
+  /** Al abrir, el foco pasa al título: quien usa teclado o lector de pantalla oye de quién se trata. */
+  focusTitle?: boolean
 }
 
 /**
@@ -75,13 +77,18 @@ export function SurfaceShell({
   onSubmit,
   onClose,
   closeDisabled = false,
+  focusTitle = false,
 }: SurfaceShellProps) {
+  const heading = React.useRef<HTMLHeadingElement>(null)
+  React.useEffect(() => {
+    if (focusTitle) heading.current?.focus({ preventScroll: true })
+  }, [focusTitle, title])
   const blocks = (
     <>
       <div className="flex shrink-0 flex-col gap-1 border-b border-border py-4 pr-3 pl-6 text-left">
         <div className="flex items-start gap-2">
           <div className="flex min-w-0 flex-1 flex-col gap-1 pt-1">
-            <h2 id={titleId} className="font-heading text-base font-medium text-foreground">
+            <h2 ref={heading} id={titleId} tabIndex={focusTitle ? -1 : undefined} className="font-heading text-base font-medium text-foreground outline-none">
               {title}
             </h2>
             {description ? (

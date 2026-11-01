@@ -134,9 +134,8 @@ it("cada conversación trae su estado de atención y su cierre, y las vistas cue
   // «Te espera» de Inicio cuenta las conversaciones sin responder como la bandeja.
   const home = await withOrgContext(appDb, orgId, (tx) =>
     getWorkspaceHome(tx, orgId, "nadie", { patients: false, appointments: false, conversations: true, tasks: false, allTasks: false, finance: false, clinical: false, crm: false, agent: true, configure: false, ownAppointments: false }))
-  const waitingRow = home.waiting.find((row) => row.kind === "conversations")
   // Sin contar las que tienen un tema abierto: esas son su propia fila.
-  expect(waitingRow?.kind === "conversations" ? waitingRow.waiting : 0).toBe(1)
+  expect(home.waiting.filter((row) => row.kind === "person")).toHaveLength(1)
 
   // Con el agente desactivado en la organización nadie está «con el agente».
   await ownerDb.update(agentConfig).set({ enabled: false }).where(eq(agentConfig.organizationId, orgId))

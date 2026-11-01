@@ -6,7 +6,7 @@
  * consume con `canAccess` y la plataforma con `usePermission`.
  *
  * Dominios: patients (filiación administrativa), clinical (ficha clínica),
- * appointments (agenda operativa), crm (contactos, oportunidades, campos),
+ * appointments (agenda operativa), crm (contactos, oportunidades),
  * conversations (bandeja y mensajes), tasks (tareas), finance (caja y cobros),
  * inventory (existencias), reports (reportes), settings (configuración),
  * audit (auditoría), agent (agente IA). Cada dominio tiene `.read`/`.write`,
@@ -244,6 +244,23 @@ export function canAccessAny(role: string, permissions: readonly string[]): bool
 }
 
 /**
+ * ¿Puede atender pacientes quien tiene `role`? La única definición (ADR 0128):
+ * quien escribe en la historia clínica. Decide a quién se le pone horario, se le
+ * da una cita, se le deriva o se le adscribe a una especialidad. Ojo: poder
+ * atender no es atender; quien atiende, además, tiene horario activo.
+ */
+export function canAttend(role: string): boolean {
+  return canAccess(role, "clinical.write");
+}
+
+/**
+ * Los roles que pueden atender, para filtrar en una consulta. El disparador
+ * `close_schedule_of_who_stops_attending` y la vista `argos.equipo` de la base
+ * repiten esta lista, y `quien-atiende.test.ts` exige que digan lo mismo.
+ */
+export const ATTENDING_ROLES: readonly OrgRole[] = ORG_ROLES.filter(canAttend);
+
+/**
  * ¿Ve `role` Facturación? Lo que la clínica paga a odentIA (plan, cargos,
  * consumo, avisos y lo pagado por el agente en Reportes) es solo de
  * propietario y administrador; no es un permiso que se reparta a otros roles.
@@ -302,15 +319,16 @@ const PLATFORM_PATH_RULES: PlatformPathRule[] = [
   // Regla específica antes de la genérica: las aprobaciones operativas las
   // resuelve quien decide (`agent.decide`), no solo quien supervisa.
   { prefix: "/agent/pendientes", permissions: ["agent.read", "agent.decide"] },
+  // Lo que hizo el agente: quien decide por él también lo ve (recepción).
+  { prefix: "/agent/actividad", permissions: ["agent.read", "agent.decide"] },
   // La dirección vieja de «Pendientes» solo redirige; conserva la misma regla.
   { prefix: "/agent/approvals", permissions: ["agent.read", "agent.decide"] },
   { prefix: "/agent", permissions: ["agent.read"] },
 
-  // Reglas específicas antes de la genérica: etapas de venta y campos de
-  // contacto son parte del trabajo diario de ventas; los define también quien
-  // trabaja con oportunidades y contactos (`crm.write`), no solo quien configura.
+  // Regla específica antes de la genérica: las etapas de venta son parte del
+  // trabajo diario de ventas; las define también quien trabaja con oportunidades
+  // y contactos (`crm.write`), no solo quien configura.
   { prefix: "/settings/pipelines", permissions: ["settings.read", "crm.write"] },
-  { prefix: "/settings/fields", permissions: ["settings.read", "crm.write"] },
   // Sedes, Equipo e Integraciones viven bajo Configuración: los cubre esta regla.
   { prefix: "/settings", permissions: ["settings.read"] },
   // Direcciones antiguas de Equipo y Sedes: solo redirigen a `/settings/team` y

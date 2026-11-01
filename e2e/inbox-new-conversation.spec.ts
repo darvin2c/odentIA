@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { member } from "@odentia/db/schema/auth"
+import { member, user } from "@odentia/db/schema/auth"
 import type { Page } from "@playwright/test"
 import { and, eq } from "drizzle-orm"
 import { tenant } from "./env"
@@ -99,8 +99,11 @@ test("«Nueva conversación»: crea a la persona con su número, abre su WhatsAp
     expectedVersion: registration.version, enabled: false, fields: registration.fields, privacyNotice: "Aviso de prueba.",
   })
   await call(page, "POST", "/api/agenda/rooms", org.slug, { branchId, name: "Unidad dental 1" }, 201)
+  const professional = randomUUID()
+  await fixtureDb.insert(user).values({ id: professional, name: "Dra. Agenda", email: `${professional}@example.test`, emailVerified: true })
+  await fixtureDb.insert(member).values({ id: randomUUID(), organizationId: org.id, userId: professional, role: "clinician", createdAt: new Date() })
   await call(page, "PUT", "/api/agenda/schedules", org.slug, {
-    branchId, professionalUserId: owner.user.id,
+    branchId, professionalUserId: professional,
     rules: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, startMin: 9 * 60, endMin: 13 * 60 })),
   })
   await fixtureDb.update(member).set({ role: "reception" }).where(and(eq(member.organizationId, org.id), eq(member.userId, owner.user.id)))
@@ -119,7 +122,7 @@ test("«Nueva conversación»: crea a la persona con su número, abre su WhatsAp
   await expect(page).toHaveURL(new RegExp(`/inbox\\?conversation=${conversationId}`))
   await expect(page.getByText(/No se pudo registrar/)).toHaveCount(0)
   // Reservar no navega: se espera a que quede guardada (la cita aparece en su Contexto, ya como paciente).
-  await expect(reception.getByRole("button", { name: "Ver cita", disabled: false })).toBeVisible()
+  await expect(reception.getByRole("button", { name: "Ver la cita", disabled: false })).toBeVisible()
   await expect(reception.getByRole("button", { name: "Reservar cita", exact: true })).toHaveCount(1)
   const [registered] = await call<{ id: string; displayName: string }[]>(page, "GET", "/api/patients?q=Rosa&limit=5", org.slug)
   expect(registered?.displayName).toBe("Rosa Quispe")
@@ -181,7 +184,7 @@ test("«Contexto» de quien lleva a un paciente: la cita que anuncia la fila tam
 
   // Se ve la cita del hijo, cada reserva bajo el nombre de quien la recibe, y sin salir de la Bandeja.
   await expect(context.getByRole("heading", { name: "Lucas Salas", exact: true })).toBeVisible()
-  await expect(context.getByRole("button", { name: "Ver cita", exact: true })).toHaveCount(1)
+  await expect(context.getByRole("button", { name: "Ver la cita", exact: true })).toHaveCount(1)
   await expect(context.getByRole("heading", { name: "Marta Salas", exact: true })).toBeVisible()
   await expect(context).toContainText("Marta todavía no es paciente")
   await expect(page).toHaveURL(new RegExp(`/inbox\\?conversation=${conversationId}`))

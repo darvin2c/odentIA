@@ -14,7 +14,7 @@ export interface WorkspaceHome {
   setup: { availability: boolean; rooms: boolean; patients: boolean; agent?: boolean } | null
   activity: { recorded: boolean }
   /** Lo que necesita a una persona, en el orden en que se muestra. */
-  waiting: WaitingRow[]
+  waiting: WaitingEntry[]
   /** La agenda de la sede o las citas de quien atiende; null sin permiso de agenda. */
   today: WorkspaceToday | null
   /** La agenda de la sede en una línea, para quien hoy atiende y además ve la sede. */
@@ -38,6 +38,9 @@ export interface WaitingBudgets {
   oldestPresentedAt: string | null
   items: Array<{ id: string; patientId: string; patientName: string; title: string; presentedAt: string | null }>
 }
+/** Los grupos de «Te espera»: los decide el servidor con la escala de siempre. */
+export type WaitingBand = "ahora" | "hoy" | "sin_apuro"
+
 export type WaitingRow =
   /** Terminó su registro por su enlace hoy y tiene cita hoy sin llegar: «Llegó» al entrar. */
   | {
@@ -49,7 +52,7 @@ export type WaitingRow =
       startsAt: string
       professionalName: string | null
     }
-  /** Una atención de otro día que quedó en borrador y lleva quien mira: «Continuar» o «Anular con motivo». */
+  /** Una atención de otro día que quedó en borrador y lleva quien mira: el panel dice qué tiene y qué falta. */
   | {
       kind: "staleEncounter"
       id: string
@@ -68,15 +71,22 @@ export type WaitingRow =
       channel: string | null
       createdAt: string
       conversationId: string | null
-      /** Nadie lo tomó todavía: la fila ofrece «Tomar este tema». */
+      /** Su tarea: sin conversación, es lo que la fila abre. */
+      taskId: string | null
+      contactId?: string | null
+      /** Nadie lo tomó todavía. */
       unclaimed: boolean
+      /** Instagram o Messenger ya no dejan escribirle: se le escribe por otro canal. */
+      windowClosed?: boolean
+      /** Quien lo tiene, si no es quien mira. */
+      assigneeName?: string | null
       /** «Ahora»: alta, o dos horas de clínica abierta esperando (decisión 1 del pulido). */
       urgent?: boolean
       /** De qué trata: cita, precio, clínico, pago u otro (R3). */
       topicKind?: string
-      /** Quien mira lo responde aquí mismo, sin entrar a la Bandeja (R3 y decisión 3). */
+      /** Quien mira lo responde desde aquí: responder lo toma al enviar. */
       canReply?: boolean
-      /** Lo que preguntó, para responderlo aquí; solo si `canReply`. */
+      /** Lo que preguntó: la fila lo dice. */
       quote?: string | null
     }
   /**
@@ -89,6 +99,7 @@ export type WaitingRow =
       why: "sin_confirmar" | "sin_recordatorios"
       id: string
       patientId: string
+      personId?: string | null
       patientName: string
       phone: string | null
       startsAt: string
@@ -102,13 +113,25 @@ export type WaitingRow =
       patientId: string
       patientName: string
       startsAt: string
+      professionalUserId: string
       professionalName: string | null
       serviceName: string | null
       branchName: string
     }
   /** Quienes aceptaron un presupuesto y no tienen cita por venir: abre la lista para agendarlos. */
   | { kind: "acceptedUnbooked"; patients: number; cents: number; currency: string }
-  | { kind: "conversations"; waiting: number; oldestAt: string | null }
+  /** Una conversación que espera respuesta: con quién y qué pidió. */
+  | {
+      kind: "person"
+      conversationId: string
+      contactId: string
+      contactName: string | null
+      channel: string | null
+      quote: string | null
+      since: string
+      urgent: boolean
+      windowClosed: boolean
+    }
   /** Conversaciones que siguen abiertas con una persona a cargo y sin mensajes desde hace horas. */
   | { kind: "stillOpen"; total: number; conversationId: string | null; contactName: string | null; quietSince: string | null }
   | ({ kind: "task"; more: number } & WaitingTask)
@@ -170,15 +193,30 @@ export type WaitingRow =
       expiredLots: number
       expired: Array<{ productName: string; expiresAt: string }>
     }
-  /** Un aviso que WhatsApp pasó a promoción: solo sale a quien aceptó novedades; hay que cambiarle el texto (ADR 0040). */
-  | { kind: "promotion"; messageId: string; title: string }
+  /** Los avisos que WhatsApp pasó a promoción, juntos: solo salen a quien aceptó novedades (ADR 0040). */
+  | { kind: "promotions"; items: WaitingPromotion[] }
   /** `startsAt`: en «citas más sin cerrar», la primera que no cupo (la Agenda abre en su día). */
-  | { kind: "more"; of: "cases" | "tasks" | "unconfirmed" | "unclosed" | "unsentBudgets"; count: number; startsAt?: string | null }
+  | { kind: "more"; of: "cases" | "tasks" | "unconfirmed" | "unclosed" | "unsentBudgets" | "conversations"; count: number; startsAt?: string | null }
+
+/** Un aviso que WhatsApp pasó a promoción y el texto solo de aviso que prepara odentIA. */
+export interface WaitingPromotion {
+  messageId: string
+  title: string
+  connectionId?: string
+  noticeText?: string | null
+  inReview?: boolean
+  /** WhatsApp no aceptó el texto de aviso: hay que escribir otro. */
+  rejected?: boolean
+}
+
+/** Una fila de la lista: su grupo y lo demás de esa persona, si su rol puede verlo. */
+export type WaitingEntry = WaitingRow & { band: WaitingBand; also?: WaitingRow[] }
 export interface WorkspaceAppointment {
   id: string
   patientId: string
   patientName: string
   startsAt: string
+  endsAt: string
   status: string
   serviceName: string | null
   professionalUserId: string

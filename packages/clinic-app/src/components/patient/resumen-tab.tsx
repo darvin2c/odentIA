@@ -185,7 +185,7 @@ export function PatientPendingCard({
         proposal.context.afterSummary || proposal.reason || "Espera la confirmación del paciente.",
       action: (
         <Link to="/inbox" search={{ conversation: proposal.conversationId }} className={buttonVariants({ size: "sm" })}>
-          Ver conversación
+          Ver la conversación
         </Link>
       ),
     })

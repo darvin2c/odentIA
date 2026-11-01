@@ -1,4 +1,4 @@
-import { canAccessAny, platformPathPermission } from "@odentia/auth/permissions"
+import { canAccessAny, canAttend, platformPathPermission } from "@odentia/auth/permissions"
 import { Badge, Button, Checkbox, toast } from "@odentia/ui"
 import {
   ConfirmDialog,
@@ -288,7 +288,8 @@ function SpecialtyForm({
   onSaved: () => void
 }) {
   const specialty = target?.specialty ?? null
-  const members = useOrgMembers()
+  // Solo quien puede atender se adscribe a una especialidad (ADR 0128).
+  const members = useOrgMembers().filter((member) => canAttend(member.role))
   const canOpenTeam = useCanOpen("/settings/team")
   const queryClient = useQueryClient()
   const initialWho = (specialty?.professionals ?? []).map((item) => item.userId)

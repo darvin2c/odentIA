@@ -99,7 +99,7 @@ test("agente: el resumen dice cómo le fue, qué aprendió y qué pasa cuando no
   for (const [index, name] of ["Respuestas por revisar", "Lecciones por aprobar"].entries()) {
     await expect(tiles.nth(index)).toContainText(name)
   }
-  // Los casos del agente se cuentan en el botón de la cabecera (ADR 0118): el resumen no los repite.
+  // Los casos del agente se cuentan en «Inicio» del menú (ADR 0125): el resumen no los repite.
   await expect(needs.getByRole("link", { name: /Esperan su sí|Pendientes/ })).toHaveCount(0)
   const agents = page.getByRole("region", { name: "Tus agentes" })
   await expect(agents).toContainText("La base que comparten los tres")
@@ -209,7 +209,7 @@ test("bandeja: con Recepción apagada lo dice, y solo quien administra puede ir 
   await call(page, "PUT", "/api/agent/config", org.slug, { enabled: true })
   await page.setViewportSize({ width: 1440, height: 900 })
   // El aviso depende del resumen del panel: se espera esa respuesta antes de afirmar que no está.
-  const panelLoaded = page.waitForResponse((response) => response.url().includes("/api/agent/panel") && response.ok())
+  const panelLoaded = page.waitForResponse((response) => response.url().includes("/api/agent/summary") && response.ok())
   await gotoHydrated(page, tenant(org.slug, "/inbox"))
   await panelLoaded
   await expect(page.getByRole("heading", { level: 1, name: "Bandeja" })).toBeVisible()

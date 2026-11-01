@@ -210,7 +210,7 @@ function ActionsPage() {
                 <>
                   {" · "}
                   <Link className="underline underline-offset-2" to="/inbox" search={{ conversation: row.original.conversationId }}>
-                    Ver conversación
+                    Ver la conversación
                   </Link>
                 </>
               ) : null}

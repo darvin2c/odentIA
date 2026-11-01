@@ -6,7 +6,7 @@ import { Bell } from "lucide-react"
 import { apiFetch } from "../lib/api"
 import { timeAgo } from "../lib/crm"
 import type { WorkspaceNotice } from "../lib/workspace"
-import { type HeaderPanelFrame, useNoticesPanel } from "./agent-panel"
+import { type NoticesFrame, useNoticesColumn } from "./notices-column"
 
 /** «Hace 10 min», «Ayer»…: cuándo llegó, con mayúscula inicial. */
 function arrived(iso: string): string {
@@ -32,12 +32,12 @@ function useNotices() {
  * aquí. Abrir un aviso lo marca leído; «Marcar todo leído» los marca todos; y
  * un aviso se retira solo cuando su asunto se resuelve (lo decide el servidor).
  *
- * Vive en las utilidades de la cabecera y se abre en la misma columna derecha
- * que el Agente (issue 93): uno a la vez, sin tapar la página; donde no cabe,
- * con el mismo cajón. El contenido es `NoticesPanel`, que monta el layout.
+ * Vive en las utilidades de la cabecera y se abre en una columna derecha, sin
+ * tapar la página; donde no cabe, con el mismo cajón de los formularios. El
+ * contenido es `NoticesPanel`, que monta el layout.
  */
 export function WorkspaceNotifications() {
-  const { open, setOpen } = useNoticesPanel()
+  const { open, setOpen } = useNoticesColumn()
   const unread = useNotices().data?.data.unread ?? 0
   const compact = useHeaderCompact()
   return (
@@ -60,8 +60,8 @@ export function WorkspaceNotifications() {
   )
 }
 
-/** Contenido de Avisos en la columna o el cajón: misma cabecera y mismo «×» que el Agente. */
-export function NoticesPanel({ overlay, onClose }: HeaderPanelFrame) {
+/** Contenido de Avisos en la columna o el cajón. */
+export function NoticesPanel({ overlay, onClose }: NoticesFrame) {
   const client = useQueryClient()
   const query = useNotices()
   const refresh = () => client.invalidateQueries({ queryKey: NOTICES_KEY })

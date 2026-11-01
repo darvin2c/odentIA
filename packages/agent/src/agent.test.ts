@@ -1086,7 +1086,7 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
   await ownerDb.execute(sql`
     insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
       (${`m-${actorId}`}, 'org_a', ${actorId}, 'owner', now()),
-      (${`m-${professionalId}`}, 'org_a', ${professionalId}, 'member', now())`)
+      (${`m-${professionalId}`}, 'org_a', ${professionalId}, 'clinician', now())`)
   const createdRoom = await withOrgContext(appDb, "org_a", (tx) =>
     createRoom(tx, "org_a", { branchId, name: "Unidad dental Agente" }))
   const roomId = createdRoom!.id
@@ -1408,7 +1408,7 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
   await ownerDb.execute(sql`
     insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
       (${`m-${actorId}`}, 'org_a', ${actorId}, 'owner', now()),
-      (${`m-${professionalId}`}, 'org_a', ${professionalId}, 'member', now())`)
+      (${`m-${professionalId}`}, 'org_a', ${professionalId}, 'clinician', now())`)
   const createdRoom = await withOrgContext(appDb, "org_a", (tx) =>
     createRoom(tx, "org_a", { branchId, name: "Unidad dental Reprog" }))
   const roomId = createdRoom!.id
@@ -1539,7 +1539,7 @@ it("confirmar_cita confirma por escrito la cita de la persona, nunca la de otra,
   await ownerDb.execute(sql`
     insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
       (${`m-${actorId}`}, 'org_a', ${actorId}, 'owner', now()),
-      (${`m-${professionalId}`}, 'org_a', ${professionalId}, 'member', now())`)
+      (${`m-${professionalId}`}, 'org_a', ${professionalId}, 'clinician', now())`)
   const room = await withOrgContext(appDb, "org_a", (tx) => createRoom(tx, "org_a", { branchId, name: "Unidad dental Confirma" }))
   const { conversationId } = await ingestText("tg:confirma-cita", "evt-confirma-cita", "Sí, ahí estaré")
   const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
@@ -1786,7 +1786,7 @@ async function bookingFixture(conversationId: string, label: string, options: { 
   await ownerDb.execute(sql`
     insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
       (${`m-${actorId}`}, 'org_a', ${actorId}, 'owner', now()),
-      (${`m-${professionalId}`}, 'org_a', ${professionalId}, 'member', now())`)
+      (${`m-${professionalId}`}, 'org_a', ${professionalId}, 'clinician', now())`)
   const room = await withOrgContext(appDb, "org_a", (tx) => createRoom(tx, "org_a", { branchId, name: `Unidad dental ${label}` }))
   await withOrgContext(appDb, "org_a", (tx) =>
     setProfessionalSchedule(tx, "org_a", actorId, {
@@ -1994,7 +1994,7 @@ it("una respuesta con un precio que no está en lo consultado no sale y, a la se
   await ownerDb.insert(user).values({ id: professionalId, name: "Dentista Precio", email: `${professionalId}@example.test` })
   await ownerDb.execute(sql`
     insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
-      (${`m-${professionalId}`}, 'org_a', ${professionalId}, 'member', now())`)
+      (${`m-${professionalId}`}, 'org_a', ${professionalId}, 'clinician', now())`)
   const schedule = (weekdays: number[]) =>
     withOrgContext(appDb, "org_a", (tx) =>
       setProfessionalSchedule(tx, "org_a", professionalId, {

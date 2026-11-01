@@ -17,7 +17,6 @@ import {
   Select,
   SelectTrigger,
   SelectValue,
-  SidebarTrigger,
   Skeleton,
   Tabs,
   TabsContent,
@@ -28,7 +27,7 @@ import {
 } from "@odentia/ui"
 import {
   HeaderCompactProvider,
-  MOBILE_NAV_TRIGGER_CLASS,
+  MobileNavTrigger,
   PageHeaderMenu,
   PageShell,
   SkeletonRegion,
@@ -69,7 +68,7 @@ export function PersonHeaderSkeleton({ crumb, actions, unsure = false }: { crumb
   return (
     <header className="flex min-w-0 flex-col gap-3">
       <div className="flex min-w-0 flex-wrap items-center gap-3">
-        {sidebar ? <SidebarTrigger className={MOBILE_NAV_TRIGGER_CLASS} /> : null}
+        {sidebar ? <MobileNavTrigger /> : null}
         <Breadcrumb className="min-w-0 flex-1">
           <BreadcrumbList>
             <BreadcrumbItem>

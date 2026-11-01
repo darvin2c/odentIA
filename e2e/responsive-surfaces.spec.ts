@@ -9,7 +9,7 @@ const SETTINGS_GROUPS: Array<[string, string[]]> = [
   ["La clínica", ["Datos de la clínica", "Sedes", "Equipo", "Horarios y ausencias", "Protección de datos"]],
   ["Atención", ["Especialidades", "Consentimientos"]],
   ["Pacientes", ["Registro de pacientes", "Portal del paciente"]],
-  ["Ventas y cobros", ["Medios de pago y ticket", "Etapas de venta", "Campos de contacto"]],
+  ["Ventas y cobros", ["Medios de pago y ticket", "Etapas de venta"]],
   // Solo para quien ve Facturación (ADR 0065); la dueña la ve.
   ["Tu cuenta odentIA", ["Plan y pagos"]],
 ]

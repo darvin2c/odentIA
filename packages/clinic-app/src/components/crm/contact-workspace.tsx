@@ -47,7 +47,7 @@ import { dueWords, isOverdue } from "./crm-helpers"
 import { OpportunityDrawer } from "./opportunity-drawer"
 import { OpportunityPanel } from "./opportunity-panel"
 import { PhoneMatchPrompt } from "./phone-match"
-import { useCompleteTask } from "./resolve-preview"
+import { useCompleteTask } from "./complete-task"
 import { TaskDrawer } from "./task-drawer"
 
 const AccountTab = lazy(() => import("../patient/account-tab").then((m) => ({ default: m.AccountTab })))
@@ -509,7 +509,7 @@ function VentasSection({ contactId, conversationId }: { contactId: string; conve
           {error}
         </p>
       ) : null}
-      {completion.dialog}
+      
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">Oportunidades</h3>
         <Button variant="outline" size="sm" className="min-h-11 sm:min-h-8" onClick={() => setOppDrawer(true)}>
@@ -589,11 +589,10 @@ function VentasSection({ contactId, conversationId }: { contactId: string; conve
                     className="min-h-11 shrink-0 sm:min-h-8"
                     disabled={taskMutation.isPending || completion.pendingId !== null}
                     onClick={() =>
-                      // Completar la de un caso del agente muestra antes lo mismo que «Resolver».
-                      done ? taskMutation.mutate({ id: task.id, status: "open" }) : void completion.complete(task.id)
+                                      done ? taskMutation.mutate({ id: task.id, status: "open" }) : void completion.complete(task.id)
                     }
                   >
-                    {done ? "Reabrir" : "Completar"}
+                    {done ? "Reabrir" : "Hecha"}
                   </Button>
                 ) : null}
               </li>

@@ -20,7 +20,8 @@ import { professionalSchedule } from "@odentia/db/schema/availability"
 import { orgSpecialty } from "@odentia/db/schema/clinical"
 import { product } from "@odentia/db/schema/inventory"
 import { promotion } from "@odentia/db/schema/promotions"
-import { and, asc, eq, sql } from "drizzle-orm"
+import { ATTENDING_ROLES } from "@odentia/auth/permissions"
+import { and, asc, eq, inArray, sql } from "drizzle-orm"
 import { listAgentServices } from "./agent-clinic-info.js"
 import { type ArgosKey, argosViewsOf } from "./argos-catalog.js"
 import { listArgosBranches } from "./argos-period.js"
@@ -1443,7 +1444,7 @@ export function argosFiguresText(key: ArgosKey, words: ArgosFigureWords): string
 export interface ArgosNames {
   sedes: string[]
   equipo: string[]
-  /** Del equipo, quienes atienden pacientes: tienen horario o citas como profesional (como `equipo.atiende`), lleven o no «Dr.». */
+  /** Del equipo, quienes atienden pacientes: pueden atender y tienen horario o citas (como `equipo.atiende`), lleven o no «Dr.». */
   atienden: string[]
   especialidades: string[]
   servicios: Array<{ name: string; specialty: string | null }>
@@ -1459,8 +1460,8 @@ export async function listArgosNames(tx: Db, orgId: string, key: ArgosKey): Prom
     tx
       .selectDistinct({
         name: user.name,
-        attends: sql<boolean>`(exists (select 1 from ${professionalSchedule} s where s.organization_id = ${member.organizationId} and s.professional_user_id = ${member.userId})
-          or exists (select 1 from ${appointment} a where a.organization_id = ${member.organizationId} and a.professional_user_id = ${member.userId}))`,
+        attends: sql<boolean>`(${inArray(member.role, [...ATTENDING_ROLES])} and (exists (select 1 from ${professionalSchedule} s where s.organization_id = ${member.organizationId} and s.professional_user_id = ${member.userId})
+          or exists (select 1 from ${appointment} a where a.organization_id = ${member.organizationId} and a.professional_user_id = ${member.userId})))`,
       })
       .from(member)
       .innerJoin(user, eq(user.id, member.userId))

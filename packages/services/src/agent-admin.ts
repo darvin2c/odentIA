@@ -1,4 +1,4 @@
-import { canAccess, ORG_ROLES } from "@odentia/auth/permissions"
+import { ATTENDING_ROLES } from "@odentia/auth/permissions"
 import { type Db, withOrgContext } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
 import type { AutomationCause } from "@odentia/db/schema/automation"
@@ -398,9 +398,6 @@ async function budgetsWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale,
     how: `Presupuestos aceptados (del todo o en parte) hace más de ${days} días, o con un tratamiento en curso sin cita para su próxima sesión; de pacientes activos que no tienen una cita programada o confirmada desde ahora.`,
   }
 }
-
-/** Roles que escriben en la historia (`clinical.write`): ven sus atenciones de otro día en «Te espera». */
-const ATTENDING_ROLES = ORG_ROLES.filter((role) => canAccess(role, "clinical.write"))
 
 async function unsignedEncounters(tx: Db, orgId: string, zone: OrgLocale, days: number, scope?: Fresh, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
   const rows = await tx.execute<{ id: string; patient_id: string; name: string; professional: string | null; professional_id: string | null; started_at: Date | string; total: number }>(sql`

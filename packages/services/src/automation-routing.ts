@@ -16,7 +16,7 @@ import {
   renderMessage,
   replyButtons,
 } from "./automation-messages.js"
-import { findTemplateByName, isPromotionFor, type TemplateItem } from "./channel-templates.js"
+import { findTemplateByName, type TemplateItem } from "./channel-templates.js"
 import { isDirectThread } from "./contacts.js"
 import { startContactConversation } from "./conversations.js"
 import { ServiceError } from "./errors.js"
@@ -339,7 +339,9 @@ async function routeFacts(
         !!spec &&
         !!template &&
         template.status === "aprobada" &&
-        isPromotionFor(template, spec.category) &&
+        // La categoría manda (ADR 0040), se haya pedido como promoción o no: «Invitar a volver» es
+        // de «controles y seguimiento» y WhatsApp la cuenta como promoción.
+        template.category === "marketing" &&
         !(await acceptsPromotions(tx, orgId, contactId))
     }
   }

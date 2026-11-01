@@ -295,8 +295,6 @@ const SETTINGS_PRIMARY = {
   branches: { permission: "settings.write", label: "Nueva sede" },
   team: { permission: "settings.write", label: "Invitar al equipo" },
   specialties: { permission: "settings.write", label: "Agregar especialidad" },
-  /** Campos y etapas de venta los define también quien trabaja con ventas. */
-  fields: { permission: "crm.write", label: "Nuevo campo" },
   paymentMethods: { permission: "settings.write", label: "Agregar medio de pago" },
 } as const
 
@@ -310,13 +308,16 @@ export function settingsPrimary(screen: keyof typeof SETTINGS_PRIMARY, can: Can,
 // Lo que espera el sí de la persona vive en la Bandeja, no en una pestaña (ADR 0118).
 const AGENT_TABS = [
   { label: "Resumen", to: "/agent", key: "resumen", permission: "read" },
+  { label: "Actividad", to: "/agent/actividad", key: "actividad", permission: "decide" },
   { label: "Aprender", to: "/agent/learn", key: "aprender", permission: "read" },
   { label: "Conocimiento", to: "/agent/knowledge", key: "conocimiento", permission: "write" },
 ] as const
 
 /** Cada pestaña aparece solo con el permiso que su ruta exige. Con una sola no hay pestañas. */
 export function agentTabsFor(can: Can) {
-  const visible = AGENT_TABS.filter((tab) => (tab.permission === "read" ? can("agent.read") : can("agent.write")))
+  const visible = AGENT_TABS.filter((tab) =>
+    tab.permission === "read" ? can("agent.read") : tab.permission === "decide" ? can("agent.read") || can("agent.decide") : can("agent.write"),
+  )
   return visible.length < 2 ? [] : visible
 }
 

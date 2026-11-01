@@ -1,3 +1,4 @@
+import { canAttend } from "@odentia/auth/permissions"
 import { Badge, Button, toast } from "@odentia/ui"
 import {
   applySubmitError,
@@ -84,7 +85,8 @@ export function NewResponseDrawer({
   defaultProfessionalUserId?: string
   onCreated: (id: string) => Promise<void>
 }) {
-  const members = useOrgMembers()
+  // Solo quien puede atender responde por un formulario; quien llevó la atención y ya no atiende no se propone.
+  const responsibles = useOrgMembers().filter((member) => canAttend(member.role))
   const create = useMutation({
     mutationFn: (value: z.infer<typeof newResponseSchema>) =>
       createFormResponse({
@@ -96,7 +98,10 @@ export function NewResponseDrawer({
       }),
   })
   const form = useAppForm({
-    defaultValues: { templateId: "", professionalUserId: defaultProfessionalUserId ?? "" },
+    defaultValues: {
+      templateId: "",
+      professionalUserId: responsibles.some((member) => member.userId === defaultProfessionalUserId) ? (defaultProfessionalUserId ?? "") : "",
+    },
     validators: { onSubmit: newResponseSchema },
     onSubmit: async ({ value }) => {
       const result = await create.mutateAsync(value)
@@ -133,7 +138,7 @@ export function NewResponseDrawer({
               label="Profesional responsable"
               options={[
                 { value: "", label: "Sin asignar" },
-                ...members.map((m) => ({ value: m.userId, label: m.user.name })),
+                ...responsibles.map((m) => ({ value: m.userId, label: m.user.name })),
               ]}
             />
           )}

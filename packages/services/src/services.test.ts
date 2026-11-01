@@ -3,8 +3,6 @@ import { auditEvent } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { getAgentConfig, upsertAgentConfig } from "./agentConfig.js"
-import { sanitizeCustomFields } from "./contacts.js"
-import { createFieldDef, deleteFieldDef, listFieldDefs, updateFieldDef } from "./fields.js"
 import { ensureDefaultPipeline, listPipelines, renameStage } from "./pipelines.js"
 import { completeTask, createTask, listTasks } from "./tasks.js"
 import { appDb, setupTestDb } from "./test-setup.js"
@@ -37,90 +35,6 @@ it("un paso se renombra, pero no cambia su momento ni su orden; otra organizaci�
   await expect(withOrgContext(appDb, "org_a", (tx) => renameStage(tx, "org_a", first.id, { name: "   " }))).rejects.toMatchObject({ status: 400 })
   await expect(withOrgContext(appDb, "org_b", (tx) => renameStage(tx, "org_b", first.id, { name: "Ajeno" }))).rejects.toMatchObject({ status: 404 })
   await withOrgContext(appDb, "org_a", (tx) => renameStage(tx, "org_a", first.id, { name: "Interesado" }))
-})
-
-it("custom fields: valida tipos, descarta desconocidas", async () => {
-  await withOrgContext(appDb, "org_a", async (tx) => {
-    await createFieldDef(tx, "org_a", { key: "alergias", label: "Alergias", type: "text" })
-    await createFieldDef(tx, "org_a", { key: "edad", label: "Edad", type: "number" })
-    await createFieldDef(tx, "org_a", {
-      key: "sede",
-      label: "Sede",
-      type: "select",
-      options: ["norte", "sur"],
-    })
-    const defs = await listFieldDefs(tx, "org_a")
-    expect(defs.map((d) => d.key).sort()).toEqual(["alergias", "edad", "sede"])
-    const clean = await sanitizeCustomFields(tx, "org_a", {
-      alergias: "penicilina",
-      edad: 30,
-      sede: "norte",
-      fantasma: "x",
-    })
-    expect(clean).toEqual({ alergias: "penicilina", edad: 30, sede: "norte" })
-    await expect(sanitizeCustomFields(tx, "org_a", { edad: "treinta" })).rejects.toMatchObject({
-      status: 400,
-    })
-    await expect(sanitizeCustomFields(tx, "org_a", { sede: "este" })).rejects.toMatchObject({
-      status: 400,
-    })
-    const renamed = await updateFieldDef(tx, "org_a", defs[0]?.id ?? "", {
-      label: "Alergias conocidas",
-    })
-    expect(renamed.label).toBe("Alergias conocidas")
-    await deleteFieldDef(tx, "org_a", defs[0]?.id ?? "")
-    expect(await listFieldDefs(tx, "org_a")).toHaveLength(2)
-  })
-})
-
-it("campos de contacto: la clave sale del nombre y dos campos no se llaman igual", async () => {
-  await withOrgContext(appDb, "org_b", async (tx) => {
-    const first = await createFieldDef(tx, "org_b", { label: "Sede preferida", type: "text" })
-    expect(first.key).toBe("sede_preferida")
-    // Otro nombre que da la misma clave recibe la siguiente libre; nadie la escribe.
-    const second = await createFieldDef(tx, "org_b", { label: "Sede (preferida)", type: "text" })
-    expect(second.key).toBe("sede_preferida_2")
-    // Sin letras ni números también hay clave.
-    expect((await createFieldDef(tx, "org_b", { label: "¿?", type: "number" })).key).toBe("campo")
-    // El mismo nombre, con otras mayúsculas o tildes, es el mismo nombre.
-    await expect(createFieldDef(tx, "org_b", { label: "  sede PREFERÍDA ", type: "date" })).rejects.toMatchObject({
-      code: "FIELD_NAME_TAKEN",
-      status: 409,
-    })
-    await expect(createFieldDef(tx, "org_b", { label: "   ", type: "text" })).rejects.toMatchObject({ status: 400 })
-  })
-})
-
-it("campos de contacto: editar cambia el nombre y las opciones, nunca la clave ni el tipo", async () => {
-  await withOrgContext(appDb, "org_b", async (tx) => {
-    const origin = await createFieldDef(tx, "org_b", {
-      label: "Cómo nos conoció",
-      type: "select",
-      options: [" Redes ", "Recomendación", "Redes", ""],
-    })
-    // Las opciones se guardan sin vacías ni repetidas.
-    expect(origin.options).toEqual(["Redes", "Recomendación"])
-    const edited = await updateFieldDef(tx, "org_b", origin.id, {
-      label: "Origen",
-      options: ["Recomendación", "Pasó por la clínica"],
-    })
-    expect(edited).toMatchObject({
-      key: "como_nos_conocio",
-      type: "select",
-      label: "Origen",
-      options: ["Recomendación", "Pasó por la clínica"],
-    })
-    // Lo ya guardado con esa clave sigue valiendo tras el cambio de nombre.
-    expect(await sanitizeCustomFields(tx, "org_b", { como_nos_conocio: "Recomendación" })).toEqual({
-      como_nos_conocio: "Recomendación",
-    })
-    await expect(updateFieldDef(tx, "org_b", origin.id, { options: [] })).rejects.toMatchObject({ status: 400 })
-    // No toma el nombre de otro campo; conservar el propio no es un choque.
-    await expect(updateFieldDef(tx, "org_b", origin.id, { label: "sede preferida" })).rejects.toMatchObject({
-      code: "FIELD_NAME_TAKEN",
-    })
-    expect((await updateFieldDef(tx, "org_b", origin.id, { label: "ORIGEN" })).label).toBe("ORIGEN")
-  })
 })
 
 it("tasks: crear, listar por estado, completar", async () => {

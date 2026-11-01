@@ -287,7 +287,7 @@ test("bandeja: lo que cerró el agente se dice en la fila y en la franja del hil
   await info.attach("cerrada-por-el-agente", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 })
 
-test("agente: las direcciones viejas de «Esperan su sí» llevan a la Bandeja y recepción no tiene el menú Agente", async ({ owner, fixtureDb }) => {
+test("agente: las direcciones viejas de «Esperan su sí» llevan a la Bandeja y recepción entra a Agente por Actividad", async ({ owner, fixtureDb }) => {
   const { page, org } = owner
   await page.setViewportSize({ width: 1440, height: 900 })
   // Lo que espera el sí de la persona vive en su conversación (ADR 0118).
@@ -295,15 +295,16 @@ test("agente: las direcciones viejas de «Esperan su sí» llevan a la Bandeja y
   await expect(page).toHaveURL(tenantPattern(org.slug, "/inbox"))
   await gotoHydrated(page, tenant(org.slug, "/agent"))
   const tabs = page.getByRole("navigation", { name: "Secciones del agente" })
-  await expect(tabs.getByRole("link")).toHaveText([/^Resumen/, /^Aprender/, /^Conocimiento/])
+  await expect(tabs.getByRole("link")).toHaveText([/^Resumen/, /^Actividad/, /^Aprender/, /^Conocimiento/])
 
-  // Recepción decide por el agente sin supervisarlo: lo suyo está en la Bandeja y en el panel.
+  // Recepción decide por el agente sin supervisarlo: lo suyo está en la Bandeja y «Te espera»; de Agente, solo su Actividad.
   await fixtureDb.update(member).set({ role: "reception" })
     .where(and(eq(member.organizationId, org.id), eq(member.userId, owner.user.id)))
   await gotoHydrated(page, tenant(org.slug, "/agent/pendientes"))
   await expect(page).toHaveURL(tenantPattern(org.slug, "/inbox"))
-  await expect(page.getByRole("navigation").getByRole("link", { name: "Agente", exact: true })).toHaveCount(0)
-  await expect(page.locator("header").getByRole("button", { name: /^Agente/ })).toBeVisible()
+  await page.getByRole("navigation").getByRole("link", { name: "Agente", exact: true }).click()
+  await expect(page).toHaveURL(tenantPattern(org.slug, "/agent/actividad"))
+  await expect(page.locator("header").getByRole("button", { name: /^Agente/ })).toHaveCount(0)
 })
 
 test("agente: Límites guarda cuántas horas espera antes de cerrar por silencio", async ({ owner }, info) => {

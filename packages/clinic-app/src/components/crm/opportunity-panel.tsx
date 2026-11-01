@@ -28,7 +28,7 @@ import { PersonLink } from "../person-link"
 import { type CloseTarget, CloseOpportunityDialog } from "./close-opportunity-dialog"
 import { dueWords, formatDueAt, isOverdue, moneyText } from "./crm-helpers"
 import { OpportunityDrawer } from "./opportunity-drawer"
-import { useCompleteTask } from "./resolve-preview"
+import { useCompleteTask } from "./complete-task"
 import { TaskDrawer } from "./task-drawer"
 
 /** Cómo se dice el paso o el resultado en la cabecera. */
@@ -167,7 +167,7 @@ export function OpportunityPanel({ opportunityId, onClose }: { opportunityId: st
                 {actionError ?? completion.error}
               </p>
             ) : null}
-            {completion.dialog}
+            
             <dl className="grid grid-cols-[minmax(6rem,auto)_1fr] gap-x-4 gap-y-2.5 text-sm">
               <dt className="text-muted-foreground">Persona</dt>
               <dd className="min-w-0">

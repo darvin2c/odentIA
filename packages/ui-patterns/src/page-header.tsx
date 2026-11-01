@@ -20,7 +20,7 @@ import { HeaderCompactProvider, useHeaderCompact, useHeaderFit, useHeaderUtiliti
  * anchos. Orden fijo: título (se recorta con puntos suspensivos), utilidades
  * globales, una acción principal y el menú ⋯ con lo demás.
  *
- * - Teléfono (<768 px): botones de 44 px solo con icono; «Agente» y «Ayuda» en ⋯.
+ * - Teléfono (<768 px): botones de 44 px solo con icono; «Ayuda» en ⋯.
  * - Desde 768 px: con icono y texto. Si la fila no cabe (panel lateral abierto,
  *   zoom), queda compacta: utilidades solo en íconos y «Ayuda» en ⋯.
  * - El contexto de la página (sede, fecha, recuento) no va en el encabezado: es
@@ -49,12 +49,28 @@ export interface PageHeaderMenuItem {
 
 const PRIMARY_CLASS = "shrink-0 gap-2 max-md:size-11 max-md:rounded-full max-md:px-0"
 
-/** Disparador del menú lateral en el teléfono: icono grande y pegado al título. */
-export const MOBILE_NAV_TRIGGER_CLASS = "-ml-2.5 -mr-1.5 size-11 shrink-0 md:hidden [&_svg]:size-[26px]!"
+/**
+ * Disparador del menú lateral en el teléfono: icono grande y pegado al título.
+ * Lleva encima lo que el menú cuenta, que plegado no se ve.
+ */
+export function MobileNavTrigger() {
+  const attention = useHeaderUtilities()?.attention
+  return (
+    <span className="relative -ml-2.5 -mr-1.5 shrink-0 md:hidden">
+      <SidebarTrigger className="size-11 [&_svg]:size-[26px]!" />
+      {attention ? (
+        <span className="pointer-events-none absolute top-0.5 right-0 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-foreground px-1 text-xs font-semibold text-background ring-2 ring-canvas">
+          {attention.count > 99 ? "99+" : attention.count}
+          <span className="sr-only"> {attention.label}</span>
+        </span>
+      ) : null}
+    </span>
+  )
+}
 
 /**
  * El menú ⋯ del encabezado. Sin opciones de la página, solo aparece cuando la
- * fila está compacta (ahí recibe «Ayuda» y, en el teléfono, «Agente»).
+ * fila está compacta (ahí recibe «Ayuda»).
  */
 export function PageHeaderMenu({
   items = [],
@@ -120,7 +136,7 @@ export interface PageHeaderProps {
 export function PageHeader({ title, subtitle, primary, secondary, menu, className }: PageHeaderProps): React.JSX.Element {
   const sidebar = useSidebarOptional()
   const utilities = useHeaderUtilities()
-  const navTrigger = sidebar ? <SidebarTrigger className={MOBILE_NAV_TRIGGER_CLASS} /> : null
+  const navTrigger = sidebar ? <MobileNavTrigger /> : null
   const isMobile = useIsMobile()
   const fit = useHeaderFit<HTMLHeadingElement, HTMLDivElement>(
     `${title}|${Boolean(primary)}|${Boolean(secondary)}`,

@@ -212,7 +212,7 @@ function AgentLearnPage() {
     queryFn: async () => {
       const result = await apiFetch<{ data: LearningOverview }>("/api/agent/learning")
       // Leer la lista la concilia en el servidor: el número del menú se pone al día con ella.
-      void queryClient.invalidateQueries({ queryKey: ["agent-panel"] })
+      void queryClient.invalidateQueries({ queryKey: ["agent-summary"] })
       return result
     },
     enabled: canRead,
@@ -221,7 +221,7 @@ function AgentLearnPage() {
   useOrgEvents(["agent.run.recorded", "agent.proposal.decided", "stream.reconnected"], () => {
     void queryClient.invalidateQueries({ queryKey: ["agent-learning"] })
   })
-  const refresh = () => Promise.all(["agent-learning", "agent-overview", "agent-panel"].map((key) => queryClient.invalidateQueries({ queryKey: [key] })))
+  const refresh = () => Promise.all(["agent-learning", "agent-overview", "agent-summary"].map((key) => queryClient.invalidateQueries({ queryKey: [key] })))
   const decide = (next: Decided) => setDecided((current) => [...current.filter((row) => row.item.id !== next.item.id), next])
   const markOk = useMutation({
     retry: false,
