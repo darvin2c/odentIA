@@ -216,7 +216,7 @@ function TeamPage() {
     [profilesQuery.data],
   )
   const profilesLoaded = profilesQuery.data !== undefined
-  // Quién atiende y qué días (ADR 0124). Sin la lista no se afirma nada de nadie.
+  // Quién atiende y qué días (ADR 0125). Sin la lista no se afirma nada de nadie.
   const attendanceQuery = useQuery({
     queryKey: ["team-attendance"],
     queryFn: () => apiFetch<{ data: TeamAttendance[] }>("/api/agenda/team"),

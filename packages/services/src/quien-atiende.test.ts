@@ -37,7 +37,7 @@ import { insertTestPatients } from "./test-patient.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 /**
- * Quién atiende (ADR 0124). «Puede atender» es del rol y lo exige el servidor en
+ * Quién atiende (ADR 0125). «Puede atender» es del rol y lo exige el servidor en
  * toda operación que le da trabajo clínico a alguien; «atiende» es además tener
  * horario activo, y la base lo cierra cuando alguien deja de poder atender.
  */

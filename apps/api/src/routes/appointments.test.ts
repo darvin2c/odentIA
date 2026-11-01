@@ -137,7 +137,7 @@ it("recursos: reception lee; member no crea unidad dental ni lee agenda, owner s
   const memberReads = await member.request(`/agenda/resources?branchId=${branchId}`)
   expect(memberReads.status).toBe(403)
   expect((await member.request(`/agenda/hours?branchId=${branchId}`)).status).toBe(403)
-  // Lo que dice Equipo de quién atiende: de quien ve la configuración (ADR 0124).
+  // Lo que dice Equipo de quién atiende: de quien ve la configuración (ADR 0125).
   expect((await member.request("/agenda/team")).status).toBe(403)
   expect((await buildApp("reception").request("/agenda/team")).status).toBe(403)
   expect((await buildApp("owner").request("/agenda/team")).status).toBe(200)

@@ -502,7 +502,7 @@ function AgendaPage() {
     return (id: string) => scheduleToneAt(index.get(id) ?? 0)
   }, [resources])
   /**
-   * Quien ya no puede atender (salió del equipo o cambió de rol, ADR 0124) conserva
+   * Quien ya no puede atender (salió del equipo o cambió de rol, ADR 0125) conserva
    * sus citas a la vista para moverlas, pero no recibe otras. Sin las fichas aún, no se afirma.
    */
   const canStillAttend = React.useCallback(
@@ -716,7 +716,7 @@ function AgendaPage() {
   /**
    * Lo que el menú de profesionales ofrece sumar: quien tiene horario en la sede y
    * quien atiende de oficio aunque aún no lo tenga. Quien dirige entra al ponerle
-   * horario: dirigir no es atender (ADR 0124).
+   * horario: dirigir no es atender (ADR 0125).
    */
   const canAdd: ScheduleColumn[] = (resources?.professionals ?? [])
     .filter((item) => item.role === "clinician" || team.some((other) => other.id === item.id))

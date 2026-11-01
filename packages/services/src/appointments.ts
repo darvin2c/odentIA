@@ -648,7 +648,7 @@ export async function searchAgendaPatients(
 }
 
 /**
- * Profesionales = quienes pueden atender (ADR 0124), primero quienes atienden
+ * Profesionales = quienes pueden atender (ADR 0125), primero quienes atienden
  * de oficio y luego quien dirige; unidades dentales = activas de la sede.
  */
 export async function listScheduleResources(

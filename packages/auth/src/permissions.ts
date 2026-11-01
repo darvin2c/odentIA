@@ -244,7 +244,7 @@ export function canAccessAny(role: string, permissions: readonly string[]): bool
 }
 
 /**
- * ¿Puede atender pacientes quien tiene `role`? La única definición (ADR 0124):
+ * ¿Puede atender pacientes quien tiene `role`? La única definición (ADR 0125):
  * quien escribe en la historia clínica. Decide a quién se le pone horario, se le
  * da una cita, se le deriva o se le adscribe a una especialidad. Ojo: poder
  * atender no es atender; quien atiende, además, tiene horario activo.

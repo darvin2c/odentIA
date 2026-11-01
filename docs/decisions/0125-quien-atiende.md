@@ -1,4 +1,4 @@
-# 0124 · Quién puede atender y quién atiende
+# 0125 · Quién puede atender y quién atiende
 
 Fecha: 2026-11-01 · Estado: aceptada · Precisa [0039](0039-un-solo-catalogo-de-especialidades.md) y [0118](0118-cada-numero-donde-se-resuelve.md)
 
