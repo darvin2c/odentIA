@@ -345,7 +345,8 @@ export function saveHiddenTypes(scope: string, types: readonly SearchType[]): vo
 
 /** Lo escrito es una pregunta, no un nombre: «¿cómo bloqueo un horario?» no se ofrece como paciente nuevo. */
 export function looksLikeQuestion(text: string): boolean {
-  return /[¿?]/.test(text) || /^(c[oó]mo|d[oó]nde|qu[eé]|cu[aá]l|cu[aá]ndo|cu[aá]nt[oa]s?|qui[eé]n|por qu[eé]|porque|puedo|se puede|quiero|necesito|no puedo|no me|no encuentro)\b/i.test(text.trim())
+  // Sin `\b`: en JavaScript, «é» no es una letra para él y «qué es» no coincidiría.
+  return /[¿?]/.test(text) || /^(c[oó]mo|d[oó]nde|qu[eé]|cu[aá]l|cu[aá]ndo|cu[aá]nt[oa]s?|qui[eé]n|por qu[eé]|porque|puedo|se puede|quiero|necesito|no puedo|no me|no encuentro)(?!\p{L})/iu.test(text.trim())
 }
 
 /** Pide la pregunta a Ayuda (el panel la abre y la envía). */

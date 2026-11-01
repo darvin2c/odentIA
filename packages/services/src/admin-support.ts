@@ -1364,11 +1364,13 @@ const HELP_STATS_ROWS = 10
  * y por tema; lo que se preguntó no se guarda, salvo que la persona lo envíe.
  */
 export async function supportHelpStats(db: Db, actor: AdminActor, now: Date = new Date()): Promise<HelpGuideStats> {
+  // Sin el identificador: «/people/<id>» de cada persona es la misma pantalla.
+  const screen = sql<string>`regexp_replace(${helpAsk.screen}, '/[0-9a-f-]{36}.*$', '')`
   const rows = await db
-    .select({ screen: helpAsk.screen, topicId: helpAsk.topicId, helpful: helpAsk.helpful, total: count() })
+    .select({ screen, topicId: helpAsk.topicId, helpful: helpAsk.helpful, total: count() })
     .from(helpAsk)
     .where(gte(helpAsk.createdAt, new Date(now.getTime() - HELP_STATS_DAYS * 86_400_000)))
-    .groupBy(helpAsk.screen, helpAsk.topicId, helpAsk.helpful)
+    .groupBy(screen, helpAsk.topicId, helpAsk.helpful)
   await writeAdminAudit(db, actor, { action: "support.help_stats.read" })
   const unanswered = new Map<string, number>()
   const notHelpful = new Map<string, number>()

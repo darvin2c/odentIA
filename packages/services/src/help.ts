@@ -16,6 +16,8 @@ import {
   helpTopicForScreen,
   helpTopicLabel,
   helpSmallTalk,
+  helpWordCount,
+  helpWritePermissions,
   matchHelpTopics,
 } from "./help-guide.js"
 import { normalizeForSearch } from "./knowledge.js"
@@ -72,16 +74,12 @@ const WHY_NOT = /\b(por que no|porque no|no puedo|no me deja|no me permite|no ap
 
 const list = (items: string[]) => (items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} y ${items[items.length - 1]}`)
 
-/** Los permisos que dejan cambiar cosas en esa pantalla: basta uno. */
-const writePermissionsOf = (topic: HelpTopic): readonly string[] =>
-  typeof topic.writePermission === "string" ? [topic.writePermission] : (topic.writePermission ?? [])
-
 const canChange = (topic: HelpTopic, asker: HelpAsker): boolean => {
-  const needed = writePermissionsOf(topic)
+  const needed = helpWritePermissions(topic)
   return needed.length === 0 || needed.some((permission) => asker.can(permission))
 }
 
-const whoCanChange = (topic: HelpTopic, asker: HelpAsker): string[] => [...new Set(writePermissionsOf(topic).flatMap((permission) => asker.whoCan(permission)))]
+const whoCanChange = (topic: HelpTopic, asker: HelpAsker): string[] => [...new Set(helpWritePermissions(topic).flatMap((permission) => asker.whoCan(permission)))]
 
 function restrictionFor(topic: HelpTopic, asker: HelpAsker): { path: string | null; restriction: string | null } {
   if (!asker.canOpen(topic.path)) {
@@ -115,7 +113,10 @@ async function screenBlockers(
     return target && asker.canOpen(target.path) ? { where: helpTopicLabel(target), path: target.path } : { where: target ? helpTopicLabel(target) : null, path: null }
   }
   if (!topic) return out
-  if (!canChange(topic, asker)) {
+  // Lo que preguntó puede ser una pantalla que no abre: no se le dice que la ve.
+  if (!asker.canOpen(topic.path)) {
+    out.push({ text: `Tu rol (${asker.roleLabel}) no tiene acceso a ${topic.title}. Pídeselo a quien administra la clínica.`, where: null, path: null })
+  } else if (!canChange(topic, asker)) {
     const roles = whoCanChange(topic, asker)
     out.push({ text: `Tu rol (${asker.roleLabel}) puede ver ${topic.title}, pero no cambiar nada ahí.${roles.length ? ` Pueden hacerlo: ${list(roles)}.` : ""}`, where: null, path: null })
   }
@@ -161,6 +162,8 @@ async function requireDailyRoom(tx: Db, orgId: string, userId: string): Promise<
 function withGuideName(question: string, personaName: string | null | undefined): string {
   const name = normalizeForSearch(personaName ?? "")
   if (!name || name === normalizeForSearch(RECEPTION_DEFAULT_NAME)) return question
+  // Solo con otras palabras: «¿Dónde veo a Ana?» también puede ser una paciente que se llama igual.
+  if (helpWordCount(question) <= helpWordCount(name)) return question
   return ` ${normalizeForSearch(question)} `.replace(` ${name} `, ` ${RECEPTION_DEFAULT_NAME} `).trim()
 }
 
@@ -190,7 +193,8 @@ export async function askHelp(tx: Db, orgId: string, asker: HelpAsker, input: { 
   const matches = matchHelpTopics(withGuideName(question, config?.personaName), topics)
 
   // «¿Por qué no puedo…?»: lo que falta de verdad en lo que preguntó; si no nombró nada, en la pantalla donde está.
-  if (WHY_NOT.test(normalizeForSearch(question))) {
+  // Lo que no es de una pantalla (el dictado, su contraseña) no depende de lo que falte en ella.
+  if (WHY_NOT.test(normalizeForSearch(question)) && !matches[0]?.faq?.general) {
     const about = matches[0]?.topic ?? here
     const blockers = await screenBlockers(tx, orgId, about, asker, topics)
     if (blockers.length > 0) {

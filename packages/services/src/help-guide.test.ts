@@ -3,7 +3,7 @@ import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { canAccess, ORG_ROLES, type Permission } from "@odentia/auth/permissions"
 import { describe, expect, it } from "vitest"
-import { HELP_TOPICS, type HelpTopic, helpSmallTalk, helpTopicForScreen, matchHelpTopics } from "./help-guide.js"
+import { HELP_TOPICS, type HelpTopic, helpSmallTalk, helpTopicForScreen, helpWritePermissions, matchHelpTopics } from "./help-guide.js"
 import { MEDICAL_HELP_TOPICS } from "./medical/help.js"
 
 /**
@@ -31,7 +31,8 @@ function screensText(): string {
       const path = join(dir, name)
       if (statSync(path).isDirectory()) walk(path)
       else if (/\.tsx?$/.test(name) && !/\.(test|stories|spec|gen)\./.test(name) && !/^seed|help-guide|medical[\\/]help/.test(name)) {
-        if (!/medical[\\/]help\.ts$/.test(path)) out.push(readFileSync(path, "utf8"))
+        // Sin comentarios: un botón que se fue no puede seguir valiendo porque alguien lo nombra en uno.
+        if (!/medical[\\/]help\.ts$/.test(path)) out.push(readFileSync(path, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, ""))
       }
     }
   }
@@ -44,8 +45,13 @@ function screensText(): string {
 describe("la guía coincide con el código", () => {
   it.each(APPS)("cada tema apunta a una pantalla que existe en %s", (app) => {
     const routes = treeOf(app)
+    const all = [...routes]
     for (const topic of HELP_TOPICS) {
-      for (const path of [topic.path]) expect(routes.has(path), `${topic.id} → ${path} ya no es una pantalla`).toBe(true)
+      expect(routes.has(topic.path), `${topic.id} → ${topic.path} ya no es una pantalla`).toBe(true)
+      // `alsoAt` es la raíz de otras direcciones: basta con que exista algo debajo.
+      for (const path of topic.alsoAt ?? []) {
+        expect(all.some((route) => route === path || route.startsWith(`${path}/`)), `${topic.id} → ${path} ya no existe`).toBe(true)
+      }
     }
     expect(new Set(HELP_TOPICS.map((topic) => topic.id)).size).toBe(HELP_TOPICS.length)
     expect(new Set(HELP_TOPICS.map((topic) => topic.path)).size).toBe(HELP_TOPICS.length)
@@ -74,24 +80,38 @@ describe("la guía coincide con el código", () => {
 
   it("cada permiso que nombra un tema existe en la matriz", () => {
     for (const topic of HELP_TOPICS) {
-      const needed = typeof topic.writePermission === "string" ? [topic.writePermission] : (topic.writePermission ?? [])
-      for (const permission of needed) {
+      for (const permission of helpWritePermissions(topic)) {
         expect(ORG_ROLES.some((role) => canAccess(role, permission as Permission)), `${topic.id}: ${permission}`).toBe(true)
       }
     }
+    const canChange = (role: string, id: string) =>
+      helpWritePermissions(HELP_TOPICS.find((topic) => topic.id === id)!).some((permission) => canAccess(role, permission as Permission))
     // Quien trabaja con ventas renombra las etapas; recepción recibe lo que llega al inventario.
-    const reception = (topic: HelpTopic) =>
-      (typeof topic.writePermission === "string" ? [topic.writePermission] : (topic.writePermission ?? [])).some((permission) => canAccess("reception", permission as Permission))
-    expect(reception(HELP_TOPICS.find((topic) => topic.id === "pipelines")!)).toBe(true)
-    expect(reception(HELP_TOPICS.find((topic) => topic.id === "inventario")!)).toBe(true)
+    expect(canChange("reception", "pipelines")).toBe(true)
+    expect(canChange("reception", "inventario")).toBe(true)
+    // Quien atiende trabaja en la página de sus pacientes, aunque no los registre.
+    expect(canChange("clinician", "pacientes")).toBe(true)
   })
 
   it("lo que cita entre comillas existe en las pantallas", () => {
     const code = screensText()
-    /** Se arman con su dato, o son un ejemplo: no están escritos enteros en ninguna parte. */
-    const composed = new Set(["Las atiende Sofi", "Lo que Sofi debe saber", "Lo hace Argos", "Comprobé su identidad: vi su documento", "Debe: 100 · A favor: 100 · Saldo: 0"])
+    /** Se arman con su dato, o son lo que escribe la persona: no están escritos enteros en ninguna parte. */
+    const composed = new Set([
+      "Las atiende Sofi",
+      "Lo que Sofi debe saber",
+      "Lo hace Argos",
+      "Pregúntale a Argos",
+      "Comprobé su identidad: vi su documento",
+      "Atender (10:00)",
+      "Enviárselo ahora",
+      "Aceptó 2 de 3",
+      "Necesita consentimiento · Preparar",
+      "Debe: 100 · A favor: 100 · Saldo: 0",
+      "sí, ahí estaré",
+      "y en agosto",
+    ])
     const missing = new Set<string>()
-    for (const topic of HELP_TOPICS) {
+    for (const topic of [...HELP_TOPICS, ...MEDICAL_HELP_TOPICS]) {
       const texts = [topic.purpose, ...(topic.faqs ?? []).flatMap((faq) => [faq.q, faq.a])]
       for (const text of texts) {
         for (const match of text.matchAll(/«([^»]+)»/g)) {

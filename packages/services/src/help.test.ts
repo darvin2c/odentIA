@@ -177,11 +177,39 @@ describe("responder", () => {
 
   it("el permiso del tema dice la verdad a cada rol", async () => {
     // Recepción recibe lo que llega al inventario y da acceso al portal desde la página de la persona.
-    const stock: HelpAsker = { ...reception, can: (permission) => permission === "inventory.stock" || permission === "patients.write" }
+    const stock: HelpAsker = { ...reception, can: (permission) => permission === "inventory.receive" || permission === "patients.write" }
     const inventory = await run((tx) => askHelp(tx, ORG, stock, { question: "¿Dónde veo el stock de insumos?", screen: "/home" }))
     expect(inventory.answers[0]).toMatchObject({ topicId: "inventario", path: "/inventory", restriction: null })
     const portal = await run((tx) => askHelp(tx, ORG, stock, { question: "¿Cómo le doy acceso al portal?", screen: "/home" }))
     expect(portal.answers[0]).toMatchObject({ topicId: "pacientes", path: "/people", restriction: null })
+  })
+
+  it("a quien atiende no le dice que no puede cambiar a sus pacientes", async () => {
+    const clinician: HelpAsker = { ...reception, roleLabel: "Odontólogo", can: (permission) => permission === "clinical.write" }
+    const reply = await run((tx) => askHelp(tx, ORG, clinician, { question: "¿Dónde hago la receta?", screen: "/home" }))
+    expect(reply.answers[0]).toMatchObject({ topicId: "pacientes", restriction: null })
+  })
+
+  it("«¿por qué no puedo?» sobre una pantalla que no abre lo dice, sin decir que la ve", async () => {
+    const reply = await run((tx) => askHelp(tx, ORG, reception, { question: "¿Por qué no puedo invitar a alguien a mi equipo?", screen: "/home" }))
+    expect(reply.kind).toBe("estado")
+    expect(reply.blockers[0]).toMatchObject({ text: "Tu rol (Recepción) no tiene acceso a Equipo. Pídeselo a quien administra la clínica.", path: null })
+  })
+
+  it("lo que no es de una pantalla responde aunque el rol no cambie nada ahí", async () => {
+    const nothing: HelpAsker = { ...reception, can: () => false }
+    const reply = await run((tx) => askHelp(tx, ORG, nothing, { question: "¿Por qué no puedo dictar?", screen: "/home" }))
+    expect(reply).toMatchObject({ kind: "guia", basedOn: "La guía del sistema." })
+    expect(reply.answers[0]?.text).toContain("«Dictar»")
+  })
+
+  it("el nombre de la clínica para su agente no se confunde con el de una paciente", async () => {
+    const named = randomUUID()
+    await insertOrg(ownerDb, named, `ana-${named}`)
+    await ownerDb.insert(agentConfig).values({ organizationId: named, personaName: "Ana" })
+    expect((await run((tx) => askHelp(tx, named, owner, { question: "¿Dónde veo a Ana?", screen: "/home" }), named)).kind).toBe("nada")
+    const reply = await run((tx) => askHelp(tx, named, owner, { question: "¿Cómo apago a Ana?", screen: "/home" }), named)
+    expect(reply.answers[0]).toMatchObject({ topicId: "agente" })
   })
 
   it("tiene un tope diario por persona", async () => {

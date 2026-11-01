@@ -57,6 +57,9 @@ export const screenEnvelope = z.object({
 
 interface Exchange {
   question: string
+  /** Dónde se preguntó: la conversación sigue al navegar y lo que se envía después dice esa pantalla. */
+  screen: string
+  attached: HelpAttachments | undefined
   reply: HelpReply
   /** Lo que la persona dijo de la respuesta, si ya lo dijo. */
   helpful?: boolean
@@ -274,6 +277,8 @@ export function HelpButton({ className }: { className?: string } = {}) {
     mutationFn: (question: string) =>
       apiFetch("/api/help/ask", { method: "POST", body: JSON.stringify({ question, screen: pathname }) }).then((body: unknown) => ({
         question,
+        screen: pathname,
+        attached: screen.data?.attached,
         reply: askEnvelope.parse(body).data,
       })),
     onSuccess: (exchange) => setConversation((current) => [...current, exchange]),
@@ -309,8 +314,8 @@ export function HelpButton({ className }: { className?: string } = {}) {
   // Un solo envío para lo que no supo, para soporte y para un problema: siempre un caso para el equipo de odentIA.
   const send = useMutation({
     retry: false,
-    mutationFn: (input: { index: number | null; text: string; kind: SupportKind }) =>
-      apiFetch("/api/help/requests", { method: "POST", body: JSON.stringify({ question: input.text, screen: pathname, kind: input.kind }) }),
+    mutationFn: (input: { index: number | null; text: string; kind: SupportKind; screen: string }) =>
+      apiFetch("/api/help/requests", { method: "POST", body: JSON.stringify({ question: input.text, screen: input.screen, kind: input.kind }) }),
     onSuccess: (_data, input) => {
       if (input.index === null) setDirect((current) => (current ? { ...current, sent: true } : current))
       else setConversation((current) => current.map((item, index) => (index === input.index ? { ...item, sent: "enviada" } : item)))
@@ -348,6 +353,19 @@ export function HelpButton({ className }: { className?: string } = {}) {
     window.addEventListener(OPEN_HELP_EVENT, onOpen)
     return () => window.removeEventListener(OPEN_HELP_EVENT, onOpen)
   }, [])
+
+  /** Lo que no supo responder y lo que respondió sin servir salen igual: la pregunta y lo que se envía con ella. */
+  const sendExchange = (exchange: Exchange, index: number) => (
+    <WhatIsSent
+      id={`ayuda-enviar-${index}`}
+      label="Tu pregunta · puedes cambiarla"
+      initial={exchange.question}
+      attached={exchange.attached}
+      onSend={(text) => send.mutateAsync({ index, text, kind: "pregunta", screen: exchange.screen })}
+      onCancel={() => setConversation((current) => current.map((item, at) => (at === index ? { ...item, sent: "no" } : item)))}
+      cancelLabel="No, gracias"
+    />
+  )
 
   function openDirect(kind: SupportKind) {
     setDirect({ kind, text: "", sent: false })
@@ -463,15 +481,7 @@ export function HelpButton({ className }: { className?: string } = {}) {
                             {SENT}
                           </p>
                         ) : exchange.sent === "no" ? null : (
-                          <WhatIsSent
-                            id={`ayuda-enviar-${index}`}
-                            label="Tu pregunta · puedes cambiarla"
-                            initial={exchange.question}
-                            attached={attached}
-                            onSend={(text) => send.mutateAsync({ index, text, kind: "pregunta" })}
-                            onCancel={() => setConversation((current) => current.map((item, at) => (at === index ? { ...item, sent: "no" } : item)))}
-                            cancelLabel="No, gracias"
-                          />
+                          sendExchange(exchange, index)
                         )}
                       </>
                     ) : null}
@@ -513,15 +523,7 @@ export function HelpButton({ className }: { className?: string } = {}) {
                           ) : exchange.sent === "no" ? null : (
                             <>
                               <p className="text-sm font-semibold">¿Lo envío a {appWords().name} para que te respondan?</p>
-                              <WhatIsSent
-                                id={`ayuda-no-sirvio-${index}`}
-                                label="Tu pregunta · puedes cambiarla"
-                                initial={exchange.question}
-                                attached={attached}
-                                onSend={(text) => send.mutateAsync({ index, text, kind: "pregunta" })}
-                                onCancel={() => setConversation((current) => current.map((item, at) => (at === index ? { ...item, sent: "no" } : item)))}
-                                cancelLabel="No, gracias"
-                              />
+                              {sendExchange(exchange, index)}
                             </>
                           )
                         ) : null}
@@ -612,7 +614,7 @@ export function HelpButton({ className }: { className?: string } = {}) {
                     label={DIRECT[direct.kind].label}
                     initial={direct.text}
                     attached={attached}
-                    onSend={(text) => send.mutateAsync({ index: null, text, kind: direct.kind })}
+                    onSend={(text) => send.mutateAsync({ index: null, text, kind: direct.kind, screen: pathname })}
                     onCancel={() => setDirect(null)}
                     cancelLabel="Cancelar"
                   />

@@ -415,7 +415,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "no encuentro a un paciente",
       "lo que le hice",
     ],
-    writePermission: "patients.write",
+    // Recepción registra; quien atiende escribe en la historia y arma el presupuesto.
+    writePermission: ["patients.write", "clinical.write", "budgets.write"],
     faqs: [
       {
         q: "¿Cómo registro un paciente nuevo?",
@@ -971,7 +972,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "resina",
       "anestesia",
     ],
-    writePermission: ["inventory.write", "inventory.stock"],
+    writePermission: ["inventory.write", "inventory.receive"],
     faqs: [
       {
         q: "¿Cómo cargo mis productos la primera vez?",
@@ -1777,6 +1778,13 @@ function wordsOf(text: string): string[] {
   return [...out]
 }
 
+/** Cuántas palabras de la pregunta dicen algo: «¿Dónde veo a Ana?», una. */
+export const helpWordCount = (text: string): number => wordsOf(text).length
+
+/** Los permisos que dejan cambiar cosas en una pantalla: basta uno. */
+export const helpWritePermissions = (topic: HelpTopic): readonly string[] =>
+  typeof topic.writePermission === "string" ? [topic.writePermission] : (topic.writePermission ?? [])
+
 /** A una letra de distancia: una que falta, sobra, cambia o dos cambiadas de lugar. */
 function oneTypoAway(a: string, b: string): boolean {
   if (a === b || Math.abs(a.length - b.length) > 1) return false
@@ -1921,7 +1929,7 @@ export function matchHelpTopics(
 }
 
 const GREETINGS = new Set(["hola", "buenas", "buenos dias", "buenas tardes", "buenas noches"])
-const THANKS = new Set(["gracias", "muchas gracias", "mil gracias", "ok", "okay", "listo", "perfecto", "genial", "vale", "entendido", "ya entendi", "ya esta"])
+const THANKS = new Set(["gracias", "muchas gracias", "mil gracias", "okay", "listo", "perfecto", "genial", "vale", "entendido", "ya entendi", "ya esta"])
 
 /** Saludar o agradecer no es una pregunta: se responde sin buscar en la guía ni ofrecer enviarlo a soporte. */
 export function helpSmallTalk(question: string): string | null {
