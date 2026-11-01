@@ -1252,7 +1252,7 @@ it("QR con el celular de quien solo dijo su nombre: «es la misma» guarda el no
   )
   await withOrgContext(appDb, "org_a", (tx) => resolveRegistrationHold(tx, "org_a", ACTOR, task!.id, { same: true }))
   const [person] = await ownerDb.select().from(contact).where(eq(contact.id, carla.id))
-  expect(person).toMatchObject({ displayName: "Ana Ríos Vega", givenNames: "Ana", familyName: "Ríos Vega", docNumber: "45129877" })
+  expect(person).toMatchObject({ displayName: "Ana Ríos Vega", givenNames: "Ana", familyName: "Ríos Vega", docNumber: "45129899" })
 })
 
 it("QR general con el celular de alguien que ya está: no se crea a nadie y recepción decide si es la misma persona", async () => {
