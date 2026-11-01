@@ -586,8 +586,9 @@ function pendingConversationsWhere(orgId: string, assignedTo: string | null): SQ
 /**
  * Personas con conversaciones que esperan respuesta (la vista «Esperan
  * respuesta» de la Bandeja, con su misma definición): cuántas son y, de las que
- * más llevan, con quién y qué pidió, por su conversación más antigua. Sin las que
- * tienen un caso abierto del agente: esas ya son su propia fila y no se cuentan dos veces. Con `assignedTo`, solo las que lleva
+ * más llevan, todas sus conversaciones: la primera es su fila y las demás, «También».
+ * Sin las que tienen un caso abierto del agente: esas ya son su propia fila y no se
+ * cuentan dos veces. Con `assignedTo`, solo las que lleva
  * esa persona: quien atiende no recibe la cuenta de toda la clínica.
  */
 async function waitingConversations(tx: Db, orgId: string, assignedTo: string | null): Promise<{ waiting: number; items: WaitingPerson[] }> {
@@ -596,18 +597,20 @@ async function waitingConversations(tx: Db, orgId: string, assignedTo: string | 
     with waiting as (
       select c.id, c.contact_id, c.channel_connection_id, ${unansweredSinceSql(conv)} as since from conversation c where ${pendingConversationsWhere(orgId, assignedTo)}
     ), pending as (
-      select distinct on (w.contact_id) w.* from waiting w where w.since is not null order by w.contact_id, w.since, w.id
+      select f.*, dense_rank() over (order by f.first_since, f.contact_id) as place
+      from (select w.*, min(w.since) over (partition by w.contact_id) as first_since from waiting w where w.since is not null) f
     )
     select p.id as "conversationId", p.contact_id as "contactId", ct.display_name as "contactName", ch.channel,
       ${iso(sql`p.since`)} as since,
       (select left(regexp_replace(m.body, '[[:space:]]+', ' ', 'g'), 280) from message m
         where m.organization_id = ${orgId} and m.conversation_id = p.id and m.direction = 'in' and m.body is not null
         order by m.created_at desc, m.id desc limit 1) as quote,
-      count(*) over ()::int as total
+      (select max(place) from pending)::int as total
     from pending p
     join contact ct on ct.id = p.contact_id and ct.organization_id = ${orgId}
     left join channel_connection ch on ch.id = p.channel_connection_id and ch.organization_id = ${orgId}
-    order by p.since, p.id limit ${WAITING_LIMITS.conversations}`)
+    where p.place <= ${WAITING_LIMITS.conversations}
+    order by p.since, p.id`)
   const shut = await shutConversations(tx, orgId, rows.map((row) => row.conversationId))
   const items: WaitingPerson[] = []
   for (const { total: _total, ...row } of rows) {

@@ -552,7 +552,7 @@ it("un caso del agente sale una sola vez: ni su tarea ni su conversación se rep
     externalId: `ext-${randomUUID()}`, createdAt: new Date(Date.now() - 1_800_000),
   })
   const withJorge = (await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, tomas, { ...access, allTasks: false }))).waiting
-  expect(withJorge.filter(row => row.kind === "person" && row.contactId === ofJorge!.contactId)).toMatchObject([{ conversationId: jorge }])
+  expect(withJorge.filter(row => row.kind === "person" && row.contactId === ofJorge!.contactId)).toMatchObject([{ conversationId: jorge, also: [{ conversationId: otherOfJorge!.id }] }])
   expect(withJorge.filter(row => row.kind === "more" && row.of === "conversations")).toEqual([])
   expect(await waitingFor(tomas, access)).toBe(2)
   // La persona de un caso es la de su conversación: reasignar una identidad mueve la conversación, no el caso.

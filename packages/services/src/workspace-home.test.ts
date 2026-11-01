@@ -171,6 +171,14 @@ it("la tarea que cuenta las demás no se pliega, aunque esa persona tenga otra f
   expect(rows.find((row) => row.kind === "person")?.also).toBeUndefined()
 })
 
+it("«N más» cuenta personas: varias conversaciones de una son una fila", () => {
+  const items = [personOf("a"), { ...personOf("a2"), contactId: "contacto-a" }, personOf("b")]
+  const rows = composeWaiting({ ...nothing, conversations: { waiting: 4, items } })
+  expect(rows.filter((row) => row.kind === "person").map((row) => row.conversationId)).toEqual(["a", "b"])
+  expect(rows.find((row) => row.kind === "person")?.also).toMatchObject([{ conversationId: "a2" }])
+  expect(rows.at(-1)).toMatchObject({ kind: "more", of: "conversations", count: 2 })
+})
+
 it("lo que dejó el sistema va entero: no está en ninguna otra lista", () => {
   const items = ["a", "b", "c", "d", "e"].map(duplicateOf)
   expect(composeWaiting({ ...nothing, possibleDuplicates: items }).map((row) => ("id" in row ? row.id : null))).toEqual(["a", "b", "c", "d", "e"])
