@@ -1,5 +1,5 @@
 <style>
-/* Presentación de 16 partes sobre un escenario de 1920×1080 que se escala a la ventana.
+/* Presentación por partes sobre un escenario de 1920×1080 que se escala a la ventana.
    Cada par muestra primero el problema de la clínica (gris, frío) y con un clic la respuesta (color de su agente).
    Un solo aspecto oscuro, el de la web de odentIA. */
 :root {
@@ -131,11 +131,15 @@ h1, h2, h3, p { margin: 0; }
 .notes-panel b { color: var(--sky); font-family: var(--agent); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; display: block; margin-bottom: 4px; }
 .notes { display: none; }
 
-/* ===== 1 · Portada ===== */
+/* ===== Lo que creemos ===== */
+.creed { justify-content: center; align-items: center; padding-bottom: 170px; }
+.creed .thesis { gap: 40px; }
+.creed-line { font-size: 40px; line-height: 1.4; color: var(--on-2); text-wrap: balance; }
+
+/* ===== Lo que hacemos ===== */
 .cover { flex-direction: row; align-items: center; gap: 36px; padding-top: 100px; }
 .cover .copy { gap: 26px; }
 .cover .h1 { font-size: 88px; }
-.cover .big-gift { font-size: 116px; display: inline-block; text-shadow: 0 0 60px rgba(245,196,107,.35); }
 .chips { display: flex; gap: 14px; flex-wrap: wrap; }
 .chip { font-size: 24px; font-weight: 600; padding: 11px 22px; border-radius: 999px; border: 1px solid rgba(79,195,215,.4); color: var(--on-2); background: rgba(79,195,215,.06); }
 .agents-line { font-size: 34px; line-height: 1.45; color: var(--on-2); max-width: 760px; text-wrap: pretty; }
@@ -1168,6 +1172,26 @@ button[data-tap] { appearance: none; -webkit-appearance: none; }
 
 /* ===== 15 · Cierre ===== */
 .close { justify-content: center; }
+/* El cierre: la oferta y qué hacer, juntos. Se queda en pantalla mientras se conversa. */
+.layer.founder-last { padding: 84px 140px 118px; gap: 22px; }
+.founder-last .h2 { font-size: 68px; }
+.founder-last .perks { gap: 18px; }
+.founder-last .perk { padding: 24px 26px; gap: 8px; border-radius: 22px; }
+.founder-last .perk .k { font-size: 52px; }
+.founder-last .perk h3 { font-size: 27px; }
+.founder-last .perk p { font-size: 20px; line-height: 1.36; }
+.founder-last .perk.hero .k { font-size: 96px; }
+.founder-last .perk.hero h3 { font-size: 34px; }
+.founder-last .perk.hero p { font-size: 22px; }
+.founder-last .perk.next .k { font-size: 28px; }
+.enter { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px 40px; padding: 24px 32px; border-radius: 24px; background: rgba(79,195,215,.07); border: 1px solid rgba(79,195,215,.3); }
+.enter-t { font-size: 38px; font-weight: 800; letter-spacing: -.015em; }
+.enter-t span { color: var(--sky); }
+.enter ol { display: flex; gap: 34px; margin: 0; padding: 0; list-style: none; font-size: 20px; line-height: 1.32; color: var(--on-2); }
+.enter li b { color: var(--on); font-weight: 700; }
+.enter .cta { grid-column: 2; grid-row: 1 / span 2; flex-direction: column; align-items: center; gap: 10px; }
+.enter .cta .btn { font-size: 32px; padding: 16px 42px; }
+.enter .cta .url { font-size: 19px; }
 .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 26px; }
 .step { border-radius: 24px; padding: 28px 30px; background: rgba(13,38,47,.9); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
 .step .n { font-family: var(--agent); font-size: 21px; color: var(--sky); }
@@ -1248,13 +1272,26 @@ html.stacked body { margin: 0; }
 <div class="viewport" id="viewport">
 <div class="stage" id="stage" role="region" aria-roledescription="presentación" aria-label="Programa Fundadores de odentIA">
 
-<!-- ============ 1 · Portada ============ -->
-<section class="slide" aria-label="Portada">
+<!-- ============ Lo que creemos ============ -->
+<section class="slide" aria-label="Lo que creemos">
+  <div class="layer creed">
+    <div class="thesis">
+      <span class="tag in" style="--d:.1s">[ Lo que creemos ]</span>
+      <h1 class="h1 in" style="--d:.25s"><span>Nadie estudió odontología</span><span class="accent">para contestar mensajes.</span></h1>
+      <p class="creed-line in" style="--d:.9s">Tu equipo debe estar con las personas. Lo demás no debería quitarle el día.</p>
+    </div>
+  </div>
+  <aside class="notes">Gracias por estar aquí. Antes de mostrarles nada, les cuento en qué creemos. Nadie estudió odontología para contestar mensajes, ni para quedarse de noche escribiendo historias. Una clínica tiene que estar con las personas, y lo demás no debería quitarle el día a nadie.</aside>
+</section>
+
+<!-- ============ Lo que hacemos ============ -->
+<section class="slide" aria-label="Lo que hacemos">
   <div class="layer cover" data-scene="cover">
     <div class="copy">
-      <span class="tag in" style="--d:.1s">[ Programa Fundadores ]</span>
-      <h1 class="h1 in" style="--d:.25s">Los primeros <span class="gift big-gift num">{{gift}}</span> los pagamos nosotros.</h1>
-      <p class="agents-line in" style="--d:.5s">Tus agentes de IA empiezan hoy: <b class="c-sky">Sofi</b> atiende, <b class="c-mint">Clío</b> documenta y <b class="c-amber">Argos</b> vigila que nadie se quede atrás.</p>
+      <span class="tag in" style="--d:.1s">[ Lo que hacemos ]</span>
+      <h2 class="h1 in" style="--d:.25s">Por eso hicimos <span class="accent">odentIA.</span></h2>
+      <p class="agents-line in" style="--d:.5s">Los mensajes, la agenda y la historia de cada persona, en un solo lugar. Y ahí mismo, tres agentes de IA trabajan con tu equipo: <b class="c-sky">Sofi</b> responde y agenda, <b class="c-mint">Clío</b> documenta y <b class="c-amber">Argos</b> vigila que nadie se quede atrás.</p>
+      <p class="agents-line in" style="--d:.7s">Tú decides qué hace cada uno.</p>
     </div>
     <div class="cover-scene in" style="--d:.3s" id="coverScene">
       <div class="d3" aria-hidden="true">
@@ -1276,7 +1313,7 @@ html.stacked body { margin: 0; }
       </div>
     </div>
   </div>
-  <aside class="notes">Gracias por estar aquí. En unos doce minutos les muestro nueve momentos del día de una clínica: cómo son hoy y cómo son con odentIA, y qué reciben por entrar primero. Empiezo por el final: los primeros {{gift}} de sus agentes los pagamos nosotros. Y les presento a esos agentes: Sofi atiende, Clío documenta y Argos vigila que nadie se quede atrás.</aside>
+  <aside class="notes">Por eso hicimos odentIA. Junta los mensajes, la agenda y la historia de cada persona en un solo lugar, y ahí mismo trabajan tres agentes de IA: Sofi responde y agenda, Clío documenta y Argos vigila que nadie se quede atrás. Ustedes deciden qué hace cada uno. En unos doce minutos les muestro cómo es hoy el día de una clínica y cómo es con odentIA. Lo que reciben por entrar primero lo dejo para el final.</aside>
 </section>
 
 <!-- ============ 2 · 22:47 ============ -->
@@ -1711,23 +1748,6 @@ html.stacked body { margin: 0; }
   <aside class="notes">Antes de hablar de precio, junten lo que vieron: la misma semana de una clínica, hoy y con odentIA. Los 23 mensajes de la noche respondidos, una sola ficha por persona, ninguna nota pendiente al cerrar, los 15 huecos de vuelta, el reporte del mes en cero horas y Lucía atendida en cuatro segundos. Y para cada caso, tu equipo no da ningún paso. Son las cifras de ejemplo de esta presentación.</aside>
 </section>
 
-<!-- ============ 13 · Fundador ============ -->
-<section class="slide" aria-label="Ser clínica fundadora">
-  <div class="layer" data-scene="perks">
-    <span class="tag in">[ Ser clínica fundadora ]</span>
-    <h2 class="h2 in" style="--d:.1s">Lo que recibes por entrar primero.</h2>
-    <div class="perks">
-      <div class="perk hero pop" style="--d:.3s"><span class="k num" data-count="{{giftN}}" data-prefix="{{cur}} ">{{gift}}</span><h3>Para tus agentes, de regalo</h3><p>Los primeros {{gift}} de conversaciones, consultas y citas recuperadas los pagamos nosotros. Tienes hasta {{giftDays}} para usarlos.</p></div>
-      <div class="perk in" style="--d:.45s"><span class="k num" data-count="{{F.feeN}}" data-prefix="{{cur}} ">{{F.fee$}}</span><h3>Sin cuota mensual</h3><p>No pagas el plan. Solo lo que hacen los agentes.</p></div>
-      <div class="perk in" style="--d:.6s"><span class="k num" data-count="{{discountN}}" data-suffix=" %">{{discount}}</span><h3>Menos en todo</h3><p>Conversaciones, consultas, citas recuperadas, preguntas a Argos y espacio.</p></div>
-      <div class="perk in" style="--d:.75s"><span class="k num" data-count="{{monthsN}}" data-suffix=" meses">{{months}}</span><h3>Precio garantizado</h3><p>Tus condiciones no cambian durante {{months}}.</p></div>
-      <div class="perk in" style="--d:.9s"><span class="k">Sin tarjeta</span><h3>Para empezar</h3><p>Abres tu clínica con la invitación.</p></div>
-      <div class="perk next in" style="--d:1.05s"><span class="k">Sin límite</span><h3>De odontólogos, sedes ni usuarios</h3><p>Cada odontólogo con su agenda y su firma; cada sede con su equipo. No se cobra por ninguno.</p></div>
-    </div>
-  </div>
-  <aside class="notes">Esto es lo que recibe una clínica fundadora. Lo más importante: {{gift}} para que los agentes trabajen desde el primer día, sin cuota mensual y con el precio garantizado por {{months}}. Y sin límite de odontólogos, sedes ni usuarios.</aside>
-</section>
-
 <!-- ============ 14 · Precio ============ -->
 <section class="slide" aria-label="Tu precio">
   <div class="layer" style="gap:26px">
@@ -1746,19 +1766,30 @@ html.stacked body { margin: 0; }
   <aside class="notes">Mismo producto, mismas funciones. La cuota desaparece y todo cuesta {{discount}} menos. El día que vimos hace un momento pasa de {{L.day$}} a {{F.day$}}.</aside>
 </section>
 
-<!-- ============ 15 · Cierre ============ -->
-<section class="slide" aria-label="Cómo entrar">
-  <div class="layer close">
-    <span class="tag in">[ Cómo entrar ]</span>
-    <h2 class="h1 in" style="--d:.1s; font-size:92px">Se entra por invitación.<br><span class="accent">Los lugares son pocos.</span></h2>
-    <div class="steps">
-      <div class="step in" style="--d:.35s"><span class="n">Paso 1</span><b>Pide tus <span class="gift">{{gift}}</span></b><p>Llenas la solicitud con los datos de tu clínica. Toma dos minutos.</p></div>
-      <div class="step in" style="--d:.55s"><span class="n">Paso 2</span><b>Te respondemos en {{answer}}</b><p>Te escribimos por WhatsApp para una llamada corta.</p></div>
-      <div class="step in" style="--d:.75s"><span class="n">Paso 3</span><b>Abres tu clínica como fundadora</b><p>La invitación llega por correo.</p></div>
+<!-- ============ 15 · Cierre: ser clínica fundadora ============ -->
+<section class="slide" aria-label="Ser clínica fundadora">
+  <div class="layer founder-last" data-scene="perks">
+    <span class="tag in">[ Ser clínica fundadora ]</span>
+    <h2 class="h2 in" style="--d:.1s">Lo que recibes por entrar primero.</h2>
+    <div class="perks">
+      <div class="perk hero pop" style="--d:.3s"><span class="k num" data-count="{{giftN}}" data-prefix="{{cur}} ">{{gift}}</span><h3>Para tus agentes, de regalo</h3><p>Los primeros {{gift}} de conversaciones, consultas y citas recuperadas los pagamos nosotros. Tienes hasta {{giftDays}} para usarlos.</p></div>
+      <div class="perk in" style="--d:.45s"><span class="k num" data-count="{{F.feeN}}" data-prefix="{{cur}} ">{{F.fee$}}</span><h3>Sin cuota mensual</h3><p>No pagas el plan. Solo lo que hacen los agentes.</p></div>
+      <div class="perk in" style="--d:.6s"><span class="k num" data-count="{{discountN}}" data-suffix=" %">{{discount}}</span><h3>Menos en todo</h3><p>Conversaciones, consultas, citas recuperadas, preguntas a Argos y espacio.</p></div>
+      <div class="perk in" style="--d:.75s"><span class="k num" data-count="{{monthsN}}" data-suffix=" meses">{{months}}</span><h3>Precio garantizado</h3><p>Tus condiciones no cambian durante {{months}}.</p></div>
+      <div class="perk in" style="--d:.9s"><span class="k">Sin tarjeta</span><h3>Para empezar</h3><p>Abres tu clínica con la invitación.</p></div>
+      <div class="perk next in" style="--d:1.05s"><span class="k">Sin límite</span><h3>De odontólogos, sedes ni usuarios</h3><p>Cada odontólogo con su agenda y su firma; cada sede con su equipo. No se cobra por ninguno.</p></div>
     </div>
-    <div class="cta in" style="--d:1s"><span class="btn">Pide tus {{gift}}</span><span class="url">odentia32.com/solicitar-invitacion</span></div>
+    <div class="enter in" style="--d:1.25s">
+      <p class="enter-t">Se entra por invitación. <span>Los lugares son pocos.</span></p>
+      <ol>
+        <li><b>1. Pide tus <span class="gift">{{gift}}</span>.</b> Toma dos minutos.</li>
+        <li><b>2. Te respondemos en {{answer}},</b> por WhatsApp.</li>
+        <li><b>3. Abres tu clínica como fundadora.</b> La invitación llega por correo.</li>
+      </ol>
+      <div class="cta"><span class="btn">Pide tus {{gift}}</span><span class="url">odentia32.com/solicitar-invitacion</span></div>
+    </div>
   </div>
-  <aside class="notes">Cierren con la acción: entrar es por invitación y los lugares son pocos. Llenan la solicitud, les respondemos en dos días hábiles y abren su clínica con la invitación. Gracias.</aside>
+  <aside class="notes">Esto es lo que recibe una clínica fundadora. Lo más importante: {{gift}} para que los agentes trabajen desde el primer día, sin cuota mensual y con el precio garantizado por {{months}}. Y sin límite de odontólogos, sedes ni usuarios. Y cierren con la acción: entrar es por invitación y los lugares son pocos. Llenan la solicitud, les respondemos en {{answer}} y abren tu clínica con la invitación. Déjenla en pantalla mientras conversan. Gracias.</aside>
 </section>
 
 <div class="brand">{{logo}}</div>

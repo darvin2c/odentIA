@@ -15,10 +15,11 @@ import odentiaLogo from "../../assets/logotipo-dark.svg?raw"
 import { ECG } from "../../components/latidia/home/DictationDemo"
 import { MEDICAL, WORDS } from "../../lib/product"
 import { contactHref } from "../../lib/site"
-import { deckFigures, fillDeck, withoutGuide } from "../../presentations/figures"
+import { deckFigures, fillDeck, withClinic, withoutGuide } from "../../presentations/figures"
 import LatidiaScripts from "../../presentations/LatidiaScripts.astro"
 import latidiaDeck from "../../presentations/latidia/deck.html?raw"
 import OdentiaScripts from "../../presentations/OdentiaScripts.astro"
+import clinicSlide from "../../presentations/odentia/clinic-slide.html?raw"
 import odentiaDeck from "../../presentations/odentia/deck.html?raw"
 
 Astro.response.headers.set("X-Robots-Tag", "noindex, nofollow")
@@ -34,8 +35,15 @@ const logo = (MEDICAL ? latidiaLogo : odentiaLogo)
   .replace("<svg ", `<svg aria-label="${WORDS.name}" role="img" `)
 // El guion es para quien presenta: solo viene con /presentacion/fundadores?guion.
 const guide = Astro.url.searchParams.has("guion")
-const source = MEDICAL ? latidiaDeck : odentiaDeck
-const deck = figures ? fillDeck(guide ? source : withoutGuide(source), { ...figures, logo, ecg: ECG }) : null
+// La v2 de odentIA, con la clínica en 3D: solo con /presentacion/fundadores?v2; latidIA aún no la tiene.
+const source = MEDICAL
+  ? latidiaDeck
+  : Astro.url.searchParams.has("v2")
+    ? withClinic(odentiaDeck, clinicSlide)
+    : odentiaDeck
+const deck = figures
+  ? fillDeck(guide ? source : withoutGuide(source), { ...figures, logo, ecg: ECG })
+  : null
 ---
 <!doctype html>
 <html lang="es" data-brand={MEDICAL ? "latidia" : undefined}>

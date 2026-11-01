@@ -88,7 +88,42 @@ export function withoutGuide(html: string): string {
     .replace(/<aside class="notes">[\s\S]*?<\/aside>\n?/g, "")
     .replace(/<div class="notes-panel"[^>]*>[\s\S]*?<\/div>\n?/, "")
     .replace(/[ \t]*<button type="button" id="notesBtn"[^>]*>[\s\S]*?<\/button>\n?/, "")
-  if (/class="notes"|id="notesBtn"|class="notes-panel"/.test(out)) throw new Error("presentación: quedó parte del guion")
+  if (/class="notes"|id="notesBtn"|class="notes-panel"/.test(out))
+    throw new Error("presentación: quedó parte del guion")
+  return out
+}
+
+/**
+ * Las partes de la v1 que en la v2 pasan a la clínica: lo que se ve pasar se explica ahí. Quedan aparte las
+ * que hay que leer para decidir: el inicio, «Todo lo de siempre», el cobro, la semana, el precio y el cierre.
+ */
+const INSIDE_THE_CLINIC = [
+  "Mensajes fuera de horario",
+  "Omnicanal",
+  "Clío, agente clínico",
+  "Argos, agente administrador",
+  "Reportes",
+  "Buscador",
+  "Tú tienes el control",
+  "Un solo caso, dos formas de trabajar",
+]
+
+/**
+ * La v2 de la presentación de odentIA (/presentacion/fundadores?v2): «Tus agentes» pasa a ser la
+ * clínica en 3D y se lleva las partes que explica. Convive con la v1 hasta que pase una llamada real.
+ */
+export function withClinic(deck: string, slide: string): string {
+  const section = (name: string) =>
+    new RegExp(
+      `(?:<!-- =+ [^\\n]* -->\\r?\\n)?<section class="slide" aria-label="${name}">[\\s\\S]*?</section>\\r?\\n?`,
+    )
+  const part = section("Tus agentes")
+  if (!part.test(deck)) throw new Error("presentación: no está la parte «Tus agentes»")
+  let out = deck.replace(part, () => `${slide}\n`)
+  for (const name of INSIDE_THE_CLINIC) {
+    if (!section(name).test(out)) throw new Error(`presentación: no está la parte «${name}»`)
+    out = out.replace(section(name), "")
+  }
   return out
 }
 
