@@ -1183,7 +1183,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         // El nombre de un paciente lo cambia el equipo en su ficha; aquí, solo el de quien aún no lo es.
         // Si dijo otro, su ficha no cambia y recepción la revisa (ADR 0116).
         outcome = await reportPatientNameMismatch(tx, ctx.orgId, { contactId, conversationId: ctx.conversationId, said })
-        if (outcome === "no_es_paciente") shown = (await updateContact(tx, ctx.orgId, contactId, names, { userId: null, origin: "agent" })).contact.displayName
+        if (outcome === "no_es_paciente") shown = (await updateContact(tx, ctx.orgId, contactId, names, { userId: null, origin: "agent" })).displayName
         if (ctx.dryRun) throw undone
       }).catch((error: unknown) => {
         if (error !== undone) throw error

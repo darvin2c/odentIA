@@ -51,7 +51,7 @@ function count(value: number, one: string, many: string): string {
 
 export async function getConversationContext(tx: Db, orgId: string, conversationId: string, can: Can): Promise<ConversationContext> {
   const [row] = await tx
-    .select({ id: contact.id, displayName: contact.displayName, phone: contact.phone, email: contact.email })
+    .select({ id: contact.id, displayName: contact.displayName, givenNames: contact.givenNames, familyName: contact.familyName, phone: contact.phone, email: contact.email })
     .from(conversation)
     .innerJoin(contact, eq(conversation.contactId, contact.id))
     .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
