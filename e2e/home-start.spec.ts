@@ -286,9 +286,13 @@ for (const width of [1440, 390]) {
 
     test("«Llamar»: el número y lo que dijo se anotan al lado; «Escríbele» abre su conversación", async ({ owner, fixtureDb }) => {
       await activeDay(fixtureDb, owner)
+      await call(owner.page, "POST", "/api/channels/connections", owner.org.slug, {
+        channel: "whatsapp", provider: "whatsapp_cloud_api", displayName: "WA E2E",
+        config: { phoneNumberId: "E2E-PNID-LLAMAR", wabaId: "E2E-WABA", accessToken: "e2e", appSecret: "e2e-secret", templates: [] },
+      }, 201)
       await setRole(fixtureDb, owner, "reception")
       const organizationId = owner.org.id
-      const people = ["Confirma por teléfono", "No viene más", "Quiere otra hora", "Sin contestar"]
+      const people = ["Confirma por teléfono", "No viene más", "Pide cambiarla", "Sin contestar"]
       const contacts = await fixtureDb.insert(contact).values(people.map((displayName, index) => ({ organizationId, displayName, phone: `+5198765430${index}` }))).returning({ id: contact.id })
       const patients = await fixtureDb
         .insert(patient)
@@ -311,33 +315,40 @@ for (const width of [1440, 390]) {
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
       const waiting = page.getByRole("region", { name: "Te espera" })
       const rowOf = (name: string) => waiting.getByRole("listitem").filter({ hasText: name })
+      const panel = surface(page).filter({ hasText: "¿Qué te dijo?" })
       const openCall = async (name: string) => {
+        await expect(waiting.getByRole("listitem").first()).toBeVisible()
         // En teléfono «Hoy» muestra las primeras: las demás están a un toque.
         const others = waiting.getByRole("button", { name: /^Ver los otros/ })
         if (await others.isVisible()) await others.click()
         await rowOf(name).getByRole("button", { name: `Llamar: ${name}` }).click()
-        return surface(page).filter({ hasText: "¿Qué te dijo?" })
+        return panel
       }
       const statusOf = async (index: number) => (await fixtureDb.select({ status: appointment.status }).from(appointment).where(eq(appointment.id, appointments[index]!.id)))[0]?.status
+      // Con el panel abierto en teléfono, la lista de atrás queda fuera del árbol accesible: primero lo guardado y que se cierre.
+      const settled = async (index: number, status: string, name: string) => {
+        await expect.poll(() => statusOf(index)).toBe(status)
+        await expect(panel).toHaveCount(0)
+        await expect(waiting.getByRole("listitem").first()).toBeVisible()
+        await expect(rowOf(name)).toHaveCount(0)
+      }
 
       const calling = await openCall("Confirma por teléfono")
       await expect(calling.getByRole("link", { name: "Llamar: Confirma por teléfono" })).toHaveAttribute("href", "tel:+51987654300")
       await calling.getByRole("button", { name: "Confirmó por teléfono" }).click()
-      await expect(rowOf("Confirma por teléfono")).toHaveCount(0)
-      expect(await statusOf(0)).toBe("confirmada")
+      await settled(0, "confirmada", "Confirma por teléfono")
       await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/home"))
 
       // «No viene» pide confirmar y no le manda otro mensaje: ya lo dijo.
       const cancelling = await openCall("No viene más")
       await cancelling.getByRole("button", { name: "No viene", exact: true }).click()
       await page.getByRole("alertdialog").getByRole("button", { name: "Cancelar la cita" }).click()
-      await expect(rowOf("No viene más")).toHaveCount(0)
-      expect(await statusOf(1)).toBe("cancelada")
+      await settled(1, "cancelada", "No viene más")
 
       // «Quiere otra hora» abre el cambio de hora de esa cita, sin salir de Inicio.
-      const moving = await openCall("Quiere otra hora")
+      const moving = await openCall("Pide cambiarla")
       await moving.getByRole("button", { name: "Quiere otra hora" }).click()
-      await expect(surface(page).filter({ hasText: "Quiere otra hora" }).getByRole("button", { name: "Mover cita" })).toBeVisible()
+      await expect(surface(page).filter({ hasText: "Pide cambiarla" }).getByRole("button", { name: "Mover cita" })).toBeVisible()
       await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/home"))
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
 

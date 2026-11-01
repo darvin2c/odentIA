@@ -34,6 +34,7 @@ import { supportNotice } from "@odentia/db/schema/admin-support"
 import { appointment, calendarFeed, calendarFeedUse, scheduleRoom } from "@odentia/db/schema/agenda"
 import { agentSearchItem, aiUsage } from "@odentia/db/schema/agent"
 import { account, invitation, member, organization, user } from "@odentia/db/schema/auth"
+import { automationJob } from "@odentia/db/schema/automation"
 import {
   appointmentPlanItem,
   clinicalFollowUp,
@@ -4179,6 +4180,18 @@ const rosaToday = reservedAt.get("Rosa Quispe|0|09:00")
 if (!luciaToday || !rosaToday) throw new Error("Faltan las citas de hoy de la semilla")
 await setAppointmentArrival(db, ORG_A, ANA_ID, luciaToday, true)
 await createEncounter(db, ORG_A, ANA_ID, rosaPatientId, { appointmentId: rosaToday })
+
+// «Llamar» en «Te espera» de recepción: a Carmen se le recordó su cita de mañana y no confirmó.
+const carmenTomorrow = reservedAt.get("Carmen Rojas|1|09:00")
+if (!carmenTomorrow) throw new Error("Falta la cita de mañana de la semilla")
+await db.insert(automationJob).values({
+  organizationId: ORG_A,
+  kind: "recordatorio_cita",
+  status: "enviado",
+  dedupeKey: `recordatorio_cita:${carmenTomorrow}:24`,
+  scheduledFor: new Date(),
+  appointmentId: carmenTomorrow,
+})
 
 // R3: la duda clínica de Rosa le llega a quien la atendió por última vez, que
 // la responde desde «Te espera» de Inicio, sin entrar a la Bandeja.
