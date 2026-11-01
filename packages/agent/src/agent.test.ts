@@ -1696,6 +1696,12 @@ it("update_contact guarda el apellido de quien ya dijo sus nombres y, si faltan,
   }
   expect(await person()).toMatchObject({ displayName: "Anita", givenNames: null, familyName: null })
 
+  // Un nombre en blanco no es un nombre, y lo que rechace la ficha lo rechaza igual en la simulación.
+  expect(String(await tool.invoke({ displayName: "   " }))).toContain("No se guardó nada")
+  const outcomeOf = (t: typeof tool, said: { givenNames: string }) => t.invoke(said).then(String, (error: Error) => error.message)
+  expect(await outcomeOf(simulated, { givenNames: "Eva" })).toBe(await outcomeOf(tool, { givenNames: "Eva" }))
+  expect(await person()).toMatchObject({ displayName: "Anita", givenNames: null, familyName: null })
+
   // Con sus nombres guardados, la simulación dice lo que haría sin cambiar nada, y el apellido los completa.
   await setNames({ displayName: "Carla", givenNames: "Carla", familyName: null })
   expect(String(await simulated.invoke({ familyName: "Quispe" }))).toContain("[SIMULACIÓN] Se actualizaría")

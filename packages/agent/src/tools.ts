@@ -2,7 +2,7 @@ import { createHash } from "node:crypto"
 import { tool } from "@langchain/core/tools"
 import { type Db, withOrgContext } from "@odentia/db"
 import type { AnswerBasisItem, AnswerCheck, AnswerTraceOutcome } from "@odentia/db/schema/agent"
-import { channelConnection, contact, conversation } from "@odentia/db/schema/crm"
+import { channelConnection, conversation } from "@odentia/db/schema/crm"
 import type { MeaningRank, OpportunityDetail, OrgLocale, ProposalItem, PublicLinkConfig, SearchEmbedder, Storage } from "@odentia/services"
 import {
   type AgentPatientBudgets,
@@ -181,7 +181,7 @@ export const TOOL_ACTION_LABEL: Record<string, string> = {
   update_followup: "Dejó la tarea de una oportunidad.",
   close_opportunity: "Propuso cerrar una oportunidad.",
   add_tags: "Etiquetó el contacto.",
-  update_contact: "Anotó su nombre.",
+  update_contact: "Actualizó datos del contacto.",
   create_task: "Dejó una tarea a tu equipo.",
   anotar_caso: "Anotó un dato del caso para después.",
   recordar_dato: "Guardó un dato de la persona para próximas conversaciones.",
@@ -1162,36 +1162,47 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       const contactId = ctx.contactId
       const given = givenNames?.trim()
       const family = familyName?.trim()
-      if (!given && !family && !displayName) return "No se guardó nada: no venía un nombre."
+      const display = displayName?.trim()
+      if (!given && !family && !display) return "No se guardó nada: no venía un nombre."
+      // La simulación corre la operación real y la deshace: así dice lo que de verdad pasaría, sin copiar sus reglas.
+      const undone = Symbol("simulación")
+      const attempt = async <T,>(fn: (tx: Db) => Promise<T>): Promise<T> => {
+        if (!ctx.dryRun) return inOrg(fn)
+        let result!: T
+        await inOrg(async (tx) => {
+          result = await fn(tx)
+          throw undone
+        }).catch((error: unknown) => {
+          if (error !== undone) throw error
+        })
+        return result
+      }
       // El nombre de un paciente lo cambia el equipo en su ficha; aquí, solo el de quien aún no lo es.
-      // Si dijo otro, su ficha no cambia y recepción la revisa (ADR 0116). La simulación mira lo mismo, sin dejar la tarea.
-      const said = [given, family].filter(Boolean).join(" ") || displayName || ""
-      const outcome = await inOrg((tx) => reportPatientNameMismatch(tx, ctx.orgId, { contactId, conversationId: ctx.conversationId, said, dryRun: ctx.dryRun }))
+      // Si dijo otro, su ficha no cambia y recepción la revisa (ADR 0116).
+      const said = [given, family].filter(Boolean).join(" ") || display || ""
+      const outcome = await attempt((tx) => reportPatientNameMismatch(tx, ctx.orgId, { contactId, conversationId: ctx.conversationId, said }))
       if (outcome === "avisado") {
-        if (ctx.dryRun) return "[SIMULACIÓN] Es paciente y su ficha dice otro nombre: por aquí no se cambia y quedaría una tarea para que recepción la revise."
         await noteAction("datos", "avisó a recepción que su nombre no es el de su ficha")
-        return "Es paciente y su ficha dice otro nombre: por aquí no se cambia y quedó una tarea para que recepción la revise. Háblale por el nombre que te dijo, sin decirle cómo figura en su ficha. Si le das su enlace para reservar, dile que ahí puede corregir su nombre."
+        return `${ctx.dryRun ? "[SIMULACIÓN] " : ""}Es paciente y su ficha dice otro nombre: por aquí no se cambia y ${ctx.dryRun ? "quedaría" : "quedó"} una tarea para que recepción la revise. Háblale por el nombre que te dijo, sin decirle cómo figura en su ficha. Si le das su enlace para reservar, dile que ahí puede corregir su nombre.`
       }
       if (outcome !== "no_es_paciente") return "Es paciente: su nombre no se cambia por aquí. Úsalo tal como figura."
-      // Sus apellidos no se guardan sin sus nombres (la regla de la ficha): con los ya guardados, los completan.
-      if (family && !given) {
-        const [saved] = await inOrg((tx) =>
-          tx
-            .select({ givenNames: contact.givenNames })
-            .from(contact)
-            .where(and(eq(contact.organizationId, ctx.orgId), eq(contact.id, contactId)))
-            .limit(1),
-        )
-        if (!saved?.givenNames?.trim()) return "No se guardó nada: sus apellidos se guardan junto con sus nombres. Envía givenNames y familyName; si no sabes sus nombres, pídeselos."
-      }
-      if (ctx.dryRun) return "[SIMULACIÓN] Se actualizaría el contacto."
-      // Se guarda lo que dijo. Solo sus nombres, sin apellidos, lo rechaza la ficha y el error vuelve al modelo.
+      // El nombre visible lo arma el servicio con sus nombres y apellidos, también con los ya guardados.
       const names = {
         ...(given ? { givenNames: given } : {}),
         ...(family ? { familyName: family } : {}),
-        ...(displayName ? { displayName } : given ? { displayName: [given, family].filter(Boolean).join(" ") } : {}),
+        ...(display ? { displayName: display } : {}),
       }
-      await inOrg((tx) => updateContact(tx, ctx.orgId, contactId, names, { userId: null, origin: "agent" }))
+      try {
+        await attempt((tx) => updateContact(tx, ctx.orgId, contactId, names, { userId: null, origin: "agent" }))
+      } catch (error) {
+        // La ficha no guarda apellidos sin nombres: se le dice qué hacer. Solo sus nombres, sin apellidos, también
+        // lo rechaza y ese error vuelve tal cual al modelo.
+        if (error instanceof ServiceError && error.fields?.givenNames) {
+          return "No se guardó nada: sus apellidos se guardan junto con sus nombres. Envía givenNames y familyName; si no sabes sus nombres, pídeselos."
+        }
+        throw error
+      }
+      if (ctx.dryRun) return "[SIMULACIÓN] Se actualizaría el contacto."
       await noteAction("datos", "anotó su nombre")
       return "Contacto actualizado."
     },
