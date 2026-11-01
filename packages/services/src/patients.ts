@@ -235,9 +235,9 @@ async function adoptIdentity(
     const otherName = !!identity.displayName && identity.displayName !== current.displayName
     const keepsName = !!current.docNumber && current.docNumber !== identity.docNumber
     if (keepsName && otherName) told.push(`nombre ${identity.displayName}`)
-    // El nombre va entero: los nombres y apellidos de antes no se mezclan con el escrito.
-    const names = keepsName
-      ? { givenNames: current.givenNames ?? identity.givenNames ?? null, familyName: current.familyName ?? identity.familyName ?? null }
+    // El nombre va entero: los nombres y apellidos de antes no se mezclan con el escrito, ni cuando solo había una parte.
+    const names = keepsName && (current.givenNames || current.familyName)
+      ? { givenNames: current.givenNames, familyName: current.familyName }
       : { givenNames: identity.givenNames ?? null, familyName: identity.familyName ?? null }
     const takesDocument = !current.docNumber && withDocument
     await tx
@@ -256,7 +256,11 @@ async function adoptIdentity(
       })
       .where(and(eq(contact.organizationId, orgId), eq(contact.id, personId)))
     // El nombre de un canal se reemplaza sin más; uno que alguien guardó (Sofi o el equipo) queda dicho.
-    const renamed = !keepsName && otherName && !!current.givenNames
+    // Completar la parte que faltaba no es cambiar de nombre: es lo esperado (ADR 0129).
+    const completes =
+      (!current.familyName && current.givenNames === identity.givenNames) ||
+      (!current.givenNames && current.familyName === identity.familyName)
+    const renamed = !keepsName && otherName && !!(current.givenNames || current.familyName) && !completes
     const body = [
       renamed ? `Se registró como ${identity.displayName}; antes figuraba como ${current.displayName}.` : null,
       told.length ? `En el registro escribió otros datos, que no se guardaron: ${told.join(", ")}. Revisa cuáles valen.` : null,
@@ -1077,8 +1081,11 @@ export async function updatePatient(
   const { registeredBranchId: _branch, isActive: _active, identityConfirmed: _confirmed, ...demographicPatch } = patch
   const demographics = Object.fromEntries(Object.keys(demographicsSchema.shape).map(key => [key, current[key as keyof PatientRow]]))
   const countryCode = await findOrgCountry(tx, orgId)
-  // Lo guardado que no cambia no se vuelve a juzgar por el país de la clínica.
-  const errors = validateDemographics({ ...demographics, ...demographicPatch }, await patientOrganizationToday(tx, orgId), countryCode, demographics)
+  // Lo guardado que no cambia no se vuelve a juzgar por el país de la clínica. Nombres y apellidos
+  // van juntos al escribirlos: editar otro dato no pide los que nadie le dijo (ADR 0129).
+  const errors = validateDemographics({ ...demographics, ...demographicPatch }, await patientOrganizationToday(tx, orgId), countryCode, demographics, {
+    partialName: !("givenNames" in demographicPatch || "familyName" in demographicPatch),
+  })
   const failedPatch = fieldsError(errors)
   if (failedPatch) throw failedPatch
   if (patch.registeredBranchId !== undefined && patch.registeredBranchId !== null) {

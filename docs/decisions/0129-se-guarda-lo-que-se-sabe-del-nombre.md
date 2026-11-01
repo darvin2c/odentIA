@@ -8,9 +8,12 @@ La regla de la ficha exige nombres y apellidos juntos. Desde el 28 de octubre, S
 
 ## Decisión y motivo
 
-- **Quien aún no es paciente puede tener solo sus nombres o solo sus apellidos, venga de Sofi o del equipo.** Lo que se sabe se guarda; no se pierde por no estar completo.
+- **Quien aún no es paciente puede quedar con solo sus nombres o solo sus apellidos.** Lo que se sabe se guarda; no se pierde por no estar completo. Lo guarda Sofi o el equipo al editar; «Nuevo contacto» sigue pidiendo los dos, porque ahí se escribe un alta y no un dato suelto.
 - **Registrarse como paciente sigue pidiendo los dos.** Ahí se completa lo que falta, con lo guardado ya escrito en el enlace y en el cajón de registro.
-- **Vale para cualquier edición, no solo para Sofi.** La regla mira lo guardado más lo que cambia: si solo la relajara Sofi, editar el teléfono de Carla le pediría a recepción unos apellidos que nadie conoce.
+- **Editar otro dato nunca pide lo que falta.** La regla mira lo guardado más lo que cambia: si solo la relajara Sofi, editar el teléfono de Carla le pediría a recepción unos apellidos que nadie conoce. Vale también para un paciente que quedó con una parte: al escribir sus nombres lleva los dos.
+- **Se puede no saber una parte, no borrar la que ya se sabe.** Vaciar «Apellidos» por error sigue dando error.
+- **Lo que Sofi escribió entero no se pierde.** Si manda «Carla» y aparte «Carla Quispe», lo demás son los apellidos. No se adivina: es el resto de lo que ella misma dio como nombre entero, y un nombre visible solo sigue sin repartirse (ADR 0058).
+- **Completar no es cambiar de nombre.** Pasar de «Carla» a «Carla Quispe» al registrarse no deja nota; registrarse con otro nombre sí.
 
 ## Alternativas descartadas
 
@@ -19,8 +22,8 @@ La regla de la ficha exige nombres y apellidos juntos. Desde el 28 de octubre, S
 
 ## Consecuencias
 
-- Con solo apellidos, el nombre visible pasa a ser esos apellidos, porque la base lo deriva de lo guardado. Se pierde el nombre de perfil que había. No apareció en esas 120 conversaciones.
-- Un paciente sigue con los dos: su ficha y su registro usan la regla completa.
+- Con solo apellidos, el nombre visible pasa a ser esos apellidos, porque la base lo deriva de lo guardado, y se pierde el nombre de perfil que había. Sofi sigue sin saber cómo se llama y puede preguntarlo, y los avisos saludan por ese apellido. Es un caso raro: no apareció en esas 120 conversaciones.
+- El registro de un paciente sigue pidiendo los dos. Si una vía interna deja a un paciente con una parte, «Faltan datos» lo dice y no le impide editar lo demás.
 
 ## Referencias
 

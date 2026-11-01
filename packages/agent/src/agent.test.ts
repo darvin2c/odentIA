@@ -1710,6 +1710,18 @@ it("update_contact guarda lo que sabe de su nombre y lo demás se completa despu
   expect(String(await tool.invoke({ familyName: "Rojas" }))).toBe("Contacto actualizado.")
   expect(await person()).toMatchObject({ displayName: "Rojas", givenNames: null, familyName: "Rojas" })
 
+  // Lo que escribió entero no se pierde: lo demás es la otra parte, venga cuál venga.
+  await setNames({ displayName: "Anita", givenNames: null, familyName: null })
+  await tool.invoke({ givenNames: "Carla", displayName: "Carla Quispe" })
+  expect(await person()).toMatchObject({ displayName: "Carla Quispe", givenNames: "Carla", familyName: "Quispe" })
+  await setNames({ displayName: "Anita", givenNames: null, familyName: null })
+  await tool.invoke({ familyName: "Quispe Rojas", displayName: "Carla Quispe Rojas" })
+  expect(await person()).toMatchObject({ displayName: "Carla Quispe Rojas", givenNames: "Carla", familyName: "Quispe Rojas" })
+  // Un nombre visible que no empieza por la parte que dio no se reparte.
+  await setNames({ displayName: "Anita", givenNames: null, familyName: null })
+  await tool.invoke({ givenNames: "Carla", displayName: "Carlita Quispe" })
+  expect(await person()).toMatchObject({ displayName: "Carla", givenNames: "Carla", familyName: null })
+
   // Lo de siempre sigue igual.
   await setNames({ displayName: "Luz", givenNames: null, familyName: null })
   await tool.invoke({ givenNames: "Luz María", familyName: "Paz" })

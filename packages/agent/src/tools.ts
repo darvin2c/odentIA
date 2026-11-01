@@ -596,7 +596,8 @@ function formatAgentBudgets(found: AgentPatientBudgets, zone: Pick<OrgLocale, "l
 /**
  * Tools del agente. NUNCA SQL ni fetch arbitrario: solo servicios dentro
  * del contexto RLS de la org (invariante). En simulación (dryRun) las
- * mutaciones devuelven vista previa sin escribir.
+ * mutaciones devuelven vista previa sin escribir, salvo `update_contact`, que
+ * corre la operación real en una transacción que se deshace.
  */
 /**
  * Las palabras del producto de la corrida. Sin ellas, las de odentIA: las
@@ -1160,10 +1161,16 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       familyName?: string
     }) => {
       const contactId = ctx.contactId
-      const given = givenNames?.trim()
-      const family = familyName?.trim()
+      let given = givenNames?.trim()
+      let family = familyName?.trim()
       const display = displayName?.trim()
       if (!given && !family && !display) return "No se guardó nada: no venía un nombre."
+      // «Carla Quispe» con solo «Carla» aparte: lo demás del nombre visible es la otra parte. Si no, se perdería,
+      // porque la base arma el visible con lo que viene por separado.
+      const whole = display ?? ""
+      const spoken = whole.toLocaleLowerCase()
+      if (given && !family && spoken.startsWith(`${given.toLocaleLowerCase()} `)) family = whole.slice(given.length).trim()
+      else if (family && !given && spoken.endsWith(` ${family.toLocaleLowerCase()}`)) given = whole.slice(0, -family.length).trim()
       // La simulación corre la operación real y la deshace: así dice lo que de verdad pasaría, sin copiar sus reglas.
       const undone = Symbol("simulación")
       const attempt = async <T,>(fn: (tx: Db) => Promise<T>): Promise<T> => {
