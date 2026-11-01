@@ -1,4 +1,4 @@
-import { Button } from "@odentia/ui"
+import { Button, ScrollArea } from "@odentia/ui"
 import { topicQuote, topicWords } from "../../lib/conversation-state"
 import { type InboxTopic, timeAgo } from "../../lib/crm"
 
@@ -41,7 +41,8 @@ export function TopicList({
         <span className="text-muted-foreground">Toca uno para verlo y responderlo</span>
       </p>
       {/* Con muchos temas la lista se desplaza: la caja de escribir sigue a la vista. */}
-      <ul className="flex max-h-36 flex-col gap-1 overflow-y-auto">
+      <ScrollArea className="[&_[data-slot=scroll-area-viewport]]:max-h-36">
+      <ul className="flex flex-col gap-1">
 
         {topics.map((topic) => (
           <li key={topic.id} className="flex items-center gap-1 rounded-xl bg-background">
@@ -71,6 +72,7 @@ export function TopicList({
           </li>
         ))}
       </ul>
+      </ScrollArea>
     </section>
   )
 }
