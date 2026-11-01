@@ -240,6 +240,27 @@ for (const longAgo of [false, true]) {
   })
 }
 
+test("latidIA: Ariadna responde con la guía del consultorio", async ({ browser, fixtureDb, passwordHash }) => {
+  const vela = await createVela(fixtureDb, passwordHash)
+  const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1440, height: 900 } })
+  const page = await context.newPage()
+  await gotoHydrated(page, latidiaUrl("app", "/login"))
+  const { slug } = await openConsultorio(page, vela)
+  await gotoHydrated(page, latidiaUrl(slug, "/agenda"))
+  await page.getByRole("button", { name: "Ayuda", exact: true }).click()
+  const help = surface(page, { name: "Ayuda", exact: true })
+  await expect(help).toContainText("Soy Ariadna, tu guía virtual de latidIA.")
+  await help.getByLabel("Tu pregunta", { exact: true }).fill("¿Dónde registro los signos vitales?")
+  await help.getByRole("button", { name: "Preguntar" }).click()
+  await expect(help.getByRole("listitem").last()).toContainText("Examen físico")
+  await help.getByLabel("Tu pregunta", { exact: true }).fill("¿Quién es Ariadna?")
+  await help.getByRole("button", { name: "Preguntar" }).click()
+  await expect(help.getByRole("listitem").last()).toContainText("Soy la guía virtual de latidIA")
+  await expect(help.getByRole("listitem").last().getByRole("link", { name: /Llévame/ })).toHaveCount(0)
+  await expect(help).not.toContainText("odentIA")
+  await context.close()
+})
+
 test("latidIA: en la Bandeja cada tema se responde por su cuenta", async ({ browser, fixtureDb, passwordHash }, testInfo) => {
   const vela = await createVela(fixtureDb, passwordHash)
   const context = await browser.newContext({ ignoreHTTPSErrors: true })

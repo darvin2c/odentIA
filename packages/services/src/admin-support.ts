@@ -11,13 +11,15 @@ import {
 } from "@odentia/db/schema/admin-support"
 import { member, organization, user } from "@odentia/db/schema/auth"
 import { serviceCatalog } from "@odentia/db/schema/clinical"
+import { helpAsk } from "@odentia/db/schema/workspace"
 import { agentConfig, channelConnection } from "@odentia/db/schema/crm"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { saasActionReview } from "@odentia/db/schema/saas-billing"
-import { and, asc, count, desc, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm"
+import { and, asc, count, desc, eq, gt, gte, inArray, isNull, ne, sql } from "drizzle-orm"
 import type { AdminActor } from "./admin-core.js"
 import { writeAdminAudit } from "./admin-core.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
+import { helpTopic, helpTopicForScreen } from "./help-guide.js"
 import { normalizeForSearch } from "./knowledge.js"
 import { enqueueSupportInboxNotice } from "./support-notices.js"
 
@@ -132,6 +134,18 @@ export interface SupportMetrics {
   openWithoutAssignee: number
   activeGrants: number
   avgFirstReplyMinutes: number | null
+}
+
+/** Lo que hay que mejorar de la guía: cuántas veces y dónde, nunca qué se preguntó. */
+export interface HelpGuideStats {
+  days: number
+  asked: number
+  unanswered: number
+  notHelpful: number
+  /** Las pantallas donde más veces no supo responder. */
+  unansweredByScreen: Array<{ name: string; total: number }>
+  /** Los temas cuya respuesta más veces no sirvió. */
+  notHelpfulByTopic: Array<{ name: string; total: number }>
 }
 
 export interface SupportKnowledgeGroup {
@@ -1338,6 +1352,51 @@ export async function supportMetrics(db: Db, actor: AdminActor): Promise<Support
       timing?.avg_minutes === null || timing?.avg_minutes === undefined
         ? null
         : Number(timing.avg_minutes),
+  }
+}
+
+const HELP_STATS_DAYS = 30
+const HELP_STATS_ROWS = 10
+
+/**
+ * Lo que Ariadna no supo responder y lo que respondió sin servir, en todas las
+ * clínicas: la lista de trabajo para mejorar la guía. Son conteos por pantalla
+ * y por tema; lo que se preguntó no se guarda, salvo que la persona lo envíe.
+ */
+export async function supportHelpStats(db: Db, actor: AdminActor, now: Date = new Date()): Promise<HelpGuideStats> {
+  // Sin el identificador: «/people/<id>» de cada persona es la misma pantalla.
+  const screen = sql<string>`regexp_replace(${helpAsk.screen}, '/[0-9a-f-]{36}.*$', '')`
+  const rows = await db
+    .select({ screen, topicId: helpAsk.topicId, helpful: helpAsk.helpful, total: count() })
+    .from(helpAsk)
+    .where(gte(helpAsk.createdAt, new Date(now.getTime() - HELP_STATS_DAYS * 86_400_000)))
+    .groupBy(screen, helpAsk.topicId, helpAsk.helpful)
+  await writeAdminAudit(db, actor, { action: "support.help_stats.read" })
+  const unanswered = new Map<string, number>()
+  const notHelpful = new Map<string, number>()
+  let asked = 0
+  for (const row of rows) {
+    const total = Number(row.total)
+    asked += total
+    if (row.topicId === null) {
+      const name = helpTopicForScreen(row.screen)?.title ?? row.screen
+      unanswered.set(name, (unanswered.get(name) ?? 0) + total)
+    }
+    if (row.helpful === false && row.topicId !== null) {
+      const name = helpTopic(row.topicId)?.title ?? row.topicId
+      notHelpful.set(name, (notHelpful.get(name) ?? 0) + total)
+    }
+  }
+  const ranked = (counts: Map<string, number>) =>
+    [...counts].map(([name, total]) => ({ name, total })).sort((a, b) => b.total - a.total).slice(0, HELP_STATS_ROWS)
+  const sum = (counts: Map<string, number>) => [...counts.values()].reduce((all, total) => all + total, 0)
+  return {
+    days: HELP_STATS_DAYS,
+    asked,
+    unanswered: sum(unanswered),
+    notHelpful: sum(notHelpful),
+    unansweredByScreen: ranked(unanswered),
+    notHelpfulByTopic: ranked(notHelpful),
   }
 }
 

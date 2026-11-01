@@ -1,7 +1,7 @@
 ---
 // /buscador (odentIA y latidIA): la portada con la demo grande y viva del buscador (SearchDemo, la misma
 // de las portadas), qué encuentra, cómo se abre en tres pasos, qué ve cada rol, lo que no es un nombre
-// (Ayuda y Argos), las preguntas y el cierre. Lo que dice cada tarjeta se comprobó en el producto:
+// (Ariadna y Argos), las preguntas y el cierre. Lo que dice cada tarjeta se comprobó en el producto:
 // `SEARCH_TYPE_PERMISSIONS` (clinic-app/lib/global-search.ts) y los permisos de packages/auth.
 import Base from "../../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../lib/faq"
@@ -88,7 +88,7 @@ const faq: FaqItem[] = [
   },
   {
     q: "¿Puedo hacerle una pregunta, como «¿cuánto cobramos en octubre?»?",
-    a: `Sí, si tu rol ve Reportes. El buscador ofrece «Preguntarle a Argos», que responde con los datos de tu ${clinicWord}. Una pregunta de cómo se usa la aplicación se le hace a Ayuda.`,
+    a: `Sí, si tu rol ve Reportes. El buscador ofrece «Preguntarle a Argos», que responde con los datos de tu ${clinicWord}. Una pregunta de cómo se usa la aplicación se le hace a Ariadna.`,
   },
 ]
 const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
@@ -173,7 +173,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
       <div class="fs-head">
         <span class="tag">[ Si no es un nombre ]</span>
         <h2 class="fs-h2">Una pregunta no se busca: se le hace a Argos.</h2>
-        <p class="fs-lead">{`Si lo que escribes es una pregunta de tu ${clinicWord}, como «${MEDICAL ? "¿Cuántas consultas cobramos en octubre?" : "¿Cuánto cobramos en octubre?"}», el buscador ofrece «Preguntarle a Argos» y responde con los datos de tu ${clinicWord}. Si es de cómo se usa la aplicación, la respuesta está en Ayuda. Argos solo se ofrece a quien ve Reportes.`}</p>
+        <p class="fs-lead">{`Si lo que escribes es una pregunta de tu ${clinicWord}, como «${MEDICAL ? "¿Cuántas consultas cobramos en octubre?" : "¿Cuánto cobramos en octubre?"}», el buscador ofrece «Preguntarle a Argos» y responde con los datos de tu ${clinicWord}. Si es de cómo se usa la aplicación, te responde Ariadna. Argos solo se ofrece a quien ve Reportes.`}</p>
         <a class="fs-link" href="/agentes/administrador">Conoce a Argos</a>
       </div>
     </div>

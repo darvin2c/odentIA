@@ -31,7 +31,7 @@ export const ARGOS_WORDS = {
   noPudo: "No pude calcular eso. Prueba a decirlo de otra forma o con un periodo más corto.",
   tiempo: "La consulta tardaba más de 3 segundos y la detuve. Prueba con un periodo más corto.",
   noExiste: "Eso no está en los datos que registra {producto}.",
-  ayuda: "Eso es de cómo se usa {producto}: te lo explica la Ayuda.",
+  ayuda: "Eso es de cómo se usa {producto}: te lo explica Ariadna.",
   otro: "Respondo preguntas sobre los datos de la clínica: dinero, pacientes, agenda, tratamientos, presupuestos e inventario. Prueba con «¿cuánto cobramos este mes?».",
 } as const
 

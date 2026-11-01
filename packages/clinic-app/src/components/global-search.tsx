@@ -53,7 +53,7 @@ import {
   useState,
 } from "react"
 import { apiFetch } from "../lib/api"
-import { ADMIN_NAME } from "../lib/agent-names"
+import { ADMIN_NAME, HELP_NAME } from "../lib/agent-names"
 import { ARGOS_ALLOWANCE_KEY, type ArgosRoute, getArgosAllowance, openArgos, routeArgos, useArgosLastQuestion } from "../lib/argos"
 import { timeAgo, useMyRole, useMyUserId } from "../lib/crm"
 import {
@@ -75,6 +75,7 @@ import {
   saveHiddenTypes,
   targetHref,
   targetVerb,
+  looksLikeQuestion,
 } from "../lib/global-search"
 import { activeOrgTimeZone, useOrgLocale } from "../lib/locale"
 import { appWords } from "../lib/product-words"
@@ -423,7 +424,7 @@ function GlobalSearchDialog({
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate font-medium">{deciding ? `Preguntar: «${text}»` : `Preguntarle a ${ADMIN_NAME}: «${text}»`}</span>
         <span className="text-xs text-muted-foreground">
-          {deciding ? `Viendo si es para ${ADMIN_NAME} o para Ayuda…` : "Responde con los datos de la clínica que tú puedes ver"}
+          {deciding ? `Viendo si es para ${ADMIN_NAME} o para ${HELP_NAME}…` : "Responde con los datos de la clínica que tú puedes ver"}
         </span>
       </span>
       <CommandShortcut className="hidden tracking-normal group-data-selected/command-item:sm:inline">Enter · Preguntar</CommandShortcut>
@@ -471,7 +472,7 @@ function GlobalSearchDialog({
         <CircleHelp />
       </span>
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate font-medium">Preguntarle a Ayuda: «{text}»</span>
+        <span className="truncate font-medium">Preguntarle a {HELP_NAME}: «{text}»</span>
         <span className="text-xs text-muted-foreground">Te enseña a usar {appWords().name}; no conoce cifras</span>
       </span>
     </CommandItem>
@@ -815,7 +816,7 @@ function GlobalSearchDialog({
             </>
           ) : null}
 
-          {nothing ? (
+          {nothing && !looksLikeQuestion(text) ? (
             <div className="space-y-3 px-4 py-6">
               <p className="text-sm">No encontramos «{text}».</p>
               <p className="text-xs text-muted-foreground">

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { HELP_TOPICS, helpTopicForScreen, matchHelpTopics } from "../help-guide.js"
+import { describeHelpSearch } from "../help-guide-suite.js"
 import { MEDICAL_HELP_TOPICS } from "./help.js"
 
 /** La Ayuda de latidIA (issue 229): las mismas pantallas, con lo que tiene un consultorio. */
@@ -31,6 +32,7 @@ describe("la guía de latidIA", () => {
     expect(vitals?.faq?.a).toContain("Examen físico")
     const [leave] = matchHelpTopics("¿Cómo emito un descanso médico?", MEDICAL_HELP_TOPICS)
     expect(leave?.faq?.q).toBe("¿Cómo emito un descanso médico?")
+    expect(matchHelpTopics("¿Quién es Ariadna?", MEDICAL_HELP_TOPICS)[0]?.faq?.a).toContain("guía virtual de latidIA")
   })
 
   it("la de odentIA no cambia", () => {
@@ -38,3 +40,5 @@ describe("la guía de latidIA", () => {
     expect(helpTopicForScreen("/patients/123")?.id).toBe("pacientes")
   })
 })
+
+describeHelpSearch("latidIA", MEDICAL_HELP_TOPICS)

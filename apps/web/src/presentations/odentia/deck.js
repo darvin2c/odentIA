@@ -724,7 +724,7 @@
       + p8own("servicio", "Profilaxis", "Servicio", "USD 35", "Abrir")
       + p8own("respuesta", "¿Cada cuánto me hago una limpieza?", "Respuesta del agente", "La respuesta que da Sofi", "", 140)
       + `<div style="height:10px"></div>`
-      + p8own("help", "Preguntarle a Ayuda: «limpieza»", "", "Abre Ayuda con esta pregunta", "", 280);
+      + p8own("help", "Preguntarle a Ariadna: «limpieza»", "", "Responde con la guía del sistema", "", 280);
     why(`<b>por significado</b>No escribiste «Profilaxis». La encontró igual.`);
     await p6wait(2200); say("Perfecto, gracias.");
   };

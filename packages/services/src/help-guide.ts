@@ -1,6 +1,17 @@
-import { normalizeForSearch, scoreKnowledgeMatch } from "./knowledge.js"
+import { AGENT_NAMES } from "./agent-names.js"
+import { normalizeForSearch } from "./knowledge.js"
 
-/* ---------- Guía de odentIA: el mapa del sistema que usa la Ayuda (latidIA: `medical/help.ts`) ---------- */
+/* ---------- Guía de odentIA: el mapa del sistema con el que responde Ariadna (latidIA: `medical/help.ts`) ---------- */
+
+/** Una pregunta frecuente de una pantalla, con su respuesta. */
+export interface HelpFaq {
+  q: string
+  a: string
+  /** Otras formas de preguntar exactamente lo mismo, enteras. */
+  forms?: string[]
+  /** No es de la pantalla de su tema: la respuesta no lleva a ella ni depende de poder abrirla. */
+  general?: boolean
+}
 
 /**
  * Un tema por pantalla. Lo que identifica a la pantalla —ruta y nombre— tiene
@@ -24,9 +35,9 @@ export interface HelpTopic {
   /** Con qué palabras la busca la gente, aunque el sistema la llame de otro modo. */
   terms: string[]
   /** Preguntas frecuentes de esa pantalla con su respuesta. */
-  faqs?: Array<{ q: string; a: string }>
-  /** Permiso que hace falta para cambiar cosas ahí; ausente = basta con poder verla. */
-  writePermission?: string
+  faqs?: HelpFaq[]
+  /** Permiso que hace falta para cambiar cosas ahí (basta uno); ausente = basta con poder verla. */
+  writePermission?: string | readonly string[]
 }
 
 const SETTINGS = "Configuración"
@@ -40,7 +51,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Inicio",
     parent: null,
     purpose:
-      "Lo que te toca hoy. «Te espera» es la única lista de lo que hay que hacer, una fila por persona, en tres grupos: Ahora, Hoy y Sin apuro, que va plegado. Cada fila tiene un solo botón y abre al lado lo que necesitas para resolverla, con sus mensajes y la caja para responder: lo que te pasó el agente (con «Tomar este tema», o «Responder» ahí mismo si es tuyo: una duda clínica al odontólogo, un pago a caja), tu atención de otro día que quedó sin cerrar (con «Continuar» o «Anular con motivo»), las citas de días anteriores que nadie cerró (con «Registrar la atención» si atiendes y «No vino»; si atiendes, te salen las tuyas), las citas que no se confirmaron tras el recordatorio (para llamar), quienes aceptaron su presupuesto y no tienen cita (para quien ve Reportes, con «Ver la lista», para agendarlos desde ahí), las conversaciones sin responder (si atiendes, las que llevas), las tareas (con «Hecha»), lo que recomienda Argos y las personas a las que Sofi no pudo escribir. Al lado, tu día: si hoy atiendes, «Mis pacientes de hoy» con la sala de espera, lo que estás atendiendo y lo que viene más tarde (con «Atender»); si no, la agenda de la sede, donde recepción marca «Llegó», o la caja, según tu trabajo. La campana de avisos es solo para enterarte: no repite nada de «Te espera».",
+      "Lo que te toca hoy. «Te espera» es la única lista de lo que hay que hacer, una fila por persona, en tres grupos: Ahora, Hoy y Sin apuro, que va plegado. Cada fila tiene un solo botón y abre al lado lo que necesitas para resolverla, con sus mensajes y la caja para responder: lo que te pasó el agente («Responder» si es tuyo o nadie lo tomó; si lo lleva otra persona, dice con quién está), tu atención de otro día que quedó sin firmar («Revisar»), las citas de días anteriores que nadie cerró («¿Vino?»; si atiendes, te salen las tuyas), las citas que no se confirmaron tras el recordatorio («Llamar»), quienes aceptaron su presupuesto y no tienen cita (para quien ve Reportes, con «Agendar»), los presupuestos sin enviar, las conversaciones sin responder (si atiendes, las que llevas), las tareas, lo que recomienda Argos y las personas a las que Sofi no pudo escribir. Al lado, tu día: si hoy atiendes, «Mis pacientes de hoy» con la sala de espera, lo que estás atendiendo y lo que viene más tarde; si no, la agenda de la sede, donde recepción marca «Llegó», o la caja, según tu trabajo. La campana de avisos es solo para enterarte: no repite nada de «Te espera».",
     terms: [
       "resumen del día",
       "pendientes",
@@ -58,8 +69,13 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "pacientes de hoy",
       "llegó",
       "atención sin cerrar",
-      "cita sin cerrar",
       "aceptaron y no tienen cita",
+      "te espera",
+      "qué me toca",
+      "qué tengo que hacer",
+      "mientras no estabas",
+      "borrador",
+      "sala de espera ahora",
     ],
     faqs: [
       {
@@ -67,8 +83,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         a: "Lo que conviene saber y no pide trabajo: un consentimiento firmado, la caja que cerró con diferencia, una oportunidad ganada o perdida, un mensaje que WhatsApp aprobó. Abrir un aviso lo marca leído y «Marcar todo leído» los marca todos. Un aviso desaparece solo cuando su asunto se resuelve, y nunca te avisa de algo que hiciste tú. Lo que hay que hacer está en «Te espera».",
       },
       {
-        q: "¿Por qué aparece «no confirmó · llamar»?",
-        a: "Con «Recordar la cita» prendida, Sofi le recordó la cita y la persona no la confirmó. La cita aparece con su teléfono para que alguien la llame con tiempo; Sofi igual le recuerda otra vez tres horas antes. Al confirmar, la fila desaparece.",
+        q: "¿Por qué aparece «No confirmó su cita»?",
+        a: "Con «Recordar la cita» prendida, Sofi le pidió confirmar y la persona no lo hizo. La fila trae su teléfono y «Llamar», para hablar con ella con tiempo. Al abrirla te pregunta «¿Qué te dijo?»: «Confirmó por teléfono», «Quiere otra hora» o «No viene», que la cancela sin enviarle otro mensaje. Si no contestó, sigue en la lista. Si dice «No recibe recordatorios», es porque los apagó y hay que confirmarle la cita a ella.",
       },
       {
         q: "¿Cómo sé quién me espera?",
@@ -76,11 +92,52 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Por qué me aparece una atención de ayer?",
-        a: "Porque quedó en borrador y la ficha de esa persona sigue trabada. Al abrirla te dice lo que tiene y lo que le falta para cerrarse: «Continuar la atención» la abre para terminarla y «Anular con motivo» la descarta dejando constancia de por qué.",
+        a: "Porque quedó sin firmar y la ficha de esa persona sigue trabada. Al abrirla te dice lo que tiene y lo que le falta para cerrarse: «Continuar la atención» la abre para terminarla y «Anularla con motivo» la descarta dejando constancia de por qué.",
+      },
+      {
+        q: "¿Quién es Ariadna?",
+        a: "Soy la guía virtual de odentIA, la que responde en Ayuda. Te digo dónde está cada cosa y te llevo con «Llévame», qué se puede hacer y qué le falta a la clínica para que algo funcione. Respondo con la guía del sistema: no veo pacientes, conversaciones ni montos y no cambio nada. Si no lo sé, te lo digo y te ofrezco enviarlo a odentIA. Me llamo como la del hilo del laberinto: te ayudo a encontrar el camino.",
+        forms: ["quien eres", "que eres", "como te llamas", "cual es tu nombre", "tu nombre", "que puedes hacer", "que sabes hacer", "para que sirves", "eres una persona", "eres un robot"],
+        general: true,
       },
       {
         q: "¿Cómo respondo lo que me pasó Sofi sin entrar a la Bandeja?",
-        a: "Si el tema es tuyo (una duda clínica de tu paciente, o un pago si estás en caja), la fila trae «Responder»: ves su pregunta, escribes y «Enviar y resolver». Sale por su canal citando su pregunta y Sofi sigue con lo demás. Un tema pasa a «Ahora» a las dos horas de clínica abierta esperando: lo que llega con la clínica cerrada no cuenta.",
+        a: "Si el tema es tuyo o nadie lo tomó (una duda clínica de tu paciente, o un pago si estás en caja), la fila trae «Responder»: ves su pregunta, escribes y «Enviar». Sale por su canal citando su pregunta, el tema queda resuelto y Sofi sigue con lo demás; si le debes algo más, «Dejar pendiente». Si lo lleva otra persona, «Responder yo» lo pasa a ti y se le avisa. Un tema pasa a «Ahora» a las dos horas de clínica abierta esperando: lo que llega con la clínica cerrada no cuenta.",
+      },
+      {
+        q: "¿Qué son los horarios y precios que aparecen al responder?",
+        a: "Son ayudas de la caja para responder: los horarios libres con quien la atendió y tu lista de precios. Tocar uno lo escribe en el mensaje, sin apartar la hora. Lo que escribes queda como borrador en este navegador y la fila dice «tienes un borrador sin enviar».",
+        forms: ["no apartar la hora"],
+      },
+      {
+        q: "¿Qué significa «Enseñárselo a Sofi»?",
+        a: "Aparece después de responder algo que Sofi no supo. Deja tu respuesta por aprobar en Agente › Aprender: Sofi la usa recién cuando alguien la aprueba.",
+      },
+      {
+        q: "¿Qué es «Mientras no estabas»?",
+        a: "Una línea que sale una vez al día, la primera vez que miras Inicio: dice lo que hicieron los agentes desde tu visita anterior, solo con lo que tu rol puede ver. Se cierra con su X.",
+      },
+      {
+        q: "¿Por qué dice que un mensaje automático no le llega a todos?",
+        a: "Porque WhatsApp lo clasificó como publicidad y solo sale a quien aceptó novedades. «Arreglar» te lleva a sus mensajes para cambiarle el texto.",
+      },
+      {
+        q: "¿Cómo cambio mi contraseña?",
+        a: "En el menú con tu nombre, abajo a la izquierda, «Cambiar contraseña». Ahí mismo, «Mi perfil» tiene tu nombre, tu foto y la verificación en dos pasos.",
+        forms: ["olvide mi contrasena", "cambiar contrasena", "mi perfil", "cambiar mi foto"],
+        general: true,
+      },
+      {
+        q: "¿Hay un manual?",
+        a: "El manual soy yo: dime con tus palabras qué quieres hacer y te llevo a la pantalla. Abajo, «En esta pantalla suelen preguntar» trae lo más común de donde estás. Para empezar, Inicio muestra los pasos que le faltan a tu clínica.",
+        forms: ["hay un manual", "hay un manual del sistema", "tienen un manual", "tienen una guia", "tienen una guia de inicio", "como uso el sistema", "como funciona el sistema", "como se usa el sistema", "como empiezo"],
+        general: true,
+      },
+      {
+        q: "¿Puedo usar odentIA desde el celular?",
+        a: "Sí. Se abre en el navegador del teléfono, con las mismas pantallas adaptadas. No hace falta instalar nada.",
+        forms: ["puedo usar el sistema desde mi celular", "funciona en el celular", "tienen aplicacion", "hay una app", "hay aplicacion", "tienen aplicacion para iphone"],
+        general: true,
       },
     ],
   },
@@ -90,7 +147,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Bandeja",
     parent: null,
     purpose:
-      "Todas las conversaciones con pacientes y contactos, de todos los canales, en un solo lugar, en cuatro pestañas que no se pisan: «Por atender» (lo que Sofi te pasó, lo que espera a una persona del equipo y lo que no se pudo enviar), «Las atiende Sofi», «Esperan al paciente» y «Cerradas». Cada persona sale una vez, aunque escriba por WhatsApp y por Telegram, y al abrirla ves lo que dijo por todos sus canales. Se buscan por nombre, teléfono, documento o algo que hayan escrito, en todas las pestañas a la vez. Lo que Sofi no puede responder queda como un tema: lo respondes con «Responder» y ella sigue con lo demás; «Contexto» muestra a la persona, su próxima cita y te deja reservarle una. Ninguna queda abierta: Sofi la cierra con una despedida cuando termina o cuando la persona deja de responder, y cualquier mensaje suyo la vuelve a abrir.",
+      "Todas las conversaciones con pacientes y contactos, de todos los canales, en un solo lugar, en cuatro pestañas que no se pisan: «Por atender» (lo que Sofi te pasó, lo que espera a una persona del equipo y lo que no se pudo enviar), «Las atiende Sofi», «Esperan al paciente» y «Cerradas». Aparte, Spam y las personas bloqueadas. Cada persona sale una vez, aunque escriba por WhatsApp y por Telegram, y al abrirla ves lo que dijo por todos sus canales. Se buscan por nombre, teléfono, documento o algo que hayan escrito, en todas las pestañas a la vez, y «Solo las mías» deja tus temas y los que nadie tomó. Lo que Sofi no puede responder queda como un tema: lo respondes con «Responder» y ella sigue con lo demás; «Contexto» muestra a la persona, su próxima cita y te deja reservarle una. Sofi cierra sola las que atiende: con una despedida cuando termina o cuando la persona deja de responder y, si ya reservó su cita, a la hora y sin despedida. Las que lleva una persona del equipo no se cierran solas. Cualquier mensaje suyo la vuelve a abrir.",
     terms: [
       "mensajes",
       "chats",
@@ -110,6 +167,25 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "responder por",
       "otro canal",
       "varios canales",
+      "mensajes de whatsapp",
+      "ver mensajes",
+      "chat",
+      "spam",
+      "bloquear",
+      "bloqueados",
+      "publicidad",
+      "solo las mías",
+      "redes",
+      "correo de un paciente",
+      "pasar conversación",
+      "desbloquear",
+      "escribió",
+      "telegram",
+      "instagram",
+      "messenger",
+      "facebook",
+      "correos de pacientes",
+      "sin responder",
     ],
     writePermission: "conversations.write",
     faqs: [
@@ -123,7 +199,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Y si ya pasaron 24 horas desde que escribió?",
-        a: "Por WhatsApp responde su pregunta igual: tu respuesta queda «Por entregar» y le llega un aviso, «Ver respuesta»; al tocarlo, o al volver a escribir, recibe tu respuesta citando su pregunta. Para ti el tema ya está resuelto. Por Instagram o Messenger no se puede escribirle hasta que vuelva a escribir: si tiene un WhatsApp marcado como suyo, «Escribirle por WhatsApp» le manda tu respuesta por ahí.",
+        a: "Por WhatsApp responde su pregunta igual: tu respuesta queda «Por entregar» y le llega un aviso, «Ver respuesta»; al tocarlo, o al volver a escribir, recibe tu respuesta citando su pregunta. Para ti el tema ya está resuelto. Una respuesta por entregar es solo texto, sin adjuntos, y si Meta aún no aprobó «Ver respuesta» queda guardada hasta que lo apruebe o la persona vuelva a escribir. Si no estás respondiendo una pregunta suya, «Elegir un mensaje aprobado». Por Instagram o Messenger no se puede escribirle hasta que vuelva a escribir: si tiene un WhatsApp marcado como suyo, «Escribirle por WhatsApp» le manda tu respuesta por ahí.",
       },
       {
         q: "¿Por qué canal le llega mi respuesta?",
@@ -135,19 +211,24 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo cierro una conversación?",
-        a: "No hace falta: Sofi la cierra con una despedida cuando termina o cuando la persona deja de responder. Lo tuyo es responder sus temas; al responderlos quedan resueltos. Si de verdad hay que cerrarla sin más, en «…» está «Cerrar sin resolver». Si la persona vuelve a escribir, se reabre sola.",
+        a: "Casi nunca hace falta: Sofi cierra las que atiende. Lo tuyo es responder sus temas; al responderlos quedan resueltos. Las que lleva una persona del equipo no se cierran solas y aparecen en «Te espera». Si de verdad hay que cerrarla sin más, en «…» está «Cerrar sin resolver». Si la persona vuelve a escribir, se reabre sola.",
       },
       {
         q: "¿Por qué se cerró sola una conversación?",
-        a: "Sofi la cierra cuando la persona se despide y no queda nada pendiente («Resuelta») o cuando deja de responder («Sin respuesta del paciente»): antes insiste una vez si había algo por responder y se despide en un horario razonable. Las que tiene una persona del equipo no se cierran solas: aparecen en «Te espera» para que la cierres o sigas.",
+        a: "Sofi la cierra cuando la persona se despide y no queda nada pendiente («Resuelta»), cuando ya reservó su cita y pasó una hora sin mensajes («Resuelta», sin despedida) o cuando deja de responder («Sin respuesta del paciente»): antes insiste una vez si había algo por responder y se despide en un horario razonable. Las que tiene una persona del equipo no se cierran solas: aparecen en «Te espera» para que la cierres o sigas.",
       },
       {
         q: "¿Cómo dejo constancia de que la persona aceptó lo que le propuso Sofi?",
-        a: "En la banda de la conversación, «Registrar confirmación», si ya dijo que sí en el chat; el equipo no aprueba nada por ella. Si te lo dijo por teléfono, en esa misma banda, «Confirmó por teléfono».",
+        a: "En la tarjeta de Sofi, dentro del hilo: «Registrar confirmación», si ya dijo que sí en el chat; el equipo no aprueba nada por ella. Si es una cita y te lo dijo por teléfono, en esa misma tarjeta, «Confirmó por teléfono».",
       },
       {
         q: "¿Cómo veo en qué se basó una respuesta de Sofi?",
         a: "En la conversación, debajo de cada mensaje de Sofi, pulsa «En qué se basó». Verás qué consultó y qué datos se comprobaron antes de enviarlo.",
+      },
+      {
+        q: "¿Qué hago con el spam o con alguien a quien no quiero responder?",
+        a: "En «…» de la conversación. «Es spam» la manda a la pestaña Spam: Sofi no responde y no se cobra; si escribe algo que no es spam, sale sola. «Bloquear a esta persona…» la deja en bloqueados: nadie le escribe y Sofi no le responde. A un paciente no se le marca ni se le bloquea: se archiva desde su página.",
+        forms: ["como marco spam", "como bloqueo a alguien", "bloquear un numero", "marcar como spam"],
       },
     ],
   },
@@ -176,12 +257,27 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "no vino",
       "atendida",
       "sin cerrar",
+      "cambiar la hora",
+      "cambiar cita",
+      "dos citas",
+      "misma hora",
+      "ver citas",
+      "paciente llegó",
+      "mi calendario",
+      "vienes en camino",
+      "calendario de google",
+      "pasar a otra fecha",
+      "reunión",
+      "semana",
+      "ver la semana",
+      "marcar que llegó",
+      "corregir hora",
     ],
     writePermission: "appointments.write",
     faqs: [
       {
         q: "¿Cómo bloqueo un horario?",
-        a: "En Configuración › Horarios y ausencias: registra una ausencia del profesional (de uno o varios días) o un feriado o cierre de la sede. En ese tramo Sofi y el enlace de la persona no reservan; alguien del equipo sí puede, con una advertencia. Las citas que ya estaban no se mueven solas.",
+        a: "En Configuración › Horarios y ausencias: registra una ausencia del profesional (días enteros o unas horas) o un feriado o cierre de la sede. En ese tramo Sofi y el enlace de la persona no reservan; alguien del equipo sí puede, con una advertencia. Las citas que ya estaban no se mueven solas.",
       },
       {
         q: "¿Por qué no aparece un profesional en la agenda?",
@@ -197,7 +293,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Quién le avisa a la persona su cita?",
-        a: "Con «Recordar la cita» prendida (viene así en toda clínica nueva) y Sofi y Argos encendidos, Sofi le avisa al reservar, al mover y al cancelar la cita, y le pide confirmar un día antes y tres horas antes. Los avisos de reserva, cambio y cancelación llegan siempre; los recordatorios, salvo que la persona los haya apagado (entonces «Te espera» te pide llamarla el día antes). Si responde «sí, ahí estaré» o toca «Confirmar», la cita queda confirmada sola; si confirma por sus hijos, Sofi le dice de quiénes eran. «Confirmar cita» en la cita es para cuando te confirma por teléfono o en persona.",
+        a: "Con «Recordar la cita» prendida (viene así en toda clínica nueva) y Sofi y Argos encendidos, Sofi le avisa al reservar, al mover y al cancelar la cita, y le recuerda antes: por defecto un día antes, para confirmar, y tres horas antes; si ya confirmó, ese segundo aviso no le pide confirmar. Las horas se cambian en esa línea de Argos. Los avisos de reserva, cambio y cancelación llegan siempre, salvo a quien pidió no recibir ningún mensaje; los recordatorios, salvo que los haya apagado (entonces «Te espera» te pide llamarla el día antes). Si responde «sí, ahí estaré» o toca «Confirmar», la cita queda confirmada sola; si confirma por sus hijos, Sofi le dice de quiénes eran. «Confirmar cita» en la cita es para cuando te confirma por teléfono o en persona.",
       },
       {
         q: "¿Cómo marco que llegó?",
@@ -209,11 +305,20 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Y si llega tarde después de marcar «No vino»?",
-        a: "Pulsa «Llegó»: la cita se recupera. Si su hora ya la ocupa otra cita, lo dice y puedes reagendarla.",
+        a: "Si es el mismo día, abre la cita y pulsa «Llegó»: se recupera. Si su hora ya la ocupa otra cita, lo dice. Otro día, «Reagendar».",
       },
       {
         q: "¿Cómo le doy cita a alguien que llama y nunca vino?",
-        a: "En «Nueva cita», «Registrar paciente nuevo»: con nombres, apellidos y teléfono basta para reservar, aunque la clínica pida más en su registro. Lo que falta queda pendiente en su página. Ahí mismo puedes anotar, si se lo preguntaste, si acepta novedades y promociones.",
+        a: "En «Nueva cita», «Registrar paciente nuevo»: con nombres, apellidos y teléfono basta para reservar, aunque la clínica pida más en su registro. Lo que falta queda pendiente en su página. Ahí mismo pregúntale si acepta novedades y promociones: sin su respuesta no se guarda.",
+      },
+      {
+        q: "¿Qué es «¿Vienes en camino?»?",
+        a: "Si a los 15 minutos de la hora nadie marcó su llegada, Sofi le pregunta si viene en camino. Solo en una sede que ya marcó alguna llegada en las últimas 12 horas, para no escribirle a quien ya está en la clínica, y dentro del horario de recontacto.",
+      },
+      {
+        q: "¿Cómo veo mis citas en mi calendario?",
+        a: "En la Agenda, «Mi calendario», junto a «Nueva cita»; en el teléfono está en el menú ⋯. Es solo para quien atiende. De cada cita muestra «Paciente» con sus iniciales, nunca el nombre, el servicio ni el motivo. Quien configura el equipo ve quién lo comparte y puede dejar de compartirlo.",
+        forms: ["mi calendario", "calendario de google", "agenda en mi celular"],
       },
     ],
   },
@@ -223,10 +328,9 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Tareas",
     parent: null,
     purpose:
-      "Los pendientes del equipo, con páginas y búsqueda: se abre en «Mías y de mi área» (las tuyas y las sin responsable de tu parte del equipo); «Vencidas» y «Hechas» las filtran, y «Toda la clínica» la ven el propietario y el administrador. Cada tarea dice de quién es y lleva a su persona. Las que dejó Argos se cierran solas cuando ya no hacen falta (la cita pasó, la persona confirmó, el presupuesto se decidió) y dicen por qué. Completar la tarea de un tema de Sofi lo da por resuelto, igual que «Marcar resuelto» en la conversación: Sofi sigue con lo demás.",
+      "Los pendientes del equipo, con páginas y búsqueda: se abre en «Mías y de mi área» (las tuyas y las sin responsable de tu parte del equipo); «Vencidas» y «Hechas» las filtran, y «Toda la clínica» la ven el propietario y el administrador. Cada tarea dice de quién es y lleva a su persona. Las que dejó Argos se cierran solas cuando ya no hacen falta (la cita pasó, la persona confirmó, el presupuesto se decidió) y dicen por qué. Completar la tarea de un tema de Sofi lo da por resuelto, igual que «Marcar resuelto» en la conversación: Sofi sigue con lo demás. Lo que deja el sistema por su cuenta no está aquí: se decide en su fila de «Te espera».",
     terms: [
       "pendientes",
-      "recordatorios",
       "to do",
       "llamar",
       "asignar",
@@ -236,6 +340,13 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "toda la clínica",
       "se cerró sola",
       "te lo pasó el agente",
+      "crear tarea",
+      "nueva tarea",
+      "tarea",
+      "tareas de otros",
+      "pendiente",
+      "acordarme",
+      "recordar algo",
     ],
     writePermission: "tasks.write",
     faqs: [
@@ -245,18 +356,18 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Por qué una tarea se marcó como hecha sola?",
-        a: "Porque su motivo ya no estaba: la cita pasó, la persona confirmó o reservó otra, el presupuesto se decidió o la oportunidad se cerró. La tarea dice «Se cerró sola» y el porqué.",
+        a: "Porque su motivo ya no estaba: la cita pasó, la persona confirmó o reservó otra, el presupuesto se decidió, la oportunidad se cerró o Sofi retomó el tema. La tarea dice «Se cerró sola» y el porqué.",
       },
     ],
   },
   {
     id: "pacientes",
     path: "/people",
-    alsoAt: ["/patients"],
+    alsoAt: ["/patients", "/contacts"],
     title: "Pacientes",
     parent: "Personas",
     purpose:
-      "Todas las personas de la clínica en una lista: pacientes, quienes aún no se registran y sus responsables. Cada persona tiene una sola página, la misma antes y después de registrarla: resumen, conversaciones, citas, datos y, ya registrada, su clínica, su plan y sus cobros, según lo que tu rol puede ver.",
+      "Todas las personas de la clínica en una lista, con las vistas Pacientes, Contactos nuevos, Archivados y Todos, y atajos como «Por agendar», «Presupuesto sin enviar» o «Deben». Cada persona tiene una sola página, la misma antes y después de registrarla: resumen, conversaciones, citas, datos y, ya registrada, su clínica, su plan y sus cobros, según lo que tu rol puede ver.",
     terms: [
       "historia clínica",
       "ficha",
@@ -281,12 +392,36 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "recetas",
       "órdenes",
       "alergias",
+      "atención",
+      "empezar atención",
+      "alergia",
+      "imágenes",
+      "foto del paciente",
+      "nombre del paciente",
+      "borrar paciente",
+      "por agendar",
+      "ya la invité",
+      "antecedentes",
+      "documento",
+      "teléfono del paciente",
+      "enlace personal",
+      "fotos",
+      "receta",
+      "historia",
+      "evolución",
+      "papel firmado",
+      "firmó",
+      "buscar persona",
+      "no encuentro a un paciente",
+      "lo que le hice",
     ],
-    writePermission: "patients.write",
+    // Recepción registra; quien atiende escribe en la historia y arma el presupuesto.
+    writePermission: ["patients.write", "clinical.write", "budgets.write"],
     faqs: [
       {
         q: "¿Cómo registro un paciente nuevo?",
-        a: "Abre su página (desde la Bandeja, o con «Nueva persona» en Pacientes) y pulsa «Registrar»: el formulario ya trae lo que se sabe de ella y solo pide lo que falta. También puedes «Enviarle su enlace»: ahí elige su cita y deja sus datos.",
+        a: "En Pacientes, «Nuevo paciente»: pide nombres, apellidos y celular, te muestra quién coincide para no duplicar y eliges quién completa lo demás (el paciente en su celular, con su código QR, o tú en la misma ventana). Si ya escribió, abre su página y pulsa «Registrar»: trae lo que se sabe de ella. También puedes «Escribirle con su enlace»: abre su conversación con el enlace listo para enviar, y ahí elige su cita y deja sus datos.",
+        forms: ["como creo un paciente nuevo", "como creo un paciente", "como registro a un paciente", "como registro un paciente", "nuevo paciente"],
       },
       {
         q: "¿Qué significa «Faltan datos para atenderla»?",
@@ -298,11 +433,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Dónde quedaron los contactos?",
-        a: "En Pacientes: elige «Por registrar» para quienes escribieron y aún no son pacientes, «Responsables» para quienes hablan por un paciente o «Todos». Cada persona tiene una sola página. Caja y odontología solo ven a los pacientes.",
+        a: "En Pacientes: elige «Contactos nuevos» para quienes escribieron y aún no son pacientes, o «Todos». Quien habla por un paciente se ve en su página, en «Personas vinculadas». Cada persona tiene una sola página. Caja y odontología solo ven a los pacientes.",
       },
       {
         q: "¿Qué mensajes le podemos enviar sin preguntarle?",
-        a: "Los avisos de lo que pasó (su cita reservada, movida o cancelada, su presupuesto, su enlace, su receta y su comprobante) llegan siempre. Los recordatorios de sus citas y los de controles y seguimiento llegan hasta que los apaga. Las novedades y promociones, y retomar un presupuesto o una consulta, solo con su sí. Son los tres interruptores de su página › Datos › Mensajes, los mismos que ella ve en su enlace, en «Tus mensajes».",
+        a: "Los avisos de lo que pasó (su cita reservada, movida o cancelada, su presupuesto, su enlace, su receta y su comprobante) llegan siempre, salvo que pida no recibir ningún mensaje. Los recordatorios de sus citas y los de controles y seguimiento llegan hasta que los apaga. Las novedades y promociones, y retomar un presupuesto o una consulta, solo con su sí. Son los tres interruptores de su página › Datos › Datos personales, en «Mensajes de la clínica», los mismos que ella ve en su enlace, en «Tus mensajes».",
       },
       {
         q: "¿Por qué dice «Aún no es su WhatsApp» junto a su teléfono?",
@@ -314,11 +449,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo anoto que no quiere recordatorios?",
-        a: "En su página › Datos › Mensajes, apaga «Recordatorios de sus citas» y di cómo lo pidió (por teléfono, en persona o por la conversación). Si no quiere nada, «No quiere ningún mensaje de la clínica»: tampoco le llegarán los avisos de sus citas. Ella también puede hacerlo desde el botón «No más recordatorios», escribiendo «BAJA» o pidiéndoselo a Sofi; escribir «cancelar» cancela su cita, no los mensajes.",
+        a: "En su página › Datos › Datos personales, en «Mensajes de la clínica», apaga «Recordatorios de sus citas» y di cómo lo pidió (por teléfono, en persona o por la conversación). Si no quiere nada, «No quiere ningún mensaje de la clínica»: tampoco le llegarán los avisos de sus citas. Ella también puede hacerlo desde el botón «No más recordatorios», escribiendo «BAJA» o pidiéndoselo a Sofi; escribir «cancelar» cancela su cita, no los mensajes.",
       },
       {
         q: "¿Cómo archivo a una persona?",
-        a: "En su página, en el menú de «Más acciones», pulsa «Archivar». Se archiva entera, con su ficha, y se recupera igual desde la vista «Archivados». Si vuelve a escribir o se registra desde su enlace, sale sola del archivo y se le responde como a cualquiera: para no responderle está «Bloquear».",
+        a: "En su página, en el menú de «Más acciones», pulsa «Archivar». Se archiva entera, con su ficha, y se recupera igual desde la vista «Archivados». Si vuelve a escribir o se registra desde su enlace, sale sola del archivo y se le responde como a cualquiera. A quien no es paciente se le puede «Bloquear» desde la conversación para no responderle; a un paciente, no.",
       },
       {
         q: "¿Puedo enviarle el registro a quien ya es paciente?",
@@ -334,7 +469,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Qué pasa si alguien se registra en línea con el documento de otra persona?",
-        a: "El registro no se completa y no se cambia nada de esa persona; a quien se registró se le dice que se comunique con recepción. En «Te espera» aparece «Alguien se registró con el documento de…»: la fila te lleva a esa persona para que revises si es ella, y «Descartar» la quita sin cambiar nada. Si al registrar a un menor escriben el documento de alguien que ya está en la clínica, en «Te espera» aparece «¿… es representante de …?»: «Confirmar» la deja como su representante con el parentesco que escribieron (la madre que registra a su segundo hijo, con un clic) y «No es representante» lo descarta sin vincular a nadie.",
+        a: "El registro no se completa y no se cambia nada de esa persona; a quien se registró se le dice que se comunique con recepción. En «Te espera» aparece «Alguien se registró con su documento»: «Revisar» te lo muestra al lado para ver si es ella, y «Descartar» la quita sin cambiar nada. Si al registrar a un menor escriben el documento de alguien que ya está en la clínica, aparece «¿Es representante de…?»: «Confirmar» la deja como su representante con el parentesco que escribieron (la madre que registra a su segundo hijo, con un clic) y «No es representante» lo descarta sin vincular a nadie.",
       },
       {
         q: "¿Dónde veo sus alergias, qué le toca y su última atención?",
@@ -346,7 +481,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿La atención queda unida a su cita?",
-        a: "Sí. Si el paciente tiene una cita hoy, el botón de la cabecera dice «Atender (10:00)» y la atención se une a ella; al firmarla, la cita queda atendida y sus controles hechos. Si ya hay una atención en curso, el botón dice «Continuar la atención» y te lleva a ella, sin perder lo escrito. Sin cita, «Atender» te pide el motivo.",
+        a: "Sí. Si el paciente tiene una cita hoy, el botón de la cabecera dice «Atender (10:00)» y la atención se une a ella; al firmarla, la cita queda atendida y sus controles hechos. Si ya hay una atención en curso, el botón dice «Continuar la atención» y te lleva a ella, sin perder lo escrito. Sin cita, «Atender» la abre en un clic: el motivo se escribe dentro, en «Consulta», y lo pide el cierre.",
       },
       {
         q: "¿Dónde registro un hallazgo del odontograma?",
@@ -404,11 +539,60 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         q: "¿Se guarda lo que escribo en la atención?",
         a: "Sí, solo, mientras escribes: arriba dice «Guardado» con la hora o «Guardando…». Sin conexión, lo escrito se queda en la pantalla y se guarda al volver; mientras tanto no se puede firmar.",
       },
+      {
+        q: "¿Cómo atiendo a un paciente?",
+        a: "Con «Atender»: en la cabecera de su página, en la cita de la Agenda o en «Mis pacientes de hoy» de Inicio. Abre la atención en un clic y, si tiene una cita hoy, queda unida a ella. Solo lo ve quien escribe en la historia clínica.",
+        forms: ["como empiezo una atencion", "como inicio una atencion", "como abro una atencion", "nueva atencion"],
+      },
+      {
+        q: "¿Cómo dicto una atención?",
+        a: "Dentro de la atención, pulsa «Dictar» y habla: Clío ordena lo que dices en sugerencias dentro de cada bloque, y tú las confirmas o firmas. Solo aparece si la clínica encendió a Clío, en Agente › Clío, y para quien lleva la atención. El micrófono solo se enciende con «Dictar» o «Reanudar», y nada entra a la historia sin que lo confirmes.",
+        forms: ["como uso el dictado", "dictado", "dictar", "como funciona clio", "como funciona el dictado"],
+        general: true,
+      },
+      {
+        q: "¿Cómo corrijo el nombre de una persona?",
+        a: "En su página, en «Más acciones», «Editar datos personales»; lo que escribió el equipo manda. Ella puede pulsar «Corregir» junto a su nombre en su enlace, y si por el chat dice que se llama de otra forma, a recepción le llega la tarea «Revisar su nombre».",
+        forms: ["como corrijo el nombre de un paciente", "como cambio el nombre de un paciente", "nombre mal escrito"],
+      },
+      {
+        q: "¿Cómo borro a un paciente?",
+        a: "Normalmente se archiva. Borrar de verdad es de Administración y responde a un pedido: en su página, Datos › «Pedidos sobre sus datos», «Revisar y borrar…» dice lo que se borra, lo que queda bloqueado y lo que hay que saber (citas, deuda), y se confirma escribiendo BORRAR.",
+        forms: ["quiero borrar a un paciente", "como elimino a un paciente", "eliminar paciente", "borrar paciente"],
+      },
+      {
+        q: "¿Cómo pongo la foto de un paciente?",
+        a: "En su página, toca su foto o sus iniciales, arriba: eliges la imagen, la encuadras y «Guardar». Ahí mismo está «Quitar foto».",
+        forms: ["como subo una foto del paciente", "foto del paciente", "cambiar foto del paciente"],
+      },
+      {
+        q: "¿Dónde subo una radiografía?",
+        a: "En su página › Clínica › Documentos, con «Nuevo», o en el bloque «Documentos» de la atención: imagen o archivo, con su tipo y la fecha de toma. Es una fila más de la lista y «Ver» la abre, con «Comparar con».",
+        forms: ["donde subo una radiografia", "subir imagen", "subir radiografia", "subir examen"],
+      },
+      {
+        q: "¿Qué son «Por agendar», «Deben» y los demás atajos?",
+        a: "Filtros de la lista de Pacientes con lo que hay que mover: «Por agendar», «Presupuesto sin enviar», «Presupuesto sin respuesta», «Control por reservar», «Faltan datos», «Por invitar a volver» y «Deben». En «Por invitar a volver», «Ya la invité» anota que la invitaste por teléfono o en persona.",
+      },
+      {
+        q: "¿Qué hago si no se le puede enviar su enlace?",
+        a: "La página dice por qué y deja «Copiar enlace», para pegarlo cuando escriba, y «Mostrar su código», para que lo escanee ahí mismo.",
+        forms: ["no le puedo enviar su enlace"],
+      },
+      {
+        q: "¿Cómo le doy acceso al portal?",
+        a: "En su página › Datos › Acceso al portal, «Dar acceso al portal»: quién entra (la persona, o su representante si es menor), qué verá, «Comprobé su identidad: vi su documento» y cómo le llega (QR si está aquí, o su WhatsApp). El código de 6 dígitos se lo dices tú, en persona o por llamada: nunca va con el enlace.",
+      },
+      {
+        q: "¿Qué hago si cambió de teléfono y no entra al portal?",
+        a: "Si lo pide por el chat, Sofi lo deja en «Te espera». En su página › Datos › Acceso al portal, «Enviar nuevo enlace»: no hace falta volver a comprobar su identidad. El código se lo dices aparte.",
+      },
     ],
   },
   {
     id: "oportunidades",
     path: "/pipeline",
+    alsoAt: ["/opportunities"],
     title: "Oportunidades",
     parent: "Personas",
     purpose:
@@ -426,16 +610,20 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "mover a",
       "avanza sola",
       "tomar",
+      "no se decidieron",
+      "seguimiento de interesados",
+      "preguntaron",
+      "no cierran",
     ],
     writePermission: "crm.write",
     faqs: [
       {
         q: "¿Por qué una oportunidad cambió de paso sola?",
-        a: "Porque pasó algo real: al agendar su cita pasa a «Evaluación agendada», al presentarle el presupuesto a «Presupuesto enviado», y al aceptarlo (aunque sea en parte) se gana; al rechazarlo se pierde. La tarjeta y el historial dicen qué la movió.",
+        a: "Porque pasó algo real: al agendar su cita pasa a «Evaluación agendada», al presentarle el presupuesto a «Presupuesto enviado», y al aceptarlo (aunque sea en parte) se gana; al rechazarlo se pierde. Si cancela la evaluación y no le queda otra cita, vuelve sola a «Interesado». La tarjeta y el historial dicen qué la movió.",
       },
       {
         q: "¿Cómo cierro una oportunidad?",
-        a: "Ábrela y pulsa «Ganada» o «Perdida» (o arrástrala a «Decidió»). Perdida pide el motivo: precio, eligió otra clínica, no responde, ya no lo necesita u otro.",
+        a: "Ábrela y pulsa «Ganada» o «Perdida», o arrástrala a esas columnas de «Decidió». Perdida pide el motivo: precio, eligió otra clínica, no responde, ya no lo necesita u otro.",
       },
       {
         q: "¿Qué es «Recepción · sin persona asignada»?",
@@ -453,7 +641,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Agente",
     parent: null,
     purpose:
-      "El resumen de tus agentes (Sofi, tu agente de recepción; Clío, tu agente clínico, y Argos, tu agente administrador): cómo van, qué necesita de ti y la entrada para configurar cada uno, el «Horario de recontacto», lo que aprenden y lo que sabe Sofi. El número junto a Agente en el menú cuenta lo que se resuelve aquí: respuestas por revisar y lecciones por aprobar. Los casos que te pasa Sofi están en «Te espera», y el número junto a Inicio cuenta las personas que te esperan. En «Actividad» ves lo que envió, propuso o te pasó; lo que espera el sí de una persona, en su conversación de la Bandeja.",
+      "El resumen de tus agentes (Sofi, tu agente de recepción; Clío, tu agente clínico, y Argos, tu agente administrador): cómo van, qué necesita de ti y la entrada para configurar cada uno, el «Horario de recontacto», lo que aprenden y lo que sabe Sofi. El número junto a Agente en el menú cuenta lo que se resuelve aquí: respuestas por revisar y lecciones por aprobar. Los casos que te pasa Sofi están en «Te espera», y el número junto a Inicio cuenta las personas que te esperan. En «Actividad» ves lo que envió, propuso o te pasó (recepción entra directo ahí); lo que espera el sí de una persona, en su conversación de la Bandeja.",
     terms: [
       "sofi",
       "clío",
@@ -480,12 +668,26 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "lo que el agente debe saber",
       "indicaciones",
       "reglas",
+      "apagar sofi",
+      "encender sofi",
+      "encender clío",
+      "apagar clío",
+      "probar sofi",
+      "qué sabe sofi",
+      "lo que sofi debe saber",
+      "recepcionista virtual",
+      "activar inteligencia artificial",
+      "enseñar",
+      "corregir",
+      "la ia",
+      "dato mal",
+      "qué sabe el bot",
     ],
     writePermission: "agent.write",
     faqs: [
       {
         q: "¿Cómo enciendo el agente?",
-        a: "En Agente, en la fila de Sofi, usa el interruptor. Te muestra cinco comprobaciones (canal, que el modelo responda, que sepa tu horario y tus servicios, si lo probaste y quién recibe los casos); lo que falta te lleva a donde se resuelve. Sin un canal o sin un modelo que responda no se enciende.",
+        a: "En Agente › Sofi, usa el interruptor de arriba («Ver y encender» te lleva desde Agente). Te muestra cinco comprobaciones (canal, que el modelo responda, que sepa tu horario y tus servicios, si lo probaste y quién recibe los casos); lo que falta te lleva a donde se resuelve. Sin un canal o sin un modelo que responda no se enciende. Clío y Argos tienen el suyo en su página.",
       },
       {
         q: "¿Qué hago si el modelo no responde?",
@@ -493,11 +695,12 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cuándo cierra Sofi una conversación?",
-        a: "Cuando la persona agradece o se despide y no queda nada pendiente, y cuando deja de responder: por defecto a las 22 horas de su último mensaje (lo cambias en la página de Sofi, entre 6 y 23 horas, porque pasadas 24 WhatsApp ya no deja despedirse). Cuando la persona escribe, Sofi responde siempre, a cualquier hora y por cualquier canal; y si pasa el caso a una persona, siempre le avisa.",
+        a: "Cuando la persona agradece o se despide y no queda nada pendiente, cuando ya reservó su cita y pasó una hora sin mensajes, y cuando deja de responder: por defecto a las 22 horas de su último mensaje (lo cambias en la página de Sofi, entre 6 y 23 horas, porque pasadas 24 WhatsApp ya no deja despedirse). Con una persona del equipo a cargo no se cierra sola. Cuando la persona escribe, Sofi responde siempre, a cualquier hora y por cualquier canal; y si pasa el caso a una persona, siempre le avisa.",
       },
       {
         q: "¿Cómo le enseño algo al agente?",
-        a: "Sofi lee al momento los datos de tu clínica: horario del equipo, sedes, servicios y precios, promociones y medios de pago; se editan donde viven y Agente › Conocimiento te muestra todo lo que toma. Ahí agregas lo que solo tú sabes (estacionamiento, cuotas, seguros…). Cómo quieres que atienda va en Agente › Sofi, en «Lo que el agente debe saber»: una sola lista con lo que escribe la clínica («Escrita por la clínica», con quién y cuándo) y lo que aprendió de tus correcciones («Aprendida», con la conversación de la que salió y quién la aprobó). Todas se editan y se retiran igual, y lo retirado se puede restaurar. Si respondió mal o buscó algo y no lo encontró, está en Agente › Aprender, en «Por revisar»: lo corriges o lo das por bueno, y lo que apruebes se puede retirar después. Al aprobar o escribir una regla que contradice otra te lo dice antes, y eliges cuál queda.",
+        a: "Sofi lee al momento los datos de tu clínica: horario del equipo, sedes, servicios y precios, promociones y medios de pago; se editan donde viven y Agente › Conocimiento te muestra todo lo que toma. Ahí agregas lo que solo tú sabes (estacionamiento, cuotas, seguros…). Cómo quieres que atienda va en Agente › Sofi, en «Lo que Sofi debe saber»: una sola lista, de hasta 40 reglas de 300 caracteres, con lo que escribe la clínica («Escrita por la clínica», con quién y cuándo) y lo que aprendió de tus correcciones («Aprendida», con la conversación de la que salió y quién la aprobó). Todas se editan y se retiran igual, y lo retirado se puede restaurar. Si respondió mal o buscó algo y no lo encontró, está en Agente › Aprender, en «Por revisar»: lo corriges o lo das por bueno, y lo que apruebes se puede retirar después. Al aprobar o escribir una regla que contradice otra te lo dice antes, y eliges cuál queda.",
+        forms: ["como le enseno algo a sofi", "como le enseno a sofi", "como entreno a sofi"],
       },
       {
         q: "¿A qué hora le escribe odentIA a una persona?",
@@ -509,7 +712,37 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Dónde veo las citas que esperan el sí de alguien?",
-        a: "En su conversación de la Bandeja: la fila dice «Espera su sí» y la banda de Sofi tiene «Registrar confirmación» (si dijo que sí en el chat) y «Confirmó por teléfono» (si lo dijo por otra vía); las dos reservan con la misma regla que Sofi y, si el horario ya no está libre, te lo dicen. También están en el panel del botón «Agente», en «Esperan». Si no responde, Sofi insiste una vez y, al despedirse, le dice que dejó libre ese horario.",
+        a: "En su conversación de la Bandeja: la fila dice «Espera su sí» y la tarjeta de Sofi tiene «Registrar confirmación» (si dijo que sí en el chat) y «Confirmó por teléfono» (si lo dijo por otra vía); las dos reservan con la misma regla que Sofi y, si el horario ya no está libre, te lo dicen. Si no responde, Sofi insiste una vez y, al despedirse, le dice que dejó libre ese horario.",
+      },
+      {
+        q: "¿Qué es Sofi?",
+        a: "Tu agente de recepción: atiende a quien escribe a la clínica por todos los canales, responde, agenda y hace seguimiento, y pasa el caso a una persona cuando corresponde. Clío es tu agente clínico, que ordena lo que dicta quien atiende, y Argos tu agente administrador, que mira cómo va la clínica y hace lo que le encargues.",
+        forms: ["quien es sofi", "que hace sofi", "quien es clio", "que es clio", "que hace clio"],
+      },
+      {
+        q: "¿Cómo apago a Sofi?",
+        a: "En Agente, con el interruptor de su fila, o en Agente › Sofi. Apagada, los mensajes pasan a tu equipo.",
+        forms: ["como apago el agente", "apagar el agente"],
+      },
+      {
+        q: "¿Cómo enciendo a Clío?",
+        a: "En Agente › Clío, con su interruptor. Después, quien lleva la atención ve «Dictar» dentro de ella.",
+        forms: ["como activo a clio", "como apago a clio"],
+      },
+      {
+        q: "¿Cómo cambio el nombre de Sofi?",
+        a: "En Agente › Sofi, abre «La base» y cambia «Se presenta como». Vale solo para tu clínica; si lo dejas vacío, se llama Sofi.",
+        forms: ["como le cambio el nombre a sofi", "como le pongo otro nombre a sofi"],
+      },
+      {
+        q: "¿Cómo pruebo a Sofi?",
+        a: "En Agente › Sofi, «Probar» abre una conversación real con una persona de prueba, también con Sofi apagada: lo que hace con su sí se crea de verdad, marcado como prueba, y se borra con la prueba.",
+        forms: ["como la pruebo", "probar a sofi", "como probar el agente"],
+      },
+      {
+        q: "¿Cómo corrijo una respuesta de Sofi?",
+        a: "Debajo de su mensaje, «En qué se basó» › «Corregir», o en Agente › Aprender, «Por revisar». Tu corrección queda como una lección y Sofi la usa cuando alguien la aprueba.",
+        forms: ["por que sofi respondio mal", "sofi respondio mal", "sofi se equivoco", "corregir a sofi"],
       },
     ],
   },
@@ -519,33 +752,36 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Argos",
     parent: "Agente",
     purpose:
-      "Argos, tu agente administrador, mira cómo va la clínica. Su página es la lista de lo que puede hacer por su cuenta: recordar citas, avisar controles, retomar presupuestos u oportunidades o dejar tareas a tu equipo. Cada línea se prende o se apaga con su interruptor y dice quién lo hace, Sofi o una persona.",
+      "Argos, tu agente administrador, mira cómo va la clínica. Su página es la lista de lo que puede hacer por su cuenta: recordar citas, avisar controles, retomar presupuestos u oportunidades o dejar tareas a tu equipo. Cada línea se prende o se apaga con su interruptor y dice quién lo hace: «Lo hace Argos» o «Le toca a una persona».",
     terms: [
       "argos",
       "administrador",
       "recordatorios",
       "mensajes automáticos",
       "automatizaciones",
-      "confirmar cita",
       "avisos",
       "reglas",
       "seguimientos",
       "recomendaciones",
       "asesor",
+      "enviar recordatorio",
+      "recordatorio",
+      "prender recordatorios",
+      "recordatorio no llega",
     ],
     writePermission: "agent.write",
     faqs: [
       {
         q: "¿Dónde enciendo los recordatorios de cita?",
-        a: "«Recordar la cita» viene prendida. Para que salga, enciende a Argos con el interruptor de arriba y a Sofi en su página: la página de Argos te avisa si falta alguno. El recordatorio es parte del servicio y llega a todos, salvo a quien se dio de baja.",
+        a: "«Recordar la cita», la línea «Una persona tiene una cita», viene prendida. Para que salga, enciende a Argos con el interruptor de arriba y a Sofi en su página: la página de Argos te avisa si falta alguno. El recordatorio es parte del servicio y llega a todos, salvo a quien se dio de baja.",
       },
       {
         q: "¿Puedo pedirle algo con mis palabras?",
-        a: "Sí. En Agente › Argos, escribe en «Dile qué quieres que haga» lo que quieres: prender, apagar o ajustar una línea, o que le ofrezca otra fecha a quien cancela su cita. Te lo deja como borrador con su flujo y una prueba con tus últimos 30 días; nada cambia hasta que lo prendas o lo guardes.",
+        a: "Sí, con Argos encendido y si administras el agente. En Agente › Argos, escribe en «Dile qué quieres que haga» lo que quieres: prender, apagar o ajustar una línea, o que le ofrezca otra fecha a quien cancela su cita. Te lo deja como borrador con su flujo y una prueba con tus últimos 30 días; nada cambia hasta que lo prendas o lo guardes.",
       },
       {
         q: "¿Por qué Sofi no le escribió a una persona?",
-        a: "En Agente › Argos, abre la línea y mira «Qué pasó con cada persona»: dice el motivo (pidió no recibirlo, no tiene WhatsApp ni correo, o WhatsApp aún no aprueba el mensaje) y cómo habilitarlo.",
+        a: "En Agente › Argos, abre la línea y mira «Qué pasó, persona por persona»: dice el motivo (pidió no recibirlo, no tiene WhatsApp ni correo, o WhatsApp aún no aprueba el mensaje) y cómo habilitarlo. Además, sale como mucho un mensaje al día por persona y, al llegar al presupuesto del mes, se pausan los mensajes para recuperar pacientes.",
       },
       {
         q: "¿A qué hora se escriben los mensajes de Argos?",
@@ -558,7 +794,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     path: "/finance",
     title: "Finanzas",
     parent: "Gestión",
-    purpose: "La caja y lo cobrado: cierres de caja, movimientos, gastos, deudas y comisiones.",
+    purpose:
+      "La caja y lo cobrado, por sede: Caja (el día, con lo que hay por cobrar ahora), Cobros (todos los tickets, con búsqueda y filtros), Deudas, Gastos y, para quien administra, Comisiones.",
     terms: [
       "caja",
       "cobros",
@@ -569,7 +806,6 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "cierre de caja",
       "deudas",
       "cobranza",
-      "comisiones",
       "a favor",
       "saldo",
       "aplicar lo que tiene a favor",
@@ -577,6 +813,30 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "devolver",
       "devolución",
       "reembolso",
+      "cobrar",
+      "cobro",
+      "registrar pago",
+      "registrar un cobro",
+      "cobrar atención",
+      "lo que me deben",
+      "ticket",
+      "gasto",
+      "cuánto cobramos",
+      "pago",
+      "devolver",
+      "anular",
+      "adelanto",
+      "cuotas",
+      "movimientos",
+      "movimientos de caja",
+      "cuadrar caja",
+      "pagó con",
+      "me debe",
+      "nos deben",
+      "los que deben",
+      "pagó la mitad",
+      "pago con yape",
+      "cobrar consulta",
     ],
     writePermission: "finance.write",
     faqs: [
@@ -587,6 +847,16 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         q: "¿Anulo el ticket o hago una devolución?",
         a: "«Anular ticket» es para un error al cobrar (otro medio, otro monto, otra persona): deshace la venta y el pago, los productos vuelven a la sede y lo atendido queda por cobrar; después cobras de nuevo y sale otro ticket. Se puede hasta el cierre de caja; después, administración. Si el paciente vuelve otro día, devuelve algo o pide su dinero, abre su ticket y usa «Devolver»: la venta queda, eliges qué devuelve y si vuelve a la sede, y le pagas en el momento o le queda a favor. La devolución tiene su número y se imprime y se envía como el ticket.",
+      },
+      {
+        q: "¿Dónde busco un ticket de otro día?",
+        a: "En Finanzas › Cobros: la tabla de todos los tickets, con lo que suma lo que ves. Un número busca en todas las fechas y el ticket se abre al lado.",
+        forms: ["donde veo un ticket viejo", "buscar ticket", "buscar boleta"],
+      },
+      {
+        q: "¿Cómo cobro una atención?",
+        a: "En Finanzas › Caja, «Por cobrar ahora» trae lo atendido, o «Cobrar» para empezar; eliges el medio de pago y sale su ticket. El comprobante le llega por correo y queda en su enlace.",
+        forms: ["como cobro", "como le cobro a un paciente", "como registro un pago", "como registro un cobro"],
       },
     ],
   },
@@ -610,14 +880,23 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "deja en la pieza",
       "cómo dice el precio",
       "precio exacto",
-      "desde",
       "solo con evaluación",
+      "servicio",
+      "servicios",
+      "agregar servicio",
+      "precio desde",
+      "cambiar precio",
+      "promociones",
+      "promoción",
+      "descuento",
+      "oferta",
+      "lo que se le explica al paciente",
     ],
     writePermission: "settings.write",
     faqs: [
       {
         q: "¿Cómo elijo qué precio dice Sofi?",
-        a: "Cada servicio dice su precio de una de tres formas: «Precio exacto», «Desde» (como mínimo, y el final se define en la evaluación) o «Solo con evaluación» (no dice ningún número y ofrece la evaluación). Al agregar servicios se pregunta una vez «¿Cómo dice el agente estos precios?», con «Precio exacto» marcado. Para cambiar varios a la vez, márcalos en la lista y elige «Cómo dice el precio». Caja y presupuesto usan siempre la tarifa.",
+        a: "Cada servicio dice su precio de una de tres formas: «Precio exacto», «Desde» (como mínimo, y el final se define en la evaluación) o «Solo con evaluación» (no dice ningún número y ofrece la evaluación). Al agregar servicios de la biblioteca se pregunta una vez «¿Cómo dice Sofi estos precios?», con «Precio exacto» marcado; un servicio propio nace «Solo con evaluación». Para cambiar varios a la vez, márcalos en la lista y elige «Cómo dice el precio». Caja y presupuesto usan siempre la tarifa.",
       },
       {
         q: "¿Sofi manda la lista de precios?",
@@ -626,6 +905,15 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         q: "¿Qué es «Deja en la pieza»?",
         a: "Lo que el servicio deja dibujado en el odontograma al completarse: la resina, una restauración de resina; la corona, su corona; la exodoncia, una pieza ausente. Solo aplica a servicios por pieza o por superficies, y lo que va en las caras pide un servicio por superficies. Los de la biblioteca ya lo traen; en uno propio lo eliges al crearlo o editarlo. En clínicas de Perú se elige también el material o el tipo, con su sigla; la causa de una ausencia se deduce al completarla.",
+      },
+      {
+        q: "¿Dónde creo una promoción?",
+        a: "En Servicios y precios › Promociones. Con «Informar» encendido, Sofi ofrece la promoción vigente que aplica, con su precio, el ahorro y la fecha de fin.",
+        forms: ["como hago una promocion", "crear promocion", "como pongo un descuento"],
+      },
+      {
+        q: "¿Dónde escribo lo que se le explica al paciente de un servicio?",
+        a: "En el formulario del servicio, en «Lo que se le explica al paciente». «Usar el texto sugerido» llena los campos con el de la biblioteca, y nada le llega a un paciente hasta que lo guardes.",
       },
     ],
   },
@@ -643,6 +931,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "honorarios",
       "liquidación",
       "mis comisiones",
+      "cuánto le toca",
     ],
     writePermission: "commissions.write",
   },
@@ -671,8 +960,19 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "lotes",
       "dar de baja lo vencido",
       "traslado entre sedes",
+      "vender producto",
+      "vender",
+      "agregar producto",
+      "producto",
+      "guantes",
+      "descontar",
+      "se acabó",
+      "cuánto nos queda",
+      "llegaron cajas",
+      "resina",
+      "anestesia",
     ],
-    writePermission: "inventory.write",
+    writePermission: ["inventory.write", "inventory.receive"],
     faqs: [
       {
         q: "¿Cómo cargo mis productos la primera vez?",
@@ -734,11 +1034,21 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "resumen del lunes",
       "correo semanal",
       "fijar",
+      "ver reportes",
+      "reporte",
+      "cuántos pacientes nuevos",
+      "cuánto cobramos este mes",
+      "excel",
+      "números del mes",
+      "cuánto entró",
+      "cuánto vendimos",
+      "ventas",
+      "comparado",
     ],
     faqs: [
       {
         q: "¿Qué le puedo preguntar a Argos en Reportes?",
-        a: "Por unas 30 cifras de Reportes: lo cobrado, lo que deja, los gastos, las deudas, las comisiones, los pacientes nuevos, por dónde nos buscaron, los presupuestos aceptados, las inasistencias, la agenda ocupada y lo que hizo el agente, también por profesional, por sede o por mes. Responde al lado, con la misma consulta de la pantalla, el periodo y la sede de arriba (o los que digas: «¿y en agosto?») y «Así lo calculé». Si duda, te pregunta; si no sabe, lo dice y puedes enviarlo a odentIA como pedido. No ve la historia clínica ni hace nada: para que el agente actúe, se prende su línea. Lo prende quien administra el agente, y hay un tope de 200 preguntas al día por clínica.",
+        a: "Por lo que registra la clínica: lo cobrado, lo que deja, los gastos, las deudas, las comisiones, los pacientes nuevos, por dónde nos buscaron, los presupuestos aceptados, las inasistencias, la agenda ocupada y lo que hizo el agente, también por profesional, por sede o por mes. Responde al lado, con el periodo y la sede de arriba (o los que digas: «¿y en agosto?») y «Así lo calculé»; cada respuesta dice si es una «Cifra oficial», la misma cuenta de Reportes, o un «Cálculo de Argos». Si duda, te pregunta; si no tiene el dato, dice qué falta y lo más cercano. No responde preguntas clínicas ni hace nada: para que el agente actúe, se prende su línea. Lo prende quien administra el agente. El plan trae preguntas por mes: cuántas quedan y cómo sumar más está en Plan y pagos.",
       },
       {
         q: "¿Cómo fijo una respuesta en el Resumen?",
@@ -783,13 +1093,14 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "zona horaria",
       "empresa",
       "razón social",
-      "suscripción",
-      "plan y pagos",
-      "pagar odentia",
       "cie-10",
       "cie-11",
       "lista de diagnósticos",
       "códigos de diagnóstico",
+      "impuestos",
+      "igv",
+      "iva",
+      "cambiar nombre de la clínica",
     ],
     writePermission: "settings.write",
     faqs: [
@@ -806,14 +1117,16 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         a: "En tres pasos: lo que propone el odontograma (una caries en la 16 propone su código), los más usados en tu clínica o el buscador de toda la lista, que no distingue tildes ni mayúsculas y muestra primero lo odontológico. «Presuntivo» basta para cerrar. Si la persona ya tenía ese diagnóstico, el sistema lo anota solo como «Ya diagnosticado antes».",
       },
       {
-        q: "¿Dónde pago la suscripción de odentIA?",
-        a: "Quien es propietario o administrador abre Configuración › Plan y pagos, o el menú con el nombre de la clínica, arriba a la izquierda. Ahí consulta el plan y aporta un comprobante; subirlo no confirma el pago. Plan y pagos y Ayuda siguen disponibles aunque la clínica esté en solo lectura.",
+        q: "¿Dónde configuro los impuestos?",
+        a: "En Datos de la clínica, «Impuestos»: dice lo que vale y «Cambiar» ofrece las tasas del país u «Otra tasa…». El ticket separa subtotal e impuesto, y Reportes › Finanzas dice cuánto de lo cobrado es impuesto.",
+        forms: ["igv", "iva", "impuestos"],
       },
     ],
   },
   {
     id: "sucursales",
     path: "/settings/branches",
+    alsoAt: ["/branches"],
     title: "Sedes",
     parent: SETTINGS,
     purpose:
@@ -827,18 +1140,24 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "dirección",
       "otra sede",
       "más de una sede",
+      "agregar sede",
+      "abrir otra sede",
+      "dirección",
+      "consultorio",
+      "local",
     ],
     writePermission: "settings.write",
     faqs: [
       {
         q: "¿Puedo tener más de una sede?",
-        a: "Sí, dentro del límite del plan de tu clínica. Cada sede se agrega en Configuración › Sedes, con su dirección y su zona horaria.",
+        a: "Sí, las que necesites. Cada sede se agrega en Configuración › Sedes, con su dirección y su zona horaria.",
       },
     ],
   },
   {
     id: "equipo",
     path: "/settings/team",
+    alsoAt: ["/members"],
     title: "Equipo",
     parent: SETTINGS,
     purpose:
@@ -853,6 +1172,19 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "agregar a alguien",
       "accesos",
       "miembros",
+      "profesional",
+      "cambiar rol",
+      "invitar usuario",
+      "verificación en dos pasos",
+      "dos pasos",
+      "comparte su agenda",
+      "quitar acceso",
+      "invitación",
+      "no le llegó la invitación",
+      "no puede entrar",
+      "usuario",
+      "crear usuario",
+      "no puede entrar a caja",
     ],
     writePermission: "settings.write",
     faqs: [
@@ -861,8 +1193,17 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         a: "En Configuración › Equipo, pulsa «Invitar al equipo», escribe su correo y elige su rol. Le llega una invitación para crear su cuenta.",
       },
       {
-        q: "¿Cómo sé quién atiende pacientes?",
+        q: "¿Cómo sé qué días atiende cada persona del equipo?",
         a: "En Configuración › Equipo, la columna «Atiende» dice qué días atiende cada persona. Un profesional que aún no tiene horario dice «Sin horario». Un propietario o administrador atiende solo si le pones horario. Si alguien deja de atender, porque sale del equipo o cambia de rol, su horario se cierra y sus citas por venir quedan en la Agenda, marcadas para pasarlas a otra persona.",
+      },
+      {
+        q: "¿Cómo pido la verificación en dos pasos al equipo?",
+        a: "La activa cada persona en Mi perfil. Quien configura el equipo puede pedírsela a todos desde Configuración › Equipo. A quien cambió de teléfono y no puede entrar, «…» › «Restablecer verificación en dos pasos».",
+        forms: ["verificacion en dos pasos", "dos factores", "doble factor"],
+      },
+      {
+        q: "¿Qué significa «Comparte su agenda»?",
+        a: "Que esa persona ve sus citas en su propio calendario, con «Mi calendario» de la Agenda. En «…», «Dejar de compartir su agenda» lo apaga, sin ver su enlace.",
       },
     ],
   },
@@ -872,7 +1213,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Horarios y ausencias",
     parent: SETTINGS,
     purpose:
-      "El horario semanal y las ausencias de cada profesional, y de cada sede sus unidades dentales, sus feriados y cierres y lo que dura una cita regular. Sin un horario aquí no se pueden reservar citas.",
+      "El horario semanal y las ausencias de cada profesional, y de cada sede sus unidades dentales, sus feriados y cierres y lo que dura una cita regular. Sin un horario aquí, Sofi y el enlace de reserva no ofrecen citas de esa persona; el equipo puede reservar igual, con una advertencia.",
     terms: [
       "horarios",
       "disponibilidad",
@@ -887,6 +1228,19 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "feriados",
       "cierres",
       "duración de la cita",
+      "horario del profesional",
+      "horario de un profesional",
+      "vacaciones del profesional",
+      "unidad dental",
+      "agregar unidad dental",
+      "horario",
+      "feriado",
+      "sillón",
+      "no viene",
+      "no atendemos",
+      "a qué hora atiende",
+      "qué días atiende",
+      "agregar sala",
     ],
     writePermission: "settings.write",
     faqs: [
@@ -919,6 +1273,9 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "autoridad de datos",
       "ANPD",
       "privacidad",
+      "ley",
+      "tratamos los datos",
+      "quién recibe los datos",
     ],
     faqs: [
       {
@@ -946,6 +1303,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "quién atiende",
       "especialista",
       "nadie atiende",
+      "especialidad",
+      "atiende especialidad",
+      "pediatría",
+      "periodoncia",
     ],
     writePermission: "settings.write",
     faqs: [
@@ -973,6 +1334,9 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "plantillas",
       "firma del paciente",
       "documentos para firmar",
+      "ficha propia",
+      "mis preguntas",
+      "formulario propio",
     ],
     writePermission: "settings.write",
     faqs: [
@@ -1000,7 +1364,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Registro de pacientes",
     parent: SETTINGS,
     purpose:
-      "Qué se le pide a un paciente cuando se registra con un enlace, y el aviso de privacidad que acepta. Lo que marcas obligatorio vale igual para el alta en recepción, el registro con QR, la reserva por enlace y el aviso «Faltan datos para atenderla».",
+      "Qué se le pide a un paciente cuando se registra con un enlace, y el aviso de privacidad que acepta. Lo que marcas obligatorio no le deja enviar su registro sin responderlo; en recepción nunca impide registrar y aparece como «Faltan datos para atenderla».",
     terms: [
       "formulario de registro",
       "enlace de registro",
@@ -1009,14 +1373,17 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "alta de paciente",
       "obligatorio",
       "opcional",
-      "no se pide",
       "datos censales",
+      "no preguntar",
+      "qué datos le pido",
+      "datos al registrarse",
+      "obligatorio el documento",
     ],
     writePermission: "settings.write",
     faqs: [
       {
         q: "¿Puedo volver obligatorio el estado civil o la ocupación?",
-        a: "No. El estado civil, el nivel educativo, la ocupación, cómo nos conoció y la procedencia solo pueden ser «Opcional» o «No se pide»: nadie los usa para atender. Nombres y apellidos, fecha de nacimiento y un teléfono o correo se piden siempre.",
+        a: "No. El estado civil, el nivel educativo, la ocupación, cómo nos conoció y la procedencia solo pueden ser «Opcional» o «No preguntar»: nadie los usa para atender. Nombres y apellidos, fecha de nacimiento y un teléfono o correo se piden siempre.",
       },
     ],
   },
@@ -1032,24 +1399,20 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "acceso de pacientes",
       "que el paciente vea sus citas",
       "acceso del paciente",
-      "pin",
       "código",
       "huella",
       "volver a entrar",
+      "que vea sus pagos",
+      "que no vea",
+      "ver sus citas",
+      "ver por internet",
+      "su página personal",
     ],
     writePermission: "settings.write",
     faqs: [
       {
-        q: "¿Cómo le doy acceso al portal?",
-        a: "En su página › Datos › Acceso al portal, «Dar acceso al portal»: quién entra (la persona, o su representante si es menor), qué verá, «Comprobé su identidad: vi su documento» y cómo le llega (QR si está aquí, o su WhatsApp). El código de 6 dígitos se lo dices tú, en persona o por llamada: nunca va con el enlace.",
-      },
-      {
         q: "¿Cuánto dura el acceso?",
         a: "El acceso no vence: dura hasta que alguien pulse «Quitar acceso», que cierra todo. El enlace de recepción vale 3 días. La primera vez guarda su acceso en el teléfono y después entra con su huella o su cara; si su teléfono no puede guardarlo, lo recordamos 30 días.",
-      },
-      {
-        q: "¿Qué hago si cambió de teléfono?",
-        a: "Si lo pide por el chat, Sofi lo deja en «Te espera». En su página › Datos › Acceso al portal, «Enviar nuevo enlace»: no hace falta volver a comprobar su identidad. El código se lo dices aparte.",
       },
       {
         q: "¿Necesito el portal para la cita o el presupuesto?",
@@ -1077,6 +1440,15 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "pie del ticket",
       "tamaño de hoja",
       "impresora térmica",
+      "medios de pago",
+      "medio de pago",
+      "yape",
+      "plin",
+      "agregar medio de pago",
+      "tarjeta",
+      "impreso en el ticket",
+      "en el ticket salga",
+      "frase del ticket",
     ],
     writePermission: "settings.write",
   },
@@ -1105,6 +1477,22 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "pedir revisión",
       "solo lectura",
       "pago pendiente",
+      "cuánto gastan los agentes",
+      "gasto de los agentes",
+      "cuánto gasta el agente",
+      "cambiar de plan",
+      "factura",
+      "software",
+      "cuánto pagamos",
+      "cuánto estamos pagando",
+      "pagando por este programa",
+      "este programa",
+    ],
+    faqs: [
+      {
+        q: "¿Dónde pago la suscripción de odentIA?",
+        a: "Quien es propietario o administrador abre Configuración › Plan y pagos, o el menú con el nombre de la clínica, arriba a la izquierda. Ahí consulta el plan y aporta un comprobante; subirlo no confirma el pago. Plan y pagos y Ayuda siguen disponibles aunque la clínica esté en solo lectura.",
+      },
     ],
   },
   {
@@ -1122,8 +1510,13 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "fases de venta",
       "pipelines",
       "renombrar etapa",
+      "nombre de una etapa",
+      "cambiar nombre de etapa",
+      "columnas",
+      "nombre de las columnas",
+      "pasos de venta",
     ],
-    writePermission: "settings.write",
+    writePermission: "crm.write",
   },
   {
     // Conserva el identificador de «Canales»: sigue siendo donde se conecta por dónde te escriben.
@@ -1132,7 +1525,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Integraciones",
     parent: SETTINGS,
     purpose:
-      "Lo que tu clínica conecta una vez: WhatsApp, Instagram, Messenger y Telegram, el chat de tu sitio web, el correo de la clínica y el modelo del agente. Cada fila dice para qué sirve, con qué cuenta está y cómo va.",
+      "Lo que tu clínica conecta una vez: WhatsApp, Instagram, Messenger y Telegram, el chat de tu sitio web, el correo de la clínica y el modelo del agente. Cada fila dice para qué sirve, con qué cuenta está y cómo va. Lo automático sale por WhatsApp y, si no se puede, por correo; Instagram, Messenger y Telegram solo responden a quien escribió primero.",
     terms: [
       "canales",
       "conectar un canal",
@@ -1146,6 +1539,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "outlook",
       "buzón",
       "conectar correo",
+      "conectar instagram",
+      "conectar messenger",
+      "conectar telegram",
+      "facebook",
+      "vincular correo",
     ],
     writePermission: "settings.write",
   },
@@ -1155,13 +1553,16 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "WhatsApp",
     parent: INTEGRATIONS,
     purpose:
-      "El número de WhatsApp de la clínica y los mensajes que WhatsApp deja enviar: aquí lo conectas y ves cuáles están aprobados. Si WhatsApp cuenta un aviso como promoción, lo marca «Meta lo considera promoción» y solo sale a quien aceptó novedades: cámbiale el texto. Las plantillas de tu cuenta con encabezado o con datos por nombre se ven, pero no se pueden enviar desde odentIA.",
+      "El número de WhatsApp de la clínica y los mensajes que WhatsApp deja enviar: aquí lo conectas, ves cuáles están aprobados y creas otro con «Nuevo mensaje». Es un solo número por clínica: para usar otro, primero se desconecta el que está. Si WhatsApp cuenta un aviso como promoción, lo marca «Meta lo considera promoción» y solo sale a quien aceptó novedades: cámbiale el texto. Las plantillas de tu cuenta con encabezado o con datos por nombre se ven, pero no se pueden enviar desde odentIA.",
     terms: [
       "conectar whatsapp",
       "whatsapp",
       "número de whatsapp",
       "mensajes aprobados",
       "plantillas de whatsapp",
+      "plantilla",
+      "rechazaron la plantilla",
+      "número nuevo",
     ],
     writePermission: "settings.write",
   },
@@ -1184,6 +1585,9 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "wix",
       "no disponible",
       "probar el chat",
+      "código",
+      "pegar el chat",
+      "web",
     ],
     writePermission: "settings.write",
     faqs: [
@@ -1218,8 +1622,14 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "historial de cambios",
       "quién cambió",
       "registro de actividad",
-      "log",
       "bitácora",
+      "quién cambió este dato",
+      "quién cambió un dato",
+      "quién hizo",
+      "quién borró",
+      "averiguar quién",
+      "quién fue",
+      "cómo sé quién",
     ],
     faqs: [
       {
@@ -1260,23 +1670,209 @@ export function helpTopicForScreen(
     .sort((a, b) => b.path.length - a.path.length)[0]
 }
 
-/** Puntuación mínima para dar un tema por respuesta. Por debajo, la Ayuda dice que no sabe. */
+/** Puntuación mínima para dar un tema por respuesta. Por debajo, Ariadna dice que no sabe. */
 export const HELP_MATCH_SCORE = 40
-/** Cuántos temas responde como mucho a una pregunta. */
-const HELP_MAX_ANSWERS = 2
+/** La pregunta frecuente escrita tal cual, o una de sus formas. */
+const EXACT_SCORE = 1000
+/** Un tema que explica toda la pregunta: por debajo de una pregunta frecuente con las mismas palabras. */
+const TOPIC_SCORE = 90
+/** Una palabra que la guía no conoce pesa en contra: nombres y detalles, poco; una pregunta ajena, entera. */
+const UNKNOWN_WORD_WEIGHT = 2
+/** Cuánto suma cada palabra de una frase de búsqueda dicha tal cual. */
+const LITERAL_WORD = 4
+/** Una pregunta frecuente se usa como respuesta desde este parecido; si no, se responde con el tema. */
+const FAQ_ANSWER_SCORE = 55
+
+/**
+ * Cuánto dice de un tema una palabra según dónde aparece: sola en el nombre de
+ * la pantalla o en sus palabras de búsqueda, dentro de una frase de búsqueda, en
+ * sus preguntas frecuentes, en lo que explica de la pantalla o solo dentro de
+ * una respuesta.
+ */
+const STRENGTH = { term: 1, phrase: 0.9, question: 0.8, purpose: 0.5, answer: 0.3 } as const
 
 export interface HelpMatch {
   topic: HelpTopic
   /** Pregunta frecuente que coincidió, si fue una; su respuesta es más precisa que el propósito. */
-  faq: { q: string; a: string } | null
+  faq: HelpFaq | null
   score: number
 }
 
+/** Lo que no dice qué busca la persona: da igual «dónde veo» que «cómo hago». */
+const EMPTY_WORDS = new Set(
+  `a abril agosto ahora ahorita al algo alguien blanqueamiento brackets calza calzas carillas corona coronas curacion curaciones diente dientes extraccion implante implantes limpieza limpiezas muela muelas profilaxis algun alguna algunas alguno algunos alla aqui asi aun ayer ayuda ayudame buenas bueno buenos cada colega como companera companero con contra cual cuales cuando cuanta cuantas cuanto cuantos da dan dar de debe deben debo del deja dejan dental dentales desde dia diciembre dias domingo domingos dos doy dice dicen dime donde el ella ellas ello ellos en encuentro enero entre era es esa esas ese eso esos esta estan estar estas este esto estos estoy favor febrero fue ha hace hacen hacer hacerlo hago han hara hay he hola hoy julio junio jueves la las le les lista lo los lunes luego manana martes marzo mas mayo me mes mi mia miercoles mio mis mucho muy necesito noviembre nada ni no nos nuestra nuestro o octubre otra otras otro otros para parte pasa pasar pasado paso pero poco poder pone poner pongo por porque puede pueden puedo pues que quien quienes quiere quieren quiero quisiera sabado sabados sabe saber sale salen salir se sea segun senor senora septiembre ser si sin sirve sirven sistema sobre solo son soy sr sra su sus tal tambien tan te tener tenemos tengo ti tiene tienen toca toda todas todo todos tu tus tuve tuvimos un una unas uno unos usa usar uso usted va van vas veo ver vez viernes y ya yo`.split(
+    " ",
+  ),
+)
+
 /**
- * Los temas que responden a una pregunta, por palabras: el nombre de la
- * pantalla, las palabras con que la busca la gente y sus preguntas frecuentes.
- * Sin modelo: es barato, se puede probar y no inventa. Si nada coincide lo
- * bastante, no hay respuesta.
+ * La misma palabra dicha de otra forma: los verbos que cambian al conjugarse
+ * («cierro», «muevo») y lo que la gente dice distinto a la pantalla («turno»,
+ * «doctor», «boleta»). Se aplica igual a la pregunta y a la guía.
+ */
+const SAME_WORD: Readonly<Record<string, string>> = Object.fromEntries(
+  (
+    [
+      ["cerrar", "cierro cierra cierre cierran"],
+      ["mover", "muevo mueve reprogramar reprogramo reagendar reagendo postergar postergo"],
+      ["devolver", "devuelvo devuelve devolucion devoluciones reembolso reembolsar"],
+      ["encender", "enciendo enciende prendo prender prende prendida prendido activar activo activa actives"],
+      ["probar", "pruebo prueba pruebas"],
+      ["atender", "atiendo atiende atienda atienden"],
+      ["responder", "respuesta respuestas contesto contestar contesta"],
+      ["enviar", "mandar mando manda envio mandarle mandarlo"],
+      ["eliminar", "borrar borro borra quitar quito"],
+      ["agendar", "sacar saco separar separo reservar reservo reserva reservas"],
+      ["cita", "turno turnos consulta consultas"],
+      ["profesional", "profesionales doctor doctora doctores doctoras dr dra odontologo odontologa odontologos dentista dentistas medico medica medicos"],
+      ["conversacion", "conversaciones chat chats"],
+      ["ticket", "tickets boleta boletas recibo recibos"],
+      ["telefono", "celular movil numero"],
+      ["contrasena", "clave password"],
+      ["whatsapp", "wsp wasap wassap whats"],
+      ["instagram", "insta"],
+      ["precio", "tarifa tarifas costo costos cuesta"],
+      ["imagen", "radiografia radiografias rayos panoramica panoramicas placa placas tomografia tomografias"],
+      ["paciente", "pacientes persona personas cliente clientes"],
+      ["invitar", "invito"],
+      ["enlace", "link links"],
+      ["documento", "dni"],
+      ["pago", "pagos plata dinero monto"],
+      ["ventas", "vendimos vendido vendio"],
+      ["cobrar", "cobro cobros facture facturar facturamos facturado"],
+      ["descargar", "bajar bajo"],
+      ["promocion", "promo promos oferta ofertas"],
+      ["agente", "bot robot chatbot ia"],
+      ["sede", "sucursal sucursales local locales"],
+      ["horario", "hora horas horarios"],
+      ["campana", "campanita"],
+      ["inasistencia", "inasistencias faltaron falto"],
+      ["correo", "email mail"],
+      ["comision", "comisiones porcentaje"],
+    ] as const
+  ).flatMap(([word, others]) => others.split(" ").map((other) => [other, word] as const)),
+)
+
+/** Dicen qué se hace, no con qué: pesan poco. «Cambio el logo» es sobre el logo. */
+const WEAK_WORDS = "abrir agregar agrego anotar anoto buscar busco cambiar cambio conectar conecto configurar configuro corregir corrijo crear creo editar edito empezar empiezo encontrar iniciar inicio modificar modifico nuevo registrar registro subir subo"
+
+/** Raíz corta: «citas», «citar» y «cita» son la misma palabra; «tareas» y «áreas», no. */
+function stemOf(word: string): string {
+  if (word.length <= 3) return word
+  // «bloquearlo», «pasarle»: el verbo sin lo que lleva pegado.
+  const bare = word.replace(/(ar|er|ir)(l[aeo]s?|me|se|te)$/, "$1")
+  let out = bare.length > 4 && bare.endsWith("s") ? bare.slice(0, -1) : bare
+  const ending = /(iendo|ando|amos|emos|imos|ada|ado|ida|ido|an|ar|er|ir)$/.exec(out)?.[0]
+  if (ending && out.length - ending.length >= 3) return out.slice(0, -ending.length)
+  if (out.length > 3 && /[aeo]$/.test(out)) out = out.slice(0, -1)
+  return out
+}
+
+/** Las palabras de un texto que dicen algo, ya como raíz y sin repetir. */
+function wordsOf(text: string): string[] {
+  const out = new Set<string>()
+  for (const raw of normalizeForSearch(text).split(" ")) {
+    const word = SAME_WORD[raw] ?? raw
+    if (word.length >= 2 && !/^\d+$/.test(word) && !EMPTY_WORDS.has(word)) out.add(stemOf(word))
+  }
+  return [...out]
+}
+
+/** Cuántas palabras de la pregunta dicen algo: «¿Dónde veo a Ana?», una. */
+export const helpWordCount = (text: string): number => wordsOf(text).length
+
+/** Los permisos que dejan cambiar cosas en una pantalla: basta uno. */
+export const helpWritePermissions = (topic: HelpTopic): readonly string[] =>
+  typeof topic.writePermission === "string" ? [topic.writePermission] : (topic.writePermission ?? [])
+
+/** A una letra de distancia: una que falta, sobra, cambia o dos cambiadas de lugar. */
+function oneTypoAway(a: string, b: string): boolean {
+  if (a === b || Math.abs(a.length - b.length) > 1) return false
+  let i = 0
+  while (i < a.length && i < b.length && a[i] === b[i]) i += 1
+  if (a.length === b.length) {
+    if (a.slice(i + 1) === b.slice(i + 1)) return true
+    return a[i] === b[i + 1] && a[i + 1] === b[i] && a.slice(i + 2) === b.slice(i + 2)
+  }
+  return a.length > b.length ? a.slice(i + 1) === b.slice(i) : a.slice(i) === b.slice(i + 1)
+}
+
+interface TopicEntry {
+  topic: HelpTopic
+  /** Cada palabra del tema con cuánto dice de él. */
+  strength: ReadonlyMap<string, number>
+  /** Las palabras de búsqueda como se escriben, para lo que se dijo tal cual. */
+  phrases: ReadonlyArray<{ text: string; empty: boolean }>
+  faqs: Array<{ faq: HelpFaq; words: readonly string[]; exact: ReadonlySet<string> }>
+}
+
+interface GuideEntry {
+  topics: TopicEntry[]
+  /** Pesa más lo que señala pocas pantallas: «deuda», una; «paciente», casi todas. */
+  weight: (word: string) => number
+  known: ReadonlySet<string>
+}
+
+const guideEntries = new WeakMap<readonly HelpTopic[], GuideEntry>()
+
+function guideEntry(topics: readonly HelpTopic[]): GuideEntry {
+  const cached = guideEntries.get(topics)
+  if (cached) return cached
+  const entries: TopicEntry[] = topics.map((topic) => {
+    const strength = new Map<string, number>()
+    const note = (text: string, value: number) => {
+      for (const word of wordsOf(text)) strength.set(word, Math.max(strength.get(word) ?? 0, value))
+    }
+    note(topic.purpose, STRENGTH.purpose)
+    for (const faq of topic.faqs ?? []) {
+      note(faq.a, STRENGTH.answer)
+      note(faq.q, STRENGTH.question)
+    }
+    for (const term of [topic.title, ...topic.terms]) note(term, wordsOf(term).length === 1 ? STRENGTH.term : STRENGTH.phrase)
+    return {
+      topic,
+      strength,
+      phrases: [topic.title, ...topic.terms].map((term) => ({ text: normalizeForSearch(term), empty: wordsOf(term).length === 0 })),
+      faqs: (topic.faqs ?? []).map((faq) => ({
+        faq,
+        words: wordsOf(faq.q),
+        exact: new Set([faq.q, ...(faq.forms ?? [])].map(normalizeForSearch)),
+      })),
+    }
+  })
+  const counts = new Map<string, number>()
+  for (const entry of entries) for (const word of entry.strength.keys()) counts.set(word, (counts.get(word) ?? 0) + 1)
+  const total = Math.max(entries.length, 1)
+  const weak = new Set(WEAK_WORDS.split(" ").map(stemOf))
+  const entry: GuideEntry = {
+    topics: entries,
+    known: new Set(counts.keys()),
+    weight: (word) => {
+      if (weak.has(word)) return 0.5
+      const seen = counts.get(word)
+      return seen ? 1 + Math.log2(total / seen) : UNKNOWN_WORD_WEIGHT
+    },
+  }
+  guideEntries.set(topics, entry)
+  return entry
+}
+
+/** Una palabra que la guía no conoce y está a una letra de una sola que sí: se escribió mal. */
+function fixTypos(words: readonly string[], known: ReadonlySet<string>): string[] {
+  return words.map((word) => {
+    if (word.length < 5 || known.has(word)) return word
+    const near = [...known].filter((candidate) => candidate.length >= 5 && oneTypoAway(word, candidate))
+    return near.length === 1 ? (near[0] ?? word) : word
+  })
+}
+
+/**
+ * Los temas que responden a una pregunta, por palabras completas: una palabra
+ * suelta dentro de otra no cuenta («ia» no está en «gracias»). Cada tema suma
+ * lo que explica de la pregunta; pesa más lo que señala pocas pantallas y lo
+ * que está en sus palabras de búsqueda. Hace falta al menos una palabra de sus
+ * búsquedas o sus preguntas, y si nada alcanza, no hay respuesta. Sin modelo:
+ * es barato, se puede probar y no inventa.
  */
 export function matchHelpTopics(
   question: string,
@@ -1284,36 +1880,63 @@ export function matchHelpTopics(
 ): HelpMatch[] {
   const asked = normalizeForSearch(question)
   if (!asked) return []
+  const guide = guideEntry(topics)
+  const words = fixTypos(wordsOf(question), guide.known)
+  const set = new Set(words)
+  const weightOf = (list: Iterable<string>) => [...list].reduce((sum, word) => sum + guide.weight(word), 0)
+  const askedWeight = weightOf(words)
+  const spaced = ` ${asked} `
+
   const matches: HelpMatch[] = []
-  for (const topic of topics) {
+  for (const entry of guide.topics) {
+    let emptyPhrase = false
+    let literal = 0
+    for (const phrase of entry.phrases) {
+      if (!spaced.includes(` ${phrase.text} `)) continue
+      literal = Math.max(literal, phrase.text.split(" ").length)
+      if (phrase.empty) emptyPhrase = true
+    }
+    const anchored = words.some((word) => (entry.strength.get(word) ?? 0) >= STRENGTH.question)
+    const explained = words.reduce((sum, word) => sum + guide.weight(word) * (entry.strength.get(word) ?? 0), 0)
     let best: HelpMatch = {
-      topic,
+      topic: entry.topic,
       faq: null,
-      score: scoreKnowledgeMatch(question, {
-        title: topic.title,
-        body: topic.purpose,
-        askForms: topic.terms,
-      }),
+      // Lo que dijo tal cual desempata: «Registro de pacientes» es esa pantalla, no la de Pacientes.
+      score: emptyPhrase ? TOPIC_SCORE + literal : anchored && askedWeight > 0 ? (TOPIC_SCORE * explained) / askedWeight + Math.min(literal, 4) * LITERAL_WORD : 0,
     }
-    // Una palabra de búsqueda que aparece entera en la pregunta pesa más que palabras sueltas.
-    for (const term of topic.terms) {
-      const clean = normalizeForSearch(term)
-      if (clean && asked.includes(clean))
-        best = { ...best, score: Math.max(best.score, 60 + clean.split(" ").length * 20) }
+    let bestFaq = 0
+    for (const item of entry.faqs) {
+      if (item.exact.has(asked)) {
+        best = { topic: entry.topic, faq: item.faq, score: EXACT_SCORE }
+        bestFaq = EXACT_SCORE
+        break
+      }
+      const shared = item.words.filter((word) => set.has(word))
+      if (shared.length === 0 || askedWeight === 0) continue
+      const recall = weightOf(shared) / askedWeight
+      const precision = weightOf(shared) / weightOf(item.words)
+      const score = (200 * recall * precision) / (recall + precision)
+      if (score > bestFaq && score >= FAQ_ANSWER_SCORE) {
+        bestFaq = score
+        best = { ...best, faq: item.faq, score: Math.max(best.score, score) }
+      }
     }
-    for (const faq of topic.faqs ?? []) {
-      const score = scoreKnowledgeMatch(question, { title: faq.q, body: "", askForms: [] }) + 10
-      if (score > best.score) best = { topic, faq, score }
-    }
-    if (best.score >= HELP_MATCH_SCORE) matches.push(best)
+    matches.push(best)
   }
-  matches.sort((a, b) => b.score - a.score)
-  const [first, second] = matches
-  if (!first) return []
-  // El segundo solo acompaña si está cerca del primero: una pregunta con dos partes.
-  return second && second.score >= first.score * 0.7
-    ? [first, second].slice(0, HELP_MAX_ANSWERS)
-    : [first]
+  // Una sola respuesta: dos pantallas para una pregunta confunden más de lo que ayudan.
+  const first = matches.reduce<HelpMatch | null>((top, match) => (!top || match.score > top.score ? match : top), null)
+  return first && first.score >= HELP_MATCH_SCORE ? [first] : []
+}
+
+const GREETINGS = new Set(["hola", "buenas", "buenos dias", "buenas tardes", "buenas noches"])
+const THANKS = new Set(["gracias", "muchas gracias", "mil gracias", "okay", "listo", "perfecto", "genial", "vale", "entendido", "ya entendi", "ya esta"])
+
+/** Saludar o agradecer no es una pregunta: se responde sin buscar en la guía ni ofrecer enviarlo a soporte. */
+export function helpSmallTalk(question: string): string | null {
+  const asked = normalizeForSearch(question).replace(new RegExp(` ?${normalizeForSearch(AGENT_NAMES.ayuda)}$`), "")
+  if (GREETINGS.has(asked)) return `Hola, soy ${AGENT_NAMES.ayuda}. Dime qué quieres hacer o qué no encuentras.`
+  if (THANKS.has(asked)) return "De nada. Si necesitas algo más, aquí estoy."
+  return null
 }
 
 /** Preguntas que la gente suele hacer en una pantalla, para ofrecerlas sin que escriba. */

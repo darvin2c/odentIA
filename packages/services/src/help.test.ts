@@ -4,14 +4,16 @@ import { member, organization, user } from "@odentia/db/schema/auth"
 import { professionalSchedule } from "@odentia/db/schema/availability"
 import { branch } from "@odentia/db/schema/org"
 import { supportCase } from "@odentia/db/schema/admin-support"
+import { agentConfig } from "@odentia/db/schema/crm"
 import { helpAsk } from "@odentia/db/schema/workspace"
 import { eq } from "drizzle-orm"
+import { randomUUID } from "node:crypto"
 import { beforeAll, describe, expect, it } from "vitest"
 import { askHelp, describeHelpAttachments, describeHelpScreen, HELP_DAILY_LIMIT, type HelpAsker, rateHelp, sendHelpRequest } from "./help.js"
 import type { AdminActor } from "./admin-core.js"
 import { getMySupportCase, listMySupportCases, markSupportCaseSeen, replyToSupportCase, setSupportCaseStatus } from "./admin-support.js"
 import { helpTopicForScreen, matchHelpTopics } from "./help-guide.js"
-import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
+import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 /** Ayuda: responde sin inventar; solo el envío explícito conserva la pregunta. */
 setupTestDb()
@@ -62,8 +64,10 @@ describe("la guía ayuda a encontrar el trabajo", () => {
     expect(first("¿cómo enciendo el agente?")).toBe("agente")
     // Una pregunta frecuente responde con su texto, no con el propósito de la pantalla.
     expect(matchHelpTopics("¿Cómo bloqueo un horario?")[0]?.faq?.a).toContain("registra una ausencia del profesional")
+    // Quien responde dice quién es.
+    expect(matchHelpTopics("¿Quién es Ariadna?")[0]?.faq?.a).toContain("guía virtual de odentIA")
     // Lo que no está en la guía no se inventa.
-    expect(matchHelpTopics("¿Cómo exporto mis pacientes a Excel?")).toEqual([])
+    expect(matchHelpTopics("¿Se pueden enviar felicitaciones de cumpleaños?")).toEqual([])
     expect(matchHelpTopics("¿Qué tiempo hará mañana?")).toEqual([])
     expect(helpTopicForScreen("/settings/availability")?.id).toBe("disponibilidad")
     // Lo que se abre desde Integraciones responde con su propio tema, no con el de la lista.
@@ -93,12 +97,12 @@ describe("responder", () => {
     const readOnly = await run((tx) => askHelp(tx, ORG, reception, { question: "¿Cómo muevo una cita?", screen: "/home" }))
     expect(readOnly.answers[0]).toMatchObject({ topicId: "agenda", path: "/agenda", restriction: "Tu rol (Recepción) puede verla, pero no cambiarla. Pueden hacerlo: Propietario y Administrador." })
 
-    const unknown = await run((tx) => askHelp(tx, ORG, owner, { question: "¿Cómo exporto mis pacientes a Excel?", screen: "/patients" }))
+    const unknown = await run((tx) => askHelp(tx, ORG, owner, { question: "¿Se pueden enviar felicitaciones de cumpleaños?", screen: "/patients" }))
     expect(unknown).toMatchObject({ kind: "nada", answers: [] })
 
     const logged = await ownerDb.select().from(helpAsk).where(eq(helpAsk.userId, USER))
     expect(logged.map((row) => [row.screen, row.topicId])).toEqual([["/agenda", "disponibilidad"], ["/agenda", "disponibilidad"], ["/home", "agenda"], ["/patients", null]])
-    expect(JSON.stringify(logged)).not.toContain("Excel")
+    expect(JSON.stringify(logged)).not.toContain("cumpleaños")
 
     await run((tx) => rateHelp(tx, ORG, USER, reply.askId, true))
     expect((await ownerDb.select().from(helpAsk).where(eq(helpAsk.id, reply.askId)))[0]?.helpful).toBe(true)
@@ -118,7 +122,7 @@ describe("responder", () => {
     expect(empty.kind).toBe("estado")
     expect(empty.blockers.map((item) => item.text)).toEqual(expect.arrayContaining([
       "No hay ninguna unidad dental creada. Sin unidad dental no se puede reservar una cita.",
-      "Ningún profesional tiene horario de atención. Sin horario no aparecen en la agenda ni se les puede reservar.",
+      "Ningún profesional tiene horario de atención. Sin horario, ni el agente ni el enlace ofrecen citas; el equipo puede reservar igual, con una advertencia.",
     ]))
     expect(empty.blockers[0]).toMatchObject({ where: "Configuración › Horarios y ausencias", path: "/settings/availability" })
     // A quien no puede cambiar la agenda se le dice primero eso, y no se le lleva a donde no entra.
@@ -132,6 +136,80 @@ describe("responder", () => {
     await ownerDb.insert(professionalSchedule).values({ organizationId: ORG, branchId: site!.id, professionalUserId: USER, weekday: 1, startMin: 540, endMin: 780 })
     const ready = await run((tx) => askHelp(tx, ORG, owner, { question: "¿Por qué no puedo mover esta cita?", screen: "/agenda" }))
     expect(ready.blockers.map((item) => item.text)).toEqual(["Todavía no hay servicios en la clínica; las citas se pueden reservar, pero sin servicio ni duración sugerida."])
+  })
+
+  it("«¿por qué no puedo?» mira lo que preguntó, no solo la pantalla donde está", async () => {
+    const blank = randomUUID()
+    await insertOrg(ownerDb, blank, `ayuda-${blank}`)
+    const ask = (question: string, screen: string) => run((tx) => askHelp(tx, blank, owner, { question, screen }), blank)
+    // Desde Inicio ve lo que le falta a la agenda.
+    const fromHome = await ask("¿Por qué no puedo reservar una cita?", "/home")
+    expect(fromHome.kind).toBe("estado")
+    expect(fromHome.blockers.map((item) => item.text)).toContain("No hay ninguna unidad dental creada. Sin unidad dental no se puede reservar una cita.")
+    // En la Agenda, otra cosa no se responde con lo que le falta a la Agenda.
+    const other = await ask("¿Por qué no puedo enviar un presupuesto?", "/agenda")
+    expect(other).toMatchObject({ kind: "guia", blockers: [] })
+    expect(other.answers[0]?.topicId).toBe("pacientes")
+    // Sin nombrar nada, la pantalla donde está.
+    expect((await ask("no me deja", "/agenda")).kind).toBe("estado")
+    // Lo que sale solo necesita a los dos agentes encendidos.
+    const reminders = await ask("¿Por qué no salen los recordatorios?", "/home")
+    expect(reminders.blockers.map((item) => item.text)).toEqual(expect.arrayContaining([expect.stringContaining("Sofi está apagada"), expect.stringContaining("Argos está apagado")]))
+  })
+
+  it("una clínica que le puso otro nombre a Sofi pregunta con el suyo", async () => {
+    const named = randomUUID()
+    await insertOrg(ownerDb, named, `nombre-${named}`)
+    await ownerDb.insert(agentConfig).values({ organizationId: named, personaName: "Lucía" })
+    const reply = await run((tx) => askHelp(tx, named, owner, { question: "¿Cómo respondo yo en vez de Lucía?", screen: "/inbox" }), named)
+    expect(reply.answers[0]).toMatchObject({ topicId: "bandeja", text: expect.stringContaining("Lo que Sofi no puede responder") })
+  })
+
+  it("saludar no es una consulta, y lo que no es de una pantalla no lleva a ninguna", async () => {
+    const before = await ownerDb.select().from(helpAsk).where(eq(helpAsk.organizationId, ORG))
+    const talk = await run((tx) => askHelp(tx, ORG, reception, { question: "Muchas gracias", screen: "/home" }))
+    expect(talk).toMatchObject({ kind: "charla", answers: [], say: expect.stringContaining("De nada") })
+    expect(await ownerDb.select().from(helpAsk).where(eq(helpAsk.organizationId, ORG))).toHaveLength(before.length)
+    const who = await run((tx) => askHelp(tx, ORG, reception, { question: "¿Quién eres?", screen: "/agenda" }))
+    expect(who).toMatchObject({ kind: "guia", basedOn: "La guía del sistema." })
+    expect(who.answers[0]).toMatchObject({ path: null, restriction: null, where: "", text: expect.stringContaining("guía virtual de odentIA") })
+  })
+
+  it("el permiso del tema dice la verdad a cada rol", async () => {
+    // Recepción recibe lo que llega al inventario y da acceso al portal desde la página de la persona.
+    const stock: HelpAsker = { ...reception, can: (permission) => permission === "inventory.receive" || permission === "patients.write" }
+    const inventory = await run((tx) => askHelp(tx, ORG, stock, { question: "¿Dónde veo el stock de insumos?", screen: "/home" }))
+    expect(inventory.answers[0]).toMatchObject({ topicId: "inventario", path: "/inventory", restriction: null })
+    const portal = await run((tx) => askHelp(tx, ORG, stock, { question: "¿Cómo le doy acceso al portal?", screen: "/home" }))
+    expect(portal.answers[0]).toMatchObject({ topicId: "pacientes", path: "/people", restriction: null })
+  })
+
+  it("a quien atiende no le dice que no puede cambiar a sus pacientes", async () => {
+    const clinician: HelpAsker = { ...reception, roleLabel: "Odontólogo", can: (permission) => permission === "clinical.write" }
+    const reply = await run((tx) => askHelp(tx, ORG, clinician, { question: "¿Dónde hago la receta?", screen: "/home" }))
+    expect(reply.answers[0]).toMatchObject({ topicId: "pacientes", restriction: null })
+  })
+
+  it("«¿por qué no puedo?» sobre una pantalla que no abre lo dice, sin decir que la ve", async () => {
+    const reply = await run((tx) => askHelp(tx, ORG, reception, { question: "¿Por qué no puedo invitar a alguien a mi equipo?", screen: "/home" }))
+    expect(reply.kind).toBe("estado")
+    expect(reply.blockers[0]).toMatchObject({ text: "Tu rol (Recepción) no tiene acceso a Equipo. Pídeselo a quien administra la clínica.", path: null })
+  })
+
+  it("lo que no es de una pantalla responde aunque el rol no cambie nada ahí", async () => {
+    const nothing: HelpAsker = { ...reception, can: () => false }
+    const reply = await run((tx) => askHelp(tx, ORG, nothing, { question: "¿Por qué no puedo dictar?", screen: "/home" }))
+    expect(reply).toMatchObject({ kind: "guia", basedOn: "La guía del sistema." })
+    expect(reply.answers[0]?.text).toContain("«Dictar»")
+  })
+
+  it("el nombre de la clínica para su agente no se confunde con el de una paciente", async () => {
+    const named = randomUUID()
+    await insertOrg(ownerDb, named, `ana-${named}`)
+    await ownerDb.insert(agentConfig).values({ organizationId: named, personaName: "Ana" })
+    expect((await run((tx) => askHelp(tx, named, owner, { question: "¿Dónde veo a Ana?", screen: "/home" }), named)).kind).toBe("nada")
+    const reply = await run((tx) => askHelp(tx, named, owner, { question: "¿Cómo apago a Ana?", screen: "/home" }), named)
+    expect(reply.answers[0]).toMatchObject({ topicId: "agente" })
   })
 
   it("tiene un tope diario por persona", async () => {

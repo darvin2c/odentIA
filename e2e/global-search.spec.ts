@@ -172,7 +172,7 @@ test("lo que dicen los mensajes aparece debajo de quien lo escribió y lleva a l
   await pressSearchShortcut(page)
   await search(page, "blanqueamiento")
   await expect(dialog(page).getByRole("option", { name: /Marta Ríos/ })).toBeVisible()
-  // Lo elegido al llegar los resultados es lo primero que se encontró, no «Preguntarle a Ayuda».
+  // Lo elegido al llegar los resultados es lo primero que se encontró, no «Preguntarle a Ariadna».
   await expect(dialog(page).getByRole("option", { name: /Marta Ríos/ })).toHaveAttribute(
     "aria-selected",
     "true",
@@ -195,7 +195,7 @@ test("cada rol ve lo de su pantalla: recepción no ve la historia clínica, el o
   await pressSearchShortcut(page)
   await search(page, "bruxismo")
   await expect(dialog(page).getByText("No encontramos «bruxismo».")).toBeVisible()
-  await expect(dialog(page).getByRole("option", { name: /Preguntarle a Ayuda/ })).toBeVisible()
+  await expect(dialog(page).getByRole("option", { name: /Preguntarle a Ariadna/ })).toBeVisible()
 
   await setRole(fixtureDb, owner, "clinician")
   await gotoHydrated(page, tenant(owner.org.slug, "/home"))
@@ -238,7 +238,11 @@ test("con Argos apagado el buscador no lo ofrece como si respondiera; encendido,
   // Apagado: se dice, con cómo encenderlo, y no hay una pregunta que quede sin respuesta.
   await expect(dialog(page).getByRole("option", { name: /Argos está apagado/ })).toBeVisible()
   await expect(dialog(page).getByRole("option", { name: /Preguntarle a Argos/ })).toHaveCount(0)
-  await expect(dialog(page).getByRole("option", { name: /Preguntarle a Ayuda/ })).toBeVisible()
+  await expect(dialog(page).getByRole("option", { name: /Preguntarle a Ariadna/ })).toBeVisible()
+  // Una pregunta no es un nombre que faltó: no se ofrece crear un paciente con ella.
+  await search(page, "¿cómo bloqueo un horario?")
+  await expect(dialog(page).getByRole("option", { name: /Preguntarle a Ariadna/ })).toBeVisible()
+  await expect(dialog(page).getByRole("button", { name: /Crear paciente/ })).toHaveCount(0)
 
   expect((await api(page, "PUT", "/api/agent/admin/settings", owner.org.slug, { enabled: true })).status).toBe(200)
   await gotoHydrated(page, tenant(owner.org.slug, "/home"))

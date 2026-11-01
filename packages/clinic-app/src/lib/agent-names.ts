@@ -5,11 +5,13 @@ import { appWords } from "./product-words"
  * Los nombres de los agentes (issue 183), los mismos que `@odentia/services`
  * (`agent-names.ts`). En el código siguen sus ids de rol; lo que se ve dice el
  * nombre. El de recepción lo elige cada clínica y vale solo para ella: se lee
- * con `useReceptionName`. Clío y Argos son fijos.
+ * con `useReceptionName`. Clío, Argos y Ariadna son fijos.
  */
 export const RECEPTION_DEFAULT_NAME = "Sofi"
 export const CLINICAL_NAME = "Clío"
 export const ADMIN_NAME = "Argos"
+/** Quien responde en Ayuda: el botón sigue diciendo «Ayuda», porque dice para qué sirve. */
+export const HELP_NAME = "Ariadna"
 
 /** El porqué del nombre de Clío, con quien atiende en el producto de esta app. */
 export const clinicalNameReason = (): string =>

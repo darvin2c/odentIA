@@ -11,7 +11,7 @@ import { surface as sideSurface } from "./surface"
 const overflow = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
 
-const UNKNOWN = "¿Cómo exporto mis pacientes a Excel?"
+const UNKNOWN = "¿Se pueden enviar felicitaciones de cumpleaños?"
 
 test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se envía a odentIA", async ({ owner, fixtureDb }, info) => {
   const { page, org } = owner
@@ -20,6 +20,7 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   await page.getByRole("button", { name: "Ayuda", exact: true }).click()
   const help = sideSurface(page, { name: "Ayuda", exact: true })
   await expect(help).toContainText("Estás en Agenda")
+  await expect(help).toContainText("Soy Ariadna, tu guía virtual de odentIA.")
   await expect(help.getByRole("region", { name: "En esta pantalla suelen preguntar" }).getByRole("button", { name: "¿Cómo bloqueo un horario?" })).toBeVisible()
 
   const ask = async (question: string) => {
@@ -50,6 +51,21 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   await expect(why).toContainText("No hay ninguna unidad dental creada. Sin unidad dental no se puede reservar una cita.")
   await expect(why).toContainText("Ningún profesional tiene horario de atención.")
 
+  // --- Saludar y agradecer no es una consulta: ni se busca ni se ofrece enviarlo a soporte ---
+  await ask("Muchas gracias")
+  const thanks = help.getByRole("listitem").filter({ hasText: "Muchas gracias" }).last()
+  await expect(thanks).toContainText("De nada.")
+  await expect(thanks).not.toContainText("¿Te sirvió?")
+
+  // --- Si la respuesta no le sirvió, no se queda sin salida: ofrece enviarlo, y puede decir que no ---
+  await ask("¿Cómo archivo a una persona?")
+  const archive = help.getByRole("listitem").filter({ hasText: "¿Cómo archivo a una persona?" })
+  await archive.getByRole("button", { name: "No", exact: true }).click()
+  await expect(archive).toContainText("¿Lo envío a odentIA para que te respondan?")
+  await expect(archive.getByRole("region", { name: "Lo que se envía" })).toBeVisible()
+  await archive.getByRole("button", { name: "No, gracias" }).click()
+  await expect(archive.getByRole("region", { name: "Lo que se envía" })).toHaveCount(0)
+
   // --- No sabe: lo dice, y la persona decide si lo envía a odentIA ---
   await ask(UNKNOWN)
   const unknown = help.getByRole("listitem").filter({ hasText: UNKNOWN })
@@ -74,12 +90,17 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   // La Ayuda no guarda lo que se le pregunta: solo la pantalla, el tema y si sirvió.
   const logged = await fixtureDb.select().from(helpAsk).where(eq(helpAsk.organizationId, org.id))
   expect(logged.map((row) => [row.screen, row.topicId, row.helpful])).toEqual([
-    ["/agenda", "disponibilidad", true], ["/agenda", "agenda", null], ["/agenda", null, null],
+    ["/agenda", "disponibilidad", true], ["/agenda", "agenda", null], ["/agenda", "pacientes", false], ["/agenda", null, null],
   ])
 
   // «Llévame» abre la pantalla.
   await first.getByRole("link", { name: "Llévame a Configuración › Horarios y ausencias" }).click()
   await expect(page).toHaveURL(tenantPattern(org.slug, "/settings/availability"))
+  // Lo conversado sigue ahí al volver a abrirla.
+  await page.getByRole("button", { name: "Ayuda", exact: true }).click()
+  await expect(help).toContainText("¿Dónde configuro los horarios?")
+  await expect(help).toContainText("Estás en Horarios y ausencias")
+  await help.getByRole("button", { name: "Cerrar", exact: true }).click()
 
   // --- odentIA responde el caso: el aviso llega al mismo botón ---
   const answeredAt = new Date()
