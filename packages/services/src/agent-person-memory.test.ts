@@ -5,7 +5,7 @@ import { member, user } from "@odentia/db/schema/auth"
 import { automationConsent } from "@odentia/db/schema/automation"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { patient, patientDataConsent, patientRegistration, patientRegistrationLink } from "@odentia/db/schema/clinical"
-import { agentConfig, channelConnection, contactIdentity, conversation } from "@odentia/db/schema/crm"
+import { agentConfig, channelConnection, contact, contactIdentity, conversation } from "@odentia/db/schema/crm"
 import { branch } from "@odentia/db/schema/org"
 import { auditEvent } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
@@ -856,5 +856,52 @@ describe("reservar desde un enlace quien recién se contacta", () => {
     expect((await run((tx) => getContact(tx, ORG, quien.contactId))).contact).toMatchObject({ displayName: "Lucía Paz Soto", docNumber: "41239876" })
     expect((await run((tx) => listPersonNotes(tx, ORG, quien.contactId))).map((note) => note.body)).toContain(
       "En el registro escribió otros datos, que no se guardaron: documento 47651234, nombre Ana Ríos Vega. Revisa cuáles valen.")
+  })
+
+  it("con solo una parte de su nombre: completarla no deja nota, otro nombre sí, y con otro documento no se mezcla", async () => {
+    const config = await run((tx) => getPatientRegistrationConfig(tx, ORG))
+    const register = async (who: { contactId: string; conversationId: string }, givenNames: string, familyName: string, docNumber: string) => {
+      const link = await run((tx) => createBookingLink(tx, ORG, { conversationId: who.conversationId }, { secretsKey: KEY }))
+      const demographics = {
+        displayName: `${givenNames} ${familyName}`, givenNames, familyName, docType: "DNI" as const, docNumber,
+        phone: `+5198755${docNumber.slice(-4)}`, birthDate: "1992-11-03", sex: "F" as const,
+      }
+      expect(await run((tx) =>
+        registerFromBookingLink(tx, ORG, link.token, { submissionId: randomUUID(), formVersion: config.version, answers: { demographics, respondent: "patient" as const, privacyAccepted: true } }))).toEqual({ registered: true })
+      const [row] = await ownerDb.select().from(contact).where(eq(contact.id, who.contactId))
+      return {
+        person: row!,
+        notes: (await run((tx) => listPersonNotes(tx, ORG, who.contactId))).map((note) => note.body),
+      }
+    }
+    const agent = { userId: null, origin: "agent" as const }
+
+    const carla = await person("parte-carla")
+    // Como lo escribió en el chat: «carla» y «Carla» son el mismo nombre.
+    await run((tx) => updateContact(tx, ORG, carla.contactId, { givenNames: "carla" }, agent))
+    const completed = await register(carla, "Carla", "Quispe", "47651235")
+    expect(completed.person).toMatchObject({ displayName: "Carla Quispe", givenNames: "Carla", familyName: "Quispe" })
+    expect(completed.notes.join(" ")).not.toContain("antes figuraba")
+
+    const rojas = await person("parte-rojas")
+    await run((tx) => updateContact(tx, ORG, rojas.contactId, { familyName: "Rojas" }, agent))
+    const renamed = await register(rojas, "Ana", "Vega", "47651236")
+    expect(renamed.person).toMatchObject({ displayName: "Ana Vega", givenNames: "Ana", familyName: "Vega" })
+    expect(renamed.notes).toContain("Se registró como Ana Vega; antes figuraba como Rojas.")
+
+    const lucia = await person("parte-lucia")
+    await run((tx) =>
+      updateContact(tx, ORG, lucia.contactId, { givenNames: "Lucía", docType: "DNI", docNumber: "41239877" }, { userId: OWNER }))
+    const kept = await register(lucia, "Ana", "Ríos Vega", "47651237")
+    expect(kept.person).toMatchObject({ displayName: "Lucía", givenNames: "Lucía", familyName: null, docNumber: "41239877" })
+    expect(kept.notes).toContain(
+      "En el registro escribió otros datos, que no se guardaron: documento 47651237, nombre Ana Ríos Vega. Revisa cuáles valen.")
+
+    // Sin nombres separados tampoco: su documento no queda bajo el nombre de otra.
+    const perfil = await person("parte-perfil")
+    await run((tx) =>
+      updateContact(tx, ORG, perfil.contactId, { docType: "DNI", docNumber: "41239878" }, { userId: OWNER }))
+    const profileKept = await register(perfil, "Ana", "Ríos Vega", "47651238")
+    expect(profileKept.person).toMatchObject({ displayName: "parte-perfil", givenNames: null, familyName: null, docNumber: "41239878" })
   })
 })

@@ -59,6 +59,8 @@ export interface ContactListItem {
 
 
 export interface ContactDetail extends ContactListItem {
+  givenNames: string | null
+  familyName: string | null
   docType: string | null
   docNumber: string | null
   birthDate: string | null
@@ -357,6 +359,8 @@ export async function getContact(tx: Db, orgId: string, id: string): Promise<Con
   return {
     contact: {
       ...toListItem(row, [...new Set(identities.map((i) => i.channel))]),
+      givenNames: row.givenNames,
+      familyName: row.familyName,
       docType: row.docType,
       docNumber: row.docNumber,
       birthDate: row.birthDate,

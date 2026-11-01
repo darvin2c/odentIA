@@ -1223,6 +1223,38 @@ it("enlace inválido o vacío no cae al formulario genérico", async () => {
   expect(created.expiresAt).toBeInstanceOf(Date)
 })
 
+it("QR con el celular de quien solo dijo su nombre: «es la misma» guarda el nombre que escribió, sin mezclarlo", async () => {
+  await seedActor()
+  await publish("org_a")
+  const version = await publishedVersion("org_a")
+  const carla = await withOrgContext(appDb, "org_a", (tx) =>
+    createContact(tx, "org_a", { displayName: "Carla", givenNames: "Carla", phone: "+51987654377" }),
+  )
+  const held = await withOrgContext(appDb, "org_a", (tx) =>
+    registerPatient(tx, "org_a", { kind: "public", entryPoint: "qr" }, {
+      submissionId: randomUUID(),
+      formVersion: version,
+      answers: {
+        demographics: { displayName: "Ana Ríos Vega", givenNames: "Ana", familyName: "Ríos Vega", birthDate: "1991-03-12", phone: "+51987654377", docType: "DNI", docNumber: "45129899" },
+        respondent: "patient",
+        health: { ...emptyClinical(), allergies: { state: "recorded", items: [{ substance: "Penicilina", severity: "desconocida" }] } },
+        privacyAccepted: true,
+      },
+    }),
+  ).then(
+    () => null,
+    (error: unknown) => error,
+  )
+  expect(held).toBeInstanceOf(RegistrationHeld)
+  await withOrgContext(appDb, "org_a", (tx) => leaveRegistrationHold(tx, "org_a", (held as RegistrationHeld).hold))
+  const [task] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(crmTask).where(and(eq(crmTask.contactId, carla.id), eq(crmTask.kind, "registro_con_documento"))),
+  )
+  await withOrgContext(appDb, "org_a", (tx) => resolveRegistrationHold(tx, "org_a", ACTOR, task!.id, { same: true }))
+  const [person] = await ownerDb.select().from(contact).where(eq(contact.id, carla.id))
+  expect(person).toMatchObject({ displayName: "Ana Ríos Vega", givenNames: "Ana", familyName: "Ríos Vega", docNumber: "45129899" })
+})
+
 it("QR general con el celular de alguien que ya está: no se crea a nadie y recepción decide si es la misma persona", async () => {
   await seedActor()
   await publish("org_a")

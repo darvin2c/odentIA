@@ -1483,6 +1483,12 @@ export async function resolveRegistrationHold(
       if (text(owner.values[key]) === null && owner.values[key] == null) fill[key] = value
     }
     if (input.familyName === "declared" && text(declared.familyName)) fill.familyName = declared.familyName
+    // Un nombre a medias (ADR 0130) no se completa con el de otro: va entero el que escribió, sin armar uno que nadie dio.
+    const halfName = !text(owner.values.givenNames) !== !text(owner.values.familyName)
+    if (halfName && input.familyName !== "saved" && text(declared.givenNames) && text(declared.familyName)) {
+      fill.givenNames = declared.givenNames
+      fill.familyName = declared.familyName
+    }
     if (owner.patientId) {
       if (Object.keys(fill).length > 0) await updatePatient(tx, orgId, actorUserId, owner.patientId, fill)
       patientId = owner.patientId

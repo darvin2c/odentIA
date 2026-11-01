@@ -217,7 +217,7 @@ export function PersonHeader({
   const bookSeed: BookingSeed | null = patient
     ? { patient: { id: patient.id, name: person.displayName }, lockedPatient: true }
     : canCrm
-      ? { person: { contactId: person.id, name: person.displayName, phone: person.phone } }
+      ? { person: { contactId: person.id, name: person.displayName, givenNames: person.givenNames, familyName: person.familyName, phone: person.phone } }
       : null
   const writeTargets = [
     {

@@ -37,7 +37,7 @@ export interface BookingSeed {
    * Quien escribe y aún no es paciente («Reservar cita» desde «Contexto»): se
    * registra aquí con lo mínimo y su ficha queda unida a esa misma persona.
    */
-  person?: { contactId: string; name: string; phone: string | null }
+  person?: { contactId: string; name: string; phone: string | null; givenNames?: string | null; familyName?: string | null }
   /** El paciente viene de un caso o de su ficha: no se cambia aquí. */
   lockedPatient?: boolean
   conversationId?: string
@@ -283,12 +283,15 @@ export function BookingDrawer({
 
   const form = useAppForm({
     defaultValues: (() => {
-      // «Nombres» y «Apellidos»: lo que sigue a la primera palabra va entero a los apellidos.
-      const [first = "", ...rest] = (seed.person?.name ?? "").trim().split(/\s+/)
+      // «Nombres» y «Apellidos»: lo guardado va donde se guardó. Sin nada guardado, el nombre de su
+      // perfil: lo que sigue a la primera palabra va entero a los apellidos.
+      const given = seed.person?.givenNames
+      const family = seed.person?.familyName
+      const [first = "", ...rest] = given || family ? [] : (seed.person?.name ?? "").trim().split(/\s+/)
       return {
         patientId: seed.patient?.id ?? "",
-        givenNames: first,
-        surname: rest.join(" "),
+        givenNames: given ?? first,
+        surname: family ?? rest.join(" "),
         phone: seed.person?.phone ?? null,
         generalConsent: null,
         serviceId: seed.serviceId ?? "",
