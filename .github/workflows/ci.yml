@@ -111,7 +111,7 @@ jobs:
       # sin esto, el PR pasa y la prueba falla recién en main, sin desplegar.
       - name: Comparar la guía de Ariadna con las pantallas
         if: matrix.parte == 'interfaz'
-        run: pnpm --filter @odentia/services exec vitest run src/help-guide.test.ts
+        run: pnpm --filter @odentia/services exec vitest run src/help-guide.test.ts src/medical/help.test.ts
 
   # Recorridos E2E con el supervisor de `e2e/run.ts`: cada parte levanta su
   # propio entorno efímero (PostgreSQL, RustFS, Mailpit, proxy y builds) y corre
