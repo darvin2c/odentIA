@@ -42,6 +42,7 @@ import {
   professionalSaid,
   visitLabel,
   visitState,
+  stepBeforeArrival,
 } from "../../lib/agenda"
 import { useReceptionName, withReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
@@ -51,7 +52,7 @@ import { filiationGapsText, type PatientFull } from "../../lib/patients"
 import { FiliacionSectionDrawer } from "../patient/filiacion-section-drawer"
 import { useAttendAppointment } from "../patient/new-encounter-button"
 import { WriteToPersonDialog } from "../write-to-person"
-import { useAppointmentArrival } from "./arrival"
+import { announceVisitStatus, useAppointmentArrival } from "./arrival"
 import { TestAppointmentDrawer } from "./test-appointment-drawer"
 import { dayShort, rangeSaid, whenSaid } from "./shared"
 import { EMPTY_WHEN, exceptionFlags, useWhen, WHEN_FIELD_MAP, WhenFields } from "./when"
@@ -166,8 +167,8 @@ function RealAppointmentDrawer({
   const isToday = zonedDateOf(appointment.startsAt, timeZone) === today
   /** Aún no llega: por confirmar o confirmada, sin llegada ni atención. */
   const before = appointment.visit === "por_confirmar" || appointment.visit === "confirmada"
-  /** Ya pasó su día y nadie la cerró: «Registrar la atención» o «No vino». */
-  const unclosed = before && !isToday && Date.parse(appointment.endsAt) <= Date.parse(now)
+  /** Ya pasó su hora y nadie la cerró: «Registrar la atención» o «No vino», igual que la lista. */
+  const unclosed = stepBeforeArrival(appointment, now, isToday) === "cerrar"
   const patient = { id: appointment.patientId, name: appointment.patientName }
   const startAttention = () =>
     attend.mutate({
@@ -183,9 +184,11 @@ function RealAppointmentDrawer({
         body: JSON.stringify(input),
       }),
     onSuccess: async (result) => {
-      toast.success(STATUS_DONE[result.data.status], {
-        description: result.data.notice?.queued ? "El agente le avisa y le ofrece otra fecha." : undefined,
-      })
+      if (result.data.status === "confirmada" || result.data.status === "no_asistio") announceVisitStatus(result.data)
+      else
+        toast.success(STATUS_DONE[result.data.status], {
+          description: result.data.notice?.queued ? "El agente le avisa y le ofrece otra fecha." : undefined,
+        })
       setActionError("")
       await onChanged()
       if (result.data.status === "cancelada") {
@@ -514,7 +517,7 @@ function RealAppointmentDrawer({
                   Confirmar cita
                 </SubmitButton>
               ) : null}
-              {/* Ya pasó su día sin cerrarse: se registra la atención o se marca que no vino. */}
+              {/* Ya pasó su hora sin cerrarse: se registra la atención o se marca que no vino. */}
               {unclosed && canAttend ? (
                 <SubmitButton className="h-11" disabled={busy} pending={attend.isPending} onClick={startAttention}>
                   Registrar la atención
@@ -531,6 +534,9 @@ function RealAppointmentDrawer({
                 >
                   No vino
                 </SubmitButton>
+              ) : null}
+              {unclosed && canWrite && !canAttend ? (
+                <p className="text-sm text-muted-foreground">Si vino, la registra {appointment.professionalName}: también le aparece en Inicio.</p>
               ) : null}
 
               {/* Llegó: «Atender» para quien atiende y «Deshacer» mientras no empiece la atención. */}
@@ -562,7 +568,7 @@ function RealAppointmentDrawer({
                   params={{ patientId: appointment.patientId, encounterId: appointment.encounter.id }}
                   className={cn(buttonVariants({ variant: "outline" }), "h-11 bg-card")}
                 >
-                  {appointment.visit === "en_atencion" ? "Seguir la atención" : "Ver la atención"}
+                  {appointment.visit === "en_atencion" ? "Continuar la atención" : "Ver la atención"}
                 </Link>
               ) : null}
 
@@ -624,7 +630,7 @@ function RealAppointmentDrawer({
                         search={{ conversation: context.origin.conversationId }}
                         className="font-semibold text-primary hover:underline"
                       >
-                        Ver conversación
+                        Ver la conversación
                       </Link>
                     ) : null}
                   </span>

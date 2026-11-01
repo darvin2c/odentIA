@@ -1,8 +1,8 @@
 /**
  * Borrar los datos de una persona a su pedido y su historia bloqueada (ADR
  * 0080, fase 2). Se borra lo no clínico (conversaciones, oportunidades,
- * tareas, notas, correo, redes, etiquetas, campos propios y lo que el agente
- * recuerda) y se bloquea lo que la ley pide guardar: la historia clínica, los
+ * tareas, notas, correo, redes, etiquetas y lo que el agente recuerda) y se
+ * bloquea lo que la ley pide guardar: la historia clínica, los
  * cobros y los comprobantes. Bloqueada es archivada y algo más: no sale en
  * búsquedas, agenda, listas ni reportes, y solo Administración la abre, con
  * motivo.

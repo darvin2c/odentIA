@@ -5,6 +5,7 @@
  * las palabras del servidor y ofrece «Reagendar».
  */
 import { toast } from "@odentia/ui"
+import { isUnconfirmedSubmit } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { type AgendaAppointment, invalidateAppointmentQueries } from "../../lib/agenda"
 import { ApiError, apiFetch } from "../../lib/api"
@@ -15,6 +16,36 @@ export interface ArrivalInput {
   arrived: boolean
   /** Para «Reagendar» cuando la cita no se puede recuperar. */
   patient?: { id: string; name: string }
+}
+
+export interface VisitStatusInput {
+  id: string
+  status: "confirmada" | "no_asistio"
+}
+
+/** Lo que se dice al confirmar una cita o marcar que no vino, en la fila y en el cajón: de quién, y si el agente le avisa. */
+export function announceVisitStatus(appointment: Pick<AgendaAppointment, "patientName" | "status" | "notice">): string {
+  const text = appointment.status === "confirmada" ? `Cita de ${appointment.patientName} confirmada` : `Cita de ${appointment.patientName}: no vino`
+  toast.success(text, appointment.notice?.queued ? { description: "El agente le avisa y le ofrece otra fecha." } : undefined)
+  return text
+}
+
+/** «Confirmar cita» y «No vino» desde una fila, sin abrir la cita: en la Agenda y en Inicio, la misma. */
+export function useAppointmentVisitStatus(options: { onDone?: (text: string) => void } = {}) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: VisitStatusInput) =>
+      apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${input.id}/status`, { method: "POST", body: JSON.stringify({ status: input.status }) }),
+    onSuccess: async (result) => {
+      options.onDone?.(announceVisitStatus(result.data))
+      await invalidateAppointmentQueries(queryClient)
+    },
+    onError: async (cause) => {
+      // Sin confirmación no se sabe si se aplicó: la agenda muestra cómo quedó.
+      toast.error(isUnconfirmedSubmit(cause) ? "No pudimos confirmar el cambio. La agenda muestra cómo quedó; revísala antes de repetirlo." : errorMessage(cause))
+      await invalidateAppointmentQueries(queryClient)
+    },
+  })
 }
 
 export function useAppointmentArrival(options: {

@@ -272,11 +272,13 @@ export function AccountTab({
   const collectRequested = useRef(openCollect)
   const ready = Boolean(account.data) && canWrite
   useEffect(() => {
+    // También se pide con la cuenta ya abierta: el «Cobrar» de la cabecera.
+    if (openCollect) collectRequested.current = true
     if (!collectRequested.current || !ready || !collectOnArrival.current) return
     collectRequested.current = false
     collectOnArrival.current()
     onCollectOpened?.()
-  }, [ready, onCollectOpened])
+  }, [ready, openCollect, onCollectOpened])
 
   if (!canRead) {
     return (

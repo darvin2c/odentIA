@@ -326,8 +326,7 @@ export interface TaskItem {
   updatedAt?: string
   /**
    * Es la tarea de un caso que pasó el agente («Te lo pasó Sofi»), con su
-   * urgencia. Completarla puede resolver la conversación: antes se muestra lo
-   * mismo que «Resolver» (`useCompleteTask`).
+   * urgencia.
    */
   agentCase?: { priority: string } | null
 }
@@ -438,7 +437,6 @@ export interface ContactFull {
     docNumber: string | null
     birthDate: string | null
     sex: string | null
-    customFields: Record<string, unknown>
     createdAt: string
     updatedAt: string
   }
@@ -572,15 +570,6 @@ export interface OpportunityDetail extends OpportunityListItem {
     what: string
     createdAt: string
   }>
-}
-
-export interface FieldDef {
-  id: string
-  key: string
-  label: string
-  type: string
-  options: string[] | null
-  position: number
 }
 
 export interface ConnectionItem {

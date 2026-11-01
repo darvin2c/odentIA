@@ -13,7 +13,6 @@ import {
   contactIdentity,
   conversation,
   crmTask,
-  customFieldDef,
   PREFERRED_CHANNELS,
 } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
@@ -64,7 +63,6 @@ export interface ContactDetail extends ContactListItem {
   docNumber: string | null
   birthDate: string | null
   sex: string | null
-  customFields: Record<string, unknown>
   createdAt: string
   updatedAt: string
 }
@@ -356,10 +354,6 @@ export async function getContact(tx: Db, orgId: string, id: string): Promise<Con
       .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.contactId, id)))
       .orderBy(desc(patientContact.isPreferred), asc(patientPerson.displayName), asc(patient.id)),
   ])
-  const customFields =
-    row.customFields && typeof row.customFields === "object" && !Array.isArray(row.customFields)
-      ? (row.customFields as Record<string, unknown>)
-      : {}
   return {
     contact: {
       ...toListItem(row, [...new Set(identities.map((i) => i.channel))]),
@@ -367,7 +361,6 @@ export async function getContact(tx: Db, orgId: string, id: string): Promise<Con
       docNumber: row.docNumber,
       birthDate: row.birthDate,
       sex: row.sex,
-      customFields,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     },
@@ -535,61 +528,6 @@ export async function createContact(
   return full.contact
 }
 
-/** Valida custom fields contra las definiciones de la org; descarta claves desconocidas. */
-export async function sanitizeCustomFields(
-  tx: Db,
-  orgId: string,
-  input: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const defs = await tx
-    .select()
-    .from(customFieldDef)
-    .where(eq(customFieldDef.organizationId, orgId))
-  const byKey = new Map(defs.map((d) => [d.key, d]))
-  const out: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(input)) {
-    const def = byKey.get(key)
-    if (!def || value === null || value === undefined) continue
-    // Cada rechazo va en su campo (`customFields.<clave>`), con su nombre para quien no lo pinta.
-    const invalid = (message: string) => invalidField(`customFields.${key}`, `Campo ${def.label}: ${message}`)
-    switch (def.type) {
-      case "text":
-        if (typeof value !== "string") throw invalid("debe ser texto")
-        out[key] = value
-        break
-      case "number":
-        if (typeof value !== "number" || !Number.isFinite(value)) {
-          throw invalid("debe ser número")
-        }
-        out[key] = value
-        break
-      case "date":
-        if (
-          typeof value !== "string" ||
-          !/^\d{4}-\d{2}-\d{2}$/.test(value) ||
-          Number.isNaN(Date.parse(value))
-        ) {
-          throw invalid("debe ser fecha YYYY-MM-DD")
-        }
-        out[key] = value
-        break
-      case "select": {
-        const options =
-          Array.isArray(def.options) && def.options.every((o): o is string => typeof o === "string")
-            ? def.options
-            : []
-        if (typeof value !== "string" || !options.includes(value)) {
-          throw invalid("valor fuera de opciones")
-        }
-        out[key] = value
-        break
-      }
-      default:
-        throw invalid("tipo desconocido")
-    }
-  }
-  return out
-}
 export async function updateContact(
   tx: Db,
   orgId: string,
@@ -611,7 +549,6 @@ export async function updateContact(
     /** Archivar/recuperar: archiva o recupera a la persona entera (`setPersonArchived`). */
     isActive?: boolean
     tags?: string[]
-    customFields?: Record<string, unknown>
   },
   actor?: { userId: string | null; origin?: "agent" },
 ): Promise<ContactDetail> {
@@ -652,10 +589,6 @@ export async function updateContact(
   if (fields.tags !== undefined) {
     patch.tags = normalizeContactTags(fields.tags)
     changed.push("tags")
-  }
-  if (fields.customFields !== undefined) {
-    patch.customFields = await sanitizeCustomFields(tx, orgId, fields.customFields)
-    changed.push("customFields")
   }
   if (isActive !== undefined) await setPersonArchived(tx, orgId, { userId: actor?.userId ?? null }, id, !isActive)
   if (changed.length > 0) {

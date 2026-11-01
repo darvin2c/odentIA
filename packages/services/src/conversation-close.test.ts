@@ -20,7 +20,6 @@ import {
   closurePendingReason,
   farewellText,
   getResolvePreview,
-  getTaskResolvePreview,
   greetingName,
   nudgeText,
   releaseConversation,
@@ -33,6 +32,7 @@ import { askConfirmationAfterReaction, REACTION_CONFIRM_TEXT } from "./reactions
 import { answerToTeamMember, reopenTopic, resolveTopic, sendTeamReply, takeTopic } from "./topic-reply.js"
 import { recordTopicAskedAgain } from "./agent-operations.js"
 import { listInboxConversations } from "./inbox.js"
+import { getPersonPanel } from "./person-panel.js"
 import { completeTask } from "./tasks.js"
 import { setWritingHours } from "./writing-hours.js"
 import { getWorkspaceHome } from "./workspace.js"
@@ -249,13 +249,6 @@ describe("«Resolver», «Tomar» y «Devolver al agente»", () => {
     expect(audit).toMatchObject({ actorUserId: c.receptionId, metadata: { via: "equipo" } })
   })
 
-  it("completar la tarea de un tema no tiene nada que advertir: no cierra la conversación", async () => {
-    const c = await clinic({ provider: "whatsapp_cloud_api" })
-    const conv = await c.thread("Lucía Paredes", { lastInboundAt: new Date(Date.now() - HOUR) })
-    await c.say(conv.id, "in", "¿Me devuelven lo que pagué?", new Date(Date.now() - HOUR))
-    const topic = await c.run((tx) => createHandoff(tx, c.orgId, null, { conversationId: conv.id, reason: "Reembolso", summary: "Reembolso", createdBy: "agent" }))
-    expect(await c.run((tx) => getTaskResolvePreview(tx, c.orgId, topic.taskId!))).toBeNull()
-  })
 })
 
 describe("el ciclo: insistir una vez y cerrar por silencio", () => {
@@ -460,7 +453,7 @@ describe("el ciclo: insistir una vez y cerrar por silencio", () => {
     // Nora la lleva la dueña: a ella le espera; a recepción no. Omar espera respuesta: es otra fila.
     const ownerHome = await c.run((tx) => getWorkspaceHome(tx, c.orgId, c.ownerId, access))
     expect(ownerHome.waiting.find((row) => row.kind === "stillOpen")).toMatchObject({ total: 1, conversationId: mine.id, contactName: "Nora Paz" })
-    expect(ownerHome.waiting.find((row) => row.kind === "conversations")).toMatchObject({ waiting: 1 })
+    expect(ownerHome.waiting.filter((row) => row.kind === "person")).toHaveLength(1)
     const receptionHome = await c.run((tx) => getWorkspaceHome(tx, c.orgId, c.receptionId, access))
     expect(receptionHome.waiting.find((row) => row.kind === "stillOpen")).toBeUndefined()
     // Con Recepción apagada nada se cierra solo, así que no hay nada que recordar.
@@ -544,6 +537,51 @@ describe("temas para el equipo: el agente nunca se calla (ADR 0050)", () => {
     // Un tema de otra conversación no se reabre por esta.
     const other = await c.thread("Otro")
     await expect(c.run((tx) => reopenTopic(tx, c.orgId, { conversationId: other.id, topicId: topic.id, userId: c.receptionId }))).rejects.toMatchObject({ status: 404 })
+  })
+
+  it("caja solo deja pendiente un pago suyo o sin tomar", async () => {
+    const c = await clinic()
+    const cashierId = `caja-${c.orgId}`
+    await ownerDb.insert(user).values({ id: cashierId, name: "Paula de Caja", email: `${cashierId}@cierre.test`, emailVerified: true })
+    await ownerDb.insert(member).values({ id: `m-${cashierId}`, userId: cashierId, organizationId: c.orgId, role: "cashier", createdAt: new Date() })
+    const conv = await c.thread("Carlos Paredes")
+    const topicOf = async (kind: string, assigneeUserId: string | null) => {
+      const topic = await c.run((tx) => createHandoff(tx, c.orgId, null, { conversationId: conv.id, reason: `Tema ${kind}`, summary: `Tema ${kind}`, createdBy: "agent" }))
+      await ownerDb.update(agentHandoff).set({ kind, assigneeUserId }).where(eq(agentHandoff.id, topic.id))
+      return topic
+    }
+    const reopen = (topicId: string) => c.run((tx) => reopenTopic(tx, c.orgId, { conversationId: conv.id, topicId, userId: cashierId }))
+    await expect(reopen((await topicOf("clinico", null)).id)).rejects.toMatchObject({ status: 403 })
+    await expect(reopen((await topicOf("pago", c.receptionId)).id)).rejects.toMatchObject({ status: 403 })
+    const own = await topicOf("pago", cashierId)
+    await c.run((tx) => resolveTopic(tx, c.orgId, { conversationId: conv.id, topicId: own.id, userId: c.ownerId }))
+    await reopen(own.id)
+    expect((await ownerDb.select().from(crmTask).where(eq(crmTask.id, own.taskId!)))[0]?.status).toBe("open")
+  })
+
+  it("el panel lee lo último que preguntó y, pasadas las 24 horas de WhatsApp, deja la respuesta por entregar", async () => {
+    const c = await clinic({ provider: "whatsapp_cloud_api" })
+    const late = new Date(Date.now() - 30 * HOUR)
+    const conv = await c.thread("Rosa Quispe", { lastInboundAt: late })
+    await c.say(conv.id, "in", "Hola", new Date(late.getTime() - 60_000))
+    const [asked] = await c.say(conv.id, "in", "¿Cuánto cuesta la limpieza?", late)
+    const panel = await c.run((tx) => getPersonPanel(tx, c.orgId, { conversationId: conv.id, userId: c.receptionId, can: () => true }))
+    expect(panel.thread.map((item) => item.text)).toEqual(["Hola", "¿Cuánto cuesta la limpieza?"])
+    expect(panel.reply).toEqual({ allowed: true, closedChannel: false, windowOpen: false, holdOn: asked!.id })
+    // La pregunta es la última, no la primera: pide un precio aunque «Hola» no lo pidiera.
+    expect(panel.suggestions.noPriceFor).not.toBeNull()
+    const sent = await c.run((tx) => sendTeamReply(tx, c.orgId, { conversationId: conv.id, userId: c.receptionId, content: { type: "text", text: "Cuesta S/ 80" }, replyToMessageId: panel.reply.holdOn }))
+    expect(sent.held).toBe(true)
+    // Sin un mensaje suyo no hay qué responder: es como un canal cerrado.
+    const never = await c.thread("Nunca escribió")
+    expect((await c.run((tx) => getPersonPanel(tx, c.orgId, { conversationId: never.id, userId: c.receptionId, can: () => true }))).reply).toEqual({ allowed: false, closedChannel: true, windowOpen: false, holdOn: null })
+  })
+
+  it("en un canal sin ventana, responder tarde sale de una vez", async () => {
+    const c = await clinic()
+    const conv = await c.thread("Visitante", { lastInboundAt: new Date(Date.now() - 30 * HOUR) })
+    const panel = await c.run((tx) => getPersonPanel(tx, c.orgId, { conversationId: conv.id, userId: c.receptionId, can: () => true }))
+    expect(panel.reply).toEqual({ allowed: true, closedChannel: false, windowOpen: true, holdOn: null })
   })
 
   it("con varios temas, responder a uno resuelve solo ese; citar un mensaje sin tema no abre ni resuelve nada", async () => {

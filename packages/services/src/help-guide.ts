@@ -40,7 +40,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Inicio",
     parent: null,
     purpose:
-      "Lo que te toca hoy. «Te espera» es la única lista de lo que hay que hacer, una fila por asunto y por orden de urgencia: lo que te pasó el agente (con «Tomar este tema», o «Responder» ahí mismo si es tuyo: una duda clínica al odontólogo, un pago a caja), tu atención de otro día que quedó sin cerrar (con «Continuar» o «Anular con motivo»), las citas de días anteriores que nadie cerró (con «No vino», o se abren para registrar la atención), las citas que no se confirmaron tras el recordatorio (para llamar), quienes aceptaron su presupuesto y no tienen cita (para quien ve Reportes, con «Ver la lista», para agendarlos desde ahí), las conversaciones sin responder, las tareas (con «Hecha»), lo que recomienda Argos y las personas a las que Sofi no pudo escribir. Al lado, tu día: si hoy atiendes, «Mis pacientes de hoy» con la sala de espera, lo que estás atendiendo y lo que viene más tarde (con «Atender»); si no, la agenda de la sede, donde recepción marca «Llegó», o la caja, según tu trabajo. La campana de avisos es solo para enterarte: no repite nada de «Te espera».",
+      "Lo que te toca hoy. «Te espera» es la única lista de lo que hay que hacer, una fila por persona, en tres grupos: Ahora, Hoy y Sin apuro, que va plegado. Cada fila tiene un solo botón y abre al lado lo que necesitas para resolverla, con sus mensajes y la caja para responder: lo que te pasó el agente (con «Tomar este tema», o «Responder» ahí mismo si es tuyo: una duda clínica al odontólogo, un pago a caja), tu atención de otro día que quedó sin cerrar (con «Continuar» o «Anular con motivo»), las citas de días anteriores que nadie cerró (con «Registrar la atención» si atiendes y «No vino»; si atiendes, te salen las tuyas), las citas que no se confirmaron tras el recordatorio (para llamar), quienes aceptaron su presupuesto y no tienen cita (para quien ve Reportes, con «Ver la lista», para agendarlos desde ahí), las conversaciones sin responder (si atiendes, las que llevas), las tareas (con «Hecha»), lo que recomienda Argos y las personas a las que Sofi no pudo escribir. Al lado, tu día: si hoy atiendes, «Mis pacientes de hoy» con la sala de espera, lo que estás atendiendo y lo que viene más tarde (con «Atender»); si no, la agenda de la sede, donde recepción marca «Llegó», o la caja, según tu trabajo. La campana de avisos es solo para enterarte: no repite nada de «Te espera».",
     terms: [
       "resumen del día",
       "pendientes",
@@ -76,7 +76,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Por qué me aparece una atención de ayer?",
-        a: "Porque quedó en borrador y la ficha de esa persona sigue trabada. La fila dice lo que le falta para cerrarse: «Continuar» la abre para terminarla y «Anular con motivo» la descarta dejando constancia de por qué.",
+        a: "Porque quedó en borrador y la ficha de esa persona sigue trabada. Al abrirla te dice lo que tiene y lo que le falta para cerrarse: «Continuar la atención» la abre para terminarla y «Anular con motivo» la descarta dejando constancia de por qué.",
       },
       {
         q: "¿Cómo respondo lo que me pasó Sofi sin entrar a la Bandeja?",
@@ -185,7 +185,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Por qué no aparece un profesional en la agenda?",
-        a: "En el día aparece quien atiende ese día, según su horario en Configuración › Horarios y ausencias. Para darle una cita a quien no atiende ese día, elígelo en «Profesionales» › «No atienden este día» y su columna se suma a la vista.",
+        a: "En el día aparece quien atiende ese día, según su horario en Configuración › Horarios y ausencias. Para darle una cita a quien no atiende ese día, elígelo en «Profesionales» › «No atienden este día» y su columna se suma a la vista. Recepción y caja no atienden, así que no aparecen; un propietario o administrador aparece cuando le pones horario.",
       },
       {
         q: "¿Puedo dar una cita fuera de horario o a una hora ocupada?",
@@ -334,7 +334,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Qué pasa si alguien se registra en línea con el documento de otra persona?",
-        a: "El registro no se completa y no se cambia nada de esa persona; a quien se registró se le dice que se comunique con recepción. En «Te espera» aparece «Alguien se registró con el documento de…»: la fila te lleva a esa persona para que revises si es ella, y «Descartar» la quita sin cambiar nada. Si al registrar a un menor escriben el documento de alguien que ya está en la clínica, en «Te espera» aparece «¿… es representante de …?»: «Confirmar» la deja como su representante con el parentesco que escribieron (la madre que registra a su segundo hijo, con un clic) y «No es ella» lo descarta sin vincular a nadie.",
+        a: "El registro no se completa y no se cambia nada de esa persona; a quien se registró se le dice que se comunique con recepción. En «Te espera» aparece «Alguien se registró con el documento de…»: la fila te lleva a esa persona para que revises si es ella, y «Descartar» la quita sin cambiar nada. Si al registrar a un menor escriben el documento de alguien que ya está en la clínica, en «Te espera» aparece «¿… es representante de …?»: «Confirmar» la deja como su representante con el parentesco que escribieron (la madre que registra a su segundo hijo, con un clic) y «No es representante» lo descarta sin vincular a nadie.",
       },
       {
         q: "¿Dónde veo sus alergias, qué le toca y su última atención?",
@@ -453,7 +453,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Agente",
     parent: null,
     purpose:
-      "El resumen de tus agentes (Sofi, tu agente de recepción; Clío, tu agente clínico, y Argos, tu agente administrador): cómo van, qué necesita de ti y la entrada para configurar cada uno, el «Horario de recontacto», lo que aprenden y lo que sabe Sofi. El número junto a Agente en el menú cuenta lo que se resuelve aquí: respuestas por revisar y lecciones por aprobar. Los casos que te pasa Sofi están en «Te espera» y en el panel del botón «Agente» de la cabecera, con su número; lo que espera el sí de una persona, en su conversación de la Bandeja.",
+      "El resumen de tus agentes (Sofi, tu agente de recepción; Clío, tu agente clínico, y Argos, tu agente administrador): cómo van, qué necesita de ti y la entrada para configurar cada uno, el «Horario de recontacto», lo que aprenden y lo que sabe Sofi. El número junto a Agente en el menú cuenta lo que se resuelve aquí: respuestas por revisar y lecciones por aprobar. Los casos que te pasa Sofi están en «Te espera», y el número junto a Inicio cuenta las personas que te esperan. En «Actividad» ves lo que envió, propuso o te pasó; lo que espera el sí de una persona, en su conversación de la Bandeja.",
     terms: [
       "sofi",
       "clío",
@@ -860,6 +860,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         q: "¿Cómo invito a alguien a mi equipo?",
         a: "En Configuración › Equipo, pulsa «Invitar al equipo», escribe su correo y elige su rol. Le llega una invitación para crear su cuenta.",
       },
+      {
+        q: "¿Cómo sé quién atiende pacientes?",
+        a: "En Configuración › Equipo, la columna «Atiende» dice qué días atiende cada persona. Un profesional que aún no tiene horario dice «Sin horario». Un propietario o administrador atiende solo si le pones horario. Si alguien deja de atender, porque sale del equipo o cambia de rol, su horario se cierra y sus citas por venir quedan en la Agenda, marcadas para pasarlas a otra persona.",
+      },
     ],
   },
   {
@@ -889,6 +893,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         q: "¿Dónde configuro los horarios?",
         a: "En Configuración › Horarios y ausencias. Ahí defines, por profesional y sede, los días y las horas de atención.",
+      },
+      {
+        q: "¿Por qué recepción o caja no aparecen en Horarios y ausencias?",
+        a: "Porque no atienden pacientes: un horario aquí hace que esa persona se ofrezca para citas, también en Sofi y en el enlace de reserva. Solo llevan horario quienes pueden atender: los profesionales, los propietarios y los administradores.",
       },
     ],
   },
@@ -1115,16 +1123,6 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "pipelines",
       "renombrar etapa",
     ],
-    writePermission: "settings.write",
-  },
-  {
-    id: "campos",
-    path: "/settings/fields",
-    title: "Campos de contacto",
-    parent: SETTINGS,
-    purpose:
-      "Los datos propios que tu clínica quiere guardar de cada contacto, además de los que ya trae el sistema.",
-    terms: ["campos personalizados", "datos adicionales", "campo nuevo", "información extra"],
     writePermission: "settings.write",
   },
   {

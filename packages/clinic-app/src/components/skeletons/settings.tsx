@@ -201,19 +201,6 @@ export function TeamActivityPageSkeleton() {
   )
 }
 
-export function ContactFieldsSkeleton() {
-  return <DataTableSkeleton columnCount={4} rowCount={4} label="Cargando los campos de contacto…" />
-}
-
-export function ContactFieldsPageSkeleton() {
-  const can = useCan()
-  return (
-    <SettingsPage title="Campos de contacto" subtitle="Los datos propios que tu clínica guarda de cada contacto." primary={settingsPrimary("fields", can)} message="Cargando los campos de contacto…">
-      <ContactFieldsSkeleton />
-    </SettingsPage>
-  )
-}
-
 export function PipelinesSkeleton() {
   return <DataTableSkeleton columnCount={3} rowCount={4} label="Cargando las etapas de venta…" />
 }
@@ -1110,7 +1097,6 @@ const PAGE_BY_PATH: Record<string, () => ReactNode> = {
   "/settings/patient-access": PatientPortalPageSkeleton,
   "/settings/payment-methods": PaymentMethodsPageSkeleton,
   "/settings/pipelines": PipelinesPageSkeleton,
-  "/settings/fields": ContactFieldsPageSkeleton,
   "/settings/integrations": IntegrationsPageSkeleton,
   "/settings/integrations/whatsapp": WhatsAppPageSkeleton,
   "/settings/integrations/webchat": WebchatPageSkeleton,

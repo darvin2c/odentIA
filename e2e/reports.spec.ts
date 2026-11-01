@@ -9,6 +9,7 @@ import { and, eq } from "drizzle-orm"
 import { tenant, tenantPattern } from "./env"
 import { api, call, expect, test, type OwnerFixture } from "./fixtures"
 import { gotoHydrated } from "./hydration"
+import { surface } from "./surface"
 
 async function observe(page: Page, info: TestInfo, name: string) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
@@ -123,10 +124,17 @@ for (const width of [1440, 390]) {
       await expect(page).toHaveURL(/lista=no_show/)
       // La tarjeta «No vinieron» también es una región: la lista es la que dice cómo se calcula.
       const list = page.getByRole(width === 390 ? "dialog" : "region", { name: "No vinieron" }).or(page.getByRole("dialog", { name: "No vinieron" })).filter({ hasText: "Cómo se calcula" }).first()
-      await expect(list.getByRole("link", { name: "Diego Ruiz" })).toBeVisible()
+      await expect(list.getByRole("button", { name: "Diego Ruiz" })).toBeVisible()
       await expect(list.getByText("Ya tiene otra cita")).toBeVisible()
       await expect(list.getByText("Cómo se calcula")).toBeVisible()
       await observe(page, info, "lista")
+      // La cita de quien no vino se abre al lado, sin salir de Reportes.
+      await list.getByRole("button", { name: "Diego Ruiz" }).click()
+      const visit = surface(page, { name: "Diego Ruiz" })
+      await expect(visit).toBeVisible()
+      await expect(page).toHaveURL(/\/reports/)
+      await visit.getByRole("button", { name: "Cerrar", exact: true }).first().click()
+      await expect(visit).toBeHidden()
       await page.keyboard.press("Escape")
       await expect(page).not.toHaveURL(/lista=/)
 

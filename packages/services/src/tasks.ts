@@ -61,8 +61,7 @@ export interface TaskItem {
   opportunityTitle: string | null
   /**
    * La tarea es la de un caso que pasó el agente («Te lo pasó el agente»), con
-   * su urgencia. Completarla puede resolver la conversación: antes se muestra
-   * lo mismo que «Resolver» (`getTaskResolvePreview`).
+   * su urgencia.
    */
   agentCase: { priority: string } | null
   createdAt: string
@@ -252,7 +251,8 @@ export async function getTask(tx: Db, orgId: string, id: string): Promise<TaskIt
 
 /** Lista simple, filtrada (agente, contexto de una persona): sin páginas. */
 export async function listTasks(tx: Db, orgId: string, input: TaskFilters): Promise<TaskItem[]> {
-  const conditions = [eq(crmTask.organizationId, orgId)]
+  // Lo que dejó el sistema (`task.kind`) se decide en su fila de «Te espera»: «Hecha» lo cerraría sin decidirlo.
+  const conditions = [eq(crmTask.organizationId, orgId), isNull(crmTask.kind)]
   if (input.status) {
     if (!STATUSES.includes(input.status)) throw validation("Estado inválido")
     conditions.push(eq(crmTask.status, input.status))
@@ -347,7 +347,8 @@ export async function pageTasks(
   const q = input.q?.trim() ?? ""
   const areas = input.viewer.areas.filter((area) => (TASK_AREAS as readonly string[]).includes(area))
   // Las tareas de una persona de prueba se ven en «Probar», no en Tareas (ADR 0094).
-  const conditions: SQL[] = [eq(crmTask.organizationId, orgId), sql`not ${testContactSql(sql`${crmTask.contactId}`)}`]
+  // Lo que dejó el sistema (`task.kind`) se decide en su fila de «Te espera»: «Hecha» lo cerraría sin decidirlo.
+  const conditions: SQL[] = [eq(crmTask.organizationId, orgId), isNull(crmTask.kind), sql`not ${testContactSql(sql`${crmTask.contactId}`)}`]
   if (!input.viewer.all) {
     conditions.push(
       or(

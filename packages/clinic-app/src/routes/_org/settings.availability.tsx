@@ -53,9 +53,11 @@ import { type BranchHours, weekLines } from "../../lib/branch-hours"
 import { AvailabilityPageSkeleton, AvailabilitySkeleton } from "../../components/skeletons/settings"
 
 export const Route = createFileRoute("/_org/settings/availability")({
-  validateSearch: (search: Record<string, unknown>): { branch?: string } => ({
+  validateSearch: (search: Record<string, unknown>): { branch?: string; profesional?: string } => ({
     ...search,
     branch: typeof search.branch === "string" ? search.branch : undefined,
+    /** A quién abre la pantalla: lo pide «Sin horario» de Equipo. */
+    profesional: typeof search.profesional === "string" ? search.profesional : undefined,
   }),
   pendingComponent: AvailabilityPageSkeleton,
   component: AvailabilityPage,
@@ -94,8 +96,8 @@ function BranchHoursCard({
           Horario de atención
         </h3>
         <p className="text-sm text-muted-foreground">
-          La suma de los horarios del equipo. Es lo que {receptionName} dice cuando le preguntan; cambia al cambiar el
-          horario de alguien.
+          La suma de los horarios de quienes atienden. Es lo que {receptionName} dice cuando le preguntan; cambia al
+          cambiar el horario de alguien.
         </p>
       </div>
       {failed ? (
@@ -104,7 +106,7 @@ function BranchHoursCard({
         <Skeleton className="h-9 w-full" />
       ) : hours === null || hours.week.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          Nadie del equipo tiene horario en esta sede: {receptionName} no dice días ni horas hasta que haya uno.
+          Nadie tiene horario en esta sede: {receptionName} no dice días ni horas hasta que haya uno.
         </p>
       ) : (
         <dl className="grid gap-1 text-sm sm:grid-cols-[auto_1fr] sm:gap-x-6">
@@ -196,15 +198,19 @@ function AvailabilityPage() {
       })),
     [resources],
   )
-  const [pickedProfessionalId, setPickedProfessionalId] = React.useState("")
+  const [pickedProfessionalId, setPickedProfessionalId] = React.useState(Route.useSearch().profesional ?? "")
   const professional = professionals.find((item) => item.id === pickedProfessionalId) ?? professionals[0]
   const professionalId = professional?.id ?? ""
 
   const schedule = useWeeklySchedule({
     branchId: resources?.branchId,
     professionalUserId: professionalId,
-    // El horario de la sede es la suma de los del equipo: cambia con cada uno.
-    onSaved: () => queryClient.invalidateQueries({ queryKey: ["branch-hours"] }),
+    // El horario de la sede es la suma de los del equipo: cambia con cada uno, y Equipo dice sus días.
+    onSaved: async () => {
+      await Promise.all(
+        ["branch-hours", "team-attendance"].map((key) => queryClient.invalidateQueries({ queryKey: [key] })),
+      )
+    },
   })
   const hoursQuery = useQuery({
     queryKey: ["branch-hours", resources?.branchId],
@@ -383,7 +389,7 @@ function AvailabilityPage() {
         <>
           <GroupTitle
             title="De cada profesional"
-            hint="Su horario de la semana y los días que no viene."
+            hint="Su horario de la semana y los días que no viene. Recepción y caja no atienden: no llevan horario."
           />
           {professional ? (
             <>

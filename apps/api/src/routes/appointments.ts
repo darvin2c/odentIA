@@ -18,6 +18,7 @@ import {
   roomWord,
   listScheduleBlocks,
   listScheduleResources,
+  listTeamAttendance,
   moveAppointment,
   searchAgendaPatients,
   setAppointmentArrival,
@@ -80,6 +81,8 @@ const statusInput = z.object({
   status: z.enum(STATUS),
   cancelReason: z.enum(["paciente", "clinica", "otro"]).optional(),
   cancelNote: z.string().max(500).optional(),
+  // Lo avisó por teléfono: ya lo sabe, no hace falta otro mensaje.
+  notice: z.literal(false).optional(),
 })
 
 const roomInput = z.object({
@@ -164,6 +167,15 @@ export function createAgendaRoute(deps: CrmDeps) {
       const [hours] = await withOrgContext(deps.db, orgId, (tx) => getBranchHours(tx, orgId, new Date(), { branchId }))
       return hours ?? null
     })
+  })
+
+  // Qué días atiende cada persona y cuántas citas tiene por venir: lo que dice Equipo.
+  app.get("/team", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver el equipo"), 403)
+    }
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => listTeamAttendance(tx, orgId)))
   })
 
   // Lo que dura una cita regular en la sede (la que se reserva sin servicio).
@@ -473,6 +485,7 @@ export function createAppointmentsRoute(deps: CrmDeps) {
         setAppointmentStatus(tx, orgId, userId, c.req.param("id"), parsed.data.status, {
           cancelReason: parsed.data.cancelReason,
           cancelNote: parsed.data.cancelNote,
+          ...(parsed.data.notice === false ? { notice: false } : {}),
         }),
       ),
     )

@@ -11,6 +11,7 @@ import {
 import { formatMoney } from "@odentia/clinical"
 import {
   ConfirmDialog,
+  DetailDrawer,
   EmptyState,
   ErrorState,
   FormDrawer,
@@ -208,6 +209,42 @@ export function DataRequestsPanel({ patientId }: { patientId: string }) {
         />
       ) : null}
     </section>
+  )
+}
+
+/**
+ * «Atender el pedido» desde «Te espera»: el mismo cajón de la ficha, para
+ * comprobar, enviar y responder sin salir de Inicio.
+ */
+export function DataRequestDrawer({ patientId, requestId, onClose }: { patientId: string; requestId: string; onClose: () => void }) {
+  const canReadClinical = usePermission("clinical.read")
+  const canErase = usePermission("patients.erase")
+  const locale = useOrgLocale() ?? "es"
+  const query = useQuery({ queryKey: dataRequestsKey(patientId), queryFn: () => fetchDataRequests(patientId) })
+  const view = query.data
+  const request = view?.requests.find((item) => item.id === requestId) ?? null
+  if (!view || !request) {
+    return (
+      <DetailDrawer open title="Pedido sobre sus datos" isLoading={query.isPending} onClose={onClose}>
+        {query.isError ? (
+          <ErrorState title="No pudimos cargar el pedido" message={problemOf(query.error) ?? ""} onRetry={() => void query.refetch()} />
+        ) : query.isPending ? null : (
+          <EmptyState title="Este pedido ya no está" description="Se atendió desde que se abrió la pantalla." />
+        )}
+      </DetailDrawer>
+    )
+  }
+  return (
+    <AttendDrawer
+      patientId={patientId}
+      request={request}
+      today={view.today}
+      locale={locale}
+      canReadClinical={canReadClinical}
+      canErase={canErase}
+      patientName={view.requesters.find((item) => item.relation === "paciente")?.displayName ?? null}
+      onClose={onClose}
+    />
   )
 }
 
@@ -830,7 +867,7 @@ function ErasureSummary({ preview, locale }: { preview: ErasurePreview; locale: 
       : null,
     preview.opportunities + preview.tasks > 0 ? `Sus oportunidades y tareas: ${preview.opportunities + preview.tasks}` : null,
     preview.notes ? `Sus notas: ${preview.notes}` : null,
-    "Correo, etiquetas y campos propios",
+    "Correo y etiquetas",
     "Lo que el agente recuerda de ella",
     "Sus permisos de mensajes: no se le escribe más",
   ].filter((item): item is string => item !== null)

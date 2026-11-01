@@ -118,7 +118,7 @@ export {
 } from "./master-detail.js"
 export { DockedSurface, type DockedSurfaceProps, useDockDecision } from "./docked-surface.js"
 export {
-  MOBILE_NAV_TRIGGER_CLASS,
+  MobileNavTrigger,
   PageHeader,
   PageHeaderMenu,
   type PageHeaderMenuItem,
@@ -127,7 +127,7 @@ export {
 } from "./page-header.js"
 export { ScrollingTabsList } from "./scrolling-tabs-list.js"
 export { type ViewTabOption, type ViewTabsProps, ViewTabs } from "./view-tabs.js"
-export { PersonAvatar, type PersonAvatarProps, personInitials } from "./person-avatar.js"
+export { PersonAvatar, type PersonAvatarProps, personFirstName, personInitials } from "./person-avatar.js"
 export {
   ADJUSTED_IMAGE_SIZE,
   ImageAdjust,

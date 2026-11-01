@@ -10,7 +10,6 @@ import {
   listTimeWords,
   messageTimeWords,
   replyWindowWords,
-  resolveWords,
   whenWords,
 } from "./conversation-state"
 import type { ConversationAttention } from "./crm"
@@ -127,19 +126,6 @@ describe("cómo se cerró", () => {
 })
 
 describe("confirmaciones de cierre", () => {
-  it("«Resolver» dice si se despide y qué más se cierra", () => {
-    expect(resolveWords("Ana Ruiz", { farewell: true, farewellText: "¡Gracias!", handoffs: 1, pendingContact: 1 }, "Sofi")).toEqual({
-      description:
-        "Se cerrará la conversación con Ana Ruiz, se le enviará la despedida de la clínica y Sofi volverá a atenderla si escribe de nuevo.",
-      also: ["También se dará por resuelto el caso que te pasó Sofi.", "Vencerá la cita propuesta que esperaba su sí."],
-    })
-    expect(resolveWords("Ana Ruiz", { farewell: false, farewellText: null, handoffs: 0, pendingContact: 0 }, "Sofi")).toEqual({
-      description:
-        "Se cerrará la conversación con Ana Ruiz sin enviarle nada: ya no se le puede escribir, porque su último mensaje fue hace casi 24 horas o más.",
-      also: [],
-    })
-  })
-
   it("«Cerrar sin resolver» no promete despedida", () => {
     expect(closeWithoutResolvingWords("Ana Ruiz", "Sofi")).toContain("sin enviarle nada")
   })

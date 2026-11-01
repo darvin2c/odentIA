@@ -13,7 +13,7 @@ import { type ConnectResult, whatsappNumbers } from "../../lib/whatsapp"
 import { WhatsAppPageSkeleton, WhatsAppSkeleton } from "../../components/skeletons/settings"
 
 export const Route = createFileRoute("/_org/settings/integrations/whatsapp")({
-  // `?mensaje=` abre ese mensaje: «Cambiar el texto» de «Te espera» llega así (ADR 0040).
+  // `?mensaje=` abre ese mensaje: «Cambiar el texto» del panel de «Te espera» llega así (ADR 0040).
   // `?conectado=` lo pone el panel al volver de «Conectar con Facebook» (issue 166).
   validateSearch: (search: Record<string, unknown>): { mensaje: string | undefined; conectado?: string } => ({
     mensaje: typeof search.mensaje === "string" && search.mensaje ? search.mensaje : undefined,

@@ -63,7 +63,7 @@ import { useOrgProfile } from "../../lib/org"
 import { ageFrom, type Encounter, type EncounterDetail, hcLabel, type PatientFull } from "../../lib/patients"
 import { productUi } from "../../product/product-ui"
 import { AttendingForNotice } from "../agenda/attending-for-notice"
-import { useAgentPanelDockBlocker } from "../agent-panel"
+import { useNoticesColumnDockBlocker } from "../notices-column"
 import { ProfessionalProfileDrawer } from "../professional-profile-drawer"
 import { ChoiceSelect } from "../ui/choice-select"
 import { ConsentSigningScreen, useSignAs } from "./consent-signing"
@@ -415,7 +415,7 @@ export function EncounterEditor({
   const [signingDocs, setSigningDocs] = useState<ConsentDocument[] | null>(null)
   const myUserId = useMyUserId()
   // El borrador ocupa la página: el agente se abre como cajón, sin desmontarlo.
-  useAgentPanelDockBlocker(true)
+  useNoticesColumnDockBlocker(true)
   const signAs = useSignAs()
   // Quien lleva la atención es quien la edita y la firma; otro profesional la
   // lee y, para continuarla, toma el relevo.

@@ -636,6 +636,36 @@ export function ClinicalAssistantPageSkeleton() {
 }
 
 // ---------------------------------------------------------------------------
+// Actividad
+// ---------------------------------------------------------------------------
+
+export function AgentActivitySkeleton() {
+  return (
+    <ul aria-hidden className="elevated flex flex-col divide-y rounded-xl border bg-card px-4 sm:px-6">
+      {slots(6).map((row) => (
+        <li key={row} className="flex flex-col gap-2 py-3">
+          <Line className="w-32" />
+          <BaseLine className="w-64 max-w-full" />
+          <Line className="w-28" />
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+export function AgentActivityPageSkeleton() {
+  return (
+    <PageLoading title="Agente" className="flex flex-col gap-6">
+      <div className="flex flex-col gap-6">
+        <p className="text-sm text-muted-foreground">Lo que envió, propuso y le pasó a tu equipo.</p>
+        <TabsLoading active="actividad" />
+        <AgentActivitySkeleton />
+      </div>
+    </PageLoading>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Aprender
 // ---------------------------------------------------------------------------
 

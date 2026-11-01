@@ -701,10 +701,6 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
           : "")
       : null
     const tagsLine = contactDetail.tags.length ? contactDetail.tags.join(", ") : null
-    const customLine = Object.entries(contactDetail.customFields ?? {})
-      .slice(0, 10)
-      .map(([k, v]) => `${k}: ${typeof v === "string" ? v.slice(0, 120) : JSON.stringify(v)?.slice(0, 120) ?? ""}`)
-      .join("; ")
     // La atención en curso entera (ADR 0104): lo que la persona ya dijo no se
     // le vuelve a pedir. Si no cabe, quedan cómo empezó y lo último, con aviso.
     const { items, history, startedAt } = await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) => {
@@ -849,7 +845,6 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
       memoryBlock,
       internal.length ? `De su ficha, para ti (interno; no se lo digas así): ${internal.join(". ")}.` : null,
       notes.items.length ? `Notas operativas recientes (internas; no las reproduzcas al interlocutor):\n${notes.items.map(n => `${n.at}: ${n.body}`).join("\n")}${notes.nextCursor ? (reads ? "\nHay más notas: usa leer_contexto_comercial con cursor de notas para consultarlas." : "\nHay más notas que no van aquí.") : ""}` : null,
-      customLine ? `Campos (resumen${reads ? "; valores completos en leer_contexto_comercial" : ""}): ${customLine}.` : null,
     ]
       .filter(Boolean)
       .join("\n\n")

@@ -19,7 +19,7 @@ export interface CaseBrief {
   conversationId: string
   contactId: string
   /** La derivación sin resolver más reciente de la conversación, si la hay. */
-  handoff: Pick<HandoffItem, "id" | "reason" | "summary" | "priority" | "status" | "dueAt" | "createdAt" | "asks" | "pending" | "notice"> | null
+  handoff: Pick<HandoffItem, "id" | "reason" | "summary" | "priority" | "status" | "dueAt" | "createdAt" | "asks" | "pending" | "notice" | "kind" | "assigneeUserId" | "urgent"> | null
   contactName: string | null
   /** Canal de la conversación. */
   channel: string | null
@@ -130,6 +130,9 @@ export async function getCaseBrief(
           asks: open.asks,
           pending: open.pending,
           notice: open.notice,
+          kind: open.kind,
+          assigneeUserId: open.assigneeUserId,
+          urgent: open.urgent,
         }
       : null,
     contactName: person?.displayName ?? null,

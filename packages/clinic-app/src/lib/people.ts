@@ -326,7 +326,7 @@ export function situationAction(situation: PersonSituation | null): string {
     case "sin_pendientes":
       return "Ver ficha"
     default:
-      return "Ver conversación"
+      return "Ver la conversación"
   }
 }
 

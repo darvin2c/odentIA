@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { ALL_PERMISSIONS, canAccess, canAccessAny, platformPathPermission, roleLabel } from "./permissions.js"
+import { ALL_PERMISSIONS, ATTENDING_ROLES, canAccess, canAccessAny, canAttend, platformPathPermission, roleLabel } from "./permissions.js"
+
+describe("quien puede atender (ADR 0128)", () => {
+  it("son quien atiende de oficio y quien dirige; recepción, caja y miembro no", () => {
+    expect([...ATTENDING_ROLES].sort()).toEqual(["admin", "clinician", "owner"])
+    for (const role of ["reception", "cashier", "member", "nadie"]) expect(canAttend(role)).toBe(false)
+  })
+})
 
 describe("el nombre del rol según el producto (entrega 3 del issue 229)", () => {
   it("quien atiende es «Odontólogo» en odentIA y «Médico» en latidIA; los demás roles no cambian", () => {
@@ -150,14 +157,12 @@ describe("permiso operativo agent.decide", () => {
     expect(platformPathPermission("/audit")).toBeNull()
   })
 
-  it("etapas de venta y campos de contacto los abre también quien trabaja con ventas", () => {
-    for (const path of ["/settings/pipelines", "/settings/fields"]) {
-      const rule = platformPathPermission(path) ?? []
-      expect(canAccessAny("reception", rule)).toBe(true)
-      expect(canAccessAny("admin", rule)).toBe(true)
-      expect(canAccessAny("clinician", rule)).toBe(false)
-      expect(canAccessAny("cashier", rule)).toBe(false)
-    }
+  it("etapas de venta las abre también quien trabaja con ventas", () => {
+    const rule = platformPathPermission("/settings/pipelines") ?? []
+    expect(canAccessAny("reception", rule)).toBe(true)
+    expect(canAccessAny("admin", rule)).toBe(true)
+    expect(canAccessAny("clinician", rule)).toBe(false)
+    expect(canAccessAny("cashier", rule)).toBe(false)
     // El resto de Configuración sigue cerrado para recepción.
     expect(canAccessAny("reception", platformPathPermission("/settings/branches") ?? [])).toBe(false)
   })

@@ -33,6 +33,11 @@ export function personInitials(
   return initialOf(first) + initialOf(rest.find((word) => !PARTICLE.test(word)))
 }
 
+/** El nombre con que se saluda, sin el tratamiento: «Dra. Ana Torres» es «Ana». */
+export function personFirstName(name: string | null | undefined): string | undefined {
+  return words(name).find((word) => !TITLE.test(word))
+}
+
 export interface PersonAvatarProps {
   /** Nombre completo, para las iniciales y el texto alternativo de la foto. */
   name: string

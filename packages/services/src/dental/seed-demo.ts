@@ -34,6 +34,7 @@ import { supportNotice } from "@odentia/db/schema/admin-support"
 import { appointment, calendarFeed, calendarFeedUse, scheduleRoom } from "@odentia/db/schema/agenda"
 import { agentSearchItem, aiUsage } from "@odentia/db/schema/agent"
 import { account, invitation, member, organization, user } from "@odentia/db/schema/auth"
+import { automationJob } from "@odentia/db/schema/automation"
 import {
   appointmentPlanItem,
   clinicalFollowUp,
@@ -81,7 +82,6 @@ import {
   contact,
   contactIdentity,
   conversation,
-  customFieldDef,
   message,
   pipeline,
   pipelineStage,
@@ -159,7 +159,6 @@ import {
   updateEncounterDraft,
   voidEncounter,
 } from "../encounters.js"
-import { createFieldDef } from "../fields.js"
 import { setCommissionRate } from "../finance.js"
 import {
   cancelFollowUp,
@@ -595,7 +594,6 @@ async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USER
   await db.delete(channelConnection).where(inArray(channelConnection.organizationId, orgs))
   // Los mensajes de WhatsApp son de la organización, no de la conexión; sus versiones se van en cascada.
   await db.delete(clinicMessage).where(inArray(clinicMessage.organizationId, orgs))
-  await db.delete(customFieldDef).where(inArray(customFieldDef.organizationId, orgs))
   // El índice de búsqueda del agente apunta a la organización: se borra antes.
   await db.delete(agentSearchItem).where(inArray(agentSearchItem.organizationId, orgs))
   await db.delete(agentConfig).where(inArray(agentConfig.organizationId, orgs))
@@ -892,19 +890,6 @@ await db.insert(branch).values([{ organizationId: ORG_B, name: "Sede Lima", coun
 // --- CRM con servicios ---
 const pipeA = await ensureDefaultPipeline(db, ORG_A)
 const pipeB = await ensureDefaultPipeline(db, ORG_B)
-
-await createFieldDef(db, ORG_A, { key: "dni", label: "DNI", type: "text" })
-await createFieldDef(db, ORG_A, {
-  key: "fecha_nacimiento",
-  label: "Fecha de nacimiento",
-  type: "date",
-})
-await createFieldDef(db, ORG_A, {
-  key: "aseguradora",
-  label: "Aseguradora",
-  type: "select",
-  options: ["Rimac", "Pacifico", "Particular"],
-})
 
 const connA = await createConnection(
   db,
@@ -3779,7 +3764,7 @@ await db.transaction((tx) =>
 )
 // «Te espera» de recepción con lo que deja el registro en línea cuando el
 // documento ya es de alguien: Valeria registra a su hijo por el QR (su vínculo
-// de «Madre» espera «Confirmar» o «No es ella», tarea `confirmar_representante`)
+// de «Madre» espera «Confirmar» o «No es representante», tarea `confirmar_representante`)
 // y alguien se registra con el DNI de Valeria (no se crea a nadie: queda con lo
 // que escribió para «¿Es la misma persona?», tarea `registro_con_documento`).
 await db.transaction((tx) =>
@@ -4179,6 +4164,18 @@ const rosaToday = reservedAt.get("Rosa Quispe|0|09:00")
 if (!luciaToday || !rosaToday) throw new Error("Faltan las citas de hoy de la semilla")
 await setAppointmentArrival(db, ORG_A, ANA_ID, luciaToday, true)
 await createEncounter(db, ORG_A, ANA_ID, rosaPatientId, { appointmentId: rosaToday })
+
+// «Llamar» en «Te espera» de recepción: a Carmen se le recordó su cita de mañana y no confirmó.
+const carmenTomorrow = reservedAt.get("Carmen Rojas|1|09:00")
+if (!carmenTomorrow) throw new Error("Falta la cita de mañana de la semilla")
+await db.insert(automationJob).values({
+  organizationId: ORG_A,
+  kind: "recordatorio_cita",
+  status: "enviado",
+  dedupeKey: `recordatorio_cita:${carmenTomorrow}:24`,
+  scheduledFor: new Date(),
+  appointmentId: carmenTomorrow,
+})
 
 // R3: la duda clínica de Rosa le llega a quien la atendió por última vez, que
 // la responde desde «Te espera» de Inicio, sin entrar a la Bandeja.

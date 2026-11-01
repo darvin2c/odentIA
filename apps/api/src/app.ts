@@ -78,7 +78,6 @@ import { createConversationsRoute } from "./routes/conversations.js"
 import { createCrmWorkspaceRoute } from "./routes/crm-workspace.js"
 import { createDataProtectionRoute } from "./routes/data-protection.js"
 import { createDiagnosisCodesRoute } from "./routes/diagnosis-codes.js"
-import { createFieldsRoute } from "./routes/fields.js"
 import { createFinanceRoute } from "./routes/finance.js"
 import { createFinancialDocumentsRoute } from "./routes/financial-documents.js"
 import { createHelpRoute } from "./routes/help.js"
@@ -1013,7 +1012,6 @@ export function createApp(deps: AppDeps) {
   guarded.route("/agenda", createAgendaRoute(crmDeps))
   guarded.route("/search", createSearchRoute({ ...crmDeps, embedder: deps.embedder }))
   guarded.route("/appointments", createAppointmentsRoute(crmDeps))
-  guarded.route("/fields", createFieldsRoute(crmDeps))
   guarded.route("/workspace", createWorkspaceRoute(crmDeps))
   guarded.route("/legal", createLegalRoute(crmDeps))
   guarded.route("/reports", createReportsRoute({ ...crmDeps, llm, decisions: deps.decisions }))

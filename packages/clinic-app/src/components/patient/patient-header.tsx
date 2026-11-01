@@ -13,14 +13,13 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-  SidebarTrigger,
   useIsMobile,
   useSidebarOptional,
 } from "@odentia/ui"
 import {
   ConfirmDialog,
   HeaderCompactProvider,
-  MOBILE_NAV_TRIGGER_CLASS,
+  MobileNavTrigger,
   PageHeaderMenu,
   PersonAvatar,
   submitErrorMessage,
@@ -151,6 +150,7 @@ export function PersonHeader({
   detail,
   summary,
   onSection,
+  onCollect,
 }: {
   person: PersonPage
   /** Ficha administrativa del paciente, si lo es (alergias, foto, edad). */
@@ -158,8 +158,10 @@ export function PersonHeader({
   /** Resumen clínico ya cargado por la pestaña Clínica (no se pide aquí). */
   summary?: PatientSummary
   onSection: (section: PatientSectionId) => void
+  /** «Cobrar»: la cuenta con el cobro ya abierto. */
+  onCollect: () => void
 }) {
-  // La página no usa PageHeader; las utilidades globales (avisos, agente) van aquí.
+  // La página no usa PageHeader; las utilidades globales (avisos) van aquí.
   const utilities = useHeaderUtilities()
   // El disparador del menú lateral en el teléfono, como en el encabezado de página.
   const sidebar = useSidebarOptional()
@@ -234,7 +236,7 @@ export function PersonHeader({
   return (
     <header className="flex min-w-0 flex-col gap-3">
       <div className="flex min-w-0 flex-wrap items-center gap-3">
-        {sidebar ? <SidebarTrigger className={MOBILE_NAV_TRIGGER_CLASS} /> : null}
+        {sidebar ? <MobileNavTrigger /> : null}
         <Breadcrumb className="min-w-0 flex-1">
           <BreadcrumbList>
             <BreadcrumbItem>
@@ -318,7 +320,7 @@ export function PersonHeader({
               </Button>
             ) : null}
             {primary === "charge" ? (
-              <Button onClick={() => onSection("cuenta")}>Cobrar</Button>
+              <Button onClick={onCollect}>Cobrar</Button>
             ) : null}
             {patient && !person.archived ? (
               <NewEncounterButton

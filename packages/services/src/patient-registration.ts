@@ -1229,7 +1229,7 @@ async function leavePendingRepresentative(
     kind: "confirmar_representante",
     relationshipDetail,
     kinship: kinshipFromWords(relationshipDetail),
-    reason: `En el registro en línea escribieron el documento de ${names?.representativeName ?? "una persona de la clínica"} como representante legal${who}. Si es su madre, padre o tutor, confírmalo; si no, elige «No es ella».`,
+    reason: `En el registro en línea escribieron el documento de ${names?.representativeName ?? "una persona de la clínica"} como representante legal${who}. Si es su madre, padre o tutor, confírmalo; si no, elige «No es representante».`,
     idempotencyKey: `${PENDING_REPRESENTATIVE_KEY}${patientId}:${representativeId}`,
   })
 }
@@ -1554,7 +1554,7 @@ const DISCARD_REASON = {
 } as const
 
 /**
- * Descarta en «Te espera» lo que dejó un registro en línea: «No es ella» en
+ * Descarta en «Te espera» lo que dejó un registro en línea: «No es representante» en
  * «¿… es representante de …?» (no se vincula a nadie) o «Descartar» en
  * «Alguien se registró con el documento de…». La tarea queda cerrada con su
  * motivo, a nombre de quien la descarta; no cambia nada de las personas.

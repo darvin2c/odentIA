@@ -137,7 +137,7 @@ export async function buildClinicalBase(owner: OwnerFixture): Promise<ClinicalId
  * Agenda mínima para reservar: una unidad dental y horario diario del propio usuario.
  * Sin horario explícito no se puede programar un control.
  */
-export async function enableAgenda(owner: OwnerFixture): Promise<{ roomId: string }> {
+export async function enableAgenda(owner: OwnerFixture, professionalUserId = owner.user.id): Promise<{ roomId: string }> {
   const { page } = owner
   const slug = owner.org.slug
   const room = await call<{ id: string }>(
@@ -150,7 +150,7 @@ export async function enableAgenda(owner: OwnerFixture): Promise<{ roomId: strin
   )
   await call(page, "PUT", "/api/agenda/schedules", slug, {
     branchId: owner.branchId,
-    professionalUserId: owner.user.id,
+    professionalUserId,
     rules: Array.from({ length: 7 }, (_, weekday) => ({
       weekday,
       startMin: 8 * 60,

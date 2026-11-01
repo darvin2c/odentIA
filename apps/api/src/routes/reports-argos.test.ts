@@ -82,7 +82,8 @@ it("Argos apagado lo dice; encendido responde con la llave del rol y anota la co
   expect((await allowance()).data.enabled).toBe(true)
   const on = await ask("admin", { text: "¿Cuánto cobramos este mes?", screen: { period: "este_mes" }, previous: null })
   expect(on.status).toBe(200)
-  expect(await on.json()).toMatchObject({ data: { kind: "respuesta", text: expect.stringMatching(/^(Del|El) .+ se cobró/), period: { value: "este_mes" } } })
+  // El día 1, «este mes» es solo hoy.
+  expect(await on.json()).toMatchObject({ data: { kind: "respuesta", text: expect.stringMatching(/^(?:(?:Del|El) .+|Hoy) se cobró/), period: { value: "este_mes" } } })
   const [row] = await ownerDb.select().from(reportQuestion).where(eq(reportQuestion.organizationId, ORG))
   expect(row).toMatchObject({ outcome: "respondida", query: expect.stringContaining(":desde") })
   // El modelo de demostración no se paga: no deja uso.
@@ -118,7 +119,7 @@ it("se fija en el Resumen, se descarga y el buscador sabe la fila, sin guardar e
   // Fijarla otra vez devuelve la misma.
   expect(await (await post("/reports/argos/pins", { questionId: data.questionId })).json()).toEqual(await pinned.clone().json())
   const pins = (await (await app.request("/reports/pins?period=este_mes")).json()) as { data: { argos: Array<{ title: string; answer: { text: string } | null }> } }
-  expect(pins.data.argos).toEqual([expect.objectContaining({ title: "Lo cobrado", answer: expect.objectContaining({ text: expect.stringMatching(/^(Del|El) .+ se cobró/) }) })])
+  expect(pins.data.argos).toEqual([expect.objectContaining({ title: "Lo cobrado", answer: expect.objectContaining({ text: expect.stringMatching(/^(?:(?:Del|El) .+|Hoy) se cobró/) }) })])
   // Fijada sigue el periodo de arriba (D11).
   const lastMonth = (await (await app.request("/reports/pins?period=mes_pasado")).json()) as { data: { argos: Array<{ period: { value: string } | null; answer: { text: string } | null }> } }
   expect(lastMonth.data.argos).toEqual([expect.objectContaining({ period: expect.objectContaining({ value: "mes_pasado" }), answer: expect.objectContaining({ text: expect.stringMatching(/^En .+ se cobró S\/\s?0\.00\.$/) }) })])

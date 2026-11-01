@@ -29,12 +29,12 @@ test("formularios: columna lateral en ventana ancha, cajón en estrecha y aviso 
   await expect(name).toHaveValue("COL-1")
   await expect(page).toHaveURL(/\/inventory/)
 
-  // Con la columna ocupada, el agente se abre como cajón encima y no la toca.
-  await page.locator("header").getByRole("button", { name: /^Agente/ }).click()
-  const agent = page.getByRole("dialog", { name: "Agente" })
-  await expect(agent).toBeVisible()
-  await agent.getByRole("button", { name: "Cerrar el panel del agente" }).click()
-  await expect(agent).toBeHidden()
+  // Con la columna ocupada, los Avisos se abren como cajón encima y no la tocan.
+  await page.locator("header").getByRole("button", { name: /^Avisos/ }).click()
+  const notices = page.getByRole("dialog", { name: "Avisos" })
+  await expect(notices).toBeVisible()
+  await notices.getByRole("button", { name: "Cerrar los avisos" }).click()
+  await expect(notices).toBeHidden()
   await expect(name).toHaveValue("COL-1")
 
   // Elegir en un desplegable también cuenta como cambio sin guardar.

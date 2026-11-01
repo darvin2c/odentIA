@@ -35,6 +35,7 @@ import { Route as EmbedDotindexRouteImport } from './../../../packages/clinic-ap
 import { Route as EmbedDotconnectionIdRouteImport } from './../../../packages/clinic-app/src/routes/public/embed.$connectionId'
 import { Route as LlegarDotbranchRouteImport } from './../../../packages/clinic-app/src/routes/public/llegar.$branch'
 import { Route as AgentDotindexRouteImport } from './../../../packages/clinic-app/src/routes/_org/agent.index'
+import { Route as AgentDotactividadRouteImport } from './../../../packages/clinic-app/src/routes/_org/agent.actividad'
 import { Route as AgentDotadministradorRouteImport } from './../../../packages/clinic-app/src/routes/_org/agent.administrador'
 import { Route as AgentDotapprovalsRouteImport } from './../../../packages/clinic-app/src/routes/_org/agent.approvals'
 import { Route as AgentDotasistenteClinicoRouteImport } from './../../../packages/clinic-app/src/routes/_org/agent.asistente-clinico'
@@ -62,7 +63,6 @@ import { Route as SettingsDotavailabilityRouteImport } from './../../../packages
 import { Route as SettingsDotbranchesRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.branches'
 import { Route as SettingsDotchannelsRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.channels'
 import { Route as SettingsDotdataProtectionRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.data-protection'
-import { Route as SettingsDotfieldsRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.fields'
 import { Route as SettingsDotformsRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.forms'
 import { Route as SettingsDotmailRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.mail'
 import { Route as SettingsDotpatientAccessRouteImport } from './../../../packages/clinic-app/src/routes/_org/settings.patient-access'
@@ -230,6 +230,12 @@ const AgentDotindexRoute = AgentDotindexRouteImport.update({
   getParentRoute: () =>
     DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
 } as any)
+const AgentDotactividadRoute = AgentDotactividadRouteImport.update({
+  id: '/agent/actividad',
+  path: '/agent/actividad',
+  getParentRoute: () =>
+    DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute,
+} as any)
 const AgentDotadministradorRoute = AgentDotadministradorRouteImport.update({
   id: '/agent/administrador',
   path: '/agent/administrador',
@@ -385,11 +391,6 @@ const SettingsDotdataProtectionRoute =
     path: '/data-protection',
     getParentRoute: () => SettingsRoute,
   } as any)
-const SettingsDotfieldsRoute = SettingsDotfieldsRouteImport.update({
-  id: '/fields',
-  path: '/fields',
-  getParentRoute: () => SettingsRoute,
-} as any)
 const SettingsDotformsRoute = SettingsDotformsRouteImport.update({
   id: '/forms',
   path: '/forms',
@@ -543,6 +544,7 @@ export interface FileRoutesByFullPath {
   '/embed/$connectionId': typeof EmbedDotconnectionIdRoute
   '/llegar/$branch': typeof LlegarDotbranchRoute
   '/embed/': typeof EmbedDotindexRoute
+  '/agent/actividad': typeof AgentDotactividadRoute
   '/agent/administrador': typeof AgentDotadministradorRoute
   '/agent/approvals': typeof AgentDotapprovalsRoute
   '/agent/asistente-clinico': typeof AgentDotasistenteClinicoRoute
@@ -565,7 +567,6 @@ export interface FileRoutesByFullPath {
   '/settings/branches': typeof SettingsDotbranchesRoute
   '/settings/channels': typeof SettingsDotchannelsRoute
   '/settings/data-protection': typeof SettingsDotdataProtectionRoute
-  '/settings/fields': typeof SettingsDotfieldsRoute
   '/settings/forms': typeof SettingsDotformsRoute
   '/settings/mail': typeof SettingsDotmailRoute
   '/settings/patient-access': typeof SettingsDotpatientAccessRoute
@@ -618,6 +619,7 @@ export interface FileRoutesByTo {
   '/embed/$connectionId': typeof EmbedDotconnectionIdRoute
   '/llegar/$branch': typeof LlegarDotbranchRoute
   '/embed': typeof EmbedDotindexRoute
+  '/agent/actividad': typeof AgentDotactividadRoute
   '/agent/administrador': typeof AgentDotadministradorRoute
   '/agent/approvals': typeof AgentDotapprovalsRoute
   '/agent/asistente-clinico': typeof AgentDotasistenteClinicoRoute
@@ -640,7 +642,6 @@ export interface FileRoutesByTo {
   '/settings/branches': typeof SettingsDotbranchesRoute
   '/settings/channels': typeof SettingsDotchannelsRoute
   '/settings/data-protection': typeof SettingsDotdataProtectionRoute
-  '/settings/fields': typeof SettingsDotfieldsRoute
   '/settings/forms': typeof SettingsDotformsRoute
   '/settings/mail': typeof SettingsDotmailRoute
   '/settings/patient-access': typeof SettingsDotpatientAccessRoute
@@ -697,6 +698,7 @@ export interface FileRoutesById {
   '/embed/$connectionId': typeof EmbedDotconnectionIdRoute
   '/llegar/$branch': typeof LlegarDotbranchRoute
   '/embed/': typeof EmbedDotindexRoute
+  '/_org/agent/actividad': typeof AgentDotactividadRoute
   '/_org/agent/administrador': typeof AgentDotadministradorRoute
   '/_org/agent/approvals': typeof AgentDotapprovalsRoute
   '/_org/agent/asistente-clinico': typeof AgentDotasistenteClinicoRoute
@@ -719,7 +721,6 @@ export interface FileRoutesById {
   '/_org/settings/branches': typeof SettingsDotbranchesRoute
   '/_org/settings/channels': typeof SettingsDotchannelsRoute
   '/_org/settings/data-protection': typeof SettingsDotdataProtectionRoute
-  '/_org/settings/fields': typeof SettingsDotfieldsRoute
   '/_org/settings/forms': typeof SettingsDotformsRoute
   '/_org/settings/mail': typeof SettingsDotmailRoute
   '/_org/settings/patient-access': typeof SettingsDotpatientAccessRoute
@@ -776,6 +777,7 @@ export interface FileRouteTypes {
     | '/embed/$connectionId'
     | '/llegar/$branch'
     | '/embed/'
+    | '/agent/actividad'
     | '/agent/administrador'
     | '/agent/approvals'
     | '/agent/asistente-clinico'
@@ -798,7 +800,6 @@ export interface FileRouteTypes {
     | '/settings/branches'
     | '/settings/channels'
     | '/settings/data-protection'
-    | '/settings/fields'
     | '/settings/forms'
     | '/settings/mail'
     | '/settings/patient-access'
@@ -851,6 +852,7 @@ export interface FileRouteTypes {
     | '/embed/$connectionId'
     | '/llegar/$branch'
     | '/embed'
+    | '/agent/actividad'
     | '/agent/administrador'
     | '/agent/approvals'
     | '/agent/asistente-clinico'
@@ -873,7 +875,6 @@ export interface FileRouteTypes {
     | '/settings/branches'
     | '/settings/channels'
     | '/settings/data-protection'
-    | '/settings/fields'
     | '/settings/forms'
     | '/settings/mail'
     | '/settings/patient-access'
@@ -929,6 +930,7 @@ export interface FileRouteTypes {
     | '/embed/$connectionId'
     | '/llegar/$branch'
     | '/embed/'
+    | '/_org/agent/actividad'
     | '/_org/agent/administrador'
     | '/_org/agent/approvals'
     | '/_org/agent/asistente-clinico'
@@ -951,7 +953,6 @@ export interface FileRouteTypes {
     | '/_org/settings/branches'
     | '/_org/settings/channels'
     | '/_org/settings/data-protection'
-    | '/_org/settings/fields'
     | '/_org/settings/forms'
     | '/_org/settings/mail'
     | '/_org/settings/patient-access'
@@ -1182,6 +1183,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentDotindexRouteImport
       parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
     }
+    '/_org/agent/actividad': {
+      id: '/_org/agent/actividad'
+      path: '/agent/actividad'
+      fullPath: '/agent/actividad'
+      preLoaderRoute: typeof AgentDotactividadRouteImport
+      parentRoute: typeof DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRoute
+    }
     '/_org/agent/administrador': {
       id: '/_org/agent/administrador'
       path: '/agent/administrador'
@@ -1371,13 +1379,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsDotdataProtectionRouteImport
       parentRoute: typeof SettingsRoute
     }
-    '/_org/settings/fields': {
-      id: '/_org/settings/fields'
-      path: '/fields'
-      fullPath: '/settings/fields'
-      preLoaderRoute: typeof SettingsDotfieldsRouteImport
-      parentRoute: typeof SettingsRoute
-    }
     '/_org/settings/forms': {
       id: '/_org/settings/forms'
       path: '/forms'
@@ -1558,7 +1559,6 @@ interface SettingsRouteChildren {
   SettingsDotbranchesRoute: typeof SettingsDotbranchesRoute
   SettingsDotchannelsRoute: typeof SettingsDotchannelsRoute
   SettingsDotdataProtectionRoute: typeof SettingsDotdataProtectionRoute
-  SettingsDotfieldsRoute: typeof SettingsDotfieldsRoute
   SettingsDotformsRoute: typeof SettingsDotformsRoute
   SettingsDotmailRoute: typeof SettingsDotmailRoute
   SettingsDotpatientAccessRoute: typeof SettingsDotpatientAccessRoute
@@ -1583,7 +1583,6 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsDotbranchesRoute: SettingsDotbranchesRoute,
   SettingsDotchannelsRoute: SettingsDotchannelsRoute,
   SettingsDotdataProtectionRoute: SettingsDotdataProtectionRoute,
-  SettingsDotfieldsRoute: SettingsDotfieldsRoute,
   SettingsDotformsRoute: SettingsDotformsRoute,
   SettingsDotmailRoute: SettingsDotmailRoute,
   SettingsDotpatientAccessRoute: SettingsDotpatientAccessRoute,
@@ -1651,6 +1650,7 @@ interface DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteChildren {
   ServicesRoute: typeof ServicesRouteWithChildren
   SettingsRoute: typeof SettingsRouteWithChildren
   TasksRoute: typeof TasksRoute
+  AgentDotactividadRoute: typeof AgentDotactividadRoute
   AgentDotadministradorRoute: typeof AgentDotadministradorRoute
   AgentDotapprovalsRoute: typeof AgentDotapprovalsRoute
   AgentDotasistenteClinicoRoute: typeof AgentDotasistenteClinicoRoute
@@ -1686,6 +1686,7 @@ const DotDotDotDotDotDotDotDotPackagesClinicAppSrcRoutesOrgRouteChildren: DotDot
     ServicesRoute: ServicesRouteWithChildren,
     SettingsRoute: SettingsRouteWithChildren,
     TasksRoute: TasksRoute,
+    AgentDotactividadRoute: AgentDotactividadRoute,
     AgentDotadministradorRoute: AgentDotadministradorRoute,
     AgentDotapprovalsRoute: AgentDotapprovalsRoute,
     AgentDotasistenteClinicoRoute: AgentDotasistenteClinicoRoute,

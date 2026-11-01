@@ -142,12 +142,14 @@ test("administrador: apagado, encenderlo, una línea con su flujo, recomendació
   // --- Inicio: la recomendación es una línea apagada con casos; dice quién lo haría ---
   await gotoHydrated(page, tenant(org.slug, "/home"))
   const today = page.getByRole("region", { name: "Te espera" })
+  // Puede esperar: va en «Sin apuro», plegado.
+  await today.getByRole("button", { name: /^Sin apuro/ }).click()
   // La del control ya está prendida: no se recomienda.
   await expect(today.getByRole("listitem").filter({ hasText: "Lo recomienda Argos" })).toHaveCount(1)
   const card = today.getByRole("listitem").filter({ hasText: "1 atención lleva más de 2 días sin firmar" })
   await expect(card).toContainText("le tocaría a tu equipo")
   await info.attach("inicio-administrador", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
-  await card.getByRole("button", { name: /Ver la lista$/ }).click()
+  await card.getByRole("button", { name: /^Ver:/ }).click()
   const drawer = sideSurface(page, { name: "Recomendación de Argos", exact: true })
   await expect(drawer).toContainText("Atenciones que siguen en borrador, se abrieron hace más de 2 días y no le salen a nadie en «Te espera»")
   await expect(drawer).toContainText("Los números salen de la base de datos, no de un modelo.")

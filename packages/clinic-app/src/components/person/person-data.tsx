@@ -1,7 +1,6 @@
 import { normalizeTags } from "@odentia/clinical"
 import { Badge, Button } from "@odentia/ui"
 import {
-  DatePickerButton,
   FormDrawer,
   internationalText,
   LoadingState,
@@ -11,11 +10,10 @@ import {
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
 import { type ReactNode, useMemo, useState } from "react"
 import { z } from "zod"
 import { apiFetch } from "../../lib/api"
-import { type ContactFull, type FieldDef, useCan, usePermission } from "../../lib/crm"
+import { type ContactFull, useCan, usePermission } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
 import { sexLabel } from "../../lib/patient-overview"
 import type { PatientFull } from "../../lib/patients"
@@ -39,49 +37,6 @@ const tagsSchema = z.object({
     }
   }),
 })
-
-/** Lo guardado de cada campo propio, como texto para su control. */
-function customFieldsDraft(defs: FieldDef[], saved: Record<string, unknown>): Record<string, string> {
-  return Object.fromEntries(
-    defs.map((def) => {
-      const value = saved[def.key]
-      return [def.key, value === undefined || value === null ? "" : String(value)]
-    }),
-  )
-}
-
-/** Un número escrito con coma o punto decimal; `null` si no es un número. */
-function numberOf(raw: string): number | null {
-  const value = Number(raw.trim().replace(",", "."))
-  return Number.isFinite(value) ? value : null
-}
-
-/**
- * Lo que se envía de cada campo propio: vacío es `null` (el servidor lo
- * quita) y un número va como número, como exige `sanitizeCustomFields`.
- */
-function customFieldsBody(defs: FieldDef[], draft: Record<string, string>): Record<string, unknown> {
-  return Object.fromEntries(
-    defs.map((def) => {
-      const raw = draft[def.key] ?? ""
-      if (!raw.trim()) return [def.key, null]
-      return [def.key, def.type === "number" ? numberOf(raw) : raw]
-    }),
-  )
-}
-
-/** Un número que no lo es se dice en su campo, en vez de perderse al guardar. */
-function customFieldsSchema(defs: FieldDef[]) {
-  return z.object({
-    customFields: z.record(z.string(), z.string()).superRefine((draft, ctx) => {
-      for (const def of defs) {
-        const raw = draft[def.key] ?? ""
-        if (def.type === "number" && raw.trim() && numberOf(raw) === null)
-          ctx.addIssue({ code: "custom", path: [def.key], message: "Escribe un número, como 12 o 3.5" })
-      }
-    }),
-  })
-}
 
 const PREFERRED_LABELS: Record<string, string> = {
   email: "Correo",
@@ -213,24 +168,18 @@ export function PersonData({ person, detail }: { person: PersonPage; detail?: Pa
 
 /**
  * Lo que la clínica guarda de la persona para ventas y mensajes: medio
- * preferido, etiquetas y campos propios. Lo lee y cambia quien lleva el CRM.
+ * preferido y etiquetas. Lo lee y cambia quien lleva el CRM.
  */
 function PersonCrmCard({ person }: { person: PersonPage }) {
   const canRead = usePermission("crm.read")
   const canWrite = usePermission("crm.write")
-  const canConfigure = usePermission("settings.read") || canWrite
   const queryClient = useQueryClient()
-  const [open, setOpen] = useState<"preferido" | "etiquetas" | "campos" | null>(null)
+  const [open, setOpen] = useState<"preferido" | "etiquetas" | null>(null)
   const contact = useQuery({
     queryKey: ["contact", person.id],
     queryFn: () => apiFetch<{ data: ContactFull }>(`/api/contacts/${person.id}`),
     enabled: canRead,
     retry: false,
-  })
-  const fields = useQuery({
-    queryKey: ["fields"],
-    queryFn: () => apiFetch<{ data: FieldDef[] }>("/api/fields"),
-    enabled: canRead,
   })
   const connections = useQuery({
     queryKey: ["connections", "usable", "preferred"],
@@ -240,7 +189,6 @@ function PersonCrmCard({ person }: { person: PersonPage }) {
       ),
     enabled: open === "preferido",
   })
-  const defs = fields.data?.data ?? []
   const patch = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
       apiFetch(`/api/contacts/${person.id}`, { method: "PATCH", body: JSON.stringify(body) }),
@@ -260,15 +208,8 @@ function PersonCrmCard({ person }: { person: PersonPage }) {
     validators: { onSubmit: tagsSchema },
     onSubmit: ({ value }) => saved({ tags: value.tags }),
   })
-  const customForm = useAppForm({
-    defaultValues: { customFields: {} as Record<string, string> },
-    validators: { onSubmit: customFieldsSchema(defs) },
-    // Vaciar un dato lo quita (null): una cadena vacía no es número, fecha ni opción.
-    onSubmit: ({ value }) => saved({ customFields: customFieldsBody(defs, value.customFields) }),
-  })
   const preferredSurface = useFormSurface(preferredForm)
   const tagsSurface = useFormSurface(tagsForm)
-  const customSurface = useFormSurface(customForm)
   const draftPreferred = useStore(preferredForm.store, (state) => state.values.preferredChannel)
   const connected = useMemo(() => {
     const channels = [
@@ -281,7 +222,6 @@ function PersonCrmCard({ person }: { person: PersonPage }) {
   }, [connections.data, draftPreferred])
   if (!canRead) return null
   const data = contact.data?.data.contact
-  const custom = data?.customFields ?? {}
   const close = () => {
     if (!patch.isPending) setOpen(null)
   }
@@ -292,98 +232,53 @@ function PersonCrmCard({ person }: { person: PersonPage }) {
       ) : contact.isError || !data ? (
         <QueryErrorState error={contact.error} onRetry={() => void contact.refetch()} />
       ) : (
-        <div className="flex flex-col gap-4">
-          <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
-            <Item label="Medio preferido para avisos">
-              <span className="flex flex-wrap items-center gap-2">
-                {data.preferredChannel
-                  ? (PREFERRED_LABELS[data.preferredChannel] ?? data.preferredChannel)
-                  : "Sin preferencia"}
-                {canWrite ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="link"
-                    onClick={() => {
-                      preferredForm.reset({ preferredChannel: data.preferredChannel ?? "" })
-                      setOpen("preferido")
-                    }}
-                  >
-                    Cambiar
-                  </Button>
-                ) : null}
-              </span>
-            </Item>
-            <Item label="Etiquetas">
-              <span className="flex flex-wrap items-center gap-1">
-                {data.tags.length === 0 ? (
-                  <span className="text-muted-foreground">Sin etiquetas</span>
-                ) : null}
-                {data.tags.map((tag) => (
-                  <Badge key={tag} variant="secondary">
-                    {tag}
-                  </Badge>
-                ))}
-                {canWrite ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="link"
-                    onClick={() => {
-                      tagsForm.reset({ tags: data.tags })
-                      setOpen("etiquetas")
-                    }}
-                  >
-                    Editar etiquetas
-                  </Button>
-                ) : null}
-              </span>
-            </Item>
-          </dl>
-          <div className="flex flex-col gap-2 border-t pt-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs font-medium text-muted-foreground">
-                Campos propios de la clínica
-              </p>
-              {canWrite && defs.length > 0 ? (
+        <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+          <Item label="Medio preferido para avisos">
+            <span className="flex flex-wrap items-center gap-2">
+              {data.preferredChannel
+                ? (PREFERRED_LABELS[data.preferredChannel] ?? data.preferredChannel)
+                : "Sin preferencia"}
+              {canWrite ? (
                 <Button
                   type="button"
                   size="sm"
-                  variant="outline"
+                  variant="link"
                   onClick={() => {
-                    customForm.reset({ customFields: customFieldsDraft(defs, custom) })
-                    setOpen("campos")
+                    preferredForm.reset({ preferredChannel: data.preferredChannel ?? "" })
+                    setOpen("preferido")
                   }}
                 >
-                  Editar campos
+                  Cambiar
                 </Button>
               ) : null}
-            </div>
-            {defs.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                La clínica aún no definió campos propios.{" "}
-                {canConfigure ? (
-                  <Link
-                    to="/settings/fields"
-                    className="font-semibold text-primary hover:underline"
-                  >
-                    Definir campos
-                  </Link>
-                ) : null}
-              </p>
-            ) : (
-              <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
-                {defs.map((def) => (
-                  <Item key={def.key} label={def.label}>
-                    {custom[def.key] === undefined || custom[def.key] === ""
-                      ? null
-                      : String(custom[def.key])}
-                  </Item>
-                ))}
-              </dl>
-            )}
-          </div>
-        </div>
+            </span>
+          </Item>
+          <Item label="Etiquetas">
+            <span className="flex flex-wrap items-center gap-1">
+              {data.tags.length === 0 ? (
+                <span className="text-muted-foreground">Sin etiquetas</span>
+              ) : null}
+              {data.tags.map((tag) => (
+                <Badge key={tag} variant="secondary">
+                  {tag}
+                </Badge>
+              ))}
+              {canWrite ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="link"
+                  onClick={() => {
+                    tagsForm.reset({ tags: data.tags })
+                    setOpen("etiquetas")
+                  }}
+                >
+                  Editar etiquetas
+                </Button>
+              ) : null}
+            </span>
+          </Item>
+        </dl>
       )}
       <FormDrawer
         {...preferredSurface}
@@ -435,45 +330,6 @@ function PersonCrmCard({ person }: { person: PersonPage }) {
             </field.Control>
           )}
         </tagsForm.AppField>
-      </FormDrawer>
-      <FormDrawer
-        {...customSurface}
-        open={open === "campos"}
-        onClose={close}
-        title="Editar campos propios"
-        submitLabel="Guardar"
-      >
-        <div className="flex flex-col gap-4">
-          {defs.map((def) => (
-            <customForm.AppField key={def.key} name={`customFields.${def.key}`}>
-              {(field) =>
-                def.type === "select" ? (
-                  <field.SelectField
-                    label={def.label}
-                    options={[
-                      { value: "", label: "Sin dato" },
-                      ...(def.options ?? []).map((option) => ({ value: option, label: option })),
-                    ]}
-                  />
-                ) : def.type === "date" ? (
-                  <field.Control label={def.label}>
-                    {(control) => (
-                      <DatePickerButton
-                        {...control.props}
-                        className="w-56"
-                        value={field.state.value ?? ""}
-                        emptyLabel="Sin dato"
-                        onChange={(next) => field.handleChange(next)}
-                      />
-                    )}
-                  </field.Control>
-                ) : (
-                  <field.TextField label={def.label} inputMode={def.type === "number" ? "decimal" : undefined} />
-                )
-              }
-            </customForm.AppField>
-          ))}
-        </div>
       </FormDrawer>
     </Card>
   )

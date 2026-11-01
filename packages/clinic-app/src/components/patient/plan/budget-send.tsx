@@ -45,6 +45,7 @@ export function BudgetSendButton({
   showRecipient = true,
   size = "default",
   variant = "default",
+  className,
   beforeSend,
   reviewable = false,
 }: {
@@ -55,6 +56,7 @@ export function BudgetSendButton({
   showRecipient?: boolean
   size?: ComponentProps<typeof Button>["size"]
   variant?: ComponentProps<typeof Button>["variant"]
+  className?: string
   /** Lo que hay que guardar antes (el borrador de la atención, por ejemplo). */
   beforeSend?: () => Promise<void>
   /** Ofrece «Revisar antes», sin obligar: enviar directo sigue siendo un clic. */
@@ -95,6 +97,7 @@ export function BudgetSendButton({
         type="button"
         size={size}
         variant={variant}
+        className={className}
         disabled={preview.isPending || blocked != null || send.isPending}
         onClick={() => {
           setError(null)

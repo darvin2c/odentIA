@@ -9,7 +9,7 @@
  */
 
 import { cn } from "@odentia/ui"
-import { ChevronDown, ChevronRight } from "lucide-react"
+import { ChevronDown, ChevronRight, TriangleAlert } from "lucide-react"
 import * as React from "react"
 
 import { SubmitButton } from "../form/submit-button.js"
@@ -191,6 +191,12 @@ function AgendaRow({
             {item.resourceShortLabel ?? item.resourceLabel}
           </span>
         </span>
+        {entry.warning ? (
+          <span className="flex min-w-0 items-center gap-1 text-[13px] font-semibold text-warning">
+            <TriangleAlert aria-hidden className="size-3.5 shrink-0" />
+            <span className="truncate">{entry.warning}</span>
+          </span>
+        ) : null}
       </div>
 
       <div className="hidden min-w-0 flex-1 items-center gap-2.5 sm:flex">
