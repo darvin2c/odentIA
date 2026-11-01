@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { isAffirmative } from "./agent-operations.js"
+import { isAffirmative, onlyCourtesy } from "./agent-operations.js"
 
 /** La evidencia de confirmación nunca acepta negaciones como consentimiento. */
 describe("isAffirmative", () => {
@@ -55,5 +55,35 @@ describe("isAffirmative", () => {
     "bueno",
   ])("rechaza %s", (text) => {
     expect(isAffirmative(text)).toBe(false)
+  })
+})
+
+/** Lo que no pide nada no entra a un tema (ADR 0122); confirmar sigue siendo solo `isAffirmative`. */
+describe("onlyCourtesy", () => {
+  it.each(["Si", "Sí.", "ok", "Ok gracias", "gracias", "Muchas gracias doctora", "entendido", "Ya", "ajá", "👍", "gracias 🙏", "Perfecto, nos vemos"])(
+    "%s no pide nada",
+    (text) => {
+      expect(onlyCourtesy(text)).toBe(true)
+    },
+  )
+
+  it.each([
+    null,
+    "",
+    "¿Y?",
+    "No cuentan con alineadores invisibles?",
+    "Sigo esperando lo del descuento",
+    "no gracias",
+    "sí, pero mañana no puedo",
+    "Y una extracción de la muela del juicio",
+  ])("%s sí dice algo", (text) => {
+    expect(onlyCourtesy(text)).toBe(false)
+  })
+
+  it("agradecer no confirma", () => {
+    expect(onlyCourtesy("gracias")).toBe(true)
+    expect(isAffirmative("gracias")).toBe(false)
+    expect(onlyCourtesy("entendido")).toBe(true)
+    expect(isAffirmative("entendido")).toBe(false)
   })
 })

@@ -103,30 +103,41 @@ test("bandeja: un tema se responde citado, queda pendiente o se resuelve sin apa
   await expect(band).toContainText(`«${FRESH_TEXT}»`)
   const box = page.getByRole("textbox", { name: "Mensaje" })
   await expect(box).toBeVisible()
-  await expect(page.getByRole("button", { name: "Enviar y resolver" })).toBeVisible()
+  await expect(band).toContainText("Se resuelve al enviar")
+  await expect(page.getByRole("button", { name: "Enviar", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Enviar, sigue pendiente" })).toHaveCount(0)
   await info.attach("tema-por-contestar", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
-  // --- «Enviar, sigue pendiente»: si promete responder después, se sugiere; el tema queda a su nombre ---
+  // --- Enter envía y resuelve; la respuesta sale citando su mensaje y la conversación sigue abierta con el agente ---
   await box.fill("Te confirmo el precio en un rato")
-  await expect(page.getByText("Prometes responder después")).toBeVisible()
-  await page.getByRole("button", { name: "Enviar, sigue pendiente" }).click()
+  await box.press("Enter")
+  await expect(page.getByText("Tema resuelto. Sofi sigue con lo demás.")).toBeVisible()
+  await expect(band).toBeHidden()
   await expect(box).toHaveValue("")
+  await expect(page.getByText("Te confirmo el precio en un rato").first()).toBeVisible()
+  const after = await detailOf(page, org.slug, fresh.id)
+  expect(after.conversation).toMatchObject({ status: "open", agentStatus: "on" })
+  await info.attach("tema-resuelto", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+
+  // --- «Dejar pendiente»: vuelve a la lista a su nombre y la caja no lo elige sola ---
+  await page.getByRole("button", { name: "Dejar pendiente" }).click()
+  const pendingList = page.getByRole("region", { name: "Temas por atender" })
+  await expect(pendingList).toContainText(FRESH_TEXT)
+  await expect(band).toBeHidden()
   await expect.poll(async () => {
     const detail = await call<{ attention: { topics: Array<{ assigneeUserId: string | null }> }; conversation: { agentStatus: string } }>(
       page, "GET", `/api/conversations/${fresh.id}`, org.slug)
     return { topics: detail.attention.topics.map((topic) => topic.assigneeUserId), agent: detail.conversation.agentStatus }
   }).toEqual({ topics: [owner.user.id], agent: "on" })
-  // La respuesta salió citando su mensaje.
-  await expect(page.getByText("Te confirmo el precio en un rato").first()).toBeVisible()
 
-  // --- Enter es «Enviar y resolver»: el tema se resuelve y la conversación sigue abierta con el agente ---
+  // --- Tocar el tema lo elige y lleva a la caja; responderlo lo resuelve ---
+  await pendingList.getByRole("button", { name: `«${FRESH_TEXT}»` }).click()
+  await expect(band).toContainText(`«${FRESH_TEXT}»`)
+  await expect(box).toBeFocused()
   await box.fill("La limpieza cuesta S/ 120")
   await box.press("Enter")
   await expect(page.getByText("Tema resuelto. Sofi sigue con lo demás.")).toBeVisible()
-  await expect(band).toBeHidden()
-  const after = await detailOf(page, org.slug, fresh.id)
-  expect(after.conversation).toMatchObject({ status: "open", agentStatus: "on" })
-  await info.attach("tema-resuelto", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+  await expect(pendingList).toBeHidden()
 
   // --- Cerrar sin resolver: en el menú de acciones, diciendo qué se cierra ---
   await call(page, "POST", "/api/agent/handoffs", org.slug, {
@@ -165,11 +176,92 @@ test("bandeja: un tema se responde citado, queda pendiente o se resuelve sin apa
   await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${old.id}`))
   const phoneBand = page.getByRole("region", { name: "Lo que te toca contestar" })
   await expect(phoneBand).toContainText("Ahora")
-  for (const control of [phoneBand.getByRole("button", { name: "Enviar y resolver" }).or(page.getByRole("button", { name: "Enviar y resolver" })), page.getByRole("button", { name: "Más acciones del tema" }), page.getByRole("button", { name: "Más acciones de la conversación" })]) {
+  for (const control of [page.getByRole("button", { name: "Enviar", exact: true }), page.getByRole("button", { name: "Quitar la cita" }), page.getByRole("button", { name: "Más acciones del tema" }), page.getByRole("button", { name: "Más acciones de la conversación" })]) {
     expect((await control.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
   }
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("hilo-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+})
+
+test("bandeja: con varios temas la caja no elige sola, cada uno se responde por su cuenta y lo que no pide respuesta no entra", async ({ owner, fixtureDb }, info) => {
+  const { page, org } = owner
+  const wa = await whatsapp(owner)
+  const from = "51911100004"
+  const asks = ["Trabajo hasta las 5:30, ¿qué opción me ofrecen?", "También quiero colocarme alineadores", "Y una extracción de la muela del juicio"]
+  await inbound(page, wa.id, from, asks[0]!)
+  const thread = await conversationWith(page, org.slug, asks[0]!)
+  const sourceOf = async (body: string) =>
+    (await fixtureDb.select({ id: message.id }).from(message).where(and(eq(message.conversationId, thread.id), eq(message.body, body))))[0]?.id
+  // Cada tema nace del último mensaje de la persona.
+  for (const [index, body] of asks.entries()) {
+    if (index > 0) await inbound(page, wa.id, from, body)
+    await expect.poll(() => sourceOf(body), { timeout: 30_000 }).toBeTruthy()
+    await call(page, "POST", "/api/agent/handoffs", org.slug, {
+      conversationId: thread.id, reason: `Tema ${index + 1}`, summary: body, priority: "media",
+    }, 201)
+  }
+  await inbound(page, wa.id, from, "Si")
+  await expect.poll(() => sourceOf("Si"), { timeout: 30_000 }).toBeTruthy()
+
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${thread.id}`))
+  const list = page.getByRole("region", { name: "Temas por atender" })
+  const band = page.getByRole("region", { name: "Lo que te toca contestar" })
+  await expect(list).toContainText("3 temas por atender")
+  for (const body of asks) await expect(list).toContainText(body)
+  // Nada elegido: no hay cita ni «se resuelve»; el «Si» no es un tema.
+  await expect(band).toBeHidden()
+  await expect(list).not.toContainText("«Si»")
+  await info.attach("varios-temas", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+
+  // --- Un mensaje sin elegir tema sale sin cita y no resuelve nada ---
+  const box = page.getByRole("textbox", { name: "Mensaje" })
+  await box.fill("Hola, un momento por favor")
+  await box.press("Enter")
+  await expect(box).toHaveValue("")
+  await expect(list).toContainText("3 temas por atender")
+  const plain = await fixtureDb.select({ replyTo: message.replyToMessageId }).from(message).where(and(eq(message.conversationId, thread.id), eq(message.body, "Hola, un momento por favor")))
+  expect(plain).toEqual([{ replyTo: null }])
+
+  // --- Elegir un tema: la cita es la suya, y al enviar se resuelve solo ese ---
+  await list.getByRole("button", { name: `«${asks[1]}»` }).click()
+  await expect(band).toContainText(`«${asks[1]}»`)
+  await expect(band).toContainText("Se resuelve al enviar")
+  await expect(list).toBeHidden()
+  await box.fill("No trabajamos con alineadores, pero sí hacemos la extracción")
+  await info.attach("tema-elegido", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+  await box.press("Enter")
+  await expect(page.getByText("Tema resuelto. Sofi sigue con lo demás.")).toBeVisible()
+  await expect(list).toContainText("2 temas por atender")
+  const [sent] = await fixtureDb.select({ replyTo: message.replyToMessageId }).from(message).where(and(eq(message.conversationId, thread.id), eq(message.body, "No trabajamos con alineadores, pero sí hacemos la extracción")))
+  expect(sent?.replyTo).toBe(await sourceOf(asks[1]!))
+  await info.attach("despues-de-enviar", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+
+  // --- En el teléfono se toca con el dedo y nada desborda ---
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(list).toContainText("2 temas por atender")
+  for (const control of [list.getByRole("button", { name: `Resolver sin responder: ${asks[2]!.slice(0, 20)}` }), list.getByRole("button", { name: `«${asks[0]}»` }), page.getByRole("button", { name: "Responder a: Si" })]) {
+    expect((await control.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
+  }
+  expect(await overflow(page)).toBeLessThanOrEqual(0)
+  await info.attach("varios-temas-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await expect(list).toContainText("2 temas por atender")
+
+  // --- «Resolver» cierra el otro sin enviar nada, y queda un solo tema: la caja lo elige ---
+  const before = (await fixtureDb.select({ id: message.id }).from(message).where(eq(message.conversationId, thread.id))).length
+  await list.getByRole("button", { name: `Resolver sin responder: ${asks[2]!.slice(0, 20)}` }).click()
+  await expect(band).toContainText(`«${asks[0]}»`)
+  expect((await fixtureDb.select({ id: message.id }).from(message).where(eq(message.conversationId, thread.id))).length).toBe(before)
+
+  // --- «Responder» en un mensaje sin tema: lo cita y no resuelve ninguno ---
+  await page.getByRole("button", { name: "Responder a: Si" }).click()
+  await expect(band).toContainText("«Si»")
+  await expect(band).toContainText("Ningún tema se resuelve")
+  await expect(box).toBeFocused()
+  await page.getByRole("button", { name: "Quitar la cita" }).click()
+  await expect(list).toContainText("1 tema por atender")
+  expect(await overflow(page)).toBeLessThanOrEqual(0)
 })
 
 test("bandeja: lo que cerró el agente se dice en la fila y en la franja del hilo", async ({ owner, fixtureDb }, info) => {

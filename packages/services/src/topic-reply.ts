@@ -4,7 +4,7 @@ import { message } from "@odentia/db/schema/crm"
 import { channelConnection, contact, conversation } from "@odentia/db/schema/crm"
 import { and, eq, sql } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
-import { claimHandoff, createHandoff, recordTopicAskedAgain } from "./agent-operations.js"
+import { asksNothingNew, claimHandoff, createHandoff, recordTopicAskedAgain } from "./agent-operations.js"
 import { type MessageItem, type OutboundContent, sendOutbound, startContactConversation } from "./conversations.js"
 import { handoffOpenSql } from "./handoff-state.js"
 import { type HeldOffer, offerHeldReplies, whatsappOf } from "./held-replies.js"
@@ -18,14 +18,11 @@ import { topicUrgentAt } from "./topic-urgency.js"
 /**
  * Una persona del equipo responde en la Bandeja (ADR 0050). Si cita un mensaje
  * de la persona, la respuesta sale citada y responde su tema (pasadas las 24
- * horas de WhatsApp queda «Por entregar» y sale «Ver respuesta», R1):
- * - Si el mensaje es de un tema abierto, ese tema pasa a quien responde (si
- *   lo tenía otra persona, se le avisa) y, con «Enviar y resolver», queda
- *   resuelto.
- * - Si no es de ningún tema y quien responde elige «Enviar, sigue pendiente»,
- *   se abre un tema a su nombre con su plazo.
- * Sin cita, es un mensaje sin tema. Escribir nunca apaga al agente: espera
- * mientras la persona conversa en vivo.
+ * horas de WhatsApp queda «Por entregar» y sale «Ver respuesta», R1). Si el
+ * mensaje es de un tema abierto, ese tema pasa a quien responde (si lo tenía
+ * otra persona, se le avisa) y queda resuelto; «Dejar pendiente» lo corrige
+ * después (`reopenTopic`, ADR 0122). Sin cita, es un mensaje sin tema. Escribir
+ * nunca apaga al agente: espera mientras la persona conversa en vivo.
  */
 export async function sendTeamReply(
   tx: Db,
@@ -35,8 +32,6 @@ export async function sendTeamReply(
     userId: string
     content: OutboundContent
     replyToMessageId?: string | null
-    /** «Enviar, sigue pendiente»: el tema queda abierto. Por defecto se resuelve. */
-    keepPending?: boolean
   },
 ): Promise<MessageItem & { topicId: string | null; topicResolved: boolean }> {
   const replyTo = input.replyToMessageId ?? null
@@ -57,32 +52,8 @@ export async function sendTeamReply(
   if (replyTo !== null && input.content.type === "text") {
     await forwardWebchatReply(tx, orgId, { conversationId: input.conversationId, userId: input.userId, text: input.content.text })
   }
-  if (topic) {
-    if (!input.keepPending && topic.taskId) {
-      await updateTask(tx, orgId, topic.taskId, { status: "done", actorUserId: input.userId })
-      return { ...sent, topicId: topic.id, topicResolved: true }
-    }
-    // «Enviar, sigue pendiente»: la persona ya tiene una respuesta; las dos horas para «Ahora» vuelven a contar.
-    await tx
-      .update(agentHandoff)
-      .set({ urgentAt: await topicUrgentAt(tx, orgId, new Date()) })
-      .where(and(eq(agentHandoff.id, topic.id), eq(agentHandoff.organizationId, orgId)))
-    return { ...sent, topicId: topic.id, topicResolved: false }
-  }
-  if (replyTo && input.keepPending) {
-    const quoted = await quotedText(tx, orgId, input.conversationId, replyTo)
-    const created = await createHandoff(tx, orgId, input.userId, {
-      conversationId: input.conversationId,
-      reason: shortReason(quoted),
-      summary: quoted ? `Escribió: «${quoted}»` : "Respuesta del equipo pendiente de completar",
-      priority: "media",
-      assigneeUserId: input.userId,
-      createdBy: "user",
-      sourceMessageId: replyTo,
-    })
-    return { ...sent, topicId: created.id, topicResolved: false }
-  }
-  return { ...sent, topicId: null, topicResolved: false }
+  if (topic?.taskId) await updateTask(tx, orgId, topic.taskId, { status: "done", actorUserId: input.userId })
+  return { ...sent, topicId: topic?.id ?? null, topicResolved: Boolean(topic?.taskId) }
 }
 
 /**
@@ -172,13 +143,13 @@ async function offerInSavepoint(tx: Db, orgId: string, conversationId: string): 
  * mensajes aprobados. La respuesta va a su WhatsApp marcado como suyo, «Por
  * entregar» y con «Ver respuesta» (R1): un WhatsApp en el que nunca escribió
  * no admite «Retomar la conversación». El tema que respondía queda resuelto en
- * su conversación, salvo «sigue pendiente» (decisión 4).
+ * su conversación (decisión 4).
  */
 export async function replyByWhatsApp(
   tx: Db,
   orgId: string,
-  input: { conversationId: string; userId: string; text: string; replyToMessageId?: string | null; keepPending?: boolean },
-): Promise<MessageItem & { conversationId: string; topicResolved: boolean }> {
+  input: { conversationId: string; userId: string; text: string; replyToMessageId?: string | null },
+): Promise<MessageItem & { conversationId: string; topicId: string | null; topicResolved: boolean }> {
   const [source] = await tx
     .select({ contactId: conversation.contactId, provider: channelConnection.provider })
     .from(conversation)
@@ -211,9 +182,8 @@ export async function replyByWhatsApp(
     holdIfClosed: true,
   })
   if (sent.held) await offerInSavepoint(tx, orgId, thread.id)
-  const resolved = topic !== null && !input.keepPending && topic.taskId !== null
-  if (resolved && topic?.taskId) await updateTask(tx, orgId, topic.taskId, { status: "done", actorUserId: input.userId })
-  return { ...sent, conversationId: thread.id, topicResolved: resolved }
+  if (topic?.taskId) await updateTask(tx, orgId, topic.taskId, { status: "done", actorUserId: input.userId })
+  return { ...sent, conversationId: thread.id, topicId: topic?.id ?? null, topicResolved: Boolean(topic?.taskId) }
 }
 
 /**
@@ -348,15 +318,44 @@ export async function resolveTopic(
 }
 
 /**
+ * «Dejar pendiente» (ADR 0122): lo resuelto vuelve a quedar abierto, con quien
+ * lo tenía. Lo que el equipo ya escribió no lo da por respondido y las dos
+ * horas para «Ahora» vuelven a contar.
+ */
+export async function reopenTopic(
+  tx: Db,
+  orgId: string,
+  input: { conversationId: string; topicId: string; userId: string },
+): Promise<void> {
+  const [topic] = await tx
+    .select({ taskId: agentHandoff.taskId })
+    .from(agentHandoff)
+    .where(and(eq(agentHandoff.id, input.topicId), eq(agentHandoff.organizationId, orgId), eq(agentHandoff.conversationId, input.conversationId)))
+    .limit(1)
+  if (!topic?.taskId) throw notFound("Tema")
+  await updateTask(tx, orgId, topic.taskId, { status: "open", actorUserId: input.userId })
+  const now = new Date()
+  await tx
+    .update(agentHandoff)
+    .set({ keptPendingAt: now, urgentAt: await topicUrgentAt(tx, orgId, now) })
+    .where(and(eq(agentHandoff.id, input.topicId), eq(agentHandoff.organizationId, orgId)))
+  await tx.execute(
+    sql`select pg_notify('org_events', ${JSON.stringify({ orgId, kind: "conversation.updated", conversationId: input.conversationId, at: now.toISOString() })})`,
+  )
+}
+
+/**
  * La persona respondió citando un mensaje de alguien del equipo (ADR 0050):
  * va al tema de esa persona. Si tiene uno abierto en el hilo se anota ahí; si
- * no, se le abre uno con este mensaje. El agente no lo responde.
+ * no, se le abre uno con este mensaje. El agente no lo responde. Un «gracias»
+ * no le pide nada (ADR 0122): devuelve `false` y sigue con el agente.
  */
 export async function answerToTeamMember(
   tx: Db,
   orgId: string,
   input: { conversationId: string; messageId: string; userId: string },
-): Promise<void> {
+): Promise<boolean> {
+  if (await asksNothingNew(tx, orgId, input.conversationId, input.messageId)) return false
   const [open] = await tx
     .select({ id: agentHandoff.id })
     .from(agentHandoff)
@@ -372,7 +371,7 @@ export async function answerToTeamMember(
     .limit(1)
   if (open) {
     await recordTopicAskedAgain(tx, orgId, { handoffId: open.id, messageId: input.messageId })
-    return
+    return true
   }
   const text = await quotedText(tx, orgId, input.conversationId, input.messageId)
   await createHandoff(tx, orgId, null, {
@@ -384,4 +383,5 @@ export async function answerToTeamMember(
     createdBy: "user",
     sourceMessageId: input.messageId,
   })
+  return true
 }

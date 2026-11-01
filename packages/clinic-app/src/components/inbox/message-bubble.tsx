@@ -17,7 +17,7 @@ import {
 } from "@odentia/ui/components/ai-elements/audio-player"
 import { Message, MessageContent } from "@odentia/ui/components/ai-elements/message"
 import { Link } from "@tanstack/react-router"
-import { AlertCircle, Bot, Check, CheckCheck, Clock, MapPin } from "lucide-react"
+import { AlertCircle, Bot, Check, CheckCheck, Clock, MapPin, Reply } from "lucide-react"
 import { useReceptionName } from "../../lib/agent-names"
 import { API_URL } from "../../lib/auth-client"
 import { channelLabel } from "../../lib/channels"
@@ -104,6 +104,8 @@ export function MessageBubble({
   orgSlug,
   onShowTrace,
   highlight,
+  selected,
+  onReply,
   quote,
   senderName,
   personFirstName,
@@ -117,6 +119,10 @@ export function MessageBubble({
   onShowTrace?: () => void
   /** Es del tema que hay que contestar: se resalta, y en rojo solo si es «Ahora». */
   highlight?: "topic" | "urgent"
+  /** Es el mensaje al que responde la caja en este momento. */
+  selected?: boolean
+  /** Presente si se le puede responder citándolo: va a la vista en lo pendiente y, en lo demás, al pasar por él. */
+  onReply?: () => void
   /** El mensaje al que responde, citado como en WhatsApp. */
   quote?: { text: string; onJump: () => void } | "missing"
   /** Quién del equipo lo escribió. */
@@ -129,12 +135,11 @@ export function MessageBubble({
   const receptionName = useReceptionName()
   // La línea de Argos solo la abre quien puede ver el agente.
   const canOpenLine = usePermission("agent.read")
-  return (
-    <Message from={out ? "user" : "assistant"}>
+  const content = (
       <MessageContent
         className={
           !out
-            ? `gap-0.5 rounded-2xl rounded-bl-md border bg-card px-3.5 py-2 ${highlight === "urgent" ? "ring-2 ring-inset ring-destructive" : highlight ? "ring-2 ring-inset ring-warning" : ""}`
+            ? `gap-0.5 rounded-2xl rounded-bl-md border ${selected ? "bg-warning-soft" : "bg-card"} px-3.5 py-2 ${highlight === "urgent" ? "ring-2 ring-inset ring-destructive" : highlight ? "ring-2 ring-inset ring-warning" : ""}`
             : byAgent
               ? "gap-0.5 group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-md group-[.is-user]:border group-[.is-user]:border-agent-border group-[.is-user]:bg-agent-soft group-[.is-user]:px-3.5 group-[.is-user]:py-2"
               : "gap-0.5 group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-md group-[.is-user]:px-3.5 group-[.is-user]:py-2"
@@ -221,6 +226,27 @@ export function MessageBubble({
           </p>
         ) : null}
       </MessageContent>
+  )
+  return (
+    <Message from={out ? "user" : "assistant"}>
+      {!out && onReply ? (
+        <div className="flex min-w-0 items-center gap-1">
+          {content}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-label={`Responder a: ${(msg.body ?? "este mensaje").slice(0, 60)}`}
+            onClick={onReply}
+            className={`min-h-11 min-w-11 shrink-0 px-1.5 text-xs font-semibold text-primary sm:min-h-8 sm:min-w-0 ${highlight ? "" : "sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"}`}
+          >
+            <Reply className="size-3.5" aria-hidden />
+            <span className="max-sm:hidden">Responder</span>
+          </Button>
+        </div>
+      ) : (
+        content
+      )}
       {/* La reacción de la persona, pegada al mensaje: no confirma nada (decisión 7). */}
       {msg.contactReaction ? (
         <span

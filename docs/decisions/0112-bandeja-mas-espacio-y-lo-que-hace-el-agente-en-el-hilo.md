@@ -1,7 +1,7 @@
 # 0112 · Bandeja: más espacio para la conversación y lo que hace el agente, en el hilo
 
 - Fecha: 2026-10-30.
-- Estado: aceptada. Precisa el ADR 0050 en cómo se muestran los temas: su lógica no cambia.
+- Estado: aceptada. Precisa el ADR 0050 en cómo se muestran los temas: su lógica no cambia. El [0122](0122-responder-cada-tema-por-su-cuenta.md) cambia a qué responde la caja y sus botones.
 
 ## Problema
 

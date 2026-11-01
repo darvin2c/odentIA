@@ -225,6 +225,13 @@
       "when": 1793485114867,
       "tag": "0031_excepciones_de_agenda_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1793499166999,
+      "tag": "0032_tema_dejado_pendiente",
+      "breakpoints": true
     }
   ]
 }

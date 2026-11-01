@@ -403,14 +403,18 @@ async function attendAgentRun(
       }
       // Responde citando un mensaje de una persona del equipo (ADR 0050): es
       // de su tema y el agente no se mete; se anota en su tema o se le abre uno.
+      // Un «gracias» no pide nada al equipo (ADR 0122): lo atiende como cualquier otro.
       if (trigger.replyToMessageId && screenMode !== "recheck" && !alarm) {
         const [quoted] = await tx
           .select({ senderKind: message.senderKind, senderUserId: message.senderUserId })
           .from(message)
           .where(and(eq(message.id, trigger.replyToMessageId), eq(message.conversationId, conversationId)))
           .limit(1)
-        if (quoted?.senderKind === "user" && quoted.senderUserId) {
-          await answerToTeamMember(tx, orgId, { conversationId, messageId: trigger.id, userId: quoted.senderUserId })
+        if (
+          quoted?.senderKind === "user" &&
+          quoted.senderUserId &&
+          (await answerToTeamMember(tx, orgId, { conversationId, messageId: trigger.id, userId: quoted.senderUserId }))
+        ) {
           return { skip: { reason: "reply-to-team", model: effectiveModel, silent: true } }
         }
       }

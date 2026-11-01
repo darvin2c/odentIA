@@ -119,7 +119,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo respondo yo en vez de Sofi?",
-        a: "Lo que Sofi no puede responder te llega como un tema: la caja de mensaje te dice a qué estás respondiendo. Escribe y pulsa «Enviar y resolver» o Enter: tu respuesta sale citando su pregunta y el tema queda resuelto; si prometes responder después, usa «Enviar, sigue pendiente». Sofi nunca deja de atender lo demás: mientras conversas en vivo espera 15 minutos. Si el tema lo tiene otra persona, la caja ofrece «Tomar este tema»; pasarlo a alguien o marcarlo resuelto está en su «…». Con el teclado, J y K pasan entre conversaciones y R lleva a la caja.",
+        a: "Lo que Sofi no puede responder te llega como un tema. Con un solo tema, la caja ya te dice a qué estás respondiendo; con varios, tocas el que quieres responder y el hilo baja hasta su mensaje. Escribe y pulsa «Enviar» o Enter: tu respuesta sale citando su pregunta y el tema queda resuelto; si le debes algo más, pulsa «Dejar pendiente». Lo que no necesita respuesta se cierra con «Resolver», sin enviarle nada. A cualquier otro mensaje le respondes con «Responder», junto a él. Un «sí» o un «gracias» que le dicen a Sofi no te piden nada: no entran a ningún tema. Sofi nunca deja de atender lo demás: mientras conversas en vivo espera 15 minutos. Si el tema lo tiene otra persona, la caja ofrece «Tomar este tema»; pasarlo a alguien está en su «…». Con el teclado, J y K pasan entre conversaciones y R lleva a la caja.",
       },
       {
         q: "¿Y si ya pasaron 24 horas desde que escribió?",

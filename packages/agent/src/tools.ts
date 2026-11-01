@@ -2510,11 +2510,11 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           ctx.handoffNeedsReply = true
           // Lo que trae sobre qué pide o qué falta se guarda aunque el aviso salga después.
           await annotate(false)
-          return `Ese tema ya lo tiene el equipo y lo que volvió a decir quedó anotado en él.${raised} ${REPLY_ASKED_AGAIN}`
+          return `Ese tema ya lo tiene el equipo${again.noted ? " y lo que volvió a decir quedó anotado en él" : ""}.${raised} ${REPLY_ASKED_AGAIN}`
         }
         const outcome = await propose("enviar_mensaje", { kind: "text", text: await withAgenda(notice) }, "request_human_handoff")
         await annotate(ctx.replySettled === true)
-        return ctx.replySettled ? "Ese tema ya lo tiene el equipo: lo anoté en él y salió el aviso. No envíes más mensajes." : `El aviso al interlocutor no salió: ${outcome}`
+        return ctx.replySettled ? `Ese tema ya lo tiene el equipo: ${again.noted ? "lo anoté en él y salió" : "salió"} el aviso. No envíes más mensajes.` : `El aviso al interlocutor no salió: ${outcome}`
       }
       const handoff = await inOrg((tx) =>
         createHandoff(tx, ctx.orgId, null, {
@@ -2591,6 +2591,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         recordTopicAskedAgain(tx, ctx.orgId, { handoffId: tema_id, messageId: ctx.triggerId }),
       ).catch(() => null)
       if (!result) return "Ese tema ya no está abierto: revisa el «Estado del caso» y responde con lo que haya."
+      if (!result.noted) return "No hace falta anotarlo: no pide nada nuevo. Si ya le dijiste quién tiene su consulta, no se lo repitas. Sin prometer una hora; no respondas el tema tú."
       if (result.raised) return "Anotado: como ya preguntó varias veces, su tema quedó como urgente para el equipo. Díselo en una frase, sin prometer una hora; no respondas el tema tú."
       // Lo que ya sabe no se le repite (auditoría del ADR 0104): era la falla de fluidez más común.
       return result.assigneeName

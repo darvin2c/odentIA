@@ -1,6 +1,7 @@
 import type { Db } from "@odentia/db"
 import { sql } from "drizzle-orm"
 import { type LastAgentAction, lastAgentActions } from "./agent-actions.js"
+import { onlyCourtesy } from "./agent-operations.js"
 import type { ConversationCloseReason } from "./conversation-close.js"
 import {
   agentAttendingSql,
@@ -81,8 +82,8 @@ export interface InboxTopic {
   createdAt: string
   dueAt: string | null
   taskId: string | null
-  /** El mensaje de la persona que se responde, citado. */
-  source: { id: string; body: string | null; createdAt: string } | null
+  /** El mensaje de la persona que se responde, citado. `onlyCourtesy`: un «Si» no dice de qué trata; lo dice el motivo. */
+  source: { id: string; body: string | null; createdAt: string; onlyCourtesy: boolean } | null
   /** Mensajes en que volvió a preguntar por el tema. */
   askedMessageIds: string[]
   askedAgainAt: string | null
@@ -249,7 +250,7 @@ async function conversationAttention(
       createdAt,
       dueAt: iso(row.due_at),
       taskId: row.task_id,
-      source: row.source_id ? { id: row.source_id, body: row.source_body, createdAt: iso(row.source_at) ?? "" } : null,
+      source: row.source_id ? { id: row.source_id, body: row.source_body, createdAt: iso(row.source_at) ?? "", onlyCourtesy: onlyCourtesy(row.source_body) } : null,
       askedMessageIds: Array.isArray(row.asked_message_ids) ? row.asked_message_ids : [],
       askedAgainAt: iso(row.asked_again_at),
     })
