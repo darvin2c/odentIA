@@ -11,6 +11,7 @@ import { channelLabel } from "../../lib/channels"
 import { timeAgo, useMemberName, useMyUserId, usePermission } from "../../lib/crm"
 import { formatClock, formatWeekdayDay } from "../../lib/finance-cash"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
+import { caseAdds } from "../../lib/home"
 import { readPanelDraft, writePanelDraft } from "../../lib/panel-draft"
 import { isAmbiguousMutationError, QueryErrorState } from "../../lib/query-error"
 import { HandoffUrgency } from "../agent/handoff-badges"
@@ -63,8 +64,6 @@ interface PersonPanelData {
   }
   canTeach: boolean
 }
-
-const oneLine = (text: string) => text.replace(/s+/g, " ").trim()
 
 export interface PersonPanelTarget {
   conversationId: string
@@ -236,11 +235,7 @@ export function PersonPanel({
   const channel = panel?.channel ? channelLabel(panel.channel) : null
   const description = [panel?.patientId ? "Paciente" : null, channel, panel?.topic ? timeAgo(panel.topic.createdAt) : null].filter(Boolean).join(" · ")
   const question = panel?.topic?.quote ?? panel?.thread.filter((item) => item.from === "person").at(-1)?.text ?? ""
-  const saidByPerson = new Set(panel?.thread.filter((item) => item.from === "person").map((item) => oneLine(item.text)) ?? [])
-  // Lo que preguntó puede ser anterior a los últimos mensajes: es lo que se va a citar, así que se dice.
-  const quoteHidden = !!panel?.topic?.quote && panel.thread.length > 0 && !saidByPerson.has(oneLine(panel.topic.quote))
-  // Un motivo que solo repite lo que dijo no explica nada.
-  const reasonAdds = !!panel?.topic && oneLine(panel.topic.reason) !== oneLine(panel.topic.quote ?? "") && !saidByPerson.has(oneLine(panel.topic.reason))
+  const { quoteHidden, reasonAdds } = panel?.topic ? caseAdds(panel.topic, panel.thread) : { quoteHidden: false, reasonAdds: false }
 
   const submit = () => {
     // Enter no pasa por el botón: mientras sale el mensaje, otro Enter le llegaría dos veces.

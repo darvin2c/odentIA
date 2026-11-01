@@ -1,11 +1,27 @@
 import { describe, expect, it } from "vitest"
-import { agendaSummary, attendedPercent, daysAgo, longDay, patientsSummary, repliable, waitingKey, waitingText, type HomeTextContext } from "./home"
+import { agendaSummary, attendedPercent, caseAdds, daysAgo, longDay, patientsSummary, repliable, waitingKey, waitingText, type HomeTextContext } from "./home"
 import type { WaitingRow } from "./workspace"
 
 const context: HomeTextContext = { today: "2026-10-12", timezone: "America/Lima", locale: "es-PE", allTasks: false, receptionName: "Sofi" }
 const task = (patch: Partial<Extract<WaitingRow, { kind: "task" }>>): WaitingRow => ({
   kind: "task", id: "t1", title: "Llamar a Mateo Huamán por su presupuesto", dueAt: null, due: "none",
   href: "/tasks?task=t1", mine: true, assigneeName: "Rosa", opportunityTitle: null, more: 0, ...patch,
+})
+
+describe("lo que el panel dice del caso", () => {
+  const person = (text: string) => ({ from: "person", text })
+  it("dice la pregunta si es anterior a los mensajes a la vista", () => {
+    expect(caseAdds({ reason: "No pudo sustentar un dato", quote: "¿Atienden los sábados?" }, [person("Sí"), { from: "agent", text: "¿Atienden los sábados?" }])).toEqual({ quoteHidden: true, reasonAdds: true })
+  })
+  it("no repite lo que ya se ve, aunque cambien los espacios", () => {
+    expect(caseAdds({ reason: "¿Atienden  los\nsábados?", quote: "¿Atienden los sábados?" }, [person("¿Atienden   los sábados?\n")])).toEqual({ quoteHidden: false, reasonAdds: false })
+  })
+  it("distingue textos que solo difieren en una letra «s»", () => {
+    expect(caseAdds({ reason: "Pide precios", quote: "¿Y los precios?" }, [person("¿Y lo precio?")])).toEqual({ quoteHidden: true, reasonAdds: true })
+  })
+  it("sin mensajes a la vista, la pregunta ya la muestra el panel", () => {
+    expect(caseAdds({ reason: "Pregunta por su pago", quote: "¿Llegó?" }, [])).toEqual({ quoteHidden: false, reasonAdds: true })
+  })
 })
 
 describe("textos de «Te espera»", () => {
