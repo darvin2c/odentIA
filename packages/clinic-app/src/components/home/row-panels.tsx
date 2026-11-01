@@ -1,5 +1,5 @@
 import { Button, buttonVariants, cn, Field, FieldError, FieldLabel, Input, toast } from "@odentia/ui"
-import { ConfirmDialog, DetailDrawer, submitErrorMessage } from "@odentia/ui-patterns"
+import { ConfirmDialog, DetailDrawer, internationalText, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { type ReactNode, useState } from "react"
@@ -252,7 +252,7 @@ export function CallPanel({
           {text.ask ? <p className="text-sm">{sentence(text.ask)}</p> : null}
           {row.phone ? (
             <a href={`tel:${row.phone.replace(/\s+/g, "")}`} className={cn(buttonVariants(), "min-h-11")} aria-label={`Llamar: ${row.patientName}`}>
-              Llamar al {row.phone}
+              Llamar al {internationalText(row.phone)}
             </a>
           ) : (
             <p className="text-sm text-muted-foreground">No tiene teléfono guardado.</p>

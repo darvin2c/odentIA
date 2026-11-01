@@ -5,7 +5,7 @@ import { channelConnection, contact, conversation, message } from "@odentia/db/s
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, asc, desc, eq, inArray, isNull, type SQL, sql } from "drizzle-orm"
 import { getAdminRecommendations, getAdminUnreached } from "./agent-admin.js"
-import { countOpenHandoffs, listHandoffs } from "./agent-operations.js"
+import { countOpenHandoffs, listHandoffs, probarHandoffSql } from "./agent-operations.js"
 import { type AppointmentVisit, appointmentVisit } from "./appointments.js"
 import { checkEncounterClosing } from "./encounters.js"
 import { AUDIT_AREA_LABELS, AUDIT_AREAS, type AuditArea, auditSubjectsOf, describeAuditEvent } from "./audit-words.js"
@@ -18,6 +18,7 @@ import { dueDataRequests } from "./data-requests.js"
 import { notFound, validation } from "./errors.js"
 import { getCashToday } from "./finance.js"
 import { inventoryWaiting } from "./inventory.js"
+import { handoffOpenSql } from "./handoff-state.js"
 import { getOrgLocale } from "./locale.js"
 import { upcomingWork } from "./report-finance.js"
 import { windowOpen } from "./message-window.js"
@@ -571,6 +572,15 @@ async function waitingCases(
   return { items, total }
 }
 
+/** Las conversaciones que esperan respuesta: la misma definición para listarlas y para contarlas. */
+function pendingConversationsSql(orgId: string, assignedTo: string | null): SQL {
+  const conv = sql.raw("c")
+  return sql`select c.id, c.contact_id, c.channel_connection_id, ${unansweredSinceSql(conv)} as since from conversation c where c.organization_id=${orgId} and c.status='open'
+        and not ${screenedSql(conv)} and c.test_by_user_id is null
+        and not ${handoffOpenExistsSql(conv)}
+        ${assignedTo ? sql`and c.assigned_user_id = ${assignedTo}` : sql``}`
+}
+
 /**
  * Conversaciones que esperan respuesta (la vista «Esperan respuesta» de la
  * Bandeja, con su misma definición): cuántas son y, de las que más llevan, con
@@ -579,14 +589,8 @@ async function waitingCases(
  * esa persona: quien atiende no recibe la cuenta de toda la clínica.
  */
 async function waitingConversations(tx: Db, orgId: string, assignedTo: string | null): Promise<{ waiting: number; items: WaitingPerson[] }> {
-  const conv = sql.raw("c")
   const rows = await tx.execute<{ conversationId: string; contactId: string; contactName: string | null; channel: string | null; since: string; quote: string | null; total: number }>(sql`
-    with pending as (
-      select c.id, c.contact_id, c.channel_connection_id, ${unansweredSinceSql(conv)} as since from conversation c where c.organization_id=${orgId} and c.status='open'
-        and not ${screenedSql(conv)} and c.test_by_user_id is null
-        and not ${handoffOpenExistsSql(conv)}
-        ${assignedTo ? sql`and c.assigned_user_id = ${assignedTo}` : sql``}
-    )
+    with pending as (${pendingConversationsSql(orgId, assignedTo)})
     select p.id as "conversationId", p.contact_id as "contactId", ct.display_name as "contactName", ch.channel,
       ${iso(sql`p.since`)} as since,
       (select left(regexp_replace(m.body, '[[:space:]]+', ' ', 'g'), 280) from message m
@@ -611,16 +615,28 @@ async function waitingConversations(tx: Db, orgId: string, assignedTo: string | 
  * Cuántas personas esperan a quien mira: el único número del menú, en «Inicio».
  * Los casos del agente sin tomar o suyos, más las conversaciones que esperan
  * respuesta y no son un caso; nunca lo que ya tiene otra persona, aunque quien
- * dirige lo vea en «Te espera».
+ * dirige lo vea en «Te espera». Cada persona cuenta una vez, como su fila.
  */
 export async function countWorkspaceWaiting(tx: Db, orgId: string, userId: string, access: WorkspaceAccess): Promise<number> {
+  // Sin ver los casos del agente, los que le pasaron; caja, además, los pagos sin tomar.
+  const onlyPayments = !access.conversations && access.topics === true
   const cases = access.agent
-    ? await countOpenHandoffs(tx, orgId, { forUserId: userId })
+    ? sql`(h.assignee_user_id is null or h.assignee_user_id = ${userId})`
     : access.conversations || access.topics
-      ? (await waitingCases(tx, orgId, userId, false, { onlyMine: true, onlyPayments: !access.conversations && access.topics === true })).total
-      : 0
-  const conversations = access.conversations ? (await waitingConversations(tx, orgId, access.agent ? null : userId)).waiting : 0
-  return cases + conversations
+      ? sql`(h.assignee_user_id = ${userId} ${onlyPayments ? sql`or (h.assignee_user_id is null and h.kind = 'pago')` : sql``})`
+      : null
+  const sources: SQL[] = []
+  // Un caso sin persona es su propia fila.
+  if (cases) {
+    sources.push(sql`select coalesce(h.contact_id::text, h.id::text) as person from agent_handoff h
+      where h.organization_id = ${orgId} and ${handoffOpenSql(sql.raw("h"))} and not ${probarHandoffSql(sql.raw("h"))} and ${cases}`)
+  }
+  if (access.conversations) {
+    sources.push(sql`select p.contact_id::text as person from (${pendingConversationsSql(orgId, access.agent ? null : userId)}) p where p.since is not null`)
+  }
+  if (sources.length === 0) return 0
+  const [row] = await tx.execute<{ people: number }>(sql`select count(distinct person)::int as people from (${sql.join(sources, sql` union all `)}) waiting`)
+  return row?.people ?? 0
 }
 
 /**

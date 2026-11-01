@@ -532,6 +532,16 @@ it("un caso del agente sale una sola vez: ni su tarea ni su conversación se rep
   expect(await waitingFor(tomas, { ...access, agent: false })).toBe(1)
   // Un rol sin conversaciones ni casos no cuenta nada.
   expect(await waitingFor(rita, restricted)).toBe(0)
+  // Un número por persona, como las filas: Lucía, con su caso y otra conversación que espera, cuenta una vez.
+  const [ofLucia] = await ownerDb.select({ contactId: conversation.contactId, connectionId: conversation.channelConnectionId }).from(conversation).where(eq(conversation.id, lucia))
+  const [second] = await ownerDb.insert(conversation).values({
+    organizationId: orgId, contactId: ofLucia!.contactId, channelConnectionId: ofLucia!.connectionId, externalThreadId: `t:${randomUUID()}`, status: "open",
+  }).returning({ id: conversation.id })
+  await ownerDb.insert(message).values({
+    organizationId: orgId, conversationId: second!.id, direction: "in", senderKind: "contact", body: "Otra cosa", status: "received",
+    externalId: `ext-${randomUUID()}`, createdAt: new Date(Date.now() - 3_600_000),
+  })
+  expect(await waitingFor(tomas, access)).toBe(2)
 })
 
 it("la campana: nadie recibe aviso de lo suyo, «Marcar todo leído» y cada aviso llega con el permiso que declara", async () => {

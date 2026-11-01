@@ -7,6 +7,7 @@
 import { formatMoney } from "@odentia/clinical"
 import { agentCaseRow } from "./agent"
 import { ADMIN_NAME, withReceptionName } from "./agent-names"
+import { internationalText } from "@odentia/ui-patterns"
 import { channelLabel } from "./channels"
 import { dayWords } from "./data-requests"
 import { timeAgo } from "./crm"
@@ -137,7 +138,7 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): WaitingT
           row.why === "sin_recordatorios"
             ? `No recibe recordatorios: confirma su cita de ${appointmentWhen(row.startsAt, context)}`
             : `No confirmó su cita de ${appointmentWhen(row.startsAt, context)}`,
-        detail: joined([row.phone, row.serviceName, row.branchName]),
+        detail: joined([row.phone ? internationalText(row.phone) : null, row.serviceName, row.branchName]),
         action: "Llamar",
       }
     case "unclosed": {

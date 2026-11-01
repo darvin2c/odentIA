@@ -32,7 +32,6 @@ import {
   listAnswerTraces,
   listHandoffs,
   claimHandoff,
-  getCaseBrief,
   listProposals,
   requiredPermissionForAction,
   type SearchEmbedder,
@@ -327,23 +326,6 @@ const simulateInput = z.object({
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         listAnswerTraces(tx, orgId, parsed.data.conversationId, { limit: parsed.data.limit }),
-      ),
-    )
-  })
-
-  /**
-   * Resumen del caso para quien lo toma: lo que la persona escribió, lo que ya
-   * se sabe y lo que hizo el agente. Lo que se recuerda de la persona solo
-   * viaja a quien puede ver sus contactos.
-   */
-  app.get("/case/brief", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccessAny(memberRole, ["conversations.read", "agent.read"])) return forbidden(c, "conversations.read")
-    const parsed = z.object({ conversationId: z.string().uuid() }).safeParse(c.req.query())
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        getCaseBrief(tx, orgId, parsed.data.conversationId, { includePerson: canAccessAny(memberRole, ["conversations.read", "crm.read"]) }),
       ),
     )
   })

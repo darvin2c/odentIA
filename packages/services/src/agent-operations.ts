@@ -3334,7 +3334,7 @@ async function enrichHandoffs(tx: Db, rows: HandoffRow[]): Promise<HandoffItem[]
 }
 
 /** Un tema de una prueba de «Probar»: se sigue en su panel (ADR 0094). `h` es `agent_handoff` o su alias. */
-function probarHandoffSql(h: SQL): SQL {
+export function probarHandoffSql(h: SQL): SQL {
   return sql`exists (select 1 from conversation t_probar where t_probar.id = ${h}.conversation_id and t_probar.test_by_user_id is not null)`
 }
 
