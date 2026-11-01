@@ -415,7 +415,7 @@ it("conexiones listan webhookUrl sin secretos; agente con gating", async () => {
   expect(forbidden.status).toBe(403)
 })
 
-it("tareas y campos van de punta a punta", async () => {
+it("tareas van de punta a punta", async () => {
   const app = buildApp("owner")
   const task = await app.request("/tasks", {
     method: "POST",

@@ -16,6 +16,8 @@ Se quita todo: la pantalla, su lugar en la ficha, la API, lo que Sofi leía y es
 
 Una capacidad entra por el valor que aporta, no porque otros CRM la tengan. Esta no aportaba más que una nota, y sumaba una segunda forma de guardar lo que ya tiene un lugar.
 
+Va en dos entregas: primero el código y, ya desplegado, la tabla y la columna. `migrate` corre con sus semillas antes de que suban la API y el worker nuevos, y la versión en marcha pide todas las columnas de `contact`. Borrar todo a la vez la dejaría fallando durante ese tiempo, más aún si una semilla falla, y sin poder volver a la imagen anterior.
+
 ## Alternativas descartadas
 
 - *Arreglarlos y conectarlos con búsqueda, filtros, Sofi y registro*: mucha complejidad para algo que nadie usó.
@@ -29,4 +31,4 @@ Una capacidad entra por el valor que aporta, no porque otros CRM la tengan. Esta
 
 ## Referencias
 
-`packages/db/drizzle/0034_sin_campos_de_contacto.sql` y `0035_sin_campos_de_contacto_reglas.sql` (borrar los datos de una persona, [0080](0080-pedidos-sobre-sus-datos-y-copia-de-la-historia.md), ya no toca esa columna).
+`compose.prod.yaml` (`migrate`); las migraciones `sin_campos_de_contacto` y `sin_campos_de_contacto_reglas` (borrar los datos de una persona, [0080](0080-pedidos-sobre-sus-datos-y-copia-de-la-historia.md), ya no toca esa columna).

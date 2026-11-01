@@ -6,7 +6,7 @@
  * consume con `canAccess` y la plataforma con `usePermission`.
  *
  * Dominios: patients (filiación administrativa), clinical (ficha clínica),
- * appointments (agenda operativa), crm (contactos, oportunidades, campos),
+ * appointments (agenda operativa), crm (contactos, oportunidades),
  * conversations (bandeja y mensajes), tasks (tareas), finance (caja y cobros),
  * inventory (existencias), reports (reportes), settings (configuración),
  * audit (auditoría), agent (agente IA). Cada dominio tiene `.read`/`.write`,

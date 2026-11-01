@@ -239,20 +239,6 @@
       "when": 1793502349030,
       "tag": "0033_lo_que_no_encontro",
       "breakpoints": true
-    },
-    {
-      "idx": 34,
-      "version": "7",
-      "when": 1793508068289,
-      "tag": "0034_sin_campos_de_contacto",
-      "breakpoints": true
-    },
-    {
-      "idx": 35,
-      "version": "7",
-      "when": 1793508069943,
-      "tag": "0035_sin_campos_de_contacto_reglas",
-      "breakpoints": true
     }
   ]
 }
