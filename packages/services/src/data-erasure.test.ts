@@ -6,16 +6,21 @@
  */
 import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
-import { agentPersonFact } from "@odentia/db/schema/agent"
-import { appointment } from "@odentia/db/schema/agenda"
-import { automationConsent } from "@odentia/db/schema/automation"
-import { encounter, patient, patientCharge } from "@odentia/db/schema/clinical"
+import { agentHandoff, agentPersonFact, agentProposal } from "@odentia/db/schema/agent"
+import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
+import { user } from "@odentia/db/schema/auth"
+import { automationConsent, automationJob, automationRule } from "@odentia/db/schema/automation"
+import { encounter, patient, patientCharge, patientContact } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, contactIdentity, conversation, crmTask as task, message } from "@odentia/db/schema/crm"
 import { crmNote } from "@odentia/db/schema/crm-workspace"
+import { opportunity } from "@odentia/db/schema/opportunities"
 import { branch } from "@odentia/db/schema/org"
-import { and, eq } from "drizzle-orm"
+import { and, eq, inArray } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { createRoom, listAppointments } from "./appointments.js"
+import { syncTeamLines } from "./agent-admin.js"
+import { deliverJob, setLine, syncCancelledAppointments } from "./automation.js"
+import { issuePersonalLink, resolvePersonalLink } from "./booking-links.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import {
   eraseForDataRequest,
@@ -29,6 +34,7 @@ import { createDataRequest, respondDataRequest, verifyDataRequest } from "./data
 import { sendPatientRecordCopy } from "./patient-record.js"
 import { listPatients } from "./patients.js"
 import { listPeople } from "./people.js"
+import { ensureDefaultPipeline } from "./pipelines.js"
 import type { Storage } from "./storage.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 import { setTestPatientIdentity } from "./test-patient.js"
@@ -106,7 +112,7 @@ async function patientWithHistory() {
   await ownerDb
     .insert(patientCharge)
     .values({ organizationId: "org_a", patientId, description: "Limpieza", amountCents: 12000, currency: "PEN" })
-  return { f, run, patientId, personId, conversationId: sent.conversationId, visitId: visit!.id, branchId: site!.id }
+  return { f, run, patientId, personId, conversationId: sent.conversationId, visitId: visit!.id, branchId: site!.id, connectionId: conn!.id }
 }
 
 it("borra lo no clínico, guarda la historia y los cobros, cancela su cita sin avisarle y bloquea la historia", async () => {
@@ -185,6 +191,147 @@ it("borra lo no clínico, guarda la historia y los cobros, cancela su cita sin a
   ).rejects.toMatchObject({ status: 403 })
 })
 
+it("lo del paciente se borra aunque lo lleve quien habla por él; lo de esa persona queda", async () => {
+  const { f, run, patientId, personId, connectionId } = await patientWithHistory()
+  const [mother] = await ownerDb
+    .insert(contact)
+    .values({ organizationId: "org_a", displayName: "Rosa, su mamá" })
+    .returning({ id: contact.id })
+  const motherId = mother!.id
+  const [thread] = await ownerDb
+    .insert(conversation)
+    .values({ organizationId: "org_a", contactId: motherId, channelConnectionId: connectionId, externalThreadId: `mama-${randomUUID()}` })
+    .returning({ id: conversation.id })
+  const threadId = thread!.id
+  const { pipelineId, stages } = await run((tx) => ensureDefaultPipeline(tx, "org_a"))
+  const newOpportunity = async (title: string, ofPatient: string | null) => {
+    const [row] = await ownerDb
+      .insert(opportunity)
+      .values({ organizationId: "org_a", contactId: motherId, patientId: ofPatient, pipelineId, stageId: stages[0]!.id, title, currency: "PEN" })
+      .returning({ id: opportunity.id })
+    return row!.id
+  }
+  const newTask = async (title: string, links: { patientId?: string; opportunityId?: string }) => {
+    const [row] = await ownerDb
+      .insert(task)
+      .values({ organizationId: "org_a", title, contactId: motherId, createdBy: f.actor, ...links })
+      .returning({ id: task.id })
+    return row!.id
+  }
+  const newLink = async (ofPatient: string | null) => {
+    const [row] = await ownerDb
+      .insert(appointmentBookingLink)
+      .values({
+        organizationId: "org_a",
+        contactId: motherId,
+        patientId: ofPatient,
+        conversationId: threadId,
+        tokenHash: randomUUID(),
+        expiresAt: new Date(Date.now() + 86_400_000),
+      } as typeof appointmentBookingLink.$inferInsert)
+      .returning({ id: appointmentBookingLink.id })
+    return row!.id
+  }
+  const newProposal = async (ofPatient: string | null) => {
+    const [row] = await ownerDb
+      .insert(agentProposal)
+      .values({
+        organizationId: "org_a",
+        contactId: motherId,
+        conversationId: threadId,
+        patientId: ofPatient,
+        action: "enviar_mensaje",
+        payload: {},
+        idempotencyKey: randomUUID(),
+      })
+      .returning({ id: agentProposal.id })
+    return row!.id
+  }
+  const newJob = async (links: { contactId?: string; opportunityId?: string }) => {
+    const [row] = await ownerDb
+      .insert(automationJob)
+      .values({ organizationId: "org_a", kind: "seguimiento_presupuesto", dedupeKey: randomUUID(), scheduledFor: new Date(), ...links })
+      .returning({ id: automationJob.id })
+    return row!.id
+  }
+
+  // Lo que es de la paciente, aunque esté a nombre de su mamá.
+  const hers = {
+    opportunity: await newOpportunity("Ortodoncia de Elena", patientId),
+    task: await newTask("Llamar por el control de Elena", { patientId }),
+    link: await newLink(patientId),
+    proposal: await newProposal(patientId),
+  }
+  const opportunityTask = await newTask("Seguir la ortodoncia", { opportunityId: hers.opportunity })
+  const opportunityJob = await newJob({ opportunityId: hers.opportunity })
+  const [passed] = await ownerDb
+    .insert(agentHandoff)
+    .values({ organizationId: "org_a", conversationId: threadId, reason: "Pide hablar", summary: "Pide hablar", taskId: hers.task })
+    .returning({ id: agentHandoff.id })
+  const [opportunityNote] = await ownerDb
+    .insert(crmNote)
+    .values({ organizationId: "org_a", contactId: motherId, opportunityId: hers.opportunity, body: "Elena prefiere las tardes" })
+    .returning({ id: crmNote.id })
+  // Lo que es de su mamá.
+  const own = {
+    opportunity: await newOpportunity("Blanqueamiento de Rosa", null),
+    task: await newTask("Llamar a Rosa", {}),
+    link: await newLink(null),
+    proposal: await newProposal(null),
+    job: await newJob({ contactId: motherId }),
+  }
+  const [ownNote] = await ownerDb
+    .insert(crmNote)
+    .values({ organizationId: "org_a", contactId: motherId, opportunityId: own.opportunity, body: "Rosa paga en cuotas" })
+    .returning({ id: crmNote.id })
+  await ownerDb
+    .insert(patientContact)
+    .values({ organizationId: "org_a", patientId, contactId: motherId, relationship: "guardian" })
+
+  const request = await run((tx) =>
+    createDataRequest(tx, "org_a", f.actor, patientId, { kind: "borrar", requesterContactId: personId, channel: "clinica" }),
+  )
+  await run((tx) => verifyDataRequest(tx, "org_a", f.actor, patientId, request.id, { how: "documento" }))
+  // Lo que se avisa antes de confirmar es lo que se borra: su tarea y su nota propias, y lo que está a nombre de su mamá.
+  expect(await run((tx) => erasurePreview(tx, "org_a", patientId))).toMatchObject({ opportunities: 1, tasks: 3, notes: 2, linkedPeople: 1 })
+  const erased = await run((tx) => eraseForDataRequest(tx, "org_a", f.actor, patientId, request.id))
+  // La constancia no dice que se borró todo: lo de su mamá es de ella.
+  expect(erased.request.resolution).toMatch(/no se borró: es de ellas/)
+
+  const idsOf = async (table: typeof opportunity | typeof task | typeof appointmentBookingLink | typeof agentProposal | typeof automationJob, ids: string[]) =>
+    (await ownerDb.select({ id: table.id }).from(table as typeof task).where(inArray(table.id, ids))).map((row) => row.id)
+  expect(await idsOf(opportunity, [hers.opportunity])).toEqual([])
+  expect(await idsOf(task, [hers.task, opportunityTask])).toEqual([])
+  expect(await idsOf(appointmentBookingLink, [hers.link])).toEqual([])
+  expect(await idsOf(agentProposal, [hers.proposal])).toEqual([])
+  expect(await idsOf(automationJob, [opportunityJob])).toEqual([])
+
+  expect(await idsOf(opportunity, [own.opportunity])).toEqual([own.opportunity])
+  expect(await idsOf(task, [own.task])).toEqual([own.task])
+  expect(await idsOf(appointmentBookingLink, [own.link])).toEqual([own.link])
+  expect(await idsOf(agentProposal, [own.proposal])).toEqual([own.proposal])
+  expect(await idsOf(automationJob, [own.job])).toEqual([own.job])
+  expect(await ownerDb.select({ id: conversation.id }).from(conversation).where(eq(conversation.id, threadId))).toHaveLength(1)
+  // Un pase se va con su tarea: cuenta un caso de su hijo, aunque esté en la conversación de su mamá.
+  expect(await ownerDb.select().from(agentHandoff).where(eq(agentHandoff.id, passed!.id))).toEqual([])
+  // Su nota se va con su oportunidad; la de su mamá queda.
+  expect((await ownerDb.select({ id: crmNote.id }).from(crmNote).where(inArray(crmNote.id, [opportunityNote!.id, ownNote!.id]))).map((row) => row.id)).toEqual([ownNote!.id])
+  const [motherAfter] = await ownerDb.select().from(contact).where(eq(contact.id, motherId))
+  expect(motherAfter).toMatchObject({ displayName: "Rosa, su mamá", isActive: true, recordLockedAt: null })
+
+  // Su presupuesto o su control siguen en pie y volverían a programarle un mensaje a su mamá: no sale.
+  const rule = await run((tx) => setLine(tx, "org_a", f.actor, "seguimiento_presupuesto", { enabled: true }))
+  const [again] = await ownerDb
+    .insert(automationJob)
+    .values({ organizationId: "org_a", ruleId: rule.id, kind: "seguimiento_presupuesto", dedupeKey: randomUUID(), scheduledFor: new Date(), contactId: motherId, patientId })
+    .returning({ id: automationJob.id })
+  const key = Buffer.alloc(32, 7)
+  expect(await run((tx) => deliverJob(tx, "org_a", again!.id, new Date(), { secretsKey: key }))).toMatchObject({ outcome: "cancelado", detail: "Sus datos se borraron a su pedido" })
+  // Y un enlace que alguien le dé después no muestra nada: no se distingue de uno que no existe.
+  const later = await run((tx) => issuePersonalLink(tx, "org_a", { contactId: motherId, patientId }, { secretsKey: key }))
+  await expect(run((tx) => resolvePersonalLink(tx, "org_a", later.token))).rejects.toMatchObject({ status: 404 })
+})
+
 it("abrirla con motivo es solo leer por una hora; «vuelve a atenderse» la desbloquea entera", async () => {
   const { f, run, patientId, personId } = await patientWithHistory()
   const request = await run((tx) =>
@@ -213,4 +360,35 @@ it("abrirla con motivo es solo leer por una hora; «vuelve a atenderse» la desb
   expect(person).toMatchObject({ isActive: true, recordLockedAt: null })
   const patients = await run((tx) => listPatients(tx, "org_a", { limit: 100 }))
   expect(patients.items.map((p) => p.id)).toContain(patientId)
+})
+
+it("bloqueada no deja tarea con su nombre por su deuda ni por su atención sin firmar; si vuelve a atenderse sí, sin ofrecerle otra fecha", async () => {
+  const { f, run, patientId, personId } = await patientWithHistory()
+  const DAY = 86_400_000
+  const former = randomUUID()
+  await ownerDb.insert(user).values({ id: former, name: "Dr. Luis Paz", email: `${former}@example.test`, emailVerified: true })
+  // Su atención abierta queda de alguien que ya no atiende: es la que deja esa tarea.
+  await ownerDb.update(encounter).set({ professionalUserId: former, startedAt: new Date(Date.now() - 5 * DAY) }).where(eq(encounter.patientId, patientId))
+  await ownerDb.insert(patientCharge).values({ organizationId: "org_a", patientId, description: "Corona", amountCents: 50000, currency: "PEN", createdAt: new Date(Date.now() - 45 * DAY) })
+  for (const key of ["cobranza_vencida", "atenciones_sin_firmar", "cita_cancelada"]) {
+    const rule = await run((tx) => setLine(tx, "org_a", f.actor, key, { enabled: true }))
+    await ownerDb.update(automationRule).set({ enabledAt: new Date(Date.now() - 46 * DAY) }).where(eq(automationRule.id, rule.id))
+  }
+  const request = await run((tx) =>
+    createDataRequest(tx, "org_a", f.actor, patientId, { kind: "borrar", requesterContactId: personId, channel: "clinica" }),
+  )
+  await run((tx) => verifyDataRequest(tx, "org_a", f.actor, patientId, request.id, { how: "documento" }))
+  await run((tx) => eraseForDataRequest(tx, "org_a", f.actor, patientId, request.id))
+
+  const check = async () => {
+    await run((tx) => syncTeamLines(tx, "org_a", new Date()))
+    // Pasada la espera de la línea: su cita se canceló al borrar y esa cancelación no fue de ella.
+    await run((tx) => syncCancelledAppointments(tx, "org_a", new Date(Date.now() + 2 * 3_600_000)))
+    const jobs = await ownerDb.select({ kind: automationJob.kind }).from(automationJob).where(eq(automationJob.patientId, patientId))
+    return jobs.map((job) => job.kind).sort()
+  }
+  expect(await check()).toEqual([])
+
+  await run((tx) => openLockedRecord(tx, "org_a", f.actor, patientId, { reason: "vuelve" }))
+  expect(await check()).toEqual(["atenciones_sin_firmar", "cobranza_vencida"])
 })

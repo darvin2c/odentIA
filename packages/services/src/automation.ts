@@ -86,7 +86,7 @@ import { NOT_RECOVERY_KINDS, patientHasItsAppointment } from "./saas-actions.js"
 import { getAgentSpendGate } from "./saas-terms.js"
 import { isWritingTime, nextWritingDay, sendTimeFor, writingScheduleOf } from "./writing-hours.js"
 import type { Storage } from "./storage.js"
-import { joinPatientPerson, patientPerson } from "./patient-identity.js"
+import { isPatientLocked, joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { productHooks } from "./products.js"
 
 /**
@@ -1022,6 +1022,17 @@ export function notYetQueued(orgId: string, prefix: string, idColumn: unknown) {
     where j.organization_id = ${orgId} and j.dedupe_key = ${prefix + ":"} || ${idColumn}::text)`
 }
 
+/**
+ * El paciente no tiene la historia bloqueada: de ella no se programa nada (ADR 0080).
+ * Filtra aquí y no al enviar para que no salga en las listas de la línea y, si
+ * vuelve a atenderse, su presupuesto o su control se programen como siempre.
+ */
+function patientNotLocked(patientColumn: unknown) {
+  return sql`not exists (select 1 from patient p
+    join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
+    where p.id = ${patientColumn} and pp.record_locked_at is not null)`
+}
+
 /** La línea, si está prendida; null si está apagada o nunca se prendió. */
 async function enabledLine(tx: Db, orgId: string, kind: AutomationKind): Promise<RuleRow | null> {
   const rule = await findLineRule(tx, orgId, kind)
@@ -1193,6 +1204,7 @@ export async function syncBudgetFollowUps(tx: Db, orgId: string, now: Date): Pro
         lte(treatmentBudget.presentedAt, cutoff),
         gte(treatmentBudget.presentedAt, since),
         notYetQueued(orgId, "seguimiento_presupuesto", treatmentBudget.id),
+        patientNotLocked(treatmentBudget.patientId),
       ),
     )
     .orderBy(asc(treatmentBudget.presentedAt), asc(treatmentBudget.id))
@@ -1308,6 +1320,7 @@ export async function syncVisitFollowUps(tx: Db, orgId: string, now: Date): Prom
         gte(appointment.endsAt, oldest),
         gte(appointment.startsAt, activeSince(rule)),
         notYetQueued(orgId, "seguimiento_no_asistencia", appointment.id),
+        patientNotLocked(appointment.patientId),
       ),
     )
     .orderBy(asc(appointment.endsAt), asc(appointment.id))
@@ -1405,6 +1418,8 @@ export async function syncCancelledAppointments(tx: Db, orgId: string, now: Date
         eq(appointment.status, "cancelada"),
         sql`${CANCELLED_BY_PERSON} between ${(since > oldest ? since : oldest).toISOString()}::timestamptz and ${cutoff.toISOString()}::timestamptz`,
         notYetQueued(orgId, "cita_cancelada", appointment.id),
+        // Si canceló y después pidió borrar sus datos, tampoco se le invita a otra.
+        patientNotLocked(appointment.patientId),
         // «Recordar la cita» ya le avisó la cancelación con la misma pregunta: no se repite.
         sql`not exists (select 1 from automation_job a where a.organization_id = ${orgId}
           and a.appointment_id = ${appointment.id} and a.kind = 'aviso_cita_cancelada' and a.status = 'enviado')`,
@@ -1452,6 +1467,7 @@ export async function syncCheckupReminders(tx: Db, orgId: string, now: Date): Pr
         gte(clinicalFollowUp.dueAt, now),
         lte(clinicalFollowUp.dueAt, horizon),
         notYetQueued(orgId, "recordatorio_control", clinicalFollowUp.id),
+        patientNotLocked(clinicalFollowUp.patientId),
       ),
     )
     .orderBy(asc(clinicalFollowUp.dueAt), asc(clinicalFollowUp.id))
@@ -1501,6 +1517,8 @@ const CONTROL_STATUS_WORDS: Record<string, string> = {
   programado: "agendado",
 }
 
+const LOCKED_RECORD = "Sus datos se borraron a su pedido"
+
 /** Verifica que el motivo del caso siga en pie; si ya se resolvió, no se hace nada. */
 async function stillValid(
   tx: Db,
@@ -1508,6 +1526,9 @@ async function stillValid(
   job: JobRow,
   now: Date,
 ): Promise<{ valid: boolean; reason?: string }> {
+  // De una historia bloqueada no se le escribe a nadie, aunque su presupuesto o su control sigan en pie
+  // y quien habla por ella siga activa (ADR 0080). Los buscadores ya no la programan; esto cubre lo que estaba programado.
+  if (job.patientId && (await isPatientLocked(tx, orgId, job.patientId))) return { valid: false, reason: LOCKED_RECORD }
   if (job.kind === "recordatorio_cita" && job.appointmentId) {
     const [appt] = await tx
       .select({ status: appointment.status, startsAt: appointment.startsAt })

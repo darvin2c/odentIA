@@ -36,6 +36,8 @@ export interface ErasurePreview {
   opportunities: number
   tasks: number
   notes: number
+  /** Sus personas vinculadas: lo que tienen por su cuenta, como sus conversaciones, es suyo y no se borra. */
+  linkedPeople: number
   /** Citas por venir: se cancelan sin avisarle. */
   futureAppointments: Array<{ id: string; startsAt: string }>
   /** Lo que debe, por moneda: se mantiene en Caja. */
@@ -64,14 +66,35 @@ async function personOf(tx: Db, orgId: string, patientId: string) {
 /** Lo que se borra y lo que hay que saber antes de confirmar (tablero 6). */
 export async function erasurePreview(tx: Db, orgId: string, patientId: string): Promise<ErasurePreview> {
   const person = await personOf(tx, orgId, patientId)
-  const counts = await tx.execute<{ conversations: number; messages: number; opportunities: number; tasks: number; notes: number }>(sql`
+  // Lo mismo que borra `erase_person_data`: también lo de este paciente que lleva quien habla por él.
+  const counts = await tx.execute<{
+    conversations: number
+    messages: number
+    opportunities: number
+    tasks: number
+    notes: number
+    linkedPeople: number
+  }>(sql`
+    with own_opportunity as (
+      select id from opportunity
+      where organization_id = ${orgId} and (contact_id = ${person.personId} or patient_id = ${patientId})
+    ), own_conversation as (
+      select id from conversation where organization_id = ${orgId} and contact_id = ${person.personId}
+    )
     select
-      (select count(*)::int from conversation where organization_id = ${orgId} and contact_id = ${person.personId}) as conversations,
-      (select count(*)::int from message m join conversation v on v.id = m.conversation_id
-        where v.organization_id = ${orgId} and v.contact_id = ${person.personId}) as messages,
-      (select count(*)::int from opportunity where organization_id = ${orgId} and contact_id = ${person.personId}) as opportunities,
-      (select count(*)::int from task where organization_id = ${orgId} and contact_id = ${person.personId}) as tasks,
-      (select count(*)::int from crm_note where organization_id = ${orgId} and contact_id = ${person.personId}) as notes`)
+      (select count(*)::int from own_conversation) as conversations,
+      (select count(*)::int from message where conversation_id in (select id from own_conversation)) as messages,
+      (select count(*)::int from own_opportunity) as opportunities,
+      (select count(*)::int from task where organization_id = ${orgId} and (
+        contact_id = ${person.personId} or patient_id = ${patientId}
+        or opportunity_id in (select id from own_opportunity)
+        or conversation_id in (select id from own_conversation)
+        or id in (select task_id from agent_handoff where organization_id = ${orgId} and task_id is not null
+          and (contact_id = ${person.personId} or conversation_id in (select id from own_conversation))))) as tasks,
+      (select count(*)::int from crm_note where organization_id = ${orgId} and (contact_id = ${person.personId}
+        or opportunity_id in (select id from own_opportunity))) as notes,
+      (select count(*)::int from patient_contact where organization_id = ${orgId} and patient_id = ${patientId}
+        and contact_id <> ${person.personId}) as "linkedPeople"`)
   const row = counts[0]!
   const future = await tx
     .select({ id: appointment.id, startsAt: appointment.startsAt })
@@ -92,6 +115,7 @@ export async function erasurePreview(tx: Db, orgId: string, patientId: string): 
     opportunities: row.opportunities,
     tasks: row.tasks,
     notes: row.notes,
+    linkedPeople: row.linkedPeople,
     futureAppointments: future.map((a) => ({ id: a.id, startsAt: a.startsAt.toISOString() })),
     balances: account.byCurrency.filter((b) => b.saldo > 0).map((b) => ({ currency: b.currency, cents: b.saldo })),
   }
@@ -115,7 +139,8 @@ export function erasureResolution(preview: ErasurePreview): string {
   const appointments = preview.futureAppointments.length
     ? ` Se cancelaron ${plural(preview.futureAppointments.length, "cita", "citas")} sin avisarle.`
     : ""
-  return `Se borraron ${parts.join(", ")} y lo que el agente recordaba de ella.${appointments} La historia clínica, los cobros y los comprobantes quedaron bloqueados.`
+  const others = preview.linkedPeople ? " Lo que sus personas vinculadas tienen por su cuenta, como sus conversaciones, no se borró: es de ellas." : ""
+  return `Se borraron ${parts.join(", ")} y lo que el agente recordaba de ella.${appointments} La historia clínica, los cobros y los comprobantes quedaron bloqueados.${others}`
 }
 
 /**
@@ -141,7 +166,8 @@ export async function eraseForDataRequest(
   const preview = await erasurePreview(tx, orgId, patientId)
   for (const item of preview.futureAppointments)
     await setAppointmentStatus(tx, orgId, actorUserId, item.id, "cancelada", {
-      cancelReason: "paciente",
+      // No canceló esa cita: «paciente» le ofrecería otra fecha si vuelve a atenderse esa semana.
+      cancelReason: "otro",
       cancelNote: "Pidió borrar sus datos",
       notice: false,
     })

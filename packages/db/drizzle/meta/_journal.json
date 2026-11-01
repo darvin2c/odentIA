@@ -274,6 +274,13 @@
       "when": 1793543992348,
       "tag": "0038_historia_de_la_firma_por_enlace",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1793547239239,
+      "tag": "0039_lo_del_paciente_con_responsable",
+      "breakpoints": true
     }
   ]
 }

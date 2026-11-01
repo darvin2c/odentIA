@@ -407,6 +407,8 @@ async function unsignedEncounters(tx: Db, orgId: string, zone: OrgLocale, days: 
     join patient p on p.id = e.patient_id and p.organization_id = e.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     left join "user" u on u.id = e.professional_user_id
     where e.organization_id = ${orgId} and e.status = 'borrador'
+      -- Una historia bloqueada no sale en listas (ADR 0080); si vuelve a atenderse, aparece.
+      and pp.record_locked_at is null
       and e.started_at < now() - make_interval(days => ${days})
       -- Quien la lleva y sigue atendiendo ya la tiene en «Te espera» con lo que
       -- le falta (staleEncounter): la línea no le deja otra tarea igual.
@@ -461,7 +463,9 @@ async function overdueCollections(tx: Db, orgId: string, zone: OrgLocale, days: 
       from patient_charge c
       join patient p on p.id = c.patient_id and p.organization_id = c.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
       left join applied a on a.charge_id = c.id
+      -- Lo cobrado se guarda, pero una historia bloqueada no deja una tarea con su nombre (ADR 0080).
       where c.organization_id = ${orgId} and c.voided_at is null and c.amount_cents > coalesce(a.applied, 0)
+        and pp.record_locked_at is null
       group by p.id, pp.display_name, p.organization_id, c.currency
       having min(c.created_at) < now() - make_interval(days => ${days})
         ${fresh(scope, sql`(p.id::text || ':' || c.currency || ':' || to_char(min(c.created_at), 'YYYY-MM-DD'))`, sql`min(c.created_at) + make_interval(days => ${days})`)}

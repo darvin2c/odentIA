@@ -895,6 +895,11 @@ function ErasureSummary({ preview, locale }: { preview: ErasurePreview; locale: 
           No sale en búsquedas, agenda, listas ni reportes, y el agente no la ve. Solo Administración la abre, con motivo.
         </p>
       </div>
+      {preview.linkedPeople ? (
+        <p className="text-muted-foreground">
+          Lo que sus personas vinculadas tienen por su cuenta, como sus conversaciones, no se borra: es de ellas.
+        </p>
+      ) : null}
       {appointments.length || debts.length ? (
         <p className="rounded-lg bg-warning-soft p-3 text-warning">
           <strong>Antes de borrar: </strong>
