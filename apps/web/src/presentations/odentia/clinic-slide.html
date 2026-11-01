@@ -1,0 +1,506 @@
+<style>
+/* La v2 de la presentación: casi todo se explica en una clínica en maqueta, llena de gente que se puede tocar.
+   La escena va detrás de los momentos (clinic-3d.js), lo que pasa lo decide clinic-sim.js y lo que se lee está
+   aquí. Cada momento es un tema y con qué trabaja la clínica: las flechas los recorren en orden y los botones
+   saltan a cualquiera. Sin 3D, las mismas fichas quedan en lista. */
+.slide.cl { isolation: isolate; cursor: default; --pc: var(--warn); }
+.slide.cl.cl-hover { cursor: pointer; }
+.slide.cl.cl-sc-con { --pc: var(--sky); }
+.cl-gl { position: absolute; inset: 0; z-index: -1; pointer-events: none; -webkit-mask-image: linear-gradient(90deg, transparent 31%, #000 37%); mask-image: linear-gradient(90deg, transparent 31%, #000 37%); }
+.cl-gl canvas { position: absolute; inset: 0; width: 1920px !important; height: 1080px !important; display: block; }
+.cl .layer { padding: 112px 0 150px 104px; gap: 20px; }
+.cl .layer.overlay { padding: 0; background: rgba(6,19,24,.72); backdrop-filter: blur(5px); }
+.cl-copy { width: 500px; display: flex; flex-direction: column; gap: 16px; }
+.cl .tag { font-size: 21px; }
+.cl-copy .h2 { font-size: 56px; }
+.cl-copy .lead { font-size: 24px; line-height: 1.38; }
+.cl-copy .clock { font-size: 92px; line-height: 1; font-weight: 800; letter-spacing: -.03em; }
+.cl-tap { font-family: var(--agent); font-size: 17px; line-height: 1.4; color: var(--on); }
+.cl-tap::before { content: ""; display: inline-block; width: 11px; height: 11px; margin-right: 9px; border-radius: 50%; background: var(--pc); vertical-align: 1px; }
+.cl-big b { display: block; font-size: 62px; line-height: 1.05; font-weight: 800; letter-spacing: -.02em; color: var(--warn); font-variant-numeric: tabular-nums; }
+.cl-big.ok b { color: var(--mint); }
+.cl-big span { font-family: var(--agent); font-size: 16px; color: var(--on-2); }
+.cl-who-does { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; font-size: 20px; line-height: 1.3; }
+.cl-who-does dt { font-family: var(--agent); font-size: 15px; letter-spacing: .04em; text-transform: uppercase; color: var(--on-3); padding-top: 3px; }
+.cl-who-does dd { margin: 0; font-weight: 700; }
+.cl-who-does small { display: block; font-family: var(--agent); font-size: 14px; font-weight: 500; color: var(--on-3); }
+.cl .switches { gap: 7px; }
+.cl .sw { padding: 7px 14px; font-size: 18px; gap: 12px; border-radius: 12px; }
+.cl .sw .who { font-size: 15px; }
+.cl .sw .toggle { transform: scale(.62); transform-origin: left center; margin-right: -26px; }
+
+/* Los botones: qué se mira y con qué trabaja la clínica. */
+.cl-bar { position: absolute; left: 640px; right: 36px; top: 18px; z-index: 7; display: none; flex-direction: column; gap: 7px; align-items: flex-start; }
+.cl-live-on .cl-bar { display: flex; }
+.cl-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cl-row > span { font-family: var(--agent); font-size: 14px; letter-spacing: .05em; text-transform: uppercase; color: var(--on-3); margin-right: 4px; }
+.cl-b { font: 600 16px var(--font); color: var(--on-2); background: rgba(9,28,35,.86); border: 1px solid var(--line-2); border-radius: 999px; padding: 6px 13px; cursor: pointer; white-space: nowrap; }
+.cl-b:hover { color: var(--on); border-color: var(--on-3); }
+.cl-b[aria-pressed="true"] { color: #06222a; background: var(--on); border-color: var(--on); }
+.cl-b.sc[data-sc="hoy"][aria-pressed="true"], .cl-b.sc[data-sc="bot"][aria-pressed="true"], .cl-b.sc[data-sc="crm"][aria-pressed="true"] { background: var(--warn); border-color: var(--warn); }
+.cl-b.sc[data-sc="con"][aria-pressed="true"] { background: var(--sky); border-color: var(--sky); }
+.cl-b:focus-visible { outline: 3px solid var(--on); outline-offset: 2px; }
+.cl-guide { margin-left: 14px; color: var(--on); border-color: var(--sky); }
+.cl-row > .cl-voice-note { display: none; font-family: var(--agent); font-size: 13px; letter-spacing: 0; text-transform: none; color: var(--on-3); margin: 0 0 0 6px; }
+.cl-guide[aria-pressed="true"] + .cl-voice-note { display: inline; }
+@media (pointer: coarse) { .cl-b { padding: 10px 18px; font-size: 19px; } }
+
+/* Los contadores: salen de la simulación, y se dice. */
+.cl-hud { position: absolute; left: 104px; top: 690px; width: 520px; display: none; flex-direction: column; gap: 5px; z-index: 3; pointer-events: none; }
+.cl-live-on.cl-hud-on .cl-hud { display: flex; }
+.cl-nums { display: flex; gap: 24px; }
+.cl-num { display: flex; flex-direction: column; }
+.cl-num b { font-size: 46px; line-height: 1.05; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.cl-num span { font-family: var(--agent); font-size: 13px; letter-spacing: .05em; text-transform: uppercase; color: var(--on-3); white-space: nowrap; }
+.cl-num.bad b { color: var(--warn); }
+.cl-num.good b { color: var(--mint); }
+.cl-num.back { display: none; }
+.cl-sc-con .cl-num.back { display: flex; }
+.cl-num.back b { color: var(--amber); }
+.cl-sim { font-size: 14px; color: var(--on-3); }
+.cl-antes { font-size: 18px; line-height: 1.3; color: var(--on-2); display: none; }
+.cl-sc-con .cl-antes { display: block; }
+.cl-antes b { color: var(--warn); font-variant-numeric: tabular-nums; }
+
+/* Lo pegado a la maqueta */
+.cl-names, .cl-pins { position: absolute; inset: 0; pointer-events: none; }
+.cl-names [hidden] { display: none; }
+.cl-at { position: absolute; left: 0; top: 0; transform: translate(-50%, -100%); white-space: nowrap; z-index: 2; }
+.slide.cl:not(.cl-ready):not(.cl-flat) .cl-at { visibility: hidden; }
+.cl-room { font-family: var(--agent); font-size: 14px; letter-spacing: .1em; text-transform: uppercase; color: var(--on-3); background: rgba(9,28,35,.6); border-radius: 6px; padding: 2px 8px; transform: translate(-50%, -50%); }
+.cl-pill { display: inline-flex; align-items: center; gap: 7px; font-size: 17px; font-weight: 700; color: var(--on); background: rgba(9,28,35,.93); border: 1.5px solid var(--warn); border-radius: 999px; padding: 3px 11px; font-variant-numeric: tabular-nums; }
+.cl-pill.ok { border-color: var(--mint); }
+.cl-pill.ok::before { content: "✓"; color: var(--mint); }
+.cl-pill.amb { border-color: var(--amber); }
+.cl-pill.calm { border-color: var(--on-3); }
+.cl-say { display: flex; flex-direction: column; gap: 3px; width: max-content; max-width: 340px; white-space: normal; font-size: 19px; font-weight: 600; line-height: 1.26; color: #06222a; background: var(--c); border-radius: 16px 16px 16px 4px; padding: 8px 12px; box-shadow: 0 12px 28px -14px rgba(0,0,0,.8); opacity: 0; transition: opacity .3s; margin-top: -8px; }
+.cl-say.on { opacity: 1; }
+.cl-say small { font-family: var(--agent); font-size: 13px; font-weight: 500; letter-spacing: .02em; opacity: .75; }
+.cl-say.hum { color: #1b1712; background: #e9e4da; border-radius: 16px 16px 4px 16px; }
+.cl .p4-lab b { font-size: 22px; text-shadow: none; background: rgba(9,28,35,.88); border-radius: 9px; padding: 3px 11px; }
+
+/* Los puntos que se pueden tocar */
+.cl-pin { position: absolute; left: 0; top: 0; width: 38px; height: 38px; margin: -19px 0 0 -19px; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; pointer-events: auto; display: none; }
+.cl-pin.show { display: block; }
+.slide.cl:not(.cl-live-on) .cl-pin { display: none; }
+.cl-pin::before { content: ""; position: absolute; inset: 12px; border-radius: 50%; background: var(--pc); box-shadow: 0 0 0 3px rgba(6,19,24,.6); }
+.cl-pin::after { content: ""; position: absolute; inset: 12px; border-radius: 50%; border: 2px solid var(--pc); animation: clpin 2.6s ease-out infinite; animation-delay: var(--pd, 0s); }
+.cl-pin.sel::before { background: var(--on); }
+.cl-pin:focus-visible { outline: 3px solid var(--on); outline-offset: 1px; }
+@media (pointer: coarse) { .cl-pin { width: 92px; height: 92px; margin: -46px 0 0 -46px; } .cl-pin::before, .cl-pin::after { inset: 39px; } }
+@keyframes clpin { from { transform: scale(1); opacity: .9; } to { transform: scale(2.8); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .cl-pin::after { animation: none; opacity: 0; } }
+.cl-tip { position: absolute; left: 0; top: 0; font-family: var(--agent); font-size: 16px; color: var(--on); background: rgba(6,19,24,.94); border-radius: 7px; padding: 3px 9px; white-space: nowrap; pointer-events: none; transform: translate(-50%, -100%); margin-top: -14px; z-index: 5; display: none; }
+.cl-tip.on { display: block; }
+
+/* La ficha que se abre al tocar */
+.cl-card { position: absolute; left: 0; top: 0; width: 430px; z-index: 6; display: none; flex-direction: column; gap: 8px; padding: 16px 22px 20px; border-radius: 18px; background: rgba(6,19,24,.97); border: 1.5px solid var(--cc, var(--warn)); box-shadow: 0 24px 60px -16px rgba(0,0,0,.8); cursor: default; white-space: normal; }
+.cl-card.on { display: flex; }
+.cl-card article { display: contents; }
+.cl-who { font-family: var(--agent); font-size: 15px; letter-spacing: .07em; text-transform: uppercase; color: var(--cc, var(--warn)); padding-right: 28px; }
+.cl-card h3, .cl-cards h3 { font-size: 27px; line-height: 1.16; font-weight: 800; letter-spacing: -.01em; }
+.cl-card p, .cl-cards p { font-size: 20px; line-height: 1.36; color: var(--on-2); }
+.cl-card .cl-now, .cl-cards .cl-now { font-family: var(--agent); font-size: 18px; color: var(--on); }
+.cl-now b { color: var(--cc, var(--warn)); font-variant-numeric: tabular-nums; }
+.cl-card .cl-was, .cl-cards .cl-was { font-size: 18px; color: var(--on-3); }
+.cl-was s { text-decoration-color: var(--warn); text-decoration-thickness: 2px; }
+.cl-close { position: absolute; right: 8px; top: 6px; width: 40px; height: 40px; border: 0; background: none; color: var(--on-2); font: 400 28px var(--font); cursor: pointer; border-radius: 10px; }
+.cl-close:hover { color: var(--on); }
+.cl-close:focus-visible, .cl-see:focus-visible { outline: 2px solid var(--on); }
+.cl-see { align-self: flex-start; margin-top: 4px; font: 700 17px var(--font); color: #06222a; background: var(--cc, var(--sky)); border: 0; border-radius: 999px; padding: 7px 15px; cursor: pointer; }
+
+/* La pantalla de muestra que abre un objeto: la misma ventana de «Todo lo de siempre». */
+.cl-shot { position: absolute; inset: 0; z-index: 8; pointer-events: none; }
+.cl-shot.open { pointer-events: auto; }
+.cl-shot.open .mscrim { opacity: 1; visibility: visible; pointer-events: auto; transition: opacity .35s; }
+.cl-shot.open .msc { opacity: 1; visibility: visible; pointer-events: auto; transform: none; transition: opacity .35s, transform .55s cubic-bezier(.2,.8,.2,1); }
+
+/* De pie la cámara se acerca y todo se lee más grande. */
+.stacked .cl-room, .stacked .cl-bar { display: none; }
+.stacked .cl-gl { -webkit-mask-image: linear-gradient(90deg, transparent 26%, #000 40%); mask-image: linear-gradient(90deg, transparent 26%, #000 40%); }
+.stacked .cl-card { width: 960px; gap: 16px; padding: 34px 44px 40px; border-radius: 34px; }
+.stacked .cl-card h3 { font-size: 56px; }
+.stacked .cl-card p { font-size: 42px; }
+.stacked .cl-who { font-size: 32px; }
+.stacked .cl-card .cl-now, .stacked .cl-card .cl-was { font-size: 38px; }
+.stacked .cl-close { width: 96px; height: 96px; font-size: 64px; }
+.stacked .cl-see { font-size: 38px; padding: 14px 30px; }
+.stacked .cl-pin { width: 110px; height: 110px; margin: -55px 0 0 -55px; }
+.stacked .cl-pin::before, .stacked .cl-pin::after { inset: 34px; }
+.stacked .cl-hud { top: 780px; }
+
+/* Sin 3D: las fichas, en lista. */
+.cl-cards { display: none; }
+.cl-flat .cl-gl, .cl-flat .cl-names, .cl-flat .cl-pins, .cl-flat .cl-hud, .cl-flat .cl-bar { display: none; }
+.cl-flat .cl-cards { position: absolute; left: 660px; top: 70px; width: 1190px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px 34px; z-index: 2; pointer-events: none; }
+.cl-flat .cl-cards article { display: flex; flex-direction: column; gap: 3px; }
+.cl-flat .cl-cards h3 { font-size: 22px; }
+.cl-flat .cl-cards p { font-size: 17px; }
+.cl-flat .cl-cards .cl-now, .cl-flat .cl-cards [data-story] { display: none; }
+.cl-flat .cl-who { font-size: 13px; }
+.cl-flat .layer[data-sc="hoy"].cur ~ .cl-cards [data-when]:not([data-when="sin"]),
+.cl-flat .layer[data-sc="con"].cur ~ .cl-cards [data-when]:not([data-when="con"]),
+.cl-flat .layer[data-sc="bot"].cur ~ .cl-cards [data-when]:not([data-when="bot"]),
+.cl-flat .layer[data-sc="crm"].cur ~ .cl-cards [data-when]:not([data-when="crm"]) { display: none; }
+.cl-flat .cl-cards .cl-was { font-size: 15px; }
+</style>
+<section class="slide cl" aria-label="Tus agentes">
+  <!-- Todo el día -->
+  <div class="layer prob" data-scene="clinic" data-step="0" data-topic="dia" data-sc="hoy" data-hold="11000">
+    <span class="tag in">[ Hoy · Todo el día ]</span>
+    <div class="cl-copy">
+      <h2 class="h2 in" style="--d:.1s">Llegan. Esperan. Se van.</h2>
+      <p class="lead in" style="--d:.3s">Mensajes sin responder, filas y papeles por todas partes. Tu equipo hace lo que puede, y nadie ve a quién está perdiendo.</p>
+      <p class="cl-tap in" style="--d:.6s">Toca a cualquier persona o cosa para ver qué le pasa.</p>
+    </div>
+  </div>
+  <div class="layer" data-scene="clinic" data-step="1" data-topic="dia" data-sc="con" data-hold="13000">
+    <span class="tag in" style="color:var(--sky)">[ Con odentIA · Todo el día ]</span>
+    <div class="cl-copy">
+      <h2 class="h2 in" style="--d:.1s">Nadie se queda esperando.</h2>
+      <p class="lead in" style="--d:.3s"><b class="c-sky">Sofi</b> responde cada mensaje y agenda. Tu equipo atiende a quien tiene al frente.</p>
+      <p class="cl-tap in" style="--d:.6s">Toca lo mismo de antes: mira qué cambió.</p>
+    </div>
+  </div>
+
+  <!-- La noche -->
+  <div class="layer prob" data-scene="clinic" data-step="2" data-topic="noche" data-sc="hoy" data-hold="21000">
+    <span class="tag in">[ Hoy · De noche ]</span>
+    <div class="cl-copy">
+      <div class="clock num in" style="--d:.1s" data-clock>22:47</div>
+      <h2 class="h2 in" style="--d:.2s">Tu clínica cerró. Tus pacientes siguen escribiendo.</h2>
+      <p class="lead in" style="--d:.4s">A Lucía le duele una muela y te escribe a las 22:47. Nadie le contesta. Otra clínica sí.</p>
+    </div>
+  </div>
+  <div class="layer" data-scene="clinic" data-step="3" data-topic="noche" data-sc="con" data-hold="24000">
+    <span class="tag in" style="color:var(--sky)">[ Con odentIA · De noche ]</span>
+    <div class="cl-copy">
+      <div class="clock num in" style="--d:.1s; color:var(--sky)" data-clock>22:47</div>
+      <h2 class="h2 in" style="--d:.2s">La misma noche. <span class="c-sky">Sofi</span> le contesta a cada uno.</h2>
+      <p class="lead in" style="--d:.4s">Respuesta en segundos, con horarios reales, y la cita en tu agenda. Lo que necesita a una persona espera con su resumen.</p>
+    </div>
+  </div>
+
+  <!-- El mostrador -->
+  <div class="layer prob" data-scene="clinic" data-step="4" data-topic="mostrador" data-sc="hoy" data-hold="11000">
+    <span class="tag in">[ Hoy · El mostrador ]</span>
+    <div class="cl-copy">
+      <h2 class="h2 in" style="--d:.1s">Lucía espera mientras la buscas en seis lugares.</h2>
+      <p class="lead in" style="--d:.3s">Tres fichas de la misma persona, porque escribió por Instagram y siguió por WhatsApp. Y si no lo escribes exacto, no aparece.</p>
+      <div class="cl-big in" style="--d:.5s"><b data-big>0:00</b><span>Lucía esperando en el mostrador · ejemplo</span></div>
+    </div>
+  </div>
+  <div class="layer" data-scene="clinic" data-step="5" data-topic="mostrador" data-sc="con" data-hold="10000">
+    <span class="tag in" style="color:var(--sky)">[ Con odentIA · El mostrador ]</span>
+    <div class="cl-copy">
+      <h2 class="h2 in" style="--d:.1s">Una persona, una historia.</h2>
+      <p class="lead in" style="--d:.3s">Escriba por donde escriba, todos los canales llegan a la misma persona. Una búsqueda, y todo lo de Lucía está en un solo lugar.</p>
+      <div class="cl-big ok in" style="--d:.5s"><b data-big>0:00</b><span>y Lucía sale atendida · ejemplo</span></div>
+    </div>
+  </div>
+
+  <!-- La consulta -->
+  <div class="layer prob" data-scene="clinic" data-step="6" data-topic="consulta" data-sc="hoy" data-hold="10000">
+    <span class="tag in">[ Hoy · La consulta ]</span>
+    <div class="cl-copy">
+      <h2 class="h2 in" style="--d:.1s">La historia se escribe a las 8 de la noche, con hambre y de memoria.</h2>
+      <p class="lead in" style="--d:.3s">Después de catorce pacientes, ¿qué le dijiste al de las 10:30?</p>
+      <div class="cl-big in" style="--d:.5s"><b data-big>14</b><span>notas por escribir · ejemplo</span></div>
+    </div>
+  </div>
+  <div class="layer" data-scene="clinic" data-step="7" data-topic="consulta" data-sc="con" data-hold="11000">
+    <span class="tag in" style="color:var(--mint)">[ Con odentIA · Agente Clío ]</span>
+    <div class="cl-copy">
+      <h2 class="h2 in" style="--d:.1s">Dictas en la consulta. La nota queda lista para confirmar.</h2>
+      <p class="lead in" style="--d:.3s"><b class="c-mint">Clío</b> propone la nota, el diagnóstico y el plan. Nada entra a la historia sin la confirmación del odontólogo.</p>
+      <div class="cl-big ok in" style="--d:.5s"><b data-big>14</b><span>notas por escribir · ejemplo</span></div>
+    </div>
+  </div>
+
+  <!-- Los que se fueron -->
+  <div class="layer prob" data-scene="clinic" data-step="8" data-topic="fueron" data-sc="hoy" data-hold="9000">
+    <span class="tag in">[ Hoy · Los que se fueron ]</span>
+    <div class="cl-copy">
+      <h2 class="h2 in" style="--d:.1s">Se fueron, y nadie sabe quiénes son.</h2>
+      <p class="lead in" style="--d:.3s">Tu agenda tiene huecos, y ellos querían esa hora. Nadie los vuelve a buscar, porque no están en ninguna lista.</p>
+      <p class="cl-tap in" style="--d:.6s">Toca a cualquiera: cada uno se fue por algo.</p>
+    </div>
+  </div>
+  <div class="layer" data-scene="clinic" data-step="9" data-topic="fueron" data-sc="con" data-hold="17000">
+    <span class="tag in" style="color:var(--amber)">[ Con odentIA · Los recuperamos ]</span>
+    <div class="cl-copy">
+      <h2 class="h2 in" style="--d:.1s"><span class="c-amber">Argos</span> los encuentra. <span class="c-sky">Sofi</span> los trae de vuelta.</h2>
+      <p class="lead in" style="--d:.3s">Quien no volvió a su control, dejó un presupuesto en pausa o faltó a su cita. No todos vuelven, pero ya sabes quiénes son y qué pasó con cada uno.</p>
+      <p class="cl-tap in" style="--d:.6s">Argos solo escribe si tú prendiste esa línea.</p>
+    </div>
+  </div>
+
+  <!-- Dirección -->
+  <div class="layer prob" data-scene="clinic" data-step="10" data-topic="direccion" data-sc="hoy" data-hold="10000">
+    <span class="tag in">[ Hoy · Dirección ]</span>
+    <div class="cl-copy">
+      <h2 class="h2 in" style="--d:.1s">Fin de mes: un día entero armando un Excel que nadie entiende.</h2>
+      <p class="lead in" style="--d:.3s">Cifras que no cuadran. Y cuando por fin está listo, no dice qué hacer.</p>
+      <div class="cl-big in" style="--d:.5s"><b data-big>0 h 00 min</b><span>armando el reporte del mes · ejemplo</span></div>
+    </div>
+  </div>
+  <div class="layer" data-scene="clinic" data-step="11" data-topic="direccion" data-sc="con" data-hold="11000">
+    <span class="tag in" style="color:var(--amber)">[ Con odentIA · Tú tienes el control ]</span>
+    <div class="cl-copy">
+      <h2 class="h2 in" style="--d:.1s">Le preguntas a <span class="c-amber">Argos</span>. Tú decides.</h2>
+      <p class="lead in" style="--d:.3s">Él arma el reporte con las cifras de tu clínica. Y cada cosa que hace un agente es un interruptor tuyo.</p>
+      <div class="switches">
+        <div class="sw lit in" style="--d:.5s; --c:var(--sky)"><span class="toggle"></span>Agendar citas<span class="who">Sofi</span></div>
+        <div class="sw lit in" style="--d:.6s; --c:var(--sky)"><span class="toggle"></span>Reenviar presupuestos<span class="who">Sofi</span></div>
+        <div class="sw lit in" style="--d:.7s; --c:var(--amber)"><span class="toggle"></span>Avisar un control<span class="who">Argos</span></div>
+        <div class="sw lit in" style="--d:.8s; --c:var(--mint)"><span class="toggle"></span>Proponer la nota<span class="who">Clío</span></div>
+      </div>
+      <p class="cl-tap in" style="--d:1s">Si no sabe, te lo pasa con el resumen. Lo clínico lo firma el odontólogo.</p>
+    </div>
+  </div>
+
+  <!-- ¿No es lo mismo? Lo usual del mercado, sin nombrar a nadie y sin cifras contra nadie. -->
+  <div class="layer prob" data-scene="clinic" data-step="12" data-topic="dia" data-sc="bot" data-hold="12000">
+    <span class="tag in">[ ¿No es lo mismo que un chatbot? ]</span>
+    <div class="cl-copy">
+      <h2 class="h2 in" style="--d:.1s">Responde. Y espera a que le escriban.</h2>
+      <p class="lead in" style="--d:.3s">Los mensajes pesan menos, pero lo demás sigue igual: tu equipo agenda y anota, y nadie va a buscar a los que se fueron.</p>
+      <dl class="cl-who-does in" style="--d:.5s">
+        <dt>Trabaja</dt><dd>Tu equipo<small>Agenda y lo anota</small></dd>
+        <dt>Cobra</dt><dd>Por mensaje o por mes<small>Vuelva o no el paciente</small></dd>
+      </dl>
+    </div>
+  </div>
+  <div class="layer prob" data-scene="clinic" data-step="13" data-topic="dia" data-sc="crm" data-hold="13000">
+    <span class="tag in">[ ¿No es lo mismo que un CRM? ]</span>
+    <div class="cl-copy">
+      <h2 class="h2 in" style="--d:.1s">Todo queda anotado. Nadie lo hace.</h2>
+      <p class="lead in" style="--d:.3s">Una pantalla para cada cosa y ninguna habla con otra: tu equipo copia de una a otra. Los que se fueron quedan como pendientes.</p>
+      <dl class="cl-who-does in" style="--d:.5s">
+        <dt>Trabaja</dt><dd>Tu equipo<small>Lo sigue a mano</small></dd>
+        <dt>Cobra</dt><dd>Por usuario, cada mes<small>Vuelva o no el paciente</small></dd>
+      </dl>
+    </div>
+  </div>
+  <div class="layer overlay" data-scene="clinic" data-step="14" data-topic="tesis" data-sc="con" data-hold="6000">
+    <div class="thesis">
+      <span class="tag in">[ La diferencia ]</span>
+      <h2 class="h1 in" style="--d:.15s"><span>Ellos guardan lo que pasó.</span><span class="accent">odentIA hace que pase.</span></h2>
+    </div>
+  </div>
+  <div class="layer" data-scene="clinic" data-step="15" data-topic="fin" data-sc="con" data-hold="9000">
+    <span class="tag in" style="color:var(--mint)">[ Con odentIA · Lo que cambió ]</span>
+    <div class="cl-copy">
+      <h2 class="h2 in" style="--d:.1s">Tu equipo vuelve a atender.</h2>
+      <p class="lead in" style="--d:.3s">La misma clínica, la misma gente que llega y las mismas personas. Lo clínico y lo físico siguen siendo de ellas.</p>
+      <dl class="cl-who-does in" style="--d:.5s">
+        <dt>Trabajan</dt><dd>Los agentes<small>Nadie de tu equipo, en estos casos</small></dd>
+        <dt>Cobra</dt><dd>Solo si el paciente vino<small>Cita recuperada: {{L.recovered$}}</small></dd>
+      </dl>
+    </div>
+  </div>
+
+  <div class="cl-gl" aria-hidden="true"></div>
+
+  <nav class="cl-bar" data-voz="/presentacion/voz/" aria-label="Qué mirar en la clínica">
+    <div class="cl-row" role="group" aria-label="Tema">
+      <button type="button" class="cl-b tp" data-topic="dia" aria-pressed="false">Todo el día</button>
+      <button type="button" class="cl-b tp" data-topic="noche" aria-pressed="false">La noche</button>
+      <button type="button" class="cl-b tp" data-topic="mostrador" aria-pressed="false">El mostrador</button>
+      <button type="button" class="cl-b tp" data-topic="consulta" aria-pressed="false">La consulta</button>
+      <button type="button" class="cl-b tp" data-topic="fueron" aria-pressed="false">Los que se fueron</button>
+      <button type="button" class="cl-b tp" data-topic="direccion" aria-pressed="false">Dirección</button>
+    </div>
+    <div class="cl-row" role="group" aria-label="Con qué trabaja la clínica">
+      <span>Con qué trabaja</span>
+      <button type="button" class="cl-b sc" data-sc="hoy" aria-pressed="false">Hoy</button>
+      <button type="button" class="cl-b sc" data-sc="bot" aria-pressed="false">Chatbot</button>
+      <button type="button" class="cl-b sc" data-sc="crm" aria-pressed="false">CRM</button>
+      <button type="button" class="cl-b sc" data-sc="con" aria-pressed="false">odentIA</button>
+      <button type="button" class="cl-b cl-guide" aria-pressed="false">▶ Explícame</button>
+      <span class="cl-voice-note">Voz generada con IA</span>
+    </div>
+  </nav>
+
+  <div class="cl-hud" aria-hidden="true">
+    <div class="cl-nums">
+      <div class="cl-num"><b data-live="hudLlegaron">0</b><span>Llegaron</span></div>
+      <div class="cl-num good"><b data-live="hudAtendidos">0</b><span>Atendidos</span></div>
+      <div class="cl-num bad"><b data-live="hudFueron">0</b><span>Se fueron</span></div>
+      <div class="cl-num back"><b data-live="volvieron">0</b><span>Volvieron</span></div>
+    </div>
+    <span class="cl-antes">Sin odentIA: de <b data-live="antesLlegaron">0</b> que llegaron, se fueron <b data-live="antesFueron">0</b>.</span>
+    <span class="cl-sim">Simulación de ejemplo, no son datos de una clínica.</span>
+  </div>
+
+  <div class="cl-names" aria-hidden="true">
+    <span class="cl-at cl-room" data-anchor="sala-recepcion" data-show="dia-hoy dia-con dia-bot noche-hoy noche-con fin-con">Recepción</span>
+    <span class="cl-at cl-room" data-anchor="sala-consultorio" data-show="dia-hoy dia-con dia-bot noche-hoy noche-con consulta-hoy consulta-con fin-con">Consultorio</span>
+    <span class="cl-at cl-room" data-anchor="sala-administracion" data-show="dia-hoy dia-con dia-bot noche-hoy noche-con direccion-hoy direccion-con fin-con">Administración</span>
+    <span class="cl-at cl-room" data-anchor="sala-caja" data-show="dia-hoy dia-con dia-bot noche-hoy noche-con fin-con">Caja</span>
+
+    <span class="cl-at" data-anchor="mensajes" data-show="dia-hoy noche-hoy mostrador-hoy"><span class="cl-pill"><span data-live="sinResponder">0</span> sin responder</span></span>
+    <span class="cl-at" data-anchor="agenda" data-show="dia-hoy fueron-hoy noche-hoy dia-bot dia-crm"><span class="cl-pill"><span data-live="huecos">15</span> huecos</span></span>
+    <span class="cl-at" data-anchor="agenda" data-show="dia-con noche-con fueron-con"><span class="cl-pill ok"><span data-live="llenos">0</span> de 15 huecos, llenos</span></span>
+    <span class="cl-at" data-anchor="perdidos" data-show="dia-hoy noche-hoy fueron-hoy"><span class="cl-pill">Se fueron: <span data-live="fueron">0</span></span></span>
+    <span class="cl-at" data-anchor="perdidos" data-show="dia-con noche-con fueron-con fin-con"><span class="cl-pill amb">Volvieron <span data-live="volvieron">0</span> de <span data-live="fueron">0</span></span></span>
+    <span class="cl-at" data-anchor="perdidos" data-show="dia-bot"><span class="cl-pill">Se fueron, y nadie les escribe</span></span>
+    <span class="cl-at" data-anchor="perdidos" data-show="dia-crm"><span class="cl-pill">Anotados: <span data-live="pendientes">0</span> · nadie les escribe</span></span>
+
+    <span class="cl-at" data-anchor="ficha1" data-show="mostrador-hoy"><span class="cl-pill">Instagram</span></span>
+    <span class="cl-at" data-anchor="ficha2" data-show="mostrador-hoy"><span class="cl-pill">WhatsApp</span></span>
+    <span class="cl-at" data-anchor="ficha3" data-show="mostrador-hoy"><span class="cl-pill">En papel</span></span>
+    <span class="cl-at" data-anchor="ficha1" data-show="mostrador-con"><span class="cl-pill ok">1 persona, 1 ficha</span></span>
+    <span class="cl-at" data-anchor="notas" data-show="consulta-hoy"><span class="cl-pill">Por escribir esta noche</span></span>
+    <span class="cl-at" data-anchor="notas" data-show="fin-con"><span class="cl-pill ok">0 notas pendientes</span></span>
+    <span class="cl-at" data-anchor="mensajes" data-show="fin-con"><span class="cl-pill ok">0 sin responder</span></span>
+    <span class="cl-at" data-anchor="agenda" data-show="fin-con"><span class="cl-pill ok"><span data-live="llenos">0</span> de 15 huecos, llenos</span></span>
+    <span class="cl-at" data-anchor="p-mensajes" data-show="dia-crm"><span class="cl-pill calm">Mensajes</span></span>
+    <span class="cl-at" data-anchor="p-agenda" data-show="dia-crm"><span class="cl-pill calm">Agenda</span></span>
+    <span class="cl-at" data-anchor="p-historia" data-show="dia-crm"><span class="cl-pill calm">Historia</span></span>
+    <span class="cl-at" data-anchor="p-caja" data-show="dia-crm"><span class="cl-pill calm">Caja</span></span>
+
+    <div class="cl-at cl-say hum" data-say="s-recep" data-follow="recep">¡Un momento, por favor!</div>
+    <div class="cl-at cl-say hum" data-say="s-doctora" data-follow="doctora">¿Quién tiene la ficha de Carla?</div>
+    <div class="cl-at cl-say hum" data-say="s-director" data-follow="director">¿Cuántos vinieron este mes?</div>
+    <div class="cl-at cl-say hum" data-say="s-caja" data-follow="caja">¿Esto ya se cobró?</div>
+    <div class="cl-at cl-say hum" data-say="s-buenos" data-follow="recep"><small>Recepción · 08:00</small>Buenos días, Lucía. ¿En qué te podemos ayudar?</div>
+    <div class="cl-at cl-say hum" data-say="s-busca" data-follow="recep">Dame un momento, Lucía: no te encuentro.</div>
+    <div class="cl-at cl-say hum" data-say="s-nota" data-follow="doctora">¿Qué le dije al de las 10:30?</div>
+    <div class="cl-at cl-say hum" data-say="s-excel" data-follow="director">Estas cifras no cuadran.</div>
+    <div class="cl-at cl-say hum" data-say="b-recep" data-follow="recep">El bot me los pasa, y agendar me toca a mí.</div>
+    <div class="cl-at cl-say hum" data-say="c-recep" data-follow="recep">¿Esto ya lo pasé a la agenda?</div>
+    <div class="cl-at cl-say hum" data-say="c-director" data-follow="director">¿Quién actualizó el CRM?</div>
+
+    <div class="cl-at cl-say" data-say="sofi-recep" data-follow="sofi" style="--c:var(--sky)"><small>Sofi → Recepción</small>Estos mensajes los respondo yo. Tú atiende a quien tienes al frente.</div>
+    <div class="cl-at cl-say" data-say="sofi-noche" data-follow="sofi" style="--c:var(--sky)"><small>Sofi · Instagram · 22:47</small>Hola, Lucía. Tengo el viernes a las 16:30 con la Dra. Ana. ¿Te la agendo?</div>
+    <div class="cl-at cl-say hum" data-say="mientras" data-follow="recep"><small>Mientras no estabas</small>Sofi atendió a <span data-live="nocheAtendidos">0</span> personas y agendó <span data-live="nocheCitas">0</span> citas.</div>
+    <div class="cl-at cl-say" data-say="sofi-lucia" data-follow="sofi" style="--c:var(--sky)"><small>Sofi → Recepción</small>Es Lucía: la misma de Instagram y de WhatsApp. Ya está su ficha.</div>
+    <div class="cl-at cl-say" data-say="clio-dra" data-follow="clio" style="--c:var(--mint)"><small>Clío → Dra. Ana</small>La nota está lista; ¿la confirmas?</div>
+    <div class="cl-at cl-say hum" data-say="dra-ok" data-follow="doctora"><small>Dra. Ana</small>Confirmada.</div>
+    <div class="cl-at cl-say" data-say="sofi-dra" data-follow="sofi" style="--c:var(--sky)"><small>Sofi → Dra. Ana</small>Esta urgencia es para ti; aquí está el resumen.</div>
+    <div class="cl-at cl-say" data-say="argos-dir" data-follow="argos" style="--c:var(--amber)"><small>Argos → Dirección</small>Hay 15 huecos esta semana; ¿prendes esta línea?</div>
+    <div class="cl-at cl-say hum" data-say="dir-ok" data-follow="director"><small>Dirección</small>Préndela.</div>
+    <div class="cl-at cl-say" data-say="argos-sofi" data-follow="argos" style="--c:var(--amber)"><small>Argos → Sofi</small>Te paso a los que no volvieron.</div>
+    <div class="cl-at cl-say hum" data-say="dir-pregunta" data-follow="director"><small>Dirección</small>¿Cuántos presupuestos quedaron sin respuesta?</div>
+    <div class="cl-at cl-say" data-say="argos-responde" data-follow="argos" style="--c:var(--amber)"><small>Argos · ejemplo</small>12 este mes. Yo le escribiría a los que llevan 7 días.</div>
+    <div class="cl-at cl-say" data-say="bot-dice" data-follow="bot" style="--c:#c9d3d6"><small>Chatbot</small>Gracias por escribir. Un asesor te atenderá.</div>
+
+    <div class="p4-lab hide" data-name="sofi" data-follow="sofi" style="--c:var(--sky)"><b>Sofi</b></div>
+    <div class="p4-lab hide" data-name="clio" data-follow="clio" style="--c:var(--mint)"><b>Clío</b></div>
+    <div class="p4-lab hide" data-name="argos" data-follow="argos" style="--c:var(--amber)"><b>Argos</b></div>
+    <div class="p4-lab hide" data-name="bot" data-follow="bot" style="--c:#c9d3d6"><b>Chatbot</b></div>
+  </div>
+
+  <div class="cl-pins">
+    <button type="button" class="cl-pin" data-hot="recep" aria-label="Recepción"></button>
+    <button type="button" class="cl-pin" data-hot="mensajes" aria-label="Los mensajes"></button>
+    <button type="button" class="cl-pin" data-hot="papeles" aria-label="Los papeles del mostrador"></button>
+    <button type="button" class="cl-pin" data-hot="fichas" aria-label="Las fichas"></button>
+    <button type="button" class="cl-pin" data-hot="sala" aria-label="La sala de espera"></button>
+    <button type="button" class="cl-pin" data-hot="agenda" aria-label="La agenda"></button>
+    <button type="button" class="cl-pin" data-hot="archivo" aria-label="El archivo"></button>
+    <button type="button" class="cl-pin" data-hot="director" aria-label="Dirección"></button>
+    <button type="button" class="cl-pin" data-hot="doctora" aria-label="La doctora"></button>
+    <button type="button" class="cl-pin" data-hot="notas" aria-label="Las notas por escribir"></button>
+    <button type="button" class="cl-pin" data-hot="caja" aria-label="Caja"></button>
+    <button type="button" class="cl-pin" data-hot="perdidos" aria-label="Los que se fueron"></button>
+    <button type="button" class="cl-pin" data-hot="pantallas" aria-label="Las pantallas del CRM"></button>
+    <button type="button" class="cl-pin" data-hot="bot" aria-label="El chatbot"></button>
+    <button type="button" class="cl-pin" data-hot="sofi" aria-label="Sofi, agente de recepción"></button>
+    <button type="button" class="cl-pin" data-hot="clio" aria-label="Clío, agente clínico"></button>
+    <button type="button" class="cl-pin" data-hot="argos" aria-label="Argos, agente administrador"></button>
+  </div>
+  <span class="cl-tip" aria-hidden="true"></span>
+  <div class="cl-card" role="status" aria-live="polite"></div>
+
+  <div class="cl-shot" data-cur="{{cur}}">
+    <div class="mscrim cl-shot-x"></div>
+    <div class="msc" role="dialog" aria-labelledby="clShotTitle">
+      <div class="msc-h"><div><b class="msc-t" id="clShotTitle"></b><span class="msc-s"></span></div><span class="msc-zero"></span><button type="button" class="msc-x cl-shot-x" aria-label="Cerrar">×</button></div>
+      <div class="msc-b"></div>
+    </div>
+  </div>
+
+  <div class="cl-cards" data-names="Lucía R.|Rosa M.|Carla S.|Mario R.|Javier C.|Pedro R.|Ana L.|Sofía T.|Diego P.|Marta V.|Luis A.|Elena G.|Óscar N.|Paula D.|Raúl H.|Nadia Q.|Hugo F.|Inés B.|Tomás K.|Julia E.">
+    <!-- Hoy -->
+    <article data-hot="recep" data-when="sin"><span class="cl-who">Recepción</span><h3>Atiende, contesta y copia, todo a la vez</h3><p>Gente al frente, el WhatsApp lleno y todo por pasar a mano. Hace todo bien: son demasiadas cosas para una persona.</p><p class="cl-now">En la fila: <b data-live="fila">0</b> · Sin leer: <b data-live="sinResponder">0</b></p></article>
+    <article data-hot="mensajes" data-when="sin"><span class="cl-who">Mensajes</span><h3>Se responde cuando se puede</h3><p>A las 22:47, nadie. Cuando alguien contesta al día siguiente, esa persona ya reservó en otro lado.</p><p class="cl-now">Sin responder: <b data-live="sinResponder">0</b></p></article>
+    <article data-hot="papeles" data-when="sin"><span class="cl-who">El mostrador</span><h3>Todo a mano, todo para después</h3><p>Pasar la cita a la agenda, buscar el presupuesto, anotar lo que se dijo. El software espera a que alguien lo haga.</p></article>
+    <article data-hot="fichas" data-when="sin"><span class="cl-who">Fichas</span><h3>Tres fichas de la misma persona</h3><p>Una por Instagram, otra por WhatsApp y otra en papel. Nadie sabe cuál es la buena ni qué se le prometió.</p></article>
+    <article data-hot="sala" data-when="sin"><span class="cl-who">Sala de espera</span><h3>Llena, y nadie sabe cuánto falta</h3><p>Su cita era a las 10:00 y nadie les avisó del retraso. Algunos se cansan y se van.</p><p class="cl-now">Esperando: <b data-live="sala">0</b></p></article>
+    <article data-hot="agenda" data-when="sin"><span class="cl-who">Agenda</span><h3>Llena de huecos, con gente en la calle</h3><p>Citas que nadie confirmó y cancelaciones de último momento. La hora vacía no se recupera, y afuera alguien la quería.</p><p class="cl-now">Huecos esta semana: <b data-live="huecos">15</b></p></article>
+    <article data-hot="archivo" data-when="sin"><span class="cl-who">Archivo</span><h3>Buscar un papel es dejar el mostrador</h3><p>Mientras recepción busca una historia, la fila sigue creciendo.</p></article>
+    <article data-hot="director" data-when="sin"><span class="cl-who">Dirección</span><h3>Se entera a fin de mes</h3><p>El reporte toma horas y llega tarde. Y los que se fueron no aparecen en ninguna hoja.</p></article>
+    <article data-hot="doctora" data-when="sin"><span class="cl-who">Dra. Ana</span><h3>Sale a buscar lo que debería tener a mano</h3><p>Mientras pregunta por una ficha, la unidad está vacía y la sala llena.</p></article>
+    <article data-hot="notas" data-when="sin"><span class="cl-who">Historias clínicas</span><h3>Se escriben a las 8 de la noche</h3><p>Con hambre y de memoria. Después de catorce pacientes, ¿qué le dijiste al de las 10:30?</p></article>
+    <article data-hot="caja" data-when="sin"><span class="cl-who">Caja</span><h3>Lo que se debe vive en una libreta</h3><p>Cobra bien a quien tiene al frente. Los saldos se recuerdan cuando alguien se acuerda.</p></article>
+    <article data-hot="perdidos" data-when="sin"><span class="cl-who">Los que se fueron</span><h3>Nadie sabe quiénes son</h3><p>Escribieron o vinieron. Nadie los volvió a buscar, porque nadie los tiene anotados.</p><p class="cl-now">Hoy: <b data-live="fueron">0</b></p></article>
+
+    <!-- Con un chatbot -->
+    <article data-hot="bot" data-when="bot"><span class="cl-who">Chatbot</span><h3>Responde lo que sabe</h3><p>Es rápido y sirve para lo repetido. Lo que no sabe, o lo que hay que hacer, se lo pasa a tu equipo.</p></article>
+    <article data-hot="recep" data-when="bot"><span class="cl-who">Recepción</span><h3>Sigue agendando y anotando</h3><p>Le llegan menos mensajes, pero los que llegan son los que dan trabajo.</p><p class="cl-now">Esperan a recepción: <b data-live="sinResponder">0</b></p></article>
+    <article data-hot="mensajes" data-when="bot"><span class="cl-who">Mensajes</span><h3>Todos reciben algo al instante</h3><p>Pero responder no es resolver: la cita, el presupuesto y la ficha siguen siendo de tu equipo.</p></article>
+    <article data-hot="agenda" data-when="bot"><span class="cl-who">Agenda</span><h3>Los huecos siguen ahí</h3><p>Un chatbot espera a que le escriban. Si nadie escribe, nadie llena esa hora.</p></article>
+    <article data-hot="perdidos" data-when="bot"><span class="cl-who">Los que se fueron</span><h3>Nadie los va a buscar</h3><p>El chatbot no le escribe a quien dejó de escribir.</p></article>
+
+    <!-- Con un CRM -->
+    <article data-hot="pantallas" data-when="crm"><span class="cl-who">Las pantallas</span><h3>Una para cada cosa, y ninguna habla con otra</h3><p>Mensajes, agenda, historia y caja. Lo que pasa en una, alguien lo copia a la otra.</p></article>
+    <article data-hot="recep" data-when="crm"><span class="cl-who">Recepción</span><h3>Además de atender, registra</h3><p>El CRM solo sabe lo que alguien le escribió. Cada persona atendida son varios minutos de teclear.</p><p class="cl-now">En la fila: <b data-live="fila">0</b></p></article>
+    <article data-hot="agenda" data-when="crm"><span class="cl-who">Agenda</span><h3>Sabe que hay huecos. No los llena</h3><p>La cifra está en un tablero muy bonito. Alguien tiene que salir a llenarla.</p></article>
+    <article data-hot="perdidos" data-when="crm"><span class="cl-who">Los que se fueron</span><h3>Anotados como pendientes</h3><p>Si alguien los anotó, están en una lista. Falta que alguien la abra y les escriba.</p><p class="cl-now">Pendientes: <b data-live="pendientes">0</b></p></article>
+
+    <!-- Con odentIA -->
+    <article data-hot="recep" data-when="con"><span class="cl-who">Recepción</span><h3>Atiende a quien tiene al frente</h3><p>Sofi responde los mensajes y agenda. Lo que necesita a una persona le llega con el resumen.</p><p class="cl-was"><s>Atiende, contesta y copia, todo a la vez</s></p></article>
+    <article data-hot="mensajes" data-when="con"><span class="cl-who">Mensajes</span><h3>Cada mensaje tiene respuesta</h3><p>Sofi responde a cualquier hora por WhatsApp, Instagram, Messenger y el chat de tu web. Lo que no sabe se lo pasa a tu equipo.</p><p class="cl-now">Sin responder: <b data-live="sinResponder">0</b></p></article>
+    <article data-hot="papeles" data-when="con"><span class="cl-who">El mostrador</span><h3>Nadie copia nada</h3><p>Sofi agenda y avisa, y queda registrado solo.</p><p class="cl-was"><s>Todo a mano, todo para después</s></p></article>
+    <article data-hot="fichas" data-when="con" data-screen="historia"><span class="cl-who">Fichas</span><h3>Una persona, una historia</h3><p>Escriba por donde escriba, todos los canales llegan a la misma persona y a su única historia.</p><p class="cl-was"><s>Tres fichas de la misma persona</s></p></article>
+    <article data-hot="sala" data-when="con"><span class="cl-who">Sala de espera</span><h3>Llegan con su hora</h3><p>Sofi les recordó la cita y el equipo ya sabe a qué vienen.</p><p class="cl-was"><s>Llena, y nadie sabe cuánto falta</s></p></article>
+    <article data-hot="agenda" data-when="con" data-screen="agenda"><span class="cl-who">Agenda</span><h3>Los huecos se van llenando</h3><p>Sofi ofrece las horas libres a quien escribe, y Argos encuentra a quien no volvió. Los recordatorios salen solos si los prendes.</p><p class="cl-now">Huecos esta semana: <b data-live="huecos">15</b></p></article>
+    <article data-hot="archivo" data-when="con" data-screen="historia"><span class="cl-who">Archivo</span><h3>Nadie deja el mostrador para buscar</h3><p>La ficha de cada persona ya está en pantalla.</p><p class="cl-was"><s>Buscar un papel es dejar el mostrador</s></p></article>
+    <article data-hot="director" data-when="con" data-screen="reportes"><span class="cl-who">Dirección</span><h3>Pregunta y tiene la respuesta</h3><p>Le pregunta a Argos y él arma el reporte. Y decide qué líneas prender.</p><p class="cl-was"><s>Se entera a fin de mes</s></p></article>
+    <article data-hot="doctora" data-when="con" data-screen="odontograma"><span class="cl-who">Dra. Ana</span><h3>Atiende con la historia a la vista</h3><p>Dicta en la consulta y Clío deja la nota lista. Lo urgente le llega con el resumen.</p></article>
+    <article data-hot="notas" data-when="con" data-screen="historia"><span class="cl-who">Historias clínicas</span><h3>La nota queda lista en la consulta</h3><p>Nada entra a la historia sin la confirmación del odontólogo.</p><p class="cl-was"><s>Se escriben a las 8 de la noche</s></p></article>
+    <article data-hot="caja" data-when="con" data-screen="caja"><span class="cl-who">Caja</span><h3>Caja sigue siendo de tu equipo</h3><p>Ningún agente cobra. Ve lo que toca cobrar hoy, y Argos le deja la tarea de llamar por un saldo pendiente.</p></article>
+    <article data-hot="perdidos" data-when="con"><span class="cl-who">Los que se fueron</span><h3>Ahora tienen nombre</h3><p>Argos ve quién no volvió. Sofi le escribe con un horario libre. No todos vuelven, y ves qué pasó con cada uno.</p><p class="cl-now">Volvieron: <b data-live="volvieron">0</b> · No quisieron: <b data-live="noVuelven">0</b></p></article>
+    <article data-hot="sofi" data-when="con" data-color="sky"><span class="cl-who">Sofi · Agente de recepción</span><h3>Responde con tu tono</h3><p>De <i>sophía</i>, sabiduría: sabe todo de tu clínica. Agenda sin que nadie copie nada, y lo urgente se lo pasa a una persona.</p></article>
+    <article data-hot="clio" data-when="con" data-color="mint"><span class="cl-who">Clío · Agente clínico</span><h3>Escribe mientras atiendes</h3><p>La musa de la <i>historia</i>. Nada entra a la historia sin la confirmación del odontólogo.</p></article>
+    <article data-hot="argos" data-when="con" data-color="amber"><span class="cl-who">Argos · Agente administrador</span><h3>No deja a nadie atrás</h3><p>El gigante de los <i>cien ojos</i>: ve toda tu clínica. Solo escribe si tú prendiste esa línea.</p></article>
+
+    <!-- Cada persona: la ficha cambia según lo que le va pasando. -->
+    <article data-story="mensaje"><span class="cl-who"><span data-field="nombre"></span> · Por WhatsApp</span><h3>«¿Tienen cita el viernes? Me duele una muela»</h3><p>Sigue mirando el celular. Nadie le responde.</p><p class="cl-now">Esperando: <b data-field="espera"></b></p></article>
+    <article data-story="noche"><span class="cl-who"><span data-field="nombre"></span> · Desde su casa</span><h3>Son las 22:47 y nadie va a responder</h3><p>Le duele ahora. Si en unos minutos nadie contesta, le escribe a otra clínica.</p><p class="cl-now">Esperando: <b data-field="espera"></b></p></article>
+    <article data-story="fila"><span class="cl-who"><span data-field="nombre"></span> · En la fila</span><h3>Solo quería confirmar su cita</h3><p>Pudo hacerlo por mensaje, pero nadie responde.</p><p class="cl-now">En la fila: <b data-field="espera"></b></p></article>
+    <article data-story="fila-llena"><span class="cl-who"><span data-field="nombre"></span> · En la puerta</span><h3>Vio la fila y se dio la vuelta</h3><p>Nadie sabe que vino.</p></article>
+    <article data-story="sala"><span class="cl-who"><span data-field="nombre"></span> · En la sala</span><h3>Nadie le dice cuánto falta</h3><p>Su cita ya pasó. Mira el reloj y mira la puerta.</p><p class="cl-now">Esperando: <b data-field="espera"></b></p></article>
+    <article data-story="unidad"><span class="cl-who"><span data-field="nombre"></span> · En la unidad</span><h3>Por fin lo atienden</h3><p>Su nota se escribirá esta noche, de memoria.</p></article>
+    <article data-story="sale"><span class="cl-who"><span data-field="nombre"></span> · Se va</span><h3>Atendido, y nadie lo volverá a buscar</h3><p>Le toca control en 6 meses. Si no se acuerda, no vuelve.</p></article>
+    <article data-story="tarde"><span class="cl-who"><span data-field="nombre"></span> · Le contestaron</span><h3>Le respondieron tarde</h3><p>Recepción encontró un minuto entre una cosa y otra.</p></article>
+    <article data-story="mensaje-perdido"><span class="cl-who"><span data-field="nombre"></span> · Se fue</span><h3>Le escribió a otra clínica</h3><p>Nadie le respondió. Su mensaje sigue ahí, sin leer.</p></article>
+    <article data-story="noche-perdido"><span class="cl-who"><span data-field="nombre"></span> · Se fue</span><h3>Reservó en otra clínica esa misma noche</h3><p>A la mañana le dirán «Buenos días». Ya es tarde.</p></article>
+    <article data-story="fila-perdido"><span class="cl-who"><span data-field="nombre"></span> · Se fue</span><h3>Se cansó de la fila</h3><p>No alcanzó a dar su nombre: en la clínica nadie sabe quién era.</p></article>
+    <article data-story="sala-perdido"><span class="cl-who"><span data-field="nombre"></span> · Se fue</span><h3>Se fue de la sala de espera</h3><p>Su ficha quedó abierta y nadie le volvió a escribir.</p></article>
+
+    <article data-story="bot-responde"><span class="cl-who"><span data-field="nombre"></span> · Con el chatbot</span><h3>Le respondió al instante</h3><p>«Gracias por escribir.» Rápido. Falta ver si sirve para lo que quiere.</p></article>
+    <article data-story="bot-resuelto"><span class="cl-who"><span data-field="nombre"></span> · Con el chatbot</span><h3>Solo quería saber el horario</h3><p>Para esto el chatbot funciona.</p></article>
+    <article data-story="bot-espera"><span class="cl-who"><span data-field="nombre"></span> · Con el chatbot</span><h3>Quiere una cita: le toca esperar a recepción</h3><p>«Un asesor te atenderá.» Sigue esperando.</p><p class="cl-now">Esperando: <b data-field="espera"></b></p></article>
+    <article data-story="bot-perdido"><span class="cl-who"><span data-field="nombre"></span> · Se fue</span><h3>Le respondieron, y nadie lo agendó</h3><p>El chatbot no le volverá a escribir, porque espera a que escriba primero.</p></article>
+    <article data-story="crm-anotado"><span class="cl-who"><span data-field="nombre"></span> · Se fue</span><h3>Está en el CRM como pendiente</h3><p>Alguien lo anotó. Nadie le ha escrito todavía.</p></article>
+
+    <article data-story="mensaje-con" data-color="sky"><span class="cl-who"><span data-field="nombre"></span> · Por WhatsApp</span><h3>Sofi le está respondiendo</h3><p>Le ofrece un horario libre, con tu tono.</p></article>
+    <article data-story="noche-con" data-color="sky"><span class="cl-who"><span data-field="nombre"></span> · Desde su casa</span><h3>La clínica cerró, y Sofi le contesta</h3><p>En segundos, con los horarios reales de la agenda.</p></article>
+    <article data-story="noche-agendado" data-color="sky"><span class="cl-who"><span data-field="nombre"></span> · Agendado de noche</span><h3>Nunca le escribió a otra clínica</h3><p>Su cita ya está en la agenda cuando tu equipo llega por la mañana.</p></article>
+    <article data-story="agendado" data-color="sky"><span class="cl-who"><span data-field="nombre"></span> · Agendado</span><h3>Ya tiene su cita</h3><p>Quedó en la agenda sin que nadie copiara nada. Le llegará el recordatorio.</p></article>
+    <article data-story="fila-con" data-color="sky"><span class="cl-who"><span data-field="nombre"></span> · En el mostrador</span><h3>Lo atienden enseguida</h3><p>Recepción ya no tiene todo lo demás encima.</p></article>
+    <article data-story="cita" data-color="sky"><span class="cl-who"><span data-field="nombre"></span> · Llega a su cita</span><h3>Viene a su hora</h3><p>Sofi le recordó la cita, y su ficha ya está lista.</p></article>
+    <article data-story="sala-con" data-color="sky"><span class="cl-who"><span data-field="nombre"></span> · En la sala</span><h3>Espera poco</h3><p>El equipo ya sabe a qué viene.</p></article>
+    <article data-story="unidad-con" data-color="mint"><span class="cl-who"><span data-field="nombre"></span> · En la unidad</span><h3>La doctora lo mira a él</h3><p>Dicta mientras atiende y Clío deja la nota lista para que la confirme.</p></article>
+    <article data-story="sale-con" data-color="mint"><span class="cl-who"><span data-field="nombre"></span> · Se va</span><h3>Su control ya tiene quién lo recuerde</h3><p>Si prendes esa línea, Argos le avisa cuando le toque.</p></article>
+    <article data-story="vuelta-msg" data-color="amber"><span class="cl-who"><span data-field="nombre"></span> · Se había ido</span><h3>Sofi le está escribiendo</h3><p>Argos vio que no volvió, y Sofi le ofrece un horario libre.</p></article>
+    <article data-story="vuelve" data-color="amber"><span class="cl-who"><span data-field="nombre"></span> · Volvió</span><h3>Se había ido, y volvió</h3><p>Argos lo encontró y Sofi le escribió. Ya tiene su hora.</p></article>
+    <article data-story="no-vuelve" data-color="amber"><span class="cl-who"><span data-field="nombre"></span> · No quiso volver</span><h3>No todos vuelven</h3><p>Sofi le escribió y no quiso. Por lo menos ya sabes quién es y qué pasó.</p></article>
+    <article data-story="no-quiso"><span class="cl-who"><span data-field="nombre"></span> · No siguió</span><h3>Le respondieron, y no siguió</h3><p>Pasa. Quedó registrado que preguntó.</p></article>
+  </div>
+
+  <aside class="notes">Casi toda la presentación pasa en esta clínica, con la misma gente en todos los momentos. Las flechas la recorren en orden: cada tema primero como es hoy y después con odentIA. Los botones de arriba saltan a cualquiera: si te dicen «ya tengo un CRM» o «ya tengo un chatbot», tócalo. Un clic en la maqueta nunca cambia de momento: abre la ficha de lo que tocaste, y algunas fichas abren su pantalla de muestra. «Explícame» la recorre sola, con la voz grabada; úsalo solo si la clínica la mira sin ti. Los puntos: todo el día, la fila y los mensajes. La noche, con el equipo en su casa. El mostrador, con las tres fichas de Lucía. La consulta, y que nada entra a la historia sin el odontólogo. Los que se fueron: Argos pregunta, Dirección prende la línea y recién ahí vuelven; no todos, y se dice. Dirección: cada cosa es un interruptor. Chatbot y CRM son lo usual del mercado, sin nombrar a nadie y sin cifras contra nadie; algunos chatbots sí agendan, así que la diferencia es que nadie va a buscar a los que se fueron. Los números de la pantalla son de una simulación de ejemplo, no de una clínica.</aside>
+</section>
