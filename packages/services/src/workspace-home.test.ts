@@ -4,7 +4,7 @@ import { composeWaiting, WAITING_LIMITS, type WaitingCase, type WaitingParts, ty
 // «Ahora» lo dice `urgent` (decisión 1 del pulido): aquí, la prioridad alta.
 const caseOf = (id: string, priority: string): WaitingCase => ({
   id, priority, urgent: priority === "alta", topicKind: "otro", reason: `Caso ${id}`, contactName: "Elena Castro", channel: "whatsapp",
-  createdAt: "2026-10-12T15:00:00.000Z", conversationId: null, unclaimed: true, canReply: false, quote: null,
+  createdAt: "2026-10-12T15:00:00.000Z", conversationId: null, taskId: null, unclaimed: true, canReply: false, quote: null,
 })
 const taskOf = (id: string, due: WaitingTask["due"]): WaitingTask => ({
   id, title: `Tarea ${id}`, dueAt: null, due, href: `/tasks?task=${id}`, mine: true, assigneeName: null, opportunityTitle: null,
@@ -93,7 +93,7 @@ it("los casos que no llegaron en la lista también se cuentan en «y N más»", 
 
 it("las citas sin cerrar van antes que las por confirmar y las que no caben se resumen", () => {
   const unclosedOf = (id: string): WaitingUnclosed => ({
-    id, patientId: `p-${id}`, patientName: id, startsAt: "2026-10-25T15:00:00.000Z", professionalName: null, serviceName: null, branchName: "Miraflores",
+    id, patientId: `p-${id}`, patientName: id, startsAt: "2026-10-25T15:00:00.000Z", professionalUserId: "u1", professionalName: null, serviceName: null, branchName: "Miraflores",
   })
   const items = Array.from({ length: WAITING_LIMITS.unclosed }, (_, index) => unclosedOf(`u${index}`))
   const rows = composeWaiting({ ...nothing, unclosed: { items, total: WAITING_LIMITS.unclosed + 2 }, unconfirmed: { items: [unconfirmedOf("rosa")], total: 1 } })

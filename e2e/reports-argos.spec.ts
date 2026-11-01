@@ -233,7 +233,7 @@ test("una lista se descarga entera en CSV, con el teléfono", async ({ owner, fi
   const page = owner.page
   await gotoHydrated(page, tenant(owner.org.slug, "/reports?period=mes_pasado&lista=no_show"))
   const list = page.getByRole("region", { name: "No vinieron" }).or(page.getByRole("dialog", { name: "No vinieron" })).filter({ hasText: "Cómo se calcula" }).first()
-  await expect(list.getByRole("link", { name: "Diego Ruiz" })).toBeVisible()
+  await expect(list.getByRole("button", { name: "Diego Ruiz" })).toBeVisible()
   const file = await csvOf(page, () => list.getByRole("button", { name: "Descargar" }).click())
   expect(file.name).toMatch(/^no-vinieron-\d{4}-\d{2}\.csv$/)
   expect(file.body).toContain("Fecha,Persona,Teléfono,Canal,Detalle,Profesional,Sede,Importe,Moneda,Ya tiene otra cita")

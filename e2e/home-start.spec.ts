@@ -11,10 +11,21 @@ import type { WorkspaceHome } from "../packages/clinic-app/src/lib/workspace"
 import { tenant, tenantPattern } from "./env"
 import { api, call, expect, test, type OwnerFixture } from "./fixtures"
 import { gotoHydrated } from "./hydration"
+import { surface } from "./surface"
 
 async function observe(page: Page, info: TestInfo, name: string) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
   await info.attach(name, { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+}
+
+/** La cita de quien inicia sesión empieza ahora, en otra unidad: lo que toca es «Llegó», a cualquier hora que corra la prueba. */
+async function startsNow(db: Db, owner: OwnerFixture) {
+  const [room] = await db.insert(scheduleRoom).values({ organizationId: owner.org.id, branchId: owner.branchId, name: "Unidad de ahora" }).returning({ id: scheduleRoom.id })
+  const now = new Date()
+  await db
+    .update(appointment)
+    .set({ roomId: room!.id, startsAt: now, endsAt: new Date(now.getTime() + 30 * 60_000) })
+    .where(and(eq(appointment.organizationId, owner.org.id), eq(appointment.professionalUserId, owner.user.id)))
 }
 
 async function prepareSchedule(owner: OwnerFixture) {
@@ -146,7 +157,7 @@ for (const width of [1440, 390]) {
       await expect(rows).toHaveCount(2)
       await expect(rows.nth(0)).toContainText("Interlocutor pendiente · Pide hablar con una persona")
       await expect(rows.nth(0)).toContainText("Te lo pasó Sofi")
-      await expect(rows.nth(0).getByRole("link", { name: /Revisar$/ })).toBeVisible()
+      await expect(rows.nth(0).getByRole("link", { name: /Ver la tarea$/ })).toBeVisible()
       await expect(waiting).not.toContainText("espera tu aprobación")
       await expect(rows.nth(1)).toContainText("Confirmar seguimiento pendiente")
       await expect(rows.nth(1)).toContainText("Sin fecha")
@@ -184,13 +195,14 @@ for (const width of [1440, 390]) {
       expect(fallback.agendaLine?.branch.id).toBe(owner.branchId)
       expect((await api(page, "GET", "/api/workspace/home?branch=no-es-una-sede", owner.org.slug)).status).toBe(400)
 
-      const task = rows.nth(1).getByRole("link", { name: /Confirmar seguimiento pendiente/ })
+      const task = rows.nth(1).getByRole("button", { name: /Confirmar seguimiento pendiente/ }).first()
       expect((await task.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
       await observe(page, info, "direccion")
-      // Toda la fila es el enlace, también con teclado.
+      // Toda la fila abre la tarea al lado, también con teclado.
       await task.focus()
       await task.press("Enter")
-      await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/tasks"))
+      await expect(surface(page).getByRole("textbox", { name: "Qué hay que hacer" })).toHaveValue("Confirmar seguimiento pendiente")
+      await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/home"))
     })
 
     test("odontólogo: solo sus pacientes de hoy, y cada fila abre la ficha", async ({ owner, fixtureDb }, info) => {
@@ -219,6 +231,7 @@ for (const width of [1440, 390]) {
 
     test("recepción marca «Llegó» en Inicio y quien atiende la ve en su sala de espera", async ({ owner, fixtureDb }, info) => {
       await activeDay(fixtureDb, owner)
+      await startsNow(fixtureDb, owner)
       await setRole(fixtureDb, owner, "reception")
       const page = owner.page
       await page.setViewportSize({ width, height: 844 })
@@ -228,8 +241,14 @@ for (const width of [1440, 390]) {
       await agenda.getByRole("button", { name: "Llegó: Paciente con cita" }).click()
       await expect(agenda.getByRole("button", { name: "Deshacer: Paciente con cita" })).toBeVisible()
       await expect(agenda).toContainText("1 en sala")
-      await expect(agenda.getByRole("link", { name: /Paciente con cita.*Llegó \d/ })).toBeVisible()
       await observe(page, info, "recepcion-llego")
+      // La fila abre la cita al lado: Inicio sigue debajo.
+      await agenda.getByRole("button", { name: /Paciente con cita.*Llegó \d/ }).click()
+      const opened = surface(page).filter({ hasText: "Hoy, de" }).filter({ hasText: "Paciente con cita" })
+      await expect(opened).toBeVisible()
+      await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/home"))
+      await opened.getByRole("button", { name: /cerrar/i }).first().click()
+      await expect(opened).toBeHidden()
       // Quien atiende la ve en «Sala de espera», con «Atender» en su botón.
       await setRole(fixtureDb, owner, "clinician")
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
@@ -244,6 +263,49 @@ for (const width of [1440, 390]) {
       expect(waiting).toMatchObject({ visit: "llego" })
       const noShow = await api(page, "POST", `/api/appointments/${waiting?.id}/status`, owner.org.slug, { status: "no_asistio" })
       expect(noShow.status).toBe(409)
+    })
+
+    test("«Reagendar» a quien no vino abre la reserva al lado, sin salir de Inicio", async ({ owner, fixtureDb }) => {
+      await activeDay(fixtureDb, owner)
+      await startsNow(fixtureDb, owner)
+      await setRole(fixtureDb, owner, "reception")
+      const page = owner.page
+      await page.setViewportSize({ width, height: 844 })
+      const home = await call<WorkspaceHome>(page, "GET", "/api/workspace/home", owner.org.slug)
+      const item = home.today?.appointments.find(row => row.patientName === "Paciente con cita")
+      await call(page, "POST", `/api/appointments/${item?.id}/status`, owner.org.slug, { status: "no_asistio" })
+      await gotoHydrated(page, tenant(owner.org.slug, "/home"))
+      await page.getByRole("region", { name: "Agenda de hoy" }).getByRole("button", { name: "Reagendar: Paciente con cita" }).click()
+      await expect(surface(page).filter({ hasText: "Paciente con cita" }).filter({ hasText: "Nueva cita" })).toBeVisible()
+      await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/home"))
+    })
+
+    test("un caso sin conversación abre su tarea al lado, sin salir de Inicio", async ({ owner, fixtureDb }) => {
+      await activeDay(fixtureDb, owner)
+      const [task] = await fixtureDb.insert(crmTask).values({ organizationId: owner.org.id, title: "Tarea del caso", createdBy: "agent" }).returning({ id: crmTask.id })
+      await fixtureDb.update(agentHandoff).set({ taskId: task!.id }).where(eq(agentHandoff.organizationId, owner.org.id))
+      const page = owner.page
+      await page.setViewportSize({ width, height: 844 })
+      await gotoHydrated(page, tenant(owner.org.slug, "/home"))
+      await page.getByRole("region", { name: "Te espera" }).getByRole("listitem").filter({ hasText: "Pide hablar con una persona" }).getByRole("button", { name: /Ver la tarea/ }).click()
+      await expect(surface(page).getByRole("textbox", { name: "Qué hay que hacer" })).toHaveValue("Tarea del caso")
+      await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/home"))
+    })
+
+    test("un pedido sobre sus datos se atiende al lado, sin salir de Inicio", async ({ owner, fixtureDb }) => {
+      await activeDay(fixtureDb, owner)
+      const page = owner.page
+      await page.setViewportSize({ width, height: 844 })
+      const home = await call<WorkspaceHome>(page, "GET", "/api/workspace/home", owner.org.slug)
+      const patientId = home.today?.appointments.find(row => row.patientName === "Paciente con cita")?.patientId
+      const view = await call<{ requesters: Array<{ contactId: string }> }>(page, "GET", `/api/patients/${patientId}/data-requests`, owner.org.slug)
+      // Sale en «Te espera» cuando le quedan pocos días: se pidió hace nueve de los diez que tiene.
+      const requestedOn = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date(Date.now() - 9 * 86_400_000))
+      await call(page, "POST", `/api/patients/${patientId}/data-requests`, owner.org.slug, { kind: "copia", requesterContactId: view.requesters[0]!.contactId, channel: "clinica", requestedOn }, 201)
+      await gotoHydrated(page, tenant(owner.org.slug, "/home"))
+      await page.getByRole("region", { name: "Te espera" }).getByRole("button", { name: /Atender el pedido/ }).click()
+      await expect(surface(page).filter({ hasText: "Comprueba que" })).toBeVisible()
+      await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/home"))
     })
 
     test("caja: «Por cobrar» con la persona atendida hoy y «Cobrar» abre el cobro", async ({ owner, fixtureDb }, info) => {
@@ -282,8 +344,11 @@ for (const width of [1440, 390]) {
       await observe(page, info, "nada-espera")
       await call(page, "PATCH", `/api/tasks/${task.id}`, owner.org.slug, { status: "open" })
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
-      await expect(waiting.getByRole("link", { name: /Revisar caso/ })).toBeVisible()
       await expect(waiting.getByText("Nada te espera por ahora", { exact: true })).toHaveCount(0)
+      // La tarea se abre al lado, sin salir de Inicio.
+      await waiting.getByRole("button", { name: /Revisar caso/ }).first().click()
+      await expect(surface(page).getByRole("textbox", { name: "Qué hay que hacer" })).toHaveValue("Revisar caso")
+      await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/home"))
     })
 
     test("error recuperable no se confunde con una clínica vacía", async ({ owner }, info) => {
@@ -317,7 +382,7 @@ for (const width of [1440, 390]) {
         await expect(page.getByRole("link", { name: "Definir horarios", exact: true })).toHaveCount(0)
         await expect(page.getByRole("region", { name: "Te espera" }).getByText("Nada te espera por ahora", { exact: true })).toBeVisible()
         const block = role === "reception" ? "Agenda de hoy" : role === "clinician" ? "Mis pacientes de hoy" : "Caja de hoy"
-        const action = role === "reception" ? "Abrir la Agenda" : role === "clinician" ? "Ver mi agenda" : "Ir a Caja"
+        const action = role === "reception" ? "Abrir la Agenda" : role === "clinician" ? "Ver mi agenda" : "Abrir la Caja"
         for (const name of ["Agenda de hoy", "Mis pacientes de hoy", "Caja de hoy"]) {
           await expect(page.getByRole("region", { name, exact: true })).toHaveCount(name === block ? 1 : 0)
         }

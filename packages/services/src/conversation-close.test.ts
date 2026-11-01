@@ -20,7 +20,6 @@ import {
   closurePendingReason,
   farewellText,
   getResolvePreview,
-  getTaskResolvePreview,
   greetingName,
   nudgeText,
   releaseConversation,
@@ -249,13 +248,6 @@ describe("«Resolver», «Tomar» y «Devolver al agente»", () => {
     expect(audit).toMatchObject({ actorUserId: c.receptionId, metadata: { via: "equipo" } })
   })
 
-  it("completar la tarea de un tema no tiene nada que advertir: no cierra la conversación", async () => {
-    const c = await clinic({ provider: "whatsapp_cloud_api" })
-    const conv = await c.thread("Lucía Paredes", { lastInboundAt: new Date(Date.now() - HOUR) })
-    await c.say(conv.id, "in", "¿Me devuelven lo que pagué?", new Date(Date.now() - HOUR))
-    const topic = await c.run((tx) => createHandoff(tx, c.orgId, null, { conversationId: conv.id, reason: "Reembolso", summary: "Reembolso", createdBy: "agent" }))
-    expect(await c.run((tx) => getTaskResolvePreview(tx, c.orgId, topic.taskId!))).toBeNull()
-  })
 })
 
 describe("el ciclo: insistir una vez y cerrar por silencio", () => {

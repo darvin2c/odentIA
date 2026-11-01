@@ -138,7 +138,7 @@ function AgentSummaryPage() {
     retry: false,
     mutationFn: () => apiFetch("/api/agent/config", { method: "PUT", body: JSON.stringify({ enabled: false }) }),
     onSuccess: () => {
-      for (const key of ["agent-config", "agent-overview", "agent-panel"]) {
+      for (const key of ["agent-config", "agent-overview", "agent-summary"]) {
         void queryClient.invalidateQueries({ queryKey: [key] })
       }
       setTurnOffOpen(false)

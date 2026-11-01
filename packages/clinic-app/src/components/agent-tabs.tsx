@@ -1,7 +1,7 @@
 import { cn, ScrollArea, tabsListVariants, tabsTriggerClassName } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
 import { Link, useRouterState } from "@tanstack/react-router"
-import type { AgentOverview, AgentPanelSummary } from "../lib/agent"
+import type { AgentOverview, AgentSummary } from "../lib/agent"
 import { apiFetch } from "../lib/api"
 import { useCan, usePermission } from "../lib/crm"
 import { agentTabsFor } from "../lib/screen-rules"
@@ -18,10 +18,10 @@ import { agentTabsFor } from "../lib/screen-rules"
  * Aprender y Conocimiento dicen cuánto espera a una persona. Los números salen
  * del mismo resumen que «Necesita de ti» (`/api/agent/overview`, consulta
  * compartida con esa pantalla): no hay otra cuenta. «Esperan su sí» cuenta
- * solo las citas propuestas que esperan respuesta (`awaitingAnswer` del panel
- * del agente): los casos se cuentan en «Te espera» y en el menú. En teléfono
+ * solo las citas propuestas que esperan respuesta (`awaitingAnswer` del resumen
+ * del agente): los casos se cuentan en «Te espera» y en «Inicio» del menú. En teléfono
  * «Esperan su sí» pasa al final de la fila (`phoneLast`): ahí el recorrido es
- * Resumen, Aprender, Conocimiento. El orden del documento, y con él el del
+ * Resumen, Actividad, Aprender, Conocimiento. El orden del documento, y con él el del
  * teclado, es el mismo en todos los anchos.
  *
  * `learnPending`: «Aprender» concilia su lista al cargarla, así que esa pantalla
@@ -42,10 +42,10 @@ export function AgentTabs({ learnPending }: { learnPending?: number } = {}) {
     retry: false,
     staleTime: 30_000,
   })
-  // La misma consulta que el panel del agente: la leen también quienes solo deciden.
+  // El resumen del agente: lo leen también quienes solo deciden.
   const panel = useQuery({
-    queryKey: ["agent-panel"],
-    queryFn: () => apiFetch<{ data: AgentPanelSummary }>("/api/agent/panel"),
+    queryKey: ["agent-summary"],
+    queryFn: () => apiFetch<{ data: AgentSummary }>("/api/agent/summary"),
     enabled: canDecide || canRead,
     retry: false,
     staleTime: 30_000,

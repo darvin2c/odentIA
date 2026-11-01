@@ -19,7 +19,7 @@ const WAITING_ROWS = [
   { title: "w-2/5", detail: "w-2/3", action: true },
   { title: "w-1/2", detail: "w-3/5", action: false },
 ]
-const TODAY_ROWS = ["w-3/5", "w-1/2", "w-2/3", "w-2/5", "w-1/2"]
+const TODAY_ROWS = ["w-3/5", "w-1/2", "w-2/3", "w-2/5", "w-7/12"]
 
 function WaitingRowSkeleton({ row, phone }: { row: (typeof WAITING_ROWS)[number]; phone: boolean }) {
   return (
@@ -48,8 +48,8 @@ function WaitingRowSkeleton({ row, phone }: { row: (typeof WAITING_ROWS)[number]
 const TODAY_CARD = "elevated flex min-w-0 flex-col gap-2 rounded-xl border bg-card p-4 sm:p-5"
 const TODAY_TITLE = "flex min-w-0 flex-1 items-center gap-2 text-[17px] font-bold tracking-tight"
 
-/** Una fila de la tarjeta: lo que la abre a todo lo ancho. */
-function TodayRow({ width }: { width: string }) {
+/** Una fila de la tarjeta: lo que la abre a todo lo ancho. En la agenda de la sede, su estado debajo y su paso al lado. */
+function TodayRow({ width, agenda = false }: { width: string; agenda?: boolean }) {
   return (
     <li className="flex items-center gap-2 py-0.5">
       <div className="flex h-auto min-h-11 w-full min-w-0 flex-1 items-center justify-start gap-2.5 rounded-lg px-2.5 py-1.5">
@@ -57,9 +57,11 @@ function TodayRow({ width }: { width: string }) {
         <span className="flex min-w-0 flex-1 flex-col gap-1.5 py-0.5">
           <Skeleton className={`h-3.5 ${width}`} />
           <Skeleton className="h-3 w-4/5" />
+          {agenda ? <Skeleton className="h-3 w-24" /> : null}
         </span>
-        <Skeleton className="h-3.5 w-16 shrink-0" />
+        {agenda ? null : <Skeleton className="h-3.5 w-16 shrink-0" />}
       </div>
+      {agenda ? <Skeleton className="h-11 w-16 shrink-0 rounded-full sm:h-8" /> : null}
     </li>
   )
 }
@@ -77,7 +79,7 @@ function TodayAgendaSkeleton() {
       <div aria-hidden className="h-1.5 rounded-full bg-muted" />
       <ul className="flex flex-col divide-y">
         {TODAY_ROWS.map((width) => (
-          <TodayRow key={width} width={width} />
+          <TodayRow key={width} width={width} agenda />
         ))}
       </ul>
       <span className="inline-flex min-h-11 items-center self-start sm:min-h-8">
@@ -149,7 +151,7 @@ function TodayCashSkeleton() {
           </li>
         ))}
       </ul>
-      <span className="inline-flex min-h-11 items-center self-start font-semibold text-primary underline underline-offset-4 sm:min-h-8">Ir a Caja</span>
+      <span className="inline-flex min-h-11 items-center self-start font-semibold text-primary underline underline-offset-4 sm:min-h-8">Abrir la Caja</span>
     </section>
   )
 }
@@ -164,7 +166,7 @@ function CashLineSkeleton() {
           <Skeleton className="h-3.5 w-3/4" />
         </span>
       </span>
-      <span className="shrink-0 font-semibold text-primary">Ir a Caja</span>
+      <span className="shrink-0 font-semibold text-primary">Abrir la Caja</span>
     </div>
   )
 }

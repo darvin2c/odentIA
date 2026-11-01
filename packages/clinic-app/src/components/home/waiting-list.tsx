@@ -12,6 +12,7 @@ import { channelLabel } from "../../lib/channels"
 import type { WaitingRow } from "../../lib/workspace"
 import { HandoffUrgency } from "../agent/handoff-badges"
 import { openAppointmentAnywhere } from "../agenda/schedule-host"
+import { BudgetSendButton } from "../patient/plan/budget-send"
 
 type RowOf<K extends WaitingRow["kind"]> = Extract<WaitingRow, { kind: K }>
 
@@ -37,7 +38,7 @@ export interface WaitingHandlers {
   /** «Confirmar» el representante que nombró un registro en línea: lo vincula y cierra la tarea. */
   onConfirmRepresentative?: (row: RowOf<"possibleDuplicate">) => void
   /**
-   * «No es ella» en el representante por confirmar y «Descartar» en «Alguien
+   * «No es representante» en el representante por confirmar y «Descartar» en «Alguien
    * se registró con el documento de…»: cierra la tarea con su motivo, sin
    * vincular ni cambiar a nadie.
    */
@@ -50,8 +51,20 @@ export interface WaitingHandlers {
   onReorder?: (row: RowOf<"inventory">) => void
   /** «Anular con motivo» una atención de otro día sin cerrar; la fila la continúa. */
   onVoidEncounter?: (row: RowOf<"staleEncounter">) => void
+  /** «Registrar la atención» de una cita que quedó sin cerrar; sin esto (sin permiso) queda «No vino». */
+  onRegisterVisit?: (row: RowOf<"unclosed">) => void
   /** «No vino» en una cita que quedó sin cerrar; sin esto (sin permiso) la fila solo abre la cita. */
   onNoShow?: (row: RowOf<"unclosed">) => void
+  /** «Confirmar cita» de quien no confirmó, sin abrirla; sin esto (sin permiso) la fila solo abre la cita. */
+  onConfirmAppointment?: (row: RowOf<"unconfirmed">) => void
+  /** Abre al lado una tarea sin conversación; sin esto la fila lleva a donde se resuelve. */
+  onOpenTask?: (taskId: string) => void
+  /** «Atender el pedido» sobre sus datos, al lado; sin esto (sin permiso) la fila lleva a su ficha. */
+  onDataRequest?: (row: RowOf<"dataRequest">) => void
+  /** «Enviar nuevo enlace» del portal, al lado; sin esto (sin permiso) la fila lleva a su ficha. */
+  onPortalReentry?: (row: RowOf<"portalReentry">) => void
+  /** Se envió un presupuesto desde su fila; sin esto (sin permiso) la fila solo lleva a su Plan. */
+  onBudgetSent?: () => void
   /** Abre al lado la lista de quienes aceptaron y no tienen cita. */
   onAcceptedList?: () => void
   /** La fila cuya acción está en curso: sus botones se desactivan y el de la acción dice que trabaja. */
@@ -115,36 +128,35 @@ function badgeOf(row: WaitingRow, context: HomeTextContext): ReactNode {
  * A dónde lleva la fila cuando se resuelve navegando; null si abre algo en esta pantalla.
  * Lo que navega es un enlace con aspecto de fila, no un botón: así lo anuncia el lector de pantalla.
  */
-function linkOf(row: WaitingRow, context: HomeTextContext, props: { className: string; children: ReactNode }): ReactElement | null {
+function linkOf(row: WaitingRow, context: HomeTextContext, handlers: WaitingHandlers, props: { className: string; children: ReactNode }): ReactElement | null {
   // «y N tareas más» abre Tareas en la vista de quien mira: la del equipo para quien dirige, las suyas para los demás.
   const tasksView = context.allTasks ? "todas" : "mias"
   switch (row.kind) {
     case "case":
-      // Los casos del agente viven aquí y en el panel lateral (decisión 21): sin conversación, su tarea en Tareas.
-      return row.conversationId ? null : <Link to="/tasks" search={{ task: undefined, vista: tasksView }} {...props} />
-    case "registrationDone":
-      return <Link to="/patients/$patientId" params={{ patientId: row.patientId }} {...props} />
+      // Los casos del agente viven aquí (decisión 21): sin conversación, su tarea al lado.
+      return row.conversationId || (row.taskId && handlers.onOpenTask) ? null : <Link to="/tasks" search={{ task: undefined, vista: tasksView }} {...props} />
     case "staleEncounter":
       return <Link to="/patients/$patientId/encounters/$encounterId" params={{ patientId: row.patientId, encounterId: row.id }} {...props} />
     // La cita y la lista se abren al lado: Inicio no se va (tablero 12).
+    case "registrationDone":
     case "unconfirmed":
     case "unclosed":
     case "acceptedUnbooked":
       return null
     case "unsentBudget":
-      // El Plan de la persona: «Qué sigue» ofrece «Enviar» y dice por dónde y a quién le llega.
+      // El Plan de la persona; enviarlo es el botón de la fila, que dice por dónde sale.
       return <Link to="/patients/$patientId" params={{ patientId: row.patientId }} search={{ tab: "plan", budgetId: row.id }} {...props} />
     case "possibleDuplicate":
-      // Datos personales de la persona: ahí se ve el documento y se decide si son la misma.
+      // Comparar pide la ficha entera; decidir son los botones de la fila.
       if (row.patientId) return <Link to="/patients/$patientId" params={{ patientId: row.patientId }} search={{ tab: "filiacion" }} {...props} />
       // Quien tenía el documento aún no es paciente: su página de persona.
       return row.personId ? <Link to="/people/$personId" params={{ personId: row.personId }} {...props} /> : null
     case "dataRequest":
-      // Datos › Pedidos sobre sus datos: ahí se comprueba, se envía la copia y se responde.
-      return <Link to="/patients/$patientId" params={{ patientId: row.patientId }} search={{ tab: "pedidos" }} {...props} />
+      // Se atiende al lado; quien no puede, ve Datos › Pedidos sobre sus datos.
+      return handlers.onDataRequest ? null : <Link to="/patients/$patientId" params={{ patientId: row.patientId }} search={{ tab: "pedidos" }} {...props} />
     case "portalReentry":
-      // Datos › Acceso al portal: la fila de su acceso dice «Pidió volver a entrar» y ofrece «Enviar nuevo enlace».
-      return <Link to="/patients/$patientId" params={{ patientId: row.patientId }} search={{ tab: "portal" }} {...props} />
+      // Se envía al lado; quien no puede, ve Datos › Acceso al portal.
+      return handlers.onPortalReentry && row.grantId ? null : <Link to="/patients/$patientId" params={{ patientId: row.patientId }} search={{ tab: "portal" }} {...props} />
     case "consentToPublish":
       return <Link to="/settings/forms" search={{ tab: "consentimientos" }} {...props} />
     case "inventory":
@@ -160,7 +172,9 @@ function linkOf(row: WaitingRow, context: HomeTextContext, props: { className: s
         ? <Link to="/inbox" search={{ conversation: row.conversationId }} {...props} />
         : <Link to="/inbox" search={{ conversation: undefined, view: undefined }} {...props} />
     case "task":
-      return row.more > 0 ? <Link to="/tasks" search={{ task: undefined, vista: tasksView }} {...props} /> : <Link to={row.href} {...props} />
+      if (row.more > 0) return <Link to="/tasks" search={{ task: undefined, vista: tasksView }} {...props} />
+      // Con conversación se resuelve en su hilo; las demás se abren al lado.
+      return handlers.onOpenTask && row.href.startsWith("/tasks") ? null : <Link to={row.href} {...props} />
     case "more":
       if (row.of === "tasks") return <Link to="/tasks" search={{ task: undefined, vista: tasksView }} {...props} />
       if (row.of === "unconfirmed") return <Link to="/agenda" search={{}} {...props} />
@@ -175,19 +189,26 @@ function linkOf(row: WaitingRow, context: HomeTextContext, props: { className: s
 }
 
 function open(row: WaitingRow, handlers: WaitingHandlers) {
-  if (row.kind === "case") handlers.onCase(row)
+  if (row.kind === "case") {
+    if (row.conversationId) handlers.onCase(row)
+    else if (row.taskId) handlers.onOpenTask?.(row.taskId)
+  }
   else if (row.kind === "advice") handlers.onAdvice(row)
   else if (row.kind === "unreached") handlers.onUnreached()
   else if (row.kind === "budgets") handlers.onBudgets(row)
   else if (row.kind === "unconfirmed" || row.kind === "unclosed") openAppointmentAnywhere(row.id)
+  else if (row.kind === "registrationDone") openAppointmentAnywhere(row.appointmentId)
+  else if (row.kind === "dataRequest") handlers.onDataRequest?.(row)
+  else if (row.kind === "portalReentry") handlers.onPortalReentry?.(row)
   else if (row.kind === "acceptedUnbooked") handlers.onAcceptedList?.()
+  else if (row.kind === "task") handlers.onOpenTask?.(row.id)
 }
 
-type QuickAction = { id: string; label: string; run: () => void; primary: boolean }
+type QuickAction = { id: string; label: string; primary: boolean } & ({ run: () => void; href?: undefined } | { href: string; run?: undefined })
 
 /**
  * Lo que la fila hace sin salir de Inicio: «Tomar» un caso que nadie tomó,
- * «Hecha» en una tarea, «Confirmar» o «No es ella» en un representante por
+ * «Hecha» en una tarea, «Confirmar» o «No es representante» en un representante por
  * confirmar. Son botones aparte de la fila, que sigue abriendo el caso, la
  * tarea o la persona.
  */
@@ -201,10 +222,21 @@ function quickActions(row: WaitingRow, handlers: WaitingHandlers, reply: { open:
     const take = handlers.onTake
     return [{ id: "tomar", label: "Tomar este tema", run: () => take(row), primary: true }]
   }
-  // Ya no se puede confirmar: queda decir que no vino (la atención se registra desde la cita).
-  if (row.kind === "unclosed" && handlers.onNoShow) {
-    const noShow = handlers.onNoShow
-    return [{ id: "no-vino", label: "No vino", run: () => noShow(row), primary: false }]
+  // Lo que la fila pide (llamar y confirmar) se hace aquí, sin abrir la cita.
+  if (row.kind === "unconfirmed") {
+    const confirm = handlers.onConfirmAppointment
+    return [
+      ...(row.phone ? [{ id: "llamar", label: "Llamar", href: `tel:${row.phone.replace(/\s+/g, "")}`, primary: false }] : []),
+      ...(confirm ? [{ id: "confirmar", label: "Confirmar cita", run: () => confirm(row), primary: true }] : []),
+    ]
+  }
+  // Ya no se puede confirmar: si vino se registra la atención y, si no, se dice que no vino.
+  if (row.kind === "unclosed") {
+    const { onRegisterVisit: register, onNoShow: noShow } = handlers
+    return [
+      ...(register ? [{ id: "registrar", label: "Registrar la atención", run: () => register(row), primary: true }] : []),
+      ...(noShow ? [{ id: "no-vino", label: "No vino", run: () => noShow(row), primary: false }] : []),
+    ]
   }
   if (row.kind === "registrationDone" && handlers.onArrived) {
     const arrived = handlers.onArrived
@@ -308,6 +340,7 @@ function WaitingRowItem({ row, context, handlers, className }: { row: WaitingRow
   // Quien no abre el resumen del caso (caja) y ya no puede responder desde aquí
   // (Instagram o Messenger cerrados): la fila lo dice, sin un botón que no lleva a nada.
   const stuck = row.kind === "case" && !row.canReply && handlers.noCaseBrief === true
+  const sendsBudget = row.kind === "unsentBudget" && handlers.onBudgetSent !== undefined
   const content = (
     <>
       {iconOf(row, context)}
@@ -323,7 +356,7 @@ function WaitingRowItem({ row, context, handlers, className }: { row: WaitingRow
         </span>
       </span>
       {/* Con un botón propio, la fila solo abre: a la vista lo dice el botón, y la fila sigue nombrando a dónde lleva para el lector de pantalla. En teléfono la acción no ocupa sitio, pero sigue nombrando la fila. */}
-      {actions.length > 0 || replying ? (
+      {actions.length > 0 || replying || sendsBudget ? (
         <span className="sr-only">{waitingOpenText(row, context)}</span>
       ) : (
         <span className="sr-only shrink-0 font-semibold text-primary sm:not-sr-only">
@@ -332,7 +365,7 @@ function WaitingRowItem({ row, context, handlers, className }: { row: WaitingRow
       )}
     </>
   )
-  const link = linkOf(row, context, { className: cn(buttonVariants({ variant: "ghost" }), ROW), children: content })
+  const link = linkOf(row, context, handlers, { className: cn(buttonVariants({ variant: "ghost" }), ROW), children: content })
   return (
     <li className={cn("flex flex-wrap items-center gap-2", className)}>
       {link ?? (stuck ? (
@@ -348,21 +381,37 @@ function WaitingRowItem({ row, context, handlers, className }: { row: WaitingRow
         </Button>
       ))}
       {actions.length > 0 ? (
-        <span className="flex shrink-0 flex-col gap-1.5 max-sm:basis-full max-sm:w-full max-sm:flex-row max-sm:[&>button]:flex-1 sm:flex-row sm:items-center">
-          {actions.map((action) => (
-            <Button
-              key={action.id}
-              type="button"
-              size="sm"
-              variant={action.primary ? "default" : "outline"}
-              className="min-h-11 shrink-0 sm:min-h-8"
-              disabled={busy}
-              aria-label={`${action.label}: ${text.title}`}
-              onClick={action.run}
-            >
-              {busyId === action.id ? "Guardando…" : action.label}
-            </Button>
-          ))}
+        <span className="flex shrink-0 flex-col gap-1.5 max-sm:basis-full max-sm:w-full max-sm:flex-row max-sm:[&>*]:flex-1 sm:flex-row sm:items-center">
+          {actions.map((action) =>
+            action.href ? (
+              <a
+                key={action.id}
+                href={action.href}
+                aria-label={`${action.label}: ${text.title}`}
+                className={cn(buttonVariants({ size: "sm", variant: action.primary ? "default" : "outline" }), "min-h-11 shrink-0 sm:min-h-8")}
+              >
+                {action.label}
+              </a>
+            ) : (
+              <Button
+                key={action.id}
+                type="button"
+                size="sm"
+                variant={action.primary ? "default" : "outline"}
+                className="min-h-11 shrink-0 sm:min-h-8"
+                disabled={busy}
+                aria-label={`${action.label}: ${text.title}`}
+                onClick={action.run}
+              >
+                {busyId === action.id ? "Guardando…" : action.label}
+              </Button>
+            ),
+          )}
+        </span>
+      ) : null}
+      {sendsBudget ? (
+        <span className="shrink-0 max-sm:basis-full max-sm:w-full">
+          <BudgetSendButton patientId={row.patientId} budgetId={row.id} size="sm" className="min-h-11 w-full sm:min-h-8 sm:w-auto" showRecipient={false} reviewable onSent={handlers.onBudgetSent} />
         </span>
       ) : null}
       {replying && row.kind === "case" && handlers.onReply ? (
@@ -375,9 +424,9 @@ function WaitingRowItem({ row, context, handlers, className }: { row: WaitingRow
 /**
  * «Te espera»: la única lista de lo que hay que hacer, una fila por asunto, en
  * el orden que entrega el servidor. Cada fila abre lo que ya existe (el
- * resumen del caso, la recomendación del administrador) o lleva a donde se
- * resuelve; «Tomar» y «Hecha» se hacen aquí mismo. Lo que está aquí no llega a
- * la campana.
+ * resumen del caso, la cita, la tarea) o lleva a donde se resuelve solo si hace
+ * falta; lo que la fila pide se hace aquí mismo. Lo que está aquí no llega a la
+ * campana.
  */
 export function WaitingList({
   rows,

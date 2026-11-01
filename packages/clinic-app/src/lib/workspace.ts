@@ -68,6 +68,8 @@ export type WaitingRow =
       channel: string | null
       createdAt: string
       conversationId: string | null
+      /** Su tarea: sin conversación, es lo que la fila abre. */
+      taskId: string | null
       /** Nadie lo tomó todavía: la fila ofrece «Tomar este tema». */
       unclaimed: boolean
       /** «Ahora»: alta, o dos horas de clínica abierta esperando (decisión 1 del pulido). */
@@ -102,6 +104,7 @@ export type WaitingRow =
       patientId: string
       patientName: string
       startsAt: string
+      professionalUserId: string
       professionalName: string | null
       serviceName: string | null
       branchName: string
@@ -179,6 +182,7 @@ export interface WorkspaceAppointment {
   patientId: string
   patientName: string
   startsAt: string
+  endsAt: string
   status: string
   serviceName: string | null
   professionalUserId: string

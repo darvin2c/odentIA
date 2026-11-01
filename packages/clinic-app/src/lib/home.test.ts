@@ -20,6 +20,15 @@ describe("textos de «Te espera»", () => {
     expect(waitingText(task({ mine: false, assigneeName: null }), context).detail).toBe("Sin fecha · Sin responsable")
   })
 
+  it("una cita sin cerrar le dice a quien no registra atenciones quién lo hace si vino", () => {
+    const row: WaitingRow = {
+      kind: "unclosed", id: "a1", patientId: "p1", patientName: "Elena Huamán", startsAt: "2026-10-11T15:00:00.000Z",
+      professionalUserId: "u1", professionalName: "Dra. Ana Torres", serviceName: "Control", branchName: "Miraflores",
+    }
+    expect(waitingText(row, { ...context, canAttend: true }).detail).toBe("Dra. Ana Torres · Control · Miraflores")
+    expect(waitingText(row, { ...context, canAttend: false }).detail).toBe("Si vino, la registra Dra. Ana Torres · Control · Miraflores")
+  })
+
   it("un pedido sobre sus datos dice qué pidió, hasta cuándo y si falta comprobar que es ella (ADR 0080)", () => {
     const row: WaitingRow = {
       kind: "dataRequest", id: "r1", patientId: "p1", patientName: "Rosa Quispe", request: "copia", dueOn: "2026-10-15", verified: false,
@@ -27,7 +36,7 @@ describe("textos de «Te espera»", () => {
     expect(waitingText(row, context)).toEqual({
       title: "Rosa Quispe pidió una copia de su historia",
       detail: "Responder hasta el jueves 15 oct · falta comprobar que es ella",
-      action: "Atender",
+      action: "Atender el pedido",
     })
     expect(waitingText({ ...row, verified: true }, context).detail).toBe("Responder hasta el jueves 15 oct")
     expect(waitingKey(row)).toBe("dataRequest:r1")
@@ -36,7 +45,7 @@ describe("textos de «Te espera»", () => {
   it("un caso del agente se llama siempre igual y dice su urgencia con palabras", () => {
     const row: WaitingRow = {
       kind: "case", id: "h1", priority: "alta", reason: "pregunta por un reembolso", contactName: "Lucía Paredes", channel: null,
-      createdAt: new Date(Date.now() - 25 * 60_000).toISOString(), conversationId: "c1", unclaimed: true,
+      createdAt: new Date(Date.now() - 25 * 60_000).toISOString(), conversationId: "c1", taskId: "t1", unclaimed: true,
     }
     expect(waitingText(row, context)).toEqual({
       title: "Lucía Paredes · pregunta por un reembolso", detail: "Te lo pasó Sofi hace 25 min · Ahora", action: "Tomar este tema",
@@ -52,13 +61,13 @@ describe("textos de «Te espera»", () => {
   it("con «Tomar» o «Hecha» en su propio botón, la fila sigue diciendo a dónde lleva", () => {
     const row: WaitingRow = {
       kind: "case", id: "h1", priority: "alta", reason: "pregunta por un reembolso", contactName: "Lucía Paredes", channel: null,
-      createdAt: new Date().toISOString(), conversationId: "c1", unclaimed: true,
+      createdAt: new Date().toISOString(), conversationId: "c1", taskId: "t1", unclaimed: true,
     }
     // Sin tomar, «Tomar» es el botón de al lado: pulsar la fila abre el caso.
     expect(waitingOpenText(row, context)).toBe("Ver el caso")
     expect(waitingOpenText({ ...row, unclaimed: false }, context)).toBe("Ver el caso")
     // Sin conversación la fila lleva a los casos del agente.
-    expect(waitingOpenText({ ...row, conversationId: null }, context)).toBe("Revisar")
+    expect(waitingOpenText({ ...row, conversationId: null }, context)).toBe("Ver la tarea")
     expect(waitingOpenText(task({}), context)).toBe("Abrir")
   })
 
@@ -89,7 +98,7 @@ describe("textos de «Te espera»", () => {
       startedAt: "2026-10-11T15:04:00.000Z", missing: ["diagnosis", "evolution"],
     }
     const text = waitingText(stale, context)
-    expect(text).toMatchObject({ title: "La atención de Lucía Fernández quedó sin cerrar", action: "Continuar" })
+    expect(text).toMatchObject({ title: "La atención de Lucía Fernández quedó sin cerrar", action: "Continuar la atención" })
     // La hora va en el formato de la clínica; el día, contado en su zona.
     expect(text.detail).toMatch(/^ayer 10:04.* · le falta el diagnóstico y la evolución$/)
     expect(waitingText({ ...stale, missing: [] }, context).detail).toMatch(/ · lista para firmar$/)
@@ -101,7 +110,7 @@ describe("textos de «Te espera»", () => {
       since: "2026-10-11T20:00:00.000Z", itemCount: 3, totalCents: 54000, currency: "PEN", options: 1,
     }
     const text = waitingText(unsent, context)
-    expect(text).toMatchObject({ title: "Presupuesto de Lucía Fernández sin enviar", action: "Enviar" })
+    expect(text).toMatchObject({ title: "Presupuesto de Lucía Fernández sin enviar", action: "Ver el presupuesto" })
     expect(text.detail).toMatch(/^Armado ayer · 3 tratamientos · S\/\s?540\.00$/)
     expect(waitingText({ ...unsent, options: 2 }, context).detail).toMatch(/ · 2 opciones$/)
     expect(waitingText({ kind: "more", of: "unsentBudgets", count: 2 }, context).title).toBe("2 presupuestos más sin enviar")
@@ -114,7 +123,7 @@ describe("textos de «Te espera»", () => {
       detail: "El documento ya está en otra ficha", createdAt,
     }
     expect(waitingText(duplicate, context)).toEqual({
-      title: "Posible ficha repetida: Pedro Ríos", detail: "Desde su enlace hace 20 min · El documento ya está en otra ficha", action: "Revisar",
+      title: "Posible ficha repetida: Pedro Ríos", detail: "Desde su enlace hace 20 min · El documento ya está en otra ficha", action: "Ver la ficha",
     })
     // Alguien se registró en línea con el documento de una persona que ya estaba.
     const held: WaitingRow = { ...duplicate, id: "t3", source: "registro", patientId: null, personId: "c1", patientName: "Rosa Ochoa", detail: "Escribió: Juan, +51999" }
@@ -128,10 +137,10 @@ describe("textos de «Te espera»", () => {
     // El registro de un menor nombró como representante a alguien que ya estaba.
     const representative: WaitingRow = { ...duplicate, id: "t4", source: "representante", personId: "c2", personName: "Rosa Ochoa", patientName: "Sofía Ochoa", detail: "" }
     expect(waitingText(representative, context).title).toBe("¿Rosa Ochoa es representante de Sofía Ochoa?")
-    // Confirmar la vincula; «No es ella» la descarta sin vincular.
+    // Confirmar la vincula; «No es representante» la descarta sin vincular.
     expect(duplicateActions(representative as Extract<WaitingRow, { kind: "possibleDuplicate" }>)).toEqual([
       { id: "confirmar", label: "Confirmar", primary: true },
-      { id: "descartar", label: "No es ella", primary: false },
+      { id: "descartar", label: "No es representante", primary: false },
     ])
     expect(duplicateActions(duplicate as Extract<WaitingRow, { kind: "possibleDuplicate" }>).map((action) => action.id)).toEqual(["revisada"])
     const reentry: WaitingRow = { kind: "portalReentry", id: "t2", patientId: "p2", contactName: "Lucía Fernández", grantId: "g1", createdAt }
@@ -174,7 +183,7 @@ describe("textos de «Te espera»", () => {
     })
     expect(waitingText({ kind: "more", of: "cases", count: 1 }, context).title).toBe("1 caso más de Sofi")
     expect(waitingText({ kind: "conversations", waiting: 3, oldestAt: new Date(Date.now() - 2 * 3_600_000).toISOString() }, context)).toMatchObject({
-      detail: "La más antigua, hace 2 h", action: "Abrir Bandeja",
+      detail: "La más antigua, hace 2 h", action: "Abrir la Bandeja",
     })
     expect(waitingText({ kind: "more", of: "tasks", count: 4 }, context).detail).toBe("Tuyas y de tu área")
   })

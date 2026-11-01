@@ -5,7 +5,7 @@ import { createPortal } from "react-dom"
 /**
  * Columna lateral del layout: el único lugar a la derecha de la página donde
  * vive lo que se abre «al lado» sin taparla (el formulario o detalle de una
- * lista, el panel del agente). Ocupa todo el alto de la ventana, se
+ * lista, los Avisos). Ocupa todo el alto de la ventana, se
  * redimensiona desde su borde y solo hay una a la vez; cuando no cabe, cada
  * superficie se abre como `Drawer`.
  *
@@ -26,7 +26,7 @@ import { createPortal } from "react-dom"
  *    contenido sale en el `fallback` (un cajón). La decisión se toma al abrir y
  *    no cambia hasta cerrar: pasar de cajón a columna a mitad de una edición
  *    remontaría el formulario.
- * 4. El panel del agente no es un formulario: cede la columna si alguien la
+ * 4. Los Avisos no son un formulario: ceden la columna si alguien la
  *    pide y se abre como cajón si ya está ocupada (lo decide la app).
  */
 

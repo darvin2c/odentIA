@@ -52,14 +52,8 @@ import {
   Wallet,
 } from "lucide-react"
 import { useEffect } from "react"
-import {
-  AGENT_PANEL_EVENTS,
-  AgentPanelButton,
-  AgentPanelMenuItem,
-  AgentPanelProvider,
-  invalidateAgentPanelQueries,
-  useAgentPanelSummary,
-} from "../components/agent-panel"
+import { NoticesColumnProvider } from "../components/notices-column"
+import { AGENT_WORK_EVENTS, invalidateAgentWork } from "../lib/agent-work"
 import { GlobalSearchButton, GlobalSearchProvider, type GlobalSearchScreen } from "../components/global-search"
 import { ArgosPanel } from "../components/argos/argos-panel"
 import { ScheduleHost } from "../components/agenda/schedule-host"
@@ -78,7 +72,7 @@ import { fetchOrgProfile, useOrgProfile } from "../lib/org"
 import { type FullOrganization, type OrgRegion, orgChecks, readOrganization, rememberServerChecks } from "../lib/org-access"
 import { productUi } from "../product/product-ui"
 import { appRoleLabel } from "../lib/product-words"
-import { useOrgEvents } from "../lib/org-events"
+import { isReceiptOnly, useOrgEvents } from "../lib/org-events"
 import { PageDraftGuard } from "../lib/page-draft-guard"
 import { RouterLink } from "../lib/router-link"
 import { PLAN_PATH } from "../lib/billing"
@@ -197,6 +191,9 @@ type NavDefinition =
       permissionsAny?: string[]
       children: NavChild[]
     })
+
+/** Lo que cambia cuántas personas esperan sin pasar por el agente: alguien escribe o se le responde. */
+const WAITING_EVENTS = ["message.created", "message.updated", "conversation.updated"]
 
 const navDefinitions: NavDefinition[] = [
   { label: "Inicio", to: "/home", icon: Home },
@@ -330,8 +327,12 @@ function OrgLayout() {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const role = org.members.find((member) => member.userId === session?.userId)?.role ?? "member"
   const queryClient = useQueryClient()
-  // Una sola suscripción SSE para el layout: agenda y panel del agente.
-  useOrgEvents(["appointment.updated", "saas.subscription.updated", ...AGENT_PANEL_EVENTS], (kind) => {
+  // Una sola suscripción SSE para el layout: agenda, trabajo del agente y el número de «Inicio».
+  useOrgEvents(["appointment.updated", "saas.subscription.updated", ...AGENT_WORK_EVENTS, ...WAITING_EVENTS], (kind, data) => {
+    if (WAITING_EVENTS.includes(kind)) {
+      if (!isReceiptOnly(kind, data)) void queryClient.invalidateQueries({ queryKey: ["workspace-waiting"] })
+      return
+    }
     if (kind === "appointment.updated" || kind === "stream.reconnected") {
       void invalidateAppointmentQueries(queryClient)
     }
@@ -340,25 +341,28 @@ function OrgLayout() {
       void queryClient.invalidateQueries({ queryKey: ["saas", org.id] })
       if (kind === "saas.subscription.updated") return
     }
-    if (kind !== "appointment.updated") invalidateAgentPanelQueries(queryClient)
+    if (kind !== "appointment.updated") invalidateAgentWork(queryClient)
   })
-  // Contador ligero para el badge del agente; la misma consulta alimenta el panel.
-  const agentSummary = useAgentPanelSummary(canAccessAny(role, ["agent.read", "agent.decide"]))
-  // El único contador de los casos del agente: lo que nadie tomó más lo tuyo
-  // (lo cuenta el servidor para quien mira). Panel, pestañas y Resumen no lo repiten.
-  const pendingCases = agentSummary.data?.data.openHandoffs ?? 0
-  // El agente lleva su contador y, para quien solo decide, entra por Pendientes.
-  const withAgentState = <T extends AppShellNavItem>(item: T): T => {
+  // El único contador del menú: cuántas personas te esperan (lo cuenta el servidor para quien mira).
+  const waiting = useQuery({
+    queryKey: ["workspace-waiting"],
+    queryFn: () => apiFetch<{ data: { people: number } }>("/api/workspace/waiting"),
+    refetchInterval: 60_000,
+  })
+  const waitingPeople = waiting.data?.data.people ?? 0
+  const waitingLabel = waitingPeople === 1 ? "persona espera" : "personas esperan"
+  // «Inicio» lleva el contador; al agente, quien solo decide entra por Pendientes.
+  const withNavState = <T extends AppShellNavItem>(item: T): T => {
+    if (item.to === "/home") return waitingPeople > 0 ? { ...item, badge: waitingPeople, badgeLabel: waitingLabel } : item
     if (item.to !== "/agent") return item
-    const target = canAccess(role, "agent.read") ? item : { ...item, to: "/agent/pendientes" }
-    return pendingCases > 0 ? { ...target, badge: pendingCases } : target
+    return canAccess(role, "agent.read") ? item : { ...item, to: "/agent/pendientes" }
   }
   // Filtra entradas y subentradas por permiso: cada grupo muestra solo las hijas autorizadas.
   const navItems = navDefinitions.flatMap((item): AppShellNavEntry[] => {
     const selfVisible =
       (!item.permission || canAccess(role, item.permission)) &&
       (!item.permissionsAny || canAccessAny(role, item.permissionsAny))
-    if (!item.children) return selfVisible ? [withAgentState(item)] : []
+    if (!item.children) return selfVisible ? [withNavState(item)] : []
     const children = item.children
       .filter(
         (child) =>
@@ -366,7 +370,7 @@ function OrgLayout() {
           (!child.permissionsAny || canAccessAny(role, child.permissionsAny)) &&
           !(child.unlessPermission && canAccess(role, child.unlessPermission)),
       )
-      .map(withAgentState)
+      .map(withNavState)
     if (children.length === 0) return []
     if (!selfVisible) return []
     return [{ ...item, children }]
@@ -417,7 +421,7 @@ function OrgLayout() {
       }}
     >
       <SideDockProvider draftGuard={PageDraftGuard}>
-        <AgentPanelProvider notices={(frame) => <NoticesPanel {...frame} />}>
+        <NoticesColumnProvider notices={(frame) => <NoticesPanel {...frame} />}>
           <GlobalSearchProvider orgId={org.id} screens={searchScreens}>
           <HeaderUtilitiesProvider
             value={{
@@ -426,15 +430,10 @@ function OrgLayout() {
                   <GlobalSearchButton />
                   <HelpButton />
                   <WorkspaceNotifications />
-                  <AgentPanelButton />
                 </>
               ),
-              menuItems: (
-                <>
-                  <HeaderHelpMenuItem />
-                  <AgentPanelMenuItem />
-                </>
-              ),
+              menuItems: <HeaderHelpMenuItem />,
+              attention: waitingPeople > 0 ? { count: waitingPeople, label: waitingLabel } : undefined,
             }}
           >
             <Outlet />
@@ -445,7 +444,7 @@ function OrgLayout() {
           {/* La cita y «Nueva cita» desde cualquier pantalla: Argos, listas e Inicio las abren al lado. */}
           <ScheduleHost />
           </GlobalSearchProvider>
-        </AgentPanelProvider>
+        </NoticesColumnProvider>
       </SideDockProvider>
       {/* Después de entrar con el enlace de acceso: pide la nueva contraseña. */}
       <AccessLinkPasswordGate request={authFetch} />

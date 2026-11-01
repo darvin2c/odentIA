@@ -223,7 +223,7 @@ function AgentSupervisionPage() {
         id: "conversation",
         header: "Caso",
         cell: ({ row }) => row.original.conversationId
-          ? <Link to="/inbox" search={{ conversation: row.original.conversationId }} className="text-primary underline">Abrir conversación</Link>
+          ? <Link to="/inbox" search={{ conversation: row.original.conversationId }} className="text-primary underline">Ver la conversación</Link>
           : "Sin conversación",
       },
       {
@@ -407,7 +407,7 @@ function AgentSupervisionPage() {
                   </span>
                   {item.conversationId ? (
                     <Link to="/inbox" search={{ conversation: item.conversationId }} className="text-xs text-primary underline">
-                      Abrir conversación
+                      Ver la conversación
                     </Link>
                   ) : null}
                 </div>

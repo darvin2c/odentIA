@@ -8,7 +8,6 @@ import {
   cn,
   Item,
   ItemContent,
-  SidebarTrigger,
   Skeleton,
   Table,
   TableBody,
@@ -19,7 +18,7 @@ import {
   useIsMobile,
   useSidebarOptional,
 } from "@odentia/ui"
-import { HeaderCompactProvider, MOBILE_NAV_TRIGGER_CLASS, PageHeaderMenu, useHeaderUtilities } from "@odentia/ui-patterns"
+import { HeaderCompactProvider, MobileNavTrigger, PageHeaderMenu, useHeaderUtilities } from "@odentia/ui-patterns"
 import type { ReactNode } from "react"
 
 const LINE_SIZE = {
@@ -148,7 +147,7 @@ export function HeaderShape({ titleClassName }: { titleClassName?: string }) {
   return (
     <HeaderCompactProvider value={isMobile}>
       <header className="flex min-w-0 flex-nowrap items-center gap-2">
-        {sidebar ? <SidebarTrigger className={MOBILE_NAV_TRIGGER_CLASS} /> : null}
+        {sidebar ? <MobileNavTrigger /> : null}
         <div className="flex min-h-[26px] min-w-0 flex-1 items-center md:min-h-8">
           <Skeleton className={cn("h-5 max-w-full md:h-7", titleClassName ?? "w-48")} />
         </div>

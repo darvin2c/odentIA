@@ -1,14 +1,16 @@
-import { Badge, Button, buttonVariants } from "@odentia/ui"
+import { Badge, Button, buttonVariants, toast } from "@odentia/ui"
 import { DetailDrawer, DetailSection, LoadingState, SubmitButton, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { useReceptionName } from "../../lib/agent-names"
+import { invalidateAgentWork } from "../../lib/agent-work"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
-import { timeAgo } from "../../lib/crm"
+import { timeAgo, useMemberName, useMyUserId } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
 import { QueryErrorState } from "../../lib/query-error"
+import { type PassableTopic, PassTopicDialog } from "../inbox/pass-topic-dialog"
 import { HandoffUrgency } from "./handoff-badges"
 
 interface CaseBrief {
@@ -25,6 +27,10 @@ interface CaseBrief {
     asks: string | null
     pending: string | null
     notice: string | null
+    kind: PassableTopic["kind"]
+    assigneeUserId: string | null
+    /** «Ahora»: lo mismo que dice su fila. */
+    urgent: boolean
   } | null
   contactName: string | null
   channel: string | null
@@ -80,7 +86,8 @@ function Messages({ said }: { said: string[] }) {
 /**
  * Resumen del caso para quien lo toma: qué pide la persona, lo que ya se sabe,
  * lo que hizo el agente y lo que falta, sin releer todo el hilo ni volver a
- * preguntar. Se arma con lo que el sistema ya guarda; aquí no se edita nada.
+ * preguntar. Se arma con lo que el sistema ya guarda; lo que se hace con el tema
+ * (tomarlo, pasarlo o resolverlo) es lo mismo que en la Bandeja.
  */
 export function CaseBriefDrawer({
   conversationId,
@@ -88,20 +95,23 @@ export function CaseBriefDrawer({
   canTake,
   inConversation = false,
   onClose,
-  onClaimed,
+  onChanged,
 }: {
   /** La conversación; null = cerrado. */
   conversationId: string | null
   name: string
   /** Puede tomar la conversación (`conversations.write`). */
   canTake: boolean
-  /** Se abrió desde la propia conversación: «Ver la conversación completa» solo cierra el resumen. */
+  /** Se abrió desde la propia conversación: «Ver la conversación» solo cierra el resumen. */
   inConversation?: boolean
   onClose: () => void
-  onClaimed?: () => void
+  /** El tema cambió de manos o se resolvió. */
+  onChanged?: () => void
 }) {
   const queryClient = useQueryClient()
   const receptionName = useReceptionName()
+  const memberName = useMemberName()
+  const myUserId = useMyUserId()
   const [showMessages, setShowMessages] = useState(false)
   const query = useQuery({
     queryKey: ["agent-case-brief", conversationId],
@@ -109,23 +119,42 @@ export function CaseBriefDrawer({
     enabled: conversationId !== null,
     retry: false,
   })
+  const [passing, setPassing] = useState(false)
+  const settled = () => {
+    void queryClient.invalidateQueries({ queryKey: ["conversations"] })
+    void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] })
+    void queryClient.invalidateQueries({ queryKey: ["agent-case-brief", conversationId] })
+    invalidateAgentWork(queryClient)
+    onChanged?.()
+  }
   // «Tomar este tema» es la misma acción de la Bandeja: el tema pasa a quien lo
   // toma y el agente sigue con lo demás (tablero 4d del pulido).
   const claim = useMutation({
     retry: false,
     mutationFn: (handoffId: string) => apiFetch(`/api/workspace/topics/${handoffId}/take`, { method: "POST" }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["conversations"] })
-      void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] })
-      void queryClient.invalidateQueries({ queryKey: ["agent-case-brief", conversationId] })
-      void queryClient.invalidateQueries({ queryKey: ["agent-handoffs"] })
-      onClaimed?.()
+    onSuccess: settled,
+  })
+  // «Pasar este tema a…» y «Marcar resuelto»: las mismas de la Bandeja, sin ir a ella.
+  const topicAction = useMutation({
+    retry: false,
+    mutationFn: ({ topicId, path, body }: { topicId: string; path: "take" | "resolve"; body?: unknown }) =>
+      apiFetch(`/api/conversations/${conversationId}/topics/${topicId}/${path}`, {
+        method: "POST",
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      }),
+    onSuccess: (_result, variables) => {
+      settled()
+      if (variables.path === "resolve") {
+        toast.success("Tema resuelto")
+        onClose()
+      }
     },
   })
 
   if (conversationId === null) return null
   const brief = query.data?.data
-  const claimError = claim.error ? submitErrorMessage(claim.error) : null
+  const actionError = claim.error ?? topicAction.error
+  const claimError = actionError ? submitErrorMessage(actionError) : null
   const handoff = brief?.handoff ?? null
   const told = handoff?.notice ?? brief?.lastAgentMessage?.text ?? null
   const arrived = handoff ? timeAgo(handoff.createdAt) : ""
@@ -139,29 +168,44 @@ export function CaseBriefDrawer({
       headerContent={
         handoff ? (
           <div className="flex flex-wrap items-center gap-2">
-            <HandoffUrgency priority={handoff.priority} />
+            <HandoffUrgency priority={handoff.urgent ? "alta" : handoff.priority} />
             <Badge variant="secondary">{handoff.reason}</Badge>
             <span className="text-sm text-muted-foreground">
-              {handoff.status === "abierta" ? "En cola por recoger" : "Con responsable asignado"}
+              {!handoff.assigneeUserId ? "Nadie lo ha tomado" : handoff.assigneeUserId === myUserId ? "Lo tienes tú" : `Lo tiene ${memberName(handoff.assigneeUserId)}`}
             </span>
           </div>
         ) : undefined
       }
       onClose={onClose}
-      isSubmitting={claim.isPending}
+      isSubmitting={claim.isPending || topicAction.isPending}
       actions={
         brief ? (
           <>
             {inConversation ? (
               <Button type="button" variant="outline" onClick={onClose}>
-                Ver la conversación completa
+                Ver la conversación
               </Button>
             ) : (
               // Lleva a la Bandeja: es un enlace con aspecto de botón, no un botón.
               <Link to="/inbox" search={{ conversation: conversationId }} className={buttonVariants({ variant: "outline" })}>
-                Ver la conversación completa
+                Ver la conversación
               </Link>
             )}
+            {handoff && canTake ? (
+              <Button type="button" variant="outline" disabled={topicAction.isPending} onClick={() => setPassing(true)}>
+                Pasar este tema a…
+              </Button>
+            ) : null}
+            {handoff && canTake ? (
+              <SubmitButton
+                variant={handoff.status === "abierta" ? "outline" : "default"}
+                pending={topicAction.isPending && topicAction.variables?.path === "resolve"}
+                disabled={claim.isPending}
+                onClick={() => topicAction.mutate({ topicId: handoff.id, path: "resolve" })}
+              >
+                Marcar resuelto
+              </SubmitButton>
+            ) : null}
             {handoff?.status === "abierta" && canTake ? (
               <SubmitButton pending={claim.isPending} onClick={() => claim.mutate(handoff.id)}>
                 Tomar este tema
@@ -270,6 +314,15 @@ export function CaseBriefDrawer({
           </p>
         </div>
       )}
+      <PassTopicDialog
+        topic={passing && handoff ? { id: handoff.id, kind: handoff.kind, assigneeUserId: handoff.assigneeUserId, quote: handoff.asks ?? handoff.reason } : null}
+        pending={topicAction.isPending}
+        onClose={() => setPassing(false)}
+        onPass={(topic, userId, toMe) => {
+          setPassing(false)
+          topicAction.mutate({ topicId: topic.id, path: "take", ...(toMe ? {} : { body: { toUserId: userId } }) })
+        }}
+      />
     </DetailDrawer>
   )
 }

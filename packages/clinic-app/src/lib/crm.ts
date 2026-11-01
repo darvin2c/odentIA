@@ -326,8 +326,7 @@ export interface TaskItem {
   updatedAt?: string
   /**
    * Es la tarea de un caso que pasó el agente («Te lo pasó Sofi»), con su
-   * urgencia. Completarla puede resolver la conversación: antes se muestra lo
-   * mismo que «Resolver» (`useCompleteTask`).
+   * urgencia.
    */
   agentCase?: { priority: string } | null
 }

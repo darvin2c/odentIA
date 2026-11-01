@@ -42,7 +42,6 @@ import {
 } from "../../components/agent/reception-drawers"
 import { AgentTestChat, PROBAR_INPUT } from "../../components/agent/test-chat"
 import { TurnOnDrawer } from "../../components/agent/turn-on-drawer"
-import { useAgentPanel } from "../../components/agent-panel"
 import {
   agentModelDown,
   type AgentFunction,
@@ -280,7 +279,6 @@ function ReceptionPage() {
   const { org } = orgRouteApi.useRouteContext()
   const canRead = usePermission("agent.read")
   const canWrite = usePermission("agent.write")
-  const agentPanel = useAgentPanel()
   const receptionName = useReceptionName()
   const [noteFor, setNoteFor] = useState<AgentFunction | null>(null)
   const [limits, setLimits] = useState<LimitsSection | null>(null)
@@ -329,7 +327,7 @@ function ReceptionPage() {
   })
 
   function refresh() {
-    for (const key of ["agent-config", "agent-overview", "agent-panel"]) {
+    for (const key of ["agent-config", "agent-overview", "agent-summary"]) {
       void queryClient.invalidateQueries({ queryKey: [key] })
     }
   }
@@ -517,7 +515,7 @@ function ReceptionPage() {
           <strong className="font-heading text-base font-bold tabular-nums">{today.passed}</strong>{" "}
           {today.passed === 1 ? "pasada a una persona" : "pasadas a una persona"}
         </p>
-        <Button type="button" variant="link" size="sm" className="ml-auto h-auto min-h-8 p-0" onClick={() => agentPanel.setOpen(true, "actividad")}>
+        <Button variant="link" size="sm" className="ml-auto h-auto min-h-8 p-0" render={<Link to="/agent/actividad" />}>
           Ver qué hizo
           <ArrowRight aria-hidden />
         </Button>

@@ -33,6 +33,8 @@ export interface HomeTextContext {
   allTasks: boolean
   /** El nombre del agente de recepción en esta clínica (`useReceptionName`). */
   receptionName: string
+  /** Puede registrar una atención; a quien no, la cita sin cerrar le dice quién la registra. */
+  canAttend?: boolean
 }
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
@@ -92,7 +94,7 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
           `Por su enlace ${ago(row.sentAt)}`,
           `Tiene cita hoy a las ${formatClock(row.startsAt, context.locale, context.timezone)}${row.professionalName ? ` con ${row.professionalName}` : ""}`,
         ]),
-        action: "Abrir su página",
+        action: "Ver la cita",
       }
     case "staleEncounter": {
       const missing = row.missing.map((key) => CLOSING_WORDS[key] ?? key)
@@ -102,7 +104,7 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
           `${daysAgo(row.startedAt, context)} ${formatClock(row.startedAt, context.locale, context.timezone)}`,
           missing.length > 0 ? `le falta ${listed(missing)}` : "lista para firmar",
         ]),
-        action: "Continuar",
+        action: "Continuar la atención",
       }
     }
     case "case":
@@ -112,7 +114,7 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
         // Un solo nombre y una sola escala: «Te lo pasó Sofi hace 25 min · Ahora».
         // «Ahora» lo dice el servidor (decisión 1 del pulido de la Bandeja).
         detail: joined([`${agentCaseRow(context.receptionName)} ${ago(row.createdAt)}`, urgencyWord(row.urgent ? "alta" : row.priority), row.channel ? channelLabel(row.channel) : null]),
-        action: !row.conversationId ? "Revisar" : row.canReply ? "Responder" : row.unclaimed ? "Tomar este tema" : "Ver el caso",
+        action: !row.conversationId ? "Ver la tarea" : row.canReply ? "Responder" : row.unclaimed ? "Tomar este tema" : "Ver el caso",
       }
     case "unconfirmed":
       // Quien no recibe recordatorios se llama el día antes (ADR 0040).
@@ -131,9 +133,10 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
     case "unclosed": {
       // «de ayer 10:00», «de hace 3 días 15:30»: sin cerrar, la cita no cuenta ni como atendida ni como «no vino».
       const day = daysAgo(row.startsAt, context)
+      const who = context.canAttend === false && row.professionalName ? `Si vino, la registra ${row.professionalName}` : row.professionalName
       return {
         title: `La cita de ${row.patientName} de ${day} ${formatClock(row.startsAt, context.locale, context.timezone)} quedó sin cerrar`,
-        detail: joined([row.professionalName, row.serviceName, row.branchName]),
+        detail: joined([who, row.serviceName, row.branchName]),
         action: "Ver la cita",
       }
     }
@@ -147,7 +150,7 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
       return {
         title: row.waiting === 1 ? "1 persona espera respuesta" : `${row.waiting} personas esperan respuesta`,
         detail: row.oldestAt ? `${row.waiting === 1 ? "Escribió" : "La más antigua,"} ${ago(row.oldestAt)}` : "Sin responder en la Bandeja",
-        action: "Abrir Bandeja",
+        action: "Abrir la Bandeja",
       }
     case "stillOpen":
       return {
@@ -156,9 +159,9 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
           : `${row.total} conversaciones siguen abiertas`,
         detail: joined([
           row.quietSince ? `Sin mensajes desde ${ago(row.quietSince)}` : null,
-          row.total === 1 ? "ciérrala con «Resolver» o escríbele" : "ciérralas con «Resolver» o escríbeles",
+          row.total === 1 ? "escríbele o ciérrala" : "escríbeles o ciérralas",
         ]),
-        action: row.total === 1 ? "Abrir" : "Abrir Bandeja",
+        action: row.total === 1 ? "Ver la conversación" : "Abrir la Bandeja",
       }
     case "task":
       return {
@@ -201,7 +204,7 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
           row.totalCents != null ? formatMoney(row.totalCents, row.currency, context.locale) : null,
           row.options > 1 ? `${row.options} opciones` : null,
         ]),
-        action: "Enviar",
+        action: "Ver el presupuesto",
       }
     case "possibleDuplicate":
       if (row.source === "registro" && row.held) {
@@ -222,13 +225,13 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
         return {
           title: `¿${row.personName ?? "Esta persona"} es representante de ${row.patientName}?`,
           detail: joined([`Desde el registro en línea ${ago(row.createdAt)}`, row.detail]),
-          action: "Revisar",
+          action: "Ver la ficha",
         }
       }
       return {
         title: `Posible ficha repetida: ${row.patientName}`,
         detail: joined([`Desde su enlace ${ago(row.createdAt)}`, row.detail]),
-        action: "Revisar",
+        action: "Ver la ficha",
       }
     case "dataRequest":
       return {
@@ -237,7 +240,7 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
           `Responder hasta el ${dayWords(row.dueOn, context.locale)}`,
           row.verified ? null : "falta comprobar que es ella",
         ]),
-        action: "Atender",
+        action: "Atender el pedido",
       }
     case "portalReentry":
       return {
@@ -328,14 +331,14 @@ type DuplicateRow = Extract<WaitingRow, { kind: "possibleDuplicate" }>
 /**
  * Los botones de una fila de documento repetido, además de la fila que lleva
  * a la persona: el representante por confirmar ofrece «Confirmar» y «No es
- * ella»; quien se registró con el documento de otra, «Descartar»; la posible
+ * representante»; quien se registró con el documento de otra, «Descartar»; la posible
  * ficha repetida de «Su enlace», «Revisada».
  */
 export function duplicateActions(row: DuplicateRow): { id: "confirmar" | "descartar" | "revisada" | "revisar"; label: string; primary: boolean }[] {
   if (row.source === "representante") {
     return [
       { id: "confirmar", label: "Confirmar", primary: true },
-      { id: "descartar", label: "No es ella", primary: false },
+      { id: "descartar", label: "No es representante", primary: false },
     ]
   }
   // Con lo que escribió guardado, «Revisar» abre «¿Es la misma persona?»; sin ello, solo descartar.

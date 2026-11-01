@@ -302,6 +302,8 @@ const PLATFORM_PATH_RULES: PlatformPathRule[] = [
   // Regla específica antes de la genérica: las aprobaciones operativas las
   // resuelve quien decide (`agent.decide`), no solo quien supervisa.
   { prefix: "/agent/pendientes", permissions: ["agent.read", "agent.decide"] },
+  // Lo que hizo el agente: quien decide por él también lo ve (recepción).
+  { prefix: "/agent/actividad", permissions: ["agent.read", "agent.decide"] },
   // La dirección vieja de «Pendientes» solo redirige; conserva la misma regla.
   { prefix: "/agent/approvals", permissions: ["agent.read", "agent.decide"] },
   { prefix: "/agent", permissions: ["agent.read"] },

@@ -1,4 +1,4 @@
-import { toast } from "@odentia/ui"
+import { Button, toast } from "@odentia/ui"
 import {
   ConfirmDialog,
   DetailDrawer,
@@ -14,23 +14,27 @@ import {
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link, createFileRoute, useNavigate } from "@tanstack/react-router"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { z } from "zod"
 import { AdminRecommendationDrawer, AdminUnreachedDrawer } from "../../components/agent/admin-recommendation"
 import { CaseBriefDrawer } from "../../components/agent/case-brief"
-import { invalidateAgentPanelQueries, takeCase } from "../../components/agent-panel"
-import { useCompleteTask } from "../../components/crm/resolve-preview"
+import { invalidateAgentWork } from "../../lib/agent-work"
+import { useCompleteTask } from "../../components/crm/complete-task"
+import { TaskDrawer } from "../../components/crm/task-drawer"
 import { CollectDrawer } from "../../components/finance/collect-drawer"
 import { TicketView, ticketDisplayNumber } from "../../components/finance/ticket-view"
 import { AwayLine } from "../../components/home/away-line"
-import { useAppointmentArrival } from "../../components/agenda/arrival"
+import { useAppointmentArrival, useAppointmentVisitStatus } from "../../components/agenda/arrival"
+import { useAttendAppointment } from "../../components/patient/new-encounter-button"
+import { DataRequestDrawer } from "../../components/patient/data-requests-panel"
+import { BudgetAnswerDrawer } from "../../components/patient/plan/next-step-action"
+import { PortalResendDrawer } from "../../components/portal/portal-access-section"
 import { RegistrationHoldDrawer } from "../../components/home/registration-hold-drawer"
 import { AgendaLine, type BranchChoice, CashLine, TodayAgenda, TodayCash, TodayPatients } from "../../components/home/today"
 import { WaitingList } from "../../components/home/waiting-list"
 import { ReportListDrawer } from "../../components/reports/report-list-drawer"
 import { HomePageSkeleton, HomeSkeleton } from "../../components/skeletons/home"
-import { invalidateAppointmentQueries } from "../../lib/agenda"
 import { HomeStart, needsSetup } from "../../components/home-start"
 import { useActiveBranch } from "../../lib/active-branch"
 import { useReceptionName } from "../../lib/agent-names"
@@ -70,12 +74,10 @@ const HOME_EVENTS = [
   "stream.reconnected",
 ]
 
-type BudgetsRow = Extract<WaitingRow, { kind: "budgets" }>
 type CaseRow = Extract<WaitingRow, { kind: "case" }>
 type StaleEncounterRow = Extract<WaitingRow, { kind: "staleEncounter" }>
 type DuplicateRow = Extract<WaitingRow, { kind: "possibleDuplicate" }>
 type InventoryRow = Extract<WaitingRow, { kind: "inventory" }>
-type UnclosedRow = Extract<WaitingRow, { kind: "unclosed" }>
 
 /** El motivo de anular una atención, con el mismo tope que `POST /api/patients/:id/encounters/:encounterId/void`. */
 const VOID_REASON_MAX = 2000
@@ -109,11 +111,11 @@ function HomePage() {
   })
 
   const canDoTasks = usePermission("tasks.write")
-  // «Tomar este tema» desde la fila: la misma acción que en la Bandeja y el panel (toma el tema, no la conversación).
+  // «Tomar este tema» desde la fila: la misma acción que en la Bandeja (toma el tema, no la conversación).
   const take = useMutation({
-    mutationFn: (row: CaseRow) => takeCase({ id: row.id, conversationId: row.conversationId }),
+    mutationFn: (row: CaseRow) => apiFetch(`/api/workspace/topics/${row.id}/take`, { method: "POST" }),
     onSuccess: () => {
-      invalidateAgentPanelQueries(queryClient)
+      invalidateAgentWork(queryClient)
       refresh()
     },
   })
@@ -124,16 +126,11 @@ function HomePage() {
   const canWriteAppointments = usePermission("appointments.write")
   // «Llegó» desde la fila de quien terminó su registro: la misma operación que la Agenda.
   const arrival = useAppointmentArrival()
-  // «No vino» en una cita que quedó sin cerrar: la misma operación que la Agenda.
-  const noShow = useMutation({
-    mutationFn: (row: UnclosedRow) =>
-      apiFetch(`/api/appointments/${row.id}/status`, { method: "POST", body: JSON.stringify({ status: "no_asistio" }) }),
-    onSuccess: async (_result, row) => {
-      toast.success(`Cita de ${row.patientName}: no vino`)
-      await invalidateAppointmentQueries(queryClient)
-      refresh()
-    },
-  })
+  // «No vino» y «Confirmar cita» desde la fila: la misma operación que la Agenda.
+  const visitStatus = useAppointmentVisitStatus()
+  // «Registrar la atención» de una cita que quedó sin cerrar: la misma de la Agenda.
+  const canAttend = usePermission("clinical.write")
+  const attend = useAttendAppointment()
   // Quienes aceptaron y no tienen cita: la lista de Reportes, al lado, para agendarlos desde aquí.
   const [acceptedList, setAcceptedList] = useState(false)
   const confirmRepresentative = useMutation({
@@ -144,7 +141,7 @@ function HomePage() {
       refresh()
     },
   })
-  // «No es ella» y «Descartar»: lo que dejó un registro en línea queda cerrado con su motivo, sin cambiar a nadie.
+  // «No es representante» y «Descartar»: lo que dejó un registro en línea queda cerrado con su motivo, sin cambiar a nadie.
   const discardRegistration = useMutation({
     mutationFn: (row: DuplicateRow) => apiFetch(`/api/tasks/${row.id}/discard`, { method: "POST", body: JSON.stringify({}) }),
     onSuccess: (_result, row) => {
@@ -181,18 +178,21 @@ function HomePage() {
         ? waitingKey(discardRegistration.variables)
         : reorder.isPending && reorder.variables
           ? waitingKey(reorder.variables)
-          : noShow.isPending && noShow.variables
-          ? waitingKey(noShow.variables)
+          : visitStatus.isPending && visitStatus.variables
+          ? `${visitStatus.variables.status === "no_asistio" ? "unclosed" : "unconfirmed"}:${visitStatus.variables.id}`
+          : arrival.isPending && arrival.variables
+          ? `registrationDone:${arrival.variables.id}`
+          : attend.isPending && attend.variables
+          ? `unclosed:${attend.variables.appointment.id}`
           : completion.pendingId
           ? `task:${completion.pendingId}`
           : null
-  const busyAction = discardRegistration.isPending ? "descartar" : null
+  const busyAction = discardRegistration.isPending ? "descartar" : visitStatus.isPending ? (visitStatus.variables?.status === "no_asistio" ? "no-vino" : "confirmar") : attend.isPending ? "registrar" : null
   const actionError =
     (take.error ? submitErrorMessage(take.error) : null) ??
     (confirmRepresentative.error ? submitErrorMessage(confirmRepresentative.error) : null) ??
     (discardRegistration.error ? submitErrorMessage(discardRegistration.error) : null) ??
     (reorder.error ? submitErrorMessage(reorder.error) : null) ??
-    (noShow.error ? submitErrorMessage(noShow.error) : null) ??
     completion.error
 
   const [briefFor, setBriefFor] = useState<{ conversationId: string; name: string } | null>(null)
@@ -200,7 +200,17 @@ function HomePage() {
   const [holdTask, setHoldTask] = useState<string | null>(null)
   const [advice, setAdvice] = useState<string | null>(null)
   const [unreached, setUnreached] = useState(false)
-  const [budgets, setBudgets] = useState<BudgetsRow | null>(null)
+  const [budgetsOpen, setBudgetsOpen] = useState(false)
+  // «¿Qué respondió?» del presupuesto que se anota, sin salir de la lista.
+  const [answering, setAnswering] = useState<{ patientId: string; budgetId: string } | null>(null)
+  const canAnswerBudgets = usePermission("budgets.write")
+  const canSendBudgets = usePermission("budgets.send")
+  // La tarea que se abre al lado desde su fila.
+  const canReadTasks = usePermission("tasks.read")
+  const [openTask, setOpenTask] = useState<string | null>(null)
+  // El pedido sobre sus datos y el reenvío del portal: los mismos cajones de la ficha.
+  const [dataRequest, setDataRequest] = useState<{ patientId: string; requestId: string } | null>(null)
+  const [portalResend, setPortalResend] = useState<{ patientId: string; grantId: string } | null>(null)
   // «Anular con motivo» una atención de otro día sin cerrar: la misma anulación de la atención.
   const [discarding, setDiscarding] = useState<StaleEncounterRow | null>(null)
   const discard = useMutation({
@@ -231,12 +241,14 @@ function HomePage() {
   const receptionName = useReceptionName()
   const data = query.data?.data
   const context = data
-    ? { today: data.date, timezone: data.timezone, locale: data.locale, allTasks: data.access.allTasks, receptionName }
+    ? { today: data.date, timezone: data.timezone, locale: data.locale, allTasks: data.access.allTasks, receptionName, canAttend }
     : null
   const choice = { branches: sede.branches, onChange: (id: string) => sede.choose(id) }
+  // La lista sale de lo último que llegó: lo que se anota se va de ella.
+  const budgets = budgetsOpen ? (data?.waiting.find((row): row is Extract<WaitingRow, { kind: "budgets" }> => row.kind === "budgets") ?? null) : null
   return <PageShell className="flex flex-col gap-4">
     <PageHeader title="Inicio" subtitle={data ? longDay(data.date, data.locale) : "Lo que te toca hoy"} />
-    <AwayLine canSeeCases={data?.access.agent ?? false} canSeeAgenda={data?.access.appointments ?? false} />
+    <AwayLine canSeeAgenda={data?.access.appointments ?? false} />
     {query.isError && !data ? (
       <ErrorState title="No pudimos cargar tu jornada" message="Revisa tu conexión." retryLabel="Reintentar" onRetry={() => void query.refetch()} />
     ) : !data || !context ? (
@@ -258,7 +270,7 @@ function HomePage() {
               onCase: (row) => row.conversationId && setBriefFor({ conversationId: row.conversationId, name: row.contactName ?? "Interlocutor" }),
               onAdvice: (row) => setAdvice(row.key),
               onUnreached: () => setUnreached(true),
-              onBudgets: setBudgets,
+              onBudgets: () => setBudgetsOpen(true),
               onTake: canTake ? (row) => take.mutate(row) : undefined,
               noCaseBrief: !data.access.conversations && !data.access.agent,
               // Responder sin entrar a la Bandeja: el odontólogo su duda clínica, caja un pago (R3 y decisión 3).
@@ -270,7 +282,7 @@ function HomePage() {
                 })
                 const first = row.contactName?.trim().split(/\s+/)[0] || "la persona"
                 toast.success(sent.data.held ? `Quedó por entregar: a ${first} le llega con «Ver respuesta».` : `Le respondiste a ${first}. Tema resuelto.`)
-                invalidateAgentPanelQueries(queryClient)
+                invalidateAgentWork(queryClient)
                 refresh()
               },
               onDone: canDoTasks ? (row) => void completion.complete(row.id) : undefined,
@@ -282,7 +294,19 @@ function HomePage() {
               onArrived: canWriteAppointments
                 ? (row) => arrival.mutate({ id: row.appointmentId, arrived: true, patient: { id: row.patientId, name: row.patientName } })
                 : undefined,
-              onNoShow: canWriteAppointments ? (row) => noShow.mutate(row) : undefined,
+              onRegisterVisit: canAttend
+                ? (row) =>
+                    attend.mutate({
+                      patientId: row.patientId,
+                      appointment: { id: row.id, professionalUserId: row.professionalUserId, professionalName: row.professionalName ?? "otro profesional" },
+                    })
+                : undefined,
+              onNoShow: canWriteAppointments ? (row) => visitStatus.mutate({ id: row.id, status: "no_asistio" }, { onSuccess: refresh }) : undefined,
+              onConfirmAppointment: canWriteAppointments ? (row) => visitStatus.mutate({ id: row.id, status: "confirmada" }, { onSuccess: refresh }) : undefined,
+              onOpenTask: canReadTasks ? setOpenTask : undefined,
+              onDataRequest: canWritePatients ? (row) => setDataRequest({ patientId: row.patientId, requestId: row.id }) : undefined,
+              onPortalReentry: canWritePatients ? (row) => row.grantId && setPortalResend({ patientId: row.patientId, grantId: row.grantId }) : undefined,
+              onBudgetSent: canSendBudgets ? refresh : undefined,
               onAcceptedList: () => setAcceptedList(true),
               onVoidEncounter: (row) => {
                 discardForm.reset({ reason: "" })
@@ -339,7 +363,7 @@ function HomePage() {
       </discardForm.AppField>
     </ConfirmDialog>
     <RegistrationHoldDrawer taskId={holdTask} onClose={() => setHoldTask(null)} />
-    <CaseBriefDrawer conversationId={briefFor?.conversationId ?? null} name={briefFor?.name ?? "Interlocutor"} canTake={canTake} onClose={() => setBriefFor(null)} onClaimed={refresh} />
+    <CaseBriefDrawer conversationId={briefFor?.conversationId ?? null} name={briefFor?.name ?? "Interlocutor"} canTake={canTake} onClose={() => setBriefFor(null)} onChanged={refresh} />
     <AdminRecommendationDrawer recommendationKey={advice} onClose={() => setAdvice(null)} />
       {/* «Ver la lista»: se agenda desde cada fila sin salir de Inicio (tablero 12). */}
       {acceptedList ? (
@@ -353,27 +377,74 @@ function HomePage() {
         />
       ) : null}
     <AdminUnreachedDrawer open={unreached} onClose={() => setUnreached(false)} />
-    {completion.dialog}
     <DetailDrawer
       open={budgets !== null}
-      onClose={() => setBudgets(null)}
+      onClose={() => setBudgetsOpen(false)}
       title="Presupuestos que esperan respuesta"
       description={budgets && budgets.items.length < budgets.total ? `Los ${budgets.items.length} más antiguos de ${budgets.total}` : undefined}
     >
       {budgets && context ? (
         <ul className="flex flex-col divide-y rounded-xl border bg-card">
           {budgets.items.map((item) => (
-            <li key={item.id} className="flex flex-col px-3 py-2 text-sm">
-              <Link to="/patients/$patientId" params={{ patientId: item.patientId }} search={{ tab: "plan" }} className="font-semibold text-primary hover:underline">
-                {item.patientName}
-              </Link>
-              <span>{item.title}</span>
-              <span className="text-muted-foreground">{item.presentedAt ? `Se presentó ${daysAgo(item.presentedAt, context)}` : "Aún sin fecha de presentación"}</span>
+            <li key={item.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2 text-sm">
+              <span className="flex min-w-0 flex-[1_1_12rem] flex-col">
+                <span className="font-semibold">{item.patientName}</span>
+                <span>{item.title}</span>
+                <span className="text-muted-foreground">{item.presentedAt ? `Se presentó ${daysAgo(item.presentedAt, context)}` : "Aún sin fecha de presentación"}</span>
+              </span>
+              {canAnswerBudgets ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="min-h-11 shrink-0 max-sm:w-full sm:min-h-8"
+                  aria-label={`¿Qué respondió? ${item.patientName}`}
+                  onClick={() => setAnswering({ patientId: item.patientId, budgetId: item.id })}
+                >
+                  ¿Qué respondió?
+                </Button>
+              ) : null}
             </li>
           ))}
         </ul>
       ) : null}
     </DetailDrawer>
+    {answering ? (
+      <BudgetAnswerDrawer
+        patientId={answering.patientId}
+        budgetId={answering.budgetId}
+        onClose={() => {
+          setAnswering(null)
+          refresh()
+        }}
+      />
+    ) : null}
+    {dataRequest ? (
+      <DataRequestDrawer
+        patientId={dataRequest.patientId}
+        requestId={dataRequest.requestId}
+        onClose={() => {
+          setDataRequest(null)
+          refresh()
+        }}
+      />
+    ) : null}
+    {portalResend ? (
+      <PortalResendDrawer
+        patientId={portalResend.patientId}
+        grantId={portalResend.grantId}
+        onClose={() => {
+          setPortalResend(null)
+          refresh()
+        }}
+      />
+    ) : null}
+    <TaskDrawer
+      open={openTask !== null}
+      taskId={openTask ?? undefined}
+      onClose={() => setOpenTask(null)}
+      onSaved={refresh}
+    />
   </PageShell>
 }
 

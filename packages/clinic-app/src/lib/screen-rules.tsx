@@ -310,6 +310,7 @@ export function settingsPrimary(screen: keyof typeof SETTINGS_PRIMARY, can: Can,
 const AGENT_TABS = [
   { label: "Resumen", to: "/agent", key: "resumen", permission: "read" },
   { label: "Esperan su sí", to: "/agent/pendientes", key: "pendientes", permission: "decide", phoneLast: true },
+  { label: "Actividad", to: "/agent/actividad", key: "actividad", permission: "decide" },
   { label: "Aprender", to: "/agent/learn", key: "aprender", permission: "read" },
   { label: "Conocimiento", to: "/agent/knowledge", key: "conocimiento", permission: "write" },
 ] as const

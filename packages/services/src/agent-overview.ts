@@ -43,8 +43,8 @@ export interface AgentOverview {
   enabled: boolean
   /**
    * `review` y `lessons`: respuestas por revisar y lecciones por aprobar en
-   * Aprender. Los casos que pasó el agente no se cuentan aquí: su único
-   * contador es el del menú (`getAgentPanelSummary`).
+   * Aprender. Los casos que pasó el agente no se cuentan aquí: cuentan en el
+   * número de «Inicio» del menú (`countWorkspaceWaiting`).
    */
   needsYou: { gaps: number; basicsMissing: number; review: number; lessons: number }
   today: AgentOutcomes

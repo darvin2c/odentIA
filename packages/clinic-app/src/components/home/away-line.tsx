@@ -1,4 +1,5 @@
 import { Button } from "@odentia/ui"
+import { personFirstName } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Sun, X } from "lucide-react"
@@ -17,17 +18,11 @@ const IDLE_MS = 10 * 60_000
  * recibe lo que hicieron los agentes desde la visita anterior. La línea se
  * queda hasta cerrarla con la ✕; no vuelve ese día.
  */
-export function AwayLine({
-  canSeeCases,
-  canSeeAgenda,
-}: {
-  canSeeCases: boolean
-  canSeeAgenda: boolean
-}) {
+export function AwayLine({ canSeeAgenda }: { canSeeAgenda: boolean }) {
   const [away, setAway] = useState<HomeAway | null>(null)
   const [closed, setClosed] = useState(false)
   const lastSent = useRef(0)
-  const firstName = authClient.useSession().data?.user.name.split(" ")[0]
+  const firstName = personFirstName(authClient.useSession().data?.user.name)
   const queryClient = useQueryClient()
 
   useEffect(() => {
@@ -67,19 +62,11 @@ export function AwayLine({
   }, [queryClient])
 
   if (!away || closed) return null
+  // Los casos no llevan botón: están justo debajo, en «Te espera».
   const action =
-    away.cases && canSeeCases ? (
-      <Button
-        size="sm"
-        variant="outline"
-        className="bg-card"
-        render={<Link to="/agent/pendientes" />}
-      >
-        {away.cases === 1 ? "Ver el caso" : "Ver los casos"}
-      </Button>
-    ) : away.appointments && canSeeAgenda ? (
+    away.appointments && canSeeAgenda ? (
       <Button size="sm" variant="outline" className="bg-card" render={<Link to="/agenda" />}>
-        Ver la agenda
+        Abrir la Agenda
       </Button>
     ) : null
 

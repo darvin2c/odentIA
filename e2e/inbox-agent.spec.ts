@@ -131,31 +131,12 @@ test("bandeja: el estado del agente por conversación, las vistas con su total y
   await expect(derivedRow).toHaveCount(0)
   await chip("Esperan al paciente 1").click()
 
-  // La tarjeta del hilo dice qué propuso el agente y que espera el sí. El panel
-  // del agente, en «Esperan al paciente», pone primero lo de este hilo.
+  // La tarjeta del hilo dice qué propuso el agente y que espera el sí.
   await waitingRow.click()
   const card = page.getByRole("article", { name: "Sofi propuso una cita" })
   await expect(card).toContainText("Espera su sí")
   await expect(card).toContainText(/Espera el sí de \S+ en esta conversación\./)
   await info.attach("hilo-con-tarjeta", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
-  await proposeAppointment(derived, "Cita el miércoles 4 de noviembre a las 11:00")
-  await page.locator("header").getByRole("button", { name: /^Agente/ }).click()
-  await page.getByRole("dialog", { name: "Agente" }).getByRole("tab", { name: /^Esperan al paciente/ }).click()
-  const panel = page.getByRole("dialog", { name: "Agente" })
-  await expect(panel.getByRole("tab", { name: /^Esperan al paciente/ })).toHaveAttribute("aria-selected", "true")
-  const cards = panel.getByRole("tabpanel").getByRole("listitem")
-  await expect(cards).toHaveCount(2)
-  await expect(cards.first()).toContainText("De esta conversación")
-  await expect(cards.first()).toContainText("Espera al paciente")
-  await expect(cards.first()).toContainText("Cita el martes 3 de noviembre a las 10:00")
-  await expect(cards.first().getByRole("link", { name: /Abrir caso|Abrir conversación/ })).toHaveCount(0)
-  // Lo que espera al paciente no lo decide el equipo: el panel no ofrece aprobar ni rechazar.
-  await expect(cards.first().getByRole("button")).toHaveCount(0)
-  await expect(cards.nth(1)).not.toContainText("De esta conversación")
-  await expect(cards.nth(1).getByRole("link", { name: "Abrir conversación" })).toBeVisible()
-  await info.attach("panel-de-esta-conversacion", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
-  await page.keyboard.press("Escape")
-  await expect(panel).toBeHidden()
   // Sin el sí del paciente, la propuesta caduca a las 48 horas: la tarjeta dice
   // que venció. La conversación sigue esperando al paciente porque lo último lo dijo
   // el agente, hasta que el agente se despida y la cierre (ADR 0024).
@@ -202,16 +183,16 @@ test("bandeja: el estado del agente por conversación, las vistas con su total y
   await expect(chip("Por atender 1")).toBeVisible()
 })
 
-test("panel del agente: columna fija en pantalla grande y cajón cuando no cabe", async ({
+test("Avisos: columna fija en pantalla grande y cajón cuando no cabe", async ({
   owner,
   fixtureDb,
   nextEventId,
 }, info) => {
   const { page, org } = owner
   await seedThreads(owner, fixtureDb, nextEventId)
-  const button = page.locator("header").getByRole("button", { name: /^Agente/ })
-  const column = page.getByRole("complementary", { name: "Agente" })
-  const drawer = page.getByRole("dialog", { name: "Agente" })
+  const button = page.locator("header").getByRole("button", { name: /^Avisos/ })
+  const column = page.getByRole("complementary", { name: "Avisos" })
+  const drawer = page.getByRole("dialog", { name: "Avisos" })
 
   // Pantalla grande: columna a la derecha; la página sigue en el árbol accesible y usable.
   await page.setViewportSize({ width: 1600, height: 900 })
@@ -229,7 +210,7 @@ test("panel del agente: columna fija en pantalla grande y cajón cuando no cabe"
 
   // El ancho se ajusta con el tirador (teclado y arrastre) y se recuerda; el
   // tope deja a la página el ancho que tiene con la columna por defecto.
-  const grip = column.getByRole("separator", { name: "Ancho del panel del agente" })
+  const grip = column.getByRole("separator", { name: "Ancho de los avisos" })
   const columnWidth = async () => Math.round((await column.boundingBox())?.width ?? 0)
   await grip.focus()
   await page.keyboard.press("ArrowLeft")
@@ -255,14 +236,11 @@ test("panel del agente: columna fija en pantalla grande y cajón cuando no cabe"
   await expect(page.getByRole("heading", { level: 1, name: "Bandeja" })).toBeVisible()
   await expect(column).toBeVisible()
 
-  // En la Bandeja ocupa el lugar de «Contexto»; en «Esperan al paciente» lo del
-  // hilo abierto va primero.
+  // En la Bandeja ocupa el lugar de «Contexto».
   await page.getByRole("tab", { name: "Esperan al paciente 1", exact: true }).click()
   await page.getByRole("button").filter({ hasText: "Espera su sí" }).click()
   const context = page.getByRole("button", { name: "Contexto", exact: true })
   await expect(context).toHaveAttribute("aria-pressed", "false")
-  await column.getByRole("tab", { name: /^Esperan al paciente/ }).click()
-  await expect(column.getByRole("tabpanel").getByRole("listitem").first()).toContainText("De esta conversación")
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("columna-bandeja", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   // Pedir «Contexto» cierra la columna y lo abre.
@@ -310,6 +288,5 @@ test("bandeja: quien no decide por el agente ve el estado del hilo, no la propue
   await expect(page.getByText(/Sofi propuso una cita ·/)).toBeVisible()
   await expect(page.getByRole("article", { name: "Sofi propuso una cita" })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Registrar confirmación" })).toHaveCount(0)
-  await expect(page.locator("header").getByRole("button", { name: /^Agente/ })).toHaveCount(0)
   expect((await api(page, "GET", "/api/agent/proposals?status=propuesta", org.slug)).status).toBe(403)
 })

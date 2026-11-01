@@ -26,10 +26,10 @@ import { createFileRoute, getRouteApi, useNavigate } from "@tanstack/react-route
 import { Ban } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
-  useAgentPanel,
-  useAgentPanelDockBlocker,
-  useAgentPanelFitsBesideContext,
-} from "../../components/agent-panel"
+  useNoticesColumn,
+  useNoticesColumnDockBlocker,
+  useNoticesColumnFitsBesideContext,
+} from "../../components/notices-column"
 import { CapReachedNotice, ReceptionOffNotice } from "../../components/agent/reception-off-notice"
 import { ContactWorkspace, type ContextSection } from "../../components/crm/contact-workspace"
 import { NewConversationDialog } from "../../components/inbox-new-conversation"
@@ -351,15 +351,15 @@ function InboxPage() {
   }, [items, selectedId, selectConversation])
 
   const mode = useDetailMode()
-  // La columna del agente ocupa el lugar de «Contexto» mientras no quepan los
-  // dos; «Contexto» sigue abierto por debajo y vuelve al cerrar el agente. Con
-  // un borrador en «Contexto» el agente se abre como cajón y no lo desmonta.
-  const agentPanel = useAgentPanel()
-  const roomForAgentAndContext = useAgentPanelFitsBesideContext()
-  const agentCoversContext =
-    agentPanel.open && agentPanel.docked && !roomForAgentAndContext && !wsDraft
-  useAgentPanelDockBlocker(mode === "panel" && contextOpen && wsDraft && !roomForAgentAndContext)
-  const contextVisible = contextOpen && !agentCoversContext
+  // La columna de Avisos ocupa el lugar de «Contexto» mientras no quepan los
+  // dos; «Contexto» sigue abierto por debajo y vuelve al cerrarla. Con
+  // un borrador en «Contexto» los Avisos se abren como cajón y no lo desmontan.
+  const noticesColumn = useNoticesColumn()
+  const roomForNoticesAndContext = useNoticesColumnFitsBesideContext()
+  const noticesCoverContext =
+    noticesColumn.open && noticesColumn.docked && !roomForNoticesAndContext && !wsDraft
+  useNoticesColumnDockBlocker(mode === "panel" && contextOpen && wsDraft && !roomForNoticesAndContext)
+  const contextVisible = contextOpen && !noticesCoverContext
   // Con poco ancho, «Contexto» no cabe junto al hilo: se abre encima, en el cajón estándar.
   const contextFits = useMediaQuery("(min-width: 1500px)")
 
@@ -408,8 +408,8 @@ function InboxPage() {
           ? () => {
               if (contextVisible) return requestCloseContext()
               setContextOpen(true)
-              // Pedir «Contexto» con el agente en su lugar cierra el agente.
-              if (agentCoversContext) agentPanel.setOpen(false)
+              // Pedir «Contexto» con los Avisos en su lugar cierra los Avisos.
+              if (noticesCoverContext) noticesColumn.setOpen(false)
             }
           : openContextMobile
       }
@@ -423,7 +423,7 @@ function InboxPage() {
               setContextSection(section)
               if (mode === "panel") {
                 setContextOpen(true)
-                if (agentCoversContext) agentPanel.setOpen(false)
+                if (noticesCoverContext) noticesColumn.setOpen(false)
               } else openContextMobile()
             }
           : undefined
@@ -663,7 +663,7 @@ function InboxPage() {
       )}
       {mode === "panel" && !contextFits ? (
         <DetailDrawer
-          open={contextAllowed && contextVisible && !agentPanel.open && !!selectedId}
+          open={contextAllowed && contextVisible && !noticesColumn.open && !!selectedId}
           onClose={requestCloseContext}
           isDirty={wsDraft}
           title="Contexto"

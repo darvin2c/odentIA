@@ -398,20 +398,6 @@ export async function closeConversation(tx: Db, orgId: string, id: string, actor
   await closeConversationWith(tx, orgId, id, { reason: "manual", byUserId: actorUserId ?? null })
 }
 
-/**
- * Completar la tarea de un tema ya no cierra la conversación (ADR 0050): el
- * agente sigue con lo demás y el ciclo la cierra por silencio, como cualquier
- * otra. Se mantienen para quien pregunta qué pasará al completarla: nada.
- */
-export async function getTaskResolvePreview(
-  _tx: Db,
-  _orgId: string,
-  _taskId: string,
-  _now = new Date(),
-): Promise<{ conversationId: string; contactName: string; preview: ResolvePreview } | null> {
-  return null
-}
-
 /** Tras completar la tarea de un tema: avisa a la Bandeja; la conversación sigue con el agente. */
 export async function resolveAfterHandoffTask(tx: Db, orgId: string, taskId: string, _actorUserId: string | null): Promise<boolean> {
   const [handoff] = await tx

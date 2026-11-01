@@ -3,6 +3,7 @@ import { ALL_PERMISSIONS } from "@odentia/auth/permissions"
 import {
   AUDIT_AREAS,
   claimHandoff,
+  countWorkspaceWaiting,
   getWorkspaceHome,
   replyToTopic,
   listWorkspaceAudit,
@@ -60,6 +61,12 @@ export function createWorkspaceRoute(deps: CrmDeps) {
     const can = (permission: string) => canAccess(memberRole, permission as Permission)
     return runService(c, 200, () => withOrgContext(deps.db, orgId, tx =>
       getWorkspaceHome(tx, orgId, userId, accessFor(memberRole), { branchId: parsed.data.branch, can })))
+  })
+  // El número de «Inicio» en el menú: cuántas personas esperan a quien mira.
+  app.get("/waiting", c => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, async tx =>
+      ({ people: await countWorkspaceWaiting(tx, orgId, userId, accessFor(memberRole)) })))
   })
   // «Mientras no estabas»: Inicio avisa que la persona la está mirando; la primera vez del día responde lo que hicieron los agentes.
   app.post("/visit", c => {

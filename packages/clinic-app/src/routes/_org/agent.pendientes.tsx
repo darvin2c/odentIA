@@ -16,7 +16,7 @@ import { AwaitingAnswerPageSkeleton, AwaitingAnswerSkeleton } from "../../compon
 /**
  * Agente › «Esperan su sí» (decisión 21, tablero 2c): solo las citas que el
  * agente propuso y esperan la respuesta de la persona. Para saber, no para
- * hacer: los casos del agente están en «Te espera» y en el panel lateral, y lo
+ * hacer: los casos del agente están en «Te espera», y lo
  * ya hecho se ve en la conversación y en la cita. Si la persona confirma por
  * teléfono, recepción lo anota con un clic y la cita se reserva con la misma
  * regla que la del agente.
@@ -44,7 +44,7 @@ function AwaitingAnswerPage() {
     enabled: canRead,
   })
   const refresh = () => {
-    for (const key of [AWAITING_ANSWER_KEY[0], "agent-panel", "agent-panel-proposals", "agent-proposals", "conversations", "conversation", "agenda-availability"]) {
+    for (const key of [AWAITING_ANSWER_KEY[0], "agent-summary", "agent-proposals", "conversations", "conversation", "agenda-availability"]) {
       void queryClient.invalidateQueries({ queryKey: [key] })
     }
   }
@@ -120,7 +120,7 @@ function AwaitingAnswerPage() {
                             <>
                               {" "}
                               <Link to="/agenda" search={{}} className="font-semibold text-primary underline-offset-4 hover:underline">
-                                Ir a la Agenda
+                                Abrir la Agenda
                               </Link>
                             </>
                           ) : null}
@@ -134,7 +134,7 @@ function AwaitingAnswerPage() {
                         search={{ conversation: item.conversationId }}
                         className="inline-flex min-h-11 flex-1 items-center justify-center rounded-md border px-3 text-sm font-semibold hover:bg-accent/60 sm:min-h-8 sm:flex-none"
                       >
-                        Ver conversación
+                        Ver la conversación
                       </Link>
                       {canConfirm && !item.taken ? (
                         <SubmitButton

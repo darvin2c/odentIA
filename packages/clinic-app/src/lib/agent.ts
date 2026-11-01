@@ -15,14 +15,12 @@ export function urgencyWord(priority: string): string {
 /**
  * Lo que el agente le pasa al equipo tiene un solo nombre (decisión 1 de la
  * fase 2): cada fila dice «Te lo pasó Sofi», con el nombre que la clínica le
- * puso (Inicio, Bandeja, panel, Tareas), y la lista se llama «Casos del
- * agente». La urgencia es siempre «Ahora / Hoy / Sin apuro». En el código
- * sigue llamándose handoff.
+ * puso (Inicio, Bandeja, Tareas). La urgencia es siempre «Ahora / Hoy / Sin
+ * apuro». En el código sigue llamándose handoff.
  */
 export function agentCaseRow(receptionName: string): string {
   return `Te lo pasó ${receptionName}`
 }
-export const AGENT_CASES_TITLE = "Casos del agente"
 
 /** Etiquetas en español para las acciones del agente autónomo. */
 export const ACTION_LABEL: Record<string, string> = {
@@ -80,33 +78,8 @@ export function proposalErrorMessage(proposal: Pick<AgentProposal, "error" | "re
   return error
 }
 
-export interface AgentHandoff {
-  id: string
-  conversationId: string | null
-  contactName: string | null
-  channel: string | null
-  reason: string
-  summary: string
-  priority: string
-  /** Qué pide la persona, en una frase, si quien derivó lo dejó escrito. */
-  asks: string | null
-  /** Lo que falta preguntar o hacer. */
-  pending: string | null
-  /** El aviso que recibió la persona al pasar su caso. */
-  notice: string | null
-  assigneeUserId: string | null
-  taskId: string | null
-  /** Plazo de recogida/resolución según la prioridad. */
-  dueAt: string | null
-  /** abierta | tomada | resuelta (derivado de su tarea). */
-  status: "abierta" | "tomada" | "resuelta"
-  createdAt: string
-  /** «Ahora»: alta, o ya pasaron dos horas de clínica abierta esperando (decisión 1 del pulido). */
-  urgent?: boolean
-}
-
-/** Resumen ligero del panel del agente (legible con agent.decide). */
-export interface AgentPanelSummary {
+/** Resumen ligero del agente (legible con agent.decide). */
+export interface AgentSummary {
   enabled: boolean
   /** Propuestas que esperan el sí del interlocutor; se ven, el equipo no las decide. */
   awaitingContact: number

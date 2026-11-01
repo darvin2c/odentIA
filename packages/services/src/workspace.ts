@@ -301,6 +301,7 @@ export interface WorkspaceAppointment {
   professionalName: string
   roomName: string
   branchName: string
+  endsAt: string
   /** Cuándo llegó; null si nadie lo marcó. */
   arrivedAt: string | null
   /** El momento de la cita (`appointmentVisit`, ADR 0032): de ahí salen la sala, «Ahora» y «Más tarde». */
@@ -402,6 +403,7 @@ async function workspaceToday(
       ${iso(sql`a.starts_at`)} as "startsAt", a.status, a.service_name as "serviceName",
       a.professional_user_id as "professionalUserId", u.name as "professionalName", ch.name as "roomName", b.name as "branchName",
       case when a.arrived_at is null then null else ${iso(sql`a.arrived_at`)} end as "arrivedAt",
+      ${iso(sql`a.ends_at`)} as "endsAt",
       a.ends_at > now() as open,
       e.id as "encounterId", e.status as "encounterStatus",
       case when e.id is null then null else ${iso(sql`e.started_at`)} end as "encounterStartedAt",
@@ -550,7 +552,7 @@ async function waitingCases(
   const items = rows
     .map(row => ({
       id: row.id, priority: row.priority, urgent: row.urgent, topicKind: row.kind, reason: row.reason, contactName: row.contactName,
-      channel: row.channel, createdAt: row.createdAt, conversationId: row.conversationId,
+      channel: row.channel, createdAt: row.createdAt, conversationId: row.conversationId, taskId: row.taskId,
       unclaimed: row.assigneeUserId === null,
       canReply: replies(row),
       quote: replies(row) && row.sourceMessageId ? (quotes.get(row.sourceMessageId) ?? null) : null,
@@ -563,18 +565,36 @@ async function waitingCases(
 /**
  * Conversaciones que esperan respuesta (la vista «Esperan respuesta» de la
  * Bandeja, con su misma definición) y desde cuándo espera la que más lleva.
- * Con `withoutCases`, sin las que tienen un caso abierto del agente: esas ya
- * son su propia fila y no se cuentan dos veces.
+ * Sin las que tienen un caso abierto del agente: esas ya son su propia fila y
+ * no se cuentan dos veces. Con `assignedTo`, solo las que lleva esa persona:
+ * quien atiende no recibe la cuenta de toda la clínica.
  */
-async function waitingConversations(tx: Db, orgId: string, withoutCases: boolean) {
+async function waitingConversations(tx: Db, orgId: string, assignedTo: string | null) {
   const conv = sql.raw("c")
   const [row] = await tx.execute<{ waiting: number; oldestAt: string | null }>(sql`
     with pending as (
       select ${unansweredSinceSql(conv)} as since from conversation c where c.organization_id=${orgId} and c.status='open'
         and not ${screenedSql(conv)} and c.test_by_user_id is null
-        ${withoutCases ? sql`and not ${handoffOpenExistsSql(conv)}` : sql``}
+        and not ${handoffOpenExistsSql(conv)}
+        ${assignedTo ? sql`and c.assigned_user_id = ${assignedTo}` : sql``}
     ) select count(since)::int as waiting, ${iso(sql`min(since)`)} as "oldestAt" from pending`)
   return row ?? { waiting: 0, oldestAt: null }
+}
+
+/**
+ * Cuántas personas esperan a quien mira: el único número del menú, en «Inicio».
+ * Los casos del agente sin tomar o suyos, más las conversaciones que esperan
+ * respuesta y no son un caso; nunca lo que ya tiene otra persona, aunque quien
+ * dirige lo vea en «Te espera».
+ */
+export async function countWorkspaceWaiting(tx: Db, orgId: string, userId: string, access: WorkspaceAccess): Promise<number> {
+  const cases = access.agent
+    ? await countOpenHandoffs(tx, orgId, { forUserId: userId })
+    : access.conversations || access.topics
+      ? (await waitingCases(tx, orgId, userId, false, { onlyMine: true, onlyPayments: !access.conversations && access.topics === true })).total
+      : 0
+  const conversations = access.conversations ? (await waitingConversations(tx, orgId, access.agent ? null : userId)).waiting : 0
+  return cases + conversations
 }
 
 /**
@@ -635,10 +655,10 @@ async function waitingRegistrationsDone(tx: Db, orgId: string): Promise<WaitingR
  * Citas de un día que ya terminó (en la zona de su sede o, sin ella, la de la clínica) que siguen en pie sin
  * llegada: nadie dijo si vinieron. De la más antigua a la más reciente.
  */
-async function waitingUnclosed(tx: Db, orgId: string, timezone: string): Promise<{ items: WaitingUnclosed[]; total: number; nextAt: string | null }> {
+async function waitingUnclosed(tx: Db, orgId: string, timezone: string, professionalUserId: string | null): Promise<{ items: WaitingUnclosed[]; total: number; nextAt: string | null }> {
   const rows = await tx.execute<{ [K in keyof WaitingUnclosed]: WaitingUnclosed[K] } & { total: number }>(sql`
     select a.id, a.patient_id as "patientId", pp.display_name as "patientName", ${iso(sql`a.starts_at`)} as "startsAt",
-      u.name as "professionalName", a.service_name as "serviceName", b.name as "branchName",
+      a.professional_user_id as "professionalUserId", u.name as "professionalName", a.service_name as "serviceName", b.name as "branchName",
       count(*) over ()::int as total
     from appointment a
     join branch b on b.id = a.branch_id and b.organization_id = a.organization_id
@@ -646,6 +666,7 @@ async function waitingUnclosed(tx: Db, orgId: string, timezone: string): Promise
     join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     left join "user" u on u.id = a.professional_user_id
     where a.organization_id = ${orgId} and not a.is_test and a.status in ('programada', 'confirmada') and a.arrived_at is null
+      ${professionalUserId ? sql`and a.professional_user_id = ${professionalUserId}` : sql``}
       and (a.starts_at at time zone coalesce(b.timezone, ${timezone}))::date < (now() at time zone coalesce(b.timezone, ${timezone}))::date
       -- Con su atención empezada no está sin cerrar: está en atención (y su borrador ya sale aparte).
       and not exists (select 1 from encounter e where e.organization_id = a.organization_id and e.appointment_id = a.id and e.status <> 'anulada')
@@ -906,8 +927,8 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
     staleEncounters: access.attends ? await waitingStaleEncounters(tx, orgId, userId, timezone) : [],
     // Quien ve la agenda de la sede llama a quien no confirmó; quien atiende no.
     unconfirmed: access.appointments && !access.ownAppointments ? await waitingUnconfirmed(tx, orgId) : null,
-    // Y cierra lo que ya pasó: ¿vino o no vino?
-    unclosed: access.appointments && !access.ownAppointments ? await waitingUnclosed(tx, orgId, timezone) : null,
+    // Y cierra lo que ya pasó: ¿vino o no vino? Quien atiende, las suyas: si vino, le toca registrar la atención.
+    unclosed: access.appointments ? await waitingUnclosed(tx, orgId, timezone, access.ownAppointments ? userId : null) : null,
     // Lo aceptado sin cita, para quien ve Reportes: la fila abre esa lista para agendarlos.
     acceptedUnbooked: options.can?.("reports.read") ? await acceptedUnbookedOf(tx, orgId) : null,
     // Quien ve la agenda de la sede sabe quién ya completó su registro para su cita de hoy.
@@ -919,7 +940,7 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
     // Los pedidos sobre sus datos, para quien los atiende (ADR 0080).
     dataRequests: options.can?.("patients.write") ? (await dueDataRequests(tx, orgId, day.date)).map(({ kind, ...item }) => ({ ...item, request: kind }))
       : [],
-    conversations: access.conversations ? await waitingConversations(tx, orgId, access.agent) : null,
+    conversations: access.conversations ? await waitingConversations(tx, orgId, access.agent ? null : userId) : null,
     stillOpen: access.conversations ? await waitingStillOpen(tx, orgId, userId, access) : null,
     overdueTasks: tasks.overdue,
     nextTask: tasks.next,

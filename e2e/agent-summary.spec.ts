@@ -211,7 +211,7 @@ test("bandeja: con Recepción apagada lo dice, y solo quien administra puede ir 
   await call(page, "PUT", "/api/agent/config", org.slug, { enabled: true })
   await page.setViewportSize({ width: 1440, height: 900 })
   // El aviso depende del resumen del panel: se espera esa respuesta antes de afirmar que no está.
-  const panelLoaded = page.waitForResponse((response) => response.url().includes("/api/agent/panel") && response.ok())
+  const panelLoaded = page.waitForResponse((response) => response.url().includes("/api/agent/summary") && response.ok())
   await gotoHydrated(page, tenant(org.slug, "/inbox"))
   await panelLoaded
   await expect(page.getByRole("heading", { level: 1, name: "Bandeja" })).toBeVisible()

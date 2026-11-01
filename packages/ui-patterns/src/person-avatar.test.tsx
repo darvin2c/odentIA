@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest"
-import { personInitials } from "./person-avatar.js"
+import { personFirstName, personInitials } from "./person-avatar.js"
+
+describe("nombre con que se saluda", () => {
+  it("salta el tratamiento", () => {
+    expect(personFirstName("Dra. Ana Torres")).toBe("Ana")
+    expect(personFirstName("Rosa Quispe")).toBe("Rosa")
+    expect(personFirstName("Dra.")).toBeUndefined()
+  })
+})
 
 describe("iniciales de una persona", () => {
   it("toma el nombre y el primer apellido, sin el tratamiento", () => {

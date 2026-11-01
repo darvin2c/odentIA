@@ -12,7 +12,7 @@ import { branch } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
 import { beforeAll, expect, it } from "vitest"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
-import { claimHandoff, countOpenHandoffs, createHandoff, getAgentPanelSummary, getAgentRunStats, listAgentRuns } from "./agent-operations.js"
+import { claimHandoff, countOpenHandoffs, createHandoff, getAgentSummary, getAgentRunStats, listAgentRuns } from "./agent-operations.js"
 import { countConversationViews } from "./conversations.js"
 import { getDebts } from "./finance.js"
 import { getReportAgent } from "./report-agent.js"
@@ -27,6 +27,7 @@ import {
   readWorkspaceNotification,
   settleWorkspaceNotifications,
   type WorkspaceAccess,
+  countWorkspaceWaiting,
 } from "./workspace.js"
 import { insertTestPatients } from "./test-patient.js"
 
@@ -492,7 +493,7 @@ it("un caso del agente sale una sola vez: ni su tarea ni su conversación se rep
     return row!.id
   }
   const lucia = await thread("Lucía Paredes")
-  await thread("Jorge Ramos")
+  const jorge = await thread("Jorge Ramos")
   const handoff = await withOrgContext(appDb, orgId, tx => createHandoff(tx, orgId, null, {
     conversationId: lucia, reason: "Pregunta por un reembolso", summary: "Pide su dinero", priority: "alta", createdBy: "agent",
   }))
@@ -505,9 +506,11 @@ it("un caso del agente sale una sola vez: ni su tarea ni su conversación se rep
   expect(rowsOf(home.waiting, "task").map(row => row.id)).not.toContain(handoff.taskId)
   // Lucía ya es su propia fila: solo Jorge espera respuesta.
   expect(rowsOf(home.waiting, "conversations")).toMatchObject([{ waiting: 1 }])
-  // Sin acceso a los casos (odontología), su conversación sí cuenta: es la única fila que la muestra.
-  const noAgent = await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, rita, { ...access, agent: false }))
-  expect(rowsOf(noAgent.waiting, "conversations")).toMatchObject([{ waiting: 2 }])
+  // Sin acceso a los casos (odontología), solo las que lleva: no recibe la cuenta de toda la clínica.
+  const clinician = () => withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, rita, { ...access, agent: false }))
+  expect(rowsOf((await clinician()).waiting, "conversations")).toEqual([])
+  await ownerDb.update(conversation).set({ assignedUserId: rita }).where(eq(conversation.id, jorge))
+  expect(rowsOf((await clinician()).waiting, "conversations")).toMatchObject([{ waiting: 1 }])
   // La campana no repite el caso.
   const notices = await withOrgContext(appDb, orgId, tx => listWorkspaceNotifications(tx, orgId, rita, ["tasks.read", "conversations.read", "agent.decide"]))
   expect(notices.items).toEqual([])
@@ -515,9 +518,18 @@ it("un caso del agente sale una sola vez: ni su tarea ni su conversación se rep
   expect(await withOrgContext(appDb, orgId, tx => countOpenHandoffs(tx, orgId, { forUserId: rita }))).toBe(1)
   await withOrgContext(appDb, orgId, tx => claimHandoff(tx, orgId, tomas, handoff.id))
   expect(await withOrgContext(appDb, orgId, tx => countOpenHandoffs(tx, orgId, { forUserId: rita }))).toBe(0)
-  expect((await withOrgContext(appDb, orgId, tx => getAgentPanelSummary(tx, orgId, tomas))).openHandoffs).toBe(1)
+  expect((await withOrgContext(appDb, orgId, tx => getAgentSummary(tx, orgId, tomas))).openHandoffs).toBe(1)
   expect(rowsOf((await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, tomas, { ...access, allTasks: false }))).waiting, "case"))
     .toMatchObject([{ id: handoff.id, unclaimed: false }])
+  // El número de «Inicio»: los casos sin tomar o suyos más las conversaciones que esperan y no son un caso.
+  const waitingFor = (who: string, role: WorkspaceAccess) => withOrgContext(appDb, orgId, tx => countWorkspaceWaiting(tx, orgId, who, role))
+  expect(await waitingFor(rita, access)).toBe(1)
+  expect(await waitingFor(tomas, access)).toBe(2)
+  // Sin acceso a los casos (odontología), solo lo suyo: su caso y las conversaciones que lleva.
+  expect(await waitingFor(rita, { ...access, agent: false })).toBe(1)
+  expect(await waitingFor(tomas, { ...access, agent: false })).toBe(1)
+  // Un rol sin conversaciones ni casos no cuenta nada.
+  expect(await waitingFor(rita, restricted)).toBe(0)
 })
 
 it("la campana: nadie recibe aviso de lo suyo, «Marcar todo leído» y cada aviso llega con el permiso que declara", async () => {
@@ -689,7 +701,10 @@ it("«Te espera» pide cerrar las citas de días anteriores sin llegada ni atenc
 
   const home = await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, recipient, { ...restricted, appointments: true }))
   expect(rowsOf(home.waiting, "unclosed").map(row => row.patientName)).toEqual(["Confirmada sin cerrar", "Sin cerrar"])
-  // Quien solo ve sus citas (el odontólogo) no recibe estas filas: las cierra recepción.
+  // Quien solo ve sus citas (el odontólogo) recibe las suyas: si vino, le toca registrar la atención.
   const own = await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, ana, { ...restricted, appointments: true, ownAppointments: true }))
-  expect(rowsOf(own.waiting, "unclosed")).toEqual([])
+  expect(rowsOf(own.waiting, "unclosed").map(row => row.professionalUserId)).toEqual([ana, ana])
+  // Y no las de otro profesional.
+  const other = await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, recipient, { ...restricted, appointments: true, ownAppointments: true }))
+  expect(rowsOf(other.waiting, "unclosed")).toEqual([])
 })

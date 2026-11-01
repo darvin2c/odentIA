@@ -64,6 +64,8 @@ export interface WaitingCase {
   channel: string | null
   createdAt: string
   conversationId: string | null
+  /** Su tarea: sin conversación, es lo que la fila abre. */
+  taskId: string | null
   /** Nadie lo tomó todavía: la fila ofrece «Tomar». */
   unclaimed: boolean
 }
@@ -228,6 +230,7 @@ export interface WaitingUnclosed {
   patientId: string
   patientName: string
   startsAt: string
+  professionalUserId: string
   professionalName: string | null
   serviceName: string | null
   branchName: string

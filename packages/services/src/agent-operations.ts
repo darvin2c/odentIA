@@ -3483,15 +3483,15 @@ export async function countAwaitingContact(tx: Db, orgId: string): Promise<numbe
   return row?.count ?? 0
 }
 
-export interface AgentPanelSummary {
+export interface AgentSummary {
   enabled: boolean
   /** Propuestas que esperan el sí del interlocutor; se ven, el equipo no las decide. */
   awaitingContact: number
   /** Citas propuestas que esperan el sí de la persona: el número de la pestaña «Esperan su sí». */
   awaitingAnswer: number
   /**
-   * Casos que pasó el agente y esperan a quien mira: sin tomar o suyos. Es el
-   * único contador (el del menú del Agente); ninguna otra parte lo repite.
+   * Casos que pasó el agente y esperan a quien mira: sin tomar o suyos. Cuentan
+   * en el número de «Inicio» del menú (`countWorkspaceWaiting`).
    */
   openHandoffs: number
   /** Corridas de hoy que respondieron o derivaron (zona de la organización). */
@@ -3503,10 +3503,10 @@ export interface AgentPanelSummary {
 }
 
 /**
- * Resumen ligero para el botón y la cabecera del panel del agente: legible
+ * Resumen ligero del agente para quien atiende: legible
  * con `agent.decide` (recepción) sin exponer configuración ni modelo.
  */
-export async function getAgentPanelSummary(tx: Db, orgId: string, userId: string): Promise<AgentPanelSummary> {
+export async function getAgentSummary(tx: Db, orgId: string, userId: string): Promise<AgentSummary> {
   await expireDueProposals(tx, orgId)
   const { locale, timezone } = await getOrgLocale(tx, orgId)
   const [cfg] = await tx

@@ -5,7 +5,6 @@ import {
   getRegistrationHold,
   resolveRegistrationHold,
   getTask,
-  getTaskResolvePreview,
   listTasks,
   operationBodySchema,
   pageTasks,
@@ -139,22 +138,6 @@ export function createTasksRoute(deps: CrmDeps) {
     }
   })
 
-  /**
-   * Lo que pasará al completar la tarea de un caso que pasó el agente: lo mismo
-   * que «Resolver» en la Bandeja (despedida y cierre). `null` si completarla no
-   * cierra ninguna conversación. El nombre solo viaja a quien puede ver a la persona.
-   */
-  app.get("/:id/resolve-preview", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    const id = z.string().uuid().safeParse(c.req.param("id"))
-    if (!id.success) return validationError(c, id.error.issues)
-    const seesPerson = canAccess(memberRole, "conversations.read") || canAccess(memberRole, "crm.read")
-    return runService(c, 200, async () => {
-      const result = await withOrgContext(deps.db, orgId, (tx) => getTaskResolvePreview(tx, orgId, id.data))
-      return result && !seesPerson ? { ...result, contactName: "la persona" } : result
-    })
-  })
-
   app.get("/:id", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     return runService(c, 200, async () => {
@@ -190,7 +173,7 @@ export function createTasksRoute(deps: CrmDeps) {
     })
   })
 
-  // «No es ella» y «Descartar» en «Te espera»: lo que dejó un registro en línea queda cerrado con su motivo (tasks.write).
+  // «No es representante» y «Descartar» en «Te espera»: lo que dejó un registro en línea queda cerrado con su motivo (tasks.write).
   app.post("/:id/discard", async (c) => {
     const { orgId, userId } = orgContextOf(c)
     const params = z.object({ id: z.uuid() }).safeParse(c.req.param())

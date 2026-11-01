@@ -85,7 +85,7 @@ import { AppointmentSearch } from "../../components/agenda/appointment-search"
 import { BookingDrawer, type BookingSeed } from "../../components/agenda/booking-drawer"
 import { ScheduleDrawer } from "../../components/agenda/schedule-editor"
 import { RoomForm } from "../../components/agenda/room-form"
-import { useAppointmentArrival } from "../../components/agenda/arrival"
+import { useAppointmentArrival, useAppointmentVisitStatus } from "../../components/agenda/arrival"
 import { dayShort, shortName } from "../../components/agenda/shared"
 import { useAttendAppointment } from "../../components/patient/new-encounter-button"
 import { MyCalendarDrawer } from "../../components/agenda/my-calendar-drawer"
@@ -100,6 +100,7 @@ import {
   invalidateAppointmentQueries,
   visitLabel,
   visitStage,
+  stepBeforeArrival,
 } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
 import { useCan, useMyUserId, usePermission } from "../../lib/crm"
@@ -177,9 +178,6 @@ const STATUSES: AppointmentStatus[] = [
   "no_asistio",
   "cancelada",
 ]
-
-/** «Confirmar» deja paso a «Llegó» desde una hora antes de la cita. */
-const ARRIVAL_WINDOW_MS = 60 * 60_000
 
 /** Lo cancelado o no asistido deja el sitio libre: no ocupa la rejilla. */
 const occupies = (status: AppointmentStatus) => status !== "cancelada" && status !== "no_asistio"
@@ -669,26 +667,7 @@ function AgendaPage() {
     : []
 
   // ----- Acciones -----
-  const statusMutation = useMutation({
-    mutationFn: (input: { id: string; status: AppointmentStatus }) =>
-      apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${input.id}/status`, {
-        method: "POST",
-        body: JSON.stringify({ status: input.status }),
-      }),
-    onSuccess: async (result) => {
-      const text =
-        result.data.status === "confirmada"
-          ? `Cita de ${result.data.patientName} confirmada`
-          : `Cita de ${result.data.patientName}: ${SCHEDULE_AGENDA_LABELS[result.data.status].toLocaleLowerCase("es")}`
-      toast.success(text)
-      setMessage(text)
-      await invalidate()
-    },
-    onError: async (error) => {
-      toast.error(rejectionSaid(error))
-      await invalidate()
-    },
-  })
+  const statusMutation = useAppointmentVisitStatus({ onDone: setMessage })
   const moveMutation = useMutation({
     mutationFn: (input: {
       id: string
@@ -784,22 +763,21 @@ function AgendaPage() {
     if (item.visit === "no_vino" || item.visit === "cancelada") {
       return canWrite ? { label: "Reagendar", onSelect: () => rebook(patientOf(item)) } : null
     }
-    if (!before(item)) return null
-    if (unclosed(item)) {
+    const step = stepBeforeArrival(item, now, isToday(item))
+    if (step === "cerrar") {
       if (canAttend) return { label: "Registrar la atención", pending: busy(item.id), onSelect: () => attendItem(item) }
       return canWrite ? { label: "No vino", pending: statusMutation.isPending && statusMutation.variables?.id === item.id, onSelect: () => statusMutation.mutate({ id: item.id, status: "no_asistio" }) } : null
     }
     if (!canWrite) return null
-    // Hoy, cerca de la hora o pasada, lo que toca es marcar que llegó (eso también la confirma).
-    const soon = isToday(item) && Date.parse(item.startsAt) - Date.parse(now) <= ARRIVAL_WINDOW_MS
-    if (item.visit === "por_confirmar" && !soon) {
+    // Hoy, cerca de la hora, lo que toca es marcar que llegó (eso también la confirma).
+    if (step === "confirmar") {
       return {
-        label: "Confirmar",
+        label: "Confirmar cita",
         pending: statusMutation.isPending && statusMutation.variables?.id === item.id,
         onSelect: () => statusMutation.mutate({ id: item.id, status: "confirmada" }),
       }
     }
-    return isToday(item)
+    return step === "llego"
       ? { label: "Llegó", pending: busy(item.id), onSelect: () => arrival.mutate({ id: item.id, arrived: true, patient: patientOf(item) }) }
       : null
   }

@@ -1,6 +1,7 @@
 import { Badge, Button, Checkbox, FieldDescription, RadioGroup, RadioGroupItem } from "@odentia/ui"
 import {
   ConfirmDialog,
+  DetailDrawer,
   EmptyState,
   ErrorState,
   FormDrawer,
@@ -283,6 +284,39 @@ function draftOf(scope: PortalScope): PortalAccessScopeDraft {
 }
 
 type AccessMode = { kind: "give" } | { kind: "change" | "resend"; row: PortalAccessRow }
+
+/**
+ * «Enviar nuevo enlace» desde «Te espera»: el mismo formulario de la ficha, sin
+ * salir de Inicio. Su acceso sigue vigente: no se vuelve a comprobar su identidad.
+ */
+export function PortalResendDrawer({ patientId, grantId, onClose }: { patientId: string; grantId: string; onClose: () => void }) {
+  const queryClient = useQueryClient()
+  const key = ["portal-access", patientId]
+  const query = useQuery({ queryKey: key, queryFn: () => fetchPortalAccessApi(patientId), retry: false })
+  const row = query.data?.access.find((item) => item.grantId === grantId) ?? null
+  if (!query.data || !row) {
+    return (
+      <DetailDrawer open title="Enviar nuevo enlace" isLoading={query.isPending} onClose={onClose}>
+        {query.isError ? (
+          <ErrorState title="No pudimos cargar su acceso" error={query.error} onRetry={() => void query.refetch()} />
+        ) : query.isPending ? null : (
+          <EmptyState title="Ya no tiene acceso al portal" description="Se lo quitaron desde que se abrió la pantalla." />
+        )}
+      </DetailDrawer>
+    )
+  }
+  return (
+    <AccessDrawer
+      patientId={patientId}
+      summary={query.data}
+      mode={{ kind: "resend", row }}
+      onClose={() => {
+        void queryClient.invalidateQueries({ queryKey: key })
+        onClose()
+      }}
+    />
+  )
+}
 
 /**
  * Lo que hace falta para dar acceso, cambiarlo o reenviarlo, dicho en su

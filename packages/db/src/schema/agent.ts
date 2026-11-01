@@ -270,7 +270,7 @@ export const agentHandoff = pgTable(
      * Cuándo pasa a «Ahora»: dos horas de clínica abierta desde que espera una
      * respuesta del equipo (decisión 1 del pulido). Vuelve a contar si el equipo
      * responde con «Enviar, sigue pendiente». Una sola regla para la Bandeja,
-     * Inicio y el panel del agente.
+     * Inicio y Agente.
      */
     urgentAt: timestamp("urgent_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

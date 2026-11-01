@@ -259,3 +259,23 @@ export function minutesLabel(minutes: number): string {
   const rest = minutes % 60
   return `${String(hours).padStart(2, "0")}:${String(rest).padStart(2, "0")}`
 }
+
+/** «Confirmar cita» deja paso a «Llegó» desde una hora antes de la cita. */
+const ARRIVAL_WINDOW_MS = 60 * 60_000
+
+/**
+ * El paso de una cita que aún no llega, con la misma regla en la lista de la
+ * Agenda, su cajón e Inicio: pasada su hora se cierra («Registrar la atención»
+ * o «No vino»); hoy, cerca de la hora, «Llegó»; y antes, confirmarla.
+ */
+export function stepBeforeArrival(
+  item: { visit: AppointmentVisit; startsAt: string; endsAt: string },
+  now: string,
+  isToday: boolean,
+): "cerrar" | "llego" | "confirmar" | null {
+  if (item.visit !== "por_confirmar" && item.visit !== "confirmada") return null
+  if (Date.parse(item.endsAt) <= Date.parse(now)) return "cerrar"
+  const soon = isToday && Date.parse(item.startsAt) - Date.parse(now) <= ARRIVAL_WINDOW_MS
+  if (item.visit === "por_confirmar" && !soon) return "confirmar"
+  return isToday ? "llego" : null
+}

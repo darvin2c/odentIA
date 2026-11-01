@@ -5,12 +5,13 @@ import { Link, useNavigate } from "@tanstack/react-router"
 import { CalendarDays, Wallet } from "lucide-react"
 import { type ReactNode, useId } from "react"
 import type { BranchOption } from "../../lib/active-branch"
-import { visitLabel, visitName, visitState } from "../../lib/agenda"
+import { stepBeforeArrival, visitLabel, visitName, visitState } from "../../lib/agenda"
 import { usePermission, useMyUserId } from "../../lib/crm"
 import { type DebtRow, debtConcepts, debtDue, formatClock } from "../../lib/finance-cash"
 import { agendaSummary, attendedPercent, patientsSummary } from "../../lib/home"
 import type { WorkspaceAppointment, WorkspaceCash, WorkspaceToday, WorkspaceTodaySummary } from "../../lib/workspace"
-import { useAppointmentArrival } from "../agenda/arrival"
+import { useAppointmentArrival, useAppointmentVisitStatus } from "../agenda/arrival"
+import { openAppointmentAnywhere, openBookingAnywhere } from "../agenda/schedule-host"
 import { BranchSwitcher } from "../branch-switcher"
 import { useAttendAppointment } from "../patient/new-encounter-button"
 
@@ -58,8 +59,8 @@ function DayProgress({ percent }: { percent: number }) {
 function VisitText({ item, now, timeZone }: { item: WorkspaceAppointment; now: string; timeZone: string }) {
   const state = visitState(item.visit)
   return (
-    <span className={cn("flex shrink-0 items-center gap-1 text-[13px] font-semibold", statusTextClass(state))}>
-      <StatusIcon status={state} className="size-3.5" />
+    <span className={cn("flex min-w-0 items-center gap-1 text-[13px] font-semibold", statusTextClass(state))}>
+      <StatusIcon status={state} className="size-3.5 shrink-0" />
       {visitLabel({ ...item, encounter: item.encounter ? { ...item.encounter, status: "borrador", endedAt: null } : null }, { now, timeZone })}
     </span>
   )
@@ -69,27 +70,45 @@ const detailOf = (parts: Array<string | null | false>) => parts.filter(Boolean).
 
 /**
  * «Agenda de hoy» de una sede: quién está en la sala, lo que falta y quién no
- * vino. Cada fila abre la cita; al lado, su paso: «Llegó», «Deshacer» o
- * «Reagendar». Se refresca sola con cada cambio de la agenda.
+ * vino. Cada fila abre la cita al lado; a su derecha, el mismo paso que en la
+ * Agenda. Se refresca sola con cada cambio de la agenda.
  */
 export function TodayAgenda({ today, locale, choice }: { today: WorkspaceToday; locale: string; choice: BranchChoice }) {
   const headingId = useId()
   const navigate = useNavigate()
   const now = useScheduleNow()
   const canWrite = usePermission("appointments.write")
-  const rebook = (patient: { id: string; name: string }) => void navigate({ to: "/agenda", search: { patientId: patient.id, branch: branch?.id } })
+  const canAttend = usePermission("clinical.write")
+  const rebook = (patient: { id: string; name: string }) => openBookingAnywhere({ patient, lockedPatient: true })
   const arrival = useAppointmentArrival({ onRebook: rebook })
+  const visitStatus = useAppointmentVisitStatus()
+  const attend = useAttendAppointment()
   const { summary, branch } = today
   const agenda = { branch: branch?.id }
-  const actionOf = (item: WorkspaceAppointment): { label: string; run: () => void } | null => {
-    if (!canWrite) return null
+  const attendItem = (item: WorkspaceAppointment) =>
+    attend.mutate({
+      patientId: item.patientId,
+      appointment: { id: item.id, professionalUserId: item.professionalUserId, professionalName: item.professionalName },
+    })
+  const actionOf = (item: WorkspaceAppointment): { label: string; primary: boolean; run: () => void } | null => {
     const patient = { id: item.patientId, name: item.patientName }
-    if (item.visit === "por_confirmar" || item.visit === "confirmada") {
-      return { label: "Llegó", run: () => arrival.mutate({ id: item.id, arrived: true, patient }) }
+    if (item.visit === "llego") {
+      if (canAttend) return { label: "Atender", primary: true, run: () => attendItem(item) }
+      return canWrite ? { label: "Deshacer", primary: false, run: () => arrival.mutate({ id: item.id, arrived: false }) } : null
     }
-    if (item.visit === "llego") return { label: "Deshacer", run: () => arrival.mutate({ id: item.id, arrived: false }) }
-    if (item.visit === "no_vino") return { label: "Reagendar", run: () => rebook(patient) }
-    return null
+    if (item.visit === "no_vino") return canWrite ? { label: "Reagendar", primary: false, run: () => rebook(patient) } : null
+    const step = stepBeforeArrival(item, now, true)
+    if (step === "cerrar") {
+      if (canAttend) return { label: "Registrar la atención", primary: true, run: () => attendItem(item) }
+      return canWrite
+        ? { label: "No vino", primary: false, run: () => visitStatus.mutate({ id: item.id, status: "no_asistio" }) }
+        : null
+    }
+    if (!canWrite) return null
+    if (step === "confirmar") {
+      return { label: "Confirmar cita", primary: true, run: () => visitStatus.mutate({ id: item.id, status: "confirmada" }) }
+    }
+    return step === "llego" ? { label: "Llegó", primary: true, run: () => arrival.mutate({ id: item.id, arrived: true, patient }) } : null
   }
   return (
     <section aria-labelledby={headingId} className={CARD}>
@@ -111,25 +130,25 @@ export function TodayAgenda({ today, locale, choice }: { today: WorkspaceToday; 
             <ul className="flex flex-col divide-y">
               {today.appointments.map((item) => {
                 const action = actionOf(item)
-                const busy = arrival.isPending && arrival.variables?.id === item.id
+                const busy =
+                  (arrival.isPending && arrival.variables?.id === item.id) ||
+                  (visitStatus.isPending && visitStatus.variables?.id === item.id) ||
+                  (attend.isPending && attend.variables?.appointment.id === item.id)
                 return (
                   <li key={item.id} className="flex items-center gap-2 py-0.5">
-                    <Link
-                      to="/agenda"
-                      search={{ appointmentId: item.id, branch: branch?.id }}
-                      className={cn(buttonVariants({ variant: "ghost" }), ROW)}
-                    >
+                    <Button type="button" variant="ghost" className={ROW} onClick={() => openAppointmentAnywhere(item.id)}>
                       <span className="w-12 shrink-0 font-semibold tabular-nums">{formatClock(item.startsAt, locale, today.timezone)}</span>
                       <span className="flex min-w-0 flex-1 flex-col">
                         <span className="truncate font-semibold">{item.patientName}</span>
                         <span className="truncate text-[13px] text-muted-foreground">{detailOf([item.professionalName, item.serviceName])}</span>
+                        {/* Debajo, no al lado: un estado largo no le quita el sitio al nombre. */}
+                        <VisitText item={item} now={now} timeZone={today.timezone} />
                       </span>
-                      <VisitText item={item} now={now} timeZone={today.timezone} />
-                    </Link>
+                    </Button>
                     {action ? (
                       <SubmitButton
                         size="sm"
-                        variant={action.label === "Llegó" ? "default" : "outline"}
+                        variant={action.primary ? "default" : "outline"}
                         className="min-h-11 shrink-0 sm:min-h-8"
                         pending={busy}
                         aria-label={`${action.label}: ${item.patientName}`}
@@ -256,10 +275,10 @@ export function TodayPatients({ today, locale, multiBranch }: { today: Workspace
               <Link
                 to="/patients/$patientId/encounters/$encounterId"
                 params={{ patientId: item.patientId, encounterId: item.encounter.id }}
-                aria-label={`${item.encounter.professionalUserId === myUserId ? "Seguir la atención" : "Ver la atención"}: ${item.patientName}`}
+                aria-label={`${item.encounter.professionalUserId === myUserId ? "Continuar la atención" : "Ver la atención"}: ${item.patientName}`}
                 className={cn(buttonVariants({ variant: "outline", size: "sm" }), "min-h-11 shrink-0 sm:min-h-8")}
               >
-                {item.encounter.professionalUserId === myUserId ? "Seguir la atención" : "Ver la atención"}
+                {item.encounter.professionalUserId === myUserId ? "Continuar la atención" : "Ver la atención"}
               </Link>
             ) : null,
           )}
@@ -368,7 +387,7 @@ export function TodayCash({
           className="p-5"
           title="Nadie por cobrar de lo atendido hoy"
           description="Cuando se cierre una atención con costo, la persona aparece aquí sola."
-          actionLabel="Ir a Caja"
+          actionLabel="Abrir la Caja"
           onAction={() => void navigate({ to: "/finance", search: finance })}
         />
       ) : (
@@ -380,7 +399,7 @@ export function TodayCash({
             ))}
           </ul>
           <Link to="/finance" search={finance} className={MORE}>
-            Ir a Caja
+            Abrir la Caja
           </Link>
         </>
       )}
@@ -406,7 +425,7 @@ export function CashLine({ cash, locale }: { cash: WorkspaceCash; locale: string
           {collectedText(cash, locale)} · {pending === 0 ? "nadie por cobrar" : `${peopleText(pending)} por cobrar`}
         </span>
       </span>
-      <span className="shrink-0 font-semibold text-primary">Ir a Caja</span>
+      <span className="shrink-0 font-semibold text-primary">Abrir la Caja</span>
     </Link>
   )
 }

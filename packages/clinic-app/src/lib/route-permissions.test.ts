@@ -10,6 +10,10 @@ it("«Pendientes» la abre quien la abría como «Aprobaciones»: también quien
   expect(platformPathPermission("/agent/pendientes")).toEqual(platformPathPermission("/agent/approvals"))
 })
 
+it("«Actividad» la abre también quien solo decide por el agente", () => {
+  expect(platformPathPermission("/agent/actividad")).toEqual(["agent.read", "agent.decide"])
+})
+
 it("la ficha y Contactos redirigen con la misma regla que la página de la persona", () => {
   // Odontología y caja no leen el CRM: una dirección vieja de Contactos no puede dejarlos fuera.
   expect(platformPathPermission("/contacts/123")).toEqual(platformPathPermission("/people/123"))

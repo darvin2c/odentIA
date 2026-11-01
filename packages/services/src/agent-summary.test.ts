@@ -13,7 +13,7 @@ import {
   countAwaitingContact,
   createHandoff,
   createProposal,
-  getAgentPanelSummary,
+  getAgentSummary,
   getAgentPatientSummary,
   listHandoffs,
 } from "./agent-operations.js"
@@ -111,7 +111,7 @@ it("el resumen cuenta lo que espera al paciente y los casos por atender, y no cu
     { organizationId: ORG, model: "prueba", status: "omitida", startedAt: new Date() },
   ])
   expect(await run((tx) => countAwaitingContact(tx, ORG))).toBe(1)
-  const summary = await run((tx) => getAgentPanelSummary(tx, ORG, RECEP))
+  const summary = await run((tx) => getAgentSummary(tx, ORG, RECEP))
   expect(summary).toMatchObject({
     awaitingContact: 1, openHandoffs: 1, interventionsToday: 2, failedToday: 2, enabled: false,
   })

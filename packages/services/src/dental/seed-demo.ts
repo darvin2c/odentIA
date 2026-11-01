@@ -3739,7 +3739,7 @@ await db.transaction((tx) =>
 )
 // «Te espera» de recepción con lo que deja el registro en línea cuando el
 // documento ya es de alguien: Valeria registra a su hijo por el QR (su vínculo
-// de «Madre» espera «Confirmar» o «No es ella», tarea `confirmar_representante`)
+// de «Madre» espera «Confirmar» o «No es representante», tarea `confirmar_representante`)
 // y alguien se registra con el DNI de Valeria (no se crea a nadie: queda con lo
 // que escribió para «¿Es la misma persona?», tarea `registro_con_documento`).
 await db.transaction((tx) =>
