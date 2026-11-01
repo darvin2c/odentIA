@@ -99,6 +99,7 @@ export type WaitingRow =
       why: "sin_confirmar" | "sin_recordatorios"
       id: string
       patientId: string
+      personId?: string | null
       patientName: string
       phone: string | null
       startsAt: string

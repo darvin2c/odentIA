@@ -318,6 +318,9 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): WaitingT
   }
 }
 
+/** Cierra una frase sin repetir el punto: «09:00 a. m.» y «¿es la misma persona?» ya terminan. */
+export const sentence = (words: string): string => (/[.?!]$/.test(words) ? words : `${words}.`)
+
 /** Lo que se dice de una fila plegada en otra: «también su cita sin cerrar». */
 export function alsoWords(row: WaitingRow): string {
   switch (row.kind) {

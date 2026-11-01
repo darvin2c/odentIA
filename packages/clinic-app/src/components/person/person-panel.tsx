@@ -266,7 +266,7 @@ export function PersonPanel({
       {panel.suggestions.slots.length > 0 ? (
         <div className="flex flex-col gap-1.5">
           <p className="text-[13px] text-muted-foreground">
-            <span className="font-bold text-foreground">Horarios libres{panel.suggestions.professionalName ? ` con ${panel.suggestions.professionalName}` : ""}.</span> <span className="max-sm:sr-only">Tocar uno lo escribe en tu respuesta; no lo aparta.</span>
+            <span className="font-bold text-foreground">Horarios libres{panel.suggestions.professionalName ? ` con ${panel.suggestions.professionalName}` : ""}.</span> <span className="max-sm:sr-only">Tocar uno lo escribe; no lo aparta.</span>
           </p>
           <div className="flex gap-1.5 overflow-x-auto sm:flex-wrap">
             {panel.suggestions.slots.map((slot) => (
@@ -284,11 +284,11 @@ export function PersonPanel({
           </div>
         </div>
       ) : null}
-      {panel.suggestions.prices.length > 0 || panel.suggestions.noPriceFor ? (
+      {panel.suggestions.prices.length === 0 && panel.suggestions.noPriceFor ? <p className="text-[13px] text-muted-foreground">{panel.suggestions.noPriceFor}</p> : null}
+      {panel.suggestions.prices.length > 0 ? (
         <div className="flex flex-col gap-1.5">
           <p className="text-[13px] text-muted-foreground">
-            <span className="font-bold text-foreground">Tu lista de precios.</span> Tocar uno lo escribe en tu respuesta.
-            {panel.suggestions.noPriceFor ? ` ${panel.suggestions.noPriceFor}` : ""}
+            <span className="font-bold text-foreground">Tu lista de precios.</span> Tocar uno lo escribe.
           </p>
           <div className="flex flex-wrap gap-1.5">
             {panel.suggestions.prices.map((price) => (

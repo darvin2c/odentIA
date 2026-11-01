@@ -6,7 +6,7 @@ import { type ReactNode, useState } from "react"
 import { invalidateAppointmentQueries } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
 import { fetchMyProfessionalProfile, saveProfessionalProfileApi } from "../../lib/encounters"
-import { alsoWords, type HomeTextContext, waitingText } from "../../lib/home"
+import { type HomeTextContext, sentence, waitingKey, waitingText } from "../../lib/home"
 import { createReorderDrafts } from "../../lib/inventory"
 import { activeOrgLocale } from "../../lib/locale"
 import { useOrgProfile } from "../../lib/org"
@@ -30,9 +30,9 @@ export function AlsoList({ rows, context, onRun }: { rows: WaitingRow[]; context
         const text = waitingText(row, context)
         const label = row.kind === "task" ? "Hecha" : text.action
         return (
-          <li key={`${row.kind}-${alsoWords(row)}`} className="flex items-center gap-3 rounded-xl bg-warning/10 p-3 text-sm">
+          <li key={waitingKey(row)} className="flex items-center gap-3 rounded-xl bg-warning/10 p-3 text-sm">
             <span className="min-w-0 flex-1">
-              <strong className="font-bold">También:</strong> {(text.ask ?? text.title).replace(/^./, (first) => first.toLowerCase())}.
+              <strong className="font-bold">También:</strong> {sentence((text.ask ?? text.title).replace(/^./, (first) => first.toLowerCase()))}
             </span>
             {label ? (
               <Button type="button" size="sm" variant="secondary" className="min-h-11 shrink-0 sm:min-h-8" aria-label={`${label}: ${text.title}`} onClick={() => onRun(row)}>
@@ -174,11 +174,6 @@ export function CallPanel({
   const status = useAppointmentVisitStatus()
   const [confirmCancel, setConfirmCancel] = useState(false)
   const [writing, setWriting] = useState(false)
-  const contact = useQuery({
-    queryKey: ["patient-person", row.patientId],
-    queryFn: () => apiFetch<{ data: { personId: string } }>(`/api/patients/${row.patientId}/person`),
-    retry: false,
-  })
   const cancel = useMutation({
     retry: false,
     // Lo dijo por teléfono: ya lo sabe, no hace falta otro mensaje.
@@ -239,7 +234,7 @@ export function CallPanel({
               </div>
               <p className="text-[13px] text-muted-foreground">
                 ¿No contestó?{" "}
-                {contact.data ? (
+                {row.personId ? (
                   <Button type="button" variant="link" className="h-auto min-h-0 p-0 text-[13px] font-semibold" onClick={() => setWriting(true)}>
                     Escríbele
                   </Button>
@@ -253,7 +248,7 @@ export function CallPanel({
         }
       >
         <div className="flex flex-col gap-4">
-          <p className="text-sm">{text.ask}.</p>
+          {text.ask ? <p className="text-sm">{sentence(text.ask)}</p> : null}
           {row.phone ? (
             <a href={`tel:${row.phone.replace(/\s+/g, "")}`} className={cn(buttonVariants(), "min-h-11")} aria-label={`Llamar: ${row.patientName}`}>
               Llamar al {row.phone}
@@ -275,7 +270,7 @@ export function CallPanel({
         onClose={() => setConfirmCancel(false)}
         onConfirm={() => cancel.mutate()}
       />
-      {contact.data ? <WriteToPersonDialog open={writing} onClose={() => setWriting(false)} people={[{ contactId: contact.data.data.personId, displayName: row.patientName }]} /> : null}
+      {row.personId ? <WriteToPersonDialog open={writing} onClose={() => setWriting(false)} people={[{ contactId: row.personId, displayName: row.patientName }]} /> : null}
     </>
   )
 }

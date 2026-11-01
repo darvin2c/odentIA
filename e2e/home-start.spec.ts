@@ -3,6 +3,7 @@ import type { Db } from "@odentia/db"
 import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { agentHandoff } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
+import { automationJob } from "@odentia/db/schema/automation"
 import { patient, patientCharge } from "@odentia/db/schema/clinical"
 import { contact, crmTask } from "@odentia/db/schema/crm"
 import type { Page, TestInfo } from "@playwright/test"
@@ -281,6 +282,70 @@ for (const width of [1440, 390]) {
       await page.getByRole("region", { name: "Agenda de hoy" }).getByRole("button", { name: "Reagendar: Paciente con cita" }).click()
       await expect(surface(page).filter({ hasText: "Paciente con cita" }).filter({ hasText: "Nueva cita" })).toBeVisible()
       await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/home"))
+    })
+
+    test("«Llamar»: el número y lo que dijo se anotan al lado; «Escríbele» abre su conversación", async ({ owner, fixtureDb }) => {
+      await activeDay(fixtureDb, owner)
+      await setRole(fixtureDb, owner, "reception")
+      const organizationId = owner.org.id
+      const people = ["Confirma por teléfono", "No viene más", "Quiere otra hora", "Sin contestar"]
+      const contacts = await fixtureDb.insert(contact).values(people.map((displayName, index) => ({ organizationId, displayName, phone: `+5198765430${index}` }))).returning({ id: contact.id })
+      const patients = await fixtureDb
+        .insert(patient)
+        .values(contacts.map((row, index) => ({ organizationId, personId: row.id, patientNumber: 10 + index })))
+        .returning({ id: patient.id })
+      const appointments = await fixtureDb
+        .insert(appointment)
+        .values(
+          patients.map((row, index) => {
+            const startsAt = new Date(Date.now() + (26 + index) * 3_600_000)
+            return { organizationId, branchId: owner.branchId, patientId: row.id, professionalUserId: owner.user.id, serviceName: "Control", startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30 }
+          }),
+        )
+        .returning({ id: appointment.id })
+      // Se le recordó y no confirmó: le toca a recepción llamarle.
+      await fixtureDb.insert(automationJob).values(appointments.map((row) => ({ organizationId, kind: "recordatorio_cita", status: "enviado", dedupeKey: `recordatorio_cita:${row.id}:24`, scheduledFor: new Date(), appointmentId: row.id })))
+      const page = owner.page
+      await page.setViewportSize({ width, height: 844 })
+      await gotoHydrated(page, tenant(owner.org.slug, "/home"))
+      const waiting = page.getByRole("region", { name: "Te espera" })
+      const rowOf = (name: string) => waiting.getByRole("listitem").filter({ hasText: name })
+      const openCall = async (name: string) => {
+        // En teléfono «Hoy» muestra las primeras: las demás están a un toque.
+        const others = waiting.getByRole("button", { name: /^Ver los otros/ })
+        if (await others.isVisible()) await others.click()
+        await rowOf(name).getByRole("button", { name: `Llamar: ${name}` }).click()
+        return surface(page).filter({ hasText: "¿Qué te dijo?" })
+      }
+      const statusOf = async (index: number) => (await fixtureDb.select({ status: appointment.status }).from(appointment).where(eq(appointment.id, appointments[index]!.id)))[0]?.status
+
+      const calling = await openCall("Confirma por teléfono")
+      await expect(calling.getByRole("link", { name: "Llamar: Confirma por teléfono" })).toHaveAttribute("href", "tel:+51987654300")
+      await calling.getByRole("button", { name: "Confirmó por teléfono" }).click()
+      await expect(rowOf("Confirma por teléfono")).toHaveCount(0)
+      expect(await statusOf(0)).toBe("confirmada")
+      await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/home"))
+
+      // «No viene» pide confirmar y no le manda otro mensaje: ya lo dijo.
+      const cancelling = await openCall("No viene más")
+      await cancelling.getByRole("button", { name: "No viene", exact: true }).click()
+      await page.getByRole("alertdialog").getByRole("button", { name: "Cancelar la cita" }).click()
+      await expect(rowOf("No viene más")).toHaveCount(0)
+      expect(await statusOf(1)).toBe("cancelada")
+
+      // «Quiere otra hora» abre el cambio de hora de esa cita, sin salir de Inicio.
+      const moving = await openCall("Quiere otra hora")
+      await moving.getByRole("button", { name: "Quiere otra hora" }).click()
+      await expect(surface(page).filter({ hasText: "Quiere otra hora" }).getByRole("button", { name: "Mover cita" })).toBeVisible()
+      await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/home"))
+      await gotoHydrated(page, tenant(owner.org.slug, "/home"))
+
+      // Sin respuesta: «Escríbele» lleva a su conversación y la fila sigue ahí.
+      const silent = await openCall("Sin contestar")
+      await silent.getByRole("button", { name: "Escríbele" }).click()
+      await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/inbox"))
+      await expect(page).toHaveURL(/conversation=/)
+      expect(await statusOf(3)).toBe("programada")
     })
 
     test("un caso sin conversación abre su tarea al lado, sin salir de Inicio", async ({ owner, fixtureDb }) => {
