@@ -64,13 +64,19 @@ async function personOf(tx: Db, orgId: string, patientId: string) {
 /** Lo que se borra y lo que hay que saber antes de confirmar (tablero 6). */
 export async function erasurePreview(tx: Db, orgId: string, patientId: string): Promise<ErasurePreview> {
   const person = await personOf(tx, orgId, patientId)
+  // Lo mismo que borra `erase_person_data`: también lo de este paciente que lleva quien habla por él.
   const counts = await tx.execute<{ conversations: number; messages: number; opportunities: number; tasks: number; notes: number }>(sql`
+    with own_opportunity as (
+      select id from opportunity
+      where organization_id = ${orgId} and (contact_id = ${person.personId} or patient_id = ${patientId})
+    )
     select
       (select count(*)::int from conversation where organization_id = ${orgId} and contact_id = ${person.personId}) as conversations,
       (select count(*)::int from message m join conversation v on v.id = m.conversation_id
         where v.organization_id = ${orgId} and v.contact_id = ${person.personId}) as messages,
-      (select count(*)::int from opportunity where organization_id = ${orgId} and contact_id = ${person.personId}) as opportunities,
-      (select count(*)::int from task where organization_id = ${orgId} and contact_id = ${person.personId}) as tasks,
+      (select count(*)::int from own_opportunity) as opportunities,
+      (select count(*)::int from task where organization_id = ${orgId}
+        and (contact_id = ${person.personId} or patient_id = ${patientId} or opportunity_id in (select id from own_opportunity))) as tasks,
       (select count(*)::int from crm_note where organization_id = ${orgId} and contact_id = ${person.personId}) as notes`)
   const row = counts[0]!
   const future = await tx

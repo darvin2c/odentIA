@@ -260,6 +260,13 @@
       "when": 1793516080572,
       "tag": "0036_quien_atiende",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1793517239830,
+      "tag": "0037_lo_del_paciente_con_responsable",
+      "breakpoints": true
     }
   ]
 }
