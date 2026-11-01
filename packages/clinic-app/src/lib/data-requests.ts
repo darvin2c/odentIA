@@ -190,6 +190,7 @@ export interface ErasurePreview {
   opportunities: number
   tasks: number
   notes: number
+  linkedPeople: number
   futureAppointments: Array<{ id: string; startsAt: string }>
   balances: Array<{ currency: string; cents: number }>
 }

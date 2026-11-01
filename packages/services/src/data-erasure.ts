@@ -36,6 +36,8 @@ export interface ErasurePreview {
   opportunities: number
   tasks: number
   notes: number
+  /** Quienes hablan por ella: lo que tienen por su cuenta, como sus conversaciones, es suyo y no se borra. */
+  linkedPeople: number
   /** Citas por venir: se cancelan sin avisarle. */
   futureAppointments: Array<{ id: string; startsAt: string }>
   /** Lo que debe, por moneda: se mantiene en Caja. */
@@ -65,19 +67,34 @@ async function personOf(tx: Db, orgId: string, patientId: string) {
 export async function erasurePreview(tx: Db, orgId: string, patientId: string): Promise<ErasurePreview> {
   const person = await personOf(tx, orgId, patientId)
   // Lo mismo que borra `erase_person_data`: también lo de este paciente que lleva quien habla por él.
-  const counts = await tx.execute<{ conversations: number; messages: number; opportunities: number; tasks: number; notes: number }>(sql`
+  const counts = await tx.execute<{
+    conversations: number
+    messages: number
+    opportunities: number
+    tasks: number
+    notes: number
+    linkedPeople: number
+  }>(sql`
     with own_opportunity as (
-      select id from opportunity
+      select id, patient_id from opportunity
       where organization_id = ${orgId} and (contact_id = ${person.personId} or patient_id = ${patientId})
+    ), own_conversation as (
+      select id from conversation where organization_id = ${orgId} and contact_id = ${person.personId}
     )
     select
-      (select count(*)::int from conversation where organization_id = ${orgId} and contact_id = ${person.personId}) as conversations,
-      (select count(*)::int from message m join conversation v on v.id = m.conversation_id
-        where v.organization_id = ${orgId} and v.contact_id = ${person.personId}) as messages,
+      (select count(*)::int from own_conversation) as conversations,
+      (select count(*)::int from message where conversation_id in (select id from own_conversation)) as messages,
       (select count(*)::int from own_opportunity) as opportunities,
-      (select count(*)::int from task where organization_id = ${orgId}
-        and (contact_id = ${person.personId} or patient_id = ${patientId} or opportunity_id in (select id from own_opportunity))) as tasks,
-      (select count(*)::int from crm_note where organization_id = ${orgId} and contact_id = ${person.personId}) as notes`)
+      (select count(*)::int from task where organization_id = ${orgId} and (
+        contact_id = ${person.personId} or patient_id = ${patientId}
+        or opportunity_id in (select id from own_opportunity)
+        or conversation_id in (select id from own_conversation)
+        or id in (select task_id from agent_handoff where organization_id = ${orgId} and task_id is not null
+          and (contact_id = ${person.personId} or conversation_id in (select id from own_conversation))))) as tasks,
+      (select count(*)::int from crm_note where organization_id = ${orgId} and (contact_id = ${person.personId}
+        or opportunity_id in (select id from own_opportunity where patient_id = ${patientId}))) as notes,
+      (select count(*)::int from patient_contact where organization_id = ${orgId} and patient_id = ${patientId}
+        and contact_id <> ${person.personId}) as "linkedPeople"`)
   const row = counts[0]!
   const future = await tx
     .select({ id: appointment.id, startsAt: appointment.startsAt })
@@ -98,6 +115,7 @@ export async function erasurePreview(tx: Db, orgId: string, patientId: string): 
     opportunities: row.opportunities,
     tasks: row.tasks,
     notes: row.notes,
+    linkedPeople: row.linkedPeople,
     futureAppointments: future.map((a) => ({ id: a.id, startsAt: a.startsAt.toISOString() })),
     balances: account.byCurrency.filter((b) => b.saldo > 0).map((b) => ({ currency: b.currency, cents: b.saldo })),
   }
@@ -121,7 +139,8 @@ export function erasureResolution(preview: ErasurePreview): string {
   const appointments = preview.futureAppointments.length
     ? ` Se cancelaron ${plural(preview.futureAppointments.length, "cita", "citas")} sin avisarle.`
     : ""
-  return `Se borraron ${parts.join(", ")} y lo que el agente recordaba de ella.${appointments} La historia clínica, los cobros y los comprobantes quedaron bloqueados.`
+  const others = preview.linkedPeople ? " Lo que quien habla por ella tiene por su cuenta, como sus conversaciones, no se borró: es de esa persona." : ""
+  return `Se borraron ${parts.join(", ")} y lo que el agente recordaba de ella.${appointments} La historia clínica, los cobros y los comprobantes quedaron bloqueados.${others}`
 }
 
 /**

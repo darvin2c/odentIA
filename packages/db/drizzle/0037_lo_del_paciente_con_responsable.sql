@@ -1,7 +1,7 @@
 -- Lo de un paciente se borra también cuando lo lleva quien habla por él (una madre,
--- un apoderado): su enlace de reserva, sus tareas, sus oportunidades con su tarea y
--- sus mensajes automáticos, y las propuestas del agente. Lo que esa persona tiene
--- por su cuenta, sus conversaciones incluidas, es suyo y queda.
+-- un apoderado): su enlace de reserva, sus tareas con su pase, sus oportunidades con
+-- su tarea, sus notas y sus mensajes automáticos, y las propuestas del agente. Lo que
+-- esa persona tiene por su cuenta, sus conversaciones incluidas, es suyo y queda.
 CREATE OR REPLACE FUNCTION public.erase_person_data(p_patient uuid, p_actor text) RETURNS text[]
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public', 'catalog', 'auth', 'admin', 'dental', 'pg_temp'
@@ -29,13 +29,13 @@ BEGIN
   UPDATE "patient_registration" SET "conversation_id" = NULL WHERE "conversation_id" = ANY(v_convs);
   UPDATE "portal_link" SET "delivery_conversation_id" = NULL, "delivery_message_id" = NULL
     WHERE "delivery_conversation_id" = ANY(v_convs);
+  -- Todas las tareas que se van, en una sola lista: lo que depende de ellas se va con ellas.
   v_tasks := ARRAY(SELECT "task_id" FROM "agent_handoff"
     WHERE ("conversation_id" = ANY(v_convs) OR "contact_id" = v_contact) AND "task_id" IS NOT NULL)
-    || ARRAY(SELECT "id" FROM "task" WHERE "organization_id" = v_org
-      AND ("patient_id" = p_patient OR "opportunity_id" = ANY(v_opps)));
-  DELETE FROM "agent_handoff" WHERE "conversation_id" = ANY(v_convs) OR "contact_id" = v_contact;
-  -- Un pase en la conversación de otra persona sigue siendo suyo; ya sin esa tarea.
-  UPDATE "agent_handoff" SET "task_id" = NULL WHERE "task_id" = ANY(v_tasks);
+    || ARRAY(SELECT "id" FROM "task" WHERE "organization_id" = v_org AND ("contact_id" = v_contact
+      OR "conversation_id" = ANY(v_convs) OR "patient_id" = p_patient OR "opportunity_id" = ANY(v_opps)));
+  -- Un pase solo se cierra con su tarea: sin ella quedaría abierto para siempre, también en la conversación de otra persona.
+  DELETE FROM "agent_handoff" WHERE "conversation_id" = ANY(v_convs) OR "contact_id" = v_contact OR "task_id" = ANY(v_tasks);
   DELETE FROM "agent_proposal" WHERE "conversation_id" = ANY(v_convs) OR "contact_id" = v_contact OR "patient_id" = p_patient;
   UPDATE "agent_lesson" SET "review_item_id" = NULL WHERE "review_item_id" IN (
     SELECT "id" FROM "agent_review_item" WHERE "conversation_id" = ANY(v_convs)
@@ -52,8 +52,9 @@ BEGIN
   UPDATE "patient_registration" SET "link_id" = NULL WHERE "link_id" IN (
     SELECT "id" FROM "patient_registration_link" WHERE "conversation_id" = ANY(v_convs) OR "contact_id" = v_contact);
   DELETE FROM "patient_registration_link" WHERE "conversation_id" = ANY(v_convs) OR "contact_id" = v_contact;
-  DELETE FROM "task" WHERE "id" = ANY(v_tasks) OR "contact_id" = v_contact OR "conversation_id" = ANY(v_convs);
-  DELETE FROM "crm_note" WHERE "contact_id" = v_contact;
+  DELETE FROM "task" WHERE "id" = ANY(v_tasks);
+  DELETE FROM "crm_note" WHERE "contact_id" = v_contact OR "opportunity_id" IN (
+    SELECT "id" FROM "opportunity" WHERE "id" = ANY(v_opps) AND "patient_id" = p_patient);
   UPDATE "crm_note" SET "conversation_id" = NULL WHERE "conversation_id" = ANY(v_convs);
   UPDATE "crm_note" SET "opportunity_id" = NULL WHERE "opportunity_id" = ANY(v_opps);
   DELETE FROM "opportunity" WHERE "id" = ANY(v_opps);

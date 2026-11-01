@@ -29,7 +29,7 @@ import {
   moveOwnAppointment,
   ownAppointmentChangeable,
 } from "./own-appointment.js"
-import { joinPatientPerson, patientPerson } from "./patient-identity.js"
+import { isPatientLocked, joinPatientPerson, patientPerson } from "./patient-identity.js"
 import {
   createPatientRegistrationLink,
   getPatientRegistrationConfig,
@@ -486,6 +486,8 @@ async function findLink(tx: Db, orgId: string, token: string, lock = false): Pro
     .limit(1)
   const [row] = lock ? await query.for("update") : await query
   if (!row) throw notFound("Enlace")
+  // De una historia bloqueada no se muestra nada, aunque el enlace siga vigente (ADR 0080).
+  if (row.patientId && (await isPatientLocked(tx, orgId, row.patientId))) throw notFound("Enlace")
   return row
 }
 

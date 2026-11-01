@@ -86,7 +86,7 @@ import { NOT_RECOVERY_KINDS, patientHasItsAppointment } from "./saas-actions.js"
 import { getAgentSpendGate } from "./saas-terms.js"
 import { isWritingTime, nextWritingDay, sendTimeFor, writingScheduleOf } from "./writing-hours.js"
 import type { Storage } from "./storage.js"
-import { joinPatientPerson, patientPerson } from "./patient-identity.js"
+import { isPatientLocked, joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { productHooks } from "./products.js"
 
 /**
@@ -1508,6 +1508,11 @@ async function stillValid(
   job: JobRow,
   now: Date,
 ): Promise<{ valid: boolean; reason?: string }> {
+  // Su presupuesto o su control siguen en pie y quien habla por ella sigue activa, pero
+  // de una historia bloqueada no se le escribe a nadie (ADR 0080).
+  if (job.patientId && (await isPatientLocked(tx, orgId, job.patientId))) {
+    return { valid: false, reason: "Sus datos se borraron a su pedido" }
+  }
   if (job.kind === "recordatorio_cita" && job.appointmentId) {
     const [appt] = await tx
       .select({ status: appointment.status, startsAt: appointment.startsAt })

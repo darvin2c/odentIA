@@ -9,7 +9,7 @@ import type { Db } from "@odentia/db"
 import { agentHandoff, agentPersonFact, agentProposal } from "@odentia/db/schema/agent"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { automationConsent, automationJob } from "@odentia/db/schema/automation"
-import { encounter, patient, patientCharge } from "@odentia/db/schema/clinical"
+import { encounter, patient, patientCharge, patientContact } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, contactIdentity, conversation, crmTask as task, message } from "@odentia/db/schema/crm"
 import { crmNote } from "@odentia/db/schema/crm-workspace"
 import { opportunity } from "@odentia/db/schema/opportunities"
@@ -17,6 +17,8 @@ import { branch } from "@odentia/db/schema/org"
 import { and, eq, inArray } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { createRoom, listAppointments } from "./appointments.js"
+import { deliverJob, setLine } from "./automation.js"
+import { issuePersonalLink, resolvePersonalLink } from "./booking-links.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import {
   eraseForDataRequest,
@@ -264,6 +266,10 @@ it("lo del paciente se borra aunque lo lleve quien habla por él; lo de esa pers
     .insert(agentHandoff)
     .values({ organizationId: "org_a", conversationId: threadId, reason: "Pide hablar", summary: "Pide hablar", taskId: hers.task })
     .returning({ id: agentHandoff.id })
+  const [opportunityNote] = await ownerDb
+    .insert(crmNote)
+    .values({ organizationId: "org_a", contactId: motherId, opportunityId: hers.opportunity, body: "Elena prefiere las tardes" })
+    .returning({ id: crmNote.id })
   // Lo que es de su mamá.
   const own = {
     opportunity: await newOpportunity("Blanqueamiento de Rosa", null),
@@ -272,14 +278,23 @@ it("lo del paciente se borra aunque lo lleve quien habla por él; lo de esa pers
     proposal: await newProposal(null),
     job: await newJob({ contactId: motherId }),
   }
+  const [ownNote] = await ownerDb
+    .insert(crmNote)
+    .values({ organizationId: "org_a", contactId: motherId, opportunityId: own.opportunity, body: "Rosa paga en cuotas" })
+    .returning({ id: crmNote.id })
+  await ownerDb
+    .insert(patientContact)
+    .values({ organizationId: "org_a", patientId, contactId: motherId, relationship: "guardian" })
 
   const request = await run((tx) =>
     createDataRequest(tx, "org_a", f.actor, patientId, { kind: "borrar", requesterContactId: personId, channel: "clinica" }),
   )
   await run((tx) => verifyDataRequest(tx, "org_a", f.actor, patientId, request.id, { how: "documento" }))
-  // Lo que se avisa antes de confirmar es lo que se borra: su tarea propia y las dos de su mamá.
-  expect(await run((tx) => erasurePreview(tx, "org_a", patientId))).toMatchObject({ opportunities: 1, tasks: 3 })
-  await run((tx) => eraseForDataRequest(tx, "org_a", f.actor, patientId, request.id))
+  // Lo que se avisa antes de confirmar es lo que se borra: su tarea y su nota propias, y lo que está a nombre de su mamá.
+  expect(await run((tx) => erasurePreview(tx, "org_a", patientId))).toMatchObject({ opportunities: 1, tasks: 3, notes: 2, linkedPeople: 1 })
+  const erased = await run((tx) => eraseForDataRequest(tx, "org_a", f.actor, patientId, request.id))
+  // La constancia no dice que se borró todo: lo de su mamá es de ella.
+  expect(erased.request.resolution).toMatch(/no se borró: es de esa persona/)
 
   const idsOf = async (table: typeof opportunity | typeof task | typeof appointmentBookingLink | typeof agentProposal | typeof automationJob, ids: string[]) =>
     (await ownerDb.select({ id: table.id }).from(table as typeof task).where(inArray(table.id, ids))).map((row) => row.id)
@@ -295,11 +310,24 @@ it("lo del paciente se borra aunque lo lleve quien habla por él; lo de esa pers
   expect(await idsOf(agentProposal, [own.proposal])).toEqual([own.proposal])
   expect(await idsOf(automationJob, [own.job])).toEqual([own.job])
   expect(await ownerDb.select({ id: conversation.id }).from(conversation).where(eq(conversation.id, threadId))).toHaveLength(1)
-  // Su pase sigue en su conversación, ya sin la tarea borrada.
-  const [stillPassed] = await ownerDb.select().from(agentHandoff).where(eq(agentHandoff.id, passed!.id))
-  expect(stillPassed).toMatchObject({ conversationId: threadId, taskId: null })
+  // Un pase solo se cierra con su tarea: se va con ella, o quedaría abierto para siempre en la conversación de su mamá.
+  expect(await ownerDb.select().from(agentHandoff).where(eq(agentHandoff.id, passed!.id))).toEqual([])
+  // Su nota se va con su oportunidad; la de su mamá queda.
+  expect((await ownerDb.select({ id: crmNote.id }).from(crmNote).where(inArray(crmNote.id, [opportunityNote!.id, ownNote!.id]))).map((row) => row.id)).toEqual([ownNote!.id])
   const [motherAfter] = await ownerDb.select().from(contact).where(eq(contact.id, motherId))
   expect(motherAfter).toMatchObject({ displayName: "Rosa, su mamá", isActive: true, recordLockedAt: null })
+
+  // Su presupuesto o su control siguen en pie y volverían a programarle un mensaje a su mamá: no sale.
+  const rule = await run((tx) => setLine(tx, "org_a", f.actor, "seguimiento_presupuesto", { enabled: true }))
+  const [again] = await ownerDb
+    .insert(automationJob)
+    .values({ organizationId: "org_a", ruleId: rule.id, kind: "seguimiento_presupuesto", dedupeKey: randomUUID(), scheduledFor: new Date(), contactId: motherId, patientId })
+    .returning({ id: automationJob.id })
+  const key = Buffer.alloc(32, 7)
+  expect(await run((tx) => deliverJob(tx, "org_a", again!.id, new Date(), { secretsKey: key }))).toMatchObject({ outcome: "cancelado", detail: "Sus datos se borraron a su pedido" })
+  // Y un enlace que alguien le dé después no muestra nada: no se distingue de uno que no existe.
+  const later = await run((tx) => issuePersonalLink(tx, "org_a", { contactId: motherId, patientId }, { secretsKey: key }))
+  await expect(run((tx) => resolvePersonalLink(tx, "org_a", later.token))).rejects.toMatchObject({ status: 404 })
 })
 
 it("abrirla con motivo es solo leer por una hora; «vuelve a atenderse» la desbloquea entera", async () => {
