@@ -5,6 +5,7 @@
  * sede antes de sembrar citas, para que la validación estricta no rechace
  * el seed histórico.
  */
+import { ATTENDING_ROLES } from "@odentia/auth/permissions"
 import type { Db } from "@odentia/db"
 import { member } from "@odentia/db/schema/auth"
 import {
@@ -34,14 +35,14 @@ export async function seedAvailability(
     contactId: string
   },
 ): Promise<void> {
-  // Solo roles profesionales atienden: recepción/caja nunca como odontólogos.
+  // Solo quien puede atender lleva horario.
   const members = await tx
     .select({ userId: member.userId })
     .from(member)
     .where(
       and(
         eq(member.organizationId, input.orgId),
-        inArray(member.role, ["owner", "admin", "clinician"]),
+        inArray(member.role, [...ATTENDING_ROLES]),
       ),
     )
   // Reemplazo acotado a la sede del seed (el seed-dev ya purga la org antes).

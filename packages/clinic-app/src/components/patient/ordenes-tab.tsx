@@ -1,3 +1,4 @@
+import { canAttend } from "@odentia/auth/permissions"
 import { diagnosisCodeLabel } from "@odentia/clinical"
 import { Badge, Button, Input, toast } from "@odentia/ui"
 import { FormDrawer, useAppForm, useFormSurface } from "@odentia/ui-patterns"
@@ -303,7 +304,7 @@ export function NewOrderDrawer({
   })
   // Un colega es quien atiende en la clínica (el servidor lo vuelve a comprobar).
   const colleagues = members.filter(
-    (m) => m.userId !== myUserId && ["clinician", "owner", "admin"].includes(m.role),
+    (m) => m.userId !== myUserId && canAttend(m.role),
   )
 
   const createMutation = useMutation({ mutationFn: createOrder })

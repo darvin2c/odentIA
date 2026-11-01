@@ -4,11 +4,13 @@
  * Cada documento firmado guarda su propia instantánea; editar el perfil nunca
  * reescribe lo ya firmado.
  */
+import { ATTENDING_ROLES } from "@odentia/auth/permissions"
 import type { Db } from "@odentia/db"
 import { member, user } from "@odentia/db/schema/auth"
 import { professionalProfile } from "@odentia/db/schema/clinical-forms"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, eq } from "drizzle-orm"
+import { and, asc, eq, inArray } from "drizzle-orm"
+import { requireCanAttend } from "./attending.js"
 import { invalidField, notFound, ServiceError } from "./errors.js"
 
 export interface ProfessionalProfile {
@@ -102,7 +104,7 @@ export async function getProfessionalProfile(
   return toProfile(userId, accountName, row)
 }
 
-/** Perfiles de todos los miembros; en blanco para quien aún no lo completó. */
+/** Perfiles de quienes pueden atender; en blanco para quien aún no lo completó. */
 export async function listProfessionalProfiles(
   tx: Db,
   orgId: string,
@@ -111,7 +113,7 @@ export async function listProfessionalProfiles(
     .select({ userId: member.userId, name: user.name })
     .from(member)
     .innerJoin(user, eq(user.id, member.userId))
-    .where(eq(member.organizationId, orgId))
+    .where(and(eq(member.organizationId, orgId), inArray(member.role, [...ATTENDING_ROLES])))
     .orderBy(asc(user.name))
   const rows = await tx
     .select()
@@ -128,7 +130,7 @@ export async function setProfessionalProfile(
   userId: string,
   input: ProfessionalProfileInput,
 ): Promise<ProfessionalProfile> {
-  const accountName = await requireMember(tx, orgId, userId)
+  const { name: accountName } = await requireCanAttend(tx, orgId, userId)
   const current = await getProfessionalProfile(tx, orgId, userId)
   const professionalTitle =
     input.professionalTitle === undefined

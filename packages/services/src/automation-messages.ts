@@ -661,6 +661,23 @@ export function replyId(action: ReplyAction, jobId: string): string {
 }
 
 /**
+ * Los botones de un mensaje, listos para enviar. WhatsApp pide un id distinto por
+ * botón y dos pueden hacer lo mismo («Voy en camino» y «No podré ir» solo siguen
+ * la conversación): desde el segundo, el id termina en cuál es de los de su acción.
+ */
+export function replyButtons(
+  buttons: readonly Pick<MessageButton, "action" | "title">[],
+  jobId: string,
+): Array<{ id: string; title: string }> {
+  const seen = new Map<ReplyAction, number>()
+  return buttons.map(({ action, title }) => {
+    const nth = (seen.get(action) ?? 0) + 1
+    seen.set(action, nth)
+    return { id: nth === 1 ? replyId(action, jobId) : `${replyId(action, jobId)}:${nth}`, title }
+  })
+}
+
+/**
  * La pregunta del permiso de novedades y promociones, una sola vez por
  * persona, tras reservar (ADR 0030). Texto y botones fijos; la respuesta la
  * resuelve el sistema sin modelo. Lleva el nombre de la clínica y su trato
@@ -789,8 +806,10 @@ export function generalPermissionButtons(contactId: string): Array<{ id: string;
 
 export function parseReplyId(value: string | null | undefined): { action: ReplyAction; jobId: string } | null {
   if (!value) return null
-  const [prefix, action, jobId, ...rest] = value.split(":")
+  const [prefix, action, jobId, nth, ...rest] = value.split(":")
   if (prefix !== REPLY_PREFIX || rest.length > 0 || !jobId) return null
+  // Solo lo que da `replyButtons`: el primero no lleva final y WhatsApp admite tres botones.
+  if (nth !== undefined && !/^[23]$/.test(nth)) return null
   if (!(REPLY_ACTIONS as readonly string[]).includes(action ?? "")) return null
   if (!/^[0-9a-f-]{36}$/i.test(jobId)) return null
   return { action: action as ReplyAction, jobId }

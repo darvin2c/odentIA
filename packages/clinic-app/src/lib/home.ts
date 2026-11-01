@@ -7,6 +7,7 @@
 import { formatMoney } from "@odentia/clinical"
 import { agentCaseRow } from "./agent"
 import { ADMIN_NAME, withReceptionName } from "./agent-names"
+import { internationalText } from "@odentia/ui-patterns"
 import { channelLabel } from "./channels"
 import { dayWords } from "./data-requests"
 import { timeAgo } from "./crm"
@@ -108,7 +109,7 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): WaitingT
       const missing = row.missing.map((key) => CLOSING_WORDS[key] ?? key)
       return {
         title: row.patientName,
-        ask: `Su atención de ${daysAgo(row.startedAt, context)} ${formatClock(row.startedAt, context.locale, context.timezone)} quedó sin firmar`,
+        ask: `Su atención de ${daysAgo(row.startedAt, context)} a las ${formatClock(row.startedAt, context.locale, context.timezone)} quedó sin firmar`,
         detail: missing.length > 0 ? `Falta ${listed(missing)}` : "Lista para firmar",
         action: "Revisar",
       }
@@ -137,7 +138,7 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): WaitingT
           row.why === "sin_recordatorios"
             ? `No recibe recordatorios: confirma su cita de ${appointmentWhen(row.startsAt, context)}`
             : `No confirmó su cita de ${appointmentWhen(row.startsAt, context)}`,
-        detail: joined([row.phone, row.serviceName, row.branchName]),
+        detail: joined([row.phone ? internationalText(row.phone) : null, row.serviceName, row.branchName]),
         action: "Llamar",
       }
     case "unclosed": {
@@ -316,6 +317,23 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): WaitingT
         action: `Ver ${row.count} más`,
       }
   }
+}
+
+const oneLine = (text: string) => text.replace(/\s+/g, " ").trim()
+
+/**
+ * Lo que el panel debe decir del caso además de los mensajes a la vista: lo que
+ * preguntó, si es anterior a ellos (es lo que se va a citar), y el motivo, si no
+ * solo repite lo que escribió.
+ */
+export function caseAdds(
+  topic: { reason: string; quote: string | null },
+  thread: ReadonlyArray<{ from: string; text: string }>,
+): { quoteHidden: boolean; reasonAdds: boolean } {
+  const said = new Set(thread.filter((item) => item.from === "person").map((item) => oneLine(item.text)))
+  const quote = oneLine(topic.quote ?? "")
+  const reason = oneLine(topic.reason)
+  return { quoteHidden: quote !== "" && thread.length > 0 && !said.has(quote), reasonAdds: reason !== quote && !said.has(reason) }
 }
 
 /** Cierra una frase sin repetir el punto: «09:00 a. m.» y «¿es la misma persona?» ya terminan. */

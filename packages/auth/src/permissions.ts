@@ -244,6 +244,23 @@ export function canAccessAny(role: string, permissions: readonly string[]): bool
 }
 
 /**
+ * ¿Puede atender pacientes quien tiene `role`? La única definición (ADR 0128):
+ * quien escribe en la historia clínica. Decide a quién se le pone horario, se le
+ * da una cita, se le deriva o se le adscribe a una especialidad. Ojo: poder
+ * atender no es atender; quien atiende, además, tiene horario activo.
+ */
+export function canAttend(role: string): boolean {
+  return canAccess(role, "clinical.write");
+}
+
+/**
+ * Los roles que pueden atender, para filtrar en una consulta. El disparador
+ * `close_schedule_of_who_stops_attending` y la vista `argos.equipo` de la base
+ * repiten esta lista, y `quien-atiende.test.ts` exige que digan lo mismo.
+ */
+export const ATTENDING_ROLES: readonly OrgRole[] = ORG_ROLES.filter(canAttend);
+
+/**
  * ¿Ve `role` Facturación? Lo que la clínica paga a odentIA (plan, cargos,
  * consumo, avisos y lo pagado por el agente en Reportes) es solo de
  * propietario y administrador; no es un permiso que se reparta a otros roles.

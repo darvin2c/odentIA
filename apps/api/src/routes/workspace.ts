@@ -1,5 +1,5 @@
 import { withOrgContext } from "@odentia/db"
-import { ALL_PERMISSIONS } from "@odentia/auth/permissions"
+import { ALL_PERMISSIONS, canAttend } from "@odentia/auth/permissions"
 import {
   AUDIT_AREAS,
   claimHandoff,
@@ -39,7 +39,7 @@ function accessFor(role: string): WorkspaceAccess {
     ownAppointments: role === "clinician",
     // Quien escribe en la historia y hoy tiene citas propias ve «Mis pacientes de
     // hoy», también la dueña; el servicio mira si las tiene (ADR 0032).
-    attends: canAccess(role, "clinical.write"),
+    attends: canAttend(role),
     // El presupuesto que nadie envió es de quien habla con la persona: envía y lleva el CRM (decisión 4).
     sendsBudgets: canAccess(role, "budgets.send") && canAccess(role, "crm.read"),
     // Caja responde desde aquí los temas de pagos que le pasa Sofi (decisión 3 del pulido).

@@ -554,7 +554,8 @@ export function composeWaiting(parts: WaitingParts): WaitingEntry[] {
   // Cada persona que espera es una fila, las que más llevan primero; las demás se ven en la Bandeja.
   if (parts.conversations && parts.conversations.waiting > 0) {
     for (const item of parts.conversations.items) rows.push({ kind: "person", ...item })
-    const left = parts.conversations.waiting - parts.conversations.items.length
+    // `waiting` son personas; una puede traer varias conversaciones.
+    const left = parts.conversations.waiting - new Set(parts.conversations.items.map((item) => item.contactId)).size
     if (left > 0) rows.push({ kind: "more", of: "conversations", count: left })
   }
 

@@ -2179,6 +2179,38 @@ describe("el ciclo de la cita: que la persona sepa que la tiene y no la pierda (
       expect((sent.replyButtons as { title: string }[]).map((button) => button.title)).toEqual(["Voy en camino", "No podré ir", "No más recordatorios"])
     })
 
+    it("con la conversación abierta sale como texto: cada botón con su id, y al tocarlo se sabe cuál fue", async () => {
+      const c = await clinic({ approved: ["cita_sin_llegar"] })
+      await ruleOn(c, "recordatorio_cita", new Date(NOW.getTime() - DAY))
+      await someoneArrived(c)
+      const carlos = await person(c, "Carlos Ramos", { consent: ["recordatorio"], openWindow: true })
+      await appointmentFor(c, carlos.patientId, new Date(NOW.getTime() - 20 * 60_000), "confirmada", 45)
+      await run(c, (tx) => syncAppointmentReminders(tx, c.orgId, NOW))
+      expect((await deliver(c)).map((result) => result.outcome)).toEqual(["enviado"])
+      const job = (await jobsOf(c)).find((item) => item.kind === "cita_sin_llegar")!
+      const sent = await messageOf(job.sentMessageId)
+      expect(sent.contentType).toBe("text")
+      const buttons = sent.replyButtons as { id: string; title: string }[]
+      expect(new Set(buttons.map((button) => button.id)).size).toBe(3)
+
+      // El hilo ya tiene el aviso como último mensaje: cada toque se mira contra él.
+      const tap = async (body: string) => {
+        const [row] = await ownerDb.insert(message)
+          .values({ organizationId: c.orgId, conversationId: carlos.conversationId!, direction: "in", senderKind: "contact", body, createdAt: new Date(Date.now() + 1000) })
+          .returning({ id: message.id })
+        const reply = await run(c, (tx) => automationReplyOf(tx, c.orgId, { conversationId: carlos.conversationId!, messageId: row!.id }))
+        await ownerDb.delete(message).where(eq(message.id, row!.id))
+        return reply
+      }
+      expect(await tap("Voy en camino")).toMatchObject({ kind: "cita_sin_llegar", button: "Voy en camino", asks: null })
+      expect(await tap("No podré ir")).toMatchObject({ kind: "cita_sin_llegar", button: "No podré ir", asks: "cambiar" })
+      // Los dos siguen la conversación con el agente o una persona; ninguno se resuelve solo.
+      for (const button of buttons.slice(0, 2)) {
+        expect(await run(c, (tx) => handleAutomationReply(tx, c.orgId, { conversationId: carlos.conversationId!, replyId: button.id }))).toBe(false)
+      }
+      expect(await run(c, (tx) => handleAutomationReply(tx, c.orgId, { conversationId: carlos.conversationId!, replyId: buttons[2]!.id }))).toBe(true)
+    })
+
     it("no pregunta donde no se marcan las llegadas, fuera del horario para escribir, ni a quien ya llegó", async () => {
       const c = await clinic({ approved: ["cita_sin_llegar"] })
       await ruleOn(c, "recordatorio_cita", new Date(NOW.getTime() - 2 * DAY))

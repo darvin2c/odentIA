@@ -6,6 +6,7 @@
  * que usa la consulta de huecos, para que agentes y portal no calculen por
  * su cuenta). Toda función recibe `tx: Db` ya contextualizado.
  */
+import { ATTENDING_ROLES } from "@odentia/auth/permissions"
 import type { Db } from "@odentia/db"
 import {
   APPOINTMENT_STATUSES,
@@ -41,6 +42,7 @@ import {
   preferredContact,
   rescheduleAppointmentReminders,
 } from "./automation.js"
+import { requireCanAttend } from "./attending.js"
 import {
   branchNotFound,
   roomNotFound,
@@ -182,7 +184,8 @@ export interface ScheduleResources {
   timeZone: string
   /** Minutos de una cita regular en la sede (sin servicio). */
   defaultDurationMin: number
-  professionals: Array<{ id: string; label: string }>
+  /** Quienes pueden atender; el rol separa a quien atiende de oficio de quien dirige. */
+  professionals: Array<{ id: string; label: string; role: string }>
   rooms: Array<{ id: string; label: string }>
 }
 
@@ -208,15 +211,6 @@ async function resolveBranch(tx: Db, orgId: string, branchId?: string) {
     throw new ServiceError("NOT_FOUND", 404, "No hay ninguna sede activa")
   }
   return { ...row, timeZone: row.timezone ?? row.orgTimezone ?? NEUTRAL_TIMEZONE }
-}
-
-async function requireProfessional(tx: Db, orgId: string, professionalUserId: string) {
-  const [membership] = await tx
-    .select({ id: member.id })
-    .from(member)
-    .where(and(eq(member.organizationId, orgId), eq(member.userId, professionalUserId)))
-    .limit(1)
-  if (!membership) throw onField(notFound("Profesional"), "professionalUserId")
 }
 
 /** El mismo error, dicho junto a su dato del cuerpo (`roomId`, `serviceId`…). */
@@ -653,7 +647,10 @@ export async function searchAgendaPatients(
   }))
 }
 
-/** Profesionales = miembros de la org; unidades dentales = activas de la sede. */
+/**
+ * Profesionales = quienes pueden atender (ADR 0128), primero quienes atienden
+ * de oficio y luego quien dirige; unidades dentales = activas de la sede.
+ */
 export async function listScheduleResources(
   tx: Db,
   orgId: string,
@@ -662,11 +659,11 @@ export async function listScheduleResources(
   const resolved = await resolveBranch(tx, orgId, input.branchId)
   const [professionals, rooms] = await Promise.all([
     tx
-      .select({ id: user.id, label: user.name })
+      .select({ id: user.id, label: user.name, role: member.role })
       .from(member)
       .innerJoin(user, eq(user.id, member.userId))
-      .where(eq(member.organizationId, orgId))
-      .orderBy(asc(user.name)),
+      .where(and(eq(member.organizationId, orgId), inArray(member.role, [...ATTENDING_ROLES])))
+      .orderBy(sql`${member.role} = 'clinician' desc`, asc(user.name)),
     tx
       .select({ id: scheduleRoom.id, label: scheduleRoom.name })
       .from(scheduleRoom)
@@ -933,7 +930,7 @@ export async function createAppointment(
     : new Date(startsAt.getTime() + duration * 60000)
   if (endsAt <= startsAt) throw invalidField("endsAt", "La cita debe terminar después de iniciar")
   await requireAppointmentPatient(tx, orgId, input.patientId)
-  await requireProfessional(tx, orgId, input.professionalUserId)
+  await requireCanAttend(tx, orgId, input.professionalUserId, "professionalUserId")
   const planItemIds = await requireSchedulableItems(tx, orgId, input.patientId, input.planItemIds ?? [])
   if (input.conversationId) {
     const [linked] = await tx.select({ id: conversation.id }).from(conversation)
@@ -1113,7 +1110,7 @@ export async function moveAppointment(
           roomId: current.roomId,
         }, current.isTest)
       : current.roomId)
-  if (professionalUserId !== current.professionalUserId) await requireProfessional(tx, orgId, professionalUserId)
+  if (professionalUserId !== current.professionalUserId) await requireCanAttend(tx, orgId, professionalUserId, "professionalUserId")
   if (roomId !== current.roomId) {
     const room = await requireRoom(tx, orgId, roomId)
     if (room.branchId !== current.branchId) {

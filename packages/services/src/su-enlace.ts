@@ -32,7 +32,7 @@ import {
   PERSONAL_LINK_MESSAGE_KEY,
   PERSONAL_LINK_SUBJECT,
   renderMessage,
-  replyId,
+  replyButtons,
   withLinkLine,
 } from "./automation-messages.js"
 import { clinicName as findClinicName, firstName } from "./automation-routing.js"
@@ -1614,10 +1614,7 @@ export async function sendPersonalLink(
       language: route.template.language,
       params,
       category: spec.category,
-      buttons: spec.buttons.map((button) => ({
-        id: replyId(button.action, link.linkId),
-        title: button.title,
-      })),
+      buttons: replyButtons(spec.buttons, link.linkId),
       link: personalLinkRef(link.linkId),
       preview: text,
     })
