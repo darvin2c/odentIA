@@ -317,7 +317,9 @@ const AGENT_TABS = [
 
 /** Cada pestaña aparece solo con el permiso que su ruta exige. Con una sola no hay pestañas. */
 export function agentTabsFor(can: Can) {
-  const visible = AGENT_TABS.filter((tab) => (tab.permission === "read" ? can("agent.read") : can("agent.write")))
+  const visible = AGENT_TABS.filter((tab) =>
+    tab.permission === "read" ? can("agent.read") : tab.permission === "decide" ? can("agent.read") || can("agent.decide") : can("agent.write"),
+  )
   return visible.length < 2 ? [] : visible
 }
 

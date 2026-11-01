@@ -306,9 +306,10 @@ it("la primera respuesta usa aceptación real y excluye colas, fallos y simulaci
   const report = await withOrgContext(appDb, orgId, tx => getReportAgent(tx, orgId, { period: "2026-09" }))
   expect(report.responses.current).toEqual({ conversations: 5, responded: 2, byAgent: 0, byTeam: 2, agentMedianSeconds: null, teamMedianSeconds: 30 })
   const home = await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, recipient, full))
-  // Cada persona es una fila, con desde cuándo espera: la misma cuenta que «Sin responder» de la Bandeja.
-  expect(rowsOf(home.waiting, "person")).toHaveLength(3)
-  expect(rowsOf(home.waiting, "person")[0]).toMatchObject({ kind: "person", since: inboundAt.toISOString() })
+  // Una fila por persona, con desde cuándo espera; sus otras conversaciones van como «También». En total, la misma cuenta que «Sin responder» de la Bandeja.
+  const waiting = home.waiting.find((row) => row.kind === "person")
+  expect(waiting).toMatchObject({ kind: "person", since: inboundAt.toISOString() })
+  expect(1 + (waiting?.also?.length ?? 0)).toBe(3)
   // Con el agente atendiendo, esperan respuesta pero no piden a una persona: van en «Las atiende el agente».
   const inbox = await withOrgContext(appDb, orgId, tx => countConversationViews(tx, orgId, { status: "open" }, ["attend", "agent"]))
   expect(inbox.attend + inbox.agent).toBeGreaterThanOrEqual(3)

@@ -15,7 +15,7 @@ import {
 import { useStore } from "@tanstack/react-form"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, createFileRoute } from "@tanstack/react-router"
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { z } from "zod"
 import { AdminRecommendationDrawer, AdminUnreachedDrawer } from "../../components/agent/admin-recommendation"
 import { openAppointmentAnywhere } from "../../components/agenda/schedule-host"
@@ -109,7 +109,10 @@ function HomePage() {
   })
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ["workspace-home"] })
   useOrgEvents(HOME_EVENTS, (kind, data) => {
-    if (!isReceiptOnly(kind, data)) refresh()
+    if (isReceiptOnly(kind, data)) return
+    refresh()
+    // Si otra persona lo tomó o lo resolvió, el panel abierto lo dice.
+    void queryClient.invalidateQueries({ queryKey: ["person-panel"] })
   })
 
   const canDoTasks = usePermission("tasks.write")
@@ -160,6 +163,7 @@ function HomePage() {
 
   // Lo que la fila abre al lado. Sus datos salen de lo último que llegó: lo que se resuelve se va de la lista.
   const [opened, setOpened] = useState<WaitingRow | null>(null)
+  const opener = useRef<HTMLElement | null>(null)
   // «¿Es la misma persona?»: la fila del registro por el código QR que se revisa.
   const [holdTask, setHoldTask] = useState<string | null>(null)
   const [advice, setAdvice] = useState<string | null>(null)
@@ -247,6 +251,8 @@ function HomePage() {
   }
   /** Abre al lado lo que la fila pide resolver. Lo demás de la persona sigue en la lista y en «También». */
   function openRow(row: WaitingRow) {
+    // Al cerrar, el foco vuelve a la fila que lo abrió. «Siguiente» se abre desde el panel: se queda la primera.
+    if (!opened && document.activeElement instanceof HTMLElement) opener.current = document.activeElement
     switch (row.kind) {
       case "case":
         if (row.conversationId) setPerson({ conversationId: row.conversationId, topicId: row.id, name: row.contactName ?? "Interlocutor" })
@@ -311,6 +317,10 @@ function HomePage() {
   const closePanel = () => {
     setOpened(null)
     setPerson(null)
+    const back = opener.current
+    opener.current = null
+    // Tras el repintado: lo que se cierra no se queda el foco.
+    if (back?.isConnected) requestAnimationFrame(() => back.focus({ preventScroll: true }))
   }
   // Lo demás de la persona abierta, leído de la lista: lo que se resuelve desaparece.
   const openedEntry: WaitingEntry | null = opened ? (data?.waiting.find((row) => waitingKey(row) === waitingKey(opened)) ?? null) : null

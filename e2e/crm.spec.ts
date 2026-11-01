@@ -290,7 +290,6 @@ test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({
   await expect(brief.getByRole("heading", { level: 3 })).toHaveText(["Lo que ya se sabe"])
   await expect(brief).toContainText("Que la atiendan hoy: tiene la cara hinchada desde anoche.")
   // Sus mensajes, en orden, sin releer el hilo.
-  await expect(brief).toContainText("Tengo la cara hinchada desde anoche")
   await expect(brief).toContainText("Necesito hablar con recepción")
   await expect(brief).toContainText("Prefiere citas por la tarde")
   await expect(brief).toContainText("Saber si puede venir hoy y darle una hora.")

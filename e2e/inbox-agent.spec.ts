@@ -155,7 +155,7 @@ test("bandeja: el estado del agente por conversación, las vistas con su total y
   const pending = page.getByRole("region", { name: "Te espera" })
   // Un caso, una fila: ni su tarea ni su conversación se repiten.
   const homeCase = pending.getByRole("listitem").filter({ hasText: "Te lo pasó Sofi" })
-  await expect(homeCase).toContainText("Pide hablar con una persona")
+  await expect(homeCase).toContainText(DERIVED_TEXT)
   await expect(pending).not.toContainText("espera tu aprobación")
   await expect(pending).not.toContainText("Cita el martes 3 de noviembre")
   // En teléfono las filas son las mismas.

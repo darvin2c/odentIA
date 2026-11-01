@@ -422,6 +422,7 @@ export function PersonPanel({
     <>
       <DetailDrawer
         open
+        focusTitle
         title={name}
         size="lg"
         description={description || undefined}

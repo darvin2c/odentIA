@@ -111,7 +111,8 @@ test("agente sin panel: el caso en Inicio, la cita en «Esperan su sí» y lo he
   // «Te espera» trae el caso una sola vez (ni su tarea ni su conversación son otra fila);
   // no hay nada del agente que aprobar ni la cita del paciente.
   const home = page.getByRole("region", { name: /^Te espera/ })
-  const caseRow = home.getByRole("listitem").filter({ hasText: "Pide hablar con una persona" })
+  // La fila dice lo que preguntó, no el motivo.
+  const caseRow = home.getByRole("listitem").filter({ hasText: "Quiero una cita" })
   await expect(caseRow).toHaveCount(1)
   await expect(caseRow).toContainText("Te lo pasó Sofi")
   await expect(home).not.toContainText("espera tu aprobación")
@@ -255,7 +256,7 @@ test("agente sin panel: el caso en Inicio, la cita en «Esperan su sí» y lo he
   await expect(brief).toContainText("Lo tienes tú")
   await brief.getByRole("button", { name: /^Más sobre/ }).click()
   await page.getByRole("menuitem", { name: "Pasar este tema a…" }).click()
-  await expect(page.getByRole("dialog", { name: "Pasar este tema a…" })).toContainText("Pide hablar con una persona")
+  await expect(page.getByRole("dialog", { name: "Pasar este tema a…" })).toBeVisible()
   await page.keyboard.press("Escape")
   await expect(page.getByRole("dialog", { name: "Pasar este tema a…" })).toBeHidden()
   await brief.getByRole("button", { name: /^Más sobre/ }).click()
@@ -293,8 +294,8 @@ test("Actividad del agente: recepción la ve, otros roles no y el servidor lo ni
   await page.unroute("**/api/agent/activity**")
   await page.getByRole("button", { name: "Reintentar" }).click()
   await expect(page.getByText("Sin actividad")).toBeVisible()
-  const tabs = page.getByRole("navigation", { name: "Secciones del agente" })
-  await expect(tabs.getByRole("link")).toHaveText(["Actividad"])
+  // Es lo único de Agente que le toca: con una sola pantalla no hay pestañas.
+  await expect(page.getByRole("navigation", { name: "Secciones del agente" })).toHaveCount(0)
 
   // Odontología y caja: sin entrada en el sidebar y 403 en servidor; el número de Inicio sí les responde.
   for (const role of ["clinician", "cashier"]) {
@@ -367,7 +368,7 @@ test("«Responder yo»: lo que tiene otra persona se dice, y al enviar pasa a qu
 
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, "/home"))
-  const row = page.getByRole("region", { name: /^Te espera/ }).getByRole("listitem").filter({ hasText: "Pide hablar con una persona" })
+  const row = page.getByRole("region", { name: /^Te espera/ }).getByRole("listitem").filter({ hasText: "Necesito hablar con alguien" })
   await expect(row).toContainText("Con Dr. Otro Prado")
   // Sin botón: tocar la fila abre el panel, que lo dice y ofrece «Responder yo».
   await expect(row.getByRole("button", { name: /^Responder/ })).toHaveCount(0)

@@ -12,35 +12,25 @@ import { PageLoading } from "./page-loading"
 const PHONE_ROWS = 5
 /** Cuáles traen su botón pequeño. */
 const WAITING_ROWS = [
-  { title: "w-3/5", detail: "w-4/5", action: true },
-  { title: "w-2/5", detail: "w-3/5", action: false },
-  { title: "w-1/2", detail: "w-3/4", action: true },
-  { title: "w-3/5", detail: "w-1/2", action: false },
-  { title: "w-2/5", detail: "w-2/3", action: true },
-  { title: "w-1/2", detail: "w-3/5", action: false },
+  { title: "w-2/5", ask: "w-4/5", detail: "w-3/5" },
+  { title: "w-1/3", ask: "w-3/5", detail: "w-1/2" },
+  { title: "w-1/2", ask: "w-3/4", detail: "w-2/5" },
+  { title: "w-2/5", ask: "w-1/2", detail: "w-3/5" },
+  { title: "w-1/3", ask: "w-2/3", detail: "w-1/2" },
+  { title: "w-1/2", ask: "w-3/5", detail: "w-2/5" },
 ]
 const TODAY_ROWS = ["w-3/5", "w-1/2", "w-2/3", "w-2/5", "w-7/12"]
 
 function WaitingRowSkeleton({ row, phone }: { row: (typeof WAITING_ROWS)[number]; phone: boolean }) {
   return (
-    <li className={phone ? "flex flex-wrap items-center gap-2" : "hidden flex-wrap items-center gap-2 sm:flex"}>
-      <div className="flex h-auto min-h-[60px] w-full min-w-0 flex-1 items-center justify-start gap-3 rounded-lg px-2 py-2">
-        <Skeleton className="size-9 shrink-0 rounded-full" />
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="flex h-5 items-center">
-            <Skeleton className={`h-3.5 ${row.title}`} />
-          </span>
-          <span className="flex h-5 items-center">
-            <Skeleton className={`h-3 ${row.detail}`} />
-          </span>
-        </span>
-        <Skeleton className="hidden h-3.5 w-12 shrink-0 sm:block" />
-      </div>
-      {row.action ? (
-        <span className="flex shrink-0 flex-col gap-1.5 max-sm:basis-full max-sm:w-full max-sm:flex-row sm:flex-row sm:items-center">
-          <Skeleton className="h-11 w-16 shrink-0 rounded-full max-sm:flex-1 sm:h-8" />
-        </span>
-      ) : null}
+    <li className={phone ? "flex items-center gap-3 px-2 py-2" : "hidden items-center gap-3 px-2 py-2 sm:flex"}>
+      <Skeleton className="size-9 shrink-0 rounded-full" />
+      <span className="flex min-w-0 flex-1 flex-col gap-1">
+        <Skeleton className={`h-3.5 ${row.title}`} />
+        <Skeleton className={`h-3.5 ${row.ask}`} />
+        <Skeleton className={`h-3 ${row.detail}`} />
+      </span>
+      <Skeleton className="h-11 w-20 shrink-0 rounded-full sm:h-8" />
     </li>
   )
 }
@@ -177,16 +167,13 @@ export function HomeSkeleton() {
     <div className="flex flex-wrap items-start gap-4">
       <div className="min-w-0 flex-[3_1_30rem]">
         <section className="elevated flex min-w-0 flex-col rounded-xl border bg-card p-3 sm:p-4">
-          <div className="flex flex-wrap items-baseline gap-x-2 px-2 pb-1.5">
-            <h2 className="flex items-center gap-2 text-[17px] font-bold tracking-tight">
-              Te espera
-              <Skeleton className="h-5 w-7 rounded-full" />
-            </h2>
-            <p className="text-sm text-muted-foreground">Por orden de urgencia</p>
-          </div>
+          <h2 className="px-2 text-[17px] font-bold tracking-tight">Te espera</h2>
+          <span className="flex items-center px-2 pt-3 pb-1">
+            <Skeleton className="h-3.5 w-28" />
+          </span>
           <ul className="flex flex-col divide-y">
             {WAITING_ROWS.map((row, index) => (
-              <WaitingRowSkeleton key={`${row.title}-${row.detail}`} row={row} phone={index < PHONE_ROWS} />
+              <WaitingRowSkeleton key={`${row.title}-${row.ask}-${row.detail}`} row={row} phone={index < PHONE_ROWS} />
             ))}
           </ul>
           <div className="mt-1 flex min-h-11 w-full items-center justify-center sm:hidden">
