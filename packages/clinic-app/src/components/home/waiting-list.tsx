@@ -77,11 +77,11 @@ function iconOf(row: WaitingRow, title: string): ReactNode {
  * enlace, no un botón: así lo anuncia el lector de pantalla.
  */
 function linkOf(row: WaitingRow, context: HomeTextContext, props: { className: string; "aria-label": string; children: ReactNode }): ReactElement | null {
-  // «y N tareas más» abre Tareas en la vista de quien mira: la del equipo para quien dirige, las suyas para los demás.
-  const tasksView = context.allTasks ? "todas" : "mias"
+  // «y N más» abre Tareas con lo de quien mira: toda la clínica para quien dirige; para los demás, lo suyo y lo de su área.
+  const tasksSearch = { task: undefined, alcance: context.allTasks ? "clinica" : undefined }
   switch (row.kind) {
     case "case":
-      return <Link to="/tasks" search={{ task: undefined, vista: tasksView }} {...props} />
+      return <Link to="/tasks" search={tasksSearch} {...props} />
     case "staleEncounter":
       return <Link to="/patients/$patientId/encounters/$encounterId" params={{ patientId: row.patientId, encounterId: row.id }} {...props} />
     case "unsentBudget":
@@ -108,16 +108,16 @@ function linkOf(row: WaitingRow, context: HomeTextContext, props: { className: s
         ? <Link to="/inbox" search={{ conversation: row.conversationId }} {...props} />
         : <Link to="/inbox" search={{ conversation: undefined, view: undefined }} {...props} />
     case "task":
-      return row.more > 0 ? <Link to="/tasks" search={{ task: undefined, vista: tasksView }} {...props} /> : <Link to={row.href} {...props} />
+      return row.more > 0 ? <Link to="/tasks" search={tasksSearch} {...props} /> : <Link to={row.href} {...props} />
     case "more":
       if (row.of === "conversations") return <Link to="/inbox" search={{ conversation: undefined, view: undefined }} {...props} />
-      if (row.of === "tasks") return <Link to="/tasks" search={{ task: undefined, vista: tasksView }} {...props} />
+      if (row.of === "tasks") return <Link to="/tasks" search={tasksSearch} {...props} />
       if (row.of === "unconfirmed") return <Link to="/agenda" search={{}} {...props} />
       // La Agenda muestra «Ya pasaron · sin cerrar» del día que se mira: abre en el de la primera que no cupo.
       if (row.of === "unclosed") return <Link to="/agenda" search={row.startsAt ? { date: dayKeyOf(row.startsAt, context.timezone) } : {}} {...props} />
       if (row.of === "unsentBudgets") return <Link to="/people" search={{}} {...props} />
       // «y N casos más»: cada caso es una tarea de Recepción («Te lo pasó Sofi»).
-      return <Link to="/tasks" search={{ task: undefined, vista: tasksView }} {...props} />
+      return <Link to="/tasks" search={tasksSearch} {...props} />
     default:
       return null
   }
