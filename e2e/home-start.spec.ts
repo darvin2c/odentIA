@@ -497,5 +497,5 @@ test("«Ver N más» de los casos lleva adonde se ven todos", async ({ owner, fi
   await gotoHydrated(page, tenant(owner.org.slug, "/home"))
   await page.getByRole("region", { name: "Te espera" }).getByRole("listitem").filter({ hasText: "casos más de" }).getByRole("link").click()
   await expect(page).toHaveURL(/\/tasks\?.*alcance=clinica/)
-  for (const name of names) await expect(page.getByText(`Te lo pasó Sofi: ${name}`)).toBeVisible()
+  for (const name of names) await expect(page.getByRole("link", { name, exact: true })).toBeVisible()
 })
