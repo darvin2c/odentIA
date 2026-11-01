@@ -637,6 +637,10 @@ it("una persona del equipo puede dar otra cita a la misma hora, pero no en la mi
     moveAppointment(tx, ORG, ACTOR, first.id, { expectedVersion: first.version, startsAt: later, outsideSchedule: true }),
   )
   expect(moved.startsAt).toBe(later.replace("Z", ".000Z"))
+  // Fuera de horario no autoriza a pisar otra cita: eso es otra excepción, y se pide aparte.
+  await expect(
+    run((tx) => createAppointment(tx, ORG, ACTOR, { ...slot, startsAt: later })),
+  ).rejects.toMatchObject({ code: "APPOINTMENT_CONFLICT" })
 })
 
 it("la duración de una cita regular se configura por sede", async () => {

@@ -24,7 +24,7 @@ El horario funcionaba como una prohibición. Reservar fuera de él estaba escond
 
 - Una clínica con una sola unidad nunca puede dar dos citas a la misma hora.
 - Con la marca `overlap_allowed`, una cita normal posterior la comprueba solo el servicio, no la base: dos reservas simultáneas podrían pisarla. Se acepta: ya hay una persona que aceptó compartir esa hora.
-- Editar los detalles de una cita fuera de horario sin cambiar hora ni profesional sigue funcionando; cambiar su servicio por otro de distinta duración pasa por la validación normal y puede rechazarse.
+- Editar una cita con el mismo profesional no vuelve a mirar su horario, para no trabar una cita ya fuera de él. Cambiarle de profesional revisa todo de nuevo.
 
 ## Referencias
 

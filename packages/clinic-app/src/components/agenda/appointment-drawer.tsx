@@ -260,7 +260,7 @@ function RealAppointmentDrawer({
           startsAt: range.start,
           endsAt: range.end,
           professionalUserId: range.columnId,
-          ...exceptionFlags(when.state === "outside" || when.state === "taken" ? when.state : null),
+          ...exceptionFlags(when.exception),
         }),
       }),
   })

@@ -34,6 +34,7 @@ export function ScheduleSnapPager({
 }: ScheduleSnapPagerProps) {
   const rootRef = React.useRef<HTMLDivElement>(null)
   const timer = React.useRef<number | undefined>(undefined)
+  const touching = React.useRef(false)
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `position` es justo lo que manda volver al centro.
   React.useLayoutEffect(() => {
@@ -43,9 +44,11 @@ export function ScheduleSnapPager({
 
   React.useEffect(() => () => window.clearTimeout(timer.current), [])
 
-  const onScroll = () => {
+  const settle = () => {
     window.clearTimeout(timer.current)
     timer.current = window.setTimeout(() => {
+      // Con el dedo aún puesto no terminó: puede estar mirando el día vecino o volver atrás.
+      if (touching.current) return
       const root = rootRef.current
       if (!root || root.clientWidth === 0) return
       const pane = Math.round(root.scrollLeft / root.clientWidth)
@@ -61,7 +64,18 @@ export function ScheduleSnapPager({
       role="group"
       aria-label={ariaLabel}
       data-snap-pager
-      onScroll={onScroll}
+      onScroll={settle}
+      onTouchStart={() => {
+        touching.current = true
+      }}
+      onTouchEnd={() => {
+        touching.current = false
+        settle()
+      }}
+      onTouchCancel={() => {
+        touching.current = false
+        settle()
+      }}
       className={cn(
         "flex min-w-0 snap-x snap-mandatory overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
         className,

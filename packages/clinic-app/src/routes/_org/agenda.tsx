@@ -94,7 +94,7 @@ import { ScheduleDrawer } from "../../components/agenda/schedule-editor"
 import { RoomForm } from "../../components/agenda/room-form"
 import { useAppointmentArrival } from "../../components/agenda/arrival"
 import { dayShort, shortName } from "../../components/agenda/shared"
-import { exceptionFlags } from "../../components/agenda/when"
+import { type AgendaException, exceptionFlags } from "../../components/agenda/when"
 import { useAttendAppointment } from "../../components/patient/new-encounter-button"
 import { MyCalendarDrawer } from "../../components/agenda/my-calendar-drawer"
 import { BranchSwitcher } from "../../components/branch-switcher"
@@ -183,11 +183,11 @@ interface MoveRequest {
   professionalUserId?: string
   roomId?: string
   /** Cae fuera de lo libre y una persona del equipo lo aceptó. */
-  exception?: boolean
+  exception?: AgendaException | null
   /** Por qué es una excepción, para confirmarla antes de enviar. */
   why?: string
   /** Dónde estaba, para «Deshacer». */
-  back?: { startsAt: string; endsAt: string; professionalUserId: string }
+  back?: { startsAt: string; endsAt: string; professionalUserId: string; roomId: string }
   /** Este movimiento ya es un «Deshacer»: no ofrece otro. */
   undoOf?: string
 }
@@ -618,14 +618,19 @@ function AgendaPage() {
     const range = dayRangeOf(item.startsAt, item.endsAt, date, TZ)
     return range && !isCovered(range, rangesOn(open, item.professionalUserId, date, TZ)) ? "Fuera de horario" : undefined
   }
-  /** Por qué mover una cita ahí sería una excepción; nada si cae en lo libre. */
-  const moveException = (item: AgendaAppointment, start: string, end: string, professionalId: string): string | null => {
+  /** Si mover una cita ahí sería una excepción: cómo y por qué, todo lo que se pisa. Nada si cae en lo libre. */
+  const moveException = (
+    item: AgendaAppointment,
+    start: string,
+    end: string,
+    professionalId: string,
+  ): (AgendaException & { why: string }) | null => {
     const date = zonedDateOf(start, TZ)
     const range = dayRangeOf(start, end, date, TZ)
     if (!range) return null
     const name = shortName(team.find((member) => member.id === professionalId)?.label ?? item.professionalName)
-    if (!isCovered(range, rangesOn(open, professionalId, date, TZ))) return `Queda fuera del horario de ${name}.`
-    if (overlapsAny(range, rangesOn(absences, professionalId, date, TZ))) return `Esa hora de ${name} está bloqueada.`
+    const outside = !isCovered(range, rangesOn(open, professionalId, date, TZ))
+    const blocked = overlapsAny(range, rangesOn(absences, professionalId, date, TZ))
     const clash = appointments.some(
       (other) =>
         other.id !== item.id &&
@@ -635,7 +640,15 @@ function AgendaPage() {
         Date.parse(other.startsAt) < Date.parse(end) &&
         Date.parse(other.endsAt) > Date.parse(start),
     )
-    return clash ? `${name} ya tiene otra cita a esa hora.` : null
+    if (!outside && !blocked && !clash) return null
+    const why = [
+      outside ? `Queda fuera del horario de ${name}.` : null,
+      blocked ? `Esa hora de ${name} está bloqueada.` : null,
+      clash ? `${name} ya tiene otra cita a esa hora.` : null,
+    ]
+      .filter(Boolean)
+      .join(" ")
+    return { outside, busy: blocked || clash, why }
   }
 
   /** Llegó o en atención, dicho con su hora: el estado real, no el reloj. */
@@ -710,7 +723,9 @@ function AgendaPage() {
   const phoneColumns = dayColumns.length > 0 ? dayColumns : team
   const dayFocus = phoneColumns.find((item) => item.id === who)?.id ?? phoneColumns[0]?.id ?? null
   /** Día y Agenda en escritorio: a quiénes se ve (vacío = todos). */
-  const chosen = whoList.filter((id) => dayColumns.some((item) => item.id === id))
+  // La vista Agenda abarca varios días: se elige entre todo el equipo, no entre quienes atienden el elegido.
+  const menuColumns = view === "lista" ? team : dayColumns
+  const chosen = whoList.filter((id) => menuColumns.some((item) => item.id === id))
   const isChosen = (id: string) => chosen.length === 0 || chosen.includes(id)
 
   // ----- Carriles -----
@@ -788,7 +803,10 @@ function AgendaPage() {
 
   // La semana del equipo: una fila por profesional, con el mismo reparto de la jornada.
   const teamDates = week.filter(
-    (date, index) => index < 6 || team.some((item) => rangesOn(open, item.id, date, TZ).length > 0),
+    (date, index) =>
+      index < 6 ||
+      team.some((item) => rangesOn(open, item.id, date, TZ).length > 0) ||
+      active.some((entry) => zonedDateOf(entry.start, TZ) === date),
   )
   const teamWindow = windowCovering(
     teamDates.flatMap((date) =>
@@ -880,7 +898,7 @@ function AgendaPage() {
           endsAt: input.endsAt,
           professionalUserId: input.professionalUserId,
           roomId: input.roomId,
-          ...exceptionFlags(input.exception ? "outside" : null),
+          ...exceptionFlags(input.exception),
         }),
       }),
     onSuccess: async (result, input) => {
@@ -896,7 +914,7 @@ function AgendaPage() {
                   ...back,
                   id: result.data.id,
                   expectedVersion: result.data.version,
-                  exception: moveException(result.data, back.startsAt, back.endsAt, back.professionalUserId) !== null,
+                  exception: moveException(result.data, back.startsAt, back.endsAt, back.professionalUserId),
                   undoOf: input.id,
                 }),
             }
@@ -1056,7 +1074,7 @@ function AgendaPage() {
   const pickWho = (ids: string[]) =>
     setParam("who", ids.length > 0 ? ids.join(",") : ownColumn ? WHO_ALL : undefined)
   const resourceTitle = group === "rooms" ? upperFirst(appWords().room.many) : "Profesionales"
-  const onlyChosen = chosen.length === 1 ? dayColumns.find((item) => item.id === chosen[0]) : undefined
+  const onlyChosen = chosen.length === 1 ? menuColumns.find((item) => item.id === chosen[0]) : undefined
   const resourceMenu = (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -1078,7 +1096,7 @@ function AgendaPage() {
       />
       <DropdownMenuContent align="end" className="min-w-72">
         {chosen.length > 0 ? <DropdownMenuItem onClick={() => pickWho([])}>Ver a todos</DropdownMenuItem> : null}
-        {dayColumns.map((item) => (
+        {menuColumns.map((item) => (
           <DropdownMenuCheckboxItem
             key={item.id}
             checked={chosen.includes(item.id)}
@@ -1226,12 +1244,12 @@ function AgendaPage() {
   /** Mover o alargar: lo libre se envía de una vez; fuera de eso, primero se confirma. */
   const requestMove = (item: AgendaAppointment, request: MoveRequest) => {
     const professionalId = request.professionalUserId ?? item.professionalUserId
-    const why = moveException(item, request.startsAt, request.endsAt, professionalId)
+    const exception = moveException(item, request.startsAt, request.endsAt, professionalId)
     const full: MoveRequest = {
       ...request,
-      back: { startsAt: item.startsAt, endsAt: item.endsAt, professionalUserId: item.professionalUserId },
+      back: { startsAt: item.startsAt, endsAt: item.endsAt, professionalUserId: item.professionalUserId, roomId: item.roomId },
     }
-    if (why) setPendingMove({ ...full, exception: true, why })
+    if (exception) setPendingMove({ ...full, exception, why: exception.why })
     else moveMutation.mutate(full)
   }
   const bookOn = (target: { columnId: string; start: string; date: string }) =>
@@ -1338,7 +1356,10 @@ function AgendaPage() {
   const showDays = small && view !== "semana"
   /** Tocar un día en la semana abre la reserva con esa persona y ese día, con sus horas libres. */
   const pickTeamDay = (columnId: string, date: string) => {
-    if (!canWrite) return
+    if (!canWrite) {
+      setParams({ date: date === today ? undefined : date, view: undefined, who: columnId })
+      return
+    }
     openBooking({
       professionalUserId: columnId,
       professionalLabel: team.find((item) => item.id === columnId)?.label,
@@ -1399,7 +1420,7 @@ function AgendaPage() {
               className={
                 small
                   ? "-mx-2 h-9 min-w-0 gap-1 px-2 text-base font-bold tracking-tight"
-                  : "h-9 min-w-0 gap-1.5 px-1.5 text-base font-bold tracking-tight 2xl:text-lg"
+                  : "h-9 min-w-0 gap-1 px-1 text-base font-bold tracking-tight 2xl:text-lg"
               }
             >
               <span className="truncate">{rangeLabel}</span>
@@ -1496,7 +1517,17 @@ function AgendaPage() {
               ) : null}
             </div>
           ) : (
-            statusChips
+            <>
+              <ScheduleResourceChips
+                aria-label={resourceTitle}
+                resources={team}
+                formatLabel={(item) => shortName(item.label)}
+                allLabel="Todos"
+                value={chosen.length === 1 ? (chosen[0] ?? null) : null}
+                onChange={(id) => pickWho(id ? [id] : [])}
+              />
+              {statusChips}
+            </>
           )}
         </div>
       ) : null}
@@ -1560,6 +1591,7 @@ function AgendaPage() {
                 rows={teamRows}
                 dates={teamDates}
                 today={today}
+                pickLabel={canWrite ? "Reservar" : "Abrir el día"}
                 onPick={(columnId, date) => pickTeamDay(columnId, date)}
               />
             </div>
@@ -1576,6 +1608,7 @@ function AgendaPage() {
                     : null
                 }
                 onPick={(columnId, date) => pickTeamDay(columnId, date)}
+                pickLabel={canWrite ? "Reservar" : "Abrir el día"}
                 onResource={(id) => pickWho([id])}
               />
               <div className="flex items-center gap-4 border-t px-4 py-2.5">

@@ -28,7 +28,7 @@ import { fetchService } from "../../lib/services"
 import { PersonPicker } from "../person-picker"
 import { ServiceSelect } from "../service-select"
 import { whenSaid } from "./shared"
-import { EMPTY_WHEN, exceptionFlags, useWhen, WHEN_FIELD_MAP, WhenFields, type WhenValues } from "./when"
+import { type AgendaException, EMPTY_WHEN, exceptionFlags, useWhen, WHEN_FIELD_MAP, WhenFields, type WhenValues } from "./when"
 
 /** Con qué se abre «Nueva cita»: nada, un hueco tocado en la rejilla o un paciente. */
 export interface BookingSeed {
@@ -167,7 +167,7 @@ export function BookingDrawer({
   const phase = React.useRef<"registro" | "cita">("cita")
 
   const save = useMutation({
-    mutationFn: (input: { patientId: string; value: BookingValues; range: ScheduleRangeValue; exception: "outside" | "taken" | null }) =>
+    mutationFn: (input: { patientId: string; value: BookingValues; range: ScheduleRangeValue; exception: AgendaException | null }) =>
       apiFetch<{ data: AgendaAppointment & { reminderReach?: ReminderReach | null } }>("/api/appointments", {
         method: "POST",
         body: JSON.stringify({
@@ -317,7 +317,7 @@ export function BookingDrawer({
           patientId,
           value,
           range,
-          exception: when.state === "outside" || when.state === "taken" ? when.state : null,
+          exception: when.exception,
         })
         // Si «Recordar la cita» está prendida, el agente le avisa solo: recepción no escribe nada.
         toast.success(`Cita reservada ${whenSaid(result.data.startsAt, timeZone, today)}`, {

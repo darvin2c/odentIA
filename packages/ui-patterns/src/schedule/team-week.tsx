@@ -41,6 +41,8 @@ export interface ScheduleTeamWeekProps {
   onPick: (columnId: string, date: string) => void
   /** Tocar el nombre: la semana de esa persona, por horas. */
   onResource?: (columnId: string) => void
+  /** Qué hace tocar un día, en el nombre accesible («Reservar», «Abrir el día»). */
+  pickLabel?: string
   /** Nombre accesible de la tabla. */
   label?: string
   className?: string
@@ -70,10 +72,10 @@ function dayDetail(day: ScheduleTeamDay): string {
 }
 
 /** Para quien no ve la barra: todo lo libre, sin resumir. */
-function dayAccessible(row: ScheduleColumn, day: ScheduleTeamDay): string {
+function dayAccessible(row: ScheduleColumn, day: ScheduleTeamDay, pickLabel: string): string {
   const starts = freeStarts(day.segments)
   const free = starts.length > 0 ? `Huecos desde las ${starts.map(hourLabel).join(", ")}. ` : ""
-  return `${row.label}, ${formatDateLong(day.date)}: ${dayHeadline(day)}. ${free}Reservar`
+  return `${row.label}, ${formatDateLong(day.date)}: ${dayHeadline(day)}. ${free}${pickLabel}`
 }
 
 const headlineTone = (day: ScheduleTeamDay) =>
@@ -90,6 +92,7 @@ export function ScheduleTeamWeek({
   selected,
   onPick,
   onResource,
+  pickLabel = "Reservar",
   label = "Semana del equipo",
   className,
 }: ScheduleTeamWeekProps) {
@@ -171,7 +174,7 @@ export function ScheduleTeamWeek({
                     <button
                       type="button"
                       aria-pressed={picked}
-                      aria-label={dayAccessible(row, day)}
+                      aria-label={dayAccessible(row, day, pickLabel)}
                       onClick={() => onPick(row.id, day.date)}
                       className={cn(
                         "flex min-h-[104px] w-full flex-col justify-center gap-1.5 rounded-xl border px-2.5 py-2 text-left outline-none transition-colors",
@@ -204,8 +207,9 @@ export function ScheduleTeamWeekList({
   dates,
   today,
   onPick,
+  pickLabel = "Reservar",
   className,
-}: Pick<ScheduleTeamWeekProps, "rows" | "dates" | "today" | "onPick" | "className">) {
+}: Pick<ScheduleTeamWeekProps, "rows" | "dates" | "today" | "onPick" | "pickLabel" | "className">) {
   return (
     <div className={cn("flex flex-col gap-2.5", className)}>
       {dates.map((date) => {
@@ -213,7 +217,8 @@ export function ScheduleTeamWeekList({
           const day = row.days.find((item) => item.date === date)
           return day ? [{ row, day }] : []
         })
-        const attending = lines.filter(({ day }) => !day.away && day.segments.some((segment) => segment.kind !== "closed"))
+        // Quien tiene una cita ese día sale aunque no atienda: es una excepción que no debe perderse.
+        const attending = lines.filter(({ day }) => day.count > 0 || (!day.away && day.segments.some((segment) => segment.kind !== "closed")))
         const others = lines.filter((line) => !attending.includes(line))
         const free = attending.reduce((total, { day }) => total + freeMinutesOf(day.segments), 0)
         const [weekday = "", number = ""] = formatDayShort(date).split(" ")
@@ -238,7 +243,7 @@ export function ScheduleTeamWeekList({
               <button
                 key={row.id}
                 type="button"
-                aria-label={dayAccessible(row, day)}
+                aria-label={dayAccessible(row, day, pickLabel)}
                 onClick={() => onPick(row.id, date)}
                 className="grid min-h-13 w-full grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1 border-t px-3.5 py-2.5 text-left outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
               >

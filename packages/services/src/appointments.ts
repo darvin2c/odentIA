@@ -1250,7 +1250,9 @@ export async function updateAppointment(
   }
   // «Editar» revisa la agenda igual que «Mover» (`moveAppointment`): quien
   // atiende debe tener horario, y ni un bloqueo ni otra cita pueden pisarla,
-  // salvo que la cita ya sea una excepción aceptada por una persona del equipo.
+  // salvo que la cita ya sea una excepción aceptada por una persona del equipo
+  // y siga con el mismo profesional.
+  const sameProfessional = professionalUserId === current.professionalUserId
   const active = current.status === "programada" || current.status === "confirmada"
   const changesPlace =
     professionalUserId !== current.professionalUserId || roomId !== current.roomId || endsAt.getTime() !== current.endsAt.getTime()
@@ -1268,9 +1270,12 @@ export async function updateAppointment(
       startsAt: current.startsAt,
       endsAt,
       ignoreAppointmentId: id,
-      allowBusy: current.overlapAllowed,
+      // Con otro profesional se revisa todo de nuevo: su horario, sus bloqueos y sus citas.
+      allowOutsideSchedule: sameProfessional,
+      allowBusy: sameProfessional && current.overlapAllowed,
       forTest: current.isTest,
     })
+    if (!sameProfessional) set.overlapAllowed = false
   }
   // La palabra va antes del intento: si la base lo rechaza, la transacción ya no admite consultas.
   const roomName = (await roomWord(tx, orgId)).one
