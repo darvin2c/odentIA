@@ -1185,7 +1185,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         if (!saved?.givenNames?.trim()) return "No se guardó nada: sus apellidos se guardan junto con sus nombres. Envía givenNames y familyName; si no sabes sus nombres, pídeselos."
       }
       if (ctx.dryRun) return "[SIMULACIÓN] Se actualizaría el contacto."
-      // Se guarda lo que dijo: «Soy Carla» ya es saber con quién habla.
+      // Se guarda lo que dijo. Solo sus nombres, sin apellidos, lo rechaza la ficha y el error vuelve al modelo.
       const names = {
         ...(given ? { givenNames: given } : {}),
         ...(family ? { familyName: family } : {}),

@@ -1712,9 +1712,6 @@ it("update_contact guarda el apellido de quien ya dijo sus nombres y, si faltan,
   await setNames({ displayName: "Luz", givenNames: null, familyName: null })
   await tool.invoke({ givenNames: "Luz María", familyName: "Paz" })
   expect(await person()).toMatchObject({ displayName: "Luz María Paz", givenNames: "Luz María", familyName: "Paz" })
-  await setNames({ displayName: "Eva", givenNames: null, familyName: null })
-  await tool.invoke({ givenNames: "Eva" })
-  expect(await person()).toMatchObject({ displayName: "Eva", givenNames: "Eva", familyName: null })
 })
 
 it("create_task no duplica en reentrega y las escrituras directas auditan su origen agente", async () => {
