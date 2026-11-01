@@ -1186,22 +1186,14 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         return `${ctx.dryRun ? "[SIMULACIÓN] " : ""}Es paciente y su ficha dice otro nombre: por aquí no se cambia y ${ctx.dryRun ? "quedaría" : "quedó"} una tarea para que recepción la revise. Háblale por el nombre que te dijo, sin decirle cómo figura en su ficha. Si le das su enlace para reservar, dile que ahí puede corregir su nombre.`
       }
       if (outcome !== "no_es_paciente") return "Es paciente: su nombre no se cambia por aquí. Úsalo tal como figura."
+      // Se guarda lo que dijo: «Soy Carla» ya es saber con quién habla, y lo demás lo completa al registrarse (ADR 0129).
       // El nombre visible lo arma el servicio con sus nombres y apellidos, también con los ya guardados.
       const names = {
         ...(given ? { givenNames: given } : {}),
         ...(family ? { familyName: family } : {}),
         ...(display ? { displayName: display } : {}),
       }
-      try {
-        await attempt((tx) => updateContact(tx, ctx.orgId, contactId, names, { userId: null, origin: "agent" }))
-      } catch (error) {
-        // La ficha no guarda apellidos sin nombres: se le dice qué hacer. Solo sus nombres, sin apellidos, también
-        // lo rechaza y ese error vuelve tal cual al modelo.
-        if (error instanceof ServiceError && error.fields?.givenNames) {
-          return "No se guardó nada: sus apellidos se guardan junto con sus nombres. Envía givenNames y familyName; si no sabes sus nombres, pídeselos."
-        }
-        throw error
-      }
+      await attempt((tx) => updateContact(tx, ctx.orgId, contactId, names, { userId: null, origin: "agent" }))
       if (ctx.dryRun) return "[SIMULACIÓN] Se actualizaría el contacto."
       await noteAction("datos", "anotó su nombre")
       return "Contacto actualizado."

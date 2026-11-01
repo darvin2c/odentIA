@@ -338,7 +338,7 @@ export function FiliacionSectionDrawer({
     const stored = Object.fromEntries(
       Object.keys(demographicsSchema.shape).map((key) => [key, source[key] ?? null]),
     )
-    const errors = validateDemographics({ ...stored, ...patch }, regionToday(), profile.country, stored)
+    const errors = validateDemographics({ ...stored, ...patch }, regionToday(), profile.country, stored, { partialName: !patient })
     const found: Record<string, string> = {}
     for (const [key, message] of Object.entries(errors)) found[FIELD_OF_ERROR[key] ?? key] ??= message
     return found

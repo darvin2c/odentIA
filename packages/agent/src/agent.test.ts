@@ -69,6 +69,7 @@ import {
   setProfessionalSchedule,
   TOOL_OPERATION,
   TOOLS_WITHOUT_OPERATION,
+  updateContact,
   updateTask,
   upsertAgentConfig,
   withdrawLesson,
@@ -1665,7 +1666,7 @@ it("si un paciente dice que se llama distinto, su ficha no cambia y recepción r
   expect(await tasksOf()).toHaveLength(1)
 })
 
-it("update_contact guarda el apellido de quien ya dijo sus nombres y, si faltan, dice que los pida", async () => {
+it("update_contact guarda lo que sabe de su nombre y lo demás se completa después", async () => {
   const { conversationId } = await ingestText("tg:apellido", "evt-apellido", "Hola")
   const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
@@ -1689,30 +1690,25 @@ it("update_contact guarda el apellido de quien ya dijo sus nombres y, si faltan,
   expect(String(await tool.invoke({}))).toContain("No se guardó nada")
   expect(String(await simulated.invoke({}))).toContain("No se guardó nada")
 
-  // Sin sus nombres, el apellido no se guarda (la regla de la ficha) y lo dice: nada de fingir que se guardó.
-  for (const said of [{ familyName: "Quispe" }, { displayName: "Ana Quispe", familyName: "Quispe" }]) {
-    expect(String(await tool.invoke(said))).toContain("sus apellidos se guardan junto con sus nombres")
-    expect(String(await simulated.invoke(said))).toContain("sus apellidos se guardan junto con sus nombres")
-  }
-  expect(await person()).toMatchObject({ displayName: "Anita", givenNames: null, familyName: null })
-
-  // Un nombre en blanco no es un nombre, y lo que rechace la ficha lo rechaza igual en la simulación.
+  // Un nombre en blanco no es un nombre.
   expect(String(await tool.invoke({ displayName: "   " }))).toContain("No se guardó nada")
-  const outcomeOf = (t: typeof tool, said: { givenNames: string }) => t.invoke(said).then(String, (error: Error) => error.message)
-  expect(await outcomeOf(simulated, { givenNames: "Eva" })).toBe(await outcomeOf(tool, { givenNames: "Eva" }))
-  expect(await person()).toMatchObject({ displayName: "Anita", givenNames: null, familyName: null })
 
-  // Con sus nombres guardados, la simulación dice lo que haría sin cambiar nada, y el apellido los completa.
-  await setNames({ displayName: "Carla", givenNames: "Carla", familyName: null })
-  expect(String(await simulated.invoke({ familyName: "Quispe" }))).toContain("[SIMULACIÓN] Se actualizaría")
-  expect(await person()).toMatchObject({ displayName: "Carla", familyName: null })
+  // «Soy Carla»: la simulación dice lo que haría sin cambiar nada, y de verdad se guarda.
+  expect(String(await simulated.invoke({ givenNames: "Carla" }))).toContain("[SIMULACIÓN] Se actualizaría")
+  expect(await person()).toMatchObject({ displayName: "Anita", givenNames: null, familyName: null })
+  expect(String(await tool.invoke({ givenNames: "Carla" }))).toBe("Contacto actualizado.")
+  expect(await person()).toMatchObject({ displayName: "Carla", givenNames: "Carla", familyName: null })
+  // Guardar otro dato no le pide los apellidos que nadie le dijo.
+  await withOrgContext(appDb, "org_a", (tx) => updateContact(tx, "org_a", contactId, { email: "carla@example.test" }))
+  expect(await person()).toMatchObject({ displayName: "Carla", email: "carla@example.test" })
+  // Y sus apellidos, cuando los dice, los completan.
   expect(String(await tool.invoke({ familyName: "Quispe" }))).toBe("Contacto actualizado.")
   expect(await person()).toMatchObject({ displayName: "Carla Quispe", givenNames: "Carla", familyName: "Quispe" })
 
-  // El nombre visible con el apellido aparte: se guardan los dos.
-  await setNames({ displayName: "Ana", givenNames: "Ana", familyName: null })
-  expect(String(await tool.invoke({ displayName: "Ana Rojas", familyName: "Rojas" }))).toBe("Contacto actualizado.")
-  expect(await person()).toMatchObject({ displayName: "Ana Rojas", familyName: "Rojas" })
+  // Solo sus apellidos también se guardan; lo que se ve es lo que se sabe de su nombre.
+  await setNames({ displayName: "Anita", givenNames: null, familyName: null })
+  expect(String(await tool.invoke({ familyName: "Rojas" }))).toBe("Contacto actualizado.")
+  expect(await person()).toMatchObject({ displayName: "Rojas", givenNames: null, familyName: "Rojas" })
 
   // Lo de siempre sigue igual.
   await setNames({ displayName: "Luz", givenNames: null, familyName: null })

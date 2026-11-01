@@ -858,6 +858,33 @@ test("quien aún no es paciente tiene su página, y registrarla no la saca de el
   await expect(page.getByText("Falta registrarla como paciente")).toHaveCount(0)
 })
 
+test("quien solo dijo sus nombres: editar otro dato no pide apellidos, y registrarla los pide con lo guardado ya escrito", async ({ owner }) => {
+  const { page } = owner
+  const slug = owner.org.slug
+  // Lo que deja Sofi cuando alguien escribe «Soy Carla».
+  const carla = await call<{ id: string }>(page, "POST", "/api/contacts", slug, { displayName: "Hola" }, 201)
+  await call(page, "PATCH", `/api/people/${carla.id}/identity`, slug, { givenNames: "Carla" })
+
+  await gotoHydrated(page, tenant(slug, `/people/${carla.id}?tab=filiacion`))
+  const contactCard = page.getByRole("region", { name: "Contacto", exact: true })
+  await contactCard.getByRole("button", { name: "Editar" }).click()
+  const contactForm = surface(page, { name: "Editar contacto" })
+  await contactForm.getByLabel("Correo").fill("carla@example.test")
+  await contactForm.getByRole("button", { name: "Guardar", exact: true }).click()
+  await expect(contactForm).toBeHidden()
+  await expect(contactCard).toContainText("carla@example.test")
+  const identity = page.getByRole("region", { name: "Identidad", exact: true })
+  await expect(identity).toContainText("Carla")
+  await page.screenshot({ path: test.info().outputPath("solo-nombres.png"), fullPage: true })
+
+  await gotoHydrated(page, tenant(slug, `/people/${carla.id}`))
+  await page.getByRole("button", { name: "Registrar", exact: true }).click()
+  const form = surface(page, { name: "Registrar a Carla" })
+  await expect(form.getByLabel("Nombres")).toHaveValue("Carla")
+  await expect(form.getByLabel("Apellidos")).toHaveValue("")
+  await page.screenshot({ path: test.info().outputPath("solo-nombres-registrar.png"), fullPage: true })
+})
+
 test("una lista y un buscador: Pacientes, Contactos nuevos y Todos con sus vínculos; Contactos redirige", async ({ owner }) => {
   const ids = await buildClinicalBase(owner)
   const { page } = owner

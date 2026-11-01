@@ -141,6 +141,15 @@ describe("contrato de registro", () => {
   })
 })
 
+it("nombres y apellidos van juntos en un paciente; quien aún no lo es puede tener lo que se sepa", () => {
+  const onlyGiven = { displayName: "Carla", givenNames: "Carla" }
+  const onlyFamily = { displayName: "Quispe", familyName: "Quispe" }
+  expect(validateDemographics(onlyGiven)).toMatchObject({ familyName: "Escribe los apellidos" })
+  expect(validateDemographics(onlyFamily)).toMatchObject({ givenNames: "Escribe los nombres" })
+  expect(validateDemographics(onlyGiven, undefined, undefined, undefined, { partialName: true })).toEqual({})
+  expect(validateDemographics(onlyFamily, undefined, undefined, undefined, { partialName: true })).toEqual({})
+})
+
 it("el parentesco escrito a mano se lee como su código HL7, y lo ambiguo queda sin código", () => {
   expect(kinshipFromWords("Madre")).toBe("MTH")
   expect(kinshipFromWords(" mamá ")).toBe("MTH")
