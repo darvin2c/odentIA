@@ -267,6 +267,13 @@
       "when": 1793519349252,
       "tag": "0037_no_es_representante",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1793521639053,
+      "tag": "0038_lo_del_paciente_con_responsable",
+      "breakpoints": true
     }
   ]
 }
