@@ -127,7 +127,6 @@ export interface MessageItem {
   attachments: unknown
   externalId: string | null
   status: string
-  error: string | null
   // Instante de aceptación real por el proveedor (outbound). Nulo si aún está
   // en cola/falló o si es histórico sin timestamp (sin backfill inventado).
   sentAt: string | null
@@ -165,12 +164,15 @@ export interface MessageItem {
 /**
  * Por qué no llegó, en palabras: el motivo del canal si lo dio así (pago, clave
  * vencida, número sin WhatsApp); el de Meta tal cual no es para la clínica, que
- * igual necesita saber de quién fue y qué puede hacer.
+ * igual necesita saber de quién fue y qué puede hacer. No pide repetirlo, porque
+ * muchos rechazos se repiten, ni promete que no se reenvía: «Ver respuesta» se
+ * vuelve a ofrecer al día siguiente.
  */
 export function deliveryNoteOf(status: string, error: string | null): string | null {
   if (status === "failed") {
     if (error === "connection-disabled") return "No se entregó: la conexión del canal estaba desactivada."
-    return whatsappFailureWords(error) ?? "No se entregó: el canal no lo aceptó. No se reenvía solo: escríbele de nuevo o llámale."
+    if (error?.startsWith("interno:")) return "No se entregó: el sistema no pudo enviarlo. Si es importante, avísale por otra vía."
+    return whatsappFailureWords(error) ?? "No se entregó: el canal no lo aceptó. Si es importante, avísale por otra vía."
   }
   if (status === "unknown") {
     return "No sabemos si llegó: el canal no confirmó el envío. No se reenvía solo, para no mandarlo dos veces."
@@ -192,7 +194,6 @@ function toMessageItem(row: typeof message.$inferSelect, automatic: MessageItem[
     attachments: row.attachments,
     externalId: row.externalId,
     status: row.status,
-    error: row.error,
     sentAt: row.sentAt ? row.sentAt.toISOString() : null,
     templateName: row.templateName,
     templateLanguage: row.templateLanguage,

@@ -789,7 +789,8 @@ export function parseReplyId(value: string | null | undefined): { action: ReplyA
   if (!value) return null
   const [prefix, action, jobId, nth, ...rest] = value.split(":")
   if (prefix !== REPLY_PREFIX || rest.length > 0 || !jobId) return null
-  if (nth !== undefined && !/^\d+$/.test(nth)) return null
+  // Solo lo que da `replyButtons`: el primero no lleva final y WhatsApp admite tres botones.
+  if (nth !== undefined && !/^[23]$/.test(nth)) return null
   if (!(REPLY_ACTIONS as readonly string[]).includes(action ?? "")) return null
   if (!/^[0-9a-f-]{36}$/i.test(jobId)) return null
   return { action: action as ReplyAction, jobId }

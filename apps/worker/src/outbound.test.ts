@@ -323,6 +323,30 @@ it("lo que Meta rechaza con su error queda como no entregado, con su motivo y si
   expect(calls).toBe(1)
 })
 
+it("lo que falla antes de llegar al canal se reintenta y, al tope, queda como fallo propio", async () => {
+  const messageId = await queuedWhatsApp("wa:51911100011")
+  let calls = 0
+  const broken = {
+    ...deps,
+    senderMode: "live" as const,
+    // Con otra clave no se pueden leer los datos de la conexión: el envío no llega a intentarse.
+    secretsKey: Buffer.alloc(32, 7),
+    fetch: (async () => {
+      calls++
+      return new Response("{}")
+    }) as typeof fetch,
+  }
+  expect(await processOutbound(appDb, broken, outJob(messageId, 1))).toBe("retry")
+  expect((await messageState(messageId))?.status).toBe("queued")
+  expect(await processOutbound(appDb, broken, outJob(messageId, 5))).toBe("done")
+  const [row] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ status: message.status, error: message.error }).from(message).where(eq(message.id, messageId)),
+  )
+  expect(row?.status).toBe("failed")
+  expect(row?.error).toMatch(/^interno: /)
+  expect(calls).toBe(0)
+})
+
 /** Meta de prueba que rechaza todo envío con ese código. No acredita lo que responde Meta real. */
 function metaRejecting(code: number) {
   return {

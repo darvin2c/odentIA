@@ -57,14 +57,16 @@ it("cada botón de cada mensaje lleva su propio id y se lee de vuelta; los ya en
     `${replyId("responder", job)}:2`,
     replyId("baja", job),
   ])
-  for (const bad of [`${replyId("responder", job)}:x`, `${replyId("responder", job)}:2:3`, "odentia:responder:j1"]) expect(parseReplyId(bad), bad).toBeNull()
+  for (const bad of [`${replyId("responder", job)}:x`, `${replyId("responder", job)}:1`, `${replyId("responder", job)}:4`, `${replyId("responder", job)}:2:3`, "odentia:responder:j1"]) expect(parseReplyId(bad), bad).toBeNull()
 })
 
 it("lo que no salió dice de quién fue y qué hacer; el motivo de Meta tal cual no llega a la clínica", async () => {
   const { deliveryNoteOf } = await import("./conversations.js")
   const rejected = deliveryNoteOf("failed", "WhatsApp send falló: 400 (#131009) Parameter value is not valid")
-  expect(rejected).toBe("No se entregó: el canal no lo aceptó. No se reenvía solo: escríbele de nuevo o llámale.")
+  expect(rejected).toBe("No se entregó: el canal no lo aceptó. Si es importante, avísale por otra vía.")
   expect(deliveryNoteOf("failed", null)).toBe(rejected)
+  // Lo que falló antes de salir no fue del canal.
+  expect(deliveryNoteOf("failed", "interno: Mensaje media sin adjunto válido")).toBe("No se entregó: el sistema no pudo enviarlo. Si es importante, avísale por otra vía.")
   expect(deliveryNoteOf("failed", "connection-disabled")).toBe("No se entregó: la conexión del canal estaba desactivada.")
   expect(deliveryNoteOf("delivered", null)).toBeNull()
 })
