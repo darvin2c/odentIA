@@ -47,7 +47,7 @@ describe("en qué está una conversación abierta", () => {
     const topic = {
       id: "t1", reason: "Descuento", priority: "media" as const, urgent: false, assigneeUserId: null, assigneeName: null,
       createdBy: "agent" as const, createdAt: NOW.toISOString(), dueAt: null, taskId: null,
-      source: { id: "m1", body: "¿Me hacen descuento?", createdAt: NOW.toISOString() }, askedMessageIds: [], askedAgainAt: null,
+      source: { id: "m1", body: "¿Me hacen descuento?", createdAt: NOW.toISOString(), onlyCourtesy: false }, askedMessageIds: [], askedAgainAt: null,
     }
     expect(conversationWords(open({ topics: [{ ...topic, urgent: true }] }))).toEqual({ text: "Te lo pasó Sofi · Ahora", tone: "urgent" })
     expect(conversationWords(open({ topics: [topic] }))).toEqual({ text: "Te lo pasó Sofi · Hoy", tone: "team" })

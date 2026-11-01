@@ -100,7 +100,7 @@ export function topicWords(topic: InboxTopic, myUserId: string | null, reception
 
 /** El texto del mensaje que originó el tema, en una línea, para la fila y la caja de texto. */
 export function topicQuote(topic: InboxTopic, max = 90): string {
-  const text = (topic.source?.body ?? topic.reason).replace(/\s+/g, " ").trim()
+  const text = ((topic.source?.onlyCourtesy ? null : topic.source?.body) ?? topic.reason).replace(/\s+/g, " ").trim()
   return text.length > max ? `${text.slice(0, max - 1)}…` : text
 }
 

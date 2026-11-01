@@ -1,6 +1,6 @@
 # 0050 · El agente nunca se calla: lo derivado es un tema, no la conversación
 
-Fecha: 2026-10-18, precisada el 2026-10-20 · Estado: aceptada · Modifica a [0024](0024-ninguna-conversacion-queda-abierta.md) en «Lo que tiene una persona» · Complementa a [0021](0021-el-agente-siempre-responde-y-sabe-todo-lo-de-la-clinica.md)
+Fecha: 2026-10-18, precisada el 2026-10-20 · Estado: aceptada · Modifica a [0024](0024-ninguna-conversacion-queda-abierta.md) en «Lo que tiene una persona» · Complementa a [0021](0021-el-agente-siempre-responde-y-sabe-todo-lo-de-la-clinica.md) · Cómo se responde un tema: [0122](0122-responder-cada-tema-por-su-cuenta.md) reemplaza «Enviar y resolver» y «Enviar, sigue pendiente»
 
 ## Problema
 

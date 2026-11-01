@@ -1654,6 +1654,46 @@ const carlosAgain = await seedMessage({
   createdAt: hoursAgo(3),
 })
 await recordTopicAskedAgain(db, ORG_A, { handoffId: carlosTopic.id, messageId: carlosAgain.id })
+// Varios temas en un hilo: la caja no elige sola y un «Si» a Sofi no entra a ninguno (ADR 0122).
+const carlosSecond = await seedMessage({
+  orgId: ORG_A,
+  conversationId: convCarlos.id,
+  direction: "in",
+  senderKind: "contact",
+  body: "También quiero saber si hacen alineadores invisibles",
+  externalId: "seed-msg-8e",
+  status: "received",
+  createdAt: hoursAgo(2),
+})
+await createHandoff(db, ORG_A, null, {
+  conversationId: convCarlos.id,
+  reason: "Pregunta si hacen alineadores invisibles",
+  summary: "Carlos pregunta por alineadores invisibles; no hay información confirmada.",
+  priority: "media",
+  createdBy: "agent",
+  sourceMessageId: carlosSecond.id,
+})
+await seedMessage({
+  orgId: ORG_A,
+  conversationId: convCarlos.id,
+  direction: "out",
+  senderKind: "agent",
+  body: "Carlos, no tengo información confirmada sobre alineadores. El equipo te responde por aquí.",
+  externalId: "seed-msg-8f",
+  status: "read",
+  createdAt: new Date(hoursAgo(2).getTime() + 60_000),
+})
+const carlosYes = await seedMessage({
+  orgId: ORG_A,
+  conversationId: convCarlos.id,
+  direction: "in",
+  senderKind: "contact",
+  body: "Ok, gracias",
+  externalId: "seed-msg-8g",
+  status: "received",
+  createdAt: new Date(hoursAgo(2).getTime() + 120_000),
+})
+await recordTopicAskedAgain(db, ORG_A, { handoffId: carlosTopic.id, messageId: carlosYes.id })
 await createHandoff(db, ORG_A, null, {
   conversationId: convJorge.id,
   reason: "Jorge se mostró molesto por la espera",

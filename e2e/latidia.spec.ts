@@ -6,6 +6,7 @@ import { encounter, patientPayment, serviceCatalog } from "@odentia/db/schema/cl
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import type { Page } from "@playwright/test"
 import { eq } from "drizzle-orm"
+import { simulateWhatsAppInbound } from "./channels"
 import { hostUrl, latidiaUrl, tenant } from "./env"
 import { chooseOption, expect, PASSWORD, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
@@ -205,6 +206,54 @@ test("latidIA: su dominio, su sesión, un consultorio médico con su marca y sus
   await expect(page).toHaveURL(
     new RegExp(`^${latidiaUrl(slug, "/home").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
   )
+  await context.close()
+})
+
+test("latidIA: en la Bandeja cada tema se responde por su cuenta", async ({ browser, fixtureDb, passwordHash }, testInfo) => {
+  const vela = await createVela(fixtureDb, passwordHash)
+  const context = await browser.newContext({ ignoreHTTPSErrors: true })
+  const page = await context.newPage()
+  await gotoHydrated(page, latidiaUrl("app", "/login"))
+  const { api, slug } = await openConsultorio(page, vela)
+  const connection = await request<{ data: { id: string } }>(page, api, "POST", "/api/channels/connections", slug, {
+    channel: "whatsapp",
+    provider: "whatsapp_cloud_api",
+    displayName: "WA latidIA",
+    config: { phoneNumberId: "E2E-LATIDIA", wabaId: "E2E-WABA", accessToken: "e2e", appSecret: "e2e-secret", templates: [] },
+  })
+  expect(connection.status).toBe(201)
+  const asks = ["¿Atienden a niños?", "Y también quiero saber el costo de la consulta"]
+  const threadOf = async (text: string) => {
+    const listed = await request<{ data: Array<{ id: string; preview: { body: string | null } | null }> }>(page, api, "GET", "/api/conversations?status=open", slug)
+    return listed.body.data.find((row) => row.preview?.body === text)?.id ?? ""
+  }
+  let thread = ""
+  for (const [index, text] of asks.entries()) {
+    expect(await simulateWhatsAppInbound(page, api, connection.body.data.id, "e2e-secret", {
+      from: "51911100009", phoneNumberId: "E2E-LATIDIA", text, wamid: `wamid.${randomUUID()}`,
+    })).toBe(200)
+    await expect.poll(() => threadOf(text), { timeout: 30_000 }).not.toBe("")
+    thread = await threadOf(text)
+    const topic = await request(page, api, "POST", "/api/agent/handoffs", slug, { conversationId: thread, reason: `Tema ${index + 1}`, summary: text, priority: "media" })
+    expect(topic.status).toBe(201)
+  }
+
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await gotoHydrated(page, latidiaUrl(slug, `/inbox?conversation=${thread}`))
+  await expect(page.locator("html")).toHaveAttribute("data-brand", "latidia")
+  const list = page.getByRole("region", { name: "Temas por atender" })
+  await expect(list).toContainText("2 temas por atender")
+  await page.screenshot({ path: testInfo.outputPath("varios-temas.png") })
+  await list.getByRole("button", { name: `«${asks[1]}»` }).click()
+  const box = page.getByRole("textbox", { name: "Mensaje" })
+  await box.fill("La consulta cuesta S/ 80")
+  await box.press("Enter")
+  await expect(page.getByText(/^Tema resuelto\./)).toBeVisible()
+  // Después de enviar la caja no elige sola, aunque quede uno: un segundo mensaje lo citaría.
+  await expect(list).toContainText("1 tema por atender")
+  await page.getByRole("button", { name: "Dejar pendiente" }).click()
+  await expect(list).toContainText("2 temas por atender")
+  await page.screenshot({ path: testInfo.outputPath("dejar-pendiente.png") })
   await context.close()
 })
 

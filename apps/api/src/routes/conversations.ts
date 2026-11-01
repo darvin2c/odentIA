@@ -34,6 +34,7 @@ import {
   replyByWhatsApp,
   deleteWebchatTest,
   takeTopic,
+  reopenTopic,
   resolveTopic,
   setAgentStatus,
   summarizeInbox,
@@ -65,8 +66,6 @@ const textInput = z.object({
   text: z.string().min(1).max(4000),
   // Responder citando un mensaje de la persona (ADR 0050).
   replyToMessageId: z.string().uuid().optional(),
-  // «Enviar, sigue pendiente»: el tema queda abierto. Por defecto se resuelve.
-  keepPending: z.boolean().optional(),
 })
 
 const approvedInput = z.object({
@@ -230,6 +229,17 @@ export function createConversationsRoute(deps: CrmDeps) {
     )
   })
 
+  // «Dejar pendiente» (ADR 0122): lo resuelto vuelve a quedar abierto.
+  app.post("/:id/topics/:topicId/reopen", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => {
+        await reopenTopic(tx, orgId, { conversationId: c.req.param("id"), topicId: c.req.param("topicId"), userId })
+        return { ok: true }
+      }),
+    )
+  })
+
   app.post("/:id/messages", async (c) => {
     const { orgId, userId } = orgContextOf(c)
     const parsed = textInput.safeParse(await c.req.json().catch(() => null))
@@ -241,7 +251,6 @@ export function createConversationsRoute(deps: CrmDeps) {
           userId,
           content: { type: "text", text: parsed.data.text },
           replyToMessageId: parsed.data.replyToMessageId ?? null,
-          keepPending: parsed.data.keepPending ?? false,
         }),
       ),
     )
@@ -268,7 +277,6 @@ export function createConversationsRoute(deps: CrmDeps) {
           userId,
           text: parsed.data.text,
           replyToMessageId: parsed.data.replyToMessageId ?? null,
-          keepPending: parsed.data.keepPending ?? false,
         }),
       ),
     )

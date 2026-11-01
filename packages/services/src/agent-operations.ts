@@ -2466,8 +2466,12 @@ const YES_COMPANY = new Set([
   "va", "una", "ahi", "alla", "alli", "voy", "nos", "vemos", "tambien", "muy", "senorita", "amiga",
 ])
 
-export function isAffirmative(text: string | null): boolean {
-  if (!text || text.includes("?")) return false
+/** Lo que asiente sin llegar a ser un sí: no confirma nada, pero tampoco pide nada. */
+const COURTESY_WORDS = new Set(["gracias", "entendido", "entendida", "ya", "aja", "ah", "oh", "bueno", "buenisimo", "vemos", "\u{1f64f}", "\u{1f60a}"])
+
+/** Las palabras de un mensaje corto, sin tildes ni signos; ninguna si pregunta algo o es largo. */
+function plainWords(text: string | null): string[] {
+  if (!text || text.includes("?")) return []
   const normal = text
     .toLowerCase()
     .normalize("NFD")
@@ -2475,10 +2479,22 @@ export function isAffirmative(text: string | null): boolean {
     .replace(/[¡!¿?.,;:()"'-]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
-  if (!normal || normal.length > 80) return false
-  const words = normal.split(" ")
+  if (!normal || normal.length > 80) return []
+  return normal.split(" ")
+}
+
+export function isAffirmative(text: string | null): boolean {
+  const words = plainWords(text)
   // Cada palabra es un sí o lo acompaña, y hay al menos un sí: «no», «pero», «mejor», «otro»… no están.
   return words.every((word) => YES_WORDS.has(word) || YES_COMPANY.has(word)) && words.some((word) => YES_WORDS.has(word))
+}
+
+/** Solo asiente o agradece: «Si», «ok», «gracias», «entendido». No sirve para confirmar: eso es `isAffirmative`. */
+export function onlyCourtesy(text: string | null): boolean {
+  const words = plainWords(text)
+  const says = (word: string) => YES_WORDS.has(word) || COURTESY_WORDS.has(word)
+  // Lo que solo acompaña no basta: «por favor» o «a la una» sí piden algo.
+  return words.every((word) => says(word) || YES_COMPANY.has(word)) && words.some(says)
 }
 
 /**
@@ -4028,17 +4044,55 @@ export async function latestOpenTopic(
 /** Cuánto atrás un tema abierto cuenta como «el mismo» que vuelve a pedir. */
 const SAME_TOPIC_MS = 12 * 60 * 60 * 1000
 
+/**
+ * Un «Si», un «ok» o un «gracias» no le piden nada nuevo a nadie: no entran a un
+ * tema ni le abren uno (ADR 0122). La excepción es el que contesta una pregunta
+ * del equipo: alguien espera ese sí para actuar.
+ */
+export async function asksNothingNew(tx: Db, orgId: string, conversationId: string, messageId: string): Promise<boolean> {
+  const [said] = await tx
+    .select({ body: conversationMessage.body, contentType: conversationMessage.contentType, replyTo: conversationMessage.replyToMessageId, createdAt: conversationMessage.createdAt })
+    .from(conversationMessage)
+    .where(and(eq(conversationMessage.id, messageId), eq(conversationMessage.organizationId, orgId), eq(conversationMessage.conversationId, conversationId)))
+    .limit(1)
+  // Una foto con «Listo» trae algo: un comprobante, por ejemplo.
+  if (!said || said.contentType !== "text" || !onlyCourtesy(said.body)) return false
+  // A qué contesta: lo que citó o, si no citó nada, lo último que se le dijo. Lo que
+  // escribió justo antes cuenta: «¿ya me dicen?» y «gracias» en una ráfaga sí preguntan.
+  const before = await tx
+    .select({ direction: conversationMessage.direction, senderKind: conversationMessage.senderKind, body: conversationMessage.body })
+    .from(conversationMessage)
+    .where(
+      and(
+        eq(conversationMessage.organizationId, orgId),
+        eq(conversationMessage.conversationId, conversationId),
+        said.replyTo ? eq(conversationMessage.id, said.replyTo) : lt(conversationMessage.createdAt, said.createdAt),
+      ),
+    )
+    .orderBy(desc(conversationMessage.createdAt))
+    .limit(10)
+  for (const item of before) {
+    // El «?» de un enlace no es una pregunta.
+    if (item.direction === "out") return !(item.senderKind === "user" && (item.body ?? "").replace(/https?:\/\/\S+/g, "").includes("?"))
+    if (!onlyCourtesy(item.body)) return false
+  }
+  return true
+}
+
 export async function recordTopicAskedAgain(
   tx: Db,
   orgId: string,
   input: { handoffId: string; messageId: string | null },
-): Promise<{ assigneeName: string | null; reason: string; raised: boolean }> {
+): Promise<{ assigneeName: string | null; reason: string; raised: boolean; noted: boolean }> {
   const [row] = await tx
     .select()
     .from(agentHandoff)
     .where(and(eq(agentHandoff.id, input.handoffId), eq(agentHandoff.organizationId, orgId), handoffStillOpen()))
     .limit(1)
   if (!row) throw notFound("Tema")
+  if (input.messageId && row.conversationId && (await asksNothingNew(tx, orgId, row.conversationId, input.messageId))) {
+    return { assigneeName: null, reason: row.reason, raised: false, noted: false }
+  }
   const asked = new Set(row.askedMessageIds ?? [])
   if (input.messageId) {
     const [msg] = await tx
@@ -4071,7 +4125,7 @@ export async function recordTopicAskedAgain(
       permission: "conversations.read",
     })
   }
-  return { assigneeName, reason: row.reason, raised }
+  return { assigneeName, reason: row.reason, raised, noted: true }
 }
 
 /** Cuántas veces vuelve a preguntar por lo mismo antes de que su tema pase a urgente. */
