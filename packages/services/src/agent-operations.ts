@@ -3965,7 +3965,11 @@ export async function claimHandoff(
   const [actor] = await tx.select({ name: user.name }).from(user).where(eq(user.id, userId)).limit(1)
   const who = await topicPersonName(tx, orgId, claimed.contactId)
   const href = claimed.conversationId ? `/inbox?conversation=${claimed.conversationId}` : "/inbox"
-  if (before?.assigneeUserId && before.assigneeUserId !== target) {
+  // Quien ya no está en el equipo no recibe avisos: el tema pasa igual.
+  const [stillHere] = before?.assigneeUserId
+    ? await tx.select({ id: member.id }).from(member).where(and(eq(member.organizationId, orgId), eq(member.userId, before.assigneeUserId))).limit(1)
+    : []
+  if (before?.assigneeUserId && before.assigneeUserId !== target && stillHere) {
     await createWorkspaceNotification(tx, orgId, {
       userId: before.assigneeUserId,
       dedupeKey: `tema:${claimed.id}:tomado:${target}`,

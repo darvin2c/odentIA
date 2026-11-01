@@ -138,7 +138,8 @@ test("agente sin panel: el caso en Inicio, la cita en «Esperan su sí» y lo he
   await box.press("Enter")
   await expect(panel).toContainText("Le respondiste a")
   await expect(panel).toContainText("Tema resuelto")
-  await expect(caseRow).toHaveCount(0)
+  // Ya no es un caso; si el mensaje no llegó a salir, sigue como alguien que espera respuesta.
+  await expect(caseRow.filter({ hasText: "Te lo pasó Sofi" })).toHaveCount(0)
   // Resolver se corrige: «Dejar pendiente» aparece después de enviar.
   await panel.getByRole("button", { name: "Dejar pendiente" }).click()
   await expect(panel).toContainText("sigue pendiente")
@@ -263,7 +264,7 @@ test("agente sin panel: el caso en Inicio, la cita en «Esperan su sí» y lo he
   await page.getByRole("menuitem", { name: "Marcar resuelto" }).click()
   await expect(brief).toBeHidden()
   await expect(page).toHaveURL(/\/home/)
-  await expect(caseRow).toHaveCount(0)
+  await expect(caseRow.filter({ hasText: "Te lo pasó Sofi" })).toHaveCount(0)
   const stillOpen = await call<Array<{ id: string }>>(page, "GET", "/api/agent/handoffs?open=1", org.slug)
   expect(stillOpen.map((h) => h.id)).not.toContain(handoff.id)
 })
@@ -358,7 +359,7 @@ test("«Responder yo»: lo que tiene otra persona se dice, y al enviar pasa a qu
   await simulateTelegramInbound(page, API, tg.id, tg.webhookSecret, { fromId: tgUser, chatId: tgUser, text: "Necesito hablar con alguien", updateId: nextEventId() })
   const conversation = await conversationFor(page, org.slug, tg.id)
   const topic = await call<{ id: string }>(page, "POST", "/api/agent/handoffs", org.slug, { conversationId: conversation.id, reason: "Pide hablar con una persona", summary: "Prefiere atención humana.", priority: "alta" }, 201)
-  // Lo tiene otra persona del equipo.
+  // Lo tiene alguien que ya no está en el equipo: no recibe aviso y el tema pasa igual.
   const otherId = randomUUID()
   await fixtureDb.insert(user).values({ id: otherId, name: "Dr. Otro Prado", email: `${otherId}@inicio.test`, emailVerified: true })
   await fixtureDb.update(agentHandoff).set({ assigneeUserId: otherId }).where(eq(agentHandoff.id, topic.id))
