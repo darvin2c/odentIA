@@ -982,7 +982,10 @@ describe("una historia bloqueada", () => {
       await run(c, (tx) => syncCheckupReminders(tx, c.orgId, NOW))
     }
     const lock = (lockedAt: Date | null) =>
-      ownerDb.update(contact).set({ recordLockedAt: lockedAt, recordLockedBy: lockedAt ? c.ownerId : null }).where(eq(contact.id, p.contactId))
+      ownerDb
+        .update(contact)
+        .set({ recordLockedAt: lockedAt, recordLockedBy: lockedAt ? c.ownerId : null, isActive: lockedAt === null })
+        .where(eq(contact.id, p.contactId))
 
     await lock(NOW)
     await sync()
