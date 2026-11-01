@@ -294,12 +294,13 @@ for (const width of [1440, 390]) {
         .insert(patient)
         .values(contacts.map((row, index) => ({ organizationId, personId: row.id, patientNumber: 10 + index })))
         .returning({ id: patient.id })
+      const [room] = await fixtureDb.insert(scheduleRoom).values({ organizationId, branchId: owner.branchId, name: "Unidad de las llamadas" }).returning({ id: scheduleRoom.id })
       const appointments = await fixtureDb
         .insert(appointment)
         .values(
           patients.map((row, index) => {
             const startsAt = new Date(Date.now() + (26 + index) * 3_600_000)
-            return { organizationId, branchId: owner.branchId, patientId: row.id, professionalUserId: owner.user.id, serviceName: "Control", startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30 }
+            return { organizationId, branchId: owner.branchId, patientId: row.id, roomId: room!.id, professionalUserId: owner.user.id, serviceName: "Control", startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30 }
           }),
         )
         .returning({ id: appointment.id })

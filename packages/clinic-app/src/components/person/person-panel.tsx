@@ -268,7 +268,7 @@ export function PersonPanel({
           <p className="text-[13px] text-muted-foreground">
             <span className="font-bold text-foreground">Horarios libres{panel.suggestions.professionalName ? ` con ${panel.suggestions.professionalName}` : ""}.</span> <span className="max-sm:sr-only">Tocar uno lo escribe; no lo aparta.</span>
           </p>
-          <div className="flex gap-1.5 overflow-x-auto sm:flex-wrap">
+          <div className="flex gap-1.5 overflow-x-auto [scrollbar-width:none] sm:flex-wrap">
             {panel.suggestions.slots.map((slot) => (
               <Button
                 key={slot.startsAt}
