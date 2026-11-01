@@ -76,6 +76,11 @@ describe("onlyCourtesy", () => {
     "no gracias",
     "sí, pero mañana no puedo",
     "Y una extracción de la muela del juicio",
+    // Lo que solo acompaña a un sí no alcanza: pide algo.
+    "Por favor",
+    "Doctora, por favor",
+    "A la una",
+    "Es la una",
   ])("%s sí dice algo", (text) => {
     expect(onlyCourtesy(text)).toBe(false)
   })

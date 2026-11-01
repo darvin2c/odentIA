@@ -655,6 +655,41 @@ describe("temas para el equipo: el agente nunca se calla (ADR 0050)", () => {
     expect(await c.run((tx) => recordTopicAskedAgain(tx, c.orgId, { handoffId: topic.id, messageId: thanks!.id }))).toMatchObject({ noted: true })
   })
 
+  it("una foto con «Listo» sí cuenta: trae algo, como un comprobante", async () => {
+    const c = await clinic()
+    const conv = await c.thread("Cyndy")
+    const base = Date.now() - 600_000
+    await c.say(conv.id, "in", "¿Cómo pago?", new Date(base))
+    const topic = await c.run((tx) => createHandoff(tx, c.orgId, null, { conversationId: conv.id, reason: "Pago", summary: "Pago", createdBy: "agent" }))
+    await c.say(conv.id, "out", "El equipo le responde por aquí.", new Date(base + 10_000))
+    const [proof] = await c.say(conv.id, "in", "Listo", new Date(base + 20_000))
+    await ownerDb.update(message).set({ contentType: "image" }).where(eq(message.id, proof!.id))
+    expect(await c.run((tx) => recordTopicAskedAgain(tx, c.orgId, { handoffId: topic.id, messageId: proof!.id }))).toMatchObject({ noted: true })
+  })
+
+  it("el «?» de un enlace del equipo no es una pregunta", async () => {
+    const c = await clinic()
+    const conv = await c.thread("Nora")
+    const [link] = await c.say(conv.id, "out", "Reserva aquí: https://clinica.test/reserva?token=abc", new Date(Date.now() - 60_000), "user")
+    await ownerDb.update(message).set({ senderUserId: c.ownerId }).where(eq(message.id, link!.id))
+    const [thanks] = await c.say(conv.id, "in", "Gracias", new Date())
+    await ownerDb.update(message).set({ replyToMessageId: link!.id }).where(eq(message.id, thanks!.id))
+    expect(await c.run((tx) => answerToTeamMember(tx, c.orgId, { conversationId: conv.id, messageId: thanks!.id, userId: c.ownerId }))).toBe(false)
+  })
+
+  it("«Dejar pendiente» no toca un tema que sigue abierto ni reabre en una conversación cerrada", async () => {
+    const c = await clinic()
+    const conv = await c.thread("Nora")
+    const [asked] = await c.say(conv.id, "in", "¿Atienden sábados?", new Date())
+    const topic = await c.run((tx) => createHandoff(tx, c.orgId, null, { conversationId: conv.id, reason: "Sábados", summary: "Sábados", createdBy: "agent", sourceMessageId: asked!.id }))
+    await c.run((tx) => reopenTopic(tx, c.orgId, { conversationId: conv.id, topicId: topic.id, userId: c.receptionId }))
+    expect((await ownerDb.select().from(agentHandoff).where(eq(agentHandoff.id, topic.id)))[0]?.keptPendingAt).toBeNull()
+    await c.run((tx) => resolveTopic(tx, c.orgId, { conversationId: conv.id, topicId: topic.id, userId: c.receptionId }))
+    await c.run((tx) => closeConversationWith(tx, c.orgId, conv.id, { reason: "manual", byUserId: c.ownerId }))
+    await expect(c.run((tx) => reopenTopic(tx, c.orgId, { conversationId: conv.id, topicId: topic.id, userId: c.receptionId }))).rejects.toThrow("ya se cerró")
+    expect((await ownerDb.select().from(crmTask).where(eq(crmTask.id, topic.taskId!)))[0]?.status).toBe("done")
+  })
+
   it("citar a alguien del equipo con un «gracias» no le abre un tema, salvo que su mensaje preguntara algo", async () => {
     const c = await clinic()
     const conv = await c.thread("Nora")

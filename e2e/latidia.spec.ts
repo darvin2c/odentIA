@@ -249,8 +249,8 @@ test("latidIA: en la Bandeja cada tema se responde por su cuenta", async ({ brow
   await box.fill("La consulta cuesta S/ 80")
   await box.press("Enter")
   await expect(page.getByText(/^Tema resuelto\./)).toBeVisible()
-  // Queda uno solo: ya no hay duda y la caja lo elige.
-  await expect(page.getByRole("region", { name: "Lo que te toca contestar" })).toContainText(`«${asks[0]}»`)
+  // Después de enviar la caja no elige sola, aunque quede uno: un segundo mensaje lo citaría.
+  await expect(list).toContainText("1 tema por atender")
   await page.getByRole("button", { name: "Dejar pendiente" }).click()
   await expect(list).toContainText("2 temas por atender")
   await page.screenshot({ path: testInfo.outputPath("dejar-pendiente.png") })

@@ -248,10 +248,11 @@ test("bandeja: con varios temas la caja no elige sola, cada uno se responde por 
   await page.setViewportSize({ width: 1440, height: 900 })
   await expect(list).toContainText("2 temas por atender")
 
-  // --- «Resolver» cierra el otro sin enviar nada, y queda un solo tema: la caja lo elige ---
+  // --- «Resolver» cierra el otro sin enviar nada; aunque quede uno, la caja no lo elige sola ---
   const before = (await fixtureDb.select({ id: message.id }).from(message).where(eq(message.conversationId, thread.id))).length
   await list.getByRole("button", { name: `Resolver sin responder: ${asks[2]!.slice(0, 20)}` }).click()
-  await expect(band).toContainText(`«${asks[0]}»`)
+  await expect(list).toContainText("1 tema por atender")
+  await expect(band).toBeHidden()
   expect((await fixtureDb.select({ id: message.id }).from(message).where(eq(message.conversationId, thread.id))).length).toBe(before)
 
   // --- «Responder» en un mensaje sin tema: lo cita y no resuelve ninguno ---

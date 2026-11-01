@@ -318,9 +318,10 @@ export async function resolveTopic(
 }
 
 /**
- * «Dejar pendiente» (ADR 0122): lo resuelto vuelve a quedar abierto, con quien
- * lo tenía. Lo que el equipo ya escribió no lo da por respondido y las dos
- * horas para «Ahora» vuelven a contar.
+ * «Dejar pendiente» (ADR 0122): lo resuelto vuelve a quedar abierto, a nombre de
+ * quien lo tiene. Lo que el equipo ya escribió no lo da por respondido y las dos
+ * horas para «Ahora» vuelven a contar. En una conversación cerrada no: un tema
+ * abierto ahí no lo vería nadie.
  */
 export async function reopenTopic(
   tx: Db,
@@ -328,11 +329,14 @@ export async function reopenTopic(
   input: { conversationId: string; topicId: string; userId: string },
 ): Promise<void> {
   const [topic] = await tx
-    .select({ taskId: agentHandoff.taskId })
+    .select({ taskId: agentHandoff.taskId, status: conversation.status, open: sql<boolean>`${handoffOpenSql(sql.raw('"agent_handoff"'))}` })
     .from(agentHandoff)
+    .innerJoin(conversation, eq(conversation.id, agentHandoff.conversationId))
     .where(and(eq(agentHandoff.id, input.topicId), eq(agentHandoff.organizationId, orgId), eq(agentHandoff.conversationId, input.conversationId)))
     .limit(1)
   if (!topic?.taskId) throw notFound("Tema")
+  if (topic.open) return
+  if (topic.status === "closed") throw validation("La conversación ya se cerró: escríbele para retomarla.")
   await updateTask(tx, orgId, topic.taskId, { status: "open", actorUserId: input.userId })
   const now = new Date()
   await tx

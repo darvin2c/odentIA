@@ -271,9 +271,9 @@ export function ThreadView({
   const canOpenPeople = usePermission("patients.read")
   const canSeeNonPatients = usePermission("crm.read")
   const [briefFor, setBriefFor] = useState<string | null>(null)
-  // Temas (ADR 0050 y 0122): a qué mensaje responde la caja (undefined = el único
-  // tema de quien mira; null = a nada, lo dijo quien escribe) y qué tema se acaba
-  // de resolver, para poder dejarlo pendiente.
+  // Temas (ADR 0050 y 0122): a qué mensaje responde la caja (undefined = al abrir, el
+  // único tema de quien mira; null = a nada) y qué tema se acaba de resolver, para
+  // poder dejarlo pendiente.
   const [replyTo, setReplyTo] = useState<string | null | undefined>(undefined)
   // «Es spam» y «Bloquear a esta persona…» (ADR 0054).
   const screenActions = useContactScreenActions()
@@ -413,7 +413,8 @@ export function ThreadView({
       setComposer("")
       setWindowClosed(false)
       setSendError(null)
-      setReplyTo(undefined)
+      // Después de enviar la caja no elige otro tema: un segundo mensaje seguido lo citaría y lo cerraría.
+      setReplyTo(null)
       if (input.viaWhatsapp) {
         setViaWhatsapp(false)
         setSentToWhatsapp(result.data.conversationId ?? null)
@@ -437,15 +438,10 @@ export function ThreadView({
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       }),
     onSuccess: (_result, variables) => {
-      if (variables.path === "resolve") {
-        setDoneTopic(variables.topicId)
-        setReplyTo(undefined)
-      }
-      // Lo dejó pendiente a propósito: la caja no vuelve a elegirlo sola.
-      if (variables.path === "reopen") {
-        setDoneTopic(null)
-        setReplyTo(null)
-      }
+      if (variables.path === "resolve") setDoneTopic(variables.topicId)
+      if (variables.path === "reopen") setDoneTopic(null)
+      // Tampoco elige sola lo que queda ni lo que se acaba de dejar pendiente.
+      if (variables.path !== "take") setReplyTo(null)
       invalidate()
       invalidateAgentPanelQueries(queryClient)
       for (const key of ["agent-case-brief", "crm-context", "workspace-home"]) {
@@ -626,8 +622,8 @@ export function ThreadView({
   const topics = threadAttention?.topics ?? []
   const forMe = (topic: InboxTopic) => !topic.assigneeUserId || topic.assigneeUserId === myUserId
   const orderedTopics = [...topics.filter(forMe), ...topics.filter((topic) => !forMe(topic))]
-  // La caja elige sola solo si no hay duda: un único tema y de quien mira. Con varios
-  // lo dice quien responde: una cita equivocada le llega a la persona (ADR 0122).
+  // Al abrir, la caja elige sola solo si no hay duda: un único tema y de quien mira. Con
+  // varios lo dice quien responde: una cita equivocada le llega a la persona (ADR 0122).
   const soleTopic = topics.length === 1 && topics[0] && forMe(topics[0]) ? topics[0] : null
   const effectiveReplyTo = replyTo === undefined ? (soleTopic?.source?.id ?? null) : replyTo
   const replyMessage = effectiveReplyTo ? (messages.find((item) => item.id === effectiveReplyTo) ?? null) : null
@@ -1100,7 +1096,7 @@ export function ThreadView({
               </Button>
             </div>
           )}
-          {doneTopic ? (
+          {doneTopic && !closed ? (
             <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-success/40 bg-success-soft px-3 py-2 text-sm">
               <CheckCircle2 className="size-4 text-success" aria-hidden />
               <span className="min-w-0 flex-1">Tema resuelto. {receptionName} sigue con lo demás.</span>
@@ -1141,17 +1137,14 @@ export function ThreadView({
             <p className="rounded-2xl bg-input/50 px-3 py-3 text-sm text-muted-foreground">No puedes escribirle mientras esté bloqueada.</p>
           ) : windowShut && !holdReply ? (
             <div className="flex flex-col gap-1.5">
-              {soleTopic?.source ? (
-                // Hay una pregunta sin responder: se le puede responder igual y le llega con «Ver respuesta» (R1).
+              {effectiveReplyTo !== null ? (
+                // Eligió un mensaje aprobado con una pregunta elegida: se le puede responder igual y le llega con «Ver respuesta» (R1).
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   className="min-h-11 w-fit sm:min-h-8"
-                  onClick={() => {
-                    setUseApproved(false)
-                    setReplyTo(soleTopic.source?.id ?? null)
-                  }}
+                  onClick={() => setUseApproved(false)}
                 >
                   Responder su pregunta
                 </Button>

@@ -13,11 +13,11 @@ Y el ciclo daba por respondidos todos los temas abiertos con cualquier mensaje d
 
 ## Decisión y motivo
 
-- **La caja elige sola solo si no hay duda:** un único tema, de quien mira. Con varios, una lista con lo que escribió la persona: tocar una fila elige el tema y lleva a su mensaje. Sin nada elegido sale un mensaje normal y no se resuelve nada. Equivocarse así no le llega a la persona.
+- **La caja elige sola solo si no hay duda:** al abrir, un único tema de quien mira. Después de enviar o resolver no vuelve a elegir: se escribe en varios mensajes seguidos y el segundo citaría y cerraría otro tema. Si no hay nada elegido, una lista con lo que escribió la persona: tocar una fila elige el tema y lleva a su mensaje. Sin elegir sale un mensaje normal y no se resuelve nada. Equivocarse así no le llega a la persona.
 - **Responder como en WhatsApp:** «Responder» junto a cada mensaje de la persona y la cita sobre la caja, con su X. Esto reemplaza las opciones «Responder a…» del «…».
 - **Un solo botón, «Enviar», y corregir después.** Enviar no se puede deshacer; resolver sí, porque no le manda nada a la persona. Por eso lo reversible no pide una decisión antes de lo irreversible: «Dejar pendiente» aparece al enviar.
 - **«Resolver» en cada fila propia,** para lo que no necesita respuesta. Lo de otra persona no se cierra de un toque: se elige y se resuelve en su «…».
-- **Lo que solo asiente o agradece no pide nada** (`onlyCourtesy`, `asksNothingNew`): no entra a un tema ni le abre uno. La excepción es lo que contesta una pregunta del equipo, porque alguien espera ese sí. Una lista fija de palabras basta: fallar cuesta un resaltado o un tema que se cierra con «Resolver».
+- **Lo que solo asiente o agradece no pide nada** (`onlyCourtesy`, `asksNothingNew`): no entra a un tema ni le abre uno. Sí cuenta si contesta una pregunta del equipo (alguien espera ese sí), si va en la misma ráfaga que algo que dijo o si trae una foto o un archivo. Una lista fija de palabras basta: fallar cuesta un resaltado o un tema que se cierra con «Resolver».
 - **El ciclo solo da por respondido un tema que está solo,** con un mensaje sin cita o que cita ese tema, y posterior a que lo dejaran pendiente (`kept_pending_at`).
 
 ## Alternativas descartadas
@@ -32,6 +32,9 @@ Y el ciclo daba por respondidos todos los temas abiertos con cualquier mensaje d
 
 - Un tema resuelto por error sale de «Por atender» y el aviso con «Dejar pendiente» desaparece al cambiar de conversación. A la persona no le pasa nada y se le puede seguir escribiendo; lo que se pierde es el recordatorio. Si «Dejar pendiente» se usa seguido, se revisa.
 - Con varios temas y sin nada elegido, un mensaje que los responde no los cierra: quedan en «Por atender» hasta que alguien toque «Resolver».
+- Una pregunta del equipo se reconoce por su «?». Sin él («Confírmame si vienes»), el «Si» lo atiende Sofi y no entra al tema.
+- Enviar solo un adjunto no cita ni resuelve el tema elegido: queda abierto, aunque la caja diga «Se resuelve al enviar».
+- Si el mensaje del tema no está cargado, tocar la fila lo elige pero no lleva a él; la cita se ve completa en la caja.
 - Sofi responde un «gracias» que cita a alguien del equipo, como cualquier otro «gracias»; antes se callaba y abría un tema. Sus textos no cambian.
 - «Sofi se ofrece» (`topic-retake.ts`) sigue contando cualquier mensaje del equipo como respuesta: un tema que no se respondió no se retoma si el equipo escribió por otro.
 

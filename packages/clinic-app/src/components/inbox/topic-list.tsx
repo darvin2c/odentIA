@@ -54,8 +54,8 @@ export function TopicList({
               <span className="min-w-[10rem] flex-1 basis-40 truncate">«{topicQuote(topic)}»</span>
               <span className={`shrink-0 text-xs ${topic.urgent ? "font-semibold text-destructive" : "text-muted-foreground"}`}>{meta(topic)}</span>
             </button>
-            {/* Lo de otra persona no se cierra de un toque: se elige y se resuelve en su «…». */}
-            {isMine(topic) ? (
+            {/* Lo de otra persona no se cierra de un toque: se elige y se resuelve en su «…». Sin mensaje no se puede elegir. */}
+            {isMine(topic) || !topic.source ? (
               <Button
                 type="button"
                 variant="ghost"

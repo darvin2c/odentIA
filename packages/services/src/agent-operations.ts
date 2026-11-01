@@ -2467,7 +2467,7 @@ const YES_COMPANY = new Set([
 ])
 
 /** Lo que asiente sin llegar a ser un sí: no confirma nada, pero tampoco pide nada. */
-const COURTESY_WORDS = new Set(["entendido", "entendida", "ya", "aja", "ah", "oh", "\u{1f64f}", "\u{1f60a}"])
+const COURTESY_WORDS = new Set(["gracias", "entendido", "entendida", "ya", "aja", "ah", "oh", "bueno", "buenisimo", "vemos", "\u{1f64f}", "\u{1f60a}"])
 
 /** Las palabras de un mensaje corto, sin tildes ni signos; ninguna si pregunta algo o es largo. */
 function plainWords(text: string | null): string[] {
@@ -2492,7 +2492,9 @@ export function isAffirmative(text: string | null): boolean {
 /** Solo asiente o agradece: «Si», «ok», «gracias», «entendido». No sirve para confirmar: eso es `isAffirmative`. */
 export function onlyCourtesy(text: string | null): boolean {
   const words = plainWords(text)
-  return words.length > 0 && words.every((word) => YES_WORDS.has(word) || YES_COMPANY.has(word) || COURTESY_WORDS.has(word))
+  const says = (word: string) => YES_WORDS.has(word) || COURTESY_WORDS.has(word)
+  // Lo que solo acompaña no basta: «por favor» o «a la una» sí piden algo.
+  return words.every((word) => says(word) || YES_COMPANY.has(word)) && words.some(says)
 }
 
 /**
@@ -4049,11 +4051,12 @@ const SAME_TOPIC_MS = 12 * 60 * 60 * 1000
  */
 export async function asksNothingNew(tx: Db, orgId: string, conversationId: string, messageId: string): Promise<boolean> {
   const [said] = await tx
-    .select({ body: conversationMessage.body, replyTo: conversationMessage.replyToMessageId, createdAt: conversationMessage.createdAt })
+    .select({ body: conversationMessage.body, contentType: conversationMessage.contentType, replyTo: conversationMessage.replyToMessageId, createdAt: conversationMessage.createdAt })
     .from(conversationMessage)
     .where(and(eq(conversationMessage.id, messageId), eq(conversationMessage.organizationId, orgId), eq(conversationMessage.conversationId, conversationId)))
     .limit(1)
-  if (!said || !onlyCourtesy(said.body)) return false
+  // Una foto con «Listo» trae algo: un comprobante, por ejemplo.
+  if (!said || said.contentType !== "text" || !onlyCourtesy(said.body)) return false
   // A qué contesta: lo que citó o, si no citó nada, lo último que se le dijo. Lo que
   // escribió justo antes cuenta: «¿ya me dicen?» y «gracias» en una ráfaga sí preguntan.
   const before = await tx
@@ -4069,7 +4072,8 @@ export async function asksNothingNew(tx: Db, orgId: string, conversationId: stri
     .orderBy(desc(conversationMessage.createdAt))
     .limit(10)
   for (const item of before) {
-    if (item.direction === "out") return !(item.senderKind === "user" && (item.body ?? "").includes("?"))
+    // El «?» de un enlace no es una pregunta.
+    if (item.direction === "out") return !(item.senderKind === "user" && (item.body ?? "").replace(/https?:\/\/\S+/g, "").includes("?"))
     if (!onlyCourtesy(item.body)) return false
   }
   return true
