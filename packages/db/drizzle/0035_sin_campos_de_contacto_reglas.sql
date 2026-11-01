@@ -1,6 +1,6 @@
 -- Los campos de contacto ya no existen: borrar los datos de una persona deja de
--- vaciar esa columna. Su search_path ahora lleva el camino completo, como las
--- demás. Lo demás de la función no cambia.
+-- vaciar esa columna. Su search_path ahora lleva el camino completo. Lo demás
+-- de la función no cambia.
 CREATE OR REPLACE FUNCTION public.erase_person_data(p_patient uuid, p_actor text) RETURNS text[]
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public', 'catalog', 'auth', 'admin', 'dental', 'pg_temp'
