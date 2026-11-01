@@ -176,7 +176,8 @@ export interface AgendaResources {
   branchId: string
   branchName: string
   timeZone: string
-  professionals: { id: string; label: string }[]
+  /** Quienes pueden atender (ADR 0124); `role` separa a quien atiende de oficio de quien dirige. */
+  professionals: { id: string; label: string; role: string }[]
   rooms: { id: string; label: string }[]
   /** Lo que dura una cita regular en la sede, en minutos. */
   defaultDurationMin: number

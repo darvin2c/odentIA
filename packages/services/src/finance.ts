@@ -26,6 +26,7 @@ import {
   paymentReturn,
   paymentTicket,
 } from "@odentia/db/schema/clinical"
+import { requireCanAttend } from "./attending.js"
 import {
   cashClosure,
   cashMovement,
@@ -1578,12 +1579,17 @@ export async function setCommissionRate(
   actorUserId: string,
   input: { professionalUserId: string; rateBps: number },
 ) {
+  // Un porcentaje es de quien puede atender; volverlo a 0 se le puede hacer a cualquiera del equipo.
   // La persona llega en el cuerpo: si no es de la clínica, se dice junto a ella.
-  await requireProfessional(tx, orgId, input.professionalUserId).catch((error: unknown) => {
-    if (error instanceof ServiceError && error.code === "NOT_FOUND")
-      throw new ServiceError("NOT_FOUND", 404, error.message, { professionalUserId: error.message })
-    throw error
-  })
+  if (input.rateBps === 0) {
+    await requireProfessional(tx, orgId, input.professionalUserId).catch((error: unknown) => {
+      if (error instanceof ServiceError && error.code === "NOT_FOUND")
+        throw new ServiceError("NOT_FOUND", 404, error.message, { professionalUserId: error.message })
+      throw error
+    })
+  } else {
+    await requireCanAttend(tx, orgId, input.professionalUserId, "professionalUserId")
+  }
   if (!Number.isInteger(input.rateBps) || input.rateBps < 0 || input.rateBps > 10000)
     throw invalidField("rateBps", "Escribe un porcentaje entre 0 y 100, con dos decimales como máximo.")
   const [existing] = await tx

@@ -241,7 +241,7 @@ describe("memoria de la persona", () => {
     const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "Surco", timezone: "America/Lima" }).returning({ id: branch.id })
     const professional = "dentista-ultima"
     await ownerDb.insert(user).values([{ id: professional, name: "Dra. Ana Torres", email: "ana.torres@ultima.test", emailVerified: true }])
-    await ownerDb.insert(member).values([{ id: `m-${professional}`, userId: professional, organizationId: ORG, role: "member", createdAt: new Date() }])
+    await ownerDb.insert(member).values([{ id: `m-${professional}`, userId: professional, organizationId: ORG, role: "clinician", createdAt: new Date() }])
     const room = await run((tx) => createRoom(tx, ORG, { branchId: site!.id, name: "Unidad dental U" }))
     const [created] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Rosa Díaz", givenNames: "Rosa", patientNumber: await run((tx) => nextPatientNumber(tx, ORG)) })
     await run((tx) => setPatientContact(tx, ORG, OWNER, created!.id, { contactId: rosa.contactId, relationship: "self", isPreferred: true }))
@@ -338,7 +338,7 @@ describe("reservar desde un enlace", () => {
     const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "Miraflores", timezone: "America/Lima" }).returning({ id: branch.id })
     const professional = "dentista-enlace"
     await ownerDb.insert(user).values([{ id: professional, name: "Dra. Lucía Salas", email: "lucia.salas@enlace.test", emailVerified: true }])
-    await ownerDb.insert(member).values([{ id: `m-${professional}`, userId: professional, organizationId: ORG, role: "member", createdAt: new Date() }])
+    await ownerDb.insert(member).values([{ id: `m-${professional}`, userId: professional, organizationId: ORG, role: "clinician", createdAt: new Date() }])
     await run((tx) => createRoom(tx, ORG, { branchId: site!.id, name: "Unidad dental 1" }))
     await run((tx) =>
       setProfessionalSchedule(tx, ORG, OWNER, {
@@ -432,7 +432,7 @@ describe("reservar desde un enlace", () => {
     const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "Barranco", timezone: "America/Lima" }).returning({ id: branch.id })
     const professional = "dentista-datos"
     await ownerDb.insert(user).values([{ id: professional, name: "Dra. Rosa Ibarra", email: "rosa.ibarra@enlace.test", emailVerified: true }])
-    await ownerDb.insert(member).values([{ id: `m-${professional}`, userId: professional, organizationId: ORG, role: "member", createdAt: new Date() }])
+    await ownerDb.insert(member).values([{ id: `m-${professional}`, userId: professional, organizationId: ORG, role: "clinician", createdAt: new Date() }])
     await run((tx) => createRoom(tx, ORG, { branchId: site!.id, name: "Unidad dental 1" }))
     await run((tx) =>
       setProfessionalSchedule(tx, ORG, OWNER, {
@@ -476,7 +476,7 @@ describe("reservar desde un enlace", () => {
     const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "Surco", timezone: "America/Lima" }).returning({ id: branch.id })
     const professional = "dentista-paciente"
     await ownerDb.insert(user).values([{ id: professional, name: "Dr. Iván Soto", email: "ivan.soto@enlace.test", emailVerified: true }])
-    await ownerDb.insert(member).values([{ id: `m-${professional}`, userId: professional, organizationId: ORG, role: "member", createdAt: new Date() }])
+    await ownerDb.insert(member).values([{ id: `m-${professional}`, userId: professional, organizationId: ORG, role: "clinician", createdAt: new Date() }])
     await run((tx) => createRoom(tx, ORG, { branchId: site!.id, name: "Unidad dental 1" }))
     await run((tx) =>
       setProfessionalSchedule(tx, ORG, OWNER, {
@@ -534,7 +534,7 @@ describe("reservar desde un enlace", () => {
     const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "Magdalena", timezone: "America/Lima" }).returning({ id: branch.id })
     const professional = "dentista-nombre"
     await ownerDb.insert(user).values([{ id: professional, name: "Dra. Milagros Díaz", email: "milagros.diaz@enlace.test", emailVerified: true }])
-    await ownerDb.insert(member).values([{ id: `m-${professional}`, userId: professional, organizationId: ORG, role: "member", createdAt: new Date() }])
+    await ownerDb.insert(member).values([{ id: `m-${professional}`, userId: professional, organizationId: ORG, role: "clinician", createdAt: new Date() }])
     await run((tx) => createRoom(tx, ORG, { branchId: site!.id, name: "Unidad dental M" }))
     await run((tx) =>
       setProfessionalSchedule(tx, ORG, OWNER, {
@@ -584,7 +584,7 @@ describe("reservar desde un enlace quien recién se contacta", () => {
     const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "San Isidro", timezone: "America/Lima" }).returning({ id: branch.id })
     const professional = "dentista-nuevo"
     await ownerDb.insert(user).values([{ id: professional, name: "Dr. Mario Paz", email: "mario.paz@enlace.test", emailVerified: true }])
-    await ownerDb.insert(member).values([{ id: `m-${professional}`, userId: professional, organizationId: ORG, role: "member", createdAt: new Date() }])
+    await ownerDb.insert(member).values([{ id: `m-${professional}`, userId: professional, organizationId: ORG, role: "clinician", createdAt: new Date() }])
     await run((tx) => createRoom(tx, ORG, { branchId: site!.id, name: "Unidad dental A" }))
     await run((tx) =>
       setProfessionalSchedule(tx, ORG, OWNER, {

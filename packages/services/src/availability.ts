@@ -19,6 +19,7 @@ import { branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, eq, gt, gte, inArray, isNull, lt, ne, or } from "drizzle-orm"
 import { branchNotFound, invalidField, roomNotFound, notFound, ServiceError, validation } from "./errors.js"
 import { NEUTRAL_TIMEZONE, roomWord } from "./locale.js"
+import { requireCanAttend } from "./attending.js"
 import { type AttendingRule, attendingRule } from "./specialties.js"
 
 // Sin zona en la sede ni en la organización: UTC, nunca la de un país.
@@ -154,7 +155,8 @@ async function requireBranch(tx: Db, orgId: string, branchId: string) {
   return { ...row, timeZone: branchTimeZone(row.timezone, row.orgTimezone) }
 }
 
-async function requireProfessional(tx: Db, orgId: string, professionalUserId: string) {
+/** Para leer: quien sigue en la clínica. Escribir pide `requireCanAttend`. */
+async function requireMember(tx: Db, orgId: string, professionalUserId: string) {
   const [membership] = await tx
     .select({ id: member.id, name: user.name })
     .from(member)
@@ -224,7 +226,7 @@ export async function getProfessionalSchedule(
   professionalUserId: string,
 ): Promise<ProfessionalScheduleView> {
   const resolved = await requireBranch(tx, orgId, branchId)
-  await requireProfessional(tx, orgId, professionalUserId)
+  await requireMember(tx, orgId, professionalUserId)
   const rows = await tx
     .select()
     .from(professionalSchedule)
@@ -266,7 +268,7 @@ export async function setProfessionalSchedule(
   input: { branchId: string; professionalUserId: string; rules: ScheduleRuleInput[] },
 ): Promise<ProfessionalScheduleView> {
   const resolved = await requireBranch(tx, orgId, input.branchId)
-  await requireProfessional(tx, orgId, input.professionalUserId)
+  await requireCanAttend(tx, orgId, input.professionalUserId, "professionalUserId")
   const seen = new Set<string>()
   // Cada rechazo lleva la ruta del turno en el cuerpo (`rules[3].endMin`): se dice en ese turno.
   for (const [index, rule] of input.rules.entries()) {
@@ -390,7 +392,7 @@ export async function createScheduleBlock(
   const startsAt = parseInstant(input.startsAt, "startsAt")
   const endsAt = parseInstant(input.endsAt, "endsAt")
   if (endsAt <= startsAt) throw invalidField("endsAt", "El bloqueo debe terminar después de iniciar.")
-  if (input.professionalUserId) await requireProfessional(tx, orgId, input.professionalUserId)
+  if (input.professionalUserId) await requireCanAttend(tx, orgId, input.professionalUserId, "professionalUserId")
   if (input.roomId) await requireRoomInBranch(tx, orgId, input.roomId, input.branchId, "roomId")
   // Sin profesional ni unidad dental, el bloqueo cierra la sede completa.
   const kind = assertBlockKind(input.kind ?? "bloqueo")
@@ -526,7 +528,7 @@ export async function validateAvailability(
 ): Promise<void> {
   if (check.endsAt <= check.startsAt) throw invalidField("endsAt", "La cita debe terminar después de iniciar")
   const resolved = await requireBranch(tx, orgId, check.branchId)
-  await requireProfessional(tx, orgId, check.professionalUserId)
+  await requireCanAttend(tx, orgId, check.professionalUserId, "professionalUserId")
   await requireRoomInBranch(tx, orgId, check.roomId, check.branchId)
   const rules = await tx
     .select()
@@ -759,7 +761,7 @@ export async function listAvailableSlots(
   if (perDay !== undefined && (!Number.isInteger(perDay) || perDay < 1 || perDay > 50)) {
     throw validation("perProfessionalPerDay debe estar entre 1 y 50")
   }
-  if (input.professionalUserId) await requireProfessional(tx, orgId, input.professionalUserId)
+  if (input.professionalUserId) await requireMember(tx, orgId, input.professionalUserId)
   // Solo quien atiende el servicio, si alguien lo atiende en esta sede.
   const attending = input.serviceId ? await attendingRule(tx, orgId, { serviceId: input.serviceId, branchId: input.branchId }) : null
   if (attending && input.professionalUserId && !attending.professionalUserIds.includes(input.professionalUserId)) {

@@ -1,3 +1,4 @@
+import { canAttend } from "@odentia/auth/permissions"
 import { Badge, Button, toast } from "@odentia/ui"
 import {
   applySubmitError,
@@ -133,7 +134,7 @@ export function NewResponseDrawer({
               label="Profesional responsable"
               options={[
                 { value: "", label: "Sin asignar" },
-                ...members.map((m) => ({ value: m.userId, label: m.user.name })),
+                ...members.filter((m) => canAttend(m.role)).map((m) => ({ value: m.userId, label: m.user.name })),
               ]}
             />
           )}

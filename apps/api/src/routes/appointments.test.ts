@@ -112,7 +112,7 @@ beforeAll(async () => {
   await ownerDb.execute(sql`
     insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
       ('m-api-actor', ${ORG}, 'api-agenda-actor', 'owner', now()),
-      ('m-api-professional', ${ORG}, ${PROFESSIONAL}, 'member', now())`)
+      ('m-api-professional', ${ORG}, ${PROFESSIONAL}, 'clinician', now())`)
   const [paciente] = await ownerDb.execute<{ id: string }>(sql`
     with pp as (insert into "contact" ("organization_id", "display_name") values (${ORG}, 'Paciente API') returning "id")
     insert into "patient" ("organization_id", "person_id", "patient_number")
@@ -137,6 +137,10 @@ it("recursos: reception lee; member no crea unidad dental ni lee agenda, owner s
   const memberReads = await member.request(`/agenda/resources?branchId=${branchId}`)
   expect(memberReads.status).toBe(403)
   expect((await member.request(`/agenda/hours?branchId=${branchId}`)).status).toBe(403)
+  // Lo que dice Equipo de quién atiende: de quien ve la configuración (ADR 0124).
+  expect((await member.request("/agenda/team")).status).toBe(403)
+  expect((await buildApp("reception").request("/agenda/team")).status).toBe(403)
+  expect((await buildApp("owner").request("/agenda/team")).status).toBe(200)
 
   const owner = buildApp("owner")
   const created = await owner.request("/agenda/rooms", {

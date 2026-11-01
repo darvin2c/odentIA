@@ -199,7 +199,11 @@ it("dos citas el mismo día: sin indicar cuál, la atención se une a la que lle
 
 it("«Espera en sala» mide de la llegada al inicio de la atención, por profesional, y sin llegadas dice que no hay datos", async () => {
   const f = await scene()
-  const query = { period: "este_mes", branchId: f.site.id }
+  // Un rango de dos días y no «este_mes»: la cita se reserva en otra zona, y el día 1 de
+  // madrugada esa hora todavía es el mes anterior para la clínica.
+  const limaDay = (offset: number) =>
+    new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date(Date.now() + offset * 86_400_000))
+  const query = { period: `${limaDay(-1)}..${limaDay(0)}`, branchId: f.site.id }
   const report = () => withOrgContext(appDb, "org_a", (tx) => getAgendaReport(tx, "org_a", query))
   expect((await report()).waitInRoom).toEqual({ medianMinutes: null, measured: 0 })
 

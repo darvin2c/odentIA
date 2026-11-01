@@ -11,7 +11,7 @@ import { appWords } from "../../lib/product-words"
  * Importes, estados y permisos los decide el servidor; aquí solo se presentan.
  * La moneda y el formato son los de la clínica y llegan en cada respuesta.
  */
-import { canAccess } from "@odentia/auth/permissions"
+import { canAttend } from "@odentia/auth/permissions"
 import { formatMoney } from "@odentia/clinical"
 import {
   Badge,
@@ -163,7 +163,7 @@ export function CommissionsAdminPanel({
   const rateById = new Map(rows.map((row) => [row.professionalUserId, row.rateBps]))
   // Quien puede atender y aún no tiene porcentaje: decide el permiso, no el nombre del rol.
   const withoutRate = members
-    .filter((member) => canAccess(member.role, "clinical.write"))
+    .filter((member) => canAttend(member.role))
     .filter((member) => (rateById.get(member.userId) ?? 0) === 0)
     .map((member) => ({ userId: member.userId, name: member.user.name }))
   const nobodyHasRate = rows.every((row) => row.rateBps === 0)
