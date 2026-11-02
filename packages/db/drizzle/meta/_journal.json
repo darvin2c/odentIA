@@ -288,6 +288,20 @@
       "when": 1793588400416,
       "tag": "0040_lo_que_sale_de_un_boton",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1793643267994,
+      "tag": "0041_cobrar_en_dos_monedas",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1793643289799,
+      "tag": "0042_cobrar_en_dos_monedas_reglas",
+      "breakpoints": true
     }
   ]
 }

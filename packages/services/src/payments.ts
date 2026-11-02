@@ -18,7 +18,7 @@ import {
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
-import { cashClosure } from "@odentia/db/schema/finance"
+import { cashClosure, cashMovement } from "@odentia/db/schema/finance"
 import { product } from "@odentia/db/schema/inventory"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import {
@@ -47,6 +47,7 @@ import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import {
   ensureOpenShift,
   hasClosureSince,
+  lockCashOfPayments,
   recordCashEgreso,
   recordCashIncome,
   requireBranch,
@@ -895,6 +896,53 @@ async function lockOrgCurrency(tx: Db, orgId: string): Promise<string> {
   return profile.currency
 }
 
+/**
+ * Las cajas de cada ticket: las monedas donde su dinero entró o salió. Sin dinero
+ * vigente (pagado solo con saldo a favor), la caja de su moneda.
+ */
+async function cashUnitsOfTickets(
+  tx: Db,
+  orgId: string,
+  tickets: ReadonlyArray<{ id: string; currency: string }>,
+): Promise<Map<string, string[]>> {
+  const units = new Map(tickets.map((ticket) => [ticket.id, [] as string[]]))
+  if (tickets.length) {
+    const rows = await tx
+      .selectDistinct({ ticketId: patientPayment.ticketId, unit: cashMovement.currency })
+      .from(cashMovement)
+      .innerJoin(
+        patientPayment,
+        and(
+          eq(patientPayment.id, cashMovement.patientPaymentId),
+          eq(patientPayment.organizationId, orgId),
+        ),
+      )
+      .where(
+        and(
+          eq(cashMovement.organizationId, orgId),
+          isNull(cashMovement.voidedAt),
+          inArray(patientPayment.ticketId, [...units.keys()]),
+        ),
+      )
+    for (const row of rows) if (row.ticketId) units.get(row.ticketId)?.push(row.unit)
+  }
+  for (const ticket of tickets) {
+    const list = units.get(ticket.id)
+    if (list && !list.length) list.push(ticket.currency)
+  }
+  return units
+}
+
+/** Ya cerró, después de este cobro, alguna caja donde está su dinero: solo administración lo anula. */
+async function ticketClosedAfter(
+  tx: Db,
+  orgId: string,
+  ticket: { id: string; branchId: string; currency: string; createdAt: Date },
+): Promise<boolean> {
+  const units = (await cashUnitsOfTickets(tx, orgId, [ticket])).get(ticket.id) ?? [ticket.currency]
+  return hasClosureSince(tx, orgId, ticket.branchId, units, ticket.createdAt)
+}
+
 /** Siguiente número de ticket de la organización, sin saltos: vive en la misma transacción. */
 async function nextTicketNumber(tx: Db, orgId: string): Promise<number> {
   // La fila nace sin competir: dos primeros cobros simultáneos de la clínica
@@ -1612,7 +1660,7 @@ export async function voidTicket(
   if (
     payments.length === 0 &&
     !input.allowPostClose &&
-    (await hasClosureSince(tx, orgId, ticket.branchId, ticket.currency, ticket.createdAt))
+    (await ticketClosedAfter(tx, orgId, ticket))
   )
     throw conflict(
       "POST_CLOSE_NEEDS_ADMIN",
@@ -1643,6 +1691,7 @@ export async function voidTicket(
     )
   const reopenedCents = sum(applications.filter((app) => app.ticketId !== ticket.id))
   let compensated = false
+  await lockCashOfPayments(tx, orgId, paymentIds)
   for (const payment of payments) {
     compensated =
       (await reverseCashIncome(
@@ -2931,6 +2980,7 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
       if (!lastClosure[key]) lastClosure[key] = row.closedAt
     }
   }
+  const ticketUnits = await cashUnitsOfTickets(tx, orgId, tickets)
   const returnRows = await returnsOfTickets(
     tx,
     orgId,
@@ -2950,9 +3000,10 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
     voidedAt: ticket.voidedAt,
     voidReason: ticket.voidReason,
     /** La caja de su sede ya cerró después de este cobro: solo administración lo anula. */
-    closedAfter:
-      (lastClosure[`${ticket.branchId}|${ticket.currency}`]?.getTime() ?? 0) >=
-      ticket.createdAt.getTime(),
+    closedAfter: (ticketUnits.get(ticket.id) ?? [ticket.currency]).some(
+      (unit) =>
+        (lastClosure[`${ticket.branchId}|${unit}`]?.getTime() ?? 0) >= ticket.createdAt.getTime(),
+    ),
     createdAt: ticket.createdAt,
     snapshot: ticket.snapshot,
     payments: (ticketPayments[ticket.id] ?? []).map((p) => ({
@@ -3085,13 +3136,7 @@ export async function getTicketReceipt(tx: Db, orgId: string, patientId: string,
     branch: branchRow ?? null,
     orgProfile: profile ?? null,
     /** La caja de su sede ya cerró después de este cobro: solo administración lo anula. */
-    closedAfter: await hasClosureSince(
-      tx,
-      orgId,
-      ticket.branchId,
-      ticket.currency,
-      ticket.createdAt,
-    ),
+    closedAfter: await ticketClosedAfter(tx, orgId, ticket),
     /** Devoluciones de este ticket (ADR 0068). */
     returns: await returnsOfTickets(tx, orgId, [ticket.id]),
   }

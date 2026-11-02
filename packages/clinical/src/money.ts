@@ -43,18 +43,21 @@ export function formatMoney(amountMinor: number, currency: string, locale: strin
 
 /**
  * No adivina separadores: «1.500» significa algo distinto en es-CL y es-PE.
- * Valida los grupos antes de quitarlos y convierte por dígitos, sin redondeo binario.
+ * Valida los grupos antes de quitarlos y separa por dígitos, sin redondeo binario.
  */
-export function parseMoney(raw: string, currency: string, locale: string): number {
-  const digits = currencyFractionDigits(currency)
+function readDecimal(
+  raw: string,
+  locale: string,
+  words: { empty: string; invalid: string },
+): { integer: string; fraction: string } {
   const parts = inputFormat(locale, 1).formatToParts(123456789.1)
   const decimal = parts.find((part) => part.type === "decimal")?.value ?? "."
   const group = parts.find((part) => part.type === "group")?.value
   let text = raw.trim()
-  if (!text) throw new Error("Ingresa el importe")
+  if (!text) throw new Error(words.empty)
   if (group && /^\s+$/.test(group)) text = text.replace(/[\u00a0\u202f ]/g, group)
   const split = text.split(decimal)
-  if (split.length > 2) throw new Error("Importe inválido")
+  if (split.length > 2) throw new Error(words.invalid)
   let integer = split[0] ?? ""
   const fraction = split[1] ?? ""
   if (group && integer.includes(group)) {
@@ -70,8 +73,17 @@ export function parseMoney(raw: string, currency: string, locale: string): numbe
     integer = groups.join("")
   }
   if (!/^\d+$/.test(integer) || !/^\d*$/.test(fraction) || (split.length === 2 && !fraction)) {
-    throw new Error("Importe inválido")
+    throw new Error(words.invalid)
   }
+  return { integer, fraction }
+}
+
+export function parseMoney(raw: string, currency: string, locale: string): number {
+  const digits = currencyFractionDigits(currency)
+  const { integer, fraction } = readDecimal(raw, locale, {
+    empty: "Ingresa el importe",
+    invalid: "Importe inválido",
+  })
   if (fraction.length > digits) {
     throw new Error(digits === 0 ? "Esta moneda no admite decimales" : `Esta moneda admite hasta ${digits} decimales`)
   }
@@ -120,4 +132,244 @@ export function formatMoneyAmount(amountMinor: number, currency: string, locale:
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   }).format(amountMinor / 10 ** digits)
+}
+
+// --- Dos monedas: el cambio y la cuenta única del valor ------------------------
+//
+// El cambio viaja y se guarda como texto decimal («3.75»), nunca como un número
+// de coma flotante. Todas las cuentas van con BigInt para coincidir con el
+// `numeric` de la base: `moneyValue` es el espejo de la función SQL `money_value`.
+
+/** Una fracción exacta: nada se redondea hasta mostrar o congelar. */
+export interface MoneyFraction {
+  num: bigint
+  den: bigint
+}
+
+const RATE_MAX_INTEGER_DIGITS = 9
+const RATE_MAX_DECIMALS = 10
+
+/** Mitad hacia arriba, como `round(numeric)` de PostgreSQL (se aleja del cero). */
+function roundHalfUp(num: bigint, den: bigint): bigint {
+  if (den === 0n) throw new Error("División entre cero")
+  const negative = num < 0n !== den < 0n
+  const top = num < 0n ? -num : num
+  const bottom = den < 0n ? -den : den
+  const rounded = (2n * top + bottom) / (2n * bottom)
+  return negative ? -rounded : rounded
+}
+
+function asSafeCents(value: bigint): number {
+  const cents = Number(value)
+  if (!Number.isSafeInteger(cents)) throw new Error("El importe excede el rango exacto admitido")
+  return cents
+}
+
+function asCents(value: number): bigint {
+  if (!Number.isSafeInteger(value)) throw new Error("El importe debe ser un entero")
+  return BigInt(value)
+}
+
+/** «3.75» → 375/100. Solo para un decimal ya normalizado. */
+function decimalFraction(text: string): MoneyFraction {
+  const [integer = "0", fraction = ""] = text.split(".")
+  return { num: BigInt(integer + fraction), den: 10n ** BigInt(fraction.length) }
+}
+
+/**
+ * La forma única de un cambio: dígitos con punto, sin ceros de sobra («3.750» es
+ * «3.75»), mayor que cero. Es la que se guarda y la que entra en la huella de un cobro.
+ */
+export function normalizeExchangeRate(value: string): string {
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(value.trim())
+  if (!match) throw new Error("Escribe el cambio con números, por ejemplo 3.75")
+  const integer = (match[1] ?? "").replace(/^0+(?=\d)/, "")
+  const fraction = (match[2] ?? "").replace(/0+$/, "")
+  if (integer.length > RATE_MAX_INTEGER_DIGITS || fraction.length > RATE_MAX_DECIMALS) {
+    throw new Error(`El cambio admite hasta ${RATE_MAX_DECIMALS} decimales y no pasa de 9 cifras`)
+  }
+  if (/^0*$/.test(integer + fraction)) throw new Error("El cambio debe ser mayor que 0")
+  return fraction ? `${integer}.${fraction}` : integer
+}
+
+/** Lo que se escribe en pantalla, con el formato de la clínica, en su forma única. */
+export function parseExchangeRate(raw: string, locale: string): string {
+  const { integer, fraction } = readDecimal(raw, locale, {
+    empty: "Escribe el cambio",
+    invalid: "Escribe el cambio con números, por ejemplo 3.75",
+  })
+  return normalizeExchangeRate(fraction ? `${integer}.${fraction}` : integer)
+}
+
+/** Texto editable compatible con parseExchangeRate y el formato de la clínica. */
+export function formatExchangeRateInput(rate: string, locale: string): string {
+  const decimal =
+    inputFormat(locale, 1)
+      .formatToParts(1.1)
+      .find((part) => part.type === "decimal")?.value ?? "."
+  return normalizeExchangeRate(rate).replace(".", decimal)
+}
+
+/**
+ * El cambio por unidad menor de cada moneda, para las cuentas en SQL:
+ * `rate × 10^(dígitos negocio − dígitos otra)`. 950 pesos chilenos (sin
+ * decimales) por USD 1 son 9.5 por centavo. Es exacto: solo corre el punto.
+ */
+export function exchangeFactor(rate: string, businessCurrency: string, otherCurrency: string): string {
+  const shift = currencyFractionDigits(businessCurrency) - currencyFractionDigits(otherCurrency)
+  const [integer = "0", fraction = ""] = normalizeExchangeRate(rate).split(".")
+  const digits = integer + fraction
+  const point = integer.length + shift
+  const whole = point > 0 ? digits.slice(0, point).padEnd(point, "0") : "0"
+  const rest = point > 0 ? digits.slice(point) : "0".repeat(-point) + digits
+  const cleanWhole = whole.replace(/^0+(?=\d)/, "")
+  const cleanRest = rest.replace(/0+$/, "")
+  return cleanRest ? `${cleanWhole}.${cleanRest}` : cleanWhole
+}
+
+/**
+ * Pasa un importe a otra moneda, con redondeo half-up: una sola conversión por
+ * cobro. Siempre cruza con la moneda del negocio, porque en ella está el cambio.
+ */
+export function convertCents(input: {
+  amountCents: number
+  from: string
+  to: string
+  businessCurrency: string
+  factor: string
+}): number {
+  const { from, to, businessCurrency } = input
+  if (from === to) return input.amountCents
+  const amount = asCents(input.amountCents)
+  const factor = decimalFraction(input.factor)
+  if (to === businessCurrency) return asSafeCents(roundHalfUp(amount * factor.num, factor.den))
+  if (from === businessCurrency) return asSafeCents(roundHalfUp(amount * factor.den, factor.num))
+  throw new Error("Una de las dos monedas debe ser la del negocio")
+}
+
+/**
+ * Cuadrar a cero: si lo convertido queda a una unidad menor o menos de lo que se
+ * debe, cancela justo lo que se debe y la cuenta queda al día.
+ */
+export function settleToDue(convertedCents: number, dueCents: number): number {
+  return convertedCents < dueCents && dueCents - convertedCents <= 1 ? dueCents : convertedCents
+}
+
+/**
+ * Cuánto vale un cobro en moneda del negocio, al congelarlo: si cancela moneda
+ * del negocio, lo que cancela; si se paga en ella, lo pagado (es exacto); si es
+ * otra moneda de punta a punta, el importe por el cambio.
+ */
+export function frozenValueCents(input: {
+  /** Lo que cancela, en la moneda de la deuda. */
+  amountCents: number
+  currency: string
+  /** Lo que entró, en la moneda en que se pagó. */
+  paidCents: number
+  paidCurrency: string
+  businessCurrency: string
+  factor: string
+}): number {
+  const { amountCents, currency, paidCents, paidCurrency, businessCurrency, factor } = input
+  if (currency === businessCurrency) return amountCents
+  if (paidCurrency === businessCurrency) return paidCents
+  if (paidCurrency !== currency) throw new Error("Una de las dos monedas debe ser la del negocio")
+  return convertCents({ amountCents, from: currency, to: businessCurrency, businessCurrency, factor })
+}
+
+/**
+ * Espejo de la función SQL `money_value`: cuánto vale una parte de un importe en
+ * moneda del negocio. Con el valor congelado reparte en proporción; sin él, la
+ * moneda del negocio vale lo que dice y otra sale del factor de hoy. Sin factor
+ * no hay valor (`null`): no entra en las sumas. Sirve para aplicación, devolución,
+ * impuesto, saldo a favor y reposición tras devolución.
+ */
+export function moneyValue(input: {
+  partCents: number
+  amountCents: number
+  /** `business_cents`: el valor congelado del importe entero. */
+  valueCents: number | null
+  currency: string
+  businessCurrency: string
+  /** `exchange_factor` de la clínica, por unidad menor. */
+  factor: string | null
+}): MoneyFraction | null {
+  const part = asCents(input.partCents)
+  if (input.valueCents !== null) {
+    if (input.amountCents === 0) return { num: 0n, den: 1n }
+    return { num: part * asCents(input.valueCents), den: asCents(input.amountCents) }
+  }
+  if (input.currency === input.businessCurrency) return { num: part, den: 1n }
+  if (input.factor === null) return null
+  const factor = decimalFraction(input.factor)
+  return { num: part * factor.num, den: factor.den }
+}
+
+/** Suma exacta; lo que no tiene valor (`null`) no entra, igual que en `sum()`. */
+export function sumMoneyValues(values: ReadonlyArray<MoneyFraction | null>): MoneyFraction {
+  let total: MoneyFraction = { num: 0n, den: 1n }
+  for (const value of values) {
+    if (value) total = { num: total.num * value.den + value.num * total.den, den: total.den * value.den }
+  }
+  return total
+}
+
+/** El único redondeo del valor: al mostrar o al congelar, nunca fila por fila. */
+export function roundMoneyValue(value: MoneyFraction): number {
+  return asSafeCents(roundHalfUp(value.num, value.den))
+}
+
+/**
+ * Cuánto sale de lo que entró al devolver una parte de un pago, en proporción y
+ * sin cambio nuevo: `round(T × (previo + r) ÷ A) − round(T × previo ÷ A)`. Devolver
+ * por partes o de una vez suma lo mismo.
+ */
+export function refundTenderCents(input: {
+  /** T: `coalesce(tender_cents, amount_cents)`. */
+  tenderCents: number
+  /** A: `amount_cents`, lo que cancela el pago. */
+  amountCents: number
+  /** Lo ya devuelto de este pago, en la moneda de `amountCents`. */
+  previousCents: number
+  /** r: lo que se devuelve ahora, en la moneda de `amountCents`. */
+  refundCents: number
+}): number {
+  const total = asCents(input.tenderCents)
+  const amount = asCents(input.amountCents)
+  const previous = asCents(input.previousCents)
+  const refund = asCents(input.refundCents)
+  return asSafeCents(
+    roundHalfUp(total * (previous + refund), amount) - roundHalfUp(total * previous, amount),
+  )
+}
+
+/**
+ * La comisión de una parte de un pago: `floor(a × B × tasa ÷ (A × 10000))`, con
+ * B el valor congelado. Multiplica antes de dividir, como la cuenta en SQL.
+ */
+export function commissionCents(input: {
+  /** a: lo aplicado del pago. */
+  appliedCents: number
+  /** A: `amount_cents` del pago. */
+  amountCents: number
+  /** B: el valor del pago en moneda del negocio. */
+  valueCents: number
+  rateBps: number
+}): number {
+  const top = asCents(input.appliedCents) * asCents(input.valueCents) * asCents(input.rateBps)
+  return asSafeCents(top / (asCents(input.amountCents) * 10_000n))
+}
+
+/** Reparte un total entero entre varias filas en proporción; el resto del redondeo va a la última. */
+export function splitCents(totalCents: number, weights: readonly number[]): number[] {
+  const total = asCents(totalCents)
+  const sum = weights.reduce((acc, weight) => acc + asCents(weight), 0n)
+  if (sum === 0n) return weights.map((_, index) => (index === weights.length - 1 ? totalCents : 0))
+  let given = 0n
+  return weights.map((weight, index) => {
+    if (index === weights.length - 1) return asSafeCents(total - given)
+    const share = roundHalfUp(total * asCents(weight), sum)
+    given += share
+    return asSafeCents(share)
+  })
 }

@@ -1,5 +1,11 @@
-import { clinicalProfileFor, DIAGNOSIS_SYSTEM_INFO } from "@odentia/clinical"
-import { Button, toast } from "@odentia/ui"
+import {
+  clinicalProfileFor,
+  DIAGNOSIS_SYSTEM_INFO,
+  formatExchangeRateInput,
+  formatMoney,
+  parseExchangeRate,
+} from "@odentia/clinical"
+import { Button, InputGroup, InputGroupAddon, InputGroupInput, InputGroupText, toast } from "@odentia/ui"
 import {
   common,
   countryOptions,
@@ -17,7 +23,7 @@ import {
   SkeletonRegion,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi } from "@tanstack/react-router"
 import { useEffect, useMemo, useState } from "react"
 import { z } from "zod"
@@ -38,6 +44,8 @@ import { useReceptionName } from "../../lib/agent-names"
 import { usePermission } from "../../lib/crm"
 import { useOrgLocale } from "../../lib/locale"
 import {
+  type CurrencyUsage,
+  fetchCurrencyUsage,
   fetchOrgProfile,
   fetchRegionDefaults,
   type OrgProfile,
@@ -51,6 +59,7 @@ import {
 import { PageDraftGuard, sameDraft } from "../../lib/page-draft-guard"
 import {
   countryName,
+  currencyLabel,
   currencyOptions,
   displayLanguage,
   type NamedOption,
@@ -58,6 +67,8 @@ import {
   regionPreview,
 } from "../../lib/region-format"
 import { productUi } from "../../product/product-ui"
+import { formatDateTimeShortLocale } from "../../lib/finance-collect"
+import { currencySymbol } from "../../lib/services"
 import { ClinicProfilePageSkeleton, ClinicProfileSkeleton } from "../../components/skeletons/settings"
 
 export const Route = createFileRoute("/_org/settings/")({
@@ -112,7 +123,16 @@ const profileSchema = z.object({
   servicesOther: z.string(),
   productsTax: z.string(),
   productsOther: z.string(),
+  // «También cobro en»: "" es que no. Con otra moneda, el cambio de hoy es obligatorio.
+  secondCurrency: z.string(),
+  exchangeRate: z.string(),
 }).superRefine((values, ctx) => {
+  if (values.secondCurrency) {
+    const rate = exchangeRateIssue(values.exchangeRate, values.locale)
+    if (rate) ctx.addIssue({ code: "custom", path: ["exchangeRate"], message: rate })
+    if (values.secondCurrency === values.currency)
+      ctx.addIssue({ code: "custom", path: ["secondCurrency"], message: "Esa ya es la moneda del negocio: elige otra" })
+  }
   const services = otherTaxError(values.servicesTax, values.servicesOther)
   if (services) ctx.addIssue({ code: "custom", path: ["servicesOther"], message: services })
   const products = otherTaxError(values.productsTax, values.productsOther)
@@ -120,6 +140,19 @@ const profileSchema = z.object({
 })
 
 type ProfileValues = z.infer<typeof profileSchema>
+
+/** Sin país elegido aún no hay formato de la clínica: vale el del español. */
+const rateLocale = (locale: string) => locale || "es"
+
+/** Lo que dice el campo del cambio si `parseExchangeRate` no lo acepta: el mismo que lo convierte al guardar. */
+function exchangeRateIssue(raw: string, locale: string): string | null {
+  try {
+    parseExchangeRate(raw, rateLocale(locale))
+    return null
+  } catch (error) {
+    return error instanceof Error ? error.message : "Revisa el cambio"
+  }
+}
 
 /**
  * Valores de partida cuando la organización todavía no tiene perfil: sin país
@@ -136,6 +169,8 @@ const emptyValues: ProfileValues = {
   currency: "",
   timezone: "",
   locale: "",
+  secondCurrency: "",
+  exchangeRate: "",
   ...emptyTaxValues,
 }
 
@@ -152,6 +187,8 @@ function toValues(profile: OrgProfile): ProfileValues {
     currency: profile.currency,
     timezone: profile.timezone,
     locale: profile.locale,
+    secondCurrency: profile.secondCurrency ?? "",
+    exchangeRate: profile.exchangeRate ? formatExchangeRateInput(profile.exchangeRate, profile.locale) : "",
     ...taxValuesFromProfile(profile),
   }
 }
@@ -178,10 +215,22 @@ function countryChoices(country: string, language: string): NamedOption[] {
 
 /**
  * Lo vacío viaja como `null` para que se guarde vacío. El correo de
- * facturación y la impresión no viajan: quedan como estaban.
+ * facturación y la impresión no viajan: quedan como estaban. La otra moneda y su
+ * cambio viajan solo si se tocaron aquí: guardar lo demás no pisa el cambio que
+ * escribió quien cobra mientras esta pantalla estaba abierta.
  */
-function toInput(values: ProfileValues): OrgProfileInput {
+function toInput(values: ProfileValues, baseline: ProfileValues): OrgProfileInput {
+  const currencyTouched =
+    values.secondCurrency !== baseline.secondCurrency || values.exchangeRate !== baseline.exchangeRate
   return {
+    ...(currencyTouched
+      ? values.secondCurrency
+        ? {
+            secondCurrency: values.secondCurrency,
+            exchangeRate: parseExchangeRate(values.exchangeRate, rateLocale(values.locale)),
+          }
+        : { secondCurrency: null }
+      : {}),
     legalName: values.legalName.trim(),
     tradeName: values.tradeName.trim(),
     fiscalDocType: values.fiscalDocType.trim() || null,
@@ -214,7 +263,8 @@ function OrgProfilePage() {
   const profile = data !== undefined ? data : fetched ? loaded : undefined
 
   const saveMutation = useMutation({
-    mutationFn: (values: ProfileValues) => saveOrgProfile(toInput(values)),
+    mutationFn: ({ values, baseline }: { values: ProfileValues; baseline: ProfileValues }) =>
+      saveOrgProfile(toInput(values, baseline)),
     onSuccess: async () => {
       toast.success("Datos guardados")
       await Promise.all([
@@ -250,8 +300,13 @@ function OrgProfilePage() {
           <ProfileForm
             key={org.id}
             values={profile ? toValues(profile) : emptyValues}
+            exchangeWritten={
+              profile?.exchangeRateAt
+                ? { at: profile.exchangeRateAt, byName: profile.exchangeRateByName ?? null }
+                : null
+            }
             pending={saveMutation.isPending}
-            onSubmit={(values) => saveMutation.mutateAsync(values)}
+            onSubmit={(values, baseline) => saveMutation.mutateAsync({ values, baseline })}
           />
           {/* Se guardan solos, con su confirmación: no son parte del «Guardar» de arriba. */}
           {profile ? (
@@ -283,12 +338,15 @@ function profileFieldMap(values: ProfileValues): ServerFieldMap {
 
 function ProfileForm({
   values,
+  exchangeWritten,
   pending,
   onSubmit,
 }: {
   values: ProfileValues
+  /** Quién puso el «Cambio de hoy» guardado y cuándo. */
+  exchangeWritten: { at: string; byName: string | null } | null
   pending: boolean
-  onSubmit: (values: ProfileValues) => Promise<unknown>
+  onSubmit: (values: ProfileValues, baseline: ProfileValues) => Promise<unknown>
 }) {
   const receptionName = useReceptionName()
   const queryClient = useQueryClient()
@@ -300,7 +358,7 @@ function ProfileForm({
     validators: { onSubmit: profileSchema },
     // Si el servidor lo rechaza, cada motivo va a su campo y el resto junto a «Guardar».
     onSubmit: async ({ value, formApi }) => {
-      await onSubmit(value)
+      await onSubmit(value, baseline)
       setInitialValues(value)
       setBaseline(value)
       if (sameDraft(formApi.state.values, value)) formApi.reset(value)
@@ -308,10 +366,16 @@ function ProfileForm({
   })
   const currentValues = useStore(form.store, (state) => state.values)
   const dirty = !sameDraft(currentValues, baseline)
-  const { countryCode: country, timezone, currency, locale } = currentValues
+  const { countryCode: country, timezone, currency, locale, secondCurrency } = currentValues
   const countryZones = useMemo(() => zonesForCountry(country), [country])
   const countries = useMemo(() => countryChoices(country, language), [country, language])
   const currencies = useMemo(() => currencyOptions(language, currency), [language, currency])
+  const otherCurrencies = useMemo(
+    () => currencyOptions(language, secondCurrency).filter((option) => option.value !== currency),
+    [language, secondCurrency, currency],
+  )
+  // Mientras la clínica cobre en otra moneda, la del negocio queda quieta: el servidor lo exige.
+  const businessLocked = !!baseline.secondCurrency && !!secondCurrency
 
   // Al elegir país se propone lo que cambia con él. Queda escrito en el
   // formulario, a la vista, y nada se guarda hasta pulsar Guardar.
@@ -328,8 +392,10 @@ function ProfileForm({
       })
       // Si mientras tanto se eligió otro país, esta propuesta ya no vale.
       if (form.state.values.countryCode !== nextCountry) return
-      // Una moneda que no se conoce queda como estaba: la elige la persona.
-      if (proposal.currency) form.setFieldValue("currency", proposal.currency)
+      // Una moneda que no se conoce queda como estaba: la elige la persona. Con
+      // otra moneda activa tampoco se propone: la del negocio no cambia.
+      if (proposal.currency && !form.state.values.secondCurrency)
+        form.setFieldValue("currency", proposal.currency)
       // La zona solo se propone si es una sola; con varias, vale la que ya
       // estaba si es de ese país y, si no, queda por elegir.
       const zones = zonesForCountry(nextCountry)
@@ -345,6 +411,8 @@ function ProfileForm({
   const [now, setNow] = useState<Date | null>(null)
   useEffect(() => setNow(new Date()), [])
   const preview = now ? regionPreview(now, { locale, timeZone: timezone, currency }) : null
+  const secondSample =
+    now && secondCurrency ? regionPreview(now, { locale, timeZone: timezone, currency: secondCurrency }) : null
   const submit = useFormSubmit(form, { fieldMap: profileFieldMap(currentValues) })
   const submitError = useFormSubmitError(form)
 
@@ -455,17 +523,22 @@ function ProfileForm({
             {(field) => (
               <field.Control
                 id="org-currency"
-                label="Moneda"
-                description="Con ella se cobra. Si la clínica ya tiene cobros o presupuestos en otra moneda, no se puede cambiar: los importes anteriores no se convierten."
+                label="Moneda del negocio"
+                description={
+                  businessLocked
+                    ? `En ella ves tus reportes, tus metas y tus comisiones. Mientras también cobres en ${secondCurrency}, no se puede cambiar.`
+                    : "En ella ves tus reportes, tus metas y tus comisiones. Si la clínica ya tiene cobros o presupuestos en otra moneda, no se puede cambiar: los importes anteriores no se convierten."
+                }
               >
                 {(control) => (
                   <SearchSelect
                     id={control.id}
-                    label="Moneda"
+                    label="Moneda del negocio"
                     placeholder="Buscar moneda…"
                     value={field.state.value}
                     options={currencies}
                     invalid={control.invalid}
+                    disabled={businessLocked}
                     aria-describedby={control.describedBy}
                     onChange={(next) => field.handleChange(next)}
                   />
@@ -473,8 +546,96 @@ function ProfileForm({
               </field.Control>
             )}
           </form.AppField>
+          <form.AppField name="secondCurrency">
+            {(field) => (
+              <field.Control
+                id="org-second-currency"
+                label="También cobro en"
+                description="Para poner precios, cobrar, comprar y registrar gastos en esa moneda. Sin ninguna, todo sigue igual."
+              >
+                {(control) => (
+                  <div className="flex items-start gap-2">
+                    <div className="min-w-0 flex-1">
+                      <SearchSelect
+                        id={control.id}
+                        label="También cobro en"
+                        placeholder="Buscar moneda…"
+                        value={field.state.value}
+                        options={otherCurrencies}
+                        invalid={control.invalid}
+                        aria-describedby={control.describedBy}
+                        onChange={(next) => {
+                          if (next === field.state.value) return
+                          field.handleChange(next)
+                          // El cambio de otra moneda no sirve para esta: se escribe de nuevo.
+                          form.setFieldValue("exchangeRate", "")
+                        }}
+                      />
+                    </div>
+                    {field.state.value ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="min-h-11 shrink-0 sm:min-h-9"
+                        onClick={() => {
+                          field.handleChange("")
+                          form.setFieldValue("exchangeRate", "")
+                        }}
+                      >
+                        Quitar
+                      </Button>
+                    ) : null}
+                  </div>
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
         </div>
-        <RegionExample preview={preview} />
+        <CurrencyUsageNote
+          chosen={secondCurrency}
+          saved={baseline.secondCurrency}
+          business={currency}
+          locale={locale}
+          language={language}
+        />
+        {secondCurrency ? (
+          <form.AppField name="exchangeRate">
+            {(field) => (
+              <field.Control
+                id="org-exchange-rate"
+                label="Cambio de hoy"
+                description={exchangeRateHelp({
+                  written: secondCurrency === baseline.secondCurrency ? exchangeWritten : null,
+                  locale,
+                  timezone,
+                })}
+              >
+                {(control) => (
+                  <InputGroup className="max-w-72">
+                    <InputGroupAddon>
+                      <InputGroupText>{currencySymbol(currency, locale || "es")}</InputGroupText>
+                    </InputGroupAddon>
+                    <InputGroupInput
+                      id={control.id}
+                      name={control.name}
+                      aria-invalid={control.invalid || undefined}
+                      aria-describedby={control.describedBy}
+                      autoComplete="off"
+                      inputMode="decimal"
+                      value={field.state.value}
+                      onBlur={control.onBlur}
+                      onChange={(event) => field.handleChange(event.target.value)}
+                    />
+                    <InputGroupAddon align="inline-end">
+                      <InputGroupText>{`por ${secondCurrency} 1`}</InputGroupText>
+                    </InputGroupAddon>
+                  </InputGroup>
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
+        ) : null}
+        <RegionExample preview={preview} secondAmount={secondSample?.amount ?? null} />
         <CountryRules country={country} language={language} />
       </section>
 
@@ -562,8 +723,92 @@ function CountryRules({ country, language }: { country: string; language: string
   )
 }
 
+/** Para qué sirve el cambio y, si ya hay uno guardado, quién lo puso y cuándo. */
+function exchangeRateHelp({
+  written,
+  locale,
+  timezone,
+}: {
+  written: { at: string; byName: string | null } | null
+  locale: string
+  timezone: string
+}): string {
+  const help =
+    "Se propone al cobrar y sirve para estimar lo que aún no se paga. Cada cobro guarda el suyo: cambiarlo no toca lo ya cobrado. Quien cobra también puede actualizarlo."
+  if (!written || !locale || !timezone) return help
+  const when = formatDateTimeShortLocale(written.at, locale, timezone)
+  return `${help} ${written.byName ? `Lo puso ${written.byName}` : "Se puso"} el ${when}.`
+}
+
+/**
+ * Lo que ya hay en la moneda que se activa o se quita, para decidir sabiendo. Sin
+ * nada en esa moneda no dice nada.
+ */
+function CurrencyUsageNote({
+  chosen,
+  saved,
+  business,
+  locale,
+  language,
+}: {
+  chosen: string
+  saved: string
+  business: string
+  locale: string
+  language: string
+}) {
+  const removing = !chosen && !!saved
+  const code = chosen && chosen !== saved ? chosen : removing ? saved : ""
+  const usageQuery = useQuery({
+    queryKey: ["org-currency-usage", code],
+    queryFn: () => fetchCurrencyUsage(code),
+    enabled: code !== "",
+  })
+  if (!code || !usageQuery.data || !locale) return null
+  const text = currencyUsageWords(usageQuery.data, { removing, business, locale, language })
+  return text ? (
+    <p role="status" className="rounded-lg border border-warning/40 bg-warning-soft px-3 py-2.5 text-sm">
+      {text}
+    </p>
+  ) : null
+}
+
+function currencyUsageWords(
+  usage: CurrencyUsage,
+  context: { removing: boolean; business: string; locale: string; language: string },
+): string | null {
+  const money = (cents: number) => formatMoney(cents, usage.currency, context.locale)
+  const parts = [
+    usage.dueCents > 0 ? `${money(usage.dueCents)} por cobrar` : null,
+    usage.services > 0
+      ? `${usage.services} ${usage.services === 1 ? "servicio" : "servicios"} con precio en ${usage.currency}`
+      : null,
+    usage.cashCents > 0 ? `${money(usage.cashCents)} en la caja` : null,
+  ].filter((part): part is string => part !== null)
+  if (parts.length === 0) return null
+  const list = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} y ${parts.at(-1)}` : parts[0]
+  const seen = `Hay ${list}.`
+  if (!context.removing) return seen
+  return [
+    seen,
+    usage.dueCents > 0 ? `Lo que ya se debe se sigue cobrando en ${usage.currency}.` : null,
+    usage.cashCents > 0 ? "La caja se sigue contando hasta cerrarla." : null,
+    usage.services > 0
+      ? `Esos servicios tendrás que pasarlos a ${currencyLabel(context.business, context.language)}.`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" ")
+}
+
 /** «Así se verán»: lo elegido arriba, aplicado a una fecha, una hora y un importe. */
-function RegionExample({ preview }: { preview: RegionPreview | null }) {
+function RegionExample({
+  preview,
+  secondAmount,
+}: {
+  preview: RegionPreview | null
+  secondAmount: string | null
+}) {
   return (
     <p className="rounded-lg bg-muted px-3 py-2.5 text-sm text-muted-foreground">
       {preview ? (
@@ -571,6 +816,7 @@ function RegionExample({ preview }: { preview: RegionPreview | null }) {
           Así se verán:{" "}
           <span className="font-medium text-foreground">
             {preview.date} · {preview.time} · {preview.amount}
+            {secondAmount ? ` · ${secondAmount}` : ""}
           </span>
           .{" "}
         </>

@@ -252,13 +252,37 @@ function assertDuration(durationMin: number | null | undefined): number | null {
  * país: poner precio a un servicio exige haber configurado la clínica.
  */
 async function orgCurrency(tx: Db, orgId: string): Promise<string> {
+  return (await orgPriceCurrencies(tx, orgId)).business
+}
+
+/** Las monedas en que la clínica pone precios: la del negocio y, si la activó, la otra. */
+async function orgPriceCurrencies(
+  tx: Db,
+  orgId: string,
+): Promise<{ business: string; second: string | null }> {
   const [profile] = await tx
-    .select({ currency: orgProfile.currency })
+    .select({ business: orgProfile.currency, second: orgProfile.secondCurrency })
     .from(orgProfile)
     .where(eq(orgProfile.organizationId, orgId))
     .limit(1)
   if (!profile) throw orgProfileRequired()
-  return profile.currency
+  return profile
+}
+
+function assertPriceCurrency(
+  currency: string,
+  allowed: { business: string; second: string | null },
+): string {
+  const code = assertCurrency(currency)
+  if (code !== allowed.business && code !== allowed.second) {
+    throw invalidField(
+      "currency",
+      allowed.second
+        ? `El precio va en ${allowed.business} o en ${allowed.second}`
+        : `El precio va en ${allowed.business}: la clínica no cobra en otra moneda`,
+    )
+  }
+  return code
 }
 
 /** La lista de servicios del país de la clínica (ADR 0069), o null. */
@@ -816,9 +840,10 @@ export async function createService(
   actorUserId: string,
   input: CreateServiceInput,
 ): Promise<ServiceRow> {
-  // La moneda viaja siempre explícita: la indicada o la de la clínica (la
-  // columna no tiene valor por defecto).
-  const currency = assertCurrency(input.currency ?? (await orgCurrency(tx, orgId)))
+  // La moneda viaja siempre explícita: la indicada, de las dos de la clínica, o
+  // la del negocio (la columna no tiene valor por defecto).
+  const allowed = await orgPriceCurrencies(tx, orgId)
+  const currency = assertPriceCurrency(input.currency ?? allowed.business, allowed)
   let values: typeof serviceCatalog.$inferInsert
   let leaves: ServiceLeaves | null
   const list = await orgServiceList(tx, orgId)
@@ -1067,8 +1092,12 @@ export async function updateService(
     set.priceCents = assertPrice(patch.priceCents)
     fields.push("priceCents")
   }
-  if (patch.currency !== undefined) {
-    set.currency = assertCurrency(patch.currency)
+  if (patch.currency !== undefined && patch.currency !== current.currency) {
+    set.currency = assertPriceCurrency(patch.currency, await orgPriceCurrencies(tx, orgId))
+    // Otra moneda, otro precio: el número nunca se conserva ni se convierte solo.
+    // Lo ya indicado o presupuestado sigue con su moneda y su precio.
+    if (patch.priceCents === undefined)
+      throw invalidField("priceCents", `Al cambiar a ${set.currency} escribe el precio de nuevo`)
     fields.push("currency")
   }
   if (patch.durationMin !== undefined) {

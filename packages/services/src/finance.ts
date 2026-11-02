@@ -207,11 +207,32 @@ async function requireProfessional(tx: Db, orgId: string, userId: string) {
 
 // --- Caja: apertura -----------------------------------------------------------
 
-/** Serializa todo lo que crea o cierra la ventana de una sede y moneda. */
+/**
+ * Serializa todo lo que crea, cierra o corrige la ventana de una sede y moneda.
+ * Orden de los bloqueos de caja, siempre el mismo para no bloquearse entre sí:
+ * primero este, de cada caja en orden fijo (`lockCashWindows`), y después la fila
+ * de la ventana (`lockShift`). Quien tiene la fila no pide este.
+ */
 async function lockCashWindow(tx: Db, orgId: string, branchId: string, unit: string): Promise<void> {
   await tx.execute(
     sql`select pg_advisory_xact_lock(hashtext('cash:' || ${orgId} || ':' || ${branchId} || ':' || ${unit}))`,
   )
+}
+
+/**
+ * Lo que toca más de una caja las bloquea juntas y en orden fijo, por sede y
+ * moneda: dos operaciones sobre las mismas cajas nunca se esperan en cruz.
+ */
+export async function lockCashWindows(
+  tx: Db,
+  orgId: string,
+  windows: ReadonlyArray<{ branchId: string; unit: string }>,
+): Promise<void> {
+  const unique = new Map(windows.map((w) => [`${w.branchId}|${w.unit}`, w]))
+  for (const key of [...unique.keys()].sort()) {
+    const window = unique.get(key)
+    if (window) await lockCashWindow(tx, orgId, window.branchId, window.unit)
+  }
 }
 
 /**
@@ -310,7 +331,7 @@ type CashMove = typeof cashMovement.$inferSelect
 
 /**
  * De dónde sale el efectivo que debe haber. Siempre suma el esperado:
- * quedó + cobros + ingresado − gastos − retirado − devuelto.
+ * quedó + cobros + ingresado − gastos − retirado − devuelto + vuelto.
  */
 export interface CashBreakdown {
   /** Lo que quedó del cierre anterior. */
@@ -325,6 +346,8 @@ export interface CashBreakdown {
   cashWithdrawnCents: number
   /** Efectivo devuelto a pacientes. */
   cashRefundedCents: number
+  /** Vuelto en otra moneda, con signo: entra el exceso del billete, sale el vuelto. */
+  cashChangeCents: number
 }
 
 function cashBreakdown(movements: CashMove[]): CashBreakdown {
@@ -337,6 +360,9 @@ function cashBreakdown(movements: CashMove[]): CashBreakdown {
     cashExpensesCents: total((m) => isCashEgreso(m) && m.kind === "gasto"),
     cashWithdrawnCents: total((m) => isCashEgreso(m) && m.kind === "retiro"),
     cashRefundedCents: total((m) => isCashEgreso(m) && m.kind === "devolucion"),
+    cashChangeCents:
+      total((m) => m.direction === "ingreso" && m.kind === "vuelto") -
+      total((m) => isCashEgreso(m) && m.kind === "vuelto"),
   }
 }
 
@@ -528,6 +554,7 @@ export async function recordCashIncome(
       and(
         eq(cashMovement.organizationId, orgId),
         eq(cashMovement.patientPaymentId, input.paymentId),
+        eq(cashMovement.kind, "cobro"),
         isNull(cashMovement.voidedAt),
       ),
     )
@@ -627,10 +654,14 @@ export async function reverseCashIncome(
       and(
         eq(cashMovement.organizationId, orgId),
         eq(cashMovement.patientPaymentId, payment.id),
+        eq(cashMovement.kind, "cobro"),
         isNull(cashMovement.voidedAt),
       ),
     )
   if (!movement) return false
+  // La caja antes que su fila, como todos: la compensación de abajo pide la misma caja.
+  const seen = await requireShift(tx, orgId, movement.shiftId)
+  await lockCashWindow(tx, orgId, seen.branchId, seen.currency)
   // Bloqueada: un cierre simultáneo espera o ya se ve cerrado, nunca a medias.
   const shift = await lockShift(tx, orgId, movement.shiftId)
   if (shift.status === "abierta") {
@@ -646,17 +677,42 @@ export async function reverseCashIncome(
       "POST_CLOSE_NEEDS_ADMIN",
       "La caja donde ingresó el cobro ya cerró y no se modifica: solo administración puede anularlo",
     )
-  const current = await ensureOpenShift(tx, orgId, actorUserId, shift.branchId, payment.currency)
+  // Sale lo que entró a la caja, con los datos del movimiento: un pago cruzado
+  // entró en otra moneda que la que cancela.
+  const current = await ensureOpenShift(tx, orgId, actorUserId, shift.branchId, movement.currency)
   await recordCashEgreso(tx, orgId, actorUserId, current.id, {
     kind: "devolucion",
-    amountCents: payment.amountCents,
-    currency: payment.currency,
-    methodName: payment.methodName,
-    methodTypeCode: payment.methodTypeCode,
+    amountCents: movement.amountCents,
+    currency: movement.currency,
+    methodName: movement.method,
+    methodTypeCode: movement.methodTypeCode,
     concept: `Compensación por anulación`,
     allowNegative: true,
   })
   return true
+}
+
+/**
+ * Las cajas donde están estos pagos, bloqueadas en orden fijo antes de tocar
+ * ninguna: una anulación con varios medios no se cruza con otra ni con un cierre.
+ */
+export async function lockCashOfPayments(tx: Db, orgId: string, paymentIds: string[]): Promise<void> {
+  if (!paymentIds.length) return
+  const windows = await tx
+    .selectDistinct({ branchId: cashShift.branchId, unit: cashShift.currency })
+    .from(cashMovement)
+    .innerJoin(
+      cashShift,
+      and(eq(cashShift.id, cashMovement.shiftId), eq(cashShift.organizationId, orgId)),
+    )
+    .where(
+      and(
+        eq(cashMovement.organizationId, orgId),
+        inArray(cashMovement.patientPaymentId, paymentIds),
+        isNull(cashMovement.voidedAt),
+      ),
+    )
+  await lockCashWindows(tx, orgId, windows)
 }
 
 export async function voidMovement(
@@ -724,12 +780,11 @@ export async function closeShift(
   shiftId: string,
   input: CloseShiftInput,
 ) {
-  const [locked] = await tx
-    .select()
-    .from(cashShift)
-    .where(and(eq(cashShift.id, shiftId), eq(cashShift.organizationId, orgId)))
-    .for("update")
-  if (!locked) throw notFound("Turno de caja")
+  // La caja antes que la fila, como un cobro: al revés, cerrar y cobrar a la vez
+  // se esperarían en cruz (la ventana siguiente pide esta misma caja al final).
+  const seen = await requireShift(tx, orgId, shiftId)
+  await lockCashWindow(tx, orgId, seen.branchId, seen.currency)
+  const locked = await lockShift(tx, orgId, shiftId)
   if (locked.status === "cerrada") return locked
   if (!Number.isSafeInteger(input.countedCents) || input.countedCents < 0)
     throw invalidField("countedCents", "El contado debe ser un importe entero mayor o igual a 0")
@@ -782,6 +837,7 @@ export async function closeShift(
     expenseCashCents: breakdown.cashExpensesCents,
     cashWithdrawnCents: breakdown.cashWithdrawnCents,
     cashRefundedCents: breakdown.cashRefundedCents,
+    cashChangeCents: breakdown.cashChangeCents,
     expectedCents: detail.esperadoCents,
     countedCents: input.countedCents,
     differenceCents: difference,
@@ -876,12 +932,12 @@ export async function closeCashWindow(
   return closeShift(tx, orgId, actorUserId, shift.id, input)
 }
 
-/** Hubo un cierre de esa sede y moneda después del instante dado. */
+/** Hubo un cierre de esa sede, en la caja de alguna de esas monedas, después del instante dado. */
 export async function hasClosureSince(
   tx: Db,
   orgId: string,
   branchId: string,
-  unit: string,
+  units: readonly string[],
   since: Date,
 ): Promise<boolean> {
   const [row] = await tx
@@ -891,7 +947,7 @@ export async function hasClosureSince(
       and(
         eq(cashClosure.organizationId, orgId),
         eq(cashClosure.branchId, branchId),
-        eq(cashClosure.currency, unit),
+        inArray(cashClosure.currency, [...units]),
         gte(cashClosure.closedAt, since),
       ),
     )
@@ -3005,6 +3061,7 @@ const EMPTY_BREAKDOWN: CashBreakdown = {
   cashExpensesCents: 0,
   cashWithdrawnCents: 0,
   cashRefundedCents: 0,
+  cashChangeCents: 0,
 }
 
 /**

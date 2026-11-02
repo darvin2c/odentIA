@@ -115,6 +115,12 @@ export interface OrgFinanceProfile {
   receiptWidth: "58" | "80"
   sheetSize: "A4" | "Letter"
   ticketFooter: string | null
+  /** La otra moneda de la clínica y su «Cambio de hoy» (`orgSecondCurrency` de `lib/org`). */
+  secondCurrency?: string | null
+  exchangeRate?: string | null
+  exchangeFactor?: string | null
+  exchangeRateAt?: string | null
+  exchangeRateByName?: string | null
 }
 
 /** Fila real de `org_profile` (puede no existir hasta que se configure). */

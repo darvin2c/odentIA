@@ -152,7 +152,9 @@ function lineTotal(
 export type BudgetPublicRow = Omit<BudgetRow, "findings">
 
 /** Presupuesto con líneas snapshot y totales enteros (null = precio desconocido). */
-export type BudgetWithTotals = BudgetPublicRow & {
+export type BudgetWithTotals = Omit<BudgetPublicRow, "currency"> & {
+  /** La moneda que dice el presupuesto (`budgetCurrencyOf`). */
+  currency: string
   /** Todas las líneas, de todas las opciones (cada una dice su `optionId`). */
   items: BudgetLineWithStatus[]
   /** Las opciones, en orden; con una sola, la pantalla no habla de opciones. */
@@ -606,6 +608,18 @@ function withoutFindings<T extends { findings: string | null }>(row: T): Omit<T,
   return rest
 }
 
+/**
+ * La moneda que dice un presupuesto: la que guarda o, si no guarda ninguna, la de
+ * sus líneas. Puente hasta que su total salga por moneda de las líneas: hoy todo
+ * presupuesto nuevo sigue guardando la suya.
+ */
+export function budgetCurrencyOf(
+  budget: { currency: string | null },
+  lines: ReadonlyArray<{ currency: string }>,
+): string {
+  return budget.currency ?? lines[0]?.currency ?? ""
+}
+
 function withTotals(
   fullBudget: BudgetRow,
   items: BudgetLineWithStatus[],
@@ -619,6 +633,7 @@ function withTotals(
   const value = valueOptionOf(options)
   return {
     ...budget,
+    currency: budgetCurrencyOf(fullBudget, items),
     hasFindings,
     items,
     options,
@@ -1959,7 +1974,7 @@ export async function deliverBudget(
       ...new Set(lines.map((line) => line.serviceId).filter((id): id is string => !!id)),
     ],
     by: opts.by,
-    total: { cents: full.totalCents, currency: updated.currency },
+    total: { cents: full.totalCents, currency: full.currency },
   })
   await notifyBudget(tx, orgId)
   return withoutFindings(updated)
@@ -2472,7 +2487,7 @@ export async function decideBudget(
           decision: decisions.get(line.planItemId),
         })),
       ),
-      currency: updated.currency,
+      currency: budgetCurrencyOf(updated, lines),
     },
   })
   await notifyBudget(tx, orgId)

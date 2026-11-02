@@ -65,6 +65,45 @@ export interface OrgProfile {
   servicesTaxBps?: number | null
   productsTaxCategory?: string | null
   productsTaxBps?: number | null
+  /** La otra moneda en que también cobra la clínica; null si cobra en una sola. Lo dice `orgSecondCurrency`. */
+  secondCurrency?: string | null
+  /** «Cambio de hoy» en texto decimal: moneda del negocio por 1 de la otra. */
+  exchangeRate?: string | null
+  /** Lo mismo por unidad menor de cada moneda. */
+  exchangeFactor?: string | null
+  exchangeRateAt?: string | null
+  exchangeRateByName?: string | null
+}
+
+/** La otra moneda de la clínica y su «Cambio de hoy». */
+export interface OrgSecondCurrency {
+  currency: string
+  /** En palabras: moneda del negocio por 1 de la otra («3.75»). */
+  rate: string
+  factor: string
+  /** Quién lo puso y cuándo; el nombre es null si ya no está en la clínica. */
+  at: string | null
+  byName: string | null
+}
+
+/**
+ * La única pregunta que se hacen las pantallas: ¿esta clínica cobra en otra
+ * moneda? `null` es que no, y entonces no aparece ningún control de más.
+ */
+export function orgSecondCurrency(profile: OrgProfile | null | undefined): OrgSecondCurrency | null {
+  if (!profile?.secondCurrency || !profile.exchangeRate || !profile.exchangeFactor) return null
+  return {
+    currency: profile.secondCurrency,
+    rate: profile.exchangeRate,
+    factor: profile.exchangeFactor,
+    at: profile.exchangeRateAt ?? null,
+    byName: profile.exchangeRateByName ?? null,
+  }
+}
+
+/** Lo mismo con el perfil de la sesión, ya cacheado. */
+export function useOrgSecondCurrency(): OrgSecondCurrency | null {
+  return orgSecondCurrency(useOrgProfile().data)
 }
 
 /** Las dos cifras de impuesto que valen hoy para la clínica (o null si su país no tiene impuesto que separar). */
@@ -110,6 +149,9 @@ export interface OrgProfileInput {
   locale: string
   /** Solo si la tarjeta «Impuestos» se tocó; al cambiar de país el servidor vuelve a lo del nuevo. */
   taxes?: OrgTaxesInput
+  /** Solo si se tocó: `null` deja de cobrar en ella; viaja con su cambio, en texto decimal. */
+  secondCurrency?: string | null
+  exchangeRate?: string | null
 }
 
 export async function fetchOrgProfile(): Promise<OrgProfile | null> {
@@ -122,6 +164,29 @@ export async function saveOrgProfile(input: OrgProfileInput): Promise<OrgProfile
     method: "PUT",
     body: JSON.stringify(input),
   })
+  return data
+}
+
+/** Escribe el «Cambio de hoy»: quien configura y quien cobra. */
+export async function saveExchangeRate(exchangeRate: string): Promise<OrgProfile> {
+  const { data } = await apiFetch<{ data: OrgProfile }>("/api/org-profile/exchange-rate", {
+    method: "PUT",
+    body: JSON.stringify({ exchangeRate }),
+  })
+  return data
+}
+
+/** Lo que la clínica ya tiene en una moneda: se dice antes de activarla o quitarla. */
+export interface CurrencyUsage {
+  currency: string
+  dueCents: number
+  services: number
+  cashCents: number
+}
+
+export async function fetchCurrencyUsage(currency: string): Promise<CurrencyUsage> {
+  const params = new URLSearchParams({ currency })
+  const { data } = await apiFetch<{ data: CurrencyUsage }>(`/api/org-profile/currency-usage?${params}`)
   return data
 }
 

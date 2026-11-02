@@ -5,24 +5,29 @@
 import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
 import { member, user } from "@odentia/db/schema/auth"
-import { cashMovement } from "@odentia/db/schema/finance"
+import { cashClosure, cashMovement, cashShift } from "@odentia/db/schema/finance"
 import { branch } from "@odentia/db/schema/org"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
-import { and, eq } from "drizzle-orm"
+import { and, eq, isNull, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import {
   addCashMovement,
+  addShiftMovement,
   closeCashWindow,
+  closeShift,
+  ensureOpenShift,
   getCashState,
   getDebts,
   listClosures,
+  lockCashWindows,
   voidMovement,
 } from "./finance.js"
 import {
   collectCharge,
   createCharge,
   getAccountSummary,
+  getTicketReceipt,
   refundCredit,
   voidTicket,
 } from "./payments.js"
@@ -33,6 +38,7 @@ setupTestDb()
 interface Fixture {
   actor: string
   patient: { id: string }
+  args: [string, string, string]
   run: <T>(fn: (tx: Db) => Promise<T>) => Promise<T>
 }
 
@@ -458,4 +464,232 @@ it("la diferencia del cierre avisa al dueño y a quien administra, con el import
   expect(notices[0]!.body).toMatch(/5[.,]00/)
   // El nombre de la sede de prueba lleva un identificador aleatorio: se mira solo el importe.
   expect(notices[0]!.body).not.toMatch(/centavos|faltaron\D*500/)
+})
+
+// --- Cobrar en dos monedas: lo que ya debía estar bien con una sola -----------
+
+/**
+ * Un cobro de S/ 300 que entró como USD 80 a la caja de dólares: el pago sigue
+ * diciendo lo que cancela y el movimiento, lo que entró. Cobrar así todavía no
+ * existe: se arma a mano lo que dejará.
+ */
+async function crossedPayment(f: Fixture) {
+  const { branchId, cash } = await seedCashbox(f)
+  await f.run((tx) =>
+    createCharge(tx, ...f.args, { description: "Corona", amountCents: 30000, currency: "PEN", branchId }),
+  )
+  const paid = await f.run((tx) =>
+    collectCharge(tx, ...f.args, {
+      branchId,
+      payments: [{ paymentMethodId: cash.id, amountCents: 30000 }],
+      requestId: randomUUID(),
+    }),
+  )
+  const dollars = await f.run((tx) => ensureOpenShift(tx, "org_a", f.actor, branchId, "USD"))
+  await ownerDb
+    .update(cashMovement)
+    .set({ voidedAt: new Date(), voidedBy: f.actor, voidReason: "Entró en dólares" })
+    .where(eq(cashMovement.patientPaymentId, paid.payments[0]!.id))
+  await ownerDb.insert(cashMovement).values({
+    organizationId: "org_a",
+    shiftId: dollars.id,
+    direction: "ingreso",
+    kind: "cobro",
+    amountCents: 8000,
+    currency: "USD",
+    method: "Efectivo",
+    methodTypeCode: "10",
+    concept: `Ticket ${paid.ticket.ticketNumber}`,
+    patientPaymentId: paid.payments[0]!.id,
+    createdBy: f.actor,
+  })
+  return { branchId, paid }
+}
+
+const closeBox = (f: Fixture, branchId: string, currency: string) =>
+  f.run((tx) =>
+    closeCashWindow(tx, "org_a", f.actor, { branchId, currency, countedCents: 0, retainedCents: 0, deliveredCents: 0 }),
+  )
+
+it("anular después del cierre saca lo que entró a la caja, en su moneda, no lo que cancela el pago", async () => {
+  const f = await clinicalFixture()
+  const { branchId, paid } = await crossedPayment(f)
+  await closeBox(f, branchId, "USD")
+  await expect(
+    f.run((tx) => voidTicket(tx, ...f.args, paid.ticket.id, { reason: "Tarde", allowPostClose: false })),
+  ).rejects.toMatchObject({ code: "POST_CLOSE_NEEDS_ADMIN" })
+  await f.run((tx) =>
+    voidTicket(tx, ...f.args, paid.ticket.id, { reason: "Autoriza administración", allowPostClose: true }),
+  )
+  const out = await ownerDb
+    .select({
+      amountCents: cashMovement.amountCents,
+      currency: cashMovement.currency,
+      method: cashMovement.method,
+      methodTypeCode: cashMovement.methodTypeCode,
+      branchId: cashShift.branchId,
+    })
+    .from(cashMovement)
+    .innerJoin(cashShift, eq(cashShift.id, cashMovement.shiftId))
+    .where(and(eq(cashMovement.kind, "devolucion"), eq(cashShift.branchId, branchId), isNull(cashMovement.voidedAt)))
+  expect(out).toEqual([{ amountCents: 8000, currency: "USD", method: "Efectivo", methodTypeCode: "10", branchId }])
+})
+
+it("el cobro cerrado es el de la caja donde entró el dinero: otra caja cerrada no lo cambia", async () => {
+  const f = await clinicalFixture()
+  const { branchId, paid } = await crossedPayment(f)
+  const closedAfter = async () => {
+    const receipt = await f.run((tx) => getTicketReceipt(tx, "org_a", f.patient.id, paid.ticket.id))
+    const summary = await f.run((tx) => getAccountSummary(tx, "org_a", f.patient.id))
+    const listed = summary.cobros.find((cobro) => cobro.ticketId === paid.ticket.id)
+    expect(listed?.closedAfter).toBe(receipt.closedAfter)
+    return receipt.closedAfter
+  }
+  expect(await closedAfter()).toBe(false)
+  await f.run((tx) =>
+    closeCashWindow(tx, "org_a", f.actor, { branchId, currency: "PEN", countedCents: 0, retainedCents: 0, deliveredCents: 0 }),
+  )
+  expect(await closedAfter()).toBe(false)
+  await closeBox(f, branchId, "USD")
+  expect(await closedAfter()).toBe(true)
+})
+
+/** Espera a que alguna transacción quede esperando un bloqueo de caja. */
+async function untilSomeoneWaitsForCash(): Promise<void> {
+  for (let tries = 0; tries < 200; tries++) {
+    const rows = await ownerDb.execute<{ waiting: string }>(
+      sql`select count(*) as waiting from pg_stat_activity where wait_event_type = 'Lock' and wait_event = 'advisory'`,
+    )
+    if (Number(rows[0]?.waiting) > 0) return
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  throw new Error("Nadie quedó esperando la caja")
+}
+
+it("cerrar y cobrar a la vez se esperan en fila: el cierre cuenta lo que se cobró", async () => {
+  const f = await clinicalFixture()
+  const { branchId } = await seedCashbox(f)
+  const open = await f.run((tx) => ensureOpenShift(tx, "org_a", f.actor, branchId, "PEN"))
+  let closing: Promise<{ expectedCents: number | null } | undefined> = Promise.resolve(undefined)
+  // Como un cobro: primero la caja y, con ella tomada, la fila de la ventana.
+  await f.run(async (tx) => {
+    await ensureOpenShift(tx, "org_a", f.actor, branchId, "PEN")
+    closing = f.run((other) =>
+      closeShift(other, "org_a", f.actor, open.id, { countedCents: 5000, retainedCents: 0, deliveredCents: 5000 }),
+    )
+    await untilSomeoneWaitsForCash()
+    await addShiftMovement(tx, "org_a", f.actor, open.id, {
+      direction: "ingreso",
+      kind: "aporte",
+      amountCents: 5000,
+      concept: "Fondo",
+    })
+  })
+  const closed = await closing
+  expect(closed?.expectedCents).toBe(5000)
+})
+
+it("anular mientras alguien tiene la caja no se queda con su fila: espera primero la caja", async () => {
+  const f = await clinicalFixture()
+  const { branchId, cash } = await seedCashbox(f)
+  await f.run((tx) =>
+    createCharge(tx, ...f.args, { description: "Control", amountCents: 5000, currency: "PEN", branchId }),
+  )
+  const paid = await f.run((tx) =>
+    collectCharge(tx, ...f.args, {
+      branchId,
+      payments: [{ paymentMethodId: cash.id, amountCents: 5000 }],
+      requestId: randomUUID(),
+    }),
+  )
+  const open = await f.run((tx) => ensureOpenShift(tx, "org_a", f.actor, branchId, "PEN"))
+  let voiding: Promise<unknown> = Promise.resolve()
+  await f.run(async (tx) => {
+    await ensureOpenShift(tx, "org_a", f.actor, branchId, "PEN")
+    voiding = f.run((other) =>
+      voidTicket(other, ...f.args, paid.ticket.id, { reason: "Error al cobrar", allowPostClose: false }),
+    )
+    await untilSomeoneWaitsForCash()
+    await addShiftMovement(tx, "org_a", f.actor, open.id, {
+      direction: "ingreso",
+      kind: "aporte",
+      amountCents: 100,
+      concept: "Sencillo",
+    })
+  })
+  await voiding
+})
+
+it("las cajas se bloquean en orden fijo, sin importar en cuál orden se pidan", async () => {
+  const f = await clinicalFixture()
+  const { branchId } = await seedCashbox(f)
+  const boxKey = (unit: string) => sql`hashtext('cash:' || ${"org_a"} || ':' || ${branchId} || ':' || ${unit})`
+  let second: Promise<unknown> = Promise.resolve()
+  await f.run(async (tx) => {
+    // Alguien tiene la de soles, que va primero. Quien pide dólares y soles espera
+    // la de soles sin haberse quedado con la de dólares: nadie espera en cruz.
+    await lockCashWindows(tx, "org_a", [{ branchId, unit: "PEN" }])
+    second = f.run((other) =>
+      lockCashWindows(other, "org_a", [
+        { branchId, unit: "USD" },
+        { branchId, unit: "PEN" },
+      ]),
+    )
+    await untilSomeoneWaitsForCash()
+    const [free] = await ownerDb.transaction((probe) =>
+      probe.execute<{ free: boolean }>(sql`select pg_try_advisory_xact_lock(${boxKey("USD")}) as free`),
+    )
+    expect(free?.free).toBe(true)
+  })
+  await second
+})
+
+it("el vuelto entra en cada caja con su signo y el desglose sigue sumando el esperado", async () => {
+  const f = await clinicalFixture()
+  const { branchId, paid } = await crossedPayment(f)
+  const dollars = await f.run((tx) => ensureOpenShift(tx, "org_a", f.actor, branchId, "USD"))
+  const soles = await f.run((tx) => ensureOpenShift(tx, "org_a", f.actor, branchId, "PEN"))
+  await f.run((tx) =>
+    addShiftMovement(tx, "org_a", f.actor, soles.id, { direction: "ingreso", kind: "aporte", amountCents: 10000, concept: "Fondo" }),
+  )
+  const paymentId = paid.payments[0]!.id
+  const change = (shiftId: string, direction: "ingreso" | "egreso", amountCents: number, currency: string) => ({
+    organizationId: "org_a",
+    shiftId,
+    direction,
+    kind: "vuelto",
+    amountCents,
+    currency,
+    concept: "Vuelto",
+    patientPaymentId: paymentId,
+  })
+  // Billete de USD 100 para S/ 300 a 3.75: quedan USD 20 de más y salen S/ 75 de vuelto.
+  await ownerDb.insert(cashMovement).values(change(dollars.id, "ingreso", 2000, "USD"))
+  await ownerDb.insert(cashMovement).values(change(soles.id, "egreso", 7500, "PEN"))
+  // Una fila por tipo y moneda: el mismo vuelto no entra dos veces en una caja.
+  await expect(ownerDb.insert(cashMovement).values(change(dollars.id, "ingreso", 2000, "USD"))).rejects.toThrow()
+
+  const closeWith = (currency: string, counted: number) =>
+    f.run((tx) =>
+      closeCashWindow(tx, "org_a", f.actor, { branchId, currency, countedCents: counted, retainedCents: 0, deliveredCents: counted }),
+    )
+  const closedUsd = await closeWith("USD", 10000)
+  const closedPen = await closeWith("PEN", 2500)
+  // USD 80 del cobro más USD 20; S/ 100 de fondo menos S/ 75.
+  expect(closedUsd).toMatchObject({ expectedCents: 10000, differenceCents: 0 })
+  expect(closedPen).toMatchObject({ expectedCents: 2500, differenceCents: 0 })
+  const closures = await ownerDb.select().from(cashClosure).where(eq(cashClosure.branchId, branchId))
+  for (const closure of closures) {
+    const sum =
+      closure.openingRetainedCents +
+      closure.cashCollectedCents +
+      closure.cashAddedCents -
+      closure.expenseCashCents -
+      closure.cashWithdrawnCents -
+      closure.cashRefundedCents +
+      closure.cashChangeCents
+    expect(sum, closure.currency).toBe(closure.expectedCents)
+  }
+  expect(closures.find((closure) => closure.currency === "USD")?.cashChangeCents).toBe(2000)
+  expect(closures.find((closure) => closure.currency === "PEN")?.cashChangeCents).toBe(-7500)
 })
