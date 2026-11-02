@@ -1,6 +1,6 @@
 # 0083 · El impuesto de lo que cobra la clínica
 
-Fecha: 2026-10-23 · Estado: aceptada · Issue #145. Lienzo «Impuestos: ajustes, ticket y Reportes», aprobado el 2026-10-23.
+Fecha: 2026-10-23 · Estado: aceptada · Issue #145. Lienzo «Impuestos: ajustes, ticket y Reportes», aprobado el 2026-10-23. Lo precisa [0134](0134-cobrar-en-dos-monedas.md): el impuesto de un pago en otra moneda y el pago del impuesto de lo cobrado.
 
 ## Problema
 
