@@ -33,6 +33,7 @@ import {
   desc,
   eq,
   inArray,
+  isNotNull,
   isNull,
   or,
   type SQL,
@@ -1696,11 +1697,12 @@ export async function collectCharge(
   }
   // Todo cobro queda en la caja de su sede, la de la moneda en que entró: la caja
   // se crea sola, nunca se abre. Con vuelto en otra moneda toca dos cajas, bloqueadas
-  // en orden fijo antes de tocar ninguna.
-  await lockCashWindows(tx, orgId, [
-    { branchId: branchRow.id, unit: paidIn },
-    ...(crossChange !== null ? [{ branchId: branchRow.id, unit: changeIn }] : []),
-  ])
+  // en orden fijo antes de tocar ninguna; con una, la bloquea `ensureOpenShift`.
+  if (crossChange !== null)
+    await lockCashWindows(tx, orgId, [
+      { branchId: branchRow.id, unit: paidIn },
+      { branchId: branchRow.id, unit: changeIn },
+    ])
   const shift = await ensureOpenShift(tx, orgId, actorUserId, branchRow.id, paidIn)
   for (const [index, payment] of payments.entries()) {
     await recordCashIncome(tx, orgId, actorUserId, shift.id, {
@@ -3338,10 +3340,18 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
         : false,
     }))
     .filter((row) => row.availableCents > 0)
-  // Lo aceptado del plan en una sola moneda: un adelanto queda por defecto a cuenta de ella.
+  // Lo aceptado del plan en una sola moneda: un adelanto queda por defecto a cuenta de
+  // ella. Sin otra moneda no hay de cuál elegir y la consulta termina en el perfil.
   const planCurrencies = await tx
     .selectDistinct({ currency: treatmentBudgetItem.currency })
     .from(treatmentBudgetItem)
+    .innerJoin(
+      orgProfile,
+      and(
+        eq(orgProfile.organizationId, treatmentBudgetItem.organizationId),
+        isNotNull(orgProfile.secondCurrency),
+      ),
+    )
     .where(
       and(
         eq(treatmentBudgetItem.organizationId, orgId),

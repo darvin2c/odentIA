@@ -1291,12 +1291,14 @@ export async function noteServiceInterest(
 
 /**
  * Lo que da el valor de la oportunidad va en dos monedas: lo aceptado si ya
- * respondió con algo aceptado (solo esa parte) y, si no, la opción que vale.
+ * respondió con algo aceptado (solo esa parte) y, si no, la opción que vale. Sin
+ * otra moneda no hay cambio de hoy con que estimar y termina en el perfil.
  */
 async function budgetValueInTwoCurrencies(tx: Db, orgId: string, budgetId: string): Promise<boolean> {
   const [row] = await tx.execute<{ currencies: number }>(sql`
     select count(distinct i.currency)::int as currencies
     from treatment_budget b
+    join org_profile op on op.organization_id = b.organization_id and op.second_currency is not null
     join treatment_budget_item i on i.organization_id = b.organization_id and i.budget_id = b.id
       and i.option_id = ${budgetValueOptionSql({ id: sql`b.id`, organizationId: sql`b.organization_id` })}
     where b.organization_id = ${orgId} and b.id = ${budgetId}

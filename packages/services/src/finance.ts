@@ -748,7 +748,8 @@ export async function recordCashChange(
  * otra moneda, las dos filas del vuelto. Con la ventana abierta se anula el
  * movimiento; con la ventana cerrada (inmutable) la compensación sale en la ventana
  * actual de la misma sede y moneda, con los datos del movimiento. Sin cambio nuevo:
- * se revierte lo que pasó. Devuelve si compensó (para que el ticket lo refleje).
+ * se revierte lo que pasó. Devuelve si compensó (para que el ticket lo refleje). Quien
+ * llama ya bloqueó sus cajas (`lockCashOfPayments`), antes que sus filas, como todos.
  */
 export async function reverseCashIncome(
   tx: Db,
@@ -771,13 +772,6 @@ export async function reverseCashIncome(
     )
     .orderBy(asc(cashMovement.createdAt), asc(cashMovement.id))
   if (!movements.length) return false
-  // Las cajas antes que sus filas, como todos: las compensaciones piden las mismas cajas.
-  const seen: Array<{ branchId: string; unit: string }> = []
-  for (const shiftId of new Set(movements.map((m) => m.shiftId))) {
-    const shift = await requireShift(tx, orgId, shiftId)
-    seen.push({ branchId: shift.branchId, unit: shift.currency })
-  }
-  await lockCashWindows(tx, orgId, seen)
   let compensated = false
   for (const movement of movements) {
     // Bloqueada: un cierre simultáneo espera o ya se ve cerrado, nunca a medias.
@@ -3499,16 +3493,12 @@ export async function getCashState(tx: Db, orgId: string, query: CashStateQuery)
       lastClosure,
     }
   const detail = await getShiftDetail(tx, orgId, open.id)
+  const paymentsById = await paymentsOfMovements(tx, orgId, detail.movements)
   // Un ticket multimedio es un solo cobro: se deduplica por ticket (o pago si es histórico).
   const cobros = detail.movements.filter((m) => m.direction === "ingreso" && m.kind === "cobro")
-  const ticketByPayment = await ticketIdsByPayment(
-    tx,
-    orgId,
-    cobros.map((m) => m.patientPaymentId).filter((id): id is string => id !== null),
-  )
   const seen = new Set<string>()
   for (const m of cobros) {
-    const ticketId = m.patientPaymentId ? ticketByPayment[m.patientPaymentId] : null
+    const ticketId = m.patientPaymentId ? paymentsById.get(m.patientPaymentId)?.ticketId : null
     seen.add(ticketId ? `ticket:${ticketId}` : m.patientPaymentId ? `pago:${m.patientPaymentId}` : `mov:${m.id}`)
   }
   return {
@@ -3521,7 +3511,7 @@ export async function getCashState(tx: Db, orgId: string, query: CashStateQuery)
     breakdown: cashBreakdown(detail.movements),
     byMethod: methodTotals(detail.movements),
     tickets: seen.size,
-    ratesUsed: await ratesUsedIn(tx, orgId, detail.movements),
+    ratesUsed: await ratesUsedIn(tx, orgId, detail.movements, paymentsById),
     lastClosure,
   }
 }
@@ -3534,21 +3524,38 @@ export interface CashRateUsed {
   byName: string | null
 }
 
-/** Los cambios usados en una ventana, para revisarlos al cerrar. Vacío sin otra moneda. */
-async function ratesUsedIn(tx: Db, orgId: string, movements: CashMove[]): Promise<CashRateUsed[]> {
+/**
+ * Los pagos de unos movimientos: su ticket (nulo = histórico) y el cambio con que
+ * entraron. Una sola consulta para contar los cobros y revisar los cambios.
+ */
+async function paymentsOfMovements(tx: Db, orgId: string, movements: CashMove[]) {
   const ids = [
     ...new Set(movements.map((m) => m.patientPaymentId).filter((id): id is string => id !== null)),
   ]
-  if (!ids.length) return []
-  const payments = await tx
+  if (!ids.length) return new Map<string, { ticketId: string | null; rate: string | null; createdBy: string | null }>()
+  const rows = await tx
     .select({
       id: patientPayment.id,
+      ticketId: patientPayment.ticketId,
       rate: patientPayment.exchangeRate,
       createdBy: patientPayment.createdBy,
     })
     .from(patientPayment)
     .where(and(eq(patientPayment.organizationId, orgId), inArray(patientPayment.id, ids)))
-  const crossed = new Map(payments.flatMap((p) => (p.rate ? [[p.id, p] as const] : [])))
+  return new Map(rows.map((row) => [row.id, row]))
+}
+
+/**
+ * Los cambios usados en una ventana, para revisarlos al cerrar. Sale de sus pagos, no
+ * de la clínica: quien quitó su otra moneda con la caja abierta aún los revisa al cerrarla.
+ */
+async function ratesUsedIn(
+  tx: Db,
+  orgId: string,
+  movements: CashMove[],
+  payments: Awaited<ReturnType<typeof paymentsOfMovements>>,
+): Promise<CashRateUsed[]> {
+  const crossed = new Map([...payments].filter(([, payment]) => payment.rate))
   if (!crossed.size) return []
   const names = await userNames(
     tx,
@@ -3570,27 +3577,6 @@ async function ratesUsedIn(tx: Db, orgId: string, movements: CashMove[]): Promis
     used.set(key, row)
   }
   return [...used.values()]
-}
-
-/** Ticket de cada pago (nulo = histórico sin ticket). Una sola consulta. */
-async function ticketIdsByPayment(
-  tx: Db,
-  orgId: string,
-  paymentIds: string[],
-): Promise<Record<string, string | null>> {
-  const map: Record<string, string | null> = {}
-  if (paymentIds.length === 0) return map
-  const rows = await tx
-    .select({ id: patientPayment.id, ticketId: patientPayment.ticketId })
-    .from(patientPayment)
-    .where(
-      and(
-        eq(patientPayment.organizationId, orgId),
-        sql`${patientPayment.id} IN (${sql.join(paymentIds.map((id) => sql`${id}`), sql`, `)})`,
-      ),
-    )
-  for (const row of rows) map[row.id] = row.ticketId
-  return map
 }
 
 // --- Cierres: historial unido (tabla nueva + turnos anteriores) -------------------------------
