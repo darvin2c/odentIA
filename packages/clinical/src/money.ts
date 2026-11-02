@@ -389,6 +389,94 @@ export function frozenValueCents(input: {
   return convertCents({ amountCents, from: currency, to: businessCurrency, businessCurrency, factor })
 }
 
+/** Con cuántos decimales se dice un cambio que no se escribió: el valor congelado no depende de él. */
+const IMPLIED_RATE_DECIMALS = 6
+
+/**
+ * El cambio que resulta de lo pagado en cada moneda: USD 1,500 pagados con S/ 5,640
+ * son S/ 3.76 por USD 1. Se dice como todo cambio (moneda del negocio por 1 de la
+ * otra), y es solo para mostrarlo: lo que vale es lo pagado, exacto.
+ */
+export function impliedExchangeRate(input: {
+  amountCents: number
+  currency: string
+  tenderCents: number
+  tenderCurrency: string
+  businessCurrency: string
+}): string {
+  const { amountCents, currency, tenderCents, tenderCurrency, businessCurrency } = input
+  if (currency !== businessCurrency && tenderCurrency !== businessCurrency) {
+    throw new Error("Una de las dos monedas debe ser la del negocio")
+  }
+  const inBusiness = tenderCurrency === businessCurrency ? tenderCents : amountCents
+  const inOther = tenderCurrency === businessCurrency ? amountCents : tenderCents
+  const other = tenderCurrency === businessCurrency ? currency : tenderCurrency
+  const businessDigits = BigInt(currencyFractionDigits(businessCurrency))
+  const otherDigits = BigInt(currencyFractionDigits(other))
+  const scale = 10n ** BigInt(IMPLIED_RATE_DECIMALS)
+  const scaled = roundHalfUp(
+    asCents(inBusiness) * 10n ** otherDigits * scale,
+    asCents(inOther) * 10n ** businessDigits,
+  )
+  const text = scaled.toString().padStart(IMPLIED_RATE_DECIMALS + 1, "0")
+  const point = text.length - IMPLIED_RATE_DECIMALS
+  return normalizeExchangeRate(`${text.slice(0, point)}.${text.slice(point)}`)
+}
+
+/** Lo que congela un gasto en dos monedas. */
+export interface ExpenseExchange {
+  /** Lo que salió, solo si salió en otra moneda que la que cancela. */
+  tender: { cents: number; currency: string } | null
+  /** El cambio usado, en palabras. */
+  exchangeRate: string
+  /** Cuánto vale en moneda del negocio. */
+  businessCents: number
+}
+
+/**
+ * Cuánto vale un gasto, la misma regla en el servidor y en lo que muestra la
+ * pantalla antes de guardar. Si salió en otra moneda (el cruce al pagar una
+ * compra) el cambio es el que resulta y lo que está en moneda del negocio es exacto;
+ * si cancela y sale en la otra moneda, el importe por el cambio que se dijo. En
+ * moneda del negocio de punta a punta no hay nada que congelar (`null`).
+ */
+export function expenseExchange(input: {
+  amountCents: number
+  currency: string
+  businessCurrency: string
+  tender?: { cents: number; currency: string } | null
+  rate?: string | null
+}): ExpenseExchange | null {
+  const { amountCents, currency, businessCurrency, tender, rate } = input
+  if (tender) {
+    return {
+      tender,
+      exchangeRate: impliedExchangeRate({
+        amountCents,
+        currency,
+        tenderCents: tender.cents,
+        tenderCurrency: tender.currency,
+        businessCurrency,
+      }),
+      businessCents: currency === businessCurrency ? amountCents : tender.cents,
+    }
+  }
+  if (currency === businessCurrency) return null
+  if (!rate) throw new Error("Escribe el cambio")
+  const exchangeRate = normalizeExchangeRate(rate)
+  return {
+    tender: null,
+    exchangeRate,
+    businessCents: convertCents({
+      amountCents,
+      from: currency,
+      to: businessCurrency,
+      businessCurrency,
+      factor: exchangeFactor(exchangeRate, businessCurrency, currency),
+    }),
+  }
+}
+
 /**
  * Espejo de la función SQL `money_value`: cuánto vale una parte de un importe en
  * moneda del negocio. Con el valor congelado reparte en proporción; sin él, la

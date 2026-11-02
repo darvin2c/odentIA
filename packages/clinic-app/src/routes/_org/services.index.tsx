@@ -486,7 +486,7 @@ function TarifarioPage() {
                   <span className="tabular-nums">
                     {materials.count}
                     {materials.cost && profileLocale !== undefined
-                      ? ` · ${formatMoney(materials.cost.cents, materials.cost.currency, profileLocale)}`
+                      ? ` · ${(materials.cost.parts ?? [materials.cost]).map((part) => formatMoney(part.cents, part.currency, profileLocale)).join(" + ")}`
                       : ""}
                   </span>
                 )

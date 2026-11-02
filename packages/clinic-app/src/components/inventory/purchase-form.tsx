@@ -6,6 +6,8 @@
  * el total y las notas. «Ya la tengo» pide lote y vencimiento por fila y
  * «La pagué ahora» abre «Registrar pago» al guardar. Cada error va en su
  * campo, también el de una fila que rechaza el servidor (`lines[i].quantity`).
+ * Con otra moneda en la clínica se elige en cuál es la compra: un precio nunca pasa
+ * de una a otra con el mismo número, ni el último ni el que ya se escribió.
  */
 import { formatMoneyInput, parseMoney, unitFor } from "@odentia/clinical"
 import { Button, FieldError, FieldGroup, Input, toast } from "@odentia/ui"
@@ -45,11 +47,14 @@ import {
   type PurchaseOrderView,
   parseWhole,
   stockText,
+  supplierBalanceWords,
   supplierDocText,
   supplierShortName,
   unitsText,
   updateOrder,
 } from "../../lib/inventory"
+import { currencyChoices } from "../../lib/expense-exchange"
+import { useOrgSecondCurrency } from "../../lib/org"
 import { isAmbiguousMutationError } from "../../lib/query-error"
 import { ChoiceButtons } from "../choice-buttons"
 import { ChoiceSelect } from "../ui/choice-select"
@@ -75,6 +80,8 @@ interface PurchaseValues {
   mode: Mode
   supplierId: string
   warehouseId: string
+  /** En qué moneda es la compra. */
+  currency: string
   lines: LineDraft[]
   notes: string
   paidNow: boolean
@@ -89,12 +96,17 @@ const MODE_OPTIONS = [
 const MAX_QUANTITY = 1_000_000_000
 const MAX_CENTS = 2_147_483_647
 
-/** El último precio por la unidad de compra de hoy (la línea vieja pudo traer otro factor). */
-function lastPriceFor(detail: ProductDetail | undefined): number | null {
+/** El último precio por la unidad de compra de hoy (la línea vieja pudo traer otro factor), en su moneda. */
+function lastPriceOf(detail: ProductDetail | undefined): number | null {
   const last = detail?.lastPurchase
   if (!detail || !last || last.unitCostCents === undefined) return null
   if (last.unitFactor === detail.purchaseFactor) return last.unitCostCents
   return Math.round((last.unitCostCents / last.unitFactor) * detail.purchaseFactor)
+}
+
+/** El último precio solo llega puesto en un campo de su misma moneda. */
+function lastPriceIn(detail: ProductDetail | undefined, currency: string | null): number | null {
+  return detail?.lastPurchase?.currency === currency ? lastPriceOf(detail) : null
 }
 
 /** El precio escrito en la unidad menor de la moneda, o el motivo por el que no se entiende. */
@@ -135,14 +147,22 @@ export function PurchaseFormDrawer({
   onSaved: (order: PurchaseOrderView, pay: boolean) => void
 }) {
   const scope = useInventory()
-  const { branchId, branchName, currency, locale, can, open } = scope
+  const { branchId, branchName, currency: orgCurrency, locale, can, open } = scope
+  const second = useOrgSecondCurrency()
   const queryClient = useQueryClient()
   const editing = Boolean(order)
-  const money = (cents: number) => (currency ? moneyText(cents, currency, locale) : formatWhole(cents))
-  const moneyInput = (cents: number) => (currency ? formatMoneyInput(cents, currency, locale) : "")
+  // Las monedas que se pueden elegir; lo que ya está en otra se queda como está.
+  const currencies = second && orgCurrency ? [orgCurrency, second.currency] : []
+  const presetCurrency =
+    preset?.currency && currencies.includes(preset.currency) ? preset.currency : null
 
   // Se arma una vez al abrir: lo que llega después no pisa lo escrito.
   const [initial] = React.useState<PurchaseValues>(() => {
+    const unit = order?.currency ?? presetCurrency ?? orgCurrency ?? ""
+    const moneyInput = (cents: number) => (unit ? formatMoneyInput(cents, unit, locale) : "")
+    // Un precio de otra moneda no llega puesto: se pierde antes que cambiar de significado.
+    const presetPrice = (cents: number | undefined) =>
+      !preset?.currency || preset.currency === unit ? cents : undefined
     const lines: LineDraft[] = order
       ? order.lines.map((line) => ({
           productId: line.productId,
@@ -157,8 +177,11 @@ export function PurchaseFormDrawer({
       : (preset?.lines ?? []).map((line) => ({
           productId: line.productId,
           quantity: line.quantity > 0 ? formatWhole(line.quantity, locale) : "",
-          price: line.unitCostCents !== undefined ? moneyInput(line.unitCostCents) : "",
-          priceTouched: line.unitCostCents !== undefined,
+          price:
+            presetPrice(line.unitCostCents) !== undefined
+              ? moneyInput(line.unitCostCents ?? 0)
+              : "",
+          priceTouched: presetPrice(line.unitCostCents) !== undefined,
           lotOpen: false,
           lotCode: "",
           expiresAt: "",
@@ -167,6 +190,7 @@ export function PurchaseFormDrawer({
       mode: "pedir",
       supplierId: order?.supplierId ?? preset?.supplierId ?? "",
       warehouseId: order?.warehouseId ?? "",
+      currency: unit,
       lines,
       notes: order?.notes ?? "",
       paidNow: false,
@@ -187,6 +211,7 @@ export function PurchaseFormDrawer({
       z.custom<PurchaseValues>().superRefine((value, ctx) => {
         if (!value.supplierId) ctx.addIssue({ code: "custom", path: ["supplierId"], message: "Elige el proveedor." })
         if (value.lines.length === 0) ctx.addIssue({ code: "custom", path: ["lines"], message: "Agrega al menos un producto." })
+        const currency = value.currency || orgCurrency
         if (!currency) ctx.addIssue({ code: "custom", path: ["lines"], message: "Configura la moneda de la clínica antes de registrar compras." })
         if (value.notes.trim().length > 2000) ctx.addIssue({ code: "custom", path: ["notes"], message: "Las notas admiten hasta 2000 caracteres." })
         value.lines.forEach((line, index) => {
@@ -209,17 +234,41 @@ export function PurchaseFormDrawer({
             ctx.addIssue({ code: "custom", path: ["lines", index, "lotCode"], message: "El lote admite hasta 120 caracteres." })
         })
       }),
-    [byId, currency, locale],
+    [byId, locale, orgCurrency],
   )
 
   const mutation = useMutation({
-    mutationFn: async (input: { intent: Intent; supplierId: string; warehouseId: string | null; notes: string | null; lines: PurchaseLineBody[] }) => {
+    mutationFn: async (input: {
+      intent: Intent
+      supplierId: string
+      warehouseId: string | null
+      currency: string
+      notes: string | null
+      lines: PurchaseLineBody[]
+    }) => {
       if (order) {
-        await updateOrder(order.id, { supplierId: input.supplierId, branchId, warehouseId: input.warehouseId, notes: input.notes, lines: input.lines })
+        await updateOrder(order.id, {
+          supplierId: input.supplierId,
+          branchId,
+          warehouseId: input.warehouseId,
+          ...(input.currency && input.currency !== order.currency
+            ? { currency: input.currency }
+            : {}),
+          notes: input.notes,
+          lines: input.lines,
+        })
         if (input.intent === "pedir") await confirmOrder(order.id)
         return fetchOrder(order.id)
       }
-      return createOrder({ supplierId: input.supplierId, branchId, warehouseId: input.warehouseId, mode: input.intent, notes: input.notes, lines: input.lines })
+      return createOrder({
+        supplierId: input.supplierId,
+        branchId,
+        warehouseId: input.warehouseId,
+        mode: input.intent,
+        ...(second && input.currency ? { currency: input.currency } : {}),
+        notes: input.notes,
+        lines: input.lines,
+      })
     },
   })
   // Crear sin respuesta del servidor puede haber guardado: no se repite a ciegas.
@@ -231,9 +280,10 @@ export function PurchaseFormDrawer({
     onSubmit: async ({ value }) => {
       const sent = intent.current === "borrador" ? "borrador" : value.mode === "ya_la_tengo" && !editing ? "ya_la_tengo" : "pedir"
       // En el mismo orden que las filas: `lines[i]` del servidor es la fila i.
+      const unit = value.currency || orgCurrency
       const lines: PurchaseLineBody[] = value.lines.map((line) => {
         const quantity = parseWhole(line.quantity) as number
-        const price = currency && line.price.trim() ? readPrice(line.price, currency, locale) : null
+        const price = unit && line.price.trim() ? readPrice(line.price, unit, locale) : null
         const lot = sent === "ya_la_tengo" && (line.lotCode.trim() || line.expiresAt) ? { lotCode: line.lotCode.trim() || null, expiresAt: line.expiresAt || null } : null
         return {
           productId: line.productId,
@@ -246,6 +296,7 @@ export function PurchaseFormDrawer({
         intent: sent,
         supplierId: value.supplierId,
         warehouseId: sedeWarehouses.length > 1 && value.warehouseId ? value.warehouseId : null,
+        currency: unit ?? "",
         notes: value.notes.trim() || null,
         lines,
       })
@@ -279,6 +330,11 @@ export function PurchaseFormDrawer({
   }, [])
 
   const values = useStore(form.store, (state) => state.values)
+  // Mientras carga la clínica aún no se sabe su moneda: lo escrito se lee con ella al llegar.
+  const currency = values.currency || orgCurrency
+  const money = (cents: number) =>
+    currency ? moneyText(cents, currency, locale) : formatWhole(cents)
+  const moneyInput = (cents: number) => (currency ? formatMoneyInput(cents, currency, locale) : "")
   const details = useQueries({
     queries: values.lines.map((line) => ({
       queryKey: inventoryKeys.product(line.productId, branchId),
@@ -290,7 +346,7 @@ export function PurchaseFormDrawer({
     details[values.lines.findIndex((line) => line.productId === productId)]?.data
 
   // El último precio llega puesto, salvo que ya se haya escrito otro. No cuenta como cambio de quien compra.
-  const lastPrices = values.lines.map((line) => lastPriceFor(detailOf(line.productId)))
+  const lastPrices = values.lines.map((line) => lastPriceIn(detailOf(line.productId), currency))
   const lastPricesKey = lastPrices.join("|")
   // biome-ignore lint/correctness/useExhaustiveDependencies: basta con la firma de los precios que llegaron.
   React.useEffect(() => {
@@ -346,11 +402,21 @@ export function PurchaseFormDrawer({
   const submitLabel = already ? "Guardar compra" : "Confirmar pedido"
   const supplierHelp = (() => {
     if (!supplier?.currency) return null
-    if ((supplier.dueCents ?? 0) > 0) return `Le debes ${moneyText(supplier.dueCents ?? 0, supplier.currency)}.`
-    if ((supplier.creditCents ?? 0) > 0) return `Tienes ${moneyText(supplier.creditCents ?? 0, supplier.currency)} a favor.`
-    return null
+    const due = supplierBalanceWords(supplier, "dueCents")
+    if (due) return `Le debes ${due}.`
+    const credit = supplierBalanceWords(supplier, "creditCents")
+    return credit ? `Tienes ${credit} a favor.` : null
   })()
   const chooseSupplier = () => open.supplier(undefined, (saved) => form.setFieldValue("supplierId", saved.id))
+  // Lo escrito estaba en la otra moneda: se borra, y el último precio llega si es de esta.
+  const chooseCurrency = (next: string) => {
+    if (next === currency) return
+    form.setFieldValue("currency", next)
+    form.state.values.lines.forEach((_, index) => {
+      form.setFieldValue(`lines[${index}].price`, "", { dontUpdateMeta: true })
+      form.setFieldValue(`lines[${index}].priceTouched`, false, { dontUpdateMeta: true })
+    })
+  }
 
   return (
     <FormDrawer
@@ -445,6 +511,35 @@ export function PurchaseFormDrawer({
             </field.Control>
           )}
         </form.AppField>
+
+        {currency && currencies.includes(currency) ? (
+          <form.AppField name="currency">
+            {(field) => (
+              <field.Group
+                legend="Moneda"
+                className="gap-3"
+                description={
+                  values.lines.length > 0
+                    ? "Si la cambias, los precios se escriben de nuevo: no se convierten."
+                    : undefined
+                }
+              >
+                {(control) => (
+                  <ChoiceButtons
+                    id={control.id}
+                    tone="primary"
+                    value={currency}
+                    options={currencyChoices(currencies, locale)}
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    onChange={chooseCurrency}
+                  />
+                )}
+              </field.Group>
+            )}
+          </form.AppField>
+        ) : null}
 
         {sedeWarehouses.length > 1 ? (
           <form.AppField name="warehouseId">
@@ -589,8 +684,13 @@ const LineRow = withForm({
     if (missing > 0) hints.push(`${missing === 1 ? "Hace" : "Hacen"} falta ${unitsText(missing, unit)} para el mínimo`)
     const last = detail?.lastPurchase
     if (last?.unitCostCents !== undefined && last.currency) {
-      const other = last.supplierId !== supplierId && supplierId ? ` (${supplierShortName(last.supplierName)})` : ""
-      hints.push(`Último precio: ${moneyText(lastPriceFor(detail) ?? last.unitCostCents, last.currency)} el ${dayText(clinicDayOf(last.at))}${other}`)
+      const other =
+        last.supplierId !== supplierId && supplierId
+          ? ` (${supplierShortName(last.supplierName)})`
+          : ""
+      hints.push(
+        `Último precio: ${moneyText(lastPriceOf(detail) ?? last.unitCostCents, last.currency)} el ${dayText(clinicDayOf(last.at))}${other}`,
+      )
     }
     if (detail && detail.usedLast30Days > 0) {
       const perMonth = detail.usedLast30Days / (factor > 1 ? factor : 1)

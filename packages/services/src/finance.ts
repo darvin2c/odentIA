@@ -11,6 +11,8 @@
  */
 import {
   commissionOfValue,
+  type ExpenseExchange,
+  expenseExchange,
   formatMoney,
   type MoneyFraction,
   moneyValue,
@@ -163,12 +165,22 @@ export async function requireBranch(tx: Db, orgId: string, branchId: string) {
   return row
 }
 /** Moneda de la clínica con bloqueo compartido: orden perfil→caja, sin deadlocks con el cambio de región. */
-async function lockOrgCurrency(tx: Db, orgId: string): Promise<string> {
+/** Las monedas de la clínica, con bloqueo compartido; `null` sin perfil. */
+async function lockOrgMoney(tx: Db, orgId: string) {
   const [profile] = await tx
-    .select({ currency: orgProfile.currency })
+    .select({
+      currency: orgProfile.currency,
+      secondCurrency: orgProfile.secondCurrency,
+      exchangeRate: orgProfile.exchangeRate,
+    })
     .from(orgProfile)
     .where(eq(orgProfile.organizationId, orgId))
     .for("share")
+  return profile ?? null
+}
+
+async function lockOrgCurrency(tx: Db, orgId: string): Promise<string> {
+  const profile = await lockOrgMoney(tx, orgId)
   // Sin respaldo de un país: la moneda sale del perfil o no hay operación.
   if (!profile) throw orgProfileRequired()
   return profile.currency
@@ -1077,6 +1089,11 @@ export interface CreateExpenseInput {
   concept: string
   amountCents: number
   currency?: string
+  /**
+   * El cambio de este gasto, si cancela en la otra moneda de la clínica; vale solo
+   * para él. Sin él, el «Cambio de hoy»: nunca queda sin su valor congelado.
+   */
+  exchangeRate?: string
   spentAt?: string | null
   receiptKind?: string
   receiptNumber?: string | null
@@ -1090,21 +1107,92 @@ export interface CreateExpenseInput {
   salesTax?: boolean
 }
 
+/** Lo que salió en otra moneda que la que cancela un gasto. */
+interface ExpenseTender {
+  cents: number
+  currency: string
+}
+
+/**
+ * Lo que un gasto congela de otra moneda; `null` si no hay nada que congelar. En
+ * una clínica de una moneda no hay cambio ni cruce y un gasto se guarda como
+ * siempre. En una de dos, se gasta en cualquiera de las dos; lo único en otra
+ * moneda es el pago de una compra que ya estaba en ella, sin valor, como antes.
+ */
+function frozenExpense(
+  profile: Awaited<ReturnType<typeof lockOrgMoney>>,
+  input: {
+    amountCents: number
+    unit: string
+    rate?: string
+    tender?: ExpenseTender
+    isPurchase: boolean
+  },
+): ExpenseExchange | null {
+  const { amountCents, unit, rate, tender, isPurchase } = input
+  const second = profile?.secondCurrency ?? null
+  if (!profile || !second) {
+    if (tender) throw invalidField("tenderCurrency", "La clínica trabaja en una sola moneda")
+    if (rate !== undefined)
+      throw invalidField("exchangeRate", "La clínica trabaja en una sola moneda")
+    return null
+  }
+  const business = profile.currency
+  const onlyIn = `La clínica trabaja solo en ${business} y ${second}`
+  if (unit !== business && unit !== second) {
+    if (!isPurchase) throw invalidField("currency", onlyIn)
+    if (tender) throw invalidField("tenderCurrency", onlyIn)
+    if (rate !== undefined) throw invalidField("exchangeRate", onlyIn)
+    return null
+  }
+  if (tender) {
+    if (rate !== undefined)
+      throw invalidField(
+        "exchangeRate",
+        "Con lo que salió en otra moneda, el cambio se calcula solo",
+      )
+    if (tender.currency !== business && tender.currency !== second)
+      throw invalidField("tenderCurrency", onlyIn)
+    if (tender.currency === unit)
+      throw invalidField("tenderCurrency", "Lo que salió va en otra moneda que la de la compra")
+  }
+  try {
+    return expenseExchange({
+      amountCents,
+      currency: unit,
+      businessCurrency: business,
+      tender: tender ?? null,
+      rate: rate ?? profile.exchangeRate,
+    })
+  } catch (error) {
+    throw invalidField(
+      tender ? "tenderCents" : "exchangeRate",
+      error instanceof Error ? error.message : "Revisa el cambio",
+    )
+  }
+}
+
 /**
  * Registra un gasto con su tipo. Con `fromCash` el egreso sale del efectivo
  * de la ventana abierta (movimiento + gasto en la misma transacción); sin
- * caja es gasto directo. Sin proveedor ni turno a mano.
+ * caja es gasto directo. Sin proveedor ni turno a mano. La caja que se usa es la
+ * de la moneda en que salió el dinero.
  */
 export async function createExpense(
   tx: Db,
   orgId: string,
   actorUserId: string,
   input: CreateExpenseInput,
-  /** Solo `payPurchaseOrder`: el gasto es el pago de esa compra. */
-  link: { purchaseOrderId?: string } = {},
+  /**
+   * Solo `payPurchaseOrder`: el gasto es el pago de esa compra y, si se pagó en
+   * otra moneda, lo que salió. Un gasto suelto no cruza monedas.
+   */
+  link: { purchaseOrderId?: string; tender?: ExpenseTender } = {},
 ) {
   const branchRow = await requireBranch(tx, orgId, input.branchId)
-  const unit = input.currency ? currency(input.currency) : await lockOrgCurrency(tx, orgId)
+  const profile = await lockOrgMoney(tx, orgId)
+  if (!input.currency && !profile) throw orgProfileRequired()
+  const unit = input.currency ? currency(input.currency) : (profile?.currency ?? "")
   const category = input.category?.trim() || "Otros"
   if (!(EXPENSE_CATEGORIES as readonly string[]).includes(category))
     throw invalidField("category", "Tipo de gasto inválido")
@@ -1113,10 +1201,28 @@ export async function createExpense(
   const salesTax = input.salesTax === true
   if (salesTax && category !== SALES_TAX_EXPENSE_CATEGORY)
     throw invalidField("salesTax", "El pago del impuesto de lo cobrado es un gasto de Impuestos")
+  // El impuesto de lo cobrado se paga en moneda del negocio: es la de lo que deja.
+  if (salesTax && profile?.secondCurrency && unit !== profile.currency)
+    throw invalidField("salesTax", "El impuesto de lo cobrado se paga en la moneda del negocio")
   // Comprobante libre según país (el catálogo fiscal llega con su módulo).
   const receiptKind = input.receiptKind?.trim() ? input.receiptKind.trim().slice(0, 60) : "ninguno"
+  const amountCents = assertCents(input.amountCents, "El gasto", "amountCents")
+  const tender = link.tender
+    ? {
+        cents: assertCents(link.tender.cents, "Lo que salió", "tenderCents"),
+        currency: currency(link.tender.currency),
+      }
+    : undefined
+  const frozen = frozenExpense(profile, {
+    amountCents,
+    unit,
+    rate: input.exchangeRate,
+    tender,
+    isPurchase: Boolean(link.purchaseOrderId),
+  })
+  const out = frozen?.tender ?? { cents: amountCents, currency: unit }
   const shift = input.fromCash
-    ? await ensureOpenShift(tx, orgId, actorUserId, branchRow.id, unit)
+    ? await ensureOpenShift(tx, orgId, actorUserId, branchRow.id, out.currency)
     : null
   const [row] = await tx
     .insert(expense)
@@ -1126,8 +1232,16 @@ export async function createExpense(
       shiftId: shift?.id ?? null,
       concept: concept(input.concept, "concept"),
       category,
-      amountCents: assertCents(input.amountCents, "El gasto", "amountCents"),
+      amountCents,
       currency: unit,
+      ...(frozen
+        ? {
+            tenderCents: frozen.tender?.cents ?? null,
+            tenderCurrency: frozen.tender?.currency ?? null,
+            exchangeRate: frozen.exchangeRate,
+            businessCents: frozen.businessCents,
+          }
+        : {}),
       spentAt: input.spentAt ? instant(input.spentAt, "spentAt") : new Date(),
       receiptKind,
       receiptNumber: input.receiptNumber?.trim() || null,
@@ -1140,11 +1254,11 @@ export async function createExpense(
   if (shift) {
     await recordCashEgreso(tx, orgId, actorUserId, shift.id, {
       kind: "gasto",
-      amountCents: row.amountCents,
-      currency: row.currency,
+      amountCents: out.cents,
+      currency: out.currency,
       concept: row.concept,
       expenseId: row.id,
-      amountField: "amountCents",
+      amountField: frozen?.tender ? "tenderCents" : "amountCents",
     })
   }
   await audit(tx, orgId, actorUserId, "expense", row.id, "finance.expense_created")
@@ -1459,10 +1573,18 @@ export async function assertSupplierCreditCovered(tx: Db, orgId: string, orderId
 
 export interface PayPurchaseOrderInput {
   orderId: string
-  /** Lo que se paga con dinero (gasto de Materiales). Cero si todo va con lo que se tenía a favor. */
+  /** Lo que se paga con dinero (gasto de Materiales), en la moneda de la compra. Cero si todo va con lo que se tenía a favor. */
   amountCents: number
   /** Lo que se usa de lo que se tiene a favor con el proveedor. */
   creditCents?: number
+  /**
+   * El cruce: lo que salió, si se pagó en la otra moneda. USD 1,500 pagados con
+   * S/ 5,640 dejan la compra al día; el cambio se calcula solo.
+   */
+  tenderCents?: number
+  tenderCurrency?: string
+  /** El cambio, si se paga en una moneda que no es la del negocio. */
+  exchangeRate?: string
   spentAt?: string | null
   fromCash?: boolean
   receiptKind?: string
@@ -1500,6 +1622,12 @@ export async function payPurchaseOrder(tx: Db, orgId: string, actorUserId: strin
   if (!Number.isSafeInteger(creditCents) || creditCents < 0 || creditCents > 2147483647)
     throw invalidField("creditCents", "Lo que se usa a favor debe ser un importe entero")
   if (amountCents + creditCents <= 0) throw invalidField("amountCents", "El pago debe ser mayor que cero")
+  if (input.tenderCents !== undefined && input.tenderCurrency === undefined)
+    throw invalidField("tenderCurrency", "Di en qué moneda salió")
+  if (input.tenderCurrency !== undefined && input.tenderCents === undefined)
+    throw invalidField("tenderCents", "Escribe lo que salió")
+  if (input.tenderCents !== undefined && amountCents === 0)
+    throw invalidField("amountCents", "Escribe lo que cancelas")
   const [before] = await purchaseBalances(tx, orgId, { orderIds: [order.id] })
   if (!before) throw purchaseOrderNotFound()
   if (input.expectedPaidCents !== undefined && input.expectedPaidCents !== before.paidCents)
@@ -1541,13 +1669,19 @@ export async function payPurchaseOrder(tx: Db, orgId: string, actorUserId: strin
         concept: `${kind} ${label} · ${before.supplierName}${part}`,
         amountCents,
         currency: order.currency,
+        ...(input.exchangeRate !== undefined ? { exchangeRate: input.exchangeRate } : {}),
         spentAt: input.spentAt ?? null,
         receiptKind: input.receiptKind,
         receiptNumber: input.receiptNumber,
         notes: input.notes,
         fromCash: input.fromCash ?? false,
       },
-      { purchaseOrderId: order.id },
+      {
+        purchaseOrderId: order.id,
+        ...(input.tenderCents !== undefined && input.tenderCurrency !== undefined
+          ? { tender: { cents: input.tenderCents, currency: input.tenderCurrency } }
+          : {}),
+      },
     )
   }
   let used: typeof supplierCreditUse.$inferSelect | null = null

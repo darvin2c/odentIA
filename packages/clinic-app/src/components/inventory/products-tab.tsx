@@ -41,6 +41,7 @@ export function presetFor(productId: string, suggestion: ReorderItem | undefined
   const last = suggestion?.lastPurchase
   return {
     supplierId: last?.supplierActive ? last.supplierId : undefined,
+    currency: last?.currency,
     lines: [{ productId, quantity: suggestion?.quantity ?? 0, unitCostCents: last?.unitCostCents }],
     notice: suggestion?.inDraft ? `Este producto ya está en el borrador ${suggestion.inDraft.label}.` : undefined,
   }

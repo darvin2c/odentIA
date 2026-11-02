@@ -51,6 +51,7 @@ import {
   withArticle,
   clinicDayOf,
 } from "../../lib/inventory"
+import { expenseRateWords } from "../../lib/expense-exchange"
 import { QueryErrorState } from "../../lib/query-error"
 import { PurchasePaymentDrawer } from "./purchase-payment-drawer"
 import { VoidDrawer } from "../finance/void-drawer"
@@ -447,7 +448,7 @@ function OrderBody({ order }: { order: PurchaseOrderView }) {
 
 /** El pago de la compra, tal como se aprobó en Reportes (ADR 0061). */
 function PaymentBlock({ order }: { order: PurchaseOrderDetail }) {
-  const { can, locale, timeZone } = useInventory()
+  const { can, locale, timeZone, currency: business } = useInventory()
   const queryClient = useQueryClient()
   const [paying, setPaying] = React.useState(false)
   const [voidingCredit, setVoidingCredit] = React.useState<PurchasePayment | null>(null)
@@ -547,6 +548,23 @@ function PaymentBlock({ order }: { order: PurchaseOrderDetail }) {
                 <li key={item.id} className={cn("flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm", item.voidedAt && "text-muted-foreground line-through")}>
                   <span className="flex flex-col">
                     <strong className="tabular-nums">{money(item.amountCents)}</strong>
+                    {item.exchangeRate &&
+                    item.tenderCents != null &&
+                    item.tenderCurrency &&
+                    business ? (
+                      <span className="text-xs tabular-nums">
+                        Salió {formatMoney(item.tenderCents, item.tenderCurrency, locale)} ·{" "}
+                        {expenseRateWords(
+                          {
+                            exchangeRate: item.exchangeRate,
+                            currency: order.currency,
+                            tenderCurrency: item.tenderCurrency,
+                          },
+                          business,
+                          locale,
+                        )}
+                      </span>
+                    ) : null}
                     <span className="text-xs text-muted-foreground">
                       {[
                         new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", timeZone }).format(new Date(item.paidAt)).replace(/\./g, ""),

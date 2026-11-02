@@ -7,10 +7,12 @@ import {
   currencyWord,
   exchangeFactor,
   exchangeRateWords,
+  expenseExchange,
   formatExchangeRateInput,
   formatMoney,
   formatMoneyInput,
   frozenValueCents,
+  impliedExchangeRate,
   moneyValue,
   normalizeExchangeRate,
   parseExchangeRate,
@@ -212,6 +214,87 @@ describe("convertir y cuadrar", () => {
     expect(frozenValueCents({ amountCents: 30000, currency: "PEN", paidCents: 8000, paidCurrency: "USD", ...pen })).toBe(30000)
     // Lo pagado en moneda del negocio manda aunque el cambio diga otra cosa.
     expect(frozenValueCents({ amountCents: 100000, currency: "USD", paidCents: 374998, paidCurrency: "PEN", ...pen })).toBe(374998)
+  })
+})
+
+describe("lo que congela un gasto", () => {
+  const business = "PEN"
+
+  it("el cambio que resulta de lo pagado se dice como todo cambio, en cualquier sentido", () => {
+    const dollars = { amountCents: 150_000, currency: "USD", businessCurrency: business }
+    expect(impliedExchangeRate({ ...dollars, tenderCents: 564_000, tenderCurrency: "PEN" })).toBe(
+      "3.76",
+    )
+    expect(
+      impliedExchangeRate({
+        amountCents: 37_600,
+        currency: "PEN",
+        tenderCents: 10_000,
+        tenderCurrency: "USD",
+        businessCurrency: business,
+      }),
+    ).toBe("3.76")
+    // Lo que no da exacto se redondea: solo se muestra.
+    expect(impliedExchangeRate({ ...dollars, tenderCents: 564_100, tenderCurrency: "PEN" })).toBe(
+      "3.760667",
+    )
+    // Pesos sin decimales: 950 pesos por dólar, no 9.5.
+    expect(
+      impliedExchangeRate({
+        amountCents: 10_000,
+        currency: "USD",
+        tenderCents: 95_000,
+        tenderCurrency: "CLP",
+        businessCurrency: "CLP",
+      }),
+    ).toBe("950")
+    expect(() =>
+      impliedExchangeRate({
+        ...dollars,
+        tenderCents: 1,
+        tenderCurrency: "EUR",
+        businessCurrency: "CLP",
+      }),
+    ).toThrow()
+  })
+
+  it("cruzar vale lo que está en moneda del negocio; sin cruzar, el importe por el cambio; en la del negocio, nada", () => {
+    const lines = { businessCurrency: business }
+    expect(
+      expenseExchange({
+        ...lines,
+        amountCents: 150_000,
+        currency: "USD",
+        tender: { cents: 564_000, currency: "PEN" },
+      }),
+    ).toEqual({
+      tender: { cents: 564_000, currency: "PEN" },
+      exchangeRate: "3.76",
+      businessCents: 564_000,
+    })
+    expect(
+      expenseExchange({
+        ...lines,
+        amountCents: 37_600,
+        currency: "PEN",
+        tender: { cents: 10_000, currency: "USD" },
+      }),
+    ).toEqual({
+      tender: { cents: 10_000, currency: "USD" },
+      exchangeRate: "3.76",
+      businessCents: 37_600,
+    })
+    expect(
+      expenseExchange({ ...lines, amountCents: 50_000, currency: "USD", rate: "3.750" }),
+    ).toEqual({
+      tender: null,
+      exchangeRate: "3.75",
+      businessCents: 187_500,
+    })
+    expect(expenseExchange({ ...lines, amountCents: 50_000, currency: "PEN" })).toBeNull()
+    expect(() => expenseExchange({ ...lines, amountCents: 50_000, currency: "USD" })).toThrow(
+      "Escribe el cambio",
+    )
   })
 })
 

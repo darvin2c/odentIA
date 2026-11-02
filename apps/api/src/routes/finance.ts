@@ -322,6 +322,7 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
         concept: z.string().trim().min(1, "Escribe en qué se gastó.").max(500, "Escribe como mucho 500 caracteres."),
         amountCents: cents,
         currency: currency.optional(),
+        exchangeRate: z.string().max(40).optional(),
         spentAt: isoDateTime.nullish(),
         receiptKind: z.string().trim().min(1).max(60).optional(),
         receiptNumber: z.string().max(60).nullish(),
@@ -355,6 +356,10 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
       .object({
         amountCents: z.number().int().min(0).max(2147483647),
         creditCents: z.number().int().min(0).max(2147483647).optional(),
+        // El cruce: lo que salió en la otra moneda; el cambio se calcula solo.
+        tenderCents: z.number().int().min(1).max(2147483647).optional(),
+        tenderCurrency: currency.optional(),
+        exchangeRate: z.string().max(40).optional(),
         spentAt: isoDateTime.nullish(),
         fromCash: z.boolean().optional(),
         receiptKind: z.string().trim().min(1).max(60).optional(),

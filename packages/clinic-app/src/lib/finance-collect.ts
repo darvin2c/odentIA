@@ -105,6 +105,13 @@ export function dayInTimezone(timeZone: string, at: Date = new Date()): string {
   return `${get("year")}-${get("month")}-${get("day")}`
 }
 
+/** Muy distinto del «Cambio de hoy»: se avisa, porque queda guardado, y nunca se frena. */
+const RATE_WARN_SHARE = 0.05
+
+export function rateIsFar(rate: string, today: string): boolean {
+  return Math.abs(Number(rate) - Number(today)) / Number(today) > RATE_WARN_SHARE
+}
+
 /** «lo puso Rosa a las 9:12», o el día si no fue hoy. Vacío si no se sabe. */
 export function rateAuthorWords(
   second: { at: string | null; byName: string | null },

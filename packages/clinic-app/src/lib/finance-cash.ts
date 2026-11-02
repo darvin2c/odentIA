@@ -680,8 +680,15 @@ export interface ExpenseRow {
   branchId: string
   concept: string
   category: string
+  /** Lo que cancela. */
   amountCents: number
   currency: string
+  /** Lo que salió, si fue en otra moneda. */
+  tenderCents?: number | null
+  tenderCurrency?: string | null
+  /** El cambio usado y lo que vale en moneda del negocio, si no es todo en ella. */
+  exchangeRate?: string | null
+  businessCents?: number | null
   spentAt: string
   receiptKind: string
   receiptNumber: string | null
@@ -734,6 +741,9 @@ export function createExpenseApi(body: {
   branchId: string
   concept: string
   amountCents: number
+  /** Solo si no es en moneda del negocio, con su cambio. */
+  currency?: string
+  exchangeRate?: string
   category: ExpenseCategory
   fromCash: boolean
   /** El pago del impuesto de lo cobrado (solo con «Impuestos», ADR 0083). */
@@ -759,6 +769,10 @@ export function payPurchaseApi(
   body: {
     amountCents: number
     creditCents?: number
+    /** Lo que salió, si se pagó en la otra moneda; el cambio se calcula solo. */
+    tenderCents?: number
+    tenderCurrency?: string
+    exchangeRate?: string
     fromCash: boolean
     spentAt?: string
     receiptKind?: string

@@ -86,6 +86,7 @@ import {
 } from "./inventory-stock.js"
 import { findOrgCurrency, findOrgLocale, formatOrgMoney, orgClinicalProfile, requireOrgCurrency } from "./locale.js"
 import { type PurchaseBalance, purchaseBalances, supplierCredits } from "./purchase-balance.js"
+import { orgMoney } from "./report-value.js"
 import { createWorkspaceNotification } from "./workspace.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import type { WaitingInventory } from "./workspace-home.js"
@@ -402,6 +403,8 @@ export type SupplierListItem = typeof supplier.$inferSelect & {
   currency?: string | null
   dueCents?: number
   creditCents?: number
+  /** Lo mismo en otra moneda, cada una por su lado; no viene si no hay nada. */
+  otherBalances?: Array<{ currency: string; dueCents: number; creditCents: number }>
 }
 
 /**
@@ -435,20 +438,41 @@ export async function listSuppliers(
   if (!options.prices) return rows.map((row) => ({ ...row, orders: ordersOf.get(row.id) ?? 0 }))
   const unit = await findOrgCurrency(tx, orgId)
   const due = new Map<string, number>()
-  for (const balance of await purchaseBalances(tx, orgId, { dueOnly: true })) {
-    if (balance.currency !== unit) continue
-    due.set(balance.supplierId, (due.get(balance.supplierId) ?? 0) + balance.dueCents)
+  // Lo de otra moneda no se suma a lo de la clínica: cada moneda dice lo suyo.
+  const others = new Map<
+    string,
+    Map<string, { currency: string; dueCents: number; creditCents: number }>
+  >()
+  const otherOf = (supplierId: string, code: string) => {
+    const bySupplier =
+      others.get(supplierId) ??
+      new Map<string, { currency: string; dueCents: number; creditCents: number }>()
+    others.set(supplierId, bySupplier)
+    const entry = bySupplier.get(code) ?? { currency: code, dueCents: 0, creditCents: 0 }
+    bySupplier.set(code, entry)
+    return entry
   }
-  const credit = new Map(
-    (await supplierCredits(tx, orgId)).filter((row) => row.currency === unit).map((row) => [row.supplierId, Math.max(0, row.cents)]),
-  )
-  return rows.map((row) => ({
-    ...row,
-    orders: ordersOf.get(row.id) ?? 0,
-    currency: unit,
-    dueCents: due.get(row.id) ?? 0,
-    creditCents: credit.get(row.id) ?? 0,
-  }))
+  for (const balance of await purchaseBalances(tx, orgId, { dueOnly: true })) {
+    if (balance.currency === unit)
+      due.set(balance.supplierId, (due.get(balance.supplierId) ?? 0) + balance.dueCents)
+    else otherOf(balance.supplierId, balance.currency).dueCents += balance.dueCents
+  }
+  const credit = new Map<string, number>()
+  for (const row of await supplierCredits(tx, orgId)) {
+    if (row.currency === unit) credit.set(row.supplierId, Math.max(0, row.cents))
+    else if (row.cents > 0) otherOf(row.supplierId, row.currency).creditCents = row.cents
+  }
+  return rows.map((row) => {
+    const otherBalances = others.get(row.id)
+    return {
+      ...row,
+      orders: ordersOf.get(row.id) ?? 0,
+      currency: unit,
+      dueCents: due.get(row.id) ?? 0,
+      creditCents: credit.get(row.id) ?? 0,
+      ...(otherBalances ? { otherBalances: [...otherBalances.values()] } : {}),
+    }
+  })
 }
 
 /* ---------------- almacenes ---------------- */
@@ -2011,6 +2035,22 @@ export interface PurchaseOrderLineInput {
   lots?: ReceptionLotInput[]
 }
 
+/**
+ * La moneda de una compra. Sin decirla, la de la clínica. Con otra moneda, una de
+ * las dos: en una clínica de una sola no se le pregunta nada a quien la pide.
+ */
+async function orderCurrency(tx: Db, orgId: string, value: string | undefined): Promise<string> {
+  if (value === undefined) return currency(await requireOrgCurrency(tx, orgId))
+  const code = currency(value)
+  const money = await orgMoney(tx, orgId)
+  if (money.secondCurrency && code !== money.currency && code !== money.secondCurrency)
+    throw invalidField(
+      "currency",
+      `La clínica compra solo en ${money.currency} y ${money.secondCurrency}`,
+    )
+  return code
+}
+
 /** A dónde llega una compra: el almacén elegido o el principal de la sede. */
 async function destinationOf(tx: Db, orgId: string, input: { branchId?: string | null; warehouseId?: string | null }) {
   if (input.warehouseId) {
@@ -2103,7 +2143,7 @@ export async function createPurchaseOrder(
       supplierId: input.supplierId,
       warehouseId: dest.id,
       status: mode === "borrador" ? "borrador" : "confirmada",
-      currency: currency(input.currency ?? (await requireOrgCurrency(tx, orgId))),
+      currency: await orderCurrency(tx, orgId, input.currency),
       notes: textOptional(input.notes, "Las notas", 2000, "notes"),
       createdBy: actorUserId,
     })
@@ -2138,8 +2178,9 @@ export async function createPurchaseOrder(
 }
 
 /**
- * Cambia una compra en borrador: proveedor, sede, notas y sus productos (las
- * líneas se reemplazan; la base solo deja quitar líneas de un borrador).
+ * Cambia una compra en borrador: proveedor, sede, moneda, notas y sus productos
+ * (las líneas se reemplazan; la base solo deja quitar líneas de un borrador). Pedida
+ * ya no cambia nada: lo que se pagó de ella cancela en su moneda.
  */
 export async function updatePurchaseOrder(
   tx: Db,
@@ -2150,6 +2191,7 @@ export async function updatePurchaseOrder(
     supplierId?: string
     branchId?: string | null
     warehouseId?: string | null
+    currency?: string
     notes?: string | null
     lines?: PurchaseOrderLineInput[]
   },
@@ -2165,6 +2207,15 @@ export async function updatePurchaseOrder(
   }
   if (input.warehouseId || input.branchId) patch.warehouseId = (await destinationOf(tx, orgId, input)).id
   if (input.notes !== undefined) patch.notes = textOptional(input.notes, "Las notas", 2000, "notes")
+  if (input.currency !== undefined && input.currency !== order.currency) {
+    patch.currency = await orderCurrency(tx, orgId, input.currency)
+    // Un precio no se convierte ni se queda con el mismo número en otra moneda.
+    if (
+      input.lines === undefined &&
+      (await orderLines(tx, orgId, id)).some((line) => line.unitCostCents > 0)
+    )
+      throw invalidField("currency", "Al cambiar la moneda, escribe de nuevo los precios")
+  }
   if (input.lines !== undefined) {
     const lines = await lineValues(tx, orgId, input.lines)
     const current = await orderLines(tx, orgId, id)
@@ -2319,6 +2370,9 @@ export async function purchasePayments(tx: Db, orgId: string, orderId: string) {
       amountCents: expense.amountCents,
       paidAt: expense.spentAt,
       concept: expense.concept,
+      tenderCents: expense.tenderCents,
+      tenderCurrency: expense.tenderCurrency,
+      exchangeRate: expense.exchangeRate,
       fromCash: sql<boolean>`${expense.shiftId} is not null`,
       receiptKind: expense.receiptKind,
       receiptNumber: expense.receiptNumber,
@@ -2343,7 +2397,17 @@ export async function purchasePayments(tx: Db, orgId: string, orderId: string) {
     .where(and(eq(supplierCreditUse.organizationId, orgId), eq(supplierCreditUse.orderId, orderId)))
   return [
     ...expenses.map((row) => ({ ...row, kind: "pago" as const })),
-    ...credits.map((row) => ({ ...row, kind: "a_favor" as const, concept: null, fromCash: false, receiptKind: null, receiptNumber: null })),
+    ...credits.map((row) => ({
+      ...row,
+      kind: "a_favor" as const,
+      concept: null,
+      tenderCents: null,
+      tenderCurrency: null,
+      exchangeRate: null,
+      fromCash: false,
+      receiptKind: null,
+      receiptNumber: null,
+    })),
   ].sort((a, b) => Number(a.voidedAt !== null) - Number(b.voidedAt !== null) || b.paidAt.getTime() - a.paidAt.getTime())
 }
 
@@ -2855,30 +2919,49 @@ export async function getReorderSuggestions(
 }
 
 /**
- * Arma un borrador por proveedor con lo que falta en la sede: a quien se le
- * compró la última vez y a ese precio. Lo que ya está en un borrador no se
- * repite; lo que nunca se compró (o cuyo proveedor está desactivado) vuelve
- * aparte para preguntar a quién pedirlo.
+ * Arma un borrador por proveedor y moneda con lo que falta en la sede: a quien se
+ * le compró la última vez, a ese precio y en esa moneda (US$ 400 nunca son S/ 400).
+ * Lo que ya está en un borrador no se repite; lo que nunca se compró (o cuyo
+ * proveedor está desactivado, o cuya moneda ya no es de la clínica) vuelve aparte
+ * para preguntar a quién pedirlo.
  */
 export async function createReorderDrafts(tx: Db, orgId: string, actorUserId: string, branchId: string) {
   const sede = await requireBranch(tx, orgId, branchId)
   const suggestions = await getReorderSuggestions(tx, orgId, sede.id, { prices: true })
   const alreadyInDraft = suggestions.items.filter((item) => item.inDraft)
   const open = suggestions.items.filter((item) => !item.inDraft)
-  const withoutSupplier = open.filter((item) => !item.lastPurchase || !item.lastPurchase.supplierActive)
+  const money = await orgMoney(tx, orgId)
+  const lastCurrency = (item: (typeof open)[number]) =>
+    (item.lastPurchase as { currency?: string } | null)?.currency
+  const buyable = (item: (typeof open)[number]) => {
+    if (!item.lastPurchase?.supplierActive) return false
+    const code = lastCurrency(item)
+    return (
+      !money.secondCurrency ||
+      code === undefined ||
+      code === money.currency ||
+      code === money.secondCurrency
+    )
+  }
+  const withoutSupplier = open.filter((item) => !buyable(item))
   const groups = new Map<string, typeof open>()
   for (const item of open) {
-    if (!item.lastPurchase || !item.lastPurchase.supplierActive) continue
-    const list = groups.get(item.lastPurchase.supplierId) ?? []
+    if (!buyable(item) || !item.lastPurchase) continue
+    const key = `${item.lastPurchase.supplierId}|${lastCurrency(item) ?? ""}`
+    const list = groups.get(key) ?? []
     list.push(item)
-    groups.set(item.lastPurchase.supplierId, list)
+    groups.set(key, list)
   }
   const drafts: Array<{ id: string; orderNumber: number; label: string; supplierId: string; supplierName: string | null; lines: number }> = []
-  for (const [supplierId, items] of groups) {
+  for (const items of groups.values()) {
+    const first = items[0]
+    const supplierId = first?.lastPurchase?.supplierId
+    if (!first || !supplierId) continue
     const order = await createPurchaseOrder(tx, orgId, actorUserId, {
       supplierId,
       branchId: sede.id,
       mode: "borrador",
+      currency: lastCurrency(first),
       lines: items.map((item) => ({
         productId: item.productId,
         quantity: item.quantity,

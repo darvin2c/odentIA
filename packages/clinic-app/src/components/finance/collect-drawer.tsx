@@ -95,6 +95,7 @@ import {
   type PromotionItem,
   type PromotionOption,
   rateAuthorWords,
+  rateIsFar,
   type SaleProduct,
   voidChargeApi,
 } from "../../lib/finance-collect"
@@ -110,9 +111,6 @@ const SALE_QUANTITY_MAX = 9999
 
 const MAX_REASON = 2000
 const MAX_REFERENCE = 200
-
-/** Un cambio más lejos que esto del de hoy se avisa, nunca se frena. */
-const RATE_WARN_SHARE = 0.05
 
 /** Quién puede figurar como pagador además del paciente. */
 const PAYER_KINDS: readonly string[] = ["responsable_economico", "representante_legal"]
@@ -1217,9 +1215,7 @@ export function CollectDrawer({
       : "No cambia lo que paga: es para saber cuánto vale en tus reportes."
   // Muy distinto del de hoy: se avisa, porque queda en el ticket, y nunca se frena.
   const rateFar =
-    second !== null &&
-    figures.rateText !== null &&
-    Math.abs(Number(figures.rateText) - Number(second.rate)) / Number(second.rate) > RATE_WARN_SHARE
+    second !== null && figures.rateText !== null && rateIsFar(figures.rateText, second.rate)
   const showOtherCurrency = second !== null && !creditOnly
   const cashLine =
     second !== null && hasCash && pay !== currency && amountCents !== null && amountCents > 0

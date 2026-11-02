@@ -174,6 +174,8 @@ export interface SupplierItem {
   currency?: string | null
   dueCents?: number
   creditCents?: number
+  /** Lo mismo en otra moneda, cada una por su lado; no viene si no hay nada. */
+  otherBalances?: Array<{ currency: string; dueCents: number; creditCents: number }>
 }
 
 export interface WarehouseItem {
@@ -242,6 +244,10 @@ export interface PurchasePayment {
   id: string
   kind: "pago" | "a_favor"
   amountCents: number
+  /** Lo que salió, si fue en otra moneda, y el cambio que resultó. */
+  tenderCents?: number | null
+  tenderCurrency?: string | null
+  exchangeRate?: string | null
   paidAt: string
   concept: string | null
   fromCash: boolean
@@ -538,13 +544,23 @@ export const createOrder = (body: {
   branchId: string
   warehouseId?: string | null
   mode: "borrador" | "pedir" | "ya_la_tengo"
+  /** Solo con otra moneda: sin ella, la de la clínica. */
+  currency?: string
   notes: string | null
   lines: PurchaseLineBody[]
 }) => data(apiFetch<{ data: PurchaseOrderView }>("/api/inventory/purchase-orders", json(body)))
 
 export const updateOrder = (
   id: string,
-  body: { supplierId: string; branchId: string; warehouseId?: string | null; notes: string | null; lines: PurchaseLineBody[] },
+  body: {
+    supplierId: string
+    branchId: string
+    warehouseId?: string | null
+    /** Solo si cambió, y con los precios de nuevo. */
+    currency?: string
+    notes: string | null
+    lines: PurchaseLineBody[]
+  },
 ) => data(apiFetch<{ data: PurchaseOrderView }>(`/api/inventory/purchase-orders/${id}`, { method: "PATCH", body: JSON.stringify(body) }))
 
 export const confirmOrder = (id: string) => data(apiFetch<{ data: unknown }>(`/api/inventory/purchase-orders/${id}/confirm`, { method: "POST" }))
@@ -668,6 +684,22 @@ export function usageText(product: { usedInCare: boolean; forSale: boolean }): s
 
 export function moneyText(cents: number, currency: string, at = locale()): string {
   return formatMoney(cents, currency, at)
+}
+
+/**
+ * Lo que se le debe a un proveedor y lo que se tiene a favor con él, cada moneda por
+ * su lado: «S/ 300.00 + USD 1,500.00». Null si no hay nada.
+ */
+export function supplierBalanceWords(
+  item: Pick<SupplierItem, "currency" | "dueCents" | "creditCents" | "otherBalances">,
+  which: "dueCents" | "creditCents",
+): string | null {
+  const parts: string[] = []
+  const own = item[which] ?? 0
+  if (own > 0 && item.currency) parts.push(moneyText(own, item.currency))
+  for (const other of item.otherBalances ?? [])
+    if (other[which] > 0) parts.push(moneyText(other[which], other.currency))
+  return parts.length > 0 ? parts.join(" + ") : null
 }
 
 /** El símbolo de la moneda en el formato de la clínica («S/», «$»). */
