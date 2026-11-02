@@ -4017,8 +4017,15 @@ export async function listTickets(tx: Db, orgId: string, query: TicketListQuery)
  * cobrado es solo lo de esos medios, no el total de un ticket pagado con dos.
  */
 async function ticketTotals(tx: Db, orgId: string, where: SQL, methodIds: string[]) {
-  const entered = sql<string>`coalesce(${paymentTicket.snapshot}->'tender'->>'currency', ${paymentTicket.currency}::text)`
-  const enteredCents = sql`coalesce((${paymentTicket.snapshot}->'tender'->>'amountCents')::bigint, ${paymentTicket.totalCents})`
+  // Sin pagos (todo con saldo a favor), lo del ticket: su moneda y nada de dinero nuevo.
+  const paid = sql`lateral (
+    select min(coalesce(${patientPayment.tenderCurrency}, ${patientPayment.currency})::text) as currency,
+      sum(coalesce(${patientPayment.tenderCents}, ${patientPayment.amountCents})) as cents
+    from ${patientPayment}
+    where ${patientPayment.organizationId} = ${paymentTicket.organizationId} and ${patientPayment.ticketId} = ${paymentTicket.id}
+  ) as paid`
+  const entered = sql<string>`coalesce(paid.currency, ${paymentTicket.currency}::text)`
+  const enteredCents = sql`coalesce(paid.cents, ${paymentTicket.totalCents})`
   const counts = await tx
     .select({
       currency: entered,
@@ -4029,6 +4036,7 @@ async function ticketTotals(tx: Db, orgId: string, where: SQL, methodIds: string
     .from(paymentTicket)
     .innerJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
     .innerJoin(patientPerson, joinPatientPerson(patientPerson))
+    .innerJoin(paid, sql`true`)
     .where(where)
     .groupBy(entered)
   const methodCurrency = sql<string>`coalesce(${patientPayment.tenderCurrency}, ${patientPayment.currency})::text`
@@ -4053,23 +4061,35 @@ async function ticketTotals(tx: Db, orgId: string, where: SQL, methodIds: string
       ),
     )
     .groupBy(methodCurrency, patientPayment.methodName)
-  // Lo devuelto sale en la moneda en que entró: una devolución en otra moneda lo dice en sus `payouts`.
-  const payouts = sql`jsonb_array_elements(case when jsonb_typeof(${paymentReturn.snapshot}->'payouts') = 'array' then ${paymentReturn.snapshot}->'payouts' else jsonb_build_array(jsonb_build_object('currency', ${paymentReturn.currency}::text, 'amountCents', ${paymentReturn.totalCents})) end)`
+  // Lo devuelto en dinero sale en la moneda en que entró, de cada pago que se liberó.
   const refunds = await tx
     .select({
-      currency: sql<string>`payout.value->>'currency'`,
-      cents: sql<string>`sum((payout.value->>'amountCents')::bigint)::bigint`,
+      currency: methodCurrency,
+      cents: sql<string>`sum(coalesce(${patientPaymentRefund.tenderCents}, ${patientPaymentRefund.amountCents}))::bigint`,
     })
-    .from(paymentReturn)
-    .innerJoin(sql`${payouts} as payout(value)`, sql`true`)
+    .from(patientPaymentRefund)
+    .innerJoin(
+      patientPayment,
+      and(
+        eq(patientPayment.organizationId, patientPaymentRefund.organizationId),
+        eq(patientPayment.id, patientPaymentRefund.paymentId),
+      ),
+    )
+    .innerJoin(
+      paymentReturn,
+      and(
+        eq(paymentReturn.organizationId, patientPaymentRefund.organizationId),
+        eq(paymentReturn.id, patientPaymentRefund.returnId),
+      ),
+    )
     .innerJoin(
       paymentTicket,
       and(eq(paymentTicket.organizationId, paymentReturn.organizationId), eq(paymentTicket.id, paymentReturn.ticketId)),
     )
     .innerJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
     .innerJoin(patientPerson, joinPatientPerson(patientPerson))
-    .where(and(where, eq(paymentReturn.outcome, "pagado")))
-    .groupBy(sql`payout.value->>'currency'`)
+    .where(where)
+    .groupBy(methodCurrency)
   const totals: TicketTotals[] = counts.map((row) => {
     const byMethod = methods
       .filter((item) => item.currency === row.currency)

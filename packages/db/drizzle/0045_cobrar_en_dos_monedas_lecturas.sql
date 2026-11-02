@@ -78,7 +78,7 @@ FROM (
   FROM public.patient_payment pay WHERE pay.voided_at IS NOT NULL
   UNION ALL
   SELECT r.organization_id, r.refunded_at, 'devolucion', -r.amount_cents, pay.method_name, pay.branch_id, r.patient_id, -r.tax_cents,
-    pay.amount_cents AS amount, pay.business_cents AS business, pay.currency::text AS currency, -(COALESCE(pay.tender_cents, pay.amount_cents)::numeric * r.amount_cents / NULLIF(pay.amount_cents, 0)), COALESCE(pay.tender_currency, pay.currency)::text
+    pay.amount_cents AS amount, pay.business_cents AS business, pay.currency::text AS currency, -COALESCE(r.tender_cents, r.amount_cents)::numeric, COALESCE(pay.tender_currency, pay.currency)::text
   FROM public.patient_payment_refund r JOIN public.patient_payment pay ON pay.organization_id = r.organization_id AND pay.id = r.payment_id
 ) x
 JOIN public.patient p ON p.organization_id = x.organization_id AND p.id = x.patient_id
@@ -546,7 +546,8 @@ CREATE OR REPLACE VIEW argos.promociones_uso AS
      LEFT JOIN auth."user" u ON ((u.id = x.professional_user_id)))
      LEFT JOIN public.org_profile op ON ((op.organization_id = x.organization_id)));--> statement-breakpoint
 
--- Un ticket vale lo que valen sus pagos; sin pagos (todo con saldo a favor), al cambio de hoy.
+-- Un ticket vale lo que valen sus pagos; sin pagos (todo con saldo a favor), al cambio de
+-- hoy. En moneda del negocio no hay nada que leer: el LATERAL ni toca la tabla.
 CREATE OR REPLACE VIEW argos.tickets AS
  SELECT t.ticket_number AS numero,
     t.created_at AS emitido_en,
@@ -554,16 +555,19 @@ CREATE OR REPLACE VIEW argos.tickets AS
     b.name AS sede,
     pp.display_name AS paciente,
     t.patient_id AS paciente_id,
-    public.money_major(CASE WHEN t.currency = op.currency THEN (t.total_cents)::numeric ELSE public.org_money_value(t.total_cents, ( SELECT sum(pay.amount_cents) FROM public.patient_payment pay WHERE ((pay.organization_id = t.organization_id) AND (pay.ticket_id = t.id))), ( SELECT sum(pay.business_cents) FROM public.patient_payment pay WHERE ((pay.organization_id = t.organization_id) AND (pay.ticket_id = t.id))), t.currency, op.currency, op.second_currency, op.exchange_factor) END, op.currency) AS total,
-    public.money_major(CASE WHEN t.currency = op.currency THEN (t.credit_applied_cents)::numeric ELSE public.org_money_value(t.credit_applied_cents, ( SELECT sum(pay.amount_cents) FROM public.patient_payment pay WHERE ((pay.organization_id = t.organization_id) AND (pay.ticket_id = t.id))), ( SELECT sum(pay.business_cents) FROM public.patient_payment pay WHERE ((pay.organization_id = t.organization_id) AND (pay.ticket_id = t.id))), t.currency, op.currency, op.second_currency, op.exchange_factor) END, op.currency) AS a_favor_usado,
+    public.money_major(CASE WHEN t.currency = op.currency THEN (t.total_cents)::numeric ELSE public.org_money_value(t.total_cents, paid.amount, paid.business, t.currency, op.currency, op.second_currency, op.exchange_factor) END, op.currency) AS total,
+    public.money_major(CASE WHEN t.currency = op.currency THEN (t.credit_applied_cents)::numeric ELSE public.org_money_value(t.credit_applied_cents, paid.amount, paid.business, t.currency, op.currency, op.second_currency, op.exchange_factor) END, op.currency) AS a_favor_usado,
     (t.voided_at IS NOT NULL) AS anulado,
     CASE WHEN t.currency <> op.currency THEN public.money_major(t.total_cents, t.currency) END AS total_otra_moneda,
     CASE WHEN t.currency::text <> op.currency THEN t.currency::text END AS otra_moneda
-   FROM ((((public.payment_ticket t
+   FROM (((((public.payment_ticket t
      JOIN public.patient p ON (((p.organization_id = t.organization_id) AND (p.id = t.patient_id))))
      JOIN public.contact pp ON (((pp.organization_id = p.organization_id) AND (pp.id = p.person_id))))
      LEFT JOIN public.org_profile op ON ((op.organization_id = t.organization_id)))
-     LEFT JOIN public.branch b ON (((b.organization_id = t.organization_id) AND (b.id = t.branch_id))));--> statement-breakpoint
+     LEFT JOIN public.branch b ON (((b.organization_id = t.organization_id) AND (b.id = t.branch_id))))
+     LEFT JOIN LATERAL ( SELECT sum(pay.amount_cents) AS amount, sum(pay.business_cents) AS business
+           FROM public.patient_payment pay
+          WHERE ((t.currency <> op.currency) AND (pay.organization_id = t.organization_id) AND (pay.ticket_id = t.id))) paid ON (true));--> statement-breakpoint
 
 -- El precio de lo realizado, al cambio de hoy: lo que se cobró de eso está en cobros.
 CREATE OR REPLACE VIEW argos.tratamientos_hechos AS

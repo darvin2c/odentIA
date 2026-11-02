@@ -306,21 +306,21 @@
     {
       "idx": 43,
       "version": "7",
-      "when": 1793659071120,
+      "when": 1793662020556,
       "tag": "0043_cobrar_en_dos_monedas",
       "breakpoints": true
     },
     {
       "idx": 44,
       "version": "7",
-      "when": 1793659073806,
+      "when": 1793662023130,
       "tag": "0044_cobrar_en_dos_monedas_reglas",
       "breakpoints": true
     },
     {
       "idx": 45,
       "version": "7",
-      "when": 1793659076304,
+      "when": 1793662025553,
       "tag": "0045_cobrar_en_dos_monedas_lecturas",
       "breakpoints": true
     }

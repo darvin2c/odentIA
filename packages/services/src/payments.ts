@@ -1996,45 +1996,56 @@ interface RefundPart {
 
 /**
  * Sale lo que entró, en esa moneda y en proporción, sin cambio nuevo: S/ 300
- * cancelados con USD 80 devuelven hasta USD 80, por partes o de una vez.
+ * cancelados con USD 80 devuelven hasta USD 80, por partes o de una vez. `tenderOf`
+ * es lo que sale de cada pago que entró en otra moneda: se guarda con su devolución.
  */
 async function refundPayouts(
   tx: Db,
   orgId: string,
   patientId: string,
   parts: RefundPart[],
-): Promise<RefundPayout[]> {
-  if (!parts.length) return []
-  const earlier = await tx
-    .select({
-      paymentId: patientPaymentRefund.paymentId,
-      amountCents: patientPaymentRefund.amountCents,
-    })
-    .from(patientPaymentRefund)
-    .where(
-      and(
-        eq(patientPaymentRefund.organizationId, orgId),
-        eq(patientPaymentRefund.patientId, patientId),
-        inArray(
-          patientPaymentRefund.paymentId,
-          parts.map((part) => part.payment.id),
-        ),
-      ),
+): Promise<{ payouts: RefundPayout[]; tenderOf: Map<string, number> }> {
+  const crossed = parts.filter((part) => part.payment.tenderCents !== null)
+  const earlier = crossed.length
+    ? await tx
+        .select({
+          paymentId: patientPaymentRefund.paymentId,
+          amountCents: patientPaymentRefund.amountCents,
+        })
+        .from(patientPaymentRefund)
+        .where(
+          and(
+            eq(patientPaymentRefund.organizationId, orgId),
+            eq(patientPaymentRefund.patientId, patientId),
+            inArray(
+              patientPaymentRefund.paymentId,
+              crossed.map((part) => part.payment.id),
+            ),
+          ),
+        )
+    : []
+  const tenderOf = new Map<string, number>()
+  for (const { payment, refundCents } of crossed)
+    tenderOf.set(
+      payment.id,
+      refundTenderCents({
+        tenderCents: payment.tenderCents ?? payment.amountCents,
+        amountCents: payment.amountCents,
+        previousCents: sum(earlier.filter((row) => row.paymentId === payment.id)),
+        refundCents,
+      }),
     )
   const totals = new Map<string, number>()
   for (const { payment, refundCents } of parts) {
-    const out = refundTenderCents({
-      tenderCents: payment.tenderCents ?? payment.amountCents,
-      amountCents: payment.amountCents,
-      previousCents: sum(earlier.filter((row) => row.paymentId === payment.id)),
-      refundCents,
-    })
     const unit = payment.tenderCurrency ?? payment.currency
-    totals.set(unit, (totals.get(unit) ?? 0) + out)
+    totals.set(unit, (totals.get(unit) ?? 0) + (tenderOf.get(payment.id) ?? refundCents))
   }
-  return [...totals.entries()]
-    .filter(([, amountCents]) => amountCents > 0)
-    .map(([currency, amountCents]) => ({ currency, amountCents }))
+  return {
+    payouts: [...totals.entries()]
+      .filter(([, amountCents]) => amountCents > 0)
+      .map(([currency, amountCents]) => ({ currency, amountCents })),
+    tenderOf,
+  }
 }
 
 /** Se dice aparte solo si salió en otra moneda que la devuelta; si no, es lo de siempre. */
@@ -2096,7 +2107,7 @@ export async function refundCredit(
       rest -= take
     }
   }
-  const payouts = await refundPayouts(tx, orgId, patientId, taking)
+  const { payouts, tenderOf } = await refundPayouts(tx, orgId, patientId, taking)
   {
     for (const { payment, refundCents: take } of taking) {
       const [refund] = await tx
@@ -2108,6 +2119,7 @@ export async function refundCredit(
           amountCents: take,
           // Con el dinero sale su parte del impuesto (ADR 0083).
           taxCents: refundTaxCents(payment, take),
+          tenderCents: tenderOf.get(payment.id) ?? null,
           refundedAt: at,
           reason: reason(input.reason),
           createdBy: actorUserId,
@@ -2680,7 +2692,7 @@ export async function returnFromTicket(
           )
       : []
   // Se le paga en el mismo paso: sale lo que entró, en esa moneda y sin cambio nuevo.
-  const payouts = await refundPayouts(
+  const { payouts, tenderOf } = await refundPayouts(
     tx,
     orgId,
     patientId,
@@ -2886,6 +2898,7 @@ export async function returnFromTicket(
           amountCents,
           // Con el dinero sale su parte del impuesto (ADR 0083).
           taxCents: paid ? refundTaxCents(paid, amountCents) : 0,
+          tenderCents: tenderOf.get(paymentId) ?? null,
           refundedAt: now,
           reason: `${label}: ${reasonText}`,
           returnId: row.id,

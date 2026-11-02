@@ -2337,6 +2337,10 @@ export const patientPayment = pgTable(
   },
   (table) => [
     index("patient_payment_org_patient_idx").on(table.organizationId, table.patientId),
+    // Las cajas y los cobros de un ticket se leen al abrir cuenta, recibo y anulación.
+    index("patient_payment_org_ticket_idx")
+      .on(table.organizationId, table.ticketId)
+      .where(sql`${table.ticketId} IS NOT NULL`),
     check("patient_payment_amount_check", sql`${table.amountCents} > 0`),
     check("patient_payment_tax_check", sql`${table.taxCents} BETWEEN 0 AND ${table.amountCents}`),
     check(
@@ -2408,6 +2412,11 @@ export const patientPaymentRefund = pgTable(
     amountCents: integer("amount_cents").notNull(),
     /** La parte del impuesto del pago que se devuelve, en proporción (ADR 0083). */
     taxCents: integer("tax_cents").notNull().default(0),
+    /**
+     * Lo que salió, en la moneda en que entró el pago, solo si entró en otra que la
+     * que cancela (`refundTenderCents`); nulo, salió lo que dice `amountCents`.
+     */
+    tenderCents: integer("tender_cents"),
     refundedAt: timestamp("refunded_at", { withTimezone: true }).notNull(),
     reason: text("reason").notNull(),
     /** La devolución de un cobro que pagó este dinero (nulo: «Devolver dinero» del saldo a favor). */
@@ -2420,6 +2429,7 @@ export const patientPaymentRefund = pgTable(
     index("payment_refund_payment_idx").on(table.organizationId, table.paymentId),
     check("payment_refund_amount_check", sql`${table.amountCents} > 0`),
     check("payment_refund_tax_check", sql`${table.taxCents} BETWEEN 0 AND ${table.amountCents}`),
+    check("payment_refund_tender_check", sql`${table.tenderCents} IS NULL OR ${table.tenderCents} >= 0`),
   ],
 )
 

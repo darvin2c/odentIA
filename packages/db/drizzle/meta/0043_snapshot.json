@@ -1,5 +1,5 @@
 {
-  "id": "036d675e-acbf-4bb2-a27d-f8f839bc3c94",
+  "id": "462bf6df-7a32-4f77-b4a7-7d6ac99c70aa",
   "prevId": "940bdc71-4f8b-410e-b847-5c90348ac323",
   "version": "7",
   "dialect": "postgresql",
@@ -18112,6 +18112,28 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "patient_payment_org_ticket_idx": {
+          "name": "patient_payment_org_ticket_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "ticket_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"patient_payment\".\"ticket_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -18561,6 +18583,12 @@
           "notNull": true,
           "default": 0
         },
+        "tender_cents": {
+          "name": "tender_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
         "refunded_at": {
           "name": "refunded_at",
           "type": "timestamp with time zone",
@@ -18703,6 +18731,10 @@
         "payment_refund_tax_check": {
           "name": "payment_refund_tax_check",
           "value": "\"patient_payment_refund\".\"tax_cents\" BETWEEN 0 AND \"patient_payment_refund\".\"amount_cents\""
+        },
+        "payment_refund_tender_check": {
+          "name": "payment_refund_tender_check",
+          "value": "\"patient_payment_refund\".\"tender_cents\" IS NULL OR \"patient_payment_refund\".\"tender_cents\" >= 0"
         }
       },
       "isRLSEnabled": false

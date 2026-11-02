@@ -518,7 +518,7 @@ export async function newPatientValue(tx: Db, orgId: string, end: Date, options:
  * Lo cobrado del tramo por medio de pago, con la regla de Finanzas (anulaciones y
  * devoluciones restan): cada medio con su valor en moneda del negocio. Si algo entró
  * en otra moneda, `entered` dice lo que entró en cada una, que es lo que se compara
- * con el arqueo de su caja: lo devuelto, lo que de verdad salió (`refundTenderCents`).
+ * con el arqueo de su caja: lo devuelto, lo que de verdad salió.
  */
 export async function collectedByMethod(tx: Db, orgId: string, span: Span, options: { currency: string; branchId?: string }) {
   const branch = options.branchId ? sql`and p.branch_id = ${options.branchId}` : sql``
@@ -547,16 +547,9 @@ export async function collectedByMethod(tx: Db, orgId: string, span: Span, optio
       where p.organization_id = ${orgId} and p.paid_at < ${at(span.start)}
         and p.voided_at >= ${at(span.start)} and p.voided_at < ${at(span.end)} ${branch}
       union all
-      select p.method_name, p.method_type_code = '10', -r.amount_cents::bigint,
-        case when p.tender_cents is null then -r.amount_cents::numeric
-          else -(round(p.tender_cents::numeric * (d.before + r.amount_cents) / p.amount_cents) - round(p.tender_cents::numeric * d.before / p.amount_cents)) end,
-        ${tenderCurrency}, ${money}
+      select p.method_name, p.method_type_code = '10', -r.amount_cents::bigint, -coalesce(r.tender_cents, r.amount_cents)::numeric, ${tenderCurrency}, ${money}
       from patient_payment_refund r
       join patient_payment p on p.organization_id = r.organization_id and p.id = r.payment_id
-      cross join lateral (
-        select coalesce(sum(e.amount_cents), 0)::numeric as before from patient_payment_refund e
-        where p.tender_cents is not null and e.organization_id = r.organization_id and e.payment_id = r.payment_id and (e.created_at, e.id) < (r.created_at, r.id)
-      ) d
       where r.organization_id = ${orgId} and r.refunded_at >= ${at(span.start)} and r.refunded_at < ${at(span.end)} ${branch}
     ) x
     cross join ${orgMoneySql(orgId)}
@@ -635,7 +628,7 @@ async function moneyFlowByCurrency(
       select coalesce(p.tender_currency, p.currency)::text, -coalesce(p.tender_cents, p.amount_cents)::numeric from patient_payment p
       where p.organization_id = ${orgId} and p.paid_at < ${at(span.start)} and p.voided_at >= ${at(span.start)} and p.voided_at < ${at(span.end)} ${paymentBranch}
       union all
-      select coalesce(p.tender_currency, p.currency)::text, -(coalesce(p.tender_cents, p.amount_cents)::numeric * r.amount_cents / nullif(p.amount_cents, 0))
+      select coalesce(p.tender_currency, p.currency)::text, -coalesce(r.tender_cents, r.amount_cents)::numeric
       from patient_payment_refund r join patient_payment p on p.organization_id = r.organization_id and p.id = r.payment_id
       where r.organization_id = ${orgId} and r.refunded_at >= ${at(span.start)} and r.refunded_at < ${at(span.end)} ${paymentBranch}
       union all

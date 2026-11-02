@@ -7,10 +7,10 @@
 import { randomUUID } from "node:crypto"
 import { type Db, withOrgContext } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
-import { patientPayment, paymentTicket } from "@odentia/db/schema/clinical"
+import { patientPayment, patientPaymentRefund, paymentTicket } from "@odentia/db/schema/clinical"
 import { cashClosure, cashMovement, cashShift } from "@odentia/db/schema/finance"
 import { branch, orgProfile } from "@odentia/db/schema/org"
-import { and, eq } from "drizzle-orm"
+import { and, asc, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import {
   addCashMovement,
@@ -668,6 +668,44 @@ it("devolver por partes sale en la moneda en que entró, en proporción y suma e
   expect(pen.cashOnHandCents).toBe(0)
   expect(pen.breakdown.cashRefundedCents).toBe(37777)
   expect((await c.box("USD")).cashOnHandCents).toBe(0)
+  // Lo que salió queda en cada devolución: sumado da lo que entró.
+  const saved = await c.run((tx) =>
+    tx
+      .select({ out: patientPaymentRefund.tenderCents })
+      .from(patientPaymentRefund)
+      .where(eq(patientPaymentRefund.organizationId, c.orgId))
+      .orderBy(asc(patientPaymentRefund.createdAt)),
+  )
+  expect(saved.map((row) => row.out)).toEqual([12591, 12591, 12595])
+})
+
+it("una devolución en la moneda en que entró no guarda otro importe", async () => {
+  const c = await clinic()
+  const debt = await c.charge(10000, "USD")
+  const paid = await c.collect({
+    chargeIds: [debt.id],
+    exchangeRate: "3.75",
+    payments: [{ paymentMethodId: c.cash.id, amountCents: 10000 }],
+  })
+  const { lines } = await c.run((tx) =>
+    getTicketReturnable(tx, c.orgId, c.patient.id, paid.ticket.id),
+  )
+  await c.run((tx) =>
+    returnFromTicket(tx, ...c.args, paid.ticket.id, {
+      branchId: c.site.id,
+      lines: [{ chargeId: lines[0]?.chargeId as string, amountCents: 2500 }],
+      paymentMethodId: c.cash.id,
+      reason: "Reclamo",
+      requestId: randomUUID(),
+    }),
+  )
+  const saved = await c.run((tx) =>
+    tx
+      .select({ out: patientPaymentRefund.tenderCents })
+      .from(patientPaymentRefund)
+      .where(eq(patientPaymentRefund.organizationId, c.orgId)),
+  )
+  expect(saved).toEqual([{ out: null }])
 })
 
 it("S/ 300 cancelados con USD 80 devuelven hasta USD 80, sin cambio nuevo", async () => {
