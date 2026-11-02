@@ -193,4 +193,40 @@ describe("Clío médica (issue 229, entrega 10)", () => {
       await setProduct("dental")
     }
   })
+
+  it("la cantidad que calculó el sistema se calcula de nuevo al corregir la duración", async () => {
+    await setProduct("medical")
+    await enable(true)
+    try {
+      const fx = await clinicalFixture()
+      const segment = (input: Parameters<typeof saveDictationSegment>[5]) =>
+        fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
+      const [recipe] = (
+        await segment({
+          drafts: [
+            {
+              kind: "receta",
+              payload: {
+                genericName: "amoxicilina",
+                strength: "500 mg",
+                dosageForm: "cápsula",
+                dose: "1 cápsula",
+                frequency: "cada 8 horas",
+                duration: "7 días",
+              },
+            },
+          ],
+        })
+      ).suggestions
+      expect(recipe).toMatchObject({ payload: { quantity: 21, quantityCalculated: true } })
+      await segment({ drafts: [], corrections: [{ suggestionId: recipe!.id, changes: { duration: "5 días" } }] })
+      const items = await fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))
+      expect(items.find((item) => item.id === recipe!.id)).toMatchObject({
+        payload: { duration: "5 días", quantity: 15, quantityCalculated: true },
+      })
+    } finally {
+      await enable(false)
+      await setProduct("dental")
+    }
+  })
 })
