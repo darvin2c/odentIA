@@ -759,6 +759,20 @@
   };
 
   // 11 · Respuesta: interruptores.
+  // En la v2 (?v2) · La clínica en 3D: todos los momentos de la parte son la misma escena. Solo se baja si
+  // se usa y, si no se puede bajar, queda lo que se lee.
+  let clinic = null, clinicFailed = false;
+  const clinicFlat = (slide) => { clinicFailed = true; slide.classList.add("cl-flat"); };
+  scenes.clinic = (layer) => {
+    if (clinicFailed) return;
+    const slide = layer.closest(".slide"), step = +layer.dataset.step;
+    const run = (m) => { try { m.start(slide, step, (k) => show(slides.indexOf(slide), k)); } catch (e) { clinicFlat(slide); } };
+    let off = false;
+    if (clinic) run(clinic);
+    else import("../clinic/clinic-3d.js").then((m) => { clinic = m; if (!off) run(m); }).catch(() => clinicFlat(slide));
+    cleanups.push(() => { off = true; clinic?.stop(); });
+  };
+
   scenes.switches = (layer) => {
     const sws = [...layer.querySelectorAll(".sw")];
     sws.forEach(s => s.classList.remove("lit"));
@@ -1014,6 +1028,8 @@
   };
   const tapOf = (t) => t instanceof Element ? t.closest("[data-tap]") : null;
   stage.addEventListener("click", (e) => {
+    // Un enlace lleva a su página: no avanza la presentación.
+    if (e.target instanceof Element && e.target.closest("a")) { e.stopPropagation(); return; }
     const t = tapOf(e.target);
     // Dentro de la ventana de un módulo, un clic no avanza la presentación.
     if (!t && e.target instanceof Element && e.target.closest(".layer.cur .msc")) { e.stopPropagation(); return; }
@@ -1041,6 +1057,7 @@
   });
   addEventListener("keydown", (e) => {
     if (e.key === "Escape" && closeScreen(stage.querySelector(".layer.mopen"))) { e.preventDefault(); return; }
+    if (e.key === "Enter" && e.target instanceof Element && e.target.closest("a")) return;
     const t = tapOf(e.target);
     if (t && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); if (t.closest(".layer.cur")) taps[t.dataset.tap]?.(t); return; }
     if (["ArrowRight", "ArrowDown", "PageDown", " ", "Enter"].includes(e.key)) { e.preventDefault(); next(); }
@@ -1082,4 +1099,14 @@
 
   const m = /^#p(\d+)$/.exec(location.hash);
   show(m ? +m[1] - 1 : 0, 0, true);
+
+  // En la v2 la clínica se prepara con calma, para que no frene la primera vez que se llega a su parte.
+  const clinicSlide = stage.querySelector(".slide.cl");
+  if (clinicSlide) {
+    const idle = window.requestIdleCallback || ((f) => setTimeout(f, 1500));
+    // Con tiempo máximo: mientras la portada se anima, el navegador puede no encontrar un momento libre.
+    idle(() => {
+      import("../clinic/clinic-3d.js").then((mod) => { clinic = mod; mod.prepare(clinicSlide); }).catch(() => clinicFlat(clinicSlide));
+    }, { timeout: 2500 });
+  }
 })();

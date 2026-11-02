@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
+import latidiaSlide from "../latidia/clinic-slide.html?raw"
+import odentiaSlide from "../odentia/clinic-slide.html?raw"
 import { createSim } from "./clinic-sim.js"
-import slide from "./clinic-slide.html?raw"
 
 type Person = {
   active: boolean
@@ -150,11 +151,13 @@ describe("la clínica simulada de la v2", () => {
       if (i === 1400) s.dawn()
     })
     expect(seen.size).toBeGreaterThan(20)
-    for (const story of seen) expect(slide, story).toContain(`data-story="${story}"`)
+    for (const slide of [odentiaSlide, latidiaSlide])
+      for (const story of seen) expect(slide, story).toContain(`data-story="${story}"`)
   })
 
-  it("no muestra llamadas: odentIA no las resuelve", () => {
-    expect(slide).not.toMatch(/teléfono|llamadas?\b/i)
+  it("no muestra llamadas: no las resolvemos", () => {
+    for (const slide of [odentiaSlide, latidiaSlide])
+      expect(slide).not.toMatch(/teléfono|llamadas?\b/i)
     const sim = createSim()
     sim.advance(120)
     for (const p of sim.people) expect(p.channel).not.toBe("llamada")

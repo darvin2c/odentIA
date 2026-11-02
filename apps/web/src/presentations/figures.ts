@@ -10,6 +10,9 @@ import {
   type Pricing,
   type TierPrices,
 } from "../lib/pricing"
+import type { WebProduct } from "../lib/product"
+import { ctaOf } from "../lib/site"
+import clinicStyle from "./clinic/clinic.css?raw"
 
 type Tier = keyof TierPrices
 
@@ -61,9 +64,13 @@ export function deckFigures(pricing: Pricing, day: Tier[]): Record<string, strin
     founders.storage &&
       `cada GB extra sobre ${founders.storage.includedGb} por ${money(founders.storage.perGb, cur)}`,
   ].filter(Boolean)
+  // El botón del cierre es el de toda la web: con el alta por invitación, lleva a pedirla.
+  const cta = ctaOf(pricing)
   return {
     ...plan(list, "L"),
     ...plan(founders, "F"),
+    ctaHref: cta.href,
+    ctaLabel: cta.label,
     cur,
     currencyWord: cur === "USD" ? "dólares" : cur,
     gift: money(founders.trialCredit, cur),
@@ -94,36 +101,67 @@ export function withoutGuide(html: string): string {
 }
 
 /**
- * Las partes de la v1 que en la v2 pasan a la clínica: lo que se ve pasar se explica ahí. Quedan aparte las
- * que hay que leer para decidir: el inicio, «Todo lo de siempre», el cobro, la semana, el precio y el cierre.
+ * Las partes de la v1 que cambian en la v2. `inside` pasan a la clínica: lo que se ve pasar se explica ahí.
+ * Quedan aparte las que hay que leer para decidir: el inicio, «Todo lo de siempre», el cobro, la semana, el
+ * precio y el cierre. `after` también quedan aparte, pero justo después de la clínica: en latidIA, lo que un
+ * médico pregunta enseguida (qué pasa con una urgencia y con la receta) y habla de agentes ya presentados.
  */
-const INSIDE_THE_CLINIC = [
-  "Mensajes fuera de horario",
-  "Omnicanal",
-  "Clío, agente clínico",
-  "Argos, agente administrador",
-  "Reportes",
-  "Buscador",
-  "Tú tienes el control",
-  "Un solo caso, dos formas de trabajar",
-]
+const CLINIC_PARTS: Record<WebProduct, { inside: string[]; after: string[] }> = {
+  dental: {
+    inside: [
+      "Mensajes fuera de horario",
+      "Omnicanal",
+      "Clío, agente clínico",
+      "Argos, agente administrador",
+      "Reportes",
+      "Buscador",
+      "Tú tienes el control",
+      "Un solo caso, dos formas de trabajar",
+    ],
+    after: [],
+  },
+  medical: {
+    inside: [
+      "Mensajes fuera de horario",
+      "Omnicanal",
+      "Clío, agente clínico",
+      "Argos, agente administrador",
+      "Reportes",
+      "Tú tienes el control",
+      "Un solo caso, dos formas de trabajar",
+    ],
+    after: ["Señales de alarma", "Receta y descanso médico"],
+  },
+}
 
 /**
- * La v2 de la presentación de odentIA (/presentacion/fundadores?v2): «Tus agentes» pasa a ser la
- * clínica en 3D y se lleva las partes que explica. Convive con la v1 hasta que pase una llamada real.
+ * La v2 de la presentación (/presentacion/fundadores?v2): «Tus agentes» pasa a ser la clínica en 3D, con
+ * sus estilos comunes y el texto de cada producto, y se lleva las partes que explica. Convive con la v1
+ * hasta que pase una llamada real.
  */
-export function withClinic(deck: string, slide: string): string {
+export function withClinic(deck: string, slide: string, product: WebProduct): string {
   const section = (name: string) =>
     new RegExp(
       `(?:<!-- =+ [^\\n]* -->\\r?\\n)?<section class="slide" aria-label="${name}">[\\s\\S]*?</section>\\r?\\n?`,
     )
-  const part = section("Tus agentes")
-  if (!part.test(deck)) throw new Error("presentación: no está la parte «Tus agentes»")
-  let out = deck.replace(part, () => `${slide}\n`)
-  for (const name of INSIDE_THE_CLINIC) {
-    if (!section(name).test(out)) throw new Error(`presentación: no está la parte «${name}»`)
-    out = out.replace(section(name), "")
+  const take = (from: string, name: string) => {
+    const found = section(name).exec(from)
+    if (!found) throw new Error(`presentación: no está la parte «${name}»`)
+    return { part: found[0], rest: from.replace(found[0], "") }
   }
+  const { inside, after } = CLINIC_PARTS[product]
+  let out = deck
+  const moved: string[] = []
+  for (const name of after) {
+    const { part, rest } = take(out, name)
+    moved.push(part)
+    out = rest
+  }
+  const clinic = `<style>\n${clinicStyle}</style>\n${slide}\n${moved.join("")}`
+  const agents = section("Tus agentes")
+  if (!agents.test(out)) throw new Error("presentación: no está la parte «Tus agentes»")
+  out = out.replace(agents, () => clinic)
+  for (const name of inside) out = take(out, name).rest
   return out
 }
 
