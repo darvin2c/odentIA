@@ -1621,6 +1621,7 @@ export async function sendPersonalLink(
       conversationId: route.conversationId,
       senderKind: "user",
       senderUserId: actorUserId,
+      fromAction: true,
       name: route.template.name,
       language: route.template.language,
       params,
@@ -1635,6 +1636,7 @@ export async function sendPersonalLink(
       conversationId: route.conversationId,
       senderKind: "user",
       senderUserId: actorUserId,
+      fromAction: true,
       content: {
         type: "text",
         text:

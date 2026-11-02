@@ -13,6 +13,7 @@ import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { agentDecisionLog, agentHandoff, agentKnowledgeGap, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
 import { user } from "@odentia/db/schema/auth"
 import { automationJob } from "@odentia/db/schema/automation"
+import { patientContact, patientResponsibility } from "@odentia/db/schema/clinical"
 import { contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
@@ -39,6 +40,7 @@ import {
   getAgentConfig,
   getLesson,
   getPatientRegistrationConfig,
+  getPersonalLinkView,
   getProbar,
   ingestInbound,
   listAgentContextCandidates,
@@ -58,6 +60,8 @@ import {
   professionalRef,
   READ_TOOLS,
   removePersonFact,
+  changeBookingLinkAppointment,
+  createBookingLink,
   reserveBookingLink,
   resolvePersonalLink,
   resolvePersonalLinkRefs,
@@ -78,7 +82,7 @@ import { insertTestPatients } from "@odentia/services/test-patient"
 import { and, desc, eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
-import { afterAll, beforeAll, expect, it, onTestFinished } from "vitest"
+import { afterAll, beforeAll, describe, expect, it, onTestFinished } from "vitest"
 import { createFakeDecisionModel, DecisionError, type DecisionModel } from "./decision/index.js"
 import { offTopicReply } from "./decision/route.js"
 import { extractDictation } from "./extract-dictation.js"
@@ -1393,6 +1397,39 @@ it("proponer_cita: si a la clínica le falta algo del paciente, su enlace con es
   expect(confirmed).not.toContain("tu salud")
 })
 
+it("la cita dura lo que el hueco que se le ofreció: la última hora del turno se puede reservar", async () => {
+  const { conversationId } = await ingestText("tg:ultima-hora", "evt-ultima-hora", "Hola, quiero una cita")
+  const fx = await bookingFixture(conversationId, "ultima-hora")
+  const ctx: AgentToolCtx = {
+    db: appDb, orgId: "org_a", conversationId, contactId: fx.contactId,
+    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, replySettled: false,
+    toolsUsed: [], usage: emptyUsage(),
+  }
+  const tools = makeAgentTools(ctx)
+  const day = upcomingMonday()
+  // Busca de 30 minutos; la sede reserva 60 si nadie dice otra cosa y el turno termina a la 1:00 p. m.
+  const found = String(await tools.find((t) => t.name === "buscar_huecos")!.invoke({
+    branchId: fx.branchId, from: day.toISOString(), to: new Date(day.getTime() + 86_400_000).toISOString(), durationMin: 30,
+  }))
+  ctx.evidence = [{ kind: "agenda", source: "Agenda: horarios disponibles", text: found }]
+  const last = found.split("\n").filter((line) => line.startsWith("- ")).at(-1)!
+  expect(last).toContain("12:30–13:00")
+  const proposed = String(await tools.find((t) => t.name === "proponer_cita")!.invoke({
+    patientId: fx.patientId,
+    branchId: fx.branchId,
+    roomId: last.match(/unidad dental ([0-9a-f-]{36})/i)![1]!,
+    professionalUserId: last.match(/profesional ([^\]\s]+)/)![1]!,
+    startsAt: last.match(ISO_INSTANT)![0],
+  }))
+  expect(proposed).toContain("Falta su sí")
+  const [pending] = await withOrgContext(appDb, "org_a", (tx) => listProposals(tx, "org_a", { conversationId, status: "propuesta" }))
+  await ingestText("tg:ultima-hora", "evt-ultima-hora-si", "Sí, confirmo")
+  expect(String(await tools.find((t) => t.name === "confirmar_propuesta")!.invoke({ proposalId: pending!.id }))).toContain("Confirmado y ejecutado")
+  const rows = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ durationMin: appointment.durationMin }).from(appointment).where(eq(appointment.patientId, fx.patientId)))
+  expect(rows).toEqual([{ durationMin: 30 }])
+})
+
 it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar reserva ni pisar cambios ajenos", async () => {
   const [createdBranch] = await ownerDb
     .insert(branch)
@@ -2481,6 +2518,174 @@ it("una señal de alarma no espera al equipo que conversa: pasa con prioridad al
   }
 })
 
+it("lo que el equipo manda con un botón no hace esperar al agente; lo que escribe, sí (ADR 0050)", async () => {
+  await ownerDb.execute(sql`insert into "user" (id, name, email, email_verified) values ('u_agent_team', 'Carla', 'carla@team.test', true) on conflict (id) do nothing`)
+  const model = new ScriptedModel(() => toolCall("send_reply", { text: "Siento que le duela. ¿Le busco una hora?" }, "call-boton"))
+
+  // Le mandaron su enlace con el botón y responde otra cosa: se le contesta sin esperar.
+  const linked = await ingestText("tg:boton", "evt-boton-1", "Hola")
+  await withOrgContext(appDb, "org_a", (tx) =>
+    sendOutbound(tx, "org_a", { conversationId: linked.conversationId, senderKind: "user", senderUserId: "u_agent_team", fromAction: true, content: { type: "text", text: "Te dejamos aquí lo que tienes pendiente" } }))
+  const pain = await ingestText("tg:boton", "evt-boton-2", "hola, me duele el diente")
+  expect(await runScripted(model, pain.conversationId, pain.messageId)).toBe("done")
+  expect(await agentMessages(pain.conversationId)).toEqual(["Siento que le duela. ¿Le busco una hora?"])
+
+  // Carla escribe de su puño: ahí sí conversa y el agente espera, sin llamar al modelo.
+  const typed = await ingestText("tg:escrito", "evt-escrito-1", "Hola")
+  await withOrgContext(appDb, "org_a", (tx) =>
+    sendOutbound(tx, "org_a", { conversationId: typed.conversationId, senderKind: "user", senderUserId: "u_agent_team", content: { type: "text", text: "Hola, soy Carla" } }))
+  const calls = model.seen.length
+  const asked = await ingestText("tg:escrito", "evt-escrito-2", "¿Tienen hora mañana?")
+  expect(await runScripted(model, asked.conversationId, asked.messageId)).toBe("done")
+  expect(await agentMessages(asked.conversationId)).toEqual([])
+  expect(model.seen).toHaveLength(calls)
+
+  // Pasan los 15 minutos y Carla no respondió: la corrida pospuesta responde sola.
+  await ownerDb.execute(sql`update message set created_at = created_at - interval '16 minutes' where conversation_id = ${asked.conversationId}`)
+  const resumed = await processAgentRun(appDb, { ...runtime, createModel: async () => model }, {
+    msg_id: 1,
+    read_ct: 0,
+    message: { kind: "inbound_message", orgId: "org_a", conversationId: asked.conversationId, messageId: asked.messageId, deferred: true },
+  })
+  expect(resumed).toBe("done")
+  expect(await agentMessages(asked.conversationId)).toEqual(["Siento que le duela. ¿Le busco una hora?"])
+})
+
+describe("el equipo y el agente en la misma conversación (ADR 0050)", () => {
+  const CARLA = "u_agent_team"
+  const carla = () => ownerDb.execute(sql`insert into "user" (id, name, email, email_verified) values (${CARLA}, 'Carla', 'carla@team.test', true) on conflict (id) do nothing`)
+  const write = (conversationId: string, text: string, fromAction = false) =>
+    withOrgContext(appDb, "org_a", (tx) =>
+      sendOutbound(tx, "org_a", { conversationId, senderKind: "user", senderUserId: CARLA, fromAction, content: { type: "text", text } }))
+  const fifteenMinutesPass = (conversationId: string) =>
+    ownerDb.execute(sql`update message set created_at = created_at - interval '16 minutes' where conversation_id = ${conversationId}`)
+  const postponed = (model: ScriptedModel, conversationId: string, messageId: string) =>
+    processAgentRun(appDb, { ...runtime, createModel: async () => model }, {
+      msg_id: 1,
+      read_ct: 0,
+      message: { kind: "inbound_message", orgId: "org_a", conversationId, messageId, deferred: true },
+    })
+  const answer = () => new ScriptedModel(() => toolCall("send_reply", { text: "Te ayudo con eso." }, "call-equipo"))
+
+  it("si la persona del equipo responde durante la espera, el agente no le responde encima y queda en el libro", async () => {
+    await carla()
+    const model = answer()
+    const first = await ingestText("tg:respondio", "evt-respondio-1", "Hola")
+    await write(first.conversationId, "Hola, soy Carla")
+    const asked = await ingestText("tg:respondio", "evt-respondio-2", "¿Tienen hora mañana?")
+    expect(await runScripted(model, asked.conversationId, asked.messageId)).toBe("done")
+    await write(asked.conversationId, "Sí, a las 3 p. m.")
+    await fifteenMinutesPass(asked.conversationId)
+    expect(await postponed(model, asked.conversationId, asked.messageId)).toBe("done")
+    expect(await agentMessages(asked.conversationId)).toEqual([])
+    expect(model.seen).toHaveLength(0)
+    expect(await ledgerErrors(asked.conversationId)).toEqual([{ status: "omitida", llmCalls: 0, error: "team-answered" }])
+  })
+
+  it("si la persona vuelve a escribir después de esa respuesta, el agente atiende lo nuevo", async () => {
+    await carla()
+    const model = answer()
+    const first = await ingestText("tg:volvio", "evt-volvio-1", "Hola")
+    await write(first.conversationId, "Hola, soy Carla")
+    const asked = await ingestText("tg:volvio", "evt-volvio-2", "¿Tienen hora mañana?")
+    await write(asked.conversationId, "Sí, a las 3 p. m.")
+    const again = await ingestText("tg:volvio", "evt-volvio-3", "¿Y cuánto cuesta?")
+    await fifteenMinutesPass(again.conversationId)
+    expect(await postponed(model, asked.conversationId, asked.messageId)).toBe("done")
+    expect(await agentMessages(again.conversationId)).toEqual([])
+    expect(await postponed(model, again.conversationId, again.messageId)).toBe("done")
+    expect(await agentMessages(again.conversationId)).toEqual(["Te ayudo con eso."])
+  })
+
+  it("lo que el equipo no logró enviar no es una respuesta: el agente responde", async () => {
+    await carla()
+    const model = answer()
+    const first = await ingestText("tg:no-salio", "evt-no-salio-1", "Hola")
+    await write(first.conversationId, "Hola, soy Carla")
+    const asked = await ingestText("tg:no-salio", "evt-no-salio-2", "¿Tienen hora mañana?")
+    const failed = await write(asked.conversationId, "Sí, a las 3 p. m.")
+    await ownerDb.update(message).set({ status: "failed" }).where(eq(message.id, failed.id))
+    await fifteenMinutesPass(asked.conversationId)
+    expect(await postponed(model, asked.conversationId, asked.messageId)).toBe("done")
+    expect(await agentMessages(asked.conversationId)).toEqual(["Te ayudo con eso."])
+  })
+
+  it("lo que el equipo escribe citando otro mensaje no responde esto: el agente no lo deja sin respuesta", async () => {
+    await carla()
+    const model = answer()
+    const first = await ingestText("tg:otro-tema", "evt-otro-tema-1", "¿Cuánto debo?")
+    const asked = await ingestText("tg:otro-tema", "evt-otro-tema-2", "¿A qué hora abren?")
+    await withOrgContext(appDb, "org_a", (tx) =>
+      sendOutbound(tx, "org_a", { conversationId: asked.conversationId, senderKind: "user", senderUserId: CARLA, replyToMessageId: first.messageId, content: { type: "text", text: "Debes 40 soles" } }))
+    await fifteenMinutesPass(asked.conversationId)
+    expect(await postponed(model, asked.conversationId, asked.messageId)).toBe("done")
+    expect(await agentMessages(asked.conversationId)).toEqual(["Te ayudo con eso."])
+  })
+
+  it("quien responde citando lo último de una ráfaga responde también lo anterior: el agente no contesta encima", async () => {
+    await carla()
+    const model = answer()
+    const first = await ingestText("tg:cita-rafaga", "evt-cita-rafaga-1", "hola")
+    const second = await ingestText("tg:cita-rafaga", "evt-cita-rafaga-2", "me duele el diente")
+    await withOrgContext(appDb, "org_a", (tx) =>
+      sendOutbound(tx, "org_a", { conversationId: second.conversationId, senderKind: "user", senderUserId: CARLA, replyToMessageId: second.messageId, content: { type: "text", text: "¿Desde cuándo te duele?" } }))
+    await fifteenMinutesPass(second.conversationId)
+    expect(await postponed(model, second.conversationId, second.messageId)).toBe("done")
+    expect(await postponed(model, first.conversationId, first.messageId)).toBe("done")
+    expect(await agentMessages(second.conversationId)).toEqual([])
+    expect(model.seen).toHaveLength(0)
+  })
+
+  it("lo que el equipo no logró enviar no lo hace esperar", async () => {
+    await carla()
+    const model = answer()
+    const first = await ingestText("tg:rechazado", "evt-rechazado-1", "Hola")
+    const rejected = await write(first.conversationId, "Hola, soy Carla")
+    await ownerDb.update(message).set({ status: "failed" }).where(eq(message.id, rejected.id))
+    const asked = await ingestText("tg:rechazado", "evt-rechazado-2", "¿Tienen hora mañana?")
+    expect(await runScripted(model, asked.conversationId, asked.messageId)).toBe("done")
+    expect(await agentMessages(asked.conversationId)).toEqual(["Te ayudo con eso."])
+  })
+
+  it("un botón del equipo en medio no parte lo que la persona viene escribiendo", async () => {
+    await carla()
+    const model = answer()
+    const first = await ingestText("tg:rafaga-boton", "evt-rafaga-boton-1", "hola")
+    const second = await ingestText("tg:rafaga-boton", "evt-rafaga-boton-2", "me duele el diente")
+    await write(second.conversationId, "Te dejamos aquí lo que tienes pendiente", true)
+    expect(await runScripted(model, second.conversationId, second.messageId)).toBe("done")
+    expect(await agentMessages(second.conversationId)).toEqual(["Te ayudo con eso."])
+    // Las dos quedaron atendidas en una sola corrida: la del primero no vuelve a responder.
+    expect(await runScripted(model, first.conversationId, first.messageId)).toBe("done")
+    expect(await agentMessages(first.conversationId)).toEqual(["Te ayudo con eso."])
+  })
+
+  it("quien cita lo que se le mandó con un botón recibe respuesta; quien cita lo que le escribieron va al tema de esa persona", async () => {
+    await carla()
+    const model = answer()
+    const linked = await ingestText("tg:cita-boton", "evt-cita-boton-1", "Hola")
+    const link = await write(linked.conversationId, "Te dejamos aquí lo que tienes pendiente", true)
+    const broken = await ingestText("tg:cita-boton", "evt-cita-boton-2", "no me abre el enlace")
+    await ownerDb.update(message).set({ replyToMessageId: link.id }).where(eq(message.id, broken.messageId))
+    expect(await runScripted(model, broken.conversationId, broken.messageId)).toBe("done")
+    expect(await agentMessages(broken.conversationId)).toEqual(["Te ayudo con eso."])
+
+    // El tema queda a su nombre: tiene que ser del equipo de la clínica.
+    await ownerDb.execute(sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values ('m-carla-cita', 'org_a', ${CARLA}, 'owner', now())`)
+    onTestFinished(() => ownerDb.execute(sql`delete from "member" where id = 'm-carla-cita'`).then(() => undefined))
+    const typed = await ingestText("tg:cita-escrito", "evt-cita-escrito-1", "Hola")
+    const said = await write(typed.conversationId, "Te llamo en un rato")
+    await fifteenMinutesPass(typed.conversationId)
+    const quoted = await ingestText("tg:cita-escrito", "evt-cita-escrito-2", "¿A qué hora me llamas?")
+    await ownerDb.update(message).set({ replyToMessageId: said.id }).where(eq(message.id, quoted.messageId))
+    expect(await runScripted(model, quoted.conversationId, quoted.messageId)).toBe("done")
+    expect(await agentMessages(quoted.conversationId)).toEqual([])
+    const topics = await withOrgContext(appDb, "org_a", (tx) =>
+      tx.select({ assignee: agentHandoff.assigneeUserId }).from(agentHandoff).where(eq(agentHandoff.conversationId, quoted.conversationId)))
+    expect(topics).toEqual([{ assignee: CARLA }])
+  })
+})
+
 it("una urgencia sin señal de alarma pasa con prioridad alta y el aviso da el teléfono de la clínica, no el de emergencias (ADR 0084)", async () => {
   await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "baseline" }))
   await ownerDb.execute(sql`update "org_profile" set "emergency_phone" = '+5115550123' where "organization_id" = 'org_a'`)
@@ -2918,6 +3123,109 @@ it("con los horarios va siempre su enlace para ver toda la agenda: lo agrega el 
   const later = runCtx("trig-agenda-3")
   await offer(later, await search(later))
   expect(await withAgenda()).toHaveLength(1)
+})
+
+it("a quien pide cambiar su cita también le da su enlace, abierto en esa cita, una sola vez por atención", async () => {
+  const { conversationId } = await ingestText("tg:cambio-enlace", "evt-cambio-enlace-1", "Quiero cambiar mi cita")
+  const fx = await bookingFixture(conversationId, "cambio-enlace")
+  const route = { path: "cambio_cita", intent: "reschedule_or_cancel", handoff: null, confidence: null, urgency: null } as const
+  const runCtx = (triggerId: string, extra: Partial<AgentToolCtx> = {}): AgentToolCtx => ({
+    ...publicCtx(conversationId, fx.contactId), triggerId, route, ...extra,
+  })
+  let turn = 0
+  // Lo que sale al responder en ese turno: el mensaje entero, con lo que le agregue el sistema.
+  const reply = async (extra: Partial<AgentToolCtx> = {}) => {
+    turn += 1
+    await makeAgentTools(runCtx(`trig-cambio-${turn}`, extra)).find((item) => item.name === "send_reply")!.invoke({ text: `Respuesta ${turn}` })
+    return (await agentMessages(conversationId)).at(-1)!
+  }
+  const LINE = /\n\nLa cita( de [^\n]+)? también se puede cambiar o cancelar aquí: https:\/\/norte\.odentia\.test\/reserva\?token=\{\{su-enlace:[0-9a-f-]{36}\}\}$/
+  const day = upcomingMonday()
+  const at = (hour: number) => new Date(day.getTime() + hour * 3_600_000).toISOString()
+  const book = (hour: number) => withOrgContext(appDb, "org_a", (tx) =>
+    createAppointment(tx, "org_a", fx.actorId, {
+      branchId: fx.branchId, patientId: fx.patientId, professionalUserId: fx.professionalId, roomId: fx.roomId, startsAt: at(hour), durationMin: 45,
+    }))
+
+  // Sin cita por venir no hay nada que abrir.
+  expect(await reply()).not.toContain("/reserva?")
+  // Con dos, la página podría abrir la que no quiere cambiar: se aclara por el chat.
+  const first = await book(10)
+  const second = await book(11)
+  expect(await reply()).not.toContain("/reserva?")
+  await ownerDb.update(appointment).set({ status: "cancelada" }).where(eq(appointment.id, first.id))
+
+  // Ya con una: no va con un acto de cita en la corrida, con algo esperando su sí ni en otro camino.
+  expect(await reply({ toolsUsed: ["reprogramar_cita"] })).not.toContain("/reserva?")
+  expect(await reply({ casePending: true })).not.toContain("/reserva?")
+  expect(await reply({ route: { ...route, path: "abierto" } })).not.toContain("/reserva?")
+
+  // Un enlace que le ofrecía reservar sigue igual, y un mensaje con enlace que no salió no cuenta como dado.
+  await withOrgContext(appDb, "org_a", (tx) => createBookingLink(tx, "org_a", { conversationId }, { secretsKey: KEY }))
+  await ownerDb.insert(message).values({ organizationId: "org_a", conversationId, direction: "out", senderKind: "agent", body: "Tu enlace: https://norte.odentia.test/reserva?token=x", status: "failed" })
+  const sent = await reply()
+  expect(sent).toMatch(LINE)
+  const links = () => withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(appointmentBookingLink).where(eq(appointmentBookingLink.conversationId, conversationId)))
+  expect(await links()).toEqual([expect.objectContaining({ booking: true })])
+  // En la misma atención ya lo tiene: no se le repite.
+  expect(await reply()).not.toContain("/reserva?")
+
+  // Aunque el enlace venga apuntando a la cita que canceló, la página abre la que sigue en pie.
+  await ownerDb.update(appointmentBookingLink).set({ appointmentId: first.id }).where(eq(appointmentBookingLink.id, (await links())[0]!.id))
+
+  // Y con ese enlace la cambia de verdad.
+  const token = /token=([0-9a-f]{64})/.exec(resolvePersonalLinkRefs(sent, KEY))![1]!
+  // La página abre esa cita y deja cambiarla.
+  const view = await withOrgContext(appDb, "org_a", (tx) => getPersonalLinkView(tx, "org_a", token))
+  expect(view).toMatchObject({ status: "abierto", appointment: { canChange: true, startsAt: at(11) } })
+  await withOrgContext(appDb, "org_a", (tx) =>
+    changeBookingLinkAppointment(tx, "org_a", token, { startsAt: at(12), professionalUserId: fx.professionalId, roomId: fx.roomId }, { secretsKey: KEY }))
+  const [moved] = await ownerDb.select({ startsAt: appointment.startsAt }).from(appointment).where(eq(appointment.id, second.id))
+  expect(moved!.startsAt.toISOString()).toBe(at(12))
+})
+
+it("el enlace para cambiar una cita pide lo mismo que el chat: un familiar sin autorización no lo recibe", async () => {
+  const seed = await ingestText("tg:cambio-paciente", "evt-cambio-paciente", "Hola")
+  const fx = await bookingFixture(seed.conversationId, "cambio-familiar")
+  const route = { path: "cambio_cita", intent: "reschedule_or_cancel", handoff: null, confidence: null, urgency: null } as const
+  await withOrgContext(appDb, "org_a", (tx) =>
+    createAppointment(tx, "org_a", fx.actorId, {
+      branchId: fx.branchId, patientId: fx.patientId, professionalUserId: fx.professionalId, roomId: fx.roomId,
+      startsAt: new Date(upcomingMonday().getTime() + 10 * 3_600_000).toISOString(), durationMin: 45,
+    }))
+  const { conversationId } = await ingestText("tg:cambio-familiar", "evt-cambio-familiar", "Quiero cancelar la cita de mi mamá")
+  const [thread] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
+  await ownerDb.insert(patientContact).values({ organizationId: "org_a", patientId: fx.patientId, contactId: thread!.contactId, relationship: "family" })
+  let turn = 0
+  const reply = async () => {
+    turn += 1
+    await makeAgentTools({ ...publicCtx(conversationId, thread!.contactId), triggerId: `trig-familiar-${turn}`, route })
+      .find((item) => item.name === "send_reply")!.invoke({ text: `Respuesta ${turn}` })
+    return (await agentMessages(conversationId)).at(-1)!
+  }
+  expect(await reply()).not.toContain("/reserva?")
+  // Con su autorización vigente, sí, y dice de quién es la cita.
+  await ownerDb.insert(patientResponsibility).values({ organizationId: "org_a", patientId: fx.patientId, contactId: thread!.contactId, kind: "autorizado_informacion", startsAt: "2020-01-01" })
+  expect(await reply()).toMatch(/\n\nLa cita de Paciente cambio-familiar también se puede cambiar o cancelar aquí: /)
+})
+
+it("también en el aviso de un pase al equipo, quien pide cambiar su cita recibe su enlace", async () => {
+  const { conversationId, messageId } = await ingestText("tg:cambio-pase", "evt-cambio-pase", "Quiero cambiar mi cita")
+  const fx = await bookingFixture(conversationId, "cambio-pase")
+  await withOrgContext(appDb, "org_a", (tx) =>
+    createAppointment(tx, "org_a", fx.actorId, {
+      branchId: fx.branchId, patientId: fx.patientId, professionalUserId: fx.professionalId, roomId: fx.roomId,
+      startsAt: new Date(upcomingMonday().getTime() + 10 * 3_600_000).toISOString(), durationMin: 45,
+    }))
+  const ctx: AgentToolCtx = {
+    ...publicCtx(conversationId, fx.contactId),
+    triggerId: messageId,
+    route: { path: "cambio_cita", intent: "reschedule_or_cancel", handoff: null, confidence: null, urgency: null },
+  }
+  await makeAgentTools(ctx).find((item) => item.name === "request_human_handoff")!.invoke({ reason: "Pide cambiar su cita", summary: "Pide cambiar su cita", message: "Una persona del equipo te responde por aquí." })
+  expect((await agentMessages(conversationId)).at(-1)).toMatch(/^Una persona del equipo te responde por aquí\.\n\nLa cita también se puede cambiar o cancelar aquí: /)
 })
 
 it("mientras la persona sigue escribiendo la corrida se pospone, y el tope evita esperar de más", async () => {

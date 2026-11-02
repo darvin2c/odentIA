@@ -36,6 +36,7 @@ import {
   setKnowledgeStatus,
   updateKnowledgeEntry,
 } from "./knowledge.js"
+import { teamWroteSql } from "./conversation-state.js"
 
 /* ---------- Aprender: revisar lo dudoso, corregir y aprobar lo que el agente aprende ---------- */
 
@@ -326,7 +327,7 @@ async function syncGapsIntoReview(tx: Db, orgId: string): Promise<number> {
     left join lateral (
       select m.body from message m
       where m.organization_id = g.organization_id and m.conversation_id = g.conversation_id
-        and m.direction = 'out' and m.sender_kind = 'user' and m.body is not null and m.created_at > g.created_at
+        and ${teamWroteSql(sql.raw("m"))} and m.body is not null and m.created_at > g.created_at
       order by m.created_at asc limit 1
     ) team on true
     left join lateral (
@@ -633,7 +634,7 @@ async function conversationAround(
   const [team] = await tx
     .select(columns)
     .from(message)
-    .where(and(inThread, eq(message.direction, "out"), eq(message.senderKind, "user"), sql`${message.createdAt} > ${timeOf((reply ?? trigger).id)}`))
+    .where(and(inThread, teamWroteSql(sql.raw('"message"')), sql`${message.createdAt} > ${timeOf((reply ?? trigger).id)}`))
     .orderBy(asc(message.createdAt))
     .limit(1)
   const line = (row: (typeof earlier)[number], role: AnswerConversationMessage["role"]): AnswerConversationMessage => ({

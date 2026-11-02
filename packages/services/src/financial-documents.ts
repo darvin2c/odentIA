@@ -1091,6 +1091,7 @@ export async function deliverDocumentPdf(
     conversationId,
     senderKind,
     ...(senderKind === "user" && actorUserId ? { senderUserId: actorUserId } : {}),
+    fromAction: true,
     content: {
       type: "media",
       attachment: { ...ref, filename: asciiFilename(input.filename) },

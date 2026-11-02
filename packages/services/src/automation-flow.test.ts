@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { channelAdapters } from "@odentia/channels"
 import { type Db, withOrgContext } from "@odentia/db"
-import { agentProposal } from "@odentia/db/schema/agent"
+import { agentActionLog, agentProposal } from "@odentia/db/schema/agent"
 import { appointment, appointmentBookingLink, scheduleRoom } from "@odentia/db/schema/agenda"
 import { professionalSchedule } from "@odentia/db/schema/availability"
 import { member, user } from "@odentia/db/schema/auth"
@@ -804,10 +804,14 @@ describe("los botones que resuelve el sistema, sin modelo", () => {
     ])
     const thread = await ownerDb.select().from(message).where(eq(message.conversationId, p.conversationId!)).orderBy(asc(message.createdAt))
     expect(thread.at(-1)).toMatchObject({ direction: "out", senderKind: "agent", body: "¡Listo! Tu cita quedó confirmada. Te esperamos." })
+    // Queda en el hilo, y así el ciclo sabe que ya no se espera nada de la persona (ADR 0113).
+    const logged = () => ownerDb.select({ kind: agentActionLog.kind, title: agentActionLog.title }).from(agentActionLog).where(eq(agentActionLog.conversationId, p.conversationId!))
+    expect(await logged()).toEqual([{ kind: "cita", title: "confirmó una cita" }])
     // Tocarlo otra vez no cambia nada y lo dice.
     await run(c, (tx) => handleAutomationReply(tx, c.orgId, { conversationId: p.conversationId!, replyId: replyId("confirmar", job.id) }))
     const again = await ownerDb.select().from(message).where(eq(message.conversationId, p.conversationId!)).orderBy(asc(message.createdAt))
     expect(again.at(-1)?.body).toBe("Tu cita ya estaba confirmada. ¡Te esperamos!")
+    expect(await logged()).toHaveLength(1)
   })
 
   it("«Confirmar» en una conversación cerrada: el toque la reabre, confirma la cita y el mensaje no se pierde", async () => {

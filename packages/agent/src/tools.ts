@@ -54,6 +54,7 @@ import {
   getOrgLocale,
   getProposal,
   issueAgendaLink,
+  issueChangeLink,
   latestOpenTopic,
   listAgentContextCandidates,
   reportPatientNameMismatch,
@@ -226,6 +227,12 @@ function agendaPhrase(url: string, forName: string | null, language: "es" | "en"
   return `La agenda completa, para elegir el día, la hora y con quién${forName ? ` (la cita queda a nombre de ${forName})` : ""}: ${url}`
 }
 
+/** Sirve igual a quien se trata de tú o de usted. */
+function changePhrase(url: string, forName: string | null, language: "es" | "en" | null | undefined): string {
+  if (language === "en") return `${forName ? `${forName}'s appointment` : "The appointment"} can also be changed or canceled here: ${url}`
+  return `La cita${forName ? ` de ${forName}` : ""} también se puede cambiar o cancelar aquí: ${url}`
+}
+
 /** La hora propuesta no salió de ningún hueco consultado: el modelo la inventó o la tomó de otra cosa (un horario de atención). */
 const SLOT_NOT_OFFERED =
   "Ese horario no está entre los huecos que consultaste con ese profesional: no se propuso. Si la persona aceptó una hora que le ofreciste, usa los datos exactos de ese hueco; si no los tienes a la vista o pidió una hora que no estaba entre los repartidos, vuelve a consultar con buscar_huecos desde esa hora (esa sede y ese profesional) y propone el hueco de la hora que le dijiste."
@@ -241,16 +248,38 @@ export function slotWasOffered(
   input: { startsAt: string; professionalUserId: string; roomId: string },
 ): boolean {
   if (!evidence) return true
+  return offeredLines(evidence, input).length > 0
+}
+
+/** Las líneas de `buscar_huecos` con ese hueco, de la más antigua a la más reciente. */
+function offeredLines(
+  evidence: { text: string }[],
+  input: { startsAt: string; professionalUserId: string; roomId: string },
+): RegExpMatchArray[] {
   const wanted = Date.parse(input.startsAt)
-  if (Number.isNaN(wanted)) return false
+  if (Number.isNaN(wanted)) return []
   const professional = input.professionalUserId.trim().toLowerCase()
-  const slot = /\[startsAt (\S+) · sede \S+ · (.+?) · profesional ([^\]\s]+)\]/g
-  return evidence.some((item) =>
-    [...item.text.matchAll(slot)].some(
-      ([, startsAt = "", room = "", ref = ""]) =>
+  const slot = /(?:(\d{2})[:.](\d{2})–(\d{2})[:.](\d{2})[^\n[]*)?\[startsAt (\S+) · sede \S+ · (.+?) · profesional ([^\]\s]+)\]/g
+  return evidence.flatMap((item) =>
+    [...item.text.matchAll(slot)].filter(
+      ([, , , , , startsAt = "", room = "", ref = ""]) =>
         Date.parse(startsAt) === wanted && ref.toLowerCase() === professional && room.includes(input.roomId),
     ),
   )
+}
+
+/**
+ * Cuánto dura el hueco ofrecido, leído de lo último que se le mostró al modelo
+ * («17:30–18:00»). Nulo si no se ofreció o la línea no lo dice.
+ */
+export function offeredSlotMinutes(
+  evidence: { text: string }[] | undefined,
+  input: { startsAt: string; professionalUserId: string; roomId: string },
+): number | null {
+  const [, fromHour, fromMinute, toHour, toMinute] = offeredLines(evidence ?? [], input).at(-1) ?? []
+  if (!fromHour || !fromMinute || !toHour || !toMinute) return null
+  const minutes = Number(toHour) * 60 + Number(toMinute) - (Number(fromHour) * 60 + Number(fromMinute))
+  return minutes > 0 ? minutes : null
 }
 
 /**
@@ -907,8 +936,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
    * lee y el token no pasa por el modelo ni queda guardado (el mensaje lleva la referencia y el
    * worker pone el token al entregarlo, ADR 0037). Es una oferta la respuesta con dos o más horas
    * después de buscar huecos en la corrida. No va con la cita que se propone, mueve o confirma en
-   * la corrida, con otra esperando su sí, al cambiar una cita ni a quien ya tiene una por venir
-   * (`issueAgendaLink`: la página le mostraría esa cita).
+   * la corrida, con otra esperando su sí, al cambiar una cita (ahí va `withChangeLink`) ni a quien
+   * ya tiene una por venir (`issueAgendaLink`: la página le mostraría esa cita).
    */
   const withAgenda = async (text: string): Promise<string> => {
     const sought = ctx.gapsSought
@@ -916,24 +945,59 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     if (!sought || !publicUrl || ctx.dryRun || ctx.casePending || ctx.route?.path === "cambio_cita") return text
     // Ya lleva su enlace (el de reserva, o el que trae la hora elegida: `/reserva?sede=…&token=…`): no va otro.
     if (APPOINTMENT_ACTS.some((name) => ctx.toolsUsed.includes(name)) || text.includes("/reserva?") || timesIn(text) < 2) return text
+    return appendLinkLine(text, publicUrl, async (tx, origin) => {
+      const link = await issueAgendaLink(
+        tx,
+        ctx.orgId,
+        { conversationId: ctx.conversationId, ...(sought.branchId ? { branchId: sought.branchId } : {}), ...(sought.serviceId ? { serviceId: sought.serviceId } : {}) },
+        { secretsKey: ctx.secretsKey },
+      )
+      return link ? agendaPhrase(personalLinkAddress(origin, personalLinkRef(link.linkId)), link.forName, ctx.personLanguage) : null
+    })
+  }
+
+  /**
+   * Agrega al mensaje la línea de un enlace. Acompaña: si no se puede emitir, el mensaje sale igual.
+   * Lo esperado (una prueba, varios pacientes, sin registro en línea) es un error del servicio; lo
+   * demás se deja ver, para que un fallo no deje de ofrecer el enlace sin que nadie lo sepa.
+   */
+  const appendLinkLine = async (
+    text: string,
+    publicUrl: NonNullable<AgentToolCtx["publicUrl"]>,
+    lineFor: (tx: Db, origin: string) => Promise<string | null>,
+  ): Promise<string> => {
     try {
       const line = await inOrg(async (tx) => {
         const origin = await clinicLinkOrigin(tx, publicUrl)
-        if (!origin) return null
-        const link = await issueAgendaLink(
-          tx,
-          ctx.orgId,
-          { conversationId: ctx.conversationId, ...(sought.branchId ? { branchId: sought.branchId } : {}), ...(sought.serviceId ? { serviceId: sought.serviceId } : {}) },
-          { secretsKey: ctx.secretsKey },
-        )
-        return link ? agendaPhrase(personalLinkAddress(origin, personalLinkRef(link.linkId)), link.forName, ctx.personLanguage) : null
+        return origin ? lineFor(tx, origin) : null
       })
       return line ? `${text}\n\n${line}` : text
-    } catch {
-      // La agenda acompaña: si no se puede emitir (una prueba, varios pacientes, sin registro en línea), los horarios salen igual.
+    } catch (error) {
+      if (!(error instanceof ServiceError)) {
+        console.error(`agent: no se pudo agregar el enlace (${error instanceof Error ? error.message : String(error)})`)
+      }
       return text
     }
   }
+
+  /**
+   * Quien pide cambiar o cancelar su cita puede hacerlo por el chat o en su enlace, donde la ve y
+   * elige otra hora. Como la agenda, lo agrega el código al enviar: sale sin depender del modelo
+   * y sin darle otra herramienta en ese camino, también en el aviso de un pase al equipo. No va
+   * con un acto de cita en la corrida ni con algo esperando su sí; `issueChangeLink` decide si
+   * hay una cita que abrir y si se le puede dar.
+   */
+  const withChangeLink = async (text: string): Promise<string> => {
+    const publicUrl = ctx.publicUrl
+    if (ctx.route?.path !== "cambio_cita" || !publicUrl || ctx.dryRun || ctx.casePending) return text
+    if (APPOINTMENT_ACTS.some((name) => ctx.toolsUsed.includes(name)) || text.includes("/reserva?")) return text
+    return appendLinkLine(text, publicUrl, async (tx, origin) => {
+      const link = await issueChangeLink(tx, ctx.orgId, { conversationId: ctx.conversationId }, { secretsKey: ctx.secretsKey })
+      return link ? changePhrase(personalLinkAddress(origin, personalLinkRef(link.linkId)), link.forName, ctx.personLanguage) : null
+    })
+  }
+
+  const withLinks = async (text: string): Promise<string> => withChangeLink(await withAgenda(text))
 
   /** Le pregunta su nombre dos veces en el mismo mensaje (auditoría del ADR 0104). Una vez por corrida. */
   const nameTwice = (text: string): string | null => {
@@ -1067,8 +1131,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       if (takenOver) return takenOver
       const kept = await personKeptWriting()
       if (kept) return kept
-      // Con horarios, su enlace para ver toda la agenda; se emite solo ahora, cuando sale.
-      const out = await withAgenda(text)
+      // Con horarios, su enlace para ver toda la agenda; al cambiar una cita, el que abre esa cita. Se emiten solo ahora, cuando sale.
+      const out = await withLinks(text)
       const sent: ProposalItem[] = []
       // La pregunta que confirma una lista (la respuesta a un presupuesto) lleva «Sí» y «No».
       const buttons = ctx.confirmButtonsFor ? { buttons: proposalConfirmButtons(ctx.confirmButtonsFor) } : {}
@@ -1724,7 +1788,10 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         }
       })()
       if (viaLink) return viaLink
-      const { reason, ...payload } = { ...input, professionalUserId }
+      // Sin servicio ni duración, la cita dura lo que el hueco ofrecido. Si no, se reserva lo que dura
+      // una cita en la sede, y una hora ofrecida al final del turno ya no cabe al confirmarla.
+      const slotMinutes = input.durationMin === undefined && !input.serviceId ? offeredSlotMinutes(ctx.evidence, input) : null
+      const { reason, ...payload } = { ...input, professionalUserId, ...(slotMinutes ? { durationMin: slotMinutes } : {}) }
       let created: ProposalItem | undefined
       const proposed = await propose("reservar_cita", payload, "proponer_cita", reason, (p) => {
         created = p
@@ -2504,7 +2571,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         // El caso ya pasó a una persona en esta corrida (lo decidió el camino):
         // no se registra otra derivación, solo sale el aviso al interlocutor.
         if (!notice) return "El caso ya pasó a una persona. Falta el aviso al interlocutor: llama de nuevo con message."
-        const outcome = await propose("enviar_mensaje", { kind: "text", text: await withAgenda(notice) }, "request_human_handoff")
+        const outcome = await propose("enviar_mensaje", { kind: "text", text: await withLinks(notice) }, "request_human_handoff")
         await annotate(ctx.replySettled === true)
         return ctx.replySettled
           ? "Aviso al interlocutor registrado. No envíes más mensajes."
@@ -2526,7 +2593,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           await annotate(false)
           return `Ese tema ya lo tiene el equipo${again.noted ? " y lo que volvió a decir quedó anotado en él" : ""}.${raised} ${REPLY_ASKED_AGAIN}`
         }
-        const outcome = await propose("enviar_mensaje", { kind: "text", text: await withAgenda(notice) }, "request_human_handoff")
+        const outcome = await propose("enviar_mensaje", { kind: "text", text: await withLinks(notice) }, "request_human_handoff")
         await annotate(ctx.replySettled === true)
         return ctx.replySettled ? `Ese tema ya lo tiene el equipo: ${again.noted ? "lo anoté en él y salió" : "salió"} el aviso. No envíes más mensajes.` : `El aviso al interlocutor no salió: ${outcome}`
       }
@@ -2554,7 +2621,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         ctx.handoffNeedsReply = true
         return `Tema pasado al equipo (${destino}). ${REPLY_AFTER_HANDOFF}`
       }
-      const outcome = await propose("enviar_mensaje", { kind: "text", text: await withAgenda(notice) }, "request_human_handoff")
+      const outcome = await propose("enviar_mensaje", { kind: "text", text: await withLinks(notice) }, "request_human_handoff")
       const noticeResult = ctx.replySettled ? " Aviso al interlocutor registrado." : ` El aviso al interlocutor no salió: ${outcome}`
       if (ctx.replySettled) await annotate(true)
       return `Tema pasado al equipo (${destino}).${noticeResult} No envíes nada más por este mensaje; en los siguientes sigues atendiendo todo lo demás.`

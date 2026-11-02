@@ -1,0 +1,1 @@
+ALTER TABLE "message" ADD COLUMN "from_action" boolean DEFAULT false NOT NULL;

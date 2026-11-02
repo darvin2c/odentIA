@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
+import { recordAgentAction } from "./agent-actions.js"
 import { type Db, withOrgContext } from "@odentia/db"
-import { agentCaseMemory, agentHandoff, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
+import { agentActionLog, agentCaseMemory, agentHandoff, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
 import { agentConfig, channelConnection, contact, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { crmNote } from "@odentia/db/schema/crm-workspace"
@@ -202,12 +203,34 @@ describe("«Resolver», «Tomar» y «Devolver al agente»", () => {
       farewellText: "Diana, cuando quieras retomar, escríbenos por aquí: estamos atentos para ayudarte.",
       handoffs: 1,
       pendingContact: 0,
+      unanswered: true,
     })
     await c.run((tx) => resolveConversationByTeam(tx, c.orgId, conv.id, c.receptionId))
     expect(await c.row(conv.id)).toMatchObject({ status: "closed", closeReason: "equipo", closedByUserId: c.receptionId, agentStatus: "on" })
-    expect((await c.messages(conv.id)).at(-1)).toMatchObject({ direction: "out", senderUserId: c.receptionId, body: "Diana, cuando quieras retomar, escríbenos por aquí: estamos atentos para ayudarte." })
+    // La despedida es de quien resolvió, pero no la escribió: si vuelve a escribir, el agente no la espera.
+    expect((await c.messages(conv.id)).at(-1)).toMatchObject({ direction: "out", senderUserId: c.receptionId, fromAction: true, body: "Diana, cuando quieras retomar, escríbenos por aquí: estamos atentos para ayudarte." })
     const late = await c.thread("Eva", { lastInboundAt: new Date(Date.now() - 24 * HOUR) })
     expect(await c.run((tx) => getResolvePreview(tx, c.orgId, late.id))).toMatchObject({ farewell: false, farewellText: null })
+  })
+
+  it("antes de cerrar dice si lo último que escribió sigue sin respuesta", async () => {
+    const c = await clinic()
+    const conv = await c.thread("Inés Ruiz")
+    await c.say(conv.id, "in", "Me duele el diente", new Date(Date.now() - HOUR))
+    expect(await c.run((tx) => getResolvePreview(tx, c.orgId, conv.id))).toMatchObject({ unanswered: true })
+    await c.say(conv.id, "out", "¿Le busco una hora?", new Date(Date.now() - HOUR / 2))
+    expect(await c.run((tx) => getResolvePreview(tx, c.orgId, conv.id))).toMatchObject({ unanswered: false })
+    // Un botón del equipo no responde lo que preguntó; lo que va en camino no se da por olvidado.
+    const button = await c.thread("Jorge Paz")
+    await c.say(button.id, "in", "¿Cuánto debo?", new Date(Date.now() - HOUR))
+    const [link] = await c.say(button.id, "out", "Te dejamos aquí tu enlace", new Date(Date.now() - HOUR / 2), "user")
+    await ownerDb.update(message).set({ fromAction: true }).where(eq(message.id, link!.id))
+    expect(await c.run((tx) => getResolvePreview(tx, c.orgId, button.id))).toMatchObject({ unanswered: true })
+    const held = await c.thread("Karen Lima")
+    await c.say(held.id, "in", "¿Cuánto debo?", new Date(Date.now() - HOUR))
+    const [reply] = await c.say(held.id, "out", "Debes 40 soles", new Date(Date.now() - HOUR / 2), "user")
+    await ownerDb.update(message).set({ status: "held" }).where(eq(message.id, reply!.id))
+    expect(await c.run((tx) => getResolvePreview(tx, c.orgId, held.id))).toMatchObject({ unanswered: false })
   })
 
   it("completar la tarea de un tema no cierra la conversación: el agente sigue con lo demás (ADR 0050)", async () => {
@@ -309,6 +332,80 @@ describe("el ciclo: insistir una vez y cerrar por silencio", () => {
     // La atención siguiente sabe cómo terminó esta.
     const [memory] = await ownerDb.select().from(agentCaseMemory).where(eq(agentCaseMemory.conversationId, conv.id))
     expect(memory?.notes[0]?.text).toContain("terminó con su cita reservada")
+  })
+
+  it("quien movió su cita desde su enlace ya no debe nada: a la hora sin mensajes se da por resuelta, sin escribirle (ADR 0113)", async () => {
+    const c = await clinic()
+    const conv = await c.thread("Javier Luna", { lastInboundAt: IN, lastMessageAt: OUT, attentionStartedAt: IN })
+    await c.say(conv.id, "in", "Hola, ¿puedo ver mis documentos?", IN)
+    await ownerDb.insert(agentActionLog).values({ organizationId: c.orgId, conversationId: conv.id, kind: "cita", title: "movió una cita", createdAt: OUT })
+    await c.say(conv.id, "out", "Listo: tu cita quedó cambiada para el viernes a las 5:00 p. m.", OUT)
+    expect(await tick(c, new Date("2026-10-12T14:51:00Z"))).toEqual({ nudged: 0, closed: 0 })
+    expect(await tick(c, new Date("2026-10-12T15:02:00Z"))).toMatchObject({ closed: 1 })
+    expect(await c.row(conv.id)).toMatchObject({ status: "closed", closeReason: "resuelta" })
+    expect((await c.messages(conv.id)).at(-1)?.body).toBe("Listo: tu cita quedó cambiada para el viernes a las 5:00 p. m.")
+    const [memory] = await ownerDb.select().from(agentCaseMemory).where(eq(agentCaseMemory.conversationId, conv.id))
+    expect(memory?.notes[0]?.text).toContain("dejó resuelto lo de su cita")
+  })
+
+  it("lo mismo si la movió por el chat; pero si lo último le pregunta algo, o escribió después, sigue esperando", async () => {
+    const c = await clinic()
+    const proposal = (conversationId: string, executedAt: Date) => ownerDb.insert(agentProposal).values({
+      organizationId: c.orgId, conversationId, action: "reprogramar_cita", payload: {}, afterSummary: "Cita movida",
+      status: "ejecutada", executedAt, idempotencyKey: randomUUID(),
+    })
+    const moved = await c.thread("Ana Cruz", { lastInboundAt: IN, lastMessageAt: OUT, attentionStartedAt: IN })
+    await c.say(moved.id, "in", "Sí, cámbiala", IN)
+    await proposal(moved.id, OUT)
+    await c.say(moved.id, "out", "Listo, tu cita quedó para el lunes.", OUT)
+    const asks = await c.thread("Bea Soto", { lastInboundAt: IN, lastMessageAt: OUT, attentionStartedAt: IN })
+    await c.say(asks.id, "in", "Sí, cámbiala", IN)
+    await proposal(asks.id, OUT)
+    await c.say(asks.id, "out", "Listo. ¿Quieres otra cita?\n\nMira la agenda: https://clinica.test/a?b=1", OUT)
+    const older = await c.thread("Clara Díaz", { lastInboundAt: IN, lastMessageAt: OUT, attentionStartedAt: new Date(IN.getTime() - HOUR) })
+    await proposal(older.id, new Date(IN.getTime() - 30 * 60_000))
+    await c.say(older.id, "in", "¿Y cuánto cuesta?", IN)
+    await c.say(older.id, "out", "Cuesta 120 soles.", OUT)
+    const linked = await c.thread("Dina Mora", { lastInboundAt: IN, lastMessageAt: OUT, attentionStartedAt: IN })
+    await c.say(linked.id, "in", "Sí, cámbiala", IN)
+    await proposal(linked.id, OUT)
+    await c.say(linked.id, "out", "Listo. Tus datos: https://clinica.test/a?b=1", OUT)
+    // Le ofreció otra hora sin signo de pregunta: espera su elección.
+    const offering = await c.thread("Elsa Vera", { lastInboundAt: IN, lastMessageAt: OUT, attentionStartedAt: IN })
+    await c.say(offering.id, "in", "Sí, cancélala", IN)
+    await proposal(offering.id, OUT)
+    await c.say(offering.id, "out", "Listo, cancelada. Tengo libre mañana a las 10:00, dime si te queda.", OUT)
+    await ownerDb.insert(agentRunLedger).values({
+      organizationId: c.orgId, conversationId: offering.id, model: "fake", status: "ok",
+      startedAt: IN, endedAt: new Date(OUT.getTime() + 1000), toolsUsed: ["confirmar_propuesta", "buscar_huecos", "send_reply"],
+    })
+    // Un botón del equipo después de su pregunta no la tapa.
+    const covered = await c.thread("Fani Ríos", { lastInboundAt: IN, lastMessageAt: OUT, attentionStartedAt: IN })
+    await c.say(covered.id, "in", "Sí, cámbiala", IN)
+    await proposal(covered.id, OUT)
+    await c.say(covered.id, "out", "Listo. ¿Quieres otra fecha?", OUT)
+    const [button] = await c.say(covered.id, "out", "Te enviamos tu comprobante", new Date(OUT.getTime() + 1000), "user")
+    await ownerDb.update(message).set({ fromAction: true }).where(eq(message.id, button!.id))
+    expect(await tick(c, new Date("2026-10-12T15:02:00Z"))).toMatchObject({ closed: 2 })
+    expect(await c.row(moved.id)).toMatchObject({ status: "closed", closeReason: "resuelta" })
+    expect(await c.row(linked.id)).toMatchObject({ status: "closed", closeReason: "resuelta" })
+    expect(await c.row(asks.id)).toMatchObject({ status: "open" })
+    expect(await c.row(older.id)).toMatchObject({ status: "open" })
+    expect(await c.row(offering.id)).toMatchObject({ status: "open" })
+    expect(await c.row(covered.id)).toMatchObject({ status: "open" })
+  })
+
+  it("lo que se anota en la misma transacción que guarda su mensaje queda después de él", async () => {
+    const c = await clinic()
+    const conv = await c.thread("Gina Paz")
+    const inboundAt = await c.run(async (tx) => {
+      const when = new Date()
+      await tx.update(conversation).set({ lastInboundAt: when }).where(eq(conversation.id, conv.id))
+      await recordAgentAction(tx, c.orgId, { conversationId: conv.id, kind: "cita", title: "confirmó una cita", detail: "desde el recordatorio" })
+      return when
+    })
+    const [action] = await ownerDb.select({ createdAt: agentActionLog.createdAt }).from(agentActionLog).where(eq(agentActionLog.conversationId, conv.id))
+    expect(action!.createdAt.getTime()).toBeGreaterThanOrEqual(inboundAt.getTime())
   })
 
   it("sin algo por responder no insiste, fuera de horario tampoco, y cierra a la hora configurada", async () => {
@@ -489,6 +586,11 @@ describe("lo que el agente redactó no sale si el equipo apagó al agente, conve
     // Una persona del equipo escribió hace menos de 15 minutos: el agente espera (ADR 0050).
     expect(await c.run((tx) => agentReplyBlockedReason(tx, c.orgId, live.id))).toMatch(/conversando/)
     expect(await c.run((tx) => agentReplyBlockedReason(tx, c.orgId, earlier.id))).toBeNull()
+    // Le mandó su enlace con el botón: no está conversando y el agente responde.
+    const button = await c.thread("Fabiola Paz")
+    const [sentByButton] = await c.say(button.id, "out", "Te dejamos aquí lo que tienes pendiente", new Date(), "user")
+    await ownerDb.update(message).set({ fromAction: true }).where(eq(message.id, sentByButton!.id))
+    expect(await c.run((tx) => agentReplyBlockedReason(tx, c.orgId, button.id))).toBeNull()
   })
 })
 
@@ -758,6 +860,20 @@ describe("temas para el equipo: el agente nunca se calla (ADR 0050)", () => {
     await tick(c, new Date("2026-10-14T17:00:00Z"))
     const [task] = await ownerDb.select().from(crmTask).where(eq(crmTask.id, topic.taskId!))
     expect(task).toMatchObject({ status: "done", settledReason: "Respondido por el equipo; la persona no volvió a preguntar" })
+  })
+
+  it("un envío con un botón no da por respondido un tema, y una respuesta suelta sigue sin esperar al paciente", async () => {
+    const c = await clinic()
+    const conv = await c.thread("Olga", { lastInboundAt: IN, lastMessageAt: OUT, attentionStartedAt: IN })
+    await c.say(conv.id, "in", "Quiero poner un reclamo", IN)
+    const topic = await c.run((tx) => createHandoff(tx, c.orgId, null, { conversationId: conv.id, reason: "Reclamo", summary: "Reclamo", createdBy: "agent" }))
+    await ownerDb.update(agentHandoff).set({ createdAt: IN }).where(eq(agentHandoff.id, topic.id))
+    const [receipt] = await c.say(conv.id, "out", "Te enviamos tu comprobante", OUT, "user")
+    await ownerDb.update(message).set({ fromAction: true }).where(eq(message.id, receipt!.id))
+    await tick(c, new Date("2026-10-14T17:00:00Z"))
+    const [task] = await ownerDb.select().from(crmTask).where(eq(crmTask.id, topic.taskId!))
+    expect(task).toMatchObject({ status: "open" })
+    expect(await c.row(conv.id)).toMatchObject({ status: "open" })
   })
 
   it("el ciclo no da por respondido un tema si hay otros abiertos ni por un mensaje que cita otra cosa", async () => {

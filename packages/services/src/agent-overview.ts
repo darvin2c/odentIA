@@ -6,6 +6,7 @@ import { and, asc, count, desc, eq, gte, inArray, sql } from "drizzle-orm"
 import { getBranchHours } from "./agent-clinic-info.js"
 import { countLearningPending } from "./agent-learning.js"
 import { type AgentModelCheck, getAgentConfig } from "./agentConfig.js"
+import { teamWroteSql } from "./conversation-state.js"
 import { getKnowledgeDataSources, listActiveKnowledge } from "./knowledge.js"
 import { getOrgLocale } from "./locale.js"
 
@@ -117,7 +118,7 @@ async function agentOutcomes(tx: Db, orgId: string, since: Date): Promise<AgentO
       or exists (
         select 1 from message m
         where m.organization_id = ${orgId} and m.conversation_id = a.id
-          and m.direction = 'out' and m.sender_kind = 'user' and m.created_at >= ${at}::timestamptz))
+          and ${teamWroteSql(sql.raw("m"))} and m.created_at >= ${at}::timestamptz))
     )
     select (select count(*)::int from attended) as attended,
            (select count(*)::int from corrected) as corrected,

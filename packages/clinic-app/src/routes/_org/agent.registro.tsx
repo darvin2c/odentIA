@@ -261,7 +261,11 @@ function AgentSupervisionPage() {
             <span className="text-muted-foreground">
               {row.original.error === "burst-covered"
                 ? "Atendido en la corrida de otro mensaje del hilo"
-                : row.original.error}
+                : row.original.error === "team-answered"
+                  ? "Ya le respondió una persona del equipo"
+                  : row.original.error === "conversation-closed"
+                    ? "La conversación estaba cerrada"
+                    : row.original.error}
             </span>
           ) : (
             <span className="text-destructive">{row.original.error}</span>
