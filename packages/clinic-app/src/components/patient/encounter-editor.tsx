@@ -1,4 +1,4 @@
-import { formatMoney, formatVitals, parseVitals, VITAL_SIGNS, type Vitals, vitalsErrors } from "@odentia/clinical"
+import { appendDictated, formatMoney, formatVitals, parseVitals, VITAL_SIGNS, type Vitals, vitalsErrors } from "@odentia/clinical"
 import {
   Button,
   cn,
@@ -748,7 +748,17 @@ export function EncounterEditor({
     if (item.kind === "nota") {
       for (const key of DRAFT_TEXT_KEYS) {
         const value = item.payload[key]
-        if (typeof value === "string") editText(key, value)
+        if (typeof value !== "string") continue
+        const stored = item.joined?.[key]
+        if (stored !== undefined && !dirtyRef.current.has(key) && !inflightRef.current.has(key)) {
+          // Sin nada por guardar manda lo que quedó en el servidor: este borrador puede ir por detrás
+          // (al volver a la atención, en otra pestaña) y guardarlo borraría lo que había.
+          draftForm.setFieldValue(key, stored)
+          valuesRef.current[key] = stored
+        } else {
+          // Hay algo escrito que aún no se guardó: se une a eso, porque su guardado es el que queda.
+          editText(key, appendDictated(valuesRef.current[key], value, key))
+        }
       }
     }
     // Los signos y el examen confirmados pasan por los mismos editores, para que el borrador local no los pise.
@@ -780,6 +790,7 @@ export function EncounterEditor({
     encounterId,
     active: canWrite && attending,
     onApplied: applyDictation,
+    noteText: (key) => String(draftForm.getFieldValue(key as DraftTextKey) ?? ""),
   })
   // Sugerencias que el odontólogo aún no confirmó ni descartó.
   const dictationPending = dictation.enabled ? dictation.pending : 0
