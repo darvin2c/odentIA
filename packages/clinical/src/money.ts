@@ -420,6 +420,16 @@ export function commissionCents(input: {
   return asSafeCents(top / (asCents(input.amountCents) * 10_000n))
 }
 
+/**
+ * Espejo de la función SQL `money_commission`: la comisión del valor de una parte
+ * (`moneyValue`), hacia abajo. Con valor congelado es la misma cuenta de arriba; sin
+ * él, la moneda del negocio vale lo que dice y la otra sale del factor. Sin valor
+ * (`null`) no hay comisión que contar.
+ */
+export function commissionOfValue(value: MoneyFraction, rateBps: number): number {
+  return asSafeCents((value.num * asCents(rateBps)) / (value.den * 10_000n))
+}
+
 /** Reparte un total entero entre varias filas en proporción; el resto del redondeo va a la última. */
 export function splitCents(totalCents: number, weights: readonly number[]): number[] {
   const total = asCents(totalCents)

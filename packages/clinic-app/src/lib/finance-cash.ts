@@ -241,7 +241,13 @@ export interface TicketListRow {
   totalCents: number
   creditAppliedCents: number
   lines: Array<{ description: string; appliedCents: number }>
-  methods: Array<{ name: string; amountCents: number }>
+  /** `tenderCents` y `tenderCurrency`, solo si entró en otra moneda que la que canceló. */
+  methods: Array<{
+    name: string
+    amountCents: number
+    tenderCents?: number
+    tenderCurrency?: string
+  }>
   cashierName: string | null
   remainingCents: number
   voided: { at: string; reason: string | null; byName: string | null } | null

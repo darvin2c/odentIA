@@ -44,7 +44,7 @@ import {
   fillArgosWords,
   findArgosBranch,
   getArgosPlan,
-  getOrgLocale,
+  argosZone,
   listArgosBranches,
   listArgosNames,
   resolveArgosPeriod,
@@ -186,9 +186,13 @@ export function argosSchemas(texts: ProductAgentTexts) {
 export const { figureAskSchema, calcularSchema, buscarSchema, planSchema } = argosSchemas(NO_AGENT_TEXTS)
 
 /** El nombre y los meses sin venir del producto, para las cifras oficiales. */
-export const figureWords = (texts: ProductAgentTexts): ArgosFigureWords => ({
+export const figureWords = (
+  texts: ProductAgentTexts,
+  secondCurrency?: string | null,
+): ArgosFigureWords => ({
   productName: productName(texts),
   recallMonths: texts.recallMonths,
+  ...(secondCurrency ? { secondCurrency } : {}),
 })
 
 export type ArgosPlan = z.infer<typeof planSchema>
@@ -247,7 +251,7 @@ export interface ArgosAsk {
   question: string
   key: ArgosKey
   now: Date
-  zone: { timezone: string; locale: string }
+  zone: { timezone: string; locale: string; secondCurrency?: string | null }
   /** El periodo y la sede de Reportes cuando se pregunta desde ahí (decisión D7). */
   screen?: { period: string; branch: string | null } | null
   /** La pregunta anterior de la conversación y su consulta (decisión D3): «¿Y ayer?». */
@@ -267,7 +271,7 @@ export interface ArgosAsk {
  * hora, la pantalla, lo anterior y la pregunta.
  */
 export function argosMessages(provider: LlmSpec["provider"], input: ArgosAsk, responses: boolean): BaseMessage[] {
-  const fixed = `${argosRules(input.texts)}\n\n${argosCatalogText(input.key, input.texts)}\n\nCifras oficiales (pídelas con calcular):\n${argosFiguresText(input.key, figureWords(input.texts))}`
+  const fixed = `${argosRules(input.texts)}\n\n${argosCatalogText(input.key, input.texts, { secondCurrency: input.zone.secondCurrency })}\n\nCifras oficiales (pídelas con calcular):\n${argosFiguresText(input.key, figureWords(input.texts))}`
   const now = new Intl.DateTimeFormat(input.zone.locale, { timeZone: input.zone.timezone, dateStyle: "full", timeStyle: "short" }).format(input.now)
   const human = [
     input.names ?? "",
@@ -777,7 +781,12 @@ export async function askArgos(
           limite: wanted.limite,
           orden: wanted.orden,
         },
-        { key, compare: Boolean(binding.period?.before), names: ready.names, words: figureWords(ready.texts) },
+        {
+          key,
+          compare: Boolean(binding.period?.before),
+          names: ready.names,
+          words: figureWords(ready.texts, ready.zone.secondCurrency),
+        },
       )
       if ("problem" in out) return `${id}: no se pudo: ${out.problem}`
       compiled = out
@@ -1013,7 +1022,7 @@ export async function askArgos(
         key,
         compare: Boolean(binding.period?.before),
         names: ready.names,
-        words: figureWords(ready.texts),
+        words: figureWords(ready.texts, ready.zone.secondCurrency),
       })
       return "problem" in out ? null : { sql: out.sql, how: out.how, figure: out.figure }
     }
@@ -1139,7 +1148,7 @@ export async function rerunArgos(
   const now = input.now ?? new Date()
   const { row, zone, bound } = await withOrgContext(db, input.orgId, async (tx) => {
     const row = await getArgosPlan(tx, input.orgId, input.userId, input.questionId)
-    const zone = await getOrgLocale(tx, input.orgId)
+    const zone = await argosZone(tx, input.orgId)
     return { row, zone, bound: await argosChoiceOf(tx, input.orgId, row.plan, input.choice, zone, now) }
   })
   if (bound.legacy) throw validation("Esta respuesta es de antes: pregúntala otra vez para cambiar su periodo")

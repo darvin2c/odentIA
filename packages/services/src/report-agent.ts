@@ -22,12 +22,14 @@
  * Cada cifra se calcula para varios tramos en una sola consulta (`spansSql`):
  * el periodo, el anterior y los 12 meses de su línea.
  */
+import { moneyValue, roundMoneyValue } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { saasCharge, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, eq, isNull, like, sql, type SQL } from "drizzle-orm"
 import { teamWroteSql, uncountedSql } from "./conversation-state.js"
 import { allocateRefunds } from "./finance.js"
 import { lastMonths } from "./report-periods.js"
+import { orgMoney } from "./report-value.js"
 import {
   at,
   bySpan,
@@ -186,6 +188,7 @@ async function appointmentsPaid(tx: Db, orgId: string, appointmentIds: string[],
     payment_cents: number
     charge_id: string
     currency: string
+    business_cents: number | null
     appointment_id: string | null
   }>(sql`
     with paid as (
@@ -197,7 +200,7 @@ async function appointmentsPaid(tx: Db, orgId: string, appointmentIds: string[],
       where e.organization_id = ${orgId} and e.status = 'finalizada' and e.voided_at is null
         and e.appointment_id in (${sql.join(appointmentIds.map((id) => sql`${id}`), sql`, `)})
     )
-    select pa.id, pa.amount_cents, pa.created_at, pa.payment_id, p.amount_cents as payment_cents, pa.charge_id, c.currency, e.appointment_id
+    select pa.id, pa.amount_cents, pa.created_at, pa.payment_id, p.amount_cents as payment_cents, pa.charge_id, c.currency, p.business_cents, e.appointment_id
     from paid
     join patient_payment_application pa on pa.organization_id = ${orgId} and pa.payment_id = paid.payment_id and pa.voided_at is null
     join patient_payment p on p.organization_id = pa.organization_id and p.id = pa.payment_id and p.voided_at is null
@@ -217,11 +220,23 @@ async function appointmentsPaid(tx: Db, orgId: string, appointmentIds: string[],
   const totals = new Map([...rows].map((row) => [row.payment_id, Number(row.payment_cents)]))
   // Todo lo devuelto hasta hoy, no solo lo de un mes.
   const refunded = await allocateRefunds(tx, orgId, apps, totals, new Date(0), now)
+  const money = await orgMoney(tx, orgId)
   for (const row of rows) {
     if (!row.appointment_id || !wanted.has(row.appointment_id)) continue
     const cents = Number(row.amount_cents)
     const list = out.get(row.appointment_id) ?? []
-    addMoney(list, row.currency, cents - Math.min(cents, refunded.get(row.id) ?? 0))
+    const net = cents - Math.min(cents, refunded.get(row.id) ?? 0)
+    // Con el valor de su pago, en moneda del negocio; solo lo viejo sin valor ni factor va en su moneda.
+    const value = moneyValue({
+      partCents: net,
+      amountCents: Number(row.payment_cents),
+      valueCents: row.business_cents === null ? null : Number(row.business_cents),
+      currency: row.currency,
+      businessCurrency: money.currency,
+      factor: row.currency === money.secondCurrency ? money.exchangeFactor : null,
+    })
+    if (value) addMoney(list, money.currency, roundMoneyValue(value))
+    else addMoney(list, row.currency, net)
     out.set(row.appointment_id, list)
   }
   return out

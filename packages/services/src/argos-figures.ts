@@ -200,7 +200,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     name: "Lo cobrado",
     describes:
       "Cuánto se cobró, «cuánto vendimos», «cuánto entró», los ingresos; por medio de pago, profesional, especialidad, servicio o tipo (tratamiento, producto y lo que aún no se aplica a una venta).",
-    how: "Pagos del periodo menos lo anulado y lo devuelto. Por tipo, lo pagado de tratamientos y de productos, y aparte lo cobrado que aún no se aplica a una venta (adelantos, saldo a favor). Por profesional, especialidad o servicio: lo pagado de lo que se atendió o vendió, sin esos adelantos.",
+    how: "Pagos del periodo menos lo anulado y lo devuelto. Por tipo, lo pagado de tratamientos y de productos, y aparte lo cobrado que aún no se aplica a una venta (adelantos, saldo a favor). Por profesional, especialidad o servicio: lo pagado de lo que se atendió o vendió, sin esos adelantos.{valor_del_dia}",
     unit: "dinero",
     column: "cobrado_dinero",
     time: "instante",
@@ -230,7 +230,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     name: "Ticket promedio por paciente",
     describes:
       "El ticket promedio sin más: lo cobrado ÷ pacientes distintos que pagaron; la frase dice «por paciente». No es el promedio de los tickets de pago. Por sede, profesional o especialidad.",
-    how: "Lo cobrado entre los pacientes distintos que pagaron en el periodo. Por profesional o especialidad, con lo pagado de lo que atendió cada uno.",
+    how: "Lo cobrado entre los pacientes distintos que pagaron en el periodo. Por profesional o especialidad, con lo pagado de lo que atendió cada uno.{valor_del_dia}",
     unit: "dinero",
     column: "ticket_promedio_dinero",
     time: "instante",
@@ -254,7 +254,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     name: "Lo cargado",
     describes:
       "Lo cargado a los pacientes: lo atendido y los productos entregados, pagado o no. «Facturado» no existe en {producto}: esto es lo más cercano.",
-    how: "Lo cargado a los pacientes en el periodo (tratamientos hechos y productos), sin lo anulado y con lo devuelto descontado, pagado o no.",
+    how: "Lo cargado a los pacientes en el periodo (tratamientos hechos y productos), sin lo anulado y con lo devuelto descontado, pagado o no.{al_cambio_de_hoy}",
     unit: "dinero",
     column: "cargado_dinero",
     time: "instante",
@@ -327,7 +327,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     key: "lo_que_deja",
     name: "Lo que deja",
     describes: "Lo que gana la clínica: lo cobrado sin su impuesto (IGV o IVA) menos comisiones y gastos registrados.",
-    how: "Lo cobrado menos su impuesto, las comisiones generadas y los demás gastos del periodo (el pago de comisiones ya está contado en ellas y el pago de ese impuesto no vuelve a restar).",
+    how: "Lo cobrado menos su impuesto, las comisiones generadas y los demás gastos del periodo (el pago de comisiones ya está contado en ellas y el pago de ese impuesto no vuelve a restar).{valor_del_dia}",
     unit: "dinero",
     column: "lo_que_deja_dinero",
     time: "instante",
@@ -346,7 +346,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     key: "margen",
     name: "Margen",
     describes: "Qué parte de lo cobrado le queda a la clínica: lo que deja ÷ lo cobrado sin su impuesto, en %.",
-    how: "Lo que deja (lo cobrado sin su impuesto menos las comisiones y los gastos registrados) entre lo cobrado sin su impuesto del periodo.",
+    how: "Lo que deja (lo cobrado sin su impuesto menos las comisiones y los gastos registrados) entre lo cobrado sin su impuesto del periodo.{valor_del_dia}",
     unit: "pct",
     column: "margen_pct",
     time: "instante",
@@ -364,7 +364,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     key: "gasto_sobre_cobrado",
     name: "Gastos sobre lo cobrado",
     describes: "Qué parte de lo cobrado se va en gastos y comisiones, en %.",
-    how: "Las comisiones y los gastos registrados del periodo entre lo cobrado sin su impuesto del periodo.",
+    how: "Las comisiones y los gastos registrados del periodo entre lo cobrado sin su impuesto del periodo.{valor_del_dia}",
     unit: "pct",
     column: "gastos_pct",
     time: "instante",
@@ -383,7 +383,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     name: "Lo gastado",
     describes:
       "Los gastos registrados en Finanzas, por tipo de gasto (alquiler, materiales, personal…). Sin el pago de comisiones.",
-    how: "Gastos registrados en Finanzas en el periodo, menos los anulados. El pago de comisiones va aparte, en Comisiones, y el pago del impuesto de lo cobrado no es un gasto.",
+    how: "Gastos registrados en Finanzas en el periodo, menos los anulados. El pago de comisiones va aparte, en Comisiones, y el pago del impuesto de lo cobrado no es un gasto.{valor_del_dia}",
     unit: "dinero",
     column: "gastos_dinero",
     time: "instante",
@@ -402,7 +402,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     key: "comisiones",
     name: "Las comisiones",
     describes: "Las comisiones de los profesionales generadas en el periodo.",
-    how: "El porcentaje de cada profesional sobre lo cobrado de lo que atendió, al momento de cobrar.",
+    how: "El porcentaje de cada profesional sobre lo cobrado de lo que atendió, al momento de cobrar.{valor_del_dia}",
     unit: "dinero",
     column: "comisiones_dinero",
     time: "instante",
@@ -421,7 +421,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     key: "te_deben",
     name: "Te deben",
     describes: "Lo que deben los pacientes hoy, en total o por antigüedad de la deuda.",
-    how: "Lo que debe cada persona hoy: lo que se le cobró menos lo que pagó y lo que tiene a favor.",
+    how: "Lo que debe cada persona hoy: lo que se le cobró menos lo que pagó y lo que tiene a favor.{al_cambio_de_hoy}",
     unit: "dinero",
     column: "te_deben_dinero",
     time: "a_hoy",
@@ -440,7 +440,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     key: "deuda_vencida",
     name: "Te deben hace más de 30 días",
     describes: "Lo que deben los pacientes desde hace más de 30 días, hoy.",
-    how: "Lo que debe cada persona desde hace más de 30 días, descontando lo que tiene a favor.",
+    how: "Lo que debe cada persona desde hace más de 30 días, descontando lo que tiene a favor.{al_cambio_de_hoy}",
     unit: "dinero",
     column: "deuda_vencida_dinero",
     time: "a_hoy",
@@ -457,16 +457,19 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     unit: "cantidad",
     column: "pacientes",
     time: "a_hoy",
-    value: COUNT,
-    additive: true,
-    sources: [{ views: ["deudas"], rows: "select 1 as v from deudas where saldo > 0", cuts: [] }],
+    // Una fila por paciente y moneda: quien debe en dos monedas es una sola persona.
+    value: "count(distinct paciente_id)",
+    additive: false,
+    sources: [
+      { views: ["deudas"], rows: "select paciente_id from deudas where saldo > 0", cuts: [] },
+    ],
   },
   {
     key: "lo_que_viene",
     name: "Lo que viene",
     describes:
       "Lo aceptado en presupuestos que todavía no se hizo (el valor de los tratamientos pendientes), hoy; por tratamiento.",
-    how: "Lo aceptado en presupuestos que todavía no se hizo, a su precio acordado, a hoy.",
+    how: "Lo aceptado en presupuestos que todavía no se hizo, a su precio acordado, a hoy.{al_cambio_de_hoy}",
     unit: "dinero",
     column: "lo_que_viene_dinero",
     time: "a_hoy",
@@ -485,7 +488,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     key: "lo_que_viene_sin_cita",
     name: "Lo aceptado sin cita",
     describes: "De lo aceptado que falta hacer, lo de pacientes sin una cita por venir, hoy.",
-    how: "Lo aceptado que todavía no se hizo, de pacientes que no tienen una cita por venir.",
+    how: "Lo aceptado que todavía no se hizo, de pacientes que no tienen una cita por venir.{al_cambio_de_hoy}",
     unit: "dinero",
     column: "sin_cita_dinero",
     time: "a_hoy",
@@ -544,7 +547,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     key: "valor_paciente_nuevo",
     name: "Lo que paga un paciente nuevo",
     describes: "De los pacientes nuevos del periodo, cuánto pagó cada uno desde que llegó hasta hoy, en promedio; por cómo nos conocieron o sede.",
-    how: "Lo pagado hasta hoy por cada paciente cuya primera cita atendida fue en el periodo, en promedio; por sede, la de esa primera cita.",
+    how: "Lo pagado hasta hoy por cada paciente cuya primera cita atendida fue en el periodo, en promedio; por sede, la de esa primera cita.{valor_del_dia}",
     unit: "dinero",
     column: "por_paciente_dinero",
     time: "instante",
@@ -772,7 +775,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     key: "presupuestado",
     name: "Lo presupuestado",
     describes: "Cuánto suman los presupuestos entregados en el periodo.",
-    how: "El valor de los presupuestos entregados en el periodo, con la opción que vale de cada uno.",
+    how: "El valor de los presupuestos entregados en el periodo, con la opción que vale de cada uno.{al_cambio_de_hoy}",
     unit: "dinero",
     column: "presupuestado_dinero",
     time: "instante",
@@ -791,7 +794,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     name: "Lo aceptado",
     describes:
       "Cuánto suma lo aceptado de los presupuestos entregados en el periodo; por tratamiento.",
-    how: "Lo aceptado (no el valor entero) de los presupuestos entregados en el periodo.",
+    how: "Lo aceptado (no el valor entero) de los presupuestos entregados en el periodo.{al_cambio_de_hoy}",
     unit: "dinero",
     column: "aceptado_dinero",
     time: "instante",
@@ -833,7 +836,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     key: "esperan_respuesta",
     name: "Presupuestos esperando respuesta",
     describes: "Lo que esperan los presupuestos sin decidir, hoy (lo pendiente en dinero).",
-    how: "Lo que falta decidir de los presupuestos que esperan respuesta, hoy.",
+    how: "Lo que falta decidir de los presupuestos que esperan respuesta, hoy.{al_cambio_de_hoy}",
     unit: "dinero",
     column: "sin_decidir_dinero",
     time: "a_hoy",
@@ -1253,7 +1256,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     key: "compras",
     name: "Lo comprado",
     describes: "Cuánto se compró a proveedores: las órdenes de compra hechas (sin borradores ni canceladas), por proveedor.",
-    how: "El total de las órdenes de compra hechas en el periodo, sin borradores ni canceladas.",
+    how: "El total de las órdenes de compra hechas en el periodo, sin borradores ni canceladas.{al_cambio_de_hoy}",
     unit: "dinero",
     column: "comprado_dinero",
     time: "instante",
@@ -1417,10 +1420,20 @@ export function argosFiguresOf(key: ArgosKey): ArgosFigure[] {
 export interface ArgosFigureWords {
   productName: string
   recallMonths: number
+  /** La otra moneda de la clínica: «Así lo calculé» dice de qué cambio habla. Sin ella, no dice nada. */
+  secondCurrency?: string | null
 }
 
 function withWords(text: string, words: ArgosFigureWords): string {
-  return text.replaceAll("{meses}", String(words.recallMonths)).replaceAll("{producto}", words.productName)
+  const second = words.secondCurrency ?? null
+  return text
+    .replaceAll("{meses}", String(words.recallMonths))
+    .replaceAll("{producto}", words.productName)
+    .replaceAll(
+      "{valor_del_dia}",
+      second ? ` Lo que entró o salió en ${second}, con el cambio de su día.` : "",
+    )
+    .replaceAll("{al_cambio_de_hoy}", second ? ` Lo que está en ${second}, al cambio de hoy.` : "")
 }
 
 export function argosFiguresText(key: ArgosKey, words: ArgosFigureWords): string {

@@ -18,6 +18,7 @@ import type { ArgosNames } from "./argos-figures.js"
 import { ARGOS_LIST_ROWS, type ArgosQueryResult } from "./argos-query.js"
 import type { ArgosStoredPlan } from "./argos-saved.js"
 import { getOrgLocale, type OrgLocale } from "./locale.js"
+import { orgMoney } from "./report-value.js"
 import { type ProductAgentTexts, productName } from "./product-agent.js"
 import { ServiceError } from "./errors.js"
 import { ensureArgosQuestion } from "./saas-included.js"
@@ -42,10 +43,23 @@ export function argosWord(key: keyof typeof ARGOS_WORDS, texts: ProductAgentText
 
 export type ArgosOutcome = "respondida" | "parcial" | "no_sabe" | "ayuda" | "otro" | "no_pudo"
 
+/** El formato de la clínica para una respuesta de Argos, con su otra moneda si la tiene. */
+export type ArgosZone = OrgLocale & { secondCurrency: string | null }
+
+export async function argosZone(tx: Db, orgId: string): Promise<ArgosZone> {
+  return {
+    ...(await getOrgLocale(tx, orgId)),
+    secondCurrency: (await orgMoney(tx, orgId)).secondCurrency,
+  }
+}
+
 /** Lo que hace falta antes de llamar a los modelos: si Argos está encendido y el formato de la clínica. */
-export async function prepareArgosQuestion(tx: Db, orgId: string): Promise<{ enabled: boolean; zone: OrgLocale }> {
+export async function prepareArgosQuestion(
+  tx: Db,
+  orgId: string,
+): Promise<{ enabled: boolean; zone: ArgosZone }> {
   const { enabled } = await getAdminSettings(tx, orgId)
-  return { enabled, zone: await getOrgLocale(tx, orgId) }
+  return { enabled, zone: await argosZone(tx, orgId) }
 }
 
 export type ArgosQuestionGate =
@@ -119,6 +133,11 @@ export async function recordArgosQuestion(
 export async function argosScreen(tx: Db, orgId: string, screen: ReportQuery, now: Date): Promise<{ period: string; branch: string | null }> {
   const scope = await reportScope(tx, orgId, screen, now)
   return { period: screen.period, branch: scope.branch?.name ?? null }
+}
+
+/** Lo que hace falta para dar formato a una cifra de Argos. */
+export type ArgosFormat = Pick<OrgLocale, "locale" | "currency" | "timezone"> & {
+  secondCurrency?: string | null
 }
 
 /** Una parte de la frase: lo que vino del resultado va destacado. */
@@ -230,16 +249,25 @@ export function argosRepeatedColumns(template: string, result: Pick<ArgosQueryRe
 /** «cobrado_dinero» → «Cobrado»: el nombre de una columna dicho para la pantalla. */
 export function argosColumnLabel(name: string): string {
   // La columna de otro cálculo juntado (`c2_pagos`) se dice sin su id.
-  const text = name.replace(/^c\d+_/, "").replace(/_(dinero|pct|mes)$/, "").replace(/_/g, " ").trim()
+  const text = name
+    .replace(/^c\d+_/, "")
+    .replace(/_(dinero|pct|mes|otra_moneda)$/, "")
+    .replace(/_/g, " ")
+    .trim()
   return text ? text.charAt(0).toUpperCase() + text.slice(1) : name
 }
 
 /**
  * El valor con el formato de la clínica. El nombre de la columna dice qué es:
- * `_dinero` en la moneda de la clínica, `_pct` un porcentaje de 0 a 100 y
- * `_mes` un mes (así se le pide al modelo); el tipo de la base dice si es fecha.
+ * `_dinero` en la moneda de la clínica, `_otra_moneda` en su otra moneda, `_pct` un
+ * porcentaje de 0 a 100 y `_mes` un mes (así se le pide al modelo); el tipo de la
+ * base dice si es fecha.
  */
-export function formatArgosValue(value: string | number | boolean | null, column: ArgosQueryResult["columns"][number], zone: Pick<OrgLocale, "locale" | "currency" | "timezone">): string {
+export function formatArgosValue(
+  value: string | number | boolean | null,
+  column: ArgosQueryResult["columns"][number],
+  zone: ArgosFormat,
+): string {
   if (value === null) return "—"
   if (column.kind === "boolean") return value ? "sí" : "no"
   if (column.kind === "date") {
@@ -261,8 +289,18 @@ export function formatArgosValue(value: string | number | boolean | null, column
     // Una variación lleva su signo: «+1 %» sube, «-32 %» baja.
     if (/^(variacion|cambio|diferencia|crecimiento)/.test(column.name) && /_pct$/.test(column.name) && value > 0)
       return `+${formatArgosValue(value, { ...column, name: "valor_pct" }, zone)}`
-    if (/_dinero$/.test(column.name)) return new Intl.NumberFormat(zone.locale, { style: "currency", currency: zone.currency }).format(value)
-    if (/_pct$/.test(column.name)) return `${new Intl.NumberFormat(zone.locale, { maximumFractionDigits: value < 10 ? 1 : 0 }).format(value)} %`
+    if (/_dinero$/.test(column.name))
+      return new Intl.NumberFormat(zone.locale, {
+        style: "currency",
+        currency: zone.currency,
+      }).format(value)
+    if (/_otra_moneda$/.test(column.name) && zone.secondCurrency)
+      return new Intl.NumberFormat(zone.locale, {
+        style: "currency",
+        currency: zone.secondCurrency,
+      }).format(value)
+    if (/_pct$/.test(column.name))
+      return `${new Intl.NumberFormat(zone.locale, { maximumFractionDigits: value < 10 ? 1 : 0 }).format(value)} %`
     return new Intl.NumberFormat(zone.locale, { maximumFractionDigits: 2 }).format(value)
   }
   return String(value)
@@ -298,7 +336,7 @@ function timeUnitOf(name: string): [string, string] | null {
 export function fillArgosSentence(
   template: string,
   result: ArgosQueryResult,
-  zone: Pick<OrgLocale, "locale" | "currency" | "timezone">,
+  zone: ArgosFormat,
   words: ArgosWords = {},
   listBelow = false,
 ): { text: string; parts: ArgosSentencePart[] } {
@@ -313,9 +351,12 @@ export function fillArgosSentence(
   const constant = (name: string) => result.rows.length > 1 && result.rows.every((row) => row[name] === first[name])
   const [lead, ...rest] = result.columns.filter((column) => !isArgosHiddenColumn(column.name) && !repeated.has(column.name) && !constant(column.name))
   // El dinero y el porcentaje solos se entienden; dos de lo mismo en una fila llevan su nombre («cobrado: S/ 284,045.00, dejo: S/ 15,946.50»).
-  const unitOf = (name: string) => /_(dinero|pct)$/.exec(name)?.[1] ?? timeUnitOf(name)?.[1] ?? null
-  const twice = (unit: string | null) => unit !== null && rest.filter((other) => unitOf(other.name) === unit).length > 1
-  const selfExplained = (column: ArgosQueryResult["columns"][number]) => column.kind !== "number" || (unitOf(column.name) !== null && !twice(unitOf(column.name)))
+  const unitOf = (name: string) =>
+    /_(dinero|pct|otra_moneda)$/.exec(name)?.[1] ?? timeUnitOf(name)?.[1] ?? null
+  const twice = (unit: string | null) =>
+    unit !== null && rest.filter((other) => unitOf(other.name) === unit).length > 1
+  const selfExplained = (column: ArgosQueryResult["columns"][number]) =>
+    column.kind !== "number" || (unitOf(column.name) !== null && !twice(unitOf(column.name)))
   const labeled = !(rest.length === 1 && rest[0] && selfExplained(rest[0]))
   const items = result.rows.slice(0, ARGOS_LIST_ROWS).map((row) => {
     const head = lead ? cell(row, lead.name) : ""
