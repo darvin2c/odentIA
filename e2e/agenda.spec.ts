@@ -370,7 +370,7 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
   await page.setViewportSize({ width: 1440, height: 900 })
   const patients = await call<{ id: string }[]>(page, "GET", "/api/patients?q=Micaela&limit=5", owner.org.slug)
   await gotoHydrated(page, tenant(owner.org.slug, `/agenda?patientId=${patients[0]?.id}`))
-  await expect(page.getByText("Paciente del caso")).toBeVisible()
+  await expect(page.getByText("Paciente", { exact: true })).toBeVisible()
   await expect(page.getByText("Micaela Ríos").first()).toBeVisible()
   await page.getByRole("button", { name: "Cancelar", exact: true }).click()
 

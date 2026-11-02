@@ -203,7 +203,8 @@ async function reserveFollowUpAppointment(
   input: Extract<ScheduleFollowUpInput, { appointment: unknown }>["appointment"],
 ) {
   try {
-    return await createAppointment(tx, orgId, actorUserId, { ...input, patientId, status: "programada" })
+    // La cita de un control es para el control: no se lleva los tratamientos aceptados de su servicio.
+    return await createAppointment(tx, orgId, actorUserId, { ...input, patientId, status: "programada", planItemIds: [] })
   } catch (error) {
     if (!(error instanceof ServiceError)) throw error
     // Lo que ya señala un dato (también un 404: el profesional, la unidad o el servicio ya no está) va con su nombre aquí.
