@@ -85,7 +85,7 @@ export async function agentConversationsMany(tx: Db, orgId: string, spans: Span[
       select b.idx, m.conversation_id,
         exists (
           select 1 from message t where t.organization_id = ${orgId} and t.conversation_id = m.conversation_id
-            and t.direction = 'out' and t.sender_kind = 'user' and t.created_at >= b.start_at and t.created_at < b.end_at
+            and t.direction = 'out' and t.sender_kind = 'user' and not t.from_action and t.created_at >= b.start_at and t.created_at < b.end_at
         ) or exists (
           select 1 from agent_handoff h where h.organization_id = ${orgId} and h.conversation_id = m.conversation_id
             and h.created_at >= b.start_at and h.created_at < b.end_at

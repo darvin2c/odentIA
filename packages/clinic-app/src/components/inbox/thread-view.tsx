@@ -49,6 +49,7 @@ import { ApiError, apiFetch, apiUpload } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import {
   channelsWords,
+  CLOSE_UNANSWERED_WORDS,
   closeWithoutResolvingWords,
   closureBand,
   conversationWords,
@@ -671,7 +672,9 @@ export function ThreadView({
   const busy = actionMutation.isPending || switching
   const name = detail.contact.displayName
   const preview = previewQuery.data?.data
-  const closeAlso = preview ? pendingWords(preview.handoffs, preview.pendingContact, "cerrar", receptionName) : []
+  const closeAlso = preview
+    ? [...(preview.unanswered ? [CLOSE_UNANSWERED_WORDS] : []), ...pendingWords(preview.handoffs, preview.pendingContact, "cerrar", receptionName)]
+    : []
   const previewError =
     previewQuery.error instanceof ApiError
       ? previewQuery.error.shape.message

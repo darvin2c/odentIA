@@ -278,9 +278,12 @@ describe("decisión 5: Sofi se ofrece al día siguiente", () => {
     const rosa = await forgotten(c, "Rosa Quispe", "clinico", "¿Puedo tomar ibuprofeno?", window)
     const jorge = await forgotten(c, "Jorge Mamani", "cita", "¿Tienen el sábado?", window)
     await ownerDb.insert(message).values({ organizationId: c.orgId, conversationId: jorge.conv, direction: "out", senderKind: "user", senderUserId: c.receptionId, body: "Te confirmo en un rato", status: "sent", createdAt: new Date("2026-10-11T00:00:00Z") })
+    // Le mandaron su comprobante con un botón: eso no contesta su cita, y Sofi la retoma.
+    const ines = await forgotten(c, "Inés Vega", "cita", "¿Tienen el lunes?", window)
+    await ownerDb.insert(message).values({ organizationId: c.orgId, conversationId: ines.conv, direction: "out", senderKind: "user", senderUserId: c.receptionId, fromAction: true, body: "Te enviamos tu comprobante", status: "sent", createdAt: new Date("2026-10-11T00:00:00Z") })
     // A las 10:00 ya no es la hora de apertura: no retoma nada.
     expect(await c.run((tx) => retakeForgottenTopics(tx, c.orgId, new Date("2026-10-12T15:00:00Z"), { secretsKey: Buffer.alloc(32) }))).toBe(0)
-    expect(await c.run((tx) => retakeForgottenTopics(tx, c.orgId, OPENING, { secretsKey: Buffer.alloc(32) }))).toBe(2)
+    expect(await c.run((tx) => retakeForgottenTopics(tx, c.orgId, OPENING, { secretsKey: Buffer.alloc(32) }))).toBe(3)
     const said = (await c.messages(carlos.conv)).at(-1)
     expect(said).toMatchObject({ direction: "out", senderKind: "agent" })
     expect(said?.body).toBe("Hola, Carlos. El sábado quedó pendiente tu consulta: «¿Cuánto cuesta una extracción de muela del juicio?». ¿Te ayudo con eso ahora? Si quieres, también te reservo una evaluación.")
@@ -288,9 +291,9 @@ describe("decisión 5: Sofi se ofrece al día siguiente", () => {
     // El tema queda «Lo retomó Sofi» y quien lo tenía recibe el aviso.
     expect(await c.taskOf(carlos.topic.taskId)).toMatchObject({ status: "done", settledReason: "Lo retomó Sofi: el equipo no alcanzó a responder" })
     const notices = await ownerDb.select().from(workspaceNotification).where(and(eq(workspaceNotification.organizationId, c.orgId), eq(workspaceNotification.userId, c.receptionId)))
-    expect(notices.map((row) => row.title).sort()).toEqual(["Sofi retomó el tema de Carlos Paredes", "Sofi retomó el tema de Elena Huamán"])
+    expect(notices.map((row) => row.title).sort()).toEqual(["Sofi retomó el tema de Carlos Paredes", "Sofi retomó el tema de Elena Huamán", "Sofi retomó el tema de Inés Vega"])
     const audits = await ownerDb.select().from(auditEvent).where(and(eq(auditEvent.organizationId, c.orgId), eq(auditEvent.action, "agent.handoff_retaken")))
-    expect(audits).toHaveLength(2)
+    expect(audits).toHaveLength(3)
     // La duda clínica y la cita que el equipo ya contestó siguen con el equipo.
     expect((await c.taskOf(rosa.topic.taskId))?.status).toBe("open")
     expect((await c.taskOf(jorge.topic.taskId))?.status).toBe("open")

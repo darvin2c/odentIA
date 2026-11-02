@@ -1090,6 +1090,7 @@ it("bandeja: vistas nuevas, «Tomar», «Devolver», «Resolver» y cerrar sin r
     farewellText: "Marta, cuando quieras retomar, escríbenos por aquí: estamos atentos para ayudarte.",
     handoffs: 0,
     pendingContact: 0,
+    unanswered: true,
   })
   const resolved = await app.request(`/conversations/${id}/resolve`, { method: "POST" })
   expect(resolved.status).toBe(200)

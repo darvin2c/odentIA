@@ -117,7 +117,7 @@ async function agentOutcomes(tx: Db, orgId: string, since: Date): Promise<AgentO
       or exists (
         select 1 from message m
         where m.organization_id = ${orgId} and m.conversation_id = a.id
-          and m.direction = 'out' and m.sender_kind = 'user' and m.created_at >= ${at}::timestamptz))
+          and m.direction = 'out' and m.sender_kind = 'user' and not m.from_action and m.created_at >= ${at}::timestamptz))
     )
     select (select count(*)::int from attended) as attended,
            (select count(*)::int from corrected) as corrected,

@@ -85,7 +85,7 @@ export async function retakeForgottenTopics(
       and not exists (select 1 from audit_event a where a.organization_id = h.organization_id and a.entity_id = h.id::text
         and a.action = 'agent.handoff_retake_skipped' and a.created_at > ${now.toISOString()}::timestamptz - interval '20 hours')
       and not exists (select 1 from message m where m.organization_id = h.organization_id and m.conversation_id = h.conversation_id
-        and m.direction = 'out' and m.sender_kind = 'user' and m.created_at > h.created_at)
+        and m.direction = 'out' and m.sender_kind = 'user' and not m.from_action and m.created_at > h.created_at)
     order by h.created_at
     limit ${RETAKE_LIMIT}`)
   const voice = clinicVoiceOf(cfg)

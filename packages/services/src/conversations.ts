@@ -876,8 +876,8 @@ function assertMetaWindowAllows(row: {
 
 const META_OUTBOUND_PROVIDERS = ["messenger", "instagram"]
 /**
- * Encola un mensaje saliente (texto o plantilla ya validada). Respuesta
- * humana (`user`) apaga el agente (patrón Kommo) y marca como leído.
+ * Encola un mensaje saliente (texto o plantilla ya validada). Respuesta humana
+ * (`user`) marca como leído y, si la escribió, hace esperar al agente (ADR 0050).
  */
 export async function sendOutbound(
   tx: Db,
@@ -895,6 +895,8 @@ export async function sendOutbound(
      * persona toca «Ver respuesta» o vuelve a escribir.
      */
     holdIfClosed?: boolean
+    /** Sale de un botón, sin que nadie lo escriba: el agente no espera por él (`teamWroteSql`). */
+    fromAction?: boolean
   },
 ): Promise<MessageItem> {
   const row = await requireWritableConversation(tx, orgId, input.conversationId, { userId: input.senderUserId ?? null })
@@ -946,6 +948,8 @@ export async function sendOutbound(
       direction: "out",
       senderKind: input.senderKind,
       senderUserId: input.senderUserId ?? null,
+      // Solo una persona puede estar conversando: lo que envía el agente no se marca.
+      fromAction: input.senderKind === "user" && input.fromAction === true,
       contentType,
       body:
         content.type === "text"
@@ -1032,6 +1036,8 @@ export async function sendTemplateOutbound(
     /** Token de «Su enlace» para el botón de la plantilla que lo abre. */
     link?: string
     preview?: string
+    /** Sale de un botón, sin que nadie lo escriba (`sendOutbound`). */
+    fromAction?: boolean
   },
 ): Promise<MessageItem> {
   // Abierta o cerrada: el envío (sendOutbound) la reabre si hace falta.
@@ -1059,6 +1065,7 @@ export async function sendTemplateOutbound(
     conversationId: input.conversationId,
     senderKind: input.senderKind,
     senderUserId: input.senderUserId,
+    ...(input.fromAction ? { fromAction: true } : {}),
     content: {
       type: "template",
       name: input.name,

@@ -22,6 +22,13 @@ Derivar a una persona apagaba al agente en toda la conversación (`agent_status 
 - **Pasadas las 24 horas de WhatsApp el equipo responde igual.** La respuesta queda «Por entregar» y sale un mensaje aprobado, «Ver respuesta». Al tocarlo, o al volver a escribir, la persona recibe la respuesta citando su pregunta. El tema se da por resuelto al escribir: no depende de que la persona toque el botón. Instagram y Messenger no admiten mensajes aprobados: la respuesta va a su WhatsApp, si tiene uno marcado como suyo.
 - **El agente se ofrece al día siguiente** con un texto fijo, en la primera hora del horario para escribir. Solo lo hace con citas y precios de lista: retoma la conversación y lo que la persona conteste lo atiende él. Una duda clínica, un descuento o un pago siempre esperan a una persona.
 
+### Precisado el 2026-11-01
+
+- **Conversar es escribir.** Lo que una persona manda con un botón (su enlace, el acceso al portal, un presupuesto, un comprobante u otro PDF, la despedida al resolver) no la pone a conversar: queda a su nombre, pero el agente no la espera ni toma como tema de ella lo que le respondan citándolo (`message.from_action`, `teamWroteSql`). Un paciente que escribió 8 minutos después de recibir su enlace estuvo 7 minutos sin respuesta, hasta que el equipo cerró la conversación porque el agente no contestaba. Un mensaje aprobado que se elige en la Bandeja sí cuenta: esa persona abrió la conversación a propósito.
+- **Un botón tampoco responde.** Lo que preguntó sigue pidiendo respuesta, no pasa a «Esperan al paciente» y un tema no se da por respondido ni deja de retomarse por ese envío (`lastReplySql`).
+- **Si nadie responde en los 15 minutos, responde el agente; si ya respondió una persona, no.** La corrida pospuesta queda `omitida` · `team-answered` cuando una persona escribió después de ese mensaje (`teamAnsweredSql`). No cuenta lo que no salió ni lo que cita otro mensaje: responde otra cosa, y dejar callado al agente perdería la pregunta. Lo que la persona escriba después tiene su propia corrida. Lo que no salió tampoco hace esperar.
+- **Cerrar con un mensaje sin responder se dice antes.** El agente no corre en una cerrada (ADR 0024), así que ese mensaje queda sin respuesta hasta que la persona vuelva a escribir. Se avisa en la confirmación y no se impide: quien cierra puede saber algo que el sistema no sabe, como que ya se resolvió por teléfono.
+
 ## Alternativas descartadas
 
 - *Dar el tema por resuelto cuando la persona toca «Ver respuesta»*: quien respondió quedaría con un pendiente que no depende de su trabajo.

@@ -213,11 +213,13 @@ it("la emisión exige grant verificado y es discreta", async () => {
   expect(issued.pinOnce).toMatch(/^\d{6}$/)
   const bodies = await withOrgContext(appDb, ORG, (tx) =>
     tx
-      .select({ body: message.body })
+      .select({ body: message.body, fromAction: message.fromAction })
       .from(message)
       .where(and(eq(message.conversationId, conversationId), eq(message.direction, "out"))),
   )
   const last = bodies[bodies.length - 1]?.body ?? ""
+  // Salió de un botón: el agente no espera a quien lo mandó.
+  expect(bodies[bodies.length - 1]?.fromAction).toBe(true)
   expect(last).not.toContain("Paciente Portal")
   expect(last).not.toContain("Contacto Portal")
   const grants = await withOrgContext(appDb, ORG, (tx) => listPortalGrants(tx, ORG, patientId))

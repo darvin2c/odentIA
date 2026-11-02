@@ -101,6 +101,8 @@ export interface ResolvePreview {
   handoffs: number
   /** Citas propuestas que esperan su sí, que vencen. */
   pendingContact: number
+  /** Lo último que escribió sigue sin respuesta. */
+  unanswered: boolean
 }
 
 export interface ConversationListItem {

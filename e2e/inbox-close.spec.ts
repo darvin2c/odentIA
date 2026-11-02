@@ -149,6 +149,9 @@ test("bandeja: un tema se responde citado, queda pendiente o se resuelve sin apa
   const confirmClose = page.getByRole("alertdialog", { name: "¿Cerrar sin resolver?" })
   await expect(confirmClose).toContainText("sin enviarle nada")
   await expect(confirmClose).toContainText("También se cerrará sin resolver el caso que te pasó Sofi.")
+  // Su mensaje sigue sin respuesta: quien cierra lo sabe antes, porque nadie más se lo va a contestar.
+  await expect(confirmClose).toContainText("Su último mensaje sigue sin respuesta")
+  await info.attach("cerrar-sin-respuesta", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await confirmClose.getByRole("button", { name: "Cerrar sin resolver", exact: true }).click()
   await expect(confirmClose).toBeHidden()
   await expect(page.getByText(new RegExp(`^Cerrada por ${owner.user.name} · hoy`))).toBeVisible()

@@ -647,6 +647,12 @@ export const message = pgTable(
      */
     fromBusinessApp: boolean("from_business_app").notNull().default(false),
     /**
+     * Lo mandó una persona del equipo con un botón (su enlace, un presupuesto,
+     * un comprobante, la despedida al resolver), sin escribirlo: es suyo, pero
+     * no está conversando y el agente no la espera (`teamWroteSql`).
+     */
+    fromAction: boolean("from_action").notNull().default(false),
+    /**
      * La reacción de la persona a este mensaje (👍, ❤️…), la última que puso; nula
      * si no reaccionó o la quitó. Una reacción no es un mensaje ni confirma nada
      * (decisión 7 de la Bandeja).

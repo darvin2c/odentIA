@@ -819,6 +819,12 @@ it("el enlace que envía el equipo queda unido a su conversación: lo que haga a
       .from(appointmentBookingLink)
       .where(and(eq(appointmentBookingLink.organizationId, ORG), eq(appointmentBookingLink.patientId, lucia.patientId)))
     expect(link?.conversationId).toBe(lucia.conversationId)
+    // Salió del botón: el agente no espera a que quien lo mandó termine de conversar.
+    const sent = await ownerDb
+      .select({ fromAction: message.fromAction })
+      .from(message)
+      .where(and(eq(message.conversationId, lucia.conversationId), eq(message.direction, "out"), eq(message.senderKind, "user")))
+    expect(sent).toEqual([{ fromAction: true }])
   } finally {
     configurePublicLinks(null)
   }

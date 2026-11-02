@@ -30,17 +30,35 @@ export function lastAcceptedOutSql(conv: SQL): SQL {
     where m_out.organization_id = ${conv}.organization_id and m_out.conversation_id = ${conv}.id and ${acceptedOutSql(sql.raw("m_out"))})`
 }
 
-/** Espera respuesta de la clínica: abierta y con un entrante posterior al último saliente aceptado. */
+/** Última respuesta del hilo: un saliente aceptado que no salió de un botón del equipo, que no responde nada. */
+export function lastReplySql(conv: SQL): SQL {
+  return sql`(select max(m_rep.created_at) from message m_rep
+    where m_rep.organization_id = ${conv}.organization_id and m_rep.conversation_id = ${conv}.id
+      and ${acceptedOutSql(sql.raw("m_rep"))} and not m_rep.from_action)`
+}
+
+/** Espera respuesta de la clínica: abierta y con un entrante posterior a su última respuesta. */
 export function unansweredSql(conv: SQL): SQL {
   return sql`(${conv}.status = 'open' and ${lastInboundSql(conv)} is not null
-    and (${lastAcceptedOutSql(conv)} is null or ${lastInboundSql(conv)} > ${lastAcceptedOutSql(conv)}))`
+    and (${lastReplySql(conv)} is null or ${lastInboundSql(conv)} > ${lastReplySql(conv)}))`
+}
+
+/**
+ * Ya le escribieron y va en camino: en cola, «Por entregar» o aceptada solo en
+ * el modo de demostración. Sigue sin contar como respuesta, pero nadie la olvidó.
+ */
+export function replyOnTheWaySql(conv: SQL): SQL {
+  return sql`exists (select 1 from message m_way
+    where m_way.organization_id = ${conv}.organization_id and m_way.conversation_id = ${conv}.id
+      and m_way.direction = 'out' and not m_way.from_action and m_way.status <> 'failed'
+      and m_way.created_at > ${lastInboundSql(conv)})`
 }
 
 /** Desde cuándo espera respuesta: el primer entrante sin responder. Nulo si no espera. */
 export function unansweredSinceSql(conv: SQL): SQL {
   return sql`(case when ${unansweredSql(conv)} then (select min(m_wait.created_at) from message m_wait
     where m_wait.organization_id = ${conv}.organization_id and m_wait.conversation_id = ${conv}.id and m_wait.direction = 'in'
-      and m_wait.created_at > coalesce(${lastAcceptedOutSql(conv)}, '-infinity'::timestamptz)) end)`
+      and m_wait.created_at > coalesce(${lastReplySql(conv)}, '-infinity'::timestamptz)) end)`
 }
 
 /** Tiene una derivación sin resolver. */
@@ -67,11 +85,30 @@ export function personInChargeSql(conv: SQL): SQL {
 /** Minutos que el agente espera después del último mensaje de una persona del equipo (ADR 0050). */
 export const TEAM_LIVE_MINUTES = 15
 
+/**
+ * Una persona del equipo le escribió: es lo único que hace esperar al agente.
+ * Lo que manda con un botón (su enlace, un presupuesto, un comprobante) no es
+ * conversar (`from_action`), y lo que no salió no le llegó a nadie.
+ */
+export function teamWroteSql(m: SQL): SQL {
+  return sql`(${m}.direction = 'out' and ${m}.sender_kind = 'user' and not ${m}.from_action and ${m}.status <> 'failed')`
+}
+
+/**
+ * Una persona del equipo respondió este entrante: escribió después y no citó
+ * otro mensaje. Lo que cita otro responde otra cosa (ADR 0122).
+ */
+export function teamAnsweredSql(m: SQL, inboundId: string): SQL {
+  return sql`(${teamWroteSql(m)}
+    and ${m}.created_at > (select t_in.created_at from message t_in where t_in.id = ${inboundId}::uuid)
+    and (${m}.reply_to_message_id is null or ${m}.reply_to_message_id = ${inboundId}::uuid))`
+}
+
 /** Una persona del equipo escribió en el hilo hace menos de `TEAM_LIVE_MINUTES`: conversa en vivo. */
 export function teamLiveSql(conv: SQL): SQL {
   return sql`exists (select 1 from message m_live
     where m_live.organization_id = ${conv}.organization_id and m_live.conversation_id = ${conv}.id
-      and m_live.direction = 'out' and m_live.sender_kind = 'user'
+      and ${teamWroteSql(sql.raw("m_live"))}
       and m_live.created_at > now() - make_interval(mins => ${TEAM_LIVE_MINUTES}))`
 }
 
@@ -112,11 +149,12 @@ export function lastIsFailedOutSql(conv: SQL): SQL {
 
 /**
  * Desde cuándo se espera al paciente: abierta, el último mensaje es un
- * saliente aceptado y no hay derivación abierta. Cuenta desde el primer
- * saliente aceptado después de su último entrante. Nulo si no.
+ * saliente aceptado, no hay derivación abierta y nada suyo sigue sin respuesta
+ * (un botón del equipo puede quedar después de lo que preguntó). Cuenta desde
+ * el primer saliente aceptado después de su último entrante. Nulo si no.
  */
 export function awaitingPatientSinceSql(conv: SQL): SQL {
-  return sql`(case when ${conv}.status = 'open' and not ${handoffOpenExistsSql(conv)} and ${lastIsAcceptedOutSql(conv)}
+  return sql`(case when ${conv}.status = 'open' and not ${handoffOpenExistsSql(conv)} and ${lastIsAcceptedOutSql(conv)} and not ${unansweredSql(conv)}
     then (select min(m_aw.created_at) from message m_aw
       where m_aw.organization_id = ${conv}.organization_id and m_aw.conversation_id = ${conv}.id
         and ${acceptedOutSql(sql.raw("m_aw"))}

@@ -78,7 +78,7 @@ import { insertTestPatients } from "@odentia/services/test-patient"
 import { and, desc, eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
-import { afterAll, beforeAll, expect, it, onTestFinished } from "vitest"
+import { afterAll, beforeAll, describe, expect, it, onTestFinished } from "vitest"
 import { createFakeDecisionModel, DecisionError, type DecisionModel } from "./decision/index.js"
 import { offTopicReply } from "./decision/route.js"
 import { extractDictation } from "./extract-dictation.js"
@@ -2479,6 +2479,160 @@ it("una señal de alarma no espera al equipo que conversa: pasa con prioridad al
   } finally {
     await ownerDb.execute(sql`update "org_profile" set "emergency_phone" = null where "organization_id" = 'org_a'`)
   }
+})
+
+it("lo que el equipo manda con un botón no hace esperar al agente; lo que escribe, sí (ADR 0050)", async () => {
+  await ownerDb.execute(sql`insert into "user" (id, name, email, email_verified) values ('u_agent_team', 'Carla', 'carla@team.test', true) on conflict (id) do nothing`)
+  const model = new ScriptedModel(() => toolCall("send_reply", { text: "Siento que le duela. ¿Le busco una hora?" }, "call-boton"))
+
+  // Le mandaron su enlace con el botón y responde otra cosa: se le contesta sin esperar.
+  const linked = await ingestText("tg:boton", "evt-boton-1", "Hola")
+  await withOrgContext(appDb, "org_a", (tx) =>
+    sendOutbound(tx, "org_a", { conversationId: linked.conversationId, senderKind: "user", senderUserId: "u_agent_team", fromAction: true, content: { type: "text", text: "Te dejamos aquí lo que tienes pendiente" } }))
+  const pain = await ingestText("tg:boton", "evt-boton-2", "hola, me duele el diente")
+  expect(await runScripted(model, pain.conversationId, pain.messageId)).toBe("done")
+  expect(await agentMessages(pain.conversationId)).toEqual(["Siento que le duela. ¿Le busco una hora?"])
+
+  // Carla escribe de su puño: ahí sí conversa y el agente espera, sin llamar al modelo.
+  const typed = await ingestText("tg:escrito", "evt-escrito-1", "Hola")
+  await withOrgContext(appDb, "org_a", (tx) =>
+    sendOutbound(tx, "org_a", { conversationId: typed.conversationId, senderKind: "user", senderUserId: "u_agent_team", content: { type: "text", text: "Hola, soy Carla" } }))
+  const calls = model.seen.length
+  const asked = await ingestText("tg:escrito", "evt-escrito-2", "¿Tienen hora mañana?")
+  expect(await runScripted(model, asked.conversationId, asked.messageId)).toBe("done")
+  expect(await agentMessages(asked.conversationId)).toEqual([])
+  expect(model.seen).toHaveLength(calls)
+
+  // Pasan los 15 minutos y Carla no respondió: la corrida pospuesta responde sola.
+  await ownerDb.execute(sql`update message set created_at = created_at - interval '16 minutes' where conversation_id = ${asked.conversationId}`)
+  const resumed = await processAgentRun(appDb, { ...runtime, createModel: async () => model }, {
+    msg_id: 1,
+    read_ct: 0,
+    message: { kind: "inbound_message", orgId: "org_a", conversationId: asked.conversationId, messageId: asked.messageId, deferred: true },
+  })
+  expect(resumed).toBe("done")
+  expect(await agentMessages(asked.conversationId)).toEqual(["Siento que le duela. ¿Le busco una hora?"])
+})
+
+describe("el equipo y el agente en la misma conversación (ADR 0050)", () => {
+  const CARLA = "u_agent_team"
+  const carla = () => ownerDb.execute(sql`insert into "user" (id, name, email, email_verified) values (${CARLA}, 'Carla', 'carla@team.test', true) on conflict (id) do nothing`)
+  const write = (conversationId: string, text: string, fromAction = false) =>
+    withOrgContext(appDb, "org_a", (tx) =>
+      sendOutbound(tx, "org_a", { conversationId, senderKind: "user", senderUserId: CARLA, fromAction, content: { type: "text", text } }))
+  const fifteenMinutesPass = (conversationId: string) =>
+    ownerDb.execute(sql`update message set created_at = created_at - interval '16 minutes' where conversation_id = ${conversationId}`)
+  const postponed = (model: ScriptedModel, conversationId: string, messageId: string) =>
+    processAgentRun(appDb, { ...runtime, createModel: async () => model }, {
+      msg_id: 1,
+      read_ct: 0,
+      message: { kind: "inbound_message", orgId: "org_a", conversationId, messageId, deferred: true },
+    })
+  const answer = () => new ScriptedModel(() => toolCall("send_reply", { text: "Te ayudo con eso." }, "call-equipo"))
+
+  it("si la persona del equipo responde durante la espera, el agente no le responde encima y queda en el libro", async () => {
+    await carla()
+    const model = answer()
+    const first = await ingestText("tg:respondio", "evt-respondio-1", "Hola")
+    await write(first.conversationId, "Hola, soy Carla")
+    const asked = await ingestText("tg:respondio", "evt-respondio-2", "¿Tienen hora mañana?")
+    expect(await runScripted(model, asked.conversationId, asked.messageId)).toBe("done")
+    await write(asked.conversationId, "Sí, a las 3 p. m.")
+    await fifteenMinutesPass(asked.conversationId)
+    expect(await postponed(model, asked.conversationId, asked.messageId)).toBe("done")
+    expect(await agentMessages(asked.conversationId)).toEqual([])
+    expect(model.seen).toHaveLength(0)
+    expect(await ledgerErrors(asked.conversationId)).toEqual([{ status: "omitida", llmCalls: 0, error: "team-answered" }])
+  })
+
+  it("si la persona vuelve a escribir después de esa respuesta, el agente atiende lo nuevo", async () => {
+    await carla()
+    const model = answer()
+    const first = await ingestText("tg:volvio", "evt-volvio-1", "Hola")
+    await write(first.conversationId, "Hola, soy Carla")
+    const asked = await ingestText("tg:volvio", "evt-volvio-2", "¿Tienen hora mañana?")
+    await write(asked.conversationId, "Sí, a las 3 p. m.")
+    const again = await ingestText("tg:volvio", "evt-volvio-3", "¿Y cuánto cuesta?")
+    await fifteenMinutesPass(again.conversationId)
+    expect(await postponed(model, asked.conversationId, asked.messageId)).toBe("done")
+    expect(await agentMessages(again.conversationId)).toEqual([])
+    expect(await postponed(model, again.conversationId, again.messageId)).toBe("done")
+    expect(await agentMessages(again.conversationId)).toEqual(["Te ayudo con eso."])
+  })
+
+  it("lo que el equipo no logró enviar no es una respuesta: el agente responde", async () => {
+    await carla()
+    const model = answer()
+    const first = await ingestText("tg:no-salio", "evt-no-salio-1", "Hola")
+    await write(first.conversationId, "Hola, soy Carla")
+    const asked = await ingestText("tg:no-salio", "evt-no-salio-2", "¿Tienen hora mañana?")
+    const failed = await write(asked.conversationId, "Sí, a las 3 p. m.")
+    await ownerDb.update(message).set({ status: "failed" }).where(eq(message.id, failed.id))
+    await fifteenMinutesPass(asked.conversationId)
+    expect(await postponed(model, asked.conversationId, asked.messageId)).toBe("done")
+    expect(await agentMessages(asked.conversationId)).toEqual(["Te ayudo con eso."])
+  })
+
+  it("lo que el equipo escribe citando otro mensaje no responde esto: el agente no lo deja sin respuesta", async () => {
+    await carla()
+    const model = answer()
+    const first = await ingestText("tg:otro-tema", "evt-otro-tema-1", "¿Cuánto debo?")
+    const asked = await ingestText("tg:otro-tema", "evt-otro-tema-2", "¿A qué hora abren?")
+    await withOrgContext(appDb, "org_a", (tx) =>
+      sendOutbound(tx, "org_a", { conversationId: asked.conversationId, senderKind: "user", senderUserId: CARLA, replyToMessageId: first.messageId, content: { type: "text", text: "Debes 40 soles" } }))
+    await fifteenMinutesPass(asked.conversationId)
+    expect(await postponed(model, asked.conversationId, asked.messageId)).toBe("done")
+    expect(await agentMessages(asked.conversationId)).toEqual(["Te ayudo con eso."])
+  })
+
+  it("lo que el equipo no logró enviar no lo hace esperar", async () => {
+    await carla()
+    const model = answer()
+    const first = await ingestText("tg:rechazado", "evt-rechazado-1", "Hola")
+    const rejected = await write(first.conversationId, "Hola, soy Carla")
+    await ownerDb.update(message).set({ status: "failed" }).where(eq(message.id, rejected.id))
+    const asked = await ingestText("tg:rechazado", "evt-rechazado-2", "¿Tienen hora mañana?")
+    expect(await runScripted(model, asked.conversationId, asked.messageId)).toBe("done")
+    expect(await agentMessages(asked.conversationId)).toEqual(["Te ayudo con eso."])
+  })
+
+  it("un botón del equipo en medio no parte lo que la persona viene escribiendo", async () => {
+    await carla()
+    const model = answer()
+    const first = await ingestText("tg:rafaga-boton", "evt-rafaga-boton-1", "hola")
+    const second = await ingestText("tg:rafaga-boton", "evt-rafaga-boton-2", "me duele el diente")
+    await write(second.conversationId, "Te dejamos aquí lo que tienes pendiente", true)
+    expect(await runScripted(model, second.conversationId, second.messageId)).toBe("done")
+    expect(await agentMessages(second.conversationId)).toEqual(["Te ayudo con eso."])
+    // Las dos quedaron atendidas en una sola corrida: la del primero no vuelve a responder.
+    expect(await runScripted(model, first.conversationId, first.messageId)).toBe("done")
+    expect(await agentMessages(first.conversationId)).toEqual(["Te ayudo con eso."])
+  })
+
+  it("quien cita lo que se le mandó con un botón recibe respuesta; quien cita lo que le escribieron va al tema de esa persona", async () => {
+    await carla()
+    const model = answer()
+    const linked = await ingestText("tg:cita-boton", "evt-cita-boton-1", "Hola")
+    const link = await write(linked.conversationId, "Te dejamos aquí lo que tienes pendiente", true)
+    const broken = await ingestText("tg:cita-boton", "evt-cita-boton-2", "no me abre el enlace")
+    await ownerDb.update(message).set({ replyToMessageId: link.id }).where(eq(message.id, broken.messageId))
+    expect(await runScripted(model, broken.conversationId, broken.messageId)).toBe("done")
+    expect(await agentMessages(broken.conversationId)).toEqual(["Te ayudo con eso."])
+
+    // El tema queda a su nombre: tiene que ser del equipo de la clínica.
+    await ownerDb.execute(sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values ('m-carla-cita', 'org_a', ${CARLA}, 'owner', now())`)
+    onTestFinished(() => ownerDb.execute(sql`delete from "member" where id = 'm-carla-cita'`).then(() => undefined))
+    const typed = await ingestText("tg:cita-escrito", "evt-cita-escrito-1", "Hola")
+    const said = await write(typed.conversationId, "Te llamo en un rato")
+    await fifteenMinutesPass(typed.conversationId)
+    const quoted = await ingestText("tg:cita-escrito", "evt-cita-escrito-2", "¿A qué hora me llamas?")
+    await ownerDb.update(message).set({ replyToMessageId: said.id }).where(eq(message.id, quoted.messageId))
+    expect(await runScripted(model, quoted.conversationId, quoted.messageId)).toBe("done")
+    expect(await agentMessages(quoted.conversationId)).toEqual([])
+    const topics = await withOrgContext(appDb, "org_a", (tx) =>
+      tx.select({ assignee: agentHandoff.assigneeUserId }).from(agentHandoff).where(eq(agentHandoff.conversationId, quoted.conversationId)))
+    expect(topics).toEqual([{ assignee: CARLA }])
+  })
 })
 
 it("una urgencia sin señal de alarma pasa con prioridad alta y el aviso da el teléfono de la clínica, no el de emergencias (ADR 0084)", async () => {
