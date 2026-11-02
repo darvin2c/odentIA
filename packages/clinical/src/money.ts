@@ -402,6 +402,70 @@ export function frozenValueCents(input: {
   return convertCents({ amountCents, from: currency, to: businessCurrency, businessCurrency, factor })
 }
 
+/**
+ * La cuenta de un cobro, la misma en el servidor y en lo que muestra la pantalla:
+ * cuánto cancela lo pagado, cuánto vale y, si el vuelto se da en otra moneda, cuánto
+ * se queda del billete y cuánto sale. Sin cambio (`rate` nulo) no hay nada que
+ * convertir ni que valorar: lo pagado en la moneda de la deuda cancela lo que dice;
+ * en otra, aún no se sabe cuánto cancela (`cancels` nulo).
+ */
+export function collectExchange(input: {
+  /** Lo que entró, en `paidCurrency`. */
+  paidCents: number
+  paidCurrency: string
+  /** Lo que falta de lo que se paga, en `currency`, la moneda de la deuda. */
+  dueCents: number
+  currency: string
+  businessCurrency: string
+  /** Solo si alguna de las dos monedas no es la del negocio. */
+  rate: string | null
+  /** Lo recibido de más, en `paidCurrency`; nulo si no se dijo lo recibido. */
+  changeCents: number | null
+  /** Moneda en que se da el vuelto. */
+  changeIn: string
+}): {
+  factor: string | null
+  cancels: number | null
+  /** El exceso del billete, si el vuelto sale en otra moneda. */
+  crossChange: number | null
+  /** El vuelto que se da, en `changeIn`. */
+  changeGiven: number | null
+  valueCents: number | null
+} {
+  const { paidCents, paidCurrency, dueCents, currency, businessCurrency, rate, changeCents, changeIn } =
+    input
+  if (rate === null)
+    return {
+      factor: null,
+      cancels: paidCurrency === currency ? paidCents : null,
+      crossChange: null,
+      changeGiven: changeCents,
+      valueCents: null,
+    }
+  const other = currency === businessCurrency ? paidCurrency : currency
+  const factor = exchangeFactor(rate, businessCurrency, other)
+  const cancels = cancelledCents({ paidCents, paidCurrency, dueCents, currency, businessCurrency, factor })
+  const crossChange =
+    changeCents !== null && changeCents > 0 && changeIn !== paidCurrency ? changeCents : null
+  return {
+    factor,
+    cancels,
+    crossChange,
+    changeGiven:
+      crossChange === null
+        ? changeCents
+        : convertCents({ amountCents: crossChange, from: paidCurrency, to: changeIn, businessCurrency, factor }),
+    valueCents: frozenValueCents({
+      amountCents: cancels,
+      currency,
+      paidCents,
+      paidCurrency,
+      businessCurrency,
+      factor,
+    }),
+  }
+}
+
 /** Con cuántos decimales se dice un cambio que no se escribió: el valor congelado no depende de él. */
 const IMPLIED_RATE_DECIMALS = 6
 

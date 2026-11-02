@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   cancelledCents,
+  collectExchange,
   commissionCents,
   convertCents,
   currencyFractionDigits,
@@ -222,6 +223,64 @@ describe("convertir y cuadrar", () => {
     expect(frozenValueCents({ amountCents: 30000, currency: "PEN", paidCents: 8000, paidCurrency: "USD", ...pen })).toBe(30000)
     // Lo pagado en moneda del negocio manda aunque el cambio diga otra cosa.
     expect(frozenValueCents({ amountCents: 100000, currency: "USD", paidCents: 374998, paidCurrency: "PEN", ...pen })).toBe(374998)
+  })
+})
+
+describe("la cuenta de un cobro", () => {
+  const base = { businessCurrency: "PEN", changeCents: null, changeIn: "PEN" }
+
+  it("sin cambio cancela lo pagado en su moneda y no sabe cuánto en otra", () => {
+    const same = { ...base, paidCents: 15_000, paidCurrency: "PEN", dueCents: 15_000, currency: "PEN" }
+    expect(collectExchange({ ...same, rate: null })).toEqual({
+      factor: null,
+      cancels: 15_000,
+      crossChange: null,
+      changeGiven: null,
+      valueCents: null,
+    })
+    expect(collectExchange({ ...same, paidCurrency: "USD", rate: null }).cancels).toBeNull()
+  })
+
+  it("debe dólares y paga soles: cancela la deuda y vale lo pagado", () => {
+    expect(
+      collectExchange({
+        ...base,
+        paidCents: 375_000,
+        paidCurrency: "PEN",
+        dueCents: 100_000,
+        currency: "USD",
+        rate: "3.75",
+      }),
+    ).toMatchObject({ factor: "3.75", cancels: 100_000, valueCents: 375_000, crossChange: null })
+  })
+
+  it("debe soles y da un billete de dólares: se queda el exceso y sale el vuelto en soles", () => {
+    expect(
+      collectExchange({
+        ...base,
+        paidCents: 8_000,
+        paidCurrency: "USD",
+        dueCents: 30_000,
+        currency: "PEN",
+        rate: "3.75",
+        changeCents: 2_000,
+        changeIn: "PEN",
+      }),
+    ).toEqual({ factor: "3.75", cancels: 30_000, crossChange: 2_000, changeGiven: 7_500, valueCents: 30_000 })
+  })
+
+  it("el vuelto en la moneda en que pagó no cruza nada", () => {
+    const figures = collectExchange({
+      ...base,
+      paidCents: 8_000,
+      paidCurrency: "USD",
+      dueCents: 8_000,
+      currency: "USD",
+      rate: "3.75",
+      changeCents: 2_000,
+      changeIn: "USD",
+    })
+    expect(figures).toMatchObject({ crossChange: null, changeGiven: 2_000, valueCents: 30_000 })
   })
 })
 

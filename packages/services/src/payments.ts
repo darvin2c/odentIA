@@ -1,8 +1,5 @@
 import {
-  cancelledCents,
-  convertCents,
-  exchangeFactor,
-  frozenValueCents,
+  collectExchange,
   normalizeExchangeRate,
   quantityWords,
   refundTenderCents,
@@ -1394,12 +1391,8 @@ export async function collectCharge(
   if (!orgCurrencies.includes(paidIn))
     throw invalidField("tenderCurrency", `La clínica cobra solo en ${orgCurrencies.join(" y ")}`)
   // Sin dinero nuevo (solo saldo a favor) no hay nada que convertir ni que valorar.
-  const needsRate = methods.length > 0 && (unit !== business || paidIn !== business)
-  if (needsRate && rateText === undefined) throw invalidField("exchangeRate", "Escribe el cambio")
-  const exchange =
-    needsRate && second && rateText !== undefined
-      ? { rate: rateText, other: second, factor: exchangeFactor(rateText, business, second) }
-      : null
+  const rate = methods.length > 0 && (unit !== business || paidIn !== business) ? rateText : null
+  if (rate === undefined) throw invalidField("exchangeRate", "Escribe el cambio")
   const changeIn = input.changeCurrency ?? paidIn
   if (changeIn !== paidIn && changeIn !== business)
     throw invalidField(
@@ -1450,16 +1443,19 @@ export async function collectCharge(
     throw validation("No hay saldo a favor ni medios para cobrar")
   // Lo que cancela lo nuevo, en la moneda de la deuda: una sola conversión por cobro.
   const tenders = methods.map((m) => m.amountCents)
-  const cancels = exchange
-    ? cancelledCents({
-        paidCents: totalNew,
-        paidCurrency: paidIn,
-        dueCents: need - creditApplied,
-        currency: unit,
-        businessCurrency: business,
-        factor: exchange.factor,
-      })
-    : totalNew
+  const figures = collectExchange({
+    paidCents: totalNew,
+    paidCurrency: paidIn,
+    dueCents: need - creditApplied,
+    currency: unit,
+    businessCurrency: business,
+    rate,
+    changeCents: change,
+    changeIn,
+  })
+  const { crossChange, changeGiven, valueCents } = figures
+  // Sin cambio y en otra moneda solo se llega sin dinero nuevo: no cancela nada.
+  const cancels = figures.cancels ?? totalNew
   // Cada medio guarda su parte; el resto del redondeo va al último, para que sumen exacto.
   const amounts = paidIn === unit ? tenders : splitCents(cancels, tenders)
   for (const [index, amount] of amounts.entries()) {
@@ -1470,31 +1466,8 @@ export async function collectCharge(
       )
     withField(`payments[${index}].amountCents`, () => assertPositiveCents(amount))
   }
-  const valueCents = exchange
-    ? frozenValueCents({
-        amountCents: cancels,
-        currency: unit,
-        paidCents: totalNew,
-        paidCurrency: paidIn,
-        businessCurrency: business,
-        factor: exchange.factor,
-      })
-    : null
   const values =
     valueCents === null ? [] : splitCents(valueCents, paidIn === business ? tenders : amounts)
-  // El vuelto en otra moneda: el exceso del billete se queda y sale el equivalente.
-  const crossChange =
-    exchange !== null && change !== null && change > 0 && changeIn !== paidIn ? change : null
-  const changeGiven =
-    crossChange !== null && exchange
-      ? convertCents({
-          amountCents: crossChange,
-          from: paidIn,
-          to: changeIn,
-          businessCurrency: business,
-          factor: exchange.factor,
-        })
-      : change
   const ticketNumber = await nextTicketNumber(tx, orgId)
   const [person] = await tx
     .select({
@@ -1630,14 +1603,14 @@ export async function collectCharge(
           reference: m.reference,
         })),
         notice: profile.ticketFooter,
-        ...(exchange && valueCents !== null
+        ...(rate !== null && valueCents !== null
           ? {
               tender: {
                 currency: paidIn,
                 amountCents: totalNew,
-                rate: exchange.rate,
+                rate,
                 businessCurrency: business,
-                otherCurrency: exchange.other,
+                otherCurrency: unit === business ? paidIn : unit,
                 valueCents,
                 changeCents: changeGiven,
                 changeCurrency: changeGiven !== null ? changeIn : null,
@@ -1677,7 +1650,7 @@ export async function collectCharge(
         taxCents: paymentTaxes[index] ?? 0,
         currency: unit,
         ...(paidIn !== unit ? { tenderCents: item.amountCents, tenderCurrency: paidIn } : {}),
-        ...(exchange ? { exchangeRate: exchange.rate, businessCents: values[index] ?? 0 } : {}),
+        ...(rate !== null ? { exchangeRate: rate, businessCents: values[index] ?? 0 } : {}),
         paidAt,
         reference: item.reference,
         createdBy: actorUserId,
@@ -1739,12 +1712,12 @@ export async function collectCharge(
       concept: `Ticket ${ticketNumber}`,
     })
   }
-  const cashPayment = methods.findIndex((m) => isCashLike(m.typeCode))
-  const changePayment = payments[cashPayment]
-  const changeMethod = methods[cashPayment]
-  if (crossChange !== null && changePayment && changeMethod)
+  // Hay vuelto solo con un medio en efectivo: lo recibido se comprobó contra él.
+  if (crossChange !== null) {
+    const cashIndex = methods.findIndex((m) => isCashLike(m.typeCode))
+    const changeMethod = methods[cashIndex]
     await recordCashChange(tx, orgId, actorUserId, {
-      paymentId: changePayment.id,
+      paymentId: payments[cashIndex].id,
       branchId: branchRow.id,
       methodName: changeMethod.name,
       methodTypeCode: changeMethod.typeCode,
@@ -1754,6 +1727,7 @@ export async function collectCharge(
       givenCurrency: changeIn,
       concept: `Vuelto · Ticket ${ticketNumber}`,
     })
+  }
   await audit(tx, orgId, actorUserId, "payment_ticket", ticket.id, "ticket.created")
   await notify(tx, { orgId, kind: "payment.created", at: new Date().toISOString() })
   const remaining = sum(targets.map((t) => ({ amountCents: t.outstanding })))

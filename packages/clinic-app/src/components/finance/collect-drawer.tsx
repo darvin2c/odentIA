@@ -22,15 +22,14 @@
  *
  * Con otra moneda (`useOrgSecondCurrency`) se abre en la moneda de la deuda: un
  * cobro cancela una moneda y entra en una, y lo que se escribe está en la que paga.
- * Las cuentas son las del servidor (`cancelledCents`); aquí solo se muestran. Sin
+ * Las cuentas son las del servidor (`collectExchange`); aquí solo se muestran. Sin
  * otra moneda no aparece ningún control de más y el cuerpo es el de siempre.
  */
 import {
-  cancelledCents,
+  collectExchange,
   convertCents,
   currencyWord,
   documentText,
-  exchangeFactor,
   formatExchangeRateInput,
   formatMoney,
   formatMoneyInput,
@@ -371,41 +370,31 @@ function collectFigures(value: CollectDraft, rules: CollectRules) {
   // Hace falta cambio si algo no es moneda del negocio; solo saldo a favor no mueve dinero.
   const needsRate = second !== null && !creditOnly && (debt !== business || pay !== business)
   const rateText = needsRate ? rateOrNull(value.rate, locale) : null
-  const exchange = {
+  // El vuelto de quien paga en otra moneda se puede dar en la del negocio. Quien paga
+  // en otra que la deuda lo recibe en la del negocio, salvo que elija otra cosa, y el
+  // cuerpo lo dice siempre que cruza; el servidor, si no se lo dicen, lo da en la que pagó.
+  const changeChoice = hasCash && pay !== business && change !== null && change > 0
+  const changeIn = value.changeCurrency || (pay === debt ? pay : business)
+  /** La misma cuenta del servidor. */
+  const exchange = collectExchange({
+    paidCents: amountCents ?? 0,
+    paidCurrency: pay,
+    dueCents: due,
+    currency: debt,
     businessCurrency: business,
-    factor: rateText && second ? exchangeFactor(rateText, business, second) : "",
-  }
-  const hasFactor = exchange.factor !== ""
+    rate: rateText,
+    changeCents: change,
+    changeIn,
+  })
+  const { factor, crossChange, changeGiven } = exchange
   const proposed =
     pay === debt
       ? due
-      : hasFactor && due > 0
-        ? convertCents({ amountCents: due, from: debt, to: pay, ...exchange })
+      : factor !== null && due > 0
+        ? convertCents({ amountCents: due, from: debt, to: pay, businessCurrency: business, factor })
         : null
-  /** Lo que cancela lo escrito, en la moneda de la deuda: la misma cuenta del servidor. */
-  const cancels =
-    amountCents === null || amountCents <= 0
-      ? null
-      : pay === debt
-        ? amountCents
-        : hasFactor
-          ? cancelledCents({
-              paidCents: amountCents,
-              paidCurrency: pay,
-              dueCents: due,
-              currency: debt,
-              ...exchange,
-            })
-          : null
-  // El vuelto de quien paga en otra moneda se puede dar en la del negocio.
-  const changeChoice = hasCash && pay !== business && change !== null && change > 0
-  const changeIn =
-    pay === business ? business : value.changeCurrency || (pay === debt ? pay : business)
-  const crossChange = changeChoice && changeIn !== pay && hasFactor
-  const changeGiven =
-    crossChange && change !== null
-      ? convertCents({ amountCents: change, from: pay, to: changeIn, ...exchange })
-      : change
+  /** Lo que cancela lo escrito, en la moneda de la deuda. */
+  const cancels = amountCents === null || amountCents <= 0 ? null : exchange.cancels
   return {
     debt,
     pay,
@@ -662,7 +651,7 @@ export function CollectDrawer({
         ...(debt !== currency ? { currency: debt } : {}),
         ...(pay !== debt ? { tenderCurrency: pay } : {}),
         ...(needsRate && rateText ? { exchangeRate: rateText } : {}),
-        ...(crossChange ? { changeCurrency: changeIn } : {}),
+        ...(crossChange !== null ? { changeCurrency: changeIn } : {}),
       }
       // Sin medios el servidor usa solo el saldo a favor.
       const payments = figures.creditOnly
@@ -1219,7 +1208,7 @@ export function CollectDrawer({
   const showOtherCurrency = second !== null && !creditOnly
   const cashLine =
     second !== null && hasCash && pay !== currency && amountCents !== null && amountCents > 0
-      ? figures.crossChange && figures.receivedCents !== null && figures.changeGiven !== null
+      ? figures.crossChange !== null && figures.receivedCents !== null && figures.changeGiven !== null
         ? `A la caja de ${word(pay)} entran ${formatMoney(figures.receivedCents, pay, locale)}. De la caja de ${word(figures.changeIn)} salen ${formatMoney(figures.changeGiven, figures.changeIn, locale)}.`
         : `A la caja de ${word(pay)} entran ${formatMoney(figures.cashPortion, pay, locale)}.`
       : null
@@ -2017,7 +2006,7 @@ export function CollectDrawer({
                               ? formatMoney(Math.abs(change), pay, locale)
                               : formatMoney(
                                   figures.changeGiven,
-                                  figures.crossChange ? figures.changeIn : pay,
+                                  figures.crossChange !== null ? figures.changeIn : pay,
                                   locale,
                                 )}
                         </span>
