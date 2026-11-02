@@ -19,9 +19,11 @@ export interface OrgLocale {
   currency: string
   timezone: string
   locale: string
-  /** Solo si la clínica cobra en otra moneda: sin ella, estos dos ni existen. */
+  /** Solo si la clínica cobra en otra moneda: sin ella, estos tres ni existen. */
   secondCurrency?: string
-  /** El «Cambio de hoy» por unidad menor, para las cuentas. */
+  /** El «Cambio de hoy», en palabras: moneda del negocio por 1 de la otra. */
+  exchangeRate?: string
+  /** El mismo cambio por unidad menor, para las cuentas. */
   exchangeFactor?: string
 }
 
@@ -32,14 +34,18 @@ export async function getOrgLocale(tx: Db, orgId: string): Promise<OrgLocale> {
     timezone: string
     locale: string
     secondCurrency: string | null
+    exchangeRate: string | null
     exchangeFactor: string | null
   }>(sql`
     select country_code as "countryCode", currency, timezone, locale,
-           second_currency as "secondCurrency", exchange_factor::text as "exchangeFactor"
+           second_currency as "secondCurrency", exchange_rate::text as "exchangeRate",
+           exchange_factor::text as "exchangeFactor"
     from org_profile where organization_id = ${orgId}`)
   if (!row) throw notFound("Perfil de organización")
-  const { secondCurrency, exchangeFactor, ...zone } = row
-  return secondCurrency && exchangeFactor ? { ...zone, secondCurrency, exchangeFactor } : zone
+  const { secondCurrency, exchangeRate, exchangeFactor, ...zone } = row
+  return secondCurrency && exchangeRate && exchangeFactor
+    ? { ...zone, secondCurrency, exchangeRate, exchangeFactor }
+    : zone
 }
 
 /**

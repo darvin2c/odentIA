@@ -56,6 +56,8 @@ import {
   hasClosureSince,
   lockCashOfPayments,
   lockCashWindows,
+  lockOrgCurrency,
+  lockOrgMoney,
   recordCashChange,
   recordCashEgreso,
   recordCashIncome,
@@ -893,22 +895,6 @@ function uuid(value: string, field = "El identificador"): string {
   return value
 }
 
-/** Monedas de la clínica con bloqueo compartido: orden perfil→cuenta/caja, sin deadlocks con el cambio de región. */
-async function lockOrgMoney(tx: Db, orgId: string) {
-  const [profile] = await tx
-    .select({ currency: orgProfile.currency, secondCurrency: orgProfile.secondCurrency })
-    .from(orgProfile)
-    .where(eq(orgProfile.organizationId, orgId))
-    .for("share")
-  // Sin respaldo de un país: la moneda sale del perfil o no hay cobro.
-  if (!profile) throw orgProfileRequired()
-  return profile
-}
-
-async function lockOrgCurrency(tx: Db, orgId: string): Promise<string> {
-  return (await lockOrgMoney(tx, orgId)).currency
-}
-
 /**
  * Las cajas de cada ticket: las monedas donde su dinero entró o salió. Sin dinero
  * vigente (pagado solo con saldo a favor), la caja de su moneda.
@@ -1257,7 +1243,10 @@ export async function collectCharge(
   await tx.execute(
     sql`select pg_advisory_xact_lock(hashtext('collect:' || ${orgId} || ':' || ${input.requestId}))`,
   )
-  const { currency: business, secondCurrency: second } = await lockOrgMoney(tx, orgId)
+  const money = await lockOrgMoney(tx, orgId)
+  // Sin respaldo de un país: la moneda sale del perfil o no hay cobro.
+  if (!money) throw orgProfileRequired()
+  const { currency: business, secondCurrency: second } = money
   await lockAccount(tx, orgId, patientId)
   const requestId = uuid(input.requestId, "La clave de idempotencia")
   const rateText = collectRate(input.exchangeRate)

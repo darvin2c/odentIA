@@ -28,7 +28,7 @@ import { testContactSql } from "./conversation-state.js"
 import { CHANNEL_NAME } from "./agent-person-memory.js"
 import { requireContact } from "./contacts.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
-import { findOrgCurrency, findOrgLocale, NO_CURRENCY, requireOrgCurrency } from "./locale.js"
+import { findOrgCurrency, findOrgLocale, NO_CURRENCY, orgProfileRequired, requireOrgCurrency } from "./locale.js"
 import { requirePatient } from "./patients.js"
 import { ensureDefaultPipeline, momentRank, type SaleMoment, stageOfMoment } from "./pipelines.js"
 import { createTask, settleTask, updateTask } from "./tasks.js"
@@ -1373,11 +1373,12 @@ export async function updateOpportunity(
     // Un valor escrito a mano va en la moneda de la clínica, salvo que la oportunidad
     // ya esté en su otra moneda: el número se escribió mirando esa.
     if (patch.amountCents !== null) {
-      const { secondCurrency } = await orgMoney(tx, orgId)
+      const money = await orgMoney(tx, orgId)
+      if (!money.currency) throw orgProfileRequired()
       patch.currency =
-        current.amountCents !== null && current.currency === secondCurrency
+        current.amountCents !== null && current.currency === money.secondCurrency
           ? current.currency
-          : await requireOrgCurrency(tx, orgId)
+          : money.currency
     }
     changed.push("amountCents")
   }

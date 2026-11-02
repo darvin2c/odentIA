@@ -22,14 +22,14 @@
  * Cada cifra se calcula para varios tramos en una sola consulta (`spansSql`):
  * el periodo, el anterior y los 12 meses de su línea.
  */
-import { moneyValue, roundMoneyValue } from "@odentia/clinical"
+import { roundMoneyValue } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { saasCharge, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, eq, isNull, like, sql, type SQL } from "drizzle-orm"
 import { teamWroteSql, uncountedSql } from "./conversation-state.js"
 import { allocateRefunds } from "./finance.js"
 import { lastMonths } from "./report-periods.js"
-import { orgMoney } from "./report-value.js"
+import { orgMoney, orgPartValue } from "./report-value.js"
 import {
   at,
   bySpan,
@@ -227,14 +227,15 @@ async function appointmentsPaid(tx: Db, orgId: string, appointmentIds: string[],
     const list = out.get(row.appointment_id) ?? []
     const net = cents - Math.min(cents, refunded.get(row.id) ?? 0)
     // Con el valor de su pago, en moneda del negocio; solo lo viejo sin valor ni factor va en su moneda.
-    const value = moneyValue({
-      partCents: net,
-      amountCents: Number(row.payment_cents),
-      valueCents: row.business_cents === null ? null : Number(row.business_cents),
-      currency: row.currency,
-      businessCurrency: money.currency,
-      factor: row.currency === money.secondCurrency ? money.exchangeFactor : null,
-    })
+    const value = orgPartValue(
+      net,
+      {
+        amountCents: Number(row.payment_cents),
+        businessCents: row.business_cents === null ? null : Number(row.business_cents),
+        currency: row.currency,
+      },
+      money,
+    )
     if (value) addMoney(list, money.currency, roundMoneyValue(value))
     else addMoney(list, row.currency, net)
     out.set(row.appointment_id, list)

@@ -8,9 +8,10 @@
  *
  * Sin dependencias de otros servicios, para que cualquiera lo use sin ciclos.
  */
-import { convertCents } from "@odentia/clinical"
+import { convertCents, type MoneyFraction, moneyValue } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { sql, type SQL } from "drizzle-orm"
+import type { OrgLocale } from "./locale.js"
 
 /** Lo que hace falta saber de la clínica para valorar. */
 export interface OrgMoney {
@@ -38,6 +39,35 @@ export async function orgMoney(tx: Db, orgId: string): Promise<OrgMoney> {
     exchangeRate: row?.exchangeRate ?? null,
     exchangeFactor: row?.exchangeFactor ?? null,
   }
+}
+
+/** Lo mismo, de lo que ya se leyó con `getOrgLocale`: una operación no relee el perfil. */
+export function orgMoneyOf(zone: OrgLocale): OrgMoney {
+  return {
+    currency: zone.currency,
+    secondCurrency: zone.secondCurrency ?? null,
+    exchangeRate: zone.exchangeRate ?? null,
+    exchangeFactor: zone.exchangeFactor ?? null,
+  }
+}
+
+/**
+ * Cuánto vale una parte de un pago o de un gasto, lo mismo que `org_money_value`: el
+ * factor de hoy solo vale para la otra moneda de la clínica.
+ */
+export function orgPartValue(
+  partCents: number,
+  source: { amountCents: number; businessCents: number | null; currency: string },
+  money: OrgMoney,
+): MoneyFraction | null {
+  return moneyValue({
+    partCents,
+    amountCents: source.amountCents,
+    valueCents: source.businessCents,
+    currency: source.currency,
+    businessCurrency: money.currency,
+    factor: source.currency === money.secondCurrency ? money.exchangeFactor : null,
+  })
 }
 
 /** La clínica como tabla `op(currency, second_currency, exchange_factor)` para unirla a una consulta. */

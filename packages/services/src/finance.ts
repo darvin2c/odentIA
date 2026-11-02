@@ -15,7 +15,6 @@ import {
   expenseExchange,
   formatMoney,
   type MoneyFraction,
-  moneyValue,
   roundMoneyValue,
   sumMoneyValues,
 } from "@odentia/clinical"
@@ -58,11 +57,11 @@ import {
   ServiceError,
   validation,
 } from "./errors.js"
-import { getOrgLocale, orgProfileRequired } from "./locale.js"
+import { getOrgLocale, type OrgLocale, orgProfileRequired } from "./locale.js"
 import { CLOSED_PURCHASE_STATUSES, type PurchaseBalance, purchaseBalances, supplierCredits } from "./purchase-balance.js"
 import { monthStart } from "./report-periods.js"
 import { bySpan, safeCents, type Span, spansSql } from "./report-spans.js"
-import { frozenValueSql, type OrgMoney, orgMoney, orgMoneySql } from "./report-value.js"
+import { frozenValueSql, type OrgMoney, orgMoney, orgMoneyOf, orgMoneySql, orgPartValue } from "./report-value.js"
 import { createWorkspaceNotification } from "./workspace.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import type { TicketFrozen } from "./payments.js"
@@ -164,9 +163,11 @@ export async function requireBranch(tx: Db, orgId: string, branchId: string) {
   if (!row) throw branchNotFound()
   return row
 }
-/** Moneda de la clínica con bloqueo compartido: orden perfil→caja, sin deadlocks con el cambio de región. */
-/** Las monedas de la clínica, con bloqueo compartido; `null` sin perfil. */
-async function lockOrgMoney(tx: Db, orgId: string) {
+/**
+ * Las monedas de la clínica con bloqueo compartido: orden perfil→cuenta/caja, sin
+ * deadlocks con el cambio de región. `null` sin perfil.
+ */
+export async function lockOrgMoney(tx: Db, orgId: string) {
   const [profile] = await tx
     .select({
       currency: orgProfile.currency,
@@ -179,7 +180,7 @@ async function lockOrgMoney(tx: Db, orgId: string) {
   return profile ?? null
 }
 
-async function lockOrgCurrency(tx: Db, orgId: string): Promise<string> {
+export async function lockOrgCurrency(tx: Db, orgId: string): Promise<string> {
   const profile = await lockOrgMoney(tx, orgId)
   // Sin respaldo de un país: la moneda sale del perfil o no hay operación.
   if (!profile) throw orgProfileRequired()
@@ -1292,7 +1293,8 @@ export async function getMonthExpenses(
   orgId: string,
   query: { year: number; month: number; branchId?: string; q?: string; category?: string },
 ) {
-  const { timezone, currency: unit } = await getOrgLocale(tx, orgId)
+  const zone = await getOrgLocale(tx, orgId)
+  const { timezone, currency: unit } = zone
   const { start, end } = monthBounds(timezone, query.year, query.month)
   const filters = [eq(expense.organizationId, orgId), gte(expense.spentAt, start), lt(expense.spentAt, end)]
   if (query.branchId) filters.push(eq(expense.branchId, query.branchId))
@@ -1302,8 +1304,9 @@ export async function getMonthExpenses(
     .where(and(...filters))
     .orderBy(desc(expense.spentAt), desc(expense.id))
   // Lo que suma el mes va con su valor; lo viejo en otra moneda, sin valor ni factor, no entra.
-  const money = await orgMoney(tx, orgId)
-  const valueOf = (row: (typeof rows)[number]) => expenseValue(row, money)
+  const money = orgMoneyOf(zone)
+  const valueOf = (row: { amountCents: number; businessCents: number | null; currency: string }) =>
+    orgPartValue(row.amountCents, row, money)
   const live = rows.filter((row) => !row.voidedAt && valueOf(row) !== null)
   const byCategoryValues = new Map<string, Array<MoneyFraction | null>>()
   for (const row of live)
@@ -1349,7 +1352,7 @@ export async function getMonthExpenses(
     })
     .filter((row) => !query.category || row.category === query.category)
     .filter((row) => !query.q?.trim() || textMatchesWords([row.concept, row.supplierName, row.receiptNumber, row.notes], query.q))
-  const shownLive = expenses.filter((row) => !row.voidedAt && expenseValue(row, money) !== null)
+  const shownLive = expenses.filter((row) => !row.voidedAt && valueOf(row) !== null)
   return {
     year: query.year,
     month: query.month,
@@ -1362,25 +1365,10 @@ export async function getMonthExpenses(
     /** Lo que queda a la vista con la búsqueda y el tipo: cuántos y cuánto suman. */
     shown: {
       count: shownLive.length,
-      totalCents: roundMoneyValue(sumMoneyValues(shownLive.map((row) => expenseValue(row, money)))),
+      totalCents: roundMoneyValue(sumMoneyValues(shownLive.map(valueOf))),
     },
     expenses,
   }
-}
-
-/** Cuánto vale un gasto en moneda del negocio: lo mismo que `money_value`. */
-function expenseValue(
-  row: { amountCents: number; businessCents: number | null; currency: string },
-  money: OrgMoney,
-): MoneyFraction | null {
-  return moneyValue({
-    partCents: row.amountCents,
-    amountCents: row.amountCents,
-    valueCents: row.businessCents,
-    currency: row.currency,
-    businessCurrency: money.currency,
-    factor: row.currency === money.secondCurrency ? money.exchangeFactor : null,
-  })
 }
 
 /**
@@ -2095,15 +2083,7 @@ async function collectedApplications(
     )
     .where(and(...filters))
   return rows.flatMap((r) => {
-    const appValue = partValue(
-      r.app.amountCents,
-      {
-        amountCents: r.payment.amountCents,
-        valueCents: r.payment.businessCents,
-        currency: r.payment.currency,
-      },
-      money,
-    )
+    const appValue = orgPartValue(r.app.amountCents, r.payment, money)
     if (!appValue) return []
     return [
       {
@@ -2128,22 +2108,6 @@ async function collectedApplications(
         professionalUserId: r.professionalUserId,
       },
     ]
-  })
-}
-
-/** Cuánto vale una parte de un pago en moneda del negocio: el factor solo vale para su otra moneda. */
-function partValue(
-  partCents: number,
-  payment: { amountCents: number; valueCents: number | null; currency: string },
-  money: OrgMoney,
-): MoneyFraction | null {
-  return moneyValue({
-    partCents,
-    amountCents: payment.amountCents,
-    valueCents: payment.valueCents,
-    currency: payment.currency,
-    businessCurrency: money.currency,
-    factor: payment.currency === money.secondCurrency ? money.exchangeFactor : null,
   })
 }
 
@@ -2316,10 +2280,17 @@ export interface MonthlyCommissionsQuery {
  * - Un cobro anulado después de pagada su comisión queda como ajuste: se
  *   descuenta del siguiente pago al profesional, sea del mes que sea.
  */
-export async function getMonthlyCommissions(tx: Db, orgId: string, query: MonthlyCommissionsQuery) {
+export async function getMonthlyCommissions(
+  tx: Db,
+  orgId: string,
+  query: MonthlyCommissionsQuery,
+  /** La clínica, si quien llama ya la leyó. */
+  known?: OrgLocale,
+) {
   await requireProfessional(tx, orgId, query.professionalUserId)
-  const { timezone, locale, currency: unit } = await getOrgLocale(tx, orgId)
-  const money = await orgMoney(tx, orgId)
+  const zone = known ?? (await getOrgLocale(tx, orgId))
+  const { timezone, locale, currency: unit } = zone
+  const money = orgMoneyOf(zone)
   const { start, end } = monthBounds(timezone, query.year, query.month)
   const rateBps = await commissionRateOf(tx, orgId, query.professionalUserId)
   const live = await collectedApplications(tx, orgId, start, end, money, {
@@ -2494,13 +2465,13 @@ export async function listMonthCommissions(
   orgId: string,
   query: { year: number; month: number; currency?: string },
 ): Promise<CommissionSummary[]> {
-  const { timezone } = await getOrgLocale(tx, orgId)
-  const { start, end } = monthBounds(timezone, query.year, query.month)
+  const zone = await getOrgLocale(tx, orgId)
+  const { start, end } = monthBounds(zone.timezone, query.year, query.month)
   const withRate = await tx
     .select({ userId: commissionRule.professionalUserId })
     .from(commissionRule)
     .where(eq(commissionRule.organizationId, orgId))
-  const active = await collectedApplications(tx, orgId, start, end, await orgMoney(tx, orgId), {
+  const active = await collectedApplications(tx, orgId, start, end, orgMoneyOf(zone), {
     liveNow: true,
   })
   const ids = [
@@ -2517,7 +2488,7 @@ export async function listMonthCommissions(
   for (const { userId } of members) {
     rows.push(
       commissionSummary(
-        await getMonthlyCommissions(tx, orgId, { ...query, professionalUserId: userId }),
+        await getMonthlyCommissions(tx, orgId, { ...query, professionalUserId: userId }, zone),
       ),
     )
   }
@@ -2817,9 +2788,9 @@ export async function collectedByProfessional(
   const profSums = new Map<string, Array<MoneyFraction | null>>()
   for (const a of apps) {
     const net = a.appCents - Math.min(a.appCents, refundByApp.get(a.appId) ?? 0)
-    const value = partValue(
+    const value = orgPartValue(
       net,
-      { amountCents: a.paymentCents, valueCents: a.paymentValueCents, currency: a.paymentCurrency },
+      { amountCents: a.paymentCents, businessCents: a.paymentValueCents, currency: a.paymentCurrency },
       money,
     )
     profSums.set(a.professionalUserId, [...(profSums.get(a.professionalUserId) ?? []), value])
@@ -3166,12 +3137,7 @@ function dayKeyIn(at: Date, timezone: string): string {
 export async function getCashToday(tx: Db, orgId: string, query: { branchId: string }) {
   const branchRow = await requireBranch(tx, orgId, query.branchId)
   const timezone = await branchTimezone(tx, orgId, branchRow)
-  const unit = (await getOrgLocale(tx, orgId)).currency
-  const [profile] = await tx
-    .select({ secondCurrency: orgProfile.secondCurrency })
-    .from(orgProfile)
-    .where(eq(orgProfile.organizationId, orgId))
-  const second = profile?.secondCurrency ?? null
+  const { currency: unit, secondCurrency: second = null } = await getOrgLocale(tx, orgId)
   const today = dayKeyIn(new Date(), timezone)
   // Sin otra moneda, solo la caja de la clínica; con ella, las dos cajas.
   const { movements } = await getDayMovements(tx, orgId, {

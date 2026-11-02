@@ -11,7 +11,7 @@ import type { Db } from "@odentia/db"
 import { requireBranch } from "./finance.js"
 import { getOrgLocale } from "./locale.js"
 import { type ReportBucket, reportBuckets, type ReportSpan, type ReportWindow, resolveReportWindow } from "./report-periods.js"
-import { type OrgMoney, orgMoney } from "./report-value.js"
+import { type OrgMoney, orgMoneyOf } from "./report-value.js"
 
 export interface ReportQuery {
   /** `este_mes`, `mes_pasado`, `ultimos_3_meses`, `este_ano`, `YYYY-MM` o `YYYY-MM-DD..YYYY-MM-DD`. */
@@ -32,7 +32,8 @@ export interface ReportScope {
 }
 
 export async function reportScope(tx: Db, orgId: string, query: ReportQuery, now: Date): Promise<ReportScope> {
-  const { timezone, locale, currency } = await getOrgLocale(tx, orgId)
+  const zone = await getOrgLocale(tx, orgId)
+  const { timezone, locale, currency } = zone
   const window = resolveReportWindow(timezone, query.period, now)
   const branch = query.branchId ? await requireBranch(tx, orgId, query.branchId) : null
   return {
@@ -40,7 +41,7 @@ export async function reportScope(tx: Db, orgId: string, query: ReportQuery, now
     timezone,
     locale,
     currency,
-    money: await orgMoney(tx, orgId),
+    money: orgMoneyOf(zone),
     branch: branch ? { id: branch.id, name: branch.name } : null,
     now,
   }

@@ -44,7 +44,7 @@ import {
   fillArgosWords,
   findArgosBranch,
   getArgosPlan,
-  argosZone,
+  getOrgLocale,
   listArgosBranches,
   listArgosNames,
   resolveArgosPeriod,
@@ -1148,7 +1148,7 @@ export async function rerunArgos(
   const now = input.now ?? new Date()
   const { row, zone, bound } = await withOrgContext(db, input.orgId, async (tx) => {
     const row = await getArgosPlan(tx, input.orgId, input.userId, input.questionId)
-    const zone = await argosZone(tx, input.orgId)
+    const zone = await getOrgLocale(tx, input.orgId)
     return { row, zone, bound: await argosChoiceOf(tx, input.orgId, row.plan, input.choice, zone, now) }
   })
   if (bound.legacy) throw validation("Esta respuesta es de antes: pregúntala otra vez para cambiar su periodo")

@@ -42,21 +42,13 @@ export function argosWord(key: keyof typeof ARGOS_WORDS, texts: ProductAgentText
 
 export type ArgosOutcome = "respondida" | "parcial" | "no_sabe" | "ayuda" | "otro" | "no_pudo"
 
-/** El formato de la clínica para una respuesta de Argos, con su otra moneda si la tiene. */
-export type ArgosZone = Omit<OrgLocale, "secondCurrency"> & { secondCurrency: string | null }
-
-export async function argosZone(tx: Db, orgId: string): Promise<ArgosZone> {
-  const zone = await getOrgLocale(tx, orgId)
-  return { ...zone, secondCurrency: zone.secondCurrency ?? null }
-}
-
 /** Lo que hace falta antes de llamar a los modelos: si Argos está encendido y el formato de la clínica. */
 export async function prepareArgosQuestion(
   tx: Db,
   orgId: string,
-): Promise<{ enabled: boolean; zone: ArgosZone }> {
+): Promise<{ enabled: boolean; zone: OrgLocale }> {
   const { enabled } = await getAdminSettings(tx, orgId)
-  return { enabled, zone: await argosZone(tx, orgId) }
+  return { enabled, zone: await getOrgLocale(tx, orgId) }
 }
 
 export type ArgosQuestionGate =
