@@ -1,6 +1,6 @@
 # 0036 · Núcleo internacional y lo que solo es de Perú
 
-Fecha: 2026-10-16 · **Estado:** aceptada (fase 3, paso 5; tableros 4 y 5 en versión 2 y decisiones 6 y 10 del lienzo) · Actualiza [0003](0003-nota-clinica-normativa.md) (odontograma firmado) y [0004](0004-identidad-estandar.md) (catálogos de identidad, ubigeo y seguro). Issues 36, 37 y 42.
+Fecha: 2026-10-16 · **Estado:** aceptada (fase 3, paso 5; tableros 4 y 5 en versión 2 y decisiones 6 y 10 del lienzo) · Actualiza [0003](0003-nota-clinica-normativa.md) (odontograma firmado) y [0004](0004-identidad-estandar.md) (catálogos de identidad, ubigeo y seguro). Issues 36, 37 y 42. Ajustada por [0131](0131-la-firma-que-se-ve-en-el-papel.md): la hoja del odontograma firmado lleva la firma dibujada, sin pedirla al firmar.
 
 ## Problema
 

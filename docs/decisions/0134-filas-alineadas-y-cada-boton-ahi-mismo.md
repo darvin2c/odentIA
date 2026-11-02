@@ -1,4 +1,4 @@
-# 0131 · Filas alineadas y cada botón ahí mismo
+# 0134 · Filas alineadas y cada botón ahí mismo
 
 Fecha: 2026-11-02 · Estado: aceptada · Precisa [0035](0035-la-ficha-en-cuatro-secciones.md) y [0126](0126-un-boton-una-accion.md).
 

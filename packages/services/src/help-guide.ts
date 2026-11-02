@@ -508,6 +508,18 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         a: "En la misma atención, en su bloque «Documentos», con «Nuevo»: receta, consentimiento, orden, formulario o imagen. Cada uno viene lleno con lo de la atención (pieza, diagnóstico, procedimiento y quien atiende). «Ver» abre su PDF al lado, con «Enviar», «Descargar PDF» e «Imprimir»; un consentimiento se firma ahí mismo. El papel lleva un código QR con el que cualquiera comprueba, sin cuenta, si sigue vigente.",
       },
       {
+        q: "¿Se puede cambiar una receta ya emitida? ¿Qué comprueba el QR?",
+        a: "Receta, orden y descanso quedan guardados como archivo al emitirse: aunque después cambien los datos de la persona o de la clínica, siempre se abre, se envía y se descarga ese mismo papel. Para corregirlo, anúlalo con su motivo y emite otro; el anulado se ve con «ANULADA» encima. El QR dice si sigue vigente, quién lo firmó y las iniciales del paciente, sin nada de salud. Si a alguien le llegó como PDF, ahí mismo comprueba que es el original, sin subir el archivo. Un papel impreso no se puede comparar así: ante una duda sobre lo que dice, que llame a la clínica. La foto de un consentimiento firmado en papel tampoco se retira; si se cargó por error, revoca ese consentimiento, retírala y vuelve a firmar.",
+      },
+      {
+        q: "¿Qué le doy al paciente para su seguro?",
+        a: "Abre la atención firmada y, en «Documentos», «Hoja de atención»: lleva el diagnóstico, la fecha, lo que se hizo, los exámenes y el tratamiento sugerido, con tu firma y tu sello, sin la nota de evolución. Envíala con la receta y la orden; el odontograma, a color. La boleta o factura electrónica la emites aparte: el ticket de caja no la reemplaza. Cada aseguradora decide qué acepta: si no admite el sello impreso, imprime el papel, séllalo a mano y que suba la foto.",
+      },
+      {
+        q: "¿Cómo pongo mi firma en los papeles?",
+        a: "Dibújala una vez en tu perfil profesional: al finalizar una atención, con «Agregar mi firma», o en Configuración › Equipo › «Mi perfil profesional» si puedes entrar ahí. Sale sola en los papeles que emites, junto a un sello con tu nombre, tu título y tu colegiatura, y cambiarla no toca lo ya emitido. Sin ella, el papel lleva una línea para firmar a mano. Solo tú puedes guardarla. Es el dibujo que se ve, no una firma digital certificada: el papel sigue diciendo «Firmado electrónicamente».",
+      },
+      {
         q: "¿Cómo firma la persona su consentimiento?",
         a: "Con «Firmar ahora» se abre una pantalla completa para pasarle la tablet: lee en letra grande, marca que entendió y firma con el dedo; si son dos, van seguidos. Al final confirmas tú con tu perfil profesional, sin dibujar otra firma. Si firmó en papel, «Firmado en papel» pide la foto de la hoja y cierra el pendiente. Con «Enviar para firmar» lo lee y lo firma desde su teléfono, en «Su enlace», antes de llegar; queda pendiente hasta que tú lo confirmes con «Confirmar». Siempre se dice el nivel real: «Firma simple · en la clínica», «en papel» o «por enlace».",
       },

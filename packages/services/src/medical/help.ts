@@ -37,6 +37,8 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
     faqs: (topic.faqs ?? []).flatMap((faq): Faq[] => {
       if (/hallazgo del odontograma|pieza quedó dibujada|se firma el odontograma/.test(faq.q))
         return []
+      if (faq.q === "¿Qué le doy al paciente para su seguro?")
+        return [{ ...faq, a: faq.a.replace("; el odontograma, a color", "") }]
       if (faq.q === "¿Dónde quedaron los contactos?")
         return [
           {

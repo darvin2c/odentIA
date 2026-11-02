@@ -19,15 +19,16 @@ import type { Db } from "@odentia/db"
 import { patientDocument } from "@odentia/db/schema/clinical"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, eq, isNull, sql } from "drizzle-orm"
+import { ATTENTION_SHEET_LABEL, getAttentionSheetPrint } from "./attention-sheet.js"
 import { getConsentPrint, getOrderPrint } from "./clinical-forms.js"
 import {
   ORDER_KIND_WORDS,
+  renderAttentionSheetPdf,
   renderMedicalLeavePdf,
   renderOrderPdf,
   renderPrescriptionPdf,
 } from "./clinical-papers.js"
 import { renderConsentPaperPdf, renderConsentPdf } from "./consent-pdf.js"
-import { type CheckableDocument, documentCheckUrl } from "./document-check.js"
 import { loadDocumentClinic } from "./document-clinic.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import {
@@ -37,20 +38,26 @@ import {
   requireDocumentConnection,
   type SendDeps,
 } from "./financial-documents.js"
+import { type IssuedPaperType, issuedPaperBytes, type PaperStorage } from "./issued-papers.js"
 import { getMedicalLeavePrint } from "./medical-leaves.js"
 import { requirePatient } from "./patients.js"
 import { getPrescriptionPrint } from "./prescriptions.js"
 import { type DecisionRecipient, listDecisionRecipients } from "./responsibilities.js"
-import type { Storage } from "./storage.js"
 import { sendPersonalLink } from "./su-enlace.js"
 
-export const HEALTH_DOCUMENT_TYPES = ["prescription", "order", "consent", "medical_leave"] as const
+export const HEALTH_DOCUMENT_TYPES = [
+  "prescription",
+  "order",
+  "consent",
+  "medical_leave",
+  "attention_sheet",
+] as const
 export type HealthDocumentType = (typeof HEALTH_DOCUMENT_TYPES)[number]
 
 function assertHealthType(value: string): HealthDocumentType {
   if ((HEALTH_DOCUMENT_TYPES as readonly string[]).includes(value))
     return value as HealthDocumentType
-  throw validation("Documento inválido: receta, orden, consentimiento o descanso médico")
+  throw validation("Documento inválido: receta, orden, consentimiento, descanso médico u hoja de atención")
 }
 
 export type HealthDocumentRecipient = DecisionRecipient
@@ -144,6 +151,15 @@ async function loadHealthMeta(
       other: "el descanso médico",
     }
   }
+  if (type === "attention_sheet") {
+    // Sin firmar no hay hoja: lo dice quien la lee.
+    await getAttentionSheetPrint(tx, orgId, patientId, documentId)
+    return {
+      label: ATTENTION_SHEET_LABEL,
+      own: "tu hoja de atención",
+      other: "la hoja de atención",
+    }
+  }
   if (type === "order") {
     const print = await getOrderPrint(tx, orgId, documentId)
     if (print.order.patientId !== patientId) throw notFound("Orden")
@@ -233,19 +249,13 @@ export async function getHealthDocumentSendOptions(
 
 // --- PDF -----------------------------------------------------------------------
 
-const CHECK_TYPE: Record<HealthDocumentType, CheckableDocument> = {
-  prescription: "prescription",
-  order: "order",
-  medical_leave: "medical_leave",
-  consent: "consent",
-}
-
 /**
  * El PDF de un papel de salud: el mismo para enviarlo, para «Tus papeles» y para
- * que el equipo lo vea. Receta, orden y descanso se generan, con su sello si se
- * anularon (enviarlos sigue prohibido: `loadHealthMeta`). El consentimiento firmado
- * es el guardado, el de la huella; el pendiente es la hoja para firmar en papel o,
- * si ya lo firmó en su enlace, lo que firmó, a la espera de que lo confirmen.
+ * que el equipo lo vea. Receta, orden y descanso son el archivo guardado al emitirse
+ * (`issuedPaperBytes`), con «ANULADA» encima si se anularon (enviarlos sigue prohibido:
+ * `loadHealthMeta`). El consentimiento firmado es el guardado, el de la huella; el
+ * pendiente es la hoja para firmar en papel o, si ya lo firmó en su enlace, lo que
+ * firmó, a la espera de que lo confirmen.
  */
 export async function renderHealthDocumentPdf(
   tx: Db,
@@ -253,38 +263,91 @@ export async function renderHealthDocumentPdf(
   patientId: string,
   type: HealthDocumentType,
   documentId: string,
-  /** Para leer el consentimiento guardado; receta y orden no lo usan. */
-  storage: Pick<Storage, "getAttachment"> = {},
-  /** Para verlo el equipo: lo que no tiene PDF guardado se genera al vuelo, sin guardarlo. */
+  /** Donde vive lo emitido: sin él no se guarda ni se lee nada. */
+  storage: PaperStorage = {},
+  /** Para verlo: lo que no se pudo guardar se genera al vuelo, sin trabar a quien lo abre. */
   options: { viewing?: boolean } = {},
 ): Promise<{ bytes: Uint8Array; filename: string; label: string }> {
-  const context = async () => ({
-    clinic: await loadDocumentClinic(tx, orgId),
-    checkUrl: await documentCheckUrl(tx, orgId, CHECK_TYPE[type], documentId),
-  })
+  const paper = { orgId, patientId, documentId }
   if (type === "prescription") {
     const data = await getPrescriptionPrint(tx, orgId, patientId, documentId)
+    const rx = data.prescription
     return {
-      bytes: await renderPrescriptionPdf(data, await context()),
-      filename: `Receta-${data.prescription.prescriptionNumber}.pdf`,
-      label: `Receta N.º ${data.prescription.prescriptionNumber}`,
+      bytes: await issuedPaperBytes(
+        tx,
+        {
+          ...paper,
+          type,
+          patientName: data.patient.displayName,
+          voided: rx.status === "anulada" ? { word: "ANULADA", reason: rx.cancelReason } : null,
+          draw: (context) => renderPrescriptionPdf(data, context),
+        },
+        storage,
+        options,
+      ),
+      filename: `Receta-${rx.prescriptionNumber}.pdf`,
+      label: `Receta N.º ${rx.prescriptionNumber}`,
     }
   }
   if (type === "medical_leave") {
     const data = await getMedicalLeavePrint(tx, orgId, patientId, documentId)
+    const { leave } = data
     return {
-      bytes: await renderMedicalLeavePdf(data, await context()),
-      filename: `Descanso-medico-${data.leave.leaveNumber}.pdf`,
-      label: `Descanso médico N.º ${data.leave.leaveNumber}`,
+      bytes: await issuedPaperBytes(
+        tx,
+        {
+          ...paper,
+          type,
+          patientName: data.patient.displayName,
+          voided: leave.status === "anulado" ? { word: "ANULADO", reason: leave.cancelReason } : null,
+          draw: (context) => renderMedicalLeavePdf(data, context),
+        },
+        storage,
+        options,
+      ),
+      filename: `Descanso-medico-${leave.leaveNumber}.pdf`,
+      label: `Descanso médico N.º ${leave.leaveNumber}`,
+    }
+  }
+  if (type === "attention_sheet") {
+    const data = await getAttentionSheetPrint(tx, orgId, patientId, documentId)
+    return {
+      bytes: await issuedPaperBytes(
+        tx,
+        {
+          ...paper,
+          type,
+          patientName: data.patient.displayName,
+          // Una atención firmada no se anula: la hoja siempre vale.
+          voided: null,
+          draw: (context) => renderAttentionSheetPdf(data, context),
+        },
+        storage,
+        options,
+      ),
+      filename: "Hoja-de-atencion.pdf",
+      label: ATTENTION_SHEET_LABEL,
     }
   }
   if (type === "order") {
     const data = await getOrderPrint(tx, orgId, documentId)
-    if (data.order.patientId !== patientId) throw notFound("Orden")
+    const { order } = data
+    if (order.patientId !== patientId) throw notFound("Orden")
     return {
-      bytes: await renderOrderPdf(data, await context()),
-      filename: `Orden-${data.order.title}.pdf`,
-      label: `${ORDER_KIND_WORDS[data.order.kind] ?? "Orden"} · ${data.order.title}`,
+      bytes: await issuedPaperBytes(
+        tx,
+        {
+          ...paper,
+          type,
+          patientName: data.patient.displayName,
+          voided: order.status === "cancelado" ? { word: "ANULADA", reason: order.cancelReason } : null,
+          draw: (context) => renderOrderPdf(data, context),
+        },
+        storage,
+        options,
+      ),
+      filename: `Orden-${order.title}.pdf`,
+      label: `${ORDER_KIND_WORDS[order.kind] ?? "Orden"} · ${order.title}`,
     }
   }
   const data = await getConsentPrint(tx, orgId, documentId)
@@ -342,6 +405,66 @@ export async function renderHealthDocumentPdf(
     filename: `Consentimiento-${doc.titleSnapshot}.pdf`,
     label: `Consentimiento · ${doc.titleSnapshot}`,
   }
+}
+
+/** Cuánto espera quien emite a que el archivo se guarde. */
+const KEEP_PAPER_WAIT_MS = 5000
+
+/**
+ * Deja guardado lo recién emitido, ya confirmada su emisión. Si falla no deshace nada:
+ * el documento existe y se guarda la próxima vez que alguien lo abra. Si el almacenamiento
+ * tarda, se responde igual y sigue guardándose: quien vea un error creería que no se
+ * emitió y volvería a emitirlo.
+ */
+export async function keepIssuedPaper(input: {
+  run: <T>(fn: (tx: Db) => Promise<T>) => Promise<T>
+  storage: PaperStorage
+  orgId: string
+  patientId: string
+  type: IssuedPaperType
+  documentId: string
+  waitMs?: number
+}): Promise<void> {
+  const { run, storage, orgId, patientId, type, documentId } = input
+  const work = run((tx) =>
+    renderHealthDocumentPdf(tx, orgId, patientId, type, documentId, storage),
+  ).then(
+    () => undefined,
+    (error: unknown) => console.error(`No se guardó el papel emitido (${type})`, error),
+  )
+  let timer: ReturnType<typeof setTimeout> | undefined
+  await Promise.race([
+    work,
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, input.waitMs ?? KEEP_PAPER_WAIT_MS)
+    }),
+  ])
+  clearTimeout(timer)
+}
+
+/**
+ * De qué paciente es el papel de salud que salió en este mensaje; null si no lleva uno.
+ * El adjunto queda en la conversación, que recepción lee, pero sigue siendo historia clínica.
+ */
+export async function healthDocumentPatientOfMessage(
+  tx: Db,
+  orgId: string,
+  messageId: string,
+): Promise<string | null> {
+  const [row] = await tx
+    .select({ metadata: auditEvent.metadata })
+    .from(auditEvent)
+    .where(
+      and(
+        eq(auditEvent.organizationId, orgId),
+        eq(auditEvent.entity, "message"),
+        eq(auditEvent.entityId, messageId),
+        eq(auditEvent.action, "health_document.sent"),
+      ),
+    )
+    .limit(1)
+  const patientId = (row?.metadata as { patientId?: unknown } | null | undefined)?.patientId
+  return typeof patientId === "string" ? patientId : null
 }
 
 // --- Envío ---------------------------------------------------------------------

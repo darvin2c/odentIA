@@ -4,18 +4,24 @@
  * y el id, y se recalcula con la clave del servidor.
  *
  * Lo público dice solo el estado, la etiqueta, las fechas, quién firmó, las iniciales
- * del paciente y cómo llamar a la clínica. Nunca diagnóstico, medicamentos, el título
- * de un consentimiento o de una orden, el motivo de anulación ni el nombre completo.
+ * del paciente, la huella de sus archivos y cómo llamar a la clínica. Nunca diagnóstico,
+ * medicamentos, el título de un consentimiento o de una orden, el motivo de anulación ni
+ * el nombre completo. El QR confirma el documento, no lo escrito en un papel: eso solo
+ * se comprueba comparando el PDF contra su huella (ADR 0132).
  */
 import { createHmac, timingSafeEqual } from "node:crypto"
 import type { Db } from "@odentia/db"
-import { prescription } from "@odentia/db/schema/clinical"
-import { clinicalOrder, consentDocument, medicalLeave } from "@odentia/db/schema/clinical-forms"
+import { encounter, prescription } from "@odentia/db/schema/clinical"
+import {
+  clinicalOrder,
+  consentDocument,
+  issuedPaper,
+  medicalLeave,
+} from "@odentia/db/schema/clinical-forms"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { requirePatient } from "./patients.js"
 import { productHooks } from "./products.js"
-import { requireProfessionalSignature } from "./professional-profiles.js"
 import { clinicOriginOf } from "./public-links.js"
 
 export const CHECKABLE_DOCUMENTS = [
@@ -24,6 +30,8 @@ export const CHECKABLE_DOCUMENTS = [
   "medical_leave",
   "consent",
   "signed_odontogram",
+  // Al final: el token guarda la posición, y lo ya impreso debe seguir valiendo.
+  "attention_sheet",
 ] as const
 export type CheckableDocument = (typeof CHECKABLE_DOCUMENTS)[number]
 
@@ -42,12 +50,16 @@ export interface DocumentCheck {
   signer: { name: string; title: string | null; registration: string | null } | null
   /** «R. Q.». */
   patientInitials: string
+  /** SHA-256 de sus archivos guardados: para comparar un PDF en el navegador de quien lo tiene. */
+  fingerprints: string[]
   clinic: { name: string; phone: string | null }
 }
 
 /** Lo que dice cada documento, antes de agregarle clínica y paciente. */
 export interface DocumentCheckFacts {
   patientId: string
+  /** El nombre que dice el papel, si el documento lo guarda; sin él, el de hoy. */
+  patientName?: string
   state: DocumentCheckState
   label: string
   issuedAt: Date | string | null
@@ -213,11 +225,10 @@ async function factsOf(
       .limit(1)
     if (!row) return null
     const voided = row.status === "cancelado"
-    let signer: DocumentCheck["signer"] = null
-    if (row.fromUserId) {
-      const found = await requireProfessionalSignature(tx, orgId, row.fromUserId).catch(() => null)
-      if (found) signer = { name: found.name, title: found.title, registration: found.registration }
-    }
+    // La copia de quien firmó; sin ella, nadie la firmó aunque hoy ya tenga colegiatura.
+    const signer: DocumentCheck["signer"] = row.signerName
+      ? { name: row.signerName, title: row.signerTitle, registration: row.signerRegistration }
+      : null
     return {
       patientId: row.patientId,
       state: voided ? "anulado" : "vigente",
@@ -226,6 +237,26 @@ async function factsOf(
       validUntil: null,
       voidedAt: voided ? row.cancelledAt : null,
       signer,
+    }
+  }
+  if (type === "attention_sheet") {
+    const [row] = await tx
+      .select()
+      .from(encounter)
+      .where(and(eq(encounter.id, id), eq(encounter.organizationId, orgId)))
+      .limit(1)
+    // Solo la atención firmada tiene hoja; firmada ya no se anula.
+    if (!row || row.status !== "finalizada") return null
+    return {
+      patientId: row.patientId,
+      state: "vigente",
+      label: "Hoja de atención",
+      issuedAt: row.finalizedAt,
+      validUntil: null,
+      voidedAt: null,
+      signer: row.signerName
+        ? { name: row.signerName, title: row.signerTitle, registration: row.signerRegistration }
+        : null,
     }
   }
   if (type === "consent") {
@@ -259,6 +290,46 @@ async function factsOf(
   return hooks.documentCheck ? hooks.documentCheck(tx, orgId, type, id) : null
 }
 
+/**
+ * Los archivos que la clínica guardó de este documento (ADR 0132). Sus huellas dicen si
+ * un PDF es ese mismo archivo, nada de lo que contiene; sus iniciales son las del papel,
+ * aunque después se corrija el nombre. El odontograma firmado se imprime desde el
+ * navegador: no tiene archivo con el que comparar.
+ */
+async function storedPapersOf(
+  tx: Db,
+  orgId: string,
+  type: CheckableDocument,
+  id: string,
+): Promise<{ fingerprints: string[]; initials: string | null }> {
+  if (type === "consent") {
+    const [row] = await tx
+      .select({ signed: consentDocument.pdfSha256, revoked: consentDocument.revokePdfSha256 })
+      .from(consentDocument)
+      .where(and(eq(consentDocument.id, id), eq(consentDocument.organizationId, orgId)))
+      .limit(1)
+    return {
+      fingerprints: row ? [row.signed, row.revoked].filter((sha): sha is string => !!sha) : [],
+      initials: null,
+    }
+  }
+  if (type === "signed_odontogram") return { fingerprints: [], initials: null }
+  const [row] = await tx
+    .select({ sha256: issuedPaper.sha256, initials: issuedPaper.patientInitials })
+    .from(issuedPaper)
+    .where(
+      and(
+        eq(issuedPaper.organizationId, orgId),
+        eq(issuedPaper.documentType, type),
+        eq(issuedPaper.documentId, id),
+      ),
+    )
+    .limit(1)
+  return row
+    ? { fingerprints: [row.sha256], initials: row.initials }
+    : { fingerprints: [], initials: null }
+}
+
 /** Lo que responde la ruta pública; null si el documento ya no está. */
 export async function readDocumentCheck(
   tx: Db,
@@ -285,6 +356,7 @@ export async function readDocumentCheck(
   const facts = await factsOf(tx, orgId, type, id, today)
   if (!facts) return null
   const person = await requirePatient(tx, orgId, facts.patientId)
+  const stored = await storedPapersOf(tx, orgId, type, id)
   const branches = await tx
     .select({ phone: branch.phone })
     .from(branch)
@@ -297,7 +369,8 @@ export async function readDocumentCheck(
     validUntil: facts.validUntil,
     voidedAt: iso(facts.voidedAt),
     signer: facts.signer,
-    patientInitials: patientInitials(person.displayName),
+    patientInitials: stored.initials ?? patientInitials(facts.patientName ?? person.displayName),
+    fingerprints: stored.fingerprints,
     clinic: {
       name: profile.tradeName || profile.legalName || "",
       phone: branches.length === 1 ? (branches[0]?.phone ?? null) : null,

@@ -23,6 +23,7 @@ import {
   registerFromBookingLink,
   reservePersonalLink,
   ServiceError,
+  type Storage,
   setPersonalLinkMessages,
   signPersonalLinkConsent,
   submitPersonalLinkData,
@@ -156,6 +157,8 @@ export type BookingRemoteAddress = (c: Context) => string | undefined
 export function createPublicBookingRoute(deps: {
   db: Db
   secretsKey: Buffer
+  /** Donde vive lo emitido: «Tus papeles» entrega ese mismo archivo (ADR 0132). */
+  storage?: Storage
   remoteAddress?: BookingRemoteAddress
   /** Quién sugiere la dirección de la persona (Geoapify, issue 36); null: los campos de siempre. */
   addressProvider?: AddressProvider | null
@@ -415,7 +418,7 @@ export function createPublicBookingRoute(deps: {
     if (!body.success || !params.success) return unavailable(c)
     try {
       const paper = await inOrg(c, (tx, orgId) =>
-        getPersonalLinkPaper(tx, orgId, body.data.token, { kind: body.data.kind, id: params.data.paperId }),
+        getPersonalLinkPaper(tx, orgId, body.data.token, { kind: body.data.kind, id: params.data.paperId }, deps.storage),
       )
       return new Response(Buffer.from(paper.bytes), {
         status: 200,

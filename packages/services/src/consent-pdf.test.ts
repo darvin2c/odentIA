@@ -88,10 +88,53 @@ it("firmado en su enlace y sin confirmar: lleva su firma y dice que falta confir
   expect(signer).toMatchObject({ heading: "Paciente", strokes })
   // La fecha en que firmó la persona, y el profesional aún sin nombre ni «firmado».
   expect(signer?.lines.at(-1)?.text).toMatch(/^Firmó el .*30/)
+  const [, informer] = penSignatures.mock.calls[0]?.[0] ?? []
+  expect(informer?.lines).toEqual([{ text: "Falta su confirmación" }])
   const written = text.mock.calls.map(([line]) => line)
-  expect(written).toContain("Falta su confirmación")
   expect(written).not.toContain("Firmado electrónicamente")
   expect(written.join(" ")).toContain("IP 203.0.113.7")
+})
+
+it("firmado: la firma guardada del profesional sale dibujada y el papel sigue diciendo cómo se firmó", async () => {
+  const penSignatures = vi.spyOn(DocumentKit.prototype, "penSignatures")
+  const strokes = [[[10, 10], [200, 120]]]
+  const consent = (professionalSignature: unknown) =>
+    ({
+      document: {
+        status: "firmado",
+        titleSnapshot: "Exodoncia",
+        procedureRef: null,
+        sectionsSnapshot: base,
+        bodySnapshot: "",
+        diagnosisCode: null,
+        declarationSnapshot: "He leído y comprendido la información.",
+        signatureMethod: "clinica",
+        signerKind: "paciente",
+        signerName: "Rosa Rojas",
+        signerDoc: "DNI 40000004",
+        signatureData: { strokes },
+        signedAt: new Date("2026-10-30T15:00:00Z"),
+        informerName: "Ana Torres",
+        informerTitle: "Cirujano dentista",
+        informerRegistration: "COP 12345",
+        informedAt: new Date("2026-10-30T15:00:00Z"),
+        professionalSignature,
+      },
+      patient: { displayName: "Rosa Rojas", docType: "DNI", docNumber: "40000004", patientNumber: 7 },
+      diagnosisDescription: null,
+      establishment: null,
+    }) as never
+
+  await renderConsentPdf(consent({ strokes }), clinic)
+  const [, withSignature] = penSignatures.mock.lastCall?.[0] ?? []
+  expect(withSignature).toMatchObject({ heading: "Profesional que informa", strokes })
+  expect(withSignature?.lines.at(-1)?.text).toBe("Firmado electrónicamente")
+
+  // Sin firma guardada: la línea para firmar a mano, no un papel a medias.
+  await renderConsentPdf(consent(null), clinic)
+  const [, withoutSignature] = penSignatures.mock.lastCall?.[0] ?? []
+  expect(withoutSignature).toMatchObject({ strokes: null, handLine: true })
+  expect(withoutSignature?.lines.at(-1)?.text).toBe("Firmado electrónicamente")
 })
 
 it("lo que se calcula de antemano es lo que de verdad ocupa", async () => {

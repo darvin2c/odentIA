@@ -539,6 +539,8 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "consent_template.review": say("Marcó como revisado un consentimiento"),
   "consent_template.services": say("Cambió para qué servicios se pide un consentimiento"),
   "professional_profile.updated": say("Cambió el perfil profesional de alguien del equipo"),
+  "professional_signature.saved": say("Guardó su firma"),
+  "professional_signature.removed": say("Quitó su firma"),
   "catalog.service_created": say("Creó un servicio"),
   "catalog.service_updated": say("Cambió un servicio"),
   "service_catalog.billing_mode": say("Cambió cómo se cobra un servicio"),

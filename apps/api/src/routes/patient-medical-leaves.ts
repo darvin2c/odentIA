@@ -4,6 +4,7 @@ import {
   cancelMedicalLeave,
   createMedicalLeave,
   getMedicalLeavePrint,
+  keepIssuedPaper,
   listMedicalLeaves,
 } from "@odentia/services"
 import { Hono } from "hono"
@@ -29,7 +30,7 @@ const reasonInput = z
   .strict()
 const leaveParams = z.object({ id: z.uuid(), leaveId: z.uuid() })
 
-export function createPatientMedicalLeavesRoute(deps: Pick<CrmDeps, "db">) {
+export function createPatientMedicalLeavesRoute(deps: Pick<CrmDeps, "db" | "storage">) {
   const app = new Hono()
   app.get("/:id/medical-leaves", async (c) => {
     const { orgId } = orgContextOf(c)
@@ -45,11 +46,20 @@ export function createPatientMedicalLeavesRoute(deps: Pick<CrmDeps, "db">) {
     if (!params.success) return validationError(c, params.error.issues)
     const parsed = createInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
+    return runService(c, 201, async () => {
+      const created = await withOrgContext(deps.db, orgId, (tx) =>
         createMedicalLeave(tx, orgId, userId, params.data.id, parsed.data),
-      ),
-    )
+      )
+      await keepIssuedPaper({
+        run: (fn) => withOrgContext(deps.db, orgId, fn),
+        storage: deps.storage,
+        orgId,
+        patientId: params.data.id,
+        type: "medical_leave",
+        documentId: created.id,
+      })
+      return created
+    })
   })
   // Datos de la hoja impresa: la plataforma la compone y el navegador la imprime.
   app.get("/:id/medical-leaves/:leaveId/print", async (c) => {
@@ -57,9 +67,16 @@ export function createPatientMedicalLeavesRoute(deps: Pick<CrmDeps, "db">) {
     const params = leaveParams.safeParse(c.req.param())
     if (!params.success) return validationError(c, params.error.issues)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        getMedicalLeavePrint(tx, orgId, params.data.id, params.data.leaveId),
-      ),
+      withOrgContext(deps.db, orgId, async (tx) => {
+        // La firma dibujada solo se le entrega a quien la guardó; la hoja es el PDF.
+        const { signerStrokes: _strokes, ...print } = await getMedicalLeavePrint(
+          tx,
+          orgId,
+          params.data.id,
+          params.data.leaveId,
+        )
+        return print
+      }),
     )
   })
   app.post("/:id/medical-leaves/:leaveId/cancel", async (c) => {

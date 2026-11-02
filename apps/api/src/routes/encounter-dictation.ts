@@ -13,6 +13,7 @@ import {
   getAgentConfig,
   issueDictationPrescription,
   keepConfirmedDictation,
+  keepIssuedPaper,
   listConfirmedDictation,
   listDictationSuggestions,
   listVoiceRemovedDictation,
@@ -238,9 +239,20 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
     const { orgId, userId } = orgContextOf(c)
     const at = params.safeParse(c.req.param())
     if (!at.success) return validationError(c, at.error.issues)
-    return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) => issueDictationPrescription(tx, orgId, userId, at.data.id, at.data.encounterId)),
-    )
+    return runService(c, 201, async () => {
+      const issued = await withOrgContext(deps.db, orgId, (tx) =>
+        issueDictationPrescription(tx, orgId, userId, at.data.id, at.data.encounterId),
+      )
+      await keepIssuedPaper({
+        run: (fn) => withOrgContext(deps.db, orgId, fn),
+        storage: deps.storage,
+        orgId,
+        patientId: at.data.id,
+        type: "prescription",
+        documentId: issued.prescriptionId,
+      })
+      return issued
+    })
   })
 
   /** La receta dictada se terminó en el formulario de siempre: sus sugerencias quedan con esa receta. */

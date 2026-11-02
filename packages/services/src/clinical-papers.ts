@@ -4,6 +4,7 @@
  * equipo los vea o los imprima. Los datos de firma son los congelados al emitir.
  */
 import { diagnosisCodeLabel, medicalLeaveEnd } from "@odentia/clinical"
+import type { getAttentionSheetPrint } from "./attention-sheet.js"
 import type { getOrderPrint } from "./clinical-forms.js"
 import {
   ageWords,
@@ -15,6 +16,7 @@ import {
   documentFormat,
   numberInWords,
   SIZE,
+  type Strokes,
 } from "./document-kit.js"
 import type { getMedicalLeavePrint } from "./medical-leaves.js"
 import type { getPrescriptionPrint } from "./prescriptions.js"
@@ -77,14 +79,17 @@ function signedAtBottom(
     registration: string | null
     at: Date | string
     checkUrl: string | null
+    strokes: Strokes | null
   },
 ) {
-  if (!input.name) return
+  // Sin quien firme (quien pidió la orden no tenía colegiatura), sigue llevando su QR.
+  if (!input.name && !input.checkUrl) return
   const signed = {
     name: input.name,
     credential: credentialOf(input.title, input.registration),
     at: dayTimeWords(input.at, kit.clinic),
     checkUrl: input.checkUrl,
+    strokes: input.strokes,
   }
   kit.anchorBottom(kit.signedBlockHeight(signed))
   kit.signedBlock(signed)
@@ -184,6 +189,7 @@ export async function renderPrescriptionPdf(
     registration: rx.prescriberRegistration,
     at: rx.issuedAt,
     checkUrl: context.checkUrl,
+    strokes: data.signerStrokes,
   })
   return kit.finish()
 }
@@ -246,6 +252,60 @@ export async function renderOrderPdf(
     registration: requestedBy?.registration ?? null,
     at: order.createdAt,
     checkUrl: context.checkUrl,
+    strokes: data.signerStrokes,
+  })
+  return kit.finish()
+}
+
+/**
+ * La hoja de atención (ADR 0133): lo que piden los seguros para reembolsar. Diagnóstico,
+ * fecha, lo que se hizo, exámenes y tratamiento sugerido, con firma y sello. No lleva la
+ * evolución ni el resto de la historia: nadie lo pide y sale de la clínica.
+ */
+export async function renderAttentionSheetPdf(
+  data: Awaited<ReturnType<typeof getAttentionSheetPrint>>,
+  context: PaperContext,
+) {
+  const { encounter, patient: person } = data
+  const zone = context.clinic
+  const title = "Hoja de atención"
+  const kit = await DocumentKit.open(context.clinic, documentFormat(context.clinic), {
+    title,
+    docLabel: title,
+    patientLabel: person.displayName,
+    createdAt: new Date(data.signedAt),
+  })
+  kit.gap(22)
+  kit.titleWithDetails(title, [{ text: `Atendido el ${dayWords(encounter.startedAt, zone)}` }])
+  kit.gap(16)
+  kit.facts(
+    [
+      ...personFacts(kit, person),
+      { label: "Historia clínica", value: chartNumber(person.patientNumber), span: 2 },
+    ],
+    4,
+  )
+  const section = (heading: string, items: string[]) => {
+    if (items.length === 0) return
+    kit.subheading(heading, { before: 14 })
+    kit.bullets(items, { size: SIZE.read })
+  }
+  section("Diagnóstico", data.diagnoses)
+  section("Procedimientos realizados", data.procedures)
+  section("Exámenes auxiliares", data.exams)
+  section("Tratamiento sugerido", data.treatments)
+  if (encounter.indications) {
+    kit.subheading("Indicaciones", { before: 14 })
+    kit.text(encounter.indications, { size: SIZE.read })
+  }
+  kit.gap(14)
+  signedAtBottom(kit, {
+    name: encounter.signerName,
+    title: encounter.signerTitle,
+    registration: encounter.signerRegistration,
+    at: data.signedAt,
+    checkUrl: context.checkUrl,
+    strokes: data.signerStrokes,
   })
   return kit.finish()
 }
@@ -319,6 +379,7 @@ export async function renderMedicalLeavePdf(
     registration: leave.signerRegistration,
     at: leave.issuedAt,
     checkUrl: context.checkUrl,
+    strokes: data.signerStrokes,
   })
   return kit.finish()
 }

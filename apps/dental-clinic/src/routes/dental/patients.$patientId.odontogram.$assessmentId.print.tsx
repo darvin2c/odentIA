@@ -42,13 +42,14 @@ function SignedOdontogramPrintPage() {
         <QueryErrorState error={query.error} onRetry={() => void query.refetch()} />
       </PageShell>
     )
-  const { assessment, patient, establishment, checkUrl } = query.data.data
+  const { assessment, patient, establishment, checkUrl, signerStrokes } = query.data.data
   return (
     <PageShell className="flex flex-col gap-4">
       <SheetPageStyle />
       <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
         <p className="text-sm text-muted-foreground">
-          Odontograma firmado. Usa «Imprimir» para llevarlo en papel.
+          Odontograma firmado. Usa «Imprimir» para llevarlo en papel o guardarlo como PDF; a color,
+          porque los seguros lo piden en rojo y azul.
         </p>
         <Button type="button" onClick={() => window.print()}>
           Imprimir
@@ -91,6 +92,7 @@ function SignedOdontogramPrintPage() {
                 registration={assessment.registrationNumber}
                 at={assessment.createdAt}
                 checkUrl={checkUrl}
+                strokes={signerStrokes}
               />
             ),
           }}

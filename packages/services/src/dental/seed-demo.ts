@@ -73,6 +73,8 @@ import {
 import {
   consentDocument,
   consentTemplate,
+  issuedPaper,
+  professionalDrawnSignature,
   professionalProfile,
 } from "@odentia/db/schema/clinical-forms"
 import {
@@ -152,6 +154,7 @@ import {
   verifyDataRequest,
 } from "../data-requests.js"
 import { buildDemo, DEMO_BUILD_STEPS, purgeDemoOrganization } from "../demo-build.js"
+import { seedDemoSignature } from "../demo-signature.js"
 import { addEncounterDiagnosis, voidEncounterDiagnosis } from "../encounter-diagnoses.js"
 import {
   addEncounterAddendum,
@@ -361,6 +364,12 @@ async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USER
     .select({ storageKey: patientDocument.storageKey })
     .from(patientDocument)
     .where(inArray(patientDocument.organizationId, orgs))
+  // Lo que la demo guardó al abrir sus recetas, órdenes y descansos (ADR 0132).
+  const previousPapers = await db
+    .select({ storageKey: issuedPaper.storageKey })
+    .from(issuedPaper)
+    .where(inArray(issuedPaper.organizationId, orgs))
+  await db.delete(issuedPaper).where(inArray(issuedPaper.organizationId, orgs))
   const previousMessages = await db
     .select({ attachments: message.attachments })
     .from(message)
@@ -603,6 +612,7 @@ async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USER
   await db.delete(branch).where(inArray(branch.organizationId, orgs))
   await db.delete(orgProfile).where(inArray(orgProfile.organizationId, orgs))
   await db.delete(auditEvent).where(inArray(auditEvent.organizationId, orgs))
+  await db.delete(professionalDrawnSignature).where(inArray(professionalDrawnSignature.organizationId, orgs))
   await db.delete(professionalProfile).where(inArray(professionalProfile.organizationId, orgs))
   await db.delete(member).where(inArray(member.organizationId, orgs))
   await db.delete(invitation).where(inArray(invitation.organizationId, orgs))
@@ -621,6 +631,7 @@ async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USER
   )
   await db.delete(user).where(inArray(user.id, users))
   for (const document of previousDocuments) await storage.deleteAttachment(document.storageKey)
+  for (const paper of previousPapers) await storage.deleteAttachment(paper.storageKey)
   for (const row of previousMessages) {
     if (!Array.isArray(row.attachments)) continue
     for (const attachment of row.attachments) {
@@ -811,6 +822,11 @@ await setProfessionalProfile(db, ORG_B, CORA_ID, CORA_ID, {
   ...PERU_PROFESSIONAL,
   registrationNumber: "34567",
 })
+// La firma que se ve en sus papeles (ADR 0131). Salas queda sin ella: la línea para firmar a mano.
+await seedDemoSignature(db, ORG_A, ANA_ID, "Ana Torres")
+await seedDemoSignature(db, ORG_A, LUIS_ID, "Luis Prado")
+await seedDemoSignature(db, ORG_A, ROJAS_ID, "Elena Rojas")
+await seedDemoSignature(db, ORG_B, CORA_ID, "Cora Vega")
 await db.insert(orgProfile).values([
   {
     organizationId: ORG_A,

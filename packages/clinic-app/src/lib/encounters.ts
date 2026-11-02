@@ -161,6 +161,8 @@ export interface ProfessionalProfile {
   specialtyRegistration: string | null
   complete: boolean
   updatedAt: string | null
+  /** Su firma dibujada: el servidor solo se la entrega a la propia persona. */
+  signatureStrokes?: number[][][] | null
 }
 
 export interface ProfessionalProfileInput {
@@ -169,6 +171,8 @@ export interface ProfessionalProfileInput {
   registrationBody?: string
   registrationNumber?: string | null
   specialtyRegistration?: string | null
+  /** Solo la propia persona. Sin el dato no cambia; nulo es que la quita. */
+  signatureStrokes?: number[][][] | null
 }
 
 const base = (patientId: string) => `/api/patients/${patientId}`

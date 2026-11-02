@@ -9,7 +9,7 @@ import { invalidField, notFound, ServiceError } from "./errors.js"
 import { clinicToday } from "./inventory-stock.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
-import { requireProfessionalSignature } from "./professional-profiles.js"
+import { drawnSignatureAt, requireProfessionalSignature } from "./professional-profiles.js"
 import { listDecisionRecipients, patientAge } from "./responsibilities.js"
 
 /**
@@ -254,5 +254,6 @@ export async function getMedicalLeavePrint(tx: Db, orgId: string, patientId: str
     establishment: org ?? null,
     evaluatedAt: visit?.startedAt ?? null,
     guardianName: guardian?.displayName ?? null,
+    signerStrokes: await drawnSignatureAt(tx, orgId, leave.issuedBy, leave.issuedAt),
   }
 }

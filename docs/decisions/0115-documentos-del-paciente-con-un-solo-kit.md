@@ -1,6 +1,6 @@
 # 0115 · Los documentos del paciente: un solo kit, firma al emitir, QR y explicación por servicio
 
-Fecha: 2026-10-30. Estado: aceptada.
+Fecha: 2026-10-30. Estado: aceptada. Ajustada por [0131](0131-la-firma-que-se-ve-en-el-papel.md): el papel lleva la firma dibujada del profesional o una línea para firmar a mano.
 
 ## Problema
 

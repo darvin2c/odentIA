@@ -330,6 +330,7 @@ export const dentalHooks: ProductHooks = {
     if (!row) return null
     return {
       patientId: row.patientId,
+      patientName: row.patientName,
       state: "vigente",
       label: "Odontograma firmado",
       issuedAt: row.createdAt,

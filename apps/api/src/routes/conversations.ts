@@ -39,10 +39,12 @@ import {
   setAgentStatus,
   summarizeInbox,
   takeConversation,
+  healthDocumentPatientOfMessage,
 } from "@odentia/services"
 import { ORG_ROLES, type OrgRole, roleLabel } from "@odentia/auth/permissions"
 import { Hono } from "hono"
 import { z } from "zod"
+import { traceClinicalRead } from "../lib/clinical-trace.js"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
@@ -533,15 +535,24 @@ export function createConversationsRoute(deps: CrmDeps) {
   })
 
   app.get("/:id/messages/:messageId/attachments/:index", async (c) => {
-    const { orgId } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
     const index = Number(c.req.param("index"))
     if (!Number.isInteger(index) || index < 0) {
       return c.json(errorBody(c, "VALIDATION", "Índice inválido"), 400)
     }
     try {
+      // Un papel de salud enviado sigue siendo de quien lee lo clínico, y abrirlo deja su traza.
+      const healthOf = await withOrgContext(deps.db, orgId, (tx) =>
+        healthDocumentPatientOfMessage(tx, orgId, c.req.param("messageId")),
+      )
+      // Lo abre un enlace del navegador: se responde con una frase, no con datos.
+      if (healthOf && !canAccess(memberRole, "clinical.read"))
+        return c.text("Este documento es de la historia clínica: solo lo abre quien atiende.", 403)
       const url = await withOrgContext(deps.db, orgId, (tx) =>
         attachmentUrl(tx, orgId, c.req.param("messageId"), index, deps.storage),
       )
+      if (healthOf)
+        await traceClinicalRead(deps.db, { orgId, userId, patientId: healthOf, resource: "documentos" })
       return c.redirect(url, 302)
     } catch (e) {
       return serviceErrorResponse(c, e) ?? Promise.reject(e)
