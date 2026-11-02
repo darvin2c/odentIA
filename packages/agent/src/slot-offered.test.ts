@@ -5,7 +5,7 @@
  * 2:00 p. m., una hora que no venía de ningún hueco.
  */
 import { describe, expect, it } from "vitest"
-import { slotWasOffered } from "./tools"
+import { offeredSlotMinutes, slotWasOffered } from "./tools"
 
 const ROOM = "11111111-1111-4111-8111-111111111111"
 const BRANCH = "22222222-2222-4222-8222-222222222222"
@@ -66,5 +66,28 @@ describe("slotWasOffered", () => {
         roomId: ROOM,
       }),
     ).toBe(true)
+  })
+})
+
+describe("offeredSlotMinutes", () => {
+  const diego = { startsAt: "2026-10-28T21:00:00.000Z", professionalUserId: "pro-diego", roomId: ROOM }
+
+  it("lee lo que dura el hueco ofrecido", () => {
+    expect(offeredSlotMinutes([hours, slots], diego)).toBe(30)
+  })
+
+  it("si el mismo hueco salió en dos búsquedas, vale la más reciente", () => {
+    const longer = {
+      text: `- miércoles, 28 de octubre, 16:00–17:00 con Dr. Diego Salas [startsAt 2026-10-28T21:00:00.000Z · sede ${BRANCH} · unidad dental ${ROOM} · profesional pro-diego]`,
+    }
+    expect(offeredSlotMinutes([slots, longer], diego)).toBe(60)
+  })
+
+  it("sin hueco ofrecido, sin evidencia o sin horas en la línea no hay duración", () => {
+    expect(offeredSlotMinutes([slots], { ...diego, professionalUserId: "pro-ana" })).toBeNull()
+    expect(offeredSlotMinutes(undefined, diego)).toBeNull()
+    const bare = { text: `[startsAt 2026-10-28T21:00:00.000Z · sede ${BRANCH} · unidad dental ${ROOM} · profesional pro-diego]` }
+    expect(slotWasOffered([bare], diego)).toBe(true)
+    expect(offeredSlotMinutes([bare], diego)).toBeNull()
   })
 })

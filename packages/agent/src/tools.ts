@@ -241,16 +241,38 @@ export function slotWasOffered(
   input: { startsAt: string; professionalUserId: string; roomId: string },
 ): boolean {
   if (!evidence) return true
+  return offeredLines(evidence, input).length > 0
+}
+
+/** Las líneas de `buscar_huecos` con ese hueco, de la más antigua a la más reciente. */
+function offeredLines(
+  evidence: { text: string }[],
+  input: { startsAt: string; professionalUserId: string; roomId: string },
+): RegExpMatchArray[] {
   const wanted = Date.parse(input.startsAt)
-  if (Number.isNaN(wanted)) return false
+  if (Number.isNaN(wanted)) return []
   const professional = input.professionalUserId.trim().toLowerCase()
-  const slot = /\[startsAt (\S+) · sede \S+ · (.+?) · profesional ([^\]\s]+)\]/g
-  return evidence.some((item) =>
-    [...item.text.matchAll(slot)].some(
-      ([, startsAt = "", room = "", ref = ""]) =>
+  const slot = /(?:(\d{2}):(\d{2})–(\d{2}):(\d{2})[^\n[]*)?\[startsAt (\S+) · sede \S+ · (.+?) · profesional ([^\]\s]+)\]/g
+  return evidence.flatMap((item) =>
+    [...item.text.matchAll(slot)].filter(
+      ([, , , , , startsAt = "", room = "", ref = ""]) =>
         Date.parse(startsAt) === wanted && ref.toLowerCase() === professional && room.includes(input.roomId),
     ),
   )
+}
+
+/**
+ * Cuánto dura el hueco ofrecido, leído de lo último que se le mostró al modelo
+ * («17:30–18:00»). Nulo si no se ofreció o la línea no lo dice.
+ */
+export function offeredSlotMinutes(
+  evidence: { text: string }[] | undefined,
+  input: { startsAt: string; professionalUserId: string; roomId: string },
+): number | null {
+  const [, fromHour, fromMinute, toHour, toMinute] = offeredLines(evidence ?? [], input).at(-1) ?? []
+  if (!fromHour || !fromMinute || !toHour || !toMinute) return null
+  const minutes = Number(toHour) * 60 + Number(toMinute) - (Number(fromHour) * 60 + Number(fromMinute))
+  return minutes > 0 ? minutes : null
 }
 
 /**
@@ -1724,7 +1746,10 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         }
       })()
       if (viaLink) return viaLink
-      const { reason, ...payload } = { ...input, professionalUserId }
+      // Sin servicio ni duración, la cita dura lo que el hueco ofrecido. Si no, se reserva lo que dura
+      // una cita en la sede, y una hora ofrecida al final del turno ya no cabe al confirmarla.
+      const slotMinutes = input.durationMin === undefined && !input.serviceId ? offeredSlotMinutes(ctx.evidence, input) : null
+      const { reason, ...payload } = { ...input, professionalUserId, ...(slotMinutes ? { durationMin: slotMinutes } : {}) }
       let created: ProposalItem | undefined
       const proposed = await propose("reservar_cita", payload, "proponer_cita", reason, (p) => {
         created = p

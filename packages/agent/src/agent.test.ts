@@ -1393,6 +1393,39 @@ it("proponer_cita: si a la clínica le falta algo del paciente, su enlace con es
   expect(confirmed).not.toContain("tu salud")
 })
 
+it("la cita dura lo que el hueco que se le ofreció: la última hora del turno se puede reservar", async () => {
+  const { conversationId } = await ingestText("tg:ultima-hora", "evt-ultima-hora", "Hola, quiero una cita")
+  const fx = await bookingFixture(conversationId, "ultima-hora")
+  const ctx: AgentToolCtx = {
+    db: appDb, orgId: "org_a", conversationId, contactId: fx.contactId,
+    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, replySettled: false,
+    toolsUsed: [], usage: emptyUsage(),
+  }
+  const tools = makeAgentTools(ctx)
+  const day = upcomingMonday()
+  // Busca de 30 minutos; la sede reserva 60 si nadie dice otra cosa y el turno termina a la 1:00 p. m.
+  const found = String(await tools.find((t) => t.name === "buscar_huecos")!.invoke({
+    branchId: fx.branchId, from: day.toISOString(), to: new Date(day.getTime() + 86_400_000).toISOString(), durationMin: 30,
+  }))
+  ctx.evidence = [{ kind: "agenda", source: "Agenda: horarios disponibles", text: found }]
+  const last = found.split("\n").filter((line) => line.startsWith("- ")).at(-1)!
+  expect(last).toContain("12:30–13:00")
+  const proposed = String(await tools.find((t) => t.name === "proponer_cita")!.invoke({
+    patientId: fx.patientId,
+    branchId: fx.branchId,
+    roomId: last.match(/unidad dental ([0-9a-f-]{36})/i)![1]!,
+    professionalUserId: last.match(/profesional ([^\]\s]+)/)![1]!,
+    startsAt: last.match(ISO_INSTANT)![0],
+  }))
+  expect(proposed).toContain("Falta su sí")
+  const [pending] = await withOrgContext(appDb, "org_a", (tx) => listProposals(tx, "org_a", { conversationId, status: "propuesta" }))
+  await ingestText("tg:ultima-hora", "evt-ultima-hora-si", "Sí, confirmo")
+  expect(String(await tools.find((t) => t.name === "confirmar_propuesta")!.invoke({ proposalId: pending!.id }))).toContain("Confirmado y ejecutado")
+  const rows = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ durationMin: appointment.durationMin }).from(appointment).where(eq(appointment.patientId, fx.patientId)))
+  expect(rows).toEqual([{ durationMin: 30 }])
+})
+
 it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar reserva ni pisar cambios ajenos", async () => {
   const [createdBranch] = await ownerDb
     .insert(branch)
