@@ -1,10 +1,11 @@
 import type { Db } from "@odentia/db"
 import { patientAllergy } from "@odentia/db/schema/clinical"
-import { conversation, message } from "@odentia/db/schema/crm"
+import { contact, conversation, message } from "@odentia/db/schema/crm"
 import { and, desc, eq, sql } from "drizzle-orm"
 import { type CaseBrief, getCaseBrief } from "./agent-case-brief.js"
 import { listHandoffs } from "./agent-operations.js"
 import { notFound, ServiceError } from "./errors.js"
+import { lateReplyOf } from "./held-replies.js"
 import { windowOpen } from "./message-window.js"
 import { openOpportunitiesOf } from "./opportunities.js"
 import { getPatientAccount } from "./payments.js"
@@ -55,8 +56,29 @@ export interface PersonPanel {
   /**
    * Hasta cuándo se le puede escribir: Instagram y Messenger cierran; WhatsApp deja el mensaje por
    * entregar, citando lo último que dijo (`holdOn`). Los demás canales no tienen ventana.
+   *
+   * Desde su ficha (`fromRecord`) no se responde: se le empieza a hablar. Pasadas las 24 horas, o si
+   * nunca escribió, WhatsApp admite solo un mensaje aprobado (`approvedOnly`): «por entregar» le diría
+   * «respondió tu consulta» sin que preguntara nada. Y con Instagram o Messenger cerrados se puede
+   * pasar a su WhatsApp (`hasWhatsapp`).
    */
-  reply: { allowed: boolean; closedChannel: boolean; windowOpen: boolean; holdOn: string | null }
+  reply: {
+    allowed: boolean
+    closedChannel: boolean
+    windowOpen: boolean
+    holdOn: string | null
+    approvedOnly: boolean
+    hasWhatsapp: boolean
+    /** Se lee y no se le escribe: bloqueada (en todas partes) o archivada (desde su ficha, como su cabecera). */
+    readOnly: "bloqueada" | "archivada" | null
+  }
+  /** Cuándo escribió por última vez; nulo si nunca. */
+  lastInboundAt: string | null
+  /**
+   * Desde su ficha, los temas abiertos que este mensaje no responde: de otra persona, o varios, donde
+   * elegir uno a ciegas citaría otra pregunta (ADR 0122). Se responden en la Bandeja.
+   */
+  otherTopics: Array<{ id: string; kind: string; assigneeUserId: string | null }>
   /** Sus citas; nulo si el rol no ve la agenda o no es paciente. */
   appointments: { next: PanelAppointment | null; last: PanelAppointment | null } | null
   /** Sus alergias activas; nulo si el rol no las lee o no es paciente. */
@@ -81,20 +103,31 @@ const PANEL_MESSAGES = 6
 export async function getPersonPanel(
   tx: Db,
   orgId: string,
-  input: { conversationId: string; topicId?: string; userId: string; can: PersonCan },
+  input: { conversationId: string; topicId?: string; userId: string; can: PersonCan; fromRecord?: boolean },
 ): Promise<PersonPanel> {
   const { can } = input
+  const fromRecord = input.fromRecord === true
   const readsThread = can("conversations.read")
   const [conv] = await tx
-    .select({ contactId: conversation.contactId, lastInboundAt: conversation.lastInboundAt })
+    .select({
+      contactId: conversation.contactId,
+      lastInboundAt: conversation.lastInboundAt,
+      screen: contact.screen,
+      isActive: contact.isActive,
+    })
     .from(conversation)
+    .innerJoin(contact, and(eq(contact.id, conversation.contactId), eq(contact.organizationId, conversation.organizationId)))
     .where(and(eq(conversation.organizationId, orgId), eq(conversation.id, input.conversationId)))
     .limit(1)
   if (!conv) throw notFound("Conversación")
 
   const handoffs = await listHandoffs(tx, orgId, { conversationId: input.conversationId, limit: 100 })
+  const openTopics = handoffs.filter((item) => item.status !== "resuelta")
+  // Desde su ficha, la misma regla de la Bandeja: un solo tema y de quien mira; si no, nadie elige por ella.
+  const soleTopic =
+    openTopics.length === 1 && openTopics[0] && (!openTopics[0].assigneeUserId || openTopics[0].assigneeUserId === input.userId) ? openTopics[0] : null
   const topicRow =
-    (input.topicId ? handoffs.find((item) => item.id === input.topicId) : handoffs.find((item) => item.status !== "resuelta")) ?? null
+    (input.topicId ? handoffs.find((item) => item.id === input.topicId) : fromRecord ? soleTopic : openTopics[0]) ?? null
   if (input.topicId && !topicRow) throw notFound("Tema")
 
   // Caja no lee conversaciones: entra solo por un pago que nadie tomó o es suyo.
@@ -136,8 +169,11 @@ export async function getPersonPanel(
           .orderBy(desc(message.createdAt), desc(message.id))
           .limit(1)
       : []
-  // Por entregar necesita algo que responder: si nunca escribió, es como un canal cerrado.
-  const closedChannel = !open && (channel?.provider === "instagram" || channel?.provider === "messenger" || (whatsapp && !lastInbound && !topicRow?.sourceMessageId))
+  const metaChannel = channel?.provider === "instagram" || channel?.provider === "messenger"
+  // Por entregar necesita algo que responder: si nunca escribió, es como un canal cerrado (desde su ficha, un mensaje aprobado).
+  const closedChannel = !open && (metaChannel || (whatsapp && !fromRecord && !lastInbound && !topicRow?.sourceMessageId))
+  const hasWhatsapp = fromRecord && !open && metaChannel && (await lateReplyOf(tx, orgId, input.conversationId)).metaWindow?.whatsapp === true
+  const readOnly = conv.screen === "blocked" ? ("bloqueada" as const) : fromRecord && !conv.isActive ? ("archivada" as const) : null
 
   const patientId = await selfPatientOf(tx, orgId, conv.contactId)
   const clinicalReader = can("clinical.read")
@@ -196,7 +232,20 @@ export async function getPersonPanel(
       })),
     known: readsThread || can("crm.read") ? brief.known : null,
     proposals: readsThread ? brief.proposals : [],
-    reply: { allowed: !closedChannel && (can("conversations.write") || can("conversations.topics")), closedChannel, windowOpen: open || !whatsapp, holdOn: lastInbound?.id ?? null },
+    reply: {
+      allowed: !closedChannel && !readOnly && (can("conversations.write") || can("conversations.topics")),
+      closedChannel,
+      windowOpen: open || !whatsapp,
+      holdOn: fromRecord ? null : (lastInbound?.id ?? null),
+      approvedOnly: fromRecord && whatsapp && !open,
+      hasWhatsapp,
+      readOnly,
+    },
+    lastInboundAt: conv.lastInboundAt?.toISOString() ?? null,
+    otherTopics:
+      fromRecord && readsThread
+        ? openTopics.filter((item) => item.id !== topicRow?.id).map((item) => ({ id: item.id, kind: item.kind, assigneeUserId: item.assigneeUserId }))
+        : [],
     appointments,
     allergies,
     lastEncounter,

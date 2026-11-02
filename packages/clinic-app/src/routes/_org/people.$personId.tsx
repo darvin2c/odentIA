@@ -38,6 +38,7 @@ import { PersonData } from "../../components/person/person-data"
 import { PersonLoading, PersonSectionLoading } from "../../components/person/person-loading"
 import { PersonLinks } from "../../components/person/person-links"
 import { PersonSummary } from "../../components/person/person-summary"
+import { RecordPanelProvider } from "../../components/person/record-panel"
 import { PatientPortalAccessSection } from "../../components/portal/portal-access-section"
 import { apiFetch } from "../../lib/api"
 import { useCan } from "../../lib/crm"
@@ -598,7 +599,7 @@ function PersonPageRoute() {
   return (
     <PersonArchivedProvider value={person.archived}>
       <WideSectionProvider patientId={patientId} name={person.displayName}>
-        {page}
+        <RecordPanelProvider>{page}</RecordPanelProvider>
       </WideSectionProvider>
     </PersonArchivedProvider>
   )

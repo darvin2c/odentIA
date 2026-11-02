@@ -40,6 +40,7 @@ import { ageFrom, hcLabel, type PatientFull, type PatientSummary } from "../../l
 import { PERSON_KIND_LABELS, type PersonPage, relationshipText } from "../../lib/people"
 import type { BookingSeed } from "../agenda/booking-drawer"
 import { openBookingAnywhere } from "../agenda/schedule-host"
+import { useOpenRecordPanel } from "../person/record-panel"
 import { PersonLink } from "../person-link"
 import { WriteToPersonDialog } from "../write-to-person"
 import { CollectButton } from "./collect-flow"
@@ -173,6 +174,7 @@ export function PersonHeader({
   const canCrm = usePermission("crm.read")
   const canRegisterResponsible = usePermission("patients.write")
   const openWide = useOpenWide()
+  const openPanel = useOpenRecordPanel()
   const patient = person.patient
   const [editing, setEditing] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -378,13 +380,16 @@ export function PersonHeader({
                 {canReadChats && other.conversationId ? (
                   <>
                     {" · "}
-                    <Link
-                      to="/inbox"
-                      search={{ conversation: other.conversationId }}
-                      className="text-primary hover:underline"
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="h-auto p-0"
+                      onClick={() => {
+                        if (other.conversationId) openPanel?.({ conversationId: other.conversationId, name: other.displayName })
+                      }}
                     >
                       Ver su conversación
-                    </Link>
+                    </Button>
                   </>
                 ) : null}
               </span>
@@ -465,6 +470,7 @@ export function PersonHeader({
         open={writeOpen}
         onClose={() => setWriteOpen(false)}
         people={writeTargets}
+        onOpened={(conversationId, target) => openPanel?.({ conversationId, name: target.displayName })}
       />
     </header>
   )

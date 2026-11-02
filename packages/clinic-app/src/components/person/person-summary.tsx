@@ -1,7 +1,6 @@
 import { Alert, AlertDescription, AlertTitle, Button } from "@odentia/ui"
 import { internationalText, SkeletonRegion } from "@odentia/ui-patterns"
 import { type UseQueryResult, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { allergyName } from "../../lib/allergies"
 import { apiFetch } from "../../lib/api"
@@ -48,6 +47,7 @@ import { LastVisitLinesSkeleton } from "../skeletons/person-sections"
 import { WriteToPersonDialog } from "../write-to-person"
 import { PersonAgentMemory, PersonNotes } from "./person-notes"
 import { PersonTomographies } from "./person-tomographies"
+import { useOpenRecordPanel } from "./record-panel"
 import { productUi } from "../../product/product-ui"
 
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
@@ -97,6 +97,7 @@ export function PersonSummary({
   summary?: UseQueryResult<{ data: PatientSummary }>
 }) {
   const openWide = useOpenWide()
+  const openPanel = useOpenRecordPanel()
   const patientId = person.patient?.id ?? null
   const ProductClinicalCards = productUi().summary.ClinicalCards
   const can = useCan()
@@ -328,13 +329,14 @@ export function PersonSummary({
                     ? ` · ${timeAgo(lastConversation.lastMessageAt)}`
                     : ""}
                   {" · "}
-                  <Link
-                    to="/inbox"
-                    search={{ conversation: lastConversation.id }}
-                    className="text-primary hover:underline"
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="h-auto p-0"
+                    onClick={() => openPanel?.({ conversationId: lastConversation.id, name: person.displayName })}
                   >
                     Abrir
-                  </Link>
+                  </Button>
                 </>
               ) : (
                 "Todavía no ha escrito"
