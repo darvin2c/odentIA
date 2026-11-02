@@ -21,6 +21,8 @@ import {
 } from "@odentia/db/schema/opportunities"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, or, type SQL, sql } from "drizzle-orm"
+import { budgetValueOptionSql } from "./budget-awaiting.js"
+import { orgMoney } from "./report-value.js"
 import { foldedWordsMatch } from "./search-text.js"
 import { testContactSql } from "./conversation-state.js"
 import { CHANNEL_NAME } from "./agent-person-memory.js"
@@ -166,6 +168,11 @@ export interface OpportunityDetail extends OpportunityListItem {
   amountFromPriceList: boolean
   /** El valor es el total del presupuesto que se le presentó. */
   amountFromBudget: boolean
+  /**
+   * Ese presupuesto va en dos monedas: el valor es un estimado en moneda del negocio
+   * al cambio de hoy. El presupuesto sigue en sus monedas y se cobra en ellas.
+   */
+  amountEstimated: boolean
   budgetTitle: string | null
   budgetNumber: number | null
   budgetStatus: string | null
@@ -1013,15 +1020,17 @@ export async function getOpportunity(
       }
     }
   }
+  const amountFromBudget =
+    !!budget && budget.status !== "borrador" && row.opp.amountCents !== null &&
+    !(!!service && row.opp.amountCents === service.priceCents && row.opp.currency === service.currency)
   return {
     ...item,
     contactPhone: contactRow?.phone ?? null,
     contactEmail: contactRow?.email ?? null,
     amountFromPriceList:
       !!service && row.opp.amountCents === service.priceCents && row.opp.currency === service.currency,
-    amountFromBudget:
-      !!budget && budget.status !== "borrador" && row.opp.amountCents !== null &&
-      !(!!service && row.opp.amountCents === service.priceCents && row.opp.currency === service.currency),
+    amountFromBudget,
+    amountEstimated: amountFromBudget && row.opp.budgetId ? await budgetValueInTwoCurrencies(tx, orgId, row.opp.budgetId) : false,
     budgetTitle: budget?.title ?? null,
     budgetNumber: budget?.number ?? null,
     budgetStatus: budget?.status ?? null,
@@ -1280,6 +1289,21 @@ export async function noteServiceInterest(
   return { outcome: created.reused ? "actualizada" : "creada", opportunityId: created.id }
 }
 
+/**
+ * Lo que da el valor de la oportunidad va en dos monedas: lo aceptado si ya
+ * respondió con algo aceptado (solo esa parte) y, si no, la opción que vale.
+ */
+async function budgetValueInTwoCurrencies(tx: Db, orgId: string, budgetId: string): Promise<boolean> {
+  const [row] = await tx.execute<{ currencies: number }>(sql`
+    select count(distinct i.currency)::int as currencies
+    from treatment_budget b
+    join treatment_budget_item i on i.organization_id = b.organization_id and i.budget_id = b.id
+      and i.option_id = ${budgetValueOptionSql({ id: sql`b.id`, organizationId: sql`b.organization_id` })}
+    where b.organization_id = ${orgId} and b.id = ${budgetId}
+      and (b.status not in ('aceptado', 'parcial') or i.decision = 'aceptado')`)
+  return (row?.currencies ?? 0) > 1
+}
+
 async function budgetPatient(tx: Db, orgId: string, budgetId: string | null | undefined): Promise<string | null> {
   if (!budgetId) return null
   const [budget] = await tx
@@ -1344,8 +1368,15 @@ export async function updateOpportunity(
   const hasService = input.serviceId !== undefined ? !!service : !!current.serviceId
   if (input.amountCents !== undefined && !hasService) {
     patch.amountCents = cleanAmount(input.amountCents) ?? null
-    // Un valor escrito a mano va en la moneda de la clínica.
-    if (patch.amountCents !== null) patch.currency = await requireOrgCurrency(tx, orgId)
+    // Un valor escrito a mano va en la moneda de la clínica, salvo que la oportunidad
+    // ya esté en su otra moneda: el número se escribió mirando esa.
+    if (patch.amountCents !== null) {
+      const { secondCurrency } = await orgMoney(tx, orgId)
+      patch.currency =
+        current.amountCents !== null && current.currency === secondCurrency
+          ? current.currency
+          : await requireOrgCurrency(tx, orgId)
+    }
     changed.push("amountCents")
   }
   const previousAssignee = current.assignedUserId

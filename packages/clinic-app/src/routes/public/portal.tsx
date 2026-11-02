@@ -55,6 +55,7 @@ import {
   fetchPublicPortalPolicyApi,
   formatPortalDate,
   formatPortalMoney,
+  portalTotalsText,
   listMyPortalGrantsApi,
   markPortalBudgetSeenApi,
   type PortalAppointment,
@@ -756,7 +757,7 @@ function BudgetsBlock({ sessionToken }: { sessionToken: string }) {
   if (query.isError) return <ErrorState title="No pudimos cargar tus presupuestos" message={portalErrorMessage(query.error)} onRetry={() => void query.refetch()} />
   const awaiting = query.data.filter((budget) => AWAITING.has(budget.status))
   const decided = query.data.filter((budget) => !AWAITING.has(budget.status))
-  const row = (budget: PortalBudget) => `Presupuesto N.º ${budget.budgetNumber} · ${budget.title} · ${formatPortalMoney(budget.totalCents, budget.currency, budget.locale)}`
+  const row = (budget: PortalBudget) => `Presupuesto N.º ${budget.budgetNumber} · ${budget.title} · ${portalTotalsText(budget, budget)}`
   return (
     <Block title="Por decidir" count={awaiting.length}>
       {awaiting.length === 0 ? <p className="text-sm text-muted-foreground">No tienes presupuestos por responder.</p> : null}

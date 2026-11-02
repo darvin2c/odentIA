@@ -9,6 +9,7 @@ import {
   type ProductWords,
   parsePatientGuide,
   productWords,
+  sumAcceptedByCurrency,
   sumAcceptedCents,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
@@ -39,7 +40,7 @@ import { budgetAwaitsAnswer } from "./budget-awaiting.js"
 import { documentSecretsKey } from "./document-check.js"
 import { type DocumentClinic, loadDocumentClinic } from "./document-clinic.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
-import { NEUTRAL_TIMEZONE, requireOrgCurrency } from "./locale.js"
+import { findOrgCurrency, NEUTRAL_TIMEZONE } from "./locale.js"
 import { decideBudgetOpportunity, linkPresentedBudget } from "./opportunities.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
@@ -51,14 +52,20 @@ import { productHooks } from "./products.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
 import { isPromotionLive, requirePromotionPrice } from "./promotions.js"
 import { personalLinkUrl } from "./public-links.js"
+import { orgMoney, todayValueCents } from "./report-value.js"
 import { requireDecisionContact } from "./responsibilities.js"
+
+export { budgetValueOptionSql } from "./budget-awaiting.js"
 
 /**
  * Documento económico de un plan clínico: cabecera con decisión auditada +
  * líneas snapshot de lo realmente cotizado (no un join mutable a la oferta
  * vigente). El presupuesto nace de un plan (nunca aislado), con ítems
- * elegibles explícitos y una sola moneda. La decisión por línea se conserva
- * como evidencia; la indicación guarda la decisión clínica vigente.
+ * elegibles explícitos. Es uno solo aunque sus líneas vayan en dos monedas: cada
+ * línea queda en la moneda con que se indicó y hay un total por moneda (`totals`);
+ * entre monedas nunca se suma ni se convierte, y cada una se cobra por su lado.
+ * La decisión por línea se conserva como evidencia; la indicación guarda la
+ * decisión clínica vigente.
  *
  * Fase 3, paso 3 (ADR 0034):
  * - Un solo borrador por persona, que crece con cada atención: al firmarla
@@ -105,6 +112,17 @@ export type BudgetLineWithStatus = BudgetLineRow & {
   lineDiscountCents: number | null
 }
 
+/** El total de una moneda: entre monedas nunca se suma ni se convierte. */
+export interface BudgetCurrencyTotal {
+  currency: string
+  /** Líneas en esa moneda. */
+  count: number
+  totalCents: number | null
+  acceptedCents: number | null
+  tariffTotalCents: number | null
+  discountCents: number | null
+}
+
 /** Una opción con sus totales: nunca se suman entre opciones. */
 export interface BudgetOptionWithTotals {
   id: string
@@ -119,6 +137,9 @@ export interface BudgetOptionWithTotals {
   /** `pendiente` mientras decide, `elegida` o `no_elegida`. */
   decision: string
   lineCount: number
+  /** Un total por moneda; siempre al menos uno. */
+  totals: BudgetCurrencyTotal[]
+  /** Las cifras de su única moneda; nulas si lleva dos (las dice `totals`). */
   totalCents: number | null
   acceptedCents: number | null
   tariffTotalCents: number | null
@@ -153,15 +174,21 @@ export type BudgetPublicRow = Omit<BudgetRow, "findings">
 
 /** Presupuesto con líneas snapshot y totales enteros (null = precio desconocido). */
 export type BudgetWithTotals = Omit<BudgetPublicRow, "currency"> & {
-  /** La moneda que dice el presupuesto (`budgetCurrencyOf`). */
+  /**
+   * La moneda de lo que vale el presupuesto: sale de sus líneas, nunca de la
+   * cabecera. Con dos monedas, la primera de `totals`; para leer importes, `totals`.
+   */
   currency: string
+  /** Un total por moneda de la opción que vale; siempre al menos uno. */
+  totals: BudgetCurrencyTotal[]
   /** Todas las líneas, de todas las opciones (cada una dice su `optionId`). */
   items: BudgetLineWithStatus[]
   /** Las opciones, en orden; con una sola, la pantalla no habla de opciones. */
   options: BudgetOptionWithTotals[]
   /**
    * Total que vale el presupuesto: el de la opción elegida o, mientras decide,
-   * el de la recomendada. Nunca la suma de las opciones.
+   * el de la recomendada. Nunca la suma de las opciones. Esta y las tres
+   * siguientes son las de su única moneda; nulas si lleva dos (las dice `totals`).
    */
   totalCents: number | null
   acceptedCents: number | null
@@ -556,19 +583,6 @@ export function valueOptionOf<T extends { decision: string; isRecommended: boole
   )
 }
 
-/**
- * La misma regla que `valueOptionOf`, en SQL: la opción que vale de una fila de
- * `treatment_budget` (la elegida, si no la recomendada, si no la primera). Para
- * lo que suma presupuestos en la base (Reportes): nunca se suman las opciones.
- * Cambian juntas; su prueba las compara.
- */
-export function budgetValueOptionSql(budget: { id: SQLWrapper; organizationId: SQLWrapper }): SQL {
-  return sql`(select value_option.id from treatment_budget_option value_option
-    where value_option.organization_id = ${budget.organizationId} and value_option.budget_id = ${budget.id}
-    order by (value_option.decision = 'elegida') desc, value_option.is_recommended desc, value_option.position
-    limit 1)`
-}
-
 /** Las visitas que cuenta una línea (`budgetLineUnits`), en SQL sobre el alias de la línea. */
 export function budgetLineUnitsSql(line: {
   billingMode: SQLWrapper
@@ -577,13 +591,51 @@ export function budgetLineUnitsSql(line: {
   return sql`(case when ${line.billingMode} = 'session' then greatest(coalesce(${line.sessionsPlanned}, 1), 1) else 1 end)`
 }
 
+/**
+ * Un total por moneda de esas líneas, en el orden de las monedas. Sin líneas, un
+ * total en cero en la moneda que se diga: siempre hay al menos uno que mostrar.
+ */
+function currencyTotals(
+  lines: BudgetLineWithStatus[],
+  emptyCurrency: string,
+): BudgetCurrencyTotal[] {
+  const currencies = [...new Set(lines.map((line) => line.currency))].sort()
+  if (currencies.length === 0) {
+    return [
+      {
+        currency: emptyCurrency,
+        count: 0,
+        totalCents: 0,
+        acceptedCents: 0,
+        tariffTotalCents: 0,
+        discountCents: 0,
+      },
+    ]
+  }
+  return currencies.map((currency) => {
+    const own = lines.filter((line) => line.currency === currency)
+    const totalCents = sumCents(own.map((line) => line.lineTotalCents))
+    const tariffTotalCents = sumCents(own.map((line) => line.tariffLineTotalCents))
+    return {
+      currency,
+      count: own.length,
+      totalCents,
+      acceptedCents: sumAcceptedCents(own),
+      tariffTotalCents,
+      discountCents:
+        totalCents == null || tariffTotalCents == null ? null : tariffTotalCents - totalCents,
+    }
+  })
+}
+
 function optionTotals(
   option: BudgetOptionRow,
   items: BudgetLineWithStatus[],
+  emptyCurrency: string,
 ): BudgetOptionWithTotals {
   const lines = items.filter((line) => line.optionId === option.id)
-  const totalCents = sumCents(lines.map((line) => line.lineTotalCents))
-  const tariffTotalCents = sumCents(lines.map((line) => line.tariffLineTotalCents))
+  const totals = currencyTotals(lines, items[0]?.currency ?? emptyCurrency)
+  const one = totals.length === 1 ? totals[0] : undefined
   return {
     id: option.id,
     position: option.position,
@@ -594,11 +646,11 @@ function optionTotals(
     isRecommended: option.isRecommended,
     decision: option.decision,
     lineCount: lines.length,
-    totalCents,
-    acceptedCents: sumAcceptedCents(lines),
-    tariffTotalCents,
-    discountCents:
-      totalCents == null || tariffTotalCents == null ? null : tariffTotalCents - totalCents,
+    totals,
+    totalCents: one?.totalCents ?? null,
+    acceptedCents: one?.acceptedCents ?? null,
+    tariffTotalCents: one?.tariffTotalCents ?? null,
+    discountCents: one?.discountCents ?? null,
   }
 }
 
@@ -609,38 +661,39 @@ function withoutFindings<T extends { findings: string | null }>(row: T): Omit<T,
 }
 
 /**
- * La moneda que dice un presupuesto: la que guarda o, si no guarda ninguna, la de
- * sus líneas. Puente hasta que su total salga por moneda de las líneas: hoy todo
- * presupuesto nuevo sigue guardando la suya.
+ * La moneda en que vale cero un presupuesto sin líneas: la de la clínica. Con líneas
+ * no hace falta preguntar. La de la cabecera no se lee: lo viejo la conserva y todo
+ * lo nuevo la deja nula.
  */
-export function budgetCurrencyOf(
-  budget: { currency: string | null },
-  lines: ReadonlyArray<{ currency: string }>,
-): string {
-  return budget.currency ?? lines[0]?.currency ?? ""
+async function emptyCurrencyOf(tx: Db, orgId: string, lines: readonly unknown[]): Promise<string> {
+  return lines.length > 0 ? "" : ((await findOrgCurrency(tx, orgId)) ?? "")
 }
 
 function withTotals(
   fullBudget: BudgetRow,
   items: BudgetLineWithStatus[],
   optionRows: BudgetOptionRow[],
+  emptyCurrency: string,
 ): BudgetWithTotals {
   const budget = withoutFindings(fullBudget)
   const hasFindings = !!fullBudget.findings
-  const options = optionRows.map((option) => optionTotals(option, items))
+  const options = optionRows.map((option) => optionTotals(option, items, emptyCurrency))
   // El presupuesto vale lo de una sola opción (la elegida o la recomendada): lo
   // que se cobra por sesión cuenta todas sus visitas previstas.
   const value = valueOptionOf(options)
+  const totals = value?.totals ?? currencyTotals(items, emptyCurrency)
+  const one = totals.length === 1
   return {
     ...budget,
-    currency: budgetCurrencyOf(fullBudget, items),
+    currency: totals[0]?.currency ?? emptyCurrency,
+    totals,
     hasFindings,
     items,
     options,
     totalCents: value ? value.totalCents : 0,
     // Regla compartida con la vista previa de la interfaz (`@odentia/clinical`):
     // solo la opción elegida tiene líneas aceptadas.
-    acceptedCents: sumAcceptedCents(items),
+    acceptedCents: one ? sumAcceptedCents(items) : null,
     tariffTotalCents: value ? value.tariffTotalCents : 0,
     discountCents: value ? value.discountCents : 0,
     awaitsAnswer: budgetAwaitsAnswer({ status: budget.status, items }),
@@ -654,11 +707,36 @@ async function loadBudget(
   patientId: string,
   budget: BudgetRow,
 ): Promise<BudgetWithTotals> {
+  const lines = await listBudgetLines(tx, orgId, patientId, budget.id)
   return withTotals(
     budget,
-    await listBudgetLines(tx, orgId, patientId, budget.id),
+    lines,
     await listOptions(tx, orgId, [budget.id]),
+    await emptyCurrencyOf(tx, orgId, lines),
   )
+}
+
+/**
+ * El valor de una oportunidad unida a un presupuesto: en una moneda, ese total tal
+ * cual; en dos, lo que vale todo en moneda del negocio al cambio de hoy. Es un
+ * estimado de la oportunidad: el presupuesto no se convierte ni se cobra así. Nulo
+ * si falta un precio o el cambio, y entonces el valor no se toca.
+ */
+async function opportunityValueOf(
+  tx: Db,
+  orgId: string,
+  totals: ReadonlyArray<{ currency: string; totalCents: number | null }>,
+): Promise<{ cents: number | null; currency: string }> {
+  const [first] = totals
+  if (totals.length === 1 && first) return { cents: first.totalCents, currency: first.currency }
+  const money = await orgMoney(tx, orgId)
+  let cents: number | null = 0
+  for (const total of totals) {
+    const value =
+      total.totalCents == null ? null : todayValueCents(total.totalCents, total.currency, money)
+    cents = cents == null || value == null ? null : cents + value
+  }
+  return { cents, currency: money.currency }
 }
 
 function assertTitle(title: string | null | undefined, fallback: string): string {
@@ -713,8 +791,9 @@ function assertItemIds(itemIds: string[]): string[] {
  * Ítems elegibles para un documento: sin presupuesto vigente, con presupuesto
  * cancelado o rechazados; o ya de este mismo borrador (`intoBudgetId`), para
  * ponerlos en otra de sus opciones. No duplican cotización vigente, no
- * recotizan un aceptado ni uno realizado. Todos con tarifa conocida y una sola
- * moneda. Lock: plan → presupuestos vigentes (UUID ordenado) → ítems.
+ * recotizan un aceptado ni uno realizado. Todos con tarifa conocida; cada uno
+ * queda en la moneda con que se indicó. Lock: plan → presupuestos vigentes (UUID
+ * ordenado) → ítems.
  */
 async function requireQuotableItems(
   tx: Db,
@@ -746,9 +825,6 @@ async function requireQuotableItems(
     assertExecutableCodings(item.codings)
     if (item.priceCents === null) throw validation("Todos los ítems deben tener precio conocido")
   }
-  const currencies = new Set(items.map((i) => i.currency))
-  if (currencies.size !== 1)
-    throw conflict("BUDGET_CURRENCY_MIX", "Los ítems usan monedas distintas")
   // Locks ordenados: presupuestos vigentes primero, luego ítems.
   const budgetIds = [
     ...new Set(
@@ -928,7 +1004,7 @@ export interface AddBudgetItemsInput {
 
 /**
  * Añadir tratamientos del plan a un presupuesto en borrador. Entran con las
- * mismas reglas que al prepararlo (cotizables, con tarifa, misma moneda, sin
+ * mismas reglas que al prepararlo (cotizables, con tarifa, en su moneda, sin
  * promoción), en la opción pedida o en todas. El borrador de una revisión no
  * lo admite: sus tratamientos se eligen al crearla.
  */
@@ -985,9 +1061,6 @@ async function addLinesToOptions(
   items: QuotableItem[],
   optionId?: string | null,
 ): Promise<number> {
-  if (items.some((item) => item.currency !== budget.currency)) {
-    throw conflict("BUDGET_CURRENCY_MIX", "Los tratamientos usan otra moneda que el presupuesto")
-  }
   const options = await targetOptions(tx, orgId, budget.id, optionId)
   const billingModes = await readBillingModes(
     tx,
@@ -1127,7 +1200,6 @@ async function insertDraftBudget(
   actorUserId: string | null,
   patientId: string,
   plan: typeof treatmentPlan.$inferSelect,
-  currency: string,
   input: { title?: string | null; notes?: string | null },
 ): Promise<{ budget: BudgetRow; option: BudgetOptionRow }> {
   const title = assertTitle(input.title, plan.title)
@@ -1141,7 +1213,8 @@ async function insertDraftBudget(
       planId: plan.id,
       budgetNumber,
       title,
-      currency,
+      // La moneda es la de cada línea: la cabecera no dice ninguna.
+      currency: null,
       status: "borrador",
       notes,
       createdBy: actorUserId,
@@ -1164,7 +1237,6 @@ async function insertDraftBudget(
     patientId,
     planId: plan.id,
     budgetNumber,
-    currency,
   })
   return { budget, option }
 }
@@ -1221,17 +1293,7 @@ export async function createBudget(
   }
   const items = await requireQuotableItems(tx, orgId, patientId, plan.id, ids)
   assertOwnItems(items, actorUserId, opts.memberRole)
-  // La moneda es la de sus tratamientos (una sola); nunca la de un país fijo.
-  const currency = items[0]?.currency ?? (await requireOrgCurrency(tx, orgId))
-  const { budget, option } = await insertDraftBudget(
-    tx,
-    orgId,
-    actorUserId,
-    patientId,
-    plan,
-    currency,
-    input,
-  )
+  const { budget, option } = await insertDraftBudget(tx, orgId, actorUserId, patientId, plan, input)
   const billingModes = await readBillingModes(
     tx,
     orgId,
@@ -1279,6 +1341,8 @@ export interface AssembledBudget {
   budgetNumber: number
   /** Tratamientos del presupuesto (de la opción que vale). */
   itemCount: number
+  /** Un total por moneda; con dos, `totalCents` es nulo. */
+  totals: BudgetCurrencyTotal[]
   totalCents: number | null
   currency: string
   /** Lo que entró en esta atención. */
@@ -1339,15 +1403,11 @@ export async function assembleEncounterBudget(
   if (quotable.length > 0) {
     // Un borrador por plan: lo de otro plan espera a que se envíe el que hay.
     const planId = draft?.planId ?? quotable[0]!.planId
-    const sameCurrency = draft?.currency ?? quotable[0]!.currency
-    const items = quotable.filter(
-      (item) => item.planId === planId && item.currency === sameCurrency,
-    )
+    const items = quotable.filter((item) => item.planId === planId)
     if (items.length > 0) {
       const plan = await lockPlan(tx, orgId, patientId, planId)
       if (!draft)
-        draft = (await insertDraftBudget(tx, orgId, actorUserId, patientId, plan, sameCurrency, {}))
-          .budget
+        draft = (await insertDraftBudget(tx, orgId, actorUserId, patientId, plan, {})).budget
       const locked = await lockBudgetRow(tx, orgId, patientId, draft.id)
       const ready = await requireQuotableItems(
         tx,
@@ -1371,6 +1431,7 @@ export async function assembleEncounterBudget(
         id: full.id,
         budgetNumber: full.budgetNumber,
         itemCount: value?.lineCount ?? full.items.length,
+        totals: full.totals,
         totalCents: full.totalCents,
         currency: full.currency,
         added: ready.length,
@@ -1966,7 +2027,7 @@ export async function deliverBudget(
   // Se une sola a la oportunidad del mismo tratamiento (o a la más reciente),
   // que pasa a «Presupuesto enviado» (ADR 0028). Mientras decide, vale lo de la
   // opción recomendada (decisión 13).
-  const full = withTotals(updated, lines, options)
+  const full = withTotals(updated, lines, options, "")
   await linkPresentedBudget(tx, orgId, {
     patientId,
     budgetId,
@@ -1974,7 +2035,7 @@ export async function deliverBudget(
       ...new Set(lines.map((line) => line.serviceId).filter((id): id is string => !!id)),
     ],
     by: opts.by,
-    total: { cents: full.totalCents, currency: full.currency },
+    total: await opportunityValueOf(tx, orgId, full.totals),
   })
   await notifyBudget(tx, orgId)
   return withoutFindings(updated)
@@ -2480,18 +2541,28 @@ export async function decideBudget(
       ...new Set(lines.map((line) => line.serviceId).filter((id): id is string => !!id)),
     ],
     // Lo que de verdad aceptó: el valor de la oportunidad ganada (en parte, lo aceptado).
-    accepted: {
-      cents: sumAcceptedCents(
-        lines.map((line) => ({
-          lineTotalCents: line.lineTotalCents,
-          decision: decisions.get(line.planItemId),
-        })),
-      ),
-      currency: budgetCurrencyOf(updated, lines),
-    },
+    accepted: await acceptedValueOf(tx, orgId, lines, decisions),
   })
   await notifyBudget(tx, orgId)
   return loadBudget(tx, orgId, patientId, updated)
+}
+
+/** Lo aceptado como valor de la oportunidad; si solo se aceptó una moneda, esa tal cual. */
+async function acceptedValueOf(
+  tx: Db,
+  orgId: string,
+  lines: BudgetLineWithStatus[],
+  decisions: ReadonlyMap<string, string>,
+): Promise<{ cents: number | null; currency: string }> {
+  const accepted = sumAcceptedByCurrency(
+    lines.map((line) => ({
+      lineTotalCents: line.lineTotalCents,
+      decision: decisions.get(line.planItemId),
+      currency: line.currency,
+    })),
+  )
+  if (accepted.length > 0) return opportunityValueOf(tx, orgId, accepted)
+  return { cents: 0, currency: lines[0]?.currency ?? "" }
 }
 
 export async function cancelBudget(
@@ -2582,7 +2653,15 @@ export async function listBudgetsForPatients(
     optionsOf.set(option.budgetId, [...(optionsOf.get(option.budgetId) ?? []), option])
   for (const budget of budgets) {
     const list = out.get(budget.patientId) ?? []
-    list.push(withTotals(budget, lines.get(budget.id) ?? [], optionsOf.get(budget.id) ?? []))
+    const own = lines.get(budget.id) ?? []
+    list.push(
+      withTotals(
+        budget,
+        own,
+        optionsOf.get(budget.id) ?? [],
+        await emptyCurrencyOf(tx, orgId, own),
+      ),
+    )
     out.set(budget.patientId, list)
   }
   return out
@@ -2615,11 +2694,13 @@ export async function listBudgets(
   )
   const result: BudgetWithTotals[] = []
   for (const budget of budgets) {
+    const lines = await listBudgetLines(tx, orgId, patientId, budget.id)
     result.push(
       withTotals(
         budget,
-        await listBudgetLines(tx, orgId, patientId, budget.id),
+        lines,
         options.filter((option) => option.budgetId === budget.id),
+        await emptyCurrencyOf(tx, orgId, lines),
       ),
     )
   }
@@ -2777,11 +2858,7 @@ export async function reviseBudget(
       new ServiceError(code, 409, message, { [field]: message })
     if (["cancelado", "reemplazado"].includes(item.status))
       throw reject("ITEM_CLOSED", "La indicación está cerrada")
-    if (item.priceCents == null || item.currency !== current.currency)
-      throw reject(
-        "BUDGET_CURRENCY_MIX",
-        "Todas las líneas requieren precio en la moneda de la propuesta",
-      )
+    if (item.priceCents == null) throw reject("ITEM_UNPRICED", "Todas las líneas requieren precio")
     if (item.budgetId && item.budgetId !== current.id)
       throw reject("ITEM_ALREADY_QUOTED", "La indicación pertenece a otra propuesta")
     assertExecutableCodings(item.codings)
@@ -2799,7 +2876,8 @@ export async function reviseBudget(
       notes: assertNotes(input.notes) ?? current.notes,
       findings: current.findings,
       proposal: current.proposal,
-      currency: current.currency,
+      // Como todo presupuesto nuevo: la moneda es la de cada línea.
+      currency: null,
       createdBy: actorUserId,
     })
     .returning()
@@ -2903,6 +2981,8 @@ export interface BudgetPrintLine {
   planItemId: string
   title: string
   detail: string | null
+  /** La moneda de sus importes: un presupuesto puede llevar dos. */
+  currency: string
   /** Precio de referencia de la unidad (tarifa, o lo acordado si es mayor). */
   listUnitCents: number | null
   /** Precio final acordado de la unidad (el tratamiento o cada visita). */
@@ -2940,6 +3020,8 @@ export interface BudgetPrintOption {
   /** `pendiente`, `elegida` o `no_elegida`. */
   decision: string
   lines: BudgetPrintLine[]
+  /** Un total por moneda; con dos, las cifras de abajo son nulas. */
+  totals: BudgetCurrencyTotal[]
   subtotalCents: number | null
   discountCents: number | null
   totalCents: number | null
@@ -2988,6 +3070,8 @@ export interface BudgetPrintPayload {
   lines: BudgetPrintLine[]
   /** Con más de una opción, cada una con su total; vacío con una sola. */
   options: BudgetPrintOption[]
+  /** Un total por moneda de la opción que vale; con dos, las cifras de abajo son nulas. */
+  totals: BudgetCurrencyTotal[]
   subtotalCents: number | null
   discountCents: number | null
   totalCents: number | null
@@ -3042,6 +3126,7 @@ function printLine(
     planItemId: line.planItemId,
     title: line.title,
     detail: site.words(line, "short"),
+    currency: line.currency,
     listUnitCents,
     unitCents,
     units,
@@ -3311,12 +3396,16 @@ export async function getBudgetPrintPayload(
   const toLine = (line: BudgetLineWithStatus) => printLine(site, line, { plan, services, isDraft })
   const value = valueOptionOf(budget.options)
   const lines = budget.items.filter((line) => !value || line.optionId === value.id).map(toLine)
-  const subtotalCents = sumCents(lines.map((line) => line.listTotalCents))
+  const subtotalCents =
+    budget.totals.length > 1 ? null : sumCents(lines.map((line) => line.listTotalCents))
   const options: BudgetPrintOption[] =
     budget.options.length > 1
       ? budget.options.map((option) => {
           const optionLines = budget.items.filter((line) => line.optionId === option.id).map(toLine)
-          const optionSubtotal = sumCents(optionLines.map((line) => line.listTotalCents))
+          const optionSubtotal =
+            option.totals.length > 1
+              ? null
+              : sumCents(optionLines.map((line) => line.listTotalCents))
           return {
             label: option.label,
             name: option.name,
@@ -3325,6 +3414,7 @@ export async function getBudgetPrintPayload(
             isRecommended: option.isRecommended,
             decision: option.decision,
             lines: optionLines,
+            totals: option.totals,
             subtotalCents: optionSubtotal,
             discountCents:
               optionSubtotal == null || option.totalCents == null
@@ -3407,6 +3497,7 @@ export async function getBudgetPrintPayload(
     professional,
     lines,
     options,
+    totals: budget.totals,
     subtotalCents,
     discountCents:
       subtotalCents == null || budget.totalCents == null ? null : subtotalCents - budget.totalCents,

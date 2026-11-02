@@ -9,7 +9,12 @@
  */
 
 import { canAccess } from "@odentia/auth/permissions"
-import { budgetAnswerText, formatMoney, type PatientGuide } from "@odentia/clinical"
+import {
+  budgetAnswerText,
+  formatMoney,
+  moneyTotalsText,
+  type PatientGuide,
+} from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   type BudgetPrintLine,
@@ -96,6 +101,26 @@ export async function buildBudgetSnapshot(
       !!payload.chart ||
       [...payload.lines, ...payload.options.flatMap((option) => option.lines)].some((line) => !!line.diagnosis),
   }
+}
+
+/** Un importe en su moneda; sin decirla, la del presupuesto. */
+type Money = (cents: number | null, currency?: string) => string
+
+/** «S/ 300.00 + USD 1,000.00»: un total por moneda, nunca sumados entre ellas. */
+function totalsWords(totals: BudgetSnapshot["totals"], money: Money): string {
+  return moneyTotalsText(totals, (cents, currency) => money(cents, currency), money(null))
+}
+
+/** Lo de esas líneas, una suma por moneda: «Incluido» si todas salen en cero. */
+function linesTotalWords(lines: BudgetPrintLine[], money: Money): string {
+  const byCurrency = new Map<string, number>()
+  for (const line of lines)
+    byCurrency.set(line.currency, (byCurrency.get(line.currency) ?? 0) + (line.totalCents ?? 0))
+  const totals = [...byCurrency]
+    .map(([currency, totalCents]) => ({ currency, totalCents }))
+    .sort((a, b) => a.currency.localeCompare(b.currency))
+  if (totals.every((total) => total.totalCents === 0)) return "Incluido"
+  return totals.map((total) => money(total.totalCents, total.currency)).join(" + ")
 }
 
 /**
@@ -254,7 +279,7 @@ function yourDecision(
   kit: DocumentKit,
   snap: BudgetSnapshot,
   lines: BudgetPrintLine[],
-  money: (cents: number | null) => string,
+  money: Money,
 ) {
   const zone = snap.org
   const hasOptions = snap.options.length > 1
@@ -289,7 +314,7 @@ function yourDecision(
       size: SIZE.dense,
       rows: lines.map((line) => [
         lineLabel(line),
-        money(line.totalCents),
+        money(line.totalCents, line.currency),
         budgetAnswerText(line.decision),
       ]),
     })
@@ -339,7 +364,13 @@ function yourDecision(
       ],
       size: SIZE.dense,
       rowPad: 3.75,
-      rows: lines.map((line) => [lineLabel(line), money(line.totalCents), box, box, box]),
+      rows: lines.map((line) => [
+        lineLabel(line),
+        money(line.totalCents, line.currency),
+        box,
+        box,
+        box,
+      ]),
     })
   }
   // La firma de quien emite no va en un borrador: aún no se entrega.
@@ -400,26 +431,27 @@ function lineLabel(line: BudgetPrintLine): string {
 }
 
 /** Lo que dice el precio de una línea, con su forma si se cobra por visita. */
-function linePrice(line: BudgetPrintLine, money: (cents: number | null) => string): string {
+function linePrice(line: BudgetPrintLine, money: Money): string {
   if (line.totalCents === 0) return "Incluido"
-  if (line.units > 1) return `${line.units} × ${money(line.unitCents)} = ${money(line.totalCents)}`
-  return money(line.totalCents)
+  if (line.units > 1)
+    return `${line.units} × ${money(line.unitCents, line.currency)} = ${money(line.totalCents, line.currency)}`
+  return money(line.totalCents, line.currency)
 }
 
-function paymentNotes(line: BudgetPrintLine, money: (cents: number | null) => string): Block[] {
+function paymentNotes(line: BudgetPrintLine, money: Money): Block[] {
   const notes: Block[] = []
   const small = { size: SIZE.second, tone: "gray" as const, leading: 1.4 }
   if (line.billingMode === "session") {
     // Lo que se cobra por sesión: el paciente ve el total, pero la deuda nace visita a visita.
     notes.push({
-      inlines: `Se cobra por sesión: ${money(line.unitCents)} en cada visita · ${line.units} ${line.units === 1 ? "visita prevista" : "visitas previstas"}`,
+      inlines: `Se cobra por sesión: ${money(line.unitCents, line.currency)} en cada visita · ${line.units} ${line.units === 1 ? "visita prevista" : "visitas previstas"}`,
       ...small,
     })
   }
   if ((line.discountCents ?? 0) > 0) {
     const reason = line.promotionName ? `Promoción ${line.promotionName}` : "Descuento"
     notes.push({
-      inlines: `${reason}: − ${money(line.discountCents)} (de ${money(line.listTotalCents)})`,
+      inlines: `${reason}: − ${money(line.discountCents, line.currency)} (de ${money(line.listTotalCents, line.currency)})`,
       ...small,
     })
   }
@@ -429,7 +461,7 @@ function paymentNotes(line: BudgetPrintLine, money: (cents: number | null) => st
 /** Una línea con todo lo que explica: nombre e importe, sitio y visitas, cómo se hace. */
 function lineDetailRow(
   line: BudgetPrintLine,
-  money: (cents: number | null) => string,
+  money: Money,
   explanation: Block[] = guideBlocks(line.guide),
 ): Cell[] {
   const meta = lineMeta(line)
@@ -445,11 +477,7 @@ function lineDetailRow(
 }
 
 /** Las columnas del detalle: el importe ocupa solo lo que necesita, y el texto, lo demás. */
-function detailColumns(
-  kit: DocumentKit,
-  lines: BudgetPrintLine[],
-  money: (cents: number | null) => string,
-) {
+function detailColumns(kit: DocumentKit, lines: BudgetPrintLine[], money: Money) {
   const width =
     Math.max(
       ...lines.map((line) => kit.textWidth(linePrice(line, money), "sansSemi", SIZE.dense)),
@@ -534,11 +562,7 @@ function dedupeRows(lines: BudgetPrintLine[]): BudgetPrintLine[] {
 }
 
 /** Una opción: por etapas si el producto las tiene, si no, «Qué se haría». */
-function singleOption(
-  kit: DocumentKit,
-  snap: BudgetSnapshot,
-  money: (cents: number | null) => string,
-) {
+function singleOption(kit: DocumentKit, snap: BudgetSnapshot, money: Money) {
   const lines = snap.lines
   const staged = snap.phases.length > 0
   const proposal = () => {
@@ -553,7 +577,7 @@ function singleOption(
     ? ` · ${visits.open ? "" : "unas "}${rangeWords(visits)} ${visits.max === 1 && !visits.open ? "visita" : "visitas"}`
     : ""
   const totalLine = () => {
-    kit.total([{ text: "Total", face: "sansSemi" }, visitsWords], money(snap.totalCents))
+    kit.total([{ text: "Total", face: "sansSemi" }, visitsWords], totalsWords(snap.totals, money))
   }
   if (!staged) {
     // Sin etapas: lo que se haría va de una vez, con su explicación.
@@ -585,7 +609,6 @@ function singleOption(
     size: SIZE.dense,
     rowPad: 4.5,
     rows: stages.map((stage, index) => {
-      const total = stage.lines.reduce((sum, line) => sum + (line.totalCents ?? 0), 0)
       const names = stage.lines.map(lineLabel).join("; ")
       return [
         [
@@ -594,7 +617,7 @@ function singleOption(
           },
         ],
         rangeWords(addRanges(stage.lines)),
-        total === 0 ? "Incluido" : money(total),
+        linesTotalWords(stage.lines, money),
       ]
     }),
   })
@@ -624,11 +647,7 @@ function singleOption(
 }
 
 /** Con 2 o 3 opciones: la tabla para comparar, y qué incluye cada una. */
-function manyOptions(
-  kit: DocumentKit,
-  snap: BudgetSnapshot,
-  money: (cents: number | null) => string,
-) {
+function manyOptions(kit: DocumentKit, snap: BudgetSnapshot, money: Money) {
   const options = snap.options
   const all = options.flatMap((option) => option.lines)
   findingsSection(kit, snap, all)
@@ -755,7 +774,12 @@ function manyOptions(
     [{ inlines: "Total", size: SIZE.dense, face: "sansBold" }],
     ...options.map(
       (option): Cell => [
-        { inlines: money(option.totalCents), face: "serif", size: SIZE.h2small, leading: 1.25 },
+        {
+          inlines: totalsWords(option.totals, money),
+          face: "serif",
+          size: SIZE.h2small,
+          leading: 1.25,
+        },
       ],
     ),
   ])
@@ -817,7 +841,7 @@ function manyOptions(
     })
     kit.spread(
       { text: `Total ${option.label.replace(/^Opción/, "opción")}`, face: "sansBold" },
-      { text: money(option.totalCents), face: "sansBold" },
+      { text: totalsWords(option.totals, money), face: "sansBold" },
       { size: SIZE.dense, leading: 1.6 },
     )
   }
@@ -836,8 +860,8 @@ export async function renderBudgetPdf(
   paper?: string | null,
 ): Promise<Uint8Array> {
   const org = snap.org
-  const money = (cents: number | null) =>
-    cents == null ? "por definir" : formatMoney(cents, snap.currency, org.locale)
+  const money: Money = (cents, currency = snap.currency) =>
+    cents == null ? "por definir" : formatMoney(cents, currency, org.locale)
   const docLabel = `Presupuesto ${snap.numberLabel}`
   const kit = await DocumentKit.open(org, documentFormat(org, paper), {
     title: snap.words.title,

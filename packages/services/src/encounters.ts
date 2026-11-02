@@ -1410,8 +1410,16 @@ export interface FinalizeEncounterBase {
   /** Cargos generados automáticamente desde los actos con servicio. */
   charges: Array<typeof patientCharge.$inferSelect>
   skippedCharges: SkippedCharge[]
-  /** Resumen para el diálogo de cierre y caja (con moneda del primer cargo). */
-  billing: { chargedCents: number; currency: string | null; lines: FinalizeBillingLine[] }
+  /**
+   * Resumen para el diálogo de cierre y caja: un total por moneda. `chargedCents` y
+   * `currency` son los de la única moneda; con dos, `chargedCents` es nulo.
+   */
+  billing: {
+    chargedCents: number | null
+    currency: string | null
+    totals: Array<{ currency: string; totalCents: number }>
+    lines: FinalizeBillingLine[]
+  }
   /**
    * El presupuesto que quedó armado con lo indicado en esta atención (decisión
    * 12): el cierre pregunta «¿Enviárselo ahora?». Nulo si no entró nada.
@@ -1853,6 +1861,15 @@ export async function finalizeEncounter(
     })
   }
   const chargedCents = billingLines.reduce((sum, line) => sum + (line.amountCents ?? 0), 0)
+  // Entre monedas no se suma: cada una con su total.
+  const chargedByCurrency = new Map<string, number>()
+  for (const line of billingLines) {
+    if (line.currency == null || line.amountCents == null) continue
+    chargedByCurrency.set(
+      line.currency,
+      (chargedByCurrency.get(line.currency) ?? 0) + line.amountCents,
+    )
+  }
   // Los materiales de sus servicios salen solos de la sede de la atención
   // (ADR 0067): lo que no alcanza queda como faltante y nunca bloquea el cierre.
   const materials = await discountEncounterMaterials(tx, orgId, actorUserId, row)
@@ -1876,8 +1893,11 @@ export async function finalizeEncounter(
     budget,
     materials,
     billing: {
-      chargedCents,
+      chargedCents: chargedByCurrency.size > 1 ? null : chargedCents,
       currency: charges[0]?.currency ?? procedures[0]?.currency ?? null,
+      totals: [...chargedByCurrency]
+        .map(([currency, totalCents]) => ({ currency, totalCents }))
+        .sort((a, b) => a.currency.localeCompare(b.currency)),
       lines: billingLines,
     },
     ...product,

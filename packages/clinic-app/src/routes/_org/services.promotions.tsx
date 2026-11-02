@@ -49,7 +49,7 @@ import { useReceptionName } from "../../lib/agent-names"
 import { ApiError } from "../../lib/api"
 import { useCan, usePermission } from "../../lib/crm"
 import { promotionsPrimary } from "../../lib/screen-rules"
-import { useOrgProfile } from "../../lib/org"
+import { useOrgProfile, useOrgSecondCurrency } from "../../lib/org"
 import {
   createPromotionApi,
   endPromotionApi,
@@ -132,12 +132,18 @@ function validityText(promotion: PromotionWithMetrics, regional: Regional): stri
   return end ? `Vigente hasta el ${dayInWords(end, regional)}` : "Vigente, sin fecha de fin"
 }
 
+/** Sin símbolo, salvo que la clínica cobre en dos monedas: ahí cada importe dice la suya. */
+function amountWith(twoCurrencies: boolean): typeof formatAmount {
+  return twoCurrencies ? formatMoney : formatAmount
+}
+
 /**
  * Precio de un servicio en la promoción. Estos importes acompañan al nombre y
  * van sin símbolo, como en el tablero; «Cobrado» y «Precio promedio» sí lo llevan.
  */
-function itemText(item: PromotionServiceItem, locale: string): string {
-  const price = formatAmount(item.priceCents, item.currency, locale)
+function itemText(item: PromotionServiceItem, locale: string, twoCurrencies: boolean): string {
+  const amount = amountWith(twoCurrencies)
+  const price = amount(item.priceCents, item.currency, locale)
   if (item.mode === "from") {
     return `${item.serviceName} desde ${price} · el precio final se pone en el presupuesto`
   }
@@ -145,7 +151,7 @@ function itemText(item: PromotionServiceItem, locale: string): string {
   if (item.priceCents === item.tariffCents && item.currency === item.tariffCurrency) {
     return `${item.serviceName} a ${price}`
   }
-  return `${item.serviceName} a ${price} en vez de ${formatAmount(item.tariffCents, item.tariffCurrency, locale)}`
+  return `${item.serviceName} a ${price} en vez de ${amount(item.tariffCents, item.tariffCurrency, locale)}`
 }
 
 function usesText(uses: number): string {
@@ -180,6 +186,7 @@ function PromotionsPage() {
   const canView = canConfigure || usePermission("catalog.read")
   const navigate = useNavigate()
   const profileQuery = useOrgProfile()
+  const twoCurrencies = !!useOrgSecondCurrency()
   const locale = profileQuery.data?.locale
   const timeZone = profileQuery.data?.timezone
   const regional = useMemo<Regional | null>(
@@ -236,7 +243,9 @@ function PromotionsPage() {
             <span className="text-xs font-normal break-words text-muted-foreground">
               {row.original.items.length === 0
                 ? "Sin servicios"
-                : row.original.items.map((item) => itemText(item, regional.locale)).join(" · ")}
+                : row.original.items
+                    .map((item) => itemText(item, regional.locale, twoCurrencies))
+                    .join(" · ")}
             </span>
           </span>
         ),
@@ -450,6 +459,7 @@ function PromotionReadOnly({
   regional: Regional
   onClose: () => void
 }) {
+  const twoCurrencies = !!useOrgSecondCurrency()
   return (
     <DetailDrawer
       open={open}
@@ -462,7 +472,7 @@ function PromotionReadOnly({
         <DetailField label="Servicios y su precio">
           <ul className="flex flex-col gap-1">
             {promotion.items.map((item) => (
-              <li key={item.id}>{itemText(item, regional.locale)}</li>
+              <li key={item.id}>{itemText(item, regional.locale, twoCurrencies)}</li>
             ))}
           </ul>
         </DetailField>
@@ -582,6 +592,7 @@ function PromotionForm({
   const receptionName = useReceptionName()
   const id = useId()
   const queryClient = useQueryClient()
+  const twoCurrencies = !!useOrgSecondCurrency()
   const { locale, timeZone } = regional
   const today = zonedDateOf(new Date().toISOString(), timeZone)
   const ended = initial?.state === "terminada"
@@ -596,11 +607,16 @@ function PromotionForm({
     items: (initial?.items ?? []).map((item) => ({
       serviceId: item.serviceId,
       serviceName: item.serviceName,
-      currency: item.currency,
+      // En la moneda de su servicio. Si el servicio cambió de moneda, el precio se
+      // escribe otra vez: el número de antes no se convierte ni se conserva.
+      currency: item.tariffCurrency,
       tariffCents: item.tariffCents,
       mode: item.mode,
       disclosure: item.priceDisclosure ?? disclosureFor(item.mode),
-      priceText: formatMoneyInput(item.priceCents, item.currency, locale),
+      priceText:
+        item.currency === item.tariffCurrency
+          ? formatMoneyInput(item.priceCents, item.currency, locale)
+          : "",
     })),
   }))
   const [confirmEnd, setConfirmEnd] = useState(false)
@@ -801,7 +817,12 @@ function PromotionForm({
                                     <span className="flex min-w-0 flex-col">
                                       <span className="text-sm font-medium break-words">{row.serviceName}</span>
                                       <span className="text-xs text-muted-foreground">
-                                        Normal {formatAmount(row.tariffCents, row.currency, locale)}
+                                        Normal{" "}
+                                        {amountWith(twoCurrencies)(
+                                          row.tariffCents,
+                                          row.currency,
+                                          locale,
+                                        )}
                                       </span>
                                     </span>
                                     <Button
@@ -1017,6 +1038,7 @@ function ServiceAdder({
   taken: string[]
   onAdd: (service: ServiceCatalogItem) => void
 }) {
+  const twoCurrencies = !!useOrgSecondCurrency()
   const [query, setQuery] = useState("")
   const [open, setOpen] = useState(false)
   const servicesQuery = useQuery({
@@ -1091,7 +1113,7 @@ function ServiceAdder({
                   <ComboboxItem key={item.id} value={item} className="flex-col items-start gap-0 py-2">
                     <span className="font-medium">{item.name}</span>
                     <span className="text-muted-foreground">
-                      Normal {formatAmount(item.priceCents, item.currency, locale)}
+                      Normal {amountWith(twoCurrencies)(item.priceCents, item.currency, locale)}
                     </span>
                   </ComboboxItem>
                 ))}

@@ -1,4 +1,4 @@
-import { formatMoney, formatVitals, parseVitals, VITAL_SIGNS, type Vitals, vitalsErrors } from "@odentia/clinical"
+import { formatMoney, formatVitals, moneyTotalsText, parseVitals, VITAL_SIGNS, type Vitals, vitalsErrors } from "@odentia/clinical"
 import {
   Button,
   cn,
@@ -281,14 +281,18 @@ interface FinalizedBudget {
   id: string
   budgetNumber: number
   itemCount: number
+  /** Un total por moneda; con dos, `totalCents` es nulo. */
+  totals?: Array<{ currency: string; totalCents: number | null }>
   totalCents: number | null
   currency: string
   added: number
 }
 
 export interface FinalizeBilling {
-  chargedCents: number
+  /** El total de su única moneda; con dos, nulo: lo dice `totals`. */
+  chargedCents: number | null
   currency: string | null
+  totals?: Array<{ currency: string; totalCents: number }>
   lines: Array<{
     procedureId: string
     description: string
@@ -2221,7 +2225,13 @@ export function EncounterEditor({
                 <p className="flex items-baseline justify-between gap-3 border-t pt-2 text-sm font-semibold">
                   <span>Total</span>
                   <span className="tabular-nums">
-                    {formatMoney(finalizedBilling.chargedCents, finalizedBilling.currency, orgLocale)}
+                    {moneyTotalsText(
+                      finalizedBilling.totals?.length
+                        ? finalizedBilling.totals
+                        : [{ currency: finalizedBilling.currency, totalCents: finalizedBilling.chargedCents }],
+                      (cents, currency) => formatMoney(cents, currency, orgLocale),
+                      "",
+                    )}
                   </span>
                 </p>
               ) : null}
@@ -2265,8 +2275,14 @@ export function EncounterEditor({
                 {finalizedBudget.itemCount === 1
                   ? "1 tratamiento"
                   : `${finalizedBudget.itemCount} tratamientos`}
-                {finalizedBudget.totalCents != null && orgLocale
-                  ? ` por ${formatMoney(finalizedBudget.totalCents, finalizedBudget.currency, orgLocale)}`
+                {orgLocale && (finalizedBudget.totalCents != null || finalizedBudget.totals?.length)
+                  ? ` por ${moneyTotalsText(
+                      finalizedBudget.totals?.length
+                        ? finalizedBudget.totals
+                        : [{ currency: finalizedBudget.currency, totalCents: finalizedBudget.totalCents }],
+                      (cents, currency) => formatMoney(cents, currency, orgLocale),
+                      "un precio por definir",
+                    )}`
                   : ""}
               </p>
               {budgetSent ? (

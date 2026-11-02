@@ -896,13 +896,6 @@ export async function updatePlanItem(
           "La prestación aún no tiene precio configurado",
         )
       }
-      if (budget && service.currency !== budget.currency) {
-        throw new ServiceError(
-          "BUDGET_CURRENCY_MIX",
-          409,
-          "La oferta usa una moneda distinta a la del presupuesto en borrador",
-        )
-      }
       set.serviceId = service.id
       set.title = service.name
       set.scope = scope

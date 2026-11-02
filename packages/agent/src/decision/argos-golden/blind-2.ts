@@ -263,7 +263,7 @@ export function blindSolvers2(h: GoldenHelpers): GoldenSolvers {
         select i.promotion_id, b.id as use_id, b.patient_id from treatment_budget b
         join treatment_budget_item i on i.organization_id = b.organization_id and i.budget_id = b.id
           and i.option_id = ${budgetValueOptionSql(budgetRef)} and i.promotion_id is not null and i.price_cents is not null
-        where b.organization_id = ${org} and b.currency = ${currency} and b.status <> 'borrador'
+        where b.organization_id = ${org} and i.currency = ${currency} and b.status <> 'borrador'
           and b.presented_at >= ${start}::timestamptz and b.presented_at < ${end}::timestamptz
         union all
         select c.promotion_id::uuid, c.id, c.patient_id from patient_charge c

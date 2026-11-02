@@ -22,7 +22,7 @@ import { clinicalFormResponse, clinicalOrder, consentDocument } from "@odentia/d
 import { orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, inArray, isNull, notInArray, type SQL, sql } from "drizzle-orm"
 import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
-import { budgetCurrencyOf, valueOptionOf } from "./budgets.js"
+import { valueOptionOf } from "./budgets.js"
 import { getCurrentDocumentContexts, listPatientDocuments } from "./clinical.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { validation } from "./errors.js"
@@ -519,7 +519,8 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
         id: b.id,
         budgetNumber: b.budgetNumber,
         title: b.title,
-        currency: budgetCurrencyOf(b, list),
+        // Sale de sus líneas: la cabecera no se lee. Con dos monedas, las dice `totals`.
+        currency: budgetTotals[0]?.currency ?? list[0]?.currency ?? "",
         status: b.status,
         itemsCount: list.length,
         unpricedCount: unpriced,

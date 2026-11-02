@@ -11,6 +11,7 @@ import {
   findMedication,
   isDiagnosisVerification,
   type MedicationCatalog,
+  moneyTotalsText,
   normalizeDrugText,
   quantityWords,
 } from "@odentia/clinical"
@@ -323,7 +324,7 @@ function summarize(kind: DictationKind, payload: Record<string, unknown>, zone: 
   }
   if (kind === "presupuesto") {
     const lines = Array.isArray(payload["lines"]) ? (payload["lines"] as BudgetPreviewLine[]) : []
-    const total = typeof payload["totalCents"] === "number" && typeof payload["currency"] === "string" ? ` · ${formatOrgMoney(payload["totalCents"], payload["currency"], zone)}` : ""
+    const total = budgetPreviewTotal(payload, zone)
     return [`Presupuesto · ${lines.length === 1 ? "1 tratamiento" : `${lines.length} tratamientos`}${total}`, "Queda en borrador: todavía no le llega a nadie."].join("\n")
   }
   if (kind === "material") {
@@ -1002,6 +1003,17 @@ async function settleAppointment(
 }
 
 /** Una línea de lo que llevaría el presupuesto pedido. */
+/** « · S/ 300.00» o, con dos monedas, « · S/ 300.00 + USD 1,000.00». */
+function budgetPreviewTotal(payload: Record<string, unknown>, zone: Pick<OrgLocale, "locale">): string {
+  const totals = Array.isArray(payload["totals"])
+    ? (payload["totals"] as Array<{ currency: string; totalCents: number }>)
+    : typeof payload["totalCents"] === "number" && typeof payload["currency"] === "string"
+      ? [{ currency: payload["currency"], totalCents: payload["totalCents"] }]
+      : []
+  if (totals.length === 0) return ""
+  return ` · ${moneyTotalsText(totals, (cents, currency) => formatOrgMoney(cents, currency, zone), "")}`
+}
+
 interface BudgetPreviewLine {
   title: string
   site: string
@@ -1045,13 +1057,22 @@ async function previewBudget(tx: Db, orgId: string, patientId: string, encounter
       dictated: true,
     })),
   ]
-  const currency = lines[0]?.currency ?? null
-  const same = lines.filter((line) => line.currency === currency)
-  const payload = { show: prepared.payload["show"] === true, lines: same, ...(currency ? { totalCents: same.reduce((sum, line) => sum + line.priceCents, 0), currency } : {}) }
+  // Un total por moneda: entre monedas no se suma, y ninguna línea queda fuera por ir en otra.
+  const byCurrency = new Map<string, number>()
+  for (const line of lines) byCurrency.set(line.currency, (byCurrency.get(line.currency) ?? 0) + line.priceCents)
+  const totals = [...byCurrency]
+    .map(([currency, totalCents]) => ({ currency, totalCents }))
+    .sort((a, b) => a.currency.localeCompare(b.currency))
+  const [only] = totals
+  const payload = {
+    show: prepared.payload["show"] === true,
+    lines,
+    ...(totals.length > 1 ? { totals } : only ? { totalCents: only.totalCents, currency: only.currency } : {}),
+  }
   const missing = unpriced.length
     ? `${unpriced.map((name) => `«${name}»`).join(" y ")} aún no ${unpriced.length === 1 ? "tiene" : "tienen"} servicio de tu lista: sale sin eso. Elige el servicio en su tarjeta.`
     : null
-  return same.length ? { payload, status: "lista", note: missing } : { payload, status: "por_revisar", note: missing ?? NOTHING_TO_QUOTE }
+  return lines.length ? { payload, status: "lista", note: missing } : { payload, status: "por_revisar", note: missing ?? NOTHING_TO_QUOTE }
 }
 
 /** El presupuesto pedido que aún espera, al día con lo que se indicó o se confirmó después. */

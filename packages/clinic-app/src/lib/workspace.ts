@@ -152,6 +152,8 @@ export type WaitingRow =
       itemCount: number
       totalCents: number | null
       currency: string
+      /** Solo si va en dos monedas: un total por cada una. */
+      totals?: Array<{ currency: string; totalCents: number | null }>
       options: number
     }
   /**

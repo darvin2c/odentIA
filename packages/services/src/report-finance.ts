@@ -1014,9 +1014,13 @@ export type PromotionVerdict = "solo_bajo_precio" | "trajo_nuevos" | "volvieron"
  */
 export async function getReportPromotions(tx: Db, orgId: string, query: ReportQuery, now: Date = new Date()) {
   const scope = await reportScope(tx, orgId, query, now)
-  const { window, currency } = scope
+  const { window } = scope
   const budget = { id: sql`b.id`, organizationId: sql`b.organization_id` }
   const units = budgetLineUnitsSql({ billingMode: sql`i.billing_mode`, sessionsPlanned: sql`i.sessions_planned` })
+  // Cuenta lo que tiene valor: la moneda del negocio y su otra moneda, cada línea en la
+  // suya (la cabecera del presupuesto no se lee). Una clínica de una moneda cuenta lo de
+  // siempre, y lo descontado en la otra entra al cambio de hoy, como en Argos.
+  const countedCurrency = (column: SQL): SQL => sql`(${column} = op.currency or ${column} = op.second_currency)`
   // Lo que se dejó de cobrar sale solo de lo aceptado (y de los cobros): un presupuesto
   // rechazado, pospuesto, reemplazado o cancelado no se cobra, y uno reemplazado no se
   // suma con su reemplazo.
@@ -1043,21 +1047,23 @@ export async function getReportPromotions(tx: Db, orgId: string, query: ReportQu
   }>(sql`
     with uses as (
       select i.promotion_id, b.patient_id, b.presented_at as at,
-        case when ${acceptedLine} then greatest(coalesce(i.tariff_price_cents, i.price_cents) - i.price_cents, 0)::bigint * ${units} else 0 end as discount,
+        case when ${acceptedLine} then ${todayValueSql(sql`greatest(coalesce(i.tariff_price_cents, i.price_cents) - i.price_cents, 0)::bigint * ${units}`, sql`i.currency::text`)} else 0 end as discount,
         (${acceptedLine}) as accepted
       from treatment_budget b
       join treatment_budget_item i on i.organization_id = b.organization_id and i.budget_id = b.id
         and i.option_id = ${budgetValueOptionSql(budget)} and i.promotion_id is not null and i.price_cents is not null
-      where b.organization_id = ${orgId} and b.currency = ${currency} and b.status <> 'borrador'
+      cross join ${orgMoneySql(orgId)}
+      where b.organization_id = ${orgId} and ${countedCurrency(sql`i.currency::text`)} and b.status <> 'borrador'
         and b.presented_at >= ${at(window.start)} and b.presented_at < ${at(window.end)}
       union all
       select c.promotion_id::uuid, c.patient_id, c.created_at,
-        greatest(coalesce(sc.price_cents::bigint * coalesce(ep.quantity, 1), c.amount_cents) - c.amount_cents, 0),
+        ${todayValueSql(sql`greatest(coalesce(sc.price_cents::bigint * coalesce(ep.quantity, 1), c.amount_cents) - c.amount_cents, 0)`, sql`c.currency::text`)},
         true
       from patient_charge c
       left join encounter_procedure ep on ep.organization_id = c.organization_id and ep.id = c.encounter_procedure_id
-      left join service_catalog sc on sc.organization_id = c.organization_id and sc.id = ep.service_id
-      where c.organization_id = ${orgId} and c.currency = ${currency} and c.voided_at is null and c.budget_item_id is null
+      left join service_catalog sc on sc.organization_id = c.organization_id and sc.id = ep.service_id and sc.currency = c.currency
+      cross join ${orgMoneySql(orgId)}
+      where c.organization_id = ${orgId} and ${countedCurrency(sql`c.currency::text`)} and c.voided_at is null and c.budget_item_id is null
         and c.promotion_id ~ '^[0-9a-f]{8}-[0-9a-f-]{27}$'
         and c.created_at >= ${at(window.start)} and c.created_at < ${at(window.end)}
     ), person as (
@@ -1076,7 +1082,7 @@ export async function getReportPromotions(tx: Db, orgId: string, query: ReportQu
       count(*)::int as people, count(*) filter (where j.fresh)::int as fresh,
       count(*) filter (where j.accepted)::int as accepted, count(*) filter (where j.collected > 0)::int as "paidSome",
       count(*) filter (where j.returned)::int as returned,
-      sum(j.discount)::text as discount, round(sum(j.collected))::text as collected
+      round(sum(j.discount))::text as discount, round(sum(j.collected))::text as collected
     from judged j join promotion pr on pr.organization_id = ${orgId} and pr.id = j.promotion_id
     group by j.promotion_id, pr.name, pr.starts_at, pr.ends_at`)
   // Quiénes usaron alguna y lo que pagaron, sin contar dos veces a quien usó dos: lo
@@ -1086,11 +1092,13 @@ export async function getReportPromotions(tx: Db, orgId: string, query: ReportQu
       select b.patient_id, b.presented_at as at from treatment_budget b
       join treatment_budget_item i on i.organization_id = b.organization_id and i.budget_id = b.id
         and i.option_id = ${budgetValueOptionSql(budget)} and i.promotion_id is not null and i.price_cents is not null
-      where b.organization_id = ${orgId} and b.currency = ${currency} and b.status <> 'borrador'
+      cross join ${orgMoneySql(orgId)}
+      where b.organization_id = ${orgId} and ${countedCurrency(sql`i.currency::text`)} and b.status <> 'borrador'
         and b.presented_at >= ${at(window.start)} and b.presented_at < ${at(window.end)}
       union all
       select c.patient_id, c.created_at from patient_charge c
-      where c.organization_id = ${orgId} and c.currency = ${currency} and c.voided_at is null and c.budget_item_id is null
+      cross join ${orgMoneySql(orgId)}
+      where c.organization_id = ${orgId} and ${countedCurrency(sql`c.currency::text`)} and c.voided_at is null and c.budget_item_id is null
         and c.promotion_id ~ '^[0-9a-f]{8}-[0-9a-f-]{27}$' and c.created_at >= ${at(window.start)} and c.created_at < ${at(window.end)}
     ), person as (select patient_id, min(at) as first_at from uses group by patient_id)
     select count(*)::int as people, count(*) filter (where not exists (
@@ -1098,12 +1106,13 @@ export async function getReportPromotions(tx: Db, orgId: string, query: ReportQu
       round(coalesce(sum(${collectedSince(sql`person.patient_id`, sql`person.first_at`)}), 0))::text as collected
     from person cross join ${orgMoneySql(orgId)}`)
   const [loose] = await tx.execute<{ count: number; cents: string }>(sql`
-    select count(*)::int as count, coalesce(sum((i.tariff_price_cents - i.price_cents)::bigint * ${units}), 0)::text as cents
+    select count(*)::int as count, round(coalesce(sum(${todayValueSql(sql`(i.tariff_price_cents - i.price_cents)::bigint * ${units}`, sql`i.currency::text`)}), 0))::text as cents
     from treatment_budget b
     join treatment_budget_item i on i.organization_id = b.organization_id and i.budget_id = b.id
       and i.option_id = ${budgetValueOptionSql(budget)} and i.promotion_id is null
       and i.tariff_price_cents is not null and i.price_cents is not null and i.tariff_price_cents > i.price_cents
-    where b.organization_id = ${orgId} and b.currency = ${currency} and ${acceptedLine}
+    cross join ${orgMoneySql(orgId)}
+    where b.organization_id = ${orgId} and ${countedCurrency(sql`i.currency::text`)} and ${acceptedLine}
       and b.presented_at >= ${at(window.start)} and b.presented_at < ${at(window.end)}`)
   const promotions = rows
     .map((row) => {

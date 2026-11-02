@@ -594,20 +594,23 @@ function formatAgentBudgets(found: AgentPatientBudgets, zone: Pick<OrgLocale, "l
   ]
   if (!found.budgets.length) lines.push("No tiene presupuestos entregados.")
   for (const budget of found.budgets) {
-    const money = (cents: number | null) => (cents == null ? "precio por definir" : formatOrgMoney(cents, budget.currency, zone))
+    const money = (cents: number | null, currency = budget.currency) => (cents == null ? "precio por definir" : formatOrgMoney(cents, currency, zone))
+    // Con dos monedas, un total por cada una: entre ellas no se suma.
+    const optionTotal = (option: (typeof budget.options)[number]) =>
+      option.totals ? option.totals.map((total) => money(total.totalCents, total.currency)).join(" + ") : money(option.totalCents)
     lines.push(
       `- Presupuesto ${budgetNumberText(budget.budgetNumber)}: ${budget.stateText}.${budget.answerable ? " Puede responderlo." : ""} [budgetId ${budget.budgetId}]`,
     )
     const several = budget.options.length > 1
     for (const option of budget.options) {
       const head = several
-        ? `  ${option.label}${option.isRecommended ? " (recomendada)" : ""}${option.decision === "elegida" ? " (la eligió)" : option.decision === "no_elegida" ? " (no elegida)" : ""}: total ${money(option.totalCents)} [optionId ${option.id}]`
-        : `  Total ${money(option.totalCents)}`
+        ? `  ${option.label}${option.isRecommended ? " (recomendada)" : ""}${option.decision === "elegida" ? " (la eligió)" : option.decision === "no_elegida" ? " (no elegida)" : ""}: total ${optionTotal(option)} [optionId ${option.id}]`
+        : `  Total ${optionTotal(option)}`
       lines.push(head)
       for (const line of option.lines) {
         const price = line.sessions
-          ? `${money(line.lineTotalCents)}, ${line.sessions.count} sesiones de ${money(line.sessions.unitCents)}`
-          : money(line.lineTotalCents)
+          ? `${money(line.lineTotalCents, line.currency)}, ${line.sessions.count} sesiones de ${money(line.sessions.unitCents, line.currency)}`
+          : money(line.lineTotalCents, line.currency)
         const promotion = line.promotionName ? `, con la promoción «${line.promotionName}»` : ""
         lines.push(
           `    · ${budgetLineWords(line)}: ${price}${promotion} — ${BUDGET_LINE_DECISION[line.decision] ?? line.decision} [planItemId ${line.planItemId}]`,

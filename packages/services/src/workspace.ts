@@ -886,17 +886,23 @@ async function waitingUnsentBudgets(
   orgId: string,
   dayStart: SQL,
 ): Promise<{ items: WaitingUnsentBudget[]; total: number }> {
-  const rows = await tx.execute<{ [K in keyof WaitingUnsentBudget]: WaitingUnsentBudget[K] } & { total: number }>(sql`
+  type Row = Omit<WaitingUnsentBudget, "currency" | "totalCents" | "totals"> & {
+    total: number
+    totals: Array<{ currency: string; totalCents: number | null }> | null
+  }
+  const rows = await tx.execute<Row>(sql`
     select b.id, b.patient_id as "patientId", p.person_id as "personId", pp.display_name as "patientName", ${iso(sql`armado.at`)} as since,
       (select count(distinct l.plan_item_id)::int from treatment_budget_item l
         join treatment_budget_option o on o.id = l.option_id and o.organization_id = l.organization_id
         where l.organization_id = b.organization_id and l.budget_id = b.id and o.is_recommended) as "itemCount",
-      (select case when bool_or(l.price_cents is null) then null else sum(l.price_cents *
-          case when l.billing_mode = 'session' then greatest(coalesce(l.sessions_planned, 1), 1) else 1 end)::int end
+      -- Un total por moneda de sus líneas: la cabecera no dice ninguna.
+      (select jsonb_agg(by_currency order by by_currency.currency) from (
+        select l.currency::text as currency, case when bool_or(l.price_cents is null) then null else sum(l.price_cents *
+          case when l.billing_mode = 'session' then greatest(coalesce(l.sessions_planned, 1), 1) else 1 end)::int end as "totalCents"
         from treatment_budget_item l
         join treatment_budget_option o on o.id = l.option_id and o.organization_id = l.organization_id
-        where l.organization_id = b.organization_id and l.budget_id = b.id and o.is_recommended) as "totalCents",
-      b.currency,
+        where l.organization_id = b.organization_id and l.budget_id = b.id and o.is_recommended
+        group by l.currency) by_currency) as totals,
       (select count(*)::int from treatment_budget_option o where o.organization_id = b.organization_id and o.budget_id = b.id) as options,
       count(*) over ()::int as total
     from treatment_budget b join patient p on p.id = b.patient_id and p.organization_id = ${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
@@ -906,7 +912,18 @@ async function waitingUnsentBudgets(
     where b.organization_id = ${orgId} and b.status = 'borrador' and b.supersedes_budget_id is null
       and armado.at < ${dayStart}
     order by armado.at, b.id limit ${WAITING_LIMITS.unsentBudgets}`)
-  return { items: rows.map(({ total: _total, ...row }) => row), total: rows[0]?.total ?? 0 }
+  return {
+    items: rows.map(({ total: _total, totals, ...row }) => {
+      const list = totals ?? []
+      return {
+        ...row,
+        currency: list[0]?.currency ?? "",
+        totalCents: list.length === 1 ? (list[0]?.totalCents ?? null) : null,
+        ...(list.length > 1 ? { totals: list } : {}),
+      }
+    }),
+    total: rows[0]?.total ?? 0,
+  }
 }
 
 /** Presupuestos que siguen esperando respuesta (`budgetAwaitsAnswerSql`); quien atiende, solo los de sus planes. */

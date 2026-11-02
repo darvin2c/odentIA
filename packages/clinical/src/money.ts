@@ -103,21 +103,73 @@ export function formatMoneyInput(amountMinor: number, currency: string, locale: 
 }
 
 /**
- * Importe aceptado de un presupuesto: suma el total de cada línea cuya
- * respuesta es «aceptado». Es la única regla, la misma para el servidor (lo
- * guardado) y para la vista previa de la interfaz (lo que se está marcando);
- * `null` si alguna línea aceptada aún no tiene precio.
+ * Importe aceptado de un presupuesto, por moneda: suma el total de cada línea
+ * cuya respuesta es «aceptado». Es la única regla, la misma para el servidor (lo
+ * guardado) y para la vista previa de la interfaz (lo que se está marcando); solo
+ * salen las monedas con algo aceptado y, en una, `null` si alguna línea aceptada
+ * aún no tiene precio. Entre monedas nunca se suma ni se convierte.
  */
-export function sumAcceptedCents(
-  lines: ReadonlyArray<{ lineTotalCents: number | null; decision: string | null | undefined }>,
-): number | null {
-  let total = 0
+export function sumAcceptedByCurrency(
+  lines: ReadonlyArray<{
+    lineTotalCents: number | null
+    decision: string | null | undefined
+    currency: string
+  }>,
+): Array<{ currency: string; totalCents: number | null }> {
+  const totals = new Map<string, number | null>()
   for (const line of lines) {
     if (line.decision !== "aceptado") continue
-    if (line.lineTotalCents == null) return null
-    total += line.lineTotalCents
+    const sofar = totals.has(line.currency) ? (totals.get(line.currency) ?? null) : 0
+    totals.set(
+      line.currency,
+      sofar == null || line.lineTotalCents == null ? null : sofar + line.lineTotalCents,
+    )
   }
-  return total
+  return [...totals]
+    .map(([currency, totalCents]) => ({ currency, totalCents }))
+    .sort((a, b) => a.currency.localeCompare(b.currency))
+}
+
+/**
+ * Lo mismo para quien tiene una sola moneda: `null` si alguna línea aceptada aún
+ * no tiene precio y también si lo aceptado va en dos monedas, porque no hay una
+ * cifra que lo diga: eso lo dice `sumAcceptedByCurrency`.
+ */
+export function sumAcceptedCents(
+  lines: ReadonlyArray<{
+    lineTotalCents: number | null
+    decision: string | null | undefined
+    currency?: string
+  }>,
+): number | null {
+  const totals = sumAcceptedByCurrency(
+    lines.map((line) => ({ ...line, currency: line.currency ?? "" })),
+  )
+  if (totals.length === 0) return 0
+  return totals.length === 1 ? (totals[0]?.totalCents ?? null) : null
+}
+
+/**
+ * «S/ 300.00 + USD 1,000.00»: un total por moneda, con el formato que pida cada
+ * pantalla. Sin el precio de alguna, `missing`, como un total al que le falta algo.
+ */
+export function moneyTotalsText(
+  totals: ReadonlyArray<{ currency: string; totalCents: number | null }>,
+  format: (cents: number, currency: string) => string,
+  missing: string,
+): string {
+  const parts: string[] = []
+  for (const total of totals) {
+    if (total.totalCents == null) return missing
+    parts.push(format(total.totalCents, total.currency))
+  }
+  return parts.join(" + ")
+}
+
+/** Para decir lo aceptado: sin las monedas en cero, salvo que todo esté en cero. */
+export function nonZeroTotals<T extends { totalCents: number | null }>(totals: readonly T[]): T[] {
+  const some = totals.filter((total) => total.totalCents !== 0)
+  return some.length > 0 ? some : totals.slice(0, 1)
 }
 
 /**
