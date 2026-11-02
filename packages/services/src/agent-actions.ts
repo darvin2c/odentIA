@@ -87,6 +87,9 @@ export async function recordAgentAction(
       kind: input.kind,
       title: input.title.slice(0, 200),
       detail: input.detail ? input.detail.slice(0, 300) : null,
+      // La hora en que se anota, no la de la transacción: un botón se atiende en la misma que guarda
+      // su mensaje, y lo hecho tiene que quedar después de él.
+      createdAt: sql`clock_timestamp()`,
     })
     .onConflictDoNothing()
 }

@@ -256,6 +256,9 @@ export function closeWithoutResolvingWords(name: string, receptionName: string):
   return `Se cerrará la conversación con ${name} sin enviarle nada. Si vuelve a escribir, la atenderá ${receptionName}.`
 }
 
+/** Cerrar deja sin contestar lo que escribió: se dice antes, porque nadie más se lo va a responder. */
+export const CLOSE_UNANSWERED_WORDS = "Su último mensaje sigue sin respuesta: si cierras, nadie se lo va a contestar."
+
 /** «Cerrar la conversación si el paciente no responde»: horas enteras entre 6 y 23. */
 export const CLOSE_AFTER_HOURS_MIN = 6
 export const CLOSE_AFTER_HOURS_MAX = 23

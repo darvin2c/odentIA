@@ -44,7 +44,7 @@ import {
   syncConnectionAccount,
   testConnection,
 } from "./connections.js"
-import { getConversationDetail } from "./conversations.js"
+import { getConversationDetail, sendTemplateOutbound } from "./conversations.js"
 import { configurePublicLinks } from "./public-links.js"
 import { decryptConfig, secretsKeyFromEnv } from "./secrets.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
@@ -762,6 +762,18 @@ describe("Bandeja, pasadas las 24 horas", () => {
     expect((await offered(c, cold)).data.map((item) => item.title)).toEqual(["Tu trabajo ya está listo", "Promo mes"])
   })
 
+  it("una plantilla que sale de un botón no hace esperar al agente, y lo que envía el agente nunca se marca", async () => {
+    const c = await clinic()
+    const id = await thread(c, "Lucía Paredes", 48)
+    await whatsappSays(c, "odentia_retomar_conversacion_v1", "aprobada")
+    const template = { conversationId: id, fromAction: true, name: "odentia_retomar_conversacion_v1", language: "es", params: ["Lucía", "Clínica Sonríe"], category: "utility" as const }
+    const button = await run(c, (tx) => sendTemplateOutbound(tx, c.orgId, KEY, { ...template, senderKind: "user", senderUserId: c.ownerId }))
+    const byAgent = await run(c, (tx) => sendTemplateOutbound(tx, c.orgId, KEY, { ...template, senderKind: "agent" }))
+    const flags = await ownerDb.select({ id: message.id, fromAction: message.fromAction }).from(message).where(eq(message.conversationId, id))
+    expect(flags).toContainEqual({ id: button.id, fromAction: true })
+    expect(flags).toContainEqual({ id: byAgent.id, fromAction: false })
+  })
+
   it("envía el mensaje con el texto armado, y no deja enviar otro hasta que responda o pase un día", async () => {
     const c = await clinic()
     const id = await thread(c, "Lucía Paredes", 48)
@@ -778,6 +790,8 @@ describe("Bandeja, pasadas las 24 horas", () => {
       templateParams: ["Lucía", "Clínica Sonríe"],
     })
     const [row] = await ownerDb.select().from(message).where(eq(message.id, sent.id))
+    // Lo eligió en la Bandeja para retomar: conversa, y el agente la espera (ADR 0050).
+    expect(row?.fromAction).toBe(false)
     expect(row?.replyButtons).toHaveLength(1)
     expect(row!.replyButtons![0]!.title).toBe("Sí, continuemos")
     // El botón sigue la conversación: no lo resuelve el sistema.

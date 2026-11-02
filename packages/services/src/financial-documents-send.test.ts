@@ -189,7 +189,8 @@ it("el ticket se envía por correo con su PDF, queda en la conversación de la p
     .from(message)
     .where(and(eq(message.organizationId, "org_a"), eq(message.conversationId, sent.conversationId)))
   expect(messages).toHaveLength(1)
-  expect(messages[0]).toMatchObject({ id: sent.messageId, direction: "out", senderKind: "user" })
+  // Salió de un botón: es de quien lo envió, pero el agente no se queda esperándola.
+  expect(messages[0]).toMatchObject({ id: sent.messageId, direction: "out", senderKind: "user", fromAction: true })
   const attachments = messages[0]!.attachments as Array<{ filename?: string; mimeType?: string }>
   expect(attachments).toHaveLength(1)
   expect(attachments[0]?.filename).toMatch(/^Ticket-\d{6}\.pdf$/)

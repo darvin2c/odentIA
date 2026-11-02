@@ -50,6 +50,25 @@ async function seedInbox() {
   return { orgId, thread, proposal, handoff }
 }
 
+it("un botón del equipo no responde lo que preguntó: sigue pidiendo respuesta y no «espera al paciente» (ADR 0050)", async () => {
+  const { orgId, thread } = await seedInbox()
+  const askedThenButton = async (name: string, values: Partial<typeof conversation.$inferInsert>) => {
+    const conv = await thread(name, values)
+    await ownerDb.insert(message).values({ organizationId: orgId, conversationId: conv.id, direction: "in", senderKind: "contact", body: "¿Cuánto debo?", status: "received", createdAt: new Date(Date.now() - 120_000) })
+    await ownerDb.insert(message).values({ organizationId: orgId, conversationId: conv.id, direction: "out", senderKind: "user", fromAction: true, body: "Te enviamos tu comprobante", status: "sent", externalId: randomUUID(), createdAt: new Date(Date.now() - 60_000) })
+    return conv
+  }
+  const off = await askedThenButton("Agente apagado", { agentStatus: "off" })
+  const on = await askedThenButton("Agente encendido", {})
+  const view = async (name: "attend" | "agent" | "awaiting_patient") =>
+    (await withOrgContext(appDb, orgId, (tx) => listInboxConversations(tx, orgId, { view: name }))).items.map((item) => item.id)
+  expect(await view("attend")).toEqual([off.id])
+  expect(await view("agent")).toEqual([on.id])
+  expect(await view("awaiting_patient")).toEqual([])
+  const { items } = await withOrgContext(appDb, orgId, (tx) => listInboxConversations(tx, orgId, {}))
+  expect(items.find((item) => item.id === off.id)?.attention).toMatchObject({ unanswered: true, awaitingPatientSince: null })
+})
+
 it("cada conversación trae su estado de atención y su cierre, y las vistas cuentan con las mismas reglas", async () => {
   const { orgId, thread, proposal, handoff } = await seedInbox()
   const closedValues = { status: "closed", closeReason: "manual", closedAt: new Date() } as const

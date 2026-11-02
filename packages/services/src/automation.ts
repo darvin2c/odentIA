@@ -3,6 +3,7 @@ import { isWhatsAppAccountFailure, type NormalizedTemplateStatus } from "@odenti
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import { member } from "@odentia/db/schema/auth"
+import { recordAgentAction } from "./agent-actions.js"
 import type {
   AutomationCause,
   AutomationJobStatus,
@@ -3654,6 +3655,16 @@ export async function handleAutomationReply(
     senderKind: "agent",
     content: { type: "text", text: confirmationReply(items) },
   })
+  // Queda en el hilo como lo demás que hizo el agente (ADR 0112), y así el ciclo sabe que
+  // ya no se espera nada de la persona (ADR 0113).
+  if (confirmed > 0) {
+    await recordAgentAction(tx, orgId, {
+      conversationId: input.conversationId,
+      kind: "cita",
+      title: "confirmó una cita",
+      detail: "desde el recordatorio",
+    })
+  }
   await audit(tx, orgId, null, "automation_job.confirmed", origin.id, {
     appointments: appointmentIds.length,
     confirmed,

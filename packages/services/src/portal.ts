@@ -477,6 +477,7 @@ export async function issuePortalLink(
     conversationId: conv.id,
     senderKind: "user",
     senderUserId: actorUserId,
+    fromAction: true,
     content: { type: "text", text },
   })
   const [updated] = await tx

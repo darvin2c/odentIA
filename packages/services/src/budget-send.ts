@@ -357,6 +357,7 @@ export async function sendBudget(
       conversationId: route.conversationId,
       senderKind,
       senderUserId: senderKind === "user" ? actor.userId : null,
+      fromAction: true,
       name: route.template.name,
       language: route.template.language,
       params,

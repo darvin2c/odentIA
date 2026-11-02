@@ -5,7 +5,7 @@ import { member } from "@odentia/db/schema/auth"
 import { automationJob } from "@odentia/db/schema/automation"
 import { channelConnection, contact, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, desc, eq, sql } from "drizzle-orm"
+import { and, desc, eq, type SQL, sql } from "drizzle-orm"
 import { claimHandoff } from "./agent-operations.js"
 import { type AgentConfig, getAgentConfig } from "./agentConfig.js"
 import {
@@ -14,6 +14,7 @@ import {
   lastAcceptedOutSql,
   lastIsFailedOutSql,
   proposalPendingExistsSql,
+  replyOnTheWaySql,
   teamLiveSql,
   unansweredSql,
 } from "./conversation-state.js"
@@ -354,6 +355,8 @@ export interface ResolvePreview {
   handoffs: number
   /** Propuestas que esperan el sí del interlocutor y vencen al cerrar. */
   pendingContact: number
+  /** Lo último que escribió sigue sin respuesta y ninguna va en camino: al cerrar, el agente ya no se lo contesta. */
+  unanswered: boolean
 }
 
 /** Lo que pasará al pulsar «Resolver», para decirlo antes. */
@@ -361,6 +364,8 @@ export async function getResolvePreview(tx: Db, orgId: string, id: string, now =
   const thread = await threadForWriting(tx, orgId, id)
   const cfg = await getAgentConfig(tx, orgId)
   const farewell = thread.status === "open" && canWriteNow(thread, now)
+  const [waiting] = await tx.execute<{ unanswered: boolean }>(sql`select (${unansweredSql(sql.raw("c"))} and not ${replyOnTheWaySql(sql.raw("c"))}) as unanswered from conversation c
+    where c.id = ${id} and c.organization_id = ${orgId}`)
   return {
     farewell,
     farewellText: farewell
@@ -368,6 +373,7 @@ export async function getResolvePreview(tx: Db, orgId: string, id: string, now =
       : null,
     handoffs: await countOpenHandoffsOf(tx, orgId, id),
     pendingContact: await countPendingProposalsOf(tx, orgId, id),
+    unanswered: waiting?.unanswered === true,
   }
 }
 
@@ -591,6 +597,7 @@ interface CareRow {
   lastFailed: boolean
   handoffOpen: boolean
   proposalPending: boolean
+  appointmentChanged: boolean
 }
 
 /**
@@ -636,6 +643,7 @@ export async function tickConversationCare(
       lastFailed: sql<boolean>`${lastIsFailedOutSql(conv)}`,
       handoffOpen: sql<boolean>`${handoffOpenExistsSql(conv)}`,
       proposalPending: sql<boolean>`${proposalPendingExistsSql(conv)}`,
+      appointmentChanged: sql<boolean>`${appointmentChangedSql(conv)}`,
     })
     .from(conversation)
     .innerJoin(contact, eq(contact.id, conversation.contactId))
@@ -678,16 +686,12 @@ export async function tickConversationCare(
     if (row.lastFailed) return null
     if (row.unanswered || !row.hasAcceptedOut) return null
     // Terminó con su cita y no queda nada por responder: se da por resuelta sin escribirle.
-    if (!row.handoffOpen && !row.proposalPending && (await bookedInAttention(inner, orgId, row))) {
+    const ended = !row.handoffOpen && !row.proposalPending ? await endedWithAppointment(inner, orgId, row) : null
+    if (ended) {
       const lastAt = row.lastMessageAt ?? row.attentionStartedAt
       if (now.getTime() - lastAt.getTime() < BOOKED_CLOSE_AFTER_MS) return null
       if (!(await stillQuiet(inner, row))) return null
-      await closeConversationWith(inner, orgId, row.id, {
-        reason: "resuelta",
-        byUserId: null,
-        now,
-        ended: "terminó con su cita reservada y no quedaba nada pendiente",
-      })
+      await closeConversationWith(inner, orgId, row.id, { reason: "resuelta", byUserId: null, now, ended })
       return "closed"
     }
     if (now.getTime() - (row.lastMessageAt ?? row.attentionStartedAt).getTime() < NUDGE_AFTER_HOURS * HOUR_MS) return null
@@ -750,7 +754,7 @@ export async function tickConversationCare(
       where h.organization_id = ${orgId} and h.conversation_id = ${row.id} and h.task_id is not null
         and ${handoffOpenSql(sql.raw("h"))}
         and exists (select 1 from message m where m.organization_id = h.organization_id and m.conversation_id = h.conversation_id
-          and m.sender_kind = 'user' and ${acceptedOutSql(sql.raw("m"))}
+          and m.sender_kind = 'user' and not m.from_action and ${acceptedOutSql(sql.raw("m"))}
           and m.created_at > greatest(h.created_at, coalesce(h.asked_again_at, '-infinity'::timestamptz), coalesce(h.kept_pending_at, '-infinity'::timestamptz))
           and (m.reply_to_message_id is null or m.reply_to_message_id = h.source_message_id or h.asked_message_ids ? m.reply_to_message_id::text))`)
     for (const item of answered) {
@@ -795,11 +799,44 @@ async function bookedInAttention(tx: Db, orgId: string, row: Pick<CareRow, "id" 
   return !!found
 }
 
+/**
+ * Después de lo último que escribió, movió, confirmó o canceló una cita, por el
+ * chat o desde su enlace: lo que hizo el agente con una propuesta queda en
+ * `agent_proposal` y lo demás en `agent_action_log`. Si escribió después, pidió
+ * otra cosa y sigue el camino de siempre.
+ */
+function appointmentChangedSql(conv: SQL): SQL {
+  const since = sql`greatest(${conv}.attention_started_at, coalesce(${conv}.last_inbound_at, '-infinity'::timestamptz))`
+  return sql`(exists (select 1 from agent_action_log l_cita
+      where l_cita.organization_id = ${conv}.organization_id and l_cita.conversation_id = ${conv}.id
+        and l_cita.kind = 'cita' and l_cita.created_at >= ${since})
+    or exists (select 1 from agent_proposal p_cita
+      where p_cita.organization_id = ${conv}.organization_id and p_cita.conversation_id = ${conv}.id
+        and p_cita.status = 'ejecutada' and p_cita.action in ('reprogramar_cita', 'cancelar_cita')
+        and p_cita.executed_at >= ${since}))`
+}
+
+/**
+ * ¿La atención ya terminó con lo de su cita? Devuelve cómo terminó, para la
+ * atención siguiente, o nulo. Quien mueve, confirma o cancela ya no debe nada,
+ * salvo que lo último que se le dijo le pregunte algo (ADR 0113). El «?» de un
+ * enlace no es una pregunta; el de una frase seguida de un enlace, sí.
+ */
+async function endedWithAppointment(tx: Db, orgId: string, row: Pick<CareRow, "id" | "attentionStartedAt" | "appointmentChanged">): Promise<string | null> {
+  if (await bookedInAttention(tx, orgId, row)) return "terminó con su cita reservada y no quedaba nada pendiente"
+  if (!row.appointmentChanged) return null
+  const last = await lastMessageOf(tx, row.id)
+  if (!last || (last.body ?? "").replace(/https?:\/\/\S+/g, "").includes("?")) return null
+  if (await offeredInThatReply(tx, row.id, last.createdAt)) return null
+  return "dejó resuelto lo de su cita y no quedaba nada pendiente"
+}
+
 async function lastMessageOf(tx: Db, id: string) {
   const [last] = await tx
     .select({ id: message.id, direction: message.direction, senderKind: message.senderKind, body: message.body, createdAt: message.createdAt, accepted: sql<boolean>`${acceptedOutSql(sql.raw('"message"'))}` })
     .from(message)
-    .where(eq(message.conversationId, id))
+    // Un botón del equipo no es un turno: no tapa lo último que se le dijo o se le preguntó.
+    .where(and(eq(message.conversationId, id), eq(message.fromAction, false)))
     .orderBy(desc(message.createdAt), desc(message.id))
     .limit(1)
   if (!last || !last.accepted) return null
@@ -827,6 +864,19 @@ async function offeredInLastTurn(tx: Db, id: string, before: Date): Promise<bool
   return (row?.tools ?? []).some((tool) => OFFER_TOOLS.has(tool))
 }
 
+/**
+ * ¿Ese mensaje lo escribió una corrida que ofreció algo? Espera su elección aunque
+ * no lleve «?». Lo que sale solo porque hizo algo en su enlace no es de ninguna corrida.
+ */
+async function offeredInThatReply(tx: Db, id: string, at: Date): Promise<boolean> {
+  const [row] = await tx.execute<{ tools: string[] | null }>(sql`
+    select tools_used as tools from agent_run_ledger
+    where conversation_id = ${id} and status in ('ok', 'handoff')
+      and started_at <= ${at.toISOString()}::timestamptz and ended_at >= ${at.toISOString()}::timestamptz
+    order by started_at desc limit 1`)
+  return (row?.tools ?? []).some((tool) => OFFER_TOOLS.has(tool))
+}
+
 /** Un texto fijo por la conversación, sin modelo. */
 async function sendFixed(
   tx: Db,
@@ -839,6 +889,7 @@ async function sendFixed(
     conversationId: id,
     senderKind: as.senderKind,
     senderUserId: as.senderKind === "user" ? as.senderUserId : null,
+    fromAction: true,
     content: { type: "text", text },
   })
 }

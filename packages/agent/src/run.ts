@@ -47,6 +47,8 @@ import {
   sendOutbound,
   answerToTeamMember,
   TEAM_LIVE_MINUTES,
+  teamAnsweredSql,
+  teamWroteSql,
   toolsDisabledBy,
   type ProductAgentTexts,
   productAgentTexts,
@@ -144,6 +146,8 @@ function matchesHandoff(text: string | null, keywords: string[]): boolean {
 
 /** El equipo tomó o cerró la conversación mientras el modelo redactaba: nada salió. */
 const TEAM_TOOK_OVER = "team-took-over"
+/** Una persona del equipo ya le respondió mientras la corrida esperaba: el agente no le responde encima (ADR 0050). */
+const TEAM_ANSWERED = "team-answered"
 /** La persona siguió escribiendo mientras se preparaba la respuesta: la de su último mensaje responde todo (ADR 0097). */
 const PERSON_KEPT_WRITING = "persona-siguio-escribiendo"
 /**
@@ -379,8 +383,9 @@ async function attendAgentRun(
       // conversando o la persona cite su mensaje.
       alarm = screenMode !== "recheck" && hasAlarmSignal(trigger.body, texts.alarmSignals)
       // Una persona del equipo conversa en vivo (ADR 0050): el agente espera
-      // hasta 15 minutos después de su último mensaje y entonces vuelve; si
-      // para entonces ella ya respondió, la corrida no tiene nada que hacer.
+      // hasta 15 minutos después de lo último que escribió y entonces vuelve;
+      // si para entonces ella ya respondió, la corrida no tiene nada que hacer.
+      // Lo que mandó con un botón no cuenta: no está conversando.
       const [team] = alarm
         ? [null]
         : await tx
@@ -390,8 +395,7 @@ async function attendAgentRun(
               and(
                 eq(message.organizationId, orgId),
                 eq(message.conversationId, conversationId),
-                eq(message.direction, "out"),
-                eq(message.senderKind, "user"),
+                teamWroteSql(sql.raw('"message"')),
               ),
             )
       const teamAt = team?.at ? new Date(team.at) : null
@@ -404,14 +408,16 @@ async function attendAgentRun(
       // Responde citando un mensaje de una persona del equipo (ADR 0050): es
       // de su tema y el agente no se mete; se anota en su tema o se le abre uno.
       // Un «gracias» no pide nada al equipo (ADR 0122): lo atiende como cualquier otro.
+      // Lo que mandó con un botón no es su conversación: «no me abre» citando el enlace lo atiende el agente.
       if (trigger.replyToMessageId && screenMode !== "recheck" && !alarm) {
         const [quoted] = await tx
-          .select({ senderKind: message.senderKind, senderUserId: message.senderUserId })
+          .select({ senderKind: message.senderKind, senderUserId: message.senderUserId, fromAction: message.fromAction })
           .from(message)
           .where(and(eq(message.id, trigger.replyToMessageId), eq(message.conversationId, conversationId)))
           .limit(1)
         if (
           quoted?.senderKind === "user" &&
+          !quoted.fromAction &&
           quoted.senderUserId &&
           (await answerToTeamMember(tx, orgId, { conversationId, messageId: trigger.id, userId: quoted.senderUserId }))
         ) {
@@ -447,6 +453,7 @@ async function attendAgentRun(
         .select({
           id: message.id,
           direction: message.direction,
+          fromAction: message.fromAction,
           body: message.body,
           createdAt: message.createdAt,
         })
@@ -454,11 +461,24 @@ async function attendAgentRun(
         .where(and(eq(message.organizationId, orgId), eq(message.conversationId, conversationId)))
         .orderBy(desc(message.createdAt), desc(message.id))
         .limit(20)
+      // Una persona del equipo ya le respondió este mensaje mientras la corrida
+      // esperaba: responder encima solo confunde. Si volvió a escribir, ese otro
+      // mensaje tiene su propia corrida.
+      const [answered] = alarm
+        ? [null]
+        : await tx
+            .select({ id: message.id })
+            .from(message)
+            .where(and(eq(message.organizationId, orgId), eq(message.conversationId, conversationId), teamAnsweredSql(sql.raw('"message"'), trigger.id)))
+            .limit(1)
+      if (answered) return { skip: { reason: TEAM_ANSWERED, model: effectiveModel } }
       // Una corrida pospuesta (el equipo conversaba) atiende todo lo que quedó
       // sin responder, aunque pase de la ventana de ráfaga.
       const horizon = inboundJob.deferred ? Number.NEGATIVE_INFINITY : now.getTime() - BURST_HORIZON_MS
       const pendingTail: { id: string; body: string | null; createdAt: Date }[] = []
       for (const item of recent) {
+        // Lo que el equipo manda con un botón no corta lo que la persona viene escribiendo.
+        if (item.fromAction) continue
         if (item.direction !== "in" || item.createdAt.getTime() < horizon) break
         pendingTail.push(item)
       }
