@@ -9,7 +9,7 @@
  * horaria siempre del perfil/sede. Nada fijo.
  */
 import { useQuery } from "@tanstack/react-query"
-import { currencyFractionDigits } from "@odentia/clinical"
+import { currencyFractionDigits, type TicketTender } from "@odentia/clinical"
 import { apiFetch } from "./api"
 import { amountFromCents } from "./workspace"
 
@@ -192,18 +192,6 @@ export interface CollectSnapshotMethod {
   reference: string | null
 }
 
-/** Con otra moneda de por medio: con qué pagó y a qué cambio (`TicketFrozen.tender`). */
-export interface CollectSnapshotTender {
-  currency: string
-  amountCents: number
-  rate: string
-  businessCurrency: string
-  otherCurrency: string
-  valueCents: number
-  changeCents: number | null
-  changeCurrency: string | null
-}
-
 /**
  * Lo que el ticket congela al cobrar (`payment_ticket.snapshot`): con esto se
  * arma el ticket en pantalla, igual que el PDF del servidor. Los campos
@@ -229,7 +217,7 @@ export interface CollectSnapshot {
   /** Frase al pie vigente al cobrar. */
   notice: string
   /** Con otra moneda de por medio; un cobro solo en moneda del negocio no lo lleva. */
-  tender?: CollectSnapshotTender | null
+  tender?: TicketTender | null
   /** Lo que quedó por cobrar de esos conceptos. */
   remainingCents?: number
   /** Lo que falta pagar de cada concepto, con lo que cuesta (`TicketFrozen.pending`). */
@@ -275,21 +263,6 @@ export interface CollectTicketRow {
   voidedAt: string | null
   voidedBy: string | null
   voidReason: string | null
-}
-
-/**
- * El bloque de otra moneda, solo si el ticket usa dos: entró en otra que la que
- * cancela, o el vuelto se dio en otra. Sin él, el ticket se ve como siempre.
- */
-export function crossTender(
-  ticket: Pick<CollectTicketRow, "currency" | "snapshot">,
-): CollectSnapshotTender | null {
-  const tender = ticket.snapshot?.tender ?? null
-  if (!tender) return null
-  const twoCurrencies =
-    tender.currency !== ticket.currency ||
-    (tender.changeCurrency !== null && tender.changeCurrency !== tender.currency)
-  return twoCurrencies ? tender : null
 }
 
 /**
@@ -423,7 +396,7 @@ export interface TicketReturnable {
   createdAt: string
   voided: boolean
   /** Con qué pagó, si hubo otra moneda: lo devuelto sale en esa moneda. */
-  tender?: CollectSnapshotTender | null
+  tender?: TicketTender | null
   lines: ReturnableLine[]
   methods: CollectSnapshotMethod[]
   returns: TicketReturnSummary[]

@@ -4,6 +4,7 @@ import {
   quantityWords,
   refundTenderCents,
   splitCents,
+  type TicketTender,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
@@ -1007,10 +1008,7 @@ export interface TicketFrozen {
   }>
   /** Frase al pie vigente al cobrar. */
   notice: string
-  /**
-   * Con otra moneda de por medio: con qué pagó y a qué cambio. Nada de esto se
-   * vuelve a calcular; un cobro solo en moneda del negocio no lo lleva.
-   */
+  /** Si usó dos monedas: con qué pagó y a qué cambio. Nada de esto se vuelve a calcular. */
   tender?: TicketTender
   /** Lo que quedó por cobrar de esos conceptos. */
   remainingCents?: number
@@ -1030,23 +1028,6 @@ export interface TicketFrozen {
    * impuesto y una línea por tasa (ADR 0083). Nulo si nada lleva impuesto.
    */
   taxes?: TicketTaxes | null
-}
-
-/** Lo que congela un cobro con otra moneda de por medio. */
-export interface TicketTender {
-  /** La moneda en que entró el dinero. */
-  currency: string
-  /** Lo que entró, sin el exceso de un billete. */
-  amountCents: number
-  /** El cambio usado, en palabras: moneda del negocio por 1 de la otra. */
-  rate: string
-  businessCurrency: string
-  otherCurrency: string
-  /** Cuánto vale en moneda del negocio. */
-  valueCents: number
-  /** El vuelto y su moneda; nulos si no hubo. */
-  changeCents: number | null
-  changeCurrency: string | null
 }
 
 export interface CollectMethodInput {
@@ -1593,7 +1574,7 @@ export async function collectCharge(
           reference: m.reference,
         })),
         notice: profile.ticketFooter,
-        ...(rate !== null && valueCents !== null
+        ...(rate !== null && (paidIn !== unit || crossChange !== null)
           ? {
               tender: {
                 currency: paidIn,
@@ -1601,9 +1582,6 @@ export async function collectCharge(
                 rate,
                 businessCurrency: business,
                 otherCurrency: unit === business ? paidIn : unit,
-                valueCents,
-                changeCents: changeGiven,
-                changeCurrency: changeGiven !== null ? changeIn : null,
               },
             }
           : {}),

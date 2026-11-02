@@ -12,9 +12,9 @@
 import {
   currencyWord,
   documentText,
-  exchangeRateWords,
   formatMoney,
   ticketFooterLines,
+  ticketTenderTitle,
   ticketUntaxedNote,
 } from "@odentia/clinical"
 import { Badge, Button, buttonVariants, cn, Skeleton } from "@odentia/ui"
@@ -33,7 +33,6 @@ import {
   CASH_TYPE_CODE,
   type CollectReceipt,
   type CollectTicketRow,
-  crossTender,
   dayInTimezone,
   fetchPatientAccount3,
   fetchTicketReturnable,
@@ -184,7 +183,7 @@ export function TicketView({
   const zone = snapshot.clinic?.timezone || timeZone
   const money = (cents: number) => formatMoney(cents, currency, format)
   // Si el cobro usó dos monedas, cada cifra lleva su símbolo: lo que entró no es lo que canceló.
-  const crossed = crossTender(ticket)
+  const crossed = snapshot.tender ?? null
   /** Cifras del cuerpo del ticket: sin símbolo, como en el papel; el total sí lo lleva. */
   const plain = (cents: number) =>
     crossed ? money(cents) : formatAmountPlain(cents, currency, format)
@@ -194,7 +193,7 @@ export function TicketView({
   const enteredOf = (method: { amountCents: number; tenderCents?: number }) =>
     crossed ? entered(method.tenderCents ?? method.amountCents) : plain(method.amountCents)
   const changeText = (cents: number) =>
-    crossed?.changeCurrency ? formatMoney(cents, crossed.changeCurrency, format) : entered(cents)
+    ticket.changeCurrency ? formatMoney(cents, ticket.changeCurrency, format) : entered(cents)
 
   const justVoided = voidedHere?.ticketId === ticket.id ? voidedHere : null
   const voided = ticket.voidedAt !== null || justVoided !== null
@@ -487,15 +486,7 @@ export function TicketView({
         <Row label="TOTAL" value={money(ticket.totalCents)} strong />
         <div className="flex flex-col gap-1">
           {crossed ? (
-            <p className="border-t pt-2 font-semibold">
-              Pagó en {currencyWord(crossed.currency, format)}, a{" "}
-              {exchangeRateWords(
-                crossed.rate,
-                crossed.businessCurrency,
-                crossed.otherCurrency,
-                format,
-              )}
-            </p>
+            <p className="border-t pt-2 font-semibold">{ticketTenderTitle(crossed, format)}</p>
           ) : null}
           {methods.map((method, index) => (
             <div key={`${method.paymentMethodId}-${index}`} className="flex flex-col">
@@ -719,7 +710,7 @@ export function TicketView({
                       <strong className="font-semibold">
                         {crossed
                           ? formatMoney(
-                              voidCashCents(method, crossed, ticket),
+                              voidCashCents(method, ticket),
                               crossed.currency,
                               format,
                             )
@@ -744,15 +735,13 @@ export function TicketView({
                   )}
                 </li>
               ))}
-              {crossed?.changeCurrency &&
-              crossed.changeCurrency !== crossed.currency &&
-              ticket.changeCents ? (
+              {ticket.changeCurrency && ticket.changeCents ? (
                 <li>
                   Vuelven{" "}
                   <strong className="font-semibold">
-                    {formatMoney(ticket.changeCents, crossed.changeCurrency, format)}
+                    {formatMoney(ticket.changeCents, ticket.changeCurrency, format)}
                   </strong>{" "}
-                  a la caja de {currencyWord(crossed.changeCurrency, format)}: fueron su vuelto.
+                  a la caja de {currencyWord(ticket.changeCurrency, format)}: fueron su vuelto.
                 </li>
               ) : null}
               {ticket.creditAppliedCents > 0 ? (
@@ -817,13 +806,11 @@ export function TicketView({
  */
 function voidCashCents(
   method: { amountCents: number; tenderCents?: number },
-  crossed: NonNullable<ReturnType<typeof crossTender>>,
   ticket: CollectTicketRow,
 ): number {
-  const cents = method.tenderCents ?? method.amountCents
-  const changeElsewhere =
-    crossed.changeCurrency !== null && crossed.changeCurrency !== crossed.currency
-  return changeElsewhere && ticket.cashReceivedCents !== null ? ticket.cashReceivedCents : cents
+  return ticket.changeCurrency && ticket.cashReceivedCents !== null
+    ? ticket.cashReceivedCents
+    : (method.tenderCents ?? method.amountCents)
 }
 
 export function TicketStatusBadge({ voidedAt }: { voidedAt: string | null }): React.JSX.Element {

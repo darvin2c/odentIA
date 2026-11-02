@@ -212,9 +212,6 @@ it("debe USD 1,000 y paga S/ 3,750: se cancela en dólares y entra a la caja de 
     rate: "3.75",
     businessCurrency: "PEN",
     otherCurrency: "USD",
-    valueCents: 375000,
-    changeCents: null,
-    changeCurrency: null,
   })
   expect(frozen.methods).toMatchObject([
     { name: "Efectivo", amountCents: 100000, tenderCents: 375000 },
@@ -297,12 +294,7 @@ it("billete de USD 100 para S/ 300 con vuelto en soles: tres movimientos y el ti
     changeCurrency: "PEN",
   })
   const frozen = paid.ticket.snapshot as TicketFrozen
-  expect(frozen.tender).toMatchObject({
-    currency: "USD",
-    amountCents: 8000,
-    changeCents: 7500,
-    changeCurrency: "PEN",
-  })
+  expect(frozen.tender).toMatchObject({ currency: "USD", amountCents: 8000 })
   // Efecto en cada caja: dólares +100, soles −75. La caja de soles se abrió sola.
   const usd = await c.box("USD")
   const pen = await c.box("PEN")
@@ -357,7 +349,7 @@ it("paga en soles con vuelto en soles: solo entra lo cobrado, sin movimientos de
     changeCurrency: null,
   })
   expect(paid.ticket.snapshot as TicketFrozen).toMatchObject({
-    tender: { changeCents: 5000, changeCurrency: "PEN" },
+    tender: { currency: "PEN", amountCents: 375000 },
   })
   expect(await c.movements()).toMatchObject([
     { kind: "cobro", amountCents: 375000, currency: "PEN" },
@@ -986,7 +978,8 @@ it("el ticket y sus papeles se arman con lo congelado, también con dos monedas"
     totalCents: 30000,
     cashReceivedCents: 10000,
     changeCents: 7500,
-    tender: { currency: "USD", changeCurrency: "PEN", rate: "3.75" },
+    changeCurrency: "PEN",
+    tender: { currency: "USD", rate: "3.75" },
     methods: [{ label: "Efectivo", amountCents: 30000, tenderCents: 8000 }],
   })
   expect((await renderTicketPdf(snap)).length).toBeGreaterThan(1000)

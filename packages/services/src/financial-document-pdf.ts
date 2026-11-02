@@ -8,10 +8,10 @@
  * - Papel: la térmica de la clínica, u hoja A4 o Carta si se pide.
  */
 import {
-  currencyWord,
-  exchangeRateWords,
   formatMoney,
   ticketFooterLines,
+  type TicketTender,
+  ticketTenderTitle,
   ticketUntaxedNote,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
@@ -34,7 +34,6 @@ import {
   getRefundReceipt,
   getTicketReceipt,
   type TicketFrozen,
-  type TicketTender,
 } from "./payments.js"
 
 export { ticketFormat } from "./document-kit.js"
@@ -84,6 +83,8 @@ export interface TicketSnapshot {
   creditAppliedCents: number
   cashReceivedCents: number | null
   changeCents: number | null
+  /** Moneda del vuelto, si se dio en otra que aquella en que entró. */
+  changeCurrency: string | null
   totalCents: number
   /** Lo que quedó por cobrar de esos conceptos al momento del cobro. */
   remainingCents: number | null
@@ -91,7 +92,7 @@ export interface TicketSnapshot {
   pending: Array<{ description: string; amountCents: number; remainingCents: number }> | null
   /** El impuesto de lo cobrado, congelado al cobrar (ADR 0083). */
   taxes: TicketTaxes | null
-  /** Con qué pagó y a qué cambio, si hubo otra moneda de por medio. */
+  /** Con qué pagó y a qué cambio, si usó dos monedas. */
   tender: TicketTender | null
   org: DocOrg
 }
@@ -165,6 +166,7 @@ export async function buildTicketSnapshot(
     creditAppliedCents: ticket.creditAppliedCents,
     cashReceivedCents: ticket.cashReceivedCents,
     changeCents: ticket.changeCents,
+    changeCurrency: ticket.changeCurrency,
     totalCents: ticket.totalCents,
     remainingCents: frozen.remainingCents ?? null,
     pending: frozen.pending ?? null,
@@ -172,26 +174,6 @@ export async function buildTicketSnapshot(
     tender: frozen.tender ?? null,
     org,
   }
-}
-
-/**
- * El bloque de otra moneda, solo si el papel usa dos: entró en otra moneda que la
- * del ticket o el vuelto se dio en otra. En una sola moneda el ticket es el de siempre.
- */
-function crossTender(snap: TicketSnapshot): TicketTender | null {
-  const { tender } = snap
-  if (!tender) return null
-  const twoCurrencies =
-    tender.currency !== snap.currency ||
-    (tender.changeCurrency !== null && tender.changeCurrency !== tender.currency)
-  return twoCurrencies ? tender : null
-}
-
-/** «Pagó en soles, a S/ 3.75 por USD 1». */
-function tenderTitle(tender: TicketTender, locale: string): string {
-  const word = currencyWord(tender.currency, locale)
-  const rate = exchangeRateWords(tender.rate, tender.businessCurrency, tender.otherCurrency, locale)
-  return `Pagó en ${word}, a ${rate}`
 }
 
 /** Una fila de texto e importe, con letra del cuerpo del ticket. */
@@ -237,7 +219,7 @@ function ticketTotals(kit: DocumentKit, snap: TicketSnapshot, money: (cents: num
 
 function howPaid(kit: DocumentKit, snap: TicketSnapshot, money: (cents: number) => string) {
   // Con dos monedas, cada cifra lleva la suya: lo que entró no es lo que canceló.
-  const tender = crossTender(snap)
+  const { tender } = snap
   const paid = (cents: number) =>
     tender ? formatMoney(cents, tender.currency, snap.org.locale) : money(cents)
   for (const method of snap.methods) {
@@ -255,8 +237,8 @@ function howPaid(kit: DocumentKit, snap: TicketSnapshot, money: (cents: number) 
     moneyRow(
       kit,
       "Vuelto",
-      tender?.changeCurrency
-        ? formatMoney(snap.changeCents, tender.changeCurrency, snap.org.locale)
+      snap.changeCurrency
+        ? formatMoney(snap.changeCents, snap.changeCurrency, snap.org.locale)
         : paid(snap.changeCents),
     )
 }
@@ -344,9 +326,8 @@ export async function renderTicketPdf(
     thermalRule(kit)
     ticketTotals(kit, snap, money)
     thermalRule(kit)
-    const crossed = crossTender(snap)
-    if (crossed)
-      kit.text(tenderTitle(crossed, org.locale), {
+    if (snap.tender)
+      kit.text(ticketTenderTitle(snap.tender, org.locale), {
         face: "sansSemi",
         size: SIZE.second,
         leading: 1.4,
@@ -416,8 +397,7 @@ export async function renderTicketPdf(
   kit.gap(8)
   ticketTotals(kit, snap, money)
   kit.gap(20)
-  const crossed = crossTender(snap)
-  kit.subheading(crossed ? tenderTitle(crossed, org.locale) : "Cómo pagó", {
+  kit.subheading(snap.tender ? ticketTenderTitle(snap.tender, org.locale) : "Cómo pagó", {
     face: "sansSemi",
     before: 0,
     after: 3,

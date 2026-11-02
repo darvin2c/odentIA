@@ -7,24 +7,6 @@ import {
   financeKeys,
   groupDayMovements,
 } from "./finance-cash"
-import { type CollectTicketRow, crossTender } from "./finance-collect"
-
-const tender = {
-  currency: "USD",
-  amountCents: 8000,
-  rate: "3.75",
-  businessCurrency: "PEN",
-  otherCurrency: "USD",
-  valueCents: 30000,
-  changeCents: 7500,
-  changeCurrency: "PEN",
-}
-
-const ticket = (currency: string, snapshotTender: typeof tender | null): Pick<CollectTicketRow, "currency" | "snapshot"> => ({
-  currency,
-  snapshot: { tender: snapshotTender } as CollectTicketRow["snapshot"],
-})
-
 const movement = (over: Partial<DayMovement>): DayMovement => ({
   id: "m1",
   shiftId: "s1",
@@ -43,18 +25,6 @@ const movement = (over: Partial<DayMovement>): DayMovement => ({
   patientId: "pa1",
   patientName: "Carlos Vega",
   ...over,
-})
-
-describe("el ticket con dos monedas", () => {
-  it("lleva el bloque solo si usa dos: entró en otra o el vuelto se dio en otra", () => {
-    expect(crossTender(ticket("PEN", tender))).toEqual(tender)
-    // Debe USD y paga USD con vuelto en dólares: una sola moneda, como siempre.
-    const sameCurrency = { ...tender, changeCurrency: "USD" }
-    expect(crossTender(ticket("USD", sameCurrency))).toBeNull()
-    // Debe USD y paga USD con vuelto en soles: dos monedas.
-    expect(crossTender(ticket("USD", tender))).toEqual(tender)
-    expect(crossTender(ticket("PEN", null))).toBeNull()
-  })
 })
 
 describe("la caja con dos monedas", () => {
