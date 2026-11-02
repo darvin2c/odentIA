@@ -178,7 +178,12 @@ import {
   startImagingStudyUpload,
 } from "../imaging-studies.js"
 import { clinicToday } from "../inventory-stock.js"
-import { MEDICAL_DEMO_ORG, seedMedicalDemo, VELA_ID } from "../medical/seed-demo.js"
+import {
+  MEDICAL_DEMO_ORG,
+  MEDICAL_RECEPCION_ID,
+  seedMedicalDemo,
+  VELA_ID,
+} from "../medical/seed-demo.js"
 import {
   closeOpportunity,
   createOpportunity,
@@ -338,14 +343,16 @@ const ROJAS_ID = `${ID}-user-rojas`
 const SALAS_ID = `${ID}-user-salas`
 /** Caja de Dental Smile: responde desde Inicio los temas de pagos que le pasa Sofi (decisión 3 del pulido de la Bandeja). */
 const CAJA_ID = `${ID}-user-caja`
+/** Recepción de Dental Smile: el rol que más usa el sistema, para recorrerlo con sus permisos. */
+const RECEPCION_ID = `${ID}-user-recepcion`
 /** El correo de cada persona del equipo: en producción, uno que no llega a nadie. */
 const SEED_EMAIL_DOMAIN = "odentia.dev"
 const seedEmail = (name: string) => `${name}@${SEED_EMAIL_DOMAIN}`
 /** Los diagnósticos de la historia, en la lista de la clínica (la CIE-10 de la semilla). */
 const DX = { caries: "K02.1", pulpitis: "K04.0", dentalExam: "Z01.2" }
-const SEED_USERS = [ANA_ID, LUIS_ID, CORA_ID, ROJAS_ID, SALAS_ID, CAJA_ID]
-/** Las cuentas que se borran: las de odentIA y la Dra. Vela del consultorio de latidIA. */
-const WIPED_USERS = [...SEED_USERS, VELA_ID]
+const SEED_USERS = [ANA_ID, LUIS_ID, CORA_ID, ROJAS_ID, SALAS_ID, CAJA_ID, RECEPCION_ID]
+/** Las cuentas que se borran: las de odentIA y las del consultorio de latidIA. */
+const WIPED_USERS = [...SEED_USERS, VELA_ID, MEDICAL_RECEPCION_ID]
 const PASSWORD = "Demo1234"
 // Teléfono compartido del hogar Rosa/Jorge. No puede modelarse con dos filas
 // de contact_identity: el unique (organization_id, channel, external_user_id)
@@ -732,6 +739,15 @@ await db.insert(user).values([
     emailVerified: true,
     ...SEED_TERMS,
   },
+  {
+    id: RECEPCION_ID,
+    name: "Lucía Paredes",
+    firstName: "Lucía",
+    lastName: "Paredes",
+    email: seedEmail("recepcion"),
+    emailVerified: true,
+    ...SEED_TERMS,
+  },
 ])
 const passwordHash = await hashPassword(PASSWORD)
 await db.insert(account).values(
@@ -771,6 +787,13 @@ await db.insert(member).values([
     organizationId: ORG_A,
     userId: CAJA_ID,
     role: "cashier",
+    createdAt: new Date(),
+  },
+  {
+    id: randomUUID(),
+    organizationId: ORG_A,
+    userId: RECEPCION_ID,
+    role: "reception",
     createdAt: new Date(),
   },
   {
@@ -4904,6 +4927,6 @@ console.log(
     )}; ${reportsProgress.discounted} atenciones con materiales descontados en ${reportsProgress.services} servicios; ${reportsProgress.today} atenciones cobradas hoy`,
 )
 console.log(
-  "credenciales (password Demo1234): ana@odentia.dev, luis@odentia.dev, cora@odentia.dev; latidIA: vela@odentia.dev",
+  "credenciales (password Demo1234): ana@odentia.dev, luis@odentia.dev, cora@odentia.dev, caja@odentia.dev, recepcion@odentia.dev; latidIA: vela@odentia.dev, recepcion.sanmartin@odentia.dev",
 )
 process.exit(0)
