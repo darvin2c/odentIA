@@ -22,6 +22,7 @@ import {
   addPlanItem,
   AGENT_ROLES,
   createBudget,
+  createCharge,
   createConnection,
   deliverBudget,
   duplicateBudgetOption,
@@ -35,6 +36,7 @@ import {
   READ_TOOLS,
   removeBudgetItems,
   secretsKeyFromEnv,
+  setOrgExchangeRate,
   setPatientContact,
   type Storage,
   TOOL_OPERATION,
@@ -551,4 +553,40 @@ it("en una simulación o en «Probar» nada se envía, nada se propone de verdad
   expect(await call(dry, "anotar_respuesta_presupuesto", { patientId, budgetId, decisions })).toContain("[SIMULACIÓN]")
   expect(await count()).toEqual(before)
   expect((await getBudgetDetailOf(patientId, budgetId)).status).toBe("presentado")
+})
+
+// Va al final: desde aquí la clínica de esta prueba cobra también en dólares.
+it("con dos monedas, ver_presupuesto y el resumen dicen lo que vale hoy como aproximado, con su regla", async () => {
+  const { conversationId } = await byTelegram("tg:dos-monedas", "evt-dos-monedas", "¿Cuánto debo?")
+  const contactId = await contactOf(conversationId)
+  const patientId = await patientOf(contactId, "Lucía Dólares")
+  const ctx = toolCtx(conversationId, contactId)
+  // Antes de activarla, lo que está en soles se lee como siempre: sin aproximado ni regla.
+  const { encounterId } = await budgetOf(patientId, { deliver: true })
+  expect(await call(ctx, "ver_presupuesto", { patientId })).not.toContain("(hoy, ")
+
+  await inOrg((tx) => setOrgExchangeRate(tx, ORG, clinic.actor, { secondCurrency: "USD", exchangeRate: "3.75" }))
+  const [implant] = await ownerDb
+    .insert(serviceCatalog)
+    .values({ organizationId: ORG, name: "Implante", scope: "general", source: "custom", priceCents: 100_000, currency: "USD" })
+    .returning({ id: serviceCatalog.id })
+  const lines = await inOrg(async (tx) => [
+    await addPlanItem(tx, ORG, clinic.actor, patientId, { serviceId: implant!.id, sourceEncounterId: encounterId }),
+    await addPlanItem(tx, ORG, clinic.actor, patientId, { serviceId: clinic.resina, sourceEncounterId: encounterId, toothNumber: 46 }),
+  ])
+  const budget = await inOrg((tx) => createBudget(tx, ORG, clinic.actor, patientId, { itemIds: lines.map((line) => line.id) }))
+  await inOrg((tx) => deliverBudget(tx, ORG, clinic.actor, patientId, budget.id))
+
+  const said = (await call(ctx, "ver_presupuesto", { patientId })).replace(/\u00a0/g, " ")
+  expect(said).toContain("Implante: USD 1,000.00 (hoy, unos S/ 3,750) — sin responder")
+  expect(said).toContain("Total S/ 180.00 + USD 1,000.00 (hoy, unos S/ 3,750)")
+  expect(said).toContain("Resina compuesta de la pieza 46: S/ 180.00 — sin responder")
+  expect(said).toContain("no prometas ese valor para un pago futuro")
+
+  await inOrg((tx) =>
+    createCharge(tx, ORG, clinic.actor, patientId, { description: "Implante", amountCents: 100_000, currency: "USD" }),
+  )
+  const summary = (await call(ctx, "ver_resumen_paciente", { patientId })).replace(/\u00a0/g, " ")
+  expect(summary).toContain("- Saldo pendiente: USD 1,000.00 (hoy, unos S/ 3,750).")
+  expect(summary).toContain("no prometas ese valor para un pago futuro")
 })

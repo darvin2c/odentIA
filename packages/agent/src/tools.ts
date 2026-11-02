@@ -3,7 +3,7 @@ import { tool } from "@langchain/core/tools"
 import { type Db, withOrgContext } from "@odentia/db"
 import type { AnswerBasisItem, AnswerCheck, AnswerTraceOutcome } from "@odentia/db/schema/agent"
 import { channelConnection, conversation } from "@odentia/db/schema/crm"
-import type { MeaningRank, OpportunityDetail, OrgLocale, ProposalItem, PublicLinkConfig, SearchEmbedder, Storage } from "@odentia/services"
+import type { MeaningRank, MoneyZone, OpportunityDetail, OrgLocale, ProposalItem, PublicLinkConfig, SearchEmbedder, Storage } from "@odentia/services"
 import {
   type AgentPatientBudgets,
   addAgentCaseNote,
@@ -40,6 +40,7 @@ import {
   formatAgentClinicData,
   formatClinicSearch,
   formatOrgMoney,
+  formatOrgMoneyToday,
   formatZoned,
   GAPS_PER_PROFESSIONAL_PER_DAY,
   GENERAL_PERMISSION_QUESTION,
@@ -97,6 +98,7 @@ import {
   nameWords,
   webchatHandoffWhere,
   webchatReplyRoutes,
+  withTodayValueRule,
 } from "@odentia/services"
 import { and, eq } from "drizzle-orm"
 import { z } from "zod"
@@ -588,16 +590,18 @@ const BUDGET_LINE_DECISION: Record<string, string> = {
  * tratamiento, pieza y precio de cada línea, total por opción y lo ya
  * respondido. Los ids van entre corchetes, para las herramientas.
  */
-function formatAgentBudgets(found: AgentPatientBudgets, zone: Pick<OrgLocale, "locale">): string {
+function formatAgentBudgets(found: AgentPatientBudgets, zone: MoneyZone): string {
   const lines = [
     `Presupuestos de ${found.context.displayName} (vínculo ${found.context.relationship}), como los recibe la persona. Lo que va entre corchetes es solo para las herramientas: no lo escribas.`,
   ]
   if (!found.budgets.length) lines.push("No tiene presupuestos entregados.")
   for (const budget of found.budgets) {
     const money = (cents: number | null, currency = budget.currency) => (cents == null ? "precio por definir" : formatOrgMoney(cents, currency, zone))
+    // Lo que se acepta o se debe lleva lo que vale hoy, si es la otra moneda de la clínica.
+    const today = (cents: number | null, currency = budget.currency) => (cents == null ? "precio por definir" : formatOrgMoneyToday(cents, currency, zone))
     // Con dos monedas, un total por cada una: entre ellas no se suma.
     const optionTotal = (option: (typeof budget.options)[number]) =>
-      option.totals ? option.totals.map((total) => money(total.totalCents, total.currency)).join(" + ") : money(option.totalCents)
+      option.totals ? option.totals.map((total) => today(total.totalCents, total.currency)).join(" + ") : today(option.totalCents)
     lines.push(
       `- Presupuesto ${budgetNumberText(budget.budgetNumber)}: ${budget.stateText}.${budget.answerable ? " Puede responderlo." : ""} [budgetId ${budget.budgetId}]`,
     )
@@ -609,8 +613,8 @@ function formatAgentBudgets(found: AgentPatientBudgets, zone: Pick<OrgLocale, "l
       lines.push(head)
       for (const line of option.lines) {
         const price = line.sessions
-          ? `${money(line.lineTotalCents, line.currency)}, ${line.sessions.count} sesiones de ${money(line.sessions.unitCents, line.currency)}`
-          : money(line.lineTotalCents, line.currency)
+          ? `${today(line.lineTotalCents, line.currency)}, ${line.sessions.count} sesiones de ${money(line.sessions.unitCents, line.currency)}`
+          : today(line.lineTotalCents, line.currency)
         const promotion = line.promotionName ? `, con la promoción «${line.promotionName}»` : ""
         lines.push(
           `    · ${budgetLineWords(line)}: ${price}${promotion} — ${BUDGET_LINE_DECISION[line.decision] ?? line.decision} [planItemId ${line.planItemId}]`,
@@ -624,7 +628,7 @@ function formatAgentBudgets(found: AgentPatientBudgets, zone: Pick<OrgLocale, "l
     )
   }
   if (found.inPreparation) lines.push("Hay otro presupuesto que la clínica aún prepara: todavía no está listo y no se dice qué lleva.")
-  return lines.join("\n")
+  return withTodayValueRule(lines.join("\n"))
 }
 
 /**
@@ -1499,11 +1503,11 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       } else {
         for (const b of summary.balance) {
           if (b.outstandingCents > 0) {
-            lines.push(`- Saldo pendiente: ${formatOrgMoney(b.outstandingCents, b.currency, zone)}.`)
+            lines.push(`- Saldo pendiente: ${formatOrgMoneyToday(b.outstandingCents, b.currency, zone)}.`)
           }
         }
       }
-      return lines.join("\n")
+      return withTodayValueRule(lines.join("\n"))
     },
     {
       name: "ver_resumen_paciente",

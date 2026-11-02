@@ -18,7 +18,6 @@ import type { ArgosNames } from "./argos-figures.js"
 import { ARGOS_LIST_ROWS, type ArgosQueryResult } from "./argos-query.js"
 import type { ArgosStoredPlan } from "./argos-saved.js"
 import { getOrgLocale, type OrgLocale } from "./locale.js"
-import { orgMoney } from "./report-value.js"
 import { type ProductAgentTexts, productName } from "./product-agent.js"
 import { ServiceError } from "./errors.js"
 import { ensureArgosQuestion } from "./saas-included.js"
@@ -44,13 +43,11 @@ export function argosWord(key: keyof typeof ARGOS_WORDS, texts: ProductAgentText
 export type ArgosOutcome = "respondida" | "parcial" | "no_sabe" | "ayuda" | "otro" | "no_pudo"
 
 /** El formato de la clínica para una respuesta de Argos, con su otra moneda si la tiene. */
-export type ArgosZone = OrgLocale & { secondCurrency: string | null }
+export type ArgosZone = Omit<OrgLocale, "secondCurrency"> & { secondCurrency: string | null }
 
 export async function argosZone(tx: Db, orgId: string): Promise<ArgosZone> {
-  return {
-    ...(await getOrgLocale(tx, orgId)),
-    secondCurrency: (await orgMoney(tx, orgId)).secondCurrency,
-  }
+  const zone = await getOrgLocale(tx, orgId)
+  return { ...zone, secondCurrency: zone.secondCurrency ?? null }
 }
 
 /** Lo que hace falta antes de llamar a los modelos: si Argos está encendido y el formato de la clínica. */

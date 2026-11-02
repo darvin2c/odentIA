@@ -11,6 +11,7 @@ import { patientCharge, patientPayment } from "@odentia/db/schema/clinical"
 import { expense } from "@odentia/db/schema/finance"
 import { sql } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
+import { getAdminRecommendation } from "./agent-admin.js"
 import { formatArgosValue } from "./argos-answer.js"
 import { argosCatalogText } from "./argos-catalog.js"
 import { ARGOS_FIGURES, argosFigure, compileArgosFigure, listArgosNames } from "./argos-figures.js"
@@ -412,6 +413,33 @@ describe("lo que se debe, por moneda", () => {
         { currency: "USD", cents: 31_000 },
       ],
     })
+  })
+
+  it("en la deuda vieja, quien debe en dos monedas es una persona con dos filas, cada una con lo que vale hoy", async () => {
+    const c = await twoCurrencyClinic(ownerDb, appDb)
+    const patient = await c.person("Bruno Díaz")
+    const old = new Date(Date.now() - 45 * 86_400_000)
+    for (const [amountCents, currency] of [
+      [100_000, "USD"],
+      [2_000, "PEN"],
+    ] as const) {
+      await ownerDb.insert(patientCharge).values({
+        organizationId: c.orgId,
+        patientId: patient,
+        branchId: c.branchId,
+        description: "Antiguo",
+        amountCents,
+        currency,
+        createdAt: old,
+      })
+    }
+    const seen = await c.run((tx) =>
+      getAdminRecommendation(tx, c.orgId, () => true, "cobranza_vencida"),
+    )
+    expect(seen.title).toMatch(/^1 persona debe/)
+    expect(seen.total).toBe(2)
+    const lines = seen.items.map((item) => item.line.replace(/\u00a0/g, " ").split(" · ")[0])
+    expect(lines.sort()).toEqual(["Debe S/ 20.00", "Debe USD 1,000.00 (hoy, unos S/ 3,750)"])
   })
 
   it("lo aceptado no tiene valor congelado: lo atendido sin cobrar va al cambio de hoy", async () => {

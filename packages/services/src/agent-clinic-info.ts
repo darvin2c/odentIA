@@ -1,3 +1,4 @@
+import { currencyWord } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import { professionalSpecialty } from "@odentia/db/schema/clinical-forms"
@@ -9,7 +10,7 @@ import { alias } from "drizzle-orm/pg-core"
 import { createHash } from "node:crypto"
 import { getAgentConfig } from "./agentConfig.js"
 import { getClinicInfoSnapshot, normalizeForSearch } from "./knowledge.js"
-import { findOrgCountry, formatOrgMoney, type OrgLocale } from "./locale.js"
+import { findOrgCountry, formatOrgMoney, formatOrgMoneyToday, type MoneyZone, type OrgLocale, TODAY_VALUE_RULE } from "./locale.js"
 import { kindOfSpecialty } from "./product-catalog.js"
 import { productHooks } from "./products.js"
 import { listClinicPromotionSummaries } from "./promotions.js"
@@ -375,7 +376,7 @@ export async function listAgentPromotions(tx: Db, orgId: string, at = new Date()
 
 /* ---------- Cómo se le dice al modelo ---------- */
 
-type Zone = Pick<OrgLocale, "locale" | "timezone">
+type Zone = MoneyZone & Pick<OrgLocale, "timezone">
 
 function clock(minutes: number): string {
   return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`
@@ -386,24 +387,24 @@ function clock(minutes: number): string {
  * al número: la comprobación antes de enviar no deja salir ese importe sin
  * ella. «evaluacion» no lleva ningún número: el agente no puede decirlo.
  */
-export function formatAgentPrice(price: AgentPrice, zone: Pick<OrgLocale, "locale">): string {
+export function formatAgentPrice(price: AgentPrice, zone: MoneyZone): string {
   const evaluation = price.evaluation
     ? ` Ofrece la evaluación: ${price.evaluation.name}${
         price.evaluation.disclosure === "evaluacion"
           ? ""
           : price.evaluation.disclosure === "desde"
-            ? `, desde ${formatOrgMoney(price.evaluation.priceCents, price.evaluation.currency, zone)}`
-            : `, ${formatOrgMoney(price.evaluation.priceCents, price.evaluation.currency, zone)}`
+            ? `, desde ${formatOrgMoneyToday(price.evaluation.priceCents, price.evaluation.currency, zone, { minimum: true })}`
+            : `, ${formatOrgMoneyToday(price.evaluation.priceCents, price.evaluation.currency, zone)}`
       }.`
     : " Ofrece agendar una evaluación."
-  if (price.disclosure === "exacto") return formatOrgMoney(price.priceCents, price.currency, zone)
+  if (price.disclosure === "exacto") return formatOrgMoneyToday(price.priceCents, price.currency, zone)
   if (price.disclosure === "desde") {
-    return `desde ${formatOrgMoney(price.priceCents, price.currency, zone)} (es un mínimo: el precio final se define en la evaluación; dilo siempre con «desde»).${evaluation}`
+    return `desde ${formatOrgMoneyToday(price.priceCents, price.currency, zone, { minimum: true })} (es un mínimo: el precio final se define en la evaluación; dilo siempre con «desde»).${evaluation}`
   }
   return `precio solo tras una evaluación: no digas ningún monto de este servicio.${evaluation}`
 }
 
-export function formatAgentService(service: AgentServiceInfo, zone: Pick<OrgLocale, "locale">): string {
+export function formatAgentService(service: AgentServiceInfo, zone: MoneyZone): string {
   return `- ${service.name} (id ${service.id})${service.durationMin ? `, ${service.durationMin} min` : ""}: ${formatAgentPrice(service.price, zone)}`
 }
 
@@ -418,7 +419,7 @@ export function formatAgentPromotion(promo: AgentPromotionInfo, zone: Zone): str
     .map((item) => {
       const tariff = formatOrgMoney(item.tariffCents, item.currency, zone)
       if (item.disclosure === "evaluacion") return `${item.serviceName}: con la promoción; el precio se define en la evaluación (no digas montos)`
-      const amount = formatOrgMoney(item.priceCents, item.currency, zone)
+      const amount = formatOrgMoneyToday(item.priceCents, item.currency, zone, { minimum: item.disclosure === "desde" })
       return item.disclosure === "desde"
         ? `${item.serviceName}: desde ${amount} (mínimo; dilo con «desde»)`
         : // La tarifa y el ahorro solo si el servicio dice su precio exacto: si no, la promoción delataría un número que la clínica no quiere dar.
@@ -767,6 +768,16 @@ function formatServiceForBooking(service: AgentServiceInfo): string {
 }
 
 /**
+ * Con segunda moneda, lo que hay que saber para decir un precio: un servicio en
+ * dólares se debe en dólares hasta que se paga. Sin ella, nada: el prompt no cambia.
+ */
+function twoCurrenciesLine(zone: Zone): string | null {
+  if (!zone.secondCurrency || !zone.currency) return null
+  const say = (code: string) => currencyWord(code, zone.locale)
+  return `La clínica cobra en ${say(zone.currency)} y también en ${say(zone.secondCurrency)}: cada importe se debe en su moneda, nunca digas el mismo número en otra. ${TODAY_VALUE_RULE}`
+}
+
+/**
  * Las líneas de la clínica para el prompt. Lo que cabe va entero; lo que no,
  * se anuncia con su cantidad y se pide a `buscar_en_la_clinica`. Cada línea
  * dice lo que de verdad llega: nunca «sin servicios» si existen.
@@ -808,6 +819,8 @@ export function formatAgentClinicData(data: AgentClinicData, zone: Zone): string
     lines.push(`Promociones vigentes (solo estas; ninguna otra). ${PROMOTION_RULE}`)
     for (const promo of data.promotions) lines.push(formatAgentPromotion(promo, zone))
   }
+  const currencies = twoCurrenciesLine(zone)
+  if (currencies) lines.push(currencies)
   if (data.professionals.length > PROFESSIONALS_IN_PROMPT) {
     lines.push(
       `Profesionales: la clínica tiene ${data.professionals.length}; búscalos por nombre o especialidad con buscar_en_la_clinica.`,

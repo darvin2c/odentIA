@@ -80,6 +80,27 @@ function loose(text: string): string {
 /** Nombres que comparten las monedas de muchos países; el de la moneda de la clínica lo da ICU. */
 const SHARED_NAMES = ["dólares", "dólar", "pesos", "peso", "euros", "euro"].map(loose).join("|")
 
+/** Moneda o formato que ICU no reconoce: quedan los códigos, los signos y los nombres compartidos. */
+function currencyParts(code: string, format: string, currencyDisplay: "symbol" | "narrowSymbol" | "name", count: number) {
+  try {
+    return new Intl.NumberFormat(format, { style: "currency", currency: code, currencyDisplay }).formatToParts(count)
+  } catch {
+    return []
+  }
+}
+
+/** Cómo se nombra una moneda en español, en plural y en singular. */
+function currencyNames(code: string): string[] {
+  const words: string[] = []
+  for (const count of [2, 1]) {
+    const name = currencyParts(code, "es", "name", count).find((part) => part.type === "currency")?.value
+    // «soles peruanos» → «soles»; «nuevo dólar taiwanés» → «dólar».
+    const word = name?.split(/\s+/).find((part) => part && !/^nuev[oa]s?$/i.test(part))
+    if (word) words.push(word)
+  }
+  return words
+}
+
 /**
  * Cómo escribe ICU la moneda de la clínica: su símbolo en el formato de la
  * clínica (S/, Q, Bs, RD$…), a qué lado del número va, y su nombre en español
@@ -90,14 +111,8 @@ function clinicMarks(currency: string | null | undefined, locale: string | null 
   const symbolAfter = new Set<string>()
   const names = new Set<string>()
   const code = currency?.trim().toUpperCase() ?? ""
-  // Moneda o formato que ICU no reconoce: quedan los códigos, los signos y los nombres compartidos.
-  const partsOf = (format: string, currencyDisplay: "symbol" | "narrowSymbol" | "name", count: number) => {
-    try {
-      return new Intl.NumberFormat(format, { style: "currency", currency: code, currencyDisplay }).formatToParts(count)
-    } catch {
-      return []
-    }
-  }
+  const partsOf = (format: string, currencyDisplay: "symbol" | "narrowSymbol" | "name", count: number) =>
+    currencyParts(code, format, currencyDisplay, count)
   // «XXX» es el código ISO de «sin moneda»: no tiene símbolo ni nombre que buscar.
   if (!/^[A-Z]{3}$/.test(code) || code === "XXX" || !partsOf("es", "name", 1).length) {
     return { before, symbolAfter, names }
@@ -115,28 +130,27 @@ function clinicMarks(currency: string | null | undefined, locale: string | null 
     before.add(pattern)
     if (at > parts.findIndex((part) => part.type === "integer")) symbolAfter.add(pattern)
   }
-  for (const count of [2, 1]) {
-    const name = partsOf("es", "name", count).find((part) => part.type === "currency")?.value
-    // «soles peruanos» → «soles»; «nuevo dólar taiwanés» → «dólar».
-    const word = name?.split(/\s+/).find((part) => part && !/^nuev[oa]s?$/i.test(part))
-    if (word) names.add(loose(word))
-  }
+  for (const word of currencyNames(code)) names.add(loose(word))
   return { before, symbolAfter, names }
 }
 
 const AMOUNT_PATTERNS = new Map<string, RegExp>()
 
-/** Un importe con su moneda, delante o detrás del número, para la moneda y el formato de la clínica. */
-function amountPattern(currency: string | null | undefined, locale: string | null | undefined): RegExp {
-  const key = `${currency ?? ""}|${locale ?? ""}`
+/**
+ * Un importe con su moneda, delante o detrás del número, para la moneda y el
+ * formato de la clínica y, si cobra en otra, también con los de esa.
+ */
+function amountPattern(currency: string | null | undefined, locale: string | null | undefined, second?: string | null): RegExp {
+  const key = `${currency ?? ""}|${locale ?? ""}|${second ?? ""}`
   const cached = AMOUNT_PATTERNS.get(key)
   if (cached) return cached
   const clinic = clinicMarks(currency, locale)
-  const before = [SIGN_BEFORE, ISO_CODES, ...clinic.before].join("|")
+  const other = clinicMarks(second, locale)
+  const before = [SIGN_BEFORE, ISO_CODES, ...clinic.before, ...other.before].join("|")
   // Un símbolo seguido de otro número pertenece a ese número («150 $480»).
-  const symbolAfter = `(?:${[SIGN_AFTER, ...clinic.symbolAfter].join("|")})(?!\\s?\\d)`
+  const symbolAfter = `(?:${[SIGN_AFTER, ...clinic.symbolAfter, ...other.symbolAfter].join("|")})(?!\\s?\\d)`
   // «480 nuevos soles», «100 nuevos pesos»: el adjetivo no cambia de qué se habla.
-  const names = `(?:${loose("nuev")}[oOaA][sS]?\\s)?(?:${[SHARED_NAMES, ...clinic.names].join("|")})`
+  const names = `(?:${loose("nuev")}[oOaA][sS]?\\s)?(?:${[SHARED_NAMES, ...clinic.names, ...other.names].join("|")})`
   const after = [symbolAfter, ISO_CODES, names].join("|")
   const pattern = new RegExp(
     String.raw`(?<!\p{L})(?:${before})\s?(${NUMBER})(?![\d])|(?<![\d.,/:])(${NUMBER})\s?(?:${after})(?!\p{L})`,
@@ -144,6 +158,66 @@ function amountPattern(currency: string | null | undefined, locale: string | nul
   )
   AMOUNT_PATTERNS.set(key, pattern)
   return pattern
+}
+
+/* ---------- De qué moneda es un importe, en una clínica con dos ---------- */
+
+/** Una marca como se compara: sin mayúsculas ni tildes, sin su punto final ni «nuevos»: «S/.» y «s/» son la misma. */
+function markKey(mark: string): string {
+  return plain(mark).trim().replace(/\.$/, "").replace(/^nuev[oa]s?\s+/, "")
+}
+
+/** Cómo se escribe una moneda: su código, sus símbolos (en la clínica, en español y los «US$» de otras regiones) y su nombre. */
+function currencyLabels(code: string, format: string): Set<string> {
+  const labels = new Set([markKey(code)])
+  for (const place of [format, "es", "en", "en-CA"]) {
+    for (const display of ["symbol", "narrowSymbol"] as const) {
+      const symbol = currencyParts(code, place, display, 1).find((part) => part.type === "currency")?.value
+      if (symbol) labels.add(markKey(symbol))
+    }
+  }
+  for (const name of currencyNames(code)) labels.add(markKey(name))
+  return labels
+}
+
+/**
+ * Lo que hace falta para leer la moneda de un importe. Solo existe en una clínica
+ * con segunda moneda: sin ella, la comprobación mira el número, como siempre.
+ */
+interface CurrencyReader {
+  pattern: RegExp
+  /** De qué monedas de la clínica puede ser cada marca: «dólares» con CAD y USD es de las dos. */
+  labels: Map<string, string[]>
+}
+
+const CURRENCY_READERS = new Map<string, CurrencyReader>()
+
+function currencyReader(zone: { currency?: string | null; locale?: string | null; secondCurrency?: string | null }): CurrencyReader | null {
+  const second = zone.secondCurrency?.trim().toUpperCase()
+  if (!second) return null
+  const business = zone.currency?.trim().toUpperCase() ?? ""
+  const key = `${business}|${second}|${zone.locale ?? ""}`
+  const cached = CURRENCY_READERS.get(key)
+  if (cached) return cached
+  const format = zone.locale?.trim() || "es"
+  const labels = new Map<string, string[]>()
+  for (const label of business ? currencyLabels(business, format) : []) labels.set(label, [business])
+  // El símbolo de la moneda del negocio en la clínica es de ella: en Chile, «$ 950.000»
+  // son pesos, aunque el dólar también se pueda escribir «$».
+  const own = currencyParts(business, format, "symbol", 1).find((part) => part.type === "currency")?.value
+  for (const label of currencyLabels(second, format)) {
+    if (own !== undefined && label === markKey(own)) continue
+    labels.set(label, [...(labels.get(label) ?? []), second])
+  }
+  const reader = { pattern: amountPattern(zone.currency, zone.locale, zone.secondCurrency), labels }
+  CURRENCY_READERS.set(key, reader)
+  return reader
+}
+
+/** Las monedas que dice una marca; una ajena a la clínica («EUR») es solo de sí misma. */
+function currenciesOf(mark: string, reader: CurrencyReader): string[] {
+  const key = markKey(mark)
+  return reader.labels.get(key) ?? [key]
 }
 const ISO_INSTANT = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})/g
 const ZONE_NAME = /\b(?:Africa|America|Antarctica|Asia|Atlantic|Australia|Europe|Indian|Pacific)\/[A-Za-z_]+(?:\/[A-Za-z_]+)?\b/g
@@ -242,14 +316,19 @@ function blank(text: string, start: number, length: number): string {
   return `${text.slice(0, start)}${" ".repeat(length)}${text.slice(start + length)}`
 }
 
+interface AmountMention extends Mention<number[]> {
+  /** Lo que dice de qué moneda es: el importe sin su número. */
+  mark: string
+}
+
 /** Importes con moneda explícita; devuelve también el texto con ellos tapados. */
-function extractAmounts(text: string, pattern: RegExp): { mentions: Mention<number[]>[]; rest: string } {
-  const mentions: Mention<number[]>[] = []
+function extractAmounts(text: string, pattern: RegExp): { mentions: AmountMention[]; rest: string } {
+  const mentions: AmountMention[] = []
   let rest = text
   for (const match of text.matchAll(pattern)) {
     const number = match[1] ?? match[2]
     if (!number) continue
-    mentions.push({ raw: match[0].trim(), value: readAmount(number), index: match.index })
+    mentions.push({ raw: match[0].trim(), value: readAmount(number), index: match.index, mark: match[0].replace(number, "") })
     rest = blank(rest, match.index, match[0].length)
   }
   return { mentions, rest }
@@ -368,6 +447,8 @@ interface SourceFacts {
   amounts: Set<number>
   /** Importes que la fuente da como precio y no solo como mínimo. */
   exact: Set<number>
+  /** Con segunda moneda: en qué monedas dice la fuente cada importe. Lo que no está aquí va sin moneda. */
+  marked: Map<number, Set<string>>
   times: Set<number>
   /** Claves `día-mes` y, para fechas sin mes, `día-*`. */
   dates: Set<string>
@@ -414,10 +495,11 @@ export function timesIn(text: string): number {
   return extractTimes(mask(normalize(text), WEB_ADDRESS)).mentions.length
 }
 
-function factsOf(item: Evidence, timeZone: string): SourceFacts {
+function factsOf(item: Evidence, timeZone: string, reader: CurrencyReader | null = null): SourceFacts {
   const text = NOT_FACTS.reduce(mask, normalize(item.text))
   const amounts = new Set<number>()
   const exact = new Set<number>()
+  const marked = new Map<number, Set<string>>()
   const times = new Set<number>()
   const dates = new Set<string>()
   const zones = new Set<string>([timeZone, ...(text.match(ZONE_NAME) ?? [])])
@@ -445,14 +527,28 @@ function factsOf(item: Evidence, timeZone: string): SourceFacts {
     }
   }
   for (const mention of extractTimes(rest).mentions) for (const value of mention.value) times.add(value)
+  const withMark = reader ? extractAmounts(rest, reader.pattern).mentions : []
   for (const match of rest.matchAll(ANY_NUMBER)) {
     const minimum = cuedAsMinimum(rest, match.index)
+    const mention = withMark.find((item) => match.index >= (item.index ?? 0) && match.index < (item.index ?? 0) + item.raw.length)
     for (const reading of readAmount(match[0])) {
       amounts.add(reading)
       if (!minimum) exact.add(reading)
+      if (mention && reader) marked.set(reading, new Set([...(marked.get(reading) ?? []), ...currenciesOf(mention.mark, reader)]))
     }
   }
-  return { source: item.source, amounts, exact, times, dates }
+  return { source: item.source, amounts, exact, marked, times, dates }
+}
+
+/**
+ * Con segunda moneda, «USD 1,000» no vale como «S/ 1,000»: la fuente lo dice en
+ * esa moneda o, si lo dice sin ninguna («Tarifa: 80»), ninguna otra fuente lo da
+ * en otra moneda.
+ */
+function saidIn(source: SourceFacts, reading: number, currencies: string[], sources: SourceFacts[]): boolean {
+  const marked = source.marked.get(reading)
+  if (marked) return currencies.some((currency) => marked.has(currency))
+  return source.amounts.has(reading) && !sources.some((other) => other.marked.has(reading))
 }
 
 /** ¿Algún subconjunto de dos o más importes suma exactamente el objetivo? */
@@ -486,19 +582,22 @@ function weekdayOf(day: number, month: number, year: number | null, now: Date): 
  * otros importes sustentados de la misma respuesta. Con la moneda y el formato
  * de la clínica (`zone.currency`, `zone.locale`) se reconocen también su
  * símbolo y su nombre; sin ellos, solo códigos ISO, signos monetarios y los
- * nombres compartidos.
+ * nombres compartidos. Una clínica con segunda moneda (`zone.secondCurrency`)
+ * comprueba además la moneda: el importe vale en la que lo dice la fuente y una
+ * suma es de una sola moneda. Sin ella se mira solo el número.
  */
 export function verifyReply(
   reply: string,
   evidence: Evidence[],
-  zone: { timezone: string; currency?: string | null; locale?: string | null },
+  zone: { timezone: string; currency?: string | null; locale?: string | null; secondCurrency?: string | null },
   now: Date = new Date(),
 ): ReplyVerdict {
+  const reader = currencyReader(zone)
   // Lo consultado en el turno llega después de lo fijo del prompt y es lo más
   // específico (un hueco de agenda antes que el horario de la sede): se mira primero.
   const sources = evidence
     .filter((item) => item.text.trim())
-    .map((item) => factsOf(item, zone.timezone))
+    .map((item) => factsOf(item, zone.timezone, reader))
     .reverse()
   const checks: FactCheck[] = []
   // La respuesta se lee como las fuentes: el enlace que envía el agente no es un importe,
@@ -506,22 +605,27 @@ export function verifyReply(
   const text = mask(normalize(reply), WEB_ADDRESS)
   const segments = priceSegments(evidence, zone.timezone)
 
-  const amounts = extractAmounts(text, amountPattern(zone.currency, zone.locale))
-  const supportedAmounts: number[] = []
-  const pendingAmounts: Mention<number[]>[] = []
+  const amounts = extractAmounts(text, amountPattern(zone.currency, zone.locale, zone.secondCurrency))
+  // Con una sola moneda, todos los importes son de la misma.
+  const currenciesIn = (mention: AmountMention): string[] => (reader ? currenciesOf(mention.mark, reader) : [""])
+  const supportedAmounts: Array<{ value: number; currencies: string[] }> = []
+  const pendingAmounts: AmountMention[] = []
   for (const mention of amounts.mentions) {
-    const found = sources.find((source) => mention.value.some((reading) => source.amounts.has(reading)))
+    const currencies = currenciesIn(mention)
+    const says = (source: SourceFacts, reading: number) =>
+      reader ? saidIn(source, reading, currencies, sources) : source.amounts.has(reading)
+    const found = sources.find((source) => mention.value.some((reading) => says(source, reading)))
     if (found) {
-      const reading = mention.value.find((value) => found.amounts.has(value)) ?? 0
+      const reading = mention.value.find((value) => says(found, value)) ?? 0
       // Un mínimo («desde») dicho como precio final no sale: el precio lo define la evaluación.
       // Basta con que una fuente lo dé como mínimo: que el mismo número aparezca suelto en
       // otra (lo que escribió la persona, una hora, una duración) no lo vuelve precio final.
-      const minimum = sources.some((source) => source.amounts.has(reading) && !source.exact.has(reading))
+      const minimum = sources.some((source) => says(source, reading) && !source.exact.has(reading))
       if (minimum && !cuedAsMinimum(text, mention.index ?? 0)) {
         checks.push({ kind: "precio", value: `${mention.raw} (es un mínimo: dilo con «desde»)`, ok: false, source: found.source })
         continue
       }
-      supportedAmounts.push(reading)
+      supportedAmounts.push({ value: reading, currencies })
       const subject = subjectOf(mention.value, segments, reply)
       checks.push({ kind: "precio", value: mention.raw, ok: true, source: found.source, ...(subject ? { subject } : {}) })
     } else {
@@ -529,8 +633,18 @@ export function verifyReply(
     }
   }
   for (const mention of pendingAmounts) {
-    const summed = mention.value.some((reading) => isSumOf(reading, supportedAmounts))
-    checks.push({ kind: "precio", value: mention.raw, ok: summed, source: summed ? SOURCE_SUM : null })
+    // Una suma es de una sola moneda: S/ 150 y USD 1,000 no dan USD 1,150.
+    const summed = currenciesIn(mention).some((currency) => {
+      const parts = supportedAmounts.filter((part) => part.currencies.includes(currency)).map((part) => part.value)
+      return mention.value.some((reading) => isSumOf(reading, parts))
+    })
+    const otherCurrency = !summed && sources.some((source) => mention.value.some((reading) => source.marked.has(reading)))
+    checks.push({
+      kind: "precio",
+      value: otherCurrency ? `${mention.raw} (ese importe está en otra moneda)` : mention.raw,
+      ok: summed,
+      source: summed ? SOURCE_SUM : null,
+    })
   }
 
   // Los instantes ISO no se escriben a una persona; si aparecen, se leen como fecha y hora.

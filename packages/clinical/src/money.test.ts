@@ -11,6 +11,7 @@ import {
   formatExchangeRateInput,
   formatMoney,
   formatMoneyInput,
+  formatMoneyWhole,
   frozenValueCents,
   impliedExchangeRate,
   moneyValue,
@@ -25,6 +26,13 @@ import {
 } from "./money.js"
 
 describe("importes en unidad menor ISO 4217", () => {
+  it("lo aproximado va sin decimales, con los de cada moneda", () => {
+    const spaced = (text: string) => text.replace(/\u00a0/g, " ")
+    expect(spaced(formatMoneyWhole(37_125, "PEN", "es-PE"))).toBe("S/ 371")
+    expect(spaced(formatMoneyWhole(37_150, "PEN", "es-PE"))).toBe("S/ 372")
+    expect(spaced(formatMoneyWhole(95_000, "CLP", "es-CL"))).toMatch(/^\$\s?95\.000$/)
+  })
+
   it("conserva las unidades de monedas con cero, dos, tres y cuatro decimales", () => {
     expect(currencyFractionDigits("CLP")).toBe(0)
     expect(currencyFractionDigits("PEN")).toBe(2)

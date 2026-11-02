@@ -2,7 +2,9 @@ import {
   type ClinicalCountryProfile,
   type ClinicalProduct,
   clinicalProfileFor,
+  convertCents,
   formatMoney,
+  formatMoneyWhole,
   isClinicalProduct,
   type ProductWords,
   productWords,
@@ -17,14 +19,27 @@ export interface OrgLocale {
   currency: string
   timezone: string
   locale: string
+  /** Solo si la clínica cobra en otra moneda: sin ella, estos dos ni existen. */
+  secondCurrency?: string
+  /** El «Cambio de hoy» por unidad menor, para las cuentas. */
+  exchangeFactor?: string
 }
 
 export async function getOrgLocale(tx: Db, orgId: string): Promise<OrgLocale> {
-  const [row] = await tx.execute<{ countryCode: string; currency: string; timezone: string; locale: string }>(sql`
-    select country_code as "countryCode", currency, timezone, locale
+  const [row] = await tx.execute<{
+    countryCode: string
+    currency: string
+    timezone: string
+    locale: string
+    secondCurrency: string | null
+    exchangeFactor: string | null
+  }>(sql`
+    select country_code as "countryCode", currency, timezone, locale,
+           second_currency as "secondCurrency", exchange_factor::text as "exchangeFactor"
     from org_profile where organization_id = ${orgId}`)
   if (!row) throw notFound("Perfil de organización")
-  return row
+  const { secondCurrency, exchangeFactor, ...zone } = row
+  return secondCurrency && exchangeFactor ? { ...zone, secondCurrency, exchangeFactor } : zone
 }
 
 /**
@@ -54,6 +69,46 @@ export function formatOrgMoney(
   zone: Pick<OrgLocale, "locale">,
 ): string {
   return formatMoney(amountMinor, currency, zone.locale || NEUTRAL_LOCALE)
+}
+
+/** Lo que hace falta para decir un importe con lo que vale hoy; sin segunda moneda, solo su formato. */
+export type MoneyZone = Pick<OrgLocale, "locale"> &
+  Partial<Pick<OrgLocale, "currency" | "secondCurrency" | "exchangeFactor">>
+
+/**
+ * Un importe como lo lee el agente: en su moneda y, si es la otra moneda de la
+ * clínica, con lo que vale hoy en la del negocio: «USD 1,000.00 (hoy, unos S/ 3,750)».
+ * Es aproximado a propósito: no lleva céntimos y lo que se debe sigue siendo en
+ * dólares; el cambio se fija al cobrar. Sin segunda moneda es `formatOrgMoney`.
+ * `minimum`: es un mínimo y lo aproximado también («hoy, desde S/ 3,750 aprox.»),
+ * para que la comprobación antes de enviar lo lea como tal.
+ */
+export function formatOrgMoneyToday(
+  amountMinor: number,
+  currency: string,
+  zone: MoneyZone,
+  options: { minimum?: boolean } = {},
+): string {
+  const said = formatOrgMoney(amountMinor, currency, zone)
+  if (!zone.currency || !zone.exchangeFactor || currency !== zone.secondCurrency || amountMinor <= 0) return said
+  const today = convertCents({
+    amountCents: amountMinor,
+    from: currency,
+    to: zone.currency,
+    businessCurrency: zone.currency,
+    factor: zone.exchangeFactor,
+  })
+  const business = formatMoneyWhole(today, zone.currency, zone.locale || NEUTRAL_LOCALE)
+  return options.minimum ? `${said} (hoy, desde ${business} aprox.)` : `${said} (hoy, unos ${business})`
+}
+
+/** Lo que se le dice al agente cuando un importe trae lo que vale hoy. */
+export const TODAY_VALUE_RULE =
+  "Lo que va con «hoy» es solo un aproximado al cambio de hoy: dilo como aproximado y no prometas ese valor para un pago futuro, porque el cambio se fija al pagar."
+
+/** El texto de una herramienta, con la regla si trae lo que vale hoy. Sin eso, tal cual. */
+export function withTodayValueRule(text: string): string {
+  return text.includes("(hoy, ") ? `${text}\n${TODAY_VALUE_RULE}` : text
 }
 
 /**

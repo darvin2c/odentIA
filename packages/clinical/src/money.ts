@@ -186,6 +186,19 @@ export function formatMoneyAmount(amountMinor: number, currency: string, locale:
   }).format(amountMinor / 10 ** digits)
 }
 
+/** Un importe sin decimales: para lo aproximado, que con céntimos parecería exacto. */
+export function formatMoneyWhole(amountMinor: number, currency: string, locale: string): string {
+  if (!Number.isSafeInteger(amountMinor)) throw new Error("El importe debe ser un entero")
+  if (!locale.trim()) throw new Error("El idioma y formato es obligatorio")
+  const code = assertCurrency(currency)
+  return new Intl.NumberFormat(locale, {
+    style: "currency",
+    currency: code,
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(amountMinor / 10 ** currencyFractionDigits(code))
+}
+
 // --- Dos monedas: el cambio y la cuenta única del valor ------------------------
 //
 // El cambio viaja y se guarda como texto decimal («3.75»), nunca como un número

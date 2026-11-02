@@ -67,7 +67,7 @@ import { retakeForgottenTopics } from "./topic-retake.js"
 import { purgeOldWebchatTests } from "./webchat.js"
 import { patientCreditSql } from "./payments.js"
 import { getPatientRegistrationConfig } from "./patient-registration.js"
-import { formatOrgMoney, getOrgLocale, type OrgLocale, orgProduct } from "./locale.js"
+import { formatOrgMoneyToday, getOrgLocale, type OrgLocale, orgProduct } from "./locale.js"
 import { productHooks } from "./products.js"
 import { lapsedToInvite } from "./return-invites.js"
 import { getWritingHours, type WritingWeek } from "./writing-hours.js"
@@ -451,7 +451,7 @@ async function overdueCollections(tx: Db, orgId: string, zone: OrgLocale, days: 
   // Primero lo que debe cada persona por moneda (lo aplicado se suma una sola
   // vez, no concepto por concepto); lo que tiene a favor, una vez por persona.
   const credit = sql`greatest(${patientCreditSql(orgId, sql`d.patient_id`, sql`d.currency`)}, 0)`
-  const rows = await tx.execute<{ patient_id: string; name: string; currency: string; owed: number; since: Date | string; since_day: string; total: number }>(sql`
+  const rows = await tx.execute<{ patient_id: string; name: string; currency: string; owed: number; since: Date | string; since_day: string; total: number; people: number }>(sql`
     with applied as materialized (
       select app.charge_id, sum(app.amount_cents) as applied
       from patient_payment_application app
@@ -474,12 +474,15 @@ async function overdueCollections(tx: Db, orgId: string, zone: OrgLocale, days: 
     )
     select d.patient_id, d.name, d.currency, (d.due - d.credit)::int as owed, d.since,
            to_char(d.since, 'YYYY-MM-DD') as since_day,
-           count(*) over ()::int as total
+           count(*) over ()::int as total,
+           -- Quien debe en dos monedas tiene dos filas y es una sola persona.
+           (select count(distinct o.patient_id) from owed o where o.due > o.credit)::int as people
     from owed d
     where d.due > d.credit
     order by d.since asc
     limit ${limit}`)
   const total = Number(rows[0]?.total ?? 0)
+  const people = Number(rows[0]?.people ?? 0)
   return {
     total,
     items: rows.map((row) => ({
@@ -487,10 +490,10 @@ async function overdueCollections(tx: Db, orgId: string, zone: OrgLocale, days: 
       // La deuda más antigua identifica el caso: si paga y vuelve a deber, es otro.
       id: `${row.patient_id}:${row.currency}:${row.since_day}`,
       personName: row.name,
-      line: `Debe ${formatOrgMoney(Number(row.owed), row.currency, zone)} · desde el ${dayOf(row.since, zone)}`,
+      line: `Debe ${formatOrgMoneyToday(Number(row.owed), row.currency, zone)} · desde el ${dayOf(row.since, zone)}`,
       patientId: row.patient_id,
     })),
-    title: `${total} ${plural(total, "persona debe", "personas deben")} desde hace más de ${days} días`,
+    title: `${people} ${plural(people, "persona debe", "personas deben")} desde hace más de ${days} días`,
     detail: total > rows.length ? `Se muestran las ${rows.length} más antiguas.` : "Ordenadas de la deuda más antigua a la más reciente.",
     how: `Conceptos por cobrar sin anular cuyo saldo sigue pendiente, descontado lo que la persona tiene a favor, y que se anotaron hace más de ${days} días.`,
   }
