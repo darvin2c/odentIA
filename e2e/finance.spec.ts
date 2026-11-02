@@ -46,9 +46,9 @@ test("aplicar lo que tiene a favor siempre se confirma: ni el enlace ni el botó
   await page.getByRole("button", { name: "Cancelar", exact: true }).click()
   expect(await owed()).toMatchObject({ porCobrar: 45000 })
 
-  // En el Resumen, el botón lo dice y también pregunta. Lo aplica solo al confirmar.
+  // En Pendientes del Resumen, el botón lo dice y también pregunta. Lo aplica solo al confirmar.
   await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}?tab=resumen`))
-  await page.locator("header").getByRole("button", { name: "Aplicar lo que tiene a favor", exact: true }).click()
+  await page.getByRole("button", { name: "Aplicar lo que tiene a favor", exact: true }).first().click()
   const confirm = page.getByRole("button", { name: /^Aplicar S\/\s*450\.00/ })
   await expect(confirm).toBeVisible()
   expect(applied).toEqual([])

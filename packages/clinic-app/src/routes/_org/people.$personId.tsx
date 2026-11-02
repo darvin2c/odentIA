@@ -598,7 +598,8 @@ function PersonPageRoute() {
   )
   return (
     <PersonArchivedProvider value={person.archived}>
-      <WideSectionProvider patientId={patientId} name={person.displayName}>
+      {/* Otra persona, otro estado: lo que estaba abierto era de la anterior, y su caja le escribiría a ella. */}
+      <WideSectionProvider key={personId} patientId={patientId} name={person.displayName}>
         <RecordPanelProvider>{page}</RecordPanelProvider>
       </WideSectionProvider>
     </PersonArchivedProvider>

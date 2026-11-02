@@ -174,8 +174,8 @@ export function PersonSummary({
       ? `Teléfono de ${spokenPhone.displayName} (${relationshipText(spokenPhone.relationship, spokenPhone.relationshipDetail).toLowerCase()}) · ${internationalText(spokenPhone.phone)}`
       : "Sin teléfono"
   const clinicalData = summary?.data?.data
-  // Lo que debe ya lo dice Pendientes, con su botón: aquí solo que no debe nada.
-  const showSaldo = Boolean(patientId) && canFinance && outstanding.length === 0
+  // Lo que debe ya lo dice Pendientes, con su botón: aquí, que no debe nada o, si Pendientes no llegó, que algo debe.
+  const showSaldo = Boolean(patientId) && canFinance && (outstanding.length === 0 || !detail)
   // Lo que ya dicen las tarjetas clínicas no se repite en los datos de abajo.
   const showFacts =
     !clinical ||
@@ -315,7 +315,13 @@ export function PersonSummary({
           ) : null}
           {showSaldo ? (
             <Fact label="Saldo">
-              {account.isPending ? "Consultando…" : account.isError ? "No disponible" : "Sin saldo por cobrar"}
+              {account.isPending
+                ? "Consultando…"
+                : account.isError
+                  ? "No disponible"
+                  : outstanding.length > 0
+                    ? "Tiene saldo por cobrar: míralo en Cobros"
+                    : "Sin saldo por cobrar"}
             </Fact>
           ) : null}
           {canChats ? (

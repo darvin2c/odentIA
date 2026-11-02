@@ -1,6 +1,6 @@
-import { DetailDrawer, LoadingState } from "@odentia/ui-patterns"
+import { DetailDrawer, ListSearchScope, LoadingState, useScopedListSearch } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
-import { createContext, lazy, type ReactNode, Suspense, useCallback, useContext, useMemo, useState } from "react"
+import { createContext, lazy, type ReactNode, Suspense, useContext, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { type DocumentFilter, isPatientSectionId, sectionOf } from "../../lib/patient-areas"
 import type { PatientFull } from "../../lib/patients"
@@ -46,6 +46,25 @@ function sectionName(id: string): string {
   return productUi().record.sections.find((item) => item.id === id)?.label ?? id
 }
 
+/** Documentos encima: sus filtros, la pieza y el visor viven aquí, no en la dirección de la pantalla de debajo. */
+function DocumentosOver({ patientId, target }: { patientId: string; target: WideTarget }) {
+  const search = useScopedListSearch({
+    tipo: target.documentFilter,
+    tooth: target.place ? String(target.place) : undefined,
+  })
+  const tooth = Number(search.get("tooth"))
+  return (
+    <ListSearchScope value={search}>
+      <DocumentosSection
+        patientId={patientId}
+        filter={search.get("tipo") as DocumentFilter | undefined}
+        tooth={tooth > 0 ? tooth : undefined}
+        documentId={search.get("documentId")}
+      />
+    </ListSearchScope>
+  )
+}
+
 /**
  * Antecedentes, Historia, Documentos, Plan y lo del producto (Odontograma y
  * Periodontograma), grandes y encima: al cerrar se sigue donde se estaba. Son
@@ -66,8 +85,6 @@ export function WideSectionProvider({
   children: ReactNode
 }) {
   const [target, setTarget] = useState<WideTarget | null>(null)
-  const open = useCallback((next: WideTarget) => setTarget(next), [])
-  const value = useMemo(() => open, [open])
   const own = target ? productUi().record.sections.find((item) => item.id === target.id) : undefined
   // La ficha ya cargó al paciente: misma clave, sin otra petición.
   const record = useQuery({
@@ -80,7 +97,7 @@ export function WideSectionProvider({
     if (!target || !patientId) return null
     if (target.id === "antecedentes") return <AntecedentesTab patientId={patientId} startEditing={target.review} />
     if (target.id === "historia") return <HistoriaTab patientId={patientId} initialTooth={target.place} />
-    if (target.id === "documentos") return <DocumentosSection patientId={patientId} filter={target.documentFilter} tooth={target.place} />
+    if (target.id === "documentos") return <DocumentosOver key={`${target.documentFilter}-${target.place}`} patientId={patientId} target={target} />
     if (target.id === "plan")
       return <PlanTab patientId={patientId} patientName={name} initialBudgetId={target.budgetId} initialItemId={target.itemId} />
     if (target.id === "responsables") return <ResponsablesTab patientId={patientId} startGranting={target.grant} />
@@ -94,7 +111,7 @@ export function WideSectionProvider({
     })
   }
   return (
-    <OpenWide.Provider value={patientId ? value : null}>
+    <OpenWide.Provider value={patientId ? setTarget : null}>
       {children}
       <DetailDrawer
         open={target !== null && Boolean(patientId)}

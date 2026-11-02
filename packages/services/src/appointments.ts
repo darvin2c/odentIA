@@ -900,6 +900,7 @@ async function acceptedOfService(tx: Db, orgId: string, patientId: string, servi
         inArray(treatmentPlanItem.status, SCHEDULABLE_ITEM_STATUSES),
       ),
     )
+    .orderBy(asc(treatmentPlanItem.createdAt), asc(treatmentPlanItem.id))
     .limit(52)
   const ids = rows.map((row) => row.id)
   const withAppointment = await scheduledItems(tx, orgId, patientId, ids)

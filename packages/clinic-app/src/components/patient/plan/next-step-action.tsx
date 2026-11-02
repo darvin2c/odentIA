@@ -196,13 +196,15 @@ export function ScheduleControl({
   const control: SchedulableControl | null = clinical
     ? (clinicalList.data?.data.find((row) => row.id === followUpId) ?? null)
     : (coordination.data?.data.followUps.find((row) => row.id === followUpId) ?? null)
-  const settled = clinical ? !clinicalList.isPending : !coordination.isPending
+  const list = clinical ? clinicalList : coordination
   // Otro lo reservó o lo canceló entre tanto: el botón lo dice, en vez de no hacer nada.
   useEffect(() => {
-    if (!settled || control) return
-    toast.error("Ese control ya no está por reservar.")
+    if (control || list.isFetching) return
+    if (list.isError) toast.error("No se pudo abrir el control. Inténtalo de nuevo.")
+    else if (list.isSuccess) toast.error("Ese control ya no está por reservar.")
+    else return
     onClose()
-  }, [settled, control, onClose])
+  }, [control, list.isFetching, list.isError, list.isSuccess, onClose])
   if (!control) return null
   return (
     <FollowUpScheduler

@@ -75,7 +75,8 @@ export function ResourceSelect({
         setPicked(item)
         onChange(item?.id ?? "")
       }}
-      onInputValueChange={(text) => onQueryChange?.(text)}
+      // El campo muestra el nombre de lo elegido: eso no es una búsqueda, y abrirlo ofrece los demás.
+      onInputValueChange={(text) => onQueryChange?.(text === selected?.label ? "" : text)}
     >
       <ComboboxInput
         id={id}

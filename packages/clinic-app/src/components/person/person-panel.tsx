@@ -57,6 +57,7 @@ interface PersonPanelData {
     windowOpen: boolean
     holdOn: string | null
     approvedOnly: boolean
+    canHold: boolean
     hasWhatsapp: boolean
     readOnly: "bloqueada" | "archivada" | null
   }
@@ -294,8 +295,8 @@ export function PersonPanel({
     ...(panel && panel.thread.length > 0 ? [{ key: "conversacion", label: "Ver la conversación", onSelect: () => void navigate({ to: "/inbox", search: { conversation: conversationId } }) }] : []),
   ]
 
-  // Desde su ficha, sin un tema que responder: pasadas las 24 horas de WhatsApp solo cabe un mensaje aprobado.
-  const approvedOnly = Boolean(panel?.reply.approvedOnly && panel.reply.allowed && !replying)
+  // Desde su ficha, sin algo que responder: pasadas las 24 horas de WhatsApp solo cabe un mensaje aprobado.
+  const approvedOnly = Boolean(panel?.reply.approvedOnly && panel.reply.allowed && (!replying || !panel.reply.canHold))
   const canType = Boolean(panel?.reply.allowed && !panel.reply.closedChannel && !approvedOnly && (!heldByOther || takeOver) && !unknownDelivery)
   // Desde su ficha, horarios y precios solo si se pueden escribir: sin caja no llevan a nada.
   const showSuggestions = !fromRecord || canType
@@ -378,7 +379,7 @@ export function PersonPanel({
           </Link>
         </div>
       ) : null}
-      {fromRecord && replying && !heldByOther ? (
+      {fromRecord && replying && !heldByOther && !approvedOnly ? (
         <div className="flex flex-wrap items-center gap-2 rounded-xl bg-muted/60 p-3 text-sm">
           <p className="min-w-0 flex-[1_1_12rem]">Respondes a: «{replying.quote ?? replying.asks ?? replying.reason}»</p>
           <Button type="button" size="sm" variant="ghost" className="min-h-11 sm:min-h-8" onClick={() => setPlain(true)}>

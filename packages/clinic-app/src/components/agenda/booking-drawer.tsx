@@ -362,9 +362,11 @@ export function BookingDrawer({
     enabled: Boolean(values.patientId) && !registering,
     retry: false,
   })
+  // También lo que pidió el Plan aunque ya tenga otra cita: lo pidió para esta y se ve.
+  const seededItems = values.patientId === seed.patient?.id ? seed.planItemIds : undefined
   const toSchedule = React.useMemo(
-    () => coordinationQuery.data?.data.treatments.filter((row) => row.toSchedule) ?? [],
-    [coordinationQuery.data],
+    () => coordinationQuery.data?.data.treatments.filter((row) => row.toSchedule || seededItems?.includes(row.id)) ?? [],
+    [coordinationQuery.data, seededItems],
   )
   // Dos iguales son una casilla: recepción no ve las piezas y elegir entre ellos sería a ciegas.
   const toScheduleRows = React.useMemo(() => {
@@ -391,8 +393,8 @@ export function BookingDrawer({
     const fromSeed = toSchedule.find((row) => seed.planItemIds?.includes(row.id))
     const first = chosen || (fromSeed ?? toSchedule[0])?.serviceId || ""
     setMarked({ patientId: values.patientId, ids: itemsOfService(first) })
-    // Con un hueco ya tocado en la rejilla no se cambia el servicio: podría no atenderlo quien eligió.
-    if (!seed.startsAt && first !== values.serviceId) {
+    // Con un hueco o un profesional ya elegidos no se cambia el servicio: podría no atenderlo.
+    if (!seed.startsAt && !seed.professionalUserId && !when.professionalFilter && first !== values.serviceId) {
       autoService.current = first || null
       // No lo eligió la persona: cerrar sin tocar nada no pregunta si descarta.
       form.setFieldValue("serviceId", first, { dontUpdateMeta: true })
@@ -401,7 +403,9 @@ export function BookingDrawer({
   }, [coordinationQuery.data, values.patientId])
   /** Lo que la cita trae; sin la lista (rol sin acceso o paciente recién registrado), lo que pidió el Plan o la regla del servidor. */
   const chosenItemsFor = (patientId: string): string[] | undefined => {
-    if (coordinationQuery.data && patientId === values.patientId) return markedIds
+    // Solo lo que se ve: lo que otra persona reservó entre tanto ya no está en la lista.
+    if (coordinationQuery.data && patientId === values.patientId)
+      return markedIds.filter((id) => toSchedule.some((row) => row.id === id))
     return seed.planItemIds?.length && patientId === seed.patient?.id ? seed.planItemIds : undefined
   }
   const submitOptions: SubmitOptions = {

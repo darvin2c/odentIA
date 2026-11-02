@@ -122,9 +122,9 @@ test("paciente: ficha inicial y hallazgo visibles en el recorrido", async ({ own
       .filter({ hasText: /^Por decidir$/ })
       .first(),
   ).toBeVisible()
-  // Sus botones hacen lo que dicen: «Ver odontograma» lo abre sin salir del Plan, no solo cierra el recorrido.
+  // Sus botones hacen lo que dicen: «Ver odontograma» lo abre en su pieza sin salir del Plan, no solo cierra el recorrido.
   await recorrido.getByRole("button", { name: "Ver odontograma", exact: true }).click()
-  await expect(surface(page, { name: "Odontograma de Lucía Quispe" }).locator("[data-tooth]").first()).toBeVisible()
+  await expect(page.getByRole("dialog", { name: /^Pieza 36/ })).toBeVisible()
   await expect(page).toHaveURL(/tab=plan/)
 })
 

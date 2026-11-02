@@ -68,6 +68,8 @@ export interface PersonPanel {
     windowOpen: boolean
     holdOn: string | null
     approvedOnly: boolean
+    /** Pasadas las 24 horas de WhatsApp hay algo suyo que responder: si no, ni el tema puede quedar por entregar. */
+    canHold: boolean
     hasWhatsapp: boolean
     /** Desde su ficha, se lee y no se le escribe: bloqueada, o archivada como dice su cabecera. */
     readOnly: "bloqueada" | "archivada" | null
@@ -238,6 +240,7 @@ export async function getPersonPanel(
       windowOpen: open || !whatsapp,
       holdOn: fromRecord ? null : (lastInbound?.id ?? null),
       approvedOnly: fromRecord && whatsapp && !open,
+      canHold: Boolean(lastInbound || topicRow?.sourceMessageId),
       hasWhatsapp,
       readOnly,
     },
