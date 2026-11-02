@@ -442,6 +442,31 @@ export async function keepIssuedPaper(input: {
   clearTimeout(timer)
 }
 
+/**
+ * De qué paciente es el papel de salud que salió en este mensaje; null si no lleva uno.
+ * El adjunto queda en la conversación, que recepción lee, pero sigue siendo historia clínica.
+ */
+export async function healthDocumentPatientOfMessage(
+  tx: Db,
+  orgId: string,
+  messageId: string,
+): Promise<string | null> {
+  const [row] = await tx
+    .select({ metadata: auditEvent.metadata })
+    .from(auditEvent)
+    .where(
+      and(
+        eq(auditEvent.organizationId, orgId),
+        eq(auditEvent.entity, "message"),
+        eq(auditEvent.entityId, messageId),
+        eq(auditEvent.action, "health_document.sent"),
+      ),
+    )
+    .limit(1)
+  const patientId = (row?.metadata as { patientId?: unknown } | null | undefined)?.patientId
+  return typeof patientId === "string" ? patientId : null
+}
+
 // --- Envío ---------------------------------------------------------------------
 
 export interface SendHealthDocumentInput {

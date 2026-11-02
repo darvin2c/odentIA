@@ -7,6 +7,7 @@ import {
   getRefundReceiptPdf,
   HEALTH_DOCUMENT_TYPES,
   keepIssuedPaper,
+  recordLockState,
   renderHealthDocumentPdf,
   saveRecipientEmail,
   sendFinancialDocument,
@@ -16,6 +17,7 @@ import type { Context } from "hono"
 import { Hono } from "hono"
 import { z } from "zod"
 import { traceClinicalRead } from "../lib/clinical-trace.js"
+import { recordLockResponse } from "../lib/record-lock.js"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
@@ -163,12 +165,26 @@ export function createFinancialDocumentsRoute(
     )
   })
 
+  // Una historia bloqueada (ADR 0080) también cierra sus papeles: estas rutas se montan
+  // antes que las de la ficha y su guarda no llega a correr.
+  const lockedRecord = async (c: Context, write: boolean) => {
+    const { orgId, userId } = orgContextOf(c)
+    const patientId = z.uuid().safeParse(c.req.param("id"))
+    if (!patientId.success) return null
+    const state = await withOrgContext(deps.db, orgId, (tx) =>
+      recordLockState(tx, orgId, userId, patientId.data),
+    )
+    return recordLockResponse(c, state, write)
+  }
+
   // El papel de salud para que el equipo lo vea o lo imprima: el mismo que se envía.
   app.get("/:id/health-document-pdf", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "clinical.read")) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes acceso a la historia clínica"), 403)
     }
+    const locked = await lockedRecord(c, false)
+    if (locked) return locked
     const parsed = healthPdfQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const patientId = c.req.param("id")
@@ -279,6 +295,8 @@ export function createFinancialDocumentsRoute(
   app.get("/:id/health-document-options", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "clinical.read")) return forbidClinical(c)
+    const locked = await lockedRecord(c, false)
+    if (locked) return locked
     const parsed = healthOptionsQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const patientId = c.req.param("id")
@@ -300,6 +318,8 @@ export function createFinancialDocumentsRoute(
   app.post("/:id/health-documents/send", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "clinical.write")) return forbidClinical(c)
+    const locked = await lockedRecord(c, true)
+    if (locked) return locked
     const parsed = healthSendInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const patientId = c.req.param("id")
