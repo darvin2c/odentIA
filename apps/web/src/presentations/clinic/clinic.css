@@ -1,0 +1,719 @@
+/* La v2 de la presentación: casi todo se explica en una clínica en maqueta, llena de gente que se puede tocar.
+   La escena va detrás de los momentos (clinic-3d.js), lo que pasa lo decide clinic-sim.js y lo que se lee está
+   en el clinic-slide.html de cada producto. Cada momento es un tema y con qué trabaja la clínica: las flechas los recorren en orden y los botones
+   saltan a cualquiera. Sin 3D, las mismas fichas quedan en lista. */
+.slide.cl {
+  isolation: isolate;
+  cursor: default;
+  --pc: var(--warn);
+  --cl-deep: 6, 19, 24;
+  --cl-panel: 9, 28, 35;
+  --cl-ink: #06222a;
+}
+[data-brand="latidia"] .slide.cl {
+  --cl-deep: 18, 6, 42;
+  --cl-panel: 30, 11, 61;
+  --cl-ink: #1e0b3d;
+}
+.slide.cl.cl-hover {
+  cursor: pointer;
+}
+.slide.cl.cl-sc-con {
+  --pc: var(--sky);
+}
+.cl-gl {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(90deg, transparent 31%, #000 37%);
+  mask-image: linear-gradient(90deg, transparent 31%, #000 37%);
+}
+.cl-gl canvas {
+  position: absolute;
+  inset: 0;
+  width: 1920px !important;
+  height: 1080px !important;
+  display: block;
+}
+.cl .layer {
+  padding: 112px 0 150px 104px;
+  gap: 20px;
+}
+.cl .layer.overlay {
+  padding: 0;
+  background: rgba(var(--cl-deep), 0.72);
+  backdrop-filter: blur(5px);
+}
+.cl-copy {
+  width: 500px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.cl .tag {
+  font-size: 21px;
+}
+.cl-copy .h2 {
+  font-size: 56px;
+}
+.cl-copy .lead {
+  font-size: 24px;
+  line-height: 1.38;
+}
+.cl-copy .clock {
+  font-size: 92px;
+  line-height: 1;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+.cl-tap {
+  font-family: var(--agent);
+  font-size: 17px;
+  line-height: 1.4;
+  color: var(--on);
+}
+.cl-tap::before {
+  content: "";
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  margin-right: 9px;
+  border-radius: 50%;
+  background: var(--pc);
+  vertical-align: 1px;
+}
+.cl-big b {
+  display: block;
+  font-size: 62px;
+  line-height: 1.05;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--warn);
+  font-variant-numeric: tabular-nums;
+}
+.cl-big.ok b {
+  color: var(--mint);
+}
+.cl-big span {
+  font-family: var(--agent);
+  font-size: 16px;
+  color: var(--on-2);
+}
+.cl-who-does {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 16px;
+  font-size: 20px;
+  line-height: 1.3;
+}
+.cl-who-does dt {
+  font-family: var(--agent);
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--on-3);
+  padding-top: 3px;
+}
+.cl-who-does dd {
+  margin: 0;
+  font-weight: 700;
+}
+.cl-who-does small {
+  display: block;
+  font-family: var(--agent);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--on-3);
+}
+.cl .switches {
+  gap: 7px;
+}
+.cl .sw {
+  padding: 7px 14px;
+  font-size: 18px;
+  gap: 12px;
+  border-radius: 12px;
+}
+.cl .sw .who {
+  font-size: 15px;
+}
+.cl .sw .toggle {
+  transform: scale(0.62);
+  transform-origin: left center;
+  margin-right: -26px;
+}
+
+/* Los botones: qué se mira y con qué trabaja la clínica. */
+.cl-bar {
+  position: absolute;
+  left: 640px;
+  right: 36px;
+  top: 18px;
+  z-index: 7;
+  display: none;
+  flex-direction: column;
+  gap: 7px;
+  align-items: flex-start;
+}
+.cl-live-on .cl-bar {
+  display: flex;
+}
+.cl-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.cl-row > span {
+  font-family: var(--agent);
+  font-size: 14px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--on-3);
+  margin-right: 4px;
+}
+.cl-b {
+  font: 600 16px var(--font);
+  color: var(--on-2);
+  background: rgba(var(--cl-panel), 0.86);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  padding: 6px 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cl-b:hover {
+  color: var(--on);
+  border-color: var(--on-3);
+}
+.cl-b[aria-pressed="true"] {
+  color: var(--cl-ink);
+  background: var(--on);
+  border-color: var(--on);
+}
+.cl-b.sc[data-sc="hoy"][aria-pressed="true"],
+.cl-b.sc[data-sc="bot"][aria-pressed="true"],
+.cl-b.sc[data-sc="crm"][aria-pressed="true"] {
+  background: var(--warn);
+  border-color: var(--warn);
+}
+.cl-b.sc[data-sc="con"][aria-pressed="true"] {
+  background: var(--sky);
+  border-color: var(--sky);
+}
+.cl-b:focus-visible {
+  outline: 3px solid var(--on);
+  outline-offset: 2px;
+}
+.cl-guide {
+  margin-left: 14px;
+  color: var(--on);
+  border-color: var(--sky);
+}
+.cl-row > .cl-voice-note {
+  display: none;
+  font-family: var(--agent);
+  font-size: 13px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--on-3);
+  margin: 0 0 0 6px;
+}
+.cl-guide[aria-pressed="true"] + .cl-voice-note {
+  display: inline;
+}
+@media (pointer: coarse) {
+  .cl-b {
+    padding: 10px 18px;
+    font-size: 19px;
+  }
+}
+
+/* Los contadores: salen de la simulación, y se dice. */
+.cl-hud {
+  position: absolute;
+  left: 104px;
+  top: 690px;
+  width: 520px;
+  display: none;
+  flex-direction: column;
+  gap: 5px;
+  z-index: 3;
+  pointer-events: none;
+}
+.cl-live-on.cl-hud-on .cl-hud {
+  display: flex;
+}
+.cl-nums {
+  display: flex;
+  gap: 24px;
+}
+.cl-num {
+  display: flex;
+  flex-direction: column;
+}
+.cl-num b {
+  font-size: 46px;
+  line-height: 1.05;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.cl-num span {
+  font-family: var(--agent);
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--on-3);
+  white-space: nowrap;
+}
+.cl-num.bad b {
+  color: var(--warn);
+}
+.cl-num.good b {
+  color: var(--mint);
+}
+.cl-num.back {
+  display: none;
+}
+.cl-sc-con .cl-num.back {
+  display: flex;
+}
+.cl-num.back b {
+  color: var(--amber);
+}
+.cl-sim {
+  font-size: 14px;
+  color: var(--on-3);
+}
+.cl-antes {
+  font-size: 18px;
+  line-height: 1.3;
+  color: var(--on-2);
+  display: none;
+}
+.cl-sc-con .cl-antes {
+  display: block;
+}
+.cl-antes b {
+  color: var(--warn);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Lo pegado a la maqueta */
+.cl-names,
+.cl-pins {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.cl-names [hidden] {
+  display: none;
+}
+.cl-at {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -100%);
+  white-space: nowrap;
+  z-index: 2;
+}
+.slide.cl:not(.cl-ready):not(.cl-flat) .cl-at {
+  visibility: hidden;
+}
+.cl-room {
+  font-family: var(--agent);
+  font-size: 14px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--on-3);
+  background: rgba(var(--cl-panel), 0.6);
+  border-radius: 6px;
+  padding: 2px 8px;
+  transform: translate(-50%, -50%);
+}
+.cl-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--on);
+  background: rgba(var(--cl-panel), 0.93);
+  border: 1.5px solid var(--warn);
+  border-radius: 999px;
+  padding: 3px 11px;
+  font-variant-numeric: tabular-nums;
+}
+.cl-pill.ok {
+  border-color: var(--mint);
+}
+.cl-pill.ok::before {
+  content: "✓";
+  color: var(--mint);
+}
+.cl-pill.amb {
+  border-color: var(--amber);
+}
+.cl-pill.calm {
+  border-color: var(--on-3);
+}
+.cl-say {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: max-content;
+  max-width: 340px;
+  white-space: normal;
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.26;
+  color: var(--cl-ink);
+  background: var(--c);
+  border-radius: 16px 16px 16px 4px;
+  padding: 8px 12px;
+  box-shadow: 0 12px 28px -14px rgba(0, 0, 0, 0.8);
+  opacity: 0;
+  transition: opacity 0.3s;
+  margin-top: -8px;
+}
+.cl-say.on {
+  opacity: 1;
+}
+.cl-say small {
+  font-family: var(--agent);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  opacity: 0.75;
+}
+.cl-say.hum {
+  color: #1b1712;
+  background: #e9e4da;
+  border-radius: 16px 16px 4px 16px;
+}
+.cl .p4-lab b {
+  font-size: 22px;
+  text-shadow: none;
+  background: rgba(var(--cl-panel), 0.88);
+  border-radius: 9px;
+  padding: 3px 11px;
+}
+
+/* Los puntos que se pueden tocar */
+.cl-pin {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 38px;
+  height: 38px;
+  margin: -19px 0 0 -19px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  pointer-events: auto;
+  display: none;
+}
+.cl-pin.show {
+  display: block;
+}
+.slide.cl:not(.cl-live-on) .cl-pin {
+  display: none;
+}
+.cl-pin::before {
+  content: "";
+  position: absolute;
+  inset: 12px;
+  border-radius: 50%;
+  background: var(--pc);
+  box-shadow: 0 0 0 3px rgba(var(--cl-deep), 0.6);
+}
+.cl-pin::after {
+  content: "";
+  position: absolute;
+  inset: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--pc);
+  animation: clpin 2.6s ease-out infinite;
+  animation-delay: var(--pd, 0s);
+}
+.cl-pin.sel::before {
+  background: var(--on);
+}
+.cl-pin:focus-visible {
+  outline: 3px solid var(--on);
+  outline-offset: 1px;
+}
+@media (pointer: coarse) {
+  .cl-pin {
+    width: 92px;
+    height: 92px;
+    margin: -46px 0 0 -46px;
+  }
+  .cl-pin::before,
+  .cl-pin::after {
+    inset: 39px;
+  }
+}
+@keyframes clpin {
+  from {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  to {
+    transform: scale(2.8);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cl-pin::after {
+    animation: none;
+    opacity: 0;
+  }
+}
+.cl-tip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-family: var(--agent);
+  font-size: 16px;
+  color: var(--on);
+  background: rgba(var(--cl-deep), 0.94);
+  border-radius: 7px;
+  padding: 3px 9px;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translate(-50%, -100%);
+  margin-top: -14px;
+  z-index: 5;
+  display: none;
+}
+.cl-tip.on {
+  display: block;
+}
+
+/* La ficha que se abre al tocar */
+.cl-card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 430px;
+  z-index: 6;
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 22px 20px;
+  border-radius: 18px;
+  background: rgba(var(--cl-deep), 0.97);
+  border: 1.5px solid var(--cc, var(--warn));
+  box-shadow: 0 24px 60px -16px rgba(0, 0, 0, 0.8);
+  cursor: default;
+  white-space: normal;
+}
+.cl-card.on {
+  display: flex;
+}
+.cl-card article {
+  display: contents;
+}
+.cl-who {
+  font-family: var(--agent);
+  font-size: 15px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--cc, var(--warn));
+  padding-right: 28px;
+}
+.cl-card h3,
+.cl-cards h3 {
+  font-size: 27px;
+  line-height: 1.16;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+.cl-card p,
+.cl-cards p {
+  font-size: 20px;
+  line-height: 1.36;
+  color: var(--on-2);
+}
+.cl-card .cl-now,
+.cl-cards .cl-now {
+  font-family: var(--agent);
+  font-size: 18px;
+  color: var(--on);
+}
+.cl-now b {
+  color: var(--cc, var(--warn));
+  font-variant-numeric: tabular-nums;
+}
+.cl-card .cl-was,
+.cl-cards .cl-was {
+  font-size: 18px;
+  color: var(--on-3);
+}
+.cl-was s {
+  text-decoration-color: var(--warn);
+  text-decoration-thickness: 2px;
+}
+.cl-close {
+  position: absolute;
+  right: 8px;
+  top: 6px;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  background: none;
+  color: var(--on-2);
+  font: 400 28px var(--font);
+  cursor: pointer;
+  border-radius: 10px;
+}
+.cl-close:hover {
+  color: var(--on);
+}
+.cl-close:focus-visible,
+.cl-see:focus-visible {
+  outline: 2px solid var(--on);
+}
+.cl-see {
+  align-self: flex-start;
+  margin-top: 4px;
+  font: 700 17px var(--font);
+  color: var(--cl-ink);
+  background: var(--cc, var(--sky));
+  border: 0;
+  border-radius: 999px;
+  padding: 7px 15px;
+  cursor: pointer;
+}
+
+/* La pantalla de muestra que abre un objeto: la misma ventana de «Todo lo de siempre». */
+.cl-shot {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  pointer-events: none;
+}
+.cl-shot.open {
+  pointer-events: auto;
+}
+.cl-shot.open .mscrim {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity 0.35s;
+}
+.cl-shot.open .msc {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: none;
+  transition:
+    opacity 0.35s,
+    transform 0.55s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* De pie la cámara se acerca y todo se lee más grande. */
+.stacked .cl-room,
+.stacked .cl-bar {
+  display: none;
+}
+.stacked .cl-gl {
+  -webkit-mask-image: linear-gradient(90deg, transparent 26%, #000 40%);
+  mask-image: linear-gradient(90deg, transparent 26%, #000 40%);
+}
+.stacked .cl-card {
+  width: 960px;
+  gap: 16px;
+  padding: 34px 44px 40px;
+  border-radius: 34px;
+}
+.stacked .cl-card h3 {
+  font-size: 56px;
+}
+.stacked .cl-card p {
+  font-size: 42px;
+}
+.stacked .cl-who {
+  font-size: 32px;
+}
+.stacked .cl-card .cl-now,
+.stacked .cl-card .cl-was {
+  font-size: 38px;
+}
+.stacked .cl-close {
+  width: 96px;
+  height: 96px;
+  font-size: 64px;
+}
+.stacked .cl-see {
+  font-size: 38px;
+  padding: 14px 30px;
+}
+.stacked .cl-pin {
+  width: 110px;
+  height: 110px;
+  margin: -55px 0 0 -55px;
+}
+.stacked .cl-pin::before,
+.stacked .cl-pin::after {
+  inset: 34px;
+}
+.stacked .cl-hud {
+  top: 780px;
+}
+
+/* Sin 3D: las fichas, en lista. */
+.cl-cards {
+  display: none;
+}
+.cl-flat .cl-gl,
+.cl-flat .cl-names,
+.cl-flat .cl-pins,
+.cl-flat .cl-hud,
+.cl-flat .cl-bar {
+  display: none;
+}
+.cl-flat .cl-cards {
+  position: absolute;
+  left: 660px;
+  top: 70px;
+  width: 1190px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 34px;
+  z-index: 2;
+  pointer-events: none;
+}
+.cl-flat .cl-cards article {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.cl-flat .cl-cards h3 {
+  font-size: 22px;
+}
+.cl-flat .cl-cards p {
+  font-size: 17px;
+}
+.cl-flat .cl-cards .cl-now,
+.cl-flat .cl-cards [data-story] {
+  display: none;
+}
+.cl-flat .cl-who {
+  font-size: 13px;
+}
+.cl-flat .layer[data-sc="hoy"].cur ~ .cl-cards [data-when]:not([data-when="sin"]),
+.cl-flat .layer[data-sc="con"].cur ~ .cl-cards [data-when]:not([data-when="con"]),
+.cl-flat .layer[data-sc="bot"].cur ~ .cl-cards [data-when]:not([data-when="bot"]),
+.cl-flat .layer[data-sc="crm"].cur ~ .cl-cards [data-when]:not([data-when="crm"]) {
+  display: none;
+}
+.cl-flat .cl-cards .cl-was {
+  font-size: 15px;
+}

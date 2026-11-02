@@ -30,10 +30,42 @@ const CAM = V(6.2, 20.2, 25.4)
 const LOOK = V(-0.35, 0, 0.75)
 const PERSON_SCALE = 1.06
 
+/* ===== Cada producto con su noche: la calle, las pantallas y la luz. La maqueta es de cartón en los dos ===== */
+const MEDICAL = document.documentElement.dataset.brand === "latidia"
+const TONE = MEDICAL
+  ? {
+      street: "#2f2352",
+      curb: "#4a3c70",
+      plate: "#302450",
+      dark: "#675f7d",
+      hole: "#463a5e",
+      screen: "#241540",
+      shadow: "#120724",
+      night: "#170b2e",
+      ink: "#1e0b3d",
+      recep: "#6f5aa8",
+      noche: { sky: "#7d75ad", ground: "#160c2c", keyC: "#a093cf" },
+      sin: { sky: "#b3acca", ground: "#302647", keyC: "#cbc5e2" },
+    }
+  : {
+      street: "#1f3d47",
+      curb: "#3a5a64",
+      plate: "#20404a",
+      dark: "#5d7079",
+      hole: "#3b4f57",
+      screen: "#16323b",
+      shadow: "#071a20",
+      night: "#0c2028",
+      ink: "#06222a",
+      recep: "#3e8a96",
+      noche: { sky: "#6f8ea6", ground: "#0f2029", keyC: "#8fafc8" },
+      sin: { sky: "#a9bac6", ground: "#2a3c44", keyC: "#c3d3e0" },
+    }
+
 /* ===== La luz de cada momento ===== */
 const LIGHT = {
-  noche: { hemi: 0.85, sky: "#6f8ea6", ground: "#0f2029", key: 0.7, keyC: "#8fafc8" },
-  sin: { hemi: 1.75, sky: "#a9bac6", ground: "#2a3c44", key: 1.55, keyC: "#c3d3e0" },
+  noche: { hemi: 0.85, ...TONE.noche, key: 0.7 },
+  sin: { hemi: 1.75, ...TONE.sin, key: 1.55 },
   con: { hemi: 2.1, sky: "#f4f3ec", ground: "#555f5c", key: 2.6, keyC: "#fff1de" },
   recupera: { hemi: 2.2, sky: "#f7f2e6", ground: "#5a5e55", key: 2.75, keyC: "#ffeed6" },
   fin: { hemi: 2.35, sky: "#fff7ea", ground: "#615f52", key: 3, keyC: "#ffe9ca" },
@@ -185,7 +217,7 @@ const PANTS = ["#3e4d57", "#4c4a52", "#57524a", "#2f3f4a", "#5a5a5e", "#404a44"]
 const HAIR = ["#2a211c", "#3b2c22", "#191613", "#5a4332", "#6f6a66", "#2e2a2a"]
 const SKIN = ["#e6d3bd", "#d6b89a", "#c9a483", "#efdcc6", "#b98f6d"]
 const TEAM_LOOK = {
-  recep: { cloth: "#3e8a96", pants: "#26363d", hair: "#2a211c" },
+  recep: { cloth: TONE.recep, pants: "#26363d", hair: "#2a211c" },
   caja: { cloth: "#7c8f96", pants: "#2f3b42", hair: "#3b2c22" },
   doctora: { cloth: "#f4f1ea", pants: "#d9d6cc", hair: "#191613" },
   director: { cloth: "#44566a", pants: "#2c3540", hair: "#6f6a66" },
@@ -221,7 +253,7 @@ function bubbleAtlas() {
     g.lineTo(cx + 26, cy + 70)
     g.fill()
   }
-  const ink = (w = 16, color = "#06222a") => {
+  const ink = (w = 16, color = TONE.ink) => {
     g.strokeStyle = color
     g.fillStyle = color
     g.lineWidth = w
@@ -440,24 +472,24 @@ function build(slide) {
   /* ----- Materiales de maqueta: un solo tono de cartón, sin texturas ----- */
   const mat = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, ...extra })
   const MAT = {
-    street: mat("#1f3d47"),
-    curb: mat("#3a5a64"),
-    plate: mat("#20404a"),
+    street: mat(TONE.street),
+    curb: mat(TONE.curb),
+    plate: mat(TONE.plate),
     floor: mat("#d8d4c8"),
     wall: mat("#efeade"),
     inner: mat("#e4dfd3"),
     furn: mat("#c9c5b9"),
     soft: mat("#aeb5b1"),
-    dark: mat("#5d7079"),
+    dark: mat(TONE.dark),
     paper: mat("#f6f2e8"),
     sticky: mat("#e8b9a4"),
     carton: mat("#b89f7c"),
     folder: mat("#b8b0a0"),
-    hole: mat("#3b4f57"),
+    hole: mat(TONE.hole),
     busy: mat("#b4bab3"),
     clash: mat("#e8927c", { emissive: "#e8927c", emissiveIntensity: 0.5 }),
     filled: mat("#a6f0d8", { emissive: "#a6f0d8", emissiveIntensity: 0.55 }),
-    screen: mat("#16323b", { emissive: "#4fc3d7", emissiveIntensity: 0.25 }),
+    screen: mat(TONE.screen, { emissive: "#4fc3d7", emissiveIntensity: 0.25 }),
   }
 
   const boxes = new Map()
@@ -512,15 +544,27 @@ function build(slide) {
   for (const z of [0.5, 1.3, 2.1]) box(MAT.soft, 0.52, 0.4, 0.52, -5.4, 0, z, 0.05)
   for (const x of [-4.6, -3.8, -3.0]) box(MAT.soft, 0.52, 0.4, 0.42, x, 0, 3.16, 0.05)
 
-  // Consultorio: la unidad dental, su lámpara, el banco y la mesa de la pared.
-  box(MAT.dark, 0.5, 0.36, 0.5, 3.75, 0, -1.4, 0.05)
-  box(MAT.soft, 0.95, 0.13, 0.5, 3.9, 0.36, -1.4, 0.05)
-  const back = box(MAT.soft, 0.85, 0.13, 0.5, 3.12, 0.43, -1.4, 0.05)
-  back.rotation.z = -0.3
-  box(MAT.soft, 0.26, 0.12, 0.34, 2.65, 0.68, -1.4, 0.05)
-  box(MAT.dark, 0.08, 1.45, 0.08, 2.9, 0, -2.25, 0.03)
-  box(MAT.dark, 0.08, 0.06, 0.82, 2.9, 1.42, -1.85, 0.02)
-  box(MAT.wall, 0.42, 0.09, 0.2, 3.0, 1.34, -1.48, 0.03)
+  // Consultorio: donde se recuesta el paciente (la unidad dental y su lámpara, o la camilla y su monitor),
+  // el banco y la mesa de la pared.
+  if (MEDICAL) {
+    box(MAT.dark, 1.5, 0.36, 0.46, 3.8, 0, -1.4, 0.05)
+    box(MAT.soft, 1.5, 0.13, 0.62, 3.95, 0.36, -1.4, 0.05)
+    box(MAT.paper, 1.46, 0.008, 0.36, 3.95, 0.49, -1.4, 0.004)
+    const headrest = box(MAT.soft, 0.85, 0.13, 0.62, 2.84, 0.43, -1.4, 0.05)
+    headrest.rotation.z = -0.3
+    box(MAT.dark, 0.08, 1.05, 0.08, 2.9, 0, -2.25, 0.03)
+    box(MAT.dark, 0.34, 0.24, 0.12, 2.9, 1.05, -2.25, 0.02)
+    box(MAT.screen, 0.28, 0.18, 0.012, 2.9, 1.08, -2.18, 0.004)
+  } else {
+    box(MAT.dark, 0.5, 0.36, 0.5, 3.75, 0, -1.4, 0.05)
+    box(MAT.soft, 0.95, 0.13, 0.5, 3.9, 0.36, -1.4, 0.05)
+    const back = box(MAT.soft, 0.85, 0.13, 0.5, 3.12, 0.43, -1.4, 0.05)
+    back.rotation.z = -0.3
+    box(MAT.soft, 0.26, 0.12, 0.34, 2.65, 0.68, -1.4, 0.05)
+    box(MAT.dark, 0.08, 1.45, 0.08, 2.9, 0, -2.25, 0.03)
+    box(MAT.dark, 0.08, 0.06, 0.82, 2.9, 1.42, -1.85, 0.02)
+    box(MAT.wall, 0.42, 0.09, 0.2, 3.0, 1.34, -1.48, 0.03)
+  }
   box(MAT.dark, 0.34, 0.03, 0.26, 2.42, 0.62, -0.92, 0.01)
   box(MAT.dark, 0.05, 0.62, 0.05, 2.42, 0, -0.92, 0.015)
   stool(EQUIPO.doctora.x, EQUIPO.doctora.z)
@@ -843,7 +887,7 @@ function build(slide) {
     1,
   )
   const shadowMat = new THREE.MeshBasicMaterial({
-    color: "#071a20",
+    color: TONE.shadow,
     transparent: true,
     opacity: 0.34,
     depthWrite: false,
@@ -885,7 +929,7 @@ function build(slide) {
       snap: true,
     }
   })
-  const night = new THREE.Color("#0c2028")
+  const night = new THREE.Color(TONE.night)
   const tint = new THREE.Color()
   const paintLook = (p, v, dim) => {
     v.dim = dim
@@ -1230,7 +1274,7 @@ function build(slide) {
     box(MAT.dark, 0.07, 0.95, 0.07, place.x, 0, place.z, 0.02, crm)
     box(MAT.dark, 0.86, 0.54, 0.05, place.x, 0.95, place.z, 0.015, crm)
     const face = box(
-      mat("#16323b", { emissive: glow, emissiveIntensity: 0.6 }),
+      mat(TONE.screen, { emissive: glow, emissiveIntensity: 0.6 }),
       0.8,
       0.48,
       0.02,
@@ -1854,6 +1898,11 @@ function build(slide) {
     return V(p.x, 1.2, p.z)
   }
   const inLayer = (sel2) => layers[ctl.step].querySelector(sel2)
+  // La hora de esa noche y las notas de ese día las dice cada momento: cada producto cuenta su historia.
+  const [nightH, nightM] = slide.querySelector("[data-clock]").dataset.clock.split(":").map(Number)
+  const NIGHT = nightH * 60 + nightM
+  const MORNING = 32 * 60
+  const notes = Number(slide.querySelector("[data-notes]").dataset.notes)
   const clockText = (minutes) => {
     const m = Math.round(minutes) % 1440
     return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`
@@ -1876,7 +1925,7 @@ function build(slide) {
   /** Amanece: sube la luz, corre el reloj y el equipo vuelve. */
   const sunrise = async (light) => {
     lightWant = light
-    await tween(1900, (e) => setClock(22 * 60 + 47 + e * (9 * 60 + 13)))
+    await tween(1900, (e) => setClock(NIGHT + e * (MORNING - NIGHT)))
     sim.dawn()
     refreshPins()
   }
@@ -1907,14 +1956,14 @@ function build(slide) {
       await say("sofi-dra", 3200)
     },
     "noche-hoy": async () => {
-      setClock(22 * 60 + 47)
+      setClock(NIGHT)
       await sleep(11000)
       await sunrise(LIGHT.sin)
       await sleep(3000)
       await say("s-buenos", 4200)
     },
     "noche-con": async () => {
-      setClock(22 * 60 + 47)
+      setClock(NIGHT)
       await sleep(300)
       showAgent("sofi")
       await sleep(500)
@@ -1942,12 +1991,12 @@ function build(slide) {
       setBig("0:04")
     },
     "consulta-hoy": async () => {
-      setBig("14")
+      setBig(String(notes))
       await sleep(1500)
       await say("s-nota", 3600)
     },
     "consulta-con": async () => {
-      setBig("14")
+      setBig(String(notes))
       await sleep(300)
       toAgents()
       showAgent("clio")
@@ -1956,9 +2005,10 @@ function build(slide) {
       await say("clio-dra", 2600)
       await say("dra-ok", 1400)
       messWant.notas = 0
-      await tween(1500, (e) => setBig(String(Math.round(14 * (1 - e)))))
+      await tween(1500, (e) => setBig(String(Math.round(notes * (1 - e)))))
       const big = inLayer("[data-big]")
-      if (big?.nextElementSibling) big.nextElementSibling.textContent = "notas pendientes · ejemplo"
+      const label = big?.nextElementSibling
+      if (label) label.textContent = label.dataset.done
     },
     "fueron-hoy": async () => {},
     "fueron-con": async () => {
