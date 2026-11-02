@@ -70,7 +70,7 @@ export function DebtsTab({
   /** Zona de la sede: desde cuándo debe y su próxima cita. */
   timeZone: string
   canWrite: boolean
-  onCollect: (patient?: { id: string; name: string } | null) => void
+  onCollect: (patient?: { id: string; name: string; currency?: string } | null) => void
 }) {
   const listSearch = useListSearch()
   const canMessage = usePermission("conversations.write")
@@ -211,7 +211,12 @@ export function DebtsTab({
                 </Button>
               ) : null}
               {canWrite ? (
-                <Button type="button" size="sm" aria-label={`Cobrar a ${name}`} onClick={() => onCollect({ id: debt.patientId, name })}>
+                <Button
+                  type="button"
+                  size="sm"
+                  aria-label={`Cobrar a ${name}`}
+                  onClick={() => onCollect({ id: debt.patientId, name, currency: debt.currency })}
+                >
                   Cobrar
                 </Button>
               ) : null}

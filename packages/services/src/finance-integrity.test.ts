@@ -38,7 +38,7 @@ setupTestDb()
 interface Fixture {
   actor: string
   patient: { id: string }
-  args: [string, string, string]
+  args: readonly [string, string, string]
   run: <T>(fn: (tx: Db) => Promise<T>) => Promise<T>
 }
 

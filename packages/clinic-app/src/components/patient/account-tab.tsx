@@ -10,7 +10,7 @@
  * saldo a favor. Dinero con `@odentia/clinical`; formato y zona del perfil de
  * la clínica.
  */
-import { documentText, formatMoney, formatMoneyInput } from "@odentia/clinical"
+import { currencyWord, documentText, formatMoney, formatMoneyInput } from "@odentia/clinical"
 import { Badge, Button, cn, Field, FieldDescription, FieldLabel } from "@odentia/ui"
 import {
   DetailDrawer,
@@ -56,6 +56,7 @@ import {
   type CollectResultBody,
   type RefundResult,
 } from "../../lib/finance-collect"
+import { useOrgSecondCurrency } from "../../lib/org"
 import { useOrgEvents } from "../../lib/org-events"
 import type { PatientFull } from "../../lib/patients"
 import { AccountSkeleton } from "../skeletons/person-sections"
@@ -135,12 +136,21 @@ export function AccountTab({
   const canWrite = usePermission("finance.write")
   const sede = useActiveBranch()
   const profile = useOrgFinanceProfile()
+  const second = useOrgSecondCurrency()
 
   const [pickedBranch, setPickedBranch] = useState("")
   const [askBranch, setAskBranch] = useState<"cobrar" | "devolver" | "agregar" | "aplicar" | null>(null)
   /** Lo que quedó tras aplicar lo que tenía a favor: «Listo» o lo que falta. */
-  const [applied, setApplied] = useState<{ appliedCents: number; remainingCents: number } | null>(null)
+  const [applied, setApplied] = useState<{
+    appliedCents: number
+    remainingCents: number
+    currency: string
+  } | null>(null)
   const [cobrarOpen, setCobrarOpen] = useState(false)
+  /** «Cobrar lo que falta»: la moneda en que se abre el cobro. */
+  const [collectIn, setCollectIn] = useState<string | undefined>(undefined)
+  /** Con otra moneda, de cuál se devuelve lo que tiene a favor. */
+  const [refundUnit, setRefundUnit] = useState<string | null>(null)
   const [collect, setCollect] = useState<CollectResultBody | null>(null)
   const [viewTicket, setViewTicket] = useState<AccountCobro | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -199,26 +209,34 @@ export function AccountTab({
   const branchName = sede.branches.find((item) => item.id === activeBranch)?.name ?? ""
 
   const cents = (text: string) => parseMoneyOrNull(text, orgUnit ?? "", locale ?? "")
-  const favor = account.data?.data.byCurrency.find((row) => row.currency === orgUnit)?.aFavor ?? 0
+  const refundCurrency = refundUnit ?? orgUnit
+  const refundCentsOf = (text: string) => parseMoneyOrNull(text, refundCurrency ?? "", locale ?? "")
+  const favor =
+    account.data?.data.byCurrency.find((row) => row.currency === refundCurrency)?.aFavor ?? 0
   const methodList = methods.data?.data ?? []
 
   const refundMutation = useMutation({
     mutationFn: (input: { amountCents: number; paymentMethodId: string; reason: string }) =>
-      refundApi(patientId, { branchId: activeBranch, ...input }),
+      refundApi(patientId, {
+        branchId: activeBranch,
+        ...input,
+        // Sin otra moneda, el cuerpo de siempre.
+        ...(refundCurrency && refundCurrency !== orgUnit ? { currency: refundCurrency } : {}),
+      }),
   })
   const refundForm = useAppForm({
     defaultValues: { amountText: "", paymentMethodId: "", reason: "" },
     validators: {
       onSubmit: refundSchema({
-        cents,
+        cents: refundCentsOf,
         favor,
-        favorText: orgUnit && locale ? formatMoney(favor, orgUnit, locale) : "",
+        favorText: refundCurrency && locale ? formatMoney(favor, refundCurrency, locale) : "",
         hasMethod: methodList.length > 0,
       }),
     },
     onSubmit: async ({ value }) => {
       const result = await refundMutation.mutateAsync({
-        amountCents: cents(value.amountText) ?? 0,
+        amountCents: refundCentsOf(value.amountText) ?? 0,
         // Sin elegir, el primero de la lista: el que se ve marcado.
         paymentMethodId: value.paymentMethodId || (methodList[0]?.id ?? ""),
         reason: value.reason.trim(),
@@ -239,9 +257,18 @@ export function AccountTab({
   // «Aplicar lo que tiene a favor»: el mismo cobro de caja, sin dinero nuevo.
   // Queda como un ticket con el saldo a favor usado (el movimiento registrado).
   const applyMutation = useMutation({
-    mutationFn: () => collectApi(patientId, { branchId: activeBranch, requestId: crypto.randomUUID() }),
+    mutationFn: (currency?: string) =>
+      collectApi(patientId, {
+        branchId: activeBranch,
+        requestId: crypto.randomUUID(),
+        ...(currency ? { currency } : {}),
+      }),
     onSuccess: (result) => {
-      setApplied({ appliedCents: result.data.creditAppliedCents, remainingCents: result.data.remainingCents })
+      setApplied({
+        appliedCents: result.data.creditAppliedCents,
+        remainingCents: result.data.remainingCents,
+        currency: result.data.ticket.currency,
+      })
       setError(null)
       invalidate()
     },
@@ -331,7 +358,10 @@ export function AccountTab({
   /** Cifras secundarias, sin símbolo: acompañan a un total que sí lo lleva. */
   const plain = (cents: number, currency = orgUnit) => formatAmountPlain(cents, currency, locale)
   // De qué cobro viene el saldo a favor.
-  const creditSources = (data.aFavorOrigen ?? []).filter((row) => row.currency === orgUnit)
+  const shownRefundUnit = refundUnit ?? orgUnit
+  const creditSources = (data.aFavorOrigen ?? []).filter((row) => row.currency === shownRefundUnit)
+  // Lo que entró en otra moneda se devuelve en esa moneda, sin cambio nuevo.
+  const refundOut = creditSources.find((row) => row.tenderCurrency)?.tenderCurrency ?? null
   const creditOrigin =
     creditSources.length === 1 && creditSources[0]
       ? `, de ${creditSources[0].advance ? "un adelanto" : "un cobro"} del ${formatDayLongLocale(creditSources[0].paidAt, locale, timeZone)}`
@@ -340,9 +370,22 @@ export function AccountTab({
         : ""
   const pending = data.pendiente
   const orgRow = data.byCurrency.find((row) => row.currency === orgUnit)
-  const orgFavor = orgRow?.aFavor ?? 0
-  const orgOwed = orgRow?.porCobrar ?? 0
-  const orgBalance = orgRow?.saldo ?? 0
+  // Con otra moneda, las acciones van por moneda: primero lo que debe en la del negocio.
+  const focusRow =
+    second && !(orgRow && orgRow.porCobrar > 0)
+      ? (data.byCurrency.find((row) => row.porCobrar > 0) ?? orgRow)
+      : orgRow
+  const focusUnit = focusRow?.currency ?? orgUnit
+  const orgFavor = focusRow?.aFavor ?? 0
+  const orgOwed = focusRow?.porCobrar ?? 0
+  const orgBalance = focusRow?.saldo ?? 0
+  const owing = second ? data.byCurrency.filter((row) => row.saldo > 0) : []
+  const favorRows = second
+    ? data.byCurrency.filter((row) => row.aFavor > 0)
+    : orgRow && orgRow.aFavor > 0
+      ? [orgRow]
+      : []
+  const refundFavor = data.byCurrency.find((row) => row.currency === shownRefundUnit)?.aFavor ?? 0
   const balances =
     data.byCurrency.length > 0
       ? data.byCurrency
@@ -352,35 +395,51 @@ export function AccountTab({
   const patientDocument = person?.docNumber ? documentText(person.docType, person.docNumber) : null
   const cobros = [...data.cobros].reverse()
   const refundChoice = methodList.find((item) => item.id === refundMethod) ?? methodList[0] ?? null
-  const refundCents = cents(refundAmount)
+  const refundCents = refundCentsOf(refundAmount)
 
   /** Abre lo pedido, ya con la sede decidida; cada formulario empieza limpio. */
-  const start = (action: "cobrar" | "devolver" | "agregar" | "aplicar") => {
-    if (action === "aplicar") applyMutation.mutate()
+  const start = (
+    action: "cobrar" | "devolver" | "agregar" | "aplicar",
+    refundFrom: string = shownRefundUnit,
+  ) => {
+    if (action === "aplicar") applyMutation.mutate(focusUnit !== orgUnit ? focusUnit : undefined)
     if (action === "cobrar") setCobrarOpen(true)
     if (action === "agregar") {
       addForm.reset()
       setAdding(true)
     }
     if (action === "devolver") {
-      refundForm.reset({ amountText: formatMoneyInput(orgFavor, orgUnit, locale), paymentMethodId: "", reason: "" })
+      const available = data.byCurrency.find((row) => row.currency === refundFrom)?.aFavor ?? 0
+      refundForm.reset({
+        amountText: formatMoneyInput(available, refundFrom, locale),
+        paymentMethodId: "",
+        reason: "",
+      })
       setRefundOpen(true)
     }
   }
 
   /** Ejecuta la acción si ya hay sede; si no, la pide una sola vez. */
-  const withBranch = (action: "cobrar" | "devolver" | "agregar" | "aplicar") => {
+  const withBranch = (
+    action: "cobrar" | "devolver" | "agregar" | "aplicar",
+    refundFrom?: string,
+  ) => {
     setError(null)
     if (!activeBranch) {
       setAskBranch(action)
       return
     }
     setAskBranch(null)
-    start(action)
+    start(action, refundFrom)
+  }
+
+  const refundFrom = (code: string) => {
+    setRefundUnit(code)
+    withBranch("devolver", code)
   }
 
   // Lo que tiene a favor cubre lo que debe: la acción es aplicarlo, no cobrar.
-  const coveredByCredit = orgOwed > 0 && orgBalance === 0
+  const coveredByCredit = orgOwed > 0 && orgBalance === 0 && owing.length === 0
   collectOnArrival.current = () => withBranch(coveredByCredit ? "aplicar" : "cobrar")
   const collectButton = (className?: string) =>
     coveredByCredit ? (
@@ -389,7 +448,11 @@ export function AccountTab({
       </Button>
     ) : (
       <Button className={className} onClick={() => withBranch("cobrar")}>
-        {orgBalance > 0 ? `Cobrar ${money(orgBalance)}` : "Cobrar un adelanto"}
+        {owing.length > 0
+          ? `Cobrar ${owing.map((row) => money(row.saldo, row.currency)).join(" + ")}`
+          : orgBalance > 0
+            ? `Cobrar ${money(orgBalance)}`
+            : "Cobrar un adelanto"}
       </Button>
     )
 
@@ -456,8 +519,8 @@ export function AccountTab({
         {applied ? (
           <p role="status" className="mt-3 text-sm">
             {applied.remainingCents > 0
-              ? `Se aplicaron ${money(applied.appliedCents)} de lo que tenía a favor. Falta: ${money(applied.remainingCents)}.`
-              : `Se aplicaron ${money(applied.appliedCents)} de lo que tenía a favor. Ya no debe nada.`}
+              ? `Se aplicaron ${money(applied.appliedCents, applied.currency)} de lo que tenía a favor. Falta: ${money(applied.remainingCents, applied.currency)}.`
+              : `Se aplicaron ${money(applied.appliedCents, applied.currency)} de lo que tenía a favor. Ya no debe nada.`}
           </p>
         ) : null}
         {canWrite ? (
@@ -472,11 +535,13 @@ export function AccountTab({
               </Button>
             ) : null}
             {collectButton("hidden sm:inline-flex")}
-            {orgFavor > 0 ? (
-              <Button variant="outline" onClick={() => withBranch("devolver")}>
-                Devolver dinero
+            {favorRows.map((row) => (
+              <Button key={row.currency} variant="outline" onClick={() => refundFrom(row.currency)}>
+                {favorRows.length > 1
+                  ? `Devolver en ${currencyWord(row.currency, locale)}`
+                  : "Devolver dinero"}
               </Button>
-            ) : null}
+            ))}
           </div>
         ) : null}
       </section>
@@ -535,7 +600,14 @@ export function AccountTab({
         ) : (
           <ul className="flex flex-col divide-y">
             {cobros.map((row) => {
-              const paidWith = row.payments.map((payment) => payment.methodName).join(" + ")
+              const paidWith = row.payments
+                .map((payment) =>
+                  // Entró en otra moneda: se dice lo que entró, porque el total es lo que canceló.
+                  payment.tenderCents != null && payment.tenderCurrency
+                    ? `${payment.methodName} ${money(payment.tenderCents, payment.tenderCurrency)}`
+                    : payment.methodName,
+                )
+                .join(" + ")
               const concepts = (row.snapshot?.lines ?? []).map((line) => line.description).join(", ")
               return (
                 <li key={row.ticketId} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2.5">
@@ -614,9 +686,13 @@ export function AccountTab({
         branchId={activeBranch}
         branchName={branchName}
         currency={orgUnit}
+        debtCurrency={collectIn}
         locale={locale}
         open={cobrarOpen}
-        onClose={() => setCobrarOpen(false)}
+        onClose={() => {
+          setCobrarOpen(false)
+          setCollectIn(undefined)
+        }}
         onCollected={(result) => {
           invalidate()
           setCollect(result)
@@ -643,6 +719,11 @@ export function AccountTab({
             onDone={() => setCollect(null)}
             onCollect={() => {
               setCollect(null)
+              withBranch("cobrar")
+            }}
+            onCollectRest={(currency) => {
+              setCollect(null)
+              setCollectIn(currency)
               withBranch("cobrar")
             }}
             onChanged={invalidate}
@@ -731,7 +812,7 @@ export function AccountTab({
               <p className="break-words font-heading text-lg font-semibold">{patientName}</p>
             ) : null}
             <p className="text-sm text-muted-foreground">
-              Tiene {money(orgFavor)} a favor{creditOrigin}
+              Tiene {money(refundFavor, shownRefundUnit)} a favor{creditOrigin}
             </p>
           </div>
         }
@@ -739,7 +820,9 @@ export function AccountTab({
         // Sin medios de pago activos no hay cómo devolver: el motivo se lee en el campo.
         submitDisabled={!refundChoice}
         submitLabel={
-          refundCents !== null && refundCents > 0 ? `Devolver ${money(refundCents)}` : "Devolver"
+          refundCents !== null && refundCents > 0
+            ? `Devolver ${money(refundCents, shownRefundUnit)}`
+            : "Devolver"
         }
         onClose={() => {
           if (!refundSurface.isSubmitting) setRefundOpen(false)
@@ -757,7 +840,7 @@ export function AccountTab({
                     id={control.id}
                     invalid={control.invalid}
                     aria-describedby={control.describedBy}
-                    currency={orgUnit}
+                    currency={shownRefundUnit}
                     locale={locale}
                     value={field.state.value}
                     onChange={field.handleChange}
@@ -798,10 +881,19 @@ export function AccountTab({
           <refundForm.AppField name="reason">
             {(field) => <field.TextareaField label="Motivo" rows={2} maxLength={MAX_REASON} />}
           </refundForm.AppField>
-          {refundChoice?.typeCode === CASH_TYPE_CODE && refundCents !== null && refundCents > 0 ? (
+          {refundOut && refundOut !== shownRefundUnit ? (
+            <p className="rounded-xl bg-muted/60 px-3 py-2 text-sm">
+              Sale en {currencyWord(refundOut, locale)}, como entró y en la misma proporción: sin
+              cambio nuevo.
+            </p>
+          ) : refundChoice?.typeCode === CASH_TYPE_CODE &&
+            refundCents !== null &&
+            refundCents > 0 ? (
             <p className="flex items-center justify-between gap-3 rounded-xl bg-muted/60 px-3 py-2 text-sm">
               <span>Salen del efectivo de la caja{branchName ? ` de ${branchName}` : ""}</span>
-              <span className="font-semibold tabular-nums">{money(refundCents)}</span>
+              <span className="font-semibold tabular-nums">
+                {money(refundCents, shownRefundUnit)}
+              </span>
             </p>
           ) : refundChoice ? (
             <p className="text-sm text-muted-foreground">
@@ -865,6 +957,12 @@ export function AccountTab({
               <span>Devuelto</span>
               <span className="tabular-nums">{money(receipt.amountCents, receipt.currency)}</span>
             </div>
+            {(receipt.payouts ?? []).map((payout) => (
+              <div key={payout.currency} className="flex justify-between gap-3">
+                <span className="text-muted-foreground">Salió de la caja</span>
+                <span className="tabular-nums">{money(payout.amountCents, payout.currency)}</span>
+              </div>
+            ))}
           </div>
         ) : null}
       </DetailDrawer>

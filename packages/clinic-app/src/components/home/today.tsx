@@ -319,7 +319,7 @@ export function AgendaLine({ line }: { line: { branch: { id: string; name: strin
 }
 
 const collectedText = (cash: WorkspaceCash, locale: string) =>
-  `Cobrado ${formatMoney(cash.collectedCents, cash.currency, locale)} en ${cash.tickets} ${cash.tickets === 1 ? "cobro" : "cobros"}`
+  `Cobrado ${formatMoney(cash.collectedCents, cash.currency, locale)}${cash.secondCollected ? ` + ${formatMoney(cash.secondCollected.cents, cash.secondCollected.currency, locale)}` : ""} en ${cash.tickets} ${cash.tickets === 1 ? "cobro" : "cobros"}`
 const peopleText = (count: number) => `${count} ${count === 1 ? "persona" : "personas"}`
 
 function ToCollectRow({ row, cash, locale, onCollect }: { row: DebtRow; cash: WorkspaceCash; locale: string; onCollect?: (row: DebtRow) => void }) {

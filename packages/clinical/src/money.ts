@@ -210,6 +210,38 @@ export function formatExchangeRateInput(rate: string, locale: string): string {
   return normalizeExchangeRate(rate).replace(".", decimal)
 }
 
+function currencySymbolIn(currency: string, locale: string): string {
+  return (
+    new Intl.NumberFormat(locale, { style: "currency", currency })
+      .formatToParts(0)
+      .find((part) => part.type === "currency")?.value ?? currency
+  )
+}
+
+/** «S/ 3.75 por USD 1»: así se dice un cambio en una pantalla o en un papel. */
+export function exchangeRateWords(
+  rate: string,
+  businessCurrency: string,
+  otherCurrency: string,
+  locale: string,
+): string {
+  const business = currencySymbolIn(businessCurrency, locale)
+  const other = currencySymbolIn(otherCurrency, locale)
+  return `${business} ${formatExchangeRateInput(rate, locale)} por ${other} 1`
+}
+
+/** «soles», «dólares», «pesos»: la moneda como se nombra al hablar, en el idioma de la clínica. */
+export function currencyWord(currency: string, locale: string): string {
+  const name = new Intl.NumberFormat(locale, {
+    style: "currency",
+    currency,
+    currencyDisplay: "name",
+  })
+    .formatToParts(2)
+    .find((part) => part.type === "currency")?.value
+  return name?.split(" ")[0]?.toLocaleLowerCase(locale) || currency
+}
+
 /**
  * El cambio por unidad menor de cada moneda, para las cuentas en SQL:
  * `rate × 10^(dígitos negocio − dígitos otra)`. 950 pesos chilenos (sin
@@ -253,6 +285,34 @@ export function convertCents(input: {
  */
 export function settleToDue(convertedCents: number, dueCents: number): number {
   return convertedCents < dueCents && dueCents - convertedCents <= 1 ? dueCents : convertedCents
+}
+
+/**
+ * Cuánto cancela lo pagado, en la moneda de la deuda: una sola conversión por
+ * cobro. Pagar justo lo que se propuso para lo que se debe deja la cuenta al día,
+ * aunque de vuelta no dé exacto: un centavo de dólar son casi cuatro de sol, y
+ * S/ 301.03 propone USD 80.27, que de vuelta son S/ 301.01. Por lo demás, cuadra a cero.
+ */
+export function cancelledCents(input: {
+  paidCents: number
+  paidCurrency: string
+  dueCents: number
+  currency: string
+  businessCurrency: string
+  factor: string
+}): number {
+  const { paidCents, paidCurrency, dueCents, currency, businessCurrency, factor } = input
+  if (paidCurrency === currency) return paidCents
+  const to = { businessCurrency, factor }
+  if (
+    dueCents > 0 &&
+    convertCents({ amountCents: dueCents, from: currency, to: paidCurrency, ...to }) === paidCents
+  )
+    return dueCents
+  return settleToDue(
+    convertCents({ amountCents: paidCents, from: paidCurrency, to: currency, ...to }),
+    dueCents,
+  )
 }
 
 /**

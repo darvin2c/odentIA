@@ -255,6 +255,8 @@ export interface WorkspaceCash {
   currency: string
   timezone: string
   collectedCents: number
+  /** Lo cobrado en la otra moneda: va aparte, nunca sumado. Solo si la clínica la tiene. */
+  secondCollected?: { currency: string; cents: number }
   /** Cobros del día: un ticket con dos medios cuenta una vez. */
   tickets: number
   /** Atendidos hoy con algo por cobrar: la misma lista de Finanzas › Caja. */

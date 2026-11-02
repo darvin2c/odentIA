@@ -105,6 +105,22 @@ export function dayInTimezone(timeZone: string, at: Date = new Date()): string {
   return `${get("year")}-${get("month")}-${get("day")}`
 }
 
+/** «lo puso Rosa a las 9:12», o el día si no fue hoy. Vacío si no se sabe. */
+export function rateAuthorWords(
+  second: { at: string | null; byName: string | null },
+  locale: string,
+  timeZone: string,
+): string {
+  if (!second.at) return ""
+  const at = new Date(second.at)
+  if (Number.isNaN(at.getTime())) return ""
+  const when =
+    dayInTimezone(timeZone, at) === dayInTimezone(timeZone)
+      ? `a las ${formatTimeShortLocale(second.at, locale, timeZone)}`
+      : `el ${formatDayLongLocale(second.at, locale, timeZone)}`
+  return second.byName ? `lo puso ${second.byName} ${when}` : `se puso ${when}`
+}
+
 // --- Perfil y medios (Configuración) ---------------------------------------
 
 export interface OrgFinanceProfile {
@@ -162,8 +178,23 @@ export interface CollectSnapshotMethod {
   paymentMethodId: string
   name: string
   typeCode: string
+  /** Lo que canceló, en la moneda del ticket. */
   amountCents: number
+  /** Lo que entró por este medio, si entró en otra moneda (`tender.currency`). */
+  tenderCents?: number
   reference: string | null
+}
+
+/** Con otra moneda de por medio: con qué pagó y a qué cambio (`TicketFrozen.tender`). */
+export interface CollectSnapshotTender {
+  currency: string
+  amountCents: number
+  rate: string
+  businessCurrency: string
+  otherCurrency: string
+  valueCents: number
+  changeCents: number | null
+  changeCurrency: string | null
 }
 
 /**
@@ -190,6 +221,8 @@ export interface CollectSnapshot {
   methods: CollectSnapshotMethod[]
   /** Frase al pie vigente al cobrar. */
   notice: string
+  /** Con otra moneda de por medio; un cobro solo en moneda del negocio no lo lleva. */
+  tender?: CollectSnapshotTender | null
   /** Lo que quedó por cobrar de esos conceptos. */
   remainingCents?: number
   /** Lo que falta pagar de cada concepto, con lo que cuesta (`TicketFrozen.pending`). */
@@ -222,8 +255,11 @@ export interface CollectTicketRow {
   currency: string
   totalCents: number
   creditAppliedCents: number
+  /** En la moneda en que entró el dinero. */
   cashReceivedCents: number | null
   changeCents: number | null
+  /** Moneda del vuelto; nula, la moneda en que entró el dinero. */
+  changeCurrency?: string | null
   payerContactId: string | null
   requestId: string | null
   snapshot: CollectSnapshot
@@ -232,6 +268,21 @@ export interface CollectTicketRow {
   voidedAt: string | null
   voidedBy: string | null
   voidReason: string | null
+}
+
+/**
+ * El bloque de otra moneda, solo si el ticket usa dos: entró en otra que la que
+ * cancela, o el vuelto se dio en otra. Sin él, el ticket se ve como siempre.
+ */
+export function crossTender(
+  ticket: Pick<CollectTicketRow, "currency" | "snapshot">,
+): CollectSnapshotTender | null {
+  const tender = ticket.snapshot?.tender ?? null
+  if (!tender) return null
+  const twoCurrencies =
+    tender.currency !== ticket.currency ||
+    (tender.changeCurrency !== null && tender.changeCurrency !== tender.currency)
+  return twoCurrencies ? tender : null
 }
 
 /**
@@ -263,6 +314,14 @@ export interface CollectInput {
   payments?: Array<{ paymentMethodId: string; amountCents: number; reference?: string }>
   cashReceivedCents?: number
   requestId: string
+  /** La moneda que cancela o a cuenta de la que queda un adelanto; omitida, la de los conceptos. */
+  currency?: string
+  /** En qué entra el dinero: los importes están en ella. Omitida, la moneda que cancela. */
+  tenderCurrency?: string
+  /** El cambio de este cobro, en decimal: vale solo para él. */
+  exchangeRate?: string
+  /** En qué se da el vuelto: la moneda en que pagó o la del negocio. */
+  changeCurrency?: string
 }
 
 export function collectApi(patientId: string, body: CollectInput): Promise<{ data: CollectResultBody }> {
@@ -356,6 +415,8 @@ export interface TicketReturnable {
   branchId: string
   createdAt: string
   voided: boolean
+  /** Con qué pagó, si hubo otra moneda: lo devuelto sale en esa moneda. */
+  tender?: CollectSnapshotTender | null
   lines: ReturnableLine[]
   methods: CollectSnapshotMethod[]
   returns: TicketReturnSummary[]
@@ -396,6 +457,8 @@ export interface ReturnSnapshot {
     backToStock: boolean | null
   }>
   payout: { kind: "pagado"; methodName: string; typeCode: string | null } | { kind: "a_favor" }
+  /** Lo que salió de la caja, si salió en otra moneda que la devuelta. */
+  payouts?: Array<{ currency: string; amountCents: number }>
   reason: string
 }
 
@@ -438,13 +501,21 @@ export interface RefundResult {
   currency: string
   branchId: string
   methodName: string
+  /** Lo que salió de la caja, si salió en otra moneda que la devuelta. */
+  payouts?: Array<{ currency: string; amountCents: number }>
   refundedAt: string
   account: AccountSummary
 }
 
 export function refundApi(
   patientId: string,
-  body: { branchId: string; amountCents: number; paymentMethodId?: string; reason: string },
+  body: {
+    branchId: string
+    amountCents: number
+    paymentMethodId?: string
+    reason: string
+    currency?: string
+  },
 ): Promise<{ data: RefundResult }> {
   return apiFetch<{ data: RefundResult }>(`/api/patients/${patientId}/refunds`, {
     method: "POST",
@@ -497,6 +568,11 @@ export interface AccountCobroPayment {
   methodName: string
   amountCents: number
   voidedAt: string | null
+  /** Lo que entró, si fue en otra moneda; el cambio y el valor si hubo otra moneda de por medio. */
+  tenderCents?: number | null
+  tenderCurrency?: string | null
+  exchangeRate?: string | null
+  businessCents?: number | null
 }
 
 export interface AccountCobro {
@@ -508,6 +584,7 @@ export interface AccountCobro {
   branchId?: string
   cashReceivedCents?: number | null
   changeCents?: number | null
+  changeCurrency?: string | null
   payerContactId?: string | null
   status: "vigente" | "anulado"
   voidedAt?: string | null
@@ -542,6 +619,8 @@ export interface AccountCreditSource {
   ticketId: string | null
   ticketNumber: number | null
   currency: string
+  /** En qué entró ese dinero, si fue en otra moneda: en ella se devuelve. */
+  tenderCurrency?: string | null
   paidAt: string
   availableCents: number
   /** El cobro fue un adelanto (sin concepto). */
@@ -553,6 +632,8 @@ export interface AccountSummary {
   /** Identidad mínima para la cabecera de caja. */
   patient?: { displayName: string; docType: string | null; docNumber: string | null; sex: string | null }
   aFavorOrigen?: AccountCreditSource[]
+  /** La moneda de lo aceptado de su plan; nula si no hay o hay en dos. */
+  planCurrency?: string | null
   /** Visitas atendidas por tratamiento (id del tratamiento del plan). */
   visitasPorTratamiento?: Record<string, number>
   byCurrency: AccountCurrency[]
@@ -570,7 +651,13 @@ export function fetchPatientAccount3(patientId: string): Promise<{ data: Account
 
 export function createManualChargeApi(
   patientId: string,
-  body: { branchId?: string; description: string; amountCents: number; notes?: string },
+  body: {
+    branchId?: string
+    description: string
+    amountCents: number
+    notes?: string
+    currency?: string
+  },
 ): Promise<{ data: { id: string } }> {
   return apiFetch<{ data: { id: string } }>(`/api/patients/${patientId}/charges`, {
     method: "POST",

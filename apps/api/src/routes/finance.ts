@@ -81,6 +81,7 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
         kind: z.enum(["aporte", "retiro"]),
         amountCents: cents,
         concept: z.string().trim().min(1, "Cuenta para qué es el movimiento.").max(500, "Escribe como mucho 500 caracteres."),
+        currency: currency.optional(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))

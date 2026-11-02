@@ -570,7 +570,7 @@ function CashOfToday({ cash, locale, choice, onChanged }: { cash: WorkspaceCash;
   const queryClient = useQueryClient()
   const canCollect = usePermission("finance.write")
   const profile = useOrgFinanceProfile().data?.data ?? null
-  const [collecting, setCollecting] = useState<DebtRow | null>(null)
+  const [collecting, setCollecting] = useState<Pick<DebtRow, "patientId" | "displayName" | "currency"> | null>(null)
   const [ticket, setTicket] = useState<{ result: CollectResultBody; patientId: string } | null>(null)
   const changed = () => {
     invalidateFinance(queryClient)
@@ -584,6 +584,7 @@ function CashOfToday({ cash, locale, choice, onChanged }: { cash: WorkspaceCash;
       branchId={cash.branchId}
       branchName={cash.branchName}
       currency={cash.currency}
+      debtCurrency={collecting?.currency}
       locale={locale}
       open={collecting !== null}
       onClose={() => setCollecting(null)}
@@ -608,6 +609,11 @@ function CashOfToday({ cash, locale, choice, onChanged }: { cash: WorkspaceCash;
           timeZone={cash.timezone}
           receiptWidth={profile.receiptWidth}
           ticketFooter={profile.ticketFooter}
+          onCollectRest={(currency) => {
+            const { patient } = ticket.result.ticket.snapshot
+            setTicket(null)
+            setCollecting({ patientId: patient.id, displayName: patient.displayName, currency })
+          }}
           onChanged={() => {
             changed()
             void queryClient.invalidateQueries({ queryKey: ["patient-account3", ticket.patientId] })

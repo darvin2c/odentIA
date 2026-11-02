@@ -581,13 +581,15 @@ export async function recordCashIncome(
 }
 
 export interface CashEgresoInput {
-  kind: "gasto" | "devolucion" | "retiro"
+  kind: "gasto" | "devolucion" | "retiro" | "vuelto"
   amountCents: number
   currency: string
   methodName?: string | null
   methodTypeCode?: string | null
   concept: string
   expenseId?: string | null
+  /** El vuelto en otra moneda va unido a su pago. */
+  patientPaymentId?: string | null
   /**
    * Compensación administrativa post-cierre: corrección del día que puede
    * dejar el contado en negativo (el test fija -10000). Los egresos
@@ -626,6 +628,7 @@ export async function recordCashEgreso(
       methodTypeCode: input.methodTypeCode ?? null,
       concept: concept(input.concept),
       expenseId: input.expenseId ?? null,
+      patientPaymentId: input.patientPaymentId ?? null,
       createdBy: actorUserId,
     })
     .returning()
@@ -633,11 +636,99 @@ export async function recordCashEgreso(
   return row
 }
 
+/** Entra efectivo por un vuelto en otra moneda, en la ventana abierta. */
+async function recordCashChangeIncome(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  shiftId: string,
+  input: {
+    amountCents: number
+    currency: string
+    methodName: string | null
+    methodTypeCode: string | null
+    concept: string
+    patientPaymentId?: string | null
+  },
+) {
+  const shift = requireOpenShift(await lockShift(tx, orgId, shiftId))
+  if (input.currency !== shift.currency)
+    throw conflict("CURRENCY_MISMATCH", "El vuelto es de otra moneda que la caja")
+  const [row] = await tx
+    .insert(cashMovement)
+    .values({
+      organizationId: orgId,
+      shiftId: shift.id,
+      direction: "ingreso",
+      kind: "vuelto",
+      amountCents: assertCents(input.amountCents),
+      currency: input.currency,
+      method: input.methodName?.slice(0, 60) ?? null,
+      methodTypeCode: input.methodTypeCode,
+      concept: concept(input.concept),
+      patientPaymentId: input.patientPaymentId ?? null,
+      createdBy: actorUserId,
+    })
+    .returning()
+  await audit(tx, orgId, actorUserId, "cash_movement", row.id, "cash.payment_registered")
+  return row
+}
+
+export interface CashChangeInput {
+  paymentId: string
+  branchId: string
+  methodName: string
+  methodTypeCode: string
+  /** El exceso del billete, que se queda en la caja de la moneda en que pagó. */
+  keptCents: number
+  keptCurrency: string
+  /** El vuelto que se le da en la otra moneda; sale de la caja de esa moneda. */
+  givenCents: number
+  givenCurrency: string
+  concept: string
+}
+
 /**
- * Revierte el ingreso a caja de un pago anulado. Con la ventana abierta se
- * anula el movimiento; con la ventana cerrada (inmutable) el dinero sale de
- * la ventana actual de la misma sede y moneda como compensación. Devuelve si
- * compensó (para que el ticket lo refleje).
+ * El vuelto en otra moneda: billete de USD 100 para un cobro de USD 80, con S/ 75
+ * de vuelto. Los USD 20 de más entran en la caja de dólares y los S/ 75 salen de la
+ * de soles. Cobrar nunca se frena: si en esa caja no constaba efectivo, lo dirá su
+ * arqueo. Quien llama ya bloqueó las dos cajas (`lockCashWindows`).
+ */
+export async function recordCashChange(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  input: CashChangeInput,
+) {
+  const kept = await ensureOpenShift(tx, orgId, actorUserId, input.branchId, input.keptCurrency)
+  await recordCashChangeIncome(tx, orgId, actorUserId, kept.id, {
+    amountCents: input.keptCents,
+    currency: input.keptCurrency,
+    methodName: input.methodName,
+    methodTypeCode: input.methodTypeCode,
+    concept: input.concept,
+    patientPaymentId: input.paymentId,
+  })
+  if (input.givenCents <= 0) return
+  const given = await ensureOpenShift(tx, orgId, actorUserId, input.branchId, input.givenCurrency)
+  await recordCashEgreso(tx, orgId, actorUserId, given.id, {
+    kind: "vuelto",
+    amountCents: input.givenCents,
+    currency: input.givenCurrency,
+    methodName: input.methodName,
+    methodTypeCode: input.methodTypeCode,
+    concept: input.concept,
+    patientPaymentId: input.paymentId,
+    allowNegative: true,
+  })
+}
+
+/**
+ * Revierte lo que un pago anulado movió en la caja: su cobro y, si dio vuelto en
+ * otra moneda, las dos filas del vuelto. Con la ventana abierta se anula el
+ * movimiento; con la ventana cerrada (inmutable) la compensación sale en la ventana
+ * actual de la misma sede y moneda, con los datos del movimiento. Sin cambio nuevo:
+ * se revierte lo que pasó. Devuelve si compensó (para que el ticket lo refleje).
  */
 export async function reverseCashIncome(
   tx: Db,
@@ -647,49 +738,64 @@ export async function reverseCashIncome(
   voidReason: string,
   allowPostClose: boolean,
 ): Promise<boolean> {
-  const [movement] = await tx
+  const movements = await tx
     .select()
     .from(cashMovement)
     .where(
       and(
         eq(cashMovement.organizationId, orgId),
         eq(cashMovement.patientPaymentId, payment.id),
-        eq(cashMovement.kind, "cobro"),
+        inArray(cashMovement.kind, ["cobro", "vuelto"]),
         isNull(cashMovement.voidedAt),
       ),
     )
-  if (!movement) return false
-  // La caja antes que su fila, como todos: la compensación de abajo pide la misma caja.
-  const seen = await requireShift(tx, orgId, movement.shiftId)
-  await lockCashWindow(tx, orgId, seen.branchId, seen.currency)
-  // Bloqueada: un cierre simultáneo espera o ya se ve cerrado, nunca a medias.
-  const shift = await lockShift(tx, orgId, movement.shiftId)
-  if (shift.status === "abierta") {
-    await tx
-      .update(cashMovement)
-      .set({ voidedAt: new Date(), voidedBy: actorUserId, voidReason })
-      .where(eq(cashMovement.id, movement.id))
-    await audit(tx, orgId, actorUserId, "cash_movement", movement.id, "cash.movement_voided")
-    return false
+    .orderBy(asc(cashMovement.createdAt), asc(cashMovement.id))
+  if (!movements.length) return false
+  // Las cajas antes que sus filas, como todos: las compensaciones piden las mismas cajas.
+  const seen: Array<{ branchId: string; unit: string }> = []
+  for (const shiftId of new Set(movements.map((m) => m.shiftId))) {
+    const shift = await requireShift(tx, orgId, shiftId)
+    seen.push({ branchId: shift.branchId, unit: shift.currency })
   }
-  if (!allowPostClose)
-    throw conflict(
-      "POST_CLOSE_NEEDS_ADMIN",
-      "La caja donde ingresó el cobro ya cerró y no se modifica: solo administración puede anularlo",
-    )
-  // Sale lo que entró a la caja, con los datos del movimiento: un pago cruzado
-  // entró en otra moneda que la que cancela.
-  const current = await ensureOpenShift(tx, orgId, actorUserId, shift.branchId, movement.currency)
-  await recordCashEgreso(tx, orgId, actorUserId, current.id, {
-    kind: "devolucion",
-    amountCents: movement.amountCents,
-    currency: movement.currency,
-    methodName: movement.method,
-    methodTypeCode: movement.methodTypeCode,
-    concept: `Compensación por anulación`,
-    allowNegative: true,
-  })
-  return true
+  await lockCashWindows(tx, orgId, seen)
+  let compensated = false
+  for (const movement of movements) {
+    // Bloqueada: un cierre simultáneo espera o ya se ve cerrado, nunca a medias.
+    const shift = await lockShift(tx, orgId, movement.shiftId)
+    if (shift.status === "abierta") {
+      await tx
+        .update(cashMovement)
+        .set({ voidedAt: new Date(), voidedBy: actorUserId, voidReason })
+        .where(eq(cashMovement.id, movement.id))
+      await audit(tx, orgId, actorUserId, "cash_movement", movement.id, "cash.movement_voided")
+      continue
+    }
+    if (!allowPostClose)
+      throw conflict(
+        "POST_CLOSE_NEEDS_ADMIN",
+        "La caja donde ingresó el cobro ya cerró y no se modifica: solo administración puede anularlo",
+      )
+    // Sale lo que entró a la caja, con los datos del movimiento: un pago cruzado
+    // entró en otra moneda que la que cancela.
+    const current = await ensureOpenShift(tx, orgId, actorUserId, shift.branchId, movement.currency)
+    const reversal = {
+      amountCents: movement.amountCents,
+      currency: movement.currency,
+      methodName: movement.method,
+      methodTypeCode: movement.methodTypeCode,
+      concept: "Compensación por anulación",
+    }
+    if (movement.direction === "egreso")
+      await recordCashChangeIncome(tx, orgId, actorUserId, current.id, reversal)
+    else
+      await recordCashEgreso(tx, orgId, actorUserId, current.id, {
+        ...reversal,
+        kind: movement.kind === "vuelto" ? "vuelto" : "devolucion",
+        allowNegative: true,
+      })
+    compensated = true
+  }
+  return compensated
 }
 
 /**
@@ -2823,9 +2929,22 @@ export async function getCashToday(tx: Db, orgId: string, query: { branchId: str
   const branchRow = await requireBranch(tx, orgId, query.branchId)
   const timezone = await branchTimezone(tx, orgId, branchRow)
   const unit = (await getOrgLocale(tx, orgId)).currency
+  const [profile] = await tx
+    .select({ secondCurrency: orgProfile.secondCurrency })
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, orgId))
+  const second = profile?.secondCurrency ?? null
   const today = dayKeyIn(new Date(), timezone)
-  const { movements } = await getDayMovements(tx, orgId, { branchId: branchRow.id, day: today, timezone, currency: unit })
+  // Sin otra moneda, solo la caja de la clínica; con ella, las dos cajas.
+  const { movements } = await getDayMovements(tx, orgId, {
+    branchId: branchRow.id,
+    day: today,
+    timezone,
+    ...(second ? {} : { currency: unit }),
+  })
   const cobros = movements.filter((m) => m.direction === "ingreso" && m.kind === "cobro")
+  const collectedIn = (code: string) =>
+    sumCents(cobros.filter((m) => m.currency === code).map((m) => ({ amountCents: m.amountCents })))
   const seen = new Set(cobros.map((m) => (m.ticketId ? `ticket:${m.ticketId}` : m.patientPaymentId ? `pago:${m.patientPaymentId}` : `mov:${m.id}`)))
   // Solo puede estar «atendido hoy» quien tiene un cargo de hoy o una atención
   // cerrada hoy: las deudas se calculan de esas personas, no de toda la clínica
@@ -2845,7 +2964,9 @@ export async function getCashToday(tx: Db, orgId: string, query: { branchId: str
     branchName: branchRow.name,
     currency: unit,
     timezone,
-    collectedCents: sumCents(cobros.map((m) => ({ amountCents: m.amountCents }))),
+    collectedCents: collectedIn(unit),
+    /** Lo cobrado en la otra moneda: va aparte, nunca sumado. Solo si la clínica la tiene. */
+    ...(second ? { secondCollected: { currency: second, cents: collectedIn(second) } } : {}),
     tickets: seen.size,
     toCollect,
   }
@@ -2906,7 +3027,21 @@ async function withTicketOrigin(tx: Db, orgId: string, movements: Array<typeof c
   const paymentIds = [
     ...new Set(movements.map((m) => m.patientPaymentId).filter((id): id is string => id !== null)),
   ]
-  const origin = new Map<string, { ticketId: string | null; ticketNumber: number | null; patientId: string; patientName: string }>()
+  const origin = new Map<
+    string,
+    {
+      ticketId: string | null
+      ticketNumber: number | null
+      patientId: string
+      patientName: string
+      exchangeRate: string | null
+      ticketCurrency: string | null
+      ticketTotalCents: number | null
+      cashReceivedCents: number | null
+      changeCents: number | null
+      changeCurrency: string | null
+    }
+  >()
   if (paymentIds.length > 0) {
     const rows = await tx
       .select({
@@ -2915,6 +3050,12 @@ async function withTicketOrigin(tx: Db, orgId: string, movements: Array<typeof c
         ticketNumber: paymentTicket.ticketNumber,
         patientId: patientPayment.patientId,
         patientName: patientPerson.displayName,
+        exchangeRate: patientPayment.exchangeRate,
+        ticketCurrency: paymentTicket.currency,
+        ticketTotalCents: paymentTicket.totalCents,
+        cashReceivedCents: paymentTicket.cashReceivedCents,
+        changeCents: paymentTicket.changeCents,
+        changeCurrency: paymentTicket.changeCurrency,
       })
       .from(patientPayment)
       .innerJoin(patient, and(eq(patient.id, patientPayment.patientId), eq(patient.organizationId, orgId)))
@@ -2934,6 +3075,18 @@ async function withTicketOrigin(tx: Db, orgId: string, movements: Array<typeof c
       ticketNumber: from?.ticketNumber ?? null,
       patientId: from?.patientId ?? null,
       patientName: from?.patientName ?? null,
+      /** Lo que canceló y con qué cambio; nulo si no hubo otra moneda. */
+      cancels:
+        from?.exchangeRate && from.ticketCurrency && from.ticketTotalCents !== null
+          ? {
+              currency: from.ticketCurrency,
+              totalCents: from.ticketTotalCents,
+              rate: from.exchangeRate,
+              cashReceivedCents: from.cashReceivedCents,
+              changeCents: from.changeCents,
+              changeCurrency: from.changeCurrency,
+            }
+          : null,
     }
   })
 }
@@ -3098,6 +3251,7 @@ export async function getCashState(tx: Db, orgId: string, query: CashStateQuery)
       breakdown: EMPTY_BREAKDOWN,
       byMethod: [] as MethodTotal[],
       tickets: 0,
+      ratesUsed: [] as CashRateUsed[],
       lastClosure,
     }
   const detail = await getShiftDetail(tx, orgId, open.id)
@@ -3123,8 +3277,55 @@ export async function getCashState(tx: Db, orgId: string, query: CashStateQuery)
     breakdown: cashBreakdown(detail.movements),
     byMethod: methodTotals(detail.movements),
     tickets: seen.size,
+    ratesUsed: await ratesUsedIn(tx, orgId, detail.movements),
     lastClosure,
   }
+}
+
+/** Un cambio con que se movió dinero en una caja: cuántas veces y quién. */
+export interface CashRateUsed {
+  rate: string
+  cobros: number
+  vueltos: number
+  byName: string | null
+}
+
+/** Los cambios usados en una ventana, para revisarlos al cerrar. Vacío sin otra moneda. */
+async function ratesUsedIn(tx: Db, orgId: string, movements: CashMove[]): Promise<CashRateUsed[]> {
+  const ids = [
+    ...new Set(movements.map((m) => m.patientPaymentId).filter((id): id is string => id !== null)),
+  ]
+  if (!ids.length) return []
+  const payments = await tx
+    .select({
+      id: patientPayment.id,
+      rate: patientPayment.exchangeRate,
+      createdBy: patientPayment.createdBy,
+    })
+    .from(patientPayment)
+    .where(and(eq(patientPayment.organizationId, orgId), inArray(patientPayment.id, ids)))
+  const crossed = new Map(payments.flatMap((p) => (p.rate ? [[p.id, p] as const] : [])))
+  if (!crossed.size) return []
+  const names = await userNames(
+    tx,
+    [...crossed.values()].map((p) => p.createdBy).filter((id): id is string => !!id),
+  )
+  const used = new Map<string, CashRateUsed>()
+  for (const m of movements) {
+    const payment = m.patientPaymentId ? crossed.get(m.patientPaymentId) : undefined
+    if (!payment?.rate) continue
+    const key = `${payment.rate}|${payment.createdBy ?? ""}`
+    const row = used.get(key) ?? {
+      rate: payment.rate,
+      cobros: 0,
+      vueltos: 0,
+      byName: payment.createdBy ? (names.get(payment.createdBy) ?? null) : null,
+    }
+    if (m.kind === "cobro") row.cobros += 1
+    if (m.kind === "vuelto") row.vueltos += 1
+    used.set(key, row)
+  }
+  return [...used.values()]
 }
 
 /** Ticket de cada pago (nulo = histórico sin ticket). Una sola consulta. */

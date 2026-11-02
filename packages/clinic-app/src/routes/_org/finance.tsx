@@ -15,7 +15,7 @@
  * del aviso que recibe administración. Dinero con `@odentia/clinical`; moneda,
  * formato y zona de la clínica o la sede.
  */
-import { formatMoney } from "@odentia/clinical"
+import { currencyWord, formatMoney } from "@odentia/clinical"
 import {
   Alert,
   AlertDescription,
@@ -53,6 +53,7 @@ import {
 } from "../../components/finance/cash-close-drawer"
 import { CollectDrawer } from "../../components/finance/collect-drawer"
 import { DebtsTab } from "../../components/finance/debts-tab"
+import { ExchangeRateLine } from "../../components/finance/exchange-rate-line"
 import { ExpenseFormDrawer } from "../../components/finance/expense-form-drawer"
 import { ExpensesTab } from "../../components/finance/expenses-tab"
 import {
@@ -81,7 +82,9 @@ import {
   CLOSURES_PAGE,
   CASH_TERMS,
   type CashBreakdown,
+  type CashState,
   cashErrorMessage,
+  cashTermLeaves,
   currentMonthIn,
   type DayEntry,
   dayKeyOf,
@@ -117,6 +120,7 @@ import {
   type CollectResultBody,
   useOrgFinanceProfile,
 } from "../../lib/finance-collect"
+import { useOrgSecondCurrency } from "../../lib/org"
 import { useOrgEvents } from "../../lib/org-events"
 
 type FinanceView = "caja" | "cobros" | "deudas" | "gastos" | "comisiones" | "cierres"
@@ -224,6 +228,8 @@ interface Workspace {
 interface CollectTarget {
   id: string
   name: string
+  /** La moneda de lo que se viene a cobrar: el cobro se abre en ella. */
+  currency?: string
 }
 
 type Panel =
@@ -589,6 +595,7 @@ function FinanceWorkspace() {
             patientName={panel?.kind === "cobrar" ? panel.patient?.name : undefined}
             branchId={ws.branchId}
             currency={ws.currency}
+            debtCurrency={panel?.kind === "cobrar" ? panel.patient?.currency : undefined}
             locale={ws.locale}
             open={panel?.kind === "cobrar"}
             onClose={() => setPanel(null)}
@@ -680,6 +687,11 @@ function FinanceWorkspace() {
             timeZone={ws?.timeZone ?? prof.timezone}
             receiptWidth={prof.receiptWidth}
             ticketFooter={prof.ticketFooter}
+            onCollectRest={(currency) => {
+              const { patient } = ticket.result.ticket.snapshot
+              setTicket(null)
+              collect({ id: patient.id, name: patient.displayName, currency })
+            }}
             onChanged={() => {
               invalidateFinance(queryClient)
               void queryClient.invalidateQueries({ queryKey: ["patient-account3", ticket.patientId] })
@@ -736,7 +748,11 @@ function DebtLine({
         </div>
         {/* En el teléfono, cobrar a alguien es la barra de abajo: sin repetir el botón en cada fila. */}
         {canWrite ? (
-          <Button className="max-sm:hidden" aria-label={`Cobrar a ${name}`} onClick={() => onCollect({ id: row.patientId, name })}>
+          <Button
+            className="max-sm:hidden"
+            aria-label={`Cobrar a ${name}`}
+            onClick={() => onCollect({ id: row.patientId, name, currency: row.currency })}
+          >
             Cobrar
           </Button>
         ) : null}
@@ -757,9 +773,9 @@ function breakdownLine(breakdown: CashBreakdown, plain: (cents: number) => strin
   if (terms.length === 0) return null
   return terms
     .map((term, index) => {
-      const sign = term.sign < 0 ? "− " : index === 0 ? "" : "+ "
+      const sign = cashTermLeaves(term, breakdown[term.key]) ? "− " : index === 0 ? "" : "+ "
       const word = index === 0 ? upperFirst(term.short) : term.short
-      return `${sign}${word} ${plain(breakdown[term.key])}`
+      return `${sign}${word} ${plain(Math.abs(breakdown[term.key]))}`
     })
     .join(" ")
 }
@@ -797,6 +813,10 @@ function CashTab({
   const queryClient = useQueryClient()
   const today = todayIn(timeZone)
   const cash = useCashState(branchId)
+  // Con otra moneda hay otra caja: su efectivo y su arqueo, nunca sumados.
+  const second = useOrgSecondCurrency()
+  const secondCash = useCashState(branchId, second !== null, second?.currency)
+  const secondState = second ? (secondCash.data?.data ?? null) : null
   const movements = useQuery({
     queryKey: financeKeys.movements(branchId, today),
     queryFn: () => fetchDayMovements(branchId, today),
@@ -808,14 +828,13 @@ function CashTab({
   })
   const [voiding, setVoiding] = useState<DayEntry | null>(null)
   const [earlierOpen, setEarlierOpen] = useState(false)
+  const [secondEarlierOpen, setSecondEarlierOpen] = useState(false)
 
   const state = cash.data?.data ?? null
   const dayBody = movements.data?.data ?? null
   // La zona con que el servidor partió el día (la de la sede) manda al mostrar horas.
   const zone = dayBody?.timezone ?? timeZone
   const money = (cents: number) => formatMoney(cents, state?.currency ?? ws.currency, locale)
-  // Importes secundarios: sin símbolo; el principal de cada bloque lo lleva.
-  const plain = (cents: number) => plainAmount(cents, state?.currency ?? ws.currency, locale)
 
   // «Días sin cerrar» compara dos consultas: se decide solo con ambas quietas,
   // para que una a medio recargar no encienda el aviso por un instante.
@@ -823,6 +842,10 @@ function CashTab({
   useEffect(() => {
     if (settled && state && dayBody) setEarlierOpen(hasEarlierDaysOpen(state, dayBody.movements))
   }, [settled, state, dayBody])
+  useEffect(() => {
+    if (secondState && dayBody && !secondCash.isFetching && !movements.isFetching)
+      setSecondEarlierOpen(hasEarlierDaysOpen(secondState, dayBody.movements))
+  }, [secondState, dayBody, secondCash.isFetching, movements.isFetching])
 
   const voidMutation = useMutation({
     mutationFn: (input: { id: string; reason: string }) => voidCashMovementApi(input.id, input.reason),
@@ -855,9 +878,16 @@ function CashTab({
       ? spokenMoment(reference, locale, zone)
       : null
   const closedToday = last !== null && dayKeyOf(last.closedAt, zone) === today
-  const others = otherMethods(state?.byMethod ?? [])
-  const collected = (state?.byMethod ?? []).reduce((total, row) => total + row.amountCents, 0)
-  const line = state ? breakdownLine(state.breakdown, plain) : null
+  // La otra caja se lee igual, por su lado.
+  const secondReference = secondState
+    ? (secondState.lastClosure?.closedAt ?? secondState.openedAt)
+    : null
+  const secondUnclosedSince =
+    secondEarlierOpen && secondReference && dayKeyOf(secondReference, zone) < today
+      ? spokenMoment(secondReference, locale, zone)
+      : null
+  const secondClosedToday =
+    secondState?.lastClosure != null && dayKeyOf(secondState.lastClosure.closedAt, zone) === today
   const ticketCount = entries.filter((entry) => entry.type === "cobro" && !entry.voided).length
   const expenseCount = entries.filter((entry) => entry.type === "gasto").length
   const openedDay = state?.openedAt ? spokenMoment(state.openedAt, locale, zone) : null
@@ -874,12 +904,33 @@ function CashTab({
 
   return (
     <div className="flex flex-col gap-4">
+      <ExchangeRateLine business={ws.currency} locale={locale} timeZone={zone} />
+
       {unclosedSince ? (
         <Alert role="status" className="border-transparent bg-warning-soft">
           <AlertTitle>
             {last
-              ? `La caja no se cierra desde ${momentDay(unclosedSince)}`
-              : `La caja tiene movimientos sin cerrar desde ${momentDay(unclosedSince)}`}
+              ? `La caja ${second ? `de ${currencyWord(ws.currency, locale)} ` : ""}no se cierra desde ${momentDay(unclosedSince)}`
+              : `La caja ${second ? `de ${currencyWord(ws.currency, locale)} ` : ""}tiene movimientos sin cerrar desde ${momentDay(unclosedSince)}`}
+          </AlertTitle>
+          <AlertDescription className="text-foreground/80">
+            Puedes seguir cobrando sin problema. Al cerrar se contará todo el efectivo recibido
+            desde entonces.
+          </AlertDescription>
+          {canClose ? (
+            <Button className="mt-2 justify-self-start" onClick={onCloseCash}>
+              Cerrar caja ahora
+            </Button>
+          ) : null}
+        </Alert>
+      ) : null}
+
+      {second && secondUnclosedSince ? (
+        <Alert role="status" className="border-transparent bg-warning-soft">
+          <AlertTitle>
+            La caja de {currencyWord(second.currency, locale)}{" "}
+            {secondState?.lastClosure ? "no se cierra" : "tiene movimientos sin cerrar"} desde{" "}
+            {momentDay(secondUnclosedSince)}
           </AlertTitle>
           <AlertDescription className="text-foreground/80">
             Puedes seguir cobrando sin problema. Al cerrar se contará todo el efectivo recibido
@@ -898,9 +949,21 @@ function CashTab({
           {cash.isPending ? (
             <Skeleton className="h-4 w-56" />
           ) : last ? (
-            `Último cierre: ${momentShort(spokenMoment(last.closedAt, locale, zone))}, ${lowerFirst(differenceLabel(last.differenceCents, money))}`
+            `${second ? `${upperFirst(currencyWord(ws.currency, locale))}. ` : ""}Último cierre: ${momentShort(spokenMoment(last.closedAt, locale, zone))}, ${lowerFirst(differenceLabel(last.differenceCents, money))}`
           ) : state ? (
-            "Esta caja aún no tiene cierres."
+            `${second ? `${upperFirst(currencyWord(ws.currency, locale))}. ` : ""}Esta caja aún no tiene cierres.`
+          ) : null}
+          {second && secondState ? (
+            <p>
+              {upperFirst(currencyWord(second.currency, locale))}.{" "}
+              {secondState.lastClosure
+                ? `Último cierre: ${momentShort(spokenMoment(secondState.lastClosure.closedAt, locale, zone))}, ${lowerFirst(
+                    differenceLabel(secondState.lastClosure.differenceCents, (cents) =>
+                      formatMoney(cents, second.currency, locale),
+                    ),
+                  )}`
+                : "Esta caja aún no tiene cierres."}
+            </p>
           ) : null}
         </div>
         <Button variant="link" className="h-auto p-0" onClick={onShowClosures}>
@@ -919,49 +982,40 @@ function CashTab({
           onRetry={() => void cash.refetch()}
         />
       ) : (
-        <section aria-labelledby="caja-efectivo" className="flex flex-wrap gap-3">
-          <div className="elevated min-w-0 grow-[2] basis-full rounded-xl border bg-card p-4 sm:basis-80 sm:p-5">
-            <h2 id="caja-efectivo" className="text-sm font-medium text-muted-foreground">
-              Efectivo en caja
-            </h2>
-            <p className="mt-1 text-3xl leading-tight font-bold tracking-tight tabular-nums">
-              {money(state.cashOnHandCents)}
-            </p>
-            <p className="mt-2 text-sm text-muted-foreground">
-              {line ??
-                (state.shiftId
-                  ? "Sin efectivo desde el último cierre."
-                  : "La caja se abre sola con el primer cobro.")}
-            </p>
-          </div>
-          {others.map((row) => (
-            <div key={row.name} className="elevated min-w-36 flex-1 rounded-xl border bg-card p-4 sm:p-5">
-              <p className="truncate text-sm font-medium text-muted-foreground">{row.name}</p>
-              <p className="mt-1 text-xl font-semibold tabular-nums">{money(row.amountCents)}</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {plural(row.count, "cobro", "cobros")}
-                {row.refundedCents > 0 ? ` · devuelto ${money(row.refundedCents)}` : ""}
-              </p>
-            </div>
-          ))}
-          <div className="elevated min-w-36 flex-1 rounded-xl border bg-card p-4 sm:p-5">
-            <p className="text-sm font-medium text-muted-foreground">
-              {unclosedSince || closedToday ? "Cobrado desde el último cierre" : "Cobrado hoy"}
-            </p>
-            <p className="mt-1 text-xl font-semibold tabular-nums">{money(collected)}</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {plural(state.tickets, "ticket", "tickets")}
-              {state.tickets > 0 ? (
-                <>
-                  {" · "}
-                  <Button variant="link" className="h-auto p-0 align-baseline" onClick={() => onShowTickets(collectedFrom)}>
-                    Ver cobros
-                  </Button>
-                </>
-              ) : null}
-            </p>
-          </div>
-        </section>
+        <>
+          <CashBoxFigures
+            state={state}
+            headingId="caja-efectivo"
+            title={
+              second
+                ? `Efectivo en caja · ${currencyWord(ws.currency, locale)}`
+                : "Efectivo en caja"
+            }
+            collectedTitle={
+              unclosedSince || closedToday ? "Cobrado desde el último cierre" : "Cobrado hoy"
+            }
+            locale={locale}
+            onShowTickets={() => onShowTickets(collectedFrom)}
+          />
+          {second && secondState ? (
+            <CashBoxFigures
+              state={secondState}
+              headingId="caja-efectivo-otra"
+              title={`Efectivo en caja · ${currencyWord(second.currency, locale)}`}
+              collectedTitle={
+                secondUnclosedSince || secondClosedToday
+                  ? "Cobrado desde el último cierre"
+                  : "Cobrado hoy"
+              }
+              locale={locale}
+              onShowTickets={() =>
+                onShowTickets(
+                  secondUnclosedSince && secondReference ? dayKeyOf(secondReference, zone) : today,
+                )
+              }
+            />
+          ) : null}
+        </>
       )}
 
       <section aria-labelledby="caja-por-cobrar" className="elevated rounded-xl border bg-card p-4 sm:p-5">
@@ -1135,6 +1189,93 @@ function CashTab({
   )
 }
 
+/** Una caja: su efectivo, lo cobrado por otros medios y lo cobrado. */
+function CashBoxFigures({
+  state,
+  headingId,
+  title,
+  collectedTitle,
+  locale,
+  onShowTickets,
+}: {
+  state: CashState
+  headingId: string
+  title: string
+  collectedTitle: string
+  locale: string
+  onShowTickets: () => void
+}) {
+  const money = (cents: number) => formatMoney(cents, state.currency, locale)
+  // Importes secundarios: sin símbolo; el principal de cada bloque lo lleva.
+  const plain = (cents: number) => plainAmount(cents, state.currency, locale)
+  const others = otherMethods(state.byMethod)
+  const collected = state.byMethod.reduce((total, row) => total + row.amountCents, 0)
+  const line = breakdownLine(state.breakdown, plain)
+  return (
+    <section aria-labelledby={headingId} className="flex flex-wrap gap-3">
+      <div className="elevated min-w-0 grow-[2] basis-full rounded-xl border bg-card p-4 sm:basis-80 sm:p-5">
+        <h2 id={headingId} className="text-sm font-medium text-muted-foreground">
+          {title}
+        </h2>
+        <p className="mt-1 text-3xl leading-tight font-bold tracking-tight tabular-nums">
+          {money(state.cashOnHandCents)}
+        </p>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {line ??
+            (state.shiftId
+              ? "Sin efectivo desde el último cierre."
+              : "La caja se abre sola con el primer cobro.")}
+        </p>
+      </div>
+      {others.map((row) => (
+        <div
+          key={row.name}
+          className="elevated min-w-36 flex-1 rounded-xl border bg-card p-4 sm:p-5"
+        >
+          <p className="truncate text-sm font-medium text-muted-foreground">{row.name}</p>
+          <p className="mt-1 text-xl font-semibold tabular-nums">{money(row.amountCents)}</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {plural(row.count, "cobro", "cobros")}
+            {row.refundedCents > 0 ? ` · devuelto ${money(row.refundedCents)}` : ""}
+          </p>
+        </div>
+      ))}
+      <div className="elevated min-w-36 flex-1 rounded-xl border bg-card p-4 sm:p-5">
+        <p className="text-sm font-medium text-muted-foreground">{collectedTitle}</p>
+        <p className="mt-1 text-xl font-semibold tabular-nums">{money(collected)}</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {plural(state.tickets, "ticket", "tickets")}
+          {state.tickets > 0 ? (
+            <>
+              {" · "}
+              <Button variant="link" className="h-auto p-0 align-baseline" onClick={onShowTickets}>
+                Ver cobros
+              </Button>
+            </>
+          ) : null}
+        </p>
+      </div>
+    </section>
+  )
+}
+
+/** «Canceló S/ 300.00 · cambio 3.75 · recibió USD 100.00 · vuelto S/ 75.00». */
+function cancelsWords(entry: Extract<DayEntry, { type: "cobro" }>, locale: string): string | null {
+  const { cancels } = entry
+  if (!cancels) return null
+  const money = (cents: number, code: string) => formatMoney(cents, code, locale)
+  return [
+    `Canceló ${money(cancels.totalCents, cancels.currency)}`,
+    `cambio ${cancels.rate}`,
+    ...(cancels.cashReceivedCents !== null
+      ? [`recibió ${money(cancels.cashReceivedCents, entry.currency)}`]
+      : []),
+    ...(cancels.changeCents
+      ? [`vuelto ${money(cancels.changeCents, cancels.changeCurrency ?? entry.currency)}`]
+      : []),
+  ].join(" · ")
+}
+
 /** Renglón de «Movimientos de hoy», dicho con palabras: nunca el código del movimiento. */
 function MovementLine({
   entry,
@@ -1183,11 +1324,12 @@ function MovementLine({
             ),
             locale,
           )
-    subtitle = `${entry.ticketNumber !== null ? `Ticket ${ticketDisplayNumber(entry.ticketNumber)}` : "Cobro sin ticket"} · ${methods}`
+    const crossed = cancelsWords(entry, locale)
+    subtitle = `${entry.ticketNumber !== null ? `Ticket ${ticketDisplayNumber(entry.ticketNumber)}` : "Cobro sin ticket"} · ${methods}${crossed ? ` · ${crossed}` : ""}`
     amountCents = entry.totalCents
   } else {
     amountCents = entry.amountCents
-    leaves = entry.type !== "aporte"
+    leaves = entry.type === "vuelto" ? entry.leaves : entry.type !== "aporte"
     if (entry.type === "gasto") {
       title = `Gasto: ${entry.concept}`
       subtitle = entry.fromCash ? "Salió del efectivo" : `Pagado con ${entry.method ?? "otro medio"}`
@@ -1196,6 +1338,9 @@ function MovementLine({
       subtitle = entry.concept
     } else if (entry.type === "retiro") {
       title = "Retiro de efectivo"
+      subtitle = entry.concept
+    } else if (entry.type === "vuelto") {
+      title = "Vuelto"
       subtitle = entry.concept
     } else {
       title = "Devolución"

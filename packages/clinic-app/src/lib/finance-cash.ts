@@ -29,6 +29,8 @@ export interface CashBreakdown {
   cashExpensesCents: number
   cashWithdrawnCents: number
   cashRefundedCents: number
+  /** Vuelto en otra moneda, con signo: entra el exceso del billete, sale el vuelto. */
+  cashChangeCents: number
 }
 
 export interface MethodTotal {
@@ -59,11 +61,23 @@ export interface CashState {
   breakdown: CashBreakdown
   byMethod: MethodTotal[]
   tickets: number
+  /** Los cambios con que se movió dinero en esta ventana; vacío sin otra moneda. */
+  ratesUsed?: CashRateUsed[]
   lastClosure: LastClosure | null
 }
 
-export function fetchCashState(branchId: string): Promise<{ data: CashState }> {
-  return apiFetch<{ data: CashState }>(`/api/finance/cash?branchId=${encodeURIComponent(branchId)}`)
+export interface CashRateUsed {
+  rate: string
+  cobros: number
+  vueltos: number
+  byName: string | null
+}
+
+/** Sin moneda, la caja de la moneda de la clínica. */
+export function fetchCashState(branchId: string, currency?: string): Promise<{ data: CashState }> {
+  const params = new URLSearchParams({ branchId })
+  if (currency) params.set("currency", currency)
+  return apiFetch<{ data: CashState }>(`/api/finance/cash?${params}`)
 }
 
 export type CashTermKey = keyof CashBreakdown
@@ -83,7 +97,19 @@ export const CASH_TERMS: ReadonlyArray<{
   { key: "cashExpensesCents", sign: -1, label: "Gastos pagados con la caja", short: "gastos" },
   { key: "cashWithdrawnCents", sign: -1, label: "Efectivo retirado", short: "retirado" },
   { key: "cashRefundedCents", sign: -1, label: "Devuelto en efectivo", short: "devuelto" },
+  { key: "cashChangeCents", sign: 1, label: "Vuelto en otra moneda", short: "vuelto" },
 ]
+
+/** El vuelto va con signo; los demás términos, con el signo de su renglón. */
+export function cashTermLeaves(term: { sign: 1 | -1 }, cents: number): boolean {
+  return term.sign < 0 || cents < 0
+}
+
+/** Dicho según lo que hizo en esta caja: el vuelto salió de aquí o se quedó el exceso del billete. */
+export function cashTermLabel(term: { key: CashTermKey; label: string }, cents: number): string {
+  if (term.key !== "cashChangeCents") return term.label
+  return cents < 0 ? "Vuelto de cobros en otra moneda" : "De más por un vuelto dado en otra moneda"
+}
 
 /** Lo que el panel de cierre y la hoja muestran siempre, aunque valga cero. */
 export const CASH_TERMS_ALWAYS: ReadonlySet<CashTermKey> = new Set([
@@ -267,7 +293,24 @@ export function fetchTickets(
 
 // --- Movimientos del día: GET /finance/movements ------------------------------------
 
-export type MovementKind = "apertura" | "cobro" | "gasto" | "aporte" | "retiro" | "devolucion"
+export type MovementKind =
+  | "apertura"
+  | "cobro"
+  | "gasto"
+  | "aporte"
+  | "retiro"
+  | "devolucion"
+  | "vuelto"
+
+/** Lo que canceló un cobro con otra moneda de por medio. */
+export interface MovementCancels {
+  currency: string
+  totalCents: number
+  rate: string
+  cashReceivedCents: number | null
+  changeCents: number | null
+  changeCurrency: string | null
+}
 
 export interface DayMovement {
   id: string
@@ -287,6 +330,8 @@ export interface DayMovement {
   ticketNumber: number | null
   patientId: string | null
   patientName: string | null
+  /** Lo que canceló y con qué cambio; nulo si no hubo otra moneda. */
+  cancels?: MovementCancels | null
 }
 
 /** Ticket cobrado ese día y ya anulado: sigue a la vista, sin sumar. */
@@ -343,9 +388,11 @@ export type DayEntry =
       currency: string
       totalCents: number
       parts: Array<{ method: string | null; amountCents: number }>
+      /** Lo que canceló y con qué cambio, si hubo otra moneda de por medio. */
+      cancels: MovementCancels | null
     }
   | {
-      type: "gasto" | "aporte" | "retiro" | "devolucion"
+      type: "gasto" | "aporte" | "retiro" | "devolucion" | "vuelto"
       key: string
       at: string
       movementId: string
@@ -353,6 +400,8 @@ export type DayEntry =
       method: string | null
       /** El dinero salió del efectivo de la caja (y no por otro medio). */
       fromCash: boolean
+      /** Sale de la caja; la compensación de un vuelto puede entrar. */
+      leaves: boolean
       currency: string
       amountCents: number
     }
@@ -382,12 +431,15 @@ export function groupDayMovements(
       currency: ticket.currency,
       totalCents: ticket.totalCents,
       parts: ticket.methods.map((method) => ({ method: method.name, amountCents: method.amountCents })),
+      cancels: null,
     }
     tickets.set(entry.key, entry)
     entries.push(entry)
   }
   for (const row of movements) {
     if (row.kind === "apertura") continue
+    // El vuelto de un cobro no es otro renglón: lo dice el renglón de su ticket.
+    if (row.kind === "vuelto" && row.patientPaymentId) continue
     if (row.kind === "cobro" && row.direction === "ingreso") {
       const key = ticketKey(row)
       let entry = tickets.get(key)
@@ -406,6 +458,7 @@ export function groupDayMovements(
           currency: row.currency,
           totalCents: 0,
           parts: [],
+          cancels: row.cancels ?? null,
         }
         tickets.set(key, entry)
         entries.push(entry)
@@ -425,6 +478,7 @@ export function groupDayMovements(
       concept: row.concept,
       method: row.method,
       fromCash: leavesCash(row),
+      leaves: row.direction === "egreso",
       currency: row.currency,
       amountCents: row.amountCents,
     })
@@ -462,6 +516,8 @@ export function addCashMovementApi(body: {
   kind: "aporte" | "retiro"
   amountCents: number
   concept: string
+  /** La caja de esa moneda; sin ella, la de la moneda de la clínica. */
+  currency?: string
 }): Promise<{ data: { id: string } }> {
   return apiFetch<{ data: { id: string } }>("/api/finance/cash/movements", {
     method: "POST",
@@ -494,6 +550,8 @@ export function closeCashApi(body: {
   branchId: string
   /** La ventana que se contó; null afirma que la sede aún no tenía caja. */
   shiftId: string | null
+  /** La caja de esa moneda; sin ella, la de la moneda de la clínica. */
+  currency?: string
   countedCents: number
   retainedCents: number
   deliveredCents: number
@@ -555,6 +613,7 @@ export interface ClosureSheet {
     expenseCashCents: number
     cashWithdrawnCents?: number
     cashRefundedCents?: number
+    cashChangeCents?: number
     expectedCents: number | null
     countedCents: number | null
     differenceCents: number | null
@@ -772,8 +831,12 @@ export function formatMonthName(ref: MonthRef, locale: string): string {
 
 /** Claves de React Query: Caja, sus paneles y el cobro invalidan por estos prefijos. */
 export const financeKeys = {
-  cash: (branchId: string) => ["finance-cash", branchId] as const,
-  debtList: (branchId: string, params: DebtListParams) => ["finance-debts", "list", branchId, params] as const,
+  cash: (branchId: string, currency?: string) =>
+    (currency
+      ? ["finance-cash", branchId, currency]
+      : ["finance-cash", branchId]) as readonly string[],
+  debtList: (branchId: string, params: DebtListParams) =>
+    ["finance-debts", "list", branchId, params] as const,
   movements: (branchId: string, day: string) => ["finance-movements", branchId, day] as const,
   closures: (branchId: string, result?: string) => ["finance-closures", branchId, result ?? "todos"] as const,
   closure: (id: string) => ["finance-closure", id] as const,
@@ -803,11 +866,11 @@ export function invalidateFinance(queryClient: QueryClient): void {
   }
 }
 
-/** Estado de la caja de la sede: lo leen Caja, «Cerrar caja» e «Ingresar o retirar». */
-export function useCashState(branchId: string, enabled = true) {
+/** Estado de la caja de la sede: lo leen Caja, «Cerrar caja» e «Ingresar o retirar». Una por moneda. */
+export function useCashState(branchId: string, enabled = true, currency?: string) {
   return useQuery({
-    queryKey: financeKeys.cash(branchId),
-    queryFn: () => fetchCashState(branchId),
+    queryKey: financeKeys.cash(branchId, currency),
+    queryFn: () => fetchCashState(branchId, currency),
     enabled: enabled && branchId !== "",
   })
 }

@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest"
 import {
+  cancelledCents,
   commissionCents,
   convertCents,
   currencyFractionDigits,
+  currencyWord,
   exchangeFactor,
+  exchangeRateWords,
   formatExchangeRateInput,
   formatMoney,
   formatMoneyInput,
@@ -117,6 +120,87 @@ describe("convertir y cuadrar", () => {
     expect(settleToDue(100000, 100000)).toBe(100000)
     expect(settleToDue(99998, 100000)).toBe(99998)
     expect(settleToDue(100001, 100000)).toBe(100001)
+  })
+
+  it("pagar lo que se propuso deja al día, también cuando de vuelta no da exacto", () => {
+    const pen = { businessCurrency: "PEN", factor: "3.75" }
+    // Debe USD 1,000 y paga S/ 3,750.
+    expect(
+      cancelledCents({
+        paidCents: 375000,
+        paidCurrency: "PEN",
+        dueCents: 100000,
+        currency: "USD",
+        ...pen,
+      }),
+    ).toBe(100000)
+    // Debe S/ 301.03: se proponen USD 80.27, que de vuelta son S/ 301.01.
+    expect(
+      cancelledCents({
+        paidCents: 8027,
+        paidCurrency: "USD",
+        dueCents: 30103,
+        currency: "PEN",
+        ...pen,
+      }),
+    ).toBe(30103)
+    // Debe S/ 301.00: los mismos USD 80.27 darían S/ 301.01, un centavo de más a favor.
+    expect(
+      cancelledCents({
+        paidCents: 8027,
+        paidCurrency: "USD",
+        dueCents: 30100,
+        currency: "PEN",
+        ...pen,
+      }),
+    ).toBe(30100)
+    // Lo pagado es otra cifra: se convierte y solo cuadra a una unidad o menos.
+    expect(
+      cancelledCents({
+        paidCents: 37500,
+        paidCurrency: "PEN",
+        dueCents: 10001,
+        currency: "USD",
+        ...pen,
+      }),
+    ).toBe(10001)
+    expect(
+      cancelledCents({
+        paidCents: 37500,
+        paidCurrency: "PEN",
+        dueCents: 20000,
+        currency: "USD",
+        ...pen,
+      }),
+    ).toBe(10000)
+    // Sin deuda (un adelanto): S/ 2,000 quedan en USD 533.33.
+    expect(
+      cancelledCents({
+        paidCents: 200000,
+        paidCurrency: "PEN",
+        dueCents: 0,
+        currency: "USD",
+        ...pen,
+      }),
+    ).toBe(53333)
+    // En la misma moneda no hay conversión.
+    expect(
+      cancelledCents({
+        paidCents: 5000,
+        paidCurrency: "USD",
+        dueCents: 9000,
+        currency: "USD",
+        ...pen,
+      }),
+    ).toBe(5000)
+  })
+
+  it("el cambio y la moneda en palabras, con el formato de la clínica", () => {
+    expect(exchangeRateWords("3.75", "PEN", "USD", "es-PE")).toBe("S/ 3.75 por USD 1")
+    expect(exchangeRateWords("950", "CLP", "USD", "es-CL")).toMatch(/^\$ 950 por US\$ 1$/)
+    expect(currencyWord("PEN", "es-PE")).toBe("soles")
+    expect(currencyWord("USD", "es-PE")).toBe("dólares")
+    expect(currencyWord("CLP", "es-CL")).toBe("pesos")
   })
 
   it("el valor congelado: exacto en moneda del negocio", () => {
