@@ -10,7 +10,7 @@
 import type { Db } from "@odentia/db"
 import { sql } from "drizzle-orm"
 import { collectedByProfessional, collectedNetMany } from "./finance.js"
-import { OVERDUE_DAYS, overdueDebtSql } from "./report-debts.js"
+import { OVERDUE_DAYS, valuedDebtSql } from "./report-debts.js"
 import { lastMonths, type ReportBucket, yearBefore } from "./report-periods.js"
 import {
   at,
@@ -25,7 +25,7 @@ import {
   type Span,
   spansSql,
 } from "./report-scope.js"
-import { businessFirst, type CurrencyAmount, orgMoneySql, todayValueSql } from "./report-value.js"
+import { type CurrencyAmount, foreignBreakdown } from "./report-value.js"
 import { appointmentTotalsMany, budgetLinesSql, newPatientsMany } from "./reports.js"
 import { agentBookedMany, agentCollectedMany, agentRecoveredMany, collectedIn } from "./report-agent.js"
 import { occupancyMany } from "./report-agenda.js"
@@ -66,29 +66,11 @@ export async function agentBookingsMany(tx: Db, orgId: string, branchId: string 
   return spans.map((_, index) => ({ booked: booked[index]?.booked ?? 0, recovered: recovered[index] ?? 0 }))
 }
 
-/** Lo que debían hace más de `OVERDUE_DAYS` días en cada momento, por moneda, con cuántas personas. */
-export async function overdueDebtMany(
-  tx: Db,
-  orgId: string,
-  branchId: string | undefined,
-  moments: Date[],
-): Promise<Array<Array<{ currency: string; cents: number; people: number }>>> {
-  const rows = await tx.execute<{ idx: number; currency: string; cents: string; people: number }>(sql`
-    ${overdueDebtSql(orgId, moments, OVERDUE_DAYS, branchId)}
-    select idx, currency, sum(owed)::text as cents, count(*)::int as people from overdue group by idx, currency`)
-  return bySpan(
-    moments.map((moment) => ({ start: moment, end: moment })),
-    [...rows],
-    (): Array<{ currency: string; cents: number; people: number }> => [],
-    (list, row) => [...list, { currency: row.currency, cents: safeCents(row.cents), people: row.people }],
-  )
-}
-
 /**
- * Lo mismo de todas las monedas en cada momento: el total aproximado al cambio de hoy
- * y las personas distintas (quien debe en dos monedas cuenta una vez). `byCurrency`
- * dice lo que se debe en cada una, solo si hay algo en otra. Lo viejo en otra moneda,
- * sin factor, no entra.
+ * Lo que debían hace más de `OVERDUE_DAYS` días en cada momento: el total aproximado
+ * al cambio de hoy y las personas distintas (quien debe en dos monedas cuenta una vez).
+ * `byCurrency` dice lo que se debe en cada una, solo si hay algo en otra. Lo viejo en
+ * otra moneda, sin factor, no entra.
  */
 export async function overdueDebtTotalsMany(
   tx: Db,
@@ -104,11 +86,7 @@ export async function overdueDebtTotalsMany(
     cents: string | null
     people: number
   }>(sql`
-    ${overdueDebtSql(orgId, moments, OVERDUE_DAYS, branchId)}, valued as (
-      select overdue.idx, overdue.patient_id, overdue.currency::text as currency, overdue.owed,
-        ${todayValueSql(sql`overdue.owed`, sql`overdue.currency`)} as value
-      from overdue cross join ${orgMoneySql(orgId)}
-    )
+    ${valuedDebtSql(orgId, moments, OVERDUE_DAYS, branchId)}
     select idx, currency, sum(owed)::text as owed, round(sum(value))::text as cents, count(distinct patient_id)::int as people
     from valued where value is not null group by grouping sets ((idx), (idx, currency))`)
   return moments.map((_, index) => {
@@ -120,9 +98,7 @@ export async function overdueDebtTotalsMany(
     return {
       cents: safeCents(total?.cents),
       people: total?.people ?? 0,
-      ...(parts.some((item) => item.currency !== business)
-        ? { byCurrency: businessFirst(parts, business) }
-        : {}),
+      ...foreignBreakdown(parts, business),
     }
   })
 }

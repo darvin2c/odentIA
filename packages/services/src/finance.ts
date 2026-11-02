@@ -61,7 +61,15 @@ import { getOrgLocale, type OrgLocale, orgProfileRequired } from "./locale.js"
 import { CLOSED_PURCHASE_STATUSES, type PurchaseBalance, purchaseBalances, supplierCredits } from "./purchase-balance.js"
 import { monthStart } from "./report-periods.js"
 import { bySpan, safeCents, type Span, spansSql } from "./report-spans.js"
-import { frozenValueSql, type OrgMoney, orgMoney, orgMoneyOf, orgMoneySql, orgPartValue } from "./report-value.js"
+import {
+  type OrgMoney,
+  orgMoney,
+  orgMoneyOf,
+  orgMoneySql,
+  orgPartValue,
+  paymentFlowSql,
+  paymentValueSql,
+} from "./report-value.js"
 import { createWorkspaceNotification } from "./workspace.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import type { TicketFrozen } from "./payments.js"
@@ -2822,34 +2830,13 @@ export async function collectedNetMany(
   spans: Span[],
   options: { branchId?: string } = {},
 ): Promise<Array<Array<{ currency: string; cents: number; taxCents: number }>>> {
-  const branchOf = (column: SQL): SQL =>
-    options.branchId ? sql`and ${column} = ${options.branchId}` : sql``
-  const value = (part: SQL) =>
-    frozenValueSql({
-      part,
-      amount: sql`x.amount`,
-      value: sql`x.business`,
-      currency: sql`x.currency`,
-    })
   const rows = await tx.execute<{ idx: number; currency: string; cents: string; tax: string }>(sql`
     select b.idx, case when v.cents is null then x.currency else op.currency end as currency,
       round(sum(coalesce(v.cents, x.cents)))::text as cents, round(sum(coalesce(v.tax, x.tax)))::text as tax
     from ${spansSql(spans)}
     cross join ${orgMoneySql(orgId)}
-    join lateral (
-      select p.currency::text as currency, p.amount_cents::bigint as cents, p.tax_cents::bigint as tax, p.amount_cents as amount, p.business_cents as business from patient_payment p
-      where p.organization_id = ${orgId} and p.paid_at >= b.start_at and p.paid_at < b.end_at
-        and (p.voided_at is null or p.voided_at >= b.end_at) ${branchOf(sql`p.branch_id`)}
-      union all
-      select p.currency::text, -p.amount_cents::bigint, -p.tax_cents::bigint, p.amount_cents, p.business_cents from patient_payment p
-      where p.organization_id = ${orgId} and p.paid_at < b.start_at
-        and p.voided_at >= b.start_at and p.voided_at < b.end_at ${branchOf(sql`p.branch_id`)}
-      union all
-      select p.currency::text, -r.amount_cents::bigint, -r.tax_cents::bigint, p.amount_cents, p.business_cents from patient_payment_refund r
-      join patient_payment p on p.id = r.payment_id and p.organization_id = r.organization_id
-      where r.organization_id = ${orgId} and r.refunded_at >= b.start_at and r.refunded_at < b.end_at ${branchOf(sql`p.branch_id`)}
-    ) x on true
-    cross join lateral (select ${value(sql`x.cents`)} as cents, ${value(sql`x.tax`)} as tax) v
+    join lateral (${paymentFlowSql(orgId, sql`b.start_at`, sql`b.end_at`, options.branchId)}) x on true
+    cross join lateral (select ${paymentValueSql(sql`x.cents`, "x")} as cents, ${paymentValueSql(sql`x.tax`, "x")} as tax) v
     group by b.idx, 2`)
   return bySpan(
     spans,

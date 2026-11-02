@@ -17,6 +17,7 @@
  */
 import { sql, type SQL } from "drizzle-orm"
 import { at } from "./report-spans.js"
+import { orgMoneySql, todayValueSql } from "./report-value.js"
 
 /** Plazo de «Te deben hace más de…», el mismo de la línea «Saldo vencido» por defecto. */
 export const OVERDUE_DAYS = 30
@@ -99,5 +100,18 @@ export function overdueDebtSql(orgId: string, moments: Date[], days: number, bra
       group by z.idx, z.patient_id, z.currency, m.at_moment
       having sum(z.owed) > 0 and min(z.since) < m.at_moment - make_interval(days => ${days})
         and sum(z.owed) > greatest(sum(z.credit), 0)
+    )`
+}
+
+/**
+ * `overdueDebtSql` más la CTE `valued(idx, patient_id, currency, owed, since, value)`:
+ * cada deuda con su valor al cambio de hoy, nulo si esa moneda ya no tiene factor. Se
+ * suma con `round(sum(value))`: nunca se redondea fila por fila.
+ */
+export function valuedDebtSql(orgId: string, moments: Date[], days: number, branchId?: string): SQL {
+  return sql`${overdueDebtSql(orgId, moments, days, branchId)}, valued as (
+      select overdue.idx, overdue.patient_id, overdue.currency::text as currency, overdue.owed, overdue.since,
+        ${todayValueSql(sql`overdue.owed`, sql`overdue.currency`)} as value
+      from overdue cross join ${orgMoneySql(orgId)}
     )`
 }

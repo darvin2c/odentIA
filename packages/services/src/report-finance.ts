@@ -22,7 +22,7 @@ import { budgetLineUnitsSql, budgetValueOptionSql } from "./budgets.js"
 import { collectedNetMany, EXPENSE_CATEGORIES } from "./finance.js"
 import { orgTaxes } from "./clinic-taxes.js"
 import { unpaidPurchasesMany } from "./purchase-balance.js"
-import { overdueDebtSql } from "./report-debts.js"
+import { overdueDebtSql, valuedDebtSql } from "./report-debts.js"
 import { addMonths, currentMonthIn, lastMonths, monthStart, type ReportBucket } from "./report-periods.js"
 import {
   at,
@@ -41,9 +41,10 @@ import {
 import {
   businessFirst,
   type CurrencyAmount,
-  frozenValueSql,
+  foreignBreakdown,
   type OrgMoney,
   orgMoneySql,
+  paymentFlowSql,
   paymentValueSql,
   todayValueCents,
   todayValueSql,
@@ -247,12 +248,6 @@ export async function expensesMany(tx: Db, orgId: string, spans: Span[], options
       when e.purchase_order_id is not null then 'compra'
       when e.sales_tax then 'impuesto_de_lo_cobrado'
       else 'gasto' end`
-  const value = frozenValueSql({
-    part: sql`x.cents`,
-    amount: sql`x.amount`,
-    value: sql`x.business`,
-    currency: sql`x.currency`,
-  })
   const rows = await tx.execute<{
     idx: number
     currency: string
@@ -265,14 +260,14 @@ export async function expensesMany(tx: Db, orgId: string, spans: Span[], options
     from ${spansSql(spans)}
     cross join ${orgMoneySql(orgId)}
     join lateral (
-      select e.currency::text as currency, e.category, ${kind} as kind, e.amount_cents::bigint as cents, e.amount_cents as amount, e.business_cents as business from expense e
+      select e.currency::text as currency, e.category, ${kind} as kind, e.amount_cents::bigint as cents, e.amount_cents, e.business_cents from expense e
       where e.organization_id = ${orgId} and e.spent_at >= b.start_at and e.spent_at < b.end_at
         and (e.voided_at is null or e.voided_at >= b.end_at) ${branch}
       union all
       select e.currency::text, e.category, ${kind}, -e.amount_cents::bigint, e.amount_cents, e.business_cents from expense e
       where e.organization_id = ${orgId} and e.spent_at < b.start_at and e.voided_at >= b.start_at and e.voided_at < b.end_at ${branch}
     ) x on true
-    cross join lateral (select ${value} as value) v
+    cross join lateral (select ${paymentValueSql(sql`x.cents`, "x")} as value) v
     group by b.idx, 2, x.category, x.kind`)
   return bySpan(
     spans,
@@ -344,52 +339,46 @@ export async function debtAgingMany(
 ) {
   const rows = await tx.execute<{
     idx: number
-    patientId: string
-    currency: string
+    age: DebtAge | null
+    currency: string | null
     owed: string
-    value: string | null
-    age: DebtAge
+    cents: string
+    people: number
   }>(sql`
-    ${overdueDebtSql(orgId, moments, 0, options.branchId)}
-    select o.idx, o.patient_id as "patientId", o.currency::text as currency, o.owed::text as owed,
-      ${todayValueSql(sql`o.owed`, sql`o.currency`)}::text as value, ${debtAgeSql(sql`o.since`, sql`m.at_moment`)} as age
-    from overdue o join m on m.idx = o.idx cross join ${orgMoneySql(orgId)}`)
+    ${valuedDebtSql(orgId, moments, 0, options.branchId)}, aged as (
+      select valued.*, ${debtAgeSql(sql`valued.since`, sql`m.at_moment`)} as age from valued join m on m.idx = valued.idx
+    )
+    select idx, age, currency, sum(owed)::text as owed, round(sum(value))::text as cents, count(distinct patient_id)::int as people
+    from aged where value is not null
+    group by grouping sets ((idx), (idx, currency), (idx, age), (idx, age, currency))`)
   return moments.map((_, index) => {
-    const own = rows.filter((row) => Number(row.idx) === index && row.value !== null)
-    const foreign = own.some((row) => row.currency !== options.currency)
-    const totals = (list: typeof own) => ({
-      cents: safeCents(Math.round(list.reduce((total, row) => total + Number(row.value), 0))),
-      people: new Set(list.map((row) => row.patientId)).size,
-      ...(foreign
-        ? {
-            byCurrency: amountsByCurrency(
-              list.map((row) => ({ currency: row.currency, cents: safeCents(row.owed) })),
-              options.currency,
-            ),
-          }
-        : {}),
-    })
-    const all = totals(own)
+    const own = rows.filter((row) => Number(row.idx) === index)
+    const slice = (age: DebtAge | null) => {
+      const list = own.filter((row) => row.age === age)
+      const total = list.find((row) => row.currency === null)
+      return {
+        cents: safeCents(total?.cents),
+        people: total?.people ?? 0,
+        parts: list.flatMap((row) =>
+          row.currency === null ? [] : [{ currency: row.currency, cents: safeCents(row.owed) }],
+        ),
+      }
+    }
+    const all = slice(null)
+    // Si algo va en otra moneda, cada tramo dice lo suyo aunque sea solo de la del negocio.
+    const foreign = foreignBreakdown(all.parts, options.currency).byCurrency !== undefined
+    const inEach = (parts: CurrencyAmount[]) =>
+      foreign ? { byCurrency: businessFirst(parts, options.currency) } : {}
     return {
       totalCents: all.cents,
       people: all.people,
-      ...(foreign ? { byCurrency: all.byCurrency } : {}),
-      ages: DEBT_AGES.map((age) => ({
-        key: age.key,
-        ...totals(own.filter((row) => row.age === age.key)),
-      })),
+      ...inEach(all.parts),
+      ages: DEBT_AGES.map((age) => {
+        const { cents, people, parts } = slice(age.key)
+        return { key: age.key, cents, people, ...inEach(parts) }
+      }),
     }
   })
-}
-
-/** Suma por moneda, con la del negocio primero. */
-function amountsByCurrency(list: CurrencyAmount[], business: string): CurrencyAmount[] {
-  const totals = new Map<string, number>()
-  for (const item of list) totals.set(item.currency, (totals.get(item.currency) ?? 0) + item.cents)
-  return businessFirst(
-    [...totals].map(([currency, cents]) => ({ currency, cents })),
-    business,
-  )
 }
 
 /**
@@ -409,19 +398,14 @@ export function purchasesDueOf(
   const oldest = valued.flatMap((item) =>
     item.oldestReceivedAt ? [item.oldestReceivedAt.getTime()] : [],
   )
-  const foreign = valued.some((item) => item.currency !== money.currency)
   return {
     cents: valued.reduce((total, item) => total + item.value, 0),
     orders: valued.reduce((total, item) => total + item.orders, 0),
     oldestReceivedAt: oldest.length > 0 ? new Date(Math.min(...oldest)).toISOString() : null,
-    ...(foreign
-      ? {
-          byCurrency: amountsByCurrency(
-            valued.map((item) => ({ currency: item.currency, cents: item.cents })),
-            money.currency,
-          ),
-        }
-      : {}),
+    ...foreignBreakdown(
+      valued.map((item) => ({ currency: item.currency, cents: item.cents })),
+      money.currency,
+    ),
   }
 }
 
@@ -474,9 +458,7 @@ export async function upcomingWork(tx: Db, orgId: string, currency: string, now:
     cents: safeCents(row?.cents),
     patients: row?.patients ?? 0,
     unbooked: { cents: safeCents(row?.unbookedCents), patients: row?.unbookedPatients ?? 0 },
-    ...(parts.some((item) => item.currency !== currency)
-      ? { byCurrency: businessFirst(parts, currency) }
-      : {}),
+    ...foreignBreakdown(parts, currency),
   }
 }
 
@@ -521,16 +503,6 @@ export async function newPatientValue(tx: Db, orgId: string, end: Date, options:
  * con el arqueo de su caja: lo devuelto, lo que de verdad salió.
  */
 export async function collectedByMethod(tx: Db, orgId: string, span: Span, options: { currency: string; branchId?: string }) {
-  const branch = options.branchId ? sql`and p.branch_id = ${options.branchId}` : sql``
-  const tender = sql`coalesce(p.tender_cents, p.amount_cents)`
-  const tenderCurrency = sql`coalesce(p.tender_currency, p.currency)::text`
-  const money = sql`p.amount_cents as amount, p.business_cents as business, p.currency::text as currency`
-  const value = frozenValueSql({
-    part: sql`x.cents`,
-    amount: sql`x.amount`,
-    value: sql`x.business`,
-    currency: sql`x.currency`,
-  })
   const rows = await tx.execute<{
     method: string
     cash: boolean
@@ -539,21 +511,10 @@ export async function collectedByMethod(tx: Db, orgId: string, span: Span, optio
     entered: string
   }>(sql`
     select x.method, bool_or(x.cash) as cash, x.entered_currency as "enteredCurrency", round(sum(v.value))::text as cents, round(sum(x.entered))::text as entered from (
-      select p.method_name as method, p.method_type_code = '10' as cash, p.amount_cents::bigint as cents, ${tender}::numeric as entered, ${tenderCurrency} as entered_currency, ${money} from patient_payment p
-      where p.organization_id = ${orgId} and p.paid_at >= ${at(span.start)} and p.paid_at < ${at(span.end)}
-        and (p.voided_at is null or p.voided_at >= ${at(span.end)}) ${branch}
-      union all
-      select p.method_name, p.method_type_code = '10', -p.amount_cents::bigint, -${tender}::numeric, ${tenderCurrency}, ${money} from patient_payment p
-      where p.organization_id = ${orgId} and p.paid_at < ${at(span.start)}
-        and p.voided_at >= ${at(span.start)} and p.voided_at < ${at(span.end)} ${branch}
-      union all
-      select p.method_name, p.method_type_code = '10', -r.amount_cents::bigint, -coalesce(r.tender_cents, r.amount_cents)::numeric, ${tenderCurrency}, ${money}
-      from patient_payment_refund r
-      join patient_payment p on p.organization_id = r.organization_id and p.id = r.payment_id
-      where r.organization_id = ${orgId} and r.refunded_at >= ${at(span.start)} and r.refunded_at < ${at(span.end)} ${branch}
+      ${paymentFlowSql(orgId, at(span.start), at(span.end), options.branchId)}
     ) x
     cross join ${orgMoneySql(orgId)}
-    cross join lateral (select ${value} as value) v
+    cross join lateral (select ${paymentValueSql(sql`x.cents`, "x")} as value) v
     where v.value is not null
     group by x.method, x.entered_currency`)
   const closures = await tx.execute<{ currency: string; count: number; cash: string }>(sql`
@@ -617,20 +578,10 @@ async function moneyFlowByCurrency(
   business: string,
   branchId: string | undefined,
 ): Promise<CurrencyAmount[]> {
-  const paymentBranch = branchId ? sql`and p.branch_id = ${branchId}` : sql``
   const expenseBranch = branchId ? sql`and e.branch_id = ${branchId}` : sql``
   const rows = await tx.execute<{ currency: string; cents: string }>(sql`
     select x.currency, round(sum(x.cents))::text as cents from (
-      select coalesce(p.tender_currency, p.currency)::text as currency, coalesce(p.tender_cents, p.amount_cents)::numeric as cents from patient_payment p
-      where p.organization_id = ${orgId} and p.paid_at >= ${at(span.start)} and p.paid_at < ${at(span.end)}
-        and (p.voided_at is null or p.voided_at >= ${at(span.end)}) ${paymentBranch}
-      union all
-      select coalesce(p.tender_currency, p.currency)::text, -coalesce(p.tender_cents, p.amount_cents)::numeric from patient_payment p
-      where p.organization_id = ${orgId} and p.paid_at < ${at(span.start)} and p.voided_at >= ${at(span.start)} and p.voided_at < ${at(span.end)} ${paymentBranch}
-      union all
-      select coalesce(p.tender_currency, p.currency)::text, -coalesce(r.tender_cents, r.amount_cents)::numeric
-      from patient_payment_refund r join patient_payment p on p.organization_id = r.organization_id and p.id = r.payment_id
-      where r.organization_id = ${orgId} and r.refunded_at >= ${at(span.start)} and r.refunded_at < ${at(span.end)} ${paymentBranch}
+      select f.entered_currency as currency, f.entered as cents from (${paymentFlowSql(orgId, at(span.start), at(span.end), branchId)}) f
       union all
       select coalesce(e.tender_currency, e.currency)::text, -coalesce(e.tender_cents, e.amount_cents)::numeric from expense e
       where e.organization_id = ${orgId} and e.spent_at >= ${at(span.start)} and e.spent_at < ${at(span.end)}
@@ -738,7 +689,7 @@ async function missingExpenses(tx: Db, orgId: string, scope: ReportScope) {
       (array_agg(round(v.value)::text order by e.spent_at desc))[1] as "lastCents"
     from expense e join branch b on b.organization_id = e.organization_id and b.id = e.branch_id
     cross join ${orgMoneySql(orgId)}
-    cross join lateral (select ${frozenValueSql({ part: sql`e.amount_cents`, amount: sql`e.amount_cents`, value: sql`e.business_cents`, currency: sql`e.currency` })} as value) v
+    cross join lateral (select ${paymentValueSql(sql`e.amount_cents`, "e")} as value) v
     where e.organization_id = ${orgId} and e.voided_at is null and v.value is not null
       and e.spent_at >= ${at(start)} and e.spent_at < ${at(end)} ${branch}
       and not exists (select 1 from commission_settlement s where s.organization_id = e.organization_id and s.expense_id = e.id)
