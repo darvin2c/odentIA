@@ -2,14 +2,16 @@
  * Registro profesional por organización: nombre de firma, título y colegiatura
  * con que el profesional firma atenciones, actas, recetas y consentimientos.
  * Cada documento firmado guarda su propia instantánea; editar el perfil nunca
- * reescribe lo ya firmado.
+ * reescribe lo ya firmado. Su firma dibujada (ADR 0131) es lo que se ve en el
+ * papel: no acredita nada más que los datos del perfil y no es firma digital.
  */
 import { ATTENDING_ROLES } from "@odentia/auth/permissions"
+import type { SignatureStrokes } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { member, user } from "@odentia/db/schema/auth"
-import { professionalProfile } from "@odentia/db/schema/clinical-forms"
+import { professionalDrawnSignature, professionalProfile } from "@odentia/db/schema/clinical-forms"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, eq, inArray } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, lte } from "drizzle-orm"
 import { requireCanAttend } from "./attending.js"
 import { invalidField, notFound, ServiceError } from "./errors.js"
 
@@ -35,6 +37,13 @@ export interface ProfessionalProfileInput {
   registrationBody?: string
   registrationNumber?: string | null
   specialtyRegistration?: string | null
+  /** Solo la propia persona. Sin el dato no cambia; nulo es que la quita. */
+  signatureStrokes?: unknown
+}
+
+/** Su propio perfil, con su firma: nadie más la recibe. */
+export interface OwnProfessionalProfile extends ProfessionalProfile {
+  signatureStrokes: SignatureStrokes | null
 }
 
 /** Instantánea con la que se firma un documento clínico. */
@@ -104,6 +113,91 @@ export async function getProfessionalProfile(
   return toProfile(userId, accountName, row)
 }
 
+/** Los trazos de una firma, con sus límites. `field`: su nombre en el cuerpo de la petición. */
+export function assertStrokes(
+  raw: unknown,
+  label = "La firma manuscrita",
+  field = "signatureData",
+): SignatureStrokes {
+  const fail = (message: string) => invalidField(field, message)
+  if (!Array.isArray(raw) || raw.length === 0) throw fail(`${label} está vacía`)
+  if (raw.length > 500) throw fail(`${label} supera el tamaño permitido`)
+  let points = 0
+  for (const stroke of raw) {
+    if (!Array.isArray(stroke) || stroke.length < 2 || stroke.length > 5000)
+      throw fail(`${label} tiene un trazo inválido`)
+    for (const point of stroke) {
+      if (
+        !Array.isArray(point) ||
+        point.length !== 2 ||
+        !point.every((n) => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1000)
+      )
+        throw fail(`${label} tiene coordenadas fuera del recuadro`)
+    }
+    points += stroke.length
+  }
+  if (points > 20000) throw fail(`${label} supera el tamaño permitido`)
+  return raw as SignatureStrokes
+}
+
+/** La firma que usa hoy; nula si no guardó ninguna o la quitó. */
+export async function currentDrawnSignature(
+  tx: Db,
+  orgId: string,
+  userId: string,
+): Promise<SignatureStrokes | null> {
+  const [row] = await tx
+    .select({ strokes: professionalDrawnSignature.strokes })
+    .from(professionalDrawnSignature)
+    .where(
+      and(
+        eq(professionalDrawnSignature.organizationId, orgId),
+        eq(professionalDrawnSignature.userId, userId),
+      ),
+    )
+    .orderBy(desc(professionalDrawnSignature.createdAt), desc(professionalDrawnSignature.id))
+    .limit(1)
+  return (row?.strokes as SignatureStrokes | null | undefined) ?? null
+}
+
+/**
+ * La firma que regía cuando se emitió un papel: la misma aunque después la
+ * cambie. Nula si entonces no tenía ninguna: el papel lleva la línea para firmar a mano.
+ */
+export async function drawnSignatureAt(
+  tx: Db,
+  orgId: string,
+  userId: string | null | undefined,
+  at: Date | string,
+): Promise<SignatureStrokes | null> {
+  if (!userId) return null
+  const [row] = await tx
+    .select({ strokes: professionalDrawnSignature.strokes })
+    .from(professionalDrawnSignature)
+    .where(
+      and(
+        eq(professionalDrawnSignature.organizationId, orgId),
+        eq(professionalDrawnSignature.userId, userId),
+        lte(professionalDrawnSignature.createdAt, new Date(at)),
+      ),
+    )
+    .orderBy(desc(professionalDrawnSignature.createdAt), desc(professionalDrawnSignature.id))
+    .limit(1)
+  return (row?.strokes as SignatureStrokes | null | undefined) ?? null
+}
+
+/** Lo que ve la propia persona de su perfil. */
+export async function getOwnProfessionalProfile(
+  tx: Db,
+  orgId: string,
+  userId: string,
+): Promise<OwnProfessionalProfile> {
+  return {
+    ...(await getProfessionalProfile(tx, orgId, userId)),
+    signatureStrokes: await currentDrawnSignature(tx, orgId, userId),
+  }
+}
+
 /** Perfiles de quienes pueden atender; en blanco para quien aún no lo completó. */
 export async function listProfessionalProfiles(
   tx: Db,
@@ -130,6 +224,13 @@ export async function setProfessionalProfile(
   userId: string,
   input: ProfessionalProfileInput,
 ): Promise<ProfessionalProfile> {
+  // Administración edita los datos de otro, nunca su firma: nadie firma por otra persona.
+  if (input.signatureStrokes !== undefined && actorUserId !== userId)
+    throw new ServiceError("SIGNATURE_OWN_ONLY", 403, "Cada profesional guarda su propia firma")
+  const signatureStrokes =
+    input.signatureStrokes === undefined || input.signatureStrokes === null
+      ? input.signatureStrokes
+      : assertStrokes(input.signatureStrokes, "Tu firma", "signatureStrokes")
   const { name: accountName } = await requireCanAttend(tx, orgId, userId)
   const current = await getProfessionalProfile(tx, orgId, userId)
   const professionalTitle =
@@ -181,6 +282,21 @@ export async function setProfessionalProfile(
     entityId: row?.id ?? userId,
     metadata: { userId, registrationNumber: registrationNumber ?? null },
   })
+  if (signatureStrokes !== undefined) {
+    await tx.insert(professionalDrawnSignature).values({
+      organizationId: orgId,
+      userId,
+      strokes: signatureStrokes,
+    })
+    await tx.insert(auditEvent).values({
+      organizationId: orgId,
+      actorUserId,
+      action: signatureStrokes ? "professional_signature.saved" : "professional_signature.removed",
+      entity: "professional_profile",
+      entityId: row?.id ?? userId,
+      metadata: { userId },
+    })
+  }
   return toProfile(userId, accountName, row)
 }
 

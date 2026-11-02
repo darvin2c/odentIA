@@ -109,9 +109,64 @@ it("en el rollo angosto, lo que va bajo la raya de firmar no se pisa con lo que 
 
 it("la firma guardada conserva su proporción aunque la columna sea más ancha", async () => {
   const kit = await DocumentKit.open(clinic, documentFormat(clinic), { title: "T", docLabel: "T" })
-  const draw = vi.spyOn(kit.page, "drawLine")
-  kit.penSignatures([{ heading: "Quien revoca", strokes: [[[0, 0], [1000, 0]]], lines: [] }])
-  const stroke = draw.mock.calls[0]?.[0]
-  expect(stroke).toBeDefined()
-  expect((stroke!.end.x as number) - (stroke!.start.x as number)).toBeCloseTo((66 * 22) / 7, 1)
+  const draw = vi.spyOn(kit.page, "drawSvgPath")
+  // Ocupa todo el recuadro de 22 × 7: una sola escala, la que cabe en el alto, sin estirarla al ancho.
+  kit.penSignatures([{ heading: "Quien revoca", strokes: [[[0, 0], [1000, 1000]]], lines: [] }])
+  const scale = draw.mock.calls[0]?.[1]?.scale
+  expect(scale).toBeDefined()
+  expect(scale! * 22).toBeCloseTo(((66 - 4) * 22) / 7, 1)
+  expect(scale! * 22).toBeLessThan(kit.width)
+})
+
+it("el bloque firmado mide lo que dice, con su firma o con la línea para firmar a mano", async () => {
+  const kit = await DocumentKit.open(clinic, documentFormat(clinic), { title: "T", docLabel: "T" })
+  const draw = vi.spyOn(kit.page, "drawSvgPath")
+  const input = { name: "Ana Torres", credential: "Cirujano dentista · COP 12345", at: "1 nov 2026, 10:20" }
+
+  const before = kit.y
+  kit.signedBlock(input)
+  expect(before - kit.y).toBeCloseTo(kit.signedBlockHeight(input))
+  expect(draw).not.toHaveBeenCalled()
+
+  const signed = { ...input, strokes: [[[0, 0], [1000, 1000]]] }
+  const again = kit.y
+  kit.signedBlock(signed)
+  expect(again - kit.y).toBeCloseTo(kit.signedBlockHeight(signed))
+  expect(draw).toHaveBeenCalledTimes(1)
+})
+
+it("el bloque firmado lleva el sello con los datos de quien firma; sin quien firme, la línea de firma y sello", async () => {
+  const kit = await DocumentKit.open(clinic, documentFormat(clinic), { title: "T", docLabel: "T" })
+  const rectangle = vi.spyOn(kit.page, "drawRectangle")
+  const signedInput = {
+    name: "Dra. Ana Torres",
+    credential: "Cirujano dentista · COP 12345",
+    at: "1 nov 2026, 10:20",
+    checkUrl: "https://clinica.test/comprobar/abc",
+  }
+  const lay = vi.spyOn(kit, "lay")
+  kit.signedBlock(signedInput)
+  const written = lay.mock.calls.map(([value]) => value)
+  expect(written).toEqual(expect.arrayContaining(["Dra. Ana Torres", "Cirujano dentista", "COP 12345"]))
+  // El recuadro del bloque y el del sello.
+  expect(rectangle).toHaveBeenCalledTimes(2)
+
+  rectangle.mockClear()
+  lay.mockClear()
+  kit.signedBlock({ ...signedInput, name: null, credential: null })
+  expect(lay.mock.calls.map(([value]) => value)).toContain("Firma y sello")
+  expect(rectangle).toHaveBeenCalledTimes(1)
+})
+
+it("el bloque firmado anclado abajo se queda en su hoja, con o sin QR y con cualquier texto", async () => {
+  for (const checkUrl of [null, "https://clinica.test/comprobar/abc"]) {
+    for (const credential of [null, "Cirujano dentista · COP 12345", `${"Especialista en endodoncia ".repeat(6)}· COP 1`]) {
+      const kit = await DocumentKit.open(clinic, documentFormat(clinic), { title: "T", docLabel: "T" })
+      const page = kit.page
+      const input = { name: "Ana Torres", credential, at: "1 de noviembre de 2026, 10:20", checkUrl }
+      kit.anchorBottom(kit.signedBlockHeight(input))
+      kit.signedBlock(input)
+      expect(kit.page).toBe(page)
+    }
+  }
 })

@@ -54,6 +54,11 @@ export function setupTestDb(): void {
     await insertOrg(ownerDb, "org_a", "norte")
     await insertOrg(ownerDb, "org_b", "sur")
   }, 180_000)
+  // Como en db y api: con Ryuk apagado, cada archivo dejaba su base encendida y la
+  // suite completa agotaba la memoria del equipo.
+  afterAll(async () => {
+    await container?.stop()
+  })
 }
 
 /**

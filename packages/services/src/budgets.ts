@@ -9,6 +9,7 @@ import {
   type ProductWords,
   parsePatientGuide,
   productWords,
+  type SignatureStrokes,
   sumAcceptedCents,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
@@ -48,7 +49,7 @@ import type { PlanItemDecision } from "./plan.js"
 import { assertExecutableCodings } from "./procedure-codings.js"
 import type { ProductSite, SiteFields } from "./product-hooks.js"
 import { productHooks } from "./products.js"
-import { requireProfessionalSignature } from "./professional-profiles.js"
+import { drawnSignatureAt, requireProfessionalSignature } from "./professional-profiles.js"
 import { isPromotionLive, requirePromotionPrice } from "./promotions.js"
 import { personalLinkUrl } from "./public-links.js"
 import { requireDecisionContact } from "./responsibilities.js"
@@ -2968,7 +2969,13 @@ export interface BudgetPrintPayload {
     patientNumber: number
     birthDate: string | null
   }
-  professional: { name: string; title: string | null; registration: string | null } | null
+  professional: {
+    name: string
+    title: string | null
+    registration: string | null
+    /** La firma que regía al entregarlo; sin ella queda la línea para firmar a mano. */
+    strokes: SignatureStrokes | null
+  } | null
   /** Las líneas de la opción que vale (con una sola opción, todas). */
   lines: BudgetPrintLine[]
   /** Con más de una opción, cada una con su total; vacío con una sola. */
@@ -3218,6 +3225,7 @@ export async function getBudgetPrintPayload(
         name: row.name,
         title: signature?.title ?? null,
         registration: signature?.registration ?? null,
+        strokes: await drawnSignatureAt(tx, orgId, author, budget.presentedAt ?? budget.createdAt),
       }
     }
   }

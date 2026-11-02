@@ -263,7 +263,7 @@ function yourDecision(
     ? ` ¿Dudas? Llámenos al ${snap.org.phone.replaceAll(" ", "\u00a0")}.`
     : ""
   // La decisión va entera en una página si cabe: casillas y firma no se separan.
-  const needed = 190 + (hasOptions ? 40 : lines.length * 24) + (snap.personalLinkUrl ? 76 : 0)
+  const needed = 240 + (hasOptions ? 40 : lines.length * 24) + (snap.personalLinkUrl ? 76 : 0)
   if (kit.room() < needed && needed <= kit.freshPageRoom()) kit.newPage()
   kit.ensure(150)
   // Arriba de una página ya hay una regla: la del encabezado corto.
@@ -344,11 +344,13 @@ function yourDecision(
   }
   // La firma de quien emite no va en un borrador: aún no se entrega.
   const signer = !snap.isDraft && snap.professional ? snap.professional : null
-  kit.ensure(70)
+  // Con firma: su lugar, su línea y hasta cinco renglones debajo. Ninguno se va solo a otra hoja.
+  kit.ensure(signer ? 130 : 70)
   kit.gap(signer ? 12 : 30)
   const top = kit.y
   const half = (kit.width - 21) / 2
-  const captionY = top - (signer ? 36 : 0)
+  // Las dos firmas sobre la misma línea: la del paciente y la de quien lo entrega.
+  const captionY = top - (signer ? 40 : 0)
   kit.page.drawLine({
     start: { x: kit.left, y: captionY },
     end: { x: kit.left + half, y: captionY },
@@ -365,16 +367,15 @@ function yourDecision(
   const bottom = kit.y
   if (signer) {
     const x = half + 21
-    kit.y = top
-    const credential = credentialOf(signer.title, signer.registration)
-    kit.text(`Firmado electrónicamente, ${dayWords(snap.issuedAt, zone)}`, {
-      size: SIZE.label,
-      face: "sansSemi",
-      tone: "gray",
-      indent: x,
-      width: half,
-      leading: 1.35,
+    if (signer.strokes) kit.drawStrokes(signer.strokes, kit.left + x, captionY + 2, half, 36)
+    kit.page.drawLine({
+      start: { x: kit.left + x, y: captionY },
+      end: { x: kit.left + x + half, y: captionY },
+      thickness: 0.75,
+      color: kit.color("ink"),
     })
+    kit.y = captionY - 3
+    const credential = credentialOf(signer.title, signer.registration)
     kit.text(signer.name, {
       size: SIZE.dense,
       face: "sansSemi",
@@ -390,6 +391,13 @@ function yourDecision(
         width: half,
         leading: 1.4,
       })
+    kit.text(`Firmado electrónicamente, ${dayWords(snap.issuedAt, zone)}`, {
+      size: SIZE.second,
+      tone: "gray",
+      indent: x,
+      width: half,
+      leading: 1.4,
+    })
     kit.y = Math.min(kit.y, bottom)
   }
 }

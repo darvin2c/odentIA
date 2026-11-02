@@ -288,6 +288,53 @@ afterAll(async () => {
   await container?.stop()
 })
 
+it("la firma del profesional: solo la propia persona la guarda y la recibe (ADR 0131)", async () => {
+  const strokes = [[[10, 10], [200, 120]]]
+  const profile = { professionalTitle: "Cirujano dentista", registrationBody: "COP", registrationNumber: "12345" }
+  const put = (appRef: Hono, target: string, body: unknown) =>
+    appRef.request(`/clinical-forms/professionals/${target}/profile`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  const admin = buildApp("admin")
+
+  const saved = await put(admin, "me", { ...profile, signatureStrokes: strokes })
+  expect(saved.status).toBe(200)
+  const mine = await json<{ data: { signatureStrokes: unknown } }>(
+    await admin.request("/clinical-forms/professionals/me/profile"),
+  )
+  expect(mine.data.signatureStrokes).toEqual(strokes)
+
+  // Administración no guarda ni quita la firma de otra persona; una firma mal formada se dice en su campo.
+  const other = "u-firma-otra"
+  await ownerDb.execute(
+    sql`insert into "user" ("id", "name", "email") values (${other}, 'Otra doctora', 'otra-firma@test.dev') on conflict do nothing`,
+  )
+  await ownerDb.execute(
+    sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values ('m-firma-otra', 'org_a', ${other}, 'clinician', now()) on conflict do nothing`,
+  )
+  for (const signatureStrokes of [strokes, null]) {
+    const denied = await put(admin, other, { ...profile, signatureStrokes })
+    expect(denied.status).toBe(403)
+    expect((await json<ErrorBody>(denied)).error.code).toBe("SIGNATURE_OWN_ONLY")
+  }
+  const invalid = await put(admin, "me", { ...profile, signatureStrokes: [[[10, 10]]] })
+  expect(invalid.status).toBe(400)
+
+  // Ni el perfil de otro ni la lista del equipo llevan firmas.
+  const corrected = await put(admin, other, profile)
+  expect(corrected.status).toBe(200)
+  const theirs = await json<{ data: Record<string, unknown> }>(
+    await admin.request(`/clinical-forms/professionals/${other}/profile`),
+  )
+  expect(theirs.data).not.toHaveProperty("signatureStrokes")
+  const list = await json<{ data: Array<Record<string, unknown>> }>(
+    await admin.request("/clinical-forms/professionals/profiles"),
+  )
+  expect(list.data.every((row) => !("signatureStrokes" in row))).toBe(true)
+})
+
 it("controles: alta, programación, cierre contra atención finalizada y cancelación", async () => {
   const { patientId, encounterId, itemId } = await setupAcceptedItem()
   const created = await post(app, `/patients/${patientId}/follow-ups`, {

@@ -1,7 +1,15 @@
 import { renderToStaticMarkup } from "react-dom/server"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { type DocumentCheck, fetchDocumentCheck } from "../../lib/document-check"
-import { DocumentCheckResult, DocumentCheckUnavailable } from "./document-check"
+import {
+  type DocumentCheck,
+  fetchDocumentCheck,
+  matchesFingerprint,
+} from "../../lib/document-check"
+import {
+  DocumentCheckResult,
+  DocumentCheckUnavailable,
+  DocumentFileCompare,
+} from "./document-check"
 
 const base: DocumentCheck = {
   state: "vigente",
@@ -11,8 +19,12 @@ const base: DocumentCheck = {
   voidedAt: null,
   signer: { name: "Dra. Ana Torres", title: "Cirujano dentista", registration: "COP 12345" },
   patientInitials: "R. Q.",
+  fingerprints: [],
   clinic: { name: "Dental Smile", phone: "+5115550123" },
 }
+
+/** SHA-256 de «abc». */
+const ABC = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -39,6 +51,37 @@ describe("Comprobar un documento", () => {
       <DocumentCheckResult check={{ ...base, clinic: { name: "Dental Smile", phone: null } }} />,
     )
     expect(page).not.toContain("Llamar a la clínica")
+  })
+
+  it("sin archivo guardado no ofrece comparar un PDF; con él, sí, y dice que no se sube", () => {
+    expect(renderToStaticMarkup(<DocumentCheckResult check={base} />)).not.toContain("Elegir el PDF")
+    const page = renderToStaticMarkup(
+      <DocumentCheckResult check={{ ...base, fingerprints: [ABC] }} />,
+    )
+    expect(page).toContain("Elegir el PDF")
+    expect(page).toContain("no se envía a ningún lado")
+  })
+
+  it("compara por la huella exacta del archivo", async () => {
+    const file = new Blob(["abc"])
+    await expect(matchesFingerprint(file, [ABC])).resolves.toBe(true)
+    await expect(matchesFingerprint(new Blob(["abd"]), [ABC])).resolves.toBe(false)
+    // Un archivo enorme no se lee: no es uno de estos papeles.
+    const huge = { size: 31 * 1024 * 1024, arrayBuffer: () => Promise.reject(new Error("no")) }
+    await expect(matchesFingerprint(huge, [ABC])).resolves.toBe(false)
+  })
+
+  it("lo que no coincide avisa que una foto o un escaneo tampoco coinciden", () => {
+    const same = renderToStaticMarkup(
+      <DocumentFileCompare fingerprints={[ABC]} initial="same" />,
+    )
+    expect(same).toContain("Es el original.")
+    const different = renderToStaticMarkup(
+      <DocumentFileCompare fingerprints={[ABC]} initial="different" />,
+    )
+    expect(different).toContain("No coincide con el original.")
+    expect(different).toContain("Una foto, un escaneo")
+    expect(different).toContain("Llame a la clínica")
   })
 
   it("un código inválido se dice con una frase útil y sin decir por qué", () => {

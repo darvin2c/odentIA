@@ -22,9 +22,11 @@ import {
   finalizeFormResponse,
   formResponsePatientId,
   generateConsentPdf as generateConsentPdfService,
+  keepIssuedPaper,
   getConsentPrint,
   getEncounterConsentNeeds,
   getOrderPrint,
+  getOwnProfessionalProfile,
   getProfessionalProfile,
   listClinicalOrders,
   listConsentDocuments,
@@ -523,6 +525,8 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
         .optional(),
       registrationNumber: z.string().max(20, "La colegiatura admite hasta 20 caracteres").nullish(),
       specialtyRegistration: z.string().max(40, "El registro de especialista admite hasta 40 caracteres").nullish(),
+      // Sus límites y que solo la guarde la propia persona los dice el servicio.
+      signatureStrokes: z.unknown().optional(),
     })
     .strict()
 
@@ -542,8 +546,13 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (target !== userId && !canReadCatalog(memberRole) && !canAccess(memberRole, "settings.read")) {
       return forbidden(c, "Sin acceso a los profesionales")
     }
+    // Su firma solo se la entrega a la propia persona.
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => getProfessionalProfile(tx, orgId, target)),
+      withOrgContext(deps.db, orgId, (tx) =>
+        target === userId
+          ? getOwnProfessionalProfile(tx, orgId, target)
+          : getProfessionalProfile(tx, orgId, target),
+      ),
     )
   })
 
@@ -1140,9 +1149,20 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     }
     const parsed = orderCreate.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) => createClinicalOrder(tx, orgId, userId, parsed.data)),
-    )
+    return runService(c, 201, async () => {
+      const created = await withOrgContext(deps.db, orgId, (tx) =>
+        createClinicalOrder(tx, orgId, userId, parsed.data),
+      )
+      await keepIssuedPaper({
+        run: (fn) => withOrgContext(deps.db, orgId, fn),
+        storage: deps.storage,
+        orgId,
+        patientId: created.patientId,
+        type: "order",
+        documentId: created.id,
+      })
+      return created
+    })
   })
 
   app.post("/orders/:id/status", async (c) => {
@@ -1172,7 +1192,9 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     const response = await runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
         patientId = await clinicalOrderPatientId(tx, orgId, c.req.param("id"))
-        return getOrderPrint(tx, orgId, c.req.param("id"))
+        // La firma dibujada solo se le entrega a quien la guardó; la hoja es el PDF.
+        const { signerStrokes: _strokes, ...print } = await getOrderPrint(tx, orgId, c.req.param("id"))
+        return print
       }),
     )
     if (response.status === 200 && patientId)

@@ -31,6 +31,7 @@ import {
   revokeConsentDocument,
   signConsentDocument,
 } from "./clinical-forms.js"
+import { retirePatientDocument } from "./clinical.js"
 import { generateConsentPdf } from "./consent-pdf.js"
 import { clinicalFixture, seedDiagnosisCodes } from "./clinical-test-fixture.js"
 import { createContact } from "./contacts.js"
@@ -229,9 +230,35 @@ it("firma en la clínica sin dibujar la del profesional, y en papel con la foto 
   expect(onPaper).toMatchObject({ status: "firmado", signatureMethod: "papel", paperDocumentId: photo!.id })
   expect(onPaper.signatureData).toBeNull()
 
+  // La foto es la prueba de lo firmado: no se retira, ni por el servicio ni en la base.
+  await expect(
+    v.run((tx) => retirePatientDocument(tx, "org_a", v.actor, v.lucia.id, photo!.id, { reason: "Error" })),
+  ).rejects.toMatchObject({ code: "DOCUMENT_BACKS_CONSENT" })
+  await expect(
+    v.run((tx) =>
+      tx
+        .update(patientDocument)
+        .set({ retiredAt: new Date(), retiredBy: v.actor, retireReason: "Error" })
+        .where(eq(patientDocument.id, photo!.id)),
+    ),
+  ).rejects.toThrow()
+
   // Firmados los dos, el cierre ya no pide nada.
   const closing = await v.run((tx) => getEncounterClosing(tx, "org_a", v.actor, v.lucia.id, v.draft.id))
   expect(closing.consents).toEqual([])
+
+  // Si la foto era de otra persona: revocado, ya se puede sacar de esta ficha.
+  await v.run((tx) =>
+    revokeConsentDocument(tx, "org_a", v.actor, onPaper.id, {
+      reason: "Se cargó la hoja de otra persona",
+      revokerContactId: signer,
+      signatureData: { strokes: [[[3, 3], [4, 4]]] },
+    }),
+  )
+  const retired = await v.run((tx) =>
+    retirePatientDocument(tx, "org_a", v.actor, v.lucia.id, photo!.id, { reason: "Era de otra persona" }),
+  )
+  expect(retired.retiredAt).toBeTruthy()
 })
 
 it("el consentimiento sale con el PDF guardado al firmar, y la revocación tiene el suyo (#47)", async () => {

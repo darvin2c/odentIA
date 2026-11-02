@@ -37,6 +37,7 @@ import { savePatientHealth } from "../clinical.js"
 import { setProfessionalSpecialties } from "../clinical-forms.js"
 import { createContact } from "../contacts.js"
 import { DEMO_COUNTRIES } from "../demo-recipes.js"
+import { seedDemoSignature } from "../demo-signature.js"
 import { createFollowUp } from "../follow-ups.js"
 import { savePatientRegistrationConfig } from "../patient-registration.js"
 import { createPatient } from "../patients.js"
@@ -138,6 +139,7 @@ export async function seedMedicalDemo(
     registrationNumber: "045678",
     signatureName: "Elena Vela",
   })
+  await seedDemoSignature(db, ORG, VELA_ID, "Elena Vela")
   await db.transaction((tx) => ensureDefaultPaymentMethods(tx, ORG, VELA_ID, "PE"))
   // Clío encendida (entrega 10): las atenciones en borrador ofrecen «Dictar la atención».
   await db.transaction((tx) =>

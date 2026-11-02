@@ -6,6 +6,7 @@ import {
   getHealthDocumentSendOptions,
   getRefundReceiptPdf,
   HEALTH_DOCUMENT_TYPES,
+  keepIssuedPaper,
   renderHealthDocumentPdf,
   saveRecipientEmail,
   sendFinancialDocument,
@@ -102,7 +103,7 @@ const recipientEmailInput = z
   })
   .strict()
 
-const healthDocumentType = z.enum(["prescription", "order", "consent", "medical_leave"])
+const healthDocumentType = z.enum(["prescription", "order", "consent", "medical_leave", "attention_sheet"])
 
 const healthOptionsQuery = z.object({
   documentType: healthDocumentType,
@@ -126,6 +127,7 @@ const HEALTH_RESOURCE = {
   order: "ordenes",
   consent: "consentimientos",
   medical_leave: "descansos",
+  attention_sheet: "atenciones",
 } as const
 
 function forbidClinical(c: Context) {
@@ -311,6 +313,16 @@ export function createFinancialDocumentsRoute(
           orgId,
           userId,
           consentId: parsed.data.documentId,
+        })
+      // Lo emitido, igual: guardado aparte, para que un envío fallido no deje un archivo suelto.
+      else
+        await keepIssuedPaper({
+          run: (fn) => withOrgContext(deps.db, orgId, fn),
+          storage: deps.storage,
+          orgId,
+          patientId,
+          type: parsed.data.documentType,
+          documentId: parsed.data.documentId,
         })
       return withOrgContext(deps.db, orgId, (tx) =>
         sendHealthDocument(

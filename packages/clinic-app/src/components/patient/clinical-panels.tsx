@@ -1147,7 +1147,12 @@ export function RecetasPanel({
                 </form.AppField>
                 <form.AppField name={`items[${index}].quantity`}>
                   {(field) => (
-                    <field.TextField label="Cantidad total" inputMode="numeric" maxLength={4} />
+                    <field.TextField
+                      label="Cantidad total"
+                      description="Los seguros reembolsan solo la cantidad escrita."
+                      inputMode="numeric"
+                      maxLength={4}
+                    />
                   )}
                 </form.AppField>
                 <form.AppField name={`items[${index}].instructions`}>
@@ -1289,7 +1294,10 @@ export function RecetasPanel({
       ) : null}
       <form.AppField name="diagnosisCode">
         {(field) => (
-          <field.Control label="Diagnóstico (opcional)">
+          <field.Control
+            label="Diagnóstico (opcional)"
+            description="Los seguros lo piden para reembolsar la receta."
+          >
             {(control) => (
               <DiagnosisSearch
                 id={control.id}
