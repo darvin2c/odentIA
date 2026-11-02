@@ -1150,20 +1150,23 @@ button[data-tap] { appearance: none; -webkit-appearance: none; }
 
 /* ===== 14 · Precio ===== */
 .prices { flex: none; display: flex; flex-direction: column; border-radius: 26px; overflow: hidden; border: 1px solid var(--line); background: rgba(6,19,24,.78); }
-.pr { display: grid; grid-template-columns: 1fr 240px 100px 300px; gap: 24px; align-items: center; padding: 16px 40px; border-bottom: 1px solid var(--line); }
+.pr { display: grid; grid-template-columns: 1fr 240px 100px 340px; gap: 24px; align-items: center; padding: 16px 40px; border-bottom: 1px solid var(--line); }
 .pr:last-child { border-bottom: none; }
 .pr .what { font-size: 30px; font-weight: 700; }
 .pr .what small { display: block; font-size: 20px; font-weight: 500; color: var(--on-3); margin-top: 4px; }
-.pr .base { font-size: 32px; color: var(--on-3); text-align: right; position: relative; font-variant-numeric: tabular-nums; }
-.pr .base::after { content: ""; position: absolute; left: 20%; right: -6px; top: 52%; height: 3px; background: var(--on-3); transform: scaleX(0); transform-origin: left; }
+.pr .base { justify-self: end; font-size: 32px; color: var(--on-3); text-align: right; position: relative; font-variant-numeric: tabular-nums; }
+.pr .base::after { content: ""; position: absolute; left: -6px; right: -6px; top: 52%; height: 3px; background: var(--on-3); transform: scaleX(0); transform-origin: left; }
 .layer.cur .pr .base::after { animation: strike .5s forwards; animation-delay: calc(var(--d, 0s) + .6s); }
 @keyframes strike { to { transform: scaleX(1); } }
 .pr .arrow { font-family: var(--agent); font-size: 28px; color: var(--sky); text-align: center; }
 .pr .now { font-size: 54px; font-weight: 800; color: var(--sky); text-align: right; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .pr .now.gift { color: var(--amber); }
 /* Los precios por tipo (ADR 0085): tres cifras en una línea. */
-.pr .base.tiers { font-size: 24px; white-space: nowrap; }
-.pr .now.tiers { font-size: 32px; white-space: nowrap; }
+.pr .base, .pr .now { white-space: nowrap; }
+/* Con varios precios se resalta el menor: «desde» es la palabra pequeña delante de la cifra. */
+.from { font-style: normal; font-size: .42em; font-weight: 600; letter-spacing: 0; margin-right: .2em; }
+.pr .base .from { font-size: .7em; }
+.res .coin11 .from { font-size: .62em; }
 .pr.head { padding: 16px 40px; font-family: var(--agent); font-size: 18px; color: var(--on-3); letter-spacing: .06em; text-transform: uppercase; }
 .pr.head span:nth-child(2), .pr.head span:nth-child(4) { text-align: right; }
 .callback { display: flex; align-items: center; gap: 26px; font-size: 28px; color: var(--on-2); padding: 20px 30px; border-radius: 20px; background: rgba(79,195,215,.07); border: 1px solid rgba(79,195,215,.3); }
@@ -1628,8 +1631,8 @@ html.stacked body { margin: 0; }
     <span class="tag in">[ Con odentIA · Por lo que hizo ]</span>
     <h2 class="h2 in" style="--d:.1s; font-size:58px; white-space:nowrap">No te cobramos el software. Te cobramos lo que hizo.</h2>
     <div class="results">
-      <div class="res in" data-tap="res" role="button" tabindex="0" style="--c:var(--sky); --d:.3s"><span class="glow"></span><span class="who"><span class="dot c-sky"></span>Agente Sofi</span><h3>Una conversación atendida</h3><div class="demo"><span class="st"><i></i>Lucía escribe a las 22:47</span><span class="st"><i></i>Sofi la atiende y agenda</span><span class="coin11"><b>$</b><span>{{L.gestiona$}}</span></span></div><p>Según lo que pasó en tu agenda: {{L.informa}} si responde, {{L.gestiona}} si mueve o reserva una cita y {{L.agenda}} si el paciente viene.</p><span class="when">Una por persona cada {{window}}.</span></div>
-      <div class="res in" data-tap="res" role="button" tabindex="0" style="--c:var(--mint); --d:.5s"><span class="glow"></span><span class="who"><span class="dot c-mint"></span>Agente Clío</span><h3>Una consulta dictada y confirmada</h3><div class="demo"><span class="st"><i></i>Clío propone la nota</span><span class="st"><i></i>La Dra. Ana la confirma</span><span class="coin11"><b>$</b><span>{{L.estandar$}}</span></span></div><p>Según lo que dejó hecho: {{L.simple}} una nota, una receta o un control, {{L.estandar}} con diagnóstico, odontograma o varias partes y {{L.completa}} si arma el presupuesto.</p><span class="when">Sin confirmación, no hay cobro.</span></div>
+      <div class="res in" data-tap="res" role="button" tabindex="0" style="--c:var(--sky); --d:.3s"><span class="glow"></span><span class="who"><span class="dot c-sky"></span>Agente Sofi</span><h3>Una conversación atendida</h3><div class="demo"><span class="st"><i></i>Lucía escribe a las 22:47</span><span class="st"><i></i>Sofi la atiende y agenda</span><span class="coin11"><b>$</b><span><i class="from">desde</i> {{L.informa$}}</span></span></div><p>Según lo que pasó en tu agenda: {{L.informa}} si responde, {{L.gestiona}} si mueve o reserva una cita y {{L.agenda}} si el paciente viene.</p><span class="when">Una por persona cada {{window}}.</span></div>
+      <div class="res in" data-tap="res" role="button" tabindex="0" style="--c:var(--mint); --d:.5s"><span class="glow"></span><span class="who"><span class="dot c-mint"></span>Agente Clío</span><h3>Una consulta dictada y confirmada</h3><div class="demo"><span class="st"><i></i>Clío propone la nota</span><span class="st"><i></i>La Dra. Ana la confirma</span><span class="coin11"><b>$</b><span><i class="from">desde</i> {{L.simple$}}</span></span></div><p>Según lo que dejó hecho: {{L.simple}} una nota, una receta o un control, {{L.estandar}} con diagnóstico, odontograma o varias partes y {{L.completa}} si arma el presupuesto.</p><span class="when">Sin confirmación, no hay cobro.</span></div>
       <div class="res in" data-tap="res" role="button" tabindex="0" style="--c:var(--amber); --d:.7s"><span class="glow"></span><span class="who"><span class="dot c-amber"></span>Agente Argos</span><h3>Una cita recuperada</h3><div class="demo"><span class="st"><i></i>Pedro reserva su control</span><span class="st"><i></i>Pedro llega a la cita</span><span class="coin11"><b>$</b><span>{{L.recovered$}}</span></span></div><p>Pedro no tenía cita: Argos lo encontró y Sofi le escribió.</p><span class="when">Se cobra solo cuando el paciente asiste.</span></div>
     </div>
     <p class="free in" style="--d:1s">El sistema completo cuesta <b class="c-sky">{{cur}} 0</b>. En el plan, la cuota vuelve entera como crédito para tus agentes.</p>
@@ -1654,14 +1657,13 @@ html.stacked body { margin: 0; }
       <div class="nvr" data-tap="nvr" role="button" tabindex="0" style="--c:var(--sky)"><span class="what">Bloqueó 3 mensajes de spam<small>Lo que no es para la clínica</small></span><span class="kind"><span class="dot c-sky"></span>Sofi</span><span class="nvp"><span class="nvc">$</span><span class="nvz num">{{cur}} 0</span></span></div>
       <div class="nvr" data-tap="nvr" role="button" tabindex="0" style="--c:var(--amber)"><span class="what">Recordó su cita a 14 pacientes<small>Recordatorios y avisos de cita</small></span><span class="kind"><span class="dot c-amber"></span>Argos</span><span class="nvp"><span class="nvc">$</span><span class="nvz num">{{cur}} 0</span></span></div>
       <div class="nvr" data-tap="nvr" role="button" tabindex="0" style="--c:var(--mint)"><span class="what">Propuso una nota que la Dra. Ana descartó<small>Borrador que no te sirvió</small></span><span class="kind"><span class="dot c-mint"></span>Clío</span><span class="nvp"><span class="nvc">$</span><span class="nvz num">{{cur}} 0</span></span></div>
-      <div class="nvr" data-tap="nvr" role="button" tabindex="0" style="--c:var(--amber)"><span class="what">Gabriel reservó desde su enlace, pero no vino<small>Cita recuperada sin asistencia</small></span><span class="kind"><span class="dot c-amber"></span>Argos</span><span class="nvp"><span class="nvc">$</span><span class="nvz num">{{cur}} 0</span></span></div>
       <div class="nvr" data-tap="nvr" role="button" tabindex="0" style="--c:var(--amber)"><span class="what">No encontró cómo responder una pregunta<small>Pregunta sin respuesta</small></span><span class="kind"><span class="dot c-amber"></span>Argos</span><span class="nvp"><span class="nvc">$</span><span class="nvz num">{{cur}} 0</span></span></div>
       <div class="nvr" data-tap="nvr" role="button" tabindex="0" style="--c:var(--on-2)"><span class="what">Recepción le respondió a Carla<small>Lo que hace tu equipo</small></span><span class="kind"><span class="dot" style="color:var(--on-2)"></span>Tu equipo</span><span class="nvp"><span class="nvc">$</span><span class="nvz num">{{cur}} 0</span></span></div>
       <div class="nvr total"><span class="what"><b>Lo cobrado por todo esto</b></span><span class="kind"></span><span class="nvp"><b class="num" id="nvTotal">{{cur}} 0,00</b></span></div>
     </div>
     <span class="tap">Toca una fila para intentar cobrarla</span>
   </div>
-  <aside class="notes">La mayoría paga por usuarios y módulos, use o no use el sistema. Clic: no cobramos el software; cada agente cobra por lo que hizo, y lo simple cuesta poco. Clic: así se ve un día; los recordatorios y las tareas no se cobran. Clic: y esto nunca se cobra: el spam que Sofi bloquea, los recordatorios de Argos, el borrador que descartaste, la cita recuperada si el paciente no vino, la pregunta que Argos no pudo responder y lo que hace tu equipo. Si preguntan: si Sofi duda y responde, esa conversación sí cuenta, y se puede pedir revisión; si Sofi le agendó la cita y no vino, la conversación se cobra como «gestiona». Estos son precios de lista; en un momento les muestro el precio de clínica fundadora.</aside>
+  <aside class="notes">La mayoría paga por usuarios y módulos, use o no use el sistema. Clic: no cobramos el software; cada agente cobra por lo que hizo, y lo simple cuesta poco. Clic: así se ve un día; los recordatorios y las tareas no se cobran. Clic: y esto nunca se cobra: el spam que Sofi bloquea, los recordatorios de Argos, el borrador que descartaste, la pregunta que Argos no pudo responder y lo que hace tu equipo. Si preguntan: si Sofi duda y responde, esa conversación sí cuenta, y se puede pedir revisión; si reservó y no vino, la cita recuperada no se cobra, pero la conversación sí, como «gestiona». Estos son precios de lista; en un momento les muestro el precio de clínica fundadora.</aside>
 </section>
 
 <!-- ============ 12 · Dos formas de trabajar ============ -->
@@ -1756,8 +1758,8 @@ html.stacked body { margin: 0; }
     <div class="prices">
       <div class="pr head in" style="--d:.2s"><span>Qué se cobra</span><span>Precio de lista</span><span></span><span>Fundadora</span></div>
       <div class="pr in" style="--d:.3s"><span class="what">Cuota mensual<small>De lista vuelve como crédito</small></span><span class="base">{{L.fee$}}</span><span class="arrow">→</span><span class="now gift">{{F.fee$}}</span></div>
-      <div class="pr in" style="--d:.5s"><span class="what">Conversación: informa · gestiona · el paciente vino<small><b class="c-sky">Sofi</b> · una por persona cada {{window}}</small></span><span class="base tiers">{{L.informa}} · {{L.gestiona}} · {{L.agenda}}</span><span class="arrow">→</span><span class="now tiers" style="color:var(--sky)">{{F.informa}} · {{F.gestiona}} · {{F.agenda}}</span></div>
-      <div class="pr in" style="--d:.7s"><span class="what">Consulta: simple · estándar · completa<small><b class="c-mint">Clío</b> · cuando el odontólogo confirma</small></span><span class="base tiers">{{L.simple}} · {{L.estandar}} · {{L.completa}}</span><span class="arrow">→</span><span class="now tiers" style="color:var(--mint)">{{F.simple}} · {{F.estandar}} · {{F.completa}}</span></div>
+      <div class="pr in" style="--d:.5s"><span class="what">Conversación<small><b class="c-sky">Sofi</b> · informa {{F.informa}} · gestiona {{F.gestiona}} · el paciente vino {{F.agenda}}</small></span><span class="base"><i class="from">desde</i> {{L.informa$}}</span><span class="arrow">→</span><span class="now" style="color:var(--sky)"><i class="from">desde</i> {{F.informa$}}</span></div>
+      <div class="pr in" style="--d:.7s"><span class="what">Consulta<small><b class="c-mint">Clío</b> · simple {{F.simple}} · estándar {{F.estandar}} · completa {{F.completa}} · cuando el odontólogo confirma</small></span><span class="base"><i class="from">desde</i> {{L.simple$}}</span><span class="arrow">→</span><span class="now" style="color:var(--mint)"><i class="from">desde</i> {{F.simple$}}</span></div>
       <div class="pr in" style="--d:.9s"><span class="what">Cita recuperada<small><b class="c-amber">Argos</b> · cuando el paciente asiste</small></span><span class="base">{{L.recovered$}}</span><span class="arrow">→</span><span class="now" style="color:var(--amber)">{{F.recovered$}}</span></div>
     </div>
     <div class="callback in" style="--d:1.3s"><span>El día de ejemplo:</span><s>{{L.day$}}</s><span>→</span><b class="num">{{F.day$}}</b><span>como clínica fundadora.</span></div>
