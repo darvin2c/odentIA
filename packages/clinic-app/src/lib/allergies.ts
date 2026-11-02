@@ -82,9 +82,22 @@ export const REMOVAL_REASON_LABELS: Record<string, string> = {
   error: "Se registró por error",
 }
 
-/** Las severas primero, después las demás en el orden en que llegaron. */
+const isSevere = (allergy: Allergy) => allergy.severity === "severa" || allergy.severity === "grave"
+
+/** Lo más grave primero. Lo que no se sabe va después de lo severo: podría serlo. */
+export function allergyRank(allergy: Allergy): number {
+  if (isSevere(allergy) || allergy.criticality === "alta") return 0
+  if (allergy.severity === "moderada") return 2
+  return allergy.severity === "leve" ? 3 : 1
+}
+
+/** De la más grave a la menos; las iguales, en el orden en que llegaron. */
 export function bySeverity(a: Allergy, b: Allergy): number {
-  const rank = (allergy: Allergy) =>
-    allergy.severity === "severa" ? 0 : allergy.severity === "moderada" ? 1 : 2
-  return rank(a) - rank(b)
+  return allergyRank(a) - allergyRank(b)
+}
+
+/** «severa», «de criticidad alta» o nada si no se sabe: lo que dice la cabecera de la ficha. */
+export function allergySeverityWord(allergy: Allergy): string {
+  if (!isSevere(allergy) && allergy.criticality === "alta") return "de criticidad alta"
+  return allergy.severity === "desconocida" ? "" : (SEVERITY_WORDS[allergy.severity] ?? allergy.severity)
 }

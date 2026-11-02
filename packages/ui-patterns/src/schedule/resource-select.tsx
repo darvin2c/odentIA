@@ -56,8 +56,11 @@ export function ResourceSelect({
   // Lo elegido se conserva aunque la búsqueda en servidor deje de devolverlo. Sin esto,
   // el campo se vacía, la búsqueda vuelve a traerlo y el campo se rellena, sin fin.
   const [picked, setPicked] = React.useState<ResourceSelectOption | null>(null)
-  const selected =
-    options.find((item) => item.id === value) ?? (picked?.id === value ? picked : null)
+  const found = options.find((item) => item.id === value) ?? (picked?.id === value ? picked : null)
+  // El mismo objeto mientras siga siendo lo mismo: las opciones se arman en cada búsqueda y, si
+  // cambiara, el campo volvería a escribir su nombre encima de lo que se está tecleando.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: lo que cuenta es su id y su nombre, no el objeto.
+  const selected = React.useMemo(() => found, [found?.id, found?.label])
   const items =
     selected && !options.some((item) => item.id === selected.id)
       ? [selected, ...options]

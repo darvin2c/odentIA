@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { type ReactNode, useEffect, useState } from "react"
 import { useReceptionName } from "../../lib/agent-names"
+import { professionalSaid } from "../../lib/agenda"
 import { invalidateAgentWork } from "../../lib/agent-work"
 import { ApiError, apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
@@ -296,17 +297,19 @@ export function PersonPanel({
   // Desde su ficha, sin un tema que responder: pasadas las 24 horas de WhatsApp solo cabe un mensaje aprobado.
   const approvedOnly = Boolean(panel?.reply.approvedOnly && panel.reply.allowed && !replying)
   const canType = Boolean(panel?.reply.allowed && !panel.reply.closedChannel && !approvedOnly && (!heldByOther || takeOver) && !unknownDelivery)
+  // Desde su ficha, horarios y precios solo si se pueden escribir: sin caja no llevan a nada.
+  const showSuggestions = !fromRecord || canType
   const otherTopics = panel?.otherTopics ?? []
   const otherTopicsLine =
     otherTopics.length > 1
-      ? `Tiene ${otherTopics.length} temas abiertos: este mensaje no responde ninguno. Para responderlos, abre toda la conversación.`
+      ? `Tiene ${otherTopics.length} temas abiertos. Lo que escribas aquí no responde ninguno: para responderlos, abre toda la conversación.`
       : otherTopics[0]?.assigneeUserId
-        ? `${otherTopics[0].kind === "clinico" ? "La duda clínica" : otherTopics[0].kind === "pago" ? "El pago" : "Su tema"} sigue con ${memberName(otherTopics[0].assigneeUserId)}. Este mensaje no lo cambia.`
+        ? `${otherTopics[0].kind === "clinico" ? "La duda clínica" : otherTopics[0].kind === "pago" ? "El pago" : "Su tema"} sigue con ${professionalSaid(memberName(otherTopics[0].assigneeUserId), { full: true })}. Lo que escribas aquí no responde ese tema.`
         : null
 
   const replyBox = panel && !sent ? (
     <div className="flex w-full flex-col gap-2">
-      {canType && panel.suggestions.slots.length > 0 ? (
+      {showSuggestions && panel.suggestions.slots.length > 0 ? (
         <div className="flex flex-col gap-1.5">
           <p className="text-[13px] text-muted-foreground">
             <span className="font-bold text-foreground">Horarios libres{panel.suggestions.professionalName ? ` con ${panel.suggestions.professionalName}` : ""}.</span> <span className="max-sm:sr-only">Tocar uno lo escribe; no lo aparta.</span>
@@ -327,8 +330,8 @@ export function PersonPanel({
           </div>
         </div>
       ) : null}
-      {canType && panel.suggestions.prices.length === 0 && panel.suggestions.noPriceFor ? <p className="text-[13px] text-muted-foreground">{panel.suggestions.noPriceFor}</p> : null}
-      {canType && panel.suggestions.prices.length > 0 ? (
+      {showSuggestions && panel.suggestions.prices.length === 0 && panel.suggestions.noPriceFor ? <p className="text-[13px] text-muted-foreground">{panel.suggestions.noPriceFor}</p> : null}
+      {showSuggestions && panel.suggestions.prices.length > 0 ? (
         <div className="flex flex-col gap-1.5">
           <p className="text-[13px] text-muted-foreground">
             <span className="font-bold text-foreground">Tu lista de precios.</span> Tocar uno lo escribe.
@@ -383,7 +386,7 @@ export function PersonPanel({
           </Button>
         </div>
       ) : null}
-      {otherTopicsLine ? <p className="text-sm text-muted-foreground">{otherTopicsLine}</p> : null}
+      {otherTopicsLine && (canType || approvedOnly) ? <p className="text-sm text-muted-foreground">{otherTopicsLine}</p> : null}
       {panel.reply.readOnly ? (
         <p role="status" className="rounded-xl bg-muted/60 p-3 text-sm">
           {panel.reply.readOnly === "bloqueada"
@@ -547,7 +550,7 @@ export function PersonPanel({
                     <p className={cn("rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap", item.from === "person" ? "bg-primary-soft" : "bg-muted")}>{item.text}</p>
                   </div>
                 ))}
-                {canReadThread ? (
+                {canWrite || (fromRecord && canReadThread) ? (
                   <Link to="/inbox" search={{ conversation: conversationId }} className="inline-flex min-h-11 items-center self-start text-sm font-semibold text-primary hover:underline sm:min-h-8">
                     Ver toda la conversación
                   </Link>

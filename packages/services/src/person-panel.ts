@@ -69,7 +69,7 @@ export interface PersonPanel {
     holdOn: string | null
     approvedOnly: boolean
     hasWhatsapp: boolean
-    /** Se lee y no se le escribe: bloqueada (en todas partes) o archivada (desde su ficha, como su cabecera). */
+    /** Desde su ficha, se lee y no se le escribe: bloqueada, o archivada como dice su cabecera. */
     readOnly: "bloqueada" | "archivada" | null
   }
   /** Cuándo escribió por última vez; nulo si nunca. */
@@ -173,7 +173,7 @@ export async function getPersonPanel(
   // Por entregar necesita algo que responder: si nunca escribió, es como un canal cerrado (desde su ficha, un mensaje aprobado).
   const closedChannel = !open && (metaChannel || (whatsapp && !fromRecord && !lastInbound && !topicRow?.sourceMessageId))
   const hasWhatsapp = fromRecord && !open && metaChannel && (await lateReplyOf(tx, orgId, input.conversationId)).metaWindow?.whatsapp === true
-  const readOnly = conv.screen === "blocked" ? ("bloqueada" as const) : fromRecord && !conv.isActive ? ("archivada" as const) : null
+  const readOnly = !fromRecord ? null : conv.screen === "blocked" ? ("bloqueada" as const) : !conv.isActive ? ("archivada" as const) : null
 
   const patientId = await selfPatientOf(tx, orgId, conv.contactId)
   const clinicalReader = can("clinical.read")

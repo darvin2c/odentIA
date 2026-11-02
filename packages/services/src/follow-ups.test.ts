@@ -19,6 +19,7 @@ import {
   listFollowUps,
   scheduleFollowUp,
 } from "./follow-ups.js"
+import { getPlanNextStep } from "./plan-next.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -72,6 +73,10 @@ it("reserva, mueve y libera el control sin confundir asistencia con cierre clín
   })
   const id = booked.appointmentId
   if (!id) throw new Error("La reserva del control no devolvió cita")
+  // Su «Qué sigue» ofrece verla, a quien lee la agenda.
+  const next = (can: (permission: string) => boolean) => f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, can))
+  expect(await next(() => true)).toMatchObject({ kind: "control", action: { label: "Ver la cita", appointmentId: id } })
+  expect((await next((permission) => permission !== "appointments.read")).action).toBeNull()
   await f.run((tx) =>
     moveAppointment(tx, "org_a", f.actor, id, {
       expectedVersion: 1,

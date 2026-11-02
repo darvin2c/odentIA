@@ -43,7 +43,17 @@ export function ServiceSelect({
   const id = idProp ?? fallbackId
   const hintId = `${id}-pista`
   const [query, setQuery] = useState("")
-  const q = useDeferredValue(query.trim())
+  // El elegido se pide por id: puede no llegar en la búsqueda (más allá de la primera página, o inactivo).
+  const chosenQuery = useQuery({
+    queryKey: ["services", "one", value],
+    queryFn: () => fetchService(value),
+    enabled: Boolean(value),
+    staleTime: 60_000,
+  })
+  const chosen = value ? chosenQuery.data?.data : undefined
+  // El campo muestra el nombre de lo elegido: eso no es una búsqueda, y abrirlo ofrece los demás.
+  const typed = query.trim()
+  const q = useDeferredValue(typed === chosen?.name ? "" : typed)
   const pageQuery = useQuery({
     queryKey: ["services", "select", q],
     queryFn: () => fetchServices({ q: q || undefined, state: "active", limit: SERVICE_SEARCH_LIMIT }),
@@ -51,16 +61,7 @@ export function ServiceSelect({
     placeholderData: (previous) => previous,
   })
   const page = pageQuery.data
-  const inPage = Boolean(value) && (page?.data ?? []).some((item) => item.id === value)
-  // El elegido que no llegó en la búsqueda (más allá de la primera página, o inactivo) se pide por id.
-  const chosenQuery = useQuery({
-    queryKey: ["services", "one", value],
-    queryFn: () => fetchService(value),
-    enabled: Boolean(value) && !inPage,
-    staleTime: 60_000,
-  })
   const services = [...(page?.data ?? [])]
-  const chosen = chosenQuery.data?.data
   if (chosen && !services.some((item) => item.id === chosen.id)) services.unshift(chosen)
   const shown = services.filter((item) => item.id !== excludeId)
   const options = [

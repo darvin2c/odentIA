@@ -50,7 +50,7 @@ export function WaitingButton({ children, size = "sm", className }: { children: 
 export function SummaryCardShape({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return (
     <section className="flex min-w-0 flex-col gap-3 elevated rounded-xl border bg-card p-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex min-h-8 flex-wrap items-center justify-between gap-2">
         <h2 className="font-heading text-base font-medium">{title}</h2>
         {action}
       </div>

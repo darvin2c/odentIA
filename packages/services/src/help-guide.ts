@@ -191,7 +191,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     faqs: [
       {
         q: "¿Cómo le escribo a alguien que nunca me escribió?",
-        a: "En la Bandeja pulsa «Nueva conversación», búscalo por nombre o por teléfono y elígelo; si no existe, créalo con su número. Si tiene teléfono se le escribe por WhatsApp, sin escribir nada más. Como nunca escribió, WhatsApp pide empezar con uno de los mensajes aprobados de la clínica: la conversación te los ofrece y, si no hay ninguno, te dice qué falta y a quién pedírselo. Desde la ficha, la Agenda o Finanzas es el mismo botón: «Escribirle».",
+        a: "En la Bandeja pulsa «Nueva conversación», búscalo por nombre o por teléfono y elígelo; si no existe, créalo con su número. Si tiene teléfono se le escribe por WhatsApp, sin escribir nada más. Como nunca escribió, WhatsApp pide empezar con uno de los mensajes aprobados de la clínica: la conversación te los ofrece y, si no hay ninguno, te dice qué falta y a quién pedírselo. Desde la ficha, la Agenda o Finanzas es el mismo botón: «Escribirle». En la ficha se abre ahí mismo, sin ir a la Bandeja.",
       },
       {
         q: "¿Cómo respondo yo en vez de Sofi?",
@@ -286,6 +286,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         q: "¿Puedo dar una cita fuera de horario o a una hora ocupada?",
         a: "Sí. Toca lo gris en el día, o elige esa hora en «Nueva cita»: te avisa y puedes reservar igual. La cita queda marcada y al profesional le llega un aviso. También puedes dar dos citas a la misma hora con un profesional, cada una en su sala o unidad; lo único que no se puede es poner a dos personas en la misma. Estas excepciones las hace siempre alguien del equipo: Sofi y el enlace de la persona solo reservan lo libre.",
+      },
+      {
+        q: "¿Cómo elijo qué tratamientos trae la cita?",
+        a: "En «Nueva cita», «Para esta cita» muestra lo que la persona aceptó y aún no tiene cita. Vienen marcados los del primer servicio; los demás se suman con un toque, y elegir otro servicio marca los de ese. Puedes desmarcarlos todos: la cita queda sin ninguno. Los marcados quedan listos en la atención de esa cita. Cuando reservan Sofi o la persona desde su enlace, la cita trae lo aceptado de su servicio que aún no tenía cita.",
       },
       {
         q: "¿Cómo le reservo una cita desde la conversación?",
@@ -474,6 +478,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         q: "¿Dónde veo sus alergias, qué le toca y su última atención?",
         a: "En el Resumen de su página: si lees la historia clínica, es el resumen clínico, con sus alergias y alertas, «Qué sigue» de su plan, su última atención y su próxima cita. Abrir la página queda en «Consultas a la historia», como cualquier lectura de la historia. Recepción y caja ven el Resumen de siempre, sin nada clínico.",
+      },
+      {
+        q: "¿Tengo que cambiar de pestaña para revisar, firmar o cobrar desde el Resumen?",
+        a: "No: cada botón de su página hace lo suyo ahí mismo. «Revisar» abre sus antecedentes con el formulario listo, «Firmar» abre la pantalla de firma, «Cobrar» abre el cobro y «Abrir» o «Escribirle» abren su conversación. Al cerrar sigues donde estabas. Adjuntos, audio y responder entre varios temas siguen en la Bandeja, con «Ver toda la conversación».",
       },
       {
         q: "¿Dónde quedaron Atenciones, Recetas u Órdenes?",
@@ -842,7 +850,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     faqs: [
       {
         q: "¿Por qué el saldo es menor que lo que debe?",
-        a: "Porque descuenta lo que la persona tiene a favor (un adelanto o un cobro de más): «Debe: 100 · A favor: 100 · Saldo: 0». Así se ve en su cuenta, en su Resumen, en el portal y en los avisos. En su cuenta, «Aplicar lo que tiene a favor» cancela la deuda con un clic y deja el movimiento registrado; si no alcanza, te dice lo que falta.",
+        a: "Porque descuenta lo que la persona tiene a favor (un adelanto o un cobro de más): «Debe: 100 · A favor: 100 · Saldo: 0». Así se ve en su cuenta, en su Resumen, en el portal y en los avisos. «Aplicar lo que tiene a favor» te dice el importe y la sede antes de hacerlo; al confirmar cancela la deuda y deja el movimiento registrado, sin dinero nuevo. Si no alcanza, te dice lo que falta.",
       },
       {
         q: "¿Anulo el ticket o hago una devolución?",

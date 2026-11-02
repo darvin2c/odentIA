@@ -366,6 +366,17 @@ export function BookingDrawer({
     () => coordinationQuery.data?.data.treatments.filter((row) => row.toSchedule) ?? [],
     [coordinationQuery.data],
   )
+  // Dos iguales son una casilla: recepción no ve las piezas y elegir entre ellos sería a ciegas.
+  const toScheduleRows = React.useMemo(() => {
+    const rows = new Map<string, { key: string; title: string; ids: string[] }>()
+    for (const item of toSchedule) {
+      const key = `${item.serviceId ?? ""}|${item.title}`
+      const row = rows.get(key) ?? { key, title: item.title, ids: [] }
+      row.ids.push(item.id)
+      rows.set(key, row)
+    }
+    return [...rows.values()]
+  }, [toSchedule])
   const [marked, setMarked] = React.useState<{ patientId: string; ids: string[] } | null>(null)
   const markedIds = marked?.patientId === values.patientId ? marked.ids : []
   const itemsOfService = (id: string, items = toSchedule) =>
@@ -383,7 +394,8 @@ export function BookingDrawer({
     // Con un hueco ya tocado en la rejilla no se cambia el servicio: podría no atenderlo quien eligió.
     if (!seed.startsAt && first !== values.serviceId) {
       autoService.current = first || null
-      form.setFieldValue("serviceId", first)
+      // No lo eligió la persona: cerrar sin tocar nada no pregunta si descarta.
+      form.setFieldValue("serviceId", first, { dontUpdateMeta: true })
     }
     // biome-ignore lint/correctness/useExhaustiveDependencies: corre al llegar la lista de cada persona.
   }, [coordinationQuery.data, values.patientId])
@@ -672,31 +684,34 @@ export function BookingDrawer({
             </div>
           )}
 
-          {toSchedule.length > 0 ? (
+          {toScheduleRows.length > 0 ? (
             <FieldSet className="gap-2">
               <FieldLegend variant="label" className="mb-0">
                 Para esta cita
               </FieldLegend>
               <FieldGroup className="gap-2">
-                {toSchedule.map((row) => (
-                  <Field key={row.id} orientation="horizontal">
+                {toScheduleRows.map((row, index) => (
+                  <Field key={row.key} orientation="horizontal">
                     <Checkbox
-                      id={`cita-tratamiento-${row.id}`}
-                      checked={markedIds.includes(row.id)}
+                      id={`cita-tratamiento-${index}`}
+                      checked={row.ids.every((id) => markedIds.includes(id))}
                       onCheckedChange={(checked) =>
                         setMarked({
                           patientId: values.patientId,
-                          ids: checked ? [...markedIds, row.id] : markedIds.filter((id) => id !== row.id),
+                          ids: checked
+                            ? [...markedIds.filter((id) => !row.ids.includes(id)), ...row.ids]
+                            : markedIds.filter((id) => !row.ids.includes(id)),
                         })
                       }
                     />
-                    <FieldLabel htmlFor={`cita-tratamiento-${row.id}`} className="font-normal">
+                    <FieldLabel htmlFor={`cita-tratamiento-${index}`} className="font-normal">
                       {row.title}
+                      {row.ids.length > 1 ? ` × ${row.ids.length}` : ""}
                     </FieldLabel>
                   </Field>
                 ))}
               </FieldGroup>
-              <FieldDescription>Aceptó estos tratamientos y aún no tienen cita. La atención de esta cita trae los marcados.</FieldDescription>
+              <FieldDescription>Aceptó estos tratamientos y aún no tienen cita. Los que marques quedan listos en su atención.</FieldDescription>
             </FieldSet>
           ) : null}
 

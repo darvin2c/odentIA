@@ -122,6 +122,10 @@ test("paciente: ficha inicial y hallazgo visibles en el recorrido", async ({ own
       .filter({ hasText: /^Por decidir$/ })
       .first(),
   ).toBeVisible()
+  // Sus botones hacen lo que dicen: «Ver odontograma» lo abre sin salir del Plan, no solo cierra el recorrido.
+  await recorrido.getByRole("button", { name: "Ver odontograma", exact: true }).click()
+  await expect(surface(page, { name: "Odontograma de Lucía Quispe" }).locator("[data-tooth]").first()).toBeVisible()
+  await expect(page).toHaveURL(/tab=plan/)
 })
 
 test("paciente: la foto se pone y se quita desde su página", async ({ owner }) => {
@@ -552,7 +556,8 @@ for (const role of ["reception", "clinician", "cashier"] as const) {
     if (role === "cashier") {
       await expect(areas).toHaveText(["Resumen", "Plan", "Cobros", "Datos"])
       // El botón de cobrar de la cabecera abre el cobro ahí mismo: el Resumen sigue debajo.
-      await page.getByRole("button", { name: /^Cobrar/ }).first().click()
+      await openSection(page, "Resumen")
+      await page.locator("header").getByRole("button", { name: /^Cobrar/ }).click()
       const collect = surface(page, { name: "Cobrar", exact: true })
       await expect(collect).toBeVisible()
       await expect(page).not.toHaveURL(/tab=cuenta/)

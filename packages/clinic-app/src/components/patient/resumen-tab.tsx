@@ -49,7 +49,8 @@ export function SummaryCard({
 }) {
   return (
     <section className="flex min-w-0 flex-col gap-3 elevated rounded-xl border bg-card p-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      {/* El alto de un botón, lo lleve o no: dos tarjetas en la misma fila alinean sus títulos. */}
+      <div className="flex min-h-8 flex-wrap items-center justify-between gap-2">
         <h2 className="font-heading text-base font-medium">{title}</h2>
         {action}
       </div>
@@ -267,7 +268,7 @@ export function PatientPendingCard({
             ? `Debe: ${money(balance.porCobrar, balance.currency)} · A favor: ${money(balance.aFavor, balance.currency)} · Saldo: ${money(balance.saldo, balance.currency)}`
             : "Cargos emitidos sin pago aplicado.",
         // El mismo cobro de Cobros, ahí mismo; «Aplicar…» siempre pide confirmar.
-        action: <CollectButton patientId={patientId} patientName={detail.patient.displayName} size="sm" variant="outline" />,
+        action: <CollectButton patientId={patientId} patientName={detail.patient.displayName} size="sm" variant="outline" currency={balance.currency} />,
       })
   }
   if (canEditPatient) {

@@ -3,17 +3,11 @@ import { Button, buttonVariants } from "@odentia/ui"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import type { AgendaAppointment } from "../../lib/agenda"
-import { allergyName } from "../../lib/allergies"
+import { allergyName, allergyRank, allergySeverityWord, bySeverity } from "../../lib/allergies"
 import { useMemberName, useMyUserId, usePermission } from "../../lib/crm"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { appointmentWhen } from "../../lib/patient-appointments"
-import {
-  type Allergy,
-  ALLERGY_SEVERITY_LABELS,
-  type OpenEncounterBrief,
-  type PatientHealth,
-  type PatientSummary,
-} from "../../lib/patients"
+import type { OpenEncounterBrief, PatientHealth, PatientSummary } from "../../lib/patients"
 import { usePersonArchived } from "../../lib/person-archived"
 import { AllergyQuickActions } from "./allergies-card"
 import { EncounterReadDrawer } from "./encounter-read-drawer"
@@ -41,20 +35,6 @@ function formatClock(iso: string): string {
 
 function plural(n: number, one: string, many: string) {
   return `${n} ${n === 1 ? one : many}`
-}
-
-/** Lo más grave primero. «Desconocida» antes que «leve»: no se sabe, y podría no serlo. */
-function allergyRank(allergy: Allergy): number {
-  if (allergy.severity === "severa" || allergy.severity === "grave" || allergy.criticality === "alta") return 0
-  if (allergy.severity === "moderada") return 1
-  return allergy.severity === "leve" ? 3 : 2
-}
-
-/** «severa», «de criticidad alta» o nada si no se sabe: lo mismo que dice la cabecera. */
-function allergySeverityWord(allergy: Allergy): string {
-  if (allergy.severity === "desconocida" || !allergy.severity) return allergy.criticality === "alta" ? "de criticidad alta" : ""
-  if (allergy.severity !== "severa" && allergy.severity !== "grave" && allergy.criticality === "alta") return "de criticidad alta"
-  return (ALLERGY_SEVERITY_LABELS[allergy.severity] ?? allergy.severity).toLowerCase()
 }
 
 /**
@@ -164,7 +144,7 @@ export function ClinicalAlertsCard({
   const archived = usePersonArchived()
   const allergies = (health?.allergies ?? [])
     .filter((allergy) => allergy.isActive && allergy.verification !== "descartada")
-    .sort((a, b) => allergyRank(a) - allergyRank(b))
+    .sort(bySeverity)
   const conditions = (health?.conditions ?? []).filter((condition) => condition.status === "activa")
   // Vigente = sin fecha de fin, igual que la cabecera de la ficha.
   const medications = (health?.medications ?? []).filter((medication) => !medication.endDate)

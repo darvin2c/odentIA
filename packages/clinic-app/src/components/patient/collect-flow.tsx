@@ -1,7 +1,8 @@
 import { documentText, formatMoney } from "@odentia/clinical"
-import { Button, Field, FieldDescription, FieldLabel, toast } from "@odentia/ui"
+import { Button, buttonVariants, Field, FieldDescription, FieldLabel, toast } from "@odentia/ui"
 import { ConfirmDialog, DetailDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
 import { type ComponentProps, lazy, Suspense, useEffect, useId, useState } from "react"
 import { useActiveBranch } from "../../lib/active-branch"
 import { apiFetch } from "../../lib/api"
@@ -90,9 +91,11 @@ interface CollectButtonProps {
   patientName: string
   size?: ComponentProps<typeof Button>["size"]
   variant?: ComponentProps<typeof Button>["variant"]
+  /** La moneda de lo que se debe: aquí solo se cobra en la de la clínica. */
+  currency?: string
 }
 
-function CollectAction({ patientId, patientName, size, variant }: CollectButtonProps) {
+function CollectAction({ patientId, patientName, size, variant, currency }: CollectButtonProps) {
   const uid = useId()
   const queryClient = useQueryClient()
   const sede = useActiveBranch()
@@ -130,6 +133,19 @@ function CollectAction({ patientId, patientName, size, variant }: CollectButtonP
     else begin(action)
   }
   const changed = () => invalidatePatientAccount(queryClient, patientId)
+
+  // Lo que se debe en otra moneda se ve en Cobros: aquí se abriría el cobro en la de la clínica.
+  if (currency && prof && currency !== prof.currency)
+    return (
+      <Link
+        to="/patients/$patientId"
+        params={{ patientId }}
+        search={{ tab: "cuenta" }}
+        className={buttonVariants({ size, variant })}
+      >
+        Ver en Cobros
+      </Link>
+    )
 
   return (
     <>
