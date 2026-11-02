@@ -1201,7 +1201,8 @@ button[data-tap] { appearance: none; -webkit-appearance: none; }
 .step b { font-size: 30px; line-height: 1.2; }
 .step p { font-size: 22px; color: var(--on-2); line-height: 1.4; }
 .cta { display: flex; align-items: center; gap: 30px; flex-wrap: wrap; }
-.cta .btn { font-size: 33px; font-weight: 800; color: #06222a; background: var(--sky); padding: 20px 44px; border-radius: 999px; }
+.cta .btn { font-size: 33px; font-weight: 800; color: #06222a; background: var(--sky); padding: 20px 44px; border-radius: 999px; text-decoration: none; }
+.cta .btn:focus-visible { outline: 3px solid var(--on); outline-offset: 3px; }
 .layer.cur .cta .btn { animation: ping 2.4s 1.8s infinite; }
 .cta .url { font-family: var(--agent); font-size: 29px; color: var(--on-2); user-select: all; }
 
@@ -1788,7 +1789,7 @@ html.stacked body { margin: 0; }
         <li><b>2. Te respondemos en {{answer}},</b> por WhatsApp.</li>
         <li><b>3. Abres tu clínica como fundadora.</b> La invitación llega por correo.</li>
       </ol>
-      <div class="cta"><span class="btn">Pide tus {{gift}}</span><span class="url">odentia32.com/solicitar-invitacion</span></div>
+      <div class="cta"><a class="btn" href="{{ctaHref}}">{{ctaLabel}}</a><span class="url">odentia32.com/solicitar-invitacion</span></div>
     </div>
   </div>
   <aside class="notes">Esto es lo que recibe una clínica fundadora. Lo más importante: {{gift}} para que los agentes trabajen desde el primer día, sin cuota mensual y con el precio garantizado por {{months}}. Y sin límite de odontólogos, sedes ni usuarios. Y cierren con la acción: entrar es por invitación y los lugares son pocos. Llenan la solicitud, les respondemos en {{answer}} y abren tu clínica con la invitación. Déjenla en pantalla mientras conversan. Gracias.</aside>
