@@ -39,6 +39,7 @@ import {
   getAgentConfig,
   getLesson,
   getPatientRegistrationConfig,
+  getPersonalLinkView,
   getProbar,
   ingestInbound,
   listAgentContextCandidates,
@@ -58,6 +59,7 @@ import {
   professionalRef,
   READ_TOOLS,
   removePersonFact,
+  changeBookingLinkAppointment,
   reserveBookingLink,
   resolvePersonalLink,
   resolvePersonalLinkRefs,
@@ -3119,6 +3121,61 @@ it("con los horarios va siempre su enlace para ver toda la agenda: lo agrega el 
   const later = runCtx("trig-agenda-3")
   await offer(later, await search(later))
   expect(await withAgenda()).toHaveLength(1)
+})
+
+it("a quien pide cambiar su cita también le da su enlace, abierto en esa cita, una sola vez por atención", async () => {
+  const { conversationId } = await ingestText("tg:cambio-enlace", "evt-cambio-enlace-1", "Quiero cambiar mi cita")
+  const fx = await bookingFixture(conversationId, "cambio-enlace")
+  const route = { path: "cambio_cita", intent: "reschedule_or_cancel", handoff: null, confidence: null, urgency: null } as const
+  const runCtx = (triggerId: string, extra: Partial<AgentToolCtx> = {}): AgentToolCtx => ({
+    ...publicCtx(conversationId, fx.contactId), triggerId, route, ...extra,
+  })
+  let turn = 0
+  // Lo que sale al responder en ese turno: el mensaje entero, con lo que le agregue el sistema.
+  const reply = async (extra: Partial<AgentToolCtx> = {}) => {
+    turn += 1
+    await makeAgentTools(runCtx(`trig-cambio-${turn}`, extra)).find((item) => item.name === "send_reply")!.invoke({ text: `Respuesta ${turn}` })
+    return (await agentMessages(conversationId)).at(-1)!
+  }
+  const LINE = /\n\nLa cita( de [^\n]+)? también se puede cambiar o cancelar aquí: https:\/\/norte\.odentia\.test\/reserva\?token=\{\{su-enlace:[0-9a-f-]{36}\}\}$/
+  const day = upcomingMonday()
+  const at = (hour: number) => new Date(day.getTime() + hour * 3_600_000).toISOString()
+  const book = (hour: number) => withOrgContext(appDb, "org_a", (tx) =>
+    createAppointment(tx, "org_a", fx.actorId, {
+      branchId: fx.branchId, patientId: fx.patientId, professionalUserId: fx.professionalId, roomId: fx.roomId, startsAt: at(hour), durationMin: 45,
+    }))
+
+  // Sin cita por venir no hay nada que abrir.
+  expect(await reply()).not.toContain("/reserva?")
+  // Con dos, la página podría abrir la que no quiere cambiar: se aclara por el chat.
+  const first = await book(10)
+  const second = await book(11)
+  expect(await reply()).not.toContain("/reserva?")
+  await ownerDb.update(appointment).set({ status: "cancelada" }).where(eq(appointment.id, first.id))
+
+  // Ya con una: no va con un acto de cita en la corrida, con algo esperando su sí ni en otro camino.
+  expect(await reply({ toolsUsed: ["reprogramar_cita"] })).not.toContain("/reserva?")
+  expect(await reply({ casePending: true })).not.toContain("/reserva?")
+  expect(await reply({ route: { ...route, path: "abierto" } })).not.toContain("/reserva?")
+
+  const sent = await reply()
+  expect(sent).toMatch(LINE)
+  const links = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(appointmentBookingLink).where(eq(appointmentBookingLink.conversationId, conversationId)))
+  // Abierto en la cita que quedó en pie, sin reabrir la reserva de otra.
+  expect(links).toEqual([expect.objectContaining({ appointmentId: second.id, booking: false })])
+  // En la misma atención ya lo tiene: no se le repite.
+  expect(await reply()).not.toContain("/reserva?")
+
+  // Y con ese enlace la cambia de verdad.
+  const token = /token=([0-9a-f]{64})/.exec(resolvePersonalLinkRefs(sent, KEY))![1]!
+  // La página abre esa cita y deja cambiarla.
+  const view = await withOrgContext(appDb, "org_a", (tx) => getPersonalLinkView(tx, "org_a", token))
+  expect(view).toMatchObject({ status: "abierto", appointment: { canChange: true, startsAt: at(11) } })
+  await withOrgContext(appDb, "org_a", (tx) =>
+    changeBookingLinkAppointment(tx, "org_a", token, { startsAt: at(12), professionalUserId: fx.professionalId, roomId: fx.roomId }, { secretsKey: KEY }))
+  const [moved] = await ownerDb.select({ startsAt: appointment.startsAt }).from(appointment).where(eq(appointment.id, second.id))
+  expect(moved!.startsAt.toISOString()).toBe(at(12))
 })
 
 it("mientras la persona sigue escribiendo la corrida se pospone, y el tope evita esperar de más", async () => {

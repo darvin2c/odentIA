@@ -305,7 +305,7 @@ export async function createBookingLink(
   input: CreateBookingLinkInput,
   deps: { secretsKey: Buffer },
 ): Promise<IssuedBookingLink> {
-  return (await bookingLinkFor(tx, orgId, input, deps, false))!
+  return (await bookingLinkFor(tx, orgId, input, deps, "cualquiera"))!
 }
 
 /**
@@ -319,7 +319,29 @@ export async function issueAgendaLink(
   input: Omit<CreateBookingLinkInput, "createdBy">,
   deps: { secretsKey: Buffer },
 ): Promise<IssuedBookingLink | null> {
-  return bookingLinkFor(tx, orgId, input, deps, true)
+  return bookingLinkFor(tx, orgId, input, deps, "sin-cita")
+}
+
+/**
+ * Para quien pide cambiar o cancelar su cita: «Su enlace», abierto en esa cita, sin reabrir la
+ * reserva de otra. Nulo si no tiene exactamente una por venir (con varias, la página podría
+ * abrir la que no quiere cambiar: se aclara por el chat) o si en esta atención ya se le dio.
+ */
+export async function issueChangeLink(
+  tx: Db,
+  orgId: string,
+  input: { conversationId: string },
+  deps: { secretsKey: Buffer },
+): Promise<IssuedBookingLink | null> {
+  const [given] = await tx.execute<{ id: string }>(sql`
+    select m.id from message m
+    join conversation c on c.organization_id = m.organization_id and c.id = m.conversation_id
+    where m.organization_id = ${orgId} and m.conversation_id = ${input.conversationId}::uuid
+      and m.direction = 'out' and m.created_at >= c.attention_started_at
+      and (m.template_link is not null or m.body like '%/reserva?%')
+    limit 1`)
+  if (given) return null
+  return bookingLinkFor(tx, orgId, { conversationId: input.conversationId, booking: false }, deps, "una-cita")
 }
 
 /** La hora que eligió en el chat: con ella la página de su enlace abre la reserva ya elegida (ADR 0109). */
@@ -353,7 +375,8 @@ async function bookingLinkFor(
   orgId: string,
   input: CreateBookingLinkInput,
   deps: { secretsKey: Buffer },
-  onlyWithoutAppointment: boolean,
+  /** Cuándo se emite según sus citas por venir: siempre, solo sin ninguna o solo con una, en la que queda abierto. */
+  appointments: "cualquiera" | "sin-cita" | "una-cita",
 ): Promise<IssuedBookingLink | null> {
   const [conv] = await tx
     .select({
@@ -446,11 +469,30 @@ async function bookingLinkFor(
     if (!site) throw branchNotFound()
   }
   if (
-    onlyWithoutAppointment &&
+    appointments === "sin-cita" &&
     chosen &&
     (await nextAppointmentOf(tx, orgId, chosen.id, new Date()))
   )
     return null
+  let openOn: string | undefined
+  if (appointments === "una-cita") {
+    const upcoming = chosen
+      ? await tx
+          .select({ id: appointment.id })
+          .from(appointment)
+          .where(
+            and(
+              eq(appointment.organizationId, orgId),
+              eq(appointment.patientId, chosen.id),
+              inArray(appointment.status, ["programada", "confirmada"]),
+              gt(appointment.startsAt, new Date()),
+            ),
+          )
+          .limit(2)
+      : []
+    if (upcoming.length !== 1) return null
+    openOn = upcoming[0]!.id
+  }
   const issued = await issuePersonalLink(
     tx,
     orgId,
@@ -463,6 +505,7 @@ async function bookingLinkFor(
         : { booking: false }),
       createdBy: input.createdBy ?? null,
       ...(newPerson ? { newPerson: true } : {}),
+      ...(openOn ? { appointmentId: openOn } : {}),
     },
     deps,
   )
