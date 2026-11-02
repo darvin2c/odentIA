@@ -24,6 +24,7 @@ import {
   createEncounter,
   createTreatmentPlan,
   finalizeEncounter,
+  keepIssuedPaper,
   findPatientDuplicates,
   getAnamnesisVersion,
   getEncounterClosing,
@@ -1363,8 +1364,8 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     const body = await c.req.json().catch(() => ({}))
     const parsed = finalizeInput.safeParse(body ?? {})
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
+    return runService(c, 200, async () => {
+      const finalized = await withOrgContext(deps.db, orgId, (tx) =>
         finalizeEncounter(
           tx,
           orgId,
@@ -1373,8 +1374,18 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           c.req.param("encounterId"),
           parsed.data,
         ),
-      ),
-    )
+      )
+      // Su hoja de atención queda guardada desde que se firma (ADR 0133).
+      await keepIssuedPaper({
+        run: (fn) => withOrgContext(deps.db, orgId, fn),
+        storage: deps.storage,
+        orgId,
+        patientId: c.req.param("id"),
+        type: "attention_sheet",
+        documentId: c.req.param("encounterId"),
+      })
+      return finalized
+    })
   })
   // Materiales usados en la atención (ADR 0067): lo lee quien lee la atención;
   // corrige quien atendió o quien lleva el inventario (lo decide el servicio).

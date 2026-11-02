@@ -155,6 +155,8 @@ export function fetchSignedOdontogramPrint(
     establishment: PrintEstablishment | null
     /** La dirección del QR; null: el papel sale sin QR. */
     checkUrl: string | null
+    /** La firma que regía al firmarlo; null: queda la línea para firmar a mano. */
+    signerStrokes: number[][][] | null
   }
 }> {
   return apiFetch(`${base(patientId)}/assessments/${assessmentId}/print`)

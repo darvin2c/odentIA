@@ -1,6 +1,6 @@
 {
-  "id": "83496bef-c1ce-4c7f-aecf-4fed4103b8ce",
-  "prevId": "355d3d37-7217-41d0-a1ff-38bcb83e1c9e",
+  "id": "940bdc71-4f8b-410e-b847-5c90348ac323",
+  "prevId": "b7d3d8b2-16ff-4824-a02e-19797c6ae39f",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -9420,6 +9420,24 @@
           "primaryKey": false,
           "notNull": false
         },
+        "signer_name": {
+          "name": "signer_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "signer_title": {
+          "name": "signer_title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "signer_registration": {
+          "name": "signer_registration",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "cancelled_at": {
           "name": "cancelled_at",
           "type": "timestamp with time zone",
@@ -10712,6 +10730,145 @@
       },
       "isRLSEnabled": false
     },
+    "public.issued_paper": {
+      "name": "issued_paper",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "patient_id": {
+          "name": "patient_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "document_type": {
+          "name": "document_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "document_id": {
+          "name": "document_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "storage_key": {
+          "name": "storage_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sha256": {
+          "name": "sha256",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "size_bytes": {
+          "name": "size_bytes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "patient_initials": {
+          "name": "patient_initials",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "issued_paper_document_uidx": {
+          "name": "issued_paper_document_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "document_type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "document_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "issued_paper_organization_id_organization_id_fk": {
+          "name": "issued_paper_organization_id_organization_id_fk",
+          "tableFrom": "issued_paper",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "tableTo": "organization",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "issued_paper_patient_id_patient_id_fk": {
+          "name": "issued_paper_patient_id_patient_id_fk",
+          "tableFrom": "issued_paper",
+          "columnsFrom": [
+            "patient_id"
+          ],
+          "tableTo": "patient",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "issued_paper_type_check": {
+          "name": "issued_paper_type_check",
+          "value": "\"issued_paper\".\"document_type\" in ('prescription','order','medical_leave','attention_sheet')"
+        },
+        "issued_paper_sha256_check": {
+          "name": "issued_paper_sha256_check",
+          "value": "\"issued_paper\".\"sha256\" ~ '^[0-9a-f]{64}$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.medical_leave": {
       "name": "medical_leave",
       "schema": "",
@@ -11172,6 +11329,107 @@
             "organization_id"
           ],
           "tableTo": "organization",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.professional_drawn_signature": {
+      "name": "professional_drawn_signature",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "strokes": {
+          "name": "strokes",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "professional_drawn_signature_org_user_idx": {
+          "name": "professional_drawn_signature_org_user_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "professional_drawn_signature_organization_id_organization_id_fk": {
+          "name": "professional_drawn_signature_organization_id_organization_id_fk",
+          "tableFrom": "professional_drawn_signature",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "tableTo": "organization",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "professional_drawn_signature_user_id_user_id_fk": {
+          "name": "professional_drawn_signature_user_id_user_id_fk",
+          "tableFrom": "professional_drawn_signature",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "tableTo": "user",
+          "schemaTo": "auth",
           "columnsTo": [
             "id"
           ],
@@ -17752,30 +18010,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "tender_cents": {
-          "name": "tender_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "tender_currency": {
-          "name": "tender_currency",
-          "type": "char(3)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "exchange_rate": {
-          "name": "exchange_rate",
-          "type": "numeric",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "business_cents": {
-          "name": "business_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
         "paid_at": {
           "name": "paid_at",
           "type": "timestamp with time zone",
@@ -17962,14 +18196,6 @@
         "patient_payment_tax_check": {
           "name": "patient_payment_tax_check",
           "value": "\"patient_payment\".\"tax_cents\" BETWEEN 0 AND \"patient_payment\".\"amount_cents\""
-        },
-        "patient_payment_tender_check": {
-          "name": "patient_payment_tender_check",
-          "value": "(\"patient_payment\".\"tender_cents\" IS NULL) = (\"patient_payment\".\"tender_currency\" IS NULL) AND (\"patient_payment\".\"tender_cents\" IS NULL OR (\"patient_payment\".\"tender_cents\" >= 0 AND \"patient_payment\".\"tender_currency\" <> \"patient_payment\".\"currency\" AND \"patient_payment\".\"exchange_rate\" IS NOT NULL))"
-        },
-        "patient_payment_value_check": {
-          "name": "patient_payment_value_check",
-          "value": "(\"patient_payment\".\"exchange_rate\" IS NULL) = (\"patient_payment\".\"business_cents\" IS NULL) AND (\"patient_payment\".\"exchange_rate\" IS NULL OR (\"patient_payment\".\"exchange_rate\" > 0 AND \"patient_payment\".\"business_cents\" >= 0))"
         },
         "patient_payment_method_type_check": {
           "name": "patient_payment_method_type_check",
@@ -19607,12 +19833,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "change_currency": {
-          "name": "change_currency",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "payer_contact_id": {
           "name": "payer_contact_id",
           "type": "uuid",
@@ -19839,10 +20059,6 @@
         "payment_ticket_total_check": {
           "name": "payment_ticket_total_check",
           "value": "\"payment_ticket\".\"total_cents\" >= 0"
-        },
-        "payment_ticket_change_currency_check": {
-          "name": "payment_ticket_change_currency_check",
-          "value": "\"payment_ticket\".\"change_currency\" IS NULL OR \"payment_ticket\".\"change_currency\" ~ '^[A-Z]{3}$'"
         }
       },
       "isRLSEnabled": false
@@ -21180,7 +21396,7 @@
           "name": "currency",
           "type": "char(3)",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "status": {
           "name": "status",
@@ -26669,6 +26885,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "paper_header": {
+          "name": "paper_header",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -27887,13 +28109,6 @@
           "notNull": true,
           "default": 0
         },
-        "cash_change_cents": {
-          "name": "cash_change_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
         "expected_cents": {
           "name": "expected_cents",
           "type": "integer",
@@ -28211,18 +28426,6 @@
               "isExpression": false,
               "asc": true,
               "nulls": "last"
-            },
-            {
-              "expression": "kind",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "currency",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
             }
           ],
           "isUnique": true,
@@ -28315,7 +28518,7 @@
         },
         "cash_movement_kind_check": {
           "name": "cash_movement_kind_check",
-          "value": "\"cash_movement\".\"kind\" IN ('apertura','cobro','gasto','aporte','retiro','devolucion','vuelto')"
+          "value": "\"cash_movement\".\"kind\" IN ('apertura','cobro','gasto','aporte','retiro','devolucion')"
         }
       },
       "isRLSEnabled": false
@@ -29267,30 +29470,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "tender_cents": {
-          "name": "tender_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "tender_currency": {
-          "name": "tender_currency",
-          "type": "char(3)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "exchange_rate": {
-          "name": "exchange_rate",
-          "type": "numeric",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "business_cents": {
-          "name": "business_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
         "spent_at": {
           "name": "spent_at",
           "type": "timestamp with time zone",
@@ -29511,14 +29690,6 @@
         "expense_amount_check": {
           "name": "expense_amount_check",
           "value": "\"expense\".\"amount_cents\" > 0"
-        },
-        "expense_tender_check": {
-          "name": "expense_tender_check",
-          "value": "(\"expense\".\"tender_cents\" IS NULL) = (\"expense\".\"tender_currency\" IS NULL) AND (\"expense\".\"tender_cents\" IS NULL OR (\"expense\".\"tender_cents\" >= 0 AND \"expense\".\"tender_currency\" <> \"expense\".\"currency\" AND \"expense\".\"exchange_rate\" IS NOT NULL))"
-        },
-        "expense_value_check": {
-          "name": "expense_value_check",
-          "value": "(\"expense\".\"exchange_rate\" IS NULL) = (\"expense\".\"business_cents\" IS NULL) AND (\"expense\".\"exchange_rate\" IS NULL OR (\"expense\".\"exchange_rate\" > 0 AND \"expense\".\"business_cents\" >= 0))"
         },
         "expense_purchase_category_check": {
           "name": "expense_purchase_category_check",
@@ -30168,36 +30339,6 @@
           "notNull": true,
           "default": false
         },
-        "second_currency": {
-          "name": "second_currency",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "exchange_rate": {
-          "name": "exchange_rate",
-          "type": "numeric",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "exchange_factor": {
-          "name": "exchange_factor",
-          "type": "numeric",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "exchange_rate_at": {
-          "name": "exchange_rate_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "exchange_rate_by": {
-          "name": "exchange_rate_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -30227,20 +30368,6 @@
           ],
           "onUpdate": "no action",
           "onDelete": "no action"
-        },
-        "org_profile_exchange_rate_by_user_id_fk": {
-          "name": "org_profile_exchange_rate_by_user_id_fk",
-          "tableFrom": "org_profile",
-          "columnsFrom": [
-            "exchange_rate_by"
-          ],
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
         }
       },
       "compositePrimaryKeys": {},
@@ -30278,14 +30405,6 @@
         "org_profile_ticket_footer_check": {
           "name": "org_profile_ticket_footer_check",
           "value": "length(trim(\"org_profile\".\"ticket_footer\")) BETWEEN 1 AND 280"
-        },
-        "org_profile_second_currency_check": {
-          "name": "org_profile_second_currency_check",
-          "value": "\"org_profile\".\"second_currency\" IS NULL OR (\"org_profile\".\"second_currency\" ~ '^[A-Z]{3}$' AND \"org_profile\".\"second_currency\" <> \"org_profile\".\"currency\")"
-        },
-        "org_profile_exchange_check": {
-          "name": "org_profile_exchange_check",
-          "value": "(\"org_profile\".\"second_currency\" IS NULL) = (\"org_profile\".\"exchange_rate\" IS NULL) AND (\"org_profile\".\"exchange_rate\" IS NULL) = (\"org_profile\".\"exchange_factor\" IS NULL) AND (\"org_profile\".\"exchange_rate\" IS NULL) = (\"org_profile\".\"exchange_rate_at\" IS NULL) AND (\"org_profile\".\"exchange_rate\" IS NULL OR (\"org_profile\".\"exchange_rate\" > 0 AND \"org_profile\".\"exchange_factor\" > 0))"
         }
       },
       "isRLSEnabled": false

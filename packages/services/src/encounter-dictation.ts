@@ -380,7 +380,8 @@ function summarize(kind: DictationKind, payload: Record<string, unknown>, zone: 
     const name = String(payload["genericName"] ?? "")
     const title = [`${name.charAt(0).toUpperCase()}${name.slice(1)}`, payload["strength"]].filter(Boolean).join(" ")
     const how = [payload["dose"], payload["route"] ? `vía ${payload["route"]}` : "", payload["frequency"], payload["duration"] ? `por ${payload["duration"]}` : ""].filter(Boolean).join(" · ")
-    const quantity = typeof payload["quantity"] === "number" ? `Cantidad total: ${payload["quantity"]}${payload["quantityCalculated"] ? " (calculada)" : ""}` : ""
+    // Sin cantidad se dice: si no, una que se calculaba y ya no se puede calcular desaparecería sin aviso.
+    const quantity = typeof payload["quantity"] === "number" ? `Cantidad total: ${payload["quantity"]}${payload["quantityCalculated"] ? " (calculada)" : ""}` : "Cantidad total: sin indicar"
     return [[title, payload["dosageForm"]].filter(Boolean).join(" · "), how, quantity].filter(Boolean).join("\n")
   }
   const due = typeof payload["dueAt"] === "string" ? new Date(payload["dueAt"]).toLocaleDateString(zone.locale, { timeZone: zone.timezone, day: "numeric", month: "long", year: "numeric" }) : ""
@@ -639,6 +640,17 @@ const MEDICATION_LABEL: Record<string, string> = {
 }
 
 /**
+ * Lo dicho de un medicamento, sin lo que dedujo el sistema: la cantidad calculada
+ * y la vía oral dada por dicha se deducen de nuevo con lo que haya cambiado, y
+ * conservan su marca. Lo que el profesional dijo no se toca.
+ */
+function saidInMedication({ quantityCalculated, routeImplied, ...said }: Record<string, unknown>): Record<string, unknown> {
+  if (quantityCalculated === true) delete said["quantity"]
+  if (routeImplied === true) delete said["route"]
+  return said
+}
+
+/**
  * Un medicamento dictado, con lo que la receta exige (la Guía de la buena
  * prescripción de la OMS, igual que «Emitir receta»). La vía oral se da por
  * dicha con una forma que se toma por la boca y la cantidad total se calcula
@@ -662,7 +674,8 @@ function prepareMedication(payload: Record<string, unknown>, medications: Medica
     // Solo con unidades que se cuentan: «10 mL» de jarabe no da un número de frascos.
     const perDose = spokenNumber(text("dose"), /(capsula|tableta|comprimido|gragea|sobre)/)
     const everyHours = spokenNumber(text("frequency"), /hora/)
-    const days = spokenNumber(text("duration"), /dia/)
+    const weeks = spokenNumber(text("duration"), /semana/)
+    const days = spokenNumber(text("duration"), /dia/) ?? (weeks ? weeks * 7 : null)
     if (perDose && everyHours && days && 24 % everyHours === 0) Object.assign(ready, { quantity: perDose * (24 / everyHours) * days, quantityCalculated: true })
   }
   if (!findMedication(genericName, medications.medications)) ready["notInList"] = true
@@ -726,7 +739,7 @@ async function revise(
   const { services, dictation } = scope
   // Un campo que llega vacío se quita de la sugerencia: el odontólogo lo borró.
   let payload: Record<string, unknown> = Object.fromEntries(
-    Object.entries({ ...current, ...patch }).filter(([, value]) => value !== null && value !== ""),
+    Object.entries({ ...(kind === "receta" ? saidInMedication(current) : current), ...patch }).filter(([, value]) => value !== null && value !== ""),
   )
   if (kind === "plan" && Array.isArray(current["options"])) return revisePlanChoice(current, patch, services, dictation)
   // Tocar otro hueco de los que ofrece la tarjeta: se queda ese, si sigue libre.
@@ -1931,7 +1944,7 @@ async function refreshRecipes(tx: Db, orgId: string, patientId: string, encounte
   const checks = await patientChecks(tx, orgId, patientId, encounterId)
   for (const row of rows) {
     const { data, meta } = splitMeta(row.payload)
-    const ready = checkAgainstPatient("receta", prepareMedication(data, scope.medications), checks, scope.medications, scope.dictation)
+    const ready = checkAgainstPatient("receta", prepareMedication(saidInMedication(data), scope.medications), checks, scope.medications, scope.dictation)
     if (ready.status === row.status && ready.note === row.note) continue
     await tx
       .update(encounterDictationSuggestion)

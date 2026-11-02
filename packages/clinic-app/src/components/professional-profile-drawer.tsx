@@ -1,14 +1,17 @@
+import { Button } from "@odentia/ui"
 import { FormDrawer, useAppForm, useFormSurface } from "@odentia/ui-patterns"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useId } from "react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useEffect, useId, useState } from "react"
 import { z } from "zod"
 import {
+  fetchMyProfessionalProfile,
   type ProfessionalProfile,
   type ProfessionalProfileInput,
   saveProfessionalProfileApi,
 } from "../lib/encounters"
 import { useOrgProfile } from "../lib/org"
 import { productUi } from "../product/product-ui"
+import { FirmaPad, FirmaView } from "./patient/firma-pad"
 
 /** Colegiatura: letras, dígitos y guion, sin espacios (como `REGISTRATION_RE` del servicio). */
 const REGISTRATION_RE = /^[A-Za-z0-9-]{1,20}$/
@@ -31,7 +34,95 @@ const profileSchema = z.object({
     .trim()
     .refine((value) => !value || REGISTRATION_RE.test(value), "Solo letras, dígitos y guion, sin espacios."),
   specialtyRegistration: z.string().max(40, "El registro de especialista admite hasta 40 caracteres."),
+  // Sin el dato no cambia; nulo es que la quita; con trazos, la nueva.
+  signatureStrokes: z.custom<number[][][] | null | undefined>(),
 })
+
+/**
+ * «Tu firma»: el dibujo que se ve en los papeles (ADR 0131), solo en el perfil
+ * propio. Se dibuja una vez y sale sola; lo que ya está emitido no cambia.
+ */
+function SignatureField({
+  saved,
+  loading,
+  failed,
+  onRetry,
+  value,
+  onChange,
+  id,
+  invalid,
+  describedBy,
+}: {
+  saved: number[][][] | null
+  loading: boolean
+  failed: boolean
+  onRetry: () => void
+  value: number[][][] | null | undefined
+  onChange: (value: number[][][] | null | undefined) => void
+  id: string
+  invalid: boolean
+  describedBy: string | undefined
+}): React.JSX.Element {
+  const [changing, setChanging] = useState(false)
+  if (loading) return <p className="text-sm text-muted-foreground">Buscando tu firma…</p>
+  if (failed)
+    return (
+      <p role="alert" className="flex flex-wrap items-center gap-2 text-sm">
+        No se pudo leer tu firma.
+        <Button type="button" size="sm" variant="outline" onClick={onRetry}>
+          Reintentar
+        </Button>
+      </p>
+    )
+  if (value === null)
+    return (
+      <p className="flex flex-wrap items-center gap-2 text-sm">
+        Se quitará al guardar: tus papeles saldrán con una línea para firmar a mano.
+        <Button type="button" size="sm" variant="outline" onClick={() => onChange(undefined)}>
+          Deshacer
+        </Button>
+      </p>
+    )
+  if (saved && !changing)
+    return (
+      <div className="flex flex-col gap-2">
+        <FirmaView strokes={saved} label="Tu firma guardada" />
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" size="sm" variant="outline" onClick={() => setChanging(true)}>
+            Cambiar
+          </Button>
+          <Button type="button" size="sm" variant="outline" onClick={() => onChange(null)}>
+            Quitar
+          </Button>
+        </div>
+      </div>
+    )
+  return (
+    <div className="flex flex-col gap-2">
+      <FirmaPad
+        id={id}
+        invalid={invalid}
+        describedBy={describedBy}
+        label="Dibuja tu firma"
+        onChange={(strokes) => onChange(strokes.length > 0 ? strokes : undefined)}
+      />
+      {saved ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="self-start"
+          onClick={() => {
+            setChanging(false)
+            onChange(undefined)
+          }}
+        >
+          Dejar la que tenía
+        </Button>
+      ) : null}
+    </div>
+  )
+}
 
 /**
  * Perfil profesional: nombre de firma, título y colegiatura. Es la identidad
@@ -40,12 +131,14 @@ const profileSchema = z.object({
  * documento guarda su copia, así que cambiarlo no reescribe lo ya firmado.
  * Título y colegio no tienen valor por defecto: si están vacíos se proponen
  * los del país de la clínica cuando los hay (`dentalProfileFor().professional`,
- * «Cirujano dentista» y «COP» solo en Perú), a la vista y editables.
+ * «Cirujano dentista» y «COP» solo en Perú), a la vista y editables. La firma
+ * dibujada solo la pone la propia persona: administración no la ve ni la cambia.
  */
 export function ProfessionalProfileDrawer({
   open,
   profile,
   target,
+  startAtSignature = false,
   onClose,
   onSaved,
 }: {
@@ -53,6 +146,8 @@ export function ProfessionalProfileDrawer({
   profile: ProfessionalProfile | null
   /** «me» para el propio perfil; el id del usuario para administración. */
   target: string
+  /** Se abrió para agregar o cambiar la firma: empieza mostrándola. */
+  startAtSignature?: boolean
   onClose: () => void
   onSaved?: (profile: ProfessionalProfile) => void
 }): React.JSX.Element {
@@ -63,6 +158,13 @@ export function ProfessionalProfileDrawer({
   const save = useMutation({
     mutationFn: (input: ProfessionalProfileInput) => saveProfessionalProfileApi(target, input),
   })
+  const mine = target === "me"
+  // La lista del equipo no trae firmas: la propia se pide aparte.
+  const own = useQuery({
+    queryKey: ["professional-profile", "me"],
+    queryFn: fetchMyProfessionalProfile,
+    enabled: mine,
+  })
   const form = useAppForm({
     defaultValues: {
       signatureName: profile?.signatureName ?? "",
@@ -70,6 +172,7 @@ export function ProfessionalProfileDrawer({
       registrationBody: profile?.registrationBody || suggested?.registrationBody || "",
       registrationNumber: profile?.registrationNumber ?? "",
       specialtyRegistration: profile?.specialtyRegistration ?? "",
+      signatureStrokes: undefined as number[][][] | null | undefined,
     },
     validators: { onSubmit: profileSchema },
     onSubmit: async ({ value }) => {
@@ -79,6 +182,7 @@ export function ProfessionalProfileDrawer({
         registrationBody: value.registrationBody.trim(),
         registrationNumber: value.registrationNumber.trim() || null,
         specialtyRegistration: value.specialtyRegistration.trim() || null,
+        ...(value.signatureStrokes === undefined ? {} : { signatureStrokes: value.signatureStrokes }),
       })
       await queryClient.invalidateQueries({ queryKey: ["professional-profile"] })
       await queryClient.invalidateQueries({ queryKey: ["professional-profiles"] })
@@ -97,6 +201,35 @@ export function ProfessionalProfileDrawer({
       form.setFieldValue("registrationBody", suggested.registrationBody, { dontUpdateMeta: true })
   }, [suggested, form])
   const surface = useFormSurface(form)
+  const signatureField = mine ? (
+    <form.AppField name="signatureStrokes">
+      {(field) => (
+        <div className="sm:col-span-2">
+          <field.Group
+            legend="Tu firma"
+            description="Sale en los papeles que emites; lo ya emitido no cambia. Es solo el dibujo: el papel sigue diciendo «Firmado electrónicamente». Con el dedo, en el celular, suele quedar mejor."
+          >
+            {(control) => (
+              <SignatureField
+                saved={own.data?.data.signatureStrokes ?? null}
+                loading={own.isPending}
+                failed={own.isError}
+                onRetry={() => void own.refetch()}
+                value={field.state.value}
+                onChange={(value) => {
+                  field.handleChange(value)
+                  field.handleBlur()
+                }}
+                id={control.id}
+                invalid={control.invalid}
+                describedBy={control.describedBy}
+              />
+            )}
+          </field.Group>
+        </div>
+      )}
+    </form.AppField>
+  ) : null
 
   return (
     <FormDrawer
@@ -108,6 +241,8 @@ export function ProfessionalProfileDrawer({
       submitLabel="Guardar perfil"
     >
       <div className="grid gap-4 sm:grid-cols-2">
+        {/* Quien vino a poner su firma la encuentra primero, sin buscarla debajo de los demás datos. */}
+        {startAtSignature ? signatureField : null}
         <form.AppField name="signatureName">
           {(field) => (
             <field.TextField
@@ -162,6 +297,7 @@ export function ProfessionalProfileDrawer({
             />
           )}
         </form.AppField>
+        {startAtSignature ? null : signatureField}
       </div>
     </FormDrawer>
   )

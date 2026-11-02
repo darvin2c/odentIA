@@ -89,6 +89,33 @@ export const professionalProfile = pgTable(
   ],
 )
 
+/**
+ * La firma que se ve en los papeles de un profesional: su dibujo, no una firma
+ * digital (ADR 0131). Solo se agrega: cada cambio es una fila y `strokes` nulo
+ * es que la quitó. Cada papel muestra la que regía al emitirse, así que
+ * cambiarla no reescribe lo emitido.
+ */
+export const professionalDrawnSignature = pgTable(
+  "professional_drawn_signature",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id),
+    /** Trazos en coordenadas 0–1000 de un recuadro de 22 × 7. */
+    strokes: jsonb("strokes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("professional_drawn_signature_org_user_idx").on(
+      table.organizationId,
+      table.userId,
+      table.createdAt,
+    ),
+  ],
+)
+
 export const FORM_TEMPLATE_STATUSES = ["borrador", "publicado", "archivado"] as const
 
 /**
@@ -485,6 +512,10 @@ export const clinicalOrder = pgTable(
     resultDocumentId: uuid("result_document_id"),
     /** Derivación a un colega de la clínica: recibe la tarea. */
     recipientUserId: text("recipient_user_id").references(() => user.id),
+    /** Copia del perfil de quien la pide, como la receta; nula si no tenía colegiatura. */
+    signerName: text("signer_name"),
+    signerTitle: text("signer_title"),
+    signerRegistration: text("signer_registration"),
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
     cancelledBy: text("cancelled_by").references(() => user.id),
     cancelReason: text("cancel_reason"),
@@ -566,6 +597,43 @@ export const medicalLeave = pgTable(
   ],
 )
 
+/**
+ * El PDF de una receta, una orden, un descanso o una hoja de atención tal como se emitió, guardado una
+ * sola vez con su huella (ADR 0132): el mismo archivo para verlo, enviarlo y
+ * descargarlo. El rol de la aplicación solo agrega y lee. No es un documento de la
+ * galería: nadie lo sube ni lo retira.
+ */
+export const issuedPaper = pgTable(
+  "issued_paper",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patient.id, { onDelete: "cascade" }),
+    documentType: text("document_type").notNull(),
+    documentId: uuid("document_id").notNull(),
+    storageKey: text("storage_key").notNull(),
+    sha256: text("sha256").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    /** Las iniciales que dice este papel: el QR las muestra para cotejarlo, aunque hoy se llame distinto. */
+    patientInitials: text("patient_initials").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("issued_paper_document_uidx").on(
+      table.organizationId,
+      table.documentType,
+      table.documentId,
+    ),
+    check(
+      "issued_paper_type_check",
+      sql`${table.documentType} in ('prescription','order','medical_leave','attention_sheet')`,
+    ),
+    check("issued_paper_sha256_check", sql`${table.sha256} ~ '^[0-9a-f]{64}$'`),
+  ],
+)
+
 export type OrgSpecialtyRow = typeof orgSpecialty.$inferSelect
 export type ClinicalFormTemplateRow = typeof clinicalFormTemplate.$inferSelect
 export type ClinicalFormResponseRow = typeof clinicalFormResponse.$inferSelect
@@ -574,6 +642,7 @@ export type ConsentDocumentRow = typeof consentDocument.$inferSelect
 export type ConsentTemplateServiceRow = typeof consentTemplateService.$inferSelect
 export type ClinicalOrderRow = typeof clinicalOrder.$inferSelect
 export type MedicalLeaveRow = typeof medicalLeave.$inferSelect
+export type IssuedPaperRow = typeof issuedPaper.$inferSelect
 
 // Referencia para que el barrel del padre no rompa si aún no re-exporta este archivo.
 export const CLINICAL_FORMS_TABLES = [
@@ -588,4 +657,5 @@ export const CLINICAL_FORMS_TABLES = [
   "consent_event",
   "clinical_order",
   "medical_leave",
+  "issued_paper",
 ] as const

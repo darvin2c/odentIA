@@ -19,6 +19,7 @@ import { GenericContainer, type StartedTestContainer, Wait } from "testcontainer
 import { afterAll, beforeAll, expect, it } from "vitest"
 import { z } from "zod"
 import { createCommissionsRoute } from "./commissions.js"
+import { createConversationsRoute } from "./conversations.js"
 import { createFinanceRoute } from "./finance.js"
 import { createFinancialDocumentsRoute } from "./financial-documents.js"
 import type { CrmDeps } from "./helpers.js"
@@ -137,6 +138,7 @@ function buildApp(role: string, userId: string, orgId = ORG_A): Hono {
   const app = new Hono()
   app.use("*", stubOrg(role, userId, orgId))
   // Mismo orden que `app.ts`: los documentos financieros van antes de la ficha.
+  app.route("/conversations", createConversationsRoute(deps))
   app.route("/patients", createFinancialDocumentsRoute(deps))
   app.route("/patients", createPatientsRoute(deps))
   app.route("/finance", createFinanceRoute(deps))
@@ -568,6 +570,25 @@ it("presupuestos: reception lee, envía y anota sin cambiar precios; cashier dec
   expect((await buildApp("reception", RECEP).request(healthPath)).status).toBe(403)
   expect((await buildApp("cashier", CASH).request(healthPath)).status).toBe(403)
   expect((await buildApp("clinician", DENT1).request(healthPath)).status).toBe(404)
+
+  // Una historia bloqueada también cierra sus papeles: Administración la abre con motivo.
+  const person = sql`(select person_id from patient where id = ${PAT_A})`
+  await ownerDb.execute(sql`update contact set is_active = false, record_locked_at = now(), record_locked_by = ${DENT1} where id = ${person}`)
+  expect((await buildApp("owner", DENT1).request(healthPath)).status).toBe(423)
+  expect((await buildApp("clinician", DENT1).request(healthPath)).status).toBe(404)
+  await ownerDb.execute(sql`update contact set is_active = true, record_locked_at = null, record_locked_by = null where id = ${person}`)
+
+  // El papel de salud enviado queda en la conversación, que recepción lee: no lo abre desde ahí.
+  const sentMessage = crypto.randomUUID()
+  await ownerDb.execute(sql`
+    insert into audit_event (organization_id, actor_user_id, action, entity, entity_id, metadata)
+    values (${ORG_A}, ${DENT1}, 'health_document.sent', 'message', ${sentMessage}, ${JSON.stringify({ patientId: PAT_A })}::jsonb)`)
+  const attachment = `/conversations/${crypto.randomUUID()}/messages/${sentMessage}/attachments/0`
+  const blocked = await buildApp("reception", RECEP).request(attachment)
+  expect(blocked.status).toBe(403)
+  expect(await blocked.text()).toContain("historia clínica")
+  // Quien lee lo clínico pasa de la guarda: aquí el mensaje de prueba no existe.
+  expect((await buildApp("clinician", DENT1).request(attachment)).status).toBe(404)
 
   // Lo que explica el presupuesto: recepción lo lee sin lo clínico y no lo edita.
   const presentationPath = `/patients/${PAT_A}/budgets/${BUDGET1}/presentation`

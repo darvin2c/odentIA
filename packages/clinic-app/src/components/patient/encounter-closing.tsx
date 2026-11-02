@@ -131,6 +131,29 @@ function consentLine(need: ConsentNeed, who: string): { title: string; detail: s
  * sigue abierto: cada rechazo en su campo, lo que falta registrar con su
  * «Registrar» y lo demás junto a los botones.
  */
+/**
+ * Donde quien atiende agrega o cambia su firma (ADR 0131): quien atiende no entra a
+ * Configuración, y el cierre es donde firma todos los días. Avisa, no impide cerrar.
+ */
+export function ClosingSignatureHint({
+  saved,
+  onEdit,
+}: {
+  saved: boolean
+  onEdit: () => void
+}): React.JSX.Element {
+  return (
+    <p className="mt-2 text-xs text-muted-foreground">
+      {saved
+        ? "Tus papeles llevan la firma que guardaste. "
+        : "Sin tu firma guardada, tus papeles salen con una línea para firmar a mano. "}
+      <Button type="button" size="sm" variant="link" className="h-auto p-0 text-xs" onClick={onEdit}>
+        {saved ? "Cambiar mi firma" : "Agregar mi firma"}
+      </Button>
+    </p>
+  )
+}
+
 export function EncounterClosingDialog({
   open,
   form,
@@ -148,6 +171,7 @@ export function EncounterClosingDialog({
   blockedReason,
   onSignNow,
   onClose,
+  signatureHint = null,
   registration = null,
   confirmLabel = null,
   initialFocus,
@@ -180,6 +204,8 @@ export function EncounterClosingDialog({
   blockedReason: string | null
   onSignNow: (need: ConsentNeed) => void
   onClose: () => void
+  /** Su firma dibujada: si la tiene y cómo agregarla o cambiarla. */
+  signatureHint?: React.ReactNode
   /** Sin colegiatura en el perfil: se pide aquí, en lugar de «Firmarás como». */
   registration?: React.ReactNode
   /** «Guardar y firmar» cuando antes hay que guardar la colegiatura. */
@@ -218,6 +244,7 @@ export function EncounterClosingDialog({
               <div className="rounded-lg border p-3">
                 <p className="font-medium">Firmarás como {signAs ?? "—"}</p>
                 <p className="text-xs text-muted-foreground">De tu perfil profesional</p>
+                {signatureHint}
               </div>
             )}
             {toRegister.length > 0 ? (

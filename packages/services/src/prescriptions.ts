@@ -18,7 +18,7 @@ import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
 import type { ProductPrescribing } from "./product-hooks.js"
 import { productHooks } from "./products.js"
-import { requireProfessionalSignature } from "./professional-profiles.js"
+import { drawnSignatureAt, requireProfessionalSignature } from "./professional-profiles.js"
 
 /**
  * Medicamento de la receta con los datos de la Guía de la buena prescripción
@@ -421,5 +421,6 @@ export async function getPrescriptionPrint(tx: Db, orgId: string, patientId: str
     patient: person,
     establishment: org ?? null,
     allergies: allergies.map((row) => row.substance),
+    signerStrokes: await drawnSignatureAt(tx, orgId, detail.issuedBy, detail.issuedAt),
   }
 }

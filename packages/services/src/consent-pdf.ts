@@ -20,6 +20,7 @@ import { credentialOf } from "./clinical-papers.js"
 import { documentCheckUrl } from "./document-check.js"
 import { loadDocumentClinic } from "./document-clinic.js"
 import {
+  CHECK_QR_SIZE,
   chartNumber,
   type DocumentClinic,
   DocumentKit,
@@ -176,8 +177,8 @@ export async function renderConsentPdf(
           : signedAt,
     },
   ]
-  // El profesional confirma con su perfil (nombre y colegiatura), sin trazo: firma electrónica.
-  const professionalStrokes = strokesOf(doc.professionalSignature)
+  // El profesional confirma con su perfil (nombre y colegiatura): firma electrónica, con la firma
+  // que guardó si la tiene (ADR 0131) y si no, con la línea para firmar a mano.
   const informerLines: { text: string; strong?: boolean }[] = awaitingConfirmation
     ? [{ text: "Falta su confirmación" }]
     : [
@@ -186,14 +187,17 @@ export async function renderConsentPdf(
           ? [{ text: credentialOf(doc.informerTitle, doc.informerRegistration) ?? "" }]
           : []),
         { text: doc.informedAt ? `Informó el ${dayTimeWords(doc.informedAt, zone)}` : "" },
-        ...(professionalStrokes ? [] : [{ text: "Firmado electrónicamente" }]),
+        { text: "Firmado electrónicamente" },
       ]
-  const signatures = professionalStrokes
-    ? [
-        { heading: signerHeading, strokes: strokesOf(doc.signatureData), lines: signerLines },
-        { heading: "Profesional que informa", strokes: professionalStrokes, lines: informerLines },
-      ]
-    : [{ heading: signerHeading, strokes: strokesOf(doc.signatureData), lines: signerLines }]
+  const signatures = [
+    { heading: signerHeading, strokes: strokesOf(doc.signatureData), lines: signerLines },
+    {
+      heading: "Profesional que informa",
+      strokes: strokesOf(doc.professionalSignature),
+      lines: informerLines,
+      handLine: true,
+    },
+  ]
   // En papel, la firma está en la hoja de la foto: aquí solo van los nombres.
   consentBody(kit, data, method === "papel" ? 0 : kit.penSignaturesHeight(signatures))
   kit.gap(SIGNATURES_GAP)
@@ -213,18 +217,8 @@ export async function renderConsentPdf(
         face: line.strong ? "sansSemi" : "sans",
         tone: line.strong ? "ink" : "gray",
       })
-  } else if (professionalStrokes) {
-    kit.penSignatures(signatures)
   } else {
     kit.penSignatures(signatures)
-    kit.gap(12)
-    kit.subheading("Profesional que informa", { size: SIZE.table })
-    for (const line of informerLines)
-      kit.text(line.text, {
-        size: line.strong ? SIZE.table : SIZE.second,
-        face: line.strong ? "sansSemi" : "sans",
-        tone: line.strong ? "ink" : "gray",
-      })
   }
   if (doc.witnessName) {
     kit.gap(10)
@@ -261,7 +255,7 @@ export async function renderConsentPdf(
   kit.gap(8)
   const words = CONSENT_SIGNATURE_WORDS[method] ?? CONSENT_SIGNATURE_WORDS.clinica
   const note = consentSignatureNote(clinicalProfileFor(data.establishment?.country).signatureLaw)
-  const qrSize = 54
+  const qrSize = CHECK_QR_SIZE
   // Con QR, el código y sus tres textos no se separan de página.
   const needed = 44 + (checkUrl ? 26 : 0)
   kit.ensure(needed)

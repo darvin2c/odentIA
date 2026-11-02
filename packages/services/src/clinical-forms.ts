@@ -40,7 +40,12 @@ import { requireCanAttend } from "./attending.js"
 import { fieldsError, invalidField, isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { addDeclaredAllergies, type DeclaredAllergy } from "./clinical.js"
 import { requirePatient } from "./patients.js"
-import { requireProfessionalSignature } from "./professional-profiles.js"
+import {
+  assertStrokes,
+  currentDrawnSignature,
+  drawnSignatureAt,
+  requireProfessionalSignature,
+} from "./professional-profiles.js"
 import { patientIsMinor, requireDecisionContact, requireLinkedActiveContact } from "./responsibilities.js"
 import { createTask } from "./tasks.js"
 import { createWorkspaceNotification } from "./workspace.js"
@@ -2118,28 +2123,7 @@ function assertSignatureData(
   }
   const strokes: unknown = "strokes" in raw ? raw.strokes : undefined
   const image: unknown = "image" in raw ? raw.image : undefined
-  if (strokes !== undefined) {
-    if (!Array.isArray(strokes) || strokes.length === 0) {
-      throw fail(`${label} está vacía`)
-    }
-    if (strokes.length > 500) throw fail(`${label} supera el tamaño permitido`)
-    let points = 0
-    for (const stroke of strokes) {
-      if (!Array.isArray(stroke) || stroke.length < 2 || stroke.length > 5000)
-        throw fail(`${label} tiene un trazo inválido`)
-      for (const point of stroke) {
-        if (
-          !Array.isArray(point) ||
-          point.length !== 2 ||
-          !point.every((n) => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1000)
-        )
-          throw fail(`${label} tiene coordenadas fuera del recuadro`)
-      }
-      points += stroke.length
-    }
-    if (points > 20000) throw fail(`${label} supera el tamaño permitido`)
-    return { strokes }
-  }
+  if (strokes !== undefined) return { strokes: assertStrokes(strokes, label, field) }
   if (typeof image !== "string" || image.length < 100) {
     throw fail(`${label} está vacía`)
   }
@@ -2244,10 +2228,12 @@ export async function signConsentDocument(
       throw invalidField("paperDocumentId", "La hoja firmada se guarda como consentimiento")
     paperDocumentId = paper.id
   }
-  // El profesional firma con su perfil; un trazo, si viene, queda como evidencia.
+  // El profesional firma con su perfil; un trazo, si viene, queda como evidencia. Si no, se copia
+  // la firma que guardó, para que se vea en el papel. En papel ya firmó a mano en la hoja.
+  const savedSignature = method === "papel" ? null : await currentDrawnSignature(tx, orgId, actorUserId)
   const professionalSignature =
     input.professionalSignature === undefined || input.professionalSignature === null
-      ? null
+      ? savedSignature && { strokes: savedSignature }
       : assertSignatureData(input.professionalSignature, "La firma del profesional", "professionalSignature")
   const informer = await requireProfessionalSignature(tx, orgId, actorUserId)
   let informedAt = now
@@ -2529,6 +2515,7 @@ export async function confirmLinkSignedConsent(
     throw conflict("NOT_LINK_SIGNED", "Este consentimiento no espera tu confirmación")
   }
   const informer = await requireProfessionalSignature(tx, orgId, actorUserId)
+  const savedSignature = await currentDrawnSignature(tx, orgId, actorUserId)
   const now = new Date()
   const [row] = await tx
     .update(consentDocument)
@@ -2538,6 +2525,7 @@ export async function confirmLinkSignedConsent(
       informerName: informer.name,
       informerTitle: informer.title,
       informerRegistration: informer.registration,
+      professionalSignature: savedSignature && { strokes: savedSignature },
       status: "firmado",
       signedAt: now,
       updatedAt: now,
@@ -3404,6 +3392,16 @@ function assertOrderKind(kind: unknown): OrderKind {
   throw validation("Tipo inválido: imagen, laboratorio o derivación")
 }
 
+/** Quien firma la orden; sin colegiatura, nadie: pedir una orden no se traba por eso. */
+async function orderSigner(tx: Db, orgId: string, userId: string) {
+  try {
+    return await requireProfessionalSignature(tx, orgId, userId)
+  } catch (e) {
+    if (!(e instanceof ServiceError)) throw e
+    return null
+  }
+}
+
 export async function createClinicalOrder(
   tx: Db,
   orgId: string,
@@ -3470,6 +3468,7 @@ export async function createClinicalOrder(
     requested,
     input.diagnosisCode?.trim() ? "diagnosisCode" : undefined,
   )
+  const signer = await orderSigner(tx, orgId, actorUserId)
   const [row] = await tx
     .insert(clinicalOrder)
     .values({
@@ -3485,6 +3484,9 @@ export async function createClinicalOrder(
       detail,
       ...diagnosis,
       status: "solicitado",
+      signerName: signer?.name ?? null,
+      signerTitle: signer?.title ?? null,
+      signerRegistration: signer?.registration ?? null,
     })
     .returning()
   await audit(tx, orgId, actorUserId, "order.create", "clinical_order", row.id, {
@@ -3695,20 +3697,16 @@ export async function getOrderPrint(tx: Db, orgId: string, orderId: string) {
           .from(diagnosisCatalog)
           .where(and(eq(diagnosisCatalog.systemKey, order.diagnosisSystem), eq(diagnosisCatalog.code, order.diagnosisCode)))
       : []
-  let requestedBy: { name: string; title: string | null; registration: string | null } | null = null
-  if (order.fromUserId) {
-    try {
-      const signature = await requireProfessionalSignature(tx, orgId, order.fromUserId)
-      requestedBy = { name: signature.name, title: signature.title, registration: signature.registration }
-    } catch (e) {
-      if (!(e instanceof ServiceError)) throw e
-    }
-  }
+  // La copia de quien la pidió; sin ella, nadie la firmó aunque hoy ya tenga colegiatura.
+  const requestedBy = order.signerName
+    ? { name: order.signerName, title: order.signerTitle, registration: order.signerRegistration }
+    : null
   return {
     order,
     diagnosisDescription: dx?.description ?? null,
     patient: person,
     establishment: org ?? null,
     requestedBy,
+    signerStrokes: await drawnSignatureAt(tx, orgId, order.fromUserId, order.createdAt),
   }
 }

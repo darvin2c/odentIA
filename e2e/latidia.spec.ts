@@ -12,8 +12,11 @@ import { simulateWhatsAppInbound } from "./channels"
 import { hostUrl, latidiaUrl, tenant } from "./env"
 import { chooseOption, expect, PASSWORD, test } from "./fixtures"
 import { consentLinkJourney } from "./consent-link-journey"
+import { drawSignature } from "./draw-signature"
 import { gotoHydrated } from "./hydration"
+import { downloadPaper, scanAndCompare } from "./issued-paper-journey"
 import { putAndRemovePhoto } from "./patient-photo"
+import { readPdfLikeACamera } from "./read-pdf"
 import { latestLinkFor } from "./mailpit"
 import { surface } from "./surface"
 
@@ -1076,6 +1079,153 @@ test("latidIA: sin colegiatura, el cierre propone «Médico cirujano» y el CMP,
     registrationBody: "CMP",
     registrationNumber: "045678",
   })
+  await context.close()
+})
+
+test("latidIA: la firma del médico se dibuja al cerrar y sale en el descanso que emite después", async ({
+  browser,
+  fixtureDb,
+  passwordHash,
+}) => {
+  const vela = await createVela(fixtureDb, passwordHash)
+  const context = await browser.newContext({ ignoreHTTPSErrors: true })
+  const page = await context.newPage()
+  await gotoHydrated(page, latidiaUrl("app", "/login"))
+  const { api, slug } = await openConsultorio(page, vela)
+  const profilePath = "/api/clinical-forms/professionals/me/profile"
+  const colegiatura = { professionalTitle: "Médico cirujano", registrationBody: "CMP", registrationNumber: "045678" }
+  expect((await request(page, api, "PUT", profilePath, slug, colegiatura)).status).toBe(200)
+  const patient = await request<{ data: { id: string } }>(page, api, "POST", "/api/patients", slug, {
+    submissionId: randomUUID(),
+    answers: {
+      demographics: { displayName: "Luis Gómez", docType: "DNI", docNumber: "40998877", birthDate: "1979-03-10" },
+      respondent: "staff",
+      privacyAccepted: false,
+    },
+  })
+  expect(patient.status).toBe(201)
+  const patientId = patient.body.data.id
+  const opened = await request<{ data: { id: string } }>(page, api, "POST", `/api/patients/${patientId}/encounters`, slug, {
+    reason: "Fiebre y dolor de garganta",
+  })
+  expect(opened.status).toBe(201)
+  const path = `/api/patients/${patientId}/encounters/${opened.body.data.id}`
+  expect(
+    (await request(page, api, "POST", `${path}/diagnoses`, slug, { diagnosisCode: "J03.9", diagnosisType: "provisional" }))
+      .status,
+  ).toBe(201)
+  expect((await request(page, api, "PATCH", path, slug, { evolution: "Amigdalitis; reposo e hidratación." })).status).toBe(
+    200,
+  )
+  const emitLeave = async () => {
+    const leave = await request<{ data: { id: string } }>(page, api, "POST", `/api/patients/${patientId}/medical-leaves`, slug, {
+      startsOn: new Date().toISOString().slice(0, 10),
+      days: 1,
+    })
+    expect(leave.status).toBe(201)
+    return leave.body.data.id
+  }
+  const leaveDrawings = async (leaveId: string) =>
+    (
+      await readPdfLikeACamera(
+        browser,
+        await downloadPaper(page, { api, slug, patientId, type: "medical_leave", id: leaveId }),
+      )
+    ).drawings
+
+  await gotoHydrated(page, latidiaUrl(slug, `/patients/${patientId}/encounters/${opened.body.data.id}`))
+  const before = await emitLeave()
+  await page.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
+  await page
+    .getByRole("dialog", { name: "Finalizar y firmar" })
+    .getByRole("button", { name: "Agregar mi firma", exact: true })
+    .click()
+  const drawer = page.getByRole("dialog", { name: "Perfil profesional" })
+  const pad = drawer.getByRole("img", { name: "Dibuja tu firma" })
+  await expect(pad).toBeInViewport()
+  await drawSignature(page, pad)
+  await page.screenshot({ path: test.info().outputPath("latidia-firma-dibujada.png"), fullPage: true })
+  await drawer.getByRole("button", { name: "Guardar perfil", exact: true }).click()
+  await expect(drawer).toBeHidden()
+
+  const after = await emitLeave()
+  expect(await leaveDrawings(after)).toBeGreaterThan(await leaveDrawings(before))
+  await context.close()
+})
+
+test("latidIA: el descanso emitido no cambia, y su QR se lee y comprueba el archivo", async ({
+  browser,
+  fixtureDb,
+  passwordHash,
+}, info) => {
+  const vela = await createVela(fixtureDb, passwordHash)
+  const context = await browser.newContext({ ignoreHTTPSErrors: true })
+  const page = await context.newPage()
+  await gotoHydrated(page, latidiaUrl("app", "/login"))
+  const { api, slug } = await openConsultorio(page, vela)
+  const profilePath = "/api/clinical-forms/professionals/me/profile"
+  const colegiatura = { professionalTitle: "Médico cirujano", registrationBody: "CMP", registrationNumber: "045678" }
+  expect((await request(page, api, "PUT", profilePath, slug, colegiatura)).status).toBe(200)
+  const patient = await request<{ data: { id: string } }>(page, api, "POST", "/api/patients", slug, {
+    submissionId: randomUUID(),
+    answers: {
+      demographics: { displayName: "Luis Gómez", docType: "DNI", docNumber: "40998877", birthDate: "1979-03-10" },
+      respondent: "staff",
+      privacyAccepted: false,
+    },
+  })
+  expect(patient.status).toBe(201)
+  const patientId = patient.body.data.id
+  const leave = await request<{ data: { id: string } }>(page, api, "POST", `/api/patients/${patientId}/medical-leaves`, slug, {
+    startsOn: new Date().toISOString().slice(0, 10),
+    days: 1,
+  })
+  expect(leave.status).toBe(201)
+  const issued = await downloadPaper(page, { api, slug, patientId, type: "medical_leave", id: leave.body.data.id })
+  await scanAndCompare(browser, issued, {
+    origin: latidiaUrl(slug),
+    state: "Documento vigente",
+    initials: "L. G.",
+    picturePath: info.outputPath("latidia-descanso.png"),
+    pagePicturePath: info.outputPath("latidia-comprobar.png"),
+  })
+  // Cambia la persona: el descanso emitido sigue siendo el mismo archivo.
+  expect(
+    (
+      await request(page, api, "PATCH", `/api/patients/${patientId}`, slug, {
+        displayName: "Luis Gómez Cambiado",
+        docType: "DNI",
+        docNumber: "99887766",
+      })
+    ).status,
+  ).toBe(200)
+  const renamed = await request<{ data: { patient: { displayName: string } } }>(page, api, "GET", `/api/patients/${patientId}`, slug)
+  expect(renamed.body.data.patient.displayName).toBe("Luis Gómez Cambiado")
+  const again = await downloadPaper(page, { api, slug, patientId, type: "medical_leave", id: leave.body.data.id })
+  expect(again.equals(issued)).toBe(true)
+
+  // La hoja de atención para el seguro: sale al firmar, con el CMP en su sello.
+  const opened = await request<{ data: { id: string } }>(page, api, "POST", `/api/patients/${patientId}/encounters`, slug, {
+    reason: "Fiebre",
+  })
+  expect(opened.status).toBe(201)
+  const path = `/api/patients/${patientId}/encounters/${opened.body.data.id}`
+  expect(
+    (await request(page, api, "POST", `${path}/diagnoses`, slug, { diagnosisCode: "J03.9", diagnosisType: "provisional" })).status,
+  ).toBe(201)
+  expect((await request(page, api, "PATCH", path, slug, { evolution: "Amigdalitis." })).status).toBe(200)
+  expect((await request(page, api, "POST", `${path}/finalize`, slug, {})).status).toBe(200)
+  const sheet = await downloadPaper(page, { api, slug, patientId, type: "attention_sheet", id: opened.body.data.id })
+  await scanAndCompare(browser, sheet, {
+    origin: latidiaUrl(slug),
+    state: "Documento vigente",
+    initials: "L. G. C.",
+    picturePath: info.outputPath("latidia-hoja-de-atencion.png"),
+    pagePicturePath: info.outputPath("latidia-comprobar-hoja.png"),
+  })
+  await gotoHydrated(page, latidiaUrl(slug, `/patients/${patientId}/encounters/${opened.body.data.id}`))
+  await page.getByRole("button", { name: "Ver hoja de atención", exact: true }).click()
+  await expect(page.getByRole("button", { name: "Descargar PDF" })).toBeVisible()
   await context.close()
 })
 

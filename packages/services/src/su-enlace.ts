@@ -68,6 +68,7 @@ import { createContactNote } from "./crm-workspace.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { buildTicketSnapshot, renderTicketPdf } from "./financial-document-pdf.js"
 import { renderHealthDocumentPdf } from "./health-documents.js"
+import type { PaperStorage } from "./issued-papers.js"
 import { findOrgCountry, findOrgLocale, orgProduct } from "./locale.js"
 import { openRoute, previewRoute } from "./message-gate.js"
 import { consentStatusOf } from "./message-permission.js"
@@ -574,6 +575,8 @@ export async function getPersonalLinkPaper(
   orgId: string,
   token: string,
   input: { kind: string; id: string },
+  /** Donde vive la receta emitida (ADR 0132). */
+  storage: PaperStorage = {},
 ): Promise<{ bytes: Uint8Array; filename: string }> {
   const link = await requireLiveLink(tx, orgId, token)
   const patientId = requireLinkDecider(link)
@@ -596,7 +599,15 @@ export async function getPersonalLinkPaper(
     metadata: { patientId, origin: "paciente" },
   })
   if (paper.kind === "receta") {
-    const rendered = await renderHealthDocumentPdf(tx, orgId, patientId, "prescription", paper.id)
+    const rendered = await renderHealthDocumentPdf(
+      tx,
+      orgId,
+      patientId,
+      "prescription",
+      paper.id,
+      storage,
+      { viewing: true },
+    )
     return { bytes: rendered.bytes, filename: rendered.filename }
   }
   const snap = await buildTicketSnapshot(tx, orgId, patientId, paper.id)

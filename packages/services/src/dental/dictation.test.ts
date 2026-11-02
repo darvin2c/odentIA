@@ -119,6 +119,73 @@ describe("odontograma por voz (issue 109)", () => {
 })
 
 describe("receta y caminos por voz (issue 109, fase 2)", () => {
+  it("lo que calculó el sistema se calcula de nuevo al corregir, y lo que dijo el profesional no se toca", async () => {
+    await enable(true)
+    const fx = await openSession("Obturación de cantidad")
+    const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
+    const correct = (suggestionId: string, changes: Record<string, unknown>) => segment({ drafts: [], corrections: [{ suggestionId, changes }] })
+    const current = async (id: string) => (await fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))).find((item) => item.id === id)
+    const [recipe] = (await segment({
+      drafts: [{ kind: "receta", payload: { genericName: "amoxicilina", strength: "500 mg", dosageForm: "cápsula", dose: "1 cápsula", frequency: "cada 8 horas", duration: "7 días" } }],
+    })).suggestions
+    expect(recipe).toMatchObject({ status: "lista", payload: { quantity: 21, quantityCalculated: true } })
+
+    // «Mejor por 5 días»: 1 cada 8 horas por 5 días son 15, y sigue diciendo que es calculada.
+    await correct(recipe!.id, { duration: "5 días" })
+    expect(await current(recipe!.id)).toMatchObject({ status: "lista", payload: { duration: "5 días", quantity: 15, quantityCalculated: true } })
+    await correct(recipe!.id, { frequency: "cada 12 horas" })
+    expect(await current(recipe!.id)).toMatchObject({ payload: { quantity: 10, quantityCalculated: true } })
+
+    await correct(recipe!.id, { duration: "dos semanas" })
+    expect(await current(recipe!.id)).toMatchObject({ payload: { quantity: 28, quantityCalculated: true } })
+
+    // Si ya no se puede calcular, la tarjeta lo dice: una cantidad que falta se ve y una que no cuadra, no.
+    await correct(recipe!.id, { duration: "hasta terminar el frasco" })
+    const uncounted = await current(recipe!.id)
+    expect(uncounted?.summary).toContain("Cantidad total: sin indicar")
+    expect(uncounted?.payload).not.toHaveProperty("quantity")
+    expect(uncounted?.payload).not.toHaveProperty("quantityCalculated")
+
+    // La que dice el profesional manda, y corregir después la duración no la toca.
+    await correct(recipe!.id, { duration: "5 días", quantity: 20 })
+    const said = await current(recipe!.id)
+    expect(said).toMatchObject({ payload: { quantity: 20 } })
+    expect(said?.payload).not.toHaveProperty("quantityCalculated")
+    await correct(recipe!.id, { duration: "10 días" })
+    expect(await current(recipe!.id)).toMatchObject({ payload: { duration: "10 días", quantity: 20 } })
+
+    // La vía oral también era deducida: con otra forma ya no vale, y se pide.
+    const [implied] = (await segment({
+      drafts: [{ kind: "receta", payload: { genericName: "ibuprofeno", strength: "400 mg", dosageForm: "tableta", dose: "1 tableta", frequency: "cada 8 horas", duration: "3 días" } }],
+    })).suggestions
+    expect(implied).toMatchObject({ payload: { route: "oral", routeImplied: true } })
+    await correct(implied!.id, { dosageForm: "ampolla" })
+    const noRoute = await current(implied!.id)
+    expect(noRoute).toMatchObject({ status: "por_revisar", note: expect.stringContaining("la vía") })
+    expect(noRoute?.payload).not.toHaveProperty("route")
+    expect(noRoute?.payload).not.toHaveProperty("routeImplied")
+    await enable(false)
+  })
+
+  it("revisar la receta contra una alergia dictada no le quita lo que era calculado", async () => {
+    await enable(true)
+    const fx = await openSession("Obturación de alergia")
+    const saved = await fx.run((tx) =>
+      saveDictationSegment(tx, ...fx.args, fx.encounter.id, {
+        drafts: [
+          { kind: "alergia", payload: { substance: "penicilina" } },
+          { kind: "receta", payload: { genericName: "amoxicilina", strength: "500 mg", dosageForm: "cápsula", dose: "1 cápsula", frequency: "cada 8 horas", duration: "7 días" } },
+        ],
+      }),
+    )
+    const allergy = saved.suggestions.find((item) => item.kind === "alergia")!
+    const recipe = saved.suggestions.find((item) => item.kind === "receta")!
+    await fx.run((tx) => discardDictationSuggestion(tx, ...fx.args, fx.encounter.id, allergy.id))
+    const after = (await fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))).find((item) => item.id === recipe.id)
+    expect(after).toMatchObject({ status: "lista", payload: { quantity: 21, quantityCalculated: true, route: "oral", routeImplied: true } })
+    await enable(false)
+  })
+
   it("la receta dictada calcula la cantidad, pide lo que falta, avisa la alergia y se emite con su propio botón", async () => {
     await enable(true)
     const fx = await openSession("Obturación de receta")

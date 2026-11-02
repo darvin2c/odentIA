@@ -34,6 +34,6 @@ Muchas clínicas cobran ciertos servicios en dólares porque sus insumos cuestan
 
 ## Referencias
 
-- Moneda y cuentas: `packages/clinical/src/money.ts`, `packages/db/drizzle/0042_cobrar_en_dos_monedas_reglas.sql`, `packages/services/src/report-value.ts`.
+- Moneda y cuentas: `packages/clinical/src/money.ts`, `packages/db/drizzle/0044_cobrar_en_dos_monedas_reglas.sql`, `packages/services/src/report-value.ts`.
 - Cobro y caja: `collectCharge` (`payments.ts`), `finance.ts`. Sofi: `verify.ts`, `formatOrgMoneyToday` (`locale.ts`).
 - Clínica de examen: `packages/services/src/exam-two-currencies.ts`.

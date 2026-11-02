@@ -5,6 +5,7 @@ import {
   createPrescription,
   getPrescriptionDetail,
   getPrescriptionPrint,
+  keepIssuedPaper,
   listPrescriptions,
 } from "@odentia/services"
 import { Hono } from "hono"
@@ -48,7 +49,7 @@ const reasonInput = z
   .object({ reason: z.string().trim().min(1, "Escribe el motivo de la anulación.").max(2000) })
   .strict()
 
-export function createPatientPrescriptionsRoute(deps: Pick<CrmDeps, "db">) {
+export function createPatientPrescriptionsRoute(deps: Pick<CrmDeps, "db" | "storage">) {
   const app = new Hono()
   app.get("/:id/prescriptions", async (c) => {
     const { orgId } = orgContextOf(c)
@@ -64,11 +65,20 @@ export function createPatientPrescriptionsRoute(deps: Pick<CrmDeps, "db">) {
     if (!params.success) return validationError(c, params.error.issues)
     const parsed = createInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
+    return runService(c, 201, async () => {
+      const created = await withOrgContext(deps.db, orgId, (tx) =>
         createPrescription(tx, orgId, userId, params.data.id, parsed.data),
-      ),
-    )
+      )
+      await keepIssuedPaper({
+        run: (fn) => withOrgContext(deps.db, orgId, fn),
+        storage: deps.storage,
+        orgId,
+        patientId: params.data.id,
+        type: "prescription",
+        documentId: created.id,
+      })
+      return created
+    })
   })
   app.get("/:id/prescriptions/:prescriptionId", async (c) => {
     const { orgId } = orgContextOf(c)
@@ -86,9 +96,16 @@ export function createPatientPrescriptionsRoute(deps: Pick<CrmDeps, "db">) {
     const params = z.object({ id: z.uuid(), prescriptionId: z.uuid() }).safeParse(c.req.param())
     if (!params.success) return validationError(c, params.error.issues)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        getPrescriptionPrint(tx, orgId, params.data.id, params.data.prescriptionId),
-      ),
+      withOrgContext(deps.db, orgId, async (tx) => {
+        // La firma dibujada solo se le entrega a quien la guardó; la hoja es el PDF.
+        const { signerStrokes: _strokes, ...print } = await getPrescriptionPrint(
+          tx,
+          orgId,
+          params.data.id,
+          params.data.prescriptionId,
+        )
+        return print
+      }),
     )
   })
   app.post("/:id/prescriptions/:prescriptionId/cancel", async (c) => {

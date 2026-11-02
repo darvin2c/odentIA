@@ -1,3 +1,4 @@
+import { signaturePath } from "@odentia/clinical"
 import { Button } from "@odentia/ui"
 import { useEffect, useRef, useState } from "react"
 
@@ -130,6 +131,42 @@ function redraw(
     })
     context.stroke()
   }
+}
+
+/**
+ * La firma recortada a lo que ocupa, nítida al imprimir: la que va sobre la línea
+ * de una hoja. El mismo trazado que en los PDF.
+ */
+export function FirmaTrace({
+  strokes,
+  label = "Firma",
+  className,
+}: {
+  strokes: number[][][]
+  label?: string
+  className?: string
+}): React.JSX.Element | null {
+  const path = signaturePath(strokes)
+  if (!path) return null
+  return (
+    <svg
+      viewBox={`0 0 ${Math.max(path.width, 0.01)} ${Math.max(path.height, 0.01)}`}
+      className={className}
+      role="img"
+      aria-label={label}
+      overflow="visible"
+    >
+      <path
+        d={path.d}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.1}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
+  )
 }
 
 /** Vista estática del trazo guardado (historial e impresión). */

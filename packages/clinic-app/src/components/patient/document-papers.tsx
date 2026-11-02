@@ -282,6 +282,44 @@ export function MedicalLeavePaper({
   )
 }
 
+/**
+ * La hoja de atención (ADR 0133): la pide el seguro para reembolsar. Sale de la atención
+ * firmada, que ya no cambia: se ve, se envía y se imprime, sin nada más que hacer con ella.
+ */
+export function AttentionSheetPaper({
+  patientId,
+  encounterId,
+  page,
+  onClose,
+}: PaperSurface & { patientId: string; encounterId: string }) {
+  const canWrite = usePermission("clinical.write")
+  const [sending, setSending] = useState(false)
+  return (
+    <DocumentPaperPanel
+      patientId={patientId}
+      type="attention_sheet"
+      documentId={encounterId}
+      title="Hoja de atención"
+      status="Para el seguro · con diagnóstico, firma y sello"
+      send={canWrite ? { kind: "open", onOpen: () => setSending(true) } : null}
+      menu={[]}
+      revision="finalizada"
+      page={page}
+      onClose={onClose}
+    >
+      {sending ? (
+        <HealthDocumentSendDrawer
+          open
+          patientId={patientId}
+          documentType="attention_sheet"
+          documentId={encounterId}
+          onClose={() => setSending(false)}
+        />
+      ) : null}
+    </DocumentPaperPanel>
+  )
+}
+
 export function OrderPaper({
   order,
   page,
