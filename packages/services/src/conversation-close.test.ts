@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import { recordAgentAction } from "./agent-actions.js"
 import { type Db, withOrgContext } from "@odentia/db"
 import { agentActionLog, agentCaseMemory, agentHandoff, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
@@ -369,11 +370,42 @@ describe("el ciclo: insistir una vez y cerrar por silencio", () => {
     await c.say(linked.id, "in", "Sí, cámbiala", IN)
     await proposal(linked.id, OUT)
     await c.say(linked.id, "out", "Listo. Tus datos: https://clinica.test/a?b=1", OUT)
+    // Le ofreció otra hora sin signo de pregunta: espera su elección.
+    const offering = await c.thread("Elsa Vera", { lastInboundAt: IN, lastMessageAt: OUT, attentionStartedAt: IN })
+    await c.say(offering.id, "in", "Sí, cancélala", IN)
+    await proposal(offering.id, OUT)
+    await c.say(offering.id, "out", "Listo, cancelada. Tengo libre mañana a las 10:00, dime si te queda.", OUT)
+    await ownerDb.insert(agentRunLedger).values({
+      organizationId: c.orgId, conversationId: offering.id, model: "fake", status: "ok",
+      startedAt: IN, endedAt: new Date(OUT.getTime() + 1000), toolsUsed: ["confirmar_propuesta", "buscar_huecos", "send_reply"],
+    })
+    // Un botón del equipo después de su pregunta no la tapa.
+    const covered = await c.thread("Fani Ríos", { lastInboundAt: IN, lastMessageAt: OUT, attentionStartedAt: IN })
+    await c.say(covered.id, "in", "Sí, cámbiala", IN)
+    await proposal(covered.id, OUT)
+    await c.say(covered.id, "out", "Listo. ¿Quieres otra fecha?", OUT)
+    const [button] = await c.say(covered.id, "out", "Te enviamos tu comprobante", new Date(OUT.getTime() + 1000), "user")
+    await ownerDb.update(message).set({ fromAction: true }).where(eq(message.id, button!.id))
     expect(await tick(c, new Date("2026-10-12T15:02:00Z"))).toMatchObject({ closed: 2 })
     expect(await c.row(moved.id)).toMatchObject({ status: "closed", closeReason: "resuelta" })
     expect(await c.row(linked.id)).toMatchObject({ status: "closed", closeReason: "resuelta" })
     expect(await c.row(asks.id)).toMatchObject({ status: "open" })
     expect(await c.row(older.id)).toMatchObject({ status: "open" })
+    expect(await c.row(offering.id)).toMatchObject({ status: "open" })
+    expect(await c.row(covered.id)).toMatchObject({ status: "open" })
+  })
+
+  it("lo que se anota en la misma transacción que guarda su mensaje queda después de él", async () => {
+    const c = await clinic()
+    const conv = await c.thread("Gina Paz")
+    const inboundAt = await c.run(async (tx) => {
+      const when = new Date()
+      await tx.update(conversation).set({ lastInboundAt: when }).where(eq(conversation.id, conv.id))
+      await recordAgentAction(tx, c.orgId, { conversationId: conv.id, kind: "cita", title: "confirmó una cita", detail: "desde el recordatorio" })
+      return when
+    })
+    const [action] = await ownerDb.select({ createdAt: agentActionLog.createdAt }).from(agentActionLog).where(eq(agentActionLog.conversationId, conv.id))
+    expect(action!.createdAt.getTime()).toBeGreaterThanOrEqual(inboundAt.getTime())
   })
 
   it("sin algo por responder no insiste, fuera de horario tampoco, y cierra a la hora configurada", async () => {

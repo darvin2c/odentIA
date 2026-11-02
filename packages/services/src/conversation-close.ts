@@ -827,6 +827,7 @@ async function endedWithAppointment(tx: Db, orgId: string, row: Pick<CareRow, "i
   if (!row.appointmentChanged) return null
   const last = await lastMessageOf(tx, row.id)
   if (!last || (last.body ?? "").replace(/https?:\/\/\S+/g, "").includes("?")) return null
+  if (await offeredInThatReply(tx, row.id, last.createdAt)) return null
   return "dejó resuelto lo de su cita y no quedaba nada pendiente"
 }
 
@@ -834,7 +835,8 @@ async function lastMessageOf(tx: Db, id: string) {
   const [last] = await tx
     .select({ id: message.id, direction: message.direction, senderKind: message.senderKind, body: message.body, createdAt: message.createdAt, accepted: sql<boolean>`${acceptedOutSql(sql.raw('"message"'))}` })
     .from(message)
-    .where(eq(message.conversationId, id))
+    // Un botón del equipo no es un turno: no tapa lo último que se le dijo o se le preguntó.
+    .where(and(eq(message.conversationId, id), eq(message.fromAction, false)))
     .orderBy(desc(message.createdAt), desc(message.id))
     .limit(1)
   if (!last || !last.accepted) return null
@@ -858,6 +860,19 @@ async function offeredInLastTurn(tx: Db, id: string, before: Date): Promise<bool
   const [row] = await tx.execute<{ tools: string[] | null }>(sql`
     select tools_used as tools from agent_run_ledger
     where conversation_id = ${id} and status in ('ok', 'handoff') and started_at <= ${before.toISOString()}::timestamptz
+    order by started_at desc limit 1`)
+  return (row?.tools ?? []).some((tool) => OFFER_TOOLS.has(tool))
+}
+
+/**
+ * ¿Ese mensaje lo escribió una corrida que ofreció algo? Espera su elección aunque
+ * no lleve «?». Lo que sale solo porque hizo algo en su enlace no es de ninguna corrida.
+ */
+async function offeredInThatReply(tx: Db, id: string, at: Date): Promise<boolean> {
+  const [row] = await tx.execute<{ tools: string[] | null }>(sql`
+    select tools_used as tools from agent_run_ledger
+    where conversation_id = ${id} and status in ('ok', 'handoff')
+      and started_at <= ${at.toISOString()}::timestamptz and ended_at >= ${at.toISOString()}::timestamptz
     order by started_at desc limit 1`)
   return (row?.tools ?? []).some((tool) => OFFER_TOOLS.has(tool))
 }

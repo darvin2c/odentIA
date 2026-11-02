@@ -96,12 +96,14 @@ export function teamWroteSql(m: SQL): SQL {
 
 /**
  * Una persona del equipo respondió este entrante: escribió después y no citó
- * otro mensaje. Lo que cita otro responde otra cosa (ADR 0122).
+ * algo anterior a él, que responde otra cosa (ADR 0122). Citar lo último de una
+ * ráfaga responde también lo que venía antes.
  */
 export function teamAnsweredSql(m: SQL, inboundId: string): SQL {
-  return sql`(${teamWroteSql(m)}
-    and ${m}.created_at > (select t_in.created_at from message t_in where t_in.id = ${inboundId}::uuid)
-    and (${m}.reply_to_message_id is null or ${m}.reply_to_message_id = ${inboundId}::uuid))`
+  const inboundAt = sql`(select t_in.created_at from message t_in where t_in.id = ${inboundId}::uuid)`
+  return sql`(${teamWroteSql(m)} and ${m}.created_at > ${inboundAt}
+    and (${m}.reply_to_message_id is null
+      or (select t_q.created_at from message t_q where t_q.id = ${m}.reply_to_message_id) >= ${inboundAt}))`
 }
 
 /** Una persona del equipo escribió en el hilo hace menos de `TEAM_LIVE_MINUTES`: conversa en vivo. */

@@ -2618,6 +2618,20 @@ describe("el equipo y el agente en la misma conversación (ADR 0050)", () => {
     expect(await agentMessages(asked.conversationId)).toEqual(["Te ayudo con eso."])
   })
 
+  it("quien responde citando lo último de una ráfaga responde también lo anterior: el agente no contesta encima", async () => {
+    await carla()
+    const model = answer()
+    const first = await ingestText("tg:cita-rafaga", "evt-cita-rafaga-1", "hola")
+    const second = await ingestText("tg:cita-rafaga", "evt-cita-rafaga-2", "me duele el diente")
+    await withOrgContext(appDb, "org_a", (tx) =>
+      sendOutbound(tx, "org_a", { conversationId: second.conversationId, senderKind: "user", senderUserId: CARLA, replyToMessageId: second.messageId, content: { type: "text", text: "¿Desde cuándo te duele?" } }))
+    await fifteenMinutesPass(second.conversationId)
+    expect(await postponed(model, second.conversationId, second.messageId)).toBe("done")
+    expect(await postponed(model, first.conversationId, first.messageId)).toBe("done")
+    expect(await agentMessages(second.conversationId)).toEqual([])
+    expect(model.seen).toHaveLength(0)
+  })
+
   it("lo que el equipo no logró enviar no lo hace esperar", async () => {
     await carla()
     const model = answer()

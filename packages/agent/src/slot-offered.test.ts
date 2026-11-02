@@ -83,6 +83,13 @@ describe("offeredSlotMinutes", () => {
     expect(offeredSlotMinutes([slots, longer], diego)).toBe(60)
   })
 
+  it("también con la hora escrita con punto, como la dicen otros idiomas", () => {
+    const dotted = {
+      text: `- miércoles, 28 de octubre, 16.00–16.45 con Dr. Diego Salas [startsAt 2026-10-28T21:00:00.000Z · sede ${BRANCH} · unidad dental ${ROOM} · profesional pro-diego]`,
+    }
+    expect(offeredSlotMinutes([dotted], diego)).toBe(45)
+  })
+
   it("sin hueco ofrecido, sin evidencia o sin horas en la línea no hay duración", () => {
     expect(offeredSlotMinutes([slots], { ...diego, professionalUserId: "pro-ana" })).toBeNull()
     expect(offeredSlotMinutes(undefined, diego)).toBeNull()

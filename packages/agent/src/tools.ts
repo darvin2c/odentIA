@@ -252,7 +252,7 @@ function offeredLines(
   const wanted = Date.parse(input.startsAt)
   if (Number.isNaN(wanted)) return []
   const professional = input.professionalUserId.trim().toLowerCase()
-  const slot = /(?:(\d{2}):(\d{2})–(\d{2}):(\d{2})[^\n[]*)?\[startsAt (\S+) · sede \S+ · (.+?) · profesional ([^\]\s]+)\]/g
+  const slot = /(?:(\d{2})[:.](\d{2})–(\d{2})[:.](\d{2})[^\n[]*)?\[startsAt (\S+) · sede \S+ · (.+?) · profesional ([^\]\s]+)\]/g
   return evidence.flatMap((item) =>
     [...item.text.matchAll(slot)].filter(
       ([, , , , , startsAt = "", room = "", ref = ""]) =>

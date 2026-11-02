@@ -25,7 +25,7 @@
 import type { Db } from "@odentia/db"
 import { saasCharge, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, eq, isNull, like, sql, type SQL } from "drizzle-orm"
-import { uncountedSql } from "./conversation-state.js"
+import { teamWroteSql, uncountedSql } from "./conversation-state.js"
 import { allocateRefunds } from "./finance.js"
 import { lastMonths } from "./report-periods.js"
 import {
@@ -85,7 +85,7 @@ export async function agentConversationsMany(tx: Db, orgId: string, spans: Span[
       select b.idx, m.conversation_id,
         exists (
           select 1 from message t where t.organization_id = ${orgId} and t.conversation_id = m.conversation_id
-            and t.direction = 'out' and t.sender_kind = 'user' and not t.from_action and t.created_at >= b.start_at and t.created_at < b.end_at
+            and ${teamWroteSql(sql.raw("t"))} and t.created_at >= b.start_at and t.created_at < b.end_at
         ) or exists (
           select 1 from agent_handoff h where h.organization_id = ${orgId} and h.conversation_id = m.conversation_id
             and h.created_at >= b.start_at and h.created_at < b.end_at
@@ -568,7 +568,7 @@ export async function firstResponsesMany(tx: Db, orgId: string, spans: Span[]): 
       left join lateral (
         select m.id, m.sent_at, m.sender_kind from message m
         where m.organization_id = ${orgId} and m.conversation_id = i.conversation_id
-          and m.direction = 'out' and ${accepted("m")} and m.created_at >= i.created_at
+          and m.direction = 'out' and ${accepted("m")} and not m.from_action and m.created_at >= i.created_at
         order by coalesce(m.sent_at, m.created_at), m.id limit 1
       ) r on true
     ), channels as (
