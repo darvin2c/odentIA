@@ -795,9 +795,7 @@ export function createApp(deps: AppDeps) {
             ...initialOrgRegion({ countryCode, currency, timezone, locale, sheetSize }),
           })
         }
-        // Quitar la otra moneda va primero: con ella activa, la del negocio no cambia.
-        if (secondCurrency === null) await setOrgExchangeRate(tx, orgId, userId, { secondCurrency })
-        let updated = await updateOrgRegion(tx, orgId, userId, {
+        const updated = await updateOrgRegion(tx, orgId, userId, {
           countryCode,
           currency,
           timezone,
@@ -806,10 +804,10 @@ export function createApp(deps: AppDeps) {
           sheetSize,
           ticketFooter,
           taxes,
+          secondCurrency,
+          exchangeRate,
           applyCountryPreset: applyCountryPreset ?? !current,
         })
-        if (secondCurrency || exchangeRate)
-          updated = await setOrgExchangeRate(tx, orgId, userId, { secondCurrency, exchangeRate })
         // Una clínica nueva trae prendido «Recordar la cita», a nombre de quien la crea (ADR 0026).
         if (!current) await turnOnNewClinicLines(tx, orgId, userId)
         // Y nace con las especialidades de su país, que puede renombrar (ADR 0039 y 0069).

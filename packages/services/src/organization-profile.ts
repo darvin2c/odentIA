@@ -284,6 +284,10 @@ export interface UpdateOrgRegionInput {
   applyCountryPreset?: boolean
   /** Impuestos de lo cobrado (ADR 0083): null en una cifra es volver a lo del país. */
   taxes?: OrgTaxInput | null
+  /** La otra moneda: omitida, sigue la que hay; `null`, deja de cobrar en ella. */
+  secondCurrency?: string | null
+  /** El «Cambio de hoy», en texto decimal; lo escribe `setOrgExchangeRate`. */
+  exchangeRate?: string | null
 }
 /** Perfil regional completo con el que nace `org_profile`. */
 export interface InitialOrgRegion {
@@ -387,10 +391,25 @@ export async function assertNoForeignCurrencyHistory(
 }
 
 /**
- * Guarda región e impresión sin reinterpretar importes. El alta del perfil y
- * este cambio comparten transacción; los medios iniciales salen del país.
+ * Guarda región, impresión y la otra moneda sin reinterpretar importes. El alta del
+ * perfil y este cambio comparten transacción; los medios iniciales salen del país.
+ * Quitar la otra moneda va primero: con ella activa, la del negocio no cambia.
  */
 export async function updateOrgRegion(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  input: UpdateOrgRegionInput,
+): Promise<OrgProfileRow> {
+  const { secondCurrency, exchangeRate, ...region } = input
+  if (secondCurrency === null) await setOrgExchangeRate(tx, orgId, actorUserId, { secondCurrency })
+  const updated = await writeOrgRegion(tx, orgId, actorUserId, region)
+  return secondCurrency || exchangeRate
+    ? setOrgExchangeRate(tx, orgId, actorUserId, { secondCurrency, exchangeRate })
+    : updated
+}
+
+async function writeOrgRegion(
   tx: Db,
   orgId: string,
   actorUserId: string,
