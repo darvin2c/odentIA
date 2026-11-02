@@ -15,7 +15,7 @@ import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm"
 import { recordAgentAction } from "./agent-actions.js"
 import { addAgentCaseNote } from "./agent-case.js"
-import { createProposal, expireBookingProposals } from "./agent-operations.js"
+import { createProposal, expireBookingProposals, resolveAgentPatientContext } from "./agent-operations.js"
 import { appointmentCalendarDownload } from "./appointment-calendar.js"
 import { createAppointment } from "./appointments.js"
 import { adminRuntime, type AppointmentChange, enqueueAppointmentNotice } from "./automation.js"
@@ -323,9 +323,10 @@ export async function issueAgendaLink(
 }
 
 /**
- * Para quien pide cambiar o cancelar su cita: «Su enlace», abierto en esa cita, sin reabrir la
- * reserva de otra. Nulo si no tiene exactamente una por venir (con varias, la página podría
- * abrir la que no quiere cambiar: se aclara por el chat) o si en esta atención ya se le dio.
+ * Para quien pide cambiar o cancelar su cita: «Su enlace», que muestra esa cita, sin tocar lo que
+ * el enlace ya ofreciera. Nulo si no tiene exactamente una por venir (con varias, la página podría
+ * abrir la que no quiere cambiar: se aclara por el chat), si no está autorizado a lo que el chat
+ * tampoco le daría, o si en esta atención ya se le dio.
  */
 export async function issueChangeLink(
   tx: Db,
@@ -337,11 +338,11 @@ export async function issueChangeLink(
     select m.id from message m
     join conversation c on c.organization_id = m.organization_id and c.id = m.conversation_id
     where m.organization_id = ${orgId} and m.conversation_id = ${input.conversationId}::uuid
-      and m.direction = 'out' and m.created_at >= c.attention_started_at
+      and m.direction = 'out' and m.status <> 'failed' and m.created_at >= c.attention_started_at
       and (m.template_link is not null or m.body like '%/reserva?%')
     limit 1`)
   if (given) return null
-  return bookingLinkFor(tx, orgId, { conversationId: input.conversationId, booking: false }, deps, "una-cita")
+  return bookingLinkFor(tx, orgId, { conversationId: input.conversationId }, deps, "una-cita")
 }
 
 /** La hora que eligió en el chat: con ella la página de su enlace abre la reserva ya elegida (ADR 0109). */
@@ -375,7 +376,7 @@ async function bookingLinkFor(
   orgId: string,
   input: CreateBookingLinkInput,
   deps: { secretsKey: Buffer },
-  /** Cuándo se emite según sus citas por venir: siempre, solo sin ninguna o solo con una, en la que queda abierto. */
+  /** Cuándo se emite según sus citas por venir: siempre, solo sin ninguna, o solo con una y sin cambiar lo que ofrecía. */
   appointments: "cualquiera" | "sin-cita" | "una-cita",
 ): Promise<IssuedBookingLink | null> {
   const [conv] = await tx
@@ -474,24 +475,23 @@ async function bookingLinkFor(
     (await nextAppointmentOf(tx, orgId, chosen.id, new Date()))
   )
     return null
-  let openOn: string | undefined
   if (appointments === "una-cita") {
-    const upcoming = chosen
-      ? await tx
-          .select({ id: appointment.id })
-          .from(appointment)
-          .where(
-            and(
-              eq(appointment.organizationId, orgId),
-              eq(appointment.patientId, chosen.id),
-              inArray(appointment.status, ["programada", "confirmada"]),
-              gt(appointment.startsAt, new Date()),
-            ),
-          )
-          .limit(2)
-      : []
+    if (!chosen) return null
+    // Cambiar por el enlace pide lo mismo que por el chat: un familiar sin autorización no recibe ninguna de las dos.
+    const allowed = await resolveAgentPatientContext(tx, orgId, conv.contactId, chosen.id).then(
+      () => true,
+      (error: unknown) => {
+        if (error instanceof ServiceError && error.code === "PATIENT_CONTEXT_FORBIDDEN") return false
+        throw error
+      },
+    )
+    if (!allowed) return null
+    const upcoming = await tx
+      .select({ id: appointment.id })
+      .from(appointment)
+      .where(upcomingAppointmentOf(orgId, chosen.id, new Date()))
+      .limit(2)
     if (upcoming.length !== 1) return null
-    openOn = upcoming[0]!.id
   }
   const issued = await issuePersonalLink(
     tx,
@@ -500,12 +500,13 @@ async function bookingLinkFor(
       contactId: conv.contactId,
       patientId: chosen?.id ?? null,
       conversationId: input.conversationId,
-      ...(booking
-        ? { booking: true, serviceId: input.serviceId ?? null, branchId: input.branchId ?? null }
-        : { booking: false }),
+      ...(appointments === "una-cita"
+        ? {}
+        : booking
+          ? { booking: true, serviceId: input.serviceId ?? null, branchId: input.branchId ?? null }
+          : { booking: false }),
       createdBy: input.createdBy ?? null,
       ...(newPerson ? { newPerson: true } : {}),
-      ...(openOn ? { appointmentId: openOn } : {}),
     },
     deps,
   )
@@ -595,17 +596,29 @@ async function shownAppointment(
   patientId: string | null,
 ): Promise<ShownAppointment | null> {
   const now = new Date()
+  let cancelled: ShownAppointment | null = null
   if (link.appointmentId) {
     const [own] = await tx
       .select(SHOWN_COLUMNS)
       .from(appointment)
       .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, link.appointmentId)))
       .limit(1)
-    // Cancelada sigue a la vista hasta su hora, para que vea que quedó cancelada.
-    if (own && own.startsAt > now && (isChangeable(own) || own.status === "cancelada")) return own
+    if (own && own.startsAt > now && isChangeable(own)) return own
+    if (own && own.startsAt > now && own.status === "cancelada") cancelled = own
   }
-  if (!patientId || link.expiresAt <= now) return null
-  return nextAppointmentOf(tx, orgId, patientId, now)
+  if (!patientId || link.expiresAt <= now) return cancelled
+  // Cancelada sigue a la vista hasta su hora, para que vea que quedó cancelada; si ya tiene otra, esa es su cita.
+  return (await nextAppointmentOf(tx, orgId, patientId, now)) ?? cancelled
+}
+
+/** Una cita en pie y por venir de ese paciente: la que se muestra y se puede cambiar. */
+function upcomingAppointmentOf(orgId: string, patientId: string, now: Date) {
+  return and(
+    eq(appointment.organizationId, orgId),
+    eq(appointment.patientId, patientId),
+    inArray(appointment.status, ["programada", "confirmada"]),
+    gt(appointment.startsAt, now),
+  )
 }
 
 /** La próxima cita en pie del paciente: la que muestra su enlace mientras está vigente. */
@@ -618,14 +631,7 @@ async function nextAppointmentOf(
   const [next] = await tx
     .select(SHOWN_COLUMNS)
     .from(appointment)
-    .where(
-      and(
-        eq(appointment.organizationId, orgId),
-        eq(appointment.patientId, patientId),
-        inArray(appointment.status, ["programada", "confirmada"]),
-        gt(appointment.startsAt, now),
-      ),
-    )
+    .where(upcomingAppointmentOf(orgId, patientId, now))
     .orderBy(asc(appointment.startsAt))
     .limit(1)
   return next ?? null

@@ -13,6 +13,7 @@ import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { agentDecisionLog, agentHandoff, agentKnowledgeGap, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
 import { user } from "@odentia/db/schema/auth"
 import { automationJob } from "@odentia/db/schema/automation"
+import { patientContact, patientResponsibility } from "@odentia/db/schema/clinical"
 import { contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
@@ -60,6 +61,7 @@ import {
   READ_TOOLS,
   removePersonFact,
   changeBookingLinkAppointment,
+  createBookingLink,
   reserveBookingLink,
   resolvePersonalLink,
   resolvePersonalLinkRefs,
@@ -3158,14 +3160,19 @@ it("a quien pide cambiar su cita también le da su enlace, abierto en esa cita, 
   expect(await reply({ casePending: true })).not.toContain("/reserva?")
   expect(await reply({ route: { ...route, path: "abierto" } })).not.toContain("/reserva?")
 
+  // Un enlace que le ofrecía reservar sigue igual, y un mensaje con enlace que no salió no cuenta como dado.
+  await withOrgContext(appDb, "org_a", (tx) => createBookingLink(tx, "org_a", { conversationId }, { secretsKey: KEY }))
+  await ownerDb.insert(message).values({ organizationId: "org_a", conversationId, direction: "out", senderKind: "agent", body: "Tu enlace: https://norte.odentia.test/reserva?token=x", status: "failed" })
   const sent = await reply()
   expect(sent).toMatch(LINE)
-  const links = await withOrgContext(appDb, "org_a", (tx) =>
+  const links = () => withOrgContext(appDb, "org_a", (tx) =>
     tx.select().from(appointmentBookingLink).where(eq(appointmentBookingLink.conversationId, conversationId)))
-  // Abierto en la cita que quedó en pie, sin reabrir la reserva de otra.
-  expect(links).toEqual([expect.objectContaining({ appointmentId: second.id, booking: false })])
+  expect(await links()).toEqual([expect.objectContaining({ booking: true })])
   // En la misma atención ya lo tiene: no se le repite.
   expect(await reply()).not.toContain("/reserva?")
+
+  // Aunque el enlace venga apuntando a la cita que canceló, la página abre la que sigue en pie.
+  await ownerDb.update(appointmentBookingLink).set({ appointmentId: first.id }).where(eq(appointmentBookingLink.id, (await links())[0]!.id))
 
   // Y con ese enlace la cambia de verdad.
   const token = /token=([0-9a-f]{64})/.exec(resolvePersonalLinkRefs(sent, KEY))![1]!
@@ -3176,6 +3183,49 @@ it("a quien pide cambiar su cita también le da su enlace, abierto en esa cita, 
     changeBookingLinkAppointment(tx, "org_a", token, { startsAt: at(12), professionalUserId: fx.professionalId, roomId: fx.roomId }, { secretsKey: KEY }))
   const [moved] = await ownerDb.select({ startsAt: appointment.startsAt }).from(appointment).where(eq(appointment.id, second.id))
   expect(moved!.startsAt.toISOString()).toBe(at(12))
+})
+
+it("el enlace para cambiar una cita pide lo mismo que el chat: un familiar sin autorización no lo recibe", async () => {
+  const seed = await ingestText("tg:cambio-paciente", "evt-cambio-paciente", "Hola")
+  const fx = await bookingFixture(seed.conversationId, "cambio-familiar")
+  const route = { path: "cambio_cita", intent: "reschedule_or_cancel", handoff: null, confidence: null, urgency: null } as const
+  await withOrgContext(appDb, "org_a", (tx) =>
+    createAppointment(tx, "org_a", fx.actorId, {
+      branchId: fx.branchId, patientId: fx.patientId, professionalUserId: fx.professionalId, roomId: fx.roomId,
+      startsAt: new Date(upcomingMonday().getTime() + 10 * 3_600_000).toISOString(), durationMin: 45,
+    }))
+  const { conversationId } = await ingestText("tg:cambio-familiar", "evt-cambio-familiar", "Quiero cancelar la cita de mi mamá")
+  const [thread] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
+  await ownerDb.insert(patientContact).values({ organizationId: "org_a", patientId: fx.patientId, contactId: thread!.contactId, relationship: "family" })
+  let turn = 0
+  const reply = async () => {
+    turn += 1
+    await makeAgentTools({ ...publicCtx(conversationId, thread!.contactId), triggerId: `trig-familiar-${turn}`, route })
+      .find((item) => item.name === "send_reply")!.invoke({ text: `Respuesta ${turn}` })
+    return (await agentMessages(conversationId)).at(-1)!
+  }
+  expect(await reply()).not.toContain("/reserva?")
+  // Con su autorización vigente, sí, y dice de quién es la cita.
+  await ownerDb.insert(patientResponsibility).values({ organizationId: "org_a", patientId: fx.patientId, contactId: thread!.contactId, kind: "autorizado_informacion", startsAt: "2020-01-01" })
+  expect(await reply()).toMatch(/\n\nLa cita de Paciente cambio-familiar también se puede cambiar o cancelar aquí: /)
+})
+
+it("también en el aviso de un pase al equipo, quien pide cambiar su cita recibe su enlace", async () => {
+  const { conversationId, messageId } = await ingestText("tg:cambio-pase", "evt-cambio-pase", "Quiero cambiar mi cita")
+  const fx = await bookingFixture(conversationId, "cambio-pase")
+  await withOrgContext(appDb, "org_a", (tx) =>
+    createAppointment(tx, "org_a", fx.actorId, {
+      branchId: fx.branchId, patientId: fx.patientId, professionalUserId: fx.professionalId, roomId: fx.roomId,
+      startsAt: new Date(upcomingMonday().getTime() + 10 * 3_600_000).toISOString(), durationMin: 45,
+    }))
+  const ctx: AgentToolCtx = {
+    ...publicCtx(conversationId, fx.contactId),
+    triggerId: messageId,
+    route: { path: "cambio_cita", intent: "reschedule_or_cancel", handoff: null, confidence: null, urgency: null },
+  }
+  await makeAgentTools(ctx).find((item) => item.name === "request_human_handoff")!.invoke({ reason: "Pide cambiar su cita", summary: "Pide cambiar su cita", message: "Una persona del equipo te responde por aquí." })
+  expect((await agentMessages(conversationId)).at(-1)).toMatch(/^Una persona del equipo te responde por aquí\.\n\nLa cita también se puede cambiar o cancelar aquí: /)
 })
 
 it("mientras la persona sigue escribiendo la corrida se pospone, y el tope evita esperar de más", async () => {
