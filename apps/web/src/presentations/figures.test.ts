@@ -64,6 +64,23 @@ describe("la v2 de odentIA, con la clínica en 3D", () => {
     }
   })
 
+  it("«Esto nunca se cobra» no incluye la conversación de quien reservó y no vino, que sí se cobra", () => {
+    for (const deck of [odentiaDeck, latidiaDeck]) {
+      const never = deck.slice(deck.indexOf('data-scene="never"'), deck.indexOf('id="nvTotal"'))
+      expect(never.length).toBeGreaterThan(0)
+      expect(never).not.toMatch(/no vino|sin asistencia/)
+    }
+  })
+
+  it("con varios precios resalta el menor con «desde»", () => {
+    for (const deck of [odentiaDeck, latidiaDeck]) {
+      for (const mark of ["F.informa$", "L.informa$", "F.simple$", "L.simple$"]) {
+        expect(deck).toContain(`<i class="from">desde</i> {{${mark}}}`)
+      }
+      expect(deck).not.toContain("{{F.informa}} · {{F.gestiona}} · {{F.agenda}}</span>")
+    }
+  })
+
   it("el cierre de cada presentación deja juntos los beneficios y cómo entrar", () => {
     for (const deck of [odentiaDeck, latidiaDeck]) {
       const last = parts(deck)?.at(-1)
