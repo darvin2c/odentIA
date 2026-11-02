@@ -74,6 +74,7 @@ import { DictationBlockSuggestions, DictationEditDrawer } from "./dictation-sugg
 import { EncounterBreadcrumb } from "./encounter-breadcrumb"
 import {
   CLOSING_FIELD_MAP,
+  ClosingSignatureHint,
   type ClosingValues,
   EncounterClosingDialog,
   SignatureRegistrationFields,
@@ -403,6 +404,7 @@ export function EncounterEditor({
   const [voidOpen, setVoidOpen] = useState(false)
   const [takingOver, setTakingOver] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
+  const [profileForSignature, setProfileForSignature] = useState(false)
   // Hora del último guardado, para «Guardado HH:MM».
   const [savedAt, setSavedAt] = useState<string>(encounter.updatedAt)
   // Antecedentes y última atención, al lado y sin salir.
@@ -1700,11 +1702,24 @@ export function EncounterEditor({
       numberRef={registrationNumberRef}
     />
   ) : null
+  const signatureHint = profileQuery.isSuccess ? (
+    <ClosingSignatureHint
+      saved={Boolean(profileQuery.data.data.signatureStrokes)}
+      onEdit={() => {
+        setConfirmOpen(false)
+        setProfileForSignature(true)
+        setProfileOpen(true)
+      }}
+    />
+  ) : null
   // Con quién se firma: lo mismo con o sin sugerencias pendientes (la hora de fin va en el cierre).
   const signFields = registrationFields ?? (
-    <p className="text-sm">
-      Firmarás como <strong>{signAs.text ?? "—"}</strong>
-    </p>
+    <div className="text-sm">
+      <p>
+        Firmarás como <strong>{signAs.text ?? "—"}</strong>
+      </p>
+      {signatureHint}
+    </div>
   )
   const age = ageFrom(patient.patient.birthDate)
   // «Guardado 10:21» / «Guardando…» / «Sin conexión»: siempre a la vista.
@@ -2148,6 +2163,7 @@ export function EncounterEditor({
         onClose={() => {
           if (!finalizing) setConfirmOpen(false)
         }}
+        signatureHint={signatureHint}
       >
         <p className="text-xs text-muted-foreground">{finalizeDescription}</p>
       </EncounterClosingDialog>
@@ -2336,7 +2352,11 @@ export function EncounterEditor({
           open
           target="me"
           profile={profileQuery.data?.data ?? null}
-          onClose={() => setProfileOpen(false)}
+          startAtSignature={profileForSignature}
+          onClose={() => {
+            setProfileOpen(false)
+            setProfileForSignature(false)
+          }}
           onSaved={() => void refreshClosing()}
         />
       ) : null}

@@ -19,7 +19,17 @@
 
 import { readFileSync } from "node:fs"
 import fontkit, { type Font } from "@pdf-lib/fontkit"
-import { PDFDocument, type PDFFont, type PDFImage, type PDFPage, type RGB, rgb } from "pdf-lib"
+import { type SignatureStrokes, signaturePath } from "@odentia/clinical"
+import {
+  degrees,
+  LineCapStyle,
+  PDFDocument,
+  type PDFFont,
+  type PDFImage,
+  type PDFPage,
+  type RGB,
+  rgb,
+} from "pdf-lib"
 import QRCode from "qrcode"
 
 // --- La clínica en el papel ----------------------------------------------------
@@ -162,13 +172,14 @@ export function printable(value: string, face: Face = "sans"): string {
 const hex = (value: number): RGB =>
   rgb(((value >> 16) & 255) / 255, ((value >> 8) & 255) / 255, (value & 255) / 255)
 
-export type Tone = "ink" | "gray" | "soft" | "alert" | "white"
+export type Tone = "ink" | "gray" | "soft" | "alert" | "stamp" | "white"
 
 const SHEET_TONES: Record<Tone, RGB> = {
   ink: hex(0x0f172a),
   gray: hex(0x475569),
   soft: hex(0x334155),
   alert: hex(0x991b1b),
+  stamp: hex(0x1e3a8a),
   white: hex(0xffffff),
 }
 const BLACK = hex(0x000000)
@@ -178,6 +189,7 @@ const THERMAL_TONES: Record<Tone, RGB> = {
   gray: BLACK,
   soft: BLACK,
   alert: BLACK,
+  stamp: BLACK,
   white: hex(0xffffff),
 }
 const RULE = hex(0xcbd5e1)
@@ -246,23 +258,42 @@ export interface TableOptions {
   head?: () => void
 }
 
+/**
+ * El QR de comprobar, en puntos (23 mm): su dirección lleva unos 135 caracteres y el
+ * módulo queda en unos 0,47 mm, para que lo lea un teléfono en una impresora común.
+ */
+export const CHECK_QR_SIZE = 66
+const CHECK_CAPTION_WIDTH = 84
+/** El sello del bloque firmado: un recuadro angosto, como uno de goma. */
+const STAMP_WIDTH = 142
+const STAMP_PAD = 6
+
 export interface SignedBlockInput {
-  name: string
+  /** Nulo: nadie lo firmó electrónicamente; queda la línea de «Firma y sello» con su QR. */
+  name: string | null
   /** «Cirujano dentista · COP 12345». */
   credential: string | null
   /** La fecha y hora de emisión, ya escrita. */
   at: string
   /** La dirección para comprobarlo; sin ella, sin QR. */
   checkUrl?: string | null
+  /** La firma que guardó quien emite; sin ella queda la línea para firmar a mano. */
+  strokes?: Strokes | null
 }
 
-export type Strokes = number[][][]
+export type Strokes = SignatureStrokes
 
 export interface PenSignature {
   heading: string
   strokes: Strokes | null
   lines: Array<{ text: string; strong?: boolean }>
+  /** Sin trazo: una línea para firmar a mano en lugar del recuadro de una hoja por firmar. */
+  handLine?: boolean
 }
+
+/** Lo que mide el lugar de la firma de quien emite, sobre su línea. */
+const SIGN_SPACE = 40
+const SIGN_LINE_WIDTH = 190
 
 export interface KitOptions {
   /** Título del PDF y del encabezado corto. */
@@ -415,7 +446,8 @@ export class DocumentKit {
 
   /** Lo que sigue necesita este alto junto: si no cabe, pasa de página. */
   ensure(height: number): void {
-    if (this.y - height < this.bottomLimit) this.newPage()
+    // Con un margen mínimo: lo anclado abajo cabe justo y un redondeo no debe mandarlo a otra hoja.
+    if (this.y - height < this.bottomLimit - 0.01) this.newPage()
   }
 
   /** Cuánto queda en esta página. */
@@ -1192,15 +1224,72 @@ export class DocumentKit {
     })
   }
 
-  /** «Firmado electrónicamente», con su QR para comprobarlo. */
-  signedBlockHeight(input: Pick<SignedBlockInput, "credential" | "checkUrl">): number {
+  /**
+   * El dibujo de una firma sentado sobre `bottom`, sin deformarlo y sin pasarse de
+   * `width` × `height`. Es solo lo que se ve: el papel sigue diciendo cómo se firmó.
+   */
+  drawStrokes(strokes: Strokes, x: number, bottom: number, width: number, height: number): void {
+    const path = signaturePath(strokes)
+    if (!path) return
+    // La escala también agranda el grosor: se compensa para que la línea salga siempre igual.
+    const scale = Math.min(width / Math.max(path.width, 0.01), height / Math.max(path.height, 0.01))
+    this.page.drawSvgPath(path.d, {
+      x,
+      y: bottom + path.height * scale,
+      scale,
+      borderColor: this.tones.ink,
+      borderWidth: 1.1 / scale,
+      borderLineCap: LineCapStyle.Round,
+    })
+  }
+
+  /** Lo que va debajo de la firma, escrito al ancho que queda junto al QR. */
+  private signedLines(input: SignedBlockInput, width: number) {
+    const style = { size: SIZE.second, tone: "gray", leading: 1.4 } as const
+    if (!input.name) return this.lay("Firma y sello", width, style)
+    // En dos renglones: a este ancho, seguidos partirían la fecha por la mitad.
+    return [
+      ...this.lay("Firmado electrónicamente", width, style),
+      ...this.lay(input.at, width, style),
+    ]
+  }
+
+  /**
+   * El sello: nombre, título y colegiatura en un recuadro (ADR 0133). Los seguros piden
+   * ver firma y sello; es una imagen con los datos, no prueba quién firmó.
+   */
+  private stampLines(input: SignedBlockInput) {
+    if (!input.name) return []
+    const width = STAMP_WIDTH - STAMP_PAD * 2
+    const style = { size: SIZE.label, tone: "stamp", leading: 1.3, align: "center" } as const
+    return [
+      ...this.lay(input.name, width, { ...style, face: "sansBold" }),
+      ...(input.credential?.split(" · ") ?? []).flatMap((part) => this.lay(part, width, style)),
+    ]
+  }
+
+  private stampHeight(input: SignedBlockInput): number {
+    const lines = this.stampLines(input)
+    return lines.length
+      ? lines.reduce((sum, line) => sum + line.height, 0) + STAMP_PAD * 2
+      : 0
+  }
+
+  private signedTextWidth(input: Pick<SignedBlockInput, "checkUrl" | "name">): number {
+    return (
+      this.width -
+      10.5 * 2 -
+      (input.name ? STAMP_WIDTH + 12 : 0) -
+      (input.checkUrl ? CHECK_QR_SIZE + 8 + CHECK_CAPTION_WIDTH + 12 : 0)
+    )
+  }
+
+  /** Su firma sobre una línea (o la línea para firmar a mano), «Firmado electrónicamente», su sello y el QR. */
+  signedBlockHeight(input: SignedBlockInput): number {
     const padY = 9
-    const lines =
-      SIZE.label * 1.35 +
-      SIZE.table * 1.4 +
-      (input.credential ? SIZE.second * 1.4 : 0) +
-      SIZE.second * 1.4
-    return Math.max(lines, input.checkUrl ? 54 : 0) + padY * 2
+    const lines = this.signedLines(input, this.signedTextWidth(input))
+    const text = SIGN_SPACE + 3 + lines.reduce((sum, line) => sum + line.height, 0)
+    return Math.max(text, this.stampHeight(input), input.checkUrl ? CHECK_QR_SIZE : 0) + padY * 2
   }
 
   signedBlock(input: SignedBlockInput): void {
@@ -1210,36 +1299,40 @@ export class DocumentKit {
     this.ensure(height + 2)
     const top = this.y
     if (!this.thermal) this.frame(this.left, top - height, this.width, height, RULE, 0.75)
-    const textWidth = this.width - padX * 2 - (input.checkUrl ? 180 : 0)
-    let cursor = top - padY
-    const rows: Array<[string, TextStyle]> = [
-      [
-        "Firmado electrónicamente",
-        { size: SIZE.label, face: "sansSemi", tone: "gray", leading: 1.35 },
-      ],
-      [input.name, { size: SIZE.table, face: "sansSemi", leading: 1.4 }],
-      ...(input.credential
-        ? [
-            [input.credential, { size: SIZE.second, tone: "gray", leading: 1.4 }] as [
-              string,
-              TextStyle,
-            ],
-          ]
-        : []),
-      [input.at, { size: SIZE.second, tone: "gray", leading: 1.4 }],
-    ]
-    for (const [value, style] of rows) {
-      const line = this.lay(value, textWidth, style)[0]
-      if (!line) continue
+    const textWidth = this.signedTextWidth(input)
+    const lineWidth = Math.min(SIGN_LINE_WIDTH, textWidth)
+    const lineY = top - padY - SIGN_SPACE
+    if (input.strokes)
+      this.drawStrokes(input.strokes, this.left + padX, lineY + 2, lineWidth, SIGN_SPACE - 4)
+    this.page.drawLine({
+      start: { x: this.left + padX, y: lineY },
+      end: { x: this.left + padX + lineWidth, y: lineY },
+      thickness: 0.75,
+      color: this.tones.ink,
+    })
+    let cursor = lineY - 3
+    for (const line of this.signedLines(input, textWidth)) {
       this.drawLineAt(line, this.left + padX, cursor, textWidth)
       cursor -= line.height
     }
+    const stamp = this.stampLines(input)
+    if (stamp.length) {
+      const stampHeight = this.stampHeight(input)
+      const stampX = this.left + padX + textWidth + 12
+      const stampTop = top - (height - stampHeight) / 2
+      this.frame(stampX, stampTop - stampHeight, STAMP_WIDTH, stampHeight, this.tones.stamp, 1)
+      let stampCursor = stampTop - STAMP_PAD
+      for (const line of stamp) {
+        this.drawLineAt(line, stampX + STAMP_PAD, stampCursor, STAMP_WIDTH - STAMP_PAD * 2)
+        stampCursor -= line.height
+      }
+    }
     if (input.checkUrl) {
-      const qrSize = 54
+      const qrSize = CHECK_QR_SIZE
       const qrX = this.right - padX - qrSize
       const qrTop = top - (height - qrSize) / 2
       this.qr(input.checkUrl, qrX, qrTop, qrSize)
-      const caption = this.lay("Escanee para comprobar que sigue vigente", 112, {
+      const caption = this.lay("Escanee para comprobar que sigue vigente", CHECK_CAPTION_WIDTH, {
         size: SIZE.label,
         tone: "gray",
         leading: 1.35,
@@ -1248,7 +1341,7 @@ export class DocumentKit {
       const captionHeight = caption.reduce((sum, line) => sum + line.height, 0)
       let captionTop = top - (height - captionHeight) / 2
       for (const line of caption) {
-        this.drawLineAt(line, qrX - 8 - 112, captionTop, 112)
+        this.drawLineAt(line, qrX - 8 - CHECK_CAPTION_WIDTH, captionTop, CHECK_CAPTION_WIDTH)
         captionTop -= line.height
       }
     }
@@ -1337,23 +1430,14 @@ export class DocumentKit {
       cursor -= 4
       const boxTop = cursor
       if (signature.strokes && signature.strokes.length > 0) {
-        // El recuadro donde se firmó mide 22 × 7: en una columna más ancha el trazo no se estira.
-        const penWidth = Math.min(width, (boxHeight * 22) / 7)
-        for (const stroke of signature.strokes) {
-          for (let point = 1; point < stroke.length; point++) {
-            const from = stroke[point - 1] as [number, number]
-            const to = stroke[point] as [number, number]
-            this.page.drawLine({
-              start: {
-                x: x + (from[0] / 1000) * penWidth,
-                y: boxTop - (from[1] / 1000) * boxHeight,
-              },
-              end: { x: x + (to[0] / 1000) * penWidth, y: boxTop - (to[1] / 1000) * boxHeight },
-              thickness: 1.25,
-              color: this.tones.ink,
-            })
-          }
-        }
+        this.drawStrokes(signature.strokes, x, boxTop - boxHeight + 2, width, boxHeight - 4)
+        this.page.drawLine({
+          start: { x, y: boxTop - boxHeight },
+          end: { x: x + width, y: boxTop - boxHeight },
+          thickness: 0.75,
+          color: this.tones.ink,
+        })
+      } else if (signature.handLine) {
         this.page.drawLine({
           start: { x, y: boxTop - boxHeight },
           end: { x: x + width, y: boxTop - boxHeight },
@@ -1691,6 +1775,63 @@ export class DocumentKit {
     }
     return this.pdf.save({ useObjectStreams: false })
   }
+}
+
+/**
+ * Un papel ya emitido, anulado: «ANULADA» cruzando cada hoja y el motivo arriba, sobre
+ * el PDF tal como salió (ADR 0132). Lo que decía se sigue leyendo; el original no se toca.
+ */
+export async function stampVoidedPdf(
+  bytes: Uint8Array,
+  input: { word: string; reason: string | null },
+): Promise<Uint8Array> {
+  const pdf = await PDFDocument.load(bytes)
+  pdf.registerFontkit(fontkit)
+  const bold = await pdf.embedFont(fontData("sansBold").bytes, { subset: true })
+  const word = printable(input.word, "sansBold")
+  const color = SHEET_TONES.alert
+  const pages = pdf.getPages()
+  for (const page of pages) {
+    const box = page.getMediaBox()
+    const reach = Math.hypot(box.width, box.height) * 0.72
+    const size = Math.min(reach / (bold.widthOfTextAtSize(word, 1) || 1), box.height * 0.3)
+    const angle = Math.atan2(box.height, box.width)
+    const along = bold.widthOfTextAtSize(word, size) / 2
+    const across = bold.heightAtSize(size, { descender: false }) / 2
+    // El centro de la palabra, en el centro de la hoja: se parte de su esquina inferior izquierda.
+    page.drawText(word, {
+      x: box.x + box.width / 2 - along * Math.cos(angle) + across * Math.sin(angle),
+      y: box.y + box.height / 2 - along * Math.sin(angle) - across * Math.cos(angle),
+      size,
+      font: bold,
+      color,
+      opacity: 0.2,
+      rotate: degrees((angle * 180) / Math.PI),
+    })
+  }
+  const first = pages[0]
+  if (first) {
+    const box = first.getMediaBox()
+    const margin = Math.min(54, box.width * 0.09)
+    const room = box.width - margin * 2
+    // Un motivo admite 2000 caracteres y en una línea caben unos cien: se mide solo el comienzo.
+    const clean = input.reason
+      ? printable(input.reason.replace(/\s+/g, " ").trim().slice(0, 300), "sansBold")
+      : ""
+    let line = printable(clean ? `${input.word} · Motivo: ${clean}` : input.word, "sansBold")
+    if (bold.widthOfTextAtSize(line, SIZE.label) > room) {
+      while (line && bold.widthOfTextAtSize(`${line}…`, SIZE.label) > room) line = line.slice(0, -1)
+      line = `${line.trimEnd()}…`
+    }
+    first.drawText(line, {
+      x: box.x + margin,
+      y: box.y + box.height - Math.min(24, box.height * 0.04),
+      size: SIZE.label,
+      font: bold,
+      color,
+    })
+  }
+  return pdf.save({ useObjectStreams: false })
 }
 
 // --- Fechas y cantidades -------------------------------------------------------

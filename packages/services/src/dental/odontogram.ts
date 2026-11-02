@@ -29,7 +29,7 @@ import { resolveOptionalDiagnosisCode } from "../diagnosis-codes.js"
 import { documentCheckUrl } from "../document-check.js"
 import { invalidField, notFound, ServiceError, validation } from "../errors.js"
 import { requirePatient } from "../patients.js"
-import { requireProfessionalSignature } from "../professional-profiles.js"
+import { drawnSignatureAt, requireProfessionalSignature } from "../professional-profiles.js"
 import { orgDentalProfile } from "./profile.js"
 
 function conflict(code: string, message: string): ServiceError {
@@ -428,6 +428,20 @@ async function signOdontogram(
   const { history } = await getOdontogram(tx, orgId, patientId)
   const candidates = history.filter((row) => !row.needsReview && !isVoidedRow(row))
   const entries = activeFindingsAsOf(candidates.map(toFindingRecord))
+  const printPatient = await printPatientOf(tx, orgId, patientId)
+  const letterhead = await establishmentOf(tx, orgId)
+  let paperHeader: PaperHeader | null = null
+  if (letterhead) {
+    const { logo: _logo, ...establishment } = letterhead
+    paperHeader = {
+      patient: {
+        docType: printPatient.docType,
+        docNumber: printPatient.docNumber,
+        birthDate: printPatient.birthDate,
+      },
+      establishment,
+    }
+  }
   const [row] = await tx
     .insert(odontogramAssessment)
     .values({
@@ -445,6 +459,7 @@ async function signOdontogram(
       entries,
       standard: input.standard,
       encounterId: input.encounterId,
+      paperHeader,
     })
     .returning()
   if (!row) throw notFound("Odontograma firmado")
@@ -758,6 +773,12 @@ async function printPatientOf(tx: Db, orgId: string, patientId: string) {
   }
 }
 
+/** El encabezado de la hoja como estaba al firmar (`odontogram_assessment.paper_header`). */
+interface PaperHeader {
+  patient: { docType: string | null; docNumber: string | null; birthDate: string | null }
+  establishment: Omit<NonNullable<Awaited<ReturnType<typeof establishmentOf>>>, "logo">
+}
+
 /**
  * Hoja de un odontograma firmado para ver e imprimir: su instantánea con el
  * gráfico de la norma, quién lo firmó y «Firma y sello» para el papel.
@@ -780,12 +801,20 @@ export async function getSignedOdontogramPrint(
     )
     .limit(1)
   if (!assessment) throw notFound("Odontograma firmado")
+  const today = await printPatientOf(tx, orgId, patientId)
+  const letterhead = await establishmentOf(tx, orgId)
+  // Lo firmado desde que se guarda su encabezado no cambia (ADR 0132); el logo es de hoy,
+  // porque el anterior se borra al cambiarlo y la hoja saldría con la imagen rota.
+  const header = assessment.paperHeader as PaperHeader | null
   return {
     assessment,
-    patient: await printPatientOf(tx, orgId, patientId),
-    establishment: await establishmentOf(tx, orgId),
+    patient: header ? { ...today, ...header.patient } : today,
+    establishment: header
+      ? { ...header.establishment, logo: letterhead?.logo ?? null }
+      : letterhead,
     // La dirección del QR de la hoja: quien la tiene en la mano comprueba que sigue vigente.
     checkUrl: await documentCheckUrl(tx, orgId, "signed_odontogram", assessment.id),
+    signerStrokes: await drawnSignatureAt(tx, orgId, assessment.authorUserId, assessment.createdAt),
   }
 }
 

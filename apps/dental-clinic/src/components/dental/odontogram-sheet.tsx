@@ -1,3 +1,4 @@
+import { FirmaTrace } from "@odentia/clinic-app/components/patient/firma-pad"
 import { brandedQrDataUrl } from "@odentia/clinic-app/lib/branded-qr"
 import { formatDate } from "@odentia/clinic-app/lib/clinical-journey"
 import { useOrgProfile } from "@odentia/clinic-app/lib/org"
@@ -64,7 +65,7 @@ export function SheetLetterhead({ establishment }: { establishment: PrintEstabli
       </div>
       <div className="text-right text-xs">
         {establishment?.branchName ? (
-          <p className="font-medium">Sede {establishment.branchName}</p>
+          <p className="font-medium">{establishment.branchName}</p>
         ) : null}
         {establishment?.address ? <p>{establishment.address}</p> : null}
         {establishment?.phone ? <p>{establishment.phone}</p> : null}
@@ -74,9 +75,10 @@ export function SheetLetterhead({ establishment }: { establishment: PrintEstabli
 }
 
 /**
+ * La firma de quien firmó sobre su línea (o la línea para firmar a mano, ADR 0131),
  * «Firmado electrónicamente» con los datos congelados y el QR para comprobarlo
- * (ADR 0115): la misma firma de los PDF, sin línea para firmar a mano. Sin
- * dirección pública el papel sale sin QR y no promete nada.
+ * (ADR 0115): lo mismo que en los PDF. Sin dirección pública el papel sale sin QR
+ * y no promete nada.
  */
 export function SheetSignature({
   name,
@@ -84,12 +86,14 @@ export function SheetSignature({
   registration,
   at,
   checkUrl,
+  strokes,
 }: {
   name: string
   title: string
   registration: string
   at: string
   checkUrl: string | null
+  strokes: number[][][] | null
 }) {
   const qr = useQuery({
     queryKey: ["odontogram-check-qr", checkUrl],
@@ -100,10 +104,22 @@ export function SheetSignature({
   return (
     <footer className="mt-4 flex items-center justify-between gap-4 border-t border-gray-400 pt-3 text-xs">
       <div className="min-w-0">
-        <p className="font-semibold">Firmado electrónicamente</p>
-        <p className="mt-1 text-sm font-medium">{name}</p>
-        <p>{[title, registration].filter(Boolean).join(" · ")}</p>
-        <p>{formatDate(at)}</p>
+        <div className="flex h-12 w-64 max-w-full items-end border-b border-black pb-0.5">
+          {strokes ? (
+            <FirmaTrace
+              strokes={strokes}
+              label={`Firma de ${name}`}
+              className="max-h-full max-w-full"
+            />
+          ) : null}
+        </div>
+        <p className="mt-1">Firmado electrónicamente · {formatDate(at)}</p>
+      </div>
+      {/* El sello: los seguros piden ver firma y sello (ADR 0133). */}
+      <div className="min-w-0 max-w-48 shrink-0 border border-blue-900 px-2 py-1.5 text-center text-[11px] leading-snug text-blue-900">
+        <p className="font-bold">{name}</p>
+        {title ? <p>{title}</p> : null}
+        {registration ? <p>{registration}</p> : null}
       </div>
       {checkUrl ? (
         <div className="flex shrink-0 items-center gap-2">
@@ -111,9 +127,10 @@ export function SheetSignature({
             Escanee para comprobar que sigue vigente
           </p>
           {qr.data ? (
-            <img src={qr.data} alt="Código para comprobar este documento" className="size-20" />
+            // 30 mm: con la corrección más alta y el isotipo al centro, el código es denso.
+            <img src={qr.data} alt="Código para comprobar este documento" className="size-28" />
           ) : (
-            <span className="size-20" />
+            <span className="size-28" />
           )}
         </div>
       ) : null}

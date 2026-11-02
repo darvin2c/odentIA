@@ -1,6 +1,6 @@
 # 0033 · Documentos de la atención en un solo lugar
 
-Fecha: 2026-10-16 · **Estado:** aceptada (fase 3, paso 2B; decisión 3 del lienzo) · Ajusta [0003](0003-nota-clinica-normativa.md): los exámenes auxiliares se piden como órdenes.
+Fecha: 2026-10-16 · **Estado:** aceptada (fase 3, paso 2B; decisión 3 del lienzo) · Ajusta [0003](0003-nota-clinica-normativa.md): los exámenes auxiliares se piden como órdenes. Ajustada por [0131](0131-la-firma-que-se-ve-en-el-papel.md): la firma dibujada del profesional se guarda una vez y sale en los papeles.
 
 ## Problema
 

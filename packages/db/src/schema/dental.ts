@@ -130,6 +130,11 @@ export const odontogramAssessment = dentalSchema.table(
     standard: text("standard").notNull(),
     /** Atención cuyo cierre lo firmó; null en el botón «Firmar odontograma». */
     encounterId: uuid("encounter_id"),
+    /**
+     * Membrete y documento de la persona al firmar (ADR 0132): la hoja no cambia si
+     * después cambian. Nulo en lo firmado antes: esa hoja los sigue leyendo de hoy.
+     */
+    paperHeader: jsonb("paper_header"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

@@ -83,6 +83,7 @@ it("el QR público de una receta: estados, y nada de salud ni el nombre completo
   expect(Object.keys(check ?? {}).sort()).toEqual(
     [
       "clinic",
+      "fingerprints",
       "issuedAt",
       "label",
       "patientInitials",
@@ -97,9 +98,12 @@ it("el QR público de una receta: estados, y nada de salud ni el nombre completo
   expect(text).not.toContain(person.displayName)
   expect(check?.patientInitials).toBe(patientInitials(person.displayName))
 
+  // Lo emitido no cambia (ADR 0132): solo para simular el paso del tiempo se aparta la guarda.
+  await ownerDb.execute(sql`alter table "prescription" disable trigger prescription_issued_immutable`)
   await ownerDb.execute(
     sql`update "prescription" set "valid_until" = '2020-01-01' where "id" = ${rx.id}`,
   )
+  await ownerDb.execute(sql`alter table "prescription" enable trigger prescription_issued_immutable`)
   expect((await f.run((tx) => readDocumentCheck(tx, "org_a", "prescription", rx.id)))?.state).toBe(
     "vencido",
   )

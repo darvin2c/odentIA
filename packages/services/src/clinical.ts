@@ -44,6 +44,7 @@ import {
   treatmentBudget,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
+import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm"
 import { allergyReviewDue } from "./allergies.js"
@@ -1886,6 +1887,28 @@ export async function retirePatientDocument(
   if (!current) throw notFound("Documento")
   if (current.retiredAt)
     throw new ServiceError("DOCUMENT_RETIRED", 409, "El archivo ya está retirado")
+  // La foto de la hoja es la prueba de lo firmado (ADR 0132); la base también lo impide.
+  const [backing] = await tx
+    .select({ id: consentDocument.id })
+    .from(consentDocument)
+    .where(
+      and(
+        eq(consentDocument.organizationId, orgId),
+        eq(consentDocument.status, "firmado"),
+        or(
+          eq(consentDocument.paperDocumentId, documentId),
+          eq(consentDocument.pdfDocumentId, documentId),
+          eq(consentDocument.revokePdfDocumentId, documentId),
+        ),
+      ),
+    )
+    .limit(1)
+  if (backing)
+    throw new ServiceError(
+      "DOCUMENT_BACKS_CONSENT",
+      409,
+      "Este archivo respalda un consentimiento firmado y no se puede retirar. Si se cargó por error, revoca ese consentimiento: después podrás retirarlo y volver a firmar.",
+    )
   const [row] = await tx
     .update(patientDocument)
     .set({ retiredAt: new Date(), retiredBy: actorUserId, retireReason: reason })

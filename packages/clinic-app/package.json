@@ -8,6 +8,7 @@
     "./components/patient/diagnosis-picker": "./src/components/patient/diagnosis-picker.tsx",
     "./components/patient/dictation-session": "./src/components/patient/dictation-session.ts",
     "./components/patient/document-labels": "./src/components/patient/document-labels.ts",
+    "./components/patient/firma-pad": "./src/components/patient/firma-pad.tsx",
     "./components/patient/new-encounter-button": "./src/components/patient/new-encounter-button.tsx",
     "./components/patient/service-picker": "./src/components/patient/service-picker.tsx",
     "./components/professional-profile-drawer": "./src/components/professional-profile-drawer.tsx",

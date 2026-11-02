@@ -38,6 +38,7 @@ import {
   type DemoKindRecipe,
   demoPriceCents,
 } from "./demo-recipes.js"
+import { seedDemoSignature } from "./demo-signature.js"
 import { ServiceError } from "./errors.js"
 import { getOrgLocale } from "./locale.js"
 import { initialOrgRegion } from "./organization-profile.js"
@@ -338,6 +339,7 @@ export async function buildDemo(
       registrationNumber: registration,
       signatureName: signerName,
     })
+    await seedDemoSignature(tx, orgId, person.id, signerName)
     await setProfessionalSchedule(tx, orgId, demo.presenterUserId, {
       branchId,
       professionalUserId: person.id,
@@ -1283,6 +1285,7 @@ export async function purgeDemoOrganization(
   // Lo que se subió en una presentación: tomografías, fotos, miniaturas, soporte y comprobantes.
   const files = (await tx.execute(sql`
     select storage_key as key from imaging_study_file where organization_id = ${orgId}
+    union all select storage_key from issued_paper where organization_id = ${orgId}
     union all select thumbnail_key from imaging_study where organization_id = ${orgId}
     union all select thumbnail_key from patient_document where organization_id = ${orgId}
     union all select avatar_storage_key from patient where organization_id = ${orgId}

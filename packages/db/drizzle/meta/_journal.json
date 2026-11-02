@@ -288,6 +288,20 @@
       "when": 1793588400416,
       "tag": "0040_lo_que_sale_de_un_boton",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1793654146921,
+      "tag": "0041_firma_y_lo_emitido",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1793654149183,
+      "tag": "0042_firma_y_lo_emitido_reglas",
+      "breakpoints": true
     }
   ]
 }

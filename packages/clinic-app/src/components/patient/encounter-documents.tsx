@@ -39,7 +39,13 @@ import { ConsentLinkActions, consentLinkWords } from "./consent-link-actions"
 import { ConsentSigningScreen, PaperSignDrawer } from "./consent-signing"
 import { NewConsentDrawer } from "./consentimientos-tab"
 import { DocumentOpenButton } from "./document-open-button"
-import { ConsentPaper, MedicalLeavePaper, OrderPaper, PrescriptionPaper } from "./document-papers"
+import {
+  AttentionSheetPaper,
+  ConsentPaper,
+  MedicalLeavePaper,
+  OrderPaper,
+  PrescriptionPaper,
+} from "./document-papers"
 import { DocumentUploadDialog } from "./document-upload-dialog"
 import { NewResponseDrawer, ResponseDetail } from "./formularios-tab"
 import { NewMedicalLeaveDrawer } from "./medical-leave"
@@ -173,6 +179,7 @@ type ViewedPaper =
   | { kind: "prescription"; prescription: Prescription }
   | { kind: "order"; order: ClinicalOrder }
   | { kind: "leave"; leave: MedicalLeave }
+  | { kind: "attention" }
 
 function firstName(patient: PatientFull): string {
   return (patient.patient.givenNames ?? patient.patient.displayName).trim().split(/\s+/)[0] ?? ""
@@ -290,6 +297,7 @@ export function EncounterDocumentsBlock({
   }
 
   const pendingTitles = docs.toSign.map((doc) => doc.titleSnapshot)
+  const signed = detail.encounter.status === "finalizada"
 
   return (
     <div className="flex flex-col gap-4">
@@ -371,6 +379,25 @@ export function EncounterDocumentsBlock({
       ))}
 
       <ul className="flex flex-col divide-y rounded-lg border">
+        {signed ? (
+          <li className="flex flex-wrap items-center justify-between gap-3 p-3">
+            <div className="flex min-w-0 flex-col">
+              <span className="text-sm font-medium">Hoja de atención</span>
+              <span className="text-xs text-muted-foreground">
+                Para el seguro: diagnóstico, lo que se hizo, firma y sello
+              </span>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              aria-label="Ver hoja de atención"
+              onClick={() => setViewing({ kind: "attention" })}
+            >
+              Ver
+            </Button>
+          </li>
+        ) : null}
         {docs.toSign.length > 0 ? (
           <li className="flex flex-wrap items-center justify-between gap-3 p-3">
             <div className="flex min-w-0 flex-col">
@@ -542,7 +569,7 @@ export function EncounterDocumentsBlock({
             <DocumentOpenButton patientId={patientId} documentId={file.id} label="Ver" />
           </li>
         ))}
-        {docs.total === 0 && docs.pendingSignatures.length === 0 ? (
+        {docs.total === 0 && docs.pendingSignatures.length === 0 && !signed ? (
           <li className="p-3 text-sm text-muted-foreground">
             Aún no hay documentos en esta atención. Usa «Nuevo» para crear uno.
           </li>
@@ -695,6 +722,12 @@ export function EncounterDocumentsBlock({
           order={docs.orders.find((order) => order.id === viewing.order.id) ?? viewing.order}
           onClose={() => setViewing(null)}
           onChanged={refresh}
+        />
+      ) : viewing?.kind === "attention" ? (
+        <AttentionSheetPaper
+          patientId={patientId}
+          encounterId={encounterId}
+          onClose={() => setViewing(null)}
         />
       ) : viewing?.kind === "leave" ? (
         <MedicalLeavePaper

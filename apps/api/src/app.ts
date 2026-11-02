@@ -535,6 +535,7 @@ export function createApp(deps: AppDeps) {
     createPublicBookingRoute({
       db: deps.db,
       secretsKey: deps.secretsKey,
+      storage: deps.storage,
       remoteAddress: deps.registrationRemoteAddress,
       addressProvider: deps.addressProviders?.paciente ?? null,
     }),
