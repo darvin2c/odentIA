@@ -3,6 +3,7 @@ import {
   type AllergenEntry,
   allergenName,
   allergyWarnings,
+  appendDictated,
   BUDGET_OPTIONS_MAX,
   codeAllergySubstance,
   DIAGNOSIS_SYSTEM_INFO,
@@ -116,6 +117,8 @@ export interface DictationDraft {
 }
 
 export interface DictationSuggestion {
+  /** Al confirmar una nota: cómo quedó cada texto en la atención, ya unido a lo que había. */
+  joined?: Record<string, string>
   id: string
   kind: DictationKind
   payload: Record<string, unknown>
@@ -1951,7 +1954,7 @@ export async function confirmDictationSuggestion(
   encounterId: string,
   id: string,
 ): Promise<DictationSuggestion> {
-  await lockOwnDraft(tx, orgId, actorUserId, patientId, encounterId)
+  const draft = await lockOwnDraft(tx, orgId, actorUserId, patientId, encounterId)
   const dictation = await requireDictatingProduct(tx, orgId)
   const row = await lockSuggestion(tx, orgId, patientId, encounterId, id)
   if (row.status === "por_revisar") throw conflict("SUGGESTION_NEEDS_REVIEW", row.note ?? "Revisa la sugerencia antes de confirmarla")
@@ -1961,9 +1964,19 @@ export async function confirmDictationSuggestion(
   // La operación recibe los campos de la sugerencia, no sus metadatos.
   const payload = splitMeta(row.payload).data
   let entityId: string | null = null
+  // Cómo quedó cada texto de la nota: la pantalla lo adopta, porque su borrador puede ir por detrás.
+  let joined: Record<string, string> | undefined
   if (row.kind === "nota") {
-    const fields = Object.keys(OPERATIONS["atencion.nota"].fields)
-    await updateEncounterDraft(tx, orgId, actorUserId, patientId, encounterId, pick(payload, fields) as UpdateEncounterDraftPatch)
+    const fields = OPERATIONS["atencion.nota"].fields
+    joined = {}
+    for (const [key, value] of Object.entries(pick(payload, Object.keys(fields)))) {
+      const name = key as keyof typeof fields
+      const text = appendDictated(draft[name], String(value), key)
+      // Lo que no cabe no se corta: la sugerencia sigue ahí y el texto, intacto.
+      if (text.length > fields[name].max) throw invalidField(key, `Con lo que ya hay en ${fields[name].label} no cabe: acorta uno de los dos.`)
+      joined[key] = text
+    }
+    await updateEncounterDraft(tx, orgId, actorUserId, patientId, encounterId, joined as UpdateEncounterDraftPatch)
   } else if (row.kind === "diagnostico") {
     const created = await addEncounterDiagnosis(tx, orgId, actorUserId, patientId, encounterId, {
       diagnosisCode: String(payload["diagnosisCode"]),
@@ -2033,7 +2046,7 @@ export async function confirmDictationSuggestion(
   if (!updated) throw new Error("No se pudo confirmar la sugerencia")
   if (row.kind === "alergia") await refreshRecipes(tx, orgId, patientId, encounterId, await dictationScope(tx, orgId))
   if (row.kind === "plan") await refreshBudgetPreview(tx, orgId, patientId, encounterId, await dictationScope(tx, orgId))
-  return toItem(updated, await findOrgLocale(tx, orgId), dictation)
+  return { ...toItem(updated, await findOrgLocale(tx, orgId), dictation), joined }
 }
 
 /**

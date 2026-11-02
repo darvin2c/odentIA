@@ -174,6 +174,8 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await expect(block("Plan y controles")).toContainText("Sin indicaciones confirmadas · 2 sugerencias")
   await expect(block("Plan y controles").getByRole("list", { name: "Sugerencias de Clío: Controles" }).getByRole("listitem")).toHaveCount(1)
   await expect(suggested("Consulta")).toContainText("Viene por dolor al masticar del lado derecho.")
+  // La atención ya tiene motivo: se dice antes de confirmar que lo dictado se agrega.
+  await expect(suggested("Consulta")).toContainText("Se agrega a lo que ya hay en Motivo de consulta.")
   // El cierre dice que el diagnóstico está sugerido, no registrado.
   const closing = page.getByRole("region", { name: "Cierre de la atención" })
   // «Finalizar y firmar» queda fijo al pie de la atención (fase 3, paso 2B), fuera del bloque de cierre.
@@ -210,8 +212,14 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await review.getByRole("button", { name: "Confirmar las 3 listas" }).click()
   await expect(idle).toBeVisible()
   const saved = await detail()
-  expect(saved.encounter).toMatchObject({ reason: "Viene por dolor al masticar del lado derecho.", evolution: "Se realizó apertura cameral sin complicaciones." })
+  // La atención ya tenía motivo: lo dictado se agrega, no lo borra.
+  const joinedReason = "Consulta\nViene por dolor al masticar del lado derecho."
+  expect(saved.encounter).toMatchObject({ reason: joinedReason, evolution: "Se realizó apertura cameral sin complicaciones." })
   expect(saved.diagnoses).toEqual([expect.objectContaining({ diagnosisCode: "K02.1", toothNumber: 16 })])
+  // El borrador de la pantalla también se une: si lo pisara, el autoguardado borraría lo de antes.
+  await page.getByRole("region", { name: "Consulta" }).getByRole("button", { name: "Abrir", exact: true }).click()
+  await expect(page.getByLabel("Motivo", { exact: true })).toHaveValue(joinedReason)
+  await page.getByRole("complementary", { name: "Panel lateral" }).getByRole("region", { name: "Consulta" }).getByRole("button", { name: "Cerrar" }).click()
   // La pantalla refleja lo confirmado sin recargar.
   await expect(closing.getByRole("listitem").filter({ hasText: "diagnóstico" })).toContainText("listo")
 

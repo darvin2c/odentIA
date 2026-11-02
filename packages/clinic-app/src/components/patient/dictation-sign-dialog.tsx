@@ -117,6 +117,7 @@ export function DictationSignDialog({
                           {DICTATION_KIND_LABEL[item.kind]}
                           {can && !checked ? " · desmarcada: no entra" : ""}
                         </span>
+                        {can && checked && session.noteAddsTo(item) ? <span className="text-muted-foreground">{session.noteAddsTo(item)}</span> : null}
                         {can && item.note ? <span className="text-warning">{item.note}</span> : null}
                         {why ? <span className="text-warning">{why}</span> : null}
                         {failed ? (

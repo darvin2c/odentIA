@@ -229,4 +229,26 @@ describe("Clío médica (issue 229, entrega 10)", () => {
       await setProduct("dental")
     }
   })
+
+  it("una nota dictada se agrega a lo que ya había", async () => {
+    await setProduct("medical")
+    await enable(true)
+    try {
+      const fx = await clinicalFixture()
+      await ownerDb.update(encounter).set({ evolution: "Lo escribí a mano." }).where(eq(encounter.id, fx.encounter.id))
+      const [note] = (
+        await fx.run((tx) =>
+          saveDictationSegment(tx, ...fx.args, fx.encounter.id, {
+            drafts: [{ kind: "nota", payload: { evolution: "Afebril, buena evolución." } }],
+          }),
+        )
+      ).suggestions
+      await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, note!.id))
+      const [session] = await ownerDb.select().from(encounter).where(eq(encounter.id, fx.encounter.id))
+      expect(session?.evolution).toBe("Lo escribí a mano.\nAfebril, buena evolución.")
+    } finally {
+      await enable(false)
+      await setProduct("dental")
+    }
+  })
 })

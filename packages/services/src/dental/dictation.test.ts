@@ -467,6 +467,40 @@ describe("dictado en la atención", () => {
     expect(await fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))).toHaveLength(7)
   })
 
+  it("una nota dictada se agrega a lo que ya había y, si no cabe, no toca nada", async () => {
+    await enable(true)
+    const fx = await openSession("Obturación de la nota")
+    await ownerDb.update(encounter).set({ evolution: "Lo escribí a mano.", illnessDuration: "3 días" }).where(eq(encounter.id, fx.encounter.id))
+    const [first, second] = await fx.run((tx) =>
+      saveDictationSuggestions(tx, ...fx.args, fx.encounter.id, [
+        { kind: "nota", payload: { evolution: "Se anestesió la 36.", illnessDuration: "una semana", prognosis: "Favorable" } },
+        { kind: "nota", payload: { evolution: "Se colocó la resina, toleró bien." } },
+      ]),
+    )
+    const confirm = (id: string) => fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, id))
+    const session = async () => (await ownerDb.select().from(encounter).where(eq(encounter.id, fx.encounter.id)))[0]!
+    // La confirmación devuelve cómo quedó cada texto: la pantalla lo adopta si su borrador va por detrás.
+    expect((await confirm(first!.id)).joined).toEqual({ evolution: "Lo escribí a mano.\nSe anestesió la 36.", illnessDuration: "3 días; una semana", prognosis: "Favorable" })
+    await confirm(second!.id)
+    expect(await session()).toMatchObject({
+      evolution: "Lo escribí a mano.\nSe anestesió la 36.\nSe colocó la resina, toleró bien.",
+      illnessDuration: "3 días; una semana",
+      prognosis: "Favorable",
+    })
+
+    // Lo que no cabe no se corta: se rechaza, la sugerencia sigue lista y el texto queda intacto.
+    const full = "a".repeat(9_990)
+    await ownerDb.update(encounter).set({ evolution: full }).where(eq(encounter.id, fx.encounter.id))
+    const [third] = await fx.run((tx) =>
+      saveDictationSuggestions(tx, ...fx.args, fx.encounter.id, [{ kind: "nota", payload: { evolution: "Una frase que ya no cabe." } }]),
+    )
+    await expect(confirm(third!.id)).rejects.toMatchObject({ fields: { evolution: expect.stringContaining("no cabe") } })
+    expect((await session()).evolution).toBe(full)
+    const pending = await fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))
+    expect(pending.find((item) => item.id === third!.id)).toMatchObject({ status: "lista" })
+    await enable(false)
+  })
+
   it("confirmar usa la operación de la atención; lo por revisar se resuelve antes; lo descartado no entra", async () => {
     await enable(true)
     const fx = await openSession("Endodoncia multirradicular")
@@ -485,7 +519,8 @@ describe("dictado en la atención", () => {
 
     await confirm(note!.id)
     const [session] = await ownerDb.select().from(encounter).where(eq(encounter.id, fx.encounter.id))
-    expect(session).toMatchObject({ reason: "Dolor al masticar", evolution: "Se realizó la limpieza de la cavidad." })
+    // El motivo de la atención ya decía «Consulta»: lo dictado se agrega, no lo borra.
+    expect(session).toMatchObject({ reason: "Consulta\nDolor al masticar", evolution: "Se realizó la limpieza de la cavidad." })
 
     await confirm(diagnosis!.id)
     expect(await ownerDb.select().from(encounterDiagnosis).where(eq(encounterDiagnosis.encounterId, fx.encounter.id))).toEqual([
