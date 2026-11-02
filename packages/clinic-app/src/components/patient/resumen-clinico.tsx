@@ -1,22 +1,24 @@
 import { diagnosisCodeLabel } from "@odentia/clinical"
 import { Button, buttonVariants } from "@odentia/ui"
 import { Link } from "@tanstack/react-router"
-import { type ReactNode, useState } from "react"
+import { useState } from "react"
 import type { AgendaAppointment } from "../../lib/agenda"
 import { allergyName } from "../../lib/allergies"
 import { useMemberName, useMyUserId, usePermission } from "../../lib/crm"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { appointmentWhen } from "../../lib/patient-appointments"
 import {
+  type Allergy,
   ALLERGY_SEVERITY_LABELS,
   type OpenEncounterBrief,
   type PatientHealth,
   type PatientSummary,
 } from "../../lib/patients"
+import { usePersonArchived } from "../../lib/person-archived"
 import { AllergyQuickActions } from "./allergies-card"
 import { EncounterReadDrawer } from "./encounter-read-drawer"
 import { SummaryCard } from "./resumen-tab"
-import { openBookingAnywhere } from "../agenda/schedule-host"
+import { openAppointmentAnywhere, openBookingAnywhere } from "../agenda/schedule-host"
 
 /** Lo que le falta a la atención, dicho para quien no necesariamente la lleva. */
 const MISSING_LABELS: Record<OpenEncounterBrief["missing"][number], string> = {
@@ -39,6 +41,20 @@ function formatClock(iso: string): string {
 
 function plural(n: number, one: string, many: string) {
   return `${n} ${n === 1 ? one : many}`
+}
+
+/** Lo más grave primero. «Desconocida» antes que «leve»: no se sabe, y podría no serlo. */
+function allergyRank(allergy: Allergy): number {
+  if (allergy.severity === "severa" || allergy.severity === "grave" || allergy.criticality === "alta") return 0
+  if (allergy.severity === "moderada") return 1
+  return allergy.severity === "leve" ? 3 : 2
+}
+
+/** «severa», «de criticidad alta» o nada si no se sabe: lo mismo que dice la cabecera. */
+function allergySeverityWord(allergy: Allergy): string {
+  if (allergy.severity === "desconocida" || !allergy.severity) return allergy.criticality === "alta" ? "de criticidad alta" : ""
+  if (allergy.severity !== "severa" && allergy.severity !== "grave" && allergy.criticality === "alta") return "de criticidad alta"
+  return (ALLERGY_SEVERITY_LABELS[allergy.severity] ?? allergy.severity).toLowerCase()
 }
 
 /**
@@ -128,8 +144,9 @@ function Alert({
 
 /**
  * Alergias y alertas antes de tocar al paciente (Resumen de quien atiende):
- * alergias por gravedad, todas iguales (tablero 7: no hay «por confirmar»), condiciones
- * activas y medicación vigente. Sin alergias registradas dice lo que consta
+ * alergias de la más grave a la menos (tablero 7: no hay «por confirmar»), condiciones
+ * activas y medicación vigente, en columnas para que muchas no alarguen la página;
+ * nunca se oculta ninguna. Sin alergias registradas dice lo que consta
  * («no preguntado» o «niega»), nunca «ninguna»: no es lo mismo.
  */
 export function ClinicalAlertsCard({
@@ -144,14 +161,14 @@ export function ClinicalAlertsCard({
   onAntecedentes: () => void
 }): React.JSX.Element {
   const canWrite = usePermission("clinical.write")
-  const allergies = (health?.allergies ?? []).filter(
-    (allergy) => allergy.isActive && allergy.verification !== "descartada",
-  )
+  const archived = usePersonArchived()
+  const allergies = (health?.allergies ?? [])
+    .filter((allergy) => allergy.isActive && allergy.verification !== "descartada")
+    .sort((a, b) => allergyRank(a) - allergyRank(b))
   const conditions = (health?.conditions ?? []).filter((condition) => condition.status === "activa")
   // Vigente = sin fecha de fin, igual que la cabecera de la ficha.
   const medications = (health?.medications ?? []).filter((medication) => !medication.endDate)
   const allergyState = health?.reviewStatus.allergies ?? "unknown"
-  const severe = (severity: string) => severity === "severa" || severity === "grave"
   return (
     <SummaryCard
       title="Alergias y alertas"
@@ -161,16 +178,14 @@ export function ClinicalAlertsCard({
         </Button>
       }
     >
-      <ul className="flex flex-col gap-2">
+      <ul className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(min(100%,17rem),1fr))]">
         {allergies.map((allergy) => (
           <Alert
             key={allergy.id}
-            tone={severe(allergy.severity) ? "danger" : "warning"}
-            title={`${allergy.kind === "intolerancia" ? "Intolerancia" : "Alergia"}${
-              severe(allergy.severity)
-                ? ` ${(ALLERGY_SEVERITY_LABELS[allergy.severity] ?? allergy.severity).toLowerCase()}`
-                : ""
-            } · ${allergyName(allergy)}`}
+            tone={allergyRank(allergy) === 0 ? "danger" : "warning"}
+            title={`${[allergy.kind === "intolerancia" ? "Intolerancia" : "Alergia", allergySeverityWord(allergy)]
+              .filter(Boolean)
+              .join(" ")} · ${allergyName(allergy)}`}
             detail={[
               allergy.reaction ?? "reacción no descrita",
               allergy.source === "paciente" ? "la declaró el paciente" : null,
@@ -180,11 +195,11 @@ export function ClinicalAlertsCard({
           />
         ))}
         {allergies.length === 0 ? (
-          <li className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed px-3 py-2">
+          <li className="col-span-full flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed px-3 py-2">
             <span className="text-sm font-medium">
               {allergyState === "none" ? "Alergias: niega" : "Alergias: no preguntado"}
             </span>
-            {allergyState === "unknown" && canWrite ? (
+            {allergyState === "unknown" && canWrite && !archived ? (
               <AllergyQuickActions patientId={patientId} patientName={patientName} />
             ) : null}
           </li>
@@ -194,16 +209,17 @@ export function ClinicalAlertsCard({
             key={condition.id}
             tone="warning"
             title={condition.name}
-            detail={condition.diagnosisCode ? diagnosisCodeLabel(condition.diagnosisSystem, condition.diagnosisCode) : "Antecedente activo"}
+            detail={condition.diagnosisCode ? diagnosisCodeLabel(condition.diagnosisSystem, condition.diagnosisCode) : condition.notes}
           />
         ))}
-        {medications.length > 0 ? (
+        {medications.map((medication) => (
           <Alert
+            key={medication.id}
             tone="muted"
-            title={plural(medications.length, "medicamento vigente", "medicamentos vigentes")}
-            detail={medications.map((medication) => medication.name).join(", ")}
+            title={[medication.name, medication.dose, medication.frequency].filter(Boolean).join(" · ")}
+            detail="Medicamento vigente"
           />
-        ) : null}
+        ))}
       </ul>
     </SummaryCard>
   )
@@ -220,21 +236,18 @@ function dayOf(iso: string): string {
 
 /**
  * La última atención cerrada: cuándo, por qué, quién y qué encontró (los
- * diagnósticos y las piezas), con «Ver» para abrirla. Sin atenciones, el
- * vacío lleva su acción.
+ * diagnósticos y las piezas), con «Ver» para leerla entera: comparte fila con
+ * «Próxima cita» y cada dato llega a 2 líneas como máximo.
  */
 export function LastVisitCard({
   patientId,
   summary,
-  attend,
   onPeriodontal,
 }: {
   patientId: string
   summary: PatientSummary
-  /** «Atender», el mismo botón de la cabecera. */
-  attend: ReactNode
-  /** «Ver periodontograma»: abre Clínica › Odontograma › Periodontograma. */
-  onPeriodontal?: () => void
+  /** «Ver periodontograma»: lo abre encima, sin salir del Resumen. */
+  onPeriodontal?: (chartId: string) => void
 }): React.JSX.Element {
   const memberName = useMemberName()
   const visit = summary.lastVisit
@@ -275,12 +288,12 @@ export function LastVisitCard({
       ) : null}
       {visit ? (
         <div className="flex flex-col gap-1 text-sm">
-          <p className="font-medium">
+          <p className="line-clamp-2 font-medium">
             {[visit.finalizedAt ? dayOf(visit.finalizedAt) : null, visit.reason || "Atención"]
               .filter(Boolean)
               .join(" · ")}
           </p>
-          <p className="text-muted-foreground">
+          <p className="line-clamp-2 text-muted-foreground">
             {[
               professional ? memberName(professional) : null,
               visit.diagnoses.length > 0 ? visit.diagnoses.join(", ") : null,
@@ -291,13 +304,13 @@ export function LastVisitCard({
               .filter(Boolean)
               .join(" · ") || "Sin diagnósticos registrados"}
           </p>
-          {gumsLine ? (
+          {gums && gumsLine ? (
             <div className="mt-1 flex flex-wrap items-center justify-between gap-2 border-t pt-2">
               <p>
                 <span className="text-muted-foreground">Encías:</span> {gumsLine}
               </p>
               {onPeriodontal ? (
-                <Button type="button" size="sm" variant="ghost" onClick={onPeriodontal}>
+                <Button type="button" size="sm" variant="ghost" onClick={() => onPeriodontal(gums.chartId)}>
                   Ver periodontograma
                 </Button>
               ) : null}
@@ -305,10 +318,8 @@ export function LastVisitCard({
           ) : null}
         </div>
       ) : (
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-sm text-muted-foreground">Todavía no tiene atenciones</p>
-          {attend}
-        </div>
+        // «Atender» ya está en la cabecera, siempre a la vista.
+        <p className="text-sm text-muted-foreground">Todavía no tiene atenciones</p>
       )}
     </SummaryCard>
   )
@@ -316,7 +327,8 @@ export function LastVisitCard({
 
 /**
  * La próxima cita con el teléfono para avisarle: lo mismo que recepción ve en
- * su Resumen. Sin cita por venir, «Reservar cita».
+ * su Resumen. «Ver la cita» la abre entera, ahí mismo. Sin cita por venir,
+ * «Reservar cita».
  */
 export function UpcomingCard({
   patientId,
@@ -336,15 +348,25 @@ export function UpcomingCard({
   phone: string
 }): React.JSX.Element {
   const canBook = usePermission("appointments.write")
+  const archived = usePersonArchived()
   return (
-    <SummaryCard title="Próxima cita">
+    <SummaryCard
+      title="Próxima cita"
+      action={
+        upcoming && !loading && !failed ? (
+          <Button type="button" size="sm" variant="outline" onClick={() => openAppointmentAnywhere(upcoming.id)}>
+            Ver la cita
+          </Button>
+        ) : undefined
+      }
+    >
       <div className="flex flex-col gap-1 text-sm">
         {loading ? (
           <p className="text-muted-foreground">Consultando…</p>
         ) : failed ? (
           <p className="text-muted-foreground">No disponible</p>
         ) : upcoming ? (
-          <p className="font-medium">
+          <p className="line-clamp-2 font-medium">
             {[appointmentWhen(upcoming), upcoming.serviceName ?? upcoming.reason, upcoming.professionalName]
               .filter(Boolean)
               .join(" · ")}
@@ -352,7 +374,7 @@ export function UpcomingCard({
         ) : (
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-muted-foreground">Sin cita por venir</p>
-            {canBook ? (
+            {canBook && !archived ? (
               <Button
                 type="button"
                 size="sm"

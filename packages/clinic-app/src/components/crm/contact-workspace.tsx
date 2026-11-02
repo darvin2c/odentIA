@@ -1,7 +1,6 @@
 import { Button, cn, ScrollArea, Spinner } from "@odentia/ui"
 import {
   ConfirmDialog,
-  DetailDrawer,
   EmptyState,
   internationalText,
   LoadingState,
@@ -15,7 +14,7 @@ import { useStore } from "@tanstack/react-form"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ChevronLeft, ChevronRight, Plus, RefreshCw, X } from "lucide-react"
-import { lazy, type ReactNode, Suspense, useCallback, useEffect, useRef, useState } from "react"
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { z } from "zod"
 import { useReceptionName, withReceptionName } from "../../lib/agent-names"
 import { ApiError, apiFetch } from "../../lib/api"
@@ -42,6 +41,7 @@ import { productUi } from "../../product/product-ui"
 import { PersonMemoryDrawer } from "../agent/person-memory"
 import { openBookingAnywhere } from "../agenda/schedule-host"
 import { CitasPanel } from "../patient/citas-panel"
+import { useOpenWide, WideSectionProvider } from "../patient/wide-section"
 import { PersonData } from "../person/person-data"
 import { dueWords, isOverdue } from "./crm-helpers"
 import { OpportunityDrawer } from "./opportunity-drawer"
@@ -51,9 +51,6 @@ import { useCompleteTask } from "./complete-task"
 import { TaskDrawer } from "./task-drawer"
 
 const AccountTab = lazy(() => import("../patient/account-tab").then((m) => ({ default: m.AccountTab })))
-const AntecedentesTab = lazy(() => import("../patient/antecedentes-tab").then((m) => ({ default: m.AntecedentesTab })))
-const DocumentosSection = lazy(() => import("../patient/documentos-panel").then((m) => ({ default: m.DocumentosSection })))
-const HistoriaTab = lazy(() => import("../patient/historia-tab").then((m) => ({ default: m.HistoriaTab })))
 const PlanTab = lazy(() => import("../patient/plan-tab").then((m) => ({ default: m.PlanTab })))
 
 export type ContextSection = "citas" | "plan" | "clinica" | "alertas" | "cobros" | "ventas" | "datos" | "notas"
@@ -124,7 +121,6 @@ export function ContactWorkspace({ conversationId, section, onSectionChange, onR
   const receptionName = useReceptionName()
   const can = useCan()
   const [memoryOpen, setMemoryOpen] = useState(false)
-  const [wide, setWide] = useState<{ id: string; label: string } | null>(null)
   const [noteDirty, setNoteDirty] = useState(false)
   const headingRef = useRef<HTMLHeadingElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -253,7 +249,8 @@ export function ContactWorkspace({ conversationId, section, onSectionChange, onR
   const current = rows.find((row) => row.id === section) ?? null
 
   return (
-    // El desplazamiento de la columna es el de la aplicación (ScrollArea), no la barra nativa.
+    <WideSectionProvider patientId={patientId} name={context.name} closeLabel="Volver a la conversación">
+    {/* El desplazamiento de la columna es el de la aplicación (ScrollArea), no la barra nativa. */}
     <div ref={rootRef} className={bare ? "flex min-h-0 flex-1 flex-col" : "elevated flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card"}>
       <section aria-label="Contexto del contacto" className="flex min-h-0 flex-1 flex-col">
         <div className="flex shrink-0 items-center gap-1.5 border-b px-3 py-2.5">
@@ -310,7 +307,7 @@ export function ContactWorkspace({ conversationId, section, onSectionChange, onR
                 {current.id === "citas" ? <CitasSection context={context} conversationId={conversationId} /> : null}
                 {current.id === "plan" && patientId ? <PlanTab patientId={patientId} patientName={context.name} /> : null}
                 {current.id === "alertas" ? <p className={cn("text-sm", warn("alertas") ? "text-warning" : "text-muted-foreground")}>{lines.alertas}</p> : null}
-                {current.id === "clinica" ? <ClinicaSection line={lines.alertas ?? ""} warn={warn("alertas")} onOpen={setWide} /> : null}
+                {current.id === "clinica" ? <ClinicaSection line={lines.alertas ?? ""} warn={warn("alertas")} /> : null}
                 {current.id === "cobros" && patientId ? <AccountTab patientId={patientId} part="cuenta" /> : null}
                 {current.id === "ventas" ? <VentasSection contactId={contactId} conversationId={conversationId} /> : null}
                 {current.id === "datos" ? <DatosSection contactId={contactId} patientId={patientId} /> : null}
@@ -326,7 +323,6 @@ export function ContactWorkspace({ conversationId, section, onSectionChange, onR
         canWrite={can("crm.write") || can("conversations.write")}
         onClose={() => setMemoryOpen(false)}
       />
-      {patientId ? <WideSection open={wide} patientId={patientId} name={context.name} onClose={() => setWide(null)} /> : null}
       <ConfirmDialog
         open={draftBlocker.status === "blocked"}
         title="Salir sin guardar la nota"
@@ -341,6 +337,7 @@ export function ContactWorkspace({ conversationId, section, onSectionChange, onR
         }}
       />
     </div>
+    </WideSectionProvider>
   )
 }
 
@@ -383,7 +380,8 @@ function CitasSection({ context, conversationId }: { context: ConversationContex
 }
 
 /** Lo clínico: lo que entra en el panel y, en grande, lo que necesita ancho. Abrirlo deja su traza, como en su página. */
-function ClinicaSection({ line, warn, onOpen }: { line: string; warn: boolean; onOpen: (section: { id: string; label: string }) => void }) {
+function ClinicaSection({ line, warn }: { line: string; warn: boolean }) {
+  const openWide = useOpenWide()
   const own = productUi().record.sections.filter((item) => !item.parent)
   const sections = [
     { id: "antecedentes", label: "Antecedentes" },
@@ -400,7 +398,7 @@ function ClinicaSection({ line, warn, onOpen }: { line: string; warn: boolean; o
             <button
               type="button"
               className="flex min-h-11 w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm font-medium outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-              onClick={() => onOpen(item)}
+              onClick={() => openWide?.({ id: item.id })}
             >
               {item.label}
               <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
@@ -409,37 +407,6 @@ function ClinicaSection({ line, warn, onOpen }: { line: string; warn: boolean; o
         ))}
       </ul>
     </>
-  )
-}
-
-/** Historia, odontograma y documentos, grandes y encima de la Bandeja: cerrarlos vuelve a la conversación. */
-function WideSection({ open, patientId, name, onClose }: { open: { id: string; label: string } | null; patientId: string; name: string; onClose: () => void }) {
-  const own = open ? productUi().record.sections.find((item) => item.id === open.id) : undefined
-  const record = useQuery({
-    queryKey: ["patient", patientId],
-    queryFn: () => apiFetch<{ data: PatientFull }>(`/api/patients/${patientId}`),
-    enabled: Boolean(own),
-    retry: false,
-  })
-  const content = (): ReactNode => {
-    if (!open) return null
-    if (open.id === "antecedentes") return <AntecedentesTab patientId={patientId} />
-    if (open.id === "historia") return <HistoriaTab patientId={patientId} onOdontogramSelect={() => undefined} />
-    if (open.id === "documentos") return <DocumentosSection patientId={patientId} />
-    if (!own) return null
-    return own.render({ patientId, record: record.data?.data ?? null, place: undefined, opened: undefined, openSection: () => undefined })
-  }
-  return (
-    <DetailDrawer
-      open={open !== null}
-      onClose={onClose}
-      size="xl"
-      className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(60rem,calc(100vw-2rem))]"
-      title={open ? `${open.label} de ${name}` : ""}
-      closeLabel="Volver a la conversación"
-    >
-      <Suspense fallback={<LoadingState message="Cargando…" />}>{content()}</Suspense>
-    </DetailDrawer>
   )
 }
 

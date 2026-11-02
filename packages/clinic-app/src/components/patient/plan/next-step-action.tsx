@@ -5,11 +5,11 @@
  * control abre su reserva. Es el mismo botón en la lista de Pacientes, el
  * Resumen y el Plan; nadie sale de donde estaba.
  */
-import { Button, buttonVariants } from "@odentia/ui"
+import { Button, buttonVariants, toast } from "@odentia/ui"
 import { DetailDrawer } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { type ComponentProps, useState } from "react"
+import { type ComponentProps, useEffect, useState } from "react"
 import {
   budgetNumberLabel,
   fetchBudgetDetail,
@@ -22,7 +22,7 @@ import {
   type SchedulableControl,
 } from "../../../lib/clinical-journey"
 import { usePermission } from "../../../lib/crm"
-import { openBookingAnywhere } from "../../agenda/schedule-host"
+import { openAppointmentAnywhere, openBookingAnywhere } from "../../agenda/schedule-host"
 import { FollowUpScheduler } from "../follow-up-scheduler"
 import { useBudgetFormat } from "./budget-parts"
 import { BudgetResponse } from "./budget-response"
@@ -65,6 +65,8 @@ export function NextStepButton({
       })
     } else if (step.kind === "respuesta" && action.budgetId) {
       setOpen("respuesta")
+    } else if (step.kind === "control" && action.appointmentId) {
+      openAppointmentAnywhere(action.appointmentId)
     } else if (step.kind === "control" && action.followUpId) {
       setOpen("control")
     }
@@ -194,6 +196,13 @@ export function ScheduleControl({
   const control: SchedulableControl | null = clinical
     ? (clinicalList.data?.data.find((row) => row.id === followUpId) ?? null)
     : (coordination.data?.data.followUps.find((row) => row.id === followUpId) ?? null)
+  const settled = clinical ? !clinicalList.isPending : !coordination.isPending
+  // Otro lo reservó o lo canceló entre tanto: el botón lo dice, en vez de no hacer nada.
+  useEffect(() => {
+    if (!settled || control) return
+    toast.error("Ese control ya no está por reservar.")
+    onClose()
+  }, [settled, control, onClose])
   if (!control) return null
   return (
     <FollowUpScheduler

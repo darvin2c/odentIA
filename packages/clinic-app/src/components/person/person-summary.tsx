@@ -1,4 +1,3 @@
-import { formatMoney } from "@odentia/clinical"
 import { Alert, AlertDescription, AlertTitle, Button } from "@odentia/ui"
 import { internationalText, SkeletonRegion } from "@odentia/ui-patterns"
 import { type UseQueryResult, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -17,13 +16,11 @@ import {
 import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { conversationStatusLabel } from "../../lib/glossary"
 import { useReceptionName } from "../../lib/agent-names"
-import { useOrgProfile } from "../../lib/org"
 import {
   appointmentWhen,
   nextAppointment,
   usePatientAppointments,
 } from "../../lib/patient-appointments"
-import type { PatientSectionId } from "../../lib/patient-areas"
 import {
   ageFrom,
   fetchPatientHealth,
@@ -33,10 +30,10 @@ import {
 } from "../../lib/patients"
 import { QueryErrorState } from "../../lib/query-error"
 import { type PersonConversation, type PersonPage, RELATIONSHIP_WORDS, relationshipText } from "../../lib/people"
+import { openAppointmentAnywhere } from "../agenda/schedule-host"
 import { OpportunityDrawer } from "../crm/opportunity-drawer"
 import { TaskDrawer } from "../crm/task-drawer"
 import { NewPatientDrawer, type NewPatientTarget } from "../patient/new-patient-drawer"
-import { NewEncounterButton } from "../patient/new-encounter-button"
 import { PlanNextCard } from "../patient/plan/plan-next"
 import {
   ClinicalAlertsCard,
@@ -45,6 +42,7 @@ import {
   UpcomingCard,
 } from "../patient/resumen-clinico"
 import { PatientPendingCard, SummaryCard } from "../patient/resumen-tab"
+import { useOpenWide } from "../patient/wide-section"
 import { PersonLink } from "../person-link"
 import { LastVisitLinesSkeleton } from "../skeletons/person-sections"
 import { WriteToPersonDialog } from "../write-to-person"
@@ -81,27 +79,24 @@ export function usePersonConversations(personId: string) {
  * permiso.
  *
  * Para quien lee la clínica es el Resumen clínico (ADR 0035): arriba la
- * atención en curso y cuatro tarjetas —alergias y alertas, «Qué sigue» del
- * plan, última atención y próxima cita—; recepción y caja ven el de siempre.
+ * atención en curso, alergias y alertas, «Qué sigue» del plan, y última atención
+ * con próxima cita; recepción y caja ven el de siempre.
+ *
+ * Va por filas alineadas, nunca en columnas sueltas: lo que puede crecer va solo
+ * en su fila, y solo comparten fila dos tarjetas de tamaño limitado (última
+ * atención y próxima cita, con cada dato en 2 líneas como máximo).
  */
 export function PersonSummary({
   person,
   detail,
   summary,
-  onSection,
 }: {
   person: PersonPage
   detail?: PatientFull
   /** El resumen clínico que pidió la página: solo para quien lee la historia. */
   summary?: UseQueryResult<{ data: PatientSummary }>
-  onSection: (
-    section: PatientSectionId,
-    tooth?: number,
-    itemId?: string,
-    planId?: string,
-    budgetId?: string,
-  ) => void
 }) {
+  const openWide = useOpenWide()
   const patientId = person.patient?.id ?? null
   const ProductClinicalCards = productUi().summary.ClinicalCards
   const can = useCan()
@@ -116,8 +111,6 @@ export function PersonSummary({
   const canTasks = usePermission("tasks.read")
   const canRegister = usePermission("patients.write")
   const canSendLink = can("crm.write") && can("conversations.write")
-  const profile = useOrgProfile()
-  const locale = profile.data?.locale
   const [registering, setRegistering] = useState(false)
   const registerTarget: NewPatientTarget = { kind: "person", person }
   const [newTask, setNewTask] = useState(false)
@@ -180,12 +173,14 @@ export function PersonSummary({
       ? `Teléfono de ${spokenPhone.displayName} (${relationshipText(spokenPhone.relationship, spokenPhone.relationshipDetail).toLowerCase()}) · ${internationalText(spokenPhone.phone)}`
       : "Sin teléfono"
   const clinicalData = summary?.data?.data
-  // Lo que ya dicen las cuatro tarjetas clínicas no se repite en los datos de abajo.
+  // Lo que debe ya lo dice Pendientes, con su botón: aquí solo que no debe nada.
+  const showSaldo = Boolean(patientId) && canFinance && outstanding.length === 0
+  // Lo que ya dicen las tarjetas clínicas no se repite en los datos de abajo.
   const showFacts =
     !clinical ||
     person.responsibleFor.length > 0 ||
     ((canChats || canCrm) && person.channels.length > 0) ||
-    canFinance ||
+    showSaldo ||
     canChats ||
     canCrm
 
@@ -196,38 +191,25 @@ export function PersonSummary({
           {clinicalData?.openEncounter ? (
             <OpenEncounterCard patientId={patientId} encounter={clinicalData.openEncounter} />
           ) : null}
-          <div className="grid min-w-0 gap-4 md:grid-cols-2">
-            {health.isError ? (
-              <QueryErrorState error={health.error} onRetry={() => void health.refetch()} />
-            ) : (
-              <ClinicalAlertsCard
-                patientId={patientId}
-                patientName={person.displayName}
-                health={health.data?.data ?? null}
-                onAntecedentes={() => onSection("antecedentes")}
-              />
-            )}
-            {/* Lo del producto junto a las alertas (latidIA: la lista de problemas, issue 229). */}
-            <ProductClinicalCards
+          {health.isError ? (
+            <QueryErrorState error={health.error} onRetry={() => void health.refetch()} />
+          ) : (
+            <ClinicalAlertsCard
               patientId={patientId}
-              onSection={(section) => onSection(section as PatientSectionId)}
+              patientName={person.displayName}
+              health={health.data?.data ?? null}
+              onAntecedentes={() => openWide?.({ id: "antecedentes" })}
             />
-            <PlanNextCard patientId={patientId} patientName={person.displayName} />
+          )}
+          {/* Lo del producto debajo de las alertas (latidIA: la lista de problemas, issue 229). */}
+          <ProductClinicalCards patientId={patientId} onSection={(section) => openWide?.({ id: section })} />
+          <PlanNextCard patientId={patientId} patientName={person.displayName} />
+          <div className="grid min-w-0 gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(100%,20rem),1fr))]">
             {clinicalData ? (
               <LastVisitCard
                 patientId={patientId}
                 summary={clinicalData}
-                attend={
-                  person.archived ? null : (
-                    <NewEncounterButton
-                      patientId={patientId}
-                      openEncounterId={clinicalData.openEncounterId}
-                      variant="outline"
-                      size="sm"
-                    />
-                  )
-                }
-                onPeriodontal={() => onSection("periodontograma")}
+                onPeriodontal={(chartId) => openWide?.({ id: "periodontograma", opened: chartId })}
               />
             ) : summary?.isError ? (
               <QueryErrorState error={summary.error} onRetry={() => void summary.refetch()} />
@@ -311,34 +293,28 @@ export function PersonSummary({
                   : appointments.isError
                     ? "No disponible"
                     : upcoming
-                      ? [
-                          appointmentWhen(upcoming),
-                          upcoming.serviceName ?? upcoming.reason,
-                          upcoming.professionalName,
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")
+                      ? (
+                          <>
+                            {[appointmentWhen(upcoming), upcoming.serviceName ?? upcoming.reason, upcoming.professionalName]
+                              .filter(Boolean)
+                              .join(" · ")}
+                            {" · "}
+                            <Button
+                              type="button"
+                              variant="link"
+                              className="h-auto p-0"
+                              onClick={() => openAppointmentAnywhere(upcoming.id)}
+                            >
+                              Ver la cita
+                            </Button>
+                          </>
+                        )
                       : "Ninguna"}
             </Fact>
           ) : null}
-          {patientId && canFinance ? (
+          {showSaldo ? (
             <Fact label="Saldo">
-              {account.isPending
-                ? "Consultando…"
-                : account.isError
-                  ? "No disponible"
-                  : outstanding.length === 0
-                    ? "Sin saldo por cobrar"
-                    : locale
-                      ? outstanding
-                          .map((balance) =>
-                            // El saldo descuenta lo que tiene a favor (decisión 22).
-                            balance.aFavor > 0
-                              ? `Debe: ${formatMoney(balance.porCobrar, balance.currency, locale)} · A favor: ${formatMoney(balance.aFavor, balance.currency, locale)} · Saldo: ${formatMoney(balance.saldo, balance.currency, locale)}`
-                              : formatMoney(balance.porCobrar, balance.currency, locale),
-                          )
-                          .join(" · ")
-                      : "…"}
+              {account.isPending ? "Consultando…" : account.isError ? "No disponible" : "Sin saldo por cobrar"}
             </Fact>
           ) : null}
           {canChats ? (
@@ -371,7 +347,8 @@ export function PersonSummary({
                 <Button
                   type="button"
                   variant="link"
-                  className="h-auto p-0"
+                  // Un título largo baja de línea: no se sale de la tarjeta.
+                  className="h-auto whitespace-normal p-0 text-left"
                   onClick={() => setViewingOpportunity(openOpportunity.id)}
                 >
                   {openOpportunity.title} · {openOpportunity.stageName}
@@ -416,59 +393,52 @@ export function PersonSummary({
         </Alert>
       ) : null}
 
-      <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
-        <div className="flex min-w-0 flex-col gap-4">
-          {patientId && detail ? (
-            <PatientPendingCard
-              patientId={patientId}
-              detail={detail}
-              clinical={clinical ? { summary: clinicalData, health: health.data?.data } : undefined}
-              onTabChange={onSection}
-            />
-          ) : !patientId && canTasks && canCrm ? (
-            <SummaryCard
-              title="Pendientes"
-              action={
-                canTaskWrite && !person.archived ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setNewTask(true)}
-                  >
-                    Nueva tarea
+      {patientId && detail ? (
+        <PatientPendingCard
+          patientId={patientId}
+          detail={detail}
+          clinical={clinical ? { summary: clinicalData, health: health.data?.data } : undefined}
+        />
+      ) : !patientId && canTasks && canCrm ? (
+        <SummaryCard
+          title="Pendientes"
+          action={
+            canTaskWrite && !person.archived ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setNewTask(true)}
+              >
+                Nueva tarea
+              </Button>
+            ) : undefined
+          }
+        >
+          {(tasks.data?.data ?? []).length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Sin tareas abiertas para esta persona.
+            </p>
+          ) : (
+            <ul className="flex flex-col divide-y">
+              {(tasks.data?.data ?? []).map((task) => (
+                <li
+                  key={task.id}
+                  className="flex flex-wrap items-center justify-between gap-2 py-2"
+                >
+                  <span className="text-sm font-medium">{task.title}</span>
+                  {/* La tarea se abre al lado, en el cajón de siempre. */}
+                  <Button type="button" size="sm" variant="outline" onClick={() => setViewingTask(task.id)}>
+                    Ver tarea
                   </Button>
-                ) : undefined
-              }
-            >
-              {(tasks.data?.data ?? []).length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  Sin tareas abiertas para esta persona.
-                </p>
-              ) : (
-                <ul className="flex flex-col divide-y">
-                  {(tasks.data?.data ?? []).map((task) => (
-                    <li
-                      key={task.id}
-                      className="flex flex-wrap items-center justify-between gap-2 py-2"
-                    >
-                      <span className="text-sm font-medium">{task.title}</span>
-                      {/* La tarea se abre al lado, en el cajón de siempre. */}
-                      <Button type="button" size="sm" variant="outline" onClick={() => setViewingTask(task.id)}>
-                        Ver tarea
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </SummaryCard>
-          ) : null}
-          <PersonNotes personId={person.id} />
-        </div>
-        <div className="flex min-w-0 flex-col gap-4">
-          <PersonAgentMemory personId={person.id} />
-        </div>
-      </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </SummaryCard>
+      ) : null}
+      <PersonNotes personId={person.id} />
+      <PersonAgentMemory personId={person.id} />
 
       <NewPatientDrawer
         open={registering}

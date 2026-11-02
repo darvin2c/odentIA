@@ -9,6 +9,7 @@ import { type EncounterDetail, encounterStatusLabel, type TimelineItem } from ".
 import { productUi } from "../../product/product-ui"
 import { DocumentOpenButton } from "./document-open-button"
 import { EncounterDetailView } from "./encounter-detail-view"
+import { useOpenWide } from "./wide-section"
 
 /**
  * Atención finalizada como unidad clínica: motivo, evolución, procedimientos
@@ -23,6 +24,7 @@ export function EncounterHistoryCard({
   patientId: string
   item: TimelineItem
 }) {
+  const openWide = useOpenWide()
   const [expanded, setExpanded] = useState(false)
   // Lo que el producto firmó con la atención (odentIA: el odontograma firmado).
   const EncounterSigned = productUi().history.EncounterSigned
@@ -86,18 +88,14 @@ export function EncounterHistoryCard({
               ))}
             </ul>
             <div>
-              <Link
-                to="/patients/$patientId"
-                params={{ patientId }}
-                search={
-                  { tab: "plan", ...(planBudgetId ? { budgetId: planBudgetId } : {}) } as {
-                    tab: "plan"
-                  }
-                }
-                className={buttonVariants({ variant: "link", size: "sm" })}
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                onClick={() => openWide?.({ id: "plan", ...(planBudgetId ? { budgetId: planBudgetId } : {}) })}
               >
                 {productUi().plan.budgetRequired ? "Ver presupuesto" : "Ver el plan"}
-              </Link>
+              </Button>
             </div>
           </div>
         ) : null}
@@ -137,14 +135,17 @@ export function EncounterHistoryCard({
                   .join("")}
               </span>
             </span>
-            <Link
-              to="/patients/$patientId"
-              params={{ patientId }}
-              search={{ tab: "periodontograma", periodontograma: item.periodontal.chartId } as { tab: "periodontograma" }}
-              className={buttonVariants({ variant: "link", size: "sm" })}
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              aria-label="Ver el periodontograma"
+              onClick={() => {
+                if (item.periodontal) openWide?.({ id: "periodontograma", opened: item.periodontal.chartId })
+              }}
             >
               Ver
-            </Link>
+            </Button>
           </div>
         ) : null}
         {item.indications ? (
