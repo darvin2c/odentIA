@@ -44,6 +44,8 @@ export interface PlanNextAction {
   /** El servicio con el que se abre «Nueva cita». */
   serviceId?: string | null
   followUpId?: string
+  /** «Ver la cita»: el control ya tiene la suya. */
+  appointmentId?: string
 }
 
 export interface PlanNextStep {
@@ -322,7 +324,12 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
         action: can("appointments.write") ? { label: "Reservar cita", followUpId: control.id } : null,
       }
     }
-    return { kind: "control", text: `${control.title} · con cita`, detail: null, action: null }
+    return {
+      kind: "control",
+      text: `${control.title} · con cita`,
+      detail: null,
+      action: control.appointmentId && can("appointments.read") ? { label: "Ver la cita", appointmentId: control.appointmentId } : null,
+    }
   }
   return { kind: "ninguno", text: "Nada pendiente en el plan", detail: null, action: null }
 }

@@ -122,6 +122,10 @@ test("paciente: ficha inicial y hallazgo visibles en el recorrido", async ({ own
       .filter({ hasText: /^Por decidir$/ })
       .first(),
   ).toBeVisible()
+  // Sus botones hacen lo que dicen: «Ver odontograma» lo abre en su pieza sin salir del Plan, no solo cierra el recorrido.
+  await recorrido.getByRole("button", { name: "Ver odontograma", exact: true }).click()
+  await expect(page.getByRole("dialog", { name: /^Pieza 36/ })).toBeVisible()
+  await expect(page).toHaveURL(/tab=plan/)
 })
 
 test("paciente: la foto se pone y se quita desde su página", async ({ owner }) => {
@@ -426,9 +430,14 @@ test("paciente: agregación del recorrido, historia y aislamiento", async ({ cre
   await openSection(page, "Clínica", "Historia")
   await expect(page.getByText("Presupuesto", { exact: true }).first()).toBeVisible()
   await expect(page.getByText("Pago", { exact: true })).toHaveCount(0)
-  await page.getByRole("link", { name: "Ver el presupuesto", exact: true }).first().click()
-  await expect(page).toHaveURL(/tab=plan/)
+  await page.getByRole("button", { name: "Ver el presupuesto", exact: true }).first().click()
+  // Se abre encima: la Historia sigue debajo, sin cambiar de pestaña.
+  const planOver = surface(page, { name: /^Plan de / })
+  await expect(planOver.getByRole("heading", { name: "Presupuesto", exact: true })).toBeVisible()
+  await expect(page).toHaveURL(/tab=historia/)
   await expect(page.getByText("Anamnesis no encontrado")).toHaveCount(0)
+  await page.keyboard.press("Escape")
+  await expect(planOver).toHaveCount(0)
 
   // El formulario clínico respeta el tratamiento abierto en el recorrido.
   await gotoHydrated(page, tenant(owner.org.slug, `${patientPath}?tab=plan&itemId=${ids.itemId}`))
@@ -546,10 +555,12 @@ for (const role of ["reception", "clinician", "cashier"] as const) {
     }
     if (role === "cashier") {
       await expect(areas).toHaveText(["Resumen", "Plan", "Cobros", "Datos"])
-      // «Cobrar» de la cabecera abre el cobro, no solo la cuenta.
-      await page.getByRole("button", { name: "Cobrar", exact: true }).first().click()
+      // El botón de cobrar de la cabecera abre el cobro ahí mismo: el Resumen sigue debajo.
+      await openSection(page, "Resumen")
+      await page.locator("header").getByRole("button", { name: /^Cobrar/ }).click()
       const collect = surface(page, { name: "Cobrar", exact: true })
       await expect(collect).toBeVisible()
+      await expect(page).not.toHaveURL(/tab=cuenta/)
       await page.keyboard.press("Escape")
       await expect(collect).toBeHidden()
       await expect(allergy).toHaveCount(0)

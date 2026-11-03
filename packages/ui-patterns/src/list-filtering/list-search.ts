@@ -7,10 +7,34 @@ export interface ListSearchController {
   setParam: (key: string, value?: string, options?: { replace?: boolean }) => void
   setParams: (patch: Record<string, string | undefined>, options?: { replace?: boolean }) => void
   resetFilters: () => void
+  /** Vive en memoria (`useScopedListSearch`): no hay historial al que volver. */
+  scoped?: boolean
 }
 
-/** Puente único entre los controles de listas y la URL plana. */
+const ScopedListSearch = React.createContext<ListSearchController | null>(null)
+
+/** Una lista abierta encima de otra pantalla: sus filtros no son los de la dirección de debajo. */
+export const ListSearchScope = ScopedListSearch.Provider
+
+/** La búsqueda de una lista que no vive en la dirección, para `ListSearchScope`. */
+export function useScopedListSearch(initial: Record<string, string | undefined>): ListSearchController {
+  const [search, setSearch] = React.useState(initial)
+  return React.useMemo(() => {
+    const setParams: ListSearchController["setParams"] = (patch) => setSearch((previous) => ({ ...previous, ...patch }))
+    return {
+      search,
+      scoped: true,
+      get: (key) => search[key] || undefined,
+      setParams,
+      setParam: (key, value) => setParams({ [key]: value }),
+      resetFilters: () => setSearch({}),
+    }
+  }, [search])
+}
+
+/** Puente único entre los controles de listas y la URL plana (o su `ListSearchScope`). */
 export function useListSearch(): ListSearchController {
+  const scoped = React.useContext(ScopedListSearch)
   const search = useSearch({ strict: false }) as Record<string, unknown>
   const navigate = useNavigate()
 
@@ -61,5 +85,5 @@ export function useListSearch(): ListSearchController {
     } as Parameters<typeof navigate>[0])
   }, [navigate])
 
-  return { search, get, setParam, setParams, resetFilters }
+  return scoped ?? { search, get, setParam, setParams, resetFilters }
 }

@@ -15,6 +15,7 @@ import {
   dictationErrorText,
   type DictationSession,
   type DictationSuggestion,
+  NOTE_FIELD_LABEL,
   suggestionText,
 } from "./dictation-session"
 import { productUi } from "../../product/product-ui"
@@ -74,6 +75,7 @@ export function DictationBlockSuggestions({ session, kind, patientName }: { sess
           const choice = optionsOf(item).length > 0
           // Con caminos, las opciones se ven abajo: arriba basta con lo que se dijo.
           const detail = choice ? (item.sourceText ? `Dijiste «${item.sourceText}»` : "") : summaryDetail
+          const addsTo = session.noteAddsTo(item)
           return (
             <li key={item.id} className="flex flex-col gap-2 rounded-xl border border-agent-border bg-agent-soft p-3 text-sm">
               <div className="flex flex-wrap items-center gap-2">
@@ -96,6 +98,7 @@ export function DictationBlockSuggestions({ session, kind, patientName }: { sess
                   <span className="font-normal text-muted-foreground">
                     {[ready ? detail : (item.note ?? detail), item.voice ? `corregido por voz, antes ${item.voice.before}` : ""].filter(Boolean).join(" · ")}
                   </span>
+                  {addsTo ? <span className="font-normal text-muted-foreground">{addsTo}</span> : null}
                   {/* Lista, con algo por definir (la cara, la pieza): avisa sin impedir confirmarla. */}
                   {ready && item.note ? (
                     <span className="flex items-start gap-1.5 font-normal text-warning">
@@ -684,12 +687,12 @@ interface EditableField {
 /** Campos que el profesional corrige a mano en una sugerencia que no es del plan, con su rótulo. */
 const EDITABLE: Record<Exclude<DictationKind, "plan" | "procedimiento">, EditableField[]> = {
   nota: [
-    { key: "reason", label: "Motivo de consulta", long: true, max: 2000 },
-    { key: "presentIllness", label: "Enfermedad actual", long: true, max: 4000 },
-    { key: "illnessDuration", label: "Tiempo de enfermedad", max: 200 },
-    { key: "evolution", label: "Evolución", long: true, max: 10_000 },
-    { key: "indications", label: "Indicaciones", long: true, max: 4000 },
-    { key: "prognosis", label: "Pronóstico", max: 2000 },
+    { key: "reason", label: NOTE_FIELD_LABEL.reason, long: true, max: 2000 },
+    { key: "presentIllness", label: NOTE_FIELD_LABEL.presentIllness, long: true, max: 4000 },
+    { key: "illnessDuration", label: NOTE_FIELD_LABEL.illnessDuration, max: 200 },
+    { key: "evolution", label: NOTE_FIELD_LABEL.evolution, long: true, max: 10_000 },
+    { key: "indications", label: NOTE_FIELD_LABEL.indications, long: true, max: 4000 },
+    { key: "prognosis", label: NOTE_FIELD_LABEL.prognosis, max: 2000 },
   ],
   diagnostico: [
     { key: "diagnosisCode", label: "Código", max: 10 },

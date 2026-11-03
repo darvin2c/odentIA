@@ -8,7 +8,7 @@
  * Dinero con el módulo compartido `@odentia/clinical`; moneda, locale y zona
  * horaria siempre del perfil/sede. Nada fijo.
  */
-import { useQuery } from "@tanstack/react-query"
+import { type QueryClient, useQuery } from "@tanstack/react-query"
 import {
   currencyFractionDigits,
   currencyWord,
@@ -340,6 +340,18 @@ export function collectApi(patientId: string, body: CollectInput): Promise<{ dat
     method: "POST",
     body: JSON.stringify(body),
   })
+}
+
+/** Lo que cambia al cobrar o aplicar saldo, desde cualquier lugar de la ficha. */
+export function invalidatePatientAccount(queryClient: QueryClient, patientId: string): void {
+  void queryClient.invalidateQueries({ queryKey: ["patient-account3", patientId] })
+  void queryClient.invalidateQueries({ queryKey: ["patient-account", patientId] })
+  void queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
+  void queryClient.invalidateQueries({ queryKey: ["ticket-receipt", patientId] })
+  void queryClient.invalidateQueries({ queryKey: ["finance-debts"] })
+  void queryClient.invalidateQueries({ queryKey: ["finance-cash"] })
+  void queryClient.invalidateQueries({ queryKey: ["finance-movements"] })
+  void queryClient.invalidateQueries({ queryKey: ["finance-closures"] })
 }
 
 export interface VoidTicketResult {
@@ -826,8 +838,8 @@ export function searchPatientsApi(query: string): Promise<{ data: PatientSearchR
 
 // --- Hooks compartidos -----------------------------------------------------------
 
-export function useOrgFinanceProfile() {
-  return useQuery({ queryKey: ["org-finance-profile"], queryFn: fetchOrgFinanceProfile })
+export function useOrgFinanceProfile(enabled = true) {
+  return useQuery({ queryKey: ["org-finance-profile"], queryFn: fetchOrgFinanceProfile, enabled })
 }
 
 export function usePaymentMethodsOptions() {

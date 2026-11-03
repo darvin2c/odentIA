@@ -28,6 +28,7 @@ import { lazy, type ReactNode, Suspense, useEffect } from "react"
 import { AccesosPanel } from "../../components/patient/accesos-panel"
 import { CitasPanel } from "../../components/patient/citas-panel"
 import { DataRequestsPanel } from "../../components/patient/data-requests-panel"
+import { useOpenWide, WideSectionProvider } from "../../components/patient/wide-section"
 import { SectionSideNav } from "../../components/person/section-side-nav"
 import { dataRequestsKey, fetchDataRequests } from "../../lib/data-requests"
 import { PersonHeader } from "../../components/patient/patient-header"
@@ -37,6 +38,7 @@ import { PersonData } from "../../components/person/person-data"
 import { PersonLoading, PersonSectionLoading } from "../../components/person/person-loading"
 import { PersonLinks } from "../../components/person/person-links"
 import { PersonSummary } from "../../components/person/person-summary"
+import { RecordPanelProvider } from "../../components/person/record-panel"
 import { PatientPortalAccessSection } from "../../components/portal/portal-access-section"
 import { apiFetch } from "../../lib/api"
 import { useCan } from "../../lib/crm"
@@ -62,6 +64,7 @@ import {
 } from "../../lib/patient-areas"
 import type { PatientFull, PatientSummary } from "../../lib/patients"
 import { personOfPatientKey, personShapeOf, rememberPatientSection, rememberPersonOfPatient, usePerson } from "../../lib/people"
+import { PersonArchivedProvider } from "../../lib/person-archived"
 import { QueryErrorState } from "../../lib/query-error"
 import { isRecordLocked, LockedRecordNotice, LockedRecordPage } from "../../components/person/locked-record"
 import { productUi } from "../../product/product-ui"
@@ -109,7 +112,7 @@ export type PersonSearch = {
   tipo?: DocumentFilter
   /** Viene de registrarlo con «Atender ahora»: abre su atención. */
   atender?: boolean
-  /** «Cobrar» de Pendientes: Cobros con el cobro ya abierto. */
+  /** Enlace a Cobros con el cobro abierto, o con la confirmación de aplicar: abrir no ejecuta nada. */
   cobrar?: boolean
   /** Lo abierto dentro de una sección del producto (odentIA: el periodontograma, desde Historia o el Resumen). */
   periodontograma?: string
@@ -158,6 +161,39 @@ const TAB_LIST_CLASS = "w-max flex-nowrap justify-start"
 /** Secciones: una sola fila con scroll horizontal propio; en móvil no empujan ni tapan el contenido. */
 const SECTION_SCROLL_CLASS = "max-w-full pb-1"
 const SECTION_LIST_CLASS = "w-max flex-nowrap justify-start"
+
+/**
+ * Una sección del producto abierta como página: lo que abre desde dentro (el
+ * odontograma pide un documento o la historia de una pieza) va encima, sin
+ * cambiar de pestaña. Sin el contexto, cambia de pestaña como siempre.
+ */
+function ProductSection({
+  own,
+  record,
+  patientId,
+  place,
+  opened,
+  openTab,
+}: {
+  own: NonNullable<ReturnType<typeof productUi>["record"]["sections"][number]>
+  record: PatientFull | null
+  patientId: string
+  place?: number
+  opened?: string
+  openTab: (next: string, place?: number, itemId?: string) => void
+}) {
+  const openWide = useOpenWide()
+  return own.render({
+    patientId,
+    record,
+    place,
+    opened,
+    openSection: (next, options) =>
+      openWide
+        ? openWide({ id: next, place: options?.place, itemId: options?.itemId })
+        : openTab(next, options?.place, options?.itemId),
+  })
+}
 
 function PersonPageRoute() {
   const { personId } = Route.useParams()
@@ -322,7 +358,6 @@ function PersonPageRoute() {
             person={person}
             detail={patientDetail}
             summary={clinicalSummary ? summary : undefined}
-            onSection={openTab}
           />
         )
       case "conversaciones":
@@ -360,11 +395,7 @@ function PersonPageRoute() {
         ) : null
       case "historia":
         return patientId ? (
-          <HistoriaTab
-            patientId={patientId}
-            initialTooth={tooth}
-            onOdontogramSelect={(next) => openTab("odontograma", next)}
-          />
+          <HistoriaTab patientId={patientId} initialTooth={tooth} />
         ) : null
       case "antecedentes":
         return patientId ? <AntecedentesTab patientId={patientId} /> : null
@@ -408,16 +439,17 @@ function PersonPageRoute() {
     const own = productUi().record.sections.find((item) => item.id === section)
     if (!own || !patientId) return null
     const props = {
+      own,
       patientId,
       place: tooth,
       opened: periodontograma,
-      openSection: (next: string, options?: { place?: number; itemId?: string }) =>
-        openTab(next, options?.place, options?.itemId),
+      openTab: (next: string, nextPlace?: number, nextItemId?: string) =>
+        openTab(next as PatientSectionId, nextPlace, nextItemId),
     }
     return withSubsections(
       own.needsRecord
-        ? needsPatient((id, full) => own.render({ ...props, patientId: id, record: full }))
-        : own.render({ ...props, record: patientDetail ?? null }),
+        ? needsPatient((id, full) => <ProductSection {...props} patientId={id} record={full} />)
+        : <ProductSection {...props} record={patientDetail ?? null} />,
     )
   }
 
@@ -470,7 +502,7 @@ function PersonPageRoute() {
     </div>
   )
 
-  return (
+  const page = (
     <PageShell className="flex min-w-0 flex-col gap-6">
       {personQuery.isFetching && !personQuery.isPending ? <DataRefreshMarker /> : null}
       {personQuery.isError ? (
@@ -493,8 +525,7 @@ function PersonPageRoute() {
         person={person}
         detail={patientDetail}
         summary={summary.data?.data}
-        onSection={openTab}
-        onCollect={() => void navigate({ search: (prev) => ({ ...prev, tab: "cuenta", cobrar: true }) })}
+        onAccount={section === "cuenta"}
       />
       {/* En Spam o bloqueada: el mismo aviso de la Bandeja, con «No es spam» o «Desbloquear» (ADR 0054). */}
       <ContactScreenBanner
@@ -564,5 +595,13 @@ function PersonPageRoute() {
         </TabsContent>
       </Tabs>
     </PageShell>
+  )
+  return (
+    <PersonArchivedProvider value={person.archived}>
+      {/* Otra persona, otro estado: lo que estaba abierto era de la anterior, y su caja le escribiría a ella. */}
+      <WideSectionProvider key={personId} patientId={patientId} name={person.displayName}>
+        <RecordPanelProvider>{page}</RecordPanelProvider>
+      </WideSectionProvider>
+    </PersonArchivedProvider>
   )
 }

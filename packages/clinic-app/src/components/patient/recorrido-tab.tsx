@@ -45,6 +45,7 @@ import { formatMoney } from "@odentia/clinical"
 import { useOrgProfile } from "../../lib/org"
 import type { ServiceCatalogItem } from "../../lib/services"
 import { ChoiceSelect } from "../ui/choice-select"
+import { CollectButton } from "./collect-flow"
 import { DiagnosisSearch } from "./diagnosis-search"
 import { ControlesPanel, RecetasPanel } from "./clinical-panels"
 import { DocumentOpenButton } from "./document-open-button"
@@ -58,7 +59,6 @@ const QUADRANTS = ["1", "2", "3", "4", "5", "6", "7", "8"] as const
 export type RecorridoTarget =
   | "plan"
   | "imagenes"
-  | "cuenta"
   | "historia"
   | "odontograma"
   | "controles"
@@ -94,12 +94,15 @@ function siteLabel(item: PlanItem): string {
 
 export function RecorridoClinicoTab({
   patientId,
+  patientName,
   initialItemId,
   showPhases = true,
   onChangeItem,
   onTabChange,
 }: {
   patientId: string
+  /** Para cobrar desde el recorrido. */
+  patientName: string
   initialItemId?: string
   /** `false`: solo el recorrido del tratamiento (la lista por fases ya está en el Plan). */
   showPhases?: boolean
@@ -285,11 +288,7 @@ export function RecorridoClinicoTab({
     }
     // Continuar o definir se resuelven en la atención abierta: navegar es la acción.
     if (nextAction === "continuar" || nextAction === "definir") {
-      if (openEncounterId) {
-        openEncounter(openEncounterId)
-        return
-      }
-      onTabChange("historia")
+      if (openEncounterId) openEncounter(openEncounterId)
       return
     }
     if (nextAction === "completar" && openEncounterId) {
@@ -321,6 +320,8 @@ export function RecorridoClinicoTab({
     completar: "Completar tratamiento",
     controlar: "Ver los controles",
   }
+  // Sin una atención abierta no hay a dónde llevar: la línea de arriba dice qué falta, sin un botón que no hace nada.
+  const canDoNext = nextAction !== null && !((nextAction === "continuar" || nextAction === "definir") && !openEncounterId)
 
   return (
     <div className="flex flex-col gap-6">
@@ -361,7 +362,7 @@ export function RecorridoClinicoTab({
                   </span>
                 ) : null}
               </div>
-              {canWrite && nextAction ? (
+              {canWrite && nextAction && canDoNext ? (
                 <Button
                   type="button"
                   disabled={completeMutation.isPending || startingSession}
@@ -761,14 +762,7 @@ export function RecorridoClinicoTab({
             ) : null}
             {finance ? (
               <div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => onTabChange("cuenta", { itemId: journey.item.id })}
-                >
-                  Gestionar la cuenta del paciente
-                </Button>
+                <CollectButton patientId={patientId} patientName={patientName} size="sm" variant="outline" />
               </div>
             ) : null}
           </div>

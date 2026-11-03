@@ -1,7 +1,6 @@
-import { Badge, Button, buttonVariants } from "@odentia/ui"
+import { Badge, Button } from "@odentia/ui"
 import { EmptyState, SkeletonRegion } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
 import { MessageCircle } from "lucide-react"
 import { useState } from "react"
 import { useReceptionName } from "../../lib/agent-names"
@@ -17,6 +16,7 @@ import { PersonLink } from "../person-link"
 import { ConversationRowsSkeleton, OpportunityRowsSkeleton } from "../skeletons/person-sections"
 import { WriteToPersonDialog } from "../write-to-person"
 import { usePersonConversations } from "./person-summary"
+import { useOpenRecordPanel } from "./record-panel"
 
 /**
  * Pestaña Conversaciones: las conversaciones de la persona (quien lee la
@@ -26,6 +26,7 @@ import { usePersonConversations } from "./person-summary"
 export function PersonConversations({ person }: { person: PersonPage }) {
   const canChats = usePermission("conversations.read")
   const canWrite = usePermission("conversations.write")
+  const openPanel = useOpenRecordPanel()
   const receptionName = useReceptionName()
   const canCrm = usePermission("crm.read")
   const canCrmWrite = usePermission("crm.write")
@@ -101,13 +102,14 @@ export function PersonConversations({ person }: { person: PersonPage }) {
                         : ""}
                     </span>
                   </span>
-                  <Link
-                    to="/inbox"
-                    search={{ conversation: conversation.id }}
-                    className={buttonVariants({ variant: "outline", size: "sm" })}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => openPanel?.({ conversationId: conversation.id, name: person.displayName })}
                   >
                     Abrir
-                  </Link>
+                  </Button>
                 </li>
               ))}
             </ul>
@@ -121,13 +123,16 @@ export function PersonConversations({ person }: { person: PersonPage }) {
                     {other.displayName}
                   </PersonLink>
                   {" · "}
-                  <Link
-                    to="/inbox"
-                    search={{ conversation: other.conversationId ?? undefined }}
-                    className="text-primary hover:underline"
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="h-auto p-0"
+                    onClick={() => {
+                      if (other.conversationId) openPanel?.({ conversationId: other.conversationId, name: other.displayName })
+                    }}
                   >
                     Abrir su conversación
-                  </Link>
+                  </Button>
                 </li>
               ))}
             </ul>
@@ -196,6 +201,7 @@ export function PersonConversations({ person }: { person: PersonPage }) {
         open={writing}
         onClose={() => setWriting(false)}
         people={[{ contactId: person.id, displayName: person.displayName }]}
+        onOpened={(conversationId, target) => openPanel?.({ conversationId, name: target.displayName })}
       />
       {viewingOpportunity ? (
         <OpportunityDrawer

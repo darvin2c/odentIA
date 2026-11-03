@@ -363,7 +363,8 @@ export function DocumentosSection({
     // El diálogo puede avisar el cierre más de una vez: se cierra una sola.
     if (!documentId || closingRef.current) return
     closingRef.current = true
-    if (pushedRef.current) {
+    // Abierto encima de otra pantalla no agregó nada al historial: volver sacaría de ella.
+    if (pushedRef.current && !listSearch.scoped) {
       pushedRef.current = false
       router.history.back()
     } else listSearch.setParams({ documentId: undefined }, { replace: true })

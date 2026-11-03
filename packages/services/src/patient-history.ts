@@ -285,7 +285,13 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
     }
   }
   const pendingConsentRows = await tx
-    .select({ id: consentDocument.id, title: consentDocument.titleSnapshot })
+    .select({
+      id: consentDocument.id,
+      title: consentDocument.titleSnapshot,
+      // Firmado por su enlace falta confirmarlo; enviado, espera su firma: no es «sin firmar».
+      personSignedAt: consentDocument.personSignedAt,
+      linkSentAt: consentDocument.linkSentAt,
+    })
     .from(consentDocument)
     .where(
       and(

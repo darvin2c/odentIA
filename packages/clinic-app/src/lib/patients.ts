@@ -660,7 +660,7 @@ export interface PatientSummary {
   openEncounterId: string | null
   openEncounter?: OpenEncounterBrief | null
   /** Consentimientos emitidos y aún sin firmar. */
-  pendingConsents?: Array<{ id: string; title: string }>
+  pendingConsents?: Array<{ id: string; title: string; personSignedAt?: string | null; linkSentAt?: string | null }>
   treatmentJourneys: TreatmentJourneySummary[]
   planPending: {
     count: number

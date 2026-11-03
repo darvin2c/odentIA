@@ -1,5 +1,16 @@
 import { composeDisplayName, pendingRegistrationFields, type RegistrationConfig } from "@odentia/clinical"
-import { Button, FieldTitle, toast } from "@odentia/ui"
+import {
+  Button,
+  Checkbox,
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+  FieldTitle,
+  toast,
+} from "@odentia/ui"
 import {
   dayMinutesIn,
   FormDrawer,
@@ -52,7 +63,8 @@ export interface BookingSeed {
   serviceId?: string
   /**
    * Tratamientos aceptados que esta cita viene a hacer (`appointment_plan_item`):
-   * la atención de la cita los trae a «Hecho hoy».
+   * la atención de la cita los trae a «Hecho hoy». Vienen marcados los del primer
+   * servicio; lo demás aceptado sin cita se ve sin marcar.
    */
   planItemIds?: string[]
 }
@@ -148,18 +160,6 @@ export function BookingDrawer({
     retry: false,
   })
 
-  // Los tratamientos que trae la cita: con su título, el que ve recepción (sin piezas ni precios).
-  const planItemIds = seed.planItemIds ?? []
-  const coordinationQuery = useQuery({
-    queryKey: ["treatment-coordination", seed.patient?.id],
-    queryFn: () => fetchTreatmentCoordination(seed.patient?.id ?? ""),
-    enabled: planItemIds.length > 0 && Boolean(seed.patient?.id),
-    retry: false,
-  })
-  const planItemTitles = planItemIds.map(
-    (id) => coordinationQuery.data?.data.treatments.find((row) => row.id === id)?.title ?? null,
-  )
-
   // Lo que se avisa después de reservar y no debe perderse con el toast.
   const consentNote = React.useRef<string | null>(null)
   const whatsappNote = React.useRef<string | null>(null)
@@ -167,7 +167,7 @@ export function BookingDrawer({
   const phase = React.useRef<"registro" | "cita">("cita")
 
   const save = useMutation({
-    mutationFn: (input: { patientId: string; value: BookingValues; range: ScheduleRangeValue; exception: AgendaException | null }) =>
+    mutationFn: (input: { patientId: string; value: BookingValues; range: ScheduleRangeValue; exception: AgendaException | null; planItemIds?: string[] }) =>
       apiFetch<{ data: AgendaAppointment & { reminderReach?: ReminderReach | null } }>("/api/appointments", {
         method: "POST",
         body: JSON.stringify({
@@ -175,8 +175,8 @@ export function BookingDrawer({
           patientId: input.patientId,
           professionalUserId: input.range.columnId,
           serviceId: input.value.serviceId || undefined,
-          // Solo si la cita sigue siendo de quien vino del Plan.
-          ...(planItemIds.length > 0 && input.patientId === seed.patient?.id ? { planItemIds } : {}),
+          // La lista que se ve, aunque quede vacía: sin decir nada, el servidor une lo aceptado del servicio.
+          ...(input.planItemIds ? { planItemIds: input.planItemIds } : {}),
           startsAt: input.range.start,
           endsAt: input.range.end,
           reason: input.value.reason.trim() || undefined,
@@ -321,6 +321,7 @@ export function BookingDrawer({
           value,
           range,
           exception: when.exception,
+          planItemIds: chosenItemsFor(patientId),
         })
         // Si «Recordar la cita» está prendida, el agente le avisa solo: recepción no escribe nada.
         toast.success(`Cita reservada ${whenSaid(result.data.startsAt, timeZone, today)}`, {
@@ -352,6 +353,61 @@ export function BookingDrawer({
     givenNames: values.givenNames.trim(),
     familyName: values.surname.trim(),
   })
+
+  // ----- Para qué -----
+  // Lo aceptado sin cita de esta persona, con su título: el que ve recepción (sin piezas ni precios).
+  const coordinationQuery = useQuery({
+    queryKey: ["treatment-coordination", values.patientId],
+    queryFn: () => fetchTreatmentCoordination(values.patientId),
+    enabled: Boolean(values.patientId) && !registering,
+    retry: false,
+  })
+  // También lo que pidió el Plan aunque ya tenga otra cita: lo pidió para esta y se ve.
+  const seededItems = values.patientId === seed.patient?.id ? seed.planItemIds : undefined
+  const toSchedule = React.useMemo(
+    () => coordinationQuery.data?.data.treatments.filter((row) => row.toSchedule || seededItems?.includes(row.id)) ?? [],
+    [coordinationQuery.data, seededItems],
+  )
+  // Dos iguales son una casilla: recepción no ve las piezas y elegir entre ellos sería a ciegas.
+  const toScheduleRows = React.useMemo(() => {
+    const rows = new Map<string, { key: string; title: string; ids: string[] }>()
+    for (const item of toSchedule) {
+      const key = `${item.serviceId ?? ""}|${item.title}`
+      const row = rows.get(key) ?? { key, title: item.title, ids: [] }
+      row.ids.push(item.id)
+      rows.set(key, row)
+    }
+    return [...rows.values()]
+  }, [toSchedule])
+  const [marked, setMarked] = React.useState<{ patientId: string; ids: string[] } | null>(null)
+  const markedIds = marked?.patientId === values.patientId ? marked.ids : []
+  const itemsOfService = (id: string, items = toSchedule) =>
+    items.filter((row) => (row.serviceId ?? "") === id).map((row) => row.id)
+  /** El servicio que se puso solo: si cambia de persona, era de la anterior. */
+  const autoService = React.useRef<string | null>(null)
+  // Al conocer lo aceptado de la persona, vienen marcados los del primer servicio: varios
+  // servicios en una cita corta no caben, y lo demás queda a la vista para marcarlo.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: corre al llegar la lista de cada persona.
+  React.useEffect(() => {
+    if (!coordinationQuery.data || marked?.patientId === values.patientId) return
+    const chosen = values.serviceId === autoService.current ? "" : values.serviceId
+    const fromSeed = toSchedule.find((row) => seed.planItemIds?.includes(row.id))
+    const first = chosen || (fromSeed ?? toSchedule[0])?.serviceId || ""
+    setMarked({ patientId: values.patientId, ids: itemsOfService(first) })
+    // Con un hueco o un profesional ya elegidos no se cambia el servicio: podría no atenderlo.
+    if (!seed.startsAt && !seed.professionalUserId && !when.professionalFilter && first !== values.serviceId) {
+      autoService.current = first || null
+      // No lo eligió la persona: cerrar sin tocar nada no pregunta si descarta.
+      form.setFieldValue("serviceId", first, { dontUpdateMeta: true })
+    }
+  }, [coordinationQuery.data, values.patientId])
+  /** Lo que la cita trae; sin la lista (rol sin acceso o paciente recién registrado), lo que pidió el Plan o la regla del servidor. */
+  const chosenItemsFor = (patientId: string): string[] | undefined => {
+    // Solo lo que se ve: lo que otra persona reservó entre tanto ya no está en la lista.
+    if (coordinationQuery.data && patientId === values.patientId)
+      return markedIds.filter((id) => toSchedule.some((row) => row.id === id))
+    return seed.planItemIds?.length && patientId === seed.patient?.id ? seed.planItemIds : undefined
+  }
   const submitOptions: SubmitOptions = {
     fieldMap: BOOKING_FIELD_MAP,
     // Lo que el registro rechaza sin campo dice a quién no se pudo registrar.
@@ -457,6 +513,13 @@ export function BookingDrawer({
     const [first = "", ...rest] = typed.trim().split(/\s+/)
     form.setFieldValue("givenNames", first)
     form.setFieldValue("surname", rest.join(" "))
+    // Se registra a otra persona: lo de la que estaba elegida (sus tratamientos y el
+    // servicio que se puso solo) era suyo.
+    form.setFieldValue("patientId", "")
+    if (autoService.current && values.serviceId === autoService.current)
+      form.setFieldValue("serviceId", "", { dontUpdateMeta: true })
+    autoService.current = null
+    setMarked(null)
     setRegistering(true)
   }
   const pickPatient = (patient: { id: string; name: string }) => {
@@ -489,19 +552,8 @@ export function BookingDrawer({
         <div className="grid gap-4">
           {seed.lockedPatient && seed.patient ? (
             <div className="grid gap-1">
-              <FieldTitle>{planItemIds.length > 0 ? "Paciente" : "Paciente del caso"}</FieldTitle>
+              <FieldTitle>Paciente</FieldTitle>
               <p className="text-sm font-medium">{seed.patient.name}</p>
-              {planItemIds.length > 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  Para:{" "}
-                  {planItemTitles.every((title) => title)
-                    ? planItemTitles.join(", ")
-                    : planItemIds.length === 1
-                      ? "1 tratamiento aceptado"
-                      : `${planItemIds.length} tratamientos aceptados`}
-                  . La atención de esta cita los trae.
-                </p>
-              ) : null}
             </div>
           ) : registering ? (
             <div className="grid gap-3 rounded-2xl border bg-muted/40 p-3.5">
@@ -643,6 +695,37 @@ export function BookingDrawer({
             </div>
           )}
 
+          {toScheduleRows.length > 0 ? (
+            <FieldSet className="gap-2">
+              <FieldLegend variant="label" className="mb-0">
+                Para esta cita
+              </FieldLegend>
+              <FieldGroup className="gap-2">
+                {toScheduleRows.map((row, index) => (
+                  <Field key={row.key} orientation="horizontal">
+                    <Checkbox
+                      id={`cita-tratamiento-${index}`}
+                      checked={row.ids.every((id) => markedIds.includes(id))}
+                      onCheckedChange={(checked) =>
+                        setMarked({
+                          patientId: values.patientId,
+                          ids: checked
+                            ? [...markedIds.filter((id) => !row.ids.includes(id)), ...row.ids]
+                            : markedIds.filter((id) => !row.ids.includes(id)),
+                        })
+                      }
+                    />
+                    <FieldLabel htmlFor={`cita-tratamiento-${index}`} className="font-normal">
+                      {row.title}
+                      {row.ids.length > 1 ? ` × ${row.ids.length}` : ""}
+                    </FieldLabel>
+                  </Field>
+                ))}
+              </FieldGroup>
+              <FieldDescription>Aceptó estos tratamientos y aún no tienen cita. Los que marques quedan listos en su atención.</FieldDescription>
+            </FieldSet>
+          ) : null}
+
           <form.AppField name="serviceId">
             {(field) => (
               <field.Control id="cita-servicio" label="Servicio (opcional)">
@@ -657,6 +740,9 @@ export function BookingDrawer({
                     onChange={(next) => {
                       if (next) queryClient.setQueryData(["services", "one", next.id], { data: next })
                       field.handleChange(next?.id ?? "")
+                      autoService.current = null
+                      // Otro servicio marca lo suyo; lo demás sigue a la vista.
+                      if (coordinationQuery.data) setMarked({ patientId: values.patientId, ids: itemsOfService(next?.id ?? "") })
                       // Con servicio, el bloque toma lo que dura el servicio.
                       when.resize(next?.durationMin ?? defaultMinutes)
                     }}

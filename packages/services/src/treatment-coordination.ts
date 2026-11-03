@@ -10,8 +10,10 @@
 import type { Db } from "@odentia/db"
 import { treatmentBudget } from "@odentia/db/schema/clinical"
 import { and, desc, eq } from "drizzle-orm"
+import { SCHEDULABLE_ITEM_STATUSES } from "./appointments.js"
 import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
 import { listFollowUps, type ScheduleFollowUpInput, scheduleFollowUp } from "./follow-ups.js"
+import { scheduledItems } from "./plan-next.js"
 import { listPlanItems } from "./plan.js"
 
 const OPEN_TREATMENT_STATUSES = ["pendiente", "programado", "en_curso", "suspendido"]
@@ -33,8 +35,11 @@ export interface TreatmentCoordination {
   budgetsAwaitingDecision: Array<{ id: string; title: string; presentedAt: Date | null }>
   /** Controles abiertos: por reservar o con cita vigente. */
   followUps: CoordinationFollowUp[]
-  /** Tratamientos abiertos, solo nombre y estado operativo. */
-  treatments: Array<{ id: string; title: string; status: string; decision: string }>
+  /**
+   * Tratamientos abiertos, solo nombre y estado operativo. `toSchedule`: aceptado
+   * y sin cita por venir, lo que «Nueva cita» ofrece para traer.
+   */
+  treatments: Array<{ id: string; title: string; status: string; decision: string; serviceId: string | null; toSchedule: boolean }>
 }
 
 function toCoordinationFollowUp(
@@ -74,23 +79,28 @@ export async function getTreatmentCoordination(
       ),
     )
     .orderBy(desc(treatmentBudget.createdAt), desc(treatmentBudget.id))
+  const open = items.filter(
+    (item) =>
+      OPEN_TREATMENT_STATUSES.includes(item.status) &&
+      !DISCARDED_DECISIONS.includes(item.decisionStatus),
+  )
+  // La misma regla de «Qué sigue» y de lo que la cita admite: aceptado, por hacer y sin cita por venir.
+  const schedulable = open.filter((item) => item.decisionStatus === "aceptado" && SCHEDULABLE_ITEM_STATUSES.includes(item.status))
+  const withAppointment = await scheduledItems(tx, orgId, patientId, schedulable.map((item) => item.id))
+  const toSchedule = new Set(schedulable.filter((item) => !withAppointment.has(item.id)).map((item) => item.id))
   return {
     budgetsAwaitingDecision: budgets,
     followUps: followUps
       .filter((row) => row.status === "pendiente" || row.status === "programado")
       .map(toCoordinationFollowUp),
-    treatments: items
-      .filter(
-        (item) =>
-          OPEN_TREATMENT_STATUSES.includes(item.status) &&
-          !DISCARDED_DECISIONS.includes(item.decisionStatus),
-      )
-      .map((item) => ({
-        id: item.id,
-        title: item.title,
-        status: item.status,
-        decision: item.decision,
-      })),
+    treatments: open.map((item) => ({
+      id: item.id,
+      title: item.title,
+      status: item.status,
+      decision: item.decision,
+      serviceId: item.serviceId,
+      toSchedule: toSchedule.has(item.id),
+    })),
   }
 }
 

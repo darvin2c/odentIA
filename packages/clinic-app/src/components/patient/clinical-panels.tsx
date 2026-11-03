@@ -29,7 +29,6 @@ import {
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { invalidateAppointmentQueries } from "../../lib/agenda"
@@ -645,13 +644,16 @@ export function ControlesPanel({
         {cancelling?.appointment && canReadAgenda ? (
           <p className="mb-4 text-sm">
             {followUpAppointmentLabel(cancelling)}.{" "}
-            <Link
-              to="/agenda"
-              search={{ appointmentId: cancelling.appointment.id }}
-              className="underline"
+            <Button
+              type="button"
+              variant="link"
+              className="h-auto p-0"
+              onClick={() => {
+                if (cancelling.appointment) openAppointmentAnywhere(cancelling.appointment.id)
+              }}
             >
-              Ver reserva en agenda
-            </Link>
+              Ver la cita
+            </Button>
           </p>
         ) : null}
         <cancelForm.AppField name="reason">

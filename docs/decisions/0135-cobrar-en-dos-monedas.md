@@ -1,4 +1,4 @@
-# 0134 · Cobrar en dos monedas
+# 0135 · Cobrar en dos monedas
 
 Fecha: 2026-11-02 · Estado: aceptada · Cambia [0071](0071-metas-descargar-y-el-resumen-del-lunes.md) («lo cobrado nunca se compara con otra moneda») y precisa [0083](0083-el-impuesto-de-lo-que-cobra-la-clinica.md)
 

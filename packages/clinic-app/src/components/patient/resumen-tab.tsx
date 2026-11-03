@@ -8,19 +8,24 @@ import { type ReactNode, useState } from "react"
 import { useReceptionName } from "../../lib/agent-names"
 import { ACTION_LABEL, type AgentProposal } from "../../lib/agent"
 import { apiFetch } from "../../lib/api"
-import { formatDate } from "../../lib/clinical-journey"
+import { fetchConsents } from "../../lib/clinical-forms"
 import { type TaskItem, usePermission } from "../../lib/crm"
 import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { useOrgProfile } from "../../lib/org"
-import type { PatientSectionId } from "../../lib/patient-areas"
 import type { PatientFull, PatientHealth, PatientSummary } from "../../lib/patients"
 import { filiationGapsText, isHealthReviewPending } from "../../lib/patients"
+import { usePersonArchived } from "../../lib/person-archived"
 import { FiliacionSectionDrawer, type FiliacionSectionKey } from "./filiacion-section-drawer"
+import { dueWords, isOverdue } from "../crm/crm-helpers"
 import { TaskDrawer } from "../crm/task-drawer"
 import { attendWord } from "../../lib/patient-overview"
+import { useCollectFlow } from "./collect-flow"
+import { ConsentLinkActions, consentLinkWords } from "./consent-link-actions"
+import { ConsentSigningScreen } from "./consent-signing"
 import { NextStepButton } from "./plan/next-step-action"
 import { usePlanNextStep } from "./plan/plan-next"
 import { PersonalLinkActions } from "./send-personal-link"
+import { useOpenWide, type WideTarget } from "./wide-section"
 
 interface Pending {
   id: string
@@ -44,7 +49,8 @@ export function SummaryCard({
 }) {
   return (
     <section className="flex min-w-0 flex-col gap-3 elevated rounded-xl border bg-card p-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      {/* El alto de un botón, lo lleve o no: dos tarjetas en la misma fila alinean sus títulos. */}
+      <div className="flex min-h-8 flex-wrap items-center justify-between gap-2">
         <h2 className="font-heading text-base font-medium">{title}</h2>
         {action}
       </div>
@@ -92,20 +98,22 @@ function PendingList({ pending }: { pending: Pending[] }) {
  * la lee lo tiene en su propia tarjeta), saldo, datos que faltan y sus tareas.
  * Para quien atiende suma lo clínico que le toca (antecedentes declarados por
  * revisar y consentimientos sin firmar). Cada bloque pide solo lo que su
- * permiso autoriza; el representante va en la cabecera.
+ * permiso autoriza; el representante va en la cabecera. Cada botón actúa aquí
+ * mismo: revisar, firmar, confirmar y cobrar no cambian de pestaña.
  */
 export function PatientPendingCard({
   patientId,
   detail,
   clinical,
-  onTabChange,
 }: {
   patientId: string
   detail: PatientFull
   /** Lo clínico ya leído por el Resumen de quien atiende (no se pide aquí). */
   clinical?: { summary?: PatientSummary; health?: PatientHealth | null }
-  onTabChange: (section: PatientSectionId) => void
 }) {
+  const openWide = useOpenWide()
+  const archived = usePersonArchived()
+  const canSign = usePermission("clinical.write")
   const receptionName = useReceptionName()
   const canClinical = usePermission("clinical.read")
   const canFinance = usePermission("finance.read")
@@ -134,6 +142,12 @@ export function PatientPendingCard({
     queryFn: () => fetchPatientAccount3(patientId),
     enabled: canFinance,
   })
+  // La fila del saldo se va al quedar pagado: el cajón y el ticket viven en la tarjeta.
+  const collect = useCollectFlow({
+    patientId,
+    patientName: detail.patient.displayName,
+    enabled: accountQuery.data?.data.byCurrency.some((balance) => balance.porCobrar > 0) ?? false,
+  })
   const proposalsQuery = useQuery({
     queryKey: ["agent-proposals", "propuesta", "patient", patientId],
     queryFn: () =>
@@ -152,9 +166,23 @@ export function PatientPendingCard({
   // «Qué sigue» del plan, la misma regla del servidor que la pestaña Plan. Si el
   // Resumen ya muestra su tarjeta (quien lee la clínica), aquí no se repite.
   const nextStepQuery = usePlanNextStep(patientId, (canAppointments || canBudgets) && !clinical)
+  // Firmar o confirmar pide el documento entero: el Resumen solo trae su título y sus fechas.
+  const pendingConsents = clinical?.summary?.pendingConsents ?? []
+  const consents = useQuery({
+    queryKey: ["consents", patientId],
+    queryFn: () => fetchConsents({ patientId }),
+    enabled: canSign && pendingConsents.length > 0,
+  })
+  const [signingId, setSigningId] = useState<string | null>(null)
+  const consentOf = (id: string) => consents.data?.data.find((row) => row.id === id) ?? null
+  const signing = signingId ? consentOf(signingId) : null
+  const consentsChanged = () => {
+    void queryClient.invalidateQueries({ queryKey: ["consents", patientId] })
+    void queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
+  }
 
-  const go = (section: PatientSectionId, label: string) => (
-    <Button size="sm" variant="outline" onClick={() => onTabChange(section)}>
+  const open = (label: string, target: WideTarget) => (
+    <Button size="sm" variant="outline" onClick={() => openWide?.(target)}>
       {label}
     </Button>
   )
@@ -166,15 +194,44 @@ export function PatientPendingCard({
         id: "health-review",
         title: "Antecedentes declarados por revisar",
         detail: "El paciente o su responsable los declaró; falta la validación clínica.",
-        action: go("antecedentes", "Revisar"),
+        action: open("Revisar", { id: "antecedentes", review: true }),
       })
-    for (const consent of clinical.summary?.pendingConsents ?? [])
+    for (const consent of pendingConsents) {
+      const document = consentOf(consent.id)
+      const signedByLink = Boolean(consent.personSignedAt)
       pending.push({
         id: `consent-${consent.id}`,
-        title: `Consentimiento sin firmar: ${consent.title}`,
-        detail: "Emitido y pendiente de la firma de la persona o su representante.",
-        action: go("documentos", "Firmar"),
+        title: `${signedByLink ? "Consentimiento por confirmar" : "Consentimiento sin firmar"}: ${consent.title}`,
+        detail:
+          consents.isError ? "No se pudo leer el documento." :
+          consentLinkWords({ status: "pendiente", personSignedAt: consent.personSignedAt ?? null, linkSentAt: consent.linkSentAt ?? null }) ??
+          "Emitido y pendiente de la firma de la persona o su representante.",
+        // Mientras se lee el documento, el botón espera: pulsarlo no abriría nada.
+        action: !canSign ? null : consents.isError ? (
+          <Button size="sm" variant="outline" disabled={consents.isFetching} onClick={() => void consents.refetch()}>
+            Reintentar
+          </Button>
+        ) : signedByLink ? (
+          document ? (
+            <ConsentLinkActions document={document} onChanged={consentsChanged} />
+          ) : (
+            <Button size="sm" disabled>
+              Confirmar
+            </Button>
+          )
+        ) : (
+          <Button
+            size="sm"
+            variant="outline"
+            aria-label={`Firmar ${consent.title}`}
+            disabled={!document}
+            onClick={() => setSigningId(consent.id)}
+          >
+            Firmar
+          </Button>
+        ),
       })
+    }
   }
   for (const proposal of proposalsQuery.data?.data ?? [])
     pending.push({
@@ -205,7 +262,7 @@ export function PatientPendingCard({
           variant="outline"
         />
       ) : (
-        go("plan", "Ver el plan")
+        open("Ver el plan", { id: "plan" })
       ),
     })
   for (const balance of accountQuery.data?.data.byCurrency ?? []) {
@@ -221,17 +278,8 @@ export function PatientPendingCard({
           balance.aFavor > 0
             ? `Debe: ${money(balance.porCobrar, balance.currency)} · A favor: ${money(balance.aFavor, balance.currency)} · Saldo: ${money(balance.saldo, balance.currency)}`
             : "Cargos emitidos sin pago aplicado.",
-        // «Cobrar» abre Cobros con el cobro ya abierto; «Aplicar…» lo aplica al llegar.
-        action: (
-          <Link
-            to="/patients/$patientId"
-            params={{ patientId }}
-            search={{ tab: "cuenta", cobrar: true }}
-            className={buttonVariants({ size: "sm", variant: "outline" })}
-          >
-            {balance.saldo > 0 ? "Cobrar" : "Aplicar lo que tiene a favor"}
-          </Link>
-        ),
+        // El mismo cobro de Cobros, ahí mismo; «Aplicar…» siempre pide confirmar.
+        action: collect.button({ size: "sm", variant: "outline", currency: balance.currency }),
       })
   }
   if (canEditPatient) {
@@ -269,7 +317,7 @@ export function PatientPendingCard({
     pending.push({
       id: `task-${task.id}`,
       title: `Tarea: ${task.title}`,
-      detail: task.dueAt ? `Vence el ${formatDate(task.dueAt)}.` : "Sin fecha límite.",
+      detail: task.dueAt ? `${isOverdue(task.dueAt) ? "Venció" : "Vence"} ${dueWords(task.dueAt)}.` : "Sin fecha límite.",
       action: (
         <Button size="sm" variant="outline" onClick={() => setViewingTask(task.id)}>
           Ver tarea
@@ -281,7 +329,7 @@ export function PatientPendingCard({
     <SummaryCard
       title="Pendientes"
       action={
-        canWriteTasks ? (
+        canWriteTasks && !archived ? (
           <Button size="sm" variant="outline" onClick={() => setNewTask(true)}>
             Nueva tarea
           </Button>
@@ -289,6 +337,14 @@ export function PatientPendingCard({
       }
     >
       <PendingList pending={pending} />
+      {collect.surfaces}
+      <ConsentSigningScreen
+        open={signing !== null}
+        documents={signing ? [signing] : []}
+        patientId={patientId}
+        onClose={() => setSigningId(null)}
+        onSigned={consentsChanged}
+      />
       {viewingTask ? (
         <TaskDrawer
           open

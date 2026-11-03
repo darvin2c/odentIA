@@ -582,6 +582,7 @@ export interface PlanNextStep {
     planItemIds?: string[]
     serviceId?: string | null
     followUpId?: string
+    appointmentId?: string
   } | null
 }
 

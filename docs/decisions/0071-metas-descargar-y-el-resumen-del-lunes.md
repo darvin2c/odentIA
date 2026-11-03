@@ -1,6 +1,6 @@
 # 0071 · Metas del mes, «Descargar» y el resumen del lunes
 
-Fecha: 2026-10-20 · Estado: aceptada · Lienzo «Reportes odentIA · cómo va el negocio», aprobado entero el 2026-10-18 (decisiones 9, 10, 11 y 15; fase 6). Lo cambia en parte [0134](0134-cobrar-en-dos-monedas.md).
+Fecha: 2026-10-20 · Estado: aceptada · Lienzo «Reportes odentIA · cómo va el negocio», aprobado entero el 2026-10-18 (decisiones 9, 10, 11 y 15; fase 6). Lo cambia en parte [0135](0135-cobrar-en-dos-monedas.md).
 
 ## Problema
 
@@ -10,7 +10,7 @@ Reportes dice cómo va la clínica, pero no contra qué. Lo que muestra no se po
 
 - **Dos metas por mes, de toda la clínica:** cobrado y pacientes nuevos (`report_goal`).
   - Una meta vale desde el mes en que se guarda hasta que otra la reemplace. Cambiarla no reescribe los meses pasados, y quitarla es otra fila sin importe.
-  - Lo cobrado va en la moneda de la clínica y nunca se compara con otra. Con dos monedas (lo cambia [0134](0134-cobrar-en-dos-monedas.md)): va en la moneda del negocio, cada pago con el valor que se congeló al cobrarlo.
+  - Lo cobrado va en la moneda de la clínica y nunca se compara con otra. Con dos monedas (lo cambia [0135](0135-cobrar-en-dos-monedas.md)): va en la moneda del negocio, cada pago con el valor que se congeló al cobrarlo.
   - Solo hay meta con un mes elegido y con «Todas las sedes»: un rango de días o varios meses no tienen meta (decisión 15).
   - El avance lo calcula el servidor dentro del Resumen. En el mes en curso dice cuánto del mes ya pasó y cuántos días quedan. Solo se pone en el mes en curso.
 - **«Descargar» en CSV (RFC 4180)** en cada lista y en cada tabla (Por profesional, Comisiones, una respuesta de Argos).

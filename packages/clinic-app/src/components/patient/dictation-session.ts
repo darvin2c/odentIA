@@ -18,9 +18,20 @@ export interface DictationSuggestion {
   voice: { before: string } | null
   /** Quitada por voz: lo que dijo para pedirlo. Se puede deshacer hasta firmar. */
   removal: { said: string } | null
+  /** Al confirmar una nota: cómo quedó cada texto en la atención, ya unido a lo que había. */
+  joined?: Record<string, string>
   /** Ya confirmada, y se pidió quitarla en voz alta: espera «Quitar del plan» o «Dejarla». */
   undoRequest?: { said: string } | null
 }
+
+export const NOTE_FIELD_LABEL = {
+  reason: "Motivo de consulta",
+  presentIllness: "Enfermedad actual",
+  illnessDuration: "Tiempo de enfermedad",
+  evolution: "Evolución",
+  indications: "Indicaciones",
+  prognosis: "Pronóstico",
+} as const
 
 export const DICTATION_KIND_LABEL: Record<DictationKind, string> = {
   nota: "Consulta",
@@ -135,6 +146,7 @@ export function useDictationSession({
   encounterId,
   active,
   onApplied,
+  noteText,
 }: {
   patientId: string
   encounterId: string
@@ -142,6 +154,8 @@ export function useDictationSession({
   active: boolean
   /** Una sugerencia entró a la historia: la pantalla refresca lo que muestra. */
   onApplied: (item: DictationSuggestion) => void
+  /** Lo que muestra hoy un campo de la nota. */
+  noteText: (key: string) => string
 }) {
   const queryClient = useQueryClient()
   const base = `/api/patients/${patientId}/encounters/${encounterId}/dictation`
@@ -423,7 +437,7 @@ export function useDictationSession({
         toast(input.result.note ?? "No se pudo reservar ese hueco: elige otro.")
         return
       }
-      onApplied(input.item)
+      onApplied({ ...input.item, joined: input.result?.joined })
       if (input.item.kind === "cita") toast.success(input.item.payload["existing"] ? "Queda la cita que ya tenía." : "Cita reservada. Le llega el aviso como cuando reserva recepción.")
       if (input.item.kind === "presupuesto") toast.success("Presupuesto armado. Muéstralo, imprímelo o envíalo desde «Plan y controles».")
       // Lo que cambia fuera de la tarjeta se dice al confirmar, no antes.
@@ -445,8 +459,8 @@ export function useDictationSession({
     mutationFn: async (input: { item: DictationSuggestion; patch: Record<string, unknown>; confirm: boolean }) => {
       const updated = await apiFetch<{ data: DictationSuggestion }>(`${base}/${input.item.id}`, { method: "PATCH", body: JSON.stringify(input.patch) })
       if (!input.confirm || updated.data.status !== "lista") return { item: updated.data, confirmed: false }
-      await apiFetch(`${base}/${input.item.id}/confirm`, { method: "POST" })
-      return { item: updated.data, confirmed: true }
+      const confirmed = await apiFetch<{ data?: DictationSuggestion } | undefined>(`${base}/${input.item.id}/confirm`, { method: "POST" })
+      return { item: { ...updated.data, joined: confirmed?.data?.joined }, confirmed: true }
     },
     onSuccess: (result) => {
       // Lo que falló antes con esta sugerencia ya no vale: se acaba de corregir.
@@ -464,8 +478,8 @@ export function useDictationSession({
       try {
         for (const item of suggestions.filter(confirmable)) {
           current = item
-          await apiFetch(`${base}/${item.id}/confirm`, { method: "POST" })
-          done.push(item)
+          const response = await apiFetch<{ data?: DictationSuggestion } | undefined>(`${base}/${item.id}/confirm`, { method: "POST" })
+          done.push({ ...item, joined: response?.data?.joined })
         }
       } catch (error) {
         setConfirmReadyFailed(current)
@@ -494,7 +508,7 @@ export function useDictationSession({
           if (response?.data && response.data.status !== "confirmada") {
             throw new ApiError(409, { code: "SLOT_TAKEN", message: `${response.data.note ?? "Un hueco se ocupó."} Revísalo y vuelve a firmar.` })
           }
-          done.push(item)
+          done.push({ ...item, joined: response?.data?.joined })
         }
       } catch (error) {
         setConfirmManyFailed(current)
@@ -585,6 +599,14 @@ export function useDictationSession({
     patientId,
     encounterId,
     editing: suggestions.find((item) => item.id === editingId) ?? null,
+    /** Dónde se agregará una nota dictada: se dice antes de confirmarla y de firmar, cuando aún se puede cambiar. */
+    noteAddsTo: (item: DictationSuggestion) => {
+      if (item.kind !== "nota") return ""
+      const fields = Object.entries(NOTE_FIELD_LABEL)
+        .filter(([key]) => typeof item.payload[key] === "string" && noteText(key).trim())
+        .map(([, label]) => label)
+      return fields.length ? `Se agrega a lo que ya hay en ${new Intl.ListFormat("es").format(fields)}.` : ""
+    },
     openEdit: (item: DictationSuggestion) => {
       save.reset()
       setEditingId(item.id)

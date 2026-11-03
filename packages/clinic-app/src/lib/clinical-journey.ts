@@ -205,7 +205,7 @@ export type SchedulableControl = Pick<
 export interface TreatmentCoordination {
   budgetsAwaitingDecision: Array<{ id: string; title: string; presentedAt: string | null }>
   followUps: SchedulableControl[]
-  treatments: Array<{ id: string; title: string; status: string; decision: string }>
+  treatments: Array<{ id: string; title: string; status: string; decision: string; serviceId: string | null; toSchedule: boolean }>
 }
 
 export function fetchTreatmentCoordination(
