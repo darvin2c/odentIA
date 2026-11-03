@@ -1,4 +1,4 @@
-import { currencyFractionDigits } from "@odentia/clinical"
+import { currencyFractionDigits, formatMoney } from "@odentia/clinical"
 import type { AppointmentVisit } from "./agenda"
 import type { DebtRow } from "./finance-debt"
 
@@ -263,6 +263,13 @@ export interface WorkspaceCash {
   tickets: number
   /** Atendidos hoy con algo por cobrar: la misma lista de Finanzas › Caja. */
   toCollect: DebtRow[]
+}
+
+/** «Cobrado S/ 150.00 + USD 80.00 en 2 cobros»: la otra moneda, solo si se cobró algo en ella. */
+export function cashCollectedText(cash: WorkspaceCash, locale: string): string {
+  const second = cash.secondCollected?.cents ? cash.secondCollected : null
+  const money = `${formatMoney(cash.collectedCents, cash.currency, locale)}${second ? ` + ${formatMoney(second.cents, second.currency, locale)}` : ""}`
+  return `Cobrado ${money} en ${cash.tickets} ${cash.tickets === 1 ? "cobro" : "cobros"}`
 }
 export interface WorkspaceNotice { id: string; title: string; body: string; href: string; createdAt: string; readAt: string | null }
 /**

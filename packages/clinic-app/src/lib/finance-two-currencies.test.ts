@@ -9,6 +9,7 @@ import {
   groupDayMovements,
 } from "./finance-cash"
 import { sentence } from "./finance-collect"
+import { cashCollectedText, type WorkspaceCash } from "./workspace"
 const movement = (over: Partial<DayMovement>): DayMovement => ({
   id: "m1",
   shiftId: "s1",
@@ -27,6 +28,28 @@ const movement = (over: Partial<DayMovement>): DayMovement => ({
   patientId: "pa1",
   patientName: "Carlos Vega",
   ...over,
+})
+
+describe("Inicio › Caja de hoy", () => {
+  const cash = (collectedCents: number, second: number, tickets: number): WorkspaceCash => ({
+    branchId: "s",
+    branchName: "Sede",
+    currency: "PEN",
+    timezone: "America/Lima",
+    collectedCents,
+    secondCollected: { currency: "USD", cents: second },
+    tickets,
+    toCollect: [],
+  })
+  const spaced = (text: string) => text.replace(/ /g, " ")
+
+  it("la otra moneda en cero no se dice", () => {
+    expect(spaced(cashCollectedText(cash(0, 0, 0), "es-PE"))).toBe("Cobrado S/ 0.00 en 0 cobros")
+    expect(spaced(cashCollectedText(cash(15000, 0, 1), "es-PE"))).toBe("Cobrado S/ 150.00 en 1 cobro")
+    expect(spaced(cashCollectedText(cash(0, 8000, 1), "es-PE"))).toBe(
+      "Cobrado S/ 0.00 + USD 80.00 en 1 cobro",
+    )
+  })
 })
 
 describe("las frases del cambio", () => {
