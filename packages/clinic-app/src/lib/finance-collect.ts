@@ -9,7 +9,13 @@
  * horaria siempre del perfil/sede. Nada fijo.
  */
 import { useQuery } from "@tanstack/react-query"
-import { currencyFractionDigits, currencyWord, type TicketTender, upperFirst } from "@odentia/clinical"
+import {
+  currencyFractionDigits,
+  currencyWord,
+  formatMoney,
+  type TicketTender,
+  upperFirst,
+} from "@odentia/clinical"
 import { apiFetch } from "./api"
 import { amountFromCents } from "./workspace"
 
@@ -100,6 +106,37 @@ const RATE_WARN_SHARE = 0.05
 
 export function rateIsFar(rate: string, today: string): boolean {
   return Math.abs(Number(rate) - Number(today)) / Number(today) > RATE_WARN_SHARE
+}
+
+/** Lo que dice el campo del importe. Con otra moneda, también cuánto cancela lo escrito. */
+export function amountHelpText(input: {
+  hasSecond: boolean
+  advance: boolean
+  pay: string
+  debt: string
+  cancels: number | null
+  due: number
+  locale: string
+  /** También debe en la otra moneda: «queda al día» dice en cuál. */
+  owesOther: boolean
+}): string {
+  const { hasSecond, advance, pay, debt, cancels, due, locale, owesOther } = input
+  const crossed = pay !== debt
+  const inDebt = (cents: number) => formatMoney(cents, debt, locale)
+  if (advance)
+    return hasSecond && crossed && cancels !== null
+      ? `Queda ${inDebt(cancels)} a favor, a cuenta de lo que debe en ${currencyWord(debt, locale)}.`
+      : "Todo queda como saldo a favor."
+  const partly = "Si paga una parte, el resto queda por cobrar."
+  if (!hasSecond) return partly
+  if (due === 0) return "Marca lo que paga."
+  if (cancels === null) return crossed ? "Con el cambio se calcula cuánto cancela." : partly
+  const left = Math.max(0, due - cancels)
+  if (crossed)
+    return left > 0
+      ? `Cancela ${inDebt(cancels)}. Quedan ${inDebt(left)} por cobrar.`
+      : `Cancela ${inDebt(cancels)}: queda al día${owesOther ? ` en ${currencyWord(debt, locale)}` : ""}.`
+  return left > 0 ? `Quedan ${inDebt(left)} por cobrar.` : partly
 }
 
 /** Cierra una frase con punto, salvo que ya termine en uno: «09:04 a. m.» no lleva otro. */

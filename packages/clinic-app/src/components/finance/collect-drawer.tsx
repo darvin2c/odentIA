@@ -93,6 +93,7 @@ import {
   type ProductCharge,
   type PromotionItem,
   type PromotionOption,
+  amountHelpText,
   rateAuthorWords,
   sentence,
   type SaleProduct,
@@ -429,35 +430,6 @@ function collectFigures(value: CollectDraft, rules: CollectRules) {
     receivedCents,
     change,
   }
-}
-
-/** Lo que dice el campo del importe. Con otra moneda, también cuánto cancela lo escrito. */
-function amountHelpText(input: {
-  hasSecond: boolean
-  advance: boolean
-  pay: string
-  debt: string
-  cancels: number | null
-  due: number
-  locale: string
-}): string {
-  const { hasSecond, advance, pay, debt, cancels, due, locale } = input
-  const crossed = pay !== debt
-  const inDebt = (cents: number) => formatMoney(cents, debt, locale)
-  if (advance)
-    return hasSecond && crossed && cancels !== null
-      ? `Queda ${inDebt(cancels)} a favor, a cuenta de lo que debe en ${currencyWord(debt, locale)}.`
-      : "Todo queda como saldo a favor."
-  const partly = "Si paga una parte, el resto queda por cobrar."
-  if (!hasSecond) return partly
-  if (due === 0) return "Marca lo que paga."
-  if (cancels === null) return crossed ? "Con el cambio se calcula cuánto cancela." : partly
-  const left = Math.max(0, due - cancels)
-  if (crossed)
-    return left > 0
-      ? `Cancela ${inDebt(cancels)}. Quedan ${inDebt(left)} por cobrar.`
-      : `Cancela ${inDebt(cancels)}: queda al día.`
-  return left > 0 ? `Quedan ${inDebt(left)} por cobrar.` : partly
 }
 
 const lineSchema = z.object({
@@ -1206,6 +1178,7 @@ export function CollectDrawer({
     cancels: figures.cancels,
     due,
     locale,
+    owesOther: owedByCurrency.some((row) => row.code !== debt),
   })
   const rateAuthor = second && orgTimeZone ? rateAuthorWords(second, locale, orgTimeZone) : ""
   const rateHelp = !second

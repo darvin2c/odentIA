@@ -8,7 +8,7 @@ import {
   financeKeys,
   groupDayMovements,
 } from "./finance-cash"
-import { accountBalances, accountBalanceTitle, sentence } from "./finance-collect"
+import { accountBalances, accountBalanceTitle, amountHelpText, sentence } from "./finance-collect"
 import { cashCollectedText, type WorkspaceCash } from "./workspace"
 const movement = (over: Partial<DayMovement>): DayMovement => ({
   id: "m1",
@@ -73,6 +73,31 @@ describe("la cuenta del paciente con dos monedas", () => {
   it("cada bloque se titula con su moneda dicha", () => {
     expect(accountBalanceTitle("USD", "es-PE", "USD")).toBe("Dólares")
     expect(accountBalanceTitle("EUR", "es-PE", null)).toBe("EUR")
+  })
+})
+
+describe("lo que dice el importe al cobrar", () => {
+  const base = {
+    hasSecond: true,
+    advance: false,
+    pay: "PEN",
+    debt: "USD",
+    cancels: 100_000,
+    due: 100_000,
+    locale: "es-PE",
+  }
+  const spaced = (text: string) => text.replace(/ /g, " ")
+
+  it("si también debe en la otra moneda, dice en cuál queda al día", () => {
+    expect(spaced(amountHelpText({ ...base, owesOther: true }))).toBe(
+      "Cancela USD 1,000.00: queda al día en dólares.",
+    )
+    expect(spaced(amountHelpText({ ...base, owesOther: false }))).toBe(
+      "Cancela USD 1,000.00: queda al día.",
+    )
+    expect(amountHelpText({ ...base, hasSecond: false, owesOther: false })).toBe(
+      "Si paga una parte, el resto queda por cobrar.",
+    )
   })
 })
 
