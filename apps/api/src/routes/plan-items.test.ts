@@ -544,7 +544,7 @@ it("plan: realizado es terminal; reabrir o cancelar ejecutado responde 409 ITEM_
   expect(((await edited.json()) as ErrorBody).error.code).toBe("ITEM_CLOSED")
 })
 
-it("plan: presupuesto exige ítems del plan con moneda única y tarifa conocida", async () => {
+it("plan: un presupuesto lleva sus ítems en cada moneda, con un total por cada una", async () => {
   const app = buildApp("admin")
   const patientId = await createFreshPatient(app, "Plan Moneda")
   const ctx = await setupPlan(app, patientId)
@@ -555,24 +555,32 @@ it("plan: presupuesto exige ítems del plan con moneda única y tarifa conocida"
     planId: ctx.planId,
     itemIds: [pen.id, usd.id],
   })
-  expect(mixed.status).toBe(409)
-  expect(((await mixed.json()) as ErrorBody).error.code).toBe("BUDGET_CURRENCY_MIX")
+  expect(mixed.status).toBe(201)
+  const created = (
+    (await mixed.json()) as {
+      data: {
+        totalCents: number | null
+        totals: Array<{ currency: string; totalCents: number | null }>
+      }
+    }
+  ).data
+  expect(created.totalCents).toBeNull()
+  expect(created.totals.map((total) => total.currency)).toEqual(["PEN", "USD"])
 
   // Cuerpo viejo sin plan se rechaza.
   const legacy = await postJson(app, `/patients/${patientId}/budgets`, { title: "Viejo" })
   expect(legacy.status).toBe(400)
 
-  // Cambiar a una oferta de otra moneda rompe la homogeneidad del borrador.
+  // Cambiar a una oferta de otra moneda: la línea del borrador sigue a su indicación.
   const budgetId = await createBudget(app, patientId, ctx.planId, [pen.id])
-  const mixedPatch = await patchJson(app, `/patients/${patientId}/plan/items/${pen.id}`, {
+  const moved = await patchJson(app, `/patients/${patientId}/plan/items/${pen.id}`, {
     encounterId: ctx.encounterId,
     serviceId: SVC_USD,
   })
-  expect(mixedPatch.status).toBe(409)
-  expect(((await mixedPatch.json()) as ErrorBody).error.code).toBe("BUDGET_CURRENCY_MIX")
-
-  expect(budgetId).toBeTruthy()
-  expect(usd).toBeTruthy()
+  expect(moved.status).toBe(200)
+  const after = await app.request(`/patients/${patientId}/budgets/${budgetId}`)
+  const afterBody = (await after.json()) as { data: { totals: Array<{ currency: string }> } }
+  expect(afterBody.data.totals.map((total) => total.currency)).toEqual(["USD"])
 })
 
 it("plan: entrada manual (title/price/currency) y sin plan responde 400", async () => {

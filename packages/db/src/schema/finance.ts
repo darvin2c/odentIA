@@ -22,6 +22,7 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   pgTable,
   text,
   timestamp,
@@ -83,6 +84,9 @@ export const CASH_MOVEMENT_KINDS = [
   "aporte",
   "retiro",
   "devolucion",
+  // El vuelto en otra moneda: el exceso del billete entra en una caja y el vuelto
+  // sale de la otra. Va unido al pago, en la caja de cada moneda.
+  "vuelto",
 ] as const
 
 export const CASH_MOVEMENT_DIRECTIONS = ["ingreso", "egreso"] as const
@@ -116,9 +120,11 @@ export const cashMovement = pgTable(
   },
   (table) => [
     index("cash_movement_org_shift_idx").on(table.organizationId, table.shiftId),
-    // Un cobro real entra a caja una sola vez (solo filas vigentes).
+    // Un cobro real entra a caja una sola vez (solo filas vigentes), en la moneda que sea.
+    // Su vuelto es otro tipo y toca dos cajas: entra el exceso en una y sale el vuelto de
+    // la otra, una vez cada uno.
     uniqueIndex("cash_movement_payment_uidx")
-      .on(table.organizationId, table.patientPaymentId)
+      .on(table.organizationId, table.patientPaymentId, table.kind, table.direction)
       .where(sql`${table.patientPaymentId} IS NOT NULL AND ${table.voidedAt} IS NULL`),
     check("cash_movement_amount_check", sql`${table.amountCents} > 0`),
     check(
@@ -127,7 +133,7 @@ export const cashMovement = pgTable(
     ),
     check(
       "cash_movement_kind_check",
-      sql`${table.kind} IN ('apertura','cobro','gasto','aporte','retiro','devolucion')`,
+      sql`${table.kind} IN ('apertura','cobro','gasto','aporte','retiro','devolucion','vuelto')`,
     ),
   ],
 )
@@ -150,6 +156,16 @@ export const expense = pgTable(
     category: text("category").notNull().default("Otros"),
     amountCents: integer("amount_cents").notNull(),
     currency: char("currency", { length: 3 }).notNull(),
+    /**
+     * Dos monedas, igual que un pago de paciente: `amountCents` y `currency` son
+     * lo que cancela; esto, lo que salió en otra moneda (nulo si salió en la misma).
+     */
+    tenderCents: integer("tender_cents"),
+    tenderCurrency: char("tender_currency", { length: 3 }),
+    /** El cambio usado, en palabras (moneda del negocio por 1 de la otra). */
+    exchangeRate: numeric("exchange_rate"),
+    /** Cuánto vale en moneda del negocio, congelado. Hay valor si y solo si hay cambio. */
+    businessCents: integer("business_cents"),
     spentAt: timestamp("spent_at", { withTimezone: true }).notNull().defaultNow(),
     /** Comprobante libre según país (fase 3 deja el tipo libre; el catálogo llega con el módulo fiscal). */
     receiptKind: text("receipt_kind").notNull().default("ninguno"),
@@ -187,6 +203,14 @@ export const expense = pgTable(
       foreignColumns: [purchaseOrder.organizationId, purchaseOrder.id],
     }),
     check("expense_amount_check", sql`${table.amountCents} > 0`),
+    check(
+      "expense_tender_check",
+      sql`(${table.tenderCents} IS NULL) = (${table.tenderCurrency} IS NULL) AND (${table.tenderCents} IS NULL OR (${table.tenderCents} >= 0 AND ${table.tenderCurrency} <> ${table.currency} AND ${table.exchangeRate} IS NOT NULL))`,
+    ),
+    check(
+      "expense_value_check",
+      sql`(${table.exchangeRate} IS NULL) = (${table.businessCents} IS NULL) AND (${table.exchangeRate} IS NULL OR (${table.exchangeRate} > 0 AND ${table.businessCents} >= 0))`,
+    ),
     check(
       "expense_purchase_category_check",
       sql`${table.purchaseOrderId} IS NULL OR ${table.category} = 'Materiales'`,
@@ -233,7 +257,7 @@ export const cashClosure = pgTable(
     windowTo: timestamp("window_to", { withTimezone: true }).notNull(),
     /**
      * Desglose del efectivo de la ventana. Siempre suma el esperado:
-     * quedó + cobros + ingresado − gastos − retirado − devuelto.
+     * quedó + cobros + ingresado − gastos − retirado − devuelto + vuelto.
      */
     openingRetainedCents: integer("opening_retained_cents").notNull().default(0),
     cashCollectedCents: integer("cash_collected_cents").notNull().default(0),
@@ -244,6 +268,8 @@ export const cashClosure = pgTable(
     cashWithdrawnCents: integer("cash_withdrawn_cents").notNull().default(0),
     /** Efectivo devuelto a pacientes (devoluciones y anulaciones posteriores al cierre). */
     cashRefundedCents: integer("cash_refunded_cents").notNull().default(0),
+    /** Vuelto en otra moneda, con signo: entra el exceso del billete, sale el vuelto. */
+    cashChangeCents: integer("cash_change_cents").notNull().default(0),
     expectedCents: integer("expected_cents").notNull(),
     countedCents: integer("counted_cents").notNull(),
     differenceCents: integer("difference_cents").notNull(),

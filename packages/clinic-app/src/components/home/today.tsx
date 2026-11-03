@@ -9,7 +9,13 @@ import { stepBeforeArrival, visitLabel, visitName, visitState } from "../../lib/
 import { usePermission, useMyUserId } from "../../lib/crm"
 import { type DebtRow, debtConcepts, debtDue, formatClock } from "../../lib/finance-cash"
 import { agendaSummary, attendedPercent, patientsSummary } from "../../lib/home"
-import type { WorkspaceAppointment, WorkspaceCash, WorkspaceToday, WorkspaceTodaySummary } from "../../lib/workspace"
+import {
+  cashCollectedText,
+  type WorkspaceAppointment,
+  type WorkspaceCash,
+  type WorkspaceToday,
+  type WorkspaceTodaySummary,
+} from "../../lib/workspace"
 import { useAppointmentArrival, useAppointmentVisitStatus } from "../agenda/arrival"
 import { openAppointmentAnywhere, openBookingAnywhere } from "../agenda/schedule-host"
 import { BranchSwitcher } from "../branch-switcher"
@@ -318,8 +324,7 @@ export function AgendaLine({ line }: { line: { branch: { id: string; name: strin
   )
 }
 
-const collectedText = (cash: WorkspaceCash, locale: string) =>
-  `Cobrado ${formatMoney(cash.collectedCents, cash.currency, locale)} en ${cash.tickets} ${cash.tickets === 1 ? "cobro" : "cobros"}`
+const collectedText = cashCollectedText
 const peopleText = (count: number) => `${count} ${count === 1 ? "persona" : "personas"}`
 
 function ToCollectRow({ row, cash, locale, onCollect }: { row: DebtRow; cash: WorkspaceCash; locale: string; onCollect?: (row: DebtRow) => void }) {

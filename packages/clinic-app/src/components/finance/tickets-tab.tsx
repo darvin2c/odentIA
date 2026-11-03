@@ -53,8 +53,14 @@ function totalsLine(totals: TicketTotals[], locale: string): { main: string; met
   const money = totals.map((row) => formatMoney(row.cobradoCents, row.currency, locale)).join(" · ")
   return {
     main: `${plural(tickets, "ticket", "tickets")}${money ? ` · ${money}` : ""}`,
+    // Con dos monedas, cada cifra lleva su símbolo: sin él no se sabe en cuál entró.
     methods: totals
-      .flatMap((row) => row.byMethod.map((method) => `${method.name} ${plainAmount(method.cents, row.currency, locale)}`))
+      .flatMap((row) =>
+        row.byMethod.map(
+          (method) =>
+            `${method.name} ${totals.length > 1 ? formatMoney(method.cents, row.currency, locale) : plainAmount(method.cents, row.currency, locale)}`,
+        ),
+      )
       .join(" · "),
     refunded: totals
       .filter((row) => row.refundedCents > 0)
@@ -226,7 +232,10 @@ export function TicketsTab({
             <span className="flex flex-col">
               {ticket.methods.map((method) => (
                 <span key={method.name} className="whitespace-nowrap">
-                  {method.name} {plainAmount(method.amountCents, ticket.currency, locale)}
+                  {method.name}{" "}
+                  {method.tenderCurrency !== undefined && method.tenderCents !== undefined
+                    ? formatMoney(method.tenderCents, method.tenderCurrency, locale)
+                    : plainAmount(method.amountCents, ticket.currency, locale)}
                 </span>
               ))}
             </span>

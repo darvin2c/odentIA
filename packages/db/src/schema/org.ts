@@ -8,6 +8,7 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   pgTable,
   primaryKey,
   smallint,
@@ -16,7 +17,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core"
-import { organization } from "./auth.js"
+import { organization, user } from "./auth.js"
 
 export const orgProfile = pgTable(
   "org_profile",
@@ -86,6 +87,15 @@ export const orgProfile = pgTable(
     // Verificación en dos pasos a todo el equipo (ADR 0107): encendida, la API
     // no deja operar en esta clínica a quien no la tiene activa.
     requireTwoFactor: boolean("require_two_factor").notNull().default(false),
+    // La otra moneda en que también cobra la clínica: dos como máximo. Nula, todo
+    // sigue en una sola moneda. Estas columnas las escribe solo `setOrgExchangeRate`.
+    secondCurrency: text("second_currency"),
+    // «Cambio de hoy» en palabras: moneda del negocio por 1 de la otra (S/ 3.75 por USD 1).
+    exchangeRate: numeric("exchange_rate"),
+    // Lo mismo por unidad menor de cada moneda, para las cuentas en SQL: siempre junto con el cambio.
+    exchangeFactor: numeric("exchange_factor"),
+    exchangeRateAt: timestamp("exchange_rate_at", { withTimezone: true }),
+    exchangeRateBy: text("exchange_rate_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -109,6 +119,15 @@ export const orgProfile = pgTable(
     check(
       "org_profile_ticket_footer_check",
       sql`length(trim(${table.ticketFooter})) BETWEEN 1 AND 280`,
+    ),
+    check(
+      "org_profile_second_currency_check",
+      sql`${table.secondCurrency} IS NULL OR (${table.secondCurrency} ~ '^[A-Z]{3}$' AND ${table.secondCurrency} <> ${table.currency})`,
+    ),
+    // Con otra moneda hay cambio y factor, y sin ella no hay ninguno: nunca a medias.
+    check(
+      "org_profile_exchange_check",
+      sql`(${table.secondCurrency} IS NULL) = (${table.exchangeRate} IS NULL) AND (${table.exchangeRate} IS NULL) = (${table.exchangeFactor} IS NULL) AND (${table.exchangeRate} IS NULL) = (${table.exchangeRateAt} IS NULL) AND (${table.exchangeRate} IS NULL OR (${table.exchangeRate} > 0 AND ${table.exchangeFactor} > 0))`,
     ),
   ],
 )

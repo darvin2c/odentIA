@@ -25,7 +25,7 @@ import { budgetStatusLabel } from "../../lib/budgets"
 import { channelLabel } from "../../lib/channels"
 import { type ContactFull, type OpportunityDetail, type Pipeline, useOrgMembers, usePermission } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
-import { useOrgProfile } from "../../lib/org"
+import { useOrgProfile, useOrgSecondCurrency } from "../../lib/org"
 import { fetchServices, type ServiceCatalogItem } from "../../lib/services"
 import { type PickedPerson, PersonPicker } from "../person-picker"
 import { ChoiceSelect } from "../ui/choice-select"
@@ -160,6 +160,11 @@ export function OpportunityDrawer({ open, contactId, conversationId, opportunity
     enabled: open && isEdit,
   })
   const detail = detailQuery.data?.data ?? null
+  // Un valor escrito a mano va en la moneda de la clínica, salvo el que ya está en su
+  // otra moneda: se lee y se guarda en esa, y el servidor aplica la misma regla.
+  const secondCurrency = useOrgSecondCurrency()?.currency
+  const amountCurrency =
+    detail && detail.amountCents !== null && detail.currency === secondCurrency ? detail.currency : orgCurrency
   const pipelinesQuery = useQuery({
     queryKey: ["pipelines"],
     queryFn: () => apiFetch<{ data: Pipeline[] }>("/api/pipelines"),
@@ -186,7 +191,7 @@ export function OpportunityDrawer({ open, contactId, conversationId, opportunity
 
   // La validación lee la pantalla del momento (persona fija o no, moneda de la clínica).
   const rules = useRef<OpportunityRules>({ needsPerson: false, currency: "", locale: "" })
-  rules.current = { needsPerson: !contactId && !isEdit, currency: orgCurrency, locale: moneyLocale }
+  rules.current = { needsPerson: !contactId && !isEdit, currency: amountCurrency, locale: moneyLocale }
   const schema = useMemo(() => opportunitySchema(() => rules.current), [])
 
   const form = useAppForm({
@@ -194,7 +199,7 @@ export function OpportunityDrawer({ open, contactId, conversationId, opportunity
     validators: { onSubmit: schema },
     onSubmit: async ({ value }) => {
       const amountCents =
-        !value.service && value.amount.trim() ? parseMoney(value.amount.trim(), orgCurrency, moneyLocale) : null
+        !value.service && value.amount.trim() ? parseMoney(value.amount.trim(), amountCurrency, moneyLocale) : null
       const body: Record<string, unknown> = {
         title: value.title.trim(),
         serviceId: value.service?.id ?? null,
@@ -436,7 +441,7 @@ export function OpportunityDrawer({ open, contactId, conversationId, opportunity
               <form.AppField name="amount">
                 {(field) => (
                   <field.Control
-                    label={`Valor estimado${orgCurrency ? ` (${orgCurrency})` : ""}`}
+                    label={`Valor estimado${amountCurrency ? ` (${amountCurrency})` : ""}`}
                     description="Con un servicio de la lista de precios, el valor es su precio."
                   >
                     {(control) => (
@@ -445,7 +450,7 @@ export function OpportunityDrawer({ open, contactId, conversationId, opportunity
                         value={field.state.value}
                         inputMode="decimal"
                         disabled={readOnly}
-                        placeholder={orgCurrency ? amountInputText(0, orgCurrency, moneyLocale) : undefined}
+                        placeholder={amountCurrency ? amountInputText(0, amountCurrency, moneyLocale) : undefined}
                         onChange={(event) => field.handleChange(event.target.value)}
                       />
                     )}

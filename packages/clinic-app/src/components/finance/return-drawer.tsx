@@ -5,7 +5,7 @@
  * importe que se le devuelve. Al final, cómo se le devuelve el dinero o si
  * queda a favor. Al terminar, la devolución se imprime y se envía como el ticket.
  */
-import { formatMoney } from "@odentia/clinical"
+import { currencyWord, formatMoney, moneyTotalsText } from "@odentia/clinical"
 import { Button } from "@odentia/ui"
 import { ErrorState, FormDrawer, SubmitButton, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
@@ -311,7 +311,17 @@ export function ReturnDrawer({
               <p className="font-heading text-base font-semibold">Devolución registrada</p>
               <p className="break-words text-sm text-muted-foreground">
                 {done.outcome === "pagado"
-                  ? `Se devolvieron ${money(done.totalCents)} por ${done.methodName}.`
+                  ? `Se devolvieron ${
+                      done.snapshot.payouts
+                        ? moneyTotalsText(
+                            done.snapshot.payouts.map((payout) => ({
+                              currency: payout.currency,
+                              cents: payout.amountCents,
+                            })),
+                            (cents, unit) => formatMoney(cents, unit, locale),
+                          )
+                        : money(done.totalCents)
+                    } por ${done.methodName}.`
                   : `Quedan ${money(done.totalCents)} a favor de ${patientName}.`}
               </p>
             </div>
@@ -521,7 +531,17 @@ export function ReturnDrawer({
                     </strong>
                   </li>
                 ) : null}
-                {wasteWords.length > 0 ? <li>No vuelve a la venta: {wasteWords.join(" y ")}.</li> : null}
+                {wasteWords.length > 0 ? (
+                  <li>No vuelve a la venta: {wasteWords.join(" y ")}.</li>
+                ) : null}
+                {chosenPayout !== LEAVE_AS_CREDIT &&
+                data?.tender &&
+                data.tender.currency !== currency ? (
+                  <li>
+                    Sale en {currencyWord(data.tender.currency, locale)}, como entró y en la misma
+                    proporción: sin cambio nuevo.
+                  </li>
+                ) : null}
                 <li>
                   {chosenPayout === LEAVE_AS_CREDIT
                     ? `Quedan ${money(total)} a favor de ${patientName}: se usan en su próximo cobro.`

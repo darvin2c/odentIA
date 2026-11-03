@@ -26,11 +26,16 @@ import {
   expensesMany,
   newPatientValue,
   upcomingWork,
+  purchasesDueOf,
 } from "./report-finance.js"
 import { activePatientsMany, funnelMany, lapsedCount, referralMany, returnedMany, STOPPED_WRITING_DAYS } from "./report-patients.js"
 import { lastMonths, reportDayOf, type ReportSpan, type YearMonth } from "./report-periods.js"
 import type { ReportScope, Span } from "./report-scope.js"
-import { budgetAcceptanceMany, getReportProfessionals, overdueDebtMany } from "./report-summary.js"
+import {
+  budgetAcceptanceMany,
+  getReportProfessionals,
+  overdueDebtTotalsMany,
+} from "./report-summary.js"
 import {
   absoluteChangeWords,
   capitalize,
@@ -244,7 +249,7 @@ export const REPORT_FIGURES: ReportFigure[] = [
     breakdown: async (ctx, group, branchId) => {
       const { window, currency } = ctx.scope
       if (group === "profesional") {
-        const rows = await collectedByProfessional(ctx.tx, ctx.orgId, { start: window.start, end: window.end, branchId }, currency)
+        const rows = await collectedByProfessional(ctx.tx, ctx.orgId, { start: window.start, end: window.end, branchId }, ctx.scope.money)
         return rows.map((row) => ({ key: row.professionalUserId, label: row.name ?? "", value: money(row.cobradoCents) }))
       }
       if (group === "medio") {
@@ -342,8 +347,13 @@ export const REPORT_FIGURES: ReportFigure[] = [
       // El impuesto de lo cobrado en el tramo, como «Lo que debes» de Finanzas (ADR 0083).
       const collected = await collectedNetMany(ctx.tx, ctx.orgId, spans, { branchId })
       return moments.map((_, index) => {
-        const tax = Math.max(0, collected[index]?.find((item) => item.currency === ctx.scope.currency)?.taxCents ?? 0)
-        return money((owed[index]?.cents ?? 0) + centsIn(purchases[index], ctx.scope.currency) + tax)
+        const tax = Math.max(
+          0,
+          collected[index]?.find((item) => item.currency === ctx.scope.currency)?.taxCents ?? 0,
+        )
+        return money(
+          (owed[index]?.cents ?? 0) + purchasesDueOf(purchases[index], ctx.scope.money).cents + tax,
+        )
       })
     },
   },
@@ -363,10 +373,15 @@ export const REPORT_FIGURES: ReportFigure[] = [
     groups: ["mes", "sede"],
     list: { key: "debts_overdue", noun: PEOPLE, feminine: true, count: (total) => total.part ?? 0, question: "¿Quiénes me deben?" },
     values: async (ctx, spans, branchId) =>
-      (await overdueDebtMany(ctx.tx, ctx.orgId, branchId, spans.map((span) => span.end))).map((list) => {
-        const found = list.find((item) => item.currency === ctx.scope.currency)
-        return { value: found?.cents ?? 0, part: found?.people ?? 0 }
-      }),
+      (
+        await overdueDebtTotalsMany(
+          ctx.tx,
+          ctx.orgId,
+          branchId,
+          spans.map((span) => span.end),
+          ctx.scope.currency,
+        )
+      ).map((item) => ({ value: item.cents, part: item.people })),
   },
   {
     key: "te_deben",

@@ -3,7 +3,9 @@
  * cada profesional, lo que te deben y lo que debes, lo que viene y qué dejó
  * cada promoción. Solo lecturas; ninguna cifra sale de un modelo.
  *
- * - Lo cobrado es `collectedNetMany` (la regla de Finanzas).
+ * - Lo cobrado es `collectedNetMany` (la regla de Finanzas). Lo que ya pasó va con
+ *   el valor congelado de cada cobro y cada gasto; lo que se debe, por moneda y con
+ *   un total aproximado al cambio de hoy (`report-value.ts`).
  * - La comisión cuenta cuando se genera, al cobrar, en su propia línea
  *   (decisión 13): `commissionsMany` es la misma cuenta de Finanzas ›
  *   Comisiones (`getMonthlyCommissions`) para varios tramos en una consulta.
@@ -20,7 +22,7 @@ import { budgetLineUnitsSql, budgetValueOptionSql } from "./budgets.js"
 import { collectedNetMany, EXPENSE_CATEGORIES } from "./finance.js"
 import { orgTaxes } from "./clinic-taxes.js"
 import { unpaidPurchasesMany } from "./purchase-balance.js"
-import { overdueDebtSql } from "./report-debts.js"
+import { overdueDebtSql, valuedDebtSql } from "./report-debts.js"
 import { addMonths, currentMonthIn, lastMonths, monthStart, type ReportBucket } from "./report-periods.js"
 import {
   at,
@@ -36,6 +38,17 @@ import {
   type Span,
   spansSql,
 } from "./report-scope.js"
+import {
+  businessFirst,
+  type CurrencyAmount,
+  foreignBreakdown,
+  type OrgMoney,
+  orgMoneySql,
+  paymentFlowSql,
+  paymentValueSql,
+  todayValueCents,
+  todayValueSql,
+} from "./report-value.js"
 
 // --- Comisiones -------------------------------------------------------------------------
 
@@ -56,11 +69,16 @@ export interface CommissionTotals {
  * cargo de un procedimiento de una atención finalizada) con su porcentaje
  * vigente; lo ya pagado, con el porcentaje y el importe con que se pagó; lo
  * pagado cuyo cobro se anuló después ya no cuenta. Solo quien sigue en la clínica.
+ * Lo nuevo va con el valor congelado de su pago; lo pagado no se toca. La base no se
+ * redondea por línea: la suma es la que se redondea.
  */
 function commissionLinesSql(orgId: string, hull: Span, currency: string, branchId: string | undefined): SQL {
   const branch = branchId ? sql`and p.branch_id = ${branchId}` : sql``
+  const line = sql`la.cents, la.payment_cents, la.business_cents, la.currency, op.currency, op.second_currency, op.exchange_factor`
+  const commission = sql`money_commission(${line}, coalesce(r.rate_bps, 0))`
   return sql`live_app as materialized (
-      select a.id, a.amount_cents::bigint as cents, a.created_at as at, e.professional_user_id as user_id
+      select a.id, a.amount_cents::bigint as cents, a.created_at as at, e.professional_user_id as user_id,
+        p.amount_cents as payment_cents, p.business_cents, p.currency::text as currency
       from patient_payment_application a
       join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id
       join patient_charge c on c.organization_id = a.organization_id and c.id = a.charge_id
@@ -68,7 +86,7 @@ function commissionLinesSql(orgId: string, hull: Span, currency: string, branchI
       join encounter e on e.organization_id = a.organization_id and e.id = ep.encounter_id
       where a.organization_id = ${orgId} and a.created_at >= ${at(hull.start)} and a.created_at < ${at(hull.end)}
         and a.voided_at is null and p.voided_at is null and c.voided_at is null and ep.voided_at is null
-        and e.status = 'finalizada' and e.voided_at is null and c.currency = ${currency} ${branch}
+        and e.status = 'finalizada' and e.voided_at is null ${branch}
     ), frozen as materialized (
       -- Lo ya pagado, con lo que se pagó. Si el cobro se anuló después, se pagó igual
       -- (cuenta en lo pagado) pero ya no es comisión del mes: se descuenta del próximo pago.
@@ -83,17 +101,19 @@ function commissionLinesSql(orgId: string, hull: Span, currency: string, branchI
       where l.organization_id = ${orgId} and l.kind = 'cobro' and l.voided_at is null and s.currency = ${currency}
         and l.occurred_at >= ${at(hull.start)} and l.occurred_at < ${at(hull.end)} ${branch}
     ), commission_line as materialized (
-      select f.user_id, f.at, case when f.live then f.base else 0 end as base, case when f.live then f.commission else 0 end as commission,
-        f.commission as paid, 0::bigint as fresh
+      select f.user_id, f.at, (case when f.live then f.base else 0 end)::numeric as base, (case when f.live then f.commission else 0 end)::numeric as commission,
+        f.commission::numeric as paid, 0::numeric as fresh
       from frozen f
       union all
-      select la.user_id, la.at, la.cents, (la.cents * coalesce(r.rate_bps, 0)) / 10000, 0, (la.cents * coalesce(r.rate_bps, 0)) / 10000
+      select la.user_id, la.at, org_money_value(${line}), ${commission}, 0, ${commission}
       from live_app la
       left join commission_rule r on r.organization_id = ${orgId} and r.professional_user_id = la.user_id
+      cross join ${orgMoneySql(orgId)}
       where not exists (select 1 from frozen f where f.application_id = la.id)
     ), member_line as (
+      -- Lo viejo en otra moneda, sin valor ni factor, no tiene base: no entra.
       select cl.* from commission_line cl
-      where exists (select 1 from member m where m.organization_id = ${orgId} and m.user_id = cl.user_id)
+      where cl.base is not null and exists (select 1 from member m where m.organization_id = ${orgId} and m.user_id = cl.user_id)
     )`
 }
 
@@ -107,8 +127,8 @@ export async function commissionsMany(
   const hull = hullOf(spans)
   const rows = await tx.execute<{ idx: number; userId: string; base: string; commission: string; paid: string; fresh: string }>(sql`
     with ${commissionLinesSql(orgId, hull, options.currency, options.branchId)}
-    select s.idx, ml.user_id as "userId", sum(ml.base)::text as base, sum(ml.commission)::text as commission,
-      sum(ml.paid)::text as paid, sum(ml.fresh)::text as fresh
+    select s.idx, ml.user_id as "userId", round(sum(ml.base))::text as base, round(sum(ml.commission))::text as commission,
+      round(sum(ml.paid))::text as paid, round(sum(ml.fresh))::text as fresh
     from member_line ml join ${spansSql(spans, "s")} on ml.at >= s.start_at and ml.at < s.end_at
     group by s.idx, ml.user_id`)
   return bySpan(
@@ -187,7 +207,7 @@ export async function commissionsOwedMany(
       group by m.idx, s.professional_user_id
     )
     select coalesce(g.idx, p.idx) as idx, coalesce(g.user_id, p.user_id) as "userId",
-      (coalesce(g.cents, 0) - coalesce(p.cents, 0))::text as owed
+      round(coalesce(g.cents, 0) - coalesce(p.cents, 0))::text as owed
     from generated g full join paid p on p.idx = g.idx and p.user_id = g.user_id`)
   return moments.map((_, index) => {
     const own = rows.filter((row) => Number(row.idx) === index).map((row) => Math.max(0, safeCents(row.owed)))
@@ -218,7 +238,8 @@ export interface ExpenseTotals {
 /**
  * Lo gastado de varios tramos en una consulta, con la regla de Finanzas: los
  * gastos del tramo que siguen en pie al cerrarlo, menos los de antes que se
- * anularon en el tramo.
+ * anularon en el tramo. Con su valor congelado, en moneda del negocio; solo lo viejo
+ * en otra moneda, sin valor ni factor, va aparte en su moneda.
  */
 export async function expensesMany(tx: Db, orgId: string, spans: Span[], options: { branchId?: string } = {}): Promise<ExpenseTotals[][]> {
   const branch = options.branchId ? sql`and e.branch_id = ${options.branchId}` : sql``
@@ -227,18 +248,27 @@ export async function expensesMany(tx: Db, orgId: string, spans: Span[], options
       when e.purchase_order_id is not null then 'compra'
       when e.sales_tax then 'impuesto_de_lo_cobrado'
       else 'gasto' end`
-  const rows = await tx.execute<{ idx: number; currency: string; category: string; kind: string; cents: string }>(sql`
-    select b.idx, x.currency, x.category, x.kind, sum(x.cents)::text as cents
+  const rows = await tx.execute<{
+    idx: number
+    currency: string
+    category: string
+    kind: string
+    cents: string
+  }>(sql`
+    select b.idx, case when v.value is null then x.currency else op.currency end as currency, x.category, x.kind,
+      round(sum(coalesce(v.value, x.cents)))::text as cents
     from ${spansSql(spans)}
+    cross join ${orgMoneySql(orgId)}
     join lateral (
-      select e.currency, e.category, ${kind} as kind, e.amount_cents::bigint as cents from expense e
+      select e.currency::text as currency, e.category, ${kind} as kind, e.amount_cents::bigint as cents, e.amount_cents, e.business_cents from expense e
       where e.organization_id = ${orgId} and e.spent_at >= b.start_at and e.spent_at < b.end_at
         and (e.voided_at is null or e.voided_at >= b.end_at) ${branch}
       union all
-      select e.currency, e.category, ${kind}, -e.amount_cents::bigint from expense e
+      select e.currency::text, e.category, ${kind}, -e.amount_cents::bigint, e.amount_cents, e.business_cents from expense e
       where e.organization_id = ${orgId} and e.spent_at < b.start_at and e.voided_at >= b.start_at and e.voided_at < b.end_at ${branch}
     ) x on true
-    group by b.idx, x.currency, x.category, x.kind`)
+    cross join lateral (select ${paymentValueSql(sql`x.cents`, "x")} as value) v
+    group by b.idx, 2, x.category, x.kind`)
   return bySpan(
     spans,
     [...rows],
@@ -294,27 +324,89 @@ function debtAgeSql(since: SQL, moment: SQL): SQL {
  * debe (conceptos menos pagos menos lo que tiene a favor) en el tramo de su
  * concepto sin pagar más antiguo. Lo de «más de 30 días» es exactamente el
  * saldo vencido de Resumen.
+ *
+ * Con dos monedas, una persona debe por separado en cada una: cada deuda va en el
+ * tramo de su moneda, y las personas se cuentan distintas (quien debe en dos cuenta
+ * una vez). Las cifras son el total aproximado al cambio de hoy y `byCurrency` dice
+ * lo que de verdad se debe; sin nada en otra moneda, `byCurrency` no viene. Lo viejo
+ * en otra moneda sin factor no entra.
  */
-export async function debtAgingMany(tx: Db, orgId: string, moments: Date[], options: { currency: string; branchId?: string }) {
-  const rows = await tx.execute<{ idx: number; owed: string; age: DebtAge }>(sql`
-    ${overdueDebtSql(orgId, moments, 0, options.branchId)}
-    select o.idx, o.owed::text as owed, ${debtAgeSql(sql`o.since`, sql`m.at_moment`)} as age
-    from overdue o join m on m.idx = o.idx where o.currency = ${options.currency}`)
+export async function debtAgingMany(
+  tx: Db,
+  orgId: string,
+  moments: Date[],
+  options: { currency: string; branchId?: string },
+) {
+  const rows = await tx.execute<{
+    idx: number
+    age: DebtAge | null
+    currency: string | null
+    owed: string
+    cents: string
+    people: number
+  }>(sql`
+    ${valuedDebtSql(orgId, moments, 0, options.branchId)}, aged as (
+      select valued.*, ${debtAgeSql(sql`valued.since`, sql`m.at_moment`)} as age from valued join m on m.idx = valued.idx
+    )
+    select idx, age, currency, sum(owed)::text as owed, round(sum(value))::text as cents, count(distinct patient_id)::int as people
+    from aged where value is not null
+    group by grouping sets ((idx), (idx, currency), (idx, age), (idx, age, currency))`)
   return moments.map((_, index) => {
-    const ages = DEBT_AGES.map((age) => ({ key: age.key, cents: 0, people: 0 }))
-    for (const row of rows) {
-      if (Number(row.idx) !== index) continue
-      const slot = ages.find((age) => age.key === row.age)
-      if (!slot) continue
-      slot.cents += safeCents(row.owed)
-      slot.people += 1
+    const own = rows.filter((row) => Number(row.idx) === index)
+    const slice = (age: DebtAge | null) => {
+      const list = own.filter((row) => row.age === age)
+      const total = list.find((row) => row.currency === null)
+      return {
+        cents: safeCents(total?.cents),
+        people: total?.people ?? 0,
+        parts: list.flatMap((row) =>
+          row.currency === null ? [] : [{ currency: row.currency, cents: safeCents(row.owed) }],
+        ),
+      }
     }
+    const all = slice(null)
+    // Si algo va en otra moneda, cada tramo dice lo suyo aunque sea solo de la del negocio.
+    const foreign = foreignBreakdown(all.parts, options.currency).byCurrency !== undefined
+    const inEach = (parts: CurrencyAmount[]) =>
+      foreign ? { byCurrency: businessFirst(parts, options.currency) } : {}
     return {
-      totalCents: ages.reduce((total, age) => total + age.cents, 0),
-      people: ages.reduce((total, age) => total + age.people, 0),
-      ages,
+      totalCents: all.cents,
+      people: all.people,
+      ...inEach(all.parts),
+      ages: DEBT_AGES.map((age) => {
+        const { cents, people, parts } = slice(age.key)
+        return { key: age.key, cents, people, ...inEach(parts) }
+      }),
     }
   })
+}
+
+/**
+ * Lo que se debe a proveedores: el total aproximado al cambio de hoy, con lo que se
+ * debe en cada moneda si hay algo en otra. Lo viejo en otra moneda sin factor no entra.
+ */
+export function purchasesDueOf(
+  list:
+    | Array<{ currency: string; cents: number; orders: number; oldestReceivedAt: Date | null }>
+    | undefined,
+  money: OrgMoney,
+) {
+  const valued = (list ?? []).flatMap((item) => {
+    const value = todayValueCents(item.cents, item.currency, money)
+    return value === null ? [] : [{ ...item, value }]
+  })
+  const oldest = valued.flatMap((item) =>
+    item.oldestReceivedAt ? [item.oldestReceivedAt.getTime()] : [],
+  )
+  return {
+    cents: valued.reduce((total, item) => total + item.value, 0),
+    orders: valued.reduce((total, item) => total + item.orders, 0),
+    oldestReceivedAt: oldest.length > 0 ? new Date(Math.min(...oldest)).toISOString() : null,
+    ...foreignBreakdown(
+      valued.map((item) => ({ currency: item.currency, cents: item.cents })),
+      money.currency,
+    ),
+  }
 }
 
 // --- Lo que viene y cuánto vale un paciente ---------------------------------------------
@@ -322,13 +414,21 @@ export async function debtAgingMany(tx: Db, orgId: string, moments: Date[], opti
 /**
  * Lo que viene, a hoy: lo aceptado en presupuestos que aún no se hizo, a su
  * precio acordado, y de eso lo de pacientes sin cita por venir. De la persona,
- * no de una sede.
+ * no de una sede. Aún no se cobra: lo de otra moneda va al cambio de hoy y
+ * `byCurrency` dice cuánto es en cada una.
  */
 export async function upcomingWork(tx: Db, orgId: string, currency: string, now: Date) {
   const budget = { id: sql`b.id`, organizationId: sql`b.organization_id` }
-  const [row] = await tx.execute<{ cents: string; patients: number; unbookedCents: string; unbookedPatients: number }>(sql`
+  const rows = await tx.execute<{
+    currency: string | null
+    original: string | null
+    cents: string
+    patients: number
+    unbookedCents: string
+    unbookedPatients: number
+  }>(sql`
     with pending as (
-      select b.patient_id,
+      select b.patient_id, i.currency::text as currency,
         i.price_cents::bigint * ${budgetLineUnitsSql({ billingMode: sql`i.billing_mode`, sessionsPlanned: sql`i.sessions_planned` })} as cents,
         not exists (
           select 1 from appointment a where a.organization_id = b.organization_id and a.patient_id = b.patient_id
@@ -338,17 +438,27 @@ export async function upcomingWork(tx: Db, orgId: string, currency: string, now:
       join treatment_budget_item i on i.organization_id = b.organization_id and i.budget_id = b.id
         and i.option_id = ${budgetValueOptionSql(budget)} and i.decision = 'aceptado' and i.price_cents is not null
       left join treatment_plan_item pi on pi.organization_id = i.organization_id and pi.id = i.plan_item_id
-      where b.organization_id = ${orgId} and b.status in ('aceptado','parcial') and b.currency = ${currency}
+      where b.organization_id = ${orgId} and b.status in ('aceptado','parcial')
         and (pi.id is null or pi.status not in ('realizado','cancelado','reemplazado'))
+    ), valued as (
+      select pending.*, ${todayValueSql(sql`pending.cents`, sql`pending.currency`)} as value from pending cross join ${orgMoneySql(orgId)}
     )
-    select coalesce(sum(cents), 0)::text as cents, count(distinct patient_id)::int as patients,
-      coalesce(sum(cents) filter (where unbooked), 0)::text as "unbookedCents",
-      count(distinct patient_id) filter (where unbooked)::int as "unbookedPatients"
-    from pending`)
+    select currency, sum(cents) filter (where value is not null)::text as original,
+      round(coalesce(sum(value), 0))::text as cents, count(distinct patient_id) filter (where value is not null)::int as patients,
+      round(coalesce(sum(value) filter (where unbooked), 0))::text as "unbookedCents",
+      count(distinct patient_id) filter (where unbooked and value is not null)::int as "unbookedPatients"
+    from valued group by grouping sets ((), (currency))`)
+  const row = rows.find((item) => item.currency === null)
+  const parts = rows.flatMap((item) =>
+    item.currency !== null && item.original !== null
+      ? [{ currency: item.currency, cents: safeCents(item.original) }]
+      : [],
+  )
   return {
     cents: safeCents(row?.cents),
     patients: row?.patients ?? 0,
     unbooked: { cents: safeCents(row?.unbookedCents), patients: row?.unbookedPatients ?? 0 },
+    ...foreignBreakdown(parts, currency),
   }
 }
 
@@ -372,48 +482,125 @@ export async function newPatientValue(tx: Db, orgId: string, end: Date, options:
         ${options.branchId ? sql`and branch_id = ${options.branchId}` : sql``}
     ), paid as (
       select c.patient_id,
-        coalesce((select sum(p.amount_cents) from patient_payment p where p.organization_id = ${orgId} and p.patient_id = c.patient_id
-          and p.currency = ${options.currency} and p.voided_at is null and p.paid_at >= c.starts_at and p.paid_at < c.starts_at + interval '6 months'), 0)
-        - coalesce((select sum(r.amount_cents) from patient_payment_refund r join patient_payment p on p.organization_id = r.organization_id and p.id = r.payment_id
-          where r.organization_id = ${orgId} and r.patient_id = c.patient_id and p.currency = ${options.currency}
+        coalesce((select sum(${paymentValueSql(sql`p.amount_cents`)}) from patient_payment p where p.organization_id = ${orgId} and p.patient_id = c.patient_id
+          and p.voided_at is null and p.paid_at >= c.starts_at and p.paid_at < c.starts_at + interval '6 months'), 0)
+        - coalesce((select sum(${paymentValueSql(sql`r.amount_cents`)}) from patient_payment_refund r join patient_payment p on p.organization_id = r.organization_id and p.id = r.payment_id
+          where r.organization_id = ${orgId} and r.patient_id = c.patient_id
             and r.refunded_at >= c.starts_at and r.refunded_at < c.starts_at + interval '6 months'), 0) as cents
-      from cohort c
+      from cohort c cross join ${orgMoneySql(orgId)}
     )
-    select count(*)::int as patients, coalesce(sum(cents), 0)::text as cents from paid`)
+    select count(*)::int as patients, round(coalesce(sum(cents), 0))::text as cents from paid`)
   const patients = row?.patients ?? 0
   return { patients, averageCents: patients > 0 ? Math.round(safeCents(row?.cents) / patients) : null }
 }
 
 // --- De dónde vino lo cobrado -----------------------------------------------------------
 
-/** Lo cobrado del tramo por medio de pago, con la regla de Finanzas (anulaciones y devoluciones restan). */
+/**
+ * Lo cobrado del tramo por medio de pago, con la regla de Finanzas (anulaciones y
+ * devoluciones restan): cada medio con su valor en moneda del negocio. Si algo entró
+ * en otra moneda, `entered` dice lo que entró en cada una, que es lo que se compara
+ * con el arqueo de su caja: lo devuelto, lo que de verdad salió.
+ */
 export async function collectedByMethod(tx: Db, orgId: string, span: Span, options: { currency: string; branchId?: string }) {
-  const branch = options.branchId ? sql`and p.branch_id = ${options.branchId}` : sql``
-  const rows = await tx.execute<{ method: string; cash: boolean; cents: string }>(sql`
-    select x.method, bool_or(x.cash) as cash, sum(x.cents)::text as cents from (
-      select p.method_name as method, p.method_type_code = '10' as cash, p.amount_cents::bigint as cents from patient_payment p
-      where p.organization_id = ${orgId} and p.currency = ${options.currency} and p.paid_at >= ${at(span.start)} and p.paid_at < ${at(span.end)}
-        and (p.voided_at is null or p.voided_at >= ${at(span.end)}) ${branch}
-      union all
-      select p.method_name, p.method_type_code = '10', -p.amount_cents::bigint from patient_payment p
-      where p.organization_id = ${orgId} and p.currency = ${options.currency} and p.paid_at < ${at(span.start)}
-        and p.voided_at >= ${at(span.start)} and p.voided_at < ${at(span.end)} ${branch}
-      union all
-      select p.method_name, p.method_type_code = '10', -r.amount_cents::bigint from patient_payment_refund r
-      join patient_payment p on p.organization_id = r.organization_id and p.id = r.payment_id
-      where r.organization_id = ${orgId} and p.currency = ${options.currency} and r.refunded_at >= ${at(span.start)} and r.refunded_at < ${at(span.end)} ${branch}
-    ) x group by x.method`)
-  const closures = await tx.execute<{ count: number; cash: string }>(sql`
-    select count(*)::int as count, coalesce(sum(cash_collected_cents - cash_refunded_cents), 0)::text as cash from cash_closure
-    where organization_id = ${orgId} and currency = ${options.currency} and closed_at >= ${at(span.start)} and closed_at < ${at(span.end)}
-      ${options.branchId ? sql`and branch_id = ${options.branchId}` : sql``}`)
+  const rows = await tx.execute<{
+    method: string
+    cash: boolean
+    enteredCurrency: string
+    cents: string
+    entered: string
+  }>(sql`
+    select x.method, bool_or(x.cash) as cash, x.entered_currency as "enteredCurrency", round(sum(v.value))::text as cents, round(sum(x.entered))::text as entered from (
+      ${paymentFlowSql(orgId, at(span.start), at(span.end), options.branchId)}
+    ) x
+    cross join ${orgMoneySql(orgId)}
+    cross join lateral (select ${paymentValueSql(sql`x.cents`, "x")} as value) v
+    where v.value is not null
+    group by x.method, x.entered_currency`)
+  const closures = await tx.execute<{ currency: string; count: number; cash: string }>(sql`
+    select currency::text as currency, count(*)::int as count, coalesce(sum(cash_collected_cents - cash_refunded_cents), 0)::text as cash from cash_closure
+    where organization_id = ${orgId} and closed_at >= ${at(span.start)} and closed_at < ${at(span.end)}
+      ${options.branchId ? sql`and branch_id = ${options.branchId}` : sql``}
+    group by currency`)
+  const labels = [...new Set(rows.map((row) => row.method))]
+  const business = closures.find((row) => row.currency === options.currency)
+  const otherClosures = closures.filter((row) => row.currency !== options.currency)
   return {
-    methods: rows
-      .map((row) => ({ label: row.method, cash: row.cash, cents: safeCents(row.cents) }))
+    methods: labels
+      .map((label) => {
+        const own = rows.filter((row) => row.method === label)
+        const foreign = own.some((row) => row.enteredCurrency !== options.currency)
+        return {
+          label,
+          cash: own.some((row) => row.cash),
+          cents: own.reduce((total, row) => total + safeCents(row.cents), 0),
+          ...(foreign
+            ? {
+                entered: businessFirst(
+                  own.map((row) => ({
+                    currency: row.enteredCurrency,
+                    cents: safeCents(row.entered),
+                    valueCents: safeCents(row.cents),
+                  })),
+                  options.currency,
+                ),
+              }
+            : {}),
+        }
+      })
       .filter((row) => row.cents !== 0)
       .sort((a, b) => b.cents - a.cents),
-    closures: { count: closures[0]?.count ?? 0, cashCents: safeCents(closures[0]?.cash) },
+    closures: {
+      count: business?.count ?? 0,
+      cashCents: safeCents(business?.cash),
+      ...(otherClosures.length > 0
+        ? {
+            others: otherClosures.map((row) => ({
+              currency: row.currency,
+              count: row.count,
+              cashCents: safeCents(row.cash),
+            })),
+          }
+        : {}),
+    },
   }
+}
+
+/**
+ * Lo que entró menos lo que salió en cada moneda: lo que de verdad se movió, sin
+ * cambio de por medio. Cobros, gastos y el vuelto en otra moneda, cada uno en la
+ * moneda en que entró o salió.
+ */
+async function moneyFlowByCurrency(
+  tx: Db,
+  orgId: string,
+  span: Span,
+  business: string,
+  branchId: string | undefined,
+): Promise<CurrencyAmount[]> {
+  const expenseBranch = branchId ? sql`and e.branch_id = ${branchId}` : sql``
+  const rows = await tx.execute<{ currency: string; cents: string }>(sql`
+    select x.currency, round(sum(x.cents))::text as cents from (
+      select f.entered_currency as currency, f.entered as cents from (${paymentFlowSql(orgId, at(span.start), at(span.end), branchId)}) f
+      union all
+      select coalesce(e.tender_currency, e.currency)::text, -coalesce(e.tender_cents, e.amount_cents)::numeric from expense e
+      where e.organization_id = ${orgId} and e.spent_at >= ${at(span.start)} and e.spent_at < ${at(span.end)}
+        and (e.voided_at is null or e.voided_at >= ${at(span.end)}) ${expenseBranch}
+      union all
+      select coalesce(e.tender_currency, e.currency)::text, coalesce(e.tender_cents, e.amount_cents)::numeric from expense e
+      where e.organization_id = ${orgId} and e.spent_at < ${at(span.start)} and e.voided_at >= ${at(span.start)} and e.voided_at < ${at(span.end)} ${expenseBranch}
+      union all
+      select m.currency::text, (case when m.direction = 'ingreso' then m.amount_cents else -m.amount_cents end)::numeric
+      from cash_movement m join cash_shift s on s.organization_id = m.organization_id and s.id = m.shift_id
+      where m.organization_id = ${orgId} and m.kind = 'vuelto' and m.voided_at is null and m.created_at >= ${at(span.start)} and m.created_at < ${at(span.end)}
+        ${branchId ? sql`and s.branch_id = ${branchId}` : sql``}
+    ) x group by x.currency`)
+  return businessFirst(
+    rows
+      .map((row) => ({ currency: row.currency, cents: safeCents(row.cents) }))
+      .filter((row) => row.cents !== 0),
+    business,
+  )
 }
 
 /** Tratamientos a la vista; el resto va en «Otros». */
@@ -423,39 +610,42 @@ const TREATMENTS_SHOWN = 6
  * Lo aplicado en el tramo a cargos de cada servicio (los 6 mayores y «Otros»).
  * Una devolución (ADR 0068) no reescribe el día del cobro: lo pagado cuenta el
  * día que se aplicó, la parte que pasa a un concepto rebajado no vuelve a
- * contar, y lo devuelto se resta el día de la devolución.
+ * contar, y lo devuelto se resta el día de la devolución. Con el valor congelado de
+ * su pago, en moneda del negocio: se redondea sobre la suma de cada tratamiento.
  */
 export async function collectedByTreatment(tx: Db, orgId: string, span: Span, options: { currency: string; branchId?: string }) {
   const branch = options.branchId ? sql`and p.branch_id = ${options.branchId}` : sql``
   const rows = await tx.execute<{ name: string; cents: string }>(sql`
     with x as (
-      select coalesce(sc.name, c.description) as name, a.amount_cents::bigint as cents
+      select coalesce(sc.name, c.description) as name, ${paymentValueSql(sql`a.amount_cents`)} as cents
       from patient_payment_application a
       join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id
       join patient_charge c on c.organization_id = a.organization_id and c.id = a.charge_id
       left join encounter_procedure ep on ep.organization_id = c.organization_id and ep.id = c.encounter_procedure_id
       left join treatment_budget_item bi on bi.organization_id = c.organization_id and bi.id = c.budget_item_id
       left join service_catalog sc on sc.organization_id = c.organization_id and sc.id = coalesce(ep.service_id, bi.service_id)
-      where a.organization_id = ${orgId} and c.currency = ${options.currency} and a.replaces_application_id is null
+      cross join ${orgMoneySql(orgId)}
+      where a.organization_id = ${orgId} and a.replaces_application_id is null
         and a.created_at >= ${at(span.start)} and a.created_at < ${at(span.end)}
         and (a.voided_at is null or a.voided_at >= ${at(span.end)} or a.return_id is not null)
         and (c.voided_at is null or c.voided_at >= ${at(span.end)} or a.return_id is not null)
         and (p.voided_at is null or p.voided_at >= ${at(span.end)}) ${branch}
       union all
       select coalesce(sc.name, c.description),
-        -(a.amount_cents - coalesce((select sum(n.amount_cents) from patient_payment_application n
-          where n.organization_id = a.organization_id and n.replaces_application_id = a.id), 0))::bigint
+        -${paymentValueSql(sql`(a.amount_cents - coalesce((select sum(n.amount_cents) from patient_payment_application n
+          where n.organization_id = a.organization_id and n.replaces_application_id = a.id), 0))`)}
       from patient_payment_application a
       join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id
       join patient_charge c on c.organization_id = a.organization_id and c.id = a.charge_id
       left join encounter_procedure ep on ep.organization_id = c.organization_id and ep.id = c.encounter_procedure_id
       left join treatment_budget_item bi on bi.organization_id = c.organization_id and bi.id = c.budget_item_id
       left join service_catalog sc on sc.organization_id = c.organization_id and sc.id = coalesce(ep.service_id, bi.service_id)
-      where a.organization_id = ${orgId} and c.currency = ${options.currency} and a.return_id is not null
+      cross join ${orgMoneySql(orgId)}
+      where a.organization_id = ${orgId} and a.return_id is not null
         and a.voided_at >= ${at(span.start)} and a.voided_at < ${at(span.end)}
         and (p.voided_at is null or p.voided_at >= ${at(span.end)}) ${branch}
     )
-    select name, sum(cents)::text as cents from x group by 1 order by sum(cents) desc`)
+    select name, round(sum(cents))::text as cents from x group by 1 order by sum(cents) desc`)
   const all = rows.map((row) => ({ name: row.name, cents: safeCents(row.cents) })).filter((row) => row.cents > 0)
   const rest = all.slice(TREATMENTS_SHOWN)
   return {
@@ -482,14 +672,25 @@ async function missingExpenses(tx: Db, orgId: string, scope: ReportScope) {
   const end = monthStart(timezone, addMonths(month, 1).year, addMonths(month, 1).month)
   const key = (value: { year: number; month: number }) => `${value.year}-${String(value.month).padStart(2, "0")}`
   const branch = scope.branch ? sql`and e.branch_id = ${scope.branch.id}` : sql``
-  const rows = await tx.execute<{ month: string; branchId: string; branchName: string; category: string; cents: string; lastDay: number; concept: string; lastCents: number }>(sql`
+  const rows = await tx.execute<{
+    month: string
+    branchId: string
+    branchName: string
+    category: string
+    cents: string
+    lastDay: number
+    concept: string
+    lastCents: string
+  }>(sql`
     select to_char(e.spent_at at time zone ${timezone}, 'YYYY-MM') as month, e.branch_id as "branchId", b.name as "branchName", e.category,
-      sum(e.amount_cents)::text as cents,
+      round(sum(v.value))::text as cents,
       max(extract(day from e.spent_at at time zone ${timezone}))::int as "lastDay",
       (array_agg(e.concept order by e.spent_at desc))[1] as concept,
-      (array_agg(e.amount_cents order by e.spent_at desc))[1] as "lastCents"
+      (array_agg(round(v.value)::text order by e.spent_at desc))[1] as "lastCents"
     from expense e join branch b on b.organization_id = e.organization_id and b.id = e.branch_id
-    where e.organization_id = ${orgId} and e.voided_at is null and e.currency = ${scope.currency}
+    cross join ${orgMoneySql(orgId)}
+    cross join lateral (select ${paymentValueSql(sql`e.amount_cents`, "e")} as value) v
+    where e.organization_id = ${orgId} and e.voided_at is null and v.value is not null
       and e.spent_at >= ${at(start)} and e.spent_at < ${at(end)} ${branch}
       and not exists (select 1 from commission_settlement s where s.organization_id = e.organization_id and s.expense_id = e.id)
       -- El pago de una compra tampoco: depende de lo que se compró, y «Copiar el de…» no debe copiarlo.
@@ -521,8 +722,16 @@ async function missingExpenses(tx: Db, orgId: string, scope: ReportScope) {
     out.push({
       category: pair.category,
       branch: { id: pair.branchId, name: pair.branchName },
-      previous: previous.map((row) => ({ month: (row as (typeof rows)[number]).month, cents: safeCents((row as (typeof rows)[number]).cents) })),
-      copy: { month: last.month, concept: last.concept, amountCents: last.lastCents, day: last.lastDay },
+      previous: previous.map((row) => ({
+        month: (row as (typeof rows)[number]).month,
+        cents: safeCents((row as (typeof rows)[number]).cents),
+      })),
+      copy: {
+        month: last.month,
+        concept: last.concept,
+        amountCents: safeCents(last.lastCents),
+        day: last.lastDay,
+      },
     })
   }
   return out.sort((a, b) => EXPENSE_CATEGORIES.indexOf(a.category as (typeof EXPENSE_CATEGORIES)[number]) - EXPENSE_CATEGORIES.indexOf(b.category as (typeof EXPENSE_CATEGORIES)[number]))
@@ -541,7 +750,8 @@ const sumOf = (list: CommissionTotals[] | undefined, pick: (item: CommissionTota
  * Reportes › Finanzas: cobrado, lo que deja el periodo, comisiones y lo que te
  * deben, con el anterior y su línea de 12 meses; la cascada de lo cobrado a lo
  * que deja; cada tramo (cobrado, comisiones, otros gastos); lo que debes; y de
- * dónde vino lo cobrado. En la moneda de la clínica: otra moneda se dice aparte.
+ * dónde vino lo cobrado. Todo en la moneda de la clínica; solo lo viejo en otra
+ * moneda, sin valor ni factor, se dice aparte.
  */
 export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery, now: Date = new Date()) {
   const scope = await reportScope(tx, orgId, query, now)
@@ -580,8 +790,9 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
   })
   const period = spent(0)
   const owedOverdue = (index: number): number =>
-    (debts[index]?.ages ?? []).filter((age) => age.key !== "0_30").reduce((total, age) => total + age.cents, 0)
-  const purchasesDue = inCurrency(unpaid, currency)
+    (debts[index]?.ages ?? [])
+      .filter((age) => age.key !== "0_30")
+      .reduce((total, age) => total + age.cents, 0)
   // Por profesional y solo de quienes siguen en la clínica (`commissionsMany`), como la tabla de Comisiones.
   const pending = (commissions[0] ?? []).map((item) => pendingOf(item, adjustments))
 
@@ -594,8 +805,12 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
     totals: { current: tramo(0), previous: tramo(1) },
     /** Los 12 meses de cada línea pequeña. */
     trend: months.map((_, index) => tramo(index + 2)),
-    /** Otras monedas del periodo, si las hubo: nunca se suman. */
+    /** Lo cobrado en otra moneda sin valor ni factor (filas viejas): no se puede sumar. Lo de hoy tiene su valor y ya está en las cifras. */
     otherCurrencies: (collected[0] ?? []).filter((item) => item.currency !== currency).map((item) => ({ currency: item.currency, cobradoCents: item.cents })),
+    /** Solo con segunda moneda: lo que entró menos lo que salió en cada una («En caja quedó» no se puede sumar). */
+    ...(scope.money.secondCurrency
+      ? { moneyFlow: await moneyFlowByCurrency(tx, orgId, window, currency, branchId) }
+      : {}),
     commissions: {
       generatedCents: generated(0),
       paidCents: sumOf(commissions[0], (item) => item.paidCents),
@@ -632,9 +847,7 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
     payables: {
       commissions: owedCommissions ?? { cents: 0, professionals: 0 },
       salesTax: { cents: Math.max(0, taxOf(0)) },
-      purchases: purchasesDue
-        ? { cents: purchasesDue.cents, orders: purchasesDue.orders, oldestReceivedAt: purchasesDue.oldestReceivedAt?.toISOString() ?? null }
-        : { cents: 0, orders: 0, oldestReceivedAt: null },
+      purchases: purchasesDueOf(unpaid, scope.money),
     },
     missing: await missingExpenses(tx, orgId, scope),
     byMethod: await collectedByMethod(tx, orgId, window, { currency, branchId }),
@@ -656,11 +869,12 @@ export async function getReportCommissions(tx: Db, orgId: string, query: ReportQ
   // Lo que atendió en el periodo (precio × cantidad) y lo que de eso sigue sin cobrar hoy.
   const attended = await tx.execute<{ userId: string; name: string; cents: string; unpaid: string }>(sql`
     select e.professional_user_id as "userId", u.name,
-      sum(ep.price_cents::bigint * ep.quantity)::text as cents,
-      sum(case when ch.charges > 0 then ch.unpaid else ep.price_cents::bigint * ep.quantity end)::text as unpaid
+      round(sum(${todayValueSql(sql`ep.price_cents::bigint * ep.quantity`, sql`ep.currency`)}))::text as cents,
+      round(sum(${todayValueSql(sql`case when ch.charges > 0 then ch.unpaid else ep.price_cents::bigint * ep.quantity end`, sql`ep.currency`)}))::text as unpaid
     from encounter_procedure ep
     join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id
     join "user" u on u.id = e.professional_user_id
+    cross join ${orgMoneySql(orgId)}
     left join lateral (
       -- Los cargos vigentes del procedimiento, juntos: con más de uno, lo atendido no se suma dos veces.
       select count(*) as charges, sum(greatest(c.amount_cents - coalesce(ap.applied, 0), 0)) as unpaid
@@ -671,7 +885,8 @@ export async function getReportCommissions(tx: Db, orgId: string, query: ReportQ
       ) ap on true
       where c.organization_id = ep.organization_id and c.encounter_procedure_id = ep.id and c.voided_at is null
     ) ch on true
-    where ep.organization_id = ${orgId} and ep.voided_at is null and ep.price_cents is not null and ep.currency = ${currency}
+    where ep.organization_id = ${orgId} and ep.voided_at is null and ep.price_cents is not null
+      and (ep.currency = op.currency or ep.currency = op.second_currency)
       and e.status = 'finalizada' and e.voided_at is null
       and e.finalized_at >= ${at(window.start)} and e.finalized_at < ${at(window.end)}
       ${branchId ? sql`and e.branch_id = ${branchId}` : sql``}
@@ -743,19 +958,23 @@ export type PromotionVerdict = "solo_bajo_precio" | "trajo_nuevos" | "volvieron"
  */
 export async function getReportPromotions(tx: Db, orgId: string, query: ReportQuery, now: Date = new Date()) {
   const scope = await reportScope(tx, orgId, query, now)
-  const { window, currency } = scope
+  const { window } = scope
   const budget = { id: sql`b.id`, organizationId: sql`b.organization_id` }
   const units = budgetLineUnitsSql({ billingMode: sql`i.billing_mode`, sessionsPlanned: sql`i.sessions_planned` })
+  // Cuenta lo que tiene valor: la moneda del negocio y su otra moneda, cada línea en la
+  // suya (la cabecera del presupuesto no se lee). Una clínica de una moneda cuenta lo de
+  // siempre, y lo descontado en la otra entra al cambio de hoy, como en Argos.
+  const countedCurrency = (column: SQL): SQL => sql`(${column} = op.currency or ${column} = op.second_currency)`
   // Lo que se dejó de cobrar sale solo de lo aceptado (y de los cobros): un presupuesto
   // rechazado, pospuesto, reemplazado o cancelado no se cobra, y uno reemplazado no se
   // suma con su reemplazo.
   const acceptedLine = sql`b.status in ('aceptado','parcial') and i.decision = 'aceptado'`
-  /** Lo que pagó la persona desde `from` hasta hoy, menos lo devuelto de esos mismos pagos: la misma cuenta por promoción y en el total. */
+  /** Lo que pagó la persona desde `from` hasta hoy, con el valor de cada pago, menos lo devuelto de esos mismos pagos: la misma cuenta por promoción y en el total. */
   const collectedSince = (patient: SQL, from: SQL): SQL => sql`
-    coalesce((select sum(x.amount_cents) from patient_payment x where x.organization_id = ${orgId} and x.patient_id = ${patient}
-      and x.currency = ${currency} and x.voided_at is null and x.paid_at >= ${from} and x.paid_at < ${at(now)}), 0)
-    - coalesce((select sum(r.amount_cents) from patient_payment_refund r join patient_payment x on x.organization_id = r.organization_id and x.id = r.payment_id
-      where r.organization_id = ${orgId} and r.patient_id = ${patient} and x.currency = ${currency} and x.voided_at is null
+    coalesce((select sum(${paymentValueSql(sql`x.amount_cents`, "x")}) from patient_payment x where x.organization_id = ${orgId} and x.patient_id = ${patient}
+      and x.voided_at is null and x.paid_at >= ${from} and x.paid_at < ${at(now)}), 0)
+    - coalesce((select sum(${paymentValueSql(sql`r.amount_cents`, "x")}) from patient_payment_refund r join patient_payment x on x.organization_id = r.organization_id and x.id = r.payment_id
+      where r.organization_id = ${orgId} and r.patient_id = ${patient} and x.voided_at is null
         and x.paid_at >= ${from} and r.refunded_at < ${at(now)}), 0)`
   const rows = await tx.execute<{
     promotionId: string
@@ -772,21 +991,23 @@ export async function getReportPromotions(tx: Db, orgId: string, query: ReportQu
   }>(sql`
     with uses as (
       select i.promotion_id, b.patient_id, b.presented_at as at,
-        case when ${acceptedLine} then greatest(coalesce(i.tariff_price_cents, i.price_cents) - i.price_cents, 0)::bigint * ${units} else 0 end as discount,
+        case when ${acceptedLine} then ${todayValueSql(sql`greatest(coalesce(i.tariff_price_cents, i.price_cents) - i.price_cents, 0)::bigint * ${units}`, sql`i.currency::text`)} else 0 end as discount,
         (${acceptedLine}) as accepted
       from treatment_budget b
       join treatment_budget_item i on i.organization_id = b.organization_id and i.budget_id = b.id
         and i.option_id = ${budgetValueOptionSql(budget)} and i.promotion_id is not null and i.price_cents is not null
-      where b.organization_id = ${orgId} and b.currency = ${currency} and b.status <> 'borrador'
+      cross join ${orgMoneySql(orgId)}
+      where b.organization_id = ${orgId} and ${countedCurrency(sql`i.currency::text`)} and b.status <> 'borrador'
         and b.presented_at >= ${at(window.start)} and b.presented_at < ${at(window.end)}
       union all
       select c.promotion_id::uuid, c.patient_id, c.created_at,
-        greatest(coalesce(sc.price_cents::bigint * coalesce(ep.quantity, 1), c.amount_cents) - c.amount_cents, 0),
+        ${todayValueSql(sql`greatest(coalesce(sc.price_cents::bigint * coalesce(ep.quantity, 1), c.amount_cents) - c.amount_cents, 0)`, sql`c.currency::text`)},
         true
       from patient_charge c
       left join encounter_procedure ep on ep.organization_id = c.organization_id and ep.id = c.encounter_procedure_id
-      left join service_catalog sc on sc.organization_id = c.organization_id and sc.id = ep.service_id
-      where c.organization_id = ${orgId} and c.currency = ${currency} and c.voided_at is null and c.budget_item_id is null
+      left join service_catalog sc on sc.organization_id = c.organization_id and sc.id = ep.service_id and sc.currency = c.currency
+      cross join ${orgMoneySql(orgId)}
+      where c.organization_id = ${orgId} and ${countedCurrency(sql`c.currency::text`)} and c.voided_at is null and c.budget_item_id is null
         and c.promotion_id ~ '^[0-9a-f]{8}-[0-9a-f-]{27}$'
         and c.created_at >= ${at(window.start)} and c.created_at < ${at(window.end)}
     ), person as (
@@ -799,13 +1020,13 @@ export async function getReportPromotions(tx: Db, orgId: string, query: ReportQu
         ${collectedSince(sql`p.patient_id`, sql`p.first_at`)} as collected,
         exists (select 1 from patient_charge c where c.organization_id = ${orgId} and c.patient_id = p.patient_id and c.voided_at is null
           and c.created_at > p.first_at + interval '1 day' and c.promotion_id is distinct from p.promotion_id::text) as returned
-      from person p
+      from person p cross join ${orgMoneySql(orgId)}
     )
     select j.promotion_id as "promotionId", pr.name, pr.starts_at as "startsAt", pr.ends_at as "endsAt",
       count(*)::int as people, count(*) filter (where j.fresh)::int as fresh,
       count(*) filter (where j.accepted)::int as accepted, count(*) filter (where j.collected > 0)::int as "paidSome",
       count(*) filter (where j.returned)::int as returned,
-      sum(j.discount)::text as discount, sum(j.collected)::text as collected
+      round(sum(j.discount))::text as discount, round(sum(j.collected))::text as collected
     from judged j join promotion pr on pr.organization_id = ${orgId} and pr.id = j.promotion_id
     group by j.promotion_id, pr.name, pr.starts_at, pr.ends_at`)
   // Quiénes usaron alguna y lo que pagaron, sin contar dos veces a quien usó dos: lo
@@ -815,24 +1036,27 @@ export async function getReportPromotions(tx: Db, orgId: string, query: ReportQu
       select b.patient_id, b.presented_at as at from treatment_budget b
       join treatment_budget_item i on i.organization_id = b.organization_id and i.budget_id = b.id
         and i.option_id = ${budgetValueOptionSql(budget)} and i.promotion_id is not null and i.price_cents is not null
-      where b.organization_id = ${orgId} and b.currency = ${currency} and b.status <> 'borrador'
+      cross join ${orgMoneySql(orgId)}
+      where b.organization_id = ${orgId} and ${countedCurrency(sql`i.currency::text`)} and b.status <> 'borrador'
         and b.presented_at >= ${at(window.start)} and b.presented_at < ${at(window.end)}
       union all
       select c.patient_id, c.created_at from patient_charge c
-      where c.organization_id = ${orgId} and c.currency = ${currency} and c.voided_at is null and c.budget_item_id is null
+      cross join ${orgMoneySql(orgId)}
+      where c.organization_id = ${orgId} and ${countedCurrency(sql`c.currency::text`)} and c.voided_at is null and c.budget_item_id is null
         and c.promotion_id ~ '^[0-9a-f]{8}-[0-9a-f-]{27}$' and c.created_at >= ${at(window.start)} and c.created_at < ${at(window.end)}
     ), person as (select patient_id, min(at) as first_at from uses group by patient_id)
     select count(*)::int as people, count(*) filter (where not exists (
       select 1 from appointment a where a.organization_id = ${orgId} and a.patient_id = person.patient_id and a.status = 'atendida' and a.starts_at < person.first_at))::int as fresh,
-      coalesce(sum(${collectedSince(sql`person.patient_id`, sql`person.first_at`)}), 0)::text as collected
-    from person`)
+      round(coalesce(sum(${collectedSince(sql`person.patient_id`, sql`person.first_at`)}), 0))::text as collected
+    from person cross join ${orgMoneySql(orgId)}`)
   const [loose] = await tx.execute<{ count: number; cents: string }>(sql`
-    select count(*)::int as count, coalesce(sum((i.tariff_price_cents - i.price_cents)::bigint * ${units}), 0)::text as cents
+    select count(*)::int as count, round(coalesce(sum(${todayValueSql(sql`(i.tariff_price_cents - i.price_cents)::bigint * ${units}`, sql`i.currency::text`)}), 0))::text as cents
     from treatment_budget b
     join treatment_budget_item i on i.organization_id = b.organization_id and i.budget_id = b.id
       and i.option_id = ${budgetValueOptionSql(budget)} and i.promotion_id is null
       and i.tariff_price_cents is not null and i.price_cents is not null and i.tariff_price_cents > i.price_cents
-    where b.organization_id = ${orgId} and b.currency = ${currency} and ${acceptedLine}
+    cross join ${orgMoneySql(orgId)}
+    where b.organization_id = ${orgId} and ${countedCurrency(sql`i.currency::text`)} and ${acceptedLine}
       and b.presented_at >= ${at(window.start)} and b.presented_at < ${at(window.end)}`)
   const promotions = rows
     .map((row) => {
@@ -918,7 +1142,7 @@ export async function financeListRows(tx: Db, orgId: string, scope: ReportScope,
     return [
       ...(await tx.execute<FinanceListRow>(sql`
         with pending as (
-          select b.patient_id, max(coalesce(b.decided_at, b.presented_at)) as at, sum(i.price_cents::bigint * ${units}) as cents,
+          select b.patient_id, i.currency::text as currency, max(coalesce(b.decided_at, b.presented_at)) as at, sum(i.price_cents::bigint * ${units}) as cents,
             string_agg(distinct i.title, ' · ') as title,
             array_agg(distinct pi.id::text) filter (where pi.id is not null) as plan_item_ids,
             -- Uno solo y en todos: si alguno no tiene servicio, la reserva no elige por la persona.
@@ -927,14 +1151,15 @@ export async function financeListRows(tx: Db, orgId: string, scope: ReportScope,
           join treatment_budget_item i on i.organization_id = b.organization_id and i.budget_id = b.id
             and i.option_id = ${budgetValueOptionSql(budget)} and i.decision = 'aceptado' and i.price_cents is not null
           left join treatment_plan_item pi on pi.organization_id = i.organization_id and pi.id = i.plan_item_id
-          where b.organization_id = ${orgId} and b.status in ('aceptado','parcial') and b.currency = ${scope.currency}
+          where b.organization_id = ${orgId} and b.status in ('aceptado','parcial')
+            and i.currency in (${scope.currency}, ${scope.money.secondCurrency ?? scope.currency})
             and (pi.id is null or pi.status not in ('realizado','cancelado','reemplazado'))
             and not ${nextAppointment(sql`b.patient_id`)}
-          group by b.patient_id
+          group by b.patient_id, i.currency
         )
-        select x.patient_id::text as id, x.at, x.patient_id as "patientId", pp.display_name as "personName", x.title,
+        select case when x.currency = ${scope.currency} then x.patient_id::text else x.patient_id::text || ':' || x.currency end as id, x.at, x.patient_id as "patientId", pp.display_name as "personName", x.title,
           null::text as "professionalName", null::text as "branchName", false as "hasNextAppointment",
-          x.cents::text as cents, ${scope.currency}::text as currency, count(*) over()::int as total,
+          x.cents::text as cents, x.currency, count(*) over()::int as total,
           x.plan_item_ids as "planItemIds", x.service_id as "serviceId"
         from pending x
         join patient p on p.id = x.patient_id and p.organization_id = ${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
@@ -951,7 +1176,7 @@ export async function financeListRows(tx: Db, orgId: string, scope: ReportScope,
         o.owed::text as cents, o.currency::text as currency, count(*) over()::int as total
       from overdue o
       join patient p on p.id = o.patient_id and p.organization_id = ${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
-      where o.currency = ${scope.currency} and ${debtAgeSql(sql`o.since`, at(end))} = ${AGE_OF_LIST[list]}
+      where o.currency in (${scope.currency}, ${scope.money.secondCurrency ?? scope.currency}) and ${debtAgeSql(sql`o.since`, at(end))} = ${AGE_OF_LIST[list]}
       order by o.since, o.patient_id limit ${limit}`)),
   ]
 }

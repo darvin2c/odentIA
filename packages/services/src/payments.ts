@@ -1,4 +1,12 @@
-import { quantityWords } from "@odentia/clinical"
+import {
+  collectExchange,
+  currencyWord,
+  normalizeExchangeRate,
+  quantityWords,
+  refundTenderCents,
+  splitCents,
+  type TicketTender,
+} from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import {
@@ -18,7 +26,7 @@ import {
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
-import { cashClosure } from "@odentia/db/schema/finance"
+import { cashClosure, cashMovement } from "@odentia/db/schema/finance"
 import { product } from "@odentia/db/schema/inventory"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import {
@@ -27,6 +35,7 @@ import {
   desc,
   eq,
   inArray,
+  isNotNull,
   isNull,
   or,
   type SQL,
@@ -47,6 +56,11 @@ import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import {
   ensureOpenShift,
   hasClosureSince,
+  lockCashOfPayments,
+  lockCashWindows,
+  lockOrgCurrency,
+  lockOrgMoney,
+  recordCashChange,
   recordCashEgreso,
   recordCashIncome,
   requireBranch,
@@ -883,16 +897,51 @@ function uuid(value: string, field = "El identificador"): string {
   return value
 }
 
-/** Moneda de la clínica con bloqueo compartido: orden perfil→cuenta/caja, sin deadlocks con el cambio de región. */
-async function lockOrgCurrency(tx: Db, orgId: string): Promise<string> {
-  const [profile] = await tx
-    .select({ currency: orgProfile.currency })
-    .from(orgProfile)
-    .where(eq(orgProfile.organizationId, orgId))
-    .for("share")
-  // Sin respaldo de un país: la moneda sale del perfil o no hay cobro.
-  if (!profile) throw orgProfileRequired()
-  return profile.currency
+/**
+ * Las cajas de cada ticket: las monedas donde su dinero entró o salió. Sin dinero
+ * vigente (pagado solo con saldo a favor), la caja de su moneda.
+ */
+async function cashUnitsOfTickets(
+  tx: Db,
+  orgId: string,
+  tickets: ReadonlyArray<{ id: string; currency: string }>,
+): Promise<Map<string, string[]>> {
+  const units = new Map(tickets.map((ticket) => [ticket.id, [] as string[]]))
+  if (tickets.length) {
+    const rows = await tx
+      .selectDistinct({ ticketId: patientPayment.ticketId, unit: cashMovement.currency })
+      .from(cashMovement)
+      .innerJoin(
+        patientPayment,
+        and(
+          eq(patientPayment.id, cashMovement.patientPaymentId),
+          eq(patientPayment.organizationId, orgId),
+        ),
+      )
+      .where(
+        and(
+          eq(cashMovement.organizationId, orgId),
+          isNull(cashMovement.voidedAt),
+          inArray(patientPayment.ticketId, [...units.keys()]),
+        ),
+      )
+    for (const row of rows) if (row.ticketId) units.get(row.ticketId)?.push(row.unit)
+  }
+  for (const ticket of tickets) {
+    const list = units.get(ticket.id)
+    if (list && !list.length) list.push(ticket.currency)
+  }
+  return units
+}
+
+/** Ya cerró, después de este cobro, alguna caja donde está su dinero: solo administración lo anula. */
+async function ticketClosedAfter(
+  tx: Db,
+  orgId: string,
+  ticket: { id: string; branchId: string; currency: string; createdAt: Date },
+): Promise<boolean> {
+  const units = (await cashUnitsOfTickets(tx, orgId, [ticket])).get(ticket.id) ?? [ticket.currency]
+  return hasClosureSince(tx, orgId, ticket.branchId, units, ticket.createdAt)
 }
 
 /** Siguiente número de ticket de la organización, sin saltos: vive en la misma transacción. */
@@ -952,11 +1001,16 @@ export interface TicketFrozen {
     paymentMethodId: string
     name: string
     typeCode: string
+    /** Lo que este medio canceló, en la moneda del ticket. */
     amountCents: number
+    /** Lo que entró por este medio, si entró en otra moneda (`tender.currency`). */
+    tenderCents?: number
     reference: string | null
   }>
   /** Frase al pie vigente al cobrar. */
   notice: string
+  /** Si usó dos monedas: con qué pagó y a qué cambio. Nada de esto se vuelve a calcular. */
+  tender?: TicketTender
   /** Lo que quedó por cobrar de esos conceptos. */
   remainingCents?: number
   /**
@@ -996,6 +1050,30 @@ export interface CollectInput {
   cashReceivedCents?: number
   /** Clave de idempotencia del cobro: reintentar devuelve el mismo ticket. */
   requestId: string
+  /**
+   * La moneda que cancela este cobro (o a cuenta de la que queda un adelanto).
+   * Omitida: la de los conceptos elegidos o, sin ellos, la del negocio.
+   */
+  currency?: string
+  /**
+   * En qué entra el dinero; los importes de `payments`, `advanceCents` y
+   * `cashReceivedCents` están en ella. Omitida: la moneda que cancela.
+   */
+  tenderCurrency?: string
+  /** El cambio de este cobro, en decimal: vale solo para él y no toca el de hoy. */
+  exchangeRate?: string
+  /** En qué se da el vuelto: la moneda en que pagó (por defecto) o la del negocio. */
+  changeCurrency?: string
+}
+
+/** El cambio tal como entra en la huella y en la base: decimal, en su forma única. */
+function collectRate(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined
+  try {
+    return normalizeExchangeRate(value)
+  } catch (error) {
+    throw invalidField("exchangeRate", error instanceof Error ? error.message : "Revisa el cambio")
+  }
 }
 
 interface OutstandingCharge {
@@ -1129,6 +1207,11 @@ async function availableCredit(
  * el número del ticket es único por organización y sin saltos (contador bajo
  * lock en la misma transacción; la caja y el correlativo se serializan junto
  * al paciente para impedir duplicados concurrentes).
+ *
+ * Un cobro cancela una moneda (la de la deuda) y entra en una (la que escribe quien
+ * cobra), entre las dos de la clínica; con cualquiera distinta de la del negocio
+ * pide el cambio, una sola conversión, y congela lo que entró y cuánto vale. Sin
+ * otra moneda todo queda vacío, como siempre. No llama a `setOrgExchangeRate`.
  */
 export async function collectCharge(
   tx: Db,
@@ -1142,9 +1225,13 @@ export async function collectCharge(
   await tx.execute(
     sql`select pg_advisory_xact_lock(hashtext('collect:' || ${orgId} || ':' || ${input.requestId}))`,
   )
-  const orgUnit = await lockOrgCurrency(tx, orgId)
+  const money = await lockOrgMoney(tx, orgId)
+  // Sin respaldo de un país: la moneda sale del perfil o no hay cobro.
+  if (!money) throw orgProfileRequired()
+  const { currency: business, secondCurrency: second } = money
   await lockAccount(tx, orgId, patientId)
   const requestId = uuid(input.requestId, "La clave de idempotencia")
+  const rateText = collectRate(input.exchangeRate)
   const fingerprint = JSON.stringify({
     branchId: input.branchId,
     payerContactId: input.payerContactId ?? null,
@@ -1156,6 +1243,11 @@ export async function collectCharge(
       reference: p.reference?.trim() || null,
     })),
     cashReceivedCents: input.cashReceivedCents ?? null,
+    // Lo de otra moneda entra solo si viene: el cuerpo de siempre da la huella de siempre.
+    ...(input.currency !== undefined ? { currency: input.currency } : {}),
+    ...(input.tenderCurrency !== undefined ? { tenderCurrency: input.tenderCurrency } : {}),
+    ...(rateText !== undefined ? { exchangeRate: rateText } : {}),
+    ...(input.changeCurrency !== undefined ? { changeCurrency: input.changeCurrency } : {}),
   })
   const [replay] = await tx
     .select()
@@ -1209,9 +1301,13 @@ export async function collectCharge(
       reference: item.reference?.trim() ? item.reference.trim().slice(0, 200) : null,
     })
   }
+  // Lo que escribe quien cobra está en la moneda en que paga.
   const totalNew = sum(methods)
-  // Manda la moneda de la clínica: los conceptos en otra moneda no entran al cobro.
-  const unit = orgUnit
+  const orgCurrencies = second ? [business, second] : [business]
+  if (input.currency !== undefined && !orgCurrencies.includes(input.currency))
+    throw invalidField("currency", `La clínica cobra solo en ${orgCurrencies.join(" y ")}`)
+  // Moneda de lo que cancela: sin otra moneda, siempre la de la clínica.
+  let unit = input.currency ?? business
   let targets: OutstandingCharge[]
   if (input.advanceCents !== undefined) {
     const advance = assertPositiveCents(input.advanceCents)
@@ -1241,10 +1337,14 @@ export async function collectCharge(
       })
     // Siempre lo más antiguo primero: el orden en que se marcaron no decide.
     const picked = selected.filter((charge) => wanted.has(charge.id))
-    if (picked.some((c) => c.currency !== unit))
+    if (second && input.currency === undefined) unit = picked[0]?.currency ?? unit
+    // Un cobro cancela una sola moneda; cada una lleva su ticket.
+    if (picked.some((c) => c.currency !== unit) || !orgCurrencies.includes(unit))
       throw conflict(
         "CURRENCY_MISMATCH",
-        "Los conceptos son de otra moneda que la clínica",
+        second
+          ? "Un cobro cancela una sola moneda: cobra cada una por separado"
+          : "Los conceptos son de otra moneda que la clínica",
         "chargeIds",
       )
     const applied = await liveAppliedByCharge(tx, orgId, patientId)
@@ -1258,6 +1358,19 @@ export async function collectCharge(
     if (!targets.length)
       throw conflict("NOTHING_DUE", "El paciente no tiene conceptos por cobrar", "chargeIds")
   }
+  // En qué entra el dinero, siempre entre las dos monedas de la clínica.
+  const paidIn = input.tenderCurrency ?? unit
+  if (!orgCurrencies.includes(paidIn))
+    throw invalidField("tenderCurrency", `La clínica cobra solo en ${orgCurrencies.join(" y ")}`)
+  // Sin dinero nuevo (solo saldo a favor) no hay nada que convertir ni que valorar.
+  const rate = methods.length > 0 && (unit !== business || paidIn !== business) ? rateText : null
+  if (rate === undefined) throw invalidField("exchangeRate", "Escribe el cambio")
+  const changeIn = input.changeCurrency ?? paidIn
+  if (changeIn !== paidIn && changeIn !== business)
+    throw invalidField(
+      "changeCurrency",
+      "El vuelto se da en la moneda en que pagó o en la del negocio",
+    )
   const cashTotal = sum(methods.filter((m) => isCashLike(m.typeCode)))
   let cashReceived: number | null = null
   let change: number | null = null
@@ -1300,6 +1413,33 @@ export async function collectCharge(
   // Sin dinero nuevo vale el crédito que cubre: el cobro puede ser solo a favor.
   if (totalNew === 0 && creditApplied === 0)
     throw validation("No hay saldo a favor ni medios para cobrar")
+  // Lo que cancela lo nuevo, en la moneda de la deuda: una sola conversión por cobro.
+  const tenders = methods.map((m) => m.amountCents)
+  const figures = collectExchange({
+    paidCents: totalNew,
+    paidCurrency: paidIn,
+    dueCents: need - creditApplied,
+    currency: unit,
+    businessCurrency: business,
+    rate,
+    changeCents: change,
+    changeIn,
+  })
+  const { crossChange, changeGiven, valueCents } = figures
+  // Sin cambio y en otra moneda solo se llega sin dinero nuevo: no cancela nada.
+  const cancels = figures.cancels ?? totalNew
+  // Cada medio guarda su parte; el resto del redondeo va al último, para que sumen exacto.
+  const amounts = paidIn === unit ? tenders : splitCents(cancels, tenders)
+  for (const [index, amount] of amounts.entries()) {
+    if (amount <= 0)
+      throw invalidField(
+        `payments[${index}].amountCents`,
+        "Con este cambio, el importe no alcanza a cancelar nada",
+      )
+    withField(`payments[${index}].amountCents`, () => assertPositiveCents(amount))
+  }
+  const values =
+    valueCents === null ? [] : splitCents(valueCents, paidIn === business ? tenders : amounts)
   const ticketNumber = await nextTicketNumber(tx, orgId)
   const [person] = await tx
     .select({
@@ -1324,7 +1464,7 @@ export async function collectCharge(
   // Las líneas del ticket reflejan lo realmente pagado por este cobro.
   const newAppliedByCharge: Record<string, number> = {}
   {
-    let pool = totalNew
+    let pool = cancels
     for (const target of targets) {
       if (pool <= 0 || target.outstanding <= 0) continue
       const take = Math.min(pool, target.outstanding)
@@ -1361,7 +1501,7 @@ export async function collectCharge(
     lines.push({
       chargeId: null,
       description: "Adelanto (saldo a favor)",
-      amountCents: totalNew,
+      amountCents: cancels,
       appliedCents: 0,
       promotion: null,
     })
@@ -1377,7 +1517,7 @@ export async function collectCharge(
       taxBps: t.charge.taxBps,
       scope: t.charge.productId ? ("productos" as const) : ("servicios" as const),
     }))
-  const toCredit = totalNew - sum(taxable)
+  const toCredit = cancels - sum(taxable)
   if (toCredit > 0 && taxes)
     taxable.push({
       amountCents: toCredit,
@@ -1386,10 +1526,7 @@ export async function collectCharge(
       scope: "servicios",
     })
   const ticketTaxes = ticketTaxesOf(taxes, taxable, profile.locale)
-  const paymentTaxes = splitTaxAcrossPayments(
-    ticketTaxes?.taxCents ?? 0,
-    methods.map((m) => m.amountCents),
-  )
+  const paymentTaxes = splitTaxAcrossPayments(ticketTaxes?.taxCents ?? 0, amounts)
   const [ticket] = await tx
     .insert(paymentTicket)
     .values({
@@ -1398,10 +1535,11 @@ export async function collectCharge(
       branchId: branchRow.id,
       ticketNumber,
       currency: unit,
-      totalCents: totalNew,
+      totalCents: cancels,
       creditAppliedCents: creditApplied,
       cashReceivedCents: cashReceived,
-      changeCents: change,
+      changeCents: changeGiven,
+      changeCurrency: crossChange !== null ? changeIn : null,
       payerContactId: input.payerContactId ?? null,
       requestId,
       snapshot: {
@@ -1428,14 +1566,26 @@ export async function collectCharge(
         },
         branch: { id: branchRow.id, name: branchRow.name },
         lines,
-        methods: methods.map((m) => ({
+        methods: methods.map((m, index) => ({
           paymentMethodId: m.paymentMethodId,
           name: m.name,
           typeCode: m.typeCode,
-          amountCents: m.amountCents,
+          amountCents: amounts[index] ?? 0,
+          ...(paidIn !== unit ? { tenderCents: m.amountCents } : {}),
           reference: m.reference,
         })),
         notice: profile.ticketFooter,
+        ...(rate !== null && (paidIn !== unit || crossChange !== null)
+          ? {
+              tender: {
+                currency: paidIn,
+                amountCents: totalNew,
+                rate,
+                businessCurrency: business,
+                otherCurrency: unit === business ? paidIn : unit,
+              },
+            }
+          : {}),
         // Lo que quedó por cobrar de estos conceptos: el reintento lo repite igual.
         remainingCents: sum(targets.map((t) => ({ amountCents: t.outstanding }))),
         pending: targets
@@ -1465,9 +1615,11 @@ export async function collectCharge(
         methodName: item.name,
         methodTypeCode: item.typeCode,
         payerContactId: input.payerContactId ?? null,
-        amountCents: item.amountCents,
+        amountCents: amounts[index] ?? 0,
         taxCents: paymentTaxes[index] ?? 0,
         currency: unit,
+        ...(paidIn !== unit ? { tenderCents: item.amountCents, tenderCurrency: paidIn } : {}),
+        ...(rate !== null ? { exchangeRate: rate, businessCents: values[index] ?? 0 } : {}),
         paidAt,
         reference: item.reference,
         createdBy: actorUserId,
@@ -1511,16 +1663,39 @@ export async function collectCharge(
     const [app] = await tx.insert(patientPaymentApplication).values(value).returning()
     await audit(tx, orgId, actorUserId, "patient_payment_application", app.id, "payment.applied")
   }
-  // Todo cobro queda en la caja de su sede: la caja se crea sola, nunca se abre.
-  const shift = await ensureOpenShift(tx, orgId, actorUserId, branchRow.id, unit)
-  for (const payment of payments) {
+  // Todo cobro queda en la caja de su sede, la de la moneda en que entró: la caja
+  // se crea sola, nunca se abre. Con vuelto en otra moneda toca dos cajas, bloqueadas
+  // en orden fijo antes de tocar ninguna; con una, la bloquea `ensureOpenShift`.
+  if (crossChange !== null)
+    await lockCashWindows(tx, orgId, [
+      { branchId: branchRow.id, unit: paidIn },
+      { branchId: branchRow.id, unit: changeIn },
+    ])
+  const shift = await ensureOpenShift(tx, orgId, actorUserId, branchRow.id, paidIn)
+  for (const [index, payment] of payments.entries()) {
     await recordCashIncome(tx, orgId, actorUserId, shift.id, {
       paymentId: payment.id,
-      amountCents: payment.amountCents,
-      currency: payment.currency,
+      amountCents: tenders[index] ?? 0,
+      currency: paidIn,
       methodName: payment.methodName,
       methodTypeCode: payment.methodTypeCode,
       concept: `Ticket ${ticketNumber}`,
+    })
+  }
+  // Hay vuelto solo con un medio en efectivo: lo recibido se comprobó contra él.
+  if (crossChange !== null) {
+    const cashIndex = methods.findIndex((m) => isCashLike(m.typeCode))
+    const changeMethod = methods[cashIndex]
+    await recordCashChange(tx, orgId, actorUserId, {
+      paymentId: payments[cashIndex].id,
+      branchId: branchRow.id,
+      methodName: changeMethod.name,
+      methodTypeCode: changeMethod.typeCode,
+      keptCents: crossChange,
+      keptCurrency: paidIn,
+      givenCents: changeGiven ?? 0,
+      givenCurrency: changeIn,
+      concept: `Vuelto · Ticket ${sixDigits(ticketNumber)}`,
     })
   }
   await audit(tx, orgId, actorUserId, "payment_ticket", ticket.id, "ticket.created")
@@ -1612,7 +1787,7 @@ export async function voidTicket(
   if (
     payments.length === 0 &&
     !input.allowPostClose &&
-    (await hasClosureSince(tx, orgId, ticket.branchId, ticket.currency, ticket.createdAt))
+    (await ticketClosedAfter(tx, orgId, ticket))
   )
     throw conflict(
       "POST_CLOSE_NEEDS_ADMIN",
@@ -1643,6 +1818,7 @@ export async function voidTicket(
     )
   const reopenedCents = sum(applications.filter((app) => app.ticketId !== ticket.id))
   let compensated = false
+  await lockCashOfPayments(tx, orgId, paymentIds)
   for (const payment of payments) {
     compensated =
       (await reverseCashIncome(
@@ -1771,6 +1947,90 @@ function rootOfCharge(charge: { id: string; originalChargeId: string | null }): 
   return charge.originalChargeId ?? charge.id
 }
 
+// --- Lo que sale de la caja al devolver ----------------------------------------------------
+
+/** Lo que sale en una moneda al devolver. */
+export interface RefundPayout {
+  currency: string
+  amountCents: number
+}
+
+interface RefundPart {
+  payment: Pick<
+    typeof patientPayment.$inferSelect,
+    "id" | "amountCents" | "taxCents" | "currency" | "tenderCents" | "tenderCurrency"
+  >
+  /** Lo que se devuelve, en la moneda que cancela el pago. */
+  refundCents: number
+}
+
+/**
+ * Sale lo que entró, en esa moneda y en proporción, sin cambio nuevo: S/ 300
+ * cancelados con USD 80 devuelven hasta USD 80, por partes o de una vez. `tenderOf`
+ * es lo que sale de cada pago que entró en otra moneda: se guarda con su devolución.
+ * Lo que en esa moneda no llega a su unidad menor no se devuelve: bajaría lo que hay a
+ * favor sin sacar nada de la caja. `field`: el importe en el cuerpo, para decirlo ahí.
+ */
+async function refundPayouts(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  parts: RefundPart[],
+  field?: string,
+): Promise<{ payouts: RefundPayout[]; tenderOf: Map<string, number> }> {
+  const crossed = parts.filter((part) => part.payment.tenderCents !== null)
+  const earlier = crossed.length
+    ? await tx
+        .select({
+          paymentId: patientPaymentRefund.paymentId,
+          amountCents: patientPaymentRefund.amountCents,
+        })
+        .from(patientPaymentRefund)
+        .where(
+          and(
+            eq(patientPaymentRefund.organizationId, orgId),
+            eq(patientPaymentRefund.patientId, patientId),
+            inArray(
+              patientPaymentRefund.paymentId,
+              crossed.map((part) => part.payment.id),
+            ),
+          ),
+        )
+    : []
+  const tenderOf = new Map<string, number>()
+  for (const { payment, refundCents } of crossed) {
+    const out = refundTenderCents({
+      tenderCents: payment.tenderCents ?? payment.amountCents,
+      amountCents: payment.amountCents,
+      previousCents: sum(earlier.filter((row) => row.paymentId === payment.id)),
+      refundCents,
+    })
+    if (out === 0 && refundCents > 0) {
+      const { locale } = await findOrgLocale(tx, orgId)
+      const word = currencyWord(payment.tenderCurrency ?? payment.currency, locale)
+      const message = `Ese importe es demasiado pequeño para devolverlo en ${word}`
+      throw new ServiceError("REFUND_TOO_SMALL", 409, message, field ? { [field]: message } : undefined)
+    }
+    tenderOf.set(payment.id, out)
+  }
+  const totals = new Map<string, number>()
+  for (const { payment, refundCents } of parts) {
+    const unit = payment.tenderCurrency ?? payment.currency
+    totals.set(unit, (totals.get(unit) ?? 0) + (tenderOf.get(payment.id) ?? refundCents))
+  }
+  return {
+    payouts: [...totals.entries()]
+      .filter(([, amountCents]) => amountCents > 0)
+      .map(([currency, amountCents]) => ({ currency, amountCents })),
+    tenderOf,
+  }
+}
+
+/** Se dice aparte solo si salió en otra moneda que la devuelta; si no, es lo de siempre. */
+function crossedPayouts(payouts: RefundPayout[], unit: string): { payouts?: RefundPayout[] } {
+  return payouts.some((payout) => payout.currency !== unit) ? { payouts } : {}
+}
+
 // --- Devolución del saldo a favor ----------------------------------------------------------
 
 export interface RefundCreditInput {
@@ -1814,11 +2074,20 @@ export async function refundCredit(
   }
   const at = new Date()
   const refunds = []
+  // Sale lo que entró, en esa moneda y en proporción, sin cambio nuevo.
+  const taking: RefundPart[] = []
   {
     let rest = amount
     for (const { payment, available } of credit) {
       if (rest <= 0) break
       const take = Math.min(available, rest)
+      taking.push({ payment, refundCents: take })
+      rest -= take
+    }
+  }
+  const { payouts, tenderOf } = await refundPayouts(tx, orgId, patientId, taking, "amountCents")
+  {
+    for (const { payment, refundCents: take } of taking) {
       const [refund] = await tx
         .insert(patientPaymentRefund)
         .values({
@@ -1828,6 +2097,7 @@ export async function refundCredit(
           amountCents: take,
           // Con el dinero sale su parte del impuesto (ADR 0083).
           taxCents: refundTaxCents(payment, take),
+          tenderCents: tenderOf.get(payment.id) ?? null,
           refundedAt: at,
           reason: reason(input.reason),
           createdBy: actorUserId,
@@ -1835,7 +2105,6 @@ export async function refundCredit(
         .returning()
       refunds.push(refund)
       await audit(tx, orgId, actorUserId, "patient_payment_refund", refund.id, "payment.refunded")
-      rest -= take
     }
   }
   // La constancia se congela al devolver: clínica, sede, a quién, cuánto y por
@@ -1877,21 +2146,29 @@ export async function refundCredit(
     currency: unit,
     methodName,
     methodTypeCode,
+    ...crossedPayouts(payouts, unit),
     reason: reason(input.reason),
     refundedAt: at.toISOString(),
   }
   await audit(tx, orgId, actorUserId, "patient_payment_refund", receiptId, "refund.receipt", {
     ...frozen,
   })
-  const shift = await ensureOpenShift(tx, orgId, actorUserId, branchRow.id, unit)
-  await recordCashEgreso(tx, orgId, actorUserId, shift.id, {
-    kind: "devolucion",
-    amountCents: amount,
-    currency: unit,
-    methodName,
-    methodTypeCode,
-    concept: `Devolución a favor`,
-  })
+  await lockCashWindows(
+    tx,
+    orgId,
+    payouts.map((payout) => ({ branchId: branchRow.id, unit: payout.currency })),
+  )
+  for (const payout of payouts) {
+    const shift = await ensureOpenShift(tx, orgId, actorUserId, branchRow.id, payout.currency)
+    await recordCashEgreso(tx, orgId, actorUserId, shift.id, {
+      kind: "devolucion",
+      amountCents: payout.amountCents,
+      currency: payout.currency,
+      methodName,
+      methodTypeCode,
+      concept: `Devolución a favor`,
+    })
+  }
   await notify(tx, { orgId, kind: "payment.refunded", at: at.toISOString() })
   return {
     refunds,
@@ -1901,6 +2178,7 @@ export async function refundCredit(
     currency: unit,
     branchId: branchRow.id,
     methodName,
+    ...crossedPayouts(payouts, unit),
     refundedAt: at,
     account: await getAccountSummary(tx, orgId, patientId),
   }
@@ -1918,6 +2196,8 @@ export interface RefundFrozen {
   currency: string
   methodName: string
   methodTypeCode: string | null
+  /** Lo que salió de la caja, si salió en otra moneda que la devuelta. */
+  payouts?: RefundPayout[]
   reason: string
   refundedAt: string
 }
@@ -1997,6 +2277,8 @@ export interface ReturnFrozen {
     backToStock: boolean | null
   }>
   payout: { kind: "pagado"; methodName: string; typeCode: string | null } | { kind: "a_favor" }
+  /** Lo que salió de la caja, si salió en otra moneda que la devuelta. */
+  payouts?: RefundPayout[]
   reason: string
   /** Frase al pie vigente al devolver. */
   notice: string
@@ -2172,6 +2454,8 @@ export async function getTicketReturnable(
     branchId: ticket.branchId,
     createdAt: ticket.createdAt,
     voided: !!ticket.voidedAt,
+    /** Con qué pagó y a qué cambio, si hubo otra moneda: lo devuelto sale en esa moneda. */
+    tender: frozen.tender ?? null,
     lines: lines.map(({ charge: _charge, applications: _applications, ...line }) => line),
     methods: (frozen.methods ?? []).map((method) => ({
       paymentMethodId: method.paymentMethodId,
@@ -2354,6 +2638,47 @@ export async function returnFromTicket(
         requirePaymentMethod(tx, orgId, paymentMethodId),
       )
     : null
+  // Lo que se libera de cada pago: queda a favor, o se le paga. Lo devuelto sale de
+  // lo que pagó este ticket, de lo último aplicado primero.
+  const freed = new Map<string, number>()
+  const takenOf = new Map<string, Map<string, number>>()
+  for (const item of plan) {
+    const taken = new Map<string, number>()
+    let left = item.amountCents
+    const mine = item.line.applications
+      .filter((app) => app.ticketId === ticket.id)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    for (const app of mine) {
+      if (left <= 0) break
+      const take = Math.min(app.amountCents, left)
+      taken.set(app.id, take)
+      freed.set(app.paymentId, (freed.get(app.paymentId) ?? 0) + take)
+      left -= take
+    }
+    takenOf.set(item.line.chargeId, taken)
+  }
+  const freedPayments =
+    method && freed.size
+      ? await tx
+          .select()
+          .from(patientPayment)
+          .where(
+            and(
+              eq(patientPayment.organizationId, orgId),
+              inArray(patientPayment.id, [...freed.keys()]),
+            ),
+          )
+      : []
+  // Se le paga en el mismo paso: sale lo que entró, en esa moneda y sin cambio nuevo.
+  const { payouts, tenderOf } = await refundPayouts(
+    tx,
+    orgId,
+    patientId,
+    freedPayments.map((payment) => ({
+      payment,
+      refundCents: freed.get(payment.id) ?? 0,
+    })),
+  )
   const number = await nextReturnNumber(tx, orgId)
   const label = `Devolución ${sixDigits(number)}`
   const [person] = await tx
@@ -2412,6 +2737,7 @@ export async function returnFromTicket(
     payout: method
       ? { kind: "pagado", methodName: method.name, typeCode: method.typeCode }
       : { kind: "a_favor" },
+    ...crossedPayouts(payouts, ticket.currency),
     reason: reasonText,
     notice: profile.ticketFooter,
   }
@@ -2437,23 +2763,9 @@ export async function returnFromTicket(
     .returning()
   if (!row) throw new ServiceError("INTERNAL", 500, "No se pudo registrar la devolución")
   const now = new Date()
-  // Lo que se libera de cada pago: queda a favor, o se le paga.
-  const freed = new Map<string, number>()
   for (const item of plan) {
     const { charge, applications } = item.line
-    // Lo devuelto sale de lo que pagó este ticket, de lo último aplicado primero.
-    const taken = new Map<string, number>()
-    let left = item.amountCents
-    const mine = applications
-      .filter((app) => app.ticketId === ticket.id)
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-    for (const app of mine) {
-      if (left <= 0) break
-      const take = Math.min(app.amountCents, left)
-      taken.set(app.id, take)
-      freed.set(app.paymentId, (freed.get(app.paymentId) ?? 0) + take)
-      left -= take
-    }
+    const taken = takenOf.get(item.line.chargeId) ?? new Map<string, number>()
     await tx
       .update(patientCharge)
       .set({
@@ -2553,21 +2865,6 @@ export async function returnFromTicket(
   }
   if (method) {
     // Se le paga en el mismo paso: lo liberado de cada pago sale por el medio elegido.
-    const freedPayments = freed.size
-      ? await tx
-          .select({
-            id: patientPayment.id,
-            amountCents: patientPayment.amountCents,
-            taxCents: patientPayment.taxCents,
-          })
-          .from(patientPayment)
-          .where(
-            and(
-              eq(patientPayment.organizationId, orgId),
-              inArray(patientPayment.id, [...freed.keys()]),
-            ),
-          )
-      : []
     for (const [paymentId, amountCents] of freed) {
       const paid = freedPayments.find((item) => item.id === paymentId)
       const [refund] = await tx
@@ -2579,6 +2876,7 @@ export async function returnFromTicket(
           amountCents,
           // Con el dinero sale su parte del impuesto (ADR 0083).
           taxCents: paid ? refundTaxCents(paid, amountCents) : 0,
+          tenderCents: tenderOf.get(paymentId) ?? null,
           refundedAt: now,
           reason: `${label}: ${reasonText}`,
           returnId: row.id,
@@ -2589,18 +2887,25 @@ export async function returnFromTicket(
         returnId: row.id,
       })
     }
-    const shift = await ensureOpenShift(tx, orgId, actorUserId, branchRow.id, ticket.currency)
-    // Sin efectivo para devolver: se dice junto al medio elegido.
-    await withFieldAsync("paymentMethodId", () =>
-      recordCashEgreso(tx, orgId, actorUserId, shift.id, {
-        kind: "devolucion",
-        amountCents: total,
-        currency: ticket.currency,
-        methodName: method.name,
-        methodTypeCode: method.typeCode,
-        concept: `${label} · Ticket ${sixDigits(ticket.ticketNumber)}`,
-      }),
+    await lockCashWindows(
+      tx,
+      orgId,
+      payouts.map((payout) => ({ branchId: branchRow.id, unit: payout.currency })),
     )
+    for (const payout of payouts) {
+      const shift = await ensureOpenShift(tx, orgId, actorUserId, branchRow.id, payout.currency)
+      // Sin efectivo para devolver: se dice junto al medio elegido.
+      await withFieldAsync("paymentMethodId", () =>
+        recordCashEgreso(tx, orgId, actorUserId, shift.id, {
+          kind: "devolucion",
+          amountCents: payout.amountCents,
+          currency: payout.currency,
+          methodName: method.name,
+          methodTypeCode: method.typeCode,
+          concept: `${label} · Ticket ${sixDigits(ticket.ticketNumber)}`,
+        }),
+      )
+    }
   }
   await audit(tx, orgId, actorUserId, "payment_return", row.id, "return.created", {
     patientId,
@@ -2931,6 +3236,10 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
       if (!lastClosure[key]) lastClosure[key] = row.closedAt
     }
   }
+  // Las cajas se leen de sus movimientos, no del pago: un movimiento puede estar en otra
+  // moneda que el pago (lo arma a mano una prueba de integridad) y saltarlo cambiaría
+  // `closedAfter`. Con el índice por ticket la consulta es barata.
+  const ticketUnits = await cashUnitsOfTickets(tx, orgId, tickets)
   const returnRows = await returnsOfTickets(
     tx,
     orgId,
@@ -2945,14 +3254,17 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
     creditAppliedCents: ticket.creditAppliedCents,
     cashReceivedCents: ticket.cashReceivedCents,
     changeCents: ticket.changeCents,
+    /** Moneda del vuelto; nula, la moneda en que entró el dinero. */
+    changeCurrency: ticket.changeCurrency,
     payerContactId: ticket.payerContactId,
     status: ticket.voidedAt ? ("anulado" as const) : ("vigente" as const),
     voidedAt: ticket.voidedAt,
     voidReason: ticket.voidReason,
     /** La caja de su sede ya cerró después de este cobro: solo administración lo anula. */
-    closedAfter:
-      (lastClosure[`${ticket.branchId}|${ticket.currency}`]?.getTime() ?? 0) >=
-      ticket.createdAt.getTime(),
+    closedAfter: (ticketUnits.get(ticket.id) ?? [ticket.currency]).some(
+      (unit) =>
+        (lastClosure[`${ticket.branchId}|${unit}`]?.getTime() ?? 0) >= ticket.createdAt.getTime(),
+    ),
     createdAt: ticket.createdAt,
     snapshot: ticket.snapshot,
     payments: (ticketPayments[ticket.id] ?? []).map((p) => ({
@@ -2960,6 +3272,10 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
       methodName: p.methodName,
       amountCents: p.amountCents,
       voidedAt: p.voidedAt,
+      tenderCents: p.tenderCents,
+      tenderCurrency: p.tenderCurrency,
+      exchangeRate: p.exchangeRate,
+      businessCents: p.businessCents,
     })),
     /** Devoluciones de este ticket (ADR 0068): con alguna, ya no se anula. */
     returns: returnRows.filter((item) => item.ticketId === ticket.id),
@@ -2990,6 +3306,8 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
       ticketId: p.ticketId,
       ticketNumber: p.ticketId ? (ticketById[p.ticketId]?.ticketNumber ?? null) : null,
       currency: p.currency,
+      /** En qué entró ese dinero, si fue en otra moneda: en ella se devuelve. */
+      tenderCurrency: p.tenderCurrency,
       paidAt: p.paidAt,
       availableCents:
         p.amountCents - (appliedByPayment[p.id] ?? 0) - (refundedByPayment[p.id] ?? 0),
@@ -3001,6 +3319,25 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
         : false,
     }))
     .filter((row) => row.availableCents > 0)
+  // Lo aceptado del plan en una sola moneda: un adelanto queda por defecto a cuenta de
+  // ella. Sin otra moneda no hay de cuál elegir y la consulta termina en el perfil.
+  const planCurrencies = await tx
+    .selectDistinct({ currency: treatmentBudgetItem.currency })
+    .from(treatmentBudgetItem)
+    .innerJoin(
+      orgProfile,
+      and(
+        eq(orgProfile.organizationId, treatmentBudgetItem.organizationId),
+        isNotNull(orgProfile.secondCurrency),
+      ),
+    )
+    .where(
+      and(
+        eq(treatmentBudgetItem.organizationId, orgId),
+        eq(treatmentBudgetItem.patientId, patientId),
+        eq(treatmentBudgetItem.decision, "aceptado"),
+      ),
+    )
   return {
     patientId,
     /** Identidad mínima para la cabecera de caja: sin datos clínicos ni traza de lectura. */
@@ -3015,6 +3352,8 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
     cobros,
     historico,
     aFavorOrigen,
+    /** La moneda de lo aceptado de su plan; nula si no hay nada o hay en dos. */
+    planCurrency: planCurrencies.length === 1 ? (planCurrencies[0]?.currency ?? null) : null,
     /** Visitas atendidas por tratamiento (actos con cargo vivo): base de «ya realizado» en cobro por sesión. */
     visitasPorTratamiento,
     conCargo: coveredPlanItems(liveCharges),
@@ -3085,13 +3424,7 @@ export async function getTicketReceipt(tx: Db, orgId: string, patientId: string,
     branch: branchRow ?? null,
     orgProfile: profile ?? null,
     /** La caja de su sede ya cerró después de este cobro: solo administración lo anula. */
-    closedAfter: await hasClosureSince(
-      tx,
-      orgId,
-      ticket.branchId,
-      ticket.currency,
-      ticket.createdAt,
-    ),
+    closedAfter: await ticketClosedAfter(tx, orgId, ticket),
     /** Devoluciones de este ticket (ADR 0068). */
     returns: await returnsOfTickets(tx, orgId, [ticket.id]),
   }

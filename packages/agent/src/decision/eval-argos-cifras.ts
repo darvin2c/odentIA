@@ -76,6 +76,12 @@ async function argosValue(
 }
 
 /** Lo que dice Reportes de esa cifra, en la unidad de Argos (el dinero sin centavos). */
+/** Lo que vale una unidad de la moneda en su unidad menor: cada moneda con sus decimales. */
+const unitCents =
+  10 **
+  (new Intl.NumberFormat("en", { style: "currency", currency: zone.currency }).resolvedOptions()
+    .maximumFractionDigits ?? 2)
+
 async function reportValue(
   report: string,
   period: string,
@@ -88,7 +94,7 @@ async function reportValue(
     const value = result.total.value
     if (value === null) return null
     return result.figure.unit === "money"
-      ? value / 100
+      ? value / unitCents
       : result.figure.unit === "hours"
         ? value / 60
         : value

@@ -1380,7 +1380,11 @@ export const treatmentBudget = pgTable(
     presentedAt: timestamp("presented_at", { withTimezone: true }),
     decisionContactId: uuid("decision_contact_id").references(() => contact.id),
     title: text("title").notNull(),
-    currency: char("currency", { length: 3 }).notNull(),
+    /**
+     * Un presupuesto puede tener líneas en dos monedas: el total por moneda sale
+     * de sus líneas (`treatment_budget_item.currency`). Lo viejo conserva su valor.
+     */
+    currency: char("currency", { length: 3 }),
     status: text("status").notNull().default("borrador"),
     notes: text("notes"),
     /** Hasta cuándo vale; al entregar se calcula con los días de la clínica. Vencer no cambia el estado. */
@@ -2308,6 +2312,20 @@ export const patientPayment = pgTable(
      */
     taxCents: integer("tax_cents").notNull().default(0),
     currency: char("currency", { length: 3 }).notNull(),
+    /**
+     * Dos monedas: `amountCents` y `currency` siguen siendo lo que cancela (la
+     * moneda de la deuda). Lo que pagó en otra moneda, sin el exceso de un
+     * billete; nulo si pagó en la misma.
+     */
+    tenderCents: integer("tender_cents"),
+    tenderCurrency: char("tender_currency", { length: 3 }),
+    /** El cambio usado, en palabras (moneda del negocio por 1 de la otra). */
+    exchangeRate: numeric("exchange_rate"),
+    /**
+     * Cuánto vale en moneda del negocio, congelado: lo leen Reportes y Argos con
+     * `money_value`. Hay valor si y solo si hay cambio; nulo, «sin otra moneda».
+     */
+    businessCents: integer("business_cents"),
     paidAt: timestamp("paid_at", { withTimezone: true }).notNull(),
     reference: text("reference"),
     notes: text("notes"),
@@ -2319,8 +2337,20 @@ export const patientPayment = pgTable(
   },
   (table) => [
     index("patient_payment_org_patient_idx").on(table.organizationId, table.patientId),
+    // Las cajas y los cobros de un ticket se leen al abrir cuenta, recibo y anulación.
+    index("patient_payment_org_ticket_idx")
+      .on(table.organizationId, table.ticketId)
+      .where(sql`${table.ticketId} IS NOT NULL`),
     check("patient_payment_amount_check", sql`${table.amountCents} > 0`),
     check("patient_payment_tax_check", sql`${table.taxCents} BETWEEN 0 AND ${table.amountCents}`),
+    check(
+      "patient_payment_tender_check",
+      sql`(${table.tenderCents} IS NULL) = (${table.tenderCurrency} IS NULL) AND (${table.tenderCents} IS NULL OR (${table.tenderCents} >= 0 AND ${table.tenderCurrency} <> ${table.currency} AND ${table.exchangeRate} IS NOT NULL))`,
+    ),
+    check(
+      "patient_payment_value_check",
+      sql`(${table.exchangeRate} IS NULL) = (${table.businessCents} IS NULL) AND (${table.exchangeRate} IS NULL OR (${table.exchangeRate} > 0 AND ${table.businessCents} >= 0))`,
+    ),
     // El tipo congelado es de la lista UN/CEFACT 4461, igual que el del medio.
     check(
       "patient_payment_method_type_check",
@@ -2382,6 +2412,11 @@ export const patientPaymentRefund = pgTable(
     amountCents: integer("amount_cents").notNull(),
     /** La parte del impuesto del pago que se devuelve, en proporción (ADR 0083). */
     taxCents: integer("tax_cents").notNull().default(0),
+    /**
+     * Lo que salió, en la moneda en que entró el pago, solo si entró en otra que la
+     * que cancela (`refundTenderCents`); nulo, salió lo que dice `amountCents`.
+     */
+    tenderCents: integer("tender_cents"),
     refundedAt: timestamp("refunded_at", { withTimezone: true }).notNull(),
     reason: text("reason").notNull(),
     /** La devolución de un cobro que pagó este dinero (nulo: «Devolver dinero» del saldo a favor). */
@@ -2394,6 +2429,10 @@ export const patientPaymentRefund = pgTable(
     index("payment_refund_payment_idx").on(table.organizationId, table.paymentId),
     check("payment_refund_amount_check", sql`${table.amountCents} > 0`),
     check("payment_refund_tax_check", sql`${table.taxCents} BETWEEN 0 AND ${table.amountCents}`),
+    check(
+      "payment_refund_tender_check",
+      sql`${table.tenderCents} IS NULL OR ${table.tenderCents} >= 0`,
+    ),
   ],
 )
 
@@ -2417,6 +2456,8 @@ export const paymentTicket = pgTable(
     creditAppliedCents: integer("credit_applied_cents").notNull().default(0),
     cashReceivedCents: integer("cash_received_cents"),
     changeCents: integer("change_cents"),
+    /** Moneda del vuelto; nula, la moneda en que entró el dinero. */
+    changeCurrency: text("change_currency"),
     payerContactId: uuid("payer_contact_id").references(() => contact.id),
     /** Clave de idempotencia del cobro (requestId del cliente). */
     requestId: uuid("request_id"),
@@ -2436,6 +2477,10 @@ export const paymentTicket = pgTable(
       .on(table.organizationId, table.requestId)
       .where(sql`${table.requestId} IS NOT NULL`),
     check("payment_ticket_total_check", sql`${table.totalCents} >= 0`),
+    check(
+      "payment_ticket_change_currency_check",
+      sql`${table.changeCurrency} IS NULL OR ${table.changeCurrency} ~ '^[A-Z]{3}$'`,
+    ),
   ],
 )
 

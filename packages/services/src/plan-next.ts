@@ -15,7 +15,7 @@
  * Recibe `can`: el botón solo se ofrece a quien puede hacerlo. La frase nunca
  * lleva diagnósticos, piezas ni notas: también la lee recepción.
  */
-import { formatMoney } from "@odentia/clinical"
+import { formatMoney, moneyTotalsText } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import {
@@ -96,7 +96,7 @@ export function unsentBudgetOf(budgets: BudgetWithTotals[]): BudgetWithTotals | 
 export function budgetLine(budget: BudgetWithTotals, locale: string): string {
   const value = valueOptionOf(budget.options)
   const count = value?.lineCount ?? budget.items.length
-  const money = budget.totalCents == null ? "falta algún precio" : formatMoney(budget.totalCents, budget.currency, locale)
+  const money = moneyTotalsText(budget.totals, (cents, currency) => formatMoney(cents, currency, locale), "falta algún precio")
   const options = budget.options.length > 1 ? ` · ${budget.options.length} opciones` : ""
   return `${count} ${count === 1 ? "tratamiento" : "tratamientos"} · ${money}${options}`
 }

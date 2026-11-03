@@ -254,6 +254,7 @@ import {
   voidOdontogramEntry,
 } from "./odontogram.js"
 import { seedPeriodontalCase } from "./seed-periodontal.js"
+import { seedTwoCurrencies } from "./seed-two-currencies.js"
 import { registerToothFinding } from "./tooth-panel.js"
 
 const databaseUrl = process.env.DATABASE_URL
@@ -4498,6 +4499,16 @@ const reportsProgress = await db.transaction((tx) =>
     orgId: ORG_A,
     ownerUserId: ANA_ID,
     branchIds: [miraflores.id, sanIsidro.id],
+  }),
+)
+// Cobrar en dos monedas: al final, con la historia ya en soles. Solo Dental Smile.
+await db.transaction((tx) =>
+  seedTwoCurrencies(tx, {
+    orgId: ORG_A,
+    ownerUserId: ANA_ID,
+    branchId: miraflores.id,
+    implantServiceId: serviceIdA("IMPLANTE"),
+    cleaningServiceId: serviceIdA("LIMPIEZA"),
   }),
 )
 // «Mi calendario» (issue 46): Luis comparte su agenda; Google la pide todos los

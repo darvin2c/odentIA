@@ -1,9 +1,14 @@
-import type { PatientGuide } from "@odentia/clinical"
+import { type PatientGuide, sumAcceptedByCurrency } from "@odentia/clinical"
 import { Checkbox, FieldLegend, FieldSet, RadioGroup, RadioGroupItem } from "@odentia/ui"
 import { SubmitButton } from "@odentia/ui-patterns"
 import { Check, ChevronDown, Minus } from "lucide-react"
 import { type ReactNode, useState } from "react"
-import { formatPortalDate, formatPortalMoney, type PortalBudget } from "../../lib/portal"
+import {
+  formatPortalDate,
+  formatPortalMoney,
+  type PortalBudget,
+  portalTotalsText,
+} from "../../lib/portal"
 import { appWords } from "../../lib/product-words"
 
 export type BudgetDecision = "aceptado" | "rechazado" | "pospuesto"
@@ -101,14 +106,23 @@ export function BudgetResponder({
   const [unchecked, setUnchecked] = useState<Set<string>>(new Set())
   const accepted = (planItemId: string, decision: string) =>
     open(decision) ? !unchecked.has(planItemId) : decision === "aceptado"
-  const money = (cents: number | null, plain = false) =>
-    formatPortalMoney(cents, budget.currency, budget.locale, plain)
-  const acceptedCents = lines.reduce(
-    (sum, item) =>
-      sum + (accepted(item.planItemId, item.decision) ? (item.lineTotalCents ?? 0) : 0),
-    0,
+  // Con dos monedas en el presupuesto, cada línea dice la suya; con una, la dice el total.
+  const twoCurrencies = new Set(budget.items.map((item) => item.currency)).size > 1
+  // Lo marcado, con la misma regla del servidor; sin nada marcado, cero en su moneda.
+  const acceptedText = portalTotalsText(
+    {
+      totals: sumAcceptedByCurrency(
+        lines.map((item) => ({
+          lineTotalCents: item.lineTotalCents,
+          decision: accepted(item.planItemId, item.decision) ? "aceptado" : null,
+          currency: item.currency,
+        })),
+      ),
+      totalCents: 0,
+    },
+    budget,
   )
-  const totalCents = several && viewedOption ? viewedOption.totalCents : budget.totalCents
+  const totalText = portalTotalsText(several && viewedOption ? viewedOption : budget, budget)
   const anyOpen = lines.some((item) => open(item.decision))
   const hasSessions = lines.some((item) => item.billingMode === "session")
   const answer = () =>
@@ -176,7 +190,7 @@ export function BudgetResponder({
                 <RadioGroupItem id={`opcion-${option.id}`} value={option.id} className="mt-0.5" />
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="font-semibold">
-                    {option.name?.trim() || option.label} · {money(option.totalCents)}
+                    {option.name?.trim() || option.label} · {portalTotalsText(option, budget)}
                   </span>
                   <span className="text-muted-foreground">
                     {[
@@ -254,7 +268,12 @@ export function BudgetResponder({
                   {detail ? <span className="text-muted-foreground">{detail}</span> : null}
                 </label>
                 <span className="whitespace-nowrap font-medium tabular-nums">
-                  {money(item.lineTotalCents, true)}
+                  {formatPortalMoney(
+                    item.lineTotalCents,
+                    item.currency,
+                    budget.locale,
+                    !twoCurrencies,
+                  )}
                 </span>
               </div>
               {guideRows.length > 0 ? (
@@ -283,7 +302,7 @@ export function BudgetResponder({
       </ul>
 
       <p className="text-sm font-semibold" aria-live="polite">
-        Aceptas {money(acceptedCents)} de {money(totalCents)}
+        Aceptas {acceptedText} de {totalText}
       </p>
       {hasSessions ? (
         <p className="text-sm text-muted-foreground">

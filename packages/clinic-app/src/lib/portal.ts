@@ -1,4 +1,9 @@
-import { formatMoney, formatMoneyAmount, type PatientGuide } from "@odentia/clinical"
+import {
+  formatMoney,
+  formatMoneyAmount,
+  moneyTotalsText,
+  type PatientGuide,
+} from "@odentia/clinical"
 import type {
   AuthenticationResponseJSON,
   PublicKeyCredentialCreationOptionsJSON,
@@ -109,7 +114,8 @@ export interface PortalBudget {
   currency: string
   /** Formato regional de la clínica; `null` si aún no lo configuró. */
   locale: string | null
-  /** Totales del servidor: el portal los muestra, no los recalcula. */
+  /** Totales del servidor: el portal los muestra, no los recalcula. Con dos monedas, las cifras de abajo son nulas. */
+  totals?: PortalCurrencyTotal[]
   totalCents: number | null
   acceptedCents: number | null
   tariffTotalCents: number | null
@@ -136,9 +142,16 @@ export interface PortalBudget {
     cons?: string | null
     isRecommended: boolean
     decision: string
+    totals?: PortalCurrencyTotal[]
     totalCents: number | null
   }>
   items: PortalBudgetLine[]
+}
+
+/** El total de una moneda: entre monedas nunca se suma ni se convierte. */
+export interface PortalCurrencyTotal {
+  currency: string
+  totalCents: number | null
 }
 
 export interface PortalDocument {
@@ -427,6 +440,21 @@ export function formatPortalMoney(
     }
   }
   return "Importe no disponible"
+}
+
+/** «S/ 300.00 + USD 1,000.00»: el total de un presupuesto o de una opción, por moneda. */
+export function portalTotalsText(
+  of: { totals?: PortalCurrencyTotal[]; totalCents: number | null },
+  budget: Pick<PortalBudget, "currency" | "locale">,
+): string {
+  const totals = of.totals?.length
+    ? of.totals
+    : [{ currency: budget.currency, totalCents: of.totalCents }]
+  return moneyTotalsText(
+    totals,
+    (cents, currency) => formatPortalMoney(cents, currency, budget.locale),
+    "Por cotizar",
+  )
 }
 
 /**

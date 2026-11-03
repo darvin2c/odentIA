@@ -10,7 +10,7 @@
 import type { Db } from "@odentia/db"
 import { sql } from "drizzle-orm"
 import { collectedByProfessional, collectedNetMany } from "./finance.js"
-import { OVERDUE_DAYS, overdueDebtSql } from "./report-debts.js"
+import { OVERDUE_DAYS, valuedDebtSql } from "./report-debts.js"
 import { lastMonths, type ReportBucket, yearBefore } from "./report-periods.js"
 import {
   at,
@@ -25,6 +25,7 @@ import {
   type Span,
   spansSql,
 } from "./report-scope.js"
+import { type CurrencyAmount, foreignBreakdown } from "./report-value.js"
 import { appointmentTotalsMany, budgetLinesSql, newPatientsMany } from "./reports.js"
 import { agentBookedMany, agentCollectedMany, agentRecoveredMany, collectedIn } from "./report-agent.js"
 import { occupancyMany } from "./report-agenda.js"
@@ -65,22 +66,41 @@ export async function agentBookingsMany(tx: Db, orgId: string, branchId: string 
   return spans.map((_, index) => ({ booked: booked[index]?.booked ?? 0, recovered: recovered[index] ?? 0 }))
 }
 
-/** Lo que debían hace más de `OVERDUE_DAYS` días en cada momento, por moneda, con cuántas personas. */
-export async function overdueDebtMany(
+/**
+ * Lo que debían hace más de `OVERDUE_DAYS` días en cada momento: el total aproximado
+ * al cambio de hoy y las personas distintas (quien debe en dos monedas cuenta una vez).
+ * `byCurrency` dice lo que se debe en cada una, solo si hay algo en otra. Lo viejo en
+ * otra moneda, sin factor, no entra.
+ */
+export async function overdueDebtTotalsMany(
   tx: Db,
   orgId: string,
   branchId: string | undefined,
   moments: Date[],
-): Promise<Array<Array<{ currency: string; cents: number; people: number }>>> {
-  const rows = await tx.execute<{ idx: number; currency: string; cents: string; people: number }>(sql`
-    ${overdueDebtSql(orgId, moments, OVERDUE_DAYS, branchId)}
-    select idx, currency, sum(owed)::text as cents, count(*)::int as people from overdue group by idx, currency`)
-  return bySpan(
-    moments.map((moment) => ({ start: moment, end: moment })),
-    [...rows],
-    (): Array<{ currency: string; cents: number; people: number }> => [],
-    (list, row) => [...list, { currency: row.currency, cents: safeCents(row.cents), people: row.people }],
-  )
+  business: string,
+): Promise<Array<{ cents: number; people: number; byCurrency?: CurrencyAmount[] }>> {
+  const rows = await tx.execute<{
+    idx: number
+    currency: string | null
+    owed: string | null
+    cents: string | null
+    people: number
+  }>(sql`
+    ${valuedDebtSql(orgId, moments, OVERDUE_DAYS, branchId)}
+    select idx, currency, sum(owed)::text as owed, round(sum(value))::text as cents, count(distinct patient_id)::int as people
+    from valued where value is not null group by grouping sets ((idx), (idx, currency))`)
+  return moments.map((_, index) => {
+    const own = rows.filter((row) => Number(row.idx) === index)
+    const total = own.find((row) => row.currency === null)
+    const parts = own.flatMap((row) =>
+      row.currency === null ? [] : [{ currency: row.currency, cents: safeCents(row.owed) }],
+    )
+    return {
+      cents: safeCents(total?.cents),
+      people: total?.people ?? 0,
+      ...foreignBreakdown(parts, business),
+    }
+  })
 }
 
 function inCurrency<T extends { currency: string }>(list: T[] | undefined, currency: string): T | undefined {
@@ -100,7 +120,13 @@ export async function getReportSummary(tx: Db, orgId: string, query: ReportQuery
     await budgetAcceptanceMany(tx, orgId, spans),
     await collectedNetMany(tx, orgId, spans, { branchId }),
     await agentBookingsMany(tx, orgId, branchId, spans),
-    await overdueDebtMany(tx, orgId, branchId, spans.map((span) => span.end)),
+    await overdueDebtTotalsMany(
+      tx,
+      orgId,
+      branchId,
+      spans.map((span) => span.end),
+      currency,
+    ),
   ]
   const nth = <T>(list: T[], index: number): T => list[index] as T
   const monthsOf = <T, V>(list: T[], pick: (item: T) => V): V[] => list.slice(2).map(pick)
@@ -134,7 +160,7 @@ export async function getReportSummary(tx: Db, orgId: string, query: ReportQuery
       current: cents(nth(collected, 0)),
       previous: cents(nth(collected, 1)),
       months: monthsOf(collected, cents),
-      /** Otras monedas del periodo, si las hubo: nunca se suman. */
+      /** Lo cobrado en otra moneda sin valor ni factor (filas viejas): no se puede sumar. */
       others: nth(collected, 0)
         .filter((item) => item.currency !== currency)
         .map((item) => ({ currency: item.currency, current: item.cents, previous: inCurrency(nth(collected, 1), item.currency)?.cents ?? 0 })),
@@ -155,9 +181,9 @@ export async function getReportSummary(tx: Db, orgId: string, query: ReportQuery
     overdue: {
       currency,
       days: OVERDUE_DAYS,
-      current: inCurrency(nth(debts, 0), currency) ?? { currency, cents: 0, people: 0 },
-      previous: inCurrency(nth(debts, 1), currency) ?? { currency, cents: 0, people: 0 },
-      months: monthsOf(debts, cents),
+      current: { currency, ...nth(debts, 0) },
+      previous: { currency, ...nth(debts, 1) },
+      months: monthsOf(debts, (item) => item.cents),
     },
     /** Lo cobrado por tramo del periodo y el mismo tramo un año antes, en la moneda de la clínica. */
     chart: buckets.map((bucket, index) => ({
@@ -197,7 +223,7 @@ export async function getReportProfessionals(tx: Db, orgId: string, query: Repor
     select created_by as "userId", count(distinct id)::int as presented,
       count(distinct id) filter (where accepted)::int as accepted
     from budget_line where created_by is not null group by created_by`)
-  const collectedBy = await collectedByProfessional(tx, orgId, { start: window.start, end: window.end, branchId }, currency)
+  const collectedBy = await collectedByProfessional(tx, orgId, { start: window.start, end: window.end, branchId }, scope.money)
   const rows = new Map<string, { userId: string; name: string; attended: number; noShow: number; total: number; presented: number; accepted: number; collectedCents: number }>()
   for (const row of professionals) rows.set(row.userId, { ...row, presented: 0, accepted: 0, collectedCents: 0 })
   for (const row of collectedBy) {

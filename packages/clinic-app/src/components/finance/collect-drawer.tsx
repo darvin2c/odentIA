@@ -19,8 +19,25 @@
  *
  * Moneda de la clínica (prop requerida) y formato del perfil; dinero con el
  * módulo compartido `@odentia/clinical`. Nada fijo de un país.
+ *
+ * Con otra moneda (`useOrgSecondCurrency`) se abre en la moneda de la deuda: un
+ * cobro cancela una moneda y entra en una, y lo que se escribe está en la que paga.
+ * Las cuentas son las del servidor (`collectExchange`); aquí solo se muestran. Sin
+ * otra moneda no aparece ningún control de más y el cuerpo es el de siempre.
  */
-import { documentText, formatMoney, formatMoneyInput, parseMoney, unitFor } from "@odentia/clinical"
+import {
+  collectExchange,
+  convertCents,
+  currencySymbol,
+  currencyWord,
+  documentText,
+  formatExchangeRateInput,
+  formatMoney,
+  formatMoneyInput,
+  parseMoney,
+  readExchangeRate,
+  unitFor,
+} from "@odentia/clinical"
 import {
   Button,
   Checkbox,
@@ -66,7 +83,6 @@ import {
   collectApi,
   createManualChargeApi,
   createProductChargeApi,
-  currencySymbol,
   editChargeConceptApi,
   fetchActivePromotions,
   fetchPatientAccount3,
@@ -77,12 +93,19 @@ import {
   type ProductCharge,
   type PromotionItem,
   type PromotionOption,
+  amountHelpText,
+  rateAuthorWords,
+  sentence,
   type SaleProduct,
   voidChargeApi,
 } from "../../lib/finance-collect"
 import { parseWholeQuantity, saleDeductionWords, saleStockNote } from "../../lib/materials"
+import { orgSecondCurrency, useOrgProfile } from "../../lib/org"
+import { currencyChoices } from "../../lib/product-words"
+import { ChoiceButtons } from "../choice-buttons"
 import { PersonPicker } from "../person-picker"
 import { ChoiceSelect } from "../ui/choice-select"
+import { RateFarNote, RateField } from "./rate-input"
 
 /** Lo más que se vende de un producto en un concepto (el tope del servidor). */
 const SALE_QUANTITY_MAX = 9999
@@ -276,6 +299,14 @@ interface CollectDraft {
   payments: SplitLine[]
   cashReceived: string
   payerContactId: string
+  /** Moneda de lo que cancela o a cuenta de la que queda un adelanto; vacía, la de la clínica. */
+  debtCurrency: string
+  /** Con qué paga: lo escrito está en ella; vacía, la de la deuda. */
+  payCurrency: string
+  /** El cambio de este cobro, como se escribe. */
+  rate: string
+  /** En qué da el vuelto; vacía, lo que corresponde según lo que paga. */
+  changeCurrency: string
 }
 
 const EMPTY_DRAFT: CollectDraft = {
@@ -288,23 +319,35 @@ const EMPTY_DRAFT: CollectDraft = {
   payments: [],
   cashReceived: "",
   payerContactId: "",
+  debtCurrency: "",
+  payCurrency: "",
+  rate: "",
+  changeCurrency: "",
 }
 
 /** Lo que el borrador necesita de la pantalla para calcularse y validarse. */
 interface CollectRules {
   needsPatient: boolean
-  /** Lo pendiente en la moneda de la clínica. */
+  /** Lo pendiente en la moneda de la deuda. */
   pending: AccountPendingItem[]
+  /** Lo que tiene a favor en esa moneda. */
   favor: number
   methods: PaymentMethodOption[]
+  /** Moneda del negocio. */
   currency: string
+  /** La otra moneda de la clínica; null si cobra en una sola. */
+  second: string | null
   locale: string
 }
 
 /** Las cifras del cobro a partir del borrador: lo que se ve y lo que se envía. */
 function collectFigures(value: CollectDraft, rules: CollectRules) {
-  const { pending, favor, methods, currency, locale } = rules
-  const money = (text: string) => parseMoneyOrNull(text, currency, locale)
+  const { pending, favor, methods, currency: business, second, locale } = rules
+  /** D: la moneda de lo que cancela. */
+  const debt = value.debtCurrency || business
+  /** P: la moneda en que paga; lo que se escribe está en ella. */
+  const pay = value.payCurrency || debt
+  const money = (text: string) => parseMoneyOrNull(text, pay, locale)
   const lineCents = (text: string) => money(text) ?? 0
   const methodById = (id: string) => methods.find((item) => item.id === id)
   const isCash = (id: string) => methodById(id)?.typeCode === CASH_TYPE_CODE
@@ -326,7 +369,51 @@ function collectFigures(value: CollectDraft, rules: CollectRules) {
       : 0
   const receivedCents = value.cashReceived.trim() ? money(value.cashReceived) : null
   const change = hasCash && receivedCents !== null ? receivedCents - cashPortion : null
+  // Hace falta cambio si algo no es moneda del negocio; solo saldo a favor no mueve dinero.
+  const needsRate = second !== null && !creditOnly && (debt !== business || pay !== business)
+  const rateText = needsRate ? (readExchangeRate(value.rate, locale).rate ?? null) : null
+  // El vuelto de quien paga en otra moneda se puede dar en la del negocio. Quien paga
+  // en otra que la deuda lo recibe en la del negocio, salvo que elija otra cosa, y el
+  // cuerpo lo dice siempre que cruza; el servidor, si no se lo dicen, lo da en la que pagó.
+  const changeChoice = hasCash && pay !== business && change !== null && change > 0
+  const changeIn = value.changeCurrency || (pay === debt ? pay : business)
+  /** La misma cuenta del servidor. */
+  const exchange = collectExchange({
+    paidCents: amountCents ?? 0,
+    paidCurrency: pay,
+    dueCents: due,
+    currency: debt,
+    businessCurrency: business,
+    rate: rateText,
+    changeCents: change,
+    changeIn,
+  })
+  const { factor, crossChange, changeGiven } = exchange
+  const proposed =
+    pay === debt
+      ? due
+      : factor !== null && due > 0
+        ? convertCents({
+            amountCents: due,
+            from: debt,
+            to: pay,
+            businessCurrency: business,
+            factor,
+          })
+        : null
+  /** Lo que cancela lo escrito, en la moneda de la deuda. */
+  const cancels = amountCents === null || amountCents <= 0 ? null : exchange.cancels
   return {
+    debt,
+    pay,
+    needsRate,
+    rateText,
+    proposed,
+    cancels,
+    changeChoice,
+    changeIn,
+    crossChange,
+    changeGiven,
     money,
     lineCents,
     methodById,
@@ -366,10 +453,14 @@ function collectSchema(rules: () => CollectRules) {
       payments: z.array(lineSchema),
       cashReceived: z.string(),
       payerContactId: z.string(),
+      debtCurrency: z.string(),
+      payCurrency: z.string(),
+      rate: z.string(),
+      changeCurrency: z.string(),
     })
     .superRefine((value, ctx) => {
       const current = rules()
-      const { currency, locale } = current
+      const { locale } = current
       const issue = (path: Array<string | number>, message: string) => ctx.addIssue({ code: "custom", path, message })
       if (current.needsPatient && !value.patient) {
         issue(["patient"], "Busca y elige al paciente que paga.")
@@ -381,14 +472,20 @@ function collectSchema(rules: () => CollectRules) {
         return
       }
       if (figures.creditOnly) return
+      if (figures.needsRate && !figures.rateText) {
+        issue(
+          ["rate"],
+          `${readExchangeRate(value.rate, locale).error ?? "Escribe el cambio"}.`,
+        )
+      }
       const amountCents = figures.amountCents
       const amountOk = amountCents !== null && amountCents > 0
       if (!amountOk) {
         issue(["amount"], value.advance ? "Escribe el importe del adelanto." : "Escribe el importe que paga ahora.")
-      } else if (!value.advance && amountCents > figures.due) {
+      } else if (!value.advance && figures.cancels !== null && figures.cancels > figures.due) {
         issue(
           ["amount"],
-          `El importe supera lo que falta de lo marcado (${formatMoney(figures.due, currency, locale)}). Para dejar dinero a favor, cobra un adelanto.`,
+          `El importe supera lo que falta de lo marcado (${formatMoney(figures.due, figures.debt, locale)}). Para dejar dinero a favor, cobra un adelanto.`,
         )
       }
       if (figures.split) {
@@ -407,7 +504,7 @@ function collectSchema(rules: () => CollectRules) {
         if (amountOk && linesOk && figures.splitTotal !== amountCents) {
           issue(
             ["payments"],
-            `Los medios suman ${formatMoney(figures.splitTotal, currency, locale)} y el importe es ${formatMoney(amountCents, currency, locale)}.`,
+            `Los medios suman ${formatMoney(figures.splitTotal, figures.pay, locale)} y el importe es ${formatMoney(amountCents, figures.pay, locale)}.`,
           )
         }
       } else if (!figures.method) {
@@ -446,6 +543,7 @@ export function CollectDrawer({
   branchId,
   branchName,
   currency,
+  debtCurrency,
   presetChargeIds,
   locale,
   open,
@@ -461,8 +559,10 @@ export function CollectDrawer({
   branchId: string
   /** Nombre de la sede; si no llega se busca entre las sedes activas. */
   branchName?: string
-  /** Moneda de la clínica: el servidor solo cobra conceptos en ella. */
+  /** Moneda de la clínica. */
   currency: string
+  /** La moneda de lo que se viene a cobrar, si quien abre el cobro la sabe. */
+  debtCurrency?: string
   presetChargeIds?: string[]
   locale: string
   open: boolean
@@ -475,6 +575,10 @@ export function CollectDrawer({
   const canWrite = usePermission("finance.write")
   const canConfigure = usePermission("settings.write")
   const sede = useActiveBranch()
+  const orgProfile = useOrgProfile()
+  const second = orgSecondCurrency(orgProfile.data)
+  const secondCode = second?.currency ?? null
+  const orgTimeZone = orgProfile.data?.timezone ?? ""
 
   const [selectInit, setSelectInit] = useState(false)
   /** El importe sigue a lo marcado hasta que la persona escribe otro. */
@@ -504,6 +608,7 @@ export function CollectDrawer({
     favor: 0,
     methods: [],
     currency,
+    second: null,
     locale,
   })
   const schema = useMemo(() => collectSchema(() => rules.current), [])
@@ -534,7 +639,17 @@ export function CollectDrawer({
       // El esquema ya exige importe y medio: aquí solo se arma el cuerpo.
       const amountCents = figures.amountCents ?? 0
       const single = figures.method
-      const base = { branchId, payerContactId: value.payerContactId || null, requestId: requestId.current }
+      const { debt, pay, needsRate, rateText, crossChange, changeIn } = figures
+      const base = {
+        branchId,
+        payerContactId: value.payerContactId || null,
+        requestId: requestId.current,
+        // Lo de otra moneda viaja solo si hace falta: soles a soles es el cuerpo de siempre.
+        ...(debt !== currency ? { currency: debt } : {}),
+        ...(pay !== debt ? { tenderCurrency: pay } : {}),
+        ...(needsRate && rateText ? { exchangeRate: rateText } : {}),
+        ...(crossChange !== null ? { changeCurrency: changeIn } : {}),
+      }
       // Sin medios el servidor usa solo el saldo a favor.
       const payments = figures.creditOnly
         ? undefined
@@ -578,6 +693,10 @@ export function CollectDrawer({
       if (key === "chargeIds" || key.startsWith("chargeIds[")) return "chargeIds"
       if (key === "advanceCents") return "amount"
       if (key === "cashReceivedCents") return "cashReceived"
+      if (key === "exchangeRate") return "rate"
+      if (key === "tenderCurrency") return "payCurrency"
+      if (key === "currency") return "debtCurrency"
+      if (key === "changeCurrency") return "changeCurrency"
       const part = /^payments\[(\d+)\]\.(paymentMethodId|amountCents|reference)$/.exec(key)
       if (!part) return undefined
       const name = part[2] === "paymentMethodId" ? "methodId" : part[2] === "amountCents" ? "amount" : "reference"
@@ -626,17 +745,42 @@ export function CollectDrawer({
   })
 
   const data = account.data?.data ?? null
-  const favor = data?.byCurrency.find((row) => row.currency === currency)?.aFavor ?? 0
+  // Lo que se cobra en esta clínica, por moneda: nunca sumado.
+  const orgCurrencies = useMemo(
+    () => (secondCode ? [currency, secondCode] : [currency]),
+    [currency, secondCode],
+  )
+  const debt = values.debtCurrency || currency
+  const pay = values.payCurrency || debt
+  const favor = data?.byCurrency.find((row) => row.currency === debt)?.aFavor ?? 0
   const pending = useMemo(
+    () => (data?.pendiente ?? []).filter((item) => item.saldoCents > 0 && item.currency === debt),
+    [data, debt],
+  )
+  const owedByCurrency = useMemo(
     () =>
-      (data?.pendiente ?? []).filter((item) => item.saldoCents > 0 && item.currency === currency),
-    [data, currency],
+      orgCurrencies.flatMap((code) => {
+        const rows = (data?.pendiente ?? []).filter(
+          (item) => item.saldoCents > 0 && item.currency === code,
+        )
+        return rows.length
+          ? [
+              {
+                code,
+                cents: rows.reduce((sum, item) => sum + item.saldoCents, 0),
+                ids: rows.map((item) => item.chargeId),
+              },
+            ]
+          : []
+      }),
+    [data, orgCurrencies],
   )
   const otherCurrencyCount = useMemo(
     () =>
-      (data?.pendiente ?? []).filter((item) => item.saldoCents > 0 && item.currency !== currency)
-        .length,
-    [data, currency],
+      (data?.pendiente ?? []).filter(
+        (item) => item.saldoCents > 0 && !orgCurrencies.includes(item.currency),
+      ).length,
+    [data, orgCurrencies],
   )
   const offersPromotions = canWrite && pending.some((item) => item.serviceId !== null)
   const promotions = useQuery({
@@ -646,21 +790,87 @@ export function CollectDrawer({
   })
   const methodList = methods.data?.data ?? []
 
-  rules.current = { needsPatient: patientId === null, pending, favor, methods: methodList, currency, locale }
+  rules.current = {
+    needsPatient: patientId === null,
+    pending,
+    favor,
+    methods: methodList,
+    currency,
+    second: secondCode,
+    locale,
+  }
   const figures = collectFigures(values, rules.current)
   const { autoCredit, due, creditOnly, amountCents, split, method, splitTotal, hasCash, change } =
     figures
 
-  // Selección inicial: lo pendiente, o lo que pidió quien abrió el cobro.
-  // Sin nada pendiente el cobro nace como adelanto.
+  // Selección inicial: se abre en la moneda de la deuda (la que pidió quien abre el
+  // cobro o, si debe en las dos, la del negocio), con lo pendiente en ella. Sin nada
+  // pendiente nace como adelanto, a cuenta de la moneda de su plan aceptado.
+  const orgProfileReady = !orgProfile.isPending
   useEffect(() => {
-    if (!open || selectInit || !data) return
-    const ids = pending.map((item) => item.chargeId)
+    if (!open || selectInit || !data || !orgProfileReady) return
+    const wanted = (presetChargeIds ?? []).length
+      ? data.pendiente.find((item) => presetChargeIds?.includes(item.chargeId))?.currency
+      : debtCurrency
+    const opening =
+      owedByCurrency.find((row) => row.code === wanted) ??
+      owedByCurrency.find((row) => row.code === currency) ??
+      owedByCurrency[0] ??
+      null
+    const planned =
+      data.planCurrency && orgCurrencies.includes(data.planCurrency) ? data.planCurrency : currency
+    const code = opening?.code ?? planned
+    const ids = opening?.ids ?? []
     const preset = (presetChargeIds ?? []).filter((id) => ids.includes(id))
     form.setFieldValue("chargeIds", preset.length > 0 ? preset : ids, { dontUpdateMeta: true })
-    if (pending.length === 0) form.setFieldValue("advance", true, { dontUpdateMeta: true })
+    form.setFieldValue("debtCurrency", code, { dontUpdateMeta: true })
+    form.setFieldValue("payCurrency", code, { dontUpdateMeta: true })
+    if (second)
+      form.setFieldValue("rate", formatExchangeRateInput(second.rate, locale), {
+        dontUpdateMeta: true,
+      })
+    if (!opening) form.setFieldValue("advance", true, { dontUpdateMeta: true })
     setSelectInit(true)
-  }, [open, selectInit, data, pending, presetChargeIds, form])
+  }, [
+    open,
+    selectInit,
+    data,
+    orgProfileReady,
+    owedByCurrency,
+    orgCurrencies,
+    presetChargeIds,
+    debtCurrency,
+    currency,
+    second,
+    locale,
+    form,
+  ])
+
+  /** Lo escrito estaba en otra moneda: vuelve a empezar y a seguir a lo marcado. */
+  const resetWritten = () => {
+    form.setFieldValue("changeCurrency", "")
+    form.setFieldValue("cashReceived", "")
+    form.setFieldValue("amount", "")
+    form.setFieldValue("payments", [])
+    setAmountTouched(false)
+  }
+
+  /** Otra moneda de deuda: lo marcado es lo de ella. */
+  const chooseDebt = (code: string) => {
+    form.setFieldValue("debtCurrency", code)
+    form.setFieldValue("payCurrency", code)
+    form.setFieldValue("chargeIds", owedByCurrency.find((row) => row.code === code)?.ids ?? [])
+    resetWritten()
+    closeInline()
+    setRowError(null)
+  }
+
+  /** Otra moneda de pago. */
+  const choosePay = (code: string) => {
+    if (code === figures.pay) return
+    form.setFieldValue("payCurrency", code)
+    resetWritten()
+  }
 
   /** Con una línea «automática», esta completa lo que falta para `totalCents`. */
   // Memorizada: el efecto del importe la usa sin volver a correr en cada render.
@@ -668,22 +878,24 @@ export function CollectDrawer({
     (totalCents: number | null) => {
       const lines = form.state.values.payments
       if (lines.length === 0) return
-      rebalance(lines, totalCents, currency, locale).forEach((line, index) => {
+      rebalance(lines, totalCents, pay, locale).forEach((line, index) => {
         if (line.amount !== lines[index]?.amount) {
           form.setFieldValue(`payments[${index}].amount`, line.amount, { dontUpdateMeta: true })
         }
       })
     },
-    [form, currency, locale],
+    [form, pay, locale],
   )
 
-  // El importe sigue a lo marcado hasta que la persona escribe otro.
+  // El importe sigue a lo marcado hasta que la persona escribe otro; está en lo que paga.
+  const proposed = figures.proposed
   useEffect(() => {
     if (!open || amountTouched || values.advance) return
-    const text = due > 0 ? formatMoneyInput(due, currency, locale) : ""
+    const cents = proposed !== null && proposed > 0 ? proposed : null
+    const text = cents !== null ? formatMoneyInput(cents, pay, locale) : ""
     if (form.state.values.amount !== text) form.setFieldValue("amount", text, { dontUpdateMeta: true })
-    followAmount(due > 0 ? due : null)
-  }, [open, amountTouched, values.advance, due, currency, locale, form, followAmount])
+    followAmount(cents)
+  }, [open, amountTouched, values.advance, proposed, pay, locale, form, followAmount])
 
   const refreshAccount = async (id: string) => {
     await queryClient.invalidateQueries({ queryKey: ["patient-account3", id] })
@@ -763,7 +975,7 @@ export function CollectDrawer({
         .filter(
           (price) =>
             price.serviceId === item.serviceId &&
-            price.currency === currency &&
+            price.currency === debt &&
             price.priceCents !== null,
         )
         .map((price) => ({ promo, price })),
@@ -849,8 +1061,14 @@ export function CollectDrawer({
     return runConcept({
       target: "agregar",
       run: async () => {
-        created = (await createManualChargeApi(effectiveId as string, { branchId, description, amountCents: cents }))
-          .data.id
+        created = (
+          await createManualChargeApi(effectiveId as string, {
+            branchId,
+            description,
+            amountCents: cents,
+            ...(debt !== currency ? { currency: debt } : {}),
+          })
+        ).data.id
       },
       done: () => {
         if (created) addCharge(created)
@@ -878,6 +1096,11 @@ export function CollectDrawer({
         const charge: ProductCharge | null = created
         if (charge) {
           addCharge(charge.id)
+          // Se vende en su moneda: el cobro va a ella, porque cancela una sola.
+          if (charge.currency !== debt && orgCurrencies.includes(charge.currency)) {
+            chooseDebt(charge.currency)
+            form.setFieldValue("chargeIds", [charge.id])
+          }
           setSoldHere((current) => ({
             ...current,
             [charge.id]: { quantity, unitPriceCents, branchName: sedeName || "la sede" },
@@ -912,7 +1135,7 @@ export function CollectDrawer({
             auto: false,
           },
         ]
-    form.setFieldValue("payments", rebalance([...lines, extra], amountCents, currency, locale))
+    form.setFieldValue("payments", rebalance([...lines, extra], amountCents, pay, locale))
   }
 
   const removeSplitLine = (index: number) => {
@@ -942,8 +1165,36 @@ export function CollectDrawer({
   const submitLabel = creditOnly
     ? "Usar saldo a favor"
     : amountCents !== null && amountCents > 0
-      ? `Cobrar ${formatMoney(amountCents, currency, locale)}`
+      ? `Cobrar ${formatMoney(amountCents, pay, locale)}`
       : "Cobrar"
+
+  // Con otra moneda, lo que cancela se dice junto al importe.
+  const word = (code: string) => currencyWord(code, locale)
+  const amountHelp = amountHelpText({
+    hasSecond: second !== null,
+    advance: values.advance,
+    pay,
+    debt,
+    cancels: figures.cancels,
+    due,
+    locale,
+    owesOther: owedByCurrency.some((row) => row.code !== debt),
+  })
+  const rateAuthor = second && orgTimeZone ? rateAuthorWords(second, locale, orgTimeZone) : ""
+  const rateHelp = !second
+    ? ""
+    : pay !== debt
+      ? `${sentence(`Tipo de cambio de hoy: ${formatExchangeRateInput(second.rate, locale)}${rateAuthor ? `, ${rateAuthor}` : ""}`)} Si lo cambias aquí, vale solo para este cobro.`
+      : "No cambia lo que paga: es para saber cuánto vale en tus reportes."
+  const showOtherCurrency = second !== null && !creditOnly
+  const cashLine =
+    second !== null && hasCash && pay !== currency && amountCents !== null && amountCents > 0
+      ? figures.crossChange !== null &&
+        figures.receivedCents !== null &&
+        figures.changeGiven !== null
+        ? `A la caja de ${word(pay)} entran ${formatMoney(figures.receivedCents, pay, locale)}. De la caja de ${word(figures.changeIn)} salen ${formatMoney(figures.changeGiven, figures.changeIn, locale)}.`
+        : `A la caja de ${word(pay)} entran ${formatMoney(figures.cashPortion, pay, locale)}.`
+      : null
 
   const editorFor = (item: AccountPendingItem) => {
     if (!editor || editor.chargeId !== item.chargeId) return null
@@ -955,7 +1206,7 @@ export function CollectDrawer({
           editorId={`${uid}-editor-${item.chargeId}`}
           promotionName={editor.promotionName}
           floorCents={editor.floorCents}
-          currency={currency}
+          currency={debt}
           locale={locale}
           busy={conceptMutation.isPending}
           pending={conceptBusy(`guardar-${item.chargeId}`)}
@@ -970,7 +1221,7 @@ export function CollectDrawer({
         idPrefix={uid}
         editorId={`${uid}-editor-${item.chargeId}`}
         item={item}
-        currency={currency}
+        currency={debt}
         locale={locale}
         removeQuestion={
           // Un producto vendido vuelve a la sede de donde salió.
@@ -1024,7 +1275,7 @@ export function CollectDrawer({
                 ? "tú pones el precio final"
                 : price.priceCents === 0
                   ? "quedaría sin costo"
-                  : `quedaría en ${formatAmountPlain(price.priceCents ?? 0, currency, locale)}`}
+                  : `quedaría en ${formatAmountPlain(price.priceCents ?? 0, debt, locale)}`}
             </span>
             <SubmitButton
               size="sm"
@@ -1137,11 +1388,47 @@ export function CollectDrawer({
                 <chargesField.Group legend="Qué paga" className="min-w-0 gap-3">
                   {(chargesControl) => (
                     <>
+                      {second !== null && !values.advance && owedByCurrency.length > 1 ? (
+                        <div className="flex flex-col gap-1.5">
+                          <ChoiceButtons
+                            aria-label="Moneda de lo que paga"
+                            tone="primary"
+                            value={debt}
+                            options={owedByCurrency.map((row) => ({
+                              value: row.code,
+                              label: `En ${word(row.code)} · ${formatMoney(row.cents, row.code, locale)}`,
+                            }))}
+                            onChange={chooseDebt}
+                          />
+                          <p className="text-sm text-muted-foreground">
+                            Cada moneda lleva su ticket. Al terminar, se ofrece cobrar lo otro.
+                          </p>
+                        </div>
+                      ) : null}
                       {values.advance ? (
-                        <p className="rounded-xl bg-muted/60 px-3 py-2 text-sm">
-                          Adelanto: no paga un concepto. Queda como saldo a favor y se usa solo en el
-                          próximo cobro.
-                        </p>
+                        <>
+                          <p className="rounded-xl bg-muted/60 px-3 py-2 text-sm">
+                            Adelanto: no paga un concepto. Queda como saldo a favor y se usa solo en
+                            el próximo cobro.
+                          </p>
+                          {second !== null ? (
+                            <div className="flex flex-col gap-1.5">
+                              <span id={`${uid}-a-cuenta`} className="text-sm font-medium">
+                                Queda a cuenta de
+                              </span>
+                              <ChoiceButtons
+                                aria-labelledby={`${uid}-a-cuenta`}
+                                tone="primary"
+                                value={debt}
+                                options={orgCurrencies.map((code) => ({
+                                  value: code,
+                                  label: `Lo que debe en ${word(code)}`,
+                                }))}
+                                onChange={(code) => form.setFieldValue("debtCurrency", code)}
+                              />
+                            </div>
+                          ) : null}
+                        </>
                       ) : pending.length === 0 ? (
                         <p className="text-sm text-muted-foreground">No tiene nada pendiente.</p>
                       ) : (
@@ -1193,15 +1480,15 @@ export function CollectDrawer({
                                       {sold ? (
                                         <span className="block text-xs text-muted-foreground">
                                           {sold.quantity > 1
-                                            ? `${formatAmountPlain(sold.unitPriceCents, currency, locale)} c/u · `
+                                            ? `${formatAmountPlain(sold.unitPriceCents, debt, locale)} c/u · `
                                             : ""}
                                           {saleDeductionWords(sold.quantity, sold.branchName)}
                                         </span>
                                       ) : null}
                                       {item.paidCents > 0 ? (
                                         <span className="block text-xs text-muted-foreground">
-                                          Costó {formatAmountPlain(item.totalCents, currency, locale)} · pagó{" "}
-                                          {formatAmountPlain(item.paidCents, currency, locale)}
+                                          Costó {formatAmountPlain(item.totalCents, debt, locale)} ·
+                                          pagó {formatAmountPlain(item.paidCents, debt, locale)}
                                         </span>
                                       ) : null}
                                       {!editable && item.promotionName ? (
@@ -1211,7 +1498,9 @@ export function CollectDrawer({
                                       ) : null}
                                     </span>
                                     <span className="shrink-0 font-semibold tabular-nums">
-                                      {formatAmountPlain(item.saldoCents, currency, locale)}
+                                      {second
+                                        ? formatMoney(item.saldoCents, debt, locale)
+                                        : formatAmountPlain(item.saldoCents, debt, locale)}
                                     </span>
                                   </label>
                                   {editable ? (
@@ -1265,7 +1554,7 @@ export function CollectDrawer({
                         <p className="flex items-center justify-between gap-3 rounded-xl bg-muted/60 px-3 py-2 text-sm">
                           <span>Se usa su saldo a favor</span>
                           <span className="font-medium tabular-nums">
-                            − {formatAmountPlain(autoCredit, currency, locale)}
+                            − {formatAmountPlain(autoCredit, debt, locale)}
                           </span>
                         </p>
                       ) : null}
@@ -1279,7 +1568,7 @@ export function CollectDrawer({
                       {adding ? (
                         <OtherConceptForm
                           idPrefix={uid}
-                          currency={currency}
+                          currency={debt}
                           locale={locale}
                           branchId={branchId}
                           busy={conceptMutation.isPending}
@@ -1332,7 +1621,7 @@ export function CollectDrawer({
                             Agregar otro concepto
                           </Button>
                           {values.advance ? (
-                            pending.length > 0 ? (
+                            owedByCurrency.length > 0 ? (
                               <Button
                                 type="button"
                                 variant="outline"
@@ -1341,6 +1630,9 @@ export function CollectDrawer({
                                 onClick={() => {
                                   form.setFieldValue("advance", false)
                                   setAmountTouched(false)
+                                  // Lo pendiente está en otra moneda: el cobro va a ella.
+                                  if (pending.length === 0)
+                                    chooseDebt(owedByCurrency[0]?.code ?? debt)
                                 }}
                               >
                                 Cobrar lo pendiente
@@ -1358,6 +1650,15 @@ export function CollectDrawer({
                                 form.setFieldValue("amount", "")
                                 form.setFieldValue("payments", [])
                                 setAmountTouched(false)
+                                // Por defecto, a cuenta de la moneda de su plan aceptado.
+                                if (
+                                  second &&
+                                  data?.planCurrency &&
+                                  orgCurrencies.includes(data.planCurrency)
+                                ) {
+                                  form.setFieldValue("debtCurrency", data.planCurrency)
+                                  form.setFieldValue("payCurrency", data.planCurrency)
+                                }
                               }}
                             >
                               Cobrar un adelanto
@@ -1406,19 +1707,58 @@ export function CollectDrawer({
               />
             ) : (
               <>
+                {showOtherCurrency && second ? (
+                  <>
+                    <form.AppField name="payCurrency">
+                      {(field) => (
+                        <field.Group legend="Paga con" className="gap-3">
+                          {(control) => (
+                            <ChoiceButtons
+                              id={control.id}
+                              invalid={control.invalid}
+                              aria-describedby={control.describedBy}
+                              onBlur={control.onBlur}
+                              tone="primary"
+                              value={pay}
+                              options={currencyChoices(orgCurrencies, locale)}
+                              onChange={choosePay}
+                            />
+                          )}
+                        </field.Group>
+                      )}
+                    </form.AppField>
+                    {figures.needsRate ? (
+                      <div className="flex flex-col gap-2">
+                        <form.AppField name="rate">
+                          {() => (
+                            <RateField
+                              id={`${uid}-cambio`}
+                              description={rateHelp}
+                              business={currency}
+                              other={second.currency}
+                              locale={locale}
+                            />
+                          )}
+                        </form.AppField>
+                        {figures.rateText ? (
+                          <RateFarNote
+                            rate={figures.rateText}
+                            today={second.rate}
+                            locale={locale}
+                            keptIn="en el ticket"
+                          />
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </>
+                ) : null}
                 <form.AppField name="amount">
                   {(field) => (
-                    <field.Control
-                      label="Importe"
-                      id={`${uid}-importe`}
-                      description={
-                        values.advance ? "Todo queda como saldo a favor." : "Si paga una parte, el resto queda por cobrar."
-                      }
-                    >
+                    <field.Control label="Importe" id={`${uid}-importe`} description={amountHelp}>
                       {(control) => (
                         <MoneyInput
                           id={control.id}
-                          currency={currency}
+                          currency={pay}
                           locale={locale}
                           value={field.state.value}
                           invalid={control.invalid}
@@ -1427,7 +1767,7 @@ export function CollectDrawer({
                           onChange={(value) => {
                             field.handleChange(value)
                             setAmountTouched(true)
-                            followAmount(parseMoneyOrNull(value, currency, locale))
+                            followAmount(parseMoneyOrNull(value, pay, locale))
                           }}
                         />
                       )}
@@ -1498,7 +1838,7 @@ export function CollectDrawer({
                                             {(control) => (
                                               <MoneyInput
                                                 id={control.id}
-                                                currency={currency}
+                                                currency={pay}
                                                 locale={locale}
                                                 value={field.state.value}
                                                 invalid={control.invalid}
@@ -1506,10 +1846,20 @@ export function CollectDrawer({
                                                 onBlur={control.onBlur}
                                                 onChange={(value) => {
                                                   field.handleChange(value)
-                                                  form.setFieldValue(`payments[${index}].auto`, false, {
-                                                    dontUpdateMeta: true,
-                                                  })
-                                                  followAmount(parseMoneyOrNull(form.state.values.amount, currency, locale))
+                                                  form.setFieldValue(
+                                                    `payments[${index}].auto`,
+                                                    false,
+                                                    {
+                                                      dontUpdateMeta: true,
+                                                    },
+                                                  )
+                                                  followAmount(
+                                                    parseMoneyOrNull(
+                                                      form.state.values.amount,
+                                                      pay,
+                                                      locale,
+                                                    ),
+                                                  )
                                                 }}
                                               />
                                             )}
@@ -1541,11 +1891,11 @@ export function CollectDrawer({
                                 )}
                                 role="status"
                               >
-                                Suman {formatMoney(splitTotal, currency, locale)}
+                                Suman {formatMoney(splitTotal, pay, locale)}
                                 {amountCents !== null && splitTotal < amountCents
-                                  ? ` · faltan ${formatMoney(amountCents - splitTotal, currency, locale)}`
+                                  ? ` · faltan ${formatMoney(amountCents - splitTotal, pay, locale)}`
                                   : amountCents !== null && splitTotal > amountCents
-                                    ? ` · sobran ${formatMoney(splitTotal - amountCents, currency, locale)}`
+                                    ? ` · sobran ${formatMoney(splitTotal - amountCents, pay, locale)}`
                                     : ""}
                               </p>
                             </>
@@ -1594,7 +1944,7 @@ export function CollectDrawer({
                             {(control) => (
                               <MoneyInput
                                 id={control.id}
-                                currency={currency}
+                                currency={pay}
                                 locale={locale}
                                 value={field.state.value}
                                 invalid={control.invalid || (change !== null && change < 0)}
@@ -1616,10 +1966,43 @@ export function CollectDrawer({
                             change !== null && change < 0 && "text-destructive",
                           )}
                         >
-                          {change === null ? "—" : formatMoney(Math.abs(change), currency, locale)}
+                          {change === null
+                            ? "—"
+                            : change < 0 || figures.changeGiven === null
+                              ? formatMoney(Math.abs(change), pay, locale)
+                              : formatMoney(
+                                  figures.changeGiven,
+                                  figures.crossChange !== null ? figures.changeIn : pay,
+                                  locale,
+                                )}
                         </span>
                       </div>
                     </div>
+                  ) : null}
+                  {figures.changeChoice ? (
+                    <form.AppField name="changeCurrency">
+                      {(field) => (
+                        <field.Group legend="Vuelto en" className="gap-3">
+                          {(control) => (
+                            <ChoiceButtons
+                              id={control.id}
+                              invalid={control.invalid}
+                              aria-describedby={control.describedBy}
+                              onBlur={control.onBlur}
+                              tone="primary"
+                              value={figures.changeIn}
+                              options={currencyChoices([pay, currency], locale)}
+                              onChange={(code) => field.handleChange(code)}
+                            />
+                          )}
+                        </field.Group>
+                      )}
+                    </form.AppField>
+                  ) : null}
+                  {cashLine ? (
+                    <p role="status" className="rounded-xl bg-muted/60 px-3 py-2 text-sm">
+                      {cashLine}
+                    </p>
                   ) : null}
                   {methodList.length > 1 ? (
                     <Button

@@ -249,3 +249,95 @@ it("un medio de pago desactivado no se ofrece; decir que no se acepta sí pasa",
   expect(refusedPaymentMentions("Chequeamos tu cita.", refused)).toEqual([])
   expect(refusedPaymentMentions("Aceptamos tarjeta.", [])).toEqual([])
 })
+
+/* ---------- Clínica con segunda moneda ---------- */
+
+const TWO = { ...LIMA, secondCurrency: "USD" }
+const IMPLANT_LINE = "- Implante (id 11111111-2222-4333-8444-555555555555), 90 min: USD 1,000.00 (hoy, unos S/ 3,750)"
+const CLEANING_LINE = "- Limpieza (id 11111111-2222-4333-8444-666666666666), 45 min: S/ 150.00"
+const CATALOG = { source: "Conocimiento publicado de la clínica", text: `${IMPLANT_LINE}\n${CLEANING_LINE}` }
+const notSupported = (reply: string, evidence = [CATALOG], zone: Parameters<typeof verifyReply>[2] = TWO) =>
+  verifyReply(reply, evidence, zone, NOW).unsupported.map((item) => item.value)
+
+it("con dos monedas, el importe vale en la moneda que dice la fuente", () => {
+  // Es lo que dice el prompt: el precio en su moneda y el aproximado en la del negocio.
+  const said = verifyReply("El implante cuesta USD 1,000 (hoy, unos S/ 3,750).", [CATALOG], TWO, NOW)
+  expect(said.ok).toBe(true)
+  expect(said.checks.map((item) => item.subject)).toEqual(["implante", "implante"])
+  for (const right of ["USD 1,000", "1000 dólares", "$1,000", "US$ 1,000", "1,000.00 USD", "1000 usd"]) {
+    expect(notSupported(`El implante cuesta ${right}.`), right).toEqual([])
+  }
+  for (const right of ["S/ 150", "S/. 150", "150 soles", "PEN 150", "150 nuevos soles"]) {
+    expect(notSupported(`La limpieza cuesta ${right}.`), right).toEqual([])
+  }
+})
+
+it("USD 1,000 dicho como S/ 1,000 no sale, ni al revés", () => {
+  expect(notSupported("El implante cuesta S/ 1,000.")).toEqual(["S/ 1,000 (ese importe está en otra moneda)"])
+  expect(notSupported("El implante cuesta 1,000 soles.")).toEqual(["1,000 soles (ese importe está en otra moneda)"])
+  expect(notSupported("El implante cuesta USD 3,750.")).toEqual(["USD 3,750 (ese importe está en otra moneda)"])
+  expect(notSupported("La limpieza cuesta USD 150.")).toEqual(["USD 150 (ese importe está en otra moneda)"])
+  expect(notSupported("La limpieza cuesta 150 dólares.")).toEqual(["150 dólares (ese importe está en otra moneda)"])
+  // Una moneda que la clínica no usa tampoco toma el número de otra.
+  expect(notSupported("La limpieza cuesta EUR 150.")).toEqual(["EUR 150 (ese importe está en otra moneda)"])
+})
+
+it("con dos monedas no se suma entre monedas", () => {
+  expect(notSupported("Implante USD 1,000 y limpieza S/ 150: en total USD 1,150.")).toEqual(["USD 1,150"])
+  expect(notSupported("Implante USD 1,000 y limpieza S/ 150: en total S/ 1,150.")).toEqual(["S/ 1,150"])
+  // Dentro de una misma moneda sí: lo aproximado en soles más lo que está en soles.
+  const same = verifyReply("Implante unos S/ 3,750 y limpieza S/ 150: en total S/ 3,900.", [CATALOG], TWO, NOW)
+  expect(same.ok).toBe(true)
+  expect(same.checks.find((item) => item.value === "S/ 3,900")?.source).toBe(SOURCE_SUM)
+  const two = [{ source: "Presupuesto", text: "Implante: USD 1,000.00\nCorona: USD 200.00\nLimpieza: S/ 150.00" }]
+  expect(notSupported("Implante USD 1,000 y corona USD 200: USD 1,200, y aparte S/ 150.", two)).toEqual([])
+})
+
+it("con una moneda, todo sigue como hoy: se mira solo el número y se suma todo", () => {
+  expect(verifyReply("El implante cuesta S/ 1,000.", [CATALOG], LIMA, NOW).ok).toBe(true)
+  expect(verifyReply("La limpieza cuesta USD 150.", [CATALOG], LIMA, NOW).ok).toBe(true)
+  expect(verifyReply("Implante USD 1,000 y limpieza S/ 150: en total USD 1,150.", [CATALOG], LIMA, NOW).ok).toBe(true)
+  // `secondCurrency` nula es una clínica de una moneda.
+  expect(verifyReply("El implante cuesta S/ 1,000.", [CATALOG], { ...LIMA, secondCurrency: null }, NOW).ok).toBe(true)
+  // Y su mensaje no dice nada de monedas.
+  expect(verifyReply("La limpieza cuesta S/ 999.", [CATALOG], LIMA, NOW).unsupported.map((item) => item.value)).toEqual(["S/ 999"])
+})
+
+it("un número sin moneda en la fuente sigue valiendo, si nadie lo da en otra", () => {
+  const bare = [{ source: "Respuestas oficiales", text: "Consulta: 80." }]
+  expect(notSupported("La consulta cuesta S/ 80.", bare)).toEqual([])
+  expect(notSupported("La consulta cuesta USD 80.", bare)).toEqual([])
+  // Que el número aparezca suelto en otra fuente no vuelve dólares lo que está en soles.
+  const loose = [{ source: "Lo dijo el interlocutor", text: "me dijeron 150" }, CATALOG]
+  expect(notSupported("La limpieza cuesta USD 150.", loose)).toEqual(["USD 150 (ese importe está en otra moneda)"])
+})
+
+it("con dos monedas conoce también el símbolo de la segunda", () => {
+  // Hoy «Bs» no se lee como dinero en una clínica de soles: el importe saldría sin comprobar.
+  const boliviano = { ...LIMA, secondCurrency: "BOB" }
+  const prices = [{ source: "Servicios", text: "- Limpieza: BOB 100.00" }]
+  expect(notSupported("Cuesta Bs 999.", prices, boliviano)).toEqual(["Bs 999"])
+  expect(notSupported("Cuesta Bs 100.", prices, boliviano)).toEqual([])
+  expect(notSupported("Cuesta 100 bolivianos.", prices, boliviano)).toEqual([])
+  expect(notSupported("Cuesta S/ 100.", prices, boliviano)).toEqual(["S/ 100 (ese importe está en otra moneda)"])
+  expect(verifyReply("Cuesta Bs 999.", prices, LIMA, NOW).checks).toEqual([])
+})
+
+it("el símbolo de la moneda del negocio es de ella", () => {
+  // En Chile «$» son pesos, aunque en otro lado el dólar se escriba igual.
+  const chile = { timezone: "America/Santiago", currency: "CLP", locale: "es-CL", secondCurrency: "USD" }
+  const prices = [{ source: "Servicios", text: "- Limpieza: $50.000\n- Implante: USD 1.000,00" }]
+  expect(notSupported("La limpieza cuesta $50.000.", prices, chile)).toEqual([])
+  expect(notSupported("La limpieza cuesta 50.000 pesos.", prices, chile)).toEqual([])
+  expect(notSupported("La limpieza cuesta USD 50.000.", prices, chile)).toEqual(["USD 50.000 (ese importe está en otra moneda)"])
+  expect(notSupported("El implante cuesta $1.000.", prices, chile)).toEqual(["$1.000 (ese importe está en otra moneda)"])
+  expect(notSupported("El implante cuesta USD 1.000.", prices, chile)).toEqual([])
+})
+
+it("un mínimo en dólares no afecta a un precio igual en soles, y su aproximado también es un mínimo", () => {
+  const prices = [{ source: "Servicios", text: "- Implante: desde USD 1,000.00 (hoy, desde S/ 3,750 aprox.)\n- Otro: S/ 1,000.00" }]
+  expect(notSupported("El otro cuesta S/ 1,000.", prices)).toEqual([])
+  expect(notSupported("El implante cuesta desde USD 1,000.", prices)).toEqual([])
+  expect(notSupported("El implante cuesta desde USD 1,000 (hoy, desde S/ 3,750 aprox.).", prices)).toEqual([])
+  expect(notSupported("El implante cuesta S/ 3,750.", prices)).toEqual(["S/ 3,750 (es un mínimo: dilo con «desde»)"])
+})

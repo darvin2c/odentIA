@@ -514,6 +514,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   // Configuración
   "org_profile.upsert": say("Cambió los datos de la clínica"),
   "settings.region_updated": say("Cambió el país, la moneda o el formato de la clínica"),
+  "settings.exchange_rate_updated": say("Cambió la otra moneda de la clínica o el cambio de hoy"),
   "settings.diagnosis_system_changed": say("Cambió la lista de diagnósticos de la clínica"),
   "settings.two_factor_required": say("Pidió verificación en dos pasos a todo el equipo"),
   "settings.two_factor_not_required": say("Dejó de pedir verificación en dos pasos al equipo"),

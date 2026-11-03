@@ -29,7 +29,6 @@ function forbid(c: Context, message = "No tienes acceso a comisiones") {
   return c.json(errorBody(c, "FORBIDDEN", message), 403)
 }
 
-const currency = z.string().regex(/^[A-Z]{3}$/)
 const year = z.coerce.number().int().min(2000).max(2100)
 const month = z.coerce.number().int().min(1).max(12)
 const reasonInput = z
@@ -41,7 +40,7 @@ const reasonInput = z
       .max(2000, "Escribe el motivo en 2000 caracteres como máximo."),
   })
   .strict()
-const period = z.object({ year, month, currency: currency.optional() })
+const period = z.object({ year, month })
 
 /**
  * A quién se puede mirar: administración, a quien pida; cualquier otro con
@@ -125,10 +124,10 @@ export function createCommissionsRoute(deps: Pick<CrmDeps, "db">) {
     if ("response" in scoped) return scoped.response
     const target = scoped.target
     if (!target) return c.json(errorBody(c, "VALIDATION", "Elige el profesional"), 400)
-    const { year: y, month: m, currency: unit } = parsed.data
+    const { year: y, month: m } = parsed.data
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        getMonthlyCommissions(tx, orgId, { professionalUserId: target, year: y, month: m, currency: unit }),
+        getMonthlyCommissions(tx, orgId, { professionalUserId: target, year: y, month: m }),
       ),
     )
   })
@@ -153,7 +152,6 @@ export function createCommissionsRoute(deps: Pick<CrmDeps, "db">) {
         professionalUserId: z.string().min(1),
         year: z.number().int().min(2000).max(2100),
         month: z.number().int().min(1).max(12),
-        currency: currency.optional(),
         branchId: z.uuid("Elige la sede del gasto."),
         notes: z.string().max(2000).nullish(),
         expectedCents: z.number().int().positive().optional(),

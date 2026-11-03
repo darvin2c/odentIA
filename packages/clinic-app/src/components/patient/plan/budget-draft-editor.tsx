@@ -30,6 +30,7 @@ import {
   isBelowTariff,
   isSessionLine,
   type Money,
+  moneyForLines,
   sessionExplanation,
   treatmentSiteLabel,
 } from "./budget-parts"
@@ -104,7 +105,7 @@ export function BudgetDraftEditor({
   promotionsFailed,
   onRetryPromotions,
   locale,
-  money,
+  money: baseMoney,
   disabled,
   delivering,
   saveLines,
@@ -138,6 +139,12 @@ export function BudgetDraftEditor({
   sendAction?: (beforeSend: () => Promise<void>) => ReactNode
   secondaryActions: ReactNode
 }): React.JSX.Element {
+  // Lo que se puede sumar cuenta: un tratamiento en otra moneda también debe decir la suya.
+  const money = moneyForLines(baseMoney, [
+    ...budget.items,
+    ...addable.map((item) => ({ currency: item.currency ?? budget.currency })),
+  ])
+  const twoCurrencies = new Set(budget.items.map((line) => line.currency)).size > 1
   const rootRef = useRef<HTMLDivElement | null>(null)
   /** Aplicar o quitar una promoción, incluir o quitar un tratamiento: la acción en curso. */
   const [pending, setPending] = useState<string | null>(null)
@@ -491,8 +498,8 @@ export function BudgetDraftEditor({
                     <form.AppField name={`lines[${index}].priceCents`}>
                       {(field) => (
                         <field.TextField
-                          label={priceLabel}
-                          hideLabel
+                          label={twoCurrencies ? `${priceLabel} (${line.currency})` : priceLabel}
+                          hideLabel={!twoCurrencies}
                           inputMode="decimal"
                           autoComplete="off"
                           className="w-32 justify-self-end text-right"
