@@ -195,6 +195,16 @@ peticiones Fail open los usa de respaldo; un error del Worker o pasar la CPU mue
 de Cloudflare. Vuelta atrás: quitar la ruta. Antes de retirarlos del VPS, mirar en Metrics la CPU de las
 pantallas con sesión y que no haya errores.
 
+### La app de las clínicas en Workers
+
+`odentia-clinicas` y `latidia-clinicas` (ADR 0138) se publican con el mismo job. Su entrada es una
+ruta comodín, `*.odentia32.com/*` y `*.latidia72.com/*`, con **Fail open**. Antes de ponerla,
+cada dirección que no es una clínica tiene que tener su propia ruta, que gana por ser más
+específica: `app.`, `admin.` y `www.` ya van a sus Workers, y `api.<dominio>/*` (y
+`media.odentia32.com/*`, los archivos de R2) se agregan en la zona, en Workers Routes, con
+Worker «None», para que sigan yendo al VPS y a R2. Un subdominio nuevo con proxy en esas zonas
+necesita lo mismo. Vuelta atrás: quitar la ruta comodín.
+
 ## Variables: una sola fuente
 
 En OpenShip, las variables comunes viven en el entorno **production del proyecto**.

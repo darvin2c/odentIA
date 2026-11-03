@@ -13,9 +13,16 @@ export interface SessionInfo {
   emailVerified: boolean
 }
 
-/** Cabeceras de la petición entrante en SSR (cookies); vacío en el cliente. */
+/**
+ * En SSR, la cookie de la petición entrante; vacío en el cliente. Solo la cookie, como `apiFetch`:
+ * las demás cabeceras de la visita (su `Host`, las de Cloudflare) no son de la API, y en Workers
+ * (ADR 0138) no hay `fetch` de Node que las descarte.
+ */
 export const ssrFetchOptions = createIsomorphicFn()
-  .server(() => ({ headers: getRequestHeaders() }))
+  .server(() => {
+    const cookie = getRequestHeaders().get("cookie")
+    return cookie ? { headers: { cookie } } : {}
+  })
   .client(() => ({}))
 
 /** URL absoluta actual (cliente o SSR): el `next` de vuelta al tenant. */
@@ -33,8 +40,8 @@ function currentAbsoluteUrl(href: string): string {
 
 /** Sesión actual o redirect al login del panel (con `next` de vuelta al tenant). */
 export async function requireSession(location: { href: string }): Promise<SessionInfo> {
-  // En SSR el fetch corre en Node y no ve las cookies del navegador: hay que
-  // reenviar las cabeceras de la petición entrante.
+  // En SSR el fetch corre en el servidor y no ve las cookies del navegador: hay que
+  // reenviar la de la petición entrante.
   const { data } = await authClient.getSession({
     fetchOptions: ssrFetchOptions(),
   })
