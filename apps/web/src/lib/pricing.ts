@@ -4,11 +4,12 @@
 
 // Este archivo también lo importan las islas (por `money` y los tipos): nada de lo que lee la
 // configuración del servidor se evalúa al cargarlo.
+import { edgeCache } from "./edge-cache"
 import { DEFAULT_DOMAIN, MEDICAL } from "./product"
 
 const FRESH_MS = 30_000
 
-/** Dentro del stack la web llama a la API por la red interna; en local, por su dirección pública. Solo en el servidor. */
+/** En el VPS la web llama a la API por la red interna; en Workers y en local, por su dirección pública. Solo en el servidor. */
 function apiBase(): string {
   const domain = import.meta.env.VITE_BASE_DOMAIN || DEFAULT_DOMAIN
   const port = import.meta.env.VITE_BASE_PORT ? `:${import.meta.env.VITE_BASE_PORT}` : ""
@@ -124,6 +125,24 @@ function planOf(plan: ApiPlan): PlanPrices {
   }
 }
 
+/**
+ * En Workers lo último leído también queda un día en la caché del centro de datos: cada
+ * isolate empieza sin nada en memoria, y sin esto un reinicio de la API daría 503 en vez de
+ * los precios de hace un momento. La clave no es una dirección que exista.
+ */
+const LAST_READ_KEY = `https://precios.odentia.internal/ultimo?product=${MEDICAL ? "medical" : "dental"}`
+const LAST_READ_SECONDS = 86_400
+
+async function keepLastRead(value: Pricing): Promise<void> {
+  const body = JSON.stringify(value)
+  await edgeCache()?.put(LAST_READ_KEY, new Response(body, { headers: { "Cache-Control": `s-maxage=${LAST_READ_SECONDS}` } }))
+}
+
+async function lastRead(): Promise<Pricing | null> {
+  const hit = await edgeCache()?.match(LAST_READ_KEY)
+  return hit ? ((await hit.json()) as Pricing) : null
+}
+
 let cached: { at: number; value: Pricing } | null = null
 let inflight: Promise<Pricing> | null = null
 
@@ -159,8 +178,9 @@ async function fetchPricing(): Promise<Pricing> {
 export async function loadPricing(): Promise<Pricing> {
   if (cached && Date.now() - cached.at < FRESH_MS) return cached.value
   inflight ??= fetchPricing()
-    .then((value) => {
+    .then(async (value) => {
       cached = { at: Date.now(), value }
+      await keepLastRead(value).catch(() => {})
       return value
     })
     .finally(() => {
@@ -170,6 +190,8 @@ export async function loadPricing(): Promise<Pricing> {
     return await inflight
   } catch (error) {
     if (cached) return cached.value
+    const last = await lastRead().catch(() => null)
+    if (last) return last
     throw error
   }
 }

@@ -1,6 +1,6 @@
 # 0062 · Fundadores: abrir una clínica pide invitación y la web muestra los precios de la administración
 
-Fecha: 2026-10-18 · Estado: aceptada · Actualiza [0046](0046-web-de-marketing-en-astro.md) (la web se genera por adelantado y no llama a la API) y [0031](0031-cobro-por-accion-con-un-plan-que-vuelve-en-credito.md) (precio negociado). Lienzo «Fundadores y lista de espera», aprobado entero el 2026-10-18; issues 165 y 168.
+Fecha: 2026-10-18 · Estado: aceptada; actualizada por [0136](0136-las-webs-de-marketing-en-cloudflare-workers.md) (la web se arma en Cloudflare Workers y lee los precios por la dirección pública de la API) · Actualiza [0046](0046-web-de-marketing-en-astro.md) (la web se genera por adelantado y no llama a la API) y [0031](0031-cobro-por-accion-con-un-plan-que-vuelve-en-credito.md) (precio negociado). Lienzo «Fundadores y lista de espera», aprobado entero el 2026-10-18; issues 165 y 168.
 
 ## Problema
 

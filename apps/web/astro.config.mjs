@@ -3,6 +3,7 @@
 import { readFileSync, readdirSync } from "node:fs"
 import { join, relative } from "node:path"
 import { fileURLToPath } from "node:url"
+import cloudflare from "@astrojs/cloudflare"
 import node from "@astrojs/node"
 import react from "@astrojs/react"
 import sitemap from "@astrojs/sitemap"
@@ -36,10 +37,18 @@ const pages = pageFiles(pagesDir)
   .filter((path) => (medical ? latidiaPages.serves.includes(path) : !latidiaPages.own.includes(path)))
   .map((path) => new URL(path === "/" ? "/" : path, site).toString().replace(/\/$/, path === "/" ? "/" : ""))
 
+// Las dos webs se publican en Cloudflare Workers (ADR 0136) con `WEB_TARGET=cloudflare`; sin él,
+// el servidor de Node de siempre, el de `pnpm dev` y el del VPS mientras se cambia la entrada.
+const workers = process.env.WEB_TARGET === "cloudflare"
+
 export default defineConfig({
   site,
   output: "server",
-  adapter: node({ mode: "standalone" }),
+  // En Workers: sin sesiones (la web no las usa y pedirían KV) y sin transformar imágenes (solo
+  // hay SVG; el servicio de imágenes de Cloudflare se cobra aparte). La caché de las páginas
+  // la pone `src/middleware.ts`.
+  adapter: workers ? cloudflare({ imageService: "passthrough" }) : node({ mode: "standalone" }),
+  ...(workers && { session: false }),
   trailingSlash: "never",
   // Cada enlace interno se baja al pasar el puntero (o al tocarlo): al hacer clic la página ya está.
   prefetch: { prefetchAll: true, defaultStrategy: "hover" },

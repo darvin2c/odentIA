@@ -230,3 +230,73 @@ jobs:
       - name: Desplegar el commit verificado
         if: steps.punta.outputs.omitir != 'true'
         run: openship deploy --project "$OPENSHIP_PROJECT_ID" --branch main --commit "$GITHUB_SHA" --env production --smart-route --watch --timeout 2400000
+
+  # Las dos webs de marketing van en Cloudflare Workers (ADR 0136), aparte de OpenShip: un
+  # cambio de texto llega en un par de minutos y no reconstruye lo demás. En un PR solo se
+  # comprueba que se arman para Workers (`--dry-run`, sin claves); en main se publican.
+  deploy-web:
+    needs: [check, e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: deploy-web-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'production' || github.sha }}
+      cancel-in-progress: false
+    env:
+      WEB_TARGET: cloudflare
+      # Publicar solo en la punta de main y con la cuenta de Cloudflare puesta en el repositorio;
+      # sin ella, hasta hacer el cambio de `docs/deployment.md`, se comprueba igual que en un PR.
+      PUBLICAR: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.CLOUDFLARE_ACCOUNT_ID != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Comprobar que es la punta de main
+        if: env.PUBLICAR == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          punta=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          if [ "$punta" != "$GITHUB_SHA" ]; then
+            echo "main ya avanzó a $punta; la corrida de ese commit publicará las webs."
+            echo "OMITIR=true" >> "$GITHUB_ENV"
+          fi
+      - if: env.OMITIR != 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - if: env.OMITIR != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - if: env.OMITIR != 'true'
+        run: pnpm install --frozen-lockfile --filter @odentia/web...
+      # Cada web es un build con su dominio y su producto; las dos usan la misma carpeta, así que
+      # se publica una antes de armar la otra. La clave de Cloudflare solo llega al paso que publica.
+      - name: Armar la web de odentIA
+        if: env.OMITIR != 'true'
+        working-directory: apps/web
+        env:
+          VITE_BASE_DOMAIN: odentia32.com
+        run: pnpm build && pnpm exec wrangler deploy --dry-run
+      - name: Publicar la web de odentIA
+        if: env.OMITIR != 'true' && env.PUBLICAR == 'true'
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler deploy
+      - name: Armar la web de latidIA
+        if: env.OMITIR != 'true'
+        working-directory: apps/web
+        env:
+          VITE_BASE_DOMAIN: latidia72.com
+          VITE_PRODUCT: medical
+          CLOUDFLARE_ENV: latidia
+        run: pnpm build && pnpm exec wrangler deploy --dry-run
+      - name: Publicar la web de latidIA
+        if: env.OMITIR != 'true' && env.PUBLICAR == 'true'
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_ENV: latidia
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler deploy

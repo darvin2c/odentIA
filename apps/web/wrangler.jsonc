@@ -1,0 +1,19 @@
+// Las dos webs de marketing en Cloudflare Workers (ADR 0136): la de odentIA y, con
+// `CLOUDFLARE_ENV=latidia` al compilar, la de latidIA. El build de Astro arma desde aquí el
+// `dist/server/wrangler.json` que publica `wrangler deploy`. Sin `routes`: mientras los dominios
+// se agregan a mano (docs/deployment.md), publicar no los toca.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "odentia-web",
+  "compatibility_date": "2026-10-01",
+  // `process.env` y lo que React usa de Node al armar la página en el servidor.
+  "compatibility_flags": ["nodejs_compat"],
+  // Registros de cada visita (lo que antes daba el servidor): el plan gratuito guarda 3 días.
+  "observability": { "enabled": true },
+  "env": {
+    "latidia": {
+      "name": "latidia-web",
+      "observability": { "enabled": true }
+    }
+  }
+}
