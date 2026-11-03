@@ -1,4 +1,4 @@
-import { formatMoney, medicalLeaveWords } from "@odentia/clinical"
+import { formatMoney, medicalLeaveWords, moneyTotalsText } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -33,7 +33,7 @@ import {
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { useBudgetPapers } from "../../lib/budget-papers"
-import { type BudgetWithTotals, budgetNumberLabel, valueOption } from "../../lib/budgets"
+import { type BudgetWithTotals, budgetNumberLabel, totalsOf, valueOption } from "../../lib/budgets"
 import {
   type ClinicalOrder,
   type ConsentDocument,
@@ -363,7 +363,8 @@ export function DocumentosSection({
     // El diálogo puede avisar el cierre más de una vez: se cierra una sola.
     if (!documentId || closingRef.current) return
     closingRef.current = true
-    if (pushedRef.current) {
+    // Abierto encima de otra pantalla no agregó nada al historial: volver sacaría de ella.
+    if (pushedRef.current && !listSearch.scoped) {
       pushedRef.current = false
       router.history.back()
     } else listSearch.setParams({ documentId: undefined }, { replace: true })
@@ -622,7 +623,14 @@ export function DocumentosSection({
       }
     }),
     ...budgetPapers.budgets.map((budget): Row => {
-      const total = valueOption(budget)?.totalCents ?? budget.totalCents
+      // Un total por moneda de la opción que vale; sin precio de alguna, no se dice ninguno.
+      const total = orgCurrencyLocale
+        ? moneyTotalsText(
+            totalsOf(valueOption(budget) ?? budget, budget.currency),
+            (cents, unit) => formatMoney(cents, unit, orgCurrencyLocale),
+            "",
+          )
+        : ""
       const date = budget.presentedAt ?? budget.createdAt
       return {
         key: `presupuesto-${budget.id}`,
@@ -631,14 +639,7 @@ export function DocumentosSection({
         teeth: [],
         retired: false,
         title: `${budgetNumberLabel(budget.budgetNumber)}${budget.title ? ` · ${budget.title}` : ""}`,
-        detail: [
-          formatDate(date),
-          total != null && orgCurrencyLocale
-            ? formatMoney(total, budget.currency, orgCurrencyLocale)
-            : null,
-        ]
-          .filter(Boolean)
-          .join(" · "),
+        detail: [formatDate(date), total || null].filter(Boolean).join(" · "),
         date,
         status: { label: budget.stateText, tone: budgetStatusTone(budget.status) as Tone },
         needsAction: false,

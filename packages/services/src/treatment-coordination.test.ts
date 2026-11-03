@@ -65,7 +65,14 @@ it("coordinación: expone títulos, estados y fechas, nunca el detalle clínico 
   const view = await f.run((tx) => getTreatmentCoordination(tx, "org_a", f.patient.id))
   expect(view.budgetsAwaitingDecision).toEqual([])
   expect(view.treatments).toEqual([
-    { id: expect.any(String), title: "Tratamiento propio", status: "pendiente", decision: "pendiente" },
+    {
+      id: expect.any(String),
+      title: "Tratamiento propio",
+      status: "pendiente",
+      decision: "pendiente",
+      serviceId: expect.any(String),
+      toSchedule: false,
+    },
   ])
   expect(view.followUps).toHaveLength(1)
   expect(Object.keys(view.followUps[0]).sort()).toEqual(

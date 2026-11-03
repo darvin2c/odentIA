@@ -3,6 +3,7 @@ import {
   type AllergenEntry,
   allergenName,
   allergyWarnings,
+  appendDictated,
   BUDGET_OPTIONS_MAX,
   codeAllergySubstance,
   DIAGNOSIS_SYSTEM_INFO,
@@ -11,6 +12,8 @@ import {
   findMedication,
   isDiagnosisVerification,
   type MedicationCatalog,
+  moneyTotalsText,
+  sumByCurrency,
   normalizeDrugText,
   quantityWords,
 } from "@odentia/clinical"
@@ -116,6 +119,8 @@ export interface DictationDraft {
 }
 
 export interface DictationSuggestion {
+  /** Al confirmar una nota: cómo quedó cada texto en la atención, ya unido a lo que había. */
+  joined?: Record<string, string>
   id: string
   kind: DictationKind
   payload: Record<string, unknown>
@@ -323,7 +328,7 @@ function summarize(kind: DictationKind, payload: Record<string, unknown>, zone: 
   }
   if (kind === "presupuesto") {
     const lines = Array.isArray(payload["lines"]) ? (payload["lines"] as BudgetPreviewLine[]) : []
-    const total = typeof payload["totalCents"] === "number" && typeof payload["currency"] === "string" ? ` · ${formatOrgMoney(payload["totalCents"], payload["currency"], zone)}` : ""
+    const total = budgetPreviewTotal(payload, zone)
     return [`Presupuesto · ${lines.length === 1 ? "1 tratamiento" : `${lines.length} tratamientos`}${total}`, "Queda en borrador: todavía no le llega a nadie."].join("\n")
   }
   if (kind === "material") {
@@ -1015,6 +1020,17 @@ async function settleAppointment(
 }
 
 /** Una línea de lo que llevaría el presupuesto pedido. */
+/** « · S/ 300.00» o, con dos monedas, « · S/ 300.00 + USD 1,000.00». */
+function budgetPreviewTotal(payload: Record<string, unknown>, zone: Pick<OrgLocale, "locale">): string {
+  const totals = Array.isArray(payload["totals"])
+    ? (payload["totals"] as Array<{ currency: string; totalCents: number }>)
+    : typeof payload["totalCents"] === "number" && typeof payload["currency"] === "string"
+      ? [{ currency: payload["currency"], totalCents: payload["totalCents"] }]
+      : []
+  if (totals.length === 0) return ""
+  return ` · ${moneyTotalsText(totals, (cents, currency) => formatOrgMoney(cents, currency, zone), "")}`
+}
+
 interface BudgetPreviewLine {
   title: string
   site: string
@@ -1058,13 +1074,20 @@ async function previewBudget(tx: Db, orgId: string, patientId: string, encounter
       dictated: true,
     })),
   ]
-  const currency = lines[0]?.currency ?? null
-  const same = lines.filter((line) => line.currency === currency)
-  const payload = { show: prepared.payload["show"] === true, lines: same, ...(currency ? { totalCents: same.reduce((sum, line) => sum + line.priceCents, 0), currency } : {}) }
+  // Un total por moneda: entre monedas no se suma, y ninguna línea queda fuera por ir en otra.
+  const totals = sumByCurrency(
+    lines.map((line) => ({ currency: line.currency, cents: line.priceCents })),
+  ).map(({ currency, cents }) => ({ currency, totalCents: cents }))
+  const [only] = totals
+  const payload = {
+    show: prepared.payload["show"] === true,
+    lines,
+    ...(totals.length > 1 ? { totals } : only ? { totalCents: only.totalCents, currency: only.currency } : {}),
+  }
   const missing = unpriced.length
     ? `${unpriced.map((name) => `«${name}»`).join(" y ")} aún no ${unpriced.length === 1 ? "tiene" : "tienen"} servicio de tu lista: sale sin eso. Elige el servicio en su tarjeta.`
     : null
-  return same.length ? { payload, status: "lista", note: missing } : { payload, status: "por_revisar", note: missing ?? NOTHING_TO_QUOTE }
+  return lines.length ? { payload, status: "lista", note: missing } : { payload, status: "por_revisar", note: missing ?? NOTHING_TO_QUOTE }
 }
 
 /** El presupuesto pedido que aún espera, al día con lo que se indicó o se confirmó después. */
@@ -1951,7 +1974,7 @@ export async function confirmDictationSuggestion(
   encounterId: string,
   id: string,
 ): Promise<DictationSuggestion> {
-  await lockOwnDraft(tx, orgId, actorUserId, patientId, encounterId)
+  const draft = await lockOwnDraft(tx, orgId, actorUserId, patientId, encounterId)
   const dictation = await requireDictatingProduct(tx, orgId)
   const row = await lockSuggestion(tx, orgId, patientId, encounterId, id)
   if (row.status === "por_revisar") throw conflict("SUGGESTION_NEEDS_REVIEW", row.note ?? "Revisa la sugerencia antes de confirmarla")
@@ -1961,9 +1984,19 @@ export async function confirmDictationSuggestion(
   // La operación recibe los campos de la sugerencia, no sus metadatos.
   const payload = splitMeta(row.payload).data
   let entityId: string | null = null
+  // Cómo quedó cada texto de la nota: la pantalla lo adopta, porque su borrador puede ir por detrás.
+  let joined: Record<string, string> | undefined
   if (row.kind === "nota") {
-    const fields = Object.keys(OPERATIONS["atencion.nota"].fields)
-    await updateEncounterDraft(tx, orgId, actorUserId, patientId, encounterId, pick(payload, fields) as UpdateEncounterDraftPatch)
+    const fields = OPERATIONS["atencion.nota"].fields
+    joined = {}
+    for (const [key, value] of Object.entries(pick(payload, Object.keys(fields)))) {
+      const name = key as keyof typeof fields
+      const text = appendDictated(draft[name], String(value), key)
+      // Lo que no cabe no se corta: la sugerencia sigue ahí y el texto, intacto.
+      if (text.length > fields[name].max) throw invalidField(key, `Con lo que ya hay en ${fields[name].label} no cabe: acorta uno de los dos.`)
+      joined[key] = text
+    }
+    await updateEncounterDraft(tx, orgId, actorUserId, patientId, encounterId, joined as UpdateEncounterDraftPatch)
   } else if (row.kind === "diagnostico") {
     const created = await addEncounterDiagnosis(tx, orgId, actorUserId, patientId, encounterId, {
       diagnosisCode: String(payload["diagnosisCode"]),
@@ -2033,7 +2066,7 @@ export async function confirmDictationSuggestion(
   if (!updated) throw new Error("No se pudo confirmar la sugerencia")
   if (row.kind === "alergia") await refreshRecipes(tx, orgId, patientId, encounterId, await dictationScope(tx, orgId))
   if (row.kind === "plan") await refreshBudgetPreview(tx, orgId, patientId, encounterId, await dictationScope(tx, orgId))
-  return toItem(updated, await findOrgLocale(tx, orgId), dictation)
+  return { ...toItem(updated, await findOrgLocale(tx, orgId), dictation), joined }
 }
 
 /**

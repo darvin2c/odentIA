@@ -286,6 +286,10 @@ const orderPatch = z.object(
     supplierId: z.uuid("Elige el proveedor").optional(),
     branchId: z.uuid("Elige la sede a la que llega la compra").nullish(),
     warehouseId: z.uuid("Elige el almacén de destino").nullish(),
+    currency: z
+      .string("La moneda de la orden no es válida")
+      .regex(/^[A-Z]{3}$/, "La moneda de la orden no es válida")
+      .optional(),
     notes: words("Las notas", 2000).nullish(),
     lines: orderLines.optional(),
   },

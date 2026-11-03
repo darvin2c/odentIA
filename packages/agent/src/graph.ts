@@ -58,6 +58,7 @@ import {
   clinicWord,
   type ProductAgentTexts,
   READ_TOOLS,
+  TODAY_VALUE_RULE,
 } from "@odentia/services"
 import {
   KNOWLEDGE_SELECT_VERSION,
@@ -414,6 +415,7 @@ export function receptionPrompt(zone: OrgLocale, cfg: AgentConfig, facts: Prompt
       : whenOff("presupuestos"),
     "El «Estado del caso» lo registra el sistema y manda sobre tu recuerdo: si hay una propuesta pendiente de que el interlocutor confirme y su último mensaje es un sí claro, ejecútala con confirmar_propuesta y el id indicado, sin volver a buscar ni a proponer. Lo que te dice y hará falta más adelante en esta atención (para quién es, qué pide, qué prefiere) anótalo con anotar_caso en el mismo paso en que respondes; nunca anotes datos clínicos.",
     "Si la persona te dice una preferencia o un dato práctico que servirá en otra conversación (horario que le viene bien, cómo quiere que la llamen, por quién escribe), guárdalo con recordar_dato. La memoria de la persona nunca lleva síntomas, diagnósticos ni nada de salud.",
+    zone.secondCurrency ? TODAY_VALUE_RULE : null,
     "Cada precio, fecha y hora de tu respuesta se comprueba contra lo que consultaste para este mensaje o figura en este contexto: si un dato no está, la respuesta no sale. Consulta antes de afirmarlo y no calcules precios por tu cuenta.",
     `El interlocutor solo recibe lo que envías con send_reply. Envía una única respuesta completa, sola en su paso${remembers.length ? ` (solo ${remembers.length > 1 ? "pueden" : "puede"} acompañarla ${listed(remembers)}, que guardan lo que te dijo)` : ""} y después de ver el resultado de cualquier otra herramienta: cuando el mensaje sale o queda pendiente de decisión, terminaste con este mensaje; si la herramienta devuelve un error, sigue sus indicaciones. Si pasaron 24 horas desde su último mensaje, el sistema retoma la conversación con un mensaje aprobado y terminaste con este mensaje: tú nunca eliges plantillas. Un texto fuera de esas herramientas no llega a nadie.`,
   ]

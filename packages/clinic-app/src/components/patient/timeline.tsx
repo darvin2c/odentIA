@@ -8,7 +8,6 @@ import {
   AttachmentTitle,
   Badge,
   Button,
-  buttonVariants,
   Empty,
   EmptyContent,
   EmptyDescription,
@@ -21,17 +20,18 @@ import {
 import { SkeletonRegion, ViewTabs } from "@odentia/ui-patterns"
 import { TimelineItemsSkeleton } from "../skeletons/person-sections"
 import { useInfiniteQuery } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
 import { ClipboardList, FileText, Image as ImageIcon } from "lucide-react"
 import { useEffect, useId, useMemo, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { timeAgo } from "../../lib/crm"
+import type { DocumentFilter } from "../../lib/patient-areas"
 import { documentCategoryLabel as docCategoryLabel } from "../../lib/patient-overview"
 import { statusLabel, type TimelineItem, timelineTypeLabel } from "../../lib/patients"
 import { AnamnesisVersionDialog } from "./anamnesis-history"
 import { DocumentOpenButton, useDocumentUrl } from "./document-open-button"
 import { EncounterHistoryCard } from "./encounter-history-card"
 import { NewEncounterButton } from "./new-encounter-button"
+import { useOpenWide, type WideTarget } from "./wide-section"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { productUi } from "../../product/product-ui"
 import { PlaceSelect } from "../../product/site-fields"
@@ -68,7 +68,7 @@ const FILTERS: Array<{ value: FeedFilter; label: string; types: string }> = [
 ]
 
 /** El filtro de Documentos donde está cada papel de la historia. */
-const DOCUMENT_FILTER_OF: Partial<Record<TimelineItem["type"], string>> = {
+const DOCUMENT_FILTER_OF: Partial<Record<TimelineItem["type"], DocumentFilter>> = {
   prescription: "recetas",
   consent: "consentimientos",
   order: "ordenes",
@@ -312,34 +312,23 @@ const STATUS_LABELS: Record<string, string> = {
  * Antes estos eventos abrían una anamnesis inexistente.
  */
 function JourneyCard({
-  patientId,
   item,
   timezone,
   locale,
 }: {
-  patientId: string
   item: TimelineItem
   timezone: string
   locale: string | undefined
 }) {
-  const link = ((): { label: string; search: Record<string, unknown> } | null => {
+  const openWide = useOpenWide()
+  const link = ((): { label: string; target: WideTarget } | null => {
     switch (item.type) {
       case "plan":
-        return {
-          label: "Abrir recorrido",
-          search: { tab: "plan", itemId: item.planItemId ?? item.refId },
-        }
+        return { label: "Abrir recorrido", target: { id: "plan", itemId: item.planItemId ?? item.refId } }
       case "budget":
-        return {
-          label: "Ver el presupuesto",
-          search: {
-            tab: "plan",
-            ...(item.planId ? { planId: item.planId } : {}),
-            budgetId: item.budgetId ?? item.refId,
-          },
-        }
+        return { label: "Ver el presupuesto", target: { id: "plan", budgetId: item.budgetId ?? item.refId } }
       case "follow_up":
-        return { label: "Ver controles", search: { tab: "plan" } }
+        return { label: "Ver controles", target: { id: "plan" } }
       default:
         return null
     }
@@ -375,14 +364,9 @@ function JourneyCard({
       </div>
       {link ? (
         <div>
-          <Link
-            to="/patients/$patientId"
-            params={{ patientId }}
-            search={link.search as { tab: "resumen" }}
-            className={buttonVariants({ variant: "outline", size: "sm" })}
-          >
+          <Button type="button" variant="outline" size="sm" onClick={() => openWide?.(link.target)}>
             {link.label}
-          </Link>
+          </Button>
         </div>
       ) : null}
     </div>
@@ -395,16 +379,15 @@ function JourneyCard({
  * Documentos.
  */
 function FactCard({
-  patientId,
   item,
   timezone,
   locale,
 }: {
-  patientId: string
   item: TimelineItem
   timezone: string
   locale: string | undefined
 }) {
+  const openWide = useOpenWide()
   const filter = DOCUMENT_FILTER_OF[item.type]
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 elevated rounded-xl border bg-card px-6 py-4">
@@ -419,14 +402,9 @@ function FactCard({
         {item.detail ? <p className="text-sm text-muted-foreground">{item.detail}</p> : null}
       </div>
       {filter ? (
-        <Link
-          to="/patients/$patientId"
-          params={{ patientId }}
-          search={{ tab: "documentos", tipo: filter } as { tab: "documentos" }}
-          className={buttonVariants({ variant: "outline", size: "sm" })}
-        >
+        <Button type="button" variant="outline" size="sm" onClick={() => openWide?.({ id: "documentos", documentFilter: filter })}>
           Ver en Documentos
-        </Link>
+        </Button>
       ) : null}
     </div>
   )
@@ -633,7 +611,6 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
               item.type === "form" ? (
               <FactCard
                 key={item.id}
-                patientId={patientId}
                 item={item}
                 timezone={timezone}
                 locale={locale}
@@ -663,7 +640,6 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
             ) : (
               <JourneyCard
                 key={item.id}
-                patientId={patientId}
                 item={item}
                 timezone={timezone}
                 locale={locale}

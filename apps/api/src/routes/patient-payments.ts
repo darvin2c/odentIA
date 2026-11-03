@@ -33,6 +33,12 @@ const collectInput = z.object({
   }).strict()).max(10).nullish(),
   cashReceivedCents: cents.nullish(),
   requestId: z.uuid(),
+  // Dos monedas: lo que cancela, en qué entra, el cambio de este cobro y en qué se da
+  // el vuelto. El servicio decide; ausentes, es el cobro de siempre.
+  currency: z.string().regex(/^[A-Z]{3}$/).nullish(),
+  tenderCurrency: z.string().regex(/^[A-Z]{3}$/).nullish(),
+  exchangeRate: z.string().max(40).nullish(),
+  changeCurrency: z.string().regex(/^[A-Z]{3}$/).nullish(),
 }).strict()
 const chargeInput = z.object({
   branchId: z.uuid().nullish(),
@@ -154,6 +160,10 @@ export function createPatientPaymentsRoute(deps: Pick<CrmDeps, "db" | "storage">
           })),
           cashReceivedCents: body.cashReceivedCents ?? undefined,
           requestId: body.requestId,
+          currency: body.currency ?? undefined,
+          tenderCurrency: body.tenderCurrency ?? undefined,
+          exchangeRate: body.exchangeRate ?? undefined,
+          changeCurrency: body.changeCurrency ?? undefined,
         }))
       // El comprobante sale solo por correo (decisión 20 v2), después de cobrar y
       // aparte: si el envío falla, el cobro ya quedó. Un reintento no lo repite.

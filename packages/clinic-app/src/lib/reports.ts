@@ -3,6 +3,7 @@
  * dice un periodo y lo compara con el anterior. Los tipos replican las
  * respuestas del servidor; él decide el tramo, la moneda y los permisos.
  */
+import { currencyFractionDigits, formatMoney, currencyWord } from "@odentia/clinical"
 import { apiFetch } from "./api"
 import { channelLabel } from "./channels"
 import { monthLabel, monthName, type YearMonth } from "./commissions"
@@ -66,6 +67,8 @@ export interface ReportHead {
   timezone: string
   locale: string
   currency: string
+  /** Solo con segunda moneda: cuál es y el cambio de hoy, en palabras. */
+  second?: { currency: string; rate: string }
   branch: { id: string; name: string } | null
 }
 
@@ -373,8 +376,9 @@ export interface ReportSummary extends ReportHead {
   overdue: {
     currency: string
     days: number
-    current: { cents: number; people: number }
-    previous: { cents: number; people: number }
+    /** `cents`: el total aproximado al cambio de hoy. `byCurrency`, solo si hay algo en otra moneda. */
+    current: { cents: number; people: number; byCurrency?: CurrencyAmount[] }
+    previous: { cents: number; people: number; byCurrency?: CurrencyAmount[] }
     months: number[]
   }
   chart: Array<ReportBucket & { cents: number; previousCents: number }>
@@ -580,13 +584,22 @@ export interface FinanceSpan {
 
 export type DebtAgeKey = "0_30" | "31_60" | "61_90" | "90_plus"
 
+/** Un importe en su moneda: lo que se debe se dice así, además de su total aproximado. */
+export interface CurrencyAmount {
+  currency: string
+  cents: number
+}
+
 export interface ReportFinance extends ReportHead {
   /** «IGV», «IVA»; null si el país de la clínica no tiene impuesto que separar. */
   taxName: string | null
   months: ReportBucket[]
   totals: { current: FinanceSpan; previous: FinanceSpan }
   trend: FinanceSpan[]
+  /** Lo cobrado en otra moneda sin valor ni factor (filas viejas): no se puede sumar. */
   otherCurrencies: Array<{ currency: string; cobradoCents: number }>
+  /** Solo con segunda moneda: lo que entró menos lo que salió en cada una. */
+  moneyFlow?: CurrencyAmount[]
   commissions: { generatedCents: number; paidCents: number; pendingCents: number; professionals: number }
   cascade: {
     cobradoCents: number
@@ -601,7 +614,13 @@ export interface ReportFinance extends ReportHead {
   }
   chart: Array<ReportBucket & FinanceSpan>
   debts: {
-    current: { totalCents: number; people: number; ages: Array<{ key: DebtAgeKey; cents: number; people: number }> }
+    /** Las cifras son el total aproximado al cambio de hoy; `byCurrency` viene solo si hay algo en otra moneda. */
+    current: {
+      totalCents: number
+      people: number
+      byCurrency?: CurrencyAmount[]
+      ages: Array<{ key: DebtAgeKey; cents: number; people: number; byCurrency?: CurrencyAmount[] }>
+    }
     previousOverdueCents: number
     overdueCents: number
   }
@@ -609,7 +628,12 @@ export interface ReportFinance extends ReportHead {
     commissions: { cents: number; professionals: number }
     /** El impuesto de lo cobrado en el periodo, que se paga el mes siguiente. */
     salesTax: { cents: number }
-    purchases: { cents: number; orders: number; oldestReceivedAt: string | null }
+    purchases: {
+      cents: number
+      orders: number
+      oldestReceivedAt: string | null
+      byCurrency?: CurrencyAmount[]
+    }
   }
   missing: Array<{
     category: string
@@ -617,8 +641,73 @@ export interface ReportFinance extends ReportHead {
     previous: Array<{ month: string; cents: number }>
     copy: { month: string; concept: string; amountCents: number; day: number }
   }>
-  byMethod: { methods: Array<{ label: string; cash: boolean; cents: number }>; closures: { count: number; cashCents: number } }
+  byMethod: {
+    /** `cents`: su valor en moneda del negocio. `entered`, solo si algo entró en otra moneda: lo que entró en cada una. */
+    methods: Array<{
+      label: string
+      cash: boolean
+      cents: number
+      entered?: Array<CurrencyAmount & { valueCents: number }>
+    }>
+    closures: {
+      count: number
+      cashCents: number
+      others?: Array<{ currency: string; count: number; cashCents: number }>
+    }
+  }
   byTreatment: { rows: Array<{ name: string; cents: number }>; others: { count: number; cents: number } | null }
+}
+
+/**
+ * El eje de un gráfico: la cifra corta con los decimales de su moneda («45 mil» son
+ * 45.000 pesos chilenos, que no tienen centavos).
+ */
+export function compactMoney(cents: number, currency: string, locale: string): string {
+  return new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 }).format(
+    cents / 10 ** currencyFractionDigits(currency),
+  )
+}
+
+/** «S/ 12,400.00 y USD 3,000.00»: lo que se debe, cada cifra con su símbolo. */
+export function amountsWords(list: CurrencyAmount[], locale: string): string {
+  return list.map((item) => formatMoney(item.cents, item.currency, locale)).join(" y ")
+}
+
+/**
+ * Lo que dice «Cobrado por medio de pago» del efectivo frente a los cierres de caja.
+ * Cada caja se cuenta en su moneda: se compara lo que entró en efectivo en cada una con
+ * sus cierres, sin cambio de por medio. Con una moneda, la frase de siempre.
+ */
+export function methodsCashNote(
+  data: Pick<ReportFinance, "byMethod" | "currency" | "locale">,
+): string | null {
+  const { methods, closures } = data.byMethod
+  const { currency, locale } = data
+  const cash = new Map<string, number>()
+  for (const method of methods.filter((row) => row.cash))
+    for (const part of method.entered ?? [{ currency, cents: method.cents }])
+      cash.set(part.currency, (cash.get(part.currency) ?? 0) + part.cents)
+  const closed = new Map<string, number>([
+    [currency, closures.cashCents],
+    ...(closures.others ?? []).map((row): [string, number] => [row.currency, row.cashCents]),
+  ])
+  const count =
+    closures.count + (closures.others ?? []).reduce((total, row) => total + row.count, 0)
+  if (count === 0)
+    return [...cash.values()].some((cents) => cents !== 0)
+      ? "Aún no hay cierres de caja en este periodo para comparar el efectivo."
+      : null
+  const codes = [...new Set([...cash.keys(), ...closed.keys()])]
+  const off = codes.filter((code) => (cash.get(code) ?? 0) !== (closed.get(code) ?? 0))
+  if (off.length === 0) return "El efectivo coincide con los cierres de caja del periodo."
+  const end = "puede haber una caja sin cerrar o un cierre que abarca días de otro periodo."
+  if (codes.length === 1)
+    return `El efectivo (${formatMoney(cash.get(currency) ?? 0, currency, locale)}) no coincide con los cierres de caja (${formatMoney(closed.get(currency) ?? 0, currency, locale)}): ${end}`
+  const said = off.map(
+    (code) =>
+      `en ${currencyWord(code, locale)} (${formatMoney(cash.get(code) ?? 0, code, locale)}) no coincide con los cierres de esa caja (${formatMoney(closed.get(code) ?? 0, code, locale)})`,
+  )
+  return `El efectivo ${said.join(" y ")}: ${end}`
 }
 
 export interface ReportCommissions extends ReportHead {
@@ -637,7 +726,12 @@ export interface ReportCommissions extends ReportHead {
 }
 
 export interface ReportOutlook extends ReportHead {
-  upcoming: { cents: number; patients: number; unbooked: { cents: number; patients: number } }
+  upcoming: {
+    cents: number
+    patients: number
+    unbooked: { cents: number; patients: number }
+    byCurrency?: CurrencyAmount[]
+  }
   patientValue: { patients: number; averageCents: number | null }
   wholeClinic: string[]
 }

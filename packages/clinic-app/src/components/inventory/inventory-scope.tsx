@@ -20,6 +20,8 @@ export interface PurchasePresetLine {
 
 export interface PurchasePreset {
   supplierId?: string
+  /** En qué moneda están los precios de las filas: la de la última compra. */
+  currency?: string
   lines: PurchasePresetLine[]
   /** Por qué llegan estas filas, dicho arriba del formulario. */
   notice?: string

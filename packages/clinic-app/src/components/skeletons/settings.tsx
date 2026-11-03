@@ -93,7 +93,7 @@ const PROFILE_CARD = "elevated flex flex-col gap-4 rounded-xl border bg-card p-5
 
 const PROFILE_FORM = [
   { title: "Identidad", fields: ["Razón social", "Nombre comercial", "Documento fiscal", "Número", "Dirección fiscal", "Teléfono para urgencias"] },
-  { title: "País y formato", fields: ["País", "Zona horaria", "Moneda"] },
+  { title: "País y formato", fields: ["País", "Zona horaria", "Moneda del negocio", "También cobro en"] },
 ]
 
 /** El formulario con sus tarjetas y rótulos: solo el valor de cada campo es barra. */

@@ -45,7 +45,13 @@ export interface ServiceCatalogItem {
 export interface ServiceMaterialsSummary {
   count: number
   /** Lo que cuestan cada vez con los últimos precios de compra; null sin precios o sin compras con precio. */
-  cost: { cents: number; currency: string; unpriced: number } | null
+  cost: {
+    cents: number
+    currency: string
+    unpriced: number
+    /** Con dos monedas: lo que cuesta en cada una, sin mezclarlas. */
+    parts?: Array<{ currency: string; cents: number }>
+  } | null
 }
 
 /** Un código de la lista oficial del país, con su texto oficial. */
@@ -109,19 +115,6 @@ export function formatAmount(cents: number, currency: string, locale: string): s
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   }).format(amountFromCents(String(cents), currency))
-}
-
-/**
- * Símbolo de una moneda tal como lo escribe el formato de la clínica: el
- * prefijo del campo de un importe. Nunca un símbolo fijo en el código.
- */
-export function currencySymbol(currency: string, locale: string): string {
-  try {
-    const parts = new Intl.NumberFormat(locale, { style: "currency", currency }).formatToParts(0)
-    return parts.find((part) => part.type === "currency")?.value ?? currency
-  } catch {
-    return currency
-  }
 }
 
 export interface ServicesQuery {
@@ -397,6 +390,8 @@ export interface ServiceMaterialLine {
   discounted: boolean
   /** Solo para quien ve precios: lo que cuesta cada vez; null si nunca se compró con precio. */
   costCents: number | null
+  /** Con dos monedas: en cuál está ese costo. */
+  costCurrency?: string
 }
 
 export interface ServiceMaterials {
@@ -411,6 +406,14 @@ export interface ServiceMaterials {
     unpriced: number
     /** Qué parte del precio del servicio son (0.018 = 1,8 %); null sin precio o con otra moneda. */
     shareOfPrice: number | null
+    /** Con dos monedas: lo que cuesta en cada una, sin mezclarlas. `cents` es la suma en la moneda del servicio. */
+    parts?: Array<{ currency: string; cents: number }>
+    /** Hubo que sumar otra moneda al cambio de hoy: `cents` y `leftCents` son «unos». */
+    estimated?: boolean
+    /** Lo que le queda del precio del servicio, en su moneda. */
+    leftCents?: number | null
+    /** El cambio de hoy, si se usó. */
+    rate?: string | null
   } | null
 }
 

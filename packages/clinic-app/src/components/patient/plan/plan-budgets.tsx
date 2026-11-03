@@ -52,6 +52,7 @@ import {
   removeBudgetItemsApi,
   reviseBudgetApi,
   updateBudgetApi,
+  totalsOf,
   valueOption,
 } from "../../../lib/budgets"
 import { useMemberName, usePermission } from "../../../lib/crm"
@@ -63,12 +64,14 @@ import { productUi } from "../../../product/product-ui"
 import { openBookingAnywhere } from "../../agenda/schedule-host"
 import { BudgetDraftEditor } from "./budget-draft-editor"
 import {
-  AMOUNT_PENDING,
+  acceptedWords,
   BudgetLinesList,
   BudgetTotals,
   budgetStatusTone,
   type Money,
+  moneyForLines,
   SessionNote,
+  totalsWords,
   treatmentSiteLabel,
   useBudgetFormat,
 } from "./budget-parts"
@@ -304,7 +307,7 @@ function quotableForDraft(
 function BudgetCard({
   patientId,
   budget,
-  money,
+  money: baseMoney,
   day,
   locale,
   localePending,
@@ -337,6 +340,7 @@ function BudgetCard({
   onSchedule: (planItemIds: string[], serviceId?: string | null) => void
   runWrite: <T>(operation: () => Promise<T>) => Promise<T>
 }): React.JSX.Element {
+  const money = moneyForLines(baseMoney, budget.items)
   const cardRef = useRef<HTMLElement | null>(null)
   const canWrite = usePermission("budgets.write")
   const canSend = usePermission("budgets.send")
@@ -424,20 +428,16 @@ function BudgetCard({
   }
 
   const accepted =
-    budget.acceptedCents != null &&
-    budget.acceptedCents > 0 &&
-    ["aceptado", "parcial"].includes(budget.status)
+    totalsOf(budget, budget.currency).some(
+      (total) => total.acceptedCents != null && total.acceptedCents > 0,
+    ) && ["aceptado", "parcial"].includes(budget.status)
   const summary = [
     `N.º ${budget.budgetNumber}${budget.revisionNumber && budget.revisionNumber > 1 ? ` · revisión ${budget.revisionNumber}` : ""}`,
     day(budget.presentedAt ?? budget.createdAt),
-    several
-      ? `${budget.options.length} opciones`
-      : budget.totalCents == null
-        ? AMOUNT_PENDING
-        : money(budget.totalCents, budget.currency),
+    several ? `${budget.options.length} opciones` : totalsWords(budget, budget.currency, money),
   ].join(" · ")
   const stateLine = accepted
-    ? `${budget.stateText} · ${money(budget.acceptedCents, budget.currency)}`
+    ? `${budget.stateText} · ${acceptedWords(budget, budget.currency, money)}`
     : budget.stateText
   const answerable = BUDGET_ANSWERABLE_STATUSES.includes(budget.status)
 
@@ -534,7 +534,7 @@ function BudgetCard({
                           : row.decision === "no_elegida"
                             ? " · no elegida"
                             : ""}
-                        {` · ${row.totalCents == null ? "…" : money(row.totalCents, budget.currency)}`}
+                        {` · ${totalsWords(row, budget.currency, money, "…")}`}
                       </Button>
                     ))}
                   </ButtonGroup>

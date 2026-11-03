@@ -6,8 +6,11 @@
  * si hay compras por pagar o sin llegar: elegir una registra el pago de esa
  * compra (`/api/finance/purchases/:id/payments`, la misma operación que desde
  * Inventario; ADR 0061) y así no se cuenta dos veces.
+ *
+ * Con otra moneda en la clínica, un gasto suelto lleva su moneda y su cambio, y
+ * pagar una compra deja elegir con qué se paga. Sin ella no aparece nada de esto.
  */
-import { formatMoney, formatMoneyInput } from "@odentia/clinical"
+import { currencyWord, formatMoney, formatMoneyInput } from "@odentia/clinical"
 import {
   Button,
   Checkbox,
@@ -37,7 +40,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
 import { usePermission } from "../../lib/crm"
-import { orgTaxesOf, useOrgProfile } from "../../lib/org"
+import { readExpenseMoney } from "../../lib/expense-exchange"
+import { currencyChoices } from "../../lib/product-words"
+import { orgTaxesOf, useOrgProfile, useTodayRate } from "../../lib/org"
 import { ChoiceButtons } from "../choice-buttons"
 import {
   cashFormMessage,
@@ -56,7 +61,9 @@ import {
   useCashState,
 } from "../../lib/finance-cash"
 import { type PurchaseBalance, purchaseOrderLabel } from "../../lib/reports"
+import { MoneyInput } from "../inventory/fields"
 import { ChoiceChips } from "./cash-close-drawer"
+import { ExpenseMoneyFields } from "./expense-money-fields"
 
 /** Dónde se registra el gasto: la sede y el formato de la clínica. */
 export interface ExpensePlace {
@@ -87,7 +94,14 @@ interface ExpenseValues {
   salesTax: "cobros" | "otro" | null
   purchase: string
   concept: string
+  /** En qué moneda es un gasto suelto, con otra moneda en la clínica. */
+  currency: string
   amount: string
+  /** Con qué se paga una compra: su moneda o la otra. */
+  payIn: string
+  /** Lo que salió, si se paga en la otra. */
+  tender: string
+  rate: string
   fromCash: boolean
   receiptKind: string
   receiptNumber: string
@@ -103,7 +117,7 @@ function PurchaseChoice({
 }: {
   orders: PurchaseBalance[]
   branchId: string
-  money: (cents: number) => string
+  money: (cents: number, currency: string) => string
   onChoose: (orderId: string) => void
 }) {
   const field = useFieldContext<string>()
@@ -133,8 +147,17 @@ function PurchaseChoice({
               {purchaseOrderLabel(order.orderNumber)} · {order.supplierName}
               {order.branchId !== branchId ? <span className="text-muted-foreground"> · {order.branchName}</span> : null}
             </span>
-            <span className={cn("shrink-0 text-sm font-semibold", order.dueCents > 0 ? "text-warning" : "text-muted-foreground")}>
-              {order.dueCents > 0 ? `por pagar ${money(order.dueCents)}` : order.receivedCents === 0 ? "aún no llega" : "al día, falta que llegue"}
+            <span
+              className={cn(
+                "shrink-0 text-sm font-semibold",
+                order.dueCents > 0 ? "text-warning" : "text-muted-foreground",
+              )}
+            >
+              {order.dueCents > 0
+                ? `por pagar ${money(order.dueCents, order.currency)}`
+                : order.receivedCents === 0
+                  ? "aún no llega"
+                  : "al día, falta que llegue"}
             </span>
           </FieldLabel>
         ))}
@@ -165,17 +188,14 @@ export function ExpenseFormDrawer({
   const { branchId, locale, orgTimeZone } = place
   const queryClient = useQueryClient()
   const canWrite = usePermission("finance.write")
-  const cash = useCashState(branchId, open)
+  const { second, todayRate } = useTodayRate(locale)
   const today = todayIn(orgTimeZone)
   const salesTaxHelpId = useId()
   const salesTaxName = orgTaxesOf(useOrgProfile().data)?.name ?? null
   // Lo que se vio de la compra al elegirla: si cambia mientras tanto, el servidor lo dice.
   const [seen, setSeen] = useState<{ due: number; paid: number } | null>(null)
   const [moreOpen, setMoreOpen] = useState(false)
-
-  const state = cash.data?.data ?? null
-  const unit = state?.currency ?? place.currency
-  const money = (cents: number) => formatMoney(cents, unit, locale)
+  const currencies = second ? [place.currency, second.currency] : []
 
   const form = useAppForm({
     defaultValues: {
@@ -183,7 +203,11 @@ export function ExpenseFormDrawer({
       salesTax: null,
       purchase: OTHER,
       concept: "",
+      currency: place.currency,
       amount: "",
+      payIn: place.currency,
+      tender: "",
+      rate: todayRate,
       fromCash: true,
       receiptKind: "",
       receiptNumber: "",
@@ -191,7 +215,7 @@ export function ExpenseFormDrawer({
     } as ExpenseValues,
     validators: {
       onSubmit: ({ value }) => {
-        const { chosen, asksSalesTax, cents, after } = derive(value)
+        const { chosen, asksSalesTax, cents, after, paid } = derive(value)
         const fields: Record<string, string> = {}
         if (value.category === "") fields.category = "Elige el tipo de gasto."
         if (asksSalesTax && value.salesTax === null) fields.salesTax = "Elige qué impuesto pagas."
@@ -199,13 +223,15 @@ export function ExpenseFormDrawer({
         if (value.amount.trim() !== "" && cents === null) fields.amount = "Ese importe no se entiende. Revísalo."
         else if (cents === null || cents <= 0) fields.amount = "Escribe un importe mayor que cero."
         else if (after !== null && after < 0 && state)
-          fields.fromCash = `En la caja solo hay ${money(state.cashOnHandCents)}: no alcanza para pagar este gasto con el efectivo.`
+          fields.fromCash = `En la caja solo hay ${formatMoney(state.cashOnHandCents, paid.payIn, locale)}: no alcanza para pagar este gasto con el efectivo.`
+        if (paid.tenderError) fields.tender = paid.tenderError
+        if (paid.rateError) fields.rate = paid.rateError
         if (value.spentDay > today) fields.spentDay = "La fecha del gasto no puede ser futura."
         return Object.keys(fields).length > 0 ? { fields } : undefined
       },
     },
     onSubmit: async ({ value }) => {
-      const { chosen, asksSalesTax, cents } = derive(value)
+      const { chosen, asksSalesTax, cents, currency, paid } = derive(value)
       if (cents === null || value.category === "") return
       // Hoy lleva la hora real; otro día, su mediodía en la zona de la clínica.
       const spentAt = value.spentDay === today ? {} : { spentAt: noonOf(value.spentDay, orgTimeZone) }
@@ -219,6 +245,7 @@ export function ExpenseFormDrawer({
           orderId: chosen.orderId,
           body: {
             amountCents: cents,
+            ...paid.body,
             fromCash: value.fromCash,
             expectedDueCents: seen?.due ?? chosen.dueCents,
             expectedPaidCents: seen?.paid ?? chosen.paidCents,
@@ -232,6 +259,8 @@ export function ExpenseFormDrawer({
         branchId,
         concept: value.concept.trim(),
         amountCents: cents,
+        ...(second && currency !== place.currency ? { currency } : {}),
+        ...paid.body,
         category: value.category,
         fromCash: value.fromCash,
         ...(asksSalesTax ? { salesTax: value.salesTax === "cobros" } : {}),
@@ -241,7 +270,14 @@ export function ExpenseFormDrawer({
     },
   })
   const surface = useFormSurface(form, {
-    fieldMap: { amountCents: "amount", spentAt: "spentDay", orderId: "purchase" },
+    fieldMap: {
+      amountCents: "amount",
+      spentAt: "spentDay",
+      orderId: "purchase",
+      tenderCents: "tender",
+      tenderCurrency: "payIn",
+      exchangeRate: "rate",
+    },
     formMessage: cashFormMessage,
   })
   const values = useStore(form.store, (s) => s.values)
@@ -262,7 +298,11 @@ export function ExpenseFormDrawer({
       salesTax: null,
       purchase: OTHER,
       concept: initial?.concept ?? "",
+      currency: place.currency,
       amount: initial ? formatMoneyInput(initial.amountCents, place.currency, locale) : "",
+      payIn: place.currency,
+      tender: "",
+      rate: todayRate,
       fromCash: !initial,
       receiptKind: "",
       receiptNumber: "",
@@ -270,7 +310,12 @@ export function ExpenseFormDrawer({
     })
     setSeen(null)
     setMoreOpen(Boolean(initial?.day && initial.day !== day))
-  }, [open, orgTimeZone, initial, place.currency, locale, form])
+  }, [open, orgTimeZone, initial, place.currency, locale, form, todayRate])
+  // El cambio de hoy puede llegar después de abrir: llega puesto, sin pisar lo escrito.
+  useEffect(() => {
+    if (open && todayRate && form.getFieldValue("rate") === "")
+      form.setFieldValue("rate", todayRate, { dontUpdateMeta: true })
+  }, [open, todayRate, form])
 
   // Una fecha que no pasa abre «Más detalles» para que se vea su error.
   const spentDayInvalid = useStore(form.store, (s) => (s.fieldMeta.spentDay?.errors.length ?? 0) > 0)
@@ -284,20 +329,66 @@ export function ExpenseFormDrawer({
     queryFn: () => fetchPurchasesToPay(),
     enabled: open && values.category === "Materiales",
   })
-  const orders = (purchases.data?.data.orders ?? []).filter((order) => order.currency === unit)
+  // Con otra moneda se ven las compras de las dos; sin ella, las de la moneda de la clínica.
+  const allOrders = purchases.data?.data.orders ?? []
+  const listed = second
+    ? allOrders.filter((order) => currencies.includes(order.currency))
+    : allOrders
+  const picked =
+    values.category === "Materiales"
+      ? (listed.find((order) => order.orderId === values.purchase) ?? null)
+      : null
+  // El impuesto de lo cobrado y lo que no es una compra: de qué moneda sale el dinero, y de esa caja.
+  const paysSalesTax =
+    values.category === "Impuestos" && salesTaxName !== null && values.salesTax === "cobros"
+  const outCurrency = second
+    ? picked
+      ? values.payIn
+      : paysSalesTax
+        ? place.currency
+        : values.currency
+    : undefined
+  const cash = useCashState(branchId, open, outCurrency)
+  const state = cash.data?.data ?? null
+  const unit = second
+    ? (picked?.currency ?? (paysSalesTax ? place.currency : values.currency))
+    : (state?.currency ?? place.currency)
+  const orders = second ? listed : listed.filter((order) => order.currency === unit)
+  const money = (cents: number) => formatMoney(cents, unit, locale)
 
-  /** Lo que se deduce de lo elegido: la compra que se paga, si se pregunta el impuesto y cómo queda la caja. */
+  /** Lo que se deduce de lo elegido: la compra que se paga, si se pregunta el impuesto, la moneda y cómo queda la caja. */
   function derive(value: ExpenseValues) {
     // Solo un gasto de Materiales paga una compra: si se cambia el tipo, ya no es ese pago.
     const chosen = value.category === "Materiales" ? (orders.find((order) => order.orderId === value.purchase) ?? null) : null
     const asksSalesTax = value.category === "Impuestos" && salesTaxName !== null
-    const cents = value.amount.trim() === "" ? null : parseAmount(value.amount, unit, locale)
+    // El impuesto de lo cobrado solo se paga en moneda del negocio.
+    const onlyBusiness = asksSalesTax && value.salesTax === "cobros"
+    const currency = second
+      ? (chosen?.currency ?? (onlyBusiness ? place.currency : value.currency))
+      : unit
+    const cents = value.amount.trim() === "" ? null : parseAmount(value.amount, currency, locale)
+    const paid = readExpenseMoney({
+      second,
+      business: place.currency,
+      cents,
+      currency,
+      payIn: chosen ? value.payIn : currency,
+      tenderText: value.tender,
+      rateText: value.rate,
+      locale,
+    })
     // Con la caja a la vista se avisa antes de guardar si el efectivo no alcanza.
     const after =
-      value.fromCash && state && cents !== null && (!chosen || chosen.branchId === branchId) ? state.cashOnHandCents - cents : null
-    return { chosen, asksSalesTax, cents, after }
+      value.fromCash &&
+      state &&
+      state.currency === paid.payIn &&
+      paid.outCents !== null &&
+      (!chosen || chosen.branchId === branchId)
+        ? state.cashOnHandCents - paid.outCents
+        : null
+    return { chosen, asksSalesTax, onlyBusiness, currency, cents, after, paid }
   }
-  const { chosen, asksSalesTax, after } = derive(values)
+  const { chosen, asksSalesTax, onlyBusiness, after, paid } = derive(values)
   // Sin nada recibido por pagar, lo que se paga es un adelanto de lo que falta que llegue.
   const advance = chosen !== null && chosen.dueCents === 0
   const asksPurchase = values.category === "Materiales" && orders.length > 0
@@ -319,9 +410,15 @@ export function ExpenseFormDrawer({
       const left = result.data.balance.dueCents
       if (!order) done("Pago registrado")
       else if (order.dueCents === 0)
-        done(`Adelanto registrado: ${purchaseOrderLabel(order.orderNumber)} lo descuenta cuando llegue${order.receivedCents > 0 ? " lo que falta" : ""}`)
-      else if (left > 0) done(`Pago registrado: a ${purchaseOrderLabel(order.orderNumber)} le falta ${money(left)}`)
-      else done(`Pago registrado: ${purchaseOrderLabel(order.orderNumber)} queda al día en Inventario`)
+        done(
+          `Adelanto registrado: ${purchaseOrderLabel(order.orderNumber)} lo descuenta cuando llegue${order.receivedCents > 0 ? " lo que falta" : ""}`,
+        )
+      else if (left > 0)
+        done(
+          `Pago registrado: a ${purchaseOrderLabel(order.orderNumber)} le falta ${formatMoney(left, order.currency, locale)}`,
+        )
+      else
+        done(`Pago registrado: ${purchaseOrderLabel(order.orderNumber)} queda al día en Inventario`)
     },
     onError: (err) => {
       // La compra cambió: se relee y el próximo envío compara con lo que se ve ahora, no con lo de antes.
@@ -338,8 +435,14 @@ export function ExpenseFormDrawer({
     const order = orders.find((item) => item.orderId === value)
     setSeen(order ? { due: order.dueCents, paid: order.paidCents } : null)
     if (order) {
-      const suggested = order.dueCents > 0 ? order.dueCents : Math.max(0, order.orderedCents - order.paidCents)
-      form.setFieldValue("amount", suggested > 0 ? formatMoneyInput(suggested, unit, locale) : "")
+      const suggested =
+        order.dueCents > 0 ? order.dueCents : Math.max(0, order.orderedCents - order.paidCents)
+      form.setFieldValue(
+        "amount",
+        suggested > 0 ? formatMoneyInput(suggested, order.currency, locale) : "",
+      )
+      form.setFieldValue("payIn", order.currency)
+      form.setFieldValue("tender", "")
       // Un pago a otra sede no sale de esta caja.
       if (order.branchId !== branchId) form.setFieldValue("fromCash", false)
     }
@@ -409,7 +512,14 @@ export function ExpenseFormDrawer({
         ) : null}
         {asksPurchase ? (
           <form.AppField name="purchase">
-            {() => <PurchaseChoice orders={orders} branchId={branchId} money={money} onChoose={choosePurchase} />}
+            {() => (
+              <PurchaseChoice
+                orders={orders}
+                branchId={branchId}
+                money={(cents, currency) => formatMoney(cents, currency, locale)}
+                onChoose={choosePurchase}
+              />
+            )}
           </form.AppField>
         ) : null}
         {chosen ? (
@@ -422,10 +532,30 @@ export function ExpenseFormDrawer({
             {(field) => <field.TextField label="En qué se gastó" maxLength={500} />}
           </form.AppField>
         )}
+        {second && !chosen && !onlyBusiness ? (
+          <form.AppField name="currency">
+            {(field) => (
+              <field.Group legend="Moneda" className="gap-3">
+                {(control) => (
+                  <ChoiceButtons
+                    id={control.id}
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    tone="primary"
+                    value={field.state.value}
+                    options={currencyChoices(currencies, locale)}
+                    onChange={(next) => field.handleChange(next)}
+                  />
+                )}
+              </field.Group>
+            )}
+          </form.AppField>
+        ) : null}
         <form.AppField name="amount">
           {(field) => (
             <field.Control
-              label="Importe"
+              label={second && chosen ? "Lo que cancelas" : "Importe"}
               description={
                 chosen
                   ? chosen.dueCents > 0
@@ -436,19 +566,65 @@ export function ExpenseFormDrawer({
                   : undefined
               }
             >
-              {(control) => (
-                <Input
-                  {...control.props}
-                  inputMode="decimal"
-                  autoComplete="off"
-                  placeholder={formatMoneyInput(0, unit, locale)}
-                  value={field.state.value}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                />
-              )}
+              {(control) =>
+                second ? (
+                  <MoneyInput
+                    id={control.id}
+                    currency={unit}
+                    placeholder={formatMoneyInput(0, unit, locale)}
+                    value={field.state.value}
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                    onChange={(next) => field.handleChange(next)}
+                  />
+                ) : (
+                  <Input
+                    {...control.props}
+                    inputMode="decimal"
+                    autoComplete="off"
+                    placeholder={formatMoneyInput(0, unit, locale)}
+                    value={field.state.value}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                  />
+                )
+              }
             </field.Control>
           )}
         </form.AppField>
+        {second && chosen && paid.asks ? (
+          <form.AppField name="payIn">
+            {(field) => (
+              <field.Group legend="Pagas con" className="gap-3">
+                {(control) => (
+                  <ChoiceButtons
+                    id={control.id}
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    tone="primary"
+                    value={field.state.value}
+                    options={currencyChoices(currencies, locale)}
+                    onChange={(next) => field.handleChange(next)}
+                  />
+                )}
+              </field.Group>
+            )}
+          </form.AppField>
+        ) : null}
+        {second ? (
+          <ExpenseMoneyFields
+            second={second}
+            money={paid}
+            currency={unit}
+            business={place.currency}
+            locale={locale}
+            crosses={Boolean(chosen)}
+            reportWords={(value) =>
+              `En tus reportes cuenta como ${value}${paid.crossed ? "" : ", con este cambio"}.`
+            }
+            field={(name, control) => <form.AppField name={name}>{() => control}</form.AppField>}
+          />
+        ) : null}
         <form.AppField name="fromCash">
           {(field) => (
             <FormChoiceField
@@ -456,9 +632,15 @@ export function ExpenseFormDrawer({
               description={
                 otherBranch && chosen
                   ? `Es de otra sede (${chosen.branchName}): no sale de esta caja.`
-                  : after === null || (after < 0 && state)
-                    ? "Se descuenta del efectivo que debe haber al cerrar."
-                    : `Se descuenta del efectivo que debe haber al cerrar: la caja queda en ${money(after)}.`
+                  : second && !values.fromCash
+                    ? "No toca ninguna caja: salió de una cuenta o de otro lado."
+                    : after === null || (after < 0 && state)
+                      ? second
+                        ? `Se descuenta de la caja de ${currencyWord(paid.payIn, locale)}.`
+                        : "Se descuenta del efectivo que debe haber al cerrar."
+                      : second
+                        ? `Se descuenta de la caja de ${currencyWord(paid.payIn, locale)}: queda en ${formatMoney(after, paid.payIn, locale)}.`
+                        : `Se descuenta del efectivo que debe haber al cerrar: la caja queda en ${money(after)}.`
               }
             >
               {(control) => (

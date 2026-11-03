@@ -22,6 +22,28 @@ export function budgetAwaitsAnswer(budget: {
 }
 
 /**
+ * La misma regla que `valueOptionOf` (`budgets.ts`), en SQL: la opción que vale de
+ * una fila de `treatment_budget` (la elegida, si no la recomendada, si no la
+ * primera). Para lo que suma presupuestos en la base (Reportes): nunca se suman
+ * las opciones. Cambian juntas; su prueba las compara. Vive aquí, sin dependencias,
+ * para que también la use la oportunidad.
+ */
+export function budgetValueOptionSql(budget: { id: SQLWrapper; organizationId: SQLWrapper }): SQL {
+  return sql`(select value_option.id from treatment_budget_option value_option
+    where value_option.organization_id = ${budget.organizationId} and value_option.budget_id = ${budget.id}
+    order by (value_option.decision = 'elegida') desc, value_option.is_recommended desc, value_option.position
+    limit 1)`
+}
+
+/** Las visitas que cuenta una línea (`budgetLineUnits`), en SQL sobre el alias de la línea. */
+export function budgetLineUnitsSql(line: {
+  billingMode: SQLWrapper
+  sessionsPlanned: SQLWrapper
+}): SQL {
+  return sql`(case when ${line.billingMode} = 'session' then greatest(coalesce(${line.sessionsPlanned}, 1), 1) else 1 end)`
+}
+
+/**
  * La regla como condición SQL sobre una fila de `treatment_budget`. Recibe sus
  * columnas: las de la tabla (`treatmentBudget`) o las de un alias (`sql\`b.id\``).
  */

@@ -35,17 +35,19 @@ import { fetchResponsibilities } from "../../lib/clinical-journey"
 import { useCan, usePermission } from "../../lib/crm"
 import { personHeaderRules } from "../../lib/screen-rules"
 import { label } from "../../lib/glossary"
-import type { PatientSectionId } from "../../lib/patient-areas"
 import { sexLabel } from "../../lib/patient-overview"
 import { ageFrom, hcLabel, type PatientFull, type PatientSummary } from "../../lib/patients"
 import { PERSON_KIND_LABELS, type PersonPage, relationshipText } from "../../lib/people"
 import type { BookingSeed } from "../agenda/booking-drawer"
 import { openBookingAnywhere } from "../agenda/schedule-host"
+import { useOpenRecordPanel } from "../person/record-panel"
 import { PersonLink } from "../person-link"
 import { WriteToPersonDialog } from "../write-to-person"
+import { CollectButton } from "./collect-flow"
 import { FiliacionSectionDrawer } from "./filiacion-section-drawer"
 import { NewEncounterButton } from "./new-encounter-button"
 import { PatientAvatar } from "./patient-avatar"
+import { useOpenWide } from "./wide-section"
 
 /** Alertas prioritarias: primero alergias severas, luego el resto. Siempre visibles, nunca tras un desplegable. */
 export function clinicalAlerts(
@@ -149,17 +151,15 @@ export function PersonHeader({
   person,
   detail,
   summary,
-  onSection,
-  onCollect,
+  onAccount,
 }: {
   person: PersonPage
   /** Ficha administrativa del paciente, si lo es (alergias, foto, edad). */
   detail?: PatientFull
   /** Resumen clínico ya cargado por la pestaña Clínica (no se pide aquí). */
   summary?: PatientSummary
-  onSection: (section: PatientSectionId) => void
-  /** «Cobrar»: la cuenta con el cobro ya abierto. */
-  onCollect: () => void
+  /** Ya está en Cobros: el botón de cobrar es el de esa pantalla, no se repite. */
+  onAccount: boolean
 }) {
   // La página no usa PageHeader; las utilidades globales (avisos) van aquí.
   const utilities = useHeaderUtilities()
@@ -172,6 +172,9 @@ export function PersonHeader({
   const canMessage = usePermission("conversations.write")
   const canReadChats = usePermission("conversations.read")
   const canCrm = usePermission("crm.read")
+  const canRegisterResponsible = usePermission("patients.write")
+  const openWide = useOpenWide()
+  const openPanel = useOpenRecordPanel()
   const patient = person.patient
   const [editing, setEditing] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -319,8 +322,8 @@ export function PersonHeader({
                 Reservar cita
               </Button>
             ) : null}
-            {primary === "charge" ? (
-              <Button onClick={onCollect}>Cobrar</Button>
+            {primary === "charge" && patient && !onAccount ? (
+              <CollectButton patientId={patient.id} patientName={person.displayName} />
             ) : null}
             {patient && !person.archived ? (
               <NewEncounterButton
@@ -338,6 +341,8 @@ export function PersonHeader({
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem
+                    // Sin la ficha cargada el cajón no tendría qué mostrar.
+                    disabled={Boolean(patient) && !detail}
                     onClick={() => {
                       setMenuOpen(false)
                       setEditing(true)
@@ -375,13 +380,16 @@ export function PersonHeader({
                 {canReadChats && other.conversationId ? (
                   <>
                     {" · "}
-                    <Link
-                      to="/inbox"
-                      search={{ conversation: other.conversationId }}
-                      className="text-primary hover:underline"
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="h-auto p-0"
+                      onClick={() => {
+                        if (other.conversationId) openPanel?.({ conversationId: other.conversationId, name: other.displayName })
+                      }}
                     >
                       Ver su conversación
-                    </Link>
+                    </Button>
                   </>
                 ) : null}
               </span>
@@ -400,13 +408,15 @@ export function PersonHeader({
               <>
                 <span className="font-medium">Sin representante legal registrado.</span> Un menor no
                 decide presupuestos ni firma consentimientos por sí mismo.{" "}
-                <button
-                  type="button"
-                  className="font-medium underline underline-offset-4"
-                  onClick={() => onSection("responsables")}
-                >
-                  Registrar responsable
-                </button>
+                {canRegisterResponsible && !person.archived ? (
+                  <button
+                    type="button"
+                    className="font-medium underline underline-offset-4"
+                    onClick={() => openWide?.({ id: "responsables", grant: true })}
+                  >
+                    Registrar responsable
+                  </button>
+                ) : null}
               </>
             ) : responsibilities.isError ? (
               "No se pudo consultar quién representa al paciente."
@@ -460,6 +470,7 @@ export function PersonHeader({
         open={writeOpen}
         onClose={() => setWriteOpen(false)}
         people={writeTargets}
+        onOpened={(conversationId, target) => openPanel?.({ conversationId, name: target.displayName })}
       />
     </header>
   )

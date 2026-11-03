@@ -9,6 +9,7 @@ import {
   isUpcoming,
   usePatientAppointments,
 } from "../../lib/patient-appointments"
+import { usePersonArchived } from "../../lib/person-archived"
 import { QueryErrorState } from "../../lib/query-error"
 import { openAppointmentAnywhere, openBookingAnywhere } from "../agenda/schedule-host"
 import { CitasSkeleton } from "../skeletons/person-sections"
@@ -47,7 +48,8 @@ export function CitasPanel({ patientId, patientName, conversationId }: { patient
   // En «Contexto» pueden ir dos paneles juntos: el de la persona y el de a quien lleva.
   const titleId = useId()
   const canRead = usePermission("appointments.read")
-  const canWrite = usePermission("appointments.write")
+  const archived = usePersonArchived()
+  const canWrite = usePermission("appointments.write") && !archived
   const query = usePatientAppointments(patientId, canRead)
   // «Nueva cita» al lado: la pestaña Citas sigue a la vista.
   const book = () => openBookingAnywhere({ patient: { id: patientId, name: patientName }, lockedPatient: true, conversationId })

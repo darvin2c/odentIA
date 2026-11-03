@@ -5,7 +5,7 @@
  * y el tipo los aplica el servidor; el total del mes y el de cada tipo son del
  * mes entero. Un gasto se anula con motivo y queda en la lista, tachado.
  */
-import { formatMoney } from "@odentia/clinical"
+import { currencyWord, formatMoney } from "@odentia/clinical"
 import { Alert, AlertDescription, AlertTitle, Badge, Button, cn, toast } from "@odentia/ui"
 import {
   common,
@@ -25,7 +25,9 @@ import { ExpenseRowsSkeleton, ExpensesTotalSkeleton } from "../skeletons/finance
 import { VoidDrawer } from "./void-drawer"
 import { plainAmount } from "../../lib/commissions"
 import { usePermission } from "../../lib/crm"
+import { expenseRateWords } from "../../lib/expense-exchange"
 import { financeErrorMessage } from "../../lib/finance"
+import { useOrgSecondCurrency } from "../../lib/org"
 import {
   daysBetween,
   dayKeyOf,
@@ -80,6 +82,7 @@ export function ExpensesTab({
   const queryClient = useQueryClient()
   const listSearch = useListSearch()
   const canInventory = usePermission("inventory.read")
+  const second = useOrgSecondCurrency()
   const [voiding, setVoiding] = useState<ExpenseRow | null>(null)
   const q = listSearch.get("q") ?? ""
   const tipo = listSearch.get("tipo") ?? ""
@@ -172,7 +175,15 @@ export function ExpensesTab({
       {
         id: "salio",
         header: "Salió de",
-        cell: ({ row }) => <span>{row.original.fromCash ? "Efectivo de la caja" : "Fuera de la caja"}</span>,
+        cell: ({ row }) => (
+          <span>
+            {!row.original.fromCash
+              ? "Fuera de la caja"
+              : second
+                ? `Caja de ${currencyWord(row.original.tenderCurrency ?? row.original.currency, locale)}`
+                : "Efectivo de la caja"}
+          </span>
+        ),
       },
       {
         id: "monto",
@@ -180,14 +191,40 @@ export function ExpensesTab({
         meta: { view: { primary: true } },
         cell: ({ row }) => {
           const expense = row.original
+          // Con otra moneda de por medio, cada cifra lleva su símbolo.
+          const business = currency
+          const named = second !== null || expense.currency !== business
           return (
-            <span
-              className={cn(
-                "block text-right font-semibold whitespace-nowrap tabular-nums",
-                expense.voidedAt !== null && "font-normal text-muted-foreground line-through",
-              )}
-            >
-              {plainAmount(expense.amountCents, expense.currency, locale)}
+            <span className="flex flex-col items-end gap-0.5">
+              <span
+                className={cn(
+                  "block text-right font-semibold whitespace-nowrap tabular-nums",
+                  expense.voidedAt !== null && "font-normal text-muted-foreground line-through",
+                )}
+              >
+                {named
+                  ? formatMoney(expense.amountCents, expense.currency, locale)
+                  : plainAmount(expense.amountCents, expense.currency, locale)}
+              </span>
+              {expense.exchangeRate && expense.tenderCents != null && expense.tenderCurrency ? (
+                <span className="text-right text-xs text-muted-foreground tabular-nums">
+                  Salió {formatMoney(expense.tenderCents, expense.tenderCurrency, locale)} ·{" "}
+                  {expenseRateWords(
+                    { ...expense, exchangeRate: expense.exchangeRate },
+                    business,
+                    locale,
+                  )}
+                </span>
+              ) : expense.exchangeRate && expense.businessCents != null ? (
+                <span className="text-right text-xs text-muted-foreground tabular-nums">
+                  Vale {formatMoney(expense.businessCents, business, locale)} ·{" "}
+                  {expenseRateWords(
+                    { ...expense, exchangeRate: expense.exchangeRate },
+                    business,
+                    locale,
+                  )}
+                </span>
+              ) : null}
             </span>
           )
         },
@@ -211,7 +248,7 @@ export function ExpensesTab({
           ) : null,
       },
     ],
-    [locale, zone, canInventory, canWrite],
+    [locale, zone, canInventory, canWrite, second, currency],
   )
   const table = useReactTable({ data: data?.expenses ?? [], columns, getCoreRowModel: getCoreRowModel() })
 

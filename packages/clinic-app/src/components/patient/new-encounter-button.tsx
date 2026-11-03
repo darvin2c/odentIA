@@ -9,6 +9,7 @@ import { ApiError, apiFetch } from "../../lib/api"
 import { useMyUserId, usePermission } from "../../lib/crm"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import type { Encounter, PatientFull } from "../../lib/patients"
+import { usePersonArchived } from "../../lib/person-archived"
 
 /** Cita de agenda desde la que se atiende: fija la sede y dice de quién es. */
 export interface AttendedAppointment {
@@ -142,7 +143,9 @@ export function NewEncounterButton({
   openFromSearch?: boolean
   size?: "default" | "sm"
 }) {
-  const canWrite = usePermission("clinical.write")
+  // Una ficha archivada se lee, pero no se atiende: se recupera primero.
+  const archived = usePersonArchived()
+  const canWrite = usePermission("clinical.write") && !archived
   const canSeeAgenda = usePermission("appointments.read")
   const sede = useActiveBranch()
   const queryClient = useQueryClient()

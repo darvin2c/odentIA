@@ -1,3 +1,4 @@
+import { formatMoney, formatMoneyAmount } from "@odentia/clinical"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 import type { PortalBudget } from "../../lib/portal"
@@ -108,5 +109,59 @@ describe("BudgetResponder", () => {
     }
     expect(page).not.toContain("Si el importe cambia")
     expect(page.match(/<label[^>]*>.*?<\/label>/s)?.[0]).not.toContain("<details")
+  })
+
+  it("con una moneda, la línea va sin símbolo y el total lo dice", () => {
+    const page = html(plain)
+    const soles = formatMoney(65000, "PEN", "es-PE")
+    expect(page).toContain(`Aceptas ${soles} de ${soles}`)
+    expect(page).toContain(`>${formatMoneyAmount(65000, "PEN", "es-PE")}</span>`)
+    expect(page).not.toContain(" + ")
+  })
+
+  it("lo marcado sin precio dice que falta cotizarlo, no lo cuenta como cero", () => {
+    const page = html({
+      ...plain,
+      items: [
+        plain.items[0]!,
+        {
+          ...plain.items[0]!,
+          planItemId: "i2",
+          title: "Corona",
+          lineTotalCents: null,
+          priceCents: null,
+        },
+      ],
+    })
+    expect(page).toContain("Aceptas Por cotizar de")
+  })
+
+  it("con dos monedas, cada línea dice la suya y hay un total por cada una", () => {
+    const totals = [
+      { currency: "PEN", totalCents: 30000 },
+      { currency: "USD", totalCents: 100000 },
+    ]
+    const page = html({
+      ...plain,
+      totals,
+      totalCents: null,
+      options: [{ ...plain.options[0]!, totals, totalCents: null }],
+      items: [
+        { ...plain.items[0]!, planItemId: "i1", lineTotalCents: 30000, currency: "PEN" },
+        {
+          ...plain.items[0]!,
+          planItemId: "i2",
+          title: "Implante",
+          lineTotalCents: 100000,
+          currency: "USD",
+        },
+      ],
+    })
+    const soles = formatMoney(30000, "PEN", "es-PE")
+    const dollars = formatMoney(100000, "USD", "es-PE")
+    expect(page).toContain(`>${soles}</span>`)
+    expect(page).toContain(`>${dollars}</span>`)
+    expect(page).toContain(`Aceptas ${soles} + ${dollars} de ${soles} + ${dollars}`)
+    expect(page).not.toContain("Por cotizar")
   })
 })

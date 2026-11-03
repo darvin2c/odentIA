@@ -9,7 +9,15 @@
  * (ADR 0068).
  * Dinero con `@odentia/clinical`; fecha y formato en la zona de la clínica.
  */
-import { documentText, formatMoney, ticketFooterLines, ticketUntaxedNote } from "@odentia/clinical"
+import {
+  currencyWord,
+  documentText,
+  formatMoney,
+  ticketFooterLines,
+  ticketTenderTitle,
+  ticketUntaxedNote,
+  moneyTotalsText,
+} from "@odentia/clinical"
 import { Badge, Button, buttonVariants, cn, Skeleton } from "@odentia/ui"
 import { FormDrawer, SubmitButton, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { useMutation, useQuery } from "@tanstack/react-query"
@@ -21,6 +29,7 @@ import { useActiveBranch } from "../../lib/active-branch"
 import { apiFetchBytes } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { financeErrorMessage, financeFormMessage } from "../../lib/finance"
+import { useOrgSecondCurrency } from "../../lib/org"
 import {
   CASH_TYPE_CODE,
   type CollectReceipt,
@@ -115,6 +124,7 @@ export function TicketView({
   onChanged,
   onDone,
   onCollect,
+  onCollectRest,
   mode = "collected",
   inAccount = false,
   closedAfter = false,
@@ -139,6 +149,8 @@ export function TicketView({
   onDone?: () => void
   /** Abre «Cobrar» de esta persona: tras anular, se ofrece «Ir a Cobrar». */
   onCollect?: () => void
+  /** Recién cobrado, si debe en la otra moneda: «Cobrar lo que falta» abre ese cobro. */
+  onCollectRest?: (currency: string) => void
   /** `collected`: recién cobrado, dice cómo quedó la deuda. `review`: ticket consultado después. */
   mode?: "collected" | "review"
   /** Ya se está en la cuenta de esta persona: no se ofrece abrirla. */
@@ -163,6 +175,7 @@ export function TicketView({
   const [returnOpen, setReturnOpen] = useState(false)
   const [returnPdfBusy, setReturnPdfBusy] = useState<string | null>(null)
   const sede = useActiveBranch()
+  const second = useOrgSecondCurrency()
 
   const snapshot = ticket.snapshot
   const currency = ticket.currency
@@ -170,8 +183,18 @@ export function TicketView({
   const format = snapshot.clinic?.locale || locale
   const zone = snapshot.clinic?.timezone || timeZone
   const money = (cents: number) => formatMoney(cents, currency, format)
+  // Si el cobro usó dos monedas, cada cifra lleva su símbolo: lo que entró no es lo que canceló.
+  const crossed = snapshot.tender ?? null
   /** Cifras del cuerpo del ticket: sin símbolo, como en el papel; el total sí lo lleva. */
-  const plain = (cents: number) => formatAmountPlain(cents, currency, format)
+  const plain = (cents: number) =>
+    crossed ? money(cents) : formatAmountPlain(cents, currency, format)
+  /** Lo que entró: en la moneda en que pagó. */
+  const entered = (cents: number) =>
+    crossed ? formatMoney(cents, crossed.currency, format) : plain(cents)
+  const enteredOf = (method: { amountCents: number; tenderCents?: number }) =>
+    crossed ? entered(method.tenderCents ?? method.amountCents) : plain(method.amountCents)
+  const changeText = (cents: number) =>
+    ticket.changeCurrency ? formatMoney(cents, ticket.changeCurrency, format) : entered(cents)
 
   const justVoided = voidedHere?.ticketId === ticket.id ? voidedHere : null
   const voided = ticket.voidedAt !== null || justVoided !== null
@@ -246,6 +269,19 @@ export function TicketView({
   const owed = account.data
     ? (account.data.data.byCurrency.find((row) => row.currency === currency)?.saldo ?? 0)
     : null
+  // Con dos monedas, lo que debe en cada una, sin sumar: lo otro se ofrece cobrar.
+  const owedElse = second
+    ? (account.data?.data.byCurrency ?? []).filter(
+        (row) => row.currency !== currency && row.saldo > 0,
+      )
+    : []
+  const owedWords = moneyTotalsText(
+    [
+      ...(owed ? [{ currency, cents: owed }] : []),
+      ...owedElse.map((row) => ({ currency: row.currency, cents: row.saldo })),
+    ],
+    (cents, unit) => formatMoney(cents, unit, format),
+  )
 
   const voidMutation = useMutation({
     mutationFn: (reason: string) => voidTicketApi(ticket.patientId, ticket.id, reason),
@@ -287,11 +323,13 @@ export function TicketView({
   const paidWith =
     methods.length > 0
       ? methods
-          .map((method) =>
-            method.typeCode === CASH_TYPE_CODE
-              ? `${money(method.amountCents)} en efectivo`
-              : `${money(method.amountCents)} por ${method.name}`,
-          )
+          .map((method) => {
+            const cents = method.tenderCents ?? method.amountCents
+            const amount = crossed ? formatMoney(cents, crossed.currency, format) : money(cents)
+            return method.typeCode === CASH_TYPE_CODE
+              ? `${amount} en efectivo`
+              : `${amount} por ${method.name}`
+          })
           .join(" + ")
       : `${money(ticket.creditAppliedCents)} de su saldo a favor`
   const when = issuedToday
@@ -347,9 +385,21 @@ export function TicketView({
               )
             ) : (
               <p className="break-words text-sm text-muted-foreground">
-                {owed > 0 ? `${person} todavía debe ${money(owed)}.` : `${person} ya no debe nada.`}
+                {owedWords ? `${person} todavía debe ${owedWords}.` : `${person} ya no debe nada.`}
               </p>
             )}
+            {onCollectRest
+              ? owedElse.map((row) => (
+                  <Button
+                    key={row.currency}
+                    type="button"
+                    className="mt-2 min-h-10 self-start"
+                    onClick={() => onCollectRest(row.currency)}
+                  >
+                    Cobrar lo que falta: {formatMoney(row.saldo, row.currency, format)}
+                  </Button>
+                ))
+              : null}
             {receipt ? (
               <p
                 className={cn(
@@ -439,9 +489,12 @@ export function TicketView({
         ) : null}
         <Row label="TOTAL" value={money(ticket.totalCents)} strong />
         <div className="flex flex-col gap-1">
+          {crossed ? (
+            <p className="border-t pt-2 font-semibold">{ticketTenderTitle(crossed, format)}</p>
+          ) : null}
           {methods.map((method, index) => (
             <div key={`${method.paymentMethodId}-${index}`} className="flex flex-col">
-              <Row label={method.name} value={plain(method.amountCents)} />
+              <Row label={method.name} value={enteredOf(method)} />
               {method.reference ? (
                 <span className="text-xs text-muted-foreground">Operación {method.reference}</span>
               ) : null}
@@ -451,10 +504,10 @@ export function TicketView({
             <Row label="Saldo a favor usado" value={plain(ticket.creditAppliedCents)} />
           ) : null}
           {ticket.cashReceivedCents != null ? (
-            <Row label="Recibido" value={plain(ticket.cashReceivedCents)} />
+            <Row label="Recibido" value={entered(ticket.cashReceivedCents)} />
           ) : null}
           {ticket.changeCents != null && ticket.changeCents > 0 ? (
-            <Row label="Vuelto" value={plain(ticket.changeCents)} />
+            <Row label="Vuelto" value={changeText(ticket.changeCents)} />
           ) : null}
           {returnsMade.map((item) => (
             <div key={item.id} className="flex items-baseline justify-between gap-3">
@@ -657,17 +710,40 @@ export function TicketView({
                 <li key={`${method.paymentMethodId}-${index}`}>
                   {method.typeCode === CASH_TYPE_CODE ? (
                     <>
-                      Salen <strong className="font-semibold">{money(method.amountCents)}</strong>{" "}
-                      del efectivo de la caja.
+                      Salen{" "}
+                      <strong className="font-semibold">
+                        {crossed
+                          ? formatMoney(voidCashCents(method, ticket), crossed.currency, format)
+                          : money(method.amountCents)}
+                      </strong>{" "}
+                      del efectivo de la caja
+                      {crossed ? ` de ${currencyWord(crossed.currency, format)}` : ""}.
                     </>
                   ) : (
                     <>
-                      <strong className="font-semibold">{money(method.amountCents)}</strong> se
-                      devuelven por {method.name}; no salen del efectivo.
+                      <strong className="font-semibold">
+                        {crossed
+                          ? formatMoney(
+                              method.tenderCents ?? method.amountCents,
+                              crossed.currency,
+                              format,
+                            )
+                          : money(method.amountCents)}
+                      </strong>{" "}
+                      se devuelven por {method.name}; no salen del efectivo.
                     </>
                   )}
                 </li>
               ))}
+              {ticket.changeCurrency && ticket.changeCents ? (
+                <li>
+                  Vuelven{" "}
+                  <strong className="font-semibold">
+                    {formatMoney(ticket.changeCents, ticket.changeCurrency, format)}
+                  </strong>{" "}
+                  a la caja de {currencyWord(ticket.changeCurrency, format)}: fueron su vuelto.
+                </li>
+              ) : null}
               {ticket.creditAppliedCents > 0 ? (
                 <li>
                   Recupera{" "}
@@ -722,6 +798,19 @@ export function TicketView({
       ) : null}
     </div>
   )
+}
+
+/**
+ * Lo que sale del efectivo al anular un pago en efectivo con otra moneda de por
+ * medio: lo que entró por él y, si el vuelto se dio en la otra, el exceso del billete.
+ */
+function voidCashCents(
+  method: { amountCents: number; tenderCents?: number },
+  ticket: CollectTicketRow,
+): number {
+  return ticket.changeCurrency && ticket.cashReceivedCents !== null
+    ? ticket.cashReceivedCents
+    : (method.tenderCents ?? method.amountCents)
 }
 
 export function TicketStatusBadge({ voidedAt }: { voidedAt: string | null }): React.JSX.Element {

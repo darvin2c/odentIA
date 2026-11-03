@@ -191,7 +191,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     faqs: [
       {
         q: "¿Cómo le escribo a alguien que nunca me escribió?",
-        a: "En la Bandeja pulsa «Nueva conversación», búscalo por nombre o por teléfono y elígelo; si no existe, créalo con su número. Si tiene teléfono se le escribe por WhatsApp, sin escribir nada más. Como nunca escribió, WhatsApp pide empezar con uno de los mensajes aprobados de la clínica: la conversación te los ofrece y, si no hay ninguno, te dice qué falta y a quién pedírselo. Desde la ficha, la Agenda o Finanzas es el mismo botón: «Escribirle».",
+        a: "En la Bandeja pulsa «Nueva conversación», búscalo por nombre o por teléfono y elígelo; si no existe, créalo con su número. Si tiene teléfono se le escribe por WhatsApp, sin escribir nada más. Como nunca escribió, WhatsApp pide empezar con uno de los mensajes aprobados de la clínica: la conversación te los ofrece y, si no hay ninguno, te dice qué falta y a quién pedírselo. Desde la ficha, la Agenda o Finanzas es el mismo botón: «Escribirle». En la ficha se abre ahí mismo, sin ir a la Bandeja.",
       },
       {
         q: "¿Cómo respondo yo en vez de Sofi?",
@@ -286,6 +286,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         q: "¿Puedo dar una cita fuera de horario o a una hora ocupada?",
         a: "Sí. Toca lo gris en el día, o elige esa hora en «Nueva cita»: te avisa y puedes reservar igual. La cita queda marcada y al profesional le llega un aviso. También puedes dar dos citas a la misma hora con un profesional, cada una en su sala o unidad; lo único que no se puede es poner a dos personas en la misma. Estas excepciones las hace siempre alguien del equipo: Sofi y el enlace de la persona solo reservan lo libre.",
+      },
+      {
+        q: "¿Cómo elijo qué tratamientos trae la cita?",
+        a: "En «Nueva cita», «Para esta cita» muestra lo que la persona aceptó y aún no tiene cita. Vienen marcados los del primer servicio; los demás se suman con un toque, y elegir otro servicio marca los de ese. Puedes desmarcarlos todos: la cita queda sin ninguno. Los marcados quedan listos en la atención de esa cita. Cuando reservan Sofi o la persona desde su enlace, la cita trae lo aceptado de su servicio que aún no tenía cita.",
       },
       {
         q: "¿Cómo le reservo una cita desde la conversación?",
@@ -476,6 +480,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         a: "En el Resumen de su página: si lees la historia clínica, es el resumen clínico, con sus alergias y alertas, «Qué sigue» de su plan, su última atención y su próxima cita. Abrir la página queda en «Consultas a la historia», como cualquier lectura de la historia. Recepción y caja ven el Resumen de siempre, sin nada clínico.",
       },
       {
+        q: "¿Tengo que cambiar de pestaña para revisar, firmar o cobrar desde el Resumen?",
+        a: "No: cada botón de su página hace lo suyo ahí mismo. «Revisar» abre sus antecedentes con el formulario listo, «Firmar» abre la pantalla de firma, «Cobrar» abre el cobro y «Abrir» o «Escribirle» abren su conversación. Al cerrar sigues donde estabas. Adjuntos, audio y responder entre varios temas siguen en la Bandeja, con «Ver toda la conversación».",
+      },
+      {
         q: "¿Dónde quedaron Atenciones, Recetas u Órdenes?",
         a: "Clínica tiene cuatro secciones: Antecedentes, Odontograma, Historia y Documentos. Historia es lo que pasó y cuándo, con las atenciones (también las anuladas, con su motivo) y lo que se firmó o se pidió. Documentos es para buscar un papel: una sola lista con «Requieren acción» y un filtro por tipo (recetas, órdenes, consentimientos, formularios, imágenes y, en clínicas de Perú, odontogramas firmados); «Nuevo» abre directo el formulario.",
       },
@@ -544,6 +552,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         a: "Sí, en el mismo presupuesto: «Duplicar como otra opción» copia la opción y cambias lo que haga falta. Cada opción tiene su total (nunca se suman) y una es la recomendada. Cuando la persona elige una, las otras quedan «No elegida» y dentro de la elegida puede dejar algo para después.",
       },
       {
+        q: "¿Un presupuesto puede tener líneas en dólares y en soles?",
+        a: "Sí. Es un solo presupuesto: cada línea va en la moneda de su servicio y el total sale por moneda, como S/ 300.00 + USD 1,000.00; entre monedas no se suma ni se convierte. La persona lo ve igual en su enlace, en el portal y en el papel, y responde una sola vez. Lo aceptado se cobra después, cada moneda con su ticket.",
+        forms: ["presupuesto en dos monedas", "presupuesto en dolares", "presupuesto con dolares y soles", "dos totales en el presupuesto"],
+      },
+      {
         q: "¿Qué quiere decir cada estado del presupuesto?",
         a: "«Por enviar»: armado y sin enviar. «Enviado · espera respuesta». «Lo está pensando». «Aceptó todo» o «Aceptó 2 de 3». «No aceptó». «Reemplazado», cuando se hizo una revisión, y «Anulado». Son las mismas palabras en toda la aplicación.",
       },
@@ -558,7 +571,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo dicto una atención?",
-        a: "Dentro de la atención, pulsa «Dictar» y habla: Clío ordena lo que dices en sugerencias dentro de cada bloque, y tú las confirmas o firmas. Solo aparece si la clínica encendió a Clío, en Agente › Clío, y para quien lleva la atención. El micrófono solo se enciende con «Dictar» o «Reanudar», y nada entra a la historia sin que lo confirmes.",
+        a: "Dentro de la atención, pulsa «Dictar» y habla: Clío ordena lo que dices en sugerencias dentro de cada bloque, y tú las confirmas o firmas. Solo aparece si la clínica encendió a Clío, en Agente › Clío, y para quien lleva la atención. El micrófono solo se enciende con «Dictar» o «Reanudar», y nada entra a la historia sin que lo confirmes. Lo que dictas para la nota se agrega al texto que ya estaba, no lo reemplaza, y la tarjeta lo dice antes de confirmar.",
         forms: ["como uso el dictado", "dictado", "dictar", "como funciona clio", "como funciona el dictado"],
         general: true,
       },
@@ -849,12 +862,17 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "pagó la mitad",
       "pago con yape",
       "cobrar consulta",
+      "otra moneda",
+      "dólares",
+      "cambio de hoy",
+      "tipo de cambio",
+      "vuelto",
     ],
     writePermission: "finance.write",
     faqs: [
       {
         q: "¿Por qué el saldo es menor que lo que debe?",
-        a: "Porque descuenta lo que la persona tiene a favor (un adelanto o un cobro de más): «Debe: 100 · A favor: 100 · Saldo: 0». Así se ve en su cuenta, en su Resumen, en el portal y en los avisos. En su cuenta, «Aplicar lo que tiene a favor» cancela la deuda con un clic y deja el movimiento registrado; si no alcanza, te dice lo que falta.",
+        a: "Porque descuenta lo que la persona tiene a favor (un adelanto o un cobro de más): «Debe: 100 · A favor: 100 · Saldo: 0». Así se ve en su cuenta, en su Resumen, en el portal y en los avisos. «Aplicar lo que tiene a favor» te dice el importe y la sede antes de hacerlo; al confirmar cancela la deuda y deja el movimiento registrado, sin dinero nuevo. Si no alcanza, te dice lo que falta.",
       },
       {
         q: "¿Anulo el ticket o hago una devolución?",
@@ -869,6 +887,41 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         q: "¿Cómo cobro una atención?",
         a: "En Finanzas › Caja, «Por cobrar ahora» trae lo atendido, o «Cobrar» para empezar; eliges el medio de pago y sale su ticket. El comprobante le llega por correo y queda en su enlace.",
         forms: ["como cobro", "como le cobro a un paciente", "como registro un pago", "como registro un cobro"],
+      },
+      {
+        q: "¿Cómo cobro en otra moneda?",
+        a: "Si la clínica también cobra en otra moneda, el cobro se abre en la moneda de lo que debe: lo que está en dólares se debe en dólares hasta que se paga. En «Paga con» eliges con qué paga y en «Tipo de cambio» llega el de hoy; si lo cambias ahí, vale solo para ese cobro y, si es muy distinto, te avisa. Escribes lo que te da y debajo ves cuánto cancela y lo que queda por cobrar. Si debe en las dos monedas, cada una lleva su ticket: al terminar, «Cobrar lo que falta» abre la otra.",
+        forms: ["como cobro en dolares", "debe en dolares y paga en soles", "paga en soles lo que debe en dolares", "cobrar en dolares", "cobro cruzado", "como le cobro en dolares"],
+      },
+      {
+        q: "¿Dónde cambio el tipo de cambio de hoy?",
+        a: "En Finanzas › Caja, arriba: dice el «Tipo de cambio de hoy», quién lo puso y «Cambiar», si puedes cobrar o configurar la clínica. Es lo que se propone en los cobros que vienen; lo ya cobrado no cambia, porque cada cobro guarda el suyo.",
+        forms: ["donde pongo el cambio de hoy", "como pongo el tipo de cambio", "donde cambio el tipo de cambio", "actualizar el tipo de cambio"],
+      },
+      {
+        q: "¿Cómo doy el vuelto en otra moneda?",
+        a: "Si paga en efectivo en la otra moneda y da un billete más grande, escribe el billete en «Recibes en efectivo» y elige en «Vuelto en» si lo das en esa moneda o en la del negocio. Antes de cobrar se lee lo que entra a cada caja y lo que sale de cada una: por S/ 300 a 3.75, un billete de USD 100 deja USD 100 en la caja de dólares y saca S/ 75 de la de soles. El ticket dice lo recibido y el vuelto, cada uno con su moneda.",
+        forms: ["como doy vuelto en soles si paga en dolares", "vuelto en otra moneda", "paga con un billete en dolares"],
+      },
+      {
+        q: "¿Cómo cierro la caja si cobro en dos monedas?",
+        a: "Cada moneda tiene su caja: en Finanzas › Caja ves el efectivo de cada una y nunca se suman. En «Cerrar caja» eliges cuál cierras, cuentas solo esa moneda y la otra sigue abierta hasta que la cierres; te avisa si falta. El cierre muestra «Tipos de cambio usados en esta caja». Cambiar dólares por soles se anota como un retiro de una caja y un ingreso en la otra.",
+        forms: ["como cierro la caja de dolares", "cerrar caja en dos monedas", "cierre de caja con dolares", "caja de dolares"],
+      },
+      {
+        q: "¿Qué dice el ticket si pagó en otra moneda?",
+        a: "Arriba, lo que canceló, en su moneda; abajo, con qué pagó y a qué cambio, cuánto por cada medio de pago, «Recibido» y «Vuelto». Si el cobro usó dos monedas, cada cifra lleva su símbolo. El papel y el comprobante dicen lo mismo.",
+        forms: ["ticket en dolares", "que dice el comprobante si pago en dolares"],
+      },
+      {
+        q: "¿Qué pasa si anulo o devuelvo un cobro en otra moneda?",
+        a: "Sale lo que entró, en esa misma moneda y en proporción, sin cambio nuevo: el cambio de hoy no cuenta. Si pagó en soles lo que debía en dólares, se le devuelve en soles. Lo que tiene a favor en una moneda no se usa para la otra.",
+        forms: ["devolver un pago en dolares", "anular un cobro en dolares"],
+      },
+      {
+        q: "¿Cómo registro un gasto o pago una compra en dólares?",
+        a: "En Finanzas › Gastos, con otra moneda en la clínica, eliges la «Moneda» del gasto y su «Tipo de cambio». Al pagar una compra en dólares puedes pagarla en soles: en «Lo que salió» escribes lo que salió, como en tu extracto, y el cambio se calcula solo. La caja que se toca es la de la moneda en que salió el dinero.",
+        forms: ["gasto en dolares", "pagar una compra en dolares", "compra en dolares", "pago una compra en soles"],
       },
     ],
   },
@@ -909,6 +962,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         q: "¿Cómo elijo qué precio dice Sofi?",
         a: "Cada servicio dice su precio de una de tres formas: «Precio exacto», «Desde» (como mínimo, y el final se define en la evaluación) o «Solo con evaluación» (no dice ningún número y ofrece la evaluación). Al agregar servicios de la biblioteca se pregunta una vez «¿Cómo dice Sofi estos precios?», con «Precio exacto» marcado; un servicio propio nace «Solo con evaluación». Para cambiar varios a la vez, márcalos en la lista y elige «Cómo dice el precio». Caja y presupuesto usan siempre la tarifa.",
+      },
+      {
+        q: "¿Cómo pongo un precio en dólares?",
+        a: "Primero activa la otra moneda en Datos de la clínica; después, el formulario del servicio trae «Moneda del precio». Al cambiarla escribes el precio de nuevo: no se convierte solo, y lo que ya se indicó o se presupuestó sigue con su moneda y su precio. Un servicio tiene un solo precio. Sofi lo dice en esa moneda y agrega, como aproximado, cuánto es hoy en tu moneda: nunca promete ese cambio para un pago futuro.",
+        forms: ["precio en dolares", "servicio en dolares", "como cobro un servicio en dolares", "cobrar un servicio en dolares"],
       },
       {
         q: "¿Sofi manda la lista de precios?",
@@ -1075,6 +1133,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         a: "Cada lista que se abre al lado y cada tabla (Por profesional, Comisiones, una respuesta de Argos) tiene «Descargar»: baja un archivo CSV que abre en Excel o Google Sheets, con las mismas filas y columnas, más el teléfono si puedes ver los datos de la persona.",
       },
       {
+        q: "¿Cómo se ven los dólares en Reportes?",
+        a: "Si la clínica cobra en otra moneda, lo que ya pasó (cobrado, gastos, lo que deja y comisiones) va en la moneda del negocio, con lo que valió el día que se cobró o se pagó: no se mueve aunque cambie el cambio de hoy. «Te deben» va por moneda, con un total aproximado al cambio de hoy, y quien debe en las dos cuenta como una persona. No incluye lo que ganes o pierdas al cambiar dólares: eso queda para tu contador.",
+        forms: ["dolares en reportes", "reportes con dos monedas", "cuanto vale lo cobrado en dolares"],
+      },
+      {
         q: "¿Qué es el resumen del lunes?",
         a: "Un correo que te llega cada lunes a las 8:00, hora de la clínica, con cuatro cifras de la semana anterior, lo que cambió y lo que recomienda Argos. Cada persona que ve Reportes lo prende para sí al final del Resumen; nace apagado. Si la semana no tuvo movimientos, no se envía, y para dejar de recibirlo basta el enlace del propio correo.",
       },
@@ -1113,6 +1176,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "igv",
       "iva",
       "cambiar nombre de la clínica",
+      "segunda moneda",
+      "cobrar en otra moneda",
     ],
     writePermission: "settings.write",
     faqs: [
@@ -1127,6 +1192,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         q: "¿Cómo elijo el diagnóstico de una atención?",
         a: "En tres pasos: lo que propone el odontograma (una caries en la 16 propone su código), los más usados en tu clínica o el buscador de toda la lista, que no distingue tildes ni mayúsculas y muestra primero lo odontológico. «Presuntivo» basta para cerrar. Si la persona ya tenía ese diagnóstico, el sistema lo anota solo como «Ya diagnosticado antes».",
+      },
+      {
+        q: "¿Cómo activo la otra moneda?",
+        a: "En Datos de la clínica, en «También cobro en» eliges la otra moneda (son dos como máximo) y en «Tipo de cambio de hoy» escribes a cuánto está, en tu moneda por 1 de la otra. Si ya hay algo en esa moneda, te lo dice antes de guardar. Desde ahí puedes poner precios, cobrar, comprar y registrar gastos en ella; tus reportes, metas y comisiones siguen en la «Moneda del negocio». Si no la activas, todo sigue igual. Para dejar de cobrar en ella, antes cobra lo que se debe en esa moneda, usa o devuelve lo que tengan a favor, retira el efectivo de su caja y pasa sus servicios a la moneda del negocio: Datos de la clínica te dice qué falta.",
+        forms: ["como activo otra moneda", "como activo los dolares", "quiero cobrar tambien en dolares", "activar segunda moneda", "activar dolares", "cobrar en dos monedas"],
       },
       {
         q: "¿Dónde configuro los impuestos?",

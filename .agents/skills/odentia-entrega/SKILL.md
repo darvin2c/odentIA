@@ -1,0 +1,181 @@
+---
+name: odentia-entrega
+description: Llevar un cambio de odentIA o latidIA de principio a fin, hasta que llegue a producción. Cubre discutirlo con cuatro voces (desarrollo, clínica, novato y auditor), hacer el lienzo si hace falta, simplificar, implementar, probar, revisar, abrir el PR, pedir el sí, unir y seguir el despliegue. Usar cuando se aprueba un lienzo («aprobado», «empieza», «implementa el lienzo»), cuando piden construir una función nueva o corregir un error reportado, aunque no mencionen PR ni merge. No usar para preguntas, ideas o estudios sin construir, ni para una etapa suelta como «corre las pruebas» o «revisa este diff».
+---
+
+# Entregar un cambio
+
+El recorrido de un cambio desde que se decide hasta que está en producción. Es un método: las reglas siguen en el `AGENTS.md` de cada área, que se lee antes de tocarla. Las rutas parten de la raíz del repositorio.
+
+Pedir esta skill autoriza crear la rama, hacer commits, subirla y abrir el PR. No autoriza unir: unir despliega a producción sin ningún otro paso, y por eso se pide aparte (etapa 10).
+
+Si el trabajo ya empezó, ubicar la etapa por el lienzo, la rama, el PR y el CI, y seguir desde ahí sin repetir lo hecho.
+
+## Cuándo se detiene
+
+Solo en estos casos. En el resto sigue sin pedir permiso y, al hablar con el usuario, dice qué cambia para la persona, no qué archivo tocó.
+
+- La mesa deja una decisión que depende del producto.
+- Hay un lienzo nuevo: espera el visto bueno antes de programar.
+- Un lienzo aprobado choca con una regla vigente o con los permisos, o se equivoca en algo de dinero o firmas: lo dice con el caso concreto y propone cómo seguir. Una diferencia menor se resuelve y se informa, sin detenerse, porque el usuario ya dijo «empieza».
+- Se va a gastar en una medición con modelo real: dice cuántas rondas y el costo aproximado.
+- Hay que tocar algo real a mano: producción, mensajes a personas, contenedores de otras sesiones.
+- Todo está listo para unir.
+
+Cada parada pide una sola cosa, con una recomendación, para que se pueda responder en una línea. El detalle de las voces queda en el acta. Lo que depende de una respuesta pendiente no se planea archivo por archivo hasta tenerla.
+
+## Por dónde entra cada cambio
+
+| Qué llega | Mesa | Lienzo |
+|---|---|---|
+| Lienzo aprobado | Las cuatro voces, para buscar lo que falta o choca; lo ya decidido no se reabre | Ya está |
+| Función nueva que cambia una pantalla o un recorrido | Las cuatro voces | Si hay más de una forma razonable |
+| Función pequeña dentro de un patrón que ya existe | Novato y auditor | No |
+| Error | Solo si el arreglo cambia lo que ve o hace la persona: las voces a las que afecte | No |
+| Cambio interno, sin efecto visible | Ninguna | No |
+
+Clínica entra siempre que el cambio toque datos o decisiones clínicas.
+
+Un error se explica antes de arreglarlo: qué le pasó a la persona, si es un error y de qué (falló el modelo o falló una regla nuestra), en palabras simples. Si la causa todavía no está comprobada, se dice así. Si afecta a una persona real, se dice primero quién debe avisarle; el agente no le escribe sin permiso. Después se arregla sin esperar respuesta, salvo que el arreglo sea una decisión de producto. Lo que ya está comprobado que es falso se corrige aunque la causa del caso siga en duda.
+
+## Las etapas
+
+Cada etapa aplica solo si el cambio la necesita; la que se salta se dice en el PR.
+
+### 1. La mesa
+
+Cuatro voces critican el cambio por separado, antes de dibujar o programar. Cómo se hace, en `references/mesa.md`. Sale un acta corta que se le muestra al usuario y alimenta las etapas siguientes.
+
+### 2. El lienzo
+
+Se publica como Artifact de tipo Design, con la skill `odentia-ux`: tableros numerados con el problema, el antes y el después con capturas reales de los dos productos, las decisiones numeradas con una recomendación, los casos y las fases. Cada promesa se cruza con `packages/auth/src/permissions.ts` y con el servicio que la haría. Si se puede, se prueba la propuesta en la app y se deshace.
+
+Espera el visto bueno. Si aprueba solo algunas decisiones, se construyen esas y las demás quedan como pendientes.
+
+### 3. Simplificar y dividir
+
+Escribir el plan y pasar cada elemento por dos preguntas: qué problema real resuelve y por qué no basta lo que ya hay. Lo que no responda se quita, y lo que repite otra cosa también.
+
+Preferir lo mínimo que reutiliza lo existente. Nada obligatorio que trabe firmar, atender o cobrar: lo opcional va como aviso. Lo legal no frena el diseño; queda anotado como pendiente.
+
+Lo que se encontró de paso y nadie pidió queda como pendiente, o como una entrega aparte con su motivo; no se mezcla con lo pedido.
+
+Dividir en entregas que valgan solas, cada una con su PR. Lo que toca dinero o firmas va en su propio PR, para revisarlo y revertirlo aparte. Una entrega a la vez: la siguiente empieza cuando la anterior está en producción. Quitar una columna o tabla que el código lee son dos entregas: primero el código y, ya desplegado, la migración, porque `migrate` corre antes de levantar la API y el worker y la imagen anterior se quedaría sin poder leer.
+
+### 4. Implementar
+
+Rama nueva desde `origin/main`, con `git fetch` antes. Commits en español: `feat(scope): descripción`.
+
+Toda corrección y función vale para los dos productos. Averiguar si la lógica vive en lo común (`packages/services`, `clinical`, `clinic-app`, `channels`) o tiene variante (`src/dental/`, `src/medical/`, `apps/dental-clinic`, `apps/medical-clinic`, `products.ts`), cubrir ambas y decir en el PR cómo quedó cada una. Si de verdad es de un solo producto, decir por qué.
+
+Lo que va en el mismo cambio:
+
+| Si cambia | Va junto |
+|---|---|
+| Una pantalla, un botón o un permiso | La guía de Ariadna (`packages/services/src/help-guide.ts` y su variante médica) |
+| Una pantalla o entidad nueva | La demo (`seed-demo.ts`, o `seed-common.ts` si sirve a los dos) |
+| Una composición compartida | Su story |
+| Tablas o reglas de la base | `pnpm db:generate` o una migración nueva, con su `GRANT` y RLS (`packages/db/AGENTS.md`) |
+| Una variable de entorno | `turbo.json`, y su valor de producción en «Al desplegar» del PR |
+| Una decisión transversal con alternativas reales | Un ADR breve (`docs/decisions/README.md`) |
+| Una regla nueva que ya rige | El `AGENTS.md` del área |
+
+Los textos que ve la gente no nombran ADR, issues ni «decisión N»; eso va en comentarios.
+
+### 5. Probar
+
+- Un error se reproduce primero con una prueba que falla sin el arreglo.
+- Tipos y pruebas de los paquetes tocados: `pnpm --filter @odentia/<paquete> typecheck|test`.
+- Si cambió una pantalla de `clinic-app` o de una app, también `pnpm --filter @odentia/ui-patterns test`. El CI del PR prueba todo; si `main` no avanzó desde esa prueba, al unir despliega sin repetirla, y si avanzó, prueba todo otra vez.
+- Los recorridos afectados: `pnpm e2e <specs> --workers=2`.
+
+La batería completa la corre el CI sin usar este equipo. Antes de una larga aquí, mirar cuántos contenedores de prueba quedan y no tener `pnpm dev` encendido. Prerrequisitos por plataforma: `docs/development.md`.
+
+Lo que no corrió no pasó. Anotar lo ejecutado para el PR.
+
+### 6. Revisar con ojos nuevos
+
+Quien escribió el código no ve lo que dio por hecho.
+
+- `simplify` sobre el cambio.
+- `code-review` en nivel `high`, o un subagente nuevo que reciba el diff sin tus conclusiones.
+- `security-review` si toca permisos, RLS, tokens, enlaces públicos o archivos subidos.
+
+Corregir lo real y repetir las pruebas de lo que cambió. Lo que se decide no corregir va al PR con su motivo.
+
+### 7. La pantalla real y la segunda mesa
+
+Aplica si cambió algo que una persona ve. Con `pnpm dev`, seguir «Implementar y comprobar» de `odentia-ux`: entrada, acción, respuesta y recuperación; escritorio y 390 px; teclado; rechazo del servidor si toca permisos; los dos productos. Guardar capturas.
+
+Con esas capturas vuelve la mesa: en el papel todo parece fácil, y lo que se quitó puede haber vuelto. Corregir lo que traba y repetir las pruebas de lo que cambió.
+
+Si no se pudo abrir la pantalla, se dice como límite en el PR. Una prueba automática no la reemplaza.
+
+### 8. Medir a los agentes
+
+Aplica si cambia lo que un agente lee o puede hacer: prompt, herramientas, camino o modelo. Se mide al final, sobre el código ya revisado, porque cuesta y cualquier cambio posterior lo invalida. Si solo cambia cuándo corre o algo a su alrededor, se juzga por sus pruebas y el PR explica por qué.
+
+- Sofi: auditoría al azar con `packages/agent/src/auditoria-masiva.ts`, con los mismos casos contra `main` y en los dos productos, y las dos versiones calificadas por un solo juez.
+- Argos, Clío, el modelo de decisión y Ariadna: el `eval:*` o banco que nombra la regla en `packages/agent/AGENTS.md` o `packages/services/AGENTS.md`.
+- Antes de gastar, comprobar que la medición puede ver este error. El juez de la auditoría, por ejemplo, no juzga horarios: un error de horarios se mide con casos propios, y la auditoría solo dice si el cambio hace daño.
+- Comprobar que el camino cambiado corrió, con una línea que lo cuente. Si no corrió, la medición no dice nada.
+
+El sí se pide con la medición completa y a la vista. Si no mejora, no se recomienda unir, aunque la diferencia parezca ruido: se quita lo que actúa en las conversaciones normales sin mejorarlas, o se mide de nuevo. Lo que solo actúa en casos que la auditoría no trae, como las alarmas, se juzga en sus propios casos. Un requisito del usuario o el arreglo de algo falso se queda si no muestra un daño mayor que el ruido de una ronda.
+
+### 9. El PR
+
+Título: `tipo(scope): lo que cambia para la persona`. Cuerpo en palabras simples, con estas secciones:
+
+```markdown
+## El problema
+## Qué cambia
+## Lo que no cambia
+## Decisiones y límites que quedan
+## Cómo se probó
+## Al desplegar
+```
+
+«Cómo se probó» dice lo ejecutado y lo que no. Nada simulado cuenta como prueba de que funciona con un proveedor real, ni la mesa como prueba de que es fácil. «Al desplegar» dice la migración y todo paso a mano. El PR enlaza el lienzo y dice qué fase es.
+
+Esperar el CI con `gh pr checks --watch`. Si falla, leer el registro y corregir la causa.
+
+Antes de pedir el sí, ponerse al día: varias sesiones unen a la vez. Con `git fetch`, si `main` avanzó, `git merge origin/main`, sin reescribir commits. Si chocan los números de ADR o de migración, tomar el siguiente libre y, en la migración, volver a generarla sobre lo de `main`, con un `when` mayor en el journal. Esperar el CI otra vez.
+
+### 10. Pedir el sí y unir
+
+Con todo verde, enviar este resumen y esperar:
+
+```markdown
+**Listo para unir: <qué cambia, en una frase>**
+
+- **Para quien lo usa:** <qué notará recepción, el clínico, caja o el paciente>
+- **Se quitó:** <lo que la mesa o la simplificación sacaron>
+- **Se comprobó:** <pruebas, recorrido en pantalla, CI>
+- **No se comprobó:** <lo que falta, sin suavizar>
+- **Agentes:** <resultado frente a la versión anterior, o por qué no aplica>
+- **Al desplegar:** <migración y pasos a mano, o nada>
+
+Al unir se despliega a producción. ¿Lo uno?
+```
+
+Si al pedir el trabajo dijo «únelo al terminar», ese es el sí, y el resumen se envía igual. No vale con algo en rojo ni con una medición que falta o no mejoró.
+
+Unir con `gh pr merge <número> --squash`.
+
+### 11. Seguir hasta producción
+
+Unir no es llegar. `main` corre todo y recién después despliega. Seguir la corrida con `gh run list --branch main --limit 5` y `gh run watch <id>`.
+
+- `deploy` en `skipped`: falló algo en `main` y no llegó nada. Decirlo enseguida en palabras simples y corregirlo con otro PR, desde la etapa 4.
+- `deploy` en `success` no basta: si `main` avanzó, la corrida termina bien sin desplegar y lo hace la del commit más nuevo. Mirar que el paso «Desplegar el commit verificado» haya corrido en un commit que incluya el tuyo.
+
+Después, los pasos a mano de «Al desplegar». La semilla no corre en producción: los precios y lo incluido se cambian en los cuatro planes, y las variables de entorno se ponen allá. Pedirlo o confirmarlo antes de tocar producción.
+
+Comprobar por fuera lo que se pueda, solo leyendo: `odentia32.com`, `latidia72.com` o su API pública. Lo que no se pueda mirar desde aquí se dice.
+
+### 12. Cerrar
+
+- Apagar `pnpm dev`, borrar los contenedores propios y devolver lo que las herramientas reescriben sin cambiarlo, como `apps/*/src/routeTree.gen.ts`. Los contenedores de otras sesiones no se tocan.
+- Si quedan fases, pasar a la siguiente: el lienzo aprobado ya la cubre, y su sí para unir se pide aparte.
+- Guardar en la memoria lo que no sale del código: decisiones pendientes y en qué va el lienzo.
+- Informar: si está en producción, qué cambia para la persona, qué no se comprobó y qué quedó pendiente.

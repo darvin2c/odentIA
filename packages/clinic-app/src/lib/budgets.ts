@@ -139,15 +139,48 @@ export interface BudgetOption {
   /** `pendiente`, `elegida` o `no_elegida`. */
   decision: string
   lineCount: number
+  /** Un total por moneda. Con dos, las cuatro cifras de abajo son nulas: entre monedas no se suma. */
+  totals?: BudgetCurrencyTotal[]
   totalCents: number | null
   acceptedCents: number | null
   tariffTotalCents: number | null
   discountCents: number | null
 }
 
+/** El total de una moneda, del servidor: entre monedas nunca se suma ni se convierte. */
+export interface BudgetCurrencyTotal {
+  currency: string
+  totalCents: number | null
+  acceptedCents: number | null
+  tariffTotalCents: number | null
+  discountCents: number | null
+}
+
+/** Los totales de una opción o de un presupuesto: siempre al menos uno, el de su moneda. */
+export function totalsOf(
+  of: Pick<
+    BudgetOption,
+    "totals" | "totalCents" | "acceptedCents" | "tariffTotalCents" | "discountCents"
+  >,
+  currency: string,
+): BudgetCurrencyTotal[] {
+  if (of.totals?.length) return of.totals
+  return [
+    {
+      currency,
+      totalCents: of.totalCents,
+      acceptedCents: of.acceptedCents,
+      tariffTotalCents: of.tariffTotalCents,
+      discountCents: of.discountCents,
+    },
+  ]
+}
+
 export interface BudgetWithTotals extends Budget {
   items: BudgetLine[]
   options: BudgetOption[]
+  /** Un total por moneda de la opción que vale. Con dos, las cuatro cifras de abajo son nulas. */
+  totals?: BudgetCurrencyTotal[]
   /** Total de la opción que vale (la elegida o, mientras decide, la recomendada). */
   totalCents: number | null
   acceptedCents: number | null
@@ -549,6 +582,7 @@ export interface PlanNextStep {
     planItemIds?: string[]
     serviceId?: string | null
     followUpId?: string
+    appointmentId?: string
   } | null
 }
 

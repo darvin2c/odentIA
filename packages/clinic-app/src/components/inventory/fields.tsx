@@ -5,7 +5,7 @@
  * un proveedor. Todas van dentro de un `Field` de la pantalla, que pone la
  * etiqueta, la ayuda y el error.
  */
-import { INVENTORY_UNITS } from "@odentia/clinical"
+import { currencySymbol, INVENTORY_UNITS } from "@odentia/clinical"
 import {
   cn,
   Combobox,
@@ -20,7 +20,8 @@ import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "@o
 import { normalizeSearchText } from "@odentia/ui-patterns"
 import * as React from "react"
 import { ChoiceSelect } from "../ui/choice-select"
-import { currencySymbol, formatWhole, parseWhole, TONE_CLASS, type Tone } from "../../lib/inventory"
+import { activeOrgLocale } from "../../lib/locale"
+import { formatWhole, parseWhole, TONE_CLASS, type Tone } from "../../lib/inventory"
 
 /** Un estado con palabras y su color: nunca solo el color. */
 export function Chip({ tone, children, className }: { tone: Tone; children: React.ReactNode; className?: string }) {
@@ -130,7 +131,7 @@ export function MoneyInput({
   return (
     <InputGroup className={cn("h-11 sm:h-9", className)} data-disabled={disabled || undefined}>
       <InputGroupAddon align="inline-start">
-        <InputGroupText>{currencySymbol(currency)}</InputGroupText>
+        <InputGroupText>{currencySymbol(currency, activeOrgLocale() ?? "es")}</InputGroupText>
       </InputGroupAddon>
       <InputGroupInput
         id={id}

@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { type ReactNode, useEffect, useState } from "react"
 import { useReceptionName } from "../../lib/agent-names"
+import { professionalSaid } from "../../lib/agenda"
 import { invalidateAgentWork } from "../../lib/agent-work"
 import { ApiError, apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
@@ -17,7 +18,8 @@ import { isAmbiguousMutationError, QueryErrorState } from "../../lib/query-error
 import { HandoffUrgency } from "../agent/handoff-badges"
 import { openBookingAnywhere } from "../agenda/schedule-host"
 import { type PassableTopic, PassTopicDialog } from "../inbox/pass-topic-dialog"
-import { WriteToPersonDialog } from "../write-to-person"
+import { InboxApprovedMessages } from "../integrations/whatsapp/inbox-approved-messages"
+import { useWriteToPerson, WriteToPersonDialog } from "../write-to-person"
 
 interface PanelAppointment {
   startsAt: string
@@ -49,7 +51,18 @@ interface PersonPanelData {
   thread: Array<{ from: "person" | "agent" | "team"; text: string; at: string }>
   known: Array<{ label: string | null; text: string; origin: "caso" | "persona" | "ficha"; notedBy: "agente" | "equipo" | null }> | null
   proposals: Array<{ label: string; summary: string; status: string; at: string }>
-  reply: { allowed: boolean; closedChannel: boolean; windowOpen: boolean; holdOn: string | null }
+  reply: {
+    allowed: boolean
+    closedChannel: boolean
+    windowOpen: boolean
+    holdOn: string | null
+    approvedOnly: boolean
+    canHold: boolean
+    hasWhatsapp: boolean
+    readOnly: "bloqueada" | "archivada" | null
+  }
+  lastInboundAt: string | null
+  otherTopics: Array<{ id: string; kind: string; assigneeUserId: string | null }>
   appointments: { next: PanelAppointment | null; last: PanelAppointment | null } | null
   allergies: string[] | null
   lastEncounter: { startedAt: string; professionalName: string | null } | null
@@ -98,6 +111,8 @@ export function PersonPanel({
   target,
   also,
   next,
+  fromRecord = false,
+  onSwitchConversation,
   onClose,
   onChanged,
 }: {
@@ -107,6 +122,10 @@ export function PersonPanel({
   also?: ReactNode
   /** «Siguiente: Rosa Quispe», después de enviar. */
   next?: { name: string; open: () => void } | null
+  /** Abierto desde su ficha: se le empieza a hablar y lo que ya está detrás no se repite. */
+  fromRecord?: boolean
+  /** «Escribirle por WhatsApp»: el panel sigue con esa conversación. */
+  onSwitchConversation?: (conversationId: string) => void
   onClose: () => void
   onChanged?: () => void
 }) {
@@ -117,12 +136,17 @@ export function PersonPanel({
   const memberName = useMemberName()
   const myUserId = useMyUserId()
   const canWrite = usePermission("conversations.write")
+  const canReadThread = usePermission("conversations.read")
   const canBook = usePermission("appointments.write")
-  const key = ["person-panel", conversationId, target?.topicId ?? null]
+  const key = ["person-panel", conversationId, target?.topicId ?? null, fromRecord]
   const query = useQuery({
     queryKey: key,
     queryFn: () => {
-      const params = new URLSearchParams({ conversationId: conversationId as string, ...(target?.topicId ? { topicId: target.topicId } : {}) })
+      const params = new URLSearchParams({
+        conversationId: conversationId as string,
+        ...(target?.topicId ? { topicId: target.topicId } : {}),
+        ...(fromRecord ? { fromRecord: "1" } : {}),
+      })
       return apiFetch<{ data: PersonPanelData }>(`/api/workspace/person-panel?${params}`)
     },
     enabled: conversationId !== null,
@@ -142,6 +166,9 @@ export function PersonPanel({
   const [taught, setTaught] = useState(false)
   const [passing, setPassing] = useState(false)
   const [writing, setWriting] = useState(false)
+  /** «Escribir sin responderlo»: un mensaje normal, con el tema todavía abierto. */
+  const [plain, setPlain] = useState(false)
+  const toWhatsapp = useWriteToPerson()
 
   // Cada persona con lo suyo: al cambiar de fila, su borrador y nada de la anterior.
   useEffect(() => {
@@ -154,6 +181,7 @@ export function PersonPanel({
     setSent(null)
     setReopened(false)
     setTaught(false)
+    setPlain(false)
   }, [conversationId, target?.topicId, myUserId])
 
   const settled = () => {
@@ -166,12 +194,13 @@ export function PersonPanel({
 
   const topic = panel?.topic && panel.topic.status !== "resuelta" ? panel.topic : null
   const heldByOther = topic?.assigneeUserId && topic.assigneeUserId !== myUserId ? topic.assigneeUserId : null
+  const replying = plain ? null : topic
 
   const send = useMutation({
     retry: false,
     mutationFn: (body: string) =>
-      topic
-        ? apiFetch<{ data: { held?: boolean; topicResolved?: boolean; topicId?: string | null } }>(`/api/workspace/topics/${topic.id}/reply`, {
+      replying
+        ? apiFetch<{ data: { held?: boolean; topicResolved?: boolean; topicId?: string | null } }>(`/api/workspace/topics/${replying.id}/reply`, {
             method: "POST",
             body: JSON.stringify({ text: body, ...(takeOver ? { takeOver: true } : {}) }),
           })
@@ -185,7 +214,7 @@ export function PersonPanel({
       setText("")
       setProblem(null)
       setTakenBy(null)
-      setSent({ text: body, held: result.data.held === true, resolved: result.data.topicResolved === true, topicId: topic?.id ?? null })
+      setSent({ text: body, held: result.data.held === true, resolved: result.data.topicResolved === true, topicId: replying?.id ?? null })
       settled()
     },
     onError: (error) => {
@@ -266,9 +295,22 @@ export function PersonPanel({
     ...(panel && panel.thread.length > 0 ? [{ key: "conversacion", label: "Ver la conversación", onSelect: () => void navigate({ to: "/inbox", search: { conversation: conversationId } }) }] : []),
   ]
 
+  // Desde su ficha, sin algo que responder: pasadas las 24 horas de WhatsApp solo cabe un mensaje aprobado.
+  const approvedOnly = Boolean(panel?.reply.approvedOnly && panel.reply.allowed && (!replying || !panel.reply.canHold))
+  const canType = Boolean(panel?.reply.allowed && !panel.reply.closedChannel && !approvedOnly && (!heldByOther || takeOver) && !unknownDelivery)
+  // Desde su ficha, horarios y precios solo si se pueden escribir: sin caja no llevan a nada.
+  const showSuggestions = !fromRecord || canType
+  const otherTopics = panel?.otherTopics ?? []
+  const otherTopicsLine =
+    otherTopics.length > 1
+      ? `Tiene ${otherTopics.length} temas abiertos. Lo que escribas aquí no responde ninguno: para responderlos, abre toda la conversación.`
+      : otherTopics[0]?.assigneeUserId
+        ? `${otherTopics[0].kind === "clinico" ? "La duda clínica" : otherTopics[0].kind === "pago" ? "El pago" : "Su tema"} sigue con ${professionalSaid(memberName(otherTopics[0].assigneeUserId), { full: true })}. Lo que escribas aquí no responde ese tema.`
+        : null
+
   const replyBox = panel && !sent ? (
     <div className="flex w-full flex-col gap-2">
-      {panel.suggestions.slots.length > 0 ? (
+      {showSuggestions && panel.suggestions.slots.length > 0 ? (
         <div className="flex flex-col gap-1.5">
           <p className="text-[13px] text-muted-foreground">
             <span className="font-bold text-foreground">Horarios libres{panel.suggestions.professionalName ? ` con ${panel.suggestions.professionalName}` : ""}.</span> <span className="max-sm:sr-only">Tocar uno lo escribe; no lo aparta.</span>
@@ -289,8 +331,8 @@ export function PersonPanel({
           </div>
         </div>
       ) : null}
-      {panel.suggestions.prices.length === 0 && panel.suggestions.noPriceFor ? <p className="text-[13px] text-muted-foreground">{panel.suggestions.noPriceFor}</p> : null}
-      {panel.suggestions.prices.length > 0 ? (
+      {showSuggestions && panel.suggestions.prices.length === 0 && panel.suggestions.noPriceFor ? <p className="text-[13px] text-muted-foreground">{panel.suggestions.noPriceFor}</p> : null}
+      {showSuggestions && panel.suggestions.prices.length > 0 ? (
         <div className="flex flex-col gap-1.5">
           <p className="text-[13px] text-muted-foreground">
             <span className="font-bold text-foreground">Tu lista de precios.</span> Tocar uno lo escribe.
@@ -337,7 +379,56 @@ export function PersonPanel({
           </Link>
         </div>
       ) : null}
-      {panel.reply.closedChannel ? (
+      {fromRecord && replying && !heldByOther && !approvedOnly ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl bg-muted/60 p-3 text-sm">
+          <p className="min-w-0 flex-[1_1_12rem]">Respondes a: «{replying.quote ?? replying.asks ?? replying.reason}»</p>
+          <Button type="button" size="sm" variant="ghost" className="min-h-11 sm:min-h-8" onClick={() => setPlain(true)}>
+            {panel.reply.approvedOnly ? "Usar un mensaje aprobado" : "Escribir sin responderlo"}
+          </Button>
+        </div>
+      ) : null}
+      {/* Lo escrito sigue guardado: volver a su pregunta lo trae de nuevo. */}
+      {fromRecord && plain && topic && !heldByOther ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl bg-muted/60 p-3 text-sm">
+          <p className="min-w-0 flex-[1_1_12rem]">Sin responder: «{topic.quote ?? topic.asks ?? topic.reason}»</p>
+          <Button type="button" size="sm" variant="ghost" className="min-h-11 sm:min-h-8" onClick={() => setPlain(false)}>
+            Responder su pregunta
+          </Button>
+        </div>
+      ) : null}
+      {otherTopicsLine && (canType || approvedOnly) ? <p className="text-sm text-muted-foreground">{otherTopicsLine}</p> : null}
+      {panel.reply.readOnly ? (
+        <p role="status" className="rounded-xl bg-muted/60 p-3 text-sm">
+          {panel.reply.readOnly === "bloqueada"
+            ? "Esta persona está bloqueada: no se le puede escribir. Se desbloquea desde su página."
+            : "Esta persona está archivada: para escribirle, recupérala desde su página."}
+        </p>
+      ) : panel.reply.closedChannel && fromRecord ? (
+        <div className="flex flex-col gap-1.5 rounded-xl bg-muted/60 p-3 text-sm">
+          <p>
+            Pasaron 24 horas desde que {first} escribió por {channel ?? "ese canal"}. {channel ?? "Ese canal"} no deja escribirle hasta que vuelva a escribir.
+          </p>
+          {panel.reply.hasWhatsapp && canWrite ? (
+            <Button
+              type="button"
+              size="sm"
+              className="min-h-11 self-start sm:min-h-8"
+              disabled={toWhatsapp.isPending}
+              onClick={() =>
+                toWhatsapp.mutate(
+                  { contactId: panel.contactId, onlyWhatsapp: true },
+                  {
+                    onSuccess: (result) => onSwitchConversation?.(result.conversationId),
+                    onError: (error) => setProblem(submitErrorMessage(error)),
+                  },
+                )
+              }
+            >
+              Escribirle por WhatsApp
+            </Button>
+          ) : null}
+        </div>
+      ) : panel.reply.closedChannel ? (
         <div className="flex flex-col gap-1.5 rounded-xl bg-muted/60 p-3 text-sm">
           <p>{channel ?? "Ese canal"} ya no deja responderle. {canWrite ? "Puedes escribirle por otro canal." : "Lo responde recepción en la Bandeja."}</p>
           {canWrite ? (
@@ -346,7 +437,7 @@ export function PersonPanel({
             </Button>
           ) : null}
         </div>
-      ) : panel.reply.allowed && (!heldByOther || takeOver) && !unknownDelivery ? (
+      ) : canType ? (
         <Field data-invalid={fieldError ? true : undefined}>
           <FieldLabel htmlFor="panel-respuesta">Tu respuesta para {first}</FieldLabel>
           <Textarea
@@ -368,9 +459,9 @@ export function PersonPanel({
           {fieldError ? <FieldError>{fieldError}</FieldError> : null}
           <FieldDescription className="text-xs">
             {panel.reply.windowOpen
-              ? `Se envía por ${channel ?? "su conversación"}${topic?.quote ? ", citando su pregunta" : ""}.`
+              ? `Se envía por ${channel ?? "su conversación"}${replying?.quote ? ", citando su pregunta" : ""}.`
               : "Queda por entregar: le llega cuando toque «Ver respuesta»."}{" "}
-            {receptionName} sigue con lo demás.{topic && topic.assigneeUserId !== myUserId ? " Al enviar, este tema queda contigo." : ""}
+            {receptionName} sigue con lo demás.{replying && replying.assigneeUserId !== myUserId ? " Al enviar, este tema queda contigo." : ""}
           </FieldDescription>
         </Field>
       ) : null}
@@ -381,7 +472,7 @@ export function PersonPanel({
       ) : null}
       <div className="flex items-center justify-end gap-2">
         {menu.length > 0 ? <RowActions label={`Más sobre ${name}`} items={menu} /> : null}
-        {panel.reply.allowed && !panel.reply.closedChannel && (!heldByOther || takeOver) && !unknownDelivery ? (
+        {canType ? (
           <Button type="button" className="min-h-11 sm:min-h-9" disabled={send.isPending} onClick={submit}>
             {send.isPending ? "Enviando…" : "Enviar"}
           </Button>
@@ -469,7 +560,7 @@ export function PersonPanel({
                     <p className={cn("rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap", item.from === "person" ? "bg-primary-soft" : "bg-muted")}>{item.text}</p>
                   </div>
                 ))}
-                {canWrite ? (
+                {canWrite || (fromRecord && canReadThread) ? (
                   <Link to="/inbox" search={{ conversation: conversationId }} className="inline-flex min-h-11 items-center self-start text-sm font-semibold text-primary hover:underline sm:min-h-8">
                     Ver toda la conversación
                   </Link>
@@ -489,7 +580,8 @@ export function PersonPanel({
               </div>
             ) : null}
 
-            <FactList panel={panel} canBook={canBook} name={name} />
+            {/* Desde su ficha, sus citas, alergias y deuda ya están detrás. */}
+            {fromRecord ? null : <FactList panel={panel} canBook={canBook} name={name} />}
 
             {panel.known && panel.known.length > 0 ? (
               <DetailSection title="Lo que ya se sabe">
@@ -519,6 +611,10 @@ export function PersonPanel({
             ) : null}
 
             {also}
+
+            {approvedOnly && !sent ? (
+              <InboxApprovedMessages conversationId={conversationId} contactName={name} lastInboundAt={panel.lastInboundAt} draft="" onSent={settled} />
+            ) : null}
           </div>
         ) : null}
       </DetailDrawer>

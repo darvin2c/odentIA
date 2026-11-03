@@ -17,6 +17,7 @@ import {
   medicalLeaveEnd,
   medicalLeaveWords,
   parseVitals,
+  vitalsErrors,
   MAX_TAGS,
   normalizeTags,
 } from "./index.js"
@@ -86,6 +87,27 @@ describe("signos vitales", () => {
     expect(bodyMassIndex({ peso: 62, talla: 160 })).toBe(24.2)
     expect(bodyMassIndex({ peso: 62 })).toBeNull()
     expect(formatVitals({ glucosaCapilar: 110 })).toBe("Glucosa 110 mg/dL")
+  })
+
+  it("dice el error junto al signo que hay que corregir; la presión completa no es un error", () => {
+    // Así llegan desde el formulario: como texto.
+    expect(vitalsErrors({ presionSistolica: "120", presionDiastolica: "80", frecuenciaCardiaca: "78" })).toEqual({})
+    expect(vitalsErrors({ presionSistolica: "120", presionDiastolica: "" })).toEqual({
+      presionDiastolica: "Registra la presión arterial completa: sistólica y diastólica",
+    })
+    expect(vitalsErrors({ presionSistolica: "", presionDiastolica: "80" })).toEqual({
+      presionSistolica: "Registra la presión arterial completa: sistólica y diastólica",
+    })
+    expect(vitalsErrors({ presionSistolica: "80", presionDiastolica: "120" })).toEqual({
+      presionSistolica: "La presión sistólica debe ser mayor que la diastólica",
+    })
+    expect(vitalsErrors({ temperatura: "50", presionSistolica: "120", presionDiastolica: "80" })).toEqual({
+      temperatura: "Temperatura fuera de rango (30–45 °C)",
+    })
+    expect(vitalsErrors({ glucosaCapilar: "110" }, CORE_VITAL_KEYS)).toEqual({
+      glucosaCapilar: "Signo vital desconocido: glucosaCapilar",
+    })
+    expect(vitalsErrors(null)).toEqual({})
   })
 })
 

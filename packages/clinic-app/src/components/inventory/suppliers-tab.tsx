@@ -14,7 +14,7 @@ import {
   formatWhole,
   inventoryErrorMessage,
   inventoryKeys,
-  moneyText,
+  supplierBalanceWords,
   setSupplierActive,
   supplierDocText,
   type SupplierItem,
@@ -97,18 +97,19 @@ export function SuppliersTab() {
         meta: { view: { primary: true } },
         cell: ({ row }) => {
           const item = row.original
-          const currency = item.currency
-          if (!currency) return null
-          if ((item.dueCents ?? 0) > 0)
+          if (!item.currency) return null
+          const due = supplierBalanceWords(item, "dueCents")
+          if (due)
             return (
               <button type="button" className="rounded-full" onClick={() => open.ordersOf(item.id, "por_pagar")} aria-label={`Ver las compras por pagar de ${item.name}`}>
-                <Chip tone="warn">Por pagar {moneyText(item.dueCents ?? 0, currency)}</Chip>
+                <Chip tone="warn">Por pagar {due}</Chip>
               </button>
             )
-          if ((item.creditCents ?? 0) > 0)
+          const credit = supplierBalanceWords(item, "creditCents")
+          if (credit)
             return (
               <button type="button" className="rounded-full" onClick={() => open.ordersOf(item.id)} aria-label={`Ver las compras de ${item.name}`}>
-                <Chip tone="soft">A favor {moneyText(item.creditCents ?? 0, currency)}</Chip>
+                <Chip tone="soft">A favor {credit}</Chip>
               </button>
             )
           return item.orders > 0 ? (

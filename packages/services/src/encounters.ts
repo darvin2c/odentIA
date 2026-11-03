@@ -1,8 +1,10 @@
+import { parseVitals, sumByCurrency, vitalsErrors } from "@odentia/clinical"
 import {
-  parseVitals,
-  vitalsErrors,
-} from "@odentia/clinical"
-import { type AssembledBudget, assembleEncounterBudget, readBillingModes, removeBudgetItems } from "./budgets.js"
+  type AssembledBudget,
+  assembleEncounterBudget,
+  readBillingModes,
+  removeBudgetItems,
+} from "./budgets.js"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import {
@@ -1410,8 +1412,16 @@ export interface FinalizeEncounterBase {
   /** Cargos generados automáticamente desde los actos con servicio. */
   charges: Array<typeof patientCharge.$inferSelect>
   skippedCharges: SkippedCharge[]
-  /** Resumen para el diálogo de cierre y caja (con moneda del primer cargo). */
-  billing: { chargedCents: number; currency: string | null; lines: FinalizeBillingLine[] }
+  /**
+   * Resumen para el diálogo de cierre y caja: un total por moneda. `chargedCents` y
+   * `currency` son los de la única moneda; con dos, `chargedCents` es nulo.
+   */
+  billing: {
+    chargedCents: number | null
+    currency: string | null
+    totals: Array<{ currency: string; totalCents: number }>
+    lines: FinalizeBillingLine[]
+  }
   /**
    * El presupuesto que quedó armado con lo indicado en esta atención (decisión
    * 12): el cierre pregunta «¿Enviárselo ahora?». Nulo si no entró nada.
@@ -1853,6 +1863,14 @@ export async function finalizeEncounter(
     })
   }
   const chargedCents = billingLines.reduce((sum, line) => sum + (line.amountCents ?? 0), 0)
+  // Entre monedas no se suma: cada una con su total.
+  const chargedTotals = sumByCurrency(
+    billingLines.flatMap((line) =>
+      line.currency == null || line.amountCents == null
+        ? []
+        : [{ currency: line.currency, cents: line.amountCents }],
+    ),
+  ).map(({ currency, cents }) => ({ currency, totalCents: cents }))
   // Los materiales de sus servicios salen solos de la sede de la atención
   // (ADR 0067): lo que no alcanza queda como faltante y nunca bloquea el cierre.
   const materials = await discountEncounterMaterials(tx, orgId, actorUserId, row)
@@ -1876,8 +1894,9 @@ export async function finalizeEncounter(
     budget,
     materials,
     billing: {
-      chargedCents,
+      chargedCents: chargedTotals.length > 1 ? null : chargedCents,
       currency: charges[0]?.currency ?? procedures[0]?.currency ?? null,
+      totals: chargedTotals,
       lines: billingLines,
     },
     ...product,

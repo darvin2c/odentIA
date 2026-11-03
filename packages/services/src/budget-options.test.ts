@@ -40,6 +40,7 @@ import { createEncounter, finalizeEncounter } from "./encounters.js"
 import { createOpportunity } from "./opportunities.js"
 import { type Can, getPlanNextStep, planNextStepsOf } from "./plan-next.js"
 import { addPlanItem } from "./plan.js"
+import { getTreatmentCoordination } from "./treatment-coordination.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 import type { Storage } from "./storage.js"
 import { getWorkspaceHome, type WorkspaceAccess } from "./workspace.js"
@@ -320,6 +321,64 @@ it("«Agendar» une lo aceptado a la cita, su atención lo trae y «Qué sigue»
     .from(encounterPlanItem)
     .where(and(eq(encounterPlanItem.encounterId, attention.id), eq(encounterPlanItem.planItemId, a.id)))
   expect(brought).toHaveLength(1)
+})
+
+it("la cita que no dice qué trae une lo aceptado sin cita de su servicio; la lista de «Nueva cita» manda, aunque venga vacía", async () => {
+  const { f, items } = await withItems(2)
+  const [a, b] = items as [(typeof items)[number], (typeof items)[number]]
+  await f.ready(f.encounter.id)
+  await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id, {}))
+  const draft = (await f.run((tx) => listBudgets(tx, "org_a", f.patient.id)))[0]!
+  await f.run((tx) => deliverBudget(tx, ...f.args, draft.id))
+  await f.run((tx) =>
+    decideBudget(tx, ...f.args, draft.id, {
+      decisions: [
+        { planItemId: a.id, decision: "aceptado" },
+        { planItemId: b.id, decision: "aceptado" },
+      ],
+    }),
+  )
+  const toSchedule = async () =>
+    (await f.run((tx) => getTreatmentCoordination(tx, "org_a", f.patient.id))).treatments.filter((row) => row.toSchedule).map((row) => row.id).sort()
+  expect(await toSchedule()).toEqual([a.id, b.id].sort())
+
+  const [site] = await ownerDb.insert(branch).values({ organizationId: "org_a", name: `Sede ${randomUUID()}` }).returning()
+  await ownerDb.insert(scheduleRoom).values([
+    { organizationId: "org_a", branchId: site!.id, name: "Unidad dental 1" },
+    { organizationId: "org_a", branchId: site!.id, name: "Unidad dental 2" },
+  ])
+  const startsAt = new Date(Date.now() + 3 * 24 * 3_600_000)
+  startsAt.setUTCMinutes(0, 0, 0)
+  const book = (planItemIds: string[] | undefined, hoursLater: number, status?: string) =>
+    f.run((tx) =>
+      createAppointment(tx, "org_a", f.actor, {
+        patientId: f.patient.id,
+        professionalUserId: f.actor,
+        branchId: site!.id,
+        serviceId: f.service.id,
+        startsAt: new Date(startsAt.getTime() + hoursLater * 3_600_000).toISOString(),
+        durationMin: 30,
+        outsideSchedule: true,
+        notice: false,
+        ...(status ? { status } : {}),
+        ...(planItemIds ? { planItemIds } : {}),
+      }),
+    )
+  const linked = async (id: string) =>
+    (await ownerDb.select().from(appointmentPlanItem).where(eq(appointmentPlanItem.appointmentId, id))).map((link) => link.planItemId).sort()
+
+  // Desmarcó todo en «Nueva cita»: se respeta y sigue faltando su cita.
+  expect(await linked((await book([], 0)).id)).toEqual([])
+  expect(await toSchedule()).toEqual([a.id, b.id].sort())
+  // Una cita que ya no va a ocurrir no se los lleva.
+  expect(await linked((await book(undefined, 1, "cancelada")).id)).toEqual([])
+  expect(await toSchedule()).toEqual([a.id, b.id].sort())
+  // Sofi o el enlace reservan con servicio y sin decir qué trae: se une lo aceptado de ese servicio.
+  expect(await linked((await book(undefined, 2)).id)).toEqual([a.id, b.id].sort())
+  expect(await toSchedule()).toEqual([])
+  expect((await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, all))).kind).not.toBe("agendar")
+  // Lo que ya tiene cita no pasa a la siguiente.
+  expect(await linked((await book(undefined, 3)).id)).toEqual([])
 })
 
 it("«Te espera»: el presupuesto armado que nadie envió sale al día siguiente a quien lo envía, y se va al enviarlo", async () => {

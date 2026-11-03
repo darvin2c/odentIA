@@ -28,7 +28,7 @@ function Fact({ label, width = "w-32" }: { label?: string; width?: string }) {
 /** `PlanNextCard`: la franja «Qué sigue». */
 export function PlanNextSkeleton() {
   return (
-    <section className="flex flex-wrap items-center gap-3 rounded-xl border border-primary/40 bg-primary/5 p-4">
+    <section className="elevated flex flex-wrap items-center gap-3 rounded-xl border bg-card p-4">
       <div className="flex min-w-0 flex-[1_1_14rem] flex-col gap-0.5">
         <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Qué sigue</span>
         <Line size="base" className="w-3/4" />
@@ -65,7 +65,7 @@ export function NotesListSkeleton() {
 }
 
 /**
- * `PersonSummary`: las cuatro tarjetas de quien lee la clínica, los datos, pendientes, notas y lo que recuerda.
+ * `PersonSummary`: las filas de quien lee la clínica, los datos, pendientes, notas y lo que recuerda.
  * `unknown`: quien lee la clínica abre a alguien que quizá aún no es paciente; arriba, sin títulos que luego se vayan.
  */
 export function PersonSummarySkeleton({
@@ -97,7 +97,7 @@ export function PersonSummarySkeleton({
           ))}
         </section>
       ) : clinical ? (
-        <div className="grid min-w-0 gap-4 md:grid-cols-2">
+        <>
           <SummaryCardShape title="Alergias y alertas" action={<WaitingButton>Antecedentes</WaitingButton>}>
             <ul className="flex flex-col gap-2">
               <li className="rounded-lg border border-dashed px-3 py-2">
@@ -106,13 +106,15 @@ export function PersonSummarySkeleton({
             </ul>
           </SummaryCardShape>
           <PlanNextSkeleton />
-          <SummaryCardShape title="Última atención">
-            <LastVisitLinesSkeleton />
-          </SummaryCardShape>
-          <SummaryCardShape title="Próxima cita">
-            <LastVisitLinesSkeleton />
-          </SummaryCardShape>
-        </div>
+          <div className="grid min-w-0 gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(100%,20rem),1fr))]">
+            <SummaryCardShape title="Última atención">
+              <LastVisitLinesSkeleton />
+            </SummaryCardShape>
+            <SummaryCardShape title="Próxima cita">
+              <LastVisitLinesSkeleton />
+            </SummaryCardShape>
+          </div>
+        </>
       ) : null}
       {showFacts ? (
         <section className="elevated rounded-xl border bg-card p-6">
@@ -120,35 +122,30 @@ export function PersonSummarySkeleton({
             {clinical ? null : <Fact label="Teléfono" />}
             {!clinical && patient !== false && (can("clinical.alerts") || can("clinical.read")) ? <Fact label={patient ? "Alergias" : undefined} /> : null}
             {!clinical && can("appointments.read") ? <Fact label="Próxima cita" width="w-48" /> : null}
-            {finance && patient !== false ? <Fact label={patient ? "Saldo" : undefined} /> : null}
+            {/* «Saldo» solo se dice sin deuda (la deuda va en Pendientes): sin nombre hasta saberlo. */}
+            {finance && patient !== false ? <Fact /> : null}
             {chats ? <Fact label="Conversación" width="w-44" /> : null}
             {crm ? <Fact label="Oportunidad" /> : null}
           </dl>
         </section>
       ) : null}
-      <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
-        <div className="flex min-w-0 flex-col gap-4">
-          <SummaryCardShape title="Pendientes" action={!can("tasks.write") || archived === true ? undefined : archived === null ? <ButtonBar /> : <WaitingButton>Nueva tarea</WaitingButton>}>
-            <RowsShape rows={2} />
-          </SummaryCardShape>
-          {crm ? (
-            <SummaryCardShape title="Notas" action={can("crm.write") ? <WaitingButton>Nueva nota</WaitingButton> : undefined}>
-              <NotesListSkeleton />
-            </SummaryCardShape>
-          ) : null}
-        </div>
-        {chats || crm ? (
-          <div className="flex min-w-0 flex-col gap-4">
-            <section className="flex min-w-0 flex-col gap-3 rounded-xl border border-agent-border bg-agent-soft p-6">
-              <Line size="base" className="w-48" />
-              <div className="flex flex-col gap-1">
-                <Line className="w-full" />
-                <Line className="w-2/3" />
-              </div>
-            </section>
+      <SummaryCardShape title="Pendientes" action={!can("tasks.write") || archived === true ? undefined : archived === null ? <ButtonBar /> : <WaitingButton>Nueva tarea</WaitingButton>}>
+        <RowsShape rows={2} />
+      </SummaryCardShape>
+      {crm ? (
+        <SummaryCardShape title="Notas" action={can("crm.write") ? <WaitingButton>Nueva nota</WaitingButton> : undefined}>
+          <NotesListSkeleton />
+        </SummaryCardShape>
+      ) : null}
+      {chats || crm ? (
+        <section className="flex min-w-0 flex-col gap-3 rounded-xl border border-agent-border bg-agent-soft p-6">
+          <Line size="base" className="w-48" />
+          <div className="flex flex-col gap-1">
+            <Line className="w-full" />
+            <Line className="w-2/3" />
           </div>
-        ) : null}
-      </div>
+        </section>
+      ) : null}
     </div>
   )
 }

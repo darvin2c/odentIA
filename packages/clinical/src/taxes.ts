@@ -9,6 +9,7 @@
  * tributaria: odentIA separa el impuesto para el ticket y Reportes; declara su
  * contador.
  */
+import { currencyWord, exchangeRateWords } from "./money.js"
 
 export const TAX_CATEGORIES = ["S", "E", "O", "Z"] as const
 export type TaxCategory = (typeof TAX_CATEGORIES)[number]
@@ -253,6 +254,29 @@ export const FISCAL_DISCLAIMER = "Recibo interno. No es un documento fiscal."
 export function ticketFooterLines(notice: string | null | undefined): string[] {
   const own = notice?.trim() ?? ""
   return own && own !== FISCAL_DISCLAIMER ? [own, FISCAL_DISCLAIMER] : [FISCAL_DISCLAIMER]
+}
+
+/**
+ * Lo que congela un cobro que usó dos monedas (`snapshot.tender`): entró en otra que
+ * la que cancela o el vuelto se dio en otra. Sin esto, el ticket se ve como siempre.
+ * El vuelto y su moneda son los del ticket; el valor, el de cada pago.
+ */
+export interface TicketTender {
+  /** La moneda en que entró el dinero. */
+  currency: string
+  /** Lo que entró, sin el exceso de un billete. */
+  amountCents: number
+  /** El cambio usado, en palabras: moneda del negocio por 1 de la otra. */
+  rate: string
+  businessCurrency: string
+  otherCurrency: string
+}
+
+/** «Pagó en soles, a S/ 3.75 por USD 1». */
+export function ticketTenderTitle(tender: TicketTender, locale: string): string {
+  const word = currencyWord(tender.currency, locale)
+  const rate = exchangeRateWords(tender.rate, tender.businessCurrency, tender.otherCurrency, locale)
+  return `Pagó en ${word}, a ${rate}`
 }
 
 /**

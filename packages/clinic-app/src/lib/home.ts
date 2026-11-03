@@ -4,7 +4,7 @@
  * las palabras de la pantalla. Ninguna regla de qué espera o qué se debe vive
  * en este archivo.
  */
-import { formatMoney } from "@odentia/clinical"
+import { formatMoney, moneyTotalsText } from "@odentia/clinical"
 import { agentCaseRow } from "./agent"
 import { ADMIN_NAME, withReceptionName } from "./agent-names"
 import { internationalText } from "@odentia/ui-patterns"
@@ -209,7 +209,15 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): WaitingT
         detail: joined([
           `Armado ${daysAgo(row.since, context)}`,
           plural(row.itemCount, "tratamiento", "tratamientos"),
-          row.totalCents != null ? formatMoney(row.totalCents, row.currency, context.locale) : null,
+          row.totals
+            ? moneyTotalsText(
+                row.totals,
+                (cents, currency) => formatMoney(cents, currency, context.locale),
+                "",
+              ) || null
+            : row.totalCents != null
+              ? formatMoney(row.totalCents, row.currency, context.locale)
+              : null,
           row.options > 1 ? `${row.options} opciones` : null,
         ]),
         action: "Enviar",

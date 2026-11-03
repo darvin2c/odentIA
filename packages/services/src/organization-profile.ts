@@ -1,10 +1,15 @@
 import {
   clinicalProfileFor,
+  type CurrencyInUse,
   currencyFractionDigits,
+  currencyRemovalWords,
+  exchangeFactor,
   isSelectableDiagnosisSystem,
+  normalizeExchangeRate,
   type SelectableDiagnosisSystem,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
+import { user } from "@odentia/db/schema/auth"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
 import { type OrgTaxInput, taxColumnsFor } from "./clinic-taxes.js"
@@ -203,12 +208,12 @@ function assertCountryCode(value: string | null | undefined): string {
   return code
 }
 
-function assertCurrency(value: string | null | undefined): string {
+function assertCurrency(value: string | null | undefined, field = "currency"): string {
   const code = (value ?? "").trim().toUpperCase()
   try {
     currencyFractionDigits(code)
   } catch {
-    throw invalidField("currency", "Elige la moneda de la lista")
+    throw invalidField(field, "Elige la moneda de la lista")
   }
   return code
 }
@@ -281,6 +286,10 @@ export interface UpdateOrgRegionInput {
   applyCountryPreset?: boolean
   /** Impuestos de lo cobrado (ADR 0083): null en una cifra es volver a lo del país. */
   taxes?: OrgTaxInput | null
+  /** La otra moneda: omitida, sigue la que hay; `null`, deja de cobrar en ella. */
+  secondCurrency?: string | null
+  /** El «Cambio de hoy», en texto decimal; lo escribe `setOrgExchangeRate`. */
+  exchangeRate?: string | null
 }
 /** Perfil regional completo con el que nace `org_profile`. */
 export interface InitialOrgRegion {
@@ -333,43 +342,76 @@ function recommendedSelectableSystem(countryCode: string): SelectableDiagnosisSy
   return isSelectableDiagnosisSystem(recommended) ? recommended : "ICD-10"
 }
 
+/** Dónde guarda una moneda lo que hace la clínica. Un dato nuevo con moneda se agrega aquí. */
+const CURRENCY_COLUMNS = [
+  ["patient_charge", "currency"],
+  ["patient_payment", "currency"],
+  ["patient_payment", "tender_currency"],
+  ["treatment_budget", "currency"],
+  ["treatment_budget_item", "currency"],
+  ["cash_shift", "currency"],
+  ["expense", "currency"],
+  ["expense", "tender_currency"],
+  ["service_catalog", "currency"],
+  ["treatment_plan_item", "currency"],
+  ["opportunity", "currency"],
+  ["promotion_service_price", "currency"],
+  ["product", "sale_currency"],
+  ["purchase_order", "currency"],
+  ["commission_settlement", "currency"],
+] as const
+
 /**
- * La moneda no reinterpreta históricos: si existen cargos, pagos,
- * presupuestos o turnos en otra moneda, el cambio se bloquea (409
- * CURRENCY_HISTORY_EXISTS) salvo procedimiento de migración explícito.
- * No se convierten importes existentes.
+ * La moneda no reinterpreta históricos: si existen cargos, pagos, presupuestos,
+ * turnos, oportunidades, promociones, productos, compras o comisiones en otra
+ * moneda, el cambio se bloquea (409 CURRENCY_HISTORY_EXISTS) salvo procedimiento
+ * de migración explícito. No se convierten importes existentes. Con `second`, la
+ * otra moneda de la clínica tampoco cuenta: dos monedas como máximo, nunca una tercera.
  */
 export async function assertNoForeignCurrencyHistory(
   tx: Db,
   orgId: string,
   nextCurrency: string,
+  options: { second: string; field: string } | null = null,
 ): Promise<void> {
-  const tables = [
-    "patient_charge",
-    "patient_payment",
-    "treatment_budget",
-    "cash_shift",
-    "expense",
-    "service_catalog",
-    "treatment_plan_item",
-  ] as const
-  for (const table of tables) {
-    const rows = await tx.execute<{ found: number }>(sql`
-      select 1 as "found" from ${sql.identifier(table)}
-      where "organization_id" = ${orgId} and "currency" <> ${nextCurrency} limit 1`)
-    if (rows.length > 0) {
-      const message =
-        "La clínica ya tiene movimientos en otra moneda: el cambio requiere migración explícita"
-      throw new ServiceError("CURRENCY_HISTORY_EXISTS", 409, message, { currency: message })
+  for (const [table, column] of CURRENCY_COLUMNS) {
+    const rows = await tx.execute<{ found: string }>(sql`
+      select trim(${sql.identifier(column)}::text) as "found" from ${sql.identifier(table)}
+      where "organization_id" = ${orgId} and ${sql.identifier(column)} <> ${nextCurrency}
+        ${options ? sql`and ${sql.identifier(column)} <> ${options.second}` : sql``}
+      limit 1`)
+    const found = rows[0]?.found
+    if (found) {
+      const message = options
+        ? `La clínica ya tiene movimientos en ${found}: es la única otra moneda en que puede cobrar`
+        : "La clínica ya tiene movimientos en otra moneda: el cambio requiere migración explícita"
+      throw new ServiceError("CURRENCY_HISTORY_EXISTS", 409, message, {
+        [options?.field ?? "currency"]: message,
+      })
     }
   }
 }
 
 /**
- * Guarda región e impresión sin reinterpretar importes. El alta del perfil y
- * este cambio comparten transacción; los medios iniciales salen del país.
+ * Guarda región, impresión y la otra moneda sin reinterpretar importes. El alta del
+ * perfil y este cambio comparten transacción; los medios iniciales salen del país.
+ * Quitar la otra moneda va primero: con ella activa, la del negocio no cambia.
  */
 export async function updateOrgRegion(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  input: UpdateOrgRegionInput,
+): Promise<OrgProfileRow> {
+  const { secondCurrency, exchangeRate, ...region } = input
+  if (secondCurrency === null) await setOrgExchangeRate(tx, orgId, actorUserId, { secondCurrency })
+  const updated = await writeOrgRegion(tx, orgId, actorUserId, region)
+  return secondCurrency || exchangeRate
+    ? setOrgExchangeRate(tx, orgId, actorUserId, { secondCurrency, exchangeRate })
+    : updated
+}
+
+async function writeOrgRegion(
   tx: Db,
   orgId: string,
   actorUserId: string,
@@ -472,6 +514,11 @@ export async function updateOrgRegion(
     return current
   }
   if (set.currency && set.currency !== current.currency) {
+    // El cambio de hoy y sus factores están en la moneda del negocio: con otra moneda activa, no cambia.
+    if (current.secondCurrency) {
+      const message = `La clínica también cobra en ${current.secondCurrency}: quita esa moneda para cambiar la del negocio`
+      throw new ServiceError("SECOND_CURRENCY_ACTIVE", 409, message, { currency: message })
+    }
     await assertNoForeignCurrencyHistory(tx, orgId, set.currency)
   }
   const [updated] = await tx
@@ -490,4 +537,174 @@ export async function updateOrgRegion(
   })
   await ensureDefaultPaymentMethods(tx, orgId, actorUserId, updated.countryCode)
   return updated
+}
+
+export interface OrgExchangeRateInput {
+  /** La otra moneda de la clínica: omitida, sigue la que hay; `null`, deja de cobrar en ella. */
+  secondCurrency?: string | null
+  /** El «Cambio de hoy», en texto decimal: moneda del negocio por 1 de la otra. Al activar, obligatorio. */
+  exchangeRate?: string | null
+}
+
+/**
+ * La única operación que escribe la otra moneda y el «Cambio de hoy», con quién y
+ * cuándo: `exchange_factor` va siempre junto a `exchange_rate`. Bloquea el perfil,
+ * así que un cobro (`lockOrgCurrency`, FOR SHARE) nunca la llama: el cambio que usa
+ * un cobro se guarda en el cobro. Escribir el mismo cambio no cambia quién lo puso.
+ */
+export async function setOrgExchangeRate(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  input: OrgExchangeRateInput,
+): Promise<OrgProfileRow> {
+  const [current] = await tx
+    .select()
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, orgId))
+    .limit(1)
+    .for("update")
+  if (!current) throw notFound("Perfil de organización")
+  const requested = input.secondCurrency === undefined ? current.secondCurrency : input.secondCurrency
+  if (requested === null) {
+    if (input.secondCurrency === undefined)
+      throw invalidField("exchangeRate", "Primero elige en qué otra moneda cobra la clínica")
+    if (!current.secondCurrency) return current
+    // Mientras algo la necesite, quitarla dejaría deudas, saldos y una caja sin cómo cobrarse.
+    const usage = await getCurrencyUsage(tx, orgId, current.secondCurrency)
+    const missing = currencyRemovalWords(usage, current.currency, current.locale)
+    if (missing)
+      throw new ServiceError("SECOND_CURRENCY_IN_USE", 409, missing, { secondCurrency: missing })
+    return writeExchange(tx, orgId, actorUserId, current, {
+      secondCurrency: null,
+      exchangeRate: null,
+      exchangeFactor: null,
+      exchangeRateAt: null,
+      exchangeRateBy: null,
+    })
+  }
+  const second = assertCurrency(requested, "secondCurrency")
+  if (second === current.currency)
+    throw invalidField("secondCurrency", "Esa ya es la moneda del negocio: elige otra")
+  const isNew = second !== current.secondCurrency
+  if (isNew)
+    await assertNoForeignCurrencyHistory(tx, orgId, current.currency, { second, field: "secondCurrency" })
+  const written = input.exchangeRate?.trim() || (isNew ? null : current.exchangeRate)
+  if (!written) throw invalidField("exchangeRate", `Escribe el cambio de hoy para cobrar en ${second}`)
+  const rate = assertExchangeRate(written)
+  if (!isNew && current.exchangeRate && rate === normalizeExchangeRate(current.exchangeRate))
+    return current
+  return writeExchange(tx, orgId, actorUserId, current, {
+    secondCurrency: second,
+    exchangeRate: rate,
+    exchangeFactor: exchangeFactor(rate, current.currency, second),
+    exchangeRateAt: new Date(),
+    exchangeRateBy: actorUserId,
+  })
+}
+
+function assertExchangeRate(value: string): string {
+  try {
+    return normalizeExchangeRate(value)
+  } catch (error) {
+    throw invalidField("exchangeRate", error instanceof Error ? error.message : "Revisa el cambio")
+  }
+}
+
+async function writeExchange(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  current: OrgProfileRow,
+  values: Pick<
+    OrgProfileRow,
+    "secondCurrency" | "exchangeRate" | "exchangeFactor" | "exchangeRateAt" | "exchangeRateBy"
+  >,
+): Promise<OrgProfileRow> {
+  const [updated] = await tx
+    .update(orgProfile)
+    .set({ ...values, updatedAt: new Date() })
+    .where(eq(orgProfile.organizationId, orgId))
+    .returning()
+  if (!updated) throw notFound("Perfil de organización")
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId,
+    action: "settings.exchange_rate_updated",
+    entity: "org_profile",
+    entityId: orgId,
+    metadata: {
+      secondCurrency: values.secondCurrency,
+      exchangeRate: values.exchangeRate,
+      previousSecondCurrency: current.secondCurrency,
+      previousExchangeRate: current.exchangeRate,
+    },
+  })
+  return updated
+}
+
+/** El nombre de quien puso el «Cambio de hoy»; `null` si no hay cambio o ya no está. */
+export async function exchangeRateAuthor(
+  tx: Db,
+  profile: Pick<OrgProfileRow, "exchangeRateBy">,
+): Promise<string | null> {
+  if (!profile.exchangeRateBy) return null
+  const [row] = await tx
+    .select({ name: user.name })
+    .from(user)
+    .where(eq(user.id, profile.exchangeRateBy))
+    .limit(1)
+  return row?.name ?? null
+}
+
+/** Lo que la clínica ya tiene en una moneda: lo que hay que saber antes de activarla o quitarla. */
+export type CurrencyUsage = CurrencyInUse
+
+export async function getCurrencyUsage(tx: Db, orgId: string, currency: string): Promise<CurrencyUsage> {
+  const code = assertCurrency(currency, "currency")
+  const [due] = await tx.execute<{ cents: string | null }>(sql`
+    select sum(greatest(c."amount_cents" - coalesce(paid."cents", 0), 0)) as "cents"
+    from "patient_charge" c
+    left join lateral (
+      select sum(a."amount_cents") as "cents" from "patient_payment_application" a
+      where a."organization_id" = c."organization_id" and a."charge_id" = c."id" and a."voided_at" is null
+    ) paid on true
+    where c."organization_id" = ${orgId} and c."currency" = ${code} and c."voided_at" is null`)
+  const [services] = await tx.execute<{ total: string }>(sql`
+    select count(*) as "total" from "service_catalog"
+    where "organization_id" = ${orgId} and "currency" = ${code} and "is_active"`)
+  // La misma cuenta del esperado de la caja: solo el efectivo (UN/CEFACT 4461, tipo 10).
+  const [cash] = await tx.execute<{ cents: string | null }>(sql`
+    select sum(case
+      when m."direction" = 'ingreso' and (m."kind" <> 'cobro' or m."method_type_code" is null or m."method_type_code" = '10') then m."amount_cents"
+      when m."direction" = 'egreso' and (m."method_type_code" is null or m."method_type_code" = '10') then -m."amount_cents"
+      else 0 end) as "cents"
+    from "cash_movement" m
+    join "cash_shift" s on s."organization_id" = m."organization_id" and s."id" = m."shift_id"
+    where m."organization_id" = ${orgId} and s."currency" = ${code} and s."status" = 'abierta' and m."voided_at" is null`)
+  // Lo que cada pago vigente tiene sin aplicar ni devolver.
+  const [favor] = await tx.execute<{ cents: string | null }>(sql`
+    select sum(greatest(p."amount_cents" - coalesce(used."cents", 0) - coalesce(back."cents", 0), 0)) as "cents"
+    from "patient_payment" p
+    left join lateral (
+      select sum(a."amount_cents") as "cents" from "patient_payment_application" a
+      where a."organization_id" = p."organization_id" and a."payment_id" = p."id" and a."voided_at" is null
+    ) used on true
+    left join lateral (
+      select sum(r."amount_cents") as "cents" from "patient_payment_refund" r
+      where r."organization_id" = p."organization_id" and r."payment_id" = p."id"
+    ) back on true
+    where p."organization_id" = ${orgId} and p."currency" = ${code} and p."voided_at" is null`)
+  const [pending] = await tx.execute<{ total: string }>(sql`
+    select count(*) as "total" from "treatment_plan_item"
+    where "organization_id" = ${orgId} and "currency" = ${code}
+      and "status" in ('pendiente', 'programado', 'en_curso', 'suspendido')`)
+  return {
+    currency: code,
+    dueCents: Number(due?.cents ?? 0),
+    favorCents: Number(favor?.cents ?? 0),
+    cashCents: Number(cash?.cents ?? 0),
+    services: Number(services?.total ?? 0),
+    pending: Number(pending?.total ?? 0),
+  }
 }

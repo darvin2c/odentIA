@@ -37,6 +37,7 @@ import { clinicalFixture } from "./clinical-test-fixture.js"
 import { getPatientHealth } from "./clinical.js"
 import { DocumentKit } from "./document-kit.js"
 import { renderHealthDocumentPdf } from "./health-documents.js"
+import { getPatientSummary } from "./patient-history.js"
 import { addPlanItem } from "./plan.js"
 import { getPatientRegistrationConfig, savePatientRegistrationConfig } from "./patient-registration.js"
 import { createPatient, patientPersonId, requirePatient, setPatientContact } from "./patients.js"
@@ -296,6 +297,9 @@ it("el consentimiento se firma en su enlace con su documento y el profesional lo
   expect((await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).consents).toEqual([])
   await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, consent.id))
   expect((await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).consents).toEqual([{ id: consent.id, title: "Exodoncia" }])
+  // El Resumen distingue «espera su firma» de «por confirmar»: no todo pendiente está sin firmar.
+  const pendingInSummary = async () => (await f.run((tx) => getPatientSummary(tx, ORG, lucia.id))).pendingConsents.find((row) => row.id === consent.id)
+  expect(await pendingInSummary()).toMatchObject({ personSignedAt: null, linkSentAt: expect.any(Date) })
 
   const strokes = { strokes: [[[10, 10], [200, 120]]] }
   // El documento que escribe se compara con el de su registro.
@@ -320,9 +324,11 @@ it("el consentimiento se firma en su enlace con su documento y el profesional lo
   expect(signed).toMatchObject({ personSignedIp: "203.0.113.7", personSignedUserAgent: "Mozilla/5.0 (Android)" })
   expect(signed?.declarationSnapshot).toMatch(/He leído y comprendido/)
   expect((await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).consents).toEqual([])
+  expect(await pendingInSummary()).toMatchObject({ personSignedAt: expect.any(Date) })
   await f.run((tx) => confirmLinkSignedConsent(tx, ORG, f.actor, consent.id))
   const [confirmed] = await ownerDb.select().from(consentDocument).where(eq(consentDocument.id, consent.id))
   expect(confirmed).toMatchObject({ status: "firmado", signatureMethod: "enlace", signatureLevel: "simple", informedBy: f.actor })
+  expect(await pendingInSummary()).toBeUndefined()
 })
 
 /** Sofi encendida o apagada, en la clínica que comparten las pruebas de este archivo. */

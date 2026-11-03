@@ -27,7 +27,7 @@ import {
 } from "../../lib/booking-link"
 import { orgSlugFromHostname, requestHostname } from "../../lib/host"
 import { activeOrgLocale, activeOrgTimeZone, setOrgLocale } from "../../lib/locale"
-import { formatPortalMoney } from "../../lib/portal"
+import { portalTotalsText } from "../../lib/portal"
 
 /**
  * «Su enlace» (ADR 0037): la página personal de cada persona. Muestra lo
@@ -419,7 +419,7 @@ function PersonalLinkPage() {
             key={budget.id}
             title="Tu presupuesto"
             badge="Por responder"
-            text={`${budget.title} · ${formatPortalMoney(budget.totalCents, budget.currency, budget.locale)}`}
+            text={`${budget.title} · ${portalTotalsText(budget, budget)}`}
             action="Ver y responder"
             onAction={() => setScreen({ kind: "presupuesto", budgetId: budget.id })}
           />

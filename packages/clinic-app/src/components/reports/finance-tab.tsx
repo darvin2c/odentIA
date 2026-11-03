@@ -4,9 +4,10 @@
  * y de dónde vino lo cobrado. La comisión cuenta al cobrar, en su propia línea
  * (decisión 13); «En caja quedó» la descuenta cuando se paga. Cada cifra lleva
  * a su lugar de Finanzas, donde se opera (decisión 14). Todo en la moneda de la
- * clínica: otra moneda se dice aparte, nunca se suma.
+ * clínica: lo que ya pasó con el valor de cada cobro y cada gasto, y lo que se debe
+ * por moneda, con un total aproximado al cambio de hoy.
  */
-import { formatMoney } from "@odentia/clinical"
+import { currencyWord, formatExchangeRateInput, formatMoney } from "@odentia/clinical"
 import { Button, cn, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, toast } from "@odentia/ui"
 import { ColumnChart, EmptyState, ShareBar, SkeletonRegion, WaterfallChart, type WaterfallStep } from "@odentia/ui-patterns"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -18,12 +19,16 @@ import { usePermission } from "../../lib/crm"
 import { cashErrorMessage, dismissExpenseGapApi, type ExpenseCategory } from "../../lib/finance-cash"
 import { QueryErrorState } from "../../lib/query-error"
 import {
+  amountsWords,
   bucketLabel,
   bucketShort,
   type Comparison,
+  compactMoney,
+  type CurrencyAmount,
   dayText,
   fetchReport,
   GRAIN_WORD,
+  methodsCashNote,
   previousPhrase,
   rateOf,
   relativeChange,
@@ -47,10 +52,6 @@ type Money = (cents: number) => string
 
 /** Lo que se aparta de la clínica más de estos puntos lleva su marca. */
 const APART_POINTS = 5
-
-function compactMoney(cents: number, currency: string, locale: string): string {
-  return new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 }).format(amountFromCents(String(cents), currency))
-}
 
 /** El importe sin decimales sobre una barra: «48 200». */
 function roundMoney(cents: number, currency: string, locale: string): string {
@@ -216,6 +217,30 @@ function AnchorLink({ href, children }: { href: string; children: ReactNode }) {
   )
 }
 
+/** «En total, unos S/ 23,650.00 al cambio de hoy (3.75)»: lo que se debe en otra moneda aún puede moverse. */
+function aboutToday(cents: number, data: ReportFinance): string {
+  const rate = data.second ? ` (${formatExchangeRateInput(data.second.rate, data.locale)})` : ""
+  return `En total, unos ${formatMoney(cents, data.currency, data.locale)} al cambio de hoy${rate}`
+}
+
+/** Lo que entró en otra moneda en el periodo: en cuánto y lo que valió. */
+function enteredInOtherCurrency(
+  data: ReportFinance,
+): Array<CurrencyAmount & { valueCents: number }> {
+  const totals = new Map<string, CurrencyAmount & { valueCents: number }>()
+  for (const method of data.byMethod.methods)
+    for (const part of method.entered ?? []) {
+      if (part.currency === data.currency) continue
+      const slot = totals.get(part.currency) ?? { currency: part.currency, cents: 0, valueCents: 0 }
+      totals.set(part.currency, {
+        ...slot,
+        cents: slot.cents + part.cents,
+        valueCents: slot.valueCents + part.valueCents,
+      })
+    }
+  return [...totals.values()].filter((part) => part.cents !== 0)
+}
+
 function FinanceCards({ data }: { data: ReportFinance }) {
   const { locale, currency } = data
   const money: Money = (cents) => formatMoney(cents, currency, locale)
@@ -224,6 +249,8 @@ function FinanceCards({ data }: { data: ReportFinance }) {
   const commissionShare = rateOf(current.commissionCents, current.cobradoCents)
   const previousShare = rateOf(previous.commissionCents, previous.cobradoCents)
   const overdueChange = data.debts.overdueCents - data.debts.previousOverdueCents
+  const inOther = enteredInOtherCurrency(data)
+  const owedParts = data.debts.current.byCurrency
   return (
     <section aria-label="Cifras de finanzas" className="grid min-w-0 gap-3.5 @xl:grid-cols-2 @5xl:grid-cols-4">
       <FinanceCard
@@ -232,9 +259,17 @@ function FinanceCards({ data }: { data: ReportFinance }) {
         change={current.cobradoCents === 0 && previous.cobradoCents === 0 ? undefined : relativeChange(current.cobradoCents, previous.cobradoCents, phrase, locale)}
         better="up"
         detail={
-          current.taxCents > 0 && data.taxName
-            ? `Ya descontadas las devoluciones · incluye ${money(current.taxCents)} de ${data.taxName}`
-            : "Ya descontadas las devoluciones"
+          <>
+            {current.taxCents > 0 && data.taxName
+              ? `Ya descontadas las devoluciones · incluye ${money(current.taxCents)} de ${data.taxName}`
+              : "Ya descontadas las devoluciones"}
+            {inOther.map((part) => (
+              <span key={part.currency} className="block">
+                {money(part.valueCents)} entraron en {currencyWord(part.currency, locale)}:{" "}
+                {formatMoney(part.cents, part.currency, locale)}, cada cobro con el cambio de su día
+              </span>
+            ))}
+          </>
         }
       />
       <FinanceCard
@@ -243,13 +278,25 @@ function FinanceCards({ data }: { data: ReportFinance }) {
         tone="highlight"
         change={current.leavesCents === 0 && previous.leavesCents === 0 ? undefined : moneyChange(current.leavesCents, previous.leavesCents, money, phrase)}
         better="up"
-        detail={
-          current.cobradoCents - current.taxCents > 0
-            ? current.taxCents > 0 && data.taxName
-              ? `${percentOf(current.leavesCents, current.cobradoCents - current.taxCents)} de lo cobrado sin ${data.taxName}`
-              : `${percentOf(current.leavesCents, current.cobradoCents)} de lo cobrado`
-            : undefined
-        }
+        detail={(() => {
+          const share =
+            current.cobradoCents - current.taxCents > 0
+              ? current.taxCents > 0 && data.taxName
+                ? `${percentOf(current.leavesCents, current.cobradoCents - current.taxCents)} de lo cobrado sin ${data.taxName}`
+                : `${percentOf(current.leavesCents, current.cobradoCents)} de lo cobrado`
+              : undefined
+          if (!data.second) return share
+          // Reportes cuenta lo que entró y salió, cada cosa con el cambio de su día.
+          return (
+            <>
+              {share ? <span className="block">{share}</span> : null}
+              <span className="block">
+                No incluye lo que ganes o pierdas al cambiar{" "}
+                {currencyWord(data.second.currency, locale)}
+              </span>
+            </>
+          )
+        })()}
       />
       <FinanceCard
         title="Comisiones"
@@ -272,7 +319,11 @@ function FinanceCards({ data }: { data: ReportFinance }) {
       />
       <FinanceCard
         title="Te deben"
-        value={money(data.debts.current.totalCents)}
+        value={
+          owedParts?.[0]
+            ? formatMoney(owedParts[0].cents, owedParts[0].currency, locale)
+            : money(data.debts.current.totalCents)
+        }
         change={
           data.debts.overdueCents === 0 && data.debts.previousOverdueCents === 0
             ? undefined
@@ -287,7 +338,16 @@ function FinanceCards({ data }: { data: ReportFinance }) {
             "Nadie debe"
           ) : (
             <>
-              {data.debts.current.people} {data.debts.current.people === 1 ? "persona" : "personas"} · <AnchorLink href="#deuda">Ver</AnchorLink>
+              {owedParts && owedParts.length > 1 ? (
+                <span className="block font-semibold">
+                  y {amountsWords(owedParts.slice(1), locale)}
+                </span>
+              ) : null}
+              {owedParts ? (
+                <span className="block">{aboutToday(data.debts.current.totalCents, data)}</span>
+              ) : null}
+              {data.debts.current.people} {data.debts.current.people === 1 ? "persona" : "personas"}{" "}
+              · <AnchorLink href="#deuda">Ver</AnchorLink>
             </>
           )
         }
@@ -397,8 +457,13 @@ function Cascade({ data }: { data: ReportFinance }) {
             : `En ${period} no se cobró nada.`}
         </p>
         <span className="rounded-full bg-secondary px-2.5 py-1 text-[13px] font-semibold text-foreground/80">
-          En caja quedó {money(current.cashLeftCents)}
-          {owed > 0 ? ` · debes ${money(owed)} (${data.payables.salesTax.cents > 0 ? `comisiones, compras e ${taxName}` : "comisiones y compras"})` : ""}
+          {/* Con dos monedas no hay una sola caja que sumar: se dice lo que se movió en cada una. */}
+          {data.moneyFlow
+            ? `Entró menos salió: ${data.moneyFlow.length > 0 ? amountsWords(data.moneyFlow, locale) : money(0)}`
+            : `En caja quedó ${money(current.cashLeftCents)}`}
+          {owed > 0
+            ? ` · debes ${money(owed)} (${data.payables.salesTax.cents > 0 ? `comisiones, compras e ${taxName}` : "comisiones y compras"})`
+            : ""}
         </span>
       </div>
       {data.missing.slice(0, 3).map((gap) => (
@@ -794,7 +859,9 @@ function DebtsCard({ data, onOpenList, advice }: { data: ReportFinance; onOpenLi
         <p className="text-sm text-muted-foreground">
           {debts.people === 0
             ? `Nadie debe ${at}.`
-            : `${money(debts.totalCents)} de ${debts.people} ${debts.people === 1 ? "persona" : "personas"} ${at}. Cuenta desde el día del cargo; quien debe varios va en el tramo del más antiguo.`}
+            : debts.byCurrency
+              ? `${amountsWords(debts.byCurrency, locale)} de ${debts.people} ${debts.people === 1 ? "persona" : "personas"} ${at}. ${aboutToday(debts.totalCents, data)}. Cuenta desde el día del cargo; en cada moneda, quien debe varios va en el tramo del más antiguo.`
+              : `${money(debts.totalCents)} de ${debts.people} ${debts.people === 1 ? "persona" : "personas"} ${at}. Cuenta desde el día del cargo; quien debe varios va en el tramo del más antiguo.`}
         </p>
       </div>
       {debts.people > 0 ? (
@@ -811,14 +878,19 @@ function DebtsCard({ data, onOpenList, advice }: { data: ReportFinance; onOpenLi
           </div>
           <div className="grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-4">
             {AGES.map((age) => {
-              const item = debts.ages.find((entry) => entry.key === age.key) ?? { cents: 0, people: 0 }
+              const item: { cents: number; people: number; byCurrency?: CurrencyAmount[] } =
+                debts.ages.find((entry) => entry.key === age.key) ?? { cents: 0, people: 0 }
               return (
                 <div key={age.key} className="flex min-w-0 flex-col gap-0.5">
                   <span className="flex items-center gap-1.5 text-[13px] font-bold text-foreground/80">
                     <span aria-hidden className="size-2.5 rounded-[3px]" style={{ background: age.color }} />
                     {age.label}
                   </span>
-                  <strong className="text-lg tabular-nums">{money(item.cents)}</strong>
+                  <strong className="text-lg tabular-nums">
+                    {item.byCurrency && item.byCurrency.length > 0
+                      ? amountsWords(item.byCurrency, locale)
+                      : money(item.cents)}
+                  </strong>
                   <span className="text-[13px] text-muted-foreground">
                     {item.people} {item.people === 1 ? "persona" : "personas"}
                   </span>
@@ -884,9 +956,14 @@ function PayablesCard({ data }: { data: ReportFinance }) {
         <li className="flex min-w-0 flex-col">
           <span className="flex justify-between gap-2">
             <strong>Compras recibidas sin pagar</strong>
-            <strong className="tabular-nums">{money(purchases.cents)}</strong>
+            <strong className="tabular-nums">
+              {purchases.byCurrency
+                ? amountsWords(purchases.byCurrency, locale)
+                : money(purchases.cents)}
+            </strong>
           </span>
           <span className="text-[13px] text-muted-foreground">
+            {purchases.byCurrency ? `${aboutToday(purchases.cents, data)}. ` : ""}
             {purchases.orders === 0
               ? "Ninguna"
               : `${purchases.orders} ${purchases.orders === 1 ? "compra" : "compras"}${daysSince !== null ? `; la más antigua llegó hace ${daysSince} ${daysSince === 1 ? "día" : "días"}` : ""}`}
@@ -940,10 +1017,21 @@ function OutlookCard({ query, onOpenList }: { query: ReportQuery; onOpenList: (l
   return (
     <ReportCard title="Lo que viene" note={data.wholeClinic.includes("upcoming") ? `${WHOLE_CLINIC} · a hoy` : "A hoy"}>
       <div className="flex flex-col gap-0.5">
-        <span className="text-[13px] font-bold text-muted-foreground">Presupuestos aceptados por hacer</span>
-        <span className="text-[28px] leading-9 font-extrabold tracking-tight tabular-nums">{money(data.upcoming.cents)}</span>
+        <span className="text-[13px] font-bold text-muted-foreground">
+          Presupuestos aceptados por hacer
+        </span>
+        <span className="text-[28px] leading-9 font-extrabold tracking-tight tabular-nums">
+          {data.upcoming.byCurrency
+            ? amountsWords(data.upcoming.byCurrency, data.locale)
+            : money(data.upcoming.cents)}
+        </span>
         <span className="text-[13px] text-muted-foreground">
-          {data.upcoming.patients === 0 ? "Nada aceptado por hacer." : `De ${data.upcoming.patients} ${data.upcoming.patients === 1 ? "paciente" : "pacientes"}: trabajo ya vendido que aún no se hace.`}
+          {data.upcoming.byCurrency
+            ? `En total, unos ${money(data.upcoming.cents)} al cambio de hoy. `
+            : ""}
+          {data.upcoming.patients === 0
+            ? "Nada aceptado por hacer."
+            : `De ${data.upcoming.patients} ${data.upcoming.patients === 1 ? "paciente" : "pacientes"}: trabajo ya vendido que aún no se hace.`}
         </span>
       </div>
       {data.upcoming.unbooked.patients > 0 ? (
@@ -994,21 +1082,58 @@ function TreatmentsCard({ data }: { data: ReportFinance }) {
 function MethodsCard({ data }: { data: ReportFinance }) {
   const plain: Money = (cents) => plainAmount(cents, data.currency, data.locale)
   const money: Money = (cents) => formatMoney(cents, data.currency, data.locale)
-  const { methods, closures } = data.byMethod
+  const { methods } = data.byMethod
   const top = Math.max(1, ...methods.map((row) => row.cents))
-  const cash = methods.filter((row) => row.cash).reduce((total, row) => total + row.cents, 0)
-  const note =
-    closures.count === 0
-      ? cash !== 0
-        ? "Aún no hay cierres de caja en este periodo para comparar el efectivo."
-        : null
-      : cash === closures.cashCents
-        ? "El efectivo coincide con los cierres de caja del periodo."
-        : `El efectivo (${money(cash)}) no coincide con los cierres de caja (${money(closures.cashCents)}): puede haber una caja sin cerrar o un cierre que abarca días de otro periodo.`
+  const note = methodsCashNote(data)
+  const crossed = methods.some((row) => row.entered)
   return (
     <ReportCard title="Cobrado por medio de pago" note={data.currency}>
       {methods.length === 0 ? (
         <EmptyLine>No se cobró nada en este periodo.</EmptyLine>
+      ) : crossed ? (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Medio</TableHead>
+              <TableHead scope="col" className="text-right">
+                Lo que entró
+              </TableHead>
+              <TableHead scope="col" className="text-right">
+                En {currencyWord(data.currency, data.locale)}
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {methods.flatMap((row) =>
+              (
+                row.entered ?? [
+                  { currency: data.currency, cents: row.cents, valueCents: row.cents },
+                ]
+              ).map((part) => (
+                <TableRow key={`${row.label}:${part.currency}`}>
+                  <TableHead scope="row" className="font-semibold whitespace-normal">
+                    {row.label}
+                  </TableHead>
+                  <TableCell className="text-right tabular-nums">
+                    {formatMoney(part.cents, part.currency, data.locale)}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {money(part.valueCents)}
+                  </TableCell>
+                </TableRow>
+              )),
+            )}
+            <TableRow>
+              <TableHead scope="row" className="font-bold">
+                Total
+              </TableHead>
+              <TableCell />
+              <TableCell className="text-right font-bold tabular-nums">
+                {money(methods.reduce((total, row) => total + row.cents, 0))}
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
       ) : (
         <BarRows rows={methods.map((row) => ({ key: row.label, label: row.label, value: plain(row.cents), share: (row.cents / top) * 100 }))} />
       )}

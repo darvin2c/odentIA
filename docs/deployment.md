@@ -81,7 +81,7 @@ Rutas del túnel («Published application routes»), con el comodín al final:
 | `api.<dominio>` | `http://api:3001` |
 | `app.<dominio>` | `http://panel:3000` |
 | `admin.<dominio>` | `http://admin:3000` |
-| `<dominio>` y `www.<dominio>` | `http://web:3000` |
+| `<dominio>` y `www.<dominio>` | `http://web:3000` (solo de respaldo: las atiende el Worker, ver «Las webs en Cloudflare Workers») |
 | `*.<dominio>` | `http://platform:3000` |
 
 Cloudflare crea el registro DNS de cada ruta salvo el del comodín: el CNAME `*` a
@@ -144,6 +144,47 @@ La web de `latidia72.com` es la misma `apps/web` con ese build (`latidia-web`, p
 (`apps/web/src/lib/latidia-pages.json`); lo demás responde 404. El túnel lleva
 `latidia72.com` (y `www.`, que redirige) a ese servicio. La lista de espera guarda el
 producto del dominio desde el que se pide (decisión 17).
+
+## Las webs en Cloudflare Workers
+
+Las dos webs de marketing (ADR 0136) se publican como dos Workers del plan gratuito,
+`odentia-web` y `latidia-web` (`apps/web/wrangler.jsonc`), fuera de OpenShip. El job
+`deploy-web` del CI las arma con `WEB_TARGET=cloudflare` y su dominio y las publica al
+pasar las pruebas de main; en un PR solo comprueba que se arman. Leen los precios de
+`https://api.<dominio>` y cada página armada se guarda 30 segundos en la caché de
+Cloudflare; los últimos precios leídos, un día, para cuando la API se reinicia. Mientras los dominios sigan en el túnel, los servicios `web` y
+`latidia-web` del compose siguen atendiendo con el servidor de Node.
+
+Configurar en GitHub, antes de unir:
+
+- Variable `CLOUDFLARE_ACCOUNT_ID`: el id de la cuenta de Cloudflare de las zonas.
+  Sin ella el job solo comprueba, también en main.
+- Secreto `CLOUDFLARE_API_TOKEN`: un token con la plantilla «Edit Cloudflare Workers»,
+  limitado a esa cuenta. Solo publica los Workers: los dominios se agregan a mano.
+- En Cloudflare, Workers › Overview: el subdominio `workers.dev` de la cuenta, si
+  nunca se eligió; sin él el primer despliegue falla.
+
+Cambio de la entrada, hecho el 2026-11-03 en las dos webs y sin cortar el servicio:
+
+1. Con el primer despliegue, abrir `odentia-web.<subdominio>.workers.dev`: inicio,
+   precios con sus cifras, una página que no es de latidIA en la de latidIA.
+   Ahí la caché no actúa, así que lo que mide es lo peor.
+2. En Workers › `odentia-web` › Metrics, la CPU por petición. Medido: mediana 2,3 ms,
+   p90 21 ms, sin cortes por CPU.
+3. En Workers › `odentia-web` › Domains › Add Route, zona `<dominio>`, dos rutas:
+   `<dominio>/*` y `www.<dominio>/*` (nunca el `*.<dominio>/*` que propone, que tomaría
+   `app.`, `api.`, `admin.` y las clínicas), con **Fail open**: si el Worker falla o pasa
+   los límites del plan, la visita sigue por el túnel al VPS. El DNS y el túnel no cambian.
+4. Comprobar `https://<dominio>/precios`, que `https://www.<dominio>/precios` redirige
+   y que la segunda visita responde `CF-Cache-Status: HIT`.
+
+Lo mismo con `latidia-web` y `latidia72.com`. Publicar sin `routes` no toca las
+rutas agregadas a mano, y deja abierto `*.workers.dev`, que apunta su dirección
+canónica al dominio. Vuelta atrás: quitar las rutas del Worker; el túnel sigue llevando
+`<dominio>` a `http://web:3000` (o `http://latidia-web:3000`). Mientras el VPS sirva la
+web, Fail open lo usa de respaldo. La entrega siguiente declara las rutas en
+`wrangler.jsonc`, cierra `workers.dev` y retira el servidor de Node, `web` y
+`latidia-web`; con eso Fail open ya no tiene adónde ir y las rutas del túnel sobran.
 
 ## Variables: una sola fuente
 
@@ -269,7 +310,15 @@ construye la imagen de PostgreSQL para las pruebas de integración, ejecuta los 
 sin E2E y, en cada PR y en `main`, comprueba que la imagen de la app construye. No
 hay entornos por PR: esa comprobación es lo único que valida la imagen antes de
 fusionar. Solo después de que ambos jobs pasen, un push a `main` ejecuta el CLI
-oficial `openship deploy --commit "$GITHUB_SHA" --watch`. El CLI envía el
+oficial `openship deploy --commit "$GITHUB_SHA" --watch`.
+
+El PR prueba todo, no solo lo afectado. Con todo en verde, el job `codigo-probado`
+anota en el último commit del PR (estado `ci/codigo-probado`) el árbol que probó: la
+unión del PR con `main` de ese momento. Al unirlo, `ya-probado` compara ese árbol con
+el de `main`: si son iguales, `main` despliega sin volver a probar; si `main` avanzó
+entretanto (otra unión), o el PR vino de un fork y no pudo anotarlo, prueba todo.
+Poner la rama al día con `main` y esperar su CI antes de unir es lo que evita la
+segunda corrida. El CLI envía el
 despliegue y espera su resultado; no hay controlador propio ni bucle HTTP de espera.
 
 Configurar en GitHub:

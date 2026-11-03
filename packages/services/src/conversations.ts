@@ -2116,7 +2116,8 @@ export async function writeToPerson(
   orgId: string,
   actorUserId: string | null,
   contactId: string,
-  input: { phone?: string | null } = {},
+  /** `onlyWhatsapp`: «Escribirle por WhatsApp» lleva a su WhatsApp aunque otro canal esté abierto. */
+  input: { phone?: string | null; onlyWhatsapp?: boolean } = {},
 ): Promise<WriteToPersonResult> {
   const [person] = await tx
     .select({ id: contact.id, isActive: contact.isActive, phone: contact.phone })
@@ -2148,7 +2149,7 @@ export async function writeToPerson(
   const typedPhone = input.phone?.trim() || null
   if (!typedPhone) {
     const live = threads.find(
-      (row) => windowOpen(row.lastInboundAt, now),
+      (row) => windowOpen(row.lastInboundAt, now) && (!input.onlyWhatsapp || row.channel === "whatsapp"),
     )
     if (live) return { conversationId: live.id, created: false, channel: live.channel, identityCreated: false }
   }
@@ -2166,7 +2167,7 @@ export async function writeToPerson(
     .limit(1)
   const fallback = threads[0]
   if (!whatsapp) {
-    if (fallback && !typedPhone) {
+    if (fallback && !typedPhone && !input.onlyWhatsapp) {
       return { conversationId: fallback.id, created: false, channel: fallback.channel, identityCreated: false }
     }
     throw new ServiceError(
@@ -2203,7 +2204,7 @@ export async function writeToPerson(
     identityCreated = claimed.created
   }
   if (!identityId) {
-    if (fallback) return { conversationId: fallback.id, created: false, channel: fallback.channel, identityCreated: false }
+    if (fallback && !input.onlyWhatsapp) return { conversationId: fallback.id, created: false, channel: fallback.channel, identityCreated: false }
     throw new ServiceError("NO_PHONE", 409, "Falta su número de WhatsApp: escríbelo para poder escribirle.")
   }
   const started = await startContactConversation(tx, orgId, actorUserId, contactId, {

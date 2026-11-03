@@ -4,7 +4,7 @@ import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
 import { automationConsent, automationJob, automationRule } from "@odentia/db/schema/automation"
 import { patientContact, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
-import { agentConfig, channelTemplate, contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
+import { agentConfig, channelConnection, channelTemplate, contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { portalSession } from "@odentia/db/schema/portal"
 import { and, asc, eq } from "drizzle-orm"
@@ -766,6 +766,38 @@ describe("«Escribirle»", () => {
       .from(auditEvent)
       .where(and(eq(auditEvent.organizationId, c.orgId), eq(auditEvent.entityId, rosa.id)))
     expect(trail).toContainEqual({ action: "contact.identity_added", actor: c.ownerId })
+  })
+
+  it("«Escribirle por WhatsApp» lleva a su WhatsApp aunque otro canal tenga la conversación abierta", async () => {
+    const c = await clinic()
+    const rosa = await person(c, "Rosa Quispe")
+    const [telegram] = await ownerDb
+      .insert(channelConnection)
+      .values({
+        organizationId: c.orgId, channel: "telegram", provider: "telegram_bot_api", displayName: "Bot",
+        configEncrypted: "config", webhookSecret: "secret", status: "active",
+      })
+      .returning({ id: channelConnection.id })
+    const [telegramIdentity] = await ownerDb
+      .insert(contactIdentity)
+      .values({ organizationId: c.orgId, contactId: rosa.contactId, channel: "telegram", externalUserId: `tg:${randomUUID()}` })
+      .returning({ id: contactIdentity.id })
+    const [open] = await ownerDb
+      .insert(conversation)
+      .values({
+        organizationId: c.orgId, contactId: rosa.contactId, contactIdentityId: telegramIdentity!.id,
+        channelConnectionId: telegram!.id, externalThreadId: `tg:${randomUUID()}`, lastInboundAt: new Date(),
+      })
+      .returning({ id: conversation.id })
+    // «Escribirle» sigue con la conversación abierta: ahí le llega sin mensaje aprobado.
+    expect(await run(c, (tx) => writeToPerson(tx, c.orgId, c.ownerId, rosa.contactId))).toMatchObject({
+      conversationId: open!.id,
+      channel: "telegram",
+    })
+    // El botón que dice WhatsApp lleva a su WhatsApp.
+    const whatsapp = await run(c, (tx) => writeToPerson(tx, c.orgId, c.ownerId, rosa.contactId, { onlyWhatsapp: true }))
+    expect(whatsapp).toMatchObject({ channel: "whatsapp" })
+    expect(whatsapp.conversationId).not.toBe(open!.id)
   })
 
   it("el número de otra persona no se mueve; sin número ni WhatsApp dice qué falta", async () => {

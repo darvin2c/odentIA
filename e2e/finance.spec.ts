@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto"
 import { tenant } from "./env"
 import { call, chooseOption, expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
@@ -5,6 +6,75 @@ import { buildClinicalBase, createAcceptedBudget, patientApiPath } from "./patie
 import { surface } from "./surface"
 
 type Closure = { countedCents: number; expectedCents: number; differenceCents: number }
+
+test("aplicar lo que tiene a favor siempre se confirma: ni el enlace ni el botón lo ejecutan solos", async ({ owner }) => {
+  const ids = await buildClinicalBase(owner)
+  const { budgetLineId } = await createAcceptedBudget(owner, ids)
+  const { page } = owner
+  const slug = owner.org.slug
+  const apiPath = patientApiPath(ids.patientId)
+  await call(page, "POST", `${apiPath}/charges`, slug, { budgetItemId: budgetLineId }, 201)
+  const methods = await call<Array<{ id: string }>>(page, "GET", "/api/org/payment-methods", slug)
+  await call(
+    page,
+    "POST",
+    `${apiPath}/collect`,
+    slug,
+    {
+      branchId: owner.branchId,
+      advanceCents: 45000,
+      payments: [{ paymentMethodId: methods[0]?.id, amountCents: 45000 }],
+      cashReceivedCents: 45000,
+      requestId: randomUUID(),
+    },
+    201,
+  )
+  const owed = async () => {
+    const account = await call<{ byCurrency: Array<{ porCobrar: number; saldo: number }> }>(page, "GET", `${apiPath}/account`, slug)
+    return account.byCurrency[0]
+  }
+  expect(await owed()).toMatchObject({ porCobrar: 45000, saldo: 0 })
+  const applied: string[] = []
+  page.on("request", (request) => {
+    if (request.method() === "POST" && request.url().endsWith("/collect")) applied.push(request.url())
+  })
+
+  // Abrir la dirección guardada no mueve el saldo: pregunta.
+  await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}?tab=cuenta&cobrar=true`))
+  await expect(page.getByRole("button", { name: /^Aplicar S\/\s*450\.00/ })).toBeVisible()
+  expect(applied).toEqual([])
+  await page.getByRole("button", { name: "Cancelar", exact: true }).click()
+  expect(await owed()).toMatchObject({ porCobrar: 45000 })
+
+  // En Pendientes del Resumen, el botón lo dice y también pregunta. Lo aplica solo al confirmar.
+  await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}?tab=resumen`))
+  await page.getByRole("button", { name: "Aplicar lo que tiene a favor", exact: true }).first().click()
+  const confirm = page.getByRole("button", { name: /^Aplicar S\/\s*450\.00/ })
+  await expect(confirm).toBeVisible()
+  expect(applied).toEqual([])
+  await confirm.click()
+  await expect(page.getByText(/Ya no debe nada/)).toBeVisible()
+  expect(await owed()).toMatchObject({ porCobrar: 0, saldo: 0 })
+  await expect(page).toHaveURL(/tab=resumen/)
+})
+
+test("cobrar todo desde Pendientes: la fila se va y el ticket sigue a la vista", async ({ owner }) => {
+  const ids = await buildClinicalBase(owner)
+  const { budgetLineId } = await createAcceptedBudget(owner, ids)
+  const { page } = owner
+  const slug = owner.org.slug
+  await call(page, "POST", `${patientApiPath(ids.patientId)}/charges`, slug, { budgetItemId: budgetLineId }, 201)
+
+  await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}?tab=resumen`))
+  await expect(page.getByText(/^Saldo por cobrar de/)).toBeVisible()
+  await page.getByRole("button", { name: "Cobrar", exact: true }).first().click()
+  const drawer = surface(page, { name: "Cobrar", exact: true })
+  await drawer.getByRole("button", { name: /^Cobrar S\/\s*450\.00/ }).click()
+  // Pagado todo, Pendientes ya no tiene la fila del saldo, y el ticket sigue para imprimirlo o enviarlo.
+  await expect(page.getByText(/^Saldo por cobrar de/)).toHaveCount(0)
+  await expect(page.getByRole("article", { name: /^Ticket / })).toBeVisible()
+  await expect(page).toHaveURL(/tab=resumen/)
+})
 
 for (const viewport of [
   { name: "escritorio", width: 1280, height: 720 },

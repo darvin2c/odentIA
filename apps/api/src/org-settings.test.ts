@@ -30,10 +30,11 @@ let appDb: Db
 let app: Hono
 let branchId = ""
 
-type Who = "owner" | "reception" | "other"
+type Who = "owner" | "reception" | "cashier" | "other"
 const SESSIONS: Record<Who, { userId: string; activeOrg: string }> = {
   owner: { userId: "u-set-owner", activeOrg: ORG },
   reception: { userId: "u-set-reception", activeOrg: ORG },
+  cashier: { userId: "u-set-cashier", activeOrg: ORG },
   other: { userId: "u-set-other", activeOrg: OTHER_ORG },
 }
 
@@ -113,11 +114,13 @@ beforeAll(async () => {
     insert into "user" ("id", "name", "email") values
       ('u-set-owner', 'Olga Propietaria', 'u-set-owner@example.test'),
       ('u-set-reception', 'Rita Recepción', 'u-set-reception@example.test'),
+      ('u-set-cashier', 'Carla Caja', 'u-set-cashier@example.test'),
       ('u-set-other', 'Otra Clínica', 'u-set-other@example.test')`)
   await ownerDb.execute(sql`
     insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
       ('m-set-owner', ${ORG}, 'u-set-owner', 'owner', now()),
       ('m-set-reception', ${ORG}, 'u-set-reception', 'reception', now()),
+      ('m-set-cashier', ${ORG}, 'u-set-cashier', 'cashier', now()),
       ('m-set-other', ${OTHER_ORG}, 'u-set-other', 'owner', now())`)
   const [row] = await ownerDb.execute<{ id: string }>(sql`
     insert into "branch" ("organization_id", "name") values (${ORG}, 'Sede Central') returning "id"`)
@@ -356,4 +359,74 @@ it("la clínica nace con el producto del dominio donde se crea, y no cambia (ent
   expect(await productOf(ORG)).toBe("dental")
   expect((await put({ legalName: "Consultorio Ajeno", ...region })).status).toBe(200)
   expect(await productOf(OTHER_ORG)).toBe("medical")
+})
+
+it("la otra moneda la activa quien configura y el cambio de hoy también lo escribe quien cobra", async () => {
+  const region = { countryCode: "PE", currency: "PEN", timezone: "America/Lima", locale: "es-PE" }
+  const body = { legalName: "Clínica Ajustes S.A.C.", tradeName: "Ajustes", ...region }
+  expect((await request("owner", "PUT", "/org-profile", body)).status).toBe(200)
+
+  // Sin nada activado, leer el perfil no dice nada de otra moneda y escribir el cambio no se puede.
+  expect(await data<Record<string, unknown>>(await request("reception", "GET", "/org-profile"))).toMatchObject({
+    secondCurrency: null,
+    exchangeRate: null,
+    exchangeRateByName: null,
+  })
+  const early = await request("cashier", "PUT", "/org-profile/exchange-rate", { exchangeRate: "3.75" })
+  expect(early.status).toBe(400)
+
+  // Activar exige escribir el cambio, y es de quien configura.
+  const noRate = await request("owner", "PUT", "/org-profile", { ...body, secondCurrency: "USD" })
+  expect(noRate.status).toBe(400)
+  const noRateBody = (await noRate.json()) as { error: { fields?: Record<string, string> } }
+  expect(noRateBody.error.fields?.exchangeRate).toContain("USD")
+  expect(
+    (await request("cashier", "PUT", "/org-profile", { ...body, secondCurrency: "USD", exchangeRate: "3.75" })).status,
+  ).toBe(403)
+  const activated = await request("owner", "PUT", "/org-profile", { ...body, secondCurrency: "USD", exchangeRate: "3.75" })
+  expect(activated.status).toBe(200)
+  expect(await data<Record<string, unknown>>(activated)).toMatchObject({
+    secondCurrency: "USD",
+    exchangeRate: "3.75",
+    exchangeFactor: "3.75",
+    exchangeRateBy: "u-set-owner",
+  })
+
+  // El cambio lo escribe también quien cobra; recepción, no.
+  expect((await request("reception", "PUT", "/org-profile/exchange-rate", { exchangeRate: "3.8" })).status).toBe(403)
+  const bad = await request("cashier", "PUT", "/org-profile/exchange-rate", { exchangeRate: "3,8" })
+  expect(bad.status).toBe(400)
+  const changed = await request("cashier", "PUT", "/org-profile/exchange-rate", { exchangeRate: "3.8" })
+  expect(changed.status).toBe(200)
+  expect(await data<Record<string, unknown>>(await request("reception", "GET", "/org-profile"))).toMatchObject({
+    exchangeRate: "3.8",
+    exchangeRateBy: "u-set-cashier",
+    exchangeRateByName: "Carla Caja",
+  })
+  // Guardar los datos de la clínica sin tocar esto no lo pisa.
+  expect((await request("owner", "PUT", "/org-profile", body)).status).toBe(200)
+  expect(await data<Record<string, unknown>>(await request("owner", "GET", "/org-profile"))).toMatchObject({
+    secondCurrency: "USD",
+    exchangeRate: "3.8",
+  })
+
+  // La moneda del negocio queda quieta y se libera en el mismo guardado que quita la otra.
+  const locked = await request("owner", "PUT", "/org-profile", { ...body, currency: "EUR" })
+  expect(locked.status).toBe(409)
+  expect(((await locked.json()) as { error: { code: string } }).error.code).toBe("SECOND_CURRENCY_ACTIVE")
+
+  // Lo que ya hay en otra moneda, solo para quien configura.
+  expect((await request("cashier", "GET", "/org-profile/currency-usage?currency=USD")).status).toBe(403)
+  expect(await data(await request("owner", "GET", "/org-profile/currency-usage?currency=USD"))).toEqual({
+    currency: "USD",
+    dueCents: 0,
+    favorCents: 0,
+    cashCents: 0,
+    services: 0,
+    pending: 0,
+  })
+
+  const removed = await request("owner", "PUT", "/org-profile", { ...body, secondCurrency: null })
+  expect(removed.status).toBe(200)
+  expect(await data<Record<string, unknown>>(removed)).toMatchObject({ secondCurrency: null, exchangeRate: null })
 })

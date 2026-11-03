@@ -42,7 +42,7 @@ import { createPromotion } from "./promotions.js"
 import { collectCharge, createCharge, voidTicket } from "./payments.js"
 import { createPaymentMethod } from "./payment-methods.js"
 import { purchaseBalances, supplierCredits, unpaidPurchasesMany } from "./purchase-balance.js"
-import { overdueDebtMany } from "./report-summary.js"
+import { overdueDebtTotalsMany } from "./report-summary.js"
 import { commissionsMany, debtAgingMany, financeListRows, getReportCommissions, getReportFinance, getReportPromotions } from "./report-finance.js"
 import { reportScope } from "./report-scope.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
@@ -355,8 +355,8 @@ it("te deben por antigüedad: lo de más de 30 días es exactamente el saldo ven
     { key: "61_90", cents: 0, people: 0 },
     { key: "90_plus", cents: 20_000, people: 1 },
   ])
-  const [overdue] = await run((tx) => overdueDebtMany(tx, orgId, undefined, [at]))
-  expect(overdue).toEqual([{ currency: "PEN", cents: 30_000, people: 2 }])
+  const [overdue] = await run((tx) => overdueDebtTotalsMany(tx, orgId, undefined, [at], "PEN"))
+  expect(overdue).toEqual({ cents: 30_000, people: 2 })
 })
 
 it("te deben por antigüedad: un cargo de hace 30 días y 9 horas ya está vencido, en la cifra, en su lista y en el Resumen", async () => {
@@ -375,8 +375,8 @@ it("te deben por antigüedad: un cargo de hace 30 días y 9 horas ya está venci
   expect(aging?.ages.find((age) => age.key === "0_30")).toEqual({ key: "0_30", cents: 0, people: 0 })
   expect(aging?.ages.find((age) => age.key === "31_60")).toEqual({ key: "31_60", cents: 7_000, people: 1 })
   // El Resumen lo cuenta vencido: lo mismo que suman los tramos de más de 30 días.
-  const [overdue] = await run((tx) => overdueDebtMany(tx, orgId, undefined, [at]))
-  expect(overdue).toEqual([{ currency: "PEN", cents: 7_000, people: 1 }])
+  const [overdue] = await run((tx) => overdueDebtTotalsMany(tx, orgId, undefined, [at], "PEN"))
+  expect(overdue).toEqual({ cents: 7_000, people: 1 })
   // Su lista es la misma cuenta: está en «31 a 60» y no en «0 a 30».
   const scope = await run((tx) => reportScope(tx, orgId, { period: "este_mes" }, at))
   expect(scope.window.end).toEqual(at)

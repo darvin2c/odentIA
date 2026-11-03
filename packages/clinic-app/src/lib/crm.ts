@@ -557,6 +557,8 @@ export interface OpportunityDetail extends OpportunityListItem {
   amountFromPriceList: boolean
   /** El valor es el total del presupuesto que se le presentó. */
   amountFromBudget: boolean
+  /** Ese presupuesto va en dos monedas: el valor es un estimado en moneda del negocio al cambio de hoy. */
+  amountEstimated?: boolean
   budgetTitle: string | null
   budgetNumber: number | null
   budgetStatus: string | null

@@ -1,4 +1,4 @@
-import { budgetStateText, diagnosisCodeLabel } from "@odentia/clinical"
+import { budgetStateText, diagnosisCodeLabel, sumByCurrency } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   clinicalFollowUp,
@@ -205,6 +205,21 @@ export interface OpenEncounterBrief {
   missing: ClosingRequirement[]
 }
 
+/** Las líneas con precio, un total por moneda; las que no lo tienen, cuántas son. */
+function pricedTotals(rows: ReadonlyArray<{ priceCents: number | null; currency: string }>) {
+  const priced = rows.flatMap((item) =>
+    item.priceCents === null ? [] : [{ currency: item.currency, cents: item.priceCents }],
+  )
+  return {
+    totals: sumByCurrency(priced).map(({ currency, count, cents }) => ({
+      currency,
+      count,
+      totalCents: cents,
+    })),
+    unpriced: rows.length - priced.length,
+  }
+}
+
 export async function getPatientSummary(tx: Db, orgId: string, patientId: string) {
   await requirePatient(tx, orgId, patientId)
   const site = (await productHooks(tx, orgId)).site
@@ -270,7 +285,13 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
     }
   }
   const pendingConsentRows = await tx
-    .select({ id: consentDocument.id, title: consentDocument.titleSnapshot })
+    .select({
+      id: consentDocument.id,
+      title: consentDocument.titleSnapshot,
+      // Firmado por su enlace falta confirmarlo; enviado, espera su firma: no es «sin firmar».
+      personSignedAt: consentDocument.personSignedAt,
+      linkSentAt: consentDocument.linkSentAt,
+    })
     .from(consentDocument)
     .where(
       and(
@@ -327,19 +348,7 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
       ),
     )
     .orderBy(asc(treatmentPlanItem.createdAt), asc(treatmentPlanItem.id))
-  const totals = new Map<string, { currency: string; count: number; totalCents: number }>()
-  let unpricedCount = 0
-  for (const item of acceptedRows) {
-    if (item.priceCents === null) {
-      unpricedCount++
-      continue
-    }
-    const total = totals.get(item.currency) ?? { currency: item.currency, count: 0, totalCents: 0 }
-    total.count++
-    total.totalCents += item.priceCents
-    totals.set(item.currency, total)
-  }
-  const amounts = [...totals.values()].sort((a, b) => a.currency.localeCompare(b.currency))
+  const { totals: amounts, unpriced: unpricedCount } = pricedTotals(acceptedRows)
 
   let lastVisit: LastVisit | null = null
   if (lastEncounter) {
@@ -496,30 +505,13 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
     }
     proposedBudgets = budgetRows.map((b) => {
       const list = byBudget.get(b.id) ?? []
-      const perCurrency = new Map<string, { currency: string; count: number; totalCents: number }>()
-      let unpriced = 0
-      for (const item of list) {
-        if (item.priceCents === null) {
-          unpriced++
-          continue
-        }
-        const entry = perCurrency.get(item.currency) ?? {
-          currency: item.currency,
-          count: 0,
-          totalCents: 0,
-        }
-        entry.count++
-        entry.totalCents += item.priceCents
-        perCurrency.set(item.currency, entry)
-      }
-      const budgetTotals = [...perCurrency.values()].sort((a, b2) =>
-        a.currency.localeCompare(b2.currency),
-      )
+      const { totals: budgetTotals, unpriced } = pricedTotals(list)
       return {
         id: b.id,
         budgetNumber: b.budgetNumber,
         title: b.title,
-        currency: b.currency,
+        // Sale de sus líneas: la cabecera no se lee. Con dos monedas, las dice `totals`.
+        currency: budgetTotals[0]?.currency ?? list[0]?.currency ?? "",
         status: b.status,
         itemsCount: list.length,
         unpricedCount: unpriced,

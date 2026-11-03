@@ -19,7 +19,7 @@
  *
  * Todo movimiento de saldo pasa por `inventory-stock.ts`.
  */
-import { quantityWords } from "@odentia/clinical"
+import { convertCents, quantityWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { encounter, encounterDictationSuggestion, serviceCatalog } from "@odentia/db/schema/clinical"
 import { product, serviceMaterial, stockMovement } from "@odentia/db/schema/inventory"
@@ -34,7 +34,8 @@ import {
   movementsWithPrefix,
   restoreUnits,
 } from "./inventory-stock.js"
-import { findOrgCurrency, findOrgLocale } from "./locale.js"
+import { findOrgLocale } from "./locale.js"
+import { businessFirst, type CurrencyAmount, type OrgMoney, orgMoney } from "./report-value.js"
 import { foldedWordsMatch } from "./search-text.js"
 
 /** Cuántos materiales puede tener un servicio. */
@@ -61,9 +62,10 @@ interface UnitCost {
 }
 
 /**
- * El último precio de compra de cada producto, por unidad de uso: el de la
- * línea de la última compra recibida ÷ el factor que copió esa línea. Una
- * línea sin precio (0) no cuenta: es una compra a la que nadie le puso precio.
+ * El último precio de compra de cada producto, por unidad de uso y en la moneda
+ * de esa compra: el de la línea de la última compra recibida con precio ÷ el factor
+ * que copió esa línea. Una línea sin precio (0) no cuenta ni esconde la anterior:
+ * es una compra a la que nadie le puso precio.
  */
 async function lastUnitCosts(tx: Db, orgId: string, productIds: string[]): Promise<Map<string, UnitCost>> {
   if (productIds.length === 0) return new Map()
@@ -82,14 +84,71 @@ async function lastUnitCosts(tx: Db, orgId: string, productIds: string[]): Promi
       and m.kind = 'ingreso'
       and m.purchase_order_id is not null
       and m.product_id in (${ids})
+      and l.unit_cost_cents > 0
     order by m.product_id, m.created_at desc, m.id desc`)
   const out = new Map<string, UnitCost>()
   for (const row of rows) {
-    const cents = Number(row.unitCostCents)
     const factor = Math.max(1, Number(row.unitFactor))
-    if (cents > 0) out.set(row.productId, { perUse: cents / factor, currency: row.currency })
+    out.set(row.productId, { perUse: Number(row.unitCostCents) / factor, currency: row.currency })
   }
   return out
+}
+
+/** En qué monedas se suma un material: la de la clínica y, si la tiene, su otra. */
+function countsIn(money: OrgMoney, code: string): boolean {
+  return code === money.currency || code === money.secondCurrency
+}
+
+/** Lo que cuesta cada vez, por moneda y sin mezclarlas, con la del negocio primero. */
+function costParts(totals: Map<string, number>, money: OrgMoney): CurrencyAmount[] {
+  return businessFirst(
+    [...totals].map(([currency, total]) => ({ currency, cents: Math.round(total) })),
+    money.currency,
+  )
+}
+
+/**
+ * El costo cuando la clínica tiene dos monedas: en la moneda del material y, para el
+ * margen, en la del servicio. Lo que ya está en esa moneda no necesita cambio; lo de
+ * la otra se suma al cambio de hoy, y por eso la cifra es aproximada.
+ */
+function twoCurrencyCost(
+  parts: CurrencyAmount[],
+  money: OrgMoney,
+  service: { priceCents: number; currency: string },
+  unpriced: number,
+): ServiceMaterialsCost {
+  const factor = money.exchangeFactor
+  // Un servicio viejo en otra moneda no se compara: se dice lo que cuesta en la del negocio.
+  const comparable = countsIn(money, service.currency) && factor !== null
+  const target = comparable ? service.currency : money.currency
+  const estimated = parts.some((part) => part.currency !== target)
+  const cents =
+    factor === null
+      ? (parts.find((part) => part.currency === target)?.cents ?? 0)
+      : parts.reduce(
+          (total, part) =>
+            total +
+            convertCents({
+              amountCents: part.cents,
+              from: part.currency,
+              to: target,
+              businessCurrency: money.currency,
+              factor,
+            }),
+          0,
+        )
+  const hasPrice = comparable && service.priceCents > 0
+  return {
+    cents,
+    currency: target,
+    unpriced,
+    shareOfPrice: hasPrice ? cents / service.priceCents : null,
+    parts,
+    estimated,
+    leftCents: hasPrice ? service.priceCents - cents : null,
+    rate: estimated ? money.exchangeRate : null,
+  }
 }
 
 /* ---------------- materiales de un servicio ---------------- */
@@ -115,6 +174,8 @@ export interface ServiceMaterialLine {
   discounted: boolean
   /** Solo para quien ve precios: lo que cuesta este material cada vez; null si nunca se compró con precio. */
   costCents: number | null
+  /** Con dos monedas: en cuál está ese costo, la de su última compra. */
+  costCurrency?: string
 }
 
 export interface ServiceMaterialsCost {
@@ -125,6 +186,14 @@ export interface ServiceMaterialsCost {
   unpriced: number
   /** Qué parte del precio del servicio son (0.018 = 1,8 %); null sin precio del servicio o con otra moneda. */
   shareOfPrice: number | null
+  /** Con dos monedas: lo que cuesta en cada una, sin mezclarlas. `cents` es la suma en la moneda del servicio. */
+  parts?: CurrencyAmount[]
+  /** Con dos monedas: hubo que sumar otra moneda al cambio de hoy, así que `cents` y `leftCents` son «unos». */
+  estimated?: boolean
+  /** Con dos monedas: lo que le queda del precio del servicio, en su moneda. */
+  leftCents?: number | null
+  /** El cambio de hoy, si se usó. */
+  rate?: string | null
 }
 
 export interface ServiceMaterials {
@@ -173,14 +242,15 @@ export async function listServiceMaterials(
     .orderBy(asc(product.name), asc(product.id))
   const { locale } = await findOrgLocale(tx, orgId)
   const costs = options.prices ? await lastUnitCosts(tx, orgId, rows.map((row) => row.productId)) : new Map<string, UnitCost>()
-  const currency = options.prices ? await findOrgCurrency(tx, orgId) : null
-  let total = 0
+  const money = options.prices ? await orgMoney(tx, orgId) : null
+  const second = money?.secondCurrency ?? null
+  const totals = new Map<string, number>()
   let priced = 0
   const items: ServiceMaterialLine[] = rows.map((row) => {
     const cost = costs.get(row.productId)
-    const own = cost && currency && cost.currency === currency ? cost.perUse * row.quantity : null
-    if (own !== null) {
-      total += own
+    const own = cost && money && countsIn(money, cost.currency) ? cost.perUse * row.quantity : null
+    if (cost && own !== null) {
+      totals.set(cost.currency, (totals.get(cost.currency) ?? 0) + own)
       priced += 1
     }
     return {
@@ -191,16 +261,24 @@ export async function listServiceMaterials(
       quantityText: quantityWords(row.quantity, row.unit, locale),
       discounted: row.isActive && row.usedInCare,
       costCents: options.prices && own !== null ? Math.round(own) : null,
+      ...(second && cost && own !== null ? { costCurrency: cost.currency } : {}),
     }
   })
   let cost: ServiceMaterialsCost | null = null
-  if (options.prices && currency && priced > 0) {
-    const cents = Math.round(total)
-    cost = {
-      cents,
-      currency,
-      unpriced: rows.length - priced,
-      shareOfPrice: service.priceCents > 0 && service.currency === currency ? cents / service.priceCents : null,
+  if (options.prices && money?.currency && priced > 0) {
+    const unpriced = rows.length - priced
+    if (second) cost = twoCurrencyCost(costParts(totals, money), money, service, unpriced)
+    else {
+      const cents = Math.round(totals.get(money.currency) ?? 0)
+      cost = {
+        cents,
+        currency: money.currency,
+        unpriced,
+        shareOfPrice:
+          service.priceCents > 0 && service.currency === money.currency
+            ? cents / service.priceCents
+            : null,
+      }
     }
   }
   return { serviceId: service.id, serviceName: service.name, items, cost }
@@ -315,7 +393,13 @@ export interface ServiceMaterialSummary {
   /** Cuántos materiales tiene. */
   count: number
   /** Solo para quien ve precios: lo que cuestan cada vez (null sin precios o sin compras con precio). */
-  cost: { cents: number; currency: string; unpriced: number } | null
+  cost: {
+    cents: number
+    currency: string
+    unpriced: number
+    /** Con dos monedas: lo que cuesta en cada una, sin mezclarlas; `cents` es la primera. */
+    parts?: CurrencyAmount[]
+  } | null
 }
 
 /**
@@ -334,26 +418,44 @@ export async function serviceMaterialSummaries(
     .from(serviceMaterial)
     .where(and(eq(serviceMaterial.organizationId, orgId), inArray(serviceMaterial.serviceId, [...new Set(serviceIds)])))
   const costs = options.prices ? await lastUnitCosts(tx, orgId, rows.map((row) => row.productId)) : new Map<string, UnitCost>()
-  const currency = options.prices && rows.length ? await findOrgCurrency(tx, orgId) : null
-  const acc = new Map<string, { count: number; total: number; priced: number }>()
+  const money = options.prices && rows.length ? await orgMoney(tx, orgId) : null
+  const acc = new Map<string, { count: number; totals: Map<string, number>; priced: number }>()
   for (const row of rows) {
-    const entry = acc.get(row.serviceId) ?? { count: 0, total: 0, priced: 0 }
+    const entry = acc.get(row.serviceId) ?? {
+      count: 0,
+      totals: new Map<string, number>(),
+      priced: 0,
+    }
     entry.count += 1
     const cost = costs.get(row.productId)
-    if (cost && currency && cost.currency === currency) {
-      entry.total += cost.perUse * row.quantity
+    if (cost && money && countsIn(money, cost.currency)) {
+      entry.totals.set(
+        cost.currency,
+        (entry.totals.get(cost.currency) ?? 0) + cost.perUse * row.quantity,
+      )
       entry.priced += 1
     }
     acc.set(row.serviceId, entry)
   }
   const out = new Map<string, ServiceMaterialSummary>()
   for (const [serviceId, entry] of acc) {
+    if (!money?.currency || entry.priced === 0) {
+      out.set(serviceId, { count: entry.count, cost: null })
+      continue
+    }
+    const unpriced = entry.count - entry.priced
+    const parts = costParts(entry.totals, money)
+    const first = parts[0]
     out.set(serviceId, {
       count: entry.count,
       cost:
-        options.prices && currency && entry.priced > 0
-          ? { cents: Math.round(entry.total), currency, unpriced: entry.count - entry.priced }
-          : null,
+        money.secondCurrency && first
+          ? { cents: first.cents, currency: first.currency, unpriced, parts }
+          : {
+              cents: Math.round(entry.totals.get(money.currency) ?? 0),
+              currency: money.currency,
+              unpriced,
+            },
     })
   }
   return out
