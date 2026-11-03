@@ -3236,11 +3236,10 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
       if (!lastClosure[key]) lastClosure[key] = row.closedAt
     }
   }
-  // Sin nada cruzado, el dinero de cada ticket está en su moneda: no hace falta buscarlo.
-  const crossed = payments.some((p) => p.tenderCurrency) || tickets.some((t) => t.changeCurrency)
-  const ticketUnits = crossed
-    ? await cashUnitsOfTickets(tx, orgId, tickets)
-    : new Map(tickets.map((ticket) => [ticket.id, [ticket.currency]]))
+  // Las cajas se leen de sus movimientos, no del pago: un movimiento puede estar en otra
+  // moneda que el pago (lo arma a mano una prueba de integridad) y saltarlo cambiaría
+  // `closedAfter`. Con el índice por ticket la consulta es barata.
+  const ticketUnits = await cashUnitsOfTickets(tx, orgId, tickets)
   const returnRows = await returnsOfTickets(
     tx,
     orgId,
