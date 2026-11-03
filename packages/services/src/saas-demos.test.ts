@@ -11,7 +11,7 @@ import { purchaseOrder, stockMovement } from "@odentia/db/schema/inventory"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { orgProfile, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { saasSubscription } from "@odentia/db/schema/saas-billing"
-import { and, eq, inArray, like, sql } from "drizzle-orm"
+import { and, asc, eq, inArray, like, sql } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import { listOrganizations } from "./admin-organizations.js"
 import { seedDiagnosisCodes } from "./clinical-test-fixture.js"
@@ -379,12 +379,26 @@ describe("una demo de Pediatría en Colombia", () => {
           eq(appointment.organizationId, demo.organizationId),
           inArray(appointment.status, ["programada", "confirmada"]),
           sql`${appointment.startsAt} > now() + interval '2 days'`,
+          // Con otra cita suya ya vencida y abierta, «ponerla al día» cierra solo una por
+          // persona y esta podría quedar para la noche siguiente.
+          sql`not exists (select 1 from appointment o where o.organization_id = ${appointment.organizationId} and o.patient_id = ${appointment.patientId} and o.id <> ${appointment.id} and o.status in ('programada', 'confirmada') and o.ends_at < now())`,
         ),
       )
+      .orderBy(asc(appointment.startsAt))
       .limit(2)
     if (!left || !manual) throw new Error("faltan citas")
     // Una cita que ya pasó sin cerrar, y otra que alguien canceló en una presentación.
-    const past = new Date(Date.now() - 3 * 3_600_000)
+    // Va un día antes de la primera cita de la demo, donde su consultorio y su profesional
+    // están libres seguro. «Hace tres horas» chocaba con la cita que ocupara su consultorio
+    // a esa hora, según cuándo corriera la prueba.
+    const [first] = await ownerDb
+      .select({ startsAt: appointment.startsAt })
+      .from(appointment)
+      .where(eq(appointment.organizationId, demo.organizationId))
+      .orderBy(asc(appointment.startsAt))
+      .limit(1)
+    if (!first) throw new Error("faltan citas")
+    const past = new Date(first.startsAt.getTime() - DAY)
     await ownerDb.execute(
       sql`update appointment set starts_at = ${past.toISOString()}::timestamptz, ends_at = ${new Date(past.getTime() + 20 * 60_000).toISOString()}::timestamptz where id = ${left.id}`,
     )

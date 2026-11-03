@@ -85,8 +85,10 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
     .toEqual([expect.objectContaining({ question: UNKNOWN, status: "abierto" })])
   const sent = await call<Array<{ id: string; question: string; status: string }>>(page, "GET", "/api/help/cases", org.slug)
   // Soporte se entera: queda el aviso por correo «Caso nuevo», que envía el worker.
+  // El worker lo envía en su propia vuelta (cada minuto): según cuándo le toque, ya salió o
+  // todavía espera. Cualquiera de los dos es correcto; un envío fallido («incierto») no.
   expect((await fixtureDb.select().from(supportNotice).where(eq(supportNotice.caseId, sent[0]!.id))).map((row) => [row.kind, row.recipientUserId, row.emailState]))
-    .toEqual([["caso_nuevo", null, "pendiente"]])
+    .toEqual([["caso_nuevo", null, expect.stringMatching(/^(pendiente|reclamado|enviado)$/)]])
   // La Ayuda no guarda lo que se le pregunta: solo la pantalla, el tema y si sirvió.
   const logged = await fixtureDb.select().from(helpAsk).where(eq(helpAsk.organizationId, org.id))
   expect(logged.map((row) => [row.screen, row.topicId, row.helpful])).toEqual([
