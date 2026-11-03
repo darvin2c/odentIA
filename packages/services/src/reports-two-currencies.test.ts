@@ -30,6 +30,7 @@ import { getOrgLocale } from "./locale.js"
 import { setOrgExchangeRate } from "./organization-profile.js"
 import { createCharge, getTicketReturnable, returnFromTicket, voidTicket } from "./payments.js"
 import { agentTextsFor, productAgentTexts } from "./products.js"
+import { orgMoney } from "./report-value.js"
 import { computeFigure, type FigureContext } from "./report-figures.js"
 import {
   collectedByMethod,
@@ -77,7 +78,7 @@ describe("lo que ya pasó, con su valor congelado", () => {
     // El impuesto (18 % incluido, 3 × USD 50.85) también sale con su parte del valor: 15,255 × 3.75.
     expect(net).toEqual([{ currency: "PEN", cents: 375_000, taxCents: 57_206 }])
     expect(
-      (await c.run((tx) => collectedByProfessional(tx, c.orgId, span))).map(
+      (await c.run(async (tx) => collectedByProfessional(tx, c.orgId, span, await orgMoney(tx, c.orgId)))).map(
         (row) => row.cobradoCents,
       ),
     ).toEqual([375_000])

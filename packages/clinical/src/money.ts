@@ -343,13 +343,13 @@ export function exchangeRateWords(
 
 /** «soles», «dólares», «pesos»: la moneda como se nombra al hablar, en el idioma de la clínica. */
 export function currencyWord(currency: string, locale: string): string {
-  const name = new Intl.NumberFormat(locale, {
-    style: "currency",
-    currency,
-    currencyDisplay: "name",
-  })
-    .formatToParts(2)
-    .find((part) => part.type === "currency")?.value
+  const key = `name|${locale}|${currency}`
+  let format = FORMATS.get(key)
+  if (!format) {
+    format = new Intl.NumberFormat(locale, { style: "currency", currency, currencyDisplay: "name" })
+    FORMATS.set(key, format)
+  }
+  const name = format.formatToParts(2).find((part) => part.type === "currency")?.value
   return name?.split(" ")[0]?.toLocaleLowerCase(locale) || currency
 }
 

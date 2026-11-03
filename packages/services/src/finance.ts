@@ -2795,10 +2795,11 @@ export async function collectedByProfessional(
   tx: Db,
   orgId: string,
   range: { start: Date; end: Date; branchId?: string },
+  /** La clínica, que quien llama ya leyó (`ReportScope.money`). */
+  money: OrgMoney,
 ): Promise<
   Array<{ professionalUserId: string; name: string | null; currency: string; cobradoCents: number }>
 > {
-  const money = await orgMoney(tx, orgId)
   const apps = await collectedApplications(tx, orgId, range.start, range.end, money, {
     branchId: range.branchId,
   })

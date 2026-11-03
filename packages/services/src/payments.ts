@@ -3236,7 +3236,11 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
       if (!lastClosure[key]) lastClosure[key] = row.closedAt
     }
   }
-  const ticketUnits = await cashUnitsOfTickets(tx, orgId, tickets)
+  // Sin nada cruzado, el dinero de cada ticket está en su moneda: no hace falta buscarlo.
+  const crossed = payments.some((p) => p.tenderCurrency) || tickets.some((t) => t.changeCurrency)
+  const ticketUnits = crossed
+    ? await cashUnitsOfTickets(tx, orgId, tickets)
+    : new Map(tickets.map((ticket) => [ticket.id, [ticket.currency]]))
   const returnRows = await returnsOfTickets(
     tx,
     orgId,
