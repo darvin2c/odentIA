@@ -3,6 +3,7 @@ import {
   CASH_TERMS,
   cashTermLabel,
   cashTermLeaves,
+  cashClosedWords,
   cashTermShort,
   type DayMovement,
   financeKeys,
@@ -98,6 +99,14 @@ describe("lo que dice el importe al cobrar", () => {
     expect(amountHelpText({ ...base, hasSecond: false, owesOther: false })).toBe(
       "Si paga una parte, el resto queda por cobrar.",
     )
+  })
+})
+
+describe("al cerrar una caja", () => {
+  it("dice cuál se cerró y cuál falta, si la otra tiene movimientos", () => {
+    expect(cashClosedWords("USD", "PEN", "es-PE")).toBe("Caja de dólares cerrada. Falta cerrar la de soles.")
+    expect(cashClosedWords("USD", null, "es-PE")).toBe("Caja de dólares cerrada.")
+    expect(cashClosedWords(null, null, "es-PE")).toBe("Caja cerrada.")
   })
 })
 

@@ -43,6 +43,7 @@ import {
   CASH_TERMS_ALWAYS,
   cashErrorMessage,
   cashFormMessage,
+  cashClosedWords,
   cashTermLabel,
   cashTermLeaves,
   closeCashApi,
@@ -241,7 +242,7 @@ export function CashCloseDrawer({
    * Recibe la ventana cerrada (su id abre la hoja) y si ya la había cerrado
    * otra persona: en ese caso el servidor devuelve aquel cierre, no este.
    */
-  onClosed: (windowId: string, alreadyClosed: boolean) => void
+  onClosed: (windowId: string, alreadyClosed: boolean, words: string) => void
 }): React.JSX.Element {
   const queryClient = useQueryClient()
   const canClose = usePermission("finance.close")
@@ -271,15 +272,15 @@ export function CashCloseDrawer({
       const alreadyClosed =
         result.data.countedCents !== sent.countedCents ||
         result.data.retainedCents !== sent.retainedCents
-      if (!alreadyClosed) {
-        const other = boxes.find((item) => item !== current)?.state
-        toast.success(
-          !several
-            ? "Caja cerrada"
-            : `Caja de ${currencyWord(unit, locale)} cerrada.${other && other.tickets > 0 ? ` Falta cerrar la de ${currencyWord(other.currency, locale)}.` : ""}`,
-        )
-      }
-      onClosed(result.data.id, alreadyClosed)
+      // Con dos cajas, la otra falta si tiene su ventana abierta: algo se movió desde su cierre.
+      const pending = boxes.find((item) => item !== current)?.state
+      const words = cashClosedWords(
+        several ? unit : null,
+        pending?.shiftId ? pending.currency : null,
+        locale,
+      )
+      if (!alreadyClosed) toast.success(several ? words : "Caja cerrada")
+      onClosed(result.data.id, alreadyClosed, words)
       onClose()
     },
     onError: (err) => {

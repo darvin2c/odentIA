@@ -133,6 +133,16 @@ export function cashTermLabel(
     : `${upperFirst(box)} que quedaron por vueltos dados en ${other}`
 }
 
+/**
+ * Lo que se dice al cerrar: con varias cajas, cuál se cerró y cuál queda con movimientos
+ * por cerrar. `closed` nulo es la única caja de la clínica.
+ */
+export function cashClosedWords(closed: string | null, pending: string | null, locale: string): string {
+  if (!closed) return "Caja cerrada."
+  const done = `Caja de ${currencyWord(closed, locale)} cerrada.`
+  return pending ? `${done} Falta cerrar la de ${currencyWord(pending, locale)}.` : done
+}
+
 /** La palabra de la línea resumida de Caja; el vuelto, con la frase del cierre. */
 export function cashTermShort(
   term: { key: CashTermKey; label: string; short: string },

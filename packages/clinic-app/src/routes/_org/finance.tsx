@@ -286,7 +286,11 @@ function FinanceWorkspace() {
   const [panel, setPanel] = useState<Panel | null>(null)
   const [ticket, setTicket] = useState<{ result: CollectResultBody; patientId: string } | null>(null)
   // Cierre recién hecho: la hoja que se abre lo dice (y si ya estaba cerrada).
-  const [justClosed, setJustClosed] = useState<{ id: string; alreadyClosed: boolean } | null>(null)
+  const [justClosed, setJustClosed] = useState<{
+    id: string
+    alreadyClosed: boolean
+    words: string
+  } | null>(null)
   // Los tickets a la vista en Cobros, en su orden: «Anterior / Siguiente» del ticket abierto.
   const [ticketList, setTicketList] = useState<string[]>([])
 
@@ -626,8 +630,8 @@ function FinanceWorkspace() {
             timeZone={ws.timeZone}
             open={panel?.kind === "cerrar"}
             onClose={() => setPanel(null)}
-            onClosed={(windowId, alreadyClosed) => {
-              setJustClosed({ id: windowId, alreadyClosed })
+            onClosed={(windowId, alreadyClosed, words) => {
+              setJustClosed({ id: windowId, alreadyClosed, words })
               setSearch({ cierre: windowId })
             }}
           />
@@ -643,7 +647,7 @@ function FinanceWorkspace() {
             justClosed && justClosed.id === search.cierre
               ? justClosed.alreadyClosed
                 ? "Esta caja ya la había cerrado otra persona: esta es la hoja de ese cierre y lo que contaste no se guardó."
-                : "Caja cerrada. Imprime la hoja para firmar la entrega."
+                : `${justClosed.words} Imprime la hoja para firmar la entrega.`
               : null
           }
           onShowTickets={(range) =>
