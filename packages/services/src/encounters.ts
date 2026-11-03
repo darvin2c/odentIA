@@ -1,3 +1,4 @@
+import { parseVitals, sumByCurrency, vitalsErrors } from "@odentia/clinical"
 import {
   type AssembledBudget,
   assembleEncounterBudget,
