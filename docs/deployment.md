@@ -310,7 +310,15 @@ construye la imagen de PostgreSQL para las pruebas de integración, ejecuta los 
 sin E2E y, en cada PR y en `main`, comprueba que la imagen de la app construye. No
 hay entornos por PR: esa comprobación es lo único que valida la imagen antes de
 fusionar. Solo después de que ambos jobs pasen, un push a `main` ejecuta el CLI
-oficial `openship deploy --commit "$GITHUB_SHA" --watch`. El CLI envía el
+oficial `openship deploy --commit "$GITHUB_SHA" --watch`.
+
+El PR prueba todo, no solo lo afectado. Con todo en verde, el job `codigo-probado`
+anota en el último commit del PR (estado `ci/codigo-probado`) el árbol que probó: la
+unión del PR con `main` de ese momento. Al unirlo, `ya-probado` compara ese árbol con
+el de `main`: si son iguales, `main` despliega sin volver a probar; si `main` avanzó
+entretanto (otra unión), o el PR vino de un fork y no pudo anotarlo, prueba todo.
+Poner la rama al día con `main` y esperar su CI antes de unir es lo que evita la
+segunda corrida. El CLI envía el
 despliegue y espera su resultado; no hay controlador propio ni bucle HTTP de espera.
 
 Configurar en GitHub:
