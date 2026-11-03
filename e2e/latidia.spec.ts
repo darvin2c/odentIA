@@ -1052,9 +1052,15 @@ test("latidIA: sin colegiatura, el cierre propone «Médico cirujano» y el CMP,
     (await request(page, api, "POST", `${path}/diagnoses`, slug, { diagnosisCode: "J03.9", diagnosisType: "provisional" }))
       .status,
   ).toBe(201)
-  expect((await request(page, api, "PATCH", path, slug, { evolution: "Amigdalitis; reposo e hidratación." })).status).toBe(
-    200,
-  )
+  // Con la presión registrada también se firma: las dos cifras juntas no son «incompletas».
+  expect(
+    (
+      await request(page, api, "PATCH", path, slug, {
+        evolution: "Amigdalitis; reposo e hidratación.",
+        vitals: { presionSistolica: 118, presionDiastolica: 76 },
+      })
+    ).status,
+  ).toBe(200)
 
   await gotoHydrated(page, latidiaUrl(slug, `/patients/${patientId}/encounters/${opened.body.data.id}`))
   await page.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
