@@ -1,4 +1,4 @@
-import type { PatientGuide } from "@odentia/clinical"
+import { type PatientGuide, sumAcceptedByCurrency } from "@odentia/clinical"
 import { Checkbox, FieldLegend, FieldSet, RadioGroup, RadioGroupItem } from "@odentia/ui"
 import { SubmitButton } from "@odentia/ui-patterns"
 import { Check, ChevronDown, Minus } from "lucide-react"
@@ -108,20 +108,20 @@ export function BudgetResponder({
     open(decision) ? !unchecked.has(planItemId) : decision === "aceptado"
   // Con dos monedas en el presupuesto, cada línea dice la suya; con una, la dice el total.
   const twoCurrencies = new Set(budget.items.map((item) => item.currency)).size > 1
-  // Lo marcado, una suma por moneda: entre monedas nunca se suma.
-  const acceptedByCurrency = new Map<string, number>()
-  for (const item of lines) {
-    if (!accepted(item.planItemId, item.decision)) continue
-    acceptedByCurrency.set(
-      item.currency,
-      (acceptedByCurrency.get(item.currency) ?? 0) + (item.lineTotalCents ?? 0),
-    )
-  }
-  const acceptedText =
-    [...acceptedByCurrency]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([currency, cents]) => formatPortalMoney(cents, currency, budget.locale))
-      .join(" + ") || formatPortalMoney(0, budget.currency, budget.locale)
+  // Lo marcado, con la misma regla del servidor; sin nada marcado, cero en su moneda.
+  const acceptedText = portalTotalsText(
+    {
+      totals: sumAcceptedByCurrency(
+        lines.map((item) => ({
+          lineTotalCents: item.lineTotalCents,
+          decision: accepted(item.planItemId, item.decision) ? "aceptado" : null,
+          currency: item.currency,
+        })),
+      ),
+      totalCents: 0,
+    },
+    budget,
+  )
   const totalText = portalTotalsText(several && viewedOption ? viewedOption : budget, budget)
   const anyOpen = lines.some((item) => open(item.decision))
   const hasSessions = lines.some((item) => item.billingMode === "session")

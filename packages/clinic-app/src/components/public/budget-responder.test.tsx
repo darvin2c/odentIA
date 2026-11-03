@@ -119,6 +119,17 @@ describe("BudgetResponder", () => {
     expect(page).not.toContain(" + ")
   })
 
+  it("lo marcado sin precio dice que falta cotizarlo, no lo cuenta como cero", () => {
+    const page = html({
+      ...plain,
+      items: [
+        plain.items[0]!,
+        { ...plain.items[0]!, planItemId: "i2", title: "Corona", lineTotalCents: null, priceCents: null },
+      ],
+    })
+    expect(page).toContain("Aceptas Por cotizar de")
+  })
+
   it("con dos monedas, cada línea dice la suya y hay un total por cada una", () => {
     const totals = [
       { currency: "PEN", totalCents: 30000 },
