@@ -10,8 +10,9 @@ Con las webs en Workers, el panel (`app.` de odentIA y de latidIA) y la administ
 
 - **Tres Workers más, igual que las webs:** `odentia-admin`, `odentia-panel` y `latidia-panel` (`apps/admin/wrangler.jsonc`, `apps/panel/wrangler.jsonc`), con `@cloudflare/vite-plugin` sobre TanStack Start solo cuando se arma con `WEB_TARGET=cloudflare`. `pnpm dev` sigue con Node, que llega a la API de portless.
 - **Siguen dependiendo de la API del VPS:** cada pantalla con sesión la pide a `api.` por su dirección pública, como ya hacía. Lo que se gana es el viaje del HTML y el despliegue aparte, no que funcionen sin el VPS.
-- **Solo la cookie viaja a la API.** El panel reenviaba todas las cabeceras de la visita; en Node `fetch` descarta `Host`, pero en Workers se respeta y el túnel, que elige el servicio por `Host`, llevaría el pedido de la sesión a `app.` en vez de a la API. Ahora reenvía solo la cookie, como la administración.
-- **Entrada con rutas y Fail open, como las webs:** `app.<dominio>/*` y `admin.odentia32.com/*` en el panel de Cloudflare. Si el Worker falla o pasa los límites del plan, la visita sigue al VPS, que conserva `panel`, `latidia-panel` y `admin`.
+- **Solo la cookie viaja a la API.** El panel reenviaba todas las cabeceras de la visita. En Node, `fetch` descarta `Host`; en Workers no hay esa garantía (en `wrangler dev` tampoco se respetó, pero no lo probamos en Cloudflare), y el túnel elige el servicio por `Host`. La API solo necesita la cookie (`get-session`, `/legal/status`), así que el panel reenvía solo esa, como la administración.
+- **Entrada con rutas y Fail open, como las webs:** `app.<dominio>/*` y `admin.odentia32.com/*` en el panel de Cloudflare. Fail open solo cubre el límite diario de peticiones del plan: pasado ese tope la visita sigue al VPS, que conserva `panel`, `latidia-panel` y `admin`. Si el Worker falla o pasa los 10 ms de CPU, la visita ve un error de Cloudflare (1101 o 1102), no el VPS; volver atrás es quitar la ruta.
+- **Los archivos con huella se guardan un año** (`public/_headers`), como hace `scripts/static-files.mjs` en el VPS.
 
 ## Alternativas descartadas
 
@@ -20,7 +21,7 @@ Con las webs en Workers, el panel (`app.` de odentIA y de latidIA) y la administ
 
 ## Consecuencias
 
-- Pesan 860 KB (administración) y 780 KB (cada panel) comprimidos, por debajo de los 3 MB del plan gratuito. La CPU por pantalla con sesión no se pudo medir sin entrar; se mira en las métricas de cada Worker después de poner la ruta, con el VPS de respaldo.
+- Pesan 860 KB (administración) y 780 KB (cada panel) comprimidos, por debajo de los 3 MB del plan gratuito. Las pantallas con sesión no se pueden guardar en caché, y en Node local tardan de 2 a 7 ms en la mediana y 26 ms en el p90 de `/onboarding` (tiempo total, no solo CPU): cerca del límite de 10 ms. Se mira en Metrics con la ruta puesta; si aparecen errores de CPU, se quita la ruta o se pasa al plan de USD 5.
 - Los registros de estas pantallas pasan a Workers (3 días en el plan gratuito).
 - Retirar `panel`, `latidia-panel` y `admin` del VPS es una entrega aparte, cuando las métricas lo respalden.
 
