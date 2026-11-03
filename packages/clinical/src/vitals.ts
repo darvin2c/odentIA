@@ -140,16 +140,16 @@ function parseSign(
   key: string,
   raw: unknown,
   allowed: readonly VitalSignKey[],
-): { ok: true; value: number | null } | { ok: false; error: string } {
+): { ok: true; key: VitalSignKey; value: number | null } | { ok: false; error: string } {
   const def = VITAL_SIGNS.find((v) => v.key === key && allowed.includes(v.key))
   if (!def) return { ok: false, error: `Signo vital desconocido: ${key}` }
-  if (raw === null || raw === undefined || raw === "") return { ok: true, value: null }
+  if (raw === null || raw === undefined || raw === "") return { ok: true, key: def.key, value: null }
   const value = typeof raw === "number" ? raw : Number(raw)
   if (!Number.isFinite(value)) return { ok: false, error: `${def.label} debe ser un número` }
   if (value < def.min || value > def.max)
     return { ok: false, error: `${def.label} fuera de rango (${def.min}–${def.max} ${def.suffix})` }
   const factor = 10 ** def.decimals
-  return { ok: true, value: Math.round(value * factor) / factor }
+  return { ok: true, key: def.key, value: Math.round(value * factor) / factor }
 }
 
 /**
@@ -170,7 +170,7 @@ export function parseVitals(
   for (const [key, raw] of Object.entries(input as Record<string, unknown>)) {
     const one = parseSign(key, raw, allowed)
     if (!one.ok) return one
-    if (one.value !== null) out[key as VitalSignKey] = one.value
+    if (one.value !== null) out[one.key] = one.value
   }
   const hasSys = out.presionSistolica !== undefined
   const hasDia = out.presionDiastolica !== undefined
