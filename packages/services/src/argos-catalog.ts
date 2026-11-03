@@ -19,11 +19,15 @@ export interface ArgosView {
   /** Columnas en orden, con lo que no se deduce del nombre. */
   columns: string
   keys: readonly ArgosKey[]
+  /** Las columnas que lee el modelo en una clínica de una moneda, sin las de la otra moneda. */
+  oneCurrencyColumns?: string
+  /** Lo que `about` dice en una clínica con dos monedas, si es otra cosa. */
+  twoCurrenciesAbout?: string
 }
 
 const ALL: readonly ArgosKey[] = ["gestion", "recepcion", "clinico", "caja"]
 
-export const ARGOS_CATALOG: readonly ArgosView[] = [
+const ONE_CURRENCY_CATALOG: readonly ArgosView[] = [
   {
     name: "ventas",
     about:
@@ -223,6 +227,69 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
   },
 ]
 
+const OTHER_CURRENCY = "otra_moneda (qué moneda es, como 'USD')"
+
+/**
+ * Lo que una vista agrega con dos monedas, al final de sus columnas: el dinero ya
+ * está en la moneda de la clínica y esto dice el importe en la otra. Una clínica de
+ * una moneda no lo lee: lo que recibe su modelo no cambia.
+ */
+const WITH_OTHER_CURRENCY: Readonly<Record<string, { columns: string; about?: string }>> = {
+  ventas: {
+    columns: `importe_otra_moneda (lo cargado en la otra moneda; nulo en moneda de la clínica), ${OTHER_CURRENCY}`,
+  },
+  cobros: {
+    columns: `importe_otra_moneda (lo que entró en la otra moneda; nulo si entró en la de la clínica), ${OTHER_CURRENCY}`,
+  },
+  pagos_por_venta: {
+    columns: `importe_otra_moneda (lo que entró en la otra moneda; nulo si entró en la de la clínica), ${OTHER_CURRENCY}`,
+  },
+  tickets: {
+    columns: `total_otra_moneda (lo que canceló en la otra moneda; nulo en moneda de la clínica), ${OTHER_CURRENCY}`,
+  },
+  deudas: {
+    columns: `saldo_otra_moneda (lo que debe en la otra moneda; nulo en moneda de la clínica), ${OTHER_CURRENCY}`,
+    about:
+      "Lo que debe cada paciente, a hoy: una fila por paciente y moneda (quien debe en dos monedas sale dos veces: para contar personas, count(distinct paciente_id)). Lo cargado sin pagar menos lo que tiene a favor en esa misma moneda. «Te deben» es la suma de «saldo», al cambio de hoy. Su deuda está vencida si su venta más antigua sin pagar tiene más de 30 días.",
+  },
+  gastos: {
+    columns: `monto_otra_moneda (lo que salió en la otra moneda; nulo si salió en la de la clínica), ${OTHER_CURRENCY}`,
+  },
+  tratamientos_hechos: {
+    columns: `precio_otra_moneda (el precio en la otra moneda; nulo en moneda de la clínica), ${OTHER_CURRENCY}`,
+  },
+  planes: {
+    columns: `precio_otra_moneda (el precio en la otra moneda; nulo en moneda de la clínica), ${OTHER_CURRENCY}`,
+  },
+  presupuestos: {
+    columns: `valor_otra_moneda (la parte del presupuesto en la otra moneda; nula si no tiene), ${OTHER_CURRENCY}`,
+  },
+  lineas_presupuesto: {
+    columns: `importe_otra_moneda (el precio en la otra moneda; nulo en moneda de la clínica), ${OTHER_CURRENCY}`,
+  },
+  compras: {
+    columns: `por_pagar (lo recibido que falta pagar), total_otra_moneda (el total en la otra moneda; nulo en moneda de la clínica), ${OTHER_CURRENCY}`,
+  },
+  compras_detalle: {
+    columns: `total_otra_moneda (el total en la otra moneda; nulo en moneda de la clínica), ${OTHER_CURRENCY}`,
+  },
+  oportunidades: {
+    columns: `valor_otra_moneda (el valor en la otra moneda; nulo en moneda de la clínica), ${OTHER_CURRENCY}`,
+  },
+}
+
+export const ARGOS_CATALOG: readonly ArgosView[] = ONE_CURRENCY_CATALOG.map((view) => {
+  const other = WITH_OTHER_CURRENCY[view.name]
+  return other
+    ? {
+        ...view,
+        columns: `${view.columns}, ${other.columns}`,
+        oneCurrencyColumns: view.columns,
+        ...(other.about ? { twoCurrenciesAbout: other.about } : {}),
+      }
+    : view
+})
+
 /** Lo que odentIA no registra: la respuesta lo dice y ofrece lo más cercano, nunca otra cifra como si fuera la pedida. */
 export const ARGOS_NOT_RECORDED: readonly string[] = [
   "Facturas o boletas: solo tickets de pago.",
@@ -248,17 +315,36 @@ export function argosViewsOf(key: ArgosKey): readonly ArgosView[] {
   return ARGOS_CATALOG.filter((view) => view.keys.includes(key))
 }
 
-/** El catálogo en texto, para el modelo: solo las vistas de la llave. */
-export function argosCatalogText(key: ArgosKey, texts: ProductAgentTexts): string {
+/**
+ * El catálogo en texto, para el modelo: solo las vistas de la llave. Las columnas de
+ * la otra moneda solo las lee el modelo de una clínica que la tiene.
+ */
+export function argosCatalogText(
+  key: ArgosKey,
+  texts: ProductAgentTexts,
+  options: { secondCurrency?: string | null } = {},
+): string {
   const views = argosViewsOf(key)
-  return withProductWords(texts, [
-    "Vistas (solo estas; el dinero está en la moneda de la clínica; «dia» es la fecha en la zona de la clínica):",
-    ...views.map((view) => `\n${view.name}: ${view.about}\n  ${view.columns}`),
-    "\nLo que {producto} no registra (tipo no_existe o parcial, con lo más cercano que sí existe):",
-    ...ARGOS_NOT_RECORDED.map((item) => `- ${item}`),
-    "\nLo que {producto} guarda pero tú no puedes consultar (tipo no_existe, dicho como «eso no lo puedo consultar» y dónde se ve):",
-    ...ARGOS_NOT_READABLE.map((item) => `- ${item}`),
-  ].join("\n"))
+  const second = options.secondCurrency ?? null
+  return withProductWords(
+    texts,
+    [
+      "Vistas (solo estas; el dinero está en la moneda de la clínica; «dia» es la fecha en la zona de la clínica):",
+      ...(second
+        ? [
+            `La clínica también cobra en ${second}. Toda columna de dinero ya está en la moneda de la clínica, así que se puede sumar: lo que ya pasó, con el cambio de su día; lo que se debe o falta cobrar, al cambio de hoy. El importe en ${second} va aparte, en las columnas que terminan en _otra_moneda, nulas en lo que es de la moneda de la clínica. En el resultado, una cifra en ${second} lleva ese mismo sufijo, no _dinero.`,
+          ]
+        : []),
+      ...views.map(
+        (view) =>
+          `\n${view.name}: ${(second && view.twoCurrenciesAbout) || view.about}\n  ${second ? view.columns : (view.oneCurrencyColumns ?? view.columns)}`,
+      ),
+      "\nLo que {producto} no registra (tipo no_existe o parcial, con lo más cercano que sí existe):",
+      ...ARGOS_NOT_RECORDED.map((item) => `- ${item}`),
+      "\nLo que {producto} guarda pero tú no puedes consultar (tipo no_existe, dicho como «eso no lo puedo consultar» y dónde se ve):",
+      ...ARGOS_NOT_READABLE.map((item) => `- ${item}`),
+    ].join("\n"),
+  )
 }
 
 /**

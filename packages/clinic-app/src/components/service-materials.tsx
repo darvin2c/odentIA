@@ -6,7 +6,13 @@
  * Inventario lo lee. El costo por vez solo lo ve quien ve precios, y lo
  * calcula el servidor con los últimos precios de compra.
  */
-import { formatMoney, unitFor } from "@odentia/clinical"
+import {
+  currencyWord,
+  formatExchangeRateInput,
+  formatMoney,
+  moneyTotalsText,
+  unitFor,
+} from "@odentia/clinical"
 import {
   Button,
   Field,
@@ -26,6 +32,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Plus, X } from "lucide-react"
 import { Fragment, useDeferredValue, useEffect, useId, useRef, useState } from "react"
 import { financeErrorMessage } from "../lib/finance"
+import { useOrgProfile } from "../lib/org"
 import {
   copiedMaterialsWords,
   formatShare,
@@ -491,7 +498,15 @@ export function ServiceMaterialsCost({
       className="flex flex-col gap-1 rounded-xl border p-3"
     >
       <h4 className="text-sm font-semibold">Cuesta en materiales</h4>
-      {cost ? (
+      {cost?.parts ? (
+        <TwoCurrencyCost
+          cost={cost}
+          parts={cost.parts}
+          servicePriceCents={servicePriceCents}
+          serviceCurrency={serviceCurrency}
+          locale={locale}
+        />
+      ) : cost ? (
         <>
           <p className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
             <span className="text-base font-semibold tabular-nums">
@@ -526,6 +541,66 @@ export function ServiceMaterialsCost({
         <p className="text-xs text-muted-foreground">Es lo guardado: se recalcula al guardar.</p>
       ) : null}
     </section>
+  )
+}
+
+/**
+ * Con dos monedas: el costo en la moneda de cada material y lo que queda en la del
+ * servicio. Si todo está en la misma no hace falta ningún cambio; si no, lo de la otra
+ * se estima al cambio de hoy y la cifra es «unos».
+ */
+function TwoCurrencyCost({
+  cost,
+  parts,
+  servicePriceCents,
+  serviceCurrency,
+  locale,
+}: {
+  cost: NonNullable<ServiceMaterials["cost"]>
+  parts: Array<{ currency: string; cents: number }>
+  servicePriceCents: number | null
+  serviceCurrency: string | null
+  locale: string
+}) {
+  const business = useOrgProfile().data?.currency
+  const each = moneyTotalsText(parts, (cents, unit) => formatMoney(cents, unit, locale))
+  const about = cost.estimated ? "unos " : ""
+  const left = cost.leftCents ?? null
+  const share =
+    cost.shareOfPrice !== null ? `: ${formatShare(cost.shareOfPrice, locale, 1)} del precio` : ""
+  const foreign = parts.find((part) => part.currency !== cost.currency)
+  const rate = cost.rate ? formatExchangeRateInput(cost.rate, locale) : null
+  return (
+    <>
+      {left !== null ? (
+        <p className="text-base font-semibold tabular-nums">
+          {left >= 0
+            ? `Te quedan ${about}${formatMoney(left, cost.currency, locale)}`
+            : `Pierdes ${about}${formatMoney(-left, cost.currency, locale)}`}
+        </p>
+      ) : null}
+      <p
+        className={left === null ? "text-base font-semibold tabular-nums" : "text-sm tabular-nums"}
+      >
+        {each} cada vez{share}.
+        {foreign && rate
+          ? ` Lo que está en ${currencyWord(foreign.currency, locale)} se estima al cambio de hoy (${rate}).${foreign.currency !== business ? " Si sube el cambio, te queda menos." : ""}`
+          : left !== null
+            ? " No hace falta ningún cambio."
+            : ""}
+      </p>
+      <p className="text-xs text-muted-foreground">
+        Con los últimos precios de compra
+        {servicePriceCents !== null && serviceCurrency
+          ? ` · precio del servicio ${formatMoney(servicePriceCents, serviceCurrency, locale)}`
+          : ""}
+        {cost.unpriced > 0
+          ? cost.unpriced === 1
+            ? ". 1 material aún no tiene una compra con precio y no entra en la suma."
+            : `. ${cost.unpriced} materiales aún no tienen una compra con precio y no entran en la suma.`
+          : "."}
+      </p>
+    </>
   )
 }
 

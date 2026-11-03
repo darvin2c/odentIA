@@ -34,6 +34,7 @@ export function ApplyCreditDialog({
   amountText,
   branchId,
   branchName,
+  currency,
   onClose,
   onApplied,
 }: {
@@ -43,13 +44,15 @@ export function ApplyCreditDialog({
   amountText: string
   branchId: string
   branchName: string
+  /** La otra moneda de la clínica, si lo que se aplica es de ella; sin ella, la del negocio. */
+  currency?: string
   onClose: () => void
   onApplied: (result: CollectResultBody) => void
 }) {
   // La misma clave mientras el diálogo sigue abierto: un reintento tras un corte no aplica dos veces.
   const [requestId, setRequestId] = useState(() => crypto.randomUUID())
   const apply = useMutation({
-    mutationFn: () => collectApi(patientId, { branchId, requestId }),
+    mutationFn: () => collectApi(patientId, { branchId, requestId, ...(currency ? { currency } : {}) }),
     onSuccess: (result) => {
       onApplied(result.data)
       onClose()

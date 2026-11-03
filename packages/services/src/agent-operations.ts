@@ -1,5 +1,5 @@
 import { canAccess } from "@odentia/auth/permissions"
-import { IDENTITY_DOC_TYPES, nameWords } from "@odentia/clinical"
+import { IDENTITY_DOC_TYPES, moneyTotalsText, nameWords, sumAcceptedByCurrency, sumAcceptedCents } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   agentHandoff,
@@ -687,6 +687,14 @@ export interface AgentBudgetLine {
   promotionName: string | null
   /** `pendiente`, `aceptado`, `pospuesto`, `rechazado` o `no_elegida`. */
   decision: string
+  /** Solo si el presupuesto lleva dos monedas: la de esta línea. Con una, la del presupuesto. */
+  currency?: string
+}
+
+/** Un total por moneda de un presupuesto en dos monedas. */
+export interface AgentBudgetTotal {
+  currency: string
+  totalCents: number | null
 }
 
 export interface AgentBudgetOption {
@@ -696,6 +704,8 @@ export interface AgentBudgetOption {
   isRecommended: boolean
   decision: string
   totalCents: number | null
+  /** Solo con dos monedas: entonces `totalCents` es nulo y el total lo dice esto. */
+  totals?: AgentBudgetTotal[]
   lines: AgentBudgetLine[]
 }
 
@@ -710,6 +720,8 @@ export interface AgentBudgetView {
   answerable: boolean
   /** El de la opción elegida o, mientras decide, el de la recomendada. */
   totalCents: number | null
+  /** Solo con dos monedas: entonces `totalCents` es nulo y el total lo dice esto. */
+  totals?: AgentBudgetTotal[]
   options: AgentBudgetOption[]
 }
 
@@ -723,7 +735,13 @@ export interface AgentPatientBudgets {
   inPreparation: boolean
 }
 
-function agentBudgetLine(line: BudgetLineWithStatus): AgentBudgetLine {
+/** Lo que recibe el agente de los totales: nada nuevo si hay una sola moneda. */
+function agentTotals(totals: BudgetWithTotals["totals"]): { totals?: AgentBudgetTotal[] } {
+  if (totals.length < 2) return {}
+  return { totals: totals.map(({ currency, totalCents }) => ({ currency, totalCents })) }
+}
+
+function agentBudgetLine(line: BudgetLineWithStatus, twoCurrencies = false): AgentBudgetLine {
   return {
     planItemId: line.planItemId,
     title: line.title,
@@ -732,10 +750,12 @@ function agentBudgetLine(line: BudgetLineWithStatus): AgentBudgetLine {
     sessions: line.billingMode === "session" ? { count: Math.max(line.sessionsPlanned ?? 1, 1), unitCents: line.priceCents } : null,
     promotionName: line.promotionName,
     decision: line.decision,
+    ...(twoCurrencies ? { currency: line.currency } : {}),
   }
 }
 
 function agentBudgetView(budget: BudgetWithTotals): AgentBudgetView {
+  const twoCurrencies = new Set(budget.items.map((line) => line.currency)).size > 1
   return {
     budgetId: budget.id,
     budgetNumber: budget.budgetNumber,
@@ -744,13 +764,15 @@ function agentBudgetView(budget: BudgetWithTotals): AgentBudgetView {
     currency: budget.currency,
     answerable: BUDGET_ANSWERABLE.includes(budget.status),
     totalCents: budget.totalCents,
+    ...agentTotals(budget.totals),
     options: budget.options.map((option) => ({
       id: option.id,
       label: option.label,
       isRecommended: option.isRecommended,
       decision: option.decision,
       totalCents: option.totalCents,
-      lines: budget.items.filter((line) => line.optionId === option.id).map(agentBudgetLine),
+      ...agentTotals(option.totals),
+      lines: budget.items.filter((line) => line.optionId === option.id).map((line) => agentBudgetLine(line, twoCurrencies)),
     })),
   }
 }
@@ -914,8 +936,10 @@ export interface BudgetAnswer {
   accepted: AgentBudgetLine[]
   postponed: AgentBudgetLine[]
   rejected: AgentBudgetLine[]
-  /** Lo que suma lo que acepta ahora; nulo si algún precio no se conoce. */
+  /** Lo que suma lo que acepta ahora; nulo si algún precio no se conoce o si va en dos monedas. */
   acceptedCents: number | null
+  /** Lo mismo, una suma por moneda. */
+  acceptedTotals: Array<{ currency: string; totalCents: number | null }>
   /** Una por cada línea de la opción: lo que dijo y, de lo ya decidido, lo que había. */
   decisions: Array<{ planItemId: string; decision: BudgetAnswerDecision }>
 }
@@ -983,18 +1007,20 @@ async function budgetAnswerOf(tx: Db, orgId: string, input: BudgetAnswerInput): 
   }
   const answered = open.map((line) => ({ line: agentBudgetLine(line), decision: said.get(line.planItemId)! }))
   const accepted = answered.filter((item) => item.decision === "aceptado").map((item) => item.line)
-  let acceptedCents: number | null = 0
-  for (const line of accepted) {
-    if (line.lineTotalCents == null || acceptedCents == null) acceptedCents = null
-    else acceptedCents += line.lineTotalCents
-  }
+  // La misma regla de lo guardado: una suma por moneda, nunca entre monedas.
+  const answers = open.map((line) => ({
+    lineTotalCents: line.lineTotalCents,
+    decision: said.get(line.planItemId),
+    currency: line.currency,
+  }))
   return {
     budget,
     option: { id: option.id, label: option.label, choosing: !chosen && budget.options.length > 1 },
     accepted,
     postponed: answered.filter((item) => item.decision === "pospuesto").map((item) => item.line),
     rejected: answered.filter((item) => item.decision === "rechazado").map((item) => item.line),
-    acceptedCents,
+    acceptedCents: sumAcceptedCents(answers),
+    acceptedTotals: sumAcceptedByCurrency(answers),
     decisions: lines.map((line) => ({
       planItemId: line.planItemId,
       decision: said.get(line.planItemId) ?? (line.decision as BudgetAnswerDecision),
@@ -1052,9 +1078,8 @@ function joinWords(items: string[]): string {
 }
 
 function acceptedMoney(answer: BudgetAnswer, zone: Pick<OrgLocale, "locale">): string {
-  return answer.accepted.length > 0 && answer.acceptedCents != null
-    ? ` (${formatOrgMoney(answer.acceptedCents, answer.budget.currency, zone)})`
-    : ""
+  const text = moneyTotalsText(answer.acceptedTotals, (cents, currency) => formatOrgMoney(cents, currency, zone), "")
+  return answer.accepted.length > 0 && text ? ` (${text})` : ""
 }
 
 /** Lo que se anotará, dicho para el equipo y para el propio agente en el estado del caso. */
@@ -2998,7 +3023,16 @@ export async function executeProposal(
         },
         { skipOwnPlan: true, via: "conversacion" },
       )
-      result = { patientId, budgetId, status: decided.status, stateText: decided.stateText, acceptedCents: decided.acceptedCents }
+      result = {
+        patientId,
+        budgetId,
+        status: decided.status,
+        stateText: decided.stateText,
+        acceptedCents: decided.acceptedCents,
+        ...(decided.totals.length > 1
+          ? { acceptedTotals: decided.totals.map(({ currency, acceptedCents }) => ({ currency, acceptedCents })) }
+          : {}),
+      }
     } else if (action === "enviar_mensaje") {
       const conversationId = locked.conversationId
       // El agente no elige plantillas (ADR 0040): fuera de las 24 horas el

@@ -177,9 +177,18 @@ export function trendSolvers(h: GoldenHelpers): GoldenSolvers {
       }
     },
     k3: async () => {
-      const currency = h.scope.currency
-      const current = await collectedByProfessional(h.tx, h.org, { start: window.start, end: window.end }, currency)
-      const previous = await collectedByProfessional(h.tx, h.org, { start: window.previous.start, end: window.previous.end }, currency)
+      const current = await collectedByProfessional(
+        h.tx,
+        h.org,
+        { start: window.start, end: window.end },
+        h.scope.money,
+      )
+      const previous = await collectedByProfessional(
+        h.tx,
+        h.org,
+        { start: window.previous.start, end: window.previous.end },
+        h.scope.money,
+      )
       const ids = [...new Set([...current, ...previous].map((row) => row.professionalUserId))]
       const rows = ids
         .map((id) => {

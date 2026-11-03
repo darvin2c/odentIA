@@ -11,6 +11,7 @@ import type { Db } from "@odentia/db"
 import { requireBranch } from "./finance.js"
 import { getOrgLocale } from "./locale.js"
 import { type ReportBucket, reportBuckets, type ReportSpan, type ReportWindow, resolveReportWindow } from "./report-periods.js"
+import { type OrgMoney, orgMoneyOf } from "./report-value.js"
 
 export interface ReportQuery {
   /** `este_mes`, `mes_pasado`, `ultimos_3_meses`, `este_ano`, `YYYY-MM` o `YYYY-MM-DD..YYYY-MM-DD`. */
@@ -24,15 +25,26 @@ export interface ReportScope {
   locale: string
   /** Moneda de la clínica: va primero cuando hay más de una. */
   currency: string
+  /** Su otra moneda y el cambio de hoy, para valorar lo que se debe. */
+  money: OrgMoney
   branch: { id: string; name: string } | null
   now: Date
 }
 
 export async function reportScope(tx: Db, orgId: string, query: ReportQuery, now: Date): Promise<ReportScope> {
-  const { timezone, locale, currency } = await getOrgLocale(tx, orgId)
+  const zone = await getOrgLocale(tx, orgId)
+  const { timezone, locale, currency } = zone
   const window = resolveReportWindow(timezone, query.period, now)
   const branch = query.branchId ? await requireBranch(tx, orgId, query.branchId) : null
-  return { window, timezone, locale, currency, branch: branch ? { id: branch.id, name: branch.name } : null, now }
+  return {
+    window,
+    timezone,
+    locale,
+    currency,
+    money: orgMoneyOf(zone),
+    branch: branch ? { id: branch.id, name: branch.name } : null,
+    now,
+  }
 }
 
 export function serializeSpan(span: ReportSpan) {
@@ -54,6 +66,10 @@ export function reportHead(scope: ReportScope) {
     timezone: scope.timezone,
     locale: scope.locale,
     currency: scope.currency,
+    // Solo con segunda moneda: sin ella, la respuesta es la de siempre.
+    ...(scope.money.secondCurrency && scope.money.exchangeRate
+      ? { second: { currency: scope.money.secondCurrency, rate: scope.money.exchangeRate } }
+      : {}),
     branch: scope.branch,
   }
 }

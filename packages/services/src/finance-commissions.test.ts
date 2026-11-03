@@ -111,7 +111,7 @@ it("comisiones: porcentaje sobre lo cobrado de lo atendido, pago en un paso y aj
   )
   const period = currentPeriod()
   const monthly = await f.run((tx) =>
-    getMonthlyCommissions(tx, "org_a", { professionalUserId: f.actor, ...period, currency: "PEN" }),
+    getMonthlyCommissions(tx, "org_a", { professionalUserId: f.actor, ...period }),
   )
   expect(monthly.lines).toHaveLength(1)
   expect(monthly.baseCents).toBe(10000)
@@ -133,7 +133,7 @@ it("comisiones: porcentaje sobre lo cobrado de lo atendido, pago en un paso y aj
     }),
   )
   const net = await f.run((tx) =>
-    getMonthlyCommissions(tx, "org_a", { professionalUserId: f.actor, ...period, currency: "PEN" }),
+    getMonthlyCommissions(tx, "org_a", { professionalUserId: f.actor, ...period }),
   )
   expect(net.baseCents).toBe(10000)
   expect(net.commissionCents).toBe(1000)
@@ -153,7 +153,7 @@ it("comisiones: porcentaje sobre lo cobrado de lo atendido, pago en un paso y aj
     }),
   )
   const afterVoid = await f.run((tx) =>
-    getMonthlyCommissions(tx, "org_a", { professionalUserId: f.actor, ...period, currency: "PEN" }),
+    getMonthlyCommissions(tx, "org_a", { professionalUserId: f.actor, ...period }),
   )
   expect(afterVoid.baseCents).toBe(10000)
   const pay = () =>

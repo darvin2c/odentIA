@@ -1434,6 +1434,8 @@ export interface PortalBudgetView {
    * los importes igual que la ficha. `null` si la clínica aún no lo configuró.
    */
   locale: string | null
+  /** Un total por moneda. Con dos, las cuatro cifras de abajo son nulas: entre monedas no se suma. */
+  totals: BudgetWithTotals["totals"]
   totalCents: number | null
   acceptedCents: number | null
   /** Suma a la tarifa de referencia y rebaja acordada (null si falta algún precio). */
@@ -1461,6 +1463,7 @@ export interface PortalBudgetView {
     cons: string | null
     isRecommended: boolean
     decision: string
+    totals: BudgetWithTotals["totals"]
     totalCents: number | null
   }>
   items: PortalBudgetLineView[]
@@ -1529,6 +1532,8 @@ export function toPortalBudget(
     status: budget.status,
     currency: budget.currency,
     locale,
+    // Un total por moneda: con dos, las cuatro cifras de abajo son nulas.
+    totals: budget.totals,
     totalCents: budget.totalCents,
     acceptedCents: budget.acceptedCents,
     tariffTotalCents: budget.tariffTotalCents,
@@ -1551,6 +1556,7 @@ export function toPortalBudget(
       cons: option.cons,
       isRecommended: option.isRecommended,
       decision: option.decision,
+      totals: option.totals,
       totalCents: option.totalCents,
     })),
     items: budget.items.map((line) => ({

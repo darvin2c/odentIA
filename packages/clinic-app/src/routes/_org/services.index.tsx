@@ -1,4 +1,4 @@
-import { formatMoney, formatMoneyInput, parseMoney } from "@odentia/clinical"
+import { formatMoney, formatMoneyInput, moneyTotalsText, parseMoney } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -125,6 +125,7 @@ import {
   type TreatmentTemplateItem,
   updateServiceApi,
 } from "../../lib/services"
+import { currencyLabel, displayLanguage } from "../../lib/region-format"
 import { productUi } from "../../product/product-ui"
 import { hasPlaces, servicesAccess, servicesHeader } from "../../lib/screen-rules"
 
@@ -265,6 +266,12 @@ function TarifarioPage() {
     const factor = desc ? -1 : 1
     return [...rows].sort((a, b) => {
       if (field === "precio") {
+        // Cada moneda aparte, la del negocio primero: S/ 100 y USD 100 no se comparan.
+        if (a.currency !== b.currency) {
+          if (a.currency === profileCurrency) return -1
+          if (b.currency === profileCurrency) return 1
+          return a.currency.localeCompare(b.currency)
+        }
         return (a.priceCents - b.priceCents) * factor
       }
       if (field === "ambito") {
@@ -274,7 +281,7 @@ function TarifarioPage() {
       }
       return a.name.localeCompare(b.name, "es") * factor
     })
-  }, [rows, sortParam])
+  }, [rows, sortParam, profileCurrency])
 
   // Agrupado por la especialidad de la clínica, con su nombre.
   const groups = useMemo(() => {
@@ -479,7 +486,7 @@ function TarifarioPage() {
                   <span className="tabular-nums">
                     {materials.count}
                     {materials.cost && profileLocale !== undefined
-                      ? ` · ${formatMoney(materials.cost.cents, materials.cost.currency, profileLocale)}`
+                      ? ` · ${moneyTotalsText(materials.cost.parts ?? [materials.cost], (cents, unit) => formatMoney(cents, unit, profileLocale))}`
                       : ""}
                   </span>
                 )
@@ -549,6 +556,7 @@ function TarifarioPage() {
       canWrite={canManage}
       onClose={closeOffer}
       orgCurrency={profileCurrency}
+      secondCurrency={profileQuery.data?.secondCurrency ?? null}
       orgLocale={profileLocale}
     />
   ) : editing ? (
@@ -561,6 +569,7 @@ function TarifarioPage() {
       canWrite={canManage}
       onClose={closeOffer}
       orgCurrency={profileCurrency}
+      secondCurrency={profileQuery.data?.secondCurrency ?? null}
       orgLocale={profileLocale}
     />
   ) : null
@@ -817,11 +826,10 @@ function priceIssue(raw: string, currency: string, locale: string): string | nul
 /**
  * Lo que exige el formulario de la oferta, con los límites de la API. Cada
  * regla tiene su campo en pantalla: el ámbito solo se pide si se elige aquí,
- * el precio pasa por el mismo `parseMoney` que lo envía, el código oficial
- * dice lo que le falta (`codeIssue`) y cada material, su cantidad.
+ * el precio pasa por el mismo `parseMoney` que lo envía, en la moneda elegida, el
+ * código oficial dice lo que le falta (`codeIssue`) y cada material, su cantidad.
  */
 function offerSchemaFor(rules: {
-  currency: string
   locale: string
   /** «Dónde se hace» está en pantalla: odentIA y un servicio propio. */
   scopeShown: boolean
@@ -830,10 +838,8 @@ function offerSchemaFor(rules: {
   return z.object({
     name: z.string().trim().min(1, "Ingresa el nombre").max(200, "Máximo 200 caracteres"),
     code: z.string().trim().max(40, "Máximo 40 caracteres"),
-    price: z.string().superRefine((value, ctx) => {
-      const message = priceIssue(value, rules.currency, rules.locale)
-      if (message) ctx.addIssue({ code: "custom", message })
-    }),
+    currency: z.string(),
+    price: z.string(),
     durationMin: z.string().refine(
       (value) => {
         if (value.trim() === "") return true
@@ -867,6 +873,9 @@ function offerSchemaFor(rules: {
         if (message) ctx.addIssue({ code: "custom", path: [index, "quantityText"], message })
       })
     }),
+  }).superRefine((values, ctx) => {
+    const message = priceIssue(values.price, values.currency, rules.locale)
+    if (message) ctx.addIssue({ code: "custom", path: ["price"], message })
   })
 }
 type OfferSchema = ReturnType<typeof offerSchemaFor>
@@ -875,6 +884,7 @@ type OfferFormValues = z.infer<OfferSchema>
 const emptyOfferValues: OfferFormValues = {
   name: "",
   code: "",
+  currency: "",
   price: "",
   durationMin: "",
   specialtyId: "",
@@ -896,15 +906,17 @@ const emptyOfferValues: OfferFormValues = {
  */
 function offerValues(
   offer: ServiceCatalogItem | null,
+  orgCurrency: string,
   locale: string,
   loaded: { officialCode: OfficialCoding | null; materials: MaterialDraftLine[] },
 ): OfferFormValues {
   // Sin «dónde» (latidIA), todo servicio es general: no hay ámbito que elegir ni que falte.
   const scope = offer?.scope ?? (hasPlaces() ? "" : "general")
-  if (!offer) return { ...emptyOfferValues, scope, ...loaded }
+  if (!offer) return { ...emptyOfferValues, currency: orgCurrency, scope, ...loaded }
   return {
     name: offer.name,
     code: offer.code ?? "",
+    currency: offer.currency,
     price: formatMoneyInput(offer.priceCents, offer.currency, locale),
     durationMin: offer.durationMin === null ? "" : String(offer.durationMin),
     specialtyId: offer.specialtyId ?? "",
@@ -972,6 +984,8 @@ interface OfferEditorProps {
   onClose: () => void
   /** Moneda y formato de la clínica (perfil ya cargado por la página). */
   orgCurrency: string
+  /** La otra moneda en que cobra la clínica: con ella, el precio se elige entre las dos. */
+  secondCurrency: string | null
   orgLocale: string
   /** Llevar la vista a sus materiales al abrir («Empieza por estos 5»). */
   revealMaterials?: boolean
@@ -991,11 +1005,14 @@ function OfferEditor({
   canWrite,
   onClose,
   orgCurrency,
+  secondCurrency,
   orgLocale,
 }: OfferEditorProps) {
   const queryClient = useQueryClient()
-  /** La tarifa se escribe y lee con la moneda y el formato de la clínica. */
-  const currency = offer?.currency ?? orgCurrency
+  /** Las monedas del precio: las de la clínica y la que ya tenga el servicio, para poder pasarlo. */
+  const currencyChoices = [
+    ...new Set([orgCurrency, secondCurrency, offer?.currency].filter((code): code is string => !!code)),
+  ]
   const templateId = offer?.templateId ?? null
   const isTemplate = offer?.source === "template"
   const codeList = useClinicalProfile().services
@@ -1094,8 +1111,8 @@ function OfferEditor({
   const [materialsTaken, setMaterialsTaken] = useState(false)
 
   const defaultValues = useMemo(
-    () => offerValues(offer, orgLocale, { officialCode: initialCode, materials: savedLines }),
-    [offer, orgLocale, initialCode, savedLines],
+    () => offerValues(offer, orgCurrency, orgLocale, { officialCode: initialCode, materials: savedLines }),
+    [offer, orgCurrency, orgLocale, initialCode, savedLines],
   )
   const defaultServiceKey = serviceKey(defaultValues)
   const materialsDirtyIn = (values: OfferFormValues) =>
@@ -1112,7 +1129,9 @@ function OfferEditor({
       name: value.name.trim(),
       code: value.code.trim() === "" ? null : value.code.trim(),
       // El esquema ya lo pasó por `parseMoney`: aquí no falla.
-      priceCents: parseMoney(value.price, currency, orgLocale),
+      priceCents: parseMoney(value.price, value.currency, orgLocale),
+      // La moneda solo viaja si es otra: el servidor exige su precio nuevo, que va al lado.
+      ...(value.currency !== (offer?.currency ?? orgCurrency) ? { currency: value.currency } : {}),
       durationMin: value.durationMin.trim() === "" ? null : Number(value.durationMin),
       billingMode: value.billingMode,
       priceDisclosure: value.priceDisclosure,
@@ -1265,7 +1284,6 @@ function OfferEditor({
   const form = useOfferForm(
     defaultValues,
     offerSchemaFor({
-      currency,
       locale: orgLocale,
       scopeShown: hasPlaces() && !isTemplate,
       // Sin leer el código guardado no se exige otro: guardar no lo envía si no se cambia.
@@ -1348,7 +1366,7 @@ function OfferEditor({
         form={form}
         offer={offer}
         allowSpecialtyScope={!isTemplate}
-        currency={currency}
+        currencyChoices={currencyChoices}
         locale={orgLocale}
         officialCodeField={
           isTemplate || !codeText ? null : (
@@ -1642,7 +1660,7 @@ function OfferFields({
   form,
   offer,
   allowSpecialtyScope,
-  currency,
+  currencyChoices,
   locale,
   officialCodeField,
 }: {
@@ -1650,8 +1668,8 @@ function OfferFields({
   /** Oferta editada; `null` es el alta de una prestación propia. */
   offer: ServiceCatalogItem | null
   allowSpecialtyScope: boolean
-  /** Moneda de la oferta; en el alta, la de la clínica. */
-  currency: string
+  /** Las monedas en que se puede poner el precio. Con una sola no se elige. */
+  currencyChoices: string[]
   /** Formato de la clínica para escribir el importe. */
   locale: string
   /** El código del país de un servicio propio, debajo del nombre (tablero 3). */
@@ -1659,6 +1677,8 @@ function OfferFields({
 }) {
   const isTemplate = offer?.source === "template"
   const idPrefix = offer?.id ?? "nueva"
+  const currency = useStore(form.store, (state) => state.values.currency)
+  const language = displayLanguage(locale)
   return (
     <>
       <form.AppField name="name">
@@ -1688,6 +1708,37 @@ function OfferFields({
           </div>
         )}
       </div>
+      {currencyChoices.length > 1 ? (
+        <form.AppField name="currency">
+          {(field) => (
+            <field.Group
+              id={`${idPrefix}-moneda-opciones`}
+              legend={<span id={`${idPrefix}-moneda`}>Moneda del precio</span>}
+              description="Al cambiar de moneda escribes el precio de nuevo: no se convierte solo. Lo que ya se indicó o se presupuestó sigue con su moneda y su precio."
+            >
+              {(control) => (
+                <RadioChips
+                  id={control.id}
+                  aria-labelledby={`${idPrefix}-moneda`}
+                  aria-describedby={control.describedBy}
+                  invalid={control.invalid}
+                  onBlur={control.onBlur}
+                  value={field.state.value}
+                  options={currencyChoices.map((code) => ({
+                    value: code,
+                    label: currencyLabel(code, language),
+                  }))}
+                  onChange={(next) => {
+                    if (next === field.state.value) return
+                    field.handleChange(next)
+                    form.setFieldValue("price", "")
+                  }}
+                />
+              )}
+            </field.Group>
+          )}
+        </form.AppField>
+      ) : null}
       <div className="grid grid-cols-2 gap-3">
         <form.AppField name="price">
           {(field) => (

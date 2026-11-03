@@ -9,7 +9,13 @@
  * horaria siempre del perfil/sede. Nada fijo.
  */
 import { type QueryClient, useQuery } from "@tanstack/react-query"
-import { currencyFractionDigits } from "@odentia/clinical"
+import {
+  currencyFractionDigits,
+  currencyWord,
+  formatMoney,
+  type TicketTender,
+  upperFirst,
+} from "@odentia/clinical"
 import { apiFetch } from "./api"
 import { amountFromCents } from "./workspace"
 
@@ -70,16 +76,6 @@ export function formatTimeShortLocale(
   })
 }
 
-/** Símbolo de la moneda tal como lo escribe el formato de la clínica (prefijo de los campos de importe). */
-export function currencySymbol(currency: string, locale: string): string {
-  try {
-    const parts = new Intl.NumberFormat(locale, { style: "currency", currency }).formatToParts(0)
-    return parts.find((part) => part.type === "currency")?.value ?? currency
-  } catch {
-    return currency
-  }
-}
-
 /**
  * Importe sin símbolo de moneda, con el formato de la clínica: para las cifras
  * secundarias (filas de conceptos, «costó… pagó…»), que acompañan a un total
@@ -105,6 +101,65 @@ export function dayInTimezone(timeZone: string, at: Date = new Date()): string {
   return `${get("year")}-${get("month")}-${get("day")}`
 }
 
+/** Muy distinto del «Cambio de hoy»: se avisa, porque queda guardado, y nunca se frena. */
+const RATE_WARN_SHARE = 0.05
+
+export function rateIsFar(rate: string, today: string): boolean {
+  return Math.abs(Number(rate) - Number(today)) / Number(today) > RATE_WARN_SHARE
+}
+
+/** Lo que dice el campo del importe. Con otra moneda, también cuánto cancela lo escrito. */
+export function amountHelpText(input: {
+  hasSecond: boolean
+  advance: boolean
+  pay: string
+  debt: string
+  cancels: number | null
+  due: number
+  locale: string
+  /** También debe en la otra moneda: «queda al día» dice en cuál. */
+  owesOther: boolean
+}): string {
+  const { hasSecond, advance, pay, debt, cancels, due, locale, owesOther } = input
+  const crossed = pay !== debt
+  const inDebt = (cents: number) => formatMoney(cents, debt, locale)
+  if (advance)
+    return hasSecond && crossed && cancels !== null
+      ? `Queda ${inDebt(cancels)} a favor, a cuenta de lo que debe en ${currencyWord(debt, locale)}.`
+      : "Todo queda como saldo a favor."
+  const partly = "Si paga una parte, el resto queda por cobrar."
+  if (!hasSecond) return partly
+  if (due === 0) return "Marca lo que paga."
+  if (cancels === null) return crossed ? "Con el cambio se calcula cuánto cancela." : partly
+  const left = Math.max(0, due - cancels)
+  if (crossed)
+    return left > 0
+      ? `Cancela ${inDebt(cancels)}. Quedan ${inDebt(left)} por cobrar.`
+      : `Cancela ${inDebt(cancels)}: queda al día${owesOther ? ` en ${currencyWord(debt, locale)}` : ""}.`
+  return left > 0 ? `Quedan ${inDebt(left)} por cobrar.` : partly
+}
+
+/** Cierra una frase con punto, salvo que ya termine en uno: «09:04 a. m.» no lleva otro. */
+export function sentence(text: string): string {
+  return /[.!?]$/.test(text.trimEnd()) ? text : `${text}.`
+}
+
+/** «lo puso Rosa a las 9:12», o el día si no fue hoy. Vacío si no se sabe. */
+export function rateAuthorWords(
+  second: { at: string | null; byName: string | null },
+  locale: string,
+  timeZone: string,
+): string {
+  if (!second.at) return ""
+  const at = new Date(second.at)
+  if (Number.isNaN(at.getTime())) return ""
+  const when =
+    dayInTimezone(timeZone, at) === dayInTimezone(timeZone)
+      ? `a las ${formatTimeShortLocale(second.at, locale, timeZone)}`
+      : `el ${formatDayLongLocale(second.at, locale, timeZone)}`
+  return second.byName ? `lo puso ${second.byName} ${when}` : `se puso ${when}`
+}
+
 // --- Perfil y medios (Configuración) ---------------------------------------
 
 export interface OrgFinanceProfile {
@@ -115,6 +170,11 @@ export interface OrgFinanceProfile {
   receiptWidth: "58" | "80"
   sheetSize: "A4" | "Letter"
   ticketFooter: string | null
+  /** La otra moneda de la clínica y su «Cambio de hoy» (`orgSecondCurrency` de `lib/org`). */
+  secondCurrency?: string | null
+  exchangeRate?: string | null
+  exchangeRateAt?: string | null
+  exchangeRateByName?: string | null
 }
 
 /** Fila real de `org_profile` (puede no existir hasta que se configure). */
@@ -156,7 +216,10 @@ export interface CollectSnapshotMethod {
   paymentMethodId: string
   name: string
   typeCode: string
+  /** Lo que canceló, en la moneda del ticket. */
   amountCents: number
+  /** Lo que entró por este medio, si entró en otra moneda (`tender.currency`). */
+  tenderCents?: number
   reference: string | null
 }
 
@@ -184,6 +247,8 @@ export interface CollectSnapshot {
   methods: CollectSnapshotMethod[]
   /** Frase al pie vigente al cobrar. */
   notice: string
+  /** Con otra moneda de por medio; un cobro solo en moneda del negocio no lo lleva. */
+  tender?: TicketTender | null
   /** Lo que quedó por cobrar de esos conceptos. */
   remainingCents?: number
   /** Lo que falta pagar de cada concepto, con lo que cuesta (`TicketFrozen.pending`). */
@@ -216,8 +281,11 @@ export interface CollectTicketRow {
   currency: string
   totalCents: number
   creditAppliedCents: number
+  /** En la moneda en que entró el dinero. */
   cashReceivedCents: number | null
   changeCents: number | null
+  /** Moneda del vuelto; nula, la moneda en que entró el dinero. */
+  changeCurrency?: string | null
   payerContactId: string | null
   requestId: string | null
   snapshot: CollectSnapshot
@@ -257,6 +325,14 @@ export interface CollectInput {
   payments?: Array<{ paymentMethodId: string; amountCents: number; reference?: string }>
   cashReceivedCents?: number
   requestId: string
+  /** La moneda que cancela o a cuenta de la que queda un adelanto; omitida, la de los conceptos. */
+  currency?: string
+  /** En qué entra el dinero: los importes están en ella. Omitida, la moneda que cancela. */
+  tenderCurrency?: string
+  /** El cambio de este cobro, en decimal: vale solo para él. */
+  exchangeRate?: string
+  /** En qué se da el vuelto: la moneda en que pagó o la del negocio. */
+  changeCurrency?: string
 }
 
 export function collectApi(patientId: string, body: CollectInput): Promise<{ data: CollectResultBody }> {
@@ -362,6 +438,8 @@ export interface TicketReturnable {
   branchId: string
   createdAt: string
   voided: boolean
+  /** Con qué pagó, si hubo otra moneda: lo devuelto sale en esa moneda. */
+  tender?: TicketTender | null
   lines: ReturnableLine[]
   methods: CollectSnapshotMethod[]
   returns: TicketReturnSummary[]
@@ -402,6 +480,8 @@ export interface ReturnSnapshot {
     backToStock: boolean | null
   }>
   payout: { kind: "pagado"; methodName: string; typeCode: string | null } | { kind: "a_favor" }
+  /** Lo que salió de la caja, si salió en otra moneda que la devuelta. */
+  payouts?: Array<{ currency: string; amountCents: number }>
   reason: string
 }
 
@@ -444,13 +524,21 @@ export interface RefundResult {
   currency: string
   branchId: string
   methodName: string
+  /** Lo que salió de la caja, si salió en otra moneda que la devuelta. */
+  payouts?: Array<{ currency: string; amountCents: number }>
   refundedAt: string
   account: AccountSummary
 }
 
 export function refundApi(
   patientId: string,
-  body: { branchId: string; amountCents: number; paymentMethodId?: string; reason: string },
+  body: {
+    branchId: string
+    amountCents: number
+    paymentMethodId?: string
+    reason: string
+    currency?: string
+  },
 ): Promise<{ data: RefundResult }> {
   return apiFetch<{ data: RefundResult }>(`/api/patients/${patientId}/refunds`, {
     method: "POST",
@@ -468,6 +556,30 @@ export interface AccountCurrency {
   aFavor: number
   /** Lo que debe menos lo que tiene a favor (decisión 22); nunca baja de cero. */
   saldo: number
+}
+
+/**
+ * Los bloques de la cuenta: la moneda del negocio siempre (en cero si no hay nada); la
+ * otra moneda de la clínica, solo si debe, tiene a favor o queda saldo en ella. Sin
+ * otra moneda, todas las filas, como siempre.
+ */
+export function accountBalances<T extends AccountCurrency>(
+  rows: readonly T[],
+  business: string,
+  second: string | null,
+): Array<T | AccountCurrency> {
+  const shown = second
+    ? rows.filter(
+        (row) =>
+          row.currency !== second || row.porCobrar !== 0 || row.aFavor !== 0 || row.saldo !== 0,
+      )
+    : [...rows]
+  return shown.length > 0 ? shown : [{ currency: business, porCobrar: 0, pagado: 0, aFavor: 0, saldo: 0 }]
+}
+
+/** El título de un bloque: con otra moneda, su nombre («Dólares»); sin ella, como siempre. */
+export function accountBalanceTitle(currency: string, locale: string, second: string | null): string {
+  return second ? upperFirst(currencyWord(currency, locale)) : currency
 }
 
 export interface AccountPendingItem {
@@ -503,6 +615,11 @@ export interface AccountCobroPayment {
   methodName: string
   amountCents: number
   voidedAt: string | null
+  /** Lo que entró, si fue en otra moneda; el cambio y el valor si hubo otra moneda de por medio. */
+  tenderCents?: number | null
+  tenderCurrency?: string | null
+  exchangeRate?: string | null
+  businessCents?: number | null
 }
 
 export interface AccountCobro {
@@ -514,6 +631,7 @@ export interface AccountCobro {
   branchId?: string
   cashReceivedCents?: number | null
   changeCents?: number | null
+  changeCurrency?: string | null
   payerContactId?: string | null
   status: "vigente" | "anulado"
   voidedAt?: string | null
@@ -548,6 +666,8 @@ export interface AccountCreditSource {
   ticketId: string | null
   ticketNumber: number | null
   currency: string
+  /** En qué entró ese dinero, si fue en otra moneda: en ella se devuelve. */
+  tenderCurrency?: string | null
   paidAt: string
   availableCents: number
   /** El cobro fue un adelanto (sin concepto). */
@@ -559,6 +679,8 @@ export interface AccountSummary {
   /** Identidad mínima para la cabecera de caja. */
   patient?: { displayName: string; docType: string | null; docNumber: string | null; sex: string | null }
   aFavorOrigen?: AccountCreditSource[]
+  /** La moneda de lo aceptado de su plan; nula si no hay o hay en dos. */
+  planCurrency?: string | null
   /** Visitas atendidas por tratamiento (id del tratamiento del plan). */
   visitasPorTratamiento?: Record<string, number>
   byCurrency: AccountCurrency[]
@@ -576,7 +698,13 @@ export function fetchPatientAccount3(patientId: string): Promise<{ data: Account
 
 export function createManualChargeApi(
   patientId: string,
-  body: { branchId?: string; description: string; amountCents: number; notes?: string },
+  body: {
+    branchId?: string
+    description: string
+    amountCents: number
+    notes?: string
+    currency?: string
+  },
 ): Promise<{ data: { id: string } }> {
   return apiFetch<{ data: { id: string } }>(`/api/patients/${patientId}/charges`, {
     method: "POST",

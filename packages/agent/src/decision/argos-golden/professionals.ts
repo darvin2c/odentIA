@@ -200,7 +200,12 @@ export function professionalSolvers(h: GoldenHelpers): GoldenSolvers {
     d8: async () => {
       const report = await getReportProfessionals(tx, org, { period: "este_mes" }, now)
       const before = scope.window.previous
-      const previousCollected = await collectedByProfessional(tx, org, { start: before.start, end: before.end }, scope.currency)
+      const previousCollected = await collectedByProfessional(
+        tx,
+        org,
+        { start: before.start, end: before.end },
+        scope.money,
+      )
       const previousAttended = await tx.execute<{ id: string; attended: number }>(sql`
         select a.professional_user_id as id, count(*)::int as attended from appointment a
         where a.organization_id = ${org} and a.status = 'atendida' and a.starts_at >= ${before.start.toISOString()}::timestamptz and a.starts_at < ${before.end.toISOString()}::timestamptz

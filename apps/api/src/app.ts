@@ -29,9 +29,12 @@ import {
   type SearchEmbedder,
   ServiceError,
   type Storage,
+  exchangeRateAuthor,
+  getCurrencyUsage,
   setBranchActive,
   setClinicLogo,
   setOrgDiagnosisSystem,
+  setOrgExchangeRate,
   startSaasTrial,
   trustedOriginsOn,
   turnOnNewClinicLines,
@@ -45,7 +48,7 @@ import { requestId } from "hono/request-id"
 import { streamSSE } from "hono/streaming"
 import { z } from "zod"
 import { adminContextOf, requireAdminContext } from "./lib/admin-context.js"
-import { canAccess, orgContextOf, requireOrgContext, requireSession } from "./lib/context.js"
+import { canAccess, canAccessAny, orgContextOf, requireOrgContext, requireSession } from "./lib/context.js"
 import { errorBody } from "./lib/error.js"
 import { createOrgEventsHub, type NotifyPayload } from "./lib/org-events.js"
 import { createAccountRoute } from "./routes/account.js"
@@ -222,6 +225,9 @@ const orgProfileInput = z.object({
   sheetSize: z.enum(["A4", "Letter"]).optional(),
   ticketFooter: z.string().trim().min(1).max(280).optional(),
   applyCountryPreset: z.boolean().optional(),
+  // La otra moneda y el «Cambio de hoy»: `null` deja de cobrar en ella; lo valida el servicio.
+  secondCurrency: z.string().max(3).nullable().optional(),
+  exchangeRate: z.string().max(40).nullable().optional(),
   // Impuestos de lo cobrado (ADR 0083): lo valida el servicio con las reglas del país.
   taxes: z
     .object({
@@ -679,6 +685,7 @@ export function createApp(deps: AppDeps) {
             ...found,
             logo: await getClinicLogo(tx, orgId),
             receptionName: (await getAgentConfig(tx, orgId)).personaName,
+            exchangeRateByName: await exchangeRateAuthor(tx, found),
           }
         : null
     })
@@ -769,6 +776,8 @@ export function createApp(deps: AppDeps) {
           ticketFooter,
           applyCountryPreset,
           taxes,
+          secondCurrency,
+          exchangeRate,
           ...identity
         } = input
         if (current) {
@@ -795,6 +804,8 @@ export function createApp(deps: AppDeps) {
           sheetSize,
           ticketFooter,
           taxes,
+          secondCurrency,
+          exchangeRate,
           applyCountryPreset: applyCountryPreset ?? !current,
         })
         // Una clínica nueva trae prendido «Recordar la cita», a nombre de quien la crea (ADR 0026).
@@ -813,6 +824,40 @@ export function createApp(deps: AppDeps) {
         })
         return updated
       }),
+    )
+  })
+
+  // El «Cambio de hoy»: lo escribe quien configura y también quien cobra. La otra moneda
+  // se activa y se quita solo en «Datos de la clínica», con su permiso (arriba).
+  guarded.put("/org-profile/exchange-rate", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccessAny(memberRole, ["settings.write", "finance.write"])) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para cambiar el cambio de hoy"), 403)
+    }
+    const parsed = z
+      .object({ exchangeRate: z.string("Escribe el cambio de hoy").max(40) })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(db, orgId, (tx) =>
+        setOrgExchangeRate(tx, orgId, userId, { exchangeRate: parsed.data.exchangeRate }),
+      ),
+    )
+  })
+
+  // Lo que la clínica ya tiene en otra moneda: se dice antes de activarla o quitarla.
+  guarded.get("/org-profile/currency-usage", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver esto"), 403)
+    }
+    const parsed = z
+      .object({ currency: z.string().regex(/^[A-Z]{3}$/, "Elige la moneda de la lista") })
+      .safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(db, orgId, (tx) => getCurrencyUsage(tx, orgId, parsed.data.currency)),
     )
   })
 

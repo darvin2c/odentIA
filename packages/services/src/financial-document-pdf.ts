@@ -7,7 +7,13 @@
  *   zona. Nada de PEN/es-PE fijos.
  * - Papel: la térmica de la clínica, u hoja A4 o Carta si se pide.
  */
-import { formatMoney, ticketFooterLines, ticketUntaxedNote } from "@odentia/clinical"
+import {
+  formatMoney,
+  ticketFooterLines,
+  type TicketTender,
+  ticketTenderTitle,
+  ticketUntaxedNote,
+} from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { contact } from "@odentia/db/schema/crm"
 import { and, eq } from "drizzle-orm"
@@ -51,6 +57,8 @@ export interface TicketLine {
 export interface TicketMethod {
   label: string
   amountCents: number
+  /** Lo que entró por este medio, si fue en otra moneda que la del ticket. */
+  tenderCents?: number
   reference: string | null
 }
 
@@ -75,6 +83,8 @@ export interface TicketSnapshot {
   creditAppliedCents: number
   cashReceivedCents: number | null
   changeCents: number | null
+  /** Moneda del vuelto, si se dio en otra que aquella en que entró. */
+  changeCurrency: string | null
   totalCents: number
   /** Lo que quedó por cobrar de esos conceptos al momento del cobro. */
   remainingCents: number | null
@@ -82,6 +92,8 @@ export interface TicketSnapshot {
   pending: Array<{ description: string; amountCents: number; remainingCents: number }> | null
   /** El impuesto de lo cobrado, congelado al cobrar (ADR 0083). */
   taxes: TicketTaxes | null
+  /** Con qué pagó y a qué cambio, si usó dos monedas. */
+  tender: TicketTender | null
   org: DocOrg
 }
 
@@ -148,15 +160,18 @@ export async function buildTicketSnapshot(
     methods: (frozen.methods ?? []).map((method) => ({
       label: method.name,
       amountCents: method.amountCents,
+      ...(method.tenderCents !== undefined ? { tenderCents: method.tenderCents } : {}),
       reference: method.reference,
     })),
     creditAppliedCents: ticket.creditAppliedCents,
     cashReceivedCents: ticket.cashReceivedCents,
     changeCents: ticket.changeCents,
+    changeCurrency: ticket.changeCurrency,
     totalCents: ticket.totalCents,
     remainingCents: frozen.remainingCents ?? null,
     pending: frozen.pending ?? null,
     taxes: frozen.taxes ?? null,
+    tender: frozen.tender ?? null,
     org,
   }
 }
@@ -203,15 +218,40 @@ function ticketTotals(kit: DocumentKit, snap: TicketSnapshot, money: (cents: num
 }
 
 function howPaid(kit: DocumentKit, snap: TicketSnapshot, money: (cents: number) => string) {
+  // Con dos monedas, cada cifra lleva la suya: lo que entró no es lo que canceló.
+  const { tender } = snap
+  const paid = (cents: number) =>
+    tender ? formatMoney(cents, tender.currency, snap.org.locale) : money(cents)
   for (const method of snap.methods) {
-    moneyRow(kit, method.label, money(method.amountCents))
+    moneyRow(
+      kit,
+      method.label,
+      tender ? paid(method.tenderCents ?? method.amountCents) : money(method.amountCents),
+    )
     if (method.reference) smallNote(kit, `Operación ${method.reference}`)
   }
   if (snap.creditAppliedCents > 0)
     moneyRow(kit, "Saldo a favor usado", money(snap.creditAppliedCents))
-  if (snap.cashReceivedCents != null) moneyRow(kit, "Recibido", money(snap.cashReceivedCents))
+  if (snap.cashReceivedCents != null) moneyRow(kit, "Recibido", paid(snap.cashReceivedCents))
   if (snap.changeCents != null && snap.changeCents > 0)
-    moneyRow(kit, "Vuelto", money(snap.changeCents))
+    moneyRow(
+      kit,
+      "Vuelto",
+      snap.changeCurrency
+        ? formatMoney(snap.changeCents, snap.changeCurrency, snap.org.locale)
+        : paid(snap.changeCents),
+    )
+}
+
+/** Lo que salió de la caja, si salió en otra moneda que la devuelta: nada de cambio nuevo. */
+function payoutRows(
+  kit: DocumentKit,
+  label: string,
+  payouts: ReadonlyArray<{ currency: string; amountCents: number }>,
+  locale: string,
+) {
+  for (const payout of payouts)
+    moneyRow(kit, label, formatMoney(payout.amountCents, payout.currency, locale))
 }
 
 /** Lo que falta del tratamiento va aparte del pago, con su nombre, y solo si falta algo. */
@@ -286,6 +326,12 @@ export async function renderTicketPdf(
     thermalRule(kit)
     ticketTotals(kit, snap, money)
     thermalRule(kit)
+    if (snap.tender)
+      kit.text(ticketTenderTitle(snap.tender, org.locale), {
+        face: "sansSemi",
+        size: SIZE.second,
+        leading: 1.4,
+      })
     howPaid(kit, snap, money)
     if (snap.remainingCents != null && snap.remainingCents > 0 && snap.lines.length > 0) {
       thermalRule(kit)
@@ -351,7 +397,11 @@ export async function renderTicketPdf(
   kit.gap(8)
   ticketTotals(kit, snap, money)
   kit.gap(20)
-  kit.subheading("Cómo pagó", { face: "sansSemi", before: 0, after: 3 })
+  kit.subheading(snap.tender ? ticketTenderTitle(snap.tender, org.locale) : "Cómo pagó", {
+    face: "sansSemi",
+    before: 0,
+    after: 3,
+  })
   howPaid(kit, snap, money)
   if (snap.remainingCents != null && snap.remainingCents > 0 && snap.lines.length > 0) {
     kit.subheading("Le falta pagar", { face: "sansSemi", before: 14, after: 3 })
@@ -405,6 +455,7 @@ export async function getRefundReceiptPdf(
     thermalRule(kit)
     kit.total("Devuelto de su saldo a favor", money(frozen.amountCents))
     kit.gap(4)
+    payoutRows(kit, "Salió de la caja", frozen.payouts ?? [], org.locale)
     kit.text(`Se devolvió por: ${frozen.methodName}`, { size: SIZE.second, leading: 1.4 })
     kit.text(`Motivo: ${frozen.reason}`, { size: SIZE.second, leading: 1.4 })
     kit.signLine("Recibí conforme: nombre y firma")
@@ -426,6 +477,7 @@ export async function getRefundReceiptPdf(
     )
     kit.gap(14)
     kit.total({ text: "Devuelto de su saldo a favor", face: "sansSemi" }, money(frozen.amountCents))
+    payoutRows(kit, "Salió de la caja", frozen.payouts ?? [], org.locale)
     kit.gap(22)
     kit.table({
       columns: [{ label: "" }, { label: "" }],
@@ -525,9 +577,10 @@ export async function renderReturnPdf(
     }
     thermalRule(kit)
     kit.total("TOTAL DEVUELTO", money(row.totalCents))
-    if (frozen.payout.kind === "pagado")
-      moneyRow(kit, frozen.payout.methodName, money(row.totalCents))
-    else kit.text("Queda como saldo a favor del paciente.", { size: SIZE.second, leading: 1.4 })
+    if (frozen.payout.kind === "pagado") {
+      if (frozen.payouts) payoutRows(kit, frozen.payout.methodName, frozen.payouts, org.locale)
+      else moneyRow(kit, frozen.payout.methodName, money(row.totalCents))
+    } else kit.text("Queda como saldo a favor del paciente.", { size: SIZE.second, leading: 1.4 })
     kit.text(`Motivo: ${frozen.reason}`, { size: SIZE.second, leading: 1.4 })
     if (frozen.payout.kind === "pagado") kit.signLine("Recibí conforme: nombre y firma")
   } else {
@@ -571,6 +624,8 @@ export async function renderReturnPdf(
       ]),
     })
     kit.total({ text: "Total devuelto", face: "sansSemi" }, money(row.totalCents), { before: 9 })
+    if (frozen.payout.kind === "pagado")
+      payoutRows(kit, "Salió de la caja", frozen.payouts ?? [], org.locale)
     kit.gap(22)
     kit.table({
       columns: [{ label: "" }, { label: "" }],

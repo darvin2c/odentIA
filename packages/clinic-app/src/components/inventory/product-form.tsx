@@ -218,7 +218,9 @@ export function ProductFormDrawer({
   const saleHelp = (() => {
     if (costPerUse === null || !last?.currency) return `Lo que se cobra por ${values.unit || "unidad"} en «Cobrar».`
     const cost = moneyText(costPerUse, last.currency)
-    if (salePriceCents === null) return `Te costó ${cost} la última vez, por ${values.unit}.`
+    // Comprado en otra moneda que la de la venta no se resta: soles menos dólares no dice nada.
+    if (salePriceCents === null || last.currency !== currency)
+      return `Te costó ${cost} la última vez, por ${values.unit}.`
     const gain = salePriceCents - costPerUse
     const share = salePriceCents > 0 ? Math.round((gain / salePriceCents) * 100) : 0
     return gain >= 0

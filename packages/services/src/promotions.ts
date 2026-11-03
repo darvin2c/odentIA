@@ -500,6 +500,13 @@ export async function requirePromotionPrice(
     .limit(1)
   if (!priced) throw conflict("PROMOTION_NO_SERVICE", "La promoción no incluye este servicio")
   const service = await requireCatalogService(tx, orgId, serviceId)
+  // La promoción va en la moneda de su servicio: si el servicio cambió de moneda, su
+  // precio ya no dice nada (no se convierte) y hay que escribirlo otra vez.
+  if (priced.currency !== service.currency)
+    throw conflict(
+      "PROMOTION_NO_SERVICE",
+      "El servicio cambió de moneda: escribe otra vez su precio en la promoción",
+    )
   if (priced.mode === "fixed") {
     return {
       promotionId: promo.id,
@@ -653,14 +660,17 @@ export async function listClinicPromotionSummaries(
     name: row.name,
     endsAt: row.endsAt,
     conditions: row.conditions,
-    items: row.items.map((item) => ({
-      serviceId: item.serviceId,
-      serviceName: item.serviceName,
-      mode: item.mode as PromotionMode,
-      priceDisclosure: item.priceDisclosure as PriceDisclosure,
-      priceCents: item.priceCents,
-      currency: item.currency,
-      tariffCents: item.tariffCents,
-    })),
+    // Lo que quedó en otra moneda que su servicio no se puede cotizar (`requirePromotionPrice`).
+    items: row.items
+      .filter((item) => item.currency === item.tariffCurrency)
+      .map((item) => ({
+        serviceId: item.serviceId,
+        serviceName: item.serviceName,
+        mode: item.mode as PromotionMode,
+        priceDisclosure: item.priceDisclosure as PriceDisclosure,
+        priceCents: item.priceCents,
+        currency: item.currency,
+        tariffCents: item.tariffCents,
+      })),
   }))
 }

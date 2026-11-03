@@ -17,9 +17,11 @@ import { usePermission } from "../../lib/crm"
 import { QueryErrorState } from "../../lib/query-error"
 import {
   absoluteChange,
+  amountsWords,
   bucketLabel,
   bucketShort,
   type Comparison,
+  compactMoney,
   fetchReport,
   GRAIN_WORD,
   POINTS,
@@ -44,10 +46,6 @@ import { ADMIN_NAME } from "../../lib/agent-names"
 const APART_POINTS = 5
 
 export type SummaryTarget = "finanzas" | "pacientes" | "agenda" | "agente"
-
-function compactMoney(cents: number, locale: string): string {
-  return new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 }).format(cents / 100)
-}
 
 /** Una diferencia de dinero dicha con palabras: «S/ 620 más que en agosto». */
 function moneyChange(current: number, previous: number, currency: string, locale: string, phrase: string): Comparison {
@@ -233,7 +231,11 @@ function SummaryFigures({
           sparkLabel={`Deuda de más de ${data.overdue.days} días al cierre de cada mes ${twelve}: ${travel(data.overdue.months, money)}`}
           change={data.overdue.current.cents === 0 && data.overdue.previous.cents === 0 ? undefined : moneyChange(data.overdue.current.cents, data.overdue.previous.cents, currency, locale, phrase)}
           better="down"
-          detail={data.overdue.current.people > 0 ? `${data.overdue.current.people} ${data.overdue.current.people === 1 ? "persona" : "personas"}, al cierre del periodo` : "Nadie, al cierre del periodo"}
+          detail={
+            data.overdue.current.people > 0
+              ? `${data.overdue.current.byCurrency ? `Son ${amountsWords(data.overdue.current.byCurrency, locale)}, unos ${money(data.overdue.current.cents)} al cambio de hoy. ` : ""}${data.overdue.current.people} ${data.overdue.current.people === 1 ? "persona" : "personas"}, al cierre del periodo`
+              : "Nadie, al cierre del periodo"
+          }
           footer={data.overdue.current.people > 0 ? <FooterButton onClick={() => onOpenList("debts_overdue")}>Ver quiénes</FooterButton> : undefined}
         />
       </section>
@@ -272,7 +274,7 @@ function CollectedChart({ data }: { data: ReportSummary }) {
           ? { reference: { value: data.goals.cobrado.amount, label: `Meta ${formatMoney(data.goals.cobrado.amount, currency, locale)}` } }
           : {})}
         format={(cents) => formatMoney(cents, currency, locale)}
-        axis={(cents) => compactMoney(cents, locale)}
+        axis={(cents) => compactMoney(cents, currency, locale)}
       />
     </ReportCard>
   )

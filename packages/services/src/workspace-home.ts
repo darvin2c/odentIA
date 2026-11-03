@@ -149,10 +149,12 @@ export interface WaitingUnsentBudget {
   patientName: string
   /** Desde cuándo está armado. */
   since: string
-  /** Tratamientos de la opción que vale y su total (null si falta algún precio). */
+  /** Tratamientos de la opción que vale y su total (null si falta algún precio o va en dos monedas). */
   itemCount: number
   totalCents: number | null
   currency: string
+  /** Solo si va en dos monedas: un total por cada una. */
+  totals?: Array<{ currency: string; totalCents: number | null }>
   options: number
 }
 

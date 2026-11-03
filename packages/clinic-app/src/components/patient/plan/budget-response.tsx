@@ -6,7 +6,7 @@
  * no se reescribe después. Sirve a quien tenga `budgets.decide`: el odontólogo
  * de lo que indicó, recepción y caja (decisión 4).
  */
-import { budgetStateText, sumAcceptedCents } from "@odentia/clinical"
+import { budgetStateText, moneyTotalsText, sumAcceptedByCurrency } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -55,7 +55,7 @@ import { fetchResponsibilities } from "../../../lib/clinical-journey"
 import { usePermission } from "../../../lib/crm"
 import type { PatientFull } from "../../../lib/patients"
 import { ChoiceSelect } from "../../ui/choice-select"
-import { AMOUNT_PENDING, budgetStatusTone, type Money } from "./budget-parts"
+import { acceptedWords, AMOUNT_PENDING, budgetStatusTone, type Money, moneyForLines, totalsWords } from "./budget-parts"
 import { appWords } from "../../../lib/product-words"
 
 type Answer = "aceptado" | "pospuesto" | "rechazado"
@@ -256,11 +256,11 @@ function AnswerButtons({ title, disabled }: { title: string; disabled: boolean }
 /** «¿Qué opción eligió?» (`optionId`): con varias opciones, antes de responder. */
 function OptionChoice({
   budget,
-  amount,
+  money,
   control,
 }: {
   budget: BudgetWithTotals
-  amount: (cents: number | null) => string
+  money: Money
   control: FieldControl
 }): React.JSX.Element {
   const field = useFieldContext<string>()
@@ -289,7 +289,7 @@ function OptionChoice({
                 .join(" · ")}
             </span>
           </span>
-          <span className="font-semibold tabular-nums">{amount(option.totalCents)}</span>
+          <span className="font-semibold tabular-nums">{totalsWords(option, budget.currency, money)}</span>
         </FieldLabel>
       ))}
     </RadioGroup>
@@ -300,7 +300,7 @@ export function BudgetResponse({
   patientId,
   budget,
   disabled = false,
-  money,
+  money: baseMoney,
   formatDay,
   runWrite,
   openOnMount = false,
@@ -320,6 +320,11 @@ export function BudgetResponse({
   const receptionName = useReceptionName()
   const uid = useId()
   const queryClient = useQueryClient()
+  // Las cifras de esta lista van sin símbolo, salvo que el presupuesto lleve dos monedas.
+  const money = moneyForLines(baseMoney, budget.items)
+  const plainMoney: Money = Object.assign((cents: number | null, unit: string) => money.plain(cents, unit), {
+    plain: money.plain,
+  })
   const canDecide = usePermission("budgets.decide")
   const canPatients = usePermission("patients.read")
   const answerable = BUDGET_ANSWERABLE_STATUSES.includes(budget.status)
@@ -441,7 +446,6 @@ export function BudgetResponse({
       : null
 
   const openLines = lines.filter((line) => !isAnswerFinal(line))
-  const amount = (cents: number | null): string => (cents == null ? AMOUNT_PENDING : money(cents, budget.currency))
 
   // «Debe decidir cada línea…» del servidor se dice en el primer tratamiento por responder.
   const firstOpen = decisionValues.findIndex((entry) => entry.decision !== "aceptado" && entry.decision !== "rechazado")
@@ -484,9 +488,14 @@ export function BudgetResponse({
     return marked || undefined
   }
 
-  /** Lo marcado como «Acepta» mientras se elige: la misma regla del servidor (`sumAcceptedCents`). */
-  const acceptingCents = (): number | null =>
-    sumAcceptedCents(lines.map((line) => ({ lineTotalCents: line.lineTotalCents, decision: answerOf(line) })))
+  /** Lo marcado como «Acepta» mientras se elige: la misma regla del servidor (`sumAcceptedByCurrency`). */
+  const acceptingWords = (): string => {
+    const accepting = sumAcceptedByCurrency(
+      lines.map((line) => ({ lineTotalCents: line.lineTotalCents, decision: answerOf(line), currency: line.currency })),
+    )
+    if (accepting.length === 0) return money(0, budget.currency)
+    return moneyTotalsText(accepting, (cents, unit) => money(cents, unit), AMOUNT_PENDING)
+  }
 
   const statusLine =
     budget.status === "presentado" && budget.presentedAt
@@ -540,12 +549,12 @@ export function BudgetResponse({
           <div className="flex gap-3">
             <dt className="flex-1 text-muted-foreground">{several && chosen ? chosen.label : "Presupuestado"}</dt>
             <dd className="text-right tabular-nums">
-              {budget.totalCents == null ? AMOUNT_PENDING : money.plain(budget.totalCents, budget.currency)}
+              {totalsWords(budget, budget.currency, plainMoney)}
             </dd>
           </div>
           <div className="flex items-baseline gap-3">
             <dt className="flex-1 font-semibold">Aceptó</dt>
-            <dd className="text-right text-lg font-semibold tabular-nums">{amount(budget.acceptedCents)}</dd>
+            <dd className="text-right text-lg font-semibold tabular-nums">{acceptedWords(budget, budget.currency, money)}</dd>
           </div>
         </dl>
       ) : null}
@@ -582,7 +591,7 @@ export function BudgetResponse({
                   legend="¿Qué opción eligió?"
                   description="Al elegir una, las otras quedan «No elegida»."
                 >
-                  {(control) => <OptionChoice budget={budget} amount={amount} control={control} />}
+                  {(control) => <OptionChoice budget={budget} money={money} control={control} />}
                 </field.Group>
               )}
             </form.AppField>
@@ -723,12 +732,12 @@ export function BudgetResponse({
             <div className="flex gap-3">
               <dt className="flex-1 text-muted-foreground">Presupuestado</dt>
               <dd className="text-right tabular-nums">
-                {chosen?.totalCents == null ? AMOUNT_PENDING : money.plain(chosen.totalCents, budget.currency)}
+                {chosen ? totalsWords(chosen, budget.currency, plainMoney) : AMOUNT_PENDING}
               </dd>
             </div>
             <div className="flex items-baseline gap-3">
               <dt className="flex-1 font-semibold">Acepta</dt>
-              <dd className="text-right text-lg font-semibold tabular-nums">{amount(acceptingCents())}</dd>
+              <dd className="text-right text-lg font-semibold tabular-nums">{acceptingWords()}</dd>
             </div>
           </dl>
 

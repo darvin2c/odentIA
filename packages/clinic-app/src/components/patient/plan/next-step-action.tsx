@@ -25,7 +25,7 @@ import { usePermission } from "../../../lib/crm"
 import { usePersonArchived } from "../../../lib/person-archived"
 import { openAppointmentAnywhere, openBookingAnywhere } from "../../agenda/schedule-host"
 import { FollowUpScheduler } from "../follow-up-scheduler"
-import { useBudgetFormat } from "./budget-parts"
+import { totalsWords, useBudgetFormat } from "./budget-parts"
 import { BudgetResponse } from "./budget-response"
 import { BudgetSendButton } from "./budget-send"
 
@@ -131,7 +131,7 @@ export function BudgetAnswerDrawer({
   const description = budget
     ? [
         budget.presentedAt ? format.day(budget.presentedAt) : null,
-        format.money(budget.totalCents, budget.currency),
+        totalsWords(budget, budget.currency, format.money, "…"),
       ]
         .filter(Boolean)
         .join(" · ")

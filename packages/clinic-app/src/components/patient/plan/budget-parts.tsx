@@ -4,13 +4,14 @@
  * importes llegan calculados del servidor (`lineTotalCents`, `totalCents`,
  * `discountCents`, `acceptedCents`): aquí se muestran, no se recalculan.
  */
-import { formatMoney, formatMoneyAmount } from "@odentia/clinical"
+import { formatMoney, formatMoneyAmount, moneyTotalsText } from "@odentia/clinical"
 import { Badge, cn } from "@odentia/ui"
 import {
   type BudgetLine,
   type BudgetOption,
   type BudgetWithTotals,
   budgetAnswerLabel,
+  totalsOf,
 } from "../../../lib/budgets"
 import { label as glossaryLabel } from "../../../lib/glossary"
 import { useOrgProfile } from "../../../lib/org"
@@ -21,6 +22,35 @@ import { useOrgProfile } from "../../../lib/org"
  */
 export type Money = ((cents: number | null, currency: string) => string) & {
   plain: (cents: number | null, currency: string) => string
+}
+
+/**
+ * Con dos monedas en el presupuesto, cada importe dice la suya: `plain` lleva el
+ * símbolo, porque ya no hay un total que la diga por toda la lista. Con una, igual.
+ */
+export function moneyForLines(money: Money, lines: ReadonlyArray<{ currency: string }>): Money {
+  if (new Set(lines.map((line) => line.currency)).size < 2) return money
+  return Object.assign((cents: number | null, currency: string) => money(cents, currency), {
+    plain: (cents: number | null, currency: string) => money(cents, currency),
+  })
+}
+
+type WithTotals = Parameters<typeof totalsOf>[0]
+
+/** «S/ 300.00 + USD 1,000.00»: el total de una opción o del presupuesto, por moneda. */
+export function totalsWords(of: WithTotals, currency: string, money: Money, missing: string = AMOUNT_PENDING): string {
+  return moneyTotalsText(totalsOf(of, currency), (cents, unit) => money(cents, unit), missing)
+}
+
+/** Lo aceptado, por moneda: sin las monedas en cero, salvo que todo esté en cero. */
+export function acceptedWords(of: WithTotals, currency: string, money: Money): string {
+  const accepted = totalsOf(of, currency).map((total) => ({ currency: total.currency, totalCents: total.acceptedCents }))
+  const some = accepted.filter((total) => total.totalCents !== 0)
+  return moneyTotalsText(
+    some.length > 0 ? some : accepted.slice(0, 1),
+    (cents, unit) => money(cents, unit),
+    AMOUNT_PENDING,
+  )
 }
 
 /** Importes y fechas con el formato y la zona de la clínica. */
@@ -165,31 +195,48 @@ export function BudgetTotals({
   money,
   className,
 }: {
-  option: Pick<BudgetOption, "totalCents" | "tariffTotalCents" | "discountCents">
+  option: WithTotals
   lines: BudgetLine[]
   currency: string
   money: Money
   className?: string
 }): React.JSX.Element {
   const hasSessions = lines.some(isSessionLine)
+  const totals = totalsOf(option, currency)
+  // Con dos monedas cada cifra lleva su símbolo: no hay una sola que diga la moneda de la lista.
+  const figure = totals.length > 1 ? money : money.plain
+  const discounts = totals.filter((total) => total.discountCents != null && total.discountCents > 0)
   return (
     <dl className={cn("flex flex-col gap-1.5 rounded-xl bg-muted/50 p-4 text-sm", className)}>
       <div className="flex gap-3">
         <dt className="flex-1 text-muted-foreground">Precio normal</dt>
         <dd className="text-right tabular-nums">
-          {option.tariffTotalCents == null ? AMOUNT_PENDING : money.plain(option.tariffTotalCents, currency)}
+          {moneyTotalsText(
+            totals.map((total) => ({ currency: total.currency, totalCents: total.tariffTotalCents })),
+            (cents, unit) => figure(cents, unit),
+            AMOUNT_PENDING,
+          )}
         </dd>
       </div>
-      {option.discountCents != null && option.discountCents > 0 ? (
+      {discounts.length > 0 ? (
         <div className="flex gap-3">
           <dt className="flex-1 text-muted-foreground">Descuento</dt>
-          <dd className="text-right tabular-nums">−&nbsp;{money.plain(option.discountCents, currency)}</dd>
+          <dd className="text-right tabular-nums">
+            −&nbsp;
+            {moneyTotalsText(
+              discounts.map((total) => ({
+                currency: total.currency,
+                totalCents: total.discountCents,
+              })),
+              (cents, unit) => figure(cents, unit),
+            )}
+          </dd>
         </div>
       ) : null}
       <div className="flex items-baseline gap-3 border-t pt-2">
         <dt className="flex-1 font-semibold">{hasSessions ? "Total del tratamiento" : "Total"}</dt>
         <dd className="text-right text-xl font-semibold tabular-nums">
-          {option.totalCents == null ? AMOUNT_PENDING : money(option.totalCents, currency)}
+          {totalsWords(option, currency, money)}
         </dd>
       </div>
     </dl>
@@ -259,7 +306,5 @@ export function BudgetLinesList({
 export function optionHeading(option: BudgetOption, budget: BudgetWithTotals, money: Money): string {
   const state =
     option.decision === "elegida" ? " · elegida" : option.decision === "no_elegida" ? " · no elegida" : ""
-  return `${option.label}${option.isRecommended ? " · recomendada" : ""}${state} · ${
-    option.totalCents == null ? AMOUNT_PENDING : money(option.totalCents, budget.currency)
-  }`
+  return `${option.label}${option.isRecommended ? " · recomendada" : ""}${state} · ${totalsWords(option, budget.currency, money)}`
 }

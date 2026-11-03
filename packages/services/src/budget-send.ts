@@ -16,7 +16,7 @@
  * responde y reserva lo que aceptó; dentro de las 24 horas y por correo va
  * además el PDF, con la dirección de su enlace escrita.
  */
-import { budgetOptionLabel, formatMoney } from "@odentia/clinical"
+import { budgetOptionLabel, formatMoney, moneyTotalsText } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { patient } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
@@ -91,16 +91,20 @@ export async function serviceRecipient(
 
 /** «3 tratamientos por S/ 540», o «2 opciones: S/ 540 o S/ 1 260». */
 function budgetSummary(budget: BudgetWithTotals, locale: string): string {
-  const money = (cents: number | null) =>
-    cents == null ? "un precio por definir" : formatMoney(cents, budget.currency, locale)
+  const money = (of: { totals: BudgetWithTotals["totals"] }) =>
+    moneyTotalsText(
+      of.totals,
+      (cents, currency) => formatMoney(cents, currency, locale),
+      "un precio por definir",
+    )
   if (budget.options.length > 1) {
-    const totals = budget.options.map((option) => money(option.totalCents))
+    const totals = budget.options.map((option) => money(option))
     const last = totals.pop()
     return `${budget.options.length} opciones: ${totals.join(", ")} o ${last}`
   }
   const value = valueOptionOf(budget.options)
   const count = value?.lineCount ?? budget.items.length
-  return `${count} ${count === 1 ? "tratamiento" : "tratamientos"} por ${money(budget.totalCents)}`
+  return `${count} ${count === 1 ? "tratamiento" : "tratamientos"} por ${money(budget)}`
 }
 
 async function readyMessage(

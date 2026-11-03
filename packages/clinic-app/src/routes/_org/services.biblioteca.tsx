@@ -1,4 +1,4 @@
-import { formatMoneyInput, parseMoney } from "@odentia/clinical"
+import { currencySymbol, formatMoneyInput, parseMoney } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -54,7 +54,6 @@ import { useClinicalProfile, useOrgProfile } from "../../lib/org"
 import {
   BILLING_MODE_LABELS,
   type BillingMode,
-  currencySymbol,
   createServiceApi,
   fetchMostUsedServices,
   fetchServices,

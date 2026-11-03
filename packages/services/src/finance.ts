@@ -9,7 +9,15 @@
  * documento; la presentación usa la utilidad compartida con el locale del perfil.
  * Sin emisor fiscal ni pasarela: no hay emisión de comprobantes ni cobro online.
  */
-import { formatMoney } from "@odentia/clinical"
+import {
+  commissionOfValue,
+  type ExpenseExchange,
+  expenseExchange,
+  formatMoney,
+  type MoneyFraction,
+  roundMoneyValue,
+  sumMoneyValues,
+} from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { member, user } from "@odentia/db/schema/auth"
 import { conversation } from "@odentia/db/schema/crm"
@@ -49,10 +57,19 @@ import {
   ServiceError,
   validation,
 } from "./errors.js"
-import { getOrgLocale, orgProfileRequired } from "./locale.js"
+import { getOrgLocale, type OrgLocale, orgProfileRequired } from "./locale.js"
 import { CLOSED_PURCHASE_STATUSES, type PurchaseBalance, purchaseBalances, supplierCredits } from "./purchase-balance.js"
 import { monthStart } from "./report-periods.js"
 import { bySpan, safeCents, type Span, spansSql } from "./report-spans.js"
+import {
+  type OrgMoney,
+  orgMoney,
+  orgMoneyOf,
+  orgMoneySql,
+  orgPartValue,
+  paymentFlowSql,
+  paymentValueSql,
+} from "./report-value.js"
 import { createWorkspaceNotification } from "./workspace.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import type { TicketFrozen } from "./payments.js"
@@ -154,13 +171,45 @@ export async function requireBranch(tx: Db, orgId: string, branchId: string) {
   if (!row) throw branchNotFound()
   return row
 }
-/** Moneda de la clínica con bloqueo compartido: orden perfil→caja, sin deadlocks con el cambio de región. */
-async function lockOrgCurrency(tx: Db, orgId: string): Promise<string> {
+/**
+ * Las monedas de la clínica con bloqueo compartido: orden perfil→cuenta/caja, sin
+ * deadlocks con el cambio de región. `null` sin perfil.
+ */
+export async function lockOrgMoney(tx: Db, orgId: string) {
   const [profile] = await tx
-    .select({ currency: orgProfile.currency })
+    .select({
+      currency: orgProfile.currency,
+      secondCurrency: orgProfile.secondCurrency,
+      exchangeRate: orgProfile.exchangeRate,
+    })
     .from(orgProfile)
     .where(eq(orgProfile.organizationId, orgId))
     .for("share")
+  return profile ?? null
+}
+
+/**
+ * La moneda en que se mueve dinero: la pedida, si es una de las de la clínica, o la del
+ * negocio. Otra abriría una caja o un cargo que después impide activar la segunda moneda.
+ */
+export async function lockOrgUnit(
+  tx: Db,
+  orgId: string,
+  requested: string | undefined,
+  field = "currency",
+): Promise<string> {
+  const money = await lockOrgMoney(tx, orgId)
+  if (!money) throw orgProfileRequired()
+  if (!requested) return money.currency
+  const code = currency(requested)
+  const allowed = money.secondCurrency ? [money.currency, money.secondCurrency] : [money.currency]
+  if (!allowed.includes(code))
+    throw invalidField(field, `La clínica trabaja solo en ${allowed.join(" y ")}`)
+  return code
+}
+
+export async function lockOrgCurrency(tx: Db, orgId: string): Promise<string> {
+  const profile = await lockOrgMoney(tx, orgId)
   // Sin respaldo de un país: la moneda sale del perfil o no hay operación.
   if (!profile) throw orgProfileRequired()
   return profile.currency
@@ -207,11 +256,32 @@ async function requireProfessional(tx: Db, orgId: string, userId: string) {
 
 // --- Caja: apertura -----------------------------------------------------------
 
-/** Serializa todo lo que crea o cierra la ventana de una sede y moneda. */
+/**
+ * Serializa todo lo que crea, cierra o corrige la ventana de una sede y moneda.
+ * Orden de los bloqueos de caja, siempre el mismo para no bloquearse entre sí:
+ * primero este, de cada caja en orden fijo (`lockCashWindows`), y después la fila
+ * de la ventana (`lockShift`). Quien tiene la fila no pide este.
+ */
 async function lockCashWindow(tx: Db, orgId: string, branchId: string, unit: string): Promise<void> {
   await tx.execute(
     sql`select pg_advisory_xact_lock(hashtext('cash:' || ${orgId} || ':' || ${branchId} || ':' || ${unit}))`,
   )
+}
+
+/**
+ * Lo que toca más de una caja las bloquea juntas y en orden fijo, por sede y
+ * moneda: dos operaciones sobre las mismas cajas nunca se esperan en cruz.
+ */
+export async function lockCashWindows(
+  tx: Db,
+  orgId: string,
+  windows: ReadonlyArray<{ branchId: string; unit: string }>,
+): Promise<void> {
+  const unique = new Map(windows.map((w) => [`${w.branchId}|${w.unit}`, w]))
+  for (const key of [...unique.keys()].sort()) {
+    const window = unique.get(key)
+    if (window) await lockCashWindow(tx, orgId, window.branchId, window.unit)
+  }
 }
 
 /**
@@ -310,7 +380,7 @@ type CashMove = typeof cashMovement.$inferSelect
 
 /**
  * De dónde sale el efectivo que debe haber. Siempre suma el esperado:
- * quedó + cobros + ingresado − gastos − retirado − devuelto.
+ * quedó + cobros + ingresado − gastos − retirado − devuelto + vuelto.
  */
 export interface CashBreakdown {
   /** Lo que quedó del cierre anterior. */
@@ -325,6 +395,8 @@ export interface CashBreakdown {
   cashWithdrawnCents: number
   /** Efectivo devuelto a pacientes. */
   cashRefundedCents: number
+  /** Vuelto en otra moneda, con signo: entra el exceso del billete, sale el vuelto. */
+  cashChangeCents: number
 }
 
 function cashBreakdown(movements: CashMove[]): CashBreakdown {
@@ -337,6 +409,9 @@ function cashBreakdown(movements: CashMove[]): CashBreakdown {
     cashExpensesCents: total((m) => isCashEgreso(m) && m.kind === "gasto"),
     cashWithdrawnCents: total((m) => isCashEgreso(m) && m.kind === "retiro"),
     cashRefundedCents: total((m) => isCashEgreso(m) && m.kind === "devolucion"),
+    cashChangeCents:
+      total((m) => m.direction === "ingreso" && m.kind === "vuelto") -
+      total((m) => isCashEgreso(m) && m.kind === "vuelto"),
   }
 }
 
@@ -472,7 +547,7 @@ export async function addCashMovement(
   actorUserId: string,
   input: CashMovementInput,
 ) {
-  const unit = input.currency ? currency(input.currency) : await lockOrgCurrency(tx, orgId)
+  const unit = await lockOrgUnit(tx, orgId, input.currency)
   const shift = await ensureOpenShift(tx, orgId, actorUserId, input.branchId, unit)
   return addShiftMovement(tx, orgId, actorUserId, shift.id, {
     direction: input.kind === "aporte" ? "ingreso" : "egreso",
@@ -528,6 +603,7 @@ export async function recordCashIncome(
       and(
         eq(cashMovement.organizationId, orgId),
         eq(cashMovement.patientPaymentId, input.paymentId),
+        eq(cashMovement.kind, "cobro"),
         isNull(cashMovement.voidedAt),
       ),
     )
@@ -554,13 +630,15 @@ export async function recordCashIncome(
 }
 
 export interface CashEgresoInput {
-  kind: "gasto" | "devolucion" | "retiro"
+  kind: "gasto" | "devolucion" | "retiro" | "vuelto"
   amountCents: number
   currency: string
   methodName?: string | null
   methodTypeCode?: string | null
   concept: string
   expenseId?: string | null
+  /** El vuelto en otra moneda va unido a su pago. */
+  patientPaymentId?: string | null
   /**
    * Compensación administrativa post-cierre: corrección del día que puede
    * dejar el contado en negativo (el test fija -10000). Los egresos
@@ -599,6 +677,7 @@ export async function recordCashEgreso(
       methodTypeCode: input.methodTypeCode ?? null,
       concept: concept(input.concept),
       expenseId: input.expenseId ?? null,
+      patientPaymentId: input.patientPaymentId ?? null,
       createdBy: actorUserId,
     })
     .returning()
@@ -606,11 +685,100 @@ export async function recordCashEgreso(
   return row
 }
 
+/** Entra efectivo por un vuelto en otra moneda, en la ventana abierta. */
+async function recordCashChangeIncome(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  shiftId: string,
+  input: {
+    amountCents: number
+    currency: string
+    methodName: string | null
+    methodTypeCode: string | null
+    concept: string
+    patientPaymentId?: string | null
+  },
+) {
+  const shift = requireOpenShift(await lockShift(tx, orgId, shiftId))
+  if (input.currency !== shift.currency)
+    throw conflict("CURRENCY_MISMATCH", "El vuelto es de otra moneda que la caja")
+  const [row] = await tx
+    .insert(cashMovement)
+    .values({
+      organizationId: orgId,
+      shiftId: shift.id,
+      direction: "ingreso",
+      kind: "vuelto",
+      amountCents: assertCents(input.amountCents),
+      currency: input.currency,
+      method: input.methodName?.slice(0, 60) ?? null,
+      methodTypeCode: input.methodTypeCode,
+      concept: concept(input.concept),
+      patientPaymentId: input.patientPaymentId ?? null,
+      createdBy: actorUserId,
+    })
+    .returning()
+  await audit(tx, orgId, actorUserId, "cash_movement", row.id, "cash.payment_registered")
+  return row
+}
+
+export interface CashChangeInput {
+  paymentId: string
+  branchId: string
+  methodName: string
+  methodTypeCode: string
+  /** El exceso del billete, que se queda en la caja de la moneda en que pagó. */
+  keptCents: number
+  keptCurrency: string
+  /** El vuelto que se le da en la otra moneda; sale de la caja de esa moneda. */
+  givenCents: number
+  givenCurrency: string
+  concept: string
+}
+
 /**
- * Revierte el ingreso a caja de un pago anulado. Con la ventana abierta se
- * anula el movimiento; con la ventana cerrada (inmutable) el dinero sale de
- * la ventana actual de la misma sede y moneda como compensación. Devuelve si
- * compensó (para que el ticket lo refleje).
+ * El vuelto en otra moneda: billete de USD 100 para un cobro de USD 80, con S/ 75
+ * de vuelto. Los USD 20 de más entran en la caja de dólares y los S/ 75 salen de la
+ * de soles. Cobrar nunca se frena: si en esa caja no constaba efectivo, lo dirá su
+ * arqueo. Quien llama ya bloqueó las dos cajas (`lockCashWindows`).
+ */
+export async function recordCashChange(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  input: CashChangeInput,
+) {
+  const kept = await ensureOpenShift(tx, orgId, actorUserId, input.branchId, input.keptCurrency)
+  await recordCashChangeIncome(tx, orgId, actorUserId, kept.id, {
+    amountCents: input.keptCents,
+    currency: input.keptCurrency,
+    methodName: input.methodName,
+    methodTypeCode: input.methodTypeCode,
+    concept: input.concept,
+    patientPaymentId: input.paymentId,
+  })
+  if (input.givenCents <= 0) return
+  const given = await ensureOpenShift(tx, orgId, actorUserId, input.branchId, input.givenCurrency)
+  await recordCashEgreso(tx, orgId, actorUserId, given.id, {
+    kind: "vuelto",
+    amountCents: input.givenCents,
+    currency: input.givenCurrency,
+    methodName: input.methodName,
+    methodTypeCode: input.methodTypeCode,
+    concept: input.concept,
+    patientPaymentId: input.paymentId,
+    allowNegative: true,
+  })
+}
+
+/**
+ * Revierte lo que un pago anulado movió en la caja: su cobro y, si dio vuelto en
+ * otra moneda, las dos filas del vuelto. Con la ventana abierta se anula el
+ * movimiento; con la ventana cerrada (inmutable) la compensación sale en la ventana
+ * actual de la misma sede y moneda, con los datos del movimiento. Sin cambio nuevo:
+ * se revierte lo que pasó. Devuelve si compensó (para que el ticket lo refleje). Quien
+ * llama ya bloqueó sus cajas (`lockCashOfPayments`), antes que sus filas, como todos.
  */
 export async function reverseCashIncome(
   tx: Db,
@@ -620,43 +788,80 @@ export async function reverseCashIncome(
   voidReason: string,
   allowPostClose: boolean,
 ): Promise<boolean> {
-  const [movement] = await tx
+  const movements = await tx
     .select()
     .from(cashMovement)
     .where(
       and(
         eq(cashMovement.organizationId, orgId),
         eq(cashMovement.patientPaymentId, payment.id),
+        inArray(cashMovement.kind, ["cobro", "vuelto"]),
         isNull(cashMovement.voidedAt),
       ),
     )
-  if (!movement) return false
-  // Bloqueada: un cierre simultáneo espera o ya se ve cerrado, nunca a medias.
-  const shift = await lockShift(tx, orgId, movement.shiftId)
-  if (shift.status === "abierta") {
-    await tx
-      .update(cashMovement)
-      .set({ voidedAt: new Date(), voidedBy: actorUserId, voidReason })
-      .where(eq(cashMovement.id, movement.id))
-    await audit(tx, orgId, actorUserId, "cash_movement", movement.id, "cash.movement_voided")
-    return false
+    .orderBy(asc(cashMovement.createdAt), asc(cashMovement.id))
+  if (!movements.length) return false
+  let compensated = false
+  for (const movement of movements) {
+    // Bloqueada: un cierre simultáneo espera o ya se ve cerrado, nunca a medias.
+    const shift = await lockShift(tx, orgId, movement.shiftId)
+    if (shift.status === "abierta") {
+      await tx
+        .update(cashMovement)
+        .set({ voidedAt: new Date(), voidedBy: actorUserId, voidReason })
+        .where(eq(cashMovement.id, movement.id))
+      await audit(tx, orgId, actorUserId, "cash_movement", movement.id, "cash.movement_voided")
+      continue
+    }
+    if (!allowPostClose)
+      throw conflict(
+        "POST_CLOSE_NEEDS_ADMIN",
+        "La caja donde ingresó el cobro ya cerró y no se modifica: solo administración puede anularlo",
+      )
+    // Sale lo que entró a la caja, con los datos del movimiento: un pago cruzado
+    // entró en otra moneda que la que cancela.
+    const current = await ensureOpenShift(tx, orgId, actorUserId, shift.branchId, movement.currency)
+    const reversal = {
+      amountCents: movement.amountCents,
+      currency: movement.currency,
+      methodName: movement.method,
+      methodTypeCode: movement.methodTypeCode,
+      concept: "Compensación por anulación",
+    }
+    if (movement.direction === "egreso")
+      await recordCashChangeIncome(tx, orgId, actorUserId, current.id, reversal)
+    else
+      await recordCashEgreso(tx, orgId, actorUserId, current.id, {
+        ...reversal,
+        kind: movement.kind === "vuelto" ? "vuelto" : "devolucion",
+        allowNegative: true,
+      })
+    compensated = true
   }
-  if (!allowPostClose)
-    throw conflict(
-      "POST_CLOSE_NEEDS_ADMIN",
-      "La caja donde ingresó el cobro ya cerró y no se modifica: solo administración puede anularlo",
+  return compensated
+}
+
+/**
+ * Las cajas donde están estos pagos, bloqueadas en orden fijo antes de tocar
+ * ninguna: una anulación con varios medios no se cruza con otra ni con un cierre.
+ */
+export async function lockCashOfPayments(tx: Db, orgId: string, paymentIds: string[]): Promise<void> {
+  if (!paymentIds.length) return
+  const windows = await tx
+    .selectDistinct({ branchId: cashShift.branchId, unit: cashShift.currency })
+    .from(cashMovement)
+    .innerJoin(
+      cashShift,
+      and(eq(cashShift.id, cashMovement.shiftId), eq(cashShift.organizationId, orgId)),
     )
-  const current = await ensureOpenShift(tx, orgId, actorUserId, shift.branchId, payment.currency)
-  await recordCashEgreso(tx, orgId, actorUserId, current.id, {
-    kind: "devolucion",
-    amountCents: payment.amountCents,
-    currency: payment.currency,
-    methodName: payment.methodName,
-    methodTypeCode: payment.methodTypeCode,
-    concept: `Compensación por anulación`,
-    allowNegative: true,
-  })
-  return true
+    .where(
+      and(
+        eq(cashMovement.organizationId, orgId),
+        inArray(cashMovement.patientPaymentId, paymentIds),
+        isNull(cashMovement.voidedAt),
+      ),
+    )
+  await lockCashWindows(tx, orgId, windows)
 }
 
 export async function voidMovement(
@@ -724,12 +929,11 @@ export async function closeShift(
   shiftId: string,
   input: CloseShiftInput,
 ) {
-  const [locked] = await tx
-    .select()
-    .from(cashShift)
-    .where(and(eq(cashShift.id, shiftId), eq(cashShift.organizationId, orgId)))
-    .for("update")
-  if (!locked) throw notFound("Turno de caja")
+  // La caja antes que la fila, como un cobro: al revés, cerrar y cobrar a la vez
+  // se esperarían en cruz (la ventana siguiente pide esta misma caja al final).
+  const seen = await requireShift(tx, orgId, shiftId)
+  await lockCashWindow(tx, orgId, seen.branchId, seen.currency)
+  const locked = await lockShift(tx, orgId, shiftId)
   if (locked.status === "cerrada") return locked
   if (!Number.isSafeInteger(input.countedCents) || input.countedCents < 0)
     throw invalidField("countedCents", "El contado debe ser un importe entero mayor o igual a 0")
@@ -782,6 +986,7 @@ export async function closeShift(
     expenseCashCents: breakdown.cashExpensesCents,
     cashWithdrawnCents: breakdown.cashWithdrawnCents,
     cashRefundedCents: breakdown.cashRefundedCents,
+    cashChangeCents: breakdown.cashChangeCents,
     expectedCents: detail.esperadoCents,
     countedCents: input.countedCents,
     differenceCents: difference,
@@ -850,7 +1055,7 @@ export async function closeCashWindow(
     // Ya cerrada: `closeShift` devuelve el cierre existente, sin efectos.
     return closeShift(tx, orgId, actorUserId, seen.id, input)
   }
-  const unit = input.currency ? currency(input.currency) : await lockOrgCurrency(tx, orgId)
+  const unit = await lockOrgUnit(tx, orgId, input.currency)
   if (input.shiftId === null) {
     await requireBranch(tx, orgId, input.branchId)
     await lockCashWindow(tx, orgId, input.branchId, unit)
@@ -876,12 +1081,12 @@ export async function closeCashWindow(
   return closeShift(tx, orgId, actorUserId, shift.id, input)
 }
 
-/** Hubo un cierre de esa sede y moneda después del instante dado. */
+/** Hubo un cierre de esa sede, en la caja de alguna de esas monedas, después del instante dado. */
 export async function hasClosureSince(
   tx: Db,
   orgId: string,
   branchId: string,
-  unit: string,
+  units: readonly string[],
   since: Date,
 ): Promise<boolean> {
   const [row] = await tx
@@ -891,7 +1096,7 @@ export async function hasClosureSince(
       and(
         eq(cashClosure.organizationId, orgId),
         eq(cashClosure.branchId, branchId),
-        eq(cashClosure.currency, unit),
+        inArray(cashClosure.currency, [...units]),
         gte(cashClosure.closedAt, since),
       ),
     )
@@ -907,6 +1112,11 @@ export interface CreateExpenseInput {
   concept: string
   amountCents: number
   currency?: string
+  /**
+   * El cambio de este gasto, si cancela en la otra moneda de la clínica; vale solo
+   * para él. Sin él, el «Cambio de hoy»: nunca queda sin su valor congelado.
+   */
+  exchangeRate?: string
   spentAt?: string | null
   receiptKind?: string
   receiptNumber?: string | null
@@ -920,21 +1130,92 @@ export interface CreateExpenseInput {
   salesTax?: boolean
 }
 
+/** Lo que salió en otra moneda que la que cancela un gasto. */
+interface ExpenseTender {
+  cents: number
+  currency: string
+}
+
+/**
+ * Lo que un gasto congela de otra moneda; `null` si no hay nada que congelar. En
+ * una clínica de una moneda no hay cambio ni cruce y un gasto se guarda como
+ * siempre. En una de dos, se gasta en cualquiera de las dos; lo único en otra
+ * moneda es el pago de una compra que ya estaba en ella, sin valor, como antes.
+ */
+function frozenExpense(
+  profile: Awaited<ReturnType<typeof lockOrgMoney>>,
+  input: {
+    amountCents: number
+    unit: string
+    rate?: string
+    tender?: ExpenseTender
+    isPurchase: boolean
+  },
+): ExpenseExchange | null {
+  const { amountCents, unit, rate, tender, isPurchase } = input
+  const second = profile?.secondCurrency ?? null
+  if (!profile || !second) {
+    if (tender) throw invalidField("tenderCurrency", "La clínica trabaja en una sola moneda")
+    if (rate !== undefined)
+      throw invalidField("exchangeRate", "La clínica trabaja en una sola moneda")
+    return null
+  }
+  const business = profile.currency
+  const onlyIn = `La clínica trabaja solo en ${business} y ${second}`
+  if (unit !== business && unit !== second) {
+    if (!isPurchase) throw invalidField("currency", onlyIn)
+    if (tender) throw invalidField("tenderCurrency", onlyIn)
+    if (rate !== undefined) throw invalidField("exchangeRate", onlyIn)
+    return null
+  }
+  if (tender) {
+    if (rate !== undefined)
+      throw invalidField(
+        "exchangeRate",
+        "Con lo que salió en otra moneda, el cambio se calcula solo",
+      )
+    if (tender.currency !== business && tender.currency !== second)
+      throw invalidField("tenderCurrency", onlyIn)
+    if (tender.currency === unit)
+      throw invalidField("tenderCurrency", "Lo que salió va en otra moneda que la de la compra")
+  }
+  try {
+    return expenseExchange({
+      amountCents,
+      currency: unit,
+      businessCurrency: business,
+      tender: tender ?? null,
+      rate: rate ?? profile.exchangeRate,
+    })
+  } catch (error) {
+    throw invalidField(
+      tender ? "tenderCents" : "exchangeRate",
+      error instanceof Error ? error.message : "Revisa el cambio",
+    )
+  }
+}
+
 /**
  * Registra un gasto con su tipo. Con `fromCash` el egreso sale del efectivo
  * de la ventana abierta (movimiento + gasto en la misma transacción); sin
- * caja es gasto directo. Sin proveedor ni turno a mano.
+ * caja es gasto directo. Sin proveedor ni turno a mano. La caja que se usa es la
+ * de la moneda en que salió el dinero.
  */
 export async function createExpense(
   tx: Db,
   orgId: string,
   actorUserId: string,
   input: CreateExpenseInput,
-  /** Solo `payPurchaseOrder`: el gasto es el pago de esa compra. */
-  link: { purchaseOrderId?: string } = {},
+  /**
+   * Solo `payPurchaseOrder`: el gasto es el pago de esa compra y, si se pagó en
+   * otra moneda, lo que salió. Un gasto suelto no cruza monedas.
+   */
+  link: { purchaseOrderId?: string; tender?: ExpenseTender } = {},
 ) {
   const branchRow = await requireBranch(tx, orgId, input.branchId)
-  const unit = input.currency ? currency(input.currency) : await lockOrgCurrency(tx, orgId)
+  const profile = await lockOrgMoney(tx, orgId)
+  if (!input.currency && !profile) throw orgProfileRequired()
+  const unit = input.currency ? currency(input.currency) : (profile?.currency ?? "")
   const category = input.category?.trim() || "Otros"
   if (!(EXPENSE_CATEGORIES as readonly string[]).includes(category))
     throw invalidField("category", "Tipo de gasto inválido")
@@ -943,10 +1224,28 @@ export async function createExpense(
   const salesTax = input.salesTax === true
   if (salesTax && category !== SALES_TAX_EXPENSE_CATEGORY)
     throw invalidField("salesTax", "El pago del impuesto de lo cobrado es un gasto de Impuestos")
+  // El impuesto de lo cobrado se paga en moneda del negocio: es la de lo que deja.
+  if (salesTax && profile?.secondCurrency && unit !== profile.currency)
+    throw invalidField("salesTax", "El impuesto de lo cobrado se paga en la moneda del negocio")
   // Comprobante libre según país (el catálogo fiscal llega con su módulo).
   const receiptKind = input.receiptKind?.trim() ? input.receiptKind.trim().slice(0, 60) : "ninguno"
+  const amountCents = assertCents(input.amountCents, "El gasto", "amountCents")
+  const tender = link.tender
+    ? {
+        cents: assertCents(link.tender.cents, "Lo que salió", "tenderCents"),
+        currency: currency(link.tender.currency),
+      }
+    : undefined
+  const frozen = frozenExpense(profile, {
+    amountCents,
+    unit,
+    rate: input.exchangeRate,
+    tender,
+    isPurchase: Boolean(link.purchaseOrderId),
+  })
+  const out = frozen?.tender ?? { cents: amountCents, currency: unit }
   const shift = input.fromCash
-    ? await ensureOpenShift(tx, orgId, actorUserId, branchRow.id, unit)
+    ? await ensureOpenShift(tx, orgId, actorUserId, branchRow.id, out.currency)
     : null
   const [row] = await tx
     .insert(expense)
@@ -956,8 +1255,16 @@ export async function createExpense(
       shiftId: shift?.id ?? null,
       concept: concept(input.concept, "concept"),
       category,
-      amountCents: assertCents(input.amountCents, "El gasto", "amountCents"),
+      amountCents,
       currency: unit,
+      ...(frozen
+        ? {
+            tenderCents: frozen.tender?.cents ?? null,
+            tenderCurrency: frozen.tender?.currency ?? null,
+            exchangeRate: frozen.exchangeRate,
+            businessCents: frozen.businessCents,
+          }
+        : {}),
       spentAt: input.spentAt ? instant(input.spentAt, "spentAt") : new Date(),
       receiptKind,
       receiptNumber: input.receiptNumber?.trim() || null,
@@ -970,11 +1277,11 @@ export async function createExpense(
   if (shift) {
     await recordCashEgreso(tx, orgId, actorUserId, shift.id, {
       kind: "gasto",
-      amountCents: row.amountCents,
-      currency: row.currency,
+      amountCents: out.cents,
+      currency: out.currency,
       concept: row.concept,
       expenseId: row.id,
-      amountField: "amountCents",
+      amountField: frozen?.tender ? "tenderCents" : "amountCents",
     })
   }
   await audit(tx, orgId, actorUserId, "expense", row.id, "finance.expense_created")
@@ -1014,7 +1321,8 @@ export async function getMonthExpenses(
   orgId: string,
   query: { year: number; month: number; branchId?: string; q?: string; category?: string },
 ) {
-  const { timezone, currency: unit } = await getOrgLocale(tx, orgId)
+  const zone = await getOrgLocale(tx, orgId)
+  const { timezone, currency: unit } = zone
   const { start, end } = monthBounds(timezone, query.year, query.month)
   const filters = [eq(expense.organizationId, orgId), gte(expense.spentAt, start), lt(expense.spentAt, end)]
   if (query.branchId) filters.push(eq(expense.branchId, query.branchId))
@@ -1023,9 +1331,23 @@ export async function getMonthExpenses(
     .from(expense)
     .where(and(...filters))
     .orderBy(desc(expense.spentAt), desc(expense.id))
-  const live = rows.filter((row) => !row.voidedAt && row.currency === unit)
-  const byCategory = new Map<string, number>()
-  for (const row of live) byCategory.set(row.category, addCents(byCategory.get(row.category) ?? 0, row.amountCents))
+  // Lo que suma el mes va con su valor; lo viejo en otra moneda, sin valor ni factor, no entra.
+  const money = orgMoneyOf(zone)
+  const valueOf = (row: { amountCents: number; businessCents: number | null; currency: string }) =>
+    orgPartValue(row.amountCents, row, money)
+  const live = rows.filter((row) => !row.voidedAt && valueOf(row) !== null)
+  const byCategoryValues = new Map<string, Array<MoneyFraction | null>>()
+  for (const row of live) {
+    const list = byCategoryValues.get(row.category) ?? []
+    list.push(valueOf(row))
+    byCategoryValues.set(row.category, list)
+  }
+  const byCategory = new Map(
+    [...byCategoryValues].map(([category, values]) => [
+      category,
+      roundMoneyValue(sumMoneyValues(values)),
+    ]),
+  )
   // El pago de una compra lleva su orden y el de una comisión lo dice: la lista los enlaza (ADR 0061).
   const orderIds = [...new Set(rows.map((row) => row.purchaseOrderId).filter((id): id is string => id !== null))]
   const orders = orderIds.length
@@ -1058,18 +1380,21 @@ export async function getMonthExpenses(
     })
     .filter((row) => !query.category || row.category === query.category)
     .filter((row) => !query.q?.trim() || textMatchesWords([row.concept, row.supplierName, row.receiptNumber, row.notes], query.q))
-  const shownLive = expenses.filter((row) => !row.voidedAt && row.currency === unit)
+  const shownLive = expenses.filter((row) => !row.voidedAt && valueOf(row) !== null)
   return {
     year: query.year,
     month: query.month,
     currency: unit,
     timezone,
-    totalCents: sumCents(live.map((row) => ({ amountCents: row.amountCents }))),
+    totalCents: roundMoneyValue(sumMoneyValues(live.map(valueOf))),
     byCategory: [...byCategory.entries()]
       .map(([category, cents]) => ({ category, cents }))
       .sort((a, b) => b.cents - a.cents),
     /** Lo que queda a la vista con la búsqueda y el tipo: cuántos y cuánto suman. */
-    shown: { count: shownLive.length, totalCents: sumCents(shownLive.map((row) => ({ amountCents: row.amountCents }))) },
+    shown: {
+      count: shownLive.length,
+      totalCents: roundMoneyValue(sumMoneyValues(shownLive.map(valueOf))),
+    },
     expenses,
   }
 }
@@ -1258,10 +1583,18 @@ export async function assertSupplierCreditCovered(tx: Db, orgId: string, orderId
 
 export interface PayPurchaseOrderInput {
   orderId: string
-  /** Lo que se paga con dinero (gasto de Materiales). Cero si todo va con lo que se tenía a favor. */
+  /** Lo que se paga con dinero (gasto de Materiales), en la moneda de la compra. Cero si todo va con lo que se tenía a favor. */
   amountCents: number
   /** Lo que se usa de lo que se tiene a favor con el proveedor. */
   creditCents?: number
+  /**
+   * El cruce: lo que salió, si se pagó en la otra moneda. USD 1,500 pagados con
+   * S/ 5,640 dejan la compra al día; el cambio se calcula solo.
+   */
+  tenderCents?: number
+  tenderCurrency?: string
+  /** El cambio, si se paga en una moneda que no es la del negocio. */
+  exchangeRate?: string
   spentAt?: string | null
   fromCash?: boolean
   receiptKind?: string
@@ -1299,6 +1632,12 @@ export async function payPurchaseOrder(tx: Db, orgId: string, actorUserId: strin
   if (!Number.isSafeInteger(creditCents) || creditCents < 0 || creditCents > 2147483647)
     throw invalidField("creditCents", "Lo que se usa a favor debe ser un importe entero")
   if (amountCents + creditCents <= 0) throw invalidField("amountCents", "El pago debe ser mayor que cero")
+  if (input.tenderCents !== undefined && input.tenderCurrency === undefined)
+    throw invalidField("tenderCurrency", "Di en qué moneda salió")
+  if (input.tenderCurrency !== undefined && input.tenderCents === undefined)
+    throw invalidField("tenderCents", "Escribe lo que salió")
+  if (input.tenderCents !== undefined && amountCents === 0)
+    throw invalidField("amountCents", "Escribe lo que cancelas")
   const [before] = await purchaseBalances(tx, orgId, { orderIds: [order.id] })
   if (!before) throw purchaseOrderNotFound()
   if (input.expectedPaidCents !== undefined && input.expectedPaidCents !== before.paidCents)
@@ -1340,13 +1679,19 @@ export async function payPurchaseOrder(tx: Db, orgId: string, actorUserId: strin
         concept: `${kind} ${label} · ${before.supplierName}${part}`,
         amountCents,
         currency: order.currency,
+        ...(input.exchangeRate !== undefined ? { exchangeRate: input.exchangeRate } : {}),
         spentAt: input.spentAt ?? null,
         receiptKind: input.receiptKind,
         receiptNumber: input.receiptNumber,
         notes: input.notes,
         fromCash: input.fromCash ?? false,
       },
-      { purchaseOrderId: order.id },
+      {
+        purchaseOrderId: order.id,
+        ...(input.tenderCents !== undefined && input.tenderCurrency !== undefined
+          ? { tender: { cents: input.tenderCents, currency: input.tenderCurrency } }
+          : {}),
+      },
     )
   }
   let used: typeof supplierCreditUse.$inferSelect | null = null
@@ -1668,6 +2013,11 @@ interface CollectedApp {
   chargeBudgetItemId: string | null
   paymentId: string
   paymentCents: number
+  /** Lo aplicado, en moneda del negocio, con el valor congelado de su pago. */
+  appValue: MoneyFraction
+  /** Lo necesario para valorar otra parte de ese pago (`money_value`). */
+  paymentValueCents: number | null
+  paymentCurrency: string
   paidAt: Date
   methodLabel: string
   cashMethod: boolean
@@ -1690,14 +2040,16 @@ interface PromotionApp {
 /**
  * Aplicaciones cobradas en la ventana: vigentes en el mes sobre cargos con
  * procedimiento de una atención finalizada no anulada. Excluye cargos
- * manuales sin atención y actos anulados o de atenciones no finalizadas.
+ * manuales sin atención y actos anulados o de atenciones no finalizadas. Cada
+ * una con su valor en moneda del negocio; lo viejo en otra moneda, sin valor ni
+ * factor, no entra.
  */
 async function collectedApplications(
   tx: Db,
   orgId: string,
   start: Date,
   end: Date,
-  currency: string,
+  money: OrgMoney,
   query: {
     professionalUserId?: string
     branchId?: string
@@ -1716,7 +2068,6 @@ async function collectedApplications(
     gte(patientPaymentApplication.createdAt, start),
     lt(patientPaymentApplication.createdAt, end),
     stillLive(patientPaymentApplication.voidedAt),
-    eq(patientCharge.currency, currency),
     stillLive(patientCharge.voidedAt),
     stillLive(patientPayment.voidedAt),
     isNull(encounterProcedure.voidedAt),
@@ -1759,24 +2110,33 @@ async function collectedApplications(
       and(eq(encounter.id, encounterProcedure.encounterId), eq(encounter.organizationId, orgId)),
     )
     .where(and(...filters))
-  return rows.map((r) => ({
-    appId: r.app.id,
-    appCents: r.app.amountCents,
-    appCreatedAt: r.app.createdAt,
-    chargeId: r.charge.id,
-    chargeDescription: r.charge.description,
-    chargeCurrency: r.charge.currency,
-    chargePromotionId: r.charge.promotionId,
-    chargePromotionName: r.charge.promotionName,
-    chargeBudgetItemId: r.charge.budgetItemId,
-    paymentId: r.payment.id,
-    paymentCents: r.payment.amountCents,
-    paidAt: r.payment.paidAt,
-    methodLabel: r.payment.methodName,
-    cashMethod: methodCashOf(r.payment),
-    patientId: r.app.patientId,
-    professionalUserId: r.professionalUserId,
-  }))
+  return rows.flatMap((r) => {
+    const appValue = orgPartValue(r.app.amountCents, r.payment, money)
+    if (!appValue) return []
+    return [
+      {
+        appId: r.app.id,
+        appCents: r.app.amountCents,
+        appCreatedAt: r.app.createdAt,
+        chargeId: r.charge.id,
+        chargeDescription: r.charge.description,
+        chargeCurrency: r.charge.currency,
+        chargePromotionId: r.charge.promotionId,
+        chargePromotionName: r.charge.promotionName,
+        chargeBudgetItemId: r.charge.budgetItemId,
+        paymentId: r.payment.id,
+        paymentCents: r.payment.amountCents,
+        appValue,
+        paymentValueCents: r.payment.businessCents,
+        paymentCurrency: r.payment.currency,
+        paidAt: r.payment.paidAt,
+        methodLabel: r.payment.methodName,
+        cashMethod: methodCashOf(r.payment),
+        patientId: r.app.patientId,
+        professionalUserId: r.professionalUserId,
+      },
+    ]
+  })
 }
 
 /**
@@ -1934,8 +2294,6 @@ export interface MonthlyCommissionsQuery {
   professionalUserId: string
   year: number
   month: number
-  /** Por defecto, la moneda de la clínica. */
-  currency?: string
 }
 
 /**
@@ -1948,13 +2306,20 @@ export interface MonthlyCommissionsQuery {
  * - Un cobro anulado después de pagada su comisión queda como ajuste: se
  *   descuenta del siguiente pago al profesional, sea del mes que sea.
  */
-export async function getMonthlyCommissions(tx: Db, orgId: string, query: MonthlyCommissionsQuery) {
+export async function getMonthlyCommissions(
+  tx: Db,
+  orgId: string,
+  query: MonthlyCommissionsQuery,
+  /** La clínica, si quien llama ya la leyó. */
+  known?: OrgLocale,
+) {
   await requireProfessional(tx, orgId, query.professionalUserId)
-  const { timezone, locale, currency: orgCurrency } = await getOrgLocale(tx, orgId)
-  const unit = query.currency ? currency(query.currency) : orgCurrency
+  const zone = known ?? (await getOrgLocale(tx, orgId))
+  const { timezone, locale, currency: unit } = zone
+  const money = orgMoneyOf(zone)
   const { start, end } = monthBounds(timezone, query.year, query.month)
   const rateBps = await commissionRateOf(tx, orgId, query.professionalUserId)
-  const live = await collectedApplications(tx, orgId, start, end, unit, {
+  const live = await collectedApplications(tx, orgId, start, end, money, {
     professionalUserId: query.professionalUserId,
     liveNow: true,
   })
@@ -1996,6 +2361,8 @@ export async function getMonthlyCommissions(tx: Db, orgId: string, query: Monthl
   ])
   const inMonth = (at: Date) => at >= start && at < end
   const lines: CommissionLine[] = []
+  // La base del mes se redondea una vez, sobre la suma; lo ya pagado quedó con su base.
+  const baseValues: MoneyFraction[] = []
   const paidThisMonth = new Set<string>()
   for (const f of frozenCobros) {
     const appId = f.line.applicationId as string
@@ -2017,9 +2384,11 @@ export async function getMonthlyCommissions(tx: Db, orgId: string, query: Monthl
       paidAt: f.settledAt,
       voidedAfterPaid: !stillLive.has(appId),
     })
+    if (stillLive.has(appId)) baseValues.push({ num: BigInt(f.line.baseCents), den: 1n })
   }
   for (const app of live) {
     if (paidThisMonth.has(app.appId)) continue
+    baseValues.push(app.appValue)
     lines.push({
       applicationId: app.appId,
       chargeId: app.chargeId,
@@ -2027,9 +2396,9 @@ export async function getMonthlyCommissions(tx: Db, orgId: string, query: Monthl
       patientId: app.patientId,
       patientName: names.get(app.patientId) ?? "",
       description: app.chargeDescription,
-      baseCents: app.appCents,
+      baseCents: roundMoneyValue(app.appValue),
       rateBps,
-      commissionCents: Math.floor((app.appCents * rateBps) / 10000),
+      commissionCents: commissionOfValue(app.appValue, rateBps),
       occurredAt: app.appCreatedAt,
       promotionName: app.chargePromotionName,
       settled: false,
@@ -2077,8 +2446,8 @@ export async function getMonthlyCommissions(tx: Db, orgId: string, query: Monthl
     rateBps,
     lines,
     adjustments,
-    /** Lo cobrado en el mes de lo que atendió (sin lo anulado). */
-    baseCents: sumCents(counted.map((l) => ({ amountCents: l.baseCents }))),
+    /** Lo cobrado en el mes de lo que atendió (sin lo anulado), en moneda del negocio. */
+    baseCents: roundMoneyValue(sumMoneyValues(baseValues)),
     /** Lo que le corresponde por el mes. */
     commissionCents: sumCents(counted.map((l) => ({ amountCents: l.commissionCents }))),
     paidCents,
@@ -2120,17 +2489,20 @@ export type CommissionSummary = ReturnType<typeof commissionSummary>
 export async function listMonthCommissions(
   tx: Db,
   orgId: string,
-  query: { year: number; month: number; currency?: string },
+  query: { year: number; month: number },
 ): Promise<CommissionSummary[]> {
-  const { timezone, currency: orgCurrency } = await getOrgLocale(tx, orgId)
-  const unit = query.currency ? currency(query.currency) : orgCurrency
-  const { start, end } = monthBounds(timezone, query.year, query.month)
+  const zone = await getOrgLocale(tx, orgId)
+  const { start, end } = monthBounds(zone.timezone, query.year, query.month)
   const withRate = await tx
     .select({ userId: commissionRule.professionalUserId })
     .from(commissionRule)
     .where(eq(commissionRule.organizationId, orgId))
-  const active = await collectedApplications(tx, orgId, start, end, unit, { liveNow: true })
-  const ids = [...new Set([...withRate.map((r) => r.userId), ...active.map((a) => a.professionalUserId)])]
+  const active = await collectedApplications(tx, orgId, start, end, orgMoneyOf(zone), {
+    liveNow: true,
+  })
+  const ids = [
+    ...new Set([...withRate.map((r) => r.userId), ...active.map((a) => a.professionalUserId)]),
+  ]
   // Solo quienes siguen en la clínica; el histórico de un ex miembro se ve en sus pagos.
   const members = ids.length
     ? await tx
@@ -2142,7 +2514,7 @@ export async function listMonthCommissions(
   for (const { userId } of members) {
     rows.push(
       commissionSummary(
-        await getMonthlyCommissions(tx, orgId, { ...query, currency: unit, professionalUserId: userId }),
+        await getMonthlyCommissions(tx, orgId, { ...query, professionalUserId: userId }, zone),
       ),
     )
   }
@@ -2159,7 +2531,7 @@ export async function getMyCommissions(
   tx: Db,
   orgId: string,
   userId: string,
-  query: { year: number; month: number; currency?: string },
+  query: { year: number; month: number },
 ) {
   const current = await getMonthlyCommissions(tx, orgId, { ...query, professionalUserId: userId })
   const previous: CommissionSummary[] = []
@@ -2176,7 +2548,6 @@ export async function getMyCommissions(
       professionalUserId: userId,
       year,
       month,
-      currency: current.currency,
     })
     if (view.lines.length > 0) previous.push(commissionSummary(view))
   }
@@ -2187,7 +2558,6 @@ export interface PayMonthCommissionInput {
   professionalUserId: string
   year: number
   month: number
-  currency?: string
   /** Sede a la que se imputa el gasto de Personal. */
   branchId: string
   notes?: string | null
@@ -2425,9 +2795,14 @@ export async function collectedByProfessional(
   tx: Db,
   orgId: string,
   range: { start: Date; end: Date; branchId?: string },
-  curr: string,
-): Promise<Array<{ professionalUserId: string; name: string | null; currency: string; cobradoCents: number }>> {
-  const apps = await collectedApplications(tx, orgId, range.start, range.end, curr, { branchId: range.branchId })
+  /** La clínica, que quien llama ya leyó (`ReportScope.money`). */
+  money: OrgMoney,
+): Promise<
+  Array<{ professionalUserId: string; name: string | null; currency: string; cobradoCents: number }>
+> {
+  const apps = await collectedApplications(tx, orgId, range.start, range.end, money, {
+    branchId: range.branchId,
+  })
   const totals = await paymentTotalsOf(
     tx,
     orgId,
@@ -2435,26 +2810,43 @@ export async function collectedByProfessional(
   )
   for (const app of apps) if (!totals.has(app.paymentId)) totals.set(app.paymentId, app.paymentCents)
   const refundByApp = await allocateRefunds(tx, orgId, apps, totals, range.start, range.end)
-  const profSums = new Map<string, number>()
+  // Lo neto de cada aplicación, con el valor de su pago: se redondea una vez, sobre la suma de cada uno.
+  const profSums = new Map<string, Array<MoneyFraction | null>>()
   for (const a of apps) {
     const net = a.appCents - Math.min(a.appCents, refundByApp.get(a.appId) ?? 0)
-    profSums.set(a.professionalUserId, (profSums.get(a.professionalUserId) ?? 0) + net)
+    const value = orgPartValue(
+      net,
+      {
+        amountCents: a.paymentCents,
+        businessCents: a.paymentValueCents,
+        currency: a.paymentCurrency,
+      },
+      money,
+    )
+    const list = profSums.get(a.professionalUserId) ?? []
+    list.push(value)
+    profSums.set(a.professionalUserId, list)
   }
   const names = await userNames(tx, [...profSums.keys()])
-  return [...profSums].map(([professionalUserId, cobradoCents]) => ({
+  return [...profSums].map(([professionalUserId, values]) => ({
     professionalUserId,
     name: names.get(professionalUserId) ?? null,
-    currency: curr,
-    cobradoCents,
+    currency: money.currency,
+    cobradoCents: roundMoneyValue(sumMoneyValues(values)),
   }))
 }
 
 /**
- * Lo cobrado neto de varios tramos en una sola consulta, por moneda: los
- * cobros del tramo que siguen en pie al cerrarlo, menos las anulaciones del
- * tramo de cobros anteriores y las devoluciones del tramo. Así el Resumen y
- * Finanzas dibujan sus 12 meses sin 12 idas. `taxCents` es la parte de eso
- * que es impuesto (ADR 0083), con la misma regla: lo que «lo que deja» resta.
+ * Lo cobrado neto de varios tramos en una sola consulta: los cobros del tramo
+ * que siguen en pie al cerrarlo, menos las anulaciones del tramo de cobros
+ * anteriores y las devoluciones del tramo. Así el Resumen y Finanzas dibujan sus
+ * 12 meses sin 12 idas. `taxCents` es la parte de eso que es impuesto (ADR 0083),
+ * con la misma regla: lo que «lo que deja» resta.
+ *
+ * Todo con su valor congelado, en moneda del negocio: anular resta el valor
+ * entero y una devolución su parte. Se redondea una vez, sobre la suma. Solo lo
+ * viejo en otra moneda, sin valor ni factor, va aparte en su moneda: no se puede
+ * sumar, igual que antes.
  */
 export async function collectedNetMany(
   tx: Db,
@@ -2462,29 +2854,26 @@ export async function collectedNetMany(
   spans: Span[],
   options: { branchId?: string } = {},
 ): Promise<Array<Array<{ currency: string; cents: number; taxCents: number }>>> {
-  const branchOf = (column: SQL): SQL => (options.branchId ? sql`and ${column} = ${options.branchId}` : sql``)
   const rows = await tx.execute<{ idx: number; currency: string; cents: string; tax: string }>(sql`
-    select b.idx, x.currency, sum(x.cents)::text as cents, sum(x.tax)::text as tax
+    select b.idx, case when v.cents is null then x.currency else op.currency end as currency,
+      round(sum(coalesce(v.cents, x.cents)))::text as cents, round(sum(coalesce(v.tax, x.tax)))::text as tax
     from ${spansSql(spans)}
-    join lateral (
-      select p.currency, p.amount_cents::bigint as cents, p.tax_cents::bigint as tax from patient_payment p
-      where p.organization_id = ${orgId} and p.paid_at >= b.start_at and p.paid_at < b.end_at
-        and (p.voided_at is null or p.voided_at >= b.end_at) ${branchOf(sql`p.branch_id`)}
-      union all
-      select p.currency, -p.amount_cents::bigint, -p.tax_cents::bigint from patient_payment p
-      where p.organization_id = ${orgId} and p.paid_at < b.start_at
-        and p.voided_at >= b.start_at and p.voided_at < b.end_at ${branchOf(sql`p.branch_id`)}
-      union all
-      select p.currency, -r.amount_cents::bigint, -r.tax_cents::bigint from patient_payment_refund r
-      join patient_payment p on p.id = r.payment_id and p.organization_id = r.organization_id
-      where r.organization_id = ${orgId} and r.refunded_at >= b.start_at and r.refunded_at < b.end_at ${branchOf(sql`p.branch_id`)}
-    ) x on true
-    group by b.idx, x.currency`)
+    cross join ${orgMoneySql(orgId)}
+    join lateral (${paymentFlowSql(orgId, sql`b.start_at`, sql`b.end_at`, options.branchId)}) x on true
+    cross join lateral (select ${paymentValueSql(sql`x.cents`, "x")} as cents, ${paymentValueSql(sql`x.tax`, "x")} as tax) v
+    group by b.idx, 2`)
   return bySpan(
     spans,
     [...rows],
     (): Array<{ currency: string; cents: number; taxCents: number }> => [],
-    (list, row) => [...list, { currency: row.currency, cents: safeCents(row.cents), taxCents: safeCents(row.tax) }],
+    (list, row) => {
+      list.push({
+        currency: row.currency,
+        cents: safeCents(row.cents),
+        taxCents: safeCents(row.tax),
+      })
+      return list
+    },
   )
 }
 
@@ -2766,10 +3155,18 @@ function dayKeyIn(at: Date, timezone: string): string {
 export async function getCashToday(tx: Db, orgId: string, query: { branchId: string }) {
   const branchRow = await requireBranch(tx, orgId, query.branchId)
   const timezone = await branchTimezone(tx, orgId, branchRow)
-  const unit = (await getOrgLocale(tx, orgId)).currency
+  const { currency: unit, secondCurrency: second = null } = await getOrgLocale(tx, orgId)
   const today = dayKeyIn(new Date(), timezone)
-  const { movements } = await getDayMovements(tx, orgId, { branchId: branchRow.id, day: today, timezone, currency: unit })
+  // Sin otra moneda, solo la caja de la clínica; con ella, las dos cajas.
+  const { movements } = await getDayMovements(tx, orgId, {
+    branchId: branchRow.id,
+    day: today,
+    timezone,
+    ...(second ? {} : { currency: unit }),
+  })
   const cobros = movements.filter((m) => m.direction === "ingreso" && m.kind === "cobro")
+  const collectedIn = (code: string) =>
+    sumCents(cobros.filter((m) => m.currency === code).map((m) => ({ amountCents: m.amountCents })))
   const seen = new Set(cobros.map((m) => (m.ticketId ? `ticket:${m.ticketId}` : m.patientPaymentId ? `pago:${m.patientPaymentId}` : `mov:${m.id}`)))
   // Solo puede estar «atendido hoy» quien tiene un cargo de hoy o una atención
   // cerrada hoy: las deudas se calculan de esas personas, no de toda la clínica
@@ -2789,7 +3186,9 @@ export async function getCashToday(tx: Db, orgId: string, query: { branchId: str
     branchName: branchRow.name,
     currency: unit,
     timezone,
-    collectedCents: sumCents(cobros.map((m) => ({ amountCents: m.amountCents }))),
+    collectedCents: collectedIn(unit),
+    /** Lo cobrado en la otra moneda: va aparte, nunca sumado. Solo si la clínica la tiene. */
+    ...(second ? { secondCollected: { currency: second, cents: collectedIn(second) } } : {}),
     tickets: seen.size,
     toCollect,
   }
@@ -2850,7 +3249,21 @@ async function withTicketOrigin(tx: Db, orgId: string, movements: Array<typeof c
   const paymentIds = [
     ...new Set(movements.map((m) => m.patientPaymentId).filter((id): id is string => id !== null)),
   ]
-  const origin = new Map<string, { ticketId: string | null; ticketNumber: number | null; patientId: string; patientName: string }>()
+  const origin = new Map<
+    string,
+    {
+      ticketId: string | null
+      ticketNumber: number | null
+      patientId: string
+      patientName: string
+      exchangeRate: string | null
+      ticketCurrency: string | null
+      ticketTotalCents: number | null
+      cashReceivedCents: number | null
+      changeCents: number | null
+      changeCurrency: string | null
+    }
+  >()
   if (paymentIds.length > 0) {
     const rows = await tx
       .select({
@@ -2859,6 +3272,12 @@ async function withTicketOrigin(tx: Db, orgId: string, movements: Array<typeof c
         ticketNumber: paymentTicket.ticketNumber,
         patientId: patientPayment.patientId,
         patientName: patientPerson.displayName,
+        exchangeRate: patientPayment.exchangeRate,
+        ticketCurrency: paymentTicket.currency,
+        ticketTotalCents: paymentTicket.totalCents,
+        cashReceivedCents: paymentTicket.cashReceivedCents,
+        changeCents: paymentTicket.changeCents,
+        changeCurrency: paymentTicket.changeCurrency,
       })
       .from(patientPayment)
       .innerJoin(patient, and(eq(patient.id, patientPayment.patientId), eq(patient.organizationId, orgId)))
@@ -2878,6 +3297,18 @@ async function withTicketOrigin(tx: Db, orgId: string, movements: Array<typeof c
       ticketNumber: from?.ticketNumber ?? null,
       patientId: from?.patientId ?? null,
       patientName: from?.patientName ?? null,
+      /** Lo que canceló y con qué cambio; nulo si no hubo otra moneda. */
+      cancels:
+        from?.exchangeRate && from.ticketCurrency && from.ticketTotalCents !== null
+          ? {
+              currency: from.ticketCurrency,
+              totalCents: from.ticketTotalCents,
+              rate: from.exchangeRate,
+              cashReceivedCents: from.cashReceivedCents,
+              changeCents: from.changeCents,
+              changeCurrency: from.changeCurrency,
+            }
+          : null,
     }
   })
 }
@@ -3005,6 +3436,7 @@ const EMPTY_BREAKDOWN: CashBreakdown = {
   cashExpensesCents: 0,
   cashWithdrawnCents: 0,
   cashRefundedCents: 0,
+  cashChangeCents: 0,
 }
 
 /**
@@ -3041,19 +3473,16 @@ export async function getCashState(tx: Db, orgId: string, query: CashStateQuery)
       breakdown: EMPTY_BREAKDOWN,
       byMethod: [] as MethodTotal[],
       tickets: 0,
+      ratesUsed: [] as CashRateUsed[],
       lastClosure,
     }
   const detail = await getShiftDetail(tx, orgId, open.id)
+  const paymentsById = await paymentsOfMovements(tx, orgId, detail.movements)
   // Un ticket multimedio es un solo cobro: se deduplica por ticket (o pago si es histórico).
   const cobros = detail.movements.filter((m) => m.direction === "ingreso" && m.kind === "cobro")
-  const ticketByPayment = await ticketIdsByPayment(
-    tx,
-    orgId,
-    cobros.map((m) => m.patientPaymentId).filter((id): id is string => id !== null),
-  )
   const seen = new Set<string>()
   for (const m of cobros) {
-    const ticketId = m.patientPaymentId ? ticketByPayment[m.patientPaymentId] : null
+    const ticketId = m.patientPaymentId ? paymentsById.get(m.patientPaymentId)?.ticketId : null
     seen.add(ticketId ? `ticket:${ticketId}` : m.patientPaymentId ? `pago:${m.patientPaymentId}` : `mov:${m.id}`)
   }
   return {
@@ -3066,29 +3495,76 @@ export async function getCashState(tx: Db, orgId: string, query: CashStateQuery)
     breakdown: cashBreakdown(detail.movements),
     byMethod: methodTotals(detail.movements),
     tickets: seen.size,
+    ratesUsed: await ratesUsedIn(tx, orgId, detail.movements, paymentsById),
     lastClosure,
   }
 }
 
-/** Ticket de cada pago (nulo = histórico sin ticket). Una sola consulta. */
-async function ticketIdsByPayment(
+/** Un cambio con que se movió dinero en una caja: cuántas veces y quién. */
+export interface CashRateUsed {
+  rate: string
+  cobros: number
+  vueltos: number
+  byName: string | null
+}
+
+/**
+ * Los pagos de unos movimientos: su ticket (nulo = histórico) y el cambio con que
+ * entraron. Una sola consulta para contar los cobros y revisar los cambios.
+ */
+async function paymentsOfMovements(tx: Db, orgId: string, movements: CashMove[]) {
+  const ids = [
+    ...new Set(movements.map((m) => m.patientPaymentId).filter((id): id is string => id !== null)),
+  ]
+  if (!ids.length)
+    return new Map<
+      string,
+      { ticketId: string | null; rate: string | null; createdBy: string | null }
+    >()
+  const rows = await tx
+    .select({
+      id: patientPayment.id,
+      ticketId: patientPayment.ticketId,
+      rate: patientPayment.exchangeRate,
+      createdBy: patientPayment.createdBy,
+    })
+    .from(patientPayment)
+    .where(and(eq(patientPayment.organizationId, orgId), inArray(patientPayment.id, ids)))
+  return new Map(rows.map((row) => [row.id, row]))
+}
+
+/**
+ * Los cambios usados en una ventana, para revisarlos al cerrar. Sale de sus pagos, no
+ * de la clínica: quien quitó su otra moneda con la caja abierta aún los revisa al cerrarla.
+ */
+async function ratesUsedIn(
   tx: Db,
   orgId: string,
-  paymentIds: string[],
-): Promise<Record<string, string | null>> {
-  const map: Record<string, string | null> = {}
-  if (paymentIds.length === 0) return map
-  const rows = await tx
-    .select({ id: patientPayment.id, ticketId: patientPayment.ticketId })
-    .from(patientPayment)
-    .where(
-      and(
-        eq(patientPayment.organizationId, orgId),
-        sql`${patientPayment.id} IN (${sql.join(paymentIds.map((id) => sql`${id}`), sql`, `)})`,
-      ),
-    )
-  for (const row of rows) map[row.id] = row.ticketId
-  return map
+  movements: CashMove[],
+  payments: Awaited<ReturnType<typeof paymentsOfMovements>>,
+): Promise<CashRateUsed[]> {
+  const crossed = new Map([...payments].filter(([, payment]) => payment.rate))
+  if (!crossed.size) return []
+  const names = await userNames(
+    tx,
+    [...crossed.values()].map((p) => p.createdBy).filter((id): id is string => !!id),
+  )
+  const used = new Map<string, CashRateUsed>()
+  for (const m of movements) {
+    const payment = m.patientPaymentId ? crossed.get(m.patientPaymentId) : undefined
+    if (!payment?.rate) continue
+    const key = `${payment.rate}|${payment.createdBy ?? ""}`
+    const row = used.get(key) ?? {
+      rate: payment.rate,
+      cobros: 0,
+      vueltos: 0,
+      byName: payment.createdBy ? (names.get(payment.createdBy) ?? null) : null,
+    }
+    if (m.kind === "cobro") row.cobros += 1
+    if (m.kind === "vuelto") row.vueltos += 1
+    used.set(key, row)
+  }
+  return [...used.values()]
 }
 
 // --- Cierres: historial unido (tabla nueva + turnos anteriores) -------------------------------
@@ -3307,7 +3783,13 @@ export interface TicketListRow {
   totalCents: number
   creditAppliedCents: number
   lines: Array<{ description: string; appliedCents: number }>
-  methods: Array<{ name: string; amountCents: number }>
+  /** `tenderCents` y `tenderCurrency` solo si entró en otra moneda que la que canceló. */
+  methods: Array<{
+    name: string
+    amountCents: number
+    tenderCents?: number
+    tenderCurrency?: string
+  }>
   cashierName: string | null
   /** Lo que quedó por pagar de esos conceptos al cobrar. */
   remainingCents: number
@@ -3485,7 +3967,13 @@ export async function listTickets(tx: Db, orgId: string, query: TicketListQuery)
         totalCents: ticket.totalCents,
         creditAppliedCents: ticket.creditAppliedCents,
         lines: (frozen?.lines ?? []).map((line) => ({ description: line.description, appliedCents: line.appliedCents })),
-        methods: (frozen?.methods ?? []).map((method) => ({ name: method.name, amountCents: method.amountCents })),
+        methods: (frozen?.methods ?? []).map((method) => ({
+          name: method.name,
+          amountCents: method.amountCents,
+          ...(method.tenderCents !== undefined && frozen?.tender
+            ? { tenderCents: method.tenderCents, tenderCurrency: frozen.tender.currency }
+            : {}),
+        })),
         cashierName: frozen?.issuer?.name ?? null,
         remainingCents: frozen?.remainingCents ?? 0,
         voided: ticket.voidedAt
@@ -3498,28 +3986,39 @@ export async function listTickets(tx: Db, orgId: string, query: TicketListQuery)
 }
 
 /**
- * Cuántos tickets hay en la lista y lo que suma, por moneda y por medio. Con
- * medios elegidos, lo cobrado es solo lo de esos medios: lo que se cuadra con
- * el POS o con Yape, no el total de un ticket pagado con dos medios.
+ * Cuántos tickets hay en la lista y lo que suma, por la moneda en que entró y por
+ * medio: es lo que se cuadra con la caja y con el POS. Con medios elegidos, lo
+ * cobrado es solo lo de esos medios, no el total de un ticket pagado con dos.
  */
 async function ticketTotals(tx: Db, orgId: string, where: SQL, methodIds: string[]) {
+  // Sin pagos (todo con saldo a favor), lo del ticket: su moneda y nada de dinero nuevo.
+  const paid = sql`lateral (
+    select min(coalesce(${patientPayment.tenderCurrency}, ${patientPayment.currency})::text) as currency,
+      sum(coalesce(${patientPayment.tenderCents}, ${patientPayment.amountCents})) as cents
+    from ${patientPayment}
+    where ${patientPayment.organizationId} = ${paymentTicket.organizationId} and ${patientPayment.ticketId} = ${paymentTicket.id}
+  ) as paid`
+  const entered = sql<string>`coalesce(paid.currency, ${paymentTicket.currency}::text)`
+  const enteredCents = sql`coalesce(paid.cents, ${paymentTicket.totalCents})`
   const counts = await tx
     .select({
-      currency: paymentTicket.currency,
+      currency: entered,
       rows: sql<number>`count(*)::int`,
       tickets: sql<number>`(count(*) filter (where ${paymentTicket.voidedAt} is null))::int`,
-      cents: sql<string>`coalesce(sum(${paymentTicket.totalCents}) filter (where ${paymentTicket.voidedAt} is null), 0)::bigint`,
+      cents: sql<string>`coalesce(sum(${enteredCents}) filter (where ${paymentTicket.voidedAt} is null), 0)::bigint`,
     })
     .from(paymentTicket)
     .innerJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
     .innerJoin(patientPerson, joinPatientPerson(patientPerson))
+    .innerJoin(paid, sql`true`)
     .where(where)
-    .groupBy(paymentTicket.currency)
+    .groupBy(entered)
+  const methodCurrency = sql<string>`coalesce(${patientPayment.tenderCurrency}, ${patientPayment.currency})::text`
   const methods = await tx
     .select({
-      currency: patientPayment.currency,
+      currency: methodCurrency,
       name: patientPayment.methodName,
-      cents: sql<string>`sum(${patientPayment.amountCents})::bigint`,
+      cents: sql<string>`sum(coalesce(${patientPayment.tenderCents}, ${patientPayment.amountCents}))::bigint`,
     })
     .from(patientPayment)
     .innerJoin(
@@ -3535,18 +4034,36 @@ async function ticketTotals(tx: Db, orgId: string, where: SQL, methodIds: string
         ...(methodIds.length ? [inArray(patientPayment.paymentMethodId, methodIds)] : []),
       ),
     )
-    .groupBy(patientPayment.currency, patientPayment.methodName)
+    .groupBy(methodCurrency, patientPayment.methodName)
+  // Lo devuelto en dinero sale en la moneda en que entró, de cada pago que se liberó.
   const refunds = await tx
-    .select({ currency: paymentReturn.currency, cents: sql<string>`sum(${paymentReturn.totalCents})::bigint` })
-    .from(paymentReturn)
+    .select({
+      currency: methodCurrency,
+      cents: sql<string>`sum(coalesce(${patientPaymentRefund.tenderCents}, ${patientPaymentRefund.amountCents}))::bigint`,
+    })
+    .from(patientPaymentRefund)
+    .innerJoin(
+      patientPayment,
+      and(
+        eq(patientPayment.organizationId, patientPaymentRefund.organizationId),
+        eq(patientPayment.id, patientPaymentRefund.paymentId),
+      ),
+    )
+    .innerJoin(
+      paymentReturn,
+      and(
+        eq(paymentReturn.organizationId, patientPaymentRefund.organizationId),
+        eq(paymentReturn.id, patientPaymentRefund.returnId),
+      ),
+    )
     .innerJoin(
       paymentTicket,
       and(eq(paymentTicket.organizationId, paymentReturn.organizationId), eq(paymentTicket.id, paymentReturn.ticketId)),
     )
     .innerJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
     .innerJoin(patientPerson, joinPatientPerson(patientPerson))
-    .where(and(where, eq(paymentReturn.outcome, "pagado")))
-    .groupBy(paymentReturn.currency)
+    .where(where)
+    .groupBy(methodCurrency)
   const totals: TicketTotals[] = counts.map((row) => {
     const byMethod = methods
       .filter((item) => item.currency === row.currency)
@@ -3702,7 +4219,10 @@ export async function listDebts(tx: Db, orgId: string, query: DebtListQuery) {
 
   return {
     timezone,
+    /** Filas: quien debe en dos monedas tiene una por moneda. */
     total: listed.length,
+    /** Personas distintas de esas filas. */
+    people: new Set(listed.map((row) => row.patientId)).size,
     nextCursor: offset + limit < listed.length ? String(offset + limit) : null,
     summary: {
       ...debtTotals(all),
