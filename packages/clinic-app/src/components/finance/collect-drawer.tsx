@@ -1184,7 +1184,7 @@ export function CollectDrawer({
   const rateHelp = !second
     ? ""
     : pay !== debt
-      ? `${sentence(`Cambio de hoy: ${formatExchangeRateInput(second.rate, locale)}${rateAuthor ? `, ${rateAuthor}` : ""}`)} Si lo cambias aquí, vale solo para este cobro.`
+      ? `${sentence(`Tipo de cambio de hoy: ${formatExchangeRateInput(second.rate, locale)}${rateAuthor ? `, ${rateAuthor}` : ""}`)} Si lo cambias aquí, vale solo para este cobro.`
       : "No cambia lo que paga: es para saber cuánto vale en tus reportes."
   const showOtherCurrency = second !== null && !creditOnly
   const cashLine =

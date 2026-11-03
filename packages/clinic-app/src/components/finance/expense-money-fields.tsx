@@ -72,7 +72,7 @@ export function ExpenseMoneyFields({
         <>
           <p role="status" className="rounded-lg bg-muted/50 px-3 py-2 text-sm">
             {money.crossed
-              ? `Cambio: ${expenseRateWords({ exchangeRate: frozen.exchangeRate, currency, tenderCurrency: money.payIn }, business, locale)}. `
+              ? `Tipo de cambio: ${expenseRateWords({ exchangeRate: frozen.exchangeRate, currency, tenderCurrency: money.payIn }, business, locale)}. `
               : ""}
             {reportWords(formatMoney(frozen.businessCents, business, locale))}
           </p>

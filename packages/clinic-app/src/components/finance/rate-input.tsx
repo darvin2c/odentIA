@@ -57,7 +57,7 @@ export function RateInput({
 /** El campo del cambio de un formulario, con su etiqueta, su ayuda y su error. Va dentro de `form.AppField`. */
 export function RateField({
   id,
-  label = "Cambio",
+  label = "Tipo de cambio",
   description,
   className,
   business,

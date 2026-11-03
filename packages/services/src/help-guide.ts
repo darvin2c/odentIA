@@ -882,12 +882,12 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo cobro en otra moneda?",
-        a: "Si la clínica también cobra en otra moneda, el cobro se abre en la moneda de lo que debe: lo que está en dólares se debe en dólares hasta que se paga. En «Paga con» eliges con qué paga y en «Cambio» llega el de hoy; si lo cambias ahí, vale solo para ese cobro y, si es muy distinto, te avisa. Escribes lo que te da y debajo ves cuánto cancela y lo que queda por cobrar. Si debe en las dos monedas, cada una lleva su ticket: al terminar, «Cobrar lo que falta» abre la otra.",
+        a: "Si la clínica también cobra en otra moneda, el cobro se abre en la moneda de lo que debe: lo que está en dólares se debe en dólares hasta que se paga. En «Paga con» eliges con qué paga y en «Tipo de cambio» llega el de hoy; si lo cambias ahí, vale solo para ese cobro y, si es muy distinto, te avisa. Escribes lo que te da y debajo ves cuánto cancela y lo que queda por cobrar. Si debe en las dos monedas, cada una lleva su ticket: al terminar, «Cobrar lo que falta» abre la otra.",
         forms: ["como cobro en dolares", "debe en dolares y paga en soles", "paga en soles lo que debe en dolares", "cobrar en dolares", "cobro cruzado", "como le cobro en dolares"],
       },
       {
-        q: "¿Dónde cambio el cambio de hoy?",
-        a: "En Finanzas › Caja, arriba: dice el «Cambio de hoy», quién lo puso y «Cambiar», si puedes cobrar o configurar la clínica. Es lo que se propone en los cobros que vienen; lo ya cobrado no cambia, porque cada cobro guarda el suyo.",
+        q: "¿Dónde cambio el tipo de cambio de hoy?",
+        a: "En Finanzas › Caja, arriba: dice el «Tipo de cambio de hoy», quién lo puso y «Cambiar», si puedes cobrar o configurar la clínica. Es lo que se propone en los cobros que vienen; lo ya cobrado no cambia, porque cada cobro guarda el suyo.",
         forms: ["donde pongo el cambio de hoy", "como pongo el tipo de cambio", "donde cambio el tipo de cambio", "actualizar el tipo de cambio"],
       },
       {
@@ -897,7 +897,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo cierro la caja si cobro en dos monedas?",
-        a: "Cada moneda tiene su caja: en Finanzas › Caja ves el efectivo de cada una y nunca se suman. En «Cerrar caja» eliges cuál cierras, cuentas solo esa moneda y la otra sigue abierta hasta que la cierres; te avisa si falta. El cierre muestra «Cambios usados en esta caja». Cambiar dólares por soles se anota como un retiro de una caja y un ingreso en la otra.",
+        a: "Cada moneda tiene su caja: en Finanzas › Caja ves el efectivo de cada una y nunca se suman. En «Cerrar caja» eliges cuál cierras, cuentas solo esa moneda y la otra sigue abierta hasta que la cierres; te avisa si falta. El cierre muestra «Tipos de cambio usados en esta caja». Cambiar dólares por soles se anota como un retiro de una caja y un ingreso en la otra.",
         forms: ["como cierro la caja de dolares", "cerrar caja en dos monedas", "cierre de caja con dolares", "caja de dolares"],
       },
       {
@@ -912,7 +912,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo registro un gasto o pago una compra en dólares?",
-        a: "En Finanzas › Gastos, con otra moneda en la clínica, eliges la «Moneda» del gasto y su «Cambio». Al pagar una compra en dólares puedes pagarla en soles: en «Lo que salió» escribes lo que salió, como en tu extracto, y el cambio se calcula solo. La caja que se toca es la de la moneda en que salió el dinero.",
+        a: "En Finanzas › Gastos, con otra moneda en la clínica, eliges la «Moneda» del gasto y su «Tipo de cambio». Al pagar una compra en dólares puedes pagarla en soles: en «Lo que salió» escribes lo que salió, como en tu extracto, y el cambio se calcula solo. La caja que se toca es la de la moneda en que salió el dinero.",
         forms: ["gasto en dolares", "pagar una compra en dolares", "compra en dolares", "pago una compra en soles"],
       },
     ],
@@ -1187,7 +1187,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo activo la otra moneda?",
-        a: "En Datos de la clínica, en «También cobro en» eliges la otra moneda (son dos como máximo) y en «Cambio de hoy» escribes a cuánto está, en tu moneda por 1 de la otra. Si ya hay algo en esa moneda, te lo dice antes de guardar. Desde ahí puedes poner precios, cobrar, comprar y registrar gastos en ella; tus reportes, metas y comisiones siguen en la «Moneda del negocio». Si no la activas, todo sigue igual. Para dejar de cobrar en ella, antes cobra lo que se debe en esa moneda, usa o devuelve lo que tengan a favor, retira el efectivo de su caja y pasa sus servicios a la moneda del negocio: Datos de la clínica te dice qué falta.",
+        a: "En Datos de la clínica, en «También cobro en» eliges la otra moneda (son dos como máximo) y en «Tipo de cambio de hoy» escribes a cuánto está, en tu moneda por 1 de la otra. Si ya hay algo en esa moneda, te lo dice antes de guardar. Desde ahí puedes poner precios, cobrar, comprar y registrar gastos en ella; tus reportes, metas y comisiones siguen en la «Moneda del negocio». Si no la activas, todo sigue igual. Para dejar de cobrar en ella, antes cobra lo que se debe en esa moneda, usa o devuelve lo que tengan a favor, retira el efectivo de su caja y pasa sus servicios a la moneda del negocio: Datos de la clínica te dice qué falta.",
         forms: ["como activo otra moneda", "como activo los dolares", "quiero cobrar tambien en dolares", "activar segunda moneda", "activar dolares", "cobrar en dos monedas"],
       },
       {

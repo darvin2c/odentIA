@@ -520,7 +520,7 @@ export function CashCloseDrawer({
 
           {state.ratesUsed?.length ? (
             <section className="flex flex-col gap-2">
-              <h3 className="text-sm font-medium">Cambios usados en esta caja</h3>
+              <h3 className="text-sm font-medium">Tipos de cambio usados en esta caja</h3>
               <ul className="flex flex-col gap-1 text-sm">
                 {state.ratesUsed.map((row) => (
                   <li

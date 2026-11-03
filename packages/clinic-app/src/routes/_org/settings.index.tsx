@@ -602,7 +602,7 @@ function ProfileForm({
             {() => (
               <RateField
                 id="org-exchange-rate"
-                label="Cambio de hoy"
+                label="Tipo de cambio de hoy"
                 description={exchangeRateHelp({
                   written: secondCurrency === baseline.secondCurrency ? exchangeWritten : null,
                   locale,

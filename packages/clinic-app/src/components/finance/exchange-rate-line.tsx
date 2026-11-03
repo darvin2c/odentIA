@@ -1,5 +1,5 @@
 /**
- * «Cambio de hoy: S/ 3.75 por USD 1 · Cambiar»: a la vista de quien cobra, con su
+ * «Tipo de cambio de hoy: S/ 3.75 por USD 1 · Cambiar»: a la vista de quien cobra, con su
  * misma operación (`saveExchangeRate`). Es la propuesta para los cobros que vienen:
  * cada cobro guarda el suyo. Sin otra moneda no existe.
  */
@@ -39,7 +39,7 @@ export function ExchangeRateLine({
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["org-profile"] })
       void queryClient.invalidateQueries({ queryKey: ["org-finance-profile"] })
-      toast.success("Cambio de hoy actualizado")
+      toast.success("Tipo de cambio de hoy actualizado")
       setOpen(false)
     },
   })
@@ -70,7 +70,7 @@ export function ExchangeRateLine({
   return (
     <>
       <p className="text-sm text-muted-foreground">
-        Cambio de hoy: {exchangeRateWords(second.rate, business, second.currency, locale)}
+        Tipo de cambio de hoy: {exchangeRateWords(second.rate, business, second.currency, locale)}
         {author ? `, ${author}` : ""}
         {canCollect || canConfigure ? (
           <>
@@ -88,7 +88,7 @@ export function ExchangeRateLine({
       <FormDrawer
         {...surface}
         open={open}
-        title="Cambio de hoy"
+        title="Tipo de cambio de hoy"
         description="Es lo que se propone en los cobros que vienen. Lo ya cobrado no cambia: cada cobro guarda el suyo."
         submitLabel="Guardar"
         onClose={() => {
