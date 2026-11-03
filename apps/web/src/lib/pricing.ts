@@ -9,11 +9,11 @@ import { DEFAULT_DOMAIN, MEDICAL } from "./product"
 
 const FRESH_MS = 30_000
 
-/** En el VPS la web llama a la API por la red interna; en Workers y en local, por su dirección pública. Solo en el servidor. */
+/** La API, por su dirección pública (en Workers no hay red interna con el VPS). Solo en el servidor. */
 function apiBase(): string {
   const domain = import.meta.env.VITE_BASE_DOMAIN || DEFAULT_DOMAIN
   const port = import.meta.env.VITE_BASE_PORT ? `:${import.meta.env.VITE_BASE_PORT}` : ""
-  return (process.env.ODENTIA_API_INTERNAL_URL || `https://api.${domain}${port}`).replace(/\/+$/, "")
+  return `https://api.${domain}${port}`
 }
 
 /** El precio de cada tipo de acción (ADR 0085), en unidades. */

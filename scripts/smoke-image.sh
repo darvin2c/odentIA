@@ -15,7 +15,6 @@ servicios=(
   "admin|pnpm --filter @odentia/admin start|vivo"
   "dental-clinic|pnpm --filter @odentia/dental-clinic start|vivo"
   "medical-clinic|pnpm --filter @odentia/medical-clinic start|vivo"
-  "web|pnpm --filter @odentia/web start|vivo"
   "api|pnpm --filter @odentia/api start|-"
   "worker|pnpm --filter @odentia/worker start|-"
   "migrate|pnpm --filter @odentia/db migrate|-"

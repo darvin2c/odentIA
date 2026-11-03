@@ -1,4 +1,5 @@
-# Receta compartida de producción para admin, panel, platform, latidIA, web, api y worker.
+# Receta compartida de producción para admin, panel, platform, latidIA, api y worker.
+# Las webs de marketing (apps/web) se publican en Cloudflare Workers desde el CI (ADR 0136).
 # OpenShip construye un artefacto por servicio; cada uno cambia su comando.
 
 FROM node:24-slim AS base
@@ -39,24 +40,22 @@ RUN pnpm install --frozen-lockfile \
   --filter @odentia/panel... \
   --filter @odentia/admin... \
   --filter @odentia/dental-clinic... \
-  --filter @odentia/medical-clinic... \
-  --filter @odentia/web...
+  --filter @odentia/medical-clinic...
 
 FROM deps AS build
 COPY . .
 # VITE_* se incrustan en build; deben coincidir con los dominios públicos.
 # Sin ENV: un ARG ya llega al RUN como variable de entorno, y cada ENV era una
 # capa más (5-11 s en el servidor de producción).
-# La web toma de VITE_BASE_DOMAIN su dirección canónica (el dominio raíz).
 ARG VITE_API_URL
 ARG VITE_BASE_DOMAIN
 # Dónde abre una clínica de cada producto (odentIA y latidIA); vacíos, en VITE_BASE_DOMAIN.
 ARG VITE_DENTAL_DOMAIN=""
 ARG VITE_MEDICAL_DOMAIN=""
-# El producto del panel y de la web de este artefacto: vacío, odentIA; `medical`, el de latidIA.
+# El producto del panel de este artefacto: vacío, odentIA; `medical`, el de latidIA.
 ARG VITE_PRODUCT=""
 RUN pnpm --filter @odentia/admin build && pnpm --filter @odentia/panel build && pnpm --filter @odentia/dental-clinic build \
-  && pnpm --filter @odentia/medical-clinic build && pnpm --filter @odentia/web build
+  && pnpm --filter @odentia/medical-clinic build
 # Producción no necesita las herramientas de build, prueba ni storybook (biome,
 # turbo, TypeScript, rolldown...: más de la mitad de node_modules). Se podan sin
 # red y sin volver a ejecutar scripts; lo que se ejecuta con `tsx` lo declara
@@ -68,8 +67,7 @@ RUN pnpm install --prod --frozen-lockfile --offline --ignore-scripts \
   --filter @odentia/panel... \
   --filter @odentia/admin... \
   --filter @odentia/dental-clinic... \
-  --filter @odentia/medical-clinic... \
-  --filter @odentia/web...
+  --filter @odentia/medical-clinic...
 
 FROM base AS runtime
 ENV NODE_ENV=production

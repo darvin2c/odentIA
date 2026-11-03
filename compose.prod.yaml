@@ -160,39 +160,12 @@ services:
       PORT: "3000"
     restart: unless-stopped
     ports:
-      # 3013 es de la web: con el mismo puerto latidIA no arrancaba en producción.
       - "127.0.0.1:3015:3000"
     depends_on:
       - api
 
-  # La web de latidia72.com (decisión 18 del issue 229): la misma web con VITE_PRODUCT=medical,
-  # solo con inicio, precios, invitación y legales. Lee los precios de la misma API, por dentro.
-  latidia-web:
-    profiles: ["latidia"]
-    build: *latidia-build
-    command: ["pnpm", "--filter", "@odentia/web", "start"]
-    environment:
-      PORT: "3000"
-      HOST: "0.0.0.0"
-      ODENTIA_API_INTERNAL_URL: "http://api:3001"
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:3016:3000"
-
-  # Web de marketing (ADR 0046): HTML generado al compilar, sin variables de runtime
-  # ni dependencias. Solo el Libro de Reclamaciones envía a la API desde el navegador.
-  web:
-    build: *app-build
-    command: ["pnpm", "--filter", "@odentia/web", "start"]
-    # La web arma cada página al servirla con los precios de la administración (ADR 0062):
-    # los lee de la API por la red del stack, nunca desde fuera.
-    environment:
-      PORT: "3000"
-      HOST: "0.0.0.0"
-      ODENTIA_API_INTERNAL_URL: "http://api:3001"
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:3013:3000"
+  # Las dos webs de marketing (odentia32.com y latidia72.com) no corren aquí: son Workers de
+  # Cloudflare (ADR 0136, docs/deployment.md).
 
   # Entrada pública por Cloudflare Tunnel: cloudflared solo abre conexiones de salida
   # y entrega cada visita por la red del stack (api:3001, panel:3000…), así que nadie
