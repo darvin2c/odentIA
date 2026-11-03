@@ -13,12 +13,48 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Un push a main que trae exactamente el código que ya pasó todo en su PR (main no
+  # avanzó entre la prueba y la unión) no se vuelve a probar: despliega directo. El PR
+  # deja anotado el árbol probado en el estado `ci/codigo-probado` de su último commit
+  # (job `codigo-probado`); si no coincide, o no se puede saber, se prueba todo.
+  ya-probado:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: read
+    outputs:
+      probado: ${{ steps.comparar.outputs.probado }}
+    steps:
+      - name: Comparar con lo probado en el PR
+        id: comparar
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          arbol=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$GITHUB_SHA" --jq .tree.sha)
+          pr=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '.[0].number // empty' || true)
+          if [ -z "$pr" ]; then
+            echo "Sin PR asociado: se prueba todo."
+            exit 0
+          fi
+          cabeza=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$pr" --jq .head.sha)
+          probado=$(gh api "repos/$GITHUB_REPOSITORY/commits/$cabeza/statuses"             --jq '[.[] | select(.context == "ci/codigo-probado")][0] | select(.state == "success") | .description // empty' || true)
+          if [ "$probado" = "$arbol" ]; then
+            echo "El PR #$pr probó este mismo código ($arbol): se despliega sin repetir las pruebas."
+            echo "probado=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "El PR #$pr probó ${probado:-nada anotado} y main tiene $arbol: se prueba todo."
+          fi
+
   # Tests unitarios y de integración repartidos en partes paralelas; los
   # recorridos E2E van en el job `e2e`. Cada archivo de prueba arranca su
   # propio PostgreSQL con testcontainers, así que cada parte es independiente.
   # Un paquete nuevo cae en la parte general salvo que se le asigne otra.
   check:
     name: check (${{ matrix.parte }})
+    needs: ya-probado
+    if: ${{ !cancelled() && needs.ya-probado.outputs.probado != 'true' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -52,9 +88,6 @@ jobs:
             opciones: --only -- --shard=3/3
     steps:
       - uses: actions/checkout@v4
-        with:
-          # En un PR, HEAD es la fusión con main y HEAD^1 la punta de main.
-          fetch-depth: 2
       # La imagen se construye en segundo plano mientras se instala y se
       # comprueban los tipos; el paso de pruebas la espera.
       - name: Preparar PostgreSQL para las pruebas de integración
@@ -72,31 +105,15 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # En main corre todo. En un PR, solo los paquetes cambiados y los que
-      # dependen de ellos, salvo que cambie algo que Turbo no atribuye a ningún
-      # paquete pero que afecta a todos: dependencias, configuración, parches,
-      # la imagen de PostgreSQL de las pruebas o este mismo workflow.
-      - name: Decidir el alcance
-        id: alcance
-        run: |
-          if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
-            echo "Push a main: suite completa."
-            exit 0
-          fi
-          globales=$(git diff --name-only HEAD^1 HEAD | grep -E '^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.npmrc|turbo\.json|tsconfig\.base\.json|patches/|infra/dev/postgres/|\.github/workflows/ci\.yml)' || true)
-          if [ -n "$globales" ]; then
-            echo "Cambian archivos globales; suite completa:"
-            echo "$globales"
-            exit 0
-          fi
-          echo "afectados=--affected" >> "$GITHUB_OUTPUT"
-          echo "TURBO_SCM_BASE=HEAD^1" >> "$GITHUB_ENV"
+      # Todo, también en un PR: lo que pasa ahí es lo que main despliega sin volver a
+      # probar (job `ya-probado`). Probar solo lo afectado dejaba pasar reglas de otro
+      # paquete, que recién fallaban en main.
       - if: matrix.tipos
-        run: pnpm exec turbo run typecheck ${{ steps.alcance.outputs.afectados }}
+        run: pnpm exec turbo run typecheck
       - name: Buscar paquetes con pruebas
         id: pruebas
         run: |
-          total=$(pnpm exec turbo ls ${{ steps.alcance.outputs.afectados }} ${{ matrix.paquetes }} --output=json | jq '.packages.count')
+          total=$(pnpm exec turbo ls ${{ matrix.paquetes }} --output=json | jq '.packages.count')
           echo "Paquetes a probar: $total"
           echo "total=$total" >> "$GITHUB_OUTPUT"
       - name: Esperar la imagen de PostgreSQL
@@ -106,12 +123,7 @@ jobs:
           cat "$RUNNER_TEMP/postgres.log"
           exit "$(cat "$RUNNER_TEMP/postgres.exit")"
       - if: steps.pruebas.outputs.total != '0'
-        run: pnpm exec turbo run test ${{ steps.alcance.outputs.afectados }} ${{ matrix.paquetes }} ${{ matrix.opciones }}
-      # Una pantalla que cambia no afecta a servicios, pero sí a la guía de Ariadna:
-      # sin esto, el PR pasa y la prueba falla recién en main, sin desplegar.
-      - name: Comparar la guía de Ariadna con las pantallas
-        if: matrix.parte == 'interfaz'
-        run: pnpm --filter @odentia/services exec vitest run src/help-guide.test.ts src/medical/help.test.ts
+        run: pnpm exec turbo run test ${{ matrix.paquetes }} ${{ matrix.opciones }}
 
   # Recorridos E2E con el supervisor de `e2e/run.ts`: cada parte levanta su
   # propio entorno efímero (PostgreSQL, RustFS, Mailpit, proxy y builds) y corre
@@ -119,6 +131,8 @@ jobs:
   # acredita integraciones reales. Sin reintentos (e2e/AGENTS.md).
   e2e:
     name: e2e (${{ matrix.parte }}/3)
+    needs: ya-probado
+    if: ${{ !cancelled() && needs.ya-probado.outputs.probado != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     strategy:
@@ -160,6 +174,8 @@ jobs:
   docker-build:
     # También en cada PR: es lo único que comprueba la imagen antes de fusionar,
     # y una imagen rota en main detiene el deploy de producción.
+    needs: ya-probado
+    if: ${{ !cancelled() && needs.ya-probado.outputs.probado != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -186,8 +202,12 @@ jobs:
           bash scripts/smoke-image.sh odentia-smoke:ci
 
   deploy:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [check, e2e, docker-build]
+    # Con lo probado en el PR, o con todo en verde aquí.
+    if: >-
+      ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      (needs.ya-probado.outputs.probado == 'true' ||
+      (needs.check.result == 'success' && needs.e2e.result == 'success' && needs.docker-build.result == 'success')) }}
+    needs: [ya-probado, check, e2e, docker-build]
     runs-on: ubuntu-latest
     # Un deploy que reconstruye todos los servicios (admin, panel, platform, web,
     # api, worker) puede superar los 20 minutos; el CLI espera hasta 40.
@@ -235,7 +255,10 @@ jobs:
   # cambio de texto llega en un par de minutos y no reconstruye lo demás. En un PR solo se
   # comprueba que se arman para Workers (`--dry-run`, sin claves); en main se publican.
   deploy-web:
-    needs: [check, e2e]
+    if: >-
+      ${{ !cancelled() && (needs.ya-probado.outputs.probado == 'true' ||
+      (needs.check.result == 'success' && needs.e2e.result == 'success')) }}
+    needs: [ya-probado, check, e2e]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
@@ -300,3 +323,29 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: pnpm exec wrangler deploy
+
+  # En un PR con todo en verde, anota el árbol que se probó (la unión del PR con main
+  # de ese momento) en su último commit: al unirlo, `ya-probado` lo compara con main.
+  # Un PR desde un fork no puede escribirlo, y entonces main prueba todo.
+  codigo-probado:
+    # Explícito: `ya-probado` no corre en un PR y, sin esto, GitHub salta todo lo que
+    # depende de él aunque las pruebas pasen.
+    if: >-
+      ${{ !cancelled() && github.event_name == 'pull_request' &&
+      needs.check.result == 'success' && needs.e2e.result == 'success' &&
+      needs.docker-build.result == 'success' && needs.deploy-web.result == 'success' }}
+    needs: [check, e2e, docker-build, deploy-web]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
+    steps:
+      - name: Anotar el código probado
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CABEZA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          arbol=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$GITHUB_SHA" --jq .tree.sha)
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$CABEZA" -f state=success             -f context=ci/codigo-probado -f description="$arbol"             -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          echo "Probado: $arbol"
