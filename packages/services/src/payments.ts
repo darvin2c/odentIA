@@ -1,5 +1,6 @@
 import {
   collectExchange,
+  currencyWord,
   normalizeExchangeRate,
   quantityWords,
   refundTenderCents,
@@ -1967,12 +1968,15 @@ interface RefundPart {
  * Sale lo que entró, en esa moneda y en proporción, sin cambio nuevo: S/ 300
  * cancelados con USD 80 devuelven hasta USD 80, por partes o de una vez. `tenderOf`
  * es lo que sale de cada pago que entró en otra moneda: se guarda con su devolución.
+ * Lo que en esa moneda no llega a su unidad menor no se devuelve: bajaría lo que hay a
+ * favor sin sacar nada de la caja. `field`: el importe en el cuerpo, para decirlo ahí.
  */
 async function refundPayouts(
   tx: Db,
   orgId: string,
   patientId: string,
   parts: RefundPart[],
+  field?: string,
 ): Promise<{ payouts: RefundPayout[]; tenderOf: Map<string, number> }> {
   const crossed = parts.filter((part) => part.payment.tenderCents !== null)
   const earlier = crossed.length
@@ -1994,16 +1998,21 @@ async function refundPayouts(
         )
     : []
   const tenderOf = new Map<string, number>()
-  for (const { payment, refundCents } of crossed)
-    tenderOf.set(
-      payment.id,
-      refundTenderCents({
-        tenderCents: payment.tenderCents ?? payment.amountCents,
-        amountCents: payment.amountCents,
-        previousCents: sum(earlier.filter((row) => row.paymentId === payment.id)),
-        refundCents,
-      }),
-    )
+  for (const { payment, refundCents } of crossed) {
+    const out = refundTenderCents({
+      tenderCents: payment.tenderCents ?? payment.amountCents,
+      amountCents: payment.amountCents,
+      previousCents: sum(earlier.filter((row) => row.paymentId === payment.id)),
+      refundCents,
+    })
+    if (out === 0 && refundCents > 0) {
+      const { locale } = await findOrgLocale(tx, orgId)
+      const word = currencyWord(payment.tenderCurrency ?? payment.currency, locale)
+      const message = `Ese importe es demasiado pequeño para devolverlo en ${word}`
+      throw new ServiceError("REFUND_TOO_SMALL", 409, message, field ? { [field]: message } : undefined)
+    }
+    tenderOf.set(payment.id, out)
+  }
   const totals = new Map<string, number>()
   for (const { payment, refundCents } of parts) {
     const unit = payment.tenderCurrency ?? payment.currency
@@ -2076,7 +2085,7 @@ export async function refundCredit(
       rest -= take
     }
   }
-  const { payouts, tenderOf } = await refundPayouts(tx, orgId, patientId, taking)
+  const { payouts, tenderOf } = await refundPayouts(tx, orgId, patientId, taking, "amountCents")
   {
     for (const { payment, refundCents: take } of taking) {
       const [refund] = await tx

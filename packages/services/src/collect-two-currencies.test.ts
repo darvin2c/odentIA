@@ -964,6 +964,49 @@ it("la base no admite dos cobros vivos del mismo pago, aunque sean de otra moned
   ).rejects.toThrow()
 })
 
+it("una devolución que en la moneda en que entró no llega a un céntimo no se registra", async () => {
+  const c = await clinic()
+  const debt = await c.charge(30000, "PEN", "Limpieza dental")
+  const paid = await c.collect({
+    chargeIds: [debt.id],
+    tenderCurrency: "USD",
+    exchangeRate: "3.75",
+    payments: [{ paymentMethodId: c.cash.id, amountCents: 8000 }],
+  })
+  const { lines } = await c.run((tx) =>
+    getTicketReturnable(tx, c.orgId, c.patient.id, paid.ticket.id),
+  )
+  // S/ 0.01 de lo que entró en dólares son USD 0.0027: no sale nada de la caja.
+  await expect(
+    c.run((tx) =>
+      returnFromTicket(tx, ...c.args, paid.ticket.id, {
+        branchId: c.site.id,
+        lines: [{ chargeId: lines[0]?.chargeId as string, amountCents: 1 }],
+        paymentMethodId: c.cash.id,
+        reason: "Reclamo",
+        requestId: randomUUID(),
+      }),
+    ),
+  ).rejects.toMatchObject({ message: expect.stringContaining("demasiado pequeño para devolverlo en dólares") })
+  const advance = await c.collect({
+    tenderCurrency: "USD",
+    exchangeRate: "3.75",
+    advanceCents: 3000,
+    payments: [{ paymentMethodId: c.cash.id, amountCents: 3000 }],
+  })
+  expect(advance.payments[0]?.currency.trim()).toBe("PEN")
+  await expect(
+    c.run((tx) =>
+      refundCredit(tx, ...c.args, {
+        branchId: c.site.id,
+        amountCents: 1,
+        paymentMethodId: c.cash.id,
+        reason: "Lo pidió",
+      }),
+    ),
+  ).rejects.toMatchObject({ fields: { amountCents: expect.stringContaining("dólares") } })
+})
+
 it("conceptos de dos monedas no van en un cobro: cada moneda lleva su ticket", async () => {
   const c = await clinic()
   const dollars = await c.charge(100000, "USD")
