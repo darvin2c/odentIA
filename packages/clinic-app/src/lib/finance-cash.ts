@@ -12,9 +12,11 @@ import type { PurchaseBalance, PurchasesToPay } from "./reports"
 import { parseMoney } from "@odentia/clinical"
 import { minutesToInstant, zonedDateOf } from "@odentia/ui-patterns"
 import { type QueryClient, useQuery } from "@tanstack/react-query"
+import { useEffect, useState } from "react"
 import { ApiError, apiFetch } from "./api"
 import { financeErrorMessage, financeFormMessage } from "./finance"
 import type { DebtRow } from "./finance-debt"
+import { useOrgSecondCurrency } from "./org"
 
 /** Efectivo según UN/CEFACT 4461: lo único que se cuenta al cerrar. */
 export const CASH_TYPE_CODE = "10"
@@ -886,6 +888,58 @@ export function useCashState(branchId: string, enabled = true, currency?: string
     queryFn: () => fetchCashState(branchId, currency),
     enabled: enabled && branchId !== "",
   })
+}
+
+/** Una caja de la sede: su moneda, su consulta y si arrastra días sin cerrar. */
+export interface CashBox {
+  code: string
+  query: ReturnType<typeof useCashState>
+  state: CashState | null
+  earlierOpen: boolean
+}
+
+function useCashBox(
+  branchId: string,
+  code: string,
+  /** Sin decirla, la caja de la clínica. */
+  currency: string | undefined,
+  enabled: boolean,
+  today?: { movements: DayMovement[] | null; isFetching: boolean },
+): CashBox {
+  const query = useCashState(branchId, enabled, currency)
+  const state = query.data?.data ?? null
+  const [earlierOpen, setEarlierOpen] = useState(false)
+  // «Días sin cerrar» compara dos consultas: se decide solo con ambas quietas,
+  // para que una a medio recargar no encienda el aviso por un instante.
+  const movements = today && !today.isFetching ? today.movements : null
+  const isFetching = query.isFetching
+  useEffect(() => {
+    if (state && movements && !isFetching) setEarlierOpen(hasEarlierDaysOpen(state, movements))
+  }, [state, movements, isFetching])
+  return { code, query, state, earlierOpen }
+}
+
+/**
+ * Las cajas de una sede, una por moneda y la de la clínica primero: su efectivo y su
+ * arqueo, nunca sumados. Sin otra moneda hay una sola. `today`, los movimientos de
+ * hoy, para saber si alguna arrastra días sin cerrar.
+ */
+export function useCashBoxes(
+  branchId: string,
+  business: string,
+  enabled = true,
+  today?: { movements: DayMovement[] | null; isFetching: boolean },
+): readonly [CashBox, ...CashBox[]] {
+  const second = useOrgSecondCurrency()
+  const main = useCashBox(branchId, business, undefined, enabled, today)
+  const other = useCashBox(
+    branchId,
+    second?.currency ?? business,
+    second?.currency,
+    enabled && second !== null,
+    today,
+  )
+  return second ? [main, other] : [main]
 }
 
 /**

@@ -44,7 +44,7 @@ import {
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { ArrowLeft } from "lucide-react"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { BranchSwitcher } from "../../components/branch-switcher"
 import {
   CashCloseDrawer,
@@ -102,7 +102,6 @@ import {
   formatDayMonth,
   formatDayShort,
   groupDayMovements,
-  hasEarlierDaysOpen,
   invalidateFinance,
   isForbidden,
   joinList,
@@ -113,6 +112,8 @@ import {
   spokenMoment,
   todayIn,
   useBranchesStatus,
+  type CashBox,
+  useCashBoxes,
   useCashState,
   voidCashMovementApi,
 } from "../../lib/finance-cash"
@@ -120,7 +121,6 @@ import {
   type CollectResultBody,
   useOrgFinanceProfile,
 } from "../../lib/finance-collect"
-import { useOrgSecondCurrency } from "../../lib/org"
 import { useOrgEvents } from "../../lib/org-events"
 
 type FinanceView = "caja" | "cobros" | "deudas" | "gastos" | "comisiones" | "cierres"
@@ -812,40 +812,28 @@ function CashTab({
   const { branchId, locale, timeZone } = ws
   const queryClient = useQueryClient()
   const today = todayIn(timeZone)
-  const cash = useCashState(branchId)
-  // Con otra moneda hay otra caja: su efectivo y su arqueo, nunca sumados.
-  const second = useOrgSecondCurrency()
-  const secondCash = useCashState(branchId, second !== null, second?.currency)
-  const secondState = second ? (secondCash.data?.data ?? null) : null
   const movements = useQuery({
     queryKey: financeKeys.movements(branchId, today),
     queryFn: () => fetchDayMovements(branchId, today),
   })
+  const dayBody = movements.data?.data ?? null
+  const boxes = useCashBoxes(branchId, ws.currency, true, {
+    movements: dayBody?.movements ?? null,
+    isFetching: movements.isFetching,
+  })
+  const [main] = boxes
+  const cash = main.query
+  const state = main.state
   // Solo quienes salieron hoy de su atención; lo de antes se dice en una línea y vive en Deudas.
   const debts = useQuery({
     queryKey: financeKeys.debtList(branchId, { when: "hoy" }),
     queryFn: () => fetchDebtList(branchId, { when: "hoy" }, null, ATTENDED_TODAY_LIMIT),
   })
   const [voiding, setVoiding] = useState<DayEntry | null>(null)
-  const [earlierOpen, setEarlierOpen] = useState(false)
-  const [secondEarlierOpen, setSecondEarlierOpen] = useState(false)
 
-  const state = cash.data?.data ?? null
-  const dayBody = movements.data?.data ?? null
   // La zona con que el servidor partió el día (la de la sede) manda al mostrar horas.
   const zone = dayBody?.timezone ?? timeZone
   const money = (cents: number) => formatMoney(cents, state?.currency ?? ws.currency, locale)
-
-  // «Días sin cerrar» compara dos consultas: se decide solo con ambas quietas,
-  // para que una a medio recargar no encienda el aviso por un instante.
-  const settled = state !== null && dayBody !== null && !cash.isFetching && !movements.isFetching
-  useEffect(() => {
-    if (settled && state && dayBody) setEarlierOpen(hasEarlierDaysOpen(state, dayBody.movements))
-  }, [settled, state, dayBody])
-  useEffect(() => {
-    if (secondState && dayBody && !secondCash.isFetching && !movements.isFetching)
-      setSecondEarlierOpen(hasEarlierDaysOpen(secondState, dayBody.movements))
-  }, [secondState, dayBody, secondCash.isFetching, movements.isFetching])
 
   const voidMutation = useMutation({
     mutationFn: (input: { id: string; reason: string }) => voidCashMovementApi(input.id, input.reason),
@@ -871,23 +859,30 @@ function CashTab({
     return <AccessDenied message={financeErrorMessage(cash.error ?? movements.error ?? debts.error)} />
   }
 
-  const last = state?.lastClosure ?? null
-  const reference = last?.closedAt ?? state?.openedAt ?? null
-  const unclosedSince =
-    earlierOpen && reference && dayKeyOf(reference, zone) < today
-      ? spokenMoment(reference, locale, zone)
-      : null
-  const closedToday = last !== null && dayKeyOf(last.closedAt, zone) === today
-  // La otra caja se lee igual, por su lado.
-  const secondReference = secondState
-    ? (secondState.lastClosure?.closedAt ?? secondState.openedAt)
-    : null
-  const secondUnclosedSince =
-    secondEarlierOpen && secondReference && dayKeyOf(secondReference, zone) < today
-      ? spokenMoment(secondReference, locale, zone)
-      : null
-  const secondClosedToday =
-    secondState?.lastClosure != null && dayKeyOf(secondState.lastClosure.closedAt, zone) === today
+  // Cada caja se lee igual, por su lado; con varias, cada frase dice cuál.
+  const several = boxes.length > 1
+  const seen = (box: CashBox) => {
+    const last = box.state?.lastClosure ?? null
+    const reference = last?.closedAt ?? box.state?.openedAt ?? null
+    return {
+      ...box,
+      word: currencyWord(box.code, locale),
+      last,
+      reference,
+      unclosedSince:
+        box.earlierOpen && reference && dayKeyOf(reference, zone) < today
+          ? spokenMoment(reference, locale, zone)
+          : null,
+      closedToday: last !== null && dayKeyOf(last.closedAt, zone) === today,
+    }
+  }
+  const views = boxes.map(seen)
+  const closureWords = ({ word, last, code, state: boxState }: ReturnType<typeof seen>) => {
+    const head = several ? `${upperFirst(word)}. ` : ""
+    if (!last) return `${head}Esta caja aún no tiene cierres.`
+    const inBox = (cents: number) => formatMoney(cents, boxState?.currency ?? code, locale)
+    return `${head}Último cierre: ${momentShort(spokenMoment(last.closedAt, locale, zone))}, ${lowerFirst(differenceLabel(last.differenceCents, inBox))}`
+  }
   const ticketCount = entries.filter((entry) => entry.type === "cobro" && !entry.voided).length
   const expenseCount = entries.filter((entry) => entry.type === "gasto").length
   const openedDay = state?.openedAt ? spokenMoment(state.openedAt, locale, zone) : null
@@ -899,72 +894,40 @@ function CashTab({
       cents: row.cents - (earlier?.totals.find((item) => item.currency === row.currency)?.cents ?? 0),
     }))
     .filter((row) => row.cents > 0)
-  // «Ver cobros» abre lo mismo que suma la tarjeta: desde el último cierre si la caja va de varios días.
-  const collectedFrom = unclosedSince && reference ? dayKeyOf(reference, zone) : today
 
   return (
     <div className="flex flex-col gap-4">
       <ExchangeRateLine business={ws.currency} locale={locale} timeZone={zone} />
 
-      {unclosedSince ? (
-        <Alert role="status" className="border-transparent bg-warning-soft">
-          <AlertTitle>
-            {last
-              ? `La caja ${second ? `de ${currencyWord(ws.currency, locale)} ` : ""}no se cierra desde ${momentDay(unclosedSince)}`
-              : `La caja ${second ? `de ${currencyWord(ws.currency, locale)} ` : ""}tiene movimientos sin cerrar desde ${momentDay(unclosedSince)}`}
-          </AlertTitle>
-          <AlertDescription className="text-foreground/80">
-            Puedes seguir cobrando sin problema. Al cerrar se contará todo el efectivo recibido
-            desde entonces.
-          </AlertDescription>
-          {canClose ? (
-            <Button className="mt-2 justify-self-start" onClick={onCloseCash}>
-              Cerrar caja ahora
-            </Button>
-          ) : null}
-        </Alert>
-      ) : null}
-
-      {second && secondUnclosedSince ? (
-        <Alert role="status" className="border-transparent bg-warning-soft">
-          <AlertTitle>
-            La caja de {currencyWord(second.currency, locale)}{" "}
-            {secondState?.lastClosure ? "no se cierra" : "tiene movimientos sin cerrar"} desde{" "}
-            {momentDay(secondUnclosedSince)}
-          </AlertTitle>
-          <AlertDescription className="text-foreground/80">
-            Puedes seguir cobrando sin problema. Al cerrar se contará todo el efectivo recibido
-            desde entonces.
-          </AlertDescription>
-          {canClose ? (
-            <Button className="mt-2 justify-self-start" onClick={onCloseCash}>
-              Cerrar caja ahora
-            </Button>
-          ) : null}
-        </Alert>
-      ) : null}
+      {views.map((box) =>
+        box.unclosedSince ? (
+          <Alert key={box.code} role="status" className="border-transparent bg-warning-soft">
+            <AlertTitle>
+              {`La caja ${several ? `de ${box.word} ` : ""}${box.last ? "no se cierra" : "tiene movimientos sin cerrar"} desde ${momentDay(box.unclosedSince)}`}
+            </AlertTitle>
+            <AlertDescription className="text-foreground/80">
+              Puedes seguir cobrando sin problema. Al cerrar se contará todo el efectivo recibido
+              desde entonces.
+            </AlertDescription>
+            {canClose ? (
+              <Button className="mt-2 justify-self-start" onClick={onCloseCash}>
+                Cerrar caja ahora
+              </Button>
+            ) : null}
+          </Alert>
+        ) : null,
+      )}
 
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <div className="text-sm text-muted-foreground">
           {cash.isPending ? (
             <Skeleton className="h-4 w-56" />
-          ) : last ? (
-            `${second ? `${upperFirst(currencyWord(ws.currency, locale))}. ` : ""}Último cierre: ${momentShort(spokenMoment(last.closedAt, locale, zone))}, ${lowerFirst(differenceLabel(last.differenceCents, money))}`
           ) : state ? (
-            `${second ? `${upperFirst(currencyWord(ws.currency, locale))}. ` : ""}Esta caja aún no tiene cierres.`
+            closureWords(seen(main))
           ) : null}
-          {second && secondState ? (
-            <p>
-              {upperFirst(currencyWord(second.currency, locale))}.{" "}
-              {secondState.lastClosure
-                ? `Último cierre: ${momentShort(spokenMoment(secondState.lastClosure.closedAt, locale, zone))}, ${lowerFirst(
-                    differenceLabel(secondState.lastClosure.differenceCents, (cents) =>
-                      formatMoney(cents, second.currency, locale),
-                    ),
-                  )}`
-                : "Esta caja aún no tiene cierres."}
-            </p>
-          ) : null}
+          {views.slice(1).map((box) =>
+            box.state ? <p key={box.code}>{closureWords(box)}</p> : null,
+          )}
         </div>
         <Button variant="link" className="h-auto p-0" onClick={onShowClosures}>
           Cierres
@@ -982,40 +945,28 @@ function CashTab({
           onRetry={() => void cash.refetch()}
         />
       ) : (
-        <>
-          <CashBoxFigures
-            state={state}
-            headingId="caja-efectivo"
-            title={
-              second
-                ? `Efectivo en caja · ${currencyWord(ws.currency, locale)}`
-                : "Efectivo en caja"
-            }
-            collectedTitle={
-              unclosedSince || closedToday ? "Cobrado desde el último cierre" : "Cobrado hoy"
-            }
-            locale={locale}
-            onShowTickets={() => onShowTickets(collectedFrom)}
-          />
-          {second && secondState ? (
+        views.map((box, index) =>
+          box.state ? (
             <CashBoxFigures
-              state={secondState}
-              headingId="caja-efectivo-otra"
-              title={`Efectivo en caja · ${currencyWord(second.currency, locale)}`}
+              key={box.code}
+              state={box.state}
+              headingId={index === 0 ? "caja-efectivo" : "caja-efectivo-otra"}
+              title={several ? `Efectivo en caja · ${box.word}` : "Efectivo en caja"}
               collectedTitle={
-                secondUnclosedSince || secondClosedToday
+                box.unclosedSince || box.closedToday
                   ? "Cobrado desde el último cierre"
                   : "Cobrado hoy"
               }
               locale={locale}
+              // «Ver cobros» abre lo mismo que suma la tarjeta: desde el último cierre si la caja va de varios días.
               onShowTickets={() =>
                 onShowTickets(
-                  secondUnclosedSince && secondReference ? dayKeyOf(secondReference, zone) : today,
+                  box.unclosedSince && box.reference ? dayKeyOf(box.reference, zone) : today,
                 )
               }
             />
-          ) : null}
-        </>
+          ) : null,
+        )
       )}
 
       <section aria-labelledby="caja-por-cobrar" className="elevated rounded-xl border bg-card p-4 sm:p-5">

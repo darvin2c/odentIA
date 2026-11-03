@@ -4,7 +4,7 @@
  * cierre imprimible y firmable. Un cierre no se edita: lo que se corrija
  * después queda como movimiento del día en que se corrige.
  *
- * Los tres leen el mismo estado de caja que la pantalla (`useCashState`), así
+ * Los tres leen el mismo estado de caja que la pantalla (`useCashBoxes`), así
  * que lo que refresca Caja los refresca a ellos. Dinero con `@odentia/clinical`;
  * moneda, formato y zona siempre de la clínica o la sede.
  */
@@ -28,7 +28,6 @@ import { useEffect, useId, useRef, useState } from "react"
 import { ticketDisplayNumber } from "./ticket-view"
 import { plainAmount } from "../../lib/commissions"
 import { usePermission } from "../../lib/crm"
-import { useOrgSecondCurrency } from "../../lib/org"
 import { currencyChoices } from "../../lib/product-words"
 import { ChoiceButtons } from "../choice-buttons"
 import {
@@ -55,7 +54,7 @@ import {
   otherMethods,
   parseAmount,
   spokenMoment,
-  useCashState,
+  useCashBoxes,
 } from "../../lib/finance-cash"
 
 function countLabel(count: number): string {
@@ -239,22 +238,20 @@ export function CashCloseDrawer({
 }): React.JSX.Element {
   const queryClient = useQueryClient()
   const canClose = usePermission("finance.close")
-  const second = useOrgSecondCurrency()
   // Cada caja se cierra por separado; sin otra moneda hay una sola.
+  const boxes = useCashBoxes(branchId, currency, open)
+  const several = boxes.length > 1
   const [box, setBox] = useState(currency)
-  const inSecond = second !== null && box === second.currency
-  const mainCash = useCashState(branchId, open)
-  const secondCash = useCashState(branchId, open && second !== null, second?.currency)
-  const cash = inSecond ? secondCash : mainCash
-  const otherBox = second !== null ? (inSecond ? mainCash : secondCash) : null
+  const current = boxes.find((item) => item.code === box) ?? boxes[0]
+  const cash = current.query
   const [notesOpen, setNotesOpen] = useState(false)
   const differenceId = useId()
   const splitHelpId = useId()
   /** Lo escrito en la otra caja se conserva al ir y volver. */
   const drafts = useRef<Record<string, CloseValues>>({})
 
-  const state = cash.data?.data ?? null
-  const unit = state?.currency ?? (inSecond ? (second?.currency ?? currency) : currency)
+  const state = current.state
+  const unit = state?.currency ?? current.code
   const money = (cents: number) => formatMoney(cents, unit, locale)
   const expected = state?.cashOnHandCents ?? 0
   const opening = state?.breakdown.openingCents ?? 0
@@ -268,9 +265,9 @@ export function CashCloseDrawer({
         result.data.countedCents !== sent.countedCents ||
         result.data.retainedCents !== sent.retainedCents
       if (!alreadyClosed) {
-        const other = otherBox?.data?.data
+        const other = boxes.find((item) => item !== current)?.state
         toast.success(
-          second === null
+          !several
             ? "Caja cerrada"
             : `Caja de ${currencyWord(unit, locale)} cerrada.${other && other.tickets > 0 ? ` Falta cerrar la de ${currencyWord(other.currency, locale)}.` : ""}`,
         )
@@ -313,7 +310,7 @@ export function CashCloseDrawer({
       await closeMutation.mutateAsync({
         branchId,
         shiftId: state.shiftId,
-        ...(second !== null ? { currency: state.currency } : {}),
+        ...(several ? { currency: state.currency } : {}),
         countedCents,
         retainedCents,
         deliveredCents,
@@ -383,7 +380,7 @@ export function CashCloseDrawer({
       title={branchName ? `Cerrar caja · ${branchName}` : "Cerrar caja"}
       description={description}
       isLoading={open && cash.isPending}
-      submitLabel={second !== null ? `Cerrar caja de ${currencyWord(unit, locale)}` : "Cerrar caja"}
+      submitLabel={several ? `Cerrar caja de ${currencyWord(unit, locale)}` : "Cerrar caja"}
       submitDisabled={!canClose || !state}
       onClose={() => {
         if (!surface.isSubmitting) onClose()
@@ -397,13 +394,10 @@ export function CashCloseDrawer({
         />
       ) : state ? (
         <div className="flex flex-col gap-5">
-          {second !== null ? (
+          {several ? (
             <div role="group" aria-label="Caja que cierras" className="grid grid-cols-2 gap-2">
-              {[
-                { code: currency, query: mainCash },
-                { code: second.currency, query: secondCash },
-              ].map(({ code, query }) => {
-                const expectedThere = query.data?.data.cashOnHandCents ?? 0
+              {boxes.map(({ code, state: there }) => {
+                const expectedThere = there?.cashOnHandCents ?? 0
                 return (
                   <Button
                     key={code}
@@ -594,18 +588,17 @@ export function CashMoveDrawer({
 }): React.JSX.Element {
   const queryClient = useQueryClient()
   const canWrite = usePermission("finance.write")
-  const second = useOrgSecondCurrency()
   // Con otra moneda, cada una tiene su caja; sin ella no se pregunta.
+  const boxes = useCashBoxes(branchId, currency, open)
+  const several = boxes.length > 1
   const [box, setBox] = useState(currency)
-  const inSecond = second !== null && box === second.currency
-  const mainCash = useCashState(branchId, open)
-  const secondCash = useCashState(branchId, open && second !== null, second?.currency)
-  const cash = inSecond ? secondCash : mainCash
+  const current = boxes.find((item) => item.code === box) ?? boxes[0]
+  const cash = current.query
   const resultId = useId()
 
   // Una sede sin caja todavía parte de cero: el ingreso la crea.
-  const state = cash.data?.data ?? null
-  const unit = state?.currency ?? (inSecond ? (second?.currency ?? currency) : currency)
+  const state = current.state
+  const unit = state?.currency ?? current.code
   const money = (cents: number) => formatMoney(cents, unit, locale)
   const onHand = state?.cashOnHandCents ?? 0
   const centsOf = (text: string) => (text.trim() === "" ? null : parseAmount(text, unit, locale))
@@ -648,7 +641,7 @@ export function CashMoveDrawer({
         kind: value.kind,
         amountCents: cents,
         concept: (value.purpose === OTHER_PURPOSE ? extra : extra ? `${label}: ${extra}` : label).slice(0, 500),
-        ...(second !== null ? { currency: unit } : {}),
+        ...(several ? { currency: unit } : {}),
       })
     },
   })
@@ -690,7 +683,7 @@ export function CashMoveDrawer({
         />
       ) : (
         <div className="flex flex-col gap-5">
-          {second !== null ? (
+          {several ? (
             <div className="flex flex-col gap-2">
               <span id={`${resultId}-caja`} className="text-sm font-medium">
                 Caja
@@ -699,7 +692,10 @@ export function CashMoveDrawer({
                 aria-labelledby={`${resultId}-caja`}
                 tone="primary"
                 value={box}
-                options={currencyChoices([currency, second.currency], locale)}
+                options={currencyChoices(
+                  boxes.map((item) => item.code),
+                  locale,
+                )}
                 onChange={(next) => setBox(next)}
               />
             </div>
