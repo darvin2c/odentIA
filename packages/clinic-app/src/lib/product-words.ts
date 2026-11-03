@@ -1,5 +1,5 @@
 import { ORG_ROLES, type OrgRole, roleLabel } from "@odentia/auth/permissions"
-import { type ProductWords, productWords } from "@odentia/clinical"
+import { currencyWord, type ProductWords, productWords, upperFirst } from "@odentia/clinical"
 import { productUi } from "../product/product-ui"
 
 /**
@@ -19,3 +19,11 @@ export function appRoleLabel(role: string, unknown = role): string {
 }
 
 export { upperFirst } from "@odentia/clinical"
+
+/** «Soles» y «Dólares»: las monedas para elegir, por su nombre. */
+export function currencyChoices(
+  codes: readonly string[],
+  locale: string,
+): Array<{ value: string; label: string }> {
+  return codes.map((code) => ({ value: code, label: upperFirst(currencyWord(code, locale)) }))
+}

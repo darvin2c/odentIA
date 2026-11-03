@@ -4,7 +4,7 @@
  * importes llegan calculados del servidor (`lineTotalCents`, `totalCents`,
  * `discountCents`, `acceptedCents`): aquí se muestran, no se recalculan.
  */
-import { formatMoney, formatMoneyAmount, moneyTotalsText, nonZeroTotals } from "@odentia/clinical"
+import { formatMoney, formatMoneyAmount, moneyTotalsText } from "@odentia/clinical"
 import { Badge, cn } from "@odentia/ui"
 import {
   type BudgetLine,
@@ -45,7 +45,8 @@ export function totalsWords(of: WithTotals, currency: string, money: Money, miss
 /** Lo aceptado, por moneda: sin las monedas en cero, salvo que todo esté en cero. */
 export function acceptedWords(of: WithTotals, currency: string, money: Money): string {
   const accepted = totalsOf(of, currency).map((total) => ({ currency: total.currency, totalCents: total.acceptedCents }))
-  return moneyTotalsText(nonZeroTotals(accepted), (cents, unit) => money(cents, unit), AMOUNT_PENDING)
+  const some = accepted.filter((total) => total.totalCents !== 0)
+  return moneyTotalsText(some.length > 0 ? some : accepted.slice(0, 1), (cents, unit) => money(cents, unit), AMOUNT_PENDING)
 }
 
 /** Importes y fechas con el formato y la zona de la clínica. */
@@ -217,7 +218,11 @@ export function BudgetTotals({
         <div className="flex gap-3">
           <dt className="flex-1 text-muted-foreground">Descuento</dt>
           <dd className="text-right tabular-nums">
-            −&nbsp;{discounts.map((total) => figure(total.discountCents, total.currency)).join(" + ")}
+            −&nbsp;
+            {moneyTotalsText(
+              discounts.map((total) => ({ currency: total.currency, totalCents: total.discountCents })),
+              (cents, unit) => figure(cents, unit),
+            )}
           </dd>
         </div>
       ) : null}

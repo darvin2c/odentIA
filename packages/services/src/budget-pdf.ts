@@ -13,6 +13,7 @@ import {
   budgetAnswerText,
   formatMoney,
   moneyTotalsText,
+  sumByCurrency,
   type PatientGuide,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
@@ -113,14 +114,11 @@ function totalsWords(totals: BudgetSnapshot["totals"], money: Money): string {
 
 /** Lo de esas líneas, una suma por moneda: «Incluido» si todas salen en cero. */
 function linesTotalWords(lines: BudgetPrintLine[], money: Money): string {
-  const byCurrency = new Map<string, number>()
-  for (const line of lines)
-    byCurrency.set(line.currency, (byCurrency.get(line.currency) ?? 0) + (line.totalCents ?? 0))
-  const totals = [...byCurrency]
-    .map(([currency, totalCents]) => ({ currency, totalCents }))
-    .sort((a, b) => a.currency.localeCompare(b.currency))
-  if (totals.every((total) => total.totalCents === 0)) return "Incluido"
-  return totals.map((total) => money(total.totalCents, total.currency)).join(" + ")
+  const totals = sumByCurrency(
+    lines.map((line) => ({ currency: line.currency, cents: line.totalCents ?? 0 })),
+  )
+  if (totals.every((total) => total.cents === 0)) return "Incluido"
+  return moneyTotalsText(totals, (cents, currency) => money(cents, currency))
 }
 
 /**

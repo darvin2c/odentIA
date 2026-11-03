@@ -149,13 +149,6 @@ export function attendedTodayAt(row: DebtRow): string | null {
   return row.attendedTodayAt
 }
 
-/** Totales por moneda: una deuda en otra moneda nunca se suma a la de la clínica. */
-export function totalsByCurrency(rows: Array<{ currency: string; cents: number }>): Array<[string, number]> {
-  const totals = new Map<string, number>()
-  for (const row of rows) totals.set(row.currency, (totals.get(row.currency) ?? 0) + row.cents)
-  return [...totals.entries()]
-}
-
 // --- Deudas por páginas: GET /finance/debts/list -------------------------------------
 
 /** El orden de Deudas; sin `sort` en la dirección, lo que más se debe primero. */

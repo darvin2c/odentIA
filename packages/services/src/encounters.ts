@@ -1,5 +1,6 @@
 import {
   parseVitals,
+  sumByCurrency,
   vitalsErrors,
 } from "@odentia/clinical"
 import { type AssembledBudget, assembleEncounterBudget, readBillingModes, removeBudgetItems } from "./budgets.js"
@@ -1862,14 +1863,13 @@ export async function finalizeEncounter(
   }
   const chargedCents = billingLines.reduce((sum, line) => sum + (line.amountCents ?? 0), 0)
   // Entre monedas no se suma: cada una con su total.
-  const chargedByCurrency = new Map<string, number>()
-  for (const line of billingLines) {
-    if (line.currency == null || line.amountCents == null) continue
-    chargedByCurrency.set(
-      line.currency,
-      (chargedByCurrency.get(line.currency) ?? 0) + line.amountCents,
-    )
-  }
+  const chargedTotals = sumByCurrency(
+    billingLines.flatMap((line) =>
+      line.currency == null || line.amountCents == null
+        ? []
+        : [{ currency: line.currency, cents: line.amountCents }],
+    ),
+  ).map(({ currency, cents }) => ({ currency, totalCents: cents }))
   // Los materiales de sus servicios salen solos de la sede de la atención
   // (ADR 0067): lo que no alcanza queda como faltante y nunca bloquea el cierre.
   const materials = await discountEncounterMaterials(tx, orgId, actorUserId, row)
@@ -1893,11 +1893,9 @@ export async function finalizeEncounter(
     budget,
     materials,
     billing: {
-      chargedCents: chargedByCurrency.size > 1 ? null : chargedCents,
+      chargedCents: chargedTotals.length > 1 ? null : chargedCents,
       currency: charges[0]?.currency ?? procedures[0]?.currency ?? null,
-      totals: [...chargedByCurrency]
-        .map(([currency, totalCents]) => ({ currency, totalCents }))
-        .sort((a, b) => a.currency.localeCompare(b.currency)),
+      totals: chargedTotals,
       lines: billingLines,
     },
     ...product,

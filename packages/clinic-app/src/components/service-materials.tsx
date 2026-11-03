@@ -6,7 +6,7 @@
  * Inventario lo lee. El costo por vez solo lo ve quien ve precios, y lo
  * calcula el servidor con los últimos precios de compra.
  */
-import { currencyWord, formatExchangeRateInput, formatMoney, unitFor } from "@odentia/clinical"
+import { currencyWord, formatExchangeRateInput, formatMoney, moneyTotalsText, unitFor } from "@odentia/clinical"
 import {
   Button,
   Field,
@@ -557,7 +557,7 @@ function TwoCurrencyCost({
   locale: string
 }) {
   const business = useOrgProfile().data?.currency
-  const each = parts.map((part) => formatMoney(part.cents, part.currency, locale)).join(" + ")
+  const each = moneyTotalsText(parts, (cents, unit) => formatMoney(cents, unit, locale))
   const about = cost.estimated ? "unos " : ""
   const left = cost.leftCents ?? null
   const share =

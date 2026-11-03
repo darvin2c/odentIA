@@ -4,7 +4,7 @@
 process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 
 import {
-  commissionCents,
+  commissionOfValue,
   convertCents,
   exchangeFactor,
   moneyValue,
@@ -304,7 +304,16 @@ describe("las otras cuentas coinciden con su forma en SQL", () => {
       const [row] = await ownerDb.execute<{ cents: string }>(
         sql`select floor(${line.appliedCents}::numeric * ${line.valueCents}::numeric * ${line.rateBps}::numeric / (${line.amountCents}::numeric * 10000))::text as cents`,
       )
-      expect(commissionCents(line), JSON.stringify(line)).toBe(Number(row?.cents))
+      const value = moneyValue({
+        partCents: line.appliedCents,
+        amountCents: line.amountCents,
+        valueCents: line.valueCents,
+        currency: "USD",
+        businessCurrency: "PEN",
+        factor: null,
+      })
+      if (!value) throw new Error("Con valor congelado siempre hay valor")
+      expect(commissionOfValue(value, line.rateBps), JSON.stringify(line)).toBe(Number(row?.cents))
     }
   })
 

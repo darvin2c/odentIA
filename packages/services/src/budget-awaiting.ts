@@ -35,6 +35,14 @@ export function budgetValueOptionSql(budget: { id: SQLWrapper; organizationId: S
     limit 1)`
 }
 
+/** Las visitas que cuenta una línea (`budgetLineUnits`), en SQL sobre el alias de la línea. */
+export function budgetLineUnitsSql(line: {
+  billingMode: SQLWrapper
+  sessionsPlanned: SQLWrapper
+}): SQL {
+  return sql`(case when ${line.billingMode} = 'session' then greatest(coalesce(${line.sessionsPlanned}, 1), 1) else 1 end)`
+}
+
 /**
  * La regla como condición SQL sobre una fila de `treatment_budget`. Recibe sus
  * columnas: las de la tabla (`treatmentBudget`) o las de un alias (`sql\`b.id\``).

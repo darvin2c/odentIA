@@ -4,7 +4,6 @@ import {
   clinicalProfileFor,
   convertCents,
   formatMoney,
-  formatMoneyWhole,
   isClinicalProduct,
   type ProductWords,
   productWords,
@@ -104,7 +103,7 @@ export function formatOrgMoneyToday(
     businessCurrency: zone.currency,
     factor: zone.exchangeFactor,
   })
-  const business = formatMoneyWhole(today, zone.currency, zone.locale || NEUTRAL_LOCALE)
+  const business = formatMoney(today, zone.currency, zone.locale || NEUTRAL_LOCALE, { whole: true })
   return options.minimum ? `${said} (hoy, desde ${business} aprox.)` : `${said} (hoy, unos ${business})`
 }
 

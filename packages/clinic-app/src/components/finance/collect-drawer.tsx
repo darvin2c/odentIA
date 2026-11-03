@@ -28,13 +28,14 @@
 import {
   collectExchange,
   convertCents,
+  currencySymbol,
   currencyWord,
   documentText,
   formatExchangeRateInput,
   formatMoney,
   formatMoneyInput,
-  parseExchangeRate,
   parseMoney,
+  readExchangeRate,
   unitFor,
 } from "@odentia/clinical"
 import {
@@ -82,7 +83,6 @@ import {
   collectApi,
   createManualChargeApi,
   createProductChargeApi,
-  currencySymbol,
   editChargeConceptApi,
   fetchActivePromotions,
   fetchPatientAccount3,
@@ -100,6 +100,7 @@ import {
 } from "../../lib/finance-collect"
 import { parseWholeQuantity, saleDeductionWords, saleStockNote } from "../../lib/materials"
 import { orgSecondCurrency, useOrgProfile } from "../../lib/org"
+import { currencyChoices } from "../../lib/product-words"
 import { ChoiceButtons } from "../choice-buttons"
 import { PersonPicker } from "../person-picker"
 import { ChoiceSelect } from "../ui/choice-select"
@@ -369,7 +370,7 @@ function collectFigures(value: CollectDraft, rules: CollectRules) {
   const change = hasCash && receivedCents !== null ? receivedCents - cashPortion : null
   // Hace falta cambio si algo no es moneda del negocio; solo saldo a favor no mueve dinero.
   const needsRate = second !== null && !creditOnly && (debt !== business || pay !== business)
-  const rateText = needsRate ? rateOrNull(value.rate, locale) : null
+  const rateText = needsRate ? (readExchangeRate(value.rate, locale).rate ?? null) : null
   // El vuelto de quien paga en otra moneda se puede dar en la del negocio. Quien paga
   // en otra que la deuda lo recibe en la del negocio, salvo que elija otra cosa, y el
   // cuerpo lo dice siempre que cruza; el servidor, si no se lo dicen, lo da en la que pagó.
@@ -431,15 +432,6 @@ const lineSchema = z.object({
   reference: z.string().max(MAX_REFERENCE, `Escribe como mucho ${MAX_REFERENCE} caracteres.`),
   auto: z.boolean(),
 })
-
-/** El cambio escrito, en su forma única; null si no se entiende. */
-function rateOrNull(raw: string, locale: string): string | null {
-  try {
-    return parseExchangeRate(raw, locale)
-  } catch {
-    return null
-  }
-}
 
 /** Las reglas del cobro, cada una en el dato que hay que corregir. */
 function collectSchema(rules: () => CollectRules) {
@@ -1737,10 +1729,7 @@ export function CollectDrawer({
                               onBlur={control.onBlur}
                               tone="primary"
                               value={pay}
-                              options={orgCurrencies.map((code) => ({
-                                value: code,
-                                label: `${word(code).charAt(0).toUpperCase()}${word(code).slice(1)}`,
-                              }))}
+                              options={currencyChoices(orgCurrencies, locale)}
                               onChange={choosePay}
                             />
                           )}
@@ -2025,10 +2014,7 @@ export function CollectDrawer({
                               onBlur={control.onBlur}
                               tone="primary"
                               value={figures.changeIn}
-                              options={[pay, currency].map((code) => ({
-                                value: code,
-                                label: `${word(code).charAt(0).toUpperCase()}${word(code).slice(1)}`,
-                              }))}
+                              options={currencyChoices([pay, currency], locale)}
                               onChange={(code) => field.handleChange(code)}
                             />
                           )}

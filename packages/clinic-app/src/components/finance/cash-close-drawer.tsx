@@ -8,7 +8,7 @@
  * que lo que refresca Caja los refresca a ellos. Dinero con `@odentia/clinical`;
  * moneda, formato y zona siempre de la clínica o la sede.
  */
-import { currencyWord, formatMoney, formatMoneyInput } from "@odentia/clinical"
+import { currencyWord, formatMoney, formatMoneyInput, upperFirst } from "@odentia/clinical"
 import {
   Button,
   cn,
@@ -29,6 +29,7 @@ import { ticketDisplayNumber } from "./ticket-view"
 import { plainAmount } from "../../lib/commissions"
 import { usePermission } from "../../lib/crm"
 import { useOrgSecondCurrency } from "../../lib/org"
+import { currencyChoices } from "../../lib/product-words"
 import { ChoiceButtons } from "../choice-buttons"
 import {
   addCashMovementApi,
@@ -139,11 +140,6 @@ function rateUseWords(cobros: number, vueltos: number): string {
     ...(vueltos > 0 ? [`${vueltos} ${vueltos === 1 ? "vuelto" : "vueltos"}`] : []),
   ]
   return parts.join(" y ")
-}
-
-/** Primera letra en mayúscula: «Dólares». */
-function titled(word: string): string {
-  return word ? `${word.charAt(0).toUpperCase()}${word.slice(1)}` : word
 }
 
 /** Medios que no se cuentan, agrupados, con su número de cobros. */
@@ -421,7 +417,7 @@ export function CashCloseDrawer({
                     )}
                     onClick={() => pickBox(code)}
                   >
-                    <span className="font-semibold">{titled(currencyWord(code, locale))}</span>
+                    <span className="font-semibold">{upperFirst(currencyWord(code, locale))}</span>
                     <span className="text-xs font-normal text-muted-foreground tabular-nums">
                       Debe haber {formatMoney(expectedThere, code, locale)}
                     </span>
@@ -703,10 +699,7 @@ export function CashMoveDrawer({
                 aria-labelledby={`${resultId}-caja`}
                 tone="primary"
                 value={box}
-                options={[currency, second.currency].map((code) => ({
-                  value: code,
-                  label: titled(currencyWord(code, locale)),
-                }))}
+                options={currencyChoices([currency, second.currency], locale)}
                 onChange={(next) => setBox(next)}
               />
             </div>

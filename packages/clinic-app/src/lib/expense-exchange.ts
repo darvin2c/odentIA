@@ -5,25 +5,13 @@
  * y el cuerpo sale igual que siempre.
  */
 import {
-  currencyWord,
   type ExpenseExchange,
   exchangeRateWords,
   expenseExchange,
-  parseExchangeRate,
+  readExchangeRate,
 } from "@odentia/clinical"
 import { parseAmount } from "./finance-cash"
 import type { OrgSecondCurrency } from "./org"
-
-/** «Soles» y «Dólares»: las monedas para elegir, por su nombre. */
-export function currencyChoices(
-  codes: readonly string[],
-  locale: string,
-): Array<{ value: string; label: string }> {
-  return codes.map((code) => {
-    const word = currencyWord(code, locale)
-    return { value: code, label: `${word.charAt(0).toUpperCase()}${word.slice(1)}` }
-  })
-}
 
 export interface ExpenseMoney {
   /** Se puede elegir: la moneda de lo que se paga es una de las dos de la clínica. */
@@ -73,8 +61,9 @@ export function readExpenseMoney(input: {
   if (!asks) return nothing
   const crossed = payIn !== currency
   const needsRate = !crossed && currency !== business
+  const base = { ...nothing, crossed, needsRate }
   // Solo se paga con lo que se tenía a favor: no sale dinero, no hay nada que valorar.
-  if (cents === 0) return { ...nothing, crossed, needsRate, outCents: 0 }
+  if (cents === 0) return { ...base, outCents: 0 }
   if (crossed) {
     const tender = tenderText.trim() === "" ? null : parseAmount(tenderText, payIn, locale)
     const tenderError =
@@ -85,9 +74,9 @@ export function readExpenseMoney(input: {
           : tender <= 0
             ? "Escribe un importe mayor que cero."
             : null
-    if (tenderError || tender === null)
-      return { ...nothing, crossed, needsRate, outCents: null, tenderError }
+    if (tenderError || tender === null) return { ...base, outCents: null, tenderError }
     let frozen: ExpenseExchange | null = null
+    // Lo que sale del cambio puede no decirse: un céntimo por un millón de dólares da 0.
     try {
       if (cents !== null)
         frozen = expenseExchange({
@@ -98,38 +87,18 @@ export function readExpenseMoney(input: {
         })
     } catch (error) {
       return {
-        ...nothing,
-        crossed,
-        needsRate,
+        ...base,
         outCents: tender,
         tenderError: error instanceof Error ? error.message : "Revisa lo que salió.",
       }
     }
-    return {
-      ...nothing,
-      crossed,
-      needsRate,
-      outCents: tender,
-      frozen,
-      body: { tenderCents: tender, tenderCurrency: payIn },
-    }
+    return { ...base, outCents: tender, frozen, body: { tenderCents: tender, tenderCurrency: payIn } }
   }
   if (!needsRate) return nothing
-  let rate: string
-  try {
-    rate = parseExchangeRate(rateText, locale)
-  } catch (error) {
-    return {
-      ...nothing,
-      crossed,
-      needsRate,
-      rateError: error instanceof Error ? error.message : "Escribe el cambio",
-    }
-  }
+  const { rate, error } = readExchangeRate(rateText, locale)
+  if (rate === undefined) return { ...base, rateError: error }
   return {
-    ...nothing,
-    crossed,
-    needsRate,
+    ...base,
     frozen:
       cents !== null
         ? expenseExchange({ amountCents: cents, currency, businessCurrency: business, rate })

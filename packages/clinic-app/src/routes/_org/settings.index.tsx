@@ -1,9 +1,11 @@
 import {
   clinicalProfileFor,
+  currencySymbol,
   DIAGNOSIS_SYSTEM_INFO,
   formatExchangeRateInput,
   formatMoney,
   parseExchangeRate,
+  readExchangeRate,
 } from "@odentia/clinical"
 import { Button, InputGroup, InputGroupAddon, InputGroupInput, InputGroupText, toast } from "@odentia/ui"
 import {
@@ -68,7 +70,6 @@ import {
 } from "../../lib/region-format"
 import { productUi } from "../../product/product-ui"
 import { formatDateTimeShortLocale } from "../../lib/finance-collect"
-import { currencySymbol } from "../../lib/services"
 import { ClinicProfilePageSkeleton, ClinicProfileSkeleton } from "../../components/skeletons/settings"
 
 export const Route = createFileRoute("/_org/settings/")({
@@ -146,12 +147,7 @@ const rateLocale = (locale: string) => locale || "es"
 
 /** Lo que dice el campo del cambio si `parseExchangeRate` no lo acepta: el mismo que lo convierte al guardar. */
 function exchangeRateIssue(raw: string, locale: string): string | null {
-  try {
-    parseExchangeRate(raw, rateLocale(locale))
-    return null
-  } catch (error) {
-    return error instanceof Error ? error.message : "Revisa el cambio"
-  }
+  return readExchangeRate(raw, rateLocale(locale)).error ?? null
 }
 
 /**

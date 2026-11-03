@@ -10,7 +10,7 @@ import { type AppointmentVisit, appointmentVisit } from "./appointments.js"
 import { checkEncounterClosing } from "./encounters.js"
 import { AUDIT_AREA_LABELS, AUDIT_AREAS, type AuditArea, auditSubjectsOf, describeAuditEvent } from "./audit-words.js"
 import { adminRuntime, remindedUnconfirmedSql } from "./automation.js"
-import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
+import { budgetAwaitsAnswerSql, budgetLineUnitsSql } from "./budget-awaiting.js"
 import { listRecategorizedMessages } from "./clinic-messages.js"
 import { listConsentsToPublish } from "./clinical-forms.js"
 import { handoffOpenExistsSql, screenedSql, stillOpenWithPersonSql, testContactSql, unansweredSinceSql, unansweredSql } from "./conversation-state.js"
@@ -898,7 +898,7 @@ async function waitingUnsentBudgets(
       -- Un total por moneda de sus líneas: la cabecera no dice ninguna.
       (select jsonb_agg(by_currency order by by_currency.currency) from (
         select l.currency::text as currency, case when bool_or(l.price_cents is null) then null else sum(l.price_cents *
-          case when l.billing_mode = 'session' then greatest(coalesce(l.sessions_planned, 1), 1) else 1 end)::int end as "totalCents"
+          ${budgetLineUnitsSql({ billingMode: sql`l.billing_mode`, sessionsPlanned: sql`l.sessions_planned` })})::int end as "totalCents"
         from treatment_budget_item l
         join treatment_budget_option o on o.id = l.option_id and o.organization_id = l.organization_id
         where l.organization_id = b.organization_id and l.budget_id = b.id and o.is_recommended

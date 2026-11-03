@@ -12,6 +12,7 @@ import {
   isDiagnosisVerification,
   type MedicationCatalog,
   moneyTotalsText,
+  sumByCurrency,
   normalizeDrugText,
   quantityWords,
 } from "@odentia/clinical"
@@ -1071,11 +1072,9 @@ async function previewBudget(tx: Db, orgId: string, patientId: string, encounter
     })),
   ]
   // Un total por moneda: entre monedas no se suma, y ninguna línea queda fuera por ir en otra.
-  const byCurrency = new Map<string, number>()
-  for (const line of lines) byCurrency.set(line.currency, (byCurrency.get(line.currency) ?? 0) + line.priceCents)
-  const totals = [...byCurrency]
-    .map(([currency, totalCents]) => ({ currency, totalCents }))
-    .sort((a, b) => a.currency.localeCompare(b.currency))
+  const totals = sumByCurrency(
+    lines.map((line) => ({ currency: line.currency, cents: line.priceCents })),
+  ).map(({ currency, cents }) => ({ currency, totalCents: cents }))
   const [only] = totals
   const payload = {
     show: prepared.payload["show"] === true,

@@ -1317,11 +1317,11 @@ export async function getMonthExpenses(
     orgPartValue(row.amountCents, row, money)
   const live = rows.filter((row) => !row.voidedAt && valueOf(row) !== null)
   const byCategoryValues = new Map<string, Array<MoneyFraction | null>>()
-  for (const row of live)
-    byCategoryValues.set(row.category, [
-      ...(byCategoryValues.get(row.category) ?? []),
-      valueOf(row),
-    ])
+  for (const row of live) {
+    const list = byCategoryValues.get(row.category) ?? []
+    list.push(valueOf(row))
+    byCategoryValues.set(row.category, list)
+  }
   const byCategory = new Map(
     [...byCategoryValues].map(([category, values]) => [
       category,
@@ -2801,7 +2801,9 @@ export async function collectedByProfessional(
       { amountCents: a.paymentCents, businessCents: a.paymentValueCents, currency: a.paymentCurrency },
       money,
     )
-    profSums.set(a.professionalUserId, [...(profSums.get(a.professionalUserId) ?? []), value])
+    const list = profSums.get(a.professionalUserId) ?? []
+    list.push(value)
+    profSums.set(a.professionalUserId, list)
   }
   const names = await userNames(tx, [...profSums.keys()])
   return [...profSums].map(([professionalUserId, values]) => ({
@@ -2842,7 +2844,10 @@ export async function collectedNetMany(
     spans,
     [...rows],
     (): Array<{ currency: string; cents: number; taxCents: number }> => [],
-    (list, row) => [...list, { currency: row.currency, cents: safeCents(row.cents), taxCents: safeCents(row.tax) }],
+    (list, row) => {
+      list.push({ currency: row.currency, cents: safeCents(row.cents), taxCents: safeCents(row.tax) })
+      return list
+    },
   )
 }
 

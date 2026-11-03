@@ -5,7 +5,7 @@
  * importe que se le devuelve. Al final, cómo se le devuelve el dinero o si
  * queda a favor. Al terminar, la devolución se imprime y se envía como el ticket.
  */
-import { currencyWord, formatMoney } from "@odentia/clinical"
+import { currencyWord, formatMoney, moneyTotalsText } from "@odentia/clinical"
 import { Button } from "@odentia/ui"
 import { ErrorState, FormDrawer, SubmitButton, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
@@ -313,11 +313,13 @@ export function ReturnDrawer({
                 {done.outcome === "pagado"
                   ? `Se devolvieron ${
                       done.snapshot.payouts
-                        ? done.snapshot.payouts
-                            .map((payout) =>
-                              formatMoney(payout.amountCents, payout.currency, locale),
-                            )
-                            .join(" + ")
+                        ? moneyTotalsText(
+                            done.snapshot.payouts.map((payout) => ({
+                              currency: payout.currency,
+                              cents: payout.amountCents,
+                            })),
+                            (cents, unit) => formatMoney(cents, unit, locale),
+                          )
                         : money(done.totalCents)
                     } por ${done.methodName}.`
                   : `Quedan ${money(done.totalCents)} a favor de ${patientName}.`}

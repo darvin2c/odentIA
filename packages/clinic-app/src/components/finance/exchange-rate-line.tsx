@@ -3,7 +3,12 @@
  * misma operación (`saveExchangeRate`). Es la propuesta para los cobros que vienen:
  * cada cobro guarda el suyo. Sin otra moneda no existe.
  */
-import { exchangeRateWords, formatExchangeRateInput, parseExchangeRate } from "@odentia/clinical"
+import {
+  exchangeRateWords,
+  formatExchangeRateInput,
+  parseExchangeRate,
+  readExchangeRate,
+} from "@odentia/clinical"
 import { Button, toast } from "@odentia/ui"
 import { FormDrawer, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
@@ -42,14 +47,8 @@ export function ExchangeRateLine({
     defaultValues: { rate: "" },
     validators: {
       onSubmit: ({ value }) => {
-        try {
-          parseExchangeRate(value.rate, locale)
-          return undefined
-        } catch (error) {
-          return {
-            fields: { rate: error instanceof Error ? error.message : "Escribe el cambio" },
-          }
-        }
+        const { error } = readExchangeRate(value.rate, locale)
+        return error ? { fields: { rate: error } } : undefined
       },
     },
     onSubmit: async ({ value }) => {

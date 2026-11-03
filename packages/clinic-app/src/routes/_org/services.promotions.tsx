@@ -1,4 +1,4 @@
-import { formatMoney, formatMoneyInput, parseMoney } from "@odentia/clinical"
+import { currencySymbol, formatMoney, formatMoneyInput, parseMoney } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -62,7 +62,6 @@ import {
   updatePromotionApi,
 } from "../../lib/promotions"
 import {
-  currencySymbol,
   fetchServices,
   formatAmount,
   PRICE_DISCLOSURE_OPTIONS,

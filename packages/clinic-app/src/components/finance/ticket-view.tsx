@@ -16,6 +16,7 @@ import {
   ticketFooterLines,
   ticketTenderTitle,
   ticketUntaxedNote,
+  moneyTotalsText,
 } from "@odentia/clinical"
 import { Badge, Button, buttonVariants, cn, Skeleton } from "@odentia/ui"
 import { FormDrawer, SubmitButton, useAppForm, useFormSurface } from "@odentia/ui-patterns"
@@ -274,10 +275,13 @@ export function TicketView({
         (row) => row.currency !== currency && row.saldo > 0,
       )
     : []
-  const owedWords = [
-    ...(owed ? [money(owed)] : []),
-    ...owedElse.map((row) => formatMoney(row.saldo, row.currency, format)),
-  ].join(" + ")
+  const owedWords = moneyTotalsText(
+    [
+      ...(owed ? [{ currency, cents: owed }] : []),
+      ...owedElse.map((row) => ({ currency: row.currency, cents: row.saldo })),
+    ],
+    (cents, unit) => formatMoney(cents, unit, format),
+  )
 
   const voidMutation = useMutation({
     mutationFn: (reason: string) => voidTicketApi(ticket.patientId, ticket.id, reason),

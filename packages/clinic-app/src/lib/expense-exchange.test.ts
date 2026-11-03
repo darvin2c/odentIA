@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { currencyChoices, expenseRateWords, readExpenseMoney } from "./expense-exchange"
+import { expenseRateWords, readExpenseMoney } from "./expense-exchange"
+import { currencyChoices } from "./product-words"
 import type { OrgSecondCurrency } from "./org"
 
 const second: OrgSecondCurrency = {

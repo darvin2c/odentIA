@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   cancelledCents,
   collectExchange,
-  commissionCents,
+  commissionOfValue,
   convertCents,
   currencyFractionDigits,
   currencyWord,
@@ -12,26 +12,27 @@ import {
   formatExchangeRateInput,
   formatMoney,
   formatMoneyInput,
-  formatMoneyWhole,
   frozenValueCents,
-  impliedExchangeRate,
+  moneyTotalsText,
   moneyValue,
   normalizeExchangeRate,
   parseExchangeRate,
   parseMoney,
   refundTenderCents,
+  readExchangeRate,
   roundMoneyValue,
-  settleToDue,
   splitCents,
+  sumByCurrency,
   sumMoneyValues,
 } from "./money.js"
 
 describe("importes en unidad menor ISO 4217", () => {
   it("lo aproximado va sin decimales, con los de cada moneda", () => {
     const spaced = (text: string) => text.replace(/\u00a0/g, " ")
-    expect(spaced(formatMoneyWhole(37_125, "PEN", "es-PE"))).toBe("S/ 371")
-    expect(spaced(formatMoneyWhole(37_150, "PEN", "es-PE"))).toBe("S/ 372")
-    expect(spaced(formatMoneyWhole(95_000, "CLP", "es-CL"))).toMatch(/^\$\s?95\.000$/)
+    const whole = { whole: true }
+    expect(spaced(formatMoney(37_125, "PEN", "es-PE", whole))).toBe("S/ 371")
+    expect(spaced(formatMoney(37_150, "PEN", "es-PE", whole))).toBe("S/ 372")
+    expect(spaced(formatMoney(95_000, "CLP", "es-CL", whole))).toMatch(/^\$\s?95\.000$/)
   })
 
   it("conserva las unidades de monedas con cero, dos, tres y cuatro decimales", () => {
@@ -127,10 +128,17 @@ describe("convertir y cuadrar", () => {
   })
 
   it("a una unidad menor o menos de lo que se debe, cancela justo lo que se debe", () => {
-    expect(settleToDue(99999, 100000)).toBe(100000)
-    expect(settleToDue(100000, 100000)).toBe(100000)
-    expect(settleToDue(99998, 100000)).toBe(99998)
-    expect(settleToDue(100001, 100000)).toBe(100001)
+    const owed = {
+      paidCurrency: "PEN",
+      dueCents: 100000,
+      currency: "USD",
+      businessCurrency: "PEN",
+      factor: "3.75",
+    }
+    expect(cancelledCents({ ...owed, paidCents: 374997 })).toBe(100000)
+    expect(cancelledCents({ ...owed, paidCents: 375000 })).toBe(100000)
+    expect(cancelledCents({ ...owed, paidCents: 374993 })).toBe(99998)
+    expect(cancelledCents({ ...owed, paidCents: 375004 })).toBe(100001)
   })
 
   it("pagar lo que se propuso deja al día, también cuando de vuelta no da exacto", () => {
@@ -226,6 +234,58 @@ describe("convertir y cuadrar", () => {
   })
 })
 
+describe("lo que se dice por moneda", () => {
+  it("suma por moneda, con cuántas filas, sin mezclar y en orden", () => {
+    expect(
+      sumByCurrency([
+        { currency: "USD", cents: 100 },
+        { currency: "PEN", cents: 300 },
+        { currency: "USD", cents: 50 },
+      ]),
+    ).toEqual([
+      { currency: "PEN", cents: 300, count: 1 },
+      { currency: "USD", cents: 150, count: 2 },
+    ])
+  })
+
+  it("dice cada total y, sin el precio de alguno, lo que falta", () => {
+    const words = (cents: number, currency: string) => `${currency} ${cents}`
+    expect(moneyTotalsText([{ currency: "PEN", cents: 300 }, { currency: "USD", cents: 5 }], words)).toBe(
+      "PEN 300 + USD 5",
+    )
+    expect(moneyTotalsText([{ currency: "PEN", totalCents: null }], words, "falta")).toBe("falta")
+  })
+
+  it("lee el cambio sin excepción", () => {
+    expect(readExchangeRate("3,75", "es-CL")).toEqual({ rate: "3.75" })
+    expect(readExchangeRate("", "es-PE").error).toBe("Escribe el cambio")
+  })
+
+  it("la suma por denominador da lo mismo que multiplicarlos todos", () => {
+    const parts = [33333, 33333, 33334].map((partCents) =>
+      moneyValue({
+        partCents,
+        amountCents: 100000,
+        valueCents: 375000,
+        currency: "USD",
+        businessCurrency: "PEN",
+        factor: null,
+      }),
+    )
+    const mixed = moneyValue({
+      partCents: 1,
+      amountCents: 3,
+      valueCents: 100,
+      currency: "USD",
+      businessCurrency: "PEN",
+      factor: null,
+    })
+    expect(roundMoneyValue(sumMoneyValues(parts))).toBe(375000)
+    // 375000 + 100/3 = 375033.33…
+    expect(roundMoneyValue(sumMoneyValues([...parts, mixed, null]))).toBe(375033)
+  })
+})
+
 describe("la cuenta de un cobro", () => {
   const base = { businessCurrency: "PEN", changeCents: null, changeIn: "PEN" }
 
@@ -289,39 +349,29 @@ describe("lo que congela un gasto", () => {
 
   it("el cambio que resulta de lo pagado se dice como todo cambio, en cualquier sentido", () => {
     const dollars = { amountCents: 150_000, currency: "USD", businessCurrency: business }
-    expect(impliedExchangeRate({ ...dollars, tenderCents: 564_000, tenderCurrency: "PEN" })).toBe(
-      "3.76",
-    )
+    const paid = (cents: number, currency: string) => ({ tender: { cents, currency } })
+    expect(expenseExchange({ ...dollars, ...paid(564_000, "PEN") })?.exchangeRate).toBe("3.76")
     expect(
-      impliedExchangeRate({
+      expenseExchange({
         amountCents: 37_600,
         currency: "PEN",
-        tenderCents: 10_000,
-        tenderCurrency: "USD",
         businessCurrency: business,
-      }),
+        ...paid(10_000, "USD"),
+      })?.exchangeRate,
     ).toBe("3.76")
     // Lo que no da exacto se redondea: solo se muestra.
-    expect(impliedExchangeRate({ ...dollars, tenderCents: 564_100, tenderCurrency: "PEN" })).toBe(
-      "3.760667",
-    )
+    expect(expenseExchange({ ...dollars, ...paid(564_100, "PEN") })?.exchangeRate).toBe("3.760667")
     // Pesos sin decimales: 950 pesos por dólar, no 9.5.
     expect(
-      impliedExchangeRate({
+      expenseExchange({
         amountCents: 10_000,
         currency: "USD",
-        tenderCents: 95_000,
-        tenderCurrency: "CLP",
         businessCurrency: "CLP",
-      }),
+        ...paid(95_000, "CLP"),
+      })?.exchangeRate,
     ).toBe("950")
     expect(() =>
-      impliedExchangeRate({
-        ...dollars,
-        tenderCents: 1,
-        tenderCurrency: "EUR",
-        businessCurrency: "CLP",
-      }),
+      expenseExchange({ ...dollars, businessCurrency: "CLP", ...paid(1, "EUR") }),
     ).toThrow()
   })
 
@@ -413,12 +463,22 @@ describe("lo devuelto y la comisión", () => {
   })
 
   it("la comisión multiplica antes de dividir y coincide con la de una moneda", () => {
-    expect(commissionCents({ appliedCents: 10000, amountCents: 10000, valueCents: 10000, rateBps: 4000 })).toBe(4000)
-    expect(commissionCents({ appliedCents: 33333, amountCents: 100000, valueCents: 375000, rateBps: 3333 })).toBe(41662)
+    const commission = (partCents: number, amountCents: number, valueCents: number, rateBps: number) => {
+      const value = moneyValue({
+        partCents,
+        amountCents,
+        valueCents,
+        currency: "USD",
+        businessCurrency: "PEN",
+        factor: null,
+      })
+      if (!value) throw new Error("Con valor congelado siempre hay valor")
+      return commissionOfValue(value, rateBps)
+    }
+    expect(commission(10000, 10000, 10000, 4000)).toBe(4000)
+    expect(commission(33333, 100000, 375000, 3333)).toBe(41662)
     // Más allá de 2^53 en el producto intermedio: con números de coma flotante se perdería.
-    expect(
-      commissionCents({ appliedCents: 2_000_000_000, amountCents: 2_100_000_000, valueCents: 2_147_483_647, rateBps: 9999 }),
-    ).toBe(2_045_017_998)
+    expect(commission(2_000_000_000, 2_100_000_000, 2_147_483_647, 9999)).toBe(2_045_017_998)
   })
 
   it("reparte en proporción y el resto del redondeo va a la última fila", () => {

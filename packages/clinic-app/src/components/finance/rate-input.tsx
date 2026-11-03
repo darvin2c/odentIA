@@ -1,6 +1,6 @@
 /** Campo del cambio, dicho como se dice: «S/ [3.75] por USD 1». */
+import { currencySymbol } from "@odentia/clinical"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@odentia/ui"
-import { currencySymbol } from "../../lib/finance-collect"
 
 export function RateInput({
   id,

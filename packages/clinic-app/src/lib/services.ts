@@ -117,19 +117,6 @@ export function formatAmount(cents: number, currency: string, locale: string): s
   }).format(amountFromCents(String(cents), currency))
 }
 
-/**
- * Símbolo de una moneda tal como lo escribe el formato de la clínica: el
- * prefijo del campo de un importe. Nunca un símbolo fijo en el código.
- */
-export function currencySymbol(currency: string, locale: string): string {
-  try {
-    const parts = new Intl.NumberFormat(locale, { style: "currency", currency }).formatToParts(0)
-    return parts.find((part) => part.type === "currency")?.value ?? currency
-  } catch {
-    return currency
-  }
-}
-
 export interface ServicesQuery {
   q?: string
   /** Especialidad de la clínica (id). */

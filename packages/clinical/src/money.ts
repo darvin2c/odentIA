@@ -1,7 +1,11 @@
 /** Importes enteros en la unidad menor ISO 4217; formato y entrada según la clínica. */
 const CURRENCY_NAMES = new Intl.DisplayNames("en", { type: "currency", fallback: "none" })
 
+/** Los decimales de cada moneda ya vista: solo guarda códigos válidos. */
+const FRACTION_DIGITS = new Map<string, number>()
+
 function assertCurrency(currency: string): string {
+  if (FRACTION_DIGITS.has(currency)) return currency
   const code = currency.trim().toUpperCase()
   if (!/^[A-Z]{3}$/.test(code) || !CURRENCY_NAMES.of(code)) {
     throw new Error("La moneda debe ser un código ISO 4217 válido")
@@ -11,34 +15,64 @@ function assertCurrency(currency: string): string {
 
 /** ICU mantiene los dígitos ISO, incluidas monedas con cero, tres o cuatro decimales. */
 export function currencyFractionDigits(currency: string): number {
-  const digits = new Intl.NumberFormat("en", {
-    style: "currency",
-    currency: assertCurrency(currency),
-  }).resolvedOptions().maximumFractionDigits
-  if (digits === undefined) throw new Error("No se pudo resolver la unidad menor de la moneda")
+  const code = assertCurrency(currency)
+  let digits = FRACTION_DIGITS.get(code)
+  if (digits === undefined) {
+    digits = new Intl.NumberFormat("en", { style: "currency", currency: code }).resolvedOptions()
+      .maximumFractionDigits
+    if (digits === undefined) throw new Error("No se pudo resolver la unidad menor de la moneda")
+    FRACTION_DIGITS.set(code, digits)
+  }
   return digits
+}
+
+const FORMATS = new Map<string, Intl.NumberFormat>()
+
+/**
+ * Crear un `Intl.NumberFormat` cuesta unas 70 veces lo que usarlo, y una lista
+ * escribe decenas de importes por render: se guarda uno por idioma, moneda y decimales.
+ */
+function moneyFormat(locale: string, digits: number, currency?: string): Intl.NumberFormat {
+  const key = `${locale}|${currency ?? ""}|${digits}`
+  let format = FORMATS.get(key)
+  if (!format) {
+    format = new Intl.NumberFormat(locale, {
+      ...(currency ? { style: "currency", currency } : {}),
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    })
+    FORMATS.set(key, format)
+  }
+  return format
 }
 
 function inputFormat(locale: string, digits = 0): Intl.NumberFormat {
   if (!locale.trim()) throw new Error("El idioma y formato es obligatorio")
-  return new Intl.NumberFormat(locale, {
-    numberingSystem: "latn",
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  })
+  const key = `latn|${locale}|${digits}`
+  let format = FORMATS.get(key)
+  if (!format) {
+    format = new Intl.NumberFormat(locale, {
+      numberingSystem: "latn",
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    })
+    FORMATS.set(key, format)
+  }
+  return format
 }
 
-export function formatMoney(amountMinor: number, currency: string, locale: string): string {
+/** `whole`: sin decimales, para lo aproximado, que con céntimos parecería exacto. */
+export function formatMoney(
+  amountMinor: number,
+  currency: string,
+  locale: string,
+  options: { whole?: boolean } = {},
+): string {
   if (!Number.isSafeInteger(amountMinor)) throw new Error("El importe debe ser un entero")
   if (!locale.trim()) throw new Error("El idioma y formato es obligatorio")
   const code = assertCurrency(currency)
   const digits = currencyFractionDigits(code)
-  return new Intl.NumberFormat(locale, {
-    style: "currency",
-    currency: code,
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  }).format(amountMinor / 10 ** digits)
+  return moneyFormat(locale, options.whole ? 0 : digits, code).format(amountMinor / 10 ** digits)
 }
 
 /**
@@ -154,22 +188,33 @@ export function sumAcceptedCents(
  * pantalla. Sin el precio de alguna, `missing`, como un total al que le falta algo.
  */
 export function moneyTotalsText(
-  totals: ReadonlyArray<{ currency: string; totalCents: number | null }>,
+  totals: ReadonlyArray<
+    { currency: string; totalCents: number | null } | { currency: string; cents: number }
+  >,
   format: (cents: number, currency: string) => string,
-  missing: string,
+  missing = "",
 ): string {
   const parts: string[] = []
   for (const total of totals) {
-    if (total.totalCents == null) return missing
-    parts.push(format(total.totalCents, total.currency))
+    const cents = "cents" in total ? total.cents : total.totalCents
+    if (cents == null) return missing
+    parts.push(format(cents, total.currency))
   }
   return parts.join(" + ")
 }
 
-/** Para decir lo aceptado: sin las monedas en cero, salvo que todo esté en cero. */
-export function nonZeroTotals<T extends { totalCents: number | null }>(totals: readonly T[]): T[] {
-  const some = totals.filter((total) => total.totalCents !== 0)
-  return some.length > 0 ? some : totals.slice(0, 1)
+/** Una suma por moneda, con cuántas filas lleva, en orden de moneda: entre ellas nunca se suma. */
+export function sumByCurrency(
+  rows: Iterable<{ currency: string; cents: number }>,
+): Array<{ currency: string; cents: number; count: number }> {
+  const totals = new Map<string, { currency: string; cents: number; count: number }>()
+  for (const { currency, cents } of rows) {
+    const total = totals.get(currency) ?? { currency, cents: 0, count: 0 }
+    total.cents += cents
+    total.count += 1
+    totals.set(currency, total)
+  }
+  return [...totals.values()].sort((a, b) => a.currency.localeCompare(b.currency))
 }
 
 /**
@@ -180,23 +225,7 @@ export function formatMoneyAmount(amountMinor: number, currency: string, locale:
   if (!Number.isSafeInteger(amountMinor)) throw new Error("El importe debe ser un entero")
   if (!locale.trim()) throw new Error("El idioma y formato es obligatorio")
   const digits = currencyFractionDigits(currency)
-  return new Intl.NumberFormat(locale, {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  }).format(amountMinor / 10 ** digits)
-}
-
-/** Un importe sin decimales: para lo aproximado, que con céntimos parecería exacto. */
-export function formatMoneyWhole(amountMinor: number, currency: string, locale: string): string {
-  if (!Number.isSafeInteger(amountMinor)) throw new Error("El importe debe ser un entero")
-  if (!locale.trim()) throw new Error("El idioma y formato es obligatorio")
-  const code = assertCurrency(currency)
-  return new Intl.NumberFormat(locale, {
-    style: "currency",
-    currency: code,
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amountMinor / 10 ** currencyFractionDigits(code))
+  return moneyFormat(locale, digits).format(amountMinor / 10 ** digits)
 }
 
 // --- Dos monedas: el cambio y la cuenta única del valor ------------------------
@@ -266,6 +295,18 @@ export function parseExchangeRate(raw: string, locale: string): string {
   return normalizeExchangeRate(fraction ? `${integer}.${fraction}` : integer)
 }
 
+/** Lo mismo, para un formulario: el cambio o lo que hay que corregir, sin excepción. */
+export function readExchangeRate(
+  raw: string,
+  locale: string,
+): { rate: string; error?: undefined } | { rate?: undefined; error: string } {
+  try {
+    return { rate: parseExchangeRate(raw, locale) }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Revisa el cambio" }
+  }
+}
+
 /** Texto editable compatible con parseExchangeRate y el formato de la clínica. */
 export function formatExchangeRateInput(rate: string, locale: string): string {
   const decimal =
@@ -275,12 +316,17 @@ export function formatExchangeRateInput(rate: string, locale: string): string {
   return normalizeExchangeRate(rate).replace(".", decimal)
 }
 
-function currencySymbolIn(currency: string, locale: string): string {
-  return (
-    new Intl.NumberFormat(locale, { style: "currency", currency })
-      .formatToParts(0)
-      .find((part) => part.type === "currency")?.value ?? currency
-  )
+/** Símbolo de la moneda tal como lo escribe el formato de la clínica: el prefijo de un importe, nunca uno fijo. */
+export function currencySymbol(currency: string, locale: string): string {
+  try {
+    return (
+      moneyFormat(locale, 0, currency)
+        .formatToParts(0)
+        .find((part) => part.type === "currency")?.value ?? currency
+    )
+  } catch {
+    return currency
+  }
 }
 
 /** «S/ 3.75 por USD 1»: así se dice un cambio en una pantalla o en un papel. */
@@ -290,8 +336,8 @@ export function exchangeRateWords(
   otherCurrency: string,
   locale: string,
 ): string {
-  const business = currencySymbolIn(businessCurrency, locale)
-  const other = currencySymbolIn(otherCurrency, locale)
+  const business = currencySymbol(businessCurrency, locale)
+  const other = currencySymbol(otherCurrency, locale)
   return `${business} ${formatExchangeRateInput(rate, locale)} por ${other} 1`
 }
 
@@ -348,7 +394,7 @@ export function convertCents(input: {
  * Cuadrar a cero: si lo convertido queda a una unidad menor o menos de lo que se
  * debe, cancela justo lo que se debe y la cuenta queda al día.
  */
-export function settleToDue(convertedCents: number, dueCents: number): number {
+function settleToDue(convertedCents: number, dueCents: number): number {
   return convertedCents < dueCents && dueCents - convertedCents <= 1 ? dueCents : convertedCents
 }
 
@@ -474,7 +520,7 @@ const IMPLIED_RATE_DECIMALS = 6
  * son S/ 3.76 por USD 1. Se dice como todo cambio (moneda del negocio por 1 de la
  * otra), y es solo para mostrarlo: lo que vale es lo pagado, exacto.
  */
-export function impliedExchangeRate(input: {
+function impliedExchangeRate(input: {
   amountCents: number
   currency: string
   tenderCents: number
@@ -582,11 +628,27 @@ export function moneyValue(input: {
   return { num: part * factor.num, den: factor.den }
 }
 
-/** Suma exacta; lo que no tiene valor (`null`) no entra, igual que en `sum()`. */
+function greatestDivisor(a: bigint, b: bigint): bigint {
+  let [x, y] = [a, b]
+  while (y !== 0n) [x, y] = [y, x % y]
+  return x
+}
+
+/**
+ * Suma exacta; lo que no tiene valor (`null`) no entra, igual que en `sum()`. Por
+ * denominador: multiplicarlos todos hacía crecer los números con cada fila.
+ */
 export function sumMoneyValues(values: ReadonlyArray<MoneyFraction | null>): MoneyFraction {
+  const byDen = new Map<bigint, bigint>()
+  for (const value of values)
+    if (value) byDen.set(value.den, (byDen.get(value.den) ?? 0n) + value.num)
   let total: MoneyFraction = { num: 0n, den: 1n }
-  for (const value of values) {
-    if (value) total = { num: total.num * value.den + value.num * total.den, den: total.den * value.den }
+  for (const [den, num] of byDen) {
+    const shared = greatestDivisor(total.den, den)
+    total = {
+      num: total.num * (den / shared) + num * (total.den / shared),
+      den: (total.den / shared) * den,
+    }
   }
   return total
 }
@@ -621,27 +683,9 @@ export function refundTenderCents(input: {
 }
 
 /**
- * La comisión de una parte de un pago: `floor(a × B × tasa ÷ (A × 10000))`, con
- * B el valor congelado. Multiplica antes de dividir, como la cuenta en SQL.
- */
-export function commissionCents(input: {
-  /** a: lo aplicado del pago. */
-  appliedCents: number
-  /** A: `amount_cents` del pago. */
-  amountCents: number
-  /** B: el valor del pago en moneda del negocio. */
-  valueCents: number
-  rateBps: number
-}): number {
-  const top = asCents(input.appliedCents) * asCents(input.valueCents) * asCents(input.rateBps)
-  return asSafeCents(top / (asCents(input.amountCents) * 10_000n))
-}
-
-/**
  * Espejo de la función SQL `money_commission`: la comisión del valor de una parte
- * (`moneyValue`), hacia abajo. Con valor congelado es la misma cuenta de arriba; sin
- * él, la moneda del negocio vale lo que dice y la otra sale del factor. Sin valor
- * (`null`) no hay comisión que contar.
+ * (`moneyValue`), hacia abajo: `floor(a × B × tasa ÷ (A × 10000))`, multiplicando
+ * antes de dividir. Sin valor no hay comisión que contar: quien llama no llega aquí.
  */
 export function commissionOfValue(value: MoneyFraction, rateBps: number): number {
   return asSafeCents((value.num * asCents(rateBps)) / (value.den * 10_000n))

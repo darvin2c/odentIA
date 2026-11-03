@@ -56,7 +56,7 @@ import { personalLinkUrl } from "./public-links.js"
 import { orgMoney, todayValueCents } from "./report-value.js"
 import { requireDecisionContact } from "./responsibilities.js"
 
-export { budgetValueOptionSql } from "./budget-awaiting.js"
+export { budgetLineUnitsSql, budgetValueOptionSql } from "./budget-awaiting.js"
 
 /**
  * Documento económico de un plan clínico: cabecera con decisión auditada +
@@ -582,14 +582,6 @@ export function valueOptionOf<T extends { decision: string; isRecommended: boole
     options[0] ??
     null
   )
-}
-
-/** Las visitas que cuenta una línea (`budgetLineUnits`), en SQL sobre el alias de la línea. */
-export function budgetLineUnitsSql(line: {
-  billingMode: SQLWrapper
-  sessionsPlanned: SQLWrapper
-}): SQL {
-  return sql`(case when ${line.billingMode} = 'session' then greatest(coalesce(${line.sessionsPlanned}, 1), 1) else 1 end)`
 }
 
 /**

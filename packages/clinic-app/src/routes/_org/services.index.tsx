@@ -1,4 +1,4 @@
-import { formatMoney, formatMoneyInput, parseMoney } from "@odentia/clinical"
+import { formatMoney, formatMoneyInput, moneyTotalsText, parseMoney } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -486,7 +486,7 @@ function TarifarioPage() {
                   <span className="tabular-nums">
                     {materials.count}
                     {materials.cost && profileLocale !== undefined
-                      ? ` · ${(materials.cost.parts ?? [materials.cost]).map((part) => formatMoney(part.cents, part.currency, profileLocale)).join(" + ")}`
+                      ? ` · ${moneyTotalsText(materials.cost.parts ?? [materials.cost], (cents, unit) => formatMoney(cents, unit, profileLocale))}`
                       : ""}
                   </span>
                 )

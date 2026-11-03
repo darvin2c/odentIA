@@ -70,16 +70,6 @@ export function formatTimeShortLocale(
   })
 }
 
-/** Símbolo de la moneda tal como lo escribe el formato de la clínica (prefijo de los campos de importe). */
-export function currencySymbol(currency: string, locale: string): string {
-  try {
-    const parts = new Intl.NumberFormat(locale, { style: "currency", currency }).formatToParts(0)
-    return parts.find((part) => part.type === "currency")?.value ?? currency
-  } catch {
-    return currency
-  }
-}
-
 /**
  * Importe sin símbolo de moneda, con el formato de la clínica: para las cifras
  * secundarias (filas de conceptos, «costó… pagó…»), que acompañan a un total

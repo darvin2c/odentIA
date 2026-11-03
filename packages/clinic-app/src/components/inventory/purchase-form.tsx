@@ -53,7 +53,7 @@ import {
   unitsText,
   updateOrder,
 } from "../../lib/inventory"
-import { currencyChoices } from "../../lib/expense-exchange"
+import { currencyChoices } from "../../lib/product-words"
 import { useOrgSecondCurrency } from "../../lib/org"
 import { isAmbiguousMutationError } from "../../lib/query-error"
 import { ChoiceButtons } from "../choice-buttons"

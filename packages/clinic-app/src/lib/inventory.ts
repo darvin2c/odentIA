@@ -9,6 +9,7 @@ import {
   documentText,
   documentTypeLabel,
   formatMoney,
+  moneyTotalsText,
   quantityWords,
   supplierDocumentTypes,
 } from "@odentia/clinical"
@@ -694,22 +695,12 @@ export function supplierBalanceWords(
   item: Pick<SupplierItem, "currency" | "dueCents" | "creditCents" | "otherBalances">,
   which: "dueCents" | "creditCents",
 ): string | null {
-  const parts: string[] = []
+  const parts: Array<{ currency: string; cents: number }> = []
   const own = item[which] ?? 0
-  if (own > 0 && item.currency) parts.push(moneyText(own, item.currency))
+  if (own > 0 && item.currency) parts.push({ currency: item.currency, cents: own })
   for (const other of item.otherBalances ?? [])
-    if (other[which] > 0) parts.push(moneyText(other[which], other.currency))
-  return parts.length > 0 ? parts.join(" + ") : null
-}
-
-/** El símbolo de la moneda en el formato de la clínica («S/», «$»). */
-export function currencySymbol(currency: string, at = locale()): string {
-  try {
-    const part = new Intl.NumberFormat(at, { style: "currency", currency }).formatToParts(1).find((item) => item.type === "currency")
-    return part?.value ?? currency
-  } catch {
-    return currency
-  }
+    if (other[which] > 0) parts.push({ currency: other.currency, cents: other[which] })
+  return parts.length > 0 ? moneyTotalsText(parts, (cents, currency) => moneyText(cents, currency)) : null
 }
 
 const noDots = (text: string) => text.replace(/\./g, "")
