@@ -4219,7 +4219,10 @@ export async function listDebts(tx: Db, orgId: string, query: DebtListQuery) {
 
   return {
     timezone,
+    /** Filas: quien debe en dos monedas tiene una por moneda. */
     total: listed.length,
+    /** Personas distintas de esas filas. */
+    people: new Set(listed.map((row) => row.patientId)).size,
     nextCursor: offset + limit < listed.length ? String(offset + limit) : null,
     summary: {
       ...debtTotals(all),

@@ -23,6 +23,7 @@ import {
   getCashState,
   getCashToday,
   getDayMovements,
+  listDebts,
 } from "./finance.js"
 import {
   buildTicketSnapshot,
@@ -1072,6 +1073,15 @@ it("los dólares no se quitan mientras algo los necesite: deuda, caja, saldo a f
     .where(eq(serviceCatalog.id, service?.id as string))
   // Ya nada la necesita: se quita.
   expect((await remove()).secondCurrency).toBeNull()
+})
+
+it("quien debe en las dos monedas tiene dos filas y es una persona", async () => {
+  const c = await clinic()
+  await c.charge(15000, "PEN", "Limpieza")
+  await c.charge(10000, "USD", "Implante")
+  const list = await c.run((tx) => listDebts(tx, c.orgId, { branchId: c.site.id }))
+  expect(list.data).toHaveLength(2)
+  expect(list).toMatchObject({ total: 2, people: 1 })
 })
 
 it("conceptos de dos monedas no van en un cobro: cada moneda lleva su ticket", async () => {

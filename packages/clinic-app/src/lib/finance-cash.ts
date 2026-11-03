@@ -178,7 +178,10 @@ export interface DebtTotals {
 
 export interface DebtListBody {
   timezone: string
+  /** Filas: quien debe en dos monedas tiene una por moneda. */
   total: number
+  /** Personas distintas de esas filas. */
+  people: number
   nextCursor: string | null
   /** De la sede entera, sin la búsqueda ni la antigüedad. */
   summary: DebtTotals & { over30: DebtTotals; over90: DebtTotals; earlier: DebtTotals }

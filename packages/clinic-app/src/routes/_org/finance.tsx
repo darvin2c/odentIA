@@ -976,7 +976,8 @@ function CashTab({
           </h2>
           {attended.length > 0 ? (
             <p className="text-sm text-muted-foreground">
-              Salieron hoy de su atención · {plural(attendedTotal, "persona", "personas")} ·{" "}
+              Salieron hoy de su atención ·{" "}
+              {plural(debts.data?.data.people ?? attendedTotal, "persona", "personas")} ·{" "}
               {attendedDue.map((row) => formatMoney(row.cents, row.currency, locale)).join(" · ")}
             </p>
           ) : null}
