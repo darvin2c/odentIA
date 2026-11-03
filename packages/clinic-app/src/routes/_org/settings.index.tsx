@@ -69,7 +69,7 @@ import {
   regionPreview,
 } from "../../lib/region-format"
 import { productUi } from "../../product/product-ui"
-import { formatDateTimeShortLocale } from "../../lib/finance-collect"
+import { formatDateTimeShortLocale, sentence } from "../../lib/finance-collect"
 import {
   ClinicProfilePageSkeleton,
   ClinicProfileSkeleton,
@@ -718,7 +718,7 @@ function exchangeRateHelp({
     "Se propone al cobrar y sirve para estimar lo que aún no se paga. Cada cobro guarda el suyo: cambiarlo no toca lo ya cobrado. Quien cobra también puede actualizarlo."
   if (!written || !locale || !timezone) return help
   const when = formatDateTimeShortLocale(written.at, locale, timezone)
-  return `${help} ${written.byName ? `Lo puso ${written.byName}` : "Se puso"} el ${when}.`
+  return `${help} ${sentence(`${written.byName ? `Lo puso ${written.byName}` : "Se puso"} el ${when}`)}`
 }
 
 /**

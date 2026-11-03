@@ -94,6 +94,7 @@ import {
   type PromotionItem,
   type PromotionOption,
   rateAuthorWords,
+  sentence,
   type SaleProduct,
   voidChargeApi,
 } from "../../lib/finance-collect"
@@ -1210,7 +1211,7 @@ export function CollectDrawer({
   const rateHelp = !second
     ? ""
     : pay !== debt
-      ? `Cambio de hoy: ${formatExchangeRateInput(second.rate, locale)}${rateAuthor ? `, ${rateAuthor}` : ""}. Si lo cambias aquí, vale solo para este cobro.`
+      ? `${sentence(`Cambio de hoy: ${formatExchangeRateInput(second.rate, locale)}${rateAuthor ? `, ${rateAuthor}` : ""}`)} Si lo cambias aquí, vale solo para este cobro.`
       : "No cambia lo que paga: es para saber cuánto vale en tus reportes."
   const showOtherCurrency = second !== null && !creditOnly
   const cashLine =

@@ -7,6 +7,7 @@ import {
   financeKeys,
   groupDayMovements,
 } from "./finance-cash"
+import { sentence } from "./finance-collect"
 const movement = (over: Partial<DayMovement>): DayMovement => ({
   id: "m1",
   shiftId: "s1",
@@ -25,6 +26,13 @@ const movement = (over: Partial<DayMovement>): DayMovement => ({
   patientId: "pa1",
   patientName: "Carlos Vega",
   ...over,
+})
+
+describe("las frases del cambio", () => {
+  it("una hora que ya termina en punto no lleva otro", () => {
+    expect(sentence("lo puso Ana a las 09:04 a. m.")).toBe("lo puso Ana a las 09:04 a. m.")
+    expect(sentence("lo puso Ana a las 21:04")).toBe("lo puso Ana a las 21:04.")
+  })
 })
 
 describe("la caja con dos monedas", () => {

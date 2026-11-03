@@ -102,6 +102,11 @@ export function rateIsFar(rate: string, today: string): boolean {
   return Math.abs(Number(rate) - Number(today)) / Number(today) > RATE_WARN_SHARE
 }
 
+/** Cierra una frase con punto, salvo que ya termine en uno: «09:04 a. m.» no lleva otro. */
+export function sentence(text: string): string {
+  return /[.!?]$/.test(text.trimEnd()) ? text : `${text}.`
+}
+
 /** «lo puso Rosa a las 9:12», o el día si no fue hoy. Vacío si no se sabe. */
 export function rateAuthorWords(
   second: { at: string | null; byName: string | null },
