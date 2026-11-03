@@ -70,8 +70,6 @@ export interface OrgProfile {
   secondCurrency?: string | null
   /** «Cambio de hoy» en texto decimal: moneda del negocio por 1 de la otra. */
   exchangeRate?: string | null
-  /** Lo mismo por unidad menor de cada moneda. */
-  exchangeFactor?: string | null
   exchangeRateAt?: string | null
   exchangeRateByName?: string | null
 }
@@ -81,7 +79,6 @@ export interface OrgSecondCurrency {
   currency: string
   /** En palabras: moneda del negocio por 1 de la otra («3.75»). */
   rate: string
-  factor: string
   /** Quién lo puso y cuándo; el nombre es null si ya no está en la clínica. */
   at: string | null
   byName: string | null
@@ -92,11 +89,10 @@ export interface OrgSecondCurrency {
  * moneda? `null` es que no, y entonces no aparece ningún control de más.
  */
 export function orgSecondCurrency(profile: OrgProfile | null | undefined): OrgSecondCurrency | null {
-  if (!profile?.secondCurrency || !profile.exchangeRate || !profile.exchangeFactor) return null
+  if (!profile?.secondCurrency || !profile.exchangeRate) return null
   return {
     currency: profile.secondCurrency,
     rate: profile.exchangeRate,
-    factor: profile.exchangeFactor,
     at: profile.exchangeRateAt ?? null,
     byName: profile.exchangeRateByName ?? null,
   }

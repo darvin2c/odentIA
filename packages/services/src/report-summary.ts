@@ -223,7 +223,7 @@ export async function getReportProfessionals(tx: Db, orgId: string, query: Repor
     select created_by as "userId", count(distinct id)::int as presented,
       count(distinct id) filter (where accepted)::int as accepted
     from budget_line where created_by is not null group by created_by`)
-  const collectedBy = await collectedByProfessional(tx, orgId, { start: window.start, end: window.end, branchId }, currency)
+  const collectedBy = await collectedByProfessional(tx, orgId, { start: window.start, end: window.end, branchId })
   const rows = new Map<string, { userId: string; name: string; attended: number; noShow: number; total: number; presented: number; accepted: number; collectedCents: number }>()
   for (const row of professionals) rows.set(row.userId, { ...row, presented: 0, accepted: 0, collectedCents: 0 })
   for (const row of collectedBy) {

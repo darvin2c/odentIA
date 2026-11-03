@@ -249,7 +249,7 @@ export const REPORT_FIGURES: ReportFigure[] = [
     breakdown: async (ctx, group, branchId) => {
       const { window, currency } = ctx.scope
       if (group === "profesional") {
-        const rows = await collectedByProfessional(ctx.tx, ctx.orgId, { start: window.start, end: window.end, branchId }, currency)
+        const rows = await collectedByProfessional(ctx.tx, ctx.orgId, { start: window.start, end: window.end, branchId })
         return rows.map((row) => ({ key: row.professionalUserId, label: row.name ?? "", value: money(row.cobradoCents) }))
       }
       if (group === "medio") {

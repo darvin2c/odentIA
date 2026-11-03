@@ -2274,8 +2274,6 @@ export interface MonthlyCommissionsQuery {
   professionalUserId: string
   year: number
   month: number
-  /** Las comisiones van siempre en moneda del negocio: se acepta por compatibilidad y no cambia la cuenta. */
-  currency?: string
 }
 
 /**
@@ -2471,7 +2469,7 @@ export type CommissionSummary = ReturnType<typeof commissionSummary>
 export async function listMonthCommissions(
   tx: Db,
   orgId: string,
-  query: { year: number; month: number; currency?: string },
+  query: { year: number; month: number },
 ): Promise<CommissionSummary[]> {
   const zone = await getOrgLocale(tx, orgId)
   const { start, end } = monthBounds(zone.timezone, query.year, query.month)
@@ -2513,7 +2511,7 @@ export async function getMyCommissions(
   tx: Db,
   orgId: string,
   userId: string,
-  query: { year: number; month: number; currency?: string },
+  query: { year: number; month: number },
 ) {
   const current = await getMonthlyCommissions(tx, orgId, { ...query, professionalUserId: userId })
   const previous: CommissionSummary[] = []
@@ -2530,7 +2528,6 @@ export async function getMyCommissions(
       professionalUserId: userId,
       year,
       month,
-      currency: current.currency,
     })
     if (view.lines.length > 0) previous.push(commissionSummary(view))
   }
@@ -2541,7 +2538,6 @@ export interface PayMonthCommissionInput {
   professionalUserId: string
   year: number
   month: number
-  currency?: string
   /** Sede a la que se imputa el gasto de Personal. */
   branchId: string
   notes?: string | null
@@ -2779,7 +2775,6 @@ export async function collectedByProfessional(
   tx: Db,
   orgId: string,
   range: { start: Date; end: Date; branchId?: string },
-  curr: string,
 ): Promise<Array<{ professionalUserId: string; name: string | null; currency: string; cobradoCents: number }>> {
   const money = await orgMoney(tx, orgId)
   const apps = await collectedApplications(tx, orgId, range.start, range.end, money, {
@@ -2809,7 +2804,7 @@ export async function collectedByProfessional(
   return [...profSums].map(([professionalUserId, values]) => ({
     professionalUserId,
     name: names.get(professionalUserId) ?? null,
-    currency: curr,
+    currency: money.currency,
     cobradoCents: roundMoneyValue(sumMoneyValues(values)),
   }))
 }

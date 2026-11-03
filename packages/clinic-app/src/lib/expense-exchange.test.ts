@@ -6,7 +6,6 @@ import type { OrgSecondCurrency } from "./org"
 const second: OrgSecondCurrency = {
   currency: "USD",
   rate: "3.75",
-  factor: "3.75",
   at: null,
   byName: null,
 }

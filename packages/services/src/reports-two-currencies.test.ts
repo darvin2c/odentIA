@@ -77,7 +77,7 @@ describe("lo que ya pasó, con su valor congelado", () => {
     // El impuesto (18 % incluido, 3 × USD 50.85) también sale con su parte del valor: 15,255 × 3.75.
     expect(net).toEqual([{ currency: "PEN", cents: 375_000, taxCents: 57_206 }])
     expect(
-      (await c.run((tx) => collectedByProfessional(tx, c.orgId, span, "PEN"))).map(
+      (await c.run((tx) => collectedByProfessional(tx, c.orgId, span))).map(
         (row) => row.cobradoCents,
       ),
     ).toEqual([375_000])
@@ -472,6 +472,8 @@ describe("la cuenta en SQL y en TypeScript", () => {
       [12_345, 12_345, null, "USD", "3.7591", 777],
       [999, 999, null, "USD", null, 3000],
       [7, 9, 0, "USD", "3.75", 3000],
+      // S/ 333.33… al 3 % son S/ 10.00 justos; dividiendo antes de multiplicar saldrían 9.99.
+      [100, 300, 100_000, "USD", "3.75", 300],
     ]
     for (const [part, amount, value, currency, factor, rate] of cases) {
       const [row] = await ownerDb.execute<{ commission: string | null; value: string | null }>(sql`

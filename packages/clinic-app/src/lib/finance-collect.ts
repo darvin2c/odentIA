@@ -131,7 +131,6 @@ export interface OrgFinanceProfile {
   /** La otra moneda de la clínica y su «Cambio de hoy» (`orgSecondCurrency` de `lib/org`). */
   secondCurrency?: string | null
   exchangeRate?: string | null
-  exchangeFactor?: string | null
   exchangeRateAt?: string | null
   exchangeRateByName?: string | null
 }
