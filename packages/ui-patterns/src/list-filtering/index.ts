@@ -9,6 +9,6 @@ export {
   type SortOption,
 } from "./filter-def.js"
 export { FilterDrawer, type FilterDrawerProps } from "./filter-drawer.js"
-export { type ListSearchController, useListSearch } from "./list-search.js"
+export { type ListSearchController, ListSearchScope, useListSearch, useScopedListSearch } from "./list-search.js"
 export { SearchInput, type SearchInputProps } from "./search-input.js"
 export { SortMenu, type SortMenuProps } from "./sort-menu.js"

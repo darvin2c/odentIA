@@ -39,6 +39,7 @@ import { CoordinationControls, CoordinationTreatments } from "./plan/plan-coordi
 import { PlanNextCard, usePlanNextStep } from "./plan/plan-next"
 import { PlanPhases } from "./plan-fases"
 import { RecorridoClinicoTab } from "./recorrido-tab"
+import { useOpenWide } from "./wide-section"
 
 export { treatmentSiteLabel } from "./plan/budget-parts"
 
@@ -86,7 +87,9 @@ export function PlanTab({
   const canClinical = usePermission("clinical.read")
   const canBudgets = usePermission("budgets.read")
   const canAgenda = usePermission("appointments.read")
+  const openWide = useOpenWide()
   const controlsRef = useRef<HTMLElement | null>(null)
+  const budgetsRef = useRef<HTMLElement | null>(null)
 
   const plansQuery = useQuery({
     queryKey: ["treatment-plans", patientId],
@@ -173,6 +176,7 @@ export function PlanTab({
       {canBudgets ? (
         <Section
           title="Presupuesto"
+          sectionRef={budgetsRef}
           description={
             productUi().plan.budgetRequired
               ? undefined
@@ -240,14 +244,22 @@ export function PlanTab({
           {journeyItem ? (
             <RecorridoClinicoTab
               patientId={patientId}
+              patientName={patientName}
               initialItemId={journeyItem.id}
               showPhases={false}
               onChangeItem={(itemId) => setJourneyItemId(itemId)}
               onTabChange={(target, destination) => {
                 // Dentro del Plan: el presupuesto y los controles están en esta misma pestaña.
                 setJourneyItemId(null)
-                if (target === "plan" && destination?.budgetId) setFocusBudgetId(destination.budgetId)
+                if (target === "plan") {
+                  if (destination?.budgetId) setFocusBudgetId(destination.budgetId)
+                  else budgetsRef.current?.scrollIntoView({ block: "start", behavior: "smooth" })
+                }
                 if (target === "controles") controlsRef.current?.scrollIntoView({ block: "start", behavior: "smooth" })
+                // Lo demás se abre encima: al cerrarlo se sigue en el Plan.
+                if (target === "odontograma") openWide?.({ id: "odontograma", place: destination?.tooth })
+                if (target === "imagenes") openWide?.({ id: "documentos", place: destination?.tooth })
+                if (target === "historia") openWide?.({ id: "historia", place: destination?.tooth })
               }}
             />
           ) : null}

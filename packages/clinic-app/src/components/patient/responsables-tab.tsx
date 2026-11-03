@@ -63,7 +63,14 @@ function todayIso(): string {
   return zonedDateOf(new Date().toISOString(), activeOrgTimeZone())
 }
 
-export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX.Element {
+export function ResponsablesTab({
+  patientId,
+  startGranting = false,
+}: {
+  patientId: string
+  /** «Registrar responsable» de la cabecera: se abre con su formulario listo. */
+  startGranting?: boolean
+}): React.JSX.Element {
   const canWrite = usePermission("patients.write")
   const canRead = usePermission("patients.read")
   const canDocuments = usePermission("clinical.read")
@@ -84,7 +91,7 @@ export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX
     enabled: canDocuments,
   })
 
-  const [grantOpen, setGrantOpen] = useState(false)
+  const [grantOpen, setGrantOpen] = useState(startGranting && canWrite)
   const [revoking, setRevoking] = useState<string | null>(null)
 
   const invalidate = () => {

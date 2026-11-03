@@ -436,7 +436,14 @@ function baseOf(health: PatientHealth): HealthBase {
   }
 }
 
-export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX.Element {
+export function AntecedentesTab({
+  patientId,
+  startEditing = false,
+}: {
+  patientId: string
+  /** «Revisar» de Pendientes: se abre con el formulario listo, sin otro clic. */
+  startEditing?: boolean
+}): React.JSX.Element {
   const queryClient = useQueryClient()
   const canWrite = usePermission("clinical.write")
   const canRead = usePermission("clinical.read")
@@ -561,6 +568,15 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
     setDrawerOpen(true)
   }
 
+  // «Revisar» de Pendientes: una sola vez, en cuanto hay qué mostrar.
+  const startedEditing = useRef(false)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `openDrawer` cambia en cada render; corre una vez al llegar.
+  useEffect(() => {
+    if (!startEditing || !canWrite || !health || startedEditing.current) return
+    startedEditing.current = true
+    openDrawer()
+  }, [startEditing, canWrite, health])
+
   async function reload(): Promise<void> {
     const fresh = await healthQuery.refetch()
     if (fresh.data) resetTo(fresh.data.data)
@@ -614,6 +630,12 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
   const readOnly = !canWrite || isSubmitting
   // Nunca se preguntó: el vacío lo dice y lleva a registrarlo (ADR 0035).
   const unasked = !hasHealthInfo(health)
+  // El botón y el cajón se llaman igual: se revisa lo declarado, se edita lo que hay o se registra por primera vez.
+  const editingVerb = pendingReview
+    ? "Revisar antecedentes"
+    : saved.conditions.length + saved.medications.length > 0
+      ? "Editar antecedentes"
+      : "Registrar antecedentes"
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -650,11 +672,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
           ) : null}
           {canWrite && !unasked ? (
             <Button type="button" onClick={openDrawer}>
-              {pendingReview
-                ? "Revisar antecedentes"
-                : saved.conditions.length + saved.medications.length > 0
-                  ? "Editar antecedentes"
-                  : "Registrar antecedentes"}
+              {editingVerb}
             </Button>
           ) : null}
         </div>
@@ -683,8 +701,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
         {...surface}
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
-        title="Registrar antecedentes"
-        description="Completa por secciones. En móvil avanza en una columna; en tablet y web el formulario usa dos columnas."
+        title={editingVerb}
         headerContent={
           <div className="flex flex-col gap-2">
             <p className="text-xs text-muted-foreground">
@@ -1048,8 +1065,9 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
 }
 
 /**
- * Resumen de lectura de lo guardado: conteos por grupo + estado de revisión.
- * Sin formularios. Las alergias tienen su propia tarjeta arriba (`AllergiesCard`).
+ * Resumen de lectura de lo guardado: qué tiene, por nombre, y el estado de
+ * revisión. Sin formularios. Las alergias tienen su propia tarjeta arriba
+ * (`AllergiesCard`).
  */
 function AntecedentesSummary({
   saved,
@@ -1059,24 +1077,30 @@ function AntecedentesSummary({
   pendingReview: boolean
 }): React.JSX.Element {
   const { conditions, medications, reviewStatus: review, bloodGroup } = saved
-  const activeCon = conditions.filter((r) => r.status === "activa").length
-  const activeMed = medications.filter((r) => r.endDate === "").length
+  const activeCon = conditions.filter((r) => r.status === "activa")
+  const activeMed = medications.filter((r) => r.endDate === "")
   const rows: Array<{ title: string; state: HealthReviewState; detail: string }> = [
     {
       title: "Condiciones",
       state: review.conditions,
       detail:
-        conditions.length === 0
-          ? "Sin registros"
-          : `${conditions.length} registro(s) · ${activeCon} activa(s)`,
+        activeCon.length > 0
+          ? activeCon.map((row) => row.name).join(", ")
+          : conditions.length > 0
+            ? "Ninguna activa"
+            : "Sin registros",
     },
     {
       title: "Medicación vigente",
       state: review.medications,
       detail:
-        medications.length === 0
-          ? "Sin registros"
-          : `${medications.length} registro(s) · ${activeMed} vigente(s)`,
+        activeMed.length > 0
+          ? activeMed
+              .map((row) => [row.name, row.doseValue ? `${row.doseValue} ${row.doseUnit}`.trim() : row.dose].filter(Boolean).join(" "))
+              .join(", ")
+          : medications.length > 0
+            ? "Ninguna vigente"
+            : "Sin registros",
     },
   ]
   return (

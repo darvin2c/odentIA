@@ -1,10 +1,10 @@
 import { QuickNoteDrawer } from "./quick-note-drawer"
 import { Timeline } from "./timeline"
+import { useOpenWide } from "./wide-section"
 
 export interface HistoriaTabProps {
   patientId: string
   initialTooth?: number
-  onOdontogramSelect: (tooth: number) => void
 }
 
 /**
@@ -14,7 +14,8 @@ export interface HistoriaTabProps {
  * La atención se inicia desde la cabecera de la página; aquí solo la ofrece el
  * vacío.
  */
-export function HistoriaTab({ patientId, initialTooth, onOdontogramSelect }: HistoriaTabProps) {
+export function HistoriaTab({ patientId, initialTooth }: HistoriaTabProps) {
+  const openWide = useOpenWide()
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -24,7 +25,7 @@ export function HistoriaTab({ patientId, initialTooth, onOdontogramSelect }: His
       <Timeline
         patientId={patientId}
         initialTooth={initialTooth}
-        onOdontogramSelect={onOdontogramSelect}
+        onOdontogramSelect={(tooth) => openWide?.({ id: "odontograma", place: tooth })}
       />
     </div>
   )

@@ -56,6 +56,7 @@ import { NEUTRAL_TIMEZONE, roomWord } from "./locale.js"
 import { advanceForAppointment, returnForCancelledAppointment } from "./opportunities.js"
 import { listPatients } from "./patients.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
+import { scheduledItems } from "./plan-next.js"
 import { countAgendaUpgrade, countRecoveredAppointment, refreshConversationTier } from "./saas-actions.js"
 
 function conflict(code: string, message: string): ServiceError {
@@ -877,6 +878,35 @@ export interface CreateAppointmentInput {
 }
 
 /** Los tratamientos que se agendan con una cita: aceptados, sin terminar y del mismo paciente. */
+/** Lo que una cita puede traer: aceptado y todavía por hacer. */
+export const SCHEDULABLE_ITEM_STATUSES = ["pendiente", "programado", "en_curso"]
+
+/**
+ * Lo aceptado de ese servicio que aún no tiene cita. Una cita que no dice qué
+ * tratamientos trae (Sofi, el enlace de reserva) lleva estos, la misma regla de
+ * Clío: así no queda «falta su cita» de algo que ya se reservó. Quien elige en
+ * «Nueva cita» manda su lista, aunque sea vacía.
+ */
+async function acceptedOfService(tx: Db, orgId: string, patientId: string, serviceId: string): Promise<string[]> {
+  const rows = await tx
+    .select({ id: treatmentPlanItem.id })
+    .from(treatmentPlanItem)
+    .where(
+      and(
+        eq(treatmentPlanItem.organizationId, orgId),
+        eq(treatmentPlanItem.patientId, patientId),
+        eq(treatmentPlanItem.serviceId, serviceId),
+        eq(treatmentPlanItem.decisionStatus, "aceptado"),
+        inArray(treatmentPlanItem.status, SCHEDULABLE_ITEM_STATUSES),
+      ),
+    )
+    .orderBy(asc(treatmentPlanItem.createdAt), asc(treatmentPlanItem.id))
+    .limit(52)
+  const ids = rows.map((row) => row.id)
+  const withAppointment = await scheduledItems(tx, orgId, patientId, ids)
+  return ids.filter((id) => !withAppointment.has(id))
+}
+
 async function requireSchedulableItems(tx: Db, orgId: string, patientId: string, ids: string[]): Promise<string[]> {
   const unique = [...new Set(ids.map((id) => id.trim()).filter(Boolean))]
   if (unique.length === 0) return []
@@ -896,7 +926,7 @@ async function requireSchedulableItems(tx: Db, orgId: string, patientId: string,
     if (row.decision !== "aceptado") {
       throw onField(conflict("ITEM_NOT_ACCEPTED", "Solo se agenda lo que la persona aceptó"), "planItemIds")
     }
-    if (!["pendiente", "programado", "en_curso"].includes(row.status))
+    if (!SCHEDULABLE_ITEM_STATUSES.includes(row.status))
       throw onField(conflict("ITEM_CLOSED", "Ese tratamiento ya no está por hacer"), "planItemIds")
   }
   return unique
@@ -931,7 +961,7 @@ export async function createAppointment(
   if (endsAt <= startsAt) throw invalidField("endsAt", "La cita debe terminar después de iniciar")
   await requireAppointmentPatient(tx, orgId, input.patientId)
   await requireCanAttend(tx, orgId, input.professionalUserId, "professionalUserId")
-  const planItemIds = await requireSchedulableItems(tx, orgId, input.patientId, input.planItemIds ?? [])
+  const chosenItems = await requireSchedulableItems(tx, orgId, input.patientId, input.planItemIds ?? [])
   if (input.conversationId) {
     const [linked] = await tx.select({ id: conversation.id }).from(conversation)
       .innerJoin(patientContact, and(
@@ -945,6 +975,10 @@ export async function createAppointment(
   }
   const status = assertStatus(input.status ?? "programada")
   const standing = status === "programada" || status === "confirmada"
+  const planItemIds =
+    input.planItemIds === undefined && service && standing
+      ? await acceptedOfService(tx, orgId, input.patientId, service.id)
+      : chosenItems
   // Serializar altas por recurso, siempre profesional → unidad dental. Dos inserciones
   // simultáneas pueden interbloquear las exclusiones antes de devolver 23P01.
   const lockScope = `appointment:${orgId}`

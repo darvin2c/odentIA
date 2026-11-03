@@ -5,11 +5,11 @@
  * control abre su reserva. Es el mismo botón en la lista de Pacientes, el
  * Resumen y el Plan; nadie sale de donde estaba.
  */
-import { Button, buttonVariants } from "@odentia/ui"
+import { Button, buttonVariants, toast } from "@odentia/ui"
 import { DetailDrawer } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { type ComponentProps, useState } from "react"
+import { type ComponentProps, useEffect, useState } from "react"
 import {
   budgetNumberLabel,
   fetchBudgetDetail,
@@ -22,7 +22,8 @@ import {
   type SchedulableControl,
 } from "../../../lib/clinical-journey"
 import { usePermission } from "../../../lib/crm"
-import { openBookingAnywhere } from "../../agenda/schedule-host"
+import { usePersonArchived } from "../../../lib/person-archived"
+import { openAppointmentAnywhere, openBookingAnywhere } from "../../agenda/schedule-host"
 import { FollowUpScheduler } from "../follow-up-scheduler"
 import { useBudgetFormat } from "./budget-parts"
 import { BudgetResponse } from "./budget-response"
@@ -42,8 +43,9 @@ export function NextStepButton({
   variant?: ComponentProps<typeof Button>["variant"]
 }): React.JSX.Element | null {
   const [open, setOpen] = useState<"respuesta" | "control" | null>(null)
+  const archived = usePersonArchived()
   const action = step.action
-  if (!action) return null
+  if (!action || archived) return null
   if (step.kind === "enviar" && action.budgetId)
     return (
       <BudgetSendButton
@@ -65,6 +67,8 @@ export function NextStepButton({
       })
     } else if (step.kind === "respuesta" && action.budgetId) {
       setOpen("respuesta")
+    } else if (step.kind === "control" && action.appointmentId) {
+      openAppointmentAnywhere(action.appointmentId)
     } else if (step.kind === "control" && action.followUpId) {
       setOpen("control")
     }
@@ -194,6 +198,15 @@ export function ScheduleControl({
   const control: SchedulableControl | null = clinical
     ? (clinicalList.data?.data.find((row) => row.id === followUpId) ?? null)
     : (coordination.data?.data.followUps.find((row) => row.id === followUpId) ?? null)
+  const list = clinical ? clinicalList : coordination
+  // Otro lo reservó o lo canceló entre tanto: el botón lo dice, en vez de no hacer nada.
+  useEffect(() => {
+    if (control || list.isFetching) return
+    if (list.isError) toast.error("No se pudo abrir el control. Inténtalo de nuevo.")
+    else if (list.isSuccess) toast.error("Ese control ya no está por reservar.")
+    else return
+    onClose()
+  }, [control, list.isFetching, list.isError, list.isSuccess, onClose])
   if (!control) return null
   return (
     <FollowUpScheduler

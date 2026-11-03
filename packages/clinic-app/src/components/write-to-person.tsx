@@ -46,10 +46,13 @@ export function useWriteToPerson() {
   const queryClient = useQueryClient()
   return useMutation({
     retry: false,
-    mutationFn: (input: { contactId: string; phone?: string }) =>
+    mutationFn: (input: { contactId: string; phone?: string; onlyWhatsapp?: boolean }) =>
       apiFetch<{ data: WriteResult }>(`/api/contacts/${input.contactId}/write`, {
         method: "POST",
-        body: JSON.stringify(input.phone ? { phone: input.phone } : {}),
+        body: JSON.stringify({
+          ...(input.phone ? { phone: input.phone } : {}),
+          ...(input.onlyWhatsapp ? { onlyWhatsapp: true } : {}),
+        }),
       }).then((result) => result.data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["conversations"] })
@@ -66,22 +69,26 @@ const phoneSchema = z.object({
 
 /**
  * «Escribirle»: la única forma de escribirle a una persona desde la ficha, la
- * Agenda, Finanzas o la Bandeja. Abre su conversación en la Bandeja: la que
- * tiene abierta, su WhatsApp o una nueva con su número. Si no tiene número lo
- * pide aquí mismo; con varias personas (un paciente y quien habla por él),
- * primero se elige a quién. Nadie escribe «wa:», elige un canal ni una conexión.
+ * Agenda, Finanzas o la Bandeja. Abre su conversación: la que tiene abierta, su
+ * WhatsApp o una nueva con su número; en la Bandeja o, desde la ficha, ahí mismo
+ * (`onOpened`). Si no tiene número lo pide aquí mismo; con varias personas (un
+ * paciente y quien habla por él), primero se elige a quién. Nadie escribe «wa:»,
+ * elige un canal ni una conexión.
  */
 export function WriteToPersonDialog({
   open,
   onClose,
   people,
   prepareRegistration = false,
+  onOpened,
 }: {
   open: boolean
   onClose: () => void
   people: WriteTarget[]
   /** Al abrir la conversación, la Bandeja prepara «Su enlace» para revisarlo antes de enviarlo. */
   prepareRegistration?: boolean
+  /** Quien la abre ahí mismo, en vez de ir a la Bandeja. */
+  onOpened?: (conversationId: string, target: WriteTarget) => void
 }) {
   const navigate = useNavigate()
   const profile = useOrgProfile()
@@ -91,8 +98,12 @@ export function WriteToPersonDialog({
   // cerrar: un número rechazado se dice en su campo, sin que el campo desaparezca.
   const [needsPhone, setNeedsPhone] = useState(false)
 
-  const openConversation = (conversationId: string) => {
+  const openConversation = (conversationId: string, target: WriteTarget) => {
     onClose()
+    if (onOpened) {
+      onOpened(conversationId, target)
+      return
+    }
     void navigate({
       to: "/inbox",
       search: prepareRegistration
@@ -107,7 +118,7 @@ export function WriteToPersonDialog({
     onSubmit: async ({ value }) => {
       if (!chosen || !value.phone) return
       const result = await write.mutateAsync({ contactId: chosen.contactId, phone: value.phone })
-      openConversation(result.conversationId)
+      openConversation(result.conversationId, chosen)
     },
   })
   const submitPhone = useFormSubmit(phoneForm)
@@ -119,7 +130,7 @@ export function WriteToPersonDialog({
     write.mutate(
       { contactId: target.contactId },
       {
-        onSuccess: (result) => openConversation(result.conversationId),
+        onSuccess: (result) => openConversation(result.conversationId, target),
         onError: (error) => {
           if (error instanceof ApiError && error.shape.code === "NO_PHONE") setNeedsPhone(true)
         },
@@ -143,6 +154,7 @@ export function WriteToPersonDialog({
   const name = chosen?.displayName ?? ""
   const working = write.isPending && !needsPhone
   const choosing = people.length > 1 && !chosen
+  const where = onOpened ? "" : " en la Bandeja"
 
   return (
     <Dialog
@@ -156,10 +168,10 @@ export function WriteToPersonDialog({
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
             {choosing
-              ? "¿A quién le escribes? Se abre su conversación en la Bandeja."
+              ? `¿A quién le escribes? Se abre su conversación${where}.`
               : needsPhone
                 ? `${name} no tiene un número de WhatsApp. Escríbelo y se abre su conversación.`
-                : `Se abre la conversación con ${name} en la Bandeja.`}
+                : `Se abre la conversación con ${name}${where}.`}
           </DialogDescription>
         </DialogHeader>
 

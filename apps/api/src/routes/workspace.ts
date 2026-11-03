@@ -110,11 +110,12 @@ export function createWorkspaceRoute(deps: CrmDeps) {
   app.get("/person-panel", async c => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccessAny(memberRole, ["conversations.read", "conversations.topics"])) return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para abrir esta conversación"), 403)
-    const parsed = z.object({ conversationId: z.string().uuid(), topicId: z.string().uuid().optional() }).safeParse(c.req.query())
+    const parsed = z.object({ conversationId: z.string().uuid(), topicId: z.string().uuid().optional(), fromRecord: z.literal("1").optional() }).safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
+    const { fromRecord, ...query } = parsed.data
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, tx =>
-        getPersonPanel(tx, orgId, { ...parsed.data, userId, can: permission => canAccess(memberRole, permission as Permission) }),
+        getPersonPanel(tx, orgId, { ...query, fromRecord: fromRecord === "1", userId, can: permission => canAccess(memberRole, permission as Permission) }),
       ),
     )
   })
