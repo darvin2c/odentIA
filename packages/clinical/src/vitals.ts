@@ -135,6 +135,23 @@ export function bodyMassIndex(vitals: Vitals | null | undefined): number | null 
   return Math.round((weight / (meters * meters)) * 10) / 10
 }
 
+/** Un signo solo: que se conozca, que sea un número plausible y con sus decimales; vacío es null. */
+function parseSign(
+  key: string,
+  raw: unknown,
+  allowed: readonly VitalSignKey[],
+): { ok: true; value: number | null } | { ok: false; error: string } {
+  const def = VITAL_SIGNS.find((v) => v.key === key && allowed.includes(v.key))
+  if (!def) return { ok: false, error: `Signo vital desconocido: ${key}` }
+  if (raw === null || raw === undefined || raw === "") return { ok: true, value: null }
+  const value = typeof raw === "number" ? raw : Number(raw)
+  if (!Number.isFinite(value)) return { ok: false, error: `${def.label} debe ser un número` }
+  if (value < def.min || value > def.max)
+    return { ok: false, error: `${def.label} fuera de rango (${def.min}–${def.max} ${def.suffix})` }
+  const factor = 10 ** def.decimals
+  return { ok: true, value: Math.round(value * factor) / factor }
+}
+
 /**
  * Valida y normaliza los signos vitales: solo claves conocidas, números
  * dentro del rango de plausibilidad y con los decimales de su medida. La
@@ -151,18 +168,9 @@ export function parseVitals(
     return { ok: false, error: "Los signos vitales deben ser un objeto" }
   const out: Vitals = {}
   for (const [key, raw] of Object.entries(input as Record<string, unknown>)) {
-    const def = VITAL_SIGNS.find((v) => v.key === key && allowed.includes(v.key))
-    if (!def) return { ok: false, error: `Signo vital desconocido: ${key}` }
-    if (raw === null || raw === undefined || raw === "") continue
-    const value = typeof raw === "number" ? raw : Number(raw)
-    if (!Number.isFinite(value)) return { ok: false, error: `${def.label} debe ser un número` }
-    if (value < def.min || value > def.max)
-      return {
-        ok: false,
-        error: `${def.label} fuera de rango (${def.min}–${def.max} ${def.suffix})`,
-      }
-    const factor = 10 ** def.decimals
-    out[def.key] = Math.round(value * factor) / factor
+    const one = parseSign(key, raw, allowed)
+    if (!one.ok) return one
+    if (one.value !== null) out[key as VitalSignKey] = one.value
   }
   const hasSys = out.presionSistolica !== undefined
   const hasDia = out.presionDiastolica !== undefined
@@ -185,8 +193,10 @@ export function vitalsErrors(
 ): Record<string, string> {
   const errors: Record<string, string> = {}
   if (!input) return errors
+  // Cada signo por su cuenta; la presión completa se mira después, con las dos
+  // juntas: una sola parecería siempre incompleta.
   for (const [key, raw] of Object.entries(input)) {
-    const one = parseVitals({ [key]: raw }, allowed)
+    const one = parseSign(key, raw, allowed)
     if (!one.ok) errors[key] = one.error
   }
   if (Object.keys(errors).length > 0) return errors

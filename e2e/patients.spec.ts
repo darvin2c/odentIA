@@ -365,8 +365,10 @@ test("paciente: ejecución de la sesión y cierre del tratamiento", async ({ own
     diagnosisType: "confirmed",
     toothNumber: 36,
   }, 201)
+  // Con la presión registrada también se firma: las dos cifras juntas no son «incompletas».
   await call(page, "PATCH", apiPath, owner.org.slug, {
     evolution: "Endodoncia de la pieza 36 sin complicaciones.",
+    vitals: { presionSistolica: 120, presionDiastolica: 80 },
   })
   await page.reload()
   await page.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
