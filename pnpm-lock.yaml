@@ -107,6 +107,9 @@ importers:
         specifier: 4.6.2
         version: 4.6.2
     devDependencies:
+      '@cloudflare/vite-plugin':
+        specifier: 1.63.0
+        version: 1.63.0(@types/node@24.19.2)(vite@8.3.0(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.1))(wrangler@4.148.0(@types/node@24.19.2))
       '@types/qrcode':
         specifier: 1.5.6
         version: 1.5.6
@@ -125,6 +128,9 @@ importers:
       vitest:
         specifier: ^3.2.7
         version: 3.2.7(@types/debug@4.1.13)(@types/node@24.19.2)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.4.0))(lightningcss@1.33.0)(tsx@4.23.13)(yaml@2.9.1)
+      wrangler:
+        specifier: 4.148.0
+        version: 4.148.0(@types/node@24.19.2)
 
   apps/api:
     dependencies:
@@ -516,6 +522,9 @@ importers:
         specifier: 4.6.2
         version: 4.6.2
     devDependencies:
+      '@cloudflare/vite-plugin':
+        specifier: 1.63.0
+        version: 1.63.0(@types/node@24.19.2)(vite@8.3.0(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.1))(wrangler@4.148.0(@types/node@24.19.2))
       '@types/qrcode':
         specifier: 1.5.6
         version: 1.5.6
@@ -534,6 +543,9 @@ importers:
       vitest:
         specifier: ^3.2.7
         version: 3.2.7(@types/debug@4.1.13)(@types/node@24.19.2)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.4.0))(lightningcss@1.33.0)(tsx@4.23.13)(yaml@2.9.1)
+      wrangler:
+        specifier: 4.148.0
+        version: 4.148.0(@types/node@24.19.2)
 
   apps/web:
     dependencies:

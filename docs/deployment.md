@@ -184,6 +184,16 @@ ve un error igual. Las rutas del túnel de `<dominio>` y `www.<dominio>` se qued
 Volver al VPS es devolver los dos servicios al compose (el adaptador de Node sigue en
 `apps/web` para `pnpm dev`) y quitar las rutas del Worker.
 
+### El panel y la administración en Workers
+
+`odentia-admin`, `odentia-panel` y `latidia-panel` (ADR 0137) se publican con el mismo job y
+los mismos dominios con que se arman en el VPS. La entrada es igual que la de las webs: en
+cada Worker › Domains › Add Route, **Fail open**, con el patrón exacto (`admin.odentia32.com/*`,
+`app.odentia32.com/*`, `app.latidia72.com/*`; nunca `*.<dominio>/*`, que tomaría las clínicas).
+Mientras `admin`, `panel` y `latidia-panel` sigan en el compose, Fail open los usa de respaldo.
+Vuelta atrás: quitar la ruta. Antes de retirarlos del VPS, mirar en Metrics la CPU de las
+pantallas con sesión y que no haya errores.
+
 ## Variables: una sola fuente
 
 En OpenShip, las variables comunes viven en el entorno **production del proyecto**.

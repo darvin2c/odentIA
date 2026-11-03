@@ -14,9 +14,16 @@ export interface SessionInfo {
   emailVerified: boolean
 }
 
-/** Cabeceras de la petición entrante en SSR (cookies); vacío en el cliente. */
+/**
+ * En SSR, la cookie de la petición entrante; vacío en el cliente. Solo la cookie, como en la
+ * administración: en Workers (ADR 0137) un `Host` reenviado se respeta y llevaría el pedido de
+ * la sesión a `app.` en vez de a la API.
+ */
 export const ssrFetchOptions = createIsomorphicFn()
-  .server(() => ({ headers: getRequestHeaders() }))
+  .server(() => {
+    const cookie = getRequestHeaders().get("cookie")
+    return cookie ? { headers: { cookie } } : {}
+  })
   .client(() => ({}))
 
 /**

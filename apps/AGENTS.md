@@ -2,6 +2,7 @@
 
 ## Responsabilidades
 
+- `panel` y `admin` se arman en Cloudflare Workers (ADR 0137; Node solo para `pnpm dev`): en SSR, a la API viaja solo la cookie de la visita, nunca sus demás cabeceras (`Host` llevaría el pedido a otro servicio).
 - `panel`: lo que es de la persona (ADR 0065): acceso a la cuenta, registro/verificación, «Elige tu clínica», invitaciones, onboarding, perfil, soporte de cuenta y conectar WhatsApp. Sin barra lateral: la misma cabecera simple en todas sus páginas. Su layout comparte `SideDockProvider` y protección de borradores con `platform`. Plan y pagos no vive aquí: `/billing/<org>` solo redirige a la clínica.
 - `api`: las rutas de un producto viven en `src/routes/dental/` y las conecta `src/routes/products.ts`, el único archivo de la API que conoce los productos (ADR 0079).
 - `dental-clinic` (antes `platform`; servicio `platform` en producción): la app de la clínica dental, operación del CRM por organización y entradas públicas (portal, widget, confirmación/baja). Conservar los vínculos entre caso, interlocutor, paciente y oportunidad; distinguir explícitamente superficies autenticadas y públicas.
