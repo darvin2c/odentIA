@@ -29,8 +29,13 @@ export const onRequest = defineMiddleware(async (context, next) => {
   const edge = context.request.method === "GET" ? edgeCache() : undefined
   const key = pageKey(url)
   const hit = await edge?.match(key)
-  // Lo que sale de la caché no se puede modificar, y Astro le agrega cabeceras.
-  if (hit) return new Response(hit.body, hit)
+  if (hit) {
+    // Lo que sale de la caché no se puede modificar, y Astro le agrega cabeceras. La caché le
+    // suma el `max-age` de la zona (horas): el navegador no la guarda, igual que la recién armada.
+    const page = new Response(hit.body, hit)
+    page.headers.delete("Cache-Control")
+    return page
+  }
   const response = await render(context, next)
   if (
     edge &&

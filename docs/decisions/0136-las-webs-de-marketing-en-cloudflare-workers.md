@@ -12,7 +12,7 @@ Las dos webs de marketing (odentia32.com y latidia72.com, la misma `apps/web`) s
 - **En el plan gratuito.** El tráfico es bajo y la web es simple: 100 000 peticiones al día y 10 ms de CPU por petición. Los archivos de la página (`/_astro/…`, fuentes, imágenes) no cuentan. Armar una página tarda de 3 a 10 ms en local, al límite; por eso el middleware guarda 30 segundos cada página armada (200 o 404) con la API de caché del centro de datos (`caches.default`, `src/lib/edge-cache.ts`): la visita que la encuentra no la vuelve a armar. La clave no lleva los parámetros de campañas (`utm_*`, `fbclid`…), que no cambian la página. El 503 no se guarda: seguiría diciendo «vuelve» con la API de vuelta.
 - **Los precios, como antes.** El Worker los lee de la ruta pública (`https://api.<dominio>`, ya no por la red del stack) y los guarda 30 segundos; con la caché de la página, un cambio en la administración se ve en un minuto como mucho. Cada isolate de Workers empieza sin nada en memoria, así que lo último leído también queda un día en la caché del centro de datos: si la API no responde (un reinicio al desplegar), se muestran esos precios. Solo si nunca se leyeron, 503.
 - **Despliegue propio.** El job `deploy-web` del CI publica las dos webs al pasar las pruebas de main, aparte de OpenShip, en un par de minutos. En un PR solo comprueba que se arman (`wrangler deploy --dry-run`).
-- **El cambio de entrada es a mano y reversible.** Mientras se cambia, el adaptador de Node sigue siendo el de siempre y el de Cloudflare se elige con `WEB_TARGET=cloudflare`, para que el VPS siga sirviendo hasta mover los dominios (`docs/deployment.md`). Volver atrás es devolver los dominios al túnel.
+- **El cambio de entrada es a mano y reversible.** El Worker toma el dominio con una ruta (`<dominio>/*` y `www.<dominio>/*`, Fail open) delante del túnel, sin tocar el DNS: si falla o pasa los límites, la visita sigue al VPS, que conserva su servidor de Node (el adaptador de Cloudflare se elige con `WEB_TARGET=cloudflare`). Volver atrás es quitar la ruta (`docs/deployment.md`).
 
 ## Alternativas descartadas
 
@@ -26,7 +26,7 @@ Las dos webs de marketing (odentia32.com y latidia72.com, la misma `apps/web`) s
 - Beneficio: un texto llega en minutos sin tocar lo demás, y el VPS deja de servir las dos webs.
 - Sacrificio: cada página que se abre, también desde la caché, cuenta como una petición del plan gratuito (100 000 al día), y también cada enlace que se baja al pasar el puntero (`prefetch`). La caché vale solo en los dominios propios, no en `*.workers.dev`, que sigue abierto (con la dirección canónica del dominio) hasta declarar los dominios. Los registros de visitas son los de Workers (3 días en el plan gratuito), no los del servidor.
 - Las webs se publican antes que la API, que espera el despliegue de OpenShip: un cambio que haga a la web pedir algo nuevo de `/api/public/founders/pricing` debe tolerar unos minutos la API anterior.
-- Queda para la entrega siguiente, ya hecho el cambio: declarar los dominios en `wrangler.jsonc` con `workers_dev: false`, quitar el adaptador de Node, `web` y `latidia-web` del compose y su build del `Dockerfile`.
+- Queda para la entrega siguiente, ya hecho el cambio: declarar las rutas en `wrangler.jsonc` con `workers_dev: false`, quitar el adaptador de Node, `web` y `latidia-web` del compose y su build del `Dockerfile`.
 - Revisar si la CPU de una página pasa los 10 ms, si las visitas superan el plan o si la web necesita la red interna del stack.
 
 ## Referencias
