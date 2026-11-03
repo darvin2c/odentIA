@@ -712,16 +712,29 @@ export function commissionOfValue(value: MoneyFraction, rateBps: number): number
   return asSafeCents((value.num * asCents(rateBps)) / (value.den * 10_000n))
 }
 
-/** Reparte un total entero entre varias filas en proporción; el resto del redondeo va a la última. */
+/**
+ * Reparte un total entero, mayor o igual a cero, entre varias filas en proporción, por
+ * residuo mayor: cada una lleva su parte entera y lo que sobra va de a una unidad a las
+ * que más perdieron al truncar (en empate, a las últimas). Suma exacto y ninguna queda
+ * negativa.
+ */
 export function splitCents(totalCents: number, weights: readonly number[]): number[] {
   const total = asCents(totalCents)
   const sum = weights.reduce((acc, weight) => acc + asCents(weight), 0n)
   if (sum === 0n) return weights.map((_, index) => (index === weights.length - 1 ? totalCents : 0))
-  let given = 0n
-  return weights.map((weight, index) => {
-    if (index === weights.length - 1) return asSafeCents(total - given)
-    const share = roundHalfUp(total * asCents(weight), sum)
-    given += share
-    return asSafeCents(share)
-  })
+  const shares = weights.map((weight) => (total * asCents(weight)) / sum)
+  let left = total - shares.reduce((acc, share) => acc + share, 0n)
+  const lost = weights.map((weight, index) => total * asCents(weight) - (shares[index] ?? 0n) * sum)
+  const order = weights
+    .map((_, index) => index)
+    .sort((a, b) => {
+      const diff = (lost[b] ?? 0n) - (lost[a] ?? 0n)
+      return diff > 0n ? 1 : diff < 0n ? -1 : b - a
+    })
+  for (const index of order) {
+    if (left <= 0n) break
+    shares[index] = (shares[index] ?? 0n) + 1n
+    left -= 1n
+  }
+  return shares.map(asSafeCents)
 }

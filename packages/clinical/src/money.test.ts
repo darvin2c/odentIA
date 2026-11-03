@@ -508,6 +508,21 @@ describe("lo devuelto y la comisión", () => {
     expect(splitCents(100, [1, 1, 1])).toEqual([33, 33, 34])
     expect(splitCents(375000, [50000, 50000])).toEqual([187500, 187500])
     expect(splitCents(100, [0, 0])).toEqual([0, 100])
+    // Ninguna parte queda negativa: el resto va a la que más le falta.
+    expect(splitCents(2, [1, 1, 1, 1])).toEqual([0, 0, 1, 1])
+    expect(splitCents(10, [1, 1, 1, 1, 1, 1])).toEqual([1, 1, 2, 2, 2, 2])
+    expect(splitCents(7, [1, 2, 4])).toEqual([1, 2, 4])
+    expect(splitCents(5, [1, 1, 3])).toEqual([1, 1, 3])
+    expect(splitCents(4, [3, 1, 1])).toEqual([2, 1, 1])
+    for (const [total, weights] of [
+      [1, [5, 5, 5]],
+      [99, [1, 2, 3, 4, 5, 6, 7]],
+      [3, [1_000_000, 1, 1, 1]],
+    ] as const) {
+      const parts = splitCents(total, weights)
+      expect(parts.reduce((acc, part) => acc + part, 0)).toBe(total)
+      expect(parts.every((part) => part >= 0)).toBe(true)
+    }
     const parts = splitCents(375001, [33333, 33333, 33334])
     expect(parts.reduce((acc, part) => acc + part, 0)).toBe(375001)
   })
