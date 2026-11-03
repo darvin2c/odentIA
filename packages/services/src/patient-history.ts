@@ -211,7 +211,11 @@ function pricedTotals(rows: ReadonlyArray<{ priceCents: number | null; currency:
     item.priceCents === null ? [] : [{ currency: item.currency, cents: item.priceCents }],
   )
   return {
-    totals: sumByCurrency(priced).map(({ currency, count, cents }) => ({ currency, count, totalCents: cents })),
+    totals: sumByCurrency(priced).map(({ currency, count, cents }) => ({
+      currency,
+      count,
+      totalCents: cents,
+    })),
     unpriced: rows.length - priced.length,
   }
 }

@@ -713,11 +713,7 @@ export function TicketView({
                       Salen{" "}
                       <strong className="font-semibold">
                         {crossed
-                          ? formatMoney(
-                              voidCashCents(method, ticket),
-                              crossed.currency,
-                              format,
-                            )
+                          ? formatMoney(voidCashCents(method, ticket), crossed.currency, format)
                           : money(method.amountCents)}
                       </strong>{" "}
                       del efectivo de la caja

@@ -478,8 +478,16 @@ export function collectExchange(input: {
   changeGiven: number | null
   valueCents: number | null
 } {
-  const { paidCents, paidCurrency, dueCents, currency, businessCurrency, rate, changeCents, changeIn } =
-    input
+  const {
+    paidCents,
+    paidCurrency,
+    dueCents,
+    currency,
+    businessCurrency,
+    rate,
+    changeCents,
+    changeIn,
+  } = input
   if (rate === null)
     return {
       factor: null,
@@ -490,7 +498,14 @@ export function collectExchange(input: {
     }
   const other = currency === businessCurrency ? paidCurrency : currency
   const factor = exchangeFactor(rate, businessCurrency, other)
-  const cancels = cancelledCents({ paidCents, paidCurrency, dueCents, currency, businessCurrency, factor })
+  const cancels = cancelledCents({
+    paidCents,
+    paidCurrency,
+    dueCents,
+    currency,
+    businessCurrency,
+    factor,
+  })
   const crossChange =
     changeCents !== null && changeCents > 0 && changeIn !== paidCurrency ? changeCents : null
   return {
@@ -500,7 +515,13 @@ export function collectExchange(input: {
     changeGiven:
       crossChange === null
         ? changeCents
-        : convertCents({ amountCents: crossChange, from: paidCurrency, to: changeIn, businessCurrency, factor }),
+        : convertCents({
+            amountCents: crossChange,
+            from: paidCurrency,
+            to: changeIn,
+            businessCurrency,
+            factor,
+          }),
     valueCents: frozenValueCents({
       amountCents: cancels,
       currency,

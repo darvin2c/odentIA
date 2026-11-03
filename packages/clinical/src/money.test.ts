@@ -250,9 +250,15 @@ describe("lo que se dice por moneda", () => {
 
   it("dice cada total y, sin el precio de alguno, lo que falta", () => {
     const words = (cents: number, currency: string) => `${currency} ${cents}`
-    expect(moneyTotalsText([{ currency: "PEN", cents: 300 }, { currency: "USD", cents: 5 }], words)).toBe(
-      "PEN 300 + USD 5",
-    )
+    expect(
+      moneyTotalsText(
+        [
+          { currency: "PEN", cents: 300 },
+          { currency: "USD", cents: 5 },
+        ],
+        words,
+      ),
+    ).toBe("PEN 300 + USD 5")
     expect(moneyTotalsText([{ currency: "PEN", totalCents: null }], words, "falta")).toBe("falta")
   })
 
@@ -290,7 +296,13 @@ describe("la cuenta de un cobro", () => {
   const base = { businessCurrency: "PEN", changeCents: null, changeIn: "PEN" }
 
   it("sin cambio cancela lo pagado en su moneda y no sabe cuánto en otra", () => {
-    const same = { ...base, paidCents: 15_000, paidCurrency: "PEN", dueCents: 15_000, currency: "PEN" }
+    const same = {
+      ...base,
+      paidCents: 15_000,
+      paidCurrency: "PEN",
+      dueCents: 15_000,
+      currency: "PEN",
+    }
     expect(collectExchange({ ...same, rate: null })).toEqual({
       factor: null,
       cancels: 15_000,
@@ -326,7 +338,13 @@ describe("la cuenta de un cobro", () => {
         changeCents: 2_000,
         changeIn: "PEN",
       }),
-    ).toEqual({ factor: "3.75", cancels: 30_000, crossChange: 2_000, changeGiven: 7_500, valueCents: 30_000 })
+    ).toEqual({
+      factor: "3.75",
+      cancels: 30_000,
+      crossChange: 2_000,
+      changeGiven: 7_500,
+      valueCents: 30_000,
+    })
   })
 
   it("el vuelto en la moneda en que pagó no cruza nada", () => {
@@ -463,7 +481,12 @@ describe("lo devuelto y la comisión", () => {
   })
 
   it("la comisión multiplica antes de dividir y coincide con la de una moneda", () => {
-    const commission = (partCents: number, amountCents: number, valueCents: number, rateBps: number) => {
+    const commission = (
+      partCents: number,
+      amountCents: number,
+      valueCents: number,
+      rateBps: number,
+    ) => {
       const value = moneyValue({
         partCents,
         amountCents,

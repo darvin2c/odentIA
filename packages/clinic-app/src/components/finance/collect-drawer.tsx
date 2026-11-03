@@ -391,7 +391,13 @@ function collectFigures(value: CollectDraft, rules: CollectRules) {
     pay === debt
       ? due
       : factor !== null && due > 0
-        ? convertCents({ amountCents: due, from: debt, to: pay, businessCurrency: business, factor })
+        ? convertCents({
+            amountCents: due,
+            from: debt,
+            to: pay,
+            businessCurrency: business,
+            factor,
+          })
         : null
   /** Lo que cancela lo escrito, en la moneda de la deuda. */
   const cancels = amountCents === null || amountCents <= 0 ? null : exchange.cancels
@@ -1211,7 +1217,9 @@ export function CollectDrawer({
   const showOtherCurrency = second !== null && !creditOnly
   const cashLine =
     second !== null && hasCash && pay !== currency && amountCents !== null && amountCents > 0
-      ? figures.crossChange !== null && figures.receivedCents !== null && figures.changeGiven !== null
+      ? figures.crossChange !== null &&
+        figures.receivedCents !== null &&
+        figures.changeGiven !== null
         ? `A la caja de ${word(pay)} entran ${formatMoney(figures.receivedCents, pay, locale)}. De la caja de ${word(figures.changeIn)} salen ${formatMoney(figures.changeGiven, figures.changeIn, locale)}.`
         : `A la caja de ${word(pay)} entran ${formatMoney(figures.cashPortion, pay, locale)}.`
       : null

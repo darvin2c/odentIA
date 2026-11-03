@@ -44,8 +44,14 @@ export function strategySolvers(h: GoldenHelpers): GoldenSolvers {
 
   /** Lo cobrado de lo que atendió cada profesional, mes en curso contra los mismos días del anterior. */
   const professionalsSameDays = async () => {
-    const current = await collectedByProfessional(h.tx, h.org, { start: window.start, end: window.end })
-    const previous = await collectedByProfessional(h.tx, h.org, { start: window.previous.start, end: window.previous.end })
+    const current = await collectedByProfessional(h.tx, h.org, {
+      start: window.start,
+      end: window.end,
+    })
+    const previous = await collectedByProfessional(h.tx, h.org, {
+      start: window.previous.start,
+      end: window.previous.end,
+    })
     const ids = [...new Set([...current, ...previous].map((row) => row.professionalUserId))]
     return ids.map((id) => {
       const now = current.find((row) => row.professionalUserId === id)

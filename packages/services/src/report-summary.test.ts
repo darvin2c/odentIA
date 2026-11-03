@@ -77,14 +77,27 @@ it("te deben hace más de 30 días: lo que se debía en cada momento, descontado
     .insert(patientPayment)
     .values({ organizationId: c.orgId, patientId: c.patientId, branchId: c.branchId, amountCents: 5_000, currency: "PEN", paidAt: day("2026-09-10T15:00:00Z"), methodName: "Efectivo" })
 
-  const [midAugust, endSeptember] = await c.run((tx) => overdueDebtTotalsMany(tx, c.orgId, undefined, [day("2026-08-15T15:00:00Z"), SEPTEMBER.end], "PEN"))
+  const [midAugust, endSeptember] = await c.run((tx) =>
+    overdueDebtTotalsMany(
+      tx,
+      c.orgId,
+      undefined,
+      [day("2026-08-15T15:00:00Z"), SEPTEMBER.end],
+      "PEN",
+    ),
+  )
   // A mediados de agosto la deuda tenía dos semanas: todavía no está vencida.
   expect(midAugust).toEqual({ cents: 0, people: 0 })
   // Al cerrar septiembre: 30 000 del primero + 10 000 del segundo − 5 000 a favor.
   expect(endSeptember).toEqual({ cents: 35_000, people: 1 })
   // Otra sede no tiene sus conceptos.
-  const [elsewhere] = await ownerDb.insert(branch).values({ organizationId: c.orgId, name: "Norte" }).returning()
-  const [other] = await c.run((tx) => overdueDebtTotalsMany(tx, c.orgId, elsewhere!.id, [SEPTEMBER.end], "PEN"))
+  const [elsewhere] = await ownerDb
+    .insert(branch)
+    .values({ organizationId: c.orgId, name: "Norte" })
+    .returning()
+  const [other] = await c.run((tx) =>
+    overdueDebtTotalsMany(tx, c.orgId, elsewhere!.id, [SEPTEMBER.end], "PEN"),
+  )
   expect(other).toEqual({ cents: 0, people: 0 })
 })
 

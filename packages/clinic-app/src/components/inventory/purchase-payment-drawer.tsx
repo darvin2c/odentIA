@@ -9,11 +9,7 @@
  * se dice el cambio, y en la otra, lo que salió (el cambio se calcula solo). Lo que
  * cancela es siempre lo de la compra. Sin ella no aparece nada de esto.
  */
-import {
-  currencyWord,
-  formatMoney,
-  formatMoneyInput,
-} from "@odentia/clinical"
+import { currencyWord, formatMoney, formatMoneyInput } from "@odentia/clinical"
 import { FieldLegend, FieldSet, toast } from "@odentia/ui"
 import { DatePickerButton, FormDrawer, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
@@ -304,9 +300,7 @@ export function PurchasePaymentDrawer({
             business={business}
             locale={locale}
             reportWords={(value) => `En tus reportes cuenta como gasto de Materiales de ${value}.`}
-            field={(name, control) => (
-              <form.AppField name={name}>{() => control}</form.AppField>
-            )}
+            field={(name, control) => <form.AppField name={name}>{() => control}</form.AppField>}
           />
         ) : null}
         {credit > 0 ? (

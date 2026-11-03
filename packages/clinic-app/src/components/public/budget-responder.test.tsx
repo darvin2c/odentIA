@@ -124,7 +124,13 @@ describe("BudgetResponder", () => {
       ...plain,
       items: [
         plain.items[0]!,
-        { ...plain.items[0]!, planItemId: "i2", title: "Corona", lineTotalCents: null, priceCents: null },
+        {
+          ...plain.items[0]!,
+          planItemId: "i2",
+          title: "Corona",
+          lineTotalCents: null,
+          priceCents: null,
+        },
       ],
     })
     expect(page).toContain("Aceptas Por cotizar de")

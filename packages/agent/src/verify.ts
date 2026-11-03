@@ -637,7 +637,8 @@ export function verifyReply(
   const pendingAmounts: AmountMention[] = []
   for (const mention of amounts.mentions) {
     const currencies = currenciesIn(mention)
-    const said = (source: SourceFacts, reading: number) => says(source, reading, currencies, sources)
+    const said = (source: SourceFacts, reading: number) =>
+      says(source, reading, currencies, sources)
     const found = sources.find((source) => mention.value.some((reading) => said(source, reading)))
     if (found) {
       const reading = mention.value.find((value) => said(found, value)) ?? 0
@@ -660,13 +661,23 @@ export function verifyReply(
     // Una suma es de una sola moneda: S/ 150 y USD 1,000 no dan USD 1,150.
     const currencies = currenciesIn(mention)
     const groups = currencies
-      ? currencies.map((currency) => supportedAmounts.filter((part) => part.currencies?.includes(currency)))
+      ? currencies.map((currency) =>
+          supportedAmounts.filter((part) => part.currencies?.includes(currency)),
+        )
       : [supportedAmounts]
     const summed = groups.some((group) =>
-      mention.value.some((reading) => isSumOf(reading, group.map((part) => part.value))),
+      mention.value.some((reading) =>
+        isSumOf(
+          reading,
+          group.map((part) => part.value),
+        ),
+      ),
     )
     const otherCurrency =
-      !summed && sources.some((source) => mention.value.some((reading) => namesCurrency(source.amounts.get(reading))))
+      !summed &&
+      sources.some((source) =>
+        mention.value.some((reading) => namesCurrency(source.amounts.get(reading))),
+      )
     checks.push({
       kind: "precio",
       value: otherCurrency ? `${mention.raw} (ese importe está en otra moneda)` : mention.raw,

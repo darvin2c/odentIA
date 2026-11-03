@@ -10,11 +10,7 @@
  * Con otra moneda en la clínica, un gasto suelto lleva su moneda y su cambio, y
  * pagar una compra deja elegir con qué se paga. Sin ella no aparece nada de esto.
  */
-import {
-  currencyWord,
-  formatMoney,
-  formatMoneyInput,
-} from "@odentia/clinical"
+import { currencyWord, formatMoney, formatMoneyInput } from "@odentia/clinical"
 import {
   Button,
   Checkbox,
@@ -626,9 +622,7 @@ export function ExpenseFormDrawer({
             reportWords={(value) =>
               `En tus reportes cuenta como ${value}${paid.crossed ? "" : ", con este cambio"}.`
             }
-            field={(name, control) => (
-              <form.AppField name={name}>{() => control}</form.AppField>
-            )}
+            field={(name, control) => <form.AppField name={name}>{() => control}</form.AppField>}
           />
         ) : null}
         <form.AppField name="fromCash">

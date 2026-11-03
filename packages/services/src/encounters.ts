@@ -1,9 +1,9 @@
 import {
-  parseVitals,
-  sumByCurrency,
-  vitalsErrors,
-} from "@odentia/clinical"
-import { type AssembledBudget, assembleEncounterBudget, readBillingModes, removeBudgetItems } from "./budgets.js"
+  type AssembledBudget,
+  assembleEncounterBudget,
+  readBillingModes,
+  removeBudgetItems,
+} from "./budgets.js"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import {

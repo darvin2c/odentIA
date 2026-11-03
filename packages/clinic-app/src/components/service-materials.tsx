@@ -6,7 +6,13 @@
  * Inventario lo lee. El costo por vez solo lo ve quien ve precios, y lo
  * calcula el servidor con los últimos precios de compra.
  */
-import { currencyWord, formatExchangeRateInput, formatMoney, moneyTotalsText, unitFor } from "@odentia/clinical"
+import {
+  currencyWord,
+  formatExchangeRateInput,
+  formatMoney,
+  moneyTotalsText,
+  unitFor,
+} from "@odentia/clinical"
 import {
   Button,
   Field,

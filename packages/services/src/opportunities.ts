@@ -28,7 +28,13 @@ import { testContactSql } from "./conversation-state.js"
 import { CHANNEL_NAME } from "./agent-person-memory.js"
 import { requireContact } from "./contacts.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
-import { findOrgCurrency, findOrgLocale, NO_CURRENCY, orgProfileRequired, requireOrgCurrency } from "./locale.js"
+import {
+  findOrgCurrency,
+  findOrgLocale,
+  NO_CURRENCY,
+  orgProfileRequired,
+  requireOrgCurrency,
+} from "./locale.js"
 import { requirePatient } from "./patients.js"
 import { ensureDefaultPipeline, momentRank, type SaleMoment, stageOfMoment } from "./pipelines.js"
 import { createTask, settleTask, updateTask } from "./tasks.js"

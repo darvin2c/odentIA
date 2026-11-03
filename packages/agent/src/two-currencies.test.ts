@@ -112,7 +112,9 @@ describe("lo que lee el modelo con dos monedas", () => {
     const facts = { tools: new Set(["send_reply"]), services: "lista" as const }
     const one = receptionPrompt(ONE, config, facts, texts)
     expect(one).not.toContain(TODAY_VALUE_RULE)
-    expect(receptionPrompt(TWO, config, facts, texts).replace(`${TODAY_VALUE_RULE}\n`, "")).toBe(one)
+    expect(receptionPrompt(TWO, config, facts, texts).replace(`${TODAY_VALUE_RULE}\n`, "")).toBe(
+      one,
+    )
   })
 
   it("lo aproximado no lleva céntimos y solo es de la otra moneda", () => {

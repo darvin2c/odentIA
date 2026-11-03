@@ -92,7 +92,12 @@ export function readExpenseMoney(input: {
         tenderError: error instanceof Error ? error.message : "Revisa lo que salió.",
       }
     }
-    return { ...base, outCents: tender, frozen, body: { tenderCents: tender, tenderCurrency: payIn } }
+    return {
+      ...base,
+      outCents: tender,
+      frozen,
+      body: { tenderCents: tender, tenderCurrency: payIn },
+    }
   }
   if (!needsRate) return nothing
   const { rate, error } = readExchangeRate(rateText, locale)

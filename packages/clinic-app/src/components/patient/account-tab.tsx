@@ -10,7 +10,13 @@
  * saldo a favor. Dinero con `@odentia/clinical`; formato y zona del perfil de
  * la clínica.
  */
-import { currencyWord, documentText, formatMoney, formatMoneyInput, moneyTotalsText } from "@odentia/clinical"
+import {
+  currencyWord,
+  documentText,
+  formatMoney,
+  formatMoneyInput,
+  moneyTotalsText,
+} from "@odentia/clinical"
 import { Badge, Button, cn, Field, FieldDescription, FieldLabel } from "@odentia/ui"
 import {
   DetailDrawer,

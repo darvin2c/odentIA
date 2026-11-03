@@ -2775,7 +2775,9 @@ export async function collectedByProfessional(
   tx: Db,
   orgId: string,
   range: { start: Date; end: Date; branchId?: string },
-): Promise<Array<{ professionalUserId: string; name: string | null; currency: string; cobradoCents: number }>> {
+): Promise<
+  Array<{ professionalUserId: string; name: string | null; currency: string; cobradoCents: number }>
+> {
   const money = await orgMoney(tx, orgId)
   const apps = await collectedApplications(tx, orgId, range.start, range.end, money, {
     branchId: range.branchId,
@@ -2793,7 +2795,11 @@ export async function collectedByProfessional(
     const net = a.appCents - Math.min(a.appCents, refundByApp.get(a.appId) ?? 0)
     const value = orgPartValue(
       net,
-      { amountCents: a.paymentCents, businessCents: a.paymentValueCents, currency: a.paymentCurrency },
+      {
+        amountCents: a.paymentCents,
+        businessCents: a.paymentValueCents,
+        currency: a.paymentCurrency,
+      },
       money,
     )
     const list = profSums.get(a.professionalUserId) ?? []
@@ -2840,7 +2846,11 @@ export async function collectedNetMany(
     [...rows],
     (): Array<{ currency: string; cents: number; taxCents: number }> => [],
     (list, row) => {
-      list.push({ currency: row.currency, cents: safeCents(row.cents), taxCents: safeCents(row.tax) })
+      list.push({
+        currency: row.currency,
+        cents: safeCents(row.cents),
+        taxCents: safeCents(row.tax),
+      })
       return list
     },
   )
@@ -3485,7 +3495,11 @@ async function paymentsOfMovements(tx: Db, orgId: string, movements: CashMove[])
   const ids = [
     ...new Set(movements.map((m) => m.patientPaymentId).filter((id): id is string => id !== null)),
   ]
-  if (!ids.length) return new Map<string, { ticketId: string | null; rate: string | null; createdBy: string | null }>()
+  if (!ids.length)
+    return new Map<
+      string,
+      { ticketId: string | null; rate: string | null; createdBy: string | null }
+    >()
   const rows = await tx
     .select({
       id: patientPayment.id,

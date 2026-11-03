@@ -70,7 +70,10 @@ import {
 } from "../../lib/region-format"
 import { productUi } from "../../product/product-ui"
 import { formatDateTimeShortLocale } from "../../lib/finance-collect"
-import { ClinicProfilePageSkeleton, ClinicProfileSkeleton } from "../../components/skeletons/settings"
+import {
+  ClinicProfilePageSkeleton,
+  ClinicProfileSkeleton,
+} from "../../components/skeletons/settings"
 
 export const Route = createFileRoute("/_org/settings/")({
   // El perfil son datos de configuración: el loader lo trae una vez —también en

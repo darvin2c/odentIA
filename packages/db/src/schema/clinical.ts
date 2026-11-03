@@ -2429,7 +2429,10 @@ export const patientPaymentRefund = pgTable(
     index("payment_refund_payment_idx").on(table.organizationId, table.paymentId),
     check("payment_refund_amount_check", sql`${table.amountCents} > 0`),
     check("payment_refund_tax_check", sql`${table.taxCents} BETWEEN 0 AND ${table.amountCents}`),
-    check("payment_refund_tender_check", sql`${table.tenderCents} IS NULL OR ${table.tenderCents} >= 0`),
+    check(
+      "payment_refund_tender_check",
+      sql`${table.tenderCents} IS NULL OR ${table.tenderCents} >= 0`,
+    ),
   ],
 )
 

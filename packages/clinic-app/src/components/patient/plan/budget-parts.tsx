@@ -46,7 +46,11 @@ export function totalsWords(of: WithTotals, currency: string, money: Money, miss
 export function acceptedWords(of: WithTotals, currency: string, money: Money): string {
   const accepted = totalsOf(of, currency).map((total) => ({ currency: total.currency, totalCents: total.acceptedCents }))
   const some = accepted.filter((total) => total.totalCents !== 0)
-  return moneyTotalsText(some.length > 0 ? some : accepted.slice(0, 1), (cents, unit) => money(cents, unit), AMOUNT_PENDING)
+  return moneyTotalsText(
+    some.length > 0 ? some : accepted.slice(0, 1),
+    (cents, unit) => money(cents, unit),
+    AMOUNT_PENDING,
+  )
 }
 
 /** Importes y fechas con el formato y la zona de la clínica. */
@@ -220,7 +224,10 @@ export function BudgetTotals({
           <dd className="text-right tabular-nums">
             −&nbsp;
             {moneyTotalsText(
-              discounts.map((total) => ({ currency: total.currency, totalCents: total.discountCents })),
+              discounts.map((total) => ({
+                currency: total.currency,
+                totalCents: total.discountCents,
+              })),
               (cents, unit) => figure(cents, unit),
             )}
           </dd>

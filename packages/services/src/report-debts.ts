@@ -108,7 +108,12 @@ export function overdueDebtSql(orgId: string, moments: Date[], days: number, bra
  * cada deuda con su valor al cambio de hoy, nulo si esa moneda ya no tiene factor. Se
  * suma con `round(sum(value))`: nunca se redondea fila por fila.
  */
-export function valuedDebtSql(orgId: string, moments: Date[], days: number, branchId?: string): SQL {
+export function valuedDebtSql(
+  orgId: string,
+  moments: Date[],
+  days: number,
+  branchId?: string,
+): SQL {
   return sql`${overdueDebtSql(orgId, moments, days, branchId)}, valued as (
       select overdue.idx, overdue.patient_id, overdue.currency::text as currency, overdue.owed, overdue.since,
         ${todayValueSql(sql`overdue.owed`, sql`overdue.currency`)} as value

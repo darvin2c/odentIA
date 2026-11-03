@@ -700,7 +700,9 @@ export function supplierBalanceWords(
   if (own > 0 && item.currency) parts.push({ currency: item.currency, cents: own })
   for (const other of item.otherBalances ?? [])
     if (other[which] > 0) parts.push({ currency: other.currency, cents: other[which] })
-  return parts.length > 0 ? moneyTotalsText(parts, (cents, currency) => moneyText(cents, currency)) : null
+  return parts.length > 0
+    ? moneyTotalsText(parts, (cents, currency) => moneyText(cents, currency))
+    : null
 }
 
 const noDots = (text: string) => text.replace(/\./g, "")

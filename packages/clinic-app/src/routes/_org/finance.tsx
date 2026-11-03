@@ -925,9 +925,9 @@ function CashTab({
           ) : state ? (
             closureWords(seen(main))
           ) : null}
-          {views.slice(1).map((box) =>
-            box.state ? <p key={box.code}>{closureWords(box)}</p> : null,
-          )}
+          {views
+            .slice(1)
+            .map((box) => (box.state ? <p key={box.code}>{closureWords(box)}</p> : null))}
         </div>
         <Button variant="link" className="h-auto p-0" onClick={onShowClosures}>
           Cierres
