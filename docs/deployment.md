@@ -152,7 +152,7 @@ Las dos webs de marketing (ADR 0136) se publican como dos Workers del plan gratu
 `deploy-web` del CI las arma con `WEB_TARGET=cloudflare` y su dominio y las publica al
 pasar las pruebas de main; en un PR solo comprueba que se arman. Leen los precios de
 `https://api.<dominio>` y cada página armada se guarda 30 segundos en la caché de
-Cloudflare. Mientras los dominios sigan en el túnel, los servicios `web` y
+Cloudflare; los últimos precios leídos, un día, para cuando la API se reinicia. Mientras los dominios sigan en el túnel, los servicios `web` y
 `latidia-web` del compose siguen atendiendo con el servidor de Node.
 
 Configurar en GitHub, antes de unir:
@@ -179,10 +179,11 @@ Cambio de la entrada, una web a la vez y con un minuto sin servicio:
    y que la segunda visita responde `CF-Cache-Status: HIT`.
 
 Lo mismo con `latidia-web` y `latidia72.com`. Publicar sin `routes` no toca los
-dominios agregados a mano. Vuelta atrás: quitar los Custom Domains y volver a poner
+dominios agregados a mano, y deja abierto `*.workers.dev`, que apunta su dirección
+canónica al dominio. Vuelta atrás: quitar los Custom Domains y volver a poner
 las dos rutas del túnel hacia `http://web:3000` (o `http://latidia-web:3000`).
 Hecho el cambio en las dos, la entrega siguiente declara los dominios en
-`wrangler.jsonc` y retira el servidor de Node, `web` y `latidia-web`.
+`wrangler.jsonc`, cierra `workers.dev` y retira el servidor de Node, `web` y `latidia-web`.
 
 ## Variables: una sola fuente
 

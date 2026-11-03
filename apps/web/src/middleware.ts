@@ -1,19 +1,11 @@
 import { defineMiddleware } from "astro:middleware"
 import type { APIContext, MiddlewareNext } from "astro"
+import { edgeCache, pageKey } from "./lib/edge-cache"
 import { loadPricing } from "./lib/pricing"
 import { servesPage, WORDS } from "./lib/product"
 
 /** Lo que dura una página armada en la caché de Cloudflare: lo mismo que los precios leídos. */
 const EDGE_SECONDS = 30
-
-/**
- * La caché del centro de datos de Cloudflare que atiende la visita; solo existe en Workers
- * (en Node, `pnpm dev` y el VPS, no hay `caches`). Es la API de caché y no la caché delante
- * del Worker: con esa, también cada archivo de la página contaría para el plan gratuito.
- */
-function edgeCache(): Cache | undefined {
-  return (globalThis.caches as (CacheStorage & { default?: Cache }) | undefined)?.default
-}
 
 /**
  * Antes de cada página: la web vive en el dominio raíz (ADR 0046), así que
@@ -35,7 +27,8 @@ export const onRequest = defineMiddleware(async (context, next) => {
     return context.redirect(apex.toString(), 301)
   }
   const edge = context.request.method === "GET" ? edgeCache() : undefined
-  const hit = await edge?.match(context.request)
+  const key = pageKey(url)
+  const hit = await edge?.match(key)
   // Lo que sale de la caché no se puede modificar, y Astro le agrega cabeceras.
   if (hit) return new Response(hit.body, hit)
   const response = await render(context, next)
@@ -46,7 +39,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
   ) {
     const copy = new Response(response.clone().body, response)
     copy.headers.set("Cache-Control", `s-maxage=${EDGE_SECONDS}`)
-    const saving = edge.put(context.request, copy)
+    const saving = edge.put(key, copy)
     const worker = (
       context.locals as { cfContext?: { waitUntil(promise: Promise<unknown>): void } }
     ).cfContext
