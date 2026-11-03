@@ -960,6 +960,9 @@ it("la base no admite dos cobros vivos del mismo pago, aunque sean de otra moned
   const cobro = rows.find((row) => row.kind === "cobro")
   const givenBack = rows.find((row) => row.kind === "vuelto" && row.direction === "egreso")
   if (!cobro || !givenBack) throw new Error("Faltan los movimientos del cobro")
+  // El vuelto dice su ticket como lo dice el resto de la caja: con seis cifras.
+  const number = String(paid.ticket.ticketNumber).padStart(6, "0")
+  expect(givenBack.concept).toBe(`Vuelto · Ticket ${number}`)
   const copy = ({ id: _id, createdAt: _at, ...row }: typeof cobro) => row
   // Otro cobro del mismo pago en la caja de soles, y otro vuelto que sale: ninguno entra.
   await expect(

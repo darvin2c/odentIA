@@ -1695,7 +1695,7 @@ export async function collectCharge(
       keptCurrency: paidIn,
       givenCents: changeGiven ?? 0,
       givenCurrency: changeIn,
-      concept: `Vuelto · Ticket ${ticketNumber}`,
+      concept: `Vuelto · Ticket ${sixDigits(ticketNumber)}`,
     })
   }
   await audit(tx, orgId, actorUserId, "payment_ticket", ticket.id, "ticket.created")
