@@ -472,9 +472,21 @@ describe("la cuenta en SQL y en TypeScript", () => {
       [12_345, 12_345, null, "USD", "3.7591", 777],
       [999, 999, null, "USD", null, 3000],
       [7, 9, 0, "USD", "3.75", 3000],
-      // S/ 333.33… al 3 % son S/ 10.00 justos; dividiendo antes de multiplicar saldrían 9.99.
+      // S/ 333.33… al 3 % son S/ 10.00 justos: un redondeo del valor no puede dejarlos en 9.99.
       [100, 300, 100_000, "USD", "3.75", 300],
+      [1, 3, 10_000, "USD", "3.75", 3],
+      [2_000_000_000, 2_100_000_000, 2_147_483_647, "USD", "3.75", 9999],
     ]
+    // Y sobre importes de todo tipo, con valores que no dan división exacta.
+    let seed = 7
+    const next = (limit: number) => {
+      seed = (seed * 48_271) % 2_147_483_647
+      return seed % limit
+    }
+    for (let index = 0; index < 400; index += 1) {
+      const amount = 1 + next(2_000_000)
+      cases.push([1 + next(amount), amount, 1 + next(8_000_000), "USD", "3.75", 1 + next(10_000)])
+    }
     for (const [part, amount, value, currency, factor, rate] of cases) {
       const [row] = await ownerDb.execute<{ commission: string | null; value: string | null }>(sql`
         select money_commission(${part}::numeric, ${amount}::numeric, ${value}::numeric, ${currency}, 'PEN', 'USD', ${factor}::numeric, ${rate}::numeric)::text as commission,

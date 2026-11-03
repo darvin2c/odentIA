@@ -29,18 +29,14 @@ CREATE FUNCTION public.org_money_value(parte numeric, importe numeric, valor num
   END
 $$;--> statement-breakpoint
 
--- La comisión de una parte de un pago: floor(a × B × tasa ÷ (A × 10000)), multiplicando
--- antes de dividir, igual que `commissionOfValue` de @odentia/clinical (una prueba
--- compara las dos). Sin valor, la misma regla de `money_value`: la moneda del negocio
--- vale lo que dice, su otra moneda sale del factor y otra cualquiera no entra.
+-- La comisión de una parte de un pago: su valor (`org_money_value`) por la tasa, hacia
+-- abajo. Da lo mismo que `commissionOfValue` de @odentia/clinical, que multiplica antes de
+-- dividir (una prueba compara las dos): el valor lleva 30 decimales y lo que una comisión
+-- deja a un lado nunca baja de 1 ÷ (A × 10000).
 CREATE FUNCTION public.money_commission(parte numeric, importe numeric, valor numeric, moneda text, moneda_negocio text, segunda text, factor numeric, tasa numeric) RETURNS numeric
     LANGUAGE sql IMMUTABLE PARALLEL SAFE
     AS $$
-  SELECT CASE
-    WHEN valor IS NOT NULL THEN CASE WHEN importe = 0 THEN 0 ELSE floor((parte * valor * tasa) / (importe * 10000)) END
-    WHEN moneda = moneda_negocio THEN floor((parte * tasa) / 10000)
-    WHEN moneda = segunda AND factor IS NOT NULL THEN floor((parte * factor * tasa) / 10000)
-  END
+  SELECT floor(public.org_money_value(parte, importe, valor, moneda, moneda_negocio, segunda, factor) * tasa / 10000)
 $$;--> statement-breakpoint
 
 -- Quien usa una vista debe poder llamar a sus funciones: también cada llave de Argos.
