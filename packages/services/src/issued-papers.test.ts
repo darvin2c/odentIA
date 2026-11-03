@@ -464,13 +464,16 @@ it("si el almacenamiento tarda, emitir responde igual y el archivo se guarda des
   const f = await clinicalFixture()
   const { storage } = fakeStorage()
   const rx = await issue(f)
+  // La puerta existe desde antes: si armar el PDF tarda más que la espera (el CI
+  // cargado), soltarla antes de que llegue el pedido igual lo deja pasar.
   let release: () => void = () => {}
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
   const slow = {
     ...storage,
     putPatientDocument: async (input: { bytes: Uint8Array }) => {
-      await new Promise<void>((resolve) => {
-        release = resolve
-      })
+      await gate
       return storage.putPatientDocument(input)
     },
   }
