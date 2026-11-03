@@ -26,7 +26,7 @@ Las dos webs de marketing (odentia32.com y latidia72.com, la misma `apps/web`) s
 - Beneficio: un texto llega en minutos sin tocar lo demás, y el VPS deja de servir las dos webs.
 - Sacrificio: cada página que se abre, también desde la caché, cuenta como una petición del plan gratuito (100 000 al día), y también cada enlace que se baja al pasar el puntero (`prefetch`). La caché vale solo en los dominios propios, no en `*.workers.dev`, que sigue abierto (con la dirección canónica del dominio) hasta declarar los dominios. Los registros de visitas son los de Workers (3 días en el plan gratuito), no los del servidor.
 - Las webs se publican antes que la API, que espera el despliegue de OpenShip: un cambio que haga a la web pedir algo nuevo de `/api/public/founders/pricing` debe tolerar unos minutos la API anterior.
-- Queda para la entrega siguiente, ya hecho el cambio: declarar las rutas en `wrangler.jsonc` con `workers_dev: false`, quitar el adaptador de Node, `web` y `latidia-web` del compose y su build del `Dockerfile`.
+- Hecho el cambio (2026-11-03): `workers_dev` apagado, y `web` y `latidia-web` fuera del compose y del `Dockerfile`, con lo que el VPS deja de servir las webs y Fail open ya no tiene respaldo. Las rutas siguen en el panel de Cloudflare, no en `wrangler.jsonc`: wrangler no sabe ponerles Fail open. El adaptador de Node queda solo para `pnpm dev`, que llega a la API de portless.
 - Revisar si la CPU de una página pasa los 10 ms, si las visitas superan el plan o si la web necesita la red interna del stack.
 
 ## Referencias

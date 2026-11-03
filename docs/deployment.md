@@ -27,19 +27,18 @@ no se comparte con OpenShip ni con las demás aplicaciones.
   imagen (`infra/dev/postgres/init`), no las migraciones. Un PostgreSQL
   gestionado necesita crearlos aparte antes de migrar.
 - La entrada pública es Cloudflare Tunnel (servicio `tunnel`, ver «Entrada por
-  Cloudflare Tunnel»). API, admin, panel, platform y web además publican en loopback
-  (API en el host 3101, panel 3010, platform 3011, admin 3012 y web 3013) solo como
-  vuelta atrás por el borde de OpenShip. La web redirige `www.` a la raíz.
-- La web (`apps/web`, ADR 0046 y 0062) arma cada página al servirla con el servidor de
-  Astro (`node ./dist/server/entry.mjs`, `HOST=0.0.0.0`). Lee los precios de la API por la
-  red del stack (`ODENTIA_API_INTERNAL_URL=http://api:3001`) y los guarda 30 segundos; si
-  la API nunca respondió, la página responde 503 en vez de inventar cifras. Su dirección
-  canónica, su mapa del sitio y sus enlaces a `app.` y `api.` salen de `VITE_BASE_DOMAIN`:
-  la canónica es `https://<dominio>`, no `WEB_URL`, que es el panel. El Libro de
-  Reclamaciones y la solicitud de Fundadores envían desde el navegador a `api.`: el origen
-  raíz `https://<dominio>` va en `TRUSTED_ORIGINS` y `COMPLAINTS_EMAIL` es el correo de
-  odentIA que recibe el aviso de cada hoja. `FOUNDERS_EMAIL` es el buzón que lee las respuestas
-  a los correos de Fundadores; sin él, esos correos no prometen que alguien las lea.
+  Cloudflare Tunnel»). API, admin, panel y platform además publican en loopback
+  (API en el host 3101, panel 3010, platform 3011 y admin 3012) solo como vuelta
+  atrás por el borde de OpenShip.
+- Las webs de marketing (`apps/web`, ADR 0046, 0062 y 0136) no corren en el VPS: son
+  Workers de Cloudflare (ver «Las webs en Cloudflare Workers»). Leen los precios de
+  `https://api.<dominio>`; su dirección canónica, su mapa del sitio y sus enlaces a `app.`
+  y `api.` salen de `VITE_BASE_DOMAIN`: la canónica es `https://<dominio>`, no `WEB_URL`,
+  que es el panel. El Libro de Reclamaciones y la solicitud de Fundadores envían desde el
+  navegador a `api.`: el origen raíz `https://<dominio>` va en `TRUSTED_ORIGINS` y
+  `COMPLAINTS_EMAIL` es el correo de odentIA que recibe el aviso de cada hoja.
+  `FOUNDERS_EMAIL` es el buzón que lee las respuestas a los correos de Fundadores; sin él,
+  esos correos no prometen que alguien las lea.
 - `pgdata` es persistente. Un redeploy puede reiniciar PostgreSQL; no debe borrar
   ni sustituir su volumen. No ejecutar `down -v` en producción.
 
@@ -81,7 +80,7 @@ Rutas del túnel («Published application routes»), con el comodín al final:
 | `api.<dominio>` | `http://api:3001` |
 | `app.<dominio>` | `http://panel:3000` |
 | `admin.<dominio>` | `http://admin:3000` |
-| `<dominio>` y `www.<dominio>` | `http://web:3000` (solo de respaldo: las atiende el Worker, ver «Las webs en Cloudflare Workers») |
+| `<dominio>` y `www.<dominio>` | `http://web:3000`, que ya no existe: las atiende el Worker. No se borran: su DNS con proxy es lo que deja correr la ruta del Worker |
 | `*.<dominio>` | `http://platform:3000` |
 
 Cloudflare crea el registro DNS de cada ruta salvo el del comodín: el CNAME `*` a
@@ -139,10 +138,9 @@ los servicios `latidia-panel` (puerto 3014) y `latidia` (3015) del compose, con 
 perfil `latidia`. El túnel lleva `app.latidia72.com` al primero y `*.latidia72.com` al
 segundo; `api.latidia72.com`, a la misma API.
 
-La web de `latidia72.com` es la misma `apps/web` con ese build (`latidia-web`, puerto
-3016, perfil `latidia`): solo inicio, precios, pedir invitación y las páginas legales
-(`apps/web/src/lib/latidia-pages.json`); lo demás responde 404. El túnel lleva
-`latidia72.com` (y `www.`, que redirige) a ese servicio. La lista de espera guarda el
+La web de `latidia72.com` es la misma `apps/web` con ese build (el Worker `latidia-web`):
+solo inicio, precios, pedir invitación y las páginas legales
+(`apps/web/src/lib/latidia-pages.json`); lo demás responde 404. La lista de espera guarda el
 producto del dominio desde el que se pide (decisión 17).
 
 ## Las webs en Cloudflare Workers
@@ -152,8 +150,8 @@ Las dos webs de marketing (ADR 0136) se publican como dos Workers del plan gratu
 `deploy-web` del CI las arma con `WEB_TARGET=cloudflare` y su dominio y las publica al
 pasar las pruebas de main; en un PR solo comprueba que se arman. Leen los precios de
 `https://api.<dominio>` y cada página armada se guarda 30 segundos en la caché de
-Cloudflare; los últimos precios leídos, un día, para cuando la API se reinicia. Mientras los dominios sigan en el túnel, los servicios `web` y
-`latidia-web` del compose siguen atendiendo con el servidor de Node.
+Cloudflare; los últimos precios leídos, un día, para cuando la API se reinicia. Solo
+responden en su dominio: `workers_dev` y `preview_urls` están apagados.
 
 Configurar en GitHub, antes de unir:
 
@@ -178,13 +176,13 @@ Cambio de la entrada, hecho el 2026-11-03 en las dos webs y sin cortar el servic
 4. Comprobar `https://<dominio>/precios`, que `https://www.<dominio>/precios` redirige
    y que la segunda visita responde `CF-Cache-Status: HIT`.
 
-Lo mismo con `latidia-web` y `latidia72.com`. Publicar sin `routes` no toca las
-rutas agregadas a mano, y deja abierto `*.workers.dev`, que apunta su dirección
-canónica al dominio. Vuelta atrás: quitar las rutas del Worker; el túnel sigue llevando
-`<dominio>` a `http://web:3000` (o `http://latidia-web:3000`). Mientras el VPS sirva la
-web, Fail open lo usa de respaldo. La entrega siguiente declara las rutas en
-`wrangler.jsonc`, cierra `workers.dev` y retira el servidor de Node, `web` y
-`latidia-web`; con eso Fail open ya no tiene adónde ir y las rutas del túnel sobran.
+Lo mismo con `latidia-web` y `latidia72.com`. Las rutas viven en el panel de Cloudflare
+y no en `wrangler.jsonc`: wrangler no sabe ponerles Fail open, y publicar sin `routes` no
+las toca. Desde el 2026-11-03 el VPS ya no sirve las webs (sin `web` ni `latidia-web` en el
+compose), así que Fail open lleva a un servicio que no existe: si el Worker falla, la visita
+ve un error igual. Las rutas del túnel de `<dominio>` y `www.<dominio>` se quedan por su DNS.
+Volver al VPS es devolver los dos servicios al compose (el adaptador de Node sigue en
+`apps/web` para `pnpm dev`) y quitar las rutas del Worker.
 
 ## Variables: una sola fuente
 

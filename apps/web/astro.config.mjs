@@ -38,7 +38,7 @@ const pages = pageFiles(pagesDir)
   .map((path) => new URL(path === "/" ? "/" : path, site).toString().replace(/\/$/, path === "/" ? "/" : ""))
 
 // Las dos webs se publican en Cloudflare Workers (ADR 0136) con `WEB_TARGET=cloudflare`; sin él,
-// el servidor de Node de siempre, el de `pnpm dev` y el del VPS mientras se cambia la entrada.
+// el servidor de Node, solo para `pnpm dev`: así la web local llega a la API de portless.
 const workers = process.env.WEB_TARGET === "cloudflare"
 
 export default defineConfig({
