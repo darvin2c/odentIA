@@ -147,6 +147,52 @@ const budgetLinesInput = z
   })
   .strict()
 
+/** Lo que caja lee de cada línea: el documento económico, sin dónde ni cómo se hace. */
+const ECONOMIC_LINE_FIELDS: ReadonlySet<string> = new Set([
+  "id",
+  "organizationId",
+  "patientId",
+  "planId",
+  "budgetId",
+  "optionId",
+  "planItemId",
+  "serviceId",
+  "patientGuide",
+  "title",
+  "scope",
+  "priceCents",
+  "tariffPriceCents",
+  "priceReason",
+  "promotionId",
+  "promotionName",
+  "promotionMode",
+  "billingMode",
+  "sessionsPlanned",
+  "currency",
+  "decision",
+  "createdBy",
+  "createdAt",
+  "updatedAt",
+  "itemStatus",
+  "lineTotalCents",
+  "tariffLineTotalCents",
+  "lineDiscountCents",
+])
+
+/**
+ * Lo que recepción suma: el sitio sin sus caras, como lo dice la hoja de la
+ * persona. El sitio común (ADR 0079) y los campos con que odentIA lo nombra;
+ * un producto sin sitio no los llena.
+ */
+const PERSON_LINE_FIELDS: ReadonlySet<string> = new Set([
+  ...ECONOMIC_LINE_FIELDS,
+  "siteSystem",
+  "siteCode",
+  "toothNumber",
+  "quadrant",
+  "arch",
+])
+
 /**
  * Quien no lee la parte clínica no recibe la ficha dentro del presupuesto. La
  * frontera se aplica aquí, en el servidor, no ocultando columnas en la
@@ -157,23 +203,27 @@ const budgetLinesInput = z
  *   estado; sin superficies ni códigos de procedimiento;
  * - caja, como documento económico: tratamiento, precio, decisión y estado,
  *   sin pieza, superficies, cuadrante, arcada ni códigos.
+ * Pasa solo lo nombrado: un campo nuevo de la línea queda vacío para ellos
+ * hasta que se decida que lo vean. Vacío y no ausente, para que la pantalla
+ * reciba siempre la misma forma.
  */
 function economicView<T extends { items: BudgetLineWithStatus[] }>(
   memberRole: string,
   budget: T,
 ): T {
   if (canAccess(memberRole, "clinical.read")) return budget
-  const asPerson = canAccess(memberRole, "budgets.send")
+  const visible = canAccess(memberRole, "budgets.send") ? PERSON_LINE_FIELDS : ECONOMIC_LINE_FIELDS
   return {
     ...budget,
-    items: budget.items.map((line) => ({
-      ...line,
-      toothNumber: asPerson ? line.toothNumber : null,
-      surfaces: [],
-      quadrant: asPerson ? line.quadrant : null,
-      arch: asPerson ? line.arch : null,
-      codings: [],
-    })),
+    items: budget.items.map(
+      (line) =>
+        Object.fromEntries(
+          Object.entries(line).map(([field, value]) => [
+            field,
+            visible.has(field) ? value : Array.isArray(value) ? [] : null,
+          ]),
+        ) as BudgetLineWithStatus,
+    ),
   }
 }
 

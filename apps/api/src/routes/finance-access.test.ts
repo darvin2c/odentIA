@@ -302,6 +302,12 @@ beforeAll(async () => {
       { memberRole: "clinician" },
     ),
   )
+  // La resina de la 16 en su cara oclusal y con su código: recepción no ve la
+  // cara ni el código, y caja nada del sitio.
+  const coding = [{ system: "CPMS", code: "D2391", version: "2026", display: "Resina" }]
+  await ownerDb.execute(
+    sql`update "treatment_budget_item" set "site_qualifiers" = ${"{occlusal}"}, "codings" = ${JSON.stringify(coding)}::jsonb where "budget_id" = ${budget.id}`,
+  )
   await withOrgContext(appDb, ORG_A, (tx) =>
     deliverBudget(tx, ORG_A, DENT1, PAT_A, budget.id, { memberRole: "clinician" }),
   )
@@ -606,36 +612,55 @@ it("presupuestos: reception lee, envía y anota sin cambiar precios; cashier dec
 
   // Recepción lo ve como lo recibe la persona: el tratamiento con su pieza
   // («Resina · pieza 16»). Caja, como documento económico, sin pieza. Ninguna
-  // recibe superficies ni códigos de procedimiento.
-  type Line = {
+  // recibe superficies ni códigos de procedimiento, tampoco en el sitio común
+  // (ADR 0079: `siteCode`, `siteQualifiers`).
+  type Line = Record<string, unknown> & {
     title: string
     priceCents: number | null
     toothNumber: number | null
     surfaces: string[]
     codings: unknown[]
+    siteSystem: string | null
+    siteCode: string | null
+    siteQualifiers: string[]
   }
-  for (const [role, userId, tooth] of [
-    ["cashier", CASH, null],
-    ["reception", RECEP, 16],
-  ] as const) {
-    const view = (await (await buildApp(role, userId).request(detailPath)).json()) as {
-      data: { totalCents: number | null; items: Line[] }
+  const linesOf = async (role: Parameters<typeof buildApp>[0], userId: string) => {
+    const detail = (await (await buildApp(role, userId).request(detailPath)).json()) as {
+      data: { items: Line[] }
     }
-    expect(view.data.items.length).toBeGreaterThan(0)
-    expect(view.data.items.every((line) => line.title.length > 0 && line.priceCents !== null)).toBe(
-      true,
-    )
-    expect(view.data.items.map((line) => line.toothNumber)).toEqual([tooth])
-    expect(
-      view.data.items.every((line) => line.surfaces.length === 0 && line.codings.length === 0),
-    ).toBe(true)
+    const listed = (await (await buildApp(role, userId).request(listPath)).json()) as {
+      data: Array<{ id: string; items: Line[] }>
+    }
+    return [detail.data.items, listed.data.find((budget) => budget.id === BUDGET1)?.items ?? []]
   }
-  const listed = (await (await buildApp("reception", RECEP).request(listPath)).json()) as {
-    data: Array<{ id: string; items: Line[] }>
+  // Quien atiende lo recibe entero.
+  const [[full]] = await linesOf("clinician", DENT1)
+  expect(full).toMatchObject({ toothNumber: 16, siteCode: "16", siteQualifiers: ["occlusal"] })
+  expect(full?.codings).toHaveLength(1)
+  const clinicalFields = [
+    "siteSystem",
+    "siteCode",
+    "siteQualifiers",
+    "toothNumber",
+    "surfaces",
+    "quadrant",
+    "arch",
+    "codings",
+  ]
+  for (const [role, userId, site] of [
+    ["cashier", CASH, { siteSystem: null, siteCode: null, toothNumber: null }],
+    ["reception", RECEP, { siteSystem: "ISO-3950", siteCode: "16", toothNumber: 16 }],
+  ] as const) {
+    for (const lines of await linesOf(role, userId)) {
+      expect(lines).toHaveLength(1)
+      expect(lines[0]).toMatchObject({ ...site, siteQualifiers: [], surfaces: [], codings: [] })
+      // Todo lo demás llega igual que a quien atiende: un campo económico nuevo
+      // que falte en la lista de la ruta se nota aquí, no vacío en la pantalla.
+      const rest = (line: Line | undefined) =>
+        Object.fromEntries(Object.entries(line ?? {}).filter(([field]) => !clinicalFields.includes(field)))
+      expect(rest(lines[0])).toEqual(rest(full))
+    }
   }
-  expect(
-    listed.data.find((budget) => budget.id === BUDGET1)?.items.map((line) => line.toothNumber),
-  ).toEqual([16])
 
   // Escritura (precios y tratamientos): reception y cashier 403 con cuerpo válido; DENT2 403 sobre plan ajeno.
   const createBody = { planId: PLAN_A, itemIds: [ITEM3] }
@@ -655,9 +680,12 @@ it("presupuestos: reception lee, envía y anota sin cambiar precios; cashier dec
   expect((await postJson(buildApp("clinician", DENT2), decisionPath, decisionBody)).status).toBe(
     403,
   )
-  expect((await postJson(buildApp("reception", RECEP), decisionPath, decisionBody)).status).toBe(
-    200,
-  )
+  const receptionDecision = await postJson(buildApp("reception", RECEP), decisionPath, decisionBody)
+  expect(receptionDecision.status).toBe(200)
+  const decidedByReception = (await receptionDecision.json()) as { data: { items: Line[] } }
+  expect(
+    decidedByReception.data.items.map((line) => [line.siteCode, line.siteQualifiers, line.codings]),
+  ).toEqual([["16", [], []]])
 
   // DENT1 entrega su propio presupuesto (budgets.send); caja no entrega y anota la respuesta.
   const deliverPath = `/patients/${PAT_A}/budgets/${ownId}/deliver`
@@ -671,6 +699,11 @@ it("presupuestos: reception lee, envía y anota sin cambiar precios; cashier dec
     },
   )
   expect(cashierDecision.status).toBe(200)
+  // Lo que responde la decisión tampoco le dice a caja dónde se hace.
+  const decided = (await cashierDecision.json()) as { data: { items: Line[] } }
+  expect(decided.data.items.map((line) => [line.toothNumber, line.siteCode, line.siteQualifiers])).toEqual([
+    [null, null, []],
+  ])
 })
 
 it("comisiones: professional propias sin ajenas ni resultado; cashier sin commissions.read; admin configura", async () => {
