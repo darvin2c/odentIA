@@ -424,6 +424,35 @@ function collectFigures(value: CollectDraft, rules: CollectRules) {
   }
 }
 
+/** Lo que dice el campo del importe. Con otra moneda, también cuánto cancela lo escrito. */
+function amountHelpText(input: {
+  hasSecond: boolean
+  advance: boolean
+  pay: string
+  debt: string
+  cancels: number | null
+  due: number
+  locale: string
+}): string {
+  const { hasSecond, advance, pay, debt, cancels, due, locale } = input
+  const crossed = pay !== debt
+  const inDebt = (cents: number) => formatMoney(cents, debt, locale)
+  if (advance)
+    return hasSecond && crossed && cancels !== null
+      ? `Queda ${inDebt(cancels)} a favor, a cuenta de lo que debe en ${currencyWord(debt, locale)}.`
+      : "Todo queda como saldo a favor."
+  const partly = "Si paga una parte, el resto queda por cobrar."
+  if (!hasSecond) return partly
+  if (due === 0) return "Marca lo que paga."
+  if (cancels === null) return crossed ? "Con el cambio se calcula cuánto cancela." : partly
+  const left = Math.max(0, due - cancels)
+  if (crossed)
+    return left > 0
+      ? `Cancela ${inDebt(cancels)}. Quedan ${inDebt(left)} por cobrar.`
+      : `Cancela ${inDebt(cancels)}: queda al día.`
+  return left > 0 ? `Quedan ${inDebt(left)} por cobrar.` : partly
+}
+
 const lineSchema = z.object({
   key: z.number(),
   methodId: z.string(),
@@ -840,34 +869,30 @@ export function CollectDrawer({
     form,
   ])
 
-  /** Otra moneda de deuda: lo marcado es lo de ella, y lo escrito vuelve a empezar. */
-  const chooseDebt = (code: string) => {
-    form.setFieldValue("debtCurrency", code)
-    form.setFieldValue("payCurrency", code)
+  /** Lo escrito estaba en otra moneda: vuelve a empezar y a seguir a lo marcado. */
+  const resetWritten = () => {
     form.setFieldValue("changeCurrency", "")
     form.setFieldValue("cashReceived", "")
     form.setFieldValue("amount", "")
     form.setFieldValue("payments", [])
-    form.setFieldValue("chargeIds", owedByCurrency.find((row) => row.code === code)?.ids ?? [])
     setAmountTouched(false)
+  }
+
+  /** Otra moneda de deuda: lo marcado es lo de ella. */
+  const chooseDebt = (code: string) => {
+    form.setFieldValue("debtCurrency", code)
+    form.setFieldValue("payCurrency", code)
+    form.setFieldValue("chargeIds", owedByCurrency.find((row) => row.code === code)?.ids ?? [])
+    resetWritten()
     closeInline()
     setRowError(null)
   }
 
-  const chooseDebtWith = (code: string, chargeId: string) => {
-    chooseDebt(code)
-    form.setFieldValue("chargeIds", [chargeId])
-  }
-
-  /** Otra moneda de pago: lo escrito estaba en la anterior y vuelve a seguir a lo marcado. */
+  /** Otra moneda de pago. */
   const choosePay = (code: string) => {
     if (code === figures.pay) return
     form.setFieldValue("payCurrency", code)
-    form.setFieldValue("changeCurrency", "")
-    form.setFieldValue("cashReceived", "")
-    form.setFieldValue("amount", "")
-    form.setFieldValue("payments", [])
-    setAmountTouched(false)
+    resetWritten()
   }
 
   /** Con una línea «automática», esta completa lo que falta para `totalCents`. */
@@ -1095,8 +1120,10 @@ export function CollectDrawer({
         if (charge) {
           addCharge(charge.id)
           // Se vende en su moneda: el cobro va a ella, porque cancela una sola.
-          if (charge.currency !== debt && orgCurrencies.includes(charge.currency))
-            chooseDebtWith(charge.currency, charge.id)
+          if (charge.currency !== debt && orgCurrencies.includes(charge.currency)) {
+            chooseDebt(charge.currency)
+            form.setFieldValue("chargeIds", [charge.id])
+          }
           setSoldHere((current) => ({
             ...current,
             [charge.id]: { quantity, unitPriceCents, branchName: sedeName || "la sede" },
@@ -1166,27 +1193,15 @@ export function CollectDrawer({
 
   // Con otra moneda, lo que cancela se dice junto al importe.
   const word = (code: string) => currencyWord(code, locale)
-  const cancels = figures.cancels
-  const left = cancels === null ? null : Math.max(0, due - cancels)
-  const amountHelp = !second
-    ? values.advance
-      ? "Todo queda como saldo a favor."
-      : "Si paga una parte, el resto queda por cobrar."
-    : values.advance
-      ? pay !== debt && cancels !== null
-        ? `Queda ${formatMoney(cancels, debt, locale)} a favor, a cuenta de lo que debe en ${word(debt)}.`
-        : "Todo queda como saldo a favor."
-      : due === 0
-        ? "Marca lo que paga."
-        : pay !== debt && cancels === null
-          ? "Con el cambio se calcula cuánto cancela."
-          : pay !== debt && cancels !== null
-            ? left !== null && left > 0
-              ? `Cancela ${formatMoney(cancels, debt, locale)}. Quedan ${formatMoney(left, debt, locale)} por cobrar.`
-              : `Cancela ${formatMoney(cancels, debt, locale)}: queda al día.`
-            : left !== null && left > 0
-              ? `Quedan ${formatMoney(left, debt, locale)} por cobrar.`
-              : "Si paga una parte, el resto queda por cobrar."
+  const amountHelp = amountHelpText({
+    hasSecond: second !== null,
+    advance: values.advance,
+    pay,
+    debt,
+    cancels: figures.cancels,
+    due,
+    locale,
+  })
   const rateAuthor = second && orgTimeZone ? rateAuthorWords(second, locale, orgTimeZone) : ""
   const rateHelp = !second
     ? ""

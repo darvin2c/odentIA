@@ -10,7 +10,7 @@
  * saldo a favor. Dinero con `@odentia/clinical`; formato y zona del perfil de
  * la clínica.
  */
-import { currencyWord, documentText, formatMoney, formatMoneyInput } from "@odentia/clinical"
+import { currencyWord, documentText, formatMoney, formatMoneyInput, moneyTotalsText } from "@odentia/clinical"
 import { Badge, Button, cn, Field, FieldDescription, FieldLabel } from "@odentia/ui"
 import {
   DetailDrawer,
@@ -209,10 +209,11 @@ export function AccountTab({
   const branchName = sede.branches.find((item) => item.id === activeBranch)?.name ?? ""
 
   const cents = (text: string) => parseMoneyOrNull(text, orgUnit ?? "", locale ?? "")
-  const refundCurrency = refundUnit ?? orgUnit
-  const refundCentsOf = (text: string) => parseMoneyOrNull(text, refundCurrency ?? "", locale ?? "")
-  const favor =
-    account.data?.data.byCurrency.find((row) => row.currency === refundCurrency)?.aFavor ?? 0
+  const refundCurrency = refundUnit ?? orgUnit ?? ""
+  const refundCentsOf = (text: string) => parseMoneyOrNull(text, refundCurrency, locale ?? "")
+  const favorIn = (code: string) =>
+    account.data?.data.byCurrency.find((row) => row.currency === code)?.aFavor ?? 0
+  const favor = favorIn(refundCurrency)
   const methodList = methods.data?.data ?? []
 
   const refundMutation = useMutation({
@@ -358,8 +359,7 @@ export function AccountTab({
   /** Cifras secundarias, sin símbolo: acompañan a un total que sí lo lleva. */
   const plain = (cents: number, currency = orgUnit) => formatAmountPlain(cents, currency, locale)
   // De qué cobro viene el saldo a favor.
-  const shownRefundUnit = refundUnit ?? orgUnit
-  const creditSources = (data.aFavorOrigen ?? []).filter((row) => row.currency === shownRefundUnit)
+  const creditSources = (data.aFavorOrigen ?? []).filter((row) => row.currency === refundCurrency)
   // Lo que entró en otra moneda se devuelve en esa moneda, sin cambio nuevo.
   const refundOut = creditSources.find((row) => row.tenderCurrency)?.tenderCurrency ?? null
   const creditOrigin =
@@ -371,21 +371,14 @@ export function AccountTab({
   const pending = data.pendiente
   const orgRow = data.byCurrency.find((row) => row.currency === orgUnit)
   // Con otra moneda, las acciones van por moneda: primero lo que debe en la del negocio.
-  const focusRow =
-    second && !(orgRow && orgRow.porCobrar > 0)
-      ? (data.byCurrency.find((row) => row.porCobrar > 0) ?? orgRow)
-      : orgRow
+  const rows = second ? data.byCurrency : orgRow ? [orgRow] : []
+  const focusRow = orgRow?.porCobrar ? orgRow : (rows.find((row) => row.porCobrar > 0) ?? orgRow)
   const focusUnit = focusRow?.currency ?? orgUnit
-  const orgFavor = focusRow?.aFavor ?? 0
-  const orgOwed = focusRow?.porCobrar ?? 0
-  const orgBalance = focusRow?.saldo ?? 0
-  const owing = second ? data.byCurrency.filter((row) => row.saldo > 0) : []
-  const favorRows = second
-    ? data.byCurrency.filter((row) => row.aFavor > 0)
-    : orgRow && orgRow.aFavor > 0
-      ? [orgRow]
-      : []
-  const refundFavor = data.byCurrency.find((row) => row.currency === shownRefundUnit)?.aFavor ?? 0
+  const focusFavor = focusRow?.aFavor ?? 0
+  const focusOwed = focusRow?.porCobrar ?? 0
+  const focusBalance = focusRow?.saldo ?? 0
+  const owing = rows.filter((row) => row.saldo > 0)
+  const favorRows = rows.filter((row) => row.aFavor > 0)
   const balances =
     data.byCurrency.length > 0
       ? data.byCurrency
@@ -400,7 +393,7 @@ export function AccountTab({
   /** Abre lo pedido, ya con la sede decidida; cada formulario empieza limpio. */
   const start = (
     action: "cobrar" | "devolver" | "agregar" | "aplicar",
-    refundFrom: string = shownRefundUnit,
+    refundFrom: string = refundCurrency,
   ) => {
     if (action === "aplicar") applyMutation.mutate(focusUnit !== orgUnit ? focusUnit : undefined)
     if (action === "cobrar") setCobrarOpen(true)
@@ -409,9 +402,8 @@ export function AccountTab({
       setAdding(true)
     }
     if (action === "devolver") {
-      const available = data.byCurrency.find((row) => row.currency === refundFrom)?.aFavor ?? 0
       refundForm.reset({
-        amountText: formatMoneyInput(available, refundFrom, locale),
+        amountText: formatMoneyInput(favorIn(refundFrom), refundFrom, locale),
         paymentMethodId: "",
         reason: "",
       })
@@ -439,7 +431,7 @@ export function AccountTab({
   }
 
   // Lo que tiene a favor cubre lo que debe: la acción es aplicarlo, no cobrar.
-  const coveredByCredit = orgOwed > 0 && orgBalance === 0 && owing.length === 0
+  const coveredByCredit = focusOwed > 0 && focusBalance === 0 && owing.length === 0
   collectOnArrival.current = () => withBranch(coveredByCredit ? "aplicar" : "cobrar")
   const collectButton = (className?: string) =>
     coveredByCredit ? (
@@ -449,10 +441,11 @@ export function AccountTab({
     ) : (
       <Button className={className} onClick={() => withBranch("cobrar")}>
         {owing.length > 0
-          ? `Cobrar ${owing.map((row) => money(row.saldo, row.currency)).join(" + ")}`
-          : orgBalance > 0
-            ? `Cobrar ${money(orgBalance)}`
-            : "Cobrar un adelanto"}
+          ? `Cobrar ${moneyTotalsText(
+              owing.map((row) => ({ currency: row.currency, cents: row.saldo })),
+              money,
+            )}`
+          : "Cobrar un adelanto"}
       </Button>
     )
 
@@ -525,7 +518,7 @@ export function AccountTab({
         ) : null}
         {canWrite ? (
           <div className="mt-4 flex flex-wrap items-center gap-2">
-            {orgOwed > 0 && orgFavor > 0 && !coveredByCredit ? (
+            {focusOwed > 0 && focusFavor > 0 && !coveredByCredit ? (
               <Button
                 variant="outline"
                 disabled={applyMutation.isPending}
@@ -812,7 +805,7 @@ export function AccountTab({
               <p className="break-words font-heading text-lg font-semibold">{patientName}</p>
             ) : null}
             <p className="text-sm text-muted-foreground">
-              Tiene {money(refundFavor, shownRefundUnit)} a favor{creditOrigin}
+              Tiene {money(favor, refundCurrency)} a favor{creditOrigin}
             </p>
           </div>
         }
@@ -821,7 +814,7 @@ export function AccountTab({
         submitDisabled={!refundChoice}
         submitLabel={
           refundCents !== null && refundCents > 0
-            ? `Devolver ${money(refundCents, shownRefundUnit)}`
+            ? `Devolver ${money(refundCents, refundCurrency)}`
             : "Devolver"
         }
         onClose={() => {
@@ -840,7 +833,7 @@ export function AccountTab({
                     id={control.id}
                     invalid={control.invalid}
                     aria-describedby={control.describedBy}
-                    currency={shownRefundUnit}
+                    currency={refundCurrency}
                     locale={locale}
                     value={field.state.value}
                     onChange={field.handleChange}
@@ -881,7 +874,7 @@ export function AccountTab({
           <refundForm.AppField name="reason">
             {(field) => <field.TextareaField label="Motivo" rows={2} maxLength={MAX_REASON} />}
           </refundForm.AppField>
-          {refundOut && refundOut !== shownRefundUnit ? (
+          {refundOut && refundOut !== refundCurrency ? (
             <p className="rounded-xl bg-muted/60 px-3 py-2 text-sm">
               Sale en {currencyWord(refundOut, locale)}, como entró y en la misma proporción: sin
               cambio nuevo.
@@ -892,7 +885,7 @@ export function AccountTab({
             <p className="flex items-center justify-between gap-3 rounded-xl bg-muted/60 px-3 py-2 text-sm">
               <span>Salen del efectivo de la caja{branchName ? ` de ${branchName}` : ""}</span>
               <span className="font-semibold tabular-nums">
-                {money(refundCents, shownRefundUnit)}
+                {money(refundCents, refundCurrency)}
               </span>
             </p>
           ) : refundChoice ? (
