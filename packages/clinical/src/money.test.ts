@@ -347,6 +347,22 @@ describe("la cuenta de un cobro", () => {
     })
   })
 
+  it("el vuelto en la otra moneda de un cobro en la del negocio usa el cambio de esa otra", () => {
+    // Pesos sin decimales: 5,000 pesos de vuelto a 950 por dólar son USD 5.26.
+    expect(
+      collectExchange({
+        paidCents: 95_000,
+        paidCurrency: "CLP",
+        dueCents: 90_000,
+        currency: "CLP",
+        businessCurrency: "CLP",
+        rate: "950",
+        changeCents: 5_000,
+        changeIn: "USD",
+      }),
+    ).toMatchObject({ factor: "9.5", crossChange: 5_000, changeGiven: 526 })
+  })
+
   it("el vuelto en la moneda en que pagó no cruza nada", () => {
     const figures = collectExchange({
       ...base,

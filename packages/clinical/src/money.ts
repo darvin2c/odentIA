@@ -496,7 +496,9 @@ export function collectExchange(input: {
       changeGiven: changeCents,
       valueCents: null,
     }
-  const other = currency === businessCurrency ? paidCurrency : currency
+  // La otra moneda del cobro: la de la deuda, la del pago o, si las dos son la del negocio, la del vuelto.
+  const other =
+    [currency, paidCurrency, changeIn].find((code) => code !== businessCurrency) ?? businessCurrency
   const factor = exchangeFactor(rate, businessCurrency, other)
   const cancels = cancelledCents({
     paidCents,
