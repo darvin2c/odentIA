@@ -81,7 +81,7 @@ Rutas del túnel («Published application routes»), con el comodín al final:
 | `api.<dominio>` | `http://api:3001` |
 | `app.<dominio>` | `http://panel:3000` |
 | `admin.<dominio>` | `http://admin:3000` |
-| `<dominio>` y `www.<dominio>` | `http://web:3000` (hasta pasarlas a Workers, ver «Las webs en Cloudflare Workers») |
+| `<dominio>` y `www.<dominio>` | `http://web:3000` (solo de respaldo: las atiende el Worker, ver «Las webs en Cloudflare Workers») |
 | `*.<dominio>` | `http://platform:3000` |
 
 Cloudflare crea el registro DNS de cada ruta salvo el del comodín: el CNAME `*` a
@@ -164,26 +164,27 @@ Configurar en GitHub, antes de unir:
 - En Cloudflare, Workers › Overview: el subdominio `workers.dev` de la cuenta, si
   nunca se eligió; sin él el primer despliegue falla.
 
-Cambio de la entrada, una web a la vez y con un minuto sin servicio:
+Cambio de la entrada, hecho el 2026-11-03 en las dos webs y sin cortar el servicio:
 
 1. Con el primer despliegue, abrir `odentia-web.<subdominio>.workers.dev`: inicio,
    precios con sus cifras, una página que no es de latidIA en la de latidIA.
    Ahí la caché no actúa, así que lo que mide es lo peor.
-2. En Workers › `odentia-web` › Metrics, la CPU por petición: la mediana y el p99,
-   por debajo de 10 ms. Si no, quedarse en el túnel y decidir antes de seguir.
-3. En el túnel, quitar las rutas `<dominio>` y `www.<dominio>`, y borrar sus registros
-   DNS si quedan.
-4. En Workers › `odentia-web` › Settings › Domains & Routes, agregar los dos como
-   Custom Domain. Cloudflare crea su DNS y su certificado.
-5. Comprobar `https://<dominio>/precios`, que `https://www.<dominio>/precios` redirige
+2. En Workers › `odentia-web` › Metrics, la CPU por petición. Medido: mediana 2,3 ms,
+   p90 21 ms, sin cortes por CPU.
+3. En Workers › `odentia-web` › Domains › Add Route, zona `<dominio>`, dos rutas:
+   `<dominio>/*` y `www.<dominio>/*` (nunca el `*.<dominio>/*` que propone, que tomaría
+   `app.`, `api.`, `admin.` y las clínicas), con **Fail open**: si el Worker falla o pasa
+   los límites del plan, la visita sigue por el túnel al VPS. El DNS y el túnel no cambian.
+4. Comprobar `https://<dominio>/precios`, que `https://www.<dominio>/precios` redirige
    y que la segunda visita responde `CF-Cache-Status: HIT`.
 
-Lo mismo con `latidia-web` y `latidia72.com`. Publicar sin `routes` no toca los
-dominios agregados a mano, y deja abierto `*.workers.dev`, que apunta su dirección
-canónica al dominio. Vuelta atrás: quitar los Custom Domains y volver a poner
-las dos rutas del túnel hacia `http://web:3000` (o `http://latidia-web:3000`).
-Hecho el cambio en las dos, la entrega siguiente declara los dominios en
-`wrangler.jsonc`, cierra `workers.dev` y retira el servidor de Node, `web` y `latidia-web`.
+Lo mismo con `latidia-web` y `latidia72.com`. Publicar sin `routes` no toca las
+rutas agregadas a mano, y deja abierto `*.workers.dev`, que apunta su dirección
+canónica al dominio. Vuelta atrás: quitar las rutas del Worker; el túnel sigue llevando
+`<dominio>` a `http://web:3000` (o `http://latidia-web:3000`). Mientras el VPS sirva la
+web, Fail open lo usa de respaldo. La entrega siguiente declara las rutas en
+`wrangler.jsonc`, cierra `workers.dev` y retira el servidor de Node, `web` y
+`latidia-web`; con eso Fail open ya no tiene adónde ir y las rutas del túnel sobran.
 
 ## Variables: una sola fuente
 
