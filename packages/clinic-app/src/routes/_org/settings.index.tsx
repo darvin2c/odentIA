@@ -1,13 +1,12 @@
 import {
   clinicalProfileFor,
-  currencySymbol,
   DIAGNOSIS_SYSTEM_INFO,
   formatExchangeRateInput,
   formatMoney,
   parseExchangeRate,
   readExchangeRate,
 } from "@odentia/clinical"
-import { Button, InputGroup, InputGroupAddon, InputGroupInput, InputGroupText, toast } from "@odentia/ui"
+import { Button, toast } from "@odentia/ui"
 import {
   common,
   countryOptions,
@@ -29,6 +28,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi } from "@tanstack/react-router"
 import { useEffect, useMemo, useState } from "react"
 import { z } from "zod"
+import { RateField } from "../../components/finance/rate-input"
 import { ClinicLogoSettings } from "../../components/settings/clinic-logo"
 import { DiagnosisListSettings } from "../../components/settings/diagnosis-list"
 import { capitalize } from "../../components/official-code-field"
@@ -596,8 +596,8 @@ function ProfileForm({
         />
         {secondCurrency ? (
           <form.AppField name="exchangeRate">
-            {(field) => (
-              <field.Control
+            {() => (
+              <RateField
                 id="org-exchange-rate"
                 label="Cambio de hoy"
                 description={exchangeRateHelp({
@@ -605,29 +605,11 @@ function ProfileForm({
                   locale,
                   timezone,
                 })}
-              >
-                {(control) => (
-                  <InputGroup className="max-w-72">
-                    <InputGroupAddon>
-                      <InputGroupText>{currencySymbol(currency, locale || "es")}</InputGroupText>
-                    </InputGroupAddon>
-                    <InputGroupInput
-                      id={control.id}
-                      name={control.name}
-                      aria-invalid={control.invalid || undefined}
-                      aria-describedby={control.describedBy}
-                      autoComplete="off"
-                      inputMode="decimal"
-                      value={field.state.value}
-                      onBlur={control.onBlur}
-                      onChange={(event) => field.handleChange(event.target.value)}
-                    />
-                    <InputGroupAddon align="inline-end">
-                      <InputGroupText>{`por ${secondCurrency} 1`}</InputGroupText>
-                    </InputGroupAddon>
-                  </InputGroup>
-                )}
-              </field.Control>
+                className="max-w-72"
+                business={currency}
+                other={secondCurrency}
+                locale={locale || "es"}
+              />
             )}
           </form.AppField>
         ) : null}

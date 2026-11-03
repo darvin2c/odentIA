@@ -11,7 +11,6 @@
  */
 import {
   currencyWord,
-  formatExchangeRateInput,
   formatMoney,
   formatMoneyInput,
 } from "@odentia/clinical"
@@ -21,15 +20,14 @@ import { useStore } from "@tanstack/react-form"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
-import { expenseRateWords, readExpenseMoney } from "../../lib/expense-exchange"
+import { readExpenseMoney } from "../../lib/expense-exchange"
 import { currencyChoices } from "../../lib/product-words"
 import { cashFormMessage, errorCode, formatDayKey, invalidateFinance, noonOf, parseAmount, payPurchaseApi, todayIn, useCashState } from "../../lib/finance-cash"
-import { rateIsFar } from "../../lib/finance-collect"
 import type { PurchaseOrderDetail } from "../../lib/inventory"
-import { orgSecondCurrency, useOrgProfile } from "../../lib/org"
+import { useOrgProfile, useTodayRate } from "../../lib/org"
 import { purchaseOrderLabel } from "../../lib/reports"
 import { ChoiceButtons } from "../choice-buttons"
-import { RateInput } from "../finance/rate-input"
+import { ExpenseMoneyFields } from "../finance/expense-money-fields"
 import { MoneyInput } from "./fields"
 
 interface PaymentValues {
@@ -72,10 +70,9 @@ export function PurchasePaymentDrawer({
 }) {
   const queryClient = useQueryClient()
   const profile = useOrgProfile().data
-  const second = orgSecondCurrency(profile)
+  const { second, todayRate } = useTodayRate(locale)
   const business = profile?.currency ?? order.currency
   const currencies = second ? [business, second.currency] : []
-  const todayRate = second ? formatExchangeRateInput(second.rate, locale) : ""
   const uid = useId()
   // Con qué se paga: decide de qué caja se habla. Sin otra moneda es siempre la de siempre.
   const [payIn, setPayIn] = useState(order.currency)
@@ -299,67 +296,18 @@ export function PurchasePaymentDrawer({
             />
           </FieldSet>
         ) : null}
-        {second && figures.crossed ? (
-          <form.AppField name="tender">
-            {(field) => (
-              <field.Control
-                id="pago-salio"
-                label="Lo que salió"
-                description="Escríbelo como sale en tu extracto. El cambio se calcula solo."
-              >
-                {(control) => (
-                  <MoneyInput
-                    id={control.id}
-                    currency={payIn}
-                    value={field.state.value}
-                    invalid={control.invalid}
-                    aria-describedby={control.describedBy}
-                    onChange={(next) => field.handleChange(next)}
-                  />
-                )}
-              </field.Control>
+        {second ? (
+          <ExpenseMoneyFields
+            second={second}
+            money={figures}
+            currency={order.currency}
+            business={business}
+            locale={locale}
+            reportWords={(value) => `En tus reportes cuenta como gasto de Materiales de ${value}.`}
+            field={(name, control) => (
+              <form.AppField name={name}>{() => control}</form.AppField>
             )}
-          </form.AppField>
-        ) : null}
-        {second && figures.needsRate ? (
-          <form.AppField name="rate">
-            {(field) => (
-              <field.Control
-                id="pago-cambio"
-                label="Cambio"
-                description="No cambia lo que pagas: es para saber cuánto vale en tus reportes."
-              >
-                {(control) => (
-                  <RateInput
-                    id={control.id}
-                    business={business}
-                    other={second.currency}
-                    locale={locale}
-                    value={field.state.value}
-                    invalid={control.invalid}
-                    aria-describedby={control.describedBy}
-                    onBlur={control.onBlur}
-                    onChange={(next) => field.handleChange(next)}
-                  />
-                )}
-              </field.Control>
-            )}
-          </form.AppField>
-        ) : null}
-        {second && figures.frozen ? (
-          <p role="status" className="rounded-lg bg-muted/50 px-3 py-2 text-sm">
-            {figures.crossed
-              ? `Cambio: ${expenseRateWords({ exchangeRate: figures.frozen.exchangeRate, currency: order.currency, tenderCurrency: payIn }, business, locale)}. `
-              : ""}
-            En tus reportes cuenta como gasto de Materiales de{" "}
-            {formatMoney(figures.frozen.businessCents, business, locale)}.
-          </p>
-        ) : null}
-        {second && figures.frozen && rateIsFar(figures.frozen.exchangeRate, second.rate) ? (
-          <p role="status" className="rounded-xl bg-warning-soft px-3 py-2 text-sm font-medium">
-            Es muy distinto del cambio de hoy ({formatExchangeRateInput(second.rate, locale)}).
-            Revísalo: este cambio queda guardado.
-          </p>
+          />
         ) : null}
         {credit > 0 ? (
           <form.AppField

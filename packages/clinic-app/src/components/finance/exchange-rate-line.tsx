@@ -17,7 +17,7 @@ import { usePermission } from "../../lib/crm"
 import { financeFormMessage } from "../../lib/finance"
 import { rateAuthorWords } from "../../lib/finance-collect"
 import { saveExchangeRate, useOrgSecondCurrency } from "../../lib/org"
-import { RateInput } from "./rate-input"
+import { RateField } from "./rate-input"
 
 export function ExchangeRateLine({
   business,
@@ -96,23 +96,7 @@ export function ExchangeRateLine({
         }}
       >
         <form.AppField name="rate">
-          {(field) => (
-            <field.Control label="Cambio">
-              {(control) => (
-                <RateInput
-                  id={control.id}
-                  business={business}
-                  other={second.currency}
-                  locale={locale}
-                  value={field.state.value}
-                  invalid={control.invalid}
-                  aria-describedby={control.describedBy}
-                  onBlur={control.onBlur}
-                  onChange={(value) => field.handleChange(value)}
-                />
-              )}
-            </field.Control>
-          )}
+          {() => <RateField business={business} other={second.currency} locale={locale} />}
         </form.AppField>
       </FormDrawer>
     </>

@@ -94,7 +94,6 @@ import {
   type PromotionItem,
   type PromotionOption,
   rateAuthorWords,
-  rateIsFar,
   type SaleProduct,
   voidChargeApi,
 } from "../../lib/finance-collect"
@@ -104,7 +103,7 @@ import { currencyChoices } from "../../lib/product-words"
 import { ChoiceButtons } from "../choice-buttons"
 import { PersonPicker } from "../person-picker"
 import { ChoiceSelect } from "../ui/choice-select"
-import { RateInput } from "./rate-input"
+import { RateFarNote, RateField } from "./rate-input"
 
 /** Lo más que se vende de un producto en un concepto (el tope del servidor). */
 const SALE_QUANTITY_MAX = 9999
@@ -1194,9 +1193,6 @@ export function CollectDrawer({
     : pay !== debt
       ? `Cambio de hoy: ${formatExchangeRateInput(second.rate, locale)}${rateAuthor ? `, ${rateAuthor}` : ""}. Si lo cambias aquí, vale solo para este cobro.`
       : "No cambia lo que paga: es para saber cuánto vale en tus reportes."
-  // Muy distinto del de hoy: se avisa, porque queda en el ticket, y nunca se frena.
-  const rateFar =
-    second !== null && figures.rateText !== null && rateIsFar(figures.rateText, second.rate)
   const showOtherCurrency = second !== null && !creditOnly
   const cashLine =
     second !== null && hasCash && pay !== currency && amountCents !== null && amountCents > 0
@@ -1739,37 +1735,23 @@ export function CollectDrawer({
                     {figures.needsRate ? (
                       <div className="flex flex-col gap-2">
                         <form.AppField name="rate">
-                          {(field) => (
-                            <field.Control
-                              label="Cambio"
+                          {() => (
+                            <RateField
                               id={`${uid}-cambio`}
                               description={rateHelp}
-                            >
-                              {(control) => (
-                                <RateInput
-                                  id={control.id}
-                                  business={currency}
-                                  other={second.currency}
-                                  locale={locale}
-                                  value={field.state.value}
-                                  invalid={control.invalid}
-                                  aria-describedby={control.describedBy}
-                                  onBlur={control.onBlur}
-                                  onChange={(value) => field.handleChange(value)}
-                                />
-                              )}
-                            </field.Control>
+                              business={currency}
+                              other={second.currency}
+                              locale={locale}
+                            />
                           )}
                         </form.AppField>
-                        {rateFar ? (
-                          <p
-                            role="status"
-                            className="rounded-xl bg-warning-soft px-3 py-2 text-sm font-medium"
-                          >
-                            Es muy distinto del cambio de hoy (
-                            {formatExchangeRateInput(second.rate, locale)}). Revísalo: este cambio
-                            queda en el ticket.
-                          </p>
+                        {figures.rateText ? (
+                          <RateFarNote
+                            rate={figures.rateText}
+                            today={second.rate}
+                            locale={locale}
+                            keptIn="en el ticket"
+                          />
                         ) : null}
                       </div>
                     ) : null}

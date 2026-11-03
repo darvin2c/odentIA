@@ -4,6 +4,7 @@ import {
   clinicalProfileFor,
   DIAGNOSIS_SYSTEM_INFO,
   type DiagnosisSystemInfo,
+  formatExchangeRateInput,
   isDiagnosisSystem,
   type OrgTaxes,
   resolveOrgTaxes,
@@ -104,6 +105,15 @@ export function orgSecondCurrency(profile: OrgProfile | null | undefined): OrgSe
 /** Lo mismo con el perfil de la sesión, ya cacheado. */
 export function useOrgSecondCurrency(): OrgSecondCurrency | null {
   return orgSecondCurrency(useOrgProfile().data)
+}
+
+/** La otra moneda y el cambio de hoy como se escribe en un campo, para proponerlo. */
+export function useTodayRate(locale: string): {
+  second: OrgSecondCurrency | null
+  todayRate: string
+} {
+  const second = useOrgSecondCurrency()
+  return { second, todayRate: second ? formatExchangeRateInput(second.rate, locale) : "" }
 }
 
 /** Las dos cifras de impuesto que valen hoy para la clínica (o null si su país no tiene impuesto que separar). */
