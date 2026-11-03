@@ -502,9 +502,7 @@ function collectSchema(rules: () => CollectRules) {
       if (figures.needsRate && !figures.rateText) {
         issue(
           ["rate"],
-          value.rate.trim()
-            ? "Escribe el cambio con números, por ejemplo 3.75."
-            : "Escribe el cambio.",
+          `${readExchangeRate(value.rate, locale).error ?? "Escribe el cambio"}.`,
         )
       }
       const amountCents = figures.amountCents

@@ -265,6 +265,10 @@ describe("lo que se dice por moneda", () => {
   it("lee el cambio sin excepción", () => {
     expect(readExchangeRate("3,75", "es-CL")).toEqual({ rate: "3.75" })
     expect(readExchangeRate("", "es-PE").error).toBe("Escribe el cambio")
+    // Cero o menos son números: lo que falla es que no es mayor que cero.
+    for (const raw of ["0", "0,00", "-3,75", " -1"])
+      expect(readExchangeRate(raw, "es-CL").error, raw).toBe("El cambio debe ser mayor que 0")
+    expect(() => normalizeExchangeRate("-3.75")).toThrow("El cambio debe ser mayor que 0")
   })
 
   it("la suma por denominador da lo mismo que multiplicarlos todos", () => {

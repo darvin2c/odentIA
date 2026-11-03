@@ -241,6 +241,7 @@ export interface MoneyFraction {
 }
 
 const RATE_MAX_INTEGER_DIGITS = 9
+const RATE_NOT_POSITIVE = "El cambio debe ser mayor que 0"
 const RATE_MAX_DECIMALS = 10
 
 /** Mitad hacia arriba, como `round(numeric)` de PostgreSQL (se aleja del cero). */
@@ -275,6 +276,8 @@ function decimalFraction(text: string): MoneyFraction {
  * «3.75»), mayor que cero. Es la que se guarda y la que entra en la huella de un cobro.
  */
 export function normalizeExchangeRate(value: string): string {
+  // Un cambio negativo es un número: lo que falla es que no es mayor que cero.
+  if (/^-\s*\d/.test(value.trim())) throw new Error(RATE_NOT_POSITIVE)
   const match = /^(\d+)(?:\.(\d+))?$/.exec(value.trim())
   if (!match) throw new Error("Escribe el cambio con números, por ejemplo 3.75")
   const integer = (match[1] ?? "").replace(/^0+(?=\d)/, "")
@@ -282,12 +285,13 @@ export function normalizeExchangeRate(value: string): string {
   if (integer.length > RATE_MAX_INTEGER_DIGITS || fraction.length > RATE_MAX_DECIMALS) {
     throw new Error(`El cambio admite hasta ${RATE_MAX_DECIMALS} decimales y no pasa de 9 cifras`)
   }
-  if (/^0*$/.test(integer + fraction)) throw new Error("El cambio debe ser mayor que 0")
+  if (/^0*$/.test(integer + fraction)) throw new Error(RATE_NOT_POSITIVE)
   return fraction ? `${integer}.${fraction}` : integer
 }
 
 /** Lo que se escribe en pantalla, con el formato de la clínica, en su forma única. */
 export function parseExchangeRate(raw: string, locale: string): string {
+  if (/^-\s*\d/.test(raw.trim())) throw new Error(RATE_NOT_POSITIVE)
   const { integer, fraction } = readDecimal(raw, locale, {
     empty: "Escribe el cambio",
     invalid: "Escribe el cambio con números, por ejemplo 3.75",
