@@ -902,6 +902,39 @@ it("una moneda ajena a las dos de la clínica se rechaza con su campo", async ()
   ).rejects.toMatchObject({ fields: { changeCurrency: expect.any(String) } })
 })
 
+it("la caja solo se mueve en las monedas de la clínica", async () => {
+  const c = await clinic()
+  const third = { fields: { currency: expect.stringContaining("PEN y USD") } }
+  await expect(
+    c.run((tx) =>
+      addCashMovement(tx, c.orgId, c.actor, {
+        branchId: c.site.id,
+        kind: "aporte",
+        amountCents: 1000,
+        concept: "Fondo",
+        currency: "EUR",
+      }),
+    ),
+  ).rejects.toMatchObject(third)
+  await expect(c.close("EUR", 0)).rejects.toMatchObject(third)
+  // Nada quedó en euros: la clínica no tiene ninguna caja en EUR.
+  const shifts = await ownerDb
+    .select({ currency: cashShift.currency })
+    .from(cashShift)
+    .where(eq(cashShift.organizationId, c.orgId))
+  expect(shifts.map((row) => row.currency.trim())).not.toContain("EUR")
+  // La segunda sí, como siempre.
+  await c.run((tx) =>
+    addCashMovement(tx, c.orgId, c.actor, {
+      branchId: c.site.id,
+      kind: "aporte",
+      amountCents: 1000,
+      concept: "Fondo",
+      currency: "USD",
+    }),
+  )
+})
+
 it("conceptos de dos monedas no van en un cobro: cada moneda lleva su ticket", async () => {
   const c = await clinic()
   const dollars = await c.charge(100000, "USD")

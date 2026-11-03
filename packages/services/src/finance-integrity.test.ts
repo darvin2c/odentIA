@@ -506,10 +506,25 @@ async function crossedPayment(f: Fixture) {
   return { branchId, paid }
 }
 
-const closeBox = (f: Fixture, branchId: string, currency: string) =>
-  f.run((tx) =>
-    closeCashWindow(tx, "org_a", f.actor, { branchId, currency, countedCents: 0, retainedCents: 0, deliveredCents: 0 }),
+/**
+ * La clínica de estas pruebas cobra en una moneda y su caja de dólares se arma a mano:
+ * se cierra por su ventana, como la cierra la pantalla.
+ */
+async function openShiftOf(branchId: string, currency: string): Promise<string> {
+  const [open] = await ownerDb
+    .select({ id: cashShift.id })
+    .from(cashShift)
+    .where(and(eq(cashShift.organizationId, "org_a"), eq(cashShift.branchId, branchId), eq(cashShift.currency, currency), eq(cashShift.status, "abierta")))
+  if (!open) throw new Error(`No hay caja abierta en ${currency}`)
+  return open.id
+}
+
+const closeBox = async (f: Fixture, branchId: string, currency: string) => {
+  const shiftId = await openShiftOf(branchId, currency)
+  return f.run((tx) =>
+    closeCashWindow(tx, "org_a", f.actor, { branchId, shiftId, countedCents: 0, retainedCents: 0, deliveredCents: 0 }),
   )
+}
 
 it("anular después del cierre saca lo que entró a la caja, en su moneda, no lo que cancela el pago", async () => {
   const f = await clinicalFixture()
@@ -669,10 +684,12 @@ it("el vuelto entra en cada caja con su signo y el desglose sigue sumando el esp
   // Una fila por tipo y moneda: el mismo vuelto no entra dos veces en una caja.
   await expect(ownerDb.insert(cashMovement).values(change(dollars.id, "ingreso", 2000, "USD"))).rejects.toThrow()
 
-  const closeWith = (currency: string, counted: number) =>
-    f.run((tx) =>
-      closeCashWindow(tx, "org_a", f.actor, { branchId, currency, countedCents: counted, retainedCents: 0, deliveredCents: counted }),
+  const closeWith = async (currency: string, counted: number) => {
+    const shiftId = await openShiftOf(branchId, currency)
+    return f.run((tx) =>
+      closeCashWindow(tx, "org_a", f.actor, { branchId, shiftId, countedCents: counted, retainedCents: 0, deliveredCents: counted }),
     )
+  }
   const closedUsd = await closeWith("USD", 10000)
   const closedPen = await closeWith("PEN", 2500)
   // USD 80 del cobro más USD 20; S/ 100 de fondo menos S/ 75.

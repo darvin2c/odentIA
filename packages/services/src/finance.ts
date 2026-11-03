@@ -188,6 +188,26 @@ export async function lockOrgMoney(tx: Db, orgId: string) {
   return profile ?? null
 }
 
+/**
+ * La moneda en que se mueve dinero: la pedida, si es una de las de la clínica, o la del
+ * negocio. Otra abriría una caja o un cargo que después impide activar la segunda moneda.
+ */
+export async function lockOrgUnit(
+  tx: Db,
+  orgId: string,
+  requested: string | undefined,
+  field = "currency",
+): Promise<string> {
+  const money = await lockOrgMoney(tx, orgId)
+  if (!money) throw orgProfileRequired()
+  if (!requested) return money.currency
+  const code = currency(requested)
+  const allowed = money.secondCurrency ? [money.currency, money.secondCurrency] : [money.currency]
+  if (!allowed.includes(code))
+    throw invalidField(field, `La clínica trabaja solo en ${allowed.join(" y ")}`)
+  return code
+}
+
 export async function lockOrgCurrency(tx: Db, orgId: string): Promise<string> {
   const profile = await lockOrgMoney(tx, orgId)
   // Sin respaldo de un país: la moneda sale del perfil o no hay operación.
@@ -527,7 +547,7 @@ export async function addCashMovement(
   actorUserId: string,
   input: CashMovementInput,
 ) {
-  const unit = input.currency ? currency(input.currency) : await lockOrgCurrency(tx, orgId)
+  const unit = await lockOrgUnit(tx, orgId, input.currency)
   const shift = await ensureOpenShift(tx, orgId, actorUserId, input.branchId, unit)
   return addShiftMovement(tx, orgId, actorUserId, shift.id, {
     direction: input.kind === "aporte" ? "ingreso" : "egreso",
@@ -1035,7 +1055,7 @@ export async function closeCashWindow(
     // Ya cerrada: `closeShift` devuelve el cierre existente, sin efectos.
     return closeShift(tx, orgId, actorUserId, seen.id, input)
   }
-  const unit = input.currency ? currency(input.currency) : await lockOrgCurrency(tx, orgId)
+  const unit = await lockOrgUnit(tx, orgId, input.currency)
   if (input.shiftId === null) {
     await requireBranch(tx, orgId, input.branchId)
     await lockCashWindow(tx, orgId, input.branchId, unit)
