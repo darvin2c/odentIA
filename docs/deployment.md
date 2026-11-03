@@ -171,18 +171,29 @@ Cambio de la entrada, hecho el 2026-11-03 en las dos webs y sin cortar el servic
    p90 21 ms, sin cortes por CPU.
 3. En Workers › `odentia-web` › Domains › Add Route, zona `<dominio>`, dos rutas:
    `<dominio>/*` y `www.<dominio>/*` (nunca el `*.<dominio>/*` que propone, que tomaría
-   `app.`, `api.`, `admin.` y las clínicas), con **Fail open**: si el Worker falla o pasa
-   los límites del plan, la visita sigue por el túnel al VPS. El DNS y el túnel no cambian.
+   `app.`, `api.`, `admin.` y las clínicas), con **Fail open**: pasado el límite diario de
+   peticiones del plan, la visita sigue por el túnel (un error del Worker o pasar la CPU
+   muestran un error de Cloudflare, 1101 o 1102). El DNS y el túnel no cambian.
 4. Comprobar `https://<dominio>/precios`, que `https://www.<dominio>/precios` redirige
    y que la segunda visita responde `CF-Cache-Status: HIT`.
 
 Lo mismo con `latidia-web` y `latidia72.com`. Las rutas viven en el panel de Cloudflare
 y no en `wrangler.jsonc`: wrangler no sabe ponerles Fail open, y publicar sin `routes` no
 las toca. Desde el 2026-11-03 el VPS ya no sirve las webs (sin `web` ni `latidia-web` en el
-compose), así que Fail open lleva a un servicio que no existe: si el Worker falla, la visita
-ve un error igual. Las rutas del túnel de `<dominio>` y `www.<dominio>` se quedan por su DNS.
+compose), así que pasado el límite diario Fail open lleva a un servicio que no existe. Las rutas del túnel de `<dominio>` y `www.<dominio>` se quedan por su DNS.
 Volver al VPS es devolver los dos servicios al compose (el adaptador de Node sigue en
 `apps/web` para `pnpm dev`) y quitar las rutas del Worker.
+
+### El panel y la administración en Workers
+
+`odentia-admin`, `odentia-panel` y `latidia-panel` (ADR 0137) se publican con el mismo job y
+los mismos dominios con que se arman en el VPS. La entrada es igual que la de las webs: en
+cada Worker › Domains › Add Route, **Fail open**, con el patrón exacto (`admin.odentia32.com/*`,
+`app.odentia32.com/*`, `app.latidia72.com/*`; nunca `*.<dominio>/*`, que tomaría las clínicas).
+Mientras `admin`, `panel` y `latidia-panel` sigan en el compose, pasado el límite diario de
+peticiones Fail open los usa de respaldo; un error del Worker o pasar la CPU muestran un error
+de Cloudflare. Vuelta atrás: quitar la ruta. Antes de retirarlos del VPS, mirar en Metrics la CPU de las
+pantallas con sesión y que no haya errores.
 
 ## Variables: una sola fuente
 
