@@ -8,7 +8,13 @@
  * que lo que refresca Caja los refresca a ellos. Dinero con `@odentia/clinical`;
  * moneda, formato y zona siempre de la clínica o la sede.
  */
-import { currencyWord, formatMoney, formatMoneyInput, upperFirst } from "@odentia/clinical"
+import {
+  currencyWord,
+  formatExchangeRateInput,
+  formatMoney,
+  formatMoneyInput,
+  upperFirst,
+} from "@odentia/clinical"
 import {
   Button,
   cn,
@@ -511,7 +517,9 @@ export function CashCloseDrawer({
                       {rateUseWords(row.cobros, row.vueltos)}
                       {row.byName ? ` · ${row.byName}` : ""}
                     </span>
-                    <span className="font-medium tabular-nums">{row.rate}</span>
+                    <span className="font-medium tabular-nums">
+                      {formatExchangeRateInput(row.rate, locale)}
+                    </span>
                   </li>
                 ))}
               </ul>
