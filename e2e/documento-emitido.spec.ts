@@ -219,7 +219,8 @@ test("lo emitido no cambia, y su QR se lee y comprueba el archivo", async ({
   })
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}/encounters/${encounter.id}`))
   await page.getByRole("button", { name: "Ver hoja de atención", exact: true }).click()
-  await expect(page.getByRole("button", { name: "Descargar PDF" })).toBeVisible()
+  // Mientras el PDF carga es un botón desactivado; ya listo, el enlace que lo descarga.
+  await expect(page.getByRole("link", { name: "Descargar PDF" })).toBeVisible()
   await expect(page.getByRole("button", { name: "Enviar" })).toBeVisible()
   await page.screenshot({ path: info.outputPath("hoja-en-la-atencion.png"), fullPage: true })
   await page.setViewportSize({ width: 390, height: 844 })

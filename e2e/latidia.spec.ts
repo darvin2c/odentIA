@@ -1231,7 +1231,8 @@ test("latidIA: el descanso emitido no cambia, y su QR se lee y comprueba el arch
   })
   await gotoHydrated(page, latidiaUrl(slug, `/patients/${patientId}/encounters/${opened.body.data.id}`))
   await page.getByRole("button", { name: "Ver hoja de atención", exact: true }).click()
-  await expect(page.getByRole("button", { name: "Descargar PDF" })).toBeVisible()
+  // Mientras el PDF carga es un botón desactivado; ya listo, el enlace que lo descarga.
+  await expect(page.getByRole("link", { name: "Descargar PDF" })).toBeVisible()
   await context.close()
 })
 
