@@ -86,7 +86,7 @@ Los textos que ve la gente no nombran ADR, issues ni «decisión N»; eso va en 
 
 - Un error se reproduce primero con una prueba que falla sin el arreglo.
 - Tipos y pruebas de los paquetes tocados: `pnpm --filter @odentia/<paquete> typecheck|test`.
-- Si cambió una pantalla de `clinic-app` o de una app, también `pnpm --filter @odentia/ui-patterns test`. El CI del PR solo prueba lo afectado y `main` prueba todo: una regla de otro paquete pasa en el PR y detiene el despliegue después.
+- Si cambió una pantalla de `clinic-app` o de una app, también `pnpm --filter @odentia/ui-patterns test`. El CI del PR prueba todo; si `main` no avanzó desde esa prueba, al unir despliega sin repetirla, y si avanzó, prueba todo otra vez.
 - Los recorridos afectados: `pnpm e2e <specs> --workers=2`.
 
 La batería completa la corre el CI sin usar este equipo. Antes de una larga aquí, mirar cuántos contenedores de prueba quedan y no tener `pnpm dev` encendido. Prerrequisitos por plataforma: `docs/development.md`.
