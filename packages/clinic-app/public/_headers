@@ -1,0 +1,5 @@
+# Solo los Workers leen este archivo (ADR 0138). Vite pone en /assets/ los archivos con su huella
+# en el nombre: otro contenido es otro nombre, así que se guardan un año, como en el VPS
+# (`scripts/static-files.mjs`).
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

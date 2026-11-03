@@ -1,4 +1,5 @@
-import { clinicAppAliases } from "@odentia/clinic-app/vite"
+import { cloudflare } from "@cloudflare/vite-plugin"
+import { clinicAppAliases, clinicAppWorkerStubs } from "@odentia/clinic-app/vite"
 import tailwindcss from "@tailwindcss/vite"
 import { tanstackStart } from "@tanstack/react-start/plugin/vite"
 import { layout, physical, rootRoute } from "@tanstack/virtual-file-routes"
@@ -16,6 +17,10 @@ const routes = rootRoute("__root.tsx", [
   layout("_org", `${COMMON_ROUTES}/_org.tsx`, [physical("", `${COMMON_ROUTES}/_org`), physical("", "dental")]),
 ])
 
+// Con `WEB_TARGET=cloudflare` el build es para Cloudflare Workers (ADR 0138); sin él, el servidor de
+// Node: el de `pnpm dev`, que llega a la API de portless, y el del VPS mientras siga de respaldo.
+const workers = process.env.WEB_TARGET === "cloudflare"
+
 export default defineConfig({
   server: {
     port: Number(process.env.PORT) || 5173,
@@ -24,5 +29,10 @@ export default defineConfig({
   // `chat.js` del chat web (ADR 0076) es común a los productos: vive en el paquete.
   publicDir: "../../packages/clinic-app/public",
   resolve: { alias: clinicAppAliases() },
-  plugins: [tailwindcss(), tanstackStart({ router: { virtualRouteConfig: routes } }), viteReact()],
+  plugins: [
+    ...(workers ? [cloudflare({ viteEnvironment: { name: "ssr" } }), clinicAppWorkerStubs()] : []),
+    tailwindcss(),
+    tanstackStart({ router: { virtualRouteConfig: routes } }),
+    viteReact(),
+  ],
 })

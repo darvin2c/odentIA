@@ -1,0 +1,13 @@
+// La app de las clínicas en Cloudflare Workers (ADR 0138): el build con `WEB_TARGET=cloudflare` arma
+// desde aquí el `dist/server/wrangler.json` que publica `wrangler deploy`. Sin `routes`: la ruta
+// `*.<dominio>/*` y sus exclusiones viven en el panel de Cloudflare (docs/deployment.md).
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "latidia-clinicas",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "@tanstack/react-start/server-entry",
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": { "enabled": true }
+}

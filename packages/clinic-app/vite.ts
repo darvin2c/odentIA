@@ -1,6 +1,6 @@
 import { createRequire } from "node:module"
 import path from "node:path"
-import { normalizePath } from "vite"
+import { normalizePath, type Plugin } from "vite"
 
 const require = createRequire(import.meta.url)
 
@@ -20,4 +20,22 @@ export function clinicAppAliases() {
       )}$1`,
     },
   ]
+}
+
+/**
+ * En Workers (ADR 0138) los códecs DICOM no se usan al armar la página (se cargan en el navegador,
+ * `lib/dicom-codecs.ts`) y ocupaban unos 300 KB del paquete del servidor, que en el plan gratuito
+ * no puede pasar de 3 MB: ahí quedan vacíos. Las pruebas de Node no usan este plugin.
+ */
+export function clinicAppWorkerStubs(): Plugin {
+  // También la ruta de pnpm (`@cornerstonejs+codec-…`) a la que lleva el alias del códec de 12 bits.
+  const codec = /@cornerstonejs[\\/+]codec-/
+  const empty = "\0codec-dicom-vacio"
+  return {
+    name: "odentia:codecs-dicom-fuera-del-servidor",
+    enforce: "pre",
+    applyToEnvironment: (environment) => environment.name === "ssr",
+    resolveId: (id) => (codec.test(id) ? empty : null),
+    load: (id) => (id === empty ? "export default undefined" : null),
+  }
 }
