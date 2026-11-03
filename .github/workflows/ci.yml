@@ -243,8 +243,6 @@ jobs:
       cancel-in-progress: false
     env:
       WEB_TARGET: cloudflare
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       # Publicar solo en la punta de main y con la cuenta de Cloudflare puesta en el repositorio;
       # sin ella, hasta hacer el cambio de `docs/deployment.md`, se comprueba igual que en un PR.
       PUBLICAR: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.CLOUDFLARE_ACCOUNT_ID != '' }}
@@ -258,7 +256,6 @@ jobs:
           punta=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
           if [ "$punta" != "$GITHUB_SHA" ]; then
             echo "main ya avanzó a $punta; la corrida de ese commit publicará las webs."
-            echo "PUBLICAR=false" >> "$GITHUB_ENV"
             echo "OMITIR=true" >> "$GITHUB_ENV"
           fi
       - if: env.OMITIR != 'true'
@@ -273,22 +270,33 @@ jobs:
       - if: env.OMITIR != 'true'
         run: pnpm install --frozen-lockfile --filter @odentia/web...
       # Cada web es un build con su dominio y su producto; las dos usan la misma carpeta, así que
-      # se publica una antes de armar la otra.
-      - name: Web de odentIA
+      # se publica una antes de armar la otra. La clave de Cloudflare solo llega al paso que publica.
+      - name: Armar la web de odentIA
         if: env.OMITIR != 'true'
         working-directory: apps/web
         env:
           VITE_BASE_DOMAIN: odentia32.com
-        run: |
-          pnpm build
-          if [ "$PUBLICAR" = "true" ]; then pnpm exec wrangler deploy; else pnpm exec wrangler deploy --dry-run; fi
-      - name: Web de latidIA
+        run: pnpm build && pnpm exec wrangler deploy --dry-run
+      - name: Publicar la web de odentIA
+        if: env.OMITIR != 'true' && env.PUBLICAR == 'true'
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler deploy
+      - name: Armar la web de latidIA
         if: env.OMITIR != 'true'
         working-directory: apps/web
         env:
           VITE_BASE_DOMAIN: latidia72.com
           VITE_PRODUCT: medical
           CLOUDFLARE_ENV: latidia
-        run: |
-          pnpm build
-          if [ "$PUBLICAR" = "true" ]; then pnpm exec wrangler deploy; else pnpm exec wrangler deploy --dry-run; fi
+        run: pnpm build && pnpm exec wrangler deploy --dry-run
+      - name: Publicar la web de latidIA
+        if: env.OMITIR != 'true' && env.PUBLICAR == 'true'
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_ENV: latidia
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler deploy
