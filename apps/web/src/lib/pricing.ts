@@ -8,7 +8,7 @@ import { DEFAULT_DOMAIN, MEDICAL } from "./product"
 
 const FRESH_MS = 30_000
 
-/** Dentro del stack la web llama a la API por la red interna; en local, por su dirección pública. Solo en el servidor. */
+/** En el VPS la web llama a la API por la red interna; en Workers y en local, por su dirección pública. Solo en el servidor. */
 function apiBase(): string {
   const domain = import.meta.env.VITE_BASE_DOMAIN || DEFAULT_DOMAIN
   const port = import.meta.env.VITE_BASE_PORT ? `:${import.meta.env.VITE_BASE_PORT}` : ""

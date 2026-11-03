@@ -64,3 +64,4 @@ tmp/
 /.e2e-env
 /.e2e-stack.json
 /.e2e-stack.lock/
+.wrangler/

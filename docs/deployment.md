@@ -81,7 +81,7 @@ Rutas del túnel («Published application routes»), con el comodín al final:
 | `api.<dominio>` | `http://api:3001` |
 | `app.<dominio>` | `http://panel:3000` |
 | `admin.<dominio>` | `http://admin:3000` |
-| `<dominio>` y `www.<dominio>` | `http://web:3000` |
+| `<dominio>` y `www.<dominio>` | `http://web:3000` (hasta pasarlas a Workers, ver «Las webs en Cloudflare Workers») |
 | `*.<dominio>` | `http://platform:3000` |
 
 Cloudflare crea el registro DNS de cada ruta salvo el del comodín: el CNAME `*` a
@@ -144,6 +144,45 @@ La web de `latidia72.com` es la misma `apps/web` con ese build (`latidia-web`, p
 (`apps/web/src/lib/latidia-pages.json`); lo demás responde 404. El túnel lleva
 `latidia72.com` (y `www.`, que redirige) a ese servicio. La lista de espera guarda el
 producto del dominio desde el que se pide (decisión 17).
+
+## Las webs en Cloudflare Workers
+
+Las dos webs de marketing (ADR 0136) se publican como dos Workers del plan gratuito,
+`odentia-web` y `latidia-web` (`apps/web/wrangler.jsonc`), fuera de OpenShip. El job
+`deploy-web` del CI las arma con `WEB_TARGET=cloudflare` y su dominio y las publica al
+pasar las pruebas de main; en un PR solo comprueba que se arman. Leen los precios de
+`https://api.<dominio>` y cada página armada se guarda 30 segundos en la caché de
+Cloudflare. Mientras los dominios sigan en el túnel, los servicios `web` y
+`latidia-web` del compose siguen atendiendo con el servidor de Node.
+
+Configurar en GitHub, antes de unir:
+
+- Variable `CLOUDFLARE_ACCOUNT_ID`: el id de la cuenta de Cloudflare de las zonas.
+  Sin ella el job solo comprueba, también en main.
+- Secreto `CLOUDFLARE_API_TOKEN`: un token con la plantilla «Edit Cloudflare Workers»,
+  limitado a esa cuenta. Solo publica los Workers: los dominios se agregan a mano.
+- En Cloudflare, Workers › Overview: el subdominio `workers.dev` de la cuenta, si
+  nunca se eligió; sin él el primer despliegue falla.
+
+Cambio de la entrada, una web a la vez y con un minuto sin servicio:
+
+1. Con el primer despliegue, abrir `odentia-web.<subdominio>.workers.dev`: inicio,
+   precios con sus cifras, una página que no es de latidIA en la de latidIA.
+   Ahí la caché no actúa, así que lo que mide es lo peor.
+2. En Workers › `odentia-web` › Metrics, la CPU por petición: la mediana y el p99,
+   por debajo de 10 ms. Si no, quedarse en el túnel y decidir antes de seguir.
+3. En el túnel, quitar las rutas `<dominio>` y `www.<dominio>`, y borrar sus registros
+   DNS si quedan.
+4. En Workers › `odentia-web` › Settings › Domains & Routes, agregar los dos como
+   Custom Domain. Cloudflare crea su DNS y su certificado.
+5. Comprobar `https://<dominio>/precios`, que `https://www.<dominio>/precios` redirige
+   y que la segunda visita responde `CF-Cache-Status: HIT`.
+
+Lo mismo con `latidia-web` y `latidia72.com`. Publicar sin `routes` no toca los
+dominios agregados a mano. Vuelta atrás: quitar los Custom Domains y volver a poner
+las dos rutas del túnel hacia `http://web:3000` (o `http://latidia-web:3000`).
+Hecho el cambio en las dos, la entrega siguiente declara los dominios en
+`wrangler.jsonc` y retira el servidor de Node, `web` y `latidia-web`.
 
 ## Variables: una sola fuente
 
