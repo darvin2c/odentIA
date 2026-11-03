@@ -475,7 +475,7 @@ describe("las columnas nuevas no aceptan filas a medias", () => {
     await expect(set("USD", "0", "0", now)).rejects.toThrow()
   })
 
-  it("el presupuesto ya no exige moneda y la caja admite el vuelto, una fila por tipo y moneda", async () => {
+  it("el presupuesto ya no exige moneda y la caja admite el vuelto: un cobro y un vuelto de cada lado por pago", async () => {
     const [budget] = await ownerDb.execute<{ nullable: string }>(
       sql`select is_nullable as nullable from information_schema.columns where table_name = 'treatment_budget' and column_name = 'currency'`,
     )
@@ -483,7 +483,7 @@ describe("las columnas nuevas no aceptan filas a medias", () => {
     const [index] = await ownerDb.execute<{ def: string }>(
       sql`select indexdef as def from pg_indexes where indexname = 'cash_movement_payment_uidx'`,
     )
-    expect(index?.def).toContain("(organization_id, patient_payment_id, kind, currency)")
+    expect(index?.def).toContain("(organization_id, patient_payment_id, kind, direction)")
     const [kinds] = await ownerDb.execute<{ def: string }>(
       sql`select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'cash_movement_kind_check'`,
     )

@@ -120,10 +120,11 @@ export const cashMovement = pgTable(
   },
   (table) => [
     index("cash_movement_org_shift_idx").on(table.organizationId, table.shiftId),
-    // Un cobro real entra a caja una sola vez (solo filas vigentes). Su vuelto es
-    // otro tipo y puede tocar dos cajas: una fila por tipo y moneda.
+    // Un cobro real entra a caja una sola vez (solo filas vigentes), en la moneda que sea.
+    // Su vuelto es otro tipo y toca dos cajas: entra el exceso en una y sale el vuelto de
+    // la otra, una vez cada uno.
     uniqueIndex("cash_movement_payment_uidx")
-      .on(table.organizationId, table.patientPaymentId, table.kind, table.currency)
+      .on(table.organizationId, table.patientPaymentId, table.kind, table.direction)
       .where(sql`${table.patientPaymentId} IS NOT NULL AND ${table.voidedAt} IS NULL`),
     check("cash_movement_amount_check", sql`${table.amountCents} > 0`),
     check(

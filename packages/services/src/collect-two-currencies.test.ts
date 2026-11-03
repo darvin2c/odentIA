@@ -935,6 +935,35 @@ it("la caja solo se mueve en las monedas de la clínica", async () => {
   )
 })
 
+it("la base no admite dos cobros vivos del mismo pago, aunque sean de otra moneda", async () => {
+  const c = await clinic()
+  const debt = await c.charge(30000, "PEN", "Limpieza dental")
+  const paid = await c.collect({
+    chargeIds: [debt.id],
+    tenderCurrency: "USD",
+    exchangeRate: "3.75",
+    changeCurrency: "PEN",
+    payments: [{ paymentMethodId: c.cash.id, amountCents: 8000 }],
+    cashReceivedCents: 10000,
+  })
+  const [payment] = await paymentsOf(paid.ticket.id)
+  const rows = await ownerDb
+    .select()
+    .from(cashMovement)
+    .where(eq(cashMovement.patientPaymentId, payment?.id as string))
+  const cobro = rows.find((row) => row.kind === "cobro")
+  const givenBack = rows.find((row) => row.kind === "vuelto" && row.direction === "egreso")
+  if (!cobro || !givenBack) throw new Error("Faltan los movimientos del cobro")
+  const copy = ({ id: _id, createdAt: _at, ...row }: typeof cobro) => row
+  // Otro cobro del mismo pago en la caja de soles, y otro vuelto que sale: ninguno entra.
+  await expect(
+    ownerDb.insert(cashMovement).values({ ...copy(cobro), currency: "PEN", shiftId: givenBack.shiftId }),
+  ).rejects.toThrow()
+  await expect(
+    ownerDb.insert(cashMovement).values({ ...copy(givenBack), currency: "USD", shiftId: cobro.shiftId }),
+  ).rejects.toThrow()
+})
+
 it("conceptos de dos monedas no van en un cobro: cada moneda lleva su ticket", async () => {
   const c = await clinic()
   const dollars = await c.charge(100000, "USD")

@@ -1,5 +1,5 @@
 {
-  "id": "462bf6df-7a32-4f77-b4a7-7d6ac99c70aa",
+  "id": "c446341d-aed9-4fdd-8ce3-77da5259e268",
   "prevId": "940bdc71-4f8b-410e-b847-5c90348ac323",
   "version": "7",
   "dialect": "postgresql",
@@ -28515,7 +28515,7 @@
               "nulls": "last"
             },
             {
-              "expression": "currency",
+              "expression": "direction",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
