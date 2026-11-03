@@ -556,12 +556,12 @@ it("en una simulación o en «Probar» nada se envía, nada se propone de verdad
 })
 
 // Va al final: desde aquí la clínica de esta prueba cobra también en dólares.
-it("con dos monedas, ver_presupuesto y el resumen dicen lo que vale hoy como aproximado, con su regla", async () => {
+it("con dos monedas, ver_presupuesto y el resumen dicen lo que vale hoy", async () => {
   const { conversationId } = await byTelegram("tg:dos-monedas", "evt-dos-monedas", "¿Cuánto debo?")
   const contactId = await contactOf(conversationId)
   const patientId = await patientOf(contactId, "Lucía Dólares")
   const ctx = toolCtx(conversationId, contactId)
-  // Antes de activarla, lo que está en soles se lee como siempre: sin aproximado ni regla.
+  // Antes de activarla, lo que está en soles se lee como siempre: sin aproximado.
   const { encounterId } = await budgetOf(patientId, { deliver: true })
   expect(await call(ctx, "ver_presupuesto", { patientId })).not.toContain("(hoy, ")
 
@@ -581,12 +581,10 @@ it("con dos monedas, ver_presupuesto y el resumen dicen lo que vale hoy como apr
   expect(said).toContain("Implante: USD 1,000.00 (hoy, unos S/ 3,750) — sin responder")
   expect(said).toContain("Total S/ 180.00 + USD 1,000.00 (hoy, unos S/ 3,750)")
   expect(said).toContain("Resina compuesta de la pieza 46: S/ 180.00 — sin responder")
-  expect(said).toContain("no prometas ese valor para un pago futuro")
 
   await inOrg((tx) =>
     createCharge(tx, ORG, clinic.actor, patientId, { description: "Implante", amountCents: 100_000, currency: "USD" }),
   )
   const summary = (await call(ctx, "ver_resumen_paciente", { patientId })).replace(/\u00a0/g, " ")
   expect(summary).toContain("- Saldo pendiente: USD 1,000.00 (hoy, unos S/ 3,750).")
-  expect(summary).toContain("no prometas ese valor para un pago futuro")
 })

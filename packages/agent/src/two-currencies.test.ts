@@ -10,7 +10,7 @@ import {
   formatAgentClinicData,
   formatClinicSearch,
   formatOrgMoneyToday,
-  withTodayValueRule,
+  TODAY_VALUE_RULE,
 } from "@odentia/services"
 import { describe, expect, it } from "vitest"
 import { receptionPrompt } from "./graph"
@@ -96,10 +96,9 @@ describe("lo que lee el modelo con dos monedas", () => {
     expect(spaced(formatOrgMoneyToday(100_000, "USD", { ...ONE, secondCurrency: "USD" }))).toBe(
       "USD 1,000.00",
     )
-    expect(withTodayValueRule("Sin saldo pendiente.")).toBe("Sin saldo pendiente.")
   })
 
-  it("el manual no cambia con la segunda moneda: lo que cambia va con los datos", () => {
+  it("el manual solo suma, con la segunda moneda, la regla de lo aproximado", () => {
     const config = {
       personaName: "Sofi",
       treatment: "tu",
@@ -111,9 +110,9 @@ describe("lo que lee el modelo con dos monedas", () => {
     } as unknown as AgentConfig
     const texts = agentTextsFor("dental")
     const facts = { tools: new Set(["send_reply"]), services: "lista" as const }
-    expect(receptionPrompt(TWO, config, facts, texts)).toBe(
-      receptionPrompt(ONE, config, facts, texts),
-    )
+    const one = receptionPrompt(ONE, config, facts, texts)
+    expect(one).not.toContain(TODAY_VALUE_RULE)
+    expect(receptionPrompt(TWO, config, facts, texts).replace(`${TODAY_VALUE_RULE}\n`, "")).toBe(one)
   })
 
   it("lo aproximado no lleva céntimos y solo es de la otra moneda", () => {
@@ -132,9 +131,7 @@ describe("lo que lee el modelo con dos monedas", () => {
     expect(spaced(formatOrgMoneyToday(10_000, "USD", chile))).toMatch(/\(hoy, unos \$\s?95\.000\)$/)
   })
 
-  it("una herramienta que trae lo que vale hoy lleva la regla", () => {
-    const line = `- Saldo pendiente: ${formatOrgMoneyToday(100_000, "USD", TWO)}.`
-    expect(withTodayValueRule(line)).toContain("no prometas ese valor para un pago futuro")
+  it("la búsqueda dice lo que vale hoy", () => {
     const search = formatClinicSearch(
       {
         services: SERVICES.slice(0, 1),

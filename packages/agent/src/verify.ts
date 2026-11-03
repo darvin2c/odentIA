@@ -181,14 +181,10 @@ function currencyLabels(code: string, format: string): Set<string> {
 }
 
 /**
- * Lo que hace falta para leer la moneda de un importe. Solo existe en una clínica
- * con segunda moneda: sin ella, la comprobación mira el número, como siempre.
+ * De qué monedas de la clínica puede ser cada marca: «dólares» con CAD y USD es de
+ * las dos. Solo existe con segunda moneda: sin ella, se mira el número, como siempre.
  */
-interface CurrencyReader {
-  pattern: RegExp
-  /** De qué monedas de la clínica puede ser cada marca: «dólares» con CAD y USD es de las dos. */
-  labels: Map<string, string[]>
-}
+type CurrencyReader = Map<string, string[]>
 
 const CURRENCY_READERS = new Map<string, CurrencyReader>()
 
@@ -209,15 +205,26 @@ function currencyReader(zone: { currency?: string | null; locale?: string | null
     if (own !== undefined && label === markKey(own)) continue
     labels.set(label, [...(labels.get(label) ?? []), second])
   }
-  const reader = { pattern: amountPattern(zone.currency, zone.locale, zone.secondCurrency), labels }
-  CURRENCY_READERS.set(key, reader)
-  return reader
+  CURRENCY_READERS.set(key, labels)
+  return labels
 }
 
 /** Las monedas que dice una marca; una ajena a la clínica («EUR») es solo de sí misma. */
 function currenciesOf(mark: string, reader: CurrencyReader): string[] {
   const key = markKey(mark)
-  return reader.labels.get(key) ?? [key]
+  return reader.get(key) ?? [key]
+}
+
+const NUMBER_READERS = new WeakMap<RegExp, RegExp>()
+
+/** Cada número de un texto con su moneda, si la dice, en una sola lectura: el importe o el número suelto. */
+function numbersWithMark(amounts: RegExp): RegExp {
+  let pattern = NUMBER_READERS.get(amounts)
+  if (!pattern) {
+    pattern = new RegExp(`${amounts.source}|${ANY_NUMBER.source}`, amounts.flags)
+    NUMBER_READERS.set(amounts, pattern)
+  }
+  return pattern
 }
 const ISO_INSTANT = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})/g
 const ZONE_NAME = /\b(?:Africa|America|Antarctica|Asia|Atlantic|Australia|Europe|Indian|Pacific)\/[A-Za-z_]+(?:\/[A-Za-z_]+)?\b/g
@@ -444,11 +451,10 @@ function zonedParts(date: Date, timeZone: string): { day: number; month: number;
 
 interface SourceFacts {
   source: string
-  amounts: Set<number>
+  /** Cada importe y en qué monedas lo dice la fuente: `""`, sin ninguna o en una clínica de una sola. */
+  amounts: Map<number, Set<string>>
   /** Importes que la fuente da como precio y no solo como mínimo. */
   exact: Set<number>
-  /** Con segunda moneda: en qué monedas dice la fuente cada importe. Lo que no está aquí va sin moneda. */
-  marked: Map<number, Set<string>>
   times: Set<number>
   /** Claves `día-mes` y, para fechas sin mes, `día-*`. */
   dates: Set<string>
@@ -495,11 +501,14 @@ export function timesIn(text: string): number {
   return extractTimes(mask(normalize(text), WEB_ADDRESS)).mentions.length
 }
 
-function factsOf(item: Evidence, timeZone: string, reader: CurrencyReader | null = null): SourceFacts {
+function factsOf(
+  item: Evidence,
+  timeZone: string,
+  money: { reader: CurrencyReader; numbers: RegExp } | null = null,
+): SourceFacts {
   const text = NOT_FACTS.reduce(mask, normalize(item.text))
-  const amounts = new Set<number>()
+  const amounts = new Map<number, Set<string>>()
   const exact = new Set<number>()
-  const marked = new Map<number, Set<string>>()
   const times = new Set<number>()
   const dates = new Set<string>()
   const zones = new Set<string>([timeZone, ...(text.match(ZONE_NAME) ?? [])])
@@ -527,28 +536,42 @@ function factsOf(item: Evidence, timeZone: string, reader: CurrencyReader | null
     }
   }
   for (const mention of extractTimes(rest).mentions) for (const value of mention.value) times.add(value)
-  const withMark = reader ? extractAmounts(rest, reader.pattern).mentions : []
-  for (const match of rest.matchAll(ANY_NUMBER)) {
-    const minimum = cuedAsMinimum(rest, match.index)
-    const mention = withMark.find((item) => match.index >= (item.index ?? 0) && match.index < (item.index ?? 0) + item.raw.length)
-    for (const reading of readAmount(match[0])) {
-      amounts.add(reading)
+  for (const match of rest.matchAll(money?.numbers ?? ANY_NUMBER)) {
+    const number = match[1] ?? match[2] ?? match[0]
+    const minimum = cuedAsMinimum(rest, match.index + match[0].indexOf(number))
+    const currencies =
+      money && number !== match[0] ? currenciesOf(match[0].replace(number, ""), money.reader) : [""]
+    for (const reading of readAmount(number)) {
+      const said = amounts.get(reading) ?? new Set<string>()
+      for (const currency of currencies) said.add(currency)
+      amounts.set(reading, said)
       if (!minimum) exact.add(reading)
-      if (mention && reader) marked.set(reading, new Set([...(marked.get(reading) ?? []), ...currenciesOf(mention.mark, reader)]))
     }
   }
-  return { source: item.source, amounts, exact, marked, times, dates }
+  return { source: item.source, amounts, exact, times, dates }
+}
+
+/** ¿Alguna fuente nombra una moneda para este importe? */
+function namesCurrency(said: Set<string> | undefined): boolean {
+  return said !== undefined && said.size > (said.has("") ? 1 : 0)
 }
 
 /**
- * Con segunda moneda, «USD 1,000» no vale como «S/ 1,000»: la fuente lo dice en
- * esa moneda o, si lo dice sin ninguna («Tarifa: 80»), ninguna otra fuente lo da
- * en otra moneda.
+ * ¿La fuente dice este importe? Sin monedas que comprobar (`null`, clínica de una)
+ * basta el número. Con ellas, «USD 1,000» no vale como «S/ 1,000»: la fuente lo dice
+ * en esa moneda o, si lo dice sin ninguna («Tarifa: 80»), ninguna otra lo da en otra.
  */
-function saidIn(source: SourceFacts, reading: number, currencies: string[], sources: SourceFacts[]): boolean {
-  const marked = source.marked.get(reading)
-  if (marked) return currencies.some((currency) => marked.has(currency))
-  return source.amounts.has(reading) && !sources.some((other) => other.marked.has(reading))
+function says(
+  source: SourceFacts,
+  reading: number,
+  currencies: string[] | null,
+  sources: SourceFacts[],
+): boolean {
+  const said = source.amounts.get(reading)
+  if (!said) return false
+  if (!currencies) return true
+  if (namesCurrency(said)) return currencies.some((currency) => said.has(currency))
+  return !sources.some((other) => namesCurrency(other.amounts.get(reading)))
 }
 
 /** ¿Algún subconjunto de dos o más importes suma exactamente el objetivo? */
@@ -593,11 +616,13 @@ export function verifyReply(
   now: Date = new Date(),
 ): ReplyVerdict {
   const reader = currencyReader(zone)
+  const amountsIn = amountPattern(zone.currency, zone.locale, zone.secondCurrency)
+  const money = reader && { reader, numbers: numbersWithMark(amountsIn) }
   // Lo consultado en el turno llega después de lo fijo del prompt y es lo más
   // específico (un hueco de agenda antes que el horario de la sede): se mira primero.
   const sources = evidence
     .filter((item) => item.text.trim())
-    .map((item) => factsOf(item, zone.timezone, reader))
+    .map((item) => factsOf(item, zone.timezone, money))
     .reverse()
   const checks: FactCheck[] = []
   // La respuesta se lee como las fuentes: el enlace que envía el agente no es un importe,
@@ -605,22 +630,21 @@ export function verifyReply(
   const text = mask(normalize(reply), WEB_ADDRESS)
   const segments = priceSegments(evidence, zone.timezone)
 
-  const amounts = extractAmounts(text, amountPattern(zone.currency, zone.locale, zone.secondCurrency))
-  // Con una sola moneda, todos los importes son de la misma.
-  const currenciesIn = (mention: AmountMention): string[] => (reader ? currenciesOf(mention.mark, reader) : [""])
-  const supportedAmounts: Array<{ value: number; currencies: string[] }> = []
+  const amounts = extractAmounts(text, amountsIn)
+  // Con una sola moneda no hay nada que comprobar: todos los importes son de la misma.
+  const currenciesIn = (mention: AmountMention) => reader && currenciesOf(mention.mark, reader)
+  const supportedAmounts: Array<{ value: number; currencies: string[] | null }> = []
   const pendingAmounts: AmountMention[] = []
   for (const mention of amounts.mentions) {
     const currencies = currenciesIn(mention)
-    const says = (source: SourceFacts, reading: number) =>
-      reader ? saidIn(source, reading, currencies, sources) : source.amounts.has(reading)
-    const found = sources.find((source) => mention.value.some((reading) => says(source, reading)))
+    const said = (source: SourceFacts, reading: number) => says(source, reading, currencies, sources)
+    const found = sources.find((source) => mention.value.some((reading) => said(source, reading)))
     if (found) {
-      const reading = mention.value.find((value) => says(found, value)) ?? 0
+      const reading = mention.value.find((value) => said(found, value)) ?? 0
       // Un mínimo («desde») dicho como precio final no sale: el precio lo define la evaluación.
       // Basta con que una fuente lo dé como mínimo: que el mismo número aparezca suelto en
       // otra (lo que escribió la persona, una hora, una duración) no lo vuelve precio final.
-      const minimum = sources.some((source) => says(source, reading) && !source.exact.has(reading))
+      const minimum = sources.some((source) => said(source, reading) && !source.exact.has(reading))
       if (minimum && !cuedAsMinimum(text, mention.index ?? 0)) {
         checks.push({ kind: "precio", value: `${mention.raw} (es un mínimo: dilo con «desde»)`, ok: false, source: found.source })
         continue
@@ -634,11 +658,15 @@ export function verifyReply(
   }
   for (const mention of pendingAmounts) {
     // Una suma es de una sola moneda: S/ 150 y USD 1,000 no dan USD 1,150.
-    const summed = currenciesIn(mention).some((currency) => {
-      const parts = supportedAmounts.filter((part) => part.currencies.includes(currency)).map((part) => part.value)
-      return mention.value.some((reading) => isSumOf(reading, parts))
-    })
-    const otherCurrency = !summed && sources.some((source) => mention.value.some((reading) => source.marked.has(reading)))
+    const currencies = currenciesIn(mention)
+    const groups = currencies
+      ? currencies.map((currency) => supportedAmounts.filter((part) => part.currencies?.includes(currency)))
+      : [supportedAmounts]
+    const summed = groups.some((group) =>
+      mention.value.some((reading) => isSumOf(reading, group.map((part) => part.value))),
+    )
+    const otherCurrency =
+      !summed && sources.some((source) => mention.value.some((reading) => namesCurrency(source.amounts.get(reading))))
     checks.push({
       kind: "precio",
       value: otherCurrency ? `${mention.raw} (ese importe está en otra moneda)` : mention.raw,
@@ -707,7 +735,7 @@ const PROMOTION_LINE = /^- Promoción «[^»]*»: (.*)$/
 
 interface PriceSegment {
   subject: string
-  amounts: Set<number>
+  amounts: Map<number, Set<string>>
 }
 
 /**

@@ -4,4 +4,4 @@ Servicios y cómo decir su precio (cada importe con su moneda):
 - Corona (id 00000000-0000-4000-8000-000000000003), 60 min: desde USD 400.00 (hoy, desde S/ 1,500 aprox.) (es un mínimo: el precio final se define en la evaluación; dilo siempre con «desde»). Ofrece la evaluación: Evaluación, USD 50.00 (hoy, unos S/ 188).
 Promociones vigentes (solo estas; ninguna otra). Un precio de promoción se dice siempre como de la promoción: con su nombre, sus condiciones y hasta cuándo vale, nunca como el precio del servicio.
 - Promoción «Sonrisa»: Implante: USD 900.00 (hoy, unos S/ 3,375) en vez de USD 1,000.00 (ahorra USD 100.00).
-La clínica cobra en soles y también en dólares: cada importe se debe en su moneda, nunca digas el mismo número en otra. Lo que va con «hoy» es solo un aproximado al cambio de hoy: dilo como aproximado y no prometas ese valor para un pago futuro, porque el cambio se fija al pagar.
+La clínica cobra en soles y también en dólares: cada importe se debe en su moneda, nunca digas el mismo número en otra.

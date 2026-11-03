@@ -10,7 +10,7 @@ import { alias } from "drizzle-orm/pg-core"
 import { createHash } from "node:crypto"
 import { getAgentConfig } from "./agentConfig.js"
 import { getClinicInfoSnapshot, normalizeForSearch } from "./knowledge.js"
-import { findOrgCountry, formatOrgMoney, formatOrgMoneyToday, type MoneyZone, type OrgLocale, TODAY_VALUE_RULE } from "./locale.js"
+import { findOrgCountry, formatOrgMoney, formatOrgMoneyToday, type MoneyZone, type OrgLocale } from "./locale.js"
 import { kindOfSpecialty } from "./product-catalog.js"
 import { productHooks } from "./products.js"
 import { listClinicPromotionSummaries } from "./promotions.js"
@@ -774,7 +774,7 @@ function formatServiceForBooking(service: AgentServiceInfo): string {
 function twoCurrenciesLine(zone: Zone): string | null {
   if (!zone.secondCurrency || !zone.currency) return null
   const say = (code: string) => currencyWord(code, zone.locale)
-  return `La clínica cobra en ${say(zone.currency)} y también en ${say(zone.secondCurrency)}: cada importe se debe en su moneda, nunca digas el mismo número en otra. ${TODAY_VALUE_RULE}`
+  return `La clínica cobra en ${say(zone.currency)} y también en ${say(zone.secondCurrency)}: cada importe se debe en su moneda, nunca digas el mismo número en otra.`
 }
 
 /**

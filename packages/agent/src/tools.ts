@@ -98,7 +98,6 @@ import {
   nameWords,
   webchatHandoffWhere,
   webchatReplyRoutes,
-  withTodayValueRule,
 } from "@odentia/services"
 import { and, eq } from "drizzle-orm"
 import { z } from "zod"
@@ -628,7 +627,7 @@ function formatAgentBudgets(found: AgentPatientBudgets, zone: MoneyZone): string
     )
   }
   if (found.inPreparation) lines.push("Hay otro presupuesto que la clínica aún prepara: todavía no está listo y no se dice qué lleva.")
-  return withTodayValueRule(lines.join("\n"))
+  return lines.join("\n")
 }
 
 /**
@@ -1507,7 +1506,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           }
         }
       }
-      return withTodayValueRule(lines.join("\n"))
+      return lines.join("\n")
     },
     {
       name: "ver_resumen_paciente",

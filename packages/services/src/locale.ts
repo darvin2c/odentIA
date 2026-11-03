@@ -107,14 +107,9 @@ export function formatOrgMoneyToday(
   return options.minimum ? `${said} (hoy, desde ${business} aprox.)` : `${said} (hoy, unos ${business})`
 }
 
-/** Lo que se le dice al agente cuando un importe trae lo que vale hoy. */
+/** Lo que se le dice al agente de una clínica con otra moneda: sus importes traen lo que valen hoy. */
 export const TODAY_VALUE_RULE =
   "Lo que va con «hoy» es solo un aproximado al cambio de hoy: dilo como aproximado y no prometas ese valor para un pago futuro, porque el cambio se fija al pagar."
-
-/** El texto de una herramienta, con la regla si trae lo que vale hoy. Sin eso, tal cual. */
-export function withTodayValueRule(text: string): string {
-  return text.includes("(hoy, ") ? `${text}\n${TODAY_VALUE_RULE}` : text
-}
 
 /**
  * Presentación de un instante en la zona/locale indicadas. Nunca reinterpreta
