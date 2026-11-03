@@ -219,7 +219,7 @@ export function createContactsRoute(deps: CrmDeps) {
    * número que eligió quien escribe: así, y solo así, un teléfono pasa a ser su
    * WhatsApp (ADR 0027). No envía nada.
    */
-  const writeInput = z.object({ phone: z.string().max(50).nullish() })
+  const writeInput = z.object({ phone: z.string().max(50).nullish(), onlyWhatsapp: z.boolean().optional() })
 
   app.post("/:id/write", async (c) => {
     const { orgId, userId } = orgContextOf(c)

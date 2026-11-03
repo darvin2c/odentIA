@@ -710,8 +710,8 @@ export function searchPatientsApi(query: string): Promise<{ data: PatientSearchR
 
 // --- Hooks compartidos -----------------------------------------------------------
 
-export function useOrgFinanceProfile() {
-  return useQuery({ queryKey: ["org-finance-profile"], queryFn: fetchOrgFinanceProfile })
+export function useOrgFinanceProfile(enabled = true) {
+  return useQuery({ queryKey: ["org-finance-profile"], queryFn: fetchOrgFinanceProfile, enabled })
 }
 
 export function usePaymentMethodsOptions() {

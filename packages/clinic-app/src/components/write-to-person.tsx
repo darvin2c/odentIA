@@ -46,10 +46,13 @@ export function useWriteToPerson() {
   const queryClient = useQueryClient()
   return useMutation({
     retry: false,
-    mutationFn: (input: { contactId: string; phone?: string }) =>
+    mutationFn: (input: { contactId: string; phone?: string; onlyWhatsapp?: boolean }) =>
       apiFetch<{ data: WriteResult }>(`/api/contacts/${input.contactId}/write`, {
         method: "POST",
-        body: JSON.stringify(input.phone ? { phone: input.phone } : {}),
+        body: JSON.stringify({
+          ...(input.phone ? { phone: input.phone } : {}),
+          ...(input.onlyWhatsapp ? { onlyWhatsapp: true } : {}),
+        }),
       }).then((result) => result.data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["conversations"] })

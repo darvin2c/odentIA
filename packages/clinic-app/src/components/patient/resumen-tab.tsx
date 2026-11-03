@@ -19,7 +19,7 @@ import { FiliacionSectionDrawer, type FiliacionSectionKey } from "./filiacion-se
 import { dueWords, isOverdue } from "../crm/crm-helpers"
 import { TaskDrawer } from "../crm/task-drawer"
 import { attendWord } from "../../lib/patient-overview"
-import { CollectButton } from "./collect-flow"
+import { useCollectFlow } from "./collect-flow"
 import { ConsentLinkActions, consentLinkWords } from "./consent-link-actions"
 import { ConsentSigningScreen } from "./consent-signing"
 import { NextStepButton } from "./plan/next-step-action"
@@ -142,6 +142,12 @@ export function PatientPendingCard({
     queryFn: () => fetchPatientAccount3(patientId),
     enabled: canFinance,
   })
+  // La fila del saldo se va al quedar pagado: el cajón y el ticket viven en la tarjeta.
+  const collect = useCollectFlow({
+    patientId,
+    patientName: detail.patient.displayName,
+    enabled: accountQuery.data?.data.byCurrency.some((balance) => balance.porCobrar > 0) ?? false,
+  })
   const proposalsQuery = useQuery({
     queryKey: ["agent-proposals", "propuesta", "patient", patientId],
     queryFn: () =>
@@ -197,10 +203,15 @@ export function PatientPendingCard({
         id: `consent-${consent.id}`,
         title: `${signedByLink ? "Consentimiento por confirmar" : "Consentimiento sin firmar"}: ${consent.title}`,
         detail:
+          consents.isError ? "No se pudo leer el documento." :
           consentLinkWords({ status: "pendiente", personSignedAt: consent.personSignedAt ?? null, linkSentAt: consent.linkSentAt ?? null }) ??
           "Emitido y pendiente de la firma de la persona o su representante.",
         // Mientras se lee el documento, el botón espera: pulsarlo no abriría nada.
-        action: !canSign ? null : signedByLink ? (
+        action: !canSign ? null : consents.isError ? (
+          <Button size="sm" variant="outline" disabled={consents.isFetching} onClick={() => void consents.refetch()}>
+            Reintentar
+          </Button>
+        ) : signedByLink ? (
           document ? (
             <ConsentLinkActions document={document} onChanged={consentsChanged} />
           ) : (
@@ -268,7 +279,7 @@ export function PatientPendingCard({
             ? `Debe: ${money(balance.porCobrar, balance.currency)} · A favor: ${money(balance.aFavor, balance.currency)} · Saldo: ${money(balance.saldo, balance.currency)}`
             : "Cargos emitidos sin pago aplicado.",
         // El mismo cobro de Cobros, ahí mismo; «Aplicar…» siempre pide confirmar.
-        action: <CollectButton patientId={patientId} patientName={detail.patient.displayName} size="sm" variant="outline" currency={balance.currency} />,
+        action: collect.button({ size: "sm", variant: "outline", currency: balance.currency }),
       })
   }
   if (canEditPatient) {
@@ -326,6 +337,7 @@ export function PatientPendingCard({
       }
     >
       <PendingList pending={pending} />
+      {collect.surfaces}
       <ConsentSigningScreen
         open={signing !== null}
         documents={signing ? [signing] : []}

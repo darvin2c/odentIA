@@ -22,6 +22,7 @@ import {
   type SchedulableControl,
 } from "../../../lib/clinical-journey"
 import { usePermission } from "../../../lib/crm"
+import { usePersonArchived } from "../../../lib/person-archived"
 import { openAppointmentAnywhere, openBookingAnywhere } from "../../agenda/schedule-host"
 import { FollowUpScheduler } from "../follow-up-scheduler"
 import { useBudgetFormat } from "./budget-parts"
@@ -42,8 +43,9 @@ export function NextStepButton({
   variant?: ComponentProps<typeof Button>["variant"]
 }): React.JSX.Element | null {
   const [open, setOpen] = useState<"respuesta" | "control" | null>(null)
+  const archived = usePersonArchived()
   const action = step.action
-  if (!action) return null
+  if (!action || archived) return null
   if (step.kind === "enviar" && action.budgetId)
     return (
       <BudgetSendButton

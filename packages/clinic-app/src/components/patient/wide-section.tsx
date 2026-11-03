@@ -1,6 +1,7 @@
 import { DetailDrawer, ListSearchScope, LoadingState, useScopedListSearch } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
-import { createContext, lazy, type ReactNode, Suspense, useContext, useState } from "react"
+import { useLocation } from "@tanstack/react-router"
+import { createContext, lazy, type ReactNode, Suspense, useContext, useEffect, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { type DocumentFilter, isPatientSectionId, sectionOf } from "../../lib/patient-areas"
 import type { PatientFull } from "../../lib/patients"
@@ -85,6 +86,16 @@ export function WideSectionProvider({
   children: ReactNode
 }) {
   const [target, setTarget] = useState<WideTarget | null>(null)
+  // Un enlace de dentro lleva a otra sección de la página: se ve esa, no lo que estaba
+  // encima. Elegir sede también queda en la dirección (`?branch=`) y no cierra nada.
+  const place = useLocation({
+    select: (location) => {
+      const { branch: _branch, ...rest } = location.search as Record<string, unknown>
+      return `${location.pathname}?${JSON.stringify(rest)}`
+    },
+  })
+  // biome-ignore lint/correctness/useExhaustiveDependencies: se cierra al cambiar la dirección.
+  useEffect(() => setTarget(null), [place])
   const own = target ? productUi().record.sections.find((item) => item.id === target.id) : undefined
   // La ficha ya cargó al paciente: misma clave, sin otra petición.
   const record = useQuery({

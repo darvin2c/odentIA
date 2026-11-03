@@ -58,6 +58,24 @@ test("aplicar lo que tiene a favor siempre se confirma: ni el enlace ni el botó
   await expect(page).toHaveURL(/tab=resumen/)
 })
 
+test("cobrar todo desde Pendientes: la fila se va y el ticket sigue a la vista", async ({ owner }) => {
+  const ids = await buildClinicalBase(owner)
+  const { budgetLineId } = await createAcceptedBudget(owner, ids)
+  const { page } = owner
+  const slug = owner.org.slug
+  await call(page, "POST", `${patientApiPath(ids.patientId)}/charges`, slug, { budgetItemId: budgetLineId }, 201)
+
+  await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}?tab=resumen`))
+  await expect(page.getByText(/^Saldo por cobrar de/)).toBeVisible()
+  await page.getByRole("button", { name: "Cobrar", exact: true }).first().click()
+  const drawer = surface(page, { name: "Cobrar", exact: true })
+  await drawer.getByRole("button", { name: /^Cobrar S\/\s*450\.00/ }).click()
+  // Pagado todo, Pendientes ya no tiene la fila del saldo, y el ticket sigue para imprimirlo o enviarlo.
+  await expect(page.getByText(/^Saldo por cobrar de/)).toHaveCount(0)
+  await expect(page.getByRole("article", { name: /^Ticket / })).toBeVisible()
+  await expect(page).toHaveURL(/tab=resumen/)
+})
+
 for (const viewport of [
   { name: "escritorio", width: 1280, height: 720 },
   { name: "teléfono", width: 390, height: 844 },

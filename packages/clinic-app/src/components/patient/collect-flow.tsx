@@ -3,7 +3,7 @@ import { Button, buttonVariants, Field, FieldDescription, FieldLabel, toast } fr
 import { ConfirmDialog, DetailDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { type ComponentProps, lazy, Suspense, useEffect, useId, useState } from "react"
+import { type ComponentProps, lazy, type ReactNode, Suspense, useEffect, useId, useState } from "react"
 import { useActiveBranch } from "../../lib/active-branch"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
@@ -81,34 +81,58 @@ export function ApplyCreditDialog({
  * cambiar de pestaña. Si lo que tiene a favor cubre lo que debe, el botón lo dice
  * y confirma. Solo para quien puede cobrar.
  */
-export function CollectButton(props: CollectButtonProps) {
-  const canWrite = usePermission("finance.write")
-  return canWrite ? <CollectAction {...props} /> : null
+export function CollectButton({
+  patientId,
+  patientName,
+  ...options
+}: { patientId: string; patientName: string } & CollectButtonOptions) {
+  const flow = useCollectFlow({ patientId, patientName })
+  return (
+    <>
+      {flow.button(options)}
+      {flow.surfaces}
+    </>
+  )
 }
 
-interface CollectButtonProps {
-  patientId: string
-  patientName: string
+interface CollectButtonOptions {
   size?: ComponentProps<typeof Button>["size"]
   variant?: ComponentProps<typeof Button>["variant"]
   /** La moneda de lo que se debe: aquí solo se cobra en la de la clínica. */
   currency?: string
 }
 
-function CollectAction({ patientId, patientName, size, variant, currency }: CollectButtonProps) {
+/**
+ * El cobro separado de su botón, para quien lo pone en una fila que se va al
+ * quedar pagado: el cajón y el ticket viven en quien llama y siguen a la vista
+ * cuando la fila ya no está.
+ */
+export function useCollectFlow({
+  patientId,
+  patientName,
+  enabled = true,
+}: {
+  patientId: string
+  patientName: string
+  /** Sin nada que cobrar a la vista no hace falta leer la cuenta. */
+  enabled?: boolean
+}): { button: (options: CollectButtonOptions) => ReactNode; surfaces: ReactNode } {
+  const canWrite = usePermission("finance.write")
   const uid = useId()
   const queryClient = useQueryClient()
   const sede = useActiveBranch()
-  const profile = useOrgFinanceProfile()
+  const profile = useOrgFinanceProfile(canWrite)
   const prof = profile.data?.data ?? null
   const account = useQuery({
     queryKey: ["patient-account3", patientId],
     queryFn: () => fetchPatientAccount3(patientId),
+    enabled: canWrite && enabled,
   })
   // La ficha ya cargó al paciente: misma clave, sin otra petición.
   const patient = useQuery({
     queryKey: ["patient", patientId],
     queryFn: () => apiFetch<{ data: PatientFull }>(`/api/patients/${patientId}`),
+    enabled: canWrite,
   })
   const [pickedBranch, setPickedBranch] = useState("")
   const [asking, setAsking] = useState<"cobrar" | "aplicar" | null>(null)
@@ -134,24 +158,29 @@ function CollectAction({ patientId, patientName, size, variant, currency }: Coll
   }
   const changed = () => invalidatePatientAccount(queryClient, patientId)
 
-  // Lo que se debe en otra moneda se ve en Cobros: aquí se abriría el cobro en la de la clínica.
-  if (currency && prof && currency !== prof.currency)
+  const button = ({ size, variant, currency }: CollectButtonOptions): ReactNode => {
+    if (!canWrite) return null
+    // Lo que se debe en otra moneda se ve en Cobros: aquí se abriría el cobro en la de la clínica.
+    if (currency && prof && currency !== prof.currency)
+      return (
+        <Link
+          to="/patients/$patientId"
+          params={{ patientId }}
+          search={{ tab: "cuenta" }}
+          className={buttonVariants({ size, variant })}
+        >
+          Ver en Cobros
+        </Link>
+      )
     return (
-      <Link
-        to="/patients/$patientId"
-        params={{ patientId }}
-        search={{ tab: "cuenta" }}
-        className={buttonVariants({ size, variant })}
-      >
-        Ver en Cobros
-      </Link>
-    )
-
-  return (
-    <>
       <Button type="button" size={size} variant={variant} disabled={!ready} onClick={onClick}>
         {covered ? "Aplicar lo que tiene a favor" : collectLabel}
       </Button>
+    )
+  }
+
+  const surfaces = canWrite ? (
+    <>
       <ConfirmDialog
         open={asking !== null}
         title="¿En qué sede estás cobrando?"
@@ -248,5 +277,7 @@ function CollectAction({ patientId, patientName, size, variant, currency }: Coll
         </>
       ) : null}
     </>
-  )
+  ) : null
+
+  return { button, surfaces }
 }

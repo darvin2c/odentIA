@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query"
 import { createContext, lazy, type ReactNode, Suspense, useContext, useState } from "react"
-import { useOrgEvents } from "../../lib/org-events"
+import { isReceiptOnly, useOrgEvents } from "../../lib/org-events"
 import type { PersonPanelTarget } from "./person-panel"
 
 const PersonPanel = lazy(() => import("./person-panel").then((m) => ({ default: m.PersonPanel })))
@@ -22,8 +22,8 @@ export function useOpenRecordPanel(): ((target: PersonPanelTarget) => void) | nu
 export function RecordPanelProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
   const [target, setTarget] = useState<PersonPanelTarget | null>(null)
-  useOrgEvents(["message.created", "message.updated", "conversation.updated"], () => {
-    if (target) void queryClient.invalidateQueries({ queryKey: ["person-panel"] })
+  useOrgEvents(["message.created", "message.updated", "conversation.updated"], (kind, data) => {
+    if (target && !isReceiptOnly(kind, data)) void queryClient.invalidateQueries({ queryKey: ["person-panel"] })
   })
   return (
     <OpenRecordPanel.Provider value={setTarget}>

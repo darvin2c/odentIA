@@ -383,7 +383,16 @@ export function PersonPanel({
         <div className="flex flex-wrap items-center gap-2 rounded-xl bg-muted/60 p-3 text-sm">
           <p className="min-w-0 flex-[1_1_12rem]">Respondes a: «{replying.quote ?? replying.asks ?? replying.reason}»</p>
           <Button type="button" size="sm" variant="ghost" className="min-h-11 sm:min-h-8" onClick={() => setPlain(true)}>
-            Escribir sin responderlo
+            {panel.reply.approvedOnly ? "Usar un mensaje aprobado" : "Escribir sin responderlo"}
+          </Button>
+        </div>
+      ) : null}
+      {/* Lo escrito sigue guardado: volver a su pregunta lo trae de nuevo. */}
+      {fromRecord && plain && topic && !heldByOther ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl bg-muted/60 p-3 text-sm">
+          <p className="min-w-0 flex-[1_1_12rem]">Sin responder: «{topic.quote ?? topic.asks ?? topic.reason}»</p>
+          <Button type="button" size="sm" variant="ghost" className="min-h-11 sm:min-h-8" onClick={() => setPlain(false)}>
+            Responder su pregunta
           </Button>
         </div>
       ) : null}
@@ -407,7 +416,7 @@ export function PersonPanel({
               disabled={toWhatsapp.isPending}
               onClick={() =>
                 toWhatsapp.mutate(
-                  { contactId: panel.contactId },
+                  { contactId: panel.contactId, onlyWhatsapp: true },
                   {
                     onSuccess: (result) => onSwitchConversation?.(result.conversationId),
                     onError: (error) => setProblem(submitErrorMessage(error)),

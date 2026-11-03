@@ -387,6 +387,7 @@ export function BookingDrawer({
   const autoService = React.useRef<string | null>(null)
   // Al conocer lo aceptado de la persona, vienen marcados los del primer servicio: varios
   // servicios en una cita corta no caben, y lo demás queda a la vista para marcarlo.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: corre al llegar la lista de cada persona.
   React.useEffect(() => {
     if (!coordinationQuery.data || marked?.patientId === values.patientId) return
     const chosen = values.serviceId === autoService.current ? "" : values.serviceId
@@ -399,7 +400,6 @@ export function BookingDrawer({
       // No lo eligió la persona: cerrar sin tocar nada no pregunta si descarta.
       form.setFieldValue("serviceId", first, { dontUpdateMeta: true })
     }
-    // biome-ignore lint/correctness/useExhaustiveDependencies: corre al llegar la lista de cada persona.
   }, [coordinationQuery.data, values.patientId])
   /** Lo que la cita trae; sin la lista (rol sin acceso o paciente recién registrado), lo que pidió el Plan o la regla del servidor. */
   const chosenItemsFor = (patientId: string): string[] | undefined => {
@@ -513,6 +513,13 @@ export function BookingDrawer({
     const [first = "", ...rest] = typed.trim().split(/\s+/)
     form.setFieldValue("givenNames", first)
     form.setFieldValue("surname", rest.join(" "))
+    // Se registra a otra persona: lo de la que estaba elegida (sus tratamientos y el
+    // servicio que se puso solo) era suyo.
+    form.setFieldValue("patientId", "")
+    if (autoService.current && values.serviceId === autoService.current)
+      form.setFieldValue("serviceId", "", { dontUpdateMeta: true })
+    autoService.current = null
+    setMarked(null)
     setRegistering(true)
   }
   const pickPatient = (patient: { id: string; name: string }) => {
