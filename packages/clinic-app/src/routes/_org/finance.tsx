@@ -113,6 +113,8 @@ import {
   todayIn,
   useBranchesStatus,
   type CashBox,
+  cashTermShort,
+  type ChangeBoxes,
   useCashBoxes,
   useCashState,
   voidCashMovementApi,
@@ -768,13 +770,18 @@ function totalsText(totals: DebtTotals, locale: string): string {
 // --- Caja -----------------------------------------------------------------------------
 
 /** «Quedó … + cobros … − gastos …»: solo los términos que no valen cero. */
-function breakdownLine(breakdown: CashBreakdown, plain: (cents: number) => string): string | null {
+function breakdownLine(
+  breakdown: CashBreakdown,
+  plain: (cents: number) => string,
+  boxes?: ChangeBoxes,
+): string | null {
   const terms = CASH_TERMS.filter((term) => breakdown[term.key] !== 0)
   if (terms.length === 0) return null
   return terms
     .map((term, index) => {
       const sign = cashTermLeaves(term, breakdown[term.key]) ? "− " : index === 0 ? "" : "+ "
-      const word = index === 0 ? upperFirst(term.short) : term.short
+      const short = cashTermShort(term, breakdown[term.key], boxes)
+      const word = index === 0 ? upperFirst(short) : short
       return `${sign}${word} ${plain(Math.abs(breakdown[term.key]))}`
     })
     .join(" ")
@@ -958,6 +965,7 @@ function CashTab({
                   : "Cobrado hoy"
               }
               locale={locale}
+              otherBox={boxes.find((other) => other.code !== box.code)?.code ?? null}
               // «Ver cobros» abre lo mismo que suma la tarjeta: desde el último cierre si la caja va de varios días.
               onShowTickets={() =>
                 onShowTickets(
@@ -1148,6 +1156,7 @@ function CashBoxFigures({
   title,
   collectedTitle,
   locale,
+  otherBox,
   onShowTickets,
 }: {
   state: CashState
@@ -1155,6 +1164,8 @@ function CashBoxFigures({
   title: string
   collectedTitle: string
   locale: string
+  /** La otra caja de la sede, para decir el vuelto cruzado; nula con una moneda. */
+  otherBox: string | null
   onShowTickets: () => void
 }) {
   const money = (cents: number) => formatMoney(cents, state.currency, locale)
@@ -1162,7 +1173,11 @@ function CashBoxFigures({
   const plain = (cents: number) => plainAmount(cents, state.currency, locale)
   const others = otherMethods(state.byMethod)
   const collected = state.byMethod.reduce((total, row) => total + row.amountCents, 0)
-  const line = breakdownLine(state.breakdown, plain)
+  const line = breakdownLine(
+    state.breakdown,
+    plain,
+    otherBox ? { box: state.currency, other: otherBox, locale } : undefined,
+  )
   return (
     <section aria-labelledby={headingId} className="flex flex-wrap gap-3">
       <div className="elevated min-w-0 grow-[2] basis-full rounded-xl border bg-card p-4 sm:basis-80 sm:p-5">

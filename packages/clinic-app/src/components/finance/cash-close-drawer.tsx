@@ -34,6 +34,7 @@ import { useEffect, useId, useRef, useState } from "react"
 import { ticketDisplayNumber } from "./ticket-view"
 import { plainAmount } from "../../lib/commissions"
 import { usePermission } from "../../lib/crm"
+import { useOrgProfile, useOrgSecondCurrency } from "../../lib/org"
 import { currencyChoices } from "../../lib/product-words"
 import { ChoiceButtons } from "../choice-buttons"
 import {
@@ -433,7 +434,19 @@ export function CashCloseDrawer({
                 (term) => CASH_TERMS_ALWAYS.has(term.key) || state.breakdown[term.key] !== 0,
               ).map((term) => (
                 <div key={term.key} className="flex justify-between gap-3">
-                  <dt>{cashTermLabel(term, state.breakdown[term.key] ?? 0)}</dt>
+                  <dt>
+                    {cashTermLabel(
+                      term,
+                      state.breakdown[term.key] ?? 0,
+                      several
+                        ? {
+                            box: unit,
+                            other: boxes.find((item) => item.code !== current.code)?.code ?? null,
+                            locale,
+                          }
+                        : undefined,
+                    )}
+                  </dt>
                   <dd className="tabular-nums">
                     {cashTermLeaves(term, state.breakdown[term.key] ?? 0) ? "− " : ""}
                     {plainAmount(Math.abs(state.breakdown[term.key] ?? 0), unit, locale)}
@@ -855,6 +868,8 @@ export function CashClosureSheet({
   orgTimeZone: string
 }): React.JSX.Element {
   const closure = sheet.closure
+  const business = useOrgProfile().data?.currency ?? null
+  const second = useOrgSecondCurrency()?.currency ?? null
   const timeZone = sheet.branch?.timezone || sheet.orgProfile?.timezone || orgTimeZone
   const money = (cents: number | null | undefined) =>
     cents === null || cents === undefined ? "—" : plainAmount(cents, closure.currency, locale)
@@ -869,7 +884,11 @@ export function CashClosureSheet({
     { key: "devuelto", label: "Devuelto en efectivo", sign: -1, cents: closure.cashRefundedCents, always: false },
     {
       key: "vuelto",
-      label: cashTermLabel({ key: "cashChangeCents", label: "" }, closure.cashChangeCents ?? 0),
+      label: cashTermLabel({ key: "cashChangeCents", label: "" }, closure.cashChangeCents ?? 0, {
+        box: closure.currency,
+        other: closure.currency === business ? second : business,
+        locale,
+      }),
       sign: (closure.cashChangeCents ?? 0) < 0 ? -1 : 1,
       cents: Math.abs(closure.cashChangeCents ?? 0),
       always: false,

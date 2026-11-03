@@ -3,6 +3,7 @@ import {
   CASH_TERMS,
   cashTermLabel,
   cashTermLeaves,
+  cashTermShort,
   type DayMovement,
   financeKeys,
   groupDayMovements,
@@ -70,6 +71,19 @@ describe("la caja con dos monedas", () => {
     expect(cashTermLeaves(expenses, 0)).toBe(true)
     expect(cashTermLabel(change, -7500)).not.toBe(cashTermLabel(change, 2000))
     expect(cashTermLabel(expenses, 500)).toBe(expenses.label)
+  })
+
+  it("el vuelto cruzado dice sus dos monedas, en la caja y en su tarjeta", () => {
+    const change = CASH_TERMS.find((term) => term.key === "cashChangeCents")!
+    const soles = { box: "PEN", other: "USD", locale: "es-PE" }
+    const dollars = { box: "USD", other: "PEN", locale: "es-PE" }
+    expect(cashTermLabel(change, -7500, soles)).toBe("Vuelto en soles de cobros en dólares")
+    expect(cashTermLabel(change, 2000, dollars)).toBe("Dólares que quedaron por vueltos dados en soles")
+    expect(cashTermShort(change, 2000, dollars)).toBe("dólares que quedaron por vueltos dados en soles")
+    expect(cashTermShort(change, -7500, soles)).toBe("vuelto en soles de cobros en dólares")
+    // Lo demás, como siempre.
+    const collected = CASH_TERMS.find((term) => term.key === "cashCollectedCents")!
+    expect(cashTermShort(collected, 8000, dollars)).toBe("cobros")
   })
 
   it("cada caja se pide y se invalida aparte: sin moneda, la clave de siempre", () => {

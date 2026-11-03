@@ -9,7 +9,7 @@
  * o la sede. Aquí no hay país, moneda ni medio de pago escritos.
  */
 import type { PurchaseBalance, PurchasesToPay } from "./reports"
-import { parseMoney } from "@odentia/clinical"
+import { currencyWord, parseMoney, upperFirst } from "@odentia/clinical"
 import { minutesToInstant, zonedDateOf } from "@odentia/ui-patterns"
 import { type QueryClient, useQuery } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
@@ -107,10 +107,41 @@ export function cashTermLeaves(term: { sign: 1 | -1 }, cents: number): boolean {
   return term.sign < 0 || cents < 0
 }
 
-/** Dicho según lo que hizo en esta caja: el vuelto salió de aquí o se quedó el exceso del billete. */
-export function cashTermLabel(term: { key: CashTermKey; label: string }, cents: number): string {
+/** Las dos monedas del vuelto cruzado: la de esta caja y la otra, si se sabe. */
+export interface ChangeBoxes {
+  box: string
+  other: string | null
+  locale: string
+}
+
+/**
+ * Dicho según lo que hizo en esta caja: el vuelto salió de aquí o se quedó el exceso
+ * del billete. Con las monedas, cada una por su nombre: «Vuelto en soles de cobros en
+ * dólares», «Dólares que quedaron por vueltos dados en soles».
+ */
+export function cashTermLabel(
+  term: { key: CashTermKey; label: string },
+  cents: number,
+  boxes?: ChangeBoxes,
+): string {
   if (term.key !== "cashChangeCents") return term.label
-  return cents < 0 ? "Vuelto de cobros en otra moneda" : "De más por un vuelto dado en otra moneda"
+  if (!boxes) return cents < 0 ? "Vuelto de cobros en otra moneda" : "De más por un vuelto dado en otra moneda"
+  const box = currencyWord(boxes.box, boxes.locale)
+  const other = boxes.other ? currencyWord(boxes.other, boxes.locale) : "otra moneda"
+  return cents < 0
+    ? `Vuelto en ${box} de cobros en ${other}`
+    : `${upperFirst(box)} que quedaron por vueltos dados en ${other}`
+}
+
+/** La palabra de la línea resumida de Caja; el vuelto, con la frase del cierre. */
+export function cashTermShort(
+  term: { key: CashTermKey; label: string; short: string },
+  cents: number,
+  boxes?: ChangeBoxes,
+): string {
+  if (term.key !== "cashChangeCents" || !boxes) return term.short
+  const label = cashTermLabel(term, cents, boxes)
+  return label.charAt(0).toLocaleLowerCase(boxes.locale) + label.slice(1)
 }
 
 /** Lo que el panel de cierre y la hoja muestran siempre, aunque valga cero. */
