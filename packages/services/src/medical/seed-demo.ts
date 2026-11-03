@@ -52,6 +52,8 @@ import { MEDICAL_DEMO_KINDS } from "./demo-kinds.js"
 
 export const MEDICAL_DEMO_ORG = "seed-org-consultorio-san-martin"
 export const VELA_ID = "seed-user-vela"
+/** Recepción del consultorio: el rol que más usa el sistema, para recorrerlo con sus permisos. */
+export const MEDICAL_RECEPCION_ID = "seed-user-recepcion-sanmartin"
 
 /** «2026-10-24T09:00:00-05:00»: el día de Lima, no el de UTC (desde las 19:00 de Lima en UTC ya es mañana). */
 function lima(dayOffset: number, hhmm: string): string {
@@ -81,29 +83,50 @@ export async function seedMedicalDemo(
       .set({ isDemo: true })
       .where(eq(saasSubscription.organizationId, ORG))
   })
-  await db.insert(user).values({
-    id: VELA_ID,
-    name: "Dra. Elena Vela",
-    firstName: "Elena",
-    lastName: "Vela",
-    email: "vela@odentia.dev",
-    emailVerified: true,
-    termsVersion: LEGAL.terms.version,
-    termsAcceptedAt: new Date(),
-  })
-  await db.insert(account).values({
-    id: randomUUID(),
-    accountId: VELA_ID,
-    providerId: "credential",
-    userId: VELA_ID,
-    password: input.passwordHash,
-  })
+  await db.insert(user).values([
+    {
+      id: VELA_ID,
+      name: "Dra. Elena Vela",
+      firstName: "Elena",
+      lastName: "Vela",
+      email: "vela@odentia.dev",
+      emailVerified: true,
+      termsVersion: LEGAL.terms.version,
+      termsAcceptedAt: new Date(),
+    },
+    {
+      id: MEDICAL_RECEPCION_ID,
+      name: "Rosa Huamán",
+      firstName: "Rosa",
+      lastName: "Huamán",
+      email: "recepcion.sanmartin@odentia.dev",
+      emailVerified: true,
+      termsVersion: LEGAL.terms.version,
+      termsAcceptedAt: new Date(),
+    },
+  ])
+  await db.insert(account).values(
+    [VELA_ID, MEDICAL_RECEPCION_ID].map((userId) => ({
+      id: randomUUID(),
+      accountId: userId,
+      providerId: "credential",
+      userId,
+      password: input.passwordHash,
+    })),
+  )
   await db.insert(member).values([
     {
       id: randomUUID(),
       organizationId: ORG,
       userId: VELA_ID,
       role: "owner",
+      createdAt: new Date(),
+    },
+    {
+      id: randomUUID(),
+      organizationId: ORG,
+      userId: MEDICAL_RECEPCION_ID,
+      role: "reception",
       createdAt: new Date(),
     },
     // Ana dirige Dental Smile y también este consultorio: «Elige tu clínica» muestra los dos.
