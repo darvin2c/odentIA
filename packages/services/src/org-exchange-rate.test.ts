@@ -200,7 +200,9 @@ it("la moneda del negocio queda quieta con otra moneda activa", async () => {
 
 it("dos monedas como máximo: con movimientos en una, no se activa otra", async () => {
   const c = await clinic()
-  await ownService(c.orgId, "USD")
+  // Un servicio que ya no se ofrece: es historia en dólares y no impide quitarlos.
+  const [old] = await ownService(c.orgId, "USD")
+  await ownerDb.update(serviceCatalog).set({ isActive: false }).where(eq(serviceCatalog.id, old!.id))
   await expect(
     c.run((tx) =>
       setOrgExchangeRate(tx, c.orgId, c.actor, { secondCurrency: "EUR", exchangeRate: "4" }),
@@ -251,8 +253,10 @@ it("dice lo que ya hay en otra moneda: por cobrar, servicios y efectivo en caja"
   expect(await c.run((tx) => getCurrencyUsage(tx, c.orgId, "USD"))).toEqual({
     currency: "USD",
     dueCents: 0,
-    services: 0,
+    favorCents: 0,
     cashCents: 0,
+    services: 0,
+    pending: 0,
   })
   await ownService(c.orgId, "USD")
   await ownService(c.orgId, "PEN")

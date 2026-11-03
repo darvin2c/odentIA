@@ -1,5 +1,6 @@
 import {
   clinicalProfileFor,
+  currencyRemovalWords,
   DIAGNOSIS_SYSTEM_INFO,
   formatExchangeRateInput,
   formatMoney,
@@ -61,7 +62,6 @@ import {
 import { PageDraftGuard, sameDraft } from "../../lib/page-draft-guard"
 import {
   countryName,
-  currencyLabel,
   currencyOptions,
   displayLanguage,
   type NamedOption,
@@ -766,20 +766,11 @@ function currencyUsageWords(
       : null,
     usage.cashCents > 0 ? `${money(usage.cashCents)} en la caja` : null,
   ].filter((part): part is string => part !== null)
+  // Para quitarla, lo mismo que exige el servidor: qué hacer antes de guardar.
+  if (context.removing) return currencyRemovalWords(usage, context.business, context.locale)
   if (parts.length === 0) return null
   const list = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} y ${parts.at(-1)}` : parts[0]
-  const seen = `Hay ${list}.`
-  if (!context.removing) return seen
-  return [
-    seen,
-    usage.dueCents > 0 ? `Lo que ya se debe se sigue cobrando en ${usage.currency}.` : null,
-    usage.cashCents > 0 ? "La caja se sigue contando hasta cerrarla." : null,
-    usage.services > 0
-      ? `Esos servicios tendrás que pasarlos a ${currencyLabel(context.business, context.language)}.`
-      : null,
-  ]
-    .filter(Boolean)
-    .join(" ")
+  return `Hay ${list}.`
 }
 
 /** «Así se verán»: lo elegido arriba, aplicado a una fecha, una hora y un importe. */

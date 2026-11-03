@@ -2,6 +2,7 @@ import {
   type ClinicalCountryProfile,
   type ClinicalProduct,
   clinicalProfileFor,
+  type CurrencyInUse,
   DIAGNOSIS_SYSTEM_INFO,
   type DiagnosisSystemInfo,
   formatExchangeRateInput,
@@ -183,12 +184,7 @@ export async function saveExchangeRate(exchangeRate: string): Promise<OrgProfile
 }
 
 /** Lo que la clínica ya tiene en una moneda: se dice antes de activarla o quitarla. */
-export interface CurrencyUsage {
-  currency: string
-  dueCents: number
-  services: number
-  cashCents: number
-}
+export type CurrencyUsage = CurrencyInUse
 
 export async function fetchCurrencyUsage(currency: string): Promise<CurrencyUsage> {
   const params = new URLSearchParams({ currency })

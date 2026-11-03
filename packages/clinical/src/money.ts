@@ -353,6 +353,44 @@ export function currencyWord(currency: string, locale: string): string {
   return name?.split(" ")[0]?.toLocaleLowerCase(locale) || currency
 }
 
+/** Lo que una clínica todavía tiene en su otra moneda. */
+export interface CurrencyInUse {
+  currency: string
+  /** Lo que se debe en esa moneda. */
+  dueCents: number
+  /** Lo que los pacientes tienen a favor en esa moneda. */
+  favorCents: number
+  /** Efectivo en las cajas abiertas de esa moneda. */
+  cashCents: number
+  /** Servicios activos con el precio en esa moneda. */
+  services: number
+  /** Tratamientos por hacer con el precio en esa moneda. */
+  pending: number
+}
+
+/**
+ * Lo que hay que hacer antes de dejar de cobrar en una moneda, dicho para quien
+ * configura; nulo si nada la necesita. La misma frase en Ajustes y en el servidor.
+ */
+export function currencyRemovalWords(usage: CurrencyInUse, business: string, locale: string): string | null {
+  const word = currencyWord(usage.currency, locale)
+  const steps = [
+    usage.dueCents > 0 ? `cobra o anula lo que se debe en ${word}` : null,
+    usage.favorCents > 0 ? `usa o devuelve lo que tienen a favor en ${word}` : null,
+    usage.cashCents > 0 ? `retira el efectivo de la caja de ${word}` : null,
+    usage.cashCents < 0 ? `cierra la caja de ${word}` : null,
+    usage.services > 0
+      ? `pasa ${usage.services === 1 ? "el servicio" : `los ${usage.services} servicios`} con precio en ${word} a ${currencyWord(business, locale)}`
+      : null,
+    usage.pending > 0
+      ? `realiza o cancela ${usage.pending === 1 ? "el tratamiento" : `los ${usage.pending} tratamientos`} por hacer en ${word}`
+      : null,
+  ].filter((step): step is string => step !== null)
+  if (steps.length === 0) return null
+  const list = steps.length > 1 ? `${steps.slice(0, -1).join(", ")} y ${steps.at(-1)}` : steps[0]
+  return `Para dejar de cobrar en ${word}, primero ${list}.`
+}
+
 /**
  * El cambio por unidad menor de cada moneda, para las cuentas en SQL:
  * `rate × 10^(dígitos negocio − dígitos otra)`. 950 pesos chilenos (sin

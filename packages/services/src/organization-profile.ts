@@ -1,6 +1,8 @@
 import {
   clinicalProfileFor,
+  type CurrencyInUse,
   currencyFractionDigits,
+  currencyRemovalWords,
   exchangeFactor,
   isSelectableDiagnosisSystem,
   normalizeExchangeRate,
@@ -568,6 +570,11 @@ export async function setOrgExchangeRate(
     if (input.secondCurrency === undefined)
       throw invalidField("exchangeRate", "Primero elige en qué otra moneda cobra la clínica")
     if (!current.secondCurrency) return current
+    // Mientras algo la necesite, quitarla dejaría deudas, saldos y una caja sin cómo cobrarse.
+    const usage = await getCurrencyUsage(tx, orgId, current.secondCurrency)
+    const missing = currencyRemovalWords(usage, current.currency, current.locale)
+    if (missing)
+      throw new ServiceError("SECOND_CURRENCY_IN_USE", 409, missing, { secondCurrency: missing })
     return writeExchange(tx, orgId, actorUserId, current, {
       secondCurrency: null,
       exchangeRate: null,
@@ -651,15 +658,7 @@ export async function exchangeRateAuthor(
 }
 
 /** Lo que la clínica ya tiene en una moneda: lo que hay que saber antes de activarla o quitarla. */
-export interface CurrencyUsage {
-  currency: string
-  /** Lo que se debe en esa moneda, sin anular y sin lo ya pagado. */
-  dueCents: number
-  /** Servicios activos con el precio en esa moneda. */
-  services: number
-  /** Efectivo en las cajas abiertas de esa moneda. */
-  cashCents: number
-}
+export type CurrencyUsage = CurrencyInUse
 
 export async function getCurrencyUsage(tx: Db, orgId: string, currency: string): Promise<CurrencyUsage> {
   const code = assertCurrency(currency, "currency")
@@ -683,10 +682,29 @@ export async function getCurrencyUsage(tx: Db, orgId: string, currency: string):
     from "cash_movement" m
     join "cash_shift" s on s."organization_id" = m."organization_id" and s."id" = m."shift_id"
     where m."organization_id" = ${orgId} and s."currency" = ${code} and s."status" = 'abierta' and m."voided_at" is null`)
+  // Lo que cada pago vigente tiene sin aplicar ni devolver.
+  const [favor] = await tx.execute<{ cents: string | null }>(sql`
+    select sum(greatest(p."amount_cents" - coalesce(used."cents", 0) - coalesce(back."cents", 0), 0)) as "cents"
+    from "patient_payment" p
+    left join lateral (
+      select sum(a."amount_cents") as "cents" from "patient_payment_application" a
+      where a."organization_id" = p."organization_id" and a."payment_id" = p."id" and a."voided_at" is null
+    ) used on true
+    left join lateral (
+      select sum(r."amount_cents") as "cents" from "patient_payment_refund" r
+      where r."organization_id" = p."organization_id" and r."payment_id" = p."id"
+    ) back on true
+    where p."organization_id" = ${orgId} and p."currency" = ${code} and p."voided_at" is null`)
+  const [pending] = await tx.execute<{ total: string }>(sql`
+    select count(*) as "total" from "treatment_plan_item"
+    where "organization_id" = ${orgId} and "currency" = ${code}
+      and "status" in ('pendiente', 'programado', 'en_curso', 'suspendido')`)
   return {
     currency: code,
     dueCents: Number(due?.cents ?? 0),
-    services: Number(services?.total ?? 0),
+    favorCents: Number(favor?.cents ?? 0),
     cashCents: Number(cash?.cents ?? 0),
+    services: Number(services?.total ?? 0),
+    pending: Number(pending?.total ?? 0),
   }
 }

@@ -420,8 +420,10 @@ it("la otra moneda la activa quien configura y el cambio de hoy también lo escr
   expect(await data(await request("owner", "GET", "/org-profile/currency-usage?currency=USD"))).toEqual({
     currency: "USD",
     dueCents: 0,
-    services: 0,
+    favorCents: 0,
     cashCents: 0,
+    services: 0,
+    pending: 0,
   })
 
   const removed = await request("owner", "PUT", "/org-profile", { ...body, secondCurrency: null })

@@ -7,7 +7,12 @@
 import { randomUUID } from "node:crypto"
 import { type Db, withOrgContext } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
-import { patientPayment, patientPaymentRefund, paymentTicket } from "@odentia/db/schema/clinical"
+import {
+  patientPayment,
+  patientPaymentRefund,
+  paymentTicket,
+  serviceCatalog,
+} from "@odentia/db/schema/clinical"
 import { cashClosure, cashMovement, cashShift } from "@odentia/db/schema/finance"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, eq } from "drizzle-orm"
@@ -1005,6 +1010,68 @@ it("una devolución que en la moneda en que entró no llega a un céntimo no se 
       }),
     ),
   ).rejects.toMatchObject({ fields: { amountCents: expect.stringContaining("dólares") } })
+})
+
+it("los dólares no se quitan mientras algo los necesite: deuda, caja, saldo a favor o servicios", async () => {
+  const c = await clinic()
+  const remove = () =>
+    c.run((tx) => setOrgExchangeRate(tx, c.orgId, c.actor, { secondCurrency: null }))
+  const blocked = (text: string) =>
+    expect(remove()).rejects.toMatchObject({
+      code: "SECOND_CURRENCY_IN_USE",
+      fields: { secondCurrency: expect.stringContaining(text) },
+    })
+  const debt = await c.charge(10000, "USD")
+  await blocked("Para dejar de cobrar en dólares, primero cobra o anula lo que se debe en dólares")
+  await c.collect({
+    chargeIds: [debt.id],
+    exchangeRate: "3.75",
+    payments: [{ paymentMethodId: c.cash.id, amountCents: 10000 }],
+  })
+  await blocked("retira el efectivo de la caja de dólares")
+  await c.run((tx) =>
+    addCashMovement(tx, c.orgId, c.actor, {
+      branchId: c.site.id,
+      kind: "retiro",
+      amountCents: 10000,
+      concept: "Al banco",
+      currency: "USD",
+    }),
+  )
+  await c.collect({
+    currency: "USD",
+    exchangeRate: "3.75",
+    advanceCents: 500,
+    payments: [{ paymentMethodId: c.cash.id, amountCents: 500 }],
+  })
+  await blocked("usa o devuelve lo que tienen a favor en dólares")
+  await c.run((tx) =>
+    refundCredit(tx, ...c.args, {
+      branchId: c.site.id,
+      amountCents: 500,
+      paymentMethodId: c.cash.id,
+      reason: "Lo pidió",
+      currency: "USD",
+    }),
+  )
+  const [service] = await ownerDb
+    .insert(serviceCatalog)
+    .values({
+      organizationId: c.orgId,
+      name: "Implante",
+      scope: "general",
+      source: "custom",
+      priceCents: 100000,
+      currency: "USD",
+    })
+    .returning()
+  await blocked("pasa el servicio con precio en dólares a soles")
+  await ownerDb
+    .update(serviceCatalog)
+    .set({ isActive: false })
+    .where(eq(serviceCatalog.id, service?.id as string))
+  // Ya nada la necesita: se quita.
+  expect((await remove()).secondCurrency).toBeNull()
 })
 
 it("conceptos de dos monedas no van en un cobro: cada moneda lleva su ticket", async () => {

@@ -1187,7 +1187,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo activo la otra moneda?",
-        a: "En Datos de la clínica, en «También cobro en» eliges la otra moneda (son dos como máximo) y en «Cambio de hoy» escribes a cuánto está, en tu moneda por 1 de la otra. Si ya hay algo en esa moneda, te lo dice antes de guardar. Desde ahí puedes poner precios, cobrar, comprar y registrar gastos en ella; tus reportes, metas y comisiones siguen en la «Moneda del negocio». Si no la activas, todo sigue igual.",
+        a: "En Datos de la clínica, en «También cobro en» eliges la otra moneda (son dos como máximo) y en «Cambio de hoy» escribes a cuánto está, en tu moneda por 1 de la otra. Si ya hay algo en esa moneda, te lo dice antes de guardar. Desde ahí puedes poner precios, cobrar, comprar y registrar gastos en ella; tus reportes, metas y comisiones siguen en la «Moneda del negocio». Si no la activas, todo sigue igual. Para dejar de cobrar en ella, antes cobra lo que se debe en esa moneda, usa o devuelve lo que tengan a favor, retira el efectivo de su caja y pasa sus servicios a la moneda del negocio: Datos de la clínica te dice qué falta.",
         forms: ["como activo otra moneda", "como activo los dolares", "quiero cobrar tambien en dolares", "activar segunda moneda", "activar dolares", "cobrar en dos monedas"],
       },
       {
