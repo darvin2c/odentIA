@@ -58,6 +58,8 @@ import {
   formatDateTimeShortLocale,
   refundApi,
   useOrgFinanceProfile,
+  accountBalances,
+  accountBalanceTitle,
   type AccountCobro,
   type CollectResultBody,
   type RefundResult,
@@ -385,10 +387,7 @@ export function AccountTab({
   const focusBalance = focusRow?.saldo ?? 0
   const owing = rows.filter((row) => row.saldo > 0)
   const favorRows = rows.filter((row) => row.aFavor > 0)
-  const balances =
-    data.byCurrency.length > 0
-      ? data.byCurrency
-      : [{ currency: orgUnit, porCobrar: 0, pagado: 0, aFavor: 0, saldo: 0 }]
+  const balances = accountBalances(data.byCurrency, orgUnit, second?.currency ?? null)
   const person = patient.data?.data.patient
   const patientName = person?.displayName ?? ""
   const patientDocument = person?.docNumber ? documentText(person.docType, person.docNumber) : null
@@ -462,7 +461,9 @@ export function AccountTab({
           {balances.map((balance) => (
             <div key={balance.currency}>
               {balances.length > 1 ? (
-                <h2 className="mb-1 text-sm font-semibold">{balance.currency}</h2>
+                <h2 className="mb-1 text-sm font-semibold">
+                  {accountBalanceTitle(balance.currency, locale, second?.currency ?? null)}
+                </h2>
               ) : null}
               <dl className="grid grid-cols-3 gap-3">
                 {(

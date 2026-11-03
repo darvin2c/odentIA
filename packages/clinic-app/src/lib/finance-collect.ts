@@ -9,7 +9,7 @@
  * horaria siempre del perfil/sede. Nada fijo.
  */
 import { useQuery } from "@tanstack/react-query"
-import { currencyFractionDigits, type TicketTender } from "@odentia/clinical"
+import { currencyFractionDigits, currencyWord, type TicketTender, upperFirst } from "@odentia/clinical"
 import { apiFetch } from "./api"
 import { amountFromCents } from "./workspace"
 
@@ -507,6 +507,30 @@ export interface AccountCurrency {
   aFavor: number
   /** Lo que debe menos lo que tiene a favor (decisión 22); nunca baja de cero. */
   saldo: number
+}
+
+/**
+ * Los bloques de la cuenta: la moneda del negocio siempre (en cero si no hay nada); la
+ * otra moneda de la clínica, solo si debe, tiene a favor o queda saldo en ella. Sin
+ * otra moneda, todas las filas, como siempre.
+ */
+export function accountBalances<T extends AccountCurrency>(
+  rows: readonly T[],
+  business: string,
+  second: string | null,
+): Array<T | AccountCurrency> {
+  const shown = second
+    ? rows.filter(
+        (row) =>
+          row.currency !== second || row.porCobrar !== 0 || row.aFavor !== 0 || row.saldo !== 0,
+      )
+    : [...rows]
+  return shown.length > 0 ? shown : [{ currency: business, porCobrar: 0, pagado: 0, aFavor: 0, saldo: 0 }]
+}
+
+/** El título de un bloque: con otra moneda, su nombre («Dólares»); sin ella, como siempre. */
+export function accountBalanceTitle(currency: string, locale: string, second: string | null): string {
+  return second ? upperFirst(currencyWord(currency, locale)) : currency
 }
 
 export interface AccountPendingItem {

@@ -8,7 +8,7 @@ import {
   financeKeys,
   groupDayMovements,
 } from "./finance-cash"
-import { sentence } from "./finance-collect"
+import { accountBalances, accountBalanceTitle, sentence } from "./finance-collect"
 import { cashCollectedText, type WorkspaceCash } from "./workspace"
 const movement = (over: Partial<DayMovement>): DayMovement => ({
   id: "m1",
@@ -49,6 +49,30 @@ describe("Inicio › Caja de hoy", () => {
     expect(spaced(cashCollectedText(cash(0, 8000, 1), "es-PE"))).toBe(
       "Cobrado S/ 0.00 + USD 80.00 en 1 cobro",
     )
+  })
+})
+
+describe("la cuenta del paciente con dos monedas", () => {
+  const row = (currency: string, porCobrar: number, aFavor = 0, saldo = porCobrar - aFavor) => ({
+    currency,
+    porCobrar,
+    pagado: 0,
+    aFavor,
+    saldo,
+  })
+
+  it("la otra moneda sale solo si tiene algo; la del negocio, siempre", () => {
+    const paid = [row("PEN", 0), row("USD", 0)]
+    expect(accountBalances(paid, "PEN", "USD").map((item) => item.currency)).toEqual(["PEN"])
+    expect(accountBalances([row("PEN", 0), row("USD", 0, 500)], "PEN", "USD")).toHaveLength(2)
+    // Con una sola moneda, todo como antes.
+    expect(accountBalances(paid, "PEN", null)).toHaveLength(2)
+    expect(accountBalances([], "PEN", "USD")).toEqual([row("PEN", 0)])
+  })
+
+  it("cada bloque se titula con su moneda dicha", () => {
+    expect(accountBalanceTitle("USD", "es-PE", "USD")).toBe("Dólares")
+    expect(accountBalanceTitle("EUR", "es-PE", null)).toBe("EUR")
   })
 })
 
