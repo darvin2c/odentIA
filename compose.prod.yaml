@@ -38,15 +38,10 @@ services:
       retries: 20
 
   migrate:
+    # Sin argumentos de build: la imagen ya no arma pantallas, solo API, worker y migraciones.
     build: &app-build
       context: .
       dockerfile: Dockerfile
-      args:
-        VITE_API_URL: ${VITE_API_URL:?}
-        VITE_BASE_DOMAIN: ${VITE_BASE_DOMAIN:?}
-        # Dónde abre una clínica de cada producto (decisión 9 del issue 229); vacíos, en VITE_BASE_DOMAIN.
-        VITE_DENTAL_DOMAIN: ${VITE_DENTAL_DOMAIN:-}
-        VITE_MEDICAL_DOMAIN: ${VITE_MEDICAL_DOMAIN:-}
     # Después de migrar carga las listas de diagnósticos oficiales del repositorio
     # (la CIE-11 de la OMS) y la biblioteca de servicios con la lista de cada país
     # (la CPMS del Perú, ADR 0069): sin ella una clínica del Perú no puede crear
@@ -90,82 +85,8 @@ services:
       migrate:
         condition: service_completed_successfully
 
-  panel:
-    build: *app-build
-    command: ["pnpm", "--filter", "@odentia/panel", "start"]
-    env_file: *runtime-env-file
-    environment:
-      PORT: "3000"
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:3010:3000"
-    depends_on:
-      - api
-
-  admin:
-    build: *app-build
-    command: ["pnpm", "--filter", "@odentia/admin", "start"]
-    env_file: *runtime-env-file
-    environment:
-      PORT: "3000"
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:3012:3000"
-    depends_on:
-      - api
-
-  platform:
-    build: *app-build
-    command: ["pnpm", "--filter", "@odentia/dental-clinic", "start"]
-    env_file: *runtime-env-file
-    environment:
-      PORT: "3000"
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:3011:3000"
-    depends_on:
-      - api
-
-  # latidIA (decisión 9 del issue 229): su panel y la app de sus clínicas son otro
-  # artefacto de la misma receta, con los dominios de latidia72.com. Solo arrancan
-  # con el perfil «latidia» y LATIDIA_API_URL y MEDICAL_DOMAIN definidos
-  # (docs/deployment.md, «latidIA en su dominio»).
-  latidia-panel:
-    profiles: ["latidia"]
-    build: &latidia-build
-      context: .
-      dockerfile: Dockerfile
-      args:
-        VITE_API_URL: ${LATIDIA_API_URL:-}
-        VITE_BASE_DOMAIN: ${MEDICAL_DOMAIN:-}
-        VITE_DENTAL_DOMAIN: ${VITE_DENTAL_DOMAIN:-}
-        VITE_MEDICAL_DOMAIN: ${MEDICAL_DOMAIN:-}
-        VITE_PRODUCT: medical
-    command: ["pnpm", "--filter", "@odentia/panel", "start"]
-    env_file: *runtime-env-file
-    environment:
-      PORT: "3000"
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:3014:3000"
-    depends_on:
-      - api
-
-  latidia:
-    profiles: ["latidia"]
-    build: *latidia-build
-    command: ["pnpm", "--filter", "@odentia/medical-clinic", "start"]
-    env_file: *runtime-env-file
-    environment:
-      PORT: "3000"
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:3015:3000"
-    depends_on:
-      - api
-
-  # Las dos webs de marketing (odentia32.com y latidia72.com) no corren aquí: son Workers de
-  # Cloudflare (ADR 0136, docs/deployment.md).
+  # Las pantallas (webs, panel, administración y app de las clínicas de los dos productos) no
+  # corren aquí: son Workers de Cloudflare (ADR 0136-0138, docs/deployment.md).
 
   # Entrada pública por Cloudflare Tunnel: cloudflared solo abre conexiones de salida
   # y entrega cada visita por la red del stack (api:3001, panel:3000…), así que nadie

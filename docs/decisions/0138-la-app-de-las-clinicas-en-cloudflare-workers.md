@@ -23,6 +23,7 @@ Con las webs, el panel y la administración en Workers, la app de las clínicas 
 - La app de las clínicas sigue dependiendo de la API del VPS: mejora lo que no pide datos al servidor; las pantallas con sesión responden casi igual (ADR 0137).
 - Es la app más usada y sus pantallas con sesión no se guardan en caché: es la que más arriesga pasar los 10 ms de CPU del plan gratuito, y un error ahí lo ve la clínica (Fail open solo cubre el límite diario). Se mira en Metrics; si aparecen cortes, la salida es el plan de USD 5 de Workers (CPU de sobra y 10 MB) o quitar la ruta.
 - Queda poco margen de tamaño: si crece más allá de 3 MB comprimidos, el plan gratuito deja de alcanzar.
+- Retirados del VPS el mismo 2026-11-03 (`platform` y `latidia` fuera del compose): sin respaldo, un error del Worker lo ve la clínica; volver es devolverlos al compose.
 - `chat.js` deja de guardarse 4 horas en el navegador: el Worker lo revalida, así que un cambio del chat llega enseguida a las webs de las clínicas.
 
 ## Referencias
