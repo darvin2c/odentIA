@@ -1,13 +1,15 @@
 ---
 name: odentia-entrega
-description: Llevar un cambio de odentIA o latidIA de principio a fin, hasta que llegue a producción. Cubre discutirlo con cuatro voces (desarrollo, clínica, novato y auditor), hacer el lienzo si hace falta, simplificar, implementar, probar, revisar, abrir el PR, pedir el sí, unir y seguir el despliegue. Usar cuando se aprueba un lienzo («aprobado», «empieza», «implementa el lienzo»), cuando piden construir una función nueva o corregir un error reportado, aunque no mencionen PR ni merge. No usar para preguntas, ideas o estudios sin construir, ni para una etapa suelta como «corre las pruebas» o «revisa este diff».
+description: Llevar un cambio de odentIA o latidIA de punta a punta en un solo PR, hasta que esté unido y desplegado en producción. Cubre discutirlo con cuatro voces (desarrollo, clínica, novato y auditor), hacer el lienzo si hace falta, simplificar, implementar, probar, revisar, abrir el PR, pedir el sí, unir y seguir el despliegue. Usar cuando se aprueba un lienzo («aprobado», «empieza», «implementa el lienzo»), cuando piden construir una función nueva o corregir un error reportado, aunque no mencionen PR ni merge. No usar para preguntas, ideas o estudios sin construir, ni para una etapa suelta como «corre las pruebas» o «revisa este diff».
 ---
 
 # Entregar un cambio
 
 El recorrido de un cambio desde que se decide hasta que está en producción. Es un método: las reglas siguen en el `AGENTS.md` de cada área, que se lee antes de tocarla. Las rutas parten de la raíz del repositorio.
 
-Pedir esta skill autoriza crear la rama, hacer commits, subirla y abrir el PR. No autoriza unir: unir despliega a producción sin ningún otro paso, y por eso se pide aparte (etapa 10).
+Una entrega es un solo PR y termina cuando ese PR está unido y su despliegue comprobado (etapa 11), no cuando se abre. Todo lo pedido va en ese PR: no se divide en entregas ni en fases, ni se deja la segunda mitad para otra sesión.
+
+Pedir esta skill autoriza crear la rama, hacer commits, subirla y abrir el PR. No autoriza unir: unir despliega a producción sin ningún otro paso, y por eso se pide aparte (etapa 10). Con el sí, la misma sesión une, sigue el despliegue y cierra, sin otra parada.
 
 Si el trabajo ya empezó, ubicar la etapa por el lienzo, la rama, el PR y el CI, y seguir desde ahí sin repetir lo hecho.
 
@@ -20,7 +22,7 @@ Solo en estos casos. En el resto sigue sin pedir permiso y, al hablar con el usu
 - Un lienzo aprobado choca con una regla vigente o con los permisos, o se equivoca en algo de dinero o firmas: lo dice con el caso concreto y propone cómo seguir. Una diferencia menor se resuelve y se informa, sin detenerse, porque el usuario ya dijo «empieza».
 - Se va a gastar en una medición con modelo real: dice cuántas rondas y el costo aproximado.
 - Hay que tocar algo real a mano: producción, mensajes a personas, contenedores de otras sesiones.
-- Todo está listo para unir.
+- Todo está listo para unir. Es la última parada: después del sí no se vuelve a esperar.
 
 Cada parada pide una sola cosa, con una recomendación, para que se pueda responder en una línea. El detalle de las voces queda en el acta. Lo que depende de una respuesta pendiente no se planea archivo por archivo hasta tenerla.
 
@@ -48,19 +50,21 @@ Cuatro voces critican el cambio por separado, antes de dibujar o programar. Cóm
 
 ### 2. El lienzo
 
-Se publica como Artifact de tipo Design, con la skill `odentia-ux`: tableros numerados con el problema, el antes y el después con capturas reales de los dos productos, las decisiones numeradas con una recomendación, los casos y las fases. Cada promesa se cruza con `packages/auth/src/permissions.ts` y con el servicio que la haría. Si se puede, se prueba la propuesta en la app y se deshace.
+Se publica como Artifact de tipo Design, con la skill `odentia-ux`: tableros numerados con el problema, el antes y el después con capturas reales de los dos productos, las decisiones numeradas con una recomendación, los casos y lo que queda fuera de este PR. Cada promesa se cruza con `packages/auth/src/permissions.ts` y con el servicio que la haría. Si se puede, se prueba la propuesta en la app y se deshace.
 
 Espera el visto bueno. Si aprueba solo algunas decisiones, se construyen esas y las demás quedan como pendientes.
 
-### 3. Simplificar y dividir
+### 3. Simplificar
 
 Escribir el plan y pasar cada elemento por dos preguntas: qué problema real resuelve y por qué no basta lo que ya hay. Lo que no responda se quita, y lo que repite otra cosa también.
 
 Preferir lo mínimo que reutiliza lo existente. Nada obligatorio que trabe firmar, atender o cobrar: lo opcional va como aviso. Lo legal no frena el diseño; queda anotado como pendiente.
 
-Lo que se encontró de paso y nadie pidió queda como pendiente, o como una entrega aparte con su motivo; no se mezcla con lo pedido.
+Lo que se encontró de paso y nadie pidió queda como pendiente en el PR; no se mezcla con lo pedido.
 
-Dividir en entregas que valgan solas, cada una con su PR. Lo que toca dinero o firmas va en su propio PR, para revisarlo y revertirlo aparte. Una entrega a la vez: la siguiente empieza cuando la anterior está en producción. Quitar una columna o tabla que el código lee son dos entregas: primero el código y, ya desplegado, la migración, porque `migrate` corre antes de levantar la API y el worker y la imagen anterior se quedaría sin poder leer.
+Todo lo pedido cabe en un PR. Si resulta demasiado, se recorta aquí, no se reparte: lo que sale queda como pendiente y se dice en la parada de la mesa o del lienzo, para que el usuario lo sepa antes de programar. Lo que toca dinero o firmas va en el mismo PR, en sus propios commits, y el PR lo nombra para que la revisión lo mire primero.
+
+Quitar una columna o tabla que el código lee no cabe en un solo despliegue: `migrate` corre antes de levantar la API y el worker, y la imagen anterior se quedaría sin poder leer. Este PR deja de leerla y no la borra; borrarla queda como pendiente, para un cambio aparte cuando este ya esté en producción.
 
 ### 4. Implementar
 
@@ -135,7 +139,7 @@ Título: `tipo(scope): lo que cambia para la persona`. Cuerpo en palabras simple
 ## Al desplegar
 ```
 
-«Cómo se probó» dice lo ejecutado y lo que no. Nada simulado cuenta como prueba de que funciona con un proveedor real, ni la mesa como prueba de que es fácil. «Al desplegar» dice la migración y todo paso a mano. El PR enlaza el lienzo y dice qué fase es.
+«Cómo se probó» dice lo ejecutado y lo que no. Nada simulado cuenta como prueba de que funciona con un proveedor real, ni la mesa como prueba de que es fácil. «Al desplegar» dice la migración y todo paso a mano. El PR enlaza el lienzo, si lo hay.
 
 Esperar el CI con `gh pr checks --watch`. Si falla, leer el registro y corregir la causa.
 
@@ -166,7 +170,7 @@ Unir con `gh pr merge <número> --squash`.
 
 Unir no es llegar. `main` corre todo y recién después despliega. Seguir la corrida con `gh run list --branch main --limit 5` y `gh run watch <id>`.
 
-- `deploy` en `skipped`: falló algo en `main` y no llegó nada. Decirlo enseguida en palabras simples y corregirlo con otro PR, desde la etapa 4.
+- `deploy` en `skipped`: falló algo en `main` y no llegó nada. Decirlo enseguida en palabras simples y corregirlo con un PR de arreglo, desde la etapa 4. Es el único otro PR que abre la entrega, y no termina hasta que ese arreglo despliega.
 - `deploy` en `success` no basta: si `main` avanzó, la corrida termina bien sin desplegar y lo hace la del commit más nuevo. Mirar que el paso «Desplegar el commit verificado» haya corrido en un commit que incluya el tuyo.
 
 Después, los pasos a mano de «Al desplegar». La semilla no corre en producción: los precios y lo incluido se cambian en los cuatro planes, y las variables de entorno se ponen allá. Pedirlo o confirmarlo antes de tocar producción.
@@ -176,6 +180,6 @@ Comprobar por fuera lo que se pueda, solo leyendo: `odentia32.com`, `latidia72.c
 ### 12. Cerrar
 
 - Apagar `pnpm dev`, borrar los contenedores propios y devolver lo que las herramientas reescriben sin cambiarlo, como `apps/*/src/routeTree.gen.ts`. Los contenedores de otras sesiones no se tocan.
-- Si quedan fases, pasar a la siguiente: el lienzo aprobado ya la cubre, y su sí para unir se pide aparte.
+- Lo que quedó fuera va a la memoria y al informe como pendiente. No se empieza otro PR sin que lo pidan.
 - Guardar en la memoria lo que no sale del código: decisiones pendientes y en qué va el lienzo.
-- Informar: si está en producción, qué cambia para la persona, qué no se comprobó y qué quedó pendiente.
+- Informar: el PR unido, el commit desplegado, qué cambia para la persona, qué no se comprobó y qué quedó pendiente.

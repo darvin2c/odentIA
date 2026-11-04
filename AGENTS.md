@@ -52,7 +52,7 @@ Leer el `AGENTS.md` del área antes de modificarla; sus reglas complementan este
 - `.agents/skills/odentia-ux/SKILL.md`: usar al diseñar o cambiar interfaces y recorridos.
 - `.agents/skills/odentia-arch/SKILL.md`: usar para stack, topología, tenancy, adaptadores y storage.
 - `.agents/skills/odentia-carga/SKILL.md`: usar al traer los pacientes de una clínica nueva desde sus archivos.
-- `.agents/skills/odentia-entrega/SKILL.md`: usar al construir una función o corregir un error, desde la mesa hasta que llega a producción.
+- `.agents/skills/odentia-entrega/SKILL.md`: usar al construir una función o corregir un error, en un solo PR desde la mesa hasta que está desplegado.
 - `.agents/skills/odentia-qa/SKILL.md`: usar para una ronda de QA en la demo de producción, sin corregir de paso.
 - `docs/development.md`: instalación, operación local y herramientas.
 - `docs/decisions/README.md`: cuándo registrar una decisión y formato MADR breve.
