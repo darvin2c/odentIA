@@ -934,7 +934,7 @@ test("latidIA: Clío dicta la consulta, los signos vitales, el examen y el desca
   await expect(page).toHaveURL(/\/encounters\//)
   await expect(page.getByRole("region", { name: "Dictado de la atención" }).getByRole("button", { name: "Dictar", exact: true })).toBeVisible()
   await expect(page.getByRole("region", { name: "Consulta" }).getByRole("button", { name: "Abrir", exact: true })).toHaveAttribute("aria-expanded", "false")
-  await expect(page.getByLabel("Motivo", { exact: true })).toHaveCount(0)
+  await expect(page.getByLabel("Motivo de consulta", { exact: true })).toHaveCount(0)
   await shot("clio-atender-sin-motivo")
 
   // En la atención: lo dictado va a cada bloque, también al examen físico y a los documentos.

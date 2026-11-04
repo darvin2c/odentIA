@@ -26,7 +26,7 @@ export interface DictationSuggestion {
 
 export const NOTE_FIELD_LABEL = {
   reason: "Motivo de consulta",
-  presentIllness: "Enfermedad actual",
+  presentIllness: "Relato de la enfermedad",
   illnessDuration: "Tiempo de enfermedad",
   evolution: "Evolución",
   indications: "Indicaciones",

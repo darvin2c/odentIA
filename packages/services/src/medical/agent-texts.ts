@@ -31,7 +31,7 @@ export const MEDICAL_AGENT_TEXTS: ProductAgentTexts = {
         {
           id: "nota",
           label: "Consulta y evolución",
-          description: "Motivo, enfermedad actual, evolución, indicaciones y pronóstico.",
+          description: "Motivo de consulta, tiempo y relato de la enfermedad, evolución, indicaciones y pronóstico.",
           fixed: true,
           tools: [],
         },

@@ -200,6 +200,23 @@ it("la copia de la historia: PDF, paquete FHIR R4 y envío a la propia persona s
   const types = bundle.entry.map((e) => e.resource.resourceType)
   expect(types).toContain("Patient")
   expect(types).toContain("Encounter")
+  // La enfermedad actual viaja entera: el relato con su sección LOINC y el tiempo como texto.
+  const illness = patientRecordFhirBundle({
+    ...record,
+    encounters: record.encounters.map((e, i) =>
+      i === 0 ? { ...e, row: { ...e.row, presentIllness: "Pinchazo con el frío", illnessDuration: "desde el sábado" } } : e,
+    ),
+  }) as { entry: Array<{ resource: { resourceType: string; code?: { text?: string; coding?: Array<{ code: string }> }; valueString?: string } }> }
+  const observed = illness.entry.map((e) => e.resource).filter((r) => r.resourceType === "Observation")
+  expect(observed).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ code: { text: "Tiempo de enfermedad" }, valueString: "desde el sábado" }),
+      expect.objectContaining({
+        code: expect.objectContaining({ coding: [expect.objectContaining({ code: "10164-2" })] }),
+        valueString: "Pinchazo con el frío",
+      }),
+    ]),
+  )
 
   const [conn] = await ownerDb
     .insert(channelConnection)

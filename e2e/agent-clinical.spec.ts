@@ -25,7 +25,7 @@ test("atender sin motivo: ningún formulario tapa a Clío y el motivo se pide al
 
   const idle = page.getByRole("region", { name: "Dictado de la atención" })
   const consulta = page.getByRole("region", { name: "Consulta" }).getByRole("button", { name: "Abrir", exact: true })
-  const reason = page.getByLabel("Motivo", { exact: true })
+  const reason = page.getByLabel("Motivo de consulta", { exact: true })
   // Con Clío apagada tampoco se abre: «Consulta» espera a que la pidan.
   await expect(consulta).toHaveAttribute("aria-expanded", "false")
   await expect(reason).toHaveCount(0)
@@ -218,7 +218,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   expect(saved.diagnoses).toEqual([expect.objectContaining({ diagnosisCode: "K02.1", toothNumber: 16 })])
   // El borrador de la pantalla también se une: si lo pisara, el autoguardado borraría lo de antes.
   await page.getByRole("region", { name: "Consulta" }).getByRole("button", { name: "Abrir", exact: true }).click()
-  await expect(page.getByLabel("Motivo", { exact: true })).toHaveValue(joinedReason)
+  await expect(page.getByLabel("Motivo de consulta", { exact: true })).toHaveValue(joinedReason)
   await page.getByRole("complementary", { name: "Panel lateral" }).getByRole("region", { name: "Consulta" }).getByRole("button", { name: "Cerrar" }).click()
   // La pantalla refleja lo confirmado sin recargar.
   await expect(closing.getByRole("listitem").filter({ hasText: "diagnóstico" })).toContainText("listo")

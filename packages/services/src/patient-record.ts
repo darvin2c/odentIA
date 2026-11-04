@@ -487,8 +487,10 @@ export async function renderPatientRecordPdf(
     )
     kit.gap(4)
     dataRows([
-      ["Motivo", row.reason],
-      ["Enfermedad actual", row.presentIllness],
+      ["Motivo de consulta", row.reason],
+      // La NTS 139 lo pide en la anamnesis (ADR 0003): sin esta fila no llegaba al papel.
+      ["Tiempo de enfermedad", row.illnessDuration],
+      ["Relato de la enfermedad", row.presentIllness],
       ["Signos vitales", vitalText],
       ["Examen", exam.lines],
       ["Diagnóstico", diagnoses.map((d) => `${diagnosisText(d)}${siteText(d)}`)],
@@ -696,6 +698,10 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
     })
   for (const { row, diagnoses, procedures, exam } of record.encounters) {
     const encounterRef = { reference: `Encounter/${row.id}` }
+    // Lo observado vale como la atención: definitivo solo si se firmó, en curso si no, y
+    // anulado si se anuló (como sus procedimientos). Un borrador no viaja como «final».
+    const observationStatus =
+      row.status === "anulada" ? "entered-in-error" : row.status === "finalizada" ? "final" : "preliminary"
     resources.push({
       resourceType: "Encounter",
       id: row.id,
@@ -762,6 +768,34 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
         ...(pr.bodySite ? { bodySite: [pr.bodySite] } : {}),
         performedDateTime: pr.createdAt.toISOString(),
       })
+    // La enfermedad actual de la anamnesis. El relato lleva su sección LOINC (10164-2, «History
+    // of present illness Narrative»). El tiempo no tiene código propio: en LOINC la duración es
+    // parte de ese relato, así que viaja como texto, sin inventar un código.
+    if (row.illnessDuration)
+      resources.push({
+        resourceType: "Observation",
+        id: `${row.id}-tiempo-enfermedad`,
+        status: observationStatus,
+        code: { text: "Tiempo de enfermedad" },
+        subject: patientRef,
+        encounter: encounterRef,
+        effectiveDateTime: row.startedAt.toISOString(),
+        valueString: row.illnessDuration,
+      })
+    if (row.presentIllness)
+      resources.push({
+        resourceType: "Observation",
+        id: `${row.id}-relato-enfermedad`,
+        status: observationStatus,
+        code: {
+          coding: [{ system: FHIR_LOINC_SYSTEM, code: "10164-2", display: "History of present illness Narrative" }],
+          text: "Relato de la enfermedad",
+        },
+        subject: patientRef,
+        encounter: encounterRef,
+        effectiveDateTime: row.startedAt.toISOString(),
+        valueString: row.presentIllness,
+      })
     const vitals = (row.vitals ?? {}) as Record<string, unknown>
     for (const v of VITAL_SIGNS) {
       const value = vitals[v.key]
@@ -769,7 +803,7 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
       resources.push({
         resourceType: "Observation",
         id: `${row.id}-${v.key}`,
-        status: "final",
+        status: observationStatus,
         category: [{ coding: [{ system: FHIR_OBSERVATION_CATEGORY_SYSTEM, code: "vital-signs" }] }],
         code: {
           coding: [{ system: FHIR_LOINC_SYSTEM, code: v.loinc, display: v.label }],
@@ -786,7 +820,7 @@ export function patientRecordFhirBundle(record: PatientRecord): Record<string, u
       resources.push({
         resourceType: "Observation",
         id: `${row.id}-examen-${part.key}`,
-        status: "final",
+        status: observationStatus,
         category: [{ coding: [{ system: FHIR_OBSERVATION_CATEGORY_SYSTEM, code: "exam" }] }],
         code: { text: part.text },
         subject: patientRef,

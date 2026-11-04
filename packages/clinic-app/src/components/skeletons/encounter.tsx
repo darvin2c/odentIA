@@ -115,7 +115,7 @@ export function EncounterDetailSkeleton() {
       <div className="flex min-w-0 flex-col gap-4">
         <section className="flex flex-col gap-3 rounded-lg border p-4">
           <dl className="grid min-w-0 gap-3 sm:grid-cols-2">
-            {["Motivo", "Enfermedad actual", "Evolución", "Indicaciones"].map((label) => (
+            {["Motivo de consulta", "Tiempo de enfermedad", "Relato de la enfermedad", "Evolución"].map((label) => (
               <div key={label}>
                 <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
                 <dd>
