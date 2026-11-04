@@ -1094,9 +1094,10 @@ export function EncounterEditor({
       title: "Consulta",
       // Sin «dónde» (latidIA), la parte del cuerpo se escribe en el texto (decisión 4 del issue 229).
       description: productUi().site
-        ? "Motivo, enfermedad actual, sede y piezas evaluadas."
-        : "Motivo, enfermedad actual y sede.",
-      summary: reason.trim() === "" ? "Sin motivo registrado" : reason.trim(),
+        ? "Motivo de consulta, tiempo y relato de la enfermedad, sede y piezas evaluadas."
+        : "Motivo de consulta, tiempo y relato de la enfermedad, y sede.",
+      // Como la evolución: lo que exige el cierre se dice en la tarjeta, no solo al firmar.
+      summary: reason.trim() === "" ? "Falta el motivo · necesario para cerrar" : reason.trim(),
       empty: reason.trim() === "",
     },
     {
@@ -1415,7 +1416,7 @@ export function EncounterEditor({
       </Field>
       <draftForm.AppField name="reason">
         {(field) => (
-          <field.Control label="Motivo" id={`${uid}-reason`}>
+          <field.Control label="Motivo de consulta" id={`${uid}-reason`}>
             {(control) => (
               <Textarea
                 {...control.props}
@@ -1436,29 +1437,12 @@ export function EncounterEditor({
           </field.Control>
         )}
       </draftForm.AppField>
-      <draftForm.AppField name="presentIllness">
-        {(field) => (
-          <field.Control label="Enfermedad actual (relato)" id={`${uid}-present-illness`}>
-            {(control) => (
-              <Textarea
-                {...control.props}
-                rows={3}
-                value={field.state.value}
-                disabled={locked}
-                maxLength={4000}
-                placeholder="Inicio, curso, síntomas y lo que lo alivia o empeora…"
-                onChange={(event) => {
-                  field.handleChange(event.target.value)
-                  rememberText("presentIllness", event.target.value)
-                }}
-              />
-            )}
-          </field.Control>
-        )}
-      </draftForm.AppField>
+      {/* Tiempo y relato no traban el cierre: en un control no hay enfermedad y exigirlos
+          obligaría a inventar (ADR 0003). Por eso dicen «(opcional)», y el motivo no. El
+          tiempo va antes del relato, como se escribe la anamnesis: motivo, tiempo y relato. */}
       <draftForm.AppField name="illnessDuration">
         {(field) => (
-          <field.Control label="Tiempo de enfermedad" id={`${uid}-illness-duration`}>
+          <field.Control label="Tiempo de enfermedad (opcional)" id={`${uid}-illness-duration`}>
             {(control) => (
               <Input
                 {...control.props}
@@ -1470,6 +1454,26 @@ export function EncounterEditor({
                 onChange={(event) => {
                   field.handleChange(event.target.value)
                   rememberText("illnessDuration", event.target.value)
+                }}
+              />
+            )}
+          </field.Control>
+        )}
+      </draftForm.AppField>
+      <draftForm.AppField name="presentIllness">
+        {(field) => (
+          <field.Control label="Relato de la enfermedad (opcional)" id={`${uid}-present-illness`}>
+            {(control) => (
+              <Textarea
+                {...control.props}
+                rows={3}
+                value={field.state.value}
+                disabled={locked}
+                maxLength={4000}
+                placeholder="Cómo empezó y siguió, qué lo alivia o empeora, qué tomó…"
+                onChange={(event) => {
+                  field.handleChange(event.target.value)
+                  rememberText("presentIllness", event.target.value)
                 }}
               />
             )}

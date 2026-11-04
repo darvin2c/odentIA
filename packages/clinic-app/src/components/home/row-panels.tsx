@@ -276,7 +276,7 @@ export function CallPanel({
   )
 }
 
-const HAS_WORDS: Record<string, string> = { reason: "Motivo", diagnosis: "Diagnóstico", evolution: "Evolución" }
+const HAS_WORDS: Record<string, string> = { reason: "Motivo de consulta", diagnosis: "Diagnóstico", evolution: "Evolución" }
 
 /** Una atención de otro día: qué ya tiene y qué falta, «Continuar» primero y anular al final. */
 export function EncounterPanel({

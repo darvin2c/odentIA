@@ -193,16 +193,19 @@ export function EncounterDetailView({
       <section aria-label="Datos de la atención" className="flex flex-col gap-3 rounded-lg border p-4">
         <dl className="grid min-w-0 gap-3 sm:grid-cols-2">
           <div>
-            <dt className="text-xs font-medium text-muted-foreground">Motivo</dt>
+            <dt className="text-xs font-medium text-muted-foreground">Motivo de consulta</dt>
             <dd className="whitespace-pre-wrap text-sm">{encounter.reason ?? "Sin motivo"}</dd>
           </div>
-          {encounter.presentIllness || encounter.illnessDuration ? (
+          {encounter.illnessDuration ? (
             <div>
-              <dt className="text-xs font-medium text-muted-foreground">Enfermedad actual</dt>
-              <dd className="whitespace-pre-wrap text-sm">
-                {encounter.illnessDuration ? `Tiempo: ${encounter.illnessDuration}. ` : ""}
-                {encounter.presentIllness ?? ""}
-              </dd>
+              <dt className="text-xs font-medium text-muted-foreground">Tiempo de enfermedad</dt>
+              <dd className="whitespace-pre-wrap text-sm">{encounter.illnessDuration}</dd>
+            </div>
+          ) : null}
+          {encounter.presentIllness ? (
+            <div>
+              <dt className="text-xs font-medium text-muted-foreground">Relato de la enfermedad</dt>
+              <dd className="whitespace-pre-wrap text-sm">{encounter.presentIllness}</dd>
             </div>
           ) : null}
           {encounter.vitals && Object.keys(encounter.vitals).length > 0 ? (

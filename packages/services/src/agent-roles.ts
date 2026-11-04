@@ -203,7 +203,7 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
     switchable: true,
     // Solo lo que ya está construido. Las recetas llegan después: mientras no existan, no figuran como funciones.
     functions: [
-      { id: "nota", label: "Consulta y evolución", description: "Motivo, enfermedad actual, evolución, indicaciones y pronóstico.", fixed: true, tools: [] },
+      { id: "nota", label: "Consulta y evolución", description: "Motivo de consulta, tiempo y relato de la enfermedad, evolución, indicaciones y pronóstico.", fixed: true, tools: [] },
       { id: "odontograma", label: "Odontograma", description: "Hallazgos por pieza y cara («la 46 ausente», «caries oclusal en la 36»), con el diagnóstico que les corresponde. Lo que la norma del país pide y no se dijo, se pide con un toque.", fixed: true, tools: [] },
       { id: "diagnostico", label: "Diagnóstico", description: "Registra el código CIE-10 que nombró el odontólogo, con su pieza.", fixed: true, tools: [] },
       { id: "plan", label: "Plan de tratamiento", description: "Busca cada prestación dictada en los servicios de la clínica; si no hay una sola, la elige el odontólogo. «Resina, o si no una corona» llega al presupuesto como dos opciones para que el paciente elija.", fixed: true, tools: [] },
