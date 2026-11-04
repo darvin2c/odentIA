@@ -1,0 +1,70 @@
+{
+  "descripcion": "Dictados de latidIA para medir qué va en el motivo de consulta, el tiempo y el relato de la enfermedad (mesa del 2026-11-04). Cada palabra admite variantes separadas por «|»; ver packages/agent/src/eval-consulta.ts.",
+  "servicios": ["Consulta de medicina general", "Consulta pediátrica", "Nebulización", "Inyectable intramuscular", "Electrocardiograma"],
+  "dictados": [
+    {
+      "id": "cm01-amigdalitis",
+      "texto": "Viene por fiebre y dolor de garganta hace tres días, sin tos. Tomó paracetamol y le baja un rato. Temperatura treinta y ocho y medio, amígdalas con placas.",
+      "espera": {
+        "nota": true,
+        "consulta": { "motivo": ["garganta|fiebre"], "motivoSin": ["tres|3 d", "paracetamol"], "tiempo": "tres|3", "relato": ["paracetamol"], "relatoSin": ["placas"] }
+      }
+    },
+    {
+      "id": "cm02-control-presion",
+      "texto": "Viene a su control de presión arterial. Es hipertenso hace cinco años, toma enalapril de diez, sin molestias. Presión ciento veintiocho con ochenta y dos.",
+      "espera": {
+        "nota": true,
+        "consulta": { "motivo": ["control|presion|hipertens"], "motivoSin": ["enalapril"], "relatoSin": ["128", "ciento veintiocho"] }
+      }
+    },
+    {
+      "id": "cm03-certificado",
+      "texto": "Viene por un certificado médico para el trabajo, no tiene molestias.",
+      "espera": {
+        "nota": true,
+        "consulta": { "motivo": ["certificado"], "tiempo": null }
+      }
+    },
+    {
+      "id": "cm04-lumbalgia",
+      "texto": "Paciente con dolor en la espalda baja desde hace una semana, después de cargar unas cajas. Empeora al agacharse y mejora con el reposo. No tomó nada.",
+      "espera": {
+        "nota": true,
+        "consulta": { "motivo": ["dolor|lumb"], "motivoSin": ["semana"], "tiempo": "semana", "relato": ["caja|carg", "agach"] }
+      }
+    },
+    {
+      "id": "cm05-cefalea",
+      "texto": "Dolor de cabeza desde anoche, como un peso en la frente, con congestión nasal. Le pasa cada vez que se resfría.",
+      "espera": {
+        "nota": true,
+        "consulta": { "motivo": ["cabeza|cefalea"], "motivoSin": ["anoche"], "tiempo": "anoche|1 dia|un dia|horas", "relato": ["congest"] }
+      }
+    },
+    {
+      "id": "cm06-nino-sano",
+      "texto": "Trae a la bebé de cuatro meses a su control de niño sano. Lacta bien, sin problemas.",
+      "espera": {
+        "nota": true,
+        "consulta": { "motivo": ["control|nino sano"], "tiempo": null, "tiempoSin": ["cuatro meses|4 meses"] }
+      }
+    },
+    {
+      "id": "cm07-tos",
+      "texto": "Tos con flema hace diez días, y ahora con fiebre desde ayer. Ya tomó un jarabe sin mejoría.",
+      "espera": {
+        "nota": true,
+        "consulta": { "motivo": ["tos"], "motivoSin": ["diez|10", "jarabe"], "tiempo": "diez|10", "relato": ["jarabe"] }
+      }
+    },
+    {
+      "id": "cm08-resultados",
+      "texto": "Viene a traer los resultados del análisis de sangre que le pidieron la vez pasada. Se siente bien.",
+      "espera": {
+        "nota": true,
+        "consulta": { "motivo": ["resultado|analisis"], "tiempo": null }
+      }
+    }
+  ]
+}

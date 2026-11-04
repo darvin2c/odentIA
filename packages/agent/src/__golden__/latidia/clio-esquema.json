@@ -7,19 +7,19 @@
       "type": "object",
       "properties": {
         "reason": {
-          "description": "Por qué vino el paciente, en sus palabras.",
+          "description": "La queja principal o para qué viene, en una línea y como lo diría el paciente.",
           "type": "string",
           "minLength": 0,
           "maxLength": 2000
         },
         "presentIllness": {
-          "description": "El relato de lo que le pasa: cómo empezó y cómo ha seguido.",
+          "description": "Cómo empezó y siguió lo que le pasa, qué lo alivia o empeora y qué tomó.",
           "type": "string",
           "minLength": 0,
           "maxLength": 4000
         },
         "illnessDuration": {
-          "description": "Desde cuándo, tal como se dijo (por ejemplo, «una semana»).",
+          "description": "Cuánto lleva así, tal como se dijo (por ejemplo, «tres días»).",
           "type": "string",
           "minLength": 0,
           "maxLength": 200

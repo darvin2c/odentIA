@@ -9,6 +9,7 @@ import { z } from "zod"
 import {
   allergyAndDonePrompt,
   appointmentAndBudgetPrompt,
+  consultaPrompt,
   DICTATION_TOOL,
   type DictationExtraction,
   type DictationPending,
@@ -86,6 +87,7 @@ export function systemPrompt(input: { services: string[]; diagnosisList: string;
     input.services.length
       ? `Servicios de la clínica, para reconocer de qué prestación habla: ${input.services.slice(0, 200).join("; ")}.`
       : "La clínica aún no tiene servicios.",
+    ...consultaPrompt("«dolor de muela», «control»"),
     ...allergyAndDonePrompt("odontólogo", "«le hice la profilaxis», «terminamos la resina de la 36»"),
     ...appointmentAndBudgetPrompt("«agéndale para la endodoncia»"),
     materialsPrompt("odontólogo", "«se fueron cuatro carpules»", "una resina, una profilaxis"),

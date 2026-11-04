@@ -17,6 +17,7 @@ import { DICTATION_FINDINGS, dictationFindingsText } from "@odentia/services/den
 import { costMicrosOf } from "../ai-usage.js"
 import { createConfiguredChatModel, platformLlmFromEnv, resolveLlmSpec } from "../llm.js"
 import { askDictationModel } from "../dictation.js"
+import { type ExpectedConsulta, scoreConsulta } from "../eval-consulta.js"
 import { DENTAL_DICTATION_PROFILE } from "./dictation.js"
 
 interface ExpectedFinding {
@@ -38,6 +39,8 @@ interface PracticeDictation {
     planes?: number[]
     controles?: number
     nota?: boolean
+    /** Qué va en el motivo, el tiempo y el relato (ver `eval-consulta.ts`). */
+    consulta?: ExpectedConsulta
     correcciones?: number
     quitar?: number
     /** Lo que la corrección pone, por una palabra («clindamicina»). */
@@ -168,6 +171,7 @@ for (const dictation of bank.dictados) {
   for (const tooth of dictation.espera.planes ?? []) other(`indicación en la ${tooth}`, plans.includes(tooth))
   if (dictation.espera.controles) other("control", read.drafts.filter((draft) => draft.kind === "control").length === dictation.espera.controles)
   if (dictation.espera.nota) other("nota", read.drafts.some((draft) => draft.kind === "nota"))
+  scoreConsulta(dictation.espera.consulta, read.drafts, other)
   const recipes = read.drafts.filter((draft) => draft.kind === "receta").map((draft) => draft.payload)
   for (const expected of dictation.espera.recetas ?? []) {
     const found = recipes.find((payload) => plain(String(payload["genericName"] ?? "")).includes(plain(expected.dci)))

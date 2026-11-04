@@ -290,9 +290,9 @@ export const OPERATIONS = {
   "atencion.nota": {
     label: "Nota de la atención",
     fields: {
-      reason: { kind: "text", max: 2000, label: "Motivo de consulta", description: "Por qué vino el paciente, en sus palabras.", body: "optional", nullable: true, agent: "fills" },
-      presentIllness: { kind: "text", max: 4000, label: "Enfermedad actual", description: "El relato de lo que le pasa: cómo empezó y cómo ha seguido.", body: "optional", nullable: true, agent: "fills" },
-      illnessDuration: { kind: "text", max: 200, label: "Tiempo de enfermedad", description: "Desde cuándo, tal como se dijo (por ejemplo, «una semana»).", body: "optional", nullable: true, agent: "fills" },
+      reason: { kind: "text", max: 2000, label: "Motivo de consulta", description: "La queja principal o para qué viene, en una línea y como lo diría el paciente.", body: "optional", nullable: true, agent: "fills" },
+      presentIllness: { kind: "text", max: 4000, label: "Relato de la enfermedad", description: "Cómo empezó y siguió lo que le pasa, qué lo alivia o empeora y qué tomó.", body: "optional", nullable: true, agent: "fills" },
+      illnessDuration: { kind: "text", max: 200, label: "Tiempo de enfermedad", description: "Cuánto lleva así, tal como se dijo (por ejemplo, «tres días»).", body: "optional", nullable: true, agent: "fills" },
       evolution: { kind: "text", max: 10000, label: "Evolución", description: "Lo que se hizo en esta atención y cómo respondió el paciente.", body: "optional", nullable: true, agent: "fills" },
       indications: { kind: "text", max: 4000, label: "Indicaciones", description: "Lo que se le indica al paciente para después de la atención.", body: "optional", nullable: true, agent: "fills" },
       prognosis: { kind: "text", max: 2000, label: "Pronóstico", description: "El pronóstico que dijo el odontólogo.", body: "optional", nullable: true, agent: "fills" },
