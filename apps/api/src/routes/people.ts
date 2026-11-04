@@ -30,7 +30,7 @@ import { type Context, Hono } from "hono"
 import { z } from "zod"
 import { canAccess, canAccessAny, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
-import { recordLockResponse } from "../lib/record-lock.js"
+import { personLockRefusal } from "../lib/record-lock.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 
 const listQuery = z.object({
@@ -148,9 +148,7 @@ export function createPeopleRoute(deps: CrmDeps) {
     const id = c.req.param("id")
     if (!id || !/^[0-9a-f-]{36}$/i.test(id) || c.req.path.endsWith("/lock") || c.req.path.endsWith("/lock/open"))
       return null
-    const { orgId, userId } = orgContextOf(c)
-    const state = await withOrgContext(deps.db, orgId, (tx) => personRecordLock(tx, orgId, userId, id))
-    return recordLockResponse(c, state, !["GET", "HEAD", "OPTIONS"].includes(c.req.method))
+    return personLockRefusal(c, deps.db, id)
   }
 
   app.get("/", async (c) => {

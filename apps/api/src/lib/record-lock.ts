@@ -1,7 +1,19 @@
-import type { RecordLockState } from "@odentia/services"
+import { type Db, withOrgContext } from "@odentia/db"
+import { type RecordLockState, personRecordLock } from "@odentia/services"
 import type { Context } from "hono"
 import { canAccess, orgContextOf } from "./context.js"
 import { errorBody } from "./error.js"
+
+/**
+ * La misma guarda para cualquier ruta cuyo `:id` es la persona (contacto):
+ * `/contacts/:id`, la página de la persona y lo que cuelga de ella. Null cuando
+ * la petición sigue; si no, la respuesta de la historia bloqueada (ADR 0080).
+ */
+export async function personLockRefusal(c: Context, db: Db, personId: string): Promise<Response | null> {
+  const { orgId, userId } = orgContextOf(c)
+  const state = await withOrgContext(db, orgId, (tx) => personRecordLock(tx, orgId, userId, personId))
+  return recordLockResponse(c, state, !["GET", "HEAD", "OPTIONS"].includes(c.req.method))
+}
 
 /**
  * La guarda de una historia bloqueada (ADR 0080) para las rutas de la ficha y

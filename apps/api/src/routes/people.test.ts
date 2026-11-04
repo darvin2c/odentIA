@@ -2,6 +2,7 @@ process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 
 import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
 import { patientAllergy, patientContact } from "@odentia/db/schema/clinical"
+import { contact } from "@odentia/db/schema/crm"
 import {
   createContact,
   createPatient,
@@ -14,6 +15,7 @@ import type { Context } from "hono"
 import { Hono, type Next } from "hono"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { createContactsRoute } from "./contacts.js"
 import type { CrmDeps } from "./helpers.js"
 import { createPatientsRoute } from "./patients.js"
 import { createPeopleRoute } from "./people.js"
@@ -64,6 +66,7 @@ function buildApp(role: string): Hono {
   })
   app.route("/people", createPeopleRoute(deps))
   app.route("/patients", createPatientsRoute(deps))
+  app.route("/contacts", createContactsRoute(deps))
   return app
 }
 
@@ -348,4 +351,49 @@ describe("la Bandeja crea y busca a la persona con lo mismo que «Nueva persona�
     }
     expect(found.data.map((item) => item.id)).toContain(data.id)
   })
+})
+
+describe("historia bloqueada: las rutas de contactos y de tomografías respetan el bloqueo (ADR 0080)", () => {
+  let lockedPatientId = ""
+  let lockedPersonId = ""
+  const json = { "content-type": "application/json" }
+
+  beforeAll(async () => {
+    const fresh = await withOrgContext(appDb, "org_a", (tx) =>
+      createPatient(tx, "org_a", "u-1", { displayName: "Lucía Cerrada" }),
+    )
+    lockedPatientId = fresh.id
+    const [own] = await ownerDb
+      .select({ id: patientContact.contactId })
+      .from(patientContact)
+      .where(and(eq(patientContact.patientId, lockedPatientId), eq(patientContact.relationship, "self")))
+    if (!own) throw new Error("La paciente de prueba no tiene su ficha propia")
+    lockedPersonId = own.id
+    // Bloquear una historia la desactiva (ver el CHECK de contact en packages/db).
+    await ownerDb
+      .update(contact)
+      .set({ isActive: false, recordLockedAt: new Date(), recordLockedBy: "u-1" })
+      .where(eq(contact.id, lockedPersonId))
+  })
+
+  it("una persona con la historia bloqueada no existe en /contacts para quien no es Administración (404)", async () => {
+    const reception = buildApp("reception")
+    expect((await reception.request(`/contacts/${lockedPersonId}`)).status).toBe(404)
+    expect(
+      (await reception.request(`/contacts/${lockedPersonId}`, { method: "PATCH", headers: json, body: JSON.stringify({ displayName: "Otra" }) })).status,
+    ).toBe(404)
+    expect((await reception.request(`/contacts/${lockedPersonId}/agent-memory`)).status).toBe(404)
+    expect((await reception.request(`/contacts/${lockedPersonId}/write`, { method: "POST", headers: json, body: "{}" })).status).toBe(404)
+    // Administración ve que está bloqueada, y quien no está bloqueada sigue visible para recepción.
+    expect((await buildApp("admin").request(`/contacts/${lockedPersonId}`)).status).toBe(423)
+    expect((await reception.request(`/contacts/${personId}`)).status).toBe(200)
+  })
+
+  it("una tomografía de la historia bloqueada no se lista ni se sube: la guarda va antes de la rama de imágenes", async () => {
+    expect((await buildApp("reception").request(`/patients/${lockedPatientId}/imaging/uploads`)).status).toBe(404)
+    expect((await buildApp("clinician").request(`/patients/${lockedPatientId}/imaging/uploads`)).status).toBe(404)
+    expect((await buildApp("admin").request(`/patients/${lockedPatientId}/imaging/uploads`)).status).toBe(423)
+    expect((await buildApp("reception").request(`/patients/${patientId}/imaging/uploads`)).status).toBe(200)
+  })
+
 })
