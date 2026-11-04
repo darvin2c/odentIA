@@ -308,7 +308,7 @@ Las stories consumen los componentes reales; únicamente sus demoras, almacén s
 - TypeScript del workspace y `typescript-language-server` son dependencias de desarrollo raíz. `pnpm install` instala el servidor; OMP lo detecta por binario local y marcador de proyecto. Tras instalar, recargar LSP (`reload`, `file: "*"`).
 - En VS Code usar la versión TypeScript del workspace (`node_modules/typescript/lib`); Biome conserva formato y lint. No confundir lint con navegación semántica.
 - Antes de cambios de contratos consultar definiciones/referencias mediante LSP. No guardar mapas de símbolos en Markdown.
-- Skills propias en `.agents/skills`; UX en `odentia-ux`, arquitectura en `odentia-arch`. Si el cliente no las descubre automáticamente, leer su `SKILL.md` explícitamente. No requieren instalar skills globales.
+- Skills propias en `.claude/skills`, donde Claude Code las descubre solo; UX en `odentia-ux`, arquitectura en `odentia-arch`. Otro cliente que no las descubra lee su `SKILL.md` desde `AGENTS.md`. No requieren instalar skills globales. Las de terceros (`ai-elements`, `i-have-adhd`) siguen en `.agents/skills`, donde las deja `skills-lock.json`.
 
 ## Problemas operativos conocidos
 

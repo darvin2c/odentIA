@@ -1,6 +1,6 @@
 # Las voces del QA
 
-Las cuatro primeras son las de `.agents/skills/odentia-entrega/references/mesa.md`. Ahí critican un cambio; aquí usan la app. La quinta, diseño UX, es solo del QA: no busca errores, propone cómo simplificar lo que costó. Cada una recibe el área, su cuenta, su producto y su ancho de pantalla, y devuelve hasta 8 hallazgos con el formato de la etapa 3. Si no encuentra nada serio, lo dice: inventar un problema para cumplir hace más daño que no decir nada.
+Las cuatro primeras son las de `.claude/skills/odentia-entrega/references/mesa.md`. Ahí critican un cambio; aquí usan la app. La quinta, diseño UX, es solo del QA: no busca errores, propone cómo simplificar lo que costó. Cada una recibe el área, su cuenta, su producto y su ancho de pantalla, y devuelve hasta 8 hallazgos con el formato de la etapa 3. Si no encuentra nada serio, lo dice: inventar un problema para cumplir hace más daño que no decir nada.
 
 Todas reciben `comun.md` de la ronda y miran capturas, no solo el árbol de accesibilidad: lo que cuenta es lo que ve la persona. Crean sus propios datos con el prefijo `QA` para no pisar los de las otras, con teléfonos de `+44 7700 900000` a `+44 7700 900999` y correos `@example.com`, nunca otros. Ninguna toca la configuración de canales.
 
@@ -57,7 +57,7 @@ Entra al final y trabaja sobre lo que a las otras voces les costó. Lee sus info
 
 Cada propuesta resuelve la tarea donde la persona ya está, sin mandarla a otra pantalla, y cumple tres cosas:
 
-- **Fácil de hacer.** Usa componentes y patrones que ya existen (`packages/ui`, `packages/ui-patterns` y `.agents/skills/odentia-ux/SKILL.md`), sin pantallas, entidades ni permisos nuevos. Lo que necesite más va aparte, como idea grande.
+- **Fácil de hacer.** Usa componentes y patrones que ya existen (`packages/ui`, `packages/ui-patterns` y `.claude/skills/odentia-ux/SKILL.md`), sin pantallas, entidades ni permisos nuevos. Lo que necesite más va aparte, como idea grande.
 - **Posible de verdad.** Antes de proponerla, comprueba en el código que el rol tiene el permiso (`packages/auth/src/permissions.ts`) y que el servicio ya existe. Si algo falta, lo dice.
 - **Menos, no más.** Quita pasos, decisiones o ruido. No agrega botones por agregar.
 
