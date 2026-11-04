@@ -89,7 +89,7 @@ import {
   voidEncounterProcedure,
   recordLockState,
 } from "@odentia/services"
-import { Hono } from "hono"
+import { type Context, Hono } from "hono"
 import { z } from "zod"
 import { traceClinicalRead } from "../lib/clinical-trace.js"
 import { canAccess, canAccessAny, orgContextOf } from "../lib/context.js"
@@ -313,6 +313,8 @@ const procedureInput = z
     description: z.string().trim().min(1, "Describe el acto libre").max(2000).nullish(),
     /** Hallazgo que trata un servicio directo; queda tratado al cerrar la atención. */
     odontogramEntryId: z.uuid().nullish(),
+    /** Lo indicado y no aceptado se acepta al hacerlo (QA CT, propuesta 4). */
+    acceptWhenDone: z.boolean().optional(),
   })
   .strict()
   .refine((d) => !(d.serviceId && d.planItemId), {
@@ -565,6 +567,16 @@ const ERASE_SUFFIXES = ["/erase", "/erase-preview"]
 
 export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
   const app = new Hono()
+
+  /** La guarda de la historia bloqueada (ADR 0080) de la ficha de la ruta; null si la petición sigue. */
+  async function lockRefusal(c: Context, write: boolean): Promise<Response | null> {
+    const lockedId = c.req.path.match(/\/patients\/([0-9a-f-]{36})(?:\/|$)/i)?.[1]
+    if (!lockedId) return null
+    const { orgId, userId } = orgContextOf(c)
+    const state = await withOrgContext(deps.db, orgId, (tx) => recordLockState(tx, orgId, userId, lockedId))
+    return recordLockResponse(c, state, write)
+  }
+
   app.use("*", async (c, next) => {
     const { memberRole } = orgContextOf(c)
     // `c.req.path` trae el prefijo de montaje (/api/patients...): el resto
@@ -588,6 +600,9 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           403,
         )
       }
+      // La guarda de la historia bloqueada va también aquí: la tomografía es de la ficha.
+      const blocked = await lockRefusal(c, writes)
+      if (blocked) return blocked
       await next()
       return
     }
@@ -625,11 +640,8 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
       )
     }
     // Una historia bloqueada (ADR 0080): sus propias rutas de borrar quedan fuera.
-    const lockedId = c.req.path.match(/\/patients\/([0-9a-f-]{36})(?:\/|$)/i)?.[1]
-    if (lockedId && !ERASE_SUFFIXES.some((suffix) => remainder.endsWith(suffix))) {
-      const { orgId, userId } = orgContextOf(c)
-      const state = await withOrgContext(deps.db, orgId, (tx) => recordLockState(tx, orgId, userId, lockedId))
-      const blocked = recordLockResponse(c, state, write)
+    if (!ERASE_SUFFIXES.some((suffix) => remainder.endsWith(suffix))) {
+      const blocked = await lockRefusal(c, write)
       if (blocked) return blocked
     }
     await next()

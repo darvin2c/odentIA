@@ -91,6 +91,8 @@ export function FiliacionPanel({
   const profile = useClinicalProfile()
   const [editing, setEditing] = useState<FiliacionSectionKey | null>(null)
   const [moreOpen, setMoreOpen] = useState(false)
+  // «Agregar» el contacto de emergencia desde aquí: el mismo cajón de «Completar», solo con sus tres campos (QA, propuesta UX 1).
+  const [addingEmergency, setAddingEmergency] = useState(false)
   const p = detail.patient
   const branches = useBranches(canRead)
   const can = useCan()
@@ -172,8 +174,13 @@ export function FiliacionPanel({
           <Item label="Dirección">{addressLine(profile, p)}</Item>
           <Item label="Contacto de emergencia">
             {emergency ?? (
-              <span className="text-muted-foreground">
-                No registrado: márcalo en Datos › Personas vinculadas («Contacto de emergencia»)
+              <span className="flex flex-wrap items-center gap-2">
+                <span className="text-muted-foreground">No registrado</span>
+                {canWrite ? (
+                  <Button size="sm" variant="outline" onClick={() => setAddingEmergency(true)}>
+                    Agregar
+                  </Button>
+                ) : null}
               </span>
             )}
           </Item>
@@ -256,6 +263,16 @@ export function FiliacionPanel({
           missing={gaps}
           open
           onClose={() => setEditing(null)}
+        />
+      ) : null}
+      {addingEmergency ? (
+        <FiliacionSectionDrawer
+          key="contacto-de-emergencia"
+          patient={p}
+          section="completar"
+          missing={[{ key: "emergencyContactName", label: "Contacto de emergencia" }]}
+          open
+          onClose={() => setAddingEmergency(false)}
         />
       ) : null}
     </section>

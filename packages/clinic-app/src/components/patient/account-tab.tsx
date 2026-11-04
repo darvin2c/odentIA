@@ -573,7 +573,11 @@ export function AccountTab({
 
       <Section title="Cobros">
         {cobros.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Todavía no se le ha cobrado nada.</p>
+          // Con pagos anteriores a los tickets, decir «no se ha cobrado nada» es falso (QA Cobros):
+          // esos pagos salen abajo, en «Pagos anteriores».
+          data.historico.length > 0 ? null : (
+            <p className="text-sm text-muted-foreground">Todavía no se le ha cobrado nada.</p>
+          )
         ) : (
           <ul className="flex flex-col divide-y">
             {cobros.map((row) => {
@@ -639,6 +643,8 @@ export function AccountTab({
                       ? ` · Anulado${row.voidReason ? ` · Motivo: ${row.voidReason}` : ""}`
                       : ""}
                   </p>
+                  {/* Sin ticket no hay concepto guardado: no se inventa (ADR de pagos anteriores). */}
+                  <p className="text-sm text-muted-foreground">Sin concepto registrado: se cobró antes de los tickets.</p>
                 </div>
                 <span className="text-base font-semibold tabular-nums">
                   {money(row.amountCents, row.currency)}
