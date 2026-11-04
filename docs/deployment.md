@@ -328,20 +328,23 @@ Vacío, esos avisos quedan pendientes y el caso sigue en la bandeja de Soporte.
 
 ## CI y despliegue automático
 
-`.github/workflows/ci.yml` instala dependencias con el lockfile, ejecuta typecheck,
-construye la imagen de PostgreSQL para las pruebas de integración, ejecuta los tests
-sin E2E y, en cada PR y en `main`, comprueba que la imagen de la app construye. No
-hay entornos por PR: esa comprobación es lo único que valida la imagen antes de
-fusionar. Solo después de que ambos jobs pasen, un push a `main` ejecuta el CLI
-oficial `openship deploy --commit "$GITHUB_SHA" --watch`.
+`.github/workflows/ci.yml` decide primero qué corre el cambio (job `alcance`, con
+`scripts/ci-alcance.mjs`; ver ADR 0140). Un cambio solo de documentación o skills no
+corre nada. Un cambio de código prueba los paquetes afectados según el grafo de Turbo,
+y las reglas que leen el repositorio entero corren siempre en el job `arquitectura`.
+La imagen de la app se construye solo si cambian `api` o `worker`, y E2E solo si el
+cambio toca algo más que la web de marketing. Un archivo fuera de `apps/`, `packages/`
+y `e2e/` (CI, Dockerfile, infraestructura, raíz) corre todo. No hay entornos por PR:
+la comprobación de la imagen es lo único que la valida antes de fusionar. Un push a
+`main` que cambia `api` o `worker` ejecuta el CLI oficial
+`openship deploy --commit "$GITHUB_SHA" --watch` solo después de que pasen sus jobs.
 
-El PR prueba todo, no solo lo afectado. Con todo en verde, el job `codigo-probado`
-anota en el último commit del PR (estado `ci/codigo-probado`) el árbol que probó: la
-unión del PR con `main` de ese momento. Al unirlo, `ya-probado` compara ese árbol con
-el de `main`: si son iguales, `main` despliega sin volver a probar; si `main` avanzó
-entretanto (otra unión), o el PR vino de un fork y no pudo anotarlo, prueba todo.
-Poner la rama al día con `main` y esperar su CI antes de unir es lo que evita la
-segunda corrida. El CLI envía el
+Con lo afectado en verde, el job `codigo-probado` anota en el último commit del PR
+(estado `ci/codigo-probado`) el árbol que probó: la unión del PR con `main` de ese
+momento. Al unirlo, `ya-probado` compara ese árbol con el de `main`: si son iguales,
+`main` despliega sin volver a probar; si `main` avanzó entretanto (otra unión), o el PR
+vino de un fork y no pudo anotarlo, prueba lo afectado otra vez. Poner la rama al día
+con `main` y esperar su CI antes de unir evita la segunda corrida. El CLI envía el
 despliegue y espera su resultado; no hay controlador propio ni bucle HTTP de espera.
 
 Configurar en GitHub:
