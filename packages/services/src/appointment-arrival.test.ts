@@ -16,7 +16,14 @@ import {
 } from "./appointments.js"
 import { setProfessionalSchedule } from "./availability.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
-import { createEncounter, finalizeEncounter, getEncounterClosing, voidEncounter } from "./encounters.js"
+import {
+  createEncounter,
+  finalizeEncounter,
+  getEncounterClosing,
+  getEncounterDetail,
+  updateEncounterDraft,
+  voidEncounter,
+} from "./encounters.js"
 import { getAgendaReport } from "./report-agenda.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 import { getWorkspaceHome, type WorkspaceAccess } from "./workspace.js"
@@ -153,7 +160,9 @@ it("«Atender» desde la cita abre sin pedir motivo, marca la llegada a la hora 
   const f = await scene()
   const visit = await f.book(0, 11, { reason: "Dolor de muela" })
   const opened = await f.run((tx) => createEncounter(tx, ...f.args, { appointmentId: visit.id }))
-  expect(opened).toMatchObject({ appointmentId: visit.id, reason: "Dolor de muela", professionalUserId: f.actor })
+  // El motivo de la cita es de quien reservó: se ofrece y no cuenta hasta que quien atiende lo usa.
+  expect(opened).toMatchObject({ appointmentId: visit.id, reason: null, professionalUserId: f.actor })
+  expect((await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, opened.id))).bookedReason).toBe("Dolor de muela")
   const attending = await f.run((tx) => getAppointment(tx, "org_a", visit.id))
   expect(attending).toMatchObject({ status: "confirmada", visit: "en_atencion", encounter: { id: opened.id, status: "borrador" } })
   // La llegada que marca «Atender» es la hora de inicio: esa espera queda sin dato.
@@ -164,6 +173,7 @@ it("«Atender» desde la cita abre sin pedir motivo, marca la llegada a la hora 
   await expect(f.run((tx) => setAppointmentStatus(tx, "org_a", f.actor, visit.id, "cancelada"))).rejects.toMatchObject({
     code: "APPOINTMENT_IN_ATTENTION",
   })
+  await f.run((tx) => updateEncounterDraft(tx, ...f.args, opened.id, { reason: "Dolor de muela" }))
   await f.ready(opened.id)
   await f.run((tx) => finalizeEncounter(tx, ...f.args, opened.id))
   expect(await f.run((tx) => getAppointment(tx, "org_a", visit.id))).toMatchObject({ status: "atendida", visit: "atendida" })
