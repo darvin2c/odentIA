@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { member, user } from "@odentia/db/schema/auth"
+import { appointment } from "@odentia/db/schema/agenda"
 import { encounter, patientCharge } from "@odentia/db/schema/clinical"
 import { odontogramEntry } from "@odentia/db/schema/dental"
 import { branch } from "@odentia/db/schema/org"
@@ -160,6 +161,22 @@ it("sin cita indicada, la atención se une a la cita de hoy más cercana y al ce
   await f.run((tx) => finalizeEncounter(tx, ...f.args, second.id))
   const third = await f.run((tx) => createEncounter(tx, ...f.args, { reason: "Sin cita hoy" }))
   expect(third.appointmentId).toBeNull()
+})
+
+it("el motivo que se anotó al reservar se ofrece, pero no se firma solo", async () => {
+  const f = await withZoneAgenda()
+  await f.ready(f.encounter.id)
+  await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
+  const visit = await f.bookLocal(0, 13, 30)
+  await ownerDb.update(appointment).set({ reason: "Limpieza dental" }).where(eq(appointment.id, visit.id))
+  const opened = await f.run((tx) => createEncounter(tx, ...f.args, { appointmentId: visit.id }))
+  // Lo escribió quien reservó: la atención nace sin motivo y el cierre lo sigue pidiendo.
+  expect(opened).toMatchObject({ appointmentId: visit.id, reason: null })
+  const detail = await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, opened.id))
+  expect(detail.bookedReason).toBe("Limpieza dental")
+  await expect(f.run((tx) => finalizeEncounter(tx, ...f.args, opened.id))).rejects.toMatchObject({
+    code: "CLOSING_INCOMPLETE",
+  })
 })
 
 it("atender la cita con un borrador sin cita del mismo día lo une a ella en vez de abrir otro", async () => {

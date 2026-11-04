@@ -1042,6 +1042,8 @@ export function EncounterEditor({
   const mode = useDetailMode()
 
   const locked = !canWrite || !attending || childCount > 0 || finalizing || voiding
+  // El motivo de la reserva se ofrece solo a quien puede usarlo y mientras no haya otro.
+  const offeredReason = !locked && reason.trim() === "" ? detail.bookedReason : null
   // Los bloques del producto (odentIA: Odontograma y Periodontograma), después del examen.
   const product = productUi().encounter.useBlocks({
     patientId,
@@ -1097,7 +1099,12 @@ export function EncounterEditor({
         ? "Motivo de consulta, tiempo y relato de la enfermedad, sede y piezas evaluadas."
         : "Motivo de consulta, tiempo y relato de la enfermedad, y sede.",
       // Como la evolución: lo que exige el cierre se dice en la tarjeta, no solo al firmar.
-      summary: reason.trim() === "" ? "Falta el motivo · necesario para cerrar" : reason.trim(),
+      summary:
+        reason.trim() !== ""
+          ? reason.trim()
+          : offeredReason
+            ? `Se agendó como «${offeredReason}» · falta el motivo`
+            : "Falta el motivo · necesario para cerrar",
       empty: reason.trim() === "",
     },
     {
@@ -1420,6 +1427,11 @@ export function EncounterEditor({
             {(control) => (
               <Textarea
                 {...control.props}
+                aria-describedby={
+                  [control.props["aria-describedby"], offeredReason ? `${uid}-booked-reason` : null]
+                    .filter(Boolean)
+                    .join(" ") || undefined
+                }
                 aria-required
                 rows={2}
                 value={field.state.value}
@@ -1437,6 +1449,23 @@ export function EncounterEditor({
           </field.Control>
         )}
       </draftForm.AppField>
+      {/* El de la reserva lo escribió quien reservó: se ofrece y solo cuenta si alguien lo
+          usa. Lo dictado o escrito entra limpio, sin sumarse a él. */}
+      {offeredReason ? (
+        <div className="-mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+          <span id={`${uid}-booked-reason`} className="text-muted-foreground">
+            Se agendó como «{offeredReason}».
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => editText("reason", offeredReason)}
+          >
+            Usar como motivo
+          </Button>
+        </div>
+      ) : null}
       {/* Tiempo y relato no traban el cierre: en un control no hay enfermedad y exigirlos
           obligaría a inventar (ADR 0003). Por eso dicen «(opcional)», y el motivo no. El
           tiempo va antes del relato, como se escribe la anamnesis: motivo, tiempo y relato. */}
@@ -1912,6 +1941,12 @@ export function EncounterEditor({
                 >
                   {openSection === section.key ? "En edición" : "Abrir"}
                 </Button>
+                {/* En un control en serie, el motivo de la reserva se usa sin abrir el bloque. */}
+                {section.key === "consulta" && offeredReason && openSection !== "consulta" ? (
+                  <Button type="button" size="sm" variant="ghost" onClick={() => editText("reason", offeredReason)}>
+                    Usar como motivo
+                  </Button>
+                ) : null}
                 {!REQUIRED_SECTIONS.includes(section.key) && section.empty && dictationCount(section.key) === 0 ? (
                   <Button
                     type="button"

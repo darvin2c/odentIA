@@ -1,0 +1,248 @@
+{
+  "_nota": "Dictados de odentIA para medir qué va en el motivo de consulta, el tiempo y el relato de la enfermedad (mesa del 2026-11-04). Cada palabra admite variantes separadas por «|»; ver packages/agent/src/eval-consulta.ts. Casos 1 a 3: los de la voz clínica de la mesa.",
+  "servicios": [
+    "Obturación con resina",
+    "Endodoncia multirradicular",
+    "Exodoncia simple",
+    "Exodoncia de tercera molar",
+    "Profilaxis dental",
+    "Aplicación de flúor",
+    "Blanqueamiento dental",
+    "Retiro de puntos",
+    "Control de ortodoncia",
+    "Ajuste de prótesis"
+  ],
+  "dictados": [
+    {
+      "id": "c01-urgencia-pulpitis",
+      "texto": "Paciente viene por dolor fuerte en la muela de abajo a la derecha. Empezó hace tres días, primero solo con el frío y desde ayer es espontáneo, no lo deja dormir, le late. Tomó ibuprofeno de cuatrocientos cada ocho horas y le calma un rato. No tiene fiebre ni hinchazón. A la percusión la cuarenta y seis duele mucho, caries profunda distal.",
+      "espera": {
+        "nota": true,
+        "consulta": {
+          "motivo": [
+            "dolor"
+          ],
+          "motivoSin": [
+            "tres|3 d",
+            "percusion",
+            "ibuprofeno"
+          ],
+          "tiempo": "tres|3",
+          "relato": [
+            "frio",
+            "ibuprofeno"
+          ]
+        },
+        "soloConsulta": true
+      }
+    },
+    {
+      "id": "c02-control-profilaxis",
+      "texto": "Viene a su control de seis meses y limpieza. No refiere molestias. Encía con sangrado leve en anteriores inferiores, cálculo lingual. Se hizo profilaxis y fluorización.",
+      "espera": {
+        "nota": true,
+        "consulta": {
+          "motivo": [
+            "control|limpieza|profilaxis"
+          ],
+          "tiempo": null,
+          "tiempoSin": [
+            "seis|6"
+          ]
+        },
+        "soloConsulta": true
+      }
+    },
+    {
+      "id": "c03-blanqueamiento-boda",
+      "texto": "Quiere blanquearse los dientes, tiene boda en dos meses. Siente que se le han oscurecido desde hace unos años, toma mucho café. No tiene sensibilidad. Coloración A3 en anteriores.",
+      "espera": {
+        "nota": true,
+        "consulta": {
+          "motivo": [
+            "blanque"
+          ],
+          "tiempo": "anos",
+          "tiempoSin": [
+            "dos meses|2 meses"
+          ],
+          "relato": [
+            "cafe"
+          ]
+        },
+        "soloConsulta": true
+      }
+    },
+    {
+      "id": "c04-fractura-incisivo",
+      "texto": "Viene porque se le rompió un pedazo de diente arriba adelante ayer comiendo un turrón. No le duele, solo le preocupa cómo se ve. La once con fractura del borde incisal.",
+      "espera": {
+        "nota": true,
+        "consulta": {
+          "motivo": [
+            "diente|fractur|romp"
+          ],
+          "motivoSin": [
+            "once",
+            "11",
+            "incisal"
+          ],
+          "tiempo": "ayer|1 dia|un dia",
+          "relato": [
+            "turron"
+          ]
+        },
+        "soloConsulta": true
+      }
+    },
+    {
+      "id": "c05-sangrado-encias",
+      "texto": "Paciente refiere sangrado de encías al cepillarse desde hace como un mes, a veces le sale mal aliento. No toma ningún medicamento.",
+      "espera": {
+        "nota": true,
+        "consulta": {
+          "motivo": [
+            "sangr"
+          ],
+          "motivoSin": [
+            "mes"
+          ],
+          "tiempo": "mes"
+        },
+        "soloConsulta": true
+      }
+    },
+    {
+      "id": "c06-absceso-automedicado",
+      "texto": "Viene por hinchazón en la cara del lado izquierdo desde anteayer. Ya empezó amoxicilina que le dio la farmacia hace dos días. Tiene fiebre de treinta y ocho.",
+      "espera": {
+        "nota": true,
+        "consulta": {
+          "motivo": [
+            "hinchaz|inflam|tumefac"
+          ],
+          "motivoSin": [
+            "amoxicilina"
+          ],
+          "tiempo": "anteayer|2 dias|dos dias",
+          "relato": [
+            "amoxicilina",
+            "fiebre"
+          ]
+        },
+        "soloConsulta": true
+      }
+    },
+    {
+      "id": "c07-retiro-puntos",
+      "texto": "Viene a retirarse los puntos de la extracción de la semana pasada. Todo bien, sin dolor.",
+      "espera": {
+        "nota": true,
+        "consulta": {
+          "motivo": [
+            "punto"
+          ],
+          "tiempo": null,
+          "tiempoSin": [
+            "semana"
+          ]
+        },
+        "soloConsulta": true
+      }
+    },
+    {
+      "id": "c08-sensibilidad",
+      "texto": "Viene por sensibilidad al frío en los dientes de abajo, lleva así unas dos semanas, empeora con el helado y mejora con la pasta para sensibilidad.",
+      "espera": {
+        "nota": true,
+        "consulta": {
+          "motivo": [
+            "sensibilidad"
+          ],
+          "motivoSin": [
+            "semana"
+          ],
+          "tiempo": "semana",
+          "relato": [
+            "helado|pasta"
+          ]
+        },
+        "soloConsulta": true
+      }
+    },
+    {
+      "id": "c09-nino-caries",
+      "texto": "La mamá trae al niño de seis años porque tiene un hueco en la muela, no le duele. Lo notaron hace un mes.",
+      "espera": {
+        "nota": true,
+        "consulta": {
+          "motivo": [
+            "hueco|caries|muela|cavidad"
+          ],
+          "motivoSin": [
+            "seis anos|6 anos"
+          ],
+          "tiempo": "mes",
+          "tiempoSin": [
+            "seis anos|6 anos"
+          ]
+        },
+        "soloConsulta": true
+      }
+    },
+    {
+      "id": "c10-protesis-floja",
+      "texto": "Viene porque la prótesis de arriba le queda floja desde hace tres meses, se le mueve al comer.",
+      "espera": {
+        "nota": true,
+        "consulta": {
+          "motivo": [
+            "protesis"
+          ],
+          "motivoSin": [
+            "tres meses|3 meses"
+          ],
+          "tiempo": "tres|3"
+        },
+        "soloConsulta": true
+      }
+    },
+    {
+      "id": "c11-control-ortodoncia",
+      "texto": "Control de ortodoncia mensual. Sin molestias, se cambiaron las ligas.",
+      "espera": {
+        "nota": true,
+        "consulta": {
+          "motivo": [
+            "ortodoncia|control"
+          ],
+          "tiempo": null,
+          "tiempoSin": [
+            "mes"
+          ]
+        },
+        "soloConsulta": true
+      }
+    },
+    {
+      "id": "c12-tercera-molar",
+      "texto": "Le duele la muela del juicio de abajo desde el sábado y le cuesta abrir la boca. No tomó nada.",
+      "espera": {
+        "nota": true,
+        "consulta": {
+          "motivo": [
+            "dolor|duele"
+          ],
+          "motivoSin": [
+            "sabado"
+          ],
+          "tiempo": "sabado",
+          "relato": [
+            "abrir"
+          ]
+        },
+        "soloConsulta": true
+      }
+    }
+  ]
+}

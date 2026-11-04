@@ -18,6 +18,7 @@ import { resolve } from "node:path"
 import { examSystemsText } from "@odentia/services/medical"
 import { costMicrosOf } from "../ai-usage.js"
 import { askDictationModel } from "../dictation.js"
+import { consultaSummary, type ExpectedConsulta, scoreConsulta } from "../eval-consulta.js"
 import { createConfiguredChatModel, platformLlmFromEnv, resolveLlmSpec } from "../llm.js"
 import { MEDICAL_DICTATION_PROFILE } from "./dictation.js"
 
@@ -29,6 +30,10 @@ interface PracticeDictation {
   contexto?: string
   espera: {
     nota?: boolean
+    /** Qué va en el motivo, el tiempo y el relato (ver `eval-consulta.ts`). */
+    consulta?: ExpectedConsulta
+    /** Solo mide la consulta: lo demás que se dicte (examen, hallazgos) no cuenta como agregado. */
+    soloConsulta?: boolean
     /** Las medidas dichas, con su cifra. */
     signos?: Record<string, number>
     /** Los sistemas nombrados y cómo los dijo. */
@@ -177,6 +182,7 @@ for (const dictation of bank.dictados.filter((item) => !solo || item.id === solo
   }
   for (const key of Object.keys(vitals)) {
     if (dictation.espera.signos && key in dictation.espera.signos) continue
+    if (dictation.espera.soloConsulta) continue
     totals.inventados += 1
     notes.push(`agregó ${key} ${String(vitals[key])}`)
   }
@@ -198,6 +204,7 @@ for (const dictation of bank.dictados.filter((item) => !solo || item.id === solo
   for (const payload of exam) {
     if ((dictation.espera.examen ?? []).some((expected) => expected.sistema === payload["system"]))
       continue
+    if (dictation.espera.soloConsulta) continue
     totals.inventados += 1
     notes.push(`agregó el sistema ${String(payload["system"])}`)
   }
@@ -212,6 +219,7 @@ for (const dictation of bank.dictados.filter((item) => !solo || item.id === solo
       "nota",
       read.drafts.some((draft) => draft.kind === "nota"),
     )
+  scoreConsulta(dictation.espera.consulta, read.drafts, other)
   const codes = read.drafts
     .filter((draft) => draft.kind === "diagnostico")
     .map((draft) => String(draft.payload["diagnosisCode"] ?? "").toUpperCase())
@@ -336,6 +344,7 @@ console.log(
 console.log(
   `Lo demás (nota, diagnósticos, indicaciones, recetas, controles, descanso, correcciones, quitar): ${totals.otrosBien} de ${totals.otrosEsperados} (${pct(totals.otrosBien, totals.otrosEsperados)})`,
 )
+if (consultaSummary()) console.log(consultaSummary())
 console.log(
   `Costo: USD ${(totals.costo / 1_000_000).toFixed(4)} en total, USD ${(totals.costo / 1_000_000 / Math.max(1, bank.dictados.length - totals.sinCosto)).toFixed(5)} por dictado${totals.sinCosto ? ` (${totals.sinCosto} sin costo informado)` : ""}`,
 )

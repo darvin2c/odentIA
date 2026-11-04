@@ -17,6 +17,7 @@ import { DICTATION_FINDINGS, dictationFindingsText } from "@odentia/services/den
 import { costMicrosOf } from "../ai-usage.js"
 import { createConfiguredChatModel, platformLlmFromEnv, resolveLlmSpec } from "../llm.js"
 import { askDictationModel } from "../dictation.js"
+import { consultaSummary, type ExpectedConsulta, scoreConsulta } from "../eval-consulta.js"
 import { DENTAL_DICTATION_PROFILE } from "./dictation.js"
 
 interface ExpectedFinding {
@@ -38,6 +39,10 @@ interface PracticeDictation {
     planes?: number[]
     controles?: number
     nota?: boolean
+    /** Qué va en el motivo, el tiempo y el relato (ver `eval-consulta.ts`). */
+    consulta?: ExpectedConsulta
+    /** Solo mide la consulta: lo demás que se dicte (examen, hallazgos) no cuenta como agregado. */
+    soloConsulta?: boolean
     correcciones?: number
     quitar?: number
     /** Lo que la corrección pone, por una palabra («clindamicina»). */
@@ -153,6 +158,7 @@ for (const dictation of bank.dictados) {
   }
   findings.forEach((payload, at) => {
     if (used.has(at)) return
+    if (dictation.espera.soloConsulta) return
     totals.inventados += 1
     notes.push(`agregó ${String(payload["toothNumber"])} ${String(payload["condition"])}`)
   })
@@ -168,6 +174,7 @@ for (const dictation of bank.dictados) {
   for (const tooth of dictation.espera.planes ?? []) other(`indicación en la ${tooth}`, plans.includes(tooth))
   if (dictation.espera.controles) other("control", read.drafts.filter((draft) => draft.kind === "control").length === dictation.espera.controles)
   if (dictation.espera.nota) other("nota", read.drafts.some((draft) => draft.kind === "nota"))
+  scoreConsulta(dictation.espera.consulta, read.drafts, other)
   const recipes = read.drafts.filter((draft) => draft.kind === "receta").map((draft) => draft.payload)
   for (const expected of dictation.espera.recetas ?? []) {
     const found = recipes.find((payload) => plain(String(payload["genericName"] ?? "")).includes(plain(expected.dci)))
@@ -246,6 +253,7 @@ console.log(`Modelo: ${spec.modelName} · ${bank.dictados.length} dictados`)
 console.log(`Hallazgos: ${totals.bien} de ${totals.esperados} bien (${pct(totals.bien, totals.esperados)}), ${totals.perdidos} perdidos, ${totals.inventados} agregados que no se dijeron`)
 console.log(`Variante y estado dichos: ${totals.detalleBien} de ${totals.detalleEsperado} bien (${pct(totals.detalleBien, totals.detalleEsperado)})`)
 console.log(`Lo demás (diagnósticos, indicaciones, controles, nota, correcciones, quitar): ${totals.otrosBien} de ${totals.otrosEsperados} (${pct(totals.otrosBien, totals.otrosEsperados)})`)
+if (consultaSummary()) console.log(consultaSummary())
 console.log(
   `Costo: USD ${(totals.costo / 1_000_000).toFixed(4)} en total, USD ${(totals.costo / 1_000_000 / Math.max(1, bank.dictados.length - totals.sinCosto)).toFixed(5)} por dictado${totals.sinCosto ? ` (${totals.sinCosto} sin costo informado)` : ""}`,
 )
