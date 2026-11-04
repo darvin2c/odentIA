@@ -13,10 +13,38 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Decide qué corre este cambio (scripts/ci-alcance.mjs): solo documentación no corre
+  # nada; un cambio de un paquete corre lo que depende de él; un archivo fuera de
+  # apps/, packages/ y e2e/ (CI, Dockerfile, infra, raíz) corre todo. Los demás jobs leen
+  # sus salidas. Si no se puede calcular, corre todo: falla hacia lo seguro.
+  alcance:
+    runs-on: ubuntu-latest
+    outputs:
+      solo_docs: ${{ steps.calcular.outputs.solo_docs }}
+      afectados: ${{ steps.calcular.outputs.afectados }}
+      hay_check: ${{ steps.calcular.outputs.hay_check }}
+      check: ${{ steps.calcular.outputs.check }}
+      e2e: ${{ steps.calcular.outputs.e2e }}
+      vps: ${{ steps.calcular.outputs.vps }}
+      cloudflare: ${{ steps.calcular.outputs.cloudflare }}
+      arquitectura: ${{ steps.calcular.outputs.arquitectura }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Calcular qué corre
+        id: calcular
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          SHA: ${{ github.sha }}
+        run: |
+          npm install --global turbo@2.10.12
+          node scripts/ci-alcance.mjs
+
   # Un push a main que trae exactamente el código que ya pasó todo en su PR (main no
   # avanzó entre la prueba y la unión) no se vuelve a probar: despliega directo. El PR
   # deja anotado el árbol probado en el estado `ci/codigo-probado` de su último commit
-  # (job `codigo-probado`); si no coincide, o no se puede saber, se prueba todo.
+  # (job `codigo-probado`); si no coincide, o no se puede saber, se prueba lo afectado.
   ya-probado:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -35,7 +63,7 @@ jobs:
           arbol=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$GITHUB_SHA" --jq .tree.sha)
           pr=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '.[0].number // empty' || true)
           if [ -z "$pr" ]; then
-            echo "Sin PR asociado: se prueba todo."
+            echo "Sin PR asociado: se prueba lo afectado."
             exit 0
           fi
           cabeza=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$pr" --jq .head.sha)
@@ -44,59 +72,20 @@ jobs:
             echo "El PR #$pr probó este mismo código ($arbol): se despliega sin repetir las pruebas."
             echo "probado=true" >> "$GITHUB_OUTPUT"
           else
-            echo "El PR #$pr probó ${probado:-nada anotado} y main tiene $arbol: se prueba todo."
+            echo "El PR #$pr probó ${probado:-nada anotado} y main tiene $arbol: se prueba lo afectado."
           fi
 
-  # Tests unitarios y de integración repartidos en partes paralelas; los
-  # recorridos E2E van en el job `e2e`. Cada archivo de prueba arranca su
-  # propio PostgreSQL con testcontainers, así que cada parte es independiente.
-  # Un paquete nuevo cae en la parte general salvo que se le asigne otra.
-  check:
-    name: check (${{ matrix.parte }})
-    needs: ya-probado
-    if: ${{ !cancelled() && needs.ya-probado.outputs.probado != 'true' }}
+  # Reglas que leen el repositorio entero (límites entre productos, rutas de la ayuda,
+  # pantallas con ScrollArea). Corren en cada cambio de código, no solo cuando cambia su
+  # paquete: un cambio en una app puede romper una regla que vive en otro paquete.
+  # Son pruebas puras, sin base de datos.
+  arquitectura:
+    name: arquitectura
+    needs: alcance
+    if: ${{ !cancelled() && needs.alcance.result == 'success' && needs.alcance.outputs.arquitectura == 'true' }}
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Tipos de todo el repo y las pruebas de los paquetes sin parte propia.
-          - parte: general
-            tipos: true
-            postgres: true
-            paquetes: --filter=!@odentia/e2e --filter=!@odentia/services --filter=!@odentia/api --filter=!@odentia/ui-patterns --filter=!@odentia/dental-clinic --filter=!@odentia/medical-clinic --filter=!@odentia/clinic-app
-          # `--only` omite el `^build` (tsc --noEmit): ya lo comprueba la parte general.
-          # Pruebas de interfaz con jsdom: sin base de datos, pero mucha CPU.
-          - parte: interfaz
-            paquetes: --filter=@odentia/ui-patterns --filter=@odentia/dental-clinic --filter=@odentia/medical-clinic --filter=@odentia/clinic-app
-            opciones: --only
-          - parte: api
-            postgres: true
-            paquetes: --filter=@odentia/api
-            opciones: --only
-          - parte: services-1
-            postgres: true
-            paquetes: --filter=@odentia/services
-            opciones: --only -- --shard=1/3
-          - parte: services-2
-            postgres: true
-            paquetes: --filter=@odentia/services
-            opciones: --only -- --shard=2/3
-          - parte: services-3
-            postgres: true
-            paquetes: --filter=@odentia/services
-            opciones: --only -- --shard=3/3
     steps:
       - uses: actions/checkout@v4
-      # La imagen se construye en segundo plano mientras se instala y se
-      # comprueban los tipos; el paso de pruebas la espera.
-      - name: Preparar PostgreSQL para las pruebas de integración
-        if: matrix.postgres
-        run: |
-          # Toda la salida al log: el paso no debe quedar atado a la del proceso.
-          (set +e
-           docker build --tag dentalagent-postgres:18.6 ./infra/dev/postgres
-           echo $? > "$RUNNER_TEMP/postgres.exit") > "$RUNNER_TEMP/postgres.log" 2>&1 &
       - uses: pnpm/action-setup@v4
         with:
           version: 9.15.0
@@ -105,34 +94,63 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # Todo, también en un PR: lo que pasa ahí es lo que main despliega sin volver a
-      # probar (job `ya-probado`). Probar solo lo afectado dejaba pasar reglas de otro
-      # paquete, que recién fallaban en main.
-      - if: matrix.tipos
-        run: pnpm exec turbo run typecheck
-      - name: Buscar paquetes con pruebas
-        id: pruebas
+      - name: Reglas de límites y de pantalla
         run: |
-          total=$(pnpm exec turbo ls ${{ matrix.paquetes }} --output=json | jq '.packages.count')
-          echo "Paquetes a probar: $total"
-          echo "total=$total" >> "$GITHUB_OUTPUT"
-      - name: Esperar la imagen de PostgreSQL
-        if: matrix.postgres && steps.pruebas.outputs.total != '0'
-        run: |
-          timeout 600 sh -c 'while [ ! -f "$RUNNER_TEMP/postgres.exit" ]; do sleep 2; done'
-          cat "$RUNNER_TEMP/postgres.log"
-          exit "$(cat "$RUNNER_TEMP/postgres.exit")"
-      - if: steps.pruebas.outputs.total != '0'
-        run: pnpm exec turbo run test ${{ matrix.paquetes }} ${{ matrix.opciones }}
+          pnpm --filter @odentia/dental exec vitest run src/boundaries.test.ts
+          pnpm --filter @odentia/medical exec vitest run src/boundaries.test.ts
+          pnpm --filter @odentia/services exec vitest run src/help-guide.test.ts
+          pnpm --filter @odentia/ui-patterns exec vitest run src/scroll-policy.test.ts
+
+  # Tipos y pruebas de los paquetes afectados, repartidos en partes paralelas. La lista
+  # de partes sale de `alcance`: una parte sin paquetes afectados no se ejecuta. Cada
+  # archivo de prueba arranca su propio PostgreSQL con testcontainers, así que cada parte
+  # es independiente. Un paquete nuevo cae en la parte general salvo que se le asigne otra.
+  check:
+    name: check (${{ matrix.parte }})
+    needs: [alcance, ya-probado]
+    if: ${{ !cancelled() && needs.alcance.result == 'success' && needs.alcance.outputs.hay_check == 'true' && needs.ya-probado.outputs.probado != 'true' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.alcance.outputs.check) }}
+    steps:
+      - uses: actions/checkout@v4
+      # La imagen de PostgreSQL (con pgmq, pg_cron y pgvector compilados) sale de la caché
+      # de capas de GitHub: se compila solo cuando cambia su Dockerfile.
+      - if: matrix.postgres
+        uses: docker/setup-buildx-action@v3
+      - name: Preparar PostgreSQL para las pruebas de integración
+        if: matrix.postgres
+        uses: docker/build-push-action@v6
+        with:
+          context: ./infra/dev/postgres
+          load: true
+          tags: dentalagent-postgres:18.6
+          cache-from: type=gha,scope=postgres
+          cache-to: type=gha,mode=max,scope=postgres
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Los tipos de lo afectado: un cambio puede romper a quien depende de él.
+      - if: matrix.tipos != ''
+        run: pnpm exec turbo run typecheck ${{ matrix.tipos }}
+      - if: matrix.pruebas != ''
+        run: pnpm exec turbo run test ${{ matrix.pruebas }} ${{ matrix.opciones }}
 
   # Recorridos E2E con el supervisor de `e2e/run.ts`: cada parte levanta su
   # propio entorno efímero (PostgreSQL, RustFS, Mailpit, proxy y builds) y corre
   # un tercio de los casos. Modelo falso y sin credenciales de proveedores: no
-  # acredita integraciones reales. Sin reintentos (e2e/AGENTS.md).
+  # acredita integraciones reales. Sin reintentos (e2e/AGENTS.md). Solo corren si
+  # el cambio toca algo que no sea la web de marketing.
   e2e:
     name: e2e (${{ matrix.parte }}/3)
-    needs: ya-probado
-    if: ${{ !cancelled() && needs.ya-probado.outputs.probado != 'true' }}
+    needs: [alcance, ya-probado]
+    if: ${{ !cancelled() && needs.alcance.result == 'success' && needs.alcance.outputs.e2e == 'true' && needs.ya-probado.outputs.probado != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     strategy:
@@ -141,11 +159,15 @@ jobs:
         parte: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
       - name: Preparar PostgreSQL de las pruebas
-        run: |
-          (set +e
-           docker build --tag dentalagent-postgres:18.6 ./infra/dev/postgres
-           echo $? > "$RUNNER_TEMP/postgres.exit") > "$RUNNER_TEMP/postgres.log" 2>&1 &
+        uses: docker/build-push-action@v6
+        with:
+          context: ./infra/dev/postgres
+          load: true
+          tags: dentalagent-postgres:18.6
+          cache-from: type=gha,scope=postgres
+          cache-to: type=gha,mode=max,scope=postgres
       - uses: pnpm/action-setup@v4
         with:
           version: 9.15.0
@@ -154,13 +176,15 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Los binarios de Chromium se bajan una vez por versión de Playwright (lockfile).
+      # `--with-deps` sigue instalando paquetes del sistema en cada corrida.
+      - name: Caché de Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       - name: Instalar Chromium
         run: pnpm --filter @odentia/e2e exec playwright install --with-deps chromium
-      - name: Esperar la imagen de PostgreSQL
-        run: |
-          timeout 600 sh -c 'while [ ! -f "$RUNNER_TEMP/postgres.exit" ]; do sleep 2; done'
-          cat "$RUNNER_TEMP/postgres.log"
-          exit "$(cat "$RUNNER_TEMP/postgres.exit")"
       - run: pnpm e2e --shard=${{ matrix.parte }}/3 --workers=2
       # Las trazas pueden llevar credenciales de prueba: solo como artefacto
       # privado del repo y por poco tiempo.
@@ -171,11 +195,13 @@ jobs:
           path: e2e/test-results/
           retention-days: 7
 
+  # Solo si cambia lo que va al VPS (api y worker, y lo que dependen de ellos): la imagen
+  # de producción sirve esos dos servicios. Las pantallas no están en esa imagen.
   docker-build:
     # También en cada PR: es lo único que comprueba la imagen antes de fusionar,
     # y una imagen rota en main detiene el deploy de producción.
-    needs: ya-probado
-    if: ${{ !cancelled() && needs.ya-probado.outputs.probado != 'true' }}
+    needs: [alcance, ya-probado]
+    if: ${{ !cancelled() && needs.alcance.result == 'success' && needs.alcance.outputs.vps == 'true' && needs.ya-probado.outputs.probado != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -199,15 +225,16 @@ jobs:
           bash scripts/smoke-image.sh odentia-smoke:ci
 
   deploy:
-    # Con lo probado en el PR, o con todo en verde aquí.
+    # Solo si cambia lo que va al VPS. Con lo probado en el PR, o con todo en verde aquí.
     if: >-
       ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      needs.alcance.result == 'success' && needs.alcance.outputs.vps == 'true' &&
       (needs.ya-probado.outputs.probado == 'true' ||
-      (needs.check.result == 'success' && needs.e2e.result == 'success' && needs.docker-build.result == 'success')) }}
-    needs: [ya-probado, check, e2e, docker-build]
+      (needs.check.result == 'success' && needs.e2e.result == 'success' && needs.docker-build.result == 'success' && needs.arquitectura.result == 'success')) }}
+    needs: [alcance, ya-probado, check, e2e, docker-build, arquitectura]
     runs-on: ubuntu-latest
-    # Un deploy que reconstruye todos los servicios (admin, panel, platform, web,
-    # api, worker) puede superar los 20 minutos; el CLI espera hasta 40.
+    # Un deploy que reconstruye los servicios del VPS puede superar los 20 minutos;
+    # el CLI espera hasta 40.
     timeout-minutes: 45
     # Un solo deploy a la vez y sin cancelar el que está en curso. Si llegan
     # varios, GitHub descarta los pendientes más viejos y deja el más reciente.
@@ -248,15 +275,18 @@ jobs:
         if: steps.punta.outputs.omitir != 'true'
         run: openship deploy --project "$OPENSHIP_PROJECT_ID" --branch main --commit "$GITHUB_SHA" --env production --smart-route --watch --timeout 2400000
 
-  # Las dos webs de marketing (ADR 0136), la administración y el panel (ADR 0137) y la app de las
+  # Las webs de marketing (ADR 0136), la administración y el panel (ADR 0137) y la app de las
   # clínicas (ADR 0138) van en Cloudflare Workers, aparte de OpenShip: un cambio llega en unos
-  # minutos y no reconstruye lo demás. En un PR solo se comprueba que se arman para Workers
-  # (`--dry-run`, sin claves); en main se publican.
+  # minutos. En un PR solo se comprueba que se arman para Workers (`--dry-run`, sin claves); en
+  # main se publican. Cada app se arma y se publica solo si el cambio la afecta.
   deploy-web:
     if: >-
-      ${{ !cancelled() && (needs.ya-probado.outputs.probado == 'true' ||
-      (needs.check.result == 'success' && needs.e2e.result == 'success')) }}
-    needs: [ya-probado, check, e2e]
+      ${{ !cancelled() && needs.alcance.result == 'success' && needs.alcance.outputs.cloudflare != '[]' &&
+      (needs.ya-probado.outputs.probado == 'true' ||
+      ((needs.check.result == 'success' || needs.check.result == 'skipped') &&
+      (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
+      (needs.arquitectura.result == 'success' || needs.arquitectura.result == 'skipped'))) }}
+    needs: [alcance, ya-probado, check, e2e, arquitectura]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     concurrency:
@@ -293,20 +323,20 @@ jobs:
       # Cada web es un build con su dominio y su producto; las dos usan la misma carpeta, así que
       # se publica una antes de armar la otra. La clave de Cloudflare solo llega al paso que publica.
       - name: Armar la web de odentIA
-        if: env.OMITIR != 'true'
+        if: env.OMITIR != 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/web')
         working-directory: apps/web
         env:
           VITE_BASE_DOMAIN: odentia32.com
         run: pnpm build && pnpm exec wrangler deploy --dry-run
       - name: Publicar la web de odentIA
-        if: env.OMITIR != 'true' && env.PUBLICAR == 'true'
+        if: env.OMITIR != 'true' && env.PUBLICAR == 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/web')
         working-directory: apps/web
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: pnpm exec wrangler deploy
       - name: Armar la web de latidIA
-        if: env.OMITIR != 'true'
+        if: env.OMITIR != 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/web')
         working-directory: apps/web
         env:
           VITE_BASE_DOMAIN: latidia72.com
@@ -314,7 +344,7 @@ jobs:
           CLOUDFLARE_ENV: latidia
         run: pnpm build && pnpm exec wrangler deploy --dry-run
       - name: Publicar la web de latidIA
-        if: env.OMITIR != 'true' && env.PUBLICAR == 'true'
+        if: env.OMITIR != 'true' && env.PUBLICAR == 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/web')
         working-directory: apps/web
         env:
           CLOUDFLARE_ENV: latidia
@@ -323,7 +353,7 @@ jobs:
         run: pnpm exec wrangler deploy
       # La administración y el panel (ADR 0137), con los mismos dominios con que se arman en el VPS.
       - name: Armar la administración
-        if: env.OMITIR != 'true'
+        if: env.OMITIR != 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/admin')
         working-directory: apps/admin
         env:
           VITE_API_URL: https://api.odentia32.com
@@ -332,14 +362,14 @@ jobs:
           VITE_MEDICAL_DOMAIN: latidia72.com
         run: pnpm build && pnpm exec wrangler deploy --dry-run
       - name: Publicar la administración
-        if: env.OMITIR != 'true' && env.PUBLICAR == 'true'
+        if: env.OMITIR != 'true' && env.PUBLICAR == 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/admin')
         working-directory: apps/admin
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: pnpm exec wrangler deploy
       - name: Armar el panel de odentIA
-        if: env.OMITIR != 'true'
+        if: env.OMITIR != 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/panel')
         working-directory: apps/panel
         env:
           VITE_API_URL: https://api.odentia32.com
@@ -348,14 +378,14 @@ jobs:
           VITE_MEDICAL_DOMAIN: latidia72.com
         run: pnpm build && pnpm exec wrangler deploy --dry-run
       - name: Publicar el panel de odentIA
-        if: env.OMITIR != 'true' && env.PUBLICAR == 'true'
+        if: env.OMITIR != 'true' && env.PUBLICAR == 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/panel')
         working-directory: apps/panel
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: pnpm exec wrangler deploy
       - name: Armar el panel de latidIA
-        if: env.OMITIR != 'true'
+        if: env.OMITIR != 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/panel')
         working-directory: apps/panel
         env:
           VITE_API_URL: https://api.latidia72.com
@@ -366,7 +396,7 @@ jobs:
           CLOUDFLARE_ENV: latidia
         run: pnpm build && pnpm exec wrangler deploy --dry-run
       - name: Publicar el panel de latidIA
-        if: env.OMITIR != 'true' && env.PUBLICAR == 'true'
+        if: env.OMITIR != 'true' && env.PUBLICAR == 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/panel')
         working-directory: apps/panel
         env:
           CLOUDFLARE_ENV: latidia
@@ -375,7 +405,7 @@ jobs:
         run: pnpm exec wrangler deploy
       # La app de las clínicas (ADR 0138), con los mismos dominios con que se arma en el VPS.
       - name: Armar la app de las clínicas de odentIA
-        if: env.OMITIR != 'true'
+        if: env.OMITIR != 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/dental-clinic')
         working-directory: apps/dental-clinic
         env:
           VITE_API_URL: https://api.odentia32.com
@@ -384,14 +414,14 @@ jobs:
           VITE_MEDICAL_DOMAIN: latidia72.com
         run: pnpm build && pnpm exec wrangler deploy --dry-run
       - name: Publicar la app de las clínicas de odentIA
-        if: env.OMITIR != 'true' && env.PUBLICAR == 'true'
+        if: env.OMITIR != 'true' && env.PUBLICAR == 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/dental-clinic')
         working-directory: apps/dental-clinic
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: pnpm exec wrangler deploy
       - name: Armar la app de las clínicas de latidIA
-        if: env.OMITIR != 'true'
+        if: env.OMITIR != 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/medical-clinic')
         working-directory: apps/medical-clinic
         env:
           VITE_API_URL: https://api.latidia72.com
@@ -401,7 +431,7 @@ jobs:
           VITE_PRODUCT: medical
         run: pnpm build && pnpm exec wrangler deploy --dry-run
       - name: Publicar la app de las clínicas de latidIA
-        if: env.OMITIR != 'true' && env.PUBLICAR == 'true'
+        if: env.OMITIR != 'true' && env.PUBLICAR == 'true' && contains(fromJSON(needs.alcance.outputs.cloudflare), '@odentia/medical-clinic')
         working-directory: apps/medical-clinic
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -410,15 +440,19 @@ jobs:
 
   # En un PR con todo en verde, anota el árbol que se probó (la unión del PR con main
   # de ese momento) en su último commit: al unirlo, `ya-probado` lo compara con main.
-  # Un PR desde un fork no puede escribirlo, y entonces main prueba todo.
+  # Lo que no aplica al cambio (job saltado) cuenta como correcto; un fallo no. Un PR
+  # desde un fork no puede escribirlo, y entonces main prueba lo afectado.
   codigo-probado:
     # Explícito: `ya-probado` no corre en un PR y, sin esto, GitHub salta todo lo que
     # depende de él aunque las pruebas pasen.
     if: >-
-      ${{ !cancelled() && github.event_name == 'pull_request' &&
-      needs.check.result == 'success' && needs.e2e.result == 'success' &&
-      needs.docker-build.result == 'success' && needs.deploy-web.result == 'success' }}
-    needs: [check, e2e, docker-build, deploy-web]
+      ${{ !cancelled() && github.event_name == 'pull_request' && needs.alcance.result == 'success' &&
+      (needs.check.result == 'success' || needs.check.result == 'skipped') &&
+      (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
+      (needs.docker-build.result == 'success' || needs.docker-build.result == 'skipped') &&
+      (needs.arquitectura.result == 'success' || needs.arquitectura.result == 'skipped') &&
+      (needs.deploy-web.result == 'success' || needs.deploy-web.result == 'skipped') }}
+    needs: [alcance, check, e2e, docker-build, arquitectura, deploy-web]
     runs-on: ubuntu-latest
     permissions:
       contents: read
