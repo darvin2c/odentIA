@@ -22,6 +22,7 @@ import { automationJob } from "@odentia/db/schema/automation"
 import { patientContact } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gte, inArray, isNull, lt, or, type SQL, sql } from "drizzle-orm"
+import { createTask } from "./tasks.js"
 import { personSearchCondition } from "./person-search.js"
 import { foldedWordsMatch } from "./search-text.js"
 import { lineOfJobKind } from "./admin-lines.js"
@@ -292,8 +293,19 @@ export async function ingestInbound(
       .limit(1)
     // Una historia bloqueada no la reactiva un mensaje (ADR 0080): el mensaje se guarda y
     // Administración la reactiva a mano. Reactivarla aquí chocaba con la base y el mensaje se perdía.
-    if (person && !person.isActive && !person.recordLockedAt && !fromTeam && !past)
+    if (person?.recordLockedAt) {
+      // Lo que pide trabajo va en «Te espera» como tarea de Administración, no en la campana.
+      await createTask(tx, orgId, {
+        title: "Reactivar la historia: le escribió por WhatsApp",
+        contactId,
+        area: "administracion",
+        reason: "Su historia está bloqueada y un mensaje no la reactiva (ADR 0080).",
+        idempotencyKey: `historia-bloqueada:${contactId}`,
+        createdBy: "sistema",
+      })
+    } else if (person && !person.isActive && !fromTeam && !past) {
       await applyContactActive(tx, orgId, contactId, true, { userId: null })
+    }
     // Escribió desde ese número: sí tiene WhatsApp (decisión 23).
     if (identity.noWhatsappAt) {
       await tx

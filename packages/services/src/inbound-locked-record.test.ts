@@ -2,7 +2,7 @@ import type { ChannelAdapter, NormalizedInbound } from "@odentia/channels"
 import { type InboundMessageJob, withOrgContext } from "@odentia/db"
 import { member, user } from "@odentia/db/schema/auth"
 import { contact } from "@odentia/db/schema/crm"
-import { eq } from "drizzle-orm"
+import { eq, sql } from "drizzle-orm"
 import { beforeAll, expect, it } from "vitest"
 import { createConnection } from "./connections.js"
 import { getConversationDetail, type IngestDeps, ingestInbound } from "./conversations.js"
@@ -75,4 +75,11 @@ it("un mensaje de una historia bloqueada se guarda sin reactivarla y avisa a Adm
     .where(eq(contact.id, contactId))
   expect(row).toMatchObject({ isActive: false })
   expect(row?.recordLockedAt).not.toBeNull()
+
+  // Administración tiene una tarea en «Te espera», y escribir otra vez no la duplica.
+  await withOrgContext(appDb, ORG, (tx) => ingestInbound(tx, job("lock-3", "Sigo aquí"), adapter, deps))
+  const tasks = await ownerDb.execute<{ n: number }>(
+    sql`select count(*)::int as n from task where organization_id = ${ORG} and contact_id = ${contactId} and area = 'administracion' and kind is null and status = 'open'`,
+  )
+  expect(tasks[0]?.n).toBe(1)
 })
