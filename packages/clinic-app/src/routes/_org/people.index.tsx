@@ -170,6 +170,20 @@ function PeoplePage() {
     staleTime: 60_000,
   })
   const rows = query.data?.data ?? []
+  // Un archivado que coincide con la búsqueda no sale en esta vista: se dice debajo de los
+  // resultados, con su camino, para no crear una ficha duplicada (QA, propuesta UX 3).
+  const archivedMatchQuery = useQuery({
+    queryKey: ["people", "archivados-coinciden", search.trim()],
+    queryFn: () =>
+      apiFetch<{ data: PersonListItem[]; nextCursor: string | null }>(
+        `/api/people?${new URLSearchParams({ ver: "archivados", limit: "20", q: search.trim() })}`,
+      ),
+    enabled: canView && view !== "archivados" && search.trim() !== "",
+    placeholderData: keepPreviousData,
+  })
+  const archivedMatches = archivedMatchQuery.data?.data.length ?? 0
+  const archivedMore = Boolean(archivedMatchQuery.data?.nextCursor)
+  const archivedLabel = `${archivedMore ? "más de " : ""}${archivedMatches} archivada${archivedMatches === 1 && !archivedMore ? "" : "s"}`
   const queryClient = useQueryClient()
   // Abrir a alguien de la lista ya muestra sus pestañas y sus botones.
   useEffect(() => {
@@ -397,9 +411,21 @@ function PeoplePage() {
               ? "Prueba con otra parte del nombre, el teléfono o el documento, o mira en «Todos»."
               : "Cuando alguien escriba o lo registres, aparece aquí."
           }
-          actionLabel={atajo ? "Ver todos" : canRegister ? "Nuevo paciente" : canCreate ? "Nuevo contacto" : undefined}
+          actionLabel={
+            filtered && archivedMatches > 0
+              ? "Ver archivada"
+              : atajo
+                ? "Ver todos"
+                : canRegister
+                  ? "Nuevo paciente"
+                  : canCreate
+                    ? "Nuevo contacto"
+                    : undefined
+          }
           onAction={
-            atajo
+            filtered && archivedMatches > 0
+              ? () => listSearch.setParam("ver", "archivados", { replace: true })
+              : atajo
               ? () => listSearch.setParam("atajo", undefined, { replace: true })
               : canRegister
                 ? () => setRegistering(true)
@@ -410,6 +436,18 @@ function PeoplePage() {
         />
       ) : (
         <>
+          {archivedMatches > 0 ? (
+            <p className="px-1 pb-2 text-sm text-muted-foreground">
+              También coincide: {archivedLabel} ·{" "}
+              <button
+                type="button"
+                className="font-medium text-primary hover:underline"
+                onClick={() => listSearch.setParam("ver", "archivados", { replace: true })}
+              >
+                Ver
+              </button>
+            </p>
+          ) : null}
           <div aria-busy={query.isPlaceholderData === true}>
             <DataTable table={table} isFetching={query.isFetching} />
           </div>
