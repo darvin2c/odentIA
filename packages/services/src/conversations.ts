@@ -286,11 +286,13 @@ export async function ingestInbound(
     // no responderle a alguien está «Bloquear».
     contactId = identity.contactId
     const [person] = await tx
-      .select({ isActive: contact.isActive })
+      .select({ isActive: contact.isActive, recordLockedAt: contact.recordLockedAt })
       .from(contact)
       .where(and(eq(contact.id, contactId), eq(contact.organizationId, orgId)))
       .limit(1)
-    if (person && !person.isActive && !fromTeam && !past)
+    // Una historia bloqueada no la reactiva un mensaje (ADR 0080): el mensaje se guarda y
+    // Administración la reactiva a mano. Reactivarla aquí chocaba con la base y el mensaje se perdía.
+    if (person && !person.isActive && !person.recordLockedAt && !fromTeam && !past)
       await applyContactActive(tx, orgId, contactId, true, { userId: null })
     // Escribió desde ese número: sí tiene WhatsApp (decisión 23).
     if (identity.noWhatsappAt) {
