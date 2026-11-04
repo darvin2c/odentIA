@@ -565,9 +565,9 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         a: "Sí, solo, mientras escribes: arriba dice «Guardado» con la hora o «Guardando…». Sin conexión, lo escrito se queda en la pantalla y se guarda al volver; mientras tanto no se puede firmar.",
       },
       {
-        q: "¿Qué va en motivo de consulta, tiempo y relato de la enfermedad?",
+        q: "¿Qué va en cada campo de «Consulta»?",
         a: "El motivo de consulta es lo que trae a la persona, en una línea y en sus palabras, por ejemplo: vengo porque me duele. Es lo único de «Consulta» que se pide para cerrar. El tiempo de enfermedad es cuánto lleva así, por ejemplo, 3 días. El relato de la enfermedad cuenta cómo empezó, cómo siguió, qué lo alivia o empeora y qué tomó. En un control o una revisión sin molestias, el tiempo y el relato quedan vacíos.",
-        forms: ["que va en el motivo de consulta", "que pongo en enfermedad actual", "que pongo en tiempo de enfermedad", "que va en el relato de la enfermedad"],
+        forms: ["que va en el motivo de consulta", "que pongo en enfermedad actual", "que va en el relato de la enfermedad", "tiempo de enfermedad"],
       },
       {
         q: "¿Cómo atiendo a un paciente?",
