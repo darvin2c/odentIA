@@ -9,7 +9,8 @@ Una ronda recorre un área en la demo de producción. Encuentra, confirma e info
 
 ## Reglas de toda ronda
 
-- **En producción, solo dentro de la demo fija de cada producto** (ADR 0096: creada desde la administración, marcada «Demo» y sin cobro). Nunca en otra clínica: ahí hay pacientes reales. Las demos y sus cuentas por rol están en `~/odentia-qa/demos.md`.
+- **La ronda no pregunta.** Si falta un acceso (segundo factor, contraseña, una demo sin marcar), no se detiene a pedirlo: usa la alternativa permitida por esta skill (local, apartado 2) y lo anota en el informe. Solo se frena ante lo que esta skill marca como prohibido, nunca por comodidad.
+- **En producción, solo dentro de una demo que la ronda crea para sí misma** desde la administración (ADR 0096: marcada «Demo» y sin cobro). Nunca en una clínica real, ni en las cuentas del usuario. Al terminar, la ronda elimina su demo y verifica que la eliminación sea completa. Las demos de cada ronda se anotan en `~/odentia-qa/demos.md`.
 - **Ningún mensaje sale de la demo.** En producción los envíos son reales, así que hay dos barreras:
   - **Canales apagados.** El WhatsApp de la demo está deshabilitado (claves falsas) y no hay correo, Messenger, Instagram ni Telegram conectados. Ninguna voz conecta, edita ni prueba un canal. Esta barrera también cubre a los pacientes que trae la demo.
   - **Solo datos que no llegan a nadie.** Todo teléfono que crea la ronda es del rango que el Reino Unido reserva para ficción, `+44 7700 900000` a `+44 7700 900999`. Todo correo es `@example.com`.
@@ -27,11 +28,11 @@ Los archivos de la ronda van fuera del repositorio, porque es público, en `~/od
 
 ## 2. Preparar la demo
 
-1. «Volver a empezar» la demo desde la administración, para que cada ronda parta de lo mismo. La administración puede pedir segundo factor; si la ronda no puede entrar, pedírselo al usuario.
+1. **Por defecto, la ronda corre en local** con `pnpm dev` y `pnpm --filter @odentia/services seed:dev`: no pide 2FA, no hay canales reales y no se toca producción. Antes de empezar, comprobar que hay memoria libre para levantar la app, dependencias instaladas y que Podman responde; si algo falta, el informe lo dice y la ronda no se atasca. Producción queda para una comprobación final, solo cuando el usuario lo pida: entonces se crea una demo para la ronda desde la administración (nombre con `QA` y la fecha), nunca una clínica existente, y se borra al terminar.
 2. Con la cuenta de propietario, comprobar las dos barreras: el WhatsApp deshabilitado y ningún otro canal conectado. Si algo está conectado, la ronda no empieza.
 3. Anotar el commit que está en producción. Desarrollo y la confirmación leen el código de ese commit (`git show <commit>:<ruta>`), no el de la rama local.
 
-**El aislamiento entre clínicas se prueba en local**, con `pnpm dev` y `pnpm --filter @odentia/services seed:dev` (`docs/development.md`, contraseña `Demo1234`). En producción, intentar entrar a otra clínica leería historias reales si el fallo existiera. Encender la app en local usa unos 8 GB: mirar antes la memoria libre.
+**El aislamiento entre clínicas se prueba en local**, con `pnpm dev` y `pnpm --filter @odentia/services seed:dev` (`docs/development.md`, contraseña `Demo1234`). En producción, intentar entrar a otra clínica leería historias reales si el fallo existiera. Encender la app en local consume memoria: mirar antes la memoria libre disponible.
 
 ## 3. Recorrer
 
@@ -71,10 +72,10 @@ Nada se hace público hasta que el usuario decida. Un error clínico también da
 
 **`~/odentia-qa/recorrido.md`:** una fila con la fecha, el área, el commit, los productos, los roles, el enlace del lienzo y el resultado: errores y mejoras confirmados, cuántos solo vio la pantalla, tropiezos del entorno y tokens gastados. Cuando el usuario responda, anotar cuántas propuestas de UX aprobó; si en dos rondas no aprueba ninguna, esa voz se quita.
 
-El mensaje final, en palabras simples: qué se recorrió, cuántos errores y mejoras se confirmaron, y por cuáles empezar con el motivo. Termina preguntando cuáles corregir y cuáles publicar como issue. Nada se corrige ni se publica sin esa respuesta.
+El mensaje final, en palabras simples: qué se recorrió, cuántos errores y mejoras se confirmaron, y por cuáles empezar con el motivo. Lista qué sigue para corregir y qué candidatos a issue hay, sin preguntar. Nada se corrige en esta ronda y nada se publica como issue sin que el usuario lo pida.
 
 **Issue, solo con el sí:** uno por cada hallazgo aprobado, con las etiquetas `qa`, `bug` o `enhancement`, y su `área: …`. Lleva el texto del informe, sin capturas ni datos de personas, porque es público.
 
 ## 6. Cerrar
 
-La demo queda como está: la próxima ronda la vuelve a empezar. Cerrar las páginas del navegador que abrió la ronda. Si se encendió algo en local, apagar `pnpm dev`, borrar los contenedores propios y devolver lo que las herramientas reescriben (`routeTree.gen.ts`). Los contenedores de otras sesiones no se tocan.
+Si la ronda creó una demo en producción, la elimina desde la administración (solo borra demos: ADR 0096, «Borrar demo») y después verifica que la eliminación sea completa: que la demo ya no aparece en la lista, que su dirección no abre y que su fila en `admin.saas_demo` ya no existe. Si la verificación falla, se informa tal cual, sin dar la ronda por cerrada. Cerrar las páginas del navegador que abrió la ronda. Si se encendió algo en local, apagar `pnpm dev`, borrar los contenedores propios y devolver lo que las herramientas reescriben (`routeTree.gen.ts`). Los contenedores de otras sesiones no se tocan.
