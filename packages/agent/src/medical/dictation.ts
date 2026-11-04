@@ -9,6 +9,7 @@ import { z } from "zod"
 import {
   allergyAndDonePrompt,
   appointmentAndBudgetPrompt,
+  consultaPrompt,
   DICTATION_TOOL,
   type DictationExtraction,
   type DictationPending,
@@ -133,6 +134,7 @@ export function systemPrompt(input: {
     input.services.length
       ? `Servicios de la clínica, para reconocer de qué prestación habla: ${input.services.slice(0, 200).join("; ")}.`
       : "La clínica aún no tiene servicios.",
+    ...consultaPrompt("«dolor de garganta», «control»"),
     ...allergyAndDonePrompt("médico", "«le hice la nebulización», «ya le puse el inyectable»"),
     ...appointmentAndBudgetPrompt("«agéndale la ecografía para la próxima semana»"),
     materialsPrompt("médico", "«se fueron dos ampollas de suero»", "una nebulización, una curación"),
