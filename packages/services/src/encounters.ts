@@ -178,6 +178,11 @@ export interface EncounterDetailBase {
   plannedItems: EncounterPlannedItemRow[]
   /** Ítems indicados en esta atención (origen), con su decisión derivada. */
   indicatedItems: EncounterPlannedItemRow[]
+  /**
+   * El motivo que se escribió al reservar su cita, si lo hay. Es una sugerencia: no
+   * cuenta como motivo de consulta hasta que quien atiende lo confirma.
+   */
+  bookedReason: string | null
 }
 
 const PAGE_DEFAULT = 30
@@ -538,17 +543,10 @@ export async function createEncounter(
       .limit(2)
     if (active.length === 1) branchId = active[0]!.id
   }
-  // El motivo no se pide al abrir (ADR 0032 y 0098): desde una cita vale el que
-  // se escribió al reservar; si no, queda vacío y el cierre lo exige.
-  let reason = cleanText(input.reason, "reason", TEXT_LIMITS.reason)
-  if (!reason && fromAppointment) {
-    const [booked] = await tx
-      .select({ reason: appointment.reason })
-      .from(appointment)
-      .where(and(eq(appointment.id, fromAppointment.id), eq(appointment.organizationId, orgId)))
-      .limit(1)
-    reason = cleanText(booked?.reason, "reason", TEXT_LIMITS.reason)
-  }
+  // El motivo no se pide al abrir (ADR 0032 y 0098) y nace vacío: el que se escribió
+  // al reservar es de quien reservó, no del profesional. La atención lo ofrece como
+  // sugerencia (`bookedReason`) y el cierre exige que alguien lo confirme o escriba.
+  const reason = cleanText(input.reason, "reason", TEXT_LIMITS.reason)
   // Profesional que atiende: por defecto quien abre (también desde la cita de
   // otro profesional: quien cubre a otro es quien escribe). Otro elegido debe
   // ser miembro con escritura clínica, nunca caja ni recepción.
@@ -808,6 +806,7 @@ export async function getEncounterDetail(
     plannedItems,
     indicatedItems,
     diagnoses,
+    bookedReason,
   ] = await Promise.all([
     tx
       .select({ siteSystem: encounterSite.siteSystem, siteCode: encounterSite.siteCode })
@@ -876,6 +875,8 @@ export async function getEncounterDetail(
         ),
       )
       .orderBy(asc(encounterDiagnosis.createdAt), asc(encounterDiagnosis.id)),
+    // Solo un borrador tiene un motivo por confirmar: una atención firmada o anulada ya no.
+    row.status === "borrador" ? bookedReasonOf(tx, orgId, row.appointmentId) : Promise.resolve(null),
   ])
   return {
     encounter: row,
@@ -889,7 +890,19 @@ export async function getEncounterDetail(
     addenda: addenda.map((row) => withSite(site, row)),
     plannedItems: plannedItems.map((link) => withSite(site, link.item)),
     indicatedItems: indicatedItems.map((row) => withSite(site, row)),
+    bookedReason,
   }
+}
+
+/** El motivo escrito al reservar la cita de la atención, para ofrecerlo, nunca para darlo por firmado. */
+async function bookedReasonOf(tx: Db, orgId: string, appointmentId: string | null): Promise<string | null> {
+  if (!appointmentId) return null
+  const [booked] = await tx
+    .select({ reason: appointment.reason })
+    .from(appointment)
+    .where(and(eq(appointment.id, appointmentId), eq(appointment.organizationId, orgId)))
+    .limit(1)
+  return booked?.reason?.trim() || null
 }
 
 /** Atención en la lista del paciente, con lo necesario para reconocerla. */

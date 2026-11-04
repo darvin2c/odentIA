@@ -503,6 +503,8 @@ export interface TreatmentPlanWithStatus {
 /** Detalle de una atención: encuentro + piezas, procedimientos, notas, odontograma, documentos y adendas. */
 export interface EncounterDetail {
   encounter: Encounter
+  /** El motivo escrito al reservar su cita: se ofrece, no cuenta hasta que se confirma. */
+  bookedReason: string | null
   teeth: number[]
   plannedItems: PlanItem[]
   indicatedItems: PlanItem[]
