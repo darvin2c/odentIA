@@ -72,6 +72,7 @@ import { MoreHorizontal, Plus, X } from "lucide-react"
 import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { useActiveBranch } from "../../lib/active-branch"
+import { BranchSwitcher } from "../branch-switcher"
 import { fetchResponsibilities, RESPONSIBILITY_KIND_LABELS } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { collectFormMessage, financeErrorMessage, financeFormMessage } from "../../lib/finance"
@@ -2047,11 +2048,27 @@ export function CollectDrawer({
               ) : null}
             </div>
 
-            <p className="text-sm text-muted-foreground">
-              {creditOnly
-                ? "No entra dinero a la caja: solo se usa su saldo a favor."
-                : `${sedeName ? `Entra a la caja de ${sedeName}.` : ""}${split ? " Sale un solo ticket." : ""}`.trim()}
-            </p>
+            {creditOnly ? (
+              <p className="text-sm text-muted-foreground">No entra dinero a la caja: solo se usa su saldo a favor.</p>
+            ) : (
+              // Con varias sedes, la caja se elige aquí mismo, sin salir del cobro (QA, propuesta UX 2).
+              <p className="text-sm text-muted-foreground">
+                {sede.branches.length > 1 ? (
+                  <>
+                    Entra a la caja de{" "}
+                    <BranchSwitcher
+                      branches={sede.branches}
+                      value={branchId}
+                      fallbackName={sedeName || "la sede"}
+                      onChange={(id) => sede.choose(id)}
+                    />
+                  </>
+                ) : sedeName ? (
+                  `Entra a la caja de ${sedeName}.`
+                ) : null}
+                {split ? " Sale un solo ticket." : null}
+              </p>
+            )}
           </>
         ) : null}
 
