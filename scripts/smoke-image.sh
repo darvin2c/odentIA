@@ -2,19 +2,15 @@
 # Arranca cada servicio de la imagen de producción con su comando real y falla si
 # no encuentra un módulo (p. ej. una dependencia podada que sí se usa al ejecutar).
 # Sin base de datos ni claves: api, worker y migrate terminan por falta de
-# configuración, y eso es lo esperado; los servidores web deben seguir vivos.
+# configuración, y eso es lo esperado.
 # Uso: scripts/smoke-image.sh <imagen>
 set -u
 
 imagen="${1:?Uso: smoke-image.sh <imagen>}"
 fallos=0
 
-# nombre|comando|¿debe seguir vivo? (los servidores web sí)
+# nombre|comando|¿debe seguir vivo?
 servicios=(
-  "panel|pnpm --filter @odentia/panel start|vivo"
-  "admin|pnpm --filter @odentia/admin start|vivo"
-  "dental-clinic|pnpm --filter @odentia/dental-clinic start|vivo"
-  "medical-clinic|pnpm --filter @odentia/medical-clinic start|vivo"
   "api|pnpm --filter @odentia/api start|-"
   "worker|pnpm --filter @odentia/worker start|-"
   "migrate|pnpm --filter @odentia/db migrate|-"

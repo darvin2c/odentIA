@@ -27,9 +27,12 @@ no se comparte con OpenShip ni con las demás aplicaciones.
   imagen (`infra/dev/postgres/init`), no las migraciones. Un PostgreSQL
   gestionado necesita crearlos aparte antes de migrar.
 - La entrada pública es Cloudflare Tunnel (servicio `tunnel`, ver «Entrada por
-  Cloudflare Tunnel»). API, admin, panel y platform además publican en loopback
-  (API en el host 3101, panel 3010, platform 3011 y admin 3012) solo como vuelta
-  atrás por el borde de OpenShip.
+  Cloudflare Tunnel»). La API además publica en loopback (host 3101) solo como
+  vuelta atrás por el borde de OpenShip.
+- En el VPS corren solo `postgres`, `migrate`, `api`, `worker`, `tunnel` y `backup`.
+  Las pantallas (webs, panel, administración y app de las clínicas de los dos
+  productos) son Workers de Cloudflare (ADR 0136-0138, «Las webs en Cloudflare
+  Workers»); sus `server.mjs` quedan en el repositorio para volver al VPS.
 - Las webs de marketing (`apps/web`, ADR 0046, 0062 y 0136) no corren en el VPS: son
   Workers de Cloudflare (ver «Las webs en Cloudflare Workers»). Leen los precios de
   `https://api.<dominio>`; su dirección canónica, su mapa del sitio y sus enlaces a `app.`
@@ -80,8 +83,12 @@ Rutas del túnel («Published application routes»), con el comodín al final:
 | `api.<dominio>` | `http://api:3001` |
 | `app.<dominio>` | `http://panel:3000` |
 | `admin.<dominio>` | `http://admin:3000` |
-| `<dominio>` y `www.<dominio>` | `http://web:3000`, que ya no existe: las atiende el Worker. No se borran: su DNS con proxy es lo que deja correr la ruta del Worker |
+| `<dominio>` y `www.<dominio>` | `http://web:3000` |
 | `*.<dominio>` | `http://platform:3000` |
+
+Salvo `api.`, esas rutas apuntan a servicios que ya no están en el compose: las direcciones
+las atienden sus Workers. No se borran: su DNS con proxy es lo que deja correr la ruta del
+Worker, y volver al VPS es devolver el servicio al compose.
 
 Cloudflare crea el registro DNS de cada ruta salvo el del comodín: el CNAME `*` a
 `<id del túnel>.cfargotunnel.com`, con proxy, se crea a mano. El certificado
@@ -132,11 +139,9 @@ Pendiente fuera del código, en la cuenta de cada servicio:
 5. Correo: `hola@` y `privacidad@latidia72.com` (Email Routing) y el remitente de los correos.
 
 El panel de `app.latidia72.com` y la app de sus clínicas (`apps/medical-clinic`) son
-otro artefacto de la misma receta, con `VITE_BASE_DOMAIN=latidia72.com`,
-`VITE_API_URL=https://api.latidia72.com` (`LATIDIA_API_URL`) y `VITE_PRODUCT=medical`:
-los servicios `latidia-panel` (puerto 3014) y `latidia` (3015) del compose, con el
-perfil `latidia`. El túnel lleva `app.latidia72.com` al primero y `*.latidia72.com` al
-segundo; `api.latidia72.com`, a la misma API.
+los Workers `latidia-panel` y `latidia-clinicas`, armados con `VITE_BASE_DOMAIN=latidia72.com`,
+`VITE_API_URL=https://api.latidia72.com` y `VITE_PRODUCT=medical` (job `deploy-web`).
+`api.latidia72.com` va por el túnel a la misma API.
 
 La web de `latidia72.com` es la misma `apps/web` con ese build (el Worker `latidia-web`):
 solo inicio, precios, pedir invitación y las páginas legales
@@ -190,10 +195,9 @@ Volver al VPS es devolver los dos servicios al compose (el adaptador de Node sig
 los mismos dominios con que se arman en el VPS. La entrada es igual que la de las webs: en
 cada Worker › Domains › Add Route, **Fail open**, con el patrón exacto (`admin.odentia32.com/*`,
 `app.odentia32.com/*`, `app.latidia72.com/*`; nunca `*.<dominio>/*`, que tomaría las clínicas).
-Mientras `admin`, `panel` y `latidia-panel` sigan en el compose, pasado el límite diario de
-peticiones Fail open los usa de respaldo; un error del Worker o pasar la CPU muestran un error
-de Cloudflare. Vuelta atrás: quitar la ruta. Antes de retirarlos del VPS, mirar en Metrics la CPU de las
-pantallas con sesión y que no haya errores.
+Desde el 2026-11-03 ya no están en el compose, así que pasado el límite diario de peticiones
+Fail open lleva a un servicio que no existe, igual que un error del Worker o pasar la CPU
+(1101 o 1102). Volver al VPS es devolver el servicio al compose y quitar la ruta.
 
 ### La app de las clínicas en Workers
 
@@ -203,23 +207,23 @@ cada dirección que no es una clínica tiene que tener su propia ruta, que gana 
 específica: `app.`, `admin.` y `www.` ya van a sus Workers, y `api.<dominio>/*` (y
 `media.odentia32.com/*`, los archivos de R2) se agregan en la zona, en Workers Routes, con
 Worker «None», para que sigan yendo al VPS y a R2. Un subdominio nuevo con proxy en esas zonas
-necesita lo mismo. Vuelta atrás: quitar la ruta comodín.
+necesita lo mismo. `platform` y `latidia` ya no están en el compose: volver al VPS es
+devolverlos y quitar la ruta comodín.
 
 ## Variables: una sola fuente
 
 En OpenShip, las variables comunes viven en el entorno **production del proyecto**.
 No copiar `.env.example` a los entornos de cada servicio ni mantener copias de los
 secretos. Los overrides por servicio tienen precedencia y pueden eclipsar cambios
-del proyecto. Admin, panel, platform y web necesitan el override declarado `PORT=3000`;
-la API usa 3001 por defecto. Una variable con el valor por defecto del código no se
+del proyecto. La API usa 3001 por defecto. Una variable con el valor por defecto del código no se
 pone en el proyecto: las pruebas corren con ese valor.
 
 Para Compose manual, la misma fuente es `infra/prod/.env`, excluido de Git y del
 contexto Docker. Los secretos se generan una vez, se conservan y se rotan mediante
 un procedimiento explícito; no regenerarlos para corregir un deploy.
 
-`VITE_API_URL` y `VITE_BASE_DOMAIN` son argumentos de build: cambiar sus valores
-requiere reconstruir las webs. Las variables de runtime requieren **Apply/refresh**,
+Las `VITE_*` de las pantallas ya no son del proyecto de OpenShip: van en el job `deploy-web`
+del CI, por producto. Las variables de runtime requieren **Apply/refresh**,
 que recrea los contenedores. Un restart solo reinicia con la configuración antigua.
 
 `ADMIN_URL` es el origen HTTPS exacto de administración y forma parte de la
@@ -367,9 +371,7 @@ esos checks no los crea el repositorio y no indican un fallo de código.
 Los dominios de odentIA no se exponen en OpenShip: son rutas del túnel. Exponerlos
 reabre la entrada directa al servidor y hace falsificable `cf-connecting-ip`; solo
 como vuelta atrás (ver «Entrada por Cloudflare Tunnel»), y entonces cada superficie
-se expone una vez: `api.` (api, 3001), `app.` (panel, 3000), `admin.` (admin,
-3000), el dominio raíz y `www.` (web, 3000) y el comodín `*.` (platform, 3000), que
-requiere DNS-01 con el proveedor DNS conectado a OpenShip; el resto usa HTTP-01.
+se expone una vez: `api.` (api, 3001). Las pantallas no corren en el VPS (ADR 0136-0138).
 
 Configurar `composePath=compose.prod.yaml` y dejar el directorio raíz vacío en el
 proyecto. No importar una copia temporal de Compose con placeholders interpolados.

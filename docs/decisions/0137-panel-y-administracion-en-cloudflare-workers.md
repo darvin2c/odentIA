@@ -23,7 +23,7 @@ Con las webs en Workers, el panel (`app.` de odentIA y de latidIA) y la administ
 
 - Pesan 860 KB (administración) y 780 KB (cada panel) comprimidos, por debajo de los 3 MB del plan gratuito. Las pantallas con sesión no se pueden guardar en caché, y en Node local tardan de 2 a 7 ms en la mediana y 26 ms en el p90 de `/onboarding` (tiempo total, no solo CPU): cerca del límite de 10 ms. Se mira en Metrics con la ruta puesta; si aparecen errores de CPU, se quita la ruta o se pasa al plan de USD 5.
 - Los registros de estas pantallas pasan a Workers (3 días en el plan gratuito).
-- Retirar `panel`, `latidia-panel` y `admin` del VPS es una entrega aparte, cuando las métricas lo respalden.
+- Retirados del VPS el mismo 2026-11-03, a pedido del dueño: sin `panel`, `latidia-panel` ni `admin` en el compose, Fail open ya no tiene respaldo, y la imagen de OpenShip ya no arma pantallas.
 
 ## Referencias
 
