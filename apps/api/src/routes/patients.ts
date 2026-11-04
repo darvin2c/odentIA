@@ -313,6 +313,8 @@ const procedureInput = z
     description: z.string().trim().min(1, "Describe el acto libre").max(2000).nullish(),
     /** Hallazgo que trata un servicio directo; queda tratado al cerrar la atención. */
     odontogramEntryId: z.uuid().nullish(),
+    /** Lo indicado y no aceptado se acepta al hacerlo (QA CT, propuesta 4). */
+    acceptWhenDone: z.boolean().optional(),
   })
   .strict()
   .refine((d) => !(d.serviceId && d.planItemId), {

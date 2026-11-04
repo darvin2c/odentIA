@@ -151,7 +151,8 @@ function planOptionLabel(item: PlanItem, locale: string | undefined): string {
       : item.scope === "tooth" || item.scope === "surfaces"
         ? "pieza por definir"
         : "general"
-  return `${item.title} · ${tooth} · ${planStatusLabel(item.status)} · ${price}`
+  const accepts = item.decision === "pendiente" ? " · se acepta al hacerlo" : ""
+  return `${item.title} · ${tooth} · ${planStatusLabel(item.status)} · ${price}${accepts}`
 }
 
 /**
@@ -198,8 +199,11 @@ export function EncounterProcedures({
     enabled: canRead && canWrite && !finalized,
   })
   const allItems = planQuery.data?.data ?? []
+  // Lo aceptado, y también lo indicado que aún no se aceptó: al registrarlo queda aceptado
+  // (`acceptWhenDone`). Si su presupuesto ya se envió, el servidor lo dice al guardar (QA CT, propuesta 4).
   const openItems = allItems.filter(
-    (item) => item.decision === "aceptado" && OPEN_STATUSES.includes(item.status),
+    (item) =>
+      (item.decision === "aceptado" || item.decision === "pendiente") && OPEN_STATUSES.includes(item.status),
   )
   const planById: Record<string, PlanItem> = Object.fromEntries(
     allItems.map((item) => [item.id, item]),
@@ -231,6 +235,8 @@ export function EncounterProcedures({
       const body = plan
         ? {
             planItemId: plan.id,
+            // Lo indicado y no aceptado se acepta al hacerlo: el servidor lo rechaza si su presupuesto ya se envió.
+            ...(plan.decision === "pendiente" ? { acceptWhenDone: true } : {}),
             diagnosisCode,
             diagnosisSystem,
             ...(isPlanPending(plan) ? { toothNumber: value.site.toothNumber, surfaces: value.site.surfaces } : {}),
