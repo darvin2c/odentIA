@@ -1090,6 +1090,32 @@ async function getOrCreateDirectPlan(
   return created.id
 }
 
+/**
+ * El tratamiento abierto y aceptado del plan con ese servicio, si lo hay. Si
+ * existe, registrar el servicio lo ejecuta: no crea otra indicación en el plan
+ * (ADR 0100, QA CT: la resina se presupuestaba otra vez).
+ */
+async function openAcceptedPlanItemFor(tx: Db, orgId: string, patientId: string, serviceId: string): Promise<string | null> {
+  const [row] = await tx
+    .select({ id: treatmentPlanItem.id })
+    .from(treatmentPlanItem)
+    .where(
+      and(
+        eq(treatmentPlanItem.organizationId, orgId),
+        eq(treatmentPlanItem.patientId, patientId),
+        eq(treatmentPlanItem.serviceId, serviceId),
+        eq(treatmentPlanItem.decisionStatus, "aceptado"),
+        ne(treatmentPlanItem.status, "realizado"),
+        ne(treatmentPlanItem.status, "cancelado"),
+        ne(treatmentPlanItem.status, "reemplazado"),
+        ne(treatmentPlanItem.status, "suspendido"),
+      ),
+    )
+    .orderBy(asc(treatmentPlanItem.id))
+    .limit(1)
+  return row?.id ?? null
+}
+
 export async function addEncounterProcedure(
   tx: Db,
   orgId: string,
@@ -1101,8 +1127,13 @@ export async function addEncounterProcedure(
   await requirePatient(tx, orgId, patientId)
   const locked = await lockEncounter(tx, orgId, patientId, encounterId)
   assertOpenDraft(locked, actorUserId)
-  const serviceIdParam = input.serviceId?.trim() ? input.serviceId.trim() : null
-  const planItemIdParam = input.planItemId ?? null
+  const requestedServiceId = input.serviceId?.trim() ? input.serviceId.trim() : null
+  const linkedPlanItemId =
+    requestedServiceId && !input.planItemId
+      ? await openAcceptedPlanItemFor(tx, orgId, patientId, requestedServiceId)
+      : null
+  const serviceIdParam = linkedPlanItemId ? null : requestedServiceId
+  const planItemIdParam = input.planItemId ?? linkedPlanItemId
   if (serviceIdParam && planItemIdParam) {
     throw validation(
       "Selecciona un servicio del catálogo o un tratamiento del presupuesto, no ambos",
@@ -1285,7 +1316,7 @@ export async function addEncounterProcedure(
       description,
       quantity,
       ...diagnosis,
-      planItemId: input.planItemId ?? directPlanItemId,
+      planItemId: planItemIdParam ?? directPlanItemId,
       priceCents,
       currency,
       codings,
@@ -1300,14 +1331,14 @@ export async function addEncounterProcedure(
       .values({ organizationId: orgId, encounterId, siteSystem: procedureSite.siteSystem, siteCode: procedureSite.siteCode })
       .onConflictDoNothing({ target: [encounterSite.encounterId, encounterSite.siteSystem, encounterSite.siteCode] })
   }
-  if (input.planItemId) {
+  if (planItemIdParam) {
     // Conserva el vínculo encounter_plan_item (pudo crearse al abrir la
     // atención); setPlanItemStatus valida pertenencia mismo paciente/org +
     // borrador y exige decisión aceptada. El lock del encounter ya está tomado
     // en esta tx (re-lock es no-op).
     await tx
       .insert(encounterPlanItem)
-      .values({ organizationId: orgId, encounterId, planItemId: input.planItemId })
+      .values({ organizationId: orgId, encounterId, planItemId: planItemIdParam })
       .onConflictDoNothing({
         target: [encounterPlanItem.encounterId, encounterPlanItem.planItemId],
       })
@@ -1316,13 +1347,13 @@ export async function addEncounterProcedure(
       .from(treatmentPlanItem)
       .where(
         and(
-          eq(treatmentPlanItem.id, input.planItemId),
+          eq(treatmentPlanItem.id, planItemIdParam),
           eq(treatmentPlanItem.organizationId, orgId),
         ),
       )
     if (acceptedNow) {
       // Lo hizo, así que lo aceptó: ya no espera en el borrador y se cierra como el servicio directo.
-      if (draftBudgetId) await removeBudgetItems(tx, orgId, actorUserId, patientId, draftBudgetId, { itemIds: [input.planItemId] })
+      if (draftBudgetId) await removeBudgetItems(tx, orgId, actorUserId, patientId, draftBudgetId, { itemIds: [planItemIdParam] })
       const now = new Date()
       await tx
         .update(treatmentPlanItem)
@@ -1335,15 +1366,15 @@ export async function addEncounterProcedure(
           completedAt: now,
           updatedAt: now,
         })
-        .where(and(eq(treatmentPlanItem.id, input.planItemId), eq(treatmentPlanItem.organizationId, orgId)))
-      await audit(tx, orgId, actorUserId, "plan.item_accepted_when_done", "treatment_plan_item", input.planItemId, {
+        .where(and(eq(treatmentPlanItem.id, planItemIdParam), eq(treatmentPlanItem.organizationId, orgId)))
+      await audit(tx, orgId, actorUserId, "plan.item_accepted_when_done", "treatment_plan_item", planItemIdParam, {
         patientId,
         encounterId,
         procedureId: row.id,
       })
-      await (await productHooks(tx, orgId)).treatmentDone(tx, { orgId, actorUserId, patientId, encounterId, planItemId: input.planItemId })
+      await (await productHooks(tx, orgId)).treatmentDone(tx, { orgId, actorUserId, patientId, encounterId, planItemId: planItemIdParam })
     } else if (item && (item.status === "pendiente" || item.status === "programado")) {
-      await setPlanItemStatus(tx, orgId, actorUserId, patientId, input.planItemId, {
+      await setPlanItemStatus(tx, orgId, actorUserId, patientId, planItemIdParam, {
         status: "en_curso",
         encounterId,
       })

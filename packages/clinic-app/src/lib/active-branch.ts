@@ -33,6 +33,19 @@ function writeStored(id: string): void {
   }
 }
 
+/**
+ * La primera sede activa: la más antigua y, con el mismo instante, la de menor id,
+ * el mismo orden `created_at, id` del servidor (`workspace.ts`). Sin ese desempate,
+ * la ficha y el inicio elegían sedes distintas al crearse en el mismo instante (QA NT).
+ */
+export function firstActiveBranchId(
+  rows: ReadonlyArray<{ id: string; isActive: boolean; createdAt: string }>,
+): string | undefined {
+  return rows
+    .filter((item) => item.isActive)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))[0]?.id
+}
+
 export function useActiveBranch(): {
   /** Sedes activas de la organización. */
   branches: BranchOption[]
@@ -98,13 +111,6 @@ export function useActiveBranch(): {
     },
     [setParams],
   )
-  // La primera activa es la más antigua, como la elige el servidor (`resolveBranch`).
-  const firstActive = React.useMemo(
-    () =>
-      (query.data?.data ?? [])
-        .filter((item) => item.isActive)
-        .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0]?.id,
-    [query.data],
-  )
+  const firstActive = React.useMemo(() => firstActiveBranchId(query.data?.data ?? []), [query.data])
   return { branches, branchId, effectiveId: branchId ?? firstActive, choose }
 }
