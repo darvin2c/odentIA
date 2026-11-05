@@ -25,7 +25,7 @@ import {
   serviceCatalog,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
-import { member } from "@odentia/db/schema/auth"
+import { member, user } from "@odentia/db/schema/auth"
 import { clinicalOrder, consentDocument, consentEvent, medicalLeave } from "@odentia/db/schema/clinical-forms"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { canAttend } from "@odentia/auth/permissions"
@@ -173,8 +173,8 @@ export interface EncounterDetailBase {
   /** Notas de evolución sin código (los diagnósticos históricos viven en `diagnoses`). */
   notes: EncounterNoteRow[]
   documents: EncounterDocumentRow[]
-  /** clinical_note con kind='adenda', orden ascendente determinista. */
-  addenda: EncounterNoteRow[]
+  /** clinical_note con kind='adenda', orden ascendente determinista, con quién la escribió. */
+  addenda: Array<EncounterNoteRow & { authorName: string | null }>
   /** Ítems del plan vinculados a la atención (aceptados al vincular; su estado clínico no cambia al abrir). */
   plannedItems: EncounterPlannedItemRow[]
   /** Ítems indicados en esta atención (origen), con su decisión derivada. */
@@ -831,9 +831,11 @@ export async function getEncounterDetail(
       .from(clinicalNote)
       .where(and(childOf, eq(clinicalNote.kind, "evolucion")))
       .orderBy(asc(clinicalNote.createdAt), asc(clinicalNote.id)),
+    // La adenda dice quién la escribió (NTS 139: toda anotación lleva a su autor).
     tx
-      .select()
+      .select({ ...getTableColumns(clinicalNote), authorName: user.name })
       .from(clinicalNote)
+      .leftJoin(user, eq(user.id, clinicalNote.authorUserId))
       .where(and(childOf, eq(clinicalNote.kind, "adenda")))
       .orderBy(asc(clinicalNote.createdAt), asc(clinicalNote.id)),
     listEncounterDocuments(tx, orgId, patientId, encounterId),

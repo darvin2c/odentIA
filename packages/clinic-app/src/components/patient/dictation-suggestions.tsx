@@ -577,7 +577,8 @@ function PrescriptionSuggestion({ session, items }: { session: DictationSession;
                   Recetar igual, con motivo
                 </Button>
               </div>
-              <p className="text-muted-foreground">O dilo: «mejor clindamicina de trescientos cada ocho horas».</p>
+              {/* Sin nombrar un medicamento: lo elige quien receta, según lo que se iba a dar. */}
+              <p className="text-muted-foreground">O dilo: «mejor cámbialo por…», con el medicamento, la dosis y cada cuánto.</p>
             </div>
           ) : null}
         </li>
