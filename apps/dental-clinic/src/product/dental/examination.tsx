@@ -4,6 +4,7 @@ import {
   subFieldError,
 } from "@odentia/clinic-app/product/product-ui"
 import { CORE_VITAL_KEYS } from "@odentia/clinical"
+import { dentalExamLines } from "@odentia/dental"
 import {
   Field,
   FieldError,
@@ -184,8 +185,8 @@ function DentalExamFields({ idPrefix, draft, onChange, disabled, errors }: Exami
 
 /**
  * El examen de la boca de odentIA: extraoral, intraoral e higiene oral, con
- * los ocho signos vitales de siempre. Al leer la atención no se muestra, como
- * antes del issue 229.
+ * los ocho signos vitales de siempre. Al leer la atención se muestra como en
+ * la copia de la historia (ADR 0003).
  */
 export const dentalExamination: ProductExaminationUi = {
   title: "Examen clínico",
@@ -196,5 +197,5 @@ export const dentalExamination: ProductExaminationUi = {
   summary: (draft) => (draft ? "Examen registrado" : ""),
   Fields: (props) => <DentalExamFields {...props} />,
   VitalsNote: () => null,
-  readLines: () => [],
+  readLines: dentalExamLines,
 }

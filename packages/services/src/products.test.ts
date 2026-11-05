@@ -139,6 +139,15 @@ it("el examen y los signos vitales los pone el producto: la boca en odentIA, los
     /no es un campo válido/,
   )
   await expect(draft({ vitals: { glucosaCapilar: 110 } })).rejects.toThrow(/Signo vital desconocido/)
+  // El examen de la boca va en la copia de la historia (ADR 0003, NTS 139), como el de latidIA.
+  await draft({ examination: { extraoral: { atm: "Sin chasquido", labios: "Secos" }, intraoral: { encias: "Inflamadas" }, higieneOral: "regular" } })
+  const dental = await f.run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))
+  expect(dental.encounters.find((entry) => entry.row.id === f.encounter.id)?.exam.lines).toEqual([
+    "Extraoral · ATM: Sin chasquido; Labios: Secos",
+    "Higiene oral: regular",
+    "Intraoral · Encías: Inflamadas",
+  ])
+  await draft({ examination: null })
 
   await setProduct("medical")
   try {

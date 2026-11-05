@@ -16,6 +16,7 @@ export * from "./country.js"
 export * from "./site.js"
 export * from "./diagnoses.js"
 export * from "./interview.js"
+export * from "./examination.js"
 export type {
   FindingColorKind,
   FindingDefinition,
