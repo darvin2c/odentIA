@@ -607,6 +607,10 @@ export function EncounterEditor({
     return body
   }
 
+  /** Lo que falta para cerrar se vuelve a pedir al servidor (el pie, «Cierre de la atención» y el cierre). */
+  const refreshClosing = () =>
+    queryClient.invalidateQueries({ queryKey: ["encounter-closing", patientId, encounterId] })
+
   /** Un solo drenado serializado: toma los dirty, los envía y repite si llegaron más. */
   const drain = (): Promise<void> => {
     if (drainRef.current) return drainRef.current
@@ -655,6 +659,8 @@ export function EncounterEditor({
           setSaveState(dirtyRef.current.size > 0 ? "pending" : "saved")
           if (sentAny) setSavedAt(new Date().toISOString())
         }
+        // Escrito el motivo o la evolución, el cierre deja de decir que faltan.
+        if (sentAny) void refreshClosing()
       } catch (err) {
         if (mountedRef.current) {
           // Sin conexión lo escrito se queda en la pantalla y se guarda al volver.
@@ -837,9 +843,6 @@ export function EncounterEditor({
     }
   }
 
-  const refreshClosing = () =>
-    queryClient.invalidateQueries({ queryKey: ["encounter-closing", patientId, encounterId] })
-
   /**
    * Hora de fin declarada: hoy a la hora indicada, en la zona de la clínica. El
    * minuto de inicio (con sus segundos en 0) queda antes del inicio: se toma
@@ -990,7 +993,7 @@ export function EncounterEditor({
    * «Finalizar y firmar»: lo que falta del borrador se dice en su campo, con su
    * bloque abierto; si no falta nada, se abre el cierre.
    */
-  const requestSign = () => {
+  const requestSign = async () => {
     const values = draftForm.state.values
     const first: ClosingRequirement | "vitals" | null = !values.reason.trim()
       ? "reason"
@@ -1001,8 +1004,21 @@ export function EncounterEditor({
           : missing.includes("diagnosis")
             ? "diagnosis"
             : null
-    if (first) requireBlock(first)
-    else openSign()
+    if (first) {
+      requireBlock(first)
+      return
+    }
+    // Lo recién escrito se guarda antes de abrir el cierre: si no, diría «Falta…» de lo que ya está.
+    if (dirtyRef.current.size > 0 || drainRef.current) {
+      try {
+        await flush()
+      } catch {
+        // El aviso del guardado ya dice qué pasó, en su sitio.
+        return
+      }
+      await refreshClosing()
+    }
+    openSign()
   }
 
   const handlePendingChange = (pending: boolean) => {
@@ -1377,7 +1393,7 @@ export function EncounterEditor({
   }
   /** «Firmar» desde la barra del teléfono: firma si se puede; si no, lleva a lo que falta para cerrar. */
   const signFromBar = () => {
-    if (canSign) requestSign()
+    if (canSign) void requestSign()
     else document.getElementById(closingId)?.scrollIntoView({ block: "start" })
   }
   const pendingDiagnoses = dictationCount("hallazgos")
