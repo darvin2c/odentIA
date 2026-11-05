@@ -5,6 +5,7 @@ import { createClinicalOrder } from "./clinical-forms.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { voidEncounter } from "./encounters.js"
 import { getTimeline } from "./patient-history.js"
+import { cancelPrescription, createPrescription } from "./prescriptions.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -91,4 +92,15 @@ it("el odontograma firmado es un hecho de la historia: el del botón aparte, el 
       [closing!.id, f.encounter.id],
     ].sort(),
   )
+})
+
+it("la Historia dice que la receta se anuló y por qué, como con la orden y el consentimiento", async () => {
+  const f = await clinicalFixture()
+  const item = { genericName: "Amoxicilina", strength: "500 mg", dosageForm: "tableta", dose: "1 tableta", route: "oral", frequency: "cada 8 horas", duration: "5 días", quantity: 15 }
+  const rx = await f.run((tx) => createPrescription(tx, ...f.args, { items: [item] } as never))
+  await f.run((tx) => cancelPrescription(tx, ...f.args, rx.id, { reason: "Se equivocó de dosis" }))
+  const { data } = await f.run((tx) => getTimeline(tx, "org_a", f.patient.id))
+  const fact = data.find((entry) => entry.refId === rx.id)
+  expect(fact?.title).toMatch(/^Se anuló la receta N\.º \d+$/)
+  expect(fact?.detail).toContain("Se equivocó de dosis")
 })
