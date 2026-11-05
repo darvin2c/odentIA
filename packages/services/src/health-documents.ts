@@ -18,7 +18,7 @@ import { createHash } from "node:crypto"
 import type { Db } from "@odentia/db"
 import { patientDocument } from "@odentia/db/schema/clinical"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { and, eq, isNull, sql } from "drizzle-orm"
+import { and, eq, inArray, isNull, sql } from "drizzle-orm"
 import { ATTENTION_SHEET_LABEL, getAttentionSheetPrint } from "./attention-sheet.js"
 import { getConsentPrint, getOrderPrint } from "./clinical-forms.js"
 import {
@@ -444,7 +444,8 @@ export async function keepIssuedPaper(input: {
 
 /**
  * De qué paciente es el papel de salud que salió en este mensaje; null si no lleva uno.
- * El adjunto queda en la conversación, que recepción lee, pero sigue siendo historia clínica.
+ * El adjunto queda en la conversación, que recepción lee, pero sigue siendo historia clínica:
+ * una receta, una orden o un descanso, y también la copia de la historia entera (ADR 0080).
  */
 export async function healthDocumentPatientOfMessage(
   tx: Db,
@@ -459,7 +460,7 @@ export async function healthDocumentPatientOfMessage(
         eq(auditEvent.organizationId, orgId),
         eq(auditEvent.entity, "message"),
         eq(auditEvent.entityId, messageId),
-        eq(auditEvent.action, "health_document.sent"),
+        inArray(auditEvent.action, ["health_document.sent", "patient_record.sent"]),
       ),
     )
     .limit(1)
