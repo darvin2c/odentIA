@@ -131,6 +131,8 @@ export type WaitingRow =
       since: string
       urgent: boolean
       windowClosed: boolean
+      /** Lo último que se le quiso decir no salió. */
+      undelivered?: boolean
     }
   /** Conversaciones que siguen abiertas con una persona a cargo y sin mensajes desde hace horas. */
   | { kind: "stillOpen"; total: number; conversationId: string | null; contactName: string | null; quietSince: string | null }

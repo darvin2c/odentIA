@@ -3,8 +3,9 @@ import { canAccess } from "@odentia/auth/permissions"
 import { agentHandoff } from "@odentia/db/schema/agent"
 import { member } from "@odentia/db/schema/auth"
 import { message } from "@odentia/db/schema/crm"
+import { auditEvent } from "@odentia/db/schema/org"
 import { channelConnection, contact, conversation } from "@odentia/db/schema/crm"
-import { and, eq, sql } from "drizzle-orm"
+import { and, desc, eq, sql } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { asksNothingNew, claimHandoff, createHandoff, recordTopicAskedAgain } from "./agent-operations.js"
 import { type MessageItem, type OutboundContent, sendOutbound, startContactConversation } from "./conversations.js"
@@ -54,9 +55,32 @@ export async function sendTeamReply(
   if (replyTo !== null && input.content.type === "text") {
     await forwardWebchatReply(tx, orgId, { conversationId: input.conversationId, userId: input.userId, text: input.content.text })
   }
-  if (topic?.taskId) await updateTask(tx, orgId, topic.taskId, { status: "done", actorUserId: input.userId })
+  if (topic?.taskId) await resolveByReply(tx, orgId, { topicId: topic.id, taskId: topic.taskId, messageId: sent.id, userId: input.userId })
   return { ...sent, topicId: topic?.id ?? null, topicResolved: Boolean(topic?.taskId) }
 }
+
+/**
+ * Esta respuesta resuelve el tema, y queda dicho cuál fue: si después no sale,
+ * el tema vuelve a quedar pendiente (`reopenTopicOfFailedReply`).
+ */
+async function resolveByReply(
+  tx: Db,
+  orgId: string,
+  input: { topicId: string; taskId: string; messageId: string; userId: string },
+): Promise<void> {
+  await updateTask(tx, orgId, input.taskId, { status: "done", actorUserId: input.userId })
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId: input.userId,
+    action: RESOLVED_BY_REPLY,
+    entity: "message",
+    entityId: input.messageId,
+    metadata: { topicId: input.topicId, taskId: input.taskId },
+  })
+}
+
+/** La marca de la respuesta que resolvió un tema (`resolveByReply`). */
+const RESOLVED_BY_REPLY = "topic.resolved_by_reply"
 
 /**
  * R4 (decisión 10 del pulido de la Bandeja): en el chat web la respuesta del
@@ -184,7 +208,7 @@ export async function replyByWhatsApp(
     holdIfClosed: true,
   })
   if (sent.held) await offerInSavepoint(tx, orgId, thread.id)
-  if (topic?.taskId) await updateTask(tx, orgId, topic.taskId, { status: "done", actorUserId: input.userId })
+  if (topic?.taskId) await resolveByReply(tx, orgId, { topicId: topic.id, taskId: topic.taskId, messageId: sent.id, userId: input.userId })
   return { ...sent, conversationId: thread.id, topicId: topic?.id ?? null, topicResolved: Boolean(topic?.taskId) }
 }
 
@@ -234,7 +258,7 @@ export async function replyToTopic(
     holdIfClosed: true,
   })
   if (sent.held) await offerInSavepoint(tx, orgId, topic.conversationId)
-  if (topic.taskId) await updateTask(tx, orgId, topic.taskId, { status: "done", actorUserId: input.userId })
+  if (topic.taskId) await resolveByReply(tx, orgId, { topicId: topic.id, taskId: topic.taskId, messageId: sent.id, userId: input.userId })
   return { ...sent, topicId: topic.id, topicResolved: topic.taskId !== null }
 }
 
@@ -358,6 +382,90 @@ export async function reopenTopic(
   await tx.execute(
     sql`select pg_notify('org_events', ${JSON.stringify({ orgId, kind: "conversation.updated", conversationId: input.conversationId, at: now.toISOString() })})`,
   )
+}
+
+/**
+ * La respuesta del equipo que resolvió un tema no salió: el tema vuelve a
+ * quedar pendiente, porque la persona no recibió nada. «Enviar» resolvió el
+ * tema al encolar (ADR 0122), pero encolado no es aceptado (`packages/AGENTS.md`).
+ * Solo el tema que resolvió esta respuesta (`resolveByReply`) y solo si nadie
+ * lo tocó después: lo que otra persona hizo con él manda. Lo reabre el sistema,
+ * no quien escribió. Devuelve el tema que reabrió, o null.
+ */
+export async function reopenTopicOfFailedReply(tx: Db, orgId: string, messageId: string): Promise<string | null> {
+  const [sent] = await tx
+    .select({ status: message.status })
+    .from(message)
+    .where(and(eq(message.id, messageId), eq(message.organizationId, orgId)))
+    .limit(1)
+  if (sent?.status !== "failed") return null
+  const [mark] = await tx
+    .select({ id: auditEvent.id, metadata: auditEvent.metadata })
+    .from(auditEvent)
+    .where(
+      and(
+        eq(auditEvent.organizationId, orgId),
+        eq(auditEvent.entity, "message"),
+        eq(auditEvent.entityId, messageId),
+        eq(auditEvent.action, RESOLVED_BY_REPLY),
+      ),
+    )
+    .orderBy(desc(auditEvent.createdAt))
+    .limit(1)
+  const resolved = mark?.metadata as { topicId?: string; taskId?: string } | null | undefined
+  if (!mark || !resolved?.topicId || !resolved.taskId) return null
+  // La tarea cambió después (la reabrieron, la volvieron a resolver): no se toca. La hora se
+  // compara en la base: en JavaScript pierde los microsegundos y lo de la misma transacción parecería después.
+  const [later] = await tx
+    .select({ id: auditEvent.id })
+    .from(auditEvent)
+    .where(
+      and(
+        eq(auditEvent.organizationId, orgId),
+        eq(auditEvent.entity, "task"),
+        eq(auditEvent.entityId, resolved.taskId),
+        eq(auditEvent.action, "task.updated"),
+        sql`${auditEvent.createdAt} > (select m.created_at from audit_event m where m.id = ${mark.id}::uuid)`,
+      ),
+    )
+    .limit(1)
+  if (later) return null
+  const [topic] = await tx
+    .select({
+      id: agentHandoff.id,
+      taskId: agentHandoff.taskId,
+      conversationId: agentHandoff.conversationId,
+      status: conversation.status,
+      open: sql<boolean>`${handoffOpenSql(sql.raw('"agent_handoff"'))}`,
+    })
+    .from(agentHandoff)
+    .innerJoin(conversation, eq(conversation.id, agentHandoff.conversationId))
+    .where(and(eq(agentHandoff.id, resolved.topicId), eq(agentHandoff.organizationId, orgId)))
+    .limit(1)
+  if (!topic?.taskId || topic.taskId !== resolved.taskId || topic.open || topic.status === "closed") return null
+  await updateTask(tx, orgId, topic.taskId, { status: "open", actorUserId: null })
+  const now = new Date()
+  await tx
+    .update(agentHandoff)
+    .set({ keptPendingAt: now, urgentAt: await topicUrgentAt(tx, orgId, now) })
+    .where(and(eq(agentHandoff.id, topic.id), eq(agentHandoff.organizationId, orgId)))
+  await tx.execute(
+    sql`select pg_notify('org_events', ${JSON.stringify({ orgId, kind: "conversation.updated", conversationId: topic.conversationId, at: now.toISOString() })})`,
+  )
+  return topic.id
+}
+
+/**
+ * Lo mismo, en su punto de guardado: si reabrir falla, el mensaje igual queda
+ * como no enviado. Lo llaman el trabajador y el aviso del proveedor.
+ */
+export async function reopenTopicOfFailedReplySafely(tx: Db, orgId: string, messageId: string): Promise<string | null> {
+  return tx
+    .transaction((inner) => reopenTopicOfFailedReply(inner, orgId, messageId))
+    .catch((error: unknown) => {
+      console.error(`No se pudo dejar pendiente el tema de la respuesta ${messageId}: ${error instanceof Error ? error.message : String(error)}`)
+      return null
+    })
 }
 
 /**
