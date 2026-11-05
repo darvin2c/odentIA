@@ -23,6 +23,7 @@ import {
   type DictationKind,
   encounter,
   encounterDictationSuggestion,
+  encounterProcedure,
   patientAllergy,
   prescription,
   serviceCatalog,
@@ -34,7 +35,7 @@ import { medicalLeave } from "@odentia/db/schema/clinical-forms"
 import { product } from "@odentia/db/schema/inventory"
 import { appointment } from "@odentia/db/schema/agenda"
 import { auditEvent, branch } from "@odentia/db/schema/org"
-import { and, asc, eq, gt, inArray, lt, sql } from "drizzle-orm"
+import { and, asc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm"
 import { getAgentConfig } from "./agentConfig.js"
 import { addPatientAllergy, markAllergiesReviewed, removePatientAllergy } from "./allergies.js"
 import { createAppointment } from "./appointments.js"
@@ -1324,6 +1325,8 @@ export interface DictationSegmentResult {
   undoRequested: string[]
   /** Alergias dichas que ya estaban registradas («penicilinas»): no se proponen, se avisa. */
   alreadyOnFile: string[]
+  /** Lo hecho que ya está registrado en esta atención («Profilaxis»): no se propone otra vez, se avisa. */
+  alreadyDone: string[]
   /** El tramo ya se había guardado: no se hizo nada. */
   repeated: boolean
 }
@@ -1365,7 +1368,7 @@ export async function saveDictationSegment(
   await lockOwnDraft(tx, orgId, actorUserId, patientId, encounterId)
   const segmentId = segment.segmentId
   if (segmentId && (await dictationSegmentSeen(tx, orgId, patientId, encounterId, segmentId))) {
-    return { suggestions: [], corrected: [], removed: [], undoRequested: [], alreadyOnFile: [], repeated: true }
+    return { suggestions: [], corrected: [], removed: [], undoRequested: [], alreadyOnFile: [], alreadyDone: [], repeated: true }
   }
   const stamp = (meta: SuggestionMeta): SuggestionMeta => (segmentId ? { ...meta, segments: [...(meta.segments ?? []), segmentId] } : meta)
   const scope = await dictationScope(tx, orgId)
@@ -1483,6 +1486,37 @@ export async function saveDictationSegment(
   const pendingAllergies = new Set(pendingNow.filter((item) => item.kind === "alergia").map((item) => allergyKey(item.payload)))
   const doneKey = (payload: Record<string, unknown>) => JSON.stringify([payload["planItemId"] ?? payload["serviceId"] ?? normalizeForSearch(String(payload["service"] ?? "")), placeOf(payload)])
   const pendingDone = new Set(pendingNow.filter((item) => item.kind === "procedimiento").map((item) => doneKey(item.payload)))
+  // Lo ya registrado en esta atención tampoco se propone otra vez: confirmarlo sería otra sesión, con
+  // su cargo (ADR 0100: «registrar de más cobra»). Por el tratamiento o el servicio, en el mismo sitio.
+  const site = (await productHooks(tx, orgId)).site
+  const registeredKeys = (id: unknown, fields: Record<string, unknown>) =>
+    typeof id === "string" && id ? [JSON.stringify([id, placeOf(fields)])] : []
+  const doneHere = new Set(
+    (
+      await tx
+        .select({
+          serviceId: encounterProcedure.serviceId,
+          planItemId: encounterProcedure.planItemId,
+          siteSystem: encounterProcedure.siteSystem,
+          siteCode: encounterProcedure.siteCode,
+          siteQualifiers: encounterProcedure.siteQualifiers,
+          description: encounterProcedure.description,
+        })
+        .from(encounterProcedure)
+        .where(
+          and(
+            eq(encounterProcedure.organizationId, orgId),
+            eq(encounterProcedure.encounterId, encounterId),
+            isNull(encounterProcedure.voidedAt),
+          ),
+        )
+    ).flatMap((row) => {
+      const fields = site.fields(row)
+      // También por su nombre: dos servicios que se llaman igual son, para quien dicta, lo mismo.
+      return [...registeredKeys(row.planItemId, fields), ...registeredKeys(row.serviceId, fields), ...registeredKeys(`nombre:${normalizeForSearch(row.description)}`, fields)]
+    }),
+  )
+  const alreadyDone: string[] = []
   // Un material pendiente se corrige («no, fueron cuatro»), no se vuelve a proponer.
   // Por el producto y por cómo se dijo: el que no se encontró y se vuelve a decir ya encontrado es el mismo.
   const materialKeys = (payload: Record<string, unknown>) => [
@@ -1522,6 +1556,17 @@ export async function saveDictationSegment(
     if (draft.kind === "procedimiento") {
       const key = doneKey(ready.payload)
       if (pendingDone.has(key)) continue
+      const said = normalizeForSearch(String(ready.payload["serviceName"] ?? ready.payload["service"] ?? ""))
+      const here = [
+        ...registeredKeys(ready.payload["planItemId"], ready.payload),
+        ...registeredKeys(ready.payload["serviceId"], ready.payload),
+        ...(said ? registeredKeys(`nombre:${said}`, ready.payload) : []),
+      ]
+      if (here.some((done) => doneHere.has(done))) {
+        const name = String(ready.payload["serviceName"] ?? ready.payload["service"] ?? "").trim()
+        if (name && !alreadyDone.includes(name)) alreadyDone.push(name)
+        continue
+      }
       pendingDone.add(key)
     }
     if (draft.kind === "material") {
@@ -1587,7 +1632,7 @@ export async function saveDictationSegment(
     })
   }
   const zone = await findOrgLocale(tx, orgId)
-  return { suggestions: inserted.map((row) => toItem(row, zone, dictation)), corrected, removed, undoRequested, alreadyOnFile, repeated: false }
+  return { suggestions: inserted.map((row) => toItem(row, zone, dictation)), corrected, removed, undoRequested, alreadyOnFile, alreadyDone, repeated: false }
 }
 
 /**

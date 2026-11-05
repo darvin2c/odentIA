@@ -13,6 +13,7 @@ import {
   type ExamState,
   type ExamSystemKey,
   MEDICAL_VITAL_KEYS,
+  mergeDictatedSystem,
   readSystemsExam,
 } from "@odentia/medical"
 import { and, eq } from "drizzle-orm"
@@ -224,7 +225,7 @@ export const MEDICAL_DICTATION: ProductDictation = {
       await updateEncounterDraft(tx, orgId, actorUserId, patientId, encounterId, { vitals })
       return null
     }
-    // Un sistema a la vez: lo demás del examen queda como estaba.
+    // Un sistema a la vez, sumado a lo que ya tenía: lo escrito no se pisa.
     const exam = readSystemsExam(current?.examination)
     const system = String(payload["system"]) as ExamSystemKey
     const finding = typeof payload["finding"] === "string" ? payload["finding"] : undefined
@@ -233,7 +234,7 @@ export const MEDICAL_DICTATION: ProductDictation = {
         ? { estado: "con_hallazgos" as const, hallazgo: finding }
         : { estado: "sin_alteraciones" as const }
     await updateEncounterDraft(tx, orgId, actorUserId, patientId, encounterId, {
-      examination: { sistemas: { ...(exam?.sistemas ?? {}), [system]: entry } },
+      examination: { ...mergeDictatedSystem(exam, system, entry) },
     })
     return null
   },

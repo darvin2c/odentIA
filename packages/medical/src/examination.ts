@@ -107,6 +107,27 @@ function labelOf(key: ExamSystemKey): string {
   return EXAM_SYSTEMS.find((system) => system.key === key)?.label ?? key
 }
 
+/**
+ * Lo dictado de un sistema se suma a lo que ya tenía, sin pisarlo (ADR 0012,
+ * actualización del 2026-10-24): un hallazgo nuevo se agrega al escrito, y un
+ * «sin alteraciones» dictado no borra un hallazgo que ya estaba. La usan el
+ * servidor al confirmar y la pantalla al reflejarlo, para que digan lo mismo.
+ */
+export function mergeDictatedSystem(
+  exam: SystemsExam | null,
+  system: ExamSystemKey,
+  dictated: ExamSystemEntry,
+): SystemsExam {
+  const current = exam?.sistemas[system]
+  const had = current?.estado === "con_hallazgos" ? (current.hallazgo ?? "").trim() : ""
+  const said = dictated.estado === "con_hallazgos" ? (dictated.hallazgo ?? "").trim() : ""
+  let entry: ExamSystemEntry
+  if (!had) entry = said ? { estado: "con_hallazgos", hallazgo: said } : dictated.estado === "con_hallazgos" ? (current ?? dictated) : { estado: "sin_alteraciones" }
+  else if (!said || had.toLowerCase().includes(said.toLowerCase())) entry = current!
+  else entry = { estado: "con_hallazgos", hallazgo: `${had}; ${said}`.slice(0, EXAM_FINDING_MAX) }
+  return { sistemas: { ...(exam?.sistemas ?? {}), [system]: entry } }
+}
+
 /** Lo guardado, leído sin fallar: lo que no se entiende queda «No examinado». */
 export function readSystemsExam(value: unknown): SystemsExam | null {
   const parsed = parseSystemsExam(value)

@@ -113,6 +113,7 @@ interface SegmentResponse {
     unused: string[]
     /** Alergias dichas que ya estaban registradas: no se proponen otra vez. */
     alreadyOnFile?: string[]
+    alreadyDone?: string[]
     repeated: boolean
     model: string | null
   }
@@ -234,6 +235,7 @@ export function useDictationSession({
       if (data.sources.length) setHighlights((current) => [...current, ...data.sources])
       // La alergia que ya estaba registrada no se propone otra vez: se dice y se sigue.
       for (const name of data.alreadyOnFile ?? []) toast(`La alergia a ${name} ya está en sus antecedentes.`)
+      for (const name of data.alreadyDone ?? []) toast(`${name} ya está registrado en esta atención: no se vuelve a sumar.`)
       if (data.omitted > 0) {
         setUnused((current) => ({
           phrases: [...current.phrases, ...data.unused.filter((phrase) => !current.phrases.includes(phrase))],
