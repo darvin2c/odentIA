@@ -35,7 +35,7 @@ import { fetchResponsibilities } from "../../lib/clinical-journey"
 import { useCan, usePermission } from "../../lib/crm"
 import { personHeaderRules } from "../../lib/screen-rules"
 import { label } from "../../lib/glossary"
-import { sexLabel } from "../../lib/patient-overview"
+import { sexLabel, speaksForWords } from "../../lib/patient-overview"
 import { ageFrom, hcLabel, type PatientFull, type PatientSummary } from "../../lib/patients"
 import { PERSON_KIND_LABELS, type PersonPage, relationshipText } from "../../lib/people"
 import type { BookingSeed } from "../agenda/booking-drawer"
@@ -169,6 +169,8 @@ export function PersonHeader({
   const queryClient = useQueryClient()
   const canRead = usePermission("patients.read")
   const can = useCan()
+  // «Habla por ella» no incluye a quien solo es su contacto de emergencia.
+  const speaksFor = person.spokenForBy.filter((other) => !other.emergencyOnly)
   const canMessage = usePermission("conversations.write")
   const canReadChats = usePermission("conversations.read")
   const canCrm = usePermission("crm.read")
@@ -364,10 +366,10 @@ export function PersonHeader({
             ) : null}
           </div>
         </div>
-        {patient && person.spokenForBy.length > 0 ? (
+        {patient && speaksFor.length > 0 ? (
           <p className="text-sm">
-            <span className="font-medium">Habla por ella: </span>
-            {person.spokenForBy.map((other, index) => (
+            <span className="font-medium">{speaksForWords(person.sex)}: </span>
+            {speaksFor.map((other, index) => (
               <span key={other.personId}>
                 {index > 0 ? ", " : ""}
                 <PersonLink contactId={other.personId} isPatient={other.isPatient}>

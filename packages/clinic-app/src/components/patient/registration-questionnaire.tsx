@@ -67,7 +67,7 @@ import {
 } from "@odentia/ui-patterns"
 import type { AnyFormApi } from "@tanstack/react-form"
 import { useStore } from "@tanstack/react-form"
-import { createContext, useContext, useId, useState } from "react"
+import { createContext, useContext, useEffect, useId, useRef, useState } from "react"
 import type { AddressSource } from "../../lib/address-suggestions"
 import { asksDocumentCountry, countryChoices } from "../../lib/person-data"
 import { productUi } from "../../product/product-ui"
@@ -372,6 +372,33 @@ type Found = { field: keyof Draft; message: string } | null
 /** En una pantalla donde todo es opcional, los campos no repiten «(opcional)»: lo dice la pantalla. */
 const AllOptionalContext = createContext(false)
 
+/** Lo escrito en el registro, guardado en la pestaña (se va al cerrarla). */
+function readQuestionnaireDraft(key: string | undefined): Partial<Draft> | null {
+  if (!key || typeof window === "undefined") return null
+  try {
+    const text = window.sessionStorage.getItem(`registro:${key}`)
+    return text ? (JSON.parse(text) as Partial<Draft>) : null
+  } catch {
+    return null
+  }
+}
+
+function writeQuestionnaireDraft(key: string, value: Draft): void {
+  try {
+    window.sessionStorage.setItem(`registro:${key}`, JSON.stringify(value))
+  } catch {
+    // Sin espacio o sin permiso: se sigue sin guardar.
+  }
+}
+
+function clearQuestionnaireDraft(key: string): void {
+  try {
+    window.sessionStorage.removeItem(`registro:${key}`)
+  } catch {
+    // Nada que borrar.
+  }
+}
+
 function useRegistrationForm(
   defaultValues: Draft,
   validate: (value: Draft, formApi: AnyFormApi) => ReturnType<typeof placeErrors>,
@@ -457,6 +484,7 @@ export function RegistrationQuestionnaire({
   submitLabel = "Enviar registro",
   shortcuts = true,
   addressSource,
+  draftKey,
   onSubmit,
 }: {
   config: RegistrationConfig
@@ -469,6 +497,11 @@ export function RegistrationQuestionnaire({
   submitLabel?: string
   /** Letras de atajo para el teclado; la vista previa imita un celular y no las lleva. */
   shortcuts?: boolean
+  /**
+   * Con una clave, lo escrito sobrevive a recargar o a «Atrás» en esa pestaña
+   * (`sessionStorage`: se va al cerrarla) y salir con algo escrito pide confirmar.
+   */
+  draftKey?: string
   /** Sugerencias para «Calle y número» (Geoapify, issue 36); sin ellas, el campo de siempre. */
   addressSource?: AddressSource
   /**
@@ -490,14 +523,47 @@ export function RegistrationQuestionnaire({
     if (wants("insuranceType")) return "insurance"
     return fill.health ? "health" : "send"
   })
+  // Lo escrito antes de recargar, en esta pestaña: se repone ya montada la página (el
+  // servidor no lo conoce, y pintarlo distinto rompería la hidratación).
+  const [restored, setRestored] = useState(false)
+  const sentRef = useRef(false)
   const form = useRegistrationForm(
     { ...EMPTY, respondent: ownRecord ? "representative" : "patient" },
     (_value, formApi) => placeErrors(formApi, finalErrors()),
     async () => {
       await onSubmit(buildAnswers())
+      // Enviado: lo escrito se borra de la pestaña ya, antes de que la pantalla cambie.
+      sentRef.current = true
+      if (draftKey) clearQuestionnaireDraft(draftKey)
     },
   )
   const draft = useStore(form.store, (state) => state.values)
+  const submitted = useStore(form.store, (state) => state.isSubmitSuccessful)
+  const touched = useStore(form.store, (state) => state.isDirty) || restored
+  // biome-ignore lint/correctness/useExhaustiveDependencies: se repone una vez, al montar
+  useEffect(() => {
+    const saved = readQuestionnaireDraft(draftKey)
+    if (!saved) return
+    form.reset({ ...form.state.values, ...saved }, { keepDefaultValues: true })
+    setRestored(true)
+  }, [])
+  useEffect(() => {
+    if (!draftKey) return
+    if (submitted) {
+      clearQuestionnaireDraft(draftKey)
+      return
+    }
+    if (touched && !sentRef.current) writeQuestionnaireDraft(draftKey, draft)
+  }, [draftKey, draft, submitted, touched])
+  // Salir con algo escrito pide confirmar al navegador: se avisa antes de perderlo.
+  useEffect(() => {
+    if (!draftKey || submitted || !touched || sentRef.current) return
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+    }
+    window.addEventListener("beforeunload", warn)
+    return () => window.removeEventListener("beforeunload", warn)
+  }, [draftKey, submitted, touched])
   const sending = useStore(form.store, (state) => state.isSubmitting)
 
   const set = (patch: Partial<Draft>) => {

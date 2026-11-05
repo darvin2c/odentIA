@@ -46,6 +46,7 @@ import { hcLabel } from "../../lib/patients"
 import { fetchPerson, type PersonListItem, type PersonPage, personQueryKey } from "../../lib/people"
 import { asksDocumentCountry, countryChoices } from "../../lib/person-data"
 import { ChoiceButtons } from "../choice-buttons"
+import { type PickedPerson, PersonPicker } from "../person-picker"
 import { SearchSelect } from "../settings/search-select"
 import { DocTypeChoice } from "./doc-type-choice"
 import { placeErrors } from "./form-errors"
@@ -78,7 +79,7 @@ const RELATION_WORDS: Record<Relation, string> = {
   otro: "Familiar",
 }
 const WHO_OPTIONS: ReadonlyArray<{ value: WhoCompletes; label: string }> = [
-  { value: "paciente", label: "Él, en su celular" },
+  { value: "paciente", label: "El paciente, en su celular" },
   { value: "equipo", label: "Yo, ahora" },
 ]
 /** Lo que respondió de novedades y promociones, en persona: «Sí, aceptó» primero. */
@@ -223,9 +224,31 @@ export function NewPatientDrawer({
   const orgProfile = useOrgProfile()
   const countryCode = orgProfile.data?.countryCode ?? null
   const defaultCountry = normalizeCountry(orgProfile.data?.countryCode)
-  const dependent = target.kind === "dependent"
   const fromPerson = target.kind === "person" ? target.person : null
-  const guardian = target.kind === "dependent" ? target.person : null
+  // Un menor desde «Nuevo paciente»: se elige aquí a su responsable y el cajón sigue como «a su cargo».
+  const [chosenGuardian, setChosenGuardian] = useState<PersonPage | null>(null)
+  const [guardianPick, setGuardianPick] = useState<PickedPerson | null>(null)
+  const guardian = target.kind === "dependent" ? target.person : chosenGuardian
+  const dependent = guardian !== null
+  // Al cerrar se olvida: la próxima vez empieza como «Nuevo paciente».
+  const openRef = useRef(open)
+  openRef.current = open
+  useEffect(() => {
+    if (open) return
+    setChosenGuardian(null)
+    setGuardianPick(null)
+  }, [open])
+  /** Elegir (o cambiar) al responsable: lo que llega después de cerrar no reabre nada. */
+  const pickGuardian = (person: PickedPerson | null) => {
+    setGuardianPick(person)
+    setChosenGuardian(null)
+    if (!person) return
+    void fetchPerson(person.id)
+      .then((page) => {
+        if (openRef.current) setChosenGuardian(page.data)
+      })
+      .catch(() => setGuardianPick(null))
+  }
   const guardianFirst = guardian?.displayName.split(" ")[0] ?? "esta persona"
 
   const [stage, setStage] = useState<Stage>("form")
@@ -475,6 +498,12 @@ export function NewPatientDrawer({
   const docType = docTypeOf(values)
   const guardianDocType = guardianDocTypeOf(values)
   const minor = minorOf(values)
+  // Si la fecha deja de ser de un menor, el responsable elegido aquí ya no corresponde.
+  useEffect(() => {
+    if (minor || target.kind === "dependent" || (!chosenGuardian && !guardianPick)) return
+    setChosenGuardian(null)
+    setGuardianPick(null)
+  }, [minor, target.kind, chosenGuardian, guardianPick])
   const needsGuardianDoc = needsGuardianDocOf(values)
 
   async function startFrom(row: PersonListItem): Promise<void> {
@@ -731,6 +760,19 @@ export function NewPatientDrawer({
                       </field.Control>
                     )}
                   </form.AppField>
+                ) : null}
+                {/* Un menor nuevo: se elige aquí a su responsable. Si ya se eligió a una persona que existe,
+                    se registra desde la página de su responsable, para no crearle otra ficha. */}
+                {!dependent && minor && picked ? (
+                  <p className="rounded-lg border border-warning/40 bg-warning-soft p-3 text-sm">
+                    Es menor de edad: regístralo desde la página de su madre, padre o tutor, con «Registrar a alguien a su cargo».
+                  </p>
+                ) : target.kind !== "dependent" && minor ? (
+                  <div className="flex flex-col gap-2 rounded-lg border border-warning/40 bg-warning-soft p-3 text-sm">
+                    <p>Es menor de edad: decide por él o ella su madre, padre o tutor. ¿Quién es?</p>
+                    <PersonPicker label="Su responsable" value={guardianPick} onChange={pickGuardian} />
+                    <p className="text-muted-foreground">Si aún no está registrado, regístralo antes con «Nuevo contacto».</p>
+                  </div>
                 ) : null}
                 {asksDocument ? (
                   <form.AppField name="docNumber">

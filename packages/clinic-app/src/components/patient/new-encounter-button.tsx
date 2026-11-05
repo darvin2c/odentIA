@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useSearch } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 import { useActiveBranch } from "../../lib/active-branch"
-import { type AgendaAppointment, invalidateAppointmentQueries, professionalSaid } from "../../lib/agenda"
+import { type AgendaAppointment, invalidateAppointmentQueries, ofProfessional } from "../../lib/agenda"
 import { ApiError, apiFetch } from "../../lib/api"
 import { useMyUserId, usePermission } from "../../lib/crm"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
@@ -55,7 +55,7 @@ export function useAttendAppointment() {
     },
     onSuccess: async (encounterId, input) => {
       if (input.appointment.professionalUserId !== myUserId) {
-        toast.info(`Atiendes la cita de ${professionalSaid(input.appointment.professionalName, { full: true })}`)
+        toast.info(`Atiendes la cita ${ofProfessional(input.appointment.professionalName, { full: true })}`)
       }
       await Promise.all([
         invalidateAppointmentQueries(queryClient),

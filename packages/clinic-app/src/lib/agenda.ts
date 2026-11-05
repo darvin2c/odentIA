@@ -131,6 +131,12 @@ export function professionalSaid(name: string, options: { full?: boolean } = {})
   return said
 }
 
+/** «de la Dra. Ana», «del Dr. Luis» o «de Ana»: «de» y quien atiende, con su contracción. */
+export function ofProfessional(name: string, options: { full?: boolean } = {}): string {
+  const said = professionalSaid(name, options)
+  return said.startsWith("el ") ? `del ${said.slice(3)}` : `de ${said}`
+}
+
 /** Más de una hora se dice en horas: «espera 388 min» no se entiende. */
 function waitWords(minutes: number): string {
   if (minutes < 60) return `${minutes} min`
@@ -179,6 +185,8 @@ export interface AppointmentContext {
   confirmation: { askAt: string | null; askedAt: string | null } | null
   /** «Faltan datos para atenderla», del servidor; null para quien no edita los datos. */
   missingData: Array<{ key: string; label: string }> | null
+  /** Para que la frase concuerde con el paciente («atenderlo»); null sin registrar o sin permiso. */
+  patientSex?: string | null
 }
 
 export interface AgendaResources {
