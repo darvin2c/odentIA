@@ -6,6 +6,7 @@ import {
   FDI_ADULT_ROWS,
   ISO_3950,
   isValidTooth,
+  surfaceLabel,
   surfacesForTooth,
   TREATMENT_SCOPES,
   type TreatmentScope,
@@ -36,6 +37,11 @@ export function siteColumns(site: Partial<DentalSite> | null | undefined): SiteC
 }
 
 /** Columnas del sitio común → pieza, caras, cuadrante y arcada. */
+/** Las caras en español, como en la pantalla: «distal, oclusal», no los códigos internos. */
+function surfaceWords(surfaces: readonly string[]): string {
+  return surfaces.map((surface) => surfaceLabel(surface).toLowerCase()).join(", ")
+}
+
 export function dentalSiteOfRow(row: SiteColumns): DentalSite {
   return dentalSiteOf({
     system: row.siteSystem,
@@ -216,7 +222,7 @@ export const dentalProductSite: ProductSite = {
     const site = dentalSiteOfRow(row)
     if (form === "full") {
       if (site.toothNumber !== null)
-        return `Pieza ${site.toothNumber}${site.surfaces.length ? ` (${site.surfaces.join(", ")})` : ""}`
+        return `Pieza ${site.toothNumber}${site.surfaces.length ? ` (${surfaceWords(site.surfaces)})` : ""}`
       if (site.quadrant !== null) return `Cuadrante ${site.quadrant}`
       if (site.arch === "upper") return "Arcada superior"
       if (site.arch === "lower") return "Arcada inferior"
@@ -224,13 +230,13 @@ export const dentalProductSite: ProductSite = {
     }
     if (site.toothNumber === null) return null
     if (form === "short" || !site.surfaces.length) return `pieza ${site.toothNumber}`
-    return `pieza ${site.toothNumber} (${site.surfaces.join(", ")})`
+    return `pieza ${site.toothNumber} (${surfaceWords(site.surfaces)})`
   },
   bodySite(row) {
     const site = dentalSiteOfRow(row)
     if (site.toothNumber === null) return null
     return {
-      text: `Pieza ${site.toothNumber} (FDI)${site.surfaces.length ? ` · ${site.surfaces.join(", ")}` : ""}`,
+      text: `Pieza ${site.toothNumber} (FDI)${site.surfaces.length ? ` · ${surfaceWords(site.surfaces)}` : ""}`,
     }
   },
   invalid: (value) => `Pieza FDI inválida: ${value}`,

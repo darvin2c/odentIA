@@ -10,8 +10,10 @@ import {
   ADMINISTRATION_ROUTES,
   allergyWarnings,
   DOSAGE_FORMS,
+  dispensedUnit,
   FOLLOW_UP_REPEAT_MONTHS,
   followUpRepeatWords,
+  weightDoseMg,
 } from "@odentia/clinical"
 import { Badge, Button, FieldLegend, FieldSet, Input, toast } from "@odentia/ui"
 import {
@@ -32,7 +34,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { invalidateAppointmentQueries } from "../../lib/agenda"
-import { apiFetch } from "../../lib/api"
+import { ApiError, apiFetch } from "../../lib/api"
+import { fetchMyProfessionalProfile } from "../../lib/encounters"
 import {
   cancelFollowUpApi,
   completeFollowUpApi,
@@ -61,6 +64,7 @@ import { DiagnosisSearch } from "./diagnosis-search"
 import { PrescriptionPaper } from "./document-papers"
 import { FollowUpScheduler } from "./follow-up-scheduler"
 import { ControlRowsSkeleton } from "../skeletons/person-sections"
+import { ProfessionalProfileDrawer } from "../professional-profile-drawer"
 
 const MAX_TITLE = 200
 const MAX_TEXT = 2000
@@ -956,9 +960,20 @@ export function RecetasPanel({
       ? initialMedications.map((medication) => ({ ...emptyMedication(), ...medication }))
       : [emptyMedication()],
   )
+  // Sin colegiatura no se firma: se pone ahí mismo, encima, sin perder la receta escrita.
+  const [needsRegistration, setNeedsRegistration] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
+  const myProfile = useQuery({
+    queryKey: ["professional-profile", "me"],
+    queryFn: fetchMyProfessionalProfile,
+    enabled: needsRegistration,
+  })
   const createMutation = useMutation({
     mutationFn: (body: Parameters<typeof createPrescriptionApi>[1]) =>
       createPrescriptionApi(patientId, body),
+    onError: (error) => {
+      if (error instanceof ApiError && error.shape.code === "PROFILE_INCOMPLETE") setNeedsRegistration(true)
+    },
   })
   const form = useAppForm({
     defaultValues: {
@@ -1054,6 +1069,27 @@ export function RecetasPanel({
 
   const createBody = (
     <div className="flex flex-col gap-4">
+      {needsRegistration ? (
+        <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-warning/40 bg-warning-soft px-3 py-2 text-sm">
+          <span className="min-w-0 flex-1">Para firmar la receta falta tu colegiatura. Lo escrito se queda aquí.</span>
+          <Button type="button" size="sm" variant="outline" className="min-h-11 sm:min-h-8" onClick={() => setProfileOpen(true)}>
+            Agregar mi colegiatura
+          </Button>
+        </div>
+      ) : null}
+      {profileOpen ? (
+        <ProfessionalProfileDrawer
+          open
+          target="me"
+          profile={myProfile.data?.data ?? null}
+          onClose={() => setProfileOpen(false)}
+          onSaved={() => {
+            setNeedsRegistration(false)
+            void queryClient.invalidateQueries({ queryKey: ["professional-profile", "me"] })
+            void queryClient.invalidateQueries({ queryKey: ["encounter-closing"] })
+          }}
+        />
+      ) : null}
       {itemId ? (
         <p className="text-sm text-muted-foreground">
           Tratamiento:{" "}
@@ -1127,6 +1163,11 @@ export function RecetasPanel({
                       label="Dosis"
                       maxLength={MAX_TITLE}
                       placeholder="Ej.: 1 tableta"
+                      description={(() => {
+                        // Solo informa: con la dosis por peso, cuántos mg son por toma; los ml los escribe quien receta.
+                        const mg = weightDoseMg(medications[index]?.dose ?? "", typedWeight !== null && Number.isFinite(typedWeight) ? typedWeight : null)
+                        return mg === null ? undefined : `Con ${typedWeight} kg son ${mg} mg por toma. Escribe también cuánto es en la presentación (ml, gotas).`
+                      })()}
                     />
                   )}
                 </form.AppField>
@@ -1151,7 +1192,10 @@ export function RecetasPanel({
                   {(field) => (
                     <field.TextField
                       label="Cantidad total"
-                      description="Los seguros reembolsan solo la cantidad escrita."
+                      description={(() => {
+                        const unit = dispensedUnit(medications[index]?.dosageForm ?? "", null)
+                        return `${unit ? `En ${unit}. ` : ""}Los seguros reembolsan solo la cantidad escrita.`
+                      })()}
                       inputMode="numeric"
                       maxLength={4}
                     />

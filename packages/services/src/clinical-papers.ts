@@ -3,7 +3,7 @@
  * con el kit único. Son los mismos para enviar, para «Tus papeles» y para que el
  * equipo los vea o los imprima. Los datos de firma son los congelados al emitir.
  */
-import { diagnosisCodeLabel, medicalLeaveEnd } from "@odentia/clinical"
+import { diagnosisCodeLabel, dispensedUnit, medicalLeaveEnd } from "@odentia/clinical"
 import type { getAttentionSheetPrint } from "./attention-sheet.js"
 import type { getOrderPrint } from "./clinical-forms.js"
 import {
@@ -161,7 +161,11 @@ export async function renderPrescriptionPdf(
             ...(item.quantity
               ? [
                   {
-                    inlines: `Cantidad: ${item.quantity} (${numberInWords(item.quantity)})`,
+                    // Con su unidad: «10 (diez) tabletas», lo que se entrega en la farmacia.
+                    inlines: `Cantidad: ${item.quantity} (${numberInWords(item.quantity)})${(() => {
+                      const unit = dispensedUnit(item.dosageForm ?? "", item.quantity)
+                      return unit ? ` ${unit}` : ""
+                    })()}`,
                     size: SIZE.table,
                     tone: "soft" as const,
                     gapBefore: 1,
