@@ -43,7 +43,7 @@ import {
   updateDictationSuggestion,
 } from "../encounter-dictation.js"
 import { DENTAL_DICTATION } from "./dictation.js"
-import { addEncounterProcedure } from "../encounters.js"
+import { addEncounterProcedure, voidEncounterProcedure } from "../encounters.js"
 import { appDb, ownerDb, setupTestDb } from "../test-setup.js"
 import { nextPatientNumber } from "../patients.js"
 import { insertTestPatients } from "../test-patient.js"
@@ -730,16 +730,24 @@ describe("alergias y lo hecho hoy por voz (issue 109)", () => {
     await enable(true)
     const fx = await openSession("Destartraje registrado", "general")
     const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
-    await fx.run((tx) => addEncounterProcedure(tx, ...fx.args, fx.encounter.id, { serviceId: fx.service.id }))
+    const registered = await fx.run((tx) => addEncounterProcedure(tx, ...fx.args, fx.encounter.id, { serviceId: fx.service.id }))
     const saved = await segment({ drafts: [{ kind: "procedimiento", payload: { service: "destartraje registrado" } }] })
     expect(saved.suggestions).toEqual([])
     expect(saved.alreadyDone).toEqual(["Destartraje registrado"])
+    // Si se dice una cantidad mayor que la registrada, no es lo mismo: se propone.
+    const more = await segment({ drafts: [{ kind: "procedimiento", payload: { service: "destartraje registrado", quantity: 2 } }], segmentId: randomUUID() })
+    expect(more.suggestions).toHaveLength(1)
+    await fx.run((tx) => discardDictationSuggestion(tx, ...fx.args, fx.encounter.id, more.suggestions[0]!.id))
     // Una vez anulado lo registrado, decirlo de nuevo sí lo propone.
-    const [row] = await ownerDb.select().from(encounterProcedure).where(eq(encounterProcedure.encounterId, fx.encounter.id))
-    await ownerDb.update(encounterProcedure).set({ voidedAt: new Date(), voidReason: "Prueba" }).where(eq(encounterProcedure.id, row!.id))
+    await fx.run((tx) => voidEncounterProcedure(tx, ...fx.args, fx.encounter.id, registered.id, { reason: "Era otro paciente" }))
     const again = await segment({ drafts: [{ kind: "procedimiento", payload: { service: "destartraje registrado" } }], segmentId: randomUUID() })
     expect(again.suggestions).toHaveLength(1)
     expect(again.alreadyDone).toEqual([])
+    // Registrado a mano mientras la sugerencia esperaba: confirmarla no lo suma otra vez.
+    await fx.run((tx) => addEncounterProcedure(tx, ...fx.args, fx.encounter.id, { serviceId: fx.service.id }))
+    await expect(
+      fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, again.suggestions[0]!.id)),
+    ).rejects.toMatchObject({ code: "ALREADY_REGISTERED", status: 409 })
     await enable(false)
   })
 

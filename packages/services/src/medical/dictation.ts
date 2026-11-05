@@ -230,8 +230,8 @@ export const MEDICAL_DICTATION: ProductDictation = {
     const system = String(payload["system"]) as ExamSystemKey
     const finding = typeof payload["finding"] === "string" ? payload["finding"] : undefined
     const entry =
-      payload["state"] === "con_hallazgos" && finding
-        ? { estado: "con_hallazgos" as const, hallazgo: finding }
+      payload["state"] === "con_hallazgos"
+        ? { estado: "con_hallazgos" as const, ...(finding ? { hallazgo: finding } : {}) }
         : { estado: "sin_alteraciones" as const }
     await updateEncounterDraft(tx, orgId, actorUserId, patientId, encounterId, {
       examination: { ...mergeDictatedSystem(exam, system, entry) },

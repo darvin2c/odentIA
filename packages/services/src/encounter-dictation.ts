@@ -1486,36 +1486,8 @@ export async function saveDictationSegment(
   const pendingAllergies = new Set(pendingNow.filter((item) => item.kind === "alergia").map((item) => allergyKey(item.payload)))
   const doneKey = (payload: Record<string, unknown>) => JSON.stringify([payload["planItemId"] ?? payload["serviceId"] ?? normalizeForSearch(String(payload["service"] ?? "")), placeOf(payload)])
   const pendingDone = new Set(pendingNow.filter((item) => item.kind === "procedimiento").map((item) => doneKey(item.payload)))
-  // Lo ya registrado en esta atención tampoco se propone otra vez: confirmarlo sería otra sesión, con
-  // su cargo (ADR 0100: «registrar de más cobra»). Por el tratamiento o el servicio, en el mismo sitio.
-  const site = (await productHooks(tx, orgId)).site
-  const registeredKeys = (id: unknown, fields: Record<string, unknown>) =>
-    typeof id === "string" && id ? [JSON.stringify([id, placeOf(fields)])] : []
-  const doneHere = new Set(
-    (
-      await tx
-        .select({
-          serviceId: encounterProcedure.serviceId,
-          planItemId: encounterProcedure.planItemId,
-          siteSystem: encounterProcedure.siteSystem,
-          siteCode: encounterProcedure.siteCode,
-          siteQualifiers: encounterProcedure.siteQualifiers,
-          description: encounterProcedure.description,
-        })
-        .from(encounterProcedure)
-        .where(
-          and(
-            eq(encounterProcedure.organizationId, orgId),
-            eq(encounterProcedure.encounterId, encounterId),
-            isNull(encounterProcedure.voidedAt),
-          ),
-        )
-    ).flatMap((row) => {
-      const fields = site.fields(row)
-      // También por su nombre: dos servicios que se llaman igual son, para quien dicta, lo mismo.
-      return [...registeredKeys(row.planItemId, fields), ...registeredKeys(row.serviceId, fields), ...registeredKeys(`nombre:${normalizeForSearch(row.description)}`, fields)]
-    }),
-  )
+  // Lo ya registrado en esta atención tampoco se propone otra vez (`alreadyRegistered`): se avisa.
+  const doneHere = await registeredDone(tx, orgId, encounterId)
   const alreadyDone: string[] = []
   // Un material pendiente se corrige («no, fueron cuatro»), no se vuelve a proponer.
   // Por el producto y por cómo se dijo: el que no se encontró y se vuelve a decir ya encontrado es el mismo.
@@ -1556,13 +1528,7 @@ export async function saveDictationSegment(
     if (draft.kind === "procedimiento") {
       const key = doneKey(ready.payload)
       if (pendingDone.has(key)) continue
-      const said = normalizeForSearch(String(ready.payload["serviceName"] ?? ready.payload["service"] ?? ""))
-      const here = [
-        ...registeredKeys(ready.payload["planItemId"], ready.payload),
-        ...registeredKeys(ready.payload["serviceId"], ready.payload),
-        ...(said ? registeredKeys(`nombre:${said}`, ready.payload) : []),
-      ]
-      if (here.some((done) => doneHere.has(done))) {
+      if (alreadyRegistered(doneHere, ready.payload)) {
         const name = String(ready.payload["serviceName"] ?? ready.payload["service"] ?? "").trim()
         if (name && !alreadyDone.includes(name)) alreadyDone.push(name)
         continue
@@ -2171,6 +2137,73 @@ async function confirmBudget(tx: Db, orgId: string, actorUserId: string, patient
   return id
 }
 
+/** Un acto ya registrado en la atención, como se compara con lo dictado. */
+interface RegisteredDone {
+  planItemId: string | null
+  serviceId: string | null
+  name: string
+  site: string
+  quantity: number
+}
+
+/** El sitio entero de un acto: pieza, caras, cuadrante y arcada (lo que no tiene, vacío). */
+const doneSite = (fields: Record<string, unknown>): string =>
+  JSON.stringify([
+    typeof fields["toothNumber"] === "number" ? fields["toothNumber"] : null,
+    Array.isArray(fields["surfaces"]) ? [...(fields["surfaces"] as string[])].sort() : [],
+    fields["quadrant"] ?? null,
+    fields["arch"] ?? null,
+  ])
+
+/** Lo hecho que ya está registrado, sin anular, en la atención. */
+async function registeredDone(tx: Db, orgId: string, encounterId: string): Promise<RegisteredDone[]> {
+  const site = (await productHooks(tx, orgId)).site
+  const rows = await tx
+    .select({
+      serviceId: encounterProcedure.serviceId,
+      planItemId: encounterProcedure.planItemId,
+      siteSystem: encounterProcedure.siteSystem,
+      siteCode: encounterProcedure.siteCode,
+      siteQualifiers: encounterProcedure.siteQualifiers,
+      description: encounterProcedure.description,
+      quantity: encounterProcedure.quantity,
+    })
+    .from(encounterProcedure)
+    .where(
+      and(
+        eq(encounterProcedure.organizationId, orgId),
+        eq(encounterProcedure.encounterId, encounterId),
+        isNull(encounterProcedure.voidedAt),
+      ),
+    )
+  return rows.map((row) => ({
+    planItemId: row.planItemId,
+    serviceId: row.serviceId,
+    name: normalizeForSearch(row.description),
+    site: doneSite(site.fields(row)),
+    quantity: row.quantity,
+  }))
+}
+
+/**
+ * ¿Lo dictado ya está registrado? Confirmarlo sería otra sesión con su cargo
+ * (ADR 0100: «registrar de más cobra»). Del mismo tratamiento si lo trae (dos
+ * cuadrantes de un raspado son dos tratamientos); si no, del mismo servicio o
+ * con el mismo nombre. Siempre en el mismo sitio, y solo si lo registrado ya
+ * llega a la cantidad que se dijo («dos radiografías» con una registrada, no).
+ */
+function alreadyRegistered(registered: readonly RegisteredDone[], payload: Record<string, unknown>): boolean {
+  const site = doneSite(payload)
+  const planItemId = typeof payload["planItemId"] === "string" ? payload["planItemId"] : null
+  const serviceId = typeof payload["serviceId"] === "string" ? payload["serviceId"] : null
+  const said = normalizeForSearch(String(payload["serviceName"] ?? payload["service"] ?? ""))
+  const same = (row: RegisteredDone) =>
+    row.site === site &&
+    (planItemId ? row.planItemId === planItemId : (serviceId !== null && row.serviceId === serviceId) || (said !== "" && row.name === said))
+  const done = registered.filter(same).reduce((total, row) => total + row.quantity, 0)
+  return done > 0 && quantityOf(payload) <= done
+}
+
 /**
  * Lo que se hizo hoy entra como «Registrar procedimiento»: del tratamiento del
  * plan, de un servicio o como acto libre. Un tratamiento que aún esperaba
@@ -2185,6 +2218,9 @@ async function confirmDone(
   encounterId: string,
   payload: Record<string, unknown>,
 ): Promise<string> {
+  // Lo que se registró a mano mientras la sugerencia esperaba no se suma otra vez.
+  if (alreadyRegistered(await registeredDone(tx, orgId, encounterId), payload))
+    throw new ServiceError("ALREADY_REGISTERED", 409, "Ya está registrado en esta atención: descarta la sugerencia para no sumarlo dos veces")
   const site = {
     toothNumber: (payload["toothNumber"] as number | undefined) ?? null,
     surfaces: (payload["surfaces"] as string[] | undefined) ?? null,

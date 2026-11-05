@@ -236,7 +236,7 @@ export const medicalExamination: ProductExaminationUi = {
     const system = EXAM_SYSTEMS.find((item) => item.key === payload["system"])
     if (!system) return draft
     const finding = typeof payload["finding"] === "string" ? payload["finding"] : ""
-    const entry = payload["state"] === "con_hallazgos" && finding ? { estado: "con_hallazgos" as const, hallazgo: finding } : { estado: "sin_alteraciones" as const }
+    const entry = payload["state"] === "con_hallazgos" ? { estado: "con_hallazgos" as const, ...(finding ? { hallazgo: finding } : {}) } : { estado: "sin_alteraciones" as const }
     return mergeDictatedSystem(exam, system.key, entry)
   },
 }

@@ -121,9 +121,12 @@ export function mergeDictatedSystem(
   const current = exam?.sistemas[system]
   const had = current?.estado === "con_hallazgos" ? (current.hallazgo ?? "").trim() : ""
   const said = dictated.estado === "con_hallazgos" ? (dictated.hallazgo ?? "").trim() : ""
+  // Lo mismo dicho otra vez es lo que ya está, frase por frase: «edema» no es «Sin edema».
+  const same = (a: string, b: string) => a.toLocaleLowerCase("es").replace(/\s+/g, " ") === b.toLocaleLowerCase("es").replace(/\s+/g, " ")
   let entry: ExamSystemEntry
-  if (!had) entry = said ? { estado: "con_hallazgos", hallazgo: said } : dictated.estado === "con_hallazgos" ? (current ?? dictated) : { estado: "sin_alteraciones" }
-  else if (!said || had.toLowerCase().includes(said.toLowerCase())) entry = current!
+  if (current?.estado === "con_hallazgos" && dictated.estado !== "con_hallazgos") entry = current
+  else if (!had) entry = said ? { estado: "con_hallazgos", hallazgo: said } : dictated
+  else if (!said || had.split(";").some((part) => same(part.trim(), said))) entry = current!
   else entry = { estado: "con_hallazgos", hallazgo: `${had}; ${said}`.slice(0, EXAM_FINDING_MAX) }
   return { sistemas: { ...(exam?.sistemas ?? {}), [system]: entry } }
 }
