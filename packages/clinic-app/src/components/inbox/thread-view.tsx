@@ -41,7 +41,7 @@ import { ThreadSkeleton } from "../skeletons/inbox"
 import { TopicList } from "./topic-list"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { Bot, CheckCircle2, ChevronDown, ChevronLeft, Copy, CornerDownLeft, Hand, PanelRight, X } from "lucide-react"
+import { AlertTriangle, Bot, CheckCircle2, ChevronDown, ChevronLeft, Copy, CornerDownLeft, Hand, PanelRight, X } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { AnswerTrace } from "../../lib/agent"
 import { useReceptionName } from "../../lib/agent-names"
@@ -275,6 +275,9 @@ export function ThreadView({
   const [blocking, setBlocking] = useState(false)
   const [passing, setPassing] = useState<InboxTopic | null>(null)
   const [doneTopic, setDoneTopic] = useState<string | null>(null)
+  // La respuesta que resolvió el tema: si no sale, el aviso deja de decir «resuelto».
+  const [doneMessage, setDoneMessage] = useState<string | null>(null)
+  const undelivered = doneMessage !== null && messages.find((item) => item.id === doneMessage)?.status === "failed"
   // Pasadas las 24 horas: elegir un mensaje aprobado en vez de responder el tema
   // (R1), o escribirle por WhatsApp desde Instagram o Messenger (tablero 4b).
   const [useApproved, setUseApproved] = useState(false)
@@ -304,6 +307,7 @@ export function ThreadView({
     setConfirming(null)
     setReplyTo(undefined)
     setDoneTopic(null)
+    setDoneMessage(null)
     setBlocking(false)
     setUseApproved(false)
     setViaWhatsapp(false)
@@ -417,7 +421,10 @@ export function ThreadView({
           result.data.held ? "Quedó en su WhatsApp: le llega con «Ver respuesta»." : "Se le envió por WhatsApp.",
         )
       }
-      if (result.data.topicResolved) setDoneTopic(result.data.topicId)
+      if (result.data.topicResolved) {
+        setDoneTopic(result.data.topicId)
+        setDoneMessage(result.data.id)
+      }
       invalidate()
       invalidateAgentWork(queryClient)
     },
@@ -1087,7 +1094,28 @@ export function ThreadView({
               </Button>
             </div>
           )}
-          {doneTopic && !closed ? (
+          {doneTopic && !closed && undelivered ? (
+            <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-warning/40 bg-warning-soft px-3 py-2 text-sm">
+              <AlertTriangle className="size-4 text-warning" aria-hidden />
+              {/* «Sigue pendiente» solo si el servidor lo volvió a abrir; si no, se ofrece dejarlo pendiente. */}
+              {topics.some((topic) => topic.id === doneTopic) ? (
+                <span className="min-w-0 flex-1">No le llegó: el tema sigue pendiente. Mira el motivo debajo de tu mensaje.</span>
+              ) : (
+                <>
+                  <span className="min-w-0 flex-1">No le llegó. Mira el motivo debajo de tu mensaje.</span>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="h-auto min-h-11 p-0 font-semibold sm:min-h-8"
+                    disabled={topicMutation.isPending}
+                    onClick={() => topicMutation.mutate({ topicId: doneTopic, path: "reopen" })}
+                  >
+                    Dejar pendiente
+                  </Button>
+                </>
+              )}
+            </div>
+          ) : doneTopic && !closed ? (
             <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-success/40 bg-success-soft px-3 py-2 text-sm">
               <CheckCircle2 className="size-4 text-success" aria-hidden />
               <span className="min-w-0 flex-1">Tema resuelto. {receptionName} sigue con lo demás.</span>

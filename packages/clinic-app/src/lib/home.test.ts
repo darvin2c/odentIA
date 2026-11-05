@@ -189,7 +189,7 @@ describe("textos de «Te espera»", () => {
       title: "4 presupuestos esperan respuesta", detail: "El más antiguo se presentó hace 9 días", action: "Ver",
     })
     expect(waitingText({ kind: "more", of: "cases", count: 1 }, context).title).toBe("1 caso más de Sofi")
-    expect(waitingText({ kind: "person", conversationId: "c", contactId: "p", contactName: "Rosa Quispe", channel: "whatsapp", quote: "¿Atienden hoy?", since: new Date(Date.now() - 2 * 3_600_000).toISOString(), urgent: false, windowClosed: false }, context)).toMatchObject({
+    expect(waitingText({ kind: "person", conversationId: "c", contactId: "p", contactName: "Rosa Quispe", channel: "whatsapp", quote: "¿Atienden hoy?", since: new Date(Date.now() - 2 * 3_600_000).toISOString(), urgent: false, windowClosed: false, undelivered: false }, context)).toMatchObject({
       title: "Rosa Quispe", ask: "¿Atienden hoy?", action: "Responder",
     })
     expect(waitingText({ kind: "more", of: "tasks", count: 4 }, context).detail).toBe("Tuyas y de tu área")
