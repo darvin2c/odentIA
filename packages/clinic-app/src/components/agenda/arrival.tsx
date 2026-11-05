@@ -50,7 +50,7 @@ export function useAppointmentVisitStatus(options: { onDone?: (text: string) => 
 
 export function useAppointmentArrival(options: {
   /** Reagendar a la persona cuando su hora ya está ocupada; sin esto el aviso solo lo dice. */
-  onRebook?: (patient: { id: string; name: string }) => void
+  onRebook?: (patient: { id: string; name: string }, from?: { serviceId?: string | null; professionalUserId?: string | null }) => void
   /**
    * El aviso ofrece «Deshacer»; no donde la pantalla ya lo tiene a la vista (el
    * cajón de la cita): un solo «Deshacer» por pantalla.

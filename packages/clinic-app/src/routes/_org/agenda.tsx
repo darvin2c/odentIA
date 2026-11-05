@@ -1020,8 +1020,8 @@ function AgendaPage() {
   }
 
   // La vista Agenda: el día elegido y los que le siguen, cada uno con su encabezado.
-  // `?dias=1` (desde «N por confirmar» de un día): solo ese día.
-  const listDays = get("dias") === "1" ? 1 : AGENDA_DAYS
+  // `?dias=1` (desde «N por confirmar» de un día): solo ese día, mientras siga ese filtro.
+  const listDays = get("dias") === "1" && statusFilter ? 1 : AGENDA_DAYS
   const agendaAppointments = appointments.filter((item) => {
     const date = zonedDateOf(item.startsAt, TZ)
     return date >= day && date < addDays(day, listDays) && isChosen(item.professionalUserId)
@@ -1365,7 +1365,7 @@ function AgendaPage() {
       withAll={false}
       counts={counts}
       value={statusFilter}
-      onChange={(next) => setParam("status", next ?? undefined)}
+      onChange={(next) => setParams({ status: next ?? undefined, dias: undefined })}
     />
   )
   const showDays = small && view !== "semana"
@@ -1734,7 +1734,8 @@ function AgendaPage() {
             if (date !== day || hidden)
               setParams({
                 ...(date !== day ? { date: date === today ? undefined : date } : {}),
-                ...(hidden ? { who: created.professionalUserId } : {}),
+                // Se suma a los que ya se veían, sin quitar a nadie de la vista.
+                ...(hidden ? { who: [...whoList, created.professionalUserId].join(",") } : {}),
               })
             await invalidate()
             await queryClient.invalidateQueries({ queryKey: ["crm-context"] })
@@ -1755,9 +1756,9 @@ function AgendaPage() {
           toneOf={toneOf}
           onClose={closeDetail}
           onChanged={invalidate}
-          onRebook={(patient) => {
+          onRebook={(patient, from) => {
             closeDetail()
-            openBooking({ patient })
+            rebook(patient, from)
           }}
         />
       ) : null}
