@@ -2,11 +2,12 @@ import { telegramBotApiAdapter } from "@odentia/channels"
 import { type OutboundMessageJob, withOrgContext } from "@odentia/db"
 import { supportCase } from "@odentia/db/schema/admin-support"
 import { member, user } from "@odentia/db/schema/auth"
-import { agentConfig, channelConnection, conversation, message } from "@odentia/db/schema/crm"
+import { agentConfig, channelConnection, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import {
   closeConversationWith,
   createConnection,
+  createHandoff,
   ingestInbound,
   listConnections,
   listInboxConversations,
@@ -14,9 +15,10 @@ import {
   personalLinkRef,
   personalLinkToken,
   sendOutbound,
+  sendTeamReply,
   SIGNUP_TOKEN_DEAD,
 } from "@odentia/services"
-import { eq, like, sql } from "drizzle-orm"
+import { and, eq, like, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { consumeOutbound, processOutbound, throttledDelaySeconds, WAITING_DELAY_SECONDS } from "./outbound.js"
 import { appDb, KEY, ownerDb, setupTestDb, storageStub, tgConnId } from "./test-setup.js"
@@ -583,4 +585,29 @@ it("«Su enlace» se guarda como referencia y sale con su token: el token solo e
   expect(delivered).toBe(`Mira aquí: https://norte.test/reserva?token=${personalLinkToken(KEY, linkId)}`)
   const [stored] = await withOrgContext(appDb, "org_a", (tx) => tx.select({ body: message.body }).from(message).where(eq(message.id, messageId)))
   expect(stored?.body).not.toMatch(/[0-9a-f]{64}/)
+})
+
+it("si el proveedor rechaza la respuesta que resolvió un tema, el tema vuelve a quedar pendiente", async () => {
+  await ownerDb.insert(user).values({ id: "ob-recepcion", name: "Rita de Recepción", email: "rita@outbound.test", emailVerified: true })
+  await ownerDb.insert(member).values({ id: "m-ob-recepcion", userId: "ob-recepcion", organizationId: "org_a", role: "reception", createdAt: new Date() })
+  const agentReply = await queuedWhatsApp("wa:51911100041")
+  const { conversationId } = await whereIs(agentReply)
+  // Lo del agente sale antes: la respuesta del equipo va detrás en la cola.
+  expect(await processOutbound(appDb, deps, outJob(agentReply))).toBe("done")
+  const [asked] = await ownerDb
+    .select({ id: message.id })
+    .from(message)
+    .where(and(eq(message.conversationId, conversationId), eq(message.direction, "in")))
+  const topic = await withOrgContext(appDb, "org_a", (tx) =>
+    createHandoff(tx, "org_a", null, { conversationId, reason: "Cita", summary: "Quiere una cita", createdBy: "agent" }),
+  )
+  const sent = await withOrgContext(appDb, "org_a", (tx) =>
+    sendTeamReply(tx, "org_a", { conversationId, userId: "ob-recepcion", content: { type: "text", text: "Te espero el lunes a las 10" }, replyToMessageId: asked!.id }),
+  )
+  expect(sent.topicResolved).toBe(true)
+  const taskStatus = async () => (await ownerDb.select({ status: crmTask.status }).from(crmTask).where(eq(crmTask.id, topic.taskId!)))[0]?.status
+  expect(await taskStatus()).toBe("done")
+  expect(await processOutbound(appDb, metaRejecting(131009), outJob(sent.id))).toBe("done")
+  expect((await messageState(sent.id))?.status).toBe("failed")
+  expect(await taskStatus()).toBe("open")
 })

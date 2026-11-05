@@ -61,6 +61,15 @@ export function unansweredSinceSql(conv: SQL): SQL {
       and m_wait.created_at > coalesce(${lastReplySql(conv)}, '-infinity'::timestamptz)) end)`
 }
 
+/**
+ * Desde cuándo nadie recibió lo último que se le quiso decir: la hora del
+ * saliente que no salió, si es el último del hilo (`lastIsFailedOutSql`); null si no.
+ */
+export function failedSinceSql(conv: SQL): SQL {
+  return sql`(case when ${lastIsFailedOutSql(conv)} then (select max(m_last.created_at) from message m_last
+    where m_last.organization_id = ${conv}.organization_id and m_last.conversation_id = ${conv}.id) end)`
+}
+
 /** Tiene una derivación sin resolver. */
 export function handoffOpenExistsSql(conv: SQL): SQL {
   return sql`exists (select 1 from agent_handoff h_open

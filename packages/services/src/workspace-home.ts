@@ -97,6 +97,8 @@ export interface WaitingPerson {
   urgent: boolean
   /** Instagram o Messenger ya no dejan escribirle. */
   windowClosed: boolean
+  /** Lo último que se le quiso decir no salió: nadie se lo dijo todavía. */
+  undelivered: boolean
 }
 
 export interface WaitingTask {

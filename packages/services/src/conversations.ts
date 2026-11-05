@@ -720,6 +720,8 @@ export async function applyStatus(
   tx: Db,
   orgId: string,
   statuses: NormalizedStatus[],
+  /** Lo que se hace con un mensaje que no salió (dejar pendiente el tema que resolvió). */
+  onFailed?: (tx: Db, messageId: string) => Promise<unknown>,
 ): Promise<number> {
   let applied = 0
   for (const s of statuses) {
@@ -737,6 +739,7 @@ export async function applyStatus(
           .where(and(eq(message.organizationId, orgId), eq(message.externalId, s.externalMessageId)))
           .returning({ id: message.id, conversationId: message.conversationId })
     if (updated && s.notOnWhatsApp) await markNotOnWhatsApp(tx, orgId, updated.conversationId)
+    if (updated && status === "failed" && onFailed) await onFailed(tx, updated.id)
     if (updated) {
       applied += 1
       await notify(tx, {

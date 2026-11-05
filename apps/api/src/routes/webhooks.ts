@@ -19,6 +19,7 @@ import {
   markWebhookVerified,
   noteHistoryDeclined,
   noteOwnAppSignatureRejected,
+  reopenTopicOfFailedReplySafely,
 } from "@odentia/services"
 import { and, eq } from "drizzle-orm"
 import { Hono } from "hono"
@@ -85,7 +86,10 @@ export function createWebhooksRoute(deps: WebhookDeps) {
         .onConflictDoNothing()
         .returning({ id: inboundEvent.id })
       if (inserted.length === 0) continue
-      await withOrgContext(deps.db, orgId, (tx) => applyStatus(tx, orgId, [status]).then(() => {}))
+      // Un fallo que llega después (un número sin WhatsApp) deja pendiente el tema que esa respuesta resolvió.
+      await withOrgContext(deps.db, orgId, (tx) =>
+        applyStatus(tx, orgId, [status], (inner, messageId) => reopenTopicOfFailedReplySafely(inner, orgId, messageId)).then(() => {}),
+      )
     }
 
     if (parsed.templateStatuses?.length) {
