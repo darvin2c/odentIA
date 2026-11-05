@@ -26,12 +26,13 @@ import {
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { member } from "@odentia/db/schema/auth"
+import { clinicalOrder, consentDocument, consentEvent, medicalLeave } from "@odentia/db/schema/clinical-forms"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { canAttend } from "@odentia/auth/permissions"
 import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm"
 import { markArrivedOnAttend, notifyAppointmentChanged, setAppointmentStatus } from "./appointments.js"
 import { listEncounterDocuments, type PatientDocumentWithContext } from "./clinical.js"
-import { type ConsentNeed, getEncounterConsentNeeds } from "./clinical-forms.js"
+import { cancelDerivationTask, type ConsentNeed, getEncounterConsentNeeds } from "./clinical-forms.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import {
@@ -2163,6 +2164,148 @@ export async function voidEncounterProcedure(
  * mismo motivo sus procedimientos, diagnósticos, hallazgos, recetas y
  * controles; la cita conserva su estado y puede volver a atenderse.
  */
+/**
+ * Los papeles de una atención anulada que aún valen (ADR 0002: se anula «lo
+ * ligado»): el descanso médico emitido, las órdenes pedidas o en proceso (y la
+ * tarea de una derivación) y los consentimientos sin firmar. Un consentimiento
+ * firmado, o firmado por la persona en su enlace, no se toca: es un acto suyo
+ * y anular la atención no lo retira; una orden con resultado tampoco, porque
+ * el resultado ya existe. Así el código del papel (`/comprobar`) dice
+ * «Anulado» en vez de «Vigente».
+ */
+async function voidEncounterPapers(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+  reason: string,
+  at: Date,
+): Promise<void> {
+  const leaves = await tx
+    .update(medicalLeave)
+    .set({ status: "anulado", cancelledAt: at, cancelledBy: actorUserId, cancelReason: reason, updatedAt: at })
+    .where(
+      and(
+        eq(medicalLeave.organizationId, orgId),
+        eq(medicalLeave.patientId, patientId),
+        eq(medicalLeave.encounterId, encounterId),
+        eq(medicalLeave.status, "emitido"),
+      ),
+    )
+    .returning({ id: medicalLeave.id })
+  for (const leave of leaves)
+    await audit(tx, orgId, actorUserId, "medical_leave.cancelled", "medical_leave", leave.id, { encounterId, reason })
+  const orders = await tx
+    .update(clinicalOrder)
+    .set({ status: "cancelado", cancelledAt: at, cancelledBy: actorUserId, cancelReason: reason, updatedAt: at })
+    .where(
+      and(
+        eq(clinicalOrder.organizationId, orgId),
+        eq(clinicalOrder.patientId, patientId),
+        eq(clinicalOrder.encounterId, encounterId),
+        inArray(clinicalOrder.status, ["solicitado", "en_proceso"]),
+      ),
+    )
+    .returning({ id: clinicalOrder.id })
+  for (const order of orders) {
+    await audit(tx, orgId, actorUserId, "order.cancel", "clinical_order", order.id, { encounterId, reason })
+    await cancelDerivationTask(tx, orgId, actorUserId, order.id)
+  }
+  const consents = await tx
+    .update(consentDocument)
+    .set({ status: "anulado", cancelledAt: at, cancelledBy: actorUserId, cancelReason: reason, updatedAt: at })
+    .where(
+      and(
+        eq(consentDocument.organizationId, orgId),
+        eq(consentDocument.patientId, patientId),
+        eq(consentDocument.encounterId, encounterId),
+        eq(consentDocument.status, "pendiente"),
+        // Lo que la persona ya firmó por su enlace espera al profesional, no se anula: es un acto suyo.
+        isNull(consentDocument.personSignedAt),
+      ),
+    )
+    .returning({ id: consentDocument.id })
+  for (const consent of consents) {
+    await tx.insert(consentEvent).values({
+      organizationId: orgId,
+      documentId: consent.id,
+      fromStatus: "pendiente",
+      toStatus: "anulado",
+      actorUserId,
+      reason,
+    })
+    await audit(tx, orgId, actorUserId, "consent.cancel", "consent_document", consent.id, { encounterId, reason })
+  }
+}
+
+/**
+ * Lo que se dio por realizado en esta atención sin una sesión suya (la cita
+ * trajo el tratamiento y se completó aquí) deja de estarlo al anularla: vuelve
+ * a «en curso» si le quedan sesiones válidas, o a «programado». Lo que tenía
+ * su sesión aquí ya lo devolvió anular el procedimiento.
+ */
+async function undoCompletionsOf(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+  reason: string,
+  at: Date,
+): Promise<void> {
+  const completed = await tx
+    .select({ id: treatmentPlanItem.id })
+    .from(treatmentPlanItem)
+    .innerJoin(
+      encounterPlanItem,
+      and(
+        eq(encounterPlanItem.organizationId, treatmentPlanItem.organizationId),
+        eq(encounterPlanItem.planItemId, treatmentPlanItem.id),
+      ),
+    )
+    .where(
+      and(
+        eq(treatmentPlanItem.organizationId, orgId),
+        eq(treatmentPlanItem.patientId, patientId),
+        eq(encounterPlanItem.encounterId, encounterId),
+        eq(treatmentPlanItem.status, "realizado"),
+      ),
+    )
+  if (completed.length === 0) return
+  const hooks = await productHooks(tx, orgId)
+  for (const item of completed) {
+    const [remaining] = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(encounterProcedure)
+      .where(
+        and(
+          eq(encounterProcedure.organizationId, orgId),
+          eq(encounterProcedure.planItemId, item.id),
+          isNull(encounterProcedure.voidedAt),
+        ),
+      )
+    const sessions = remaining?.n ?? 0
+    await tx
+      .update(treatmentPlanItem)
+      .set({
+        status: sessions > 0 ? "en_curso" : "programado",
+        completedAt: null,
+        ...(sessions > 0 ? {} : { startedAt: null }),
+        updatedAt: at,
+      })
+      .where(and(eq(treatmentPlanItem.id, item.id), eq(treatmentPlanItem.organizationId, orgId)))
+    await audit(tx, orgId, actorUserId, "plan.item_status_changed", "treatment_plan_item", item.id, {
+      patientId,
+      from: "realizado",
+      to: sessions > 0 ? "en_curso" : "programado",
+      reason,
+      encounterId,
+    })
+    await hooks.treatmentUndone(tx, { orgId, actorUserId, patientId, encounterId, planItemId: item.id, reason, at })
+  }
+}
+
 export async function voidEncounter(
   tx: Db,
   orgId: string,
@@ -2263,6 +2406,8 @@ export async function voidEncounter(
         inArray(clinicalFollowUp.status, ["pendiente", "programado"]),
       ),
     )
+  await voidEncounterPapers(tx, orgId, actorUserId, patientId, encounterId, cascade, at)
+  await undoCompletionsOf(tx, orgId, actorUserId, patientId, encounterId, cascade, at)
   const [row] = await tx
     .update(encounter)
     .set({

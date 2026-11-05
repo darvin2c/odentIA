@@ -404,3 +404,11 @@ it("lo que deja cada tratamiento de la biblioteca encaja con su ámbito y es un 
     expect(validateLeavesFinding(leaves, { scope, strictVariants: true }), key).toEqual([])
   }
 })
+
+it("«Firmar odontograma» a pedido no congela lo de una atención aún abierta", async () => {
+  const f = await attending("org_a")
+  const draft = await f.open()
+  await f.run((tx) => addOdontogramEntries(tx, ...f.args, { ...caries16, details: { variant: "dentin" }, encounterId: draft }))
+  const signed = await f.run((tx) => createOdontogramAssessment(tx, ...f.args, { purpose: "personal" }))
+  expect(signed.entries).toEqual([])
+})

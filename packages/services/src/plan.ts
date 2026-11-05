@@ -1047,6 +1047,8 @@ export async function setPlanItemStatus(
         and(
           eq(encounterProcedure.organizationId, orgId),
           eq(encounterProcedure.planItemId, itemId),
+          // Una sesión anulada no cuenta: si no, se cerraría un tratamiento que no se hizo.
+          isNull(encounterProcedure.voidedAt),
         ),
       )
       .limit(1)
