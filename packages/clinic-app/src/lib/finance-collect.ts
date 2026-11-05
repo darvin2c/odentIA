@@ -538,6 +538,8 @@ export function refundApi(
     paymentMethodId?: string
     reason: string
     currency?: string
+    requestId: string
+    expectedCreditCents?: number
   },
 ): Promise<{ data: RefundResult }> {
   return apiFetch<{ data: RefundResult }>(`/api/patients/${patientId}/refunds`, {
