@@ -444,6 +444,60 @@ it("el primer 190 en una conexión del botón la marca y avisa una vez, sin espe
   expect((await connectionView(connectionId))?.signup?.tokenDead).toBe(false)
 })
 
+it("con la app propia, un 190 marca la conexión, avisa a todo el equipo y abre el caso; un envío aceptado lo retira", async () => {
+  await ownerDb.insert(user).values([
+    { id: "ob-admin-propia", name: "Ana Dueña", email: "ana-propia@outbound.test", emailVerified: true },
+    { id: "ob-recep-propia", name: "Rita Recepción", email: "rita-propia@outbound.test", emailVerified: true },
+  ])
+  await ownerDb.insert(member).values([
+    { id: "m-ob-admin-propia", userId: "ob-admin-propia", organizationId: "org_a", role: "owner", createdAt: new Date() },
+    { id: "m-ob-recep-propia", userId: "ob-recep-propia", organizationId: "org_a", role: "reception", createdAt: new Date() },
+  ])
+  const first = await queuedWhatsApp("wa:51911100051")
+  const { connectionId, conversationId } = await whereIs(first)
+  await ownerDb
+    .update(channelConnection)
+    .set({ ownApp: { registeredAt: "2026-09-01T12:00:00.000Z", subscribedAt: "2026-09-01T12:00:00.000Z", problems: {}, tokenExpiresAt: null, keysCheckedAt: "2026-09-01T12:00:00.000Z" } })
+    .where(eq(channelConnection.id, connectionId))
+  const notices = () =>
+    ownerDb.select({ userId: workspaceNotification.userId, title: workspaceNotification.title, resolvedAt: workspaceNotification.resolvedAt })
+      .from(workspaceNotification)
+      .where(eq(workspaceNotification.subject, `clave-propia:${connectionId}`))
+  const cases = () => ownerDb.select({ id: supportCase.id }).from(supportCase).where(eq(supportCase.dedupeKey, "clave-propia-rechazada"))
+
+  expect(await processOutbound(appDb, metaRejecting(190), outJob(first))).toBe("done")
+  expect((await messageState(first))?.status).toBe("failed")
+  expect((await connectionView(connectionId))?.ownApp?.tokenRejectedAt).toBeTruthy()
+  // Quien administra sabe qué hacer; recepción, que lo que escribe no llega.
+  // (La dueña de otra prueba de este archivo también lo recibe: es de la misma clínica.)
+  const ours = (await notices()).filter((row) => row.userId.endsWith("-propia"))
+  expect(ours.map((row) => [row.userId, row.title]).sort()).toEqual([
+    ["ob-admin-propia", "Meta ya no acepta la clave de WhatsApp"],
+    ["ob-recep-propia", "WhatsApp no está enviando mensajes"],
+  ])
+  expect(await cases()).toHaveLength(1)
+
+  // Otro rechazo no repite el caso.
+  const second = await withOrgContext(appDb, "org_a", (tx) =>
+    sendOutbound(tx, "org_a", { conversationId, senderKind: "agent", content: { type: "text", text: "Otro" } }),
+  )
+  expect(await processOutbound(appDb, metaRejecting(190), outJob(second.id))).toBe("done")
+  expect(await cases()).toHaveLength(1)
+
+  // Meta vuelve a aceptar un envío: la marca se quita y los avisos se retiran.
+  const third = await withOrgContext(appDb, "org_a", (tx) =>
+    sendOutbound(tx, "org_a", { conversationId, senderKind: "agent", content: { type: "text", text: "Ya salió" } }),
+  )
+  const accepting = {
+    ...deps,
+    senderMode: "live" as const,
+    fetch: (async () => new Response(JSON.stringify({ messages: [{ id: `wamid.${Math.random()}` }] }), { status: 200 })) as typeof fetch,
+  }
+  expect(await processOutbound(appDb, accepting, outJob(third.id))).toBe("done")
+  expect((await connectionView(connectionId))?.ownApp?.tokenRejectedAt).toBeNull()
+  expect((await notices()).every((row) => row.resolvedAt !== null)).toBe(true)
+})
+
 it("un 190 sin el botón (a mano, una demo) o un rechazo de pago no marcan la conexión", async () => {
   const byHand = await queuedWhatsApp("wa:51911100013")
   const manual = (await whereIs(byHand)).connectionId
