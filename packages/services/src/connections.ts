@@ -17,7 +17,7 @@ import {
   channelConnection,
   conversation,
 } from "@odentia/db/schema/crm"
-import { and, asc, eq, max } from "drizzle-orm"
+import { and, asc, eq, max, sql } from "drizzle-orm"
 import {
   declareConfigTemplates,
   listChannelTemplates,
@@ -140,6 +140,8 @@ export interface ConnectionOwnAppView {
   keysCheckedAt: string | null
   /** Último aviso que llegó firmado con otra clave secreta; nulo: ninguno. */
   signatureRejectedAt: string | null
+  /** Cuándo Meta rechazó un envío porque ya no acepta la clave; nulo: no pasó desde la última clave. */
+  tokenRejectedAt: string | null
 }
 
 export interface ConnectionPublic {
@@ -202,6 +204,7 @@ function ownAppView(ownApp: ConnectionOwnApp | null): ConnectionOwnAppView | nul
     tokenExpiresAt: ownApp.tokenExpiresAt ?? null,
     keysCheckedAt: ownApp.keysCheckedAt ?? null,
     signatureRejectedAt: ownApp.signatureRejectedAt ?? null,
+    tokenRejectedAt: ownApp.tokenRejectedAt ?? null,
   }
 }
 
@@ -900,7 +903,12 @@ export async function setConnectionStatus(
   }
   const [updated] = await tx
     .update(channelConnection)
-    .set({ status, updatedAt: new Date() })
+    .set({
+      status,
+      updatedAt: new Date(),
+      // Reactivar empieza de cero: si Meta sigue sin aceptar la clave, el próximo envío lo vuelve a avisar.
+      ...(status === "active" ? { ownApp: sql`case when ${channelConnection.ownApp} is null then null else ${channelConnection.ownApp} - 'tokenRejectedAt' end` } : {}),
+    })
     .where(and(eq(channelConnection.id, id), eq(channelConnection.organizationId, orgId)))
     .returning()
   if (!updated) throw notFound("Conexión")
@@ -1003,6 +1011,8 @@ async function recheckOwnApp(
         ...known,
         tokenExpiresAt: keys.checked ? (keys.tokenExpiresAt?.toISOString() ?? null) : known.tokenExpiresAt,
         keysCheckedAt: keys.checked ? new Date().toISOString() : (known.keysCheckedAt ?? null),
+        // Meta confirmó la clave: la que rechazó ya no es esta.
+        tokenRejectedAt: keys.checked ? null : (known.tokenRejectedAt ?? null),
       }
     : freshOwnApp(keys)
   const [current] = await tx

@@ -4,10 +4,13 @@ import { type Db, type OutboundMessageJob, type QueueMessage, sendOutboundMessag
 import { channelConnection, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import {
+  clearOwnAppTokenRejected,
   decryptConfig,
   isSaasSendBlocked,
+  noteOwnAppTokenRejected,
   noteSignupTokenProblem,
   reopenTopicOfFailedReplySafely,
+  reportOwnAppTokenRejected,
   reportSignupTokenFailure,
   resolvePersonalLinkRefs,
   SIGNUP_TOKEN_DEAD,
@@ -48,6 +51,16 @@ async function noteRejectedSignupToken(db: Db, deps: SendDeps, orgId: string, us
     detail: "WhatsApp rechazó un envío porque ya no acepta la clave",
     expiresAt: used.expiresAt,
   })
+}
+
+/**
+ * Lo mismo con la app propia de la clínica: la conexión dice que Meta ya no
+ * acepta su clave y avisa a todo el equipo («avisar siempre»), y Soporte recibe
+ * el caso. En su propia transacción, como con el botón.
+ */
+async function noteRejectedOwnAppToken(db: Db, deps: SendDeps, orgId: string, used: { connectionId: string; token: string }): Promise<void> {
+  const marked = await withOrgContext(db, orgId, (tx) => noteOwnAppTokenRejected(tx, orgId, used.connectionId, deps.secretsKey, used.token))
+  if (marked) await reportOwnAppTokenRejected(deps.ownerDb, { orgId, connectionId: used.connectionId })
 }
 
 async function notify(tx: Db, payload: Record<string, unknown>): Promise<void> {
@@ -171,6 +184,7 @@ export async function processOutbound(
   let conversationId: string | null = null
   let waiting = false
   let signupToken = null as SignupTokenInUse | null
+  let ownAppToken = null as { connectionId: string; token: string } | null
   try {
     await withOrgContext(db, orgId, async (tx) => {
       const [row] = await tx
@@ -240,6 +254,10 @@ export async function processOutbound(
         if (row.connection.signup && row.connection.signup.tokenProblem !== SIGNUP_TOKEN_DEAD && typeof token === "string") {
           signupToken = { connectionId: row.connection.id, token, expiresAt: row.connection.signup.tokenExpiresAt ?? null }
         }
+        // Con la app propia, la clave la pegó la clínica: si Meta la rechaza, también se avisa.
+        if (row.connection.ownApp && !row.connection.signup && typeof token === "string") {
+          ownAppToken = { connectionId: row.connection.id, token }
+        }
         providerAttempted = true
         externalId = (await adapter.sendMessage(config, outbound, { fetch: deps.fetch, webhookSecret: row.connection.webhookSecret })).externalId
       }
@@ -251,6 +269,14 @@ export async function processOutbound(
           sentAt: deps.senderMode === "live" ? sql`coalesce(${message.sentAt}, clock_timestamp())` : null,
         })
         .where(eq(message.id, messageId))
+      // Meta volvió a aceptar un envío con la app propia: la clave sirve y los avisos se retiran.
+      // En su punto de guardado: si falla, el mensaje igual queda como enviado.
+      if (ownAppToken && row.connection.ownApp?.tokenRejectedAt) {
+        const connectionId = row.connection.id
+        await tx.transaction((inner) => clearOwnAppTokenRejected(inner, orgId, connectionId)).catch((failure: unknown) => {
+          console.error(`worker: no se pudo quitar la marca de la clave (${connectionId})`, failure)
+        })
+      }
       await notify(tx, {
         orgId,
         kind: "message.updated",
@@ -302,6 +328,11 @@ export async function processOutbound(
       if (signupToken && error instanceof ProviderRejectedError && error.code === WHATSAPP_TOKEN_REJECTED_CODE) {
         await noteRejectedSignupToken(db, deps, orgId, signupToken).catch((failure: unknown) => {
           console.error(`worker: no se pudo anotar la clave rechazada (${signupToken?.connectionId})`, failure)
+        })
+      }
+      if (ownAppToken && error instanceof ProviderRejectedError && error.code === WHATSAPP_TOKEN_REJECTED_CODE) {
+        await noteRejectedOwnAppToken(db, deps, orgId, ownAppToken).catch((failure: unknown) => {
+          console.error(`worker: no se pudo anotar la clave rechazada de la app propia (${ownAppToken?.connectionId})`, failure)
         })
       }
       return "done"

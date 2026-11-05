@@ -113,6 +113,8 @@ export interface WorkspaceNoticeInput {
  *   los próximos 7 días (se pegó otra) o la conexión ya no está activa.
  * - `meta-desconecto:<conexión>`: Meta ya no tiene cortada la conexión (se
  *   volvió a conectar o Meta avisó que se reconectó) o la conexión ya no está activa.
+ * - `clave-propia:<conexión>`: WhatsApp con la app propia volvió a enviar o se
+ *   pegó otra clave, o la conexión ya no está activa.
  */
 export const NOTICE_SUBJECTS = [
   "producto",
@@ -123,6 +125,7 @@ export const NOTICE_SUBJECTS = [
   "firma-meta",
   "vence-clave-meta",
   "meta-desconecto",
+  "clave-propia",
 ] as const
 
 /**
@@ -234,6 +237,9 @@ export async function settleWorkspaceNotifications(tx: Db, orgId: string, scope:
         or (n.subject like 'meta-desconecto:%' and not exists (select 1 from channel_connection c
           where c.organization_id = n.organization_id and c.id::text = ${subjectId("meta-desconecto")}
             and c.status = 'active' and jsonb_typeof(c.signup->'metaRemoved') = 'object'))
+        or (n.subject like 'clave-propia:%' and not exists (select 1 from channel_connection c
+          where c.organization_id = n.organization_id and c.id::text = ${subjectId("clave-propia")}
+            and c.status = 'active' and c.own_app->>'tokenRejectedAt' is not null))
       )`)
 }
 
