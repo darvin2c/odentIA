@@ -221,6 +221,48 @@ export const DOSAGE_FORMS = [
   "gotas",
 ] as const
 
+/** En qué se cuenta la cantidad total de cada forma: lo que se entrega en la farmacia. */
+const DISPENSED_UNIT: Record<string, [one: string, many: string]> = {
+  tableta: ["tableta", "tabletas"],
+  "tableta recubierta": ["tableta", "tabletas"],
+  cápsula: ["cápsula", "cápsulas"],
+  "suspensión oral": ["frasco", "frascos"],
+  jarabe: ["frasco", "frascos"],
+  "solución oral": ["frasco", "frascos"],
+  "solución inyectable": ["ampolla", "ampollas"],
+  "cartucho dental": ["cartucho", "cartuchos"],
+  gel: ["tubo", "tubos"],
+  crema: ["tubo", "tubos"],
+  ungüento: ["tubo", "tubos"],
+  pasta: ["tubo", "tubos"],
+  colutorio: ["frasco", "frascos"],
+  spray: ["frasco", "frascos"],
+  gotas: ["frasco", "frascos"],
+}
+
+/** «tabletas», «frasco»: en qué se cuenta la cantidad de esa forma; nulo si no se sabe. */
+export function dispensedUnit(dosageForm: string, count: number | null): string | null {
+  const unit = DISPENSED_UNIT[dosageForm.trim().toLowerCase()]
+  if (!unit) return null
+  return count === 1 ? unit[0] : unit[1]
+}
+
+/**
+ * Lo que da una dosis escrita por peso («15 mg/kg») con el peso del paciente,
+ * en mg por toma. Solo informa: la dosis la escribe quien receta. Solo si el
+ * campo dice exactamente «N mg/kg» (por toma): «mg/kg/día», un rango o algo
+ * más escrito no se calculan, porque leerlos mal daría otra dosis. Nulo si
+ * no hay peso.
+ */
+export function weightDoseMg(dose: string, weightKg: number | null): number | null {
+  if (weightKg === null || !(weightKg > 0)) return null
+  const match = /^\s*(\d+(?:,\d+)?|\d+\.\d{1,2})\s*mg\s*\/\s*kg\s*(?:por\s+(?:toma|dosis))?\s*$/i.exec(dose)
+  if (!match) return null
+  const perKg = Number((match[1] ?? "").replace(",", "."))
+  if (!Number.isFinite(perKg) || perKg <= 0) return null
+  return Math.round(perKg * weightKg * 10) / 10
+}
+
 /** Vías de administración (vocabulario controlado de la receta). */
 export const ADMINISTRATION_ROUTES = [
   "oral",
