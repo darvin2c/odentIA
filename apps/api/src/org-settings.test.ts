@@ -205,6 +205,15 @@ it("datos de la clínica: vaciar un dato lo guarda vacío, lo que no se envía s
     ticketFooter: "Recibo interno. No es un documento fiscal.",
   })
 
+  // Dos personas con la pantalla abierta: cada una envía solo lo que cambió y no pisa lo de la otra.
+  expect((await request("owner", "PUT", "/org-profile", { fiscalAddress: "Av. Norte 1" })).status).toBe(200)
+  const other = await request("owner", "PUT", "/org-profile", { tradeName: "Ajustes Norte" })
+  expect(await data<Profile>(other)).toMatchObject({
+    legalName: "Clínica Ajustes S.A.C.",
+    tradeName: "Ajustes Norte",
+    fiscalAddress: "Av. Norte 1",
+  })
+
   // Recepción lee el perfil (lo usa la agenda), pero no lo cambia.
   expect((await request("reception", "GET", "/org-profile")).status).toBe(200)
   expect(

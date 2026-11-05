@@ -440,7 +440,7 @@ test("paciente: agregación del recorrido, historia y aislamiento", async ({ cre
   const planOver = surface(page, { name: /^Plan de / })
   await expect(planOver.getByRole("heading", { name: "Presupuesto", exact: true })).toBeVisible()
   await expect(page).toHaveURL(/tab=historia/)
-  await expect(page.getByText("Anamnesis no encontrado")).toHaveCount(0)
+  await expect(page.getByText(/Anamnesis no encontrad[ao]/)).toHaveCount(0)
   await page.keyboard.press("Escape")
   await expect(planOver).toHaveCount(0)
 

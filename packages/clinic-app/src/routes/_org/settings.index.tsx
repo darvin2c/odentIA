@@ -212,15 +212,21 @@ function countryChoices(country: string, language: string): NamedOption[] {
   return country ? [{ value: country, label: countryName(country, language) }, ...byName] : byName
 }
 
+const TAX_KEYS = ["taxLegalForm", "servicesTax", "servicesOther", "productsTax", "productsOther"] as const
+
 /**
  * Lo vacío viaja como `null` para que se guarde vacío. El correo de
- * facturación y la impresión no viajan: quedan como estaban. La otra moneda y su
- * cambio viajan solo si se tocaron aquí: guardar lo demás no pisa el cambio que
- * escribió quien cobra mientras esta pantalla estaba abierta.
+ * facturación y la impresión no viajan: quedan como estaban. Con la clínica ya
+ * creada viaja solo lo que se cambió aquí: guardar no pisa lo que otra persona
+ * guardó en otro dato mientras esta pantalla estaba abierta (el cambio que
+ * escribió quien cobra, la razón social…). Los impuestos viajan también si
+ * cambió el país, porque el servidor los vuelve a leer con él.
  */
-function toInput(values: ProfileValues, baseline: ProfileValues): OrgProfileInput {
+function toInput(values: ProfileValues, baseline: ProfileValues, created: boolean): OrgProfileInput {
+  const touched = (key: keyof ProfileValues) => !created || values[key] !== baseline[key]
   const currencyTouched =
     values.secondCurrency !== baseline.secondCurrency || values.exchangeRate !== baseline.exchangeRate
+  const taxesTouched = touched("countryCode") || TAX_KEYS.some((key) => touched(key))
   return {
     ...(currencyTouched
       ? values.secondCurrency
@@ -230,17 +236,17 @@ function toInput(values: ProfileValues, baseline: ProfileValues): OrgProfileInpu
           }
         : { secondCurrency: null }
       : {}),
-    legalName: values.legalName.trim(),
-    tradeName: values.tradeName.trim(),
-    fiscalDocType: values.fiscalDocType.trim() || null,
-    fiscalDocNumber: values.fiscalDocNumber.trim() || null,
-    fiscalAddress: values.fiscalAddress.trim() || null,
-    emergencyPhone: values.emergencyPhone?.trim() || null,
-    countryCode: values.countryCode,
-    currency: values.currency,
-    timezone: values.timezone,
-    locale: values.locale,
-    taxes: taxesInputFrom(values.countryCode, values),
+    ...(touched("legalName") ? { legalName: values.legalName.trim() } : {}),
+    ...(touched("tradeName") ? { tradeName: values.tradeName.trim() } : {}),
+    ...(touched("fiscalDocType") ? { fiscalDocType: values.fiscalDocType.trim() || null } : {}),
+    ...(touched("fiscalDocNumber") ? { fiscalDocNumber: values.fiscalDocNumber.trim() || null } : {}),
+    ...(touched("fiscalAddress") ? { fiscalAddress: values.fiscalAddress.trim() || null } : {}),
+    ...(touched("emergencyPhone") ? { emergencyPhone: values.emergencyPhone?.trim() || null } : {}),
+    ...(touched("countryCode") ? { countryCode: values.countryCode } : {}),
+    ...(touched("currency") ? { currency: values.currency } : {}),
+    ...(touched("timezone") ? { timezone: values.timezone } : {}),
+    ...(touched("locale") ? { locale: values.locale } : {}),
+    ...(taxesTouched ? { taxes: taxesInputFrom(values.countryCode, values) } : {}),
   }
 }
 
@@ -263,7 +269,7 @@ function OrgProfilePage() {
 
   const saveMutation = useMutation({
     mutationFn: ({ values, baseline }: { values: ProfileValues; baseline: ProfileValues }) =>
-      saveOrgProfile(toInput(values, baseline)),
+      saveOrgProfile(toInput(values, baseline, !!profile)),
     onSuccess: async () => {
       toast.success("Datos guardados")
       await Promise.all([

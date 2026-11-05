@@ -342,13 +342,13 @@ export function createAgendaRoute(deps: CrmDeps) {
   })
 
   app.delete("/blocks/:id", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para configurar bloqueos"), 403)
     }
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
-        await deleteScheduleBlock(tx, orgId, c.req.param("id"))
+        await deleteScheduleBlock(tx, orgId, c.req.param("id"), userId)
         return { ok: true }
       }),
     )
@@ -371,7 +371,7 @@ export function createAppointmentsRoute(deps: CrmDeps) {
         if (error instanceof ServiceError && error.status === 404) return null
         throw error
       })
-      const refusal = patientId ? await patientLockRefusal(c, deps.db, patientId, "Cita no encontrado") : null
+      const refusal = patientId ? await patientLockRefusal(c, deps.db, patientId, "Cita no encontrada") : null
       if (refusal) return refusal
     }
     await next()

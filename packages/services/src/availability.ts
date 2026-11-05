@@ -15,7 +15,7 @@ import {
 } from "@odentia/db/schema/availability"
 import { member, user } from "@odentia/db/schema/auth"
 import { serviceCatalog } from "@odentia/db/schema/clinical"
-import { branch, orgProfile } from "@odentia/db/schema/org"
+import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, eq, gt, gte, inArray, isNull, lt, ne, or } from "drizzle-orm"
 import { branchNotFound, invalidField, roomNotFound, notFound, ServiceError, validation } from "./errors.js"
 import { NEUTRAL_TIMEZONE, roomWord } from "./locale.js"
@@ -411,6 +411,21 @@ export async function createScheduleBlock(
     })
     .returning({ id: scheduleBlock.id })
   if (!created) throw new Error("No se pudo crear el bloqueo")
+  // Queda en Actividad del equipo: quién cerró la agenda, de quién y cuándo.
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId,
+    action: kind === "ausencia" ? "schedule_block.absence_created" : "schedule_block.created",
+    entity: "schedule_block",
+    entityId: created.id,
+    metadata: {
+      branchId: input.branchId,
+      professionalUserId: input.professionalUserId ?? null,
+      roomId: input.roomId ?? null,
+      startsAt: startsAt.toISOString(),
+      endsAt: endsAt.toISOString(),
+    },
+  })
   const [item] = await listScheduleBlocks(tx, orgId, {
     branchId: input.branchId,
     from: new Date(startsAt.getTime() - 1000).toISOString(),
@@ -424,12 +439,26 @@ export async function deleteScheduleBlock(
   tx: Db,
   orgId: string,
   id: string,
+  /** Quién lo quita: queda en Actividad del equipo. */
+  actorUserId: string | null = null,
 ): Promise<void> {
   const [deleted] = await tx
     .delete(scheduleBlock)
     .where(and(eq(scheduleBlock.organizationId, orgId), eq(scheduleBlock.id, id)))
-    .returning({ id: scheduleBlock.id })
+    .returning({ id: scheduleBlock.id, kind: scheduleBlock.kind, startsAt: scheduleBlock.startsAt, endsAt: scheduleBlock.endsAt, professionalUserId: scheduleBlock.professionalUserId })
   if (!deleted) throw notFound("Bloqueo")
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId,
+    action: deleted.kind === "ausencia" ? "schedule_block.absence_removed" : "schedule_block.removed",
+    entity: "schedule_block",
+    entityId: deleted.id,
+    metadata: {
+      professionalUserId: deleted.professionalUserId,
+      startsAt: deleted.startsAt.toISOString(),
+      endsAt: deleted.endsAt.toISOString(),
+    },
+  })
 }
 
 /* Validación de disponibilidad (reserva y movimiento) */

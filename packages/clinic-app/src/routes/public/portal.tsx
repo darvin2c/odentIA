@@ -396,7 +396,10 @@ function PortalLanding({ initialOrg, closed, onSession }: { initialOrg: string; 
             {error}
           </p>
         ) : null}
-        <p className="text-sm text-muted-foreground">¿Aún no tienes acceso? Pídelo en recepción.</p>
+        {/* Con el portal apagado no hay acceso que pedir: no se promete. */}
+        {policy.data && !policy.data.enabled ? null : (
+          <p className="text-sm text-muted-foreground">¿Aún no tienes acceso? Pídelo en recepción.</p>
+        )}
       </form>
     </PageShell>
   )
