@@ -4,7 +4,7 @@ import { agentHandoff } from "@odentia/db/schema/agent"
 import { member } from "@odentia/db/schema/auth"
 import { message } from "@odentia/db/schema/crm"
 import { channelConnection, contact, conversation } from "@odentia/db/schema/crm"
-import { and, eq, sql } from "drizzle-orm"
+import { and, desc, eq, sql } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { asksNothingNew, claimHandoff, createHandoff, recordTopicAskedAgain } from "./agent-operations.js"
 import { type MessageItem, type OutboundContent, sendOutbound, startContactConversation } from "./conversations.js"
@@ -358,6 +358,52 @@ export async function reopenTopic(
   await tx.execute(
     sql`select pg_notify('org_events', ${JSON.stringify({ orgId, kind: "conversation.updated", conversationId: input.conversationId, at: now.toISOString() })})`,
   )
+}
+
+/**
+ * La respuesta del equipo que resolvió un tema no salió (el proveedor la
+ * rechazó): el tema vuelve a quedar pendiente, porque la persona no recibió
+ * nada. Lo llama el trabajador al marcar el mensaje como no enviado. «Enviar»
+ * resolvió el tema al encolar (ADR 0122), pero encolado no es aceptado
+ * (`packages/AGENTS.md`). Devuelve el tema que reabrió, o null.
+ */
+export async function reopenTopicOfFailedReply(tx: Db, orgId: string, messageId: string): Promise<string | null> {
+  const [sent] = await tx
+    .select({
+      conversationId: message.conversationId,
+      senderKind: message.senderKind,
+      senderUserId: message.senderUserId,
+      replyToMessageId: message.replyToMessageId,
+      status: message.status,
+    })
+    .from(message)
+    .where(and(eq(message.id, messageId), eq(message.organizationId, orgId)))
+    .limit(1)
+  if (!sent || sent.senderKind !== "user" || !sent.replyToMessageId || sent.status !== "failed") return null
+  const [topic] = await tx
+    .select({ id: agentHandoff.id, taskId: agentHandoff.taskId, status: conversation.status, open: sql<boolean>`${handoffOpenSql(sql.raw('"agent_handoff"'))}` })
+    .from(agentHandoff)
+    .innerJoin(conversation, eq(conversation.id, agentHandoff.conversationId))
+    .where(
+      and(
+        eq(agentHandoff.organizationId, orgId),
+        eq(agentHandoff.conversationId, sent.conversationId),
+        sql`(${agentHandoff.sourceMessageId} = ${sent.replyToMessageId}::uuid or ${agentHandoff.askedMessageIds} ? ${sent.replyToMessageId})`,
+      ),
+    )
+    .orderBy(desc(agentHandoff.createdAt))
+    .limit(1)
+  if (!topic?.taskId || topic.open || topic.status === "closed") return null
+  await updateTask(tx, orgId, topic.taskId, { status: "open", ...(sent.senderUserId ? { actorUserId: sent.senderUserId } : {}) })
+  const now = new Date()
+  await tx
+    .update(agentHandoff)
+    .set({ keptPendingAt: now, urgentAt: await topicUrgentAt(tx, orgId, now) })
+    .where(and(eq(agentHandoff.id, topic.id), eq(agentHandoff.organizationId, orgId)))
+  await tx.execute(
+    sql`select pg_notify('org_events', ${JSON.stringify({ orgId, kind: "conversation.updated", conversationId: sent.conversationId, at: now.toISOString() })})`,
+  )
+  return topic.id
 }
 
 /**

@@ -7,6 +7,7 @@ import {
   decryptConfig,
   isSaasSendBlocked,
   noteSignupTokenProblem,
+  reopenTopicOfFailedReply,
   reportSignupTokenFailure,
   resolvePersonalLinkRefs,
   SIGNUP_TOKEN_DEAD,
@@ -290,6 +291,8 @@ export async function processOutbound(
           entityId: messageId,
           metadata: { op: rejected ? "send-failed" : "send-uncertain", error: detail.slice(0, 500) },
         })
+        // La respuesta del equipo que resolvió un tema no salió: el tema vuelve a quedar pendiente.
+        if (rejected) await reopenTopicOfFailedReply(tx, orgId, messageId)
         // La Bandeja lo dice enseguida: no salió o no se sabe si salió.
         if (conversationId) {
           await notify(tx, { orgId, kind: "message.updated", conversationId, messageId, at: new Date().toISOString() })
