@@ -7,7 +7,7 @@ import {
   decryptConfig,
   isSaasSendBlocked,
   noteSignupTokenProblem,
-  reopenTopicOfFailedReply,
+  reopenTopicOfFailedReplySafely,
   reportSignupTokenFailure,
   resolvePersonalLinkRefs,
   SIGNUP_TOKEN_DEAD,
@@ -191,6 +191,7 @@ export async function processOutbound(
           .update(message)
           .set({ status: "failed", error: "connection-disabled" })
           .where(eq(message.id, messageId))
+        await reopenTopicOfFailedReplySafely(tx, orgId, messageId)
         return
       }
       // En orden: uno anterior de la conversación que sigue en cola (frenado
@@ -292,7 +293,7 @@ export async function processOutbound(
           metadata: { op: rejected ? "send-failed" : "send-uncertain", error: detail.slice(0, 500) },
         })
         // La respuesta del equipo que resolvió un tema no salió: el tema vuelve a quedar pendiente.
-        if (rejected) await reopenTopicOfFailedReply(tx, orgId, messageId)
+        if (rejected) await reopenTopicOfFailedReplySafely(tx, orgId, messageId)
         // La Bandeja lo dice enseguida: no salió o no se sabe si salió.
         if (conversationId) {
           await notify(tx, { orgId, kind: "message.updated", conversationId, messageId, at: new Date().toISOString() })
@@ -322,6 +323,7 @@ export async function processOutbound(
           entityId: messageId,
           metadata: { op: "send-failed", error: detail.slice(0, 500) },
         })
+        await reopenTopicOfFailedReplySafely(tx, orgId, messageId)
       }).catch(() => {})
       return "done"
     }

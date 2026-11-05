@@ -1097,7 +1097,23 @@ export function ThreadView({
           {doneTopic && !closed && undelivered ? (
             <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-warning/40 bg-warning-soft px-3 py-2 text-sm">
               <AlertTriangle className="size-4 text-warning" aria-hidden />
-              <span className="min-w-0 flex-1">No le llegó: el tema sigue pendiente. Mira el motivo debajo de tu mensaje.</span>
+              {/* «Sigue pendiente» solo si el servidor lo volvió a abrir; si no, se ofrece dejarlo pendiente. */}
+              {topics.some((topic) => topic.id === doneTopic) ? (
+                <span className="min-w-0 flex-1">No le llegó: el tema sigue pendiente. Mira el motivo debajo de tu mensaje.</span>
+              ) : (
+                <>
+                  <span className="min-w-0 flex-1">No le llegó. Mira el motivo debajo de tu mensaje.</span>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="h-auto min-h-11 p-0 font-semibold sm:min-h-8"
+                    disabled={topicMutation.isPending}
+                    onClick={() => topicMutation.mutate({ topicId: doneTopic, path: "reopen" })}
+                  >
+                    Dejar pendiente
+                  </Button>
+                </>
+              )}
             </div>
           ) : doneTopic && !closed ? (
             <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-success/40 bg-success-soft px-3 py-2 text-sm">

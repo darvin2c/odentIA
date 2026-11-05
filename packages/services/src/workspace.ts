@@ -596,7 +596,7 @@ async function waitingConversations(tx: Db, orgId: string, assignedTo: string | 
   const rows = await tx.execute<{ conversationId: string; contactId: string; contactName: string | null; channel: string | null; undelivered: boolean; since: string; quote: string | null; total: number }>(sql`
     with waiting as (
       select c.id, c.contact_id, c.channel_connection_id,
-        coalesce(${unansweredSinceSql(conv)}, ${failedSinceSql(conv)}) as since,
+        coalesce(${failedSinceSql(conv)}, ${unansweredSinceSql(conv)}) as since,
         ${lastIsFailedOutSql(conv)} as undelivered
       from conversation c where ${pendingConversationsWhere(orgId, assignedTo)}
     ), pending as (
