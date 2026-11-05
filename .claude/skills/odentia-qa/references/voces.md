@@ -4,7 +4,7 @@ Las cuatro primeras son las de `.claude/skills/odentia-entrega/references/mesa.m
 
 Todas reciben `comun.md` de la ronda y miran capturas, no solo el árbol de accesibilidad: lo que cuenta es lo que ve la persona. Crean sus propios datos con el prefijo `QA` para no pisar los de las otras, con teléfonos de `+44 7700 900000` a `+44 7700 900999` y correos `@example.com`, nunca otros. Ninguna toca la configuración de canales.
 
-Si algo de la demo parece mal, cada voz lo anota igual; la confirmación decide si viene de cómo se armó la demo.
+Si algo de la demo parece mal, cada voz lo anota igual; la confirmación decide si viene de cómo se armó la demo. Lo mismo si la voz sabe o sospecha que es a propósito: lo anota igual, porque una decisión escrita no hace bueno lo que está mal.
 
 ## Novato
 
