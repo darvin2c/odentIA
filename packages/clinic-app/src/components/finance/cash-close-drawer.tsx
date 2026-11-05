@@ -370,6 +370,8 @@ export function CashCloseDrawer({
               autoComplete="off"
               placeholder={zero}
               value={values.splitField === name ? field.state.value : shown(computed)}
+              // Lo calculado se reemplaza al escribir, no se pega delante («0.00» + «0» daba «0.000»).
+              onFocus={(event) => event.currentTarget.select()}
               onChange={(event) => {
                 form.setFieldValue("splitField", name)
                 field.handleChange(event.target.value)
@@ -475,7 +477,8 @@ export function CashCloseDrawer({
                       value={field.state.value}
                       onChange={(event) => field.handleChange(event.target.value)}
                     />
-                    <p id={differenceId} role="status" className="text-sm">
+                    {/* Con su alto reservado: el aviso que aparece no empuja los campos mientras se escribe. */}
+                    <p id={differenceId} role="status" className="min-h-10 text-sm">
                       {difference === null ? null : difference === 0 ? (
                         <span className="text-success">Cuadra con lo que debe haber.</span>
                       ) : (

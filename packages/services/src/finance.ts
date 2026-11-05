@@ -1410,7 +1410,12 @@ export async function voidExpense(
   actorUserId: string,
   expenseId: string,
   input: { reason: string },
-  opts: { fromCommission?: boolean } = {},
+  /**
+   * `allowPostClose`: quien administra (`finance.admin`) puede anular un gasto
+   * cuya caja ya cerró; la caja de hoy recibe la «Compensación por anulación»,
+   * como al anular un cobro (`reverseCashIncome`). Lo cerrado no se toca.
+   */
+  opts: { fromCommission?: boolean; allowPostClose?: boolean } = {},
 ) {
   const [found] = await tx
     .select({ purchaseOrderId: expense.purchaseOrderId })
@@ -1451,6 +1456,13 @@ export async function voidExpense(
         "Ese gasto es el pago de una comisión: anula el pago desde Comisiones",
       )
   }
+  // La caja donde salió: bloqueada, un cierre simultáneo espera o ya se ve cerrado.
+  const shift = current.shiftId ? await lockShift(tx, orgId, current.shiftId) : null
+  if (shift && shift.status !== "abierta" && !(opts.allowPostClose || opts.fromCommission))
+    throw conflict(
+      "POST_CLOSE_NEEDS_ADMIN",
+      "La caja donde salió el gasto ya cerró y no se modifica: solo administración puede anularlo",
+    )
   const [row] = await tx
     .update(expense)
     .set({
@@ -1461,27 +1473,33 @@ export async function voidExpense(
     })
     .where(and(eq(expense.id, expenseId), eq(expense.organizationId, orgId)))
     .returning()
-  if (current.shiftId) {
-    // Bloqueada: un cierre simultáneo espera o ya se ve cerrado.
-    const shift = await lockShift(tx, orgId, current.shiftId)
-    if (shift.status === "abierta") {
-      const [movement] = await tx
-        .select()
-        .from(cashMovement)
-        .where(
-          and(
-            eq(cashMovement.organizationId, orgId),
-            eq(cashMovement.expenseId, expenseId),
-            isNull(cashMovement.voidedAt),
-          ),
-        )
-      if (movement) {
-        await tx
-          .update(cashMovement)
-          .set({ voidedAt: new Date(), voidedBy: actorUserId, voidReason: reason(input.reason) })
-          .where(eq(cashMovement.id, movement.id))
-        await audit(tx, orgId, actorUserId, "cash_movement", movement.id, "cash.movement_voided")
-      }
+  if (shift) {
+    const [movement] = await tx
+      .select()
+      .from(cashMovement)
+      .where(
+        and(
+          eq(cashMovement.organizationId, orgId),
+          eq(cashMovement.expenseId, expenseId),
+          isNull(cashMovement.voidedAt),
+        ),
+      )
+    if (movement && shift.status === "abierta") {
+      await tx
+        .update(cashMovement)
+        .set({ voidedAt: new Date(), voidedBy: actorUserId, voidReason: reason(input.reason) })
+        .where(eq(cashMovement.id, movement.id))
+      await audit(tx, orgId, actorUserId, "cash_movement", movement.id, "cash.movement_voided")
+    } else if (movement) {
+      // Ya cerrada: lo que salió vuelve a entrar en la caja de hoy (lo posterior se corrige como movimiento del día).
+      const today = await ensureOpenShift(tx, orgId, actorUserId, shift.branchId, movement.currency)
+      await recordCashChangeIncome(tx, orgId, actorUserId, today.id, {
+        amountCents: movement.amountCents,
+        currency: movement.currency,
+        methodName: movement.method,
+        methodTypeCode: movement.methodTypeCode,
+        concept: "Compensación por anulación",
+      })
     }
   }
   // El pago de una compra cerrada puede ser lo que se tiene a favor con el

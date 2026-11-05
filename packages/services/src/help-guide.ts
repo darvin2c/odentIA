@@ -537,7 +537,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo le llega el comprobante de su pago?",
-        a: "Al cobrar, sale solo por su correo y queda 30 días en su enlace, en «Tus papeles». Si no tiene correo, la caja te dice «Sin correo: entrégalo impreso o pídele su correo». Por WhatsApp se le envía solo si lo pide en el chat.",
+        a: "Al cobrar, sale solo por su correo y queda 30 días en su enlace, en «Tus papeles». Si no tiene correo, la caja te lo dice: entrégalo impreso o agrégale su correo en «Enviar» del ticket. Si la clínica no tiene un correo conectado, solo puede ir impreso. Por WhatsApp se le envía solo si lo pide en el chat.",
       },
       {
         q: "¿Dónde está el plan de tratamiento?",

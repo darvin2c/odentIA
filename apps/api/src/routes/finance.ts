@@ -427,7 +427,9 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        voidExpense(tx, orgId, userId, c.req.param("id"), parsed.data),
+        voidExpense(tx, orgId, userId, c.req.param("id"), parsed.data, {
+          allowPostClose: canAccess(memberRole, "finance.admin"),
+        }),
       ),
     )
   })
