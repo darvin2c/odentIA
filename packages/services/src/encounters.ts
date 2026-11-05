@@ -32,7 +32,7 @@ import { canAttend } from "@odentia/auth/permissions"
 import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm"
 import { markArrivedOnAttend, notifyAppointmentChanged, setAppointmentStatus } from "./appointments.js"
 import { listEncounterDocuments, type PatientDocumentWithContext } from "./clinical.js"
-import { type ConsentNeed, getEncounterConsentNeeds } from "./clinical-forms.js"
+import { cancelDerivationTask, type ConsentNeed, getEncounterConsentNeeds } from "./clinical-forms.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import {
@@ -2166,11 +2166,12 @@ export async function voidEncounterProcedure(
  */
 /**
  * Los papeles de una atención anulada que aún valen (ADR 0002: se anula «lo
- * ligado»): el descanso médico emitido, las órdenes pedidas o en proceso y
- * los consentimientos sin firmar. Un consentimiento firmado no se toca: es un
- * acto de la persona y anular la atención no lo retira; una orden con
- * resultado tampoco, porque el resultado ya existe. Así el código del papel
- * (`/comprobar`) dice «Anulado» en vez de «Vigente».
+ * ligado»): el descanso médico emitido, las órdenes pedidas o en proceso (y la
+ * tarea de una derivación) y los consentimientos sin firmar. Un consentimiento
+ * firmado, o firmado por la persona en su enlace, no se toca: es un acto suyo
+ * y anular la atención no lo retira; una orden con resultado tampoco, porque
+ * el resultado ya existe. Así el código del papel (`/comprobar`) dice
+ * «Anulado» en vez de «Vigente».
  */
 async function voidEncounterPapers(
   tx: Db,
@@ -2194,7 +2195,7 @@ async function voidEncounterPapers(
     )
     .returning({ id: medicalLeave.id })
   for (const leave of leaves)
-    await audit(tx, orgId, actorUserId, "medical_leave.cancel", "medical_leave", leave.id, { encounterId, reason })
+    await audit(tx, orgId, actorUserId, "medical_leave.cancelled", "medical_leave", leave.id, { encounterId, reason })
   const orders = await tx
     .update(clinicalOrder)
     .set({ status: "cancelado", cancelledAt: at, cancelledBy: actorUserId, cancelReason: reason, updatedAt: at })
@@ -2207,8 +2208,10 @@ async function voidEncounterPapers(
       ),
     )
     .returning({ id: clinicalOrder.id })
-  for (const order of orders)
+  for (const order of orders) {
     await audit(tx, orgId, actorUserId, "order.cancel", "clinical_order", order.id, { encounterId, reason })
+    await cancelDerivationTask(tx, orgId, actorUserId, order.id)
+  }
   const consents = await tx
     .update(consentDocument)
     .set({ status: "anulado", cancelledAt: at, cancelledBy: actorUserId, cancelReason: reason, updatedAt: at })
@@ -2218,6 +2221,8 @@ async function voidEncounterPapers(
         eq(consentDocument.patientId, patientId),
         eq(consentDocument.encounterId, encounterId),
         eq(consentDocument.status, "pendiente"),
+        // Lo que la persona ya firmó por su enlace espera al profesional, no se anula: es un acto suyo.
+        isNull(consentDocument.personSignedAt),
       ),
     )
     .returning({ id: consentDocument.id })
@@ -2290,6 +2295,13 @@ async function undoCompletionsOf(
         updatedAt: at,
       })
       .where(and(eq(treatmentPlanItem.id, item.id), eq(treatmentPlanItem.organizationId, orgId)))
+    await audit(tx, orgId, actorUserId, "plan.item_status_changed", "treatment_plan_item", item.id, {
+      patientId,
+      from: "realizado",
+      to: sessions > 0 ? "en_curso" : "programado",
+      reason,
+      encounterId,
+    })
     await hooks.treatmentUndone(tx, { orgId, actorUserId, patientId, encounterId, planItemId: item.id, reason, at })
   }
 }
