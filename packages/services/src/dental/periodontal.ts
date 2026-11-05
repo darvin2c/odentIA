@@ -25,6 +25,7 @@ import {
   type PeriodontalToothInput,
   type PeriodontalToothRecord,
   PERI_IMPLANT_CONDITIONS,
+  PERIODONTAL_DIAGNOSES,
   periodontalDentition,
   proposePeriodontalClassification,
   summarizePeriodontal,
@@ -36,10 +37,10 @@ import { user } from "@odentia/db/schema/auth"
 import { encounter, encounterDiagnosis } from "@odentia/db/schema/clinical"
 import { odontogramEntry, periodontalChart, periodontalTooth } from "@odentia/db/schema/dental"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, desc, eq, inArray, isNotNull, isNull, lt, ne } from "drizzle-orm"
+import { and, desc, eq, inArray, isNotNull, isNull, like, lt, ne } from "drizzle-orm"
 import { insertOdontogramFinding, orgStrictVariants, voidOdontogramEntry } from "./odontogram.js"
 import { findDiagnosisCode, orgDiagnosisSystem } from "../diagnosis-codes.js"
-import { addEncounterDiagnosis } from "../encounter-diagnoses.js"
+import { addEncounterDiagnosis, voidEncounterDiagnosis } from "../encounter-diagnoses.js"
 import { assertOpenDraft, lockEncounter } from "../encounters.js"
 import { fieldsError, notFound, ServiceError, validation } from "../errors.js"
 import { findOrgLocale } from "../locale.js"
@@ -540,11 +541,16 @@ export async function classifyPeriodontalChart(
   return chartView(tx, orgId, updated!, person.birthDate)
 }
 
+/** Con qué termina la nota que deja la clasificación (`periodontalDiagnosisLabel`). */
+const PERIODONTAL_LABEL_SUFFIX = "(AAP/EFP 2017)"
+
 /**
  * Deja en la atención el diagnóstico con el código de la lista de la clínica
  * (`periodontalDiagnosisCode`) y la clasificación en palabras como nota. No lo
  * repite si ya está; si la lista no tiene ese código, no deja nada y el
- * odontólogo lo elige en el buscador. La salud no lleva código.
+ * odontólogo lo elige en el buscador. La salud no lleva código. Cambiar la
+ * clasificación cambia el de la atención: lo periodontal anterior (otro
+ * diagnóstico u otro estadio) se anula con su motivo y queda solo el de ahora.
  */
 async function recordEncounterDiagnosis(
   tx: Db,
@@ -556,26 +562,44 @@ async function recordEncounterDiagnosis(
 ): Promise<string | null> {
   const system = await orgDiagnosisSystem(tx, orgId)
   const code = periodontalDiagnosisCode(system, input.diagnosis)
+  const label = periodontalDiagnosisLabel(input)
+  // Lo periodontal que ya tiene la atención (gingivitis o periodontitis, de esta lista).
+  const periodontalCodes = PERIODONTAL_DIAGNOSES.map((diagnosis) => periodontalDiagnosisCode(system, diagnosis)).filter(
+    (item): item is string => item !== null,
+  )
+  const recorded = periodontalCodes.length
+    ? await tx
+        .select({ id: encounterDiagnosis.id, code: encounterDiagnosis.diagnosisCode, note: encounterDiagnosis.note })
+        .from(encounterDiagnosis)
+        .where(
+          and(
+            eq(encounterDiagnosis.organizationId, orgId),
+            eq(encounterDiagnosis.encounterId, encounterId),
+            eq(encounterDiagnosis.diagnosisSystem, system),
+            inArray(encounterDiagnosis.diagnosisCode, periodontalCodes),
+            isNull(encounterDiagnosis.voidedAt),
+            // Solo lo que dejó la clasificación (sin pieza y con su nota): lo que el
+            // odontólogo puso a mano, con pieza o como presuntivo, no se toca.
+            isNull(encounterDiagnosis.siteCode),
+            like(encounterDiagnosis.note, `%${PERIODONTAL_LABEL_SUFFIX}`),
+          ),
+        )
+    : []
+  for (const row of recorded) {
+    // El mismo diagnóstico con la misma nota se queda; lo demás (otro diagnóstico u otro estadio) se anula.
+    if (row.code === code && row.note === label) continue
+    await voidEncounterDiagnosis(tx, orgId, actorUserId, patientId, encounterId, row.id, {
+      reason: `Se cambió la clasificación periodontal: ${label}.`,
+    })
+  }
   if (!code || !(await findDiagnosisCode(tx, system, code))) return null
-  const [existing] = await tx
-    .select({ id: encounterDiagnosis.id })
-    .from(encounterDiagnosis)
-    .where(
-      and(
-        eq(encounterDiagnosis.organizationId, orgId),
-        eq(encounterDiagnosis.encounterId, encounterId),
-        eq(encounterDiagnosis.diagnosisSystem, system),
-        eq(encounterDiagnosis.diagnosisCode, code),
-        isNull(encounterDiagnosis.voidedAt),
-      ),
-    )
-    .limit(1)
-  if (existing) return code
+  // Un diagnóstico registrado no se modifica (la base lo impide): con otro estadio se anuló arriba y se registra de nuevo.
+  if (recorded.some((row) => row.code === code && row.note === label)) return code
   await addEncounterDiagnosis(tx, orgId, actorUserId, patientId, encounterId, {
     diagnosisCode: code,
     diagnosisSystem: system,
     diagnosisType: "confirmed",
-    note: periodontalDiagnosisLabel(input),
+    note: label,
   })
   return code
 }

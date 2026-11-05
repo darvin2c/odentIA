@@ -270,7 +270,20 @@ export function hasHealthInfo(health: PatientHealth | null | undefined): boolean
  * marcó revisor/fecha. Distinto de «No se le preguntó» (contenido desconocido).
  */
 export function isHealthReviewPending(health: PatientHealth | null | undefined): boolean {
-  return hasHealthInfo(health) && !health?.reviewedAt
+  if (!health || health.reviewedAt || !hasHealthInfo(health)) return false
+  // Las alergias tienen su propia revisión: las que agregó o revisó el equipo no son «declaradas
+  // por el paciente», y por sí solas no dejan pendiente lo demás.
+  if (!health.allergiesReviewedAt) return true
+  const status = health.reviewStatus
+  const answers = health.latestAnamnesis?.answers
+  return (
+    health.bloodGroup != null ||
+    health.conditions.length > 0 ||
+    health.medications.length > 0 ||
+    status.conditions !== "unknown" ||
+    status.medications !== "unknown" ||
+    (!!answers && Object.keys(answers).length > 0)
+  )
 }
 
 export interface ClinicalNote {
@@ -282,6 +295,8 @@ export interface ClinicalNote {
   diagnosisType?: string | null
   toothNumber?: number | null
   authorUserId?: string
+  /** Quien la escribió (las adendas lo traen). */
+  authorName?: string | null
   encounterId?: string | null
   kind?: string
   createdAt: string
