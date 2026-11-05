@@ -31,6 +31,7 @@ export const SUBMIT_ERROR_WORDS = {
   notFound: "El registro ya no está disponible. Consulta la lista actual antes de continuar; los campos se conservan.",
   conflict: "Los datos entran en conflicto con el estado actual. Consulta el registro y revisa los campos antes de guardar.",
   rateLimited: "Hay demasiadas solicitudes. Espera un momento antes de volver a guardar; los campos se conservan.",
+  locked: "Esta historia está bloqueada: no se puede cambiar.",
   invalid: "No se guardaron los cambios. Revisa los datos marcados.",
 } as const
 
@@ -46,11 +47,12 @@ export function isUnconfirmedSubmit(error: unknown): boolean {
 
 /**
  * Los estados con los que la API de odentIA da un motivo para la persona
- * (`ServiceError`, validación): su mensaje y sus `fields` se dicen. Otro
+ * (`ServiceError`, validación, la historia bloqueada con 423): su mensaje y
+ * sus `fields` se dicen. Otro
  * estado (un 422 de un proxy, por ejemplo) no viene de ella y su cuerpo puede
  * traer detalles internos: se dice lo de siempre.
  */
-const REASONED_STATUS = new Set([400, 403, 404, 409, 413, 429])
+const REASONED_STATUS = new Set([400, 403, 404, 409, 413, 423, 429])
 
 /**
  * Lee el error de un envío: los campos que el servidor señaló y, para lo
@@ -80,6 +82,8 @@ export function submitErrorOf(error: unknown): SubmitError {
       return { form: message ?? SUBMIT_ERROR_WORDS.notFound, fields }
     case 409:
       return { form: message ?? SUBMIT_ERROR_WORDS.conflict, fields }
+    case 423:
+      return { form: message ?? SUBMIT_ERROR_WORDS.locked, fields }
     case 429:
       return { form: message ?? SUBMIT_ERROR_WORDS.rateLimited, fields }
     default:

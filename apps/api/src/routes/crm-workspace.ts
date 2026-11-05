@@ -7,10 +7,11 @@ import {
   listContactActivity,
   type CrmCapabilities,
 } from "@odentia/services"
-import { Hono } from "hono"
+import { type Context, Hono, type Next } from "hono"
 import { z } from "zod"
 import { canAccess, canAccessAny, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
+import { personLockRefusal } from "../lib/record-lock.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 
 /**
@@ -57,6 +58,14 @@ function capabilitiesOf(memberRole: string): CrmCapabilities {
 
 export function createCrmWorkspaceRoute(deps: CrmDeps) {
   const app = new Hono()
+
+  // Una persona con la historia bloqueada no existe aquí tampoco (ADR 0080):
+  // ni su contexto, ni su actividad, ni notas nuevas.
+  app.use("/contacts/:id/*", async (c: Context, next: Next) => {
+    const blocked = await personLockRefusal(c, deps.db, c.req.param("id"))
+    if (blocked) return blocked
+    await next()
+  })
 
   app.get("/contacts/:id/context", async (c) => {
     const ctx = orgContextOf(c)

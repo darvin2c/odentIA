@@ -3842,6 +3842,9 @@ function bigintCents(value: unknown): number {
  * páginas y con lo que suma la lista entera (`totals`). Un número escrito es
  * el de un ticket o un documento: se busca en todas las fechas (`allDates`).
  */
+/** Lo que dice un ticket en lugar del nombre de una persona con la historia bloqueada. */
+export const LOCKED_RECORD_NAME = "Historia bloqueada"
+
 export async function listTickets(tx: Db, orgId: string, query: TicketListQuery) {
   const branchRow = await requireBranch(tx, orgId, query.branchId)
   const timezone = await branchTimezone(tx, orgId, branchRow)
@@ -3856,15 +3859,19 @@ export async function listTickets(tx: Db, orgId: string, query: TicketListQuery)
   const frozenDocument = sql`${paymentTicket.snapshot}->'patient'->>'docNumber'`
 
   const filters: SQL[] = [eq(paymentTicket.organizationId, orgId), eq(paymentTicket.branchId, branchRow.id)]
+  // Una historia bloqueada (ADR 0080) guarda sus comprobantes, que siguen
+  // sumando; pero su nombre y su documento quedan solo dentro de la historia:
+  // no se buscan por ellos ni se muestran aquí.
+  const unlocked = isNull(patientPerson.recordLockedAt)
   if (q)
     filters.push(
       allDates
         ? or(
             number !== null ? eq(paymentTicket.ticketNumber, number) : sql`false`,
-            digits ? digitsContain(patientPerson.docNumber, digits) : sql`false`,
-            digits ? digitsContain(frozenDocument, digits) : sql`false`,
+            digits ? and(unlocked, digitsContain(patientPerson.docNumber, digits))! : sql`false`,
+            digits ? and(unlocked, digitsContain(frozenDocument, digits))! : sql`false`,
           )!
-        : foldedWordsMatch([patientPerson.displayName, frozenName], q),
+        : and(unlocked, foldedWordsMatch([patientPerson.displayName, frozenName], q))!,
     )
   if (!allDates && query.from) filters.push(gte(paymentTicket.createdAt, dayBoundsUTC(day(query.from), timezone).start))
   if (!allDates && query.to) filters.push(lt(paymentTicket.createdAt, dayBoundsUTC(day(query.to), timezone).end))
@@ -3908,6 +3915,7 @@ export async function listTickets(tx: Db, orgId: string, query: TicketListQuery)
       displayName: patientPerson.displayName,
       docType: patientPerson.docType,
       docNumber: patientPerson.docNumber,
+      lockedAt: patientPerson.recordLockedAt,
     })
     .from(paymentTicket)
     .innerJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
@@ -3953,15 +3961,16 @@ export async function listTickets(tx: Db, orgId: string, query: TicketListQuery)
     nextCursor,
     /** Quiénes cobraron en esta sede: las opciones de «Cobró» (solo en la primera página). */
     cashiers: cursor ? null : await ticketCashiers(tx, orgId, branchRow.id),
-    data: rows.map(({ ticket, displayName, docType, docNumber }): TicketListRow => {
+    data: rows.map(({ ticket, displayName, docType, docNumber, lockedAt }): TicketListRow => {
       const frozen = ticket.snapshot as Partial<TicketFrozen> | null
+      const locked = lockedAt !== null
       return {
         id: ticket.id,
         number: ticket.ticketNumber,
         patientId: ticket.patientId,
-        displayName,
-        docType: docType ?? frozen?.patient?.docType ?? null,
-        docNumber: docNumber ?? frozen?.patient?.docNumber ?? null,
+        displayName: locked ? LOCKED_RECORD_NAME : displayName,
+        docType: locked ? null : (docType ?? frozen?.patient?.docType ?? null),
+        docNumber: locked ? null : (docNumber ?? frozen?.patient?.docNumber ?? null),
         createdAt: ticket.createdAt,
         currency: ticket.currency,
         totalCents: ticket.totalCents,

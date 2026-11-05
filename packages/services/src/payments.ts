@@ -3430,6 +3430,17 @@ export async function getTicketReceipt(tx: Db, orgId: string, patientId: string,
   }
 }
 
+/** El paciente de un ticket, para la guarda de su historia bloqueada (404 si no existe). */
+export async function ticketPatientId(tx: Db, orgId: string, ticketId: string): Promise<string> {
+  const [row] = await tx
+    .select({ patientId: paymentTicket.patientId })
+    .from(paymentTicket)
+    .where(and(eq(paymentTicket.id, ticketId), eq(paymentTicket.organizationId, orgId)))
+    .limit(1)
+  if (!row) throw notFound("Ticket")
+  return row.patientId
+}
+
 /**
  * El mismo ticket, buscado solo por su identificador: la lista de Cobros y el
  * buscador rápido lo abren sin saber de quién es. Dice también de qué paciente.

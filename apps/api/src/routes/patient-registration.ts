@@ -16,14 +16,34 @@ import {
   ServiceError,
 } from "@odentia/services"
 import { and, eq } from "drizzle-orm"
-import { Hono } from "hono"
+import { type Context, Hono, type Next } from "hono"
 import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
+import { patientLockRefusal, personLockRefusal } from "../lib/record-lock.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 
 export function createPatientRegistrationRoute(deps: CrmDeps & { cookieDomain: string; webURL: string }) {
   const app = new Hono()
+
+  // La historia bloqueada (ADR 0080): este router se monta en «/», antes que
+  // los de la ficha y de la persona, así que sus guardas no llegan a correr
+  // aquí. Cada `use` va acotado a sus rutas: uno en «*» alcanzaría a todo lo
+  // que se monte después.
+  const patientLock = async (c: Context, next: Next) => {
+    const blocked = await patientLockRefusal(c, deps.db, c.req.param("id"))
+    if (blocked) return blocked
+    await next()
+  }
+  const personLock = async (c: Context, next: Next) => {
+    const blocked = await personLockRefusal(c, deps.db, c.req.param("id"))
+    if (blocked) return blocked
+    await next()
+  }
+  app.use("/patients/:id/personal-link", patientLock)
+  app.use("/patients/:id/personal-link/*", patientLock)
+  app.use("/contacts/:id/personal-link", personLock)
+  app.use("/contacts/:id/registration-links", personLock)
   app.get("/patient-registration/config", async c => {
     const { orgId, memberRole } = orgContextOf(c)
     // La lee quien da de alta pacientes y quien configura el registro.

@@ -31,6 +31,7 @@ import { Hono } from "hono"
 import { z } from "zod"
 import { canAccess, canAccessAny, orgContextOf, type Permission } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
+import { personLockRefusal } from "../lib/record-lock.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
 // A qué hora escribe no es un ajuste del Administrador: es el «Horario de recontacto» de Agente.
@@ -263,6 +264,8 @@ export function createAgentAdminRoute(deps: AgentAdminDeps) {
     if (!canAccessAny(memberRole, ["crm.read", "patients.read"])) {
       return c.json(errorBody(c, "FORBIDDEN", "Sin permiso para ver a esta persona"), 403)
     }
+    const blocked = await personLockRefusal(c, deps.db, c.req.param("contactId"))
+    if (blocked) return blocked
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => getMessagePermissions(tx, orgId, c.req.param("contactId"))),
     )
@@ -273,6 +276,9 @@ export function createAgentAdminRoute(deps: AgentAdminDeps) {
     if (!canAccessAny(memberRole, ["crm.write", "patients.write"])) {
       return c.json(errorBody(c, "FORBIDDEN", "Sin permiso para cambiar a esta persona"), 403)
     }
+    // Borrar sus datos apagó sus mensajes (ADR 0080): nadie los vuelve a encender por aquí.
+    const blocked = await personLockRefusal(c, deps.db, c.req.param("contactId"))
+    if (blocked) return blocked
     const parsed = permissionInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>

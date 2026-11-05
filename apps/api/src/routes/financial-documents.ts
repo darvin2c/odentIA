@@ -17,7 +17,7 @@ import type { Context } from "hono"
 import { Hono } from "hono"
 import { z } from "zod"
 import { traceClinicalRead } from "../lib/clinical-trace.js"
-import { recordLockResponse } from "../lib/record-lock.js"
+import { canonicalUuid, recordLockResponse } from "../lib/record-lock.js"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
@@ -169,12 +169,12 @@ export function createFinancialDocumentsRoute(
   // antes que las de la ficha y su guarda no llega a correr.
   const lockedRecord = async (c: Context, write: boolean) => {
     const { orgId, userId } = orgContextOf(c)
-    const patientId = z.uuid().safeParse(c.req.param("id"))
-    if (!patientId.success) return null
+    const patientId = canonicalUuid(c.req.param("id"))
+    if (!patientId) return null
     const state = await withOrgContext(deps.db, orgId, (tx) =>
-      recordLockState(tx, orgId, userId, patientId.data),
+      recordLockState(tx, orgId, userId, patientId),
     )
-    return recordLockResponse(c, state, write)
+    return recordLockResponse(c, state, write, "Paciente no encontrado")
   }
 
   // El papel de salud para que el equipo lo vea o lo imprima: el mismo que se envía.

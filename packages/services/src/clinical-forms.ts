@@ -34,7 +34,7 @@ import { ATTENDING_ROLES, canAttend } from "@odentia/auth/permissions"
 import { member, user } from "@odentia/db/schema/auth"
 import { crmTask } from "@odentia/db/schema/crm"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, getTableColumns, inArray, isNull, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm"
 import { foldedWordsMatch } from "./search-text.js"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { requireCanAttend } from "./attending.js"
@@ -3648,6 +3648,15 @@ export async function listClinicalOrders(
   if (query.patientId) {
     await requirePatient(tx, orgId, query.patientId)
     conditions.push(eq(clinicalOrder.patientId, query.patientId))
+  } else {
+    // Sin paciente es una lista de trabajo, y en ella una historia bloqueada no
+    // existe (ADR 0080). Con su paciente la guarda de la ruta ya decidió quién la ve.
+    const locked = tx
+      .select({ id: patient.id })
+      .from(patient)
+      .innerJoin(patientPerson, joinPatientPerson(patientPerson))
+      .where(and(eq(patient.organizationId, orgId), isNotNull(patientPerson.recordLockedAt)))
+    conditions.push(notInArray(clinicalOrder.patientId, locked))
   }
   if (query.status) {
     if (!["solicitado", "en_proceso", "completado", "cancelado"].includes(query.status)) {
