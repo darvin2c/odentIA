@@ -505,6 +505,18 @@ describe("WhatsApp con la app propia de la clínica", () => {
     expect(ownAppExpiryWords(done, NOW, day)).toBeNull()
   })
 
+  it("si Meta ya no acepta la clave, la conexión pide atención y no se afirma que la clave sirve", () => {
+    const rejected: OwnAppState = { ...done, tokenRejectedAt: minutesAgo(5) }
+    const checks = ownAppChecks(rejected, { found: null, day })
+    expect(checks.map((check) => [check.key, check.state])).toEqual([
+      ["clave", "problem"],
+      ["registro", "ok"],
+      ["suscripcion", "ok"],
+    ])
+    expect(checks[0]).toMatchObject({ title: "Meta ya no acepta la clave." })
+    expect(connectionPending(connection({ ownApp: rejected }))).toBe("own-app")
+  })
+
   it("una firma rechazada cuenta solo si llegó después del último mensaje que sí se leyó", () => {
     const rejected = { ...done, signatureRejectedAt: minutesAgo(5) }
     expect(ownAppSignatureProblem(rejected, minutesAgo(12))).toBe(true)

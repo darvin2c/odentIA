@@ -20,6 +20,7 @@ La configuración de Meta que usa el botón (plantilla «Configuración de regis
   - se reintenta mientras la clave siga vigente;
   - si Meta ya no acepta la clave, no se insiste: solo volver a conectar la repone.
 - **Lo mismo si Meta rechaza un envío con el código 190** (2026-10-31): la clave retirada antes de tiempo no espera a la revisión de cada 12 horas, que además no pregunta por una clave con vencimiento lejano. Solo en conexiones hechas con el botón.
+- **También con la app propia** (2026-11-05, «avisar siempre»): un 190 marca la conexión (`own_app.tokenRejectedAt`), la campana avisa a quien la administra y Soporte recibe su caso. En las dos formas de conexión, el resto del equipo que trabaja con conversaciones se entera de que WhatsApp no envía. Se retira al volver a enviar o al pegar otra clave.
 - **Cada renovación queda en la actividad de la clínica** como algo automático, sin la clave.
 
 ## Alternativas descartadas
