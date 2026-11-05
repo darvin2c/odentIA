@@ -8,14 +8,16 @@ import {
   registerPhoneNumber,
   subscribeAppToAccount,
 } from "@odentia/channels"
+import { canAccess } from "@odentia/auth/permissions"
 import type { Db } from "@odentia/db"
 import { member } from "@odentia/db/schema/auth"
 import { channelConnection, type ConnectionOwnApp } from "@odentia/db/schema/crm"
 import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm"
 import { ServiceError } from "./errors.js"
 import { getOrgLocale } from "./locale.js"
-import { encryptJson } from "./secrets.js"
-import { upsertWorkspaceNotification } from "./workspace.js"
+import { reportAutomaticCase } from "./model-outage.js"
+import { decryptConfig, encryptJson } from "./secrets.js"
+import { settleWorkspaceNotifications, upsertWorkspaceNotification } from "./workspace.js"
 
 /**
  * WhatsApp con la app propia de la clínica: lo que odentIA hace en Meta por
@@ -264,6 +266,7 @@ async function saveConfig(tx: Db, row: ConnectionRow, value: Record<string, unkn
 /* ---------- Avisos de la campana ---------- */
 
 const signatureSubject = (connectionId: string) => `firma-meta:${connectionId}`
+const tokenRejectedSubject = (connectionId: string) => `clave-propia:${connectionId}`
 const expirySubject = (connectionId: string) => `vence-clave-meta:${connectionId}`
 const WHATSAPP_SETTINGS_HREF = "/settings/integrations/whatsapp"
 
@@ -293,6 +296,108 @@ export async function notifyAdmins(
       subject,
     })
   }
+}
+
+/**
+ * WhatsApp no envía (Meta ya no acepta la clave o cortó la conexión): se avisa
+ * también a quien trabaja con las conversaciones y no puede arreglarlo, para
+ * que sepa que lo que escribe no le llega a nadie («avisar siempre»). Mismo
+ * asunto que el aviso de quien administra: se retiran juntos.
+ */
+export async function notifyTeamChannelDown(tx: Db, orgId: string, subject: string): Promise<void> {
+  const team = await tx
+    .select({ userId: member.userId, role: member.role })
+    .from(member)
+    .where(eq(member.organizationId, orgId))
+    .limit(100)
+  for (const { userId, role } of team) {
+    if (!canAccess(role, "conversations.read") || canAccess(role, "settings.write")) continue
+    await upsertWorkspaceNotification(tx, orgId, {
+      userId,
+      dedupeKey: `${subject}:${userId}`,
+      title: "WhatsApp no está enviando mensajes",
+      body: "Lo que se escribe por WhatsApp no le llega a nadie hasta que se vuelva a conectar. Quien administra la clínica ya está avisado.",
+      href: "/inbox",
+      permission: "conversations.read",
+      subject,
+    })
+  }
+}
+
+/**
+ * Meta rechazó un envío de una conexión con la app propia porque ya no acepta
+ * la clave (código 190; la conexión del botón lo anota en su `signup`, ADR
+ * 0073). La conexión lo dice («Necesita atención») y la campana avisa a quien
+ * la administra y al resto del equipo. Solo si la clave guardada sigue siendo
+ * la que se usó: si ya se pegó otra, no se marca. Devuelve si se marcó ahora
+ * (una conexión ya marcada no repite el aviso ni el caso de Soporte).
+ */
+export async function noteOwnAppTokenRejected(
+  tx: Db,
+  orgId: string,
+  connectionId: string,
+  secretsKey: Buffer,
+  token: string,
+  now = new Date(),
+): Promise<boolean> {
+  const [row] = await tx
+    .select({ configEncrypted: channelConnection.configEncrypted, ownApp: channelConnection.ownApp })
+    .from(channelConnection)
+    .where(
+      and(
+        eq(channelConnection.id, connectionId),
+        eq(channelConnection.organizationId, orgId),
+        eq(channelConnection.status, "active"),
+        isNotNull(channelConnection.ownApp),
+        isNull(channelConnection.signup),
+      ),
+    )
+    .for("update")
+    .limit(1)
+  if (!row?.ownApp || row.ownApp.tokenRejectedAt) return false
+  if (decryptConfig(secretsKey, row.configEncrypted)["accessToken"] !== token) return false
+  await tx
+    .update(channelConnection)
+    .set({ ownApp: sql`jsonb_set(${channelConnection.ownApp}, '{tokenRejectedAt}', to_jsonb(${now.toISOString()}::text))` })
+    .where(and(eq(channelConnection.id, connectionId), eq(channelConnection.organizationId, orgId)))
+  const subject = tokenRejectedSubject(connectionId)
+  await notifyAdmins(tx, orgId, subject, {
+    title: "Meta ya no acepta la clave de WhatsApp",
+    body: "Los mensajes de WhatsApp no pueden salir. Genera una clave nueva en Meta y pégala en Configuración › Integraciones › WhatsApp › Cambiar la clave. Ya avisamos a odentIA.",
+  })
+  await notifyTeamChannelDown(tx, orgId, subject)
+  return true
+}
+
+/** Meta volvió a aceptar un envío: la clave sirve otra vez y los avisos se retiran. */
+export async function clearOwnAppTokenRejected(tx: Db, orgId: string, connectionId: string): Promise<void> {
+  const [cleared] = await tx
+    .update(channelConnection)
+    .set({ ownApp: sql`${channelConnection.ownApp} - 'tokenRejectedAt'` })
+    .where(
+      and(
+        eq(channelConnection.id, connectionId),
+        eq(channelConnection.organizationId, orgId),
+        sql`${channelConnection.ownApp}->>'tokenRejectedAt' is not null`,
+      ),
+    )
+    .returning({ id: channelConnection.id })
+  if (cleared) await settleWorkspaceNotifications(tx, orgId, { subject: tokenRejectedSubject(connectionId) })
+}
+
+/**
+ * Abre o amplía el caso automático de Soporte: una clínica con la app propia
+ * cuya clave ya no acepta Meta. Uno solo con todas las clínicas afectadas.
+ */
+export async function reportOwnAppTokenRejected(ownerDb: Db, input: { orgId: string; connectionId: string }): Promise<void> {
+  await reportAutomaticCase(ownerDb, {
+    dedupeKey: "clave-propia-rechazada",
+    title: "Meta ya no acepta la clave de WhatsApp (app propia)",
+    orgId: input.orgId,
+    note: `WhatsApp con la app propia (conexión ${input.connectionId}): Meta rechazó un envío porque ya no acepta la clave.`,
+    detail: "Meta (190): la clave de acceso ya no es válida",
+    screen: WHATSAPP_SETTINGS_HREF,
+  })
 }
 
 /**

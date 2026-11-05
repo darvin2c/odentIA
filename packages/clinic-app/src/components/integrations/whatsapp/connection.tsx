@@ -18,6 +18,7 @@ import {
   connectionWords,
   ownAppExpiryWords,
   ownAppSignatureProblem,
+  ownAppTokenRejected,
   ownMessageData,
   WHATSAPP_DISCONNECT_CONSEQUENCE,
   WHATSAPP_KEY_FIELDS,
@@ -440,6 +441,12 @@ export function WhatsAppConnection({
             ) : null}
           </Note>
         ) : null}
+        {/* Con la app propia, Meta ya no acepta la clave: quien solo consulta sabe quién lo arregla. */}
+        {active && !canWrite && ownAppTokenRejected(connection.ownApp) ? (
+          <p className="rounded-xl bg-warning-soft px-3.5 py-3 text-sm text-warning">
+            Meta ya no acepta la clave: los mensajes de WhatsApp no salen. Quien administra la configuración puede pegar una nueva.
+          </p>
+        ) : null}
         {/* Meta ya no acepta la clave: el botón para volver a conectar es el de abajo, para quien administra. */}
         {active && pending === "token-dead" && !canWrite ? (
           <p className="rounded-xl bg-warning-soft px-3.5 py-3 text-sm text-warning">
@@ -464,7 +471,11 @@ export function WhatsAppConnection({
               step={1}
               onUpdated={() => void refreshConnections()}
             />
-            {ownAppSignatureProblem(connection.ownApp, connection.lastInboundAt) ? (
+            {ownAppTokenRejected(connection.ownApp) ? (
+              <Button type="button" className="h-11 self-start px-5 sm:h-9" onClick={openKey}>
+                Cambiar la clave
+              </Button>
+            ) : ownAppSignatureProblem(connection.ownApp, connection.lastInboundAt) ? (
               <Button type="button" className="h-11 self-start px-5 sm:h-9" onClick={openKey}>
                 Cambiar la clave secreta
               </Button>
