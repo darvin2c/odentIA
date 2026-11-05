@@ -607,6 +607,10 @@ export function EncounterEditor({
     return body
   }
 
+  /** Lo que falta para cerrar se vuelve a pedir al servidor (el pie, «Cierre de la atención» y el cierre). */
+  const refreshClosing = () =>
+    queryClient.invalidateQueries({ queryKey: ["encounter-closing", patientId, encounterId] })
+
   /** Un solo drenado serializado: toma los dirty, los envía y repite si llegaron más. */
   const drain = (): Promise<void> => {
     if (drainRef.current) return drainRef.current
@@ -615,6 +619,8 @@ export function EncounterEditor({
       let sentAny = false
       // Lo que se envió: al guardar bien solo eso deja de tener algo que corregir.
       const sent = new Set<string>()
+      // Alguna tanda llegó al servidor: lo que falta para cerrar puede haber cambiado.
+      let savedAny = false
       try {
         if (mountedRef.current) setSaveState("saving")
         for (;;) {
@@ -636,6 +642,7 @@ export function EncounterEditor({
               latestWriteAtRef.current,
               new Date(saved.data.updatedAt).getTime(),
             )
+            savedAny = true
             // La sección «Signos vitales» y la medición anterior se leen de nuevo.
             if (sendable.includes("vitals"))
               void queryClient.invalidateQueries({ queryKey: ["patient-vitals", patientId] })
@@ -655,7 +662,11 @@ export function EncounterEditor({
           setSaveState(dirtyRef.current.size > 0 ? "pending" : "saved")
           if (sentAny) setSavedAt(new Date().toISOString())
         }
+        // Lo guardado (el motivo, la evolución, los signos) se vuelve a comprobar en el cierre.
+        if (savedAny) void refreshClosing()
       } catch (err) {
+        // Aunque una tanda posterior falle, lo que sí se guardó ya cuenta para cerrar.
+        if (savedAny) void refreshClosing()
         if (mountedRef.current) {
           // Sin conexión lo escrito se queda en la pantalla y se guarda al volver.
           if (isOffline(err)) {
@@ -837,9 +848,6 @@ export function EncounterEditor({
     }
   }
 
-  const refreshClosing = () =>
-    queryClient.invalidateQueries({ queryKey: ["encounter-closing", patientId, encounterId] })
-
   /**
    * Hora de fin declarada: hoy a la hora indicada, en la zona de la clínica. El
    * minuto de inicio (con sus segundos en 0) queda antes del inicio: se toma
@@ -990,7 +998,7 @@ export function EncounterEditor({
    * «Finalizar y firmar»: lo que falta del borrador se dice en su campo, con su
    * bloque abierto; si no falta nada, se abre el cierre.
    */
-  const requestSign = () => {
+  const requestSign = async () => {
     const values = draftForm.state.values
     const first: ClosingRequirement | "vitals" | null = !values.reason.trim()
       ? "reason"
@@ -1001,8 +1009,22 @@ export function EncounterEditor({
           : missing.includes("diagnosis")
             ? "diagnosis"
             : null
-    if (first) requireBlock(first)
-    else openSign()
+    if (first) {
+      requireBlock(first)
+      return
+    }
+    // Lo recién escrito se guarda, y lo que falta se vuelve a comprobar, antes de abrir el cierre:
+    // si no, diría «Falta…» de lo que ya está. También si la comprobación de un guardado aún no vuelve.
+    if (dirtyRef.current.size > 0 || drainRef.current || closingQuery.isFetching) {
+      try {
+        await flush()
+      } catch {
+        // El aviso del guardado ya dice qué pasó, en su sitio.
+        return
+      }
+      await refreshClosing()
+    }
+    openSign()
   }
 
   const handlePendingChange = (pending: boolean) => {
@@ -1377,7 +1399,7 @@ export function EncounterEditor({
   }
   /** «Firmar» desde la barra del teléfono: firma si se puede; si no, lleva a lo que falta para cerrar. */
   const signFromBar = () => {
-    if (canSign) requestSign()
+    if (canSign) void requestSign()
     else document.getElementById(closingId)?.scrollIntoView({ block: "start" })
   }
   const pendingDiagnoses = dictationCount("hallazgos")
