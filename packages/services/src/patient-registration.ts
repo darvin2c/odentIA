@@ -53,7 +53,7 @@ import { getPatientHealth, initializeDeclaredPatientHealth } from "./clinical.js
 import { joinPatientPerson, patientRowColumns } from "./patient-identity.js"
 import { applyMessagePermissions } from "./data-consents.js"
 import { consentStatusOf } from "./message-permission.js"
-import { createPerson, findPersonByDocument, setPersonArchived } from "./people.js"
+import { createPerson, findPersonByDocument, setPersonArchived, updatePersonIdentity } from "./people.js"
 import { grantResponsibility } from "./responsibilities.js"
 import { claimWhatsAppNumber, hasWhatsappNumber, isDirectThread, lockRegistrationContacts, whatsappNumberOf, whatsappNumbersOf } from "./contacts.js"
 import { completeTask, createTask, discardTask, settleTask } from "./tasks.js"
@@ -1123,6 +1123,32 @@ export async function attachLegalRepresentative(
   },
 ): Promise<string | null> {
   let representativeId = input.existingContactId ?? null
+  // Ya existía y no tiene documento: el que escribió el equipo se le guarda (solo lo vacío). Sin él,
+  // firmar por el menor se rechazaba al final y la firma se perdía. Desde fuera no: lo escrito no prueba quién es.
+  if (representativeId && actorUserId !== null && input.representative.docNumber) {
+    const [current] = await tx
+      .select({ docNumber: contact.docNumber })
+      .from(contact)
+      .where(and(eq(contact.organizationId, orgId), eq(contact.id, representativeId)))
+      .limit(1)
+    if (current && !current.docNumber) {
+      const rep = input.representative
+      const personId = representativeId
+      // En su punto de guardado: si ese documento ya es de otra persona (o algo de ella no
+      // pasa las reglas), no frena el alta del menor; se completa después en su página.
+      await tx
+        .transaction((inner) =>
+          updatePersonIdentity(inner, orgId, { userId: actorUserId }, personId, {
+            docType: rep.docType ?? null,
+            docNumber: rep.docNumber,
+            docCountry: documentIssuerCountry(clinicalProfileFor(input.countryCode), rep.docType, rep.docCountry),
+          }),
+        )
+        .catch((error: unknown) => {
+          if (!(error instanceof ServiceError)) throw error
+        })
+    }
+  }
   if (!representativeId) {
     const rep = input.representative
     const docCountry = rep.docNumber

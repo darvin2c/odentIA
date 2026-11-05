@@ -8,6 +8,7 @@ import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { type OpportunityListItem, timeAgo, usePermission } from "../../lib/crm"
 import { conversationStatusLabel } from "../../lib/glossary"
+import { speaksForWords } from "../../lib/patient-overview"
 import type { PersonPage } from "../../lib/people"
 import { QueryErrorState } from "../../lib/query-error"
 import { OpportunityDrawer } from "../crm/opportunity-drawer"
@@ -46,7 +47,8 @@ export function PersonConversations({ person }: { person: PersonPage }) {
     retry: false,
   })
   const list = conversations.data?.data ?? []
-  const spokenWithConversation = person.spokenForBy.filter((other) => other.conversationId)
+  // Las conversaciones de quien habla por ella (no de quien solo es su contacto de emergencia).
+  const spokenWithConversation = person.spokenForBy.filter((other) => other.conversationId && !other.emergencyOnly)
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
@@ -118,7 +120,7 @@ export function PersonConversations({ person }: { person: PersonPage }) {
             <ul className="flex flex-col gap-1 border-t pt-3 text-sm">
               {spokenWithConversation.map((other) => (
                 <li key={other.personId}>
-                  Habla por ella{" "}
+                  {speaksForWords(person.sex)}{" "}
                   <PersonLink contactId={other.personId} isPatient={other.isPatient}>
                     {other.displayName}
                   </PersonLink>

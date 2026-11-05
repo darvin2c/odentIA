@@ -13,6 +13,11 @@ export function attendWord(sex: string | null | undefined, verb = "atender"): st
   return `${verb}${sex === "M" ? "lo" : "la"}`
 }
 
+/** «Habla por él» o «Habla por ella» según la persona; sin sexo registrado, «ella» (la persona). */
+export function speaksForWords(sex: string | null | undefined): string {
+  return sex === "M" ? "Habla por él" : "Habla por ella"
+}
+
 export function documentCategoryLabel(category: string): string {
   if (category === "radiografia") return "Radiografía"
   if (category === "foto_clinica") return "Foto clínica"

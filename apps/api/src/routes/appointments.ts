@@ -12,6 +12,7 @@ import {
   getAppointmentContext,
   getBranchHours,
   getPatientMissingData,
+  requirePatient,
   getProfessionalSchedule,
   listAppointments,
   listRooms,
@@ -446,6 +447,8 @@ export function createAppointmentsRoute(deps: CrmDeps) {
         return {
           ...context,
           missingData: canEditPerson ? await getPatientMissingData(tx, orgId, patientId) : null,
+          // «atenderlo» o «atenderla»: la frase concuerda con el paciente.
+          patientSex: canEditPerson ? (await requirePatient(tx, orgId, patientId)).sex : null,
         }
       }),
     )

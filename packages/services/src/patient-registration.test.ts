@@ -1123,6 +1123,32 @@ it("desde su página, sin conversación, el equipo registra con lo mínimo a una
   ).rejects.toMatchObject({ status: 400 })
 })
 
+it("a su cargo, el documento que se escribe de su madre ya registrada se le guarda: después puede firmar por el menor", async () => {
+  await seedActor()
+  await publish("org_a")
+  const { person } = await makeContactWithConversation("org_a", "Rosa Quispe")
+  const child = await withOrgContext(appDb, "org_a", (tx) =>
+    registerPatient(
+      tx,
+      "org_a",
+      { kind: "internal", userId: ACTOR, contactId: person.id, scope: "essentials" },
+      {
+        submissionId: randomUUID(),
+        answers: {
+          demographics: { displayName: "Lía Quispe", givenNames: "Lía", familyName: "Quispe", birthDate: `${new Date().getUTCFullYear() - 8}-03-10` },
+          respondent: "staff",
+          representative: { displayName: "Rosa Quispe", relationship: "guardian", relationshipDetail: "Madre", phone: "+51977000200", docType: "DNI", docNumber: "40123456" },
+          privacyAccepted: false,
+        },
+        contacts: [{ contactId: person.id, relationship: "guardian", isPreferred: true }],
+      },
+    ),
+  )
+  expect(child.id).toBeTruthy()
+  const [mother] = await ownerDb.select({ docType: contact.docType, docNumber: contact.docNumber }).from(contact).where(eq(contact.id, person.id))
+  expect(mother).toMatchObject({ docType: "DNI", docNumber: "40123456" })
+})
+
 it("desde la Agenda, sin conversación, el equipo registra a alguien nuevo con lo mínimo y lo que falta queda en sus notas", async () => {
   await seedActor()
   await publish("org_a")
