@@ -428,6 +428,7 @@ export function EncounterDetailView({
               <li key={adenda.id} className="border-b pb-2 text-sm last:border-0">
                 <p className="whitespace-pre-wrap">{adenda.note}</p>
                 <p className="mt-1 text-xs text-muted-foreground">
+                  {adenda.authorName ? `${adenda.authorName} · ` : ""}
                   <time dateTime={adenda.createdAt}>{formatDateTime(adenda.createdAt)}</time>
                 </p>
               </li>

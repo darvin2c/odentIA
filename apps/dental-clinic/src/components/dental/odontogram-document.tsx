@@ -798,6 +798,9 @@ export function OdontogramDocument({
       )
     if (entry.needsReview) obsLines.push(`${tag}: registro previo en revisión.`)
   }
+  // Una caries de dos caras se guarda como una fila por cara: su nota se escribe una sola vez.
+  const specs = [...new Set(specLines)]
+  const notes = [...new Set(obsLines)]
   return (
     <div className="odontogram-document mx-auto w-full max-w-3xl bg-white p-4 text-gray-900">
       <style>{`@media print{.odontogram-document{max-width:none}.odontogram-document .odonto-doc-row-16{width:170mm}.odontogram-document .odonto-doc-row-10{width:106mm}.odontogram-document *{print-color-adjust:exact;-webkit-print-color-adjust:exact}}`}</style>
@@ -833,7 +836,7 @@ export function OdontogramDocument({
           <div>
             <h3 className="text-xs font-bold uppercase tracking-wide">Especificaciones</h3>
             <div className="mt-1 min-h-16 whitespace-pre-wrap rounded-sm border border-gray-400 p-2 text-xs leading-relaxed">
-              {specLines.map((line, i) => (
+              {specs.map((line, i) => (
                 <p key={i}>{line}</p>
               ))}
             </div>
@@ -841,7 +844,7 @@ export function OdontogramDocument({
           <div>
             <h3 className="text-xs font-bold uppercase tracking-wide">Observaciones</h3>
             <div className="mt-1 min-h-16 whitespace-pre-wrap rounded-sm border border-gray-400 p-2 text-xs leading-relaxed">
-              {obsLines.map((line, i) => (
+              {notes.map((line, i) => (
                 <p key={i}>{line}</p>
               ))}
             </div>

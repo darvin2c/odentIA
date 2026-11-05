@@ -169,6 +169,35 @@ it("calcula, guarda la clasificación que confirma el odontólogo y compara dos 
   expect(await periodontalDiagnoses(f.first)).toEqual([
     { code: "K05.3", note: "Periodontitis estadio III, grado B, generalizada (AAP/EFP 2017)", type: "confirmed" },
   ])
+  // Corrige el estadio: sigue uno solo, con la nota de ahora.
+  await f.run((tx) =>
+    classifyPeriodontalChart(tx, f.orgId, f.actor, f.patientId, initial.id, { diagnosis: "periodontitis", stage: 2, grade: "B", extent: "generalized" }),
+  )
+  expect(await periodontalDiagnoses(f.first)).toEqual([
+    { code: "K05.3", note: "Periodontitis estadio II, grado B, generalizada (AAP/EFP 2017)", type: "confirmed" },
+  ])
+  // Lo que el odontólogo anotó a mano (presuntivo, otra nota) no es de la clasificación: se queda.
+  const [flowRow] = await ownerDb
+    .select({ system: encounterDiagnosis.diagnosisSystem })
+    .from(encounterDiagnosis)
+    .where(and(eq(encounterDiagnosis.encounterId, f.first), eq(encounterDiagnosis.diagnosisCode, "K05.3"), isNull(encounterDiagnosis.voidedAt)))
+  await ownerDb.insert(encounterDiagnosis).values({
+    organizationId: f.orgId, patientId: f.patientId, encounterId: f.first,
+    diagnosisSystem: flowRow!.system, diagnosisCode: "K05.3", diagnosisType: "provisional", note: "Lo anotó a mano",
+  })
+  // Cambia a gingivitis: la periodontitis de la clasificación se anula con su motivo, no quedan las dos.
+  await seedDiagnosisCodes([{ code: "K05.1", title: "Gingivitis crónica" }])
+  await f.run((tx) => classifyPeriodontalChart(tx, f.orgId, f.actor, f.patientId, initial.id, { diagnosis: "gingivitis", extent: "generalized" }))
+  expect(await periodontalDiagnoses(f.first)).toEqual([{ code: "K05.3", note: "Lo anotó a mano", type: "provisional" }])
+  const live = await ownerDb
+    .select({ code: encounterDiagnosis.diagnosisCode })
+    .from(encounterDiagnosis)
+    .where(and(eq(encounterDiagnosis.encounterId, f.first), isNull(encounterDiagnosis.voidedAt)))
+  expect(live.map((row) => row.code).sort()).toEqual(["K05.1", "K05.3"])
+  // Y vuelve a la periodontitis que había confirmado.
+  await f.run((tx) =>
+    classifyPeriodontalChart(tx, f.orgId, f.actor, f.patientId, initial.id, { diagnosis: "periodontitis", stage: 3, grade: "B", extent: "generalized" }),
+  )
   await f.close(f.first)
 
   const second = await f.open()
