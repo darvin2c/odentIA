@@ -2421,11 +2421,18 @@ export const patientPaymentRefund = pgTable(
     reason: text("reason").notNull(),
     /** La devolución de un cobro que pagó este dinero (nulo: «Devolver dinero» del saldo a favor). */
     returnId: uuid("return_id"),
+    /**
+     * La clave de «Devolver dinero» (`requestId` del cliente): el mismo pedido
+     * enviado otra vez no devuelve dos veces. Una devolución deja una fila por
+     * cobro que la paga, todas con la misma clave.
+     */
+    requestId: uuid("request_id"),
     createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index("payment_refund_org_patient_idx").on(table.organizationId, table.patientId),
+    index("payment_refund_org_request_idx").on(table.organizationId, table.requestId),
     index("payment_refund_payment_idx").on(table.organizationId, table.paymentId),
     check("payment_refund_amount_check", sql`${table.amountCents} > 0`),
     check("payment_refund_tax_check", sql`${table.taxCents} BETWEEN 0 AND ${table.amountCents}`),

@@ -1,0 +1,2 @@
+ALTER TABLE "patient_payment_refund" ADD COLUMN "request_id" uuid;--> statement-breakpoint
+CREATE INDEX "payment_refund_org_request_idx" ON "patient_payment_refund" USING btree ("organization_id","request_id");
