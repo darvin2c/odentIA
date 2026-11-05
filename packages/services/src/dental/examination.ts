@@ -1,29 +1,12 @@
+import {
+  DENTAL_EXAM_EXTRAORAL as EXAMINATION_EXTRAORAL,
+  DENTAL_EXAM_HYGIENE as EXAMINATION_HYGIENE,
+  DENTAL_EXAM_INTRAORAL as EXAMINATION_INTRAORAL,
+  DENTAL_EXAM_LABELS as EXAMINATION_LABELS,
+  dentalExamLines,
+} from "@odentia/dental"
 import { invalidField, validation } from "../errors.js"
 import type { ProductExamination } from "../product-hooks.js"
-
-const EXAMINATION_EXTRAORAL = ["atm", "ganglios", "labios"] as const
-const EXAMINATION_INTRAORAL = [
-  "encias",
-  "lengua",
-  "paladar",
-  "pisoBoca",
-  "carrillos",
-  "orofaringe",
-] as const
-const EXAMINATION_HYGIENE = ["buena", "regular", "mala"] as const
-
-/** El nombre de cada dato como lo ve quien escribe el examen. */
-const EXAMINATION_LABELS: Record<string, string> = {
-  atm: "ATM",
-  ganglios: "Ganglios",
-  labios: "Labios",
-  encias: "Encías",
-  lengua: "Lengua",
-  paladar: "Paladar",
-  pisoBoca: "Piso de boca",
-  carrillos: "Carrillos",
-  orofaringe: "Orofaringe",
-}
 
 /** Examen clínico con la estructura del examenClinico de anamnesis; vacíos se recortan, grupos vacíos se omiten. */
 function assertExamination(input: unknown): Record<string, unknown> | null {
@@ -72,11 +55,12 @@ function assertExamination(input: unknown): Record<string, unknown> | null {
 
 /**
  * El examen de la boca de odentIA (extraoral, intraoral e higiene oral), que
- * hasta el issue 229 era el de toda atención. La copia de la historia y su
- * exportación aún no lo llevan, como antes.
+ * hasta el issue 229 era el de toda atención. Va en la copia de la historia
+ * (ADR 0003, NTS 139). La exportación FHIR aún no lo lleva: cada parte
+ * necesita su código, y eso queda pendiente.
  */
 export const dentalExamination: ProductExamination = {
   parse: assertExamination,
-  recordLines: () => [],
+  recordLines: dentalExamLines,
   observations: () => [],
 }
