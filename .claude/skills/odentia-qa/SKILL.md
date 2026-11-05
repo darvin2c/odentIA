@@ -11,6 +11,7 @@ Una ronda recorre un área en la demo de producción. Encuentra, confirma e info
 
 - **La ronda no pregunta.** Si falta un acceso (segundo factor, contraseña, una demo sin marcar), no se detiene a pedirlo: usa la alternativa permitida por esta skill (local, apartado 2) y lo anota en el informe. Solo se frena ante lo que esta skill marca como prohibido, nunca por comodidad.
 - **Lo que espera del usuario va siempre como pregunta, con sugerencia.** Al informar, cada decisión pendiente se le pregunta de forma concreta, con la opción que se recomienda y su motivo. No vale dejar «pendiente» o «espera tu sí» sin pregunta ni sugerencia.
+- **Lo que es un error se corrige; no se pregunta.** Se anota en qué orden se corrige y por qué. Solo se le pregunta al usuario lo que es una decisión de producto: quitar, agregar o cambiar algo que funciona.
 - **En producción, solo dentro de una demo que la ronda crea para sí misma** desde la administración (ADR 0096: marcada «Demo» y sin cobro). Nunca en una clínica real, ni en las cuentas del usuario. Al terminar, la ronda elimina su demo y verifica que la eliminación sea completa. Las demos de cada ronda se anotan en `~/odentia-qa/demos.md`.
 - **Ningún mensaje sale de la demo.** En producción los envíos son reales, así que hay dos barreras:
   - **Canales apagados.** El WhatsApp de la demo está deshabilitado (claves falsas) y no hay correo, Messenger, Instagram ni Telegram conectados. Ninguna voz conecta, edita ni prueba un canal. Esta barrera también cubre a los pacientes que trae la demo.
