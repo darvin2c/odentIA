@@ -619,6 +619,8 @@ export function EncounterEditor({
       let sentAny = false
       // Lo que se envió: al guardar bien solo eso deja de tener algo que corregir.
       const sent = new Set<string>()
+      // Alguna tanda llegó al servidor: lo que falta para cerrar puede haber cambiado.
+      let savedAny = false
       try {
         if (mountedRef.current) setSaveState("saving")
         for (;;) {
@@ -640,6 +642,7 @@ export function EncounterEditor({
               latestWriteAtRef.current,
               new Date(saved.data.updatedAt).getTime(),
             )
+            savedAny = true
             // La sección «Signos vitales» y la medición anterior se leen de nuevo.
             if (sendable.includes("vitals"))
               void queryClient.invalidateQueries({ queryKey: ["patient-vitals", patientId] })
@@ -659,9 +662,11 @@ export function EncounterEditor({
           setSaveState(dirtyRef.current.size > 0 ? "pending" : "saved")
           if (sentAny) setSavedAt(new Date().toISOString())
         }
-        // Escrito el motivo o la evolución, el cierre deja de decir que faltan.
-        if (sentAny) void refreshClosing()
+        // Lo guardado (el motivo, la evolución, los signos) se vuelve a comprobar en el cierre.
+        if (savedAny) void refreshClosing()
       } catch (err) {
+        // Aunque una tanda posterior falle, lo que sí se guardó ya cuenta para cerrar.
+        if (savedAny) void refreshClosing()
         if (mountedRef.current) {
           // Sin conexión lo escrito se queda en la pantalla y se guarda al volver.
           if (isOffline(err)) {
@@ -1008,8 +1013,9 @@ export function EncounterEditor({
       requireBlock(first)
       return
     }
-    // Lo recién escrito se guarda antes de abrir el cierre: si no, diría «Falta…» de lo que ya está.
-    if (dirtyRef.current.size > 0 || drainRef.current) {
+    // Lo recién escrito se guarda, y lo que falta se vuelve a comprobar, antes de abrir el cierre:
+    // si no, diría «Falta…» de lo que ya está. También si la comprobación de un guardado aún no vuelve.
+    if (dirtyRef.current.size > 0 || drainRef.current || closingQuery.isFetching) {
       try {
         await flush()
       } catch {
