@@ -608,6 +608,28 @@ describe("la persona confirma por escrito", () => {
     expect(still?.status).toBe("programada")
   })
 
+  it("si el último recordatorio fue de una cita que ya no puede confirmar, su «sí» no confirma otra: pregunta", async () => {
+    const c = await clinic()
+    const rosa = await person(c, "Rosa Quispe", { openWindow: true })
+    const ana = await person(c, "Ana Torres", { openWindow: true })
+    const own = await book(c, rosa.patientId, later(3 * DAY), { notice: false })
+    // El recordatorio era de una cita de Ana (su hija, que ya cumplió 18): Rosa ya no la ve.
+    const theirs = await book(c, ana.patientId, later(2 * DAY), { notice: false })
+    const [sent] = await ownerDb.insert(message).values({
+      organizationId: c.orgId, conversationId: rosa.conversationId!, direction: "out", senderKind: "agent",
+      body: "Te recordamos la cita de Ana", status: "sent", externalId: `ext-${randomUUID()}`,
+    }).returning({ id: message.id })
+    await ownerDb.insert(automationJob).values({
+      organizationId: c.orgId, kind: "recordatorio_cita", status: "enviado", dedupeKey: `prueba:${randomUUID()}`,
+      scheduledFor: new Date(), contactId: rosa.contactId, appointmentId: theirs.id, sentMessageId: sent!.id,
+    })
+    const result = await run(c, (tx) => confirmAppointmentByContact(tx, c.orgId, { contactId: rosa.contactId, conversationId: rosa.conversationId! }))
+    expect(result.outcome).toBe("varias")
+    expect(result.outcome === "varias" ? result.options.map((option) => option.appointmentId) : []).toEqual([own.id])
+    const [still] = await ownerDb.select({ status: appointment.status }).from(appointment).where(eq(appointment.id, own.id))
+    expect(still?.status).toBe("programada")
+  })
+
   it("con varias por confirmar pide cuál; sin ninguna lo dice", async () => {
     const c = await clinic()
     const rosa = await person(c, "Rosa Quispe", { openWindow: true })
