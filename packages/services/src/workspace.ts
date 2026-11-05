@@ -21,7 +21,7 @@ import { inventoryWaiting } from "./inventory.js"
 import { getOrgLocale } from "./locale.js"
 import { upcomingWork } from "./report-finance.js"
 import { windowOpen } from "./message-window.js"
-import { topicUrgentAt } from "./topic-urgency.js"
+import { clinicOpenSchedule, topicUrgentAtWith } from "./topic-urgency.js"
 import {
   composeWaiting,
   WAITING_LIMITS,
@@ -622,11 +622,14 @@ async function waitingConversations(tx: Db, orgId: string, assignedTo: string | 
     where p.place <= ${WAITING_LIMITS.conversations}
     order by p.since, p.id`)
   const shut = await shutConversations(tx, orgId, rows.map((row) => row.conversationId))
-  const items: WaitingPerson[] = []
-  for (const { total: _total, ...row } of rows) {
-    const urgentAt = await topicUrgentAt(tx, orgId, new Date(row.since))
-    items.push({ ...row, urgent: urgentAt.getTime() <= Date.now(), windowClosed: shut.has(row.conversationId) })
-  }
+  // El horario y sus cierres se leen una vez, desde quien espera hace más.
+  const earliest = rows.reduce((min, row) => Math.min(min, Date.parse(row.since)), Date.now())
+  const schedule = rows.length > 0 ? await clinicOpenSchedule(tx, orgId, new Date(earliest)) : null
+  const items: WaitingPerson[] = rows.map(({ total: _total, ...row }) => ({
+    ...row,
+    urgent: topicUrgentAtWith(schedule, new Date(row.since)).getTime() <= Date.now(),
+    windowClosed: shut.has(row.conversationId),
+  }))
   return { waiting: rows[0]?.total ?? 0, items }
 }
 

@@ -233,7 +233,10 @@ export function TodayPatients({ today, locale, multiBranch }: { today: Workspace
   const mine = { who: myUserId }
   const waiting = today.appointments.filter((item) => item.visit === "llego")
   const attending = today.appointments.filter((item) => item.visit === "en_atencion")
-  const later = today.appointments.filter((item) => item.visit === "por_confirmar" || item.visit === "confirmada")
+  // Lo que aún no llega: «Más tarde» si su hora no terminó; si ya terminó, aparte (aún puede llegar tarde).
+  const notYet = today.appointments.filter((item) => item.visit === "por_confirmar" || item.visit === "confirmada")
+  const later = notYet.filter((item) => Date.parse(item.endsAt) > Date.parse(now))
+  const missed = notYet.filter((item) => Date.parse(item.endsAt) <= Date.parse(now))
   const attended = today.summary.attended
   const attendButton = (item: WorkspaceAppointment) =>
     canAttend ? (
@@ -290,6 +293,7 @@ export function TodayPatients({ today, locale, multiBranch }: { today: Workspace
           )}
           {/* Si nadie espera ni se está atendiendo, la siguiente se atiende desde aquí: «Atender» marca la llegada. */}
           {group("Más tarde", later, (item, index) => (index === 0 && waiting.length === 0 && attending.length === 0 ? attendButton(item) : null))}
+          {group("Pasó su hora sin llegar", missed, () => null)}
           {attended > 0 ? (
             <p className="text-[13px] text-muted-foreground">
               {attended === 1 ? "1 paciente atendido hoy" : `${attended} pacientes atendidos hoy`}

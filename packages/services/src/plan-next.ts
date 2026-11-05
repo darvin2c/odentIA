@@ -287,6 +287,7 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
   const { name, budgets, items, withAppointment, control, nextAppointmentAt } = facts
   const { locale, timezone } = context
   const day = (date: Date) => dayWords(date, locale, timezone)
+  const dayKey = (date: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(date)
 
   // 1. Armado y sin enviar: lo envía recepción (decisión 4).
   const unsent = unsentBudgetOf(budgets)
@@ -307,7 +308,11 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
       .filter((budget) => budget.status === "aceptado" || budget.status === "parcial")
       .find((budget) => budget.items.some((line) => toSchedule.some((item) => item.id === line.planItemId)))
     // Ya tiene una cita que no lo lleva: se dice así, no «falta su cita», que suena a que no tiene ninguna.
-    const missing = nextAppointmentAt ? `su cita del ${day(nextAppointmentAt)} no lo lleva` : "falta su cita"
+    // Si una parte ya tiene cita, se dice que falta el resto.
+    const partly = toSchedule.length < accepted.length
+    const missing = nextAppointmentAt
+      ? `su cita del ${day(nextAppointmentAt)} no lo lleva${partly ? " todo" : ""}`
+      : "falta su cita"
     const text = decided
       ? decided.status === "aceptado"
         ? `Aceptó todo: ${missing}`
@@ -318,7 +323,7 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
           : "Tiene tratamientos aceptados sin cita"
         : // En latidIA lo indicado ya queda aceptado: no hubo nada que aceptar.
           nextAppointmentAt
-          ? `Lo indicado no va en su cita del ${day(nextAppointmentAt)}`
+          ? `${partly ? "Parte de lo indicado" : "Lo indicado"} no va en su cita del ${day(nextAppointmentAt)}`
           : "Falta la cita de lo indicado"
     return {
       kind: "agendar",
@@ -365,8 +370,8 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
       return {
         kind: "control",
         text: `${control.title} · por reservar`,
-        // Futuro: toca ese día («Toca el 12 dic»); ya pasado: desde cuándo espera («Tocaba el 12 dic»).
-        detail: `${control.dueAt.getTime() > Date.now() ? "Toca el" : "Tocaba el"} ${day(control.dueAt)}`,
+        // Hoy o después: toca ese día («Toca el 12 dic»); un día ya pasado: «Tocaba el 12 dic».
+        detail: `${dayKey(control.dueAt) >= dayKey(new Date()) ? "Toca el" : "Tocaba el"} ${day(control.dueAt)}`,
         action: can("appointments.write") ? { label: "Reservar cita", followUpId: control.id } : null,
       }
     }

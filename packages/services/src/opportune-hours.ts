@@ -20,7 +20,7 @@ export interface OpportuneSchedule {
 }
 
 /** Lo de una ventana que queda fuera de los cierres. */
-function openParts(start: number, end: number, closed: OpportuneSchedule["closed"]): Array<[number, number]> {
+export function openParts(start: number, end: number, closed: OpportuneSchedule["closed"]): Array<[number, number]> {
   let parts: Array<[number, number]> = [[start, end]]
   for (const gap of closed ?? []) {
     const from = gap.start.getTime()
@@ -135,6 +135,20 @@ function windowsOf(schedule: OpportuneSchedule, day: LocalDay): Array<{ start: D
     start: localToInstant(schedule.timeZone, day.year, day.month, day.day, start),
     end: localToInstant(schedule.timeZone, day.year, day.month, day.day, end),
   }))
+}
+
+/**
+ * Los tramos del horario, como instantes, de los días locales que van de `from`
+ * a `to` (el primero y el último pueden pasarse de esos bordes).
+ */
+export function windowsBetween(schedule: OpportuneSchedule, from: Date, to: Date): Array<{ start: Date; end: Date }> {
+  const out: Array<{ start: Date; end: Date }> = []
+  for (let offset = 0; offset < 400; offset++) {
+    const day = shiftedDay(from, schedule.timeZone, offset)
+    if (localToInstant(schedule.timeZone, day.year, day.month, day.day, 0).getTime() >= to.getTime()) break
+    out.push(...windowsOf(schedule, day))
+  }
+  return out
 }
 
 export function isOpportune(at: Date, schedule: OpportuneSchedule): boolean {
