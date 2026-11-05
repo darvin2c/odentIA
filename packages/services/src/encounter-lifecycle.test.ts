@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { member, user } from "@odentia/db/schema/auth"
 import { appointment } from "@odentia/db/schema/agenda"
 import { encounter, patientCharge } from "@odentia/db/schema/clinical"
+import { clinicalOrder, consentDocument, consentEvent, medicalLeave } from "@odentia/db/schema/clinical-forms"
 import { odontogramEntry } from "@odentia/db/schema/dental"
 import { branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
@@ -11,7 +12,9 @@ import { setProfessionalSchedule } from "./availability.js"
 import { addClinicalNote } from "./clinical.js"
 import { addOdontogramEntries } from "./dental/odontogram.js"
 import { clinicalFixture, makeSigner, seedDiagnosisCodes } from "./clinical-test-fixture.js"
+import { createClinicalOrder, createConsentDocument, createConsentTemplate, publishConsentTemplate } from "./clinical-forms.js"
 import { addEncounterDiagnosis } from "./encounter-diagnoses.js"
+import { createMedicalLeave } from "./medical-leaves.js"
 import {
   addEncounterProcedure,
   createEncounter,
@@ -605,4 +608,58 @@ it("el perfil profesional no trae título ni colegio por defecto: los escribe la
     }),
   )
   expect(saved).toMatchObject({ professionalTitle: "Odontóloga", registrationBody: "COEM", complete: true })
+})
+
+it("anular la atención anula su descanso, sus órdenes y sus consentimientos sin firmar; el firmado no cambia", async () => {
+  const f = await clinicalFixture()
+  const template = await f.run(async (tx) => {
+    const draft = await createConsentTemplate(tx, "org_a", f.actor, {
+      title: "Consentimiento de restauración",
+      sections: {
+        procedure: "Restauración de la pieza con resina compuesta.",
+        benefits: ["Recuperar forma y función"],
+        risks: ["Sensibilidad temporal"],
+        alternatives: ["Control sin tratamiento"],
+        consequences: "Avance de la caries y dolor.",
+      },
+    })
+    return publishConsentTemplate(tx, "org_a", f.actor, draft.id)
+  })
+  const leave = await f.run((tx) => createMedicalLeave(tx, ...f.args, { days: 2, encounterId: f.encounter.id }))
+  const order = await f.run((tx) =>
+    createClinicalOrder(tx, "org_a", f.actor, {
+      kind: "laboratorio",
+      patientId: f.patient.id,
+      encounterId: f.encounter.id,
+      recipient: "Laboratorio",
+      title: "Hemograma",
+    }),
+  )
+  const consent = () =>
+    f.run((tx) =>
+      createConsentDocument(tx, "org_a", f.actor, {
+        templateId: template.id,
+        patientId: f.patient.id,
+        encounterId: f.encounter.id,
+        procedureRef: "Restauración pieza 16",
+      }),
+    )
+  const pending = await consent()
+  const signed = await consent()
+  await ownerDb
+    .update(consentDocument)
+    .set({ status: "firmado", signedAt: new Date(), signatureMethod: "clinica", signatureLevel: "simple" })
+    .where(eq(consentDocument.id, signed.id))
+
+  await f.run((tx) => voidEncounter(tx, ...f.args, f.encounter.id, { reason: "Paciente equivocado" }))
+
+  const [leaveRow] = await ownerDb.select().from(medicalLeave).where(eq(medicalLeave.id, leave.id))
+  expect(leaveRow).toMatchObject({ status: "anulado", cancelReason: "Atención anulada: Paciente equivocado" })
+  const [orderRow] = await ownerDb.select().from(clinicalOrder).where(eq(clinicalOrder.id, order.id))
+  expect(orderRow).toMatchObject({ status: "cancelado", cancelReason: "Atención anulada: Paciente equivocado" })
+  const consents = await ownerDb.select().from(consentDocument).where(eq(consentDocument.encounterId, f.encounter.id))
+  expect(consents.find((row) => row.id === pending.id)?.status).toBe("anulado")
+  expect(consents.find((row) => row.id === signed.id)?.status).toBe("firmado")
+  const events = await ownerDb.select().from(consentEvent).where(eq(consentEvent.documentId, pending.id))
+  expect(events.map((event) => event.toStatus)).toContain("anulado")
 })

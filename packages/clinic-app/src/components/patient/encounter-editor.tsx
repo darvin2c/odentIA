@@ -2398,7 +2398,7 @@ export function EncounterEditor({
       <ConfirmDialog
         open={voidOpen}
         title="Anular este borrador"
-        description="Queda en la historia como «anulada» con tu nombre, la hora y el motivo. Se anulan sus diagnósticos, procedimientos, hallazgos, recetas y controles; no genera cargos. La cita, si la hay, puede volver a atenderse."
+        description="Queda en la historia como «anulada» con tu nombre, la hora y el motivo. Se anulan sus diagnósticos, procedimientos, hallazgos, recetas, controles, órdenes, descansos y consentimientos sin firmar; lo que se dio por hecho aquí vuelve a quedar pendiente y no genera cargos. Un consentimiento ya firmado no cambia. La cita, si la hay, puede volver a atenderse."
         confirmLabel="Anular borrador"
         pending={voiding}
         error={voidError}

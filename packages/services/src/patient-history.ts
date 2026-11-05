@@ -1069,9 +1069,15 @@ export async function getTimeline(
       hydrated.set(row.id, {
         ...hydrated.get(row.id)!,
         createdAt: row.issuedAt,
-        title: `Receta N.º ${row.prescriptionNumber}`,
+        title:
+          row.status === "anulada" ? `Se anuló la receta N.º ${row.prescriptionNumber}` : `Receta N.º ${row.prescriptionNumber}`,
         detail:
-          medications.map((m) => `${m.medicationName} ${m.dose}`).join(" · ") || "Sin medicamentos",
+          [
+            medications.map((m) => `${m.medicationName} ${m.dose}`).join(" · ") || "Sin medicamentos",
+            row.status === "anulada" ? row.cancelReason : null,
+          ]
+            .filter(Boolean)
+            .join(" · "),
         status: row.status,
         authorId: row.issuedBy,
         planItemId: row.planItemId,

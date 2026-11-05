@@ -1,7 +1,7 @@
 import { withOrgContext } from "@odentia/db"
 import { sql } from "drizzle-orm"
 import { expect, it } from "vitest"
-import { addEncounterProcedure } from "./encounters.js"
+import { addEncounterProcedure, voidEncounter, voidEncounterProcedure } from "./encounters.js"
 import {
   addPlanItem,
   createTreatmentPlan,
@@ -150,4 +150,54 @@ it("indica sin elegir plan: el plan abierto nace con la atención y recibe lo si
   await expect(
     run((tx) => setPlanItemStatus(tx, ...args, resina.id, { status: "en_curso" })),
   ).rejects.toMatchObject({ code: "ITEM_CLOSED" })
+})
+
+it("una sesión anulada no deja completar el tratamiento, y anular la atención devuelve lo completado en ella", async () => {
+  await ownerDb.execute(
+    sql`insert into "user" (id,name,email) values ('clinical-void','Clínico','clinical-void@example.test') on conflict do nothing`,
+  )
+  const [patient] = await ownerDb.execute<{ id: string }>(
+    sql`with pp as (insert into contact (organization_id,display_name) values ('org_a','Paciente de la sesión anulada') returning id) insert into patient (organization_id,person_id,patient_number) select 'org_a',pp.id,9101 from pp returning id`,
+  )
+  const [service] = await ownerDb.execute<{ id: string }>(
+    sql`insert into service_catalog (organization_id,name,scope,source,price_cents,currency) values ('org_a','Endodoncia','general','custom',50000,'PEN') returning id`,
+  )
+  const draft = async () =>
+    (
+      await ownerDb.execute<{ id: string }>(
+        sql`insert into encounter (organization_id,patient_id,professional_user_id) values ('org_a',${patient!.id},'clinical-void') returning id`,
+      )
+    )[0]!.id
+  const run = <T>(fn: (tx: typeof appDb) => Promise<T>) => withOrgContext(appDb, "org_a", fn)
+  const args = ["org_a", "clinical-void", patient!.id] as const
+  const first = await draft()
+  const plan = await run((tx) => createTreatmentPlan(tx, ...args, { title: "Plan", originEncounterId: first }))
+  const item = await run((tx) => addPlanItem(tx, ...args, { serviceId: service!.id, planId: plan.id, sourceEncounterId: first }))
+  const [budget] = await ownerDb.execute<{ id: string }>(
+    sql`insert into treatment_budget (organization_id,patient_id,plan_id,budget_number,title,currency,status) values ('org_a',${patient!.id},${plan.id},9101,'Propuesta','PEN','aceptado') returning id`,
+  )
+  await ownerDb.execute(
+    sql`update treatment_plan_item set decision_status = 'aceptado', budget_id = ${budget!.id} where id = ${item.id}`,
+  )
+  const statusOf = async () =>
+    (await run((tx) => listPlanItems(tx, "org_a", patient!.id))).find((i) => i.id === item.id)?.status
+
+  // La única sesión se anula: «Completar» ya no puede cerrarlo.
+  const session = await run((tx) => addEncounterProcedure(tx, ...args, first, { planItemId: item.id }))
+  await run((tx) => voidEncounterProcedure(tx, ...args, first, session.id, { reason: "Era otra pieza" }))
+  expect(await statusOf()).toBe("programado")
+  await expect(
+    run((tx) => setPlanItemStatus(tx, ...args, item.id, { status: "realizado", encounterId: first })),
+  ).rejects.toMatchObject({ code: "ATTENTION_REQUIRED" })
+
+  // Con una sesión válida, se completa en otra atención sin sesión propia; anular esa atención lo reabre.
+  await run((tx) => addEncounterProcedure(tx, ...args, first, { planItemId: item.id }))
+  await ownerDb.execute(
+    sql`update encounter set status = 'finalizada', signer_name = 'Clínico', signer_registration = 'COP 1' where id = ${first}`,
+  )
+  const second = await draft()
+  await run((tx) => setPlanItemStatus(tx, ...args, item.id, { status: "realizado", encounterId: second }))
+  expect(await statusOf()).toBe("realizado")
+  await run((tx) => voidEncounter(tx, ...args, second, { reason: "Abierta por error" }))
+  expect(await statusOf()).toBe("en_curso")
 })
