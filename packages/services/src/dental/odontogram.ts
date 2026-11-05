@@ -1,6 +1,7 @@
 import type { Db } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
 import {
+  encounter,
   encounterPlanItem,
   encounterSite,
   patient,
@@ -426,7 +427,21 @@ async function signOdontogram(
     throw validation("La persona no tiene nombre registrado para firmar el odontograma")
   // Snapshot calculado en el servidor; nunca se acepta del cliente.
   const { history } = await getOdontogram(tx, orgId, patientId)
-  const candidates = history.filter((row) => !row.needsReview && !isVoidedRow(row))
+  // Lo de una atención aún abierta no está firmado por quien la lleva y puede
+  // anularse: solo entra la atención que se firma con este odontograma.
+  const drafts = new Set(
+    (
+      await tx
+        .select({ id: encounter.id })
+        .from(encounter)
+        .where(and(eq(encounter.organizationId, orgId), eq(encounter.patientId, patientId), eq(encounter.status, "borrador")))
+    )
+      .map((row) => row.id)
+      .filter((id) => id !== input.encounterId),
+  )
+  const candidates = history.filter(
+    (row) => !row.needsReview && !isVoidedRow(row) && !(row.encounterId && drafts.has(row.encounterId)),
+  )
   const entries = activeFindingsAsOf(candidates.map(toFindingRecord))
   const printPatient = await printPatientOf(tx, orgId, patientId)
   const letterhead = await establishmentOf(tx, orgId)

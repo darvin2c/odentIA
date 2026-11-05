@@ -32,6 +32,7 @@ import {
 } from "@odentia/db/schema/clinical-forms"
 import { ATTENDING_ROLES, canAttend } from "@odentia/auth/permissions"
 import { member, user } from "@odentia/db/schema/auth"
+import { crmTask } from "@odentia/db/schema/crm"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm"
 import { foldedWordsMatch } from "./search-text.js"
@@ -47,7 +48,7 @@ import {
   requireProfessionalSignature,
 } from "./professional-profiles.js"
 import { patientIsMinor, requireDecisionContact, requireLinkedActiveContact } from "./responsibilities.js"
-import { createTask } from "./tasks.js"
+import { createTask, updateTask } from "./tasks.js"
 import { createWorkspaceNotification } from "./workspace.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import type { ProductSite, SiteColumns } from "./product-hooks.js"
@@ -3509,6 +3510,26 @@ export async function createClinicalOrder(
   return row
 }
 
+/**
+ * La tarea que dejó una derivación a un colega (`clinical-order:<id>`) se
+ * cancela con su orden: si no, el colega seguiría con «Te derivaron a…» de
+ * algo que ya no se pide.
+ */
+export async function cancelDerivationTask(tx: Db, orgId: string, actorUserId: string, orderId: string): Promise<void> {
+  const [task] = await tx
+    .select({ id: crmTask.id })
+    .from(crmTask)
+    .where(
+      and(
+        eq(crmTask.organizationId, orgId),
+        eq(crmTask.idempotencyKey, `clinical-order:${orderId}`),
+        eq(crmTask.status, "open"),
+      ),
+    )
+    .limit(1)
+  if (task) await updateTask(tx, orgId, task.id, { status: "cancelled", actorUserId })
+}
+
 const ORDER_TRANSITIONS: Record<string, string[]> = {
   solicitado: ["en_proceso", "completado", "cancelado"],
   en_proceso: ["completado", "cancelado"],
@@ -3614,6 +3635,7 @@ export async function cancelClinicalOrder(
     .returning()
   if (!row) throw notFound("Orden")
   await audit(tx, orgId, actorUserId, "order.cancel", "clinical_order", orderId, { from: current.status })
+  await cancelDerivationTask(tx, orgId, actorUserId, orderId)
   return row
 }
 
