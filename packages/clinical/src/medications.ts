@@ -249,12 +249,14 @@ export function dispensedUnit(dosageForm: string, count: number | null): string 
 
 /**
  * Lo que da una dosis escrita por peso («15 mg/kg») con el peso del paciente,
- * en mg por toma. Solo informa: la dosis la escribe quien receta. Nulo si la
- * dosis no es por peso o no hay peso.
+ * en mg por toma. Solo informa: la dosis la escribe quien receta. Solo si el
+ * campo dice exactamente «N mg/kg» (por toma): «mg/kg/día», un rango o algo
+ * más escrito no se calculan, porque leerlos mal daría otra dosis. Nulo si
+ * no hay peso.
  */
 export function weightDoseMg(dose: string, weightKg: number | null): number | null {
   if (weightKg === null || !(weightKg > 0)) return null
-  const match = /(\d+(?:[.,]\d+)?)\s*mg\s*\/\s*kg/i.exec(dose)
+  const match = /^\s*(\d+(?:,\d+)?|\d+\.\d{1,2})\s*mg\s*\/\s*kg\s*(?:por\s+(?:toma|dosis))?\s*$/i.exec(dose)
   if (!match) return null
   const perKg = Number((match[1] ?? "").replace(",", "."))
   if (!Number.isFinite(perKg) || perKg <= 0) return null

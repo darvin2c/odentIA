@@ -37,7 +37,7 @@ import { user } from "@odentia/db/schema/auth"
 import { encounter, encounterDiagnosis } from "@odentia/db/schema/clinical"
 import { odontogramEntry, periodontalChart, periodontalTooth } from "@odentia/db/schema/dental"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, desc, eq, inArray, isNotNull, isNull, lt, ne } from "drizzle-orm"
+import { and, desc, eq, inArray, isNotNull, isNull, like, lt, ne } from "drizzle-orm"
 import { insertOdontogramFinding, orgStrictVariants, voidOdontogramEntry } from "./odontogram.js"
 import { findDiagnosisCode, orgDiagnosisSystem } from "../diagnosis-codes.js"
 import { addEncounterDiagnosis, voidEncounterDiagnosis } from "../encounter-diagnoses.js"
@@ -541,6 +541,9 @@ export async function classifyPeriodontalChart(
   return chartView(tx, orgId, updated!, person.birthDate)
 }
 
+/** Con qué termina la nota que deja la clasificación (`periodontalDiagnosisLabel`). */
+const PERIODONTAL_LABEL_SUFFIX = "(AAP/EFP 2017)"
+
 /**
  * Deja en la atención el diagnóstico con el código de la lista de la clínica
  * (`periodontalDiagnosisCode`) y la clasificación en palabras como nota. No lo
@@ -575,6 +578,10 @@ async function recordEncounterDiagnosis(
             eq(encounterDiagnosis.diagnosisSystem, system),
             inArray(encounterDiagnosis.diagnosisCode, periodontalCodes),
             isNull(encounterDiagnosis.voidedAt),
+            // Solo lo que dejó la clasificación (sin pieza y con su nota): lo que el
+            // odontólogo puso a mano, con pieza o como presuntivo, no se toca.
+            isNull(encounterDiagnosis.siteCode),
+            like(encounterDiagnosis.note, `%${PERIODONTAL_LABEL_SUFFIX}`),
           ),
         )
     : []

@@ -1072,16 +1072,30 @@ export function RecetasPanel({
       {needsRegistration ? (
         <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-warning/40 bg-warning-soft px-3 py-2 text-sm">
           <span className="min-w-0 flex-1">Para firmar la receta falta tu colegiatura. Lo escrito se queda aquí.</span>
-          <Button type="button" size="sm" variant="outline" className="min-h-11 sm:min-h-8" onClick={() => setProfileOpen(true)}>
-            Agregar mi colegiatura
-          </Button>
+          {/* El perfil se abre ya cargado: abierto vacío, guardar borraría lo que tenía. */}
+          {myProfile.isError ? (
+            <Button type="button" size="sm" variant="outline" className="min-h-11 sm:min-h-8" onClick={() => void myProfile.refetch()}>
+              Reintentar
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="min-h-11 sm:min-h-8"
+              disabled={!myProfile.isSuccess}
+              onClick={() => setProfileOpen(true)}
+            >
+              {myProfile.isSuccess ? "Agregar mi colegiatura" : "Cargando tu perfil…"}
+            </Button>
+          )}
         </div>
       ) : null}
-      {profileOpen ? (
+      {profileOpen && myProfile.isSuccess ? (
         <ProfessionalProfileDrawer
           open
           target="me"
-          profile={myProfile.data?.data ?? null}
+          profile={myProfile.data.data}
           onClose={() => setProfileOpen(false)}
           onSaved={() => {
             setNeedsRegistration(false)
