@@ -606,6 +606,7 @@ it("cuenta: concepto manual, cobro parcial, anulación, devolución y límites",
     branchId: site.id,
     amountCents: 50000,
     reason: "Devolución excesiva",
+    requestId: requestId(),
   })
   expect(refundOver.status).toBe(409)
   expect((await json<ErrorBody>(refundOver)).error.code).toBe("INSUFFICIENT_CREDIT")
@@ -613,6 +614,7 @@ it("cuenta: concepto manual, cobro parcial, anulación, devolución y límites",
     branchId: site.id,
     amountCents: 10000,
     reason: "Ajuste acordado",
+    requestId: requestId(),
   })
   expect(refund.status).toBe(201)
 

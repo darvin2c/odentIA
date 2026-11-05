@@ -86,6 +86,10 @@ const refundInput = z.object({
   paymentMethodId: z.uuid().nullish(),
   reason: z.string().trim().min(1, { error: "Escribe el motivo de la devolución" }).max(2000),
   currency: z.string().regex(/^[A-Z]{3}$/).optional(),
+  // El mismo pedido enviado otra vez no devuelve dos veces (como cobrar y devolver desde el ticket).
+  requestId: z.uuid(),
+  // Lo que la pantalla mostraba a favor: si cambió, se dice antes de devolver.
+  expectedCreditCents: z.number().int().min(0).optional(),
 }).strict()
 // «Devolver» desde un ticket (ADR 0068): qué devuelve, cómo se le paga y por qué.
 const returnInput = z.object({

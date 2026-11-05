@@ -30,7 +30,7 @@ import {
 import { handoffOpenSql } from "./handoff-state.js"
 import { listOpportunities, type OpportunityListItem } from "./opportunities.js"
 import { proposalPendingSql } from "./proposal-state.js"
-import type { TaskItem } from "./tasks.js"
+import { readableTaskSql, type TaskItem, type TaskReader } from "./tasks.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 /* ------------------------------------------------------------------ */
@@ -45,6 +45,8 @@ export interface CrmCapabilities {
   conversations: boolean
   tasks: boolean
   agent: boolean
+  /** Lee la historia clínica: ve las derivaciones de una orden (`readsTask`). */
+  clinical?: boolean
   /** Ve la agenda: recibe la próxima cita de la persona. */
   appointments?: boolean
 }
@@ -185,7 +187,7 @@ async function notify(tx: Db, payload: { orgId: string; kind: string; at: string
 /* ------------------------- Cursor keyset ------------------------- */
 
 function activityFingerprint(contactId: string, caps: CrmCapabilities): string {
-  const m = `${caps.conversations ? 1 : 0}${caps.tasks ? 1 : 0}${caps.agent ? 1 : 0}`
+  const m = `${caps.conversations ? 1 : 0}${caps.tasks ? 1 : 0}${caps.agent ? 1 : 0}${caps.clinical ? 1 : 0}`
   return JSON.stringify({ c: contactId, m })
 }
 
@@ -639,6 +641,9 @@ export async function listContactActivity(
     if (convIds.length > 0) taskScope.push(inArray(crmTask.conversationId, convIds))
     const taskMerged: SQL = sql`('task:' || ${crmTask.id}::text)`
     const taskConds = [eq(crmTask.organizationId, orgId), or(...taskScope)!]
+    // Lo que su rol no lee no deja rastro en la actividad (`readsTask`).
+    const readable = readableTaskSql(readerOfCaps(caps))
+    if (readable) taskConds.push(readable)
     if (cursor) taskConds.push(keysetPredicate(crmTask.createdAt, taskMerged, cursor))
     const taskRows = await tx
       .select({ task: crmTask, at: atColumn(crmTask.createdAt) })
@@ -673,6 +678,7 @@ export async function listContactActivity(
         eq(crmTask.contactId, contactId),
         sql`${crmTask.conversationId} in (select "id" from "conversation" where "organization_id" = ${orgId} and "contact_id" = ${contactId})`,
       )!,
+      ...(readableTaskSql(readerOfCaps(caps)) ? [readableTaskSql(readerOfCaps(caps))!] : []),
     ]
     if (cursor) auditConds.push(keysetPredicate(auditEvent.createdAt, auditMerged, cursor))
     const auditRows = await tx
@@ -901,7 +907,15 @@ export async function listContactActivity(
  * resueltos igual que listTasks. Sin límite silencioso: son todas las
  * abiertas del contacto.
  */
-export async function listContactTasks(tx: Db, orgId: string, contactId: string): Promise<TaskItem[]> {
+/** Lo que lee quien mira el contexto (`readsTask`): la historia y las conversaciones. */
+const readerOfCaps = (caps: CrmCapabilities): TaskReader => ({ clinical: caps.clinical === true, conversations: caps.conversations })
+
+export async function listContactTasks(
+  tx: Db,
+  orgId: string,
+  contactId: string,
+  reader: TaskReader,
+): Promise<TaskItem[]> {
   const convIds = await contactConversationIds(tx, orgId, contactId)
   const scope = [eq(crmTask.contactId, contactId)]
   if (convIds.length > 0) scope.push(inArray(crmTask.conversationId, convIds))
@@ -923,7 +937,14 @@ export async function listContactTasks(tx: Db, orgId: string, contactId: string)
       opportunity,
       and(eq(opportunity.id, crmTask.opportunityId), eq(opportunity.organizationId, orgId)),
     )
-    .where(and(eq(crmTask.organizationId, orgId), eq(crmTask.status, "open"), or(...scope)!))
+    .where(
+      and(
+        eq(crmTask.organizationId, orgId),
+        eq(crmTask.status, "open"),
+        or(...scope)!,
+        readableTaskSql(reader),
+      ),
+    )
     .orderBy(asc(crmTask.dueAt), desc(crmTask.createdAt))
   return rows.map((r) => ({
     id: r.task.id,
@@ -945,6 +966,7 @@ export async function listContactTasks(tx: Db, orgId: string, contactId: string)
     contactName: r.contactName,
     opportunityTitle: r.opportunityTitle,
     agentCase: r.casePriority ? { priority: r.casePriority } : null,
+    fromRecord: (r.task.idempotencyKey ?? "").startsWith("clinical-order:"),
     createdAt: r.task.createdAt.toISOString(),
     updatedAt: r.task.updatedAt.toISOString(),
   }))
@@ -961,8 +983,8 @@ export async function getContactWorkspace(
     opportunitiesLimit?: number
   },
 ): Promise<CrmContactWorkspace> {
-  const full = await getContact(tx, orgId, contactId)
   const caps = opts.capabilities
+  const full = await getContact(tx, orgId, contactId, readerOfCaps(caps))
   // El detalle heredado también respeta capacidades: sin tasks.read no hay
   // pendientes; sin conversations.read no hay hilos ni identidades de canal.
   const scoped: ContactFull = {
@@ -986,7 +1008,7 @@ export async function getContactWorkspace(
       )
   const [opps, tasks, agent, activity, nextAppointment, permissions] = await Promise.all([
     listOpportunities(tx, orgId, { contactId, limit: opts.opportunitiesLimit ?? 30 }),
-    caps.tasks ? listContactTasks(tx, orgId, contactId) : Promise.resolve([] as TaskItem[]),
+    caps.tasks ? listContactTasks(tx, orgId, contactId, readerOfCaps(caps)) : Promise.resolve([] as TaskItem[]),
     agentPromise,
     listContactActivity(tx, orgId, contactId, {
       limit: opts.activityLimit ?? ACTIVITY_DEFAULT_LIMIT,

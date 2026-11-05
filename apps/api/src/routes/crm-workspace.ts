@@ -53,6 +53,8 @@ function capabilitiesOf(memberRole: string): CrmCapabilities {
     agent: canAccessAny(memberRole, ["agent.read", "agent.decide"]),
     // La próxima cita de la persona, solo para quien ve la agenda.
     appointments: canAccess(memberRole, "appointments.read"),
+    // Las tareas clínicas, solo para quien lee la historia (`permissions.ts`).
+    clinical: canAccess(memberRole, "clinical.read"),
   }
 }
 

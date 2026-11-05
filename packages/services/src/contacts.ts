@@ -23,6 +23,7 @@ import { personSearchCondition } from "./person-search.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { findOrgCountry } from "./locale.js"
 import { identityPatchOf, setPersonArchived, updatePersonIdentity } from "./people.js"
+import { readableTaskSql, type TaskReader } from "./tasks.js"
 
 /** Aviso en vivo mínimo para refresco CRM: solo `{ orgId, kind, at }`, sin PII. */
 export async function notifyContactChange(tx: Db, orgId: string): Promise<void> {
@@ -318,7 +319,12 @@ export interface ContactFull {
   conversations: ContactConversationItem[]
 }
 
-export async function getContact(tx: Db, orgId: string, id: string): Promise<ContactFull> {
+export async function getContact(
+  tx: Db,
+  orgId: string,
+  id: string,
+  reader: TaskReader = { clinical: true, conversations: true },
+): Promise<ContactFull> {
   const row = await requireContact(tx, orgId, id)
   const [identities, tasks, conversations, links] = await Promise.all([
     tx
@@ -329,7 +335,8 @@ export async function getContact(tx: Db, orgId: string, id: string): Promise<Con
       .select()
       .from(crmTask)
       .where(
-        and(eq(crmTask.organizationId, orgId), eq(crmTask.contactId, id), eq(crmTask.status, "open")),
+        // Lo que quien mira no lee no se le entrega (`readsTask`): ni la derivación ni su título.
+        and(eq(crmTask.organizationId, orgId), eq(crmTask.contactId, id), eq(crmTask.status, "open"), readableTaskSql(reader)),
       )
       .orderBy(asc(crmTask.createdAt)),
     tx

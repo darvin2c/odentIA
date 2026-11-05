@@ -90,7 +90,9 @@ export async function getConversationContext(tx: Db, orgId: string, conversation
   if (can("crm.read")) {
     const opportunities = await listOpportunities(tx, orgId, { contactId: row.id, limit: 30 })
     const open = opportunities.items.filter((item) => item.status === "open").length
-    const tasks = can("tasks.read") ? (await listContactTasks(tx, orgId, row.id)).length : 0
+    const tasks = can("tasks.read")
+      ? (await listContactTasks(tx, orgId, row.id, { clinical: can("clinical.read"), conversations: can("conversations.read") })).length
+      : 0
     lines.ventas =
       open + tasks > 0
         ? [open > 0 ? count(open, "oportunidad abierta", "oportunidades abiertas") : null, tasks > 0 ? count(tasks, "tarea", "tareas") : null].filter(Boolean).join(" · ")

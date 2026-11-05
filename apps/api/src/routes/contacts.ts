@@ -128,7 +128,13 @@ export function createContactsRoute(deps: CrmDeps) {
       return c.json(errorBody(c, "FORBIDDEN", "Sin permiso de lectura del CRM"), 403)
     }
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => getContact(tx, orgId, c.req.param("id"))),
+      // Sus tareas abiertas, con lo que el rol lee (`readsTask`): la derivación solo a quien atiende.
+      withOrgContext(deps.db, orgId, (tx) =>
+        getContact(tx, orgId, c.req.param("id"), {
+          clinical: canAccess(orgContextOf(c).memberRole, "clinical.read"),
+          conversations: canAccess(orgContextOf(c).memberRole, "conversations.read"),
+        }),
+      ),
     )
   })
 

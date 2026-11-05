@@ -562,6 +562,18 @@ const coordinationScheduleInput = z.union([
     .strict(),
 ])
 
+/** Lo clínico de la fila de la ficha: solo para quien lee la historia (`permissions.ts`). */
+const CLINICAL_PATIENT_FIELDS = ["bloodGroup", "asaClass", "healthReviewStatus", "healthReviewedAt", "healthReviewedBy", "healthRevision"] as const
+
+/** La ficha sin lo clínico, para recepción y caja: la fila suelta o dentro de `patient`. */
+function withoutClinical<T>(value: T): T {
+  if (!value || typeof value !== "object") return value
+  const copy = { ...(value as Record<string, unknown>) }
+  for (const field of CLINICAL_PATIENT_FIELDS) if (field in copy) copy[field] = null
+  if (copy["patient"] && typeof copy["patient"] === "object") copy["patient"] = withoutClinical(copy["patient"])
+  return copy as T
+}
+
 /** Borrar sus datos y ver qué se borraría: son las que dejan la historia bloqueada. */
 const ERASE_SUFFIXES = ["/erase", "/erase-preview"]
 
@@ -678,20 +690,21 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
   })
 
   app.post("/", async (c) => {
-    const { orgId, userId } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
     const parsed = createInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     // Lo mínimo (nombres, apellidos y cómo ubicarla) es el alta del equipo:
     // basta `patients.write`, que ya exige la ruta.
     return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) => {
+      withOrgContext(deps.db, orgId, async (tx) => {
         const { contextContactId, conversationId, scope, ...input } = parsed.data
-        return registerPatient(
+        const created = await registerPatient(
           tx,
           orgId,
           { kind: "internal", userId, contactId: contextContactId, conversationId, ...(scope ? { scope } : {}) },
           input,
         )
+        return canAccess(memberRole, "clinical.read") ? created : withoutClinical(created)
       }),
     )
   })
@@ -774,6 +787,8 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
         const { health: _health, ...declared } = full.registration?.answers ?? { health: undefined }
         return {
           ...full,
+          // Lo clínico de la ficha (grupo sanguíneo, clase ASA, revisión de salud) es de quien lee la historia.
+          patient: clinicalRead ? full.patient : withoutClinical(full.patient),
           registration: full.registration ? { ...full.registration, answers: declared } : null,
           activeAllergies:
             clinicalRead || canAccess(memberRole, "clinical.alerts") ? full.activeAllergies : [],
@@ -843,13 +858,15 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
   })
 
   app.patch("/:id", async (c) => {
-    const { orgId, userId } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
     const parsed = patchInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        updatePatient(tx, orgId, userId, c.req.param("id"), parsed.data),
-      ),
+      withOrgContext(deps.db, orgId, async (tx) => {
+        const updated = await updatePatient(tx, orgId, userId, c.req.param("id"), parsed.data)
+        // Corregir una dirección no devuelve lo clínico a recepción.
+        return canAccess(memberRole, "clinical.read") ? updated : withoutClinical(updated)
+      }),
     )
   })
 
