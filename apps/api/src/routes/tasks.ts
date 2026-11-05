@@ -14,7 +14,7 @@ import {
   updateTask,
   type TaskItem,
 } from "@odentia/services"
-import { Hono } from "hono"
+import { type Context, Hono } from "hono"
 import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
@@ -59,6 +59,21 @@ const patchInput = z.object({
 function stripCrmNames(item: TaskItem): TaskItem {
   return { ...item, contactName: null, opportunityTitle: null }
 }
+
+/**
+ * ¿Puede ver esta tarea quien pregunta? Lo clínico, solo quien lee la historia
+ * («lo clínico nunca se entrega a recepción/caja», `permissions.ts`). Por su id,
+ * la misma que vería en sus listas: la suya o la de su área en Tareas, toda con
+ * «Toda la clínica», y la de una persona o un paciente que puede ver.
+ */
+function seesTask(memberRole: string, userId: string, item: TaskItem): boolean {
+  if (item.clinical && !canAccess(memberRole, "clinical.read")) return false
+  if (canAccess(memberRole, "tasks.all") || item.assigneeUserId === userId) return true
+  if (!item.assigneeUserId && item.area && taskAreasOfRole(memberRole).includes(item.area)) return true
+  return (Boolean(item.patientId) && canAccess(memberRole, "patients.read")) || (Boolean(item.contactId) && canAccess(memberRole, "crm.read"))
+}
+
+const taskNotFound = (c: Context) => c.json(errorBody(c, "NOT_FOUND", "Tarea no encontrada"), 404)
 
 /** Nombres según permisos: CRM y filiación se exponen por separado. */
 function visibleTask(memberRole: string, item: TaskItem): TaskItem {
@@ -119,7 +134,8 @@ export function createTasksRoute(deps: CrmDeps) {
             ...(query.overdue ? { overdue: query.overdue === "true" } : {}),
           }),
         )
-        return c.json({ data: items.map((item) => visibleTask(memberRole, item)), nextCursor: null, total: items.length }, 200)
+        const seen = items.filter((item) => seesTask(memberRole, userId, item))
+        return c.json({ data: seen.map((item) => visibleTask(memberRole, item)), nextCursor: null, total: seen.length }, 200)
       }
       const view = query.view ?? (query.status === "done" ? "hechas" : query.overdue === "true" ? "vencidas" : "abiertas")
       const page = await withOrgContext(deps.db, orgId, (tx) =>
@@ -132,18 +148,23 @@ export function createTasksRoute(deps: CrmDeps) {
           ...(query.limit ? { limit: query.limit } : {}),
         }),
       )
-      return c.json({ data: page.items.map((item) => visibleTask(memberRole, item)), nextCursor: page.nextCursor, total: page.total }, 200)
+      // Lo suyo y lo de su área: lo clínico de su área ya es de quien lo lee; con «Toda la clínica», se quita.
+      const seen = page.items.filter((item) => seesTask(memberRole, userId, item))
+      return c.json({ data: seen.map((item) => visibleTask(memberRole, item)), nextCursor: page.nextCursor, total: page.total - (page.items.length - seen.length) }, 200)
     } catch (e) {
       return serviceErrorResponse(c, e) ?? Promise.reject(e)
     }
   })
 
   app.get("/:id", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    return runService(c, 200, async () => {
-      const item = await withOrgContext(deps.db, orgId, tx => getTask(tx, orgId, c.req.param("id")))
-      return visibleTask(memberRole, item)
-    })
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    try {
+      const item = await withOrgContext(deps.db, orgId, (tx) => getTask(tx, orgId, c.req.param("id")))
+      if (!seesTask(memberRole, userId, item)) return taskNotFound(c)
+      return c.json({ data: visibleTask(memberRole, item) }, 200)
+    } catch (e) {
+      return serviceErrorResponse(c, e) ?? Promise.reject(e)
+    }
   })
 
   app.post("/", async (c) => {
@@ -221,6 +242,13 @@ export function createTasksRoute(deps: CrmDeps) {
         errorBody(c, "FORBIDDEN", "Sin permiso de lectura del CRM para vincular tareas"),
         403,
       )
+    }
+    // Solo se cambia la tarea que se puede ver: por su id no se cierra la de otra persona o la clínica.
+    try {
+      const current = await withOrgContext(deps.db, orgId, (tx) => getTask(tx, orgId, c.req.param("id")))
+      if (!seesTask(memberRole, userId, current)) return taskNotFound(c)
+    } catch (e) {
+      return serviceErrorResponse(c, e) ?? Promise.reject(e)
     }
     return runService(c, 200, async () => {
       const updated = await withOrgContext(deps.db, orgId, (tx) =>

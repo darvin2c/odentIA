@@ -774,6 +774,8 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
         const { health: _health, ...declared } = full.registration?.answers ?? { health: undefined }
         return {
           ...full,
+          // Lo clínico de la ficha (grupo sanguíneo, clase ASA, revisión de salud) es de quien lee la historia.
+          patient: clinicalRead ? full.patient : { ...full.patient, bloodGroup: null, asaClass: null, healthReviewStatus: null },
           registration: full.registration ? { ...full.registration, answers: declared } : null,
           activeAllergies:
             clinicalRead || canAccess(memberRole, "clinical.alerts") ? full.activeAllergies : [],

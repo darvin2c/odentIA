@@ -45,6 +45,11 @@ export interface CrmCapabilities {
   conversations: boolean
   tasks: boolean
   agent: boolean
+  /**
+   * Lee la historia clínica: ve las tareas clínicas (una derivación, un tema
+   * clínico que pasó el agente). Sin esto no llegan ni su título ni su rastro.
+   */
+  clinical?: boolean
   /** Ve la agenda: recibe la próxima cita de la persona. */
   appointments?: boolean
 }
@@ -639,6 +644,8 @@ export async function listContactActivity(
     if (convIds.length > 0) taskScope.push(inArray(crmTask.conversationId, convIds))
     const taskMerged: SQL = sql`('task:' || ${crmTask.id}::text)`
     const taskConds = [eq(crmTask.organizationId, orgId), or(...taskScope)!]
+    // Lo clínico no deja rastro en la actividad de quien no lee la historia.
+    if (caps.clinical !== true) taskConds.push(sql`not ${clinicalTaskSql}`)
     if (cursor) taskConds.push(keysetPredicate(crmTask.createdAt, taskMerged, cursor))
     const taskRows = await tx
       .select({ task: crmTask, at: atColumn(crmTask.createdAt) })
@@ -673,6 +680,7 @@ export async function listContactActivity(
         eq(crmTask.contactId, contactId),
         sql`${crmTask.conversationId} in (select "id" from "conversation" where "organization_id" = ${orgId} and "contact_id" = ${contactId})`,
       )!,
+      ...(caps.clinical === true ? [] : [sql`not ${clinicalTaskSql}`]),
     ]
     if (cursor) auditConds.push(keysetPredicate(auditEvent.createdAt, auditMerged, cursor))
     const auditRows = await tx
@@ -901,7 +909,16 @@ export async function listContactActivity(
  * resueltos igual que listTasks. Sin límite silencioso: son todas las
  * abiertas del contacto.
  */
-export async function listContactTasks(tx: Db, orgId: string, contactId: string): Promise<TaskItem[]> {
+/** Una tarea clínica: un tema clínico del agente o la derivación de una orden (como `TaskItem.clinical`). */
+// Con `coalesce`: sin área, `area = 'clinico'` sería NULL y el `not` dejaría fuera la tarea.
+const clinicalTaskSql: SQL = sql`(coalesce(${crmTask.area}, '') = 'clinico' or coalesce(${crmTask.idempotencyKey}, '') like 'clinical-order:%')`
+
+export async function listContactTasks(
+  tx: Db,
+  orgId: string,
+  contactId: string,
+  opts: { clinical?: boolean } = {},
+): Promise<TaskItem[]> {
   const convIds = await contactConversationIds(tx, orgId, contactId)
   const scope = [eq(crmTask.contactId, contactId)]
   if (convIds.length > 0) scope.push(inArray(crmTask.conversationId, convIds))
@@ -923,7 +940,14 @@ export async function listContactTasks(tx: Db, orgId: string, contactId: string)
       opportunity,
       and(eq(opportunity.id, crmTask.opportunityId), eq(opportunity.organizationId, orgId)),
     )
-    .where(and(eq(crmTask.organizationId, orgId), eq(crmTask.status, "open"), or(...scope)!))
+    .where(
+      and(
+        eq(crmTask.organizationId, orgId),
+        eq(crmTask.status, "open"),
+        or(...scope)!,
+        opts.clinical ? undefined : sql`not ${clinicalTaskSql}`,
+      ),
+    )
     .orderBy(asc(crmTask.dueAt), desc(crmTask.createdAt))
   return rows.map((r) => ({
     id: r.task.id,
@@ -945,6 +969,7 @@ export async function listContactTasks(tx: Db, orgId: string, contactId: string)
     contactName: r.contactName,
     opportunityTitle: r.opportunityTitle,
     agentCase: r.casePriority ? { priority: r.casePriority } : null,
+    clinical: r.task.area === "clinico" || (r.task.idempotencyKey ?? "").startsWith("clinical-order:"),
     createdAt: r.task.createdAt.toISOString(),
     updatedAt: r.task.updatedAt.toISOString(),
   }))
@@ -986,7 +1011,7 @@ export async function getContactWorkspace(
       )
   const [opps, tasks, agent, activity, nextAppointment, permissions] = await Promise.all([
     listOpportunities(tx, orgId, { contactId, limit: opts.opportunitiesLimit ?? 30 }),
-    caps.tasks ? listContactTasks(tx, orgId, contactId) : Promise.resolve([] as TaskItem[]),
+    caps.tasks ? listContactTasks(tx, orgId, contactId, { clinical: caps.clinical === true }) : Promise.resolve([] as TaskItem[]),
     agentPromise,
     listContactActivity(tx, orgId, contactId, {
       limit: opts.activityLimit ?? ACTIVITY_DEFAULT_LIMIT,

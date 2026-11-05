@@ -64,6 +64,11 @@ export interface TaskItem {
    * su urgencia.
    */
   agentCase: { priority: string } | null
+  /**
+   * Lleva algo de la historia clínica: un tema clínico que pasó el agente
+   * (`area` clínico) o la derivación de una orden. Solo la ve quien lee lo clínico.
+   */
+  clinical: boolean
   createdAt: string
   updatedAt: string
 }
@@ -93,6 +98,7 @@ function toItem(
     contactName,
     opportunityTitle,
     agentCase: casePriority ? { priority: casePriority } : null,
+    clinical: row.area === "clinico" || (row.idempotencyKey ?? "").startsWith("clinical-order:"),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   }
