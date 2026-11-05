@@ -249,6 +249,8 @@ export async function getPersonPage(
             eq(patientContact.organizationId, orgId),
             eq(patientContact.patientId, own.patient.id),
             sql`${patientContact.relationship} <> 'self'`,
+            // A quien solo se llama en una emergencia no habla por ella: su representante o el preferido sí.
+            sql`not (${patientContact.isEmergency} and ${patientContact.relationship} <> 'guardian' and not ${patientContact.isPreferred})`,
             eq(contact.isActive, true),
           ),
         )

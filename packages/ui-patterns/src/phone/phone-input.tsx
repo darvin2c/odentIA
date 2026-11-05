@@ -106,10 +106,12 @@ export function PhoneInput({
   /*
    * Un campo con un teléfono a medias no puede parecer correcto: al salir se
    * marca inválido por sí solo. El mensaje lo pone la pantalla (`FieldError`);
-   * aquí solo se enciende `aria-invalid`, que es lo que pinta el error.
+   * aquí solo se enciende `aria-invalid`, que es lo que pinta el error. Un
+   * número posible pero raro para su país se guarda: no se pinta en rojo (el
+   * rojo sin motivo llevaba ahí el foco al enviar), lo avisa `PhoneField`.
    */
   const current = React.useMemo(() => phoneMeta(display, country), [country, display])
-  const invalid = invalidProp || (touched && current.digits.length > 0 && !current.isValid)
+  const invalid = invalidProp || (touched && current.digits.length > 0 && !current.e164)
 
   React.useEffect(() => {
     if (value === emitted.current) return

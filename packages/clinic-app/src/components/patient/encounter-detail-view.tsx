@@ -399,7 +399,7 @@ export function EncounterDetailView({
       <ProductDetail patientId={patientId} detail={detail} slot="end" />
 
       {unrecorded.length > 0 ? (
-        <p className="text-sm text-muted-foreground">No se registró {listWords(unrecorded)}.</p>
+        <p className="text-sm text-muted-foreground">Sin registrar: {listWords(unrecorded)}.</p>
       ) : null}
 
       {encounter.signerName ? (

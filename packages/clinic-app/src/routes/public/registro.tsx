@@ -149,6 +149,7 @@ function PublicRegistrationPage() {
           countryCode={info.countryCode ?? null}
           ownRecord={ownRecord}
           addressSource={addressSource}
+          draftKey={`${slug}:${token ?? entryPoint ?? "qr"}`}
           onSubmit={async (answers) => {
             try {
               const result = await submitPublicRegistration(slug, {

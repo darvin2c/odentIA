@@ -8,6 +8,7 @@ import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { type OpportunityListItem, timeAgo, usePermission } from "../../lib/crm"
 import { conversationStatusLabel } from "../../lib/glossary"
+import { speaksForWords } from "../../lib/patient-overview"
 import type { PersonPage } from "../../lib/people"
 import { QueryErrorState } from "../../lib/query-error"
 import { OpportunityDrawer } from "../crm/opportunity-drawer"
@@ -118,7 +119,7 @@ export function PersonConversations({ person }: { person: PersonPage }) {
             <ul className="flex flex-col gap-1 border-t pt-3 text-sm">
               {spokenWithConversation.map((other) => (
                 <li key={other.personId}>
-                  Habla por ella{" "}
+                  {speaksForWords(person.sex)}{" "}
                   <PersonLink contactId={other.personId} isPatient={other.isPatient}>
                     {other.displayName}
                   </PersonLink>

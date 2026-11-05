@@ -181,7 +181,10 @@ export function EncounterContextBody({
       <section className="flex flex-col gap-1">
         <h3 className="font-medium">Alergias</h3>
         {allergies.length === 0 ? (
-          <p className="text-muted-foreground">Sin alergias registradas.</p>
+          // «No tiene» solo si se le preguntó; si nunca se preguntó, se dice así (ADR 0035).
+          <p className="text-muted-foreground">
+            {data.reviewStatus.allergies === "none" ? "No tiene alergias." : "Aún no se le preguntó por alergias."}
+          </p>
         ) : (
           <ul className="flex flex-col gap-1">
             {allergies.map((allergy) => (

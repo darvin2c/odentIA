@@ -35,7 +35,7 @@ import { fetchResponsibilities } from "../../lib/clinical-journey"
 import { useCan, usePermission } from "../../lib/crm"
 import { personHeaderRules } from "../../lib/screen-rules"
 import { label } from "../../lib/glossary"
-import { sexLabel } from "../../lib/patient-overview"
+import { sexLabel, speaksForWords } from "../../lib/patient-overview"
 import { ageFrom, hcLabel, type PatientFull, type PatientSummary } from "../../lib/patients"
 import { PERSON_KIND_LABELS, type PersonPage, relationshipText } from "../../lib/people"
 import type { BookingSeed } from "../agenda/booking-drawer"
@@ -366,7 +366,7 @@ export function PersonHeader({
         </div>
         {patient && person.spokenForBy.length > 0 ? (
           <p className="text-sm">
-            <span className="font-medium">Habla por ella: </span>
+            <span className="font-medium">{speaksForWords(person.sex)}: </span>
             {person.spokenForBy.map((other, index) => (
               <span key={other.personId}>
                 {index > 0 ? ", " : ""}
