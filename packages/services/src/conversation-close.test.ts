@@ -8,7 +8,7 @@ import { crmNote } from "@odentia/db/schema/crm-workspace"
 import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
-import { and, asc, eq } from "drizzle-orm"
+import { and, asc, desc, eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 import { addAgentCaseNote, getAgentCaseState, formatAgentCaseForPrompt } from "./agent-case.js"
 import { createHandoff } from "./agent-operations.js"
@@ -30,13 +30,13 @@ import {
 } from "./conversation-close.js"
 import { reopenConversation, sendOutbound } from "./conversations.js"
 import { askConfirmationAfterReaction, REACTION_CONFIRM_TEXT } from "./reactions.js"
-import { answerToTeamMember, reopenTopic, resolveTopic, sendTeamReply, takeTopic } from "./topic-reply.js"
+import { answerToTeamMember, reopenTopic, reopenTopicOfFailedReply, resolveTopic, sendTeamReply, takeTopic } from "./topic-reply.js"
 import { recordTopicAskedAgain } from "./agent-operations.js"
 import { listInboxConversations } from "./inbox.js"
 import { getPersonPanel } from "./person-panel.js"
 import { completeTask } from "./tasks.js"
 import { setWritingHours } from "./writing-hours.js"
-import { getWorkspaceHome } from "./workspace.js"
+import { countWorkspaceWaiting, getWorkspaceHome, type WorkspaceAccess } from "./workspace.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 import { insertTestPatients } from "./test-patient.js"
 
@@ -639,6 +639,77 @@ describe("temas para el equipo: el agente nunca se calla (ADR 0050)", () => {
     // Un tema de otra conversación no se reabre por esta.
     const other = await c.thread("Otro")
     await expect(c.run((tx) => reopenTopic(tx, c.orgId, { conversationId: other.id, topicId: topic.id, userId: c.receptionId }))).rejects.toMatchObject({ status: 404 })
+  })
+
+  it("si la respuesta que resolvió el tema no sale, el tema vuelve a quedar pendiente y la persona sale en «Te espera»", async () => {
+    const c = await clinic()
+    const conv = await c.thread("Lucía Paredes")
+    const [asked] = await c.say(conv.id, "in", "¿Puedo ir el sábado?", new Date(Date.now() - 60_000))
+    const topic = await c.run((tx) => createHandoff(tx, c.orgId, null, { conversationId: conv.id, reason: "Horario", summary: "Sábado", createdBy: "agent" }))
+    const sent = await c.run((tx) => sendTeamReply(tx, c.orgId, {
+      conversationId: conv.id, userId: c.receptionId, content: { type: "text", text: "Sí, de 9 a 13" }, replyToMessageId: asked!.id,
+    }))
+    expect(sent.topicResolved).toBe(true)
+    // Mientras está en cola no se reabre nada: encolado aún no es «no salió».
+    expect(await c.run((tx) => reopenTopicOfFailedReply(tx, c.orgId, sent.id))).toBeNull()
+    // El proveedor la rechaza (la clave de WhatsApp venció, por ejemplo).
+    await ownerDb.update(message).set({ status: "failed", error: "token" }).where(eq(message.id, sent.id))
+    expect(await c.run((tx) => reopenTopicOfFailedReply(tx, c.orgId, sent.id))).toBe(topic.id)
+    expect((await ownerDb.select().from(crmTask).where(eq(crmTask.id, topic.taskId!)))[0]?.status).toBe("open")
+    // Lo reabrió el sistema, no quien escribió.
+    const [reopened] = await ownerDb.select().from(auditEvent)
+      .where(and(eq(auditEvent.entity, "task"), eq(auditEvent.entityId, topic.taskId!), eq(auditEvent.action, "task.updated")))
+      .orderBy(desc(auditEvent.createdAt)).limit(1)
+    expect(reopened).toMatchObject({ actorUserId: null, metadata: expect.objectContaining({ statusNext: "open" }) })
+    // Dos veces no hace nada más: ya está abierto.
+    expect(await c.run((tx) => reopenTopicOfFailedReply(tx, c.orgId, sent.id))).toBeNull()
+  })
+
+  it("una respuesta que no resolvió el tema no lo reabre si no sale, y lo que otra persona hizo después manda", async () => {
+    const c = await clinic()
+    const conv = await c.thread("Rosa Vega")
+    const [asked] = await c.say(conv.id, "in", "¿Atienden el domingo?", new Date(Date.now() - 60_000))
+    const topic = await c.run((tx) => createHandoff(tx, c.orgId, null, { conversationId: conv.id, reason: "Horario", summary: "Domingo", createdBy: "agent" }))
+    const first = await c.run((tx) => sendTeamReply(tx, c.orgId, {
+      conversationId: conv.id, userId: c.receptionId, content: { type: "text", text: "No, solo de lunes a sábado" }, replyToMessageId: asked!.id,
+    }))
+    expect(first.topicResolved).toBe(true)
+    // Otra respuesta citando la misma pregunta, con el tema ya resuelto: no resuelve nada.
+    const second = await c.run((tx) => sendTeamReply(tx, c.orgId, {
+      conversationId: conv.id, userId: c.receptionId, content: { type: "text", text: "Te esperamos el lunes" }, replyToMessageId: asked!.id,
+    }))
+    expect(second.topicResolved).toBe(false)
+    await ownerDb.update(message).set({ status: "failed", error: "token" }).where(eq(message.id, second.id))
+    expect(await c.run((tx) => reopenTopicOfFailedReply(tx, c.orgId, second.id))).toBeNull()
+    // Alguien lo dejó pendiente y lo volvió a resolver: aunque la primera no salga, manda lo de después.
+    await c.run((tx) => reopenTopic(tx, c.orgId, { conversationId: conv.id, topicId: topic.id, userId: c.receptionId }))
+    await c.run((tx) => resolveTopic(tx, c.orgId, { conversationId: conv.id, topicId: topic.id, userId: c.receptionId }))
+    await ownerDb.update(message).set({ status: "failed", error: "token" }).where(eq(message.id, first.id))
+    expect(await c.run((tx) => reopenTopicOfFailedReply(tx, c.orgId, first.id))).toBeNull()
+    expect((await ownerDb.select().from(crmTask).where(eq(crmTask.id, topic.taskId!)))[0]?.status).toBe("done")
+  })
+
+  it("en Inicio sale la persona a la que no le llegó lo último que se le escribió, aunque no haya vuelto a escribir", async () => {
+    const c = await clinic()
+    const conv = await c.thread("Marta Ríos")
+    // Escribió y se le respondió: nadie la espera.
+    await c.say(conv.id, "in", "¿Mañana a qué hora es?", new Date(Date.now() - 180_000))
+    await c.say(conv.id, "out", "A las 10", new Date(Date.now() - 120_000), "user")
+    const access: WorkspaceAccess = {
+      patients: true, appointments: false, conversations: true, tasks: false, finance: false, clinical: false,
+      crm: true, agent: true, allTasks: false, configure: false, ownAppointments: false, attends: false,
+    }
+    expect(await c.run((tx) => countWorkspaceWaiting(tx, c.orgId, c.receptionId, access))).toBe(0)
+    // Lo último que se le escribió no salió.
+    const failedAt = new Date(Date.now() - 60_000)
+    const [reminder] = await c.say(conv.id, "out", "Te recordamos tu cita de mañana", failedAt)
+    await ownerDb.update(message).set({ status: "failed", error: "token" }).where(eq(message.id, reminder!.id))
+    const home = await c.run((tx) => getWorkspaceHome(tx, c.orgId, c.receptionId, access))
+    const row = home.waiting.find((item) => item.kind === "person" && item.conversationId === conv.id) as { undelivered?: boolean; since?: string } | undefined
+    expect(row?.undelivered).toBe(true)
+    // La hora es la del mensaje que no salió.
+    expect(new Date(row!.since!).getTime()).toBe(failedAt.getTime())
+    expect(await c.run((tx) => countWorkspaceWaiting(tx, c.orgId, c.receptionId, access))).toBe(1)
   })
 
   it("caja solo deja pendiente un pago suyo o sin tomar", async () => {
