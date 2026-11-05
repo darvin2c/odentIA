@@ -1,7 +1,7 @@
 import type { Db } from "@odentia/db"
-import { professionalSchedule } from "@odentia/db/schema/availability"
+import { professionalSchedule, scheduleBlock } from "@odentia/db/schema/availability"
 import { branch } from "@odentia/db/schema/org"
-import { and, eq } from "drizzle-orm"
+import { and, eq, gt, isNull, lt } from "drizzle-orm"
 import { findOrgLocale } from "./locale.js"
 import { addOpportuneMinutes, type MinuteRange, type OpportuneSchedule } from "./opportune-hours.js"
 
@@ -29,7 +29,53 @@ export async function clinicOpenSchedule(tx: Db, orgId: string): Promise<Opportu
   if (rows.length === 0) return null
   const week: MinuteRange[][] = Array.from({ length: 7 }, () => [])
   for (const row of rows) week[row.weekday]?.push([row.startMin, row.endMin])
-  return { timeZone: (await findOrgLocale(tx, orgId)).timezone, week }
+  return { timeZone: (await findOrgLocale(tx, orgId)).timezone, week, closed: await clinicClosures(tx, orgId) }
+}
+
+/**
+ * Cuándo la clínica entera está cerrada aunque su horario diga que abre (un
+ * feriado, un cierre): los bloqueos de toda una sede (sin profesional ni
+ * unidad), cuando cierran a la vez todas sus sedes activas. Del día anterior a
+ * las cuatro semanas que siguen, lo que alcanza a contar un tema.
+ */
+async function clinicClosures(tx: Db, orgId: string): Promise<Array<{ start: Date; end: Date }>> {
+  const now = Date.now()
+  const rows = await tx
+    .select({ branchId: scheduleBlock.branchId, start: scheduleBlock.startsAt, end: scheduleBlock.endsAt })
+    .from(scheduleBlock)
+    .innerJoin(branch, and(eq(branch.id, scheduleBlock.branchId), eq(branch.organizationId, orgId), eq(branch.isActive, true)))
+    .where(
+      and(
+        eq(scheduleBlock.organizationId, orgId),
+        isNull(scheduleBlock.professionalUserId),
+        isNull(scheduleBlock.roomId),
+        gt(scheduleBlock.endsAt, new Date(now - 86_400_000)),
+        lt(scheduleBlock.startsAt, new Date(now + 32 * 86_400_000)),
+      ),
+    )
+  if (rows.length === 0) return []
+  const branches = await tx
+    .select({ id: branch.id })
+    .from(branch)
+    .where(and(eq(branch.organizationId, orgId), eq(branch.isActive, true)))
+  // Lo cerrado a la vez en todas las sedes: la intersección de los cierres de cada una.
+  let closed: Array<{ start: Date; end: Date }> | null = null
+  for (const { id } of branches) {
+    const own = rows.filter((row) => row.branchId === id).map((row) => ({ start: row.start, end: row.end }))
+    if (closed === null) {
+      closed = own
+      continue
+    }
+    const next: Array<{ start: Date; end: Date }> = []
+    for (const a of closed)
+      for (const b of own) {
+        const start = Math.max(a.start.getTime(), b.start.getTime())
+        const end = Math.min(a.end.getTime(), b.end.getTime())
+        if (end > start) next.push({ start: new Date(start), end: new Date(end) })
+      }
+    closed = next
+  }
+  return closed ?? []
 }
 
 /**

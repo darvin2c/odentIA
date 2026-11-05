@@ -15,6 +15,25 @@ export interface OpportuneSchedule {
   timeZone: string
   /** Por día de la semana (0 = domingo), los tramos permitidos; vacío = ese día no. */
   week: MinuteRange[][]
+  /** Instantes en que, aunque el horario diga que sí, está cerrado (un feriado, un cierre): no cuentan. */
+  closed?: Array<{ start: Date; end: Date }>
+}
+
+/** Lo de una ventana que queda fuera de los cierres. */
+function openParts(start: number, end: number, closed: OpportuneSchedule["closed"]): Array<[number, number]> {
+  let parts: Array<[number, number]> = [[start, end]]
+  for (const gap of closed ?? []) {
+    const from = gap.start.getTime()
+    const to = gap.end.getTime()
+    parts = parts.flatMap(([a, b]): Array<[number, number]> => {
+      if (to <= a || from >= b) return [[a, b]]
+      return [
+        ...(from > a ? ([[a, from]] as Array<[number, number]>) : []),
+        ...(to < b ? ([[to, b]] as Array<[number, number]>) : []),
+      ]
+    })
+  }
+  return parts
 }
 
 /** Cuántos días se busca hacia adelante o atrás antes de rendirse (un horario sin tramos). */
@@ -159,11 +178,12 @@ export function addOpportuneMinutes(at: Date, minutes: number, schedule: Opportu
   if (left <= 0) return at
   for (let offset = 0; offset < 32; offset++) {
     for (const window of windowsOf(schedule, shiftedDay(at, schedule.timeZone, offset))) {
-      const start = Math.max(window.start.getTime(), at.getTime())
-      const end = window.end.getTime()
-      if (end <= start) continue
-      if (end - start >= left) return new Date(start + left)
-      left -= end - start
+      const begin = Math.max(window.start.getTime(), at.getTime())
+      if (window.end.getTime() <= begin) continue
+      for (const [start, end] of openParts(begin, window.end.getTime(), schedule.closed)) {
+        if (end - start >= left) return new Date(start + left)
+        left -= end - start
+      }
     }
   }
   return null

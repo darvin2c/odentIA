@@ -423,11 +423,12 @@ describe("al cambiar la cita, el agente le avisa", () => {
     await book(c, lucia.patientId, later(4 * DAY))
     expect((await deliver(c)).map((result) => result.outcome)).toEqual(["enviado"])
     // Pidió no recibir ningún mensaje de la clínica: ahí sí se respeta también el aviso.
+    // Ni se arma: la Agenda no dice «el agente le avisa» de algo que no saldrá.
     const ana = await person(c, "Ana Torres", { openWindow: true, refused: ["avisos"] })
-    await book(c, ana.patientId, later(5 * DAY))
-    expect((await deliver(c)).map((result) => result.outcome)).toEqual(["omitido"])
-    const theirs = (await jobsOf(c)).find((job) => job.contactId === ana.contactId)
-    expect(theirs).toMatchObject({ status: "omitido", cause: "sin_permiso", taskId: null })
+    const booked = await book(c, ana.patientId, later(5 * DAY))
+    expect(booked.notice?.queued ?? false).toBe(false)
+    expect(await deliver(c)).toEqual([])
+    expect((await jobsOf(c)).find((job) => job.contactId === ana.contactId)).toBeUndefined()
     expect(await ownerDb.select().from(crmTask).where(eq(crmTask.organizationId, c.orgId))).toEqual([])
   })
 })

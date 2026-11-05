@@ -201,7 +201,7 @@ const LISTS: Record<ReportListKey, ListCopy> = {
     showNext: false,
   },
   controls_missed: {
-    title: "No vinieron a su control",
+    title: "Controles que no se hicieron",
     noun: { one: "control", many: "controles" },
     how: (period) => `Controles que tocaban en ${period} y no se hicieron: siguen pendientes, se cancelaron o se marcaron hechos sin una atención cerrada.`,
     where: { to: "/agenda", label: "Abrir la Agenda" },
