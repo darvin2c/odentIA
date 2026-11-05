@@ -67,7 +67,7 @@ import {
 } from "@odentia/ui-patterns"
 import type { AnyFormApi } from "@tanstack/react-form"
 import { useStore } from "@tanstack/react-form"
-import { createContext, useContext, useEffect, useId, useState } from "react"
+import { createContext, useContext, useEffect, useId, useRef, useState } from "react"
 import type { AddressSource } from "../../lib/address-suggestions"
 import { asksDocumentCountry, countryChoices } from "../../lib/person-data"
 import { productUi } from "../../product/product-ui"
@@ -526,11 +526,15 @@ export function RegistrationQuestionnaire({
   // Lo escrito antes de recargar, en esta pestaña: se repone ya montada la página (el
   // servidor no lo conoce, y pintarlo distinto rompería la hidratación).
   const [restored, setRestored] = useState(false)
+  const sentRef = useRef(false)
   const form = useRegistrationForm(
     { ...EMPTY, respondent: ownRecord ? "representative" : "patient" },
     (_value, formApi) => placeErrors(formApi, finalErrors()),
     async () => {
       await onSubmit(buildAnswers())
+      // Enviado: lo escrito se borra de la pestaña ya, antes de que la pantalla cambie.
+      sentRef.current = true
+      if (draftKey) clearQuestionnaireDraft(draftKey)
     },
   )
   const draft = useStore(form.store, (state) => state.values)
@@ -549,11 +553,11 @@ export function RegistrationQuestionnaire({
       clearQuestionnaireDraft(draftKey)
       return
     }
-    if (touched) writeQuestionnaireDraft(draftKey, draft)
+    if (touched && !sentRef.current) writeQuestionnaireDraft(draftKey, draft)
   }, [draftKey, draft, submitted, touched])
   // Salir con algo escrito pide confirmar al navegador: se avisa antes de perderlo.
   useEffect(() => {
-    if (!draftKey || submitted || !touched) return
+    if (!draftKey || submitted || !touched || sentRef.current) return
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault()
     }

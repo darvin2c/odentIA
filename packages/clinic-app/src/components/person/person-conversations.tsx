@@ -47,7 +47,8 @@ export function PersonConversations({ person }: { person: PersonPage }) {
     retry: false,
   })
   const list = conversations.data?.data ?? []
-  const spokenWithConversation = person.spokenForBy.filter((other) => other.conversationId)
+  // Las conversaciones de quien habla por ella (no de quien solo es su contacto de emergencia).
+  const spokenWithConversation = person.spokenForBy.filter((other) => other.conversationId && !other.emergencyOnly)
 
   return (
     <div className="flex min-w-0 flex-col gap-4">

@@ -1133,11 +1133,20 @@ export async function attachLegalRepresentative(
       .limit(1)
     if (current && !current.docNumber) {
       const rep = input.representative
-      await updatePersonIdentity(tx, orgId, { userId: actorUserId }, representativeId, {
-        docType: rep.docType ?? null,
-        docNumber: rep.docNumber,
-        docCountry: documentIssuerCountry(clinicalProfileFor(input.countryCode), rep.docType, rep.docCountry),
-      })
+      const personId = representativeId
+      // En su punto de guardado: si ese documento ya es de otra persona (o algo de ella no
+      // pasa las reglas), no frena el alta del menor; se completa después en su página.
+      await tx
+        .transaction((inner) =>
+          updatePersonIdentity(inner, orgId, { userId: actorUserId }, personId, {
+            docType: rep.docType ?? null,
+            docNumber: rep.docNumber,
+            docCountry: documentIssuerCountry(clinicalProfileFor(input.countryCode), rep.docType, rep.docCountry),
+          }),
+        )
+        .catch((error: unknown) => {
+          if (!(error instanceof ServiceError)) throw error
+        })
     }
   }
   if (!representativeId) {

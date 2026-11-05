@@ -231,11 +231,24 @@ export function NewPatientDrawer({
   const guardian = target.kind === "dependent" ? target.person : chosenGuardian
   const dependent = guardian !== null
   // Al cerrar se olvida: la próxima vez empieza como «Nuevo paciente».
+  const openRef = useRef(open)
+  openRef.current = open
   useEffect(() => {
     if (open) return
     setChosenGuardian(null)
     setGuardianPick(null)
   }, [open])
+  /** Elegir (o cambiar) al responsable: lo que llega después de cerrar no reabre nada. */
+  const pickGuardian = (person: PickedPerson | null) => {
+    setGuardianPick(person)
+    setChosenGuardian(null)
+    if (!person) return
+    void fetchPerson(person.id)
+      .then((page) => {
+        if (openRef.current) setChosenGuardian(page.data)
+      })
+      .catch(() => setGuardianPick(null))
+  }
   const guardianFirst = guardian?.displayName.split(" ")[0] ?? "esta persona"
 
   const [stage, setStage] = useState<Stage>("form")
@@ -485,6 +498,12 @@ export function NewPatientDrawer({
   const docType = docTypeOf(values)
   const guardianDocType = guardianDocTypeOf(values)
   const minor = minorOf(values)
+  // Si la fecha deja de ser de un menor, el responsable elegido aquí ya no corresponde.
+  useEffect(() => {
+    if (minor || target.kind === "dependent" || (!chosenGuardian && !guardianPick)) return
+    setChosenGuardian(null)
+    setGuardianPick(null)
+  }, [minor, target.kind, chosenGuardian, guardianPick])
   const needsGuardianDoc = needsGuardianDocOf(values)
 
   async function startFrom(row: PersonListItem): Promise<void> {
@@ -742,18 +761,16 @@ export function NewPatientDrawer({
                     )}
                   </form.AppField>
                 ) : null}
-                {!dependent && minor ? (
+                {/* Un menor nuevo: se elige aquí a su responsable. Si ya se eligió a una persona que existe,
+                    se registra desde la página de su responsable, para no crearle otra ficha. */}
+                {!dependent && minor && picked ? (
+                  <p className="rounded-lg border border-warning/40 bg-warning-soft p-3 text-sm">
+                    Es menor de edad: regístralo desde la página de su madre, padre o tutor, con «Registrar a alguien a su cargo».
+                  </p>
+                ) : target.kind !== "dependent" && minor ? (
                   <div className="flex flex-col gap-2 rounded-lg border border-warning/40 bg-warning-soft p-3 text-sm">
                     <p>Es menor de edad: decide por él o ella su madre, padre o tutor. ¿Quién es?</p>
-                    <PersonPicker
-                      label="Su responsable"
-                      value={guardianPick}
-                      onChange={(person) => {
-                        setGuardianPick(person)
-                        if (!person) return
-                        void fetchPerson(person.id).then((page) => setChosenGuardian(page.data))
-                      }}
-                    />
+                    <PersonPicker label="Su responsable" value={guardianPick} onChange={pickGuardian} />
                     <p className="text-muted-foreground">Si aún no está registrado, regístralo antes con «Nuevo contacto».</p>
                   </div>
                 ) : null}
