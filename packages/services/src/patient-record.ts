@@ -41,7 +41,9 @@ import {
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
+import { user } from "@odentia/db/schema/auth"
 import {
+  clinicalNote,
   diagnosisCatalog,
   encounter,
   encounterDiagnosis,
@@ -122,6 +124,8 @@ export interface PatientRecord {
     procedures: Array<typeof encounterProcedure.$inferSelect & RecordSite>
     /** El examen como lo cuenta el producto: en líneas para el PDF y como Observations para FHIR. */
     exam: { lines: string[]; observations: ExamObservation[] }
+    /** Lo corregido después de firmar, con quién y cuándo: también es parte de la historia. */
+    addenda: Array<{ note: string; authorName: string | null; createdAt: Date }>
   }>
   /** Lo que agrega el producto de la clínica (odentIA: el odontograma vigente). */
   productSections: RecordSection[]
@@ -184,6 +188,20 @@ export async function loadPatientRecord(
         .from(encounterDiagnosis)
         .where(and(byPatient(encounterDiagnosis), isNull(encounterDiagnosis.voidedAt)))
         .orderBy(asc(encounterDiagnosis.createdAt))
+    : []
+  const addenda = encounterIds.length
+    ? await tx
+        .select({ encounterId: clinicalNote.encounterId, note: clinicalNote.note, authorName: user.name, createdAt: clinicalNote.createdAt })
+        .from(clinicalNote)
+        .leftJoin(user, eq(user.id, clinicalNote.authorUserId))
+        .where(
+          and(
+            eq(clinicalNote.organizationId, orgId),
+            inArray(clinicalNote.encounterId, encounterIds),
+            eq(clinicalNote.kind, "adenda"),
+          ),
+        )
+        .orderBy(asc(clinicalNote.createdAt), asc(clinicalNote.id))
     : []
   const procedures = encounterIds.length
     ? await tx
@@ -291,6 +309,9 @@ export async function loadPatientRecord(
         lines: hooks.examination.recordLines(row.examination),
         observations: hooks.examination.observations(row.examination),
       },
+      addenda: addenda
+        .filter((a) => a.encounterId === row.id)
+        .map((a) => ({ note: a.note, authorName: a.authorName, createdAt: a.createdAt })),
     })),
     productSections,
     planItems: planItems.map((item) => ({
@@ -466,7 +487,7 @@ export async function renderPatientRecordPdf(
 
   section(`Atenciones (${record.encounters.length})`)
   if (!record.encounters.length) kit.text("Sin atenciones registradas.")
-  for (const { row, diagnoses, procedures, exam } of record.encounters) {
+  for (const { row, diagnoses, procedures, exam, addenda } of record.encounters) {
     const vitals = (row.vitals ?? {}) as Record<string, unknown>
     const vitalText = VITAL_SIGNS.filter((v) => typeof vitals[v.key] === "number")
       .map((v) => `${v.label} ${vitals[v.key]} ${v.suffix}`)
@@ -498,6 +519,10 @@ export async function renderPatientRecordPdf(
       ["Evolución", row.evolution],
       ["Plan", row.indications],
       ["Anulada", row.status === "anulada" ? row.voidReason : null],
+      [
+        "Adendas",
+        addenda.map((a) => `${a.note} (${[a.authorName, dayTimeWords(a.createdAt, zone)].filter(Boolean).join(", ")})`),
+      ],
     ])
   }
 

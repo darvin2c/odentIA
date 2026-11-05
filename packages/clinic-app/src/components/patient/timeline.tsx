@@ -8,6 +8,7 @@ import {
   AttachmentTitle,
   Badge,
   Button,
+  cn,
   Empty,
   EmptyContent,
   EmptyDescription,
@@ -378,6 +379,9 @@ function JourneyCard({
  * «Se completó el formulario…» o la receta emitida. El papel en sí se abre en
  * Documentos.
  */
+/** Los tipos que se dicen en femenino («Receta anulada», «Orden anulada»). */
+const FEMININE_TYPES = new Set(["prescription", "order", "note", "anamnesis", "encounter"])
+
 function FactCard({
   item,
   timezone,
@@ -389,16 +393,23 @@ function FactCard({
 }) {
   const openWide = useOpenWide()
   const filter = DOCUMENT_FILTER_OF[item.type]
+  // Lo anulado se ve distinto, como la atención anulada: el servidor dice el estado.
+  const voided = item.status === "anulada" || item.status === "anulado"
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 elevated rounded-xl border bg-card px-6 py-4">
+    <div
+      className={cn(
+        "flex flex-wrap items-center justify-between gap-3 rounded-xl border px-6 py-4",
+        voided ? "border-dashed" : "elevated bg-card",
+      )}
+    >
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <CardHeaderRow
-          badge={timelineTypeLabel(item.type)}
+          badge={voided ? `${timelineTypeLabel(item.type)} ${FEMININE_TYPES.has(item.type) ? "anulada" : "anulado"}` : timelineTypeLabel(item.type)}
           createdAt={item.createdAt}
           timezone={timezone}
           locale={locale}
         />
-        <p className="text-sm font-medium">{item.title}</p>
+        <p className={cn("text-sm font-medium", voided && "text-muted-foreground")}>{item.title}</p>
         {item.detail ? <p className="text-sm text-muted-foreground">{item.detail}</p> : null}
       </div>
       {filter ? (
