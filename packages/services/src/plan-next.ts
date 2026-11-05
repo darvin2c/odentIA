@@ -61,8 +61,13 @@ export type Can = (permission: string) => boolean
 /** Estados de una cita que todavía va a ocurrir. */
 const LIVE_APPOINTMENT = ["programada", "confirmada"]
 
+/** «12 dic»; de otro año, con el año («12 dic 2025»). */
 function dayWords(date: Date, locale: string, timeZone: string): string {
-  return new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", timeZone }).format(date).replace(".", "")
+  const yearOf = (at: Date) => new Intl.DateTimeFormat("en-CA", { year: "numeric", timeZone }).format(at)
+  const otherYear = yearOf(date) !== yearOf(new Date())
+  return new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", ...(otherYear ? { year: "numeric" } : {}), timeZone })
+    .format(date)
+    .replace(".", "")
 }
 
 /** Tratamientos con una cita por venir que ya los trae. */

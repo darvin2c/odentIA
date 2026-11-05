@@ -10,7 +10,7 @@ import { ADMIN_NAME, withReceptionName } from "./agent-names"
 import { internationalText } from "@odentia/ui-patterns"
 import { channelLabel } from "./channels"
 import { dayWords } from "./data-requests"
-import { timeAgo } from "./crm"
+import { TASK_AREA_LABEL, timeAgo } from "./crm"
 import { dayKeyOf, daysBetween, formatClock, formatWeekdayDay } from "./finance-cash"
 import type { WaitingRow, WorkspaceTodaySummary } from "./workspace"
 
@@ -179,7 +179,8 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): WaitingT
         detail: joined([
           dueText(row, context).replace(/^./, (first) => first.toUpperCase()),
           row.opportunityTitle ? `Oportunidad «${row.opportunityTitle}»` : null,
-          row.mine ? null : (row.assigneeName ?? "Sin responsable"),
+          // Como en Tareas: sin persona, el área que la tiene («Equipo de recepción»).
+          row.mine ? null : (row.assigneeName ?? (row.area && row.area in TASK_AREA_LABEL ? TASK_AREA_LABEL[row.area as keyof typeof TASK_AREA_LABEL] : "Sin responsable")),
           row.more > 0 ? `y ${plural(row.more, "tarea", "tareas")} más${context.allTasks ? " del equipo" : ""}` : null,
         ]),
         action: row.more > 0 ? "Ver tareas" : "Abrir",
