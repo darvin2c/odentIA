@@ -10,6 +10,7 @@ Una ronda recorre un área en la demo de producción. Encuentra, confirma e info
 ## Reglas de toda ronda
 
 - **La ronda no pregunta.** Si falta un acceso (segundo factor, contraseña, una demo sin marcar), no se detiene a pedirlo: usa la alternativa permitida por esta skill (local, apartado 2) y lo anota en el informe. Solo se frena ante lo que esta skill marca como prohibido, nunca por comodidad.
+- **Lo que espera del usuario va siempre como pregunta, con sugerencia.** Al informar, cada decisión pendiente se le pregunta de forma concreta, con la opción que se recomienda y su motivo. No vale dejar «pendiente» o «espera tu sí» sin pregunta ni sugerencia.
 - **En producción, solo dentro de una demo que la ronda crea para sí misma** desde la administración (ADR 0096: marcada «Demo» y sin cobro). Nunca en una clínica real, ni en las cuentas del usuario. Al terminar, la ronda elimina su demo y verifica que la eliminación sea completa. Las demos de cada ronda se anotan en `~/odentia-qa/demos.md`.
 - **Ningún mensaje sale de la demo.** En producción los envíos son reales, así que hay dos barreras:
   - **Canales apagados.** El WhatsApp de la demo está deshabilitado (claves falsas) y no hay correo, Messenger, Instagram ni Telegram conectados. Ninguna voz conecta, edita ni prueba un canal. Esta barrera también cubre a los pacientes que trae la demo.
@@ -17,6 +18,7 @@ Una ronda recorre un área en la demo de producción. Encuentra, confirma e info
 - **El modelo es el real.** Su costo no pesa. Lo que responden Sofi, Clío o Argos se mira como parte de la pantalla; su calidad la mide su auditoría.
 - **El repositorio es público, y una ronda no publica nada.** Todo va primero al informe privado. Un issue solo se crea para lo que el usuario apruebe, y nunca para un fallo de permisos, de aislamiento entre clínicas o de datos (etapa 5).
 - **Una voz simulada no prueba que algo sea fácil.** Lo que depende de cómo trabaja una clínica real se marca como supuesto. La pantalla sí es real: lo que se reproduce, pasa.
+- **Ninguna decisión esconde un problema.** Si algo está mal, se informa aunque un ADR o un `AGENTS.md` diga que es a propósito. Va con su gravedad real, cita la decisión, dice por qué falla en uso y cómo debería hacerse correctamente, con la fuente o el estándar que lo respalda. Una decisión escrita explica por qué pasa, pero no lo descarta. Lo mismo vale para la demo: lo que está mal en ella se informa para corregirlo, porque es lo que ve una clínica al conocer el producto.
 
 ## 1. Elegir el área
 
@@ -54,7 +56,10 @@ Las voces se equivocan con seguridad, y una lista con falsas alarmas se deja de 
 
 1. Repetir los pasos en una sesión limpia. Lo que no se repite se descarta y se cuenta. Lo que no se puede repetir en la demo queda «leído, sin reproducir».
 2. Buscar la causa en el código, con `archivo:línea`.
-3. Mirar si es a propósito en el `AGENTS.md` del área o en un ADR, o si viene de cómo se armó la demo (`packages/services/src/demo-build.ts` y las semillas de Reportes). Si es a propósito y sigue pareciendo mal, se informa como mejora citando esa decisión.
+3. Mirar si es a propósito en el `AGENTS.md` del área o en un ADR, o si viene de cómo se armó la demo (`packages/services/src/demo-build.ts` y las semillas de Reportes).
+   - **A propósito y sigue mal:** no se descarta ni se le baja la gravedad. Se informa como error o mejora, según lo que le pasa a la persona, marcado «decisión a revisar: <ADR o regla>». Cuenta lo que decidió, por qué falla y cómo debería hacerse correctamente. Si para saberlo hace falta estudiar el tema (otros programas, normas o fuentes clínicas), se estudia y se cita.
+   - **A propósito y está bien:** se descarta, con el motivo.
+   - **De la demo:** se informa como error de la demo, con su causa en la semilla, para corregirla.
 4. Probarlo en el otro producto, si el código es común.
 5. Buscar si ya existe entre los issues abiertos.
 
@@ -67,12 +72,14 @@ Nada se hace público hasta que el usuario decida. Un error clínico también da
 - **Resumen:** qué se recorrió, con qué roles y anchos, qué no se alcanzó a ver y cuántas alarmas se descartaron.
 - **Uno por error alto**, con sus capturas: qué le pasa a la persona, los pasos, lo esperado, la causa, a qué producto afecta.
 - **Seguridad, aparte:** permisos, aislamiento o datos que llegan a quien no debe. Se avisa enseguida, nunca llega a un issue y el tablero se quita antes de compartir el lienzo.
-- **Medios y bajos** juntos, **mejoras**, y **descartadas y a propósito**, para no volver a reportarlas.
+- **Medios y bajos** juntos y **mejoras**. Lo que está mal por una decisión va aquí, o en su tablero de error alto, según su gravedad, con la decisión citada y cómo debería ser.
+- **Errores de la demo**, con su causa en la semilla.
+- **Descartadas**, para no volver a reportarlas: solo las falsas alarmas y lo que es a propósito y está bien, cada una con su motivo.
 - **Propuestas de diseño UX**, con el antes y el después en pasos y saltos. No se reproducen, pero se confirma que el permiso y el servicio que suponen existen.
 
 **`~/odentia-qa/recorrido.md`:** una fila con la fecha, el área, el commit, los productos, los roles, el enlace del lienzo y el resultado: errores y mejoras confirmados, cuántos solo vio la pantalla, tropiezos del entorno y tokens gastados. Cuando el usuario responda, anotar cuántas propuestas de UX aprobó; si en dos rondas no aprueba ninguna, esa voz se quita.
 
-El mensaje final, en palabras simples: qué se recorrió, cuántos errores y mejoras se confirmaron, y por cuáles empezar con el motivo. Lista qué sigue para corregir y qué candidatos a issue hay, sin preguntar. Nada se corrige en esta ronda y nada se publica como issue sin que el usuario lo pida.
+El mensaje final, en palabras simples: qué se recorrió, cuántos errores y mejoras se confirmaron, y por cuáles empezar con el motivo. Nombra cada decisión que produce un problema y cómo debería ser. Lista qué sigue para corregir y qué candidatos a issue hay. Cierra con las decisiones que esperan del usuario, cada una como pregunta y con la opción sugerida. Nada se corrige en esta ronda y nada se publica como issue sin que el usuario lo pida.
 
 **Issue, solo con el sí:** uno por cada hallazgo aprobado, con las etiquetas `qa`, `bug` o `enhancement`, y su `área: …`. Lleva el texto del informe, sin capturas ni datos de personas, porque es público.
 

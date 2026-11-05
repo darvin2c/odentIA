@@ -21,6 +21,7 @@ Ayudar a la clínica a ofrecer una atención continua, oportuna y personalizada,
 Permitir que cada usuario complete su trabajo con facilidad mediante una experiencia intuitiva, simple, minimalista y profesional, con el contexto y las ayudas necesarias en cada momento.
 
 - «Menos es más»: menos esfuerzo, ruido y decisiones innecesarias; no menos capacidad ni menos ayuda. Presentar complejidad progresivamente, sin esconder lo necesario.
+- Fluido, no prohibitivo: el sistema avisa siempre lo que pasa, donde se decide, y la persona decide; lo clínico lo decide el profesional. Un aviso no frena ni pide pasos obligatorios: la constancia de que se vio la guarda el sistema. No aplica a permisos, protección de datos ni lo que exige la ley.
 - Elegir interacciones por su utilidad, no por novedad. Arrastrar y soltar solo cuando facilite la tarea y con alternativa accesible; las ayudas son oportunas y contextuales.
 - El usuario entiende qué ocurre, cómo avanzar y qué consecuencias tienen sus acciones. La conversación con el agente es una vía, no una obligación para realizar cualquier tarea.
 - Conservar contexto y borradores, distinguir pendiente de confirmado y permitir recuperación ante errores. Accesibilidad WCAG, teclado y móvil forman parte de la facilidad de uso.
