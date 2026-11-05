@@ -530,6 +530,10 @@ it("con quien solo está autorizado a recibir información no se habla del presu
   const summary = await call(ctx, "ver_resumen_paciente", { patientId })
   expect(summary).not.toContain("Presupuesto N°")
   expect(summary).toContain("solo se conversan con quien decide")
+  // Si lo pide, le llega a quien decide y a ella no se le dice nada de él.
+  const resent = await call(ctx, "reenviar_presupuesto", { patientId })
+  expect(resent).toContain("Quien escribe no decide por el paciente")
+  expect(resent).not.toMatch(/N\.º|no está listo|no tiene un presupuesto/)
   const refused = await call(ctx, "anotar_respuesta_presupuesto", {
     patientId,
     budgetId,

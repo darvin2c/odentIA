@@ -47,7 +47,7 @@ import { openRoute, previewRoute } from "./message-gate.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { personalLinkRef } from "./personal-link-token.js"
 import { personalLinkMessageUrl } from "./public-links.js"
-import { listDecisionRecipients } from "./responsibilities.js"
+import { contactDecides, listDecisionRecipients } from "./responsibilities.js"
 import type { Storage } from "./storage.js"
 
 /** Estados en los que el presupuesto se puede enviar (o reenviar). */
@@ -436,8 +436,9 @@ function budgetOptionLine(budget: BudgetWithTotals): string {
 /**
  * «Ver y responder» de «Presupuesto listo»: la persona lo tocó (y con eso abrió
  * la ventana de 24 horas), así que se le deja el PDF en su conversación con un
- * texto fijo. Solo vale si el presupuesto es de un paciente del que ella es la
- * persona o su representante.
+ * texto fijo. Solo vale si quien lo tocó decide hoy por ese paciente
+ * (`contactDecides`): un menor, un autorizado de información o quien lo
+ * representó antes de los 18 no lo reciben.
  */
 export async function answerBudgetButton(
   tx: Db,
@@ -447,16 +448,10 @@ export async function answerBudgetButton(
 ): Promise<boolean> {
   const [row] = await tx.execute<{ patientId: string; status: string }>(sql`
     select b.patient_id as "patientId", b.status from treatment_budget b
-    where b.organization_id = ${orgId} and b.id = ${input.budgetId}
-      and exists (select 1 from patient_contact pc where pc.organization_id = b.organization_id
-        and pc.patient_id = b.patient_id and pc.contact_id = ${input.contactId} and pc.relationship = 'self'
-        union all
-        select 1 from patient_responsibility r where r.organization_id = b.organization_id
-        and r.patient_id = b.patient_id and r.contact_id = ${input.contactId} and r.revoked_at is null
-        and r.kind in ('representante_legal','responsable_economico','autorizado_informacion'))`)
+    where b.organization_id = ${orgId} and b.id = ${input.budgetId}`)
   if (!row || !(SENDABLE as readonly string[]).includes(row.status) || row.status === "borrador")
     return false
-  // Quien tocó el botón puede ser responsable económico: recibe lo que le corresponde a él.
+  if (!(await contactDecides(tx, orgId, row.patientId, input.contactId))) return false
   const snap = await buildBudgetSnapshot(tx, orgId, row.patientId, input.budgetId, {
     recipientContactId: input.contactId,
   })

@@ -4,12 +4,13 @@
  * aunque escriba él; y sin fecha de nacimiento no firma por enlace.
  */
 import { randomUUID } from "node:crypto"
-import { patientContact, patientResponsibility } from "@odentia/db/schema/clinical"
+import { patientContact, patientResponsibility, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
 import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { getAgentPatientBudgets, getAgentPatientSummary, resolveAgentPatientContext } from "./agent-operations.js"
-import { serviceRecipient } from "./budget-send.js"
+import { preferredContact } from "./automation.js"
+import { answerBudgetButton, serviceRecipient } from "./budget-send.js"
 import {
   createConsentDocument,
   createConsentTemplate,
@@ -125,6 +126,24 @@ it("Sofi habla del presupuesto solo con quien decide, y la representación de un
   expect(await context(personId)).toMatchObject({ authorization: "self", decides: true })
   expect((await budgets(personId)).context.decides).toBe(true)
   expect(await context(tia!.id)).toMatchObject({ decides: false })
+
+  // Los avisos de sus citas ya no le llegan a su madre, aunque el registro la dejó como preferida.
+  await ownerDb.update(patientContact).set({ isPreferred: false }).where(eq(patientContact.patientId, f.patient.id))
+  await ownerDb.update(patientContact).set({ isPreferred: true }).where(eq(patientContact.contactId, madre!.id))
+  expect(await f.run((tx) => preferredContact(tx, ORG, f.patient.id))).toBe(personId)
+  // Y «Ver y responder» de un presupuesto que recibió cuando Lía era menor ya no le deja el PDF.
+  const [plan] = await ownerDb.insert(treatmentPlan).values({ organizationId: ORG, patientId: f.patient.id, title: "Plan" }).returning({ id: treatmentPlan.id })
+  const [budget] = await ownerDb.insert(treatmentBudget).values({
+    organizationId: ORG, patientId: f.patient.id, planId: plan!.id, budgetNumber: 901, title: "Ortodoncia", currency: "PEN", status: "presentado",
+  }).returning({ id: treatmentBudget.id })
+  const button = (who: string) =>
+    f.run((tx) => answerBudgetButton(tx, ORG, { conversationId: randomUUID(), contactId: who, budgetId: budget!.id }, {} as Parameters<typeof answerBudgetButton>[3]))
+  expect(await button(madre!.id)).toBe(false)
+  expect(await button(tia!.id)).toBe(false)
+
+  // Con 12 años, en cambio, los avisos son de su madre.
+  await setTestPatientIdentity(ownerDb, f.patient.id, { birthDate: minorBirth() })
+  expect(await f.run((tx) => preferredContact(tx, ORG, f.patient.id))).toBe(madre!.id)
 })
 
 it("sin fecha de nacimiento la propia persona no firma por enlace: lo firma en la clínica", async () => {

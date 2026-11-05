@@ -2166,6 +2166,14 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         throw e
       }
       const usted = ctx.treatment === "usted"
+      // Quien lo pidió no decide (una tía autorizada, quien lo representó de niño): el presupuesto
+      // le llega a quien decide y a esta persona no se le dice nada de él, ni si existe.
+      if (!outcome.askerDecides) {
+        if (outcome.outcome === "enviado") await noteAction("presupuesto", "reenvió su presupuesto a quien decide", `Presupuesto ${budgetNumberText(outcome.budgetNumber)}`)
+        else await noteAction("tarea", "dejó una tarea a recepción: enviarle su presupuesto a quien decide")
+        const said = "El presupuesto se lo hacemos llegar a quien decide por el paciente."
+        return `Quien escribe no decide por el paciente: no le des el número, el estado ni ningún dato del presupuesto. Díselo con send_reply, con estas palabras o parecidas: «${said}»`
+      }
       if (outcome.outcome === "enviado") {
         const by = outcome.channel === "whatsapp" ? "WhatsApp" : "correo"
         const where = outcome.here

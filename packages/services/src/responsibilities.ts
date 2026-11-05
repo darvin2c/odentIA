@@ -148,6 +148,43 @@ export async function listDecisionRecipients(tx: Db, orgId: string, patientId: s
   return out
 }
 
+/**
+ * Qué puede saber de un paciente quien no es él: su representante legal
+ * vigente (`currentRepresentationSql`: al cumplir 18 termina la de su
+ * infancia) o un autorizado de información vigente. Nulo: nada. Los días se
+ * cuentan con el de la clínica. La usan el agente y a quién se le escriben
+ * los avisos.
+ */
+export async function contactStanding(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  contactId: string,
+  age?: { today: string; adultSince: string | null },
+): Promise<"representante_legal" | "autorizado_informacion" | null> {
+  const day = age ?? (await patientAge(tx, orgId, patientId))
+  const [representative] = await tx.select({ id: patientResponsibility.id }).from(patientResponsibility)
+    .where(and(currentRepresentationSql(orgId, patientId, day), eq(patientResponsibility.contactId, contactId))).limit(1)
+  if (representative) return "representante_legal"
+  const [informed] = await tx.select({ id: patientResponsibility.id }).from(patientResponsibility)
+    .where(and(eq(patientResponsibility.organizationId, orgId), eq(patientResponsibility.patientId, patientId),
+      eq(patientResponsibility.contactId, contactId), eq(patientResponsibility.kind, "autorizado_informacion"),
+      isNull(patientResponsibility.revokedAt), lte(patientResponsibility.startsAt, day.today),
+      or(isNull(patientResponsibility.endsAt), gte(patientResponsibility.endsAt, day.today)))).limit(1)
+  return informed ? "autorizado_informacion" : null
+}
+
+/**
+ * Fue su representante legal y ya no lo es (cumplió 18, venció o se revocó),
+ * sin otra facultad vigente: ya no se le escribe lo de ese paciente.
+ */
+export async function representationEnded(tx: Db, orgId: string, patientId: string, contactId: string): Promise<boolean> {
+  const [was] = await tx.select({ id: patientResponsibility.id }).from(patientResponsibility)
+    .where(and(eq(patientResponsibility.organizationId, orgId), eq(patientResponsibility.patientId, patientId),
+      eq(patientResponsibility.contactId, contactId), eq(patientResponsibility.kind, "representante_legal"))).limit(1)
+  return Boolean(was) && (await contactStanding(tx, orgId, patientId, contactId)) === null
+}
+
 /** Igual que `requireDecisionContact`, como sí o no: para decidir qué se muestra. */
 export async function contactDecides(tx: Db, orgId: string, patientId: string, contactId: string): Promise<boolean> {
   try {

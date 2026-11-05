@@ -71,7 +71,7 @@ import {
   chatPrivacyNotice,
   registerFromConversation,
 } from "./patient-registration.js"
-import { currentRepresentationSql, patientAge, requireDecisionContact, requireLinkedActiveContact } from "./responsibilities.js"
+import { contactStanding, patientAge, requireDecisionContact, requireLinkedActiveContact } from "./responsibilities.js"
 import { createTask, getTask, updateTask } from "./tasks.js"
 import { createWorkspaceNotification, upsertWorkspaceNotification } from "./workspace.js"
 import { auditEvent, branch } from "@odentia/db/schema/org"
@@ -238,39 +238,16 @@ export async function resolveAgentPatientContext(
     authorization = "self"
     decides = !age.isMinor
   } else {
-    const [representative] = await tx
-      .select({ id: patientResponsibility.id })
-      .from(patientResponsibility)
-      .where(and(currentRepresentationSql(orgId, patientId, age), eq(patientResponsibility.contactId, contactId)))
-      .limit(1)
-    if (representative) {
-      authorization = "representante_legal"
-      decides = true
-    } else {
-      const [informed] = await tx
-        .select({ id: patientResponsibility.id })
-        .from(patientResponsibility)
-        .where(
-          and(
-            eq(patientResponsibility.organizationId, orgId),
-            eq(patientResponsibility.patientId, patientId),
-            eq(patientResponsibility.contactId, contactId),
-            eq(patientResponsibility.kind, "autorizado_informacion"),
-            isNull(patientResponsibility.revokedAt),
-            lte(patientResponsibility.startsAt, age.today),
-            or(isNull(patientResponsibility.endsAt), gte(patientResponsibility.endsAt, age.today)),
-          ),
-        )
-        .limit(1)
-      if (!informed) {
-        throw new ServiceError(
-          "PATIENT_CONTEXT_FORBIDDEN",
-          409,
-          "El interlocutor no está autorizado a recibir información de este paciente",
-        )
-      }
-      authorization = "autorizado_informacion"
+    const standing = await contactStanding(tx, orgId, patientId, contactId, age)
+    if (!standing) {
+      throw new ServiceError(
+        "PATIENT_CONTEXT_FORBIDDEN",
+        409,
+        "El interlocutor no está autorizado a recibir información de este paciente",
+      )
     }
+    authorization = standing
+    decides = standing === "representante_legal"
   }
   const row = await requirePatient(tx, orgId, patientId)
   return {
@@ -624,6 +601,10 @@ export async function confirmAppointmentByContact(
     const together = options.filter((option) => reminded.includes(option.appointmentId))
     const waiting = options.filter((option) => option.status === "programada")
     if (together.length > 0) chosen = together
+    // El último recordatorio fue de citas que ya no puede confirmar (la de un hijo que cumplió
+    // 18): su «sí» respondía a esas, así que no se confirma otra sin preguntar.
+    else if (reminded.length > 0 && waiting.length > 0) return { outcome: "varias", options: waiting.map(strip) }
+    else if (reminded.length > 0) return { outcome: "ninguna" }
     else if (waiting.length > 1) return { outcome: "varias", options: waiting.map(strip) }
     else {
       const one = waiting[0] ?? (options.length === 1 ? options[0] : undefined)
@@ -838,6 +819,8 @@ export type AgentBudgetResend =
       outcome: "enviado"
       budgetNumber: number
       recipientName: string
+      /** Quien lo pidió decide por el paciente; si no, no se le dice nada del presupuesto. */
+      askerDecides: boolean
       /** Le llegó a quien escribe; si no, a su representante legal (paciente menor). */
       toInterlocutor: boolean
       channel: "whatsapp" | "email"
@@ -852,6 +835,8 @@ export type AgentBudgetResend =
       detail: string | null
       /** La tarea que quedó a recepción. */
       taskId: string
+      /** Quien lo pidió decide por el paciente; si no, no se le dice si existe ni cómo va. */
+      askerDecides: boolean
     }
 
 /**
@@ -913,7 +898,7 @@ export async function resendBudgetByContact(
       createdBy: "agent",
       idempotencyKey: `${input.requestId}:tarea`,
     })
-    return { outcome, detail, taskId: task.id }
+    return { outcome, detail, taskId: task.id, askerDecides: context.decides }
   }
   if (!target) return leaveTask("ninguno", null)
   if (target.status === "borrador") return leaveTask("no_listo", null)
@@ -939,6 +924,7 @@ export async function resendBudgetByContact(
       budgetNumber: target.budgetNumber,
       recipientName: sent.recipientName,
       toInterlocutor: thread?.contactId === input.contactId,
+      askerDecides: context.decides,
       channel: sent.channel,
       via: sent.via,
       here: sent.conversationId === input.conversationId,
