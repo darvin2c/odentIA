@@ -30,7 +30,7 @@ import { type Context, Hono } from "hono"
 import { z } from "zod"
 import { canAccess, canAccessAny, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
-import { personLockRefusal } from "../lib/record-lock.js"
+import { patientLockRefusal, personLockRefusal } from "../lib/record-lock.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 
 const listQuery = z.object({
@@ -146,8 +146,7 @@ export function createPeopleRoute(deps: CrmDeps) {
   })
   async function lockGuard(c: Context) {
     const id = c.req.param("id")
-    if (!id || !/^[0-9a-f-]{36}$/i.test(id) || c.req.path.endsWith("/lock") || c.req.path.endsWith("/lock/open"))
-      return null
+    if (!id || c.req.path.endsWith("/lock") || c.req.path.endsWith("/lock/open")) return null
     return personLockRefusal(c, deps.db, id)
   }
 
@@ -203,6 +202,10 @@ export function createPeopleRoute(deps: CrmDeps) {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "patients.read"))
       return forbidden(c, "No tienes permiso para ver a las personas")
+    // Solo dice de qué persona es la ficha: Administración llega así a la
+    // pantalla de la historia bloqueada; para los demás no existe.
+    const blocked = await patientLockRefusal(c, deps.db, c.req.param("patientId"), "Persona no encontrado")
+    if (blocked?.status === 404) return blocked
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => personOfPatient(tx, orgId, c.req.param("patientId"))),
     )

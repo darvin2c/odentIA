@@ -393,6 +393,17 @@ function appointmentRows(tx: Db, orgId: string) {
     .leftJoin(testAuthor, eq(testAuthor.id, testConversation.testByUserId))
 }
 
+/** El paciente de una cita, para la guarda de su historia bloqueada (404 si no existe). */
+export async function appointmentPatientId(tx: Db, orgId: string, id: string): Promise<string> {
+  const [row] = await tx
+    .select({ patientId: appointment.patientId })
+    .from(appointment)
+    .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, id)))
+    .limit(1)
+  if (!row) throw notFound("Cita")
+  return row.patientId
+}
+
 export async function getAppointment(tx: Db, orgId: string, id: string): Promise<AppointmentItem> {
   const [row] = await appointmentRows(tx, orgId)
     .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, id)))

@@ -13,6 +13,7 @@ import type { Context } from "hono"
 import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
+import { patientLockRefusal } from "../lib/record-lock.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 import {
   addCashMovement,
@@ -24,6 +25,8 @@ import {
   getDayMovements,
   getDebts,
   getTicketReceiptById,
+  ServiceError,
+  ticketPatientId,
   listDebts,
   listTickets,
   TICKET_SORTS,
@@ -243,6 +246,15 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
     const { orgId } = orgContextOf(c)
     const params = z.object({ id: z.uuid() }).safeParse(c.req.param())
     if (!params.success) return validationError(c, params.error.issues)
+    // El comprobante de una historia bloqueada se guarda, pero para los demás no existe (ADR 0080).
+    const patientId = await withOrgContext(deps.db, orgId, (tx) => ticketPatientId(tx, orgId, params.data.id)).catch(
+      (error) => {
+        if (error instanceof ServiceError && error.status === 404) return null
+        throw error
+      },
+    )
+    const blocked = patientId ? await patientLockRefusal(c, deps.db, patientId, "Ticket no encontrado") : null
+    if (blocked) return blocked
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => getTicketReceiptById(tx, orgId, params.data.id)),
     )

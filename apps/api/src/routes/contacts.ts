@@ -21,7 +21,6 @@ import { errorBody } from "../lib/error.js"
 import { personLockRefusal } from "../lib/record-lock.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 
-const UUID = /^[0-9a-f-]{36}$/i
 
 const listQuery = z.object({
   q: z.string().optional(),
@@ -70,7 +69,7 @@ export function createContactsRoute(deps: CrmDeps) {
   // Una historia bloqueada no existe para quien no es Administración (ADR 0080): la misma guarda que la página de la persona.
   const lockGuard = async (c: Context, next: Next) => {
     const id = c.req.param("id")
-    if (id && UUID.test(id)) {
+    if (id) {
       const blocked = await personLockRefusal(c, deps.db, id)
       if (blocked) return blocked
     }

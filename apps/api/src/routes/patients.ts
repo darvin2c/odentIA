@@ -94,7 +94,7 @@ import { z } from "zod"
 import { traceClinicalRead } from "../lib/clinical-trace.js"
 import { canAccess, canAccessAny, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
-import { recordLockResponse } from "../lib/record-lock.js"
+import { canonicalUuid, personLockRefusal, recordLockResponse } from "../lib/record-lock.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 import { createPatientBudgetsRoute } from "./patient-budgets.js"
 import { createImagingStudiesRoute } from "./imaging-studies.js"
@@ -570,11 +570,12 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
 
   /** La guarda de la historia bloqueada (ADR 0080) de la ficha de la ruta; null si la petición sigue. */
   async function lockRefusal(c: Context, write: boolean): Promise<Response | null> {
-    const lockedId = c.req.path.match(/\/patients\/([0-9a-f-]{36})(?:\/|$)/i)?.[1]
+    // Un id escrito sin guiones o con mayúsculas también es la ficha: PostgreSQL lo lee igual.
+    const lockedId = canonicalUuid(c.req.path.match(/\/patients\/([^/]+)/)?.[1])
     if (!lockedId) return null
     const { orgId, userId } = orgContextOf(c)
     const state = await withOrgContext(deps.db, orgId, (tx) => recordLockState(tx, orgId, userId, lockedId))
-    return recordLockResponse(c, state, write)
+    return recordLockResponse(c, state, write, "Paciente no encontrado")
   }
 
   app.use("*", async (c, next) => {
@@ -716,6 +717,9 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
 
   app.put("/:id/contacts/:contactId", async (c) => {
     const { orgId, userId } = orgContextOf(c)
+    // La ficha la guarda el `use` de arriba; la persona que se vincula, aquí (ADR 0080).
+    const blocked = await personLockRefusal(c, deps.db, c.req.param("contactId"))
+    if (blocked) return blocked
     const parsed = registrationContactInputSchema
       .omit({ contactId: true })
       .safeParse(await c.req.json().catch(() => null))
@@ -731,6 +735,8 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     )
   })
 
+  // Quitar a una persona bloqueada de la ficha de otro (un hijo que sigue
+  // atendiéndose) no toca su historia: sigue permitido.
   app.delete("/:id/contacts/:contactId", async (c) => {
     const { orgId, userId } = orgContextOf(c)
     return runService(c, 200, () =>
