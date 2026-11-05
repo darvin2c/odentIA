@@ -73,7 +73,7 @@ import {
   returnSold,
   stockBySede,
 } from "./inventory-stock.js"
-import { findOrgLocale, orgProfileRequired } from "./locale.js"
+import { findOrgLocale, formatOrgMoney, orgProfileRequired } from "./locale.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
 import { isCashLike, requirePaymentMethod } from "./payment-methods.js"
@@ -1428,6 +1428,16 @@ export async function collectCharge(
   const { crossChange, changeGiven, valueCents } = figures
   // Sin cambio y en otra moneda solo se llega sin dinero nuevo: no cancela nada.
   const cancels = figures.cancels ?? totalNew
+  // Con conceptos marcados no se cobra más de lo que les falta: el resto quedaría a favor sin
+  // que nadie lo dijera. Pasa cuando otra pantalla cobró una parte mientras esta seguía abierta.
+  if (input.chargeIds?.length && cancels > need - creditApplied) {
+    const due = need - creditApplied
+    const message =
+      due > 0
+        ? `A lo marcado ya solo le falta ${formatOrgMoney(due, unit, await findOrgLocale(tx, orgId))}. Cobra eso, o el resto como adelanto.`
+        : "Lo marcado ya está pagado. Revisa la cuenta antes de cobrar."
+    throw new ServiceError("EXCEEDS_DUE", 409, message)
+  }
   // Cada medio guarda su parte; el resto del redondeo va al último, para que sumen exacto.
   const amounts = paidIn === unit ? tenders : splitCents(cancels, tenders)
   for (const [index, amount] of amounts.entries()) {
@@ -1505,6 +1515,7 @@ export async function collectCharge(
       appliedCents: 0,
       promotion: null,
     })
+
   // El impuesto de lo que entra hoy (ADR 0083): cada concepto con el que guardó
   // al crearse; lo que queda a favor, con el de las atenciones. Lo pagado con
   // saldo a favor ya lo llevó cuando entró ese dinero.
@@ -2040,6 +2051,10 @@ export interface RefundCreditInput {
   paymentMethodId?: string | null
   reason: string
   currency?: string
+  /** Clave del pedido: enviado otra vez, devuelve lo mismo una sola vez. */
+  requestId?: string
+  /** Lo que la pantalla mostraba a favor: si cambió (otra pestaña devolvió), se dice antes de devolver. */
+  expectedCreditCents?: number
 }
 
 /**
@@ -2054,13 +2069,66 @@ export async function refundCredit(
   patientId: string,
   input: RefundCreditInput,
 ) {
+  const requestId = input.requestId ? uuid(input.requestId, "La clave de la devolución") : null
+  if (requestId)
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('refund:' || ${orgId} || ':' || ${requestId}))`)
   const orgUnit = await lockOrgCurrency(tx, orgId)
   await lockAccount(tx, orgId, patientId)
   const amount = withField("amountCents", () => assertPositiveCents(input.amountCents))
+  if (requestId) {
+    // El mismo pedido otra vez (doble clic, la red que reintenta): lo que ya se devolvió, sin otro egreso.
+    const earlier = await tx
+      .select()
+      .from(patientPaymentRefund)
+      .where(and(eq(patientPaymentRefund.organizationId, orgId), eq(patientPaymentRefund.requestId, requestId)))
+      .orderBy(asc(patientPaymentRefund.createdAt), asc(patientPaymentRefund.id))
+    if (earlier.length) {
+      const [stored] = await tx
+        .select({ id: auditEvent.entityId })
+        .from(auditEvent)
+        .where(
+          and(
+            eq(auditEvent.organizationId, orgId),
+            eq(auditEvent.action, "refund.receipt"),
+            eq(auditEvent.entity, "patient_payment_refund"),
+            inArray(auditEvent.entityId, earlier.map((row) => row.id)),
+          ),
+        )
+        .limit(1)
+      const receiptId = stored?.id ?? null
+      const receipt = receiptId ? await getRefundReceipt(tx, orgId, patientId, receiptId) : null
+      // Otra persona, otro importe, otra moneda u otra sede no son el mismo pedido.
+      if (
+        !receiptId ||
+        !receipt ||
+        earlier.some((row) => row.patientId !== patientId) ||
+        sum(earlier) !== amount ||
+        receipt.currency !== (input.currency ?? orgUnit) ||
+        receipt.branch.id !== input.branchId
+      )
+        throw conflict("REFUND_REQUEST_CONFLICT", "Esta devolución ya se registró con otros datos. Cierra el panel y revisa la cuenta antes de devolver otra vez.")
+      return {
+        refunds: earlier,
+        receiptId,
+        amountCents: receipt.amountCents,
+        currency: receipt.currency,
+        branchId: receipt.branch.id,
+        methodName: receipt.methodName,
+        ...(receipt.payouts ? { payouts: receipt.payouts } : {}),
+        refundedAt: new Date(receipt.refundedAt),
+        duplicate: true as const,
+        account: await getAccountSummary(tx, orgId, patientId),
+      }
+    }
+  }
   const branchRow = await requireBranch(tx, orgId, input.branchId)
   const unit = input.currency ?? orgUnit
   const credit = await availableCredit(tx, orgId, patientId, unit)
   const total = sum(credit.map((c) => ({ amountCents: c.available })))
+  if (input.expectedCreditCents !== undefined && input.expectedCreditCents !== total) {
+    const message = `Lo que tiene a favor cambió: ahora es ${formatOrgMoney(total, unit, await findOrgLocale(tx, orgId))}. Revísalo antes de devolver.`
+    throw new ServiceError("CREDIT_CHANGED", 409, message, { amountCents: message })
+  }
   if (amount > total) {
     const message = "Solo se devuelve lo que está a favor"
     throw new ServiceError("INSUFFICIENT_CREDIT", 409, message, { amountCents: message })
@@ -2100,6 +2168,7 @@ export async function refundCredit(
           tenderCents: tenderOf.get(payment.id) ?? null,
           refundedAt: at,
           reason: reason(input.reason),
+          requestId,
           createdBy: actorUserId,
         })
         .returning()
