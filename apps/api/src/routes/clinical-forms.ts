@@ -1,4 +1,4 @@
-import { withOrgContext } from "@odentia/db"
+import { type Db, withOrgContext } from "@odentia/db"
 import {
   addFormAddendum,
   advanceClinicalOrder,
@@ -62,11 +62,12 @@ import {
   updateFormTemplate,
   updateSpecialty,
 } from "@odentia/services"
-import { type Context, Hono } from "hono"
+import { type Context, Hono, type Next } from "hono"
 import { z } from "zod"
 import { traceClinicalRead } from "../lib/clinical-trace.js"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
+import { patientLockRefusal } from "../lib/record-lock.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
 const uuid = z.string().uuid()
@@ -388,6 +389,31 @@ const orderStatus = z
 
 export function createClinicalFormsRoute(deps: CrmDeps) {
   const app = new Hono()
+
+  // La historia bloqueada (ADR 0080) en lo que se abre por su id: el papel dice
+  // de quién es. Lo que nombra al paciente en la consulta o en el cuerpo lo
+  // guarda `lockedRecordGuard`, para toda la API.
+  const paperLock =
+    (patientOf: (tx: Db, orgId: string, id: string) => Promise<string>) =>
+    async (c: Context, next: Next) => {
+      const id = c.req.param("id")
+      if (id && uuid.safeParse(id).success) {
+        const { orgId } = orgContextOf(c)
+        const patientId = await withOrgContext(deps.db, orgId, (tx) => patientOf(tx, orgId, id)).catch((error) => {
+          // Un papel que no existe lo dice su ruta, con su 404 de siempre.
+          if (error instanceof ServiceError && error.status === 404) return null
+          throw error
+        })
+        const refusal = patientId ? await patientLockRefusal(c, deps.db, patientId) : null
+        if (refusal) return refusal
+      }
+      await next()
+    }
+  app.use("/consents/:id", paperLock(consentDocumentPatientId))
+  app.use("/consents/:id/*", paperLock(consentDocumentPatientId))
+  app.use("/orders/:id/*", paperLock(clinicalOrderPatientId))
+  app.use("/form-responses/:id", paperLock(formResponsePatientId))
+  app.use("/form-responses/:id/*", paperLock(formResponsePatientId))
 
   // --- Especialidades ---
   app.get("/specialties", async (c) => {

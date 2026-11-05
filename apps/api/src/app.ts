@@ -51,6 +51,7 @@ import { adminContextOf, requireAdminContext } from "./lib/admin-context.js"
 import { canAccess, canAccessAny, orgContextOf, requireOrgContext, requireSession } from "./lib/context.js"
 import { errorBody } from "./lib/error.js"
 import { createOrgEventsHub, type NotifyPayload } from "./lib/org-events.js"
+import { lockedRecordGuard } from "./lib/record-lock.js"
 import { createAccountRoute } from "./routes/account.js"
 import { createAccountSupportRoute } from "./routes/account-support.js"
 import { type AddressProviders, createAddressRoute } from "./routes/address.js"
@@ -658,6 +659,13 @@ export function createApp(deps: AppDeps) {
   guarded.use("*", async (c, next) => {
     if (isWebhook(c)) return next()
     return requireOrgContext(deps)(c, next)
+  })
+  // La historia bloqueada (ADR 0080) en toda ruta que nombra a la ficha o a la
+  // persona en la consulta o en el cuerpo, no solo en su dirección.
+  const lockGuard = lockedRecordGuard(db)
+  guarded.use("*", async (c, next) => {
+    if (isWebhook(c)) return next()
+    return lockGuard(c, next)
   })
   guarded.use("*", async (c, next) => {
     if (

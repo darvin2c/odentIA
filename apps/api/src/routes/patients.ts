@@ -94,7 +94,7 @@ import { z } from "zod"
 import { traceClinicalRead } from "../lib/clinical-trace.js"
 import { canAccess, canAccessAny, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
-import { recordLockResponse } from "../lib/record-lock.js"
+import { personLockRefusal, recordLockResponse } from "../lib/record-lock.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 import { createPatientBudgetsRoute } from "./patient-budgets.js"
 import { createImagingStudiesRoute } from "./imaging-studies.js"
@@ -716,6 +716,9 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
 
   app.put("/:id/contacts/:contactId", async (c) => {
     const { orgId, userId } = orgContextOf(c)
+    // La ficha la guarda el `use` de arriba; la persona que se vincula, aquí (ADR 0080).
+    const blocked = await personLockRefusal(c, deps.db, c.req.param("contactId"))
+    if (blocked) return blocked
     const parsed = registrationContactInputSchema
       .omit({ contactId: true })
       .safeParse(await c.req.json().catch(() => null))
@@ -733,6 +736,8 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
 
   app.delete("/:id/contacts/:contactId", async (c) => {
     const { orgId, userId } = orgContextOf(c)
+    const blocked = await personLockRefusal(c, deps.db, c.req.param("contactId"))
+    if (blocked) return blocked
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
         await removePatientContact(tx, orgId, userId, c.req.param("id"), c.req.param("contactId"))

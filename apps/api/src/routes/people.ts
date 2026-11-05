@@ -30,7 +30,7 @@ import { type Context, Hono } from "hono"
 import { z } from "zod"
 import { canAccess, canAccessAny, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
-import { personLockRefusal } from "../lib/record-lock.js"
+import { patientLockRefusal, personLockRefusal } from "../lib/record-lock.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 
 const listQuery = z.object({
@@ -203,6 +203,8 @@ export function createPeopleRoute(deps: CrmDeps) {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "patients.read"))
       return forbidden(c, "No tienes permiso para ver a las personas")
+    const blocked = await patientLockRefusal(c, deps.db, c.req.param("patientId"))
+    if (blocked) return blocked
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => personOfPatient(tx, orgId, c.req.param("patientId"))),
     )

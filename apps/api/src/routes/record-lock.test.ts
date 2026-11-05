@@ -1,0 +1,262 @@
+process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
+
+import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
+import { patientContact } from "@odentia/db/schema/clinical"
+import { contact } from "@odentia/db/schema/crm"
+import { createPatient, secretsKeyFromEnv } from "@odentia/services"
+import { and, eq, sql } from "drizzle-orm"
+import { migrate } from "drizzle-orm/postgres-js/migrator"
+import { type Context, Hono, type Next } from "hono"
+import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
+import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { lockedRecordGuard } from "../lib/record-lock.js"
+import { createAgentAdminRoute } from "./agent-admin.js"
+import { createAppointmentsRoute } from "./appointments.js"
+import { createClinicalFormsRoute } from "./clinical-forms.js"
+import { createContactsRoute } from "./contacts.js"
+import type { CrmDeps } from "./helpers.js"
+import { createPatientsRoute } from "./patients.js"
+import { createPeopleRoute } from "./people.js"
+
+/**
+ * La historia bloqueada (ADR 0080) en toda la API, no solo en `/patients/:id`,
+ * `/people/:id` y `/contacts/:id`: lo que la nombra en la consulta, en el
+ * cuerpo o por el id de un papel o de una cita. Para quien no es
+ * Administración no existe (404); a Administración se le dice 423, y abierta
+ * para leer solo deja leer.
+ */
+
+const IMAGE = "dentalagent-postgres:18.6"
+const KEY = secretsKeyFromEnv("ab".repeat(32))
+
+let container: StartedTestContainer
+let ownerDb: Db
+let appDb: Db
+let openPatientId = ""
+let lockedPatientId = ""
+let lockedPersonId = ""
+let openPersonId = ""
+let lockedOrderId = ""
+let openOrderId = ""
+let lockedAppointmentId = ""
+
+const storageStub = {
+  putAvatar: async () => {
+    throw new Error("no usado")
+  },
+  deleteByUrl: async () => {},
+  putAttachment: async () => {
+    throw new Error("no usado")
+  },
+  attachmentUrl: async (key: string) => `https://signed.example.com/${key}`,
+  deleteAttachment: async () => {},
+  putPatientDocument: async () => {
+    throw new Error("no usado")
+  },
+  putPatientAvatar: async () => {
+    throw new Error("no usado")
+  },
+}
+
+/** La app como la arma `app.ts`: la guarda común antes de las rutas. */
+function buildApp(role: string): Hono {
+  const deps: CrmDeps = {
+    db: appDb,
+    secretsKey: KEY,
+    storage: storageStub,
+    validateExternal: false,
+    webhookBaseUrl: "https://api.example.com",
+  }
+  const app = new Hono()
+  app.use("*", async (c: Context, next: Next) => {
+    c.set("orgId", "org_a")
+    c.set("userId", "u-1")
+    c.set("memberRole", role)
+    await next()
+  })
+  app.use("*", lockedRecordGuard(appDb))
+  app.route("/clinical-forms", createClinicalFormsRoute(deps))
+  app.route("/appointments", createAppointmentsRoute(deps))
+  app.route("/agent/admin", createAgentAdminRoute({ ...deps, llm: { fake: true } }))
+  app.route("/contacts", createContactsRoute(deps))
+  app.route("/patients", createPatientsRoute(deps))
+  app.route("/people", createPeopleRoute(deps))
+  return app
+}
+
+const json = { "content-type": "application/json" }
+const get = (role: string, path: string) => buildApp(role).request(path)
+const send = (role: string, method: string, path: string, body: unknown) =>
+  buildApp(role).request(path, { method, headers: json, body: JSON.stringify(body) })
+
+async function personOf(patientId: string): Promise<string> {
+  const [own] = await ownerDb
+    .select({ id: patientContact.contactId })
+    .from(patientContact)
+    .where(and(eq(patientContact.patientId, patientId), eq(patientContact.relationship, "self")))
+  if (!own) throw new Error("La paciente de prueba no tiene su ficha propia")
+  return own.id
+}
+
+beforeAll(async () => {
+  container = await new GenericContainer(IMAGE)
+    .withExposedPorts(5432)
+    .withEnvironment({
+      POSTGRES_DB: "dentalagent",
+      POSTGRES_USER: "dentalagent",
+      POSTGRES_PASSWORD: "dentalagent",
+      POSTGRES_APP_PASSWORD: "dentalagent_app",
+    })
+    .withWaitStrategy(Wait.forLogMessage("database system is ready to accept connections", 2))
+    .withCommand(["postgres", "-c", "shared_preload_libraries=pg_cron", "-c", "cron.database_name=dentalagent"])
+    .start()
+  const host = `${container.getHost()}:${container.getMappedPort(5432)}`
+  ownerDb = createOwnerDb(`postgres://dentalagent:dentalagent@${host}/dentalagent`)
+  await migrate(ownerDb, { migrationsFolder: "../../packages/db/drizzle" })
+  appDb = createAppDb(`postgres://dentalagent_app:dentalagent_app@${host}/dentalagent`)
+  await ownerDb.execute(
+    sql`insert into "organization" ("id", "name", "slug", "created_at") values ('org_a', 'Clínica', 'norte', now())`,
+  )
+  await ownerDb.execute(
+    sql`insert into "org_profile" ("organization_id", "legal_name", "country_code", "currency", "timezone", "locale")
+        values ('org_a', 'Clínica', 'PE', 'PEN', 'America/Lima', 'es-PE')`,
+  )
+  await ownerDb.execute(sql`insert into "user" ("id", "name", "email") values ('u-1', 'Ana', 'ana@test.dev')`)
+  const [open, locked] = await withOrgContext(appDb, "org_a", async (tx) => [
+    await createPatient(tx, "org_a", "u-1", { displayName: "Sofía Abierta" }),
+    await createPatient(tx, "org_a", "u-1", { displayName: "Lucía Cerrada" }),
+  ])
+  openPatientId = open!.id
+  lockedPatientId = locked!.id
+  openPersonId = await personOf(openPatientId)
+  lockedPersonId = await personOf(lockedPatientId)
+
+  // Lo que ya tenía antes de bloquearse: una orden y una cita pasada.
+  const orders = await ownerDb.execute<{ id: string }>(
+    sql`insert into "clinical_order" ("organization_id", "kind", "patient_id", "recipient", "title")
+        values ('org_a', 'laboratorio', ${lockedPatientId}, 'Laboratorio', 'Hemograma'),
+               ('org_a', 'laboratorio', ${openPatientId}, 'Laboratorio', 'Glucosa')
+        returning "id"`,
+  )
+  lockedOrderId = orders[0]!.id
+  openOrderId = orders[1]!.id
+  const [branch] = await ownerDb.execute<{ id: string }>(
+    sql`insert into "branch" ("organization_id", "name") values ('org_a', 'Sede') returning "id"`,
+  )
+  const [room] = await ownerDb.execute<{ id: string }>(
+    sql`insert into "schedule_room" ("organization_id", "branch_id", "name") values ('org_a', ${branch!.id}, 'Unidad 1') returning "id"`,
+  )
+  const [appointment] = await ownerDb.execute<{ id: string }>(
+    sql`insert into "appointment" ("organization_id", "branch_id", "patient_id", "professional_user_id", "room_id", "starts_at", "ends_at", "duration_min", "status")
+        values ('org_a', ${branch!.id}, ${lockedPatientId}, 'u-1', ${room!.id}, now() - interval '3 days', now() - interval '3 days' + interval '30 minutes', 30, 'atendida')
+        returning "id"`,
+  )
+  lockedAppointmentId = appointment!.id
+
+  // Bloquear una historia la desactiva (ver el CHECK de contact en packages/db).
+  await ownerDb
+    .update(contact)
+    .set({ isActive: false, recordLockedAt: new Date(), recordLockedBy: "u-1" })
+    .where(eq(contact.id, lockedPersonId))
+}, 120_000)
+
+afterAll(async () => {
+  await container?.stop()
+})
+
+describe("órdenes, consentimientos y formularios de una historia bloqueada (S1)", () => {
+  it("no se emite una orden: 404 a quien no es Administración y 423 a Administración", async () => {
+    const order = { patientId: lockedPatientId, kind: "laboratorio", recipient: "Laboratorio", title: "Perfil lipídico" }
+    expect((await send("clinician", "POST", "/clinical-forms/orders", order)).status).toBe(404)
+    expect((await send("admin", "POST", "/clinical-forms/orders", order)).status).toBe(423)
+  })
+
+  it("no se crean consentimientos ni formularios para ella", async () => {
+    // A Administración se le dice 423 antes de buscar la plantilla: el 404 de
+    // quien no es Administración no se confunde con «plantilla inexistente».
+    const consent = { patientId: lockedPatientId, templateId: crypto.randomUUID() }
+    expect((await send("clinician", "POST", "/clinical-forms/consents", consent)).status).toBe(404)
+    expect((await send("admin", "POST", "/clinical-forms/consents", consent)).status).toBe(423)
+    const form = { patientId: lockedPatientId, templateId: crypto.randomUUID() }
+    expect((await send("clinician", "POST", "/clinical-forms/form-responses", form)).status).toBe(404)
+    expect((await send("admin", "POST", "/clinical-forms/form-responses", form)).status).toBe(423)
+  })
+
+  it("sus órdenes, consentimientos y formularios no se listan por su paciente", async () => {
+    for (const path of ["orders", "consents", "form-responses"]) {
+      expect((await get("clinician", `/clinical-forms/${path}?patientId=${lockedPatientId}`)).status).toBe(404)
+      expect((await get("admin", `/clinical-forms/${path}?patientId=${lockedPatientId}`)).status).toBe(423)
+    }
+  })
+
+  it("la lista de trabajo de órdenes no trae las de una historia bloqueada", async () => {
+    const response = await get("clinician", "/clinical-forms/orders")
+    expect(response.status).toBe(200)
+    const ids = ((await response.json()) as { data: Array<{ id: string }> }).data.map((order) => order.id)
+    expect(ids).toContain(openOrderId)
+    expect(ids).not.toContain(lockedOrderId)
+  })
+
+  it("una orden suya abierta por su id no se imprime ni cambia de estado", async () => {
+    expect((await get("clinician", `/clinical-forms/orders/${lockedOrderId}/print`)).status).toBe(404)
+    expect(
+      (await send("clinician", "POST", `/clinical-forms/orders/${lockedOrderId}/status`, { status: "cancelado", reason: "x" }))
+        .status,
+    ).toBe(404)
+    expect((await get("admin", `/clinical-forms/orders/${lockedOrderId}/print`)).status).toBe(423)
+  })
+
+  it("abierta para leer, Administración lee pero no escribe", async () => {
+    await ownerDb.execute(
+      sql`insert into "patient_record_opening" ("organization_id", "patient_id", "user_id", "reason", "expires_at")
+          values ('org_a', ${lockedPatientId}, 'u-1', 'autoridad', now() + interval '1 hour')`,
+    )
+    try {
+      expect((await get("admin", `/clinical-forms/orders?patientId=${lockedPatientId}`)).status).toBe(200)
+      const order = { patientId: lockedPatientId, kind: "laboratorio", recipient: "Laboratorio", title: "Perfil lipídico" }
+      const refused = await send("admin", "POST", "/clinical-forms/orders", order)
+      expect(refused.status).toBe(423)
+      expect(((await refused.json()) as { error: { message: string } }).error.message).toBe(
+        "La historia está abierta solo para leer",
+      )
+    } finally {
+      await ownerDb.execute(sql`delete from "patient_record_opening" where "patient_id" = ${lockedPatientId}`)
+    }
+  })
+})
+
+describe("citas, permisos de mensajes y vínculos de una persona bloqueada (S2)", () => {
+  it("sus citas no se listan por su paciente ni se abren por su id", async () => {
+    expect((await get("reception", `/appointments?patientId=${lockedPatientId}`)).status).toBe(404)
+    expect((await get("reception", `/appointments/${lockedAppointmentId}`)).status).toBe(404)
+    expect((await get("reception", `/appointments/${lockedAppointmentId}/context`)).status).toBe(404)
+    expect((await send("reception", "PATCH", `/appointments/${lockedAppointmentId}`, { reason: "x" })).status).toBe(404)
+    expect((await get("admin", `/appointments/${lockedAppointmentId}`)).status).toBe(423)
+  })
+
+  it("recepción no lee ni vuelve a encender sus mensajes", async () => {
+    expect((await get("reception", `/agent/admin/people/${lockedPersonId}/permissions`)).status).toBe(404)
+    expect(
+      (await send("reception", "POST", `/agent/admin/people/${lockedPersonId}/permissions`, { tipo: "recordatorios", recibir: true }))
+        .status,
+    ).toBe(404)
+    expect((await get("reception", `/agent/admin/people/${openPersonId}/permissions`)).status).toBe(200)
+  })
+
+  it("no se le pasa una cuenta ni se la vincula a otra ficha", async () => {
+    const move = await send("reception", "POST", `/contacts/${openPersonId}/identities/${crypto.randomUUID()}/move`, {
+      toContactId: lockedPersonId,
+      reason: "Es su número",
+    })
+    expect(move.status).toBe(404)
+    const link = await send("reception", "PUT", `/patients/${openPatientId}/contacts/${lockedPersonId}`, {
+      relationship: "guardian",
+    })
+    expect(link.status).toBe(404)
+  })
+
+  it("no se averigua de quién es su ficha", async () => {
+    expect((await get("reception", `/people/by-patient/${lockedPatientId}`)).status).toBe(404)
+    expect((await get("reception", `/people/by-patient/${openPatientId}`)).status).toBe(200)
+  })
+})
