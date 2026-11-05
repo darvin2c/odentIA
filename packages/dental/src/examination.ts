@@ -1,6 +1,6 @@
 /**
  * El examen de la boca de odentIA (ADR 0003; NTS 139: el examen extraoral e
- * intraoral va en la historia): extraoral, intraoral e higiene oral. Sus
+ * intraoral va en la historia): extraoral, higiene oral e intraoral. Sus
  * datos y su nombre en palabras viven aquí, para que el servidor (la copia de
  * la historia) y la pantalla (la atención firmada) digan lo mismo.
  */
@@ -30,26 +30,26 @@ const GROUPS = [
 const HYGIENE_WORDS: Record<string, string> = { buena: "buena", regular: "regular", mala: "mala" }
 
 /**
- * El examen guardado, una línea por parte: «Extraoral · ATM: sin chasquido;
- * Labios: secos», «Intraoral · Encías: inflamadas», «Higiene oral: regular».
- * Lo que no se escribió no sale; sin nada escrito, ninguna línea.
+ * El examen guardado, una línea por parte y en el orden del formulario:
+ * «Extraoral · ATM: sin chasquido; Labios: secos», «Higiene oral: regular»,
+ * «Intraoral · Encías: inflamadas». Lo que no se escribió no sale; sin nada
+ * escrito, ninguna línea.
  */
 export function dentalExamLines(value: unknown): string[] {
   if (!value || typeof value !== "object" || Array.isArray(value)) return []
   const exam = value as Record<string, unknown>
-  const lines: string[] = []
-  for (const group of GROUPS) {
+  const groupLine = (group: (typeof GROUPS)[number]): string[] => {
     const given = exam[group.key]
-    if (!given || typeof given !== "object" || Array.isArray(given)) continue
+    if (!given || typeof given !== "object" || Array.isArray(given)) return []
     const parts = group.fields
       .map((field) => {
         const text = (given as Record<string, unknown>)[field]
         return typeof text === "string" && text.trim() ? `${DENTAL_EXAM_LABELS[field] ?? field}: ${text.trim()}` : null
       })
       .filter((part): part is string => part !== null)
-    if (parts.length) lines.push(`${group.label} · ${parts.join("; ")}`)
+    return parts.length ? [`${group.label} · ${parts.join("; ")}`] : []
   }
   const hygiene = exam["higieneOral"]
-  if (typeof hygiene === "string" && HYGIENE_WORDS[hygiene]) lines.push(`Higiene oral: ${HYGIENE_WORDS[hygiene]}`)
-  return lines
+  const hygieneLine = typeof hygiene === "string" && HYGIENE_WORDS[hygiene] ? [`Higiene oral: ${HYGIENE_WORDS[hygiene]}`] : []
+  return [...groupLine(GROUPS[0]), ...hygieneLine, ...groupLine(GROUPS[1])]
 }

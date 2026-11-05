@@ -144,8 +144,8 @@ it("el examen y los signos vitales los pone el producto: la boca en odentIA, los
   const dental = await f.run((tx) => loadPatientRecord(tx, "org_a", f.patient.id))
   expect(dental.encounters.find((entry) => entry.row.id === f.encounter.id)?.exam.lines).toEqual([
     "Extraoral · ATM: Sin chasquido; Labios: Secos",
-    "Intraoral · Encías: Inflamadas",
     "Higiene oral: regular",
+    "Intraoral · Encías: Inflamadas",
   ])
   await draft({ examination: null })
 
