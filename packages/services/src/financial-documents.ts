@@ -1309,7 +1309,7 @@ export async function sendFinancialDocument(
 
 export type TicketReceiptOutcome =
   | { sent: "correo"; email: string; conversationId: string; messageId: string }
-  /** Lo que dice Caja: «Sin correo: entrégalo impreso, o agrégale su correo en «Enviar» del ticket». */
+  /** Lo que dice Caja: «Sin correo: entrégalo impreso, o agrégale su correo en «Enviar al paciente» del ticket». */
   | {
       sent: null
       reason: "sin_correo" | "sin_conexion" | "correo_ajeno" | "sin_permiso"
@@ -1320,7 +1320,7 @@ const RECEIPT_WORDS: Record<
   "sin_correo" | "sin_conexion" | "correo_ajeno" | "sin_permiso",
   string
 > = {
-  sin_correo: "Sin correo: entrégalo impreso, o agrégale su correo en «Enviar» del ticket",
+  sin_correo: "Sin correo: entrégalo impreso, o agrégale su correo en «Enviar al paciente» del ticket",
   sin_conexion: "La clínica no tiene un correo conectado: entrégalo impreso",
   correo_ajeno: "Su correo está vinculado a otra persona: entrégalo impreso",
   sin_permiso: "Pidió no recibir ningún mensaje de la clínica: entrégalo impreso",
@@ -1462,7 +1462,8 @@ export async function sendReceiptInConversation(
   if (!ticket) return null
   const snap = await buildTicketSnapshot(tx, orgId, input.patientId, ticket.id)
   const label = `Comprobante N.º ${snap.numberLabel}`
-  // Si la corrida se repite, el mismo comprobante recién enviado aquí no sale otra vez.
+  // Si la misma corrida se repite, el comprobante recién enviado aquí no sale otra vez. Pero sí si
+  // el anterior no salió, o si la persona volvió a escribir («no me llegó»): eso es otro pedido.
   const [recent] = await tx
     .select({ id: message.id })
     .from(message)
@@ -1473,7 +1474,10 @@ export async function sendReceiptInConversation(
         eq(message.direction, "out"),
         eq(message.senderKind, "agent"),
         eq(message.body, label),
+        sql`${message.status} not in ('failed', 'unknown')`,
         sql`${message.createdAt} >= now() - interval '10 minutes'`,
+        sql`not exists (select 1 from message i where i.organization_id = ${message.organizationId}
+          and i.conversation_id = ${message.conversationId} and i.direction = 'in' and i.created_at > ${message.createdAt})`,
       ),
     )
     .limit(1)
