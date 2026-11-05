@@ -141,6 +141,13 @@ export function BookingDrawer({
   onClose: () => void
   onSaved: (appointment: AgendaAppointment) => Promise<void>
 }) {
+  // Con más de una sede, se dice en cuál se reserva (la que se eligió en la Agenda).
+  const branchList =
+    useQuery({
+      queryKey: ["branches"],
+      queryFn: () => apiFetch<{ data: Array<{ id: string; name: string }> }>("/api/branches"),
+    }).data?.data ?? []
+  const bookingBranch = branchList.length > 1 ? (branchList.find((item) => item.id === branchId)?.name ?? null) : null
   // ----- A quién -----
   const [registering, setRegistering] = React.useState(Boolean(seed.person))
   const [created, setCreated] = React.useState<{ id: string; name: string } | null>(null)
@@ -544,7 +551,7 @@ export function BookingDrawer({
         {...surface}
         open
         title="Nueva cita"
-        description={`Elige a quién y cuándo. La ${appWords().room.one} se asigna con el hueco.`}
+        description={`${bookingBranch ? `En ${bookingBranch}. ` : ""}Elige a quién y cuándo. La ${appWords().room.one} se asigna con el hueco.`}
         onClose={onClose}
 
         submitLabel={submitLabel}

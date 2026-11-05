@@ -245,7 +245,9 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
   await card.click()
   await expect(page.getByText("Por confirmar", { exact: true }).last()).toBeVisible()
   await shot("detalle-por-confirmar")
+  // «Confirmar cita» pregunta cómo confirmó y lo deja anotado.
   await page.getByRole("button", { name: "Confirmar cita" }).click()
+  await page.getByRole("menuitem", { name: "Confirmó por teléfono" }).click()
   await expect(page.getByRole("button", { name: "Confirmar cita" })).toHaveCount(0)
   await expect(page.getByText("Confirmada", { exact: true }).last()).toBeVisible()
   await page.getByRole("button", { name: "Cerrar" }).click()
