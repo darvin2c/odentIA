@@ -79,7 +79,7 @@ import { lapsedToInvite, recordInvitation } from "./return-invites.js"
 import { updateOpportunity } from "./opportunities.js"
 import { getPatientMissingData, patientHealthToAsk } from "./patient-registration.js"
 import { personalLinkRef } from "./personal-link-token.js"
-import { contactDecides, listDecisionRecipients, patientAge } from "./responsibilities.js"
+import { contactDecides, listDecisionRecipients, patientAge, representationEnded } from "./responsibilities.js"
 import { clinicOriginOf, personalLinkMessageUrl, personalLinkUrl, publicLinksConfigured } from "./public-links.js"
 import { createTask, settleTask } from "./tasks.js"
 import { upsertWorkspaceNotification } from "./workspace.js"
@@ -890,7 +890,9 @@ export async function enqueueJob(
 /**
  * A quién se le escribe lo de un paciente (recordatorios, avisos de la cita y
  * recontactos), siempre la misma para el mismo paciente:
- * 1. otra persona que el equipo marcó como preferida (la abuela que lo trae);
+ * 1. otra persona que el equipo marcó como preferida (la abuela que lo trae),
+ *    salvo quien fue su representante y ya no lo es (`representationEnded`:
+ *    al cumplir 18, la madre que el registro dejó como preferida);
  * 2. siendo menor de edad, su representante legal vigente, el mismo de sus
  *    presupuestos y recetas (`listDecisionRecipients`): un niño no confirma ni
  *    lleva a nadie a la cita, y sus datos de salud los gestiona su
@@ -923,12 +925,15 @@ export async function preferredContact(tx: Db, orgId: string, patientId: string)
     .limit(20)
   if (rows.length === 0) return null
   const chosen = rows.find((r) => r.isPreferred && r.relationship !== "self")
-  if (chosen) return chosen.contactId
+  const ended = chosen ? await representationEnded(tx, orgId, patientId, chosen.contactId) : false
+  if (chosen && !ended) return chosen.contactId
   if ((await patientAge(tx, orgId, patientId)).isMinor) {
     const [representative] = await listDecisionRecipients(tx, orgId, patientId)
     if (representative) return representative.contactId
   }
-  return (rows.find((r) => r.isPreferred) ?? rows.find((r) => r.relationship === "self") ?? rows[0])!.contactId
+  // Quien ya no lo representa tampoco entra por los últimos pasos.
+  const rest = ended ? rows.filter((r) => r.contactId !== chosen?.contactId) : rows
+  return (rest.find((r) => r.isPreferred) ?? rest.find((r) => r.relationship === "self") ?? rest[0])?.contactId ?? null
 }
 
 function hashToken(token: string): string {
@@ -1211,8 +1216,9 @@ export async function syncBudgetFollowUps(tx: Db, orgId: string, now: Date): Pro
     .orderBy(asc(treatmentBudget.presentedAt), asc(treatmentBudget.id))
     .limit(BATCH_LIMIT)
   for (const budget of pending) {
+    // El presupuesto solo con quien decide: nunca a la abuela preferida ni a quien lo representó de niño.
     const contactId =
-      budget.decisionContactId ?? (await preferredContact(tx, orgId, budget.patientId))
+      budget.decisionContactId ?? (await listDecisionRecipients(tx, orgId, budget.patientId))[0]?.contactId ?? null
     // Sin a quién escribirle el caso se anota igual: al atenderlo queda como «no pude» (sin_destino)
     // con su tarea, y no vuelve a ocupar el lote en cada ciclo.
     if (!contactId) omitidos++
