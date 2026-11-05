@@ -14,7 +14,7 @@ import {
   Textarea,
 } from "@odentia/ui"
 import type * as React from "react"
-import { useRef } from "react"
+import { useRef, useState } from "react"
 import { PasswordInput, type PasswordRequirement } from "../password-input.js"
 import { PhoneInput, type PhoneInputProps } from "../phone/phone-input.js"
 import {
@@ -255,8 +255,11 @@ export type PhoneFieldProps = FieldText &
  */
 export function PhoneField({ label, description, hideLabel, id, className, ...phone }: PhoneFieldProps) {
   const field = useFieldContext<string | null>()
+  // Posible pero no válido para su país (un dígito de más, un rango reservado): se guarda y se avisa.
+  const [doubtful, setDoubtful] = useState(false)
+  const hint = doubtful ? "Revisa el número: no parece de un celular de ese país. Se guarda tal como está." : description
   return (
-    <FormField label={label} description={description} hideLabel={hideLabel} id={id} className={className}>
+    <FormField label={label} description={hint} hideLabel={hideLabel} id={id} className={className}>
       {(control) => (
         <PhoneInput
           {...phone}
@@ -268,6 +271,7 @@ export function PhoneField({ label, description, hideLabel, id, className, ...ph
           onBlur={control.onBlur}
           onChange={(next, meta) => {
             field.handleChange(next)
+            setDoubtful(meta.e164 !== null && !meta.isValid)
             // Solo se toca el aviso propio: el de un validador de la pantalla se respeta.
             if (meta.digits.length > 0 && !meta.e164) field.setErrorMap({ onChange: INCOMPLETE_PHONE })
             else if (field.state.meta.errorMap.onChange === INCOMPLETE_PHONE) field.setErrorMap({ onChange: undefined })

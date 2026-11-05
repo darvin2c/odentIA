@@ -171,7 +171,8 @@ const FOCUSABLE =
 export function focusFirstInvalid(root: ParentNode | null): void {
   const run = () => {
     const scope: ParentNode = root && (root as Node).isConnected ? root : document
-    for (const marked of scope.querySelectorAll<HTMLElement>('[aria-invalid="true"], fieldset[data-invalid="true"]')) {
+    // Un aviso (`data-advisory`: un teléfono raro que igual se guarda) no se lleva el foco de un error.
+    for (const marked of scope.querySelectorAll<HTMLElement>('[aria-invalid="true"]:not([data-advisory="true"]), fieldset[data-invalid="true"]')) {
       // Con `tabindex` (también -1: la firma, la persona elegida) se enfoca él; si no, su primer control.
       const target =
         marked.matches(FOCUSABLE) || marked.hasAttribute("tabindex") ? marked : marked.querySelector<HTMLElement>(FOCUSABLE)

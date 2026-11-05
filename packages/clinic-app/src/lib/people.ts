@@ -45,6 +45,8 @@ export interface PersonSpokenForBy {
   /** Parentesco con HL7 v3 RoleCode, si se conoce. */
   kinship?: string | null
   isPreferred: boolean
+  /** Solo es su contacto de emergencia: no se dice que habla por ella. */
+  emergencyOnly?: boolean
   conversationId: string | null
 }
 
