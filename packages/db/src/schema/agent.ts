@@ -785,6 +785,12 @@ export interface AgentPatientContext {
   relationship: string
   /** Autorización del interlocutor: self | representante_legal | autorizado_informacion. */
   authorization: "self" | "representante_legal" | "autorizado_informacion"
+  /**
+   * Decide por el paciente (`requireDecisionContact`): la propia persona si es
+   * mayor de edad o su representante legal vigente. Solo con quien decide se
+   * habla del presupuesto.
+   */
+  decides: boolean
 }
 
 /**

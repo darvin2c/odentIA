@@ -71,7 +71,7 @@ import {
   chatPrivacyNotice,
   registerFromConversation,
 } from "./patient-registration.js"
-import { requireDecisionContact, requireLinkedActiveContact } from "./responsibilities.js"
+import { currentRepresentationSql, patientAge, requireDecisionContact, requireLinkedActiveContact } from "./responsibilities.js"
 import { createTask, getTask, updateTask } from "./tasks.js"
 import { createWorkspaceNotification, upsertWorkspaceNotification } from "./workspace.js"
 import { auditEvent, branch } from "@odentia/db/schema/org"
@@ -218,7 +218,11 @@ export function autonomyModeOf(action: AutonomyAction): AutonomyMode {
  * Resuelve el contexto que el agente puede ver de un paciente: exige
  * vinculación activa contacto↔paciente y autorización del interlocutor
  * (es el paciente, su representante legal o autorizado de información
- * vigente). Nunca devuelve historia clínica, solo filiación mínima.
+ * vigente). La representación de un menor termina al cumplir 18, con la
+ * misma regla de quien decide (`currentRepresentationSql`), y los días se
+ * cuentan con el de la clínica. `decides` dice si además decide por él
+ * (`requireDecisionContact`). Nunca devuelve historia clínica, solo
+ * filiación mínima.
  */
 export async function resolveAgentPatientContext(
   tx: Db,
@@ -227,34 +231,46 @@ export async function resolveAgentPatientContext(
   patientId: string,
 ): Promise<AgentPatientContext> {
   const { relationship } = await requireLinkedActiveContact(tx, orgId, patientId, contactId)
+  const age = await patientAge(tx, orgId, patientId)
   let authorization: AgentPatientContext["authorization"]
+  let decides = false
   if (relationship === "self") {
     authorization = "self"
+    decides = !age.isMinor
   } else {
-    const today = new Date().toISOString().slice(0, 10)
-    const [grant] = await tx
-      .select({ kind: patientResponsibility.kind })
+    const [representative] = await tx
+      .select({ id: patientResponsibility.id })
       .from(patientResponsibility)
-      .where(
-        and(
-          eq(patientResponsibility.organizationId, orgId),
-          eq(patientResponsibility.patientId, patientId),
-          eq(patientResponsibility.contactId, contactId),
-          inArray(patientResponsibility.kind, ["representante_legal", "autorizado_informacion"]),
-          isNull(patientResponsibility.revokedAt),
-          lte(patientResponsibility.startsAt, today),
-          or(isNull(patientResponsibility.endsAt), gte(patientResponsibility.endsAt, today)),
-        ),
-      )
+      .where(and(currentRepresentationSql(orgId, patientId, age), eq(patientResponsibility.contactId, contactId)))
       .limit(1)
-    if (!grant) {
-      throw new ServiceError(
-        "PATIENT_CONTEXT_FORBIDDEN",
-        409,
-        "El interlocutor no está autorizado a recibir información de este paciente",
-      )
+    if (representative) {
+      authorization = "representante_legal"
+      decides = true
+    } else {
+      const [informed] = await tx
+        .select({ id: patientResponsibility.id })
+        .from(patientResponsibility)
+        .where(
+          and(
+            eq(patientResponsibility.organizationId, orgId),
+            eq(patientResponsibility.patientId, patientId),
+            eq(patientResponsibility.contactId, contactId),
+            eq(patientResponsibility.kind, "autorizado_informacion"),
+            isNull(patientResponsibility.revokedAt),
+            lte(patientResponsibility.startsAt, age.today),
+            or(isNull(patientResponsibility.endsAt), gte(patientResponsibility.endsAt, age.today)),
+          ),
+        )
+        .limit(1)
+      if (!informed) {
+        throw new ServiceError(
+          "PATIENT_CONTEXT_FORBIDDEN",
+          409,
+          "El interlocutor no está autorizado a recibir información de este paciente",
+        )
+      }
+      authorization = "autorizado_informacion"
     }
-    authorization = grant.kind as AgentPatientContext["authorization"]
   }
   const row = await requirePatient(tx, orgId, patientId)
   return {
@@ -263,8 +279,13 @@ export async function resolveAgentPatientContext(
     displayName: row.displayName,
     relationship,
     authorization,
+    decides,
   }
 }
+
+/** El presupuesto solo se conversa con quien decide (`AgentPatientContext.decides`). */
+export const BUDGET_ONLY_WITH_DECIDER =
+  "El presupuesto solo se conversa con quien decide por el paciente: la propia persona si es mayor de edad, o su representante legal."
 
 /** Pacientes vinculados al contacto (para que el agente pregunte de quién habla). */
 export async function listAgentContextCandidates(tx: Db, orgId: string, contactId: string) {
@@ -377,10 +398,10 @@ export const AGENT_SUMMARY_BUDGETS_SHOWN = 5
 
 /**
  * Resumen mínimo del paciente según la facultad del interlocutor, sin leer
- * historia clínica: próximas citas y estado de presupuestos presentados o
- * decididos (nunca borradores) para self/representante/autorizado; saldo
- * solo para self, representante legal o responsable económico vigente.
- * Siempre del paciente verificado, nunca de otro.
+ * historia clínica: próximas citas para self/representante/autorizado; estado
+ * de presupuestos presentados o decididos (nunca borradores) solo para quien
+ * decide (`decides`); saldo solo para self, representante legal o responsable
+ * económico vigente. Siempre del paciente verificado, nunca de otro.
  */
 export async function getAgentPatientSummary(
   tx: Db,
@@ -416,16 +437,19 @@ export async function getAgentPatientSummary(
     )
     .orderBy(asc(appointment.startsAt))
     .limit(AGENT_APPOINTMENTS_SHOWN + 1)
-  const budgetRows = await tx
-    .select({
-      number: treatmentBudget.budgetNumber,
-      title: treatmentBudget.title,
-      status: treatmentBudget.status,
-    })
-    .from(treatmentBudget)
-    .where(and(eq(treatmentBudget.organizationId, orgId), eq(treatmentBudget.patientId, patientId), ne(treatmentBudget.status, "borrador")))
-    .orderBy(desc(treatmentBudget.budgetNumber))
-    .limit(AGENT_SUMMARY_BUDGETS_SHOWN + 1)
+  // El presupuesto solo con quien decide: a nadie más se le cuenta ni que existe.
+  const budgetRows = context.decides
+    ? await tx
+        .select({
+          number: treatmentBudget.budgetNumber,
+          title: treatmentBudget.title,
+          status: treatmentBudget.status,
+        })
+        .from(treatmentBudget)
+        .where(and(eq(treatmentBudget.organizationId, orgId), eq(treatmentBudget.patientId, patientId), ne(treatmentBudget.status, "borrador")))
+        .orderBy(desc(treatmentBudget.budgetNumber))
+        .limit(AGENT_SUMMARY_BUDGETS_SHOWN + 1)
+    : []
   // Si algo no cupo, se cuenta entero: el agente dice «y N más», nunca calla.
   const countMore = async (shown: number, rows: number, total: () => Promise<number>) => (rows > shown ? (await total()) - shown : 0)
   const moreAppointments = await countMore(AGENT_APPOINTMENTS_SHOWN, appointments.length, async () => {
@@ -783,11 +807,12 @@ export function budgetNumberText(budgetNumber: number): string {
 }
 
 /**
- * Los presupuestos de un paciente que el interlocutor está autorizado a ver
- * (`resolveAgentPatientContext`: la persona, su representante o quien ella
- * autorizó; nunca por coincidencia de teléfono), tal como los recibe la
- * persona: tratamientos, pieza, precios y opciones. Sin diagnósticos ni notas.
- * Del que aún se prepara solo se dice que existe.
+ * Los presupuestos de un paciente, solo para quien decide por él
+ * (`resolveAgentPatientContext` con `decides`: la persona si es mayor de edad
+ * o su representante legal vigente; nunca un autorizado de información ni por
+ * coincidencia de teléfono), tal como los recibe la persona: tratamientos,
+ * pieza, precios y opciones. Sin diagnósticos ni notas. Del que aún se
+ * prepara solo se dice que existe.
  */
 export async function getAgentPatientBudgets(
   tx: Db,
@@ -796,6 +821,7 @@ export async function getAgentPatientBudgets(
   patientId: string,
 ): Promise<AgentPatientBudgets> {
   const context = await resolveAgentPatientContext(tx, orgId, contactId, patientId)
+  if (!context.decides) throw new ServiceError("BUDGET_NOT_FOR_INTERLOCUTOR", 409, BUDGET_ONLY_WITH_DECIDER)
   const all = await listBudgets(tx, orgId, patientId)
   const newest = [...all].reverse()
   const delivered = newest.filter((budget) => !BUDGET_NOT_DELIVERED.includes(budget.status))

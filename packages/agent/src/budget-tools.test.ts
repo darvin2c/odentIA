@@ -512,7 +512,7 @@ it("con dos opciones hay que elegir una; lo incompleto no se propone y corregir 
   expect((await getBudgetDetailOf(patientId, budgetId)).status).toBe("presentado")
 })
 
-it("quien solo está autorizado a recibir información ve el presupuesto, pero la respuesta la da la persona o su representante", async () => {
+it("con quien solo está autorizado a recibir información no se habla del presupuesto, y la respuesta la da la persona o su representante", async () => {
   const { conversationId } = await byTelegram("tg:autorizado", "evt-autorizado", "Mi papá acepta todo")
   const contactId = await contactOf(conversationId)
   const [row] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Jorge Autorizado", patientNumber: await nextPatientNumber(ownerDb, ORG) })
@@ -523,7 +523,13 @@ it("quien solo está autorizado a recibir información ve el presupuesto, pero l
   )
   const { budgetId, tooth } = await budgetOf(patientId, { deliver: true })
   const ctx = toolCtx(conversationId, contactId)
-  expect(await call(ctx, "ver_presupuesto", { patientId })).toContain(`Total ${S}540.00`)
+  // El presupuesto solo con quien decide: ni su detalle ni que existe.
+  const seen = await call(ctx, "ver_presupuesto", { patientId })
+  expect(seen).toContain("El presupuesto solo se conversa con quien decide por el paciente")
+  expect(seen).not.toContain("540")
+  const summary = await call(ctx, "ver_resumen_paciente", { patientId })
+  expect(summary).not.toContain("Presupuesto N°")
+  expect(summary).toContain("solo se conversan con quien decide")
   const refused = await call(ctx, "anotar_respuesta_presupuesto", {
     patientId,
     budgetId,

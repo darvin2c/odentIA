@@ -66,7 +66,7 @@ export async function patientIsMinor(tx: Db, orgId: string, patientId: string): 
 }
 
 /** Representación legal vigente hoy; si ya es mayor de edad, solo la que se dio siendo adulto. */
-function currentRepresentationSql(
+export function currentRepresentationSql(
   orgId: string,
   patientId: string,
   age: { today: string; adultSince: string | null },

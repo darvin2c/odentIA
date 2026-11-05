@@ -1455,7 +1455,10 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           .join("\n")
       }
       const found = await inOrg((tx) => resolveAgentPatientContext(tx, ctx.orgId, ctx.contactId, patientId))
-      return `Paciente: ${found.displayName} (vínculo ${found.relationship}, autorización ${found.authorization}). Solo filiación mínima: nunca pidas ni reveles historia clínica.`
+      const decision = found.decides
+        ? "Decide por el paciente."
+        : "No decide por el paciente: no le hables de su presupuesto; si lo pide, ofrece enviárselo a quien decide (reenviar_presupuesto)."
+      return `Paciente: ${found.displayName} (vínculo ${found.relationship}, autorización ${found.authorization}). ${decision} Solo filiación mínima: nunca pidas ni reveles historia clínica.`
     },
     {
       name: "ver_contexto_paciente",
@@ -1488,6 +1491,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         lines.push(
           `Y ${summary.moreAppointments} ${summary.moreAppointments === 1 ? "cita más" : "citas más"} después de estas: para verlas, vuelve a llamar con desde${after ? ` ${after}` : ""}. No digas que no tiene otra cita sin verlas.`,
         )
+      }
+      if (!summary.context.decides) {
+        lines.push("Presupuestos: solo se conversan con quien decide por el paciente; no los menciones. Si lo pide, ofrece enviárselo a quien decide (reenviar_presupuesto).")
       }
       for (const b of summary.budgets) {
         lines.push(`- Presupuesto N°${b.number} ${b.title}: ${b.status}.`)
@@ -2078,6 +2084,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       try {
         found = await inOrg((tx) => getAgentPatientBudgets(tx, ctx.orgId, ctx.contactId, patientId))
       } catch (e) {
+        if (e instanceof ServiceError && e.code === "BUDGET_NOT_FOR_INTERLOCUTOR") {
+          return `${e.message} No le des datos del presupuesto; si lo pide, ofrece enviárselo a quien decide (reenviar_presupuesto).`
+        }
         if (e instanceof ServiceError) {
           return `No puedes ver los presupuestos de ese paciente (${e.message}). No des datos suyos: pregunta de quién habla o pasa el caso a una persona.`
         }
