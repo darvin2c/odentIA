@@ -2432,7 +2432,10 @@ export const patientPaymentRefund = pgTable(
   },
   (table) => [
     index("payment_refund_org_patient_idx").on(table.organizationId, table.patientId),
-    index("payment_refund_org_request_idx").on(table.organizationId, table.requestId),
+    // La base también impide guardar dos veces la misma devolución de un cobro (ADR 0063: la base protege).
+    uniqueIndex("payment_refund_org_request_payment_uidx")
+      .on(table.organizationId, table.requestId, table.paymentId)
+      .where(sql`${table.requestId} IS NOT NULL`),
     index("payment_refund_payment_idx").on(table.organizationId, table.paymentId),
     check("payment_refund_amount_check", sql`${table.amountCents} > 0`),
     check("payment_refund_tax_check", sql`${table.taxCents} BETWEEN 0 AND ${table.amountCents}`),

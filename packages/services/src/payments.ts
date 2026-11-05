@@ -1434,8 +1434,8 @@ export async function collectCharge(
     const due = need - creditApplied
     const message =
       due > 0
-        ? `A lo marcado ya solo le falta ${formatOrgMoney(due, unit, await findOrgLocale(tx, orgId))}: alguien cobró una parte. Cobra eso, o el resto como adelanto.`
-        : "Lo marcado ya está pagado: alguien lo cobró mientras tanto."
+        ? `A lo marcado ya solo le falta ${formatOrgMoney(due, unit, await findOrgLocale(tx, orgId))}. Cobra eso, o el resto como adelanto.`
+        : "Lo marcado ya está pagado. Revisa la cuenta antes de cobrar."
     throw new ServiceError("EXCEEDS_DUE", 409, message)
   }
   // Cada medio guarda su parte; el resto del redondeo va al último, para que sumen exacto.
@@ -1515,12 +1515,7 @@ export async function collectCharge(
       appliedCents: 0,
       promotion: null,
     })
-  else {
-    // Lo que pasa de lo que debía queda a favor, y el ticket lo dice.
-    const left = cancels - Object.values(newAppliedByCharge).reduce((total, cents) => total + cents, 0)
-    if (left > 0)
-      lines.push({ chargeId: null, description: "Queda a favor", amountCents: left, appliedCents: 0, promotion: null })
-  }
+
   // El impuesto de lo que entra hoy (ADR 0083): cada concepto con el que guardó
   // al crearse; lo que queda a favor, con el de las atenciones. Lo pagado con
   // saldo a favor ya lo llevó cuando entró ese dinero.
@@ -2088,12 +2083,33 @@ export async function refundCredit(
       .where(and(eq(patientPaymentRefund.organizationId, orgId), eq(patientPaymentRefund.requestId, requestId)))
       .orderBy(asc(patientPaymentRefund.createdAt), asc(patientPaymentRefund.id))
     if (earlier.length) {
-      if (earlier.some((row) => row.patientId !== patientId) || sum(earlier) !== amount)
-        throw conflict("REQUEST_ID_CONFLICT", "Esta devolución ya se registró con otros datos. Cierra y vuelve a abrir.")
-      const receipt = await getRefundReceipt(tx, orgId, patientId, earlier[0]!.id)
+      const [stored] = await tx
+        .select({ id: auditEvent.entityId })
+        .from(auditEvent)
+        .where(
+          and(
+            eq(auditEvent.organizationId, orgId),
+            eq(auditEvent.action, "refund.receipt"),
+            eq(auditEvent.entity, "patient_payment_refund"),
+            inArray(auditEvent.entityId, earlier.map((row) => row.id)),
+          ),
+        )
+        .limit(1)
+      const receiptId = stored?.id ?? null
+      const receipt = receiptId ? await getRefundReceipt(tx, orgId, patientId, receiptId) : null
+      // Otra persona, otro importe, otra moneda u otra sede no son el mismo pedido.
+      if (
+        !receiptId ||
+        !receipt ||
+        earlier.some((row) => row.patientId !== patientId) ||
+        sum(earlier) !== amount ||
+        receipt.currency !== (input.currency ?? orgUnit) ||
+        receipt.branch.id !== input.branchId
+      )
+        throw conflict("REFUND_REQUEST_CONFLICT", "Esta devolución ya se registró con otros datos. Cierra el panel y revisa la cuenta antes de devolver otra vez.")
       return {
         refunds: earlier,
-        receiptId: earlier[0]!.id,
+        receiptId,
         amountCents: receipt.amountCents,
         currency: receipt.currency,
         branchId: receipt.branch.id,

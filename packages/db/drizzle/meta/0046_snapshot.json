@@ -1,5 +1,5 @@
 {
-  "id": "b2ae5cd7-b9bf-4f15-8624-295804390ab9",
+  "id": "122c88bf-4380-40da-b440-79ce1f757433",
   "prevId": "5f8ea483-fb21-4aba-9f74-28473c263a61",
   "version": "7",
   "dialect": "postgresql",
@@ -18649,8 +18649,8 @@
           "method": "btree",
           "with": {}
         },
-        "payment_refund_org_request_idx": {
-          "name": "payment_refund_org_request_idx",
+        "payment_refund_org_request_payment_uidx": {
+          "name": "payment_refund_org_request_payment_uidx",
           "columns": [
             {
               "expression": "organization_id",
@@ -18663,9 +18663,16 @@
               "isExpression": false,
               "asc": true,
               "nulls": "last"
+            },
+            {
+              "expression": "payment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
             }
           ],
-          "isUnique": false,
+          "isUnique": true,
+          "where": "\"patient_payment_refund\".\"request_id\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}

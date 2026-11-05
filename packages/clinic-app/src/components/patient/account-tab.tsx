@@ -217,14 +217,15 @@ export function AccountTab({
 
   // Una clave por devolución: el mismo pedido enviado otra vez no devuelve dos veces.
   const refundRequestId = useRef<string>(crypto.randomUUID())
+  // Lo que se veía a favor al abrir «Devolver dinero»: si otra pestaña devolvió, el servidor lo dice.
+  const refundSeenFavor = useRef<number | null>(null)
   const refundMutation = useMutation({
     mutationFn: (input: { amountCents: number; paymentMethodId: string; reason: string }) =>
       refundApi(patientId, {
         branchId: activeBranch,
         ...input,
         requestId: refundRequestId.current,
-        // Lo que se veía a favor: si otra pantalla devolvió mientras tanto, el servidor lo dice.
-        expectedCreditCents: favor,
+        ...(refundSeenFavor.current !== null ? { expectedCreditCents: refundSeenFavor.current } : {}),
         // Sin otra moneda, el cuerpo de siempre.
         ...(refundCurrency && refundCurrency !== orgUnit ? { currency: refundCurrency } : {}),
       }),
@@ -383,6 +384,7 @@ export function AccountTab({
     }
     if (action === "devolver") {
       refundRequestId.current = crypto.randomUUID()
+      refundSeenFavor.current = favorIn(refundFrom)
       refundForm.reset({
         amountText: formatMoneyInput(favorIn(refundFrom), refundFrom, locale),
         paymentMethodId: "",

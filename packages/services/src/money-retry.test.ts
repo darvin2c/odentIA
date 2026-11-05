@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
-import { patientPaymentRefund, paymentTicket } from "@odentia/db/schema/clinical"
+import { patientPaymentRefund } from "@odentia/db/schema/clinical"
 import { branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
@@ -53,18 +53,6 @@ it("con conceptos marcados no se cobra más de lo que les falta: lo dice en vez 
   expect(account.byCurrency.find((row) => row.currency === "PEN")?.aFavor ?? 0).toBe(0)
 })
 
-it("un cobro sin conceptos marcados que pasa lo que debe dice en el ticket lo que queda a favor", async () => {
-  const f = (await clinicalFixture()) as unknown as Fixture
-  const { branchId, cash } = await cashbox(f)
-  await f.run((tx) => createCharge(tx, ...f.args, { description: "Consulta", amountCents: 10000, currency: "PEN" }))
-  await f.run((tx) =>
-    collectCharge(tx, ...f.args, { branchId, payments: [{ paymentMethodId: cash.id, amountCents: 15000 }], requestId: randomUUID() }),
-  )
-  const [ticket] = await ownerDb.select().from(paymentTicket).where(eq(paymentTicket.patientId, f.patient.id))
-  const lines = (ticket!.snapshot as { lines: Array<{ description: string; amountCents: number }> }).lines
-  expect(lines).toEqual(expect.arrayContaining([expect.objectContaining({ description: "Queda a favor", amountCents: 5000 })]))
-})
-
 it("«Devolver dinero» enviado dos veces devuelve una sola vez; si el saldo cambió, lo dice", async () => {
   const f = (await clinicalFixture()) as unknown as Fixture
   const { branchId, cash } = await cashbox(f)
@@ -89,7 +77,7 @@ it("«Devolver dinero» enviado dos veces devuelve una sola vez; si el saldo cam
     .where(and(eq(patientPaymentRefund.patientId, f.patient.id), eq(patientPaymentRefund.requestId, requestId)))
   expect(rows).toHaveLength(1)
   // La misma clave con otros datos no se toma como reintento.
-  await expect(refund({ amountCents: 6000, requestId })).rejects.toMatchObject({ code: "REQUEST_ID_CONFLICT" })
+  await expect(refund({ amountCents: 6000, requestId })).rejects.toMatchObject({ code: "REFUND_REQUEST_CONFLICT" })
   // Otra pestaña que aún mostraba 200 a favor: el servidor dice que cambió.
   await expect(refund({ amountCents: 5000, requestId: randomUUID(), expectedCreditCents: 20000 })).rejects.toMatchObject({
     code: "CREDIT_CHANGED",
@@ -97,4 +85,20 @@ it("«Devolver dinero» enviado dos veces devuelve una sola vez; si el saldo cam
   })
   const account = await f.run((tx) => getAccountSummary(tx, "org_a", f.patient.id))
   expect(account.byCurrency.find((row) => row.currency === "PEN")?.aFavor).toBe(15000)
+})
+
+it("el reintento de una devolución pagada con varios cobros devuelve la misma constancia", async () => {
+  const f = (await clinicalFixture()) as unknown as Fixture
+  const { branchId, cash } = await cashbox(f)
+  for (const cents of [8000, 7000])
+    await f.run((tx) =>
+      collectCharge(tx, ...f.args, { branchId, advanceCents: cents, payments: [{ paymentMethodId: cash.id, amountCents: cents }], requestId: randomUUID() }),
+    )
+  const requestId = randomUUID()
+  const refund = () => f.run((tx) => refundCredit(tx, ...f.args, { branchId, reason: "Se muda", amountCents: 12000, requestId }))
+  const first = await refund()
+  // Las dos filas nacen en la misma transacción: la constancia es la de la fila que la guarda.
+  for (let i = 0; i < 3; i++) expect(await refund()).toMatchObject({ duplicate: true, receiptId: first.receiptId, amountCents: 12000 })
+  const rows = await ownerDb.select().from(patientPaymentRefund).where(eq(patientPaymentRefund.requestId, requestId))
+  expect(rows).toHaveLength(2)
 })
