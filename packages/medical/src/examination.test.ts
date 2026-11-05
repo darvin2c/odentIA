@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  mergeDictatedSystem,
   examCounts,
   examLines,
   examSummary,
@@ -78,5 +79,39 @@ describe("examen por sistemas (issue 229, decisión 5)", () => {
     expect(examCounts(rest)).toEqual({ examined: 10, findings: 1, notExamined: 0 })
     expect(examSummary(markRestNormal(null))).toBe("10 sistemas sin alteraciones")
     expect(examLines(null)).toEqual([])
+  })
+})
+
+describe("lo dictado de un sistema se suma a lo escrito (ADR 0012)", () => {
+  const written = { sistemas: { abdomen: { estado: "con_hallazgos" as const, hallazgo: "Dolor en FID" } } }
+
+  it("un hallazgo dictado se agrega al que ya estaba escrito", () => {
+    expect(mergeDictatedSystem(written, "abdomen", { estado: "con_hallazgos", hallazgo: "Blando, doloroso en epigastrio" }).sistemas.abdomen).toEqual({
+      estado: "con_hallazgos",
+      hallazgo: "Dolor en FID; Blando, doloroso en epigastrio",
+    })
+  })
+
+  it("«sin alteraciones» dictado no borra un hallazgo escrito, y lo repetido no se duplica", () => {
+    expect(mergeDictatedSystem(written, "abdomen", { estado: "sin_alteraciones" }).sistemas.abdomen).toEqual(written.sistemas.abdomen)
+    expect(mergeDictatedSystem(written, "abdomen", { estado: "con_hallazgos", hallazgo: "dolor en fid" }).sistemas.abdomen).toEqual(written.sistemas.abdomen)
+  })
+
+  it("lo que solo se parece no se descarta: «edema» no es «Sin edema»", () => {
+    const negated = { sistemas: { extremidades: { estado: "con_hallazgos" as const, hallazgo: "Sin edema" } } }
+    expect(mergeDictatedSystem(negated, "extremidades", { estado: "con_hallazgos", hallazgo: "Edema" }).sistemas.extremidades).toEqual({
+      estado: "con_hallazgos",
+      hallazgo: "Sin edema; Edema",
+    })
+  })
+
+  it("«con hallazgos» marcado y aún sin texto no pasa a «sin alteraciones» por lo dictado", () => {
+    const marked = { sistemas: { abdomen: { estado: "con_hallazgos" as const } } }
+    expect(mergeDictatedSystem(marked, "abdomen", { estado: "sin_alteraciones" }).sistemas.abdomen).toEqual({ estado: "con_hallazgos" })
+  })
+
+  it("en un sistema vacío entra lo dictado, y los demás sistemas quedan como estaban", () => {
+    const merged = mergeDictatedSystem(written, "piel", { estado: "sin_alteraciones" })
+    expect(merged.sistemas).toEqual({ ...written.sistemas, piel: { estado: "sin_alteraciones" } })
   })
 })
