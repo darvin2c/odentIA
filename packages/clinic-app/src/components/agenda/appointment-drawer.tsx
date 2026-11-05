@@ -48,6 +48,7 @@ import { useReceptionName, withReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { usePermission } from "../../lib/crm"
+import { attendWord } from "../../lib/patient-overview"
 import { filiationGapsText, type PatientFull } from "../../lib/patients"
 import { FiliacionSectionDrawer } from "../patient/filiacion-section-drawer"
 import { useAttendAppointment } from "../patient/new-encounter-button"
@@ -604,7 +605,7 @@ function RealAppointmentDrawer({
                 <DetailField label="Datos">
                   {/* La misma regla y frase que su página: lo calcula el servidor. */}
                   <span className="flex flex-wrap items-center gap-x-2">
-                    Faltan datos para atenderla: {filiationGapsText(context.missingData).toLowerCase()}
+                    Faltan datos para {attendWord(context.patientSex)}: {filiationGapsText(context.missingData).toLowerCase()}
                     {/* Lo mismo que «Completar» en su Resumen: solo lo que falta, con «Enviarle su enlace». */}
                     <Button type="button" variant="link" size="sm" className="h-auto p-0 font-semibold" onClick={() => setCompleting(true)}>
                       Completar

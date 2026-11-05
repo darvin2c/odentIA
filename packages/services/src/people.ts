@@ -89,6 +89,8 @@ export interface PersonSpokenForBy {
   /** Parentesco con HL7 v3 RoleCode, si se conoce. */
   kinship: string | null
   isPreferred: boolean
+  /** Solo es su contacto de emergencia: no se dice que habla por ella. */
+  emergencyOnly: boolean
   /** Su conversación más reciente; solo para quien lee conversaciones. */
   conversationId: string | null
 }
@@ -235,6 +237,7 @@ export async function getPersonPage(
           relationshipDetail: patientContact.relationshipDetail,
           kinship: patientContact.kinship,
           isPreferred: patientContact.isPreferred,
+          isEmergency: patientContact.isEmergency,
           conversationId: sql<
             string | null
           >`(select cv.id from conversation cv where cv.organization_id = ${orgId} and cv.contact_id = ${contact.id} order by cv.last_message_at desc nulls last, cv.id desc limit 1)`,
@@ -325,6 +328,8 @@ export async function getPersonPage(
       relationshipDetail: r.relationshipDetail,
       kinship: r.kinship,
       isPreferred: r.isPreferred,
+      // A quien solo se llama en una emergencia no «habla por ella»: sigue para escribirle y como teléfono de respaldo.
+      emergencyOnly: r.isEmergency && r.relationship !== "guardian" && !r.isPreferred,
       conversationId: readsConversations ? r.conversationId : null,
     })),
     channels,

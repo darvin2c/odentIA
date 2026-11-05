@@ -339,16 +339,14 @@ function healthSchema(
     .superRefine((value, ctx) => {
       const activeCon = value.conditions.filter((r) => r.status === "activa").length
       const activeMed = value.medications.filter((r) => r.endDate === "").length
+      // Con algo activo escrito, la revisión queda «Registrada» sola al guardar (`healthBody`):
+      // no se pide marcarla a mano. Solo se avisa si se marcó «No tiene» y hay algo escrito.
       const review = (group: "conditions" | "medications", message: string) =>
         ctx.addIssue({ code: "custom", path: ["reviewStatus", group], message })
       if (value.reviewStatus.conditions === "none" && activeCon > 0)
-        review("conditions", "Hay condiciones activas: no puede marcarse ausencia.")
-      else if (activeCon > 0 && value.reviewStatus.conditions !== "recorded")
-        review("conditions", "Con condiciones activas la revisión debe quedar registrada.")
+        review("conditions", "Marcaste que no tiene, pero hay condiciones activas: quítalas o cambia la respuesta.")
       if (value.reviewStatus.medications === "none" && activeMed > 0)
-        review("medications", "Hay medicamentos vigentes: no puede marcarse ausencia.")
-      else if (activeMed > 0 && value.reviewStatus.medications !== "recorded")
-        review("medications", "Con medicamentos vigentes la revisión debe quedar registrada.")
+        review("medications", "Marcaste que no toma, pero hay medicamentos vigentes: quítalos o cambia la respuesta.")
       const weeks = value.pregnancyWeeks.trim()
       if (
         asksPregnancy &&
@@ -382,7 +380,12 @@ function healthBody(
     body: {
       expectedRevision: base.revision,
       // Las alergias no viajan: se agregan y quitan una por una en su tarjeta (tablero 7).
-      reviewStatus: { ...value.reviewStatus, allergies: allergiesReview },
+      reviewStatus: {
+        // Lo escrito y activo ya es lo registrado: no hace falta marcarlo.
+        conditions: value.conditions.some((r) => r.status === "activa") ? "recorded" : value.reviewStatus.conditions,
+        medications: value.medications.some((r) => r.endDate === "") ? "recorded" : value.reviewStatus.medications,
+        allergies: allergiesReview,
+      },
       bloodGroup: (value.bloodGroup || null) as SaveHealthInput["bloodGroup"],
       // Las mismas filas de `familyRows`, en el mismo orden: las que tienen condición escrita.
       familyHistory: value.familyHistory.filter((row) => row.condition.trim() !== "").map((row) => {
@@ -826,9 +829,6 @@ export function AntecedentesTab({
           >
             <div className="flex flex-col gap-1.5">
               <h3 className="font-heading text-base font-medium">Entrevista de salud</h3>
-              <p className="text-xs text-muted-foreground">
-                Una columna en móvil, dos en tablet y web.
-              </p>
             </div>
             <div className="flex flex-col gap-4">
               <Collapsible open={openPersonales} onOpenChange={setOpenPersonales}>
