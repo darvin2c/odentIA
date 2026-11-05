@@ -394,6 +394,9 @@ function whatsappPending(connection: ConnectionItem): string | null {
   if (connection.signup?.tokenDead) {
     return "La conexión con Meta venció o fue retirada: los mensajes no salen hasta volver a conectarlo con Facebook."
   }
+  if (connection.ownApp?.tokenRejectedAt) {
+    return "Meta ya no acepta la clave: los mensajes no salen hasta pegar una nueva con «Cambiar la clave»."
+  }
   if (connection.signup) {
     return connection.signup.pending.length > 0 ? "Falta un paso para terminar de conectarlo." : null
   }

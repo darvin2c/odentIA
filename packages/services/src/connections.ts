@@ -140,6 +140,8 @@ export interface ConnectionOwnAppView {
   keysCheckedAt: string | null
   /** Último aviso que llegó firmado con otra clave secreta; nulo: ninguno. */
   signatureRejectedAt: string | null
+  /** Cuándo Meta rechazó un envío porque ya no acepta la clave; nulo: no pasó desde la última clave. */
+  tokenRejectedAt: string | null
 }
 
 export interface ConnectionPublic {
@@ -202,6 +204,7 @@ function ownAppView(ownApp: ConnectionOwnApp | null): ConnectionOwnAppView | nul
     tokenExpiresAt: ownApp.tokenExpiresAt ?? null,
     keysCheckedAt: ownApp.keysCheckedAt ?? null,
     signatureRejectedAt: ownApp.signatureRejectedAt ?? null,
+    tokenRejectedAt: ownApp.tokenRejectedAt ?? null,
   }
 }
 
@@ -1003,6 +1006,8 @@ async function recheckOwnApp(
         ...known,
         tokenExpiresAt: keys.checked ? (keys.tokenExpiresAt?.toISOString() ?? null) : known.tokenExpiresAt,
         keysCheckedAt: keys.checked ? new Date().toISOString() : (known.keysCheckedAt ?? null),
+        // Meta confirmó la clave: la que rechazó ya no es esta.
+        tokenRejectedAt: keys.checked ? null : (known.tokenRejectedAt ?? null),
       }
     : freshOwnApp(keys)
   const [current] = await tx

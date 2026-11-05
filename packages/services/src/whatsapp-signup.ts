@@ -44,7 +44,7 @@ import { notFound, ServiceError, validation } from "./errors.js"
 import { getOrgLocale } from "./locale.js"
 import { reportAutomaticCase } from "./model-outage.js"
 import { decryptConfig, encryptJson } from "./secrets.js"
-import { notifyAdmins } from "./whatsapp-own-app.js"
+import { notifyAdmins, notifyTeamChannelDown } from "./whatsapp-own-app.js"
 import { settleWorkspaceNotifications, upsertWorkspaceNotification } from "./workspace.js"
 
 /**
@@ -630,6 +630,7 @@ export async function applyAccountEvents(
     title: "WhatsApp se desconectó de Meta",
     body: `${metaRemovalWhy(removed)} Mientras tanto no llegan ni salen mensajes de WhatsApp. Vuelve a conectar con Facebook en Configuración › Integraciones › WhatsApp.`,
   })
+  await notifyTeamChannelDown(tx, orgId, metaRemovedSubject(connectionId))
 }
 
 /* ---------- La clave de Meta se renueva sola (darvin2c/odentIA#121) ---------- */
@@ -872,6 +873,8 @@ async function notifySignupTokenProblem(tx: Db, orgId: string, connectionId: str
       subject: tokenSubject(connectionId),
     })
   }
+  // Solo si ya no sale nada: «no se pudo renovar» sigue enviando.
+  if (dead) await notifyTeamChannelDown(tx, orgId, tokenSubject(connectionId))
 }
 
 /** Lo que Soporte de odentIA necesita para ayudar: qué dijo Meta y cuándo vence. */
