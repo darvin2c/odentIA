@@ -34,7 +34,7 @@ import { type Context, Hono, type Next } from "hono"
 import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
-import { patientLockRefusal } from "../lib/record-lock.js"
+import { canonicalUuid, patientLockRefusal } from "../lib/record-lock.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
 const STATUS = ["programada", "confirmada", "atendida", "no_asistio", "cancelada"] as const
@@ -362,15 +362,15 @@ export function createAppointmentsRoute(deps: CrmDeps) {
   // La historia bloqueada (ADR 0080) también en la cita que se abre por su id:
   // la cita dice de quién es. `?patientId=` y el cuerpo los guarda `lockedRecordGuard`.
   const appointmentLock = async (c: Context, next: Next) => {
-    const id = c.req.param("id")
-    if (id && /^[0-9a-f-]{36}$/i.test(id)) {
+    const id = canonicalUuid(c.req.param("id"))
+    if (id) {
       const { orgId } = orgContextOf(c)
       const patientId = await withOrgContext(deps.db, orgId, (tx) => appointmentPatientId(tx, orgId, id)).catch((error) => {
         // Una cita que no existe lo dice su ruta, con su 404 de siempre.
         if (error instanceof ServiceError && error.status === 404) return null
         throw error
       })
-      const refusal = patientId ? await patientLockRefusal(c, deps.db, patientId) : null
+      const refusal = patientId ? await patientLockRefusal(c, deps.db, patientId, "Cita no encontrado") : null
       if (refusal) return refusal
     }
     await next()

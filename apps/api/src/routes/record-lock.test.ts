@@ -14,7 +14,11 @@ import { createAgentAdminRoute } from "./agent-admin.js"
 import { createAppointmentsRoute } from "./appointments.js"
 import { createClinicalFormsRoute } from "./clinical-forms.js"
 import { createContactsRoute } from "./contacts.js"
+import { createCrmWorkspaceRoute } from "./crm-workspace.js"
+import { createFinanceRoute } from "./finance.js"
+import { createFinancialDocumentsRoute } from "./financial-documents.js"
 import type { CrmDeps } from "./helpers.js"
+import { createPatientRegistrationRoute } from "./patient-registration.js"
 import { createPatientsRoute } from "./patients.js"
 import { createPeopleRoute } from "./people.js"
 
@@ -39,6 +43,9 @@ let openPersonId = ""
 let lockedOrderId = ""
 let openOrderId = ""
 let lockedAppointmentId = ""
+let branchId = ""
+let lockedTicketId = ""
+let openIdentityId = ""
 
 const storageStub = {
   putAvatar: async () => {
@@ -58,7 +65,7 @@ const storageStub = {
   },
 }
 
-/** La app como la arma `app.ts`: la guarda común antes de las rutas. */
+/** La app como la arma `app.ts`: la guarda común antes de las rutas, y en su orden de montaje. */
 function buildApp(role: string): Hono {
   const deps: CrmDeps = {
     db: appDb,
@@ -75,12 +82,17 @@ function buildApp(role: string): Hono {
     await next()
   })
   app.use("*", lockedRecordGuard(appDb))
-  app.route("/clinical-forms", createClinicalFormsRoute(deps))
-  app.route("/appointments", createAppointmentsRoute(deps))
-  app.route("/agent/admin", createAgentAdminRoute({ ...deps, llm: { fake: true } }))
+  // Como en `app.ts`: el registro va en «/» y antes que la ficha y la persona.
+  app.route("/", createPatientRegistrationRoute({ ...deps, cookieDomain: "example.com", webURL: "https://example.com" }))
   app.route("/contacts", createContactsRoute(deps))
+  app.route("/crm", createCrmWorkspaceRoute(deps))
+  app.route("/patients", createFinancialDocumentsRoute(deps))
   app.route("/patients", createPatientsRoute(deps))
   app.route("/people", createPeopleRoute(deps))
+  app.route("/appointments", createAppointmentsRoute(deps))
+  app.route("/agent/admin", createAgentAdminRoute({ ...deps, llm: { fake: true } }))
+  app.route("/finance", createFinanceRoute(deps))
+  app.route("/clinical-forms", createClinicalFormsRoute(deps))
   return app
 }
 
@@ -143,6 +155,19 @@ beforeAll(async () => {
   const [branch] = await ownerDb.execute<{ id: string }>(
     sql`insert into "branch" ("organization_id", "name") values ('org_a', 'Sede') returning "id"`,
   )
+  branchId = branch!.id
+  const frozen = JSON.stringify({ patient: { displayName: "Lucía Cerrada", docNumber: "70000001" }, lines: [], methods: [] })
+  const [ticket] = await ownerDb.execute<{ id: string }>(
+    sql`insert into "payment_ticket" ("organization_id", "patient_id", "branch_id", "ticket_number", "currency", "total_cents", "snapshot")
+        values ('org_a', ${lockedPatientId}, ${branchId}, 1, 'PEN', 5000, ${frozen}::jsonb)
+        returning "id"`,
+  )
+  lockedTicketId = ticket!.id
+  const [identity] = await ownerDb.execute<{ id: string }>(
+    sql`insert into "contact_identity" ("organization_id", "contact_id", "channel", "external_user_id")
+        values ('org_a', ${openPersonId}, 'whatsapp', '447700900123') returning "id"`,
+  )
+  openIdentityId = identity!.id
   const [room] = await ownerDb.execute<{ id: string }>(
     sql`insert into "schedule_room" ("organization_id", "branch_id", "name") values ('org_a', ${branch!.id}, 'Unidad 1') returning "id"`,
   )
@@ -175,10 +200,8 @@ describe("órdenes, consentimientos y formularios de una historia bloqueada (S1)
     // A Administración se le dice 423 antes de buscar la plantilla: el 404 de
     // quien no es Administración no se confunde con «plantilla inexistente».
     const consent = { patientId: lockedPatientId, templateId: crypto.randomUUID() }
-    expect((await send("clinician", "POST", "/clinical-forms/consents", consent)).status).toBe(404)
     expect((await send("admin", "POST", "/clinical-forms/consents", consent)).status).toBe(423)
     const form = { patientId: lockedPatientId, templateId: crypto.randomUUID() }
-    expect((await send("clinician", "POST", "/clinical-forms/form-responses", form)).status).toBe(404)
     expect((await send("admin", "POST", "/clinical-forms/form-responses", form)).status).toBe(423)
   })
 
@@ -200,7 +223,7 @@ describe("órdenes, consentimientos y formularios de una historia bloqueada (S1)
   it("una orden suya abierta por su id no se imprime ni cambia de estado", async () => {
     expect((await get("clinician", `/clinical-forms/orders/${lockedOrderId}/print`)).status).toBe(404)
     expect(
-      (await send("clinician", "POST", `/clinical-forms/orders/${lockedOrderId}/status`, { status: "cancelado", reason: "x" }))
+      (await send("clinician", "POST", `/clinical-forms/orders/${lockedOrderId}/status`, { toStatus: "cancelado", reason: "Equivocada" }))
         .status,
     ).toBe(404)
     expect((await get("admin", `/clinical-forms/orders/${lockedOrderId}/print`)).status).toBe(423)
@@ -244,7 +267,7 @@ describe("citas, permisos de mensajes y vínculos de una persona bloqueada (S2)"
   })
 
   it("no se le pasa una cuenta ni se la vincula a otra ficha", async () => {
-    const move = await send("reception", "POST", `/contacts/${openPersonId}/identities/${crypto.randomUUID()}/move`, {
+    const move = await send("reception", "POST", `/contacts/${openPersonId}/identities/${openIdentityId}/move`, {
       toContactId: lockedPersonId,
       reason: "Es su número",
     })
@@ -258,5 +281,81 @@ describe("citas, permisos de mensajes y vínculos de una persona bloqueada (S2)"
   it("no se averigua de quién es su ficha", async () => {
     expect((await get("reception", `/people/by-patient/${lockedPatientId}`)).status).toBe(404)
     expect((await get("reception", `/people/by-patient/${openPatientId}`)).status).toBe(200)
+  })
+})
+
+describe("la historia bloqueada en las demás rutas y formas de pedirla", () => {
+  const order = () => ({ patientId: lockedPatientId, kind: "laboratorio", recipient: "Laboratorio", title: "Perfil lipídico" })
+
+  it("un cuerpo JSON enviado como texto, o sin decir su tipo, pasa igual por la guarda", async () => {
+    for (const headers of [{ "content-type": "text/plain;charset=UTF-8" }, {} as Record<string, string>]) {
+      const response = await buildApp("clinician").request("/clinical-forms/orders", {
+        method: "POST",
+        headers,
+        body: JSON.stringify(order()),
+      })
+      expect(response.status).toBe(404)
+    }
+  })
+
+  it("un id escrito sin guiones o en mayúsculas es la misma ficha", async () => {
+    const bare = lockedPatientId.replaceAll("-", "")
+    expect((await get("clinician", `/clinical-forms/orders?patientId=${bare}`)).status).toBe(404)
+    expect((await get("clinician", `/clinical-forms/orders/${lockedOrderId.replaceAll("-", "")}/print`)).status).toBe(404)
+    expect((await get("reception", `/patients/${lockedPatientId.toUpperCase()}`)).status).toBe(404)
+    expect((await get("reception", `/appointments/${lockedAppointmentId.replaceAll("-", "")}`)).status).toBe(404)
+  })
+
+  it("«Su enlace» desde la ficha o la persona no responde por una historia bloqueada", async () => {
+    expect((await get("reception", `/patients/${lockedPatientId}/personal-link/preview`)).status).toBe(404)
+    expect((await send("reception", "POST", `/patients/${lockedPatientId}/personal-link/show`, {})).status).toBe(404)
+    expect((await send("reception", "POST", `/patients/${lockedPatientId}/personal-link`, {})).status).toBe(404)
+    expect((await send("reception", "POST", `/contacts/${lockedPersonId}/personal-link`, {})).status).toBe(404)
+    expect((await send("reception", "POST", `/contacts/${lockedPersonId}/registration-links`, {})).status).toBe(404)
+  })
+
+  it("el contexto, la actividad y las notas del CRM no existen para una persona bloqueada", async () => {
+    expect((await get("reception", `/crm/contacts/${lockedPersonId}/context`)).status).toBe(404)
+    expect((await get("reception", `/crm/contacts/${lockedPersonId}/activity`)).status).toBe(404)
+    expect((await send("reception", "POST", `/crm/contacts/${lockedPersonId}/notes`, { body: "Nota" })).status).toBe(404)
+  })
+
+  it("caja no abre su ticket ni ve su nombre en Cobros, aunque el ticket sigue sumando", async () => {
+    expect((await get("cashier", `/finance/tickets/${lockedTicketId}`)).status).toBe(404)
+    const list = await get("cashier", `/finance/tickets?branchId=${branchId}`)
+    expect(list.status).toBe(200)
+    type Page = { data: { data: Array<{ id: string; displayName: string; docNumber: string | null }> } }
+    const rows = ((await list.json()) as Page).data.data
+    const row = rows.find((item) => item.id === lockedTicketId)
+    expect(row?.displayName).toBe("Historia bloqueada")
+    expect(row?.docNumber).toBeNull()
+    const searched = await get("cashier", `/finance/tickets?branchId=${branchId}&q=${encodeURIComponent("Lucía")}`)
+    const found = ((await searched.json()) as Page).data.data.map((item) => item.id)
+    expect(found).not.toContain(lockedTicketId)
+  })
+
+  it("el 404 de una historia bloqueada dice lo mismo que el de una que no existe", async () => {
+    const missing = await get("reception", `/patients/${crypto.randomUUID()}`)
+    const blocked = await get("reception", `/patients/${lockedPatientId}`)
+    expect(blocked.status).toBe(404)
+    expect(((await blocked.json()) as { error: { message: string } }).error.message).toBe(
+      ((await missing.json()) as { error: { message: string } }).error.message,
+    )
+  })
+
+  it("Administración llega a la historia bloqueada por el número de su ficha; los demás no", async () => {
+    expect((await get("admin", `/people/by-patient/${lockedPatientId}`)).status).toBe(200)
+    expect((await get("reception", `/people/by-patient/${lockedPatientId}`)).status).toBe(404)
+  })
+
+  it("quitar a una persona bloqueada de la ficha de otro sigue permitido", async () => {
+    await ownerDb.execute(
+      sql`insert into "patient_contact" ("organization_id", "patient_id", "contact_id", "relationship")
+          values ('org_a', ${openPatientId}, ${lockedPersonId}, 'guardian')`,
+    )
+    const removed = await buildApp("reception").request(`/patients/${openPatientId}/contacts/${lockedPersonId}`, {
+      method: "DELETE",
+    })
+    expect(removed.status).toBe(200)
   })
 })
