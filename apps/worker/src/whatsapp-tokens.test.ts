@@ -243,11 +243,20 @@ it("una clave vencida que Meta ya no acepta queda anotada y no se insiste; si la
     signup: { tokenProblem: "La clave que dio Meta ya no sirve: venció o la retiraron. Vuelve a conectar con Facebook para que los mensajes sigan saliendo." },
   })
   expect((await stateOf(raced)).token).toBe("L-DE-LA-CLINICA")
-  expect(await noticesOf(dead)).toMatchObject([
+  // Quien administra sabe qué hacer; recepción, que lo que escribe por WhatsApp no llega.
+  const deadNotices = (await noticesOf(dead)).sort((a, b) => a.userId.localeCompare(b.userId))
+  expect(deadNotices).toMatchObject([
     {
       userId: "w-duena",
       title: "La conexión de WhatsApp con Meta dejó de servir",
       body: "Los mensajes de WhatsApp no pueden salir. Vuelve a conectar con Facebook en Configuración › Integraciones › WhatsApp. Ya avisamos a odentIA.",
+      permission: "settings.write",
+    },
+    {
+      userId: "w-recepcion",
+      title: "WhatsApp no está enviando mensajes",
+      href: "/inbox",
+      permission: "conversations.read",
     },
   ])
   expect((await supportCases()).find((row) => row.dedupeKey === "clave-meta-sin-renovar:no-valida")).toMatchObject({

@@ -127,6 +127,11 @@ export interface ConnectionOwnApp {
   keysCheckedAt?: string | null
   /** Último aviso que llegó con otra firma (la clave secreta no es de esa app). Nulo: ninguno desde la última clave. */
   signatureRejectedAt?: string | null
+  /**
+   * Cuándo Meta rechazó un envío porque ya no acepta la clave de acceso (código
+   * 190): no salen mensajes hasta pegar otra. Nulo: ninguno desde la última clave.
+   */
+  tokenRejectedAt?: string | null
 }
 
 export const channelConnection = pgTable(

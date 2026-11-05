@@ -137,6 +137,14 @@ describe("mensajería", () => {
     expect(fine.find((item) => item.channel === "whatsapp")).toMatchObject({ tone: "ok", status: "Conectado" })
   })
 
+  it("con la app propia, una clave que Meta ya no acepta pide atención y dice que se pegue otra", () => {
+    const ownApp = { registeredAt: minutesAgo(60), subscribedAt: minutesAgo(60), problems: {}, pinNeeded: false, tokenExpiresAt: null, keysCheckedAt: minutesAgo(60), signatureRejectedAt: null }
+    const rejected = connection({ lastInboundAt: minutesAgo(30), ownApp: { ...ownApp, tokenRejectedAt: minutesAgo(5) } })
+    const row = channelRows([rejected], since).find((item) => item.channel === "whatsapp")
+    expect(row).toMatchObject({ tone: "attention", status: "Necesita atención" })
+    expect(row?.problem).toBe("Meta ya no acepta la clave: los mensajes no salen hasta pegar una nueva con «Cambiar la clave».")
+  })
+
   it("la fila es la misma antes y después de conectarla", () => {
     const before = channelRows([], since).find((row) => row.channel === "telegram")
     const after = channelRows([connection({ id: "t1", channel: "telegram" })], since).find((row) => row.channel === "telegram")

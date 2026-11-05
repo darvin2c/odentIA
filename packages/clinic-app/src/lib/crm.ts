@@ -658,6 +658,8 @@ export interface OwnAppState {
   /** Meta confirmó la clave y la clave secreta; nulo: no se pudo preguntar. */
   keysCheckedAt: string | null
   signatureRejectedAt: string | null
+  /** Meta rechazó un envío porque ya no acepta la clave: no sale nada hasta pegar otra. */
+  tokenRejectedAt?: string | null
 }
 
 export interface AgentConfig {

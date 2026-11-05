@@ -212,6 +212,11 @@ export function ownAppSignatureProblem(state: OwnAppState | null | undefined, la
   return !lastInboundAt || Date.parse(rejected) > Date.parse(lastInboundAt)
 }
 
+/** Meta ya no acepta la clave de la app propia: no sale ningún mensaje hasta pegar otra. */
+export function ownAppTokenRejected(state: OwnAppState | null | undefined): boolean {
+  return Boolean(state?.tokenRejectedAt)
+}
+
 /** Lo que odentIA no pudo hacer en Meta por la conexión: registrar el número o suscribir la app. */
 export function ownAppUnfinished(state: OwnAppState | null | undefined): boolean {
   return Boolean(state && (!state.registeredAt || !state.subscribedAt))
@@ -239,7 +244,15 @@ export function ownAppChecks(
 ): OwnAppCheck[] {
   const checks: OwnAppCheck[] = []
   if (found) checks.push({ key: "numero", state: "ok", title: "Encontramos el número", text: found })
-  if (state.keysCheckedAt) {
+  if (ownAppTokenRejected(state)) {
+    // Lo que se comprobó antes ya no vale: Meta rechazó la clave al enviar.
+    checks.push({
+      key: "clave",
+      state: "problem",
+      title: "Meta ya no acepta la clave.",
+      text: "Los mensajes de WhatsApp no salen. Genera una clave nueva en Meta y pégala con «Cambiar la clave».",
+    })
+  } else if (state.keysCheckedAt) {
     checks.push(
       state.tokenExpiresAt
         ? {
@@ -324,7 +337,11 @@ export function connectionPending(
   if (connection.signup?.metaRemoved) return "meta-removed"
   if (connection.signup?.tokenDead) return "token-dead"
   if (connection.signup) return connection.signup.pending.length > 0 ? "signup" : null
-  if (ownAppUnfinished(connection.ownApp) || ownAppSignatureProblem(connection.ownApp, setup?.lastInboundAt ?? connection.lastInboundAt)) {
+  if (
+    ownAppTokenRejected(connection.ownApp) ||
+    ownAppUnfinished(connection.ownApp) ||
+    ownAppSignatureProblem(connection.ownApp, setup?.lastInboundAt ?? connection.lastInboundAt)
+  ) {
     return "own-app"
   }
   const step = setupStep(setup ?? connection)
