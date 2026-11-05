@@ -707,6 +707,15 @@ it("odontograma firmado: instantánea inmutable con la firma del perfil; bloquea
   )
   expect(listed).toHaveLength(1)
   expect(listed[0]!.entries).toEqual([])
+  // Con la atención aún abierta, su hallazgo no se congela en lo firmado a pedido.
+  const whileOpen = await withOrgContext(appDb, "org_a", (tx) =>
+    createOdontogramAssessment(tx, "org_a", signer, p.id, { ...base, purpose: "reentry" }),
+  )
+  expect(whileOpen.entries).toEqual([])
+  // Cerrada la atención, sí entra.
+  await ownerDb.execute(
+    sql`update encounter set status = 'finalizada', signer_name = 'Clínico', signer_registration = 'COP 1' where id = ${draft}::uuid`,
+  )
   const second = await withOrgContext(appDb, "org_a", (tx) =>
     createOdontogramAssessment(tx, "org_a", signer, p.id, { ...base, purpose: "reentry" }),
   )
