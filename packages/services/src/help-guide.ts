@@ -1658,7 +1658,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     faqs: [
       {
         q: "¿Por qué WhatsApp no envía?",
-        a: "Si Meta ya no acepta la conexión, la fila de WhatsApp en Integraciones dice «Necesita atención» y la campana avisa a todo el equipo. Si se conectó con Facebook, vuelve a conectar con el botón; si usa la app propia de la clínica en Meta, genera allí una clave nueva y pégala con «Cambiar la clave». Debajo de cada mensaje que no salió, la Bandeja dice el motivo.",
+        a: "Si Meta ya no acepta la conexión, la fila de WhatsApp en Integraciones dice «Necesita atención» y la campana avisa a quien administra y a quien atiende las conversaciones. Si se conectó con Facebook, vuelve a conectar con el botón; si usa la app propia de la clínica en Meta, genera allí una clave nueva y pégala con «Cambiar la clave». Debajo de cada mensaje que no salió, la Bandeja dice el motivo.",
       },
     ],
   },

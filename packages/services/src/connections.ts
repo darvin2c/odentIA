@@ -17,7 +17,7 @@ import {
   channelConnection,
   conversation,
 } from "@odentia/db/schema/crm"
-import { and, asc, eq, max } from "drizzle-orm"
+import { and, asc, eq, max, sql } from "drizzle-orm"
 import {
   declareConfigTemplates,
   listChannelTemplates,
@@ -903,7 +903,12 @@ export async function setConnectionStatus(
   }
   const [updated] = await tx
     .update(channelConnection)
-    .set({ status, updatedAt: new Date() })
+    .set({
+      status,
+      updatedAt: new Date(),
+      // Reactivar empieza de cero: si Meta sigue sin aceptar la clave, el próximo envío lo vuelve a avisar.
+      ...(status === "active" ? { ownApp: sql`case when ${channelConnection.ownApp} is null then null else ${channelConnection.ownApp} - 'tokenRejectedAt' end` } : {}),
+    })
     .where(and(eq(channelConnection.id, id), eq(channelConnection.organizationId, orgId)))
     .returning()
   if (!updated) throw notFound("Conexión")

@@ -873,8 +873,8 @@ async function notifySignupTokenProblem(tx: Db, orgId: string, connectionId: str
       subject: tokenSubject(connectionId),
     })
   }
-  // Solo si ya no sale nada: «no se pudo renovar» sigue enviando.
-  if (dead) await notifyTeamChannelDown(tx, orgId, tokenSubject(connectionId))
+  // Solo si ya no sale nada («no se pudo renovar» sigue enviando) y Meta no cortó la conexión: ese aviso ya lo dijo.
+  if (dead && !signup.metaRemoved) await notifyTeamChannelDown(tx, orgId, tokenSubject(connectionId))
 }
 
 /** Lo que Soporte de odentIA necesita para ayudar: qué dijo Meta y cuándo vence. */

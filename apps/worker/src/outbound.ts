@@ -268,7 +268,13 @@ export async function processOutbound(
         })
         .where(eq(message.id, messageId))
       // Meta volvió a aceptar un envío con la app propia: la clave sirve y los avisos se retiran.
-      if (ownAppToken && row.connection.ownApp?.tokenRejectedAt) await clearOwnAppTokenRejected(tx, orgId, row.connection.id)
+      // En su punto de guardado: si falla, el mensaje igual queda como enviado.
+      if (ownAppToken && row.connection.ownApp?.tokenRejectedAt) {
+        const connectionId = row.connection.id
+        await tx.transaction((inner) => clearOwnAppTokenRejected(inner, orgId, connectionId)).catch((failure: unknown) => {
+          console.error(`worker: no se pudo quitar la marca de la clave (${connectionId})`, failure)
+        })
+      }
       await notify(tx, {
         orgId,
         kind: "message.updated",
