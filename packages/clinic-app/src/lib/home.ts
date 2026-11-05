@@ -127,7 +127,10 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): WaitingT
       return {
         title: row.contactName ?? "Persona sin nombre",
         ask: row.quote,
-        detail: joined([`Escribió ${ago(row.since)}`, row.channel ? channelLabel(row.channel) : null]),
+        detail: joined([
+          row.undelivered ? `No le llegó lo último que se le escribió (${ago(row.since)})` : `Escribió ${ago(row.since)}`,
+          row.channel ? channelLabel(row.channel) : null,
+        ]),
         action: row.windowClosed ? "Escribirle" : "Responder",
       }
     case "unconfirmed":
