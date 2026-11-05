@@ -10,6 +10,7 @@ import { type Context, Hono, type Next } from "hono"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import type { CrmDeps } from "./helpers.js"
+import { createContactsRoute } from "./contacts.js"
 import { createPatientsRoute } from "./patients.js"
 import { createTasksRoute } from "./tasks.js"
 
@@ -60,6 +61,7 @@ function buildApp(role: string, userId = "u-1"): Hono {
   })
   app.route("/tasks", createTasksRoute(deps))
   app.route("/patients", createPatientsRoute(deps))
+  app.route("/contacts", createContactsRoute(deps))
   return app
 }
 
@@ -109,15 +111,19 @@ afterAll(async () => {
 })
 
 describe("tareas clínicas (S4)", () => {
-  it("recepción y caja no ven una derivación ni un tema clínico de la persona; sí lo demás", async () => {
-    for (const role of ["reception", "cashier"]) {
+  it("la derivación solo la ve quien atiende; el tema clínico del agente, también quien lee la conversación", async () => {
+    const idsOf = async (role: string) => {
       const response = await get(role, `/tasks?patientId=${patientId}`)
       expect(response.status).toBe(200)
-      const ids = ((await response.json()) as { data: Array<{ id: string }> }).data.map((task) => task.id)
-      expect(ids).toContain(receptionTaskId)
-      expect(ids).not.toContain(referralTaskId)
-      expect(ids).not.toContain(clinicalTopicTaskId)
+      return ((await response.json()) as { data: Array<{ id: string }> }).data.map((task) => task.id)
     }
+    const cashier = await idsOf("cashier")
+    expect(cashier).toContain(receptionTaskId)
+    expect(cashier).not.toContain(referralTaskId)
+    expect(cashier).not.toContain(clinicalTopicTaskId)
+    const reception = await idsOf("reception")
+    expect(reception).toEqual(expect.arrayContaining([receptionTaskId, clinicalTopicTaskId]))
+    expect(reception).not.toContain(referralTaskId)
     const clinician = await get("clinician", `/tasks?patientId=${patientId}`)
     const seen = ((await clinician.json()) as { data: Array<{ id: string }> }).data.map((task) => task.id)
     expect(seen).toEqual(expect.arrayContaining([referralTaskId, clinicalTopicTaskId]))
@@ -125,7 +131,8 @@ describe("tareas clínicas (S4)", () => {
 
   it("por su id, una tarea clínica no se abre ni se cierra sin leer la historia", async () => {
     expect((await get("cashier", `/tasks/${referralTaskId}`)).status).toBe(404)
-    expect((await patch("reception", `/tasks/${clinicalTopicTaskId}`, { status: "done" })).status).toBe(404)
+    expect((await get("reception", `/tasks/${referralTaskId}`)).status).toBe(404)
+    expect((await patch("cashier", `/tasks/${clinicalTopicTaskId}`, { status: "done" })).status).toBe(404)
     expect((await get("clinician", `/tasks/${referralTaskId}`)).status).toBe(200)
     expect((await get("reception", `/tasks/${receptionTaskId}`)).status).toBe(200)
   })
@@ -147,7 +154,7 @@ describe("el contexto de la Bandeja (S4)", () => {
                  ('org_a', ${own!.id}, 'Tema pendiente: cambiar la cita', 'open', 'user', 'recepcion')`,
     )
     const titles = async (clinical: boolean) =>
-      (await withOrgContext(appDb, "org_a", (tx) => listContactTasks(tx, "org_a", own!.id, { clinical }))).map((task) => task.title)
+      (await withOrgContext(appDb, "org_a", (tx) => listContactTasks(tx, "org_a", own!.id, { clinical, conversations: false }))).map((task) => task.title)
     expect(await titles(false)).toEqual(["Tema pendiente: cambiar la cita"])
     expect(await titles(true)).toEqual(expect.arrayContaining(["Te lo pasó Sofi: sangrado de encías", "Tema pendiente: cambiar la cita"]))
   })
@@ -177,5 +184,42 @@ describe("la copia de la historia enviada por la Bandeja (S3)", () => {
       metadata: { patientId },
     })
     expect(await withOrgContext(appDb, "org_a", (tx) => healthDocumentPatientOfMessage(tx, "org_a", messageId))).toBe(patientId)
+  })
+})
+
+describe("lo que encontró la revisión del punto 5", () => {
+  it("la ficha de contacto de recepción no trae la derivación entre sus tareas abiertas", async () => {
+    const [own] = await ownerDb
+      .select({ id: patientContact.contactId })
+      .from(patientContact)
+      .where(and(eq(patientContact.patientId, patientId), eq(patientContact.relationship, "self")))
+    await ownerDb.execute(
+      sql`insert into "task" ("organization_id", "contact_id", "assignee_user_id", "title", "status", "created_by", "idempotency_key")
+          values ('org_a', ${own!.id}, 'u-2', 'Derivación: periodoncia', 'open', 'user', ${`clinical-order:${crypto.randomUUID()}`})`,
+    )
+    type Contact = { data: { openTasks: Array<{ title: string }> } }
+    const reception = (await (await get("reception", `/contacts/${own!.id}`)).json()) as Contact
+    expect(reception.data.openTasks.map((task) => task.title)).not.toContain("Derivación: periodoncia")
+  })
+
+  it("guardar la ficha no le devuelve lo clínico a recepción", async () => {
+    const response = await patch("reception", `/patients/${patientId}`, { notes: "Prefiere la tarde" })
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as { data: Record<string, unknown> }
+    const row = (body.data["patient"] ?? body.data) as Record<string, unknown>
+    expect(row).toMatchObject({ bloodGroup: null, asaClass: null, healthReviewStatus: null })
+  })
+
+  it("caja sigue viendo la tarea de la persona que solo lleva su contacto", async () => {
+    const [own] = await ownerDb
+      .select({ id: patientContact.contactId })
+      .from(patientContact)
+      .where(and(eq(patientContact.patientId, patientId), eq(patientContact.relationship, "self")))
+    const [task] = await ownerDb.execute<{ id: string }>(
+      sql`insert into "task" ("organization_id", "contact_id", "title", "status", "created_by", "area")
+          values ('org_a', ${own!.id}, 'Cobrar el saldo del control', 'open', 'user', 'caja') returning "id"`,
+    )
+    const ids = ((await (await get("cashier", `/tasks?patientId=${patientId}`)).json()) as { data: Array<{ id: string }> }).data.map((t) => t.id)
+    expect(ids).toContain(task!.id)
   })
 })

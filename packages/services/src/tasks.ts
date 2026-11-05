@@ -34,6 +34,33 @@ export function taskAreasOfRole(role: string): TaskArea[] {
   return []
 }
 
+/** Lo que puede leer quien mira una tarea: la historia clínica y las conversaciones. */
+export interface TaskReader {
+  clinical: boolean
+  conversations: boolean
+}
+
+/**
+ * ¿Puede ver esta tarea? «Lo clínico nunca se entrega a recepción/caja»
+ * (`permissions.ts`), sin esconder lo que ya ve por otro lado:
+ * - la derivación de una orden lleva lo escrito en la historia: solo quien la lee;
+ * - el tema clínico que pasó el agente sale de la conversación: quien la lee
+ *   (recepción) ya lo vio; caja, que no lee la Bandeja, no.
+ */
+export function readsTask(task: { area: string | null; fromRecord: boolean }, reader: TaskReader): boolean {
+  if (task.fromRecord && !reader.clinical) return false
+  if (task.area === "clinico" && !reader.clinical && !reader.conversations) return false
+  return true
+}
+
+/** Lo mismo en SQL, para lo que se lee de la tabla de tareas (`readsTask`). */
+export function readableTaskSql(reader: TaskReader): SQL | undefined {
+  const hidden: SQL[] = []
+  if (!reader.clinical) hidden.push(sql`coalesce(${crmTask.idempotencyKey}, '') like 'clinical-order:%'`)
+  if (!reader.clinical && !reader.conversations) hidden.push(sql`coalesce(${crmTask.area}, '') = 'clinico'`)
+  return hidden.length ? sql`not (${sql.join(hidden, sql` or `)})` : undefined
+}
+
 export interface TaskItem {
   id: string
   title: string
@@ -64,11 +91,8 @@ export interface TaskItem {
    * su urgencia.
    */
   agentCase: { priority: string } | null
-  /**
-   * Lleva algo de la historia clínica: un tema clínico que pasó el agente
-   * (`area` clínico) o la derivación de una orden. Solo la ve quien lee lo clínico.
-   */
-  clinical: boolean
+  /** Es la derivación de una orden clínica: su título sale de la historia (`readsTask`). */
+  fromRecord: boolean
   createdAt: string
   updatedAt: string
 }
@@ -98,7 +122,7 @@ function toItem(
     contactName,
     opportunityTitle,
     agentCase: casePriority ? { priority: casePriority } : null,
-    clinical: row.area === "clinico" || (row.idempotencyKey ?? "").startsWith("clinical-order:"),
+    fromRecord: (row.idempotencyKey ?? "").startsWith("clinical-order:"),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   }

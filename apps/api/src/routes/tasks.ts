@@ -10,13 +10,15 @@ import {
   pageTasks,
   TASK_SORTS,
   TASK_VIEWS,
+  readsTask,
   taskAreasOfRole,
   updateTask,
   type TaskItem,
+  type TaskReader,
 } from "@odentia/services"
 import { type Context, Hono } from "hono"
 import { z } from "zod"
-import { canAccess, orgContextOf } from "../lib/context.js"
+import { canAccess, canAccessAny, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 
@@ -60,17 +62,22 @@ function stripCrmNames(item: TaskItem): TaskItem {
   return { ...item, contactName: null, opportunityTitle: null }
 }
 
+/** Lo que lee el rol: la historia y las conversaciones (`readsTask`). */
+const readerOf = (memberRole: string): TaskReader => ({
+  clinical: canAccess(memberRole, "clinical.read"),
+  conversations: canAccess(memberRole, "conversations.read"),
+})
+
 /**
- * ¿Puede ver esta tarea quien pregunta? Lo clínico, solo quien lee la historia
- * («lo clínico nunca se entrega a recepción/caja», `permissions.ts`). Por su id,
- * la misma que vería en sus listas: la suya o la de su área en Tareas, toda con
- * «Toda la clínica», y la de una persona o un paciente que puede ver.
+ * ¿Puede abrir o cambiar esta tarea por su id? La misma que vería en sus
+ * listas: la suya o la de su área en Tareas, toda con «Toda la clínica», y la
+ * de una persona que puede ver. Siempre con lo que su rol lee (`readsTask`).
  */
 function seesTask(memberRole: string, userId: string, item: TaskItem): boolean {
-  if (item.clinical && !canAccess(memberRole, "clinical.read")) return false
+  if (!readsTask(item, readerOf(memberRole))) return false
   if (canAccess(memberRole, "tasks.all") || item.assigneeUserId === userId) return true
   if (!item.assigneeUserId && item.area && taskAreasOfRole(memberRole).includes(item.area)) return true
-  return (Boolean(item.patientId) && canAccess(memberRole, "patients.read")) || (Boolean(item.contactId) && canAccess(memberRole, "crm.read"))
+  return Boolean(item.patientId || item.contactId) && canAccessAny(memberRole, ["patients.read", "crm.read"])
 }
 
 const taskNotFound = (c: Context) => c.json(errorBody(c, "NOT_FOUND", "Tarea no encontrada"), 404)
@@ -134,7 +141,8 @@ export function createTasksRoute(deps: CrmDeps) {
             ...(query.overdue ? { overdue: query.overdue === "true" } : {}),
           }),
         )
-        const seen = items.filter((item) => seesTask(memberRole, userId, item))
+        // La persona ya la puede ver quien filtra por ella: aquí solo cuenta lo que su rol lee.
+        const seen = items.filter((item) => readsTask(item, readerOf(memberRole)))
         return c.json({ data: seen.map((item) => visibleTask(memberRole, item)), nextCursor: null, total: seen.length }, 200)
       }
       const view = query.view ?? (query.status === "done" ? "hechas" : query.overdue === "true" ? "vencidas" : "abiertas")
@@ -148,9 +156,8 @@ export function createTasksRoute(deps: CrmDeps) {
           ...(query.limit ? { limit: query.limit } : {}),
         }),
       )
-      // Lo suyo y lo de su área: lo clínico de su área ya es de quien lo lee; con «Toda la clínica», se quita.
-      const seen = page.items.filter((item) => seesTask(memberRole, userId, item))
-      return c.json({ data: seen.map((item) => visibleTask(memberRole, item)), nextCursor: page.nextCursor, total: page.total - (page.items.length - seen.length) }, 200)
+      // Lo suyo y lo de su área («Toda la clínica» es de quien dirige, que lee todo): nada que quitar.
+      return c.json({ data: page.items.map((item) => visibleTask(memberRole, item)), nextCursor: page.nextCursor, total: page.total }, 200)
     } catch (e) {
       return serviceErrorResponse(c, e) ?? Promise.reject(e)
     }
