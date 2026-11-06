@@ -300,8 +300,10 @@ export interface Prescription {
   issuedAt: string
   cancelledAt: string | null
   cancelReason: string | null
-  /** Por qué se recetó pese al aviso de alergia (decisión 10). */
+  /** Por qué se recetó pese al aviso, si quien receta lo dejó (opcional desde Q17). */
   allergyOverrideReason?: string | null
+  /** Los avisos que vio quien recetó al emitirla (alergia, embarazo, duplicado por ATC). */
+  alertsSeen?: string[] | null
   /** El peso (kg) con que se recetó: latidIA, a un menor de 12 años (issue 229). */
   patientWeightKg?: string | null
   diagnosisCode?: string | null
@@ -351,6 +353,8 @@ export function createPrescriptionApi(
     acknowledgeAllergies?: boolean
     /** Con aviso de alergia, por qué se receta igual: queda en la receta. */
     allergyOverrideReason?: string | null
+    /** Los avisos que mostró la pantalla, tal cual: la receta guarda estos como vistos (ADR 0143). */
+    alertsShown?: string[]
     /** El peso (kg) con que se receta, si la receta lo lleva. */
     patientWeightKg?: number | null
     items: PrescriptionMedicationBody[]

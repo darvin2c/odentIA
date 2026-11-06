@@ -244,7 +244,7 @@ import { seedReportsPatients } from "../seed-reports-patients.js"
 import { seedReportsProgress } from "../seed-reports-progress.js"
 import { seedRoles } from "../seed-roles.js"
 import { seedClinicNoticesDemo, seedSaasBillingDemo } from "../seed-saas-billing.js"
-import { seedSaasCostDemo } from "../seed-saas-cost.js"
+import { seedRepliesRuns, seedSaasCostDemo } from "../seed-saas-cost.js"
 import { seedWebchat } from "../seed-webchat.js"
 import { seedWorkspace } from "../seed-workspace.js"
 import { createService, quickAddServices, updateService } from "../service-catalog.js"
@@ -4423,7 +4423,8 @@ await db.transaction((tx) => seedWebchat(tx, domainSeed, { secretsKey, fetch }))
 // Dos años de historia de una clínica mediana en dos sedes: Reportes con
 // tendencia, comparación con el año anterior y mapas de días y horas.
 const reportsHistory = await db.transaction((tx) => {
-  const service = (code: string, weight: number, firstVisit = false) => {
+  // `perUnit`: se cobra por pieza (una obturación por diente), y a veces van dos o tres.
+  const service = (code: string, weight: number, firstVisit = false, perUnit = false) => {
     const found = catalogA.find((item) => item.code === code)
     if (!found || found.priceCents === null) throw new Error(`Falta el servicio semilla ${code}`)
     return {
@@ -4433,6 +4434,7 @@ const reportsHistory = await db.transaction((tx) => {
       durationMin: found.durationMin ?? 30,
       weight,
       firstVisit,
+      perUnit,
     }
   }
   return seedReports(tx, {
@@ -4480,7 +4482,7 @@ const reportsHistory = await db.transaction((tx) => {
     services: [
       service("EVALUACION", 1, true),
       service("LIMPIEZA", 30),
-      service("OBTURACION", 26),
+      service("OBTURACION", 26, false, true),
       service("ORTODONCIA_CTRL", 18),
       service("EXODONCIA", 8),
       service("ENDODONCIA", 7),
@@ -4812,6 +4814,8 @@ const saasCost = await db.transaction((tx) =>
     ],
   }),
 )
+// Cada respuesta de Sofi con su corrida: Agente cuenta lo mismo que Reportes.
+await db.transaction((tx) => seedRepliesRuns(tx, ORG_A))
 await db.insert(aiUsage).values([
   {
     organizationId: ORG_A,

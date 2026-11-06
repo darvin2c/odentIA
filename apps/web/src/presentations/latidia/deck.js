@@ -487,7 +487,7 @@
     for (const ch of "enalapril") { q.textContent += ch; await p6wait(90); }
     q.classList.add("done");
     await p6wait(500);
-    out.innerHTML = `<div class="stop"><span><b>Enalapril:</b> está embarazada (12 semanas) y los IECA están contraindicados en el embarazo.</span><div class="btns"><span class="btn p">Cambiar medicamento</span><span class="btn">Recetar igual, con motivo</span></div></div>`;
+    out.innerHTML = `<div class="stop"><span><b>Enalapril:</b> está embarazada (12 semanas) y los IECA están contraindicados en el embarazo.</span><div class="btns"><span class="btn p">Cambiar medicamento</span><span class="btn">Emitir receta</span></div></div>`;
     await p6wait(2200);
     out.querySelector(".btn.p").classList.add("press");
     await p6wait(500);

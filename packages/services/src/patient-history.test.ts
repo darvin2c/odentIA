@@ -1,5 +1,7 @@
 import { odontogramAssessment } from "@odentia/db/schema/dental"
+import { encounter } from "@odentia/db/schema/clinical"
 import { consentDocument, consentTemplate } from "@odentia/db/schema/clinical-forms"
+import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { createClinicalOrder } from "./clinical-forms.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
@@ -103,4 +105,41 @@ it("la Historia dice que la receta se anuló y por qué, como con la orden y el 
   const fact = data.find((entry) => entry.refId === rx.id)
   expect(fact?.title).toMatch(/^Se anuló la receta N\.º \d+$/)
   expect(fact?.detail).toContain("Se equivocó de dosis")
+})
+
+it("Historia: cada atención va el día en que empezó, aunque se haya cargado después, y la anulada el día en que se anuló", async () => {
+  const f = await clinicalFixture()
+  await f.run((tx) => voidEncounter(tx, ...f.args, f.encounter.id, { reason: "Abierta por error" }))
+  // Firmadas como las cierra la app: primero en borrador (una por persona) y después finalizadas.
+  const signed = async (startedAt: Date, createdAt: Date) => {
+    const [row] = await ownerDb
+      .insert(encounter)
+      .values({
+        organizationId: "org_a",
+        patientId: f.patient.id,
+        professionalUserId: f.actor,
+        reason: "Control",
+        startedAt,
+        createdAt,
+        signerName: "Ana Torres",
+        signerTitle: "Médica cirujana",
+        signerRegistration: "12345",
+      })
+      .returning({ id: encounter.id })
+    if (!row) throw new Error("no se creó la atención")
+    const endedAt = new Date(startedAt.getTime() + 20 * 60_000)
+    await ownerDb
+      .update(encounter)
+      .set({ status: "finalizada", endedAt, finalizedAt: endedAt, finalizedBy: f.actor })
+      .where(eq(encounter.id, row.id))
+    return row.id
+  }
+  // La del 10 de septiembre se cargó el 1 de noviembre; la del 5 de octubre, en su día.
+  const late = await signed(new Date("2026-09-10T15:00:00Z"), new Date("2026-11-01T12:00:00Z"))
+  const onTime = await signed(new Date("2026-10-05T15:00:00Z"), new Date("2026-10-05T15:00:00Z"))
+  const { data } = await f.run((tx) => getTimeline(tx, "org_a", f.patient.id, { types: ["encounter"] }))
+  expect(data.map((item) => item.id)).toEqual([f.encounter.id, onTime, late])
+  expect(data.find((item) => item.id === late)?.createdAt.toISOString()).toBe("2026-09-10T15:00:00.000Z")
+  const asc = await f.run((tx) => getTimeline(tx, "org_a", f.patient.id, { types: ["encounter"], order: "asc" }))
+  expect(asc.data.map((item) => item.id)).toEqual([late, onTime, f.encounter.id])
 })
