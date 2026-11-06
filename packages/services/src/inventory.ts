@@ -795,6 +795,7 @@ export async function createProduct(
       .where(
         and(
           eq(auditEvent.organizationId, orgId),
+          eq(auditEvent.entity, "product"),
           eq(auditEvent.action, "product.created"),
           sql`${auditEvent.metadata}->>'requestKey' = ${input.idempotencyKey}`,
         ),
@@ -802,6 +803,11 @@ export async function createProduct(
       .limit(1)
     if (prior?.id) {
       const done = await requireProduct(tx, orgId, prior.id)
+      // Es un reintento solo si pide lo mismo: si cambió el nombre o el código, no se descarta en silencio.
+      const sameSku = !input.sku?.trim() || input.sku.trim().toUpperCase() === done.sku.toUpperCase()
+      if (done.name !== name || !sameSku) {
+        throw conflict(`Desde esta ventana ya se guardó «${done.name}». Ábrelo en la lista para cambiarlo.`, "name")
+      }
       return { ...done, minimums: await minimumsOf(tx, orgId, done.id) }
     }
   }

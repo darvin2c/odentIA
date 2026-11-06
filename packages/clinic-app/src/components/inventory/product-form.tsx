@@ -33,6 +33,7 @@ import {
   inventoryKeys,
   inventoryUnconfirmedMessage,
   moneyText,
+  newKey,
   type ProductDetail,
   type ProductInputBody,
   parseWhole,
@@ -152,7 +153,7 @@ export function ProductFormDrawer({
   )
 
   // La clave de este formulario abierto (X13): si se corta la red, reintentar no crea otro producto.
-  const [createKey] = React.useState(() => crypto.randomUUID())
+  const [createKey] = React.useState(newKey)
   const mutation = useMutation({
     mutationFn: (body: ProductInputBody) =>
       product ? updateProduct(product.id, body) : createProduct({ ...body, idempotencyKey: createKey }),
@@ -236,9 +237,8 @@ export function ProductFormDrawer({
       onClose={onClose}
       title={product ? "Editar producto" : "Nuevo producto"}
       description={branchName}
-      // Mientras no se pueda volver a guardar, el porqué sigue a la vista aunque se escriba.
+      // El aviso sigue a la vista hasta que se vuelva a guardar; reintentar no repite el producto (X13).
       error={surface.error}
-      // Enter tampoco reenvía: el aviso de que no se pudo confirmar sigue a la vista.
       onSubmit={surface.onSubmit}
       submitLabel="Guardar"
       cancelLabel="Cancelar"
