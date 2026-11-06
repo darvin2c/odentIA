@@ -722,11 +722,12 @@ export async function getTimeline(
   const cmp = order === "desc" ? sql`<` : sql`>`
   const direction = order === "desc" ? sql`desc` : sql`asc`
   const branches: SQL[] = []
-  // Las atenciones firmadas y las anuladas (con su motivo, a la hora en que se
-  // anularon): Historia absorbe la lista de Atenciones (ADR 0035). El borrador
-  // en curso no es todavía un hecho: lo continúa la cabecera.
+  // Las atenciones firmadas, a la hora en que empezaron (la de su detalle y su
+  // resumen), y las anuladas, con su motivo, a la hora en que se anularon:
+  // Historia absorbe la lista de Atenciones (ADR 0035). El borrador en curso no
+  // es todavía un hecho: lo continúa la cabecera.
   if (types.includes("encounter"))
-    branches.push(sql`select id, 'encounter'::text as kind, case when status = 'anulada' then coalesce(voided_at, created_at) else created_at end as created_at from encounter where organization_id = ${orgId} and patient_id = ${patientId}::uuid and status in ('finalizada', 'anulada')
+    branches.push(sql`select id, 'encounter'::text as kind, case when status = 'anulada' then coalesce(voided_at, created_at) else started_at end as created_at from encounter where organization_id = ${orgId} and patient_id = ${patientId}::uuid and status in ('finalizada', 'anulada')
     ${tooth == null ? sql`` : sql`and exists (select 1 from encounter_site et where et.encounter_id = encounter.id and et.organization_id = ${orgId} and et.site_system = ${site.system} and et.site_code = ${toothCode})`}`)
   // Los papeles, a la hora de lo que pasó con ellos: el consentimiento cuando se
   // firmó o se revocó, la orden cuando se pidió y el formulario al completarse.
@@ -852,7 +853,7 @@ export async function getTimeline(
         id: row.id,
         refId: row.id,
         type: "encounter",
-        createdAt: row.status === "anulada" ? (row.voidedAt ?? row.createdAt) : row.createdAt,
+        createdAt: row.status === "anulada" ? (row.voidedAt ?? row.createdAt) : row.startedAt,
         voidReason: row.voidReason,
         title: row.reason || "Atención",
         detail: row.evolution,
