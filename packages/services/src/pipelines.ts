@@ -202,6 +202,8 @@ export async function renameStage(
     .where(and(eq(pipelineStage.id, stageId), eq(pipelineStage.organizationId, orgId)))
     .limit(1)
   if (!current) throw notFound("Etapa")
+  // El embudo queda bloqueado mientras se renombra: dos renombres a la vez se esperan y el segundo ve al primero.
+  await tx.select({ id: pipeline.id }).from(pipeline).where(and(eq(pipeline.id, current.pipelineId), eq(pipeline.organizationId, orgId))).for("update")
   const [twin] = await tx
     .select({ id: pipelineStage.id })
     .from(pipelineStage)

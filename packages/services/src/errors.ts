@@ -81,9 +81,9 @@ export function notFound(entity: string): ServiceError {
   return new ServiceError("NOT_FOUND", 404, `${entity} no ${foundWord(entity)}`)
 }
 
-/** La sede no existe (o no es de la organización): `notFound` concuerda en masculino. */
+/** La sede no existe (o no es de la organización). */
 export function branchNotFound(): ServiceError {
-  return new ServiceError("NOT_FOUND", 404, "Sede no encontrada")
+  return notFound("Sede")
 }
 
 /**

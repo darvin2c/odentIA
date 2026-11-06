@@ -217,18 +217,23 @@ export async function upsertAgentConfig(
       throw invalidField(`functionNotes.${id}`, `Cada indicación admite hasta ${FUNCTION_NOTE_CHARS} caracteres`)
     }
   }
-  // Bloqueada mientras se guarda: un interruptor se aplica sobre lo último guardado.
+  // El modelo se pregunta antes de bloquear: su respuesta puede tardar y la fila no espera por ella.
+  if (input.enabled === true && opts.modelCheck) {
+    if (!(await opts.modelCheck()).responds) {
+      throw new ServiceError(MODEL_NOT_RESPONDING, 409, `El modelo no responde ahora, así que Sofi no se puede encender. Ya avisamos a ${await orgProductName(tx, orgId)}.`)
+    }
+  }
+  // Un interruptor o una indicación se aplica sobre lo último guardado: la fila
+  // existe y queda bloqueada mientras se guarda (también la primera vez).
+  if (input.functionSwitch !== undefined || input.functionNote !== undefined) {
+    await tx.insert(agentConfig).values({ organizationId: orgId, ...DEFAULTS }).onConflictDoNothing({ target: agentConfig.organizationId })
+  }
   const [current] = await tx
     .select()
     .from(agentConfig)
     .where(eq(agentConfig.organizationId, orgId))
     .limit(1)
     .for("update")
-  if (input.enabled === true && opts.modelCheck) {
-    if (!(await opts.modelCheck()).responds) {
-      throw new ServiceError(MODEL_NOT_RESPONDING, 409, `El modelo no responde ahora, así que Sofi no se puede encender. Ya avisamos a ${await orgProductName(tx, orgId)}.`)
-    }
-  }
   const { functionSwitch, functionNote, ...fields } = input
   const patch: Partial<typeof agentConfig.$inferInsert> = { ...fields }
   if (functionSwitch !== undefined) {

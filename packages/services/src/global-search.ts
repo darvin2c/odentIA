@@ -28,7 +28,7 @@ import { purchaseOrderLabel } from "./finance.js"
 import { accountBalances } from "./payments.js"
 import { PURCHASE_STATUS_WORDS } from "./purchase-balance.js"
 import { personSearchCondition } from "./person-search.js"
-import { digitsContain, foldedStartsWith, foldedWordsMatch, foldText, referenceNumber, searchDigits, searchWords } from "./search-text.js"
+import { digitsContain, foldedStartsWith, foldedWordsMatch, foldText, referenceNumber, searchDigits, searchWords, serviceWordsMatch } from "./search-text.js"
 import { pageTasks, taskAreasOfRole } from "./tasks.js"
 
 /** Tipos que se pueden quitar con el filtro de la ventana. */
@@ -390,7 +390,11 @@ export async function searchEverything(
           target: { screen: "persona", personId: String(row.person_id), section: "documentos" },
         },
       )
-    const leaveAsked = askedFor(["descanso", "descansos", "medico", "certificado", "incapacidad"])
+    // «médico» solo cuenta junto a «descanso»: «médico» suelto busca otra cosa.
+    const leaveWords = searchWords(q).some((word) => foldText(word).startsWith("descanso"))
+      ? ["descanso", "descansos", "medico", "certificado", "incapacidad"]
+      : ["descanso", "descansos", "certificado", "incapacidad"]
+    const leaveAsked = askedFor(leaveWords)
     // Un descanso no tiene más texto que su nota: se encuentra pidiéndolo por su nombre.
     const leaves = leaveAsked.asked
       ? await rows(sql`
@@ -622,7 +626,8 @@ export async function searchEverything(
   if (can("catalog.read") && on("servicio") && !digits) {
     const services = await rows(sql`
       select s.id, s.name, s.code, s.price_cents, s.currency, s.duration_min from service_catalog s
-      where s.organization_id = ${orgId} and s.is_active and ${foldedWordsMatch([sql`s.name`, sql`s.code`], q)}
+      where s.organization_id = ${orgId} and s.is_active
+        and ${serviceWordsMatch([sql`s.name`, sql`s.code`], q, (await productHooks(tx, orgId)).catalog.everydayWords)}
       order by ${foldedStartsWith(sql`s.name`, q)} desc, s.name limit ${PER_TYPE}`)
     for (const row of services) addOwner(serviceOwner(row, true))
     const promotions = await rows(sql`

@@ -37,13 +37,14 @@ function writeStored(id: string | undefined): void {
   for (const listener of listeners) listener()
 }
 
-/** Lo guardado cambia aquí o en otra pestaña. */
+/**
+ * Lo guardado cambia en esta pestaña. Lo que se elige en otra no cambia la
+ * sede de esta a mitad de un cobro: vale al volver a abrirla.
+ */
 function subscribeStored(listener: () => void): () => void {
   listeners.add(listener)
-  window.addEventListener("storage", listener)
   return () => {
     listeners.delete(listener)
-    window.removeEventListener("storage", listener)
   }
 }
 

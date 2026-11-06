@@ -168,6 +168,10 @@ interface Profile {
 
 it("datos de la clínica: vaciar un dato lo guarda vacío, lo que no se envía se conserva y el nombre comercial es el de la cuenta", async () => {
   const region = { countryCode: "PE", currency: "PEN", timezone: "America/Lima", locale: "es-PE" }
+  // Al crear la clínica la razón social es obligatoria: sin ella no nace el perfil.
+  const nameless = await request("owner", "PUT", "/org-profile", { tradeName: "Ajustes", ...region })
+  expect(nameless.status).toBe(400)
+  expect(await nameless.json()).toMatchObject({ error: { fields: { legalName: "Escribe la razón social" } } })
   const created = await request("owner", "PUT", "/org-profile", {
     legalName: "Clínica Ajustes S.A.C.",
     tradeName: "Ajustes",

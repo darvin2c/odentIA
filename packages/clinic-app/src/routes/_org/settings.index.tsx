@@ -242,7 +242,8 @@ function toInput(values: ProfileValues, baseline: ProfileValues, created: boolea
     ...(touched("fiscalDocNumber") ? { fiscalDocNumber: values.fiscalDocNumber.trim() || null } : {}),
     ...(touched("fiscalAddress") ? { fiscalAddress: values.fiscalAddress.trim() || null } : {}),
     ...(touched("emergencyPhone") ? { emergencyPhone: values.emergencyPhone?.trim() || null } : {}),
-    ...(touched("countryCode") ? { countryCode: values.countryCode } : {}),
+    // Los impuestos se leen con su país: si viajan, viaja también el país con que se eligieron.
+    ...(touched("countryCode") || taxesTouched ? { countryCode: values.countryCode } : {}),
     ...(touched("currency") ? { currency: values.currency } : {}),
     ...(touched("timezone") ? { timezone: values.timezone } : {}),
     ...(touched("locale") ? { locale: values.locale } : {}),

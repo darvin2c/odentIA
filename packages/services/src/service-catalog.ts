@@ -38,7 +38,7 @@ import {
   type TemplateProduct,
   templateProductColumns,
 } from "./products.js"
-import { everydayServiceVariants, foldedWordsMatch } from "./search-text.js"
+import { foldedWordsMatch, serviceWordsMatch } from "./search-text.js"
 import { librarySpecialtyIds, requireOrgSpecialtyId } from "./specialties.js"
 
 function conflict(code: string, message: string, fields?: Record<string, string>): ServiceError {
@@ -575,7 +575,7 @@ export async function listTemplates(
   if (q) {
     const fields =
       list && release ? [treatmentTemplate.name, procedureCode.code] : [treatmentTemplate.name]
-    conditions.push(foldedWordsMatch(fields, q))
+    conditions.push(serviceWordsMatch(fields, q, (await productHooks(tx, orgId)).catalog.everydayWords))
   }
   // La biblioteca es corta (unos 400 tratamientos): se cuenta lo que coincide.
   const total = (await libraryQuery(tx, list, release).where(and(...conditions))).length
@@ -727,8 +727,8 @@ export async function listServices(
   const q = query.q?.trim()
   if (q) {
     // También como lo dicen los pacientes: «limpieza» encuentra la profilaxis.
-    const columns = [serviceCatalog.name, serviceCatalog.code]
-    conditions.push(or(foldedWordsMatch(columns, q), ...everydayServiceVariants(q).map((other) => foldedWordsMatch(columns, other)))!)
+    const { everydayWords } = (await productHooks(tx, orgId)).catalog
+    conditions.push(serviceWordsMatch([serviceCatalog.name, serviceCatalog.code], q, everydayWords))
   }
   const [counted] = await tx
     .select({ total: sql<number>`count(*)::int` })

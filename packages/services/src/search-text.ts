@@ -48,39 +48,29 @@ export function foldedWordsMatch(
 }
 
 /**
- * Cómo lo dicen los pacientes y cómo se llama en el catálogo: buscar
- * «limpieza» encuentra también la profilaxis y «curación» la restauración con
- * resina. Solo amplía lo que se encuentra; nunca cambia un nombre. Las claves
- * van plegadas (sin tildes ni mayúsculas).
+ * Las otras formas de una búsqueda de servicios: cada palabra de todos los días
+ * («limpieza») por las del catálogo de su producto (`catalog.everydayWords`).
+ * Solo amplía lo que se encuentra; nunca cambia un nombre.
  */
-const EVERYDAY_SERVICE_WORDS: Record<string, string[]> = {
-  limpieza: ["profilaxis", "destartraje", "tartrectomia"],
-  curacion: ["restauracion", "resina", "obturacion"],
-  calza: ["restauracion", "resina", "obturacion"],
-  empaste: ["restauracion", "resina", "obturacion"],
-  tapadura: ["restauracion", "resina", "obturacion"],
-  extraccion: ["exodoncia"],
-  sacar: ["exodoncia", "extraccion"],
-  nervio: ["endodoncia"],
-  conducto: ["endodoncia"],
-  brackets: ["ortodoncia"],
-  frenillos: ["ortodoncia"],
-  funda: ["corona"],
-  placa: ["protesis"],
-  dentadura: ["protesis"],
-  encias: ["periodoncia", "raspado"],
-  chequeo: ["consulta", "control", "evaluacion"],
-  revision: ["consulta", "control", "evaluacion"],
+export function everydayServiceVariants(q: string, everydayWords: Readonly<Record<string, readonly string[]>>): string[] {
+  const words = searchWords(q)
+  return words.flatMap((word, index) => {
+    const folded = foldText(word)
+    const others = Object.hasOwn(everydayWords, folded) ? (everydayWords[folded] ?? []) : []
+    return others.map((other) => [...words.slice(0, index), other, ...words.slice(index + 1)].join(" "))
+  })
 }
 
-/** Las otras formas de una búsqueda de servicios: cada palabra de todos los días por la del catálogo. */
-export function everydayServiceVariants(q: string): string[] {
-  const words = searchWords(q)
-  return words.flatMap((word, index) =>
-    (EVERYDAY_SERVICE_WORDS[foldText(word)] ?? []).map((other) =>
-      [...words.slice(0, index), other, ...words.slice(index + 1)].join(" "),
-    ),
-  )
+/** Una búsqueda de servicios en `columns`, también con las palabras de todos los días. */
+export function serviceWordsMatch(
+  columns: SQLWrapper[],
+  q: string,
+  everydayWords: Readonly<Record<string, readonly string[]>>,
+): SQL {
+  const variants = everydayServiceVariants(q, everydayWords)
+  return variants.length === 0
+    ? foldedWordsMatch(columns, q)
+    : or(foldedWordsMatch(columns, q), ...variants.map((other) => foldedWordsMatch(columns, other)))!
 }
 
 /** Texto plegado como `search_fold` de la base: sin tildes ni mayúsculas. */
