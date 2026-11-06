@@ -78,13 +78,15 @@ export function createPublicPortalRoute(deps: {
   const app = new Hono()
   const buckets = new Map<string, { expiresAt: number; count: number }>()
   const unavailable = (c: Context) => c.json(errorBody(c, "NOT_FOUND", "Enlace no disponible"), 404)
-  const address = deps.remoteAddress ?? ((c: Context) => {
+  const connection = (c: Context) => {
     try {
       return getConnInfo(c).remote.address
     } catch {
       return undefined
     }
-  })
+  }
+  // La dirección de quien entra; si la cabecera de confianza no llegó, la de la conexión.
+  const address = (c: Context) => deps.remoteAddress?.(c) ?? connection(c)
 
   app.use("*", async (c, next) => {
     c.header("Cache-Control", "no-store")
