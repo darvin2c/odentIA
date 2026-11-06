@@ -64,12 +64,51 @@ export function missingQuotedNames(topics: readonly HelpTopic[]): string[] {
   return [...missing]
 }
 
+/**
+ * Una pregunta del banco. `expected` es la pantalla, con la que se ajustó el
+ * buscador; lo demás es la respuesta, con la que `eval:ayuda` (del agente) mide
+ * lo que la persona recibe. Ejemplos escritos por el equipo, nunca mensajes reales.
+ */
 interface Asked {
   q: string
   expected: string[]
+  /** La guía con que se etiquetó la respuesta. */
+  producto: "odentia" | "latidia"
+  /** Ruta de la pantalla desde donde se preguntó, si se sabe. */
+  pantalla?: string
+  /** Lo que la responde, mostrado tal cual: preguntas frecuentes (su pregunta exacta) o el párrafo de una pantalla (su id). */
+  faqs?: string[]
+  temas?: string[]
+  /** `ninguna`: la guía no la responde. `datos`: es de las cifras de la clínica (lo responde Argos). */
+  es?: "ninguna" | "datos"
 }
 
-export const helpBanks = JSON.parse(readFileSync(new URL("./help-preguntas.json", import.meta.url), "utf8")) as Record<"desarrollo" | "control" | "final" | "ciego", Asked[]>
+/**
+ * `ronda` son las 14 preguntas de la ronda de QA del 2026-11-04 y, como
+ * `ciego`, nadie las usó para ajustar. `cifras` son preguntas sobre las cifras
+ * de la clínica y lo que cuenta cada una.
+ */
+export const helpBanks = JSON.parse(readFileSync(new URL("./help-preguntas.json", import.meta.url), "utf8")) as Record<
+  "desarrollo" | "control" | "final" | "ciego" | "ronda" | "cifras",
+  Asked[]
+>
+
+/** Lo que el banco da como respuesta de este producto y su guía no tiene, o una pregunta sin una sola etiqueta. */
+export function helpBankLabelProblems(product: Asked["producto"], topics: readonly HelpTopic[]): string[] {
+  const faqs = new Set(topics.flatMap((topic) => (topic.faqs ?? []).map((faq) => faq.q)))
+  const ids = new Set(topics.map((topic) => topic.id))
+  const problems: string[] = []
+  for (const [bank, items] of Object.entries(helpBanks)) {
+    for (const item of items) {
+      if (item.producto !== product) continue
+      const answers = (item.faqs?.length ?? 0) + (item.temas?.length ?? 0)
+      if ((answers > 0) === (item.es !== undefined)) problems.push(`[${bank}] «${item.q}»: lleva una respuesta o «es», solo uno`)
+      for (const q of item.faqs ?? []) if (!faqs.has(q)) problems.push(`[${bank}] «${item.q}»: la guía no tiene la pregunta frecuente «${q}»`)
+      for (const id of item.temas ?? []) if (!ids.has(id)) problems.push(`[${bank}] «${item.q}»: la guía no tiene la pantalla «${id}»`)
+    }
+  }
+  return problems
+}
 
 export function measureHelpBank(bank: readonly Asked[], topics: readonly HelpTopic[]) {
   const out = { bien: 0, mal: 0, noSabe: 0, inventa: 0, aparte: 0 }
@@ -93,6 +132,11 @@ export function describeHelpSearch(product: string, topics: readonly HelpTopic[]
 
     it("lo que cita existe en las pantallas", () => {
       expect(missingQuotedNames(topics).join(" | ")).toBe("")
+    })
+
+    it("el banco por respuesta nombra lo que la guía tiene", () => {
+      // Cambiar una pregunta frecuente o una pantalla cambia su etiqueta en `help-preguntas.json` en el mismo cambio.
+      expect(helpBankLabelProblems(product === "latidIA" ? "latidia" : "odentia", topics).join("\n")).toBe("")
     })
 
     it("toda pregunta frecuente se encuentra a sí misma", () => {
