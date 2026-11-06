@@ -342,7 +342,14 @@
       "idx": 48,
       "version": "7",
       "when": 1793989403321,
-      "tag": "0048_avisos_de_la_receta",
+      "tag": "0048_aviso_sugerido",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1793989463321,
+      "tag": "0049_avisos_de_la_receta",
       "breakpoints": true
     }
   ]

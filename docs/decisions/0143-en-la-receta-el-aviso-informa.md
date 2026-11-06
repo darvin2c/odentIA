@@ -43,4 +43,4 @@ El usuario lo decidió el 2026-11-05: «todo lo que mostramos es informativo; no
 ## Referencias
 
 - `packages/services/src/prescriptions.ts` (`createPrescription`, `currentMedicationsOf`), `packages/clinical/src/allergens.ts` (`duplicateWarnings`), `packages/services/src/encounter-dictation.ts`, `packages/clinic-app/src/components/patient/clinical-panels.tsx` y `prescription-alerts.tsx`.
-- `packages/db/drizzle/0048_avisos_de_la_receta.sql`.
+- `packages/db/drizzle/0049_avisos_de_la_receta.sql`.

@@ -393,8 +393,8 @@ function AdministratorPage() {
                 <p className="min-w-0 flex-1 basis-64">
                   {on.length > 0 ? (
                     <>
-                      <span className="font-semibold">Al encenderlo solo hace lo que ya está prendido.</span> Las demás líneas empiezan
-                      apagadas: él te recomienda en Inicio las que hoy tienen casos, y tú prendes las que quieras, una por una.
+                      <span className="font-semibold">Al encenderlo solo hace lo que ya está prendido.</span> Una clínica nueva trae
+                      todas sus líneas prendidas; las que apagues quedan apagadas, y él te recomienda en Inicio las que hoy tienen casos.
                     </>
                   ) : (
                     <>

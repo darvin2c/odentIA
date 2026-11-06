@@ -249,7 +249,20 @@ export function DictationPanel({
                 ) : null}
               </>
             ) : (
-              "Habla como le contarías a un colega. Lo que dictas aparece como sugerencias dentro de cada bloque. Nada entra a la historia hasta que confirmes."
+              <>
+                Habla como le contarías a un colega. Lo que dictas aparece como sugerencias dentro de cada bloque. Nada entra a la
+                historia hasta que confirmes.{" "}
+                {/* El costo, donde se decide dictar (ADR 0141): Clío nace encendida. */}
+                Si confirmas algo, al cerrar la atención se cuenta como una consulta de {CLINICAL_NAME} de tu plan.
+                {seesBilling(role) ? (
+                  <>
+                    {" "}
+                    <Link to={PLAN_PATH} className="text-primary underline underline-offset-4">
+                      Ver precios
+                    </Link>
+                  </>
+                ) : null}
+              </>
             )}
           </p>
           {/* A dónde quedó cada sugerencia: un toque lleva a su bloque. */}

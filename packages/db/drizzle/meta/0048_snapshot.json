@@ -1,5 +1,5 @@
 {
-  "id": "f5e14a3c-8c8b-4780-aeb5-3e0d95cf86c0",
+  "id": "c8bb9f7e-0276-44ac-8451-b9b96d7bcc64",
   "prevId": "be5b6821-fbce-4857-b00e-b0b01bd45e07",
   "version": "7",
   "dialect": "postgresql",
@@ -20317,12 +20317,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "alerts_seen": {
-          "name": "alerts_seen",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -30690,6 +30684,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "notice_suggested_at": {
+          "name": "notice_suggested_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},

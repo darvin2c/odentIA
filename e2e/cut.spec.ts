@@ -44,6 +44,11 @@ async function onboard(page: Page, org: UiOrg): Promise<void> {
   await expect(page).toHaveURL(tenantPattern(org.slug, "/home"))
   const branches = await call<{ name: string }[]>(page, "GET", "/api/branches", org.slug)
   expect(branches.map(branch => branch.name)).toContain(org.branch)
+  // Nace con todo encendido y lo dice en Inicio, cada cosa con su enlace (ADR 0141).
+  const born = page.getByRole("list", { name: "Viene encendido" })
+  await expect(born).toContainText("El registro en línea, con un aviso de privacidad sugerido, sin revisar.")
+  await expect(born).toContainText("El portal del paciente")
+  await expect(born.getByRole("link", { name: "Revisar el aviso" })).toBeVisible()
 }
 
 test("auth: registro, verificación y onboarding", async ({ browser }) => {

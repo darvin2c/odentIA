@@ -49,7 +49,8 @@ export function WhatsAppConnect({
             </h2>
             <p className="text-sm text-muted-foreground">
               Tu número y tu cuenta siguen siendo tuyos: {appWords().name} solo recibe permiso para enviar y recibir por ese número. Al
-              conectar, atiende el agente, responde tu equipo desde la Bandeja y salen los recordatorios y avisos.
+              conectar, responde tu equipo desde la Bandeja y, si están encendidos, atiende el agente y salen los recordatorios y
+              avisos.
             </p>
           </div>
           {onCancel ? (
