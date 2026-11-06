@@ -1002,6 +1002,19 @@ export async function updatePlanItem(
   return { ...item, decision: await itemDecision(tx, orgId, item) }
 }
 
+/**
+ * Un tratamiento sin presupuesto que quedó aceptado en una atención: se hizo en
+ * ella (aceptado al hacerlo o servicio directo), así que está unido a esa atención.
+ */
+async function acceptedInAttention(tx: Db, orgId: string, itemId: string): Promise<boolean> {
+  const [link] = await tx
+    .select({ id: encounterPlanItem.planItemId })
+    .from(encounterPlanItem)
+    .where(and(eq(encounterPlanItem.organizationId, orgId), eq(encounterPlanItem.planItemId, itemId)))
+    .limit(1)
+  return Boolean(link)
+}
+
 export async function setPlanItemStatus(
   tx: Db,
   orgId: string,
@@ -1035,7 +1048,12 @@ export async function setPlanItemStatus(
     if (current.decisionStatus !== "aceptado")
       throw conflict("ITEM_NOT_ACCEPTED", "El tratamiento no está aceptado")
     // Donde lo indicado queda aceptado al indicarlo (latidIA), basta la decisión.
-    if ((await hooksOf(tx, orgId)).budgetRequired && (!budget || budget.status === "cancelado")) {
+    // Lo aceptado en una atención (al hacerlo, sin presupuesto) tampoco lo pide:
+    // una endodoncia en dos sesiones aceptada en la primera se completa en la segunda.
+    if (
+      (await hooksOf(tx, orgId)).budgetRequired &&
+      (budget ? budget.status === "cancelado" : !(await acceptedInAttention(tx, orgId, itemId)))
+    ) {
       throw conflict("BUDGET_CLOSED", "El presupuesto del tratamiento está cerrado")
     }
     assertExecutableCodings(current.codings)
