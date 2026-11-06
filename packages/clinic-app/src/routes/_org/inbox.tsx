@@ -236,8 +236,10 @@ function InboxPage() {
     // Spam y Bloqueados muestran todo lo de esas personas, abierto o cerrado.
     if (!isSideView(activeView)) params.set("status", activeView === "closed" ? "closed" : "open")
     params.set("view", activeView)
+    // «Quien espera más»: lo más antiguo primero (X7), solo en «Por atender». Sin elegir, lo último que se movió.
+    if (activeView === "attend" && listSearch.get("sort") === "espera") params.set("sort", "espera")
     return params.toString()
-  }, [filterParams, activeView])
+  }, [filterParams, activeView, listSearch])
 
   // La clave empieza por `conversations`: se invalida junto con la lista.
   const summaryQuery = useQuery({
@@ -461,6 +463,25 @@ function InboxPage() {
     )
   }
 
+  // «Quien espera más» (X7): solo en «Por atender» y sin buscar, arriba de la lista; la fila de
+  // pestañas no tiene lugar para otro control.
+  const byWait = activeView === "attend" && listSearch.get("sort") === "espera"
+  const orderHeader =
+    activeView === "attend" && !searching ? (
+      <div className="flex items-center justify-between gap-2 px-3.5 py-1.5 text-xs text-muted-foreground">
+        <span>{byWait ? "Primero quien lleva más tiempo sin un movimiento" : "Primero lo último que se movió"}</span>
+        <Button
+          type="button"
+          variant={byWait ? "secondary" : "ghost"}
+          size="sm"
+          className="min-h-11 shrink-0 sm:min-h-8"
+          aria-pressed={byWait}
+          onClick={() => listSearch.setParam("sort", byWait ? undefined : "espera", { replace: true })}
+        >
+          Quien espera más
+        </Button>
+      </div>
+    ) : null
   return (
     // La Bandeja ya reparte la ventana en lista, hilo y «Contexto»: lo que se
     // abre desde aquí va en cajón, no en la columna lateral.
@@ -582,6 +603,7 @@ function InboxPage() {
           >
             <ConversationList
               items={items}
+              header={orderHeader}
               myUserId={myUserId}
               selectedId={selectedId}
               isLoading={listQuery.isLoading && items.length === 0}
@@ -629,6 +651,7 @@ function InboxPage() {
           {!selectedId || !thread ? (
             <ConversationList
               items={items}
+              header={orderHeader}
               myUserId={myUserId}
               selectedId={selectedId}
               isLoading={listQuery.isLoading && items.length === 0}

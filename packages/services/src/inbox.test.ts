@@ -260,6 +260,13 @@ it("una fila por persona: sus canales juntos, en su estado más urgente, y un gr
     withOrgContext(appDb, orgId, (tx) => listInboxConversations(tx, orgId, input))
   // Rosa sale una vez, con la conversación que pide a una persona y sus dos canales.
   const everyone = (await list()).items
+  // «Quien espera más» (X7) da vuelta el orden, y sus páginas siguen sin repetir ni saltar.
+  const recentIds = everyone.map((item) => item.id)
+  const oldest = (await list({ sort: "espera" })).items.map((item) => item.id)
+  expect(oldest).toEqual([...recentIds].reverse())
+  const first = await list({ sort: "espera", limit: 1 })
+  const second = await list({ sort: "espera", limit: 1, ...(first.nextCursor ? { cursor: first.nextCursor } : {}) })
+  expect([...first.items, ...second.items].map((item) => item.id)).toEqual(oldest.slice(0, 2))
   expect(everyone.map((item) => item.id).sort()).toEqual([wa.id, group.id].sort())
   const row = everyone.find((item) => item.id === wa.id)
   expect(row).toMatchObject({ channels: ["whatsapp", "telegram"], unreadCount: 3 })
