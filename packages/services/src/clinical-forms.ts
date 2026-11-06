@@ -2833,11 +2833,16 @@ export async function listConsentDocuments(
     }
     conditions.push(eq(consentDocument.status, query.status))
   }
-  return tx
-    .select()
+  // La lista dice el estado; las firmas dibujadas solo viajan al abrir el documento o su PDF
+  // (minimización y peso): aquí van vacías.
+  const { signatureData: _signature, professionalSignature: _professional, revokeSignature: _revoke, ...listed } =
+    getTableColumns(consentDocument)
+  const rows = await tx
+    .select(listed)
     .from(consentDocument)
     .where(and(...conditions))
     .orderBy(desc(consentDocument.createdAt))
+  return rows.map((row) => ({ ...row, signatureData: null, professionalSignature: null, revokeSignature: null }))
 }
 
 /** Paciente dueño de un consentimiento: para dejar traza de su lectura (404 si no existe). */

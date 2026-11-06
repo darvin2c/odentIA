@@ -62,6 +62,8 @@ const listQuery = filtersQuery.extend({
   view: z.enum(CONVERSATION_VIEWS).optional(),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
+  /** «espera»: quien lleva más tiempo esperando, primero. */
+  sort: z.enum(["reciente", "espera"]).optional(),
 })
 
 const textInput = z.object({

@@ -566,6 +566,9 @@ function AgendaPage() {
   )
   const dayAppointments = appointments.filter((item) => zonedDateOf(item.startsAt, TZ) === day)
   const dayStanding = dayAppointments.filter((item) => occupies(item.status)).length
+  // Lo que no ocupa la rejilla se dice en la cuenta: la lista del día trae todas (X9).
+  const dayNoShow = dayAppointments.filter((item) => item.status === "no_asistio").length
+  const dayCancelled = dayAppointments.filter((item) => item.status === "cancelada").length
   const pending = dayAppointments.filter((item) => item.status === "programada").length
 
   const open = React.useMemo(
@@ -1449,6 +1452,8 @@ function AgendaPage() {
             <>
               <span className="truncate">
                 {dayStanding} {dayStanding === 1 ? "cita" : "citas"}
+                {dayNoShow > 0 ? ` · ${dayNoShow} no ${dayNoShow === 1 ? "vino" : "vinieron"}` : ""}
+                {dayCancelled > 0 ? ` · ${dayCancelled} ${dayCancelled === 1 ? "cancelada" : "canceladas"}` : ""}
                 {pending > 0 ? " ·" : ""}
               </span>
               {/* Si falta sitio, lo que se recorta es el total: esto pide hacer algo. */}
