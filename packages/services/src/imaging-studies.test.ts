@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
 import { imagingStudy, imagingStudyFile } from "@odentia/db/schema/clinical"
+import { orgProfile } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { getPatientDocument, listPatientDocuments } from "./clinical.js"
@@ -16,7 +18,7 @@ import {
   startImagingStudyUpload,
 } from "./imaging-studies.js"
 import { createPatient } from "./patients.js"
-import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
+import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
 
@@ -261,4 +263,17 @@ it("guarda medidas con quién y cuándo, y quitarlas las retira sin borrarlas", 
         addImagingMeasurement(tx, "org_a", ACTOR, patient.id, document.id, { ...measure, toothNumber }),
       ),
     ).rejects.toMatchObject({ code: "VALIDATION" })
+})
+
+it("latidIA no guarda la tomografía y lo dice, aunque la pida otro cliente que no es la pantalla", async () => {
+  await seed()
+  const medical = randomUUID()
+  await insertOrg(ownerDb, medical, medical)
+  await ownerDb.update(orgProfile).set({ product: "medical" }).where(eq(orgProfile.organizationId, medical))
+  const patient = await withOrgContext(appDb, medical, (tx) =>
+    createPatient(tx, medical, ACTOR, { displayName: "Rosa Quispe" }),
+  )
+  await expect(
+    withOrgContext(appDb, medical, (tx) => startImagingStudyUpload(tx, medical, ACTOR, patient.id, input())),
+  ).rejects.toMatchObject({ code: "IMAGING_STUDIES_UNSUPPORTED", status: 400 })
 })

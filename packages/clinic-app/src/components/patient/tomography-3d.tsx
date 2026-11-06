@@ -1,4 +1,4 @@
-import { Slider } from "@odentia/ui"
+import { Button, Slider } from "@odentia/ui"
 import { LoadingState } from "@odentia/ui-patterns"
 import { useEffect, useId, useRef, useState } from "react"
 import { cbctNifti } from "../../lib/cbct-nifti"
@@ -62,10 +62,16 @@ export function Tomography3D({
   volume,
   window,
   className,
+  onExpand,
+  focusOnOpen = false,
 }: {
   volume: CbctVolume
   window: WindowLevel
   className?: string
+  /** En el cuadro chico de «Cortes»: lleva a la pestaña «3D», grande, para mostrárselo al paciente. */
+  onExpand?: () => void
+  /** Recibe el foco al abrirse (al llegar con «Ver grande», que desaparece). */
+  focusOnOpen?: boolean
 }) {
   const id = useId()
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -132,6 +138,10 @@ export function Tomography3D({
   }, [window, state])
 
   useEffect(() => {
+    if (focusOnOpen) canvasRef.current?.focus()
+  }, [focusOnOpen])
+
+  useEffect(() => {
     const nv = nvRef.current
     if (state !== "listo" || !nv) return
     // Sin cortar, el plano queda fuera del volumen; al cortar entra desde adelante hasta el centro.
@@ -143,6 +153,11 @@ export function Tomography3D({
       <span className="absolute top-2 left-2 z-10 rounded bg-black/70 px-1.5 py-0.5 text-[0.7rem] font-semibold tracking-wide text-slate-300 uppercase">
         3D · para mostrar
       </span>
+      {onExpand && state !== "sin-3d" && (
+        <Button type="button" size="sm" variant="outline" className="absolute top-2 right-2 z-10" onClick={onExpand}>
+          Ver grande
+        </Button>
+      )}
       {state === "sin-3d" ? (
         <p role="status" className="m-auto max-w-xs p-6 text-center text-sm text-slate-300">
           Este equipo no puede mostrar el 3D; los cortes siguen igual.
@@ -156,8 +171,10 @@ export function Tomography3D({
           <div className="relative min-h-48 flex-1 touch-none">
             <canvas
               ref={canvasRef}
+              // biome-ignore lint/a11y/noNoninteractiveTabindex: el 3D recibe el foco al llegar con «Ver grande».
+              tabIndex={focusOnOpen ? -1 : undefined}
               aria-label="Tomografía en 3D: arrastra para girarla"
-              className="absolute inset-0 h-full w-full"
+              className="absolute inset-0 h-full w-full outline-none"
             />
             {state === "cargando" && (
               <div className="absolute inset-0 flex items-center justify-center">
@@ -166,7 +183,10 @@ export function Tomography3D({
             )}
           </div>
           <div className="flex flex-wrap items-center gap-3 px-3 py-2 text-xs text-slate-400">
-            <span id={`${id}-cut`}>Ver por dentro, desde adelante</span>
+            <p className="basis-full text-slate-300">
+              Arrastra con el dedo o el ratón para girarla.
+            </p>
+            <span id={`${id}-cut`}>Ver por dentro</span>
             <Slider
               aria-labelledby={`${id}-cut`}
               className="min-w-32 flex-1"
@@ -177,6 +197,9 @@ export function Tomography3D({
               disabled={state !== "listo"}
               onValueChange={(v) => setCut(sliderValue(v))}
             />
+            <p className="basis-full">
+              Mueve a la derecha para abrirla desde adelante; a la izquierda vuelve a verse entera.
+            </p>
             <p className="basis-full text-amber-200">
               El hueso fino puede no verse en 3D. Para medir y decidir, usa los cortes.
             </p>

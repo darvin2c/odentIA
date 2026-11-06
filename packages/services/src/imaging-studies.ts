@@ -191,6 +191,13 @@ export async function startImagingStudyUpload(
   files: { index: number; sopInstanceUid: string }[]
 }> {
   await requirePatient(tx, orgId, patientId)
+  // La misma regla que la pantalla de subir: no basta con que el producto no tenga el tipo «tomografia».
+  if (!(await productHooks(tx, orgId)).imagingStudies)
+    throw new ServiceError(
+      "IMAGING_STUDIES_UNSUPPORTED",
+      400,
+      "La tomografía todavía no se guarda en la ficha: guarda el CD o pide al centro el informe en PDF",
+    )
   const studyUid = dicomUid(input.studyInstanceUid, "El estudio")
   const files = input.files ?? []
   if (!files.length) throw validation("La tomografía no trae archivos DICOM")

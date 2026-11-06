@@ -160,6 +160,7 @@ function ThreePlanes({
   tool,
   saved,
   show3d,
+  onExpand3d,
 }: {
   volume: CbctVolume
   window: WindowLevel
@@ -167,6 +168,8 @@ function ThreePlanes({
   saved: SavedMeasures
   /** El cuarto cuadro: el 3D para mostrar (en la computadora). */
   show3d: boolean
+  /** «Ver grande» del cuarto cuadro: la pestaña «3D». */
+  onExpand3d?: () => void
 }) {
   const [point, setPoint] = useState({
     x: Math.floor(volume.nx / 2),
@@ -297,7 +300,7 @@ function ThreePlanes({
           </div>
         </div>
       ))}
-      {show3d && <Tomography3D volume={volume} window={window} />}
+      {show3d && <Tomography3D volume={volume} window={window} onExpand={onExpand3d} />}
     </div>
   )
 }
@@ -477,7 +480,7 @@ const PHONE_VIEWS: { value: TomographyView; label: string }[] = [
 const VIEW_ONLY_NOTICE =
   "En el celular la tomografía es para mirar. Para medir, ábrela en una computadora o una tablet."
 
-/** Pantalla completa del visor: «Panorámica» y «Cortes» (con el 3D), o una vista grande a la vez en el celular. */
+/** Pantalla completa del visor: «Panorámica», «Cortes» y «3D», o una vista grande a la vez en el celular. */
 export function TomographyViewer({
   patientId,
   doc,
@@ -512,14 +515,8 @@ export function TomographyViewer({
       ? (custom ?? volume.presets.hueso)
       : volume.presets[preset]
     : null
-  // En la computadora, «Corte» es parte de la panorámica y el 3D, de los cortes.
-  const shown: TomographyView = viewOnly
-    ? view
-    : view === "corte"
-      ? "panoramica"
-      : view === "3d"
-        ? "cortes"
-        : view
+  // En la computadora, «Pieza» es parte de la panorámica; el 3D tiene su pestaña, para mostrarlo grande.
+  const shown: TomographyView = !viewOnly && view === "corte" ? "panoramica" : view
   const files = loaded.files.data?.data.files
   const otherSeries = useMemo(
     () => new Set(files?.map((f) => f.seriesInstanceUid)).size > 1,
@@ -527,14 +524,22 @@ export function TomographyViewer({
   )
 
   // Al cambiar de vista, el aviso de la anterior ya no aplica.
+  // Al llegar con «Ver grande», el foco pasa al 3D: el botón deja de existir.
+  const [expanded3d, setExpanded3d] = useState(false)
   const changeView = (next: TomographyView) => {
     setView(next)
     setNotice(null)
+    if (next !== "3d") setExpanded3d(false)
   }
   const chooseTool = (next: Tool) => {
     // Medir queda a la vista; en el celular se dice por qué no, con la salida.
     if (viewOnly && next !== "ninguna") {
       setNotice(VIEW_ONLY_NOTICE)
+      return
+    }
+    // El 3D es solo para mostrar: M y A dicen dónde se mide en vez de encender una herramienta oculta.
+    if (view === "3d" && next !== "ninguna") {
+      setNotice("El 3D es para mostrar. Para medir, usa la panorámica o los cortes.")
       return
     }
     setNotice(null)
@@ -599,6 +604,7 @@ export function TomographyViewer({
               <TabsList aria-label="Vista">
                 <TabsTrigger value="panoramica">Panorámica</TabsTrigger>
                 <TabsTrigger value="cortes">Cortes</TabsTrigger>
+                <TabsTrigger value="3d">3D</TabsTrigger>
               </TabsList>
             </Tabs>
           )}
@@ -745,7 +751,7 @@ export function TomographyViewer({
               phoneView={viewOnly ? (shown === "corte" ? "corte" : "panoramica") : undefined}
             />
           ) : shown === "3d" ? (
-            <Tomography3D volume={volume} window={window} className="flex-1" />
+            <Tomography3D volume={volume} window={window} className="flex-1" focusOnOpen={expanded3d} />
           ) : (
             <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
               <ThreePlanes
@@ -754,6 +760,10 @@ export function TomographyViewer({
                 tool={viewOnly ? "ninguna" : tool}
                 saved={saved}
                 show3d={!viewOnly}
+                onExpand3d={() => {
+                  setExpanded3d(true)
+                  changeView("3d")
+                }}
               />
               <aside className="flex w-full shrink-0 flex-col gap-3 border-t border-slate-800 bg-[#0d131b] p-4 text-sm lg:w-72 lg:border-t-0 lg:border-l">
                 <MeasureList saved={saved} canWrite={canWrite} viewOnly={viewOnly} />
