@@ -2844,9 +2844,12 @@ export async function voidCommissionSettlement(
 // --- Lo cobrado de un tramo (Reportes) -----------------------------------------------------
 
 /**
- * Lo cobrado por profesional en un tramo: solo lo atendido, la misma base de
- * las comisiones (aplicaciones del tramo, netas de devoluciones con la regla
- * de las comisiones). Lo usan Finanzas y el Resumen de Reportes.
+ * Lo cobrado por profesional en un tramo: solo lo atendido, con la regla de
+ * «Lo cobrado por tratamiento» (ADR 0068): lo cobrado cuenta el día del cobro
+ * y lo devuelto se resta el día de la devolución. Comisiones cuenta lo que
+ * sigue en pie: tras una devolución de otro mes, lo que queda pasa al mes de la
+ * devolución. Por eso coinciden en el mismo mes y en la suma de los meses, no
+ * mes a mes. Lo usan Finanzas y el Resumen de Reportes.
  */
 export async function collectedByProfessional(
   tx: Db,
@@ -2859,7 +2862,7 @@ export async function collectedByProfessional(
 > {
   // Como «Lo cobrado por tratamiento»: lo cobrado cuenta el día del cobro y lo
   // devuelto se resta el día de la devolución. Así un mes cerrado no cambia y la
-  // suma de los meses es lo que de verdad quedó cobrado, como en Comisiones.
+  // suma de los meses es lo que de verdad quedó cobrado.
   const apps = await collectedApplications(tx, orgId, range.start, range.end, money, {
     branchId: range.branchId,
     returnsApart: true,
@@ -4280,11 +4283,9 @@ export async function listDebts(tx: Db, orgId: string, query: DebtListQuery) {
         .where(and(eq(patient.organizationId, orgId), inArray(patient.id, patientIds)))
     : []
   const docOf = new Map(docs.map((row) => [row.id, row]))
-  // Quien tiene a favor todo lo que debe no debe (decisión 22, como Reportes): no entra en la lista ni en la cuenta.
-  const all: DebtListRow[] = debts.flatMap((row) => {
+  const rows: DebtListRow[] = debts.map((row) => {
     const creditUsedCents = Math.max(0, Math.min(row.creditCents, row.totalCents))
-    if (row.totalCents - creditUsedCents <= 0) return []
-    return [{
+    return {
       ...row,
       dueCents: row.totalCents - creditUsedCents,
       creditUsedCents,
@@ -4292,13 +4293,32 @@ export async function listDebts(tx: Db, orgId: string, query: DebtListQuery) {
       docType: docOf.get(row.patientId)?.docType ?? null,
       docNumber: docOf.get(row.patientId)?.docNumber ?? null,
       nextAppointmentAt: null,
-    }]
+    }
   })
+  // Quien tiene a favor todo lo que debe, en todas las sedes, no debe (decisión 22, como Reportes y
+  // «Deben»): no entra en la lista ni en la cuenta. El saldo a favor se resta entero en cada sede, así
+  // que se mira lo de todas antes de dejar fuera a quien sí debe en otra.
+  const covered = rows.filter((row) => row.dueCents <= 0)
+  const owesSomewhere = new Set<string>()
+  if (covered.length > 0) {
+    const everywhere = await getDebts(tx, orgId, { patientIds: [...new Set(covered.map((row) => row.patientId))] })
+    const sums = new Map<string, { total: number; credit: number }>()
+    for (const row of everywhere) {
+      const key = `${row.patientId}|${row.currency}`
+      const sum = sums.get(key) ?? { total: 0, credit: row.creditCents }
+      sum.total += row.totalCents
+      sums.set(key, sum)
+    }
+    for (const [key, sum] of sums) if (sum.total > sum.credit) owesSomewhere.add(key)
+  }
+  const all = rows.filter((row) => row.dueCents > 0 || owesSomewhere.has(`${row.patientId}|${row.currency}`))
   const olderThan = (days: number) => all.filter((row) => (row.ageDays ?? 0) > days)
 
   const q = query.q?.trim() ?? ""
   const digits = q ? searchDigits(q) : ""
-  const listed = all
+  // «Atendidos hoy» de la Caja sí muestra a quien paga con su saldo a favor: hay que tocar «Cobrar»
+  // para aplicarlo, como cuenta Inicio («Por cobrar»).
+  const listed = (query.when === "hoy" ? rows : all)
     .filter((row) => query.when !== "hoy" || row.attendedTodayAt !== null)
     .filter((row) => !query.age || (row.ageDays ?? 0) > Number(query.age))
     .filter((row) =>

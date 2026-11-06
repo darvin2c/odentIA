@@ -589,8 +589,10 @@ function tableOf(result: ArgosQueryResult, zone: Parameters<typeof fillArgosSent
   // Los ids siguen en las filas (para abrir a la persona desde la pantalla), pero no son una columna que se muestre;
   // un total que la frase ya dice tampoco se repite en cada fila.
   const shownColumns = result.columns.filter((column) => !isArgosHiddenColumn(column.name) && !repeated.has(column.name))
-  const labels = argosColumnLabels(shownColumns.map((column) => column.name))
-  const columns = shownColumns.map((column, index) => ({ ...column, label: labels[index] ?? argosColumnLabel(column.name) }))
+  // Las etiquetas se numeran sobre todas las columnas, como el CSV y «Así lo calculé».
+  const allLabels = argosColumnLabels(result.columns.map((column) => column.name))
+  const labelOf = new Map(result.columns.map((column, index) => [column.name, allLabels[index] ?? argosColumnLabel(column.name)]))
+  const columns = shownColumns.map((column) => ({ ...column, label: labelOf.get(column.name) ?? argosColumnLabel(column.name) }))
   const display = result.rows.map((row) => Object.fromEntries(shownColumns.map((column) => [column.name, formatArgosValue(row[column.name] ?? null, column, zone)])))
   return { columns, rows: result.rows, display, truncated: result.truncated }
 }

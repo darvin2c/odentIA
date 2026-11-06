@@ -59,6 +59,9 @@ import { OVERDUE_DAYS } from "./report-debts.js"
 
 // --- Lo que se puede preguntar -------------------------------------------------------------
 
+/** Las citas con desenlace (vino, no vino o se canceló): la base de «No vinieron» y «Canceladas» en todas las pantallas. */
+const markedOf = (item: { attended: number; noShow: number; cancelled: number }): number => item.attended + item.noShow + item.cancelled
+
 export const FIGURE_AREAS = ["dinero", "pacientes", "agenda", "agente"] as const
 export type FigureArea = (typeof FIGURE_AREAS)[number]
 
@@ -239,7 +242,7 @@ export const REPORT_FIGURES: ReportFigure[] = [
     area: "dinero",
     name: "Lo cobrado",
     describes: "Cuánto se cobró, «cuánto gané» o «cuánto vendimos»: lo que pagaron los pacientes, las ventas, los ingresos; también cómo pagaron (efectivo, tarjeta, transferencia) o qué tratamiento dejó más.",
-    how: "Pagos del periodo menos lo anulado y lo devuelto, en la moneda de la clínica. Por profesional, solo lo de sus atenciones: la base de las comisiones.",
+    how: "Pagos del periodo menos lo anulado y lo devuelto, en la moneda de la clínica. Por profesional, solo lo de sus atenciones: lo cobrado cuenta el día del cobro y lo devuelto se resta el día de la devolución.",
     unit: "money",
     tab: "finanzas",
     better: "up",
@@ -453,7 +456,7 @@ export const REPORT_FIGURES: ReportFigure[] = [
     area: "pacientes",
     name: "Pacientes nuevos",
     describes: "Cuántos pacientes nuevos llegaron o vinieron por primera vez a atenderse.",
-    how: "Personas cuya primera cita atendida fue en el periodo.",
+    how: "Personas que vinieron por primera vez en el periodo: su primera cita atendida o su primera atención firmada sin cita.",
     unit: "count",
     noun: PATIENTS,
     tab: "pacientes",
@@ -647,7 +650,7 @@ export const REPORT_FIGURES: ReportFigure[] = [
     area: "agenda",
     name: "No vinieron",
     describes: "Cuántos pacientes faltaron a su cita: las inasistencias, el ausentismo, los que no se presentaron.",
-    how: "Citas a las que el paciente no vino ÷ citas que ya pasaron (atendidas, no vinieron, canceladas y las que pasaron sin marcar).",
+    how: "Citas a las que el paciente no vino ÷ citas con desenlace (atendidas, no vinieron y canceladas). Las que pasaron sin marcar no cuentan.",
     unit: "rate",
     noun: APPOINTMENTS,
     tab: "agenda",
@@ -656,16 +659,15 @@ export const REPORT_FIGURES: ReportFigure[] = [
     groups: ["mes", "sede", "profesional"],
     list: { key: "no_show", noun: APPOINTMENTS, feminine: true, count: (total) => total.part ?? 0, question: "¿Quiénes no vinieron?" },
     values: async (ctx, spans, branchId) =>
-      (await appointmentTotalsMany(ctx.tx, ctx.orgId, { ...branchScope(branchId), now: ctx.scope.now }, spans)).map((item) => rateValue(item.noShow, item.total)),
-    breakdown: (ctx, _group, branchId) =>
-      byProfessional(ctx, branchId, (row) => rateValue(row.noShow, row.attended + row.noShow + row.cancelled + row.unmarked)),
+      (await appointmentTotalsMany(ctx.tx, ctx.orgId, { ...branchScope(branchId), now: ctx.scope.now }, spans)).map((item) => rateValue(item.noShow, markedOf(item))),
+    breakdown: (ctx, _group, branchId) => byProfessional(ctx, branchId, (row) => rateValue(row.noShow, markedOf(row))),
   },
   {
     key: "canceladas",
     area: "agenda",
     name: "Canceladas",
     describes: "Cuántas citas se cancelaron.",
-    how: "Citas canceladas ÷ citas que ya pasaron (atendidas, no vinieron, canceladas y las que pasaron sin marcar).",
+    how: "Citas canceladas ÷ citas con desenlace (atendidas, no vinieron y canceladas). Las que pasaron sin marcar no cuentan.",
     unit: "rate",
     noun: APPOINTMENTS,
     tab: "agenda",
@@ -673,9 +675,8 @@ export const REPORT_FIGURES: ReportFigure[] = [
     groups: ["mes", "sede", "profesional"],
     list: { key: "cancelled", noun: APPOINTMENTS, feminine: true, count: (total) => total.part ?? 0, question: "¿Cuáles se cancelaron?" },
     values: async (ctx, spans, branchId) =>
-      (await appointmentTotalsMany(ctx.tx, ctx.orgId, { ...branchScope(branchId), now: ctx.scope.now }, spans)).map((item) => rateValue(item.cancelled, item.total)),
-    breakdown: (ctx, _group, branchId) =>
-      byProfessional(ctx, branchId, (row) => rateValue(row.cancelled, row.attended + row.noShow + row.cancelled + row.unmarked)),
+      (await appointmentTotalsMany(ctx.tx, ctx.orgId, { ...branchScope(branchId), now: ctx.scope.now }, spans)).map((item) => rateValue(item.cancelled, markedOf(item))),
+    breakdown: (ctx, _group, branchId) => byProfessional(ctx, branchId, (row) => rateValue(row.cancelled, markedOf(row))),
   },
   {
     key: "agenda_ocupada",

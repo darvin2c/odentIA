@@ -475,7 +475,7 @@ async function overdueCollections(tx: Db, orgId: string, zone: OrgLocale, days: 
       group by p.id, pp.display_name, p.organization_id, c.currency
       -- Días de calendario en la zona de la clínica, como Finanzas › Deudas y Reportes.
       having ((now() at time zone ${debtZoneSql(orgId)})::date - (min(c.created_at) at time zone ${debtZoneSql(orgId)})::date) > ${days}
-        ${fresh(scope, sql`(p.id::text || ':' || c.currency || ':' || to_char(min(c.created_at), 'YYYY-MM-DD'))`, sql`min(c.created_at) + make_interval(days => ${days})`)}
+        ${fresh(scope, sql`(p.id::text || ':' || c.currency || ':' || to_char(min(c.created_at), 'YYYY-MM-DD'))`, sql`(((min(c.created_at) at time zone ${debtZoneSql(orgId)})::date + make_interval(days => ${days} + 1)) at time zone ${debtZoneSql(orgId)})`)}
     ), owed as materialized (
       select d.*, ${credit} as credit from debt d
     )

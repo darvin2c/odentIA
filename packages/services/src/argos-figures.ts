@@ -508,7 +508,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     name: "Pacientes nuevos",
     describes:
       "Pacientes atendidos por primera vez; de una sede, los que tuvieron su primera cita en ella; por cómo nos conocieron.",
-    how: "Personas cuya primera cita atendida fue en el periodo; por sede, la sede de esa primera cita.",
+    how: "Personas que vinieron por primera vez en el periodo (su primera cita atendida o su primera atención firmada sin cita); por sede, la sede de esa primera vez.",
     unit: "cantidad",
     column: "pacientes_nuevos",
     time: "instante",
@@ -526,8 +526,8 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
   {
     key: "pacientes_atendidos",
     name: "Pacientes atendidos",
-    describes: "Cuántos pacientes distintos se atendieron; por tipo: nuevo (su primera cita atendida fue en el periodo) o recurrente.",
-    how: "Pacientes distintos con una cita atendida en el periodo; nuevos los de primera cita atendida en el periodo y recurrentes los demás.",
+    describes: "Cuántos pacientes distintos se atendieron; por tipo: nuevo (vino por primera vez en el periodo) o recurrente.",
+    how: "Pacientes distintos con una cita atendida en el periodo; nuevos los que vinieron por primera vez en el periodo y recurrentes los demás.",
     unit: "cantidad",
     column: "pacientes",
     time: "instante",
@@ -536,7 +536,8 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     sources: [
       {
         views: ["citas"],
-        // Nuevo si su primera cita atendida, de todas, cae en el periodo (como pacientes.primera_atencion_en).
+        // Nuevo si su primera cita atendida, de todas, cae en el periodo. Aquí solo se ven citas:
+        // `pacientes.primera_atencion_en` cuenta además la atención firmada sin cita.
         rows: (r) =>
           `select inicio as t, dia, hora, sede, profesional, servicio, paciente_id, case when min(inicio) over (partition by paciente_id) >= ${r.desde} then 'nuevo' else 'recurrente' end as tipo from citas where estado = 'atendida'`,
         cuts: [...WHEN, "hora", "sede", "profesional", "servicio", "tipo"],
@@ -547,7 +548,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     key: "valor_paciente_nuevo",
     name: "Lo que paga un paciente nuevo",
     describes: "De los pacientes nuevos del periodo, cuánto pagó cada uno desde que llegó hasta hoy, en promedio; por cómo nos conocieron o sede.",
-    how: "Lo pagado hasta hoy por cada paciente cuya primera cita atendida fue en el periodo, en promedio; por sede, la de esa primera cita.{valor_del_dia}",
+    how: "Lo pagado hasta hoy por cada paciente que vino por primera vez en el periodo, en promedio; por sede, la de esa primera vez.{valor_del_dia}",
     unit: "dinero",
     column: "por_paciente_dinero",
     time: "instante",
@@ -1109,7 +1110,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     key: "asistieron",
     name: "Asistieron",
     describes: "La asistencia: qué parte de las citas que ya pasaron se atendió.",
-    how: "Citas atendidas entre las citas del periodo que ya pasaron, canceladas incluidas.",
+    how: "Citas atendidas entre las citas del periodo con desenlace (atendidas, no vinieron y canceladas); las que pasaron sin marcar no cuentan.",
     unit: "pct",
     column: "asistieron_pct",
     time: "instante",
@@ -1118,7 +1119,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     sources: [
       {
         views: ["citas"],
-        rows: "select inicio as t, dia, hora, sede, profesional, servicio, (estado = 'atendida')::int as a, ya_paso::int as n from citas",
+        rows: "select inicio as t, dia, hora, sede, profesional, servicio, (estado = 'atendida')::int as a, (estado in ('atendida', 'no_vino', 'cancelada'))::int as n from citas",
         cuts: [...WHEN, "hora", "sede", "profesional", "servicio"],
       },
     ],
@@ -1127,7 +1128,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     key: "no_vinieron",
     name: "No vinieron",
     describes: "La inasistencia: qué parte de las citas que ya pasaron terminó en «no vino».",
-    how: "Citas que terminaron en «no vino» entre las citas del periodo que ya pasaron.",
+    how: "Citas que terminaron en «no vino» entre las citas del periodo con desenlace (atendidas, no vinieron y canceladas); las que pasaron sin marcar no cuentan.",
     unit: "pct",
     column: "no_vinieron_pct",
     time: "instante",
@@ -1137,7 +1138,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     sources: [
       {
         views: ["citas"],
-        rows: "select inicio as t, dia, dia_semana, hora, sede, profesional, servicio, (estado = 'no_vino')::int as a, ya_paso::int as n from citas",
+        rows: "select inicio as t, dia, dia_semana, hora, sede, profesional, servicio, (estado = 'no_vino')::int as a, (estado in ('atendida', 'no_vino', 'cancelada'))::int as n from citas",
         cuts: [...WHEN, "dia_semana", "hora", "sede", "profesional", "servicio"],
       },
     ],
@@ -1146,7 +1147,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     key: "canceladas",
     name: "Canceladas",
     describes: "Qué parte de las citas que ya pasaron se canceló.",
-    how: "Citas canceladas entre las citas del periodo que ya pasaron.",
+    how: "Citas canceladas entre las citas del periodo con desenlace (atendidas, no vinieron y canceladas); las que pasaron sin marcar no cuentan.",
     unit: "pct",
     column: "canceladas_pct",
     time: "instante",
@@ -1156,7 +1157,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     sources: [
       {
         views: ["citas"],
-        rows: "select inicio as t, dia, dia_semana, hora, sede, profesional, servicio, (estado = 'cancelada')::int as a, ya_paso::int as n from citas",
+        rows: "select inicio as t, dia, dia_semana, hora, sede, profesional, servicio, (estado = 'cancelada')::int as a, (estado in ('atendida', 'no_vino', 'cancelada'))::int as n from citas",
         cuts: [...WHEN, "dia_semana", "hora", "sede", "profesional", "servicio"],
       },
     ],

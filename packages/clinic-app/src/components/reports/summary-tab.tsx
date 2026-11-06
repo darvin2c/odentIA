@@ -394,7 +394,7 @@ function Professionals({ query }: { query: ReportQuery }) {
           </TableBody>
         </Table>
       </div>
-      <p className="text-[13px] text-muted-foreground">{legend} Cobrado es lo de sus atenciones, la misma base de las comisiones.</p>
+      <p className="text-[13px] text-muted-foreground">{legend} Cobrado es lo de sus atenciones: cuenta el día del cobro, y lo devuelto se resta el día que se devolvió.</p>
     </ReportCard>
   )
 }

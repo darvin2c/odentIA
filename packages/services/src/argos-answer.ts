@@ -252,6 +252,8 @@ export function argosColumnLabel(name: string): string {
  * «Cobrado (2)». El nombre de la columna no cambia: lo usan los huecos de la frase.
  */
 export function argosColumnLabels(names: readonly string[]): string[] {
+  // Se numera sobre todas las columnas del resultado, también las que no se muestran:
+  // así la pantalla, el CSV y «Así lo calculé» dicen el mismo «(2)».
   const seen = new Map<string, number>()
   return names.map((name) => {
     const label = argosColumnLabel(name)

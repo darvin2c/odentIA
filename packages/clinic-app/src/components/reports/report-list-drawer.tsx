@@ -87,7 +87,7 @@ const LISTS: Record<ReportListKey, ListCopy> = {
   new_patients: {
     title: "Pacientes nuevos",
     noun: { one: "persona", many: "personas" },
-    how: (period) => `Personas cuya primera cita atendida fue en ${period}.`,
+    how: (period) => `Personas que vinieron por primera vez en ${period}: su primera cita atendida o su primera atención firmada sin cita.`,
     where: { to: "/people", label: "Ir a Pacientes" },
     showNext: false,
   },

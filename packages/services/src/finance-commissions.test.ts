@@ -335,7 +335,7 @@ it("el mes en Reportes concilia cobrado, gastos y deuda de la sede, y el cobro c
   })
 })
 
-it("después de «Devolver», Por profesional cuadra con Comisiones: lo cobrado el día del cobro y lo devuelto el día que se devolvió", async () => {
+it("después de «Devolver», Por profesional cuenta lo cobrado el día del cobro y lo devuelto el día que se devolvió, y en el mismo mes cuadra con Comisiones", async () => {
   const f = await clinicalFixture()
   await ownerDb.insert(member).values({ id: randomUUID(), organizationId: "org_a", userId: f.actor, role: "clinician", createdAt: new Date() })
   const branchId = await seedBranch()
@@ -390,12 +390,15 @@ it("después de «Devolver», Por profesional cuadra con Comisiones: lo cobrado 
   expect(monthly.baseCents).toBe(20000)
   expect(await professional("este_mes")).toBe(20000)
 
-  // Cobrado el mes pasado y devuelto este: el mes pasado no cambia (300) y este resta lo devuelto (−100).
+  // Cobrado hace 35 días (otro mes) y devuelto hoy: ese mes no cambia (300) y este resta lo devuelto (−100).
   // Antes, el reemplazo volvía a contar este mes como cobrado.
   const second = await attended("Corona con devolución")
   const earlier = await collect(second.id)
-  const lastMonth = sql`now() - interval '35 days'`
-  await ownerDb.execute(sql`update patient_payment_application set created_at = ${lastMonth} where payment_id = ${earlier.payments[0]!.id}`)
+  const shifted = new Date(Date.now() - 35 * 86_400_000)
+  await ownerDb.execute(sql`update patient_payment_application set created_at = ${shifted.toISOString()}::timestamptz where payment_id = ${earlier.payments[0]!.id}`)
+  const shiftedMonth = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima", year: "numeric", month: "2-digit" }).format(shifted)
+  expect(await professional(shiftedMonth)).toBe(30000)
   await giveBack(earlier.ticket.id)
+  expect(await professional(shiftedMonth)).toBe(30000)
   expect(await professional("este_mes")).toBe(20000 - 10000)
 })

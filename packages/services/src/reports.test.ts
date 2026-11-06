@@ -24,6 +24,7 @@ import {
   getBudgetDetail,
   recommendBudgetOption,
 } from "./budgets.js"
+import { runArgosQuery } from "./argos-query.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { addPlanItem } from "./plan.js"
 import { createPromotion } from "./promotions.js"
@@ -448,4 +449,12 @@ it("pacientes nuevos: también quien vino por primera vez sin cita, con su atenc
   expect(patients.newPatients.current).toBe(1)
   const list = await c.run((tx) => getReportList(tx, c.orgId, { period: "2026-09", list: "new_patients" }, NOW))
   expect(list.rows.map((row) => row.patientId)).toEqual([walkIn])
+  // Argos lo cuenta igual: su vista de pacientes trae esa primera vez (migración 0047).
+  const seen = await runArgosQuery(appDb, {
+    orgId: c.orgId,
+    memberRole: "owner",
+    query: `select primera_atencion_en as first, atenciones as visits from pacientes where paciente_id = '${walkIn}'`,
+  })
+  expect(seen.rows[0]?.first).not.toBeNull()
+  expect(seen.rows[0]?.visits).toBe(1)
 })

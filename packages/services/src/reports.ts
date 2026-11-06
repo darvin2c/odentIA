@@ -227,8 +227,9 @@ export async function getReportAdvice(
   const noShows = found("seguimiento_no_asistencia")
   const appointments = await appointmentTotals(tx, orgId, scope, scope.window)
   const before = await appointmentTotals(tx, orgId, scope, scope.window.previous)
-  const rate = percent(appointments.noShow, appointments.total)
-  const previousRate = percent(before.noShow, before.total)
+  // La misma base que la tarjeta: las citas con desenlace.
+  const rate = percent(appointments.noShow, appointments.attended + appointments.noShow + appointments.cancelled)
+  const previousRate = percent(before.noShow, before.attended + before.noShow + before.cancelled)
   const worth = rate !== null && (rate >= NO_SHOW_ALERT_RATE || (previousRate !== null && rate - previousRate >= NO_SHOW_ALERT_RISE))
   const controls = found("recordatorio_control")
   if (noShows && worth) notices.push(notice("agenda", noShows, { rate, previousRate }))

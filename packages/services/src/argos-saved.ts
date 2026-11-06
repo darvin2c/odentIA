@@ -146,6 +146,8 @@ export async function listArgosPins(tx: Db, orgId: string): Promise<Array<{ id: 
  * demás CSV de Reportes, «AAAA-MM-DD HH:MM» en la zona de la clínica.
  */
 export function argosAnswerCsv(title: string, day: string, result: ArgosQueryResult, timezone: string): CsvFile {
+  const allLabels = argosColumnLabels(result.columns.map((column) => column.name))
+  const labelOf = new Map(result.columns.map((column, index) => [column.name, allLabels[index] ?? column.name]))
   const columns = result.columns.filter((column) => !isArgosHiddenColumn(column.name))
   const moment = new Intl.DateTimeFormat("sv-SE", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
   const cell = (value: string | number | boolean | null | undefined, kind: string) =>
@@ -153,7 +155,7 @@ export function argosAnswerCsv(title: string, day: string, result: ArgosQueryRes
   return {
     filename: csvFileName(title, day),
     body: toCsv(
-      argosColumnLabels(columns.map((column) => column.name)),
+      columns.map((column) => labelOf.get(column.name) ?? column.name),
       result.rows.map((row) => columns.map((column) => cell(row[column.name], column.kind))),
     ),
   }

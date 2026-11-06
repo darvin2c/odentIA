@@ -275,11 +275,14 @@ describe("quién debe, igual en Deudas y en Reportes", () => {
     const listed = await f.run((tx) => listDebts(tx, "org_a", { branchId }))
     expect(listed.data.map((row) => row.patientId)).not.toContain(luis.id)
     expect(listed.summary.people).toBe(0)
+    // En la Caja, «Atendidos hoy» sí lo trae: hay que tocar «Cobrar» para aplicar su adelanto.
+    const today = await f.run((tx) => listDebts(tx, "org_a", { branchId, when: "hoy" }))
+    expect(today.data.find((row) => row.patientId === luis.id)).toMatchObject({ dueCents: 0, creditUsedCents: 9000 })
 
     // Anotado hace 30 días a las 00:01 de Lima: son 30 días, no «más de 30», en Deudas y en Reportes.
     const rosa = await secondPatient("Rosa Treinta", "47031288")
-    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date())
-    const day = new Date(Date.parse(`${today}T12:00:00Z`) - 30 * 86_400_000).toISOString().slice(0, 10)
+    const limaToday = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date())
+    const day = new Date(Date.parse(`${limaToday}T12:00:00Z`) - 30 * 86_400_000).toISOString().slice(0, 10)
     await ownerDb.insert(patientCharge).values({
       organizationId: "org_a",
       patientId: rosa.id,

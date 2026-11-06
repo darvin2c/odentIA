@@ -2,8 +2,9 @@ import { type SQL, sql } from "drizzle-orm"
 
 /**
  * La primera vez que vino cada persona: su primera cita atendida o su primera
- * atención firmada sin cita, lo que pasó antes. La misma regla que «Vinieron»
- * en el embudo de Pacientes (`funnelSql`). Las citas de prueba no cuentan.
+ * atención firmada sin cita, lo que pasó antes; la vista `argos.pacientes` cuenta
+ * igual (migración 0047). «Vinieron» del embudo (`funnelSql`) también acepta una
+ * atención firmada. Las citas de prueba no cuentan.
  * `first_visit(id, patient_id, starts_at, branch_id, service_name, professional_user_id)`.
  */
 export function firstVisitSql(orgId: string): SQL {

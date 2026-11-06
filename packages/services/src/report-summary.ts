@@ -204,8 +204,8 @@ export async function getReportSummary(tx: Db, orgId: string, query: ReportQuery
 
 /**
  * Reportes › Resumen › Por profesional: citas del periodo, presupuestos que
- * presentó y lo cobrado de lo que atendió (la misma base de las comisiones,
- * `collectedByProfessional`). Va aparte del Resumen para que sus cifras de
+ * presentó y lo cobrado de lo que atendió (`collectedByProfessional`: lo
+ * cobrado el día del cobro y lo devuelto el día de la devolución). Va aparte del Resumen para que sus cifras de
  * arriba no esperen a esta tabla, que es la consulta más pesada.
  */
 export async function getReportProfessionals(tx: Db, orgId: string, query: ReportQuery, now: Date = new Date()) {
