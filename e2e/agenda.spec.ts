@@ -4,10 +4,17 @@ import type { Page } from "@playwright/test"
 import { api, call, expect, test, type OwnerFixture } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 
-/** Hoy en Lima como «yyyy-mm-dd» y un instante a las 18:00 Lima (UTC−5 fijo). */
+/**
+ * Una cita de hoy en Lima (UTC−5 fijo): a las 18:00 o, si ya pasaron, dentro de
+ * 10 minutos. La reserva no admite una hora que ya pasó, y «Llegó» es de hoy.
+ */
 function limaToday(): { date: string; startsAt: string; endsAt: string } {
-  const date = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date())
-  return { date, startsAt: `${date}T23:00:00.000Z`, endsAt: `${date}T23:45:00.000Z` }
+  const lima = (at: number) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date(at))
+  const now = Date.now()
+  const sixPm = Date.parse(`${lima(now)}T23:00:00.000Z`)
+  const step = 5 * 60_000
+  const start = Math.max(sixPm, Math.ceil((now + 10 * 60_000) / step) * step)
+  return { date: lima(start), startsAt: new Date(start).toISOString(), endsAt: new Date(start + 45 * 60_000).toISOString() }
 }
 
 /**
@@ -56,7 +63,7 @@ async function prepareAppointment(owner: OwnerFixture): Promise<{
   )
   const { date, startsAt, endsAt } = limaToday()
   // Horario explícito del profesional (la reserva estricta lo exige): el día
-  // de hoy en Lima de 17:00 a 20:00 cubre la cita de las 18:00.
+  // de hoy en Lima, entero, cubre la cita aunque sea tarde.
   const weekday = new Date(`${date}T17:00:00Z`).getUTCDay()
   await call(
     owner.page,
@@ -66,7 +73,7 @@ async function prepareAppointment(owner: OwnerFixture): Promise<{
     {
       branchId: owner.branchId,
       professionalUserId: owner.user.id,
-      rules: [{ weekday, startMin: 17 * 60, endMin: 20 * 60 }],
+      rules: [{ weekday, startMin: 0, endMin: 24 * 60 }],
     },
     200,
   )
@@ -245,7 +252,9 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
   await card.click()
   await expect(page.getByText("Por confirmar", { exact: true }).last()).toBeVisible()
   await shot("detalle-por-confirmar")
+  // «Confirmar cita» pregunta cómo confirmó y lo deja anotado.
   await page.getByRole("button", { name: "Confirmar cita" }).click()
+  await page.getByRole("menuitem", { name: "Confirmó por teléfono" }).click()
   await expect(page.getByRole("button", { name: "Confirmar cita" })).toHaveCount(0)
   await expect(page.getByText("Confirmada", { exact: true }).last()).toBeVisible()
   await page.getByRole("button", { name: "Cerrar" }).click()

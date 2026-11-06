@@ -87,6 +87,8 @@ const statusInput = z.object({
   cancelNote: z.string().max(500).optional(),
   // Lo avisó por teléfono: ya lo sabe, no hace falta otro mensaje.
   notice: z.literal(false).optional(),
+  // Cómo confirmó la persona, cuando lo anota el equipo: queda en la actividad de la cita.
+  via: z.enum(["telefono", "en_persona", "mensaje"]).optional(),
 })
 
 const roomInput = z.object({
@@ -408,7 +410,7 @@ export function createAppointmentsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
-        const created = await createAppointment(tx, orgId, userId, parsed.data)
+        const created = await createAppointment(tx, orgId, userId, parsed.data, { requested: true })
         // Si el recordatorio le llegará: «Carmen no recibirá el recordatorio: aún no tiene WhatsApp».
         return { ...created, reminderReach: await appointmentReminderReach(tx, orgId, created.patientId) }
       }),
@@ -510,6 +512,7 @@ export function createAppointmentsRoute(deps: CrmDeps) {
         setAppointmentStatus(tx, orgId, userId, c.req.param("id"), parsed.data.status, {
           cancelReason: parsed.data.cancelReason,
           cancelNote: parsed.data.cancelNote,
+          ...(parsed.data.via ? { via: parsed.data.via } : {}),
           ...(parsed.data.notice === false ? { notice: false } : {}),
         }),
       ),

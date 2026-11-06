@@ -2,6 +2,10 @@ import {
   Button,
   buttonVariants,
   cn,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
   FieldLabel,
   RadioGroup,
   RadioGroupItem,
@@ -65,6 +69,13 @@ import { appWords, upperFirst } from "../../lib/product-words"
 export type AppointmentDrawerMode = "view" | "move" | "cancel"
 
 type CancelReason = "paciente" | "clinica" | "otro"
+/** Cómo confirmó la persona, cuando lo anota el equipo. */
+type ConfirmVia = "telefono" | "en_persona" | "mensaje"
+const CONFIRM_VIAS: ReadonlyArray<{ via: ConfirmVia; label: string }> = [
+  { via: "telefono", label: "Confirmó por teléfono" },
+  { via: "en_persona", label: "Confirmó en persona" },
+  { via: "mensaje", label: "Confirmó por mensaje" },
+]
 const CANCEL_REASONS: Array<{ id: CancelReason; label: string }> = [
   { id: "paciente", label: "Lo pidió el paciente" },
   { id: "clinica", label: "Lo pidió la clínica" },
@@ -137,7 +148,8 @@ function RealAppointmentDrawer({
   onClose: () => void
   onChanged: () => Promise<void>
   /** Reagendar a quien canceló o no vino: abre «Nueva cita» con la persona. */
-  onRebook: (patient: { id: string; name: string }) => void
+  /** Reservar otra: con el servicio y el profesional de esta, si se pasan. */
+  onRebook: (patient: { id: string; name: string }, from?: { serviceId?: string | null; professionalUserId?: string | null }) => void
 }) {
   const [mode, setMode] = React.useState<AppointmentDrawerMode | "edit">(initialMode)
   // El rechazo de una acción del cajón (confirmar, «No vino»); los formularios dicen el suyo.
@@ -179,7 +191,7 @@ function RealAppointmentDrawer({
 
   // ----- Cancelar -----
   const setStatus = useMutation({
-    mutationFn: (input: { status: AppointmentStatus; cancelReason?: CancelReason; cancelNote?: string }) =>
+    mutationFn: (input: { status: AppointmentStatus; cancelReason?: CancelReason; cancelNote?: string; via?: ConfirmVia }) =>
       apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${appointment.id}/status`, {
         method: "POST",
         body: JSON.stringify(input),
@@ -189,6 +201,19 @@ function RealAppointmentDrawer({
       else
         toast.success(STATUS_DONE[result.data.status], {
           description: result.data.notice?.queued ? "El agente le avisa y le ofrece otra fecha." : undefined,
+          // Cancelada: se ofrece otro día con lo mismo (servicio y profesional), sin volver a elegirlo.
+          ...(result.data.status === "cancelada" && canWrite
+            ? {
+                action: {
+                  label: "Reservar otro día",
+                  onClick: () =>
+                    onRebook(
+                      { id: appointment.patientId, name: appointment.patientName },
+                      { serviceId: appointment.serviceId, professionalUserId: appointment.professionalUserId },
+                    ),
+                },
+              }
+            : {}),
         })
       setActionError("")
       await onChanged()
@@ -505,18 +530,30 @@ function RealAppointmentDrawer({
                 </SubmitButton>
               ) : null}
               {canWrite && appointment.visit === "por_confirmar" && !started ? (
-                <SubmitButton
-                  className="h-11"
-                  variant={isToday ? "outline" : "default"}
-                  disabled={busy}
-                  pending={setStatus.isPending && setStatus.variables?.status === "confirmada"}
-                  onClick={() => changeStatus("confirmada")}
-                >
-                  {setStatus.isPending && setStatus.variables?.status === "confirmada" ? null : (
+                // Se anota cómo confirmó: queda en la actividad de la cita.
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={<Button className="h-11" variant={isToday ? "outline" : "default"} disabled={busy} />}
+                  >
                     <Check aria-hidden />
-                  )}
-                  Confirmar cita
-                </SubmitButton>
+                    {setStatus.isPending && setStatus.variables?.status === "confirmada" ? "Confirmando…" : "Confirmar cita"}
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    {CONFIRM_VIAS.map((option) => (
+                      <DropdownMenuItem
+                        key={option.via}
+                        onClick={() =>
+                          setStatus.mutate(
+                            { status: "confirmada", via: option.via },
+                            { onError: (cause) => setActionError(submitErrorMessage(cause)) },
+                          )
+                        }
+                      >
+                        {option.label}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
               ) : null}
               {/* Ya pasó su hora sin cerrarse: se registra la atención o se marca que no vino. */}
               {unclosed && canAttend ? (
@@ -585,7 +622,11 @@ function RealAppointmentDrawer({
                 </SubmitButton>
               ) : null}
               {canWrite && (appointment.status === "no_asistio" || appointment.status === "cancelada") ? (
-                <Button variant="outline" className="h-11 bg-card" onClick={() => onRebook(patient)}>
+                <Button
+                  variant="outline"
+                  className="h-11 bg-card"
+                  onClick={() => onRebook(patient, { serviceId: appointment.serviceId, professionalUserId: appointment.professionalUserId })}
+                >
                   Reagendar
                 </Button>
               ) : null}
