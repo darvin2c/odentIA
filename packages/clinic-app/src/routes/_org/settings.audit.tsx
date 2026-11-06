@@ -174,7 +174,8 @@ function TeamActivityPage() {
           return (
             <span className="flex min-w-0 flex-col">
               <span className="font-medium">{row.original.what}</span>
-              {also ? <span className="text-sm text-muted-foreground">{also}</span> : null}
+              {/* Lo demás se parte en renglones: no empuja «Sobre qué» fuera de la tabla. */}
+              {also ? <span className="max-w-md whitespace-normal text-sm text-muted-foreground">{also}</span> : null}
             </span>
           )
         },
@@ -182,6 +183,8 @@ function TeamActivityPage() {
       {
         id: "subject",
         header: "Sobre qué",
+        // En el teléfono también se ve: es lo que responde «¿de quién?».
+        meta: { view: { primary: true } },
         cell: ({ row }) => <SubjectCell subject={row.original.subject} />,
       },
       {

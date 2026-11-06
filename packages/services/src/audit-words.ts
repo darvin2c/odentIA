@@ -660,11 +660,16 @@ export function leadAuditIndex(actions: readonly string[]): number {
     const index = actions.indexOf(lead)
     if (index >= 0) return index
   }
-  const own = actions.findIndex((action) => !FOLLOWER_ACTIONS.has(action))
-  return own >= 0 ? own : 0
+  // Entre los demás, siempre el mismo: los registros de un instante no tienen orden propio.
+  let lead = -1
+  actions.forEach((action, index) => {
+    if (FOLLOWER_ACTIONS.has(action)) return
+    if (lead < 0 || action.localeCompare(actions[lead]!) < 0) lead = index
+  })
+  return lead >= 0 ? lead : 0
 }
 
-/** Lo demás de esa acción, con palabras y sin repetir: «Aplicó un pago a un cargo», 2 veces. */
+/** Lo demás de esa acción, con palabras, sin repetir y en un orden fijo: «Aplicó un pago a un cargo», 2 veces. */
 export function alsoAuditWords(actions: readonly string[], lead: number): Array<{ what: string; count: number }> {
   const leadWhat = phraseOf(actions[lead] ?? "").what
   const counts = new Map<string, number>()
@@ -675,5 +680,5 @@ export function alsoAuditWords(actions: readonly string[], lead: number): Array<
     if (what === leadWhat) return
     counts.set(what, (counts.get(what) ?? 0) + 1)
   })
-  return [...counts].map(([what, count]) => ({ what, count }))
+  return [...counts].map(([what, count]) => ({ what, count })).sort((a, b) => a.what.localeCompare(b.what, "es"))
 }
