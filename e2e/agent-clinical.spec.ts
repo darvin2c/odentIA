@@ -11,6 +11,59 @@ const overflow = (page: Page) =>
 const DICTATION =
   "Viene por dolor al masticar del lado derecho. En la dieciséis hay caries en dentina. En la dieciséis hacemos endodoncia. Se realizó apertura cameral sin complicaciones. Control en 6 meses."
 
+declare global {
+  interface Window {
+    /** El reconocimiento de voz simulado de la prueba (ver `fakeSpeech`). */
+    __speech?: { onresult: ((event: unknown) => void) | null; onerror: ((event: unknown) => void) | null; onend: (() => void) | null }
+    /** Cuántas veces se abrió la escucha simulada. */
+    __starts?: number
+  }
+}
+
+/**
+ * El micrófono no se puede probar aquí: el navegador de la prueba recibe un reconocimiento de voz
+ * simulado que entrega lo que la prueba le pasa. No acredita cómo oye un navegador real.
+ * Se instala antes de abrir la página.
+ */
+async function fakeSpeech(page: Page) {
+  await page.addInitScript(() => {
+    class FakeRecognition {
+      onresult: ((event: unknown) => void) | null = null
+      onend: (() => void) | null = null
+      onerror: ((event: unknown) => void) | null = null
+      start() {
+        window.__speech = this
+        window.__starts = (window.__starts ?? 0) + 1
+      }
+      stop() {
+        this.onend?.()
+      }
+    }
+    Object.assign(window, { SpeechRecognition: FakeRecognition, webkitSpeechRecognition: FakeRecognition })
+  })
+  return {
+    say: (text: string, final = true) =>
+      page.evaluate(
+        ([heard, isFinal]) => {
+          const speech = window.__speech
+          if (!speech?.onresult) throw new Error("La página no está escuchando")
+          speech.onresult({ resultIndex: 0, results: [Object.assign([{ transcript: heard }], { isFinal })] })
+        },
+        [text, final] as const,
+      ),
+    /** El navegador corta la escucha con «network», como Chrome tras unos 5 minutos de habla seguida. */
+    cutByNetwork: () =>
+      page.evaluate(() => {
+        const speech = window.__speech
+        if (!speech?.onerror || !speech.onend) throw new Error("La página no está escuchando")
+        speech.onerror({ error: "network" })
+        speech.onend()
+      }),
+    /** Cuántas veces se abrió la escucha. */
+    starts: () => page.evaluate(() => window.__starts ?? 0),
+  }
+}
+
 test("atender sin motivo: ningún formulario tapa a Clío y el motivo se pide al firmar", async ({ owner }, info) => {
   const { page, org } = owner
   const patient = await call<{ id: string }>(page, "POST", "/api/patients", org.slug, {
@@ -128,30 +181,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await expect(page.getByRole("switch", { name: "Apagar a Clío" })).toBeChecked()
 
   // --- En la atención: escribir lo dictado, revisar dentro de cada bloque y confirmar ---
-  // El micrófono no se puede probar aquí: el navegador de la prueba recibe un reconocimiento de voz
-  // simulado que entrega las frases que la prueba le pasa. No acredita cómo oye un navegador real.
-  await page.addInitScript(() => {
-    class FakeRecognition {
-      onresult: ((event: unknown) => void) | null = null
-      onend: (() => void) | null = null
-      onerror: ((event: unknown) => void) | null = null
-      start() {
-        ;(window as unknown as { __speech: FakeRecognition }).__speech = this
-      }
-      stop() {
-        this.onend?.()
-      }
-    }
-    Object.assign(window, { SpeechRecognition: FakeRecognition, webkitSpeechRecognition: FakeRecognition })
-  })
-  const say = (text: string, final = true) =>
-    page.evaluate(
-      ([heard, isFinal]) => {
-        const speech = (window as unknown as { __speech: { onresult: (event: unknown) => void } }).__speech
-        speech.onresult({ resultIndex: 0, results: [Object.assign([{ transcript: heard }], { isFinal })] })
-      },
-      [text, final] as const,
-    )
+  const { say } = await fakeSpeech(page)
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}/encounters/${encounter.id}`))
   const idle = page.getByRole("region", { name: "Dictado de la atención" })
   const review = page.getByRole("region", { name: "Sugerencias por revisar" })
@@ -391,6 +421,55 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
     .where(and(eq(member.organizationId, org.id), eq(member.userId, owner.user.id)))
   await gotoHydrated(page, tenant(org.slug, "/agent/asistente-clinico"))
   await expect(page.getByRole("heading", { level: 1, name: "Inicio" })).toBeVisible()
+})
+
+test("dictado: el corte del servicio de voz del navegador no pausa; si la red no vuelve, se pausa y se dice", async ({ owner }, info) => {
+  const { page, org } = owner
+  const patient = await call<{ id: string }>(page, "POST", "/api/patients", org.slug, {
+    submissionId: crypto.randomUUID(),
+    answers: { demographics: { displayName: "Elena Salas", docType: "DNI", docNumber: "41236587" }, respondent: "staff", privacyAccepted: false },
+    contacts: [],
+  }, 201)
+  const encounter = await call<{ id: string }>(page, "POST", `/api/patients/${patient.id}/encounters`, org.slug, { reason: "Consulta" }, 201)
+  await call(page, "PUT", "/api/agent/config", org.slug, { clinicalAssistantEnabled: true })
+  const speech = await fakeSpeech(page)
+  // «Lo dictado» se abre al lado desde 1280 px: la misma ventana que las demás atenciones de este archivo.
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}/encounters/${encounter.id}`))
+  await page.getByRole("region", { name: "Dictado de la atención" }).getByRole("button", { name: "Dictar", exact: true }).click()
+  const live = page.getByRole("region", { name: "Dictado en curso" })
+  const lost = page.getByRole("alert").filter({ hasText: "No pude seguir escuchando" })
+  await expect(live).toContainText("Escuchando")
+  const opened = await speech.starts()
+
+  // Chrome cierra la conexión con su servicio de voz tras unos 5 minutos de habla seguida y avisa
+  // «network»: la escucha se reabre sola, cada vez que pasa mientras se sigue oyendo.
+  await speech.say("en la dieciséis hay caries", false)
+  await speech.cutByNetwork()
+  await expect.poll(speech.starts).toBe(opened + 1)
+  await expect(live).toContainText("Escuchando")
+  await expect(lost).toHaveCount(0)
+  // Lo que se estaba oyendo al cortar no se pierde: entra a lo dictado y ya no queda como parcial.
+  const backup = page.getByRole("region", { name: "Lo dictado" })
+  await expect(backup).toContainText("en la dieciséis hay caries")
+  await expect(backup.getByRole("status")).toHaveText("Escuchando…")
+  await info.attach("dictado-tras-corte", { body: await page.screenshot(), contentType: "image/png" })
+  await speech.say("y hacemos endodoncia", false)
+  await speech.cutByNetwork()
+  await expect.poll(speech.starts).toBe(opened + 2)
+  await expect(live).toContainText("Escuchando")
+
+  // Si la escucha reabierta vuelve a cortarse sin haber oído nada, la red no volvió: se pausa y se dice.
+  await speech.cutByNetwork()
+  await expect(live).toContainText("En pausa")
+  await expect(lost).toBeVisible()
+  expect(await speech.starts()).toBe(opened + 2)
+  await info.attach("dictado-sin-red", { body: await page.screenshot(), contentType: "image/png" })
+
+  // Reanudar vuelve a escuchar y quita el aviso.
+  await live.getByRole("button", { name: "Reanudar el dictado" }).click()
+  await expect(live).toContainText("Escuchando")
+  await expect(lost).toHaveCount(0)
 })
 
 test("asistente clínico: la alergia dictada y lo hecho hoy se confirman donde van", async ({ owner }, info) => {
