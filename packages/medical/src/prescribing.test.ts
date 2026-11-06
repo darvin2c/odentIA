@@ -31,7 +31,7 @@ describe("la receta de latidIA (issue 229, decisión 12)", () => {
     })
   })
 
-  it("con embarazo lo recuerda y lo contraindicado va con motivo, como una alergia", () => {
+  it("con embarazo lo recuerda y lo contraindicado se avisa, como una alergia", () => {
     const pregnant = context({
       embarazoLactancia: { embarazo: { estado: "si", fecha: "2026-10-10", semanas: 10 } },
     })

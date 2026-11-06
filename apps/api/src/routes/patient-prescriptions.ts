@@ -39,6 +39,8 @@ const createInput = z
     diagnosisSystem: z.string().max(20).nullish(),
     validUntil: z.iso.date("Elige la fecha en el calendario.").nullish(),
     acknowledgeAllergies: z.boolean().optional(),
+    // Los avisos que mostró la pantalla, tal cual (ADR 0143).
+    alertsShown: z.array(z.string().max(1000)).max(40).nullish(),
     allergyOverrideReason: z.string().max(500, "El motivo para recetar igual tiene como mucho 500 caracteres.").nullish(),
     /** El peso (kg) con que se receta; latidIA lo pide a un menor de 12 años (issue 229). */
     patientWeightKg: z.number(WEIGHT).min(0.5, WEIGHT).max(400, WEIGHT).nullish(),

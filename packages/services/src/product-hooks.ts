@@ -244,7 +244,7 @@ export const COMMON_INTERVIEW: ProductInterview = {
 export interface PrescribingReview {
   /** Lo que impide emitir (latidIA: un controlado, el peso de un niño). */
   errors: string[]
-  /** Lo que se receta solo con motivo, como una alergia (latidIA: contraindicado en el embarazo). */
+  /** Lo que se avisa como una alergia y decide quien receta (latidIA: contraindicado en el embarazo; ADR 0143). */
   warnings: string[]
 }
 
