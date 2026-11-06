@@ -381,6 +381,8 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "opportunity.won": say("Cerró una oportunidad como ganada"),
   "opportunity.lost": say("Cerró una oportunidad como perdida"),
   "opportunity.closed": say("Cerró una oportunidad"),
+  // ADR 0144: la cierra el sistema, a nombre de quien anuló su presupuesto.
+  "opportunity.closed_budget_cancelled": say("Se cerró una oportunidad al anular su presupuesto"),
   "opportunity.reopened": say("Reabrió una oportunidad"),
   "task.created": say("Creó una tarea"),
   "task.updated": say("Cambió una tarea"),

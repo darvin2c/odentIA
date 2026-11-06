@@ -4,17 +4,34 @@
  * enviado», unida a él y a nombre de quien lo entregó; reenviarlo no abre
  * otra, con una abierta se une como siempre, el segundo que espera respuesta
  * abre la suya y la revisión sigue con la del que reemplaza. Igual en latidIA.
+ * Lo que encontró la revisión del PR #470: la revisión de lo ya vendido no
+ * toma otra, anular la suelta o la cierra, Sofi no la duplica (tampoco por la
+ * madre de un menor), al decidir lleva lo elegido y entregar a la vez no abre dos.
  */
 import { randomUUID } from "node:crypto"
-import { patient, serviceCatalog } from "@odentia/db/schema/clinical"
+import { patient, patientContact, serviceCatalog } from "@odentia/db/schema/clinical"
 import { channelConnection, contact } from "@odentia/db/schema/crm"
 import { orgProfile } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { sendBudget } from "./budget-send.js"
-import { createBudget, decideBudget, deliverBudget, reviseBudget } from "./budgets.js"
+import {
+  cancelBudget,
+  createBudget,
+  decideBudget,
+  deliverBudget,
+  duplicateBudgetOption,
+  removeBudgetItems,
+  reviseBudget,
+} from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
-import { createOpportunity, getOpportunity, listOpportunities } from "./opportunities.js"
+import {
+  createOpportunity,
+  getOpportunity,
+  listOpportunities,
+  noteServiceInterest,
+  setOpportunityTask,
+} from "./opportunities.js"
 import { addPlanItem } from "./plan.js"
 import type { Storage } from "./storage.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
@@ -30,8 +47,8 @@ async function personOf(patientId: string): Promise<string> {
   return row!.personId
 }
 
-const opportunitiesOf = async (f: Fixture) =>
-  (await f.run((tx) => listOpportunities(tx, f.args[0], { patientId: f.patient.id }))).items
+const opportunitiesOf = async (f: Fixture, filter: { patientId?: string; contactId?: string } = { patientId: f.patient.id }) =>
+  (await f.run((tx) => listOpportunities(tx, f.args[0], filter))).items
 
 const indicate = (f: Fixture, serviceId: string) =>
   f.run((tx) => addPlanItem(tx, ...f.args, { serviceId, planId: f.plan.id, sourceEncounterId: f.encounter.id }))
@@ -213,4 +230,153 @@ it("en latidIA, igual: el presupuesto entregado abre su oportunidad y rechazarlo
     moment: "decidio",
     closeReason: "rechazo_presupuesto",
   })
+})
+
+/** Entrega un presupuesto con esos tratamientos y devuelve el presupuesto, sus tratamientos y su oportunidad. */
+async function delivered(f: Fixture, serviceIds: string[]) {
+  const items: Array<Awaited<ReturnType<typeof indicate>>> = []
+  for (const serviceId of serviceIds) items.push(await indicate(f, serviceId))
+  const budget = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: items.map((item) => item.id) }))
+  await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
+  const opp = (await opportunitiesOf(f)).find((row) => row.budgetId === budget.id)
+  return { budget, items, opp }
+}
+
+it("la revisión de un presupuesto ya ganado no toma otra oportunidad abierta ni la gana: la venta cuenta una vez", async () => {
+  const f = await clinicalFixture()
+  const { budget, items, opp } = await delivered(f, [f.service.id])
+  const item = items[0]!
+  await f.run((tx) => decideBudget(tx, ...f.args, budget.id, { decisions: [{ planItemId: item.id, decision: "aceptado" }] }))
+  const person = await personOf(f.patient.id)
+  const asked = await f.run((tx) =>
+    createOpportunity(tx, "org_a", { contactId: person, title: "Blanqueamiento" }, { userId: null, origin: "agente" }),
+  )
+  const revision = await f.run((tx) => reviseBudget(tx, ...f.args, budget.id, { itemIds: [item.id], reason: "Cambio" }))
+  await f.run((tx) => deliverBudget(tx, ...f.args, revision.id))
+  expect(await f.run((tx) => getOpportunity(tx, "org_a", asked.id))).toMatchObject({ budgetId: null, moment: "interesado" })
+  await f.run((tx) => decideBudget(tx, ...f.args, revision.id, { decisions: [{ planItemId: item.id, decision: "aceptado" }] }))
+  const all = await opportunitiesOf(f, { contactId: person })
+  expect(all.filter((row) => row.status === "won").map((row) => row.id)).toEqual([opp!.id])
+  expect(all.find((row) => row.id === asked.id)).toMatchObject({ status: "open", moment: "interesado" })
+})
+
+it("anular el presupuesto cierra como perdida la oportunidad que nació de él; la de otro interés o con una tarea solo se suelta", async () => {
+  // Nació de él y nadie la trabajó: perdida, «Otro», a nombre de quien lo anuló.
+  const f = await clinicalFixture()
+  const { budget, opp } = await delivered(f, [f.service.id])
+  await f.run((tx) => cancelBudget(tx, ...f.args, budget.id))
+  expect(await f.run((tx) => getOpportunity(tx, "org_a", opp!.id))).toMatchObject({
+    status: "lost",
+    moment: "decidio",
+    closeReason: "otro",
+    closeNote: "Se anuló el presupuesto",
+  })
+  const activity = await f.run((tx) => listWorkspaceAudit(tx, "org_a", { action: "opportunity.closed_budget_cancelled" }))
+  expect(activity.items.find((row) => row.entityId === opp!.id)).toMatchObject({
+    who: "Clínico",
+    what: "Se cerró una oportunidad al anular su presupuesto",
+  })
+
+  // La que ya era de otro interés sigue abierta, sin presupuesto, y ya no promete cerrarse sola.
+  const g = await clinicalFixture()
+  const gPerson = await personOf(g.patient.id)
+  const asked = await g.run((tx) =>
+    createOpportunity(tx, "org_a", { contactId: gPerson, title: "Blanqueamiento" }, { userId: null, origin: "agente" }),
+  )
+  const joined = await delivered(g, [g.service.id])
+  expect(joined.opp?.id).toBe(asked.id)
+  await g.run((tx) => cancelBudget(tx, ...g.args, joined.budget.id))
+  expect(await g.run((tx) => getOpportunity(tx, "org_a", asked.id))).toMatchObject({
+    status: "open",
+    budgetId: null,
+    moment: "presupuesto_enviado",
+    after: null,
+  })
+
+  // La que nació de él pero ya tiene una tarea: alguien la trabaja, solo se suelta.
+  const h = await clinicalFixture()
+  const worked = await delivered(h, [h.service.id])
+  await h.run((tx) =>
+    setOpportunityTask(tx, "org_a", worked.opp!.id, { title: "Llamar a ver qué decidió" }, { userId: h.actor, createdBy: "user" }),
+  )
+  await h.run((tx) => cancelBudget(tx, ...h.args, worked.budget.id))
+  expect(await h.run((tx) => getOpportunity(tx, "org_a", worked.opp!.id))).toMatchObject({ status: "open", budgetId: null })
+})
+
+it("Sofi no duplica la venta: lo que pregunta la persona por un tratamiento de su presupuesto pendiente actualiza esa oportunidad", async () => {
+  const f = await clinicalFixture()
+  const endodoncia = await otherService("org_a", "Endodoncia", 30000)
+  const { opp } = await delivered(f, [f.service.id, endodoncia])
+  const person = await personOf(f.patient.id)
+  const noted = await f.run((tx) =>
+    noteServiceInterest(tx, "org_a", { contactId: person, conversationId: null, serviceId: endodoncia, said: "¿Cuánto es la endodoncia?" }),
+  )
+  expect(noted).toEqual({ outcome: "actualizada", opportunityId: opp!.id })
+  expect((await opportunitiesOf(f, { contactId: person })).filter((row) => row.status === "open")).toHaveLength(1)
+  // Crearla sin paciente (el equipo, o el agente con «crear oportunidad») encuentra la que ya existe.
+  await expect(
+    f.run((tx) => createOpportunity(tx, "org_a", { contactId: person, title: "Endodoncia", serviceId: endodoncia })),
+  ).rejects.toMatchObject({ code: "OPPORTUNITY_EXISTS" })
+})
+
+it("menor: el presupuesto se une a lo que anotó su madre del mismo tratamiento, que pasa a llevarlo; de otro tratamiento, no", async () => {
+  const f = await clinicalFixture()
+  const [mother] = await ownerDb.insert(contact).values({ organizationId: "org_a", displayName: "Mamá de prueba" }).returning({ id: contact.id })
+  await ownerDb.insert(patientContact).values({ organizationId: "org_a", patientId: f.patient.id, contactId: mother!.id, relationship: "guardian" })
+  const asked = await f.run((tx) =>
+    noteServiceInterest(tx, "org_a", { contactId: mother!.id, conversationId: null, serviceId: f.service.id, said: "Para mi hijo" }),
+  )
+  expect(asked.outcome).toBe("creada")
+  const { budget, items, opp } = await delivered(f, [f.service.id])
+  expect(opp).toMatchObject({ id: asked.opportunityId, contactId: mother!.id, patientId: f.patient.id, moment: "presupuesto_enviado" })
+  expect(await opportunitiesOf(f)).toHaveLength(1)
+  // Lo que vuelve a preguntar la madre sigue con la misma.
+  const again = await f.run((tx) =>
+    noteServiceInterest(tx, "org_a", { contactId: mother!.id, conversationId: null, serviceId: f.service.id, said: "¿Ya está?" }),
+  )
+  expect(again).toEqual({ outcome: "actualizada", opportunityId: opp!.id })
+  await f.run((tx) => decideBudget(tx, ...f.args, budget.id, { decisions: [{ planItemId: items[0]!.id, decision: "aceptado" }] }))
+  expect(await f.run((tx) => getOpportunity(tx, "org_a", opp!.id))).toMatchObject({ status: "won" })
+
+  // Lo que la madre anotó de otro tratamiento no se toma como «la más reciente».
+  const g = await clinicalFixture()
+  const [other] = await ownerDb.insert(contact).values({ organizationId: "org_a", displayName: "Otra mamá" }).returning({ id: contact.id })
+  await ownerDb.insert(patientContact).values({ organizationId: "org_a", patientId: g.patient.id, contactId: other!.id, relationship: "guardian" })
+  const blanqueamiento = await otherService("org_a", "Blanqueamiento", 50000)
+  const hers = await g.run((tx) =>
+    noteServiceInterest(tx, "org_a", { contactId: other!.id, conversationId: null, serviceId: blanqueamiento, said: "Para mí" }),
+  )
+  const child = await delivered(g, [g.service.id])
+  expect(child.opp).toMatchObject({ contactId: await personOf(g.patient.id) })
+  expect(await g.run((tx) => getOpportunity(tx, "org_a", hers.opportunityId!))).toMatchObject({ moment: "interesado", patientId: null })
+})
+
+it("al decidir, la que nació del presupuesto se llama como la opción elegida", async () => {
+  const f = await clinicalFixture()
+  const endodoncia = await otherService("org_a", "Endodoncia", 30000)
+  const resina = await indicate(f, f.service.id)
+  const endo = await indicate(f, endodoncia)
+  const draft = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [resina.id, endo.id] }))
+  const two = await f.run((tx) => duplicateBudgetOption(tx, ...f.args, draft.id, draft.options[0]!.id))
+  const second = two.options.find((option) => option.id !== draft.options[0]!.id)!
+  await f.run((tx) => removeBudgetItems(tx, ...f.args, draft.id, { itemIds: [endo.id], optionId: second.id }))
+  await f.run((tx) => deliverBudget(tx, ...f.args, draft.id))
+  const [opp] = await opportunitiesOf(f)
+  expect(opp!.title).toBe("Tratamiento propio y Endodoncia")
+  await f.run((tx) =>
+    decideBudget(tx, ...f.args, draft.id, { optionId: second.id, decisions: [{ planItemId: resina.id, decision: "aceptado" }] }),
+  )
+  expect(await f.run((tx) => getOpportunity(tx, "org_a", opp!.id))).toMatchObject({ status: "won", title: "Tratamiento propio" })
+})
+
+it("imprimir y enviar a la vez el mismo borrador abre una sola oportunidad", async () => {
+  const f = await clinicalFixture()
+  const item = await indicate(f, f.service.id)
+  const budget = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [item.id] }))
+  const results = await Promise.allSettled([
+    f.run((tx) => deliverBudget(tx, ...f.args, budget.id)),
+    f.run((tx) => deliverBudget(tx, ...f.args, budget.id)),
+  ])
+  expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1)
+  expect(await opportunitiesOf(f)).toHaveLength(1)
 })

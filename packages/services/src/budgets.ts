@@ -42,7 +42,7 @@ import { documentSecretsKey } from "./document-check.js"
 import { type DocumentClinic, loadDocumentClinic } from "./document-clinic.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCurrency, NEUTRAL_TIMEZONE } from "./locale.js"
-import { decideBudgetOpportunity, linkPresentedBudget } from "./opportunities.js"
+import { decideBudgetOpportunity, linkPresentedBudget, releaseCancelledBudget } from "./opportunities.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
 import { listPaymentMethods } from "./payment-methods.js"
@@ -2030,25 +2030,28 @@ export async function deliverBudget(
     ],
     by: opts.by,
     total: await opportunityValueOf(tx, orgId, full.totals),
-    opens: { userId: actorUserId, ...budgetInterest(lines, options, updated.title) },
+    opens: {
+      userId: actorUserId,
+      ...budgetInterest(
+        lines.filter((line) => line.optionId === (valueOptionOf(options)?.id ?? line.optionId)),
+        updated.title,
+      ),
+    },
   })
   await notifyBudget(tx, orgId)
   return withoutFindings(updated)
 }
 
 /**
- * El interés de la oportunidad que abre un presupuesto entregado (ADR 0144):
- * los tratamientos de la opción que vale, en una línea («Resina y
- * Endodoncia», «Resina, Endodoncia y 2 más»), y su servicio si es uno solo.
- * Sin tratamientos con nombre, el título del presupuesto.
+ * El interés de la oportunidad de un presupuesto (ADR 0144): los tratamientos
+ * de una opción (la que vale al entregarlo, la elegida al decidirlo), en una
+ * línea («Resina y Endodoncia», «Resina, Endodoncia y 2 más»), y su servicio
+ * si es uno solo. Sin tratamientos con nombre, el título del presupuesto.
  */
 function budgetInterest(
-  lines: BudgetLineWithStatus[],
-  options: BudgetOptionRow[],
+  own: BudgetLineWithStatus[],
   budgetTitle: string,
 ): { title: string; serviceId: string | null } {
-  const value = valueOptionOf(options)
-  const own = value ? lines.filter((line) => line.optionId === value.id) : lines
   const titles = [...new Set(own.map((line) => line.title.trim()).filter(Boolean))]
   const shown = titles.length > 3 ? [...titles.slice(0, 2), `${titles.length - 2} más`] : titles
   const last = shown.at(-1)
@@ -2561,6 +2564,8 @@ export async function decideBudget(
     ],
     // Lo que de verdad aceptó: el valor de la oportunidad ganada (en parte, lo aceptado).
     accepted: await acceptedValueOf(tx, orgId, lines, decisions),
+    // La que nació de él lleva por nombre lo de la opción elegida (ADR 0144).
+    title: budgetInterest(lines, current.title).title,
   })
   await notifyBudget(tx, orgId)
   return loadBudget(tx, orgId, patientId, updated)
@@ -2639,6 +2644,8 @@ export async function cancelBudget(
     from: current.status,
     itemCount: itemIds.length,
   })
+  // Su oportunidad ya no se cerrará sola al responderlo (ADR 0144).
+  await releaseCancelledBudget(tx, orgId, { budgetId, userId: actorUserId })
   await notifyBudget(tx, orgId)
   return withoutFindings(updated)
 }
