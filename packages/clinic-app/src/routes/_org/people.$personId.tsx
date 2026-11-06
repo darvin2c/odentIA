@@ -201,6 +201,7 @@ function PersonPageRoute() {
   const navigate = useNavigate({ from: Route.fullPath })
   const queryClient = useQueryClient()
   const can = useCan()
+  const myUserId = useMyUserId()
   const personQuery = usePerson(personId, can("patients.read"))
   const person = personQuery.data?.data ?? null
   const patientId = person?.patient?.id ?? null
@@ -300,7 +301,6 @@ function PersonPageRoute() {
   const entries = areaNav(current.area, can, pageOf)
   const openEncounterId = summary.data?.data.openEncounterId ?? undefined
   // La que lleva quien mira: la receta, el descanso y la orden se escriben dentro de ella (ADR 0002).
-  const myUserId = useMyUserId()
   const openBrief = summary.data?.data.openEncounter
   const ownEncounterId = openEncounterId && (!openBrief || openBrief.professionalUserId === myUserId) ? openEncounterId : undefined
 
