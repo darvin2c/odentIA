@@ -168,6 +168,10 @@ interface Profile {
 
 it("datos de la clínica: vaciar un dato lo guarda vacío, lo que no se envía se conserva y el nombre comercial es el de la cuenta", async () => {
   const region = { countryCode: "PE", currency: "PEN", timezone: "America/Lima", locale: "es-PE" }
+  // Al crear la clínica la razón social es obligatoria: sin ella no nace el perfil.
+  const nameless = await request("owner", "PUT", "/org-profile", { tradeName: "Ajustes", ...region })
+  expect(nameless.status).toBe(400)
+  expect(await nameless.json()).toMatchObject({ error: { fields: { legalName: "Escribe la razón social" } } })
   const created = await request("owner", "PUT", "/org-profile", {
     legalName: "Clínica Ajustes S.A.C.",
     tradeName: "Ajustes",
@@ -203,6 +207,15 @@ it("datos de la clínica: vaciar un dato lo guarda vacío, lo que no se envía s
     // Tampoco envía la impresión: queda como estaba.
     receiptWidth: "80",
     ticketFooter: "Recibo interno. No es un documento fiscal.",
+  })
+
+  // Dos personas con la pantalla abierta: cada una envía solo lo que cambió y no pisa lo de la otra.
+  expect((await request("owner", "PUT", "/org-profile", { fiscalAddress: "Av. Norte 1" })).status).toBe(200)
+  const other = await request("owner", "PUT", "/org-profile", { tradeName: "Ajustes Norte" })
+  expect(await data<Profile>(other)).toMatchObject({
+    legalName: "Clínica Ajustes S.A.C.",
+    tradeName: "Ajustes Norte",
+    fiscalAddress: "Av. Norte 1",
   })
 
   // Recepción lee el perfil (lo usa la agenda), pero no lo cambia.

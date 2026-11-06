@@ -1,5 +1,6 @@
 import { currencyFractionDigits, type PatientGuide } from "@odentia/clinical"
 import { apiFetch } from "./api"
+import { appWords } from "./product-words"
 import { amountFromCents } from "./workspace"
 
 /** Oferta del tarifario de la clínica (contrato GET /api/services). */
@@ -297,10 +298,17 @@ export const PRICE_DISCLOSURE_TAG: Record<PriceDisclosure, string | null> = {
   evaluacion: "Con evaluación",
 }
 
-/** Cómo se cobra un servicio, con las palabras de la pantalla. */
+/**
+ * Cómo se cobra un servicio, con las palabras de la pantalla y de su producto
+ * (latidIA: «Por todo el tratamiento»). Se leen al usarlas: la app ya declaró su producto.
+ */
 export const BILLING_MODE_LABELS: Record<BillingMode, string> = {
-  treatment: "Por tratamiento",
-  session: "Por sesión",
+  get treatment() {
+    return appWords().billingModes.treatment
+  },
+  get session() {
+    return appWords().billingModes.session
+  },
 }
 
 /** «Dónde se hace» un servicio propio: así la atención sabe qué pedir al registrarlo. */

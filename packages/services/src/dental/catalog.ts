@@ -22,9 +22,31 @@ const KIND_WORDS: Record<TreatmentKind, string> = {
   general: "atención dental",
 }
 
+/** Cómo piden los pacientes un tratamiento dental y cómo se llama en el catálogo. */
+const EVERYDAY_WORDS: Record<string, readonly string[]> = {
+  limpieza: ["profilaxis", "destartraje", "tartrectomia"],
+  curacion: ["restauracion", "resina", "obturacion"],
+  calza: ["restauracion", "resina", "obturacion"],
+  empaste: ["restauracion", "resina", "obturacion"],
+  tapadura: ["restauracion", "resina", "obturacion"],
+  extraccion: ["exodoncia"],
+  sacar: ["exodoncia", "extraccion"],
+  nervio: ["endodoncia"],
+  conducto: ["endodoncia"],
+  brackets: ["ortodoncia"],
+  frenillos: ["ortodoncia"],
+  funda: ["corona"],
+  placa: ["protesis"],
+  dentadura: ["protesis"],
+  encias: ["periodoncia", "raspado"],
+  chequeo: ["consulta", "control", "evaluacion"],
+  revision: ["consulta", "control", "evaluacion"],
+}
+
 /** El catálogo de odentIA: los tipos de su biblioteca y las especialidades odontológicas de cada país (ADR 0069). */
 export const dentalCatalog: ProductCatalog = {
   kinds: TREATMENT_KINDS,
   kindWords: KIND_WORDS,
+  everydayWords: EVERYDAY_WORDS,
   specialties: (country) => dentalProfileFor(country).specialties.list,
 }

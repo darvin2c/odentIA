@@ -1,7 +1,9 @@
 import type { Db } from "@odentia/db"
+import { auditEvent } from "@odentia/db/schema/org"
 import { pipeline, pipelineStage } from "@odentia/db/schema/crm"
-import { and, asc, eq } from "drizzle-orm"
+import { and, asc, eq, ne, sql } from "drizzle-orm"
 import { invalidField, isUniqueViolation, notFound } from "./errors.js"
+import { orgProduct } from "./locale.js"
 
 /**
  * Los cuatro pasos fijos de una venta (ADR 0028). Cada uno tiene su «momento»:
@@ -23,6 +25,14 @@ export const SALE_MOMENT_NAMES: Record<SaleMoment, string> = {
   evaluacion_agendada: "Evaluación agendada",
   presupuesto_enviado: "Presupuesto enviado",
   decidio: "Decidió",
+}
+
+/**
+ * El nombre con que nace cada paso en latidIA: allí se agenda una consulta, no
+ * una evaluación. Lo demás es igual en los dos productos.
+ */
+const MEDICAL_MOMENT_NAMES: Partial<Record<SaleMoment, string>> = {
+  evaluacion_agendada: "Consulta agendada",
 }
 
 /** Orden de los pasos: una oportunidad avanza sola solo hacia adelante. */
@@ -84,11 +94,12 @@ export async function ensureDefaultPipeline(
         .values({ organizationId: orgId, name: "Ventas", isDefault: true })
         .returning()
       if (!created) throw new Error("No se pudo crear el embudo")
+      const medical = (await orgProduct(tx, orgId)) === "medical"
       await tx.insert(pipelineStage).values(
         SALE_MOMENTS.map((moment, position) => ({
           organizationId: orgId,
           pipelineId: created.id,
-          name: SALE_MOMENT_NAMES[moment],
+          name: (medical ? MEDICAL_MOMENT_NAMES[moment] : undefined) ?? SALE_MOMENT_NAMES[moment],
           position,
           moment,
         })),
@@ -179,15 +190,49 @@ export async function renameStage(
   orgId: string,
   stageId: string,
   input: { name: string },
+  actorUserId: string | null = null,
 ): Promise<Stage> {
   const name = input.name.trim()
   if (!name) throw invalidField("name", "Escribe el nombre del paso")
   if (name.length > 120) throw invalidField("name", "El nombre del paso no puede superar 120 caracteres")
+  // Dos pasos del mismo embudo con el mismo nombre no se distinguen en el tablero.
+  const [current] = await tx
+    .select({ pipelineId: pipelineStage.pipelineId, name: pipelineStage.name })
+    .from(pipelineStage)
+    .where(and(eq(pipelineStage.id, stageId), eq(pipelineStage.organizationId, orgId)))
+    .limit(1)
+  if (!current) throw notFound("Etapa")
+  // El embudo queda bloqueado mientras se renombra: dos renombres a la vez se esperan y el segundo ve al primero.
+  await tx.select({ id: pipeline.id }).from(pipeline).where(and(eq(pipeline.id, current.pipelineId), eq(pipeline.organizationId, orgId))).for("update")
+  const [twin] = await tx
+    .select({ id: pipelineStage.id })
+    .from(pipelineStage)
+    .where(
+      and(
+        eq(pipelineStage.organizationId, orgId),
+        eq(pipelineStage.pipelineId, current.pipelineId),
+        ne(pipelineStage.id, stageId),
+        sql`lower(${pipelineStage.name}) = lower(${name})`,
+      ),
+    )
+    .limit(1)
+  if (twin) throw invalidField("name", "Otro paso de este embudo ya se llama así: elige otro nombre")
   const [updated] = await tx
     .update(pipelineStage)
     .set({ name })
     .where(and(eq(pipelineStage.id, stageId), eq(pipelineStage.organizationId, orgId)))
     .returning()
   if (!updated) throw notFound("Etapa")
+  // Queda en la actividad del equipo, con el nombre de antes y el nuevo.
+  if (current.name !== name) {
+    await tx.insert(auditEvent).values({
+      organizationId: orgId,
+      actorUserId,
+      action: "settings.pipeline_stage_renamed",
+      entity: "pipeline_stage",
+      entityId: stageId,
+      metadata: { from: current.name, to: name },
+    })
+  }
   return toStage(updated)
 }

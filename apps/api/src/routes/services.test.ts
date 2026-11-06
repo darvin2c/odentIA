@@ -730,6 +730,13 @@ it("services: con más de 100 servicios la lista pagina y dice el total; lo eleg
   // Otra clínica no lo ve.
   expect((await getJson(buildApp("owner", "org_a"), `/services/${last.id}`)).status).toBe(404)
   expect((await getJson(app, "/services?ids=no-es-un-id")).status).toBe(400)
+  // Como lo dicen los pacientes: «limpieza» encuentra la profilaxis; lo que no se parece, no.
+  await ownerDb.execute(sql`
+    insert into "service_catalog" ("organization_id", "source", "name", "specialty_id", "scope", "price_cents", "currency")
+    values ('org_e', 'custom', 'Profilaxis dental', ${general}::uuid, 'general', 9000, 'PEN')`)
+  const lay = (await (await getJson(app, "/services?q=limpieza")).json()) as { data: ServiceItem[]; total: number }
+  expect(lay.data.map((row) => row.name)).toEqual(["Profilaxis dental"])
+  expect(lay.total).toBe(1)
 })
 
 it("services: cada servicio tiene una sola especialidad de la clínica, también el de la biblioteca", async () => {

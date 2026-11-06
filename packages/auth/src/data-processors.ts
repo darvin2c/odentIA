@@ -59,7 +59,7 @@ export const DATA_PROCESSORS: readonly DataProcessor[] = [
     purpose:
       "Almacenar archivos (adjuntos, imágenes, documentos y copias de seguridad) y ser la entrada segura a la aplicación.",
     data: "Archivos que la clínica y sus pacientes suben o envían, copias de la base de datos y el tráfico hacia la aplicación.",
-    receives: "Archivos e imágenes, copias de seguridad y la entrada segura a odentIA",
+    receives: "Archivos e imágenes, copias de seguridad y la entrada segura a la aplicación",
     country: "Estados Unidos",
     use: { kind: "siempre" },
   },
@@ -69,7 +69,7 @@ export const DATA_PROCESSORS: readonly DataProcessor[] = [
     short: MAIL_PROVIDER,
     purpose: "Enviar los correos del sistema: invitaciones, avisos, recetas y comprobantes.",
     data: "Nombre y correo del destinatario y contenido del mensaje.",
-    receives: "Correos que envía odentIA: avisos, recetas y comprobantes",
+    receives: "Correos que envía la aplicación: avisos, recetas y comprobantes",
     country: MAIL_COUNTRY,
     use: { kind: "siempre" },
   },

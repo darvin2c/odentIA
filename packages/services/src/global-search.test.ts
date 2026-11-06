@@ -150,6 +150,11 @@ beforeAll(async () => {
     authorUserId: PROFESSIONAL,
     note: "Dolor molar inferior derecho. Refiere bruxismo nocturno.",
   })
+  // Un descanso y una orden: se buscan por su nombre («descanso médico», «orden»), no solo por su texto.
+  await ownerDb.execute(sql`insert into medical_leave (organization_id, patient_id, leave_number, starts_on, days, ends_on)
+    values (${ORG}, ${luciaPatientId}, 1, '2026-10-19', 3, '2026-10-21')`)
+  await ownerDb.execute(sql`insert into clinical_order (organization_id, kind, patient_id, recipient, title)
+    values (${ORG}, 'imagen', ${luciaPatientId}, 'Centro de imágenes', 'Radiografía panorámica')`)
 }, 180_000)
 
 describe("buscar sin tildes y con su dueño", () => {
@@ -233,6 +238,22 @@ describe("cada rol ve lo de su pantalla", () => {
     const reception = await as("reception", "bruxismo")
     expect(reception.owners).toEqual([])
     expect(reception.clinicalReads).toEqual([])
+  })
+
+  it("«descanso médico» y «orden» traen los de la historia, y «orden panorámica» la que dice eso", async () => {
+    const leaves = await as("clinician", "descanso médico")
+    expect(owner(leaves, "Lucía Quispe")?.items.find((item) => item.kind === "descanso")).toMatchObject({
+      title: "Descanso médico de 3 días",
+      type: "clinica",
+    })
+    const orders = await as("clinician", "orden panoramica")
+    expect(owner(orders, "Lucía Quispe")?.items.find((item) => item.kind === "orden")).toMatchObject({
+      title: "Radiografía panorámica",
+      detail: "Centro de imágenes",
+    })
+    expect(owner(await as("clinician", "orden tomografia"), "Lucía Quispe")?.items.some((item) => item.kind === "orden") ?? false).toBe(false)
+    // Recepción no ve la historia: tampoco por su nombre.
+    expect((await as("reception", "descanso médico")).owners).toEqual([])
   })
 
   it("caja no recibe citas ni mensajes; el odontólogo no ve como dueño a quien aún no es paciente", async () => {

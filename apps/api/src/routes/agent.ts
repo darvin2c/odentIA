@@ -42,6 +42,9 @@ const putInput = z.object({
   about: z.string().max(600, "Escribe como mucho 600 caracteres.").optional(),
   disabledFunctions: z.array(z.string().max(40)).max(20).optional(),
   functionNotes: z.record(z.string().max(40), z.string().max(300, "Escribe como mucho 300 caracteres.")).optional(),
+  // Un interruptor o una indicación sola: se aplica sobre lo guardado (dos ventanas no se pisan).
+  functionSwitch: z.object({ id: z.string().max(40), on: z.boolean() }).optional(),
+  functionNote: z.object({ id: z.string().max(40), note: z.string().max(300, "Escribe como mucho 300 caracteres.") }).optional(),
   /** Horas de silencio tras las que el agente se despide y cierra (ADR 0024). */
   closeAfterHours: z.number({ error: HOURS_RANGE }).int(HOURS_RANGE).min(6, HOURS_RANGE).max(23, HOURS_RANGE).optional(),
 })

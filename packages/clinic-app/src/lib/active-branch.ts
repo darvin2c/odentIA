@@ -25,11 +25,26 @@ function readStored(): string | undefined {
   }
 }
 
-function writeStored(id: string): void {
+const listeners = new Set<() => void>()
+
+function writeStored(id: string | undefined): void {
   try {
-    localStorage.setItem(STORAGE_KEY, id)
+    if (id === undefined) localStorage.removeItem(STORAGE_KEY)
+    else localStorage.setItem(STORAGE_KEY, id)
   } catch {
     // Sin almacenamiento (modo privado): la sede sigue en el enlace.
+  }
+  for (const listener of listeners) listener()
+}
+
+/**
+ * Lo guardado cambia en esta pestaña. Lo que se elige en otra no cambia la
+ * sede de esta a mitad de un cobro: vale al volver a abrirla.
+ */
+function subscribeStored(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
   }
 }
 
@@ -76,13 +91,14 @@ export function useActiveBranch(): {
   )
   // `?branch=` vacío es «sin sede elegida», no una sede.
   const fromLink = get("branch") || undefined
-  const [stored, setStored] = React.useState(readStored)
+  // En el servidor y al hidratar no hay nada guardado: el primer pintado es el
+  // mismo en los dos (#418), y enseguida se usa la recordada.
+  const stored = React.useSyncExternalStore(subscribeStored, readStored, () => undefined)
 
   // La sede a la que lleva un enlace pasa a ser la recordada.
   React.useEffect(() => {
     if (!fromLink || fromLink === stored) return
     writeStored(fromLink)
-    setStored(fromLink)
   }, [fromLink, stored])
 
   // La sede recordada se usa enseguida, sin esperar la lista: la pantalla pide
@@ -95,18 +111,12 @@ export function useActiveBranch(): {
   // Una sede que ya no existe se olvida: el próximo ingreso no la vuelve a pedir.
   React.useEffect(() => {
     if (!forgotten) return
-    try {
-      localStorage.removeItem(STORAGE_KEY)
-    } catch {
-      // Sin almacenamiento: no había nada guardado.
-    }
-    setStored(undefined)
+    writeStored(undefined)
   }, [forgotten])
 
   const choose = React.useCallback(
     (id: string, extra?: Record<string, string | undefined>) => {
       writeStored(id)
-      setStored(id)
       setParams({ ...extra, branch: id })
     },
     [setParams],

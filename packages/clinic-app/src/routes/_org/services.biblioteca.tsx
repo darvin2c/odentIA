@@ -980,8 +980,19 @@ function ServiceCell({
 }
 
 const BILLING_OPTIONS: ReadonlyArray<{ value: BillingMode; label: string }> = [
-  { value: "treatment", label: BILLING_MODE_LABELS.treatment },
-  { value: "session", label: BILLING_MODE_LABELS.session },
+  // Se leen al pintar: las palabras dependen del producto.
+  {
+    value: "treatment",
+    get label() {
+      return BILLING_MODE_LABELS.treatment
+    },
+  },
+  {
+    value: "session",
+    get label() {
+      return BILLING_MODE_LABELS.session
+    },
+  },
 ]
 
 /* ----------------------------- Servicio propio ----------------------------- */
