@@ -74,6 +74,7 @@ test("firma en la tablet: lee la hoja del papel, firma donde va su firma y el pr
   const screen = page.getByRole("dialog", { name: "Firma de Rosa" })
   const sheet = screen.getByRole("article", { name: template.title })
   await expect(sheet.getByText("Consentimiento informado")).toBeVisible()
+  await page.screenshot({ path: info.outputPath("0-hoja-tablet-arriba.png") })
   await expect(sheet.getByText("Exodoncia pieza 38", { exact: true })).toBeVisible()
   await expect(sheet.getByText("41223355", { exact: true })).toBeVisible()
   await expect(sheet.getByRole("heading", { name: "Riesgos y molestias" })).toBeVisible()
