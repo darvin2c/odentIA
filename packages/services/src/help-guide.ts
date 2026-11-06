@@ -626,7 +626,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Oportunidades",
     parent: "Personas",
     purpose:
-      "El tablero de ventas: cada interés concreto de una persona (un precio, un tratamiento, una evaluación) en cuatro pasos que avanzan solos: Interesado, Evaluación agendada (al agendar su cita), Presupuesto enviado (al presentarle el presupuesto) y Decidió (al aceptarlo o rechazarlo), que se ve en dos mitades: Ganadas y Perdidas. Cada tarjeta dice por qué está donde está y cuál es su tarea. Muestra lo abierto y lo decidido en los últimos 30 días; el total suma solo lo abierto.",
+      "El tablero de ventas: cada interés concreto de una persona (un precio, un tratamiento, una evaluación, un presupuesto que se le entregó) en cuatro pasos que avanzan solos: Interesado, Evaluación agendada (al agendar su cita), Presupuesto enviado (al presentarle el presupuesto) y Decidió (al aceptarlo o rechazarlo), que se ve en dos mitades: Ganadas y Perdidas. Cada tarjeta dice por qué está donde está y cuál es su tarea. Muestra lo abierto y lo decidido en los últimos 30 días; el total suma solo lo abierto.",
     terms: [
       "embudo",
       "pipeline",
@@ -661,7 +661,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Por qué apareció una oportunidad que nadie creó?",
-        a: "Con «Oportunidades» encendida en Sofi, quien pregunta por el precio o la disponibilidad de un servicio concreto queda anotado en «Interesado», en Recepción. Si ya tenía una abierta de ese servicio se actualiza, y si ya aceptó un presupuesto con él no se anota nada.",
+        a: "Con «Oportunidades» encendida en Sofi, quien pregunta por el precio o la disponibilidad de un servicio concreto queda anotado en «Interesado», en Recepción. Si ya tenía una abierta de ese servicio se actualiza, y si ya aceptó un presupuesto con él no se anota nada. También se abre sola al entregar un presupuesto (imprimirlo o enviarlo) a quien no tenía una abierta, por ejemplo el que se hizo con el paciente en el sillón: aparece en «Presupuesto enviado», en Recepción, con sus tratamientos por nombre y el total como valor, y su historial dice quién lo entregó. Reenviarlo no abre otra, y si esperaba la respuesta a otro presupuesto, cada uno tiene la suya.",
       },
     ],
   },
