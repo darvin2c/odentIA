@@ -1,12 +1,12 @@
 import { Badge, Button, ScrollArea, Spinner } from "@odentia/ui"
 import { DataRefreshMarker, EmptyState, personInitials, SkeletonRegion } from "@odentia/ui-patterns"
 import { Bot } from "lucide-react"
-import { useState } from "react"
+import { useId, useState } from "react"
 import { ConversationRowsSkeleton } from "../skeletons/inbox"
 import { useReceptionName } from "../../lib/agent-names"
 import { channelIcon } from "../../lib/channels"
 import { screenReasonWords } from "../../lib/contact-screen"
-import { channelsWords, conversationWords, type ConversationWords, listTimeWords, topicQuote } from "../../lib/conversation-state"
+import { channelsWords, conversationWords, type ConversationWords, listTimeWords, onlySendFailed, topicQuote } from "../../lib/conversation-state"
 import { type ConversationListItem, previewWords } from "../../lib/crm"
 
 /** Spam y Bloqueados (ADR 0054): dos listas aparte, junto a las pestañas. */
@@ -16,6 +16,16 @@ export type SideView = "spam" | "blocked"
  * La fila de la lista es la persona (fase 4 del pulido): sigue elegida al abrir
  * cualquiera de sus conversaciones, también desde un enlace viejo.
  */
+/**
+ * El orden que se ve (propuesta UX 3): lo que espera respuesta y, al final, lo que solo no
+ * salió. La lista y el teclado (J/K) recorren el mismo.
+ */
+export function visibleRows(items: ConversationListItem[], grouped: boolean) {
+  const failed = grouped ? items.filter(onlySendFailed) : []
+  const waiting = failed.length > 0 ? items.filter((item) => !failed.includes(item)) : items
+  return { waiting, failed }
+}
+
 export function isRowOf(item: ConversationListItem, id: string | null): boolean {
   return id !== null && (item.id === id || (item.conversationIds ?? []).includes(id))
 }
@@ -132,23 +142,114 @@ export function ConversationList({
   onBackToTabs?: () => void
 }) {
   const receptionName = useReceptionName()
-  // Propuesta UX 3: lo que no salió va junto, plegado, debajo de lo que espera respuesta.
-  const failed = sideView ? [] : items.filter((item) => item.attention?.sendFailed)
-  const waiting = failed.length > 0 ? items.filter((item) => !failed.includes(item)) : items
-  const [showFailed, setShowFailed] = useState(false)
-  const failedOpen = showFailed || failed.some((item) => isRowOf(item, selectedId))
+  // Propuesta UX 3: lo que solo no salió va junto, plegado, debajo de lo que espera respuesta.
+  // Buscando, o en Spam y Bloqueados, no se agrupa: cada fila va donde cae.
+  const { waiting, failed } = visibleRows(items, !sideView && !searching)
+  const failedId = useId()
+  // Lo que eligió quien mira vale mientras no cambie la conversación abierta; abrir una que no
+  // salió abre el grupo.
+  const [shown, setShown] = useState<{ open: boolean; at: string | null } | null>(null)
+  const selectedFailed = failed.some((item) => isRowOf(item, selectedId))
+  const failedOpen = shown && shown.at === selectedId ? shown.open : selectedFailed || (shown?.open ?? false)
   const failedHeader = (
     <button
-      key="no-salieron"
       type="button"
       aria-expanded={failedOpen}
-      onClick={() => setShowFailed((open) => !open)}
-      className="flex min-h-11 items-center justify-between gap-2 px-3.5 py-2 text-left text-sm font-semibold text-muted-foreground hover:bg-muted/70"
+      aria-controls={failedId}
+      onClick={() => setShown({ open: !failedOpen, at: selectedId })}
+      className="flex min-h-11 items-center justify-between gap-2 px-3.5 py-2 text-left text-sm font-semibold text-muted-foreground outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
     >
-      <span>No salieron · {failed.length}</span>
-      <span className="text-xs font-normal">{failedOpen ? "Ocultar" : "Ver"}</span>
+      {/* Con más páginas por cargar, puede haber más de las que se cuentan aquí. */}
+      <span>
+        No salieron · {failed.length}
+        {hasNextPage ? "+" : ""}
+      </span>
+      <span aria-hidden className="text-xs font-normal">
+        {failedOpen ? "Ocultar" : "Ver"}
+      </span>
     </button>
   )
+  const loadMore = hasNextPage ? (
+    <Button variant="ghost" size="sm" className="self-center" disabled={isFetchingNextPage} onClick={onFetchNextPage}>
+      {isFetchingNextPage ? (
+        <>
+          <Spinner className="size-4" aria-hidden />
+          Cargar más
+        </>
+      ) : (
+        "Cargar más"
+      )}
+    </Button>
+  ) : null
+  const renderRow = (item: ConversationListItem) => {
+    const selected = isRowOf(item, selectedId)
+    const initials = personInitials(item.contact.displayName)
+    // La fila es la persona: un icono por canal, primero el de la conversación que muestra.
+    const rowChannels = item.channels?.length ? item.channels : [item.connection.channel]
+    const screen = item.contact.screen ?? null
+    const line = screen ? null : rowLine(item, myUserId, receptionName)
+    const row = (
+      <button
+        key={item.id}
+        type="button"
+        onClick={() => onSelect(item.id)}
+        aria-current={selected ? "true" : undefined}
+        className={`relative flex min-w-0 flex-1 gap-2.5 px-3.5 py-2.5 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${
+          selected ? "bg-muted shadow-[inset_3px_0_0_0_var(--color-foreground)]" : "hover:bg-muted/70"
+        }`}
+      >
+        <span
+          aria-hidden
+          className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary-soft text-[13px] font-semibold text-primary-soft-foreground"
+        >
+          {initials || "?"}
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className={`min-w-0 truncate text-sm ${item.unreadCount > 0 ? "font-bold" : "font-semibold"}`}>
+              {item.contact.displayName}
+            </span>
+            <span className="flex flex-1 items-center gap-1 text-muted-foreground">
+              {rowChannels.map((rowChannel) => {
+                const ChannelIcon = channelIcon(rowChannel)
+                return <ChannelIcon key={rowChannel} className="size-3.5 shrink-0" aria-hidden />
+              })}
+              <span className="sr-only">{channelsWords(rowChannels)}</span>
+              {item.isTest ? <Badge variant="secondary" className="shrink-0">Prueba</Badge> : null}
+            </span>
+            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+              {listTimeWords(item.lastMessageAt ?? item.preview?.createdAt ?? null)}
+            </span>
+          </span>
+          <span className="flex min-w-0 items-center gap-1.5 text-[13px] text-muted-foreground">
+            {/* En Spam y Bloqueados la fila dice por qué; el estado de atención no aplica. */}
+            {screen ? (
+              <span className="min-w-0 flex-1 truncate">{screenReasonWords(screen, item.contact.screenReason)}</span>
+            ) : line ? (
+              <StateLabel words={line} className="flex-1 font-medium [&.font-semibold]:font-semibold" />
+            ) : null}
+            {item.unreadCount > 0 && (
+              <span
+                className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-primary px-1 text-xs font-semibold text-primary-foreground"
+                aria-label={`${item.unreadCount} sin leer`}
+              >
+                {item.unreadCount}
+              </span>
+            )}
+          </span>
+        </span>
+      </button>
+    )
+    if (!sideView || !screen || !onRowAction) return row
+    return (
+      <div key={item.id} className="flex items-center gap-2 pr-3">
+        {row}
+        <Button type="button" size="sm" variant="outline" className="min-h-11 shrink-0 rounded-full sm:min-h-8" onClick={() => onRowAction(item)}>
+          {screen === "blocked" ? "Desbloquear" : "No es spam"}
+        </Button>
+      </div>
+    )
+  }
   return (
     // El desplazamiento de la lista es el de la aplicación (ScrollArea), no la barra nativa.
     <ScrollArea className="elevated min-h-0 flex-1 rounded-xl border bg-card">
@@ -163,76 +264,14 @@ export function ConversationList({
             </span>
           </div>
         ) : null}
-        {[...waiting, ...(failedOpen ? failed : [])].map((item, index) => {
-          const selected = isRowOf(item, selectedId)
-          const initials = personInitials(item.contact.displayName)
-          // La fila es la persona: un icono por canal, primero el de la conversación que muestra.
-          const rowChannels = item.channels?.length ? item.channels : [item.connection.channel]
-          const screen = item.contact.screen ?? null
-          const line = screen ? null : rowLine(item, myUserId, receptionName)
-          const row = (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => onSelect(item.id)}
-              aria-current={selected ? "true" : undefined}
-              className={`relative flex min-w-0 flex-1 gap-2.5 px-3.5 py-2.5 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${
-                selected ? "bg-muted shadow-[inset_3px_0_0_0_var(--color-foreground)]" : "hover:bg-muted/70"
-              }`}
-            >
-              <span
-                aria-hidden
-                className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary-soft text-[13px] font-semibold text-primary-soft-foreground"
-              >
-                {initials || "?"}
-              </span>
-              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span className="flex min-w-0 items-center gap-1.5">
-                  <span className={`min-w-0 truncate text-sm ${item.unreadCount > 0 ? "font-bold" : "font-semibold"}`}>
-                    {item.contact.displayName}
-                  </span>
-                  <span className="flex flex-1 items-center gap-1 text-muted-foreground">
-                    {rowChannels.map((rowChannel) => {
-                      const ChannelIcon = channelIcon(rowChannel)
-                      return <ChannelIcon key={rowChannel} className="size-3.5 shrink-0" aria-hidden />
-                    })}
-                    <span className="sr-only">{channelsWords(rowChannels)}</span>
-                    {item.isTest ? <Badge variant="secondary" className="shrink-0">Prueba</Badge> : null}
-                  </span>
-                  <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                    {listTimeWords(item.lastMessageAt ?? item.preview?.createdAt ?? null)}
-                  </span>
-                </span>
-                <span className="flex min-w-0 items-center gap-1.5 text-[13px] text-muted-foreground">
-                  {/* En Spam y Bloqueados la fila dice por qué; el estado de atención no aplica. */}
-                  {screen ? (
-                    <span className="min-w-0 flex-1 truncate">{screenReasonWords(screen, item.contact.screenReason)}</span>
-                  ) : line ? (
-                    <StateLabel words={line} className="flex-1 font-medium [&.font-semibold]:font-semibold" />
-                  ) : null}
-                  {item.unreadCount > 0 && (
-                    <span
-                      className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-primary px-1 text-xs font-semibold text-primary-foreground"
-                      aria-label={`${item.unreadCount} sin leer`}
-                    >
-                      {item.unreadCount}
-                    </span>
-                  )}
-                </span>
-              </span>
-            </button>
-          )
-          if (!sideView || !screen || !onRowAction) return index === waiting.length && failedOpen ? [failedHeader, row] : row
-          return (
-            <div key={item.id} className="flex items-center gap-2 pr-3">
-              {row}
-              <Button type="button" size="sm" variant="outline" className="min-h-11 shrink-0 rounded-full sm:min-h-8" onClick={() => onRowAction(item)}>
-                {screen === "blocked" ? "Desbloquear" : "No es spam"}
-              </Button>
-            </div>
-          )
-        })}
-        {failed.length > 0 && !failedOpen ? failedHeader : null}
+        {waiting.map(renderRow)}
+        {failed.length > 0 ? loadMore : null}
+        {failed.length > 0 ? failedHeader : null}
+        {failed.length > 0 ? (
+          <div id={failedId} hidden={!failedOpen} className={failedOpen ? "flex flex-col divide-y" : "hidden"}>
+            {failedOpen ? failed.map(renderRow) : null}
+          </div>
+        ) : null}
         {isRefreshing && hasItems ? (
           <div className="p-2">
             <DataRefreshMarker />
@@ -287,18 +326,8 @@ export function ConversationList({
             </Button>
           </div>
         ) : null}
-        {hasNextPage && (
-          <Button variant="ghost" size="sm" className="self-center" disabled={isFetchingNextPage} onClick={onFetchNextPage}>
-            {isFetchingNextPage ? (
-              <>
-                <Spinner className="size-4" aria-hidden />
-                Cargar más
-              </>
-            ) : (
-              "Cargar más"
-            )}
-          </Button>
-        )}
+        {/* Con el grupo «No salieron», «Cargar más» va justo después de lo que espera respuesta. */}
+        {failed.length === 0 ? loadMore : null}
       </div>
     </ScrollArea>
   )

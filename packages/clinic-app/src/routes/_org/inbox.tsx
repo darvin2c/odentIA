@@ -34,7 +34,7 @@ import { CapReachedNotice, ReceptionOffNotice } from "../../components/agent/rec
 import { ContactWorkspace, type ContextSection } from "../../components/crm/contact-workspace"
 import { NewConversationDialog } from "../../components/inbox-new-conversation"
 import { conversationTarget, type ScreenTarget, UnblockDialog, useContactScreenActions } from "../../components/inbox-contact-screen"
-import { ConversationList, isRowOf, type SideView } from "../../components/inbox/conversation-list"
+import { ConversationList, isRowOf, type SideView, visibleRows } from "../../components/inbox/conversation-list"
 import { ThreadView } from "../../components/inbox/thread-view"
 import { InboxPageSkeleton } from "../../components/skeletons/inbox"
 import { useReceptionName } from "../../lib/agent-names"
@@ -323,6 +323,11 @@ function InboxPage() {
     activeView === "attend"
       ? (items.find((item) => !isRowOf(item, selectedId) && (item.attention?.topics?.length ?? 0) > 0)?.id ?? null)
       : null
+  // El orden que se ve: lo que solo no salió va al final (propuesta UX 3).
+  const ordered = useMemo(() => {
+    const { waiting, failed } = visibleRows(items, !sideView && !searching)
+    return [...waiting, ...failed]
+  }, [items, sideView, searching])
   // Con el teclado: J y K pasan entre conversaciones, R lleva a la caja de texto (fuera de un campo).
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -339,16 +344,16 @@ function InboxPage() {
         box.focus()
         return
       }
-      if (items.length === 0) return
+      if (ordered.length === 0) return
       event.preventDefault()
-      const at = items.findIndex((item) => isRowOf(item, selectedId))
-      const next = key === "j" ? Math.min(items.length - 1, at + 1) : Math.max(0, at === -1 ? 0 : at - 1)
-      const target_ = items[next]
+      const at = ordered.findIndex((item) => isRowOf(item, selectedId))
+      const next = key === "j" ? Math.min(ordered.length - 1, at + 1) : Math.max(0, at === -1 ? 0 : at - 1)
+      const target_ = ordered[next]
       if (target_) selectConversation(target_.id)
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [items, selectedId, selectConversation])
+  }, [ordered, selectedId, selectConversation])
 
   const mode = useDetailMode()
   // La columna de Avisos ocupa el lugar de «Contexto» mientras no quepan los
