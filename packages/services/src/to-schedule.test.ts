@@ -16,6 +16,7 @@ import { branch } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { countOverdueControls, getAdminRecommendation } from "./agent-admin.js"
+import { setLine } from "./automation.js"
 import { peopleShortcutMembers } from "./people-shortcuts.js"
 import { nextPatientNumber } from "./patients.js"
 import { getPlanNextStep } from "./plan-next.js"
@@ -219,10 +220,15 @@ it("«control vencido sin cita»: su día ya pasó y la persona no tiene ninguna
   expect(await c.run((tx) => getPlanNextStep(tx, c.orgId, iris, all))).toMatchObject({ text: expect.stringMatching(/^Control de presión · tiene cita el /), action: { label: "Ver la cita" } })
   expect(await c.run((tx) => getPlanNextStep(tx, c.orgId, juan, all))).toMatchObject({ text: "Control de presión · por reservar", detail: expect.stringMatching(/^Toca el /) })
 
-  // Inicio, con Argos apagado: la fila con la misma cuenta. Encendido, es su línea y no se repite.
-  const rowOf = async () =>
-    (await c.run((tx) => getWorkspaceHome(tx, c.orgId, c.actor, reception, { can: all }))).waiting.find((row) => row.kind === "overdueControls")
+  // Inicio, con Argos apagado: la fila con la misma cuenta.
+  const home = () => c.run((tx) => getWorkspaceHome(tx, c.orgId, c.actor, reception, { can: all }))
+  const rowOf = async () => (await home()).waiting.find((row) => row.kind === "overdueControls")
   expect(await rowOf()).toMatchObject({ controls: 1, patients: 1 })
+  // Encendido y con la línea apagada, Argos la recomienda: es esa fila y esta no se repite.
   await ownerDb.insert(agentConfig).values({ organizationId: c.orgId, enabled: true, advisor: { enabled: true } })
   expect(await rowOf()).toBeUndefined()
+  expect((await home()).waiting.some((row) => row.kind === "advice" && row.key === "recordatorio_control")).toBe(true)
+  // Con la línea prendida, avisa antes de que toque; lo que ya venció vuelve a esta fila.
+  await c.run((tx) => setLine(tx, c.orgId, c.actor, "recordatorio_control", { enabled: true }))
+  expect(await rowOf()).toMatchObject({ controls: 1, patients: 1 })
 })

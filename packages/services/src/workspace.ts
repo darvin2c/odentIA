@@ -1022,10 +1022,12 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
     unclosed: access.appointments ? await waitingUnclosed(tx, orgId, timezone, access.ownAppointments ? userId : null) : null,
     // Lo aceptado sin cita, para quien ve Reportes: la fila lleva a Pacientes › «Por agendar».
     acceptedUnbooked: options.can?.("reports.read") ? await acceptedUnbookedOf(tx, orgId) : null,
-    // Los controles vencidos sin cita, para quien ve la agenda de la sede. Con Argos encendido son
-    // su línea «Avisar un control» (recomendación o automatización): no se repiten aquí.
+    // Los controles vencidos sin cita, para quien ve la agenda de la sede: la lista de la línea de
+    // Argos «Avisar un control». Si Argos ya la recomienda aquí, es esa fila y no se repite. Prendida,
+    // la línea avisa antes de que toque; lo que ya venció sigue saliendo aquí.
     overdueControls:
-      access.appointments && !access.ownAppointments && options.can?.("appointments.read") && !admin.enabled
+      access.appointments && !access.ownAppointments && options.can?.("appointments.read") &&
+      !advice.some((item) => item.key === "recordatorio_control")
         ? await overdueControlsOf(tx, orgId)
         : null,
     // Quien ve la agenda de la sede sabe quién ya completó su registro para su cita de hoy.

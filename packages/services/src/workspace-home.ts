@@ -291,8 +291,8 @@ export interface WaitingAcceptedUnbooked {
 
 /**
  * Los controles vencidos sin ninguna cita por venir: la consulta de la línea de
- * Argos «Avisar un control», y la fila abre su misma lista. Solo con Argos
- * apagado: encendido, es su línea y no se repite (ADR 0025 y 0127).
+ * Argos «Avisar un control», y la fila abre su misma lista. Si Argos ya la
+ * recomienda en «Te espera», es esa fila y esta no sale (ADR 0025 y 0127).
  */
 export interface WaitingOverdueControls {
   controls: number
@@ -400,7 +400,7 @@ export interface WaitingParts {
   unclosed?: { items: WaitingUnclosed[]; total: number; nextAt?: string | null } | null
   /** Quienes tienen algo aceptado sin cita, con lo que suma (null o 0: nadie). */
   acceptedUnbooked?: WaitingAcceptedUnbooked | null
-  /** Los controles vencidos sin cita, con Argos apagado (null o 0: ninguno). */
+  /** Los controles vencidos sin cita, si Argos no los recomienda ya (null o 0: ninguno). */
   overdueControls?: WaitingOverdueControls | null
   /** Presupuestos armados y sin enviar desde el día anterior, del más antiguo al más reciente. */
   unsentBudgets?: { items: WaitingUnsentBudget[]; total: number } | null

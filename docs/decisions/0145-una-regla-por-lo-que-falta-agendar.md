@@ -16,7 +16,7 @@ La ronda de QA del 2026-11-04 contó la misma pregunta con un número distinto e
   - *Control vencido sin cita:* un control pendiente cuyo día ya pasó en la zona de la clínica, de una persona sin ninguna cita por venir. A un control le sirve cualquier visita.
 - **Los atajos «Por agendar» y «Control vencido» de Pacientes son esa regla**, no un paso de «Qué sigue»: alguien puede estar en «Por agendar» aunque su siguiente paso sea enviar otro presupuesto. Así el número es el mismo que el de Inicio. Los atajos de presupuestos siguen el paso de «Qué sigue».
 - **Argos usa la misma regla y suma sus días** (0015): el título los nombra («hace más de 7 días»). Cuenta presupuestos y controles; Pacientes, personas: cuando no coinciden, el título dice las dos cifras.
-- **Inicio lleva a donde se resuelve** (0118): lo aceptado sin cita es una fila que abre Pacientes › «Por agendar», con «Reservar cita» en cada persona. Los controles vencidos son la línea de Argos «Avisar un control»: con Argos encendido, la línea los recomienda o los atiende; con Argos apagado, Inicio trae una fila con su misma consulta que abre su misma lista. Nunca las dos (0025, 0127).
+- **Inicio lleva a donde se resuelve** (0118): lo aceptado sin cita es una fila que abre Pacientes › «Por agendar», con «Reservar cita» en cada persona. Los controles vencidos son la línea de Argos «Avisar un control»: Inicio trae una fila con su misma consulta que abre su misma lista, salvo que Argos ya la recomiende ahí; entonces es esa fila. Nunca las dos (0025, 0127). Prendida, la línea avisa antes de que el control toque ([0141](0141-en-una-clinica-nueva-todo-viene-encendido.md) la prende en toda clínica nueva); lo que ya venció sigue saliendo en la fila.
 
 ## Alternativas descartadas
 

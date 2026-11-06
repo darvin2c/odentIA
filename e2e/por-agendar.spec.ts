@@ -25,7 +25,7 @@ test("lo aceptado sin cita y el control vencido llevan a su lista; un cobro es u
     dueAt: new Date(Date.now() - 10 * 86_400_000),
   })
 
-  // --- Inicio: las dos filas, con Argos apagado ---
+  // --- Inicio: las dos filas (la clínica de prueba nace con Argos apagado) ---
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, "/home"))
   const waiting = page.getByRole("region", { name: "Te espera" })

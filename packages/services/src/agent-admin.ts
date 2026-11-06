@@ -1351,7 +1351,8 @@ export async function getAdminRecommendations(
 
 /**
  * Las cifras de «Avisar un control» (`overdueControls`) sin su lista: la fila de
- * Inicio con Argos apagado. Es la misma consulta, y la fila abre la misma lista.
+ * Inicio cuando Argos no la recomienda ahí. Es la misma consulta, y la fila abre
+ * la misma lista.
  */
 export async function countOverdueControls(tx: Db, orgId: string): Promise<{ controls: number; patients: number }> {
   const result = await overdueControls(tx, orgId, await getOrgLocale(tx, orgId), 1)
