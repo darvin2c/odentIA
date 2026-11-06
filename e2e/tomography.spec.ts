@@ -106,6 +106,11 @@ test("tomografía: la carpeta del CD se sube, queda en la ficha y se abre en pan
   // El 3D es el cuarto cuadro y dice que es para mostrar (o que este equipo no puede).
   await expect(viewer.getByText("3D · para mostrar")).toBeVisible()
   await page.screenshot({ path: test.info().outputPath("tomografia-cortes.png") })
+  // «Ver grande» lleva al 3D en su pestaña, para mostrárselo al paciente.
+  await viewer.getByRole("button", { name: "Ver grande" }).click()
+  await expect(viewer.getByRole("tab", { name: "3D", exact: true })).toHaveAttribute("aria-selected", "true")
+  await expect(viewer.getByText("El hueso fino puede no verse en 3D", { exact: false })).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("tomografia-3d.png") })
 
   // En el celular: una vista grande a la vez y, al intentar medir, por qué no.
   const phone = await page.context().browser()!.newContext({

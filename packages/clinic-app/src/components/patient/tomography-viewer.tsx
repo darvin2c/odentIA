@@ -160,6 +160,7 @@ function ThreePlanes({
   tool,
   saved,
   show3d,
+  onExpand3d,
 }: {
   volume: CbctVolume
   window: WindowLevel
@@ -167,6 +168,8 @@ function ThreePlanes({
   saved: SavedMeasures
   /** El cuarto cuadro: el 3D para mostrar (en la computadora). */
   show3d: boolean
+  /** «Ver grande» del cuarto cuadro: la pestaña «3D». */
+  onExpand3d?: () => void
 }) {
   const [point, setPoint] = useState({
     x: Math.floor(volume.nx / 2),
@@ -297,7 +300,7 @@ function ThreePlanes({
           </div>
         </div>
       ))}
-      {show3d && <Tomography3D volume={volume} window={window} />}
+      {show3d && <Tomography3D volume={volume} window={window} onExpand={onExpand3d} />}
     </div>
   )
 }
@@ -512,14 +515,8 @@ export function TomographyViewer({
       ? (custom ?? volume.presets.hueso)
       : volume.presets[preset]
     : null
-  // En la computadora, «Corte» es parte de la panorámica y el 3D, de los cortes.
-  const shown: TomographyView = viewOnly
-    ? view
-    : view === "corte"
-      ? "panoramica"
-      : view === "3d"
-        ? "cortes"
-        : view
+  // En la computadora, «Pieza» es parte de la panorámica; el 3D tiene su pestaña, para mostrarlo grande.
+  const shown: TomographyView = !viewOnly && view === "corte" ? "panoramica" : view
   const files = loaded.files.data?.data.files
   const otherSeries = useMemo(
     () => new Set(files?.map((f) => f.seriesInstanceUid)).size > 1,
@@ -599,6 +596,7 @@ export function TomographyViewer({
               <TabsList aria-label="Vista">
                 <TabsTrigger value="panoramica">Panorámica</TabsTrigger>
                 <TabsTrigger value="cortes">Cortes</TabsTrigger>
+                <TabsTrigger value="3d">3D</TabsTrigger>
               </TabsList>
             </Tabs>
           )}
@@ -754,6 +752,7 @@ export function TomographyViewer({
                 tool={viewOnly ? "ninguna" : tool}
                 saved={saved}
                 show3d={!viewOnly}
+                onExpand3d={() => changeView("3d")}
               />
               <aside className="flex w-full shrink-0 flex-col gap-3 border-t border-slate-800 bg-[#0d131b] p-4 text-sm lg:w-72 lg:border-t-0 lg:border-l">
                 <MeasureList saved={saved} canWrite={canWrite} viewOnly={viewOnly} />

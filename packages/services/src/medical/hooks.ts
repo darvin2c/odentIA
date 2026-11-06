@@ -39,6 +39,7 @@ export const medicalHooks: ProductHooks = {
   preferredDiagnoses: (system) => (isDiagnosisSystem(system) ? medicalDiagnosisPattern(system) : null),
   prescribing: medicalPrescribing,
   imaging: MEDICAL_IMAGING_TYPES,
+  imagingStudies: false,
   consentSuggestions: MEDICAL_CONSENT_TEMPLATES,
   interview: medicalInterview,
   examination: medicalExamination,

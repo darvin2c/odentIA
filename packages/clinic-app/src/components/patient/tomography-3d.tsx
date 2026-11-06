@@ -1,4 +1,4 @@
-import { Slider } from "@odentia/ui"
+import { Button, Slider } from "@odentia/ui"
 import { LoadingState } from "@odentia/ui-patterns"
 import { useEffect, useId, useRef, useState } from "react"
 import { cbctNifti } from "../../lib/cbct-nifti"
@@ -62,10 +62,13 @@ export function Tomography3D({
   volume,
   window,
   className,
+  onExpand,
 }: {
   volume: CbctVolume
   window: WindowLevel
   className?: string
+  /** En el cuadro chico de «Cortes»: lleva a la pestaña «3D», grande, para mostrárselo al paciente. */
+  onExpand?: () => void
 }) {
   const id = useId()
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -143,6 +146,11 @@ export function Tomography3D({
       <span className="absolute top-2 left-2 z-10 rounded bg-black/70 px-1.5 py-0.5 text-[0.7rem] font-semibold tracking-wide text-slate-300 uppercase">
         3D · para mostrar
       </span>
+      {onExpand && state !== "sin-3d" && (
+        <Button type="button" size="sm" variant="outline" className="absolute top-2 right-2 z-10" onClick={onExpand}>
+          Ver grande
+        </Button>
+      )}
       {state === "sin-3d" ? (
         <p role="status" className="m-auto max-w-xs p-6 text-center text-sm text-slate-300">
           Este equipo no puede mostrar el 3D; los cortes siguen igual.

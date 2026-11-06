@@ -175,6 +175,7 @@ export const dentalHooks: ProductHooks = {
   site: dentalProductSite,
   prescribing: DENTAL_PRESCRIBING,
   imaging: DENTAL_IMAGING_TYPES,
+  imagingStudies: true,
   consentSuggestions: SUGGESTED_CONSENT_TEMPLATES,
   interview: dentalInterview,
   examination: dentalExamination,
