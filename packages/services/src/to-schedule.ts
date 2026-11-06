@@ -125,23 +125,23 @@ export function overdueControlSql(
     and ${noUpcomingAppointmentSql({ id: control.patientId, organizationId: control.organizationId })})`
 }
 
-/** Pacientes activos con algo aceptado y sin cita: Pacientes › «Por agendar» y su fila de Inicio. */
+/** Pacientes activos y que no son de prueba con algo aceptado y sin cita: Pacientes › «Por agendar» y su fila de Inicio. */
 export async function patientsToSchedule(tx: Db, orgId: string): Promise<string[]> {
   const rows = await tx.execute<{ id: string }>(sql`
     select distinct p.id from treatment_plan_item i
     join patient p on p.organization_id = i.organization_id and p.id = i.patient_id
-    join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id and pp.is_active
+    join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id and pp.is_active and not pp.is_test
     where i.organization_id = ${orgId}
       and ${toScheduleSql({ id: sql`i.id`, organizationId: sql`i.organization_id`, status: sql`i.status`, decisionStatus: sql`i.decision_status` })}`)
   return rows.map((row) => row.id)
 }
 
-/** Pacientes activos con un control vencido y sin cita: Pacientes › «Control vencido» y su fila de Inicio. */
+/** Pacientes activos y que no son de prueba con un control vencido y sin cita: Pacientes › «Control vencido» y su fila de Inicio. */
 export async function patientsWithOverdueControl(tx: Db, orgId: string, timezone: string): Promise<string[]> {
   const rows = await tx.execute<{ id: string }>(sql`
     select distinct p.id from clinical_follow_up f
     join patient p on p.organization_id = f.organization_id and p.id = f.patient_id
-    join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id and pp.is_active
+    join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id and pp.is_active and not pp.is_test
     where f.organization_id = ${orgId}
       and ${overdueControlSql({ organizationId: sql`f.organization_id`, patientId: sql`f.patient_id`, status: sql`f.status`, dueAt: sql`f.due_at` }, timezone)}`)
   return rows.map((row) => row.id)

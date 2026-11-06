@@ -419,7 +419,7 @@ function lineToScheduleSql(now: Date): SQL {
     { id: sql`pi.id`, organizationId: sql`pi.organization_id`, status: sql`pi.status`, decisionStatus: sql`pi.decision_status` },
     at(now),
   )} and exists (select 1 from patient lp join contact lc on lc.organization_id = lp.organization_id and lc.id = lp.person_id
-    where lp.organization_id = pi.organization_id and lp.id = pi.patient_id and lc.is_active))`
+    where lp.organization_id = pi.organization_id and lp.id = pi.patient_id and lc.is_active and not lc.is_test))`
 }
 
 /**

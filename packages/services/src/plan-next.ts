@@ -35,7 +35,7 @@ import { notFound } from "./errors.js"
 import { findOrgLocale } from "./locale.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { productHooks } from "./products.js"
-import { dayKeyIn, isToSchedule, LIVE_APPOINTMENT_STATUSES } from "./to-schedule.js"
+import { dayKeyIn, isOverdueControl, isToSchedule, LIVE_APPOINTMENT_STATUSES } from "./to-schedule.js"
 
 export type PlanNextKind = "enviar" | "agendar" | "respuesta" | "continuar" | "control" | "ninguno"
 
@@ -392,8 +392,9 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
       return {
         kind: "control",
         text: `${control.title} · por reservar`,
-        // Hoy o después: toca ese día («Toca el 12 dic»); un día ya pasado: «Tocaba el 12 dic».
-        detail: `${dayKey(control.dueAt) >= dayKey(new Date()) ? "Toca el" : "Tocaba el"} ${day(control.dueAt)}`,
+        // Vencido sin cita (la regla de «Control vencido», `isOverdueControl`): «Tocaba el 12 dic»;
+        // hoy o después: «Toca el 12 dic».
+        detail: `${isOverdueControl(control, nextAppointmentAt ?? null, timezone) ? "Tocaba el" : "Toca el"} ${day(control.dueAt)}`,
         action: can("appointments.write") ? { label: "Reservar cita", followUpId: control.id } : null,
       }
     }

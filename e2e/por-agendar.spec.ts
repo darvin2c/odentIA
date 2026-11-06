@@ -87,6 +87,9 @@ test("lo aceptado sin cita y el control vencido llevan a su lista; un cobro es u
   await info.attach("inicio-movil", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
   await gotoHydrated(page, tenant(org.slug, "/settings/audit?area=cobros"))
   await expect(page.getByText("Emitió un ticket").first()).toBeVisible()
+  // «Sobre qué» también se ve en el teléfono: la persona y el ticket, con sus enlaces.
+  await expect(page.getByRole("link", { name: "Lucía Quispe" }).first()).toBeVisible()
+  await expect(page.getByRole("link", { name: /^Ticket N\.º \d{6}$/ }).first()).toBeVisible()
   await expect.poll(() => overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("actividad-movil", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
 })

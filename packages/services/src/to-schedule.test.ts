@@ -16,6 +16,8 @@ import { branch } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { countOverdueControls, getAdminRecommendation } from "./agent-admin.js"
+import { argosFigure } from "./argos-figures.js"
+import { runArgosQuery } from "./argos-query.js"
 import { setLine } from "./automation.js"
 import { peopleShortcutMembers } from "./people-shortcuts.js"
 import { nextPatientNumber } from "./patients.js"
@@ -32,16 +34,28 @@ import {
   toScheduleSql,
 } from "./to-schedule.js"
 import { getWorkspaceHome, type WorkspaceAccess } from "./workspace.js"
+import { canAccess } from "@odentia/auth/permissions"
 
 setupTestDb()
 
 const DAY = 86_400_000
 const LIMA = "America/Lima"
 const all = () => true
-const reception: WorkspaceAccess = {
-  patients: true, appointments: true, conversations: false, tasks: false, finance: true, clinical: false,
-  crm: false, agent: false, allTasks: false, configure: false, ownAppointments: false,
+/** Lo que ve cada rol en Inicio, con sus permisos de verdad (como `accessFor` de la API). */
+function accessOf(role: string): { access: WorkspaceAccess; can: (permission: string) => boolean } {
+  const can = (permission: string) => canAccess(role, permission)
+  return {
+    can,
+    access: {
+      patients: can("patients.read"), appointments: can("appointments.read"), conversations: can("conversations.read"),
+      tasks: can("tasks.read"), finance: can("finance.read"), clinical: can("clinical.read"), crm: can("crm.read"),
+      agent: can("agent.read") || can("agent.decide"), allTasks: can("tasks.all"), configure: can("settings.write"),
+      ownAppointments: role === "clinician",
+    },
+  }
 }
+const owner = accessOf("owner")
+const reception = accessOf("reception")
 
 interface Clinic {
   orgId: string
@@ -87,7 +101,11 @@ async function accepted(c: Clinic, patientId: string, status = "pendiente", days
     organizationId: c.orgId, patientId, planId: plan!.id, budgetId: budget!.id, optionId, planItemId: item!.id,
     title: "Corona", currency: "PEN", priceCents: 10_000, decision: "aceptado",
   })
-  await ownerDb.update(treatmentBudget).set({ status: "aceptado", decidedAt: new Date(Date.now() - daysAgo * DAY) }).where(eq(treatmentBudget.id, budget!.id))
+  // Como de verdad: se entregó y después se aceptó.
+  await ownerDb
+    .update(treatmentBudget)
+    .set({ status: "aceptado", presentedAt: new Date(Date.now() - (daysAgo + 1) * DAY), decidedAt: new Date(Date.now() - daysAgo * DAY) })
+    .where(eq(treatmentBudget.id, budget!.id))
   return item!.id
 }
 
@@ -150,8 +168,15 @@ it("«aceptó y no tiene cita» es una sola regla: código, SQL, Pacientes, Inic
   // Reportes («No tienen cita») e Inicio: el mismo número, y lo que suma.
   const work = await c.run((tx) => upcomingWork(tx, c.orgId, "PEN", new Date()))
   expect(work.unbooked).toEqual({ patients: 4, cents: 40_000 })
-  const home = await c.run((tx) => getWorkspaceHome(tx, c.orgId, c.actor, reception, { can: all }))
+  // La cifra oficial de Argos («Lo aceptado sin cita») suma lo mismo: la corona de Beto cuenta aunque tenga otra cita.
+  const figure = argosFigure("lo_que_viene_sin_cita")?.sources[0]?.rows
+  const official = await runArgosQuery(appDb, { orgId: c.orgId, memberRole: "owner", query: `select sum(v) as v from (${figure}) x` })
+  expect(Number(official.rows[0]?.v) * 100).toBe(40_000)
+  const home = await c.run((tx) => getWorkspaceHome(tx, c.orgId, c.actor, owner.access, { can: owner.can }))
   expect(home.waiting.find((row) => row.kind === "acceptedUnbooked")).toMatchObject({ patients: 4, cents: 40_000 })
+  // Recepción no ve Reportes: esa fila, con su importe, no es suya.
+  const desk = await c.run((tx) => getWorkspaceHome(tx, c.orgId, c.actor, reception.access, { can: reception.can }))
+  expect(desk.waiting.some((row) => row.kind === "acceptedUnbooked")).toBe(false)
   // Argos: la misma regla con sus días, un caso por presupuesto; la fila de Beto dice su otra cita.
   const argos = await c.run((tx) => getAdminRecommendation(tx, c.orgId, all, "presupuestos_sin_cita"))
   expect(argos.total).toBe(4)
@@ -220,8 +245,8 @@ it("«control vencido sin cita»: su día ya pasó y la persona no tiene ninguna
   expect(await c.run((tx) => getPlanNextStep(tx, c.orgId, iris, all))).toMatchObject({ text: expect.stringMatching(/^Control de presión · tiene cita el /), action: { label: "Ver la cita" } })
   expect(await c.run((tx) => getPlanNextStep(tx, c.orgId, juan, all))).toMatchObject({ text: "Control de presión · por reservar", detail: expect.stringMatching(/^Toca el /) })
 
-  // Inicio, con Argos apagado: la fila con la misma cuenta.
-  const home = () => c.run((tx) => getWorkspaceHome(tx, c.orgId, c.actor, reception, { can: all }))
+  // Inicio de recepción, con Argos apagado: la fila con la misma cuenta.
+  const home = () => c.run((tx) => getWorkspaceHome(tx, c.orgId, c.actor, reception.access, { can: reception.can }))
   const rowOf = async () => (await home()).waiting.find((row) => row.kind === "overdueControls")
   expect(await rowOf()).toMatchObject({ controls: 1, patients: 1 })
   // Encendido y con la línea apagada, Argos la recomienda: es esa fila y esta no se repite.

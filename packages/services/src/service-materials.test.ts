@@ -24,7 +24,7 @@ import {
   stockMovement,
   supplier,
 } from "@odentia/db/schema/inventory"
-import { auditEvent, branch } from "@odentia/db/schema/org"
+import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { upsertAgentConfig } from "./agentConfig.js"
@@ -314,6 +314,41 @@ it("«Empieza por estos 5»: los servicios más hechos del mes sin materiales, s
   expect(top).toMatchObject({ days: 30, totalEncounters: 5, coveredEncounters: 3, share: 0.6 })
   const one = await withOrgContext(appDb, "org_m", (tx) => topServicesWithoutMaterials(tx, "org_m", { limit: 1 }))
   expect(one).toMatchObject({ services: [{ serviceId: sealant.id }], coveredEncounters: 1 })
+})
+
+it("«Empieza por estos 5» en latidIA: las consultas de su biblioteca no se sugieren, los procedimientos sí", async () => {
+  await insertOrg(ownerDb, "org_lat", "consultorio")
+  await ownerDb.update(orgProfile).set({ product: "medical" }).where(eq(orgProfile.organizationId, "org_lat"))
+  const professional = randomUUID()
+  await ownerDb.insert(user).values({ id: professional, name: "Dra. Vela", email: `${professional}@example.test` })
+  /** Un servicio de la biblioteca médica, por su clave. */
+  const fromLibrary = async (key: string, name: string, kind: string) => {
+    await ownerDb.insert(treatmentTemplate).values({ key, name, kind, scope: "general", product: "medical" }).onConflictDoNothing()
+    const [template] = await ownerDb.select({ id: treatmentTemplate.id }).from(treatmentTemplate).where(eq(treatmentTemplate.key, key))
+    const [row] = await ownerDb
+      .insert(serviceCatalog)
+      .values({ organizationId: "org_lat", templateId: template!.id, source: "template", name, scope: "general", priceCents: 8000, currency: "PEN" })
+      .returning()
+    return row!
+  }
+  const consult = await fromLibrary("consulta-medicina-general", "Consulta de medicina general", "general")
+  const control = await fromLibrary("control-nino-sano-1-a-4", "Control de niño sano (1 a 4 años)", "pediatria")
+  const nebulization = await fromLibrary("nebulizacion", "Nebulización", "procedimiento")
+  const [person] = await insertTestPatients(ownerDb, { organizationId: "org_lat", displayName: "Rosa Quispe", patientNumber: await nextPatientNumber(ownerDb, "org_lat") })
+  const at = new Date(Date.now() - 3 * 86_400_000)
+  for (const act of [{ serviceId: consult.id, quantity: 9 }, { serviceId: control.id, quantity: 5 }, { serviceId: nebulization.id, quantity: 2 }]) {
+    const [visit] = await ownerDb
+      .insert(encounter)
+      .values({ organizationId: "org_lat", patientId: person!.id, professionalUserId: professional, reason: "Consulta" })
+      .returning()
+    await ownerDb.insert(encounterProcedure).values({ organizationId: "org_lat", encounterId: visit!.id, serviceId: act.serviceId, description: "Acto", quantity: act.quantity })
+    await ownerDb
+      .update(encounter)
+      .set({ status: "finalizada", startedAt: at, finalizedAt: at, endedAt: at, finalizedBy: professional, signerName: "Dra. Vela", signerTitle: "Médico cirujano", signerRegistration: "CMP 12345" })
+      .where(eq(encounter.id, visit!.id))
+  }
+  const top = await withOrgContext(appDb, "org_lat", (tx) => topServicesWithoutMaterials(tx, "org_lat"))
+  expect(top.services).toEqual([{ serviceId: nebulization.id, name: "Nebulización", times: 2 }])
 })
 
 /** Atención en una sede con materiales y lotes: 2 guantes y 1 sobre por vez. */

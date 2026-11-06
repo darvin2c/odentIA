@@ -241,7 +241,7 @@ async function overdueControls(tx: Db, orgId: string, zone: OrgLocale, limit: nu
       select f.id, p.id as patient_id, pp.display_name as name, f.title, f.due_at
       from clinical_follow_up f
       join patient p on p.id = f.patient_id and p.organization_id = f.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
-      where f.organization_id = ${orgId} and pp.is_active
+      where f.organization_id = ${orgId} and pp.is_active and not pp.is_test
         and ${overdueControlSql({ organizationId: sql`f.organization_id`, patientId: sql`f.patient_id`, status: sql`f.status`, dueAt: sql`f.due_at` }, zone.timezone)}
     )
     select due.*, count(*) over ()::int as total,
@@ -389,25 +389,42 @@ async function lapsedInvites(tx: Db, orgId: string, zone: OrgLocale, limit: numb
 }
 
 /**
- * Presupuestos aceptados con algo sin cita: la regla de Pacientes › «Por agendar»
+ * Lo aceptado sin cita, un caso por persona: la regla de Pacientes › «Por agendar»
  * (`budgetToScheduleSql`), más los días que espera la línea (ADR 0015), que el
- * título nombra. Otra cita de la persona no lo agenda: la fila dice cuál es.
+ * título nombra. El caso es su presupuesto más antiguo con algo sin cita; los
+ * demás se dicen en la fila. Otra cita de la persona no lo agenda: la fila dice
+ * cuál es. Al crear casos (`scope`), quien ya tiene uno abierto no recibe otro.
  */
 async function budgetsWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale, days: number, scope?: Fresh, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
-  const rows = await tx.execute<{ id: string; patient_id: string; name: string; title: string; number: number; decided_at: Date | string; next_session: boolean; next_at: Date | string | null; total: number }>(sql`
-    select b.id, p.id as patient_id, pp.display_name as name, b.title, b.budget_number as number, b.decided_at,
-           ${NEXT_SESSION_OPEN} as next_session,
-           (select min(a.starts_at) from appointment a where a.organization_id = p.organization_id and a.patient_id = p.id
-              and a.starts_at > now() and a.status in ('programada', 'confirmada')) as next_at,
-           count(*) over ()::int as total
-    from treatment_budget b
-    join patient p on p.id = b.patient_id and p.organization_id = b.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
-    where b.organization_id = ${orgId} and b.status in ('aceptado', 'parcial')
-      and ${BUDGET_TO_SCHEDULE}
-      and (b.decided_at < now() - make_interval(days => ${days}) or ${NEXT_SESSION_OPEN})
-      and pp.is_active
-      ${fresh(scope, sql`b.id::text`, sql`b.decided_at + make_interval(days => ${days})`)}
-    order by b.decided_at asc
+  const rows = await tx.execute<{ id: string; patient_id: string; name: string; title: string; number: number; decided_at: Date | string; next_session: boolean; next_at: Date | string | null; budgets: number; total: number }>(sql`
+    with due as (
+      select b.id, p.id as patient_id, pp.display_name as name, b.title, b.budget_number as number, b.decided_at,
+             ${NEXT_SESSION_OPEN} as next_session,
+             (select min(a.starts_at) from appointment a where a.organization_id = p.organization_id and a.patient_id = p.id
+                and a.starts_at > now() and a.status in ('programada', 'confirmada')) as next_at
+      from treatment_budget b
+      join patient p on p.id = b.patient_id and p.organization_id = b.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
+      where b.organization_id = ${orgId} and b.status in ('aceptado', 'parcial')
+        and ${BUDGET_TO_SCHEDULE}
+        and (b.decided_at < now() - make_interval(days => ${days}) or ${NEXT_SESSION_OPEN})
+        and pp.is_active and not pp.is_test
+        ${fresh(scope, sql`b.id::text`, sql`b.decided_at + make_interval(days => ${days})`)}
+        ${
+          scope
+            ? sql`and not exists (select 1 from automation_job open_case
+                left join task open_task on open_task.organization_id = open_case.organization_id and open_task.id = open_case.task_id
+                where open_case.organization_id = p.organization_id and open_case.kind = ${scope.kind} and open_case.patient_id = p.id
+                  and (open_case.status = 'pendiente' or open_task.status = 'open'))`
+            : sql``
+        }
+    ), person as (
+      select distinct on (due.patient_id) due.*, (count(*) over (partition by due.patient_id))::int as budgets
+      from due
+      order by due.patient_id, due.decided_at asc, due.id
+    )
+    select person.*, count(*) over ()::int as total
+    from person
+    order by person.decided_at asc, person.id
     limit ${limit}`)
   const total = Number(rows[0]?.total ?? 0)
   const dayWord = plural(days, "día", "días")
@@ -420,6 +437,7 @@ async function budgetsWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale,
       // Sin importes: quien agenda ve el presupuesto mínimo, no sus líneas.
       line: [
         `${row.next_session ? "Falta la cita de la próxima sesión · " : ""}Presupuesto N.º ${row.number} · ${row.title} · aceptado el ${dayOf(row.decided_at, zone)}`,
+        row.budgets > 1 ? `y ${plural(row.budgets - 1, "otro presupuesto", `otros ${row.budgets - 1} presupuestos`)}` : null,
         row.next_at ? `su cita del ${dayOf(row.next_at, zone)} no lo lleva` : null,
       ]
         .filter(Boolean)
@@ -427,9 +445,9 @@ async function budgetsWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale,
       patientId: row.patient_id,
       budgetId: row.id,
     })),
-    title: `${total} ${plural(total, "presupuesto aceptado", "presupuestos aceptados")} hace más de ${days} ${dayWord}, sin cita para lo aceptado`,
-    detail: "El paciente aceptó y lo aceptado todavía no tiene fecha.",
-    how: `Presupuestos aceptados (del todo o en parte) hace más de ${days} ${dayWord}, o con un tratamiento en curso, que tienen algo aceptado sin una cita por venir que lo lleve, aunque la persona tenga otra cita; de pacientes activos. Es la regla de Pacientes › «Por agendar», que cuenta personas y no espera esos ${days} ${dayWord}.`,
+    title: `${total} ${plural(total, "persona tiene", "personas tienen")} algo aceptado hace más de ${days} ${dayWord}, sin cita para eso`,
+    detail: "Aceptaron y lo aceptado todavía no tiene fecha.",
+    how: `Personas con un presupuesto aceptado (del todo o en parte) hace más de ${days} ${dayWord}, o con un tratamiento en curso, que tiene algo aceptado sin una cita por venir que lo lleve, aunque tengan otra cita; de pacientes activos. Una fila por persona, con su presupuesto más antiguo. Es la regla de Pacientes › «Por agendar», que no espera esos ${days} ${dayWord}.`,
   }
 }
 

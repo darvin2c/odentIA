@@ -454,7 +454,7 @@ describe("«Presupuesto aceptado sin cita» sigue la regla de «Por agendar» (A
     expect(line.todayCases).toBe(1)
     const advice = await run(c, (tx) => getAdminRecommendation(tx, c.orgId, all, "presupuestos_sin_cita"))
     // El título nombra los días de la línea; la fila dice la otra cita.
-    expect(advice.title).toBe("1 presupuesto aceptado hace más de 7 días, sin cita para lo aceptado")
+    expect(advice.title).toBe("1 persona tiene algo aceptado hace más de 7 días, sin cita para eso")
     expect(advice.items[0]?.line).toMatch(/su cita del .+ no lo lleva$/)
     await turnedOn(c, "presupuestos_sin_cita", 30, 7)
     expect(await run(c, (tx) => syncTeamLines(tx, c.orgId, new Date()))).toBe(1)
@@ -465,6 +465,40 @@ describe("«Presupuesto aceptado sin cita» sigue la regla de «Por agendar» (A
     await ownerDb.insert(appointmentPlanItem).values({ organizationId: c.orgId, patientId: rosa, appointmentId: cleaning!.id, planItemId: item })
     expect(await settle()).toBe(1)
     expect((await run(c, (tx) => getAdminRecommendation(tx, c.orgId, all, "presupuestos_sin_cita"))).total).toBe(0)
+  })
+
+  it("un caso por persona: con dos presupuestos y otra cita, una sola tarea, que dice cuántos son", async () => {
+    const c = await clinic()
+    const rosa = await person(c, "Rosa Quispe")
+    await acceptedBudget(c, rosa, 20)
+    await acceptedBudget(c, rosa, 10)
+    const startsAt = new Date(Date.now() + DAY)
+    await ownerDb.insert(appointment).values({
+      organizationId: c.orgId, branchId: c.branchId, patientId: rosa, professionalUserId: c.professionalId, roomId: c.roomId,
+      startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30, status: "programada",
+    })
+    const advice = await run(c, (tx) => getAdminRecommendation(tx, c.orgId, all, "presupuestos_sin_cita"))
+    expect(advice.total).toBe(1)
+    expect(advice.items[0]?.line).toMatch(/ · y otro presupuesto · su cita del .+ no lo lleva$/)
+    await turnedOn(c, "presupuestos_sin_cita", 30, 7)
+    expect(await run(c, (tx) => syncTeamLines(tx, c.orgId, new Date()))).toBe(1)
+    expect((await deliver(c)).map((result) => result.outcome)).toEqual(["tarea"])
+    // Con su tarea abierta, el otro presupuesto no abre otro caso.
+    expect(await run(c, (tx) => syncTeamLines(tx, c.orgId, new Date()))).toBe(0)
+    expect(await tasksOf(c)).toHaveLength(1)
+  })
+
+  it("si lo aceptado ya se hizo o se suspendió, la tarea se cierra con ese motivo, no con «ya tiene cita»", async () => {
+    const c = await clinic()
+    const rosa = await person(c, "Rosa Quispe")
+    const item = await acceptedBudget(c, rosa, 10)
+    await turnedOn(c, "presupuestos_sin_cita", 30, 7)
+    expect(await run(c, (tx) => syncTeamLines(tx, c.orgId, new Date()))).toBe(1)
+    expect((await deliver(c)).map((result) => result.outcome)).toEqual(["tarea"])
+    await ownerDb.update(treatmentPlanItem).set({ status: "suspendido" }).where(eq(treatmentPlanItem.id, item))
+    expect(await run(c, (tx) => settleTasks(tx, c.orgId, new Date()))).toBe(1)
+    const [settled] = await tasksOf(c)
+    expect(settled).toMatchObject({ status: "done", settledReason: "lo aceptado de Rosa Quispe ya se hizo, se suspendió o se canceló" })
   })
 
   it("los controles vencidos son los de Pacientes: su día ya pasó y la persona no tiene ninguna cita por venir", async () => {

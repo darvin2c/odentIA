@@ -1020,8 +1020,12 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
     unconfirmed: access.appointments && !access.ownAppointments ? await waitingUnconfirmed(tx, orgId) : null,
     // Y cierra lo que ya pasó: ¿vino o no vino? Quien atiende, las suyas: si vino, le toca registrar la atención.
     unclosed: access.appointments ? await waitingUnclosed(tx, orgId, timezone, access.ownAppointments ? userId : null) : null,
-    // Lo aceptado sin cita, para quien ve Reportes: la fila lleva a Pacientes › «Por agendar».
-    acceptedUnbooked: options.can?.("reports.read") ? await acceptedUnbookedOf(tx, orgId) : null,
+    // Lo aceptado sin cita, para quien ve Reportes: la fila lleva a Pacientes › «Por agendar». Si Argos
+    // ya recomienda aquí «Presupuesto aceptado sin cita», es esa fila y esta no se repite.
+    acceptedUnbooked:
+      options.can?.("reports.read") && !advice.some((item) => item.key === "presupuestos_sin_cita")
+        ? await acceptedUnbookedOf(tx, orgId)
+        : null,
     // Los controles vencidos sin cita, para quien ve la agenda de la sede: la lista de la línea de
     // Argos «Avisar un control». Si Argos ya la recomienda aquí, es esa fila y no se repite. Prendida,
     // la línea avisa antes de que toque; lo que ya venció sigue saliendo aquí.
@@ -1131,12 +1135,12 @@ export interface WorkspaceAuditItem {
   who: string
   area: AuditArea | "otros"
   areaLabel: string
+  /** Cuántos registros de la acción dicen `what`: dos pagos sin ticket son «Registró un pago», 2 veces. */
+  times: number
   /** Lo demás que dejó la misma acción («Registró un pago», «Aplicó un pago a un cargo» ×2). */
   also: Array<{ what: string; count: number }>
   /** Sobre quién y sobre qué; nulo si el registro no lo dice o la historia está bloqueada. */
   subject: WorkspaceAuditSubject | null
-  /** Cuántos registros de la acción dicen `what`: dos pagos sin ticket son «Registró un pago», 2 veces. */
-  times: number
 }
 
 /** Sobre quién fue una acción y, si lo hay, la cita, el ticket o el presupuesto. */
@@ -1163,13 +1167,13 @@ type AuditRow = {
   actorName: string | null
   createdAt: string
   origin: string | null
+  /** La persona de la que trata, aunque su historia esté bloqueada: agrupa y ordena la página. */
   personId: string | null
+  /** Su nombre; nulo si su historia está bloqueada (ADR 0080). */
   personName: string | null
   patientId: string | null
   appointmentId: string | null
-  /** La persona de la que trata, aunque su historia esté bloqueada: agrupa y ordena la página. */
   appointmentAt: string | null
-  /** Su nombre; nulo si su historia está bloqueada (ADR 0080). */
   ticketId: string | null
   ticketNumber: number | null
   budgetId: string | null
@@ -1238,10 +1242,6 @@ function auditActionsOf(moment: AuditRow[]): AuditRow[][] {
   return [...people.map((id) => moment.filter((row) => row.personId === id)), ...(nobody.length > 0 ? [nobody] : [])]
 }
 
-/**
- * Actividad del equipo, de lo más reciente a lo más antiguo: una fila por acción
- * (issue #112). Un cobro deja su pago, su ticket y su movimiento de caja en el
- * mismo instante: la fila dice lo que se hizo, «también» lo demás, y sobre quién
 /** La persona de una fila para ordenar y cortar la página: su id, o vacío si no nombra a nadie (va al final del instante). */
 const auditPersonKey = (row: Pick<AuditRow, "personId">) => row.personId ?? ""
 
@@ -1253,9 +1253,18 @@ function auditOrder(a: AuditRow, b: AuditRow): number {
   return a.id === b.id ? 0 : a.id < b.id ? 1 : -1
 }
 
+/**
+ * Actividad del equipo, de lo más reciente a lo más antiguo: una fila por acción
+ * (issue #112). Un cobro deja su pago, su ticket y su movimiento de caja en el
+ * mismo instante: la fila dice lo que se hizo, «también» lo demás, y sobre quién
  * y qué fue, con su enlace. `area` acota por tema (`AUDIT_AREAS`); `action` sigue
  * admitiendo el código exacto para quien integra o prueba. La pantalla solo
  * muestra las palabras. De una historia bloqueada no se dice el nombre (ADR 0080).
+ *
+ * La página va por instante, por persona y por registro (`created_at desc`, la
+ * persona y el id), y el cursor lleva los tres: corta entre instantes y, si uno no
+ * cabe (una carga de datos, un ciclo del worker), entre las personas de ese
+ * instante; nunca dentro de una acción.
  */
 export async function listWorkspaceAudit(
   tx: Db,
@@ -1264,13 +1273,11 @@ export async function listWorkspaceAudit(
 ) {
   if ((input.before && !Number.isFinite(Date.parse(input.before))) || (!!input.before !== !!input.beforeId)) throw validation("Cursor de auditoría inválido")
   if (input.area !== undefined && !(AUDIT_AREAS as readonly string[]).includes(input.area)) throw validation("Elige un área de la lista")
- *
- * La página va por instante, por persona y por registro (`created_at desc`, la
- * persona y el id), y el cursor lleva los tres: corta entre instantes y, si uno no
- * cabe (una carga de datos, un ciclo del worker), entre las personas de ese
- * instante; nunca dentro de una acción.
   const subjects = input.area ? auditSubjectsOf(input.area) : null
   const uuid = sql.raw(`'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'`)
+  // La persona de cada registro, aunque su historia esté bloqueada: así se agrupa y se ordena.
+  // En orden de bytes ("C"), el mismo que compara la página al armar el cursor.
+  const personKey = sql`(coalesce(person.id::text, '') collate "C")`
   const rows = await tx.execute<AuditRow>(sql`
     select ev.id, ev.action, ev.entity, ev.entity_id as "entityId", ev.actor_user_id as "actorUserId", u.name as "actorName",
       to_char(ev.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as "createdAt", ev.origin,
@@ -1285,9 +1292,6 @@ export async function listWorkspaceAudit(
     from (
       select a.id, a.action, a.entity, a.entity_id, a.actor_user_id, a.created_at,
         -- Solo un id de verdad se busca en su tabla: lo demás no es una fila de la clínica.
-  // La persona de cada registro, aunque su historia esté bloqueada: así se agrupa y se ordena.
-  // En orden de bytes ("C"), el mismo que compara la página al armar el cursor.
-  const personKey = sql`(coalesce(person.id::text, '') collate "C")`
         case when a.entity_id ~ ${uuid} then a.entity_id::uuid end as eid,
         -- Lo que hizo la propia persona (portal, enlace de reserva) lleva el actor «contact:<id>».
         case when a.actor_user_id like 'contact:%' then 'patient' else a.metadata->>'origin' end as origin
@@ -1333,6 +1337,7 @@ export async function listWorkspaceAudit(
   // corta entre sus personas, nunca dentro de una acción; si además no se leyó entero, su última
   // persona queda para la página siguiente.
   const shown: AuditRow[][] = []
+  let cut = false
   for (const moment of moments) {
     const actions = auditActionsOf(moment)
     if (shown.length > 0 && shown.length + actions.length > AUDIT_PAGE) {
@@ -1346,7 +1351,6 @@ export async function listWorkspaceAudit(
       cut = fit.length < actions.length || !whole
       break
     }
-  let cut = false
     shown.push(...actions)
   }
   const items: WorkspaceAuditItem[] = shown.map((action) => {
@@ -1364,11 +1368,11 @@ export async function listWorkspaceAudit(
       who: head.actorName ?? words.author,
       area: words.area,
       areaLabel: words.areaLabel,
+      times: leadAuditCount(action.map((row) => row.action), lead),
       also: alsoAuditWords(action.map((row) => row.action), lead),
       subject: auditSubjectOf(action, head, zone),
     }
   })
-      times: leadAuditCount(action.map((row) => row.action), lead),
   // El cursor es el último registro mostrado, con su instante y su persona: la siguiente página
   // empieza después. Lo de nadie de un instante con varias personas va al final de ese instante.
   const lastRow = shown.flat().reduce<AuditRow | null>((last, row) => (!last || auditOrder(row, last) > 0 ? row : last), null)
