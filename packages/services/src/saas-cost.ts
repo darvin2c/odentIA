@@ -272,7 +272,9 @@ export async function loadClinicCostContext(
   )
   const citas = actions.filter((row) => row.kind === "cita")
   for (const row of usage) {
-    if (row.provider === "jev") add(bucket, "jev", row)
+    // La Ayuda es de odentIA (ADR 0146): va en lo que regalamos, aparte de lo que Jev decide en los mensajes.
+    if (row.origin === "ayuda") add(bucket, "ayuda", row)
+    else if (row.provider === "jev") add(bucket, "jev", row)
     else if ((AGENT_TEST_ORIGINS as readonly string[]).includes(row.origin))
       add(bucket, "pruebas", row)
     else if (row.origin === "dictado") {
@@ -447,6 +449,7 @@ export async function getClinicCostMargin(
       usageOf("clio_sin_cobro").micros,
     ),
     free("jev", "Jev · decide cada mensaje", usageOf("jev").calls, usageOf("jev").micros),
+    free("ayuda", "Ariadna · elige la respuesta de la Ayuda", usageOf("ayuda").calls, usageOf("ayuda").micros),
     free(
       "pruebas",
       "Pruebas (Probar, simulación, práctica)",
