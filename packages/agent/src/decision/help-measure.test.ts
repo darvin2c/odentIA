@@ -1,6 +1,6 @@
-import { helpTopicsFor } from "@odentia/services"
+import { HELP_SELECT_MAX_OPTIONS, type HelpOption, helpOptions, type HelpSelection, helpTopicsFor } from "@odentia/services"
 import { describe, expect, it } from "vitest"
-import { type HelpOption, helpOptions, type HelpSelection } from "./help.js"
+import { KNOWLEDGE_SELECT_MAX_OPTIONS } from "./knowledge.js"
 import { type HelpBankItem, helpMetrics, helpOutcome, meetsHelpMinimum, tallyHelp, wilsonLower } from "./help-measure.js"
 
 /** Cómo cuenta `eval:ayuda` lo que hizo la Ayuda con cada pregunta, sin proveedor. */
@@ -69,6 +69,10 @@ describe("lo que cuenta como acierto", () => {
     ])
     expect(helpMetrics(tally).resolved).toBe(2 / 3)
   })
+})
+
+it("la Ayuda ofrece a Jev el mismo total de opciones que el conocimiento", () => {
+  expect(HELP_SELECT_MAX_OPTIONS).toBe(KNOWLEDGE_SELECT_MAX_OPTIONS - 1)
 })
 
 describe("los mínimos", () => {

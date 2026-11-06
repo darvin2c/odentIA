@@ -26,10 +26,10 @@
  * proveedor.
  */
 import { readFileSync } from "node:fs"
-import { agentTextsFor, helpTopicsFor, matchHelpTopics } from "@odentia/services"
 import { costMicrosOf } from "../ai-usage.js"
 import { platformLlmFromEnv, resolveLlmSpec } from "../llm.js"
 import {
+  agentTextsFor,
   HELP_CONFIDENT,
   HELP_SELECT_VERSION,
   helpCandidates,
@@ -39,8 +39,10 @@ import {
   helpScreenName,
   type HelpSelection,
   helpState,
+  helpTopicsFor,
+  matchHelpTopics,
   readHelpSelection,
-} from "./help.js"
+} from "@odentia/services"
 import {
   HELP_MINIMUM,
   type HelpBankItem,
