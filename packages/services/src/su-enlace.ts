@@ -73,6 +73,7 @@ import { findOrgCountry, findOrgLocale, orgProduct } from "./locale.js"
 import { openRoute, previewRoute } from "./message-gate.js"
 import { consentStatusOf } from "./message-permission.js"
 import { clinicAsksHealth, getPatientMissingData, getPatientRegistrationConfig } from "./patient-registration.js"
+import { privacyNoticeOf } from "./privacy-notice.js"
 import {
   patientOrganizationToday,
   patientPersonId,
@@ -272,8 +273,10 @@ async function pendingOf(
     )
     .limit(1)
   const promotions = config.askMessages ? await consentStatusOf(tx, orgId, contactId, "novedades") : "granted"
+  // El aviso se muestra siempre con su casilla (decisión 22 del 2026-11-05): el de la clínica o,
+  // si aún no escribió uno, el sugerido con sus datos (ADR 0141).
   return {
-    privacy: !accepted && !!config.privacyNotice,
+    privacy: !accepted && !!(await privacyNoticeOf(tx, orgId)),
     promotions: promotions === null,
     promotionsOffer: promotions !== null && promotions !== "granted" && (await consentStatusOf(tx, orgId, contactId, "avisos")) !== "revoked",
   }
@@ -710,7 +713,8 @@ export async function getPersonalLinkDataForm(
     countryCode: await findOrgCountry(tx, orgId),
     today: await patientOrganizationToday(tx, orgId),
     hasRepresentative: await hasLegalRepresentative(tx, orgId, link.patientId),
-    registration: await getPatientRegistrationConfig(tx, orgId),
+    // El aviso que ve y acepta: el de la clínica o, sin uno, el sugerido (ADR 0141).
+    registration: { ...(await getPatientRegistrationConfig(tx, orgId)), privacyNotice: await privacyNoticeOf(tx, orgId) },
     asksHealth: health,
     firstName: firstName(await requirePatient(tx, orgId, link.patientId)) || null,
     pending: await pendingOf(tx, orgId, link.row.contactId, link.patientId),
@@ -1076,7 +1080,9 @@ async function saveLinkConsents(
       )
       .limit(1)
     const config = await getPatientRegistrationConfig(tx, orgId)
-    if (!accepted && config.privacyNotice) {
+    // Queda aceptado el mismo texto que se le mostró.
+    const notice = await privacyNoticeOf(tx, orgId)
+    if (!accepted && notice) {
       const [grantor] = await tx
         .select({ name: contact.displayName })
         .from(contact)
@@ -1086,7 +1092,7 @@ async function saveLinkConsents(
         organizationId: orgId,
         patientId,
         noticeVersion: config.version,
-        noticeText: config.privacyNotice,
+        noticeText: notice,
         purposes: ["atencion", "recordatorios"],
         grantedByContactId: link.row.contactId,
         grantedByName: grantor?.name ?? "",

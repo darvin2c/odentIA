@@ -297,7 +297,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Quién le avisa a la persona su cita?",
-        a: "Con «Recordar la cita» prendida (viene así en toda clínica nueva) y Sofi y Argos encendidos, Sofi le avisa al reservar, al mover y al cancelar la cita, y le recuerda antes: por defecto un día antes, para confirmar, y tres horas antes; si ya confirmó, ese segundo aviso no le pide confirmar. Las horas se cambian en esa línea de Argos. Los avisos de reserva, cambio y cancelación llegan siempre, salvo a quien pidió no recibir ningún mensaje; los recordatorios, salvo que los haya apagado (entonces «Te espera» te pide llamarla el día antes). Si responde «sí, ahí estaré» o toca «Confirmar», la cita queda confirmada sola; si confirma por sus hijos, Sofi le dice de quiénes eran. «Confirmar cita» en la cita es para cuando te confirma por teléfono o en persona.",
+        a: "Con «Recordar la cita» prendida y Sofi y Argos encendidos (una clínica nueva trae los tres), Sofi le avisa al reservar, al mover y al cancelar la cita, y le recuerda antes: por defecto un día antes, para confirmar, y tres horas antes; si ya confirmó, ese segundo aviso no le pide confirmar. Las horas se cambian en esa línea de Argos. Los avisos de reserva, cambio y cancelación llegan siempre, salvo a quien pidió no recibir ningún mensaje; los recordatorios, salvo que los haya apagado (entonces «Te espera» te pide llamarla el día antes). Si responde «sí, ahí estaré» o toca «Confirmar», la cita queda confirmada sola; si confirma por sus hijos, Sofi le dice de quiénes eran. «Confirmar cita» en la cita es para cuando te confirma por teléfono o en persona.",
       },
       {
         q: "¿Cómo marco que llegó?",
@@ -576,7 +576,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo dicto una atención?",
-        a: "Dentro de la atención, pulsa «Dictar» y habla: Clío ordena lo que dices en sugerencias dentro de cada bloque, y tú las confirmas o firmas. Solo aparece si la clínica encendió a Clío, en Agente › Clío, y para quien lleva la atención. El micrófono solo se enciende con «Dictar» o «Reanudar», y nada entra a la historia sin que lo confirmes. Lo que dictas para la nota se agrega al texto que ya estaba, no lo reemplaza, y la tarjeta lo dice antes de confirmar.",
+        a: "Dentro de la atención, pulsa «Dictar» y habla: Clío ordena lo que dices en sugerencias dentro de cada bloque, y tú las confirmas o firmas. Aparece con Clío encendida (una clínica nueva la trae encendida; se apaga en Agente › Clío) y para quien lleva la atención. Si confirmas algo, al cerrar la atención se cuenta como una consulta de Clío de tu plan; si nadie dicta, no cuesta nada. El micrófono solo se enciende con «Dictar» o «Reanudar», y nada entra a la historia sin que lo confirmes. Lo que dictas para la nota se agrega al texto que ya estaba, no lo reemplaza, y la tarjeta lo dice antes de confirmar.",
         forms: ["como uso el dictado", "dictado", "dictar", "como funciona clio", "como funciona el dictado"],
         general: true,
       },
@@ -717,7 +717,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     faqs: [
       {
         q: "¿Cómo enciendo el agente?",
-        a: "En Agente › Sofi, usa el interruptor de arriba («Ver y encender» te lleva desde Agente). Te muestra cinco comprobaciones (canal, que el modelo responda, que sepa tu horario y tus servicios, si lo probaste y quién recibe los casos); lo que falta te lleva a donde se resuelve. Sin un canal o sin un modelo que responda no se enciende. Clío y Argos tienen el suyo en su página.",
+        a: "En Agente › Sofi, usa el interruptor de arriba («Ver y encender» te lleva desde Agente). Te muestra cinco comprobaciones (canal, que el modelo responda, que sepa tu horario y tus servicios, si lo probaste y quién recibe los casos); lo que falta te lleva a donde se resuelve. Sin un canal o sin un modelo que responda no se enciende. Una clínica nueva la trae encendida: responde desde que conectas un canal. Clío y Argos tienen el suyo en su página.",
       },
       {
         q: "¿Qué hago si el modelo no responde?",
@@ -756,7 +756,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo enciendo a Clío?",
-        a: "En Agente › Clío, con su interruptor. Después, quien lleva la atención ve «Dictar» dentro de ella.",
+        a: "Una clínica nueva la trae encendida. Se enciende o se apaga en Agente › Clío, con su interruptor; encendida, quien lleva la atención ve «Dictar» dentro de ella.",
         forms: ["como activo a clio", "como apago a clio"],
       },
       {
@@ -803,7 +803,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     faqs: [
       {
         q: "¿Dónde enciendo los recordatorios de cita?",
-        a: "«Recordar la cita», la línea «Una persona tiene una cita», viene prendida. Para que salga, enciende a Argos con el interruptor de arriba y a Sofi en su página: la página de Argos te avisa si falta alguno. El recordatorio es parte del servicio y llega a todos, salvo a quien se dio de baja.",
+        a: "Una clínica nueva trae prendidos «Recordar la cita» (la línea «Una persona tiene una cita»), Argos y Sofi. Si apagaste alguno, para que salga enciende a Argos con el interruptor de arriba y a Sofi en su página: la página de Argos te avisa si falta alguno. El recordatorio es parte del servicio y llega a todos, salvo a quien se dio de baja.",
       },
       {
         q: "¿Puedo pedirle algo con mis palabras?",
@@ -1144,7 +1144,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Qué es el resumen del lunes?",
-        a: "Un correo que te llega cada lunes a las 8:00, hora de la clínica, con cuatro cifras de la semana anterior, lo que cambió y lo que recomienda Argos. Cada persona que ve Reportes lo prende para sí al final del Resumen; nace apagado. Si la semana no tuvo movimientos, no se envía, y para dejar de recibirlo basta el enlace del propio correo.",
+        a: "Un correo que te llega cada lunes a las 8:00, hora de la clínica, con cuatro cifras de la semana anterior, lo que cambió y lo que recomienda Argos. A quien crea la clínica le llega desde el primer lunes; cada otra persona que ve Reportes lo prende para sí al final del Resumen. Si la semana no tuvo movimientos, no se envía, y para dejar de recibirlo basta el enlace del propio correo.",
       },
       {
         q: "¿Qué es «Espera en sala»?",
@@ -1480,7 +1480,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Portal del paciente",
     parent: SETTINGS,
     purpose:
-      "El portal donde el paciente ve lo suyo cuando quiera: sus citas, presupuestos, documentos y su cuenta. Aquí se enciende (viene apagado) y se elige lo que puede ver; lo demás son valores fijos.",
+      "El portal donde el paciente ve lo suyo cuando quiera: sus citas, presupuestos, documentos y su cuenta. Una clínica nueva lo trae encendido: aquí se apaga o se enciende y se elige lo que puede ver; lo demás son valores fijos. El acceso de cada persona se da en la clínica, con su documento.",
     terms: [
       "portal",
       "acceso de pacientes",

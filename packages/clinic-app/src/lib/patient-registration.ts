@@ -25,7 +25,8 @@ export interface PublicRegistrationInfo {
 
 export interface RegistrationConfigResponse {
   data: RegistrationConfig
-  meta: { today: string }
+  /** `noticeSuggested`: el aviso es aún el que armó odentIA al nacer la clínica (ADR 0141). */
+  meta: { today: string; noticeSuggested?: boolean }
 }
 
 export interface SaveRegistrationConfigInput {
@@ -35,6 +36,8 @@ export interface SaveRegistrationConfigInput {
   privacyNotice: string
   askReminders: boolean
   askMessages: boolean
+  /** «Lo revisé»: el aviso sugerido pasa a ser de la clínica. */
+  noticeReviewed?: boolean
 }
 
 export interface PublicSubmitInput {

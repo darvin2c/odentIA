@@ -1,8 +1,8 @@
 import { Badge, buttonVariants, cn } from "@odentia/ui"
 import { Link } from "@tanstack/react-router"
 import { ArrowRight, CheckCircle2 } from "lucide-react"
-import { ADMIN_NAME, RECEPTION_DEFAULT_NAME, useReceptionName } from "../lib/agent-names"
-import type { WorkspaceHome } from "../lib/workspace"
+import { ADMIN_NAME, CLINICAL_NAME, RECEPTION_DEFAULT_NAME, useReceptionName } from "../lib/agent-names"
+import type { SetupOn, WorkspaceHome } from "../lib/workspace"
 import { appWords } from "../lib/product-words"
 
 /**
@@ -37,10 +37,41 @@ export function needsSetup(data: WorkspaceHome): boolean {
   return setupSteps(data.setup).some(step => !step.done)
 }
 
+/**
+ * «Tu clínica viene con esto encendido» (ADR 0141): solo lo que está encendido de verdad, cada
+ * cosa con su enlace a donde se apaga. No pide nada: la clínica decide qué deja.
+ */
+function bornOn(on: SetupOn, receptionName: string) {
+  return [
+    on.reception ? { text: `${receptionName} responde a quien escriba, desde que conectes un canal.`, href: "/agent/recepcion", action: "Ver o apagar" } : null,
+    on.admin
+      ? {
+          text: `${ADMIN_NAME}, con ${on.lines === 1 ? "1 línea" : `${on.lines} líneas`}: recuerda las citas, sigue los presupuestos y avisa lo pendiente.`,
+          href: "/agent/administrador",
+          action: "Ver o apagar",
+        }
+      : null,
+    on.clio ? { text: `${CLINICAL_NAME}, para dictar la atención.`, href: "/agent/asistente-clinico", action: "Ver o apagar" } : null,
+    on.registration
+      ? {
+          text: on.noticeSuggested
+            ? "El registro en línea, con un aviso de privacidad sugerido, sin revisar."
+            : "El registro en línea de pacientes.",
+          href: "/settings/patient-registration",
+          action: on.noticeSuggested ? "Revisar el aviso" : "Ver o apagar",
+        }
+      : null,
+    on.portal ? { text: "El portal del paciente: el acceso lo da recepción a cada persona.", href: "/settings/patient-access", action: "Ver o apagar" } : null,
+    on.digest ? { text: "Tu resumen del lunes, por correo.", href: "/reports", action: "Ver o apagar" } : null,
+  ].filter((item): item is { text: string; href: string; action: string } => item !== null)
+}
+
 /** «Prepara tu primera atención»: orienta el primer uso sin convertir una jornada activa en un tutorial. */
 export function HomeStart({ setup }: { setup: NonNullable<WorkspaceHome["setup"]> }) {
-  const steps = setupSteps(setup, useReceptionName())
+  const receptionName = useReceptionName()
+  const steps = setupSteps(setup, receptionName)
   const next = steps.find(step => !step.done)
+  const born = setup.on ? bornOn(setup.on, receptionName) : []
   if (!next) return null
   return <section aria-label="Siguiente paso" className="enter elevated rounded-xl border bg-card p-6">
     <Badge variant="secondary" className="mb-3">{steps.some(step => step.done) ? "Configuración parcial" : "Sin configurar"}</Badge>
@@ -55,5 +86,15 @@ export function HomeStart({ setup }: { setup: NonNullable<WorkspaceHome["setup"]
         <div><p className="font-medium">{step.title}{step.done ? " · Preparado" : ""}</p><p className="mt-1 text-muted-foreground">{step.description}</p></div>
       </li>)}
     </ol>
+    {born.length > 0 ? <div className="mt-6 border-t pt-5">
+      <h3 className="text-sm font-semibold">Tu clínica viene con esto encendido</h3>
+      <p className="mt-1 text-sm text-muted-foreground">Cada cosa se apaga donde se configura.</p>
+      <ul aria-label="Viene encendido" className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+        {born.map(item => <li key={item.href} className="flex flex-col gap-0.5">
+          <span>{item.text}</span>
+          <Link to={item.href} className="inline-flex min-h-11 items-center font-semibold text-primary-soft-foreground underline-offset-2 hover:underline sm:min-h-0">{item.action}</Link>
+        </li>)}
+      </ul>
+    </div> : null}
   </section>
 }

@@ -6,6 +6,7 @@ import {
   createBookingLink,
   createPatientRegistrationLink,
   getPatientRegistrationConfig,
+  registrationNoticeSuggested,
   patientOrganizationToday,
   personalLinkUrl,
   previewPersonalLinkSend,
@@ -51,7 +52,10 @@ export function createPatientRegistrationRoute(deps: CrmDeps & { cookieDomain: s
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver el registro"), 403)
     }
     try {
-      const result = await withOrgContext(deps.db, orgId, async tx => ({ data: await getPatientRegistrationConfig(tx, orgId), meta: { today: await patientOrganizationToday(tx, orgId) } }))
+      const result = await withOrgContext(deps.db, orgId, async tx => ({
+        data: await getPatientRegistrationConfig(tx, orgId),
+        meta: { today: await patientOrganizationToday(tx, orgId), noticeSuggested: await registrationNoticeSuggested(tx, orgId) },
+      }))
       c.header("Cache-Control", "no-store")
       return c.json(result)
     } catch (error) { return serviceErrorResponse(c, error) ?? Promise.reject(error) }
@@ -61,7 +65,7 @@ export function createPatientRegistrationRoute(deps: CrmDeps & { cookieDomain: s
     if (!canAccess(memberRole, "settings.write")) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para configurar el registro"), 403)
     }
-    const parsed = z.strictObject({ enabled: z.boolean(), fields: registrationConfigSchema.shape.fields, privacyNotice: registrationConfigSchema.shape.privacyNotice, askReminders: z.boolean().optional(), askMessages: z.boolean().optional(), expectedVersion: z.number().int().nonnegative() }).safeParse(await c.req.json().catch(() => null))
+    const parsed = z.strictObject({ enabled: z.boolean(), fields: registrationConfigSchema.shape.fields, privacyNotice: registrationConfigSchema.shape.privacyNotice, askReminders: z.boolean().optional(), askMessages: z.boolean().optional(), noticeReviewed: z.boolean().optional(), expectedVersion: z.number().int().nonnegative() }).safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => savePatientRegistrationConfig(tx, orgId, userId, parsed.data)))
   })

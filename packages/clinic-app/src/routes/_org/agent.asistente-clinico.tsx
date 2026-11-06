@@ -183,6 +183,14 @@ function ClinicalAssistantPage() {
                 <span className="font-semibold text-foreground">Más adelante:</span> {role.later} Hoy no lo hace.
               </p>
             ) : null}
+            {/* Nace encendido (ADR 0141): el costo se dice aquí y junto a «Dictar la atención». */}
+            <p className="text-sm text-muted-foreground">
+              <span className="font-semibold text-foreground">Cuánto cuesta:</span> cada atención dictada en la que se confirma algo se
+              cuenta al cerrarla como una consulta de {CLINICAL_NAME}, según tu plan. Si nadie dicta, no cuesta nada.{" "}
+              <Link to="/settings/plan" className={LINK}>
+                Ver precios
+              </Link>
+            </p>
           </Card>
 
           <Card id="clinico-llega" title="Hasta dónde llega solo" hint="Nunca guarda: siempre sugiere. No tiene niveles.">

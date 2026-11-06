@@ -1080,6 +1080,24 @@ async function defaultSpendCap(tx: Db, orgId: string, actorUserId: string, capCe
 }
 
 /**
+ * El presupuesto de una clínica que nace, desde el primer día: la cuota de su
+ * plan o, en la prueba sin plan, la del plan de lista de su producto. Lo llama
+ * `setUpNewClinic`; elegir el plan después lo fija si aún nadie lo decidió.
+ */
+export async function setNewClinicSpendCap(tx: Db, orgId: string, actorUserId: string): Promise<void> {
+  const [sub] = await tx
+    .select({ planId: saasSubscription.planId })
+    .from(saasSubscription)
+    .where(eq(saasSubscription.organizationId, orgId))
+    .limit(1)
+  if (!sub) return
+  const [plan] = sub.planId
+    ? await tx.select({ priceCents: saasPlan.priceCents }).from(saasPlan).where(eq(saasPlan.id, sub.planId)).limit(1)
+    : await tx.select({ priceCents: saasPlan.priceCents }).from(saasPlan).where(defaultPlanOf(await orgProduct(tx, orgId))).limit(1)
+  if (plan && plan.priceCents > 0) await defaultSpendCap(tx, orgId, actorUserId, plan.priceCents)
+}
+
+/**
  * Elige o cambia el plan (el cambio nunca reescribe cargos históricos; el
  * precio nuevo rige el próximo cargo generado, no el pasado). En prueba no
  * genera cargo aún (llega al fin de la prueba); en restricción no reactiva
