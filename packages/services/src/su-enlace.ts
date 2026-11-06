@@ -259,6 +259,12 @@ async function pendingOf(
   orgId: string,
   contactId: string,
   patientId: string,
+  /**
+   * «Tus datos» pide datos: ahí el aviso va siempre, con su casilla, aunque la clínica no haya
+   * escrito uno (el sugerido; decisión 22, ADR 0141). En los demás pasos y para el agente
+   * (`chatBookingMissing`) solo cuenta el aviso que escribió la clínica, como antes.
+   */
+  options: { asksData?: boolean } = {},
 ): Promise<{ privacy: boolean; promotions: boolean; promotionsOffer: boolean }> {
   const config = await getPatientRegistrationConfig(tx, orgId)
   const [accepted] = await tx
@@ -273,10 +279,8 @@ async function pendingOf(
     )
     .limit(1)
   const promotions = config.askMessages ? await consentStatusOf(tx, orgId, contactId, "novedades") : "granted"
-  // El aviso se muestra siempre con su casilla (decisión 22 del 2026-11-05): el de la clínica o,
-  // si aún no escribió uno, el sugerido con sus datos (ADR 0141).
   return {
-    privacy: !accepted && !!(await privacyNoticeOf(tx, orgId)),
+    privacy: !accepted && (options.asksData ? !!(await privacyNoticeOf(tx, orgId)) : !!config.privacyNotice),
     promotions: promotions === null,
     promotionsOffer: promotions !== null && promotions !== "granted" && (await consentStatusOf(tx, orgId, contactId, "avisos")) !== "revoked",
   }
@@ -717,7 +721,7 @@ export async function getPersonalLinkDataForm(
     registration: { ...(await getPatientRegistrationConfig(tx, orgId)), privacyNotice: await privacyNoticeOf(tx, orgId) },
     asksHealth: health,
     firstName: firstName(await requirePatient(tx, orgId, link.patientId)) || null,
-    pending: await pendingOf(tx, orgId, link.row.contactId, link.patientId),
+    pending: await pendingOf(tx, orgId, link.row.contactId, link.patientId, { asksData: true }),
   }
 }
 
