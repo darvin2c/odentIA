@@ -89,6 +89,8 @@ export type MoveCause =
   | "presupuesto_presentado"
   | "presupuesto_aceptado"
   | "presupuesto_rechazado"
+  /** Su presupuesto venció hace más de 30 días sin respuesta (ADR 0144). */
+  | "presupuesto_vencido"
 
 /** Quién hace algo con la oportunidad: una persona, el agente o el sistema por algo que pasó. */
 export interface OpportunityActor {
@@ -1617,7 +1619,8 @@ export async function moveOpportunity(
  * Cierra como ganada o perdida con un motivo de la lista: una sola forma de
  * cerrar para el equipo, el agente y la respuesta a un presupuesto. Va a
  * «Decidió» y su tarea abierta se cierra sola. `because`: la cerró algo que
- * pasó, con su propio registro (anular su presupuesto, ADR 0144).
+ * pasó, con su propio registro (anular su presupuesto o que venciera sin
+ * respuesta, ADR 0144).
  */
 export async function closeOpportunity(
   tx: Db,
@@ -1625,7 +1628,7 @@ export async function closeOpportunity(
   id: string,
   input: { outcome: "won" | "lost"; reason: string; note?: string | null },
   actor?: OpportunityActor,
-  options: { because?: "presupuesto_anulado" } = {},
+  options: { because?: "presupuesto_anulado" | "presupuesto_vencido" } = {},
 ): Promise<OpportunityDetail> {
   const current = await requireOpportunity(tx, orgId, id, true)
   if (current.status !== "open") throw validation("La oportunidad ya está cerrada")
@@ -1652,13 +1655,24 @@ export async function closeOpportunity(
   const words = CLOSE_REASON_WORDS[reason]
   await recordEvent(tx, orgId, id, input.outcome === "won" ? "opportunity.won" : "opportunity.lost", current.stageId, decided.id, actor, {
     note: note ? `${words} · ${note}` : words,
-    cause: reason === "acepto_presupuesto" ? "presupuesto_aceptado" : reason === "rechazo_presupuesto" ? "presupuesto_rechazado" : null,
+    cause:
+      reason === "acepto_presupuesto"
+        ? "presupuesto_aceptado"
+        : reason === "rechazo_presupuesto"
+          ? "presupuesto_rechazado"
+          : options.because === "presupuesto_vencido"
+            ? "presupuesto_vencido"
+            : null,
   })
   await auditOpportunity(
     tx,
     orgId,
     actor,
-    options.because === "presupuesto_anulado" ? "opportunity.closed_budget_cancelled" : "opportunity.closed",
+    options.because === "presupuesto_anulado"
+      ? "opportunity.closed_budget_cancelled"
+      : options.because === "presupuesto_vencido"
+        ? "opportunity.closed_budget_expired"
+        : "opportunity.closed",
     id,
     { outcome: input.outcome, reason, toStageId: decided.id },
   )
@@ -2149,7 +2163,14 @@ export async function decideBudgetOpportunity(
     .from(opportunity)
     .where(and(eq(opportunity.organizationId, orgId), eq(opportunity.budgetId, input.budgetId)))
     .orderBy(desc(opportunity.createdAt))
-  const open = linked.find((row) => row.status === "open")
+  let open = linked.find((row) => row.status === "open")
+  // Respondió después de que su presupuesto venciera y la oportunidad se cerrara
+  // sola por eso (ADR 0144): se reabre y se decide con la regla de siempre.
+  const expired = open ? undefined : await closedForExpiry(tx, orgId, linked.filter((row) => row.status === "lost").map((row) => row.id))
+  if (expired) {
+    await reopenOpportunity(tx, orgId, expired, { userId: null, origin: "automatico" })
+    open = { id: expired, status: "open" }
+  }
   // Completar una respuesta (lo pospuesto de un parcial) no vuelve a decidir una
   // oportunidad que ya se cerró con este presupuesto, ni busca otra.
   if (!open && linked.length > 0) return null
@@ -2240,6 +2261,77 @@ export async function releaseCancelledBudget(
     }
   }
   return linked.map((row) => row.id)
+}
+
+/** Días después del fin de su vigencia en que la oportunidad de un presupuesto sin respuesta se da por perdida. */
+export const UNANSWERED_BUDGET_DAYS = 30
+
+/** La oportunidad perdida que se cerró sola porque su presupuesto venció sin respuesta, si es una de estas. */
+async function closedForExpiry(tx: Db, orgId: string, ids: string[]): Promise<string | undefined> {
+  for (const id of ids) {
+    const [last] = await tx
+      .select({ cause: opportunityEvent.cause })
+      .from(opportunityEvent)
+      .where(
+        and(
+          eq(opportunityEvent.organizationId, orgId),
+          eq(opportunityEvent.opportunityId, id),
+          inArray(opportunityEvent.action, ["opportunity.won", "opportunity.lost"]),
+        ),
+      )
+      .orderBy(desc(opportunityEvent.createdAt), desc(opportunityEvent.id))
+      .limit(1)
+    if (last?.cause === "presupuesto_vencido") return id
+  }
+  return undefined
+}
+
+/**
+ * Lo que nadie respondió (ADR 0144): la oportunidad de un presupuesto entregado
+ * que sigue sin respuesta pasados 30 días del fin de su vigencia se cierra sola
+ * como perdida, «No responde», a nombre del sistema. No se toca la que alguien
+ * trabaja: con un responsable, una tarea, una nota o un cambio a mano después
+ * de entregarlo. Un presupuesto sin vigencia no vence. Si la persona responde
+ * después, decidirlo la reabre y la cierra con la regla de siempre
+ * (`decideBudgetOpportunity`). Corre en el ciclo del worker, junto a
+ * `settleTasks`, aunque el Administrador esté apagado. Devuelve cuántas cerró.
+ */
+export async function closeUnansweredBudgetOpportunities(
+  tx: Db,
+  orgId: string,
+  now: Date,
+  options: { batch?: number } = {},
+): Promise<number> {
+  const zone = await findOrgLocale(tx, orgId)
+  const today = new Intl.DateTimeFormat("en-CA", {
+    timeZone: zone.timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now)
+  const rows = await tx.execute<{ id: string }>(sql`
+    select o.id from opportunity o
+    join treatment_budget b on b.organization_id = o.organization_id and b.id = o.budget_id
+    where o.organization_id = ${orgId} and o.status = 'open' and o.assigned_user_id is null
+      and b.status = 'presentado' and b.valid_until is not null
+      and b.valid_until < ${today}::date - ${sql.raw(String(UNANSWERED_BUDGET_DAYS))}
+      and not exists (select 1 from task t where t.organization_id = o.organization_id and t.opportunity_id = o.id)
+      and not exists (select 1 from crm_note n where n.organization_id = o.organization_id and n.opportunity_id = o.id)
+      and not exists (select 1 from opportunity_event e where e.organization_id = o.organization_id and e.opportunity_id = o.id
+        and e.origin = 'persona' and e.created_at > coalesce(b.presented_at, o.created_at))
+    order by b.valid_until, o.id
+    limit ${options.batch ?? 200}`)
+  for (const { id } of rows) {
+    await closeOpportunity(
+      tx,
+      orgId,
+      id,
+      { outcome: "lost", reason: "no_responde", note: `Su presupuesto venció hace más de ${UNANSWERED_BUDGET_DAYS} días sin respuesta` },
+      { userId: null, origin: "automatico" },
+      { because: "presupuesto_vencido" },
+    )
+  }
+  return rows.length
 }
 
 /** Las oportunidades abiertas del contacto, para que el agente sepa en qué punto está cada una. */

@@ -68,6 +68,7 @@ import { purgeOldWebchatTests } from "./webchat.js"
 import { patientCreditSql } from "./payments.js"
 import { getPatientRegistrationConfig } from "./patient-registration.js"
 import { formatOrgMoneyToday, getOrgLocale, type OrgLocale, orgProduct } from "./locale.js"
+import { closeUnansweredBudgetOpportunities } from "./opportunities.js"
 import { productHooks } from "./products.js"
 import { debtZoneSql } from "./report-debts.js"
 import { lapsedToInvite } from "./return-invites.js"
@@ -1471,6 +1472,8 @@ export interface TickSummary {
   cerradas: number
   /** Tareas que se cerraron solas porque su motivo desapareció. */
   tareasCerradas: number
+  /** Oportunidades que se cerraron solas: su presupuesto venció hace más de 30 días sin respuesta (ADR 0144). */
+  ventasSinRespuesta: number
   /** «Ver respuesta» que salieron por respuestas del equipo por entregar (R1). */
   respuestasOfrecidas: number
   /** Temas de cita o precio que Sofi retomó a la hora de apertura (decisión 5 del pulido). */
@@ -1534,7 +1537,7 @@ export async function tickAutomations(
   deps: TickDeps,
 ): Promise<TickSummary> {
   const orgRows = await ownerDb.select({ orgId: organization.id }).from(organization)
-  const summary: TickSummary = { orgs: 0, programados: 0, entregados: 0, fallidos: 0, insistidas: 0, cerradas: 0, tareasCerradas: 0, respuestasOfrecidas: 0, temasRetomados: 0, errores: 0 }
+  const summary: TickSummary = { orgs: 0, programados: 0, entregados: 0, fallidos: 0, insistidas: 0, cerradas: 0, tareasCerradas: 0, ventasSinRespuesta: 0, respuestasOfrecidas: 0, temasRetomados: 0, errores: 0 }
   let orgId = ""
   const count = () => {
     summary.errores++
@@ -1565,6 +1568,10 @@ export async function tickAutomations(
     // Las tareas se cierran solas cuando su motivo desaparece, aunque el
     // Administrador esté apagado: una cita que pasó no espera a que lo prendan.
     summary.tareasCerradas += await step("cierre de tareas", 0, () => withOrgContext(appDb, orgId, (tx) => settleTasks(tx, orgId, now)))
+    // Lo que nadie respondió (ADR 0144): como las tareas, no espera a que prendan al Administrador.
+    summary.ventasSinRespuesta += await step("ventas sin respuesta", 0, () =>
+      withOrgContext(appDb, orgId, (tx) => closeUnansweredBudgetOpportunities(tx, orgId, now)),
+    )
     // Las pruebas del chat web de más de 7 días se borran solas (fase 6 del pulido).
     await apart(orgId, "pruebas del chat web", 0, () => withOrgContext(appDb, orgId, (tx) => purgeOldWebchatTests(tx, orgId, now)))
     // Las respuestas del equipo por entregar (R1) son de la Bandeja: «Ver

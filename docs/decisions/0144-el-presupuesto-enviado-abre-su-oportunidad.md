@@ -11,7 +11,8 @@ Al resolverlo aparecen otros huecos, porque desde ahora casi toda venta tiene un
 - la regla «se une a la del mismo tratamiento o, si no hay, a la más reciente» dejaba que el segundo presupuesto de una persona tomara la oportunidad del primero mientras este esperaba respuesta;
 - la revisión de un presupuesto ya decidido podía tomar otra oportunidad y ganarla: la misma venta contada dos veces;
 - un presupuesto anulado dejaba su oportunidad abierta, diciendo que se cerraría sola;
-- lo que Sofi anota cuando la persona pregunta por un tratamiento de su presupuesto pendiente, o lo que anota la madre de un menor, abría otra tarjeta para la misma venta.
+- lo que Sofi anota cuando la persona pregunta por un tratamiento de su presupuesto pendiente, o lo que anota la madre de un menor, abría otra tarjeta para la misma venta;
+- el presupuesto que nadie responde dejaba su oportunidad abierta para siempre, inflando lo que el tablero da por en curso.
 
 ## Decisión y motivo
 
@@ -28,6 +29,7 @@ Al resolverlo aparecen otros huecos, porque desde ahora casi toda venta tiene un
 - **Reenviar no abre otra.** Reenviar no vuelve a entregar, y la oportunidad ya unida al presupuesto es la primera que se elige.
 - **Anular un presupuesto entregado suelta su oportunidad** (`releaseCancelledBudget`, desde `cancelBudget`). La que nació de él y nadie trabajó (sin tareas ni notas) se cierra como perdida, «Otro» con la nota «Se anuló el presupuesto», a nombre de quien lo anuló (`opportunity.closed_budget_cancelled`). La que ya era de otro interés, o tiene trabajo encima, sigue abierta sin presupuesto y deja de decir que se cierra sola.
 - **El mismo interés incluye el presupuesto pendiente y a quien la persona lleva.** Lo que anota Sofi (`noteServiceInterest`) y crear una oportunidad sin paciente (`sameOpenInterest`) encuentran la abierta de ese servicio de la persona o de un paciente que lleva, también si el servicio está en su presupuesto que espera respuesta, y siguen con esa.
+- **Lo que nadie respondió se da por perdido** (`closeUnansweredBudgetOpportunities`, en el ciclo del worker junto a `settleTasks`, aunque el Administrador esté apagado). Pasados 30 días del fin de la vigencia (`valid_until`) de un presupuesto entregado que sigue sin respuesta, su oportunidad se cierra sola como perdida, «No responde» (el motivo de la lista que lo dice), a nombre del sistema (`opportunity.closed_budget_expired`). No se toca la que alguien trabaja: con un responsable, una tarea, una nota o un cambio a mano después de entregarlo. Un presupuesto sin vigencia no vence. Si la persona responde después, aceptarlo o rechazarlo la reabre y la cierra con la regla de siempre.
 - **Una persona a la vez.** Unir o abrir por un presupuesto y anotar un interés toman un candado por persona (`lockPeople`): dos entregas o una entrega y un mensaje al mismo tiempo no abren dos tarjetas por lo mismo.
 - **No se rellena hacia atrás.** Decidir un presupuesto entregado antes de este cambio sin oportunidad la busca por el mismo orden y la cierra; si no hay, no se abre ninguna.
 
@@ -45,10 +47,10 @@ Al resolverlo aparecen otros huecos, porque desde ahora casi toda venta tiene un
 - El tablero y su total muestran también lo que se presupuestó en la clínica, sin trabajo de nadie; «Te espera» y «Retomar un presupuesto» siguen igual.
 - Una persona puede tener a la vez una oportunidad por presupuesto pendiente, además de las que anotó el agente.
 - Sacrificio: el presupuesto que se une a la más reciente de otro interés (por ejemplo, la que anotó el agente por un blanqueamiento) conserva el título de esa oportunidad; la 0028 lo decidió así y no se reabre aquí.
-- Pendiente de decidir: qué pasa con la oportunidad de un presupuesto vencido que nunca se respondió. Hoy sigue abierta en «Presupuesto enviado».
+- Lo que nadie respondió sale del tablero abierto a los 30 días de vencido y cuenta en Reportes como perdido por «No responde».
 - Se revisa si las clínicas piden que una de estas oportunidades quede a cargo de alguien al nacer.
 
 ## Referencias
 
-- `packages/services/src/opportunities.ts` (`linkPresentedBudget`, `openForBudget`, `pickOpportunity`, `budgetFamily`, `waitsOnOtherBudget`, `includesService`, `carriedBy`, `lockPeople`, `releaseCancelledBudget`, `createOpportunity`, `noteServiceInterest`), `budgets.ts` (`deliverBudget`, `decideBudget`, `cancelBudget`, `budgetInterest`), `audit-words.ts`.
+- `packages/services/src/opportunities.ts` (`linkPresentedBudget`, `openForBudget`, `pickOpportunity`, `budgetFamily`, `waitsOnOtherBudget`, `includesService`, `carriedBy`, `lockPeople`, `releaseCancelledBudget`, `closeUnansweredBudgetOpportunities`, `createOpportunity`, `noteServiceInterest`), `agent-admin.ts` (`tickAutomations`), `budgets.ts` (`deliverBudget`, `decideBudget`, `cancelBudget`, `budgetInterest`), `audit-words.ts`.
 - Pruebas: `packages/services/src/budget-opportunity.test.ts`.

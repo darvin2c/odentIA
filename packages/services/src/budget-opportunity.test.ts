@@ -7,12 +7,13 @@
  * Lo que encontró la revisión del PR #470: la revisión de lo ya vendido no
  * toma otra, anular la suelta o la cierra, Sofi no la duplica (tampoco por la
  * madre de un menor), al decidir lleva lo elegido y entregar a la vez no abre dos.
+ * Lo que nadie respondió se cierra solo pasados 30 días de su vigencia.
  */
 import { randomUUID } from "node:crypto"
-import { patient, patientContact, serviceCatalog } from "@odentia/db/schema/clinical"
+import { patient, patientContact, serviceCatalog, treatmentBudget } from "@odentia/db/schema/clinical"
 import { channelConnection, contact } from "@odentia/db/schema/crm"
 import { orgProfile } from "@odentia/db/schema/org"
-import { eq } from "drizzle-orm"
+import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { sendBudget } from "./budget-send.js"
 import {
@@ -26,11 +27,13 @@ import {
 } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import {
+  closeUnansweredBudgetOpportunities,
   createOpportunity,
   getOpportunity,
   listOpportunities,
   noteServiceInterest,
   setOpportunityTask,
+  updateOpportunity,
 } from "./opportunities.js"
 import { addPlanItem } from "./plan.js"
 import type { Storage } from "./storage.js"
@@ -379,4 +382,59 @@ it("imprimir y enviar a la vez el mismo borrador abre una sola oportunidad", asy
   ])
   expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1)
   expect(await opportunitiesOf(f)).toHaveLength(1)
+})
+
+it("pasados 30 días de su vigencia sin respuesta se cierra sola «No responde»; si responde después, se reabre y se decide; lo que alguien trabaja o no vence, no", async () => {
+  const f = await clinicalFixture()
+  const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10)
+  /** Un presupuesto entregado con la vigencia que se diga (la vigencia se fija en el borrador). */
+  const deliveredUntil = async (validUntil: string) => {
+    const item = await indicate(f, f.service.id)
+    const draft = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [item.id] }))
+    await ownerDb.update(treatmentBudget).set({ validUntil }).where(eq(treatmentBudget.id, draft.id))
+    await f.run((tx) => deliverBudget(tx, ...f.args, draft.id))
+    const opp = (await opportunitiesOf(f)).find((row) => row.budgetId === draft.id)!
+    return { budget: draft, item, opp }
+  }
+  const expired = await deliveredUntil(daysAgo(40))
+  const recent = await deliveredUntil(daysAgo(20))
+  const withTask = await deliveredUntil(daysAgo(40))
+  await f.run((tx) =>
+    setOpportunityTask(tx, "org_a", withTask.opp.id, { title: "Llamarla" }, { userId: f.actor, createdBy: "user" }),
+  )
+  const taken = await deliveredUntil(daysAgo(40))
+  await f.run((tx) => updateOpportunity(tx, "org_a", taken.opp.id, { assignedUserId: f.actor }, { userId: f.actor }))
+  // Un presupuesto de antes, sin vigencia, no vence (hoy toda entrega la fija).
+  const timeless = await deliveredUntil(daysAgo(40))
+  await ownerDb.transaction(async (owner) => {
+    await owner.execute(sql`set local session_replication_role = replica`)
+    await owner.update(treatmentBudget).set({ validUntil: null }).where(eq(treatmentBudget.id, timeless.budget.id))
+  })
+
+  expect(await f.run((tx) => closeUnansweredBudgetOpportunities(tx, "org_a", new Date()))).toBe(1)
+  expect(await f.run((tx) => closeUnansweredBudgetOpportunities(tx, "org_a", new Date()))).toBe(0)
+  expect(await f.run((tx) => getOpportunity(tx, "org_a", expired.opp.id))).toMatchObject({
+    status: "lost",
+    moment: "decidio",
+    closeReason: "no_responde",
+    why: "Perdida: «No responde»",
+  })
+  for (const kept of [recent, withTask, taken, timeless]) {
+    expect(await f.run((tx) => getOpportunity(tx, "org_a", kept.opp.id))).toMatchObject({ status: "open", moment: "presupuesto_enviado" })
+  }
+  const activity = await f.run((tx) => listWorkspaceAudit(tx, "org_a", { action: "opportunity.closed_budget_expired" }))
+  expect(activity.items.find((row) => row.entityId === expired.opp.id)).toMatchObject({
+    who: "Automático",
+    what: "Se cerró una oportunidad: su presupuesto venció sin respuesta",
+  })
+
+  // Responde después: se reabre y se decide con la regla de siempre.
+  await f.run((tx) =>
+    decideBudget(tx, ...f.args, expired.budget.id, { decisions: [{ planItemId: expired.item.id, decision: "aceptado" }] }),
+  )
+  const won = await f.run((tx) => getOpportunity(tx, "org_a", expired.opp.id))
+  expect(won).toMatchObject({ status: "won", closeReason: "acepto_presupuesto" })
+  expect(won.history.map((row) => row.action)).toEqual(
+    expect.arrayContaining(["opportunity.lost", "opportunity.reopened", "opportunity.won"]),
+  )
 })
