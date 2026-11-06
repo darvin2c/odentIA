@@ -99,7 +99,7 @@ const LIST_TITLES: Record<string, string> = {
   funnel_lost_accepted: "Aún no responden o lo rechazaron",
   funnel_lost_paid: "Aceptaron y aún no pagan",
   funnel_stopped: "Dejaron de escribir",
-  controls_missed: "No vinieron a su control",
+  controls_missed: "Controles que no se hicieron",
   lapsed: "Sin venir hace meses",
   invited_returned: "Volvieron tras la invitación",
 }
