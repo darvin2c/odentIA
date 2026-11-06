@@ -480,7 +480,7 @@ for (const width of [1440, 390]) {
         await expect(page.getByRole("link", { name: "Definir horarios", exact: true })).toHaveCount(0)
         await expect(page.getByRole("region", { name: "Te espera" }).getByText("Nada te espera por ahora", { exact: true })).toBeVisible()
         const block = role === "reception" ? "Agenda de hoy" : role === "clinician" ? "Mis pacientes de hoy" : "Caja de hoy"
-        const action = role === "reception" ? "Abrir la Agenda" : role === "clinician" ? "Ver mi agenda" : "Abrir la Caja"
+        const action = role === "reception" ? "Abrir la Agenda" : role === "clinician" ? "Ver mi agenda" : "Ir a la Caja"
         for (const name of ["Agenda de hoy", "Mis pacientes de hoy", "Caja de hoy"]) {
           await expect(page.getByRole("region", { name, exact: true })).toHaveCount(name === block ? 1 : 0)
         }

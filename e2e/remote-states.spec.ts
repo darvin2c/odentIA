@@ -176,7 +176,8 @@ test("conocimiento: rechazo conserva campos y permite corregir sin filtrar el er
 })
 
 for (const surface of ["knowledge", "product"] as const) {
-  test(`${surface}: respuesta perdida tras guardar conserva entrada y bloquea duplicación ambigua`, async ({ owner }) => {
+  const outcome = surface === "knowledge" ? "bloquea duplicación ambigua" : "se reintenta sin duplicar"
+  test(`${surface}: respuesta perdida tras guardar conserva entrada y ${outcome}`, async ({ owner }) => {
     const { page, org } = owner
     const endpoint = surface === "knowledge" ? "/api/agent/knowledge" : "/api/inventory/products"
     let writes = 0
@@ -184,6 +185,8 @@ for (const surface of ["knowledge", "product"] as const) {
     await page.route(url => url.pathname === endpoint, async route => {
       if (route.request().method() !== "POST" || relaying) return route.continue()
       writes++
+      // El producto lleva la clave del formulario (X13): el reintento llega al servidor tal cual.
+      if (surface === "product" && writes > 1) return route.continue()
       // La operación sí se aplica (desde el navegador, con la misma sesión);
       // solo se pierde la respuesta de la petición original.
       relaying = true
@@ -203,15 +206,21 @@ for (const surface of ["knowledge", "product"] as const) {
     }
     await drawer.getByRole("button", { name: "Guardar", exact: true }).click()
     await expect(drawer.getByRole("alert")).toBeVisible()
-    await expect(drawer.getByRole("button", { name: "Guardar", exact: true })).toBeDisabled()
     const field = drawer.getByLabel(surface === "knowledge" ? "La pregunta" : "Nombre", { exact: true })
     await expect(field).toHaveValue(surface === "knowledge" ? "Entrada confirmada en servidor" : "Producto confirmado en servidor")
-    await field.press("Enter")
+    if (surface === "knowledge") {
+      await expect(drawer.getByRole("button", { name: "Guardar", exact: true })).toBeDisabled()
+      await field.press("Enter")
+    } else {
+      // Volver a guardar devuelve el producto ya creado con esa clave, y el cajón se cierra.
+      await drawer.getByRole("button", { name: "Guardar", exact: true }).click()
+      await expect(drawer).toBeHidden()
+    }
     // Los productos se leen por sede (ADR 0067): la lista trae sus filas en `items`.
     const saved = surface === "knowledge"
       ? (await call<Array<{ title: string }>>(page, "GET", `${endpoint}?status=borrador`, org.slug)).map(item => item.title)
       : (await call<{ items: Array<{ name: string }> }>(page, "GET", `${endpoint}?branchId=${owner.branchId}`, org.slug)).items.map(item => item.name)
     expect(saved).toEqual([surface === "knowledge" ? "Entrada confirmada en servidor" : "Producto confirmado en servidor"])
-    expect(writes).toBe(1)
+    expect(writes).toBe(surface === "knowledge" ? 1 : 2)
   })
 }

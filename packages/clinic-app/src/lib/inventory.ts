@@ -427,7 +427,8 @@ export interface ProductInputBody {
   salePriceCents?: number | null
 }
 
-export const createProduct = (body: ProductInputBody) =>
+/** `idempotencyKey`: la clave del formulario abierto; reintentar el alta no repite el producto. */
+export const createProduct = (body: ProductInputBody & { idempotencyKey?: string }) =>
   data(apiFetch<{ data: { id: string; name: string } }>("/api/inventory/products", json(body)))
 
 export const updateProduct = (id: string, body: ProductInputBody) =>

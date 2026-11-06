@@ -396,7 +396,7 @@ export function TodayCash({
           className="p-5"
           title="Nadie por cobrar de lo atendido hoy"
           description="Cuando se cierre una atención con costo, la persona aparece aquí sola."
-          actionLabel="Abrir la Caja"
+          actionLabel="Ir a la Caja"
           onAction={() => void navigate({ to: "/finance", search: finance })}
         />
       ) : (
@@ -408,7 +408,7 @@ export function TodayCash({
             ))}
           </ul>
           <Link to="/finance" search={finance} className={MORE}>
-            Abrir la Caja
+            Ir a la Caja
           </Link>
         </>
       )}
@@ -434,7 +434,7 @@ export function CashLine({ cash, locale }: { cash: WorkspaceCash; locale: string
           {collectedText(cash, locale)} · {pending === 0 ? "nadie por cobrar" : `${peopleText(pending)} por cobrar`}
         </span>
       </span>
-      <span className="shrink-0 font-semibold text-primary">Abrir la Caja</span>
+      <span className="shrink-0 font-semibold text-primary">Ir a la Caja</span>
     </Link>
   )
 }
