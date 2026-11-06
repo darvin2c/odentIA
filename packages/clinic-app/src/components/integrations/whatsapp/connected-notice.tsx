@@ -1,6 +1,10 @@
 import { Button, buttonVariants, cn } from "@odentia/ui"
-import { Check, ExternalLink } from "lucide-react"
+import { Link } from "@tanstack/react-router"
+import { Check, ExternalLink, Info } from "lucide-react"
 import { useEffect, useRef } from "react"
+import { useReceptionName } from "../../../lib/agent-names"
+import { useAgentSummary } from "../../../lib/agent-work"
+import { usePermission } from "../../../lib/crm"
 import { META_ACCOUNT_URL } from "../../../lib/whatsapp"
 import { Note } from "./note"
 
@@ -39,6 +43,11 @@ export function ConnectedNotice({
     const writing = active instanceof HTMLElement && active.matches("input, textarea, [contenteditable='true']")
     if (!writing) region.current?.focus()
   }, [])
+  // Si Sofi responde desde ahora (ADR 0141): lo dice el resumen del agente; sin saberlo, no se dice.
+  const canSee = usePermission("agent.read")
+  const canManage = usePermission("agent.write")
+  const receptionName = useReceptionName()
+  const receptionOn = useAgentSummary(canSee).data?.data.enabled
   const sent = requested && requested > 0 ? requested : null
   const waiting = sent === null && inReview && inReview > 0 ? inReview : null
 
@@ -60,6 +69,35 @@ export function ConnectedNotice({
             {firstMessage ? ` El primero llegó ${firstMessage}.` : ""}
           </span>
         </li>
+        {receptionOn !== undefined ? (
+          <li className="flex gap-2.5">
+            {receptionOn ? (
+              <Check aria-hidden className="mt-0.5 size-4 shrink-0 text-primary-soft-foreground" />
+            ) : (
+              <Info aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+            )}
+            <span>
+              {receptionOn ? (
+                <>
+                  <strong className="font-semibold">{receptionName} responde desde ahora</strong> a quien escriba a este número.
+                  Lo que aún no sepa de tu clínica lo pasa a tu equipo.
+                </>
+              ) : (
+                <>
+                  <strong className="font-semibold">{receptionName} no está atendiendo:</strong> responde tu equipo desde la Bandeja.
+                </>
+              )}
+              {canManage ? (
+                <>
+                  {" "}
+                  <Link to="/agent/recepcion" className="font-semibold text-primary-soft-foreground underline-offset-2 hover:underline">
+                    {receptionOn ? `Ver o apagar a ${receptionName}` : `Encender a ${receptionName}`}
+                  </Link>
+                </>
+              ) : null}
+            </span>
+          </li>
+        ) : null}
         {sent !== null ? (
           <li className="flex gap-2.5">
             <Check aria-hidden className="mt-0.5 size-4 shrink-0 text-primary-soft-foreground" />
