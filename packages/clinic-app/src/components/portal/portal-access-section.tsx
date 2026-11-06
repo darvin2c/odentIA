@@ -14,7 +14,7 @@ import {
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { useState } from "react"
+import { useId, useState } from "react"
 import { z } from "zod"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
@@ -32,6 +32,7 @@ import {
   resendPortalAccessApi,
   revokePortalAccessApi,
 } from "../../lib/portal"
+import { PersonalLinkSummary } from "../patient/send-personal-link"
 import { PortalAccessSkeleton } from "../skeletons/person-sections"
 
 /** «Citas, presupuestos y documentos»: lo que verá, dicho como en la fila. */
@@ -48,7 +49,7 @@ export function scopeText(scope: PortalScope): string {
 }
 
 /**
- * Datos › Acceso al portal (decisión 9, ADR 0037): una sola fila por quien
+ * Datos › Enlace y portal (decisión 9, ADR 0037): primero su enlace; después, una sola fila por quien
  * entra, en lugar de las listas de permisos, sesiones y llaves. «Dar acceso al
  * portal» son cuatro preguntas en una pantalla; «Cambiar» lo que verá;
  * «Enviar nuevo enlace» para volver a entrar, sin volver a comprobar su
@@ -64,6 +65,7 @@ export function PatientPortalAccessSection({ patientId }: { patientId: string })
   const query = useQuery({ queryKey: key, queryFn: () => fetchPortalAccessApi(patientId), enabled: canManage, retry: false })
   const [drawer, setDrawer] = useState<{ kind: "give" } | { kind: "change" | "resend"; row: PortalAccessRow } | null>(null)
   const [revoking, setRevoking] = useState<PortalAccessRow | null>(null)
+  const uid = useId()
   const revoke = useMutation({
     mutationFn: (grantId: string) => revokePortalAccessApi(grantId),
     onSuccess: () => {
@@ -72,107 +74,141 @@ export function PatientPortalAccessSection({ patientId }: { patientId: string })
     },
   })
   if (!canManage) {
-    return <EmptyState title="Acceso al portal" description="El acceso de un paciente al portal lo gestiona quien puede editar su ficha." />
+    return <EmptyState title="Enlace y portal" description="Su enlace y su acceso al portal los gestiona quien puede editar su ficha." />
   }
+  // «Su enlace» va siempre primero: es lo que ya tiene y no depende del portal (ni de que cargue).
+  const linkBlock = (
+    <section aria-labelledby={`${uid}-enlace`} className="flex flex-col gap-2 rounded-lg border p-3">
+      <h3 id={`${uid}-enlace`} className="text-sm font-medium">
+        Su enlace
+      </h3>
+      <PersonalLinkSummary patientId={patientId} />
+    </section>
+  )
+  const portalTitle = (
+    <h3 id={`${uid}-portal`} className="sr-only">
+      Portal
+    </h3>
+  )
   if (query.isPending)
     return (
-      <SkeletonRegion message="Cargando el acceso al portal…">
-        <PortalAccessSkeleton />
-      </SkeletonRegion>
+      <div className="flex flex-col gap-3">
+        {linkBlock}
+        <SkeletonRegion message="Cargando el acceso al portal…">
+          <PortalAccessSkeleton />
+        </SkeletonRegion>
+      </div>
     )
-  if (query.isError) return <ErrorState title="No pudimos cargar el acceso al portal" error={query.error} onRetry={() => void query.refetch()} />
+  if (query.isError)
+    return (
+      <div className="flex flex-col gap-3">
+        {linkBlock}
+        <ErrorState title="No pudimos cargar el acceso al portal" error={query.error} onRetry={() => void query.refetch()} />
+      </div>
+    )
   const summary = query.data
   if (!summary.enabled) {
     return (
-      <EmptyState
-        title="El portal está apagado"
-        description="«Su enlace» cubre la cita, los datos y el presupuesto. Encienda el portal si sus pacientes piden ver sus documentos cuando quieran."
-        actionLabel={canConfigure ? "Encender el portal" : undefined}
-        onAction={canConfigure ? () => void navigate({ to: "/settings/patient-access" }) : undefined}
-      />
+      <div className="flex flex-col gap-3">
+        {linkBlock}
+        <EmptyState
+          title="El portal está apagado"
+          description={
+            canConfigure
+              ? "El portal es para que entre cuando quiera a ver además sus documentos. Está apagado para toda la clínica."
+              : "El portal es para que entre cuando quiera a ver además sus documentos. Lo enciende quien administra la clínica."
+          }
+          actionLabel={canConfigure ? "Ir a Configuración" : undefined}
+          onAction={canConfigure ? () => void navigate({ to: "/settings/patient-access" }) : undefined}
+        />
+      </div>
     )
   }
   const pendingCandidates = summary.candidates.filter((candidate) => !summary.access.some((row) => row.contactId === candidate.contactId))
   return (
-    <section aria-label="Acceso al portal" className="flex flex-col gap-3">
-      {summary.access.length === 0 ? (
-        <EmptyState
-          title="Sin acceso al portal"
-          description="Con el portal ve sus citas, presupuestos y documentos cuando quiera. Se da en persona, con su documento."
-          actionLabel={summary.candidates.length > 0 ? "Dar acceso al portal" : undefined}
-          onAction={summary.candidates.length > 0 ? () => setDrawer({ kind: "give" }) : undefined}
-        />
-      ) : (
-        <ul className="flex flex-col divide-y rounded-lg border">
-          {summary.access.map((row) => (
-            <li key={row.grantId} className="flex flex-wrap items-center gap-3 p-3">
-              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <p className="text-sm font-medium">
-                  {row.name}
-                  {row.relation === "representante" ? " (representante)" : ""} · {scopeText(row.scope)}
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  {[
-                    row.saved ? "Acceso guardado en su teléfono" : "Aún no guardó su acceso",
-                    row.lastEntryAt ? `entró el ${formatPortalDate(row.lastEntryAt)}` : "aún no entra",
-                  ].join(" · ")}
-                </p>
-                {row.reentryRequested ? (
-                  <Badge variant="secondary" className="self-start">
-                    Pidió volver a entrar
-                  </Badge>
-                ) : null}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" variant={row.reentryRequested ? "default" : "outline"} size="sm" onClick={() => setDrawer({ kind: "resend", row })}>
-                  Enviar nuevo enlace
-                </Button>
-                <Button type="button" variant="outline" size="sm" onClick={() => setDrawer({ kind: "change", row })}>
-                  Cambiar
-                </Button>
-                <Button type="button" variant="ghost" size="sm" className="text-destructive" onClick={() => setRevoking(row)}>
-                  Quitar acceso
-                </Button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-      {summary.access.length > 0 && pendingCandidates.length > 0 ? (
-        <Button type="button" variant="outline" className="self-start" onClick={() => setDrawer({ kind: "give" })}>
-          Dar acceso a otra persona
-        </Button>
-      ) : null}
-      {summary.candidates.length === 0 && summary.access.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Entra la propia persona si es mayor de edad, o su representante legal si es menor. Registre a su representante en «Responsables».</p>
-      ) : null}
-      {drawer ? (
-        <AccessDrawer
-          patientId={patientId}
-          summary={summary}
-          mode={drawer}
+    <div className="flex flex-col gap-3">
+      {linkBlock}
+      <section aria-labelledby={`${uid}-portal`} className="flex flex-col gap-3">
+        {portalTitle}
+        {summary.access.length === 0 ? (
+          <EmptyState
+            title="Sin acceso al portal"
+            description="Con el portal ve sus citas, presupuestos y documentos cuando quiera. Se da en persona, con su documento."
+            actionLabel={summary.candidates.length > 0 ? "Dar acceso al portal" : undefined}
+            onAction={summary.candidates.length > 0 ? () => setDrawer({ kind: "give" }) : undefined}
+          />
+        ) : (
+          <ul className="flex flex-col divide-y rounded-lg border">
+            {summary.access.map((row) => (
+              <li key={row.grantId} className="flex flex-wrap items-center gap-3 p-3">
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <p className="text-sm font-medium">
+                    {row.name}
+                    {row.relation === "representante" ? " (representante)" : ""} · {scopeText(row.scope)}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {[
+                      row.saved ? "Acceso guardado en su teléfono" : "Aún no guardó su acceso",
+                      row.lastEntryAt ? `entró el ${formatPortalDate(row.lastEntryAt)}` : "aún no entra",
+                    ].join(" · ")}
+                  </p>
+                  {row.reentryRequested ? (
+                    <Badge variant="secondary" className="self-start">
+                      Pidió volver a entrar
+                    </Badge>
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant={row.reentryRequested ? "default" : "outline"} size="sm" onClick={() => setDrawer({ kind: "resend", row })}>
+                    Enviar nuevo enlace
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => setDrawer({ kind: "change", row })}>
+                    Cambiar
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" className="text-destructive" onClick={() => setRevoking(row)}>
+                    Quitar acceso
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+        {summary.access.length > 0 && pendingCandidates.length > 0 ? (
+          <Button type="button" variant="outline" className="self-start" onClick={() => setDrawer({ kind: "give" })}>
+            Dar acceso a otra persona
+          </Button>
+        ) : null}
+        {summary.candidates.length === 0 && summary.access.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Entra la propia persona si es mayor de edad, o su representante legal si es menor. Registra a su representante en «Responsables».</p>
+        ) : null}
+        {drawer ? (
+          <AccessDrawer
+            patientId={patientId}
+            summary={summary}
+            mode={drawer}
+            onClose={() => {
+              setDrawer(null)
+              void queryClient.invalidateQueries({ queryKey: key })
+            }}
+          />
+        ) : null}
+        <ConfirmDialog
+          open={revoking !== null}
+          title={`¿Quitar el acceso de ${revoking?.name ?? ""}?`}
+          description="Se cierra todo: sus sesiones, su acceso guardado y los enlaces sin usar. Para volver a entrar habrá que darle acceso otra vez."
+          confirmLabel="Quitar acceso"
+          variant="destructive"
+          pending={revoke.isPending}
+          error={revoke.error ? submitErrorMessage(revoke.error) : null}
           onClose={() => {
-            setDrawer(null)
-            void queryClient.invalidateQueries({ queryKey: key })
+            if (revoke.isPending) return
+            revoke.reset()
+            setRevoking(null)
           }}
+          onConfirm={() => revoking && revoke.mutate(revoking.grantId)}
         />
-      ) : null}
-      <ConfirmDialog
-        open={revoking !== null}
-        title={`¿Quitar el acceso de ${revoking?.name ?? ""}?`}
-        description="Se cierra todo: sus sesiones, su acceso guardado y los enlaces sin usar. Para volver a entrar habrá que darle acceso otra vez."
-        confirmLabel="Quitar acceso"
-        variant="destructive"
-        pending={revoke.isPending}
-        error={revoke.error ? submitErrorMessage(revoke.error) : null}
-        onClose={() => {
-          if (revoke.isPending) return
-          revoke.reset()
-          setRevoking(null)
-        }}
-        onConfirm={() => revoking && revoke.mutate(revoking.grantId)}
-      />
-    </section>
+      </section>
+    </div>
   )
 }
 
