@@ -1129,11 +1129,19 @@ async function getOrCreateDirectPlan(
 /**
  * El tratamiento abierto y aceptado del plan con ese servicio, si lo hay. Si
  * existe, registrar el servicio lo ejecuta: no crea otra indicación en el plan
- * (ADR 0100, QA CT: la resina se presupuestaba otra vez).
+ * (ADR 0100, QA CT: la resina se presupuestaba otra vez). Con la pieza dicha,
+ * solo el de esa pieza o el que aún no la tiene: la endodoncia de la 21 no es
+ * una sesión de la que sigue en curso en la 11.
  */
-async function openAcceptedPlanItemFor(tx: Db, orgId: string, patientId: string, serviceId: string): Promise<string | null> {
-  const [row] = await tx
-    .select({ id: treatmentPlanItem.id })
+async function openAcceptedPlanItemFor(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  serviceId: string,
+  siteCode: string | null,
+): Promise<string | null> {
+  const rows = await tx
+    .select({ id: treatmentPlanItem.id, siteCode: treatmentPlanItem.siteCode })
     .from(treatmentPlanItem)
     .where(
       and(
@@ -1148,8 +1156,19 @@ async function openAcceptedPlanItemFor(tx: Db, orgId: string, patientId: string,
       ),
     )
     .orderBy(asc(treatmentPlanItem.id))
-    .limit(1)
+  const row = rows.find((item) => !siteCode || !item.siteCode || item.siteCode === siteCode)
   return row?.id ?? null
+}
+
+/** La pieza (o el sitio) que trae lo pedido, si se dijo; sin ella, ninguna. */
+async function requestedSiteCode(tx: Db, orgId: string, input: AddEncounterProcedureInput): Promise<string | null> {
+  const site = await siteOf(tx, orgId)
+  try {
+    return site.columns(siteInputOf(site, input)).siteCode
+  } catch {
+    // Un sitio mal dicho se rechaza más adelante con su campo; aquí no decide nada.
+    return null
+  }
 }
 
 export async function addEncounterProcedure(
@@ -1166,7 +1185,7 @@ export async function addEncounterProcedure(
   const requestedServiceId = input.serviceId?.trim() ? input.serviceId.trim() : null
   const linkedPlanItemId =
     requestedServiceId && !input.planItemId
-      ? await openAcceptedPlanItemFor(tx, orgId, patientId, requestedServiceId)
+      ? await openAcceptedPlanItemFor(tx, orgId, patientId, requestedServiceId, await requestedSiteCode(tx, orgId, input))
       : null
   const serviceIdParam = linkedPlanItemId ? null : requestedServiceId
   const planItemIdParam = input.planItemId ?? linkedPlanItemId

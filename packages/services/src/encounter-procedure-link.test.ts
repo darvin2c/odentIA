@@ -1,6 +1,7 @@
 import { withOrgContext } from "@odentia/db"
 import { sql } from "drizzle-orm"
 import { expect, it } from "vitest"
+import { createBudget } from "./budgets.js"
 import { addEncounterProcedure } from "./encounters.js"
 import { addPlanItem, createTreatmentPlan, listPlanItems, setPlanItemStatus } from "./plan.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
@@ -100,6 +101,37 @@ it("aceptar al hacerlo un tratamiento de varias sesiones lo deja en curso y la s
     sql`select status from treatment_plan_item where id = ${item.id}`,
   )
   expect(afterSecond.status).toBe("realizado")
+})
+
+it("la misma endodoncia en otra pieza no es una sesión de la que sigue en curso, y lo en curso no vuelve a presupuestarse", async () => {
+  await ownerDb.execute(
+    sql`insert into "user" (id,name,email) values ('clinical-teeth','Clínico','clinical-teeth@example.test')`,
+  )
+  const [patient] = await ownerDb.execute<{ id: string }>(
+    sql`with pp as (insert into contact (organization_id,display_name) values ('org_a','Paciente piezas') returning id) insert into patient (organization_id,person_id,patient_number) select 'org_a',pp.id,4 from pp returning id`,
+  )
+  const [service] = await ownerDb.execute<{ id: string }>(
+    sql`insert into service_catalog (organization_id,name,scope,source,price_cents,currency) values ('org_a','Endodoncia anterior','tooth','custom',45000,'PEN') returning id`,
+  )
+  const [visit] = await ownerDb.execute<{ id: string }>(
+    sql`insert into encounter (organization_id,patient_id,professional_user_id) values ('org_a',${patient.id},'clinical-teeth') returning id`,
+  )
+  const run = <T>(fn: (tx: typeof appDb) => Promise<T>) => withOrgContext(appDb, "org_a", fn)
+  const args = ["org_a", "clinical-teeth", patient.id] as const
+  const plan = await run((tx) => createTreatmentPlan(tx, ...args, { title: "Plan", originEncounterId: visit.id }))
+  const item = await run((tx) =>
+    addPlanItem(tx, ...args, { serviceId: service.id, planId: plan.id, sourceEncounterId: visit.id, toothNumber: 11, plannedSessions: 2 }),
+  )
+  await run((tx) => addEncounterProcedure(tx, ...args, visit.id, { planItemId: item.id, acceptWhenDone: true }))
+
+  // La 21, del catálogo, en la misma atención: es otro tratamiento, no la sesión de la 11.
+  const other = await run((tx) => addEncounterProcedure(tx, ...args, visit.id, { serviceId: service.id, toothNumber: 21 }))
+  expect(other.planItemId).not.toBe(item.id)
+
+  // La de la 11, aceptada al hacerla y en curso, ya no se cotiza.
+  await expect(
+    run((tx) => createBudget(tx, ...args, { planId: plan.id, itemIds: [item.id] })),
+  ).rejects.toMatchObject({ code: "ITEM_CLOSED" })
 })
 
 it("aceptar al hacerlo un tratamiento de una sola sesión lo deja realizado, como hasta ahora", async () => {

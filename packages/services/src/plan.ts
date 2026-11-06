@@ -1004,15 +1004,22 @@ export async function updatePlanItem(
 
 /**
  * Un tratamiento sin presupuesto que quedó aceptado en una atención: se hizo en
- * ella (aceptado al hacerlo o servicio directo), así que está unido a esa atención.
+ * ella (aceptado al hacerlo o servicio directo), así que tiene un procedimiento
+ * vigente. Si ese acto se anuló, la aceptación ya no tiene de dónde salir.
  */
 async function acceptedInAttention(tx: Db, orgId: string, itemId: string): Promise<boolean> {
-  const [link] = await tx
-    .select({ id: encounterPlanItem.planItemId })
-    .from(encounterPlanItem)
-    .where(and(eq(encounterPlanItem.organizationId, orgId), eq(encounterPlanItem.planItemId, itemId)))
+  const [done] = await tx
+    .select({ id: encounterProcedure.id })
+    .from(encounterProcedure)
+    .where(
+      and(
+        eq(encounterProcedure.organizationId, orgId),
+        eq(encounterProcedure.planItemId, itemId),
+        isNull(encounterProcedure.voidedAt),
+      ),
+    )
     .limit(1)
-  return Boolean(link)
+  return Boolean(done)
 }
 
 export async function setPlanItemStatus(
