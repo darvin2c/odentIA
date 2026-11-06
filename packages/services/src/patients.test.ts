@@ -797,6 +797,12 @@ it("persona única: una identidad, protegida del agente y sustituible por el con
   await withOrgContext(appDb, "org_a", (tx) =>
     updatePatient(tx, "org_a", ACTOR, ficha.id, { displayName: "Rosa Quispe de Ríos" }),
   )
+  // Otra sesión que vio el nombre de antes no lo pisa: se avisa junto al dato.
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      updatePatient(tx, "org_a", ACTOR, ficha.id, { displayName: "Rosa Quispe", base: { displayName: "Rosa Quispe Mamani" } }),
+    ),
+  ).rejects.toMatchObject({ code: "STALE_DATA", fields: { displayName: expect.stringContaining("Otra sesión") } })
   const trasFicha = await withOrgContext(appDb, "org_a", (tx) =>
     getContact(tx, "org_a", provisional.contactId),
   )

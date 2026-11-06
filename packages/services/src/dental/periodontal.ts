@@ -407,6 +407,17 @@ export async function startPeriodontalChart(
   return chartView(tx, orgId, chart!, person.birthDate)
 }
 
+/** El mismo JSON con las claves en orden (la furca puede venir en otro orden). */
+function canonical(value: unknown): string {
+  const sorted = (item: unknown): unknown =>
+    Array.isArray(item)
+      ? item.map(sorted)
+      : item && typeof item === "object"
+        ? Object.fromEntries(Object.keys(item as Record<string, unknown>).sort().map((key) => [key, sorted((item as Record<string, unknown>)[key])]))
+        : item
+  return JSON.stringify(sorted(value))
+}
+
 /**
  * Guarda una pieza entera (lo que no se envía queda sin medir). Solo las piezas
  * que se debían sondear y solo en el borrador de quien lleva la atención.
@@ -417,10 +428,34 @@ export async function savePeriodontalTooth(
   actorUserId: string,
   patientId: string,
   chartId: string,
-  input: PeriodontalToothInput,
+  input: PeriodontalToothInput & {
+    /** Cómo estaba guardada la pieza para quien sondea: otra pestaña no se pisa (`STALE_DRAFT`). */
+    base?: Omit<PeriodontalToothInput, "toothNumber">
+  },
 ): Promise<PeriodontalToothRecord> {
   const chart = await requireChart(tx, orgId, patientId, chartId, true)
   await requireWritable(tx, orgId, actorUserId, chart)
+  if (input.base !== undefined) {
+    const [existing] = await tx
+      .select()
+      .from(periodontalTooth)
+      .where(and(eq(periodontalTooth.chartId, chart.id), eq(periodontalTooth.toothNumber, input.toothNumber)))
+      .for("update")
+    const stored = existing ? toothRecord(existing) : emptyPeriodontalTooth(input.toothNumber)
+    const { base: _base, ...sent } = input
+    const now = canonical(normalizePeriodontalTooth({ ...stored, toothNumber: input.toothNumber }))
+    // Lo que vio quien sondea, o lo que ya llega (un reintento que sí había llegado): no hay conflicto.
+    const same =
+      now === canonical(normalizePeriodontalTooth({ ...stored, ...input.base, toothNumber: input.toothNumber })) ||
+      now === canonical(normalizePeriodontalTooth({ ...sent, toothNumber: input.toothNumber }))
+    if (!same) {
+      throw new ServiceError(
+        "STALE_DRAFT",
+        409,
+        `Pieza ${input.toothNumber}: otra pestaña la guardó mientras sondeabas. Recarga para ver lo último.`,
+      )
+    }
+  }
   if (!chart.expectedTeeth.includes(input.toothNumber)) {
     throw validation(`La pieza ${input.toothNumber} no se sondea: el odontograma de esta atención la tiene ausente`)
   }

@@ -213,6 +213,8 @@ const responsePatch = z
   .object({
     answers: z.record(z.string(), z.unknown()),
     professionalUserId: z.string().min(1).max(200).nullish(),
+    /** Las respuestas guardadas de las que partió: otra pestaña no se pisa. */
+    baseAnswers: z.record(z.string(), z.unknown()).optional(),
   })
   .strict()
 
