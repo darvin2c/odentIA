@@ -1,4 +1,4 @@
-# 0146. El visor muestra en 3D para explicar y mide en mm solo con una escala que vale
+# 0147. El visor muestra en 3D para explicar y mide en mm solo con una escala que vale
 
 - **Fecha:** 2026-11-06
 - **Estado:** aceptada (lienzo «Visor de imágenes: ver, entender y mostrar», decisiones 1 a 8). Revisa la decisión 7 del lienzo del visor de tomografía y precisa el ADR 0056.

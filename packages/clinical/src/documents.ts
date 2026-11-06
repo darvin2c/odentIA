@@ -6,7 +6,7 @@
  * (intraorales: periapical, interproximal o bitewing, oclusal; extraorales:
  * panorámica, cefalométrica; tomografía de haz cónico) y la fotografía clínica
  * intra y extraoral. La tomografía se guarda como un estudio DICOM y se abre
- * en el visor de la ficha (ADR 0055, 0056 y 0146).
+ * en el visor de la ficha (ADR 0055, 0056 y 0147).
  */
 
 export const RADIOGRAPH_TYPES = [

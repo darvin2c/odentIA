@@ -282,7 +282,7 @@ export interface ProductDocumentsUi {
   /**
    * Los tipos de imagen que se suben y, si cambia, cómo se nombra cada categoría (latidIA: «Imagen
    * diagnóstica»). `studies`: si guarda la tomografía como estudio y la abre en su visor (odentIA; latidIA
-   * todavía no, ADR 0146).
+   * todavía no, ADR 0147).
    */
   imaging: {
     types: readonly ImagingType[]

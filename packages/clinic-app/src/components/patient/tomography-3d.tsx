@@ -6,7 +6,7 @@ import type { CbctVolume, WindowLevel } from "../../lib/cbct-volume"
 import { sliderValue } from "../../lib/view-transform"
 
 /**
- * La tomografía en 3D, solo para mostrar (ADR 0146): se gira con el dedo o el
+ * La tomografía en 3D, solo para mostrar (ADR 0147): se gira con el dedo o el
  * ratón y «Cortar» le quita una parte para ver adentro. No mide ni se guarda en
  * la atención: el umbral del 3D puede borrar el hueso fino, y lo que vale está
  * en los cortes. La dibuja NiiVue con la tarjeta gráfica (WebGL2), sobre una

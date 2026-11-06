@@ -1,7 +1,7 @@
 # 0056. El visor de tomografía reconstruye en el navegador
 
 - **Fecha:** 2026-10-18
-- **Estado:** aceptada (fases 3 y 4 del lienzo del visor de tomografía, issue 34). El 3D para mostrar lo agrega el ADR 0146.
+- **Estado:** aceptada (fases 3 y 4 del lienzo del visor de tomografía, issue 34). El 3D para mostrar lo agrega el ADR 0147.
 
 ## Problema
 
