@@ -36,7 +36,7 @@ import { useCan, usePermission } from "../../lib/crm"
 import { personHeaderRules } from "../../lib/screen-rules"
 import { label } from "../../lib/glossary"
 import { sexLabel, speaksForWords } from "../../lib/patient-overview"
-import { ageFrom, hcLabel, type PatientFull, type PatientSummary } from "../../lib/patients"
+import { ageFrom, filiationGapsText, hcLabel, type PatientFull, type PatientSummary } from "../../lib/patients"
 import { PERSON_KIND_LABELS, type PersonPage, relationshipText } from "../../lib/people"
 import type { BookingSeed } from "../agenda/booking-drawer"
 import { openBookingAnywhere } from "../agenda/schedule-host"
@@ -47,6 +47,7 @@ import { CollectButton } from "./collect-flow"
 import { FiliacionSectionDrawer } from "./filiacion-section-drawer"
 import { NewEncounterButton } from "./new-encounter-button"
 import { PatientAvatar } from "./patient-avatar"
+import { PersonalLinkDrawer } from "./send-personal-link"
 import { useOpenWide } from "./wide-section"
 
 /** Alertas prioritarias: primero alergias severas, luego el resto. Siempre visibles, nunca tras un desplegable. */
@@ -180,6 +181,8 @@ export function PersonHeader({
   const patient = person.patient
   const [editing, setEditing] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  // «Su enlace», siempre a mano: falten o no datos.
+  const [linkOpen, setLinkOpen] = useState(false)
   const [archiveOpen, setArchiveOpen] = useState(false)
   const [archiveError, setArchiveError] = useState<string | null>(null)
   const [writeOpen, setWriteOpen] = useState(false)
@@ -352,6 +355,16 @@ export function PersonHeader({
                   >
                     Editar datos personales
                   </DropdownMenuItem>
+                  {patient && !person.archived ? (
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setMenuOpen(false)
+                        setLinkOpen(true)
+                      }}
+                    >
+                      Su enlace
+                    </DropdownMenuItem>
+                  ) : null}
                   <DropdownMenuItem
                     onClick={() => {
                       setMenuOpen(false)
@@ -366,6 +379,14 @@ export function PersonHeader({
             ) : null}
           </div>
         </div>
+        {patient ? (
+          <PersonalLinkDrawer
+            patientId={patient.id}
+            open={linkOpen}
+            onClose={() => setLinkOpen(false)}
+            missing={filiationGapsText(detail?.missingData ?? [])}
+          />
+        ) : null}
         {patient && speaksFor.length > 0 ? (
           <p className="text-sm">
             <span className="font-medium">{speaksForWords(person.sex)}: </span>
