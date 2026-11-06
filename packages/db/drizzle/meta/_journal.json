@@ -337,6 +337,13 @@
       "when": 1793989343321,
       "tag": "0047_pacientes_sin_cita",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1793989403321,
+      "tag": "0048_avisos_de_la_receta",
+      "breakpoints": true
     }
   ]
 }

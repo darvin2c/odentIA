@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { user } from "@odentia/db/schema/auth"
-import { patientAllergy } from "@odentia/db/schema/clinical"
+import { patientAllergy, patientMedication } from "@odentia/db/schema/clinical"
+import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { addClinicalNote } from "./clinical.js"
 import { clinicalFixture, makeSigner } from "./clinical-test-fixture.js"
@@ -90,16 +91,17 @@ it("exige DCI y vía reconocida, y avisa la alergia antes de prescribir", async 
       createPrescription(tx, ...f.args, { items: [{ ...base, genericName: "amoxicilina" }] }),
     ),
   ).rejects.toMatchObject({ code: "ALLERGY_CONFLICT" })
-  // Recetar igual pide un motivo escrito (decisión 10): confirmar sin motivo no basta.
-  await expect(
-    f.run((tx) =>
-      createPrescription(tx, ...f.args, {
-        acknowledgeAllergies: true,
-        allergyOverrideReason: "  ",
-        items: [{ ...base, genericName: "amoxicilina" }],
-      }),
-    ),
-  ).rejects.toMatchObject({ code: "ALLERGY_CONFLICT" })
+  // Visto el aviso, se receta sin escribir nada (Q17): la receta guarda el aviso que vio.
+  const seen = await f.run((tx) =>
+    createPrescription(tx, ...f.args, {
+      acknowledgeAllergies: true,
+      allergyOverrideReason: "  ",
+      items: [{ ...base, genericName: "amoxicilina" }],
+    }),
+  )
+  expect(seen.allergyOverrideReason).toBeNull()
+  expect(seen.alertsSeen).toEqual([expect.stringMatching(/^Amoxicilina: alergia severa a /)])
+  // Con motivo, queda además el motivo.
   const confirmed = await f.run((tx) =>
     createPrescription(tx, ...f.args, {
       acknowledgeAllergies: true,
@@ -117,6 +119,22 @@ it("exige DCI y vía reconocida, y avisa la alergia antes de prescribir", async 
     }),
   )
   expect(plain.allergyOverrideReason).toBeNull()
+  expect(plain.alertsSeen).toBeNull()
+})
+
+it("lo que ya toma, o dos veces lo mismo en la receta, se avisa por su código ATC y no frena (X2)", async () => {
+  const f = await clinicalFixture()
+  await ownerDb.insert(patientMedication).values({ organizationId: "org_a", patientId: f.patient.id, name: "Ibuprofeno 400 mg", genericName: "ibuprofeno", atcCode: "M01AE01" })
+  const base = { strength: "50 mg", dosageForm: "tableta", dose: "1 tableta", route: "oral", frequency: "Cada 12 horas", duration: "3 días" }
+  // Sin pedir nada: el duplicado solo informa y queda en la receta.
+  const issued = await f.run((tx) =>
+    createPrescription(tx, ...f.args, { items: [{ ...base, genericName: "diclofenaco" }, { ...base, genericName: "paracetamol", strength: "500 mg" }] }),
+  )
+  expect(issued.alertsSeen).toEqual([expect.stringMatching(/^Diclofenaco: ya toma Ibuprofeno 400 mg, del mismo grupo/)])
+  // Lo que ya no toma (con fecha de fin pasada) no cuenta.
+  await ownerDb.update(patientMedication).set({ endDate: "2020-01-01" }).where(eq(patientMedication.patientId, f.patient.id))
+  const later = await f.run((tx) => createPrescription(tx, ...f.args, { items: [{ ...base, genericName: "diclofenaco" }] }))
+  expect(later.alertsSeen).toBeNull()
 })
 
 it("avisa por el código de la alergia, se haya escrito como se haya escrito", async () => {

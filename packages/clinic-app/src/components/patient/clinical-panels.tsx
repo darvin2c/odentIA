@@ -9,6 +9,7 @@
 import {
   ADMINISTRATION_ROUTES,
   allergyWarnings,
+  duplicateWarnings,
   DOSAGE_FORMS,
   dispensedUnit,
   FOLLOW_UP_REPEAT_MONTHS,
@@ -63,6 +64,8 @@ import { ChoiceSelect } from "../ui/choice-select"
 import { DiagnosisSearch } from "./diagnosis-search"
 import { PrescriptionPaper } from "./document-papers"
 import { FollowUpScheduler } from "./follow-up-scheduler"
+import { clinicToday } from "../../lib/inventory"
+import { PrescriptionAlertsSeen } from "./prescription-alerts"
 import { ControlRowsSkeleton } from "../skeletons/person-sections"
 import { ProfessionalProfileDrawer } from "../professional-profile-drawer"
 
@@ -716,11 +719,7 @@ export function PrescriptionEntry({
           </ul>
         )}
         {prescription.notes ? <p className="text-sm">{prescription.notes}</p> : null}
-        {prescription.allergyOverrideReason ? (
-          <p className="text-sm text-muted-foreground">
-            Recetada pese al aviso de alergia: {prescription.allergyOverrideReason}
-          </p>
-        ) : null}
+        <PrescriptionAlertsSeen prescription={prescription} />
         {prescription.cancelReason ? (
           <p className="text-sm text-muted-foreground">Anulada: {prescription.cancelReason}</p>
         ) : null}
@@ -828,7 +827,6 @@ export function RecetasPanel({
   defaultDiagnosisCode,
   defaultDiagnosisSystem,
   initialMedications,
-  startOverriding = false,
   onIssued,
 }: {
   patientId: string
@@ -852,8 +850,6 @@ export function RecetasPanel({
   defaultDiagnosisSystem?: string
   /** La receta dictada, ya puesta, para completarla o resolver su aviso (issue 109, fase 2). */
   initialMedications?: Array<Partial<Omit<MedicationDraft, "key">>>
-  /** Se abre con «Recetar igual, con motivo» ya elegido. */
-  startOverriding?: boolean
   /** La receta quedó emitida. */
   onIssued?: (prescriptionId: string) => void
 }): React.JSX.Element {
@@ -903,7 +899,6 @@ export function RecetasPanel({
             .min(1, "Añade al menos un medicamento.")
             .max(MAX_MEDICATIONS, `La receta lleva hasta ${MAX_MEDICATIONS} medicamentos.`),
           patientWeightKg: z.string(),
-          overriding: z.boolean(),
           allergyOverrideReason: z
             .string()
             .max(500, "El motivo para recetar igual tiene como mucho 500 caracteres."),
@@ -913,8 +908,7 @@ export function RecetasPanel({
           notes: z.string().max(MAX_TEXT, `Las notas tienen como mucho ${MAX_TEXT} caracteres.`),
         })
         .superRefine((value, ctx) => {
-          const { rules, conflictsOf } = latest.current
-          let warned = false
+          const { rules } = latest.current
           value.items.forEach((medication, index) => {
             const name = medication.genericName.trim()
             if (!name) return
@@ -928,26 +922,12 @@ export function RecetasPanel({
               })
               return
             }
-            if (conflictsOf(name).length === 0) return
-            warned = true
-            if (!value.overriding)
-              ctx.addIssue({
-                code: "custom",
-                path,
-                message: "Tiene un aviso: cámbialo o recétalo igual con un motivo.",
-              })
           })
           if (rules.weight.required && weightOf(value.patientWeightKg) === null)
             ctx.addIssue({
               code: "custom",
               path: ["patientWeightKg"],
               message: value.patientWeightKg.trim() ? WEIGHT_RANGE : "Escribe su peso en kilos.",
-            })
-          if (warned && value.overriding && !value.allergyOverrideReason.trim())
-            ctx.addIssue({
-              code: "custom",
-              path: ["allergyOverrideReason"],
-              message: "Escribe por qué la recetas igual.",
             })
         }),
     [],
@@ -982,8 +962,7 @@ export function RecetasPanel({
       planItemId: itemId ?? "",
       items: initialItems,
       patientWeightKg: "",
-      // Recetar igual pese al aviso pide un motivo escrito, que queda en la receta (decisión 10).
-      overriding: startOverriding,
+      // El aviso no pide nada (Q17): la receta guarda que lo viste; el motivo, si lo escribes.
       allergyOverrideReason: "",
       diagnosisCode: defaultDiagnosisCode ?? "",
       diagnosisSystem: defaultDiagnosisSystem ?? (null as string | null),
@@ -993,10 +972,10 @@ export function RecetasPanel({
     validators: { onSubmit: schema },
     onSubmit: async ({ value }) => {
       const { rules, conflictsOf } = latest.current
-      const warned = value.items.some(
+      // Lo que tiene un aviso se emite igual: la pantalla ya lo mostró y la receta lo guarda.
+      const acknowledged = value.items.some(
         (medication) => conflictsOf(medication.genericName.trim()).length > 0,
       )
-      const acknowledged = warned && value.overriding && value.allergyOverrideReason.trim() !== ""
       const result = await createMutation.mutateAsync({
         encounterId: encounterId ?? null,
         planItemId: (itemId ?? value.planItemId) || null,
@@ -1005,7 +984,7 @@ export function RecetasPanel({
         diagnosisSystem: value.diagnosisCode ? value.diagnosisSystem : null,
         validUntil: value.validUntil || null,
         acknowledgeAllergies: acknowledged,
-        allergyOverrideReason: acknowledged ? value.allergyOverrideReason.trim() : null,
+        allergyOverrideReason: acknowledged ? value.allergyOverrideReason.trim() || null : null,
         patientWeightKg: rules.weight.required ? weightOf(value.patientWeightKg) : null,
         items: value.items.map((medication) => ({
           genericName: medication.genericName.trim(),
@@ -1025,7 +1004,6 @@ export function RecetasPanel({
         planItemId: value.planItemId,
         items: [emptyMedication()],
         patientWeightKg: "",
-        overriding: false,
         allergyOverrideReason: "",
         diagnosisCode: "",
         diagnosisSystem: value.diagnosisSystem,
@@ -1042,16 +1020,20 @@ export function RecetasPanel({
 
   const medications = useStore(form.store, (state) => state.values.items)
   const weight = useStore(form.store, (state) => state.values.patientWeightKg)
-  const overriding = useStore(form.store, (state) => state.values.overriding)
   const conflictsByMedication = medications.map((medication) => conflictsOf(medication.genericName))
   const typedWeight = weight.trim() ? Number(weight.replace(",", ".")) : null
   const ruleCheck = rules.check(
     medications,
     typedWeight !== null && Number.isFinite(typedWeight) ? typedWeight : null,
   )
-  // Lo contraindicado en el embarazo va como una alergia: se cambia o se receta con motivo.
+  // Lo contraindicado en el embarazo va como una alergia: se avisa y decide quien receta (Q17).
   const conflicts = [...new Set(conflictsByMedication.flat())]
   const onlyAllergies = ruleCheck.warnings.length === 0
+  // Lo que ya toma y sus enfermedades, a la vista al recetar; un duplicado por ATC solo informa (X2).
+  const today = clinicToday()
+  const taking = (healthQuery.data?.data.medications ?? []).filter((medication) => !medication.endDate || medication.endDate >= today)
+  const illnesses = (healthQuery.data?.data.conditions ?? []).filter((condition) => condition.status === "activa")
+  const duplicates = duplicateWarnings(medications, taking, prescribing.catalog)
   // El peso del último registro se propone una vez; quien receta lo corrige.
   useEffect(() => {
     if (rules.weight.required && rules.weight.suggested !== null && weight === "")
@@ -1103,6 +1085,21 @@ export function RecetasPanel({
             void queryClient.invalidateQueries({ queryKey: ["encounter-closing"] })
           }}
         />
+      ) : null}
+      {taking.length > 0 || illnesses.length > 0 ? (
+        <div role="note" aria-label="Lo que ya toma" className="flex flex-col gap-1 rounded-md border bg-muted/40 p-3 text-sm">
+          {taking.length > 0 ? (
+            <p>
+              <span className="font-medium">Ya toma:</span>{" "}
+              {taking.map((medication) => [medication.name, medication.dose, medication.frequency].filter(Boolean).join(" ")).join(" · ")}
+            </p>
+          ) : null}
+          {illnesses.length > 0 ? (
+            <p>
+              <span className="font-medium">Tiene:</span> {illnesses.map((condition) => condition.name).join(" · ")}
+            </p>
+          ) : null}
+        </div>
       ) : null}
       {itemId ? (
         <p className="text-sm text-muted-foreground">
@@ -1306,19 +1303,18 @@ export function RecetasPanel({
               <li key={line}>{line}</li>
             ))}
           </ul>
-          {overriding ? (
-            <form.AppField name="allergyOverrideReason">
-              {(field) => (
-                <field.TextareaField
-                  label="¿Por qué la recetas igual?"
-                  description="Queda en la receta, con tu nombre."
-                  autoFocus
-                  maxLength={500}
-                  placeholder="Por ejemplo, la reacción fue un malestar, no una alergia"
-                />
-              )}
-            </form.AppField>
-          ) : null}
+          {/* Decide quien receta (Q17): si la emite igual, la receta guarda el aviso con su nombre. */}
+          <p className="text-muted-foreground">Si la recetas igual, la receta guarda que viste este aviso, con tu nombre.</p>
+          <form.AppField name="allergyOverrideReason">
+            {(field) => (
+              <field.TextareaField
+                label="Motivo (opcional)"
+                description="Si lo escribes, queda en la receta."
+                maxLength={500}
+                placeholder="Por ejemplo, la reacción fue un malestar, no una alergia"
+              />
+            )}
+          </form.AppField>
           <div className="flex flex-wrap gap-2">
             <Button
               type="button"
@@ -1333,23 +1329,21 @@ export function RecetasPanel({
                   field.focus()
                   field.select()
                 }
-                form.setFieldValue("overriding", false)
-                form.setFieldValue("allergyOverrideReason", "")
               }}
             >
               Cambiar medicamento
             </Button>
-            {overriding ? null : (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => form.setFieldValue("overriding", true)}
-              >
-                Recetar igual, con motivo
-              </Button>
-            )}
           </div>
+        </div>
+      ) : null}
+      {duplicates.length > 0 ? (
+        <div role="note" className="flex flex-col gap-1 rounded-md border border-warning/40 bg-warning/5 p-3 text-sm">
+          <p className="font-medium">Para que lo tengas en cuenta</p>
+          <ul className="list-disc pl-5">
+            {duplicates.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
         </div>
       ) : null}
       <form.AppField name="diagnosisCode">

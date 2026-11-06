@@ -1,4 +1,4 @@
-import { ADMINISTRATION_ROUTES, allergyWarnings, findMedication } from "@odentia/clinical"
+import { ADMINISTRATION_ROUTES, allergyWarnings, duplicateWarnings, findMedication } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   diagnosisCatalog,
@@ -6,14 +6,16 @@ import {
   orgCounter,
   patient,
   patientAllergy,
+  patientMedication,
   prescription,
   prescriptionItem,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gte, isNull, or, sql } from "drizzle-orm"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { invalidField, notFound, ServiceError } from "./errors.js"
+import { clinicToday } from "./inventory-stock.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
 import type { ProductPrescribing } from "./product-hooks.js"
@@ -50,9 +52,12 @@ export interface CreatePrescriptionInput {
   diagnosisSystem?: string | null
   /** Fecha (AAAA-MM-DD) hasta la que la receta es válida. */
   validUntil?: string | null
-  /** La persona que prescribe vio el aviso de alergia y prescribe igual. */
+  /**
+   * Quien receta vio los avisos (alergia, embarazo): la pantalla los muestra antes de emitir y
+   * lo manda. Sin él, con un aviso, se responde 409 para mostrarlo; nunca se receta a ciegas.
+   */
   acknowledgeAllergies?: boolean
-  /** Con aviso de alergia, por qué se receta igual (decisión 10): obligatorio y queda en la receta. */
+  /** Por qué se receta igual pese al aviso: opcional (Q17); si se escribe, queda en la receta. */
   allergyOverrideReason?: string | null
   /** El peso (kg) con que se receta: latidIA lo pide a un menor de 12 años (issue 229). */
   patientWeightKg?: number | null
@@ -236,16 +241,31 @@ export async function createPrescription(
       review.errors.join(" "),
       await blockedFields(prescribing, tx, { orgId, patientId, items, weightKg }),
     )
-  // Lo contraindicado en el embarazo se receta como una alergia: con motivo.
+  // La alergia y lo contraindicado en el embarazo se avisan: decide quien receta, y queda en la
+  // receta que lo vio (Q17 del QA del 2026-11-04). El motivo es opcional.
   const conflicts = [
     ...items.flatMap((item) => allergyWarnings(item.genericName, allergies, prescribing.catalog)),
     ...review.warnings,
   ]
   const overrideReason = conflicts.length > 0 ? input.allergyOverrideReason?.trim() || null : null
-  if (conflicts.length > 0 && (!input.acknowledgeAllergies || !overrideReason)) {
-    const message = `${review.warnings.length > 0 ? "Aviso" : "Aviso de alergia"}: ${conflicts.join(" ")} Para recetar igual, escribe por qué.`
+  if (conflicts.length > 0 && !input.acknowledgeAllergies) {
+    const message = `${review.warnings.length > 0 ? "Aviso" : "Aviso de alergia"}: ${conflicts.join(" ")} Si la recetas igual, queda en la receta que viste el aviso.`
     throw new ServiceError("ALLERGY_CONFLICT", 409, message, { allergyOverrideReason: message })
   }
+  // Lo que ya toma (sus antecedentes vigentes): un duplicado por su código ATC solo informa (X2).
+  const today = await clinicToday(tx, orgId)
+  const taking = await tx
+    .select({ name: patientMedication.name, atcCode: patientMedication.atcCode })
+    .from(patientMedication)
+    .where(
+      and(
+        eq(patientMedication.organizationId, orgId),
+        eq(patientMedication.patientId, patientId),
+        or(isNull(patientMedication.endDate), gte(patientMedication.endDate, today)),
+      ),
+    )
+  const duplicates = duplicateWarnings(items, taking, prescribing.catalog)
+  const alertsSeen = [...conflicts, ...duplicates]
   if (overrideReason && overrideReason.length > 500)
     throw invalidField(
       "allergyOverrideReason",
@@ -271,6 +291,7 @@ export async function createPrescription(
       ...diagnosis,
       validUntil,
       allergyOverrideReason: overrideReason,
+      alertsSeen: alertsSeen.length > 0 ? alertsSeen : null,
       patientWeightKg: weightKg === null ? null : String(weightKg),
       prescriberName: signer.name,
       prescriberTitle: signer.title,
@@ -291,10 +312,11 @@ export async function createPrescription(
     action: "prescription.issued",
     entity: "prescription",
     entityId: row.id,
-    // Sin copiar el motivo: la auditoría dice que se recetó igual, el motivo queda en la receta.
+    // Sin copiar los avisos ni el motivo: la auditoría dice cuántos hubo; lo clínico queda en la receta.
     metadata: {
       patientId,
       allergyWarnings: conflicts.length,
+      duplicateWarnings: duplicates.length,
       allergyOverride: Boolean(overrideReason),
     },
   })

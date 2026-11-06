@@ -49,6 +49,8 @@ import { DocumentPaperPanel } from "./document-paper-panel"
 import { HealthDocumentSendDrawer } from "./health-document-send"
 import { OrderCancelDrawer, OrderResultDrawer } from "./ordenes-tab"
 import { BudgetReviewDrawer } from "./plan/budget-review"
+import { PrescriptionAlertsSeen } from "./prescription-alerts"
+
 
 /** Lo que todo papel recibe: en la superficie lateral o en su propia dirección. */
 interface PaperSurface {
@@ -170,16 +172,12 @@ export function PrescriptionPaper({
       page={page}
       onClose={onClose}
       notice={
-        prescription.cancelReason || prescription.allergyOverrideReason ? (
+        prescription.cancelReason || prescription.allergyOverrideReason || prescription.alertsSeen?.length ? (
           <>
             {prescription.cancelReason ? (
               <p className="text-muted-foreground">Anulada: {prescription.cancelReason}</p>
             ) : null}
-            {prescription.allergyOverrideReason ? (
-              <p className="text-muted-foreground">
-                Recetada pese al aviso de alergia: {prescription.allergyOverrideReason}
-              </p>
-            ) : null}
+            <PrescriptionAlertsSeen prescription={prescription} />
           </>
         ) : undefined
       }

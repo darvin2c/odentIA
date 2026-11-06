@@ -467,7 +467,8 @@ function medicationDraftOf(item: DictationSuggestion) {
  * sugerencia, en el bloque Documentos. «Emitir receta» la emite con la
  * colegiatura de quien atiende, solo cuando está completa y sin aviso; si falta
  * algo o choca con una alergia, el formulario de siempre se abre ya lleno, con
- * «Cambiar medicamento» y «Recetar igual, con motivo». Nunca se emite con
+ * el aviso a la vista y «Cambiar medicamento»; se emite igual sin escribir nada
+ * (Q17), y la receta guarda el aviso que se vio. Nunca se emite con
  * «Confirmar las N listas».
  */
 function PrescriptionSuggestion({ session, items }: { session: DictationSession; items: DictationSuggestion[] }) {
@@ -574,7 +575,7 @@ function PrescriptionSuggestion({ session, items }: { session: DictationSession;
                   Cambiar medicamento
                 </Button>
                 <Button type="button" size="sm" variant="outline" className="min-h-11 sm:min-h-8" disabled={busy} onClick={() => setForm({ overriding: true })}>
-                  Recetar igual, con motivo
+                  Revisar y recetar igual
                 </Button>
               </div>
               {/* Sin nombrar un medicamento: lo elige quien receta, según lo que se iba a dar. */}
@@ -596,7 +597,6 @@ function PrescriptionSuggestion({ session, items }: { session: DictationSession;
           drawerOnly
           createOpen
           initialMedications={items.map(medicationDraftOf)}
-          startOverriding={form.overriding}
           onIssued={(prescriptionId) => session.settlePrescription.mutate(prescriptionId)}
           onCreateOpenChange={(open) => {
             if (!open) setForm(null)

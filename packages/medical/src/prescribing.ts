@@ -7,8 +7,10 @@ import { dayWords, type MedicalHistory, pregnancyWeeks } from "./history.js"
  * - los controlados no salen en la receta común: van en la receta oficial
  *   de cada país;
  * - con embarazo o lactancia registrados, lo recuerda, y lo contraindicado
- *   en el embarazo se receta solo con motivo, como una alergia;
+ *   en el embarazo se avisa como una alergia: decide quien receta, y la receta
+ *   guarda que vio el aviso (Q17 del QA del 2026-11-04);
  * - a un menor de 12 años se le receta con su peso.
+ * El duplicado por código ATC lo avisa `duplicateWarnings` (@odentia/clinical).
  * Las interacciones entre medicamentos quedan fuera: piden una base con
  * licencia.
  */
@@ -87,7 +89,7 @@ export interface PrescribingContext {
 export interface PrescribingCheck {
   /** Lo que impide emitir: un controlado, o falta el peso de un niño. */
   errors: string[]
-  /** Lo que se receta solo con motivo, como una alergia: contraindicado en el embarazo. */
+  /** Lo que se avisa como una alergia: contraindicado en el embarazo. Decide quien receta. */
   warnings: string[]
   /** Lo que se recuerda sin bloquear: el embarazo y la lactancia registrados, con su fecha. */
   reminders: string[]

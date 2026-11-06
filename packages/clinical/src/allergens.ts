@@ -542,6 +542,48 @@ export function allergyWarnings(
   return lines
 }
 
+/** Lo que ya toma, de sus antecedentes: el nombre que se ve y su código ATC, si lo tiene. */
+export interface TakenMedication {
+  name: string
+  atcCode?: string | null
+}
+
+/**
+ * El duplicado por código ATC (X2 del QA del 2026-11-04): lo que se receta y ya toma, o que va
+ * dos veces en la receta, con el mismo principio activo (el mismo ATC) o del mismo grupo
+ * (`medicationGroupOfAtc`). Solo informa: «todo lo que mostramos es informativo; decide quien
+ * receta». Es la misma regla para la pantalla y el servidor; lo escrito a mano, sin ATC, no se
+ * compara.
+ */
+export function duplicateWarnings(
+  items: ReadonlyArray<{ genericName: string }>,
+  taking: readonly TakenMedication[],
+  catalog: MedicationCatalog = DENTAL_MEDICATION_CATALOG,
+): string[] {
+  const coded = items
+    .map((item) => ({ name: item.genericName.trim(), atc: findMedication(item.genericName, catalog.medications)?.atc ?? null }))
+    .filter((item): item is { name: string; atc: string } => item.name !== "" && item.atc !== null)
+  const why = (a: string, b: string): string | null => {
+    if (a === b) return `el mismo principio activo (ATC ${a})`
+    const group = medicationGroupOfAtc(a)
+    if (group && group !== "otros" && group === medicationGroupOfAtc(b)) return `del mismo grupo, ${groupWords(group)}`
+    // Fuera de los grupos con nombre, el mismo subgrupo químico (los cinco primeros caracteres del ATC).
+    return a.length >= 5 && a.slice(0, 5) === b.slice(0, 5) ? `del mismo grupo (ATC ${a.slice(0, 5)})` : null
+  }
+  const lines: string[] = []
+  coded.forEach((item, index) => {
+    for (const med of taking) {
+      const same = med.atcCode ? why(item.atc, med.atcCode) : null
+      if (same) lines.push(`${capitalized(item.name)}: ya toma ${med.name}, ${same}.`)
+    }
+    for (const other of coded.slice(index + 1)) {
+      const same = why(item.atc, other.atc)
+      if (same) lines.push(`${capitalized(item.name)} y ${other.name} van en la misma receta: son ${same}.`)
+    }
+  })
+  return [...new Set(lines)]
+}
+
 /** La frecuencia de la medicación habitual en palabras. */
 export const MEDICATION_FREQUENCY_LABELS: Record<MedicationFrequency, string> = {
   cada_8_h: "Cada 8 horas",

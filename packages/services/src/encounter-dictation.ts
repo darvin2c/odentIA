@@ -2340,7 +2340,7 @@ export async function issueDictationPrescription(
 
 /**
  * La receta dictada se terminó en el formulario de siempre («Completar»,
- * «Cambiar medicamento», «Recetar igual, con motivo»): sus sugerencias quedan
+ * «Cambiar medicamento» o emitirla igual con el aviso a la vista): sus sugerencias quedan
  * confirmadas con esa receta, que tiene que ser de esta atención.
  */
 export async function settleDictationPrescription(
