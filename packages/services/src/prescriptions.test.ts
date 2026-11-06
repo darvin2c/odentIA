@@ -1,6 +1,10 @@
+import { randomUUID } from "node:crypto"
+import { user } from "@odentia/db/schema/auth"
 import { patientAllergy } from "@odentia/db/schema/clinical"
 import { expect, it } from "vitest"
-import { clinicalFixture } from "./clinical-test-fixture.js"
+import { addClinicalNote } from "./clinical.js"
+import { clinicalFixture, makeSigner } from "./clinical-test-fixture.js"
+import { takeOverEncounter } from "./encounters.js"
 import { addPlanItem } from "./plan.js"
 import { cancelPrescription, createPrescription, getPrescriptionDetail } from "./prescriptions.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
@@ -137,4 +141,31 @@ it("avisa por el código de la alergia, se haya escrito como se haya escrito", a
   await expect(
     f.run((tx) => createPrescription(tx, ...f.args, { items: [{ ...base, genericName: "clindamicina" }] })),
   ).resolves.toMatchObject({ status: "emitida" })
+})
+
+it("otro profesional no escribe dentro de la atención ajena sin tomar el relevo: ni receta, ni nota, ni plan (ADR 0002)", async () => {
+  const f = await clinicalFixture()
+  const other = randomUUID()
+  await ownerDb.insert(user).values({ id: other, name: "Otro clínico", email: `${other}@example.test` })
+  await makeSigner("org_a", other)
+  const item = {
+    genericName: "paracetamol",
+    strength: "500 mg",
+    dosageForm: "tableta",
+    dose: "Dosis prescrita",
+    route: "oral",
+    frequency: "Según indicación clínica",
+    duration: "Duración prescrita",
+    quantity: 2,
+  }
+  const asOther = ["org_a", other, f.patient.id] as const
+  await expect(f.run((tx) => createPrescription(tx, ...asOther, { encounterId: f.encounter.id, items: [item] }))).rejects.toMatchObject({ code: "NOT_ATTENDING" })
+  await expect(f.run((tx) => addClinicalNote(tx, ...asOther, { note: "Nota ajena", encounterId: f.encounter.id }))).rejects.toMatchObject({ code: "NOT_ATTENDING" })
+  await expect(
+    f.run((tx) => addPlanItem(tx, ...asOther, { planId: f.plan.id, serviceId: f.service.id, sourceEncounterId: f.encounter.id })),
+  ).rejects.toMatchObject({ code: "NOT_ATTENDING" })
+  // Sin unirla a la atención, o tras tomar el relevo, sí.
+  await expect(f.run((tx) => createPrescription(tx, ...asOther, { items: [item] }))).resolves.toMatchObject({ status: "emitida" })
+  await f.run((tx) => takeOverEncounter(tx, "org_a", other, f.patient.id, f.encounter.id))
+  await expect(f.run((tx) => createPrescription(tx, ...asOther, { encounterId: f.encounter.id, items: [item] }))).resolves.toMatchObject({ encounterId: f.encounter.id })
 })

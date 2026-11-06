@@ -32,6 +32,7 @@ import { canAttend } from "@odentia/auth/permissions"
 import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm"
 import { markArrivedOnAttend, notifyAppointmentChanged, setAppointmentStatus } from "./appointments.js"
 import { listEncounterDocuments, type PatientDocumentWithContext } from "./clinical.js"
+import { assertAttending } from "./encounter-attending.js"
 import { cancelDerivationTask, type ConsentNeed, getEncounterConsentNeeds } from "./clinical-forms.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
@@ -298,13 +299,9 @@ export async function requireEncounter(
 export function assertOpenDraft(row: EncounterRow, actorUserId: string): void {
   if (row.status === "finalizada") throw conflict("FINALIZED", "La atención está finalizada")
   if (row.status === "anulada") throw conflict("VOIDED", "La atención está anulada")
-  if (row.professionalUserId !== actorUserId) {
-    throw conflict(
-      "NOT_ATTENDING",
-      "Otro profesional lleva esta atención: toma el relevo para continuarla",
-    )
-  }
+  assertAttending(row, actorUserId)
 }
+
 
 /**
  * Igual que requireEncounter pero bloqueando la fila FOR UPDATE: serializa

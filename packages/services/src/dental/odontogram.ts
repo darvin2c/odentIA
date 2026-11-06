@@ -256,7 +256,7 @@ export async function addOdontogramEntries(
       "Los hallazgos se registran dentro de una atención: atiende a la persona para registrarlos",
     )
   }
-  const row = await requireDraftLink(tx, orgId, patientId, encounterId)
+  const row = await requireDraftLink(tx, orgId, patientId, encounterId, actorUserId)
   if (row.professionalUserId !== actorUserId) {
     throw conflict(
       "NOT_ATTENDING",
@@ -287,7 +287,7 @@ export async function voidOdontogramEntry(
     .where(and(eq(odontogramEntry.id, entryId), eq(odontogramEntry.organizationId, orgId)))
     .limit(1)
   if (!current || current.patientId !== patientId) throw notFound("Entrada de odontograma")
-  if (current.encounterId) await requireDraftLink(tx, orgId, current.patientId, current.encounterId)
+  if (current.encounterId) await requireDraftLink(tx, orgId, current.patientId, current.encounterId, actorUserId)
   if (isVoidedRow(current)) throw conflict("ALREADY_VOIDED", "La entrada ya está anulada")
   // Corrección auditable: solo estado de corrección; condition/surface/note
   // originales se preservan intactos.

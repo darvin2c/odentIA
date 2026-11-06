@@ -22,6 +22,7 @@ import { serviceKindOf } from "./specialties.js"
 import { productHooks } from "./products.js"
 import { orgClinicalProfile } from "./locale.js"
 import { readBillingModes } from "./budgets.js"
+import { assertAttending } from "./encounter-attending.js"
 import {
   type ProductHooks,
   type ProductParts,
@@ -228,15 +229,16 @@ export async function surfaceLimits(
   return (await (await hooksOf(tx, orgId)).templateSurfaceLimits(tx, service.templateId)) ?? { min: 1, max: 5 }
 }
 
-/** Lock de la atención borrador (contexto de mutación clínica). */
+/** Lock de la atención borrador (contexto de mutación clínica), llevada por quien escribe. */
 async function lockDraftEncounter(
   tx: Db,
   orgId: string,
   patientId: string,
   encounterId: string,
+  actorUserId: string,
 ): Promise<void> {
   const [enc] = await tx
-    .select({ id: encounter.id, status: encounter.status })
+    .select({ id: encounter.id, status: encounter.status, professionalUserId: encounter.professionalUserId })
     .from(encounter)
     .where(
       and(
@@ -250,6 +252,7 @@ async function lockDraftEncounter(
   if (!enc) throw notFound("Atención")
   if (enc.status === "anulada") throw conflict("VOIDED", "La atención está anulada")
   if (enc.status !== "borrador") throw conflict("FINALIZED", "La atención está finalizada")
+  assertAttending(enc, actorUserId)
 }
 
 /** Lock del plan acotado a org+paciente (anti-traversal). */
@@ -473,7 +476,7 @@ export async function createTreatmentPlan(
   if (!input.originEncounterId?.trim())
     throw validation("originEncounterId es obligatorio: el plan nace en una atención borrador")
   const originEncounterId = input.originEncounterId.trim()
-  await lockDraftEncounter(tx, orgId, patientId, originEncounterId)
+  await lockDraftEncounter(tx, orgId, patientId, originEncounterId, actorUserId)
   const title = assertTitle(input.title)
   // La atención donde nace queda en el plan (antes se pedía y no se guardaba).
   const [row] = await tx
@@ -682,7 +685,7 @@ export async function addPlanItem(
   if (!input.serviceId?.trim())
     throw invalidField("serviceId", "Elige la prestación de la lista de servicios.")
   const encounterId = input.sourceEncounterId.trim()
-  await lockDraftEncounter(tx, orgId, patientId, encounterId)
+  await lockDraftEncounter(tx, orgId, patientId, encounterId, actorUserId)
   // No se elige plan al indicar: va al abierto, que nace solo si no hay.
   const plan = await planForIndication(tx, orgId, actorUserId, patientId, encounterId, input.planId)
   const service = await requireServiceForIndication(tx, orgId, input.serviceId.trim())
@@ -774,7 +777,7 @@ export async function addPlanItemsBatch(
   }
   const teeth = [...new Set(input.toothNumbers)].sort((a, b) => a - b)
   if (teeth.length !== input.toothNumbers.length) throw validation("toothNumbers no debe repetirse")
-  await lockDraftEncounter(tx, orgId, patientId, input.sourceEncounterId.trim())
+  await lockDraftEncounter(tx, orgId, patientId, input.sourceEncounterId.trim(), actorUserId)
   const plan = await planForIndication(tx, orgId, actorUserId, patientId, input.sourceEncounterId.trim(), input.planId)
   const service = await requireServiceForIndication(tx, orgId, input.serviceId.trim())
   const hooks = await hooksOf(tx, orgId)
@@ -846,7 +849,7 @@ export async function updatePlanItem(
   await requirePatient(tx, orgId, patientId)
   if (!patch.encounterId?.trim())
     throw validation("encounterId es obligatorio como contexto de mutación")
-  await lockDraftEncounter(tx, orgId, patientId, patch.encounterId.trim())
+  await lockDraftEncounter(tx, orgId, patientId, patch.encounterId.trim(), actorUserId)
   const [prev] = await tx
     .select({ planId: treatmentPlanItem.planId, budgetId: treatmentPlanItem.budgetId })
     .from(treatmentPlanItem)
@@ -1010,7 +1013,7 @@ export async function setPlanItemStatus(
   if (!(PLAN_ITEM_STATUSES as readonly string[]).includes(input.status))
     throw validation("status inválido")
   await requirePatient(tx, orgId, patientId)
-  if (input.encounterId) await lockDraftEncounter(tx, orgId, patientId, input.encounterId)
+  if (input.encounterId) await lockDraftEncounter(tx, orgId, patientId, input.encounterId, actorUserId)
   const { item: current, budget } = await lockPlanItemForExecution(tx, orgId, patientId, itemId)
   if (CLOSED_STATUSES.includes(current.status))
     throw conflict("ITEM_CLOSED", "El tratamiento está cerrado")
@@ -1123,7 +1126,7 @@ export async function revisePlanItem(
   const reason = input.reason?.trim()
   if (!reason || reason.length > 2000) throw invalidField("reason", "El motivo debe tener 1–2000 caracteres.")
   await requirePatient(tx, orgId, patientId)
-  await lockDraftEncounter(tx, orgId, patientId, input.encounterId)
+  await lockDraftEncounter(tx, orgId, patientId, input.encounterId, actorUserId)
   const { item } = await lockPlanItemForExecution(tx, orgId, patientId, itemId)
   if (CLOSED_STATUSES.includes(item.status))
     throw conflict("ITEM_CLOSED", "El tratamiento está cerrado")
