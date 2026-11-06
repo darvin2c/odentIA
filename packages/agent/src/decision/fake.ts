@@ -28,10 +28,14 @@ export function createFakeDecisionModel(): DecisionModel {
         if (q.kind === "choice" && (q.id === "topic" || q.id === "help")) {
           // Elección de conocimiento y de la Ayuda (`help.v1`): gana la opción
           // que comparte más palabras con el estado; sin ninguna en común, «none».
-          const words = new Set(text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/[^a-z0-9]+/).filter((w) => w.length >= 4))
-          let best = { value: "none", hits: 0 }
+          // En la Ayuda cuenta solo la pregunta (no el nombre de la pantalla), hacen
+          // falta dos palabras en común y «data» es como «none».
+          const help = q.id === "help"
+          const asked = help && text.includes("pregunta: ") ? text.slice(text.indexOf("pregunta: ") + "pregunta: ".length) : text
+          const words = new Set(asked.normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/[^a-z0-9]+/).filter((w) => w.length >= 4))
+          let best = { value: "none", hits: help ? 1 : 0 }
           for (const option of q.options) {
-            if (option.value === "none") continue
+            if (option.value === "none" || (help && option.value === "data")) continue
             const described = (option.description ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/[^a-z0-9]+/)
             const hits = described.filter((w) => w.length >= 4 && words.has(w)).length
             if (hits > best.hits) best = { value: option.value, hits }

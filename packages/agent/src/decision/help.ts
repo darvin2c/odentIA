@@ -90,7 +90,7 @@ export function helpQuestion(candidates: readonly HelpOption[], texts: ProductAg
   return {
     id: HELP_SELECT_QUESTION,
     kind: "choice",
-    instructions: `Alguien del equipo de una ${clinicWord(texts)} pregunta en la Ayuda de ${product} cómo se usa el sistema. ¿Qué texto de la guía responde exactamente su pregunta? Elige una pregunta frecuente si su respuesta es lo que pregunta; una pantalla solo si pregunta qué es, para qué sirve o dónde está esa pantalla y ninguna pregunta frecuente lo responde mejor.`,
+    instructions: `Alguien del equipo de una ${clinicWord(texts)} pregunta en la Ayuda de ${product} cómo se usa el sistema. ¿Qué texto de la guía responde exactamente su pregunta? Elige una pregunta frecuente si su respuesta es lo que pregunta; una pantalla si su párrafo, leído tal cual, responde la pregunta (por ejemplo, qué es esa pantalla, para qué sirve o que ahí se hace lo que pregunta) y ninguna pregunta frecuente lo hace mejor.`,
     options: [
       ...candidates.map((option, index) => ({ value: optionValue(option, index), description: describe(option) })),
       {
@@ -130,8 +130,11 @@ export interface HelpSelection {
 
 /**
  * Lee la respuesta del modelo de decisión con un umbral (`confident`): la
- * medición lo recorre entero sobre las mismas respuestas. Sin distribución no
- * hay certeza: lo elegido se ofrece, nunca se afirma.
+ * medición lo recorre entero sobre las mismas respuestas. Primero lo más
+ * probable: «ninguna» o «datos» con el umbral, o una respuesta de la guía con
+ * el umbral; si no, «ninguna» y «datos» sumadas con el umbral son «ninguna»; si
+ * no, duda. Sin distribución no hay certeza: lo elegido se ofrece, nunca se
+ * afirma.
  */
 export function readHelpSelection(result: DecisionResult, candidates: readonly HelpOption[], confident = HELP_CONFIDENT): HelpSelection {
   const answer = answerOf(result, HELP_SELECT_QUESTION, "choice")
@@ -151,14 +154,20 @@ export function readHelpSelection(result: DecisionResult, candidates: readonly H
     .filter((item) => item.probability >= HELP_CANDIDATE)
     .slice(0, HELP_OFFERED)
     .map((item) => item.option)
-  if (topValue === NONE || topValue === DATA) {
-    if (top >= confident) return { verdict: topValue === NONE ? "ninguna" : "datos", shown: [], offered: [], top }
-    return { verdict: "duda", shown: [], offered, top }
+  if ((topValue === NONE || topValue === DATA) && top >= confident) {
+    return { verdict: topValue === NONE ? "ninguna" : "datos", shown: [], offered: [], top }
   }
   const [first, second] = guide
-  if (!first || first.probability < confident) return { verdict: "duda", shown: [], offered, top }
-  const shown = second && second.probability >= HELP_SECOND ? [first.option, second.option] : [first.option]
-  return { verdict: "seguro", shown, offered: [], top }
+  if (first && first.probability >= confident) {
+    const shown = second && second.probability >= HELP_SECOND ? [first.option, second.option] : [first.option]
+    return { verdict: "seguro", shown, offered: [], top }
+  }
+  // «Ninguna» y «datos» dicen lo mismo de la guía: que no la responde. Juntas
+  // pasan el umbral aunque ninguna lo pase sola: no está en la guía. La salida
+  // a Argos pide su propia certeza.
+  const away = (answer.probabilities[NONE] ?? 0) + (answer.probabilities[DATA] ?? 0)
+  if (away >= confident) return { verdict: "ninguna", shown: [], offered: [], top }
+  return { verdict: "duda", shown: [], offered, top }
 }
 
 /** El texto que se muestra, tal cual está en la guía (como `askHelp`): la respuesta de la pregunta frecuente o el párrafo de la pantalla. */

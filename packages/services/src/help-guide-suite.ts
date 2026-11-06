@@ -3,6 +3,7 @@ import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import { type HelpTopic, matchHelpTopics } from "./help-guide.js"
+import { normalizeForSearch } from "./knowledge.js"
 
 /**
  * Lo que se le exige a la guía de cada producto. Lo corren `help-guide.test.ts`
@@ -81,6 +82,8 @@ interface Asked {
   temas?: string[]
   /** `ninguna`: la guía no la responde. `datos`: es de las cifras de la clínica (lo responde Argos). */
   es?: "ninguna" | "datos"
+  /** La misma pregunta ya está en este banco de ajuste: `eval:ayuda` no la cuenta para confirmar. */
+  repite?: "desarrollo" | "control" | "final"
 }
 
 /**
@@ -93,13 +96,27 @@ export const helpBanks = JSON.parse(readFileSync(new URL("./help-preguntas.json"
   Asked[]
 >
 
-/** Lo que el banco da como respuesta de este producto y su guía no tiene, o una pregunta sin una sola etiqueta. */
+const PRODUCTS: ReadonlySet<unknown> = new Set(["odentia", "latidia"])
+const NOT_IN_GUIDE: ReadonlySet<unknown> = new Set(["ninguna", "datos"])
+const TUNING = ["desarrollo", "control", "final"] as const
+
+/**
+ * Lo que el banco da como respuesta de este producto y su guía no tiene, o una
+ * pregunta sin una sola etiqueta. Un producto o un `es` que no existen, o un
+ * `repite` sin esa pregunta, salen con cualquier producto.
+ */
 export function helpBankLabelProblems(product: Asked["producto"], topics: readonly HelpTopic[]): string[] {
   const faqs = new Set(topics.flatMap((topic) => (topic.faqs ?? []).map((faq) => faq.q)))
   const ids = new Set(topics.map((topic) => topic.id))
+  const asked = (bank: string) => new Set((helpBanks[bank as keyof typeof helpBanks] ?? []).map((item) => normalizeForSearch(item.q)))
   const problems: string[] = []
   for (const [bank, items] of Object.entries(helpBanks)) {
     for (const item of items) {
+      if (!PRODUCTS.has(item.producto)) problems.push(`[${bank}] «${item.q}»: el producto «${String(item.producto)}» no existe (odentia o latidia)`)
+      if (item.es !== undefined && !NOT_IN_GUIDE.has(item.es)) problems.push(`[${bank}] «${item.q}»: «es» vale ninguna o datos, no «${String(item.es)}»`)
+      if (item.repite !== undefined && (!TUNING.includes(item.repite) || !asked(item.repite).has(normalizeForSearch(item.q)))) {
+        problems.push(`[${bank}] «${item.q}»: no está repetida en «${String(item.repite)}»`)
+      }
       if (item.producto !== product) continue
       const answers = (item.faqs?.length ?? 0) + (item.temas?.length ?? 0)
       if ((answers > 0) === (item.es !== undefined)) problems.push(`[${bank}] «${item.q}»: lleva una respuesta o «es», solo uno`)

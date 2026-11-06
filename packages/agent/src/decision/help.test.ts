@@ -132,9 +132,21 @@ describe("leer lo que eligió", () => {
   })
 
   it("«ninguna» o «datos» sin certeza es duda y ofrece lo de la guía", () => {
-    const selection = read(result([["data", 0.45], [ENLACE, 0.3], ["none", 0.25]]))
+    const selection = read(result([["none", 0.4], [ENLACE, 0.35], ["data", 0.15], [TAREAS, 0.1]]))
     expect(selection.verdict).toBe("duda")
-    expect(names(selection.offered)).toEqual(["¿Qué es «Su enlace»?"])
+    expect(names(selection.offered)).toEqual(["¿Qué es «Su enlace»?", "¿Por qué no veo las tareas de los demás?"])
+  })
+
+  it("«ninguna» y «datos» juntas con el umbral dicen que no está en la guía", () => {
+    expect(read(result([["none", 0.35], ["data", 0.33], [ENLACE, 0.32]]))).toEqual({ verdict: "ninguna", shown: [], offered: [], top: 0.35 })
+    // Para salir a Argos, «datos» necesita su propia certeza.
+    expect(read(result([["data", 0.45], ["none", 0.25], [ENLACE, 0.3]])).verdict).toBe("ninguna")
+    expect(read(result([["none", 0.3], ["data", 0.25], [ENLACE, 0.45]])).verdict).toBe("duda")
+  })
+
+  it("una respuesta de la guía con el umbral gana a «ninguna» y «datos» sumadas", () => {
+    const selection = read(result([[TAREAS, 0.5], ["none", 0.3], ["data", 0.2]]), 0.5)
+    expect(selection.verdict).toBe("seguro")
   })
 
   it("las mismas respuestas se leen con cualquier umbral", () => {
