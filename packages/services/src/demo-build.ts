@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto"
 import { LEGAL } from "@odentia/auth/legal"
 import type { ClinicalProduct } from "@odentia/clinical"
-import { DEFAULT_REGISTRATION_CONFIG, includedTaxCents } from "@odentia/clinical"
+import { DEFAULT_REGISTRATION_CONFIG, includedTaxCents, type MedicationEntry } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import type { DemoProgress, DemoSize } from "@odentia/db/schema/admin-demos"
 import { saasDemo } from "@odentia/db/schema/admin-demos"
+import { agentRunLedger } from "@odentia/db/schema/agent"
 import { appointment } from "@odentia/db/schema/agenda"
 import { member, organization, user } from "@odentia/db/schema/auth"
 import {
@@ -12,14 +13,15 @@ import {
   encounter,
   encounterDiagnosis,
   encounterProcedure,
+  orgSpecialty,
   patientCharge,
   patientDocument,
-  patientPayment,
-  patientPaymentApplication,
   serviceCatalog,
   treatmentTemplate,
 } from "@odentia/db/schema/clinical"
+import { professionalSpecialty } from "@odentia/db/schema/clinical-forms"
 import { channelConnection, message } from "@odentia/db/schema/crm"
+import { cashShift } from "@odentia/db/schema/finance"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
@@ -30,39 +32,44 @@ import { createRoom } from "./appointments.js"
 import { setProfessionalSchedule } from "./availability.js"
 import { chargeTaxOf, orgTaxes } from "./clinic-taxes.js"
 import { ensureClinicConsents, setProfessionalSpecialties } from "./clinical-forms.js"
-import { createConnection } from "./connections.js"
+import { createConnection, setConnectionStatus } from "./connections.js"
 import {
   DEMO_COUNTRIES,
   DEMO_SIZE_RECIPES,
   type DemoCountry,
   type DemoKindRecipe,
+  type DemoWho,
   demoPriceCents,
 } from "./demo-recipes.js"
+import { closeShift, getShiftDetail } from "./finance.js"
 import { seedDemoSignature } from "./demo-signature.js"
 import { ServiceError } from "./errors.js"
 import { getOrgLocale } from "./locale.js"
 import { initialOrgRegion } from "./organization-profile.js"
 import { ensureDefaultPaymentMethods } from "./payment-methods.js"
 import { ensureDefaultPipeline } from "./pipelines.js"
-import { demoKindsFor } from "./products.js"
+import { demoKindsFor, productHooks } from "./products.js"
 import { setProfessionalProfile } from "./professional-profiles.js"
 import { addDays, dayStart, reportDayOf } from "./report-periods.js"
 import { defaultPlanOf } from "./saas-plan-product.js"
 import { seedChannelTemplates } from "./seed-automation.js"
 import { seedConversationIn, seedMessageIn } from "./seed-common.js"
+import { insertSeedPayments, type SeedCharge, type SeedPayment } from "./seed-payments.js"
 import {
   chunks,
   generator,
+  insertSeedPapers,
   knownDiagnosisCodes,
   promotionFor,
   type Random,
   seedReports,
+  whoFits,
 } from "./seed-reports.js"
 import { seedReportsAgent } from "./seed-reports-agent.js"
 import { seedReportsArgos } from "./seed-reports-argos.js"
 import { seedReportsPatients } from "./seed-reports-patients.js"
 import { demoPromotionsOf, seedOperation, seedPromotions } from "./seed-operation.js"
-import { seedSaasCostDemo } from "./seed-saas-cost.js"
+import { seedRepliesRuns, seedSaasCostDemo } from "./seed-saas-cost.js"
 import { savePatientRegistrationConfig } from "./patient-registration.js"
 import { fromTemplates } from "./service-catalog.js"
 import { librarySpecialtyIds } from "./specialties.js"
@@ -74,8 +81,15 @@ import { librarySpecialtyIds } from "./specialties.js"
  * las próximas dos semanas. Cada noche `advanceDemo` cierra los días que
  * pasaron y agrega los que entran, para que la agenda de hoy siempre tenga
  * algo que mostrar. Todo corre con la conexión owner del worker y en una sola
- * transacción: una demo nunca queda a medias. Nada sale a una persona: el
- * canal tiene claves falsas y los correos son de example.com.
+ * transacción: una demo nunca queda a medias. Nada sale a una persona: su
+ * WhatsApp queda desconectado (no recibe ni envía, y así lo dice), los
+ * teléfonos son del rango de ficción +44 7700 900000–900999 y los correos,
+ * de example.com.
+ *
+ * La demo cuenta una clínica coherente: cada servicio lo atiende quien tiene
+ * su especialidad y a quien le corresponde por edad y sexo, cada cobro tiene
+ * su ticket y su caja, cada respuesta de Sofi su corrida, y quien escribe por
+ * WhatsApp tiene su número (`saas-demos.test.ts` lo comprueba).
  */
 
 /** Los pasos del armado que dice el avance: equipo, tarifario, historia, agentes, hoy y operación. */
@@ -83,6 +97,15 @@ export const DEMO_BUILD_STEPS = 6
 
 /** Días de agenda hacia adelante. */
 const HORIZON_DAYS = 14
+/**
+ * Los teléfonos de la demo son del rango que Ofcom reserva para la ficción
+ * (+44 7700 900000 a 900999): nunca son de una persona real, aunque la clínica
+ * sea de Perú, Colombia o México. El último es el de la clínica; los otros
+ * 999, de quienes escriben por WhatsApp.
+ */
+const FICTION_PHONE_PREFIX = "447700900"
+const DEMO_CLINIC_PHONE = `+${FICTION_PHONE_PREFIX}999`
+const FICTION_PHONES = 999
 const MORNING = [9, 10, 11, 12]
 const AFTERNOON = [14, 15, 16, 17]
 
@@ -135,6 +158,8 @@ interface TeamMember {
   weekdays: number[]
   afternoonOnly: boolean
   occupancy: number
+  /** La especialidad que atiende (tipo de la biblioteca); nula, todas las de la receta. */
+  specialty: string | null
 }
 
 interface AgendaContext {
@@ -146,16 +171,58 @@ interface AgendaContext {
   receptionUserId: string
   team: TeamMember[]
   rooms: Map<string, string[]>
-  services: Array<{
-    id: string
-    name: string
-    priceCents: number
-    durationMin: number
-    weight: number
-    firstVisit: boolean
-  }>
+  services: DemoService[]
   paymentMethods: DemoCountry["paymentMethods"]
   holidays: ReadonlySet<string>
+  /** La lista de medicamentos del producto: el código ATC de lo que se receta. */
+  medications: readonly MedicationEntry[]
+}
+
+/** Un servicio del tarifario de la demo, con lo que la receta dice de él. */
+interface DemoService {
+  id: string
+  name: string
+  priceCents: number
+  durationMin: number
+  weight: number
+  firstVisit: boolean
+  specialty?: string
+  who?: DemoWho
+  perUnit?: boolean
+}
+
+/** El tipo de la biblioteca de cada profesional: el de su lugar en la rotación, o el de la receta. */
+const specialtyOfIndex = (kind: DemoKindRecipe, index: number): string | null =>
+  kind.specialtyRotation?.[index] ?? kind.professional.specialty
+
+/** Si el profesional da ese servicio: sin especialidad, cualquiera; con ella, quien la atiende. */
+const attends = (professional: { specialty: string | null }, service: { specialty?: string }): boolean =>
+  !service.specialty || !professional.specialty || service.specialty === professional.specialty
+
+/** A quién atiende el profesional y a quién se le da el servicio. */
+const needOf = (kind: DemoKindRecipe, professional: { specialty: string | null }, service: { who?: DemoWho }): Array<DemoWho | undefined> => [
+  professional.specialty ? kind.specialtyWho?.[professional.specialty] : undefined,
+  service.who,
+]
+
+/**
+ * Lo que Sofi dice, con los datos de la demo (ADR 0120): `{especialidades}` es
+ * la lista de las que atiende el equipo, como las nombra la clínica.
+ */
+async function demoTexts(tx: Db, orgId: string, kind: DemoKindRecipe, specialties: readonly string[]): Promise<DemoKindRecipe> {
+  const ids = await librarySpecialtyIds(tx, orgId, specialties)
+  const names = ids.size
+    ? (
+        await tx
+          .select({ id: orgSpecialty.id, name: orgSpecialty.name })
+          .from(orgSpecialty)
+          .where(and(eq(orgSpecialty.organizationId, orgId), inArray(orgSpecialty.id, [...new Set(ids.values())])))
+      ).map((row) => row.name.toLocaleLowerCase("es"))
+    : []
+  const list =
+    names.length <= 1 ? (names[0] ?? kind.name.toLocaleLowerCase("es")) : `${names.slice(0, -1).join(", ")} y ${names.at(-1)}`
+  const said = (texts: readonly string[]) => texts.map((text) => text.replaceAll("{especialidades}", list))
+  return { ...kind, inbound: said(kind.inbound), reply: said(kind.reply), openTopics: said(kind.openTopics) }
 }
 
 /**
@@ -354,7 +421,7 @@ export async function buildDemo(
               ],
       ),
     })
-    const specialtyKind = kind.specialtyRotation?.[index] ?? kind.professional.specialty
+    const specialtyKind = specialtyOfIndex(kind, index)
     if (specialtyKind) {
       const ids = await librarySpecialtyIds(tx, orgId, [specialtyKind])
       const id = ids.get(specialtyKind)
@@ -370,8 +437,12 @@ export async function buildDemo(
       weekdays,
       afternoonOnly,
       occupancy: Math.min(0.92, kind.occupancy + (random.next() - 0.5) * 0.12),
+      specialty: specialtyKind,
     })
   }
+  // Las especialidades que atiende el equipo: lo de las demás no se ofrece ni se dice.
+  const teamSpecialties = [...new Set(team.flatMap((item) => (item.specialty ? [item.specialty] : [])))]
+  const said = await demoTexts(tx, orgId, kind, teamSpecialties)
 
   await ensureDefaultPaymentMethods(tx, orgId, demo.presenterUserId, country.code)
   await ensureDefaultPipeline(tx, orgId)
@@ -399,8 +470,8 @@ export async function buildDemo(
     privacyNotice: `${demo.name} usará tus datos solo para registrarte como paciente, atenderte y recordarte tus citas. Puedes pedir verlos, corregirlos o eliminarlos escribiendo a recepción.`,
   })
 
-  // El canal de la demo tiene claves falsas: nada de lo que se escriba desde ella sale.
-  const phone = `${country.mobile.prefix}${String(random.int(10 ** (country.mobile.digits - 1), 10 ** country.mobile.digits - 1))}`
+  // El canal de la demo no tiene claves de verdad: guarda su historia y, al terminar de
+  // armarla, queda desconectado. Meta nunca dijo su calidad ni su límite: no se escriben.
   const connection = await createConnection(
     tx,
     orgId,
@@ -412,27 +483,13 @@ export async function buildDemo(
       config: {
         phoneNumberId: `demo-${demo.id}`,
         wabaId: `demo-waba-${demo.id}`,
-        displayPhoneNumber: phone,
+        displayPhoneNumber: DEMO_CLINIC_PHONE,
         accessToken: "demo",
         appSecret: "demo",
       },
     },
     { fetch: deps.fetch, validateExternal: false },
   )
-  await tx
-    .update(channelConnection)
-    .set({
-      webhookVerifiedAt: new Date(now.getTime() - 7 * 86_400_000),
-      health: {
-        quality: "alta",
-        dailyLimit: 2000,
-        unlimited: false,
-        number: phone,
-        name: demo.name,
-        checkedAt: now.toISOString(),
-      },
-    })
-    .where(eq(channelConnection.id, connection.id))
   await seedChannelTemplates(tx, { orgId, connectionId: connection.id })
 
   // --- El tarifario de la receta, desde la biblioteca del producto ----------------------------
@@ -453,6 +510,8 @@ export async function buildDemo(
   for (const recipe of kind.services) {
     const templateId = templateIdOf.get(recipe.template)
     if (!templateId) continue
+    // La consulta de una especialidad que nadie del equipo atiende no se ofrece.
+    if (recipe.specialty && !teamSpecialties.includes(recipe.specialty)) continue
     // Una prestación que el país no codifica no se ofrece: se salta sin deshacer las demás.
     await tx
       .transaction((inner) =>
@@ -468,7 +527,7 @@ export async function buildDemo(
       )
       .catch(() => undefined)
   }
-  const services = await demoServices(tx, orgId, kind)
+  const services = await demoServices(tx, orgId, kind, teamSpecialties)
   if (!services.some((item) => item.firstVisit))
     throw new ServiceError(
       "CONFLICT",
@@ -487,6 +546,7 @@ export async function buildDemo(
 
   // --- La historia de los meses que se pidieron -----------------------------------------------
   await step(2, "historia")
+  const medications = (await productHooks(tx, orgId)).prescribing.catalog.medications
   await seedReports(tx, {
     orgId,
     ownerUserId: receptionUserId,
@@ -504,6 +564,8 @@ export async function buildDemo(
       afternoonOnly: item.afternoonOnly,
       occupancy: item.occupancy,
       signerTitle: item.title,
+      specialty: item.specialty,
+      ...(item.specialty && kind.specialtyWho?.[item.specialty] ? { who: kind.specialtyWho[item.specialty] } : {}),
     })),
     services,
     patientIds: [],
@@ -519,8 +581,9 @@ export async function buildDemo(
       person: (r) => kind.person(r, country),
       note: kind.note,
       diagnosisSystem: "ICD-11",
-      inbound: kind.inbound,
-      reply: kind.reply,
+      inbound: said.inbound,
+      reply: said.reply,
+      medications,
       budgets: kind.budgets,
       promotions: await demoPromotionsOf(tx, orgId),
       paymentMethods: country.paymentMethods,
@@ -562,7 +625,8 @@ export async function buildDemo(
     .update(saasSubscription)
     .set({ isDemo: true })
     .where(eq(saasSubscription.organizationId, orgId))
-  await seedReportsPatients(tx, { orgId, ownerUserId: receptionUserId })
+  // Los controles son los de la receta: su nombre, cada cuánto y a quién.
+  await seedReportsPatients(tx, { orgId, ownerUserId: receptionUserId, followUp: kind.followUp })
   await seedReportsArgos(tx, {
     orgId,
     ownerUserId: demo.presenterUserId,
@@ -575,6 +639,8 @@ export async function buildDemo(
       ...team.slice(0, 2).map((item) => ({ userId: item.userId, weight: 1 })),
     ],
   })
+  // Cada respuesta de Sofi de la historia con su corrida: Agente cuenta lo mismo que Reportes.
+  await seedRepliesRuns(tx, orgId)
 
   // --- Hoy y las próximas dos semanas ---------------------------------------------------------
   await step(4, "hoy")
@@ -584,18 +650,21 @@ export async function buildDemo(
     orgId,
     timezone,
     currency,
-    kind,
+    kind: said,
     random,
     receptionUserId,
     team,
     rooms,
     services,
     paymentMethods: country.paymentMethods,
+    medications,
   }
   const today = reportDayOf(timezone, now)
   // La historia termina dos días antes de hoy: desde ahí sigue la agenda.
   const historyEnd = now.getTime() - 2 * 86_400_000
   const through = addDays(today, HORIZON_DAYS)
+  // Primero los teléfonos: la agenda que viene es de personas a las que se puede escribir.
+  await giveDemoPhones(tx, orgId)
   for (let day = addDays(today, -2); day <= through; day = addDays(day, 1))
     await planDay(tx, context, day, historyEnd)
   await closeVisits(tx, context, now)
@@ -606,6 +675,9 @@ export async function buildDemo(
   // Después de hoy: los materiales se descuentan de las atenciones recién cerradas.
   await step(5, "operacion")
   await seedOperation(tx, operation)
+  // Con su historia armada, el WhatsApp de la demo queda desconectado: no tiene un número
+  // de verdad, así que no dice «Conectado» ni intenta enviar (la Bandeja lo dice al escribir).
+  await setConnectionStatus(tx, orgId, connection.id, "disabled")
   await step(DEMO_BUILD_STEPS, "listo")
   return { organizationId: orgId, historyThrough: through, slug }
 }
@@ -619,25 +691,37 @@ async function freeDemoSlug(tx: Db, wanted: string): Promise<string> {
   throw new ServiceError("CONFLICT", 409, "No hay un subdominio libre para esta demo")
 }
 
-/** Los servicios de la receta que la clínica ofrece, con su peso en la agenda. */
+/**
+ * Los servicios de la receta que la clínica ofrece, con su peso en la agenda,
+ * su especialidad y a quién se le dan. La consulta de una especialidad que
+ * nadie del equipo atiende queda fuera.
+ */
 async function demoServices(
   tx: Db,
   orgId: string,
   kind: DemoKindRecipe,
-): Promise<AgendaContext["services"]> {
+  specialties: readonly string[],
+): Promise<DemoService[]> {
   const rows = await tx
     .select({
       id: serviceCatalog.id,
       name: serviceCatalog.name,
       priceCents: serviceCatalog.priceCents,
       durationMin: serviceCatalog.durationMin,
+      specialtyId: serviceCatalog.specialtyId,
       key: treatmentTemplate.key,
     })
     .from(serviceCatalog)
     .innerJoin(treatmentTemplate, eq(treatmentTemplate.id, serviceCatalog.templateId))
     .where(and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.isActive, true)))
-  const offered = kind.services.flatMap((recipe) => {
+  // La regla de la agenda de la app (`attendingRule`): un servicio de una especialidad que
+  // alguien del equipo atiende lo da solo quien la atiende (la consulta de control y las
+  // pruebas son de medicina general); si nadie la atiende, cualquiera.
+  const kindOfId = new Map([...(await librarySpecialtyIds(tx, orgId, specialties))].map(([key, id]) => [id, key]))
+  const offered = kind.services.flatMap((recipe): DemoService[] => {
     const row = rows.find((item) => item.key === recipe.template)
+    if (recipe.specialty && !specialties.includes(recipe.specialty)) return []
+    const specialty = (row?.specialtyId ? kindOfId.get(row.specialtyId) : undefined) ?? recipe.specialty
     return row && row.priceCents !== null
       ? [
           {
@@ -647,14 +731,22 @@ async function demoServices(
             durationMin: row.durationMin ?? recipe.durationMin,
             weight: recipe.weight,
             firstVisit: recipe.firstVisit ?? false,
+            ...(specialty ? { specialty } : {}),
+            ...(recipe.who ? { who: recipe.who } : {}),
+            ...(recipe.perUnit ? { perUnit: true } : {}),
           },
         ]
       : []
   })
-  // La primera visita es la primera de la receta que el país ofrece; las de respaldo quedan como una más.
-  const first = offered.find((item) => item.firstVisit)
+  // La primera visita es la primera de la receta que el país ofrece (una por cada especialidad
+  // que la receta separa); las de respaldo quedan como una más.
+  const groupOf = (item: DemoService): string =>
+    kind.services.find((recipe) => recipe.firstVisit && rows.some((row) => row.id === item.id && row.key === recipe.template))
+      ?.specialty ?? ""
+  const firsts = new Map<string, DemoService>()
+  for (const item of offered) if (item.firstVisit && !firsts.has(groupOf(item))) firsts.set(groupOf(item), item)
   return offered.map((item) =>
-    item.firstVisit && item !== first
+    item.firstVisit && firsts.get(groupOf(item)) !== item
       ? { ...item, firstVisit: false, weight: Math.max(item.weight, 4) }
       : item,
   )
@@ -682,10 +774,47 @@ async function planDay(tx: Db, ctx: AgendaContext, day: string, notBefore: numbe
       ),
     )
   if ((existing?.count ?? 0) > 0 && start.getTime() >= notBefore) return
-  const patients = (await tx.execute(sql`
-    select p.id from patient p where p.organization_id = ${ctx.orgId}
-    order by md5(p.id::text || ${day}) limit 400`)) as unknown as Array<{ id: string }>
+  // Primero quienes tienen un teléfono (el suyo o el de su responsable): a ellos se les confirma la cita.
+  const patients = (
+    (await tx.execute(sql`
+    select p.id, c.birth_date::text as birth_date, c.sex
+    from patient p
+    join contact c on c.organization_id = p.organization_id and c.id = p.person_id
+    left join lateral (
+      select gc.phone from patient_contact pc
+      join contact gc on gc.organization_id = pc.organization_id and gc.id = pc.contact_id
+      where pc.organization_id = p.organization_id and pc.patient_id = p.id and pc.relationship = 'guardian' and pc.is_preferred
+      limit 1
+    ) g on true
+    where p.organization_id = ${ctx.orgId} and c.record_locked_at is null
+    order by (coalesce(g.phone, c.phone) is null), md5(p.id::text || ${day}) limit 400`)) as unknown as Array<{
+      id: string
+      birth_date: string | null
+      sex: string | null
+    }>
+  ).map((row) => ({
+    id: row.id,
+    person:
+      row.birth_date && (row.sex === "F" || row.sex === "M")
+        ? { birthDate: row.birth_date.slice(0, 10), sex: row.sex as "F" | "M" }
+        : null,
+  }))
   if (patients.length === 0) return
+  const booked = new Set<string>()
+  /** La siguiente persona de la lista que puede recibir el servicio ese día, y que no tiene otra cita ese día. */
+  const nextPatient = (need: Array<DemoWho | undefined>, at: Date): string | null => {
+    for (let step = 0; step < patients.length; step += 1) {
+      const candidate = patients[(cursor + step) % patients.length] as (typeof patients)[number]
+      if (booked.has(candidate.id)) continue
+      const person = candidate.person
+      if (person && (person.birthDate > at.toISOString().slice(0, 10) || !need.every((who) => whoFits(who, person, at))))
+        continue
+      cursor = (cursor + step + 1) % patients.length
+      booked.add(candidate.id)
+      return candidate.id
+    }
+    return null
+  }
   const followUps = ctx.services.filter((item) => !item.firstVisit)
   const first = ctx.services.filter((item) => item.firstVisit)
   const rows: Array<typeof appointment.$inferInsert> = []
@@ -735,17 +864,21 @@ async function planDay(tx: Db, ctx: AgendaContext, day: string, notBefore: numbe
         start.getTime() + hour * 3_600_000 + ctx.random.pick([0, 0, 15]) * 60_000,
       )
       if (startsAt.getTime() < notBefore) continue
-      const isFirst = ctx.random.chance(0.12) && first.length > 0
-      const service = isFirst
-        ? ctx.random.weighted(first)
-        : ctx.random.weighted(followUps.length > 0 ? followUps : first)
+      // Solo lo que atiende ese profesional (su especialidad), y a quien le corresponde.
+      const mineFirst = first.filter((item) => attends(professional, item))
+      const mineFollow = followUps.filter((item) => attends(professional, item))
+      const isFirst = ctx.random.chance(0.12) && mineFirst.length > 0
+      const choices = isFirst ? mineFirst : mineFollow.length > 0 ? mineFollow : mineFirst
+      if (choices.length === 0) continue
+      const service = ctx.random.weighted(choices)
       const from = startsAt.getTime()
       const to = from + service.durationMin * 60_000
       const roomId = roomIds.find((id) => free(`room:${id}`, from, to))
       if (!roomId || !free(`pro:${professional.userId}`, from, to)) continue
+      const patientId = nextPatient(needOf(ctx.kind, professional, service), startsAt)
+      if (!patientId) continue
       take(`room:${roomId}`, from, to)
       take(`pro:${professional.userId}`, from, to)
-      const patientId = (patients[cursor++ % patients.length] as { id: string }).id
       const sourceRoll = ctx.random.next()
       rows.push({
         id: randomUUID(),
@@ -826,11 +959,14 @@ async function closeVisits(tx: Db, ctx: AgendaContext, before: Date): Promise<nu
       .set({ status: "no_asistio" })
       .where(inArray(appointment.id, missed))
   const priceOf = new Map(ctx.services.map((item) => [item.id, item]))
+  // Lo cobrado de todas las tandas: se guarda junto, con sus tickets en orden de cobro.
+  const payments: SeedPayment[] = []
+  const charged = new Map<string, SeedCharge>()
   for (const batch of chunks(attended, 200)) {
     const people = new Map(
       (
         await tx.execute(sql`
-          select p.id, c.birth_date, c.sex from patient p join contact c on c.organization_id = p.organization_id and c.id = p.person_id
+          select p.id, c.birth_date::text as birth_date, c.sex from patient p join contact c on c.organization_id = p.organization_id and c.id = p.person_id
           where p.organization_id = ${ctx.orgId} and p.id in (${sql.join(
             batch.map((item) => sql`${item.patientId}::uuid`),
             sql`, `,
@@ -862,6 +998,7 @@ async function closeVisits(tx: Db, ctx: AgendaContext, before: Date): Promise<nu
         { name: visit.serviceName ?? service?.name ?? "" },
         ctx.random,
         people.get(visit.patientId) ?? null,
+        startedAt,
       )
       return {
         visit,
@@ -903,6 +1040,8 @@ async function closeVisits(tx: Db, ctx: AgendaContext, before: Date): Promise<nu
         ...(row.note.vitals ? { vitals: row.note.vitals } : {}),
         ...(row.note.examination ? { examination: row.note.examination } : {}),
         startedAt: row.startedAt,
+        // Se abrió al empezar: la Historia la fecha ese día, no el de la noche que la cerró.
+        createdAt: row.startedAt,
         signerName: row.professional?.signerName ?? null,
         signerTitle: row.professional?.title ?? null,
         signerRegistration: row.professional?.registration ?? null,
@@ -957,6 +1096,26 @@ async function closeVisits(tx: Db, ctx: AgendaContext, before: Date): Promise<nu
         sql`, `,
       )}) as v(id, ended_at)
       where e.organization_id = ${ctx.orgId} and e.id = v.id`)
+    // La receta y el descanso que se emitieron en la atención, firmados por quien atendió.
+    await insertSeedPapers(tx, {
+      orgId: ctx.orgId,
+      timezone: ctx.timezone,
+      diagnosisSystem: "ICD-11",
+      medications: ctx.medications,
+      rows: rows.map((row) => ({
+        patientId: row.visit.patientId,
+        encounterId: row.encounterId,
+        endedAt: row.endedAt,
+        note: row.note,
+        diagnosisCode: row.note.diagnosisCode && known.has(row.note.diagnosisCode) ? row.note.diagnosisCode : null,
+        signer: {
+          userId: row.visit.professionalUserId,
+          name: row.professional?.signerName ?? "",
+          title: row.professional?.title ?? null,
+          registration: row.professional?.registration ?? null,
+        },
+      })),
+    })
     if (priced.length === 0) continue
     await tx.insert(patientCharge).values(
       priced.map((row) => ({
@@ -976,43 +1135,118 @@ async function closeVisits(tx: Db, ctx: AgendaContext, before: Date): Promise<nu
     )
     // Casi todo se cobra el mismo día; algunos quedan debiendo (de ahí «Te deben»).
     const paid = priced.filter(() => ctx.random.chance(0.88))
-    const methods = ctx.paymentMethods
-    const payments = paid.map((row) => {
-      const method = ctx.random.weighted(methods)
+    for (const row of priced) {
+      charged.set(row.chargeId, {
+        description: row.service?.name ?? "",
+        amountCents: row.promoted?.cents ?? row.service?.priceCents ?? 0,
+        promotionName: row.promoted?.charge.promotionName ?? null,
+        taxCategory: tax?.taxCategory ?? null,
+        taxBps: tax?.taxBps ?? null,
+      })
+    }
+    for (const row of paid) {
+      const method = ctx.random.weighted(ctx.paymentMethods)
       const cents = row.promoted?.cents ?? row.service?.priceCents ?? 0
-      return {
-        row,
-        payment: {
-          id: randomUUID(),
-          organizationId: ctx.orgId,
-          patientId: row.visit.patientId,
-          branchId: row.visit.branchId,
-          amountCents: cents,
-          taxCents: tax?.taxCategory === "S" ? includedTaxCents(cents, tax.taxBps) : 0,
-          currency: ctx.currency,
-          paidAt: new Date(row.endedAt.getTime() + 5 * 60_000),
-          methodName: method.name,
-          methodTypeCode: method.typeCode,
-          createdBy: ctx.receptionUserId,
-        },
-      }
-    })
-    if (payments.length > 0) {
-      await tx.insert(patientPayment).values(payments.map((item) => item.payment))
-      await tx.insert(patientPaymentApplication).values(
-        payments.map((item) => ({
-          organizationId: ctx.orgId,
-          patientId: item.row.visit.patientId,
-          paymentId: item.payment.id,
-          chargeId: item.row.chargeId,
-          amountCents: item.payment.amountCents,
-          createdBy: ctx.receptionUserId,
-          createdAt: item.payment.paidAt,
-        })),
-      )
+      if (cents <= 0) continue
+      payments.push({
+        patientId: row.visit.patientId,
+        branchId: row.visit.branchId,
+        chargeId: row.chargeId,
+        amountCents: cents,
+        taxCents: tax?.taxCategory === "S" ? includedTaxCents(cents, tax.taxBps) : 0,
+        currency: ctx.currency,
+        paidAt: new Date(row.endedAt.getTime() + 5 * 60_000),
+        methodName: method.name,
+        methodTypeCode: method.typeCode,
+        createdBy: ctx.receptionUserId,
+      })
     }
   }
+  // Con su ticket y su caja: lo de días anteriores, en el cierre de su día; lo de hoy, en la caja abierta.
+  await insertSeedPayments(tx, {
+    orgId: ctx.orgId,
+    payments,
+    charges: charged,
+    openFrom: reportDayOf(ctx.timezone, before),
+    cashierUserId: ctx.receptionUserId,
+  })
   return due.length
+}
+
+/**
+ * Los teléfonos de quienes escriben (cada paciente o su responsable, y quien
+ * solo preguntó): un número del rango de ficción y su identidad de WhatsApp,
+ * así su ficha dice el número por el que escribe y se le puede confirmar la
+ * cita. Primero a quien vino o escribió más hace poco: el rango tiene 999
+ * números y una demo grande tiene más personas; las demás quedan sin
+ * teléfono, como una ficha vieja. Sus conversaciones de WhatsApp quedan con ese número.
+ */
+async function giveDemoPhones(tx: Db, orgId: string): Promise<void> {
+  await tx.execute(sql`
+    with writers as (
+      select coalesce(g.contact_id, p.person_id) as contact_id, max(a.starts_at) as last_visit
+      from patient p
+      left join patient_contact g on g.organization_id = p.organization_id and g.patient_id = p.id
+        and g.relationship = 'guardian' and g.is_preferred
+      left join appointment a on a.organization_id = p.organization_id and a.patient_id = p.id
+      where p.organization_id = ${orgId}
+      group by 1
+    ), talkers as (
+      select contact_id, max(last_message_at) as last_message from conversation
+      where organization_id = ${orgId} group by 1
+    ), wanted as (
+      select k.id as contact_id,
+        row_number() over (order by greatest(w.last_visit, t.last_message) desc nulls last, k.id) as n
+      from contact k
+      left join writers w on w.contact_id = k.id
+      left join talkers t on t.contact_id = k.id
+      where k.organization_id = ${orgId} and (w.contact_id is not null or t.contact_id is not null)
+        and k.phone is null and k.record_locked_at is null and not k.is_test
+        and not exists (select 1 from contact_identity i where i.organization_id = k.organization_id and i.contact_id = k.id and i.channel = 'whatsapp')
+    ), free as (
+      select ${FICTION_PHONE_PREFIX}::text || lpad(s::text, 3, '0') as wa, row_number() over (order by s) as n
+      from generate_series(0, ${FICTION_PHONES - 1}::int) s
+      where not exists (select 1 from contact_identity i where i.organization_id = ${orgId} and i.channel = 'whatsapp'
+          and i.external_user_id = ${FICTION_PHONE_PREFIX}::text || lpad(s::text, 3, '0'))
+        and not exists (select 1 from contact c where c.organization_id = ${orgId}
+          and c.phone = '+' || ${FICTION_PHONE_PREFIX}::text || lpad(s::text, 3, '0'))
+    ), given as (
+      update contact c set phone = '+' || f.wa
+      from wanted w join free f on f.n = w.n
+      where c.organization_id = ${orgId} and c.id = w.contact_id
+      returning c.id, f.wa
+    )
+    insert into contact_identity (organization_id, contact_id, channel, external_user_id, is_primary)
+    select ${orgId}, id, 'whatsapp', wa, true from given`)
+  await tx.execute(sql`
+    update conversation cv set contact_identity_id = i.id
+    from contact_identity i, channel_connection cc
+    where cv.organization_id = ${orgId} and cv.contact_identity_id is null
+      and i.organization_id = ${orgId} and i.contact_id = cv.contact_id and i.channel = 'whatsapp'
+      and cc.organization_id = ${orgId} and cc.id = cv.channel_connection_id and cc.channel = 'whatsapp'`)
+}
+
+/**
+ * Recepción cierra la caja que quedó abierta de un día anterior: contada, sin
+ * diferencia y sin dejar fondo, con la operación de la app. Lo cobrado en una
+ * presentación queda en ese cierre, como en una clínica que cierra cada noche.
+ */
+async function closeDemoCash(tx: Db, ctx: AgendaContext, today: string): Promise<void> {
+  const [year, month, date] = today.split("-").map(Number) as [number, number, number]
+  const start = dayStart(ctx.timezone, year, month, date)
+  const open = await tx
+    .select({ id: cashShift.id })
+    .from(cashShift)
+    .where(and(eq(cashShift.organizationId, ctx.orgId), eq(cashShift.status, "abierta"), lt(cashShift.openedAt, start)))
+  for (const shift of open) {
+    const counted = (await getShiftDetail(tx, ctx.orgId, shift.id)).esperadoCents
+    if (counted < 0) continue
+    await closeShift(tx, ctx.orgId, ctx.receptionUserId, shift.id, {
+      countedCents: counted,
+      retainedCents: 0,
+      deliveredCents: counted,
+    })
+  }
 }
 
 /**
@@ -1033,19 +1267,35 @@ async function seedTodayInbox(
     .from(message)
     .where(and(eq(message.organizationId, ctx.orgId), like(message.externalId, `${thread}%`)))
   if ((already?.count ?? 0) > 0) return
+  // Quienes escriben por WhatsApp tienen su número: primero ellos, cada persona una vez, y
+  // nunca alguien cuyo número ya tiene su conversación en esta conexión.
   const writers = (await tx.execute(sql`
-    select coalesce(g.contact_id, p.person_id) as contact_id
-    from patient p
-    left join patient_contact g on g.organization_id = p.organization_id and g.patient_id = p.id and g.relationship = 'guardian'
-    where p.organization_id = ${ctx.orgId}
-    order by md5(p.id::text || ${today}) limit 60`)) as unknown as Array<{ contact_id: string }>
+    with writers as (
+      select distinct on (coalesce(g.contact_id, p.person_id)) coalesce(g.contact_id, p.person_id) as contact_id,
+        md5(p.id::text || ${today}) as shuffle
+      from patient p
+      left join patient_contact g on g.organization_id = p.organization_id and g.patient_id = p.id
+        and g.relationship = 'guardian' and g.is_preferred
+      where p.organization_id = ${ctx.orgId}
+      order by coalesce(g.contact_id, p.person_id), md5(p.id::text || ${today})
+    )
+    select w.contact_id from writers w
+    join contact k on k.organization_id = ${ctx.orgId} and k.id = w.contact_id and k.record_locked_at is null
+    left join contact_identity i on i.organization_id = ${ctx.orgId} and i.contact_id = w.contact_id and i.channel = 'whatsapp'
+    where i.id is null or not exists (
+      select 1 from conversation c where c.organization_id = ${ctx.orgId}
+        and c.channel_connection_id = ${connectionId}::uuid and c.external_thread_id = i.external_user_id)
+    order by (i.id is null), w.shuffle limit 60`)) as unknown as Array<{ contact_id: string }>
   if (writers.length === 0) return
   const now = Date.now()
   const total = Math.min(writers.length, 4 + professionals * 3)
+  const runs: Array<typeof agentRunLedger.$inferInsert> = []
   for (let index = 0; index < total; index += 1) {
     const contactId = (writers[index] as { contact_id: string }).contact_id
     const asked = new Date(now - ctx.random.int(5, 300) * 60_000)
     const answered = new Date(asked.getTime() + ctx.random.int(20, 90) * 1000)
+    // La respuesta contesta a lo que preguntó (van de a pares en la receta).
+    const exchange = ctx.random.int(0, ctx.kind.inbound.length - 1)
     const topic = index < ctx.kind.openTopics.length ? (ctx.kind.openTopics[index] as string) : null
     const waitsPatient = !topic && index % 3 === 0
     const conv = await seedConversationIn(tx, {
@@ -1058,12 +1308,12 @@ async function seedTodayInbox(
       lastOutboundAt: answered,
       lastMessageAt: topic ? new Date(answered.getTime() + 60_000) : answered,
     })
-    await seedMessageIn(tx, {
+    const first = await seedMessageIn(tx, {
       orgId: ctx.orgId,
       conversationId: conv.id,
       direction: "in",
       senderKind: "contact",
-      body: ctx.random.pick(ctx.kind.inbound),
+      body: ctx.kind.inbound[exchange] as string,
       externalId: `${thread}${index}-a`,
       status: "received",
       createdAt: asked,
@@ -1073,12 +1323,26 @@ async function seedTodayInbox(
       conversationId: conv.id,
       direction: "out",
       senderKind: "agent",
-      body: ctx.random.pick(ctx.kind.reply),
+      body: ctx.kind.reply[exchange] ?? ctx.random.pick(ctx.kind.reply),
       externalId: `${thread}${index}-b`,
       status: waitsPatient ? "read" : "delivered",
       createdAt: answered,
     })
+    // Cada respuesta de Sofi es una corrida suya, y pasar el tema al equipo, otra: así
+    // Agente cuenta lo mismo que Reportes.
+    runs.push({
+      organizationId: ctx.orgId,
+      conversationId: conv.id,
+      triggerMessageId: first.id,
+      model: "gpt-6-luna",
+      status: "ok",
+      startedAt: new Date(asked.getTime() + 1_000),
+      endedAt: answered,
+      latencyMs: Math.max(0, answered.getTime() - asked.getTime() - 1_000),
+      toolsUsed: ["send_reply"],
+    })
     if (topic) {
+      const askedAgain = new Date(answered.getTime() + 60_000)
       const question = await seedMessageIn(tx, {
         orgId: ctx.orgId,
         conversationId: conv.id,
@@ -1087,7 +1351,7 @@ async function seedTodayInbox(
         body: topic,
         externalId: `${thread}${index}-c`,
         status: "received",
-        createdAt: new Date(answered.getTime() + 60_000),
+        createdAt: askedAgain,
       })
       await createHandoff(tx, ctx.orgId, null, {
         conversationId: conv.id,
@@ -1097,8 +1361,20 @@ async function seedTodayInbox(
         createdBy: "agent",
         sourceMessageId: question.id,
       })
+      runs.push({
+        organizationId: ctx.orgId,
+        conversationId: conv.id,
+        triggerMessageId: question.id,
+        model: "gpt-6-luna",
+        status: "handoff",
+        startedAt: new Date(askedAgain.getTime() + 1_000),
+        endedAt: new Date(askedAgain.getTime() + 5_000),
+        latencyMs: 4_000,
+        toolsUsed: ["request_human_handoff"],
+      })
     }
   }
+  if (runs.length > 0) await tx.insert(agentRunLedger).values(runs)
 }
 
 /**
@@ -1123,11 +1399,22 @@ async function topUpFollowUps(tx: Db, ctx: AgendaContext, today: string): Promis
   const wanted = 8 + ctx.team.length * 4
   const missing = wanted - (open?.count ?? 0)
   if (missing <= 0) return
+  // El control es de quien lo necesita: con los diagnósticos de la receta, solo después de una atención con uno de ellos.
+  const diagnoses = followUp.diagnoses ?? []
   const origins = (await tx.execute(sql`
     select distinct on (e.patient_id) e.id, e.patient_id, e.professional_user_id
     from encounter e
     where e.organization_id = ${ctx.orgId} and e.status = 'finalizada'
       and not exists (select 1 from clinical_follow_up f where f.organization_id = e.organization_id and f.patient_id = e.patient_id and f.status = 'pendiente')
+      ${
+        diagnoses.length > 0
+          ? sql`and exists (select 1 from encounter_diagnosis d where d.organization_id = e.organization_id and d.encounter_id = e.id
+              and d.diagnosis_code in (${sql.join(
+                diagnoses.map((code) => sql`${code}`),
+                sql`, `,
+              )}))`
+          : sql``
+      }
     order by e.patient_id, e.ended_at desc
     limit ${missing}`)) as unknown as Array<{
     id: string
@@ -1180,29 +1467,46 @@ async function agendaContextOf(
     sql`select branch_id, id from schedule_room where organization_id = ${orgId} order by name`,
   )) as unknown as Array<{ branch_id: string; id: string }>)
     rooms.set(row.branch_id, [...(rooms.get(row.branch_id) ?? []), row.id])
+  // La especialidad de cada profesional, como la dejó el armado (la de la receta que atiende).
+  const kinds = [
+    ...new Set([...(kind.specialtyRotation ?? []), ...(kind.professional.specialty ? [kind.professional.specialty] : [])]),
+  ]
+  const kindOfId = new Map([...(await librarySpecialtyIds(tx, orgId, kinds))].map(([key, id]) => [id, key]))
+  const specialtyOf = new Map<string, string>()
+  for (const row of await tx
+    .select({ userId: professionalSpecialty.userId, specialtyId: professionalSpecialty.specialtyId })
+    .from(professionalSpecialty)
+    .where(eq(professionalSpecialty.organizationId, orgId))) {
+    const key = kindOfId.get(row.specialtyId)
+    if (key && !specialtyOf.has(row.userId)) specialtyOf.set(row.userId, key)
+  }
+  const team: TeamMember[] = schedules.map((row) => ({
+    userId: row.professional_user_id,
+    name: row.signature_name ?? "",
+    signerName: row.signature_name ?? "",
+    registration: row.registration_number ?? "",
+    title: row.professional_title ?? "",
+    branchId: row.branch_id,
+    weekdays: row.weekdays.map(Number),
+    afternoonOnly: Number(row.first_min) >= 14 * 60,
+    occupancy: kind.occupancy,
+    specialty: specialtyOf.get(row.professional_user_id) ?? kind.professional.specialty,
+  }))
+  const specialties = [...new Set(team.flatMap((item) => (item.specialty ? [item.specialty] : [])))]
   return {
     orgId,
     timezone,
     currency,
-    kind,
+    kind: await demoTexts(tx, orgId, kind, specialties),
     // La noche de cada día da su propia agenda, siempre la misma para ese día.
     random: generator((demo.seed ^ Number(today.replaceAll("-", ""))) >>> 0),
     receptionUserId: `${demoUserPrefix(demo.id)}recepcion`,
-    team: schedules.map((row) => ({
-      userId: row.professional_user_id,
-      name: row.signature_name ?? "",
-      signerName: row.signature_name ?? "",
-      registration: row.registration_number ?? "",
-      title: row.professional_title ?? "",
-      branchId: row.branch_id,
-      weekdays: row.weekdays.map(Number),
-      afternoonOnly: Number(row.first_min) >= 14 * 60,
-      occupancy: kind.occupancy,
-    })),
+    team,
     rooms,
-    services: await demoServices(tx, orgId, kind),
+    services: await demoServices(tx, orgId, kind, specialties),
     paymentMethods: demoCountryOf(demo.countryCode).paymentMethods,
     holidays: demoCountryOf(demo.countryCode).holidays,
+    medications: (await productHooks(tx, orgId)).prescribing.catalog.medications,
   }
 }
 
@@ -1220,6 +1524,8 @@ export async function advanceDemo(
   const today = reportDayOf(timezone, now)
   const ctx = await agendaContextOf(tx, demo, demo.organizationId, today)
   await closeVisits(tx, ctx, now)
+  // Lo cobrado de ayer ya está en su caja: recepción la cierra.
+  await closeDemoCash(tx, ctx, today)
   const through = addDays(today, HORIZON_DAYS)
   const from =
     demo.historyThrough && demo.historyThrough >= today ? addDays(demo.historyThrough, 1) : today

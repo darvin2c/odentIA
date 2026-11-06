@@ -1,6 +1,6 @@
 import type { ClinicalProduct } from "@odentia/clinical"
 import type { DemoSize } from "@odentia/db/schema/admin-demos"
-import type { Random, ReportsSeedNote, ReportsSeedPerson } from "./seed-reports.js"
+import type { Random, ReportsSeedNote, ReportsSeedPerson, ReportsSeedWho } from "./seed-reports.js"
 
 /**
  * Las recetas de las demos para presentar (ADR 0096): qué hace distinto a
@@ -17,9 +17,25 @@ export interface DemoServiceRecipe {
   durationMin: number
   /** Cuántas veces sale en la agenda frente a los demás. */
   weight: number
-  /** La primera visita de una persona nueva. */
+  /**
+   * La primera visita de una persona nueva. Con `specialty`, la de esa
+   * especialidad: cada una tiene la suya.
+   */
   firstVisit?: boolean
+  /**
+   * La especialidad que lo atiende (el tipo de la biblioteca, como
+   * `specialtyRotation`), en un tipo de demo con varias: solo lo da quien la
+   * atiende, y si nadie del equipo la atiende no se ofrece.
+   */
+  specialty?: string
+  /** A quién se le da: el control de niño sano de 1 a 4 años, solo a quien tiene de 1 a 4. */
+  who?: DemoWho
+  /** Se cobra por unidad (una resina por pieza, una radiografía por placa): a veces van dos o tres. */
+  perUnit?: boolean
 }
+
+/** A quién: edad cumplida el día de la cita y sexo. Vacío, a todos. */
+export type DemoWho = ReportsSeedWho
 
 /** Un producto de Inventario de la demo, con lo que cuesta y cuánto debe haber. */
 export interface DemoProductRecipe {
@@ -91,22 +107,34 @@ export interface DemoKindRecipe {
   professional: { title: { F: string; M: string }; specialty: string | null }
   /** El tipo de cada profesional cuando el tipo de demo tiene varias especialidades (Policlínico). */
   specialtyRotation?: readonly string[]
+  /** A quién atiende cada especialidad (pediatría, hasta los 17 años; ginecología, a mujeres). */
+  specialtyWho?: Readonly<Record<string, DemoWho>>
   services: readonly DemoServiceRecipe[]
   /** Quién llega: edades, sexo y responsable de los menores (con nombres del país). */
   person: (random: Random, country: DemoCountry) => ReportsSeedPerson
-  /** Lo que se escribe en cada atención. */
+  /** Lo que se escribe en cada atención (`at`: cuándo empezó, para la edad de ese día). */
   note: (
     service: { name: string },
     random: Random,
     person: ReportsSeedPerson | null,
+    at: Date,
   ) => ReportsSeedNote
-  /** Primer mensaje de quien escribe y la respuesta de Sofi. */
+  /**
+   * Primer mensaje de quien escribe y la respuesta de Sofi: `reply[i]` contesta
+   * a `inbound[i]`. Solo dicen lo que es cierto en cualquier tamaño de la demo
+   * (sin sedes ni profesionales por nombre); `{especialidades}` se llena con
+   * las que atiende el equipo.
+   */
   inbound: readonly string[]
   reply: readonly string[]
   /** Lo que hoy espera a una persona en la Bandeja. */
   openTopics: readonly string[]
-  /** El control que se repite y vence (control del niño sano, prenatal…). */
-  followUp: { title: string; everyMonths: number } | null
+  /**
+   * El control que se repite y vence (control del niño sano, prenatal…).
+   * `diagnoses`: solo después de una atención con uno de esos diagnósticos (el
+   * prenatal, de una gestación).
+   */
+  followUp: { title: string; everyMonths: number; diagnoses?: readonly string[] } | null
   budgets: boolean
   /** Cuánto se llena la agenda de cada profesional. */
   occupancy: number

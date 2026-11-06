@@ -12,8 +12,10 @@
  * - Las conversaciones de la historia se reparten por canal como en una
  *   clínica mediana (WhatsApp primero), no por turnos.
  * - «Cómo nos conoció» de la lista (decisión 3); algunos no lo dijeron.
- * - Un control de mantenimiento seis meses después de la primera visita: lo
- *   hizo quien volvió en esas semanas; los demás siguen pendientes o se cancelaron.
+ * - El control que se repite (sin receta, uno de mantenimiento seis meses
+ *   después de la primera visita; con receta, el suyo, cada cuánto dice y solo
+ *   después de una atención con su diagnóstico): lo hizo quien volvió en esas
+ *   semanas; los demás siguen pendientes o se cancelaron.
  * - «Invitar a volver» (#139): de quienes volvieron en los últimos cuatro meses
  *   tras más de seis sin venir, a la mayoría se la invitó dos o tres semanas
  *   antes; y a algunos de los que hoy siguen sin venir, en los últimos tres
@@ -32,6 +34,13 @@ import { chunks, generator } from "./seed-reports.js"
 export interface ReportsPatientsSeedInput {
   orgId: string
   ownerUserId: string
+  /**
+   * El control que se repite en esta clínica (el de la receta de la demo):
+   * su nombre, cada cuántos meses y, si lo tiene, los diagnósticos que lo
+   * piden (el de presión y glucosa, solo a quien tiene hipertensión o
+   * diabetes). Nulo: no hay controles. Sin él, el de mantenimiento de Dental Smile.
+   */
+  followUp?: { title: string; everyMonths: number; diagnoses?: readonly string[] } | null
 }
 
 /** Por dónde escribe la gente en una clínica mediana. */
@@ -56,8 +65,8 @@ const REFERRAL_WEIGHTS: Array<{ kind: string | null; weight: number; said?: read
 ]
 
 const DAY_MS = 86_400_000
-/** El control de mantenimiento vence a los seis meses. */
-const CONTROL_DAYS = 182
+/** Sin receta: el control de mantenimiento, que vence a los seis meses. */
+const MAINTENANCE: { title: string; everyMonths: number; diagnoses?: readonly string[] } = { title: "Control de mantenimiento", everyMonths: 6 }
 
 export async function seedReportsPatients(
   tx: Db,
@@ -158,14 +167,31 @@ export async function seedReportsPatients(
       where p.organization_id = ${orgId} and p.id = v.id`)
   }
 
-  // --- Controles de mantenimiento ---------------------------------------------------------------
+  // --- El control que se repite ----------------------------------------------------------------
   const now = Date.now()
-  const firsts = await tx.execute<{ patient_id: string; number: number; encounter_id: string; ended_at: string }>(sql`
+  const followUp = input.followUp === undefined ? MAINTENANCE : input.followUp
+  const diagnoses = followUp?.diagnoses ?? []
+  const firsts = followUp
+    ? await tx.execute<{ patient_id: string; number: number; encounter_id: string; ended_at: string }>(sql`
     select distinct on (e.patient_id) e.patient_id, p.patient_number as number, e.id as encounter_id, e.finalized_at as ended_at
     from encounter e join patient p on p.organization_id = e.organization_id and p.id = e.patient_id
     where e.organization_id = ${orgId} and e.status = 'finalizada' and e.finalized_at is not null
       and not exists (select 1 from clinical_follow_up f where f.organization_id = e.organization_id and f.patient_id = e.patient_id)
+      ${
+        diagnoses.length > 0
+          ? sql`and exists (select 1 from encounter_diagnosis d where d.organization_id = e.organization_id and d.encounter_id = e.id
+              and d.diagnosis_code in (${sql.join(
+                diagnoses.map((code) => sql`${code}`),
+                sql`, `,
+              )}))`
+          : sql``
+      }
     order by e.patient_id, e.finalized_at, e.id`)
+    : []
+  // Cada cuánto, en días; se hizo si volvió entre un tercio del intervalo antes (hasta un mes) y la mitad después (hasta seis semanas).
+  const intervalDays = Math.round((followUp?.everyMonths ?? 6) * 30.4)
+  const before = Math.min(30, Math.round(intervalDays / 3))
+  const after = Math.min(42, Math.round(intervalDays / 2))
   const visits = await tx.execute<{ patient_id: string; encounter_id: string; ended_at: string }>(sql`
     select e.patient_id, e.id as encounter_id, e.finalized_at as ended_at from encounter e
     where e.organization_id = ${orgId} and e.status = 'finalizada' and e.finalized_at is not null
@@ -178,8 +204,9 @@ export async function seedReportsPatients(
   }
   const controls: Array<typeof clinicalFollowUp.$inferInsert> = []
   for (const first of [...firsts].sort((a, b) => a.number - b.number)) {
+    if (!followUp) break
     const originAt = new Date(first.ended_at).getTime()
-    const dueAt = originAt + CONTROL_DAYS * DAY_MS
+    const dueAt = originAt + intervalDays * DAY_MS
     // Solo los que vencen hasta dentro de dos meses: más allá nadie los mira todavía.
     if (dueAt > now + 60 * DAY_MS) continue
     const base = {
@@ -187,13 +214,12 @@ export async function seedReportsPatients(
       patientId: first.patient_id,
       originEncounterId: first.encounter_id,
       kind: "mantenimiento",
-      title: "Control de mantenimiento",
+      title: followUp.title,
       dueAt: new Date(dueAt),
       createdBy: input.ownerUserId,
       createdAt: new Date(originAt),
     }
-    // Lo hizo quien volvió entre un mes antes y seis semanas después de la fecha.
-    const back = visitsOf.get(first.patient_id)?.find((visit) => visit.at >= dueAt - 30 * DAY_MS && visit.at <= dueAt + 42 * DAY_MS)
+    const back = visitsOf.get(first.patient_id)?.find((visit) => visit.at > originAt && visit.at >= dueAt - before * DAY_MS && visit.at <= dueAt + after * DAY_MS)
     if (back && back.at <= now) {
       controls.push({ ...base, status: "realizado", completedEncounterId: back.encounterId, outcome: "Sin novedades", completedAt: new Date(back.at) })
     } else if (dueAt < now && random.chance(0.2)) {
