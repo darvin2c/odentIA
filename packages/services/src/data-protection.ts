@@ -12,6 +12,7 @@ import { user } from "@odentia/db/schema/auth"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
 import { desc, eq, sql } from "drizzle-orm"
+import { getAdminSettings } from "./agent-admin.js"
 import { getAgentConfig } from "./agentConfig.js"
 import {
   type DocumentClinic,
@@ -160,6 +161,8 @@ export async function getDataProtectionView(tx: Db, orgId: string): Promise<Data
     group by provider`)
   const connected = new Map(connections.map((c) => [c.provider, c]))
   const agent = await getAgentConfig(tx, orgId)
+  // Argos (el Administrador) también usa el modelo: arma sus mensajes y responde las preguntas.
+  const argosOn = (await getAdminSettings(tx, orgId)).enabled
   const zone: Zone = {
     locale: responsible.locale || NEUTRAL_LOCALE,
     timezone: responsible.timezone || NEUTRAL_TIMEZONE,
@@ -223,15 +226,15 @@ export async function getDataProtectionView(tx: Db, orgId: string): Promise<Data
         always.push(processorRow(p, null))
         break
       case "agentes":
-        if (agent.enabled || agent.clinicalAssistantEnabled) {
-          // El modelo lo usan Recepción y el dictado; la decisión y la búsqueda, solo los agentes.
+        if (agent.enabled || agent.clinicalAssistantEnabled || argosOn) {
+          // El modelo lo usan Recepción, Argos y el dictado; la decisión y la búsqueda, solo los agentes.
           if (p.id === "openai") {
             const uses = [
-              agent.enabled ? "agentes encendidos" : null,
+              agent.enabled || argosOn ? "agentes encendidos" : null,
               agent.clinicalAssistantEnabled ? "dictado encendido" : null,
             ]
             inUse.push(processorRow(p, uses.filter(Boolean).join(" y ")))
-          } else if (agent.enabled) inUse.push(processorRow(p, "agentes encendidos"))
+          } else if (agent.enabled || argosOn) inUse.push(processorRow(p, "agentes encendidos"))
         }
         break
       case "dictado":

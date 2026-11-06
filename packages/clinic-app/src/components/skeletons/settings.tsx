@@ -695,7 +695,7 @@ export function PatientPortalSkeleton() {
     <div aria-hidden className="flex flex-col gap-6">
       <section className={PORTAL_CARD}>
         <h2 className="font-heading text-base font-medium">El portal</h2>
-        <PortalOption label="Portal del paciente encendido" hint="Apagado por defecto. Apagado, nadie entra y no se dan accesos." />
+        <PortalOption label="Portal del paciente encendido" hint="Una clínica nueva lo trae encendido. El acceso se da a cada persona, en la clínica y con su documento. Apagado, nadie entra y no se dan accesos." />
       </section>
       <section className={PORTAL_CARD}>
         <div className="flex flex-col gap-1.5">

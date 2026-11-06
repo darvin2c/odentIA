@@ -143,6 +143,8 @@ export const patientRegistrationConfig = pgTable("patient_registration_config", 
   // Qué permisos de mensajes pregunta el registro, además de la atención.
   askReminders: boolean("ask_reminders").notNull().default(true),
   askMessages: boolean("ask_messages").notNull().default(true),
+  // El aviso que armó odentIA al nacer la clínica, aún sin revisar (ADR 0141); nulo: es de la clínica.
+  noticeSuggestedAt: timestamp("notice_suggested_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 })
