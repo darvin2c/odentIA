@@ -62,7 +62,7 @@ describe("captura en secuencia del periodontograma", () => {
     expect(state.cursor.field).toBe(2)
     // Más de 15 no existe: lo dice y no escribe nada.
     const over = applyCaptureKey(press(start(), ["+"]), { kind: "digit", value: 6 })
-    expect(over.say).toBe("La profundidad va de 0 a 15 mm")
+    expect(over.say).toBe("La profundidad va de 0 a 15 mm; vuelve a escribirla")
     expect(over.state.teeth[17]!.probingDepth[2]).toBeNull()
     expect(over.state.tens).toBe(false)
     // «+» otra vez, o ⌫, lo deshace sin borrar nada.
@@ -70,11 +70,26 @@ describe("captura en secuencia del periodontograma", () => {
     expect(press(start(), ["+", "Backspace"]).tens).toBe(false)
   })
 
+  it("moverse, saltar la pieza o ir a otra deshacen el «+»; S marca lo ya escrito", () => {
+    expect(press(start(), ["+", "ArrowRight"]).tens).toBe(false)
+    expect(press(start(), ["+", "x"]).tens).toBe(false)
+    expect(jumpToTooth(press(start(), ["+"]), 16).tens).toBe(false)
+    // «2», «+» y S: el sangrado va al sitio del 2, y el «+» sigue esperando su cifra.
+    const state = press(start(), ["2", "+", "s"])
+    expect(state.teeth[17]!.bleeding[2]).toBe(true)
+    expect(state.tens).toBe(true)
+  })
+
   it("la recesión de −10 se escribe con «−», «+» y 0", () => {
     const state = press(start(), ["1", "1", "1", "-", "+", "0"])
     expect(state.teeth[17]!.recession[2]).toBe(-10)
-    // −11 no existe.
-    expect(applyCaptureKey(press(start(), ["1", "1", "1", "-", "+"]), { kind: "digit", value: 1 }).say).toBe("La recesión va de -10 a 15 mm")
+    // También en el otro orden: «+», «−» y 0.
+    expect(press(start(), ["1", "1", "1", "+", "-", "0"]).teeth[17]!.recession[2]).toBe(-10)
+    // −11 y +16 no existen: lo dice y no escribe nada.
+    expect(applyCaptureKey(press(start(), ["1", "1", "1", "-", "+"]), { kind: "digit", value: 1 }).say).toBe("La recesión va de -10 a 15 mm; vuelve a escribirla")
+    const over = applyCaptureKey(press(start(), ["1", "1", "1", "+"]), { kind: "digit", value: 6 })
+    expect(over.say).toBe("La recesión va de -10 a 15 mm; vuelve a escribirla")
+    expect(over.state.teeth[17]!.recession[2]).toBeNull()
   })
 
   it("S y P marcan el sitio que se acaba de escribir", () => {

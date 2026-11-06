@@ -39,4 +39,4 @@ Es lo que hacen otros programas: ninguno de los revisados junta cifras por tiemp
 ## Referencias
 
 - `apps/dental-clinic/src/components/dental/periodontal/capture-state.ts` (`applyCaptureKey`, `keyFromEvent`), `periodontal-capture.tsx` (el botón «+10»).
-- `odentia-qa/2026-11-04-completo/estudio-x1-periodontograma.md` (la medición).
+- La medición y la comparación con otros programas son del estudio X1 de la ronda de QA del 2026-11-04, que está fuera del repositorio; las pruebas de `capture-state.test.ts` repiten lo que importa.

@@ -332,12 +332,14 @@ export function PeriodontalCapture({
             : "Guardado"
 
   // Cuatro filas de cifras (con «−», 0 y ⌫ abajo), «+10» junto a las marcas y «Saltar pieza» a lo ancho.
-  const keypad: Array<{ label: string; key: CaptureKey; aria?: string; wide?: boolean; full?: boolean }> = [
+  // «+» o «−» pulsados, a la espera de la cifra: el campo activo lo muestra en gris.
+  const pending = capture.tens || capture.minus
+  const keypad: Array<{ label: string; key: CaptureKey; aria?: string; wide?: boolean; full?: boolean; pressed?: boolean }> = [
     ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((value) => ({ label: String(value), key: { kind: "digit", value } as CaptureKey })),
-    { label: "−", key: { kind: "minus" }, aria: "Recesión negativa" },
+    { label: "−", key: { kind: "minus" }, aria: "Recesión negativa", pressed: capture.minus },
     { label: "0", key: { kind: "digit", value: 0 } },
     { label: "⌫", key: { kind: "back" }, aria: "Borrar" },
-    { label: "+10", key: { kind: "plus" }, aria: "Más 10: la próxima cifra va de 10 a 15" },
+    { label: "+10", key: { kind: "plus" }, aria: "Más 10: con la próxima cifra, de 10 a 15", pressed: capture.tens },
     { label: "Sangra (S)", key: { kind: "bleeding" }, wide: true },
     { label: "Supura (P)", key: { kind: "suppuration" }, wide: true },
     { label: "Saltar pieza", key: { kind: "skip" }, wide: true, full: true },
@@ -398,7 +400,7 @@ export function PeriodontalCapture({
                   inputMode="none"
                   autoComplete="off"
                   value={
-                    value === null || (active && capture.tens)
+                    value === null || (pending && active)
                       ? active
                         ? `${capture.minus && row === "rec" ? "−" : ""}${capture.tens ? "1…" : ""}`
                         : ""
@@ -407,10 +409,18 @@ export function PeriodontalCapture({
                         : String(value)
                   }
                   onChange={(event) => {
-                    // Lo que llega sin pasar por la tecla (pegar, teclados en pantalla del sistema).
-                    const char = event.target.value.slice(-1)
-                    const key = keyFromEvent({ key: char })
-                    if (key) apply(key)
+                    // Lo que llega sin pasar por la tecla (pegar, teclados en pantalla del sistema, dictado):
+                    // un borrado es ⌫, y lo escrito se lee de lo que llegó, no del final del campo (que
+                    // puede mostrar «1…» o «−» mientras espera la cifra).
+                    const input = event.nativeEvent as InputEvent
+                    if (input.inputType?.startsWith("delete")) {
+                      apply({ kind: "back" })
+                      return
+                    }
+                    for (const char of input.data ?? event.target.value.slice(-1)) {
+                      const key = keyFromEvent({ key: char })
+                      if (key) apply(key)
+                    }
                   }}
                   onFocus={() => {
                     if (capture.cursor.field !== field) {
@@ -428,8 +438,10 @@ export function PeriodontalCapture({
                   className={cn(
                     "h-14 w-full min-w-0 rounded-xl border-2 bg-background text-center font-mono text-2xl font-extrabold outline-none transition-colors",
                     active ? "border-primary ring-4 ring-primary/20" : "border-input",
-                    row === "pd" && value !== null && value >= 6 && "text-danger",
-                    row === "pd" && value !== null && value >= 4 && value < 6 && "text-warning",
+                    // Lo que aún espera su cifra no se ve como un valor escrito.
+                    pending && active && "font-semibold text-muted-foreground",
+                    !(pending && active) && row === "pd" && value !== null && value >= 6 && "text-danger",
+                    !(pending && active) && row === "pd" && value !== null && value >= 4 && value < 6 && "text-warning",
                     row === "rec" && value === 0 && "text-muted-foreground",
                     row === "pd" && pd !== null && record?.bleeding[site] && "bg-danger-soft",
                   )}
@@ -497,9 +509,10 @@ export function PeriodontalCapture({
           <Button
             key={item.label}
             type="button"
-            variant={item.wide ? "outline" : "secondary"}
+            variant={item.pressed ? "default" : item.wide ? "outline" : "secondary"}
             className={cn("h-12 text-lg font-bold", item.wide && "text-sm", item.full && "col-span-3")}
             aria-label={item.aria}
+            aria-pressed={item.pressed}
             tabIndex={-1}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => apply(item.key)}
@@ -596,7 +609,16 @@ export function PeriodontalCapture({
         <header className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 border-b bg-background px-4 py-3 pr-14 sm:px-6">
           <div className="flex flex-wrap items-center gap-3">
             <DialogTitle className="text-lg">Periodontograma</DialogTitle>
-            <Tabs value={mode} onValueChange={(value) => setMode(value === "plaque" ? "plaque" : "probe")}>
+            <Tabs
+              value={mode}
+              onValueChange={(value) => {
+                setMode(value === "plaque" ? "plaque" : "probe")
+                // Moverse deshace «+» y «−» (ADR 0142).
+                const next = { ...latest.current, minus: false, tens: false }
+                latest.current = next
+                setCapture(next)
+              }}
+            >
               <TabsList aria-label="Qué se marca">
                 <TabsTrigger value="probe">Sondaje</TabsTrigger>
                 <TabsTrigger value="plaque">Placa</TabsTrigger>
@@ -627,7 +649,7 @@ export function PeriodontalCapture({
           </div>
         </header>
         <DialogDescription id="perio-capture-desc" className="sr-only">
-          Escribe con el teclado las profundidades y luego las recesiones de cada pieza; pasa sola a la siguiente. S marca sangrado, P supuración, X salta la pieza, la flecha izquierda y derecha se mueven sin borrar.
+          Escribe con el teclado las profundidades y luego las recesiones de cada pieza; pasa sola a la siguiente. Para 10 a 15, «+» y la segunda cifra: más y 2 es 12. «−» antes del número, la recesión negativa. S marca sangrado, P supuración, X salta la pieza, la flecha izquierda y derecha se mueven sin borrar.
         </DialogDescription>
         {saver.error ? (
           <p role="alert" className="px-6 pt-3 text-sm text-destructive">

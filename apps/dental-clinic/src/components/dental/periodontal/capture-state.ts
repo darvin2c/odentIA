@@ -175,7 +175,7 @@ export function applyCaptureKey(state: CaptureState, key: CaptureKey): CaptureRe
       const max = kind === "pd" ? PROBING_DEPTH_MAX_MM : RECESSION_MAX_MM
       if (value > max || value < RECESSION_MIN_MM) {
         const range = kind === "pd" ? `La profundidad va de 0 a ${PROBING_DEPTH_MAX_MM} mm` : `La recesión va de ${RECESSION_MIN_MM} a ${RECESSION_MAX_MM} mm`
-        return { state: { ...state, minus: false, tens: false }, changed: [], say: range }
+        return { state: { ...state, minus: false, tens: false }, changed: [], say: state.tens || state.minus ? `${range}; vuelve a escribirla` : range }
       }
       const teeth = setField(state.teeth, step, field, value)
       const moved = advance({ ...state, teeth })
@@ -193,7 +193,11 @@ export function applyCaptureKey(state: CaptureState, key: CaptureKey): CaptureRe
       return {
         state: { ...state, tens: !state.tens },
         changed: [],
-        say: state.tens ? "Sin sumar 10" : "Más 10: escribe la segunda cifra, de 10 a 15",
+        say: state.tens
+          ? "Sin sumar 10"
+          : state.minus && fieldKind(field) === "rec"
+            ? `Más 10: con «−» solo cabe ${RECESSION_MIN_MM}; escribe 0`
+            : "Más 10: escribe la segunda cifra, de 10 a 15",
       }
     case "back": {
       if (state.tens) return { state: { ...state, tens: false }, changed: [], say: "Sin sumar 10" }
