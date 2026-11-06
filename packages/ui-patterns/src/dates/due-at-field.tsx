@@ -12,6 +12,17 @@ import { clockMinutes, clockValue, TimeSelect } from "./time-select.js"
 
 /** Al elegir solo el día, vence a las 9:00 de la clínica. */
 const DEFAULT_MINUTES = 9 * 60
+/** Lo último que ofrece la lista de horas. */
+const LAST_MINUTES = 22 * 60
+
+/**
+ * La hora con la que nace al elegir el día: las 9:00; si es hoy y ya pasaron,
+ * la próxima media hora (hasta las 22:00), para que no nazca vencida.
+ */
+export function defaultMinutesFor(date: string, today: string, nowMinutes: number): number {
+  if (date !== today || nowMinutes < DEFAULT_MINUTES) return DEFAULT_MINUTES
+  return Math.min(LAST_MINUTES, Math.ceil((nowMinutes + 1) / 30) * 30)
+}
 
 /** Día y minutos del día de un instante en la zona dada; `null` sin instante válido. */
 export function dueParts(
@@ -64,6 +75,7 @@ export function DueAtField({
   const parts = dueParts(value, timeZone)
   const today = zonedDateOf(new Date().toISOString(), timeZone)
   const minutes = parts?.minutes ?? DEFAULT_MINUTES
+  const nowMinutes = dayMinutesIn(new Date().toISOString(), timeZone)
   const at = (date: string, chosen: number) => minutesToInstant(date, chosen, timeZone)
   return (
     <fieldset
@@ -87,7 +99,8 @@ export function DueAtField({
         disabled={disabled}
         aria-label={parts ? `Día: ${formatDateLong(parts.date)}` : "Elegir el día"}
         aria-invalid={invalid || undefined}
-        onChange={(date) => onChange(at(date, minutes))}
+        // La primera vez, la hora por defecto; después, la que ya se eligió.
+        onChange={(date) => onChange(at(date, parts ? minutes : defaultMinutesFor(date, today, nowMinutes)))}
       >
         <CalendarDays aria-hidden />
         {parts ? formatDateLong(parts.date) : "Sin fecha"}

@@ -52,6 +52,7 @@ import {
   ServiceError,
   validation,
 } from "./errors.js"
+import { looksLikeId } from "./ids.js"
 import { NEUTRAL_TIMEZONE, roomWord } from "./locale.js"
 import { advanceForAppointment, returnForCancelledAppointment } from "./opportunities.js"
 import { listPatients } from "./patients.js"
@@ -266,6 +267,7 @@ async function requireService(tx: Db, orgId: string, serviceId: string) {
 }
 
 async function requireAppointment(tx: Db, orgId: string, id: string, options: { lock?: boolean } = {}) {
+  if (!looksLikeId(id)) throw notFound("Cita")
   const query = tx
     .select()
     .from(appointment)
@@ -395,6 +397,7 @@ function appointmentRows(tx: Db, orgId: string) {
 
 /** El paciente de una cita, para la guarda de su historia bloqueada (404 si no existe). */
 export async function appointmentPatientId(tx: Db, orgId: string, id: string): Promise<string> {
+  if (!looksLikeId(id)) throw notFound("Cita")
   const [row] = await tx
     .select({ patientId: appointment.patientId })
     .from(appointment)
@@ -405,6 +408,7 @@ export async function appointmentPatientId(tx: Db, orgId: string, id: string): P
 }
 
 export async function getAppointment(tx: Db, orgId: string, id: string): Promise<AppointmentItem> {
+  if (!looksLikeId(id)) throw notFound("Cita")
   const [row] = await appointmentRows(tx, orgId)
     .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, id)))
     .limit(1)
@@ -943,13 +947,32 @@ async function requireSchedulableItems(tx: Db, orgId: string, patientId: string,
   return unique
 }
 
+/** Cuánto antes de ahora puede empezar una cita nueva: el reloj de quien la pide puede ir un poco atrás. */
+const PAST_START_TOLERANCE_MS = 5 * 60_000
+
 export async function createAppointment(
   tx: Db,
   orgId: string,
   actorUserId: string,
   input: CreateAppointmentInput,
+  /**
+   * `requested`: la pide una persona desde la Agenda o la API. Como en la
+   * pantalla, no nace en una hora que ya pasó ni ya cerrada («Atendida» la
+   * pone el cierre de la atención; «No vino» y «Cancelada» se marcan después).
+   * Las semillas de la demo sí arman citas pasadas.
+   */
+  options: { requested?: boolean } = {},
 ): Promise<AppointmentItem> {
   const startsAt = parseInstant(input.startsAt, "startsAt")
+  if (options.requested) {
+    if (startsAt.getTime() < Date.now() - PAST_START_TOLERANCE_MS)
+      throw invalidField("startsAt", "Esa hora ya pasó. Elige una hora de ahora en adelante.")
+    if (input.status && input.status !== "programada" && input.status !== "confirmada")
+      throw invalidField(
+        "status",
+        "Una cita nueva queda programada o confirmada: «Atendida» la pone el cierre de la atención; «No vino» o «Cancelada» se marcan después.",
+      )
+  }
   const service = input.serviceId ? await requireService(tx, orgId, input.serviceId) : null
   const room = input.roomId ? await requireRoom(tx, orgId, input.roomId) : null
   const resolved = await resolveBranch(tx, orgId, input.branchId ?? room?.branchId)

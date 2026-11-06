@@ -58,8 +58,14 @@ export function DetailDrawer({
       {/* Sin `DrawerTitle` dentro (el `h2` lo pone el shell compartido), el
           nombre accesible del diálogo se cablea a mano: las props propias
           ganan sobre las que Base UI deriva del Title. */}
+      {/* En el teléfono baja desde abajo con un alto fijo, como `FormDrawer`: sin él, el cuerpo
+          no tiene contra qué medirse y lo de abajo (Reprogramar, Anular) queda fuera sin desplazarse. */}
       <DrawerContent
-        className={cn(DRAWER_WIDTH[size], className)}
+        className={cn(
+          "data-[swipe-axis=y]:[--drawer-content-height:calc(100dvh-6rem)]",
+          DRAWER_WIDTH[size],
+          className,
+        )}
         aria-labelledby={titleId}
         aria-describedby={surface.description ? descriptionId : undefined}
       >
