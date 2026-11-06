@@ -179,7 +179,7 @@ export function ConsentSheet({
         ) : null}
       </div>
 
-      <section className="mt-6 flex flex-col gap-3 border-2 border-foreground p-4 sm:p-5">
+      <section className="mt-6 flex flex-col gap-3 border border-foreground p-4 sm:p-5">
         <h3 className="font-bold">Declaración</h3>
         <p id={declarationId}>{declaration}</p>
         {accept ? accept(declarationId) : null}

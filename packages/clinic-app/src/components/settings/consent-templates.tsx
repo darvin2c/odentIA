@@ -47,6 +47,7 @@ import { useDeferredValue, useEffect, useId, useMemo, useRef, useState } from "r
 import { z } from "zod"
 import {
   type ConsentTemplate,
+  CONSENT_SIGNATURE_WORDS,
   fetchConsentPreview,
   fetchConsentSheetFrame,
   fetchConsentTemplates,
@@ -412,6 +413,9 @@ function ConsentPreviewDrawer({ draft, onClose }: { draft: ConsentPreviewDraft; 
                   </p>
                 ),
               }}
+              professional={{ note: "Falta su confirmación: lo confirma el profesional en la clínica." }}
+              signatureWords={CONSENT_SIGNATURE_WORDS.enlace}
+              signatureNote={frame.data?.data.signatureNote ?? null}
             />
           </div>
         </TabsContent>

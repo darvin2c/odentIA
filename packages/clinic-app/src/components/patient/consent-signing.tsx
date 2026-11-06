@@ -1,4 +1,4 @@
-import { diagnosisCodeLabel } from "@odentia/clinical"
+import { CONSENT_DECLARATION, diagnosisCodeLabel } from "@odentia/clinical"
 import {
   Button,
   Checkbox,
@@ -11,7 +11,6 @@ import {
 } from "@odentia/ui"
 import {
   applySubmitError,
-  ErrorState,
   FormChoiceField,
   FormDrawer,
   focusFirstInvalid,
@@ -352,12 +351,6 @@ function SigningFlow({
           <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-3 py-6 text-lg sm:px-6">
           {loading || frame.isPending ? (
             <LoadingState message="Preparando la hoja…" />
-          ) : frame.isError ? (
-            <ErrorState
-              title="No pudimos preparar la hoja"
-              message="Revisa tu conexión y vuelve a intentarlo."
-              onRetry={() => void frame.refetch()}
-            />
           ) : !signer ? (
             <p role="alert" className="rounded-md bg-warning-soft p-4 text-base">
               {isMinor
@@ -383,7 +376,7 @@ function SigningFlow({
             <ConsentSheet
               large
               titleRef={titleRef}
-              clinic={frame.data.data.clinic}
+              clinic={frame.data?.data.clinic ?? null}
               title={current.titleSnapshot}
               procedureRef={current.procedureRef}
               facts={
@@ -398,7 +391,7 @@ function SigningFlow({
               diagnosis={diagnosisOf(current)}
               sections={current.sectionsSnapshot}
               body={current.bodySnapshot}
-              declaration={frame.data.data.declaration}
+              declaration={current.declarationSnapshot ?? frame.data?.data.declaration ?? CONSENT_DECLARATION}
               minor={isMinor}
               accept={(declarationId) => (
                 <form.AppField key={`${current.id}-understood`} name={`docs[${step.index}].understood`}>
@@ -406,7 +399,7 @@ function SigningFlow({
                     <FormChoiceField label={<strong className="text-lg">Entendí lo que me explicaron y acepto</strong>}>
                       {(control) => (
                         <Checkbox
-                          className="mt-1 size-6"
+                          className="mt-1 size-6 border-foreground"
                           id={control.id}
                           name={control.name}
                           checked={field.state.value === true}
@@ -425,13 +418,11 @@ function SigningFlow({
               signer={{
                 heading: signer.kind === "representante" ? "Representante legal" : "Paciente",
                 name: signer.name,
-                // Como el papel: su documento si firma la persona; si no, que firma como representante.
+                // Como el papel: bajo la persona, su documento; el representante ya lo dice el título.
                 detail:
-                  signer.kind === "representante"
-                    ? "Representante legal"
-                    : patient?.docNumber
-                      ? `${patient.docType ?? "Documento"} ${patient.docNumber}`
-                      : null,
+                  signer.kind === "paciente" && patient?.docNumber
+                    ? `${patient.docType ?? "Documento"} ${patient.docNumber}`
+                    : null,
                 children: (
                   <form.AppField key={`${current.id}-strokes`} name={`docs[${step.index}].strokes`}>
                     {(field) => (
@@ -457,10 +448,10 @@ function SigningFlow({
               professional={{
                 name: signAs.name,
                 detail: signAs.detail,
-                note: "Falta su confirmación: lo confirma al terminar, con su perfil.",
+                note: "Falta su confirmación: lo confirma al terminar.",
               }}
               signatureWords={CONSENT_SIGNATURE_WORDS.clinica}
-              signatureNote={frame.data.data.signatureNote}
+              signatureNote={frame.data?.data.signatureNote ?? null}
             />
           ) : step.kind === "confirm" ? (
             <div className="flex flex-col gap-4">

@@ -57,7 +57,7 @@ export function LinkConsentStep({ slug, token, consentId, onBack }: { slug: stri
       onSubmit: z.object({
         docNumber: z.string().trim().min(1, `Escribe tu ${docLabel}.`).max(40, "Escribe como mucho 40 caracteres."),
         comprehensionConfirmed: z.boolean().refine((value) => value, "Marca que entendiste lo que te explicaron y aceptas."),
-        signatureData: z.array(z.array(z.array(z.number()))).min(1, "Firma con el dedo o el mouse en el recuadro."),
+        signatureData: z.array(z.array(z.array(z.number()))).min(1, "Firma con el dedo en el recuadro."),
       }),
     },
     onSubmit: async ({ value }) => {
@@ -95,10 +95,14 @@ export function LinkConsentStep({ slug, token, consentId, onBack }: { slug: stri
         accept={(declarationId) => (
           <form.AppField name="comprehensionConfirmed">
             {(field) => (
-              <FormChoiceField id="consent-understood" label="Entendí lo que me explicaron y acepto" className="min-h-11">
+              <FormChoiceField
+                id="consent-understood"
+                label={<strong className="text-base">Entendí lo que me explicaron y acepto</strong>}
+                className="min-h-11"
+              >
                 {(control) => (
                   <Checkbox
-                    className="mt-0.5 size-6"
+                    className="mt-0.5 size-6 border-foreground"
                     id={control.id}
                     name={control.name}
                     checked={field.state.value === true}
@@ -117,7 +121,6 @@ export function LinkConsentStep({ slug, token, consentId, onBack }: { slug: stri
         signer={{
           heading: consent.signer.asRepresentative ? "Representante legal" : "Paciente",
           name: consent.signer.name,
-          detail: consent.signer.asRepresentative ? "Representante legal" : null,
           children: (
             <>
               <form.AppField name="docNumber">
@@ -134,7 +137,7 @@ export function LinkConsentStep({ slug, token, consentId, onBack }: { slug: stri
               </form.AppField>
               <form.AppField name="signatureData">
                 {(field) => (
-                  <field.Group legend="Tu firma">
+                  <field.Group legend="Firma aquí con el dedo">
                     {(control) => (
                       <FirmaPad
                         label="Tu firma"
@@ -150,7 +153,7 @@ export function LinkConsentStep({ slug, token, consentId, onBack }: { slug: stri
             </>
           ),
         }}
-        professional={{ note: `Lo confirma tu ${appWords().clinician.one} en la clínica, con su firma.` }}
+        professional={{ note: `Falta su confirmación: lo confirma tu ${appWords().clinician.one} en la clínica.` }}
         signatureWords={consent.signatureWords}
         signatureNote={consent.signatureNote}
       />
