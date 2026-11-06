@@ -5,12 +5,14 @@ import {
   postalAddressErrors,
   postalAddressText,
   type PostalAddress,
+  upperFirst,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
+import { scheduleRoom } from "@odentia/db/schema/agenda"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { fieldsError, invalidField, notFound, ServiceError } from "./errors.js"
-import { findOrgCountry } from "./locale.js"
+import { findOrgCountry, roomWord } from "./locale.js"
 import { clinicOriginOf } from "./public-links.js"
 
 export type BranchRow = typeof branch.$inferSelect
@@ -180,6 +182,10 @@ export async function createBranch(tx: Db, orgId: string, actorUserId: string, i
     entityId: created.id,
     metadata: { name: created.name },
   })
+  // Cada sede nueva nace con su primera unidad («Unidad dental 1», «Sala 1»): sin ella no se
+  // reserva. Se renombra o se agregan más en Agenda (ADR 0141).
+  const word = await roomWord(tx, orgId)
+  await tx.insert(scheduleRoom).values({ organizationId: orgId, branchId: created.id, name: `${upperFirst(word.one)} 1` })
   return created
 }
 

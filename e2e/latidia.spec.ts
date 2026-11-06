@@ -10,7 +10,7 @@ import type { Page } from "@playwright/test"
 import { and, eq } from "drizzle-orm"
 import { simulateWhatsAppInbound } from "./channels"
 import { hostUrl, latidiaUrl, tenant } from "./env"
-import { chooseOption, expect, PASSWORD, test } from "./fixtures"
+import { asClinicFromBefore, chooseOption, expect, PASSWORD, test } from "./fixtures"
 import { consentLinkJourney } from "./consent-link-journey"
 import { drawSignature } from "./draw-signature"
 import { gotoHydrated } from "./hydration"
@@ -85,7 +85,7 @@ async function createVela(fixtureDb: Db, passwordHash: string): Promise<{ id: st
 }
 
 /** Entra por la API de latidIA y abre su consultorio con una sede: nace en su dominio. */
-async function openConsultorio(page: Page, vela: { id: string; email: string }) {
+async function openConsultorio(page: Page, vela: { id: string; email: string }, db: Db) {
   const api = latidiaUrl("api")
   const signedIn = await request<{ user: { id: string } }>(
     page,
@@ -130,6 +130,8 @@ async function openConsultorio(page: Page, vela: { id: string; email: string }) 
   expect(
     (await request(page, api, "POST", "/api/branches", slug, { name: "Sede Central" })).status,
   ).toBe(201)
+  // Como las demás clínicas de prueba: parte de «sin fila = apagado» (ADR 0141).
+  await asClinicFromBefore(db, created.body.id)
   return { api, slug, orgId: created.body.id }
 }
 
@@ -153,7 +155,7 @@ test("latidIA: su dominio, su sesión, un consultorio médico con su marca y sus
   await shot("acceso")
 
   // La sesión vive en su dominio: entra por la API de latidIA.
-  const { api, slug, orgId } = await openConsultorio(page, vela)
+  const { api, slug, orgId } = await openConsultorio(page, vela, fixtureDb)
 
   // Nació en el dominio de latidIA: es un consultorio médico.
   const [profile] = await fixtureDb
@@ -223,7 +225,7 @@ for (const longAgo of [false, true]) {
     const context = await browser.newContext({ ignoreHTTPSErrors: true })
     const page = await context.newPage()
     await gotoHydrated(page, latidiaUrl("app", "/login"))
-    const { api, slug } = await openConsultorio(page, vela)
+    const { api, slug } = await openConsultorio(page, vela, fixtureDb)
     const [org] = await fixtureDb.select({ id: organization.id }).from(organization).where(eq(organization.slug, slug))
     await consentLinkJourney({
       page,
@@ -248,7 +250,7 @@ test("latidIA: Ariadna responde con la guía del consultorio", async ({ browser,
   const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1440, height: 900 } })
   const page = await context.newPage()
   await gotoHydrated(page, latidiaUrl("app", "/login"))
-  const { slug } = await openConsultorio(page, vela)
+  const { slug } = await openConsultorio(page, vela, fixtureDb)
   await gotoHydrated(page, latidiaUrl(slug, "/agenda"))
   await page.getByRole("button", { name: "Ayuda", exact: true }).click()
   const help = surface(page, { name: "Ayuda", exact: true })
@@ -269,7 +271,7 @@ test("latidIA: en la Bandeja cada tema se responde por su cuenta", async ({ brow
   const context = await browser.newContext({ ignoreHTTPSErrors: true })
   const page = await context.newPage()
   await gotoHydrated(page, latidiaUrl("app", "/login"))
-  const { api, slug } = await openConsultorio(page, vela)
+  const { api, slug } = await openConsultorio(page, vela, fixtureDb)
   const connection = await request<{ data: { id: string } }>(page, api, "POST", "/api/channels/connections", slug, {
     channel: "whatsapp",
     provider: "whatsapp_cloud_api",
@@ -328,7 +330,7 @@ test("latidIA: lo que el agente buscó y no encontró se revisa en Aprender y se
   const context = await browser.newContext({ ignoreHTTPSErrors: true })
   const page = await context.newPage()
   await gotoHydrated(page, latidiaUrl("app", "/login"))
-  const { api, slug, orgId } = await openConsultorio(page, vela)
+  const { api, slug, orgId } = await openConsultorio(page, vela, fixtureDb)
   const connection = await request<{ data: { id: string } }>(page, api, "POST", "/api/channels/connections", slug, {
     channel: "whatsapp",
     provider: "whatsapp_cloud_api",
@@ -388,7 +390,7 @@ test("latidIA: la foto del paciente se pone y se quita desde su página", async 
   const context = await browser.newContext({ ignoreHTTPSErrors: true })
   const page = await context.newPage()
   await gotoHydrated(page, latidiaUrl("app", "/login"))
-  const { api, slug } = await openConsultorio(page, vela)
+  const { api, slug } = await openConsultorio(page, vela, fixtureDb)
   const patient = await request<{ data: { id: string } }>(page, api, "POST", "/api/patients", slug, {
     submissionId: randomUUID(),
     answers: {
@@ -422,7 +424,7 @@ test("latidIA: la ficha médica con el examen por sistemas, los signos vitales, 
   const page = await context.newPage()
   const shot = (name: string) => page.screenshot({ path: testInfo.outputPath(`${name}.png`), fullPage: true })
   await gotoHydrated(page, latidiaUrl("app", "/login"))
-  const { api, slug, orgId } = await openConsultorio(page, vela)
+  const { api, slug, orgId } = await openConsultorio(page, vela, fixtureDb)
 
   // Rosa, con un control de hace dos meses ya firmado y su consulta de hoy abierta.
   const patient = await request<{ data: { id: string } }>(page, api, "POST", "/api/patients", slug, {
@@ -649,7 +651,7 @@ test("latidIA: lo indicado queda aceptado y se agenda sin presupuesto; Reportes 
     await page.evaluate(() => document.documentElement.classList.remove("dark"))
   }
   await gotoHydrated(page, latidiaUrl("app", "/login"))
-  const { api, slug, orgId } = await openConsultorio(page, vela)
+  const { api, slug, orgId } = await openConsultorio(page, vela, fixtureDb)
   // El catálogo médico llega en la entrega 8: aquí, un servicio propio con su tarifa.
   await fixtureDb
     .insert(serviceCatalog)
@@ -742,7 +744,7 @@ test("latidIA: un control que se repite deja indicado el siguiente al completarl
   const page = await context.newPage()
   const shot = (name: string) => page.screenshot({ path: testInfo.outputPath(`${name}.png`), fullPage: true })
   await gotoHydrated(page, latidiaUrl("app", "/login"))
-  const { api, slug, orgId } = await openConsultorio(page, vela)
+  const { api, slug, orgId } = await openConsultorio(page, vela, fixtureDb)
   const patient = await request<{ data: { id: string } }>(page, api, "POST", "/api/patients", slug, {
     submissionId: randomUUID(),
     answers: {
@@ -818,7 +820,7 @@ test("latidIA: la biblioteca de un consultorio con su código CPMS, sus cinco es
   const page = await context.newPage()
   const shot = (name: string) => page.screenshot({ path: testInfo.outputPath(`${name}.png`), fullPage: true })
   await gotoHydrated(page, latidiaUrl("app", "/login"))
-  const { slug } = await openConsultorio(page, vela)
+  const { slug } = await openConsultorio(page, vela, fixtureDb)
   await page.setViewportSize({ width: 1440, height: 900 })
 
   // Agregar servicios: solo lo de un consultorio, cada uno con su código CPMS.
@@ -879,7 +881,7 @@ test("latidIA: Clío dicta la consulta, los signos vitales, el examen y el desca
   const page = await context.newPage()
   const shot = (name: string) => page.screenshot({ path: testInfo.outputPath(`${name}.png`), fullPage: true })
   await gotoHydrated(page, latidiaUrl("app", "/login"))
-  const { api, slug } = await openConsultorio(page, vela)
+  const { api, slug } = await openConsultorio(page, vela, fixtureDb)
   // El descanso se firma con el perfil profesional.
   expect(
     (
@@ -1032,7 +1034,7 @@ test("latidIA: sin colegiatura, el cierre propone «Médico cirujano» y el CMP,
   const context = await browser.newContext({ ignoreHTTPSErrors: true })
   const page = await context.newPage()
   await gotoHydrated(page, latidiaUrl("app", "/login"))
-  const { api, slug } = await openConsultorio(page, vela)
+  const { api, slug } = await openConsultorio(page, vela, fixtureDb)
   const patient = await request<{ data: { id: string } }>(page, api, "POST", "/api/patients", slug, {
     submissionId: randomUUID(),
     answers: {
@@ -1097,7 +1099,7 @@ test("latidIA: la firma del médico se dibuja al cerrar y sale en el descanso qu
   const context = await browser.newContext({ ignoreHTTPSErrors: true })
   const page = await context.newPage()
   await gotoHydrated(page, latidiaUrl("app", "/login"))
-  const { api, slug } = await openConsultorio(page, vela)
+  const { api, slug } = await openConsultorio(page, vela, fixtureDb)
   const profilePath = "/api/clinical-forms/professionals/me/profile"
   const colegiatura = { professionalTitle: "Médico cirujano", registrationBody: "CMP", registrationNumber: "045678" }
   expect((await request(page, api, "PUT", profilePath, slug, colegiatura)).status).toBe(200)
@@ -1168,7 +1170,7 @@ test("latidIA: el descanso emitido no cambia, y su QR se lee y comprueba el arch
   const context = await browser.newContext({ ignoreHTTPSErrors: true })
   const page = await context.newPage()
   await gotoHydrated(page, latidiaUrl("app", "/login"))
-  const { api, slug } = await openConsultorio(page, vela)
+  const { api, slug } = await openConsultorio(page, vela, fixtureDb)
   const profilePath = "/api/clinical-forms/professionals/me/profile"
   const colegiatura = { professionalTitle: "Médico cirujano", registrationBody: "CMP", registrationNumber: "045678" }
   expect((await request(page, api, "PUT", profilePath, slug, colegiatura)).status).toBe(200)
@@ -1246,7 +1248,7 @@ test("latidIA: Clío anota el material dicho, al firmar se ve lo que salió del 
   const page = await context.newPage()
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, latidiaUrl("app", "/login"))
-  const { api, slug, orgId } = await openConsultorio(page, vela)
+  const { api, slug, orgId } = await openConsultorio(page, vela, fixtureDb)
   const [site] = await fixtureDb.select({ id: branch.id }).from(branch).where(eq(branch.organizationId, orgId))
   const product = async (name: string, unit: string, counted: number | null) => {
     const created = await request<{ data: { id: string } }>(page, api, "POST", "/api/inventory/products", slug, {

@@ -1052,6 +1052,16 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
   // Sin Recepción ni el Administrador no sale «Recordar la cita» ni ningún aviso:
   // es un paso más de la puesta en marcha para quien puede encenderlos.
   const agentStep = setup && options.can?.("agent.write") ? await adminRuntime(tx, orgId) : null
+  // Lo que la clínica tiene encendido de verdad (ADR 0141): Inicio lo dice con su enlace para apagarlo.
+  const [on] = setup
+    ? await tx.execute<{ clio: boolean; registration: boolean; notice_suggested: boolean; portal: boolean; digest: boolean; lines: number }>(sql`
+    select coalesce((select clinical_assistant_enabled from agent_config where organization_id=${orgId}), false) as clio,
+      coalesce((select enabled from patient_registration_config where organization_id=${orgId}), false) as registration,
+      coalesce((select notice_suggested_at is not null from patient_registration_config where organization_id=${orgId}), false) as notice_suggested,
+      coalesce((select portal_enabled from portal_policy where organization_id=${orgId}), false) as portal,
+      coalesce((select enabled from report_digest where organization_id=${orgId} and user_id=${userId}), false) as digest,
+      (select count(*)::int from automation_rule where organization_id=${orgId} and enabled) as lines`)
+    : []
   // Con trabajo ya registrado, Inicio deja de ofrecer la puesta en marcha.
   const [activity] = await tx.execute<{ recorded: boolean }>(sql`
     select (
@@ -1067,7 +1077,21 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
       or ${access.agent} and exists(select 1 from agent_proposal where organization_id=${orgId})
     ) as recorded`)
   return { date: day.date, timezone, locale, access, multiBranch: many, waiting, today, agendaLine, cash,
-    setup: setup ? { ...setup, ...(agentStep ? { agent: agentStep.adminOn && agentStep.receptionOn } : {}) } : null,
+    setup: setup
+      ? {
+          ...setup,
+          ...(agentStep ? { agent: agentStep.adminOn && agentStep.receptionOn } : {}),
+          on: {
+            ...(agentStep ? { reception: agentStep.receptionOn, admin: agentStep.adminOn } : {}),
+            clio: on?.clio ?? false,
+            registration: on?.registration ?? false,
+            noticeSuggested: on?.notice_suggested ?? false,
+            portal: on?.portal ?? false,
+            digest: on?.digest ?? false,
+            lines: on?.lines ?? 0,
+          },
+        }
+      : null,
     activity: { recorded: activity?.recorded ?? false } }
 }
 

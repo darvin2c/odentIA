@@ -183,11 +183,9 @@ it("datos de la clínica: vaciar un dato lo guarda vacío, lo que no se envía s
   // Un solo nombre visible (decisión 19): el nombre comercial es también el de la cuenta.
   const [account] = await ownerDb.execute<{ name: string }>(sql`select name from organization where id = ${ORG}`)
   expect(account?.name).toBe("Ajustes")
-  // Al crear la clínica viene prendida «Recordar la cita», a nombre de quien la crea, y nada más (ADR 0026).
-  const lines = await ownerDb.execute<{ kind: string; enabled: boolean; enabled_by: string | null }>(
-    sql`select kind, enabled, enabled_by from automation_rule where organization_id = ${ORG}`,
-  )
-  expect([...lines].map((row) => [row.kind, row.enabled, row.enabled_by])).toEqual([["recordatorio_cita", true, "u-set-owner"]])
+  // Esta ya tenía una sede: no es una clínica que nace, y no se enciende nada (ADR 0141).
+  const lines = await ownerDb.execute<{ kind: string }>(sql`select kind from automation_rule where organization_id = ${ORG}`)
+  expect([...lines]).toEqual([])
 
   // El nombre comercial es obligatorio: vacío no se acepta; si no se envía, queda como estaba.
   const blank = await request("owner", "PUT", "/org-profile", { legalName: "Clínica Ajustes S.A.C.", tradeName: "  ", ...region })
@@ -365,6 +363,20 @@ it("la clínica nace con el producto del dominio donde se crea, y no cambia (ent
       body: JSON.stringify(body),
     })
   expect((await put({ legalName: "Consultorio Ajeno", ...region })).status).toBe(200)
+  // Nace sin ninguna sede: viene con todo encendido a nombre de quien la crea, como una de odentIA (ADR 0141).
+  const lines = await ownerDb.execute<{ enabled: boolean; enabled_by: string | null }>(
+    sql`select enabled, enabled_by from automation_rule where organization_id = ${OTHER_ORG}`,
+  )
+  expect(lines.length).toBeGreaterThan(1)
+  expect([...lines].every((row) => row.enabled && row.enabled_by === "u-set-other")).toBe(true)
+  const [agent] = await ownerDb.execute<{ enabled: boolean; clinical: boolean }>(
+    sql`select enabled, clinical_assistant_enabled as clinical from agent_config where organization_id = ${OTHER_ORG}`,
+  )
+  expect(agent).toEqual({ enabled: true, clinical: true })
+  const [portal] = await ownerDb.execute<{ enabled: boolean }>(
+    sql`select portal_enabled as enabled from portal_policy where organization_id = ${OTHER_ORG}`,
+  )
+  expect(portal?.enabled).toBe(true)
   const productOf = async (org: string) =>
     (await ownerDb.execute<{ product: string }>(sql`select product from org_profile where organization_id = ${org}`))[0]?.product
   expect(await productOf(OTHER_ORG)).toBe("medical")

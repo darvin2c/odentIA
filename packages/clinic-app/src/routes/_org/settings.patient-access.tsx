@@ -119,7 +119,7 @@ function PortalForm({
           {(field) => (
             <field.CheckboxField
               label="Portal del paciente encendido"
-              description="Apagado por defecto. Apagado, nadie entra y no se dan accesos."
+              description="Una clínica nueva lo trae encendido. El acceso se da a cada persona, en la clínica y con su documento. Apagado, nadie entra y no se dan accesos."
               disabled={!canWrite}
             />
           )}
