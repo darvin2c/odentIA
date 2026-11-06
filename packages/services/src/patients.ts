@@ -977,7 +977,31 @@ export async function findPatientDuplicates(tx: Db, orgId: string, input: { disp
   return rows.map(({ rank: priority, ...row }) => ({ ...row, reason: priority === 1 ? "document" as const : priority === 2 ? "name_birthDate" as const : "phone" as const }))
 }
 
+/**
+ * Lo que quien edita vio guardado en cada dato que cambia: si otra sesión lo
+ * cambió mientras tanto, se avisa en vez de pisarlo (`STALE_DATA`), junto al
+ * dato. Sin `base`, se guarda como antes.
+ */
+export function assertUnchangedSince(
+  stored: Record<string, unknown>,
+  base: Record<string, unknown> | undefined,
+): void {
+  if (!base) return
+  const text = (value: unknown) => (value === null || value === undefined ? "" : String(value))
+  const fields: Record<string, string> = {}
+  for (const [key, seen] of Object.entries(base)) {
+    // Solo lo que guarda esta fila: un dato que vive en otra (su teléfono, su seguro) no se compara aquí.
+    if (!(key in stored)) continue
+    if (text(stored[key]) !== text(seen)) fields[key] = "Otra sesión cambió este dato mientras editabas: recarga para ver lo último."
+  }
+  if (Object.keys(fields).length > 0) {
+    throw new ServiceError("STALE_DATA", 409, "Otra sesión cambió estos datos mientras editabas: recarga para ver lo último.", fields)
+  }
+}
+
 export interface UpdatePatientPatch {
+  /** Lo que se vio guardado de cada dato que cambia (`assertUnchangedSince`). */
+  base?: Record<string, unknown>
   displayName?: string
   givenNames?: string | null
   familyName?: string | null
@@ -1081,7 +1105,8 @@ export async function updatePatient(
   if (!personId) throw notFound("Paciente")
   await tx.select({ id: contact.id }).from(contact).where(and(eq(contact.organizationId, orgId), eq(contact.id, personId))).for("update")
   const current = await requirePatient(tx, orgId, id)
-  const { registeredBranchId: _branch, isActive: _active, identityConfirmed: _confirmed, ...demographicPatch } = patch
+  assertUnchangedSince(current as unknown as Record<string, unknown>, patch.base)
+  const { registeredBranchId: _branch, isActive: _active, identityConfirmed: _confirmed, base: _base, ...demographicPatch } = patch
   const demographics = Object.fromEntries(Object.keys(demographicsSchema.shape).map(key => [key, current[key as keyof PatientRow]]))
   const countryCode = await findOrgCountry(tx, orgId)
   // Lo guardado que no cambia no se vuelve a juzgar por el país de la clínica. Nombres y apellidos

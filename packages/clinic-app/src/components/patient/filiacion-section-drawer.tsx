@@ -348,14 +348,22 @@ export function FiliacionSectionDrawer({
 
   const save = useMutation({
     mutationFn: (patch: Record<string, unknown>) => {
+      // Lo que se vio guardado de cada dato que cambia, como lo dio el servidor (el seguro se ve como una
+      // opción y se guarda en dos datos): si otra sesión lo cambió, el servidor lo dice junto al dato.
+      const base = Object.fromEntries(
+        Object.keys(patch).map((key) => {
+          const seen = source[key]
+          return [key, typeof seen === "string" || typeof seen === "number" || typeof seen === "boolean" ? seen : null]
+        }),
+      )
       if (!patient)
         return apiFetch(`/api/people/${person.id}/identity`, {
           method: "PATCH",
-          body: JSON.stringify(patch),
+          body: JSON.stringify({ ...patch, base }),
         })
       return apiFetch(`/api/patients/${patient.id}`, {
         method: "PATCH",
-        body: JSON.stringify(confirmsNames ? { ...patch, identityConfirmed: true } : patch),
+        body: JSON.stringify(confirmsNames ? { ...patch, base, identityConfirmed: true } : { ...patch, base }),
       })
     },
   })

@@ -1102,6 +1102,17 @@ export async function updateFormTemplate(
   return row
 }
 
+/** El mismo JSON con las claves en orden: dos respuestas iguales se comparan iguales. */
+function canonicalJson(value: unknown): string {
+  const sorted = (item: unknown): unknown =>
+    Array.isArray(item)
+      ? item.map(sorted)
+      : item && typeof item === "object"
+        ? Object.fromEntries(Object.keys(item as Record<string, unknown>).sort().map((key) => [key, sorted((item as Record<string, unknown>)[key])]))
+        : item
+  return JSON.stringify(sorted(value))
+}
+
 /**
  * Publica el borrador con su número de versión real y archiva la versión
  * publicada anterior de la misma clave: «Nuevo formulario» ofrece solo la
@@ -1282,7 +1293,12 @@ export async function updateFormResponseDraft(
   orgId: string,
   actorUserId: string,
   responseId: string,
-  input: { answers: unknown; professionalUserId?: string | null },
+  input: {
+    answers: unknown
+    professionalUserId?: string | null
+    /** Las respuestas guardadas de las que partió quien escribe: otra pestaña no se pisa (`STALE_DRAFT`). */
+    baseAnswers?: unknown
+  },
 ): Promise<FormResponseRow> {
   const [current] = await tx
     .select()
@@ -1291,7 +1307,15 @@ export async function updateFormResponseDraft(
       and(eq(clinicalFormResponse.id, responseId), eq(clinicalFormResponse.organizationId, orgId)),
     )
     .limit(1)
+    .for("update")
   if (!current) throw notFound("Formulario")
+  // Otra pestaña guardó otras respuestas mientras se escribía: se avisa en vez de pisarlas.
+  if (input.baseAnswers !== undefined && canonicalJson(current.answers ?? {}) !== canonicalJson(input.baseAnswers ?? {})) {
+    throw conflict(
+      "STALE_DRAFT",
+      "Otra pestaña guardó otras respuestas de este formulario mientras escribías. Copia lo tuyo si lo necesitas y recarga para ver lo último.",
+    )
+  }
   if (current.status !== "borrador") {
     throw conflict(
       "FINALIZED",

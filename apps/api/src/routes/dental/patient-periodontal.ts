@@ -27,7 +27,7 @@ import { type CrmDeps, runService, validationError } from "../helpers.js"
  * valida el servicio con las reglas de `@odentia/clinical`.
  */
 const sites = <T extends z.ZodType>(item: T) => z.array(item).length(6)
-const toothInput = z
+const toothFields = z
   .object({
     skipped: z.boolean().optional(),
     probingDepth: sites(z.number().int().nullable()).optional(),
@@ -40,6 +40,8 @@ const toothInput = z
     periImplant: z.enum(PERI_IMPLANT_CONDITIONS).nullable().optional(),
   })
   .strict()
+// Con cómo estaba guardada la pieza para quien sondea: otra pestaña no se pisa.
+const toothInput = toothFields.extend({ base: toothFields.optional() }).strict()
 const startInput = z.object({ encounterId: z.uuid() }).strict()
 // Lo que escribe el odontólogo: cada dato con su mensaje, para decirlo junto a su campo.
 const wholeNumber = (what: string) =>

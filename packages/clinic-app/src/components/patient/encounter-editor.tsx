@@ -206,7 +206,14 @@ interface DraftPatch extends Partial<Record<NoteKey, string | null>> {
   indications?: string | null
   teeth?: number[]
   examination?: Record<string, unknown> | null
+  /** Lo último guardado que conoce el editor de cada texto que envía: otra pestaña no se pisa. */
+  base?: Partial<Record<TextKey, string | null>>
 }
+
+/** Los textos que se cuidan de otra pestaña: el servidor avisa si cambiaron (`STALE_DRAFT`). */
+const TEXT_KEYS = ["reason", "evolution", "indications", "presentIllness", "illnessDuration", "prognosis"] as const
+type TextKey = (typeof TEXT_KEYS)[number]
+const isTextKey = (key: string): key is TextKey => (TEXT_KEYS as readonly string[]).includes(key)
 
 const AUTOSAVE_MS = 800
 const MAX_REASON = 2000
@@ -507,6 +514,15 @@ export function EncounterEditor({
   const mountedRef = useRef(true)
   const childCountRef = useRef(0)
   const latestWriteAtRef = useRef(new Date(encounter.updatedAt).getTime())
+  // Lo último guardado de cada texto, como lo devolvió el servidor: viaja como `base`.
+  const savedTextRef = useRef<Record<TextKey, string | null>>({
+    reason: encounter.reason ?? null,
+    evolution: encounter.evolution ?? null,
+    indications: encounter.indications ?? null,
+    presentIllness: encounter.presentIllness ?? null,
+    illnessDuration: encounter.illnessDuration ?? null,
+    prognosis: encounter.prognosis ?? null,
+  })
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: se monta una vez; `drain` solo lee refs
   useEffect(() => {
@@ -604,6 +620,10 @@ export function EncounterEditor({
           break
       }
     }
+    // Cada texto que viaja dice de qué versión partió.
+    const base: Partial<Record<TextKey, string | null>> = {}
+    for (const key of keys) if (isTextKey(key) && key in body) base[key] = savedTextRef.current[key]
+    if (Object.keys(base).length > 0) body.base = base
     return body
   }
 
@@ -642,6 +662,8 @@ export function EncounterEditor({
               latestWriteAtRef.current,
               new Date(saved.data.updatedAt).getTime(),
             )
+            // Lo que quedó guardado es la nueva base de cada texto enviado.
+            for (const key of sendable) if (isTextKey(key)) savedTextRef.current[key] = saved.data[key] ?? null
             savedAny = true
             // La sección «Signos vitales» y la medición anterior se leen de nuevo.
             if (sendable.includes("vitals"))

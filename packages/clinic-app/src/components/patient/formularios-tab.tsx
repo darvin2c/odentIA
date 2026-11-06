@@ -199,6 +199,8 @@ export function ResponseDetail({
   // Cambios sin guardar: `version` cuenta cada cambio y `saved` el último guardado.
   const version = useRef(0)
   const saved = useRef(0)
+  // Las respuestas como quedaron guardadas: viajan como base del próximo guardado.
+  const savedAnswers = useRef<Record<string, unknown>>(response.answers ?? {})
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Si el último guardado falló: el autoguardado corre con el estado de su render, que
   // ya dice «pendiente» por el cambio que lo disparó, así que el fallo se recuerda aquí.
@@ -241,9 +243,12 @@ export function ResponseDetail({
     if (target === saved.current) return
     setSaveState("guardando")
     try {
-      await updateFormResponse(response.id, {
+      const updated = await updateFormResponse(response.id, {
         answers: answersForServer(schema, form.state.values.answers),
+        // De qué respuestas guardadas partió: si otra pestaña guardó otras, se avisa en vez de pisarlas.
+        baseAnswers: savedAnswers.current,
       })
+      savedAnswers.current = updated.data.answers ?? {}
       saved.current = target
       saveFailed.current = false
       setSaveState(version.current === target ? "guardado" : "pendiente")
@@ -281,6 +286,7 @@ export function ResponseDetail({
       const title = response.templateTitle ?? "el formulario"
       updateFormResponse(response.id, {
         answers: answersForServer(schema, form.state.values.answers),
+        baseAnswers: savedAnswers.current,
       }).catch((error: unknown) =>
         toast.error(`No se guardaron los últimos cambios de «${title}». ${submitErrorMessage(error)}`, {
           description: "Vuelve a abrirlo y revisa las respuestas.",

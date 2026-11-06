@@ -511,6 +511,13 @@ it("formularios: versión real al publicar, título congelado, tipos clínicos, 
   expect(response.templateTitle).toBe("Evaluación inicial")
   const save = (answers: Record<string, unknown>) =>
     run((tx) => updateFormResponseDraft(tx, "org_a", ACTOR, response.id, { answers }))
+  // Dos pestañas: la que partió de otras respuestas guardadas no las pisa.
+  await expect(
+    run((tx) => updateFormResponseDraft(tx, "org_a", ACTOR, response.id, { answers: { dolor: false }, baseAnswers: { dolor: true } })),
+  ).rejects.toMatchObject({ code: "STALE_DRAFT", status: 409 })
+  await expect(
+    run((tx) => updateFormResponseDraft(tx, "org_a", ACTOR, response.id, { answers: { dolor: false }, baseAnswers: response.answers ?? {} })),
+  ).resolves.toMatchObject({ answers: { dolor: false } })
   await expect(save({ pieza: 19 })).rejects.toMatchObject({ status: 400 })
   await expect(save({ dolor: true, intensidad: 11 })).rejects.toMatchObject({ status: 400 })
   await expect(save({ foto: crypto.randomUUID() })).rejects.toMatchObject({ status: 400 })

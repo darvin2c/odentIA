@@ -32,7 +32,7 @@ import {
 import { SubmitButton, submitErrorMessage } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { type PeriodontalChart as ChartData, periodontalKeys, savePeriodontalTooth, toothSaveBody } from "../../../lib/dental/periodontal"
+import { type PeriodontalChart as ChartData, type PeriodontalToothSave, periodontalKeys, savePeriodontalTooth, toothSaveBody } from "../../../lib/dental/periodontal"
 import { isUpper, PlaqueTooth } from "./anatomy"
 import {
   applyCaptureKey,
@@ -136,6 +136,13 @@ function useToothSaver(patientId: string, chartId: string, latest: React.RefObje
   /** La pieza que no se pudo guardar: el aviso la nombra y el gráfico la marca. */
   const [failedTooth, setFailedTooth] = useState<number | null>(null)
   const [savedAt, setSavedAt] = useState<Date | null>(null)
+  // Cómo quedó guardada cada pieza: viaja como base, y otra pestaña no se pisa.
+  const saved = useRef<Map<number, PeriodontalToothSave> | null>(null)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: lo guardado se lee al montar, antes de sondear.
+  useEffect(() => {
+    const teeth = latest.current?.teeth ?? {}
+    saved.current = new Map(Object.entries(teeth).map(([tooth, record]) => [Number(tooth), toothSaveBody(record)]))
+  }, [])
 
   const drain = useCallback((): Promise<void> => {
     if (running.current) return running.current
@@ -146,7 +153,9 @@ function useToothSaver(patientId: string, chartId: string, latest: React.RefObje
         const record = latest.current?.teeth[tooth]
         if (!record) continue
         try {
-          await savePeriodontalTooth(patientId, chartId, tooth, toothSaveBody(record))
+          const base = saved.current?.get(tooth)
+          const done = await savePeriodontalTooth(patientId, chartId, tooth, { ...toothSaveBody(record), ...(base ? { base } : {}) })
+          saved.current?.set(tooth, toothSaveBody(done.data))
         } catch (err) {
           pending.current.add(tooth)
           if (isOffline(err)) {
