@@ -1,4 +1,9 @@
-import { type ConsentSections, consentSectionsToText } from "@odentia/clinical"
+import {
+  CONSENT_DECLARATION,
+  CONSENT_SECTION_LABELS,
+  type ConsentSections,
+  consentSectionsToText,
+} from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -53,7 +58,8 @@ import { fetchConsentTemplateServices, saveConsentTemplateServices } from "../..
 import { sameDraft, usePageDraftGuard } from "../../lib/page-draft-guard"
 import { fetchServices } from "../../lib/services"
 import { usePdfUrl } from "../patient/document-paper-panel"
-import { ConsentReading } from "../public/link-steps"
+import { useOrgProfile } from "../../lib/org"
+import { consentFiscalLine, ConsentSheet as PatientConsentSheet } from "../patient/consent-sheet"
 import { TemplatesSkeleton } from "../skeletons/settings"
 import { SettingsLoadError } from "./load-error"
 
@@ -338,6 +344,7 @@ interface ConsentPreviewDraft {
  */
 function ConsentPreviewDrawer({ draft, onClose }: { draft: ConsentPreviewDraft; onClose: () => void }) {
   const mobile = useIsMobile() === true
+  const org = useOrgProfile().data
   const pdf = useQuery({
     queryKey: ["consent-preview", draft],
     queryFn: () => fetchConsentPreview(draft),
@@ -386,12 +393,26 @@ function ConsentPreviewDrawer({ draft, onClose }: { draft: ConsentPreviewDraft; 
           )}
         </TabsContent>
         <TabsContent value="telefono">
-          <div className="mx-auto flex max-w-[24rem] flex-col gap-4 rounded-[2rem] border-8 border-foreground/80 bg-background p-5">
-            <h2 className="text-lg font-semibold">{draft.title}</h2>
-            <ConsentReading sections={draft.sections} body={null} />
-            <p className="text-sm text-muted-foreground">
-              Después escribe su documento, marca que entendió y firma con el dedo.
-            </p>
+          <div className="mx-auto flex max-w-[24rem] flex-col gap-4 rounded-[2rem] border-8 border-foreground/80 bg-muted/40 px-1 py-4">
+            <PatientConsentSheet
+              clinic={org ? { name: org.tradeName || org.legalName, fiscalLine: consentFiscalLine(org), logo: org.logo ?? null } : null}
+              title={draft.title}
+              facts={[
+                { label: "Paciente", value: "Se completa solo", strong: true },
+                { label: "Historia clínica", value: "Se completa solo" },
+              ]}
+              sections={draft.sections}
+              declaration={CONSENT_DECLARATION}
+              signer={{
+                heading: "Paciente",
+                name: "Nombre del paciente",
+                children: (
+                  <p className="text-sm text-muted-foreground">
+                    Aquí marca que acepta, escribe su documento y firma con el dedo.
+                  </p>
+                ),
+              }}
+            />
           </div>
         </TabsContent>
       </Tabs>
@@ -417,9 +438,9 @@ interface ConsentValues {
 
 /** Las tres listas, con el nombre de cada línea para decir en cuál está el problema. */
 const CONSENT_LISTS = [
-  { name: "benefits", label: "Beneficios esperados", one: "beneficio", many: "beneficios", a: "un", the: "El" },
-  { name: "risks", label: "Riesgos y molestias", one: "riesgo", many: "riesgos", a: "un", the: "El" },
-  { name: "alternatives", label: "Alternativas", one: "alternativa", many: "alternativas", a: "una", the: "La" },
+  { name: "benefits", label: CONSENT_SECTION_LABELS.benefits, one: "beneficio", many: "beneficios", a: "un", the: "El" },
+  { name: "risks", label: CONSENT_SECTION_LABELS.risks, one: "riesgo", many: "riesgos", a: "un", the: "El" },
+  { name: "alternatives", label: CONSENT_SECTION_LABELS.alternatives, one: "alternativa", many: "alternativas", a: "una", the: "La" },
 ] as const
 
 function consentSectionsOf(value: ConsentValues): ConsentSections {
@@ -803,7 +824,7 @@ function ConsentSheet({ group }: { group: ConsentGroup | null }) {
             <form.AppField name="procedure">
               {(field) => (
                 <field.TextareaField
-                  label={<span className={SHEET_LABEL}>Procedimiento propuesto</span>}
+                  label={<span className={SHEET_LABEL}>{CONSENT_SECTION_LABELS.procedure}</span>}
                   rows={2}
                   maxLength={4000}
                   disabled={!canAdmin}
@@ -813,7 +834,7 @@ function ConsentSheet({ group }: { group: ConsentGroup | null }) {
               )}
             </form.AppField>
             <p className={SHEET_FIXED}>
-              <strong className="font-semibold">Diagnóstico que lo motiva</strong> · se toma de la atención
+              <strong className="font-semibold">{CONSENT_SECTION_LABELS.diagnosis}</strong> · se toma de la atención
             </p>
             {CONSENT_LISTS.map((list) => (
               <form.AppField key={list.name} name={list.name}>
@@ -839,7 +860,7 @@ function ConsentSheet({ group }: { group: ConsentGroup | null }) {
             <form.AppField name="consequences">
               {(field) => (
                 <field.TextareaField
-                  label={<span className={SHEET_LABEL}>Consecuencias de no tratarse</span>}
+                  label={<span className={SHEET_LABEL}>{CONSENT_SECTION_LABELS.consequences}</span>}
                   rows={2}
                   maxLength={4000}
                   disabled={!canAdmin}
@@ -851,7 +872,7 @@ function ConsentSheet({ group }: { group: ConsentGroup | null }) {
             <form.AppField name="notes">
               {(field) => (
                 <field.TextareaField
-                  label={<span className={SHEET_LABEL}>Información adicional (opcional)</span>}
+                  label={<span className={SHEET_LABEL}>{CONSENT_SECTION_LABELS.notes} (opcional)</span>}
                   description="Si la dejas vacía, no sale en la hoja."
                   rows={1}
                   maxLength={4000}

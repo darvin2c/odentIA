@@ -1,0 +1,247 @@
+import { CONSENT_SECTION_LABELS, type ConsentSections } from "@odentia/clinical"
+import { cn } from "@odentia/ui"
+import { type ReactNode, type Ref, useId } from "react"
+
+/** El membrete del papel: nombre, «razón social · RUC» y logo. */
+export interface ConsentSheetClinic {
+  name: string
+  fiscalLine: string | null
+  logo: string | null
+}
+
+/**
+ * «Dental Smile S.A.C. · RUC 20601234567», como el membrete del PDF: la razón
+ * social solo si no es el nombre que ven los pacientes.
+ */
+export function consentFiscalLine(profile: {
+  tradeName?: string | null
+  legalName?: string | null
+  fiscalDocType?: string | null
+  fiscalDocNumber?: string | null
+}): string | null {
+  const name = profile.tradeName || profile.legalName
+  const fiscal = profile.fiscalDocNumber
+    ? [profile.fiscalDocType, profile.fiscalDocNumber].filter(Boolean).join(" ")
+    : null
+  return (
+    [profile.legalName && profile.legalName !== name ? profile.legalName : null, fiscal]
+      .filter(Boolean)
+      .join(" · ") || null
+  )
+}
+
+/** Iniciales del membrete cuando la clínica no subió su logo, como el cuadro del PDF. */
+function initialsOf(name: string): string {
+  const [first = "", second = ""] = name.trim().split(/\s+/)
+  return (second ? `${first.charAt(0)}${second.charAt(0)}` : first.slice(0, 2)).toUpperCase()
+}
+
+export interface ConsentSheetProps {
+  clinic: ConsentSheetClinic | null
+  title: string
+  /** La pieza o zona: «Exodoncia pieza 38». */
+  procedureRef?: string | null
+  /** La fila de datos del papel: paciente, documento e historia clínica. */
+  facts: { label: string; value: string; strong?: boolean }[]
+  /** «CIE-10 MINSA · K04.0 · Pulpitis». */
+  diagnosis?: string | null
+  sections: Partial<ConsentSections> | null | undefined
+  /** El texto completo de un consentimiento sin secciones (los antiguos). */
+  body?: string | null
+  declaration: string
+  /** La casilla que acepta la declaración; recibe el id del texto para describirla. */
+  accept?: (declarationId: string) => ReactNode
+  /** Menor de edad: firma su representante legal, como avisa el papel. */
+  minor?: boolean
+  /** Quien firma: «Paciente» o «Representante legal», y lo que se escribe o dibuja. */
+  signer?: { heading: string; name: string; detail?: string | null; children?: ReactNode }
+  /** Lo que falta del profesional: se dice como pendiente, nunca como firmado. */
+  professional?: { name?: string | null; detail?: string | null; note: string }
+  /** «Firma simple · en la clínica» y la nota de su alcance, al pie como en el papel. */
+  signatureWords?: string | null
+  signatureNote?: string | null
+  /** Letra grande para leer en la tablet. */
+  large?: boolean
+  /** El título, para llevar ahí la vista y el foco al pasar al siguiente. */
+  titleRef?: Ref<HTMLHeadingElement>
+  className?: string
+}
+
+/**
+ * La hoja del consentimiento en pantalla: lo mismo y en el mismo orden que su PDF
+ * (`consent-pdf.ts`), para que quien firma lea lo que queda guardado. En pantalla
+ * las firmas van una debajo de otra y el texto se acomoda al ancho; el papel las
+ * pone lado a lado y pagina. Sigue el tema; el recuadro de firma es blanco.
+ */
+export function ConsentSheet({
+  clinic,
+  title,
+  procedureRef,
+  facts,
+  diagnosis,
+  sections,
+  body,
+  declaration,
+  accept,
+  minor = false,
+  signer,
+  professional,
+  signatureWords,
+  signatureNote,
+  large = false,
+  titleRef,
+  className,
+}: ConsentSheetProps): React.JSX.Element {
+  const ids = useId()
+  const titleId = `${ids}-title`
+  const declarationId = `${ids}-declaration`
+  const list = (items: string[] | undefined) =>
+    items && items.length > 0 ? (
+      <ul className="list-disc pl-6">
+        {items.map((item, index) => (
+          // Dos líneas iguales son posibles en un texto propio: la posición las distingue.
+          // biome-ignore lint/suspicious/noArrayIndexKey: el orden de la lista no cambia en pantalla
+          <li key={index}>{item}</li>
+        ))}
+      </ul>
+    ) : null
+  const section = (heading: string, content: ReactNode) =>
+    content ? (
+      <section className="flex flex-col gap-0.5">
+        <h3 className="font-bold">{heading}</h3>
+        {content}
+      </section>
+    ) : null
+  return (
+    <article
+      aria-labelledby={titleId}
+      className={cn(
+        "flex flex-col rounded-sm border bg-card px-5 py-6 text-card-foreground shadow-sm sm:px-10 sm:py-10",
+        large ? "text-lg leading-relaxed" : "text-base leading-normal",
+        className,
+      )}
+    >
+      {clinic ? (
+        <header className="flex items-center gap-3 border-b-2 border-foreground pb-3">
+          {clinic.logo ? (
+            <img src={clinic.logo} alt="" className="h-12 max-w-32 object-contain" />
+          ) : (
+            <span
+              aria-hidden
+              className="flex size-11 shrink-0 items-center justify-center bg-foreground font-serif text-base font-semibold text-background"
+            >
+              {initialsOf(clinic.name)}
+            </span>
+          )}
+          <div className="flex min-w-0 flex-col">
+            <span className="font-serif text-xl leading-tight font-semibold break-words">
+              {clinic.name}
+            </span>
+            {clinic.fiscalLine ? (
+              <span className="text-sm text-muted-foreground">{clinic.fiscalLine}</span>
+            ) : null}
+          </div>
+        </header>
+      ) : null}
+
+      <p className="mt-5 text-sm font-semibold text-muted-foreground">Consentimiento informado</p>
+      <h2
+        id={titleId}
+        ref={titleRef}
+        tabIndex={-1}
+        className="font-serif text-2xl leading-tight font-semibold break-words outline-none sm:text-3xl"
+      >
+        {title}
+      </h2>
+      {procedureRef ? <p className="mt-1 text-muted-foreground">{procedureRef}</p> : null}
+
+      {facts.length > 0 ? (
+        <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 border-y py-3 sm:grid-cols-3">
+          {facts.map((fact) => (
+            <div key={fact.label} className="flex min-w-0 flex-col">
+              <dt className="text-sm text-muted-foreground">{fact.label}</dt>
+              <dd className={cn("break-words", fact.strong && "font-semibold")}>{fact.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+
+      <div className="mt-4 flex flex-col gap-4">
+        {sections ? (
+          <>
+            {section(
+              CONSENT_SECTION_LABELS.procedure,
+              sections.procedure ? <p>{sections.procedure}</p> : null,
+            )}
+            {section(CONSENT_SECTION_LABELS.diagnosis, diagnosis ? <p>{diagnosis}</p> : null)}
+            {section(CONSENT_SECTION_LABELS.benefits, list(sections.benefits))}
+            {section(CONSENT_SECTION_LABELS.risks, list(sections.risks))}
+            {section(CONSENT_SECTION_LABELS.alternatives, list(sections.alternatives))}
+            {section(
+              CONSENT_SECTION_LABELS.consequences,
+              sections.consequences ? <p>{sections.consequences}</p> : null,
+            )}
+            {section(
+              CONSENT_SECTION_LABELS.notes,
+              sections.notes ? <p className="whitespace-pre-wrap">{sections.notes}</p> : null,
+            )}
+          </>
+        ) : body ? (
+          <p className="whitespace-pre-wrap">{body}</p>
+        ) : null}
+      </div>
+
+      <section className="mt-6 flex flex-col gap-3 border-2 border-foreground p-4 sm:p-5">
+        <h3 className="font-bold">Declaración</h3>
+        <p id={declarationId}>{declaration}</p>
+        {accept ? accept(declarationId) : null}
+      </section>
+
+      {minor ? (
+        <p className="mt-4 rounded-md bg-muted px-3 py-2 text-base">
+          <strong className="font-semibold">Menor de edad.</strong> Firma su representante legal.
+        </p>
+      ) : null}
+
+      {signer || professional ? (
+        <div className="mt-6 flex flex-col gap-6">
+          {signer ? (
+            <section className="flex flex-col gap-2">
+              <h3 className="font-bold">{signer.heading}</h3>
+              {signer.children}
+              <div className="flex flex-col border-t border-foreground pt-1.5 text-base">
+                <span className="font-semibold break-words">{signer.name}</span>
+                {signer.detail ? (
+                  <span className="text-muted-foreground">{signer.detail}</span>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
+          {professional ? (
+            <section className="flex flex-col gap-2">
+              <h3 className="font-bold">Profesional que informa</h3>
+              <div className="flex flex-col border-t border-foreground pt-1.5 text-base">
+                {professional.name ? (
+                  <span className="font-semibold break-words">{professional.name}</span>
+                ) : null}
+                {professional.detail ? (
+                  <span className="text-muted-foreground">{professional.detail}</span>
+                ) : null}
+                <span className="text-muted-foreground">{professional.note}</span>
+              </div>
+            </section>
+          ) : null}
+        </div>
+      ) : null}
+
+      {signatureWords || signatureNote ? (
+        <footer className="mt-6 border-t pt-3 text-sm text-muted-foreground">
+          {signatureWords ? (
+            <p className="font-semibold text-foreground">{signatureWords}</p>
+          ) : null}
+          {signatureNote ? <p>{signatureNote}</p> : null}
+        </footer>
+      ) : null}
+    </article>
+  )
+}

@@ -136,6 +136,13 @@ export async function consentLinkJourney(input: {
   const phone = await visitor.newPage()
   await gotoHydrated(phone, url(`/reserva?token=${token}`))
   await phone.getByRole("button", { name: "Leer y firmar" }).click()
+  // Lee la hoja del papel: la pieza y la declaración que acepta, sin el número de su documento.
+  const sheet = phone.getByRole("article", { name: template.title })
+  await expect(sheet.getByText("Procedimiento de prueba", { exact: true })).toBeVisible()
+  await expect(sheet.getByText(/^He leído y comprendido la información/)).toBeVisible()
+  await expect(sheet.getByText("HC-", { exact: false })).toBeVisible()
+  await expect(sheet.getByText("45678902")).toHaveCount(0)
+  await phone.screenshot({ path: info.outputPath("0-hoja-telefono.png"), fullPage: true })
   await phone.getByLabel(/^Escribe tu DNI/).fill("45678902")
   await phone.getByRole("checkbox", { name: "Entendí lo que me explicaron" }).click()
   const pad = phone.getByRole("img", { name: "Tu firma" })

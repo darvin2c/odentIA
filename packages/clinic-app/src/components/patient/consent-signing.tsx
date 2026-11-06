@@ -1,4 +1,4 @@
-import { CONSENT_DECLARATION, CONSENT_SECTION_LABELS } from "@odentia/clinical"
+import { CONSENT_DECLARATION, clinicalProfileFor, consentSignatureNote, diagnosisCodeLabel } from "@odentia/clinical"
 import {
   Button,
   Checkbox,
@@ -36,7 +36,9 @@ import { fetchResponsibilities } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { uploadPatientFile } from "../../lib/encounter-documents"
 import { fetchMyProfessionalProfile, registrationLabel } from "../../lib/encounters"
-import type { PatientFull } from "../../lib/patients"
+import { useOrgProfile } from "../../lib/org"
+import { hcLabel, type PatientFull } from "../../lib/patients"
+import { ConsentSheet, consentFiscalLine } from "./consent-sheet"
 import { FirmaPad } from "./firma-pad"
 
 export interface SignerChoice {
@@ -89,6 +91,8 @@ export function useSignerChoices(patientId: string) {
   return {
     choices,
     isMinor,
+    /** La ficha del paciente: su nombre, documento e historia clínica van en la hoja. */
+    patient: detail?.patient ?? null,
     loading: patientQuery.isPending || responsibilitiesQuery.isPending,
   }
 }
@@ -99,12 +103,13 @@ function firstName(name: string): string {
 }
 
 /** «Firmas como Ana Torres · Cirujano dentista · COP 12345», de su perfil profesional. */
-export function useSignAs(): { text: string | null; loading: boolean } {
+export function useSignAs(): { text: string | null; name: string | null; detail: string | null; loading: boolean } {
   const profile = useQuery({ queryKey: ["professional-profile", "me"], queryFn: fetchMyProfessionalProfile })
   const data = profile.data?.data
-  if (!data) return { text: null, loading: profile.isPending }
-  const parts = [data.signatureName ?? data.accountName, data.professionalTitle, registrationLabel(data)].filter(Boolean)
-  return { text: parts.join(" · "), loading: false }
+  if (!data) return { text: null, name: null, detail: null, loading: profile.isPending }
+  const name = data.signatureName ?? data.accountName
+  const detail = [data.professionalTitle, registrationLabel(data)].filter(Boolean).join(" · ") || null
+  return { text: [name, detail].filter(Boolean).join(" · "), name, detail, loading: false }
 }
 
 /**
@@ -162,7 +167,9 @@ function SigningFlow({
   const ids = useId()
   const rootRef = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
-  const { choices, isMinor, loading } = useSignerChoices(patientId)
+  const { choices, isMinor, patient, loading } = useSignerChoices(patientId)
+  const org = useOrgProfile().data
+  const titleRef = useRef<HTMLHeadingElement>(null)
   const [step, setStep] = useState<Step>({ kind: "sign", index: 0 })
   // Con más de una persona habilitada, primero se elige quién firma.
   const [whoChosen, setWhoChosen] = useState(false)
@@ -267,6 +274,12 @@ function SigningFlow({
     if (typeof shownIndex === "number")
       form.setFieldValue(`docs[${shownIndex}].strokes`, [], { dontUpdateMeta: true, dontValidate: true })
   }, [shownIndex, form])
+  // Cada hoja se empieza a leer desde arriba: al pasar a la siguiente, la vista y el foco van a su título.
+  useEffect(() => {
+    if (typeof shownIndex !== "number") return
+    titleRef.current?.scrollIntoView({ block: "start" })
+    titleRef.current?.focus({ preventScroll: true })
+  }, [shownIndex])
 
   useEffect(() => {
     if (!rejected) return
@@ -333,7 +346,8 @@ function SigningFlow({
           Pantalla completa para que la persona lea y firme con el dedo; al final confirma el profesional.
         </DialogDescription>
 
-        <div ref={rootRef} className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-6 py-6 text-lg">
+        <div ref={rootRef} className="flex w-full flex-1 flex-col bg-muted/40">
+          <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-3 py-6 text-lg sm:px-6">
           {loading ? (
             <LoadingState message="Buscando quién puede firmar…" />
           ) : !signer ? (
@@ -358,74 +372,89 @@ function SigningFlow({
               )}
             </form.AppField>
           ) : current && step.kind === "sign" ? (
-            <article className="flex flex-col gap-5">
-              <h2 className="text-2xl font-semibold">{current.titleSnapshot}</h2>
-              {current.procedureRef ? <p className="text-muted-foreground">{current.procedureRef}</p> : null}
-              {current.sectionsSnapshot ? (
-                <>
-                  <BigBlock title={CONSENT_SECTION_LABELS.procedure}>
-                    <p>{current.sectionsSnapshot.procedure}</p>
-                  </BigBlock>
-                  <BigBlock title={CONSENT_SECTION_LABELS.benefits}>
-                    <BigList items={current.sectionsSnapshot.benefits} />
-                  </BigBlock>
-                  <BigBlock title={CONSENT_SECTION_LABELS.risks}>
-                    <BigList items={current.sectionsSnapshot.risks} />
-                  </BigBlock>
-                  <BigBlock title={CONSENT_SECTION_LABELS.alternatives}>
-                    <BigList items={current.sectionsSnapshot.alternatives} />
-                  </BigBlock>
-                  <BigBlock title={CONSENT_SECTION_LABELS.consequences}>
-                    <p>{current.sectionsSnapshot.consequences}</p>
-                  </BigBlock>
-                </>
-              ) : (
-                <p className="whitespace-pre-wrap">{current.bodySnapshot}</p>
+            <ConsentSheet
+              large
+              titleRef={titleRef}
+              clinic={
+                org
+                  ? { name: org.tradeName || org.legalName, fiscalLine: consentFiscalLine(org), logo: org.logo ?? null }
+                  : null
+              }
+              title={current.titleSnapshot}
+              procedureRef={current.procedureRef}
+              facts={
+                patient
+                  ? [
+                      { label: "Paciente", value: patient.displayName, strong: true },
+                      ...(patient.docNumber ? [{ label: patient.docType ?? "Documento", value: patient.docNumber }] : []),
+                      { label: "Historia clínica", value: hcLabel(patient.patientNumber) },
+                    ]
+                  : []
+              }
+              diagnosis={diagnosisOf(current)}
+              sections={current.sectionsSnapshot}
+              body={current.bodySnapshot}
+              declaration={CONSENT_DECLARATION}
+              minor={isMinor}
+              accept={(declarationId) => (
+                <form.AppField key={`${current.id}-understood`} name={`docs[${step.index}].understood`}>
+                  {(field) => (
+                    <FormChoiceField label={<strong className="text-lg">Entendí lo que me explicaron y acepto</strong>}>
+                      {(control) => (
+                        <Checkbox
+                          className="mt-1 size-6"
+                          id={control.id}
+                          name={control.name}
+                          checked={field.state.value === true}
+                          aria-invalid={control.invalid || undefined}
+                          aria-describedby={[declarationId, control.describedBy].filter(Boolean).join(" ")}
+                          onCheckedChange={(value) => {
+                            field.handleChange(value === true)
+                            field.handleBlur()
+                          }}
+                        />
+                      )}
+                    </FormChoiceField>
+                  )}
+                </form.AppField>
               )}
-              <form.AppField key={`${current.id}-understood`} name={`docs[${step.index}].understood`}>
-                {(field) => (
-                  <FormChoiceField
-                    className="rounded-lg border p-4"
-                    label={<strong className="text-lg">Entendí lo que me explicaron y acepto</strong>}
-                    description={CONSENT_DECLARATION}
-                  >
-                    {(control) => (
-                      <Checkbox
-                        className="mt-1 size-6"
-                        id={control.id}
-                        name={control.name}
-                        checked={field.state.value === true}
-                        aria-invalid={control.invalid || undefined}
-                        aria-describedby={control.describedBy}
-                        onCheckedChange={(value) => {
-                          field.handleChange(value === true)
-                          field.handleBlur()
-                        }}
-                      />
+              signer={{
+                heading: signer.kind === "representante" ? "Representante legal" : "Paciente",
+                name: signer.name,
+                detail:
+                  signer.kind === "paciente" && patient?.docNumber
+                    ? `${patient.docType ?? "Documento"} ${patient.docNumber}`
+                    : null,
+                children: (
+                  <form.AppField key={`${current.id}-strokes`} name={`docs[${step.index}].strokes`}>
+                    {(field) => (
+                      <field.Group legend="Firma aquí con el dedo">
+                        {(control) => (
+                          <FirmaPad
+                            key={current.id}
+                            label={`Firma de ${signer.name}`}
+                            id={control.id}
+                            invalid={control.invalid}
+                            describedBy={control.describedBy}
+                            onChange={(value) => {
+                              field.handleChange(value)
+                              field.handleBlur()
+                            }}
+                          />
+                        )}
+                      </field.Group>
                     )}
-                  </FormChoiceField>
-                )}
-              </form.AppField>
-              <form.AppField key={`${current.id}-strokes`} name={`docs[${step.index}].strokes`}>
-                {(field) => (
-                  <field.Group legend="Firma aquí con el dedo">
-                    {(control) => (
-                      <FirmaPad
-                        key={current.id}
-                        label={`Firma de ${signer.name}`}
-                        id={control.id}
-                        invalid={control.invalid}
-                        describedBy={control.describedBy}
-                        onChange={(value) => {
-                          field.handleChange(value)
-                          field.handleBlur()
-                        }}
-                      />
-                    )}
-                  </field.Group>
-                )}
-              </form.AppField>
-            </article>
+                  </form.AppField>
+                ),
+              }}
+              professional={{
+                name: signAs.name,
+                detail: signAs.detail,
+                note: "Falta su confirmación: lo confirma al terminar, con su perfil.",
+              }}
+              signatureWords={CONSENT_SIGNATURE_WORDS.clinica}
+              signatureNote={consentSignatureNote(clinicalProfileFor(org?.countryCode).signatureLaw)}
+            />
           ) : step.kind === "confirm" ? (
             <div className="flex flex-col gap-4">
               <p>
@@ -448,6 +477,7 @@ function SigningFlow({
               </ul>
             </div>
           ) : null}
+          </div>
         </div>
 
         <footer className="sticky bottom-0 flex flex-col gap-2 border-t bg-popover px-6 py-4">
@@ -456,8 +486,8 @@ function SigningFlow({
               {error}
             </p>
           ) : null}
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <span className="text-sm text-muted-foreground">{CONSENT_SIGNATURE_WORDS.clinica}</span>
+          {/* El nivel de firma va al pie de la hoja, como en el papel: aquí solo los botones. */}
+          <div className="flex flex-wrap items-center justify-end gap-3">
             {!signer ? (
               <Button type="button" variant="outline" onClick={onClose}>
                 Cerrar
@@ -491,23 +521,11 @@ function SigningFlow({
   )
 }
 
-function BigBlock({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="flex flex-col gap-1">
-      <h3 className="text-base font-semibold text-muted-foreground">{title}</h3>
-      {children}
-    </section>
-  )
-}
-
-function BigList({ items }: { items: string[] }) {
-  return (
-    <ul className="list-disc pl-6">
-      {items.map((item) => (
-        <li key={item}>{item}</li>
-      ))}
-    </ul>
-  )
+/** «CIE-10 MINSA · K04.0 · Pulpitis», como lo escribe el papel. */
+function diagnosisOf(document: ConsentDocument): string | null {
+  if (!document.diagnosisCode) return null
+  const code = diagnosisCodeLabel(document.diagnosisSystem, document.diagnosisCode)
+  return document.diagnosisDescription ? `${code} · ${document.diagnosisDescription}` : code
 }
 
 interface PaperSignValues {

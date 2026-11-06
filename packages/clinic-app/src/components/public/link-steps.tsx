@@ -1,12 +1,20 @@
-import type { ConsentSections } from "@odentia/clinical"
-import { ScrollArea } from "@odentia/ui"
-import { ErrorState, LoadingState, SubmitButton, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
+import { Checkbox } from "@odentia/ui"
+import {
+  ErrorState,
+  FormChoiceField,
+  LoadingState,
+  SubmitButton,
+  useAppForm,
+  useFormSubmit,
+  useFormSubmitError,
+} from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { CircleCheck } from "lucide-react"
 import { z } from "zod"
 import { ApiError } from "../../lib/api"
 import { fetchLinkConsent, fetchLinkQuestionnaire, signLinkConsent, submitLinkQuestionnaire } from "../../lib/booking-link"
+import { ConsentSheet } from "../patient/consent-sheet"
 import { FirmaPad } from "../patient/firma-pad"
 import { AnswerAppField, isFieldVisible, missingRequired } from "../patient/form-fields"
 import { appWords } from "../../lib/product-words"
@@ -24,54 +32,6 @@ function Done({ title, text, onBack }: { title: string; text: string; onBack: ()
       <SubmitButton type="button" variant="outline" className="mt-2 min-h-11" pending={false} onClick={onBack}>
         Volver a lo pendiente
       </SubmitButton>
-    </div>
-  )
-}
-
-/** Lo que lee el paciente antes de firmar; la clínica lo ve igual en su vista previa. */
-export function ConsentReading({
-  sections,
-  body,
-}: {
-  sections: Partial<ConsentSections> | null | undefined
-  body: string | null | undefined
-}) {
-  const list = (title: string, items: string[] | undefined) =>
-    items && items.length > 0 ? (
-      <div>
-        <p className="font-semibold">{title}</p>
-        <ul className="list-disc pl-5">
-          {items.map((item) => (
-            <li key={item}>{item}</li>
-          ))}
-        </ul>
-      </div>
-    ) : null
-  return (
-    <div className="flex flex-col gap-3 p-4 text-sm">
-      {sections?.procedure ? (
-        <div>
-          <p className="font-semibold">Qué te van a hacer</p>
-          <p>{sections.procedure}</p>
-        </div>
-      ) : null}
-      {list("Beneficios", sections?.benefits)}
-      {list("Riesgos", sections?.risks)}
-      {list("Otras opciones", sections?.alternatives)}
-      {sections?.consequences ? (
-        <div>
-          <p className="font-semibold">Si no te lo haces</p>
-          <p>{sections.consequences}</p>
-        </div>
-      ) : null}
-      {sections?.notes ? (
-        <div>
-          <p className="font-semibold">Información adicional</p>
-          <p className="whitespace-pre-wrap">{sections.notes}</p>
-        </div>
-      ) : null}
-      {/* El texto completo solo si no hay secciones: con ellas repetiría todo. */}
-      {!sections && body ? <p className="whitespace-pre-wrap">{body}</p> : null}
     </div>
   )
 }
@@ -116,45 +76,82 @@ export function LinkConsentStep({ slug, token, consentId, onBack }: { slug: stri
   if (query.isError) return <ErrorState title="No pudimos abrir el consentimiento" message={problemOf(query.error, "Vuelve a intentarlo.")} onRetry={() => void query.refetch()} />
   const consent = query.data.data
   return (
+    // La hoja es la del papel que recibe: se lee entera en la página, sin otra barra que la de siempre.
     <form className="flex flex-col gap-4" onSubmit={submit} noValidate>
-      <h2 className="text-lg font-semibold">{consent.title}</h2>
-      <ScrollArea className="flex max-h-[50svh] flex-col rounded-2xl border bg-card">
-        <ConsentReading sections={consent.sections} body={consent.body} />
-      </ScrollArea>
-      <p className="text-sm text-muted-foreground">
-        Firma {consent.signer.name}
-        {consent.signer.asRepresentative ? ", como su representante" : ""}.
-      </p>
-      <form.AppField name="docNumber">
-        {(field) => (
-          <field.TextField
-            label={`Escribe tu ${docLabel}`}
-            id="consent-doc"
-            description="Lo comparamos con el de tu ficha; no lo mostramos."
-            inputClassName="min-h-11"
-            autoComplete="off"
-            maxLength={20}
-          />
-        )}
-      </form.AppField>
-      <form.AppField name="comprehensionConfirmed">
-        {(field) => <field.CheckboxField label="Entendí lo que me explicaron y acepto" id="consent-understood" className="min-h-11" />}
-      </form.AppField>
-      <form.AppField name="signatureData">
-        {(field) => (
-          <field.Group legend="Tu firma">
-            {(control) => (
-              <FirmaPad
-                label="Tu firma"
-                id={control.id}
-                invalid={control.invalid}
-                describedBy={control.describedBy}
-                onChange={(strokes) => field.handleChange(strokes)}
-              />
+      <ConsentSheet
+        className="-mx-2 sm:mx-0"
+        clinic={consent.clinic}
+        title={consent.title}
+        procedureRef={consent.procedureRef}
+        facts={[
+          { label: "Paciente", value: consent.patient.name, strong: true },
+          { label: "Historia clínica", value: consent.patient.chartNumber },
+        ]}
+        diagnosis={consent.diagnosis}
+        sections={consent.sections}
+        body={consent.body}
+        declaration={consent.declaration}
+        accept={(declarationId) => (
+          <form.AppField name="comprehensionConfirmed">
+            {(field) => (
+              <FormChoiceField id="consent-understood" label="Entendí lo que me explicaron y acepto" className="min-h-11">
+                {(control) => (
+                  <Checkbox
+                    className="mt-0.5 size-6"
+                    id={control.id}
+                    name={control.name}
+                    checked={field.state.value === true}
+                    aria-invalid={control.invalid || undefined}
+                    aria-describedby={[declarationId, control.describedBy].filter(Boolean).join(" ")}
+                    onCheckedChange={(value) => {
+                      field.handleChange(value === true)
+                      field.handleBlur()
+                    }}
+                  />
+                )}
+              </FormChoiceField>
             )}
-          </field.Group>
+          </form.AppField>
         )}
-      </form.AppField>
+        signer={{
+          heading: consent.signer.asRepresentative ? "Representante legal" : "Paciente",
+          name: consent.signer.name,
+          children: (
+            <>
+              <form.AppField name="docNumber">
+                {(field) => (
+                  <field.TextField
+                    label={`Escribe tu ${docLabel}`}
+                    id="consent-doc"
+                    description="Lo comparamos con el de tu ficha; no lo mostramos."
+                    inputClassName="min-h-11"
+                    autoComplete="off"
+                    maxLength={20}
+                  />
+                )}
+              </form.AppField>
+              <form.AppField name="signatureData">
+                {(field) => (
+                  <field.Group legend="Tu firma">
+                    {(control) => (
+                      <FirmaPad
+                        label="Tu firma"
+                        id={control.id}
+                        invalid={control.invalid}
+                        describedBy={control.describedBy}
+                        onChange={(strokes) => field.handleChange(strokes)}
+                      />
+                    )}
+                  </field.Group>
+                )}
+              </form.AppField>
+            </>
+          ),
+        }}
+        professional={{ note: `Lo confirma tu ${appWords().clinician.one} en la clínica, con su firma.` }}
+        signatureWords={consent.signatureWords}
+        signatureNote={consent.signatureNote}
+      />
       {error ? (
         <p role="alert" className="text-sm text-destructive">
           {error}
