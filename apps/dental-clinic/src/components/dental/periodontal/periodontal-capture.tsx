@@ -274,7 +274,7 @@ export function PeriodontalCapture({
   // Las teclas pueden llegar antes de que se pinte la anterior: todo se lee de `latest`.
   const apply = (key: CaptureKey) => {
     const before = latest.current
-    const result = applyCaptureKey(before, key, performance.now())
+    const result = applyCaptureKey(before, key)
     latest.current = result.state
     setCapture(result.state)
     if (result.say) setSay(result.say)
@@ -331,14 +331,16 @@ export function PeriodontalCapture({
             ? `Guardado ${saver.savedAt.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`
             : "Guardado"
 
-  const keypad: Array<{ label: string; key: CaptureKey; aria?: string; wide?: boolean }> = [
+  // Cuatro filas de cifras (con «−», 0 y ⌫ abajo), «+10» junto a las marcas y «Saltar pieza» a lo ancho.
+  const keypad: Array<{ label: string; key: CaptureKey; aria?: string; wide?: boolean; full?: boolean }> = [
     ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((value) => ({ label: String(value), key: { kind: "digit", value } as CaptureKey })),
     { label: "−", key: { kind: "minus" }, aria: "Recesión negativa" },
     { label: "0", key: { kind: "digit", value: 0 } },
     { label: "⌫", key: { kind: "back" }, aria: "Borrar" },
+    { label: "+10", key: { kind: "plus" }, aria: "Más 10: la próxima cifra va de 10 a 15" },
     { label: "Sangra (S)", key: { kind: "bleeding" }, wide: true },
     { label: "Supura (P)", key: { kind: "suppuration" }, wide: true },
-    { label: "Saltar pieza", key: { kind: "skip" }, wide: true },
+    { label: "Saltar pieza", key: { kind: "skip" }, wide: true, full: true },
   ]
 
   // Caras con algún sitio sin escribir (las piezas saltadas no faltan).
@@ -395,7 +397,15 @@ export function PeriodontalCapture({
                   aria-label={fieldLabel(step, field)}
                   inputMode="none"
                   autoComplete="off"
-                  value={value === null ? (active && capture.minus && row === "rec" ? "−" : "") : row === "rec" ? signed(value) : String(value)}
+                  value={
+                    value === null || (active && capture.tens)
+                      ? active
+                        ? `${capture.minus && row === "rec" ? "−" : ""}${capture.tens ? "1…" : ""}`
+                        : ""
+                      : row === "rec"
+                        ? signed(value)
+                        : String(value)
+                  }
                   onChange={(event) => {
                     // Lo que llega sin pasar por la tecla (pegar, teclados en pantalla del sistema).
                     const char = event.target.value.slice(-1)
@@ -404,7 +414,7 @@ export function PeriodontalCapture({
                   }}
                   onFocus={() => {
                     if (capture.cursor.field !== field) {
-                      const next = { ...latest.current, cursor: { step: latest.current.cursor.step, field }, minus: false, last: null }
+                      const next = { ...latest.current, cursor: { step: latest.current.cursor.step, field }, minus: false, tens: false, last: null }
                       latest.current = next
                       setCapture(next)
                     }
@@ -488,7 +498,7 @@ export function PeriodontalCapture({
             key={item.label}
             type="button"
             variant={item.wide ? "outline" : "secondary"}
-            className={cn("h-12 text-lg font-bold", item.wide && "text-sm")}
+            className={cn("h-12 text-lg font-bold", item.wide && "text-sm", item.full && "col-span-3")}
             aria-label={item.aria}
             tabIndex={-1}
             onMouseDown={(event) => event.preventDefault()}
@@ -643,7 +653,7 @@ export function PeriodontalCapture({
               {capture.done ? doneCard : probeCard}
               <p className="text-xs text-muted-foreground">
                 {pendingSteps === 0 ? "No falta ninguna cara." : `Faltan ${pendingSteps} ${pendingSteps === 1 ? "cara" : "caras"} por sondear.`} 0 a 9: la medida, pasa sola al
-                sitio siguiente (10 a 15: los dos dígitos seguidos) · − recesión negativa · S sangra · P supura · ⌫ borra · ← → ↑ ↓ se mueven sin borrar · X salta la pieza.
+                sitio siguiente · + y la segunda cifra: 10 a 15 (+ 2 = 12) · − recesión negativa · S sangra · P supura · ⌫ borra · ← → ↑ ↓ se mueven sin borrar · X salta la pieza.
               </p>
             </div>
             <div className="flex min-w-0 flex-col gap-2">

@@ -19,14 +19,12 @@ function start(): CaptureState {
   return initialCaptureState(teeth, probingSequence(TEETH))
 }
 
-function press(state: CaptureState, keys: Array<CaptureKey | string>, at = 0): CaptureState {
-  let now = at
+function press(state: CaptureState, keys: Array<CaptureKey | string>): CaptureState {
   for (const key of keys) {
     const parsed = typeof key === "string" ? keyFromEvent({ key }) : key
     if (!parsed) throw new Error(`tecla sin uso: ${String(key)}`)
-    // Cada tecla, un segundo después: no se juntan dos dígitos salvo que la prueba lo pida.
-    now += 1000
-    state = applyCaptureKey(state, parsed, now).state
+    // Sin reloj: da igual el ritmo con que se teclea (ADR 0142).
+    state = applyCaptureKey(state, parsed).state
   }
   return state
 }
@@ -54,17 +52,29 @@ describe("captura en secuencia del periodontograma", () => {
     expect(state.cursor.field).toBe(0)
   })
 
-  it("dos dígitos seguidos escriben 10 a 15 en el mismo sitio", () => {
-    let state = start()
-    state = applyCaptureKey(state, { kind: "digit", value: 1 }, 1000).state
-    state = applyCaptureKey(state, { kind: "digit", value: 2 }, 1300).state
-    expect(state.teeth[17]!.probingDepth[2]).toBe(12)
-    // El cursor ya había pasado al centro y ahí sigue.
-    expect(state.cursor.field).toBe(1)
-    // Pasado el plazo, el segundo dígito va al sitio siguiente.
-    state = applyCaptureKey(state, { kind: "digit", value: 1 }, 5000).state
-    state = applyCaptureKey(state, { kind: "digit", value: 3 }, 9000).state
-    expect(state.teeth[17]!.probingDepth.slice(0, 3)).toEqual([3, 1, 12])
+  it("cada cifra va a su sitio al pulsarla, y 10 a 15 se escriben con «+» y la segunda cifra (ADR 0142)", () => {
+    // «2 1 2» seguido son tres sitios, al ritmo que sea: el «1» nunca se une con la siguiente.
+    let state = press(start(), ["2", "1", "2"])
+    expect(state.teeth[17]!.probingDepth.slice(0, 3)).toEqual([2, 1, 2])
+    // «+» y «2» es 12, en un solo sitio; el cursor pasa al siguiente.
+    state = press(start(), ["+", "2", "3"])
+    expect(state.teeth[17]!.probingDepth.slice(0, 3)).toEqual([null, 3, 12])
+    expect(state.cursor.field).toBe(2)
+    // Más de 15 no existe: lo dice y no escribe nada.
+    const over = applyCaptureKey(press(start(), ["+"]), { kind: "digit", value: 6 })
+    expect(over.say).toBe("La profundidad va de 0 a 15 mm")
+    expect(over.state.teeth[17]!.probingDepth[2]).toBeNull()
+    expect(over.state.tens).toBe(false)
+    // «+» otra vez, o ⌫, lo deshace sin borrar nada.
+    expect(press(start(), ["+", "+"]).tens).toBe(false)
+    expect(press(start(), ["+", "Backspace"]).tens).toBe(false)
+  })
+
+  it("la recesión de −10 se escribe con «−», «+» y 0", () => {
+    const state = press(start(), ["1", "1", "1", "-", "+", "0"])
+    expect(state.teeth[17]!.recession[2]).toBe(-10)
+    // −11 no existe.
+    expect(applyCaptureKey(press(start(), ["1", "1", "1", "-", "+"]), { kind: "digit", value: 1 }).say).toBe("La recesión va de -10 a 15 mm")
   })
 
   it("S y P marcan el sitio que se acaba de escribir", () => {
@@ -98,5 +108,6 @@ describe("captura en secuencia del periodontograma", () => {
     expect(keyFromEvent({ key: "a" })).toBeNull()
     expect(keyFromEvent({ key: "5", ctrlKey: true })).toBeNull()
     expect(keyFromEvent({ key: "−" })).toEqual({ kind: "minus" })
+    expect(keyFromEvent({ key: "+" })).toEqual({ kind: "plus" })
   })
 })
