@@ -13,6 +13,7 @@
     "test": "vitest run",
     "eval:decisions": "tsx --env-file-if-exists=../../infra/dev/.env src/decision/eval.ts",
     "eval:knowledge": "tsx --env-file-if-exists=../../infra/dev/.env src/decision/eval-knowledge.ts",
+    "eval:ayuda": "tsx --env-file-if-exists=../../infra/dev/.env src/decision/eval-ayuda.ts",
     "eval:admin": "tsx --env-file-if-exists=../../infra/dev/.env src/decision/eval-admin.ts",
     "eval:reports": "tsx --env-file-if-exists=../../infra/dev/.env src/decision/eval-reports.ts",
     "eval:argos": "tsx --env-file-if-exists=../../infra/dev/.env src/decision/eval-argos.ts",
