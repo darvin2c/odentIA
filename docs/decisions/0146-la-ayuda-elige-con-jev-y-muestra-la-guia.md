@@ -31,6 +31,9 @@ El puntaje no separaba un acierto de un error, así que ningún umbral lo arregl
 - **Sin Jev, solo responden las palabras.** Si Jev no está, falla, se pasa del plazo (2 s) o no decide, la Ayuda responde solo con una pregunta frecuente que las palabras reconozcan; si no hay ninguna, dice «ninguna». Nunca pega el párrafo de la pantalla. Tampoco recurre al modelo que escribe: no da probabilidades y costaría más.
 - **Jev decide en toda clínica, y lo paga odentIA.** La Ayuda es de odentIA: el costo va con el origen `ayuda`, no se cobra a la clínica ni cuenta para su presupuesto y figura en «Costo y margen» como lo que regalamos.
   - **Qué viaja a TypeSafe:** solo la pregunta y el nombre de la pantalla.
+  - **Lo que no viaja:** lo que puede ser el dato de una persona (solo cifras, cuatro o más seguidas, un correo, o un nombre suelto que no es una pregunta: `mayIdentifySomeone`). Eso lo responde el respaldo; el buscador tampoco elige la Ayuda para un nombre o un teléfono.
+  - **Una clínica cuyo modelo de decisión no es Jev** no le pregunta: responde el respaldo.
+  - **Lo que dice cuando no responde, según por qué:** «Esto no está en la guía» solo si lo decidió Jev; sin Jev, «Ahora no puedo buscar bien en la guía»; tras «Ninguna es lo que busco», «No encontré tu respuesta en la guía».
   - **El aviso:** junto a la caja dice «No escribas nombres de pacientes».
   - **El registro de tratamiento:** Jev pasa a figurar como encargado siempre, no solo con los agentes encendidos.
 - **Lo que queda de cada pregunta.** `help_ask` guarda la pantalla, el tema y la pregunta frecuente que respondió (textos de la guía), cómo se decidió (`exacta`, `jev` o `respaldo`), lo que decidió Jev y su probabilidad. Nunca guarda el texto de la pregunta.
