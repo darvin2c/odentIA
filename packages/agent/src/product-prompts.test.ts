@@ -4,7 +4,7 @@
  * carácter por carácter, con el de antes de separarlos (`__golden__`). Si una
  * diferencia es a propósito, se mide el agente antes de aceptar la nueva.
  */
-import type { AgentConfig, OrgLocale } from "@odentia/services"
+import { type AgentConfig, type HelpTopic, helpOptions, helpQuestion, type OrgLocale } from "@odentia/services"
 import { describe, expect, it } from "vitest"
 import { z } from "zod"
 import { agentTextsFor, argosCatalogText, argosFiguresText, compileArgosFigure } from "@odentia/services"
@@ -58,6 +58,23 @@ describe("prompts de odentIA, iguales a los de antes", () => {
       { id: "b", title: "Formas de pago", askForms: [] },
     ]
     await expect(json(knowledgeQuestion(candidates as never, DENTAL))).toMatchFileSnapshot(golden("conocimiento.json"))
+    // La Ayuda (help.v1, ADR 0146): sus instrucciones y cómo se dice cada clase de opción, medidas con Jev.
+    // Con una guía de muestra: cambiar la guía de verdad no cambia la pregunta.
+    const guide: HelpTopic[] = [
+      {
+        id: "agenda",
+        path: "/agenda",
+        title: "Agenda",
+        parent: null,
+        purpose: "Las citas por día y la semana del equipo.",
+        terms: [],
+        faqs: [
+          { q: "¿Cómo bloqueo un horario?", a: "En Horarios y ausencias.", forms: ["bloquear un horario"] },
+          { q: "¿Hay un manual?", a: "El manual soy yo.", general: true },
+        ],
+      },
+    ]
+    await expect(json(helpQuestion(helpOptions(guide), DENTAL))).toMatchFileSnapshot(golden("ayuda.json"))
   })
 
   it("Argos", async () => {

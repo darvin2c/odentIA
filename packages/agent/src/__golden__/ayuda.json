@@ -1,0 +1,27 @@
+{
+  "id": "help",
+  "kind": "choice",
+  "instructions": "Alguien del equipo de una clínica dental escribe en la Ayuda de odentIA. ¿Qué texto de la guía responde exactamente lo que escribió? Elige una pregunta frecuente si su respuesta es lo que pregunta; una pantalla si su párrafo, leído tal cual, responde la pregunta (por ejemplo, qué es esa pantalla, para qué sirve o que ahí se hace lo que pregunta) y ninguna pregunta frecuente lo hace mejor. Si no pregunta cómo hacer algo en odentIA (un saludo, una broma, una pregunta de salud, de cocina o de cualquier otro tema), o si nada de la lista lo responde, elige «ninguna»: no la acerques a la respuesta más general.",
+  "options": [
+    {
+      "value": "f1",
+      "description": "Agenda: ¿Cómo bloqueo un horario? / bloquear un horario"
+    },
+    {
+      "value": "f2",
+      "description": "Pregunta general, solo si pregunta esto: ¿Hay un manual?"
+    },
+    {
+      "value": "t3",
+      "description": "Pantalla Agenda: Las citas por día y la semana del equipo."
+    },
+    {
+      "value": "data",
+      "description": "Pregunta por las cifras o los datos de su clínica (cuánto, cuántos, quién, por qué un número suyo es el que es o no coincide con el de otra pantalla): lo responden sus datos, no la guía."
+    },
+    {
+      "value": "none",
+      "description": "Ninguna: no es una pregunta sobre cómo hacer algo en odentIA (saludos, bromas, salud, recetas, consejos u otros temas), o nada de la lista la responde."
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm"
-import { boolean, date, index, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core"
+import { boolean, check, date, index, pgTable, real, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core"
 import { user } from "./auth.js"
 import { orgFk } from "./crm.js"
 import { adminSchema } from "./schemas.js"
@@ -32,20 +32,38 @@ export const workspaceNotification = pgTable("workspace_notification", {
 
 /**
  * Consulta a la Ayuda de odentIA. No guarda lo que se preguntó: solo la
- * pantalla, el tema que respondió (o ninguno) y si sirvió. Con eso se sabe qué
- * falta en la guía sin leer lo que escribe el equipo, y se aplica el tope
- * diario por persona.
+ * pantalla, el tema y la pregunta frecuente que respondió (textos de la guía),
+ * cómo se decidió y si sirvió. Con eso se sabe qué falta en la guía sin leer lo
+ * que escribe el equipo, y se aplica el tope diario por persona.
  */
+export const HELP_ASK_VIA = ["exacta", "jev", "respaldo"] as const
+export const HELP_ASK_VERDICTS = ["seguro", "duda", "ninguna", "datos"] as const
+
 export const helpAsk = pgTable("help_ask", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   organizationId: orgFk("organization_id"),
   userId: text("user_id").notNull().references(() => user.id),
   screen: text("screen").notNull(),
   topicId: text("topic_id"),
+  /** La pregunta frecuente que respondió, como está en la guía; nula si respondió el párrafo o nada. */
+  faq: text("faq"),
+  /**
+   * Cómo se decidió (ADR 0146): `exacta`, la pregunta escrita como en la guía
+   * (o tocada), sin modelo; `jev`, la eligió Jev; `respaldo`, Jev no respondió y
+   * decidieron las palabras. Nula en lo de antes de que decidiera Jev.
+   */
+  via: text("via"),
+  /** Lo que decidió Jev; nulo si no decidió él. */
+  verdict: text("verdict"),
+  /** La probabilidad de lo más probable que dijo Jev. */
+  probability: real("probability"),
   helpful: boolean("helpful"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, table => [
   index("help_ask_user_date_idx").on(table.organizationId, table.userId, table.createdAt),
+  check("help_ask_via_check", sql`${table.via} is null or ${table.via} in ('exacta','jev','respaldo')`),
+  check("help_ask_verdict_check", sql`${table.verdict} is null or ${table.verdict} in ('seguro','duda','ninguna','datos')`),
+  check("help_ask_probability_check", sql`${table.probability} is null or (${table.probability} >= 0 and ${table.probability} <= 1)`),
 ])
 
 /**

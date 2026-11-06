@@ -1,13 +1,26 @@
+import {
+  asAdminDecider,
+  createDecisionModel,
+  createFakeDecisionModel,
+  meterAiUse,
+  type PlatformDecisions,
+  type PlatformLlm,
+  reportDecisionOutage,
+  resolveLlmSpec,
+  watchDecisionKey,
+} from "@odentia/agent"
 import { canAccess, canAccessAny, ORG_ROLES, type OrgRole, type Permission, platformPathPermission, roleLabel } from "@odentia/auth/permissions"
 import type { ClinicalProduct } from "@odentia/clinical"
-import { withOrgContext } from "@odentia/db"
+import { type Db, withOrgContext } from "@odentia/db"
 import {
   askHelp,
+  type HelpDecider,
   assertMySupportCaseWritable,
   attachToMySupportCase,
   clientSupportAttachmentUrl,
   describeHelpAttachments,
   describeHelpScreen,
+  getAgentConfig,
   getMySupportCase,
   grantSupportAccess,
   type HelpAsker,
@@ -65,11 +78,38 @@ function askerOf(userId: string, memberRole: string, product: ClinicalProduct): 
   }
 }
 
+type HelpRouteDeps = CrmDeps & { appVersion?: string | null; llm: PlatformLlm; decisions?: PlatformDecisions | undefined; ownerDb?: Db | undefined }
+
+/**
+ * Quién elige la respuesta de la Ayuda (ADR 0146): Jev, con la cuenta de
+ * odentIA; con el modelo de demostración, su doble determinista. Nunca el
+ * modelo que escribe: no da probabilidades y costaría más. Una clínica cuyo
+ * modelo de decisión no es Jev no le pregunta. Sin Jev, null: la Ayuda responde
+ * solo lo que reconocen las palabras. Una clave que Jev rechaza se avisa a
+ * Soporte como en las corridas (`reportDecisionOutage`).
+ */
+async function helpDecider(deps: HelpRouteDeps, orgId: string): Promise<HelpDecider | null> {
+  if (deps.llm.fake) return asAdminDecider(createFakeDecisionModel())
+  const { decisionProvider } = await withOrgContext(deps.db, orgId, (tx) => getAgentConfig(tx, orgId))
+  if (decisionProvider !== "jev" || !deps.decisions?.jev) return null
+  // Jev no usa el modelo que escribe: no hace falta su clave.
+  const model = await createDecisionModel("jev", deps.decisions, resolveLlmSpec({ fake: true })).catch(() => null)
+  if (!model) return null
+  const ownerDb = deps.ownerDb
+  return asAdminDecider(
+    ownerDb
+      ? watchDecisionKey(model, (problem) => {
+          void reportDecisionOutage(ownerDb, { orgId, provider: "jev", problem, at: new Date() }).catch(() => undefined)
+        })
+      : model,
+  )
+}
+
 /**
  * Ayuda de odentIA: para todo el equipo, sin permiso propio. No cambia nada y
  * no lee datos de pacientes; lo que responde depende del rol de quien pregunta.
  */
-export function createHelpRoute(deps: CrmDeps & { appVersion?: string | null }) {
+export function createHelpRoute(deps: HelpRouteDeps) {
   const app = new Hono()
 
   /** La pantalla donde está la persona y lo que un envío a odentIA llevaría de ella. */
@@ -91,7 +131,11 @@ export function createHelpRoute(deps: CrmDeps & { appVersion?: string | null }) 
     const { orgId, userId, memberRole } = orgContextOf(c)
     const parsed = askInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, async (tx) => askHelp(tx, orgId, askerOf(userId, memberRole, await orgProduct(tx, orgId)), parsed.data)))
+    // Al proveedor viajan solo la pregunta y el nombre de la pantalla; lo que cuesta lo paga odentIA (origen «ayuda»).
+    return runService(c, 200, async () => {
+      const asker = askerOf(userId, memberRole, await withOrgContext(deps.db, orgId, (tx) => orgProduct(tx, orgId)))
+      return meterAiUse(deps.db, orgId, "ayuda", async () => askHelp(deps.db, orgId, asker, parsed.data, await helpDecider(deps, orgId)))
+    })
   })
 
   app.post("/ask/:id/feedback", async (c) => {

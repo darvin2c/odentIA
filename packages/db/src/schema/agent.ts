@@ -348,7 +348,8 @@ export const agentRunLedger = pgTable(
  * pide con palabras; `ya_aviso`, la comprobación antes de un seguimiento;
  * `vectores`, el índice de la búsqueda por significado; `comprobacion`, la
  * llamada mínima que dice si el modelo responde; `reportes`, lo que se le
- * pregunta a Argos sobre las cifras de Reportes.
+ * pregunta a Argos sobre las cifras de Reportes; `ayuda`, la respuesta de la
+ * guía que elige Jev en la Ayuda (ADR 0146), que paga odentIA.
  */
 export const AI_USAGE_ORIGINS = [
   "recepcion",
@@ -363,6 +364,7 @@ export const AI_USAGE_ORIGINS = [
   "transcripcion",
   "comprobacion",
   "reportes",
+  "ayuda",
 ] as const
 export type AiUsageOrigin = (typeof AI_USAGE_ORIGINS)[number]
 
@@ -401,7 +403,7 @@ export const aiUsage = pgTable(
     index("ai_usage_org_idx").on(table.organizationId, table.createdAt),
     check(
       "ai_usage_origin_check",
-      sql`${table.origin} in ('recepcion','probar','simulacion','vista_previa','dictado','practica_dictado','administrador','ya_aviso','vectores','transcripcion','comprobacion','reportes')`,
+      sql`${table.origin} in ('recepcion','probar','simulacion','vista_previa','dictado','practica_dictado','administrador','ya_aviso','vectores','transcripcion','comprobacion','reportes','ayuda')`,
     ),
     check("ai_usage_calls_check", sql`${table.calls} >= 1`),
     check("ai_usage_cost_check", sql`${table.costMicros} is null or ${table.costMicros} >= 0`),

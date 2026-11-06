@@ -34,8 +34,8 @@ export type LegalDoc = {
 }
 
 /** Fecha de la versión vigente de todos los documentos legales. */
-export const LEGAL_UPDATED = "26 de octubre de 2026"
-export const LEGAL_UPDATED_ISO = "2026-10-26"
+export const LEGAL_UPDATED = "6 de noviembre de 2026"
+export const LEGAL_UPDATED_ISO = "2026-11-06"
 
 /** Datos del titular; lo pendiente conserva el mismo marcador en todos los documentos. */
 export const TITULAR = {

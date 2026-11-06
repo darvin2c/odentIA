@@ -1,35 +1,35 @@
-import {
-  clinicWord,
-  type HelpFaq,
-  type HelpTopic,
-  helpTopicForScreen,
-  helpTopicLabel,
-  type ProductAgentTexts,
-  productName,
-  scoreKnowledgeMatch,
-} from "@odentia/services"
-import { KNOWLEDGE_SELECT_MAX_OPTIONS } from "./knowledge.js"
-import { answerOf, type DecisionQuestion, type DecisionResult } from "./port.js"
+import type { AdminAnswer, AdminDecider, AdminQuestion } from "./admin-request.js"
+import { type HelpFaq, type HelpTopic, helpTopicForScreen, helpTopicLabel } from "./help-guide.js"
+import { scoreKnowledgeMatch } from "./knowledge.js"
+import { clinicWord, type ProductAgentTexts, productName } from "./product-agent.js"
 
 /**
- * La Ayuda elige su respuesta (estudio X8, opción b): el modelo de decisión
- * dice qué texto de la guía responde la pregunta de alguien del equipo —una
- * pregunta frecuente o el párrafo de una pantalla—, que no está en la guía o
- * que es de las cifras de la clínica (eso lo responde Argos). Lo que se muestra
- * es siempre el texto de la guía tal cual: el modelo no redacta nada. Al
- * proveedor viajan la pregunta y el nombre de la pantalla, nada de la clínica.
+ * La Ayuda elige su respuesta (ADR 0146, estudio X8, opción b): el modelo de
+ * decisión dice qué texto de la guía responde la pregunta de alguien del
+ * equipo —una pregunta frecuente o el párrafo de una pantalla—, que no está en
+ * la guía o que es de las cifras de la clínica (eso lo responde Argos). Lo que
+ * se muestra es siempre el texto de la guía tal cual: el modelo no redacta
+ * nada. Al proveedor viajan la pregunta y el nombre de la pantalla, nada de la
+ * clínica.
  *
- * Todavía no responde en la Ayuda (`help.ts` de los servicios): se mide antes
- * con `eval:ayuda` y el umbral se elige con su curva. Versionada como
- * `knowledge.v1`: cambiar la redacción o el orden de las opciones invalida lo
- * medido.
+ * Versionada como `knowledge.v1` del agente: cambiar la redacción o el orden
+ * de las opciones invalida lo medido con `eval:ayuda`, y
+ * `product-prompts.test.ts` del agente lo atrapa (`__golden__/ayuda.json`).
  */
 export const HELP_SELECT_VERSION = "help.v1"
 export const HELP_SELECT_QUESTION = "help"
-/** Las opciones de la guía que caben: el mismo total que `knowledge.v1`, con sitio para «ninguna» y «datos». */
-export const HELP_SELECT_MAX_OPTIONS = KNOWLEDGE_SELECT_MAX_OPTIONS - 1
-/** Desde esta probabilidad se muestra lo elegido. Es el punto de partida de la ADR 0007: el de la Ayuda sale de la curva de `eval:ayuda`. */
-export const HELP_CONFIDENT = 0.6
+/**
+ * Las opciones de la guía que caben: el mismo total que `knowledge.v1` del
+ * agente (250 y «ninguna»), con sitio para «ninguna» y «datos». Una prueba del
+ * agente las mantiene iguales.
+ */
+export const HELP_SELECT_MAX_OPTIONS = 249
+/**
+ * Desde esta probabilidad se muestra lo elegido. Medido con Jev el 2026-11-06
+ * (ADR 0146): es el único umbral de la curva que cumple los cuatro mínimos del
+ * estudio en los bancos de ajuste, y se confirmó una vez en los ciegos.
+ */
+export const HELP_CONFIDENT = 0.9
 /** Una segunda respuesta se muestra junto a la primera desde esta probabilidad: la pregunta tenía dos partes. */
 export const HELP_SECOND = 0.25
 /** «¿Querías decir…?» ofrece como mucho estas. */
@@ -39,6 +39,9 @@ const HELP_CANDIDATE = 0.05
 const NONE = "none"
 const DATA = "data"
 const DESCRIPTION_CHARS = 240
+
+/** El modelo de decisión, con la misma forma que el de los pedidos a Argos. */
+export type HelpDecider = AdminDecider
 
 /** Lo que la guía puede responder: una pregunta frecuente o el párrafo de una pantalla. */
 export type HelpOption = { kind: "faq"; topic: HelpTopic; faq: HelpFaq } | { kind: "tema"; topic: HelpTopic }
@@ -82,22 +85,26 @@ export function helpCandidates(options: readonly HelpOption[], question: string)
 function describe(option: HelpOption): string {
   if (option.kind === "tema") return `Pantalla ${helpTopicLabel(option.topic)}: ${option.topic.purpose}`.slice(0, DESCRIPTION_CHARS)
   const asked = [option.faq.q, ...(option.faq.forms ?? [])].join(" / ")
-  return (option.faq.general ? asked : `${helpTopicLabel(option.topic)}: ${asked}`).slice(0, DESCRIPTION_CHARS)
+  // Una pregunta general (el manual, el celular) responde solo eso: no es la respuesta por defecto.
+  return (option.faq.general ? `Pregunta general, solo si pregunta esto: ${asked}` : `${helpTopicLabel(option.topic)}: ${asked}`).slice(0, DESCRIPTION_CHARS)
 }
 
-export function helpQuestion(candidates: readonly HelpOption[], texts: ProductAgentTexts): DecisionQuestion {
+export function helpQuestion(candidates: readonly HelpOption[], texts: ProductAgentTexts): AdminQuestion {
   const product = productName(texts)
   return {
     id: HELP_SELECT_QUESTION,
     kind: "choice",
-    instructions: `Alguien del equipo de una ${clinicWord(texts)} pregunta en la Ayuda de ${product} cómo se usa el sistema. ¿Qué texto de la guía responde exactamente su pregunta? Elige una pregunta frecuente si su respuesta es lo que pregunta; una pantalla si su párrafo, leído tal cual, responde la pregunta (por ejemplo, qué es esa pantalla, para qué sirve o que ahí se hace lo que pregunta) y ninguna pregunta frecuente lo hace mejor.`,
+    instructions: `Alguien del equipo de una ${clinicWord(texts)} escribe en la Ayuda de ${product}. ¿Qué texto de la guía responde exactamente lo que escribió? Elige una pregunta frecuente si su respuesta es lo que pregunta; una pantalla si su párrafo, leído tal cual, responde la pregunta (por ejemplo, qué es esa pantalla, para qué sirve o que ahí se hace lo que pregunta) y ninguna pregunta frecuente lo hace mejor. Si no pregunta cómo hacer algo en ${product} (un saludo, una broma, una pregunta de salud, de cocina o de cualquier otro tema), o si nada de la lista lo responde, elige «ninguna»: no la acerques a la respuesta más general.`,
     options: [
       ...candidates.map((option, index) => ({ value: optionValue(option, index), description: describe(option) })),
       {
         value: DATA,
         description: "Pregunta por las cifras o los datos de su clínica (cuánto, cuántos, quién, por qué un número suyo es el que es o no coincide con el de otra pantalla): lo responden sus datos, no la guía.",
       },
-      { value: NONE, description: `Nada de la lista responde la pregunta, o no es una pregunta sobre cómo se usa ${product}.` },
+      {
+        value: NONE,
+        description: `Ninguna: no es una pregunta sobre cómo hacer algo en ${product} (saludos, bromas, salud, recetas, consejos u otros temas), o nada de la lista la responde.`,
+      },
     ],
   }
 }
@@ -128,6 +135,9 @@ export interface HelpSelection {
   top: number | null
 }
 
+type ChoiceAnswer = Extract<AdminAnswer, { kind: "choice" }>
+const isChoice = (answer: AdminAnswer): answer is ChoiceAnswer => answer.kind === "choice" && "choice" in answer
+
 /**
  * Lee la respuesta del modelo de decisión con un umbral (`confident`): la
  * medición lo recorre entero sobre las mismas respuestas. Primero lo más
@@ -136,8 +146,12 @@ export interface HelpSelection {
  * no, duda. Sin distribución no hay certeza: lo elegido se ofrece, nunca se
  * afirma.
  */
-export function readHelpSelection(result: DecisionResult, candidates: readonly HelpOption[], confident = HELP_CONFIDENT): HelpSelection {
-  const answer = answerOf(result, HELP_SELECT_QUESTION, "choice")
+export function readHelpSelection(
+  result: { answers: readonly AdminAnswer[] },
+  candidates: readonly HelpOption[],
+  confident = HELP_CONFIDENT,
+): HelpSelection {
+  const answer = result.answers.filter(isChoice).find((item) => item.id === HELP_SELECT_QUESTION)
   if (!answer) return { verdict: "duda", shown: [], offered: [], top: null }
   const byValue = new Map(candidates.map((option, index) => [optionValue(option, index), option]))
   if (!answer.probabilities) {
@@ -170,7 +184,7 @@ export function readHelpSelection(result: DecisionResult, candidates: readonly H
   return { verdict: "duda", shown: [], offered, top }
 }
 
-/** El texto que se muestra, tal cual está en la guía (como `askHelp`): la respuesta de la pregunta frecuente o el párrafo de la pantalla. */
+/** El texto que se muestra, tal cual está en la guía: la respuesta de la pregunta frecuente o el párrafo de la pantalla. */
 export function helpAnswerText(option: HelpOption): string {
   if (option.kind === "faq") return option.faq.a
   return `En ${helpTopicLabel(option.topic)}. ${option.topic.purpose}`

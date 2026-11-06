@@ -80,14 +80,20 @@ describe("lo que Ariadna no supo", () => {
       { organizationId: ORG, userId: CLIENT, screen: "/home", topicId: "agenda", helpful: true },
       // Lo de hace más de 30 días ya no cuenta.
       { organizationId: ORG, userId: CLIENT, screen: "/tasks", topicId: null, createdAt: new Date(Date.now() - 40 * 86_400_000) },
+      // Con Jev (ADR 0146): «ninguna» no supo; la duda resuelta con un toque cuenta una vez, como lo tocado; lo de
+      // las cifras va a Argos y no es «sin respuesta».
+      { organizationId: ORG, userId: CLIENT, screen: "/agenda", topicId: null, via: "jev", verdict: "ninguna" },
+      { organizationId: ORG, userId: CLIENT, screen: "/inbox", topicId: null, via: "jev", verdict: "duda" },
+      { organizationId: ORG, userId: CLIENT, screen: "/inbox", topicId: "agente", faq: "¿Cómo apago a Sofi?", via: "exacta" },
+      { organizationId: ORG, userId: CLIENT, screen: "/finance", topicId: null, via: "jev", verdict: "datos" },
     ])
     expect(await supportHelpStats(ownerDb, staff)).toEqual({
       days: 30,
-      asked: 5,
-      unanswered: 3,
+      asked: 8,
+      unanswered: 4,
       notHelpful: 1,
       unansweredByScreen: [
-        { name: "Agenda", total: 2 },
+        { name: "Agenda", total: 3 },
         { name: "Pacientes", total: 1 },
       ],
       notHelpfulByTopic: [{ name: "Finanzas", total: 1 }],
