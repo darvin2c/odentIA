@@ -25,9 +25,9 @@ export function createFakeDecisionModel(): DecisionModel {
                     : false
           return { id: q.id, kind: "yesno", probability: yes ? 0.92 : 0.08 }
         }
-        if (q.kind === "choice" && q.id === "topic") {
-          // Elección de conocimiento: gana la opción que comparte más palabras
-          // con el estado; sin ninguna en común, «none».
+        if (q.kind === "choice" && (q.id === "topic" || q.id === "help")) {
+          // Elección de conocimiento y de la Ayuda (`help.v1`): gana la opción
+          // que comparte más palabras con el estado; sin ninguna en común, «none».
           const words = new Set(text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/[^a-z0-9]+/).filter((w) => w.length >= 4))
           let best = { value: "none", hits: 0 }
           for (const option of q.options) {

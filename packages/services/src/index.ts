@@ -154,6 +154,7 @@ export type { DictationPrepared, ProductDictation } from "./product-hooks.js"
 export {
   agentTextsFor,
   dictationFor,
+  helpTopicsFor,
   productAgentTexts,
   productDictation,
   productHelpTopics,
