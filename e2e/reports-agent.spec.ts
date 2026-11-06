@@ -184,7 +184,8 @@ for (const width of [1440, 390]) {
     // Cómo respondimos: quién primero y las que pasaron al equipo, que llevan a su conversación.
     const answers = page.getByRole("region", { name: "Cómo respondimos a quien escribió" })
     await expect(answers.getByRole("heading", { name: "Quién respondió primero" })).toBeVisible()
-    await expect(answers).toContainText("3 personas escribieron por primera vez")
+    // Cuenta conversaciones nuevas, no personas: Pacientes cuenta personas.
+    await expect(answers).toContainText(/3 conversaciones empezaron/)
     await expect(answers.getByRole("link", { name: "Ver en la Bandeja" })).toBeVisible()
     await answers.getByRole("button", { name: "Ver cuáles" }).click()
     const handoffs = page.getByRole(width === 390 ? "dialog" : "region", { name: "Pasaron al equipo", exact: true }).or(page.getByRole("dialog", { name: "Pasaron al equipo", exact: true })).first()

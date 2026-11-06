@@ -83,6 +83,7 @@ export function FinanceTab({
   onOpenList,
   onShowCurrentMonth,
   advice,
+  argosEnabled,
 }: {
   query: ReportQuery
   view?: FinanceView
@@ -90,9 +91,11 @@ export function FinanceTab({
   onOpenList: (list: ReportListKey) => void
   onShowCurrentMonth: () => void
   advice?: ReactNode
+  /** Argos encendido: solo así comenta las cifras. */
+  argosEnabled?: boolean
 }) {
   if (view === "promociones") return <PromotionsView query={query} onBack={() => onView(undefined)} />
-  return <FinanceMain query={query} onView={onView} onOpenList={onOpenList} onShowCurrentMonth={onShowCurrentMonth} advice={advice} />
+  return <FinanceMain query={query} onView={onView} onOpenList={onOpenList} onShowCurrentMonth={onShowCurrentMonth} advice={advice} argosEnabled={argosEnabled} />
 }
 
 function FinanceMain({
@@ -101,12 +104,14 @@ function FinanceMain({
   onOpenList,
   onShowCurrentMonth,
   advice,
+  argosEnabled,
 }: {
   query: ReportQuery
   onView: (view: FinanceView | undefined) => void
   onOpenList: (list: ReportListKey) => void
   onShowCurrentMonth: () => void
   advice?: ReactNode
+  argosEnabled?: boolean
 }) {
   const navigate = useNavigate()
   const canFinance = usePermission("finance.read")
@@ -125,7 +130,7 @@ function FinanceMain({
       </SkeletonRegion>
     )
   if (report.isError)
-    return <QueryErrorState error={report.error} onRetry={() => void report.refetch()} notFound="La sede elegida ya no está disponible. Elige otra sede." />
+    return <QueryErrorState error={report.error} onRetry={() => void report.refetch()} notFound="La sede elegida ya no está disponible. Elige otra sede." invalid="Ese periodo no se puede mostrar: elige otro arriba." />
   const data = report.data.data
   const { current } = data.totals
   // Lo que se debe (comisiones, compras sin pagar) también es movimiento: sin cobros, igual hay que verlo.
@@ -155,7 +160,7 @@ function FinanceMain({
       ) : null}
       <Cascade data={data} />
       <MonthlyChart data={data} />
-      <CommissionsSection query={query} data={data} />
+      <CommissionsSection query={query} data={data} argosEnabled={argosEnabled === true} />
       <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
         <DebtsCard data={data} onOpenList={onOpenList} advice={advice} />
         <PayablesCard data={data} />
@@ -246,8 +251,9 @@ function FinanceCards({ data }: { data: ReportFinance }) {
   const money: Money = (cents) => formatMoney(cents, currency, locale)
   const phrase = previousPhrase(data, locale)
   const { current, previous } = data.totals
-  const commissionShare = rateOf(current.commissionCents, current.cobradoCents)
-  const previousShare = rateOf(previous.commissionCents, previous.cobradoCents)
+  // La misma base que «De lo cobrado a lo que deja»: lo cobrado sin el impuesto, que no es de la clínica.
+  const commissionShare = rateOf(current.commissionCents, current.cobradoCents - current.taxCents)
+  const previousShare = rateOf(previous.commissionCents, previous.cobradoCents - previous.taxCents)
   const overdueChange = data.debts.overdueCents - data.debts.previousOverdueCents
   const inOther = enteredInOtherCurrency(data)
   const owedParts = data.debts.current.byCurrency
@@ -304,7 +310,7 @@ function FinanceCards({ data }: { data: ReportFinance }) {
         detail={
           <>
             {commissionShare !== null
-              ? `${commissionShare} % de lo cobrado${previousShare !== null ? (previousShare === commissionShare ? ` · igual ${phrase}` : ` · ${previousShare} % ${phrase.replace(/^que /, "")}`) : ""}`
+              ? `${commissionShare} % de lo cobrado${current.taxCents > 0 && data.taxName ? ` sin ${data.taxName}` : ""}${previousShare !== null ? (previousShare === commissionShare ? ` · igual ${phrase}` : ` · ${previousShare} % ${phrase.replace(/^que /, "")}`) : ""}`
               : "Sin cobros de lo atendido"}
             <br />
             Por pagar: {money(data.commissions.pendingCents)}
@@ -642,7 +648,7 @@ function ApartMoney({ value, text, share, clinic }: { value: number; text: strin
   )
 }
 
-function CommissionsSection({ query, data }: { query: ReportQuery; data: ReportFinance }) {
+function CommissionsSection({ query, data, argosEnabled }: { query: ReportQuery; data: ReportFinance; argosEnabled: boolean }) {
   const report = useQuery({
     queryKey: reportKey("finance/commissions", query),
     queryFn: () => fetchReport<ReportCommissions>("finance/commissions", query),
@@ -794,7 +800,8 @@ function CommissionsSection({ query, data }: { query: ReportQuery; data: ReportF
             </TableBody>
           </Table>
         </div>
-        {worst && clinicUnpaid !== null && worst.share - clinicUnpaid > APART_POINTS ? (
+        {/* Es una observación de Argos: con Argos apagado no se dice como suya. */}
+        {argosEnabled && worst && clinicUnpaid !== null && worst.share - clinicUnpaid > APART_POINTS ? (
           <p className="flex min-w-0 items-start gap-2.5 rounded-xl border bg-muted/40 px-3.5 py-3 text-sm">
             <span aria-hidden className="flex size-6 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
               <Bot className="size-3.5" />
@@ -862,6 +869,8 @@ function DebtsCard({ data, onOpenList, advice }: { data: ReportFinance; onOpenLi
             : debts.byCurrency
               ? `${amountsWords(debts.byCurrency, locale)} de ${debts.people} ${debts.people === 1 ? "persona" : "personas"} ${at}. ${aboutToday(debts.totalCents, data)}. Cuenta desde el día del cargo; en cada moneda, quien debe varios va en el tramo del más antiguo.`
               : `${money(debts.totalCents)} de ${debts.people} ${debts.people === 1 ? "persona" : "personas"} ${at}. Cuenta desde el día del cargo; quien debe varios va en el tramo del más antiguo.`}
+          {/* Finanzas › Deudas muestra en cada sede lo que nació sin sede; aquí se cuenta una sola vez, en toda la clínica. */}
+          {data.branch ? ` Solo lo de ${data.branch.name}: lo que se anotó sin sede (un concepto sin atención) se ve en toda la clínica.` : null}
         </p>
       </div>
       {debts.people > 0 ? (
@@ -1031,7 +1040,7 @@ function OutlookCard({ query, onOpenList }: { query: ReportQuery; onOpenList: (l
             : ""}
           {data.upcoming.patients === 0
             ? "Nada aceptado por hacer."
-            : `De ${data.upcoming.patients} ${data.upcoming.patients === 1 ? "paciente" : "pacientes"}: trabajo ya vendido que aún no se hace.`}
+            : `De ${data.upcoming.patients} ${data.upcoming.patients === 1 ? "paciente" : "pacientes"}, tengan cita o no: trabajo ya vendido que aún no se hace.`}
         </span>
       </div>
       {data.upcoming.unbooked.patients > 0 ? (

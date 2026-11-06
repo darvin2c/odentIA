@@ -95,8 +95,18 @@ export async function peopleShortcutMembers(
   if (can("crm.read") && wanted("por_invitar_a_volver"))
     members.por_invitar_a_volver = (await lapsedToInvite(tx, orgId, timezone, now)).map((row) => row.patientId)
   if (can("finance.read") && wanted("deben")) {
+    // Debe quien, en una moneda, debe más de lo que tiene a favor (decisión 22, como Reportes y Deudas).
     const debts = await getDebts(tx, orgId)
-    members.deben = [...new Set(debts.map((debt) => debt.patientId))]
+    const owed = new Map<string, { total: number; credit: number }>()
+    for (const debt of debts) {
+      const key = `${debt.patientId}|${debt.currency}`
+      const sum = owed.get(key) ?? { total: 0, credit: debt.creditCents }
+      sum.total += debt.totalCents
+      owed.set(key, sum)
+    }
+    members.deben = [
+      ...new Set([...owed].filter(([, sum]) => sum.total > sum.credit).map(([key]) => key.split("|")[0]!)),
+    ]
   }
   return members
 }
