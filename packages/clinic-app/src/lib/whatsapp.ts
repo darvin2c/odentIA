@@ -397,7 +397,10 @@ export function connectionWords(connection: ConnectionItem, since: Since, pendin
       title,
       tone: "off",
       status: "Desconectado.",
-      detail: "No recibe ni envía mensajes. Las conversaciones que ya tienes se conservan.",
+      // En una demo no hay un número de verdad: sus conversaciones son de ejemplo.
+      detail: connection.demoClinic
+        ? "Es la conexión de la demo: no envía ni recibe mensajes de verdad. Sus conversaciones son de ejemplo."
+        : "No recibe ni envía mensajes. Las conversaciones que ya tienes se conservan.",
       facts: [],
     }
   }

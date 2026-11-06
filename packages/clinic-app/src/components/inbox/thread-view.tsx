@@ -607,6 +607,8 @@ export function ThreadView({
   const closed = conv.status === "closed"
   // La ventana de 24 horas de WhatsApp la dice el servidor con el hilo, antes de que nadie escriba.
   const windowShut = windowClosed || detail.whatsappWindow?.open === false
+  // El canal de esta conversación está desactivado (ausente en respuestas antiguas: se supone activo).
+  const channelOff = detail.connection.status !== undefined && detail.connection.status !== "active"
   // La atención del propio hilo manda; la de la lista solo adelanta el dato
   // mientras llega el detalle. Sin ninguna, la cabecera calla: no se deduce aquí.
   const threadAttention = detail.attention ?? attention
@@ -1148,6 +1150,14 @@ export function ThreadView({
               }}
               onResolve={(topic) => topicMutation.mutate({ topicId: topic.id, path: "resolve" })}
             />
+          ) : null}
+          {canWrite && !blocked && channelOff && !viaWhatsapp ? (
+            // Antes de escribir: con el canal desconectado, lo que se escriba no sale.
+            <p role="status" className="text-xs text-warning">
+              {detail.connection.demoClinic
+                ? `Es la conexión de la demo: lo que escribas aquí no le llega a ${firstName}. Sus conversaciones son de ejemplo.`
+                : `Este ${channelLabel(detail.connection.channel)} está desconectado: lo que escribas no le llega a ${firstName} hasta volver a conectarlo en Configuración › Integraciones.`}
+            </p>
           ) : null}
           {!canWrite ? (
             <p className="rounded-2xl bg-input/50 px-3 py-3 text-sm text-muted-foreground">Tu rol puede leer esta conversación, pero no escribir en ella.</p>

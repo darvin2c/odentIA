@@ -278,7 +278,8 @@ export interface AgentOverview {
   provider: { problem: AgentProviderProblem | null; at: string | null }
   /** `branchesWithHours` y `services`: sin ellos no puede decir cuándo atiende ni qué hace la clínica. */
   knows: { answers: number; servicesWithPrice: number; services: number; branches: number; branchesWithHours: number }
-  readiness: { channels: string[]; receivers: string[]; sandboxTurns: number }
+  /** `demoClinic`: es una clínica de demostración, sin un canal de verdad: se prueba con «Probar». */
+  readiness: { channels: string[]; receivers: string[]; sandboxTurns: number; demoClinic?: boolean }
 }
 
 /** Estado de una conversación de prueba; el servidor lo devuelve y vuelve tal cual en el turno siguiente. */

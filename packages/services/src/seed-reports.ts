@@ -10,6 +10,8 @@
  * de demostración (ayer, hoy y mañana).
  */
 import { randomUUID } from "node:crypto"
+import type { MedicationEntry } from "@odentia/clinical"
+import { findMedication, includedTaxCents, medicalLeaveEnd } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import { scheduleBlock } from "@odentia/db/schema/availability"
@@ -23,21 +25,22 @@ import {
   patientContact,
   patientResponsibility,
   patientCharge,
-  patientPayment,
-  patientPaymentApplication,
+  prescription,
+  prescriptionItem,
   treatmentBudget,
   treatmentBudgetItem,
   treatmentBudgetOption,
   treatmentPlan,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
+import { medicalLeave } from "@odentia/db/schema/clinical-forms"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
 import { expense } from "@odentia/db/schema/finance"
 import { and, eq, inArray, sql } from "drizzle-orm"
 import { getOrgLocale } from "./locale.js"
-import { includedTaxCents } from "@odentia/clinical"
 import { chargeTaxOf, orgTaxes } from "./clinic-taxes.js"
-import { addMonths, currentMonthIn, monthStart, type YearMonth } from "./report-periods.js"
+import { addMonths, currentMonthIn, dayStart as localDayStart, monthStart, reportDayOf, type YearMonth } from "./report-periods.js"
+import { insertSeedPayments, type SeedCharge, type SeedPayment } from "./seed-payments.js"
 
 export interface ReportsSeedProfessional {
   userId: string
@@ -52,6 +55,56 @@ export interface ReportsSeedProfessional {
   occupancy: number
   /** Cómo firma su título; sin él, «Cirujano dentista». */
   signerTitle?: string
+  /**
+   * La especialidad que atiende (el tipo de la biblioteca, `librarySpecialtyIds`):
+   * solo le tocan los servicios sin especialidad o de la suya.
+   */
+  specialty?: string | null
+  /** A quién atiende por su especialidad (pediatría, hasta los 17 años). */
+  who?: ReportsSeedWho
+}
+
+/**
+ * A quién se le da un servicio o a quién atiende una especialidad: la edad
+ * cumplida el día de la cita y el sexo (ISO 5218, `F` o `M`). Vacío: a todos.
+ */
+export interface ReportsSeedWho {
+  minAge?: number
+  maxAge?: number
+  sex?: "F" | "M"
+}
+
+/** Años cumplidos el día `at`, desde la fecha de nacimiento AAAA-MM-DD. */
+export function ageOn(birthDate: string, at: Date): number {
+  const [year, month, day] = birthDate.slice(0, 10).split("-").map(Number) as [number, number, number]
+  const on = new Date(at)
+  let age = on.getUTCFullYear() - year
+  if (on.getUTCMonth() + 1 < month || (on.getUTCMonth() + 1 === month && on.getUTCDate() < day)) age -= 1
+  return Math.max(0, age)
+}
+
+/** Si la persona puede recibir ese servicio ese día. Sin datos de la persona, no se sabe y vale. */
+export function whoFits(who: ReportsSeedWho | undefined, person: { birthDate: string; sex: "F" | "M" } | null, at: Date): boolean {
+  if (!who || !person) return true
+  if (who.sex && person.sex !== who.sex) return false
+  const age = ageOn(person.birthDate, at)
+  if (who.minAge !== undefined && age < who.minAge) return false
+  if (who.maxAge !== undefined && age > who.maxAge) return false
+  return true
+}
+
+/** Un medicamento de una receta sembrada, como lo pide la receta (DCI, concentración y forma). */
+export interface ReportsSeedMedication {
+  genericName: string
+  strength: string
+  dosageForm: string
+  dose: string
+  /** Una vía de `ADMINISTRATION_ROUTES`. */
+  route: string
+  frequency: string
+  duration: string
+  quantity?: number
+  instructions?: string
 }
 
 /** Lo que se escribe en una atención cerrada de la historia. */
@@ -61,6 +114,13 @@ export interface ReportsSeedNote {
   diagnosisCode?: string
   vitals?: Record<string, unknown>
   examination?: Record<string, unknown>
+  /**
+   * La receta que se emitió en la atención: queda en Documentos y se imprime.
+   * `weightKg`: el peso con que se recetó, que la receta de un menor de 12 años lleva.
+   */
+  prescription?: { items: readonly ReportsSeedMedication[]; notes?: string; weightKg?: number }
+  /** El descanso médico que se emitió, desde el día de la atención. */
+  leave?: { days: number; notes: string }
 }
 
 /** Una persona nueva: de qué edad y sexo, y si es menor, quién la trae. */
@@ -83,10 +143,10 @@ export interface ReportsSeedRecipe {
   firstVisitShare?: number
   /** Quién es cada persona nueva (edad, sexo, responsable). */
   person?: (random: Random) => ReportsSeedPerson
-  /** Lo que queda escrito en cada atención. */
-  note?: (service: ReportsSeedInput["services"][number], random: Random, person: ReportsSeedPerson | null) => ReportsSeedNote
+  /** Lo que queda escrito en cada atención (`at`: cuándo empezó). */
+  note?: (service: ReportsSeedInput["services"][number], random: Random, person: ReportsSeedPerson | null, at: Date) => ReportsSeedNote
   diagnosisSystem?: string
-  /** El primer mensaje de quien escribe y la respuesta. */
+  /** El primer mensaje de quien escribe y la respuesta: `reply[i]` contesta a `inbound[i]`. */
   inbound?: readonly string[]
   reply?: readonly string[]
   budgets?: boolean
@@ -96,6 +156,8 @@ export interface ReportsSeedRecipe {
   names?: { given: readonly string[]; surnames: readonly string[]; bySex?: { F: readonly string[]; M: readonly string[] } }
   /** Promociones que ya existen: una parte de los cobros de su servicio en sus fechas lleva su precio. */
   promotions?: readonly ReportsSeedPromotion[]
+  /** La lista de medicamentos del producto: el código ATC de lo que se receta sale de ella. */
+  medications?: readonly MedicationEntry[]
 }
 
 /** Una promoción de la clínica sobre un servicio, como la aplica Caja al cobrar. */
@@ -138,8 +200,22 @@ export interface ReportsSeedInput {
   /** Sedes con historia, cada una con sus unidades dentales. */
   branches: Array<{ id: string; roomIds: string[]; rent: number }>
   professionals: ReportsSeedProfessional[]
-  /** Servicios del tarifario que se atienden, con su precio y duración. */
-  services: Array<{ id: string; name: string; priceCents: number; durationMin: number; weight: number; firstVisit?: boolean }>
+  /**
+   * Servicios del tarifario que se atienden, con su precio y duración. `specialty`:
+   * solo lo da quien la atiende; `who`: a quién se le da; `perUnit`: se cobra por
+   * unidad (una resina por pieza), y a veces van dos o tres en la misma atención.
+   */
+  services: Array<{
+    id: string
+    name: string
+    priceCents: number
+    durationMin: number
+    weight: number
+    firstVisit?: boolean
+    specialty?: string
+    who?: ReportsSeedWho
+    perUnit?: boolean
+  }>
   /** Pacientes que ya existían: vuelven en la historia. */
   patientIds: string[]
   recipe?: ReportsSeedRecipe
@@ -212,6 +288,111 @@ export async function knownDiagnosisCodes(tx: Db, system: string | undefined, co
   return new Set(rows.map((row) => row.code))
 }
 
+/** Una atención cerrada con lo que se emitió en ella: su receta y su descanso. */
+export interface SeedPaperRow {
+  patientId: string
+  encounterId: string
+  endedAt: Date
+  note: ReportsSeedNote | null
+  /** El diagnóstico de la atención, si la lista lo tiene: la receta lo lleva. */
+  diagnosisCode: string | null
+  signer: { userId: string; name: string; title: string | null; registration: string | null }
+}
+
+/**
+ * Las recetas y los descansos médicos de atenciones ya firmadas, numerados por
+ * clínica como los emite la app y firmados por quien atendió. Se insertan
+ * directo porque son del pasado (la app receta con la atención en borrador);
+ * su PDF se arma la primera vez que se abre (ADR 0132). El descanso no lleva el
+ * diagnóstico: la persona no autorizó que figure.
+ */
+export async function insertSeedPapers(
+  tx: Db,
+  input: { orgId: string; timezone: string; diagnosisSystem: string | undefined; medications: readonly MedicationEntry[]; rows: readonly SeedPaperRow[] },
+): Promise<void> {
+  const prescribed = input.rows.filter((row) => (row.note?.prescription?.items.length ?? 0) > 0)
+  const rested = input.rows.filter((row) => row.note?.leave)
+  const numbers = async (key: string, count: number): Promise<number> => {
+    const [counter] = await tx
+      .insert(orgCounter)
+      .values({ organizationId: input.orgId, key, value: count })
+      .onConflictDoUpdate({ target: [orgCounter.organizationId, orgCounter.key], set: { value: sql`"org_counter"."value" + ${count}` } })
+      .returning({ value: orgCounter.value })
+    return (counter?.value ?? count) - count + 1
+  }
+  if (prescribed.length > 0) {
+    const first = await numbers("prescription", prescribed.length)
+    const rows = prescribed.map((row, index) => ({ row, id: randomUUID(), number: first + index }))
+    await tx.insert(prescription).values(
+      rows.map(({ row, id, number }) => ({
+        id,
+        organizationId: input.orgId,
+        patientId: row.patientId,
+        encounterId: row.encounterId,
+        prescriptionNumber: number,
+        notes: row.note?.prescription?.notes ?? null,
+        ...(row.diagnosisCode && input.diagnosisSystem ? { diagnosisSystem: input.diagnosisSystem, diagnosisCode: row.diagnosisCode } : {}),
+        patientWeightKg: row.note?.prescription?.weightKg !== undefined ? String(row.note.prescription.weightKg) : null,
+        prescriberName: row.signer.name,
+        prescriberTitle: row.signer.title,
+        prescriberRegistration: row.signer.registration,
+        issuedBy: row.signer.userId,
+        issuedAt: row.endedAt,
+        createdAt: row.endedAt,
+        updatedAt: row.endedAt,
+      })),
+    )
+    await tx.insert(prescriptionItem).values(
+      rows.flatMap(({ row, id }) =>
+        (row.note?.prescription?.items ?? []).map((item) => ({
+          organizationId: input.orgId,
+          patientId: row.patientId,
+          prescriptionId: id,
+          medicationName: `${item.genericName} ${item.strength} ${item.dosageForm}`,
+          genericName: item.genericName,
+          strength: item.strength,
+          dosageForm: item.dosageForm,
+          atcCode: findMedication(item.genericName, input.medications)?.atc ?? null,
+          dose: item.dose,
+          route: item.route,
+          frequency: item.frequency,
+          duration: item.duration,
+          quantity: item.quantity ?? null,
+          instructions: item.instructions ?? null,
+          createdAt: row.endedAt,
+        })),
+      ),
+    )
+  }
+  if (rested.length > 0) {
+    const first = await numbers("medical_leave", rested.length)
+    await tx.insert(medicalLeave).values(
+      rested.map((row, index) => {
+        const startsOn = reportDayOf(input.timezone, row.endedAt)
+        const days = row.note?.leave?.days ?? 1
+        return {
+          organizationId: input.orgId,
+          patientId: row.patientId,
+          encounterId: row.encounterId,
+          leaveNumber: first + index,
+          startsOn,
+          days,
+          endsOn: medicalLeaveEnd(startsOn, days),
+          showDiagnosis: false,
+          notes: row.note?.leave?.notes ?? null,
+          signerName: row.signer.name,
+          signerTitle: row.signer.title,
+          signerRegistration: row.signer.registration,
+          issuedBy: row.signer.userId,
+          issuedAt: row.endedAt,
+          createdAt: row.endedAt,
+          updatedAt: row.endedAt,
+        }
+      }),
+    )
+  }
+}
+
 export function chunks<T>(items: T[], size = 500): T[][] {
   const out: T[][] = []
   for (let index = 0; index < items.length; index += size) out.push(items.slice(index, index + size))
@@ -268,8 +449,9 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
   )
   const pool: number[] = input.patientIds.flatMap((id, index) => (drafts.has(id) ? [] : [index]))
   const patientCount = (): number => input.patientIds.length + fresh.length
-  const newPatient = (): number => {
-    const person = recipe.person ? recipe.person(random) : null
+  const personOf = (index: number): ReportsSeedPerson | null =>
+    index >= input.patientIds.length ? (fresh[index - input.patientIds.length]?.person ?? null) : null
+  const newPatient = (person: ReportsSeedPerson | null): number => {
     const bySex = person ? recipe.names?.bySex?.[person.sex] : undefined
     fresh.push({
       given: random.pick(bySex ?? given),
@@ -281,12 +463,35 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
     pool.push(index)
     return index
   }
+  // Nadie viene antes de nacer, y cada servicio y cada especialidad atiende a quien le toca.
+  const fits = (need: ReadonlyArray<ReportsSeedWho | undefined>, person: ReportsSeedPerson | null, at: Date): boolean =>
+    !person || (person.birthDate <= at.toISOString().slice(0, 10) && need.every((who) => whoFits(who, person, at)))
+  const newPatientFor = (need: ReadonlyArray<ReportsSeedWho | undefined>, at: Date): number | null => {
+    if (!recipe.person) return newPatient(null)
+    for (let tries = 0; tries < 40; tries += 1) {
+      const person = recipe.person(random)
+      if (fits(need, person, at)) return newPatient(person)
+    }
+    return null
+  }
+  const returningFor = (need: ReadonlyArray<ReportsSeedWho | undefined>, at: Date): number | null => {
+    for (let tries = 0; tries < 12; tries += 1) {
+      const index = pool[Math.max(0, pool.length - 1 - Math.floor(random.next() ** 2 * pool.length))] as number
+      if (fits(need, personOf(index), at)) return index
+    }
+    return null
+  }
 
   // --- La agenda día por día ---------------------------------------------------------------
   const visits: PlannedVisit[] = []
   const holidays: Array<{ branchId: string; day: Date }> = []
-  const firstVisitServices = input.services.filter((service) => service.firstVisit)
-  const followUpServices = input.services.filter((service) => !service.firstVisit)
+  // Lo que atiende cada profesional: los servicios sin especialidad y los de la suya.
+  const offer = input.professionals.map((professional) => {
+    const mine = input.services.filter(
+      (service) => !service.specialty || !professional.specialty || service.specialty === professional.specialty,
+    )
+    return { first: mine.filter((service) => service.firstVisit), followUp: mine.filter((service) => !service.firstVisit) }
+  })
   for (let day = 0; day < totalDays; day += 1) {
     const dayStart = new Date(firstStart + day * 86_400_000)
     const { weekday, monthDay, month } = localDay(new Date(dayStart.getTime() + 12 * 3_600_000), timezone)
@@ -307,10 +512,17 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
         // De 3 a 6 de la tarde la agenda se llena menos: ahí quedan las horas libres.
         const afternoonDip = hour >= 15 && hour < 18 ? 0.72 : 1
         if (!random.chance(Math.min(0.97, professional.occupancy * growth * season * afternoonDip))) continue
+        const startsAt = new Date(dayStart.getTime() + hour * 3_600_000 + random.pick([0, 0, 15]) * 60_000)
         // La primera visita es una evaluación de una persona nueva.
         const isFirst = random.chance(recipe.firstVisitShare ?? 0.11)
-        const patientIndex = isFirst || pool.length < 30 ? newPatient() : (pool[Math.max(0, pool.length - 1 - Math.floor(random.next() ** 2 * pool.length))] as number)
-        const service = isFirst && firstVisitServices.length > 0 ? random.weighted(firstVisitServices) : random.weighted(followUpServices)
+        const mine = offer[professionalIndex] as { first: typeof input.services; followUp: typeof input.services }
+        const choices = isFirst && mine.first.length > 0 ? mine.first : mine.followUp.length > 0 ? mine.followUp : mine.first
+        if (choices.length === 0) continue
+        const service = random.weighted(choices)
+        const need = [professional.who, service.who]
+        const patientIndex =
+          isFirst || pool.length < 30 ? newPatientFor(need, startsAt) : (returningFor(need, startsAt) ?? newPatientFor(need, startsAt))
+        if (patientIndex === null) continue
         const roll = random.next()
         const status = roll < 0.07 ? "no_asistio" : roll < 0.16 ? "cancelada" : "atendida"
         // El agente agenda cada vez más: del 8 % al 34 % en dos años; el enlace, un 6 %.
@@ -324,11 +536,12 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
           branchId: branch.id,
           roomId: branch.roomIds[professionalIndex % branch.roomIds.length] as string,
           service,
-          startsAt: new Date(dayStart.getTime() + hour * 3_600_000 + random.pick([0, 0, 15]) * 60_000),
+          startsAt,
           status,
           source,
           waitMinutes: random.int(2, 18),
-          quantity: service.priceCents < 20_000 && random.chance(0.12) ? random.int(2, 3) : 1,
+          // Solo lo que se cobra por unidad va de a dos o tres (resinas, radiografías); una consulta es una.
+          quantity: service.perUnit && random.chance(0.12) ? random.int(2, 3) : 1,
         })
       }
     }
@@ -426,8 +639,6 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
     }
   }
   const patientOf = (index: number): string => patientIds[index] as string
-  const personOf = (index: number): ReportsSeedPerson | null =>
-    index >= input.patientIds.length ? (fresh[index - input.patientIds.length]?.person ?? null) : null
 
   // --- Conversaciones: cómo llegó cada persona nueva y las consultas que no reservaron ------
   const connections = await tx
@@ -509,33 +720,38 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
     })
     for (const batch of chunks(threadRows)) {
       await tx.insert(conversation).values(batch.map((item) => item.row))
+      // Las corridas de las respuestas de Sofi las deja `seedRepliesRuns`, después del gasto de ejemplo.
       await tx.insert(message).values(
-        batch.flatMap(({ thread, sentAt, row }) => [
-          {
-            organizationId: input.orgId,
-            conversationId: row.id,
-            direction: "in",
-            senderKind: "contact",
-            status: "received",
-            body: recipe.inbound ? random.pick(recipe.inbound) : "Hola, quisiera una cita",
-            createdAt: thread.inboundAt,
-          },
-          ...(thread.reply && sentAt
-            ? [
-                {
-                  organizationId: input.orgId,
-                  conversationId: row.id,
-                  direction: "out",
-                  senderKind: thread.reply.by,
-                  status: "sent",
-                  body: recipe.reply ? random.pick(recipe.reply) : "Con gusto, ¿qué día le acomoda?",
-                  externalId: `seed-reportes-${row.externalThreadId}`,
-                  createdAt: sentAt,
-                  sentAt,
-                },
-              ]
-            : []),
-        ]),
+        batch.flatMap(({ thread, sentAt, row }) => {
+          // La respuesta contesta a lo que preguntó: van de a pares en la receta.
+          const exchange = recipe.inbound && recipe.inbound.length > 0 ? random.int(0, recipe.inbound.length - 1) : -1
+          return [
+            {
+              organizationId: input.orgId,
+              conversationId: row.id,
+              direction: "in",
+              senderKind: "contact",
+              status: "received",
+              body: exchange >= 0 ? (recipe.inbound?.[exchange] as string) : "Hola, quisiera una cita",
+              createdAt: thread.inboundAt,
+            },
+            ...(thread.reply && sentAt
+              ? [
+                  {
+                    organizationId: input.orgId,
+                    conversationId: row.id,
+                    direction: "out",
+                    senderKind: thread.reply.by,
+                    status: "sent",
+                    body: recipe.reply?.[exchange] ?? (recipe.reply ? random.pick(recipe.reply) : "Con gusto, ¿qué día le acomoda?"),
+                    externalId: `seed-reportes-${row.externalThreadId}`,
+                    createdAt: sentAt,
+                    sentAt,
+                  },
+                ]
+              : []),
+          ]
+        }),
       )
       for (const { thread, row } of batch) if (thread.personIndex !== null) conversationOf.set(thread.personIndex, row.id)
     }
@@ -587,7 +803,7 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
       const rows = batch.map((visit) => {
         // La llegada es anterior al inicio: la espera en sala queda medida.
         const startedAt = new Date(visit.startsAt.getTime() + Math.max(1, visit.waitMinutes - 5) * 60_000)
-        const note = recipe.note ? recipe.note(visit.service, random, personOf(visit.patientIndex)) : null
+        const note = recipe.note ? recipe.note(visit.service, random, personOf(visit.patientIndex), startedAt) : null
         return { visit, note, id: randomUUID(), procedureId: randomUUID(), startedAt, endedAt: new Date(startedAt.getTime() + visit.service.durationMin * 60_000) }
       })
       for (const row of rows) done.push({ visit: row.visit, encounterId: row.id, procedureId: row.procedureId, endedAt: row.endedAt })
@@ -604,6 +820,8 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
           ...(row.note?.vitals ? { vitals: row.note.vitals } : {}),
           ...(row.note?.examination ? { examination: row.note.examination } : {}),
           startedAt: row.startedAt,
+          // Se abrió al empezar, como en la app: la Historia la fecha ese día y no el de la semilla.
+          createdAt: row.startedAt,
           signerName: row.visit.professional.signerName,
           signerTitle: row.visit.professional.signerTitle ?? "Cirujano dentista",
           signerRegistration: row.visit.professional.registration,
@@ -649,6 +867,25 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
           sql`, `,
         )}) as v(id, ended_at)
         where e.organization_id = ${input.orgId} and e.id = v.id`)
+      await insertSeedPapers(tx, {
+        orgId: input.orgId,
+        timezone,
+        diagnosisSystem: recipe.diagnosisSystem,
+        medications: recipe.medications ?? [],
+        rows: rows.map((row) => ({
+          patientId: patientOf(row.visit.patientIndex),
+          encounterId: row.id,
+          endedAt: row.endedAt,
+          note: row.note,
+          diagnosisCode: row.note?.diagnosisCode && known.has(row.note.diagnosisCode) ? row.note.diagnosisCode : null,
+          signer: {
+            userId: row.visit.professional.userId,
+            name: row.visit.professional.signerName,
+            title: row.visit.professional.signerTitle ?? null,
+            registration: row.visit.professional.registration,
+          },
+        })),
+      })
     }
   }
 
@@ -657,19 +894,21 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
   // pagan después, otros en dos partes y unos pocos siguen debiendo: de ahí
   // salen «Te deben hace más de 30 días» y lo cobrado por profesional.
   const charges: Array<typeof patientCharge.$inferInsert> = []
-  const payments: Array<typeof patientPayment.$inferInsert & { id: string; paidAt: Date; branchId: string }> = []
-  const applications: Array<typeof patientPaymentApplication.$inferInsert> = []
+  const payments: SeedPayment[] = []
+  const charged = new Map<string, SeedCharge>()
   // Como en Cobrar (ADR 0083): cada atención con el impuesto de su país y cada pago con el suyo.
   const tax = chargeTaxOf(await orgTaxes(tx, input.orgId), false)
+  // La historia cobra hasta el día anterior a su último: ese día y los siguientes los cierra la agenda de la demo.
+  const historyDay = reportDayOf(timezone, new Date(historyEnd))
+  const [cutYear, cutMonth, cutDate] = historyDay.split("-").map(Number) as [number, number, number]
+  const historyCut = localDayStart(timezone, cutYear, cutMonth, cutDate).getTime()
   const pay = (visit: PlannedVisit, chargeId: string, cents: number, paidAt: Date): void => {
-    if (paidAt.getTime() > historyEnd || cents <= 0) return
+    if (paidAt.getTime() >= historyCut || cents <= 0) return
     const method = random.weighted(recipe.paymentMethods ?? PAYMENT_METHODS)
-    const id = randomUUID()
     payments.push({
-      id,
-      organizationId: input.orgId,
       patientId: patientOf(visit.patientIndex),
       branchId: visit.branchId,
+      chargeId,
       amountCents: cents,
       taxCents: tax?.taxCategory === "S" ? includedTaxCents(cents, tax.taxBps) : 0,
       currency,
@@ -678,13 +917,19 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
       methodTypeCode: method.typeCode,
       createdBy: input.ownerUserId,
     })
-    applications.push({ organizationId: input.orgId, patientId: patientOf(visit.patientIndex), paymentId: id, chargeId, amountCents: cents, createdBy: input.ownerUserId, createdAt: paidAt })
   }
   for (const item of done) {
     const { visit } = item
     const promoted = promotionFor(recipe.promotions, visit.service.id, item.endedAt, random)
     const cents = (promoted?.cents ?? visit.service.priceCents) * visit.quantity
     const chargeId = randomUUID()
+    charged.set(chargeId, {
+      description: visit.service.name,
+      amountCents: cents,
+      promotionName: promoted?.charge.promotionName ?? null,
+      taxCategory: tax?.taxCategory ?? null,
+      taxBps: tax?.taxBps ?? null,
+    })
     charges.push({
       id: chargeId,
       organizationId: input.orgId,
@@ -712,8 +957,14 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
     // El resto sigue debiéndose.
   }
   for (const batch of chunks(charges)) await tx.insert(patientCharge).values(batch)
-  for (const batch of chunks(payments)) await tx.insert(patientPayment).values(batch)
-  for (const batch of chunks(applications)) await tx.insert(patientPaymentApplication).values(batch)
+  // Cada pago con su ticket y su caja: Reportes, Cobros y los cierres cuentan lo mismo.
+  await insertSeedPayments(tx, {
+    orgId: input.orgId,
+    payments,
+    charges: charged,
+    openFrom: reportDayOf(timezone, new Date()),
+    cashierUserId: input.ownerUserId,
+  })
 
   // --- Presupuestos: tres de cada cuatro evaluaciones de personas nuevas terminan en uno -----
   const budgets = recipe.budgets === false ? 0 : await seedBudgets(tx, {

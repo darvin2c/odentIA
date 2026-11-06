@@ -415,7 +415,14 @@ function channelRow(channel: MessagingChannel, connection: ConnectionItem, index
       tone: "off",
       status: "Desconectado",
       review: [],
-      detail: { kind: "account", account, activity: "no recibe ni envía mensajes" },
+      // En una demo no hay un número de verdad: sus conversaciones son de ejemplo.
+      detail: {
+        kind: "account",
+        account,
+        activity: connection.demoClinic
+          ? "es la conexión de la demo: no envía ni recibe mensajes de verdad"
+          : "no recibe ni envía mensajes",
+      },
       problem: null,
     }
   }

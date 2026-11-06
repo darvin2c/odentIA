@@ -30,6 +30,7 @@ import {
   requestMissingTemplates,
   settleMessageTexts,
 } from "./clinic-messages.js"
+import { isDemoClinic } from "./demo-clinic.js"
 import { invalidField, isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { decryptConfig, encryptJson } from "./secrets.js"
 import { checkOwnAppKeys, freshOwnApp, type OwnAppKeysChecked, settleOwnApp } from "./whatsapp-own-app.js"
@@ -168,6 +169,11 @@ export interface ConnectionPublic {
 
 /** Una conexión en la lista de Integraciones, con lo que se calcula al leer. */
 export interface ConnectionOverview extends ConnectionPublic {
+  /**
+   * Es de una clínica de demostración (ADR 0096): su WhatsApp no tiene un número
+   * de verdad, así que la pantalla lo dice en vez de «Desconectado» a secas.
+   */
+  demoClinic: boolean
   /** Último mensaje recibido por esa conexión. */
   lastInboundAt: string | null
   /** Sus mensajes de WhatsApp por estado; nulo si el canal no los usa. */
@@ -428,8 +434,10 @@ export async function listConnectionsOverview(
     .filter((item) => channelAdapters[item.provider as ChannelProvider]?.capabilities.templates)
     .map((item) => item.id)
   const counts = await countConnectionMessages(tx, orgId, withMessages)
+  const demoClinic = await isDemoClinic(tx, orgId)
   return items.map((item) => ({
     ...item,
+    demoClinic,
     lastInboundAt: lastInbound.get(item.id)?.toISOString() ?? null,
     messages: counts.get(item.id) ?? null,
   }))
