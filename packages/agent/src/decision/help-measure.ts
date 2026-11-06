@@ -1,4 +1,4 @@
-import type { HelpOption, HelpSelection } from "./help.js"
+import type { HelpOption, HelpSelection } from "@odentia/services"
 
 /**
  * Cómo se cuenta lo que hizo la Ayuda con una pregunta del banco

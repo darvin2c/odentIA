@@ -17,7 +17,8 @@ import { ArrowRight, CircleHelp } from "lucide-react"
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { z } from "zod"
 import { apiFetch } from "../lib/api"
-import { HELP_NAME, useReceptionName, withReceptionName } from "../lib/agent-names"
+import { ADMIN_NAME, HELP_NAME, useReceptionName, withReceptionName } from "../lib/agent-names"
+import { openArgos } from "../lib/argos"
 import { ASK_HELP_EVENT } from "../lib/global-search"
 import { casesEnvelope, SupportCasesSection } from "./support-cases"
 import { appWords } from "../lib/product-words"
@@ -32,10 +33,16 @@ const helpAnswer = z.object({
 
 const helpReply = z.object({
   askId: z.string(),
-  kind: z.enum(["guia", "estado", "nada", "charla"]),
+  kind: z.enum(["guia", "estado", "duda", "nada", "datos", "charla"]),
   say: z.string().nullable().optional(),
   answers: z.array(helpAnswer),
   blockers: z.array(z.object({ text: z.string(), where: z.string().nullable(), path: z.string().nullable() })),
+  /** La duda: respuestas de la guía para elegir; tocar una la pregunta tal cual, sin modelo. */
+  choices: z.array(z.object({ question: z.string(), where: z.string() })).default([]),
+  /** Lo de las cifras: si puede preguntárselo a Argos. */
+  argos: z.boolean().default(false),
+  /** Lo que cuesta preguntarle a Argos, dicho por el servidor como está hoy. */
+  argosNote: z.string().nullable().default(null),
   basedOn: z.string(),
 })
 type HelpReply = z.infer<typeof helpReply>
@@ -65,6 +72,8 @@ interface Exchange {
   helpful?: boolean
   /** Ya la envió a odentIA, o dijo que no. */
   sent?: "enviada" | "no"
+  /** En la duda dijo que ninguna era lo que buscaba: se ofrece enviarla. */
+  noneFits?: boolean
 }
 
 /**
@@ -253,6 +262,13 @@ export function HelpButton({ className }: { className?: string } = {}) {
   const handledLink = useRef<string | null>(null)
   const exchanges = useConversation()
   const [direct, setDirect] = useState<DirectMessage | null>(null)
+  /** La duda que pasó al envío: su campo recibe el foco cuando aparece. */
+  const [focusSend, setFocusSend] = useState<number | null>(null)
+  useEffect(() => {
+    if (focusSend === null) return
+    document.getElementById(`ayuda-enviar-${focusSend}`)?.focus()
+    setFocusSend(null)
+  }, [focusSend])
 
   const screen = useQuery({
     queryKey: ["help-screen", pathname],
@@ -423,8 +439,9 @@ export function HelpButton({ className }: { className?: string } = {}) {
                     ) : null}
 
                     {exchange.reply.kind === "guia"
-                      ? exchange.reply.answers.map((answer) => (
-                          <div key={answer.topicId} className={ANSWER}>
+                      ? exchange.reply.answers.map((answer, at) => (
+                          // biome-ignore lint/suspicious/noArrayIndexKey: dos respuestas pueden ser de la misma pantalla; llegan en orden y no cambian.
+                          <div key={`${answer.topicId}-${at}`} className={ANSWER}>
                             <p className="whitespace-pre-wrap">{withDestination(withReceptionName(answer.text, receptionName), answer.where)}</p>
                             {answer.restriction ? <p>{answer.restriction}</p> : null}
                             {answer.path ? (
@@ -470,10 +487,12 @@ export function HelpButton({ className }: { className?: string } = {}) {
                       </div>
                     ) : null}
 
-                    {exchange.reply.kind === "nada" ? (
+                    {exchange.reply.kind === "nada" || (exchange.reply.kind === "duda" && exchange.noneFits) ? (
                       <>
                         <div className={ANSWER}>
-                          <p className="font-bold">Esto no está en la guía, y no quiero inventarlo.</p>
+                          <p className="font-bold">
+                            {exchange.reply.kind === "duda" ? "No encontré tu respuesta en la guía." : (exchange.reply.say ?? "Esto no está en la guía, y no quiero inventarlo.")}
+                          </p>
                           {exchange.sent === undefined ? <p>¿Lo envío a {appWords().name} para que te respondan?</p> : null}
                         </div>
                         {exchange.sent === "enviada" ? (
@@ -484,6 +503,77 @@ export function HelpButton({ className }: { className?: string } = {}) {
                           sendExchange(exchange, index)
                         )}
                       </>
+                    ) : null}
+
+                    {/* La duda: las respuestas de la guía más parecidas. Tocar una la pregunta tal cual, sin modelo. */}
+                    {exchange.reply.kind === "duda" && !exchange.noneFits ? (
+                      <div className={ANSWER}>
+                        <p className="font-bold">{exchange.reply.say}</p>
+                        <ul className="flex flex-col gap-1.5">
+                          {exchange.reply.choices.map((choice) => (
+                            <li key={choice.question}>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="h-auto min-h-11 w-full flex-col items-start justify-start gap-0.5 whitespace-normal bg-card py-2 text-left sm:min-h-10"
+                                disabled={ask.isPending}
+                                onClick={() => askText(withReceptionName(choice.question, receptionName))}
+                              >
+                                <span className="font-semibold text-primary">{withReceptionName(choice.question, receptionName)}</span>
+                                {choice.where ? <span className="text-xs font-normal text-muted-foreground">En {choice.where}</span> : null}
+                              </Button>
+                            </li>
+                          ))}
+                        </ul>
+                        <Button
+                          type="button"
+                          variant="link"
+                          className={`h-auto self-start p-0 ${LINK}`}
+                          onClick={() => {
+                            setConversation((current) => current.map((item, at) => (at === index ? { ...item, noneFits: true } : item)))
+                            // El botón desaparece: el foco pasa al texto que se enviaría (WCAG 2.4.3).
+                            setFocusSend(index)
+                          }}
+                        >
+                          Ninguna es lo que busco
+                        </Button>
+                      </div>
+                    ) : null}
+
+                    {/* Las cifras de la clínica no son de la guía: las responde Argos, si el rol lo ve y está encendido. */}
+                    {exchange.reply.kind === "datos" ? (
+                      <div className={ANSWER}>
+                        <p>{exchange.reply.say}</p>
+                        {exchange.reply.argos ? (
+                          <>
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="min-h-11 self-start sm:min-h-9"
+                              onClick={() => {
+                                setOpen(false)
+                                openArgos({ question: exchange.question, routed: true })
+                              }}
+                            >
+                              Preguntarle a {ADMIN_NAME}
+                            </Button>
+                            {exchange.reply.argosNote ? <p className="text-xs text-muted-foreground">{exchange.reply.argosNote}</p> : null}
+                          </>
+                        ) : null}
+                        {exchange.reply.answers.map((answer) =>
+                          answer.path ? (
+                            <Link
+                              key={answer.topicId}
+                              to={answer.path}
+                              className={cn(buttonVariants({ size: "sm" }), "min-h-11 self-start sm:min-h-9")}
+                              aria-label={`Llévame a ${answer.where}`}
+                              onClick={() => setOpen(false)}
+                            >
+                              Llévame
+                            </Link>
+                          ) : null,
+                        )}
+                      </div>
                     ) : null}
 
                     {exchange.reply.kind === "guia" || exchange.reply.kind === "estado" ? (
@@ -622,8 +712,9 @@ export function HelpButton({ className }: { className?: string } = {}) {
               ) : null}
 
               <div className="flex flex-wrap items-center justify-between gap-x-3 text-[13px] sm:flex-col sm:items-start">
+                {/* La pregunta la lee el modelo que elige la respuesta (ADR 0146): que no lleve a nadie. */}
                 <p id="ayuda-pregunta-nota" className="text-muted-foreground">
-                  No cambia nada por ti.<span className="hidden sm:inline"> Si no sabe, te lo dice.</span>
+                  No escribas nombres de pacientes.<span className="hidden sm:inline"> No cambia nada por ti y, si no sabe, te lo dice.</span>
                 </p>
                 {direct && !direct.sent ? null : (
                   <div className="flex flex-wrap items-center gap-x-4">

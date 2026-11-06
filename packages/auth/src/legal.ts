@@ -24,11 +24,10 @@ export const LEGAL = {
     ] as string[],
   },
   agreement: {
-    version: "2026-10-26",
-    effectiveAt: "2026-10-26",
+    version: "2026-11-06",
+    effectiveAt: "2026-11-06",
     changes: [
-      "La lista de proveedores que tratan los datos, con su país.",
-      "Copia y borrado de los datos de un paciente desde su ficha.",
+      "La Ayuda usa Jev siempre: recibe solo la pregunta y el nombre de la pantalla, sin datos de pacientes.",
     ] as string[],
   },
 } as const

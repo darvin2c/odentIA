@@ -173,6 +173,8 @@ describe("costo y margen de una clínica", () => {
       usage({ origin: "dictado", encounterId, calls: 2, costMicros: 3_000, createdAt: at }),
       // Argos responde preguntas incluidas.
       usage({ origin: "reportes", costMicros: 2_000, createdAt: at }),
+      // La Ayuda le pregunta a Jev: lo regalamos, en su propia fila (ADR 0146).
+      usage({ origin: "ayuda", provider: "jev", model: "jev-1.13.0", calls: 3, costMicros: 1_100, createdAt: at }),
     ])
     const [anyUser] = (await ownerDb.execute(
       sql`select id from "user" limit 1`,
@@ -212,14 +214,15 @@ describe("costo y margen de una clínica", () => {
     ])
     expect(line("argos:preguntas")).toMatchObject({ count: 1, costMicros: 2_000, chargedCents: 0 })
     expect(line("jev")).toMatchObject({ costMicros: 100 })
+    expect(line("ayuda")).toMatchObject({ group: "regalo", count: 3, costMicros: 1_100, chargedCents: 0, note: "Lo regalamos" })
     expect(line("no_ia:almacenamiento")).toMatchObject({
       costMicros: 10 * SAAS_STORAGE_COST_MICROS_PER_GB,
     })
     // La cuota de USD 29 vuelve como crédito: USD 1 de acciones no pasa del crédito.
     expect(cost.chargedCents).toBe(2900)
-    expect(cost.aiMicros).toBe(10_100)
+    expect(cost.aiMicros).toBe(11_200)
     expect(cost.costMicros).toBe(
-      10_100 + 10 * SAAS_STORAGE_COST_MICROS_PER_GB + SAAS_FIXED_COST_MICROS,
+      11_200 + 10 * SAAS_STORAGE_COST_MICROS_PER_GB + SAAS_FIXED_COST_MICROS,
     )
     expect(cost.commissionCents).toBe(290)
     expect(cost.sellerName).toBe("Carla Núñez")
@@ -271,6 +274,8 @@ describe("costo y margen de una clínica", () => {
 
 describe("todas las clínicas", () => {
   it("pone arriba lo que hay que revisar: la alarma y la Fundadora sin uso", async () => {
+    // Preguntarle a la Ayuda no es usar los agentes: sigue «sin uso» (ADR 0146).
+    await ownerDb.insert(aiUsage).values({ organizationId: FOUNDER, origin: "ayuda", provider: "jev", model: "jev-1.13.0", calls: 1, costMicros: 400, createdAt: new Date() })
     const overview = await getCostMarginOverview(ownerDb)
     expect(overview.clinics.map((item) => [item.organizationId, item.alarm, item.idle])).toEqual([
       [ORG, true, false],

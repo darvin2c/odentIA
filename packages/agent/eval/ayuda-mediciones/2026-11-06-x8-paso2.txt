@@ -1,0 +1,30 @@
+
+> @odentia/agent@0.0.0 eval:ayuda C:\projects\odentIA\.claude\worktrees\agent-af9c4ad0d3676907c\packages\agent
+> tsx --env-file-if-exists=../../infra/dev/.env src/decision/eval-ayuda.ts "--" "--provider=jev" "--banco=ronda,ciego,cifras" "--umbral=0.90"
+
+../../infra/dev/.env not found. Continuing without it.
+../../infra/dev/.env not found. Continuing without it.
+Ayuda · help.v1 · proveedor jev (jev-1.13.0)
+  guía odentia: 29 pantallas y 167 preguntas frecuentes → 198 opciones con «datos» y «ninguna», 22048 caracteres (≈ 5512 tokens a 4 car./token, sin tokenizador)
+  guía latidia: 29 pantallas y 165 preguntas frecuentes → 196 opciones con «datos» y «ninguna», 21918 caracteres (≈ 5480 tokens a 4 car./token, sin tokenizador)
+  bancos: ronda 14 · ciego 125 (10 repetidas de los de ajuste, fuera) · cifras 38
+
+Por banco, con el umbral 0.9:
+  banco          n  seguro bien  seguro mal  (2.ª mal)  (pantalla bien)  duda c/correcta  duda sin  ninguna bien  ninguna mal  datos bien  datos mal  fallos
+  ronda         14            2           0          0                0                4         1             0            0           0          0       0
+  ciego        125           29           0          0                0               55         4            14            1           0          0       0
+  cifras        38            4           0          0                0                7         0             0            0           0          0       0
+  «seguro bien»: todo lo que mostró corresponde. «seguro mal» incluye (2.ª mal), la primera bien y la segunda no, y (pantalla bien), la pantalla correcta con otra respuesta.
+
+Confirmación con el umbral 0.9, en ronda + ciego + cifras (n = 177; nadie los usó para ajustar):
+  umbral     mostrado  cota inf.  sin respuesta  con respuesta  seguro y    «datos»  fallos  cumple
+             correcto       95 %    no responde       resuelve       mal bien dicho
+  mínimo       ≥ 95 %                    ≥ 95 %         ≥ 70 %                                p95 ≤ 2 s
+  0.90        100.0 %     90.1 %        100.0 %         94.4 %         0      0.0 %       0      sí
+
+Demora (177 llamadas, también las que fallaron): p50 246 ms · p95 302 ms (mínimo para salir ≤ 2000 ms; plazo de esta medición 5000 ms)
+  Tokens de entrada por pregunta: mínimo 8705 · habitual 8773 · máximo 8809; de salida, habitual 1885
+  Costo por pregunta: habitual USD 0.000368 · máximo USD 0.000370 · esta corrida USD 0.065197 (177 llamadas con precio, de 177)
+  1300 preguntas al mes (clínica de 10 personas, estudio X8): USD 0.478400
+
+Seguro y se equivoca con el umbral 0.9 (0):

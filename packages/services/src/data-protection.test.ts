@@ -23,7 +23,8 @@ it("lista lo que la clínica usa, lo que odentIA usa siempre y los pedidos del a
 
   const before = await run((tx) => getDataProtectionView(tx, "org_a"))
   expect(before.processors.always.map((p) => p.id)).toEqual(
-    expect.arrayContaining(["servidor", "cloudflare", "correo", "geoapify"]),
+    // Jev, siempre: la Ayuda le pregunta en toda clínica (ADR 0146).
+    expect.arrayContaining(["servidor", "cloudflare", "correo", "geoapify", "jev"]),
   )
   expect(before.activities.map((a) => a.id)).toEqual(
     expect.arrayContaining(["atender", "citas", "cobrar", "novedades"]),

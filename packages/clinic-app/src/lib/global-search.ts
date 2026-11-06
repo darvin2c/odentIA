@@ -345,11 +345,8 @@ export function saveHiddenTypes(scope: string, types: readonly SearchType[]): vo
   }
 }
 
-/** Lo escrito es una pregunta, no un nombre: «¿cómo bloqueo un horario?» no se ofrece como paciente nuevo. */
-export function looksLikeQuestion(text: string): boolean {
-  // Sin `\b`: en JavaScript, «é» no es una letra para él y «qué es» no coincidiría.
-  return /[¿?]/.test(text) || /^(c[oó]mo|d[oó]nde|qu[eé]|cu[aá]l|cu[aá]ndo|cu[aá]nt[oa]s?|qui[eé]n|por qu[eé]|porque|puedo|se puede|quiero|necesito|no puedo|no me|no encuentro)(?!\p{L})/iu.test(text.trim())
-}
+/** La misma regla que usa la Ayuda para no mandar a Jev lo que no es una pregunta (ADR 0146). */
+export { looksLikeQuestion } from "@odentia/clinical"
 
 /** Pide la pregunta a Ayuda (el panel la abre y la envía). */
 export const ASK_HELP_EVENT = "odentia:preguntar-ayuda"

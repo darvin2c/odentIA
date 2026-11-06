@@ -1,5 +1,5 @@
-import { agentTextsFor, helpTopicsFor } from "@odentia/services"
 import { describe, expect, it } from "vitest"
+import type { AdminAnswer } from "./admin-request.js"
 import {
   HELP_CONFIDENT,
   HELP_OFFERED,
@@ -13,11 +13,16 @@ import {
   helpScreenName,
   helpState,
   readHelpSelection,
-} from "./help.js"
-import { KNOWLEDGE_SELECT_MAX_OPTIONS } from "./knowledge.js"
-import type { DecisionResult } from "./port.js"
+} from "./help-decision.js"
+import { agentTextsFor, helpTopicsFor } from "./products.js"
 
-/** La pregunta `help.v1` y la lectura de su resultado, sin proveedor: las probabilidades las escribe la prueba. */
+type DecisionResult = { answers: AdminAnswer[]; model: string; usage: { inputTokens: number; outputTokens: number } | null; latencyMs?: number }
+
+/**
+ * La pregunta `help.v1` y la lectura de su resultado, sin proveedor: las
+ * probabilidades las escribe la prueba. La lectura se prueba con 0,6 para ver
+ * cada camino; lo que hace la Ayuda con el umbral medido (0,9), al final.
+ */
 const TOPICS = helpTopicsFor("dental")
 const OPTIONS = helpOptions(TOPICS)
 const QUESTION = helpQuestion(OPTIONS, agentTextsFor("dental"))
@@ -42,7 +47,7 @@ function result(probabilities: Array<[number | "none" | "data", number]>, choice
   }
 }
 
-const read = (r: DecisionResult, at?: number) => readHelpSelection(r, OPTIONS, at)
+const read = (r: DecisionResult, at = 0.6) => readHelpSelection(r, OPTIONS, at)
 const names = (options: HelpOption[]) => options.map((option) => (option.kind === "faq" ? option.faq.q : option.topic.id))
 
 describe("la pregunta help.v1", () => {
@@ -54,7 +59,7 @@ describe("la pregunta help.v1", () => {
     expect(values).toContain("none")
     expect(values).toContain("data")
     expect(new Set(values).size).toBe(values.length)
-    expect(values.length).toBeLessThanOrEqual(KNOWLEDGE_SELECT_MAX_OPTIONS + 1)
+    expect(values.length).toBeLessThanOrEqual(HELP_SELECT_MAX_OPTIONS + 2)
     for (const option of QUESTION.kind === "choice" ? QUESTION.options : []) expect(option.description?.length ?? 0).toBeLessThanOrEqual(240)
   })
 
@@ -166,6 +171,14 @@ describe("leer lo que eligió", () => {
     const declined: DecisionResult = { answers: [{ id: HELP_SELECT_QUESTION, kind: "declined" }], model: "jev-1.13.0", usage: null, latencyMs: 1 }
     expect(read(declined)).toEqual({ verdict: "duda", shown: [], offered: [], top: null })
     expect(read({ ...declined, answers: [] })).toEqual({ verdict: "duda", shown: [], offered: [], top: null })
+  })
+
+  it("con el umbral medido solo se muestra lo que Jev da casi por seguro", () => {
+    expect(HELP_CONFIDENT).toBe(0.9)
+    expect(readHelpSelection(result([[TAREAS, 0.86], ["none", 0.14]]), OPTIONS).verdict).toBe("duda")
+    expect(readHelpSelection(result([[TAREAS, 0.93], ["none", 0.07]]), OPTIONS).verdict).toBe("seguro")
+    expect(readHelpSelection(result([["data", 0.8], ["none", 0.2]]), OPTIONS).verdict).toBe("ninguna")
+    expect(readHelpSelection(result([["data", 0.92], ["none", 0.08]]), OPTIONS).verdict).toBe("datos")
   })
 
   it("lo que no es una opción no se muestra", () => {

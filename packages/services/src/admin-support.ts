@@ -1367,16 +1367,22 @@ export async function supportHelpStats(db: Db, actor: AdminActor, now: Date = ne
   // Sin el identificador: «/people/<id>» de cada persona es la misma pantalla.
   const screen = sql<string>`regexp_replace(${helpAsk.screen}, '/[0-9a-f-]{36}.*$', '')`
   const rows = await db
-    .select({ screen, topicId: helpAsk.topicId, helpful: helpAsk.helpful, total: count() })
+    .select({ screen, topicId: helpAsk.topicId, verdict: helpAsk.verdict, helpful: helpAsk.helpful, total: count() })
     .from(helpAsk)
     .where(gte(helpAsk.createdAt, new Date(now.getTime() - HELP_STATS_DAYS * 86_400_000)))
-    .groupBy(screen, helpAsk.topicId, helpAsk.helpful)
+    .groupBy(screen, helpAsk.topicId, helpAsk.verdict, helpAsk.helpful)
   await writeAdminAudit(db, actor, { action: "support.help_stats.read" })
   const unanswered = new Map<string, number>()
   const notHelpful = new Map<string, number>()
   let asked = 0
   for (const row of rows) {
     const total = Number(row.total)
+    // La duda (ADR 0146) no es «sin respuesta» ni se cuenta: si la persona toca una de las que ofrece, esa cuenta
+    // como su pregunta, y no dos veces. Lo de las cifras sí se cuenta, pero va a Argos: tampoco es «sin respuesta».
+    if (row.verdict === "duda" || row.verdict === "datos") {
+      asked += row.verdict === "datos" ? total : 0
+      continue
+    }
     asked += total
     if (row.topicId === null) {
       const name = helpTopicForScreen(row.screen)?.title ?? row.screen

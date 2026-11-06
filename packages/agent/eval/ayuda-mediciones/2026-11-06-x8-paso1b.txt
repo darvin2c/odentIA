@@ -1,0 +1,59 @@
+
+> @odentia/agent@0.0.0 eval:ayuda C:\projects\odentIA\.claude\worktrees\agent-af9c4ad0d3676907c\packages\agent
+> tsx --env-file-if-exists=../../infra/dev/.env src/decision/eval-ayuda.ts "--" "--provider=jev" "--banco=desarrollo,control,final"
+
+../../infra/dev/.env not found. Continuing without it.
+../../infra/dev/.env not found. Continuing without it.
+Ayuda · help.v1 · proveedor jev (jev-1.13.0)
+  guía odentia: 29 pantallas y 167 preguntas frecuentes → 198 opciones con «datos» y «ninguna», 22048 caracteres (≈ 5512 tokens a 4 car./token, sin tokenizador)
+  guía latidia: 29 pantallas y 165 preguntas frecuentes → 196 opciones con «datos» y «ninguna», 21918 caracteres (≈ 5480 tokens a 4 car./token, sin tokenizador)
+  bancos: desarrollo 123 · control 180 · final 150
+
+Por banco, con el umbral 0.6:
+  banco          n  seguro bien  seguro mal  (2.ª mal)  (pantalla bien)  duda c/correcta  duda sin  ninguna bien  ninguna mal  datos bien  datos mal  fallos
+  desarrollo   123           89           5          0                5                9         1             8            3           1          0       0
+  control      180           70           8          0                6               33         6            32           12           1          0       0
+  final        150           58           9          1                6               32         5            30            5           2          0       0
+  «seguro bien»: todo lo que mostró corresponde. «seguro mal» incluye (2.ª mal), la primera bien y la segunda no, y (pantalla bien), la pantalla correcta con otra respuesta.
+
+Para elegir el umbral, en desarrollo + control + final (n = 453; ya se usaron para ajustar el buscador):
+  umbral     mostrado  cota inf.  sin respuesta  con respuesta  seguro y    «datos»  fallos  cumple
+             correcto       95 %    no responde       resuelve       mal bien dicho
+  mínimo       ≥ 95 %                    ≥ 95 %         ≥ 70 %                                p95 ≤ 2 s
+  0.30         81.3 %     76.6 %         77.6 %         78.4 %        58     33.3 %       0      no
+  0.40         84.1 %     79.5 %         80.0 %         79.9 %        47     33.3 %       0      no
+  0.50         86.8 %     82.2 %         83.2 %         84.5 %        36     28.6 %       0      no
+  0.60         90.8 %     86.5 %         90.4 %         88.7 %        22     19.0 %       0      no
+  0.70         93.0 %     88.8 %         92.0 %         91.5 %        15     19.0 %       0      no
+  0.80         95.5 %     91.3 %         94.4 %         93.0 %         8     14.3 %       0      no
+  0.90         96.8 %     92.1 %         96.8 %         93.3 %         4      4.8 %       0      sí
+  Cumplen los cuatro mínimos: 0.90. Confirma el más bajo, una sola vez, con --umbral=0.90.
+
+Demora (453 llamadas, también las que fallaron): p50 251 ms · p95 315 ms (mínimo para salir ≤ 2000 ms; plazo de esta medición 5000 ms)
+  Tokens de entrada por pregunta: mínimo 8760 · habitual 8769 · máximo 8783; de salida, habitual 1885
+  Costo por pregunta: habitual USD 0.000368 · máximo USD 0.000369 · esta corrida USD 0.166775 (453 llamadas con precio, de 453)
+  1300 preguntas al mes (clínica de 10 personas, estudio X8): USD 0.478400
+
+Seguro y se equivoca con el umbral 0.6 (22):
+  - [desarrollo · odentia] «¿Cómo agendo una cita?» → mostró FAQ «¿Cómo le reservo una cita desde la conversación?» (0.70); esperado: párrafo de agenda
+  - [desarrollo · odentia] «como saco una cita para un paciente» → mostró FAQ «¿Cómo le reservo una cita desde la conversación?» (0.74); esperado: párrafo de agenda
+  - [desarrollo · odentia] «¿Cómo cambio el precio de un servicio?» → mostró FAQ «¿Cómo elijo qué precio dice Sofi?» y párrafo de servicios (0.67); esperado: párrafo de servicios
+  - [desarrollo · odentia] «¿Qué sabe Sofi?» → mostró FAQ «¿Qué es Sofi?» (0.80); esperado: FAQ «¿Cómo le enseño algo al agente?»
+  - [desarrollo · odentia] «¿Cómo exporto mis pacientes a Excel?» → mostró FAQ «¿Cómo descargo una lista o una tabla de Reportes?» (0.74); esperado: ninguna
+  - [control · odentia] «desbloquear a alguien que bloquee por error» → mostró FAQ «¿Qué hago con el spam o con alguien a quien no quiero responder?» (0.74); esperado: ninguna
+  - [control · odentia] «sacar una cita para mañana» → mostró FAQ «¿Cómo le reservo una cita desde la conversación?» (0.65); esperado: párrafo de agenda
+  - [control · odentia] «como veo los turnos de un solo doctor» → mostró párrafo de agenda (0.66); esperado: ninguna
+  - [control · odentia] «donde saco la boleta» → mostró FAQ «¿Dónde busco un ticket de otro día?» (0.91); esperado: ninguna
+  - [control · odentia] «no me aparece el comprobante del pago que hice» → mostró FAQ «¿Cómo le llega el comprobante de su pago?» (0.84); esperado: ninguna
+  - [control · odentia] «como me anoto un pendiente para el viernes» → mostró párrafo de tareas (0.77); esperado: ninguna
+  - [control · odentia] «por que no les llega el recordatrio a los pacientes» → mostró FAQ «¿Por qué dice que un mensaje automático no le llega a todos?» (0.76); esperado: FAQ «¿Por qué Sofi no le escribió a una persona?» o FAQ «¿Dónde enciendo los recordatorios de cita?»
+  - [control · odentia] «cuanto le toca al doctor por lo que hizo este mes» → mostró párrafo de comisiones (0.98); esperado: datos
+  - [final · odentia] «correos que mandan los pacientes a la clinica, donde los leo» → mostró párrafo de bandeja (0.88); esperado: ninguna
+  - [final · odentia] «como separo una cita para la señora lucia el jueves en la tarde» → mostró FAQ «¿Cómo le reservo una cita desde la conversación?» y párrafo de agenda (0.64); esperado: párrafo de agenda
+  - [final · odentia] «cuales citas de mañana faltan confirmar» → mostró FAQ «¿Dónde veo las citas que esperan el sí de alguien?» (0.64); esperado: datos
+  - [final · odentia] «quiero sacar de la lista a un paciente que ya no viene hace años» → mostró FAQ «¿Cómo borro a un paciente?» y FAQ «¿Cómo archivo a una persona?» (0.71); esperado: FAQ «¿Cómo archivo a una persona?»
+  - [final · odentia] «quiero que les lleguen recordatorios automaticos de sus citas a los pacientes» → mostró FAQ «¿Dónde enciendo los recordatorios de cita?» y párrafo de administrador (0.65) [la segunda no corresponde]; esperado: FAQ «¿Dónde enciendo los recordatorios de cita?» o FAQ «¿Quién le avisa a la persona su cita?»
+  - [final · odentia] «por que mi compañera no puede entrar a caja, no le aparece» → mostró FAQ «¿Por qué recepción o caja no aparecen en Horarios y ausencias?» (0.64); esperado: párrafo de equipo
+  - [final · odentia] «quiero dejarle un pendiente a la doctora para que llame al sr vega» → mostró párrafo de tareas (0.82); esperado: ninguna
+  - [final · odentia] «cuanto le toca al dr lopez por las endodoncias de este mes» → mostró párrafo de comisiones (0.91); esperado: datos
+  - [final · odentia] «el ortodoncista gana 40% de lo que hace, donde pongo eso» → mostró párrafo de comisiones (0.91); esperado: ninguna

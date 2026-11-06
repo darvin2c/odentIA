@@ -1086,7 +1086,7 @@ export function createApp(deps: AppDeps) {
   guarded.route("/opportunities", createOpportunitiesRoute(crmDeps))
   guarded.route(
     "/help",
-    createHelpRoute({ ...crmDeps, appVersion: process.env["APP_VERSION"] ?? null }),
+    createHelpRoute({ ...crmDeps, appVersion: process.env["APP_VERSION"] ?? null, llm, decisions: deps.decisions, ownerDb: deps.ownerDb }),
   )
   guarded.route(
     "/agent/admin",

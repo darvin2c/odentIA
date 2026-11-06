@@ -364,6 +364,8 @@ function GlobalSearchDialog({
   /** Qué fila de preguntar va primero, arriba de los resultados; sin decidir o algo para buscar, al final. */
   const askFirst = route === "negocio" ? "argos" : route === "ayuda" ? "ayuda" : null
   const data = typing ? search.data : undefined
+  /** Ya llegaron los resultados de lo que está escrito. */
+  const settled = typing && debounced === text && !search.isFetching && search.isSuccess
   const screenMatches = typing
     ? screens.filter((screen) => fold(screen.label).includes(fold(text))).slice(0, 4)
     : screens.slice(0, 6)
@@ -373,7 +375,10 @@ function GlobalSearchDialog({
     if (typing && askFirst === "ayuda") return "preguntar-ayuda"
     if (data?.owners[0]) return `dueño:${data.owners[0].key}`
     if (data?.meaning[0]) return `dueño:${data.meaning[0].key}`
-    if (typing) return asksArgos ? "preguntar-argos" : "preguntar-ayuda"
+    if (typing && asksArgos) return "preguntar-argos"
+    // La Ayuda le pregunta a Jev (ADR 0146): va primero solo con una pregunta y cuando ya se sabe que no hay
+    // resultados. Un nombre o un teléfono con Enter no se le manda.
+    if (typing) return settled && looksLikeQuestion(text) ? "preguntar-ayuda" : ""
     if (asksArgos && lastAsked) return "volver-argos"
     if (recents[0]) return `reciente:${recents[0].id}`
     return screens[0] ? `pantalla:${screens[0].to}` : ""
