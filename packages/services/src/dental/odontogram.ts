@@ -256,13 +256,8 @@ export async function addOdontogramEntries(
       "Los hallazgos se registran dentro de una atención: atiende a la persona para registrarlos",
     )
   }
-  const row = await requireDraftLink(tx, orgId, patientId, encounterId, actorUserId)
-  if (row.professionalUserId !== actorUserId) {
-    throw conflict(
-      "NOT_ATTENDING",
-      "Otro profesional lleva esta atención: toma el relevo para continuarla",
-    )
-  }
+  // Solo quien lleva la atención registra hallazgos en ella (ADR 0002, `requireDraftLink` con actor).
+  await requireDraftLink(tx, orgId, patientId, encounterId, actorUserId)
   return insertOdontogramFinding(tx, orgId, actorUserId, patientId, encounterId, input, {
     strictVariants: await orgStrictVariants(tx, orgId),
     bodyFields: { diagnosisCode: options.diagnosisField ?? "diagnosisCode" },

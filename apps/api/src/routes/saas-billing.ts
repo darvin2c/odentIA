@@ -1158,7 +1158,13 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
     const membership = await accountMember(deps, c, orgId)
     if (!membership)
       return c.json(errorBody(c, "FORBIDDEN", "No eres miembro de esta organización"), 403)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getClinicNotices(tx, orgId, membership)))
+    // La franja es de todos; con importes solo para quien pasó la verificación que pide la clínica
+    // (ADR 0107). Si falta, sus avisos son los de quien no ve la facturación.
+    const gated =
+      seesBilling(membership.role) &&
+      (await clinicTwoFactorGate(deps.ownerDb, { orgId, userId: membership.userId, sessionId: membership.sessionId })) !== null
+    const viewer = gated ? { ...membership, billing: false } : membership
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getClinicNotices(tx, orgId, viewer)))
   })
 
   app.get("/alerts", async (c) => {

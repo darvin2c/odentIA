@@ -53,6 +53,7 @@ import { createWorkspaceNotification } from "./workspace.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import type { ProductSite, SiteColumns } from "./product-hooks.js"
 import { productHooks } from "./products.js"
+import { assertAttending } from "./encounter-attending.js"
 
 /** El «dónde» del producto de la clínica (odentIA: piezas). */
 const siteOf = async (tx: Db, orgId: string): Promise<ProductSite> => (await productHooks(tx, orgId)).site
@@ -3419,7 +3420,9 @@ export async function createClinicalOrder(
   }
   let encounterId: string | null = null
   if (input.encounterId) {
-    await requireVisibleEncounter(tx, orgId, input.patientId, input.encounterId)
+    const visit = await requireVisibleEncounter(tx, orgId, input.patientId, input.encounterId)
+    // Dentro de una atención en curso escribe quien la lleva (ADR 0002); una ya firmada solo se cita.
+    if (visit.status === "borrador") assertAttending(visit, actorUserId)
     encounterId = input.encounterId
   }
   let recipientUserId: string | null = null

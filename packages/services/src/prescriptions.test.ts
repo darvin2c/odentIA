@@ -4,7 +4,9 @@ import { patientAllergy } from "@odentia/db/schema/clinical"
 import { expect, it } from "vitest"
 import { addClinicalNote } from "./clinical.js"
 import { clinicalFixture, makeSigner } from "./clinical-test-fixture.js"
+import { createClinicalOrder } from "./clinical-forms.js"
 import { takeOverEncounter } from "./encounters.js"
+import { createMedicalLeave } from "./medical-leaves.js"
 import { addPlanItem } from "./plan.js"
 import { cancelPrescription, createPrescription, getPrescriptionDetail } from "./prescriptions.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
@@ -163,6 +165,15 @@ it("otro profesional no escribe dentro de la atención ajena sin tomar el relevo
   await expect(f.run((tx) => addClinicalNote(tx, ...asOther, { note: "Nota ajena", encounterId: f.encounter.id }))).rejects.toMatchObject({ code: "NOT_ATTENDING" })
   await expect(
     f.run((tx) => addPlanItem(tx, ...asOther, { planId: f.plan.id, serviceId: f.service.id, sourceEncounterId: f.encounter.id })),
+  ).rejects.toMatchObject({ code: "NOT_ATTENDING" })
+  // Lo mismo con el descanso médico y la orden, que se escriben dentro de la atención.
+  await expect(
+    f.run((tx) => createMedicalLeave(tx, ...asOther, { days: 2, encounterId: f.encounter.id })),
+  ).rejects.toMatchObject({ code: "NOT_ATTENDING" })
+  await expect(
+    f.run((tx) =>
+      createClinicalOrder(tx, "org_a", other, { kind: "imagen", patientId: f.patient.id, encounterId: f.encounter.id, recipient: "Centro de imágenes", title: "Radiografía" }),
+    ),
   ).rejects.toMatchObject({ code: "NOT_ATTENDING" })
   // Sin unirla a la atención, o tras tomar el relevo, sí.
   await expect(f.run((tx) => createPrescription(tx, ...asOther, { items: [item] }))).resolves.toMatchObject({ status: "emitida" })
