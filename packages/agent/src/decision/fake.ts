@@ -1,4 +1,4 @@
-import type { DecisionModel, DecisionResult } from "./port.js"
+import type { DecisionModel, DecisionQuestion, DecisionResult } from "./port.js"
 
 /**
  * Modelo de decisión determinista para dev/e2e/tests: decide por palabras
@@ -25,17 +25,14 @@ export function createFakeDecisionModel(): DecisionModel {
                     : false
           return { id: q.id, kind: "yesno", probability: yes ? 0.92 : 0.08 }
         }
-        if (q.kind === "choice" && (q.id === "topic" || q.id === "help")) {
-          // Elección de conocimiento y de la Ayuda (`help.v1`): gana la opción
-          // que comparte más palabras con el estado; sin ninguna en común, «none».
-          // En la Ayuda cuenta solo la pregunta (no el nombre de la pantalla), hacen
-          // falta dos palabras en común y «data» es como «none».
-          const help = q.id === "help"
-          const asked = help && text.includes("pregunta: ") ? text.slice(text.indexOf("pregunta: ") + "pregunta: ".length) : text
-          const words = new Set(asked.normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/[^a-z0-9]+/).filter((w) => w.length >= 4))
-          let best = { value: "none", hits: help ? 1 : 0 }
+        if (q.kind === "choice" && q.id === "help") return fakeHelp(q, text)
+        if (q.kind === "choice" && q.id === "topic") {
+          // Elección de conocimiento: gana la opción que comparte más palabras
+          // con el estado; sin ninguna en común, «none».
+          const words = new Set(text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/[^a-z0-9]+/).filter((w) => w.length >= 4))
+          let best = { value: "none", hits: 0 }
           for (const option of q.options) {
-            if (option.value === "none" || (help && option.value === "data")) continue
+            if (option.value === "none") continue
             const described = (option.description ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/[^a-z0-9]+/)
             const hits = described.filter((w) => w.length >= 4 && words.has(w)).length
             if (hits > best.hits) best = { value: option.value, hits }
@@ -78,4 +75,36 @@ export function createFakeDecisionModel(): DecisionModel {
       return { answers, model: "fake-decision", usage: { inputTokens: state.length, outputTokens: 0 }, latencyMs: 1 }
     },
   }
+}
+
+/**
+ * La Ayuda de demostración (`help.v1`, ADR 0146): lee solo la pregunta, no la
+ * pantalla. «Cuánto» o «cuántos» es de las cifras; tres palabras en común con
+ * una respuesta de la guía, seguro; dos, duda entre las dos más parecidas;
+ * menos, «ninguna». Con el umbral de la Ayuda (0,9) da cada salida.
+ */
+function fakeHelp(q: Extract<DecisionQuestion, { kind: "choice" }>, text: string): DecisionResult["answers"][number] {
+  const plain = (value: string) => value.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "")
+  const marker = "pregunta: "
+  const asked = plain(text.includes(marker) ? text.slice(text.indexOf(marker) + marker.length) : text)
+  const words = new Set(asked.split(/[^a-z0-9]+/).filter((word) => word.length >= 4))
+  const ranked = q.options
+    .filter((option) => option.value !== "none" && option.value !== "data")
+    .map((option) => ({
+      value: option.value,
+      hits: new Set(plain(option.description ?? "").split(/[^a-z0-9]+/).filter((word) => word.length >= 4 && words.has(word))).size,
+    }))
+    .sort((a, b) => b.hits - a.hits)
+  const [first, second] = ranked
+  const picks: Record<string, number> = /\bcuant[oa]s?\b/.test(asked)
+    ? { data: 0.95 }
+    : first && first.hits >= 3
+      ? { [first.value]: 0.95 }
+      : first && second && first.hits === 2
+        ? { [first.value]: 0.6, [second.value]: 0.3 }
+        : { none: 0.95 }
+  const rest = (1 - Object.values(picks).reduce((sum, p) => sum + p, 0)) / Math.max(1, q.options.length - Object.keys(picks).length)
+  const probabilities = Object.fromEntries(q.options.map((option) => [option.value, picks[option.value] ?? rest]))
+  const choice = Object.entries(picks).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "none"
+  return { id: q.id, kind: "choice", choice, probabilities, confidence: picks[choice] ?? null }
 }

@@ -1,14 +1,27 @@
 import { createHash } from "node:crypto"
-import type { Db } from "@odentia/db"
+import { type Db, withOrgContext } from "@odentia/db"
 import { scheduleRoom } from "@odentia/db/schema/agenda"
 import { professionalSchedule } from "@odentia/db/schema/availability"
 import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { organization } from "@odentia/db/schema/auth"
 import { agentConfig, channelConnection } from "@odentia/db/schema/crm"
-import { helpAsk } from "@odentia/db/schema/workspace"
+import { HELP_ASK_VERDICTS, HELP_ASK_VIA, helpAsk } from "@odentia/db/schema/workspace"
 import { and, count, eq, gte } from "drizzle-orm"
+import { getAdminSettings } from "./agent-admin.js"
 import { openSupportCaseFromHelp, type SupportCaseListItem } from "./admin-support.js"
 import { invalidField, notFound, ServiceError } from "./errors.js"
+import {
+  type HelpDecider,
+  helpAnswerText,
+  helpCandidates,
+  type HelpOption,
+  helpOptions,
+  helpQuestion,
+  helpScreenName,
+  type HelpSelection,
+  helpState,
+  readHelpSelection,
+} from "./help-decision.js"
 import {
   type HelpTopic,
   helpSuggestions,
@@ -21,17 +34,22 @@ import {
   matchHelpTopics,
 } from "./help-guide.js"
 import { normalizeForSearch } from "./knowledge.js"
-import { RECEPTION_DEFAULT_NAME, receptionName } from "./agent-names.js"
+import { AGENT_NAMES, RECEPTION_DEFAULT_NAME, receptionName } from "./agent-names.js"
 import { roomWord } from "./locale.js"
-import { productHelpTopics } from "./products.js"
+import type { ProductAgentTexts } from "./product-agent.js"
+import { productAgentTexts, productHelpTopics } from "./products.js"
 
 /* ---------- Ariadna, la que responde en Ayuda: dónde está cada cosa, qué se puede y por qué algo no ---------- */
 
 /**
- * Ariadna responde con la guía del sistema, no con un modelo: el tema lo
- * eligen las palabras de la pregunta y la respuesta es un texto escrito y
- * revisado. No cambia nada, no lee conversaciones ni historia clínica y, si no
- * sabe, lo dice. El tope diario protege el servicio; hoy no hay coste por uso.
+ * Ariadna responde con la guía del sistema (ADR 0146): lo escrito igual que en
+ * la guía responde sin modelo; lo demás lo elige Jev entre las respuestas de la
+ * guía (`help.v1`) y se muestra tal cual, porque el modelo no redacta. Si Jev
+ * duda, ofrece las más parecidas; si no está en la guía, lo dice; si es de las
+ * cifras de la clínica, la lleva a Argos. Sin Jev, solo responde una pregunta
+ * frecuente que reconozcan las palabras. No cambia nada ni lee conversaciones,
+ * historia clínica ni montos. Lo que cuesta Jev lo paga odentIA (origen
+ * `ayuda`); el tope diario protege el servicio.
  */
 export const HELP_DAILY_LIMIT = 200
 const QUESTION_CHARS = 500
@@ -47,15 +65,30 @@ export interface HelpAnswer {
   restriction: string | null
 }
 
+/** Una respuesta para elegir cuando Ariadna duda: tocarla la pregunta escrita como en la guía, sin modelo. */
+export interface HelpChoice {
+  question: string
+  /** La pantalla de esa respuesta, para reconocerla; vacío si no es de una pantalla. */
+  where: string
+}
+
 export interface HelpReply {
   askId: string
-  /** `guia`: respondió con un tema. `estado`: dijo qué falta en esa pantalla. `nada`: no lo sabe. `charla`: un saludo o un gracias. */
-  kind: "guia" | "estado" | "nada" | "charla"
-  /** Lo que dice cuando es `charla`. */
+  /**
+   * `guia`: respondió con la guía. `estado`: dijo qué falta en esa pantalla.
+   * `duda`: no está segura y ofrece las más parecidas. `nada`: no está en la
+   * guía. `datos`: es de las cifras de la clínica. `charla`: un saludo o un gracias.
+   */
+  kind: "guia" | "estado" | "duda" | "nada" | "datos" | "charla"
+  /** Lo que dice cuando es `charla`, `duda` o `datos`. */
   say: string | null
   answers: HelpAnswer[]
   /** Lo que falta de verdad en la pantalla, cuando se preguntó por qué algo no se puede. */
   blockers: Array<{ text: string; where: string | null; path: string | null }>
+  /** `duda`: hasta tres respuestas de la guía para elegir. */
+  choices: HelpChoice[]
+  /** `datos`: puede preguntárselo a Argos (ve Reportes y Argos está encendido). */
+  argos: boolean
   basedOn: string
 }
 
@@ -167,72 +200,182 @@ function withGuideName(question: string, personaName: string | null | undefined)
   return ` ${normalizeForSearch(question)} `.replace(` ${name} `, ` ${RECEPTION_DEFAULT_NAME} `).trim()
 }
 
+/** Lo que se le pregunta a una pantalla por su nombre: «Agenda», «¿Qué es Configuración › Etapas de venta?». */
+const screenAsks = (topic: HelpTopic) =>
+  [topic.title, helpTopicLabel(topic)].flatMap((name) => [name, `¿Qué es ${name}?`]).map(normalizeForSearch)
+
+/**
+ * Lo escrito igual que en la guía responde sin modelo: una pregunta frecuente o
+ * una de sus formas, o el nombre de una pantalla. Es lo que llega al tocar una
+ * sugerencia o una de las respuestas que ofrece la duda.
+ */
+export function exactHelpOption(question: string, topics: readonly HelpTopic[]): HelpOption | null {
+  const asked = normalizeForSearch(question)
+  if (!asked) return null
+  for (const topic of topics) {
+    for (const faq of topic.faqs ?? []) {
+      if ([faq.q, ...(faq.forms ?? [])].some((form) => normalizeForSearch(form) === asked)) return { kind: "faq", topic, faq }
+    }
+  }
+  const topic = topics.find((item) => screenAsks(item).includes(asked))
+  return topic ? { kind: "tema", topic } : null
+}
+
+/** Lo que se toca en la duda: escrito como en la guía, para que `exactHelpOption` lo reconozca. */
+function choiceOf(option: HelpOption): HelpChoice {
+  if (option.kind === "faq") return { question: option.faq.q, where: option.faq.general ? "" : helpTopicLabel(option.topic) }
+  return { question: `¿Qué es ${helpTopicLabel(option.topic)}?`, where: helpTopicLabel(option.topic) }
+}
+
+const NOTHING: HelpSelection = { verdict: "ninguna", shown: [], offered: [], top: null }
+
+/** Sin Jev, o si no responde: solo una pregunta frecuente que las palabras reconozcan. Nunca el párrafo de la pantalla. */
+function byWords(question: string, topics: readonly HelpTopic[]): HelpSelection {
+  const [match] = matchHelpTopics(question, topics)
+  return match?.faq ? { verdict: "seguro", shown: [{ kind: "faq", topic: match.topic, faq: match.faq }], offered: [], top: null } : NOTHING
+}
+
+type Decided = { via: (typeof HELP_ASK_VIA)[number]; selection: HelpSelection }
+
+/** Jev elige la respuesta de la guía con `help.v1`; si falla, no responde o duda sin nada que ofrecer, deciden las palabras. */
+async function decideHelp(
+  question: string,
+  screenName: string | null,
+  topics: readonly HelpTopic[],
+  texts: ProductAgentTexts,
+  decider: HelpDecider | null,
+): Promise<Decided> {
+  if (decider) {
+    try {
+      const candidates = helpCandidates(helpOptions(topics), question)
+      const result = await decider.decide(helpState(question, screenName), [helpQuestion(candidates, texts)])
+      const selection = readHelpSelection(result, candidates)
+      if (selection.verdict !== "duda" || selection.offered.length > 0) return { via: "jev", selection }
+    } catch {
+      // Jev no respondió a tiempo o falló: la Ayuda sigue sin él.
+    }
+  }
+  return { via: "respaldo", selection: byWords(question, topics) }
+}
+
 /**
  * Responde una pregunta sobre cómo usar el sistema, con la guía del producto
- * de la clínica. Deja constancia de la pantalla y del tema que respondió,
- * nunca del texto de la pregunta.
+ * de la clínica (ADR 0146). Lo que se lee de la clínica va en su transacción y
+ * Jev responde fuera de ella. Deja constancia de la pantalla, de la respuesta
+ * de la guía y de lo que decidió Jev, nunca del texto de la pregunta.
  */
-export async function askHelp(tx: Db, orgId: string, asker: HelpAsker, input: { question: unknown; screen: unknown }): Promise<HelpReply> {
+export async function askHelp(
+  db: Db,
+  orgId: string,
+  asker: HelpAsker,
+  input: { question: unknown; screen: unknown },
+  decider: HelpDecider | null = null,
+): Promise<HelpReply> {
   if (typeof input.question !== "string" || input.question.trim().length < 3) throw invalidField("question", "Escribe tu pregunta: al menos 3 caracteres.")
   const question = input.question.trim().slice(0, QUESTION_CHARS)
   const screen = typeof input.screen === "string" ? input.screen.slice(0, 200) : "/"
   const talk = helpSmallTalk(question)
   // Un saludo no es una consulta: no gasta del tope ni cuenta como algo que no supo.
-  if (talk) return { askId: "", kind: "charla", say: talk, answers: [], blockers: [], basedOn: "" }
-  await requireDailyRoom(tx, orgId, asker.userId)
-  const topics = await productHelpTopics(tx, orgId)
+  if (talk) return { askId: "", kind: "charla", say: talk, answers: [], blockers: [], choices: [], argos: false, basedOn: "" }
+
+  const ready = await withOrgContext(db, orgId, async (tx) => {
+    await requireDailyRoom(tx, orgId, asker.userId)
+    const [config] = await tx.select({ personaName: agentConfig.personaName }).from(agentConfig).where(eq(agentConfig.organizationId, orgId)).limit(1)
+    return { topics: await productHelpTopics(tx, orgId), texts: await productAgentTexts(tx, orgId), personaName: config?.personaName }
+  })
+  const { topics } = ready
   const here = helpTopicForScreen(screen, topics)
-  const log = async (topicId: string | null) => {
-    const [row] = await tx.insert(helpAsk).values({ organizationId: orgId, userId: asker.userId, screen, topicId }).returning({ id: helpAsk.id })
-    if (!row) throw new Error("No se pudo registrar la consulta")
-    return row.id
-  }
-
   // La guía dice «Sofi»: una clínica que le puso otro nombre pregunta con el suyo.
-  const [config] = await tx.select({ personaName: agentConfig.personaName }).from(agentConfig).where(eq(agentConfig.organizationId, orgId)).limit(1)
-  const matches = matchHelpTopics(withGuideName(question, config?.personaName), topics)
+  const asked = withGuideName(question, ready.personaName)
+  const exact = exactHelpOption(asked, topics)
+  const decided: Decided = exact
+    ? { via: "exacta", selection: { verdict: "seguro", shown: [exact], offered: [], top: null } }
+    : await decideHelp(asked, helpScreenName(screen, topics), topics, ready.texts, decider)
+  const { selection } = decided
+  const first = selection.shown[0]
 
-  // «¿Por qué no puedo…?»: lo que falta de verdad en lo que preguntó; si no nombró nada, en la pantalla donde está.
-  // Lo que no es de una pantalla (el dictado, su contraseña) no depende de lo que falte en ella.
-  if (WHY_NOT.test(normalizeForSearch(question)) && !matches[0]?.faq?.general) {
-    const about = matches[0]?.topic ?? here
-    const blockers = await screenBlockers(tx, orgId, about, asker, topics)
-    if (blockers.length > 0) {
-      return {
-        askId: await log(about?.id ?? null),
-        kind: "estado",
-        say: null,
-        answers: [],
-        blockers,
-        basedOn: `Lo que tu clínica tiene configurado ahora y lo que tu rol puede hacer${about ? ` en ${about.title}` : ""}.`,
+  return withOrgContext(db, orgId, async (tx) => {
+    const log = async (topicId: string | null, faq: string | null = null) => {
+      const verdict = decided.via === "jev" ? (selection.verdict satisfies (typeof HELP_ASK_VERDICTS)[number]) : null
+      const [row] = await tx
+        .insert(helpAsk)
+        .values({ organizationId: orgId, userId: asker.userId, screen, topicId, faq, via: decided.via, verdict, probability: decided.via === "jev" ? selection.top : null })
+        .returning({ id: helpAsk.id })
+      if (!row) throw new Error("No se pudo registrar la consulta")
+      return row.id
+    }
+    const reply = (kind: HelpReply["kind"], parts: Partial<HelpReply> & { askId: string }): HelpReply => ({
+      kind,
+      say: null,
+      answers: [],
+      blockers: [],
+      choices: [],
+      argos: false,
+      basedOn: "",
+      ...parts,
+    })
+
+    // «¿Por qué no puedo…?»: lo que falta de verdad en lo que preguntó; si no nombró nada, en la pantalla donde está.
+    // Lo que no es de una pantalla (el dictado, su contraseña) no depende de lo que falte en ella.
+    const general = first?.kind === "faq" && first.faq.general
+    if (WHY_NOT.test(normalizeForSearch(question)) && !general) {
+      const about = first?.topic ?? selection.offered[0]?.topic ?? matchHelpTopics(asked, topics)[0]?.topic ?? here
+      const blockers = await screenBlockers(tx, orgId, about, asker, topics)
+      if (blockers.length > 0) {
+        return reply("estado", {
+          askId: await log(about?.id ?? null),
+          blockers,
+          basedOn: `Lo que tu clínica tiene configurado ahora y lo que tu rol puede hacer${about ? ` en ${about.title}` : ""}.`,
+        })
       }
     }
-  }
 
-  if (matches.length === 0) {
-    return { askId: await log(null), kind: "nada", say: null, answers: [], blockers: [], basedOn: "" }
-  }
-  const answers = matches.map(({ topic, faq }) => {
-    // Lo que no es de una pantalla (quién es Ariadna, su contraseña) no lleva a ninguna.
-    if (faq?.general) return { topicId: topic.id, where: "", text: faq.a, path: null, restriction: null }
-    const access = restrictionFor(topic, asker)
-    return {
-      topicId: topic.id,
-      where: helpTopicLabel(topic),
-      text: faq ? faq.a : `En ${helpTopicLabel(topic)}. ${topic.purpose}`,
-      path: access.path,
-      restriction: access.restriction,
+    if (selection.verdict === "seguro" && first) {
+      const answers = selection.shown.map((option): HelpAnswer => {
+        // Lo que no es de una pantalla (quién es Ariadna, su contraseña) no lleva a ninguna.
+        if (option.kind === "faq" && option.faq.general) return { topicId: option.topic.id, where: "", text: option.faq.a, path: null, restriction: null }
+        const access = restrictionFor(option.topic, asker)
+        return { topicId: option.topic.id, where: helpTopicLabel(option.topic), text: helpAnswerText(option), ...access }
+      })
+      const places = [...new Set(answers.map((answer) => answer.where).filter(Boolean))]
+      return reply("guia", {
+        askId: await log(first.topic.id, first.kind === "faq" ? first.faq.q : null),
+        answers,
+        basedOn: places.length > 0 ? `El mapa del sistema: ${places.join(" y ")}.` : "La guía del sistema.",
+      })
     }
+
+    if (selection.verdict === "duda") {
+      return reply("duda", {
+        askId: await log(null),
+        say: "No estoy segura de qué preguntas. ¿Es alguna de estas?",
+        choices: selection.offered.map(choiceOf),
+      })
+    }
+
+    if (selection.verdict === "datos") {
+      const reports = helpTopic("reportes", topics)
+      const seesReports = asker.can("reports.read")
+      const argosOn = seesReports && (await getAdminSettings(tx, orgId)).enabled
+      const askId = await log(null)
+      if (argosOn) return reply("datos", { askId, argos: true, say: `Eso es de las cifras de tu clínica: te lo responde ${AGENT_NAMES.administrador}, con las mismas cuentas de Reportes.` })
+      if (seesReports && reports) {
+        const access = restrictionFor(reports, asker)
+        return reply("datos", {
+          askId,
+          say: `Eso es de las cifras de tu clínica, y no está en la guía. Las ves en Reportes; ${AGENT_NAMES.administrador}, que las responde, está apagado.`,
+          answers: [{ topicId: reports.id, where: helpTopicLabel(reports), text: "", ...access }],
+        })
+      }
+      const roles = asker.whoCan("reports.read")
+      return reply("datos", {
+        askId,
+        say: `Eso es de las cifras de tu clínica, y no está en la guía.${roles.length ? ` Pídeselo a quien ve Reportes: ${list(roles)}.` : ""}`,
+      })
+    }
+
+    return reply("nada", { askId: await log(null) })
   })
-  const places = answers.map((answer) => answer.where).filter(Boolean)
-  return {
-    askId: await log(matches[0]?.topic.id ?? null),
-    kind: "guia",
-    say: null,
-    answers,
-    blockers: [],
-    basedOn: places.length > 0 ? `El mapa del sistema: ${places.join(" y ")}.` : "La guía del sistema.",
-  }
 }
 
 /** «¿Te sirvió?»: un sí o un no sobre la respuesta, sin texto. */

@@ -66,6 +66,28 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   await archive.getByRole("button", { name: "No, gracias" }).click()
   await expect(archive.getByRole("region", { name: "Lo que se envía" })).toHaveCount(0)
 
+  // --- Duda: ofrece las respuestas de la guía más parecidas; tocar una responde sin volver a preguntarle a Jev ---
+  await ask("quiero apagar a Sofi")
+  const doubt = help.getByRole("listitem").filter({ hasText: "quiero apagar a Sofi" })
+  await expect(doubt).toContainText("No estoy segura de qué preguntas. ¿Es alguna de estas?")
+  await expect(doubt).not.toContainText("¿Te sirvió?")
+  await doubt.getByRole("button", { name: /^¿Cómo apago a Sofi\?/ }).click()
+  const picked = help.getByRole("listitem").filter({ hasText: "En Agente, con el interruptor de su fila" })
+  await expect(picked).toContainText("¿Cómo apago a Sofi?")
+  // Si ninguna era lo que buscaba, no se queda sin salida: se ofrece enviarla.
+  await doubt.getByRole("button", { name: "Ninguna es lo que busco" }).click()
+  await expect(doubt).toContainText("Esto no está en la guía, y no quiero inventarlo.")
+  await doubt.getByRole("button", { name: "No, gracias" }).click()
+  await info.attach("ayuda-duda", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+
+  // --- Las cifras de la clínica no son de la guía: con Argos encendido y Reportes en su rol, se las pregunta a Argos ---
+  await call(page, "PUT", "/api/agent/admin/settings", org.slug, { enabled: true })
+  await ask("¿Cuánto cobramos este mes?")
+  const figures = help.getByRole("listitem").filter({ hasText: "¿Cuánto cobramos este mes?" })
+  await expect(figures).toContainText("Eso es de las cifras de tu clínica: te lo responde Argos")
+  await expect(figures.getByRole("button", { name: "Preguntarle a Argos" })).toBeVisible()
+  await expect(figures).toContainText("Usa una de las preguntas a Argos de este mes.")
+
   // --- No sabe: lo dice, y la persona decide si lo envía a odentIA ---
   await ask(UNKNOWN)
   const unknown = help.getByRole("listitem").filter({ hasText: UNKNOWN })
@@ -89,11 +111,19 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   // todavía espera. Cualquiera de los dos es correcto; un envío fallido («incierto») no.
   expect((await fixtureDb.select().from(supportNotice).where(eq(supportNotice.caseId, sent[0]!.id))).map((row) => [row.kind, row.recipientUserId, row.emailState]))
     .toEqual([["caso_nuevo", null, expect.stringMatching(/^(pendiente|reclamado|enviado)$/)]])
-  // La Ayuda no guarda lo que se le pregunta: solo la pantalla, el tema y si sirvió.
-  const logged = await fixtureDb.select().from(helpAsk).where(eq(helpAsk.organizationId, org.id))
-  expect(logged.map((row) => [row.screen, row.topicId, row.helpful])).toEqual([
-    ["/agenda", "disponibilidad", true], ["/agenda", "agenda", null], ["/agenda", "pacientes", false], ["/agenda", null, null],
+  // La Ayuda no guarda lo que se le pregunta: solo la pantalla, lo que respondió, cómo se decidió y si sirvió.
+  // Lo escrito como en la guía no pasa por Jev; lo demás lo decide (aquí, su doble de demostración).
+  const logged = await fixtureDb.select().from(helpAsk).where(eq(helpAsk.organizationId, org.id)).orderBy(helpAsk.createdAt)
+  expect(logged.map((row) => [row.screen, row.topicId, row.via, row.verdict, row.helpful])).toEqual([
+    ["/agenda", "disponibilidad", "exacta", null, true],
+    ["/agenda", "agenda", "jev", "duda", null],
+    ["/agenda", "pacientes", "exacta", null, false],
+    ["/agenda", null, "jev", "duda", null],
+    ["/agenda", "agente", "exacta", null, null],
+    ["/agenda", null, "jev", "datos", null],
+    ["/agenda", null, "jev", "ninguna", null],
   ])
+  expect(JSON.stringify(logged)).not.toContain("cumpleaños")
 
   // «Llévame» abre la pantalla.
   await first.getByRole("link", { name: "Llévame a Configuración › Horarios y ausencias" }).click()

@@ -1,8 +1,18 @@
+import {
+  asAdminDecider,
+  createDecisionModel,
+  createFakeDecisionModel,
+  meterAiUse,
+  type PlatformDecisions,
+  type PlatformLlm,
+  resolveLlmSpec,
+} from "@odentia/agent"
 import { canAccess, canAccessAny, ORG_ROLES, type OrgRole, type Permission, platformPathPermission, roleLabel } from "@odentia/auth/permissions"
 import type { ClinicalProduct } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
 import {
   askHelp,
+  type HelpDecider,
   assertMySupportCaseWritable,
   attachToMySupportCase,
   clientSupportAttachmentUrl,
@@ -66,10 +76,24 @@ function askerOf(userId: string, memberRole: string, product: ClinicalProduct): 
 }
 
 /**
+ * Quién elige la respuesta de la Ayuda (ADR 0146): Jev, con la cuenta de
+ * odentIA, en toda clínica; con el modelo de demostración, su doble
+ * determinista. Nunca el modelo que escribe: no da probabilidades y costaría
+ * más. Sin Jev, null: la Ayuda responde solo lo que reconocen las palabras.
+ */
+async function helpDecider(llm: PlatformLlm, decisions: PlatformDecisions | undefined): Promise<HelpDecider | null> {
+  if (llm.fake) return asAdminDecider(createFakeDecisionModel())
+  if (!decisions?.jev) return null
+  // Jev no usa el modelo que escribe: no hace falta su clave.
+  const model = await createDecisionModel("jev", decisions, resolveLlmSpec({ fake: true })).catch(() => null)
+  return model ? asAdminDecider(model) : null
+}
+
+/**
  * Ayuda de odentIA: para todo el equipo, sin permiso propio. No cambia nada y
  * no lee datos de pacientes; lo que responde depende del rol de quien pregunta.
  */
-export function createHelpRoute(deps: CrmDeps & { appVersion?: string | null }) {
+export function createHelpRoute(deps: CrmDeps & { appVersion?: string | null; llm: PlatformLlm; decisions?: PlatformDecisions | undefined }) {
   const app = new Hono()
 
   /** La pantalla donde está la persona y lo que un envío a odentIA llevaría de ella. */
@@ -91,7 +115,11 @@ export function createHelpRoute(deps: CrmDeps & { appVersion?: string | null }) 
     const { orgId, userId, memberRole } = orgContextOf(c)
     const parsed = askInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, async (tx) => askHelp(tx, orgId, askerOf(userId, memberRole, await orgProduct(tx, orgId)), parsed.data)))
+    // Al proveedor viajan solo la pregunta y el nombre de la pantalla; lo que cuesta lo paga odentIA (origen «ayuda»).
+    return runService(c, 200, async () => {
+      const asker = askerOf(userId, memberRole, await withOrgContext(deps.db, orgId, (tx) => orgProduct(tx, orgId)))
+      return meterAiUse(deps.db, orgId, "ayuda", async () => askHelp(deps.db, orgId, asker, parsed.data, await helpDecider(deps.llm, deps.decisions)))
+    })
   })
 
   app.post("/ask/:id/feedback", async (c) => {
