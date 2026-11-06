@@ -27,7 +27,8 @@ export const Route = createFileRoute("/_org/settings/audit")({
 const TITLE = "Actividad del equipo"
 const SUBTITLE = "Quién hizo qué, cuándo y sobre qué: una fila por acción. Es una consulta: desde aquí no se cambia nada."
 
-type Cursor = { before: string; beforeId: string } | null
+/** Dónde sigue la lista: el instante, la persona y el registro del último que se vio. */
+type Cursor = { before: string; beforePerson: string; beforeId: string } | null
 
 /** Sobre quién fue y, si lo hay, la cita, el ticket o el presupuesto: lo arma el servidor. */
 interface ActivitySubject {
@@ -48,6 +49,8 @@ interface ActivityItem {
   who: string
   areaLabel: string
   createdAt: string
+  /** Cuántos registros de la acción dicen `what` (dos pagos sin ticket: 2). */
+  times: number
   /** Lo demás que dejó la misma acción: un cobro también registra su pago y su movimiento de caja. */
   also: Array<{ what: string; count: number }>
   subject: ActivitySubject | null
@@ -61,10 +64,15 @@ interface ActivityPage {
 
 const ALL = "todas"
 
-/** «También registró un pago y aplicó un pago a un cargo (2)». */
+/** « (2 veces)»: las frases son de un registro; la cuenta dice cuántos fueron. */
+function times(count: number): string {
+  return count > 1 ? ` (${count} veces)` : ""
+}
+
+/** «También registró un pago y aplicó un pago a un cargo (2 veces)». */
 function alsoText(also: ActivityItem["also"]): string | null {
   if (also.length === 0) return null
-  const parts = also.map((item) => `${item.what.charAt(0).toLowerCase()}${item.what.slice(1)}${item.count > 1 ? ` (${item.count})` : ""}`)
+  const parts = also.map((item) => `${item.what.charAt(0).toLowerCase()}${item.what.slice(1)}${times(item.count)}`)
   const list = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} y ${parts.at(-1)}`
   return `También ${list}`
 }
@@ -133,6 +141,7 @@ function TeamActivityPage() {
       if (area !== ALL) params.set("area", area)
       if (pageParam) {
         params.set("before", pageParam.before)
+        params.set("beforePerson", pageParam.beforePerson)
         params.set("beforeId", pageParam.beforeId)
       }
       return apiFetch<{ data: ActivityPage }>(`/api/workspace/audit?${params}`)
@@ -173,7 +182,7 @@ function TeamActivityPage() {
           const also = alsoText(row.original.also)
           return (
             <span className="flex min-w-0 flex-col">
-              <span className="font-medium">{row.original.what}</span>
+              <span className="font-medium">{`${row.original.what}${times(row.original.times)}`}</span>
               {/* Lo demás se parte en renglones: no empuja «Sobre qué» fuera de la tabla. */}
               {also ? <span className="max-w-md whitespace-normal text-sm text-muted-foreground">{also}</span> : null}
             </span>

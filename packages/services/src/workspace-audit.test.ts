@@ -12,7 +12,9 @@ import { expect, it } from "vitest"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { collectCharge, createCharge, voidTicket } from "./payments.js"
 import { createPaymentMethod } from "./payment-methods.js"
+import { nextPatientNumber } from "./patients.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
+import { insertTestPatients } from "./test-patient.js"
 import { listWorkspaceAudit } from "./workspace.js"
 
 setupTestDb()
@@ -79,4 +81,56 @@ it("lo de varias personas en un mismo instante va en una fila por persona, y la 
   const second = await audit({ action: "paginas.prueba", ...first.next! })
   expect(new Set([...first.items, ...second.items].map((item) => item.id)).size).toBe(60)
   expect(second.next).toBeNull()
+})
+
+/** `n` pacientes de prueba en org_a, para registros que nombran a cada uno. */
+async function patients(n: number): Promise<string[]> {
+  const ids: string[] = []
+  for (let index = 0; index < n; index++) {
+    const [row] = await insertTestPatients(ownerDb, { organizationId: "org_a", displayName: `Persona ${index + 1}`, patientNumber: await nextPatientNumber(ownerDb, "org_a") })
+    ids.push(row!.id)
+  }
+  return ids
+}
+
+/** Todas las páginas de una acción, siguiendo el cursor. */
+async function allPages(action: string) {
+  const pages: Awaited<ReturnType<typeof audit>>[] = []
+  let next: Awaited<ReturnType<typeof audit>>["next"] = null
+  do {
+    const page = await audit({ action, ...(next ?? {}) })
+    pages.push(page)
+    next = page.next
+  } while (next && pages.length < 20)
+  return pages
+}
+
+it("un instante de varias personas justo en el límite de la página va entero a la siguiente", async () => {
+  const [p1, p2, p3] = await patients(3)
+  // 49 instantes de una acción y, antes, uno de tres personas: no cabe en la primera página.
+  await ownerDb.execute(sql`insert into audit_event (organization_id, action, entity, created_at)
+    select 'org_a', 'limite.prueba', 'prueba', '2026-08-01 10:00:00+00'::timestamptz + n * interval '1 second'
+    from generate_series(1, 49) n`)
+  await ownerDb.execute(sql`insert into audit_event (organization_id, actor_user_id, action, entity, entity_id, created_at) values
+    ('org_a', null, 'limite.prueba', 'patient', ${p1}, '2026-08-01 09:00:00+00'),
+    ('org_a', null, 'limite.prueba', 'patient', ${p2}, '2026-08-01 09:00:00+00'),
+    ('org_a', null, 'limite.prueba', 'patient', ${p3}, '2026-08-01 09:00:00+00')`)
+  const pages = await allPages("limite.prueba")
+  expect(pages.map((page) => page.items.length)).toEqual([49, 3])
+  expect(pages[1]!.items.map((item) => item.subject?.patientId).sort()).toEqual([p1, p2, p3].sort())
+})
+
+it("un instante de más de 400 registros (una carga de datos) se corta entre personas, nunca dentro de una acción", async () => {
+  const people = await patients(150)
+  // Un solo instante: tres registros por persona, 450 en total.
+  await ownerDb.execute(sql`insert into audit_event (organization_id, actor_user_id, action, entity, entity_id, created_at)
+    select 'org_a', null, 'carga.prueba', 'patient', p.id::text, '2026-07-01 08:00:00+00'
+    from unnest(${`{${people.join(",")}}`}::uuid[]) as p(id), generate_series(1, 3)`)
+  const pages = await allPages("carga.prueba")
+  const items = pages.flatMap((page) => page.items)
+  // Una acción por persona, con sus tres registros: ninguna partida ni repetida.
+  expect(items).toHaveLength(150)
+  expect(new Set(items.map((item) => item.subject?.patientId)).size).toBe(150)
+  expect(items.every((item) => item.times === 3)).toBe(true)
+  expect(pages.length).toBeGreaterThan(1)
 })

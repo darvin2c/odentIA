@@ -53,7 +53,7 @@ function accessFor(role: string): WorkspaceAccess {
  */
 const noticePermissions = (role: string) => ALL_PERMISSIONS.filter(permission => canAccess(role, permission))
 const homeInput = z.object({ branch: z.string().uuid().optional() })
-const auditInput = z.object({ action: z.string().max(120).optional(), area: z.enum(AUDIT_AREAS).optional(), before: z.string().datetime({ offset: true }).optional(), beforeId: z.string().uuid().optional() })
+const auditInput = z.object({ action: z.string().max(120).optional(), area: z.enum(AUDIT_AREAS).optional(), before: z.string().datetime({ offset: true }).optional(), beforeId: z.string().uuid().optional(), beforePerson: z.union([z.literal(""), z.string().uuid()]).optional() })
 
 export function createWorkspaceRoute(deps: CrmDeps) {
   const app = new Hono()

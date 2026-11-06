@@ -636,10 +636,13 @@ export function describeAuditEvent(action: string, origin?: string | null): Audi
  * Una acción deja a veces varios registros en el mismo momento: un cobro, su
  * pago, su aplicación a cada concepto, su ticket y su movimiento de caja. La
  * fila de «Actividad del equipo» lleva el nombre de lo que la persona hizo, y
- * lo demás va como consecuencia (issue #112). Primero lo que nombra la acción;
+ * lo demás va como consecuencia (issue #112). Primero lo que nombra la acción
+ * (firmar o anular una atención deja su cargo; cobrar, su pago y su caja);
  * nunca lo que solo la acompaña, si hay otra cosa.
  */
 const LEAD_ACTIONS = [
+  "encounter.finalized",
+  "encounter.voided",
   "ticket.voided",
   "ticket.created",
   "payment.refunded",
@@ -673,14 +676,19 @@ export function leadAuditIndex(actions: readonly string[]): number {
   return lead >= 0 ? lead : 0
 }
 
+/** Cuántos registros de esa acción dicen lo mismo que el que la nombra: dos pagos sin ticket son «Registró un pago», 2 veces. */
+export function leadAuditCount(actions: readonly string[], lead: number): number {
+  const leadWhat = phraseOf(actions[lead] ?? "").what
+  return actions.filter((action) => phraseOf(action).what === leadWhat).length
+}
+
 /** Lo demás de esa acción, con palabras, sin repetir y en un orden fijo: «Aplicó un pago a un cargo», 2 veces. */
 export function alsoAuditWords(actions: readonly string[], lead: number): Array<{ what: string; count: number }> {
   const leadWhat = phraseOf(actions[lead] ?? "").what
   const counts = new Map<string, number>()
-  actions.forEach((action, index) => {
-    if (index === lead) return
+  actions.forEach((action) => {
     const what = phraseOf(action).what
-    // Otro registro igual al que nombra la fila no se repite: la fila ya lo dice.
+    // Lo que dice lo mismo que la fila va en su cuenta (`leadAuditCount`), no aquí.
     if (what === leadWhat) return
     counts.set(what, (counts.get(what) ?? 0) + 1)
   })

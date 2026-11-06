@@ -8,7 +8,7 @@ import { countOverdueControls, getAdminRecommendations, getAdminUnreached } from
 import { countOpenHandoffs, type HandoffScope, listHandoffs, openHandoffPeopleSql } from "./agent-operations.js"
 import { type AppointmentVisit, appointmentVisit } from "./appointments.js"
 import { checkEncounterClosing } from "./encounters.js"
-import { alsoAuditWords, AUDIT_AREA_LABELS, AUDIT_AREAS, type AuditArea, auditSubjectsOf, describeAuditEvent, leadAuditIndex } from "./audit-words.js"
+import { alsoAuditWords, AUDIT_AREA_LABELS, AUDIT_AREAS, type AuditArea, auditSubjectsOf, describeAuditEvent, leadAuditCount, leadAuditIndex } from "./audit-words.js"
 import { adminRuntime, remindedUnconfirmedSql } from "./automation.js"
 import { budgetAwaitsAnswerSql, budgetLineUnitsSql } from "./budget-awaiting.js"
 import { listRecategorizedMessages } from "./clinic-messages.js"
@@ -1135,6 +1135,8 @@ export interface WorkspaceAuditItem {
   also: Array<{ what: string; count: number }>
   /** Sobre quién y sobre qué; nulo si el registro no lo dice o la historia está bloqueada. */
   subject: WorkspaceAuditSubject | null
+  /** Cuántos registros de la acción dicen `what`: dos pagos sin ticket son «Registró un pago», 2 veces. */
+  times: number
 }
 
 /** Sobre quién fue una acción y, si lo hay, la cita, el ticket o el presupuesto. */
@@ -1165,7 +1167,9 @@ type AuditRow = {
   personName: string | null
   patientId: string | null
   appointmentId: string | null
+  /** La persona de la que trata, aunque su historia esté bloqueada: agrupa y ordena la página. */
   appointmentAt: string | null
+  /** Su nombre; nulo si su historia está bloqueada (ADR 0080). */
   ticketId: string | null
   ticketNumber: number | null
   budgetId: string | null
@@ -1191,7 +1195,8 @@ function auditWhen(iso: string, locale: string, timeZone: string): string {
 
 /** De qué trata una fila: lo que nombra la acción y, si no lo tiene, lo de otro registro suyo. */
 function auditSubjectOf(rows: AuditRow[], lead: AuditRow, zone: { locale: string; timezone: string }): WorkspaceAuditSubject | null {
-  const person = rows.find((row) => row.personId && row.personName)
+  const person = rows.find((row) => row.personId)
+  // De una historia bloqueada no se dice nada: ni su nombre ni lo que se le hizo.
   if (!person?.personId || !person.personName) return null
   const ticket = [lead, ...rows].find((row) => row.ticketId)
   const appointment = [lead, ...rows].find((row) => row.appointmentId && row.appointmentAt)
@@ -1209,7 +1214,7 @@ function auditSubjectOf(rows: AuditRow[], lead: AuditRow, zone: { locale: string
 /**
  * Los registros de un mismo momento: los que dejó la misma transacción (el mismo
  * instante, `now()` de la base) de quien la hizo. Van seguidos en el orden de la
- * lista, así que una página nunca corta uno.
+ * lista, y dentro, por persona (`auditCursorKey`).
  */
 function auditMoments(rows: AuditRow[]): AuditRow[][] {
   const moments: AuditRow[][] = []
@@ -1237,19 +1242,52 @@ function auditActionsOf(moment: AuditRow[]): AuditRow[][] {
  * Actividad del equipo, de lo más reciente a lo más antiguo: una fila por acción
  * (issue #112). Un cobro deja su pago, su ticket y su movimiento de caja en el
  * mismo instante: la fila dice lo que se hizo, «también» lo demás, y sobre quién
+/** La persona de una fila para ordenar y cortar la página: su id, o vacío si no nombra a nadie (va al final del instante). */
+const auditPersonKey = (row: Pick<AuditRow, "personId">) => row.personId ?? ""
+
+/** El orden de la lista (`created_at desc`, persona desc, id desc): positivo si `a` va después de `b`. */
+function auditOrder(a: AuditRow, b: AuditRow): number {
+  if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1
+  const [pa, pb] = [auditPersonKey(a), auditPersonKey(b)]
+  if (pa !== pb) return pa < pb ? 1 : -1
+  return a.id === b.id ? 0 : a.id < b.id ? 1 : -1
+}
+
  * y qué fue, con su enlace. `area` acota por tema (`AUDIT_AREAS`); `action` sigue
  * admitiendo el código exacto para quien integra o prueba. La pantalla solo
  * muestra las palabras. De una historia bloqueada no se dice el nombre (ADR 0080).
  */
-export async function listWorkspaceAudit(tx: Db, orgId: string, input: { action?: string; area?: AuditArea; before?: string; beforeId?: string }) {
+export async function listWorkspaceAudit(
+  tx: Db,
+  orgId: string,
+  input: { action?: string; area?: AuditArea; before?: string; beforeId?: string; beforePerson?: string },
+) {
   if ((input.before && !Number.isFinite(Date.parse(input.before))) || (!!input.before !== !!input.beforeId)) throw validation("Cursor de auditoría inválido")
   if (input.area !== undefined && !(AUDIT_AREAS as readonly string[]).includes(input.area)) throw validation("Elige un área de la lista")
+ *
+ * La página va por instante, por persona y por registro (`created_at desc`, la
+ * persona y el id), y el cursor lleva los tres: corta entre instantes y, si uno no
+ * cabe (una carga de datos, un ciclo del worker), entre las personas de ese
+ * instante; nunca dentro de una acción.
   const subjects = input.area ? auditSubjectsOf(input.area) : null
   const uuid = sql.raw(`'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'`)
   const rows = await tx.execute<AuditRow>(sql`
-    with ev as (
+    select ev.id, ev.action, ev.entity, ev.entity_id as "entityId", ev.actor_user_id as "actorUserId", u.name as "actorName",
+      to_char(ev.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as "createdAt", ev.origin,
+      person.id as "personId",
+      -- Una historia bloqueada no se nombra en ninguna lista (ADR 0080).
+      case when person.record_locked_at is null then person.display_name end as "personName",
+      pt.id as "patientId",
+      ap.id as "appointmentId", ${iso(sql`ap.starts_at`)} as "appointmentAt",
+      coalesce(tk.id, pa.ticket_id, pr.ticket_id) as "ticketId",
+      coalesce(tk.ticket_number, (select t2.ticket_number from payment_ticket t2 where t2.organization_id = ${orgId} and t2.id = coalesce(pa.ticket_id, pr.ticket_id))) as "ticketNumber",
+      bu.id as "budgetId", bu.budget_number as "budgetNumber"
+    from (
       select a.id, a.action, a.entity, a.entity_id, a.actor_user_id, a.created_at,
         -- Solo un id de verdad se busca en su tabla: lo demás no es una fila de la clínica.
+  // La persona de cada registro, aunque su historia esté bloqueada: así se agrupa y se ordena.
+  // En orden de bytes ("C"), el mismo que compara la página al armar el cursor.
+  const personKey = sql`(coalesce(person.id::text, '') collate "C")`
         case when a.entity_id ~ ${uuid} then a.entity_id::uuid end as eid,
         -- Lo que hizo la propia persona (portal, enlace de reserva) lleva el actor «contact:<id>».
         case when a.actor_user_id like 'contact:%' then 'patient' else a.metadata->>'origin' end as origin
@@ -1257,17 +1295,8 @@ export async function listWorkspaceAudit(tx: Db, orgId: string, input: { action?
       where a.organization_id=${orgId}
       ${input.action ? sql`and a.action = ${input.action}` : sql``}
       ${subjects ? sql`and split_part(a.action, '.', 1) in (${sql.join(subjects.map((subject) => sql`${subject}`), sql`, `)})` : sql``}
-      ${input.before && input.beforeId ? sql`and (a.created_at,a.id) < (${input.before}::timestamptz,${input.beforeId}::uuid)` : sql``}
-      order by a.created_at desc, a.id desc limit ${AUDIT_READ + 1}
-    )
-    select ev.id, ev.action, ev.entity, ev.entity_id as "entityId", ev.actor_user_id as "actorUserId", u.name as "actorName",
-      to_char(ev.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as "createdAt", ev.origin,
-      person.id as "personId", person.display_name as "personName", pt.id as "patientId",
-      ap.id as "appointmentId", ${iso(sql`ap.starts_at`)} as "appointmentAt",
-      coalesce(tk.id, pa.ticket_id, pr.ticket_id) as "ticketId",
-      coalesce(tk.ticket_number, (select t2.ticket_number from payment_ticket t2 where t2.organization_id = ${orgId} and t2.id = coalesce(pa.ticket_id, pr.ticket_id))) as "ticketNumber",
-      bu.id as "budgetId", bu.budget_number as "budgetNumber"
-    from ev
+      ${input.before ? sql`and a.created_at <= ${input.before}::timestamptz` : sql``}
+    ) ev
     left join "user" u on u.id = ev.actor_user_id
     left join appointment ap on ev.entity = 'appointment' and ap.organization_id = ${orgId} and ap.id = ev.eid
     left join payment_ticket tk on ev.entity = 'payment_ticket' and tk.organization_id = ${orgId} and tk.id = ev.eid
@@ -1286,22 +1315,38 @@ export async function listWorkspaceAudit(tx: Db, orgId: string, input: { action?
     left join patient pt on pt.organization_id = ${orgId} and pt.id = coalesce(
       ap.patient_id, tk.patient_id, pm.patient_id, pa.patient_id, ch.patient_id, rf.patient_id, pr.patient_id,
       cmp.patient_id, bu.patient_id, en.patient_id, fu.patient_id, case when ev.entity = 'patient' then ev.eid end)
-    -- Una historia bloqueada no se nombra en ninguna lista (ADR 0080).
-    left join contact person on person.organization_id = ${orgId} and person.record_locked_at is null
+    left join contact person on person.organization_id = ${orgId}
       and person.id = coalesce(pt.person_id, cv.contact_id, op.contact_id, case when ev.entity = 'contact' then ev.eid end)
-    order by ev.created_at desc, ev.id desc`)
+    ${
+      input.before && input.beforeId
+        ? sql`where (ev.created_at, ${personKey}, ev.id) < (${input.before}::timestamptz, ${input.beforePerson ?? ""}, ${input.beforeId}::uuid)`
+        : sql``
+    }
+    order by ev.created_at desc, ${personKey} desc, ev.id desc
+    limit ${AUDIT_READ + 1}`)
   const zone = await getOrgLocale(tx, orgId)
   // Si se leyó de más, el último momento puede seguir más abajo: queda para la página siguiente.
   const truncated = rows.length > AUDIT_READ
   const read = auditMoments(rows.slice(0, AUDIT_READ))
   const moments = truncated && read.length > 1 ? read.slice(0, -1) : read
-  // Momentos enteros hasta llenar la página (al menos uno, aunque traiga más filas).
-  const taken: AuditRow[][] = []
+  // Momentos enteros hasta llenar la página. Un momento que no cabe solo (una carga de datos) se
+  // corta entre sus personas, nunca dentro de una acción; si además no se leyó entero, su última
+  // persona queda para la página siguiente.
   const shown: AuditRow[][] = []
   for (const moment of moments) {
     const actions = auditActionsOf(moment)
-    if (taken.length > 0 && shown.length + actions.length > AUDIT_PAGE) break
-    taken.push(moment)
+    if (shown.length > 0 && shown.length + actions.length > AUDIT_PAGE) {
+      cut = true
+      break
+    }
+    const whole = !(truncated && moment === read.at(-1))
+    if (shown.length === 0 && (actions.length > AUDIT_PAGE || !whole)) {
+      const fit = actions.slice(0, Math.min(AUDIT_PAGE, whole ? actions.length : Math.max(actions.length - 1, 1)))
+      shown.push(...fit)
+      cut = fit.length < actions.length || !whole
+      break
+    }
+  let cut = false
     shown.push(...actions)
   }
   const items: WorkspaceAuditItem[] = shown.map((action) => {
@@ -1323,13 +1368,15 @@ export async function listWorkspaceAudit(tx: Db, orgId: string, input: { action?
       subject: auditSubjectOf(action, head, zone),
     }
   })
-  // El cursor es el último registro del último momento mostrado: la siguiente página empieza después.
-  const lastRow = taken.at(-1)?.at(-1) ?? null
-  const more = taken.length < read.length || truncated
+      times: leadAuditCount(action.map((row) => row.action), lead),
+  // El cursor es el último registro mostrado, con su instante y su persona: la siguiente página
+  // empieza después. Lo de nadie de un instante con varias personas va al final de ese instante.
+  const lastRow = shown.flat().reduce<AuditRow | null>((last, row) => (!last || auditOrder(row, last) > 0 ? row : last), null)
+  const more = cut || shown.flat().length < rows.length
   // Las áreas viajan con su nombre: la pantalla arma el filtro sin textos propios.
   return {
     items,
-    next: more && lastRow ? { before: lastRow.createdAt, beforeId: lastRow.id } : null,
+    next: more && lastRow ? { before: lastRow.createdAt, beforePerson: auditPersonKey(lastRow), beforeId: lastRow.id } : null,
     areas: AUDIT_AREAS.map((id) => ({ id, label: AUDIT_AREA_LABELS[id] })),
   }
 }
