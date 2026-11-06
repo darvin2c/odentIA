@@ -1,4 +1,5 @@
 import type { Db } from "@odentia/db"
+import { auditEvent } from "@odentia/db/schema/org"
 import { pipeline, pipelineStage } from "@odentia/db/schema/crm"
 import { and, asc, eq, ne, sql } from "drizzle-orm"
 import { invalidField, isUniqueViolation, notFound } from "./errors.js"
@@ -189,13 +190,14 @@ export async function renameStage(
   orgId: string,
   stageId: string,
   input: { name: string },
+  actorUserId: string | null = null,
 ): Promise<Stage> {
   const name = input.name.trim()
   if (!name) throw invalidField("name", "Escribe el nombre del paso")
   if (name.length > 120) throw invalidField("name", "El nombre del paso no puede superar 120 caracteres")
   // Dos pasos del mismo embudo con el mismo nombre no se distinguen en el tablero.
   const [current] = await tx
-    .select({ pipelineId: pipelineStage.pipelineId })
+    .select({ pipelineId: pipelineStage.pipelineId, name: pipelineStage.name })
     .from(pipelineStage)
     .where(and(eq(pipelineStage.id, stageId), eq(pipelineStage.organizationId, orgId)))
     .limit(1)
@@ -219,5 +221,16 @@ export async function renameStage(
     .where(and(eq(pipelineStage.id, stageId), eq(pipelineStage.organizationId, orgId)))
     .returning()
   if (!updated) throw notFound("Etapa")
+  // Queda en la actividad del equipo, con el nombre de antes y el nuevo.
+  if (current.name !== name) {
+    await tx.insert(auditEvent).values({
+      organizationId: orgId,
+      actorUserId,
+      action: "settings.pipeline_stage_renamed",
+      entity: "pipeline_stage",
+      entityId: stageId,
+      metadata: { from: current.name, to: name },
+    })
+  }
   return toStage(updated)
 }

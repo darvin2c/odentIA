@@ -526,6 +526,8 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "settings.two_factor_reset": say("Restableció la verificación en dos pasos de alguien del equipo"),
   "settings.payment_method_created": say("Agregó un medio de pago"),
   "settings.payment_method_updated": say("Cambió un medio de pago"),
+  "settings.payment_method_moved": say("Cambió el orden de los medios de pago"),
+  "settings.pipeline_stage_renamed": say("Cambió el nombre de un paso de Oportunidades"),
   "branch.create": say("Creó una sede"),
   "branch.update": say("Cambió una sede"),
   "branch.deactivate": say("Desactivó una sede"),

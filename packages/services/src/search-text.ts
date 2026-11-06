@@ -47,6 +47,42 @@ export function foldedWordsMatch(
   return and(...words.map((word) => or(...columns.map((column) => foldedContains(column, word)))!))!
 }
 
+/**
+ * Cómo lo dicen los pacientes y cómo se llama en el catálogo: buscar
+ * «limpieza» encuentra también la profilaxis y «curación» la restauración con
+ * resina. Solo amplía lo que se encuentra; nunca cambia un nombre. Las claves
+ * van plegadas (sin tildes ni mayúsculas).
+ */
+const EVERYDAY_SERVICE_WORDS: Record<string, string[]> = {
+  limpieza: ["profilaxis", "destartraje", "tartrectomia"],
+  curacion: ["restauracion", "resina", "obturacion"],
+  calza: ["restauracion", "resina", "obturacion"],
+  empaste: ["restauracion", "resina", "obturacion"],
+  tapadura: ["restauracion", "resina", "obturacion"],
+  extraccion: ["exodoncia"],
+  sacar: ["exodoncia", "extraccion"],
+  nervio: ["endodoncia"],
+  conducto: ["endodoncia"],
+  brackets: ["ortodoncia"],
+  frenillos: ["ortodoncia"],
+  funda: ["corona"],
+  placa: ["protesis"],
+  dentadura: ["protesis"],
+  encias: ["periodoncia", "raspado"],
+  chequeo: ["consulta", "control", "evaluacion"],
+  revision: ["consulta", "control", "evaluacion"],
+}
+
+/** Las otras formas de una búsqueda de servicios: cada palabra de todos los días por la del catálogo. */
+export function everydayServiceVariants(q: string): string[] {
+  const words = searchWords(q)
+  return words.flatMap((word, index) =>
+    (EVERYDAY_SERVICE_WORDS[foldText(word)] ?? []).map((other) =>
+      [...words.slice(0, index), other, ...words.slice(index + 1)].join(" "),
+    ),
+  )
+}
+
 /** Texto plegado como `search_fold` de la base: sin tildes ni mayúsculas. */
 export function foldText(text: string): string {
   return text.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase()

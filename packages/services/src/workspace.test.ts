@@ -219,7 +219,9 @@ it("la actividad del equipo se dice con palabras, dice quién fue y se acota por
     ('org_a', null, 'appointment.status_confirmada', 'appointment', null, '2026-09-29 10:00:30+00'),
     ('org_a', null, 'portal.appointment_confirmed', 'appointment', null, '2026-09-29 10:01:00+00'),
     ('org_a', null, 'contact.updated', 'contact', '{"origin":"agent"}'::jsonb, '2026-09-29 10:02:00+00'),
-    ('org_a', null, 'tema_nuevo.sin_frase', 'x', null, '2026-09-29 10:03:00+00')`)
+    ('org_a', null, 'tema_nuevo.sin_frase', 'x', null, '2026-09-29 10:03:00+00'),
+    ('org_a', ${recipient}, 'schedule_block.absence_created', 'schedule_block', null, '2026-09-29 10:04:00+00'),
+    ('org_a', ${recipient}, 'settings.payment_method_moved', 'organization_payment_method', null, '2026-09-29 10:05:00+00')`)
   const list = (input: Parameters<typeof listWorkspaceAudit>[2]) =>
     withOrgContext(appDb, "org_a", tx => listWorkspaceAudit(tx, "org_a", input))
 
@@ -231,6 +233,11 @@ it("la actividad del equipo se dice con palabras, dice quién fue y se acota por
   })
   expect(agenda.items.find(item => item.action === "appointment.status_confirmada")).toMatchObject({
     what: "Confirmó una cita", who: "Automático",
+  })
+  // Los bloqueos y las ausencias también son de la agenda; mover un medio de pago dice qué hizo.
+  expect(agenda.items.find(item => item.action === "schedule_block.absence_created")).toMatchObject({ what: "Registró una ausencia" })
+  expect((await list({ action: "settings.payment_method_moved" })).items[0]).toMatchObject({
+    what: "Cambió el orden de los medios de pago", area: "configuracion",
   })
   // Lo que hace el paciente es suyo por naturaleza; lo del agente, solo si el registro lo dice.
   expect((await list({ area: "portal" })).items.find(item => item.action === "portal.appointment_confirmed")).toMatchObject({

@@ -124,6 +124,12 @@ export interface UpsertAgentConfigInput {
   about?: string
   disabledFunctions?: string[]
   functionNotes?: Record<string, string>
+  /**
+   * Un solo interruptor o una sola indicación: se aplica sobre lo guardado, así
+   * dos ventanas que tocan funciones distintas no se pisan.
+   */
+  functionSwitch?: { id: string; on: boolean }
+  functionNote?: { id: string; note: string }
   /** Entero de 6 a 23: después de 24 horas WhatsApp ya no deja despedirse sin mensaje aprobado. */
   closeAfterHours?: number
 }
@@ -201,17 +207,42 @@ export async function upsertAgentConfig(
       }
     }
   }
+  if (input.functionSwitch !== undefined && !switchable.includes(input.functionSwitch.id)) {
+    throw validation("Solo se pueden apagar las funciones que la ficha del agente permite")
+  }
+  if (input.functionNote !== undefined) {
+    const { id, note } = input.functionNote
+    if (!AGENT_ROLES.recepcion.functions.some((fn) => fn.id === id)) throw validation("Indicación para una función que no existe")
+    if (note.trim().length > FUNCTION_NOTE_CHARS) {
+      throw invalidField(`functionNotes.${id}`, `Cada indicación admite hasta ${FUNCTION_NOTE_CHARS} caracteres`)
+    }
+  }
+  // Bloqueada mientras se guarda: un interruptor se aplica sobre lo último guardado.
   const [current] = await tx
     .select()
     .from(agentConfig)
     .where(eq(agentConfig.organizationId, orgId))
     .limit(1)
+    .for("update")
   if (input.enabled === true && opts.modelCheck) {
     if (!(await opts.modelCheck()).responds) {
       throw new ServiceError(MODEL_NOT_RESPONDING, 409, `El modelo no responde ahora, así que Sofi no se puede encender. Ya avisamos a ${await orgProductName(tx, orgId)}.`)
     }
   }
-  const patch: Partial<typeof agentConfig.$inferInsert> = { ...input }
+  const { functionSwitch, functionNote, ...fields } = input
+  const patch: Partial<typeof agentConfig.$inferInsert> = { ...fields }
+  if (functionSwitch !== undefined) {
+    const saved = current?.disabledFunctions ?? DEFAULTS.disabledFunctions
+    patch.disabledFunctions = functionSwitch.on
+      ? saved.filter((id) => id !== functionSwitch.id)
+      : [...new Set([...saved, functionSwitch.id])]
+  }
+  if (functionNote !== undefined) {
+    const notes = { ...(current?.functionNotes ?? DEFAULTS.functionNotes) }
+    if (functionNote.note.trim()) notes[functionNote.id] = functionNote.note.trim()
+    else delete notes[functionNote.id]
+    patch.functionNotes = notes
+  }
   if (input.personaName !== undefined) patch.personaName = input.personaName?.trim() || null
   if (input.about !== undefined) patch.about = input.about.trim()
   if (input.disabledFunctions !== undefined) patch.disabledFunctions = [...new Set(input.disabledFunctions)]

@@ -20,7 +20,7 @@
  */
 import { testOnlyPersonSql } from "./conversation-state.js"
 import type { Db } from "@odentia/db"
-import { type SQL, sql } from "drizzle-orm"
+import { type SQL, type SQLWrapper, sql } from "drizzle-orm"
 import { productHooks } from "./products.js"
 import { isProfessional, ownBudgetOf } from "./budgets.js"
 import type { ClinicalAccessResource } from "./clinical-access.js"
@@ -28,13 +28,7 @@ import { purchaseOrderLabel } from "./finance.js"
 import { accountBalances } from "./payments.js"
 import { PURCHASE_STATUS_WORDS } from "./purchase-balance.js"
 import { personSearchCondition } from "./person-search.js"
-import {
-  digitsContain,
-  foldedStartsWith,
-  foldedWordsMatch,
-  referenceNumber,
-  searchDigits,
-} from "./search-text.js"
+import { digitsContain, foldedStartsWith, foldedWordsMatch, foldText, referenceNumber, searchDigits, searchWords } from "./search-text.js"
 import { pageTasks, taskAreasOfRole } from "./tasks.js"
 
 /** Tipos que se pueden quitar con el filtro de la ventana. */
@@ -92,6 +86,8 @@ export type SearchItemKind =
   | "atencion"
   | "diagnostico"
   | "receta"
+  | "descanso"
+  | "orden"
   | "documento"
   | "consentimiento"
   | "tarea"
@@ -299,6 +295,15 @@ export async function searchEverything(
 
   // --- Historia clínica: atenciones, notas, diagnósticos y recetas ----------
   if (seesPeople && can("clinical.read") && on("clinica") && !digits) {
+    // «receta», «descanso médico» u «orden» piden esas cosas: sin más palabras, las últimas;
+    // con más («receta amoxicilina»), las que además dicen eso.
+    const askedFor = (typeWords: readonly string[]): { asked: boolean; rest: string } => {
+      const words = searchWords(q)
+      const rest = words.filter((word) => !typeWords.includes(foldText(word)))
+      return { asked: rest.length < words.length, rest: rest.join(" ") }
+    }
+    const contentOr = (asked: { asked: boolean; rest: string }, columns: SQLWrapper[]): SQL =>
+      !asked.asked ? foldedWordsMatch(columns, q) : asked.rest ? foldedWordsMatch(columns, asked.rest) : sql`true`
     const clinical = (
       row: Row,
       kind: SearchItemKind,
@@ -373,7 +378,7 @@ export async function searchEverything(
       join prescription pr on pr.organization_id = pi.organization_id and pr.id = pi.prescription_id
       join patient p on p.organization_id = pi.organization_id and p.id = pi.patient_id
       where pi.organization_id = ${orgId} and pr.status <> 'anulada'
-        and ${foldedWordsMatch([sql`pi.medication_name`, sql`pi.generic_name`, sql`pi.brand_name`], q)}
+        and ${contentOr(askedFor(["receta", "recetas", "prescripcion", "prescripciones"]), [sql`pi.medication_name`, sql`pi.generic_name`, sql`pi.brand_name`])}
       order by pr.issued_at desc nulls last limit ${PER_TYPE}`)
     for (const row of prescriptions)
       clinical(
@@ -385,6 +390,31 @@ export async function searchEverything(
           target: { screen: "persona", personId: String(row.person_id), section: "documentos" },
         },
       )
+    const leaveAsked = askedFor(["descanso", "descansos", "medico", "certificado", "incapacidad"])
+    // Un descanso no tiene más texto que su nota: se encuentra pidiéndolo por su nombre.
+    const leaves = leaveAsked.asked
+      ? await rows(sql`
+      select ml.id, ml.leave_number, ml.days, ml.issued_at as at, p.id as patient_id, p.person_id
+      from medical_leave ml join patient p on p.organization_id = ml.organization_id and p.id = ml.patient_id
+      where ml.organization_id = ${orgId} and ml.status <> 'anulado'
+        and ${contentOr(leaveAsked, [sql`ml.notes`])}
+      order by ml.issued_at desc limit ${PER_TYPE}`)
+      : []
+    for (const row of leaves)
+      clinical(row, "descanso", `Descanso médico de ${Number(row.days)} ${Number(row.days) === 1 ? "día" : "días"}`, "descansos", {
+        target: { screen: "persona", personId: String(row.person_id), section: "documentos" },
+      })
+    const orders = await rows(sql`
+      select o.id, o.title, o.recipient, o.created_at as at, p.id as patient_id, p.person_id
+      from clinical_order o join patient p on p.organization_id = o.organization_id and p.id = o.patient_id
+      where o.organization_id = ${orgId} and o.cancelled_at is null
+        and ${contentOr(askedFor(["orden", "ordenes", "examen", "examenes", "interconsulta", "interconsultas"]), [sql`o.title`, sql`o.recipient`, sql`o.detail`])}
+      order by o.created_at desc limit ${PER_TYPE}`)
+    for (const row of orders)
+      clinical(row, "orden", str(row.title) ?? "Orden", "ordenes", {
+        detail: str(row.recipient),
+        target: { screen: "persona", personId: String(row.person_id), section: "documentos" },
+      })
   }
 
   // --- Documentos e imágenes (piden permiso clínico, como su lista) ---------

@@ -1,11 +1,11 @@
 import { withOrgContext } from "@odentia/db"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, eq } from "drizzle-orm"
+import { and, eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { getAgentConfig, upsertAgentConfig } from "./agentConfig.js"
 import { ensureDefaultPipeline, listPipelines, renameStage } from "./pipelines.js"
 import { completeTask, createTask, listTasks } from "./tasks.js"
-import { appDb, setupTestDb } from "./test-setup.js"
+import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
 
@@ -34,7 +34,18 @@ it("un paso se renombra, pero no cambia su momento ni su orden; otra organizaci�
   expect(renamed).toMatchObject({ name: "Pidió precio", moment: "interesado", position: 0 })
   await expect(withOrgContext(appDb, "org_a", (tx) => renameStage(tx, "org_a", first.id, { name: "   " }))).rejects.toMatchObject({ status: 400 })
   await expect(withOrgContext(appDb, "org_b", (tx) => renameStage(tx, "org_b", first.id, { name: "Ajeno" }))).rejects.toMatchObject({ status: 404 })
+  // Otro paso del mismo embudo ya se llama así: no se repite (M46).
+  const second = stages[1]!
+  await expect(withOrgContext(appDb, "org_a", (tx) => renameStage(tx, "org_a", second.id, { name: "pidió PRECIO" }))).rejects.toMatchObject({ status: 400 })
   await withOrgContext(appDb, "org_a", (tx) => renameStage(tx, "org_a", first.id, { name: "Interesado" }))
+  // Cada cambio de nombre queda en la actividad, con el de antes y el nuevo.
+  const renames = await ownerDb.execute<{ metadata: { from: string; to: string } }>(
+    sql`select metadata from audit_event where organization_id = 'org_a' and action = 'settings.pipeline_stage_renamed' and entity_id = ${first.id} order by created_at, id`,
+  )
+  expect([...renames].map((row) => row.metadata)).toEqual([
+    { from: "Interesado", to: "Pidió precio" },
+    { from: "Pidió precio", to: "Interesado" },
+  ])
 })
 
 it("tasks: crear, listar por estado, completar", async () => {

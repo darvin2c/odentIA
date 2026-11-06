@@ -88,7 +88,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo sé quién me espera?",
-        a: "En «Mis pacientes de hoy», «Sala de espera» muestra a quien recepción marcó con «Llegó», desde qué hora y cuánto lleva esperando; se actualiza solo. El nombre abre su página para mirarla antes de llamarla y «Atender» abre la atención en un clic. Si nadie marcó la llegada, «Atender» la marca solo.",
+        a: "En «Mis pacientes de hoy», «Sala de espera» muestra a quien recepción marcó con «Llegó», desde qué hora y cuánto lleva esperando; se actualiza solo. El nombre abre su página para mirarla antes de llamarla y «Atender» abre la atención en un clic. Si no hay nadie en sala ni en atención, la siguiente de «Más tarde» trae su «Atender», que marca la llegada sola.",
       },
       {
         q: "¿Por qué me aparece una atención de ayer?",
@@ -238,7 +238,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Agenda",
     parent: null,
     purpose:
-      "Las citas por día, la semana de todo el equipo con sus horas libres y la vista Agenda, que las lista día por día; un odontólogo la abre en su columna. Desde ahí reservas, mueves y cancelas citas, marcas «Llegó» cuando la persona está en la clínica y, quien atiende, pulsa «Atender». Cada cita dice en palabras cómo va (Por confirmar, Confirmada, Llegó, En atención, Atendida, No vino o Cancelada), el teléfono de la persona, de qué conversación salió y cuándo le pedirá Sofi que confirme, y te deja escribirle.",
+      "Las citas por día, la semana de todo el equipo con sus horas libres y la vista Agenda, que las lista día por día; un odontólogo la abre en su columna. Desde ahí reservas, mueves y cancelas citas, marcas «Llegó» cuando la persona está en la clínica y, quien atiende, pulsa «Atender». Al abrir una cita ves en palabras cómo va (Por confirmar, Confirmada, Llegó, En atención, Atendida, No vino o Cancelada), el teléfono de la persona, de qué conversación salió y cuándo le pedirá Sofi que confirme, y puedes escribirle.",
     terms: [
       "citas",
       "calendario",
@@ -626,7 +626,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Oportunidades",
     parent: "Personas",
     purpose:
-      "El tablero de ventas: cada interés concreto de una persona (un precio, un tratamiento, una evaluación) en cuatro pasos que avanzan solos: Interesado, Evaluación agendada (al agendar su cita), Presupuesto enviado (al presentarle el presupuesto) y Decidió (al aceptarlo o rechazarlo). Cada tarjeta dice por qué está donde está y cuál es su tarea. Muestra lo abierto y lo decidido en los últimos 30 días; el total suma solo lo abierto.",
+      "El tablero de ventas: cada interés concreto de una persona (un precio, un tratamiento, una evaluación) en cuatro pasos que avanzan solos: Interesado, Evaluación agendada (al agendar su cita), Presupuesto enviado (al presentarle el presupuesto) y Decidió (al aceptarlo o rechazarlo), que se ve en dos mitades: Ganadas y Perdidas. Cada tarjeta dice por qué está donde está y cuál es su tarea. Muestra lo abierto y lo decidido en los últimos 30 días; el total suma solo lo abierto.",
     terms: [
       "embudo",
       "pipeline",
@@ -1085,7 +1085,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Reportes",
     parent: "Gestión",
     purpose:
-      "Cómo va la clínica en un periodo, comparado con el anterior: el Resumen, Finanzas, Pacientes, Agenda y el Agente. Cada cifra abre la lista que la respalda, y cada lista y tabla se descarga. Arriba, «Pregúntale a Argos» responde con esas mismas cifras.",
+      "Cómo va la clínica en un periodo, comparado con el anterior: el Resumen, Finanzas, Pacientes, Agenda y el Agente. Las cifras que tienen una lista detrás la abren al tocarlas, y cada lista y tabla se descarga. Arriba, «Pregúntale a Argos» responde con esas mismas cifras.",
     terms: [
       "estadísticas",
       "indicadores",

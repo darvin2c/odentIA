@@ -38,7 +38,7 @@ import {
   type TemplateProduct,
   templateProductColumns,
 } from "./products.js"
-import { foldedWordsMatch } from "./search-text.js"
+import { everydayServiceVariants, foldedWordsMatch } from "./search-text.js"
 import { librarySpecialtyIds, requireOrgSpecialtyId } from "./specialties.js"
 
 function conflict(code: string, message: string, fields?: Record<string, string>): ServiceError {
@@ -726,7 +726,9 @@ export async function listServices(
   }
   const q = query.q?.trim()
   if (q) {
-    conditions.push(foldedWordsMatch([serviceCatalog.name, serviceCatalog.code], q))
+    // También como lo dicen los pacientes: «limpieza» encuentra la profilaxis.
+    const columns = [serviceCatalog.name, serviceCatalog.code]
+    conditions.push(or(foldedWordsMatch(columns, q), ...everydayServiceVariants(q).map((other) => foldedWordsMatch(columns, other)))!)
   }
   const [counted] = await tx
     .select({ total: sql<number>`count(*)::int` })

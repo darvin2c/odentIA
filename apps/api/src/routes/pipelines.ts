@@ -39,12 +39,12 @@ export function createPipelinesRoute(deps: CrmDeps) {
   })
 
   app.patch("/stages/:id", async (c) => {
-    const { orgId } = orgContextOf(c)
+    const { orgId, userId } = orgContextOf(c)
     if (!canAccess(orgContextOf(c).memberRole, "crm.write")) return notForYou(c)
     const parsed = renameInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => renameStage(tx, orgId, c.req.param("id"), parsed.data)),
+      withOrgContext(deps.db, orgId, (tx) => renameStage(tx, orgId, c.req.param("id"), parsed.data, userId)),
     )
   })
 
