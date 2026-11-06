@@ -2,7 +2,7 @@
  * Reportes › Finanzas (tablero 2): de lo cobrado a lo que deja el periodo, las
  * comisiones de cada profesional, lo que te deben y lo que debes, lo que viene
  * y de dónde vino lo cobrado. La comisión cuenta al cobrar, en su propia línea
- * (decisión 13); «En caja quedó» la descuenta cuando se paga. Cada cifra lleva
+ * (decisión 13). Cada cifra lleva
  * a su lugar de Finanzas, donde se opera (decisión 14). Todo en la moneda de la
  * clínica: lo que ya pasó con el valor de cada cobro y cada gasto, y lo que se debe
  * por moneda, con un total aproximado al cambio de hoy.
@@ -450,11 +450,11 @@ function Cascade({ data }: { data: ReportFinance }) {
   const commissionShare = rateOf(current.commissionCents, base)
   const leavesShare = rateOf(current.leavesCents, base)
   const period = spanLabel(data.period, locale)
-  const owed = data.payables.commissions.cents + data.payables.purchases.cents + data.payables.salesTax.cents
   const taxLead = current.taxCents > 0 ? `De lo cobrado en ${period}, ${money(current.taxCents)} son ${taxName} y no son de la clínica. De lo que queda, el` : null
   return (
     <ReportCard title="De lo cobrado a lo que deja el periodo">
       <div className="-mt-2 flex min-w-0 flex-wrap items-start justify-between gap-3">
+        {/* Un solo resultado del periodo: «Lo que deja». Lo que entró y salió de la caja está en Finanzas › Caja, y lo que se debe, en «Lo que debes». */}
         <p className="max-w-3xl text-sm text-muted-foreground">
           {current.cobradoCents > 0 && commissionShare !== null && otherShare !== null && leavesShare !== null
             ? leavesShare >= 0
@@ -462,15 +462,6 @@ function Cascade({ data }: { data: ReportFinance }) {
               : `En ${period} las comisiones (${commissionShare} %) y los otros gastos (${otherShare} %) pasaron lo cobrado: faltaron ${money(-current.leavesCents)}.`
             : `En ${period} no se cobró nada.`}
         </p>
-        <span className="rounded-full bg-secondary px-2.5 py-1 text-[13px] font-semibold text-foreground/80">
-          {/* Con dos monedas no hay una sola caja que sumar: se dice lo que se movió en cada una. */}
-          {data.moneyFlow
-            ? `Entró menos salió: ${data.moneyFlow.length > 0 ? amountsWords(data.moneyFlow, locale) : money(0)}`
-            : `En caja quedó ${money(current.cashLeftCents)}`}
-          {owed > 0
-            ? ` · debes ${money(owed)} (${data.payables.salesTax.cents > 0 ? `comisiones, compras e ${taxName}` : "comisiones y compras"})`
-            : ""}
-        </span>
       </div>
       {data.missing.slice(0, 3).map((gap) => (
         <MissingExpense key={`${gap.branch.id}:${gap.category}`} data={data} gap={gap} />

@@ -9,7 +9,7 @@
  * - La comisión cuenta cuando se genera, al cobrar, en su propia línea
  *   (decisión 13): `commissionsMany` es la misma cuenta de Finanzas ›
  *   Comisiones (`getMonthlyCommissions`) para varios tramos en una consulta.
- *   «En caja quedó» la descuenta cuando se paga, con los demás gastos.
+ *   `cashLeftCents` la descuenta cuando se paga, con los demás gastos.
  * - Los gastos son los de Finanzas › Gastos por su tipo; el pago de una
  *   comisión se separa de «Personal» por la liquidación que lo generó y el de
  *   una compra va en Materiales (ADR 0061).
@@ -571,43 +571,6 @@ export async function collectedByMethod(tx: Db, orgId: string, span: Span, optio
   }
 }
 
-/**
- * Lo que entró menos lo que salió en cada moneda: lo que de verdad se movió, sin
- * cambio de por medio. Cobros, gastos y el vuelto en otra moneda, cada uno en la
- * moneda en que entró o salió.
- */
-async function moneyFlowByCurrency(
-  tx: Db,
-  orgId: string,
-  span: Span,
-  business: string,
-  branchId: string | undefined,
-): Promise<CurrencyAmount[]> {
-  const expenseBranch = branchId ? sql`and e.branch_id = ${branchId}` : sql``
-  const rows = await tx.execute<{ currency: string; cents: string }>(sql`
-    select x.currency, round(sum(x.cents))::text as cents from (
-      select f.entered_currency as currency, f.entered as cents from (${paymentFlowSql(orgId, at(span.start), at(span.end), branchId)}) f
-      union all
-      select coalesce(e.tender_currency, e.currency)::text, -coalesce(e.tender_cents, e.amount_cents)::numeric from expense e
-      where e.organization_id = ${orgId} and e.spent_at >= ${at(span.start)} and e.spent_at < ${at(span.end)}
-        and (e.voided_at is null or e.voided_at >= ${at(span.end)}) ${expenseBranch}
-      union all
-      select coalesce(e.tender_currency, e.currency)::text, coalesce(e.tender_cents, e.amount_cents)::numeric from expense e
-      where e.organization_id = ${orgId} and e.spent_at < ${at(span.start)} and e.voided_at >= ${at(span.start)} and e.voided_at < ${at(span.end)} ${expenseBranch}
-      union all
-      select m.currency::text, (case when m.direction = 'ingreso' then m.amount_cents else -m.amount_cents end)::numeric
-      from cash_movement m join cash_shift s on s.organization_id = m.organization_id and s.id = m.shift_id
-      where m.organization_id = ${orgId} and m.kind = 'vuelto' and m.voided_at is null and m.created_at >= ${at(span.start)} and m.created_at < ${at(span.end)}
-        ${branchId ? sql`and s.branch_id = ${branchId}` : sql``}
-    ) x group by x.currency`)
-  return businessFirst(
-    rows
-      .map((row) => ({ currency: row.currency, cents: safeCents(row.cents) }))
-      .filter((row) => row.cents !== 0),
-    business,
-  )
-}
-
 /** Tratamientos a la vista; el resto va en «Otros». */
 const TREATMENTS_SHOWN = 6
 
@@ -790,7 +753,11 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
     commissionCents: generated(index),
     otherExpensesCents: otherExpenses(index),
     leavesCents: leaves(index),
-    /** En caja quedó: lo cobrado menos todo lo gastado, también el pago de comisiones. */
+    /**
+     * Lo cobrado menos todo lo gastado, también el pago de comisiones. Reportes ya
+     * no lo muestra (un solo resultado del periodo, «Lo que deja»); Argos lo usa
+     * para explicar por qué no coincide con lo que entró a la caja.
+     */
     cashLeftCents: cobrado(index) - spent(index).totalCents,
   })
   const period = spent(0)
@@ -812,10 +779,6 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
     trend: months.map((_, index) => tramo(index + 2)),
     /** Lo cobrado en otra moneda sin valor ni factor (filas viejas): no se puede sumar. Lo de hoy tiene su valor y ya está en las cifras. */
     otherCurrencies: (collected[0] ?? []).filter((item) => item.currency !== currency).map((item) => ({ currency: item.currency, cobradoCents: item.cents })),
-    /** Solo con segunda moneda: lo que entró menos lo que salió en cada una («En caja quedó» no se puede sumar). */
-    ...(scope.money.secondCurrency
-      ? { moneyFlow: await moneyFlowByCurrency(tx, orgId, window, currency, branchId) }
-      : {}),
     commissions: {
       generatedCents: generated(0),
       paidCents: sumOf(commissions[0], (item) => item.paidCents),

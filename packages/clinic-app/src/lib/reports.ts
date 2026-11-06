@@ -599,8 +599,6 @@ export interface FinanceSpan {
   commissionCents: number
   otherExpensesCents: number
   leavesCents: number
-  /** Lo cobrado menos todo lo gastado, también el pago de comisiones. */
-  cashLeftCents: number
 }
 
 export type DebtAgeKey = "0_30" | "31_60" | "61_90" | "90_plus"
@@ -619,8 +617,6 @@ export interface ReportFinance extends ReportHead {
   trend: FinanceSpan[]
   /** Lo cobrado en otra moneda sin valor ni factor (filas viejas): no se puede sumar. */
   otherCurrencies: Array<{ currency: string; cobradoCents: number }>
-  /** Solo con segunda moneda: lo que entró menos lo que salió en cada una. */
-  moneyFlow?: CurrencyAmount[]
   commissions: { generatedCents: number; paidCents: number; pendingCents: number; professionals: number }
   cascade: {
     cobradoCents: number
