@@ -621,8 +621,8 @@ export function generatedSolvers5(h: GoldenHelpers): GoldenSolvers {
       return {
         respuesta: `Hoy falta hacer ${h.show(coming)} de lo aceptado en los planes que siguen abiertos, al precio acordado en su presupuesto, de ${plural(work.patients, "paciente", "pacientes")}; ${
           work.unbooked.patients === work.patients
-            ? `ninguno de ellos tiene una cita por venir`
-            : `de eso, ${money(work.unbooked.cents)} es de ${plural(work.unbooked.patients, "paciente", "pacientes")} sin cita por venir`
+            ? `nada de eso tiene una cita por venir que lo lleve`
+            : `de eso, ${money(work.unbooked.cents)} es de ${plural(work.unbooked.patients, "paciente", "pacientes")} y ninguna cita por venir lo lleva`
         }.`,
         criterio: "«Lo que viene» de Reportes: lo aceptado en presupuestos (aceptados en todo o en parte) cuyo tratamiento no está realizado, cancelado ni reemplazado, a su precio acordado, a hoy.",
         nota: `Si cuentas también lo que aún no aceptan (presupuestos que esperan respuesta, lo no decidido): ${money(sumOf(waiting, (row) => row.pending))} más, en ${waiting.length} presupuestos. Con el precio de cada tratamiento aceptado del plan en vez del presupuesto: ${money(Number(plan?.cents ?? 0))} (${plan?.items ?? 0} tratamientos).`,
@@ -637,9 +637,9 @@ export function generatedSolvers5(h: GoldenHelpers): GoldenSolvers {
       const recent = list.rows.filter((row) => new Date(row.at).getTime() >= window.start.getTime()).length
       return {
         respuesta: list.total
-          ? `Hoy ${plural(list.total, "paciente aceptó", "pacientes aceptaron")} su presupuesto, ${list.total === 1 ? "tiene" : "tienen"} tratamientos por hacer y no ${list.total === 1 ? "tiene" : "tienen"} ninguna cita por venir, por ${money(cents)}. Los de más monto: ${listOf(list.rows.slice(0, 5).map((row) => ({ name: row.personName, value: `${money(row.cents ?? 0)}, ${firstOf(row.title)}` })))}.`
-          : "Hoy todos los pacientes con algo aceptado por hacer tienen una cita por venir.",
-        criterio: "La lista «Aceptaron y no tienen cita» de Reportes (la de «Lo que viene»): pacientes con lo aceptado en un presupuesto que falta hacer y sin cita programada o confirmada por venir, a hoy, de más a menos monto.",
+          ? `Hoy ${plural(list.total, "paciente aceptó", "pacientes aceptaron")} su presupuesto, ${list.total === 1 ? "tiene" : "tienen"} tratamientos por hacer y ninguna cita por venir los lleva, por ${money(cents)}. Los de más monto: ${listOf(list.rows.slice(0, 5).map((row) => ({ name: row.personName, value: `${money(row.cents ?? 0)}, ${firstOf(row.title)}` })))}.`
+          : "Hoy todo lo aceptado por hacer tiene una cita por venir que lo lleva.",
+        criterio: "La lista «Aceptaron y no tienen cita» de Reportes (la de «Lo que viene»): pacientes con lo aceptado en un presupuesto que falta hacer y que ninguna cita programada o confirmada por venir lleva (aunque tengan otra cita), a hoy, de más a menos monto.",
         nota: `«Lo que viene» entero, con cita o sin ella: ${h.show(coming)} de ${plural(coming.total.part ?? 0, "paciente", "pacientes")}. De los ${list.total} sin cita, ${recent} aceptaron este mes.`,
         datos: { total: list.total, centavos: cents, primeros: list.rows.slice(0, 20).map((row) => ({ name: row.personName, cents: row.cents, title: row.title, at: row.at })) },
       }

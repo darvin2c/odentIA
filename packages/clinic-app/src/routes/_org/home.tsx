@@ -36,7 +36,6 @@ import { PortalResendDrawer } from "../../components/portal/portal-access-sectio
 import { RegistrationHoldDrawer } from "../../components/home/registration-hold-drawer"
 import { AgendaLine, type BranchChoice, CashLine, TodayAgenda, TodayCash, TodayPatients } from "../../components/home/today"
 import { WaitingList } from "../../components/home/waiting-list"
-import { ReportListDrawer } from "../../components/reports/report-list-drawer"
 import { HomePageSkeleton, HomeSkeleton } from "../../components/skeletons/home"
 import { HomeStart, needsSetup } from "../../components/home-start"
 import { useActiveBranch } from "../../lib/active-branch"
@@ -131,8 +130,6 @@ function HomePage() {
   // «Registrar la atención» de una cita que quedó sin cerrar: la misma de la Agenda.
   const canAttend = usePermission("clinical.write")
   const attend = useAttendAppointment()
-  // Quienes aceptaron y no tienen cita: la lista de Reportes, al lado, para agendarlos desde aquí.
-  const [acceptedList, setAcceptedList] = useState(false)
   const confirmRepresentative = useMutation({
     mutationFn: (row: DuplicateRow) =>
       apiFetch(`/api/patients/${row.patientId}/responsibilities/pending/${row.id}/confirm`, { method: "POST", body: JSON.stringify({}) }),
@@ -226,7 +223,7 @@ function HomePage() {
       case "advice":
       case "unreached":
       case "budgets":
-      case "acceptedUnbooked":
+      case "overdueControls":
       case "unconfirmed":
       case "unclosed":
       case "staleEncounter":
@@ -284,8 +281,9 @@ function HomePage() {
       case "budgets":
         setBudgetsOpen(true)
         return
-      case "acceptedUnbooked":
-        setAcceptedList(true)
+      case "overdueControls":
+        // La lista de la línea de Argos «Avisar un control»: la misma, con «Solo esta vez».
+        setAdvice("recordatorio_control")
         return
       case "unsentBudget":
         setReviewing({ patientId: row.patientId, budgetId: row.id })
@@ -479,17 +477,6 @@ function HomePage() {
       />
     ) : null}
     <AdminRecommendationDrawer recommendationKey={advice} onClose={() => setAdvice(null)} />
-      {/* «Ver la lista»: se agenda desde cada fila sin salir de Inicio (tablero 12). */}
-      {acceptedList ? (
-        <ReportListDrawer
-          list="upcoming_unbooked"
-          query={{ period: "este_mes" }}
-          onClose={() => {
-            setAcceptedList(false)
-            refresh()
-          }}
-        />
-      ) : null}
     <AdminUnreachedDrawer open={unreached} onClose={() => setUnreached(false)} />
     <DetailDrawer
       open={budgets !== null}

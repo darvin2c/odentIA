@@ -256,10 +256,12 @@ const LISTS: Record<ReportListKey, ListCopy> = {
     title: "Aceptaron y no tienen cita",
     noun: { one: "persona", many: "personas" },
     how: () =>
-      "A hoy: personas con tratamientos aceptados en un presupuesto que aún no se hicieron y sin ninguna cita por venir. El importe es lo aceptado por hacer, a su precio acordado.",
+      "A hoy: personas con tratamientos aceptados en un presupuesto que aún no se hicieron y que ninguna cita por venir lleva, aunque tengan otra cita. Es la regla de Pacientes › «Por agendar». El importe es lo aceptado sin cita, a su precio acordado.",
     where: { to: "/agenda", label: "Abrir la Agenda" },
     patientTab: "plan",
-    showNext: false,
+    // Otra cita no lo lleva: se dice, para sumarlo a esa o darle otra.
+    showNext: true,
+    nextLabel: "Tiene otra cita",
     asOfToday: true,
   },
 }

@@ -4,7 +4,7 @@ import { encounter, patient } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, asc, desc, eq, inArray, isNull, type SQL, sql } from "drizzle-orm"
-import { getAdminRecommendations, getAdminUnreached } from "./agent-admin.js"
+import { countOverdueControls, getAdminRecommendations, getAdminUnreached } from "./agent-admin.js"
 import { countOpenHandoffs, type HandoffScope, listHandoffs, openHandoffPeopleSql } from "./agent-operations.js"
 import { type AppointmentVisit, appointmentVisit } from "./appointments.js"
 import { checkEncounterClosing } from "./encounters.js"
@@ -20,6 +20,7 @@ import { getCashToday } from "./finance.js"
 import { inventoryWaiting } from "./inventory.js"
 import { getOrgLocale } from "./locale.js"
 import { upcomingWork } from "./report-finance.js"
+import { patientsToSchedule } from "./to-schedule.js"
 import { windowOpen } from "./message-window.js"
 import { clinicOpenSchedule, topicUrgentAtWith } from "./topic-urgency.js"
 import {
@@ -37,6 +38,7 @@ import {
   type WaitingUnconfirmed,
   type WaitingUnclosed,
   type WaitingAcceptedUnbooked,
+  type WaitingOverdueControls,
   type WaitingUnsentBudget,
 } from "./workspace-home.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
@@ -734,11 +736,23 @@ async function waitingUnclosed(tx: Db, orgId: string, timezone: string, professi
   return { items: items.slice(0, WAITING_LIMITS.unclosed), total: rows[0]?.total ?? 0, nextAt: items[WAITING_LIMITS.unclosed]?.startsAt ?? null }
 }
 
-/** La misma cuenta de Reportes › Finanzas («No tienen cita»), en la moneda de la clínica. */
+/**
+ * Lo aceptado sin cita: cuántos son en Pacientes › «Por agendar» (la misma
+ * regla, `patientsToSchedule`), adonde lleva la fila, y lo que suma en la moneda
+ * de la clínica (la cifra «No tienen cita» de Reportes › Finanzas).
+ */
 async function acceptedUnbookedOf(tx: Db, orgId: string): Promise<WaitingAcceptedUnbooked | null> {
+  const patients = (await patientsToSchedule(tx, orgId)).length
+  if (patients === 0) return null
   const { currency } = await getOrgLocale(tx, orgId)
   const work = await upcomingWork(tx, orgId, currency, new Date())
-  return work.unbooked.patients > 0 ? { patients: work.unbooked.patients, cents: work.unbooked.cents, currency } : null
+  return { patients, cents: work.unbooked.cents, currency }
+}
+
+/** Los controles vencidos sin cita: la misma consulta de la línea de Argos «Avisar un control». */
+async function overdueControlsOf(tx: Db, orgId: string): Promise<WaitingOverdueControls | null> {
+  const counts = await countOverdueControls(tx, orgId)
+  return counts.controls > 0 ? counts : null
 }
 
 async function waitingUnconfirmed(tx: Db, orgId: string): Promise<{ items: WaitingUnconfirmed[]; total: number }> {
@@ -1006,8 +1020,14 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
     unconfirmed: access.appointments && !access.ownAppointments ? await waitingUnconfirmed(tx, orgId) : null,
     // Y cierra lo que ya pasó: ¿vino o no vino? Quien atiende, las suyas: si vino, le toca registrar la atención.
     unclosed: access.appointments ? await waitingUnclosed(tx, orgId, timezone, access.ownAppointments ? userId : null) : null,
-    // Lo aceptado sin cita, para quien ve Reportes: la fila abre esa lista para agendarlos.
+    // Lo aceptado sin cita, para quien ve Reportes: la fila lleva a Pacientes › «Por agendar».
     acceptedUnbooked: options.can?.("reports.read") ? await acceptedUnbookedOf(tx, orgId) : null,
+    // Los controles vencidos sin cita, para quien ve la agenda de la sede. Con Argos encendido son
+    // su línea «Avisar un control» (recomendación o automatización): no se repiten aquí.
+    overdueControls:
+      access.appointments && !access.ownAppointments && options.can?.("appointments.read") && !admin.enabled
+        ? await overdueControlsOf(tx, orgId)
+        : null,
     // Quien ve la agenda de la sede sabe quién ya completó su registro para su cita de hoy.
     registrationsDone: access.appointments && !access.ownAppointments ? await waitingRegistrationsDone(tx, orgId) : [],
     // El presupuesto que nadie envió le sale a quien habla con la persona (decisión 12).

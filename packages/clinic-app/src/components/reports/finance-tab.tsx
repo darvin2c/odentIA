@@ -1046,9 +1046,11 @@ function OutlookCard({ query, onOpenList }: { query: ReportQuery; onOpenList: (l
       {data.upcoming.unbooked.patients > 0 ? (
         <div className="flex flex-col gap-1.5 rounded-xl bg-warning-soft px-3.5 py-3 text-warning">
           <strong>
-            {data.upcoming.unbooked.patients} {data.upcoming.unbooked.patients === 1 ? "no tiene" : "no tienen"} cita: {money(data.upcoming.unbooked.cents)}
+            {data.upcoming.unbooked.patients} {data.upcoming.unbooked.patients === 1 ? "tiene" : "tienen"} algo sin cita: {money(data.upcoming.unbooked.cents)}
           </strong>
-          <span className="text-[13px]">«Presupuesto aceptado sin cita» de {ADMIN_NAME} deja una tarea a recepción para llamarlos.</span>
+          <span className="text-[13px]">
+            Lo aceptado que ninguna cita por venir lleva, aunque tengan otra: la regla de Pacientes › «Por agendar». «Presupuesto aceptado sin cita» de {ADMIN_NAME} deja una tarea a recepción para llamarlos.
+          </span>
           <Button type="button" size="sm" className="self-start" onClick={() => onOpenList("upcoming_unbooked")}>
             Ver {data.upcoming.unbooked.patients === 1 ? "quién" : `los ${data.upcoming.unbooked.patients}`}
           </Button>

@@ -24,6 +24,7 @@ import { orgTaxes } from "./clinic-taxes.js"
 import { unpaidPurchasesMany } from "./purchase-balance.js"
 import { debtDaysSql, debtZoneSql, overdueDebtSql, valuedDebtSql } from "./report-debts.js"
 import { firstVisitSql } from "./report-visits.js"
+import { toScheduleSql } from "./to-schedule.js"
 import { addMonths, currentMonthIn, lastMonths, monthStart, type ReportBucket } from "./report-periods.js"
 import {
   at,
@@ -412,11 +413,21 @@ export function purchasesDueOf(
 
 // --- Lo que viene y cuánto vale un paciente ---------------------------------------------
 
+/** «Aceptó y no tiene cita» (`toScheduleSql`) sobre el tratamiento `pi` de una línea, de una persona activa. */
+function lineToScheduleSql(now: Date): SQL {
+  return sql`(${toScheduleSql(
+    { id: sql`pi.id`, organizationId: sql`pi.organization_id`, status: sql`pi.status`, decisionStatus: sql`pi.decision_status` },
+    at(now),
+  )} and exists (select 1 from patient lp join contact lc on lc.organization_id = lp.organization_id and lc.id = lp.person_id
+    where lp.organization_id = pi.organization_id and lp.id = pi.patient_id and lc.is_active))`
+}
+
 /**
  * Lo que viene, a hoy: lo aceptado en presupuestos que aún no se hizo, a su
- * precio acordado, y de eso lo de pacientes sin cita por venir. De la persona,
- * no de una sede. Aún no se cobra: lo de otra moneda va al cambio de hoy y
- * `byCurrency` dice cuánto es en cada una.
+ * precio acordado, y de eso lo que no tiene cita: la regla de «Por agendar»
+ * (`toScheduleSql`), una cita por venir que lleve ese tratamiento, aunque la
+ * persona tenga otra. De la persona, no de una sede. Aún no se cobra: lo de
+ * otra moneda va al cambio de hoy y `byCurrency` dice cuánto es en cada una.
  */
 export async function upcomingWork(tx: Db, orgId: string, currency: string, now: Date) {
   const budget = { id: sql`b.id`, organizationId: sql`b.organization_id` }
@@ -431,16 +442,13 @@ export async function upcomingWork(tx: Db, orgId: string, currency: string, now:
     with pending as (
       select b.patient_id, i.currency::text as currency,
         i.price_cents::bigint * ${budgetLineUnitsSql({ billingMode: sql`i.billing_mode`, sessionsPlanned: sql`i.sessions_planned` })} as cents,
-        not exists (
-          select 1 from appointment a where a.organization_id = b.organization_id and a.patient_id = b.patient_id
-            and a.starts_at > ${at(now)} and a.status in ('programada','confirmada')
-        ) as unbooked
+        ${lineToScheduleSql(now)} as unbooked
       from treatment_budget b
       join treatment_budget_item i on i.organization_id = b.organization_id and i.budget_id = b.id
         and i.option_id = ${budgetValueOptionSql(budget)} and i.decision = 'aceptado' and i.price_cents is not null
-      left join treatment_plan_item pi on pi.organization_id = i.organization_id and pi.id = i.plan_item_id
+      join treatment_plan_item pi on pi.organization_id = i.organization_id and pi.id = i.plan_item_id
       where b.organization_id = ${orgId} and b.status in ('aceptado','parcial')
-        and (pi.id is null or pi.status not in ('realizado','cancelado','reemplazado'))
+        and pi.status not in ('realizado','cancelado','reemplazado')
     ), valued as (
       select pending.*, ${todayValueSql(sql`pending.cents`, sql`pending.currency`)} as value from pending cross join ${orgMoneySql(orgId)}
     )
@@ -1127,7 +1135,7 @@ type FinanceListRow = {
 /**
  * Las personas detrás de una cifra de Finanzas: quién debe en cada tramo de
  * antigüedad al cerrar el periodo (la misma consulta de la cifra) y quién tiene
- * algo aceptado por hacer sin cita por venir (a hoy).
+ * algo aceptado por hacer sin una cita por venir que lo lleve (a hoy).
  */
 export async function financeListRows(tx: Db, orgId: string, scope: ReportScope, list: FinanceListKey, limit: number, now: Date): Promise<FinanceListRow[]> {
   const nextAppointment = (patient: SQL): SQL => sql`exists (
@@ -1147,15 +1155,16 @@ export async function financeListRows(tx: Db, orgId: string, scope: ReportScope,
           from treatment_budget b
           join treatment_budget_item i on i.organization_id = b.organization_id and i.budget_id = b.id
             and i.option_id = ${budgetValueOptionSql(budget)} and i.decision = 'aceptado' and i.price_cents is not null
-          left join treatment_plan_item pi on pi.organization_id = i.organization_id and pi.id = i.plan_item_id
+          join treatment_plan_item pi on pi.organization_id = i.organization_id and pi.id = i.plan_item_id
           where b.organization_id = ${orgId} and b.status in ('aceptado','parcial')
             and i.currency in (${scope.currency}, ${scope.money.secondCurrency ?? scope.currency})
-            and (pi.id is null or pi.status not in ('realizado','cancelado','reemplazado'))
-            and not ${nextAppointment(sql`b.patient_id`)}
+            and ${lineToScheduleSql(now)}
           group by b.patient_id, i.currency
         )
         select case when x.currency = ${scope.currency} then x.patient_id::text else x.patient_id::text || ':' || x.currency end as id, x.at, x.patient_id as "patientId", pp.display_name as "personName", x.title,
-          null::text as "professionalName", null::text as "branchName", false as "hasNextAppointment",
+          null::text as "professionalName", null::text as "branchName",
+          -- Puede tener otra cita que no lo lleva: la fila lo dice.
+          ${nextAppointment(sql`x.patient_id`)} as "hasNextAppointment",
           x.cents::text as cents, x.currency, count(*) over()::int as total,
           x.plan_item_ids as "planItemIds", x.service_id as "serviceId"
         from pending x
