@@ -21,6 +21,12 @@ En producción había una sola demo, «Dental Smile», y solo se creaba con un c
 - **Solo se borran las demos.** Ninguna función borra una clínica real: la historia clínica y los comprobantes se guardan (decisión del 2026-10-27). Borrar una demo, volver a empezar o el borrado a los 60 días sin abrirse actúan solo sobre una organización con su fila en `admin.saas_demo`; marcar «modo demo» en Cobros no basta.
   - Las tablas se leen de la base: toda tabla que cuelga de una clínica lleva `organization_id`. Así, una tabla nueva no deja restos.
   - Las comprobaciones de la base (claves foráneas, la caja que no se borra) se suspenden solo dentro de esa transacción (`session_replication_role`). Por eso necesita la conexión owner.
+- **Cuenta una clínica coherente (2026-11-05, QA del 2026-11-04).** Lo que dice una pantalla lo confirma otra; `saas-demos-coherence.test.ts` lo comprueba.
+  - Cada cobro tiene su ticket, su aplicación y su caja (los días pasados, cerrados), como lo deja «Cobrar».
+  - Cada servicio lo da quien tiene su especialidad (la regla de la agenda) y a quien le corresponde por edad y sexo; la consulta de una especialidad que el equipo no atiende no se ofrece.
+  - Cada respuesta de Sofi sale de una corrida y contesta a lo que preguntaron; sus textos no nombran sedes ni profesionales, y las especialidades salen del equipo.
+  - Los signos vitales son del cuerpo de cada persona; las recetas y los descansos de latidIA se emiten en sus atenciones.
+  - Los teléfonos son del rango de ficción +44 7700 900000–900999. El WhatsApp de la demo queda **desconectado**: no tiene un número de verdad, así que no dice «Conectado» ni intenta enviar (decisión del usuario del 2026-11-06, sin un proveedor de demostración). Integraciones, la Bandeja y Agente dicen que es la conexión de la demo y que sus conversaciones son de ejemplo; quien vuelve a escribir vuelve a su conversación, que se reabre.
 - **El comando se retira.** La semilla de desarrollo ya no tiene modo producción, y «Dental Smile» se vuelve a crear con el botón.
 
 ## Alternativas descartadas

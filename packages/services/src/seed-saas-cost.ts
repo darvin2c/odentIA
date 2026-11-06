@@ -1,10 +1,10 @@
 import type { Db } from "@odentia/db"
 import { agentRunLedger, aiUsage } from "@odentia/db/schema/agent"
 import { encounter, encounterDictationSuggestion } from "@odentia/db/schema/clinical"
-import { conversation } from "@odentia/db/schema/crm"
+import { conversation, message } from "@odentia/db/schema/crm"
 import { reportQuestion } from "@odentia/db/schema/reports"
 import { saasAction } from "@odentia/db/schema/saas-billing"
-import { and, eq, gte, inArray, lt, notInArray } from "drizzle-orm"
+import { and, desc, eq, gte, inArray, lt, notInArray, sql } from "drizzle-orm"
 import { currentSaasPeriod } from "./saas-actions.js"
 
 /**
@@ -42,6 +42,7 @@ export async function seedSaasCostDemo(
       tier: saasAction.tier,
       occurredAt: saasAction.occurredAt,
       contactId: saasAction.contactId,
+      conversationId: saasAction.conversationId,
       encounterId: saasAction.encounterId,
     })
     .from(saasAction)
@@ -174,6 +175,9 @@ export async function seedSaasCostDemo(
     )
 
   // --- Sofi: cada respuesta es una corrida con lo que hizo --------------------------------
+  // En la conversación de la acción y a la hora de su respuesta: Agente cuenta las
+  // conversaciones con corridas y Reportes las que tienen una respuesta de Sofi, y deben
+  // ser las mismas.
   const scripts: Record<string, string[][]> = {
     informa: [["send_reply"], ["ver_sedes_y_servicios", "send_reply"], ["send_reply"]],
     gestiona: [
@@ -259,19 +263,30 @@ export async function seedSaasCostDemo(
     })
   }
   for (const row of conversationActions) {
-    const thread = row.contactId ? threadOf.get(row.contactId) : undefined
+    const thread = row.conversationId ?? (row.contactId ? threadOf.get(row.contactId) : undefined)
     if (!thread || withRuns.has(thread)) continue
-    withRuns.add(thread)
     if (row.kind === "cita") {
-      // La cita recuperada: la conversación que llevó a reservar, antes de la visita.
-      answer(
-        thread,
-        new Date(row.occurredAt.getTime() - 3 * 86_400_000),
-        scripts.gestiona?.slice(2, 5) ?? [],
-        `cita:${row.id}`,
-      )
+      // La cita recuperada: la conversación que llevó a reservar, cuando Sofi respondió antes de la visita.
+      const [reply] = await tx
+        .select({ at: message.createdAt })
+        .from(message)
+        .where(
+          and(
+            eq(message.organizationId, orgId),
+            eq(message.conversationId, thread),
+            eq(message.senderKind, "agent"),
+            lt(message.createdAt, row.occurredAt),
+            gte(message.createdAt, period.start),
+          ),
+        )
+        .orderBy(desc(message.createdAt))
+        .limit(1)
+      if (!reply) continue
+      withRuns.add(thread)
+      answer(thread, reply.at, scripts.gestiona?.slice(2, 5) ?? [], `cita:${row.id}`)
       continue
     }
+    withRuns.add(thread)
     const script = scripts[row.tier === "informa" ? "informa" : "gestiona"] ?? []
     answer(
       thread,
@@ -280,26 +295,27 @@ export async function seedSaasCostDemo(
       row.id,
     )
   }
-  // Lo que pasó al equipo o era spam: una respuesta sin cobro, en conversaciones del mes sin acción.
+  // Lo que pasó al equipo o era spam: una respuesta sin cobro, en conversaciones del mes sin
+  // acción, a la hora en que Sofi respondió.
   const loose = await tx
-    .select({ id: conversation.id })
-    .from(conversation)
+    .select({ id: message.conversationId, at: sql<Date>`min(${message.createdAt})`.mapWith(conversation.lastMessageAt) })
+    .from(message)
+    .innerJoin(conversation, and(eq(conversation.organizationId, message.organizationId), eq(conversation.id, message.conversationId)))
     .where(
       and(
-        eq(conversation.organizationId, orgId),
+        eq(message.organizationId, orgId),
+        eq(message.senderKind, "agent"),
+        gte(message.createdAt, period.start),
+        lt(message.createdAt, end),
         contactIds.length ? notInArray(conversation.contactId, contactIds) : undefined,
-        gte(conversation.lastMessageAt, period.start),
       ),
     )
+    .groupBy(message.conversationId)
+    .orderBy(message.conversationId)
     .limit(2)
   for (const row of loose) {
     if (withRuns.has(row.id)) continue
-    answer(
-      row.id,
-      at(period.start, 60 * 24 * (1 + mark(row.id) * 5)),
-      [["request_human_handoff", "send_reply"]],
-      `suelta:${row.id}`,
-    )
+    answer(row.id, row.at, [["request_human_handoff", "send_reply"]], `suelta:${row.id}`)
   }
 
   // --- Argos: preguntas con su costo; las de los primeros días, sin anotar (repartidas) ----
@@ -452,4 +468,27 @@ export async function seedSaasCostDemo(
     await tx.insert(agentRunLedger).values(runs.slice(index, index + 500))
   if (suggestions.length) await tx.insert(encounterDictationSuggestion).values(suggestions)
   return { pauses, runs: runCount, questions: questionCount }
+}
+
+/**
+ * Toda respuesta de Sofi sale de una corrida, como en la app: las de la
+ * historia que no tienen su gasto de ejemplo (`seedSaasCostDemo`, solo del mes
+ * en curso) quedan con la suya, sin tokens ni costo, porque ningún modelo
+ * corrió. Así Agente, que cuenta conversaciones con corridas, dice lo mismo que
+ * Reportes, que cuenta las que tienen una respuesta de Sofi. Va después del
+ * gasto de ejemplo y no repite una corrida que ya está cerca de su respuesta.
+ */
+export async function seedRepliesRuns(tx: Db, orgId: string): Promise<number> {
+  const inserted = await tx.execute(sql`
+    insert into agent_run_ledger (organization_id, conversation_id, trigger_message_id, model, status, started_at, ended_at, latency_ms, tools_used)
+    select m.organization_id, m.conversation_id,
+      (select i.id from message i where i.organization_id = m.organization_id and i.conversation_id = m.conversation_id
+        and i.direction = 'in' and i.created_at <= m.created_at order by i.created_at desc limit 1),
+      'gpt-6-luna', 'ok', m.created_at - interval '4 seconds', m.created_at, 4000, array['send_reply']
+    from message m
+    where m.organization_id = ${orgId} and m.direction = 'out' and m.sender_kind = 'agent'
+      and m.status in ('sent', 'delivered', 'read')
+      and not exists (select 1 from agent_run_ledger l where l.organization_id = m.organization_id and l.conversation_id = m.conversation_id
+        and l.started_at between m.created_at - interval '10 minutes' and m.created_at + interval '10 minutes')`)
+  return inserted.count ?? 0
 }
