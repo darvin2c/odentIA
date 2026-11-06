@@ -1712,7 +1712,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Actividad del equipo",
     parent: SETTINGS,
     purpose:
-      "Quién hizo qué y cuándo en la clínica, dicho con palabras. Es una consulta: desde ahí no se cambia nada.",
+      "Quién hizo qué, cuándo y sobre qué en la clínica, dicho con palabras: una fila por acción, con la persona y, si lo hay, el ticket, la cita o el presupuesto, que se abren al tocarlos. Es una consulta: desde ahí no se cambia nada.",
     terms: [
       "auditoría",
       "historial de cambios",
@@ -1731,6 +1731,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         q: "¿Por qué algunas filas dicen «El paciente o su contacto»?",
         a: "Porque lo hizo la propia persona: confirmó o cambió su cita, respondió un presupuesto o abrió un documento desde el portal o desde su enlace. Nunca queda a nombre de quien le envió el enlace.",
+      },
+      {
+        q: "¿Por qué un cobro sale en una sola fila?",
+        a: "Porque es una sola acción: al cobrar quedan registrados el pago, su aplicación a cada concepto, el ticket y el movimiento de caja, y la fila dice lo que se hizo («Emitió un ticket») con lo demás debajo, en «También». Lo mismo al anular. En «Sobre qué» van la persona y el ticket, la cita o el presupuesto, cada uno con su enlace. De una historia bloqueada no se dice el nombre.",
       },
     ],
   },

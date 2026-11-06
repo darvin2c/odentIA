@@ -1,7 +1,7 @@
 import { Badge, Field, FieldLabel, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
 import { DataTable, EmptyState, PageHeader, SubmitButton } from "@odentia/ui-patterns"
 import { useInfiniteQuery } from "@tanstack/react-query"
-import { createFileRoute, useNavigate } from "@tanstack/react-router"
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { History } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
@@ -25,11 +25,21 @@ export const Route = createFileRoute("/_org/settings/audit")({
 })
 
 const TITLE = "Actividad del equipo"
-const SUBTITLE = "Quién hizo qué y cuándo. Es una consulta: desde aquí no se cambia nada."
+const SUBTITLE = "Quién hizo qué, cuándo y sobre qué: una fila por acción. Es una consulta: desde aquí no se cambia nada."
 
 type Cursor = { before: string; beforeId: string } | null
 
-/** Una fila tal como la entrega el servidor: ya viene dicha con palabras. */
+/** Sobre quién fue y, si lo hay, la cita, el ticket o el presupuesto: lo arma el servidor. */
+interface ActivitySubject {
+  personId: string
+  personName: string
+  patientId: string | null
+  /** «Ticket N.º 000012», «Cita del 17 nov, 10:00». */
+  label: string | null
+  open: { kind: "appointment" | "ticket" | "budget"; id: string } | null
+}
+
+/** Una fila tal como la entrega el servidor: una acción, ya dicha con palabras. */
 interface ActivityItem {
   id: string
   /** Qué pasó: «Reservó una cita». */
@@ -38,6 +48,9 @@ interface ActivityItem {
   who: string
   areaLabel: string
   createdAt: string
+  /** Lo demás que dejó la misma acción: un cobro también registra su pago y su movimiento de caja. */
+  also: Array<{ what: string; count: number }>
+  subject: ActivitySubject | null
 }
 
 interface ActivityPage {
@@ -47,6 +60,49 @@ interface ActivityPage {
 }
 
 const ALL = "todas"
+
+/** «También registró un pago y aplicó un pago a un cargo (2)». */
+function alsoText(also: ActivityItem["also"]): string | null {
+  if (also.length === 0) return null
+  const parts = also.map((item) => `${item.what.charAt(0).toLowerCase()}${item.what.slice(1)}${item.count > 1 ? ` (${item.count})` : ""}`)
+  const list = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} y ${parts.at(-1)}`
+  return `También ${list}`
+}
+
+const LINK = "font-medium text-primary underline-offset-2 hover:underline"
+
+/** La persona, a su página, y la cita, el ticket o el presupuesto, a donde se abren. */
+function SubjectCell({ subject }: { subject: ActivitySubject | null }) {
+  if (!subject) return <span className="text-muted-foreground">—</span>
+  const { open, label } = subject
+  return (
+    <span className="flex min-w-0 flex-col">
+      <Link to="/people/$personId" params={{ personId: subject.personId }} className={LINK}>
+        {subject.personName}
+      </Link>
+      {label && open?.kind === "ticket" ? (
+        <Link to="/finance" search={{ tab: "cobros", ticket: open.id }} className="text-sm text-muted-foreground underline-offset-2 hover:underline">
+          {label}
+        </Link>
+      ) : label && open?.kind === "appointment" ? (
+        <Link to="/agenda" search={{ appointmentId: open.id }} className="text-sm text-muted-foreground underline-offset-2 hover:underline">
+          {label}
+        </Link>
+      ) : label && open?.kind === "budget" && subject.patientId ? (
+        <Link
+          to="/patients/$patientId"
+          params={{ patientId: subject.patientId }}
+          search={{ tab: "plan", budgetId: open.id }}
+          className="text-sm text-muted-foreground underline-offset-2 hover:underline"
+        >
+          {label}
+        </Link>
+      ) : label ? (
+        <span className="text-sm text-muted-foreground">{label}</span>
+      ) : null}
+    </span>
+  )
+}
 
 /** Fecha y hora en el formato y la zona de la clínica, no en los del navegador. */
 function formatWhen(iso: string, locale: string | undefined, timeZone: string): string {
@@ -113,7 +169,20 @@ function TeamActivityPage() {
         accessorKey: "what",
         header: "Qué hizo",
         meta: { view: { role: "title" } },
-        cell: ({ row }) => <span className="font-medium">{row.original.what}</span>,
+        cell: ({ row }) => {
+          const also = alsoText(row.original.also)
+          return (
+            <span className="flex min-w-0 flex-col">
+              <span className="font-medium">{row.original.what}</span>
+              {also ? <span className="text-sm text-muted-foreground">{also}</span> : null}
+            </span>
+          )
+        },
+      },
+      {
+        id: "subject",
+        header: "Sobre qué",
+        cell: ({ row }) => <SubjectCell subject={row.original.subject} />,
       },
       {
         accessorKey: "areaLabel",

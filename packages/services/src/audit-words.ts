@@ -627,3 +627,53 @@ export function describeAuditEvent(action: string, origin?: string | null): Audi
     areaLabel: AUDIT_AREA_LABELS[area],
   }
 }
+
+/**
+ * Una acción deja a veces varios registros en el mismo momento: un cobro, su
+ * pago, su aplicación a cada concepto, su ticket y su movimiento de caja. La
+ * fila de «Actividad del equipo» lleva el nombre de lo que la persona hizo, y
+ * lo demás va como consecuencia (issue #112). Primero lo que nombra la acción;
+ * nunca lo que solo la acompaña, si hay otra cosa.
+ */
+const LEAD_ACTIONS = [
+  "ticket.voided",
+  "ticket.created",
+  "payment.refunded",
+  "payment.voided",
+  "payment.created",
+  "charge.voided",
+  "charge.created",
+] as const
+
+/** Lo que solo acompaña a otro registro de la misma acción: no nombra la fila si hay otra cosa. */
+const FOLLOWER_ACTIONS: ReadonlySet<string> = new Set([
+  "payment.applied",
+  "payment.application_voided",
+  "cash.payment_registered",
+  "cash.movement_voided",
+  "charge.returned",
+])
+
+/** Cuál de los registros de una misma acción la nombra (su índice). */
+export function leadAuditIndex(actions: readonly string[]): number {
+  for (const lead of LEAD_ACTIONS) {
+    const index = actions.indexOf(lead)
+    if (index >= 0) return index
+  }
+  const own = actions.findIndex((action) => !FOLLOWER_ACTIONS.has(action))
+  return own >= 0 ? own : 0
+}
+
+/** Lo demás de esa acción, con palabras y sin repetir: «Aplicó un pago a un cargo», 2 veces. */
+export function alsoAuditWords(actions: readonly string[], lead: number): Array<{ what: string; count: number }> {
+  const leadWhat = phraseOf(actions[lead] ?? "").what
+  const counts = new Map<string, number>()
+  actions.forEach((action, index) => {
+    if (index === lead) return
+    const what = phraseOf(action).what
+    // Otro registro igual al que nombra la fila no se repite: la fila ya lo dice.
+    if (what === leadWhat) return
+    counts.set(what, (counts.get(what) ?? 0) + 1)
+  })
+  return [...counts].map(([what, count]) => ({ what, count }))
+}
