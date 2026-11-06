@@ -64,11 +64,13 @@ const NEW_PATIENT: NewPatientTarget = { kind: "new" }
  */
 export const Route = createFileRoute("/_org/people/")({
   // `nuevo`: abre «Nuevo paciente» con ese nombre (lo usa el buscador rápido cuando no encuentra a alguien).
-  validateSearch: (search: Record<string, unknown>): { ver?: PeopleView; q?: string; nuevo?: string } => ({
+  validateSearch: (search: Record<string, unknown>): { ver?: PeopleView; q?: string; nuevo?: string; atajo?: string } => ({
     ...search,
     ver: isPeopleView(search.ver) ? search.ver : undefined,
     q: typeof search.q === "string" ? search.q : undefined,
     nuevo: typeof search.nuevo === "string" ? search.nuevo : undefined,
+    // El atajo de la lista (`PEOPLE_SHORTCUTS`): Inicio lleva a «Presupuesto sin respuesta».
+    atajo: typeof search.atajo === "string" ? search.atajo : undefined,
   }),
   pendingComponent: PeopleLoading,
   component: PeoplePage,
