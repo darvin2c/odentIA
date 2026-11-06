@@ -611,11 +611,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo le doy acceso al portal?",
-        a: "Su enlace ya le muestra su cita, sus presupuestos, lo que tiene por firmar y sus comprobantes, sin clave: está en el «…» de su página, «Su enlace». El portal es para que vea además sus documentos cuando quiera. En su página › Datos › Enlace y portal, «Dar acceso al portal»: quién entra (la persona, o su representante si es menor), qué verá, «Comprobé su identidad: vi su documento» y cómo le llega (QR si está aquí, o su WhatsApp). El código de 6 dígitos se lo dices tú, en persona o por llamada: nunca va con el enlace.",
+        a: "Su enlace ya le muestra su cita, lo que le falta completar, sus presupuestos, lo que tiene por firmar, sus recetas y comprobantes, y sus mensajes, sin crear una cuenta: está en el «…» de su página, «Su enlace», y en Datos › Enlace y portal. El portal es para que entre cuando quiera a ver además sus documentos. En su página › Datos › Enlace y portal, «Dar acceso al portal»: quién entra (la persona, o su representante si es menor), qué verá, «Comprobé su identidad: vi su documento» y cómo le llega (QR si está aquí, o su WhatsApp). El código de 6 dígitos se lo dices tú, en persona o por llamada: nunca va con el enlace.",
       },
       {
         q: "¿Qué hago si cambió de teléfono y no entra al portal?",
-        a: "Si lo pide por el chat, Sofi lo deja en «Te espera». En su página › Datos › Acceso al portal, «Enviar nuevo enlace»: no hace falta volver a comprobar su identidad. El código se lo dices aparte.",
+        a: "Si lo pide por el chat, Sofi lo deja en «Te espera». En su página › Datos › Enlace y portal, «Enviar nuevo enlace»: no hace falta volver a comprobar su identidad. El código se lo dices aparte.",
       },
     ],
   },

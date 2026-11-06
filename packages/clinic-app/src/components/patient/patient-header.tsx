@@ -36,7 +36,7 @@ import { useCan, usePermission } from "../../lib/crm"
 import { personHeaderRules } from "../../lib/screen-rules"
 import { label } from "../../lib/glossary"
 import { sexLabel, speaksForWords } from "../../lib/patient-overview"
-import { ageFrom, hcLabel, type PatientFull, type PatientSummary } from "../../lib/patients"
+import { ageFrom, filiationGapsText, hcLabel, type PatientFull, type PatientSummary } from "../../lib/patients"
 import { PERSON_KIND_LABELS, type PersonPage, relationshipText } from "../../lib/people"
 import type { BookingSeed } from "../agenda/booking-drawer"
 import { openBookingAnywhere } from "../agenda/schedule-host"
@@ -355,7 +355,7 @@ export function PersonHeader({
                   >
                     Editar datos personales
                   </DropdownMenuItem>
-                  {patient ? (
+                  {patient && !person.archived ? (
                     <DropdownMenuItem
                       onClick={() => {
                         setMenuOpen(false)
@@ -379,7 +379,14 @@ export function PersonHeader({
             ) : null}
           </div>
         </div>
-        {patient ? <PersonalLinkDrawer patientId={patient.id} open={linkOpen} onClose={() => setLinkOpen(false)} /> : null}
+        {patient ? (
+          <PersonalLinkDrawer
+            patientId={patient.id}
+            open={linkOpen}
+            onClose={() => setLinkOpen(false)}
+            missing={filiationGapsText(detail?.missingData ?? [])}
+          />
+        ) : null}
         {patient && speaksFor.length > 0 ? (
           <p className="text-sm">
             <span className="font-medium">{speaksForWords(person.sex)}: </span>
