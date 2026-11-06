@@ -82,6 +82,11 @@ export interface DicomImage {
   pixelSpacing: [number, number] | null
   /** Por qué no se mide en mm cuando `pixelSpacing` es null. */
   spacingIssue: SpacingIssue | null
+  /**
+   * Si la escala se sabe en el paciente: calibrada (0028,0A02), corregida con la
+   * ampliación (0018,1114) o de una intraoral. Una cefalométrica sin esto no mide.
+   */
+  spacingCalibrated: boolean
   frames: number
   /** Cuadro mostrado, desde 0. */
   frame: number
@@ -102,7 +107,7 @@ function str(ds: dicomParser.DataSet, tag: string): string | null {
 }
 
 /** Por qué una radiografía no se mide en mm. */
-export type SpacingIssue = "sin_espaciado" | "ampliada" | "panoramica"
+export type SpacingIssue = "sin_espaciado" | "ampliada" | "panoramica" | "foto"
 
 function pair(ds: dicomParser.DataSet, tag: string): [number, number] | null {
   const row = ds.floatString(tag, 0)
@@ -123,18 +128,49 @@ function pair(ds: dicomParser.DataSet, tag: string): [number, number] | null {
 export function measureSpacing(ds: dicomParser.DataSet): {
   spacing: [number, number] | null
   issue: SpacingIssue | null
+  calibrated: boolean
 } {
   const modality = str(ds, "x00080060")
-  if (modality === "PX") return { spacing: null, issue: "panoramica" }
+  if (modality === "PX") return { spacing: null, issue: "panoramica", calibrated: false }
   const patient = pair(ds, "x00280030")
-  if (patient) return { spacing: patient, issue: null }
+  if (patient)
+    return {
+      spacing: patient,
+      issue: null,
+      calibrated: Boolean(str(ds, "x00280a02")) || modality === "IO",
+    }
   const imager = pair(ds, "x00181164")
-  if (!imager) return { spacing: null, issue: "sin_espaciado" }
+  if (!imager) return { spacing: null, issue: "sin_espaciado", calibrated: false }
   const magnification = ds.floatString("x00181114")
   if (magnification && magnification > 0) {
-    return { spacing: [imager[0] / magnification, imager[1] / magnification], issue: null }
+    return {
+      spacing: [imager[0] / magnification, imager[1] / magnification],
+      issue: null,
+      calibrated: true,
+    }
   }
-  return modality === "IO" ? { spacing: imager, issue: null } : { spacing: null, issue: "ampliada" }
+  return modality === "IO"
+    ? { spacing: imager, issue: null, calibrated: true }
+    : { spacing: null, issue: "ampliada", calibrated: false }
+}
+
+/**
+ * Con qué se mide según lo que la ficha dice que es: muchos equipos exportan la
+ * panorámica y la cefalométrica como radiografía común (modalidad DX) y copian
+ * la escala del sensor. La panorámica no se mide; la cefalométrica, solo con la
+ * escala calibrada.
+ */
+export function measurableSpacing(
+  image: Pick<DicomImage, "pixelSpacing" | "spacingIssue" | "spacingCalibrated">,
+  imageType: string | null | undefined,
+): { spacing: [number, number] | null; issue: SpacingIssue | null } {
+  if (imageType === "panoramica") return { spacing: null, issue: "panoramica" }
+  if (imageType === "cefalometrica" && image.pixelSpacing && !image.spacingCalibrated)
+    return { spacing: null, issue: "ampliada" }
+  return {
+    spacing: image.pixelSpacing,
+    issue: image.pixelSpacing ? null : (image.spacingIssue ?? "sin_espaciado"),
+  }
 }
 
 function unsupported(what: string): DicomUnsupportedError {
@@ -368,6 +404,7 @@ async function decodeFrame(ds: dicomParser.DataSet, frame: number): Promise<Dico
     range: { min, max },
     pixelSpacing: measurable.spacing,
     spacingIssue: measurable.issue,
+    spacingCalibrated: measurable.calibrated,
     frames,
     frame,
     meta,
@@ -417,7 +454,8 @@ export function spacingIssueText(issue: SpacingIssue | null): string {
     return "En la panorámica la imagen viene ampliada y deformada: mide en la periapical o en la tomografía."
   if (issue === "ampliada")
     return "Esta radiografía viene ampliada y el archivo no dice cuánto: en mm saldría más grande de lo real. Mide en la periapical o en la tomografía."
-  return "Esta imagen no trae su escala: se puede mirar, no medir en mm. Para medir, sube el archivo original del sensor."
+  if (issue === "foto") return "Una foto no trae escala: se puede mirar, no medir en mm."
+  return "Esta imagen no trae su escala: se puede mirar, no medir en mm. Para medir, sube el archivo que entrega el equipo de rayos X."
 }
 
 /** Distancia entre dos puntos (en píxeles de imagen) en mm, o null sin calibración. */

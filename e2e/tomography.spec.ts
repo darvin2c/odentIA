@@ -96,7 +96,7 @@ test("tomografía: la carpeta del CD se sube, queda en la ficha y se abre en pan
     timeout: 60_000,
   })
   await expect(viewer.getByText("Panorámica reconstruida")).toBeVisible()
-  await expect(viewer.getByText(/Corte \d+ de \d+/)).toBeVisible()
+  await expect(viewer.getByText(/\d+ de \d+ mm del arco/)).toBeVisible()
   await page.screenshot({ path: test.info().outputPath("tomografia-visor.png") })
   // La tomografía se acerca en cada vista, con el porcentaje a la vista.
   await viewer.getByRole("button", { name: "Acercar", exact: true }).first().click()
@@ -118,8 +118,10 @@ test("tomografía: la carpeta del CD se sube, queda en la ficha y se abre en pan
     await gotoHydrated(mobile, tenant(slug, `/patients/${patient.id}?tab=documentos&tipo=imagenes`))
     await mobile.getByRole("button", { name: /Ver Tomografía/ }).click()
     const small = mobile.getByRole("dialog", { name: /Tomografía/ })
-    await expect(small.getByRole("tab", { name: "Corte", exact: true })).toBeVisible({ timeout: 60_000 })
-    await small.getByRole("tab", { name: "Corte", exact: true }).click()
+    await expect(small.getByRole("tab", { name: "Pieza", exact: true })).toBeVisible({
+      timeout: 60_000,
+    })
+    await small.getByRole("tab", { name: "Pieza", exact: true }).click()
     await expect(small.getByText(/Desliza con el dedo/)).toBeVisible()
     await small.getByRole("button", { name: "Medir" }).click()
     await expect(small.getByText(/En el celular la tomografía es para mirar/)).toBeVisible()
@@ -164,6 +166,6 @@ test("tomografía de un niño: «Ir a la pieza» lleva a la 55 en la dentición 
   await expect(viewer.getByText("Panorámica reconstruida")).toBeVisible({ timeout: 60_000 })
   // El visor encuentra el arco del niño y el corte cae en la 55, no en una permanente.
   await viewer.getByRole("button", { name: "55", exact: true }).click()
-  await expect(viewer.getByText(/Corte \d+ de \d+ · pieza 55/)).toBeVisible()
+  await expect(viewer.getByText(/Pieza 55 · \d+ de \d+ mm del arco/)).toBeVisible()
   await page.screenshot({ path: test.info().outputPath("tomografia-nino-55.png") })
 })

@@ -469,7 +469,7 @@ type TomographyView = "panoramica" | "corte" | "cortes" | "3d"
 
 const PHONE_VIEWS: { value: TomographyView; label: string }[] = [
   { value: "panoramica", label: "Panorámica" },
-  { value: "corte", label: "Corte" },
+  { value: "corte", label: "Pieza" },
   { value: "cortes", label: "Cortes" },
   { value: "3d", label: "3D" },
 ]
@@ -526,6 +526,11 @@ export function TomographyViewer({
     [files],
   )
 
+  // Al cambiar de vista, el aviso de la anterior ya no aplica.
+  const changeView = (next: TomographyView) => {
+    setView(next)
+    setNotice(null)
+  }
   const chooseTool = (next: Tool) => {
     // Medir queda a la vista; en el celular se dice por qué no, con la salida.
     if (viewOnly && next !== "ninguna") {
@@ -580,14 +585,17 @@ export function TomographyViewer({
       title={patientName ? `${patientName} · ${doc.label}` : doc.label}
       subtitle={
         <>
-          {doc.imaging ? `${doc.imaging.sliceCount.toLocaleString(activeOrgLocale())} cortes` : ""}
-          {doc.source ? ` · ${doc.source}` : ""}
+          {doc.imaging
+            ? `${doc.imaging.sliceCount.toLocaleString(activeOrgLocale())} imágenes en el estudio`
+            : ""}
+          {/* El centro no se repite si ya está en el nombre. */}
+          {doc.source && !doc.label.includes(doc.source) ? ` · ${doc.source}` : ""}
         </>
       }
       actions={
         <>
           {ready && !viewOnly && (
-            <Tabs value={shown} onValueChange={(next) => setView(next as TomographyView)}>
+            <Tabs value={shown} onValueChange={(next) => changeView(next as TomographyView)}>
               <TabsList aria-label="Vista">
                 <TabsTrigger value="panoramica">Panorámica</TabsTrigger>
                 <TabsTrigger value="cortes">Cortes</TabsTrigger>
@@ -604,6 +612,17 @@ export function TomographyViewer({
       toolbar={
         ready && volume && window ? (
           <>
+            {/* En el celular, las vistas van primero: son la navegación principal. */}
+            {viewOnly && (
+              <div className="min-w-0 basis-full">
+                <ViewTabs
+                  label="Vista"
+                  value={view}
+                  options={PHONE_VIEWS}
+                  onValueChange={changeView}
+                />
+              </div>
+            )}
             <BrightnessControls
               volume={volume}
               preset={preset}
@@ -627,9 +646,11 @@ export function TomographyViewer({
                 <ToggleGroupItem value="medir" aria-keyshortcuts="M">
                   Medir
                 </ToggleGroupItem>
-                <ToggleGroupItem value="angulo" aria-keyshortcuts="A">
-                  Ángulo
-                </ToggleGroupItem>
+                {!viewOnly && (
+                  <ToggleGroupItem value="angulo" aria-keyshortcuts="A">
+                    Ángulo
+                  </ToggleGroupItem>
+                )}
               </ToggleGroup>
             )}
             <DropdownMenu>
@@ -708,11 +729,6 @@ export function TomographyViewer({
         </div>
       ) : (
         <>
-          {viewOnly && (
-            <div className="border-b border-slate-800 px-3 py-2">
-              <ViewTabs label="Vista" value={view} options={PHONE_VIEWS} onValueChange={setView} />
-            </div>
-          )}
           {shown === "panoramica" || shown === "corte" ? (
             <PanoramicView
               volume={volume}

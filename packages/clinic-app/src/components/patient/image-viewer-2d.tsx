@@ -17,6 +17,7 @@ import {
   type DicomImage,
   DicomUnsupportedError,
   distanceMm,
+  measurableSpacing,
   openDicom,
   renderDicom,
   spacingIssueText,
@@ -216,7 +217,7 @@ function Stage({
       </div>
       {view.orientation.flip && (
         <span className="absolute top-2 left-2 rounded-md bg-black/75 px-2 py-1 text-xs font-medium text-amber-200">
-          Volteada · el lado derecho del paciente queda a la izquierda
+          Volteada: es la imagen en espejo del archivo
         </span>
       )}
       <span className="absolute bottom-3 left-3 hidden text-xs text-slate-400 md:block">
@@ -306,6 +307,8 @@ export function ImageViewer2D({
   url,
   dicom,
   label,
+  imageType,
+  photo: isPhoto = false,
 }: {
   patientId: string
   documentId: string
@@ -313,6 +316,10 @@ export function ImageViewer2D({
   url: string | null
   dicom: boolean
   label: string
+  /** Qué es, según la ficha: decide si se mide en mm. */
+  imageType?: string | null
+  /** Una foto clínica no trae escala; se dice distinto que en una radiografía. */
+  photo?: boolean
 }) {
   const id = useId()
   const [view, setView] = useState<View2D>(DEFAULT_VIEW)
@@ -349,13 +356,17 @@ export function ImageViewer2D({
   }, [dicom, frames.image, photo.element])
 
   const image = dicom ? frames.image : undefined
+  // La escala con que se mide: la del archivo, según lo que la ficha dice que es.
+  const scale = image
+    ? measurableSpacing(image, imageType)
+    : { spacing: null, issue: isPhoto ? ("foto" as const) : ("sin_espaciado" as const) }
   const measurement = useMemo(() => {
-    if (!image || points.length !== 2) return null
-    const mm = distanceMm(image, points[0]!, points[1]!)
+    if (!scale.spacing || points.length !== 2) return null
+    const mm = distanceMm({ pixelSpacing: scale.spacing }, points[0]!, points[1]!)
     return mm === null
       ? null
       : `${mm.toLocaleString(activeOrgLocale(), { maximumFractionDigits: 2 })} mm`
-  }, [image, points])
+  }, [scale.spacing, points])
 
   const startMeasuring = () => {
     if (measuring) {
@@ -363,8 +374,8 @@ export function ImageViewer2D({
       return
     }
     // Medir queda a la vista; si aquí no se puede, se dice al intentarlo, con la salida.
-    if (!image?.pixelSpacing) {
-      setNotice(spacingIssueText(image?.spacingIssue ?? "sin_espaciado"))
+    if (!scale.spacing) {
+      setNotice(spacingIssueText(scale.issue))
       return
     }
     setMeasuring(true)

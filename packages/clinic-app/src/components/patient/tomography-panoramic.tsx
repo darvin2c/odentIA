@@ -364,6 +364,10 @@ export function PanoramicView({
   )
 
   const noArch = !control || control.length < 5
+  // Dónde está el corte elegido: la pieza y los mm a lo largo del arco (no la cantidad de cortes del archivo).
+  const arcPosition = curve.length
+    ? `${teethLabel ? `Pieza ${teethLabel} · ` : ""}${Math.round(curve[clampIndex(index)]!.s).toLocaleString(activeOrgLocale())} de ${Math.round(curve[curve.length - 1]!.s).toLocaleString(activeOrgLocale())} mm del arco`
+    : ""
   if (phoneView) {
     const chosen = crosses[CROSS_OFFSETS.indexOf(0)]
     const step = (delta: number) => setIndex((i) => clampIndex(i + delta * perMm))
@@ -399,7 +403,7 @@ export function PanoramicView({
             className="flex min-h-[55dvh] items-center"
             image={chosen.image}
             window={window}
-            label={teethLabel ? `Corte · pieza ${teethLabel}` : "Corte"}
+            label={teethLabel ? `Corte de la pieza ${teethLabel}` : "Corte"}
             tool="ninguna"
             measures={measures
               .filter((m) => m.view === "transversal")
@@ -431,11 +435,7 @@ export function PanoramicView({
                 }
               />
             </div>
-            <output className="font-semibold text-slate-100 tabular-nums">
-              Corte {Math.round(curve[clampIndex(index)]!.s)} de{" "}
-              {Math.round(curve[curve.length - 1]!.s)}
-              {teethLabel ? ` · pieza ${teethLabel}` : ""}
-            </output>
+            <output className="font-semibold text-slate-100 tabular-nums">{arcPosition}</output>
             {phoneView === "corte" && (
               <span>Desliza con el dedo para pasar al corte siguiente.</span>
             )}
@@ -545,8 +545,7 @@ export function PanoramicView({
               onValueChange={(v) => setIndex(clampIndex(Array.isArray(v) ? (v[0] ?? 0) : (v as number)))}
             />
             <output className="min-w-40 font-semibold text-slate-100 tabular-nums">
-              Corte {Math.round(curve[clampIndex(index)]!.s)} de {Math.round(curve[curve.length - 1]!.s)}
-              {teethLabel ? ` · pieza ${teethLabel}` : ""}
+              {arcPosition}
             </output>
             <span>Cada corte: 1 mm · Rueda o ↑ ↓ avanzan · Ctrl + rueda acerca</span>
           </div>
@@ -669,9 +668,6 @@ export function PanoramicView({
               </p>
             </div>
           )}
-          <p className="text-xs text-slate-500">
-            {Math.round(curve.length ? curve[curve.length - 1]!.s : 0).toLocaleString(activeOrgLocale())} mm de arco
-          </p>
           {tool !== "ninguna" && !viewOnly && (
             <Button type="button" size="sm" variant="ghost" onClick={() => onTool("ninguna")}>
               Terminar de medir

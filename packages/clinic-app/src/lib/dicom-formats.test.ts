@@ -2,7 +2,7 @@ import { createRequire } from "node:module"
 import * as dicomParser from "dicom-parser"
 import { deflateSync } from "fflate"
 import { describe, expect, it } from "vitest"
-import { decodeDicom, measureSpacing, spacingIssueText } from "./dicom"
+import { decodeDicom, measurableSpacing, measureSpacing, spacingIssueText } from "./dicom"
 
 const require = createRequire(import.meta.url)
 
@@ -142,13 +142,13 @@ function spacingOf(input: Build) {
 
 describe("medir en mm solo con una escala que vale", () => {
   it("la intraoral mide con el espaciado del detector: el sensor va pegado al diente", () => {
-    expect(spacingOf({ modality: "IO", imagerSpacing: "0.02\\0.02" })).toEqual({
+    expect(spacingOf({ modality: "IO", imagerSpacing: "0.02\\0.02" })).toMatchObject({
       spacing: [0.02, 0.02],
       issue: null,
     })
   })
   it("la cefalométrica sin su ampliación no mide: en mm saldría más grande de lo real", () => {
-    expect(spacingOf({ modality: "DX", imagerSpacing: "0.1\\0.1" })).toEqual({
+    expect(spacingOf({ modality: "DX", imagerSpacing: "0.1\\0.1" })).toMatchObject({
       spacing: null,
       issue: "ampliada",
     })
@@ -166,25 +166,47 @@ describe("medir en mm solo con una escala que vale", () => {
   it("Pixel Spacing ya está en el paciente", () => {
     expect(
       spacingOf({ modality: "DX", pixelSpacing: "0.1\\0.12", imagerSpacing: "0.13\\0.13" }),
-    ).toEqual({
+    ).toMatchObject({
       spacing: [0.1, 0.12],
       issue: null,
     })
   })
   it("la panorámica nunca mide en mm: su ampliación cambia de un punto a otro", () => {
-    expect(spacingOf({ modality: "PX", pixelSpacing: "0.1\\0.1" })).toEqual({
+    expect(spacingOf({ modality: "PX", pixelSpacing: "0.1\\0.1" })).toMatchObject({
       spacing: null,
       issue: "panoramica",
     })
   })
   it("sin espaciado no mide, y cada caso dice la salida", async () => {
-    expect(spacingOf({ modality: "IO" })).toEqual({ spacing: null, issue: "sin_espaciado" })
+    expect(spacingOf({ modality: "IO" })).toMatchObject({ spacing: null, issue: "sin_espaciado" })
     expect(spacingIssueText("panoramica")).toMatch(/periapical o en la tomografía/)
     expect(spacingIssueText("ampliada")).toMatch(/más grande de lo real/)
-    expect(spacingIssueText("sin_espaciado")).toMatch(/archivo original del sensor/)
+    expect(spacingIssueText("sin_espaciado")).toMatch(/equipo de rayos X/)
     const image = await decodeDicom(build({ modality: "PX", pixelSpacing: "0.1\\0.1" }))
     expect(image.pixelSpacing).toBeNull()
     expect(image.spacingIssue).toBe("panoramica")
+  })
+})
+
+describe("lo que la ficha dice que es también decide si se mide", () => {
+  it("una panorámica exportada como radiografía común no mide en mm", async () => {
+    const image = await decodeDicom(build({ modality: "DX", pixelSpacing: "0.1\\0.1" }))
+    expect(image.pixelSpacing).toEqual([0.1, 0.1])
+    expect(measurableSpacing(image, "panoramica")).toEqual({ spacing: null, issue: "panoramica" })
+    expect(measurableSpacing(image, "periapical").spacing).toEqual([0.1, 0.1])
+  })
+  it("una cefalométrica con la escala del sensor copiada no mide; con la ampliación, sí", async () => {
+    const copied = await decodeDicom(build({ modality: "DX", pixelSpacing: "0.1\\0.1" }))
+    expect(measurableSpacing(copied, "cefalometrica")).toEqual({ spacing: null, issue: "ampliada" })
+    const corrected = await decodeDicom(
+      build({ modality: "DX", imagerSpacing: "0.11\\0.11", magnification: "1.1" }),
+    )
+    expect(measurableSpacing(corrected, "cefalometrica").spacing?.[0]).toBeCloseTo(0.1)
+  })
+  it("una foto dice que no trae escala, sin pedir un archivo que no tiene", () => {
+    expect(spacingIssueText("foto")).toBe(
+      "Una foto no trae escala: se puede mirar, no medir en mm.",
+    )
   })
 })
 

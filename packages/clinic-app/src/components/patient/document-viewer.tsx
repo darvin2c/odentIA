@@ -652,6 +652,8 @@ function DocumentViewer({
       url={url}
       dicom={isDicomDoc(doc)}
       label={doc.label}
+      imageType={doc.imageType}
+      photo={doc.category === "foto_clinica"}
     />
   ) : isPdfDoc(doc) ? (
     <embed src={url} type="application/pdf" className="min-h-0 w-full flex-1 bg-white" />

@@ -166,7 +166,7 @@ export function Tomography3D({
             )}
           </div>
           <div className="flex flex-wrap items-center gap-3 px-3 py-2 text-xs text-slate-400">
-            <span id={`${id}-cut`}>Cortar</span>
+            <span id={`${id}-cut`}>Ver por dentro, desde adelante</span>
             <Slider
               aria-labelledby={`${id}-cut`}
               className="min-w-32 flex-1"

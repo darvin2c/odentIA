@@ -181,8 +181,10 @@ export function TomographyReview({
           {result.ignored > 0 && (
             <li>
               No se suben {result.ignored.toLocaleString(activeOrgLocale())}{" "}
-              {result.ignored === 1 ? "archivo que no es" : "archivos que no son"} imágenes DICOM (el
-              visor del CD, sus programas e imágenes de muestra).
+              {result.ignored === 1
+                ? "archivo que no es una imagen"
+                : "archivos que no son imágenes"}{" "}
+              del estudio (el visor del CD, sus programas e imágenes de muestra).
             </li>
           )}
           {others.length > 0 && (
