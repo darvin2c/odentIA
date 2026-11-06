@@ -256,6 +256,10 @@ export interface ConversationDetail {
       readReceipts: boolean
       edit: boolean
     } | null
+    /** `disabled`: lo que se escriba no sale; la Bandeja lo dice antes de escribir. Ausente en respuestas antiguas. */
+    status?: string
+    /** Es de una clínica de demostración: no tiene un número de verdad (ADR 0096). */
+    demoClinic?: boolean
   }
   /**
    * La ventana de 24 horas de WhatsApp: cerrada, solo se le envía un mensaje
@@ -600,6 +604,8 @@ export interface ConnectionItem {
    */
   /** Cuándo entró el último mensaje por esta conexión; `null` si aún ninguno. */
   lastInboundAt?: string | null
+  /** Es de una clínica de demostración: su canal no tiene un número de verdad (ADR 0096). */
+  demoClinic?: boolean
   /** Cuándo el proveedor verificó la dirección de avisos; `null` si aún no. */
   webhookVerifiedAt?: string | null
   /** Lo último que el proveedor dijo de la cuenta; cada dato que no entrega queda nulo. */

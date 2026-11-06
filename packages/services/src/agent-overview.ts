@@ -8,6 +8,7 @@ import { countLearningPending } from "./agent-learning.js"
 import { type AgentModelCheck, getAgentConfig } from "./agentConfig.js"
 import { teamWroteSql } from "./conversation-state.js"
 import { getKnowledgeDataSources, listActiveKnowledge } from "./knowledge.js"
+import { isDemoClinic } from "./demo-clinic.js"
 import { getOrgLocale } from "./locale.js"
 
 /* ---------- Resumen del agente: cómo va y qué necesita de la clínica ---------- */
@@ -83,6 +84,11 @@ export interface AgentOverview {
     receivers: string[]
     /** Pruebas que el modelo respondió. */
     sandboxTurns: number
+    /**
+     * Es una clínica de demostración (ADR 0096): su canal no tiene un número de
+     * verdad, así que sin canal se prueba con «Probar» en vez de conectar uno.
+     */
+    demoClinic: boolean
   }
 }
 
@@ -262,6 +268,7 @@ export async function getAgentOverview(
       channels: connections.map((row) => row.channel),
       receivers: receivers.map((row) => row.name),
       sandboxTurns: turns?.sandboxTurns ?? 0,
+      demoClinic: await isDemoClinic(tx, orgId),
     },
   }
 }

@@ -39,6 +39,7 @@ import {
 } from "./contacts.js"
 import { assertContactWritable, type ContactScreenView, getContactScreenView } from "./contact-screen.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
+import { isDemoClinic } from "./demo-clinic.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { CONVERSATION_VIEWS, type ConversationView, conversationViewSql, mineOrUnclaimedSql, personKeySql } from "./conversation-state.js"
 import { findOrgCountry } from "./locale.js"
@@ -1666,6 +1667,13 @@ export interface ConversationDetail {
     provider: string
     displayName: string
     capabilities: unknown
+    /**
+     * `active` o `disabled`: desactivada, lo que se escriba no sale. La Bandeja
+     * lo dice antes de escribir. `demoClinic`: es de una clínica de demostración,
+     * sin un número de verdad (ADR 0096).
+     */
+    status: string
+    demoClinic: boolean
   }
   /**
    * La ventana de 24 horas de WhatsApp, para decirlo antes de escribir: abierta
@@ -1745,6 +1753,8 @@ export async function getConversationDetail(
       provider: row.connection.provider,
       displayName: row.connection.displayName,
       capabilities: adapter?.capabilities ?? null,
+      status: row.connection.status,
+      demoClinic: row.connection.status === "active" ? false : await isDemoClinic(tx, orgId),
     },
     whatsappWindow:
       row.connection.provider === "whatsapp_cloud_api"
