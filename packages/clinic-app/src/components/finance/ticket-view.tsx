@@ -550,7 +550,8 @@ export function TicketView({
         </div>
       </article>
 
-      <div className="flex flex-col gap-2">
+      {/* Propuesta UX 2: imprimir y enviar quedan abajo a la vista, sin desplazar el ticket en el celular. */}
+      <div className="sticky bottom-0 z-10 -mx-1 flex flex-col gap-2 border-t bg-card px-1 pt-3 pb-[max(0.25rem,env(safe-area-inset-bottom))]">
         <SubmitButton className="min-h-11 w-full" pending={printing} onClick={() => void print()}>
           <Printer aria-hidden />
           Imprimir
