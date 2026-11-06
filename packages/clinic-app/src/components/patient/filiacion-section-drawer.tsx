@@ -283,6 +283,9 @@ export function FiliacionSectionDrawer({
   const countries = useMemo(() => countryChoices(profile.country), [profile.country])
   const patientAddressSource = useMemo(() => staffAddressSource("paciente"), [])
   const source = (patient ?? person ?? {}) as unknown as Partial<Record<string, unknown>>
+  // Lo que se vio al abrir: si la ficha se recarga mientras se edita (otra sesión guardó), lo
+  // que no se tocó no se vuelve a enviar con lo de antes, y la base dice de dónde se partió.
+  const [seenAtOpen] = useState(() => source)
   const sections = useSectionFields(source)
   const completing = section === "completar"
   const all = [
@@ -297,7 +300,7 @@ export function FiliacionSectionDrawer({
     : null
   const sectionFields = (completing ? all.filter((field) => wanted?.has(field.key)) : sections[section].fields)
     .filter((field) => patient || PERSON_FIELD_KEYS.has(field.key))
-  const original = initialValues(source, sectionFields)
+  const original = initialValues(seenAtOpen, sectionFields)
   // Guardar confirma los apellidos: los que se ven al guardar quedan revisados.
   const confirmsNames = Boolean(patient?.identityNeedsReview) && (completing || section === "identidad")
   // El documento repetido: además del error en el número, el enlace a quien ya lo tiene.
@@ -348,14 +351,22 @@ export function FiliacionSectionDrawer({
 
   const save = useMutation({
     mutationFn: (patch: Record<string, unknown>) => {
+      // Lo que se vio guardado de cada dato que cambia, como lo dio el servidor (el seguro se ve como una
+      // opción y se guarda en dos datos): si otra sesión lo cambió, el servidor lo dice junto al dato.
+      const base = Object.fromEntries(
+        Object.keys(patch).map((key) => {
+          const seen = seenAtOpen[key]
+          return [key, typeof seen === "string" || typeof seen === "number" || typeof seen === "boolean" ? seen : null]
+        }),
+      )
       if (!patient)
         return apiFetch(`/api/people/${person.id}/identity`, {
           method: "PATCH",
-          body: JSON.stringify(patch),
+          body: JSON.stringify({ ...patch, base }),
         })
       return apiFetch(`/api/patients/${patient.id}`, {
         method: "PATCH",
-        body: JSON.stringify(confirmsNames ? { ...patch, identityConfirmed: true } : patch),
+        body: JSON.stringify(confirmsNames ? { ...patch, base, identityConfirmed: true } : { ...patch, base }),
       })
     },
   })

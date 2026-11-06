@@ -79,6 +79,7 @@ import {
   takeOverEncounter,
   operationBodySchema,
   operationBodyShape,
+  ENCOUNTER_TEXT_FIELDS,
   type UpdateEncounterDraftPatch,
   updateEncounterDraft,
   updatePatient,
@@ -153,6 +154,8 @@ const patchInput = z.object({
   isActive: z.boolean().optional(),
   /** Recepción confirma el nombre separado tras la migración. */
   identityConfirmed: z.boolean().optional(),
+  /** Lo que se vio guardado de cada dato que cambia: otra sesión no se pisa. */
+  base: z.record(z.string().max(60), z.union([z.string().max(500), z.number(), z.boolean(), z.null()])).optional(),
 })
 
 const healthReviewState = z.enum(["unknown", "none", "recorded"], "Elige la revisión del grupo")
@@ -296,6 +299,8 @@ const encounterPatchInput = z.object({
   examination: z.record(z.string(), z.unknown()).nullish(),
   /** Claves y rangos de @odentia/clinical (VITAL_SIGNS); el servicio valida. */
   vitals: z.record(z.string(), z.union([z.number(), z.string().max(10), z.null()])).nullish(),
+  /** Lo que el editor cree guardado en cada texto que cambia (otra pestaña no se pisa). */
+  base: z.partialRecord(z.enum(ENCOUNTER_TEXT_FIELDS), z.string().max(100_000).nullable()).optional(),
 })
 const QUANTITY_RANGE = "La cantidad va de 1 a 99"
 const procedureInput = z

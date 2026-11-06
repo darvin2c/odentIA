@@ -123,6 +123,26 @@ export interface UpdateEncounterDraftPatch {
   /** Signos vitales (claves de @odentia/clinical); null los limpia. */
   vitals?: Record<string, unknown> | null
   prognosis?: string | null
+  /**
+   * Lo que el editor cree guardado en cada texto que cambia, para no pisar lo
+   * que otra pestaña o persona guardó mientras tanto (`STALE_DRAFT`). Sin él,
+   * se guarda como antes.
+   */
+  base?: Partial<Record<EncounterTextField, string | null>>
+}
+
+/** Los textos del borrador que el editor escribe y se cuidan de otra pestaña. */
+export const ENCOUNTER_TEXT_FIELDS = ["reason", "evolution", "indications", "presentIllness", "illnessDuration", "prognosis"] as const
+export type EncounterTextField = (typeof ENCOUNTER_TEXT_FIELDS)[number]
+
+/** Cómo se llama cada texto en la pantalla: así el aviso dice cuál cambió. */
+const ENCOUNTER_TEXT_LABELS: Record<EncounterTextField, string> = {
+  reason: "Motivo",
+  evolution: "Evolución",
+  indications: "Indicaciones",
+  presentIllness: "Enfermedad actual",
+  illnessDuration: "Tiempo de enfermedad",
+  prognosis: "Pronóstico",
 }
 
 export interface AddEncounterProcedureInput {
@@ -1003,6 +1023,22 @@ export async function updateEncounterDraft(
   await requirePatient(tx, orgId, patientId)
   const locked = await lockEncounter(tx, orgId, patientId, encounterId)
   assertOpenDraft(locked, actorUserId)
+  // Otra pestaña (u otra persona tras el relevo) guardó otro texto en el mismo campo:
+  // se avisa en vez de pisarlo. Lo escrito sigue en la pantalla de quien guarda.
+  // Si lo guardado ya es lo que llega (un reintento que sí había llegado), no hay conflicto.
+  const stale: Record<string, string> = {}
+  for (const field of ENCOUNTER_TEXT_FIELDS) {
+    const expected = patch.base?.[field]
+    const sent = patch[field]
+    if (expected === undefined || sent === undefined) continue
+    const stored = (locked[field] ?? "").trim()
+    if (stored === (expected ?? "").trim() || stored === (sent ?? "").trim()) continue
+    stale[field] = `Otra pestaña o persona guardó otra «${ENCOUNTER_TEXT_LABELS[field]}» mientras escribías. Copia lo tuyo si lo necesitas y recarga para ver lo último.`
+  }
+  const staleFields = Object.keys(stale)
+  if (staleFields.length > 0) {
+    throw new ServiceError("STALE_DRAFT", 409, stale[staleFields[0] as string] as string, stale)
+  }
   const set: Partial<typeof encounter.$inferInsert> = {}
   if (patch.branchId !== undefined) {
     if (patch.branchId !== null) {

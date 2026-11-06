@@ -199,6 +199,15 @@ export function ResponseDetail({
   // Cambios sin guardar: `version` cuenta cada cambio y `saved` el último guardado.
   const version = useRef(0)
   const saved = useRef(0)
+  // Las respuestas como quedaron guardadas: viajan como base del próximo guardado.
+  const savedAnswers = useRef<Record<string, unknown>>(response.answers ?? {})
+  // Un solo guardado a la vez: el siguiente sale con la base que dejó el anterior.
+  const inFlight = useRef<Promise<void> | null>(null)
+  /** Lo guardado deja al día la lista: al reabrir el formulario se parte de lo último. */
+  const remember = (updated: FormResponse) =>
+    queryClient.setQueryData<{ data: FormResponse[] }>(["form-responses", response.patientId], (old) =>
+      old ? { ...old, data: old.data.map((row) => (row.id === updated.id ? { ...row, ...updated } : row)) } : old,
+    )
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Si el último guardado falló: el autoguardado corre con el estado de su render, que
   // ya dice «pendiente» por el cambio que lo disparó, así que el fallo se recuerda aquí.
@@ -237,20 +246,34 @@ export function ResponseDetail({
   /** Guarda lo pendiente; si el servidor lo rechaza, lanza su error. */
   const persist = async (): Promise<void> => {
     clearTimeout(timer.current ?? undefined)
+    // Si hay uno en curso se espera: el siguiente sale con la base al día.
+    while (inFlight.current) await inFlight.current.catch(() => {})
     const target = version.current
     if (target === saved.current) return
     setSaveState("guardando")
+    const run = (async () => {
+      try {
+        const updated = await updateFormResponse(response.id, {
+          answers: answersForServer(schema, form.state.values.answers),
+          // De qué respuestas guardadas partió: si otra pestaña guardó otras, se avisa en vez de pisarlas.
+          baseAnswers: savedAnswers.current,
+        })
+        savedAnswers.current = updated.data.answers ?? {}
+        remember(updated.data)
+        saved.current = target
+        saveFailed.current = false
+        setSaveState(version.current === target ? "guardado" : "pendiente")
+      } catch (error) {
+        setSaveState("error")
+        saveFailed.current = true
+        throw error
+      }
+    })()
+    inFlight.current = run
     try {
-      await updateFormResponse(response.id, {
-        answers: answersForServer(schema, form.state.values.answers),
-      })
-      saved.current = target
-      saveFailed.current = false
-      setSaveState(version.current === target ? "guardado" : "pendiente")
-    } catch (error) {
-      setSaveState("error")
-      saveFailed.current = true
-      throw error
+      await run
+    } finally {
+      if (inFlight.current === run) inFlight.current = null
     }
   }
   // Guardado automático 1,2 s después del último cambio: lo que el servidor
@@ -277,15 +300,23 @@ export function ResponseDetail({
   // biome-ignore lint/correctness/useExhaustiveDependencies: solo al desmontar; lee el borrador vigente al salir.
   useEffect(
     () => () => {
-      if (version.current === saved.current) return
       const title = response.templateTitle ?? "el formulario"
-      updateFormResponse(response.id, {
-        answers: answersForServer(schema, form.state.values.answers),
-      }).catch((error: unknown) =>
-        toast.error(`No se guardaron los últimos cambios de «${title}». ${submitErrorMessage(error)}`, {
-          description: "Vuelve a abrirlo y revisa las respuestas.",
-        }),
-      )
+      // Primero termina el guardado en curso; después, si aún falta algo, sale con la base que dejó.
+      void (async () => {
+        while (inFlight.current) await inFlight.current.catch(() => {})
+        if (version.current === saved.current) return
+        try {
+          const updated = await updateFormResponse(response.id, {
+            answers: answersForServer(schema, form.state.values.answers),
+            baseAnswers: savedAnswers.current,
+          })
+          remember(updated.data)
+        } catch (error) {
+          toast.error(`No se guardaron los últimos cambios de «${title}». ${submitErrorMessage(error)}`, {
+            description: "Vuelve a abrirlo y revisa las respuestas.",
+          })
+        }
+      })()
     },
     [],
   )
