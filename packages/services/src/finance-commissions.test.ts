@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto"
 import { member } from "@odentia/db/schema/auth"
 import { encounter, encounterProcedure } from "@odentia/db/schema/clinical"
 import { branch } from "@odentia/db/schema/org"
-import { eq } from "drizzle-orm"
+import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import {
@@ -21,7 +21,7 @@ import {
   voidCommissionSettlement,
   voidExpense,
 } from "./finance.js"
-import { collectCharge, createCharge, refundCredit, voidTicket } from "./payments.js"
+import { collectCharge, createCharge, getTicketReturnable, refundCredit, returnFromTicket, voidTicket } from "./payments.js"
 import { createPromotion } from "./promotions.js"
 import { getReportFinance, getReportPromotions } from "./report-finance.js"
 import { getReportProfessionals } from "./report-summary.js"
@@ -333,4 +333,69 @@ it("el mes en Reportes concilia cobrado, gastos y deuda de la sede, y el cobro c
     discountCents: 112_100,
     collectedCents: 19900,
   })
+})
+
+it("después de «Devolver», Por profesional cuadra con Comisiones: lo cobrado el día del cobro y lo devuelto el día que se devolvió", async () => {
+  const f = await clinicalFixture()
+  await ownerDb.insert(member).values({ id: randomUUID(), organizationId: "org_a", userId: f.actor, role: "clinician", createdAt: new Date() })
+  const branchId = await seedBranch()
+  const cash = await f.run((tx) => createPaymentMethod(tx, "org_a", f.actor, { name: "Efectivo devolución", typeCode: "10" }))
+  // Dos actos de la misma atención, que se firma antes de cobrarlos.
+  const procedures = await ownerDb
+    .insert(encounterProcedure)
+    .values(
+      ["Endodoncia con devolución", "Corona con devolución"].map((description) => ({
+        organizationId: "org_a",
+        encounterId: f.encounter.id,
+        serviceId: f.service.id,
+        description,
+        priceCents: 30000,
+        currency: "PEN",
+        createdBy: f.actor,
+      })),
+    )
+    .returning()
+  await ownerDb
+    .update(encounter)
+    .set({ status: "finalizada", finalizedAt: new Date(), signerName: "Clínico", signerRegistration: "12345" })
+    .where(eq(encounter.id, f.encounter.id))
+  const attended = async (description: string) => {
+    const procedure = procedures.find((row) => row.description === description)!
+    return f.run((tx) => createCharge(tx, ...f.args, { encounterProcedureId: procedure.id }))
+  }
+  await f.run((tx) => setCommissionRate(tx, "org_a", f.actor, { professionalUserId: f.actor, rateBps: 1000 }))
+  const collect = async (chargeId: string) =>
+    f.run((tx) => collectCharge(tx, ...f.args, { branchId, chargeIds: [chargeId], payments: [{ paymentMethodId: cash.id, amountCents: 30000 }], requestId: randomUUID() }))
+  const giveBack = async (ticketId: string) => {
+    const { lines } = await f.run((tx) => getTicketReturnable(tx, "org_a", f.patient.id, ticketId))
+    await f.run((tx) =>
+      returnFromTicket(tx, "org_a", f.actor, f.patient.id, ticketId, {
+        branchId,
+        lines: [{ chargeId: lines[0]!.chargeId, amountCents: 10000 }],
+        paymentMethodId: cash.id,
+        reason: "Reclamo",
+        requestId: randomUUID(),
+      }),
+    )
+  }
+  const professional = async (period: string) =>
+    (await f.run((tx) => getReportProfessionals(tx, "org_a", { period, branchId }))).rows.find((row) => row.userId === f.actor)?.collectedCents ?? 0
+
+  // Mismo mes: se cobran 300 y se devuelven 100. Quedan 200, en los dos lados (antes, Por profesional restaba 100 dos veces).
+  const first = await attended("Endodoncia con devolución")
+  const paid = await collect(first.id)
+  await giveBack(paid.ticket.id)
+  const period = currentPeriod()
+  const monthly = await f.run((tx) => getMonthlyCommissions(tx, "org_a", { professionalUserId: f.actor, ...period }))
+  expect(monthly.baseCents).toBe(20000)
+  expect(await professional("este_mes")).toBe(20000)
+
+  // Cobrado el mes pasado y devuelto este: el mes pasado no cambia (300) y este resta lo devuelto (−100).
+  // Antes, el reemplazo volvía a contar este mes como cobrado.
+  const second = await attended("Corona con devolución")
+  const earlier = await collect(second.id)
+  const lastMonth = sql`now() - interval '35 days'`
+  await ownerDb.execute(sql`update patient_payment_application set created_at = ${lastMonth} where payment_id = ${earlier.payments[0]!.id}`)
+  await giveBack(earlier.ticket.id)
+  expect(await professional("este_mes")).toBe(20000 - 10000)
 })

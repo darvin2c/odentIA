@@ -47,7 +47,7 @@ import {
 } from "@odentia/db/schema/finance"
 import { purchaseOrder, supplier, supplierCreditUse } from "@odentia/db/schema/inventory"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, or, type SQL, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, or, type SQL, sql } from "drizzle-orm"
 import {
   branchNotFound,
   isUniqueViolation,
@@ -2060,16 +2060,25 @@ async function collectedApplications(
      * de un mes ya cerrado, que no cambian por lo que pase después).
      */
     liveNow?: boolean
+    /**
+     * Como «Lo cobrado por tratamiento» (ADR 0068): lo que después se devolvió
+     * cuenta el día que se cobró, y no su reemplazo. La diferencia devuelta se
+     * resta aparte, el día de la devolución (`returnedApplications`).
+     */
+    returnsApart?: boolean
   } = {},
 ): Promise<CollectedApp[]> {
   const stillLive = (column: typeof patientPaymentApplication.voidedAt | typeof patientCharge.voidedAt | typeof patientPayment.voidedAt) =>
     query.liveNow ? isNull(column) : or(isNull(column), gte(column, end))
+  // Con `returnsApart`, lo anulado por una devolución sigue contando: su diferencia se resta aparte.
+  const keptOrReturned = (column: typeof patientPaymentApplication.voidedAt | typeof patientCharge.voidedAt) =>
+    query.returnsApart ? or(stillLive(column), isNotNull(patientPaymentApplication.returnId))! : stillLive(column)
   const filters = [
     eq(patientPaymentApplication.organizationId, orgId),
     gte(patientPaymentApplication.createdAt, start),
     lt(patientPaymentApplication.createdAt, end),
-    stillLive(patientPaymentApplication.voidedAt),
-    stillLive(patientCharge.voidedAt),
+    keptOrReturned(patientPaymentApplication.voidedAt),
+    keptOrReturned(patientCharge.voidedAt),
     stillLive(patientPayment.voidedAt),
     isNull(encounterProcedure.voidedAt),
     eq(encounter.status, "finalizada"),
@@ -2077,6 +2086,7 @@ async function collectedApplications(
   ]
   if (query.professionalUserId) filters.push(eq(encounter.professionalUserId, query.professionalUserId))
   if (query.branchId) filters.push(eq(patientPayment.branchId, query.branchId))
+  if (query.returnsApart) filters.push(isNull(patientPaymentApplication.replacesApplicationId))
   const rows = await tx
     .select({
       app: patientPaymentApplication,
@@ -2187,11 +2197,14 @@ export async function allocateRefunds(
     .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
   for (const refund of monthRefunds) {
     const total = paymentTotals.get(refund.paymentId) ?? 0
+    // Lo que anuló esta misma devolución ya no estaba en pie: su reemplazo es lo que queda.
+    // (Su `voidedAt` puede quedar unos milisegundos después de la devolución.)
     const liveAtRefund = allApps.filter(
       (a) =>
         a.paymentId === refund.paymentId &&
         a.createdAt <= refund.createdAt &&
-        (a.voidedAt === null || a.voidedAt > refund.createdAt),
+        (a.voidedAt === null || a.voidedAt > refund.createdAt) &&
+        !(refund.returnId !== null && a.returnId === refund.returnId),
     )
     const earlier = allRefunds
       .filter((r) => r.paymentId === refund.paymentId && r.createdAt < refund.createdAt)
@@ -2801,8 +2814,12 @@ export async function collectedByProfessional(
 ): Promise<
   Array<{ professionalUserId: string; name: string | null; currency: string; cobradoCents: number }>
 > {
+  // Como «Lo cobrado por tratamiento»: lo cobrado cuenta el día del cobro y lo
+  // devuelto se resta el día de la devolución. Así un mes cerrado no cambia y la
+  // suma de los meses es lo que de verdad quedó cobrado, como en Comisiones.
   const apps = await collectedApplications(tx, orgId, range.start, range.end, money, {
     branchId: range.branchId,
+    returnsApart: true,
   })
   const totals = await paymentTotalsOf(
     tx,
@@ -2828,6 +2845,11 @@ export async function collectedByProfessional(
     list.push(value)
     profSums.set(a.professionalUserId, list)
   }
+  for (const returned of await returnedApplications(tx, orgId, range, money)) {
+    const list = profSums.get(returned.professionalUserId) ?? []
+    list.push(returned.value)
+    profSums.set(returned.professionalUserId, list)
+  }
   const names = await userNames(tx, [...profSums.keys()])
   return [...profSums].map(([professionalUserId, values]) => ({
     professionalUserId,
@@ -2835,6 +2857,53 @@ export async function collectedByProfessional(
     currency: money.currency,
     cobradoCents: roundMoneyValue(sumMoneyValues(values)),
   }))
+}
+
+/**
+ * Lo devuelto en el tramo de lo cobrado por lo que atendió cada profesional,
+ * con signo negativo: de cada aplicación que anuló una devolución, la parte que
+ * no pasó a su reemplazo. Con el valor congelado de su pago.
+ */
+async function returnedApplications(
+  tx: Db,
+  orgId: string,
+  range: { start: Date; end: Date; branchId?: string },
+  money: OrgMoney,
+): Promise<Array<{ professionalUserId: string; value: MoneyFraction | null }>> {
+  const kept = sql<number>`coalesce((select sum(n.amount_cents) from patient_payment_application n
+    where n.organization_id = ${patientPaymentApplication.organizationId} and n.replaces_application_id = ${patientPaymentApplication.id}), 0)::int`
+  const filters = [
+    eq(patientPaymentApplication.organizationId, orgId),
+    isNotNull(patientPaymentApplication.returnId),
+    gte(patientPaymentApplication.voidedAt, range.start),
+    lt(patientPaymentApplication.voidedAt, range.end),
+    or(isNull(patientPayment.voidedAt), gte(patientPayment.voidedAt, range.end))!,
+    isNull(encounterProcedure.voidedAt),
+    eq(encounter.status, "finalizada"),
+    isNull(encounter.voidedAt),
+  ]
+  if (range.branchId) filters.push(eq(patientPayment.branchId, range.branchId))
+  const rows = await tx
+    .select({
+      appCents: patientPaymentApplication.amountCents,
+      kept,
+      payment: patientPayment,
+      professionalUserId: encounter.professionalUserId,
+    })
+    .from(patientPaymentApplication)
+    .innerJoin(patientPayment, and(eq(patientPayment.id, patientPaymentApplication.paymentId), eq(patientPayment.organizationId, orgId)))
+    .innerJoin(patientCharge, and(eq(patientCharge.id, patientPaymentApplication.chargeId), eq(patientCharge.organizationId, orgId)))
+    .innerJoin(
+      encounterProcedure,
+      and(eq(encounterProcedure.id, patientCharge.encounterProcedureId), eq(encounterProcedure.organizationId, orgId)),
+    )
+    .innerJoin(encounter, and(eq(encounter.id, encounterProcedure.encounterId), eq(encounter.organizationId, orgId)))
+    .where(and(...filters))
+  return rows.flatMap((row) => {
+    const returned = row.appCents - Number(row.kept)
+    if (returned <= 0) return []
+    return [{ professionalUserId: row.professionalUserId, value: orgPartValue(-returned, row.payment, money) }]
+  })
 }
 
 /**
