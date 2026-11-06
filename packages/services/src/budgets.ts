@@ -2018,7 +2018,8 @@ export async function deliverBudget(
     ...(options.length > 1 ? { options: options.length } : {}),
   })
   // Se une sola a la oportunidad del mismo tratamiento (o a la más reciente),
-  // que pasa a «Presupuesto enviado» (ADR 0028). Mientras decide, vale lo de la
+  // que pasa a «Presupuesto enviado» (ADR 0028); sin ninguna, abre la suya a
+  // nombre de quien lo entregó (ADR 0144). Mientras decide, vale lo de la
   // opción recomendada (decisión 13).
   const full = withTotals(updated, lines, options, "")
   await linkPresentedBudget(tx, orgId, {
@@ -2029,9 +2030,34 @@ export async function deliverBudget(
     ],
     by: opts.by,
     total: await opportunityValueOf(tx, orgId, full.totals),
+    opens: { userId: actorUserId, ...budgetInterest(lines, options, updated.title) },
   })
   await notifyBudget(tx, orgId)
   return withoutFindings(updated)
+}
+
+/**
+ * El interés de la oportunidad que abre un presupuesto entregado (ADR 0144):
+ * los tratamientos de la opción que vale, en una línea («Resina y
+ * Endodoncia», «Resina, Endodoncia y 2 más»), y su servicio si es uno solo.
+ * Sin tratamientos con nombre, el título del presupuesto.
+ */
+function budgetInterest(
+  lines: BudgetLineWithStatus[],
+  options: BudgetOptionRow[],
+  budgetTitle: string,
+): { title: string; serviceId: string | null } {
+  const value = valueOptionOf(options)
+  const own = value ? lines.filter((line) => line.optionId === value.id) : lines
+  const titles = [...new Set(own.map((line) => line.title.trim()).filter(Boolean))]
+  const shown = titles.length > 3 ? [...titles.slice(0, 2), `${titles.length - 2} más`] : titles
+  const last = shown.at(-1)
+  const text = shown.length > 1 ? `${shown.slice(0, -1).join(", ")} y ${last}` : (last ?? budgetTitle)
+  const services = [...new Set(own.map((line) => line.serviceId))]
+  return {
+    title: text.length > 200 ? `${text.slice(0, 199)}…` : text,
+    serviceId: services.length === 1 ? (services[0] ?? null) : null,
+  }
 }
 
 /** Hoy, en la zona de la clínica, más los días de vigencia de la clínica. */
