@@ -3,6 +3,19 @@ import type { AppointmentVisit } from "./agenda"
 import type { DebtRow } from "./finance-debt"
 
 /** Lo que devuelve `/api/workspace/home`: «Te espera» ya ordenado y lo de hoy según el rol. */
+/** Lo que la clínica tiene encendido, para decirlo en Inicio con su enlace para apagarlo (ADR 0141). */
+export interface SetupOn {
+  reception?: boolean
+  admin?: boolean
+  clio: boolean
+  registration: boolean
+  noticeSuggested: boolean
+  portal: boolean
+  digest: boolean
+  /** Cuántas líneas de Argos están encendidas. */
+  lines: number
+}
+
 export interface WorkspaceHome {
   date: string
   timezone: string
@@ -11,7 +24,14 @@ export interface WorkspaceHome {
   /** Hay más de una sede activa: solo entonces se ofrece elegirla. */
   multiBranch: boolean
   /** `agent`: Recepción y el Administrador encendidos; solo viaja a quien puede encenderlos. */
-  setup: { availability: boolean; rooms: boolean; patients: boolean; agent?: boolean } | null
+  setup: {
+    availability: boolean
+    rooms: boolean
+    patients: boolean
+    agent?: boolean
+    /** Lo encendido de verdad (ADR 0141); Recepción y Argos, solo para quien puede encenderlos. */
+    on?: SetupOn
+  } | null
   activity: { recorded: boolean }
   /** Lo que necesita a una persona, en el orden en que se muestra. */
   waiting: WaitingEntry[]

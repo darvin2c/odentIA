@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { type Db, withOrgContext } from "@odentia/db"
-import { auditEvent, branch } from "@odentia/db/schema/org"
+import { scheduleRoom } from "@odentia/db/schema/agenda"
+import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { listScheduleResources } from "./appointments.js"
@@ -118,4 +119,21 @@ it("cada sede tiene su enlace corto para llegar, y lleva a su ficha de Google o 
   await expect(run((tx) => getBranchDirections(tx, orgId, "miraflores-2"))).rejects.toMatchObject({ status: 404 })
   await run((tx) => setBranchActive(tx, orgId, "config-test", first.id, false))
   await expect(run((tx) => getBranchDirections(tx, orgId, "miraflores"))).rejects.toMatchObject({ status: 404 })
+})
+
+it("cada sede nueva nace con su primera unidad, con la palabra de su producto (ADR 0141)", async () => {
+  const roomsOf = async (orgId: string, branchId: string) =>
+    (await ownerDb.select({ name: scheduleRoom.name }).from(scheduleRoom).where(and(eq(scheduleRoom.organizationId, orgId), eq(scheduleRoom.branchId, branchId)))).map(
+      (row) => row.name,
+    )
+  const dental = randomUUID()
+  await insertOrg(ownerDb, dental, dental)
+  const sede = await withOrgContext(appDb, dental, (tx) => createBranch(tx, dental, "config-test", { name: "Sede Centro" }))
+  expect(await roomsOf(dental, sede.id)).toEqual(["Unidad dental 1"])
+
+  const medical = randomUUID()
+  await insertOrg(ownerDb, medical, medical)
+  await ownerDb.update(orgProfile).set({ product: "medical" }).where(eq(orgProfile.organizationId, medical))
+  const consultorio = await withOrgContext(appDb, medical, (tx) => createBranch(tx, medical, "config-test", { name: "Sede Norte" }))
+  expect(await roomsOf(medical, consultorio.id)).toHaveLength(1)
 })

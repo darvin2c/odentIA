@@ -1,6 +1,6 @@
 # 0026 · «Recordar la cita» viene prendida en toda clínica nueva
 
-Fecha: 2026-10-15 · Estado: aceptada · Excepción acotada a [0015](0015-administrador-lineas-prendidas-o-apagadas.md) y [0023](0023-el-administrador-detecta-y-recepcion-habla.md)
+Fecha: 2026-10-15 · Estado: sustituida por [0141](0141-en-una-clinica-nueva-todo-viene-encendido.md) · Excepción acotada a [0015](0015-administrador-lineas-prendidas-o-apagadas.md) y [0023](0023-el-administrador-detecta-y-recepcion-habla.md)
 
 ## Problema
 

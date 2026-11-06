@@ -3105,16 +3105,12 @@ export async function appointmentConfirmationPlan(
 }
 
 /**
- * Lo que una clínica nueva trae prendido: solo «Recordar la cita». Confirmar
- * las citas es lo básico y una clínica mediana no debería tener que buscarlo
- * (ADR 0026). Se prende con `setLine`, a nombre de quien crea la clínica y
- * con su registro; nunca toca una línea que ya existe ni una clínica que ya
- * estaba: se llama solo al crear el perfil de una clínica.
+ * Prende las líneas de una clínica que nace (ADR 0141, que sustituye al 0026):
+ * con `setLine`, a nombre de quien la crea y con su registro. Nunca toca una
+ * línea que ya existe ni una clínica que ya estaba: la llama `setUpNewClinic`.
  */
-export const NEW_CLINIC_LINES = ["recordatorio_cita"] as const
-
-export async function turnOnNewClinicLines(tx: Db, orgId: string, actorUserId: string): Promise<void> {
-  for (const key of NEW_CLINIC_LINES) {
+export async function turnOnNewClinicLines(tx: Db, orgId: string, actorUserId: string, keys: readonly string[]): Promise<void> {
+  for (const key of keys) {
     if (await findLineRule(tx, orgId, key)) continue
     const rule = await setLine(tx, orgId, actorUserId, key, { enabled: true })
     await audit(tx, orgId, actorUserId, "admin_line.default_on", rule.id, { key })

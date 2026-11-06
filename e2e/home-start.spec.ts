@@ -151,7 +151,7 @@ for (const width of [1440, 390]) {
       await expect(agenda).toContainText("Hoy no hay citas en")
       await expect(page.getByText(/No acredita|los ceros no indican|Sin actividad todavía|Sin pendientes en este resumen/)).toHaveCount(0)
       const home = await call<WorkspaceHome>(page, "GET", "/api/workspace/home", owner.org.slug)
-      expect(home.setup).toEqual({ availability: true, rooms: true, patients: true, agent: true })
+      expect(home.setup).toMatchObject({ availability: true, rooms: true, patients: true, agent: true })
       expect(home.waiting).toEqual([])
       expect(home.today?.summary).toEqual({ total: 0, waiting: 0, attending: 0, attended: 0, upcoming: 0, unconfirmed: 0 })
       await observe(page, info, "configurada-sin-pendientes")

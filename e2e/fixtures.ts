@@ -2,7 +2,14 @@ import { LEGAL } from "@odentia/auth/legal"
 import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
 import { account, user as users } from "@odentia/db/schema/auth"
-import { saasSignupPolicy } from "@odentia/db/schema/saas-billing"
+import { scheduleRoom } from "@odentia/db/schema/agenda"
+import { automationRule } from "@odentia/db/schema/automation"
+import { agentConfig } from "@odentia/db/schema/crm"
+import { patientRegistrationConfig } from "@odentia/db/schema/org"
+import { portalPolicy } from "@odentia/db/schema/portal-access"
+import { reportDigest } from "@odentia/db/schema/reports"
+import { saasSignupPolicy, saasSubscription } from "@odentia/db/schema/saas-billing"
+import { and, eq, ne } from "drizzle-orm"
 import { test as base, expect, type BrowserContext, type Locator, type Page } from "@playwright/test"
 import { hashPassword } from "better-auth/crypto"
 import { API, PANEL } from "./env"
@@ -37,9 +44,26 @@ export async function call<T>(page: Page, method: string, path: string, slug: st
   return result.body.data
 }
 
+/**
+ * Una clínica de prueba como las de antes del ADR 0141: «sin fila = apagado», solo «Recordar la
+ * cita» y sin unidades. Así cada recorrido enciende lo que prueba. Una clínica que nace con todo
+ * encendido se prueba con `createOwner(tag, { born: "encendida" })`.
+ */
+export async function asClinicFromBefore(db: Db, orgId: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx.delete(automationRule).where(and(eq(automationRule.organizationId, orgId), ne(automationRule.kind, "recordatorio_cita")))
+    await tx.delete(agentConfig).where(eq(agentConfig.organizationId, orgId))
+    await tx.delete(patientRegistrationConfig).where(eq(patientRegistrationConfig.organizationId, orgId))
+    await tx.delete(portalPolicy).where(eq(portalPolicy.organizationId, orgId))
+    await tx.delete(reportDigest).where(eq(reportDigest.organizationId, orgId))
+    await tx.delete(scheduleRoom).where(eq(scheduleRoom.organizationId, orgId))
+    await tx.update(saasSubscription).set({ spendCapCents: null }).where(eq(saasSubscription.organizationId, orgId))
+  })
+}
+
 /** La contraseña de las cuentas de prueba (su hash lo da `passwordHash`). */
 export const PASSWORD = "e2e-secreto-123"
-type TestFixtures = { createOwner: (tag: string) => Promise<OwnerFixture>; owner: OwnerFixture }
+type TestFixtures = { createOwner: (tag: string, options?: { born?: "encendida" }) => Promise<OwnerFixture>; owner: OwnerFixture }
 type WorkerFixtures = { fixtureDb: Db; passwordHash: string; nextEventId: () => number; signupOpen: void }
 
 export const test = base.extend<TestFixtures, WorkerFixtures>({
@@ -67,7 +91,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   createOwner: async ({ browser, fixtureDb, passwordHash }, use) => {
     const contexts: BrowserContext[] = []
     try {
-      await use(async (tag) => {
+      await use(async (tag, options) => {
         const id = randomUUID()
         const user: TestIdentity = {
           id, firstName: "Ana", lastName: "Pruebas", name: "Ana Pruebas",
@@ -100,6 +124,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
         expect(active.body.id).toBe(org.id)
         await call(page, "PUT", "/api/org-profile", org.slug, { legalName: `${org.name} S.A.C.`, countryCode: "PE" })
         const branch = await call<{ id: string }>(page, "POST", "/api/branches", org.slug, { name: "Sede Central" }, 201)
+        if (options?.born !== "encendida") await asClinicFromBefore(fixtureDb, org.id)
         return { context, page, user, org, branchId: branch.id }
       })
     } finally {
