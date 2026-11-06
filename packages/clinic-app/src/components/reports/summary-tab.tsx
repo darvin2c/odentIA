@@ -78,7 +78,7 @@ export function SummaryTab({
   const [goalMetric, setGoalMetric] = useState<ReportGoalMetric | null>(null)
 
   if (report.isError)
-    return <QueryErrorState error={report.error} onRetry={() => void report.refetch()} notFound="La sede elegida ya no está disponible. Elige otra sede." />
+    return <QueryErrorState error={report.error} onRetry={() => void report.refetch()} notFound="La sede elegida ya no está disponible. Elige otra sede." invalid="Ese periodo no se puede mostrar: elige otro arriba." />
 
   const data = report.data?.data
   // «Sin movimiento» se dice de lo pedido, no de lo que aún muestra la sede o el periodo anterior.
@@ -394,7 +394,7 @@ function Professionals({ query }: { query: ReportQuery }) {
           </TableBody>
         </Table>
       </div>
-      <p className="text-[13px] text-muted-foreground">{legend} Cobrado es lo de sus atenciones, la misma base de las comisiones.</p>
+      <p className="text-[13px] text-muted-foreground">{legend} Cobrado es lo de sus atenciones: cuenta el día del cobro, y lo devuelto se resta el día que se devolvió.</p>
     </ReportCard>
   )
 }
