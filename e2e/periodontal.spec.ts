@@ -56,12 +56,12 @@ async function setup(owner: OwnerFixture): Promise<{ patientId: string; encounte
  * Lo que se escribe en cada cara: las tres profundidades, «s» para el sangrado
  * y las tres recesiones. La 16, la 26 y la 14 tienen bolsas de 5 mm por fuera
  * con la encía en su lugar (periodontitis localizada); lo demás, la encía 2 mm
- * sobre la corona. No se usa el «1» delante de otro dígito: dos dígitos
- * seguidos escriben 10 a 15.
+ * sobre la corona. Se escribe seguido, y el «1» delante de otra cifra queda en su
+ * sitio: 10 a 15 se escriben con «+» (ADR 0142).
  */
 function keysFor(tooth: number, face: "buccal" | "lingual"): string {
   const sick = [16, 26, 14].includes(tooth) && face === "buccal"
-  return sick ? "5s35000" : "323-2-2-2"
+  return sick ? "5s35000" : "312-2-2-2"
 }
 
 test("periodontograma completo con el teclado, clasificado, firmado y comparado", async ({ owner }) => {
@@ -114,6 +114,8 @@ test("periodontograma completo con el teclado, clasificado, firmado y comparado"
   const t16 = chart.teeth.find((tooth) => tooth.toothNumber === 16)!
   expect(t16.probingDepth.slice(0, 3)).toEqual([5, 3, 5])
   expect(t16.plaque).toEqual([true, false, false, false])
+  // «3 1 2» tecleado seguido queda en tres sitios (distal, centro y mesial de la 17): el «1» no se une.
+  expect(chart.teeth.find((tooth) => tooth.toothNumber === 17)!.probingDepth.slice(0, 3)).toEqual([2, 1, 3])
   expect(chart.teeth.find((tooth) => tooth.toothNumber === 17)!.mobility).toBe(1)
   const odontogram = await call<{ history: Array<{ toothNumber: number; condition: string; details: { grade?: number } }> }>(page, "GET", `${apiPath}/odontogram`, slug)
   expect(odontogram.history.some((entry) => entry.toothNumber === 17 && entry.condition === "pathological_mobility" && entry.details.grade === 1)).toBe(true)
