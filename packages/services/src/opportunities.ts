@@ -19,9 +19,10 @@ import {
   type OpportunityEventOrigin,
   type OpportunityStatus,
 } from "@odentia/db/schema/opportunities"
+import { crmNote } from "@odentia/db/schema/crm-workspace"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, or, type SQL, sql } from "drizzle-orm"
-import { budgetValueOptionSql } from "./budget-awaiting.js"
+import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, not, or, type SQL, sql } from "drizzle-orm"
+import { budgetAwaitsAnswerSql, budgetValueOptionSql } from "./budget-awaiting.js"
 import { orgMoney } from "./report-value.js"
 import { foldedWordsMatch } from "./search-text.js"
 import { testContactSql } from "./conversation-state.js"
@@ -88,6 +89,12 @@ export type MoveCause =
   | "presupuesto_presentado"
   | "presupuesto_aceptado"
   | "presupuesto_rechazado"
+  /** Su presupuesto venció hace más de 30 días sin respuesta (ADR 0144). */
+  | "presupuesto_vencido"
+  /** Se reabrió sola: respondió después de darse por perdida (ADR 0144). */
+  | "respondio"
+  /** Se reabrió sola: le presentaron otra versión del presupuesto (ADR 0144). */
+  | "nueva_version"
 
 /** Quién hace algo con la oportunidad: una persona, el agente o el sistema por algo que pasó. */
 export interface OpportunityActor {
@@ -302,6 +309,34 @@ function dayAndTime(date: Date, zone: Zone): string {
   return `${shortDay(date, zone)} ${month}, ${time}`
 }
 
+/** «6 dic»: un día del calendario (`AAAA-MM-DD`) en el idioma de la clínica. */
+function calendarDay(day: string, zone: Zone): string {
+  return new Intl.DateTimeFormat(wordsLocale(zone), { timeZone: "UTC", day: "numeric", month: "short" })
+    .format(new Date(`${day}T12:00:00Z`))
+    .replace(/\./g, "")
+}
+
+/**
+ * Lo que la hará avanzar sola. En «Presupuesto enviado» sin presupuesto unido
+ * (se anuló o se soltó al vencer), nada la cerrará sola. Si nació del
+ * presupuesto y nadie la trabaja, avisa cuándo se dará por perdida si no
+ * responde (ADR 0144) y cómo evitarlo.
+ */
+async function afterWords(
+  tx: Db,
+  orgId: string,
+  item: Pick<OpportunityListItem, "id" | "status" | "moment">,
+  budgetId: string | null,
+  zone: Zone,
+): Promise<string | null> {
+  if (item.status !== "open") return null
+  if (item.moment !== "presupuesto_enviado") return AFTER_WORDS[item.moment]
+  if (!budgetId) return null
+  const closesOn = await unansweredClosesOn(tx, orgId, item.id)
+  if (!closesOn) return AFTER_WORDS[item.moment]
+  return `${AFTER_WORDS[item.moment]}. Si no responde, el ${calendarDay(closesOn, zone)} se cierra sola como perdida: tómala o déjale una tarea para seguirla`
+}
+
 /** Lo último que le pasó a una oportunidad, para decir por qué está donde está. */
 interface LastEvent {
   action: string
@@ -354,14 +389,26 @@ function whyOf(
     if (last.origin === "agente") return agentWords(last.cause, last.causeAt, last.createdAt, now, zone)
     return `La movió ${last.actorName ?? "el equipo"} ${when}`
   }
-  if (last.action === "opportunity.reopened") return `La reabrió ${last.actorName ?? "el equipo"} ${when}`
+  if (last.action === "opportunity.reopened") return reopenedWords(last.cause) ?? `La reabrió ${last.actorName ?? "el equipo"} ${when}`
   if (last.action === "opportunity.created") {
+    // Nació con su presupuesto (ADR 0144): quién se lo presentó.
+    if (last.cause === "presupuesto_presentado") {
+      if (last.origin === "agente") return agentWords(last.cause, last.causeAt, last.createdAt, now, zone)
+      return `Se abrió sola: ${last.actorName ?? "el equipo"} presentó el presupuesto ${when}`
+    }
     if (last.origin === "agente") {
       const channel = last.channel ? CHANNEL_NAME[last.channel] ?? null : null
       return `Lo pidió${channel ? ` por ${channel}` : ""} ${when}`
     }
     if (last.origin === "persona") return `La creó ${last.actorName ?? "el equipo"} ${when}`
   }
+  return null
+}
+
+/** Por qué se reabrió sola (ADR 0144), con las mismas palabras en la tarjeta y en el historial. */
+function reopenedWords(cause: string | null): string | null {
+  if (cause === "respondio") return "Se reabrió sola: respondió después de darse por perdida"
+  if (cause === "nueva_version") return "Se reabrió sola: le presentaron otra versión del presupuesto"
   return null
 }
 
@@ -379,7 +426,13 @@ function historyWhat(
   toStageName: string | null,
   now: Date,
   zone: Zone,
+  actorName: string | null = null,
 ): string {
+  if (event.action === "opportunity.created" && event.cause === "presupuesto_presentado") {
+    const target = toStageName ? ` en «${toStageName}»` : ""
+    if (event.origin === "agente") return `${agentWords(event.cause, event.causeAt, event.createdAt, now, zone)}: se abrió${target}`
+    return `Se abrió sola${target}: ${actorName ?? "el equipo"} presentó el presupuesto ${dayWords(event.createdAt, now, zone)}`
+  }
   if (event.action === "opportunity.moved") {
     const target = toStageName ? ` a «${toStageName}»` : ""
     if (event.origin === "agente") {
@@ -394,6 +447,7 @@ function historyWhat(
     const reason = event.note ? `: ${event.note}` : ""
     return `${ACTION_WORDS[event.action]}${reason}`
   }
+  if (event.action === "opportunity.reopened") return reopenedWords(event.cause) ?? ACTION_WORDS[event.action]!
   return ACTION_WORDS[event.action] ?? "Cambió la oportunidad"
 }
 
@@ -1041,13 +1095,13 @@ export async function getOpportunity(
     budgetNumber: budget?.number ?? null,
     budgetStatus: budget?.status ?? null,
     nextAppointment,
-    after: item.status === "open" ? AFTER_WORDS[item.moment] : null,
+    after: await afterWords(tx, orgId, item, row.opp.budgetId, zone),
     history: events.map(({ event, actorName, toStageName }) => ({
       id: event.id,
       action: event.action,
       origin: (["persona", "agente", "automatico"].includes(event.origin) ? event.origin : "persona") as OpportunityEventOrigin,
       who: whoOf(event.origin, actorName),
-      what: historyWhat(event, toStageName, now, zone),
+      what: historyWhat(event, toStageName, now, zone, actorName),
       createdAt: event.createdAt.toISOString(),
     })),
   }
@@ -1073,45 +1127,69 @@ async function selfPatientOf(tx: Db, orgId: string, contactId: string): Promise<
 
 /**
  * La oportunidad abierta de la misma persona y el mismo interés: mismo
- * contacto y paciente, y mismo servicio (o, sin servicio, mismo título).
+ * contacto y paciente, y mismo servicio (o, sin servicio, mismo título). Sin
+ * paciente, también la de su propia ficha y, cuando la crea el agente
+ * (`widen`), la de los pacientes que lleva como apoderada sin ficha propia; el
+ * equipo no se amplía a otros pacientes. El servicio cuenta también si está en
+ * su presupuesto pendiente (ADR 0144). Con un presupuesto de por medio, la que
+ * espera la respuesta a otro no es el mismo interés.
  */
 async function sameOpenInterest(
   tx: Db,
   orgId: string,
-  input: { contactId: string; patientId: string | null; serviceId: string | null; title: string },
+  input: {
+    contactId: string
+    patientId: string | null
+    serviceId: string | null
+    title: string
+    budgetId?: string | null
+    widen?: boolean
+  },
 ) {
+  const family = input.budgetId ? await budgetFamily(tx, orgId, input.budgetId) : null
+  const ownRecord = sql`${opportunity.patientId} in (select pc.patient_id from patient_contact pc
+    where pc.organization_id = ${orgId} and pc.contact_id = ${input.contactId} and pc.relationship = 'self')`
   const [found] = await tx
     .select({ id: opportunity.id, title: opportunity.title })
     .from(opportunity)
     .where(
       and(
         eq(opportunity.organizationId, orgId),
-        eq(opportunity.contactId, input.contactId),
         eq(opportunity.status, "open"),
-        input.patientId ? eq(opportunity.patientId, input.patientId) : isNull(opportunity.patientId),
+        input.patientId
+          ? and(eq(opportunity.contactId, input.contactId), eq(opportunity.patientId, input.patientId))
+          : input.widen
+            ? carriedBy(orgId, input.contactId)
+            : and(eq(opportunity.contactId, input.contactId), or(isNull(opportunity.patientId), ownRecord)),
         input.serviceId
-          ? eq(opportunity.serviceId, input.serviceId)
+          ? includesService(orgId, input.serviceId)
           : sql`lower(btrim(${opportunity.title})) = lower(btrim(${input.title}))`,
+        family ? not(waitsOnOtherBudget(orgId, family.ids)) : undefined,
       ),
     )
-    .orderBy(desc(opportunity.createdAt))
+    // Primero la de la propia persona, después la de quien lleva.
+    .orderBy(sql`(${opportunity.contactId} = ${input.contactId}) desc`, desc(opportunity.createdAt))
     .limit(1)
   return found ?? null
 }
 
 /**
- * Crea una oportunidad: siempre en «Interesado». La crea el agente cuando la
- * persona pide algo concreto o el equipo; nunca nace de un «hola». No se
- * duplica una abierta del mismo interés: el agente recibe la que ya existe
- * (`reuseOpen`) y el equipo, el aviso de que ya está. Con servicio, el valor
- * sale de su precio en la lista de precios. Sin responsable es de Recepción.
+ * Crea una oportunidad: en «Interesado». La crea el agente cuando la persona
+ * pide algo concreto o el equipo; nunca nace de un «hola». No se duplica una
+ * abierta del mismo interés: el agente recibe la que ya existe (`reuseOpen`) y
+ * el equipo, el aviso de que ya está. Con servicio, el valor sale de su precio
+ * en la lista de precios. Sin responsable es de Recepción.
+ *
+ * La única que nace más adelante es la de un presupuesto entregado sin otra
+ * que le corresponda (`presentedBudget`, ADR 0144): nace en «Presupuesto
+ * enviado», unida a él, con esa causa en el historial y su propio registro.
  */
 export async function createOpportunity(
   tx: Db,
   orgId: string,
   input: CreateOpportunityInput,
   actor?: OpportunityActor,
-  options: { reuseOpen?: boolean } = {},
+  options: { reuseOpen?: boolean; presentedBudget?: boolean } = {},
 ): Promise<OpportunityDetail & { reused?: boolean }> {
   await requireContact(tx, orgId, input.contactId)
   let patientId: string | null = null
@@ -1129,18 +1207,24 @@ export async function createOpportunity(
       .limit(1)
     if (!pipe) throw invalidField("pipelineId", "Embudo inválido para esta organización")
   }
-  const stage = await stageOfMoment(tx, orgId, pipelineId, "interesado")
+  const presented = options.presentedBudget === true && !!input.budgetId
+  const stage = await stageOfMoment(tx, orgId, pipelineId, presented ? "presupuesto_enviado" : "interesado")
   const title = cleanTitle(input.title)
   const service = await resolveService(tx, orgId, input.serviceId)
   const budgetId = await resolveBudget(tx, orgId, input.budgetId, patientId)
   // Si el presupuesto trae paciente y no se declaró, se adopta (sin duplicar ficha).
   const effectivePatientId = patientId ?? (await budgetPatient(tx, orgId, budgetId))
   if (effectivePatientId) await requirePatientLink(tx, orgId, effectivePatientId, input.contactId, patientId ? "patientId" : "budgetId")
+  // Una persona a la vez, también al crearla (el equipo, `crear_oportunidad` del agente, un presupuesto).
+  const recordPerson = effectivePatientId ? await personOfPatient(tx, orgId, effectivePatientId) : null
+  await lockPeople(tx, orgId, [input.contactId, ...(recordPerson ? [recordPerson] : [])])
   const existing = await sameOpenInterest(tx, orgId, {
     contactId: input.contactId,
     patientId: effectivePatientId,
     serviceId: service?.id ?? null,
     title,
+    budgetId,
+    widen: originOf(actor) === "agente",
   })
   if (existing) {
     if (options.reuseOpen) return { ...(await getOpportunity(tx, orgId, existing.id)), reused: true }
@@ -1182,10 +1266,20 @@ export async function createOpportunity(
     })
     .returning()
   if (!created) throw new Error("No se pudo crear la oportunidad")
-  await recordEvent(tx, orgId, created.id, "opportunity.created", null, stage.id, actor)
-  await auditOpportunity(tx, orgId, actor, "opportunity.created", created.id, {
+  await recordEvent(
+    tx,
+    orgId,
+    created.id,
+    "opportunity.created",
+    null,
+    stage.id,
+    actor,
+    presented ? { cause: "presupuesto_presentado" } : {},
+  )
+  await auditOpportunity(tx, orgId, actor, presented ? "opportunity.created_from_budget" : "opportunity.created", created.id, {
     contactId: input.contactId,
     stageId: stage.id,
+    ...(presented ? { budgetId } : {}),
   })
   await notifyOpp(tx, orgId)
   await notifyAssignee(tx, orgId, assignedUserId, `opportunity:${created.id}:assigned`, "Nueva oportunidad asignada", title, {
@@ -1203,16 +1297,21 @@ export type ServiceInterestOutcome = "creada" | "actualizada" | "ya_aceptado" | 
  * de la fase 4): lo anota el sistema, no un modelo. Sin duplicar:
  * - si quien escribe, o alguien que lleva, ya aceptó un presupuesto con ese
  *   servicio, no hace nada (ya no es un interesado);
- * - si ya tiene abierta una oportunidad de ese servicio, la actualiza con lo
- *   que dijo ahora;
+ * - si ya tiene abierta una oportunidad de ese servicio, suya o de un paciente
+ *   que lleva como apoderada sin ficha propia (también la de un presupuesto
+ *   pendiente que lo incluye), la actualiza con lo que dijo ahora; con
+ *   `patientId` (el agente sabe de quién es), solo la de ese paciente;
+ * - si la de ese presupuesto se cerró sola porque venció sin respuesta y el
+ *   presupuesto sigue esperando, la reabre: respondió (ADR 0144);
  * - si no, la crea en «Interesado» y sin responsable, que es de Recepción.
  */
 export async function noteServiceInterest(
   tx: Db,
   orgId: string,
-  input: { contactId: string; conversationId: string | null; serviceId: string; said: string },
+  input: { contactId: string; conversationId: string | null; serviceId: string; said: string; patientId?: string | null },
 ): Promise<{ outcome: ServiceInterestOutcome; opportunityId: string | null }> {
   const person = await requireContact(tx, orgId, input.contactId)
+  if (input.patientId) await requirePatientLink(tx, orgId, input.patientId, input.contactId)
   // En una prueba se anota de verdad, para su persona de prueba (ADR 0094); nunca para una real.
   if (input.conversationId && !person.isTest) {
     const [thread] = await tx
@@ -1252,20 +1351,44 @@ export async function noteServiceInterest(
     if (accepted) return { outcome: "ya_aceptado", opportunityId: null }
   }
   const interestText = input.said.replace(/\s+/g, " ").trim().slice(0, 500) || null
-  // Cualquier oportunidad abierta de ese servicio, sea para quien sea de los suyos: es el mismo interés.
-  const [open] = await tx
-    .select({ id: opportunity.id, conversationId: opportunity.conversationId })
-    .from(opportunity)
-    .where(
-      and(
-        eq(opportunity.organizationId, orgId),
-        eq(opportunity.contactId, input.contactId),
-        eq(opportunity.status, "open"),
-        eq(opportunity.serviceId, service.id),
-      ),
-    )
-    .orderBy(desc(opportunity.createdAt))
-    .limit(1)
+  // Una persona a la vez: quien escribe y quienes lleva, como al entregarles un presupuesto.
+  const people = linked.length
+    ? await tx
+        .select({ personId: patient.personId })
+        .from(patient)
+        .where(and(eq(patient.organizationId, orgId), inArray(patient.id, linked.map((row) => row.patientId))))
+    : []
+  await lockPeople(tx, orgId, [input.contactId, ...people.map((row) => row.personId)])
+  // Cualquier oportunidad abierta de ese servicio, sea para quien sea de los suyos (también la
+  // de un presupuesto suyo que espera respuesta y lo incluye): es el mismo interés (ADR 0144).
+  const scope = input.patientId
+    ? or(eq(opportunity.patientId, input.patientId), and(eq(opportunity.contactId, input.contactId), isNull(opportunity.patientId)))!
+    : carriedBy(orgId, input.contactId)
+  const sameInterest = (status: "open" | "lost") =>
+    tx
+      .select({ id: opportunity.id, contactId: opportunity.contactId, conversationId: opportunity.conversationId })
+      .from(opportunity)
+      .where(
+        and(
+          eq(opportunity.organizationId, orgId),
+          eq(opportunity.status, status),
+          scope,
+          includesService(orgId, service.id),
+          status === "lost" ? budgetStillWaits(orgId) : undefined,
+        ),
+      )
+      .orderBy(sql`(${opportunity.contactId} = ${input.contactId}) desc`, desc(opportunity.createdAt))
+  let [open] = await sameInterest("open").limit(1)
+  if (!open) {
+    // Escribió por lo de un presupuesto que se dio por perdido al vencer y que sigue esperando: respondió.
+    const lost = await sameInterest("lost")
+    const expired = await closedForExpiry(tx, orgId, lost.map((row) => row.id))
+    const back = lost.find((row) => row.id === expired)
+    if (back) {
+      await reopenOpportunity(tx, orgId, back.id, { userId: null, origin: "agente", cause: "respondio" })
+      open = back
+    }
+  }
   if (open) {
     await updateOpportunity(
       tx,
@@ -1273,7 +1396,10 @@ export async function noteServiceInterest(
       open.id,
       {
         interestText,
-        ...(open.conversationId === null && input.conversationId ? { conversationId: input.conversationId } : {}),
+        // El hilo es de quien escribe: solo va en la oportunidad que es suya.
+        ...(open.conversationId === null && input.conversationId && open.contactId === input.contactId
+          ? { conversationId: input.conversationId }
+          : {}),
       },
       { userId: null, origin: "agente" },
     )
@@ -1287,6 +1413,7 @@ export async function noteServiceInterest(
       title: service.name,
       serviceId: service.id,
       interestText,
+      ...(input.patientId ? { patientId: input.patientId } : {}),
       ...(input.conversationId ? { conversationId: input.conversationId } : {}),
     },
     { userId: null, origin: "agente" },
@@ -1567,7 +1694,9 @@ export async function moveOpportunity(
 /**
  * Cierra como ganada o perdida con un motivo de la lista: una sola forma de
  * cerrar para el equipo, el agente y la respuesta a un presupuesto. Va a
- * «Decidió» y su tarea abierta se cierra sola.
+ * «Decidió» y su tarea abierta se cierra sola. `because`: la cerró algo que
+ * pasó, con su propio registro (anular su presupuesto o que venciera sin
+ * respuesta, ADR 0144).
  */
 export async function closeOpportunity(
   tx: Db,
@@ -1575,7 +1704,21 @@ export async function closeOpportunity(
   id: string,
   input: { outcome: "won" | "lost"; reason: string; note?: string | null },
   actor?: OpportunityActor,
+  options: { because?: "presupuesto_anulado" | "presupuesto_vencido" } = {},
 ): Promise<OpportunityDetail> {
+  await closeOpportunityRow(tx, orgId, id, input, actor, options)
+  return getOpportunity(tx, orgId, id)
+}
+
+/** Lo mismo que `closeOpportunity`, sin armar el detalle: para cerrar muchas en un ciclo. */
+async function closeOpportunityRow(
+  tx: Db,
+  orgId: string,
+  id: string,
+  input: { outcome: "won" | "lost"; reason: string; note?: string | null },
+  actor?: OpportunityActor,
+  options: { because?: "presupuesto_anulado" | "presupuesto_vencido" } = {},
+): Promise<void> {
   const current = await requireOpportunity(tx, orgId, id, true)
   if (current.status !== "open") throw validation("La oportunidad ya está cerrada")
   if (input.outcome !== "won" && input.outcome !== "lost") throw invalidField("outcome", "Elige si se ganó o se perdió")
@@ -1601,9 +1744,27 @@ export async function closeOpportunity(
   const words = CLOSE_REASON_WORDS[reason]
   await recordEvent(tx, orgId, id, input.outcome === "won" ? "opportunity.won" : "opportunity.lost", current.stageId, decided.id, actor, {
     note: note ? `${words} · ${note}` : words,
-    cause: reason === "acepto_presupuesto" ? "presupuesto_aceptado" : reason === "rechazo_presupuesto" ? "presupuesto_rechazado" : null,
+    cause:
+      reason === "acepto_presupuesto"
+        ? "presupuesto_aceptado"
+        : reason === "rechazo_presupuesto"
+          ? "presupuesto_rechazado"
+          : options.because === "presupuesto_vencido"
+            ? "presupuesto_vencido"
+            : null,
   })
-  await auditOpportunity(tx, orgId, actor, "opportunity.closed", id, { outcome: input.outcome, reason, toStageId: decided.id })
+  await auditOpportunity(
+    tx,
+    orgId,
+    actor,
+    options.because === "presupuesto_anulado"
+      ? "opportunity.closed_budget_cancelled"
+      : options.because === "presupuesto_vencido"
+        ? "opportunity.closed_budget_expired"
+        : "opportunity.closed",
+    id,
+    { outcome: input.outcome, reason, toStageId: decided.id },
+  )
   // Su tarea ya no hace falta: se cierra sola, diciendo por qué.
   const [task] = await tx
     .select({ id: crmTask.id })
@@ -1623,15 +1784,18 @@ export async function closeOpportunity(
       { actorUserId: actor?.userId ?? null, link: id },
     )
   }
-  return getOpportunity(tx, orgId, id)
 }
 
-/** Reabrir la devuelve al paso en que estaba antes de cerrarse. */
+/**
+ * Reabrir la devuelve al paso en que estaba antes de cerrarse. Cuando se
+ * reabre sola (ADR 0144), `cause` dice por qué: respondió después de darse por
+ * perdida o le presentaron otra versión del presupuesto.
+ */
 export async function reopenOpportunity(
   tx: Db,
   orgId: string,
   id: string,
-  actor?: OpportunityActor,
+  actor?: OpportunityActor & { cause?: MoveCause },
 ): Promise<OpportunityDetail> {
   const current = await requireOpportunity(tx, orgId, id, true)
   if (current.status === "open") throw validation("La oportunidad ya está abierta")
@@ -1655,7 +1819,7 @@ export async function reopenOpportunity(
     .update(opportunity)
     .set({ stageId: target, status: "open", closedAt: null, closeReason: null, closeNote: null, updatedAt: new Date() })
     .where(and(eq(opportunity.id, id), eq(opportunity.organizationId, orgId)))
-  await recordEvent(tx, orgId, id, "opportunity.reopened", current.stageId, target, actor)
+  await recordEvent(tx, orgId, id, "opportunity.reopened", current.stageId, target, actor, { cause: actor?.cause ?? null })
   await auditOpportunity(tx, orgId, actor, "opportunity.reopened", id, { fromStageId: current.stageId, toStageId: target })
   await notifyOpp(tx, orgId)
   return getOpportunity(tx, orgId, id)
@@ -1679,30 +1843,188 @@ function ofPerson(orgId: string, patientId: string): SQL {
 }
 
 /**
+ * La oportunidad espera la respuesta a otro presupuesto (ADR 0144): ese
+ * presupuesto es su interés, y otro no se le une ni la cuenta como el mismo.
+ * `budgetIds`: el presupuesto de que se trata y, si es una revisión, el que
+ * reemplaza. Espera respuesta con la regla de siempre (`budgetAwaitsAnswerSql`).
+ */
+function waitsOnOtherBudget(orgId: string, budgetIds: string[]): SQL {
+  const own = sql.join(
+    budgetIds.map((id) => sql`${id}::uuid`),
+    sql`, `,
+  )
+  const awaiting = budgetAwaitsAnswerSql({
+    id: sql`waiting_budget.id`,
+    status: sql`waiting_budget.status`,
+    organizationId: sql`waiting_budget.organization_id`,
+  })
+  return sql`(${opportunity.budgetId} is not null and ${opportunity.budgetId} not in (${own}) and exists (
+    select 1 from treatment_budget waiting_budget
+    where waiting_budget.organization_id = ${orgId} and waiting_budget.id = ${opportunity.budgetId} and ${awaiting}))`
+}
+
+/**
+ * La familia de un presupuesto (ADR 0144): él y el que reemplaza, si es una
+ * revisión, con el número que comparten todas sus versiones. La usan
+ * `sameOpenInterest` y `pickOpportunity`.
+ */
+interface BudgetFamily {
+  ids: string[]
+  replaces: string | null
+  number: number | null
+}
+
+async function budgetFamily(tx: Db, orgId: string, budgetId: string): Promise<BudgetFamily> {
+  const [row] = await tx
+    .select({ replaces: treatmentBudget.supersedesBudgetId, number: treatmentBudget.budgetNumber })
+    .from(treatmentBudget)
+    .where(and(eq(treatmentBudget.organizationId, orgId), eq(treatmentBudget.id, budgetId)))
+    .limit(1)
+  const replaces = row?.replaces ?? null
+  return { ids: replaces ? [budgetId, replaces] : [budgetId], replaces, number: row?.number ?? null }
+}
+
+/**
+ * El vínculo `pc` es de quien lleva al paciente sin ser paciente ella misma
+ * (ADR 0144): su apoderada (`guardian`) sin ficha propia. Solo por ella se
+ * juntan dos identidades; paciente ≠ interlocutor ≠ responsable, y una madre
+ * que también es paciente pregunta por lo suyo.
+ */
+const GUARDIAN_WITHOUT_RECORD = sql`(pc.relationship = 'guardian' and not exists (
+  select 1 from patient_contact own where own.organization_id = pc.organization_id
+    and own.contact_id = pc.contact_id and own.relationship = 'self'))`
+
+/**
+ * Las oportunidades de una persona y, si es apoderada sin ficha propia, las de
+ * los pacientes que lleva (`patient_contact`).
+ */
+function carriedBy(orgId: string, contactId: string): SQL {
+  return or(
+    eq(opportunity.contactId, contactId),
+    sql`${opportunity.patientId} in (select pc.patient_id from patient_contact pc
+      where pc.organization_id = ${orgId} and pc.contact_id = ${contactId} and ${GUARDIAN_WITHOUT_RECORD})`,
+  )!
+}
+
+/** La persona (contacto) de un paciente: su identidad (ADR 0001). */
+async function personOfPatient(tx: Db, orgId: string, patientId: string): Promise<string | null> {
+  const [row] = await tx
+    .select({ id: patient.personId })
+    .from(patient)
+    .where(and(eq(patient.organizationId, orgId), eq(patient.id, patientId)))
+    .limit(1)
+  return row?.id ?? null
+}
+
+/**
+ * La oportunidad es de ese servicio: es el suyo o está en su presupuesto que
+ * espera respuesta (ADR 0144; la venta de varios tratamientos no lleva uno solo).
+ */
+function includesService(orgId: string, serviceId: string): SQL {
+  const awaiting = budgetAwaitsAnswerSql({
+    id: sql`pending_budget.id`,
+    status: sql`pending_budget.status`,
+    organizationId: sql`pending_budget.organization_id`,
+  })
+  return or(
+    eq(opportunity.serviceId, serviceId),
+    sql`exists (select 1 from treatment_budget pending_budget
+      join treatment_budget_item pending_line on pending_line.organization_id = pending_budget.organization_id
+        and pending_line.budget_id = pending_budget.id
+      where pending_budget.organization_id = ${orgId} and pending_budget.id = ${opportunity.budgetId}
+        and pending_line.service_id = ${serviceId} and ${awaiting})`,
+  )!
+}
+
+/** Su presupuesto sigue esperando respuesta (`budgetAwaitsAnswerSql`). */
+function budgetStillWaits(orgId: string): SQL {
+  const awaiting = budgetAwaitsAnswerSql({
+    id: sql`still_budget.id`,
+    status: sql`still_budget.status`,
+    organizationId: sql`still_budget.organization_id`,
+  })
+  return sql`exists (select 1 from treatment_budget still_budget
+    where still_budget.organization_id = ${orgId} and still_budget.id = ${opportunity.budgetId} and ${awaiting})`
+}
+
+/**
+ * Una persona a la vez (ADR 0144): entregar dos presupuestos, anotar un interés
+ * o crear una oportunidad al mismo tiempo no abre dos por lo mismo. Se toman
+ * en el orden de la misma clave que se bloquea (`hashtext`), para no
+ * esperarse en cruz.
+ */
+async function lockPeople(tx: Db, orgId: string, contactIds: string[]): Promise<void> {
+  const keys = [...new Set(contactIds)].map((id) => sql`${`oportunidad:${orgId}:${id}`}`)
+  if (keys.length === 0) return
+  const locks = await tx.execute<{ key: number }>(
+    sql`select distinct hashtext(k) as key from unnest(array[${sql.join(keys, sql`, `)}]::text[]) as k order by key`,
+  )
+  for (const { key } of locks) await tx.execute(sql`select pg_advisory_xact_lock(${key}::int)`)
+}
+
+/**
  * La oportunidad abierta que corresponde a algo que pasó: la del mismo
  * tratamiento o, si no hay, la más reciente. `moments` acota en qué pasos se
- * busca.
+ * busca. Con un presupuesto (`budget`), primero la que ya está unida a él o al
+ * que reemplaza, y nunca una que espera la respuesta a otro; con `onlyOwn`,
+ * solo esa. Del mismo tratamiento cuenta también la que anotó sin paciente su
+ * apoderada sin ficha propia (`GUARDIAN_WITHOUT_RECORD`), nunca como «la más
+ * reciente».
  */
 async function pickOpportunity(
   tx: Db,
   orgId: string,
-  input: { patientId: string; serviceIds: string[]; moments?: SaleMoment[] },
+  input: {
+    patientId: string
+    serviceIds: string[]
+    moments?: SaleMoment[]
+    budget?: BudgetFamily
+    onlyOwn?: boolean
+  },
 ) {
+  const budgetIds = input.budget?.ids ?? []
+  const shared = and(
+    eq(opportunity.organizationId, orgId),
+    eq(opportunity.status, "open"),
+    input.moments ? inArray(pipelineStage.moment, input.moments) : undefined,
+    input.budget ? not(waitsOnOtherBudget(orgId, budgetIds)) : undefined,
+  )
   const rows = await tx
     .select({ opp: opportunity, moment: pipelineStage.moment })
     .from(opportunity)
     .innerJoin(pipelineStage, eq(pipelineStage.id, opportunity.stageId))
-    .where(
-      and(
-        eq(opportunity.organizationId, orgId),
-        eq(opportunity.status, "open"),
-        ofPerson(orgId, input.patientId),
-        input.moments ? inArray(pipelineStage.moment, input.moments) : undefined,
-      ),
-    )
+    .where(and(shared, ofPerson(orgId, input.patientId)))
     .orderBy(desc(opportunity.createdAt), desc(opportunity.id))
+  const own = rows.find((row) => row.opp.budgetId && budgetIds.includes(row.opp.budgetId))
+  if (input.onlyOwn) return own ?? null
   const sameService = rows.find((row) => row.opp.serviceId && input.serviceIds.includes(row.opp.serviceId))
-  return sameService ?? rows[0] ?? null
+  if (own ?? sameService) return own ?? sameService ?? null
+  const [ofCarer] = input.serviceIds.length
+    ? await tx
+        .select({ opp: opportunity, moment: pipelineStage.moment })
+        .from(opportunity)
+        .innerJoin(pipelineStage, eq(pipelineStage.id, opportunity.stageId))
+        .where(
+          and(
+            shared,
+            isNull(opportunity.patientId),
+            inArray(opportunity.serviceId, input.serviceIds),
+            sql`${opportunity.contactId} in (select pc.contact_id from patient_contact pc
+              where pc.organization_id = ${orgId} and pc.patient_id = ${input.patientId} and ${GUARDIAN_WITHOUT_RECORD})`,
+          ),
+        )
+        .orderBy(desc(opportunity.createdAt), desc(opportunity.id))
+        .limit(1)
+    : []
+  return ofCarer ? { ...ofCarer, ofCarer: true } : (rows[0] ?? null)
+}
+
+/** La que anotó quien lleva al paciente pasa a llevarlo: desde ahí es de su historia. */
+async function adoptPatient(tx: Db, orgId: string, opportunityId: string, patientId: string): Promise<void> {
+  await tx
+    .update(opportunity)
+    .set({ patientId, updatedAt: new Date() })
+    .where(and(eq(opportunity.id, opportunityId), eq(opportunity.organizationId, orgId), isNull(opportunity.patientId)))
 }
 
 /**
@@ -1721,6 +2043,7 @@ export async function advanceForAppointment(
     moments: ["interesado"],
   })
   if (!picked) return null
+  if ("ofCarer" in picked) await adoptPatient(tx, orgId, picked.opp.id, input.patientId)
   const target = await stageOfMoment(tx, orgId, picked.opp.pipelineId, "evaluacion_agendada")
   await moveOpportunity(tx, orgId, picked.opp.id, target.id, {
     userId: null,
@@ -1814,11 +2137,114 @@ export async function returnForCancelledAppointment(
   return returned
 }
 
+/** Lo que necesita la oportunidad propia de un presupuesto entregado (ADR 0144). */
+export interface BudgetOpportunityOpening {
+  /** Quién lo entregó: la oportunidad se abre a su nombre (nulo: el equipo). */
+  userId: string | null
+  /** Los tratamientos de la opción que vale, en una línea. */
+  title: string
+  /** El servicio, si la opción que vale tiene uno solo. */
+  serviceId: string | null
+}
+
 /**
- * Al presentar un presupuesto, se une solo a la oportunidad abierta del mismo
- * tratamiento o, si no hay, a la más reciente; la oportunidad adopta al
- * paciente, su valor pasa a ser el total del presupuesto y, si aún no llegaba
- * ahí, pasa sola a «Presupuesto enviado».
+ * Alguna versión de ese presupuesto (las revisiones conservan su número) ya
+ * tuvo su oportunidad, abierta o decidida.
+ */
+async function versionHadOpportunity(tx: Db, orgId: string, budgetNumber: number): Promise<boolean> {
+  const [row] = await tx
+    .select({ id: opportunity.id })
+    .from(opportunity)
+    .innerJoin(
+      treatmentBudget,
+      and(eq(treatmentBudget.organizationId, opportunity.organizationId), eq(treatmentBudget.id, opportunity.budgetId)),
+    )
+    .where(and(eq(opportunity.organizationId, orgId), eq(treatmentBudget.budgetNumber, budgetNumber)))
+    .limit(1)
+  return !!row
+}
+
+/**
+ * La marca en el registro de la entrega (`budget.delivered`) que pone un
+ * presupuesto bajo «lo que nadie respondió» (ADR 0144). La lleva toda entrega
+ * desde el despliegue de este cambio: es la fecha de corte, guardada en cada
+ * entrega. Lo entregado antes no la tiene y nunca se cierra por vencido.
+ */
+export const UNANSWERED_RULE_MARK = "unansweredCloses"
+
+/** La oportunidad con su paso, como la devuelve `pickOpportunity`. */
+async function opportunityRow(tx: Db, orgId: string, id: string) {
+  const [row] = await tx
+    .select({ opp: opportunity, moment: pipelineStage.moment })
+    .from(opportunity)
+    .innerJoin(pipelineStage, eq(pipelineStage.id, opportunity.stageId))
+    .where(and(eq(opportunity.organizationId, orgId), eq(opportunity.id, id)))
+    .limit(1)
+  return row ?? null
+}
+
+/**
+ * La oportunidad perdida de alguna versión de ese presupuesto, si ninguna se
+ * ganó: la que vuelve a abrirse cuando la clínica presenta otra versión.
+ */
+async function lostOfVersion(tx: Db, orgId: string, budgetNumber: number): Promise<string | null> {
+  const rows = await tx
+    .select({ id: opportunity.id, status: opportunity.status })
+    .from(opportunity)
+    .innerJoin(
+      treatmentBudget,
+      and(eq(treatmentBudget.organizationId, opportunity.organizationId), eq(treatmentBudget.id, opportunity.budgetId)),
+    )
+    .where(and(eq(opportunity.organizationId, orgId), eq(treatmentBudget.budgetNumber, budgetNumber)))
+    .orderBy(desc(opportunity.closedAt), desc(opportunity.id))
+  if (rows.some((row) => row.status === "won")) return null
+  return rows.find((row) => row.status === "lost")?.id ?? null
+}
+
+/**
+ * La oportunidad propia de un presupuesto entregado sin otra que le
+ * corresponda (ADR 0144): de la persona del paciente, en «Presupuesto
+ * enviado», unida a él y sin responsable (Recepción). Es un paso del sistema
+ * (`automatico`) que lleva el nombre de quien lo entregó, para el historial y
+ * la Actividad del equipo.
+ */
+async function openForBudget(
+  tx: Db,
+  orgId: string,
+  input: { patientId: string; budgetId: string; by?: "agente" | "persona" },
+  personId: string,
+  opening: BudgetOpportunityOpening,
+) {
+  const created = await createOpportunity(
+    tx,
+    orgId,
+    {
+      contactId: personId,
+      patientId: input.patientId,
+      title: opening.title,
+      serviceId: opening.serviceId,
+      budgetId: input.budgetId,
+    },
+    input.by === "agente" ? { userId: null, origin: "agente" } : { userId: opening.userId, origin: "automatico" },
+    // Nunca frena la entrega: si ya hubiera una del mismo interés, sigue con esa.
+    { reuseOpen: true, presentedBudget: true },
+  )
+  return opportunityRow(tx, orgId, created.id)
+}
+
+/**
+ * Al presentar un presupuesto, se une solo a la oportunidad abierta que ya es
+ * suya (o del que reemplaza), a la del mismo tratamiento (también la que anotó
+ * su apoderada sin ficha propia) o, si no hay, a la más reciente de la
+ * persona, nunca a una que espera la respuesta a otro presupuesto. La
+ * oportunidad adopta al paciente, su valor pasa a ser el total del presupuesto
+ * y, si aún no llegaba ahí, pasa sola a «Presupuesto enviado».
+ *
+ * Al entregarlo (`opens`), si no hay ninguna, abre la suya (ADR 0144). Una
+ * revisión de lo que ya tuvo su oportunidad es la misma venta: sigue con la
+ * suya si está abierta; si se perdió (no respondió, el precio, la rechazó), la
+ * reabre, porque es otra oportunidad de cerrarla; si se ganó, no toma otra ni
+ * abre una. Al decidir uno entregado antes que no la tiene, no se abre ninguna.
  */
 export async function linkPresentedBudget(
   tx: Db,
@@ -1831,9 +2257,28 @@ export async function linkPresentedBudget(
     by?: "agente" | "persona"
     /** Total del presupuesto presentado, en su moneda: pasa a ser el valor de la oportunidad. */
     total?: { cents: number | null; currency: string }
+    /** Al entregarlo: con qué se abre la suya si no hay ninguna que le corresponda. */
+    opens?: BudgetOpportunityOpening
   },
 ): Promise<string | null> {
-  const picked = await pickOpportunity(tx, orgId, { patientId: input.patientId, serviceIds: input.serviceIds })
+  const family = await budgetFamily(tx, orgId, input.budgetId)
+  const personId = await personOfPatient(tx, orgId, input.patientId)
+  if (personId) await lockPeople(tx, orgId, [personId])
+  const sold = !!family.replaces && family.number !== null && (await versionHadOpportunity(tx, orgId, family.number))
+  let picked = await pickOpportunity(tx, orgId, {
+    patientId: input.patientId,
+    serviceIds: input.serviceIds,
+    budget: family,
+    onlyOwn: sold,
+  })
+  if (!picked && sold && family.number !== null) {
+    const lost = await lostOfVersion(tx, orgId, family.number)
+    if (lost) {
+      await reopenOpportunity(tx, orgId, lost, { userId: null, origin: "automatico", cause: "nueva_version" })
+      picked = await opportunityRow(tx, orgId, lost)
+    }
+  }
+  if (!picked && input.opens && !sold && personId) picked = await openForBudget(tx, orgId, input, personId, input.opens)
   if (!picked) return null
   // El valor de la oportunidad pasa a ser lo que de verdad se le presentó.
   const value = input.total && input.total.cents !== null ? { amountCents: input.total.cents, currency: input.total.currency } : {}
@@ -1854,10 +2299,24 @@ export async function linkPresentedBudget(
   return picked.opp.id
 }
 
+/** Una persona del equipo le cambió el nombre: el sistema ya no lo pisa. */
+async function titleChangedByPerson(tx: Db, orgId: string, opportunityId: string): Promise<boolean> {
+  const [row] = await tx.execute<{ found: number }>(sql`
+    select 1 as found from audit_event a
+    where a.organization_id = ${orgId} and a.entity = 'opportunity' and a.entity_id = ${opportunityId}
+      and a.action = 'opportunity.updated' and a.metadata->'fields' @> '["title"]'::jsonb
+      and a.metadata->>'origin' is null
+    limit 1`)
+  return !!row
+}
+
 /**
  * La persona decidió su presupuesto: aceptarlo, aunque sea en parte, gana la
  * oportunidad con lo aceptado como valor; rechazarlo la pierde con «Rechazó el
- * presupuesto». Pospuesto no cambia nada.
+ * presupuesto». Pospuesto no cambia nada. La oportunidad es la de su familia
+ * (él o el que reemplaza). Si se había cerrado sola porque venció sin
+ * respuesta (ADR 0144), responder la reabre: aceptarlo o rechazarlo la decide
+ * como siempre y «lo pienso» la deja abierta.
  */
 export async function decideBudgetOpportunity(
   tx: Db,
@@ -1869,21 +2328,44 @@ export async function decideBudgetOpportunity(
     serviceIds: string[]
     /** Lo aceptado, en la moneda del presupuesto: el valor de la oportunidad ganada. */
     accepted?: { cents: number | null; currency: string }
+    /** Los tratamientos de la opción elegida: el nombre de la que nació del presupuesto (ADR 0144). */
+    title?: string
   },
 ): Promise<string | null> {
   const outcome = input.status === "aceptado" || input.status === "parcial" ? "won" : input.status === "rechazado" ? "lost" : null
-  if (!outcome) return null
+  if (!outcome && input.status !== "pospuesto") return null
+  const family = await budgetFamily(tx, orgId, input.budgetId)
+  // Con su fila tomada: si el ciclo de «lo que nadie respondió» la está cerrando, se espera y se ve cerrada.
   const linked = await tx
     .select({ id: opportunity.id, status: opportunity.status })
     .from(opportunity)
-    .where(and(eq(opportunity.organizationId, orgId), eq(opportunity.budgetId, input.budgetId)))
+    .where(and(eq(opportunity.organizationId, orgId), inArray(opportunity.budgetId, family.ids)))
     .orderBy(desc(opportunity.createdAt))
-  const open = linked.find((row) => row.status === "open")
+    .for("update")
+  let open = linked.find((row) => row.status === "open")
+  if (!open) {
+    const expired = await closedForExpiry(tx, orgId, linked.filter((row) => row.status === "lost").map((row) => row.id))
+    if (expired) {
+      await reopenOpportunity(tx, orgId, expired, { userId: null, origin: "automatico", cause: "respondio" })
+      open = { id: expired, status: "open" }
+    }
+  }
+  if (!outcome) return open?.id ?? null
   // Completar una respuesta (lo pospuesto de un parcial) no vuelve a decidir una
   // oportunidad que ya se cerró con este presupuesto, ni busca otra.
   if (!open && linked.length > 0) return null
   const id = open?.id ?? (await linkPresentedBudget(tx, orgId, input))
   if (!id) return null
+  // La que nació del presupuesto se llama como lo que eligió, salvo que una persona le cambiara el nombre.
+  const title = input.title?.trim().slice(0, 200)
+  if (title && (await bornFromBudget(tx, orgId, id)) && !(await titleChangedByPerson(tx, orgId, id))) {
+    const [current] = await tx
+      .select({ title: opportunity.title })
+      .from(opportunity)
+      .where(and(eq(opportunity.id, id), eq(opportunity.organizationId, orgId)))
+      .limit(1)
+    if (current && current.title !== title) await updateOpportunity(tx, orgId, id, { title }, { userId: null, origin: "automatico" })
+  }
   // Ganada, su valor es lo que aceptó (aceptado en parte, solo esa parte).
   if (outcome === "won" && input.accepted && input.accepted.cents !== null) {
     await tx
@@ -1899,6 +2381,226 @@ export async function decideBudgetOpportunity(
     { userId: null, origin: "automatico" },
   )
   return id
+}
+
+/** Nació de un presupuesto entregado (ADR 0144): su alta lleva esa causa. */
+async function bornFromBudget(tx: Db, orgId: string, opportunityId: string): Promise<boolean> {
+  const [row] = await tx
+    .select({ id: opportunityEvent.id })
+    .from(opportunityEvent)
+    .where(
+      and(
+        eq(opportunityEvent.organizationId, orgId),
+        eq(opportunityEvent.opportunityId, opportunityId),
+        eq(opportunityEvent.action, "opportunity.created"),
+        eq(opportunityEvent.cause, "presupuesto_presentado"),
+      ),
+    )
+    .limit(1)
+  return !!row
+}
+
+/**
+ * Le suelta el presupuesto a una oportunidad que sigue abierta (ADR 0144):
+ * deja de decir que se cierra sola al responderlo. Queda en su historial.
+ */
+async function detachBudget(tx: Db, orgId: string, id: string, actor: OpportunityActor): Promise<void> {
+  await tx
+    .update(opportunity)
+    .set({ budgetId: null, updatedAt: new Date() })
+    .where(and(eq(opportunity.id, id), eq(opportunity.organizationId, orgId)))
+  await recordEvent(tx, orgId, id, "opportunity.updated", null, null, actor)
+  await auditOpportunity(tx, orgId, actor, "opportunity.updated", id, { fields: ["budgetId"] })
+  await notifyOpp(tx, orgId)
+}
+
+/**
+ * Se anuló un presupuesto (ADR 0144): su oportunidad ya no puede cerrarse sola
+ * al responderlo. La que nació de él y nadie trabajó (sin tareas ni notas) se
+ * cierra como perdida, «Otro» con la nota «Se anuló el presupuesto», a nombre
+ * de quien lo anuló. La que ya era de otro interés, o tiene trabajo encima,
+ * sigue abierta y solo se suelta del presupuesto. Devuelve las que tocó.
+ */
+export async function releaseCancelledBudget(
+  tx: Db,
+  orgId: string,
+  input: { budgetId: string; userId: string | null },
+): Promise<string[]> {
+  const linked = await tx
+    .select({ id: opportunity.id })
+    .from(opportunity)
+    .where(and(eq(opportunity.organizationId, orgId), eq(opportunity.budgetId, input.budgetId), eq(opportunity.status, "open")))
+    .for("update")
+  const actor: OpportunityActor = { userId: input.userId, origin: "automatico" }
+  for (const { id } of linked) {
+    const [task] = await tx
+      .select({ id: crmTask.id })
+      .from(crmTask)
+      .where(and(eq(crmTask.organizationId, orgId), eq(crmTask.opportunityId, id)))
+      .limit(1)
+    const [note] = await tx
+      .select({ id: crmNote.id })
+      .from(crmNote)
+      .where(and(eq(crmNote.organizationId, orgId), eq(crmNote.opportunityId, id)))
+      .limit(1)
+    if (!task && !note && (await bornFromBudget(tx, orgId, id))) {
+      await closeOpportunityRow(
+        tx,
+        orgId,
+        id,
+        { outcome: "lost", reason: "otro", note: "Se anuló el presupuesto" },
+        actor,
+        { because: "presupuesto_anulado" },
+      )
+    } else {
+      await detachBudget(tx, orgId, id, actor)
+    }
+  }
+  return linked.map((row) => row.id)
+}
+
+/** Días después del fin de su vigencia en que la oportunidad de un presupuesto sin respuesta se da por perdida. */
+export const UNANSWERED_BUDGET_DAYS = 30
+
+/** La oportunidad perdida que se cerró sola porque su presupuesto venció sin respuesta, si es una de estas. */
+async function closedForExpiry(tx: Db, orgId: string, ids: string[]): Promise<string | undefined> {
+  for (const id of ids) {
+    const [last] = await tx
+      .select({ cause: opportunityEvent.cause })
+      .from(opportunityEvent)
+      .where(
+        and(
+          eq(opportunityEvent.organizationId, orgId),
+          eq(opportunityEvent.opportunityId, id),
+          inArray(opportunityEvent.action, ["opportunity.won", "opportunity.lost"]),
+        ),
+      )
+      .orderBy(desc(opportunityEvent.createdAt), desc(opportunityEvent.id))
+      .limit(1)
+    if (last?.cause === "presupuesto_vencido") return id
+  }
+  return undefined
+}
+
+/**
+ * Lo que decide si «lo que nadie respondió» alcanza a la oportunidad `o` de su
+ * presupuesto `b`, salvo la fecha (ADR 0144). La misma regla para el ciclo y
+ * para lo que la tarjeta avisa. Fuera: lo entregado antes del despliegue (sin
+ * `UNANSWERED_RULE_MARK`), lo que tiene una nueva versión en borrador y lo que
+ * alguien trabaja (responsable, tarea, nota o un cambio a mano o de Sofi
+ * después de entregarlo).
+ */
+function unansweredRuleSql(): SQL {
+  return sql`o.status = 'open' and o.assigned_user_id is null
+    and b.status = 'presentado' and b.valid_until is not null
+    and exists (select 1 from audit_event delivered where delivered.organization_id = b.organization_id
+      and delivered.action = 'budget.delivered' and delivered.entity_id = b.id::text
+      and delivered.metadata->>${UNANSWERED_RULE_MARK} = 'true')
+    and not exists (select 1 from treatment_budget draft where draft.organization_id = b.organization_id
+      and draft.supersedes_budget_id = b.id and draft.status = 'borrador')
+    and not exists (select 1 from task t where t.organization_id = o.organization_id and t.opportunity_id = o.id)
+    and not exists (select 1 from crm_note n where n.organization_id = o.organization_id and n.opportunity_id = o.id)
+    and not exists (select 1 from opportunity_event e where e.organization_id = o.organization_id and e.opportunity_id = o.id
+      and e.origin in ('persona', 'agente') and e.created_at > coalesce(b.presented_at, o.created_at))`
+}
+
+/** El día de hoy en la zona de la clínica, `AAAA-MM-DD`. */
+function clinicDay(timezone: string, now: Date): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(now)
+}
+
+/**
+ * Cuándo se cerraría sola como perdida, si su presupuesto sigue sin respuesta
+ * (`AAAA-MM-DD`), para avisarlo en la tarjeta; nulo si la regla no la alcanza.
+ */
+async function unansweredClosesOn(tx: Db, orgId: string, opportunityId: string): Promise<string | null> {
+  const [row] = await tx.execute<{ closesOn: string }>(sql`
+    select to_char(b.valid_until + ${sql.raw(String(UNANSWERED_BUDGET_DAYS + 1))}, 'YYYY-MM-DD') as "closesOn"
+    from opportunity o join treatment_budget b on b.organization_id = o.organization_id and b.id = o.budget_id
+    where o.organization_id = ${orgId} and o.id = ${opportunityId} and ${unansweredRuleSql()}
+      and exists (select 1 from opportunity_event c where c.organization_id = o.organization_id and c.opportunity_id = o.id
+        and c.action = 'opportunity.created' and c.cause = 'presupuesto_presentado')`)
+  return row?.closesOn ?? null
+}
+
+/**
+ * Lo que nadie respondió (ADR 0144): pasados 30 días del fin de su vigencia,
+ * el presupuesto entregado que sigue sin respuesta deja de esperar. Su
+ * oportunidad, si nació de él, se cierra sola como perdida, «No responde», a
+ * nombre del sistema; si era de otro interés, solo se suelta del presupuesto.
+ * La regla es `unansweredRuleSql`: no toca lo que alguien trabaja, lo
+ * entregado antes del despliegue ni lo que tiene otra versión en borrador. Si
+ * la persona responde después, se reabre (`decideBudgetOpportunity`,
+ * `noteServiceInterest`). Corre en el ciclo del worker, junto a `settleTasks`,
+ * aunque el Administrador esté apagado. Cada una va en su propio punto de
+ * guardado y salta la que otra transacción tiene tomada (la respuesta que
+ * llega a la vez): un choque no deshace las demás. Devuelve cuántas cerró.
+ */
+export async function closeUnansweredBudgetOpportunities(
+  tx: Db,
+  orgId: string,
+  now: Date,
+  options: { batch?: number } = {},
+): Promise<number> {
+  const zone = await findOrgLocale(tx, orgId)
+  const rows = await tx.execute<{ id: string; born: boolean }>(sql`
+    select o.id, exists (select 1 from opportunity_event c where c.organization_id = o.organization_id
+      and c.opportunity_id = o.id and c.action = 'opportunity.created' and c.cause = 'presupuesto_presentado') as born
+    from opportunity o join treatment_budget b on b.organization_id = o.organization_id and b.id = o.budget_id
+    where o.organization_id = ${orgId} and ${unansweredRuleSql()}
+      and b.valid_until < ${clinicDay(zone.timezone, now)}::date - ${sql.raw(String(UNANSWERED_BUDGET_DAYS))}
+    order by b.valid_until, o.id
+    limit ${options.batch ?? 200}
+    for update of o skip locked`)
+  const actor: OpportunityActor = { userId: null, origin: "automatico" }
+  let closed = 0
+  for (const row of rows) {
+    try {
+      const done = await tx.transaction(async (point) => {
+        const inner = point as unknown as Db
+        const [still] = await inner
+          .select({ status: opportunity.status })
+          .from(opportunity)
+          .where(and(eq(opportunity.id, row.id), eq(opportunity.organizationId, orgId)))
+          .limit(1)
+        if (still?.status !== "open") return false
+        if (!row.born) {
+          await detachBudget(inner, orgId, row.id, actor)
+          return false
+        }
+        await closeOpportunityRow(
+          inner,
+          orgId,
+          row.id,
+          { outcome: "lost", reason: "no_responde", note: `Su presupuesto venció hace más de ${UNANSWERED_BUDGET_DAYS} días sin respuesta` },
+          actor,
+          { because: "presupuesto_vencido" },
+        )
+        return true
+      })
+      if (done) closed++
+    } catch (error) {
+      // Un choque deshace solo su punto de guardado: queda para el próximo ciclo.
+      console.error(`[oportunidades] org=${orgId} no se pudo cerrar ${row.id} por vencido:`, error instanceof Error ? error.message : error)
+    }
+  }
+  return closed
+}
+
+/** El último día local en que cada clínica corrió «lo que nadie respondió» en este proceso. */
+const unansweredRunDay = new Map<string, string>()
+
+/**
+ * «Lo que nadie respondió» una vez por día local de la clínica (ADR 0144): el
+ * ciclo del worker corre cada minuto y la regla solo cambia de un día al otro.
+ * Si el proceso se reinicia, vuelve a correr ese día; no cierra dos veces.
+ */
+export async function closeUnansweredOncePerDay(tx: Db, orgId: string, now: Date): Promise<number> {
+  const day = clinicDay((await findOrgLocale(tx, orgId)).timezone, now)
+  if (unansweredRunDay.get(orgId) === day) return 0
+  const closed = await closeUnansweredBudgetOpportunities(tx, orgId, now)
+  unansweredRunDay.set(orgId, day)
+  return closed
 }
 
 /** Las oportunidades abiertas del contacto, para que el agente sepa en qué punto está cada una. */
