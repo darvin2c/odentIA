@@ -164,7 +164,7 @@ function SummaryFigures({
           better="up"
           detail={data.collected.others.length > 0 ? `Además, ${data.collected.others.map((item) => formatMoney(item.current, item.currency, locale)).join(" y ")}` : undefined}
           goal={<GoalLine metric="cobrado" goals={data.goals} currency={currency} locale={locale} onEdit={onEditGoal} />}
-          footer={<FooterLink to="finanzas">Ver en Finanzas</FooterLink>}
+          footer={<FooterLink to="finanzas">Ver la pestaña Finanzas</FooterLink>}
         />
         <SummaryFigure
           title="Pacientes nuevos"
@@ -191,7 +191,7 @@ function SummaryFigures({
               ? `No se presentó ningún presupuesto en ${spanLabel(data.period, locale)}.`
               : `${data.acceptance.current.accepted} de ${data.acceptance.current.presented} ${data.acceptance.current.presented === 1 ? "presupuesto presentado" : "presupuestos presentados"}`
           }
-          footer={<FooterLink to="pacientes">Ver en Pacientes</FooterLink>}
+          footer={<FooterLink to="pacientes">Ver la pestaña Pacientes</FooterLink>}
         />
         <SummaryFigure
           title="No vinieron"
@@ -221,7 +221,7 @@ function SummaryFigures({
               .filter(Boolean)
               .join(" · ") || undefined
           }
-          footer={<FooterLink to="agente">Ver en Agente</FooterLink>}
+          footer={<FooterLink to="agente">Ver la pestaña Agente</FooterLink>}
         />
         <SummaryFigure
           title={`Te deben hace más de ${data.overdue.days} días`}

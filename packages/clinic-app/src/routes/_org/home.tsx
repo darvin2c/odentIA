@@ -522,6 +522,20 @@ function HomePage() {
           ))}
         </ul>
       ) : null}
+      {/* La lista entera está en Pacientes (X10): aquí van los más antiguos. Ese atajo deja fuera a quien antes tiene algo por agendar. */}
+      {budgets && budgets.items.length < budgets.total ? (
+        <Link
+          to="/people"
+          search={{ atajo: "presupuesto_sin_respuesta" }}
+          className="mt-3 inline-flex min-h-11 items-center text-sm font-semibold text-primary-soft-foreground underline-offset-2 hover:underline sm:min-h-0"
+          onClick={() => setBudgetsOpen(false)}
+        >
+          Ver en Pacientes › «Presupuesto sin respuesta»
+        </Link>
+      ) : null}
+      {budgets && budgets.items.length < budgets.total ? (
+        <p className="text-xs text-muted-foreground">Ahí va quien no tiene antes algo aceptado por agendar ni un presupuesto sin enviar.</p>
+      ) : null}
     </DetailDrawer>
     {answering ? (
       <BudgetAnswerDrawer

@@ -273,7 +273,7 @@ async function conversationAttention(
 export async function listInboxConversations(
   tx: Db,
   orgId: string,
-  input: ConversationFilters & { view?: ConversationView; cursor?: string; limit?: number; now?: Date },
+  input: ConversationFilters & { view?: ConversationView; cursor?: string; limit?: number; now?: Date; sort?: "reciente" | "espera" },
 ): Promise<{ items: InboxConversationItem[]; nextCursor: string | null }> {
   const { now, ...filters } = input
   const { rows, nextCursor } = await listPersonRows(tx, orgId, filters)
