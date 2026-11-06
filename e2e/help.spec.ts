@@ -26,7 +26,7 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   const ask = async (question: string) => {
     await help.getByLabel("Tu pregunta", { exact: true }).fill(question)
     // El envío es un botón de icono dentro del campo, con su nombre.
-    await help.getByRole("button", { name: "Preguntar" }).click()
+    await help.getByRole("button", { name: "Preguntar", exact: true }).click()
     await expect(help.getByRole("listitem").filter({ hasText: question }).last()).toBeVisible()
   }
 
@@ -71,6 +71,7 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   const doubt = help.getByRole("listitem").filter({ hasText: "quiero apagar a Sofi" })
   await expect(doubt).toContainText("No estoy segura de qué preguntas. ¿Es alguna de estas?")
   await expect(doubt).not.toContainText("¿Te sirvió?")
+  await info.attach("ayuda-duda", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await doubt.getByRole("button", { name: /^¿Cómo apago a Sofi\?/ }).click()
   const picked = help.getByRole("listitem").filter({ hasText: "En Agente, con el interruptor de su fila" })
   await expect(picked).toContainText("¿Cómo apago a Sofi?")
@@ -78,7 +79,6 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   await doubt.getByRole("button", { name: "Ninguna es lo que busco" }).click()
   await expect(doubt).toContainText("Esto no está en la guía, y no quiero inventarlo.")
   await doubt.getByRole("button", { name: "No, gracias" }).click()
-  await info.attach("ayuda-duda", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
   // --- Las cifras de la clínica no son de la guía: con Argos encendido y Reportes en su rol, se las pregunta a Argos ---
   await call(page, "PUT", "/api/agent/admin/settings", org.slug, { enabled: true })
@@ -87,6 +87,7 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   await expect(figures).toContainText("Eso es de las cifras de tu clínica: te lo responde Argos")
   await expect(figures.getByRole("button", { name: "Preguntarle a Argos" })).toBeVisible()
   await expect(figures).toContainText("Usa una de las preguntas a Argos de este mes.")
+  await info.attach("ayuda-cifras", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
   // --- No sabe: lo dice, y la persona decide si lo envía a odentIA ---
   await ask(UNKNOWN)

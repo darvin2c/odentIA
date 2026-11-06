@@ -63,7 +63,7 @@ function jev(picks: Record<string, number>, product: "dental" | "medical" = "den
   const decider: HelpDecider = {
     async decide(state, questions) {
       const question = questions[0]
-      if (!question || question.kind !== "choice") throw new Error("help.v1 es una pregunta de elegir")
+      if (question?.kind !== "choice") throw new Error("help.v1 es una pregunta de elegir")
       seen.push({ state, question })
       const probabilities = Object.fromEntries(
         Object.entries(picks).map(([key, probability]) => {
