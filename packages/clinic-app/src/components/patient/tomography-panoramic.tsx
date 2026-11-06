@@ -1,9 +1,10 @@
 import { Button, Slider } from "@odentia/ui"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { API_URL } from "../../lib/auth-client"
 import {
+  ARCH_BEYOND_MM,
   type CrossImage,
   type CurveSample,
   crossSection,
@@ -28,7 +29,9 @@ import {
   windowToRgba,
 } from "../../lib/cbct-volume"
 import { orgSlugFromHostname, requestHostname } from "../../lib/host"
-import { activeOrgLocale } from "../../lib/locale"
+import { formatDate } from "../../lib/clinical-journey"
+import { useMyUserId } from "../../lib/crm"
+import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import type { PatientDocument } from "../../lib/patients"
 import { MeasureList, type SavedMeasure, type SavedMeasures, type Vec3 } from "./tomography-measures"
 import { formatMeasure, type PlaneMeasure, SliceCanvas, type Tool } from "./tomography-slice"
@@ -47,6 +50,7 @@ interface Encounter {
   id: string
   status: string
   createdAt: string
+  professionalUserId: string
 }
 
 /** mm del volumen de un punto de una vista. */
@@ -100,7 +104,11 @@ function useArch(volume: CbctVolume) {
   const proposal = useMemo(() => detectArch(volume), [volume])
   const [control, setControl] = useState<Point[] | null>(proposal?.control ?? null)
   const [axialZ, setAxialZ] = useState(proposal?.z ?? Math.floor(volume.nz / 2))
-  const curve = useMemo(() => (control && control.length >= 5 ? sampleCurve(volume, control) : []), [volume, control])
+  // El arco llega hasta el último esmalte; se prolonga hacia la rama para ver las terceras molares.
+  const curve = useMemo(
+    () => (control && control.length >= 5 ? sampleCurve(volume, control, undefined, ARCH_BEYOND_MM) : []),
+    [volume, control],
+  )
   return { proposal, control, setControl, axialZ, setAxialZ, curve }
 }
 
@@ -159,11 +167,14 @@ export function PanoramicView({
   // La pieza que se nombra al medir es de la dentición de la pieza elegida: un niño da «55».
   const dentition = tooth ? dentitionOf(tooth) : "permanent"
   const [index, setIndex] = useState(0)
+  // La pieza pedida que no cae sobre el arco: se dice en vez de marcarla como elegida.
+  const [missing, setMissing] = useState<number | null>(null)
   const placed = useRef(false)
   useEffect(() => {
     if (!curve.length || placed.current) return
     placed.current = true
     const at = tooth ? toothIndex(curve, tooth) : null
+    if (tooth && at === null) setMissing(tooth)
     setIndex(at ?? Math.floor(curve.length / 2))
   }, [curve, tooth])
   const clampIndex = useCallback(
@@ -211,9 +222,19 @@ export function PanoramicView({
       // La pieza a la altura de la medida: el corte transversal o la columna de la panorámica.
       toothNumber:
         curve.length && view !== "axial"
-          ? toothAt(curve, view === "transversal" ? at : Math.round(points[0]!.x), jaw, dentition)
+          ? view === "transversal"
+            ? toothAt(curve, at, jaw, dentition)
+            : panoramaTooth(points, image as CrossImage)
           : null,
     })
+  }
+  // La panorámica muestra los dos maxilares: la pieza sale de la altura de los
+  // puntos respecto del plano oclusal, no de la pieza elegida. Si la medida cruza
+  // de un maxilar al otro, queda sin pieza.
+  const panoramaTooth = (points: Point[], image: CrossImage) => {
+    const above = points.map((q) => image.zTop - q.y > occlusalZ)
+    if (above.some((a) => a !== above[0])) return null
+    return toothAt(curve, Math.round(points[0]!.x), above[0] ? "upper" : "lower", dentition)
   }
   const asPlane = (m: SavedMeasure, points: Point[]): PlaneMeasure => ({
     id: m.id,
@@ -244,13 +265,26 @@ export function PanoramicView({
     setControl((prev) => (prev ? prev.map((c, k) => (k === i ? { x: p.x, y: p.y } : c)) : prev))
   const [marking, setMarking] = useState<Point[]>([])
 
-  // Guardar vista en la atención de hoy (borrador).
+  // Guardar vista: solo en la atención que lleva quien mira y que abrió hoy. La
+  // ficha tiene a lo más un borrador, y puede ser de otro profesional o de otro día.
+  const myUserId = useMyUserId()
   const encounters = useQuery({
     queryKey: ["encounters-open", patientId],
-    queryFn: () => apiFetch<{ data: Encounter[] }>(`/api/patients/${patientId}/encounters?limit=20`),
+    queryFn: () => apiFetch<{ data: Encounter[] }>(`/api/patients/${patientId}/encounters?status=borrador&limit=5`),
     enabled: canWrite && !viewOnly,
   })
-  const draftEncounter = encounters.data?.data.find((e) => e.status === "borrador") ?? null
+  const today = formatDate(new Date().toISOString())
+  const draftEncounter =
+    encounters.data?.data.find(
+      (e) => e.status === "borrador" && e.professionalUserId === myUserId && formatDate(e.createdAt) === today,
+    ) ?? null
+  const draftTime = draftEncounter
+    ? new Date(draftEncounter.createdAt).toLocaleTimeString(activeOrgLocale(), {
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: activeOrgTimeZone(),
+      })
+    : null
   const [saving, setSaving] = useState<"idle" | "saving" | "saved" | "error">("idle")
   const saveView = async () => {
     if (!pano || !draftEncounter) return
@@ -281,7 +315,7 @@ export function PanoramicView({
       )
       ctx.fillStyle = "#94a3b8"
       ctx.font = "13px system-ui, sans-serif"
-      ctx.fillText("Medidas orientativas: para planificar una cirugía, confírmalas en el programa del equipo.", 12, panoH + crossH + 58)
+      ctx.fillText("Medidas orientativas: para planificar una cirugía, confírmalas en el programa del tomógrafo.", 12, panoH + crossH + 58)
       const blob = await new Promise<Blob | null>((resolve) => out.toBlob(resolve, "image/png"))
       if (!blob) throw new Error("Sin imagen")
       const form = new FormData()
@@ -306,6 +340,65 @@ export function PanoramicView({
       setSaving("error")
     }
   }
+
+  const goToTooth = (t: number) => {
+    setTooth(t)
+    const at = toothIndex(curve, t)
+    setMissing(at === null ? t : null)
+    if (at !== null) setIndex(clampIndex(at))
+  }
+  const panelId = useId()
+  // La columna derecha, en el orden del trabajo: ir a la pieza, medir y guardar lo visto.
+  const toothSection = teeth.length > 0 && curve.length > 0 && (
+    <fieldset className="flex flex-col gap-2">
+      <legend className="mb-2 text-xs font-semibold tracking-wide text-slate-400 uppercase">Ir a la pieza</legend>
+      <div className="flex flex-wrap gap-2">
+        {teeth.map((t) => (
+          <Button
+            key={t}
+            type="button"
+            size="sm"
+            variant={t === tooth && missing !== t ? "secondary" : "outline"}
+            aria-pressed={t === tooth && missing !== t}
+            aria-describedby={`${panelId}-tooth`}
+            onClick={() => goToTooth(t)}
+          >
+            {t}
+          </Button>
+        ))}
+      </div>
+      <p id={`${panelId}-tooth`} className="text-xs text-slate-400" aria-live="polite">
+        {missing
+          ? `La ${missing} no cae sobre el arco: llega con la barra de cortes o ajusta el arco en «Más».`
+          : "Lleva la panorámica y los cortes a esa pieza."}
+      </p>
+    </fieldset>
+  )
+  const attentionSection = canWrite && !viewOnly && pano && (
+    <section aria-labelledby={`${panelId}-attention`} className="flex flex-col gap-2">
+      <h3 id={`${panelId}-attention`} className="text-xs font-semibold tracking-wide text-slate-400 uppercase">
+        En la atención
+      </h3>
+      {draftEncounter ? (
+        <>
+          <Button type="button" size="sm" disabled={saving === "saving"} onClick={() => void saveView()}>
+            {saving === "saving" ? "Guardando…" : `Guardar en tu atención de hoy · ${draftTime}`}
+          </Button>
+          <p className="text-xs text-slate-400" aria-live="polite">
+            {saving === "saved"
+              ? "Guardada en tu atención de hoy, con las medidas."
+              : saving === "error"
+                ? "No se pudo guardar. Vuelve a intentarlo."
+                : "Guarda esta imagen, con las medidas, en la nota de la atención."}
+          </p>
+        </>
+      ) : (
+        <p className="text-xs text-slate-400">
+          Para guardar esta imagen en la nota, abre tu atención de hoy con este paciente.
+        </p>
+      )}
+    </section>
+  )
 
   const teethLabel = curve.length ? toothAt(curve, clampIndex(index), jaw, dentition) : null
   const tick = useCallback(
@@ -441,31 +534,9 @@ export function PanoramicView({
             )}
           </div>
         )}
-        <div className="flex flex-col gap-3 bg-[#0d131b] p-4 text-sm">
-          {teeth.length > 0 && curve.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-semibold tracking-wide text-slate-400 uppercase">
-                Ir a la pieza
-              </span>
-              {teeth.map((t) => (
-                <Button
-                  key={t}
-                  type="button"
-                  size="sm"
-                  variant={t === tooth ? "secondary" : "outline"}
-                  onClick={() => {
-                    setTooth(t)
-                    const at = toothIndex(curve, t)
-                    if (at !== null) setIndex(clampIndex(at))
-                  }}
-                >
-                  {t}
-                </Button>
-              ))}
-            </div>
-          )}
-          <MeasureList saved={saved} canWrite={canWrite} viewOnly={viewOnly} />
-          <p className="text-xs text-slate-400">{note}</p>
+        <div className="flex flex-col gap-4 bg-[#0d131b] p-4 text-sm">
+          {toothSection}
+          <MeasureList saved={saved} canWrite={canWrite} viewOnly={viewOnly} note={note} />
         </div>
       </div>
     )
@@ -625,49 +696,9 @@ export function PanoramicView({
               {proposal ? "" : " El visor no encontró el arco solo."}
             </p>
           )}
-          {teeth.length > 0 && curve.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-semibold tracking-wide text-slate-400 uppercase">Ir a la pieza</span>
-              {teeth.map((t) => (
-                <Button
-                  key={t}
-                  type="button"
-                  size="sm"
-                  variant={t === tooth ? "secondary" : "outline"}
-                  onClick={() => {
-                    setTooth(t)
-                    const at = toothIndex(curve, t)
-                    if (at !== null) setIndex(clampIndex(at))
-                  }}
-                >
-                  {t}
-                </Button>
-              ))}
-            </div>
-          )}
-          <MeasureList saved={saved} canWrite={canWrite} viewOnly={viewOnly} />
-          <p className="text-xs text-slate-400">{note}</p>
-          {canWrite && !viewOnly && pano && (
-            <div className="flex flex-col gap-1">
-              <Button
-                type="button"
-                size="sm"
-                disabled={!draftEncounter || saving === "saving"}
-                onClick={() => void saveView()}
-              >
-                {saving === "saving" ? "Guardando…" : "Guardar vista en la atención"}
-              </Button>
-              <p className="text-xs text-slate-400" aria-live="polite">
-                {saving === "saved"
-                  ? "Vista guardada en la atención de hoy."
-                  : saving === "error"
-                    ? "No se pudo guardar la vista. Vuelve a intentarlo."
-                    : draftEncounter
-                      ? "La imagen con las medidas queda en la atención de hoy."
-                      : "Abre la atención de hoy para guardar la vista."}
-              </p>
-            </div>
-          )}
+          {toothSection}
+          <MeasureList saved={saved} canWrite={canWrite} viewOnly={viewOnly} note={note} />
+          {attentionSection}
           {tool !== "ninguna" && !viewOnly && (
             <Button type="button" size="sm" variant="ghost" onClick={() => onTool("ninguna")}>
               Terminar de medir

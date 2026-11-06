@@ -1,6 +1,16 @@
 import { cbctDemoTeeth, generateCbctPhantom } from "@odentia/dental"
 import { describe, expect, it } from "vitest"
-import { crossSection, detectArch, occlusalSample, panorama, panoramaRows, sampleCurve, toothAt, toothIndex } from "./cbct-arch"
+import {
+  ARCH_BEYOND_MM,
+  crossSection,
+  detectArch,
+  occlusalSample,
+  panorama,
+  panoramaRows,
+  sampleCurve,
+  toothAt,
+  toothIndex,
+} from "./cbct-arch"
 import { volumeFromSlices } from "./cbct-volume"
 
 const V = 0.5
@@ -82,6 +92,43 @@ describe("arco, panorámica y cortes transversales", () => {
     expect(crest).toBeDefined()
     expect(Math.abs(crest!.z - -11.5)).toBeLessThan(2)
     expect(lowerHalf.some(({ v, z }) => z > -11 && v > 2000)).toBe(false)
+  })
+})
+
+describe("terceras molares y la prolongación hacia la rama", () => {
+  const arch = detectArch(volume)!
+  const curve = sampleCurve(volume, arch.control)
+  const extended = sampleCurve(volume, arch.control, undefined, ARCH_BEYOND_MM)
+
+  it("la prolongación agrega 15 mm en cada extremo sin mover los dientes", () => {
+    const beyond = extended.filter((c) => c.beyond)
+    expect(beyond.length * V).toBeCloseTo(2 * ARCH_BEYOND_MM, 0)
+    expect(extended[0]!.s).toBe(0)
+    const a = curve[toothIndex(curve, 36)!]!
+    const b = extended[toothIndex(extended, 36)!]!
+    expect(Math.hypot(a.x - b.x, a.y - b.y) * V).toBeLessThan(1)
+  })
+
+  it("«Ir a la 38» cae detrás de la 37 y el corte se nombra 38", () => {
+    for (const [third, second] of [
+      [38, 37],
+      [48, 47],
+      [18, 17],
+      [28, 27],
+    ] as const) {
+      const at = toothIndex(extended, third)
+      expect(at, `pieza ${third}`).not.toBeNull()
+      const sSecond = extended[toothIndex(extended, second)!]!.s
+      const sMid = extended.filter((c) => !c.beyond).reduce((best, c) => (c.y < best.y ? c : best)).s
+      // Más lejos de la línea media que la segunda molar, del mismo lado.
+      expect(Math.abs(extended[at!]!.s - sMid)).toBeGreaterThan(Math.abs(sSecond - sMid))
+      expect(toothAt(extended, at!, third < 30 ? "upper" : "lower")).toBe(third)
+    }
+  })
+
+  it("en la rama, pasada la última pieza, no nombra ninguna", () => {
+    expect(toothAt(extended, extended.length - 1, "lower")).toBeNull()
+    expect(toothAt(extended, 0, "upper")).toBeNull()
   })
 })
 

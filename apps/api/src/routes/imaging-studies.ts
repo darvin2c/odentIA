@@ -121,9 +121,11 @@ export function createImagingStudiesRoute(deps: CrmDeps) {
           url: await deps.storage.uploadUrl!(file.storageKey, DICOM),
         })),
       )
+      // Solo el avance: quien recibe el CD sin leer la historia (clinical.receive)
+      // no debe recibir las piezas, etiquetas ni vínculos del documento clínico.
       return {
         state: started.state,
-        document: started.document,
+        document: { id: started.document.id },
         files: started.files,
         pending: pending.map((file) => file.index),
         targets,

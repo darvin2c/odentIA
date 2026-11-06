@@ -195,6 +195,12 @@ it("recepción sube la tomografía y ve el avance, pero no la abre ni la descarg
   expect((await reception.request(`/patients/${id}/imaging/studies/${documentId}/download`)).status).toBe(403)
   expect((await reception.request(`/patients/${id}/documents`)).status).toBe(403)
 
+  // Si vuelve con el mismo CD, la respuesta trae solo el avance: nada del documento clínico.
+  const again = await post(reception, `/patients/${id}/imaging/uploads`, start)
+  const againBody = (await again.json()) as { data: { state: string; document: Record<string, unknown> } }
+  expect(againBody.data.state).toBe("exists")
+  expect(againBody.data.document).toEqual({ id: documentId })
+
   // Caja no sube tomografías.
   expect((await post(buildApp("cashier"), `/patients/${id}/imaging/uploads`, start)).status).toBe(403)
 })

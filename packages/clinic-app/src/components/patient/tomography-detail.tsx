@@ -85,11 +85,11 @@ export function TomographyDetail({
             className={buttonVariants({ size: "sm", variant: "outline" })}
           >
             <Download aria-hidden="true" />
-            Descargar para el programa del equipo
+            Descargar para el programa del tomógrafo
           </a>
         </div>
         <p className="text-xs text-muted-foreground">
-          La descarga es un ZIP con la tomografía tal como llegó, para abrirla en el programa del equipo o
+          La descarga es un ZIP con la tomografía tal como llegó, para abrirla en el programa del tomógrafo o
           en Weasis.
         </p>
         {viewing && (

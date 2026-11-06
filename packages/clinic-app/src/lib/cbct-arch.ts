@@ -27,6 +27,12 @@ export interface CurveSample {
   ty: number
   /** Distancia sobre el arco desde su inicio, en mm. */
   s: number
+  /**
+   * Prolongación detrás de los últimos dientes (hacia la rama): ahí caen las
+   * terceras molares que el arco propuesto no alcanza, pero no cuenta para el
+   * largo de cada lado de la arcada.
+   */
+  beyond?: boolean
 }
 
 /** Mínimos cuadrados de y = a·x² + b·x + c. */
@@ -189,7 +195,12 @@ function catmullRom(control: readonly Point[], steps: number): Point[] {
  * Muestras del arco cada `stepMm`, con su tangente y su normal hacia afuera.
  * Afuera es lejos del interior de la U (la lengua).
  */
-export function sampleCurve(volume: CbctVolume, control: readonly Point[], stepMm = volume.sx): CurveSample[] {
+export function sampleCurve(
+  volume: CbctVolume,
+  control: readonly Point[],
+  stepMm = volume.sx,
+  beyondMm = 0,
+): CurveSample[] {
   if (control.length < 2) return []
   const dense = catmullRom(control, 200)
   const mm = dense.map((p) => ({ x: p.x * volume.sx, y: p.y * volume.sy }))
@@ -224,7 +235,17 @@ export function sampleCurve(volume: CbctVolume, control: readonly Point[], stepM
     }
     out.push({ x: px / volume.sx, y: py / volume.sy, tx: tx / volume.sx, ty: ty / volume.sy, nx: nx / volume.sx, ny: ny / volume.sy, s })
   }
-  return out
+  if (beyondMm <= 0 || out.length < 2) return out
+  // Prolonga en línea recta, siguiendo la tangente de cada extremo (hacia la rama).
+  const steps = Math.round(beyondMm / stepMm)
+  const extend = (from: CurveSample, sign: -1 | 1): CurveSample[] =>
+    Array.from({ length: steps }, (_, k) => {
+      const o = (k + 1) * stepMm * sign
+      return { ...from, x: from.x + from.tx * o, y: from.y + from.ty * o, beyond: true }
+    })
+  const head = extend(out[0]!, -1).reverse()
+  const tail = extend(out[out.length - 1]!, 1)
+  return [...head, ...out, ...tail].map((sample, i) => ({ ...sample, s: i * stepMm }))
 }
 
 /** Valor del volumen en (x, y) del corte z, con interpolación bilineal. */
@@ -335,8 +356,15 @@ export function jawRows(volume: CbctVolume, occlusalZ: number, jaw: "upper" | "l
     : [occlusalZ - mm(8), occlusalZ + mm(36)]
 }
 
-/** Ancho mesiodistal típico por posición (1 = incisivo central … 7 = segundo molar), en mm. */
-const TOOTH_WIDTH = { upper: [8.5, 6.5, 7.5, 7, 6.5, 10, 9], lower: [5.5, 6, 7, 7, 7.5, 11, 10.5] }
+/**
+ * Ancho mesiodistal típico de la corona por posición (1 = incisivo central … 8 =
+ * tercer molar), en mm: Ash y Nelson, «Wheeler's Dental Anatomy, Physiology and
+ * Occlusion», tabla de medidas de la corona (18/28: 8,5; 38/48: 10).
+ */
+const TOOTH_WIDTH = { upper: [8.5, 6.5, 7.5, 7, 6.5, 10, 9, 8.5], lower: [5.5, 6, 7, 7, 7.5, 11, 10.5, 10] }
+
+/** Lo que se prolonga el arco detrás de los últimos dientes, en mm: alcanza la tercera molar y el inicio de la rama. */
+export const ARCH_BEYOND_MM = 15
 
 /**
  * Lo mismo en la dentición temporal (1 = incisivo central … 5 = segundo molar):
@@ -368,22 +396,33 @@ export function toothIndex(curve: readonly CurveSample[], fdi: number): number |
   const quadrant = Math.floor(fdi / 10)
   const position = fdi % 10
   const primary = quadrant >= 5
-  if (quadrant < 1 || quadrant > 8 || position < 1 || position > (primary ? 5 : 7) || curve.length < 2) return null
+  if (quadrant < 1 || quadrant > 8 || position < 1 || position > (primary ? 5 : 8) || curve.length < 2) return null
   const table = primary ? PRIMARY_TOOTH_WIDTH : TOOTH_WIDTH
   const widths = jawOf(fdi) === "upper" ? table.upper : table.lower
-  const total = curve[curve.length - 1]!.s
+  // El largo de cada lado es el de los dientes, sin la prolongación hacia la rama.
+  const core = curve.filter((c) => !c.beyond)
+  if (core.length < 2) return null
+  const start = core[0]!.s
+  const end = core[core.length - 1]!.s
   // La línea media: el punto más adelantado del arco (el de menor y).
-  let mid = 0
-  for (let i = 1; i < curve.length; i++) if (curve[i]!.y < curve[mid]!.y) mid = i
-  const sMid = curve[mid]!.s
+  let mid = core[0]!
+  for (const c of core) if (c.y < mid.y) mid = c
+  const sMid = mid.s
   const right = quadrant === 1 || quadrant === 4 || quadrant === 5 || quadrant === 8
-  const sideLength = right ? sMid : total - sMid
-  const sum = widths.reduce((n, w) => n + w, 0)
+  const sideLength = right ? sMid - start : end - sMid
+  // El arco propuesto llega hasta el último esmalte: si el lado alcanza para una
+  // tercera molar, las ocho piezas se reparten en él; si no, se reparten siete y
+  // la tercera molar cae detrás, en la prolongación.
+  const seven = widths.slice(0, 7).reduce((n, w) => n + w, 0)
+  const onSide = !primary && sideLength >= seven + widths[7]! / 2 ? 8 : primary ? 5 : 7
+  const scale = sideLength / widths.slice(0, onSide).reduce((n, w) => n + w, 0)
   const before = widths.slice(0, position - 1).reduce((n, w) => n + w, 0)
-  const along = ((before + widths[position - 1]! / 2) / sum) * sideLength
+  const along = (before + widths[position - 1]! / 2) * scale
   const s = right ? sMid - along : sMid + along
   let best = 0
   for (let i = 1; i < curve.length; i++) if (Math.abs(curve[i]!.s - s) < Math.abs(curve[best]!.s - s)) best = i
+  // Fuera del arco (ni con la prolongación la alcanza): no se inventa una posición.
+  if (Math.abs(curve[best]!.s - s) > widths[position - 1]! / 2) return null
   return best
 }
 
@@ -401,12 +440,15 @@ export function toothAt(
   const candidates = jaw === "upper" ? (primary ? [5, 6] : [1, 2]) : primary ? [8, 7] : [4, 3]
   let best: { fdi: number; d: number } | null = null
   for (const q of candidates)
-    for (let p = 1; p <= (primary ? 5 : 7); p++) {
+    for (let p = 1; p <= (primary ? 5 : 8); p++) {
       const fdi = q * 10 + p
       const at = toothIndex(curve, fdi)
       if (at === null) continue
       const d = Math.abs(at - index)
       if (!best || d < best.d) best = { fdi, d }
     }
+  // En la prolongación, pasada la última pieza (la rama), no hay pieza que nombrar.
+  const step = curve.length > 1 ? curve[1]!.s - curve[0]!.s : 1
+  if (best && curve[index]?.beyond && best.d * step > 6) return null
   return best?.fdi ?? null
 }

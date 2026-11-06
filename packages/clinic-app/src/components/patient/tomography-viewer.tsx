@@ -433,7 +433,7 @@ export function VolumeLoadError({
 }) {
   const tooLarge = error instanceof CbctTooLargeError
   const message = tooLarge
-    ? "Esta computadora no tiene memoria suficiente para armar la tomografía. Ábrela en otra computadora o descárgala para el programa del equipo."
+    ? "Esta computadora no tiene memoria suficiente para armar la tomografía. Ábrela en otra computadora o descárgala para el programa del tomógrafo."
     : error instanceof DicomUnsupportedError
       ? error.message
       : error instanceof ApiError
@@ -687,7 +687,7 @@ export function TomographyViewer({
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={download} className="flex-col items-start gap-0.5">
-                  <span>Descargar para el programa del centro</span>
+                  <span>Descargar para el programa del tomógrafo</span>
                   <span className="text-xs text-muted-foreground">
                     Para planificar el implante o seguir el nervio, ábrela en el programa del centro
                     de imágenes o del tomógrafo.
@@ -766,8 +766,7 @@ export function TomographyViewer({
                 }}
               />
               <aside className="flex w-full shrink-0 flex-col gap-3 border-t border-slate-800 bg-[#0d131b] p-4 text-sm lg:w-72 lg:border-t-0 lg:border-l">
-                <MeasureList saved={saved} canWrite={canWrite} viewOnly={viewOnly} />
-                <p className="text-xs text-slate-400">{MEASURE_NOTE(voxel)}</p>
+                <MeasureList saved={saved} canWrite={canWrite} viewOnly={viewOnly} note={MEASURE_NOTE(voxel)} />
                 <p className="text-xs text-slate-500">
                   Rueda o ↑ ↓ avanzan el corte · Ctrl + rueda o dos dedos acercan · doble clic
                   ajusta · 1, 2 y 3 cambian el brillo
