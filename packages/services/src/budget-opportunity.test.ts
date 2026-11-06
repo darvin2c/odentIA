@@ -12,8 +12,8 @@
 import { randomUUID } from "node:crypto"
 import { patient, patientContact, serviceCatalog, treatmentBudget } from "@odentia/db/schema/clinical"
 import { channelConnection, contact } from "@odentia/db/schema/crm"
-import { orgProfile } from "@odentia/db/schema/org"
-import { eq, sql } from "drizzle-orm"
+import { auditEvent, orgProfile } from "@odentia/db/schema/org"
+import { and, eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { sendBudget } from "./budget-send.js"
 import {
@@ -27,11 +27,14 @@ import {
 } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import {
+  advanceForAppointment,
+  closeOpportunity,
   closeUnansweredBudgetOpportunities,
   createOpportunity,
   getOpportunity,
   listOpportunities,
   noteServiceInterest,
+  returnForCancelledAppointment,
   setOpportunityTask,
   updateOpportunity,
 } from "./opportunities.js"
@@ -91,7 +94,8 @@ it("entregar un presupuesto sin oportunidad abre la suya en «Presupuesto enviad
     amountCents: 150000,
     currency: "PEN",
     why: "Se abrió sola: Clínico presentó el presupuesto hoy",
-    after: "Cuando acepte o rechace el presupuesto, se cierra sola",
+    // Avisa cuándo se dará por perdida si no responde, y cómo evitarlo.
+    after: expect.stringMatching(/^Cuando acepte o rechace el presupuesto, se cierra sola\. Si no responde, el \d{1,2} \S+ se cierra sola como perdida: tómala o déjale una tarea para seguirla$/),
   })
   // Un solo paso en su historial: nunca estuvo en «Interesado».
   expect(opened.history).toEqual([
@@ -386,26 +390,16 @@ it("imprimir y enviar a la vez el mismo borrador abre una sola oportunidad", asy
 
 it("pasados 30 días de su vigencia sin respuesta se cierra sola «No responde»; si responde después, se reabre y se decide; lo que alguien trabaja o no vence, no", async () => {
   const f = await clinicalFixture()
-  const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10)
-  /** Un presupuesto entregado con la vigencia que se diga (la vigencia se fija en el borrador). */
-  const deliveredUntil = async (validUntil: string) => {
-    const item = await indicate(f, f.service.id)
-    const draft = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [item.id] }))
-    await ownerDb.update(treatmentBudget).set({ validUntil }).where(eq(treatmentBudget.id, draft.id))
-    await f.run((tx) => deliverBudget(tx, ...f.args, draft.id))
-    const opp = (await opportunitiesOf(f)).find((row) => row.budgetId === draft.id)!
-    return { budget: draft, item, opp }
-  }
-  const expired = await deliveredUntil(daysAgo(40))
-  const recent = await deliveredUntil(daysAgo(20))
-  const withTask = await deliveredUntil(daysAgo(40))
+  const expired = await deliveredUntil(f, daysAgo(40))
+  const recent = await deliveredUntil(f, daysAgo(20))
+  const withTask = await deliveredUntil(f, daysAgo(40))
   await f.run((tx) =>
     setOpportunityTask(tx, "org_a", withTask.opp.id, { title: "Llamarla" }, { userId: f.actor, createdBy: "user" }),
   )
-  const taken = await deliveredUntil(daysAgo(40))
+  const taken = await deliveredUntil(f, daysAgo(40))
   await f.run((tx) => updateOpportunity(tx, "org_a", taken.opp.id, { assignedUserId: f.actor }, { userId: f.actor }))
   // Un presupuesto de antes, sin vigencia, no vence (hoy toda entrega la fija).
-  const timeless = await deliveredUntil(daysAgo(40))
+  const timeless = await deliveredUntil(f, daysAgo(40))
   await ownerDb.transaction(async (owner) => {
     await owner.execute(sql`set local session_replication_role = replica`)
     await owner.update(treatmentBudget).set({ validUntil: null }).where(eq(treatmentBudget.id, timeless.budget.id))
@@ -437,4 +431,251 @@ it("pasados 30 días de su vigencia sin respuesta se cierra sola «No responde»
   expect(won.history.map((row) => row.action)).toEqual(
     expect.arrayContaining(["opportunity.lost", "opportunity.reopened", "opportunity.won"]),
   )
+})
+
+// --- Segunda revisión del PR #470 (V1 a V15) y la fecha de corte ---
+
+const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10)
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/** Un presupuesto entregado con la vigencia que se diga (la vigencia se fija en el borrador) y su oportunidad. */
+async function deliveredUntil(f: Fixture, validUntil: string) {
+  const item = await indicate(f, f.service.id)
+  const draft = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [item.id] }))
+  await ownerDb.update(treatmentBudget).set({ validUntil }).where(eq(treatmentBudget.id, draft.id))
+  await f.run((tx) => deliverBudget(tx, ...f.args, draft.id))
+  const opp = (await opportunitiesOf(f)).find((row) => row.budgetId === draft.id)!
+  return { budget: draft, item, opp }
+}
+
+const tick = (f: Fixture) => f.run((tx) => closeUnansweredBudgetOpportunities(tx, "org_a", new Date()))
+const statusOf = async (f: Fixture, id: string) => {
+  const opp = await f.run((tx) => getOpportunity(tx, "org_a", id))
+  return [opp.status, opp.closeReason]
+}
+
+it("V1 y V12 · la nueva versión de lo que se perdió (no respondió, el precio) reabre su oportunidad, y aceptarla la gana", async () => {
+  const f = await clinicalFixture()
+  const { budget, item, opp } = await deliveredUntil(f, daysAgo(40))
+  await tick(f)
+  expect(await statusOf(f, opp.id)).toEqual(["lost", "no_responde"])
+  const revision = await f.run((tx) => reviseBudget(tx, ...f.args, budget.id, { itemIds: [item.id], reason: "Pidió cambiar" }))
+  await f.run((tx) => deliverBudget(tx, ...f.args, revision.id))
+  expect(await f.run((tx) => getOpportunity(tx, "org_a", opp.id))).toMatchObject({
+    status: "open",
+    budgetId: revision.id,
+    why: "Se reabrió sola: le presentaron otra versión del presupuesto",
+  })
+  await f.run((tx) => decideBudget(tx, ...f.args, revision.id, { decisions: [{ planItemId: item.id, decision: "aceptado" }] }))
+  expect(await statusOf(f, opp.id)).toEqual(["won", "acepto_presupuesto"])
+  expect(await opportunitiesOf(f)).toHaveLength(1)
+
+  // «Precio» a mano y una versión más barata que acepta: se gana la misma.
+  const g = await clinicalFixture()
+  const priced = await delivered(g, [g.service.id])
+  await g.run((tx) => closeOpportunity(tx, "org_a", priced.opp!.id, { outcome: "lost", reason: "precio" }, { userId: g.actor }))
+  const cheaper = await g.run((tx) => reviseBudget(tx, ...g.args, priced.budget.id, { itemIds: [priced.items[0]!.id], reason: "Descuento" }))
+  await g.run((tx) => deliverBudget(tx, ...g.args, cheaper.id))
+  await g.run((tx) => decideBudget(tx, ...g.args, cheaper.id, { decisions: [{ planItemId: priced.items[0]!.id, decision: "aceptado" }] }))
+  expect(await statusOf(g, priced.opp!.id)).toEqual(["won", "acepto_presupuesto"])
+  expect(await opportunitiesOf(g)).toHaveLength(1)
+})
+
+it("V2, V3 y V4 · no se da por perdida con una nueva versión en borrador, si escribió a Sofi por eso o si alguien la cambió a mano", async () => {
+  const f = await clinicalFixture()
+  const drafting = await deliveredUntil(f, daysAgo(40))
+  const revision = await f.run((tx) =>
+    reviseBudget(tx, ...f.args, drafting.budget.id, { itemIds: [drafting.item.id], reason: "Ajuste" }),
+  )
+  await tick(f)
+  expect(await statusOf(f, drafting.opp.id)).toEqual(["open", null])
+  // La versión nueva sigue con la misma.
+  await f.run((tx) => deliverBudget(tx, ...f.args, revision.id))
+  expect(await f.run((tx) => getOpportunity(tx, "org_a", drafting.opp.id))).toMatchObject({ status: "open", budgetId: revision.id })
+
+  const g = await clinicalFixture()
+  const asked = await deliveredUntil(g, daysAgo(40))
+  const gPerson = await personOf(g.patient.id)
+  await g.run((tx) =>
+    noteServiceInterest(tx, "org_a", { contactId: gPerson, conversationId: null, serviceId: g.service.id, said: "¿Cuánto era?" }),
+  )
+  const renamed = await deliveredUntil(g, daysAgo(40))
+  await g.run((tx) => updateOpportunity(tx, "org_a", renamed.opp.id, { title: "Resina (llamar)" }, { userId: g.actor }))
+  await tick(g)
+  expect(await statusOf(g, asked.opp.id)).toEqual(["open", null])
+  expect(await statusOf(g, renamed.opp.id)).toEqual(["open", null])
+})
+
+it("V5 · el ciclo la cierra mientras la persona acepta: la respuesta espera, la reabre y la gana", async () => {
+  const f = await clinicalFixture()
+  const { budget, item, opp } = await deliveredUntil(f, daysAgo(40))
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let closed = false
+  const cycle = f.run(async (tx) => {
+    const n = await closeUnansweredBudgetOpportunities(tx, "org_a", new Date())
+    closed = true
+    await gate
+    return n
+  })
+  while (!closed) await sleep(20)
+  const decide = f.run((tx) => decideBudget(tx, ...f.args, budget.id, { decisions: [{ planItemId: item.id, decision: "aceptado" }] }))
+  await sleep(500)
+  release()
+  const [c, d] = await Promise.allSettled([cycle, decide])
+  expect(c.status).toBe("fulfilled")
+  expect(d.status).toBe("fulfilled")
+  expect(await statusOf(f, opp.id)).toEqual(["won", "acepto_presupuesto"])
+})
+
+it("V6 · la persona acepta mientras corre el ciclo: el ciclo salta esa y cierra las demás", async () => {
+  const f = await clinicalFixture()
+  const other = await deliveredUntil(f, daysAgo(60))
+  const { budget, item, opp } = await deliveredUntil(f, daysAgo(40))
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let decided = false
+  const decide = f.run(async (tx) => {
+    await decideBudget(tx, ...f.args, budget.id, { decisions: [{ planItemId: item.id, decision: "aceptado" }] })
+    decided = true
+    await gate
+  })
+  while (!decided) await sleep(20)
+  const cycle = tick(f)
+  await sleep(300)
+  release()
+  const [d, c] = await Promise.allSettled([decide, cycle])
+  expect(d.status).toBe("fulfilled")
+  expect(c.status).toBe("fulfilled")
+  expect(await statusOf(f, opp.id)).toEqual(["won", "acepto_presupuesto"])
+  expect(await statusOf(f, other.opp.id)).toEqual(["lost", "no_responde"])
+})
+
+it("V7, V8 y V13 · una madre que también es paciente no se junta con su hijo; el equipo crea lo de la madre sin ficha", async () => {
+  // V7: la madre (paciente) preguntó por ese servicio para ella; el presupuesto del hijo abre el suyo.
+  const child = await clinicalFixture()
+  const mom = await clinicalFixture()
+  const momPerson = await personOf(mom.patient.id)
+  await ownerDb.insert(patientContact).values({ organizationId: "org_a", patientId: child.patient.id, contactId: momPerson, relationship: "guardian" })
+  const hers = await mom.run((tx) =>
+    noteServiceInterest(tx, "org_a", { contactId: momPerson, conversationId: null, serviceId: child.service.id, said: "¿Cuánto cuesta para mí?" }),
+  )
+  const sold = await delivered(child, [child.service.id])
+  expect(sold.opp).toMatchObject({ contactId: await personOf(child.patient.id) })
+  expect(await mom.run((tx) => getOpportunity(tx, "org_a", hers.opportunityId!))).toMatchObject({
+    moment: "interesado",
+    patientId: null,
+    budgetId: null,
+  })
+  // V8: con el presupuesto del hijo pendiente, lo que la madre pide para ella se anota aparte.
+  const again = await mom.run((tx) =>
+    noteServiceInterest(tx, "org_a", { contactId: momPerson, conversationId: null, serviceId: child.service.id, said: "Yo también quiero" }),
+  )
+  expect(again).toEqual({ outcome: "actualizada", opportunityId: hers.opportunityId })
+  expect(await child.run((tx) => getOpportunity(tx, "org_a", sold.opp!.id))).toMatchObject({ interestText: null })
+
+  // V13: la madre sin ficha; el equipo le crea su propia oportunidad aunque el hijo tenga ese servicio pendiente.
+  const f = await clinicalFixture()
+  const [mother] = await ownerDb.insert(contact).values({ organizationId: "org_a", displayName: "Mamá sin ficha" }).returning({ id: contact.id })
+  await ownerDb.insert(patientContact).values({ organizationId: "org_a", patientId: f.patient.id, contactId: mother!.id, relationship: "guardian" })
+  await delivered(f, [f.service.id])
+  const own = await f.run((tx) =>
+    createOpportunity(tx, "org_a", { contactId: mother!.id, title: "Para ella", serviceId: f.service.id }, { userId: f.actor }),
+  )
+  expect(own).toMatchObject({ contactId: mother!.id, patientId: null, moment: "interesado" })
+})
+
+it("V9 · menor: lo que anotó su apoderada pasa a llevarlo al agendar y vuelve a «Interesado» si cancela la evaluación", async () => {
+  const f = await clinicalFixture()
+  const [mother] = await ownerDb.insert(contact).values({ organizationId: "org_a", displayName: "Mamá V9" }).returning({ id: contact.id })
+  await ownerDb.insert(patientContact).values({ organizationId: "org_a", patientId: f.patient.id, contactId: mother!.id, relationship: "guardian" })
+  const asked = await f.run((tx) =>
+    noteServiceInterest(tx, "org_a", { contactId: mother!.id, conversationId: null, serviceId: f.service.id, said: "Para mi hijo" }),
+  )
+  const startsAt = new Date(Date.now() + 3 * 86_400_000)
+  expect(
+    await f.run((tx) => advanceForAppointment(tx, "org_a", { patientId: f.patient.id, serviceId: f.service.id, startsAt, source: "recepcion" })),
+  ).toBe(asked.opportunityId)
+  expect(await f.run((tx) => getOpportunity(tx, "org_a", asked.opportunityId!))).toMatchObject({
+    moment: "evaluacion_agendada",
+    patientId: f.patient.id,
+  })
+  await f.run((tx) => returnForCancelledAppointment(tx, "org_a", { patientId: f.patient.id, startsAt }))
+  expect((await f.run((tx) => getOpportunity(tx, "org_a", asked.opportunityId!))).moment).toBe("interesado")
+})
+
+it("V10 · al vencer, la que era de otro interés no se pierde: solo se le suelta el presupuesto", async () => {
+  const f = await clinicalFixture()
+  const fPerson = await personOf(f.patient.id)
+  const asked = await f.run((tx) =>
+    createOpportunity(tx, "org_a", { contactId: fPerson, title: "Blanqueamiento" }, { userId: null, origin: "agente" }),
+  )
+  const { opp } = await deliveredUntil(f, daysAgo(40))
+  expect(opp.id).toBe(asked.id)
+  await tick(f)
+  expect(await f.run((tx) => getOpportunity(tx, "org_a", asked.id))).toMatchObject({
+    status: "open",
+    title: "Blanqueamiento",
+    budgetId: null,
+    after: null,
+  })
+})
+
+it("V11 y V15 · responder después de darse por perdida la reabre: «lo pienso» la deja abierta y escribirle a Sofi no abre otra", async () => {
+  const f = await clinicalFixture()
+  const thinking = await deliveredUntil(f, daysAgo(40))
+  await tick(f)
+  await f.run((tx) =>
+    decideBudget(tx, ...f.args, thinking.budget.id, { decisions: [{ planItemId: thinking.item.id, decision: "pospuesto" }] }),
+  )
+  expect(await f.run((tx) => getOpportunity(tx, "org_a", thinking.opp.id))).toMatchObject({
+    status: "open",
+    moment: "presupuesto_enviado",
+    why: "Se reabrió sola: respondió después de darse por perdida",
+  })
+
+  const g = await clinicalFixture()
+  const { budget, item, opp } = await deliveredUntil(g, daysAgo(40))
+  await tick(g)
+  const person = await personOf(g.patient.id)
+  const noted = await g.run((tx) =>
+    noteServiceInterest(tx, "org_a", { contactId: person, conversationId: null, serviceId: g.service.id, said: "¿Sigue valiendo mi presupuesto?" }),
+  )
+  expect(noted).toEqual({ outcome: "actualizada", opportunityId: opp.id })
+  await g.run((tx) => decideBudget(tx, ...g.args, budget.id, { decisions: [{ planItemId: item.id, decision: "aceptado" }] }))
+  const all = await opportunitiesOf(g, { contactId: person })
+  expect(all.map((row) => [row.id, row.status])).toEqual([[opp.id, "won"]])
+})
+
+it("V14 · al decidir no pisa el nombre que le puso una persona", async () => {
+  const f = await clinicalFixture()
+  const { budget, items, opp } = await delivered(f, [f.service.id])
+  await f.run((tx) => updateOpportunity(tx, "org_a", opp!.id, { title: "Resina de Ana: viene con su esposo" }, { userId: f.actor }))
+  await f.run((tx) => decideBudget(tx, ...f.args, budget.id, { decisions: [{ planItemId: items[0]!.id, decision: "aceptado" }] }))
+  expect(await f.run((tx) => getOpportunity(tx, "org_a", opp!.id))).toMatchObject({
+    status: "won",
+    title: "Resina de Ana: viene con su esposo",
+  })
+})
+
+it("fecha de corte · lo entregado antes del despliegue (sin la marca en su entrega) nunca se da por perdido", async () => {
+  const f = await clinicalFixture()
+  const before = await deliveredUntil(f, daysAgo(60))
+  // Así queda una entrega de antes: su registro no lleva la marca de la regla.
+  await ownerDb.transaction(async (owner) => {
+    await owner.execute(sql`set local session_replication_role = replica`)
+    await owner
+      .update(auditEvent)
+      .set({ metadata: sql`${auditEvent.metadata} - 'unansweredCloses'` })
+      .where(and(eq(auditEvent.action, "budget.delivered"), eq(auditEvent.entityId, before.budget.id)))
+  })
+  await tick(f)
+  expect(await f.run((tx) => getOpportunity(tx, "org_a", before.opp.id))).toMatchObject({
+    status: "open",
+    after: "Cuando acepte o rechace el presupuesto, se cierra sola",
+  })
 })

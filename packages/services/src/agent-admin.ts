@@ -68,7 +68,7 @@ import { purgeOldWebchatTests } from "./webchat.js"
 import { patientCreditSql } from "./payments.js"
 import { getPatientRegistrationConfig } from "./patient-registration.js"
 import { formatOrgMoneyToday, getOrgLocale, type OrgLocale, orgProduct } from "./locale.js"
-import { closeUnansweredBudgetOpportunities } from "./opportunities.js"
+import { closeUnansweredOncePerDay } from "./opportunities.js"
 import { productHooks } from "./products.js"
 import { debtZoneSql } from "./report-debts.js"
 import { lapsedToInvite } from "./return-invites.js"
@@ -1568,9 +1568,9 @@ export async function tickAutomations(
     // Las tareas se cierran solas cuando su motivo desaparece, aunque el
     // Administrador esté apagado: una cita que pasó no espera a que lo prendan.
     summary.tareasCerradas += await step("cierre de tareas", 0, () => withOrgContext(appDb, orgId, (tx) => settleTasks(tx, orgId, now)))
-    // Lo que nadie respondió (ADR 0144): como las tareas, no espera a que prendan al Administrador.
+    // Lo que nadie respondió (ADR 0144): como las tareas, no espera a que prendan al Administrador. Una vez por día local.
     summary.ventasSinRespuesta += await step("ventas sin respuesta", 0, () =>
-      withOrgContext(appDb, orgId, (tx) => closeUnansweredBudgetOpportunities(tx, orgId, now)),
+      withOrgContext(appDb, orgId, (tx) => closeUnansweredOncePerDay(tx, orgId, now)),
     )
     // Las pruebas del chat web de más de 7 días se borran solas (fase 6 del pulido).
     await apart(orgId, "pruebas del chat web", 0, () => withOrgContext(appDb, orgId, (tx) => purgeOldWebchatTests(tx, orgId, now)))

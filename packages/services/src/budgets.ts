@@ -42,7 +42,12 @@ import { documentSecretsKey } from "./document-check.js"
 import { type DocumentClinic, loadDocumentClinic } from "./document-clinic.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCurrency, NEUTRAL_TIMEZONE } from "./locale.js"
-import { decideBudgetOpportunity, linkPresentedBudget, releaseCancelledBudget } from "./opportunities.js"
+import {
+  decideBudgetOpportunity,
+  linkPresentedBudget,
+  releaseCancelledBudget,
+  UNANSWERED_RULE_MARK,
+} from "./opportunities.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
 import { listPaymentMethods } from "./payment-methods.js"
@@ -2016,6 +2021,8 @@ export async function deliverBudget(
     patientId,
     itemCount: lines.length,
     ...(options.length > 1 ? { options: options.length } : {}),
+    // Entregado desde la 0144: si nadie lo responde, su oportunidad se cierra sola (la fecha de corte).
+    [UNANSWERED_RULE_MARK]: true,
   })
   // Se une sola a la oportunidad del mismo tratamiento (o a la más reciente),
   // que pasa a «Presupuesto enviado» (ADR 0028); sin ninguna, abre la suya a
