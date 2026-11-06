@@ -15,12 +15,14 @@ import {
   addCashMovement,
   addShiftMovement,
   closeCashWindow,
+  createExpense,
   closeShift,
   ensureOpenShift,
   getCashState,
   getDebts,
   listClosures,
   lockCashWindows,
+  voidExpense,
   voidMovement,
 } from "./finance.js"
 import {
@@ -548,6 +550,30 @@ it("anular después del cierre saca lo que entró a la caja, en su moneda, no lo
     .innerJoin(cashShift, eq(cashShift.id, cashMovement.shiftId))
     .where(and(eq(cashMovement.kind, "devolucion"), eq(cashShift.branchId, branchId), isNull(cashMovement.voidedAt)))
   expect(out).toEqual([{ amountCents: 8000, currency: "USD", method: "Efectivo", methodTypeCode: "10", branchId }])
+})
+
+it("un gasto de la caja ya cerrada lo anula administración, y lo que salió vuelve a la caja de hoy", async () => {
+  const f = await clinicalFixture()
+  const { branchId, cash } = await seedCashbox(f)
+  // Primero entra efectivo, para que el gasto pueda salir de la caja.
+  await f.run((tx) => createCharge(tx, ...f.args, { description: "Limpieza", amountCents: 5000, currency: "PEN", branchId }))
+  await f.run((tx) =>
+    collectCharge(tx, ...f.args, { branchId, payments: [{ paymentMethodId: cash.id, amountCents: 5000 }], requestId: randomUUID() }),
+  )
+  const spent = await f.run((tx) =>
+    createExpense(tx, "org_a", f.actor, { branchId, concept: "Gasto de prueba", amountCents: 3000, currency: "PEN", fromCash: true }),
+  )
+  await closeBox(f, branchId, "PEN")
+  await expect(f.run((tx) => voidExpense(tx, "org_a", f.actor, spent.id, { reason: "Se registró mal" }))).rejects.toMatchObject({
+    code: "POST_CLOSE_NEEDS_ADMIN",
+  })
+  await f.run((tx) => voidExpense(tx, "org_a", f.actor, spent.id, { reason: "Autoriza administración" }, { allowPostClose: true }))
+  const back = await ownerDb
+    .select({ direction: cashMovement.direction, amountCents: cashMovement.amountCents, concept: cashMovement.concept, status: cashShift.status })
+    .from(cashMovement)
+    .innerJoin(cashShift, eq(cashShift.id, cashMovement.shiftId))
+    .where(and(eq(cashShift.branchId, branchId), eq(cashMovement.concept, "Compensación por anulación"), isNull(cashMovement.voidedAt)))
+  expect(back).toEqual([{ direction: "ingreso", amountCents: 3000, concept: "Compensación por anulación", status: "abierta" }])
 })
 
 it("el cobro cerrado es el de la caja donde entró el dinero: otra caja cerrada no lo cambia", async () => {

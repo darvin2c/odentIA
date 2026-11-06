@@ -2574,7 +2574,9 @@ export async function cancelPurchaseOrder(
       const voidReason = input.reason?.trim() || "Se canceló la compra"
       const live = (await purchasePayments(tx, orgId, id)).filter((payment) => payment.voidedAt === null)
       for (const payment of live) {
-        if (payment.kind === "pago") await voidExpense(tx, orgId, actorUserId, payment.id, { reason: voidReason })
+        // Cancelar la compra ya lo decidió quien puede hacerlo: si su caja cerró, lo pagado vuelve a la de hoy.
+        if (payment.kind === "pago")
+          await voidExpense(tx, orgId, actorUserId, payment.id, { reason: voidReason }, { allowPostClose: true })
         else await voidSupplierCreditUse(tx, orgId, actorUserId, payment.id, { reason: voidReason })
       }
     }
