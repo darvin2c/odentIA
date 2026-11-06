@@ -137,7 +137,7 @@ const COMMON_SECTIONS = [
   {
     id: "portal",
     area: "datos",
-    label: "Acceso al portal",
+    label: "Enlace y portal",
     permission: "patients.write",
     patient: true,
   },

@@ -978,7 +978,7 @@ async function portalCandidates(tx: Db, orgId: string, patientId: string): Promi
   return candidates.sort((a, b) => (a.relation === b.relation ? a.name.localeCompare(b.name, "es") : a.relation === "self" ? -1 : 1))
 }
 
-/** La fila de acceso al portal de la página de la persona (Datos › Acceso al portal). */
+/** La fila de acceso al portal de la página de la persona (Datos › Enlace y portal). */
 export async function getPortalAccessSummary(tx: Db, orgId: string, patientId: string): Promise<PortalAccessSummary> {
   const policy = await getPortalPolicy(tx, orgId)
   const grants = (
