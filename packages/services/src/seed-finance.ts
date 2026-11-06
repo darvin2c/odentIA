@@ -1,9 +1,9 @@
 import type { Db } from "@odentia/db"
 import { paymentTicket } from "@odentia/db/schema/clinical"
-import { and, eq } from "drizzle-orm"
+import { and, eq, sql } from "drizzle-orm"
 import { addShiftMovement, closeCashWindow, createExpense, ensureOpenShift, getCashState } from "./finance.js"
 import { listPaymentMethods, updatePaymentMethod } from "./payment-methods.js"
-import { collectCharge, createCharge, voidTicket } from "./payments.js"
+import { collectCharge, createCharge, patientCreditSql, voidTicket } from "./payments.js"
 
 /** Escenarios manuales de caja: multimedio, anulación, cierre con diferencia y medio apagado. */
 export async function seedFinance(tx: Db, input: {
@@ -30,12 +30,21 @@ export async function seedFinance(tx: Db, input: {
   const charge = await createCharge(tx, orgId, ownerUserId, patientId, {
     branchId, description: "Profilaxis", amountCents: 12000, currency: "PEN",
   })
+  // Lo que ya tiene a favor se usa solo al cobrar, y con el concepto marcado no se cobra
+  // más de lo que le falta (EXCEEDS_DUE): se paga solo lo que queda, en efectivo y Yape.
+  const [credit] = (await tx.execute(
+    sql`select ${patientCreditSql(orgId, sql`${patientId}::uuid`, sql`'PEN'`)} as cents`,
+  )) as unknown as Array<{ cents: string | number }>
+  const due = Math.max(0, 12000 - Number(credit?.cents ?? 0))
+  const inCash = Math.min(5000, due)
+  const inWallet = due - inCash
   await collectCharge(tx, orgId, ownerUserId, patientId, {
     branchId, payerContactId: contactId, chargeIds: [charge.id], requestId,
     payments: [
-      { paymentMethodId: cash.id, amountCents: 5000 },
-      { paymentMethodId: wallet.id, amountCents: 7000, reference: "DEMO-7000" },
-    ], cashReceivedCents: 10000,
+      ...(inCash > 0 ? [{ paymentMethodId: cash.id, amountCents: inCash }] : []),
+      ...(inWallet > 0 ? [{ paymentMethodId: wallet.id, amountCents: inWallet, reference: `DEMO-${inWallet}` }] : []),
+    ],
+    ...(inCash > 0 ? { cashReceivedCents: 10000 } : {}),
   })
   await createExpense(tx, orgId, ownerUserId, {
     branchId, category: "Materiales", concept: "Guantes y mascarillas", amountCents: 3550, fromCash: true,
