@@ -66,6 +66,23 @@ it("la receta de latidIA: controlados, embarazo, peso de un niño y alergias de 
     })
     expect(withReason.allergyOverrideReason).toBe("Hipertensión grave; lo decide con su obstetra")
     expect(withReason.items[0]?.atcCode).toBe("C09AA02")
+    // Sin motivo también (Q17): es solo un aviso, y la receta guarda que se vio.
+    const noReason = await prescribe({ items: [medication("enalapril")], acknowledgeAllergies: true })
+    expect(noReason.allergyOverrideReason).toBeNull()
+    expect(noReason.alertsSeen).toEqual([expect.stringMatching(/IECA están contraindicados/)])
+
+    // La medicación habitual elegida de la lista de latidIA lleva su ATC (X2): antes quedaba sin él.
+    const current = await f.run((tx) => getPatientHealth(tx, "org_a", f.patient.id))
+    await f.run((tx) =>
+      savePatientHealth(tx, "org_a", f.actor, f.patient.id, {
+        expectedRevision: current.revision,
+        reviewStatus: { allergies: "unknown", conditions: "unknown", medications: "recorded" },
+        conditions: [],
+        medications: [{ name: "Cefalexina 500 mg", genericName: "cefalexina" }],
+      }),
+    )
+    const saved = await f.run((tx) => getPatientHealth(tx, "org_a", f.patient.id))
+    expect(saved.medications[0]?.atcCode).toBe("J01DB01")
 
     // Alérgica a las fluoroquinolonas: el grupo es de la lista de latidIA y el ciprofloxacino avisa.
     await f.run((tx) =>

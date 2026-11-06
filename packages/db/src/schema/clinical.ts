@@ -2130,6 +2130,11 @@ export const prescription = pgTable(
      */
     allergyOverrideReason: text("allergy_override_reason"),
     /**
+     * Los avisos que vio quien recetó al emitirla (alergia, embarazo, duplicado por ATC): quedan en
+     * la receta con su nombre, sin pedirle nada (ADR 0143).
+     */
+    alertsSeen: text("alerts_seen").array(),
+    /**
      * El peso con que se recetó (kg), que la receta de un menor de 12 años
      * lleva en latidIA (issue 229, decisión 12). Sin él, vacío.
      */

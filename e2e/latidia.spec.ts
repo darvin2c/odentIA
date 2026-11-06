@@ -584,7 +584,7 @@ test("latidIA: la ficha médica con el examen por sistemas, los signos vitales, 
   await shot("resumen-oscuro")
   await page.evaluate(() => document.documentElement.classList.remove("dark"))
 
-  // La receta (entrega 6a): con el embarazo registrado, lo recuerda y lo contraindicado va con motivo;
+  // La receta (entrega 6a): con el embarazo registrado, lo recuerda y lo contraindicado se avisa (ADR 0143);
   // un controlado no sale en la receta común.
   expect(
     (

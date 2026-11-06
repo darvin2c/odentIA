@@ -8,6 +8,7 @@ import {
   type DoseUnit,
   doseText,
   findHabitualMedication,
+  type MedicationCatalog,
   MEDICATION_FREQUENCIES,
   MEDICATION_FREQUENCY_LABELS,
   type MedicationFrequency,
@@ -435,12 +436,17 @@ function validateConditionRow(input: HealthConditionInput, index: number): Valid
   return { id: input.id ?? null, name, diagnosisCode, diagnosisSystem, status: input.status, startDate, endDate, notes }
 }
 
-function validateMedicationRow(input: HealthMedicationInput, index: number): ValidatedMedication {
+function validateMedicationRow(
+  input: HealthMedicationInput,
+  index: number,
+  habitual: MedicationCatalog["habitual"],
+): ValidatedMedication {
   const at = `medications[${index}]`
   const name = assertText(input.name, 200, `${at}.name`, true, "Escribe el nombre")
   const genericName = assertText(input.genericName, 200, `${at}.genericName`, false)
-  // La DCI de la lista lleva su código ATC, el mismo de la receta; lo escrito a mano, ninguno.
-  const atcCode = findHabitualMedication(genericName ?? name)?.atc ?? null
+  // La DCI de la lista del producto lleva su código ATC, el mismo de la receta (latidIA sugiere
+  // también lo que receta, ADR 0143); lo escrito a mano, ninguno.
+  const atcCode = findHabitualMedication(genericName ?? name, habitual)?.atc ?? null
   const doseUnit = input.doseUnit?.trim() || null
   const doseValue = input.doseValue ?? null
   // La dosis lleva número y unidad, o ninguno de los dos: se dice en el que falta.
@@ -821,7 +827,8 @@ async function persistPatientHealth(
       }
   const allergies = (input.allergies ?? []).map(validateAllergyRow)
   const conditions = input.conditions.map(validateConditionRow)
-  const medications = input.medications.map(validateMedicationRow)
+  const habitual = (await productHooks(tx, orgId)).prescribing.catalog.habitual
+  const medications = input.medications.map((row, index) => validateMedicationRow(row, index, habitual))
   // La omisión de un ID persistido es 400: evita el borrado accidental.
   const [persistedAllergies, persistedConditions, persistedMeds] = await Promise.all([
     tx
