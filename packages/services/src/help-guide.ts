@@ -601,6 +601,21 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         forms: ["donde subo una radiografia", "subir imagen", "subir radiografia", "subir examen"],
       },
       {
+        q: "¿Cómo veo una tomografía?",
+        a: "En su página › Clínica › Documentos, «Ver» la abre a toda la ventana. «Panorámica» arma la panorámica con cinco cortes de la pieza: «Ir a la pieza» lleva a la pieza de la orden, también a las terceras molares, y la barra «Cortes» recorre el arco. «Cortes» la muestra desde arriba, de frente y de lado, y «3D» sirve para explicarla, no para medir. «Medir» marca dos puntos y «Ángulo», tres: quedan con tu nombre y son orientativas; para planificar una cirugía, confírmalas en el programa del tomógrafo. Si el arco no sigue los dientes, «Más» › «Ajustar el arco» y «Terminar y guardar»: queda guardado con la tomografía.",
+        forms: ["como veo una tomografia", "tomografia en 3d", "ir a la pieza", "como mido en la tomografia", "ajustar el arco", "cbct"],
+      },
+      {
+        q: "¿Para qué es «Guardar en tu atención de hoy» en la tomografía?",
+        a: "Guarda como imagen lo que estás viendo (la panorámica, los cinco cortes y tus medidas) en la nota de tu atención de hoy con ese paciente, para que quede a la vista sin abrir la tomografía. Aparece solo si tienes una atención tuya abierta hoy; si no, la pantalla te dice que la abras.",
+        forms: ["guardar vista en la atencion", "guardar en tu atencion de hoy", "para que sirve guardar vista"],
+      },
+      {
+        q: "¿Cómo cierro una orden de imagen con su resultado?",
+        a: "En su página › Clínica › Documentos › Órdenes, «Subir resultado». «Ya está en la ficha» elige la tomografía o la radiografía que ya se subió (por ejemplo, la del CD que trajo) y la une a la orden sin copiarla. «Archivo nuevo» sube una imagen, un PDF o el archivo DICOM de una radiografía. Una tomografía (la carpeta del CD) se sube primero en Documentos y después se elige. La orden queda «Con resultado».",
+        forms: ["como cierro una orden", "subir resultado de la orden", "resultado de la tomografia", "cerrar la orden de imagen"],
+      },
+      {
         q: "¿Qué son «Por agendar», «Deben» y los demás atajos?",
         a: "Filtros de la lista de Pacientes con lo que hay que mover: «Por agendar», «Presupuesto sin enviar», «Presupuesto sin respuesta», «Control vencido», «Faltan datos», «Por invitar a volver» y «Deben». Cada uno dice su regla al elegirlo. «Por agendar» es quien tiene algo aceptado sin una cita que lo lleve, aunque tenga otra cita, y «Control vencido» quien tiene un control cuyo día ya pasó y ninguna cita por venir: son las mismas cuentas de Inicio y de Argos. En «Por invitar a volver», «Ya la invité» anota que la invitaste por teléfono o en persona.",
       },

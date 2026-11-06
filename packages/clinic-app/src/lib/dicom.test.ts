@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs"
 import { createRequire } from "node:module"
-import { DICOM_SAMPLES, type DicomSample, encodeDemoDicom } from "@odentia/clinical"
+import { DICOM_SAMPLES, type DicomSample, encodeDemoCtSlice, encodeDemoDicom } from "@odentia/clinical"
 import { describe, expect, it } from "vitest"
 import { DicomUnsupportedError, decodeDicom, distanceMm, renderDicom } from "./dicom"
 
@@ -55,6 +55,28 @@ describe("visor DICOM", () => {
     const image = await decodeDicom(demo())
     expect(distanceMm(image, { x: 0, y: 0 }, { x: 10, y: 0 })).toBeCloseTo(0.4)
     expect(distanceMm({ pixelSpacing: null }, { x: 0, y: 0 }, { x: 10, y: 0 })).toBeNull()
+  })
+  it("una tomografía sin unidades Hounsfield no las declara: los grises quedan tal cual", async () => {
+    const slice = (hounsfield: boolean) =>
+      encodeDemoCtSlice({
+        width: 2,
+        height: 1,
+        pixels: new Uint16Array([300, 2500]),
+        hounsfield,
+        window: hounsfield ? undefined : { center: 1400, width: 2200 },
+        voxelMm: 0.5,
+        position: [0, 0, 0],
+        instanceNumber: 1,
+        studyUid: "2.25.1",
+        seriesUid: "2.25.1.2",
+        frameOfReferenceUid: "2.25.1.3",
+        sopUid: "2.25.1.4.1",
+      })
+    const raw = await decodeDicom(arrayBuffer(slice(false)))
+    expect(Array.from(raw.values ?? [])).toEqual([300, 2500])
+    expect(raw.window).toEqual({ center: 1400, width: 2200 })
+    const hu = await decodeDicom(arrayBuffer(slice(true)))
+    expect(Array.from(hu.values ?? [])).toEqual([-700, 1500])
   })
   it("descarta los bits que quedan fuera de Bits Stored", async () => {
     const pixels = new Uint16Array([0xf00f, 4095])

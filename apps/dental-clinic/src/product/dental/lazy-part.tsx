@@ -1,8 +1,16 @@
+import { isChunkLoadError, markNewVersion } from "@odentia/clinic-app/lib/new-version"
 import { ErrorState, LoadingState } from "@odentia/ui-patterns"
 import { type ComponentType, lazy, type ReactNode, Suspense } from "react"
 
 function PartFailed() {
-  return <ErrorState title="No se pudo abrir esta parte" message="Guarda lo que estés haciendo y recarga la página." retryLabel="Recargar" onRetry={() => window.location.reload()} />
+  return (
+    <ErrorState
+      title="No se pudo abrir esta parte"
+      message="Puede que haya una versión nueva. Recarga la página para abrirla: lo que ya guardaste no se pierde."
+      retryLabel="Recargar"
+      onRetry={() => window.location.reload()}
+    />
+  )
 }
 
 /**
@@ -16,7 +24,12 @@ export function lazyPart<P extends object>(
   load: () => Promise<ComponentType<P>>,
   fallback: ReactNode = <LoadingState />,
 ): (props: P) => React.JSX.Element {
-  const Part = lazy(async () => ({ default: await load().catch(() => PartFailed as ComponentType<P>) })) as unknown as ComponentType<P>
+  const Part = lazy(async () => ({
+    default: await load().catch((error: unknown) => {
+      if (isChunkLoadError(error)) markNewVersion()
+      return PartFailed as ComponentType<P>
+    }),
+  })) as unknown as ComponentType<P>
   return function LazyPart(props: P) {
     return (
       <Suspense fallback={fallback}>

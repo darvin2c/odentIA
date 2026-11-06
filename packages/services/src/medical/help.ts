@@ -37,6 +37,15 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
     faqs: (topic.faqs ?? []).flatMap((faq): Faq[] => {
       if (/hallazgo del odontograma|pieza quedó dibujada|se firma el odontograma/.test(faq.q))
         return []
+      // latidIA todavía no guarda la tomografía en la ficha.
+      if (/tomografía/.test(faq.q)) return []
+      if (faq.q === "¿Cómo cierro una orden de imagen con su resultado?")
+        return [
+          {
+            ...faq,
+            a: "En su página › Clínica › Documentos › Órdenes, «Subir resultado». «Ya está en la ficha» elige la imagen que ya se subió y la une a la orden sin copiarla. «Archivo nuevo» sube una imagen, un PDF o el archivo DICOM de una radiografía. De una tomografía, sube su informe en PDF. La orden queda «Con resultado».",
+          },
+        ]
       if (faq.q === "¿Qué le doy al paciente para su seguro?")
         return [{ ...faq, a: faq.a.replace("; el odontograma, a color", "") }]
       if (faq.q === "¿Dónde quedaron los contactos?")

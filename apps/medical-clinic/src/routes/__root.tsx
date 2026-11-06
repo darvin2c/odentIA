@@ -1,4 +1,6 @@
 import { BrandProvider, Toaster } from "@odentia/ui"
+import { NewVersionNotice } from "@odentia/clinic-app/components/new-version-notice"
+import { watchNewVersion } from "@odentia/clinic-app/lib/new-version"
 import { createQueryClient } from "@odentia/clinic-app/lib/query-client"
 import { QueryClientProvider } from "@tanstack/react-query"
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router"
@@ -28,6 +30,8 @@ export const Route = createRootRoute({
 function RootComponent() {
   // Cada render SSR tiene su propia caché: nunca compartir datos entre sesiones.
   const [queryClient] = useState(createQueryClient)
+  // Una versión nueva desplegada con la pestaña abierta: se avisa, no se recarga sola.
+  useEffect(() => watchNewVersion(), [])
   useEffect(() => {
     document.documentElement.dataset.hydrated = "true"
     return () => {
@@ -53,6 +57,7 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
       <body>
         <BrandProvider brand="latidia">{children}</BrandProvider>
         <Toaster position="top-center" richColors />
+        <NewVersionNotice />
         <Scripts />
       </body>
     </html>

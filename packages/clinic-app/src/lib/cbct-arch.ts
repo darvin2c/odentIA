@@ -74,7 +74,7 @@ function percentile(sorted: readonly number[], p: number): number {
 
 /** Solo el esmalte (y el metal): lo más brillante del brillo «Diente», sin la dentina ni la cortical. */
 function enamelThreshold(presets: CbctVolume["presets"]): number {
-  return presets.diente.center + presets.diente.width / 4
+  return presets.enamel
 }
 
 /**

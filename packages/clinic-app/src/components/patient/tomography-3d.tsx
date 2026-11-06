@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState } from "react"
 import { cbctNifti } from "../../lib/cbct-nifti"
 import type { CbctVolume, WindowLevel } from "../../lib/cbct-volume"
 import { sliderValue } from "../../lib/view-transform"
+import { isChunkLoadError, markNewVersion } from "../../lib/new-version"
 
 /**
  * La tomografía en 3D, solo para mostrar (ADR 0147): se gira con el dedo o el
@@ -111,7 +112,9 @@ export function Tomography3D({
       nv.setRenderAzimuthElevation(180, 10)
       await nv.setVolumeRenderIllumination(0.4).catch(() => {})
       if (alive) setState("listo")
-    })().catch(() => {
+    })().catch((error: unknown) => {
+      // El 3D baja al abrirse: con una versión nueva desplegada, lo dice el aviso de la app.
+      if (isChunkLoadError(error)) markNewVersion()
       if (alive) setState("error")
     })
     return () => {

@@ -22,7 +22,7 @@ export interface CbctVolume {
   sz: number
   data: Int16Array
   range: { min: number; max: number }
-  presets: Record<BrightnessPreset, WindowLevel>
+  presets: StudyPresets
 }
 
 export type BrightnessPreset = "hueso" | "diente" | "blando"
@@ -138,9 +138,17 @@ function otsu3(hist: Uint32Array): [number, number] {
  * tejido blando y tejido duro; con eso, «Tejido blando» va del límite con el
  * aire al límite con el hueso, «Hueso» del tejido blando al 85 % de lo duro
  * (el hueso en grises y los dientes casi blancos) y «Diente» de la mitad de lo
- * duro a su máximo (esmalte, dentina y pulpa).
+ * duro a su percentil 99 (esmalte, dentina y pulpa): por encima queda el metal
+ * (brackets, coronas, implantes), que con el máximo dejaba la dentina en gris oscuro.
  */
-export function computePresets(data: Int16Array, range: { min: number; max: number }): Record<BrightnessPreset, WindowLevel> {
+/**
+ * Los brillos del estudio y, aparte, el umbral del esmalte con el que se busca el
+ * arco: sale de lo más brillante (hasta el máximo, con el metal), no del brillo
+ * «Diente», que deja el metal fuera para ver la dentina.
+ */
+export type StudyPresets = Record<BrightnessPreset, WindowLevel> & { enamel: number }
+
+export function computePresets(data: Int16Array, range: { min: number; max: number }): StudyPresets {
   const span = Math.max(1, range.max - range.min + 1)
   const bins = Math.min(4096, span)
   const scale = bins / span
@@ -176,7 +184,8 @@ export function computePresets(data: Int16Array, range: { min: number; max: numb
   return {
     blando: window(value(t1), value(t2)),
     hueso: window(softMid, hard(0.85)),
-    diente: window(hard(0.5), hard(0.999)),
+    diente: window(hard(0.5), hard(0.99)),
+    enamel: (hard(0.5) + hard(0.999)) / 2 + (hard(0.999) - hard(0.5)) / 4,
   }
 }
 
