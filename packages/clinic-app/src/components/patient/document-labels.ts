@@ -1,4 +1,7 @@
 import {
+  DICOM_DOCUMENT_MAX_BYTES,
+  DOCUMENT_MAX_BYTES,
+  documentMaxBytes,
   IMAGE_TYPE_LABELS,
   type ImageType,
   type PatientDocumentCategory,
@@ -37,12 +40,9 @@ export const ACCEPTED_TYPES = [
 /** DICOM suele llegar sin tipo declarado: se admite por extensión y el servidor
  * verifica el contenido real de todos los archivos. */
 export const ACCEPT_ATTR = [...ACCEPTED_TYPES, ".dcm"].join(",")
-export const MAX_BYTES = 10 * 1024 * 1024
-/**
- * La radiografía DICOM sin comprimir pesa más (una cefalométrica o una
- * panorámica de alta resolución): mismo tope que `PATIENT_DICOM_MAX_BYTES`.
- */
-export const DICOM_MAX_BYTES = 30 * 1024 * 1024
+/** Los topes de la API (`documentMaxBytes`): 10 MB, y 30 MB la radiografía DICOM. */
+export const MAX_BYTES = DOCUMENT_MAX_BYTES
+export const DICOM_MAX_BYTES = DICOM_DOCUMENT_MAX_BYTES
 
 function isDicomFile(file: File): boolean {
   return file.type === "application/dicom" || /\.dcm$/i.test(file.name)
@@ -54,7 +54,7 @@ export function isAcceptedFile(file: File): boolean {
 
 /** El tope de un archivo: el de la radiografía DICOM o el de los demás. */
 export function maxBytesFor(file: File): number {
-  return isDicomFile(file) ? DICOM_MAX_BYTES : MAX_BYTES
+  return documentMaxBytes(isDicomFile(file) ? "application/dicom" : file.type)
 }
 
 /**
@@ -75,7 +75,7 @@ export function unsupportedFormatMessage(name: string): string {
 
 /** ¿El producto guarda la tomografía y la abre en su visor? (odentIA sí; latidIA todavía no.) */
 export function storesTomography(): boolean {
-  return productUi().documents.imaging.types.some((type) => type.value === "tomografia")
+  return productUi().documents.imaging.studies
 }
 
 export function categoryLabel(category: string): string {

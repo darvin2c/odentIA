@@ -57,7 +57,7 @@ import { DicomFacts, ImageViewer2D } from "./image-viewer-2d"
 import { TAGS_INPUT_HELP, TagsCount, TagsInput } from "./tags-input"
 import { TomographyDetail } from "./tomography-detail"
 import { TomographyViewer } from "./tomography-viewer"
-import { usePatientName, ViewerShell } from "./viewer-shell"
+import { isTyping, usePatientName, ViewerShell } from "./viewer-shell"
 import { PlacesField } from "../../product/site-fields"
 
 /** Las URL firmadas expiran: se consideran frescas 10 min y luego se regeneran. */
@@ -187,8 +187,7 @@ export function usePatientEncounters(patientId: string, enabled = true) {
 /** Las flechas pasan de archivo salvo cuando el foco está en un control que las usa. */
 function arrowsBelongToControl(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false
-  if (target.isContentEditable) return true
-  if (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return true
+  if (isTyping(target)) return true
   const role = target.getAttribute("role")
   // Dentro de un menú («Más»), las flechas recorren sus opciones.
   if (target.closest('[role="menu"]') || role?.startsWith("menuitem")) return true

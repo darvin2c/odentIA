@@ -6,6 +6,11 @@
 
 export type Point = { x: number; y: number }
 
+/** El valor de un deslizador de Base UI, que llega como número o como lista. */
+export function sliderValue(value: number | readonly number[], fallback = 0): number {
+  return Array.isArray(value) ? (value[0] ?? fallback) : (value as number)
+}
+
 /** Cuartos de vuelta en el sentido del reloj (0 a 3). */
 export type QuarterTurns = 0 | 1 | 2 | 3
 

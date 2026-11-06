@@ -537,10 +537,15 @@ export function TomographyViewer({
     setTool(next)
   }
 
+  // Los atajos leen la herramienta de ahora sin volver a registrarse en cada render.
+  const keys = useRef({ tool, chooseTool })
+  keys.current = { tool, chooseTool }
   useEffect(() => {
     if (!open || !volume) return
     const onKey = (event: KeyboardEvent) => {
-      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return
+      const { tool, chooseTool } = keys.current
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)
+        return
       if (event.key === "1") setPreset("hueso")
       else if (event.key === "2") setPreset("diente")
       else if (event.key === "3") setPreset("blando")
@@ -555,7 +560,7 @@ export function TomographyViewer({
     }
     document.addEventListener("keydown", onKey)
     return () => document.removeEventListener("keydown", onKey)
-  })
+  }, [open, volume])
 
   const download = () => {
     const anchor = document.createElement("a")

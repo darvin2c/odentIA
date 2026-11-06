@@ -3,6 +3,7 @@ import { LoadingState } from "@odentia/ui-patterns"
 import { useEffect, useId, useRef, useState } from "react"
 import { cbctNifti } from "../../lib/cbct-nifti"
 import type { CbctVolume, WindowLevel } from "../../lib/cbct-volume"
+import { sliderValue } from "../../lib/view-transform"
 
 /**
  * La tomografía en 3D, solo para mostrar (ADR 0146): se gira con el dedo o el
@@ -28,9 +29,19 @@ type NiivueInstance = {
 /** Lado mínimo de las texturas 3D que pide la copia reducida. */
 const SIDE = 256
 
-/** ¿Este equipo puede dibujar el 3D? WebGL2 con texturas 3D de al menos 256 de lado. */
-export function canRender3d(): boolean {
+let render3d: boolean | undefined
+
+/**
+ * ¿Este equipo puede dibujar el 3D? WebGL2 con texturas 3D de al menos 256 de
+ * lado. Es del equipo, no de la tomografía: se prueba una sola vez.
+ */
+function canRender3d(): boolean {
   if (typeof document === "undefined") return false
+  render3d ??= probeWebgl2()
+  return render3d
+}
+
+function probeWebgl2(): boolean {
   try {
     const gl = document.createElement("canvas").getContext("webgl2")
     if (!gl) return false
@@ -63,15 +74,10 @@ export function Tomography3D({
     canRender3d() ? "cargando" : "sin-3d",
   )
   const [cut, setCut] = useState(0)
-  const windowRef = useRef(window)
-  windowRef.current = window
 
   useEffect(() => {
     const canvas = canvasRef.current
-    if (!canvas || !canRender3d()) {
-      setState("sin-3d")
-      return
-    }
+    if (!canvas) return
     let alive = true
     setState("cargando")
     ;(async () => {
@@ -95,15 +101,8 @@ export function Tomography3D({
       await nv.loadFromArrayBuffer(cbctNifti(volume, SIDE).buffer, "tomografia.nii")
       if (!alive) return
       nv.setSliceType(mod.SLICE_TYPE.RENDER)
-      // De frente, apenas desde arriba.
+      // De frente, apenas desde arriba. El brillo lo pone el efecto de abajo al quedar listo.
       nv.setRenderAzimuthElevation(180, 10)
-      const cal = calibration(windowRef.current)
-      const image = nv.volumes[0]
-      if (image) {
-        image.cal_min = cal.min
-        image.cal_max = cal.max
-        nv.updateGLVolume()
-      }
       await nv.setVolumeRenderIllumination(0.4).catch(() => {})
       if (alive) setState("listo")
     })().catch(() => {
@@ -176,7 +175,7 @@ export function Tomography3D({
               max={100}
               step={1}
               disabled={state !== "listo"}
-              onValueChange={(v) => setCut(Array.isArray(v) ? (v[0] ?? 0) : (v as number))}
+              onValueChange={(v) => setCut(sliderValue(v))}
             />
             <p className="basis-full text-amber-200">
               El hueso fino puede no verse en 3D. Para medir y decidir, usa los cortes.

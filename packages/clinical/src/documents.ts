@@ -78,6 +78,19 @@ export const DOCUMENT_FORMATS = {
 } as const
 export type DocumentMime = keyof typeof DOCUMENT_FORMATS
 
+/** Tope de un archivo de la ficha. */
+export const DOCUMENT_MAX_BYTES = 10 * 1024 * 1024
+/**
+ * La radiografía DICOM sin comprimir (cefalométrica, panorámica de alta
+ * resolución) pasa de 10 MB; sigue entrando como archivo, no como tomografía.
+ */
+export const DICOM_DOCUMENT_MAX_BYTES = 30 * 1024 * 1024
+
+/** El tope según el formato: el mismo en la pantalla que sube y en la API que recibe. */
+export function documentMaxBytes(mime: string): number {
+  return mime === "application/dicom" ? DICOM_DOCUMENT_MAX_BYTES : DOCUMENT_MAX_BYTES
+}
+
 function startsWith(bytes: Uint8Array, signature: readonly number[], offset = 0): boolean {
   if (bytes.length < offset + signature.length) return false
   return signature.every((b, i) => bytes[offset + i] === b)

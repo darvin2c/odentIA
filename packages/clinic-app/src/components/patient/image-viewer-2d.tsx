@@ -16,11 +16,12 @@ import { ApiError, apiFetchBytes } from "../../lib/api"
 import {
   type DicomImage,
   DicomUnsupportedError,
-  decodeDicom,
   distanceMm,
+  openDicom,
   renderDicom,
   spacingIssueText,
 } from "../../lib/dicom"
+import { dicomDate } from "../../lib/clinical-journey"
 import { activeOrgLocale } from "../../lib/locale"
 import { useZoomPan } from "../../lib/use-zoom-pan"
 import {
@@ -30,9 +31,11 @@ import {
   orientContext,
   orientedSize,
   type Point,
+  sliderValue,
   toOriented,
   UPRIGHT,
 } from "../../lib/view-transform"
+import { filterOf } from "./image-viewer"
 import { ZoomControls } from "./viewer-shell"
 
 /**
@@ -67,10 +70,6 @@ function isDefault(view: View2D): boolean {
     view.orientation.turns === 0 &&
     !view.orientation.flip
   )
-}
-
-function sliderValue(value: number | readonly number[]): number {
-  return Array.isArray(value) ? (value[0] ?? 0) : (value as number)
 }
 
 /**
@@ -123,7 +122,6 @@ function Stage({
   measuring,
   onPoint,
   measurement,
-  fileKey,
 }: {
   source: Source
   view: View2D
@@ -132,15 +130,30 @@ function Stage({
   measuring: boolean
   onPoint: (point: Point) => void
   measurement: string | null
-  /** Otro archivo empieza ajustado; otro cuadro del mismo, no. */
-  fileKey: string
 }) {
   const zoom = useZoomPan({ arrowPan: true, canToggle: () => !measuring })
   const ref = useRef<HTMLCanvasElement | null>(null)
   const size = orientedSize(source.width, source.height, view.orientation)
-  // Otro archivo empieza ajustado.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: depende solo del archivo a propósito.
-  useEffect(() => zoom.fit(), [fileKey])
+  // La ventana del DICOM se calcula solo cuando cambian el cuadro, el brillo, el contraste o el negativo:
+  // girar, voltear o marcar un punto vuelven a dibujar sin recorrer los píxeles.
+  const flat = useMemo(() => {
+    if (source.kind !== "dicom") return null
+    const pixels = renderDicom(source.image, {
+      ...windowFor(source.image, { brightness: view.brightness, contrast: view.contrast }),
+      invert: view.invert,
+    })
+    const canvas = document.createElement("canvas")
+    canvas.width = source.width
+    canvas.height = source.height
+    canvas
+      .getContext("2d")
+      ?.putImageData(
+        new ImageData(pixels as Uint8ClampedArray<ArrayBuffer>, source.width, source.height),
+        0,
+        0,
+      )
+    return canvas
+  }, [source, view.brightness, view.contrast, view.invert])
   useEffect(() => {
     const canvas = ref.current
     if (!canvas) return
@@ -152,23 +165,7 @@ function Stage({
     ctx.clearRect(0, 0, size.width, size.height)
     orientContext(ctx, source.width, source.height, view.orientation)
     if (source.kind === "image") ctx.drawImage(source.element, 0, 0)
-    else {
-      const pixels = renderDicom(source.image, {
-        ...windowFor(source.image, view),
-        invert: view.invert,
-      })
-      const flat = document.createElement("canvas")
-      flat.width = source.width
-      flat.height = source.height
-      flat
-        .getContext("2d")
-        ?.putImageData(
-          new ImageData(new Uint8ClampedArray(pixels), source.width, source.height),
-          0,
-          0,
-        )
-      ctx.drawImage(flat, 0, 0)
-    }
+    else if (flat) ctx.drawImage(flat, 0, 0)
     ctx.setTransform(1, 0, 0, 1, 0, 0)
     if (points.length) {
       const unit = Math.max(1, size.width / 400)
@@ -188,13 +185,10 @@ function Stage({
         ctx.stroke()
       }
     }
-  }, [source, view, points, size.width, size.height])
+  }, [source, flat, view.orientation, points, size.width, size.height])
 
   // En una foto, brillo, contraste y negativo los pone el navegador; en un DICOM, la ventana.
-  const filter =
-    source.kind === "image"
-      ? `brightness(${view.brightness}%) contrast(${view.contrast}%)${view.invert ? " invert(1)" : ""}`
-      : undefined
+  const filter = source.kind === "image" ? filterOf(view) : undefined
   return (
     // biome-ignore lint/a11y/useSemanticElements: el marco recibe el foco y los gestos; un fieldset no.
     <div
@@ -263,15 +257,26 @@ function useDicomFrames(patientId: string, documentId: string, enabled: boolean)
     retry: false,
     enabled,
   })
-  // Cada cuadro se decodifica al pedirlo; el anterior sigue a la vista mientras tanto.
+  // La cabecera se lee una vez por archivo; cada cuadro se decodifica al pedirlo y el anterior sigue a
+  // la vista mientras tanto. Los cuadros ya vistos no se guardan: se vuelven a decodificar.
+  const file = useMemo(() => {
+    if (!bytes.data) return null
+    try {
+      return { ok: openDicom(bytes.data) } as const
+    } catch (error) {
+      return { error } as const
+    }
+  }, [bytes.data])
   const query = useQuery({
     queryKey: ["patient-document-dicom-frame", patientId, documentId, frame],
     queryFn: () => {
-      if (!bytes.data) throw new Error("El archivo aún no llega")
-      return decodeDicom(bytes.data, frame)
+      if (!file) throw new Error("El archivo aún no llega")
+      if ("error" in file) throw file.error
+      return file.ok.decode(frame)
     },
-    enabled: enabled && bytes.isSuccess,
+    enabled: enabled && Boolean(file),
     staleTime: Number.POSITIVE_INFINITY,
+    gcTime: 0,
     retry: false,
     placeholderData: keepPreviousData,
   })
@@ -316,14 +321,12 @@ export function ImageViewer2D({
   const [notice, setNotice] = useState<string | null>(null)
   const photo = useImageElement(dicom ? null : url)
   const frames = useDicomFrames(patientId, documentId, dicom)
-  // Otro archivo empieza como viene.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: depende solo del archivo a propósito.
-  useEffect(() => {
-    setView(DEFAULT_VIEW)
+  // Otro archivo vuelve a montar el visor (`key`): empieza ajustado y como viene.
+  const stopMeasuring = () => {
     setMeasuring(false)
     setPoints([])
     setNotice(null)
-  }, [documentId])
+  }
 
   const source = useMemo<Source | null>(() => {
     if (dicom)
@@ -356,9 +359,7 @@ export function ImageViewer2D({
 
   const startMeasuring = () => {
     if (measuring) {
-      setMeasuring(false)
-      setPoints([])
-      setNotice(null)
+      stopMeasuring()
       return
     }
     // Medir queda a la vista; si aquí no se puede, se dice al intentarlo, con la salida.
@@ -491,9 +492,7 @@ export function ImageViewer2D({
               disabled={isDefault(view) && points.length === 0}
               onClick={() => {
                 setView(DEFAULT_VIEW)
-                setPoints([])
-                setMeasuring(false)
-                setNotice(null)
+                stopMeasuring()
               }}
             >
               Restablecer
@@ -515,7 +514,6 @@ export function ImageViewer2D({
         measuring={measuring}
         onPoint={addPoint}
         measurement={measurement}
-        fileKey={documentId}
       />
       {image && image.frames > 1 && (
         <fieldset className="flex flex-wrap items-center gap-2 border-t border-slate-800 px-3 py-2 sm:px-4">
@@ -574,12 +572,7 @@ export function DicomFacts({ patientId, documentId }: { patientId: string; docum
   const frames = useDicomFrames(patientId, documentId, true)
   const image = frames.image
   if (!image) return null
-  const date =
-    image.meta.studyDate && /^\d{8}$/.test(image.meta.studyDate)
-      ? new Date(
-          `${image.meta.studyDate.slice(0, 4)}-${image.meta.studyDate.slice(4, 6)}-${image.meta.studyDate.slice(6, 8)}T12:00:00`,
-        ).toLocaleDateString(activeOrgLocale(), { dateStyle: "medium" })
-      : image.meta.studyDate
+  const date = dicomDate(image.meta.studyDate) ?? image.meta.studyDate
   return (
     <dl className="grid grid-cols-1 gap-y-2 text-sm">
       {date && (

@@ -6,6 +6,7 @@ import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import type { PatientFull } from "../../lib/patients"
 import type { ZoomPan } from "../../lib/use-zoom-pan"
+import { MAX_SCALE } from "../../lib/view-transform"
 
 /**
  * El armazón de los visores de imagen (radiografía, foto y tomografía): toda la
@@ -56,7 +57,8 @@ function useFullscreen() {
   return { available, active, toggle, exit }
 }
 
-function isTyping(target: EventTarget | null): boolean {
+/** ¿El foco está en un campo donde se escribe? Ahí los atajos del visor no actúan. */
+export function isTyping(target: EventTarget | null): boolean {
   return (
     target instanceof HTMLElement &&
     (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
@@ -190,7 +192,7 @@ export function ZoomControls({ zoom, className }: { zoom: ZoomPan; className?: s
         aria-label="Acercar"
         aria-keyshortcuts="+"
         onClick={zoom.zoomIn}
-        disabled={percent >= 800}
+        disabled={percent >= MAX_SCALE * 100}
       >
         <span aria-hidden="true" className="text-base leading-none">
           +

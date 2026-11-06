@@ -44,6 +44,12 @@ export function formatDate(value: string | null | undefined): string {
   })
 }
 
+/** Una fecha DICOM (DA, AAAAMMDD, PS3.5 §6.2) como las demás fechas de la clínica; null si no es una. */
+export function dicomDate(value: string | null | undefined): string | null {
+  if (!value || !/^\d{8}$/.test(value)) return null
+  return formatDate(`${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`)
+}
+
 /** Fecha y hora cortas, en el formato y la zona de la clínica, para citas y controles. */
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) return "—"

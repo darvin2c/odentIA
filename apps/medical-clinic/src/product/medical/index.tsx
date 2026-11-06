@@ -70,7 +70,11 @@ export const medicalUi: ProductUi = {
   prescribing: medicalPrescribing,
   documents: {
     ...bare.documents,
-    imaging: { types: MEDICAL_IMAGING_TYPES, categoryLabels: MEDICAL_CATEGORY_LABELS },
+    imaging: {
+      types: MEDICAL_IMAGING_TYPES,
+      categoryLabels: MEDICAL_CATEGORY_LABELS,
+      studies: false,
+    },
     // El descanso médico, junto a la receta (decisión 8).
     medicalLeave: true,
   },

@@ -1,6 +1,7 @@
 import { Button, Field, FieldLabel, Slider } from "@odentia/ui"
 import { ViewTabs } from "@odentia/ui-patterns"
 import { useId, useState } from "react"
+import { sliderValue } from "../../lib/view-transform"
 
 /** Ajustes de visualización: solo afectan a la pantalla, nunca al archivo. */
 export interface ImageAdjustments {
@@ -17,12 +18,9 @@ export const DEFAULT_ADJUSTMENTS: ImageAdjustments = {
   invert: false,
 }
 
-function filterOf(a: ImageAdjustments): string {
+/** El filtro CSS de brillo, contraste y negativo de una foto. */
+export function filterOf(a: Pick<ImageAdjustments, "brightness" | "contrast" | "invert">): string {
   return `brightness(${a.brightness}%) contrast(${a.contrast}%)${a.invert ? " invert(1)" : ""}`
-}
-
-function sliderValue(value: number | readonly number[]): number {
-  return Array.isArray(value) ? (value[0] ?? 0) : (value as number)
 }
 
 /** Controles de zoom, brillo, contraste e inversión, accesibles con teclado. */
