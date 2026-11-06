@@ -7,7 +7,7 @@ import { type SQL, type SQLWrapper, sql } from "drizzle-orm"
  * Reportes y las líneas de Argos: una pantalla no cuenta con otra regla.
  *
  * - **Aceptó y no tiene cita**: un tratamiento aceptado que aún se hace
- *   (pendiente o en curso) y que ninguna cita por venir lleva. Otra cita de la
+ *   (pendiente, programado o en curso) y que ninguna cita por venir lleva. Otra cita de la
  *   persona no lo agenda: «Qué sigue» lo dice («su cita del 12 dic no lo lleva»).
  * - **Control vencido sin cita**: un control pendiente cuyo día ya pasó, de una
  *   persona sin ninguna cita por venir. A un control le sirve cualquier visita:
@@ -19,8 +19,12 @@ import { type SQL, type SQLWrapper, sql } from "drizzle-orm"
 /** Estados de una cita que todavía va a ocurrir. */
 export const LIVE_APPOINTMENT_STATUSES = ["programada", "confirmada"] as const
 
-/** Lo aceptado que aún se hace: lo que espera empezar y lo que va por sesiones. */
-export const TO_SCHEDULE_STATUSES = ["pendiente", "en_curso"] as const
+/**
+ * Lo aceptado que aún se hace: lo que espera empezar (pendiente, o programado
+ * si se deshizo una atención que lo había hecho) y lo que va por sesiones. Es
+ * también lo que una cita puede traer (`SCHEDULABLE_ITEM_STATUSES`).
+ */
+export const TO_SCHEDULE_STATUSES = ["pendiente", "programado", "en_curso"] as const
 
 const list = (values: readonly string[]) => sql.join(values.map((value) => sql`${value}`), sql`, `)
 

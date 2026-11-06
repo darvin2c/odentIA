@@ -125,6 +125,9 @@ it("«aceptó y no tiene cita» es una sola regla: código, SQL, Pacientes, Inic
   await accepted(c, eva, "suspendido")
   // Fede está archivado.
   await accepted(c, fede)
+  // A Gabi se le deshizo la atención que lo había hecho: vuelve a estar por agendar.
+  const gabi = await person(c, "Gabi Paz")
+  await accepted(c, gabi, "programado")
 
   // La regla en código y en SQL dicen lo mismo de cada tratamiento.
   const items = await c.run((tx) =>
@@ -138,22 +141,23 @@ it("«aceptó y no tiene cita» es una sola regla: código, SQL, Pacientes, Inic
   const carried = new Set(items.filter((row) => row.carried).map((row) => row.id))
   for (const row of items) expect(isToSchedule(row, carried)).toBe(row.due)
 
-  const expected = [ana, beto, dani].sort()
+  const expected = [ana, beto, dani, gabi].sort()
   expect((await c.run((tx) => patientsToSchedule(tx, c.orgId))).sort()).toEqual(expected)
   // Pacientes › «Por agendar»: la misma regla.
   const members = await c.run((tx) => peopleShortcutMembers(tx, c.orgId, all, LIMA, new Date(), "por_agendar"))
   expect(members.por_agendar?.sort()).toEqual(expected)
   // Reportes («No tienen cita») e Inicio: el mismo número, y lo que suma.
   const work = await c.run((tx) => upcomingWork(tx, c.orgId, "PEN", new Date()))
-  expect(work.unbooked).toEqual({ patients: 3, cents: 30_000 })
+  expect(work.unbooked).toEqual({ patients: 4, cents: 40_000 })
   const home = await c.run((tx) => getWorkspaceHome(tx, c.orgId, c.actor, reception, { can: all }))
-  expect(home.waiting.find((row) => row.kind === "acceptedUnbooked")).toMatchObject({ patients: 3, cents: 30_000 })
+  expect(home.waiting.find((row) => row.kind === "acceptedUnbooked")).toMatchObject({ patients: 4, cents: 40_000 })
   // Argos: la misma regla con sus días, un caso por presupuesto; la fila de Beto dice su otra cita.
   const argos = await c.run((tx) => getAdminRecommendation(tx, c.orgId, all, "presupuestos_sin_cita"))
-  expect(argos.total).toBe(3)
+  expect(argos.total).toBe(4)
   expect(argos.items.map((item) => item.patientId).sort()).toEqual(expected)
   expect(argos.items.find((item) => item.patientId === beto)?.line).toMatch(/· su cita del .+ no lo lleva$/)
   expect(argos.items.find((item) => item.patientId === dani)?.line).toMatch(/^Falta la cita de la próxima sesión · /)
+  expect(await c.run((tx) => getPlanNextStep(tx, c.orgId, gabi, all))).toMatchObject({ kind: "agendar" })
   // «Qué sigue» de Beto dice que su cita no la lleva, no que le falta una.
   expect((await c.run((tx) => getPlanNextStep(tx, c.orgId, beto, all))).text).toMatch(/^Aceptó todo: su cita del .+ no lo lleva$/)
 

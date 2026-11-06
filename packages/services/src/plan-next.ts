@@ -317,8 +317,9 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
   }
 
   // 2. Lo aceptado sin cita: «Reservar cita» con los tratamientos ya puestos.
-  const accepted = items.filter((item) => item.decisionStatus === "aceptado" && item.status === "pendiente")
-  const toStart = toSchedule.filter((item) => item.status === "pendiente")
+  const notStarted = (item: PlanItemRow) => item.status === "pendiente" || item.status === "programado"
+  const accepted = items.filter((item) => item.decisionStatus === "aceptado" && notStarted(item))
+  const toStart = toSchedule.filter(notStarted)
   if (toStart.length > 0) {
     const decided = budgets
       .filter((budget) => budget.status === "aceptado" || budget.status === "parcial")

@@ -11,8 +11,8 @@ La ronda de QA del 2026-11-04 contó la misma pregunta con un número distinto e
 
 ## Decisión y motivo
 
-- **Una regla por pregunta, en código y en SQL** (`packages/services/src/to-schedule.ts`), que usan Inicio, Pacientes, «Qué sigue», Reportes y Argos:
-  - *Aceptó y no tiene cita:* un tratamiento aceptado que aún se hace (pendiente o en curso) y que ninguna cita por venir lleva. Otra cita de la persona no lo agenda: un tratamiento necesita su tiempo, y «Qué sigue» y Argos dicen «su cita del 12 dic no lo lleva».
+- **Una regla por pregunta, en código y en SQL** (`packages/services/src/to-schedule.ts`), que usan Inicio, Pacientes, «Qué sigue», la coordinación de recepción, Reportes y Argos:
+  - *Aceptó y no tiene cita:* un tratamiento aceptado que aún se hace (pendiente, programado o en curso: lo que una cita puede traer) y que ninguna cita por venir lleva. Otra cita de la persona no lo agenda: un tratamiento necesita su tiempo, y «Qué sigue» y Argos dicen «su cita del 12 dic no lo lleva».
   - *Control vencido sin cita:* un control pendiente cuyo día ya pasó en la zona de la clínica, de una persona sin ninguna cita por venir. A un control le sirve cualquier visita.
 - **Los atajos «Por agendar» y «Control vencido» de Pacientes son esa regla**, no un paso de «Qué sigue»: alguien puede estar en «Por agendar» aunque su siguiente paso sea enviar otro presupuesto. Así el número es el mismo que el de Inicio. Los atajos de presupuestos siguen el paso de «Qué sigue».
 - **Argos usa la misma regla y suma sus días** (0015): el título los nombra («hace más de 7 días»). Cuenta presupuestos y controles; Pacientes, personas: cuando no coinciden, el título dice las dos cifras.
