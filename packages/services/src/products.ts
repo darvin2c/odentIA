@@ -73,9 +73,14 @@ export function demoKindsFor(product: ClinicalProduct): readonly DemoKindRecipe[
 
 const HELP: Record<ClinicalProduct, readonly HelpTopic[]> = { dental: HELP_TOPICS, medical: MEDICAL_HELP_TOPICS }
 
+/** La guía de la Ayuda de un producto, sin clínica (las mediciones). */
+export function helpTopicsFor(product: ClinicalProduct): readonly HelpTopic[] {
+  return HELP[product]
+}
+
 /** La guía de la Ayuda del producto de esta clínica: sus pantallas con sus palabras. */
 export async function productHelpTopics(tx: Db, orgId: string): Promise<readonly HelpTopic[]> {
-  return HELP[await orgProduct(tx, orgId)]
+  return helpTopicsFor(await orgProduct(tx, orgId))
 }
 
 /**
