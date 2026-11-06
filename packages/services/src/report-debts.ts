@@ -22,6 +22,25 @@ import { orgMoneySql, todayValueSql } from "./report-value.js"
 /** Plazo de «Te deben hace más de…», el mismo de la línea «Saldo vencido» por defecto. */
 export const OVERDUE_DAYS = 30
 
+/**
+ * La zona con que se cuentan los días de una deuda: la de la sede o, sin sede,
+ * la de la clínica. La misma de Finanzas › Deudas (`branchTimezone`).
+ */
+export function debtZoneSql(orgId: string, branchId?: string): SQL {
+  const clinic = sql`(select op.timezone from org_profile op where op.organization_id = ${orgId})`
+  return branchId
+    ? sql`coalesce((select b.timezone from branch b where b.organization_id = ${orgId} and b.id = ${branchId}), ${clinic}, 'UTC')`
+    : sql`coalesce(${clinic}, 'UTC')`
+}
+
+/**
+ * Cuántos días de calendario hay, en `zone`, de `since` a `moment`: la cuenta
+ * de Finanzas › Deudas. Así «más de 30 días» no cambia según la hora del día.
+ */
+export function debtDaysSql(since: SQL, moment: SQL, zone: SQL): SQL {
+  return sql`((${moment} at time zone ${zone})::date - (${since} at time zone ${zone})::date)`
+}
+
 /** Existía en ese momento y todavía no estaba anulado. */
 function liveAt(alias: "a" | "c" | "p", column: "created_at" | "paid_at"): SQL {
   return sql.raw(`${alias}.${column} < m.at_moment and (${alias}.voided_at is null or ${alias}.voided_at >= m.at_moment)`)
@@ -29,11 +48,14 @@ function liveAt(alias: "a" | "c" | "p", column: "created_at" | "paid_at"): SQL {
 
 /**
  * CTE `overdue(idx, patient_id, currency, owed, since)`: por cada momento
- * (`idx`), quién debía hace más de `days` días, cuánto y desde cuándo. La
- * sede filtra por la sede del concepto; lo que tiene a favor es de la persona.
+ * (`idx`), quién debía hace más de `days` días de calendario, cuánto y desde
+ * cuándo. La sede filtra por la sede del concepto: lo que nació sin sede no
+ * entra (Finanzas › Deudas lo muestra en todas, y la pantalla lo dice); lo que
+ * tiene a favor es de la persona.
  */
 export function overdueDebtSql(orgId: string, moments: Date[], days: number, branchId?: string): SQL {
   const branch = branchId ? sql`and c.branch_id = ${branchId}` : sql``
+  const old = days > 0 ? sql`and ${debtDaysSql(sql`min(z.since)`, sql`m.at_moment`, debtZoneSql(orgId, branchId))} > ${days}` : sql``
   return sql`with m(idx, at_moment) as (
       values ${sql.join(
         moments.map((moment, index) => sql`(${index}::int, ${at(moment)})`),
@@ -98,7 +120,7 @@ export function overdueDebtSql(orgId: string, moments: Date[], days: number, bra
       ) z
       join m on m.idx = z.idx
       group by z.idx, z.patient_id, z.currency, m.at_moment
-      having sum(z.owed) > 0 and min(z.since) < m.at_moment - make_interval(days => ${days})
+      having sum(z.owed) > 0 and min(z.since) < m.at_moment ${old}
         and sum(z.owed) > greatest(sum(z.credit), 0)
     )`
 }

@@ -135,15 +135,19 @@ export const PEOPLE_VIEWS = [
 ] as const
 export type PeopleView = (typeof PEOPLE_VIEWS)[number]["id"]
 
-/** Los atajos de Pacientes, con las palabras de la pantalla (decisión 6). */
+/**
+ * Los atajos de Pacientes, con las palabras de la pantalla (decisión 6) y qué
+ * cuenta cada uno: otras pantallas cuentan parecido con otra regla, y el número
+ * se entiende si dice la suya.
+ */
 export const PEOPLE_SHORTCUTS = [
-  { id: "por_agendar", label: "Por agendar" },
-  { id: "presupuesto_sin_enviar", label: "Presupuesto sin enviar" },
-  { id: "presupuesto_sin_respuesta", label: "Presupuesto sin respuesta" },
-  { id: "control_por_reservar", label: "Control por reservar" },
-  { id: "faltan_datos", label: "Faltan datos" },
-  { id: "por_invitar_a_volver", label: "Por invitar a volver" },
-  { id: "deben", label: "Deben" },
+  { id: "por_agendar", label: "Por agendar", rule: "Quien tiene algo aceptado o en curso sin cita para eso, aunque tenga otra cita. Si además tiene un presupuesto sin enviar, va en ese atajo." },
+  { id: "presupuesto_sin_enviar", label: "Presupuesto sin enviar", rule: "Quien tiene un presupuesto armado que aún no se le envió." },
+  { id: "presupuesto_sin_respuesta", label: "Presupuesto sin respuesta", rule: "Quien recibió su presupuesto y aún no respondió, si no tiene algo aceptado por agendar ni un presupuesto sin enviar." },
+  { id: "control_por_reservar", label: "Control por reservar", rule: "Quien tiene su próximo control como lo que sigue, aunque toque más adelante o ya tenga cita." },
+  { id: "faltan_datos", label: "Faltan datos", rule: "Pacientes a los que les falta un dato de su ficha." },
+  { id: "por_invitar_a_volver", label: "Por invitar a volver", rule: "Quien pasó el tiempo de su control sin volver y no se invitó en ese tiempo." },
+  { id: "deben", label: "Deben", rule: "Quien debe más de lo que tiene a favor, de cualquier fecha." },
 ] as const
 export type PeopleShortcut = (typeof PEOPLE_SHORTCUTS)[number]["id"]
 

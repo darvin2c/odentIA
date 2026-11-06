@@ -24,12 +24,33 @@ export const REPORT_PRESET_LABELS: Record<ReportPreset, string> = {
 /** Un rango de días: `2026-09-10..2026-09-25`, ambos incluidos. */
 const RANGE = /^(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})$/
 
-/** `este_mes`, `mes_pasado`, `ultimos_3_meses`, `este_ano`, `YYYY-MM` o un rango; lo demás no es un periodo. */
+/** El primer año que Reportes muestra, como el servidor (`report-periods.ts`). */
+const FIRST_REPORT_YEAR = 2000
+/** Un rango abarca como mucho dos años, como el servidor (`REPORT_RANGE_MAX_DAYS`). */
+const RANGE_MAX_DAYS = 731
+
+/** Un día que existe en el calendario: «2026-02-30» no. */
+function realDay(day: string): boolean {
+  const [year, month, date] = day.split("-").map(Number) as [number, number, number]
+  const parsed = new Date(Date.UTC(year, month - 1, date))
+  return year >= FIRST_REPORT_YEAR && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === date
+}
+
+/**
+ * `este_mes`, `mes_pasado`, `ultimos_3_meses`, `este_ano`, `YYYY-MM` o un rango
+ * de días que existen, en orden y de hasta dos años; lo demás no es un periodo
+ * y el enlace vuelve al de siempre. Lo que aún no pasa lo dice el servidor, con
+ * la zona de la clínica.
+ */
 export function isReportPeriod(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    ((REPORT_PRESETS as readonly string[]).includes(value) || /^\d{4}-(0[1-9]|1[0-2])$/.test(value) || RANGE.test(value))
-  )
+  if (typeof value !== "string") return false
+  if ((REPORT_PRESETS as readonly string[]).includes(value)) return true
+  if (/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) return Number(value.slice(0, 4)) >= FIRST_REPORT_YEAR
+  const range = RANGE.exec(value)
+  if (!range) return false
+  const [from, to] = [range[1] as string, range[2] as string]
+  if (!realDay(from) || !realDay(to) || from > to) return false
+  return (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000 + 1 <= RANGE_MAX_DAYS
 }
 
 /** Los días de un periodo de rango; `null` si es de meses. */

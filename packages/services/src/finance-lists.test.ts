@@ -5,6 +5,7 @@
  */
 import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
+import { patientCharge } from "@odentia/db/schema/clinical"
 import { branch } from "@odentia/db/schema/org"
 import { describe, expect, it } from "vitest"
 import { clinicalFixture } from "./clinical-test-fixture.js"
@@ -22,6 +23,7 @@ import { collectCharge, createCharge, getTicketReceiptById, voidTicket } from ".
 import { createPaymentMethod } from "./payment-methods.js"
 import { nextPatientNumber } from "./patients.js"
 import { insertTestPatients } from "./test-patient.js"
+import { getReportFinance } from "./report-finance.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 setupTestDb()
 
@@ -252,6 +254,50 @@ describe("Deudas por páginas", () => {
     const today = await f.run((tx) => listDebts(tx, "org_a", { branchId, when: "hoy" }))
     expect(today.total).toBe(2)
     expect(today.summary.earlier.people).toBe(0)
+  })
+})
+
+describe("quién debe, igual en Deudas y en Reportes", () => {
+  it("quien tiene a favor lo que debe no es deudor, y los 30 días son de calendario, a cualquier hora", async () => {
+    const f = await clinicalFixture()
+    const { branchId, cash } = await seedBranch(f.run, f.actor)
+    // Dejó un adelanto por todo lo que debe: no debe nada (decisión 22).
+    const luis = await secondPatient("Luis Adelanto", "47031299")
+    await f.run((tx) => createCharge(tx, "org_a", f.actor, luis.id, { description: "Corona", amountCents: 9000, currency: "PEN", branchId }))
+    await f.run((tx) =>
+      collectCharge(tx, "org_a", f.actor, luis.id, {
+        branchId,
+        advanceCents: 9000,
+        payments: [{ paymentMethodId: cash.id, amountCents: 9000 }],
+        requestId: randomUUID(),
+      }),
+    )
+    const listed = await f.run((tx) => listDebts(tx, "org_a", { branchId }))
+    expect(listed.data.map((row) => row.patientId)).not.toContain(luis.id)
+    expect(listed.summary.people).toBe(0)
+    // En la Caja, «Atendidos hoy» sí lo trae: hay que tocar «Cobrar» para aplicar su adelanto.
+    const today = await f.run((tx) => listDebts(tx, "org_a", { branchId, when: "hoy" }))
+    expect(today.data.find((row) => row.patientId === luis.id)).toMatchObject({ dueCents: 0, creditUsedCents: 9000 })
+
+    // Anotado hace 30 días a las 00:01 de Lima: son 30 días, no «más de 30», en Deudas y en Reportes.
+    const rosa = await secondPatient("Rosa Treinta", "47031288")
+    const limaToday = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date())
+    const day = new Date(Date.parse(`${limaToday}T12:00:00Z`) - 30 * 86_400_000).toISOString().slice(0, 10)
+    await ownerDb.insert(patientCharge).values({
+      organizationId: "org_a",
+      patientId: rosa.id,
+      description: "Ortodoncia",
+      amountCents: 5000,
+      currency: "PEN",
+      branchId,
+      createdAt: new Date(`${day}T00:01:00-05:00`),
+    })
+    const debts = await f.run((tx) => listDebts(tx, "org_a", { branchId }))
+    expect(debts.data.find((row) => row.patientId === rosa.id)?.ageDays).toBe(30)
+    expect(debts.summary.over30.people).toBe(0)
+    const report = await f.run((tx) => getReportFinance(tx, "org_a", { period: "este_mes", branchId }))
+    expect(report.debts.current.ages.find((age) => age.key === "0_30")).toMatchObject({ cents: 5000, people: 1 })
+    expect(report.debts.overdueCents).toBe(0)
   })
 })
 
