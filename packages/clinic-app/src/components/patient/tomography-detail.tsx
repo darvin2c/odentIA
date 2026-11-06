@@ -123,7 +123,11 @@ export function TomographyDetail({
             {imaging.fileCount.toLocaleString(activeOrgLocale())} archivos
           </p>
           <p className="text-muted-foreground">
-            La subida quedó a medias. Vuelve a elegir la carpeta del CD: lo que ya se subió no se repite.
+            {doc.retiredAt
+              ? "La subida se canceló y ya no se puede retomar. Para guardar la tomografía, súbela de nuevo desde Documentos."
+              : canUpload
+                ? "La subida quedó a medias. Vuelve a elegir la carpeta del CD: lo que ya se subió no se repite."
+                : "La subida quedó a medias. Puede retomarla quien sube archivos a la ficha, eligiendo otra vez la carpeta del CD."}
           </p>
         </div>
       )}

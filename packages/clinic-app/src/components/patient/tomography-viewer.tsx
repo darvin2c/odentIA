@@ -33,7 +33,8 @@ import {
 import { DicomUnsupportedError, decodeDicom, renderDicom } from "../../lib/dicom"
 import { tomographyDownloadUrl } from "../../lib/imaging-upload"
 import { MEASURE_NOTE, MeasureList, type SavedMeasures, useSavedMeasures, type Vec3 } from "./tomography-measures"
-import { PanoramicView } from "./tomography-panoramic"
+import { detectArch } from "../../lib/cbct-arch"
+import { PanoramicView, type SavedArch } from "./tomography-panoramic"
 import { type PlaneMeasure, type Point, SliceCanvas, type Tool } from "./tomography-slice"
 import { Tomography3D } from "./tomography-3d"
 import { usePatientName, ViewerShell } from "./viewer-shell"
@@ -51,6 +52,8 @@ export interface StudyFiles {
   sliceCount: number
   voxelMm: number | null
   files: { index: number; url: string; sizeBytes: number; seriesInstanceUid: string }[]
+  /** El arco ajustado a mano, si alguien lo guardó. */
+  arch?: SavedArch
 }
 
 const PRESET_LABELS: Record<BrightnessPreset, string> = {
@@ -171,11 +174,13 @@ function ThreePlanes({
   /** «Ver grande» del cuarto cuadro: la pestaña «3D». */
   onExpand3d?: () => void
 }) {
-  const [point, setPoint] = useState({
+  // Abre a la altura de los dientes: el corte del medio de una tomografía de campo
+  // grande cae en la nariz o en la base del cráneo.
+  const [point, setPoint] = useState(() => ({
     x: Math.floor(volume.nx / 2),
     y: Math.floor(volume.ny / 2),
-    z: Math.floor(volume.nz / 2),
-  })
+    z: detectArch(volume)?.z ?? Math.floor(volume.nz / 2),
+  }))
   const [draft, setDraft] = useState<{ plane: Plane; points: Point[] } | null>(null)
   // Cambiar de herramienta descarta los puntos a medio marcar.
   // biome-ignore lint/correctness/useExhaustiveDependencies: depende solo de la herramienta a propósito.
@@ -349,7 +354,7 @@ export function useCbctVolume(patientId: string, documentId: string) {
  * Sin memoria para el volumen (tablero 9): los cortes de la serie mayor de a
  * uno, decodificados al pedirlos, con su propia ventana.
  */
-function SingleSlices({ files }: { files: StudyFiles["files"] }) {
+function SingleSlices({ files, onRetry }: { files: StudyFiles["files"]; onRetry: () => void }) {
   const series = useMemo(() => {
     const counts = new Map<string, number>()
     for (const f of files) counts.set(f.seriesInstanceUid, (counts.get(f.seriesInstanceUid) ?? 0) + 1)
@@ -386,13 +391,27 @@ function SingleSlices({ files }: { files: StudyFiles["files"] }) {
   const step = (delta: number) => setIndex((i) => Math.max(0, Math.min(series.length - 1, i + delta)))
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center gap-3 p-4">
+      {/* Mientras llega el corte pedido, el anterior se atenúa: nunca se muestra con el número del nuevo. */}
+      {slice.isError && (
+        <div role="alert" className="flex flex-wrap items-center gap-3 text-sm text-red-200">
+          No se pudo cargar el corte {index + 1}.
+          <Button type="button" size="sm" variant="outline" onClick={onRetry}>
+            Reintentar
+          </Button>
+        </div>
+      )}
       <canvas
         ref={ref}
         role="img"
-        aria-label={`Corte ${index + 1} de ${series.length}`}
+        aria-label={
+          slice.isPlaceholderData || slice.isError
+            ? `Cargando el corte ${index + 1} de ${series.length}`
+            : `Corte ${index + 1} de ${series.length}`
+        }
+        aria-busy={slice.isPlaceholderData}
         // biome-ignore lint/a11y/noNoninteractiveTabindex: el corte se recorre con las flechas del teclado.
         tabIndex={0}
-        className="max-h-[70dvh] max-w-full object-contain"
+        className={`max-h-[70dvh] max-w-full object-contain ${slice.isPlaceholderData || slice.isError ? "opacity-30" : ""}`}
         onWheel={(event) => step(event.deltaY > 0 ? 1 : -1)}
         onKeyDown={(event) => {
           if (event.key === "ArrowUp") step(-1)
@@ -529,6 +548,7 @@ export function TomographyViewer({
   const changeView = (next: TomographyView) => {
     setView(next)
     setNotice(null)
+    setAdjusting(false)
     if (next !== "3d") setExpanded3d(false)
   }
   const chooseTool = (next: Tool) => {
@@ -554,6 +574,8 @@ export function TomographyViewer({
     if (!open || !volume) return
     const onKey = (event: KeyboardEvent) => {
       const { tool, chooseTool } = keys.current
+      // Lo que ya atendió un corte (1–5 al ajustar el arco, las flechas) no cambia el brillo.
+      if (event.defaultPrevented) return
       if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)
         return
       if (event.key === "1") setPreset("hueso")
@@ -590,6 +612,11 @@ export function TomographyViewer({
       title={patientName ? `${patientName} · ${doc.label}` : doc.label}
       subtitle={
         <>
+          {doc.retiredAt ? (
+            <span className="font-medium text-red-300">
+              Retirada{doc.retireReason ? ` · ${doc.retireReason}` : ""} ·{" "}
+            </span>
+          ) : null}
           {doc.imaging
             ? `${doc.imaging.sliceCount.toLocaleString(activeOrgLocale())} imágenes en el estudio`
             : ""}
@@ -665,14 +692,14 @@ export function TomographyViewer({
                 <ChevronDown aria-hidden="true" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start">
-                {shown === "panoramica" && !viewOnly && canWrite && (
+                {shown === "panoramica" && !viewOnly && !adjusting && (
                   <DropdownMenuItem
                     onClick={() => {
-                      setAdjusting((a) => !a)
+                      setAdjusting(true)
                       setTool("ninguna")
                     }}
                   >
-                    {adjusting ? "Terminar de ajustar el arco" : "Ajustar el arco"}
+                    Ajustar el arco
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem
@@ -699,10 +726,7 @@ export function TomographyViewer({
               aria-live="polite"
               className="min-w-0 basis-full text-xs text-amber-200 empty:hidden lg:basis-auto"
             >
-              {notice ??
-                (adjusting
-                  ? "Arrastra los puntos del arco o elige uno con 1–5 y muévelo con las flechas."
-                  : "")}
+              {notice ?? ""}
             </p>
             {otherSeries && (
               <p className="min-w-0 basis-full text-xs text-slate-400">
@@ -714,7 +738,7 @@ export function TomographyViewer({
       }
     >
       {single && loaded.files.data ? (
-        <SingleSlices files={loaded.files.data.data.files} />
+        <SingleSlices files={loaded.files.data.data.files} onRetry={() => void loaded.files.refetch()} />
       ) : loaded.error ? (
         <VolumeLoadError
           error={loaded.error}
@@ -745,6 +769,8 @@ export function TomographyViewer({
               patientId={patientId}
               doc={doc}
               adjusting={adjusting}
+              onAdjustDone={() => setAdjusting(false)}
+              savedArch={loaded.files.data?.data.arch ?? null}
               onTool={setTool}
               saved={saved}
               note={MEASURE_NOTE(voxel)}

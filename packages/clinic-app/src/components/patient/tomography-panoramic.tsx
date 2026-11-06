@@ -99,11 +99,25 @@ function projectOnPanorama(volume: CbctVolume, curve: readonly CurveSample[], im
   return out
 }
 
-/** El arco: propuesto, ajustado o marcado a mano (cinco puntos sobre el corte desde arriba). */
-function useArch(volume: CbctVolume) {
+/** El arco guardado con la tomografía, en mm del volumen (lo que devuelve la API). */
+export interface SavedArch {
+  arch: { points: [number, number][]; z: number } | null
+  updatedAt: string | null
+  updatedByName: string | null
+}
+
+/**
+ * El arco: el guardado con la tomografía, el que propone el visor o el marcado
+ * a mano (cinco puntos sobre el corte desde arriba).
+ */
+function useArch(volume: CbctVolume, saved: SavedArch["arch"]) {
   const proposal = useMemo(() => detectArch(volume), [volume])
-  const [control, setControl] = useState<Point[] | null>(proposal?.control ?? null)
-  const [axialZ, setAxialZ] = useState(proposal?.z ?? Math.floor(volume.nz / 2))
+  const [control, setControl] = useState<Point[] | null>(
+    saved ? saved.points.map(([x, y]) => ({ x: x / volume.sx, y: y / volume.sy })) : (proposal?.control ?? null),
+  )
+  const [axialZ, setAxialZ] = useState(
+    saved ? Math.round(saved.z / volume.sz) : (proposal?.z ?? Math.floor(volume.nz / 2)),
+  )
   // El arco llega hasta el último esmalte; se prolonga hacia la rama para ver las terceras molares.
   const curve = useMemo(
     () => (control && control.length >= 5 ? sampleCurve(volume, control, undefined, ARCH_BEYOND_MM) : []),
@@ -132,6 +146,8 @@ export function PanoramicView({
   patientId,
   doc,
   adjusting,
+  onAdjustDone,
+  savedArch,
   onTool,
   saved,
   note,
@@ -145,6 +161,10 @@ export function PanoramicView({
   patientId: string
   doc: PatientDocument
   adjusting: boolean
+  /** Termina «Ajustar el arco» (guardado o cancelado). */
+  onAdjustDone: () => void
+  /** El arco guardado con la tomografía, si alguien lo ajustó. */
+  savedArch: SavedArch | null
   onTool: (tool: Tool) => void
   saved: SavedMeasures
   /** Medidas orientativas (decisión 9). */
@@ -153,7 +173,30 @@ export function PanoramicView({
   phoneView?: "panoramica" | "corte"
 }) {
   const queryClient = useQueryClient()
-  const { proposal, control, setControl, axialZ, setAxialZ, curve } = useArch(volume)
+  const { proposal, control, setControl, axialZ, setAxialZ, curve } = useArch(volume, savedArch?.arch ?? null)
+  // El arco que vale al terminar o cancelar el ajuste: el guardado o el propuesto.
+  const [archState, setArchState] = useState<{ baseline: Point[] | null; info: SavedArch | null }>(() => ({
+    baseline: control,
+    info: savedArch?.arch ? savedArch : null,
+  }))
+  const [archMessage, setArchMessage] = useState<string | null>(null)
+  const saveArch = async (next: Point[] | null) => {
+    if (!canWrite || viewOnly) return
+    try {
+      const { data } = await apiFetch<{ data: SavedArch }>(`/api/patients/${patientId}/imaging/studies/${doc.id}/arch`, {
+        method: "PUT",
+        body: JSON.stringify({
+          arch: next
+            ? { points: next.map((p) => [p.x * volume.sx, p.y * volume.sy]), z: axialZ * volume.sz }
+            : null,
+        }),
+      })
+      setArchState({ baseline: next ?? proposal?.control ?? null, info: data.arch ? data : null })
+      setArchMessage(next ? "Arco guardado con la tomografía." : "Vuelve el arco que propone el visor.")
+    } catch {
+      setArchMessage("No se pudo guardar el arco. Vuelve a intentarlo.")
+    }
+  }
   const occlusalZ = proposal?.z ?? axialZ
   const pano = useMemo(
     () => (curve.length ? panorama(volume, curve, 12, ...panoramaRows(volume, occlusalZ)) : null),
@@ -644,8 +687,10 @@ export function PanoramicView({
               const next = [...marking, p]
               if (next.length < 5) setMarking(next)
               else {
-                setControl([...next].sort((a, b) => a.x - b.x))
+                const sorted = [...next].sort((a, b) => a.x - b.x)
+                setControl(sorted)
                 setMarking([])
+                void saveArch(sorted)
               }
               return
             }
@@ -690,11 +735,61 @@ export function PanoramicView({
           }
         />
         <div className="flex flex-1 flex-col gap-3 bg-[#0d131b] p-4 text-sm">
-          {adjusting && (
-            <p className="rounded-lg bg-cyan-950/60 p-2 text-xs text-cyan-100">
-              Arrastra los puntos del arco o elige uno con 1–5 y muévelo con las flechas.
-              {proposal ? "" : " El visor no encontró el arco solo."}
-            </p>
+          {adjusting ? (
+            <div role="status" className="flex flex-col gap-2 rounded-lg bg-cyan-950/60 p-3 text-xs text-cyan-100">
+              <p className="font-semibold">Ajustando el arco</p>
+              <p>
+                Arrastra los puntos sobre el corte de arriba, o elige uno con 1–5 y muévelo con las flechas.
+                {proposal ? "" : " El visor no encontró el arco solo."}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => {
+                    if (control) void saveArch(control)
+                    onAdjustDone()
+                  }}
+                >
+                  {canWrite ? "Terminar y guardar" : "Terminar"}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setControl(archState.baseline)
+                    setArchMessage(null)
+                    onAdjustDone()
+                  }}
+                >
+                  Cancelar
+                </Button>
+                {canWrite && archState.info && proposal && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setControl(proposal.control)
+                      void saveArch(null)
+                      onAdjustDone()
+                    }}
+                  >
+                    Volver al arco propuesto
+                  </Button>
+                )}
+              </div>
+            </div>
+          ) : (
+            (archMessage || archState.info) && (
+              <p className="text-xs text-slate-400" aria-live="polite">
+                {archMessage ??
+                  `Arco ajustado a mano${archState.info?.updatedByName ? ` por ${archState.info.updatedByName}` : ""}${
+                    archState.info?.updatedAt ? `, ${formatDate(archState.info.updatedAt)}` : ""
+                  }.`}
+              </p>
+            )
           )}
           {toothSection}
           <MeasureList saved={saved} canWrite={canWrite} viewOnly={viewOnly} note={note} />

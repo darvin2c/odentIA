@@ -474,13 +474,74 @@ export interface ImagingStudyFileRow {
   seriesInstanceUid: string
 }
 
-/** Archivos de una tomografía completa, en orden, para verla o descargarla. */
+/** El arco de la panorámica, ajustado a mano: cinco puntos del corte axial y ese corte, en mm del volumen. */
+export interface ImagingArch {
+  points: [number, number][]
+  z: number
+}
+
+export interface ImagingArchRow {
+  arch: ImagingArch | null
+  updatedAt: Date | null
+  updatedByName: string | null
+}
+
+async function archRow(tx: Db, study: typeof imagingStudy.$inferSelect): Promise<ImagingArchRow> {
+  if (!study.archControl) return { arch: null, updatedAt: null, updatedByName: null }
+  const [named] = study.archUpdatedBy
+    ? await tx.select({ name: user.name }).from(user).where(eq(user.id, study.archUpdatedBy)).limit(1)
+    : []
+  return { arch: study.archControl, updatedAt: study.archUpdatedAt, updatedByName: named?.name ?? null }
+}
+
+/**
+ * Guarda el arco ajustado a mano (uno por tomografía, con quién y cuándo), o
+ * vuelve al que propone el visor con `null`. Solo en una tomografía completa y vigente.
+ */
+export async function setImagingStudyArch(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  documentId: string,
+  arch: ImagingArch | null,
+): Promise<ImagingArchRow> {
+  const { study, retiredAt } = await requireStudy(tx, orgId, patientId, documentId)
+  if (retiredAt) throw new ServiceError("DOCUMENT_RETIRED", 409, "La tomografía está retirada")
+  if (!study.completedAt)
+    throw new ServiceError("IMAGING_UPLOAD_PENDING", 409, "La tomografía aún no termina de subirse")
+  const valid = (v: unknown) => typeof v === "number" && Number.isFinite(v) && Math.abs(v) < 2000
+  if (
+    arch !== null &&
+    (!Array.isArray(arch.points) ||
+      arch.points.length !== 5 ||
+      !arch.points.every((p) => Array.isArray(p) && p.length === 2 && p.every(valid)) ||
+      !valid(arch.z))
+  )
+    throw validation("El arco necesita cinco puntos")
+  const [row] = await tx
+    .update(imagingStudy)
+    .set({
+      archControl: arch === null ? null : { points: arch.points.map((p) => [p[0], p[1]] as [number, number]), z: arch.z },
+      archUpdatedBy: arch === null ? null : actorUserId,
+      archUpdatedAt: arch === null ? null : new Date(),
+    })
+    .where(and(eq(imagingStudy.documentId, documentId), eq(imagingStudy.organizationId, orgId)))
+    .returning()
+  if (!row) throw notFound("Tomografía")
+  await audit(tx, orgId, actorUserId, arch === null ? "imaging_study.arch_reset" : "imaging_study.arch_set", documentId, {
+    patientId,
+  })
+  return archRow(tx, row)
+}
+
+/** Archivos de una tomografía completa, en orden, para verla o descargarla, con su arco guardado. */
 export async function getImagingStudyFiles(
   tx: Db,
   orgId: string,
   patientId: string,
   documentId: string,
-): Promise<{ study: typeof imagingStudy.$inferSelect; files: ImagingStudyFileRow[] }> {
+): Promise<{ study: typeof imagingStudy.$inferSelect; files: ImagingStudyFileRow[]; arch: ImagingArchRow }> {
   const { study } = await requireStudy(tx, orgId, patientId, documentId)
   if (!study.completedAt)
     throw new ServiceError("IMAGING_UPLOAD_PENDING", 409, "La tomografía aún no termina de subirse")
@@ -495,7 +556,7 @@ export async function getImagingStudyFiles(
     .from(imagingStudyFile)
     .where(and(eq(imagingStudyFile.documentId, documentId), eq(imagingStudyFile.organizationId, orgId)))
     .orderBy(asc(imagingStudyFile.fileIndex))
-  return { study, files }
+  return { study, files, arch: await archRow(tx, study) }
 }
 
 /**
