@@ -2,7 +2,7 @@ import { Badge, Button } from "@odentia/ui"
 import { ConfirmDialog, FlowDiagram, submitErrorMessage, submitForm, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useNavigate } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
 import { CircleAlert, CircleCheck } from "lucide-react"
 import { useEffect, useId, useState } from "react"
 import { z } from "zod"
@@ -30,6 +30,15 @@ const examples = (receptionName: string) => [
  * que entiende queda como borrador en su línea y se abre ahí; no prende ni
  * cambia nada. Lo que no reconoce o no se puede, lo dice.
  */
+/**
+ * Una pregunta de cifras (X12): pide un número de la clínica, no un cambio de las líneas.
+ * «Cuánto cuesta», «cuántas veces» o «cuál es el horario» son pedidos para Sofi, no cifras.
+ */
+const FIGURES_QUESTION =
+  /\b(cu[aá]nt[oa]s (pacientes|citas|consultas|personas|presupuestos|cobros|comprobantes|ventas)|cu[aá]nto (se )?(cobr|factur|gan|ingres|vend|recaud|debe)|qu[eé] porcentaje|ingresos|facturaci[oó]n|tasa de)/i
+/** «En cuanto alguien cancele…» y «cuanto antes» son de cuándo, no de cuánto. */
+const NOT_FIGURES = /\b(en cu[aá]nto|cu[aá]nto antes)\b/i
+
 export function AdminRequest({ onOpen }: { onOpen: (key: string | undefined) => void }) {
   const uid = useId()
   const queryClient = useQueryClient()
@@ -81,6 +90,8 @@ export function AdminRequest({ onOpen }: { onOpen: (key: string | undefined) => 
   }, [down])
   const answer = ask.data?.data
   const unknown = !!answer && !answer.understood && !answer.unavailable
+  // Esta página arma cambios de las líneas; una pregunta de cifras va en Reportes (X12).
+  const asksFigures = unknown && FIGURES_QUESTION.test(text) && !NOT_FIGURES.test(text)
   return (
     <section aria-labelledby={`${uid}-titulo`} className="elevated flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-5 sm:p-6">
       <form noValidate className="flex flex-col gap-3" onSubmit={submit}>
@@ -146,6 +157,15 @@ export function AdminRequest({ onOpen }: { onOpen: (key: string | undefined) => 
               </Button>
               <span className="text-muted-foreground">{down ? "El campo vuelve a activarse solo en medio minuto." : "Ya puedes volver a escribir."}</span>
             </div>
+          ) : null}
+          {asksFigures ? (
+            <p>
+              Eso suena a una pregunta de cifras: pregúntala en{" "}
+              <Link to="/reports" className="font-semibold text-primary-soft-foreground underline-offset-2 hover:underline">
+                Reportes
+              </Link>
+              , en «Pregúntale a {ADMIN_NAME}». Aquí se le piden cambios a sus líneas.
+            </p>
           ) : null}
           {unknown ? (
             forward.isSuccess ? (

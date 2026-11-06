@@ -1,6 +1,7 @@
 import { Badge, Button, ScrollArea, Spinner } from "@odentia/ui"
 import { DataRefreshMarker, EmptyState, personInitials, SkeletonRegion } from "@odentia/ui-patterns"
 import { Bot } from "lucide-react"
+import type { ReactNode } from "react"
 import { ConversationRowsSkeleton } from "../skeletons/inbox"
 import { useReceptionName } from "../../lib/agent-names"
 import { channelIcon } from "../../lib/channels"
@@ -105,6 +106,7 @@ export function ConversationList({
   sideView = null,
   onRowAction,
   onBackToTabs,
+  header,
 }: {
   items: ConversationListItem[]
   /** Quien mira: un tema suyo se dice «Lo tienes tú». */
@@ -129,12 +131,15 @@ export function ConversationList({
   onRowAction?: (item: ConversationListItem) => void
   /** El vacío de Spam y Bloqueados lleva de vuelta a las pestañas. */
   onBackToTabs?: () => void
+  /** Arriba de las filas: el orden de «Por atender». */
+  header?: ReactNode
 }) {
   const receptionName = useReceptionName()
   return (
     // El desplazamiento de la lista es el de la aplicación (ScrollArea), no la barra nativa.
     <ScrollArea className="elevated min-h-0 flex-1 rounded-xl border bg-card">
       <div className="flex flex-col divide-y">
+        {header}
         {sideView ? (
           <div className="flex flex-col gap-0.5 px-3.5 py-2.5">
             <span className="text-sm font-semibold">{sideView === "spam" ? "Spam · últimos 30 días" : "Bloqueados"}</span>
