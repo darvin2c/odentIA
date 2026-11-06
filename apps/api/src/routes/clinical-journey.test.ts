@@ -997,6 +997,24 @@ it("documentos: carga con vínculos clínicos y corrección versionada", async (
     (await app.request(`/patients/${patientId}/documents`, { method: "POST", body: wrongType }))
       .status,
   ).toBe(400)
+  // Solo la radiografía DICOM pasa de 10 MB, hasta 30 (una cefalométrica sin comprimir).
+  const sized = (bytes: Uint8Array, type: string, name: string) => {
+    const body = new FormData()
+    body.append("file", new Blob([bytes as Uint8Array<ArrayBuffer>], { type }), name)
+    body.append("label", name)
+    body.append("category", "radiografia")
+    return app.request(`/patients/${patientId}/documents`, { method: "POST", body })
+  }
+  const elevenMb = 11 * 1024 * 1024
+  const bigPng = new Uint8Array(elevenMb)
+  bigPng.set([137, 80, 78, 71, 13, 10, 26, 10])
+  expect((await sized(bigPng, "image/png", "grande.png")).status).toBe(400)
+  const bigDicom = new Uint8Array(elevenMb)
+  bigDicom.set(new TextEncoder().encode("DICM"), 128)
+  expect((await sized(bigDicom, "application/dicom", "cefalometrica.dcm")).status).toBe(201)
+  const tooBigDicom = new Uint8Array(31 * 1024 * 1024)
+  tooBigDicom.set(new TextEncoder().encode("DICM"), 128)
+  expect((await sized(tooBigDicom, "application/dicom", "enorme.dcm")).status).toBe(400)
   const uploaded = await app.request(`/patients/${patientId}/documents`, {
     method: "POST",
     body: form,

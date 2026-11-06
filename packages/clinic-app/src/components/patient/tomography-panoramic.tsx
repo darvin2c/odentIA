@@ -127,6 +127,7 @@ export function PanoramicView({
   onTool,
   saved,
   note,
+  phoneView,
 }: {
   volume: CbctVolume
   window: WindowLevel
@@ -140,6 +141,8 @@ export function PanoramicView({
   saved: SavedMeasures
   /** Medidas orientativas (decisión 9). */
   note: string
+  /** En el celular, una vista grande a la vez: la panorámica o el corte elegido. */
+  phoneView?: "panoramica" | "corte"
 }) {
   const queryClient = useQueryClient()
   const { proposal, control, setControl, axialZ, setAxialZ, curve } = useArch(volume)
@@ -361,6 +364,112 @@ export function PanoramicView({
   )
 
   const noArch = !control || control.length < 5
+  // Dónde está el corte elegido: la pieza y los mm a lo largo del arco (no la cantidad de cortes del archivo).
+  const arcPosition = curve.length
+    ? `${teethLabel ? `Pieza ${teethLabel} · ` : ""}${Math.round(curve[clampIndex(index)]!.s).toLocaleString(activeOrgLocale())} de ${Math.round(curve[curve.length - 1]!.s).toLocaleString(activeOrgLocale())} mm del arco`
+    : ""
+  if (phoneView) {
+    const chosen = crosses[CROSS_OFFSETS.indexOf(0)]
+    const step = (delta: number) => setIndex((i) => clampIndex(i + delta * perMm))
+    return (
+      // scroll-nativo: en el celular la vista grande va arriba y lo demás se desplaza debajo.
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        {phoneView === "panoramica" ? (
+          pano ? (
+            <SliceCanvas
+              className="flex items-center"
+              image={pano}
+              window={window}
+              label="Panorámica reconstruida"
+              tool="ninguna"
+              overlay={tick}
+              measures={measures
+                .filter((m) => m.view === "panoramica")
+                .flatMap((m) => {
+                  const points = projectOnPanorama(volume, curve, pano, m.points)
+                  return points ? [asPlane(m, points)] : []
+                })}
+              onPick={(p) => setIndex(clampIndex(p.x))}
+              onStep={step}
+            />
+          ) : (
+            <p role="status" className="m-auto max-w-sm p-6 text-center text-sm text-slate-300">
+              El visor no encontró el arco. Para marcarlo, ábrela en una computadora; mientras
+              tanto, «Cortes» funciona.
+            </p>
+          )
+        ) : chosen ? (
+          <SliceCanvas
+            className="flex min-h-[55dvh] items-center"
+            image={chosen.image}
+            window={window}
+            label={teethLabel ? `Corte de la pieza ${teethLabel}` : "Corte"}
+            tool="ninguna"
+            measures={measures
+              .filter((m) => m.view === "transversal")
+              .flatMap((m) => {
+                const points = projectOnCross(volume, curve[chosen.at]!, chosen.image, m.points)
+                return points ? [asPlane(m, points)] : []
+              })}
+            onStep={step}
+            onSwipe={step}
+          />
+        ) : (
+          <p role="status" className="m-auto max-w-sm p-6 text-center text-sm text-slate-300">
+            Sin arco no hay cortes a lo largo de la boca. Para marcarlo, ábrela en una computadora.
+          </p>
+        )}
+        {curve.length > 0 && (
+          <div className="flex flex-col gap-1 border-t border-slate-800 px-3 py-2 text-xs text-slate-400">
+            <div className="flex items-center gap-3">
+              <span id="cortes-label-celular">A lo largo del arco</span>
+              <Slider
+                aria-labelledby="cortes-label-celular"
+                className="min-w-32 flex-1"
+                value={[clampIndex(index)]}
+                min={2 * perMm}
+                max={curve.length - 1 - 2 * perMm}
+                step={1}
+                onValueChange={(v) =>
+                  setIndex(clampIndex(Array.isArray(v) ? (v[0] ?? 0) : (v as number)))
+                }
+              />
+            </div>
+            <output className="font-semibold text-slate-100 tabular-nums">{arcPosition}</output>
+            {phoneView === "corte" && (
+              <span>Desliza con el dedo para pasar al corte siguiente.</span>
+            )}
+          </div>
+        )}
+        <div className="flex flex-col gap-3 bg-[#0d131b] p-4 text-sm">
+          {teeth.length > 0 && curve.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold tracking-wide text-slate-400 uppercase">
+                Ir a la pieza
+              </span>
+              {teeth.map((t) => (
+                <Button
+                  key={t}
+                  type="button"
+                  size="sm"
+                  variant={t === tooth ? "secondary" : "outline"}
+                  onClick={() => {
+                    setTooth(t)
+                    const at = toothIndex(curve, t)
+                    if (at !== null) setIndex(clampIndex(at))
+                  }}
+                >
+                  {t}
+                </Button>
+              ))}
+            </div>
+          )}
+          <MeasureList saved={saved} canWrite={canWrite} viewOnly={viewOnly} />
+          <p className="text-xs text-slate-400">{note}</p>
+        </div>
+      </div>
+    )
+  }
   return (
     // En pantallas angostas la vista se desplaza; en anchas, todo cabe sin desplazar.
     // scroll-nativo: visor sobre fondo oscuro que deja de desplazarse en ancho (`lg:overflow-hidden`);
@@ -391,7 +500,7 @@ export function PanoramicView({
             <p className="font-semibold text-slate-100">Marca el arco para armar la panorámica</p>
             <p className="mt-1">
               Haz clic en 5 puntos sobre el hueso del corte de la derecha, de un lado al otro (
-              {marking.length} de 5). Mientras tanto, «Tres cortes» funciona.
+              {marking.length} de 5). Mientras tanto, «Cortes» funciona.
             </p>
           </div>
         )}
@@ -402,6 +511,7 @@ export function PanoramicView({
               return (
                 <SliceCanvas
                   key={k}
+                  zoomControls={false}
                   className={k === 0 ? "ring-2 ring-amber-500 ring-inset" : ""}
                   image={c.image}
                   window={window}
@@ -435,10 +545,9 @@ export function PanoramicView({
               onValueChange={(v) => setIndex(clampIndex(Array.isArray(v) ? (v[0] ?? 0) : (v as number)))}
             />
             <output className="min-w-40 font-semibold text-slate-100 tabular-nums">
-              Corte {Math.round(curve[clampIndex(index)]!.s)} de {Math.round(curve[curve.length - 1]!.s)}
-              {teethLabel ? ` · pieza ${teethLabel}` : ""}
+              {arcPosition}
             </output>
-            <span>Cada corte: 1 mm · Rueda o ↑ ↓ para avanzar</span>
+            <span>Cada corte: 1 mm · Rueda o ↑ ↓ avanzan · Ctrl + rueda acerca</span>
           </div>
         )}
       </div>
@@ -559,9 +668,6 @@ export function PanoramicView({
               </p>
             </div>
           )}
-          <p className="text-xs text-slate-500">
-            {Math.round(curve.length ? curve[curve.length - 1]!.s : 0).toLocaleString(activeOrgLocale())} mm de arco
-          </p>
           {tool !== "ninguna" && !viewOnly && (
             <Button type="button" size="sm" variant="ghost" onClick={() => onTool("ninguna")}>
               Terminar de medir

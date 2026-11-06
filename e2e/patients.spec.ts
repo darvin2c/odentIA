@@ -742,6 +742,12 @@ test("documentos: una sola lista para buscar un papel, con sus filtros y cada fi
   await expect(viewer.getByText("Detalles del archivo")).toBeVisible()
   // El visor dice solo lo que tiene: nada de «Sin … vinculado».
   await expect(viewer.getByText(/Sin .* vinculad/)).toHaveCount(0)
+  // Se acerca con «+» y una foto sin escala dice por qué no se mide, con la salida.
+  await viewer.getByRole("button", { name: "Acercar", exact: true }).click()
+  await expect(viewer.getByRole("button", { name: /ahora al 125 %/ })).toBeVisible()
+  await viewer.getByRole("button", { name: "Medir" }).click()
+  await expect(viewer.getByText(/no trae su escala/)).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("visor-radiografia.png") })
   await page.keyboard.press("Escape")
   await expect(page).not.toHaveURL(/documentId=/)
   await expect(view).toBeFocused()

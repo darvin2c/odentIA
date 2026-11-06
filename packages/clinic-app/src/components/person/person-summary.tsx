@@ -32,6 +32,7 @@ import { type PersonConversation, type PersonPage, RELATIONSHIP_WORDS, relations
 import { openAppointmentAnywhere } from "../agenda/schedule-host"
 import { OpportunityDrawer } from "../crm/opportunity-drawer"
 import { TaskDrawer } from "../crm/task-drawer"
+import { storesTomography } from "../patient/document-labels"
 import { NewPatientDrawer, type NewPatientTarget } from "../patient/new-patient-drawer"
 import { PlanNextCard } from "../patient/plan/plan-next"
 import {
@@ -104,7 +105,7 @@ export function PersonSummary({
   const receptionName = useReceptionName()
   const canAlerts = can("clinical.alerts") || can("clinical.read")
   // Quien recibe el CD sin leer la historia (recepción) sube aquí la tomografía.
-  const receivesTomography = can("clinical.receive") && !can("clinical.read")
+  const receivesTomography = can("clinical.receive") && !can("clinical.read") && storesTomography()
   const canAppointments = usePermission("appointments.read")
   const canFinance = usePermission("finance.read")
   const canChats = usePermission("conversations.read")

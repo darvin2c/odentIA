@@ -52,17 +52,12 @@ import {
   takenAt,
 } from "./document-labels"
 import { DocumentLinkSelects, type DocumentLinkValue } from "./document-link-selects"
-import { DicomViewer } from "./dicom-viewer"
-import {
-  AdjustedImage,
-  DEFAULT_ADJUSTMENTS,
-  ImageAdjustControls,
-  type ImageAdjustments,
-  ImageCompare,
-} from "./image-viewer"
+import { ImageCompare } from "./image-viewer"
+import { DicomFacts, ImageViewer2D } from "./image-viewer-2d"
 import { TAGS_INPUT_HELP, TagsCount, TagsInput } from "./tags-input"
 import { TomographyDetail } from "./tomography-detail"
 import { TomographyViewer } from "./tomography-viewer"
+import { isTyping, usePatientName, ViewerShell } from "./viewer-shell"
 import { PlacesField } from "../../product/site-fields"
 
 /** Las URL firmadas expiran: se consideran frescas 10 min y luego se regeneran. */
@@ -192,9 +187,10 @@ export function usePatientEncounters(patientId: string, enabled = true) {
 /** Las flechas pasan de archivo salvo cuando el foco está en un control que las usa. */
 function arrowsBelongToControl(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false
-  if (target.isContentEditable) return true
-  if (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return true
+  if (isTyping(target)) return true
   const role = target.getAttribute("role")
+  // Dentro de un menú («Más»), las flechas recorren sus opciones.
+  if (target.closest('[role="menu"]') || role?.startsWith("menuitem")) return true
   return role === "slider" || role === "combobox" || role === "listbox" || role === "option"
 }
 
@@ -235,6 +231,11 @@ export function DocumentViewerHost({
   // La tomografía completa abre su visor; «Detalles» lleva a su ficha de archivo.
   const [details, setDetails] = useState(false)
   const [editing, setEditing] = useState(false)
+  // «Detalles» empieza abierto donde cabe al lado de la imagen.
+  const [detailsOpen, setDetailsOpen] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches,
+  )
+  const patientName = usePatientName(patientId)
   // biome-ignore lint/correctness/useExhaustiveDependencies: cada archivo abre en su vista.
   useEffect(() => {
     setDetails(false)
@@ -256,6 +257,145 @@ export function DocumentViewerHost({
         onClose={onClose}
         onDetails={() => setDetails(true)}
       />
+    )
+  }
+
+  const viewer = (detailsOpen?: boolean) => (
+    <DocumentViewer
+      patientId={patientId}
+      doc={doc}
+      planItem={doc.planItemId ? planById.get(doc.planItemId) : undefined}
+      encounter={doc.encounterId ? encounterById.get(doc.encounterId) : undefined}
+      canEdit={canWrite && !doc.retiredAt}
+      onEditContext={() => setEditing(true)}
+      // Se compara con radiografías y fotos, no con la hoja escaneada de un consentimiento.
+      compareCandidates={allDocs.filter(
+        (d) => d.id !== doc.id && !d.retiredAt && isImageDoc(d) && isImageCategory(d.category),
+      )}
+      onChanged={onChanged}
+      onRetired={async () => {
+        onClose()
+        await onChanged()
+      }}
+      detailsOpen={detailsOpen}
+    />
+  )
+  const contextDrawer = editing && (
+    <ContextDrawer
+      patientId={patientId}
+      doc={doc}
+      encounters={encounters}
+      planItems={planItems}
+      suggestions={tagSuggestions}
+      open
+      onOpenChange={(open) => {
+        if (!open) setEditing(false)
+      }}
+      onSaved={async (updated) => {
+        setEditing(false)
+        await onChanged()
+        if (updated?.id && updated.id !== doc.id) onNavigate(updated.id)
+      }}
+    />
+  )
+  const position = sequence.length > 1 && index >= 0 ? `${index + 1} de ${sequence.length}` : null
+  const subtitle = [
+    imageTypeLabel(doc.imageType) ?? categoryLabel(doc.category),
+    formatTakenAt(doc),
+    doc.toothNumbers.length > 0
+      ? `${doc.toothNumbers.length === 1 ? "Pieza" : "Piezas"} ${doc.toothNumbers.join(", ")}`
+      : null,
+    position,
+  ]
+    .filter(Boolean)
+    .join(" · ")
+
+  // Radiografías, fotos, PDF y DICOM: el armazón oscuro, con la imagen como lo principal.
+  if (!doc.imaging) {
+    return (
+      <>
+        <ViewerShell
+          open={!editing}
+          onClose={onClose}
+          // Quién es va siempre a la vista: la ficha queda tapada.
+          title={patientName ? `${patientName} · ${doc.label}` : doc.label}
+          subtitle={subtitle}
+          onKeyDown={(event) => {
+            if (arrowsBelongToControl(event.target)) return
+            if (event.key === "ArrowLeft" && previous) {
+              event.preventDefault()
+              onNavigate(previous.id)
+            } else if (event.key === "ArrowRight" && next) {
+              event.preventDefault()
+              onNavigate(next.id)
+            }
+          }}
+          actions={
+            <>
+              <div className="flex gap-2 max-md:hidden">
+                {previous && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    aria-keyshortcuts="ArrowLeft"
+                    onClick={() => onNavigate(previous.id)}
+                  >
+                    Anterior
+                  </Button>
+                )}
+                {next && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    aria-keyshortcuts="ArrowRight"
+                    onClick={() => onNavigate(next.id)}
+                  >
+                    Siguiente
+                  </Button>
+                )}
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant={detailsOpen ? "secondary" : "outline"}
+                aria-pressed={detailsOpen}
+                onClick={() => setDetailsOpen((open) => !open)}
+              >
+                Detalles
+              </Button>
+            </>
+          }
+        >
+          {viewer(detailsOpen)}
+          {/* En el teléfono, pasar de una a otra queda fijo abajo, al alcance del pulgar. */}
+          {position ? (
+            <div className="flex items-center justify-between gap-2 border-t border-slate-800 px-3 py-2.5 md:hidden">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={!previous}
+                onClick={() => previous && onNavigate(previous.id)}
+              >
+                Anterior
+              </Button>
+              <span className="text-xs text-slate-400 tabular-nums">{position}</span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={!next}
+                onClick={() => next && onNavigate(next.id)}
+              >
+                Siguiente
+              </Button>
+            </div>
+          ) : null}
+        </ViewerShell>
+        {contextDrawer}
+      </>
     )
   }
 
@@ -322,24 +462,7 @@ export function DocumentViewerHost({
               </div>
             </div>
           </DialogHeader>
-          <DocumentViewer
-            patientId={patientId}
-            doc={doc}
-            planItem={doc.planItemId ? planById.get(doc.planItemId) : undefined}
-            encounter={doc.encounterId ? encounterById.get(doc.encounterId) : undefined}
-            canEdit={canWrite && !doc.retiredAt}
-            onEditContext={() => setEditing(true)}
-            // Se compara con radiografías y fotos, no con la hoja escaneada de un consentimiento.
-            compareCandidates={allDocs.filter(
-              (d) =>
-                d.id !== doc.id && !d.retiredAt && isImageDoc(d) && isImageCategory(d.category),
-            )}
-            onChanged={onChanged}
-            onRetired={async () => {
-              onClose()
-              await onChanged()
-            }}
-          />
+          {viewer()}
           {/* En el teléfono, pasar de una a otra queda fijo abajo, al alcance del pulgar. */}
           {sequence.length > 1 && index >= 0 ? (
             <div className="sticky bottom-0 -mx-6 flex items-center justify-between gap-2 border-t bg-popover px-4 py-3 md:hidden">
@@ -368,24 +491,7 @@ export function DocumentViewerHost({
           ) : null}
         </DialogContent>
       </Dialog>
-      {editing && (
-        <ContextDrawer
-          patientId={patientId}
-          doc={doc}
-          encounters={encounters}
-          planItems={planItems}
-          suggestions={tagSuggestions}
-          open
-          onOpenChange={(open) => {
-            if (!open) setEditing(false)
-          }}
-          onSaved={async (updated) => {
-            setEditing(false)
-            await onChanged()
-            if (updated?.id && updated.id !== doc.id) onNavigate(updated.id)
-          }}
-        />
-      )}
+      {contextDrawer}
     </>
   )
 }
@@ -400,6 +506,7 @@ function DocumentViewer({
   compareCandidates,
   onChanged,
   onRetired,
+  detailsOpen,
 }: {
   patientId: string
   doc: DocView
@@ -411,6 +518,8 @@ function DocumentViewer({
   compareCandidates: DocView[]
   onChanged: () => Promise<void>
   onRetired: () => Promise<void>
+  /** En el armazón oscuro: si «Detalles» está abierto al lado de la imagen. */
+  detailsOpen?: boolean
 }) {
   // En el teléfono, los ajustes y los detalles empiezan plegados (tablero 5).
   const phone = useIsMobile()
@@ -418,7 +527,6 @@ function DocumentViewer({
   // La tomografía no tiene un solo archivo: se abre en su detalle, no por URL.
   const urlQuery = useSignedUrl(patientId, doc.id, "original", !doc.imaging)
   const url = urlQuery.data?.data.url ?? null
-  const [adjustments, setAdjustments] = useState<ImageAdjustments>(DEFAULT_ADJUSTMENTS)
   const [compareId, setCompareId] = useState<string>("")
   const [retireOpen, setRetireOpen] = useState(false)
   const [actionPending, setActionPending] = useState(false)
@@ -440,7 +548,6 @@ function DocumentViewer({
   const compareSelectId = useId()
   // biome-ignore lint/correctness/useExhaustiveDependencies: otro archivo empieza sin ajustes.
   useEffect(() => {
-    setAdjustments(DEFAULT_ADJUSTMENTS)
     setCompareId("")
     setActionError(null)
   }, [doc.id])
@@ -508,401 +615,421 @@ function DocumentViewer({
         ...(planItem.budgetId ? { budgetId: planItem.budgetId } : {}),
       }
     : { tab: "plan" as const }
-  return (
-    <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_20rem]">
-      {doc.imaging ? (
-        <TomographyDetail
-          patientId={patientId}
-          doc={doc}
-          canUpload={canEdit}
-          onChanged={onChanged}
-        />
-      ) : urlQuery.isPending ? (
-        <LoadingState message="Cargando…" />
-      ) : error || !url ? (
-        <div className="flex flex-col gap-2">
-          <p className="text-sm text-destructive">{error ?? "No se pudo obtener el documento."}</p>
-          <Button size="sm" variant="outline" onClick={() => void urlQuery.refetch()}>
-            Reintentar
-          </Button>
+  const stage = doc.imaging ? (
+    <TomographyDetail patientId={patientId} doc={doc} canUpload={canEdit} onChanged={onChanged} />
+  ) : urlQuery.isPending ? (
+    <div className="m-auto w-full max-w-sm">
+      <LoadingState message="Cargando…" />
+    </div>
+  ) : error || !url ? (
+    <div className="m-auto flex flex-col gap-2 p-6">
+      <p className="text-sm text-destructive">{error ?? "No se pudo obtener el documento."}</p>
+      <Button size="sm" variant="outline" onClick={() => void urlQuery.refetch()}>
+        Reintentar
+      </Button>
+    </div>
+  ) : isImageDoc(doc) && compareDoc && compareUrl ? (
+    // scroll-nativo: la comparación mide su propio alto dentro del visor oscuro.
+    <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
+      <ImageCompare
+        before={
+          takenAt(compareDoc) <= takenAt(doc)
+            ? { url: compareUrl, label: compareDoc.label, caption: formatTakenAt(compareDoc) }
+            : { url, label: doc.label, caption: formatTakenAt(doc) }
+        }
+        after={
+          takenAt(compareDoc) <= takenAt(doc)
+            ? { url, label: doc.label, caption: formatTakenAt(doc) }
+            : { url: compareUrl, label: compareDoc.label, caption: formatTakenAt(compareDoc) }
+        }
+      />
+    </div>
+  ) : isImageDoc(doc) || isDicomDoc(doc) ? (
+    <ImageViewer2D
+      key={doc.id}
+      patientId={patientId}
+      documentId={doc.id}
+      url={url}
+      dicom={isDicomDoc(doc)}
+      label={doc.label}
+      imageType={doc.imageType}
+      photo={doc.category === "foto_clinica"}
+    />
+  ) : isPdfDoc(doc) ? (
+    <embed src={url} type="application/pdf" className="min-h-0 w-full flex-1 bg-white" />
+  ) : (
+    <p className="m-auto p-6 text-sm text-muted-foreground">
+      Vista previa no disponible para este tipo de archivo.
+    </p>
+  )
+
+  const panel = (
+    <div className="flex min-w-0 flex-col gap-3">
+      {doc.retiredAt && (
+        <div
+          role="status"
+          className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm"
+        >
+          <p className="font-medium">Retirado {timeAgo(doc.retiredAt)}</p>
+          <p className="text-muted-foreground">Motivo: {doc.retireReason}</p>
         </div>
-      ) : isImageDoc(doc) && compareDoc && compareUrl ? (
-        <ImageCompare
-          before={
-            takenAt(compareDoc) <= takenAt(doc)
-              ? { url: compareUrl, label: compareDoc.label, caption: formatTakenAt(compareDoc) }
-              : { url, label: doc.label, caption: formatTakenAt(doc) }
-          }
-          after={
-            takenAt(compareDoc) <= takenAt(doc)
-              ? { url, label: doc.label, caption: formatTakenAt(doc) }
-              : { url: compareUrl, label: compareDoc.label, caption: formatTakenAt(compareDoc) }
-          }
-        />
-      ) : isImageDoc(doc) ? (
-        <div className="flex min-w-0 flex-col gap-3">
-          <AdjustedImage
-            src={url}
-            alt={doc.label}
-            adjustments={adjustments}
-            className="max-h-[65vh]"
-          />
-          {phone ? (
-            <details className="rounded-md border px-3 py-2">
-              <summary className="cursor-pointer text-sm font-medium">
-                Acercar, brillo y contraste
-              </summary>
-              <div className="pt-2">
-                <ImageAdjustControls value={adjustments} onChange={setAdjustments} />
-              </div>
-            </details>
-          ) : (
-            <ImageAdjustControls value={adjustments} onChange={setAdjustments} />
-          )}
-        </div>
-      ) : isPdfDoc(doc) ? (
-        <embed src={url} type="application/pdf" className="h-[70vh] w-full rounded-md border" />
-      ) : isDicomDoc(doc) ? (
-        <DicomViewer key={doc.id} patientId={patientId} documentId={doc.id} label={doc.label} />
-      ) : (
-        <p className="text-sm text-muted-foreground">
-          Vista previa no disponible para este tipo de archivo.
-        </p>
       )}
-      {/* Visor arriba; columna de metadata (plegable en móvil) debajo/al lado. */}
-      <div className="flex min-w-0 flex-col gap-3">
-        {doc.retiredAt && (
-          <div
-            role="status"
-            className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm"
+      {isImageDoc(doc) && rankedCandidates.length > 0 && (
+        <Field>
+          <FieldLabel htmlFor={compareSelectId}>Comparar con</FieldLabel>
+          <Select
+            items={Object.fromEntries([
+              ["", "Sin comparar"],
+              ...rankedCandidates.map((d) => [
+                d.id,
+                `${imageTypeLabel(d.imageType) ?? d.label} · ${formatTakenAt(d)}`,
+              ]),
+            ])}
+            value={compareId}
+            onValueChange={(v) => setCompareId(v ?? "")}
           >
-            <p className="font-medium">Retirado {timeAgo(doc.retiredAt)}</p>
-            <p className="text-muted-foreground">Motivo: {doc.retireReason}</p>
-          </div>
-        )}
-        {isImageDoc(doc) && rankedCandidates.length > 0 && (
-          <Field>
-            <FieldLabel htmlFor={compareSelectId}>Comparar con</FieldLabel>
-            <Select
-              items={Object.fromEntries([
-                ["", "Sin comparar"],
-                ...rankedCandidates.map((d) => [
-                  d.id,
-                  `${imageTypeLabel(d.imageType) ?? d.label} · ${formatTakenAt(d)}`,
-                ]),
-              ])}
-              value={compareId}
-              onValueChange={(v) => setCompareId(v ?? "")}
-            >
-              <SelectTrigger id={compareSelectId}>
-                <SelectValue placeholder="Sin comparar" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">Sin comparar</SelectItem>
-                {rankedCandidates.map((d) => (
-                  <SelectItem key={d.id} value={d.id}>
-                    {imageTypeLabel(d.imageType) ?? d.label} · {formatTakenAt(d)}
-                    {d.toothNumbers.length > 0 ? ` · ${d.toothNumbers.join(", ")}` : ""}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-        )}
-        {/* Solo lo que la imagen tiene (decisión 10): lo vacío no ocupa lugar y
+            <SelectTrigger id={compareSelectId}>
+              <SelectValue placeholder="Sin comparar" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">Sin comparar</SelectItem>
+              {rankedCandidates.map((d) => (
+                <SelectItem key={d.id} value={d.id}>
+                  {imageTypeLabel(d.imageType) ?? d.label} · {formatTakenAt(d)}
+                  {d.toothNumbers.length > 0 ? ` · ${d.toothNumbers.join(", ")}` : ""}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+      )}
+      {/* Solo lo que la imagen tiene (decisión 10): lo vacío no ocupa lugar y
             se agrega con «Piezas y vínculos». */}
-        <details open={!phone} className="rounded-md border px-3 py-2">
-          <summary className="cursor-pointer text-sm font-medium">Detalles del archivo</summary>
-          <dl className="grid grid-cols-1 gap-x-4 gap-y-2 pt-2 text-sm">
+      <details open={!phone || detailsOpen !== undefined} className="rounded-md border px-3 py-2">
+        <summary className="cursor-pointer text-sm font-medium">Detalles del archivo</summary>
+        <dl className="grid grid-cols-1 gap-x-4 gap-y-2 pt-2 text-sm">
+          <div>
+            <dt className="text-xs text-muted-foreground">Tipo</dt>
+            <dd>{imageTypeLabel(doc.imageType) ?? categoryLabel(doc.category)}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-muted-foreground">
+              {doc.capturedAt ? "Tomada" : "Subida"}
+            </dt>
+            <dd>
+              {formatDateTime(doc.capturedAt ?? doc.createdAt)}
+              {doc.capturedAt ? (
+                <span className="text-muted-foreground">
+                  {" "}
+                  (subida {formatDateTime(doc.createdAt)})
+                </span>
+              ) : null}
+            </dd>
+          </div>
+          {doc.source && (
             <div>
-              <dt className="text-xs text-muted-foreground">Tipo</dt>
-              <dd>{imageTypeLabel(doc.imageType) ?? categoryLabel(doc.category)}</dd>
+              <dt className="text-xs text-muted-foreground">Origen</dt>
+              <dd>{doc.source}</dd>
             </div>
+          )}
+          {doc.reportStatus && (
+            <div>
+              <dt className="text-xs text-muted-foreground">Informe</dt>
+              <dd className="flex flex-wrap items-center gap-2">
+                {reportStatusLabel(doc.reportStatus)}
+                {canEdit && doc.reportStatus === "pendiente" && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={actionPending}
+                    onClick={() => void setReport("informado")}
+                  >
+                    Marcar como informada
+                  </Button>
+                )}
+                {canEdit && doc.reportStatus === "informado" && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={actionPending}
+                    onClick={() => void setReport("pendiente")}
+                  >
+                    Volver a pendiente
+                  </Button>
+                )}
+              </dd>
+              {doc.reportStatus === "pendiente" && (
+                <p className="pt-1 text-xs text-muted-foreground">
+                  El informe va como resultado de su orden o en la evolución de la atención.
+                </p>
+              )}
+            </div>
+          )}
+          {teeth.length > 0 && (
             <div>
               <dt className="text-xs text-muted-foreground">
-                {doc.capturedAt ? "Tomada" : "Subida"}
+                {teeth.length === 1 ? "Pieza" : "Piezas"}
               </dt>
-              <dd>
-                {formatDateTime(doc.capturedAt ?? doc.createdAt)}
-                {doc.capturedAt ? (
-                  <span className="text-muted-foreground">
-                    {" "}
-                    (subida {formatDateTime(doc.createdAt)})
-                  </span>
-                ) : null}
+              <dd>{teeth.join(", ")}</dd>
+            </div>
+          )}
+          {tags.length > 0 && (
+            <div>
+              <dt className="text-xs text-muted-foreground">Etiquetas</dt>
+              <dd className="flex flex-wrap gap-1">
+                {tags.map((t) => (
+                  <Badge key={t} variant="secondary">
+                    {t}
+                  </Badge>
+                ))}
               </dd>
             </div>
-            {doc.source && (
-              <div>
-                <dt className="text-xs text-muted-foreground">Origen</dt>
-                <dd>{doc.source}</dd>
-              </div>
-            )}
-            {doc.reportStatus && (
-              <div>
-                <dt className="text-xs text-muted-foreground">Informe</dt>
-                <dd className="flex flex-wrap items-center gap-2">
-                  {reportStatusLabel(doc.reportStatus)}
-                  {canEdit && doc.reportStatus === "pendiente" && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={actionPending}
-                      onClick={() => void setReport("informado")}
-                    >
-                      Marcar como informada
-                    </Button>
-                  )}
-                  {canEdit && doc.reportStatus === "informado" && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={actionPending}
-                      onClick={() => void setReport("pendiente")}
-                    >
-                      Volver a pendiente
-                    </Button>
-                  )}
-                </dd>
-                {doc.reportStatus === "pendiente" && (
-                  <p className="pt-1 text-xs text-muted-foreground">
-                    El informe va como resultado de su orden o en la evolución de la atención.
-                  </p>
-                )}
-              </div>
-            )}
-            {teeth.length > 0 && (
-              <div>
-                <dt className="text-xs text-muted-foreground">
-                  {teeth.length === 1 ? "Pieza" : "Piezas"}
-                </dt>
-                <dd>{teeth.join(", ")}</dd>
-              </div>
-            )}
-            {tags.length > 0 && (
-              <div>
-                <dt className="text-xs text-muted-foreground">Etiquetas</dt>
-                <dd className="flex flex-wrap gap-1">
-                  {tags.map((t) => (
-                    <Badge key={t} variant="secondary">
-                      {t}
-                    </Badge>
-                  ))}
-                </dd>
-              </div>
-            )}
-            {doc.encounterId && (
-              <div>
-                <dt className="text-xs text-muted-foreground">Atención</dt>
-                <dd>
-                  <Link
-                    to="/patients/$patientId/encounters/$encounterId"
-                    params={{ patientId, encounterId: doc.encounterId }}
-                    className={linkButton}
-                  >
-                    {encounter
-                      ? `Abrir la atención del ${formatDate(encounter.createdAt)}`
-                      : "Abrir la atención"}
-                  </Link>
-                </dd>
-              </div>
-            )}
-            {doc.planItemId && (
-              <div>
-                <dt className="text-xs text-muted-foreground">Tratamiento</dt>
-                <dd>
-                  <Link
-                    to="/patients/$patientId"
-                    params={{ patientId }}
-                    search={planSearch}
-                    className={linkButton}
-                  >
-                    {planItem ? `Ver plan: ${planItem.title}` : "Ver plan"}
-                  </Link>
-                </dd>
-              </div>
-            )}
-            {doc.budgetId && (
-              <div>
-                <dt className="text-xs text-muted-foreground">Presupuesto</dt>
-                <dd>
-                  <Link
-                    to="/patients/$patientId"
-                    params={{ patientId }}
-                    search={{ tab: "plan", budgetId: doc.budgetId }}
-                    className={linkButton}
-                  >
-                    Ver la propuesta
-                  </Link>
-                </dd>
-              </div>
-            )}
-            {doc.encounterProcedureId && (
-              <div>
-                <dt className="text-xs text-muted-foreground">Procedimiento</dt>
-                <dd>Unido a un procedimiento de la atención</dd>
-              </div>
-            )}
-            {doc.followUpId && (
-              <div>
-                <dt className="text-xs text-muted-foreground">Control</dt>
-                <dd>
-                  <Link
-                    to="/patients/$patientId"
-                    params={{ patientId }}
-                    search={{ tab: "plan" }}
-                    className={linkButton}
-                  >
-                    Ver controles
-                  </Link>
-                </dd>
-              </div>
-            )}
-            {doc.prescriptionId && (
-              <div>
-                <dt className="text-xs text-muted-foreground">Receta</dt>
-                <dd>
-                  <Link
-                    to="/patients/$patientId"
-                    params={{ patientId }}
-                    search={{ tab: "recetas" }}
-                    className={linkButton}
-                  >
-                    Ver recetas
-                  </Link>
-                </dd>
-              </div>
-            )}
-            {doc.paymentId && (
-              <div>
-                <dt className="text-xs text-muted-foreground">Pago</dt>
-                <dd>
-                  <Link
-                    to="/patients/$patientId"
-                    params={{ patientId }}
-                    search={{ tab: "cuenta" }}
-                    className={linkButton}
-                  >
-                    Ver cuenta
-                  </Link>
-                </dd>
-              </div>
-            )}
-          </dl>
+          )}
+          {doc.encounterId && (
+            <div>
+              <dt className="text-xs text-muted-foreground">Atención</dt>
+              <dd>
+                <Link
+                  to="/patients/$patientId/encounters/$encounterId"
+                  params={{ patientId, encounterId: doc.encounterId }}
+                  className={linkButton}
+                >
+                  {encounter
+                    ? `Abrir la atención del ${formatDate(encounter.createdAt)}`
+                    : "Abrir la atención"}
+                </Link>
+              </dd>
+            </div>
+          )}
+          {doc.planItemId && (
+            <div>
+              <dt className="text-xs text-muted-foreground">Tratamiento</dt>
+              <dd>
+                <Link
+                  to="/patients/$patientId"
+                  params={{ patientId }}
+                  search={planSearch}
+                  className={linkButton}
+                >
+                  {planItem ? `Ver plan: ${planItem.title}` : "Ver plan"}
+                </Link>
+              </dd>
+            </div>
+          )}
+          {doc.budgetId && (
+            <div>
+              <dt className="text-xs text-muted-foreground">Presupuesto</dt>
+              <dd>
+                <Link
+                  to="/patients/$patientId"
+                  params={{ patientId }}
+                  search={{ tab: "plan", budgetId: doc.budgetId }}
+                  className={linkButton}
+                >
+                  Ver la propuesta
+                </Link>
+              </dd>
+            </div>
+          )}
+          {doc.encounterProcedureId && (
+            <div>
+              <dt className="text-xs text-muted-foreground">Procedimiento</dt>
+              <dd>Unido a un procedimiento de la atención</dd>
+            </div>
+          )}
+          {doc.followUpId && (
+            <div>
+              <dt className="text-xs text-muted-foreground">Control</dt>
+              <dd>
+                <Link
+                  to="/patients/$patientId"
+                  params={{ patientId }}
+                  search={{ tab: "plan" }}
+                  className={linkButton}
+                >
+                  Ver controles
+                </Link>
+              </dd>
+            </div>
+          )}
+          {doc.prescriptionId && (
+            <div>
+              <dt className="text-xs text-muted-foreground">Receta</dt>
+              <dd>
+                <Link
+                  to="/patients/$patientId"
+                  params={{ patientId }}
+                  search={{ tab: "recetas" }}
+                  className={linkButton}
+                >
+                  Ver recetas
+                </Link>
+              </dd>
+            </div>
+          )}
+          {doc.paymentId && (
+            <div>
+              <dt className="text-xs text-muted-foreground">Pago</dt>
+              <dd>
+                <Link
+                  to="/patients/$patientId"
+                  params={{ patientId }}
+                  search={{ tab: "cuenta" }}
+                  className={linkButton}
+                >
+                  Ver cuenta
+                </Link>
+              </dd>
+            </div>
+          )}
+        </dl>
+      </details>
+      {isDicomDoc(doc) && !doc.imaging && <DicomFacts key={doc.id} patientId={patientId} documentId={doc.id} />}
+      {(isImageDoc(doc) || isDicomDoc(doc)) && !doc.imaging && (
+        <p className="text-xs text-muted-foreground">
+          Brillo, contraste, negativo, girar y voltear son solo para mirar: el archivo no cambia.
+        </p>
+      )}
+      {historyQuery.data && historyQuery.data.length > 1 && (
+        <details className="rounded-md border px-3 py-2">
+          <summary className="cursor-pointer text-sm font-medium">
+            Cambios de piezas y vínculos ({historyQuery.data.length} versiones)
+          </summary>
+          <ul className="flex flex-col gap-2 pt-2">
+            {[...historyQuery.data]
+              .sort((a, b) => b.version - a.version)
+              .map((rev) => (
+                <li key={rev.version} className="text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">v{rev.version}</span> ·{" "}
+                  {timeAgo(rev.createdAt)}
+                  {rev.toothNumbers.length > 0 && ` · Piezas ${rev.toothNumbers.join(", ")}`}
+                  {rev.tags.length > 0 && ` · ${rev.tags.join(", ")}`}
+                  {rev.encounterId && " · Atención"}
+                  {rev.planItemId && " · Tratamiento"}
+                  {rev.encounterProcedureId && " · Procedimiento"}
+                  {rev.budgetId && " · Presupuesto"}
+                  {rev.followUpId && " · Control"}
+                  {rev.prescriptionId && " · Receta"}
+                  {rev.paymentId && " · Pago"}
+                </li>
+              ))}
+          </ul>
         </details>
-        {historyQuery.data && historyQuery.data.length > 1 && (
-          <details className="rounded-md border px-3 py-2">
-            <summary className="cursor-pointer text-sm font-medium">
-              Cambios de piezas y vínculos ({historyQuery.data.length} versiones)
-            </summary>
-            <ul className="flex flex-col gap-2 pt-2">
-              {[...historyQuery.data]
-                .sort((a, b) => b.version - a.version)
-                .map((rev) => (
-                  <li key={rev.version} className="text-xs text-muted-foreground">
-                    <span className="font-medium text-foreground">v{rev.version}</span> ·{" "}
-                    {timeAgo(rev.createdAt)}
-                    {rev.toothNumbers.length > 0 && ` · Piezas ${rev.toothNumbers.join(", ")}`}
-                    {rev.tags.length > 0 && ` · ${rev.tags.join(", ")}`}
-                    {rev.encounterId && " · Atención"}
-                    {rev.planItemId && " · Tratamiento"}
-                    {rev.encounterProcedureId && " · Procedimiento"}
-                    {rev.budgetId && " · Presupuesto"}
-                    {rev.followUpId && " · Control"}
-                    {rev.prescriptionId && " · Receta"}
-                    {rev.paymentId && " · Pago"}
-                  </li>
-                ))}
-            </ul>
-          </details>
-        )}
+      )}
 
-        <div className="flex flex-wrap gap-2">
-          {canEdit && (
-            <Button size="sm" variant="outline" onClick={onEditContext}>
-              {productUi().site ? "Piezas y vínculos" : "Vínculos"}
-            </Button>
-          )}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              const link = `${window.location.origin}/patients/${patientId}?tab=documentos&documentId=${doc.id}`
-              void navigator.clipboard
-                ?.writeText(link)
-                .catch(() => window.prompt("Copia el enlace:", link))
-            }}
-          >
-            Copiar enlace
+      <div className="flex flex-wrap gap-2">
+        {canEdit && (
+          <Button size="sm" variant="outline" onClick={onEditContext}>
+            {productUi().site ? "Piezas y vínculos" : "Vínculos"}
           </Button>
-          {url && (
-            <>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => window.open(url, "_blank", "noopener")}
-              >
-                Abrir en pestaña nueva
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  const anchor = document.createElement("a")
-                  anchor.href = url
-                  anchor.download = doc.label
-                  document.body.appendChild(anchor)
-                  anchor.click()
-                  anchor.remove()
-                }}
-              >
-                Descargar
-              </Button>
-            </>
-          )}
-          {canEdit && !doc.retiredAt && (
+        )}
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            const link = `${window.location.origin}/patients/${patientId}?tab=documentos&documentId=${doc.id}`
+            void navigator.clipboard
+              ?.writeText(link)
+              .catch(() => window.prompt("Copia el enlace:", link))
+          }}
+        >
+          Copiar enlace
+        </Button>
+        {url && (
+          <>
             <Button
               size="sm"
               variant="outline"
-              className="text-destructive"
+              onClick={() => window.open(url, "_blank", "noopener")}
+            >
+              Abrir en pestaña nueva
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
               onClick={() => {
-                retireForm.reset({ reason: "" })
-                setRetireOpen(true)
+                const anchor = document.createElement("a")
+                anchor.href = url
+                anchor.download = doc.label
+                document.body.appendChild(anchor)
+                anchor.click()
+                anchor.remove()
               }}
             >
-              Retirar…
+              Descargar
             </Button>
-          )}
-        </div>
-        {actionError && (
-          <p role="alert" className="text-sm text-destructive">
-            {actionError}
-          </p>
+          </>
+        )}
+        {canEdit && !doc.retiredAt && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-destructive"
+            onClick={() => {
+              retireForm.reset({ reason: "" })
+              setRetireOpen(true)
+            }}
+          >
+            Retirar…
+          </Button>
         )}
       </div>
-      <ConfirmDialog
-        open={retireOpen}
-        title="Retirar archivo"
-        description={`Sale de Documentos, ${productUi().site ? "de la historia por pieza" : "de la historia"} y del resumen. No se borra: queda en «Retirados» con tu nombre, la fecha y el motivo. No se puede deshacer.`}
-        confirmLabel="Retirar"
-        pending={retirePending}
-        error={retireError}
-        onClose={() => {
-          if (!retirePending) setRetireOpen(false)
-        }}
-        onConfirm={() => void submitForm(retireForm)}
-      >
-        <retireForm.AppField name="reason">
-          {(field) => (
-            <field.TextareaField
-              label="Motivo"
-              aria-required
-              maxLength={MAX_RETIRE_REASON}
-              placeholder="p. ej. Subida al paciente equivocado"
-            />
-          )}
-        </retireForm.AppField>
-      </ConfirmDialog>
+      {actionError && (
+        <p role="alert" className="text-sm text-destructive">
+          {actionError}
+        </p>
+      )}
+    </div>
+  )
+
+  const retireDialog = (
+    <ConfirmDialog
+      open={retireOpen}
+      title="Retirar archivo"
+      description={`Sale de Documentos, ${productUi().site ? "de la historia por pieza" : "de la historia"} y del resumen. No se borra: queda en «Retirados» con tu nombre, la fecha y el motivo. No se puede deshacer.`}
+      confirmLabel="Retirar"
+      pending={retirePending}
+      error={retireError}
+      onClose={() => {
+        if (!retirePending) setRetireOpen(false)
+      }}
+      onConfirm={() => void submitForm(retireForm)}
+    >
+      <retireForm.AppField name="reason">
+        {(field) => (
+          <field.TextareaField
+            label="Motivo"
+            aria-required
+            maxLength={MAX_RETIRE_REASON}
+            placeholder="p. ej. Subida al paciente equivocado"
+          />
+        )}
+      </retireForm.AppField>
+    </ConfirmDialog>
+  )
+
+  if (detailsOpen === undefined) {
+    return (
+      <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        {stage}
+        {panel}
+        {retireDialog}
+      </div>
+    )
+  }
+  return (
+    <div className="relative flex min-h-0 flex-1">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">{stage}</div>
+      {detailsOpen && (
+        // scroll-nativo: «Detalles» se desplaza solo, al lado de la imagen (encima en el teléfono).
+        <aside
+          aria-label="Detalles del archivo"
+          className="absolute inset-0 z-10 overflow-y-auto bg-[#0d131b] p-4 text-sm lg:static lg:w-80 lg:shrink-0 lg:border-l lg:border-slate-800"
+        >
+          {panel}
+        </aside>
+      )}
+      {retireDialog}
     </div>
   )
 }

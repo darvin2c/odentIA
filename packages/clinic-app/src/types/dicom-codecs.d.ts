@@ -18,6 +18,10 @@ declare module "@cornerstonejs/codec-libjpeg-turbo-8bit/decodewasmjs" {
   const factory: CornerstoneCodecFactory
   export default factory
 }
+declare module "@cornerstonejs/codec-openjph/wasmjs" {
+  const factory: CornerstoneCodecFactory
+  export default factory
+}
 declare module "@cornerstonejs/codec-libjpeg-turbo-12bit/wasmjs" {
   const factory: CornerstoneCodecFactory
   export default factory

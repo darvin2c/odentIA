@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { FolderOpen, Upload } from "lucide-react"
 import { useId, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
-import { formatDate } from "../../lib/clinical-journey"
+import { dicomDate } from "../../lib/clinical-journey"
 import {
   dicomNameMatches,
   droppedFiles,
@@ -45,11 +45,6 @@ function formatMm(value: number): string {
 }
 
 /** AAAAMMDD de DICOM al formato de la clínica. */
-function dicomDate(value: string | null): string | null {
-  if (!value || !/^\d{8}$/.test(value)) return null
-  return formatDate(`${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`)
-}
-
 /** Mediodía del día del estudio, para guardarlo como fecha de toma sin correrse de día. */
 function capturedAtOf(value: string | null): string | null {
   if (!value || !/^\d{8}$/.test(value)) return null
@@ -186,8 +181,10 @@ export function TomographyReview({
           {result.ignored > 0 && (
             <li>
               No se suben {result.ignored.toLocaleString(activeOrgLocale())}{" "}
-              {result.ignored === 1 ? "archivo que no es" : "archivos que no son"} imágenes DICOM (el
-              visor del CD, sus programas e imágenes de muestra).
+              {result.ignored === 1
+                ? "archivo que no es una imagen"
+                : "archivos que no son imágenes"}{" "}
+              del estudio (el visor del CD, sus programas e imágenes de muestra).
             </li>
           )}
           {others.length > 0 && (

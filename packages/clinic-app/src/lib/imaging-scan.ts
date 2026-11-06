@@ -1,4 +1,5 @@
 import * as dicomParser from "dicom-parser"
+import { DICOM_PARSE_OPTIONS } from "./dicom"
 
 /**
  * Lee en el navegador lo que trae una carpeta de CD, un ZIP o una selección de
@@ -90,7 +91,7 @@ async function headerOf(file: Blob): Promise<dicomParser.DataSet | null> {
     const bytes = new Uint8Array(await file.slice(0, Math.min(limit, file.size)).arrayBuffer())
     if (!isPart10(bytes)) return null
     try {
-      return dicomParser.parseDicom(bytes, { untilTag: "x7fe00010" })
+      return dicomParser.parseDicom(bytes, { ...DICOM_PARSE_OPTIONS, untilTag: "x7fe00010" })
     } catch {
       if (limit >= file.size) return null
     }

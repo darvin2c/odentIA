@@ -180,9 +180,18 @@ export function computePresets(data: Int16Array, range: { min: number; max: numb
   }
 }
 
-/** Memoria que el navegador puede dedicar al volumen (`navigator.deviceMemory` en GB, si lo dice). */
-function memoryBudget(): number {
-  const gb = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 8
+/**
+ * Memoria que el navegador puede dedicar al volumen (`navigator.deviceMemory`
+ * en GB, si lo dice). Safari y Firefox no lo dicen: en una computadora se
+ * suponen 8 GB, y en un celular o una tablet, 2 GB, porque ahí una pestaña que
+ * se pasa se cierra sola en vez de mostrar el aviso.
+ */
+export function memoryBudget(
+  deviceMemoryGb: number | undefined = (navigator as Navigator & { deviceMemory?: number })
+    .deviceMemory,
+  touch: boolean = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches,
+): number {
+  const gb = deviceMemoryGb ?? (touch ? 2 : 8)
   return Math.min(1.5 * 1024 ** 3, gb * 1024 ** 3 * 0.25)
 }
 

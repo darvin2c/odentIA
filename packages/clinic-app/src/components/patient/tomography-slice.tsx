@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useRef } from "react"
 import { type PlaneImage, type WindowLevel, windowToRgba } from "../../lib/cbct-volume"
 import { activeOrgLocale } from "../../lib/locale"
+import { useZoomPan } from "../../lib/use-zoom-pan"
+import { ZoomControls } from "./viewer-shell"
 
 /**
  * Un corte de la tomografía en un lienzo (ADR 0056): la imagen con su ventana,
  * la retícula, las medidas y lo que dibuje cada vista encima. Clic, rueda,
- * flechas y arrastre llegan en coordenadas de la imagen.
+ * flechas y arrastre llegan en coordenadas de la imagen. Cada corte se acerca
+ * por su cuenta: dos dedos, Ctrl + rueda o doble clic; la rueda sola avanza.
  */
 
 export type Point = { x: number; y: number }
@@ -46,6 +49,8 @@ export function SliceCanvas({
   onKey,
   overlay,
   className,
+  zoomControls = true,
+  onSwipe,
 }: {
   image: PlaneImage
   window: WindowLevel
@@ -68,8 +73,19 @@ export function SliceCanvas({
   /** Dibujo extra (arco, líneas de corte) en coordenadas de la imagen. */
   overlay?: (ctx: CanvasRenderingContext2D, image: PlaneImage) => void
   className?: string
+  /** «− 100 % +» sobre el corte; en los cortes chicos solo quedan los gestos. */
+  zoomControls?: boolean
+  /** Deslizar con el corte ajustado (en el celular: el corte siguiente). */
+  onSwipe?: (direction: -1 | 1) => void
 }) {
   const ref = useRef<HTMLCanvasElement | null>(null)
+  const zoom = useZoomPan({
+    onWheelStep: onStep ? (delta, shift) => onStep(delta * (shift ? 5 : 1)) : undefined,
+    // Mientras se arrastra el arco, arrastrar no mueve la imagen.
+    canPan: () => !onPointerDown,
+    canToggle: () => tool === "ninguna",
+    onSwipe,
+  })
   const rgba = useMemo(() => windowToRgba(image.values, window), [image, window])
   useEffect(() => {
     const canvas = ref.current
@@ -140,47 +156,54 @@ export function SliceCanvas({
     }
   }
   return (
-    <div className={`relative min-w-0 bg-black ${className ?? ""}`}>
-      <canvas
-        ref={ref}
-        role="img"
-        aria-label={`${label}${measures?.length ? `; ${measures.map(formatMeasure).join(", ")}` : ""}`}
-        // biome-ignore lint/a11y/noNoninteractiveTabindex: el corte se recorre con las flechas del teclado.
-        tabIndex={0}
-        className={`mx-auto block max-h-full w-full max-w-full object-contain focus-visible:outline-2 focus-visible:outline-cyan-400 ${tool === "ninguna" ? "cursor-crosshair" : "cursor-cell"}`}
-        style={{ aspectRatio: String(aspect) }}
-        onClick={(event) => {
-          const point = toImage(event)
-          if (tool === "ninguna") onPick?.(point)
-          else onMark?.(point)
-        }}
-        onWheel={(event) => {
-          if (!onStep) return
-          event.preventDefault()
-          onStep((event.deltaY > 0 ? 1 : -1) * (event.shiftKey ? 5 : 1))
-        }}
-        onPointerDown={onPointerDown ? (event) => onPointerDown(toImage(event)) : undefined}
-        onPointerMove={onPointerMove ? (event) => onPointerMove(toImage(event)) : undefined}
-        onPointerUp={onPointerUp}
-        onKeyDown={(event) => {
-          if (onKey?.(event.key)) {
-            event.preventDefault()
-            return
-          }
-          if (!onStep) return
-          const step = { ArrowUp: -1, ArrowDown: 1, PageUp: -10, PageDown: 10 }[event.key]
-          if (step) {
-            event.preventDefault()
-            onStep(step)
-          }
-        }}
-      />
+    <div
+      ref={zoom.frameRef}
+      // Ajustado, deslizar hacia abajo desplaza la vista (en el celular, los cortes apilados).
+      style={zoom.frameStyle}
+      className={`relative min-w-0 overflow-hidden bg-black ${className ?? ""}`}
+    >
+      <div className="flex h-full w-full items-center" style={zoom.contentStyle}>
+        <canvas
+          ref={ref}
+          role="img"
+          aria-label={`${label}${measures?.length ? `; ${measures.map(formatMeasure).join(", ")}` : ""}`}
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: el corte se recorre con las flechas del teclado.
+          tabIndex={0}
+          className={`mx-auto block max-h-full w-full max-w-full object-contain focus-visible:outline-2 focus-visible:outline-cyan-400 ${tool === "ninguna" ? "cursor-crosshair" : "cursor-cell"}`}
+          style={{ aspectRatio: String(aspect) }}
+          onClick={(event) => {
+            // Al terminar de arrastrar la imagen ampliada no se elige ni se marca.
+            if (zoom.consumeDrag()) return
+            // El segundo clic de un doble clic no marca otro punto en el mismo lugar.
+            if (tool !== "ninguna" && event.detail > 1) return
+            const point = toImage(event)
+            if (tool === "ninguna") onPick?.(point)
+            else onMark?.(point)
+          }}
+          onPointerDown={onPointerDown ? (event) => onPointerDown(toImage(event)) : undefined}
+          onPointerMove={onPointerMove ? (event) => onPointerMove(toImage(event)) : undefined}
+          onPointerUp={onPointerUp}
+          onKeyDown={(event) => {
+            if (onKey?.(event.key)) {
+              event.preventDefault()
+              return
+            }
+            if (!onStep) return
+            const step = { ArrowUp: -1, ArrowDown: 1, PageUp: -10, PageDown: 10 }[event.key]
+            if (step) {
+              event.preventDefault()
+              onStep(step)
+            }
+          }}
+        />
+      </div>
       <span
         className="absolute top-2 left-2 rounded bg-black/70 px-1.5 py-0.5 text-[0.7rem] font-semibold tracking-wide text-slate-300 uppercase"
         title={technical ? `Corte ${technical}` : undefined}
       >
         {label}
       </span>
+      {zoomControls && <ZoomControls zoom={zoom} className="absolute right-2 bottom-2" />}
     </div>
   )
 }

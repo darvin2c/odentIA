@@ -68,6 +68,10 @@ const jpeg8 = loader(
   () => import("@cornerstonejs/codec-libjpeg-turbo-8bit/decodewasmjs"),
   () => import("@cornerstonejs/codec-libjpeg-turbo-8bit/decodewasm?url"),
 )
+const openJph = loader(
+  () => import("@cornerstonejs/codec-openjph/wasmjs"),
+  () => import("@cornerstonejs/codec-openjph/wasm?url"),
+)
 const jpeg12 = loader(
   () => import("@cornerstonejs/codec-libjpeg-turbo-12bit/wasmjs"),
   // El paquete no exporta su `.wasm`: lo resuelve el alias de `vite.config.ts`.
@@ -102,6 +106,8 @@ async function runWasm(module: Promise<WasmModule>, className: string, bytes: Ui
 }
 
 export const decodeJpeg2000 = (bytes: Uint8Array) => runWasm(openJpeg(), "J2KDecoder", bytes)
+/** JPEG 2000 de alto rendimiento (HTJ2K, PS3.5 §A.4.11), con OpenJPH. */
+export const decodeHtj2k = (bytes: Uint8Array) => runWasm(openJph(), "HTJ2KDecoder", bytes)
 export const decodeJpegLs = (bytes: Uint8Array) => runWasm(charLs(), "JpegLSDecoder", bytes)
 export const decodeJpegBaseline = (bytes: Uint8Array) => runWasm(jpeg8(), "JPEGDecoder", bytes)
 export const decodeJpegExtended12 = (bytes: Uint8Array) => runWasm(jpeg12(), "JPEGDecoder", bytes)

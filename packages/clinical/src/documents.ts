@@ -5,8 +5,8 @@
  * Los subtipos siguen la nomenclatura radiológica odontológica habitual
  * (intraorales: periapical, interproximal o bitewing, oclusal; extraorales:
  * panorámica, cefalométrica; tomografía de haz cónico) y la fotografía clínica
- * intra y extraoral. La tomografía se guarda como archivo externo (DICOM o
- * exportación del equipo); no hay visor volumétrico.
+ * intra y extraoral. La tomografía se guarda como un estudio DICOM y se abre
+ * en el visor de la ficha (ADR 0055, 0056 y 0147).
  */
 
 export const RADIOGRAPH_TYPES = [
@@ -77,6 +77,19 @@ export const DOCUMENT_FORMATS = {
   "application/dicom": "dcm",
 } as const
 export type DocumentMime = keyof typeof DOCUMENT_FORMATS
+
+/** Tope de un archivo de la ficha. */
+export const DOCUMENT_MAX_BYTES = 10 * 1024 * 1024
+/**
+ * La radiografía DICOM sin comprimir (cefalométrica, panorámica de alta
+ * resolución) pasa de 10 MB; sigue entrando como archivo, no como tomografía.
+ */
+export const DICOM_DOCUMENT_MAX_BYTES = 30 * 1024 * 1024
+
+/** El tope según el formato: el mismo en la pantalla que sube y en la API que recibe. */
+export function documentMaxBytes(mime: string): number {
+  return mime === "application/dicom" ? DICOM_DOCUMENT_MAX_BYTES : DOCUMENT_MAX_BYTES
+}
 
 function startsWith(bytes: Uint8Array, signature: readonly number[], offset = 0): boolean {
   if (bytes.length < offset + signature.length) return false

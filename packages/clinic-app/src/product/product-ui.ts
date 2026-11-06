@@ -279,8 +279,16 @@ export interface ProductDocumentsUi {
   kind: { filter: string; label: string; nouns: readonly [one: string, many: string] } | null
   /** Sus papeles de la persona, ya armados (odentIA: los odontogramas firmados, solo en Perú). Es un hook. */
   usePapers(patientId: string): ProductPapers
-  /** Los tipos de imagen que se suben y, si cambia, cómo se nombra cada categoría (latidIA: «Imagen diagnóstica»). */
-  imaging: { types: readonly ImagingType[]; categoryLabels: Readonly<Record<string, string>> }
+  /**
+   * Los tipos de imagen que se suben y, si cambia, cómo se nombra cada categoría (latidIA: «Imagen
+   * diagnóstica»). `studies`: si guarda la tomografía como estudio y la abre en su visor (odentIA; latidIA
+   * todavía no, ADR 0147).
+   */
+  imaging: {
+    types: readonly ImagingType[]
+    categoryLabels: Readonly<Record<string, string>>
+    studies: boolean
+  }
   /** Si emite descansos médicos (latidIA, decisión 8 del issue 229): «Nuevo», su filtro y su fila. */
   medicalLeave: boolean
 }
@@ -525,7 +533,7 @@ export function bareProduct(product: ClinicalProduct): ProductUi {
     documents: {
       kind: null,
       usePapers: () => NO_PAPERS,
-      imaging: { types: DENTAL_IMAGING_TYPES, categoryLabels: {} },
+      imaging: { types: DENTAL_IMAGING_TYPES, categoryLabels: {}, studies: true },
       medicalLeave: false,
     },
     health: { asksPregnancy: true, InterviewSections: () => null, validate: () => ({}), Summary: () => null },
