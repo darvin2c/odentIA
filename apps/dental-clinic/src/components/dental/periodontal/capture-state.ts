@@ -28,8 +28,10 @@ export interface CaptureState {
   cursor: { step: number; field: number }
   /** Se pulsó «−»: la próxima recesión va en negativo. */
   minus: boolean
-  /** Lo último que se escribió, para el sangrado y para escribir 10 a 15 con dos dígitos seguidos. */
-  last: { step: number; field: number; at: number } | null
+  /** Se pulsó «+» («+10» en pantalla): la próxima cifra suma 10, para escribir 10 a 15 (ADR 0142). */
+  tens: boolean
+  /** Lo último que se escribió, para el sangrado y la supuración. */
+  last: { step: number; field: number } | null
   /** Ya se escribió la última recesión de la última cara. */
   done: boolean
 }
@@ -37,6 +39,7 @@ export interface CaptureState {
 export type CaptureKey =
   | { kind: "digit"; value: number }
   | { kind: "minus" }
+  | { kind: "plus" }
   | { kind: "back" }
   | { kind: "move"; direction: "left" | "right" | "up" | "down" }
   | { kind: "bleeding" }
@@ -50,9 +53,6 @@ export interface CaptureResult {
   /** Lo que dice el lector de pantalla. */
   say: string
 }
-
-/** Dos dígitos seguidos dentro de este plazo escriben 10 a 15 en el mismo sitio. */
-export const TWO_DIGIT_MS = 800
 
 export const chartFace = (step: PeriodontalProbingStep): ChartFace => (step.face === "buccal" ? "out" : "in")
 
@@ -129,7 +129,7 @@ export function firstOpenCursor(teeth: CaptureTeeth, steps: PeriodontalProbingSt
 
 export function initialCaptureState(teeth: CaptureTeeth, steps: PeriodontalProbingStep[]): CaptureState {
   const open = firstOpenCursor(teeth, steps)
-  return { teeth, steps, cursor: open ?? { step: Math.max(0, steps.length - 1), field: 5 }, minus: false, last: null, done: open === null }
+  return { teeth, steps, cursor: open ?? { step: Math.max(0, steps.length - 1), field: 5 }, minus: false, tens: false, last: null, done: open === null }
 }
 
 /** Lleva el cursor a una pieza: a su cara del mismo lado si existe, si no a su primer paso. */
@@ -142,7 +142,7 @@ export function jumpToTooth(state: CaptureState, toothNumber: number): CaptureSt
   const s = state.steps[step]!
   let field = 0
   while (field < 5 && cellValue(state.teeth, s, field) !== null) field++
-  return { ...state, cursor: { step, field }, minus: false, last: null, done: false }
+  return { ...state, cursor: { step, field }, minus: false, tens: false, last: null, done: false }
 }
 
 function stepWords(step: PeriodontalProbingStep): string {
@@ -158,34 +158,28 @@ function advance(state: CaptureState): { cursor: CaptureState["cursor"]; done: b
   return { cursor: { step, field }, done: true }
 }
 
-/** Aplica una tecla de la captura. Solo cambia lo que dice el lienzo; lo demás no hace nada. */
-export function applyCaptureKey(state: CaptureState, key: CaptureKey, now: number): CaptureResult {
+/**
+ * Aplica una tecla de la captura. Solo cambia lo que dice el lienzo; lo demás no hace nada.
+ * Cada cifra va a su sitio en cuanto se pulsa, sin esperar ni mirar el reloj: 10 a 15 se
+ * escriben con «+» y la segunda cifra (ADR 0142, que precisa el 0054).
+ */
+export function applyCaptureKey(state: CaptureState, key: CaptureKey): CaptureResult {
   const step = state.steps[state.cursor.step]
   if (!step) return { state, changed: [], say: "" }
   const { field } = state.cursor
   switch (key.kind) {
     case "digit": {
-      const last = state.last
-      // «1» y enseguida otro dígito: 10 a 15 en el sitio que acaba de escribirse.
-      if (last && now - last.at <= TWO_DIGIT_MS && !state.minus) {
-        const lastStep = state.steps[last.step]!
-        const previous = cellValue(state.teeth, lastStep, last.field)
-        const max = fieldKind(last.field) === "pd" ? PROBING_DEPTH_MAX_MM : RECESSION_MAX_MM
-        if (previous === 1 && 10 + key.value <= max) {
-          const teeth = setField(state.teeth, lastStep, last.field, 10 + key.value)
-          return {
-            state: { ...state, teeth, last: null },
-            changed: [lastStep.toothNumber],
-            say: `${fieldLabel(lastStep, last.field)}: ${10 + key.value} mm`,
-          }
-        }
-      }
       const kind = fieldKind(field)
-      const value = kind === "rec" && state.minus ? -key.value : key.value
-      if (kind === "rec" && value < RECESSION_MIN_MM) return { state: { ...state, minus: false }, changed: [], say: `La recesión va de ${RECESSION_MIN_MM} a ${RECESSION_MAX_MM} mm` }
+      const magnitude = (state.tens ? 10 : 0) + key.value
+      const value = kind === "rec" && state.minus ? -magnitude : magnitude
+      const max = kind === "pd" ? PROBING_DEPTH_MAX_MM : RECESSION_MAX_MM
+      if (value > max || value < RECESSION_MIN_MM) {
+        const range = kind === "pd" ? `La profundidad va de 0 a ${PROBING_DEPTH_MAX_MM} mm` : `La recesión va de ${RECESSION_MIN_MM} a ${RECESSION_MAX_MM} mm`
+        return { state: { ...state, minus: false, tens: false }, changed: [], say: state.tens || state.minus ? `${range}; vuelve a escribirla` : range }
+      }
       const teeth = setField(state.teeth, step, field, value)
       const moved = advance({ ...state, teeth })
-      const next = { ...state, teeth, cursor: moved.cursor, done: moved.done, minus: false, last: { step: state.cursor.step, field, at: now } }
+      const next = { ...state, teeth, cursor: moved.cursor, done: moved.done, minus: false, tens: false, last: { step: state.cursor.step, field } }
       let say = `${fieldLabel(step, field)}: ${value} mm`
       if (moved.done) say += ". Sondaje completo"
       else if (moved.cursor.step !== state.cursor.step) say += `. Lista ${stepWords(step)}; sigue ${stepWords(state.steps[moved.cursor.step]!)}`
@@ -195,7 +189,18 @@ export function applyCaptureKey(state: CaptureState, key: CaptureKey, now: numbe
     case "minus":
       if (fieldKind(field) !== "rec") return { state, changed: [], say: "El signo menos va solo en la recesión" }
       return { state: { ...state, minus: !state.minus }, changed: [], say: state.minus ? "Recesión positiva" : "Recesión negativa: escribe el número" }
+    case "plus":
+      return {
+        state: { ...state, tens: !state.tens },
+        changed: [],
+        say: state.tens
+          ? "Sin sumar 10"
+          : state.minus && fieldKind(field) === "rec"
+            ? `Más 10: con «−» solo cabe ${RECESSION_MIN_MM}; escribe 0`
+            : "Más 10: escribe la segunda cifra, de 10 a 15",
+      }
     case "back": {
+      if (state.tens) return { state: { ...state, tens: false }, changed: [], say: "Sin sumar 10" }
       if (state.minus) return { state: { ...state, minus: false }, changed: [], say: "Recesión positiva" }
       // Borra el sitio actual si tiene valor; si no, vuelve uno y lo borra.
       let target = state.cursor
@@ -215,12 +220,12 @@ export function applyCaptureKey(state: CaptureState, key: CaptureKey, now: numbe
       const position = typingPositions(step)[field % 3]!
       if (key.direction === "up" || key.direction === "down") {
         const target = fieldAt(step, key.direction === "up" ? "pd" : "rec", position)
-        return { state: { ...state, cursor: { step: state.cursor.step, field: target }, minus: false, last: null, done: false }, changed: [], say: fieldLabel(step, target) }
+        return { state: { ...state, cursor: { step: state.cursor.step, field: target }, minus: false, tens: false, last: null, done: false }, changed: [], say: fieldLabel(step, target) }
       }
       const nextPosition = position + (key.direction === "right" ? 1 : -1)
       if (nextPosition < 0 || nextPosition > 2) return { state, changed: [], say: "" }
       const target = fieldAt(step, row, nextPosition)
-      return { state: { ...state, cursor: { step: state.cursor.step, field: target }, minus: false, last: null, done: false }, changed: [], say: fieldLabel(step, target) }
+      return { state: { ...state, cursor: { step: state.cursor.step, field: target }, minus: false, tens: false, last: null, done: false }, changed: [], say: fieldLabel(step, target) }
     }
     case "bleeding":
     case "suppuration": {
@@ -258,7 +263,7 @@ export function applyCaptureKey(state: CaptureState, key: CaptureKey, now: numbe
       }
       const done = next < 0
       return {
-        state: { ...state, teeth, cursor: done ? state.cursor : { step: next, field: 0 }, done, minus: false, last: null },
+        state: { ...state, teeth, cursor: done ? state.cursor : { step: next, field: 0 }, done, minus: false, tens: false, last: null },
         changed: [step.toothNumber],
         say: `Pieza ${step.toothNumber} saltada${done ? ". Sondaje completo" : `; sigue ${stepWords(state.steps[next]!)}`}`,
       }
@@ -284,6 +289,8 @@ export function keyFromEvent(event: { key: string; ctrlKey?: boolean; metaKey?: 
     case "-":
     case "−":
       return { kind: "minus" }
+    case "+":
+      return { kind: "plus" }
     case "Backspace":
     case "Delete":
       return { kind: "back" }
