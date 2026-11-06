@@ -398,7 +398,7 @@ export function createFormResponse(body: {
 
 export function updateFormResponse(
   id: string,
-  body: { answers: Record<string, unknown>; professionalUserId?: string | null },
+  body: { answers: Record<string, unknown>; professionalUserId?: string | null; baseAnswers?: Record<string, unknown> },
 ) {
   return patch<FormResponse>(`${BASE}/form-responses/${id}`, body)
 }
