@@ -158,7 +158,12 @@ export function startPeriodontalChart(patientId: string, encounterId: string) {
   })
 }
 
-export function savePeriodontalTooth(patientId: string, chartId: string, toothNumber: number, body: PeriodontalToothSave) {
+export function savePeriodontalTooth(
+  patientId: string,
+  chartId: string,
+  toothNumber: number,
+  body: PeriodontalToothSave & { base?: PeriodontalToothSave },
+) {
   return apiFetch<{ data: PeriodontalToothRecord }>(`${base(patientId)}/${chartId}/teeth/${toothNumber}`, {
     method: "PUT",
     body: JSON.stringify(body),

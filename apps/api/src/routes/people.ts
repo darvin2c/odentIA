@@ -65,6 +65,8 @@ const identityInput = z
     sex: z.string().max(1).nullable().optional(),
     phone: z.string().max(50).nullable().optional(),
     email: z.string().max(200).nullable().optional(),
+    /** Lo que se vio guardado de cada dato que cambia: otra sesión no se pisa. */
+    base: z.record(z.string().max(60), z.union([z.string().max(500), z.null()])).optional(),
   })
   .strict()
 
@@ -261,6 +263,7 @@ export function createPeopleRoute(deps: CrmDeps) {
           { userId },
           c.req.param("id"),
           identityPatchOf(parsed.data),
+          parsed.data.base,
         )
         return { saved: true }
       }),
