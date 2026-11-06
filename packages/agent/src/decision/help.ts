@@ -82,7 +82,8 @@ export function helpCandidates(options: readonly HelpOption[], question: string)
 function describe(option: HelpOption): string {
   if (option.kind === "tema") return `Pantalla ${helpTopicLabel(option.topic)}: ${option.topic.purpose}`.slice(0, DESCRIPTION_CHARS)
   const asked = [option.faq.q, ...(option.faq.forms ?? [])].join(" / ")
-  return (option.faq.general ? asked : `${helpTopicLabel(option.topic)}: ${asked}`).slice(0, DESCRIPTION_CHARS)
+  // Una pregunta general (el manual, el celular) responde solo eso: no es la respuesta por defecto.
+  return (option.faq.general ? `Pregunta general, solo si pregunta esto: ${asked}` : `${helpTopicLabel(option.topic)}: ${asked}`).slice(0, DESCRIPTION_CHARS)
 }
 
 export function helpQuestion(candidates: readonly HelpOption[], texts: ProductAgentTexts): DecisionQuestion {
@@ -90,14 +91,17 @@ export function helpQuestion(candidates: readonly HelpOption[], texts: ProductAg
   return {
     id: HELP_SELECT_QUESTION,
     kind: "choice",
-    instructions: `Alguien del equipo de una ${clinicWord(texts)} pregunta en la Ayuda de ${product} cómo se usa el sistema. ¿Qué texto de la guía responde exactamente su pregunta? Elige una pregunta frecuente si su respuesta es lo que pregunta; una pantalla si su párrafo, leído tal cual, responde la pregunta (por ejemplo, qué es esa pantalla, para qué sirve o que ahí se hace lo que pregunta) y ninguna pregunta frecuente lo hace mejor.`,
+    instructions: `Alguien del equipo de una ${clinicWord(texts)} escribe en la Ayuda de ${product}. ¿Qué texto de la guía responde exactamente lo que escribió? Elige una pregunta frecuente si su respuesta es lo que pregunta; una pantalla si su párrafo, leído tal cual, responde la pregunta (por ejemplo, qué es esa pantalla, para qué sirve o que ahí se hace lo que pregunta) y ninguna pregunta frecuente lo hace mejor. Si no pregunta cómo hacer algo en ${product} (un saludo, una broma, una pregunta de salud, de cocina o de cualquier otro tema), o si nada de la lista lo responde, elige «ninguna»: no la acerques a la respuesta más general.`,
     options: [
       ...candidates.map((option, index) => ({ value: optionValue(option, index), description: describe(option) })),
       {
         value: DATA,
         description: "Pregunta por las cifras o los datos de su clínica (cuánto, cuántos, quién, por qué un número suyo es el que es o no coincide con el de otra pantalla): lo responden sus datos, no la guía.",
       },
-      { value: NONE, description: `Nada de la lista responde la pregunta, o no es una pregunta sobre cómo se usa ${product}.` },
+      {
+        value: NONE,
+        description: `Ninguna: no es una pregunta sobre cómo hacer algo en ${product} (saludos, bromas, salud, recetas, consejos u otros temas), o nada de la lista la responde.`,
+      },
     ],
   }
 }
