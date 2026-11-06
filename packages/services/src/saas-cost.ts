@@ -10,7 +10,7 @@ import {
   saasSubscription,
   storageUsageDay,
 } from "@odentia/db/schema/saas-billing"
-import { and, asc, desc, eq, gte, inArray, lt, notInArray, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gte, inArray, lt, ne, notInArray, sql } from "drizzle-orm"
 import { AGENT_TEST_ORIGINS } from "./ai-usage.js"
 import { previousSaasPeriod } from "./saas-action-review.js"
 import {
@@ -571,7 +571,11 @@ async function informBlocksShadow(
   return shadow
 }
 
-/** Activa hace más de `SAAS_FOUNDER_IDLE_DAYS` días y sin ningún gasto de IA en ese tiempo. */
+/**
+ * Activa hace más de `SAAS_FOUNDER_IDLE_DAYS` días y sin ningún gasto de IA de
+ * sus agentes en ese tiempo. Preguntarle a la Ayuda no es usar los agentes
+ * (ADR 0146): no cuenta.
+ */
 async function idleSince(
   tx: Db,
   orgId: string,
@@ -583,7 +587,7 @@ async function idleSince(
   const [used] = await tx
     .select({ id: aiUsage.id })
     .from(aiUsage)
-    .where(and(eq(aiUsage.organizationId, orgId), gte(aiUsage.createdAt, since)))
+    .where(and(eq(aiUsage.organizationId, orgId), gte(aiUsage.createdAt, since), ne(aiUsage.origin, "ayuda")))
     .limit(1)
   return !used
 }

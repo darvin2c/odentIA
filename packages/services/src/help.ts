@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto"
+import { mayIdentifySomeone } from "@odentia/clinical"
 import { type Db, withOrgContext } from "@odentia/db"
 import { scheduleRoom } from "@odentia/db/schema/agenda"
 import { professionalSchedule } from "@odentia/db/schema/availability"
@@ -6,7 +7,7 @@ import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { organization } from "@odentia/db/schema/auth"
 import { agentConfig, channelConnection } from "@odentia/db/schema/crm"
 import { type HELP_ASK_VERDICTS, type HELP_ASK_VIA, helpAsk } from "@odentia/db/schema/workspace"
-import { and, count, eq, gte } from "drizzle-orm"
+import { and, count, eq, gte, sql } from "drizzle-orm"
 import { getAdminSettings } from "./agent-admin.js"
 import { openSupportCaseFromHelp, type SupportCaseListItem } from "./admin-support.js"
 import { invalidField, notFound, ServiceError } from "./errors.js"
@@ -38,6 +39,7 @@ import { AGENT_NAMES, RECEPTION_DEFAULT_NAME, receptionName } from "./agent-name
 import { roomWord } from "./locale.js"
 import type { ProductAgentTexts } from "./product-agent.js"
 import { productAgentTexts, productHelpTopics } from "./products.js"
+import { getArgosPanelAllowance } from "./saas-included.js"
 
 /* ---------- Ariadna, la que responde en Ayuda: dónde está cada cosa, qué se puede y por qué algo no ---------- */
 
@@ -89,6 +91,8 @@ export interface HelpReply {
   choices: HelpChoice[]
   /** `datos`: puede preguntárselo a Argos (ve Reportes y Argos está encendido). */
   argos: boolean
+  /** `datos` con Argos: lo que cuesta preguntarle, dicho como está hoy; nulo si no tiene tope. */
+  argosNote: string | null
   basedOn: string
 }
 
@@ -180,7 +184,13 @@ async function screenBlockers(
   return out
 }
 
-async function requireDailyRoom(tx: Db, orgId: string, userId: string): Promise<void> {
+/**
+ * Reserva la consulta antes de decidir: con el bloqueo de la persona, dos
+ * preguntas a la vez no pasan juntas del tope diario. La fila se completa al
+ * responder; si algo falla en medio, queda contada y sin respuesta.
+ */
+async function reserveAsk(tx: Db, orgId: string, userId: string, screen: string): Promise<string> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`ayuda:${orgId}:${userId}`}))`)
   const since = new Date(Date.now() - 86_400_000)
   const [row] = await tx
     .select({ total: count() })
@@ -189,15 +199,32 @@ async function requireDailyRoom(tx: Db, orgId: string, userId: string): Promise<
   if (Number(row?.total ?? 0) >= HELP_DAILY_LIMIT) {
     throw new ServiceError("HELP_LIMIT", 429, "Llegaste al tope de preguntas a Ariadna por hoy. Mañana vuelve a estar disponible.")
   }
+  const [reserved] = await tx.insert(helpAsk).values({ organizationId: orgId, userId, screen }).returning({ id: helpAsk.id })
+  if (!reserved) throw new Error("No se pudo registrar la consulta")
+  return reserved.id
 }
 
-/** La pregunta con «Sofi» donde la clínica dice el nombre que le puso a su agente de recepción. */
-function withGuideName(question: string, personaName: string | null | undefined): string {
-  const name = normalizeForSearch(personaName ?? "")
-  if (!name || name === normalizeForSearch(RECEPTION_DEFAULT_NAME)) return question
+/**
+ * La pregunta con «Sofi» donde la clínica dice el nombre que le puso a su
+ * agente de recepción. Cambia solo el nombre: el resto queda como se escribió,
+ * que es lo que lee Jev; la coincidencia exacta compara sin tildes ni signos.
+ */
+export function withGuideName(question: string, personaName: string | null | undefined): string {
+  const name = normalizeForSearch(personaName ?? "").split(" ").filter(Boolean)
+  if (name.length === 0 || name.join(" ") === normalizeForSearch(RECEPTION_DEFAULT_NAME)) return question
   // Solo con otras palabras: «¿Dónde veo a Ana?» también puede ser una paciente que se llama igual.
-  if (helpWordCount(question) <= helpWordCount(name)) return question
-  return ` ${normalizeForSearch(question)} `.replace(` ${name} `, ` ${RECEPTION_DEFAULT_NAME} `).trim()
+  if (helpWordCount(question) <= name.length) return question
+  const words = [...question.matchAll(/[\p{L}\p{M}\p{N}]+/gu)]
+  for (let at = 0; at + name.length <= words.length; at += 1) {
+    const span = words.slice(at, at + name.length)
+    if (span.every((word, index) => normalizeForSearch(word[0]) === name[index])) {
+      const start = span[0]?.index ?? 0
+      const last = span[span.length - 1]
+      const end = (last?.index ?? 0) + (last?.[0].length ?? 0)
+      return `${question.slice(0, start)}${RECEPTION_DEFAULT_NAME}${question.slice(end)}`
+    }
+  }
+  return question
 }
 
 /** Lo que se le pregunta a una pantalla por su nombre: «Agenda», «¿Qué es Configuración › Etapas de venta?». */
@@ -229,15 +256,30 @@ function choiceOf(option: HelpOption): HelpChoice {
 
 const NOTHING: HelpSelection = { verdict: "ninguna", shown: [], offered: [], top: null }
 
-/** Sin Jev, o si no responde: solo una pregunta frecuente que las palabras reconozcan. Nunca el párrafo de la pantalla. */
+/** Sin Jev, o si no respondió: solo una pregunta frecuente que las palabras reconozcan. Nunca el párrafo de la pantalla. */
 function byWords(question: string, topics: readonly HelpTopic[]): HelpSelection {
   const [match] = matchHelpTopics(question, topics)
   return match?.faq ? { verdict: "seguro", shown: [{ kind: "faq", topic: match.topic, faq: match.faq }], offered: [], top: null } : NOTHING
 }
 
-type Decided = { via: (typeof HELP_ASK_VIA)[number]; selection: HelpSelection }
+/**
+ * Cómo se decidió y, si no respondió nada, por qué: Jev dijo que no está
+ * (`ninguna`), Jev no estaba o no pudo (`sin_jev`), o lo escrito puede ser el
+ * dato de una persona y no se le preguntó (`dato`).
+ */
+type Decided = { via: (typeof HELP_ASK_VIA)[number]; selection: HelpSelection; why: "ninguna" | "sin_jev" | "dato" }
 
-/** Jev elige la respuesta de la guía con `help.v1`; si falla, no responde o duda sin nada que ofrecer, deciden las palabras. */
+/** El código de un error, sin su texto: puede repetir lo que se preguntó. */
+const errorCodeOf = (error: unknown): string => {
+  const code = (error as { code?: unknown } | null)?.code
+  return typeof code === "string" ? code : error instanceof Error ? error.name : "desconocido"
+}
+
+/**
+ * Jev elige la respuesta de la guía con `help.v1`. Si falla, se niega o no da
+ * probabilidades, deciden las palabras. Si da probabilidades y nada llega a
+ * ofrecerse, es «ninguna»: Jev sí respondió.
+ */
 async function decideHelp(
   question: string,
   screenName: string | null,
@@ -250,19 +292,50 @@ async function decideHelp(
       const candidates = helpCandidates(helpOptions(topics), question)
       const result = await decider.decide(helpState(question, screenName), [helpQuestion(candidates, texts)])
       const selection = readHelpSelection(result, candidates)
-      if (selection.verdict !== "duda" || selection.offered.length > 0) return { via: "jev", selection }
-    } catch {
-      // Jev no respondió a tiempo o falló: la Ayuda sigue sin él.
+      if (selection.top !== null) {
+        if (selection.verdict === "duda" && selection.offered.length === 0) return { via: "jev", selection: { ...NOTHING, top: selection.top }, why: "ninguna" }
+        return { via: "jev", selection, why: "ninguna" }
+      }
+    } catch (error) {
+      // La Ayuda sigue sin Jev; queda el código (una clave rechazada es CONFIG), nunca la pregunta.
+      console.warn(`La Ayuda respondió sin Jev: ${errorCodeOf(error)}`)
     }
   }
-  return { via: "respaldo", selection: byWords(question, topics) }
+  return { via: "respaldo", selection: byWords(question, topics), why: "sin_jev" }
 }
+
+/** Lo que dice cuando no responde, según por qué. */
+const NOT_ANSWERED: Record<Decided["why"], string> = {
+  ninguna: "Esto no está en la guía, y no quiero inventarlo.",
+  sin_jev: "Ahora no puedo buscar bien en la guía.",
+  dato: "No lo encontré en la guía. Si buscas a una persona o un número, usa «Buscar en todo».",
+}
+
+/** Lo que cuesta preguntarle a Argos desde la Ayuda (ADR 0085), dicho como está hoy. */
+async function argosNoteOf(tx: Db, orgId: string): Promise<string | null> {
+  // Es solo un aviso: si no se puede leer cuánto queda, no se promete nada y el botón sigue (en su propio
+  // punto de guardado, para no dejar la transacción abortada).
+  const allowance = await tx.transaction((point) => getArgosPanelAllowance(point, orgId)).catch(() => null)
+  if (!allowance) return null
+  if (!allowance.limited) return null
+  if (allowance.remaining > 0) {
+    return `Usa una de las preguntas a ${AGENT_NAMES.administrador} de este mes: ${allowance.remaining === 1 ? "te queda 1" : `te quedan ${allowance.remaining}`}.`
+  }
+  return allowance.autoPack
+    ? `Ya usaste las preguntas a ${AGENT_NAMES.administrador} de este mes: al preguntarle se suma un paquete, como pidió la clínica.`
+    : `Ya usaste las preguntas a ${AGENT_NAMES.administrador} de este mes: al preguntarle te dice cómo sumar más.`
+}
+
+const probabilityOf = (value: number | null): number | null =>
+  value === null || !Number.isFinite(value) ? null : Math.min(1, Math.max(0, value))
 
 /**
  * Responde una pregunta sobre cómo usar el sistema, con la guía del producto
  * de la clínica (ADR 0146). Lo que se lee de la clínica va en su transacción y
- * Jev responde fuera de ella. Deja constancia de la pantalla, de la respuesta
- * de la guía y de lo que decidió Jev, nunca del texto de la pregunta.
+ * Jev responde fuera de ella. Lo que puede ser el dato de una persona (un
+ * teléfono, un correo, un nombre suelto) no viaja a Jev. Deja constancia de la
+ * pantalla, de la respuesta de la guía y de lo que decidió Jev, nunca del
+ * texto de la pregunta.
  */
 export async function askHelp(
   db: Db,
@@ -276,21 +349,23 @@ export async function askHelp(
   const screen = typeof input.screen === "string" ? input.screen.slice(0, 200) : "/"
   const talk = helpSmallTalk(question)
   // Un saludo no es una consulta: no gasta del tope ni cuenta como algo que no supo.
-  if (talk) return { askId: "", kind: "charla", say: talk, answers: [], blockers: [], choices: [], argos: false, basedOn: "" }
+  if (talk) return { askId: "", kind: "charla", say: talk, answers: [], blockers: [], choices: [], argos: false, argosNote: null, basedOn: "" }
 
   const ready = await withOrgContext(db, orgId, async (tx) => {
-    await requireDailyRoom(tx, orgId, asker.userId)
+    const askId = await reserveAsk(tx, orgId, asker.userId, screen)
     const [config] = await tx.select({ personaName: agentConfig.personaName }).from(agentConfig).where(eq(agentConfig.organizationId, orgId)).limit(1)
-    return { topics: await productHelpTopics(tx, orgId), texts: await productAgentTexts(tx, orgId), personaName: config?.personaName }
+    return { askId, topics: await productHelpTopics(tx, orgId), texts: await productAgentTexts(tx, orgId), personaName: config?.personaName }
   })
-  const { topics } = ready
+  const { topics, askId } = ready
   const here = helpTopicForScreen(screen, topics)
   // La guía dice «Sofi»: una clínica que le puso otro nombre pregunta con el suyo.
   const asked = withGuideName(question, ready.personaName)
   const exact = exactHelpOption(asked, topics)
   const decided: Decided = exact
-    ? { via: "exacta", selection: { verdict: "seguro", shown: [exact], offered: [], top: null } }
-    : await decideHelp(asked, helpScreenName(screen, topics), topics, ready.texts, decider)
+    ? { via: "exacta", selection: { verdict: "seguro", shown: [exact], offered: [], top: null }, why: "ninguna" }
+    : mayIdentifySomeone(question)
+      ? { via: "respaldo", selection: byWords(asked, topics), why: "dato" }
+      : await decideHelp(asked, helpScreenName(screen, topics), topics, ready.texts, decider)
   const { selection } = decided
   const first = selection.shown[0]
 
@@ -298,8 +373,9 @@ export async function askHelp(
     const log = async (topicId: string | null, faq: string | null = null) => {
       const verdict = decided.via === "jev" ? (selection.verdict satisfies (typeof HELP_ASK_VERDICTS)[number]) : null
       const [row] = await tx
-        .insert(helpAsk)
-        .values({ organizationId: orgId, userId: asker.userId, screen, topicId, faq, via: decided.via, verdict, probability: decided.via === "jev" ? selection.top : null })
+        .update(helpAsk)
+        .set({ topicId, faq, via: decided.via, verdict, probability: decided.via === "jev" ? probabilityOf(selection.top) : null })
+        .where(and(eq(helpAsk.organizationId, orgId), eq(helpAsk.id, askId)))
         .returning({ id: helpAsk.id })
       if (!row) throw new Error("No se pudo registrar la consulta")
       return row.id
@@ -311,12 +387,14 @@ export async function askHelp(
       blockers: [],
       choices: [],
       argos: false,
+      argosNote: null,
       basedOn: "",
       ...parts,
     })
 
-    // «¿Por qué no puedo…?»: lo que falta de verdad en lo que preguntó; si no nombró nada, en la pantalla donde está.
-    // Lo que no es de una pantalla (el dictado, su contraseña) no depende de lo que falte en ella.
+    // «¿Por qué no puedo…?»: lo que falta de verdad en lo que eligió Jev (o, si no eligió, en lo que reconocen las
+    // palabras); si no nombró nada, en la pantalla donde está. Lo que no es de una pantalla (el dictado, su
+    // contraseña) no depende de lo que falte en ella.
     const general = first?.kind === "faq" && first.faq.general
     if (WHY_NOT.test(normalizeForSearch(question)) && !general) {
       const about = first?.topic ?? selection.offered[0]?.topic ?? matchHelpTopics(asked, topics)[0]?.topic ?? here
@@ -357,8 +435,15 @@ export async function askHelp(
       const reports = helpTopic("reportes", topics)
       const seesReports = asker.can("reports.read")
       const argosOn = seesReports && (await getAdminSettings(tx, orgId)).enabled
-      const askId = await log(null)
-      if (argosOn) return reply("datos", { askId, argos: true, say: `Eso es de las cifras de tu clínica: te lo responde ${AGENT_NAMES.administrador}, con las mismas cuentas de Reportes.` })
+      await log(null)
+      if (argosOn) {
+        return reply("datos", {
+          askId,
+          argos: true,
+          argosNote: await argosNoteOf(tx, orgId),
+          say: `Eso es de las cifras de tu clínica: te lo responde ${AGENT_NAMES.administrador}, con las mismas cuentas de Reportes.`,
+        })
+      }
       if (seesReports && reports) {
         const access = restrictionFor(reports, asker)
         return reply("datos", {
@@ -374,7 +459,7 @@ export async function askHelp(
       })
     }
 
-    return reply("nada", { askId: await log(null) })
+    return reply("nada", { askId: await log(null), say: NOT_ANSWERED[decided.why] })
   })
 }
 

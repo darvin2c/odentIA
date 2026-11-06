@@ -131,7 +131,7 @@ describe("responder", () => {
 
     // Sin Jev, lo que las palabras no reconocen como una pregunta frecuente no se responde.
     const unknown = await askHelp(appDb, ORG, owner, { question: "¿Se pueden enviar felicitaciones de cumpleaños?", screen: "/patients" })
-    expect(unknown).toMatchObject({ kind: "nada", answers: [] })
+    expect(unknown).toMatchObject({ kind: "nada", answers: [], say: "Ahora no puedo buscar bien en la guía." })
 
     const logged = await ownerDb.select().from(helpAsk).where(eq(helpAsk.userId, USER))
     expect(logged.map((row) => [row.screen, row.topicId, row.faq, row.via, row.verdict, row.probability])).toEqual([
@@ -312,10 +312,10 @@ describe("con Jev (ADR 0146)", () => {
   it("ninguna: dice que no está en la guía y nunca pega el párrafo de la pantalla", async () => {
     const org = await clinic()
     const reply = await askHelp(appDb, org, owner, { question: "¿qué antibiótico le doy a un absceso?", screen: "/agenda" }, jev({ none: 0.97, "tema:agenda": 0.03 }).decider)
-    expect(reply).toMatchObject({ kind: "nada", answers: [], choices: [] })
+    expect(reply).toMatchObject({ kind: "nada", answers: [], choices: [], say: "Esto no está en la guía, y no quiero inventarlo." })
     // «Ninguna» y «datos» juntas también: ninguna de las dos es de la guía.
     const away = await askHelp(appDb, org, owner, { question: "¿por qué la vista Día dice 15 y la lista 19?", screen: "/agenda" }, jev({ none: 0.5, data: 0.45, "tema:agenda": 0.05 }).decider)
-    expect(away).toMatchObject({ kind: "nada", answers: [] })
+    expect(away).toMatchObject({ kind: "nada", answers: [], say: "Esto no está en la guía, y no quiero inventarlo." })
     expect((await logOf(org)).map((row) => [row.via, row.verdict])).toEqual([["jev", "ninguna"], ["jev", "ninguna"]])
   })
 
@@ -346,11 +346,65 @@ describe("con Jev (ADR 0146)", () => {
     expect(known).toMatchObject({ kind: "guia" })
     expect(known.answers[0]?.text).toContain("registra una ausencia del profesional")
     // Lo que las palabras solo acercan a una pantalla no se responde con su párrafo.
-    expect(await askHelp(appDb, org, owner, { question: "¿Dónde veo el stock de insumos?", screen: "/agenda" }, down)).toMatchObject({ kind: "nada", answers: [] })
+    expect(await askHelp(appDb, org, owner, { question: "¿Dónde veo el stock de insumos?", screen: "/agenda" }, down)).toMatchObject({ kind: "nada", answers: [], say: "Ahora no puedo buscar bien en la guía." })
     // Un Jev que se niega a responder tampoco deja una duda sin nada que ofrecer.
     const declined: HelpDecider = { decide: async () => ({ answers: [{ id: "help", kind: "declined" }], model: "jev-prueba", usage: null }) }
     expect((await askHelp(appDb, org, owner, { question: "¿Dónde veo el stock de insumos?", screen: "/agenda" }, declined)).kind).toBe("nada")
     expect((await logOf(org)).map((row) => [row.via, row.verdict])).toEqual([["respaldo", null], ["respaldo", null], ["respaldo", null]])
+  })
+
+  it("lo que puede ser el dato de una persona no llega a Jev", async () => {
+    const org = await clinic()
+    const { decider, seen } = jev({ none: 1 })
+    // Lo que llega desde el buscador con Enter: un teléfono, un nombre suelto, un correo, un documento.
+    for (const question of ["987654321", "Elena Pérez Quispe", "ana.paz@correo.pe", "¿Cómo registro al paciente con DNI 45678912?"]) {
+      const reply = await askHelp(appDb, org, owner, { question, screen: "/home" }, decider)
+      expect(["nada", "guia"], question).toContain(reply.kind)
+      if (reply.kind === "nada") expect(reply.say).toBe("No lo encontré en la guía. Si buscas a una persona o un número, usa «Buscar en todo».")
+    }
+    expect(seen).toEqual([])
+    const logged = await logOf(org)
+    expect(logged.map((row) => row.via)).toEqual(["respaldo", "respaldo", "respaldo", "respaldo"])
+    expect(JSON.stringify(logged)).not.toMatch(/Elena|987654321|correo|45678912/)
+  })
+
+  it("con otro nombre para Sofi, Jev lee la pregunta como se escribió, con solo el nombre cambiado", async () => {
+    const org = await clinic()
+    await ownerDb.insert(agentConfig).values({ organizationId: org, personaName: "Lucía" })
+    const { decider, seen } = jev({ "¿Cómo apago a Sofi?": 0.95 })
+    await askHelp(appDb, org, owner, { question: "¿Por qué Lucía le contestó así a una señora?", screen: "/inbox" }, decider)
+    expect(seen[0]?.state).toBe("Pantalla: Bandeja\nPregunta: ¿Por qué Sofi le contestó así a una señora?")
+  })
+
+  it("Jev que responde sin nada que ofrecer dice «ninguna»; el respaldo es solo para cuando no respondió", async () => {
+    const org = await clinic()
+    // «Ninguna» con 0,85 y lo demás muy repartido: Jev respondió, y no está en la guía.
+    const spread = Object.fromEntries(helpOptions(helpTopicsFor("dental")).slice(0, 5).map((option) => [option.kind === "faq" ? option.faq.q : `tema:${option.topic.id}`, 0.03]))
+    const unsure = await askHelp(appDb, org, owner, { question: "como bloqueo un horario para el doctor", screen: "/agenda" }, jev({ none: 0.85, ...spread }).decider)
+    expect(unsure).toMatchObject({ kind: "nada", say: "Esto no está en la guía, y no quiero inventarlo." })
+    // Sin probabilidades no hay certeza: deciden las palabras, y lo dicen.
+    const flat: HelpDecider = { decide: async () => ({ answers: [{ id: "help", kind: "choice", choice: "none", confidence: null, probabilities: null }], model: "jev-prueba", usage: null }) }
+    const words = await askHelp(appDb, org, owner, { question: "¿Dónde veo el stock de insumos?", screen: "/agenda" }, flat)
+    expect(words).toMatchObject({ kind: "nada", say: "Ahora no puedo buscar bien en la guía." })
+    expect((await logOf(org)).map((row) => [row.via, row.verdict, row.probability])).toEqual([["jev", "ninguna", expect.closeTo(0.85, 5)], ["respaldo", null, null]])
+  })
+
+  it("la probabilidad se guarda entre 0 y 1", async () => {
+    const org = await clinic()
+    await askHelp(appDb, org, owner, { question: "quiero cerrar la tarde del doctor Ruiz", screen: "/agenda" }, jev({ "¿Cómo bloqueo un horario?": 1.4 }).decider)
+    expect((await logOf(org))[0]?.probability).toBe(1)
+  })
+
+  it("dos preguntas a la vez no pasan juntas del tope diario", async () => {
+    const org = await clinic()
+    const busy = { ...owner, userId: OTHER_USER }
+    await ownerDb.insert(helpAsk).values(Array.from({ length: HELP_DAILY_LIMIT - 1 }, () => ({ organizationId: org, userId: OTHER_USER, screen: "/home" })))
+    const both = await Promise.allSettled([
+      askHelp(appDb, org, busy, { question: "¿Cómo bloqueo un horario?", screen: "/agenda" }),
+      askHelp(appDb, org, busy, { question: "¿Cómo invito a alguien a mi equipo?", screen: "/agenda" }),
+    ])
+    expect(both.map((item) => item.status).sort()).toEqual(["fulfilled", "rejected"])
+    expect((await logOf(org)).length).toBe(HELP_DAILY_LIMIT)
   })
 
   it("en latidIA le pregunta con la guía y las palabras de latidIA", async () => {

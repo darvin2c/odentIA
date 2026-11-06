@@ -274,6 +274,8 @@ describe("costo y margen de una clínica", () => {
 
 describe("todas las clínicas", () => {
   it("pone arriba lo que hay que revisar: la alarma y la Fundadora sin uso", async () => {
+    // Preguntarle a la Ayuda no es usar los agentes: sigue «sin uso» (ADR 0146).
+    await ownerDb.insert(aiUsage).values({ organizationId: FOUNDER, origin: "ayuda", provider: "jev", model: "jev-1.13.0", calls: 1, costMicros: 400, createdAt: new Date() })
     const overview = await getCostMarginOverview(ownerDb)
     expect(overview.clinics.map((item) => [item.organizationId, item.alarm, item.idle])).toEqual([
       [ORG, true, false],

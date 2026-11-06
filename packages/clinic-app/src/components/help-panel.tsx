@@ -41,6 +41,8 @@ const helpReply = z.object({
   choices: z.array(z.object({ question: z.string(), where: z.string() })).default([]),
   /** Lo de las cifras: si puede preguntárselo a Argos. */
   argos: z.boolean().default(false),
+  /** Lo que cuesta preguntarle a Argos, dicho por el servidor como está hoy. */
+  argosNote: z.string().nullable().default(null),
   basedOn: z.string(),
 })
 type HelpReply = z.infer<typeof helpReply>
@@ -260,6 +262,13 @@ export function HelpButton({ className }: { className?: string } = {}) {
   const handledLink = useRef<string | null>(null)
   const exchanges = useConversation()
   const [direct, setDirect] = useState<DirectMessage | null>(null)
+  /** La duda que pasó al envío: su campo recibe el foco cuando aparece. */
+  const [focusSend, setFocusSend] = useState<number | null>(null)
+  useEffect(() => {
+    if (focusSend === null) return
+    document.getElementById(`ayuda-enviar-${focusSend}`)?.focus()
+    setFocusSend(null)
+  }, [focusSend])
 
   const screen = useQuery({
     queryKey: ["help-screen", pathname],
@@ -481,7 +490,9 @@ export function HelpButton({ className }: { className?: string } = {}) {
                     {exchange.reply.kind === "nada" || (exchange.reply.kind === "duda" && exchange.noneFits) ? (
                       <>
                         <div className={ANSWER}>
-                          <p className="font-bold">Esto no está en la guía, y no quiero inventarlo.</p>
+                          <p className="font-bold">
+                            {exchange.reply.kind === "duda" ? "No encontré tu respuesta en la guía." : (exchange.reply.say ?? "Esto no está en la guía, y no quiero inventarlo.")}
+                          </p>
                           {exchange.sent === undefined ? <p>¿Lo envío a {appWords().name} para que te respondan?</p> : null}
                         </div>
                         {exchange.sent === "enviada" ? (
@@ -518,7 +529,11 @@ export function HelpButton({ className }: { className?: string } = {}) {
                           type="button"
                           variant="link"
                           className={`h-auto self-start p-0 ${LINK}`}
-                          onClick={() => setConversation((current) => current.map((item, at) => (at === index ? { ...item, noneFits: true } : item)))}
+                          onClick={() => {
+                            setConversation((current) => current.map((item, at) => (at === index ? { ...item, noneFits: true } : item)))
+                            // El botón desaparece: el foco pasa al texto que se enviaría (WCAG 2.4.3).
+                            setFocusSend(index)
+                          }}
                         >
                           Ninguna es lo que busco
                         </Button>
@@ -542,7 +557,7 @@ export function HelpButton({ className }: { className?: string } = {}) {
                             >
                               Preguntarle a {ADMIN_NAME}
                             </Button>
-                            <p className="text-xs text-muted-foreground">Usa una de las preguntas a {ADMIN_NAME} de este mes.</p>
+                            {exchange.reply.argosNote ? <p className="text-xs text-muted-foreground">{exchange.reply.argosNote}</p> : null}
                           </>
                         ) : null}
                         {exchange.reply.answers.map((answer) =>

@@ -77,7 +77,9 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   await expect(picked).toContainText("¿Cómo apago a Sofi?")
   // Si ninguna era lo que buscaba, no se queda sin salida: se ofrece enviarla.
   await doubt.getByRole("button", { name: "Ninguna es lo que busco" }).click()
-  await expect(doubt).toContainText("Esto no está en la guía, y no quiero inventarlo.")
+  await expect(doubt).toContainText("No encontré tu respuesta en la guía.")
+  // El botón desaparece: el foco pasa al texto que se enviaría.
+  await expect(doubt.getByLabel("Tu pregunta · puedes cambiarla")).toBeFocused()
   await doubt.getByRole("button", { name: "No, gracias" }).click()
 
   // --- Las cifras de la clínica no son de la guía: con Argos encendido y Reportes en su rol, se las pregunta a Argos ---
@@ -86,7 +88,8 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   const figures = help.getByRole("listitem").filter({ hasText: "¿Cuánto cobramos este mes?" })
   await expect(figures).toContainText("Eso es de las cifras de tu clínica: te lo responde Argos")
   await expect(figures.getByRole("button", { name: "Preguntarle a Argos" })).toBeVisible()
-  await expect(figures).toContainText("Usa una de las preguntas a Argos de este mes.")
+  // Lo que cuesta preguntarle lo dice el servidor solo si es cierto: esta clínica no tiene tope de preguntas, y no se le promete ninguno.
+  await expect(figures).not.toContainText("preguntas a Argos de este mes")
   await info.attach("ayuda-cifras", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
   // --- No sabe: lo dice, y la persona decide si lo envía a odentIA ---
@@ -197,6 +200,27 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   }
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("ayuda-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+
+  // En el teléfono también: la duda se toca con el dedo y lo que no está en la guía se dice.
+  const askOnPhone = async (question: string) => {
+    await sheet.getByLabel("Tu pregunta", { exact: true }).fill(question)
+    await sheet.getByRole("button", { name: "Preguntar", exact: true }).click()
+    await expect(sheet.getByRole("listitem").filter({ hasText: question }).last()).toBeVisible()
+  }
+  await askOnPhone("quiero apagar a Sofi")
+  const phoneDoubt = sheet.getByRole("listitem").filter({ hasText: "quiero apagar a Sofi" }).last()
+  await expect(phoneDoubt).toContainText("¿Es alguna de estas?")
+  const phoneChoice = phoneDoubt.getByRole("button", { name: /^¿Cómo apago a Sofi\?/ })
+  await phoneChoice.scrollIntoViewIfNeeded()
+  expect((await phoneChoice.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
+  await phoneDoubt.getByRole("button", { name: "Ninguna es lo que busco" }).click()
+  await expect(phoneDoubt).toContainText("No encontré tu respuesta en la guía.")
+  await expect(phoneDoubt.getByLabel("Tu pregunta · puedes cambiarla")).toBeFocused()
+  await askOnPhone(UNKNOWN)
+  // La primera fila con esa pregunta es la de la conversación; la de «Tus casos con soporte» va después.
+  await expect(sheet.getByRole("listitem").filter({ hasText: UNKNOWN }).first()).toContainText("Esto no está en la guía, y no quiero inventarlo.")
+  expect(await overflow(page)).toBeLessThanOrEqual(0)
+  await info.attach("ayuda-movil-duda", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
   // --- Otro rol: la misma pregunta dice que no puede entrar ahí, y no ofrece llevarlo ---
   await fixtureDb.update(member).set({ role: "clinician" })
