@@ -152,6 +152,9 @@ function RealAppointmentDrawer({
   onRebook: (patient: { id: string; name: string }, from?: { serviceId?: string | null; professionalUserId?: string | null }) => void
 }) {
   const [mode, setMode] = React.useState<AppointmentDrawerMode | "edit">(initialMode)
+  // Abierto desde el menú para cancelar: «Volver» cierra. Si de ahí se fue a reprogramar, ya
+  // pasó por el detalle, y «Volver» vuelve a él.
+  const openedToCancel = React.useRef(initialMode === "cancel")
   // El rechazo de una acción del cajón (confirmar, «No vino»); los formularios dicen el suyo.
   const [actionError, setActionError] = React.useState("")
   const [writing, setWriting] = React.useState(false)
@@ -742,7 +745,7 @@ function RealAppointmentDrawer({
         variant="destructive"
         pending={cancelling}
         error={cancelError}
-        onClose={() => (initialMode === "cancel" ? onClose() : setMode("view"))}
+        onClose={() => (openedToCancel.current ? onClose() : setMode("view"))}
         onConfirm={() => void submitForm(cancelForm)}
       >
         <div className="grid gap-3 text-left">
@@ -785,6 +788,30 @@ function RealAppointmentDrawer({
               />
             )}
           </cancelForm.AppField>
+          {/* Propuesta UX 5: si lo pidió el paciente, quizá quiere otro día. Mover conserva el servicio
+              y el profesional, y no deja una cita cancelada. */}
+          <cancelForm.Subscribe selector={(state) => state.values.cancelReason}>
+            {(reason) =>
+              reason === "paciente" && canWrite && before ? (
+                <p className="flex flex-wrap items-center gap-2 text-sm">
+                  ¿Quiere otro día?
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="min-h-11 sm:min-h-8"
+                    disabled={cancelling}
+                    onClick={() => {
+                      openedToCancel.current = false
+                      setMode("move")
+                    }}
+                  >
+                    Reprogramar
+                  </Button>
+                </p>
+              ) : null
+            }
+          </cancelForm.Subscribe>
         </div>
       </ConfirmDialog>
     </>

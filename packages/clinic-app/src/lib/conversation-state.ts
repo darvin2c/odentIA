@@ -40,6 +40,26 @@ function since(iso: string): string {
 }
 
 /**
+ * Lo único que tiene es un envío que no salió (propuesta UX 3): sin temas, sin caso del agente
+ * y abierta, su fila dice «No se pudo enviar» y nada va antes. Lo que tiene un tema abierto
+ * nunca se pliega con esas.
+ */
+export function onlySendFailed(input: {
+  status: string
+  attention?: ConversationAttention | null
+  closure?: ConversationClosure | null
+}): boolean {
+  const attention = input.attention
+  return (
+    !!attention?.sendFailed &&
+    !input.closure &&
+    input.status !== "closed" &&
+    !attention.topics?.length &&
+    !attention.handoffPriority
+  )
+}
+
+/**
  * La palabra de la fila y de la cabecera del hilo (ADR 0050). Orden: cerrada;
  * su tema más urgente (de quién es: nadie, tú u otra persona); lo último que no
  * salió; sin responder y sin el agente; espera al paciente; la atiende el agente. Sin `attention`
