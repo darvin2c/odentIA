@@ -123,6 +123,7 @@ function Stage({
   measuring,
   onPoint,
   measurement,
+  fileKey,
 }: {
   source: Source
   view: View2D
@@ -131,13 +132,15 @@ function Stage({
   measuring: boolean
   onPoint: (point: Point) => void
   measurement: string | null
+  /** Otro archivo empieza ajustado; otro cuadro del mismo, no. */
+  fileKey: string
 }) {
-  const zoom = useZoomPan({ arrowPan: true })
+  const zoom = useZoomPan({ arrowPan: true, canToggle: () => !measuring })
   const ref = useRef<HTMLCanvasElement | null>(null)
   const size = orientedSize(source.width, source.height, view.orientation)
-  // Otra imagen empieza ajustada.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: depende solo de la imagen a propósito.
-  useEffect(() => zoom.fit(), [source])
+  // Otro archivo empieza ajustado.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: depende solo del archivo a propósito.
+  useEffect(() => zoom.fit(), [fileKey])
   useEffect(() => {
     const canvas = ref.current
     if (!canvas) return
@@ -210,7 +213,8 @@ function Stage({
           className={`block h-full w-full object-contain ${measuring ? "cursor-crosshair" : ""}`}
           style={{ filter }}
           onClick={(event) => {
-            if (zoom.consumeDrag() || !measuring) return
+            // El segundo clic de un doble clic no marca otro punto en el mismo lugar.
+            if (zoom.consumeDrag() || !measuring || event.detail > 1) return
             const p = canvasPoint(event, size.width, size.height)
             onPoint(fromOriented(p, source.width, source.height, view.orientation))
           }}
@@ -511,6 +515,7 @@ export function ImageViewer2D({
         measuring={measuring}
         onPoint={addPoint}
         measurement={measurement}
+        fileKey={documentId}
       />
       {image && image.frames > 1 && (
         <fieldset className="flex flex-wrap items-center gap-2 border-t border-slate-800 px-3 py-2 sm:px-4">

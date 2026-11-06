@@ -591,7 +591,7 @@ export function TomographyViewer({
           )}
           {onDetails && (
             <Button type="button" size="sm" variant="ghost" onClick={onDetails}>
-              Detalles e informe
+              Detalles
             </Button>
           )}
         </>

@@ -44,19 +44,16 @@ function useFullscreen() {
     document.addEventListener("fullscreenchange", update)
     return () => document.removeEventListener("fullscreenchange", update)
   }, [])
-  // Al cerrar el visor se sale de pantalla completa.
-  useEffect(
-    () => () => {
-      if (document.fullscreenElement) void document.exitFullscreen().catch(() => {})
-    },
-    [],
-  )
+  /** Al cerrar el visor se sale; pasar de una radiografía a una tomografía no. */
+  const exit = () => {
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {})
+  }
   const toggle = () => {
     if (!target) return
     if (document.fullscreenElement) void document.exitFullscreen().catch(() => {})
     else void target.requestFullscreen().catch(() => {})
   }
-  return { available, active, toggle }
+  return { available, active, toggle, exit }
 }
 
 function isTyping(target: EventTarget | null): boolean {
@@ -88,6 +85,10 @@ export function ViewerShell({
   onKeyDown?: (event: React.KeyboardEvent<HTMLDivElement>) => void
 }) {
   const fullscreen = useFullscreen()
+  const close = () => {
+    fullscreen.exit()
+    onClose()
+  }
   const toggleRef = useRef(fullscreen.toggle)
   toggleRef.current = fullscreen.toggle
   useEffect(() => {
@@ -103,7 +104,7 @@ export function ViewerShell({
   }, [open, fullscreen.available])
 
   return (
-    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+    <Dialog open={open} onOpenChange={(next) => !next && close()}>
       <DialogContent
         showCloseButton={false}
         onKeyDown={onKeyDown}
@@ -134,7 +135,7 @@ export function ViewerShell({
               )}
             </Button>
           )}
-          <Button type="button" size="sm" variant="outline" onClick={onClose}>
+          <Button type="button" size="sm" variant="outline" onClick={close}>
             <X aria-hidden="true" />
             Cerrar
           </Button>

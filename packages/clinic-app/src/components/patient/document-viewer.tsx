@@ -190,6 +190,8 @@ function arrowsBelongToControl(target: EventTarget | null): boolean {
   if (target.isContentEditable) return true
   if (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return true
   const role = target.getAttribute("role")
+  // Dentro de un menú («Más»), las flechas recorren sus opciones.
+  if (target.closest('[role="menu"]') || role?.startsWith("menuitem")) return true
   return role === "slider" || role === "combobox" || role === "listbox" || role === "option"
 }
 
@@ -881,7 +883,7 @@ function DocumentViewer({
           )}
         </dl>
       </details>
-      {isDicomDoc(doc) && !doc.imaging && <DicomFacts patientId={patientId} documentId={doc.id} />}
+      {isDicomDoc(doc) && !doc.imaging && <DicomFacts key={doc.id} patientId={patientId} documentId={doc.id} />}
       {(isImageDoc(doc) || isDicomDoc(doc)) && !doc.imaging && (
         <p className="text-xs text-muted-foreground">
           Brillo, contraste, negativo, girar y voltear son solo para mirar: el archivo no cambia.

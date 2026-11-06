@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import path from "node:path"
+import { devices } from "@playwright/test"
 import { encodeDemoCtSlice } from "@odentia/clinical"
 import { type CbctDentition, generateCbctPhantom } from "@odentia/dental"
 import { tenant } from "./env"
@@ -42,7 +43,7 @@ function writeCd(dir: string, patientName: string, dentition: CbctDentition = "p
 }
 
 test("tomografía: la carpeta del CD se sube, queda en la ficha y se abre en panorámica y cortes", async ({ owner }) => {
-  test.setTimeout(180_000)
+  test.setTimeout(240_000)
   const { page } = owner
   const slug = owner.org.slug
   const patient = await call<{ id: string }>(page, "POST", "/api/patients", slug, {
@@ -97,9 +98,35 @@ test("tomografía: la carpeta del CD se sube, queda en la ficha y se abre en pan
   await expect(viewer.getByText("Panorámica reconstruida")).toBeVisible()
   await expect(viewer.getByText(/Corte \d+ de \d+/)).toBeVisible()
   await page.screenshot({ path: test.info().outputPath("tomografia-visor.png") })
+  // La tomografía se acerca en cada vista, con el porcentaje a la vista.
+  await viewer.getByRole("button", { name: "Acercar", exact: true }).first().click()
+  await expect(viewer.getByRole("button", { name: /ahora al 125 %/ }).first()).toBeVisible()
   await viewer.getByRole("tab", { name: "Cortes", exact: true }).click()
   await expect(viewer.getByText("De frente")).toBeVisible()
-  await page.screenshot({ path: test.info().outputPath("tomografia-tres-cortes.png") })
+  // El 3D es el cuarto cuadro y dice que es para mostrar (o que este equipo no puede).
+  await expect(viewer.getByText("3D · para mostrar")).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("tomografia-cortes.png") })
+
+  // En el celular: una vista grande a la vez y, al intentar medir, por qué no.
+  const phone = await page.context().browser()!.newContext({
+    ...devices["iPhone 13"],
+    storageState: await page.context().storageState(),
+    ignoreHTTPSErrors: true,
+  })
+  try {
+    const mobile = await phone.newPage()
+    await gotoHydrated(mobile, tenant(slug, `/patients/${patient.id}?tab=documentos&tipo=imagenes`))
+    await mobile.getByRole("button", { name: /Ver Tomografía/ }).click()
+    const small = mobile.getByRole("dialog", { name: /Tomografía/ })
+    await expect(small.getByRole("tab", { name: "Corte", exact: true })).toBeVisible({ timeout: 60_000 })
+    await small.getByRole("tab", { name: "Corte", exact: true }).click()
+    await expect(small.getByText(/Desliza con el dedo/)).toBeVisible()
+    await small.getByRole("button", { name: "Medir" }).click()
+    await expect(small.getByText(/En el celular la tomografía es para mirar/)).toBeVisible()
+    await mobile.screenshot({ path: test.info().outputPath("tomografia-celular.png") })
+  } finally {
+    await phone.close()
+  }
 })
 
 test("tomografía de un niño: «Ir a la pieza» lleva a la 55 en la dentición de leche", async ({ owner }) => {

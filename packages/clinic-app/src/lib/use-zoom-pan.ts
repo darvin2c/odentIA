@@ -21,6 +21,8 @@ export interface ZoomPanOptions {
   onSwipe?: (direction: -1 | 1) => void
   /** Las flechas desplazan la imagen ampliada (en la radiografía). */
   arrowPan?: boolean
+  /** Si el doble clic acerca: no mientras se mide, donde cada clic marca un punto. */
+  canToggle?: () => boolean
 }
 
 const DRAG_PX = 4
@@ -50,6 +52,8 @@ export function useZoomPan(options: ZoomPanOptions = {}) {
     let start: { at: Point; zoom: ZoomState } | null = null
     let pinch: { distance: number } | null = null
     let panning = false
+    // Hubo dos dedos en este gesto: al soltar no es un deslizamiento.
+    let multi = false
 
     const onWheel = (event: WheelEvent) => {
       if (event.ctrlKey || event.metaKey) {
@@ -71,8 +75,10 @@ export function useZoomPan(options: ZoomPanOptions = {}) {
       if (pointers.size === 1) {
         dragged.current = false
         panning = false
+        multi = false
         start = { at: { x: event.clientX, y: event.clientY }, zoom: zoomRef.current }
       } else if (pointers.size === 2) {
+        multi = true
         const [a, b] = [...pointers.values()]
         pinch = { distance: Math.hypot(a!.x - b!.x, a!.y - b!.y) }
         dragged.current = true
@@ -110,12 +116,19 @@ export function useZoomPan(options: ZoomPanOptions = {}) {
       if (!pointers.has(event.pointerId)) return
       pointers.delete(event.pointerId)
       if (pointers.size < 2) pinch = null
+      // De dos dedos a uno: el que queda sigue desde donde está, con el acercamiento de ahora.
+      if (pointers.size === 1) {
+        const [rest] = [...pointers.values()]
+        start = { at: rest!, zoom: zoomRef.current }
+        panning = false
+      }
       if (pointers.size === 0 && start) {
         const dx = event.clientX - start.at.x
         const dy = event.clientY - start.at.y
         const swipe = optionsRef.current.onSwipe
         if (
           swipe &&
+          !multi &&
           start.zoom.scale === 1 &&
           Math.abs(dx) > SWIPE_PX &&
           Math.abs(dx) > 2 * Math.abs(dy)
@@ -127,6 +140,9 @@ export function useZoomPan(options: ZoomPanOptions = {}) {
       }
     }
     const onDoubleClick = (event: MouseEvent) => {
+      // Dos clics rápidos en «+» o «−» no ajustan la imagen.
+      if (event.target instanceof Element && event.target.closest("button, fieldset, input")) return
+      if (optionsRef.current.canToggle && !optionsRef.current.canToggle()) return
       setZoom((z) => toggleZoom(z, pointIn(frame, event.clientX, event.clientY), sizeOf(frame)))
     }
     const onKeyDown = (event: KeyboardEvent) => {
@@ -182,6 +198,8 @@ export function useZoomPan(options: ZoomPanOptions = {}) {
     [frame],
   )
 
+  /** Con la imagen ajustada se desplaza la página hacia abajo; ampliada, el gesto es de la imagen. */
+  const frameStyle: CSSProperties = { touchAction: zoom.scale > 1 ? "none" : "pan-y" }
   const contentStyle: CSSProperties = {
     transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})`,
     transformOrigin: "0 0",
@@ -191,6 +209,8 @@ export function useZoomPan(options: ZoomPanOptions = {}) {
     /** Ref del marco: recibe los gestos y recorta la imagen ampliada. */
     frameRef: setFrame,
     zoom,
+    /** Estilo del marco: qué gestos quedan para la página. */
+    frameStyle,
     /** Estilo de lo que se acerca, dentro del marco. */
     contentStyle,
     zoomIn: () => byButton(1.25),

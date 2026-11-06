@@ -83,6 +83,7 @@ export function SliceCanvas({
     onWheelStep: onStep ? (delta, shift) => onStep(delta * (shift ? 5 : 1)) : undefined,
     // Mientras se arrastra el arco, arrastrar no mueve la imagen.
     canPan: () => !onPointerDown,
+    canToggle: () => tool === "ninguna",
     onSwipe,
   })
   const rgba = useMemo(() => windowToRgba(image.values, window), [image, window])
@@ -157,7 +158,9 @@ export function SliceCanvas({
   return (
     <div
       ref={zoom.frameRef}
-      className={`relative min-w-0 touch-none overflow-hidden bg-black ${className ?? ""}`}
+      // Ajustado, deslizar hacia abajo desplaza la vista (en el celular, los cortes apilados).
+      style={zoom.frameStyle}
+      className={`relative min-w-0 overflow-hidden bg-black ${className ?? ""}`}
     >
       <div className="flex h-full w-full items-center" style={zoom.contentStyle}>
         <canvas
@@ -171,6 +174,8 @@ export function SliceCanvas({
           onClick={(event) => {
             // Al terminar de arrastrar la imagen ampliada no se elige ni se marca.
             if (zoom.consumeDrag()) return
+            // El segundo clic de un doble clic no marca otro punto en el mismo lugar.
+            if (tool !== "ninguna" && event.detail > 1) return
             const point = toImage(event)
             if (tool === "ninguna") onPick?.(point)
             else onMark?.(point)
