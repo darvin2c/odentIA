@@ -18,6 +18,8 @@ pnpm db:seed
 
 `.env` con finales LF: CRLF rompe su carga en sh. Los scripts tsx de db/services cargan `infra/dev/.env` con `--env-file-if-exists`; variables existentes tienen prioridad. Semilla manual determinista/idempotente, no para tests/CI.
 
+Las radiografías, las fotos y la tomografía de la demo son reales y de uso libre (Wikimedia Commons y los datos de muestra de 3D Slicer; licencia y autor en `packages/services/src/dental/demo-imaging.ts` y en el «Origen» de cada documento). La semilla las descarga la primera vez, comprueba su SHA-256 y las guarda en `.cache/demo-imaging/` (unos 28 MB); sin conexión las deja fuera y lo avisa.
+
 La semilla trae dos años de historia de Dental Smile en dos sedes (Miraflores y San Isidro, `packages/services/src/seed-reports.ts`): citas, atenciones, cobros, gastos y conversaciones para que Reportes muestre tendencias. `pnpm --filter @odentia/services bench:reports` mide cada consulta de Reportes contra esa base, sin escribir nada; la meta es menos de 300 ms por consulta.
 
 Infra definida en `infra/dev/compose.yaml`: PostgreSQL :5432, almacenamiento S3 con RustFS :9000 (consola :9001; `storage-init` crea los buckets con `infra/dev/storage-init.sh`) y Mailpit :1025/:8025. MinIO se archivó en 2026 y ya no publica imagen. En Windows lanzar `pnpm dev` desde Git Bash con pnpm en PATH; proxies Portless en 443. Panel: `app.odentia.localhost`; administración: `admin.odentia.localhost`; plataforma: `odentia.localhost`; web de marketing: `www.odentia.localhost` (`pnpm --filter @odentia/web dev`).
