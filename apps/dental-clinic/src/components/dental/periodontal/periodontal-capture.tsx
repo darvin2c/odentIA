@@ -5,7 +5,9 @@
  * cambio se guarda solo; sin conexión queda en la pantalla y se envía al volver.
  * La placa (O'Leary) se marca aparte, en sus cuatro caras.
  */
+import { ApiError } from "@odentia/clinic-app/lib/api"
 import {
+  emptyPeriodontalTooth,
   furcationEntriesFor,
   MOBILITY_MAX,
   probingSequence,
@@ -32,7 +34,7 @@ import {
 import { SubmitButton, submitErrorMessage } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { type PeriodontalChart as ChartData, periodontalKeys, savePeriodontalTooth, toothSaveBody } from "../../../lib/dental/periodontal"
+import { type PeriodontalChart as ChartData, type PeriodontalToothSave, periodontalKeys, savePeriodontalTooth, toothSaveBody } from "../../../lib/dental/periodontal"
 import { isUpper, PlaqueTooth } from "./anatomy"
 import {
   applyCaptureKey,
@@ -136,19 +138,38 @@ function useToothSaver(patientId: string, chartId: string, latest: React.RefObje
   /** La pieza que no se pudo guardar: el aviso la nombra y el gráfico la marca. */
   const [failedTooth, setFailedTooth] = useState<number | null>(null)
   const [savedAt, setSavedAt] = useState<Date | null>(null)
+  // Cómo quedó guardada cada pieza: viaja como base, y otra pestaña no se pisa.
+  const saved = useRef<Map<number, PeriodontalToothSave> | null>(null)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: lo guardado se lee al montar, antes de sondear.
+  useEffect(() => {
+    const teeth = latest.current?.teeth ?? {}
+    saved.current = new Map(Object.entries(teeth).map(([tooth, record]) => [Number(tooth), toothSaveBody(record)]))
+  }, [])
 
+  // Las piezas que otra pestaña guardó: no se vuelven a enviar hasta recargar, y las demás siguen.
+  const conflicted = useRef(new Set<number>())
   const drain = useCallback((): Promise<void> => {
     if (running.current) return running.current
     const run = (async () => {
-      while (pending.current.size > 0) {
-        const tooth = pending.current.values().next().value as number
+      let stale: { tooth: number; message: string } | null = null
+      for (;;) {
+        const tooth = [...pending.current].find((item) => !conflicted.current.has(item))
+        if (tooth === undefined) break
         pending.current.delete(tooth)
         const record = latest.current?.teeth[tooth]
         if (!record) continue
         try {
-          await savePeriodontalTooth(patientId, chartId, tooth, toothSaveBody(record))
+          // Sin guardar todavía, la base es la pieza vacía: dos pestañas con un sondaje nuevo tampoco se pisan.
+          const base = saved.current?.get(tooth) ?? toothSaveBody(emptyPeriodontalTooth(tooth))
+          const done = await savePeriodontalTooth(patientId, chartId, tooth, { ...toothSaveBody(record), base })
+          saved.current?.set(tooth, toothSaveBody(done.data))
         } catch (err) {
           pending.current.add(tooth)
+          if (err instanceof ApiError && err.shape.code === "STALE_DRAFT") {
+            conflicted.current.add(tooth)
+            stale = { tooth, message: submitErrorMessage(err) }
+            continue
+          }
           if (isOffline(err)) {
             setState("offline")
           } else {
@@ -160,6 +181,13 @@ function useToothSaver(patientId: string, chartId: string, latest: React.RefObje
           }
           return
         }
+      }
+      if (stale) {
+        // Lo demás se guardó; la pieza que cambió otra pestaña queda marcada, con lo sondeado aquí.
+        setState("error")
+        setFailedTooth(stale.tooth)
+        setError(stale.message.startsWith(`Pieza ${stale.tooth}:`) ? stale.message : `Pieza ${stale.tooth}: ${stale.message}`)
+        return
       }
       setState("saved")
       setError(null)
