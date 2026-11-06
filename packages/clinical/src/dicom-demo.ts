@@ -62,16 +62,20 @@ export interface DemoDicomInput {
   pixels: Uint16Array
   /** Cuadros que contiene `pixels`; por omisión, 1. */
   frames?: number
-  /** Espaciado del detector en mm (fila, columna). */
-  pixelSpacingMm?: [number, number]
+  /** Espaciado del detector en mm (fila, columna); null: el archivo no trae escala. */
+  pixelSpacingMm?: [number, number] | null
   studyDate?: string
   uid?: string
 }
 
 export function encodeDemoDicom(input: DemoDicomInput): Uint8Array {
   const uid = input.uid ?? `2.25.${Date.now()}${Math.floor(Math.random() * 1e6)}`
-  const [rowMm, colMm] = input.pixelSpacingMm ?? [0.04, 0.04]
-  const pixelBytes = new Uint8Array(input.pixels.buffer, input.pixels.byteOffset, input.pixels.byteLength)
+  const spacing = input.pixelSpacingMm === null ? null : (input.pixelSpacingMm ?? [0.04, 0.04])
+  const pixelBytes = new Uint8Array(
+    input.pixels.buffer,
+    input.pixels.byteOffset,
+    input.pixels.byteLength,
+  )
   const metaBody = concat([
     element(0x0002, 0x0001, { vr: "OB", bytes: new Uint8Array([0, 1]) }),
     element(0x0002, 0x0002, text("UI", INTRAORAL_SOP_CLASS)),
@@ -88,7 +92,7 @@ export function encodeDemoDicom(input: DemoDicomInput): Uint8Array {
     element(0x0008, 0x0060, text("CS", "IO")),
     element(0x0008, 0x0070, text("LO", "DEMO Odentia32")),
     element(0x0010, 0x0010, text("PN", "DEMO^PACIENTE")),
-    element(0x0018, 0x1164, text("DS", `${rowMm}\\${colMm}`)),
+    ...(spacing ? [element(0x0018, 0x1164, text("DS", `${spacing[0]}\\${spacing[1]}`))] : []),
     element(0x0028, 0x0002, us(1)),
     element(0x0028, 0x0004, text("CS", "MONOCHROME2")),
     ...((input.frames ?? 1) > 1 ? [element(0x0028, 0x0008, text("IS", String(input.frames)))] : []),

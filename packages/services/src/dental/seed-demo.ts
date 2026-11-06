@@ -17,17 +17,10 @@
  */
 
 import { randomUUID } from "node:crypto"
-import { readFileSync } from "node:fs"
-import { createRequire } from "node:module"
 import { deflateSync } from "node:zlib"
 import { LEGAL } from "@odentia/auth/legal"
 import type { PatientGuide } from "@odentia/clinical"
-import {
-  DEFAULT_REGISTRATION_CONFIG,
-  DICOM_SAMPLES,
-  encodeDemoCtSlice,
-  encodeDemoDicom,
-} from "@odentia/clinical"
+import { DEFAULT_REGISTRATION_CONFIG, encodeDemoCtSlice, encodeDemoDicom } from "@odentia/clinical"
 import { createOwnerDb, withOrgContext } from "@odentia/db"
 import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { supportNotice } from "@odentia/db/schema/admin-support"
@@ -98,11 +91,18 @@ import {
 import { auditEvent, branch, orgProfile, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { saasAction, saasSubscription, storageUsageDay } from "@odentia/db/schema/saas-billing"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
-import { generateCbctPhantom, TREATMENT_KIND_KEYS } from "@odentia/dental"
+import { TREATMENT_KIND_KEYS } from "@odentia/dental"
 import { hashPassword } from "better-auth/crypto"
 import { and, asc, desc, eq, inArray, isNull, like, or, sql } from "drizzle-orm"
 import { PDFDocument, StandardFonts } from "pdf-lib"
 import sharp from "sharp"
+import {
+  DEMO_CBCT,
+  DEMO_IMAGES,
+  type DemoImageSource,
+  demoImage,
+  readGipl,
+} from "./demo-imaging.js"
 import { claimHandoff, createHandoff, recordTopicAskedAgain } from "../agent-operations.js"
 import { upsertAgentConfig } from "../agentConfig.js"
 import { addPatientAllergy, removePatientAllergy } from "../allergies.js"
@@ -270,40 +270,31 @@ const seedConversation = (args: SeedConversationArgs) => seedConversationIn(db, 
 const seedMessage = (args: SeedMessageArgs) => seedMessageIn(db, args)
 const countWhere = (table: string, orgId: string) => countWhereIn(db, table, orgId)
 /**
- * Imagen clínica de demostración (no es de un paciente real): radiografía o
- * foto esquemática dibujada con SVG para que la galería, el visor y la
- * comparación se vean como con imágenes reales. `variant` desplaza la lesión.
+ * La hoja de un consentimiento firmado en papel, fotografiada: un papel con
+ * renglones, dibujado con SVG (no es una imagen clínica).
  */
-async function demoClinicalImage(kind: "rx" | "foto", variant = 0): Promise<Buffer> {
-  const [w, h] = kind === "rx" ? [640, 480] : [800, 600]
-  const bg = kind === "rx" ? "#1b1b1b" : "#7a2f35"
-  const tooth = kind === "rx" ? "#b9b9b9" : "#f1ead8"
-  const teeth = [120, 300, 480]
-    .map(
-      (x) =>
-        `<rect x="${x}" y="70" width="140" height="260" rx="48" fill="${tooth}"/>` +
-        (kind === "rx"
-          ? `<rect x="${x + 22}" y="320" width="34" height="130" rx="14" fill="#9a9a9a"/><rect x="${x + 84}" y="320" width="34" height="130" rx="14" fill="#9a9a9a"/><ellipse cx="${x + 70}" cy="150" rx="34" ry="40" fill="#e8e8e8"/>`
-          : ""),
-    )
-    .join("")
-  const lesion = `<ellipse cx="${160 + variant * 6}" cy="${120 + variant * 4}" rx="${26 - variant}" ry="${20 - variant}" fill="${kind === "rx" ? "#3d3d3d" : "#4a3420"}"/>`
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="${bg}"/>${teeth}${lesion}</svg>`
-  return sharp(Buffer.from(svg))
-    .blur(kind === "rx" ? 2.2 : 0.6)
-    .png()
-    .toBuffer()
+async function demoSignedSheet(): Promise<Buffer> {
+  const lines = Array.from(
+    { length: 14 },
+    (_, k) =>
+      `<rect x="90" y="${150 + k * 34}" width="${k % 4 === 3 ? 300 : 520}" height="8" rx="4" fill="#c9c4b8"/>`,
+  ).join("")
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1000"><rect width="100%" height="100%" fill="#8a8578"/><rect x="50" y="40" width="700" height="920" fill="#f6f3ea"/><rect x="90" y="80" width="420" height="22" rx="6" fill="#4a4640"/>${lines}<path d="M120 880 C 180 820 240 900 300 850 S 400 830 440 870" stroke="#1f3a8a" stroke-width="5" fill="none"/></svg>`
+  return sharp(Buffer.from(svg)).png().toBuffer()
 }
 
-/** Guarda la imagen demo y su miniatura, como hace la subida real. */
-async function putDemoImage(patientId: string, kind: "rx" | "foto", variant = 0) {
-  const bytes = await demoClinicalImage(kind, variant)
+/** Guarda una imagen y su miniatura, como hace la subida real. */
+async function putDemoBytes(
+  patientId: string,
+  bytes: Buffer,
+  contentType: "image/jpeg" | "image/png",
+) {
   const ref = await storage.putPatientDocument({
     orgId: ORG_A,
     patientId,
     bytes,
-    contentType: "image/png",
-    ext: "png",
+    contentType,
+    ext: contentType === "image/jpeg" ? "jpg" : "png",
   })
   const thumb = await makeImageThumbnail(bytes)
   const thumbRef = thumb
@@ -316,6 +307,15 @@ async function putDemoImage(patientId: string, kind: "rx" | "foto", variant = 0)
       })
     : null
   return { ...ref, thumbnailKey: thumbRef?.objectKey ?? null }
+}
+
+/**
+ * Una imagen clínica real de la demo (`demo-imaging.ts`), guardada como la subida
+ * real; null si no se pudo descargar: ese documento queda fuera.
+ */
+async function putDemoImage(patientId: string, source: DemoImageSource) {
+  const bytes = await demoImage(source)
+  return bytes ? putDemoBytes(patientId, bytes, "image/jpeg") : null
 }
 
 const DEMO_VOICE_WAV = demoVoiceNoteWav()
@@ -1204,12 +1204,14 @@ await seedMessage({
 })
 // Adjuntos demo con bytes reales: la imagen se ve inline y la nota de voz con
 // su transcripción debajo (así se prueba el render sin TRANSCRIBE_*).
+// La radiografía que manda Rosa por el chat es real (`demo-imaging.ts`); sin ella va la de siempre.
+const rosaXray = await demoImage(DEMO_IMAGES.periapicalInferior)
 const rosaImageRef = await storage.putAttachment({
   orgId: ORG_A,
   conversationId: convRosa.id,
-  bytes: DEMO_XRAY_PNG,
-  contentType: "image/png",
-  ext: "png",
+  bytes: rosaXray ?? DEMO_XRAY_PNG,
+  contentType: rosaXray ? "image/jpeg" : "image/png",
+  ext: rosaXray ? "jpg" : "png",
 })
 await seedMessage({
   orgId: ORG_A,
@@ -1222,7 +1224,7 @@ await seedMessage({
     {
       objectKey: rosaImageRef.objectKey,
       mimeType: rosaImageRef.mimeType,
-      filename: "radiografia-demo.png",
+      filename: rosaXray ? "radiografia.jpg" : "radiografia-demo.png",
       size: rosaImageRef.size,
     },
   ],
@@ -2587,68 +2589,76 @@ const dxErrado = await addEncounterDiagnosis(db, ORG_A, ANA_ID, rosaPatientId, d
 await voidEncounterDiagnosis(db, ORG_A, ANA_ID, rosaPatientId, draft.id, dxErrado.id, {
   reason: "Pieza equivocada: era la 36",
 })
-// Documentos demo con bytes reales en storage (el registro exige borrador).
-const rxRef = await putDemoImage(rosaPatientId, "rx", 0)
-const docRx = await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
-  category: "radiografia",
-  label: "[DEMO] Radiografía periapical pieza 36",
-  storageKey: rxRef.objectKey,
-  contentType: rxRef.mimeType,
-  sizeBytes: rxRef.size,
-  thumbnailKey: rxRef.thumbnailKey,
-  imageType: "periapical",
-  capturedAt: new Date(Date.now() - 20 * 60_000),
-  source: "Sensor intraoral · sala 2",
-  encounterId: draft.id,
-  toothNumbers: [36],
-  tags: ["radiografia", "diagnostico-inicial"],
-})
-// Corrección versionada: suma etiqueta sin tocar blob ni clasificación.
-await correctDocumentContext(db, ORG_A, ANA_ID, rosaPatientId, docRx.id, {
-  expectedVersion: 1,
-  tags: ["radiografia", "diagnostico-inicial", "pieza-36"],
-})
-const fotoRef = await putDemoImage(rosaPatientId, "foto", 0)
-await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
-  category: "foto_clinica",
-  label: "[DEMO] Foto clínica piezas 36 y 46",
-  storageKey: fotoRef.objectKey,
-  contentType: fotoRef.mimeType,
-  sizeBytes: fotoRef.size,
-  thumbnailKey: fotoRef.thumbnailKey,
-  imageType: "foto_intraoral",
-  capturedAt: new Date(Date.now() - 15 * 60_000),
-  encounterId: draft.id,
-  planItemId: endo46.id,
-  toothNumbers: [36, 46],
-  tags: ["foto-clinica", "seguimiento"],
-})
-// Imágenes previas para comparar y filtrar por tipo y periodo: panorámica de
-// un centro externo e interproximal de control, ya informadas.
+// Documentos demo con imágenes clínicas reales (`demo-imaging.ts`), guardadas como la
+// subida real; el «Origen» lleva su autor y su licencia. El registro exige borrador.
+const rxRef = await putDemoImage(rosaPatientId, DEMO_IMAGES.periapicalInferior)
+let docRx: { id: string } | null = null
+if (rxRef) {
+  docRx = await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
+    category: "radiografia",
+    label: "[DEMO] Radiografía periapical pieza 36",
+    storageKey: rxRef.objectKey,
+    contentType: rxRef.mimeType,
+    sizeBytes: rxRef.size,
+    thumbnailKey: rxRef.thumbnailKey,
+    imageType: "periapical",
+    capturedAt: new Date(Date.now() - 20 * 60_000),
+    source: DEMO_IMAGES.periapicalInferior.credit,
+    encounterId: draft.id,
+    toothNumbers: [36],
+    tags: ["radiografia", "diagnostico-inicial"],
+  })
+  // Corrección versionada: suma etiqueta sin tocar blob ni clasificación.
+  await correctDocumentContext(db, ORG_A, ANA_ID, rosaPatientId, docRx.id, {
+    expectedVersion: 1,
+    tags: ["radiografia", "diagnostico-inicial", "pieza-36"],
+  })
+}
+const fotoRef = await putDemoImage(rosaPatientId, DEMO_IMAGES.fotoIntraoral)
+if (fotoRef) {
+  await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
+    category: "foto_clinica",
+    label: "[DEMO] Foto intraoral lateral derecha",
+    storageKey: fotoRef.objectKey,
+    contentType: fotoRef.mimeType,
+    sizeBytes: fotoRef.size,
+    thumbnailKey: fotoRef.thumbnailKey,
+    imageType: "foto_intraoral",
+    capturedAt: new Date(Date.now() - 15 * 60_000),
+    source: DEMO_IMAGES.fotoIntraoral.credit,
+    encounterId: draft.id,
+    planItemId: endo46.id,
+    toothNumbers: [46],
+    tags: ["foto-clinica", "seguimiento"],
+  })
+}
+// Imágenes previas para comparar y filtrar por tipo y periodo: panorámica y
+// cefalométrica de un centro externo y una periapical de control, ya informadas.
 for (const previa of [
   {
+    image: DEMO_IMAGES.panoramica,
     imageType: "panoramica",
     label: "[DEMO] Panorámica inicial",
     days: 18,
-    source: "Centro radiológico externo",
     teeth: [] as number[],
   },
   {
-    imageType: "bitewing",
-    label: "[DEMO] Interproximal derecha",
+    image: DEMO_IMAGES.cefalometrica,
+    imageType: "cefalometrica",
+    label: "[DEMO] Cefalométrica lateral",
     days: 14,
-    source: "Sensor intraoral · sala 2",
-    teeth: [16, 46],
+    teeth: [] as number[],
   },
   {
+    image: DEMO_IMAGES.periapicalPeriodontitis,
     imageType: "periapical",
-    label: "[DEMO] Periapical 36 de control previo",
+    label: "[DEMO] Periapical 25 de control previo",
     days: 200,
-    source: "Sensor intraoral · sala 1",
-    teeth: [36],
+    teeth: [25],
   },
 ] as const) {
-  const ref = await putDemoImage(rosaPatientId, "rx", previa.days > 100 ? 5 : 1)
+  const ref = await putDemoImage(rosaPatientId, previa.image)
+  if (!ref) continue
   await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
     category: "radiografia",
     label: previa.label,
@@ -2658,109 +2668,85 @@ for (const previa of [
     thumbnailKey: ref.thumbnailKey,
     imageType: previa.imageType,
     capturedAt: new Date(Date.now() - previa.days * 86_400_000),
-    source: previa.source,
+    source: previa.image.credit,
     reportStatus: "informado",
     toothNumbers: [...previa.teeth],
   })
 }
-// Periapical del sensor en DICOM (16 bits, con espaciado del detector) para
-// el visor DICOM; se genera con el codificador de demostración.
+// Una periapical real dentro de un DICOM, para el visor DICOM. Viene de una imagen,
+// no del sensor: no trae escala, y el visor lo dice al intentar medir (no se inventa).
 {
-  const { data, info } = await sharp(await demoClinicalImage("rx", 2))
-    .greyscale()
-    .raw()
-    .toBuffer({ resolveWithObject: true })
-  const pixels = new Uint16Array(info.width * info.height)
-  for (let i = 0; i < pixels.length; i++) pixels[i] = Math.round(((data[i] ?? 0) / 255) * 4095)
-  const dicom = encodeDemoDicom({
-    width: info.width,
-    height: info.height,
-    pixels,
-    pixelSpacingMm: [0.04, 0.04],
-  })
-  const ref = await storage.putPatientDocument({
-    orgId: ORG_A,
-    patientId: rosaPatientId,
-    bytes: dicom,
-    contentType: "application/dicom",
-    ext: "dcm",
-  })
-  await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
-    category: "radiografia",
-    label: "[DEMO] Periapical 36 del sensor (DICOM)",
-    storageKey: ref.objectKey,
-    contentType: "application/dicom",
-    sizeBytes: ref.size,
-    imageType: "periapical",
-    capturedAt: new Date(Date.now() - 10 * 60_000),
-    source: "Sensor intraoral · sala 2",
-    toothNumbers: [36],
-  })
-}
-// La misma periapical en cada compresión que lee el visor DICOM (JPEG, JPEG-LS,
-// JPEG 2000, RLE, Big Endian y varios cuadros); las genera
-// `packages/clinical/samples/dicom/generate.py`. Son muestras, no se informan.
-{
-  const require = createRequire(import.meta.url)
-  for (const sample of DICOM_SAMPLES) {
-    if (sample.transferSyntax === "1.2.840.10008.1.2.1") continue // ya está la del sensor
-    const bytes = new Uint8Array(
-      readFileSync(require.resolve(`@odentia/clinical/samples/dicom/${sample.file}`)),
-    )
+  const bytes = await demoImage(DEMO_IMAGES.periapicalRadiolucidez)
+  if (bytes) {
+    const { data, info } = await sharp(bytes)
+      .greyscale()
+      .raw()
+      .toBuffer({ resolveWithObject: true })
+    const pixels = new Uint16Array(info.width * info.height)
+    for (let i = 0; i < pixels.length; i++) pixels[i] = Math.round(((data[i] ?? 0) / 255) * 4095)
+    const dicom = encodeDemoDicom({
+      width: info.width,
+      height: info.height,
+      pixels,
+      pixelSpacingMm: null,
+    })
     const ref = await storage.putPatientDocument({
       orgId: ORG_A,
       patientId: rosaPatientId,
-      bytes,
+      bytes: dicom,
       contentType: "application/dicom",
       ext: "dcm",
     })
     await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
       category: "radiografia",
-      label: `[DEMO] Periapical en ${sample.name} (DICOM)`,
+      label: "[DEMO] Periapical 11 y 21 (DICOM, sin escala)",
       storageKey: ref.objectKey,
       contentType: "application/dicom",
       sizeBytes: ref.size,
       imageType: "periapical",
-      capturedAt: new Date(Date.now() - 400 * 86_400_000),
-      source: "Muestra de formatos DICOM",
-      reportStatus: "no_requiere",
-      toothNumbers: [36],
+      capturedAt: new Date(Date.now() - 10 * 60_000),
+      source: DEMO_IMAGES.periapicalRadiolucidez.credit,
+      toothNumbers: [11, 21],
     })
   }
 }
-// Tomografía de demostración (un fantoma sintético, no es de un paciente) para
-// el visor de tomografía: la serie CT entra por el mismo camino que la de un CD
-// (ADR 0055). Lleva el nombre de Rosa para que no salte el aviso de nombre.
-{
-  const phantom = generateCbctPhantom()
-  const root = "2.25.3400000000000000000034"
+// Tomografía real (PreDentalSurgery, de los datos de muestra de 3D Slicer; no es de
+// un paciente de la clínica) para el visor de tomografía: la serie CT entra por el
+// mismo camino que la de un CD (ADR 0055). Lleva el nombre de Rosa para que no
+// salte el aviso de nombre. Sin conexión queda fuera, sin inventar otra.
+const cbct = await demoImage(DEMO_CBCT)
+if (cbct) {
+  const volume = readGipl(cbct)
+  const root = "2.25.3400000000000000000035"
   const studyUid = `${root}.1`
   const seriesUid = `${root}.2`
-  const slices = phantom.data.map((pixels, k) =>
+  const plane = volume.nx * volume.ny
+  const slices = Array.from({ length: volume.nz }, (_, k) =>
     encodeDemoCtSlice({
-      width: phantom.size,
-      height: phantom.size,
-      pixels,
-      voxelMm: phantom.voxelMm,
-      position: [phantom.origin[0], phantom.origin[1], phantom.sliceZ[k]!],
+      width: volume.nx,
+      height: volume.ny,
+      pixels: volume.data.subarray(k * plane, (k + 1) * plane),
+      voxelMm: volume.voxelMm,
+      position: [0, 0, k * volume.voxelMm],
       instanceNumber: k + 1,
       studyUid,
       seriesUid,
       frameOfReferenceUid: `${root}.3`,
       sopUid: `${root}.4.${k + 1}`,
       patientName: "QUISPE^ROSA",
+      institution: "3D Slicer (datos de muestra)",
     }),
   )
   const started = await startImagingStudyUpload(db, ORG_A, ANA_ID, rosaPatientId, {
-    label: "[DEMO] Tomografía (CBCT) · Centro de imágenes de demostración",
+    label: "[DEMO] Tomografía (CBCT)",
     studyInstanceUid: studyUid,
     dicomPatientName: "QUISPE^ROSA",
     modality: "CT",
     capturedAt: new Date(Date.now() - 20 * 86_400_000),
-    source: "Centro de imágenes de demostración",
+    source: DEMO_CBCT.credit,
     toothNumbers: [36, 37],
     sliceCount: slices.length,
-    voxelMm: phantom.voxelMm,
+    voxelMm: volume.voxelMm,
     files: slices.map((bytes, k) => ({
       sopInstanceUid: `${root}.4.${k + 1}`,
       seriesInstanceUid: seriesUid,
@@ -2780,16 +2766,18 @@ for (const previa of [
     documentId,
     pending.map((file) => file.index),
   )
-  // Miniatura: el corte a la altura de las raíces inferiores, con ventana de hueso.
-  const k = phantom.sliceZ.findIndex((z) => z >= -18)
+  // Miniatura: el corte a la altura de los dientes (un tercio desde abajo), con el contraste del corte.
+  const k = Math.floor(volume.nz * 0.3)
+  const cut = volume.data.subarray(k * plane, (k + 1) * plane)
+  const sorted = Array.from(cut).sort((a, b) => a - b)
+  const low = sorted[Math.floor(sorted.length * 0.05)] ?? 0
+  const high = sorted[Math.floor(sorted.length * 0.998)] ?? 4095
   const gray = Buffer.from(
-    Array.from(phantom.data[k]!, (stored) =>
-      Math.max(0, Math.min(255, Math.round(((stored - 1000 - 699.5) / 2999 + 0.5) * 255))),
+    Array.from(cut, (v) =>
+      Math.max(0, Math.min(255, Math.round(((v - low) / Math.max(1, high - low)) * 255))),
     ),
   )
-  const thumb = await sharp(gray, {
-    raw: { width: phantom.size, height: phantom.size, channels: 1 },
-  })
+  const thumb = await sharp(gray, { raw: { width: volume.nx, height: volume.ny, channels: 1 } })
     .resize(320)
     .webp()
     .toBuffer()
@@ -2803,19 +2791,22 @@ for (const previa of [
   await setImagingThumbnail(db, ORG_A, rosaPatientId, documentId, thumbRef.objectKey)
 }
 // Una imagen subida al paciente equivocado se retira con motivo; no se borra.
-const erradaRef = await putDemoImage(rosaPatientId, "rx", 3)
-const errada = await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
-  category: "radiografia",
-  label: "[DEMO] Periapical de otro paciente",
-  storageKey: erradaRef.objectKey,
-  contentType: erradaRef.mimeType,
-  sizeBytes: erradaRef.size,
-  thumbnailKey: erradaRef.thumbnailKey,
-  imageType: "periapical",
-})
-await retirePatientDocument(db, ORG_A, ANA_ID, rosaPatientId, errada.id, {
-  reason: "Subida al paciente equivocado",
-})
+const erradaRef = await putDemoImage(rosaPatientId, DEMO_IMAGES.periapicalRadiolucidez)
+if (erradaRef) {
+  const errada = await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
+    category: "radiografia",
+    label: "[DEMO] Periapical de otro paciente",
+    storageKey: erradaRef.objectKey,
+    contentType: erradaRef.mimeType,
+    sizeBytes: erradaRef.size,
+    thumbnailKey: erradaRef.thumbnailKey,
+    imageType: "periapical",
+    source: DEMO_IMAGES.periapicalRadiolucidez.credit,
+  })
+  await retirePatientDocument(db, ORG_A, ANA_ID, rosaPatientId, errada.id, {
+    reason: "Subida al paciente equivocado",
+  })
+}
 // Un informe suelto en PDF: no es imagen ni consentimiento, así que Documentos
 // lo muestra en «Otros archivos» y lo abre en el mismo visor (issue 149).
 {
@@ -2884,10 +2875,12 @@ const evaluacion46 = await createEncounter(db, ORG_A, ANA_ID, rosaPatientId, {
 await addEncounterProcedure(db, ORG_A, ANA_ID, rosaPatientId, evaluacion46.id, {
   planItemId: obt36.id,
 })
-await correctDocumentContext(db, ORG_A, ANA_ID, rosaPatientId, docRx.id, {
-  expectedVersion: 2,
-  planItemId: obt36.id,
-})
+if (docRx) {
+  await correctDocumentContext(db, ORG_A, ANA_ID, rosaPatientId, docRx.id, {
+    expectedVersion: 2,
+    planItemId: obt36.id,
+  })
+}
 // Dos opciones en un mismo presupuesto (decisión 13): la 46 se arregla con una
 // resina o con una corona, y Rosa elige una. La B nace como copia de la A y se
 // cambia lo que hace falta; cada una con su total, nunca sumadas. Queda enviado,
@@ -3310,7 +3303,7 @@ const mariaPaz = await createPatient(db, ORG_A, ANA_ID, {
   phone: "+51987111222",
   registeredBranchId: miraflores.id,
 })
-await createPatient(db, ORG_A, ANA_ID, {
+const luciaPaz = await createPatient(db, ORG_A, ANA_ID, {
   displayName: "Lucía Paz",
   givenNames: "Lucía",
   familyName: "Paz",
@@ -3318,6 +3311,25 @@ await createPatient(db, ORG_A, ANA_ID, {
   phone: "+51987111222",
   registeredBranchId: miraflores.id,
 })
+// Su periapical real: la 75 temporal y las coronas en formación de 35, 36 y 37.
+{
+  const ref = await putDemoImage(luciaPaz.id, DEMO_IMAGES.periapicalNino)
+  if (ref) {
+    await registerPatientDocument(db, ORG_A, ANA_ID, luciaPaz.id, {
+      category: "radiografia",
+      label: "[DEMO] Periapical de la 75",
+      storageKey: ref.objectKey,
+      contentType: ref.mimeType,
+      sizeBytes: ref.size,
+      thumbnailKey: ref.thumbnailKey,
+      imageType: "periapical",
+      capturedAt: new Date(Date.now() - 30 * 86_400_000),
+      source: DEMO_IMAGES.periapicalNino.credit,
+      reportStatus: "informado",
+      toothNumbers: [75, 36],
+    })
+  }
+}
 await createPatient(db, ORG_A, ANA_ID, {
   displayName: "María Quispe Huamán",
   givenNames: "María",
@@ -4306,7 +4318,7 @@ await db.transaction(async (tx) => {
     )
     .limit(1)
   if (paperPending) {
-    const photo = await putDemoImage(domainSeed.patientId, "foto", 2)
+    const photo = await putDemoBytes(domainSeed.patientId, await demoSignedSheet(), "image/png")
     const sheet = await registerPatientDocument(db, ORG_A, ANA_ID, domainSeed.patientId, {
       category: "consentimiento",
       label: "[DEMO] Hoja firmada: Anestesia local odontológica",
