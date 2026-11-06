@@ -991,7 +991,7 @@ export function assertUnchangedSince(
   const fields: Record<string, string> = {}
   for (const [key, seen] of Object.entries(base)) {
     // Solo lo que guarda esta fila: un dato que vive en otra (su teléfono, su seguro) no se compara aquí.
-    if (!(key in stored)) continue
+    if (!Object.hasOwn(stored, key)) continue
     if (text(stored[key]) !== text(seen)) fields[key] = "Otra sesión cambió este dato mientras editabas: recarga para ver lo último."
   }
   if (Object.keys(fields).length > 0) {

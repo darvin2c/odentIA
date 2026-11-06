@@ -98,6 +98,10 @@ it("solo quien lleva la atención escribe, solo en borrador y solo las piezas qu
   await expect(
     f.run((tx) => savePeriodontalTooth(tx, f.orgId, f.actor, f.patientId, chart.id, { ...tooth36, probingDepth: [5, 5, 5, 5, 5, 5], base: { probingDepth: [null, null, null, null, null, null] } })),
   ).rejects.toMatchObject({ code: "STALE_DRAFT", message: expect.stringMatching(/^Pieza 36/) })
+  // El reintento que sí había llegado (lo mismo, con la base vacía) no es un conflicto.
+  await expect(
+    f.run((tx) => savePeriodontalTooth(tx, f.orgId, f.actor, f.patientId, chart.id, { ...tooth36, base: { probingDepth: [null, null, null, null, null, null] } })),
+  ).resolves.toMatchObject({ toothNumber: 36 })
   // Quien parte de lo guardado sí guarda.
   await expect(
     f.run((tx) => savePeriodontalTooth(tx, f.orgId, f.actor, f.patientId, chart.id, { ...tooth36, base: { probingDepth: saved.probingDepth, furcation: saved.furcation } })),

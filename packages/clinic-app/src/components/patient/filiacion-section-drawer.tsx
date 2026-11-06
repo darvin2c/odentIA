@@ -283,6 +283,9 @@ export function FiliacionSectionDrawer({
   const countries = useMemo(() => countryChoices(profile.country), [profile.country])
   const patientAddressSource = useMemo(() => staffAddressSource("paciente"), [])
   const source = (patient ?? person ?? {}) as unknown as Partial<Record<string, unknown>>
+  // Lo que se vio al abrir: si la ficha se recarga mientras se edita (otra sesión guardó), lo
+  // que no se tocó no se vuelve a enviar con lo de antes, y la base dice de dónde se partió.
+  const [seenAtOpen] = useState(() => source)
   const sections = useSectionFields(source)
   const completing = section === "completar"
   const all = [
@@ -297,7 +300,7 @@ export function FiliacionSectionDrawer({
     : null
   const sectionFields = (completing ? all.filter((field) => wanted?.has(field.key)) : sections[section].fields)
     .filter((field) => patient || PERSON_FIELD_KEYS.has(field.key))
-  const original = initialValues(source, sectionFields)
+  const original = initialValues(seenAtOpen, sectionFields)
   // Guardar confirma los apellidos: los que se ven al guardar quedan revisados.
   const confirmsNames = Boolean(patient?.identityNeedsReview) && (completing || section === "identidad")
   // El documento repetido: además del error en el número, el enlace a quien ya lo tiene.
@@ -352,7 +355,7 @@ export function FiliacionSectionDrawer({
       // opción y se guarda en dos datos): si otra sesión lo cambió, el servidor lo dice junto al dato.
       const base = Object.fromEntries(
         Object.keys(patch).map((key) => {
-          const seen = source[key]
+          const seen = seenAtOpen[key]
           return [key, typeof seen === "string" || typeof seen === "number" || typeof seen === "boolean" ? seen : null]
         }),
       )

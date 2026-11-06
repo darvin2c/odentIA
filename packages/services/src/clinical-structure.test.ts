@@ -518,6 +518,10 @@ it("formularios: versión real al publicar, título congelado, tipos clínicos, 
   await expect(
     run((tx) => updateFormResponseDraft(tx, "org_a", ACTOR, response.id, { answers: { dolor: false }, baseAnswers: response.answers ?? {} })),
   ).resolves.toMatchObject({ answers: { dolor: false } })
+  // El reintento que sí había llegado (con la base de antes) no es un conflicto.
+  await expect(
+    run((tx) => updateFormResponseDraft(tx, "org_a", ACTOR, response.id, { answers: { dolor: false }, baseAnswers: response.answers ?? {} })),
+  ).resolves.toMatchObject({ answers: { dolor: false } })
   await expect(save({ pieza: 19 })).rejects.toMatchObject({ status: 400 })
   await expect(save({ dolor: true, intensidad: 11 })).rejects.toMatchObject({ status: 400 })
   await expect(save({ foto: crypto.randomUUID() })).rejects.toMatchObject({ status: 400 })

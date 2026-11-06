@@ -1309,13 +1309,7 @@ export async function updateFormResponseDraft(
     .limit(1)
     .for("update")
   if (!current) throw notFound("Formulario")
-  // Otra pestaña guardó otras respuestas mientras se escribía: se avisa en vez de pisarlas.
-  if (input.baseAnswers !== undefined && canonicalJson(current.answers ?? {}) !== canonicalJson(input.baseAnswers ?? {})) {
-    throw conflict(
-      "STALE_DRAFT",
-      "Otra pestaña guardó otras respuestas de este formulario mientras escribías. Copia lo tuyo si lo necesitas y recarga para ver lo último.",
-    )
-  }
+
   if (current.status !== "borrador") {
     throw conflict(
       "FINALIZED",
@@ -1326,6 +1320,18 @@ export async function updateFormResponseDraft(
   }
   const schema = assertFormSchema(current.templateSnapshot)
   const answers = assertAnswers(schema, input.answers, { requireAll: false, site: await siteOf(tx, orgId) })
+  // Otra pestaña guardó otras respuestas mientras se escribía: se avisa en vez de pisarlas. Si lo
+  // guardado ya es lo que llega (un reintento que sí había llegado), no hay conflicto.
+  if (
+    input.baseAnswers !== undefined &&
+    canonicalJson(current.answers ?? {}) !== canonicalJson(input.baseAnswers ?? {}) &&
+    canonicalJson(current.answers ?? {}) !== canonicalJson(answers)
+  ) {
+    throw conflict(
+      "STALE_DRAFT",
+      "Otra pestaña o persona guardó otras respuestas de este formulario mientras escribías. Copia lo tuyo si lo necesitas y recarga para ver lo último.",
+    )
+  }
   await assertAttachmentAnswers(tx, orgId, current.patientId, schema, answers)
   let professionalUserId = current.professionalUserId
   if (input.professionalUserId !== undefined) {

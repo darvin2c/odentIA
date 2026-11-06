@@ -689,6 +689,10 @@ it("dos pestañas: guardar un texto que otra pestaña cambió avisa en vez de pi
   // La pestaña A guarda la evolución; la B partió de la evolución vacía.
   const fromA = await f.run((tx) => updateEncounterDraft(tx, ...f.args, f.encounter.id, { evolution: "Escrito en A", base: { evolution: null } }))
   expect(fromA.evolution).toBe("Escrito en A")
+  // El reintento de A que sí había llegado (con la base de antes) no es un conflicto.
+  await expect(
+    f.run((tx) => updateEncounterDraft(tx, ...f.args, f.encounter.id, { evolution: "Escrito en A", base: { evolution: null } })),
+  ).resolves.toMatchObject({ evolution: "Escrito en A" })
   await expect(
     f.run((tx) => updateEncounterDraft(tx, ...f.args, f.encounter.id, { evolution: "Escrito en B", base: { evolution: null } })),
   ).rejects.toMatchObject({ code: "STALE_DRAFT", status: 409, fields: { evolution: expect.stringContaining("Evolución") } })

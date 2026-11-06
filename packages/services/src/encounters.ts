@@ -1025,14 +1025,19 @@ export async function updateEncounterDraft(
   assertOpenDraft(locked, actorUserId)
   // Otra pestaña (u otra persona tras el relevo) guardó otro texto en el mismo campo:
   // se avisa en vez de pisarlo. Lo escrito sigue en la pantalla de quien guarda.
+  // Si lo guardado ya es lo que llega (un reintento que sí había llegado), no hay conflicto.
+  const stale: Record<string, string> = {}
   for (const field of ENCOUNTER_TEXT_FIELDS) {
     const expected = patch.base?.[field]
-    if (expected === undefined || patch[field] === undefined) continue
-    const stored = locked[field] ?? null
-    if ((stored ?? "") !== (expected ?? "")) {
-      const message = `Otra pestaña guardó otra «${ENCOUNTER_TEXT_LABELS[field]}» mientras escribías. Copia lo tuyo si lo necesitas y recarga para ver lo último.`
-      throw new ServiceError("STALE_DRAFT", 409, message, { [field]: message })
-    }
+    const sent = patch[field]
+    if (expected === undefined || sent === undefined) continue
+    const stored = (locked[field] ?? "").trim()
+    if (stored === (expected ?? "").trim() || stored === (sent ?? "").trim()) continue
+    stale[field] = `Otra pestaña o persona guardó otra «${ENCOUNTER_TEXT_LABELS[field]}» mientras escribías. Copia lo tuyo si lo necesitas y recarga para ver lo último.`
+  }
+  const staleFields = Object.keys(stale)
+  if (staleFields.length > 0) {
+    throw new ServiceError("STALE_DRAFT", 409, stale[staleFields[0] as string] as string, stale)
   }
   const set: Partial<typeof encounter.$inferInsert> = {}
   if (patch.branchId !== undefined) {

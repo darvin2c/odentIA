@@ -514,6 +514,8 @@ export function EncounterEditor({
   const mountedRef = useRef(true)
   const childCountRef = useRef(0)
   const latestWriteAtRef = useRef(new Date(encounter.updatedAt).getTime())
+  // Los textos que otra pestaña cambió: no se vuelven a enviar hasta recargar, y lo demás sigue guardándose.
+  const conflictRef = useRef<Set<DraftKey>>(new Set())
   // Lo último guardado de cada texto, como lo devolvió el servidor: viaja como `base`.
   const savedTextRef = useRef<Record<TextKey, string | null>>({
     reason: encounter.reason ?? null,
@@ -641,13 +643,15 @@ export function EncounterEditor({
       const sent = new Set<string>()
       // Alguna tanda llegó al servidor: lo que falta para cerrar puede haber cambiado.
       let savedAny = false
+      // El aviso de otra pestaña: lo demás se guardó; ese campo queda con lo escrito, sin enviarse.
+      let stale: unknown = null
       try {
         if (mountedRef.current) setSaveState("saving")
         for (;;) {
-          if (dirtyRef.current.size === 0) break
+          const sendable = [...dirtyRef.current].filter((key) => !conflictRef.current.has(key))
+          if (sendable.length === 0) break
           sentAny = true
-          const sendable = [...dirtyRef.current]
-          dirtyRef.current.clear()
+          for (const key of sendable) dirtyRef.current.delete(key)
           for (const key of sendable) sent.add(key)
           for (const key of sendable) inflightRef.current.add(key)
           try {
@@ -662,8 +666,12 @@ export function EncounterEditor({
               latestWriteAtRef.current,
               new Date(saved.data.updatedAt).getTime(),
             )
-            // Lo que quedó guardado es la nueva base de cada texto enviado.
+            // Lo que quedó guardado es la nueva base de cada texto enviado, también en la caché:
+            // al volver a la atención se parte de lo guardado, no de una copia vieja.
             for (const key of sendable) if (isTextKey(key)) savedTextRef.current[key] = saved.data[key] ?? null
+            queryClient.setQueryData<{ data: EncounterDetail }>(["encounter", patientId, encounterId], (old) =>
+              old ? { ...old, data: { ...old.data, encounter: { ...old.data.encounter, ...saved.data } } } : old,
+            )
             savedAny = true
             // La sección «Signos vitales» y la medición anterior se leen de nuevo.
             if (sendable.includes("vitals"))
@@ -671,6 +679,14 @@ export function EncounterEditor({
             // El examen guardado ya no tiene nada que corregir.
             if (sendable.includes("examination") && mountedRef.current) setExamErrors({})
           } catch (err) {
+            // Otra pestaña guardó otro texto en un campo: ese se aparta y lo demás se vuelve a enviar.
+            const fields = err instanceof ApiError && err.shape.code === "STALE_DRAFT" ? Object.keys(err.shape.fields ?? {}) : []
+            if (fields.length > 0) {
+              for (const key of sendable) if (fields.includes(key)) conflictRef.current.add(key)
+              for (const key of sendable) dirtyRef.current.add(key)
+              stale = err
+              continue
+            }
             for (const key of sendable) dirtyRef.current.add(key)
             throw err
           } finally {
@@ -680,9 +696,14 @@ export function EncounterEditor({
         if (mountedRef.current) {
           setSaveError(null)
           // Lo guardado ya no tiene nada que corregir; lo que falta para cerrar sigue marcado.
-          clearSubmitErrors(draftForm, (name) => [...sent].some((key) => name === key || name.startsWith(`${key}.`)))
+          clearSubmitErrors(draftForm, (name) => [...sent].some((key) => name === key && !conflictRef.current.has(key as DraftKey) || name.startsWith(`${key}.`)))
           setSaveState(dirtyRef.current.size > 0 ? "pending" : "saved")
           if (sentAny) setSavedAt(new Date().toISOString())
+          // Un campo que cambió otra pestaña se dice junto a él, y el estado no dice «Guardado».
+          if (stale || [...dirtyRef.current].some((key) => conflictRef.current.has(key))) {
+            if (stale) setSaveError(placeAutosaveError(stale))
+            setSaveState("error")
+          }
         }
         // Lo guardado (el motivo, la evolución, los signos) se vuelve a comprobar en el cierre.
         if (savedAny) void refreshClosing()
@@ -750,6 +771,9 @@ export function EncounterEditor({
     setSubmitErrors(draftForm, { fields: own })
     if (form) return form
     if (rest.length > 0) return rest.join(" ")
+    // Otra pestaña cambió un texto: no se guarda solo; lo demás sí se guardó.
+    if (err instanceof ApiError && err.shape.code === "STALE_DRAFT")
+      return "Otra pestaña o persona cambió lo marcado: lo demás se guardó. Copia lo tuyo si lo necesitas y recarga para ver lo último."
     return "No se guardó lo último: corrige lo marcado y se guarda solo."
   }
 
@@ -796,6 +820,8 @@ export function EncounterEditor({
         const value = item.payload[key]
         if (typeof value !== "string") continue
         const stored = item.joined?.[key]
+        // Lo unido quedó guardado en el servidor: es la nueva base de ese texto.
+        if (stored !== undefined) savedTextRef.current[key] = stored.trim() ? stored : null
         if (stored !== undefined && !dirtyRef.current.has(key) && !inflightRef.current.has(key)) {
           // Sin nada por guardar manda lo que quedó en el servidor: este borrador puede ir por detrás
           // (al volver a la atención, en otra pestaña) y guardarlo borraría lo que había.
