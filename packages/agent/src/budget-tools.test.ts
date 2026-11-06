@@ -519,7 +519,8 @@ it("con quien solo está autorizado a recibir información no se habla del presu
   const patientId = row!.id
   await inOrg((tx) => setPatientContact(tx, ORG, clinic.actor, patientId, { contactId, relationship: "family", isPreferred: false }))
   await inOrg((tx) =>
-    grantResponsibility(tx, ORG, clinic.actor, patientId, { contactId, kind: "autorizado_informacion", startsAt: new Date().toISOString().slice(0, 10) }),
+    // Desde ayer: «hoy» en UTC ya es mañana en Lima desde las 19:00, y la autorización aún no empezaría.
+    grantResponsibility(tx, ORG, clinic.actor, patientId, { contactId, kind: "autorizado_informacion", startsAt: new Date(Date.now() - 86_400_000).toISOString().slice(0, 10) }),
   )
   const { budgetId, tooth } = await budgetOf(patientId, { deliver: true })
   const ctx = toolCtx(conversationId, contactId)

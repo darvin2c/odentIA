@@ -425,7 +425,15 @@ describe("«Tus papeles» y el comprobante por correo", () => {
 
     const none = await withTicket()
     expect(await run(none.c, (tx) => sendTicketReceiptByEmail(tx, none.c.orgId, none.c.ownerId, none.p.patientId, none.ticketId, { storage: noStorage }))).toEqual({
-      sent: null, reason: "sin_correo", text: "Sin correo: entrégalo impreso o pídele su correo",
+      sent: null, reason: "sin_correo", text: "Sin correo: entrégalo impreso, o agrégale su correo en «Enviar al paciente» del ticket",
+    })
+    // Sin buzón de la clínica se dice eso primero: pedirle su correo no serviría de nada.
+    await ownerDb
+      .update(channelConnection)
+      .set({ status: "disabled" })
+      .where(and(eq(channelConnection.organizationId, none.c.orgId), eq(channelConnection.channel, "email")))
+    expect(await run(none.c, (tx) => sendTicketReceiptByEmail(tx, none.c.orgId, none.c.ownerId, none.p.patientId, none.ticketId, { storage: noStorage }))).toMatchObject({
+      sent: null, reason: "sin_conexion",
     })
   })
 
