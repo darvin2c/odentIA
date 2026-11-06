@@ -477,12 +477,16 @@ test("agenda: lo que falta se dice con su acción, y la sede se elige en un solo
   await page.keyboard.press("Escape")
 
   // Dos sedes: se elige bajo el título y la elección vale también en Horarios y ausencias.
-  await call(page, "POST", "/api/branches", owner.org.slug, { name: "Sede Norte" }, 201)
+  const norte = await call<{ id: string }>(page, "POST", "/api/branches", owner.org.slug, { name: "Sede Norte" }, 201)
   await gotoHydrated(page, tenant(owner.org.slug, "/agenda"))
   await page.getByRole("button", { name: "Sede Central" }).click()
   await page.getByRole("menuitem", { name: "Sede Norte" }).click()
   await expect(page.getByRole("button", { name: "Sede Norte" })).toBeVisible()
-  await expect(page.getByText("Esta sede aún no tiene unidades dentales")).toBeVisible()
+  // Cada sede nueva nace con su primera unidad (ADR 0141): la Agenda no la da por vacía. La sede
+  // sin unidades la prueba otro caso.
+  await expect(page.getByText("Esta sede aún no tiene unidades dentales")).toHaveCount(0)
+  const northRooms = await call<{ rooms: Array<{ label: string }> }>(page, "GET", `/api/agenda/resources?branchId=${norte.id}`, owner.org.slug)
+  expect(northRooms.rooms.map((room) => room.label)).toEqual(["Unidad dental 1"])
   await shot("sede-elegida")
   await gotoHydrated(page, tenant(owner.org.slug, "/settings/availability"))
   await expect(page.getByRole("button", { name: "Sede Norte" })).toBeVisible()

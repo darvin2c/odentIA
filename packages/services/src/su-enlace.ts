@@ -74,6 +74,7 @@ import { findOrgCountry, findOrgLocale, orgProduct } from "./locale.js"
 import { openRoute, previewRoute } from "./message-gate.js"
 import { consentStatusOf } from "./message-permission.js"
 import { clinicAsksHealth, getPatientMissingData, getPatientRegistrationConfig } from "./patient-registration.js"
+import { privacyNoticeOf } from "./privacy-notice.js"
 import {
   patientOrganizationToday,
   patientPersonId,
@@ -259,6 +260,12 @@ async function pendingOf(
   orgId: string,
   contactId: string,
   patientId: string,
+  /**
+   * «Tus datos» pide datos: ahí el aviso va siempre, con su casilla, aunque la clínica no haya
+   * escrito uno (el sugerido; decisión 22, ADR 0141). En los demás pasos y para el agente
+   * (`chatBookingMissing`) solo cuenta el aviso que escribió la clínica, como antes.
+   */
+  options: { asksData?: boolean } = {},
 ): Promise<{ privacy: boolean; promotions: boolean; promotionsOffer: boolean }> {
   const config = await getPatientRegistrationConfig(tx, orgId)
   const [accepted] = await tx
@@ -274,7 +281,7 @@ async function pendingOf(
     .limit(1)
   const promotions = config.askMessages ? await consentStatusOf(tx, orgId, contactId, "novedades") : "granted"
   return {
-    privacy: !accepted && !!config.privacyNotice,
+    privacy: !accepted && (options.asksData ? !!(await privacyNoticeOf(tx, orgId)) : !!config.privacyNotice),
     promotions: promotions === null,
     promotionsOffer: promotions !== null && promotions !== "granted" && (await consentStatusOf(tx, orgId, contactId, "avisos")) !== "revoked",
   }
@@ -711,10 +718,11 @@ export async function getPersonalLinkDataForm(
     countryCode: await findOrgCountry(tx, orgId),
     today: await patientOrganizationToday(tx, orgId),
     hasRepresentative: await hasLegalRepresentative(tx, orgId, link.patientId),
-    registration: await getPatientRegistrationConfig(tx, orgId),
+    // El aviso que ve y acepta: el de la clínica o, sin uno, el sugerido (ADR 0141).
+    registration: { ...(await getPatientRegistrationConfig(tx, orgId)), privacyNotice: await privacyNoticeOf(tx, orgId) },
     asksHealth: health,
     firstName: firstName(await requirePatient(tx, orgId, link.patientId)) || null,
-    pending: await pendingOf(tx, orgId, link.row.contactId, link.patientId),
+    pending: await pendingOf(tx, orgId, link.row.contactId, link.patientId, { asksData: true }),
   }
 }
 
@@ -1077,7 +1085,9 @@ async function saveLinkConsents(
       )
       .limit(1)
     const config = await getPatientRegistrationConfig(tx, orgId)
-    if (!accepted && config.privacyNotice) {
+    // Queda aceptado el mismo texto que se le mostró.
+    const notice = await privacyNoticeOf(tx, orgId)
+    if (!accepted && notice) {
       const [grantor] = await tx
         .select({ name: contact.displayName })
         .from(contact)
@@ -1087,7 +1097,7 @@ async function saveLinkConsents(
         organizationId: orgId,
         patientId,
         noticeVersion: config.version,
-        noticeText: config.privacyNotice,
+        noticeText: notice,
         purposes: ["atencion", "recordatorios"],
         grantedByContactId: link.row.contactId,
         grantedByName: grantor?.name ?? "",
