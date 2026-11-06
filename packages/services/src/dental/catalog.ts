@@ -49,4 +49,13 @@ export const dentalCatalog: ProductCatalog = {
   kindWords: KIND_WORDS,
   everydayWords: EVERYDAY_WORDS,
   specialties: (country) => dentalProfileFor(country).specialties.list,
+  // Las consultas y evaluaciones de `biblioteca.csv`; las radiografías y las pruebas gastan y no van aquí.
+  consultations: [
+    "consulta-odontologica-general",
+    "consulta-odontologica-especializada",
+    "evaluacion-oral-completa",
+    "evaluacion-periodica-de-paciente-continuador",
+    "reevaluacion-oral-limitada",
+    "reevaluacion-postoperatoria",
+  ],
 }

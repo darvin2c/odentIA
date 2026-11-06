@@ -32,6 +32,12 @@ export interface ProductCatalog {
   everydayWords: Readonly<Record<string, readonly string[]>>
   /** Las especialidades con que nace una clínica del país (null: aún sin país). */
   specialties(country: string | null): readonly CatalogSpecialty[]
+  /**
+   * Las claves de la biblioteca que son una consulta: se examina y se conversa,
+   * y casi no se gastan materiales. «Empieza por estos 5» de Servicios no las
+   * sugiere. Un servicio propio, sin biblioteca, no se sabe: cuenta como procedimiento.
+   */
+  consultations: readonly string[]
 }
 
 /** Un producto sin biblioteca ni especialidades propias. */
@@ -40,6 +46,7 @@ export const NO_CATALOG: ProductCatalog = {
   kindWords: {},
   everydayWords: {},
   specialties: () => [],
+  consultations: [],
 }
 
 export function isCatalogKind(catalog: ProductCatalog, value: unknown): value is string {

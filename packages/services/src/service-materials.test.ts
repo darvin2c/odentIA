@@ -3,7 +3,7 @@
  * - La lista de un servicio se reemplaza entera, solo con productos que se
  *   usan en las atenciones, y dice lo que cuesta cada vez con el último
  *   precio de compra (solo para quien ve precios).
- * - «Empieza por estos 5»: los servicios más hechos del mes sin materiales.
+ * - «Empieza por estos 5»: los servicios más hechos del mes sin materiales, sin las consultas.
  * - Al firmar la atención se descuentan del lote que vence primero en la sede
  *   de la atención; lo que no alcanza queda como faltante; un reintento no
  *   descuenta dos veces; sin sede no se descuenta ni se anuncia.
@@ -14,7 +14,7 @@
 import { randomUUID } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
-import { encounter, encounterProcedure, serviceCatalog } from "@odentia/db/schema/clinical"
+import { encounter, encounterProcedure, serviceCatalog, treatmentTemplate } from "@odentia/db/schema/clinical"
 import {
   product,
   productLot,
@@ -232,7 +232,7 @@ it("los materiales de un servicio se reemplazan enteros, solo con lo que se usa 
   expect(others.map((option) => option.productId)).not.toContain(brush.id)
 })
 
-it("«Empieza por estos 5»: los servicios más hechos del mes sin materiales y qué parte de las atenciones cubren", async () => {
+it("«Empieza por estos 5»: los servicios más hechos del mes sin materiales, sin las consultas, y qué parte de las atenciones cubren", async () => {
   // Una clínica aparte: lo que cuentan las demás pruebas no se mezcla.
   await insertOrg(ownerDb, "org_m", "materiales")
   const professional = randomUUID()
@@ -248,6 +248,16 @@ it("«Empieza por estos 5»: los servicios más hechos del mes sin materiales y 
   const sealant = await service("Sellante por pieza")
   const resin = await service("Restauración con resina")
   const evaluation = await service("Evaluación", false)
+  // La consulta de la biblioteca es lo que más se hace, pero casi no gasta: no se sugiere.
+  await ownerDb
+    .insert(treatmentTemplate)
+    .values({ key: "consulta-odontologica-general", name: "Consulta odontológica general", kind: "diagnostico", scope: "general" })
+    .onConflictDoNothing()
+  const [consultTemplate] = await ownerDb.select({ id: treatmentTemplate.id }).from(treatmentTemplate).where(eq(treatmentTemplate.key, "consulta-odontologica-general"))
+  const [consult] = await ownerDb
+    .insert(serviceCatalog)
+    .values({ organizationId: "org_m", templateId: consultTemplate!.id, source: "template", name: "Consulta", scope: "general", priceCents: 5000, currency: "PEN" })
+    .returning()
   const resinA2 = await newProduct({ name: "Resina A2", unit: "jeringa" }, "org_m")
   await ownerDb.insert(serviceMaterial).values({ organizationId: "org_m", serviceId: resin.id, productId: resinA2.id, quantity: 1 })
   const [person] = await insertTestPatients(ownerDb, {
@@ -287,7 +297,7 @@ it("«Empieza por estos 5»: los servicios más hechos del mes sin materiales y 
         .where(eq(encounter.id, row!.id))
     }
   }
-  await visit([{ serviceId: cleaning.id }], 2)
+  await visit([{ serviceId: cleaning.id }, { serviceId: consult!.id, quantity: 6 }], 2)
   await visit([{ serviceId: cleaning.id }, { serviceId: sealant.id, quantity: 4 }], 5)
   await visit([{ serviceId: cleaning.id }], 10)
   await visit([{ serviceId: resin.id }], 3)

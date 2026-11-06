@@ -606,7 +606,8 @@ function TwoCurrencyCost({
 
 /**
  * «Empieza por estos 5» (tablero 17): los servicios más hechos del último mes
- * que todavía no tienen materiales, y qué parte de las atenciones son. Cada
+ * que todavía no tienen materiales, sin las consultas (las deja fuera el
+ * servidor), y qué parte de las atenciones son. Cada
  * uno abre su formulario. Sin servicios por configurar no se muestra: es una
  * sugerencia, no un aviso que pida algo.
  */
@@ -666,7 +667,7 @@ export function ServicesWithoutMaterialsCard({
       </p>
       <p className="text-xs text-muted-foreground">
         Con estos bien puestos, la mayor parte de lo que se usa ya se descuenta solo al cerrar cada
-        atención.
+        atención. Las consultas no se sugieren: casi no gastan materiales.
       </p>
     </section>
   )
