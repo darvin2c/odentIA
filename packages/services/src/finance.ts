@@ -57,6 +57,7 @@ import {
   ServiceError,
   validation,
 } from "./errors.js"
+import { looksLikeId } from "./ids.js"
 import { getOrgLocale, type OrgLocale, orgProfileRequired } from "./locale.js"
 import { CLOSED_PURCHASE_STATUSES, type PurchaseBalance, purchaseBalances, supplierCredits } from "./purchase-balance.js"
 import { monthStart } from "./report-periods.js"
@@ -3670,6 +3671,7 @@ export async function listClosures(
 
 /** Hoja de cierre imprimible: todo lo contado desde el cierre anterior. */
 export async function getClosureSheet(tx: Db, orgId: string, closureId: string) {
+  if (!looksLikeId(closureId)) throw notFound("Cierre de caja")
   // Se acepta el identificador del cierre o el de su ventana: cerrar devuelve
   // la ventana, y el aviso de diferencia enlaza con ella.
   const [closure] = await tx

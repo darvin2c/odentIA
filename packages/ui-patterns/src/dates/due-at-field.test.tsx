@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event"
 import * as React from "react"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { minutesToInstant } from "../schedule/time.js"
-import { DueAtField, dueParts } from "./due-at-field.js"
+import { DueAtField, defaultMinutesFor, dueParts } from "./due-at-field.js"
 
 const LIMA = "America/Lima"
 
@@ -59,5 +59,17 @@ describe("DueAtField", () => {
     render(<DueAtField timeZone={LIMA} value="2099-10-17T14:00:00.000Z" onChange={onChange} />)
     await userEvent.click(screen.getByRole("button", { name: "Sin fecha" }))
     expect(onChange).toHaveBeenCalledWith(null)
+  })
+})
+
+describe("la hora con la que nace una fecha de vencimiento", () => {
+  it("otro día, a las 9:00; hoy antes de las 9:00, también", () => {
+    expect(defaultMinutesFor("2026-11-06", "2026-11-05", 15 * 60)).toBe(9 * 60)
+    expect(defaultMinutesFor("2026-11-05", "2026-11-05", 8 * 60)).toBe(9 * 60)
+  })
+  it("hoy, pasadas las 9:00, la próxima media hora: no nace vencida", () => {
+    expect(defaultMinutesFor("2026-11-05", "2026-11-05", 10 * 60 + 12)).toBe(10 * 60 + 30)
+    expect(defaultMinutesFor("2026-11-05", "2026-11-05", 10 * 60 + 30)).toBe(11 * 60)
+    expect(defaultMinutesFor("2026-11-05", "2026-11-05", 23 * 60)).toBe(22 * 60)
   })
 })

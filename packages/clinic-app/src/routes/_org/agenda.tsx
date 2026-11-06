@@ -151,6 +151,8 @@ export const Route = createFileRoute("/_org/agenda")({
     sumar?: string
     group?: string
     status?: string
+    /** «1»: la vista Agenda muestra solo el día elegido (lo abre «N por confirmar»). */
+    dias?: string
     /** «Mi calendario» abierto (lo abre también el aviso de la campana). */
     calendario?: string
   } => ({
@@ -935,7 +937,13 @@ function AgendaPage() {
   const isToday = (item: AgendaAppointment) => zonedDateOf(item.startsAt, TZ) === today
   /** Su hora pasó sin llegada ni atención: «Ya pasaron · sin cerrar». */
   const unclosed = (item: AgendaAppointment) => before(item) && Date.parse(item.endsAt) <= Date.parse(now)
-  const rebook = (patient: { id: string; name: string }) => openBooking({ patient })
+  // Reagendar trae el servicio y el profesional de la cita que no fue: solo falta el día.
+  const rebook = (patient: { id: string; name: string }, from?: { serviceId?: string | null; professionalUserId?: string | null }) =>
+    openBooking({
+      patient,
+      ...(from?.serviceId ? { serviceId: from.serviceId } : {}),
+      ...(from?.professionalUserId ? { professionalUserId: from.professionalUserId } : {}),
+    })
   const arrival = useAppointmentArrival({ onRebook: rebook })
   const attend = useAttendAppointment()
   const attendItem = (item: AgendaAppointment) =>
@@ -990,7 +998,7 @@ function AgendaPage() {
     const busy = (id: string) => (arrival.isPending && arrival.variables?.id === id) || (attend.isPending && attend.variables?.appointment.id === id)
     if (item.visit === "llego") return canAttend ? { label: "Atender", pending: busy(item.id), onSelect: () => attendItem(item) } : null
     if (item.visit === "no_vino" || item.visit === "cancelada") {
-      return canWrite ? { label: "Reagendar", onSelect: () => rebook(patientOf(item)) } : null
+      return canWrite ? { label: "Reagendar", onSelect: () => rebook(patientOf(item), item) } : null
     }
     const step = stepBeforeArrival(item, now, isToday(item))
     if (step === "cerrar") {
@@ -1012,9 +1020,11 @@ function AgendaPage() {
   }
 
   // La vista Agenda: el día elegido y los que le siguen, cada uno con su encabezado.
+  // `?dias=1` (desde «N por confirmar» de un día): solo ese día, mientras siga ese filtro.
+  const listDays = get("dias") === "1" && statusFilter ? 1 : AGENDA_DAYS
   const agendaAppointments = appointments.filter((item) => {
     const date = zonedDateOf(item.startsAt, TZ)
-    return date >= day && date < addDays(day, AGENDA_DAYS) && isChosen(item.professionalUserId)
+    return date >= day && date < addDays(day, listDays) && isChosen(item.professionalUserId)
   })
   const agendaDates = [...new Set(agendaAppointments.map((item) => zonedDateOf(item.startsAt, TZ)))].sort()
   const itemsOn = (date: string): ScheduleAgendaItem[] =>
@@ -1233,7 +1243,7 @@ function AgendaPage() {
       actionLabel={filtered ? "Quitar filtros" : canWrite ? "Nueva cita" : undefined}
       onAction={
         filtered
-          ? () => setParams({ status: undefined, who: undefined })
+          ? () => setParams({ status: undefined, who: undefined, dias: undefined })
           : canWrite
             ? () => openBooking()
             : undefined
@@ -1355,7 +1365,7 @@ function AgendaPage() {
       withAll={false}
       counts={counts}
       value={statusFilter}
-      onChange={(next) => setParam("status", next ?? undefined)}
+      onChange={(next) => setParams({ status: next ?? undefined, dias: undefined })}
     />
   )
   const showDays = small && view !== "semana"
@@ -1447,7 +1457,8 @@ function AgendaPage() {
                   variant="ghost"
                   size="sm"
                   className="h-7 shrink-0 px-1 font-semibold text-warning"
-                  onClick={() => setParams({ view: "lista", status: "programada" })}
+                  // Las de este día, no las de toda la semana que sigue.
+                  onClick={() => setParams({ view: "lista", status: "programada", dias: "1" })}
                 >
                   {pending} por confirmar
                 </Button>
@@ -1464,7 +1475,7 @@ function AgendaPage() {
         views={VIEWS}
         view={view}
         onViewChange={(next) =>
-          setParams({ view: next === "dia" ? undefined : next, status: undefined })
+          setParams({ view: next === "dia" ? undefined : next, status: undefined, dias: undefined })
         }
         filters={
           small ? undefined : (
@@ -1716,9 +1727,16 @@ function AgendaPage() {
               void navigate({ to: "/inbox", search: { conversation: backTo } })
               return
             }
-            // Se va al día de la cita: quien reserva ve lo que acaba de reservar.
+            // Se va al día y a la columna de la cita: quien reserva ve lo que acaba de reservar,
+            // aunque la vista mostrara a otro profesional.
             const date = zonedDateOf(created.startsAt, TZ)
-            if (date !== day) goTo(date)
+            const hidden = group === "professionals" && whoList.length > 0 && !whoList.includes(created.professionalUserId)
+            if (date !== day || hidden)
+              setParams({
+                ...(date !== day ? { date: date === today ? undefined : date } : {}),
+                // Se suma a los que ya se veían, sin quitar a nadie de la vista.
+                ...(hidden ? { who: [...whoList, created.professionalUserId].join(",") } : {}),
+              })
             await invalidate()
             await queryClient.invalidateQueries({ queryKey: ["crm-context"] })
           }}
@@ -1738,9 +1756,9 @@ function AgendaPage() {
           toneOf={toneOf}
           onClose={closeDetail}
           onChanged={invalidate}
-          onRebook={(patient) => {
+          onRebook={(patient, from) => {
             closeDetail()
-            openBooking({ patient })
+            rebook(patient, from)
           }}
         />
       ) : null}
