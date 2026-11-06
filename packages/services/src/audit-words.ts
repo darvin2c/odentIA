@@ -373,12 +373,17 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "contact.blocked": say("Bloqueó a una persona"),
   "contact.unblocked": say("Desbloqueó a una persona"),
   "opportunity.created": say("Creó una oportunidad"),
+  // ADR 0144: la abre el sistema, a nombre de quien entregó el presupuesto.
+  "opportunity.created_from_budget": say("Se abrió una oportunidad al entregar un presupuesto"),
   "opportunity.updated": say("Cambió una oportunidad"),
   "opportunity.moved": say("Movió una oportunidad de etapa"),
   "opportunity.stage_changed": say("Movió una oportunidad de etapa"),
   "opportunity.won": say("Cerró una oportunidad como ganada"),
   "opportunity.lost": say("Cerró una oportunidad como perdida"),
   "opportunity.closed": say("Cerró una oportunidad"),
+  // ADR 0144: la cierra el sistema, a nombre de quien anuló su presupuesto.
+  "opportunity.closed_budget_cancelled": say("Se cerró una oportunidad al anular su presupuesto"),
+  "opportunity.closed_budget_expired": say("Se cerró una oportunidad: su presupuesto venció sin respuesta", "sistema"),
   "opportunity.reopened": say("Reabrió una oportunidad"),
   "task.created": say("Creó una tarea"),
   "task.updated": say("Cambió una tarea"),

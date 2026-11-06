@@ -1,6 +1,6 @@
 # 0028 · Ventas que se mueven solas, tareas que se cierran solas
 
-Fecha: 2026-10-15 · Estado: aceptada · Ajusta a [0023](0023-el-administrador-detecta-y-recepcion-habla.md) («Retomar una oportunidad» trabaja sobre la tarea de la oportunidad)
+Fecha: 2026-10-15 · Estado: aceptada · Ajusta a [0023](0023-el-administrador-detecta-y-recepcion-habla.md) («Retomar una oportunidad» trabaja sobre la tarea de la oportunidad) · Precisada por [0144](0144-el-presupuesto-enviado-abre-su-oportunidad.md) (el presupuesto entregado también abre su oportunidad)
 
 ## Problema
 

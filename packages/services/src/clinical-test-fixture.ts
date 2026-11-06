@@ -110,19 +110,20 @@ export async function readyToClose(
   })
 }
 
-export async function clinicalFixture() {
+/** `orgId`: la clínica de la prueba; por defecto `org_a` (la otra de las pruebas es `org_b`). */
+export async function clinicalFixture(orgId = "org_a") {
   const actor = randomUUID()
   await ownerDb.insert(user).values({ id: actor, name: "Clínico", email: `${actor}@example.test` })
-  await makeSigner("org_a", actor)
+  await makeSigner(orgId, actor)
   const [person] = await insertTestPatients(ownerDb, {
-      organizationId: "org_a",
+      organizationId: orgId,
       displayName: "Paciente de prueba",
-      patientNumber: await nextPatientNumber(ownerDb, "org_a"),
+      patientNumber: await nextPatientNumber(ownerDb, orgId),
     })
   const [session] = await ownerDb
     .insert(encounter)
     .values({
-      organizationId: "org_a",
+      organizationId: orgId,
       patientId: person.id,
       professionalUserId: actor,
       reason: "Consulta",
@@ -131,7 +132,7 @@ export async function clinicalFixture() {
   const [plan] = await ownerDb
     .insert(treatmentPlan)
     .values({
-      organizationId: "org_a",
+      organizationId: orgId,
       patientId: person.id,
       title: "Plan clínico",
       originEncounterId: session.id,
@@ -140,7 +141,7 @@ export async function clinicalFixture() {
   const [service] = await ownerDb
     .insert(serviceCatalog)
     .values({
-      organizationId: "org_a",
+      organizationId: orgId,
       name: "Tratamiento propio",
       scope: "general",
       source: "custom",
@@ -148,9 +149,9 @@ export async function clinicalFixture() {
       currency: "PEN",
     })
     .returning()
-  const run = <T>(fn: (tx: typeof appDb) => Promise<T>) => withOrgContext(appDb, "org_a", fn)
+  const run = <T>(fn: (tx: typeof appDb) => Promise<T>) => withOrgContext(appDb, orgId, fn)
   /** Prepara el mínimo clínico de una atención del fixture antes de cerrarla. */
-  const ready = (encounterId: string) => readyToClose("org_a", actor, person.id, encounterId)
+  const ready = (encounterId: string) => readyToClose(orgId, actor, person.id, encounterId)
   return {
     actor,
     patient: person,
@@ -159,6 +160,6 @@ export async function clinicalFixture() {
     service,
     run,
     ready,
-    args: ["org_a", actor, person.id] as const,
+    args: [orgId, actor, person.id] as const,
   }
 }

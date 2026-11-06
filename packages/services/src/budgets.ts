@@ -42,7 +42,12 @@ import { documentSecretsKey } from "./document-check.js"
 import { type DocumentClinic, loadDocumentClinic } from "./document-clinic.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCurrency, NEUTRAL_TIMEZONE } from "./locale.js"
-import { decideBudgetOpportunity, linkPresentedBudget } from "./opportunities.js"
+import {
+  decideBudgetOpportunity,
+  linkPresentedBudget,
+  releaseCancelledBudget,
+  UNANSWERED_RULE_MARK,
+} from "./opportunities.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
 import { listPaymentMethods } from "./payment-methods.js"
@@ -2016,9 +2021,12 @@ export async function deliverBudget(
     patientId,
     itemCount: lines.length,
     ...(options.length > 1 ? { options: options.length } : {}),
+    // Entregado desde la 0144: si nadie lo responde, su oportunidad se cierra sola (la fecha de corte).
+    [UNANSWERED_RULE_MARK]: true,
   })
   // Se une sola a la oportunidad del mismo tratamiento (o a la más reciente),
-  // que pasa a «Presupuesto enviado» (ADR 0028). Mientras decide, vale lo de la
+  // que pasa a «Presupuesto enviado» (ADR 0028); sin ninguna, abre la suya a
+  // nombre de quien lo entregó (ADR 0144). Mientras decide, vale lo de la
   // opción recomendada (decisión 13).
   const full = withTotals(updated, lines, options, "")
   await linkPresentedBudget(tx, orgId, {
@@ -2029,9 +2037,37 @@ export async function deliverBudget(
     ],
     by: opts.by,
     total: await opportunityValueOf(tx, orgId, full.totals),
+    opens: {
+      userId: actorUserId,
+      ...budgetInterest(
+        lines.filter((line) => line.optionId === (valueOptionOf(options)?.id ?? line.optionId)),
+        updated.title,
+      ),
+    },
   })
   await notifyBudget(tx, orgId)
   return withoutFindings(updated)
+}
+
+/**
+ * El interés de la oportunidad de un presupuesto (ADR 0144): los tratamientos
+ * de una opción (la que vale al entregarlo, la elegida al decidirlo), en una
+ * línea («Resina y Endodoncia», «Resina, Endodoncia y 2 más»), y su servicio
+ * si es uno solo. Sin tratamientos con nombre, el título del presupuesto.
+ */
+function budgetInterest(
+  own: BudgetLineWithStatus[],
+  budgetTitle: string,
+): { title: string; serviceId: string | null } {
+  const titles = [...new Set(own.map((line) => line.title.trim()).filter(Boolean))]
+  const shown = titles.length > 3 ? [...titles.slice(0, 2), `${titles.length - 2} más`] : titles
+  const last = shown.at(-1)
+  const text = shown.length > 1 ? `${shown.slice(0, -1).join(", ")} y ${last}` : (last ?? budgetTitle)
+  const services = [...new Set(own.map((line) => line.serviceId))]
+  return {
+    title: text.length > 200 ? `${text.slice(0, 199)}…` : text,
+    serviceId: services.length === 1 ? (services[0] ?? null) : null,
+  }
 }
 
 /** Hoy, en la zona de la clínica, más los días de vigencia de la clínica. */
@@ -2535,6 +2571,8 @@ export async function decideBudget(
     ],
     // Lo que de verdad aceptó: el valor de la oportunidad ganada (en parte, lo aceptado).
     accepted: await acceptedValueOf(tx, orgId, lines, decisions),
+    // La que nació de él lleva por nombre lo de la opción elegida (ADR 0144).
+    title: budgetInterest(lines, current.title).title,
   })
   await notifyBudget(tx, orgId)
   return loadBudget(tx, orgId, patientId, updated)
@@ -2613,6 +2651,8 @@ export async function cancelBudget(
     from: current.status,
     itemCount: itemIds.length,
   })
+  // Su oportunidad ya no se cerrará sola al responderlo (ADR 0144).
+  await releaseCancelledBudget(tx, orgId, { budgetId, userId: actorUserId })
   await notifyBudget(tx, orgId)
   return withoutFindings(updated)
 }
