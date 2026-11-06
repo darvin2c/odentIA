@@ -1,6 +1,6 @@
 # 0013 · La Ayuda responde con la guía del sistema, atada a las pantallas
 
-Fecha: 2026-10-11, revisada el 2026-11-01 · Estado: aceptada
+Fecha: 2026-10-11, revisada el 2026-11-01 · Estado: sustituida por la [0146](0146-la-ayuda-elige-con-jev-y-muestra-la-guia.md) el 2026-11-06
 
 ## Problema
 
