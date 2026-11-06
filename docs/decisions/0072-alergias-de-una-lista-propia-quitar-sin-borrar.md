@@ -14,7 +14,7 @@ El aviso al recetar comparaba textos: una alergia escrita «amoxi», con otra or
 - **Todas avisan igual.** No hay «Confirmar» ni «por confirmar»: la declarada por el paciente avisa como la registrada por la odontóloga.
 - **Quitar no borra.** Solo quien escribe en la historia, con su motivo: «ya no es alérgica» (FHIR `clinicalStatus` resolved), «era otra cosa» (refuted) o «se registró por error» (entered-in-error). Queda en «Alergias quitadas» con quién, cuándo y por qué, y se vuelve a poner.
 - **Revisarlas con el paciente es un hecho con fecha** (`allergies_reviewed_at/by`): «Sin cambios» en la atención, agregar o quitar una. Si nunca se revisaron o pasaron 6 meses, la atención pide preguntarle por alergias nuevas (`allergyReviewDue`).
-- **Recetar igual pese al aviso pide un motivo escrito**, que queda en la receta (`allergy_override_reason`); la auditoría solo anota que se hizo.
+- **Recetar igual pese al aviso pedía un motivo escrito.** Lo sustituye [0143](0143-en-la-receta-el-aviso-informa.md): el aviso no pide nada, la receta guarda el aviso que se vio (`alerts_seen`) y el motivo es opcional.
 - **La medicación habitual** se escribe igual que la receta: DCI con su ATC (una lista de lo que más toman los pacientes y cambia lo que se hace en la boca), dosis con número y unidad UCUM y frecuencia de una lista; el texto escrito antes queda como respaldo.
 
 ## Alternativas descartadas

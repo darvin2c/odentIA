@@ -88,7 +88,7 @@ export interface ProductPrescribingUi {
 }
 
 export interface PrescribingRulesUi {
-  /** Lo que impide emitir, lo que va con motivo (como una alergia) y lo que solo se recuerda. */
+  /** Lo que impide emitir, lo que se avisa como una alergia (ADR 0143) y lo que solo se recuerda. */
   check(
     items: ReadonlyArray<{ genericName: string }>,
     weightKg: number | null,

@@ -114,7 +114,8 @@ export default function PrescriptionDemo() {
         title: "Contraindicado en el embarazo",
         text: "Doxiciclina: está embarazada (12 semanas) y las tetraciclinas están contraindicadas en el embarazo (ATC J01AA02).",
       }
-      status = "Solo se emite con un motivo escrito."
+      status = "Decides tú: si la emites, la receta guarda que viste el aviso."
+      emitOk = true
     } else if (kase === "nino") {
       if (weightDone) {
         block = { kind: "ok", title: "Lista", text: "El peso, 26 kg, va en la receta." }
@@ -210,8 +211,8 @@ export default function PrescriptionDemo() {
           )}
           {done && kase === "embarazo" && (
             <span className="rx-field">
-              <span className="rx-label">Motivo para recetarlo igual</span>
-              <span className="rx-input motive">Escribe por qué, como harías con una alergia…</span>
+              <span className="rx-label">Motivo (opcional)</span>
+              <span className="rx-input motive">Si lo escribes, queda en la receta…</span>
             </span>
           )}
         </div>
