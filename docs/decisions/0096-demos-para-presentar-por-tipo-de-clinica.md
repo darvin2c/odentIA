@@ -26,7 +26,7 @@ En producción había una sola demo, «Dental Smile», y solo se creaba con un c
   - Cada servicio lo da quien tiene su especialidad (la regla de la agenda) y a quien le corresponde por edad y sexo; la consulta de una especialidad que el equipo no atiende no se ofrece.
   - Cada respuesta de Sofi sale de una corrida y contesta a lo que preguntaron; sus textos no nombran sedes ni profesionales, y las especialidades salen del equipo.
   - Los signos vitales son del cuerpo de cada persona; las recetas y los descansos de latidIA se emiten en sus atenciones.
-  - Los teléfonos son del rango de ficción +44 7700 900000–900999. El WhatsApp de la demo queda **desconectado**: no tiene un número de verdad, así que no dice «Conectado» ni intenta enviar. Su historia es de cuando estaba conectado.
+  - Los teléfonos son del rango de ficción +44 7700 900000–900999. El WhatsApp de la demo queda **desconectado**: no tiene un número de verdad, así que no dice «Conectado» ni intenta enviar (decisión del usuario del 2026-11-06, sin un proveedor de demostración). Integraciones, la Bandeja y Agente dicen que es la conexión de la demo y que sus conversaciones son de ejemplo; quien vuelve a escribir vuelve a su conversación, que se reabre.
 - **El comando se retira.** La semilla de desarrollo ya no tiene modo producción, y «Dental Smile» se vuelve a crear con el botón.
 
 ## Alternativas descartadas
