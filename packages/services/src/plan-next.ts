@@ -61,8 +61,13 @@ export type Can = (permission: string) => boolean
 /** Estados de una cita que todavía va a ocurrir. */
 const LIVE_APPOINTMENT = ["programada", "confirmada"]
 
+/** «12 dic»; de otro año, con el año («12 dic 2025»). */
 function dayWords(date: Date, locale: string, timeZone: string): string {
-  return new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", timeZone }).format(date).replace(".", "")
+  const yearOf = (at: Date) => new Intl.DateTimeFormat("en-CA", { year: "numeric", timeZone }).format(at)
+  const otherYear = yearOf(date) !== yearOf(new Date())
+  return new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", ...(otherYear ? { year: "numeric" } : {}), timeZone })
+    .format(date)
+    .replace(".", "")
 }
 
 /** Tratamientos con una cita por venir que ya los trae. */
@@ -134,7 +139,24 @@ export async function getPlanNextStep(
     )
     .orderBy(sql`${clinicalFollowUp.status} = 'pendiente' desc`, asc(clinicalFollowUp.dueAt))
     .limit(1)
-  return planNextStepFrom({ name: firstName(person), budgets, items, withAppointment, control }, context, can)
+  const [next] = await tx
+    .select({ startsAt: appointment.startsAt })
+    .from(appointment)
+    .where(
+      and(
+        eq(appointment.organizationId, orgId),
+        eq(appointment.patientId, patientId),
+        inArray(appointment.status, LIVE_APPOINTMENT),
+        gt(appointment.startsAt, new Date()),
+      ),
+    )
+    .orderBy(asc(appointment.startsAt))
+    .limit(1)
+  return planNextStepFrom(
+    { name: firstName(person), budgets, items, withAppointment, control, nextAppointmentAt: next?.startsAt ?? null },
+    context,
+    can,
+  )
 }
 
 /**
@@ -181,6 +203,20 @@ export async function planNextStepsOf(
       ),
     )
   const withAppointment = new Set(scheduled.map((row) => row.planItemId))
+  // La próxima cita de cada uno, lleve o no lo aceptado: «falta su cita» no se dice a quien ya tiene una.
+  const nextAppointments = await tx
+    .selectDistinctOn([appointment.patientId], { patientId: appointment.patientId, startsAt: appointment.startsAt })
+    .from(appointment)
+    .where(
+      and(
+        eq(appointment.organizationId, orgId),
+        inArray(appointment.patientId, ids),
+        inArray(appointment.status, LIVE_APPOINTMENT),
+        gt(appointment.startsAt, new Date()),
+      ),
+    )
+    .orderBy(appointment.patientId, asc(appointment.startsAt))
+  const nextAppointmentOf = new Map(nextAppointments.map((row) => [row.patientId, row.startsAt]))
   // El próximo control de cada uno, con el mismo orden que el de uno solo.
   const controls = await tx
     .selectDistinctOn([clinicalFollowUp.patientId])
@@ -210,6 +246,7 @@ export async function planNextStepsOf(
           items: itemsOf.get(person.id) ?? [],
           withAppointment,
           control: controlOf.get(person.id),
+          nextAppointmentAt: nextAppointmentOf.get(person.id) ?? null,
         },
         context,
         can,
@@ -241,13 +278,16 @@ interface PlanFacts {
   items: PlanItemRow[]
   withAppointment: Set<string>
   control: FollowUpRow | undefined
+  /** Su próxima cita, aunque no lleve lo aceptado. */
+  nextAppointmentAt?: Date | null
 }
 
 /** La regla de «Qué sigue», en el orden fijo de arriba. Sin consultas: decide con lo cargado. */
 function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): PlanNextStep {
-  const { name, budgets, items, withAppointment, control } = facts
+  const { name, budgets, items, withAppointment, control, nextAppointmentAt } = facts
   const { locale, timezone } = context
   const day = (date: Date) => dayWords(date, locale, timezone)
+  const dayKey = (date: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(date)
 
   // 1. Armado y sin enviar: lo envía recepción (decisión 4).
   const unsent = unsentBudgetOf(budgets)
@@ -267,14 +307,24 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
     const decided = budgets
       .filter((budget) => budget.status === "aceptado" || budget.status === "parcial")
       .find((budget) => budget.items.some((line) => toSchedule.some((item) => item.id === line.planItemId)))
+    // Ya tiene una cita que no lo lleva: se dice así, no «falta su cita», que suena a que no tiene ninguna.
+    // Si una parte ya tiene cita, se dice que falta el resto.
+    const partly = toSchedule.length < accepted.length
+    const missing = nextAppointmentAt
+      ? `su cita del ${day(nextAppointmentAt)} no lo lleva${partly ? " todo" : ""}`
+      : "falta su cita"
     const text = decided
       ? decided.status === "aceptado"
-        ? "Aceptó todo: falta su cita"
-        : `${decided.stateText}: falta su cita`
+        ? `Aceptó todo: ${missing}`
+        : `${decided.stateText}: ${missing}`
       : context.budgetRequired
-        ? "Tiene tratamientos aceptados sin cita"
+        ? nextAppointmentAt
+          ? `Tiene tratamientos aceptados que su cita del ${day(nextAppointmentAt)} no lleva`
+          : "Tiene tratamientos aceptados sin cita"
         : // En latidIA lo indicado ya queda aceptado: no hubo nada que aceptar.
-          "Falta la cita de lo indicado"
+          nextAppointmentAt
+          ? `${partly ? "Parte de lo indicado" : "Lo indicado"} no va en su cita del ${day(nextAppointmentAt)}`
+          : "Falta la cita de lo indicado"
     return {
       kind: "agendar",
       text,
@@ -320,7 +370,8 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
       return {
         kind: "control",
         text: `${control.title} · por reservar`,
-        detail: `Desde el ${day(control.dueAt)}`,
+        // Hoy o después: toca ese día («Toca el 12 dic»); un día ya pasado: «Tocaba el 12 dic».
+        detail: `${dayKey(control.dueAt) >= dayKey(new Date()) ? "Toca el" : "Tocaba el"} ${day(control.dueAt)}`,
         action: can("appointments.write") ? { label: "Reservar cita", followUpId: control.id } : null,
       }
     }

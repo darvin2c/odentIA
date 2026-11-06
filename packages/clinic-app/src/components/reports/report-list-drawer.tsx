@@ -201,7 +201,7 @@ const LISTS: Record<ReportListKey, ListCopy> = {
     showNext: false,
   },
   controls_missed: {
-    title: "No vinieron a su control",
+    title: "Controles que no se hicieron",
     noun: { one: "control", many: "controles" },
     how: (period) => `Controles que tocaban en ${period} y no se hicieron: siguen pendientes, se cancelaron o se marcaron hechos sin una atención cerrada.`,
     where: { to: "/agenda", label: "Abrir la Agenda" },
@@ -308,7 +308,12 @@ function describe(copy: ListCopy, data: ReportList, period: string): string {
 
 function when(row: ReportListRow, list: ReportListKey, locale: string, timeZone: string): { day: string; hour: string | null } {
   const date = new Date(row.at)
-  const day = new Intl.DateTimeFormat(locale, { weekday: "short", day: "numeric", month: "short", timeZone }).format(date).replace(/\./g, "")
+  // De otro año, con el año: una deuda de hace un año no parece de esta semana.
+  const yearOf = (at: Date) => new Intl.DateTimeFormat("en-CA", { year: "numeric", timeZone }).format(at)
+  const otherYear = yearOf(date) !== yearOf(new Date())
+  const day = new Intl.DateTimeFormat(locale, { weekday: "short", day: "numeric", month: "short", ...(otherYear ? { year: "numeric" } : {}), timeZone })
+    .format(date)
+    .replace(/\./g, "")
   // Un control, un presupuesto o una deuda tienen día, no hora.
   const timed = list === "no_show" || list === "cancelled" || list === "unmarked" || list === "new_patients" || list === "agent_booked" || list === "agent_handoffs"
   return { day, hour: timed ? new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", timeZone }).format(date) : null }

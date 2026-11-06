@@ -214,9 +214,13 @@ function WaitingRowItem({ row, context, handlers, className }: { row: WaitingEnt
 const BAND_TITLE: Record<WaitingBand, string> = { ahora: "Ahora", hoy: "Hoy", sin_apuro: "Sin apuro" }
 const BAND_COLOR: Record<WaitingBand, string> = { ahora: "text-destructive", hoy: "text-warning", sin_apuro: "text-muted-foreground" }
 
-function bandCount(band: WaitingBand, rows: WaitingEntry[]): string {
+/**
+ * Cuántas filas tiene el grupo. «N personas esperan» es solo del menú (las
+ * personas que te esperan, que cuenta el servidor): aquí se dice «asuntos»
+ * para no dar otra cifra con la misma frase.
+ */
+function bandCount(_band: WaitingBand, rows: WaitingEntry[]): string {
   const count = rows.length
-  if (band === "ahora") return count === 1 ? "1 persona espera" : `${count} personas esperan`
   return count === 1 ? "1 asunto" : `${count} asuntos`
 }
 

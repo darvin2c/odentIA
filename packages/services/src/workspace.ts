@@ -21,7 +21,7 @@ import { inventoryWaiting } from "./inventory.js"
 import { getOrgLocale } from "./locale.js"
 import { upcomingWork } from "./report-finance.js"
 import { windowOpen } from "./message-window.js"
-import { topicUrgentAt } from "./topic-urgency.js"
+import { clinicOpenSchedule, topicUrgentAtWith } from "./topic-urgency.js"
 import {
   composeWaiting,
   WAITING_LIMITS,
@@ -440,7 +440,8 @@ async function workspaceToday(
     waiting: count("llego"),
     attending: count("en_atencion"),
     attended: count("atendida"),
-    upcoming: count("por_confirmar", "confirmada"),
+    // Por venir: lo que aún no terminó. A las 23:00 lo de la mañana ya no está «por venir».
+    upcoming: items.filter((item) => (item.visit === "por_confirmar" || item.visit === "confirmada") && item.open).length,
     unconfirmed: count("por_confirmar"),
   }
   const pending = items.filter(item => item.visit === "por_confirmar" || item.visit === "confirmada")
@@ -621,11 +622,14 @@ async function waitingConversations(tx: Db, orgId: string, assignedTo: string | 
     where p.place <= ${WAITING_LIMITS.conversations}
     order by p.since, p.id`)
   const shut = await shutConversations(tx, orgId, rows.map((row) => row.conversationId))
-  const items: WaitingPerson[] = []
-  for (const { total: _total, ...row } of rows) {
-    const urgentAt = await topicUrgentAt(tx, orgId, new Date(row.since))
-    items.push({ ...row, urgent: urgentAt.getTime() <= Date.now(), windowClosed: shut.has(row.conversationId) })
-  }
+  // El horario y sus cierres se leen una vez, desde quien espera hace más.
+  const earliest = rows.reduce((min, row) => Math.min(min, Date.parse(row.since)), Date.now())
+  const schedule = rows.length > 0 ? await clinicOpenSchedule(tx, orgId, new Date(earliest)) : null
+  const items: WaitingPerson[] = rows.map(({ total: _total, ...row }) => ({
+    ...row,
+    urgent: topicUrgentAtWith(schedule, new Date(row.since)).getTime() <= Date.now(),
+    windowClosed: shut.has(row.conversationId),
+  }))
   return { waiting: rows[0]?.total ?? 0, items }
 }
 
@@ -697,9 +701,9 @@ async function waitingRegistrationsDone(tx: Db, orgId: string): Promise<WaitingR
     left join "user" u on u.id = a.professional_user_id
     cross join lateral (select max(e.created_at) as at from audit_event e
       where e.organization_id = a.organization_id and e.action = 'personal_link.data_sent' and e.entity_id = a.patient_id::text
-        and (e.created_at at time zone coalesce(b.timezone, 'UTC'))::date = (now() at time zone coalesce(b.timezone, 'UTC'))::date) sent
+        and (e.created_at at time zone coalesce(b.timezone, (select op.timezone from org_profile op where op.organization_id = b.organization_id), 'UTC'))::date = (now() at time zone coalesce(b.timezone, (select op.timezone from org_profile op where op.organization_id = b.organization_id), 'UTC'))::date) sent
     where a.organization_id = ${orgId} and not a.is_test and a.status in ('programada', 'confirmada') and a.arrived_at is null
-      and (a.starts_at at time zone coalesce(b.timezone, 'UTC'))::date = (now() at time zone coalesce(b.timezone, 'UTC'))::date
+      and (a.starts_at at time zone coalesce(b.timezone, (select op.timezone from org_profile op where op.organization_id = b.organization_id), 'UTC'))::date = (now() at time zone coalesce(b.timezone, (select op.timezone from org_profile op where op.organization_id = b.organization_id), 'UTC'))::date
       and sent.at is not null
     order by sent.at desc, a.id limit ${WAITING_LIMITS.otherCases}`)
   return [...rows]
@@ -761,7 +765,7 @@ async function waitingUnconfirmed(tx: Db, orgId: string): Promise<{ items: Waiti
  */
 function noRemindersTomorrowSql(orgId: string): SQL {
   return sql`(a.status = 'programada'
-    and (a.starts_at at time zone coalesce(b.timezone, 'UTC'))::date = ((now() at time zone coalesce(b.timezone, 'UTC'))::date + 1)
+    and (a.starts_at at time zone coalesce(b.timezone, (select op.timezone from org_profile op where op.organization_id = b.organization_id), 'UTC'))::date = ((now() at time zone coalesce(b.timezone, (select op.timezone from org_profile op where op.organization_id = b.organization_id), 'UTC'))::date + 1)
     and exists (select 1 from automation_rule r where r.organization_id = ${orgId}
       and r.kind = 'recordatorio_cita' and r.enabled and r.agent_part)
     and exists (select 1 from automation_consent s
@@ -787,7 +791,7 @@ async function waitingTasks(tx: Db, orgId: string, userId: string, access: Works
   const select = sql`select t.id, t.title, ${iso(sql`t.due_at`)} as "dueAt",
       case when t.due_at is null then 'none' when t.due_at < now() then 'overdue'
         when t.due_at < ${dayEnd} then 'today' else 'later' end as due,
-      coalesce(t.assignee_user_id=${userId}, false) as mine, u.name as "assigneeName",
+      coalesce(t.assignee_user_id=${userId}, false) as mine, u.name as "assigneeName", t.area,
       t.conversation_id as "conversationId", t.contact_id as "personId",
       ${access.crm ? sql`(select o.title from opportunity o where o.id = t.opportunity_id and o.organization_id = t.organization_id)` : sql`null`} as "opportunityTitle"
     from task t left join "user" u on u.id=t.assignee_user_id where ${scope}`

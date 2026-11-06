@@ -2971,6 +2971,9 @@ export async function enqueueAppointmentNotice(
   if (change === "cancelada" ? appt.status !== "cancelada" : !standing) return { queued: false }
   const contactId = await preferredContact(tx, orgId, appt.patientId)
   if (!contactId) return { queued: false }
+  const kind = NOTICE_OF[change]
+  // Si pidió no recibir mensajes de la clínica, no se dice que el agente le avisa: no saldría.
+  if (!(await mayWriteFirst(tx, orgId, contactId, purposeOfKind(kind)))) return { queued: false }
   if (change === "movida") {
     // Un aviso que aún no sale dice la fecha nueva al salir: no hace falta otro.
     const [waiting] = await tx
@@ -2987,7 +2990,6 @@ export async function enqueueAppointmentNotice(
       .limit(1)
     if (waiting) return { queued: true }
   }
-  const kind = NOTICE_OF[change]
   const job = await enqueueJob(tx, orgId, {
     ruleId: rule.id,
     kind,
