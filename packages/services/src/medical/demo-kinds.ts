@@ -317,19 +317,45 @@ function ageAt(person: ReportsSeedPerson | null, at: Date): number {
 
 /**
  * El cuerpo de cada persona: cuán alta y cuán robusta es frente a la mediana
- * de su edad, de −1 a 1, y un rasgo de 0 a 1 para lo que la acompaña siempre
- * (su enfermedad crónica). Sale de su nacimiento y su sexo, así que es el
- * mismo en todas sus visitas, las de la historia y las de la agenda: la talla
- * de un adulto no cambia y el peso solo varía un poco.
+ * de su edad, de −1 a 1, y dos números de 0 a 1 para lo que la acompaña
+ * siempre (si tiene una enfermedad crónica y cuál). Sale de su nacimiento y su
+ * sexo, así que es el mismo en todas sus visitas, las de la historia y las de
+ * la agenda, y con cualquier médico: la talla de un adulto no cambia y el peso
+ * solo varía un poco.
  */
-function bodyOf(person: ReportsSeedPerson | null): { height: number; build: number; trait: number } {
+function bodyOf(person: ReportsSeedPerson | null): { height: number; build: number; trait: number; chronic: number } {
   const key = person ? `${person.birthDate.slice(0, 10)}:${person.sex}` : "sin-datos"
   const part = (salt: string): number => {
     let hash = 2166136261
     for (const char of `${salt}:${key}`) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619)
     return (hash >>> 0) / 4294967296
   }
-  return { height: part("talla") * 2 - 1, build: part("peso") * 2 - 1, trait: part("rasgo") }
+  return { height: part("talla") * 2 - 1, build: part("peso") * 2 - 1, trait: part("rasgo"), chronic: part("cronica") }
+}
+
+/** Una enfermedad crónica en control. */
+type Chronic = "hipertension" | "diabetes" | "colesterol" | "obesidad"
+
+/**
+ * El año con que se cuenta la edad para saber si alguien tiene una enfermedad
+ * crónica: uno fijo, para que nadie se enferme ni se cure de un día a otro
+ * cuando cumple años.
+ */
+const CHRONIC_REFERENCE_YEAR = 2026
+
+/**
+ * La enfermedad crónica de cada persona, o ninguna: la misma en todas sus
+ * visitas y con cualquier médico. Es más común con la edad (15 % antes de los
+ * 40, 45 % hasta los 59 y 70 % desde los 60); nadie la tiene antes de los 25.
+ * Quien tiene obesidad pesa como tal en todas sus visitas (`vitals`).
+ */
+function chronicOf(person: ReportsSeedPerson | null): Chronic | null {
+  if (!person) return null
+  const age = CHRONIC_REFERENCE_YEAR - Number(person.birthDate.slice(0, 4))
+  if (age < 25) return null
+  const body = bodyOf(person)
+  if (body.chronic >= (age >= 60 ? 0.7 : age >= 40 ? 0.45 : 0.15)) return null
+  return body.trait < 0.42 ? "hipertension" : body.trait < 0.76 ? "diabetes" : body.trait < 0.9 ? "colesterol" : "obesidad"
 }
 
 /** Mediana de talla (cm) y peso (kg) por edad, de 0 a 12 años (OMS, ambos sexos); entre dos puntos, la recta. */
@@ -366,15 +392,14 @@ function growthAt(age: number): { talla: number; peso: number } {
 /**
  * Los signos de siempre, con valores de su edad el día de la visita. Talla y
  * peso son los de su cuerpo (`bodyOf`): un niño crece entre visitas y un
- * adulto no; el peso cambia apenas (±0,5 kg). `bmi`: el índice de masa
- * corporal de quien tiene obesidad, para que su peso sea el de su diagnóstico.
+ * adulto no; el peso cambia apenas (±0,5 kg) y quien tiene obesidad
+ * (`chronicOf`) la tiene en todas sus visitas.
  */
 function vitals(
   random: Random,
   person: ReportsSeedPerson | null,
   at: Date,
   extra: Record<string, number> = {},
-  options: { bmi?: number } = {},
 ): Record<string, number> {
   const age = ageAt(person, at)
   const body = bodyOf(person)
@@ -402,7 +427,8 @@ function vitals(
   // De los 12 a los 18 se pasa, en línea recta, de lo de un niño de 12 a lo de su cuerpo
   // adulto; después la talla ya no cambia y el peso es el de su índice de masa corporal.
   const adultTalla = (person?.sex === "M" ? 169 : 156) + 7 * body.height
-  const adultPeso = (options.bmi ?? 23.5 + 3.5 * body.build) * (adultTalla / 100) ** 2
+  const bmi = chronicOf(person) === "obesidad" ? 31 + 6 * ((body.build + 1) / 2) : 23.5 + 3.5 * body.build
+  const adultPeso = bmi * (adultTalla / 100) ** 2
   const at12 = growthAt(12)
   const share = Math.min(1, (age - 12) / 6)
   const talla = Math.round(at12.talla * (1 + 0.035 * body.height) + (adultTalla - at12.talla * (1 + 0.035 * body.height)) * share)
@@ -436,9 +462,9 @@ type Patient = { child: boolean; adult: boolean; weightKg: number }
 type Prescribed = NonNullable<ReportsSeedNote["prescription"]>
 type Medication = Prescribed["items"][number]
 
-/** Los mililitros de una dosis por kilo, redondeados al medio mililitro. */
-const mlFor = (weightKg: number, mgPerKg: number, mgPerMl: number): string =>
-  `${(Math.round(((weightKg * mgPerKg) / mgPerMl) * 2) / 2).toLocaleString("es")} ml`
+/** Los mililitros de una dosis por kilo, sin pasar la dosis de un adulto (`maxMg`), redondeados al medio mililitro. */
+const mlFor = (weightKg: number, mgPerKg: number, mgPerMl: number, maxMg: number): string =>
+  `${(Math.round((Math.min(weightKg * mgPerKg, maxMg) / mgPerMl) * 2) / 2).toLocaleString("es")} ml`
 
 /** Lo que se receta, por la Denominación Común Internacional de la lista médica (`GENERAL_MEDICATIONS`). */
 const RX = {
@@ -448,7 +474,7 @@ const RX = {
           genericName: "paracetamol",
           strength: "120 mg/5 ml",
           dosageForm: "jarabe",
-          dose: mlFor(who.weightKg, 15, 24),
+          dose: mlFor(who.weightKg, 15, 24, 500),
           route: "oral",
           frequency: "cada 6 horas si hay fiebre o dolor",
           duration: "3 días",
@@ -471,7 +497,7 @@ const RX = {
           genericName: "amoxicilina",
           strength: "250 mg/5 ml",
           dosageForm: "suspensión",
-          dose: mlFor(who.weightKg, 50 / 3, 50),
+          dose: mlFor(who.weightKg, 50 / 3, 50, 500),
           route: "oral",
           frequency: "cada 8 horas",
           duration: `${days} días`,
@@ -513,7 +539,8 @@ const RX = {
     genericName: "sulfato ferroso",
     strength: "75 mg/5 ml",
     dosageForm: "jarabe",
-    dose: mlFor(who.weightKg, 3, 3),
+    // 3 mg de hierro por kilo al día, hasta 60 mg (lo de un adulto).
+    dose: mlFor(who.weightKg, 3, 3, 60),
     route: "oral",
     frequency: "una vez al día, lejos de las comidas",
     duration: "3 meses",
@@ -591,6 +618,9 @@ type Episode = {
   rx?: (who: Patient) => Medication[]
   /** Días de descanso médico, solo para un adulto. */
   leave?: { days: number; notes: string }
+  /** Solo a esas edades el día de la visita (la bronquiolitis, antes de los 2 años). */
+  minAge?: number
+  maxAge?: number
 }
 
 /** Lo escrito en una atención con lo que se emitió en ella: la receta y, a un adulto, su descanso. */
@@ -618,7 +648,10 @@ function episodeNote(
   person: ReportsSeedPerson | null,
   at: Date,
 ): ReportsSeedNote {
-  const episode = random.weighted(episodes)
+  // Lo que le puede pasar a esa edad; si nada calza, lo de siempre.
+  const age = ageAt(person, at)
+  const fitting = episodes.filter((item) => (item.minAge ?? 0) <= age && age < (item.maxAge ?? 200))
+  const episode = random.weighted(fitting.length > 0 ? fitting : episodes)
   return issued(
     {
       evolution: episode.evolution,
@@ -685,10 +718,20 @@ const RESPIRATORY: readonly Episode[] = [
   },
 ]
 
-/** Lo de un adulto con su enfermedad crónica en control: la misma en cada visita (`bodyOf`). */
+/**
+ * El control de la enfermedad crónica de la persona (`chronicOf`): la misma en
+ * cada visita y con cualquier médico. Sin una, un chequeo.
+ */
 function chronicNote(random: Random, person: ReportsSeedPerson | null, at: Date): ReportsSeedNote {
-  const body = bodyOf(person)
-  if (body.trait < 0.42)
+  const chronic = chronicOf(person)
+  if (!chronic)
+    return {
+      evolution: "Chequeo general sin hallazgos. Se piden análisis de rutina.",
+      diagnosisCode: "QA00.0",
+      vitals: vitals(random, person, at),
+      examination: exam(),
+    }
+  if (chronic === "hipertension")
     return issued(
       {
         evolution:
@@ -704,7 +747,7 @@ function chronicNote(random: Random, person: ReportsSeedPerson | null, at: Date)
       at,
       () => [RX.enalapril()],
     )
-  if (body.trait < 0.76)
+  if (chronic === "diabetes")
     return issued(
       {
         evolution:
@@ -717,7 +760,7 @@ function chronicNote(random: Random, person: ReportsSeedPerson | null, at: Date)
       at,
       () => [RX.metformina()],
     )
-  if (body.trait < 0.9)
+  if (chronic === "colesterol")
     return issued(
       {
         evolution: "Colesterol alto. Estatina y control de perfil lipídico en tres meses.",
@@ -729,13 +772,27 @@ function chronicNote(random: Random, person: ReportsSeedPerson | null, at: Date)
       at,
       () => [RX.atorvastatina()],
     )
-  // Quien tiene obesidad la tiene en todas sus visitas: su peso es el de su diagnóstico.
+  // Quien tiene obesidad la tiene en todas sus visitas: su peso es el de su diagnóstico (`vitals`).
   return {
     evolution: "Obesidad. Plan de alimentación y actividad física; control mensual de peso.",
     diagnosisCode: "5B81.01",
-    vitals: vitals(random, person, at, {}, { bmi: 31 + 6 * ((body.build + 1) / 2) }),
+    vitals: vitals(random, person, at),
     examination: exam(),
   }
+}
+
+/**
+ * Una consulta de medicina general o familiar: a veces el control de la
+ * enfermedad crónica de la persona, si la tiene; si no, lo que le pasó.
+ */
+function generalNote(
+  episodes: readonly Episode[],
+  random: Random,
+  person: ReportsSeedPerson | null,
+  at: Date,
+): ReportsSeedNote {
+  if (chronicOf(person) && random.chance(0.35)) return chronicNote(random, person, at)
+  return episodeNote(episodes, random, person, at)
 }
 
 /** Una consulta de pediatría: el control del niño sano o una enfermedad de la infancia. */
@@ -765,6 +822,7 @@ function pediatricNote(service: { name: string }, random: Random, person: Report
       {
         code: "CA41.0",
         weight: 6,
+        maxAge: 2,
         evolution:
           "Bronquiolitis leve. Lavados nasales, fraccionar tomas y signos de alarma explicados a la mamá.",
         found: {
@@ -806,6 +864,8 @@ function gynecologyNote(service: { name: string }, random: Random, person: Repor
         code: "QA21.0",
         weight: 30,
         evolution: "Consejería en anticoncepción. Elige método y se indica seguimiento.",
+        minAge: 15,
+        maxAge: 50,
       },
       {
         code: "GA02.Z",
@@ -821,11 +881,19 @@ function gynecologyNote(service: { name: string }, random: Random, person: Repor
         code: "GA30.0Z",
         weight: 10,
         evolution: "Bochornos y alteración del sueño. Medidas generales y control en tres meses.",
+        minAge: 45,
       },
       {
         code: "QA00.Z",
         weight: 28,
         evolution: "Control ginecológico anual. Se toma Papanicolaou; resultado en diez días.",
+        minAge: 21,
+      },
+      {
+        code: "QA00.Z",
+        weight: 28,
+        evolution: "Control ginecológico anual sin hallazgos. Papanicolaou desde los 21 años.",
+        maxAge: 21,
       },
     ],
     random,
@@ -853,6 +921,7 @@ const GENERAL_EPISODES: readonly Episode[] = [
     code: "8A81.Z",
     weight: 8,
     evolution: "Cefalea tensional por estrés laboral. Analgésico y control si se repite.",
+    minAge: 18,
     rx: (who) => [RX.paracetamol(who)],
   },
   {
@@ -892,7 +961,7 @@ export const MEDICAL_DEMO_KINDS: readonly DemoKindRecipe[] = [
       { template: "glucosa-capilar", price: 15, durationMin: 10, weight: 6 },
     ],
     person: (random) => adult(random, 16, 78),
-    note: (_service, random, person, at) => episodeNote(GENERAL_EPISODES, random, person, at),
+    note: (_service, random, person, at) => generalNote(GENERAL_EPISODES, random, person, at),
     inbound: [
       "Hola, ¿tienen cita hoy? Tengo fiebre desde ayer",
       "Buenas, quisiera una consulta para un chequeo",
@@ -908,7 +977,7 @@ export const MEDICAL_DEMO_KINDS: readonly DemoKindRecipe[] = [
     openTopics: [
       "¿Puedo ir con mi esposo y que lo vean a los dos en la misma cita?",
       "¿Aceptan mi seguro de la empresa?",
-      "Me dieron un resultado de análisis, ¿la doctora lo puede revisar por aquí?",
+      "Me dieron un resultado de análisis, ¿{la doctora} lo puede revisar por aquí?",
     ],
     followUp: null,
     budgets: false,
@@ -980,7 +1049,7 @@ export const MEDICAL_DEMO_KINDS: readonly DemoKindRecipe[] = [
       "Sí, mañana a las 10:00 hay espacio. ¿Le reservo a nombre de la niña?",
     ],
     openTopics: [
-      "¿La doctora puede ver a mis dos hijos en la misma cita?",
+      "¿{La doctora} puede ver a mis dos hijos en la misma cita?",
       "Mi hijo vomitó después de la vacuna, ¿es normal?",
       "¿Me pueden mandar el carné de vacunas por aquí?",
     ],
@@ -1062,7 +1131,7 @@ export const MEDICAL_DEMO_KINDS: readonly DemoKindRecipe[] = [
       "Hola, estoy embarazada de 8 semanas y quisiera mi primer control",
       "Buenas, me toca mi Papanicolaou, ¿tienen cita esta semana?",
       "Hola, quisiera información para ponerme el implante",
-      "¿La doctora hace ecografías el mismo día?",
+      "¿{La doctora} hace ecografías el mismo día?",
     ],
     reply: [
       "¡Felicidades! ¿Le reservo su primer control el martes a las 10:00?",
@@ -1076,7 +1145,14 @@ export const MEDICAL_DEMO_KINDS: readonly DemoKindRecipe[] = [
       "¿Ya salió mi resultado del Papanicolaou?",
     ],
     // El control prenatal es de quien está embarazada: después de una atención de su gestación.
-    followUp: { title: "Control prenatal", everyMonths: 1, diagnoses: ["QA42.Z"] },
+    // De la gestación de ahora: se indica hasta 8 meses después de su atención y, pasado el noveno, ya no corresponde.
+    followUp: {
+      title: "Control prenatal",
+      everyMonths: 1,
+      diagnoses: ["QA42.Z"],
+      validMonths: 8,
+      expired: "Terminó la gestación",
+    },
     budgets: false,
     occupancy: 0.74,
     expenses: GENERAL_EXPENSES,
@@ -1139,7 +1215,7 @@ export const MEDICAL_DEMO_KINDS: readonly DemoKindRecipe[] = [
       "Hola, me toca mi control de presión, ¿hay cita esta semana?",
       "Buenas, se me acabaron las pastillas de la diabetes",
       "Hola, quisiera una consulta, tengo la glucosa alta",
-      "¿La doctora puede ver mis análisis?",
+      "¿{La doctora} puede ver mis análisis?",
     ],
     reply: [
       "Hola, sí. ¿Le reservo el control el miércoles a las 9:00?",
@@ -1227,20 +1303,12 @@ export const MEDICAL_DEMO_KINDS: readonly DemoKindRecipe[] = [
             vitals: vitals(random, person, at),
             examination: exam(),
           }
-        : episodeNote(
-            // A un niño, lo de la infancia; la presión y la anticoncepción son de un adulto.
-            ageAt(person, at) < 15
-              ? RESPIRATORY
-              : [
-                  ...RESPIRATORY,
-                  {
-                    code: "BA00.Z",
-                    weight: 10,
-                    evolution: "Presión alta en control. Continúa tratamiento y dieta baja en sal.",
-                    rx: () => [RX.enalapril()],
-                  },
-                  { code: "QA21.0", weight: 6, evolution: "Consejería en planificación familiar." },
-                ],
+        : generalNote(
+            // La anticoncepción es de 15 a 49 años; la enfermedad crónica, de la persona.
+            [
+              ...RESPIRATORY,
+              { code: "QA21.0", weight: 6, evolution: "Consejería en planificación familiar.", minAge: 15, maxAge: 50 },
+            ],
             random,
             person,
             at,
@@ -1361,28 +1429,7 @@ export const MEDICAL_DEMO_KINDS: readonly DemoKindRecipe[] = [
           ? gynecologyNote(service, random, person, at)
           : /interna/i.test(service.name)
             ? chronicNote(random, person, at)
-            : episodeNote(
-                ageAt(person, at) < 18
-                  ? RESPIRATORY
-                  : [
-                      ...GENERAL_EPISODES,
-                      {
-                        code: "BA00.Z",
-                        weight: 12,
-                        evolution: "Hipertensión arterial en control; continúa tratamiento.",
-                        rx: () => [RX.enalapril()],
-                      },
-                      {
-                        code: "5A11",
-                        weight: 8,
-                        evolution: "Diabetes tipo 2 en control; continúa metformina.",
-                        rx: () => [RX.metformina()],
-                      },
-                    ],
-                random,
-                person,
-                at,
-              ),
+            : generalNote(ageAt(person, at) < 18 ? RESPIRATORY : GENERAL_EPISODES, random, person, at),
     // Sofi dice lo que hay: las especialidades salen del equipo de la demo, sin sedes ni nombres.
     inbound: [
       "Hola, ¿qué especialidades atienden?",

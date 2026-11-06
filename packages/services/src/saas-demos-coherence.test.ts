@@ -12,6 +12,8 @@ import { advanceDemo, buildDemo, demoKindOf } from "./demo-build.js"
 import type { DemoKindRecipe, DemoWho } from "./demo-recipes.js"
 import { collectedNetMany, listTickets } from "./finance.js"
 import { getTimeline } from "./patient-history.js"
+import { listConnectionsOverview } from "./connections.js"
+import { getConversationDetail } from "./conversations.js"
 import { agentConversationsMany } from "./report-agent.js"
 import { currentMonthIn, monthStart, reportDayOf } from "./report-periods.js"
 import { createSaasPlan } from "./saas-billing.js"
@@ -97,21 +99,31 @@ type Built = {
   historyThrough: string
   product: "dental" | "medical"
   kind: DemoKindRecipe
-  size: "pequeno" | "mediano"
+  size: "pequeno" | "mediano" | "grande"
 }
+
+/**
+ * La semilla de cada demo es fija, para que una prueba que falla se pueda
+ * repetir: el nombre del bloque la dice. `DEMO_SEED` prueba con otra.
+ */
+const seedOf = (fallback: number): number => Number(process.env.DEMO_SEED ?? fallback)
 
 async function build(input: {
   product: "dental" | "medical"
   kind: string
-  size: "pequeno" | "mediano"
+  size: "pequeno" | "mediano" | "grande"
   countryCode: string
   name: string
+  seed: number
+  months?: 6 | 12
 }): Promise<Built> {
+  const { seed, months, ...asked0 } = input
   const asked = await requestDemo(ownerDb, admin, {
-    ...input,
-    months: 6,
+    ...asked0,
+    months: months ?? 6,
     presenterUserId: admin.userId,
   })
+  await ownerDb.update(saasDemo).set({ seed }).where(eq(saasDemo.id, asked.id))
   const [row] = await ownerDb.select().from(saasDemo).where(eq(saasDemo.id, asked.id))
   if (!row) throw new Error("falta la demo")
   const ref = { ...row, product: input.product, size: input.size }
@@ -141,6 +153,20 @@ const rows = async <T>(query: ReturnType<typeof sql>): Promise<T[]> =>
   (await ownerDb.execute(query)) as unknown as T[]
 const count = async (query: ReturnType<typeof sql>): Promise<number> =>
   Number((await rows<{ n: number }>(query))[0]?.n ?? 0)
+
+/**
+ * Un texto de la receta como patrón: lo que la demo llena con sus datos
+ * (`{especialidades}`, `{la doctora}`) puede decir cualquier cosa de su tipo.
+ */
+function said(text: string): RegExp {
+  const escaped = text.replace(/[.*+?^$()|[\]\\]/g, "\\$&")
+  return new RegExp(
+    `^${escaped
+      .replaceAll("{especialidades}", "[^{}]+")
+      .replaceAll("{la doctora}", "(la doctora|el doctor|el médico)")
+      .replaceAll("{La doctora}", "(La doctora|El doctor|El médico)")}$`,
+  )
+}
 
 /** Años cumplidos el día de la cita (cuenta propia, no la de la semilla). */
 function yearsOn(birthDate: string, at: Date): number {
@@ -361,6 +387,22 @@ function coherent(demo: () => Built) {
     }>(sql`
       select status, health, webhook_verified_at from channel_connection where organization_id = ${orgId} and channel = 'whatsapp'`)
     expect(connections).toEqual([{ status: "disabled", health: null, webhook_verified_at: null }])
+    // Integraciones, la Bandeja y Agente dicen que es la conexión de la demo, que no envía ni recibe de verdad.
+    const [listed] = await listConnectionsOverview(ownerDb, orgId)
+    expect(listed).toMatchObject({ status: "disabled", demoClinic: true })
+    const [anyone] = await rows<{ id: string }>(
+      sql`select id from conversation where organization_id = ${orgId} limit 1`,
+    )
+    if (!anyone) throw new Error("faltan conversaciones")
+    const detail = await getConversationDetail(ownerDb, orgId, anyone.id)
+    expect(detail.connection).toMatchObject({ status: "disabled", demoClinic: true })
+    const overview = await getAgentOverview(ownerDb, orgId)
+    expect(overview.readiness).toMatchObject({ channels: [], demoClinic: true })
+    // Sofi no dice que responde por WhatsApp.
+    const [about] = await rows<{ about: string | null }>(
+      sql`select about from agent_config where organization_id = ${orgId}`,
+    )
+    expect(about?.about ?? "").not.toMatch(/whatsapp/i)
   })
 
   it("Sofi dice solo lo que hay: cada respuesta contesta su pregunta y nada habla de una sede que no existe (Z7)", async () => {
@@ -368,22 +410,22 @@ function coherent(demo: () => Built) {
     const branches = await count(
       sql`select count(*)::int as n from branch where organization_id = ${orgId}`,
     )
-    const said = await rows<{ body: string }>(sql`
+    const written = await rows<{ body: string }>(sql`
       select body from message where organization_id = ${orgId} and body is not null
         and (sender_kind = 'agent' or direction = 'in')`)
-    if (branches === 1) expect(said.filter((row) => /sede/i.test(row.body))).toEqual([])
-    // La primera respuesta de Sofi en cada conversación es la de la pregunta (las que no dependen del equipo).
+    if (branches === 1) expect(written.filter((row) => /sede/i.test(row.body))).toEqual([])
+    // Cada respuesta de Sofi contesta lo último que le escribieron antes (también en una conversación reabierta).
     const pairs = await rows<{ asked: string; answered: string }>(sql`
-      select (select m.body from message m where m.organization_id = c.organization_id and m.conversation_id = c.id and m.direction = 'in' order by m.created_at limit 1) as asked,
-        (select m.body from message m where m.organization_id = c.organization_id and m.conversation_id = c.id and m.sender_kind = 'agent' order by m.created_at limit 1) as answered
-      from conversation c where c.organization_id = ${orgId}`)
+      select (select i.body from message i where i.organization_id = m.organization_id and i.conversation_id = m.conversation_id
+          and i.direction = 'in' and i.created_at <= m.created_at order by i.created_at desc limit 1) as asked,
+        m.body as answered
+      from message m where m.organization_id = ${orgId} and m.sender_kind = 'agent'`)
     const answered = pairs.filter((row) => row.answered && row.asked)
     expect(answered.length).toBeGreaterThan(20)
     for (const row of answered) {
-      const index = kind.inbound.indexOf(row.asked)
-      expect(index).toBeGreaterThanOrEqual(0)
-      const expected = kind.reply[index] as string
-      if (!expected.includes("{especialidades}")) expect(row.answered).toBe(expected)
+      const index = kind.inbound.findIndex((text) => said(text).test(row.asked))
+      expect({ asked: row.asked, index: index >= 0 }).toEqual({ asked: row.asked, index: true })
+      expect(row.answered).toMatch(said(kind.reply[index] as string))
     }
   })
 
@@ -461,40 +503,8 @@ function coherent(demo: () => Built) {
   })
 }
 
-describe("una demo de Policlínico mediana (latidIA)", () => {
-  let demo: Built
-  beforeAll(async () => {
-    demo = await build({
-      product: "medical",
-      kind: "policlinico",
-      size: "mediano",
-      countryCode: "PE",
-      name: "Policlínico Coherente",
-    })
-  }, 300_000)
-
-  coherent(() => demo)
-
-  it("ofrece y dice solo las especialidades de su equipo (Z6, Z7)", async () => {
-    const orgId = demo.organizationId
-    const attended = await rows<{ name: string }>(sql`
-      select distinct s.name from professional_specialty ps join org_specialty s on s.organization_id = ps.organization_id and s.id = ps.specialty_id
-      where ps.organization_id = ${orgId}`)
-    // Las tres del tamaño mediano: medicina general, pediatría y ginecología.
-    expect(attended.length).toBe(3)
-    const offered = await rows<{ key: string }>(sql`
-      select t.key from service_catalog sc join treatment_template t on t.id = sc.template_id where sc.organization_id = ${orgId}`)
-    expect(offered.map((row) => row.key)).not.toContain("consulta-medicina-interna")
-    expect(offered.map((row) => row.key)).not.toContain("consulta-medicina-familiar")
-    const listed = await rows<{ body: string }>(sql`
-      select body from message where organization_id = ${orgId} and sender_kind = 'agent' and body like 'Atendemos %'`)
-    expect(listed.length).toBeGreaterThan(0)
-    for (const row of listed) {
-      for (const item of attended) expect(row.body).toContain(item.name.toLocaleLowerCase("es"))
-      expect(row.body).not.toMatch(/interna|familiar|\{/)
-    }
-  })
-
+/** Lo que vale para las demos de latidIA: el cuerpo de cada persona, su enfermedad crónica y lo que se escribe a su edad. */
+function medical(demo: () => Built) {
   it("los signos vitales cambian como puede cambiar un cuerpo entre una medición y otra (Z10)", async () => {
     const measured = await rows<{
       patient_id: string
@@ -503,7 +513,7 @@ describe("una demo de Policlínico mediana (latidIA)", () => {
       peso: string | null
     }>(sql`
       select patient_id, started_at::text as started_at, vitals->>'talla' as talla, vitals->>'peso' as peso
-      from encounter where organization_id = ${demo.organizationId} and status = 'finalizada' and vitals is not null
+      from encounter where organization_id = ${demo().organizationId} and status = 'finalizada' and vitals is not null
       order by patient_id, started_at`)
     expect(measured.length).toBeGreaterThan(100)
     const wrong: string[] = []
@@ -525,8 +535,34 @@ describe("una demo de Policlínico mediana (latidIA)", () => {
     expect(wrong.slice(0, 10)).toEqual([])
   })
 
+  it("cada persona tiene una sola enfermedad crónica, la misma con cualquier médico", async () => {
+    const mixed = await rows<{ patient_id: string; codes: string[] }>(sql`
+      select patient_id, array_agg(distinct diagnosis_code) as codes from encounter_diagnosis
+      where organization_id = ${demo().organizationId} and diagnosis_code in ('BA00.Z', '5A11', '5C80.0Z', '5B81.01')
+      group by patient_id having count(distinct diagnosis_code) > 1`)
+    expect(mixed.slice(0, 5)).toEqual([])
+  })
+
+  it("lo que se escribe va con la edad: bronquiolitis antes de los 2 años, bochornos desde los 45, anticoncepción de 15 a 49", async () => {
+    const wrong = await rows<{ code: string; age: number }>(sql`
+      select d.diagnosis_code as code, extract(year from age(e.started_at::date, c.birth_date))::int as age
+      from encounter_diagnosis d
+      join encounter e on e.organization_id = d.organization_id and e.id = d.encounter_id
+      join patient p on p.organization_id = e.organization_id and p.id = e.patient_id
+      join contact c on c.organization_id = p.organization_id and c.id = p.person_id
+      where d.organization_id = ${demo().organizationId} and (
+        (d.diagnosis_code = 'CA41.0' and age(e.started_at::date, c.birth_date) >= interval '2 years')
+        or (d.diagnosis_code = 'GA30.0Z' and age(e.started_at::date, c.birth_date) < interval '45 years')
+        or (d.diagnosis_code = 'QA21.0' and (age(e.started_at::date, c.birth_date) < interval '15 years' or age(e.started_at::date, c.birth_date) >= interval '50 years'))
+      ) limit 5`)
+    expect(wrong).toEqual([])
+  })
+}
+
+/** Las recetas y los descansos de latidIA (Z3), en una demo con consultas generales. */
+function papers(demo: () => Built) {
   it("tiene recetas y descansos médicos para imprimir, firmados y numerados (Z3)", async () => {
-    const orgId = demo.organizationId
+    const orgId = demo().organizationId
     expect(
       await count(
         sql`select count(*)::int as n from prescription where organization_id = ${orgId}`,
@@ -537,7 +573,7 @@ describe("una demo de Policlínico mediana (latidIA)", () => {
         sql`select count(*)::int as n from medical_leave where organization_id = ${orgId}`,
       ),
     ).toBeGreaterThan(5)
-    // Numeradas sin repetir, con quien prescribe, con medicamentos de vía conocida.
+    // Con quien prescribe, con medicamentos de vía conocida.
     expect(
       await count(
         sql`select count(*)::int as n from prescription where organization_id = ${orgId} and (prescriber_name is null or prescriber_name = '')`,
@@ -562,9 +598,119 @@ describe("una demo de Policlínico mediana (latidIA)", () => {
         where l.organization_id = ${orgId} and age(l.starts_on, c.birth_date) < interval '18 years'`),
     ).toBe(0)
   })
+}
+
+const POLICLINICO_MEDIANO = seedOf(20_261_104)
+describe(`una demo de Policlínico mediana (latidIA, semilla ${POLICLINICO_MEDIANO})`, () => {
+  let demo: Built
+  beforeAll(async () => {
+    demo = await build({
+      product: "medical",
+      kind: "policlinico",
+      size: "mediano",
+      countryCode: "PE",
+      name: "Policlínico Coherente",
+      seed: POLICLINICO_MEDIANO,
+    })
+  }, 300_000)
+
+  coherent(() => demo)
+  medical(() => demo)
+  papers(() => demo)
+
+  it("ofrece y dice solo las especialidades de su equipo (Z6, Z7)", async () => {
+    const orgId = demo.organizationId
+    const attended = await rows<{ name: string }>(sql`
+      select distinct s.name from professional_specialty ps join org_specialty s on s.organization_id = ps.organization_id and s.id = ps.specialty_id
+      where ps.organization_id = ${orgId}`)
+    // Las tres del tamaño mediano: medicina general, pediatría y ginecología.
+    expect(attended.length).toBe(3)
+    const offered = await rows<{ key: string }>(sql`
+      select t.key from service_catalog sc join treatment_template t on t.id = sc.template_id where sc.organization_id = ${orgId}`)
+    expect(offered.map((row) => row.key)).not.toContain("consulta-medicina-interna")
+    expect(offered.map((row) => row.key)).not.toContain("consulta-medicina-familiar")
+    const listed = await rows<{ body: string }>(sql`
+      select body from message where organization_id = ${orgId} and sender_kind = 'agent' and body like 'Atendemos %'`)
+    expect(listed.length).toBeGreaterThan(0)
+    for (const row of listed) {
+      for (const item of attended) expect(row.body).toContain(item.name.toLocaleLowerCase("es"))
+      expect(row.body).not.toMatch(/interna|familiar|\{/)
+    }
+  })
 })
 
-describe("una demo de clínica general pequeña (odentIA)", () => {
+// Con 8 profesionales entra medicina interna: la misma persona la ve el internista y el médico general.
+const POLICLINICO_GRANDE = seedOf(20_261_105)
+describe(`una demo de Policlínico grande (latidIA, semilla ${POLICLINICO_GRANDE})`, () => {
+  let demo: Built
+  beforeAll(async () => {
+    demo = await build({
+      product: "medical",
+      kind: "policlinico",
+      size: "grande",
+      countryCode: "PE",
+      name: "Policlínico Grande Coherente",
+      seed: POLICLINICO_GRANDE,
+    })
+  }, 600_000)
+
+  coherent(() => demo)
+  medical(() => demo)
+  papers(() => demo)
+
+  it("tiene medicina interna, y sus controles de presión y glucosa son de quien tiene hipertensión o diabetes", async () => {
+    const orgId = demo.organizationId
+    expect(
+      await count(sql`select count(*)::int as n from appointment a
+        join service_catalog sc on sc.organization_id = a.organization_id and sc.id = a.service_id
+        join treatment_template t on t.id = sc.template_id
+        where a.organization_id = ${orgId} and t.key = 'consulta-medicina-interna'`),
+    ).toBeGreaterThan(0)
+    expect(
+      await count(
+        sql`select count(*)::int as n from clinical_follow_up where organization_id = ${orgId}`,
+      ),
+    ).toBeGreaterThan(0)
+  })
+})
+
+const GINECOLOGIA = seedOf(20_261_106)
+describe(`una demo de ginecología pequeña (latidIA, semilla ${GINECOLOGIA})`, () => {
+  let demo: Built
+  beforeAll(async () => {
+    demo = await build({
+      product: "medical",
+      kind: "ginecologia_obstetricia",
+      size: "pequeno",
+      countryCode: "PE",
+      name: "Ginecología Coherente",
+      seed: GINECOLOGIA,
+      // Con un año de historia hay gestaciones que ya terminaron.
+      months: 12,
+    })
+  }, 300_000)
+
+  coherent(() => demo)
+  medical(() => demo)
+
+  it("el control prenatal es de la gestación de ahora: el que pasa de nueve meses ya no queda pendiente", async () => {
+    const orgId = demo.organizationId
+    expect(
+      await count(sql`select count(*)::int as n from clinical_follow_up f
+        join encounter e on e.organization_id = f.organization_id and e.id = f.origin_encounter_id
+        where f.organization_id = ${orgId} and f.status = 'pendiente' and e.ended_at < now() - interval '9 months'`),
+    ).toBe(0)
+    expect(
+      await count(sql`select count(*)::int as n from clinical_follow_up
+        where organization_id = ${orgId} and status = 'cancelado' and cancelled_reason = 'Terminó la gestación'`),
+    ).toBeGreaterThan(0)
+  })
+})
+
+const DENTAL = seedOf(20_261_107)
+/** Noches que se recorren seguidas: más de las 4 semanas en que antes la Bandeja de hoy se vaciaba. */
+const NIGHTS = 32
+describe(`una demo de clínica general pequeña (odentIA, semilla ${DENTAL})`, () => {
   let demo: Built
   beforeAll(async () => {
     demo = await build({
@@ -573,6 +719,7 @@ describe("una demo de clínica general pequeña (odentIA)", () => {
       size: "pequeno",
       countryCode: "MX",
       name: "Dental Coherente",
+      seed: DENTAL,
     })
   }, 300_000)
 
@@ -585,4 +732,50 @@ describe("una demo de clínica general pequeña (odentIA)", () => {
       ),
     ).toBeGreaterThan(0)
   })
+
+  it(`noche tras noche, ${NIGHTS} seguidas, la Bandeja de hoy se llena y quien vuelve a escribir vuelve a su conversación`, async () => {
+    const [row] = await ownerDb.select().from(saasDemo).where(eq(saasDemo.id, demo.id))
+    if (!row) throw new Error("falta la demo")
+    let historyThrough = row.historyThrough
+    const start = Date.now()
+    const perNight: number[] = []
+    let reopened = 0
+    for (let night = 1; night <= NIGHTS; night += 1) {
+      const at = new Date(start + night * DAY)
+      const done = await ownerDb.transaction((tx) =>
+        advanceDemo(
+          tx,
+          {
+            ...row,
+            product: demo.product,
+            size: demo.size,
+            organizationId: demo.organizationId,
+            historyThrough,
+          },
+          at,
+        ),
+      )
+      historyThrough = done.historyThrough
+      const today = await rows<{ id: string; phone: string | null; before: boolean }>(sql`
+        select c.id, k.phone,
+          exists (select 1 from message o where o.organization_id = c.organization_id and o.conversation_id = c.id
+            and (o.external_id is null or o.external_id not like ${`demo-${done.today}-%`})) as before
+        from conversation c
+        join contact k on k.organization_id = c.organization_id and k.id = c.contact_id
+        where c.organization_id = ${demo.organizationId}
+          and exists (select 1 from message m where m.organization_id = c.organization_id and m.conversation_id = c.id
+            and m.external_id like ${`demo-${done.today}-%-a`})`)
+      perNight.push(today.length)
+      // Cada una de alguien con su número: nadie «Sin teléfono».
+      expect({ night, sinTelefono: today.filter((item) => !item.phone).length }).toEqual({
+        night,
+        sinTelefono: 0,
+      })
+      reopened += today.filter((item) => item.before).length
+    }
+    // Un profesional: 4 + 3 conversaciones cada noche, todas las noches.
+    expect(perNight).toEqual(Array.from({ length: NIGHTS }, () => 7))
+    // Quien ya había escrito volvió a su conversación, que se reabrió.
+    expect(reopened).toBeGreaterThan(NIGHTS)
+  }, 600_000)
 })

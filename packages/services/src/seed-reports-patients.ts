@@ -38,9 +38,19 @@ export interface ReportsPatientsSeedInput {
    * El control que se repite en esta clínica (el de la receta de la demo):
    * su nombre, cada cuántos meses y, si lo tiene, los diagnósticos que lo
    * piden (el de presión y glucosa, solo a quien tiene hipertensión o
-   * diabetes). Nulo: no hay controles. Sin él, el de mantenimiento de Dental Smile.
+   * diabetes). Con `validMonths` (el prenatal) cuenta la atención más reciente,
+   * y el que pasa de uno más se cancela con el motivo `expired`. Nulo: no hay
+   * controles. Sin él, el de mantenimiento de Dental Smile.
    */
-  followUp?: { title: string; everyMonths: number; diagnoses?: readonly string[] } | null
+  followUp?: FollowUpRecipe | null
+}
+
+type FollowUpRecipe = {
+  title: string
+  everyMonths: number
+  diagnoses?: readonly string[]
+  validMonths?: number
+  expired?: string
 }
 
 /** Por dónde escribe la gente en una clínica mediana. */
@@ -66,7 +76,7 @@ const REFERRAL_WEIGHTS: Array<{ kind: string | null; weight: number; said?: read
 
 const DAY_MS = 86_400_000
 /** Sin receta: el control de mantenimiento, que vence a los seis meses. */
-const MAINTENANCE: { title: string; everyMonths: number; diagnoses?: readonly string[] } = { title: "Control de mantenimiento", everyMonths: 6 }
+const MAINTENANCE: FollowUpRecipe = { title: "Control de mantenimiento", everyMonths: 6 }
 
 export async function seedReportsPatients(
   tx: Db,
@@ -186,7 +196,8 @@ export async function seedReportsPatients(
               )}))`
           : sql``
       }
-    order by e.patient_id, e.finalized_at, e.id`)
+    -- Con vigencia (el prenatal), la atención más reciente: la de la gestación de ahora.
+    order by e.patient_id, ${followUp.validMonths ? sql`e.finalized_at desc` : sql`e.finalized_at`}, e.id`)
     : []
   // Cada cuánto, en días; se hizo si volvió entre un tercio del intervalo antes (hasta un mes) y la mitad después (hasta seis semanas).
   const intervalDays = Math.round((followUp?.everyMonths ?? 6) * 30.4)
@@ -220,8 +231,12 @@ export async function seedReportsPatients(
       createdAt: new Date(originAt),
     }
     const back = visitsOf.get(first.patient_id)?.find((visit) => visit.at > originAt && visit.at >= dueAt - before * DAY_MS && visit.at <= dueAt + after * DAY_MS)
+    // Pasada su vigencia y uno más (el prenatal de una gestación que ya terminó), ya no corresponde.
+    const expiresAt = followUp.validMonths ? originAt + Math.round((followUp.validMonths + 1) * 30.4) * DAY_MS : null
     if (back && back.at <= now) {
       controls.push({ ...base, status: "realizado", completedEncounterId: back.encounterId, outcome: "Sin novedades", completedAt: new Date(back.at) })
+    } else if (expiresAt !== null && expiresAt < now) {
+      controls.push({ ...base, status: "cancelado", cancelledReason: followUp.expired ?? "Ya no corresponde", cancelledAt: new Date(expiresAt) })
     } else if (dueAt < now && random.chance(0.2)) {
       controls.push({ ...base, status: "cancelado", cancelledReason: "No respondió", cancelledAt: new Date(dueAt + 14 * DAY_MS) })
     } else {

@@ -132,9 +132,17 @@ export interface DemoKindRecipe {
   /**
    * El control que se repite y vence (control del niño sano, prenatal…).
    * `diagnoses`: solo después de una atención con uno de esos diagnósticos (el
-   * prenatal, de una gestación).
+   * prenatal, de una gestación). `validMonths`: hasta cuántos meses después de
+   * esa atención se indica (el prenatal, lo que queda de una gestación); el que
+   * pasa de uno más se cancela con el motivo `expired`.
    */
-  followUp: { title: string; everyMonths: number; diagnoses?: readonly string[] } | null
+  followUp: {
+    title: string
+    everyMonths: number
+    diagnoses?: readonly string[]
+    validMonths?: number
+    expired?: string
+  } | null
   budgets: boolean
   /** Cuánto se llena la agenda de cada profesional. */
   occupancy: number

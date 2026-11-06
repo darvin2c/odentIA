@@ -20,7 +20,7 @@ import {
   treatmentTemplate,
 } from "@odentia/db/schema/clinical"
 import { professionalSpecialty } from "@odentia/db/schema/clinical-forms"
-import { channelConnection, message } from "@odentia/db/schema/crm"
+import { channelConnection, conversation, message } from "@odentia/db/schema/crm"
 import { cashShift } from "@odentia/db/schema/finance"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
@@ -33,6 +33,7 @@ import { setProfessionalSchedule } from "./availability.js"
 import { chargeTaxOf, orgTaxes } from "./clinic-taxes.js"
 import { ensureClinicConsents, setProfessionalSpecialties } from "./clinical-forms.js"
 import { createConnection, setConnectionStatus } from "./connections.js"
+import { reopenIfClosed } from "./conversations.js"
 import {
   DEMO_COUNTRIES,
   DEMO_SIZE_RECIPES,
@@ -89,7 +90,7 @@ import { librarySpecialtyIds } from "./specialties.js"
  * La demo cuenta una clínica coherente: cada servicio lo atiende quien tiene
  * su especialidad y a quien le corresponde por edad y sexo, cada cobro tiene
  * su ticket y su caja, cada respuesta de Sofi su corrida, y quien escribe por
- * WhatsApp tiene su número (`saas-demos.test.ts` lo comprueba).
+ * WhatsApp tiene su número (`saas-demos-coherence.test.ts` lo comprueba).
  */
 
 /** Los pasos del armado que dice el avance: equipo, tarifario, historia, agentes, hoy y operación. */
@@ -206,10 +207,18 @@ const needOf = (kind: DemoKindRecipe, professional: { specialty: string | null }
 ]
 
 /**
- * Lo que Sofi dice, con los datos de la demo (ADR 0120): `{especialidades}` es
- * la lista de las que atiende el equipo, como las nombra la clínica.
+ * Lo que dicen Sofi y quienes escriben, con los datos de la demo (ADR 0120):
+ * `{especialidades}` es la lista de las que atiende el equipo, como las nombra
+ * la clínica, y `{la doctora}` dice «la doctora» si el equipo es de doctoras,
+ * «el doctor» si es de doctores y «el médico» si hay de los dos.
  */
-async function demoTexts(tx: Db, orgId: string, kind: DemoKindRecipe, specialties: readonly string[]): Promise<DemoKindRecipe> {
+async function demoTexts(
+  tx: Db,
+  orgId: string,
+  kind: DemoKindRecipe,
+  specialties: readonly string[],
+  sexes: ReadonlyArray<"F" | "M">,
+): Promise<DemoKindRecipe> {
   const ids = await librarySpecialtyIds(tx, orgId, specialties)
   const names = ids.size
     ? (
@@ -221,7 +230,14 @@ async function demoTexts(tx: Db, orgId: string, kind: DemoKindRecipe, specialtie
     : []
   const list =
     names.length <= 1 ? (names[0] ?? kind.name.toLocaleLowerCase("es")) : `${names.slice(0, -1).join(", ")} y ${names.at(-1)}`
-  const said = (texts: readonly string[]) => texts.map((text) => text.replaceAll("{especialidades}", list))
+  const doctor = sexes.every((sex) => sex === "F") ? "la doctora" : sexes.every((sex) => sex === "M") ? "el doctor" : "el médico"
+  const said = (texts: readonly string[]) =>
+    texts.map((text) =>
+      text
+        .replaceAll("{especialidades}", list)
+        .replaceAll("{la doctora}", doctor)
+        .replaceAll("{La doctora}", `${doctor.charAt(0).toLocaleUpperCase("es")}${doctor.slice(1)}`),
+    )
   return { ...kind, inbound: said(kind.inbound), reply: said(kind.reply), openTopics: said(kind.openTopics) }
 }
 
@@ -442,7 +458,13 @@ export async function buildDemo(
   }
   // Las especialidades que atiende el equipo: lo de las demás no se ofrece ni se dice.
   const teamSpecialties = [...new Set(team.flatMap((item) => (item.specialty ? [item.specialty] : [])))]
-  const said = await demoTexts(tx, orgId, kind, teamSpecialties)
+  const said = await demoTexts(
+    tx,
+    orgId,
+    kind,
+    teamSpecialties,
+    people.filter((person) => person.role === "clinician").map((person) => person.sex),
+  )
 
   await ensureDefaultPaymentMethods(tx, orgId, demo.presenterUserId, country.code)
   await ensureDefaultPipeline(tx, orgId)
@@ -455,7 +477,7 @@ export async function buildDemo(
       personaName: "Sofi",
       treatment: "usted",
       tone: "cercano",
-      about: `${kind.name} en ${places[0] ?? country.name}, ${country.name}. Atendemos con cita y respondemos por WhatsApp todos los días.`,
+      about: `${kind.name} en ${places[0] ?? country.name}, ${country.name}. Atendemos con cita, de lunes a sábado.`,
     },
     { actorUserId: demo.presenterUserId },
   )
@@ -668,8 +690,8 @@ export async function buildDemo(
   for (let day = addDays(today, -2); day <= through; day = addDays(day, 1))
     await planDay(tx, context, day, historyEnd)
   await closeVisits(tx, context, now)
-  await seedTodayInbox(tx, context, connection.id, today, size.professionals)
-  await topUpFollowUps(tx, context, today)
+  await seedTodayInbox(tx, context, connection.id, today, size.professionals, now)
+  await topUpFollowUps(tx, context, today, now)
 
   // --- Lo que el equipo ya usa: inventario, promociones, comisiones, oportunidades y Sofi ----
   // Después de hoy: los materiales se descuentan de las atenciones recién cerradas.
@@ -1177,7 +1199,8 @@ async function closeVisits(tx: Db, ctx: AgendaContext, before: Date): Promise<nu
  * Los teléfonos de quienes escriben (cada paciente o su responsable, y quien
  * solo preguntó): un número del rango de ficción y su identidad de WhatsApp,
  * así su ficha dice el número por el que escribe y se le puede confirmar la
- * cita. Primero a quien vino o escribió más hace poco: el rango tiene 999
+ * cita. Primero a quien escribió el último mes y después a quien vino o
+ * escribió más hace poco: el rango tiene 999
  * números y una demo grande tiene más personas; las demás quedan sin
  * teléfono, como una ficha vieja. Sus conversaciones de WhatsApp quedan con ese número.
  */
@@ -1196,7 +1219,10 @@ async function giveDemoPhones(tx: Db, orgId: string): Promise<void> {
       where organization_id = ${orgId} group by 1
     ), wanted as (
       select k.id as contact_id,
-        row_number() over (order by greatest(w.last_visit, t.last_message) desc nulls last, k.id) as n
+        row_number() over (
+          order by coalesce(t.last_message > now() - interval '30 days', false) desc,
+            greatest(w.last_visit, t.last_message) desc nulls last, k.id
+        ) as n
       from contact k
       left join writers w on w.contact_id = k.id
       left join talkers t on t.contact_id = k.id
@@ -1252,7 +1278,8 @@ async function closeDemoCash(tx: Db, ctx: AgendaContext, today: string): Promise
 /**
  * La Bandeja de hoy: temas que esperan a una persona, conversaciones que
  * atiende Sofi y otras que esperan respuesta del paciente. Si hoy ya tiene las
- * suyas, no agrega otras.
+ * suyas, no agrega otras. Quien ya escribió antes vuelve a su conversación de
+ * WhatsApp, que se reabre (ADR 0024): una persona tiene una por su número.
  */
 async function seedTodayInbox(
   tx: Db,
@@ -1260,6 +1287,7 @@ async function seedTodayInbox(
   connectionId: string,
   today: string,
   professionals: number,
+  at: Date,
 ): Promise<void> {
   const thread = `demo-${today}-`
   const [already] = await tx
@@ -1267,8 +1295,9 @@ async function seedTodayInbox(
     .from(message)
     .where(and(eq(message.organizationId, ctx.orgId), like(message.externalId, `${thread}%`)))
   if ((already?.count ?? 0) > 0) return
-  // Quienes escriben por WhatsApp tienen su número: primero ellos, cada persona una vez, y
-  // nunca alguien cuyo número ya tiene su conversación en esta conexión.
+  // Quienes escriben por WhatsApp tienen su número: primero ellos, cada persona una vez.
+  // Quien ya tiene una conversación por esta conexión vuelve a ella; si sigue abierta (la
+  // atienden todavía), hoy no escribe otra vez.
   const writers = (await tx.execute(sql`
     with writers as (
       select distinct on (coalesce(g.contact_id, p.person_id)) coalesce(g.contact_id, p.person_id) as contact_id,
@@ -1279,35 +1308,49 @@ async function seedTodayInbox(
       where p.organization_id = ${ctx.orgId}
       order by coalesce(g.contact_id, p.person_id), md5(p.id::text || ${today})
     )
-    select w.contact_id from writers w
+    select w.contact_id, last.id as conversation_id
+    from writers w
     join contact k on k.organization_id = ${ctx.orgId} and k.id = w.contact_id and k.record_locked_at is null
-    left join contact_identity i on i.organization_id = ${ctx.orgId} and i.contact_id = w.contact_id and i.channel = 'whatsapp'
-    where i.id is null or not exists (
-      select 1 from conversation c where c.organization_id = ${ctx.orgId}
-        and c.channel_connection_id = ${connectionId}::uuid and c.external_thread_id = i.external_user_id)
-    order by (i.id is null), w.shuffle limit 60`)) as unknown as Array<{ contact_id: string }>
+    left join lateral (
+      select c.id, c.status from conversation c
+      where c.organization_id = ${ctx.orgId} and c.channel_connection_id = ${connectionId}::uuid and c.contact_id = w.contact_id
+      order by c.last_message_at desc nulls last, c.id limit 1
+    ) last on true
+    where last.id is null or last.status = 'closed'
+    order by not exists (select 1 from contact_identity i where i.organization_id = ${ctx.orgId} and i.contact_id = w.contact_id and i.channel = 'whatsapp'),
+      w.shuffle
+    limit 60`)) as unknown as Array<{ contact_id: string; conversation_id: string | null }>
   if (writers.length === 0) return
-  const now = Date.now()
+  const now = at.getTime()
   const total = Math.min(writers.length, 4 + professionals * 3)
   const runs: Array<typeof agentRunLedger.$inferInsert> = []
   for (let index = 0; index < total; index += 1) {
-    const contactId = (writers[index] as { contact_id: string }).contact_id
+    const writer = writers[index] as (typeof writers)[number]
+    const contactId = writer.contact_id
     const asked = new Date(now - ctx.random.int(5, 300) * 60_000)
     const answered = new Date(asked.getTime() + ctx.random.int(20, 90) * 1000)
     // La respuesta contesta a lo que preguntó (van de a pares en la receta).
     const exchange = ctx.random.int(0, ctx.kind.inbound.length - 1)
     const topic = index < ctx.kind.openTopics.length ? (ctx.kind.openTopics[index] as string) : null
     const waitsPatient = !topic && index % 3 === 0
-    const conv = await seedConversationIn(tx, {
-      orgId: ctx.orgId,
-      contactId,
-      connectionId,
-      thread: `${thread}${index}`,
+    const times = {
       unreadCount: topic ? 1 : 0,
       lastInboundAt: topic ? new Date(answered.getTime() + 60_000) : asked,
       lastOutboundAt: answered,
       lastMessageAt: topic ? new Date(answered.getTime() + 60_000) : answered,
-    })
+    }
+    let conv: { id: string }
+    if (writer.conversation_id) {
+      // Vuelve a escribir: su conversación se reabre con una atención nueva, como lo hace la app.
+      await reopenIfClosed(tx, ctx.orgId, writer.conversation_id, { userId: null, via: "entrante" })
+      await tx
+        .update(conversation)
+        .set({ ...times, attentionStartedAt: asked, updatedAt: asked })
+        .where(and(eq(conversation.organizationId, ctx.orgId), eq(conversation.id, writer.conversation_id)))
+      conv = { id: writer.conversation_id }
+    } else {
+      conv = await seedConversationIn(tx, { orgId: ctx.orgId, contactId, connectionId, thread: `${thread}${index}`, ...times })
+    }
     const first = await seedMessageIn(tx, {
       orgId: ctx.orgId,
       conversationId: conv.id,
@@ -1378,10 +1421,28 @@ async function seedTodayInbox(
 }
 
 /**
- * Los controles que vencen este mes (la receta dice cuál y cada cuánto): así
- * «Controles» y Sofi tienen a quién avisar. Solo agrega lo que falta.
+ * Un control que ya no corresponde se cancela: el prenatal de una gestación
+ * que ya terminó. La receta dice hasta cuántos meses vale después de la
+ * atención que lo pidió; uno más y se cancela con su motivo.
  */
-async function topUpFollowUps(tx: Db, ctx: AgendaContext, today: string): Promise<void> {
+async function expireFollowUps(tx: Db, ctx: AgendaContext, at: Date): Promise<void> {
+  const followUp = ctx.kind.followUp
+  if (!followUp?.validMonths) return
+  await tx.execute(sql`
+    update clinical_follow_up f set status = 'cancelado', cancelled_reason = ${followUp.expired ?? "Ya no corresponde"},
+      cancelled_at = ${at.toISOString()}::timestamptz, updated_at = ${at.toISOString()}::timestamptz
+    from encounter e
+    where f.organization_id = ${ctx.orgId} and f.status = 'pendiente' and f.title = ${followUp.title}
+      and e.organization_id = f.organization_id and e.id = f.origin_encounter_id
+      and e.ended_at < ${at.toISOString()}::timestamptz - make_interval(months => ${followUp.validMonths + 1})`)
+}
+
+/**
+ * Los controles que vencen este mes (la receta dice cuál y cada cuánto): así
+ * «Controles» y Sofi tienen a quién avisar. Solo agrega lo que falta, y solo de
+ * atenciones recientes si la receta dice hasta cuándo vale.
+ */
+async function topUpFollowUps(tx: Db, ctx: AgendaContext, today: string, at: Date): Promise<void> {
   const followUp = ctx.kind.followUp
   if (!followUp) return
   const [year, month] = today.split("-").map(Number) as [number, number]
@@ -1413,6 +1474,11 @@ async function topUpFollowUps(tx: Db, ctx: AgendaContext, today: string): Promis
                 diagnoses.map((code) => sql`${code}`),
                 sql`, `,
               )}))`
+          : sql``
+      }
+      ${
+        followUp.validMonths
+          ? sql`and e.ended_at > ${at.toISOString()}::timestamptz - make_interval(months => ${followUp.validMonths})`
           : sql``
       }
     order by e.patient_id, e.ended_at desc
@@ -1497,7 +1563,14 @@ async function agendaContextOf(
     orgId,
     timezone,
     currency,
-    kind: await demoTexts(tx, orgId, kind, specialties),
+    // El título de cada profesional dice si es doctora o doctor.
+    kind: await demoTexts(
+      tx,
+      orgId,
+      kind,
+      specialties,
+      schedules.map((row) => (row.professional_title === kind.professional.title.F ? "F" : "M")),
+    ),
     // La noche de cada día da su propia agenda, siempre la misma para ese día.
     random: generator((demo.seed ^ Number(today.replaceAll("-", ""))) >>> 0),
     receptionUserId: `${demoUserPrefix(demo.id)}recepcion`,
@@ -1513,15 +1586,17 @@ async function agendaContextOf(
 /**
  * Pone la demo al día (cada noche, decisión 5): cierra lo que pasó, llena los
  * días que entran en las dos semanas, cierra las conversaciones viejas y deja
- * la Bandeja y los controles de hoy. Es idempotente para un mismo día.
+ * la Bandeja y los controles de hoy. Es idempotente para un mismo día. `now`
+ * es la hora de esa noche (las pruebas recorren varias noches seguidas).
  */
 export async function advanceDemo(
   tx: Db,
   demo: DemoRecipeRef & { organizationId: string; historyThrough: string | null },
+  now: Date = new Date(),
 ): Promise<{ historyThrough: string; today: string }> {
   const { timezone } = await getOrgLocale(tx, demo.organizationId)
-  const now = new Date()
   const today = reportDayOf(timezone, now)
+  const at = now.toISOString()
   const ctx = await agendaContextOf(tx, demo, demo.organizationId, today)
   await closeVisits(tx, ctx, now)
   // Lo cobrado de ayer ya está en su caja: recepción la cierra.
@@ -1533,20 +1608,21 @@ export async function advanceDemo(
     await planDay(tx, ctx, day, now.getTime())
   // Lo de días anteriores ya se resolvió: la Bandeja queda con lo de hoy.
   await tx.execute(sql`
-    update conversation set status = 'closed', closed_at = now(), close_reason = 'resuelta', unread_count = 0
-    where organization_id = ${demo.organizationId} and status <> 'closed' and last_message_at < now() - interval '36 hours'`)
+    update conversation set status = 'closed', closed_at = ${at}::timestamptz, close_reason = 'resuelta', unread_count = 0
+    where organization_id = ${demo.organizationId} and status <> 'closed' and last_message_at < ${at}::timestamptz - interval '36 hours'`)
   // Un tema se resuelve con su tarea (`resolveTopic`).
   await tx.execute(sql`
-    update task set status = 'done', updated_at = now()
+    update task set status = 'done', updated_at = ${at}::timestamptz
     where organization_id = ${demo.organizationId} and status = 'open'
-      and id in (select task_id from agent_handoff where organization_id = ${demo.organizationId} and task_id is not null and created_at < now() - interval '36 hours')`)
+      and id in (select task_id from agent_handoff where organization_id = ${demo.organizationId} and task_id is not null and created_at < ${at}::timestamptz - interval '36 hours')`)
   const [connection] = await tx
     .select({ id: channelConnection.id })
     .from(channelConnection)
     .where(eq(channelConnection.organizationId, demo.organizationId))
     .limit(1)
-  if (connection) await seedTodayInbox(tx, ctx, connection.id, today, ctx.team.length)
-  await topUpFollowUps(tx, ctx, today)
+  if (connection) await seedTodayInbox(tx, ctx, connection.id, today, ctx.team.length, now)
+  await expireFollowUps(tx, ctx, now)
+  await topUpFollowUps(tx, ctx, today, now)
   return { historyThrough: through, today }
 }
 
