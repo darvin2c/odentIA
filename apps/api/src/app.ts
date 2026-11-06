@@ -38,7 +38,7 @@ import {
   setOrgExchangeRate,
   startSaasTrial,
   trustedOriginsOn,
-  turnOnNewClinicLines,
+  setUpNewClinic,
   updateBranch,
   updateOrgRegion,
 } from "@odentia/services"
@@ -820,8 +820,11 @@ export function createApp(deps: AppDeps) {
           exchangeRate,
           applyCountryPreset: applyCountryPreset ?? !current,
         })
-        // Una clínica nueva trae prendido «Recordar la cita», a nombre de quien la crea (ADR 0026).
-        if (!current) await turnOnNewClinicLines(tx, orgId, userId)
+        // Una clínica que nace (todavía sin ninguna sede, ni archivada) viene con todo encendido, a
+        // nombre de quien la crea (ADR 0141, que sustituye al 0026). Vale también para el alta
+        // asistida, cuyo perfil ya existía: allí antes no nacía ni «Recordar la cita».
+        const [anyBranch] = await tx.select({ id: branch.id }).from(branch).where(eq(branch.organizationId, orgId)).limit(1)
+        if (!anyBranch) await setUpNewClinic(tx, orgId, userId)
         // Y nace con las especialidades de su país, que puede renombrar (ADR 0039 y 0069).
         if (!current) await ensureClinicSpecialties(tx, orgId)
         // Y con sus consentimientos activos, para firmar por la web desde el primer día.
