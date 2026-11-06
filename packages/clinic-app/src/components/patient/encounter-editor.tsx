@@ -1841,7 +1841,7 @@ export function EncounterEditor({
             <EncounterBreadcrumb patientId={patientId} patientName={patient.patient.displayName} />
             <span>
               {[
-                age !== "" ? `${age} años` : null,
+                age !== "" ? `${age} ${Number(age) === 1 ? "año" : "años"}` : null,
                 hcLabel(patient.patient.patientNumber),
                 // La hora de la cita no viaja en la atención: se dice que viene de ella y cuándo empezó.
                 encounter.appointmentId ? "desde su cita" : null,

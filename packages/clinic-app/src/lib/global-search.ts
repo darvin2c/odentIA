@@ -132,6 +132,8 @@ export const SEARCH_KIND_LABELS: Record<string, string> = {
   atencion: "Atención",
   diagnostico: "Diagnóstico",
   receta: "Receta",
+  descanso: "Descanso médico",
+  orden: "Orden",
   documento: "Documento",
   consentimiento: "Consentimiento",
   tarea: "Tarea",

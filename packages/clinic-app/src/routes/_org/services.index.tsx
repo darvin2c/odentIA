@@ -153,13 +153,20 @@ const TARIFARIO_SORT_OPTIONS = [
 ]
 
 const BILLING_OPTIONS: ReadonlyArray<{ value: BillingMode; label: string }> = [
-  { value: "treatment", label: BILLING_MODE_LABELS.treatment },
-  { value: "session", label: BILLING_MODE_LABELS.session },
+  // Se leen al pintar: las palabras dependen del producto.
+  {
+    value: "treatment",
+    get label() {
+      return BILLING_MODE_LABELS.treatment
+    },
+  },
+  {
+    value: "session",
+    get label() {
+      return BILLING_MODE_LABELS.session
+    },
+  },
 ]
-
-function stateLabel(state: string): string {
-  return STATE_OPTIONS.find((o) => o.value === state)?.label ?? state
-}
 
 /* ------------------------------- Tarifario -------------------------------- */
 
@@ -652,7 +659,7 @@ function TarifarioPage() {
           <EmptyState
             icon={Tag}
             title="Sin resultados"
-            description={`Ninguna prestación ${stateLabel(estadoFilter).toLowerCase()} coincide con la búsqueda.`}
+            description={`Ninguna prestación ${estadoFilter === "inactive" ? "inactiva" : "activa"} coincide con la búsqueda.`}
           />
         ) : (
           <div className="flex min-w-0 flex-col gap-6">

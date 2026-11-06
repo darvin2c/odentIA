@@ -141,19 +141,19 @@ export interface OrgTaxesInput {
 
 /**
  * Lo que guarda «Datos de la clínica». `null` vacía un dato opcional; lo que no
- * viaja (la impresión) queda como estaba.
+ * viaja queda como estaba. Al crear la clínica viaja todo.
  */
 export interface OrgProfileInput {
-  legalName: string
-  tradeName: string
-  fiscalDocType: string | null
-  fiscalDocNumber: string | null
-  fiscalAddress: string | null
-  emergencyPhone: string | null
-  countryCode: string
-  currency: string
-  timezone: string
-  locale: string
+  legalName?: string
+  tradeName?: string
+  fiscalDocType?: string | null
+  fiscalDocNumber?: string | null
+  fiscalAddress?: string | null
+  emergencyPhone?: string | null
+  countryCode?: string
+  currency?: string
+  timezone?: string
+  locale?: string
   /** Solo si la tarjeta «Impuestos» se tocó; al cambiar de país el servidor vuelve a lo del nuevo. */
   taxes?: OrgTaxesInput
   /** Solo si se tocó: `null` deja de cobrar en ella; viaja con su cambio, en texto decimal. */

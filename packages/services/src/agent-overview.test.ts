@@ -145,6 +145,25 @@ describe("voz, funciones y límites de la clínica", () => {
     await run((tx) => upsertAgentConfig(tx, ORG, { disabledFunctions: [] }))
   })
 
+  it("dos ventanas que tocan funciones distintas no se pisan: cada interruptor e indicación va sola", async () => {
+    // Una ventana apaga «seguimiento»; la otra, abierta antes, apaga «informar».
+    await run((tx) => upsertAgentConfig(tx, ORG, { functionSwitch: { id: "seguimiento", on: false } }))
+    const both = await run((tx) => upsertAgentConfig(tx, ORG, { functionSwitch: { id: "informar", on: false } }))
+    expect([...both.disabledFunctions].sort()).toEqual(["informar", "seguimiento"])
+    const back = await run((tx) => upsertAgentConfig(tx, ORG, { functionSwitch: { id: "seguimiento", on: true } }))
+    expect(back.disabledFunctions).toEqual(["informar"])
+    await expect(run((tx) => upsertAgentConfig(tx, ORG, { functionSwitch: { id: "derivar", on: false } }))).rejects.toThrow()
+    await run((tx) => upsertAgentConfig(tx, ORG, { disabledFunctions: [] }))
+    // Las indicaciones, igual: cada una se guarda sobre las otras.
+    await run((tx) => upsertAgentConfig(tx, ORG, { functionNote: { id: "agendar", note: " Primero las mañanas. " } }))
+    const notes = await run((tx) => upsertAgentConfig(tx, ORG, { functionNote: { id: "informar", note: "Precios de lista." } }))
+    expect(notes.functionNotes).toEqual({ agendar: "Primero las mañanas.", informar: "Precios de lista." })
+    const cleared = await run((tx) => upsertAgentConfig(tx, ORG, { functionNote: { id: "agendar", note: "  " } }))
+    expect(cleared.functionNotes).toEqual({ informar: "Precios de lista." })
+    await expect(run((tx) => upsertAgentConfig(tx, ORG, { functionNote: { id: "informar", note: "x".repeat(301) } }))).rejects.toThrow(/300/)
+    await run((tx) => upsertAgentConfig(tx, ORG, { functionNotes: {} }))
+  })
+
   it("las indicaciones por función se recortan, se limitan y las vacías se quitan", async () => {
     await expect(run((tx) => upsertAgentConfig(tx, ORG, { functionNotes: { agendar: "x".repeat(301) } }))).rejects.toThrow(/300/)
     await expect(run((tx) => upsertAgentConfig(tx, ORG, { functionNotes: { inventada: "hola" } }))).rejects.toThrow()

@@ -1312,7 +1312,7 @@ export async function collectCharge(
   if (input.advanceCents !== undefined) {
     const advance = assertPositiveCents(input.advanceCents)
     if (advance !== totalNew)
-      throw invalidField("advanceCents", "El adelanto coincide con la suma de los medios")
+      throw invalidField("advanceCents", "El adelanto debe ser igual a la suma de los medios")
     targets = []
   } else if (input.chargeIds?.length) {
     // Sin repetidos: el mismo concepto dos veces se cobraría dos veces.

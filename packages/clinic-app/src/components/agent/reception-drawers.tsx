@@ -50,7 +50,7 @@ function useSaveConfig() {
   const queryClient = useQueryClient()
   return useMutation({
     retry: false,
-    mutationFn: (patch: Partial<AgentConfig>) =>
+    mutationFn: (patch: Partial<AgentConfig> & { functionNote?: { id: string; note: string } }) =>
       apiFetch("/api/agent/config", { method: "PUT", body: JSON.stringify(patch) }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["agent-config"] })
@@ -76,10 +76,8 @@ export function FunctionNoteDrawer({
     validators: { onSubmit: noteSchema },
     onSubmit: async ({ value }) => {
       if (!fn) return
-      const next = { ...config.functionNotes }
-      if (value.note.trim()) next[fn.id] = value.note.trim()
-      else delete next[fn.id]
-      await save.mutateAsync({ functionNotes: next })
+      // Solo la de esta función: otra ventana pudo guardar la de otra.
+      await save.mutateAsync({ functionNote: { id: fn.id, note: value.note.trim() } })
       onClose()
     },
   })
