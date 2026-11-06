@@ -886,9 +886,13 @@ export function RecetasPanel({
     ...allergyWarnings(genericName, activeAllergies, prescribing.catalog),
     ...rules.check([{ genericName }], 1).warnings,
   ]
+  // Lo que ya toma y sus enfermedades, a la vista al recetar; un duplicado por ATC solo informa (ADR 0143).
+  const today = clinicToday()
+  const taking = (healthQuery.data?.data.medications ?? []).filter((medication) => !medication.endDate || medication.endDate >= today)
+  const illnesses = (healthQuery.data?.data.conditions ?? []).filter((condition) => condition.status === "activa")
   // El esquema se arma una vez; las reglas y las alergias llegan después y cambian.
-  const latest = useRef({ rules, conflictsOf })
-  latest.current = { rules, conflictsOf }
+  const latest = useRef({ rules, conflictsOf, taking })
+  latest.current = { rules, conflictsOf, taking }
   const schema = useMemo(
     () =>
       z
@@ -953,6 +957,11 @@ export function RecetasPanel({
       createPrescriptionApi(patientId, body),
     onError: (error) => {
       if (error instanceof ApiError && error.shape.code === "PROFILE_INCOMPLETE") setNeedsRegistration(true)
+      // Un aviso que la pantalla no tenía (otra sesión agregó una alergia): se vuelve a leer y aparece.
+      if (error instanceof ApiError && error.shape.code === "ALLERGY_CONFLICT") {
+        void queryClient.invalidateQueries({ queryKey: ["patient-health", patientId] })
+        void queryClient.invalidateQueries({ queryKey: ["patient", patientId] })
+      }
     },
   })
   const form = useAppForm({
@@ -962,7 +971,7 @@ export function RecetasPanel({
       planItemId: itemId ?? "",
       items: initialItems,
       patientWeightKg: "",
-      // El aviso no pide nada (Q17): la receta guarda que lo viste; el motivo, si lo escribes.
+      // El aviso no pide nada (ADR 0143): la receta guarda que lo viste; el motivo, si lo escribes.
       allergyOverrideReason: "",
       diagnosisCode: defaultDiagnosisCode ?? "",
       diagnosisSystem: defaultDiagnosisSystem ?? (null as string | null),
@@ -971,11 +980,11 @@ export function RecetasPanel({
     },
     validators: { onSubmit: schema },
     onSubmit: async ({ value }) => {
-      const { rules, conflictsOf } = latest.current
-      // Lo que tiene un aviso se emite igual: la pantalla ya lo mostró y la receta lo guarda.
-      const acknowledged = value.items.some(
-        (medication) => conflictsOf(medication.genericName.trim()).length > 0,
-      )
+      const { rules, conflictsOf, taking: takingNow } = latest.current
+      // Lo que tiene un aviso se emite igual: la pantalla lo mostró y la receta guarda eso (ADR 0143).
+      const shownConflicts = [...new Set(value.items.flatMap((medication) => conflictsOf(medication.genericName.trim())))]
+      const acknowledged = shownConflicts.length > 0
+      const alertsShown = [...shownConflicts, ...duplicateWarnings(value.items, takingNow, prescribing.catalog)]
       const result = await createMutation.mutateAsync({
         encounterId: encounterId ?? null,
         planItemId: (itemId ?? value.planItemId) || null,
@@ -985,6 +994,7 @@ export function RecetasPanel({
         validUntil: value.validUntil || null,
         acknowledgeAllergies: acknowledged,
         allergyOverrideReason: acknowledged ? value.allergyOverrideReason.trim() || null : null,
+        alertsShown,
         patientWeightKg: rules.weight.required ? weightOf(value.patientWeightKg) : null,
         items: value.items.map((medication) => ({
           genericName: medication.genericName.trim(),
@@ -1026,13 +1036,9 @@ export function RecetasPanel({
     medications,
     typedWeight !== null && Number.isFinite(typedWeight) ? typedWeight : null,
   )
-  // Lo contraindicado en el embarazo va como una alergia: se avisa y decide quien receta (Q17).
+  // Lo contraindicado en el embarazo va como una alergia: se avisa y decide quien receta (ADR 0143).
   const conflicts = [...new Set(conflictsByMedication.flat())]
   const onlyAllergies = ruleCheck.warnings.length === 0
-  // Lo que ya toma y sus enfermedades, a la vista al recetar; un duplicado por ATC solo informa (X2).
-  const today = clinicToday()
-  const taking = (healthQuery.data?.data.medications ?? []).filter((medication) => !medication.endDate || medication.endDate >= today)
-  const illnesses = (healthQuery.data?.data.conditions ?? []).filter((condition) => condition.status === "activa")
   const duplicates = duplicateWarnings(medications, taking, prescribing.catalog)
   // El peso del último registro se propone una vez; quien receta lo corrige.
   useEffect(() => {
@@ -1087,7 +1093,7 @@ export function RecetasPanel({
         />
       ) : null}
       {taking.length > 0 || illnesses.length > 0 ? (
-        <div role="note" aria-label="Lo que ya toma" className="flex flex-col gap-1 rounded-md border bg-muted/40 p-3 text-sm">
+        <div role="note" aria-label="Lo que ya toma y sus enfermedades" className="flex flex-col gap-1 rounded-md border bg-muted/40 p-3 text-sm">
           {taking.length > 0 ? (
             <p>
               <span className="font-medium">Ya toma:</span>{" "}
@@ -1139,6 +1145,8 @@ export function RecetasPanel({
                       id={dciId(medication.key)}
                       list={`${uid}-dci`}
                       maxLength={MAX_TITLE}
+                      // El aviso va junto al medicamento, no solo al final (ADR 0143): no frena.
+                      description={conflictsByMedication[index]?.length ? `Aviso: ${conflictsByMedication[index]!.join(" ")}` : undefined}
                     />
                   )}
                 </form.AppField>
@@ -1303,18 +1311,8 @@ export function RecetasPanel({
               <li key={line}>{line}</li>
             ))}
           </ul>
-          {/* Decide quien receta (Q17): si la emite igual, la receta guarda el aviso con su nombre. */}
+          {/* Decide quien receta (ADR 0143): si la emite igual, la receta guarda el aviso con su nombre. */}
           <p className="text-muted-foreground">Si la recetas igual, la receta guarda que viste este aviso, con tu nombre.</p>
-          <form.AppField name="allergyOverrideReason">
-            {(field) => (
-              <field.TextareaField
-                label="Motivo (opcional)"
-                description="Si lo escribes, queda en la receta."
-                maxLength={500}
-                placeholder="Por ejemplo, la reacción fue un malestar, no una alergia"
-              />
-            )}
-          </form.AppField>
           <div className="flex flex-wrap gap-2">
             <Button
               type="button"
@@ -1329,6 +1327,7 @@ export function RecetasPanel({
                   field.focus()
                   field.select()
                 }
+                form.setFieldValue("allergyOverrideReason", "")
               }}
             >
               Cambiar medicamento
@@ -1336,8 +1335,20 @@ export function RecetasPanel({
           </div>
         </div>
       ) : null}
+      {conflicts.length > 0 ? (
+        <form.AppField name="allergyOverrideReason">
+          {(field) => (
+            <field.TextareaField
+              label="Motivo (opcional)"
+              description="Si lo escribes, queda en la receta."
+              maxLength={500}
+              placeholder="Por ejemplo, la reacción fue un malestar, no una alergia"
+            />
+          )}
+        </form.AppField>
+      ) : null}
       {duplicates.length > 0 ? (
-        <div role="note" className="flex flex-col gap-1 rounded-md border border-warning/40 bg-warning/5 p-3 text-sm">
+        <div role="status" className="flex flex-col gap-1 rounded-md border border-warning/40 bg-warning/5 p-3 text-sm">
           <p className="font-medium">Para que lo tengas en cuenta</p>
           <ul className="list-disc pl-5">
             {duplicates.map((line) => (

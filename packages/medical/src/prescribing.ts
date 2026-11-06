@@ -8,7 +8,7 @@ import { dayWords, type MedicalHistory, pregnancyWeeks } from "./history.js"
  *   de cada país;
  * - con embarazo o lactancia registrados, lo recuerda, y lo contraindicado
  *   en el embarazo se avisa como una alergia: decide quien receta, y la receta
- *   guarda que vio el aviso (Q17 del QA del 2026-11-04);
+ *   guarda que vio el aviso (ADR 0143);
  * - a un menor de 12 años se le receta con su peso.
  * El duplicado por código ATC lo avisa `duplicateWarnings` (@odentia/clinical).
  * Las interacciones entre medicamentos quedan fuera: piden una base con

@@ -549,7 +549,7 @@ export interface TakenMedication {
 }
 
 /**
- * El duplicado por código ATC (X2 del QA del 2026-11-04): lo que se receta y ya toma, o que va
+ * El duplicado por código ATC (ADR 0143): lo que se receta y ya toma, o que va
  * dos veces en la receta, con el mismo principio activo (el mismo ATC) o del mismo grupo
  * (`medicationGroupOfAtc`). Solo informa: «todo lo que mostramos es informativo; decide quien
  * receta». Es la misma regla para la pantalla y el servidor; lo escrito a mano, sin ATC, no se
@@ -566,9 +566,10 @@ export function duplicateWarnings(
   const why = (a: string, b: string): string | null => {
     if (a === b) return `el mismo principio activo (ATC ${a})`
     const group = medicationGroupOfAtc(a)
-    if (group && group !== "otros" && group === medicationGroupOfAtc(b)) return `del mismo grupo, ${groupWords(group)}`
-    // Fuera de los grupos con nombre, el mismo subgrupo químico (los cinco primeros caracteres del ATC).
-    return a.length >= 5 && a.slice(0, 5) === b.slice(0, 5) ? `del mismo grupo (ATC ${a.slice(0, 5)})` : null
+    if (group && group !== "otros" && group === medicationGroupOfAtc(b)) return `del mismo grupo (${groupWords(group)})`
+    // Fuera de los grupos con nombre, el mismo subgrupo químico (los cinco primeros caracteres del
+    // ATC). Los subgrupos «X» («otros») juntan sustancias distintas: no cuentan.
+    return a.length >= 5 && a.slice(0, 5) === b.slice(0, 5) && a[4] !== "X" ? `del mismo grupo (ATC ${a.slice(0, 5)})` : null
   }
   const lines: string[] = []
   coded.forEach((item, index) => {
@@ -577,6 +578,10 @@ export function duplicateWarnings(
       if (same) lines.push(`${capitalized(item.name)}: ya toma ${med.name}, ${same}.`)
     }
     for (const other of coded.slice(index + 1)) {
+      if (item.atc === other.atc) {
+        lines.push(`${capitalized(item.name)} va dos veces en la receta (ATC ${item.atc}).`)
+        continue
+      }
       const same = why(item.atc, other.atc)
       if (same) lines.push(`${capitalized(item.name)} y ${other.name} van en la misma receta: son ${same}.`)
     }

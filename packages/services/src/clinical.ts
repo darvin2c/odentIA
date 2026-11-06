@@ -445,7 +445,7 @@ function validateMedicationRow(
   const name = assertText(input.name, 200, `${at}.name`, true, "Escribe el nombre")
   const genericName = assertText(input.genericName, 200, `${at}.genericName`, false)
   // La DCI de la lista del producto lleva su código ATC, el mismo de la receta (latidIA sugiere
-  // también lo que receta: X2 del QA del 2026-11-04); lo escrito a mano, ninguno.
+  // también lo que receta, ADR 0143); lo escrito a mano, ninguno.
   const atcCode = findHabitualMedication(genericName ?? name, habitual)?.atc ?? null
   const doseUnit = input.doseUnit?.trim() || null
   const doseValue = input.doseValue ?? null

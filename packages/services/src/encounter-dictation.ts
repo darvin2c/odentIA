@@ -3,6 +3,7 @@ import {
   type AllergenEntry,
   allergenName,
   allergyWarnings,
+  duplicateWarnings,
   appendDictated,
   BUDGET_OPTIONS_MAX,
   codeAllergySubstance,
@@ -16,6 +17,7 @@ import {
   sumByCurrency,
   normalizeDrugText,
   quantityWords,
+  type TakenMedication,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
@@ -50,7 +52,7 @@ import { findOrgLocale, formatOrgMoney, type OrgLocale, orgProduct } from "./loc
 import { OPERATIONS, operationAgentSchema } from "./operation-fields.js"
 import { addBudgetItems, assembleEncounterBudget, createBudget, duplicateBudgetOption, findDraftBudget, removeBudgetItems } from "./budgets.js"
 import { addPlanItem, listPlanItems, setPlanItemStatus } from "./plan.js"
-import { createPrescription } from "./prescriptions.js"
+import { createPrescription, currentMedicationsOf } from "./prescriptions.js"
 import { dictatedMaterials, materialsFromServices } from "./service-materials.js"
 import type { DictationPrepared, ProductDictation } from "./product-hooks.js"
 import { productHooks, requireDictatingProduct } from "./products.js"
@@ -807,6 +809,8 @@ interface PatientChecks {
   /** Por qué no cabe otra elección de caminos (decisión 3), o null si cabe. */
   choiceBlocked: string | null
   planItems: OpenPlanItem[]
+  /** Lo que ya toma, para avisar el duplicado por ATC (solo informa). */
+  taking: TakenMedication[]
 }
 
 /** Lo que se puede hacer hoy de un tratamiento: no está cerrado ni suspendido, y está aceptado o espera respuesta. */
@@ -861,7 +865,14 @@ async function patientChecks(tx: Db, orgId: string, patientId: string, encounter
       inSentBudget: Boolean(item.budgetId && sent.has(item.budgetId)),
     }
   })
-  return { allergies, dictatedAllergies, choiceBlocked: pendingChoice ? CHOICE_ALREADY_HERE : draftOptions > 1 ? CHOICE_ALREADY_IN_BUDGET : null, planItems }
+  const catalog = (await productHooks(tx, orgId)).prescribing.catalog
+  return {
+    allergies,
+    dictatedAllergies,
+    choiceBlocked: pendingChoice ? CHOICE_ALREADY_HERE : draftOptions > 1 ? CHOICE_ALREADY_IN_BUDGET : null,
+    planItems,
+    taking: await currentMedicationsOf(tx, orgId, patientId, catalog),
+  }
 }
 
 /** Una alergia dictada, como la lee el aviso al recetar. */
@@ -1156,8 +1167,11 @@ function settleDone(prepared: Prepared, checks: PatientChecks, dictation: Produc
  */
 function checkAgainstPatient(kind: DictationKind, prepared: Prepared, checks: PatientChecks, medications: MedicationCatalog, dictation: ProductDictation): Prepared {
   if (kind === "receta") {
-    const { allergyWarnings: _old, ...payload } = prepared.payload
-    const genericName = String(payload["genericName"] ?? "")
+    const { allergyWarnings: _old, duplicateWarnings: _oldDuplicates, ...rest } = prepared.payload
+    const genericName = String(rest["genericName"] ?? "")
+    // Lo que ya toma del mismo principio o grupo: solo informa, en la tarjeta (ADR 0143).
+    const duplicates = duplicateWarnings([{ genericName }], checks.taking, medications)
+    const payload = duplicates.length ? { ...rest, duplicateWarnings: duplicates } : rest
     const onFile = allergyWarnings(genericName, checks.allergies as never, medications)
     // La alergia que se acaba de dictar avisa igual, aunque aún no se confirme.
     const dictated = allergyWarnings(genericName, checks.dictatedAllergies as never, medications).filter((line) => !onFile.includes(line))
@@ -2316,8 +2330,14 @@ export async function issueDictationPrescription(
   if (rows.length === 0) throw conflict("NO_DICTATED_PRESCRIPTION", "No hay una receta dictada por emitir")
   const waiting = rows.find((row) => row.status !== "lista")
   if (waiting) throw conflict("SUGGESTION_NEEDS_REVIEW", waiting.note ?? "Completa la receta antes de emitirla")
+  // Los duplicados que mostró la tarjeta quedan como vistos; la alergia se resuelve en el formulario.
+  const shownDuplicates = rows.flatMap((row) => {
+    const lines = splitMeta(row.payload).data["duplicateWarnings"]
+    return Array.isArray(lines) ? lines.filter((line): line is string => typeof line === "string") : []
+  })
   const created = await createPrescription(tx, orgId, actorUserId, patientId, {
     encounterId,
+    alertsShown: shownDuplicates,
     items: rows.map((row) => {
       const data = splitMeta(row.payload).data
       const text = (key: string) => (typeof data[key] === "string" ? String(data[key]) : "")
@@ -2340,7 +2360,7 @@ export async function issueDictationPrescription(
 
 /**
  * La receta dictada se terminó en el formulario de siempre («Completar»,
- * «Cambiar medicamento» o emitirla igual con el aviso a la vista): sus sugerencias quedan
+ * «Cambiar medicamento» o emitirla igual con el aviso a la vista, ADR 0143): sus sugerencias quedan
  * confirmadas con esa receta, que tiene que ser de esta atención.
  */
 export async function settleDictationPrescription(

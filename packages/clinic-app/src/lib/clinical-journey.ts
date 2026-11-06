@@ -353,6 +353,8 @@ export function createPrescriptionApi(
     acknowledgeAllergies?: boolean
     /** Con aviso de alergia, por qué se receta igual: queda en la receta. */
     allergyOverrideReason?: string | null
+    /** Los avisos que mostró la pantalla, tal cual: la receta guarda estos como vistos (ADR 0143). */
+    alertsShown?: string[]
     /** El peso (kg) con que se receta, si la receta lo lleva. */
     patientWeightKg?: number | null
     items: PrescriptionMedicationBody[]

@@ -211,7 +211,7 @@ const recetas = scripted(
   "Lucía Torres · receta de la atención de hoy",
   "ms-rx",
   `<div class="ms-card"><span class="ms-k">Medicamento</span><b class="ms-field" data-s="med">&nbsp;</b><small data-s="dose">&nbsp;</small><span class="ms-in" data-s="why">${pill("Cambiado por la alergia a la penicilina", "amber")}</span></div>
-  <div class="ms-alert ms-in" data-s="al"><b>Lucía es alérgica a la penicilina.</b><span>La amoxicilina es una penicilina.</span><span class="ms-acts"><span class="ms-btn" data-s="chg">Cambiar medicamento</span><span class="ms-btn ghost">Recetar igual</span></span></div>
+  <div class="ms-alert ms-in" data-s="al"><b>Lucía es alérgica a la penicilina.</b><span>La amoxicilina es una penicilina.</span><span class="ms-acts"><span class="ms-btn" data-s="chg">Cambiar medicamento</span><span class="ms-btn ghost">Emitir receta</span></span></div>
   <div class="ms-bar"><span></span><span class="ms-btn ms-in" data-s="emit">Emitir receta</span></div>
   ${toast("Receta emitida con tu firma y enviada a Lucía")}`,
   [

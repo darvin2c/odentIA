@@ -1,4 +1,12 @@
-import { ADMINISTRATION_ROUTES, allergyWarnings, duplicateWarnings, findMedication } from "@odentia/clinical"
+import {
+  ADMINISTRATION_ROUTES,
+  allergyWarnings,
+  duplicateWarnings,
+  findHabitualMedication,
+  findMedication,
+  type MedicationCatalog,
+  type TakenMedication,
+} from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   diagnosisCatalog,
@@ -57,8 +65,14 @@ export interface CreatePrescriptionInput {
    * lo manda. Sin él, con un aviso, se responde 409 para mostrarlo; nunca se receta a ciegas.
    */
   acknowledgeAllergies?: boolean
-  /** Por qué se receta igual pese al aviso: opcional (Q17); si se escribe, queda en la receta. */
+  /** Por qué se receta igual pese al aviso: opcional (ADR 0143); si se escribe, queda en la receta. */
   allergyOverrideReason?: string | null
+  /**
+   * Los avisos que la pantalla mostró, tal cual (ADR 0143). La receta guarda como «vistos» solo
+   * estos; uno de alergia o embarazo que el servidor encuentra y no se mostró responde 409 para
+   * mostrarlo. Sin él (un cliente de antes), `acknowledgeAllergies` cubre los de alergia.
+   */
+  alertsShown?: string[] | null
   /** El peso (kg) con que se receta: latidIA lo pide a un menor de 12 años (issue 229). */
   patientWeightKg?: number | null
   items: PrescriptionMedicationInput[]
@@ -214,8 +228,8 @@ export async function createPrescription(
     }
   })
   // Alergias vigentes del paciente frente a cada DCI, todas por igual (las que
-  // dijo el paciente también): con aviso, recetar igual pide un motivo escrito
-  // que queda en la receta; nunca se prescribe a ciegas.
+  // dijo el paciente también): con aviso, se receta igual con el aviso a la
+  // vista y la receta lo guarda (ADR 0143); nunca se prescribe a ciegas.
   const allergies = await tx
     .select({
       substance: patientAllergy.substance,
@@ -242,30 +256,26 @@ export async function createPrescription(
       await blockedFields(prescribing, tx, { orgId, patientId, items, weightKg }),
     )
   // La alergia y lo contraindicado en el embarazo se avisan: decide quien receta, y queda en la
-  // receta que lo vio (Q17 del QA del 2026-11-04). El motivo es opcional.
+  // receta que lo vio (ADR 0143). El motivo es opcional.
   const conflicts = [
     ...items.flatMap((item) => allergyWarnings(item.genericName, allergies, prescribing.catalog)),
     ...review.warnings,
   ]
   const overrideReason = conflicts.length > 0 ? input.allergyOverrideReason?.trim() || null : null
-  if (conflicts.length > 0 && !input.acknowledgeAllergies) {
-    const message = `${review.warnings.length > 0 ? "Aviso" : "Aviso de alergia"}: ${conflicts.join(" ")} Si la recetas igual, queda en la receta que viste el aviso.`
+  const shown = input.alertsShown ? new Set(input.alertsShown.map((line) => line.trim())) : null
+  // Lo de alergia o embarazo que la pantalla no mostró se muestra antes de emitir: nunca a ciegas.
+  const unseen = conflicts.filter((line) => (shown ? !shown.has(line) : !input.acknowledgeAllergies))
+  if (unseen.length > 0) {
+    const message = `${review.warnings.length > 0 ? "Aviso" : "Aviso de alergia"}: ${unseen.join(" ")} Si la recetas igual, queda en la receta que viste el aviso.`
     throw new ServiceError("ALLERGY_CONFLICT", 409, message, { allergyOverrideReason: message })
   }
-  // Lo que ya toma (sus antecedentes vigentes): un duplicado por su código ATC solo informa (X2).
-  const today = await clinicToday(tx, orgId)
-  const taking = await tx
-    .select({ name: patientMedication.name, atcCode: patientMedication.atcCode })
-    .from(patientMedication)
-    .where(
-      and(
-        eq(patientMedication.organizationId, orgId),
-        eq(patientMedication.patientId, patientId),
-        or(isNull(patientMedication.endDate), gte(patientMedication.endDate, today)),
-      ),
-    )
-  const duplicates = duplicateWarnings(items, taking, prescribing.catalog)
-  const alertsSeen = [...conflicts, ...duplicates]
+  // Lo que ya toma (sus antecedentes vigentes): un duplicado por su código ATC solo informa (ADR 0143).
+  const duplicates = duplicateWarnings(items, await currentMedicationsOf(tx, orgId, patientId, prescribing.catalog), prescribing.catalog)
+  // Quedan como vistos los de alergia y embarazo (ya mostrados) y los duplicados que la pantalla
+  // mostró; un duplicado que no se mostró no se firma como visto. Se guardan en palabras, como se
+  // leyeron: la directiva del MINSA pide guardar el aviso y la respuesta; la exportación FHIR
+  // (`DetectedIssue`) queda para cuando se exporte la receta.
+  const alertsSeen = [...new Set([...conflicts, ...duplicates.filter((line) => shown?.has(line))])]
   if (overrideReason && overrideReason.length > 500)
     throw invalidField(
       "allergyOverrideReason",
@@ -322,6 +332,34 @@ export async function createPrescription(
   })
   return { ...row, items: medications }
 }
+/**
+ * Lo que el paciente ya toma, de sus antecedentes vigentes (sin fecha de fin o con una que aún no
+ * pasa), con su código ATC: el guardado o, si falta (lo de antes de corregir latidIA), el de la
+ * lista del producto. Lo usan la receta y el dictado.
+ */
+export async function currentMedicationsOf(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  catalog: MedicationCatalog,
+): Promise<TakenMedication[]> {
+  const today = await clinicToday(tx, orgId)
+  const rows = await tx
+    .select({ name: patientMedication.name, genericName: patientMedication.genericName, atcCode: patientMedication.atcCode })
+    .from(patientMedication)
+    .where(
+      and(
+        eq(patientMedication.organizationId, orgId),
+        eq(patientMedication.patientId, patientId),
+        or(isNull(patientMedication.endDate), gte(patientMedication.endDate, today)),
+      ),
+    )
+  return rows.map((row) => ({
+    name: row.name,
+    atcCode: row.atcCode ?? findHabitualMedication(row.genericName ?? row.name, catalog.habitual)?.atc ?? null,
+  }))
+}
+
 export async function listPrescriptions(tx: Db, orgId: string, patientId: string) {
   await requirePatient(tx, orgId, patientId)
   return tx

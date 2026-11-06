@@ -2,7 +2,7 @@ import { cn } from "@odentia/ui"
 import type { Prescription } from "../../lib/clinical-journey"
 
 /**
- * Lo que vio quien recetó (Q17 y X2 del QA del 2026-11-04): la receta lo guarda sola, con su
+ * Lo que vio quien recetó (ADR 0143): la receta lo guarda sola, con su
  * nombre, sin pedirle nada; y el motivo, si lo dejó. Las recetas de antes solo tienen el motivo.
  */
 export function PrescriptionAlertsSeen({
@@ -29,7 +29,7 @@ export function PrescriptionAlertsSeen({
       ) : null}
       {prescription.allergyOverrideReason ? (
         <p>
-          {alerts.length > 0 ? "Motivo" : "Recetada pese al aviso de alergia"}: {prescription.allergyOverrideReason}
+          {alerts.length > 0 ? "Motivo" : "Recetada pese al aviso"}: {prescription.allergyOverrideReason}
         </p>
       ) : null}
     </div>

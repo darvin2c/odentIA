@@ -51,7 +51,6 @@ import { OrderCancelDrawer, OrderResultDrawer } from "./ordenes-tab"
 import { BudgetReviewDrawer } from "./plan/budget-review"
 import { PrescriptionAlertsSeen } from "./prescription-alerts"
 
-
 /** Lo que todo papel recibe: en la superficie lateral o en su propia dirección. */
 interface PaperSurface {
   page?: boolean

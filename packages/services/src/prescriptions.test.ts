@@ -91,7 +91,11 @@ it("exige DCI y vía reconocida, y avisa la alergia antes de prescribir", async 
       createPrescription(tx, ...f.args, { items: [{ ...base, genericName: "amoxicilina" }] }),
     ),
   ).rejects.toMatchObject({ code: "ALLERGY_CONFLICT" })
-  // Visto el aviso, se receta sin escribir nada (Q17): la receta guarda el aviso que vio.
+  // Si la pantalla dice lo que mostró y falta el aviso de alergia, no se emite: se muestra (ADR 0143).
+  await expect(
+    f.run((tx) => createPrescription(tx, ...f.args, { alertsShown: [], items: [{ ...base, genericName: "amoxicilina" }] })),
+  ).rejects.toMatchObject({ code: "ALLERGY_CONFLICT" })
+  // Visto el aviso, se receta sin escribir nada (ADR 0143): la receta guarda el aviso que vio.
   const seen = await f.run((tx) =>
     createPrescription(tx, ...f.args, {
       acknowledgeAllergies: true,
@@ -126,11 +130,18 @@ it("lo que ya toma, o dos veces lo mismo en la receta, se avisa por su código A
   const f = await clinicalFixture()
   await ownerDb.insert(patientMedication).values({ organizationId: "org_a", patientId: f.patient.id, name: "Ibuprofeno 400 mg", genericName: "ibuprofeno", atcCode: "M01AE01" })
   const base = { strength: "50 mg", dosageForm: "tableta", dose: "1 tableta", route: "oral", frequency: "Cada 12 horas", duration: "3 días" }
-  // Sin pedir nada: el duplicado solo informa y queda en la receta.
+  const duplicate = "Diclofenaco: ya toma Ibuprofeno 400 mg, del mismo grupo (antiinflamatorios no esteroideos)."
+  // Sin pedir nada: el duplicado solo informa; queda como visto si la pantalla lo mostró.
   const issued = await f.run((tx) =>
-    createPrescription(tx, ...f.args, { items: [{ ...base, genericName: "diclofenaco" }, { ...base, genericName: "paracetamol", strength: "500 mg" }] }),
+    createPrescription(tx, ...f.args, {
+      alertsShown: [duplicate],
+      items: [{ ...base, genericName: "diclofenaco" }, { ...base, genericName: "paracetamol", strength: "500 mg" }],
+    }),
   )
-  expect(issued.alertsSeen).toEqual([expect.stringMatching(/^Diclofenaco: ya toma Ibuprofeno 400 mg, del mismo grupo/)])
+  expect(issued.alertsSeen).toEqual([duplicate])
+  // Lo que no se mostró (otro cliente, el dictado sin el aviso) no se firma como visto.
+  const notShown = await f.run((tx) => createPrescription(tx, ...f.args, { items: [{ ...base, genericName: "diclofenaco" }] }))
+  expect(notShown.alertsSeen).toBeNull()
   // Lo que ya no toma (con fecha de fin pasada) no cuenta.
   await ownerDb.update(patientMedication).set({ endDate: "2020-01-01" }).where(eq(patientMedication.patientId, f.patient.id))
   const later = await f.run((tx) => createPrescription(tx, ...f.args, { items: [{ ...base, genericName: "diclofenaco" }] }))
