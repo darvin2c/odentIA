@@ -6,7 +6,7 @@
 import { randomUUID } from "node:crypto"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { automationLinkToken } from "@odentia/db/schema/automation"
-import { patient, patientContact, patientResponsibility } from "@odentia/db/schema/clinical"
+import { patient, patientContact, patientDataConsent, patientResponsibility } from "@odentia/db/schema/clinical"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { agentActionLog, agentCaseMemory } from "@odentia/db/schema/agent"
 import { agentConfig, channelConnection, channelTemplate, contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
@@ -1025,3 +1025,21 @@ it("Inicio: quien terminó su registro hoy y tiene cita hoy sale en «Te espera�
   await ownerDb.update(appointment).set({ status: "confirmada", arrivedAt: new Date(), arrivedBy: f.actor }).where(eq(appointment.id, booked!.id))
   expect(await rows()).toEqual([])
 })
+
+it("sin aviso propio, «Tus datos» muestra el sugerido con su casilla y queda aceptado ese texto (decisión 22, ADR 0141)", async () => {
+  const f = await clinicalFixture()
+  // Una clínica de antes, que nunca escribió su aviso.
+  const config = await f.run((tx) => getPatientRegistrationConfig(tx, ORG))
+  await f.run((tx) =>
+    savePatientRegistrationConfig(tx, ORG, f.actor, { expectedVersion: config.version, enabled: false, fields: config.fields, privacyNotice: "" }),
+  )
+  const ana = await minimal(f, { given: "Ana", surname: "Soto" })
+  const link = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: ana.personId, patientId: ana.patientId }, { secretsKey: KEY }))
+  const form = await f.run((tx) => getPersonalLinkDataForm(tx, ORG, link.token))
+  expect(form.pending.privacy).toBe(true)
+  expect(form.registration.privacyNotice).toContain("usará tus datos")
+  await f.run((tx) => submitPersonalLinkData(tx, ORG, link.token, { data: { birthDate: "1990-03-03" }, privacyAccepted: true }))
+  const [consent] = await ownerDb.select().from(patientDataConsent).where(eq(patientDataConsent.patientId, ana.patientId))
+  expect(consent?.noticeText).toBe(form.registration.privacyNotice)
+})
+

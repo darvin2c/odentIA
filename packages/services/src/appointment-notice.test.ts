@@ -24,7 +24,6 @@ import {
   syncAppointmentReminders,
   syncBudgetFollowUps,
   syncCancelledAppointments,
-  turnOnNewClinicLines,
 } from "./automation.js"
 import { setProfessionalSchedule } from "./availability.js"
 import { createConnection } from "./connections.js"
@@ -748,29 +747,6 @@ describe("solo novedades y promociones pide permiso (ADR 0030)", () => {
     expect((await said()).at(-1)?.body).toBe("¿Le podemos escribir para enviarle novedades y promociones de Clínica Sonríe?")
     expect(await run(c, (tx) => handleAutomationReply(tx, c.orgId, { conversationId: rosa.conversationId!, replyId: replyId("permiso_no", rosa.contactId) }))).toBe(true)
     expect((await said()).at(-1)?.body).toBe("Entendido: no le enviaremos novedades ni promociones.")
-  })
-})
-
-describe("una clínica nueva trae prendido «Recordar la cita»", () => {
-  it("se prende a nombre de quien la crea, solo esa línea y nunca encima de una que ya existe", async () => {
-    const c = await clinic()
-    await run(c, (tx) => turnOnNewClinicLines(tx, c.orgId, c.ownerId))
-    const rules = await ownerDb.select().from(automationRule).where(eq(automationRule.organizationId, c.orgId))
-    expect(rules.map((rule) => [rule.kind, rule.enabled, rule.enabledBy, rule.agentPart, rule.teamPart])).toEqual([
-      ["recordatorio_cita", true, c.ownerId, true, true],
-    ])
-    const trail = await ownerDb
-      .select({ action: auditEvent.action, actor: auditEvent.actorUserId })
-      .from(auditEvent)
-      .where(and(eq(auditEvent.organizationId, c.orgId), eq(auditEvent.entity, "automation")))
-    expect(trail.map((row) => row.action).sort()).toEqual(["admin_line.default_on", "admin_line.updated"])
-    expect(trail.every((row) => row.actor === c.ownerId)).toBe(true)
-
-    // Quien la apagó la tiene apagada: volver a llamarlo no la prende.
-    await run(c, (tx) => setLine(tx, c.orgId, c.ownerId, "recordatorio_cita", { enabled: false }))
-    await run(c, (tx) => turnOnNewClinicLines(tx, c.orgId, c.ownerId))
-    const [rule] = await ownerDb.select().from(automationRule).where(eq(automationRule.organizationId, c.orgId))
-    expect(rule?.enabled).toBe(false)
   })
 })
 

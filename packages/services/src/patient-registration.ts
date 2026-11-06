@@ -355,6 +355,24 @@ export interface SaveRegistrationConfigInput {
   /** Sin valor, se conserva lo que ya tenía la clínica. */
   askReminders?: boolean
   askMessages?: boolean
+  /** «Lo revisé»: el aviso sugerido pasa a ser de la clínica aunque no cambie su texto. */
+  noticeReviewed?: boolean
+  /** Solo `setUpNewClinic`: el aviso es el sugerido, sin revisar (ADR 0141). */
+  suggested?: boolean
+}
+
+/**
+ * Si el aviso de privacidad que ve el paciente es aún el sugerido, sin revisar por nadie de la
+ * clínica (ADR 0141): el que se publicó al nacer, o el que «Tus datos» muestra a una clínica que
+ * nunca escribió el suyo (`privacyNoticeOf`).
+ */
+export async function registrationNoticeSuggested(tx: Db, orgId: string): Promise<boolean> {
+  const [row] = await tx
+    .select({ at: patientRegistrationConfig.noticeSuggestedAt, notice: patientRegistrationConfig.privacyNotice })
+    .from(patientRegistrationConfig)
+    .where(eq(patientRegistrationConfig.organizationId, orgId))
+    .limit(1)
+  return !!row?.at || !row?.notice.trim()
 }
 
 export async function savePatientRegistrationConfig(
@@ -397,6 +415,12 @@ export async function savePatientRegistrationConfig(
   const nextVersion = input.expectedVersion + 1
   const askReminders = input.askReminders ?? current?.askReminders ?? true
   const askMessages = input.askMessages ?? current?.askMessages ?? true
+  // El sugerido deja de serlo cuando alguien lo cambia o dice que lo revisó.
+  const noticeSuggestedAt = input.suggested
+    ? new Date()
+    : current?.noticeSuggestedAt && !input.noticeReviewed && parsed.data.privacyNotice === current.privacyNotice
+      ? current.noticeSuggestedAt
+      : null
   await tx
     .insert(patientRegistrationConfig)
     .values({
@@ -407,6 +431,7 @@ export async function savePatientRegistrationConfig(
       privacyNotice: parsed.data.privacyNotice,
       askReminders,
       askMessages,
+      noticeSuggestedAt,
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
@@ -418,6 +443,7 @@ export async function savePatientRegistrationConfig(
         privacyNotice: parsed.data.privacyNotice,
         askReminders,
         askMessages,
+        noticeSuggestedAt,
         updatedAt: new Date(),
       },
     })
@@ -427,7 +453,11 @@ export async function savePatientRegistrationConfig(
     action: "patient-registration.config_saved",
     entity: "patient_registration_config",
     entityId: orgId,
-    metadata: { version: nextVersion, enabled: parsed.data.enabled },
+    metadata: {
+      version: nextVersion,
+      enabled: parsed.data.enabled,
+      ...(current?.noticeSuggestedAt && !noticeSuggestedAt ? { noticeReviewed: true } : {}),
+    },
   })
   return {
     version: nextVersion,
