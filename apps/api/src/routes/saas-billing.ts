@@ -1012,6 +1012,27 @@ async function accountMember(deps: SaasBillingAccountDeps, c: Context, orgId: st
   return { userId: session.user.id, sessionId: session.session.id, role: membership.role }
 }
 /**
+ * Si la clínica pide verificación en dos pasos (ADR 0107) y esta sesión no la
+ * pasó, la respuesta que da toda la app; si no, null. Lo de la facturación con
+ * importes y cambios lo pasa, como el resto de lo que administra.
+ */
+async function twoFactorRefusal(
+  deps: SaasBillingAccountDeps,
+  c: Context,
+  orgId: string,
+  membership: { userId: string; sessionId: string },
+): Promise<Response | null> {
+  const gate = await clinicTwoFactorGate(deps.ownerDb, { orgId, userId: membership.userId, sessionId: membership.sessionId })
+  if (gate === "activar") {
+    return c.json(errorBody(c, "TWO_FACTOR_REQUIRED", "Esta clínica pide verificación en dos pasos: actívala en Mi perfil"), 403)
+  }
+  if (gate === "codigo") {
+    return c.json(errorBody(c, "TWO_FACTOR_CODE_REQUIRED", "Esta clínica pide el código de tu app de autenticación"), 403)
+  }
+  return null
+}
+
+/**
  * Miembro que ve Facturación (`seesBilling`: owner/admin), o null (sin sesión,
  * sin membresía u otro rol, o sin el código que pide la clínica: ADR 0107).
  */
@@ -1075,6 +1096,8 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
     if (!seesBilling(membership.role)) {
       return c.json(errorBody(c, "FORBIDDEN", "Solo quien administra ve la facturación"), 403)
     }
+    const refusal = await twoFactorRefusal(deps, c, orgId, membership)
+    if (refusal) return refusal
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => getOrganizationBillingSummary(tx, orgId)),
     )
@@ -1135,7 +1158,13 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
     const membership = await accountMember(deps, c, orgId)
     if (!membership)
       return c.json(errorBody(c, "FORBIDDEN", "No eres miembro de esta organización"), 403)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getClinicNotices(tx, orgId, membership)))
+    // La franja es de todos; con importes solo para quien pasó la verificación que pide la clínica
+    // (ADR 0107). Si falta, sus avisos son los de quien no ve la facturación.
+    const gated =
+      seesBilling(membership.role) &&
+      (await clinicTwoFactorGate(deps.ownerDb, { orgId, userId: membership.userId, sessionId: membership.sessionId })) !== null
+    const viewer = gated ? { ...membership, billing: false } : membership
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getClinicNotices(tx, orgId, viewer)))
   })
 
   app.get("/alerts", async (c) => {
@@ -1145,6 +1174,8 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
     if (!membership)
       return c.json(errorBody(c, "FORBIDDEN", "No eres miembro de esta organización"), 403)
     if (!seesBilling(membership.role)) return c.json({ data: [] })
+    const refusal = await twoFactorRefusal(deps, c, orgId, membership)
+    if (refusal) return refusal
     return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getSaasAlerts(tx, orgId)))
   })
 
@@ -1344,6 +1375,8 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
     if (!seesBilling(membership.role)) {
       return c.json(errorBody(c, "FORBIDDEN", "Solo quien administra puede cambiar el plan"), 403)
     }
+    const refusal = await twoFactorRefusal(deps, c, body.orgId, membership)
+    if (refusal) return refusal
     return runService(c, 200, () =>
       withOrgContext(deps.db, body.orgId, (tx) =>
         chooseSaasPlan(tx, body.orgId, membership.userId, body.planCode),
@@ -1398,6 +1431,8 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
     if (!seesBilling(membership.role)) {
       return c.json(errorBody(c, "FORBIDDEN", "Solo quien administra registra comprobantes"), 403)
     }
+    const refusal = await twoFactorRefusal(deps, c, orgId, membership)
+    if (refusal) return refusal
     const bytes = new Uint8Array(await file.arrayBuffer())
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) =>

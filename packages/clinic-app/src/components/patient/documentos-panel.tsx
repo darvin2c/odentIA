@@ -223,6 +223,7 @@ export function DocumentosSection({
   patientId,
   filter: requestedFilter,
   encounterId,
+  ownEncounterId,
   tooth,
   documentId,
 }: {
@@ -230,6 +231,11 @@ export function DocumentosSection({
   filter?: DocumentFilter
   /** La atención en curso: lo que se crea aquí queda unido a ella. */
   encounterId?: string
+  /**
+   * La atención en curso si la lleva quien mira: la receta, el descanso y la orden se escriben
+   * dentro de ella (ADR 0002). Un archivo, un consentimiento o un formulario se unen a cualquiera.
+   */
+  ownEncounterId?: string
   /** La pieza del filtro «Pieza» (`?tooth=`). */
   tooth?: number
   /** El archivo abierto en el visor (`?documentId=`). */
@@ -1026,7 +1032,7 @@ export function DocumentosSection({
       {creating === "receta" ? (
         <RecetasPanel
           patientId={patientId}
-          encounterId={encounterId}
+          encounterId={ownEncounterId}
           items={planItems.data?.data ?? []}
           drawerOnly
           createOpen
@@ -1042,7 +1048,7 @@ export function DocumentosSection({
         <NewMedicalLeaveDrawer
           open
           patientId={patientId}
-          encounterId={encounterId}
+          encounterId={ownEncounterId}
           onClose={() => setCreating(null)}
           onCreated={(leave) => {
             setCreating(null)
@@ -1067,7 +1073,7 @@ export function DocumentosSection({
         <NewOrderDrawer
           open
           patientId={patientId}
-          encounterId={encounterId}
+          encounterId={ownEncounterId}
           onClose={() => setCreating(null)}
           onCreated={(order) => {
             setCreating(null)
