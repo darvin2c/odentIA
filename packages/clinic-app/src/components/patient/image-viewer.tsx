@@ -85,7 +85,7 @@ export function ImageAdjustControls({
           aria-pressed={value.invert}
           onClick={() => onChange({ ...value, invert: !value.invert })}
         >
-          Invertir
+          Negativo
         </Button>
         <Button
           type="button"

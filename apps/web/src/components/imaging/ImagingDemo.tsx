@@ -1,7 +1,7 @@
 // La demo de imágenes de las dos webs: se ve como el visor de la clínica (oscuro, con sus pestañas y
-// sus botones) y se usa como él, con una tomografía real de ejemplo. En odentIA: «Panorámica y cortes»
-// (la panorámica con el corte de cada pieza y su medida), «Tres cortes» (desde arriba, de frente y de
-// lado, cada uno con su barra) y «Radiografía» (brillo, contraste, invertir y acercar). En latidIA:
+// sus botones) y se usa como él, con una tomografía real de ejemplo. En odentIA: «Panorámica»
+// (la panorámica con el corte de cada pieza y su medida), «Cortes» (desde arriba, de frente y de
+// lado, cada uno con su barra) y «Radiografía» (brillo, contraste, negativo y acercar). En latidIA:
 // la radiografía de frente y la tomografía de senos por cortes. Sin movimiento (prefers-reduced-motion)
 // no pasa sola de pieza en pieza.
 import { useEffect, useRef, useState } from "react"
@@ -13,8 +13,8 @@ type Variant = "dental" | "medical"
 
 const TABS: Record<Variant, [Tab, string][]> = {
   dental: [
-    ["pano", "Panorámica y cortes"],
-    ["cuts", "Tres cortes"],
+    ["pano", "Panorámica"],
+    ["cuts", "Cortes"],
     ["xray", "Radiografía"],
   ],
   medical: [
@@ -163,7 +163,7 @@ export default function ImagingDemo({ variant = "dental" }: { variant?: Variant 
               aria-pressed={invert}
               onClick={() => setInvert(!invert)}
             >
-              Invertir
+              Negativo
             </button>
             <button
               type="button"

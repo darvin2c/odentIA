@@ -5,8 +5,8 @@
  * Los subtipos siguen la nomenclatura radiológica odontológica habitual
  * (intraorales: periapical, interproximal o bitewing, oclusal; extraorales:
  * panorámica, cefalométrica; tomografía de haz cónico) y la fotografía clínica
- * intra y extraoral. La tomografía se guarda como archivo externo (DICOM o
- * exportación del equipo); no hay visor volumétrico.
+ * intra y extraoral. La tomografía se guarda como un estudio DICOM y se abre
+ * en el visor de la ficha (ADR 0055, 0056 y 0146).
  */
 
 export const RADIOGRAPH_TYPES = [

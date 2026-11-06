@@ -1,6 +1,8 @@
 import * as dicomParser from "dicom-parser"
+import { inflateSync } from "fflate"
 import {
   type DecodedFrame,
+  decodeHtj2k,
   decodeJpeg2000,
   decodeJpegBaseline,
   decodeJpegExtended12,
@@ -11,18 +13,21 @@ import { decodeRleFrame } from "./dicom-rle"
 
 /**
  * Lectura de imágenes DICOM 2D para el visor (PS3.5/PS3.3): sintaxis nativas
- * (Little Endian implícita y explícita, Big Endian explícita), RLE, JPEG
- * (baseline de 8 bits, extendido de 12 bits y sin pérdida), JPEG-LS y JPEG
- * 2000, monocromas (MONOCHROME1/2) o en color (RGB, YBR_FULL), con uno o
- * varios cuadros. Aplica la transformación de modalidad (Rescale
- * Slope/Intercept) y lee la ventana sugerida y el espaciado de píxel (Pixel
- * Spacing o, en intraorales, Imager Pixel Spacing) para medir en mm.
+ * (Little Endian implícita y explícita, Big Endian explícita, y la explícita
+ * comprimida con Deflate), RLE, JPEG (baseline de 8 bits, extendido de 12 bits
+ * y sin pérdida), JPEG-LS, JPEG 2000 y JPEG 2000 de alto rendimiento (HTJ2K),
+ * monocromas (MONOCHROME1/2) o en color (RGB, YBR_FULL), con uno o varios
+ * cuadros. Aplica la transformación de modalidad (Rescale Slope/Intercept) y
+ * lee la ventana sugerida y el espaciado con el que se puede medir en mm
+ * (`measureSpacing`).
  *
  * Lo que no se puede leer bien se informa con `DicomUnsupportedError`: el
  * visor nunca pinta una imagen mal decodificada.
  */
 
-const LITTLE_ENDIAN = new Set(["1.2.840.10008.1.2", "1.2.840.10008.1.2.1"])
+/** Deflated Explicit VR Little Endian (PS3.5 §A.5): el conjunto de datos va comprimido. */
+const DEFLATE = "1.2.840.10008.1.2.1.99"
+const LITTLE_ENDIAN = new Set(["1.2.840.10008.1.2", "1.2.840.10008.1.2.1", DEFLATE])
 const BIG_ENDIAN = "1.2.840.10008.1.2.2"
 const RLE = "1.2.840.10008.1.2.5"
 type Codec = (bytes: Uint8Array) => Promise<DecodedFrame>
@@ -36,19 +41,21 @@ const CODECS: Record<string, Codec> = {
   "1.2.840.10008.1.2.4.81": decodeJpegLs,
   "1.2.840.10008.1.2.4.90": decodeJpeg2000,
   "1.2.840.10008.1.2.4.91": decodeJpeg2000,
+  "1.2.840.10008.1.2.4.201": decodeHtj2k,
+  "1.2.840.10008.1.2.4.202": decodeHtj2k,
+  "1.2.840.10008.1.2.4.203": decodeHtj2k,
 }
-/** Las que JPEG y JPEG 2000 entregan ya en RGB, aunque el archivo diga YBR. */
+/** Las que JPEG y JPEG 2000 (también HTJ2K) entregan ya en RGB, aunque el archivo diga YBR. */
 const DECODER_GIVES_RGB = new Set([
   "1.2.840.10008.1.2.4.50",
   "1.2.840.10008.1.2.4.51",
   "1.2.840.10008.1.2.4.90",
   "1.2.840.10008.1.2.4.91",
+  "1.2.840.10008.1.2.4.201",
+  "1.2.840.10008.1.2.4.202",
+  "1.2.840.10008.1.2.4.203",
 ])
 const UNSUPPORTED_NAMES: Record<string, string> = {
-  "1.2.840.10008.1.2.1.99": "Deflate",
-  "1.2.840.10008.1.2.4.201": "JPEG 2000 de alto rendimiento (HTJ2K)",
-  "1.2.840.10008.1.2.4.202": "JPEG 2000 de alto rendimiento (HTJ2K)",
-  "1.2.840.10008.1.2.4.203": "JPEG 2000 de alto rendimiento (HTJ2K)",
   "1.2.840.10008.1.2.4.100": "video MPEG-2",
   "1.2.840.10008.1.2.4.101": "video MPEG-2",
   "1.2.840.10008.1.2.4.102": "video MPEG-4",
@@ -71,8 +78,10 @@ export interface DicomImage {
   monochrome1: boolean
   window: { center: number; width: number }
   range: { min: number; max: number }
-  /** mm por píxel (fila, columna); null si el archivo no lo declara. */
+  /** mm por píxel (fila, columna) con el que se puede medir; null si no se puede. */
   pixelSpacing: [number, number] | null
+  /** Por qué no se mide en mm cuando `pixelSpacing` es null. */
+  spacingIssue: SpacingIssue | null
   frames: number
   /** Cuadro mostrado, desde 0. */
   frame: number
@@ -92,13 +101,40 @@ function str(ds: dicomParser.DataSet, tag: string): string | null {
   return value ? value : null
 }
 
-function spacing(ds: dicomParser.DataSet): [number, number] | null {
-  for (const tag of ["x00280030", "x00181164"]) {
-    const row = ds.floatString(tag, 0)
-    const col = ds.floatString(tag, 1)
-    if (row && col && row > 0 && col > 0) return [row, col]
+/** Por qué una radiografía no se mide en mm. */
+export type SpacingIssue = "sin_espaciado" | "ampliada" | "panoramica"
+
+function pair(ds: dicomParser.DataSet, tag: string): [number, number] | null {
+  const row = ds.floatString(tag, 0)
+  const col = ds.floatString(tag, 1)
+  return row && col && row > 0 && col > 0 ? [row, col] : null
+}
+
+/**
+ * El espaciado con el que se mide en mm (PS3.3 C.8.11.1.1 y C.8.11.7):
+ * - La panorámica (modalidad PX) no se mide: su ampliación cambia de un punto
+ *   a otro de la imagen.
+ * - Pixel Spacing (0028,0030) ya está en el plano del paciente.
+ * - Imager Pixel Spacing (0018,1164) está en el detector: se corrige con la
+ *   ampliación del archivo (0018,1114). Sin ella solo vale en la intraoral
+ *   (modalidad IO), donde el sensor va pegado al diente; en la cefalométrica
+ *   la cifra saldría más grande de lo real.
+ */
+export function measureSpacing(ds: dicomParser.DataSet): {
+  spacing: [number, number] | null
+  issue: SpacingIssue | null
+} {
+  const modality = str(ds, "x00080060")
+  if (modality === "PX") return { spacing: null, issue: "panoramica" }
+  const patient = pair(ds, "x00280030")
+  if (patient) return { spacing: patient, issue: null }
+  const imager = pair(ds, "x00181164")
+  if (!imager) return { spacing: null, issue: "sin_espaciado" }
+  const magnification = ds.floatString("x00181114")
+  if (magnification && magnification > 0) {
+    return { spacing: [imager[0] / magnification, imager[1] / magnification], issue: null }
   }
-  return null
+  return modality === "IO" ? { spacing: imager, issue: null } : { spacing: null, issue: "ampliada" }
 }
 
 function unsupported(what: string): DicomUnsupportedError {
@@ -179,9 +215,26 @@ export interface DicomFile {
   decode(frame: number): Promise<DicomImage>
 }
 
+/**
+ * Descomprime el conjunto de datos de un archivo Deflate (PS3.5 §A.5): Deflate
+ * sin cabecera, desde donde termina el grupo 0002. dicom-parser espera el
+ * archivo entero de vuelta (su tipo declara `void`, pero usa lo que devuelve).
+ */
+function inflateDataset(bytes: Uint8Array, position: number): Uint8Array {
+  const inflated = inflateSync(bytes.subarray(position))
+  const out = new Uint8Array(position + inflated.length)
+  out.set(bytes.subarray(0, position))
+  out.set(inflated, position)
+  return out
+}
+
+export const DICOM_PARSE_OPTIONS = {
+  inflater: inflateDataset as unknown as (arr: Uint8Array, position: number) => void,
+}
+
 /** Lee la cabecera una sola vez; útil para recorrer muchos cuadros del mismo archivo. */
 export function openDicom(buffer: ArrayBuffer): DicomFile {
-  const ds = dicomParser.parseDicom(new Uint8Array(buffer))
+  const ds = dicomParser.parseDicom(new Uint8Array(buffer), DICOM_PARSE_OPTIONS)
   return {
     dataset: ds,
     frames: Math.max(1, ds.intString("x00280008") ?? 1),
@@ -304,6 +357,7 @@ async function decodeFrame(ds: dicomParser.DataSet, frame: number): Promise<Dico
     center !== undefined && width !== undefined && width > 0
       ? { center, width }
       : { center: (min + max) / 2, width: Math.max(1, max - min) }
+  const measurable = measureSpacing(ds)
   return {
     width: cols,
     height: rows,
@@ -312,7 +366,8 @@ async function decodeFrame(ds: dicomParser.DataSet, frame: number): Promise<Dico
     monochrome1: photometric === "MONOCHROME1",
     window,
     range: { min, max },
-    pixelSpacing: spacing(ds),
+    pixelSpacing: measurable.spacing,
+    spacingIssue: measurable.issue,
     frames,
     frame,
     meta,
@@ -354,6 +409,15 @@ export function renderDicom(
     out[i * 4 + 3] = 255
   }
   return out
+}
+
+/** Lo que dice el visor al intentar medir donde no se puede, con la salida. */
+export function spacingIssueText(issue: SpacingIssue | null): string {
+  if (issue === "panoramica")
+    return "En la panorámica la imagen viene ampliada y deformada: mide en la periapical o en la tomografía."
+  if (issue === "ampliada")
+    return "Esta radiografía viene ampliada y el archivo no dice cuánto: en mm saldría más grande de lo real. Mide en la periapical o en la tomografía."
+  return "Esta imagen no trae su escala: se puede mirar, no medir en mm. Para medir, sube el archivo original del sensor."
 }
 
 /** Distancia entre dos puntos (en píxeles de imagen) en mm, o null sin calibración. */

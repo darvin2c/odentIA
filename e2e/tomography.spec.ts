@@ -10,7 +10,7 @@ import { surface } from "./surface"
 /**
  * Tomografía (issue 34, ADR 0055 y 0056): la carpeta de un CD se sube desde
  * Imágenes directo al almacenamiento, la API la da por completa y el visor la
- * abre en «Panorámica y cortes» con el arco propuesto.
+ * abre en «Panorámica» con el arco propuesto.
  */
 
 /** Una carpeta de CD: los cortes del fantoma (no es de un paciente) y su visor. */
@@ -91,11 +91,13 @@ test("tomografía: la carpeta del CD se sube, queda en la ficha y se abre en pan
   await page.reload()
   await page.getByRole("button", { name: /Ver Tomografía/ }).click()
   const viewer = page.getByRole("dialog", { name: /Tomografía/ })
-  await expect(viewer.getByRole("tab", { name: "Panorámica y cortes" })).toBeVisible({ timeout: 60_000 })
+  await expect(viewer.getByRole("tab", { name: "Panorámica", exact: true })).toBeVisible({
+    timeout: 60_000,
+  })
   await expect(viewer.getByText("Panorámica reconstruida")).toBeVisible()
   await expect(viewer.getByText(/Corte \d+ de \d+/)).toBeVisible()
   await page.screenshot({ path: test.info().outputPath("tomografia-visor.png") })
-  await viewer.getByRole("tab", { name: "Tres cortes" }).click()
+  await viewer.getByRole("tab", { name: "Cortes", exact: true }).click()
   await expect(viewer.getByText("De frente")).toBeVisible()
   await page.screenshot({ path: test.info().outputPath("tomografia-tres-cortes.png") })
 })

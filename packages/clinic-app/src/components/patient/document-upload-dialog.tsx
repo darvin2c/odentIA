@@ -50,7 +50,10 @@ import {
   imageTypesFor,
   isAcceptedFile,
   MAX_BYTES,
+  maxBytesFor,
   planItemLabel,
+  storesTomography,
+  unsupportedFormatMessage,
   UPLOAD_CATEGORIES,
 } from "./document-labels"
 import { DocumentLinkSelects, type DocumentLinkValue } from "./document-link-selects"
@@ -208,9 +211,15 @@ function toRow(
   initialTeeth: number[],
   defaultPlanItemId?: string,
 ): { values: RowValues; meta: RowFile } | { fileError: string } {
-  if (!isAcceptedFile(file)) return { fileError: "Solo se admiten JPG, PNG, WebP, PDF o DICOM." }
+  if (!isAcceptedFile(file)) return { fileError: unsupportedFormatMessage(file.name) }
   if (file.size === 0) return { fileError: "El archivo está vacío." }
-  if (file.size > MAX_BYTES) return { fileError: "El archivo no puede superar 10 MB." }
+  if (file.size > maxBytesFor(file))
+    return {
+      fileError:
+        maxBytesFor(file) > MAX_BYTES
+          ? "La radiografía DICOM no puede superar 30 MB."
+          : "El archivo no puede superar 10 MB (la radiografía DICOM, 30 MB).",
+    }
   rowSeq += 1
   return {
     values: {
@@ -272,6 +281,8 @@ export function DocumentUploadDialog({
     onChange: () => void onSuccess(),
   })
   const [noStudy, setNoStudy] = useState(false)
+  // latidIA aún no guarda la tomografía: se dice antes de subir, sin cientos de cortes sueltos.
+  const [studyNotStored, setStudyNotStored] = useState(false)
   const [files, setFiles] = useState<Record<string, RowFile>>({})
   const [rejected, setRejected] = useState<string[]>([])
   const wasOpen = useRef(false)
@@ -462,10 +473,31 @@ export function DocumentUploadDialog({
   const select = async (selection: SelectedFile[]) => {
     if (!selection.length || disabled) return
     setNoStudy(false)
+    setStudyNotStored(false)
     if (mayHoldStudy(selection, MAX_BYTES)) {
       const found = await tomography.scan(selection)
-      if (found.studies.some((study) => study.isVolume)) return
+      const volume = found.studies.some((study) => study.isVolume)
+      if (volume && storesTomography()) return
       tomography.reset()
+      if (volume) {
+        setStudyNotStored(true)
+        addFiles(
+          selection
+            .map((item) =>
+              item.file instanceof File
+                ? item.file
+                : new File([item.file], item.name.split("/").at(-1) ?? item.name),
+            )
+            // Los cortes de la tomografía no entran sueltos: solo las imágenes y documentos que traiga.
+            .filter(
+              (file) =>
+                isAcceptedFile(file) &&
+                !/\.dcm$/i.test(file.name) &&
+                file.type !== "application/dicom",
+            ),
+        )
+        return
+      }
       // Una carpeta o un ZIP sin tomografía: solo entran sus imágenes y documentos sueltos.
       const fromFolder = selection.some((item) => item.name.includes("/") || /[.]zip$/i.test(item.name))
       if (fromFolder) {
@@ -568,7 +600,7 @@ export function DocumentUploadDialog({
       open={open}
       onClose={close}
       title="Subir imágenes o documentos"
-      description="JPG, PNG, WebP, PDF o DICOM, máx. 10 MB por archivo; la tomografía, hasta 1 GB. El formato se verifica por contenido. Sin atención queda como General."
+      description={`JPG, PNG, WebP, PDF o DICOM, máx. 10 MB por archivo y 30 MB la radiografía DICOM${storesTomography() ? "; la tomografía, hasta 1 GB" : ""}. El formato se verifica por contenido. Sin atención queda como General.`}
       onSubmit={(event) => {
         targets.current = new Set(pendingKeys)
         surface.onSubmit(event)
@@ -634,9 +666,20 @@ export function DocumentUploadDialog({
                       <TomographyDropZone
                         disabled={disabled}
                         onSelect={(selection) => void select(selection)}
-                        hint="Fotos, PDF, radiografías y tomografías. Hasta 10 MB por archivo y 1 GB por tomografía."
+                        hint={
+                          storesTomography()
+                            ? "Fotos, PDF, radiografías y tomografías. Hasta 10 MB por archivo, 30 MB la radiografía DICOM y 1 GB la tomografía."
+                            : "Fotos, PDF y radiografías. Hasta 10 MB por archivo y 30 MB la radiografía DICOM."
+                        }
                       />
                     </div>
+                    {studyNotStored && (
+                      <p role="status" className="text-xs text-muted-foreground">
+                        La tomografía todavía no se guarda en la ficha: guarda el CD o pide al
+                        centro el informe en PDF. Se agregan solo las imágenes y documentos sueltos
+                        que traiga.
+                      </p>
+                    )}
                     {noStudy && (
                       <p className="text-xs text-muted-foreground">
                         No encontramos una tomografía en lo elegido: se agregan solo sus imágenes y documentos.

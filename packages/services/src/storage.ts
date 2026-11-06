@@ -8,6 +8,12 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 
 export const PATIENT_DOC_MAX_BYTES = 10 * 1024 * 1024
 
+/**
+ * La radiografía DICOM sin comprimir (cefalométrica, panorámica de alta
+ * resolución) pasa de 10 MB; sigue entrando por la API, no como tomografía.
+ */
+export const PATIENT_DICOM_MAX_BYTES = 30 * 1024 * 1024
+
 export const PATIENT_AVATAR_MAX_BYTES = 2 * 1024 * 1024
 
 export const PATIENT_AVATAR_MIME_EXT: Record<string, string> = {

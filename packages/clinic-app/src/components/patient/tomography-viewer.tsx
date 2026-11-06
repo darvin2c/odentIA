@@ -1,9 +1,10 @@
 import {
   Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
   Field,
   FieldLabel,
   Slider,
@@ -12,9 +13,9 @@ import {
   TabsTrigger,
 } from "@odentia/ui"
 import { ToggleGroup, ToggleGroupItem } from "@odentia/ui/components/toggle-group"
-import { LoadingState } from "@odentia/ui-patterns"
+import { LoadingState, ViewTabs } from "@odentia/ui-patterns"
 import { keepPreviousData, useQuery } from "@tanstack/react-query"
-import { X } from "lucide-react"
+import { ChevronDown } from "lucide-react"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import {
@@ -34,13 +35,16 @@ import { tomographyDownloadUrl } from "../../lib/imaging-upload"
 import { MEASURE_NOTE, MeasureList, type SavedMeasures, useSavedMeasures, type Vec3 } from "./tomography-measures"
 import { PanoramicView } from "./tomography-panoramic"
 import { type PlaneMeasure, type Point, SliceCanvas, type Tool } from "./tomography-slice"
+import { Tomography3D } from "./tomography-3d"
+import { usePatientName, ViewerShell } from "./viewer-shell"
 import { activeOrgLocale } from "../../lib/locale"
 import type { PatientDocument } from "../../lib/patients"
 
 /**
- * Visor de tomografía a pantalla completa (ADR 0056): el volumen se arma en el
- * navegador y cada vista es un corte del volumen. Brillo por estudio, medida y
- * ángulo (orientativos), teclado y, en un celular, solo ver.
+ * Visor de tomografía a pantalla completa (ADR 0056 y 0146): el volumen se arma
+ * en el navegador y cada vista es un corte del volumen; el 3D es solo para
+ * mostrar. Brillo por estudio, medida y ángulo (orientativos), acercar en cada
+ * vista, teclado y, en un celular, solo ver: una vista grande a la vez.
  */
 
 export interface StudyFiles {
@@ -109,7 +113,7 @@ export function BrightnessControls({
             {PRESET_LABELS[key]}
           </ToggleGroupItem>
         ))}
-        <ToggleGroupItem value="mas">Más</ToggleGroupItem>
+        <ToggleGroupItem value="mas">Ajuste fino</ToggleGroupItem>
       </ToggleGroup>
       {preset === "mas" && (
         <div className="flex min-w-64 flex-1 flex-wrap gap-4">
@@ -155,11 +159,14 @@ function ThreePlanes({
   window,
   tool,
   saved,
+  show3d,
 }: {
   volume: CbctVolume
   window: WindowLevel
   tool: Tool
   saved: SavedMeasures
+  /** El cuarto cuadro: el 3D para mostrar (en la computadora). */
+  show3d: boolean
 }) {
   const [point, setPoint] = useState({
     x: Math.floor(volume.nx / 2),
@@ -254,7 +261,10 @@ function ThreePlanes({
         return [{ id: m.id, view: m.view, index: 0, kind: m.kind, points, value: m.value }]
       })
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-1 gap-px bg-slate-800 md:grid-cols-3">
+    // scroll-nativo: en el celular los tres cortes van uno bajo otro; en ancho, la cuadrícula cabe sin desplazar.
+    <div
+      className={`grid min-h-0 flex-1 grid-cols-1 gap-px overflow-y-auto bg-slate-800 md:overflow-hidden ${show3d ? "md:grid-cols-2 md:grid-rows-2" : "md:grid-cols-3"}`}
+    >
       {(["axial", "coronal", "sagittal"] as const).map((plane) => (
         <div key={plane} className="flex min-h-0 min-w-0 flex-col bg-black">
           <SliceCanvas
@@ -287,6 +297,7 @@ function ThreePlanes({
           </div>
         </div>
       ))}
+      {show3d && <Tomography3D volume={volume} window={window} />}
     </div>
   )
 }
@@ -454,7 +465,19 @@ export function VolumeLoadError({
   )
 }
 
-/** Pantalla completa del visor. `children` permite agregar vistas (la panorámica). */
+type TomographyView = "panoramica" | "corte" | "cortes" | "3d"
+
+const PHONE_VIEWS: { value: TomographyView; label: string }[] = [
+  { value: "panoramica", label: "Panorámica" },
+  { value: "corte", label: "Corte" },
+  { value: "cortes", label: "Cortes" },
+  { value: "3d", label: "3D" },
+]
+
+const VIEW_ONLY_NOTICE =
+  "En el celular la tomografía es para mirar. Para medir, ábrela en una computadora o una tablet."
+
+/** Pantalla completa del visor: «Panorámica» y «Cortes» (con el 3D), o una vista grande a la vez en el celular. */
 export function TomographyViewer({
   patientId,
   doc,
@@ -475,14 +498,44 @@ export function TomographyViewer({
   const loaded = useCbctVolume(patientId, doc.id)
   const volume = loaded.volume
   const viewOnly = useViewOnly()
+  const patientName = usePatientName(patientId)
   const [preset, setPreset] = useState<BrightnessPreset | "mas">("hueso")
   const [custom, setCustom] = useState<WindowLevel | null>(null)
   const [tool, setTool] = useState<Tool>("ninguna")
   const saved = useSavedMeasures(patientId, doc.id, canWrite)
-  const [view, setView] = useState<"panoramica" | "tres">("panoramica")
+  const [view, setView] = useState<TomographyView>("panoramica")
   const [adjusting, setAdjusting] = useState(false)
   const [single, setSingle] = useState(false)
-  const window = volume ? (preset === "mas" ? (custom ?? volume.presets.hueso) : volume.presets[preset]) : null
+  const [notice, setNotice] = useState<string | null>(null)
+  const window = volume
+    ? preset === "mas"
+      ? (custom ?? volume.presets.hueso)
+      : volume.presets[preset]
+    : null
+  // En la computadora, «Corte» es parte de la panorámica y el 3D, de los cortes.
+  const shown: TomographyView = viewOnly
+    ? view
+    : view === "corte"
+      ? "panoramica"
+      : view === "3d"
+        ? "cortes"
+        : view
+  const files = loaded.files.data?.data.files
+  const otherSeries = useMemo(
+    () => new Set(files?.map((f) => f.seriesInstanceUid)).size > 1,
+    [files],
+  )
+
+  const chooseTool = (next: Tool) => {
+    // Medir queda a la vista; en el celular se dice por qué no, con la salida.
+    if (viewOnly && next !== "ninguna") {
+      setNotice(VIEW_ONLY_NOTICE)
+      return
+    }
+    setNotice(null)
+    setAdjusting(false)
+    setTool(next)
+  }
 
   useEffect(() => {
     if (!open || !volume) return
@@ -491,8 +544,10 @@ export function TomographyViewer({
       if (event.key === "1") setPreset("hueso")
       else if (event.key === "2") setPreset("diente")
       else if (event.key === "3") setPreset("blando")
-      else if (!viewOnly && (event.key === "m" || event.key === "M")) setTool((t) => (t === "medir" ? "ninguna" : "medir"))
-      else if (!viewOnly && (event.key === "a" || event.key === "A")) setTool((t) => (t === "angulo" ? "ninguna" : "angulo"))
+      else if (event.key === "m" || event.key === "M")
+        chooseTool(tool === "medir" ? "ninguna" : "medir")
+      else if (event.key === "a" || event.key === "A")
+        chooseTool(tool === "angulo" ? "ninguna" : "angulo")
       else if (event.key === "Escape" && tool !== "ninguna") {
         event.preventDefault()
         setTool("ninguna")
@@ -500,28 +555,37 @@ export function TomographyViewer({
     }
     document.addEventListener("keydown", onKey)
     return () => document.removeEventListener("keydown", onKey)
-  }, [open, volume, viewOnly, tool])
+  })
+
+  const download = () => {
+    const anchor = document.createElement("a")
+    anchor.href = tomographyDownloadUrl(patientId, doc.id)
+    anchor.download = ""
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+  }
 
   const voxel = doc.imaging?.voxelMm ?? volume?.sx ?? null
+  const ready = Boolean(volume && window && !single && !loaded.error)
   return (
-    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent
-        showCloseButton={false}
-        className="dark top-0 left-0 flex h-dvh w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none bg-[#05080c] p-0 text-slate-100 sm:max-w-none"
-      >
-        <div className="flex flex-wrap items-center gap-3 border-b border-slate-800 px-4 py-2.5">
-          <div className="min-w-0 flex-1">
-            <DialogTitle className="truncate text-sm font-semibold">{doc.label}</DialogTitle>
-            <DialogDescription className="text-xs text-slate-400">
-              {doc.imaging ? `${doc.imaging.sliceCount.toLocaleString(activeOrgLocale())} cortes` : ""}
-              {doc.source ? ` · ${doc.source}` : ""}
-            </DialogDescription>
-          </div>
-          {volume && !single && (
-            <Tabs value={view} onValueChange={(next) => setView(next as "panoramica" | "tres")}>
+    <ViewerShell
+      open={open}
+      onClose={onClose}
+      title={patientName ? `${patientName} · ${doc.label}` : doc.label}
+      subtitle={
+        <>
+          {doc.imaging ? `${doc.imaging.sliceCount.toLocaleString(activeOrgLocale())} cortes` : ""}
+          {doc.source ? ` · ${doc.source}` : ""}
+        </>
+      }
+      actions={
+        <>
+          {ready && !viewOnly && (
+            <Tabs value={shown} onValueChange={(next) => setView(next as TomographyView)}>
               <TabsList aria-label="Vista">
-                <TabsTrigger value="panoramica">Panorámica y cortes</TabsTrigger>
-                <TabsTrigger value="tres">Tres cortes</TabsTrigger>
+                <TabsTrigger value="panoramica">Panorámica</TabsTrigger>
+                <TabsTrigger value="cortes">Cortes</TabsTrigger>
               </TabsList>
             </Tabs>
           )}
@@ -530,116 +594,159 @@ export function TomographyViewer({
               Detalles e informe
             </Button>
           )}
-          <Button type="button" size="sm" variant="outline" onClick={onClose}>
-            <X aria-hidden="true" />
-            Cerrar
-          </Button>
-        </div>
-        {single && loaded.files.data ? (
-          <SingleSlices files={loaded.files.data.data.files} />
-        ) : loaded.error ? (
-          <VolumeLoadError
-            error={loaded.error}
-            patientId={patientId}
-            documentId={doc.id}
-            onRetry={loaded.retry}
-            onSingle={loaded.files.data ? () => setSingle(true) : undefined}
-          />
-        ) : !volume || !window ? (
-          <div className="m-auto w-full max-w-sm">
-            <LoadingState
-              message={
-                loaded.progress && loaded.progress.total
-                  ? `Abriendo ${loaded.progress.total.toLocaleString(activeOrgLocale())} cortes… ${Math.floor((loaded.progress.done / loaded.progress.total) * 100)} %`
-                  : "Abriendo la tomografía…"
-              }
-            />
-          </div>
-        ) : (
+        </>
+      }
+      toolbar={
+        ready && volume && window ? (
           <>
-            <div className="flex flex-wrap items-center gap-3 border-b border-slate-800 px-4 py-2">
-              <BrightnessControls
-                volume={volume}
-                preset={preset}
-                onPreset={(next) => {
-                  if (next === "mas") setCustom(window)
-                  setPreset(next)
-                }}
-                window={window}
-                onWindow={setCustom}
-              />
-              {!viewOnly && (
-                <ToggleGroup
-                  value={tool === "ninguna" ? [] : [tool]}
-                  onValueChange={(value: string[]) => setTool((value[0] as Tool | undefined) ?? "ninguna")}
-                  variant="outline"
-                  size="sm"
-                  aria-label="Herramienta"
-                >
-                  <ToggleGroupItem value="medir" aria-keyshortcuts="M">
-                    Medir
-                  </ToggleGroupItem>
-                  <ToggleGroupItem value="angulo" aria-keyshortcuts="A">
-                    Ángulo
-                  </ToggleGroupItem>
-                </ToggleGroup>
-              )}
-              {view === "panoramica" && !viewOnly && canWrite && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={adjusting ? "secondary" : "outline"}
-                  aria-pressed={adjusting}
+            <BrightnessControls
+              volume={volume}
+              preset={preset}
+              onPreset={(next) => {
+                if (next === "mas") setCustom(window)
+                setPreset(next)
+              }}
+              window={window}
+              onWindow={setCustom}
+            />
+            {shown !== "3d" && (
+              <ToggleGroup
+                value={tool === "ninguna" ? [] : [tool]}
+                onValueChange={(value: string[]) =>
+                  chooseTool((value[0] as Tool | undefined) ?? "ninguna")
+                }
+                variant="outline"
+                size="sm"
+                aria-label="Herramienta"
+              >
+                <ToggleGroupItem value="medir" aria-keyshortcuts="M">
+                  Medir
+                </ToggleGroupItem>
+                <ToggleGroupItem value="angulo" aria-keyshortcuts="A">
+                  Ángulo
+                </ToggleGroupItem>
+              </ToggleGroup>
+            )}
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<Button type="button" size="sm" variant="outline" />}>
+                Más
+                <ChevronDown aria-hidden="true" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                {shown === "panoramica" && !viewOnly && canWrite && (
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setAdjusting((a) => !a)
+                      setTool("ninguna")
+                    }}
+                  >
+                    {adjusting ? "Terminar de ajustar el arco" : "Ajustar el arco"}
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem
                   onClick={() => {
-                    setAdjusting((a) => !a)
+                    setPreset("hueso")
                     setTool("ninguna")
+                    setAdjusting(false)
+                    setNotice(null)
                   }}
                 >
-                  Ajustar arco
-                </Button>
-              )}
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                onClick={() => {
-                  setPreset("hueso")
-                  setTool("ninguna")
-                  setAdjusting(false)
-                }}
-              >
-                Restablecer
-              </Button>
-            </div>
-            {view === "panoramica" ? (
-              <PanoramicView
-                volume={volume}
-                window={window}
-                tool={tool}
-                viewOnly={viewOnly}
-                canWrite={canWrite}
-                patientId={patientId}
-                doc={doc}
-                adjusting={adjusting}
-                onTool={setTool}
-                saved={saved}
-                note={MEASURE_NOTE(voxel)}
-              />
-            ) : (
-              <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-                <ThreePlanes volume={volume} window={window} tool={tool} saved={saved} />
-                <aside className="flex w-full shrink-0 flex-col gap-3 border-t border-slate-800 bg-[#0d131b] p-4 text-sm lg:w-72 lg:border-t-0 lg:border-l">
-                  <MeasureList saved={saved} canWrite={canWrite} viewOnly={viewOnly} />
-                  <p className="text-xs text-slate-400">{MEASURE_NOTE(voxel)}</p>
-                  <p className="text-xs text-slate-500">
-                    Rueda o ↑ ↓ para avanzar · 1, 2 y 3 cambian el brillo{viewOnly ? "" : " · M mide · A ángulo"}
-                  </p>
-                </aside>
-              </div>
+                  Restablecer
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={download} className="flex-col items-start gap-0.5">
+                  <span>Descargar para el programa del centro</span>
+                  <span className="text-xs text-muted-foreground">
+                    Para planificar el implante o seguir el nervio, ábrela en el programa del centro
+                    de imágenes o del tomógrafo.
+                  </span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <p
+              aria-live="polite"
+              className="min-w-0 basis-full text-xs text-amber-200 empty:hidden lg:basis-auto"
+            >
+              {notice ??
+                (adjusting
+                  ? "Arrastra los puntos del arco o elige uno con 1–5 y muévelo con las flechas."
+                  : "")}
+            </p>
+            {otherSeries && (
+              <p className="min-w-0 basis-full text-xs text-slate-400">
+                Este estudio trae otra serie además de la que se ve; para verla, descárgalo.
+              </p>
             )}
           </>
-        )}
-      </DialogContent>
-    </Dialog>
+        ) : undefined
+      }
+    >
+      {single && loaded.files.data ? (
+        <SingleSlices files={loaded.files.data.data.files} />
+      ) : loaded.error ? (
+        <VolumeLoadError
+          error={loaded.error}
+          patientId={patientId}
+          documentId={doc.id}
+          onRetry={loaded.retry}
+          onSingle={loaded.files.data ? () => setSingle(true) : undefined}
+        />
+      ) : !volume || !window ? (
+        <div className="m-auto w-full max-w-sm">
+          <LoadingState
+            message={
+              loaded.progress && loaded.progress.total
+                ? `Abriendo ${loaded.progress.total.toLocaleString(activeOrgLocale())} cortes… ${Math.floor((loaded.progress.done / loaded.progress.total) * 100)} %`
+                : "Abriendo la tomografía…"
+            }
+          />
+        </div>
+      ) : (
+        <>
+          {viewOnly && (
+            <div className="border-b border-slate-800 px-3 py-2">
+              <ViewTabs label="Vista" value={view} options={PHONE_VIEWS} onValueChange={setView} />
+            </div>
+          )}
+          {shown === "panoramica" || shown === "corte" ? (
+            <PanoramicView
+              volume={volume}
+              window={window}
+              tool={tool}
+              viewOnly={viewOnly}
+              canWrite={canWrite}
+              patientId={patientId}
+              doc={doc}
+              adjusting={adjusting}
+              onTool={setTool}
+              saved={saved}
+              note={MEASURE_NOTE(voxel)}
+              phoneView={viewOnly ? (shown === "corte" ? "corte" : "panoramica") : undefined}
+            />
+          ) : shown === "3d" ? (
+            <Tomography3D volume={volume} window={window} className="flex-1" />
+          ) : (
+            <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+              <ThreePlanes
+                volume={volume}
+                window={window}
+                tool={viewOnly ? "ninguna" : tool}
+                saved={saved}
+                show3d={!viewOnly}
+              />
+              <aside className="flex w-full shrink-0 flex-col gap-3 border-t border-slate-800 bg-[#0d131b] p-4 text-sm lg:w-72 lg:border-t-0 lg:border-l">
+                <MeasureList saved={saved} canWrite={canWrite} viewOnly={viewOnly} />
+                <p className="text-xs text-slate-400">{MEASURE_NOTE(voxel)}</p>
+                <p className="text-xs text-slate-500">
+                  Rueda o ↑ ↓ avanzan el corte · Ctrl + rueda o dos dedos acercan · doble clic
+                  ajusta · 1, 2 y 3 cambian el brillo
+                  {viewOnly ? "" : " · M mide · A ángulo"}
+                </p>
+              </aside>
+            </div>
+          )}
+        </>
+      )}
+    </ViewerShell>
   )
 }

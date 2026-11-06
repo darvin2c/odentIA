@@ -38,9 +38,44 @@ export const ACCEPTED_TYPES = [
  * verifica el contenido real de todos los archivos. */
 export const ACCEPT_ATTR = [...ACCEPTED_TYPES, ".dcm"].join(",")
 export const MAX_BYTES = 10 * 1024 * 1024
+/**
+ * La radiografía DICOM sin comprimir pesa más (una cefalométrica o una
+ * panorámica de alta resolución): mismo tope que `PATIENT_DICOM_MAX_BYTES`.
+ */
+export const DICOM_MAX_BYTES = 30 * 1024 * 1024
+
+function isDicomFile(file: File): boolean {
+  return file.type === "application/dicom" || /\.dcm$/i.test(file.name)
+}
 
 export function isAcceptedFile(file: File): boolean {
   return ACCEPTED_TYPES.includes(file.type) || /\.dcm$/i.test(file.name)
+}
+
+/** El tope de un archivo: el de la radiografía DICOM o el de los demás. */
+export function maxBytesFor(file: File): number {
+  return isDicomFile(file) ? DICOM_MAX_BYTES : MAX_BYTES
+}
+
+/**
+ * Por qué no entra un archivo, con qué hacer. Los formatos que llegan de los
+ * sensores, del iPhone o del escáner se nombran; el contenido real lo verifica
+ * el servidor.
+ */
+export function unsupportedFormatMessage(name: string): string {
+  const ext = /\.([a-z0-9]+)$/i.exec(name)?.[1]?.toLowerCase() ?? ""
+  if (ext === "tif" || ext === "tiff" || ext === "bmp")
+    return `Es ${ext === "bmp" ? "BMP" : "TIFF"}: expórtala en DICOM o en JPG desde el programa del sensor.`
+  if (ext === "heic" || ext === "heif")
+    return "Es una foto HEIC del iPhone: súbela desde el iPhone, que la convierte a JPG, o elige «Más compatible» en la cámara."
+  if (ext === "stl" || ext === "ply" || ext === "obj")
+    return "Es un modelo del escáner intraoral: todavía no se guardan en la ficha."
+  return "Solo se admiten JPG, PNG, WebP, PDF o DICOM."
+}
+
+/** ¿El producto guarda la tomografía y la abre en su visor? (odentIA sí; latidIA todavía no.) */
+export function storesTomography(): boolean {
+  return productUi().documents.imaging.types.some((type) => type.value === "tomografia")
 }
 
 export function categoryLabel(category: string): string {

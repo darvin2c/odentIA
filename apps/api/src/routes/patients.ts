@@ -56,6 +56,7 @@ import {
   markAllergiesReviewed,
   PATIENT_AVATAR_MAX_BYTES,
   PATIENT_AVATAR_MIME_EXT,
+  PATIENT_DICOM_MAX_BYTES,
   PATIENT_DOC_MAX_BYTES,
   registerPatient,
   makeImageThumbnail,
@@ -1078,18 +1079,25 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     const [firstMissing] = Object.values(missing)
     if (firstMissing || typeof category !== "string" || typeof label !== "string")
       return c.json(errorBody(c, "VALIDATION", firstMissing ?? "Elige la categoría.", missing), 400)
-    if (!file.size || file.size > PATIENT_DOC_MAX_BYTES) {
-      return c.json(errorBody(c, "VALIDATION", "El archivo debe pesar entre 1 byte y 10 MB"), 400)
+    if (!file.size || file.size > PATIENT_DICOM_MAX_BYTES) {
+      return c.json(
+        errorBody(
+          c,
+          "VALIDATION",
+          "El archivo debe pesar entre 1 byte y 10 MB (la radiografía DICOM, 30 MB)",
+        ),
+        400,
+      )
     }
     const bytes = new Uint8Array(await file.arrayBuffer())
     // El formato se decide por el contenido: un tipo declarado que no coincide
     // con los bytes (p. ej. un ejecutable renombrado a .jpg) se rechaza.
     const contentType = sniffDocumentMime(bytes)
     if (!contentType)
-      return c.json(
-        errorBody(c, "VALIDATION", "Solo se admiten JPG, PNG, WebP, PDF o DICOM"),
-        400,
-      )
+      return c.json(errorBody(c, "VALIDATION", "Solo se admiten JPG, PNG, WebP, PDF o DICOM"), 400)
+    // Solo la radiografía DICOM pasa de 10 MB.
+    if (contentType !== "application/dicom" && file.size > PATIENT_DOC_MAX_BYTES)
+      return c.json(errorBody(c, "VALIDATION", "El archivo debe pesar entre 1 byte y 10 MB"), 400)
     const declared = file.type === "application/octet-stream" ? "" : file.type
     if (declared && declared !== contentType)
       return c.json(
