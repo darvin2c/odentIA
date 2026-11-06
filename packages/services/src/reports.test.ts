@@ -165,8 +165,10 @@ it("agenda: cada cita cae en un solo grupo, por su fecha en la zona de la clíni
   // El Resumen dice las mismas cifras que su pestaña: son la misma consulta por tramos.
   const summary = await c.run((tx) => getReportSummary(tx, c.orgId, { period: "2026-09" }, NOW))
   expect(summary.newPatients).toMatchObject({ current: 2, previous: 2 })
-  expect(summary.noShow.current).toEqual({ noShow: september.appointments.current.noShow, total: september.appointments.current.total })
-  expect(summary.noShow.previous).toEqual({ noShow: september.appointments.previous.noShow, total: september.appointments.previous.total })
+  // «No vinieron» con la misma base que la pestaña Agenda: las citas con desenlace, sin las que nadie marcó.
+  const marked = (totals: typeof september.appointments.current) => totals.attended + totals.noShow + totals.cancelled
+  expect(summary.noShow.current).toEqual({ noShow: september.appointments.current.noShow, total: marked(september.appointments.current) })
+  expect(summary.noShow.previous).toEqual({ noShow: september.appointments.previous.noShow, total: marked(september.appointments.previous) })
   // Doce meses que terminan en septiembre: el último es el periodo.
   expect(summary.months.map((month) => month.key).slice(-2)).toEqual(["2026-08", "2026-09"])
   expect(summary.newPatients.months.slice(-2)).toEqual([2, 2])
@@ -428,4 +430,22 @@ it("el asesor acompaña a la cifra solo si está encendido y hay algo que hacer"
   expect((await c.run((tx) => getReportAdvice(tx, c.orgId, { period: month }, everyone))).notices).toEqual([])
   await c.run((tx) => setLine(tx, c.orgId, doctor, "seguimiento_no_asistencia", { noRecommend: false, enabled: true }))
   expect((await c.run((tx) => getReportAdvice(tx, c.orgId, { period: month }, everyone))).notices).toEqual([])
+})
+
+it("pacientes nuevos: también quien vino por primera vez sin cita, con su atención firmada, como «Vinieron» del embudo", async () => {
+  const c = await clinic()
+  const ana = await c.professional("Ana")
+  const walkIn = await c.person("Sin cita", 1)
+  const [visit] = await ownerDb
+    .insert(encounter)
+    .values({ organizationId: c.orgId, patientId: walkIn, professionalUserId: ana, startedAt: new Date("2026-09-15T15:00:00Z") })
+    .returning()
+  await ownerDb
+    .update(encounter)
+    .set({ status: "finalizada", finalizedAt: new Date("2026-09-15T16:00:00Z"), signerName: "Ana", signerRegistration: "12345" })
+    .where(eq(encounter.id, visit!.id))
+  const patients = await c.run((tx) => getReportPatients(tx, c.orgId, { period: "2026-09" }, NOW))
+  expect(patients.newPatients.current).toBe(1)
+  const list = await c.run((tx) => getReportList(tx, c.orgId, { period: "2026-09", list: "new_patients" }, NOW))
+  expect(list.rows.map((row) => row.patientId)).toEqual([walkIn])
 })
