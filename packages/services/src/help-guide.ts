@@ -51,7 +51,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Inicio",
     parent: null,
     purpose:
-      "Lo que te toca hoy. «Te espera» es la única lista de lo que hay que hacer, una fila por persona, en tres grupos: Ahora, Hoy y Sin apuro, que va plegado. Cada fila tiene un solo botón y abre al lado lo que necesitas para resolverla, con sus mensajes y la caja para responder: lo que te pasó el agente («Responder» si es tuyo o nadie lo tomó; si lo lleva otra persona, dice con quién está), tu atención de otro día que quedó sin firmar («Revisar»), las citas de días anteriores que nadie cerró («¿Vino?»; si atiendes, te salen las tuyas), las citas que no se confirmaron tras el recordatorio («Llamar»), quienes aceptaron su presupuesto y no tienen cita (para quien ve Reportes, con «Agendar»), los presupuestos sin enviar, las conversaciones sin responder (si atiendes, las que llevas), las tareas, lo que recomienda Argos y, con el Administrador encendido, las personas a las que Sofi no pudo escribir. Al lado, tu día: si hoy atiendes, «Mis pacientes de hoy» con la sala de espera, lo que estás atendiendo y lo que viene más tarde; si no, la agenda de la sede, donde recepción marca «Llegó», o la caja, según tu trabajo. La campana de avisos es solo para enterarte: no repite nada de «Te espera».",
+      "Lo que te toca hoy. «Te espera» es la única lista de lo que hay que hacer, una fila por persona, en tres grupos: Ahora, Hoy y Sin apuro, que va plegado. Cada fila tiene un solo botón y abre al lado lo que necesitas para resolverla, con sus mensajes y la caja para responder: lo que te pasó el agente («Responder» si es tuyo o nadie lo tomó; si lo lleva otra persona, dice con quién está), tu atención de otro día que quedó sin firmar («Revisar»), las citas de días anteriores que nadie cerró («¿Vino?»; si atiendes, te salen las tuyas), las citas que no se confirmaron tras el recordatorio («Llamar»), cuántos tienen algo aceptado sin cita (para quien ve Reportes, con «Ver en Pacientes», que abre «Por agendar»; si Argos ya te recomienda «Presupuesto aceptado sin cita», va en esa fila), los controles vencidos sin ninguna cita (para quien ve la agenda de la sede, como recepción, la dueña o la administración, con la lista de la línea de Argos «Avisar un control»; si Argos ya te la recomienda, va en esa fila), los presupuestos sin enviar, las conversaciones sin responder (si atiendes, las que llevas), las tareas, lo que recomienda Argos y, con el Administrador encendido, las personas a las que Sofi no pudo escribir. Al lado, tu día: si hoy atiendes, «Mis pacientes de hoy» con la sala de espera, lo que estás atendiendo y lo que viene más tarde; si no, la agenda de la sede, donde recepción marca «Llegó», o la caja, según tu trabajo. La campana de avisos es solo para enterarte: no repite nada de «Te espera».",
     terms: [
       "resumen del día",
       "pendientes",
@@ -602,7 +602,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Qué son «Por agendar», «Deben» y los demás atajos?",
-        a: "Filtros de la lista de Pacientes con lo que hay que mover: «Por agendar», «Presupuesto sin enviar», «Presupuesto sin respuesta», «Control por reservar», «Faltan datos», «Por invitar a volver» y «Deben». En «Por invitar a volver», «Ya la invité» anota que la invitaste por teléfono o en persona.",
+        a: "Filtros de la lista de Pacientes con lo que hay que mover: «Por agendar», «Presupuesto sin enviar», «Presupuesto sin respuesta», «Control vencido», «Faltan datos», «Por invitar a volver» y «Deben». Cada uno dice su regla al elegirlo. «Por agendar» es quien tiene algo aceptado sin una cita que lo lleve, aunque tenga otra cita, y «Control vencido» quien tiene un control cuyo día ya pasó y ninguna cita por venir: son las mismas cuentas de Inicio y de Argos. En «Por invitar a volver», «Ya la invité» anota que la invitaste por teléfono o en persona.",
       },
       {
         q: "¿Qué hago si no se le puede enviar su enlace?",
@@ -1071,7 +1071,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo se descuentan los materiales de una atención?",
-        a: "Solos, al firmarla: en Servicios y precios cada servicio dice qué usa cada vez («Materiales que usa») y sale de la sede de la atención. Si se usó otra cantidad, en la atención firmada, «Materiales usados» › «Corregir»; lo firmado no cambia.",
+        a: "Solos, al firmarla: en Servicios y precios cada servicio dice qué usa cada vez («Materiales que usa») y sale de la sede de la atención. Arriba de la lista se sugieren los más hechos que aún no los tienen; las consultas no, porque casi no gastan. Si se usó otra cantidad, en la atención firmada, «Materiales usados» › «Corregir»; lo firmado no cambia.",
       },
       {
         q: "¿Cómo vendo un cepillo o un enjuague?",
@@ -1712,7 +1712,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Actividad del equipo",
     parent: SETTINGS,
     purpose:
-      "Quién hizo qué y cuándo en la clínica, dicho con palabras. Es una consulta: desde ahí no se cambia nada.",
+      "Quién hizo qué, cuándo y sobre qué en la clínica, dicho con palabras: una fila por acción, con la persona y, si lo hay, el ticket, la cita o el presupuesto, que se abren al tocarlos. Es una consulta: desde ahí no se cambia nada.",
     terms: [
       "auditoría",
       "historial de cambios",
@@ -1731,6 +1731,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         q: "¿Por qué algunas filas dicen «El paciente o su contacto»?",
         a: "Porque lo hizo la propia persona: confirmó o cambió su cita, respondió un presupuesto o abrió un documento desde el portal o desde su enlace. Nunca queda a nombre de quien le envió el enlace.",
+      },
+      {
+        q: "¿Por qué un cobro sale en una sola fila?",
+        a: "Porque es una sola acción: al cobrar quedan registrados el pago, su aplicación a cada concepto, el ticket y el movimiento de caja, y la fila dice lo que se hizo («Emitió un ticket») con lo demás debajo, en «También». Lo mismo al anular. En «Sobre qué» van la persona y el ticket, la cita o el presupuesto, cada uno con su enlace. De una historia bloqueada no se dice el nombre.",
       },
     ],
   },

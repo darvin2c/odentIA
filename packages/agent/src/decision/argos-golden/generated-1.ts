@@ -353,7 +353,7 @@ export function generatedSolvers1(h: GoldenHelpers): GoldenSolvers {
       return {
         respuesta: `En ${monthName(key)} te quedaron ${show(leaves)}: de ${show(collected)} cobrados se restan ${show(commissions)} de comisiones y ${show(spent)} de gastos registrados. Puede faltar algún gasto que no se anotó.`,
         criterio: "«Lo que deja» de Reportes › Finanzas de ese mes completo: lo cobrado − las comisiones generadas − los gastos registrados (sin el pago de comisiones, que ya está en ellas).",
-        nota: `Si solo restas los gastos registrados, sin comisiones: ${money(totalOf(collected) - totalOf(spent))}. Si restas lo que de verdad salió ese mes, con el pago de comisiones hecho en él (${money(paidCommissions)}) en vez de las generadas: ${money(finance.totals.current.cashLeftCents)} («En caja quedó»).`,
+        nota: `Si solo restas los gastos registrados, sin comisiones: ${money(totalOf(collected) - totalOf(spent))}. Si restas lo que de verdad salió ese mes, con el pago de comisiones hecho en él (${money(paidCommissions)}) en vez de las generadas: ${money(finance.totals.current.cashLeftCents)}.`,
         datos: { deja: leaves.total, cobrado: collected.total, gastos: spent.total, comisiones: commissions.total, pagoComisiones: paidCommissions, enCaja: finance.totals.current.cashLeftCents },
       }
     },

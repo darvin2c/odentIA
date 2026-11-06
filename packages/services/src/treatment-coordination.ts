@@ -15,6 +15,7 @@ import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
 import { listFollowUps, type ScheduleFollowUpInput, scheduleFollowUp } from "./follow-ups.js"
 import { scheduledItems } from "./plan-next.js"
 import { listPlanItems } from "./plan.js"
+import { isToSchedule } from "./to-schedule.js"
 
 const OPEN_TREATMENT_STATUSES = ["pendiente", "programado", "en_curso", "suspendido"]
 // Lo que no aceptó, lo reemplazado y lo que estaba solo en una opción no elegida.
@@ -84,10 +85,10 @@ export async function getTreatmentCoordination(
       OPEN_TREATMENT_STATUSES.includes(item.status) &&
       !DISCARDED_DECISIONS.includes(item.decisionStatus),
   )
-  // La misma regla de «Qué sigue» y de lo que la cita admite: aceptado, por hacer y sin cita por venir.
+  // La regla de «Por agendar» (`isToSchedule`): aceptado, por hacer y sin una cita por venir que lo lleve.
   const schedulable = open.filter((item) => item.decisionStatus === "aceptado" && SCHEDULABLE_ITEM_STATUSES.includes(item.status))
   const withAppointment = await scheduledItems(tx, orgId, patientId, schedulable.map((item) => item.id))
-  const toSchedule = new Set(schedulable.filter((item) => !withAppointment.has(item.id)).map((item) => item.id))
+  const toSchedule = new Set(open.filter((item) => isToSchedule(item, withAppointment)).map((item) => item.id))
   return {
     budgetsAwaitingDecision: budgets,
     followUps: followUps

@@ -821,7 +821,7 @@ export function blindSolvers2(h: GoldenHelpers): GoldenSolvers {
         respuesta: `No te puedo recomendar qué hacer: odentIA no da consejos. Lo registrado: hoy ${show(result)} pacientes dejaron de venir (su última cita atendida fue hace más de 6 meses y no tienen cita, presupuesto esperando respuesta ni control pendiente). Los que se fueron más recientemente: ${listOf(recent.slice(0, 5).map((row) => ({ name: row.personName, value: `última cita el ${shortDate(row.at)}` })))}.`,
         criterio:
           "Trampa: es un consejo. Se ofrece «Sin venir hace más de 6 meses» de Reportes, a hoy, con su lista ordenada de la última cita más reciente a la más antigua.",
-        nota: `Además, ${plural(unbooked.total, "paciente tiene", "pacientes tienen")} tratamientos aceptados por hacer y ninguna cita por venir («Aceptaron y no tienen cita» de Reportes).`,
+        nota: `Además, ${plural(unbooked.total, "paciente tiene", "pacientes tienen")} tratamientos aceptados por hacer sin una cita por venir que los lleve («Aceptaron y no tienen cita» de Reportes).`,
         datos: { sinVenir: result.total, lista: recent.slice(0, 10).map((row) => ({ name: row.personName, at: row.at })), aceptadoSinCita: unbooked.total },
       }
     },

@@ -141,10 +141,11 @@ export type PeopleView = (typeof PEOPLE_VIEWS)[number]["id"]
  * se entiende si dice la suya.
  */
 export const PEOPLE_SHORTCUTS = [
-  { id: "por_agendar", label: "Por agendar", rule: "Quien tiene algo aceptado o en curso sin cita para eso, aunque tenga otra cita. Si además tiene un presupuesto sin enviar, va en ese atajo." },
+  { id: "por_agendar", label: "Por agendar", rule: "Quien tiene algo aceptado o en curso sin una cita que lo lleve, aunque tenga otra cita. Es la misma regla de Inicio y de Argos, que además espera unos días desde que se aceptó." },
   { id: "presupuesto_sin_enviar", label: "Presupuesto sin enviar", rule: "Quien tiene un presupuesto armado que aún no se le envió." },
   { id: "presupuesto_sin_respuesta", label: "Presupuesto sin respuesta", rule: "Quien recibió su presupuesto y aún no respondió, si no tiene algo aceptado por agendar ni un presupuesto sin enviar." },
-  { id: "control_por_reservar", label: "Control por reservar", rule: "Quien tiene su próximo control como lo que sigue, aunque toque más adelante o ya tenga cita." },
+  // El id sigue siendo `control_por_reservar`: así siguen sirviendo los enlaces guardados.
+  { id: "control_por_reservar", label: "Control vencido", rule: "Quien tiene un control cuyo día ya pasó y ninguna cita por venir. Es la misma lista de Inicio y de Argos." },
   { id: "faltan_datos", label: "Faltan datos", rule: "Pacientes a los que les falta un dato de su ficha." },
   { id: "por_invitar_a_volver", label: "Por invitar a volver", rule: "Quien pasó el tiempo de su control sin volver y no se invitó en ese tiempo." },
   { id: "deben", label: "Deben", rule: "Quien debe más de lo que tiene a favor, de cualquier fecha." },

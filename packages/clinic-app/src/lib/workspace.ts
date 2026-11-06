@@ -140,8 +140,10 @@ export type WaitingRow =
       serviceName: string | null
       branchName: string
     }
-  /** Quienes aceptaron un presupuesto y no tienen cita por venir: abre la lista para agendarlos. */
+  /** Quienes tienen algo aceptado sin una cita que lo lleve: lleva a Pacientes › «Por agendar». */
   | { kind: "acceptedUnbooked"; patients: number; cents: number; currency: string }
+  /** Los controles vencidos sin cita: abre la lista de la línea de Argos «Avisar un control». */
+  | { kind: "overdueControls"; controls: number; patients: number }
   /** Una conversación que espera respuesta: con quién y qué pidió. */
   | {
       kind: "person"

@@ -9,6 +9,7 @@ import {
   type FigureResult,
   getAgendaReport,
   getPatientReportList,
+  patientsWithOverdueControl,
   reportDayOf,
   reportScope,
   type Span,
@@ -149,7 +150,7 @@ export function strategySolvers(h: GoldenHelpers): GoldenSolvers {
       const overdue = await h.fig("deuda_vencida")
       const free = await h.fig("horas_libres")
       return {
-        respuesta: `Qué estás desaprovechando es una evaluación que odentIA no hace, pero sí tengo lo registrado que todavía no se convierte en ingreso: ${waiting.budgets} presupuestos esperan respuesta por ${h.money(waiting.cents)}; lo aceptado que falta hacer vale ${h.money(coming.cents)} (${coming.patients} pacientes; ${coming.unbooked.patients} de ellos sin cita, por ${h.money(coming.unbooked.cents)}); y ${h.show(lapsed)} pacientes llevan más de 6 meses sin venir.`,
+        respuesta: `Qué estás desaprovechando es una evaluación que odentIA no hace, pero sí tengo lo registrado que todavía no se convierte en ingreso: ${waiting.budgets} presupuestos esperan respuesta por ${h.money(waiting.cents)}; lo aceptado que falta hacer vale ${h.money(coming.cents)} (${coming.patients} pacientes; ${coming.unbooked.patients} de ellos con algo sin cita, por ${h.money(coming.unbooked.cents)}); y ${h.show(lapsed)} pacientes llevan más de 6 meses sin venir.`,
         criterio: "Trampa: es un juicio. Se ofrecen presupuestos que esperan respuesta (lo aún no decidido), «Lo que viene» de Reportes (lo aceptado sin hacer, con lo que no tiene cita) y «Sin venir hace más de 6 meses», a hoy.",
         nota: `También: te deben ${h.show(owed)} (${h.show(overdue)} hace más de 30 días, de ${overdue.total.part ?? 0} personas), y este mes quedaron ${h.show(free)} libres en la agenda.`,
         datos: { esperanRespuesta: waiting, loQueViene: coming, sinVenir: lapsed.total, teDeben: owed.total, vencido: overdue.total, horasLibres: free.total },
@@ -308,14 +309,13 @@ export function strategySolvers(h: GoldenHelpers): GoldenSolvers {
           and a.starts_at >= ${weekStart.toISOString()}::timestamptz and a.starts_at < ${weekEnd.toISOString()}::timestamptz`)
       const waiting = await awaiting()
       const overdue = await h.fig("deuda_vencida")
-      const [controls] = await h.tx.execute<{ overdue: number }>(sql`
-        select count(distinct f.patient_id)::int as overdue from clinical_follow_up f ${h.joinPerson(sql`f.patient_id`)}
-        where f.organization_id = ${h.org} and f.status = 'pendiente' and f.due_at < ${nowIso}::timestamptz and pp.is_active`)
+      // La regla de Pacientes › «Control vencido», Inicio y Argos (ADR 0145): su día ya pasó y ninguna cita por venir.
+      const controls = { overdue: (await patientsWithOverdueControl(h.tx, h.org, h.tz)).length }
       const coming = await upcomingWork(h.tx, h.org, h.scope.currency, h.now)
       const lapsed = await h.fig("sin_venir")
       const sunday = new Intl.DateTimeFormat(h.scope.locale, { day: "numeric", month: "long", timeZone: "UTC" }).format(new Date(`${addDays(monday, 6)}T12:00:00Z`))
       return {
-        respuesta: `Tus prioridades las decides tú; odentIA no las elige. Lo pendiente que tengo registrado para esta semana: 1) ${week?.unconfirmed ?? 0} de las ${week?.coming ?? 0} citas que quedan hasta el domingo ${sunday} siguen sin confirmar; 2) ${waiting.budgets} presupuestos esperan respuesta (${h.money(waiting.cents)}${waiting.oldest ? `, el más antiguo desde el ${dateWords(waiting.oldest)}` : ""}); 3) ${overdue.total.part ?? 0} personas te deben hace más de 30 días (${h.show(overdue)}); 4) ${controls?.overdue ?? 0} pacientes tienen un control vencido sin cita; 5) ${coming.unbooked.patients} pacientes con tratamiento aceptado no tienen cita (${h.money(coming.unbooked.cents)}).`,
+        respuesta: `Tus prioridades las decides tú; odentIA no las elige. Lo pendiente que tengo registrado para esta semana: 1) ${week?.unconfirmed ?? 0} de las ${week?.coming ?? 0} citas que quedan hasta el domingo ${sunday} siguen sin confirmar; 2) ${waiting.budgets} presupuestos esperan respuesta (${h.money(waiting.cents)}${waiting.oldest ? `, el más antiguo desde el ${dateWords(waiting.oldest)}` : ""}); 3) ${overdue.total.part ?? 0} personas te deben hace más de 30 días (${h.show(overdue)}); 4) ${controls?.overdue ?? 0} pacientes tienen un control vencido sin cita; 5) ${coming.unbooked.patients} pacientes tienen un tratamiento aceptado sin cita que lo lleve (${h.money(coming.unbooked.cents)}).`,
         criterio: "Trampa: es un consejo. Se ofrece lo pendiente registrado, a hoy: citas de esta semana sin confirmar, presupuestos que esperan respuesta, deuda de más de 30 días (Reportes), controles vencidos sin cita y lo aceptado sin cita («Lo que viene» de Reportes).",
         nota: `Además: ${week?.unmarked ?? 0} citas de esta semana ya pasaron sin marcar si vino el paciente, y ${h.show(lapsed)} pacientes llevan más de 6 meses sin venir.`,
         datos: { semana: { desde: monday, hasta: addDays(monday, 6), ...week }, esperanRespuesta: waiting, vencido: overdue.total, controlesVencidos: controls?.overdue ?? 0, aceptadoSinCita: coming.unbooked, sinVenir: lapsed.total },

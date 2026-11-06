@@ -3,14 +3,18 @@
  * botón que decide el servidor. Es la misma regla para la pestaña Plan, el
  * Resumen, «Te espera» y la línea del Administrador que retoma presupuestos:
  * se apoya en `budgetAwaitsAnswer` (lo que espera respuesta), en
- * `deriveNextAction` (el siguiente paso de un tratamiento) y en los controles.
+ * `isToSchedule` (lo aceptado sin cita) y en los controles.
  *
  * El orden es fijo y sin puntajes:
  * 1. Un presupuesto armado y sin enviar: «Enviar el presupuesto a Lucía».
  * 2. Lo aceptado que aún no tiene cita: «Aceptó 2 de 3: falta su cita».
  * 3. Lo que espera respuesta: «Enviado · espera respuesta» o «Lo está pensando».
  * 4. Un tratamiento en curso sin cita para su próxima sesión.
- * 5. El próximo control: «Control de las resinas · por reservar desde el 20 nov».
+ * 5. El próximo control: «Control de las resinas · por reservar · Toca el 20 nov»,
+ *    o «tiene cita el 22 nov» si ya tiene una cita desde ese día.
+ *
+ * «Falta su cita» y «por reservar» siguen las reglas de `to-schedule.ts`: lo
+ * aceptado sin una cita que lo lleve y el control sin ninguna cita por venir.
  *
  * Recibe `can`: el botón solo se ofrece a quien puede hacerlo. La frase nunca
  * lleva diagnósticos, piezas ni notas: también la lee recepción.
@@ -29,9 +33,9 @@ import { firstName } from "./automation-routing.js"
 import { listBudgets, listBudgetsForPatients, valueOptionOf, type BudgetWithTotals } from "./budgets.js"
 import { notFound } from "./errors.js"
 import { findOrgLocale } from "./locale.js"
-import { deriveNextAction } from "./treatment-journey.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { productHooks } from "./products.js"
+import { dayKeyIn, isOverdueControl, isToSchedule, LIVE_APPOINTMENT_STATUSES } from "./to-schedule.js"
 
 export type PlanNextKind = "enviar" | "agendar" | "respuesta" | "continuar" | "control" | "ninguno"
 
@@ -58,8 +62,8 @@ export interface PlanNextStep {
 
 export type Can = (permission: string) => boolean
 
-/** Estados de una cita que todavía va a ocurrir. */
-const LIVE_APPOINTMENT = ["programada", "confirmada"]
+/** Estados de una cita que todavía va a ocurrir (la misma lista de `to-schedule.ts`). */
+const LIVE_APPOINTMENT = [...LIVE_APPOINTMENT_STATUSES]
 
 /** «12 dic»; de otro año, con el año («12 dic 2025»). */
 function dayWords(date: Date, locale: string, timeZone: string): string {
@@ -140,7 +144,7 @@ export async function getPlanNextStep(
     .orderBy(sql`${clinicalFollowUp.status} = 'pendiente' desc`, asc(clinicalFollowUp.dueAt))
     .limit(1)
   const [next] = await tx
-    .select({ startsAt: appointment.startsAt })
+    .select({ id: appointment.id, startsAt: appointment.startsAt })
     .from(appointment)
     .where(
       and(
@@ -153,7 +157,15 @@ export async function getPlanNextStep(
     .orderBy(asc(appointment.startsAt))
     .limit(1)
   return planNextStepFrom(
-    { name: firstName(person), budgets, items, withAppointment, control, nextAppointmentAt: next?.startsAt ?? null },
+    {
+      name: firstName(person),
+      budgets,
+      items,
+      withAppointment,
+      control,
+      nextAppointmentAt: next?.startsAt ?? null,
+      nextAppointmentId: next?.id ?? null,
+    },
     context,
     can,
   )
@@ -205,7 +217,7 @@ export async function planNextStepsOf(
   const withAppointment = new Set(scheduled.map((row) => row.planItemId))
   // La próxima cita de cada uno, lleve o no lo aceptado: «falta su cita» no se dice a quien ya tiene una.
   const nextAppointments = await tx
-    .selectDistinctOn([appointment.patientId], { patientId: appointment.patientId, startsAt: appointment.startsAt })
+    .selectDistinctOn([appointment.patientId], { patientId: appointment.patientId, id: appointment.id, startsAt: appointment.startsAt })
     .from(appointment)
     .where(
       and(
@@ -216,7 +228,7 @@ export async function planNextStepsOf(
       ),
     )
     .orderBy(appointment.patientId, asc(appointment.startsAt))
-  const nextAppointmentOf = new Map(nextAppointments.map((row) => [row.patientId, row.startsAt]))
+  const nextAppointmentOf = new Map(nextAppointments.map((row) => [row.patientId, row]))
   // El próximo control de cada uno, con el mismo orden que el de uno solo.
   const controls = await tx
     .selectDistinctOn([clinicalFollowUp.patientId])
@@ -246,7 +258,8 @@ export async function planNextStepsOf(
           items: itemsOf.get(person.id) ?? [],
           withAppointment,
           control: controlOf.get(person.id),
-          nextAppointmentAt: nextAppointmentOf.get(person.id) ?? null,
+          nextAppointmentAt: nextAppointmentOf.get(person.id)?.startsAt ?? null,
+          nextAppointmentId: nextAppointmentOf.get(person.id)?.id ?? null,
         },
         context,
         can,
@@ -280,14 +293,17 @@ interface PlanFacts {
   control: FollowUpRow | undefined
   /** Su próxima cita, aunque no lleve lo aceptado. */
   nextAppointmentAt?: Date | null
+  nextAppointmentId?: string | null
 }
 
 /** La regla de «Qué sigue», en el orden fijo de arriba. Sin consultas: decide con lo cargado. */
 function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): PlanNextStep {
-  const { name, budgets, items, withAppointment, control, nextAppointmentAt } = facts
+  const { name, budgets, items, withAppointment, control, nextAppointmentAt, nextAppointmentId } = facts
   const { locale, timezone } = context
   const day = (date: Date) => dayWords(date, locale, timezone)
-  const dayKey = (date: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(date)
+  const dayKey = (date: Date) => dayKeyIn(date, timezone)
+  // Lo aceptado sin una cita por venir que lo lleve (la regla de «Por agendar»).
+  const toSchedule = items.filter((item) => isToSchedule(item, withAppointment))
 
   // 1. Armado y sin enviar: lo envía recepción (decisión 4).
   const unsent = unsentBudgetOf(budgets)
@@ -301,15 +317,16 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
   }
 
   // 2. Lo aceptado sin cita: «Reservar cita» con los tratamientos ya puestos.
-  const accepted = items.filter((item) => item.decisionStatus === "aceptado" && item.status === "pendiente")
-  const toSchedule = accepted.filter((item) => !withAppointment.has(item.id))
-  if (toSchedule.length > 0) {
+  const notStarted = (item: PlanItemRow) => item.status === "pendiente" || item.status === "programado"
+  const accepted = items.filter((item) => item.decisionStatus === "aceptado" && notStarted(item))
+  const toStart = toSchedule.filter(notStarted)
+  if (toStart.length > 0) {
     const decided = budgets
       .filter((budget) => budget.status === "aceptado" || budget.status === "parcial")
-      .find((budget) => budget.items.some((line) => toSchedule.some((item) => item.id === line.planItemId)))
+      .find((budget) => budget.items.some((line) => toStart.some((item) => item.id === line.planItemId)))
     // Ya tiene una cita que no lo lleva: se dice así, no «falta su cita», que suena a que no tiene ninguna.
     // Si una parte ya tiene cita, se dice que falta el resto.
-    const partly = toSchedule.length < accepted.length
+    const partly = toStart.length < accepted.length
     const missing = nextAppointmentAt
       ? `su cita del ${day(nextAppointmentAt)} no lo lleva${partly ? " todo" : ""}`
       : "falta su cita"
@@ -330,7 +347,7 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
       text,
       detail: decided?.decidedAt ? `Respondió el ${day(decided.decidedAt)}` : null,
       action: can("appointments.write")
-        ? { label: "Reservar cita", planItemIds: toSchedule.map((item) => item.id), serviceId: toSchedule[0]?.serviceId ?? null }
+        ? { label: "Reservar cita", planItemIds: toStart.map((item) => item.id), serviceId: toStart[0]?.serviceId ?? null }
         : null,
     }
   }
@@ -348,11 +365,7 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
   }
 
   // 4. Un tratamiento en curso sin cita para su próxima sesión.
-  const continuing = items.find(
-    (item) =>
-      deriveNextAction({ status: item.status, decisionStatus: item.decisionStatus, budgetStatus: "aceptado", openSession: false }) === "continuar" &&
-      !withAppointment.has(item.id),
-  )
+  const continuing = toSchedule.find((item) => item.status === "en_curso")
   if (continuing) {
     return {
       kind: "continuar",
@@ -366,12 +379,22 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
 
   // 5. El próximo control.
   if (control) {
+    // A un control le sirve cualquier visita: con una cita por venir desde su día, no está «por reservar».
+    if (control.status === "pendiente" && nextAppointmentAt && dayKey(nextAppointmentAt) >= dayKey(control.dueAt)) {
+      return {
+        kind: "control",
+        text: `${control.title} · tiene cita el ${day(nextAppointmentAt)}`,
+        detail: `${dayKey(control.dueAt) >= dayKey(new Date()) ? "Toca el" : "Tocaba el"} ${day(control.dueAt)}`,
+        action: nextAppointmentId && can("appointments.read") ? { label: "Ver la cita", appointmentId: nextAppointmentId } : null,
+      }
+    }
     if (control.status === "pendiente") {
       return {
         kind: "control",
         text: `${control.title} · por reservar`,
-        // Hoy o después: toca ese día («Toca el 12 dic»); un día ya pasado: «Tocaba el 12 dic».
-        detail: `${dayKey(control.dueAt) >= dayKey(new Date()) ? "Toca el" : "Tocaba el"} ${day(control.dueAt)}`,
+        // Vencido sin cita (la regla de «Control vencido», `isOverdueControl`): «Tocaba el 12 dic»;
+        // hoy o después: «Toca el 12 dic».
+        detail: `${isOverdueControl(control, nextAppointmentAt ?? null, timezone) ? "Tocaba el" : "Toca el"} ${day(control.dueAt)}`,
         action: can("appointments.write") ? { label: "Reservar cita", followUpId: control.id } : null,
       }
     }

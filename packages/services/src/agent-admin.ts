@@ -71,6 +71,7 @@ import { formatOrgMoneyToday, getOrgLocale, type OrgLocale, orgProduct } from ".
 import { productHooks } from "./products.js"
 import { debtZoneSql } from "./report-debts.js"
 import { lapsedToInvite } from "./return-invites.js"
+import { budgetToScheduleSql, noUpcomingAppointmentSql, overdueControlSql } from "./to-schedule.js"
 import { getWritingHours, type WritingWeek } from "./writing-hours.js"
 import type { Storage } from "./storage.js"
 
@@ -155,6 +156,8 @@ export interface AdminCase {
 
 interface CaseResult {
   total: number
+  /** Personas distintas, en la línea que cuenta otra cosa (controles). */
+  people?: number
   items: AdminCase[]
   title: string
   detail: string
@@ -180,23 +183,19 @@ const dayOf = (value: Date | string, zone: OrgLocale) => {
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many)
 const blank = { patientId: null, contactId: null, opportunityId: null, appointmentId: null, budgetId: null, controlId: null, ownerUserId: null }
 
-/** Sin cita futura: ninguna cita programada o confirmada desde ahora. */
-const NO_FUTURE_APPOINTMENT = sql`not exists (
-  select 1 from appointment a
-  where a.organization_id = p.organization_id and a.patient_id = p.id
-    and a.starts_at > now() and a.status in ('programada', 'confirmada'))`
+/** Sin cita futura: ninguna cita programada o confirmada desde ahora (`noUpcomingAppointmentSql`). */
+const NO_FUTURE_APPOINTMENT = noUpcomingAppointmentSql({ id: sql`p.id`, organizationId: sql`p.organization_id` })
+
+/** El presupuesto `b` tiene algo aceptado sin cita: la regla de Pacientes › «Por agendar». */
+const BUDGET_TO_SCHEDULE = budgetToScheduleSql({ id: sql`b.id`, organizationId: sql`b.organization_id` })
+/** Un tratamiento en curso del presupuesto sin cita para su próxima sesión (decisión 14): no espera los días. */
+const NEXT_SESSION_OPEN = budgetToScheduleSql(
+  { id: sql`b.id`, organizationId: sql`b.organization_id` },
+  sql`now()`,
+  sql`and scheduled_item.status = 'en_curso'`,
+)
 
 /** Solo lo nuevo desde que se prendió y que aún no tiene su caso. `at` es cuándo se cumplió la condición. */
-/** Un tratamiento en curso del presupuesto sin cita viva para su próxima sesión (decisión 14). */
-const NEXT_SESSION_OPEN = sql`exists (select 1 from treatment_budget_item bi
-  join treatment_plan_item i on i.organization_id = bi.organization_id and i.id = bi.plan_item_id
-  where bi.organization_id = b.organization_id and bi.budget_id = b.id
-    and i.status = 'en_curso' and i.decision_status = 'aceptado'
-    and not exists (select 1 from appointment_plan_item api
-      join appointment a on a.organization_id = api.organization_id and a.id = api.appointment_id
-      where api.organization_id = b.organization_id and api.plan_item_id = i.id
-        and a.status in ('programada', 'confirmada')))`
-
 function fresh(scope: Fresh | undefined, id: SQL, at: SQL): SQL {
   if (!scope) return sql``
   return sql`and ${at} >= ${scope.since.toISOString()}::timestamptz
@@ -231,21 +230,32 @@ async function upcomingAppointments(tx: Db, orgId: string, zone: OrgLocale, limi
   }
 }
 
+/**
+ * Controles vencidos sin cita (`overdueControlSql`): la misma regla de Pacientes
+ * › «Control vencido» y de su fila de Inicio. Aquí cuenta controles; allá,
+ * personas: el título dice las dos cifras cuando no coinciden.
+ */
 async function overdueControls(tx: Db, orgId: string, zone: OrgLocale, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
-  const rows = await tx.execute<{ id: string; patient_id: string; name: string; title: string; due_at: Date | string; total: number; old: number }>(sql`
-    select f.id, p.id as patient_id, pp.display_name as name, f.title, f.due_at,
-           count(*) over ()::int as total,
-           (count(*) filter (where f.due_at < now() - interval '30 days') over ())::int as old
-    from clinical_follow_up f
-    join patient p on p.id = f.patient_id and p.organization_id = f.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
-    where f.organization_id = ${orgId} and f.status = 'pendiente' and f.due_at < now()
-      and pp.is_active and ${NO_FUTURE_APPOINTMENT}
-    order by f.due_at asc
+  const rows = await tx.execute<{ id: string; patient_id: string; name: string; title: string; due_at: Date | string; total: number; people: number; old: number }>(sql`
+    with due as (
+      select f.id, p.id as patient_id, pp.display_name as name, f.title, f.due_at
+      from clinical_follow_up f
+      join patient p on p.id = f.patient_id and p.organization_id = f.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
+      where f.organization_id = ${orgId} and pp.is_active and not pp.is_test
+        and ${overdueControlSql({ organizationId: sql`f.organization_id`, patientId: sql`f.patient_id`, status: sql`f.status`, dueAt: sql`f.due_at` }, zone.timezone)}
+    )
+    select due.*, count(*) over ()::int as total,
+           (select count(distinct d.patient_id) from due d)::int as people,
+           (count(*) filter (where due.due_at < now() - interval '30 days') over ())::int as old
+    from due
+    order by due.due_at asc
     limit ${limit}`)
   const total = Number(rows[0]?.total ?? 0)
+  const people = Number(rows[0]?.people ?? 0)
   const old = Number(rows[0]?.old ?? 0)
   return {
     total,
+    people,
     items: rows.map((row) => ({
       ...blank,
       id: row.id,
@@ -254,9 +264,12 @@ async function overdueControls(tx: Db, orgId: string, zone: OrgLocale, limit: nu
       patientId: row.patient_id,
       controlId: row.id,
     })),
-    title: `${total} ${plural(total, "control vencido de un paciente sin cita", "controles vencidos de pacientes sin cita")}`,
+    title:
+      people === total
+        ? `${total} ${plural(total, "control vencido de un paciente sin cita", "controles vencidos de pacientes sin cita")}`
+        : `${total} controles vencidos de ${people} ${plural(people, "paciente", "pacientes")} sin cita`,
     detail: old > 0 ? `${old} ${plural(old, "venció", "vencieron")} hace más de 30 días.` : "Todos vencieron en los últimos 30 días.",
-    how: "Controles pendientes con fecha vencida, de pacientes activos que no tienen una cita programada o confirmada desde ahora.",
+    how: "Controles pendientes cuyo día ya pasó, de pacientes activos sin ninguna cita programada o confirmada por venir: a un control le sirve cualquier visita. Es la misma lista de Pacientes › «Control vencido».",
   }
 }
 
@@ -375,19 +388,46 @@ async function lapsedInvites(tx: Db, orgId: string, zone: OrgLocale, limit: numb
   }
 }
 
+/**
+ * Lo aceptado sin cita, un caso por persona: la regla de Pacientes › «Por agendar»
+ * (`budgetToScheduleSql`), más los días que espera la línea (ADR 0015), que el
+ * título nombra. El caso es su presupuesto más antiguo con algo sin cita; los
+ * demás se dicen en la fila. Otra cita de la persona no lo agenda: la fila dice
+ * cuál es. Al crear casos (`scope`), quien ya tiene uno abierto no recibe otro.
+ */
 async function budgetsWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale, days: number, scope?: Fresh, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
-  const rows = await tx.execute<{ id: string; patient_id: string; name: string; title: string; number: number; decided_at: Date | string; next_session: boolean; total: number }>(sql`
-    select b.id, p.id as patient_id, pp.display_name as name, b.title, b.budget_number as number, b.decided_at,
-           ${NEXT_SESSION_OPEN} as next_session, count(*) over ()::int as total
-    from treatment_budget b
-    join patient p on p.id = b.patient_id and p.organization_id = b.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
-    where b.organization_id = ${orgId} and b.status in ('aceptado', 'parcial')
-      and (b.decided_at < now() - make_interval(days => ${days}) or ${NEXT_SESSION_OPEN})
-      and pp.is_active and ${NO_FUTURE_APPOINTMENT}
-      ${fresh(scope, sql`b.id::text`, sql`b.decided_at + make_interval(days => ${days})`)}
-    order by b.decided_at asc
+  const rows = await tx.execute<{ id: string; patient_id: string; name: string; title: string; number: number; decided_at: Date | string; next_session: boolean; next_at: Date | string | null; budgets: number; total: number }>(sql`
+    with due as (
+      select b.id, p.id as patient_id, pp.display_name as name, b.title, b.budget_number as number, b.decided_at,
+             ${NEXT_SESSION_OPEN} as next_session,
+             (select min(a.starts_at) from appointment a where a.organization_id = p.organization_id and a.patient_id = p.id
+                and a.starts_at > now() and a.status in ('programada', 'confirmada')) as next_at
+      from treatment_budget b
+      join patient p on p.id = b.patient_id and p.organization_id = b.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
+      where b.organization_id = ${orgId} and b.status in ('aceptado', 'parcial')
+        and ${BUDGET_TO_SCHEDULE}
+        and (b.decided_at < now() - make_interval(days => ${days}) or ${NEXT_SESSION_OPEN})
+        and pp.is_active and not pp.is_test
+        ${fresh(scope, sql`b.id::text`, sql`b.decided_at + make_interval(days => ${days})`)}
+        ${
+          scope
+            ? sql`and not exists (select 1 from automation_job open_case
+                left join task open_task on open_task.organization_id = open_case.organization_id and open_task.id = open_case.task_id
+                where open_case.organization_id = p.organization_id and open_case.kind = ${scope.kind} and open_case.patient_id = p.id
+                  and (open_case.status = 'pendiente' or open_task.status = 'open'))`
+            : sql``
+        }
+    ), person as (
+      select distinct on (due.patient_id) due.*, (count(*) over (partition by due.patient_id))::int as budgets
+      from due
+      order by due.patient_id, due.decided_at asc, due.id
+    )
+    select person.*, count(*) over ()::int as total
+    from person
+    order by person.decided_at asc, person.id
     limit ${limit}`)
   const total = Number(rows[0]?.total ?? 0)
+  const dayWord = plural(days, "día", "días")
   return {
     total,
     items: rows.map((row) => ({
@@ -395,13 +435,19 @@ async function budgetsWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale,
       id: row.id,
       personName: row.name,
       // Sin importes: quien agenda ve el presupuesto mínimo, no sus líneas.
-      line: `${row.next_session ? "Falta la cita de la próxima sesión · " : ""}Presupuesto N.º ${row.number} · ${row.title} · aceptado el ${dayOf(row.decided_at, zone)}`,
+      line: [
+        `${row.next_session ? "Falta la cita de la próxima sesión · " : ""}Presupuesto N.º ${row.number} · ${row.title} · aceptado el ${dayOf(row.decided_at, zone)}`,
+        row.budgets > 1 ? `y ${plural(row.budgets - 1, "otro presupuesto", `otros ${row.budgets - 1} presupuestos`)}` : null,
+        row.next_at ? `su cita del ${dayOf(row.next_at, zone)} no lo lleva` : null,
+      ]
+        .filter(Boolean)
+        .join(" · "),
       patientId: row.patient_id,
       budgetId: row.id,
     })),
-    title: `${total} ${plural(total, "presupuesto aceptado", "presupuestos aceptados")} hace más de ${days} días, sin cita`,
-    detail: "El paciente aceptó y todavía no tiene fecha para empezar.",
-    how: `Presupuestos aceptados (del todo o en parte) hace más de ${days} días, o con un tratamiento en curso sin cita para su próxima sesión; de pacientes activos que no tienen una cita programada o confirmada desde ahora.`,
+    title: `${total} ${plural(total, "persona tiene", "personas tienen")} algo aceptado hace más de ${days} ${dayWord}, sin cita para eso`,
+    detail: "Aceptaron y lo aceptado todavía no tiene fecha.",
+    how: `Personas con un presupuesto aceptado (del todo o en parte) hace más de ${days} ${dayWord}, o con un tratamiento en curso, que tiene algo aceptado sin una cita por venir que lo lleve, aunque tengan otra cita; de pacientes activos. Una fila por persona, con su presupuesto más antiguo. Es la regla de Pacientes › «Por agendar», que no espera esos ${days} ${dayWord}.`,
   }
 }
 
@@ -1319,6 +1365,16 @@ export async function getAdminRecommendations(
   }
   const shown = opts.all ? found : found.slice(0, ADMIN_MAX_RECOMMENDATIONS)
   return { enabled: settings.enabled, recommendations: shown, more: found.length - shown.length }
+}
+
+/**
+ * Las cifras de «Avisar un control» (`overdueControls`) sin su lista: la fila de
+ * Inicio cuando Argos no la recomienda ahí. Es la misma consulta, y la fila abre
+ * la misma lista.
+ */
+export async function countOverdueControls(tx: Db, orgId: string): Promise<{ controls: number; patients: number }> {
+  const result = await overdueControls(tx, orgId, await getOrgLocale(tx, orgId), 1)
+  return { controls: result.total, patients: result.people ?? 0 }
 }
 
 /** Una recomendación con su lista completa (hasta el tope), para revisar y decidir. */

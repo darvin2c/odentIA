@@ -4,6 +4,8 @@ import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
 import { automationConsent, automationJob, automationRule } from "@odentia/db/schema/automation"
 import {
+  appointmentPlanItem,
+  clinicalFollowUp,
   encounter,
   patientCharge,
   patientContact,
@@ -20,6 +22,7 @@ import { and, eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 import { ADMIN_LINES, flowOf } from "./admin-lines.js"
 import {
+  countOverdueControls,
   getAdminLine,
   getAdminOverview,
   getAdminPage,
@@ -100,12 +103,28 @@ async function person(c: Clinic, name: string): Promise<string> {
 }
 
 let budgetNumber = 5000
-async function acceptedBudget(c: Clinic, patientId: string, daysAgo: number) {
+/** Un presupuesto aceptado hace `daysAgo` días, con su tratamiento aceptado y sin empezar. Devuelve el tratamiento. */
+async function acceptedBudget(c: Clinic, patientId: string, daysAgo: number): Promise<string> {
   const [plan] = await ownerDb.insert(treatmentPlan).values({ organizationId: c.orgId, patientId, title: "Plan" }).returning({ id: treatmentPlan.id })
-  await ownerDb.insert(treatmentBudget).values({
-    organizationId: c.orgId, patientId, planId: plan!.id, budgetNumber: budgetNumber++, title: "Ortodoncia", currency: "PEN",
-    status: "aceptado", decidedAt: new Date(Date.now() - daysAgo * DAY),
+  const [item] = await ownerDb
+    .insert(treatmentPlanItem)
+    .values({ organizationId: c.orgId, patientId, planId: plan!.id, title: "Ortodoncia", currency: "PEN", status: "pendiente", decisionStatus: "aceptado" })
+    .returning({ id: treatmentPlanItem.id })
+  // Solo un presupuesto en borrador admite líneas: se acepta después.
+  const [budget] = await ownerDb
+    .insert(treatmentBudget)
+    .values({ organizationId: c.orgId, patientId, planId: plan!.id, budgetNumber: budgetNumber++, title: "Ortodoncia", currency: "PEN", status: "borrador" })
+    .returning({ id: treatmentBudget.id })
+  const optionId = randomUUID()
+  await ownerDb.insert(treatmentBudgetOption).values({ id: optionId, organizationId: c.orgId, patientId, budgetId: budget!.id, position: 1 })
+  await ownerDb.insert(treatmentBudgetItem).values({
+    organizationId: c.orgId, patientId, planId: plan!.id, budgetId: budget!.id, optionId, planItemId: item!.id, title: "Ortodoncia", currency: "PEN", decision: "aceptado",
   })
+  await ownerDb
+    .update(treatmentBudget)
+    .set({ status: "aceptado", decidedAt: new Date(Date.now() - daysAgo * DAY) })
+    .where(eq(treatmentBudget.id, budget!.id))
+  return item!.id
 }
 
 async function noShow(c: Clinic, patientId: string, daysAgo: number) {
@@ -353,7 +372,7 @@ describe("las líneas que dejan trabajo al equipo", () => {
   it("lo que deja el Administrador se cierra solo cuando su motivo desaparece, y dice por qué", async () => {
     const c = await clinic()
     const late = await person(c, "Rosa Quispe")
-    await acceptedBudget(c, late, 8)
+    const item = await acceptedBudget(c, late, 8)
     await turnedOn(c, "presupuestos_sin_cita", 0, 7)
     await ownerDb.update(automationRule).set({ enabledAt: new Date(Date.now() - 2 * DAY) }).where(eq(automationRule.organizationId, c.orgId))
     expect(await run(c, (tx) => syncTeamLines(tx, c.orgId, new Date()))).toBe(1)
@@ -363,35 +382,49 @@ describe("las líneas que dejan trabajo al equipo", () => {
     expect(task).toMatchObject({ status: "open", patientId: late, createdBy: "admin" })
     // Mientras el motivo siga en pie, no se cierra.
     expect(await run(c, (tx) => settleTasks(tx, c.orgId, new Date()))).toBe(0)
-    // Reservó su cita: la tarea ya no hace falta.
+    // Reservó su cita con lo aceptado: la tarea ya no hace falta.
     const startsAt = new Date(Date.now() + 2 * DAY)
-    await ownerDb.insert(appointment).values({
-      organizationId: c.orgId, branchId: c.branchId, patientId: late, professionalUserId: c.professionalId, roomId: c.roomId,
-      startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30, status: "programada",
-    })
+    const [booked] = await ownerDb
+      .insert(appointment)
+      .values({
+        organizationId: c.orgId, branchId: c.branchId, patientId: late, professionalUserId: c.professionalId, roomId: c.roomId,
+        startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30, status: "programada",
+      })
+      .returning({ id: appointment.id })
+    await ownerDb.insert(appointmentPlanItem).values({ organizationId: c.orgId, patientId: late, appointmentId: booked!.id, planItemId: item })
     expect(await run(c, (tx) => settleTasks(tx, c.orgId, new Date()))).toBe(1)
     const [settled] = await tasksOf(c)
-    expect(settled).toMatchObject({ status: "done", settledReason: "Rosa Quispe ya tiene otra cita reservada" })
+    expect(settled).toMatchObject({ status: "done", settledReason: "Rosa Quispe ya tiene cita para lo aceptado" })
     // «Qué pasó» no dice que la resolvió una persona.
     const line = await run(c, (tx) => getAdminLine(tx, c.orgId, all, "presupuestos_sin_cita"))
-    expect(line.people[0]).toMatchObject({ outcome: "tarea_resuelta", text: "Se cerró sola: Rosa Quispe ya tiene otra cita reservada." })
+    expect(line.people[0]).toMatchObject({ outcome: "tarea_resuelta", text: "Se cerró sola: Rosa Quispe ya tiene cita para lo aceptado." })
     // Repetir el ciclo no la toca otra vez.
     expect(await run(c, (tx) => settleTasks(tx, c.orgId, new Date()))).toBe(0)
   })
 
   it("las tareas que siguen en pie no tapan a las siguientes: la revisión avanza con un cursor entre ciclos", async () => {
     const c = await clinic()
-    for (const name of ["Uno Pérez", "Dos Pérez", "Tres Pérez"]) await acceptedBudget(c, await person(c, name), 8)
+    const itemOf = new Map<string, string>()
+    for (const name of ["Uno Pérez", "Dos Pérez", "Tres Pérez"]) {
+      const patientId = await person(c, name)
+      itemOf.set(patientId, await acceptedBudget(c, patientId, 8))
+    }
     await turnedOn(c, "presupuestos_sin_cita", 2, 7)
     expect(await run(c, (tx) => syncTeamLines(tx, c.orgId, new Date()))).toBe(3)
     expect((await deliver(c)).map((result) => result.outcome)).toEqual(["tarea", "tarea", "tarea"])
-    // La tarea más nueva deja de hacer falta: su paciente ya tiene cita.
+    // La tarea más nueva deja de hacer falta: su paciente ya tiene una cita que lleva lo aceptado.
     const tasks = (await tasksOf(c)).sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id))
     const last = tasks.at(-1)!
     const startsAt = new Date(Date.now() + 2 * DAY)
-    await ownerDb.insert(appointment).values({
-      organizationId: c.orgId, branchId: c.branchId, patientId: last.patientId!, professionalUserId: c.professionalId, roomId: c.roomId,
-      startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30, status: "programada",
+    const [booked] = await ownerDb
+      .insert(appointment)
+      .values({
+        organizationId: c.orgId, branchId: c.branchId, patientId: last.patientId!, professionalUserId: c.professionalId, roomId: c.roomId,
+        startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30, status: "programada",
+      })
+      .returning({ id: appointment.id })
+    await ownerDb.insert(appointmentPlanItem).values({
+      organizationId: c.orgId, patientId: last.patientId!, appointmentId: booked!.id, planItemId: itemOf.get(last.patientId!)!,
     })
     // Con dos por ciclo, el primero revisa las dos más viejas (siguen en pie) y el siguiente sigue desde ahí.
     const cycle = () => run(c, (tx) => settleTasks(tx, c.orgId, new Date(), { batch: 1, perCycle: 2 }))
@@ -400,6 +433,92 @@ describe("las líneas que dejan trabajo al equipo", () => {
     expect((await tasksOf(c)).find((task) => task.id === last.id)).toMatchObject({ status: "done" })
     // Al llegar al final vuelve a empezar: nada más que cerrar.
     expect(await cycle()).toBe(0)
+  })
+})
+
+describe("«Presupuesto aceptado sin cita» sigue la regla de «Por agendar» (ADR 0145)", () => {
+  it("otra cita de la persona no lo agenda: el caso y su tarea siguen hasta que una cita lleva lo aceptado", async () => {
+    const c = await clinic()
+    const rosa = await person(c, "Rosa Quispe")
+    const item = await acceptedBudget(c, rosa, 10)
+    // Una limpieza mañana, sin el tratamiento aceptado.
+    const startsAt = new Date(Date.now() + DAY)
+    const [cleaning] = await ownerDb
+      .insert(appointment)
+      .values({
+        organizationId: c.orgId, branchId: c.branchId, patientId: rosa, professionalUserId: c.professionalId, roomId: c.roomId,
+        startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30, status: "programada",
+      })
+      .returning({ id: appointment.id })
+    const line = await run(c, (tx) => getAdminLine(tx, c.orgId, all, "presupuestos_sin_cita"))
+    expect(line.todayCases).toBe(1)
+    const advice = await run(c, (tx) => getAdminRecommendation(tx, c.orgId, all, "presupuestos_sin_cita"))
+    // El título nombra los días de la línea; la fila dice la otra cita.
+    expect(advice.title).toBe("1 persona tiene algo aceptado hace más de 7 días, sin cita para eso")
+    expect(advice.items[0]?.line).toMatch(/su cita del .+ no lo lleva$/)
+    await turnedOn(c, "presupuestos_sin_cita", 30, 7)
+    expect(await run(c, (tx) => syncTeamLines(tx, c.orgId, new Date()))).toBe(1)
+    expect((await deliver(c)).map((result) => result.outcome)).toEqual(["tarea"])
+    const settle = () => run(c, (tx) => settleTasks(tx, c.orgId, new Date()))
+    expect(await settle()).toBe(0)
+    // La limpieza ahora lleva el tratamiento: ya no falta su cita y la tarea se cierra sola.
+    await ownerDb.insert(appointmentPlanItem).values({ organizationId: c.orgId, patientId: rosa, appointmentId: cleaning!.id, planItemId: item })
+    expect(await settle()).toBe(1)
+    expect((await run(c, (tx) => getAdminRecommendation(tx, c.orgId, all, "presupuestos_sin_cita"))).total).toBe(0)
+  })
+
+  it("un caso por persona: con dos presupuestos y otra cita, una sola tarea, que dice cuántos son", async () => {
+    const c = await clinic()
+    const rosa = await person(c, "Rosa Quispe")
+    await acceptedBudget(c, rosa, 20)
+    await acceptedBudget(c, rosa, 10)
+    const startsAt = new Date(Date.now() + DAY)
+    await ownerDb.insert(appointment).values({
+      organizationId: c.orgId, branchId: c.branchId, patientId: rosa, professionalUserId: c.professionalId, roomId: c.roomId,
+      startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30, status: "programada",
+    })
+    const advice = await run(c, (tx) => getAdminRecommendation(tx, c.orgId, all, "presupuestos_sin_cita"))
+    expect(advice.total).toBe(1)
+    expect(advice.items[0]?.line).toMatch(/ · y otro presupuesto · su cita del .+ no lo lleva$/)
+    await turnedOn(c, "presupuestos_sin_cita", 30, 7)
+    expect(await run(c, (tx) => syncTeamLines(tx, c.orgId, new Date()))).toBe(1)
+    expect((await deliver(c)).map((result) => result.outcome)).toEqual(["tarea"])
+    // Con su tarea abierta, el otro presupuesto no abre otro caso.
+    expect(await run(c, (tx) => syncTeamLines(tx, c.orgId, new Date()))).toBe(0)
+    expect(await tasksOf(c)).toHaveLength(1)
+  })
+
+  it("si lo aceptado ya se hizo o se suspendió, la tarea se cierra con ese motivo, no con «ya tiene cita»", async () => {
+    const c = await clinic()
+    const rosa = await person(c, "Rosa Quispe")
+    const item = await acceptedBudget(c, rosa, 10)
+    await turnedOn(c, "presupuestos_sin_cita", 30, 7)
+    expect(await run(c, (tx) => syncTeamLines(tx, c.orgId, new Date()))).toBe(1)
+    expect((await deliver(c)).map((result) => result.outcome)).toEqual(["tarea"])
+    await ownerDb.update(treatmentPlanItem).set({ status: "suspendido" }).where(eq(treatmentPlanItem.id, item))
+    expect(await run(c, (tx) => settleTasks(tx, c.orgId, new Date()))).toBe(1)
+    const [settled] = await tasksOf(c)
+    expect(settled).toMatchObject({ status: "done", settledReason: "lo aceptado de Rosa Quispe ya se hizo, se suspendió o se canceló" })
+  })
+
+  it("los controles vencidos son los de Pacientes: su día ya pasó y la persona no tiene ninguna cita por venir", async () => {
+    const c = await clinic()
+    const [ana, beto, caro] = [await person(c, "Ana Paz"), await person(c, "Beto Paz"), await person(c, "Caro Paz")]
+    const control = (patientId: string, dueAt: Date) =>
+      ownerDb.insert(clinicalFollowUp).values({ organizationId: c.orgId, patientId, kind: "mantenimiento", title: "Control de presión", dueAt, status: "pendiente" })
+    // Ana tiene dos vencidos; Beto, uno y una cita por venir; Caro, uno que toca hoy.
+    await control(ana, new Date(Date.now() - 10 * DAY))
+    await control(ana, new Date(Date.now() - 40 * DAY))
+    await control(beto, new Date(Date.now() - 10 * DAY))
+    await control(caro, new Date())
+    const startsAt = new Date(Date.now() + 3 * DAY)
+    await ownerDb.insert(appointment).values({
+      organizationId: c.orgId, branchId: c.branchId, patientId: beto, professionalUserId: c.professionalId, roomId: c.roomId,
+      startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30, status: "programada",
+    })
+    const advice = await run(c, (tx) => getAdminRecommendation(tx, c.orgId, all, "recordatorio_control"))
+    expect(advice.title).toBe("2 controles vencidos de 1 paciente sin cita")
+    expect(await run(c, (tx) => countOverdueControls(tx, c.orgId))).toEqual({ controls: 2, patients: 1 })
   })
 })
 
@@ -549,7 +668,7 @@ describe("decisión 14: un tratamiento en curso sin siguiente sesión cuenta en 
     await ownerDb.insert(treatmentBudgetOption).values({ id: optionId, organizationId: c.orgId, patientId: rosa, budgetId: budget!.id, position: 1 })
     await ownerDb
       .insert(treatmentBudgetItem)
-      .values({ organizationId: c.orgId, patientId: rosa, planId: plan!.id, budgetId: budget!.id, optionId, planItemId: item!.id, title: "Endodoncia de la 36", currency: "PEN" })
+      .values({ organizationId: c.orgId, patientId: rosa, planId: plan!.id, budgetId: budget!.id, optionId, planItemId: item!.id, title: "Endodoncia de la 36", currency: "PEN", decision: "aceptado" })
     await ownerDb.update(treatmentBudget).set({ status: "aceptado", decidedAt: new Date(Date.now() - DAY) }).where(eq(treatmentBudget.id, budget!.id))
     // El presupuesto es de ayer y el tratamiento aún no empezó: nada que pedir todavía.
     expect((await run(c, (tx) => getAdminLine(tx, c.orgId, all, "presupuestos_sin_cita"))).todayCases).toBe(0)

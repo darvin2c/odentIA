@@ -21,7 +21,7 @@
  */
 import { convertCents, quantityWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
-import { encounter, encounterDictationSuggestion, serviceCatalog } from "@odentia/db/schema/clinical"
+import { encounter, encounterDictationSuggestion, serviceCatalog, treatmentTemplate } from "@odentia/db/schema/clinical"
 import { product, serviceMaterial, stockMovement } from "@odentia/db/schema/inventory"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, asc, eq, inArray, sql } from "drizzle-orm"
@@ -35,6 +35,7 @@ import {
   restoreUnits,
 } from "./inventory-stock.js"
 import { findOrgLocale } from "./locale.js"
+import { productHooks } from "./products.js"
 import { businessFirst, type CurrencyAmount, type OrgMoney, orgMoney } from "./report-value.js"
 import { foldedWordsMatch } from "./search-text.js"
 
@@ -502,7 +503,9 @@ export interface ServicesWithoutMaterials {
 /**
  * «Empieza por estos 5»: los servicios activos más hechos en los últimos
  * días (procedimientos no anulados de atenciones firmadas) que todavía no
- * tienen materiales, y qué parte de las atenciones de esos días cubren.
+ * tienen materiales, y qué parte de las atenciones de esos días cubren. Las
+ * consultas no (`catalog.consultations` del producto): casi no gastan, y
+ * sugerirlas empujaba a cargar insumos donde no hacen falta.
  */
 export async function topServicesWithoutMaterials(
   tx: Db,
@@ -511,6 +514,12 @@ export async function topServicesWithoutMaterials(
 ): Promise<ServicesWithoutMaterials> {
   const days = Math.min(Math.max(Math.trunc(input.days ?? 30), 1), 365)
   const limit = Math.min(Math.max(Math.trunc(input.limit ?? 5), 1), 20)
+  const consultations = (await productHooks(tx, orgId)).catalog.consultations
+  const notConsultation =
+    consultations.length > 0
+      ? sql`and not exists (select 1 from ${treatmentTemplate} t where t.id = s.template_id
+          and t.key in (${sql.join(consultations.map((key) => sql`${key}`), sql`, `)}))`
+      : sql``
   const top = await tx.execute<{ serviceId: string; name: string; times: number }>(sql`
     select s.id as "serviceId", s.name, sum(ep.quantity)::int as times
     from encounter_procedure ep
@@ -524,6 +533,7 @@ export async function topServicesWithoutMaterials(
       and not exists (
         select 1 from service_material sm where sm.organization_id = ${orgId} and sm.service_id = s.id
       )
+      ${notConsultation}
     group by s.id, s.name
     order by times desc, s.name asc
     limit ${limit}`)

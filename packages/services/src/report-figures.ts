@@ -414,7 +414,7 @@ export const REPORT_FIGURES: ReportFigure[] = [
     area: "dinero",
     name: "Lo que viene",
     describes: "Cuánto dinero está por venir: tratamientos aceptados en presupuestos que aún no se hicieron.",
-    how: "Lo aceptado en presupuestos que todavía no se hizo, a su precio acordado, a hoy. «Sin cita» son los de pacientes sin una cita por venir.",
+    how: "Lo aceptado en presupuestos que todavía no se hizo, a su precio acordado, a hoy. «Sin cita» es lo que ninguna cita por venir lleva, aunque la persona tenga otra cita: la regla de Pacientes › «Por agendar».",
     unit: "money",
     noun: PATIENTS,
     tab: "finanzas",
@@ -425,7 +425,7 @@ export const REPORT_FIGURES: ReportFigure[] = [
     list: { key: "upcoming_unbooked", noun: PATIENTS, feminine: false, count: (total) => total.whole ?? 0 },
     values: async (ctx, spans) => {
       const work = await upcomingWork(ctx.tx, ctx.orgId, ctx.scope.currency, ctx.scope.now)
-      // `whole`: cuántos de esos pacientes no tienen cita por venir (su lista).
+      // `whole`: cuántos de esos pacientes tienen algo sin una cita que lo lleve (su lista).
       return spans.map(() => ({ value: work.cents, part: work.patients, whole: work.unbooked.patients }))
     },
   },

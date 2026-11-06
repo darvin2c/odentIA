@@ -1,9 +1,13 @@
 /**
  * Los atajos de «Pacientes» (decisión 6 del lienzo): cuántos y quiénes necesitan
- * algo ahora. No inventan reglas: cada paciente cae en el mismo paso que dice
- * «Qué sigue» (`planNextStepsOf`, la regla de `getPlanNextStep`), en «no viene hace 6 meses» (`lapsedSql`, la
- * regla de Reportes), o en lo que falta de su ficha (`patientsMissingData`, la regla de `getPatientMissingData`) o
- * de sus cobros (`getDebts`). Así la lista y su atajo no pueden contradecirse.
+ * algo ahora. No inventan reglas:
+ * - «Por agendar» y «Control vencido» son las reglas de `to-schedule.ts`, las
+ *   mismas de Inicio y de las líneas de Argos: el número es el mismo en las tres.
+ * - Los presupuestos caen en el mismo paso que dice «Qué sigue» (`planNextStepsOf`,
+ *   la regla de `getPlanNextStep`): un solo paso por persona.
+ * - «Por invitar a volver» es `lapsedToInvite`, lo que falta de su ficha es
+ *   `patientsMissingData` y «Deben», sus cobros (`getDebts`).
+ * Así la lista y su atajo no pueden contradecirse.
  */
 import type { Db } from "@odentia/db"
 import { sql } from "drizzle-orm"
@@ -11,6 +15,7 @@ import { getDebts } from "./finance.js"
 import { patientsMissingData } from "./patient-registration.js"
 import { type PlanNextKind, planNextStepsOf } from "./plan-next.js"
 import { lapsedToInvite } from "./return-invites.js"
+import { patientsToSchedule, patientsWithOverdueControl } from "./to-schedule.js"
 
 export const PEOPLE_SHORTCUTS = [
   "por_agendar",
@@ -23,13 +28,16 @@ export const PEOPLE_SHORTCUTS = [
 ] as const
 export type PeopleShortcut = (typeof PEOPLE_SHORTCUTS)[number]
 
-/** Cada paso de «Qué sigue» cae en un atajo; «ninguno» en ninguno. */
+/**
+ * Los pasos de «Qué sigue» que son un atajo. Agendar, continuar y el control no:
+ * esos atajos son su regla (`to-schedule.ts`), aunque antes toque otro paso.
+ */
 const SHORTCUT_OF_PLAN: Record<PlanNextKind, PeopleShortcut | null> = {
   enviar: "presupuesto_sin_enviar",
-  agendar: "por_agendar",
-  continuar: "por_agendar",
+  agendar: null,
+  continuar: null,
   respuesta: "presupuesto_sin_respuesta",
-  control: "control_por_reservar",
+  control: null,
   ninguno: null,
 }
 
@@ -52,7 +60,8 @@ async function plannedPatientIds(tx: Db, orgId: string): Promise<string[]> {
   return rows.map((row) => row.id)
 }
 
-const PLAN_SHORTCUTS = ["por_agendar", "presupuesto_sin_enviar", "presupuesto_sin_respuesta", "control_por_reservar"] as const
+/** Los atajos que salen de «Qué sigue»: recorren a los pacientes con plan. */
+const PLAN_SHORTCUTS = ["presupuesto_sin_enviar", "presupuesto_sin_respuesta"] as const
 
 /** De esos pacientes, a cuáles todavía les falta algo en su ficha: lo que marca cada fila de la página. */
 export async function missingDataAmong(tx: Db, orgId: string, patientIds: string[]): Promise<Set<string>> {
@@ -82,6 +91,10 @@ export async function peopleShortcutMembers(
   const members: PeopleShortcutMembers = {}
   const wanted = (shortcut: PeopleShortcut) => only === undefined || only === shortcut
   const planAllowed = ["clinical.read", "budgets.read", "appointments.read"].some((permission) => can(permission))
+  // Las dos reglas de lo que falta agendar: las mismas de Inicio y de Argos, sin recorrer paciente por paciente.
+  if (planAllowed && wanted("por_agendar")) members.por_agendar = await patientsToSchedule(tx, orgId)
+  if (planAllowed && wanted("control_por_reservar"))
+    members.control_por_reservar = await patientsWithOverdueControl(tx, orgId, timezone)
   if (planAllowed && PLAN_SHORTCUTS.some(wanted)) {
     for (const shortcut of PLAN_SHORTCUTS) members[shortcut] = []
     // Todos de una vez, con la misma regla de «Qué sigue» (`planNextStepsOf`).

@@ -18,4 +18,22 @@ export const medicalCatalog: ProductCatalog = {
     suero: ["hidratacion"],
   },
   specialties: () => MEDICAL_SPECIALTIES,
+  // Las consultas y los controles de `biblioteca_medica.csv`; los procedimientos y las pruebas no.
+  consultations: [
+    "consulta-medicina-general",
+    "consulta-de-control",
+    "consulta-a-domicilio",
+    "consulta-medicina-familiar",
+    "consulta-medicina-interna",
+    "consulta-pediatria",
+    "consulta-ginecologia",
+    "control-nino-sano-menor-1",
+    "control-nino-sano-1-a-4",
+    "control-nino-sano-5-a-11",
+    "chequeo-preventivo-adulto",
+    "chequeo-preventivo-adulto-mayor",
+    "planificacion-familiar",
+    "control-prenatal-4-a-6",
+    "control-prenatal-7-o-mas",
+  ],
 }

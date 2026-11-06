@@ -254,9 +254,6 @@ describe("pagar una compra en dólares", () => {
 
     // Lo cargado aquí es lo que cuentan Reportes y Argos.
     expect(await spent(c)).toBe(564_000)
-    const finance = await c.run((tx) => getReportFinance(tx, c.orgId, { period: "este_mes" }))
-    // Lo que salió fueron soles: en dólares no salió nada.
-    expect(finance.moneyFlow).toEqual([{ currency: "PEN", cents: -564_000 }])
     const now = new Date()
     const month = await c.run((tx) =>
       getMonthExpenses(tx, c.orgId, {

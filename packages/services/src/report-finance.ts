@@ -9,7 +9,7 @@
  * - La comisión cuenta cuando se genera, al cobrar, en su propia línea
  *   (decisión 13): `commissionsMany` es la misma cuenta de Finanzas ›
  *   Comisiones (`getMonthlyCommissions`) para varios tramos en una consulta.
- *   «En caja quedó» la descuenta cuando se paga, con los demás gastos.
+ *   `cashLeftCents` la descuenta cuando se paga, con los demás gastos.
  * - Los gastos son los de Finanzas › Gastos por su tipo; el pago de una
  *   comisión se separa de «Personal» por la liquidación que lo generó y el de
  *   una compra va en Materiales (ADR 0061).
@@ -24,6 +24,7 @@ import { orgTaxes } from "./clinic-taxes.js"
 import { unpaidPurchasesMany } from "./purchase-balance.js"
 import { debtDaysSql, debtZoneSql, overdueDebtSql, valuedDebtSql } from "./report-debts.js"
 import { firstVisitSql } from "./report-visits.js"
+import { toScheduleSql } from "./to-schedule.js"
 import { addMonths, currentMonthIn, lastMonths, monthStart, type ReportBucket } from "./report-periods.js"
 import {
   at,
@@ -412,11 +413,21 @@ export function purchasesDueOf(
 
 // --- Lo que viene y cuánto vale un paciente ---------------------------------------------
 
+/** «Aceptó y no tiene cita» (`toScheduleSql`) sobre el tratamiento `pi` de una línea, de una persona activa. */
+function lineToScheduleSql(now: Date): SQL {
+  return sql`(${toScheduleSql(
+    { id: sql`pi.id`, organizationId: sql`pi.organization_id`, status: sql`pi.status`, decisionStatus: sql`pi.decision_status` },
+    at(now),
+  )} and exists (select 1 from patient lp join contact lc on lc.organization_id = lp.organization_id and lc.id = lp.person_id
+    where lp.organization_id = pi.organization_id and lp.id = pi.patient_id and lc.is_active and not lc.is_test))`
+}
+
 /**
  * Lo que viene, a hoy: lo aceptado en presupuestos que aún no se hizo, a su
- * precio acordado, y de eso lo de pacientes sin cita por venir. De la persona,
- * no de una sede. Aún no se cobra: lo de otra moneda va al cambio de hoy y
- * `byCurrency` dice cuánto es en cada una.
+ * precio acordado, y de eso lo que no tiene cita: la regla de «Por agendar»
+ * (`toScheduleSql`), una cita por venir que lleve ese tratamiento, aunque la
+ * persona tenga otra. De la persona, no de una sede. Aún no se cobra: lo de
+ * otra moneda va al cambio de hoy y `byCurrency` dice cuánto es en cada una.
  */
 export async function upcomingWork(tx: Db, orgId: string, currency: string, now: Date) {
   const budget = { id: sql`b.id`, organizationId: sql`b.organization_id` }
@@ -431,16 +442,13 @@ export async function upcomingWork(tx: Db, orgId: string, currency: string, now:
     with pending as (
       select b.patient_id, i.currency::text as currency,
         i.price_cents::bigint * ${budgetLineUnitsSql({ billingMode: sql`i.billing_mode`, sessionsPlanned: sql`i.sessions_planned` })} as cents,
-        not exists (
-          select 1 from appointment a where a.organization_id = b.organization_id and a.patient_id = b.patient_id
-            and a.starts_at > ${at(now)} and a.status in ('programada','confirmada')
-        ) as unbooked
+        ${lineToScheduleSql(now)} as unbooked
       from treatment_budget b
       join treatment_budget_item i on i.organization_id = b.organization_id and i.budget_id = b.id
         and i.option_id = ${budgetValueOptionSql(budget)} and i.decision = 'aceptado' and i.price_cents is not null
-      left join treatment_plan_item pi on pi.organization_id = i.organization_id and pi.id = i.plan_item_id
+      join treatment_plan_item pi on pi.organization_id = i.organization_id and pi.id = i.plan_item_id
       where b.organization_id = ${orgId} and b.status in ('aceptado','parcial')
-        and (pi.id is null or pi.status not in ('realizado','cancelado','reemplazado'))
+        and pi.status not in ('realizado','cancelado','reemplazado')
     ), valued as (
       select pending.*, ${todayValueSql(sql`pending.cents`, sql`pending.currency`)} as value from pending cross join ${orgMoneySql(orgId)}
     )
@@ -561,43 +569,6 @@ export async function collectedByMethod(tx: Db, orgId: string, span: Span, optio
         : {}),
     },
   }
-}
-
-/**
- * Lo que entró menos lo que salió en cada moneda: lo que de verdad se movió, sin
- * cambio de por medio. Cobros, gastos y el vuelto en otra moneda, cada uno en la
- * moneda en que entró o salió.
- */
-async function moneyFlowByCurrency(
-  tx: Db,
-  orgId: string,
-  span: Span,
-  business: string,
-  branchId: string | undefined,
-): Promise<CurrencyAmount[]> {
-  const expenseBranch = branchId ? sql`and e.branch_id = ${branchId}` : sql``
-  const rows = await tx.execute<{ currency: string; cents: string }>(sql`
-    select x.currency, round(sum(x.cents))::text as cents from (
-      select f.entered_currency as currency, f.entered as cents from (${paymentFlowSql(orgId, at(span.start), at(span.end), branchId)}) f
-      union all
-      select coalesce(e.tender_currency, e.currency)::text, -coalesce(e.tender_cents, e.amount_cents)::numeric from expense e
-      where e.organization_id = ${orgId} and e.spent_at >= ${at(span.start)} and e.spent_at < ${at(span.end)}
-        and (e.voided_at is null or e.voided_at >= ${at(span.end)}) ${expenseBranch}
-      union all
-      select coalesce(e.tender_currency, e.currency)::text, coalesce(e.tender_cents, e.amount_cents)::numeric from expense e
-      where e.organization_id = ${orgId} and e.spent_at < ${at(span.start)} and e.voided_at >= ${at(span.start)} and e.voided_at < ${at(span.end)} ${expenseBranch}
-      union all
-      select m.currency::text, (case when m.direction = 'ingreso' then m.amount_cents else -m.amount_cents end)::numeric
-      from cash_movement m join cash_shift s on s.organization_id = m.organization_id and s.id = m.shift_id
-      where m.organization_id = ${orgId} and m.kind = 'vuelto' and m.voided_at is null and m.created_at >= ${at(span.start)} and m.created_at < ${at(span.end)}
-        ${branchId ? sql`and s.branch_id = ${branchId}` : sql``}
-    ) x group by x.currency`)
-  return businessFirst(
-    rows
-      .map((row) => ({ currency: row.currency, cents: safeCents(row.cents) }))
-      .filter((row) => row.cents !== 0),
-    business,
-  )
 }
 
 /** Tratamientos a la vista; el resto va en «Otros». */
@@ -782,7 +753,11 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
     commissionCents: generated(index),
     otherExpensesCents: otherExpenses(index),
     leavesCents: leaves(index),
-    /** En caja quedó: lo cobrado menos todo lo gastado, también el pago de comisiones. */
+    /**
+     * Lo cobrado menos todo lo gastado, también el pago de comisiones. Reportes ya
+     * no lo muestra (un solo resultado del periodo, «Lo que deja»); Argos lo usa
+     * para explicar por qué no coincide con lo que entró a la caja.
+     */
     cashLeftCents: cobrado(index) - spent(index).totalCents,
   })
   const period = spent(0)
@@ -804,10 +779,6 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
     trend: months.map((_, index) => tramo(index + 2)),
     /** Lo cobrado en otra moneda sin valor ni factor (filas viejas): no se puede sumar. Lo de hoy tiene su valor y ya está en las cifras. */
     otherCurrencies: (collected[0] ?? []).filter((item) => item.currency !== currency).map((item) => ({ currency: item.currency, cobradoCents: item.cents })),
-    /** Solo con segunda moneda: lo que entró menos lo que salió en cada una («En caja quedó» no se puede sumar). */
-    ...(scope.money.secondCurrency
-      ? { moneyFlow: await moneyFlowByCurrency(tx, orgId, window, currency, branchId) }
-      : {}),
     commissions: {
       generatedCents: generated(0),
       paidCents: sumOf(commissions[0], (item) => item.paidCents),
@@ -1127,7 +1098,7 @@ type FinanceListRow = {
 /**
  * Las personas detrás de una cifra de Finanzas: quién debe en cada tramo de
  * antigüedad al cerrar el periodo (la misma consulta de la cifra) y quién tiene
- * algo aceptado por hacer sin cita por venir (a hoy).
+ * algo aceptado por hacer sin una cita por venir que lo lleve (a hoy).
  */
 export async function financeListRows(tx: Db, orgId: string, scope: ReportScope, list: FinanceListKey, limit: number, now: Date): Promise<FinanceListRow[]> {
   const nextAppointment = (patient: SQL): SQL => sql`exists (
@@ -1147,15 +1118,16 @@ export async function financeListRows(tx: Db, orgId: string, scope: ReportScope,
           from treatment_budget b
           join treatment_budget_item i on i.organization_id = b.organization_id and i.budget_id = b.id
             and i.option_id = ${budgetValueOptionSql(budget)} and i.decision = 'aceptado' and i.price_cents is not null
-          left join treatment_plan_item pi on pi.organization_id = i.organization_id and pi.id = i.plan_item_id
+          join treatment_plan_item pi on pi.organization_id = i.organization_id and pi.id = i.plan_item_id
           where b.organization_id = ${orgId} and b.status in ('aceptado','parcial')
             and i.currency in (${scope.currency}, ${scope.money.secondCurrency ?? scope.currency})
-            and (pi.id is null or pi.status not in ('realizado','cancelado','reemplazado'))
-            and not ${nextAppointment(sql`b.patient_id`)}
+            and ${lineToScheduleSql(now)}
           group by b.patient_id, i.currency
         )
         select case when x.currency = ${scope.currency} then x.patient_id::text else x.patient_id::text || ':' || x.currency end as id, x.at, x.patient_id as "patientId", pp.display_name as "personName", x.title,
-          null::text as "professionalName", null::text as "branchName", false as "hasNextAppointment",
+          null::text as "professionalName", null::text as "branchName",
+          -- Puede tener otra cita que no lo lleva: la fila lo dice.
+          ${nextAppointment(sql`x.patient_id`)} as "hasNextAppointment",
           x.cents::text as cents, x.currency, count(*) over()::int as total,
           x.plan_item_ids as "planItemIds", x.service_id as "serviceId"
         from pending x

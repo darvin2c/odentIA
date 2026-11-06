@@ -9,6 +9,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import type { AgendaAppointment } from "../../lib/agenda"
+import { fetchTreatmentCoordination } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { QueryErrorState } from "../../lib/query-error"
 import {
@@ -256,10 +257,12 @@ const LISTS: Record<ReportListKey, ListCopy> = {
     title: "Aceptaron y no tienen cita",
     noun: { one: "persona", many: "personas" },
     how: () =>
-      "A hoy: personas con tratamientos aceptados en un presupuesto que aún no se hicieron y sin ninguna cita por venir. El importe es lo aceptado por hacer, a su precio acordado.",
+      "A hoy: personas con tratamientos aceptados en un presupuesto que aún no se hicieron y que ninguna cita por venir lleva, aunque tengan otra cita. Es la regla de Pacientes › «Por agendar». El importe es lo aceptado sin cita, a su precio acordado.",
     where: { to: "/agenda", label: "Abrir la Agenda" },
     patientTab: "plan",
-    showNext: false,
+    // Otra cita no lo lleva: se dice, para sumarlo a esa o darle otra.
+    showNext: true,
+    nextLabel: "Tiene otra cita",
     asOfToday: true,
   },
 }
@@ -344,9 +347,19 @@ export function ReportListDrawer({ list, query, onClose }: { list: ReportListKey
   // Solo una cita en pie y por venir la saca de «no tienen cita»: «No vino» o cancelar no la agendan.
   useAppointmentSaved((appointment) => {
     if (!bookedNow(appointment)) return
-    setBooked((current) => ({ ...current, [appointment.patientId]: appointment }))
-    // Las cifras de Reportes («No tienen cita: 76») ya no valen; la lista abierta se queda con sus marcas.
-    void queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === "report" && query.queryKey[1] !== `list:${list}` })
+    const mark = () => {
+      setBooked((current) => ({ ...current, [appointment.patientId]: appointment }))
+      // Las cifras de Reportes («No tienen cita: 76») ya no valen; la lista abierta se queda con sus marcas.
+      void queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === "report" && query.queryKey[1] !== `list:${list}` })
+    }
+    if (list !== "upcoming_unbooked") return mark()
+    // Aquí cuenta la cita que lleva lo aceptado, no otra (la regla de «Por agendar», ADR 0145): lo dice
+    // el servidor. Si aún le queda algo sin cita, la fila sigue sin marcar.
+    void fetchTreatmentCoordination(appointment.patientId)
+      .then(({ data }) => {
+        if (!data.treatments.some((treatment) => treatment.toSchedule)) mark()
+      })
+      .catch(() => undefined)
   })
   const bookFor = (context: QuickViewContext) =>
     openBookingAnywhere({
