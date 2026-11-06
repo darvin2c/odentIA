@@ -597,7 +597,10 @@ function ReceptionPage() {
                     <EntryRow label="Cerrar la conversación" value={closeAfter} onClick={canWrite ? () => setLimits("cierre") : undefined} />
                   </li>
                 </ul>
-                {overview.readiness.channels.length === 0 && canWrite ? (
+                {overview.readiness.channels.length === 0 && overview.readiness.demoClinic ? (
+                  // En una demo no hay un canal de verdad que conectar: Sofi se prueba en «Probar».
+                  <p className="text-sm text-muted-foreground">La demo no tiene un canal de verdad: prueba a {role.name} con «Probar».</p>
+                ) : overview.readiness.channels.length === 0 && canWrite ? (
                   <Link to="/settings/integrations" className={`w-fit ${LINK}`}>
                     Conectar un canal
                   </Link>

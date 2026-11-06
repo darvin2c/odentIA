@@ -467,17 +467,20 @@ function medicationDraftOf(item: DictationSuggestion) {
  * sugerencia, en el bloque Documentos. «Emitir receta» la emite con la
  * colegiatura de quien atiende, solo cuando está completa y sin aviso; si falta
  * algo o choca con una alergia, el formulario de siempre se abre ya lleno, con
- * «Cambiar medicamento» y «Recetar igual, con motivo». Nunca se emite con
+ * el aviso a la vista y «Cambiar medicamento»; se emite igual sin escribir nada
+ * (ADR 0143), y la receta guarda el aviso que se vio. Nunca se emite con
  * «Confirmar las N listas».
  */
 function PrescriptionSuggestion({ session, items }: { session: DictationSession; items: DictationSuggestion[] }) {
-  const [form, setForm] = useState<null | { overriding: boolean }>(null)
+  const [form, setForm] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const queryClient = useQueryClient()
   // Se emite con la colegiatura de quien atiende: sin ella no se ofrece «Emitir receta».
   const profile = useQuery({ queryKey: ["professional-profile", "me"], queryFn: fetchMyProfessionalProfile })
   const licensed = profile.data?.data.complete !== false
   const warnings = items.flatMap((item) => (Array.isArray(item.payload["allergyWarnings"]) ? (item.payload["allergyWarnings"] as string[]) : []))
+  // Lo que ya toma del mismo principio o grupo: solo informa, y al emitir queda como visto (ADR 0143).
+  const duplicates = [...new Set(items.flatMap((item) => (Array.isArray(item.payload["duplicateWarnings"]) ? (item.payload["duplicateWarnings"] as string[]) : [])))]
   const waiting = items.filter((item) => item.status !== "lista" && !(item.payload["allergyWarnings"] as string[] | undefined)?.length)
   const ready = warnings.length === 0 && waiting.length === 0
   const busy = session.issuePrescription.isPending || session.act.isPending || session.dictating
@@ -499,7 +502,7 @@ function PrescriptionSuggestion({ session, items }: { session: DictationSession;
               <p className="font-medium">Receta · {count}</p>
               <p className="text-muted-foreground">
                 {warnings.length
-                  ? "Aviso de alergia: resuélvelo antes de emitir."
+                  ? "Aviso de alergia: revísalo en la receta antes de emitirla."
                   : waiting.length
                     ? (waiting[0]?.note ?? "Falta completarla.")
                     : voiced?.voice
@@ -537,7 +540,7 @@ function PrescriptionSuggestion({ session, items }: { session: DictationSession;
               />
             ) : null}
             {!warnings.length ? (
-              <Button type="button" variant="outline" size="sm" className="min-h-11 sm:min-h-8" disabled={busy} onClick={() => setForm({ overriding: false })}>
+              <Button type="button" variant="outline" size="sm" className="min-h-11 sm:min-h-8" disabled={busy} onClick={() => setForm(true)}>
                 {ready ? "Editar" : "Completar"}
               </Button>
             ) : null}
@@ -561,6 +564,16 @@ function PrescriptionSuggestion({ session, items }: { session: DictationSession;
               )
             })}
           </ul>
+          {duplicates.length ? (
+            <div role="status" className="flex flex-col gap-1 rounded-md border border-warning/40 bg-warning/5 p-3 sm:ml-8">
+              <p className="font-medium">Para que lo tengas en cuenta</p>
+              <ul className="list-disc pl-5">
+                {duplicates.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           {warnings.length ? (
             <div role="alert" className="flex flex-col gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 sm:ml-8">
               <p className="font-medium">Aviso de alergia</p>
@@ -570,11 +583,8 @@ function PrescriptionSuggestion({ session, items }: { session: DictationSession;
                 ))}
               </ul>
               <div className="flex flex-wrap gap-2">
-                <Button type="button" size="sm" variant="outline" className="min-h-11 sm:min-h-8" disabled={busy} onClick={() => setForm({ overriding: false })}>
-                  Cambiar medicamento
-                </Button>
-                <Button type="button" size="sm" variant="outline" className="min-h-11 sm:min-h-8" disabled={busy} onClick={() => setForm({ overriding: true })}>
-                  Recetar igual, con motivo
+                <Button type="button" size="sm" variant="outline" className="min-h-11 sm:min-h-8" disabled={busy} onClick={() => setForm(true)}>
+                  Revisar la receta
                 </Button>
               </div>
               {/* Sin nombrar un medicamento: lo elige quien receta, según lo que se iba a dar. */}
@@ -596,10 +606,9 @@ function PrescriptionSuggestion({ session, items }: { session: DictationSession;
           drawerOnly
           createOpen
           initialMedications={items.map(medicationDraftOf)}
-          startOverriding={form.overriding}
           onIssued={(prescriptionId) => session.settlePrescription.mutate(prescriptionId)}
           onCreateOpenChange={(open) => {
-            if (!open) setForm(null)
+            if (!open) setForm(false)
           }}
         />
       ) : null}

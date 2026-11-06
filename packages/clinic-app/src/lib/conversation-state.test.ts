@@ -9,6 +9,7 @@ import {
   dayWords,
   listTimeWords,
   messageTimeWords,
+  onlySendFailed,
   replyWindowWords,
   whenWords,
 } from "./conversation-state"
@@ -170,5 +171,17 @@ describe("una fila por persona (fase 4 del pulido)", () => {
     expect(replyWindowWords("open")).toBe("abierto")
     expect(replyWindowWords(null)).toBe("abierto")
     expect(replyWindowWords("closed")).toBe("pasaron 24 horas")
+  })
+})
+
+describe("onlySendFailed (propuesta UX 3)", () => {
+  it("pliega solo lo que dice «No se pudo enviar» y nada antes", () => {
+    expect(onlySendFailed(open({ sendFailed: true }))).toBe(true)
+    // Con un tema abierto o un caso del agente, la fila dice eso primero: no se esconde.
+    expect(onlySendFailed(open({ sendFailed: true, topics: [{ id: "t", urgent: true } as never] }))).toBe(false)
+    expect(onlySendFailed(open({ sendFailed: true, handoffPriority: "alta" }))).toBe(false)
+    // Cerrada, dice cómo se cerró.
+    expect(onlySendFailed({ ...open({ sendFailed: true }), status: "closed" })).toBe(false)
+    expect(onlySendFailed(open({}))).toBe(false)
   })
 })

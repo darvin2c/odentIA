@@ -328,7 +328,10 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
   }).toPass()
   await page.getByRole("button", { name: "Cancelar cita" }).click()
   const cancel = page.getByRole("alertdialog")
+  // Si lo pidió el paciente (lo de siempre), ofrece «Reprogramar»; con otro motivo, no.
+  await expect(cancel.getByRole("button", { name: "Reprogramar", exact: true })).toBeVisible()
   await cancel.getByRole("radio", { name: "Lo pidió la clínica" }).click()
+  await expect(cancel.getByRole("button", { name: "Reprogramar", exact: true })).toHaveCount(0)
   await cancel.getByLabel("Nota, si hace falta").fill("Se reprograma por viaje")
   await shot("cancelar")
   await cancel.getByRole("button", { name: "Cancelar cita" }).click()

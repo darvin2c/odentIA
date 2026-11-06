@@ -286,7 +286,11 @@ function AgentSummaryPage() {
                         <p className="text-sm text-muted-foreground">
                           {isReception && on
                             ? `Responde por ${
-                                channels.length ? channels.map((channel) => channelLabel(channel)).join(", ") : "ningún canal: falta conectar uno"
+                                channels.length
+                                  ? channels.map((channel) => channelLabel(channel)).join(", ")
+                                  : overview.readiness.demoClinic
+                                    ? "ningún canal: la demo no tiene uno de verdad, se prueba con «Probar»"
+                                    : "ningún canal: falta conectar uno"
                               }`
                             : role.id === "administrador" && on && admin
                               ? adminSummary(admin)
