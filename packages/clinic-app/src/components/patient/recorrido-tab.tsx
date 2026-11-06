@@ -38,7 +38,7 @@ import {
   reviseTreatmentApi,
   suspendTreatmentApi,
 } from "../../lib/clinical-journey"
-import { usePermission } from "../../lib/crm"
+import { useMyUserId, usePermission } from "../../lib/crm"
 import type { Encounter, PatientSummary, PlanItem, TreatmentNextAction } from "../../lib/patients"
 import { planStatusLabel } from "../../lib/patients"
 import { formatMoney } from "@odentia/clinical"
@@ -116,6 +116,7 @@ export function RecorridoClinicoTab({
       params: { patientId, encounterId },
     })
   const canWrite = usePermission("clinical.write")
+  const myUserId = useMyUserId()
   const canRead = usePermission("clinical.read")
   const queryClient = useQueryClient()
   const sede = useActiveBranch()
@@ -199,6 +200,10 @@ export function RecorridoClinicoTab({
 
   const summary = summaryQuery.data?.data ?? null
   const openEncounterId = summary?.openEncounterId ?? null
+  // Dentro de la atención en curso escribe quien la lleva (ADR 0002): revisar, completar, cambiar el
+  // estado y la receta se unen solo a la propia. La de otro profesional se abre y se toma el relevo ahí.
+  const ownEncounterId =
+    openEncounterId && (!summary?.openEncounter || summary.openEncounter.professionalUserId === myUserId) ? openEncounterId : null
   const [startingSession, setStartingSession] = useState(false)
 
   if (itemsQuery.isPending) {
@@ -292,7 +297,9 @@ export function RecorridoClinicoTab({
       return
     }
     if (nextAction === "completar" && openEncounterId) {
-      completeMutation.mutate(openEncounterId)
+      // La lleva otro profesional: se abre para tomar el relevo ahí.
+      if (ownEncounterId) completeMutation.mutate(ownEncounterId)
+      else openEncounter(openEncounterId)
       return
     }
     if (nextAction === "presupuestar" || nextAction === "decidir") {
@@ -642,10 +649,12 @@ export function RecorridoClinicoTab({
               </div>
             ) : null}
             {canWrite &&
-            !openEncounterId &&
+            !ownEncounterId &&
             !["realizado", "cancelado", "reemplazado"].includes(journey.item.status) ? (
               <p className="text-xs text-muted-foreground">
-                Revisar, suspender o cancelar requiere una atención abierta del paciente.
+                {openEncounterId
+                  ? "La atención abierta la lleva otro profesional: para revisar la indicación, ábrela y toma el relevo."
+                  : "Revisar, suspender o cancelar requiere una atención abierta del paciente."}
               </p>
             ) : null}
           </div>
@@ -660,7 +669,7 @@ export function RecorridoClinicoTab({
           <RecetasPanel
             patientId={patientId}
             itemId={selectedId}
-            encounterId={openEncounterId ?? undefined}
+            encounterId={ownEncounterId ?? undefined}
             items={items}
           />
 
@@ -774,7 +783,7 @@ export function RecorridoClinicoTab({
         open={form === "revise"}
         patientId={patientId}
         itemId={selectedId}
-        encounterId={openEncounterId}
+        encounterId={ownEncounterId}
         initialTooth={journey?.item.toothNumber ?? null}
         onClose={close}
         onDone={() => {
@@ -788,7 +797,7 @@ export function RecorridoClinicoTab({
         open={form === "suspend" || form === "cancel"}
         patientId={patientId}
         itemId={selectedId}
-        encounterId={openEncounterId}
+        encounterId={ownEncounterId}
         onClose={close}
         onDone={() => {
           close()

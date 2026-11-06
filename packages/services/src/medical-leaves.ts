@@ -11,6 +11,7 @@ import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
 import { drawnSignatureAt, requireProfessionalSignature } from "./professional-profiles.js"
 import { listDecisionRecipients, patientAge } from "./responsibilities.js"
+import { assertAttending } from "./encounter-attending.js"
 
 /**
  * El descanso médico (issue 229, decisión 8): la constancia de reposo, como la
@@ -57,7 +58,7 @@ export async function createMedicalLeave(
     throw invalidField("startsOn", "Elige el primer día del descanso en el calendario.")
   if (input.encounterId) {
     const [visit] = await tx
-      .select({ status: encounter.status })
+      .select({ status: encounter.status, professionalUserId: encounter.professionalUserId })
       .from(encounter)
       .where(
         and(
@@ -69,6 +70,8 @@ export async function createMedicalLeave(
     if (!visit) throw notFound("Atención")
     if (visit.status === "anulada")
       throw new ServiceError("VOIDED", 409, "La atención está anulada")
+    // Dentro de una atención en curso escribe quien la lleva (ADR 0002); una ya firmada solo se cita.
+    if (visit.status === "borrador") assertAttending(visit, actorUserId)
   }
   // Sin la autorización de la persona, el diagnóstico no se guarda: no hay nada que filtrar después.
   const diagnosis = input.showDiagnosis

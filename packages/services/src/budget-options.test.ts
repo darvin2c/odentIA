@@ -36,7 +36,7 @@ import {
   removeBudgetOption,
 } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
-import { createEncounter, finalizeEncounter } from "./encounters.js"
+import { createEncounter, finalizeEncounter, takeOverEncounter } from "./encounters.js"
 import { createOpportunity } from "./opportunities.js"
 import { type Can, getPlanNextStep, planNextStepsOf } from "./plan-next.js"
 import { addPlanItem } from "./plan.js"
@@ -220,7 +220,9 @@ it("el odontólogo actúa sobre lo que él indicó, aunque el plan lo haya abier
     { id: randomUUID(), organizationId: "org_a", userId: other, role: "clinician", createdAt: new Date() },
     { id: randomUUID(), organizationId: "org_a", userId: third, role: "clinician", createdAt: new Date() },
   ])
-  // El plan lo abrió f.actor; este tratamiento lo indicó `other`.
+  // El plan lo abrió f.actor; este tratamiento lo indicó `other`, que tomó el relevo de la atención
+  // (sin el relevo no escribe en la de f.actor, ADR 0002).
+  await withOrgContext(appDb, "org_a", (tx) => takeOverEncounter(tx, "org_a", other, f.patient.id, f.encounter.id))
   const own = await withOrgContext(appDb, "org_a", (tx) =>
     addPlanItem(tx, "org_a", other, f.patient.id, { serviceId: f.service.id, sourceEncounterId: f.encounter.id }),
   )

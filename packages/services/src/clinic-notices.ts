@@ -41,6 +41,8 @@ export interface ClinicNotice {
 export interface NoticeViewer {
   userId: string
   role: string
+  /** `false`: ve la facturación pero aún no pasó la verificación que pide la clínica (ADR 0107): sin importes. */
+  billing?: boolean
 }
 
 const DAY = 86_400_000
@@ -61,7 +63,7 @@ const ALERT_ACTION: Record<SaasAlert["action"], ClinicNoticeAction> = {
 
 /** Avisos de la franja para esta persona en esta clínica, del más grave al más leve. */
 export async function getClinicNotices(tx: Db, orgId: string, viewer: NoticeViewer, now = new Date()): Promise<ClinicNotice[]> {
-  const billing = seesBilling(viewer.role)
+  const billing = seesBilling(viewer.role) && viewer.billing !== false
   const attends = canAccess(viewer.role, "conversations.write")
   const notices: ClinicNotice[] = []
 
