@@ -41,7 +41,7 @@ import { PersonSummary } from "../../components/person/person-summary"
 import { RecordPanelProvider } from "../../components/person/record-panel"
 import { PatientPortalAccessSection } from "../../components/portal/portal-access-section"
 import { apiFetch } from "../../lib/api"
-import { useCan } from "../../lib/crm"
+import { useCan, useMyUserId } from "../../lib/crm"
 import { useOrgEvents } from "../../lib/org-events"
 import {
   areaNav,
@@ -201,6 +201,7 @@ function PersonPageRoute() {
   const navigate = useNavigate({ from: Route.fullPath })
   const queryClient = useQueryClient()
   const can = useCan()
+  const myUserId = useMyUserId()
   const personQuery = usePerson(personId, can("patients.read"))
   const person = personQuery.data?.data ?? null
   const patientId = person?.patient?.id ?? null
@@ -299,6 +300,9 @@ function PersonPageRoute() {
   const areas = visibleAreas(can, pageOf)
   const entries = areaNav(current.area, can, pageOf)
   const openEncounterId = summary.data?.data.openEncounterId ?? undefined
+  // La que lleva quien mira: la receta, el descanso y la orden se escriben dentro de ella (ADR 0002).
+  const openBrief = summary.data?.data.openEncounter
+  const ownEncounterId = openEncounterId && (!openBrief || openBrief.professionalUserId === myUserId) ? openEncounterId : undefined
 
   const needsPatient = (render: (id: string, full: PatientFull) => ReactNode): ReactNode => {
     if (!patientId) return null
@@ -405,6 +409,7 @@ function PersonPageRoute() {
             patientId={patientId}
             filter={tipo}
             encounterId={openEncounterId}
+            ownEncounterId={ownEncounterId}
             tooth={tooth}
             documentId={documentId}
           />

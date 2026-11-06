@@ -157,6 +157,16 @@ it("la clínica que la pide no deja operar a quien no la tiene; la otra clínica
   // Las operaciones de cobro de quien administra también lo piden.
   const cap = await request("ownerGoogle", "POST", "/account/billing/spend-cap", { orgId: ORG, capCents: 100 })
   expect(cap.status).toBe(403)
+  // También ver la suscripción, sus alertas y cambiar el plan.
+  for (const [method, path, body] of [
+    ["GET", `/account/billing/subscription?orgId=${ORG}`, undefined],
+    ["GET", `/account/billing/alerts?orgId=${ORG}`, undefined],
+    ["POST", "/account/billing/plan", { orgId: ORG, planCode: "esencial" }],
+  ] as const) {
+    const gated = await request("ownerGoogle", method, path, body)
+    expect(gated.status, path).toBe(403)
+    expect(await code(gated), path).toBe("TWO_FACTOR_CODE_REQUIRED")
+  }
 
   // Mi perfil dice qué clínica la pide.
   const mine = await request("reception", "GET", "/account/two-factor")

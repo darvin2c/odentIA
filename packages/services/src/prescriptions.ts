@@ -18,6 +18,7 @@ import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
 import type { ProductPrescribing } from "./product-hooks.js"
 import { productHooks } from "./products.js"
+import { assertAttending } from "./encounter-attending.js"
 import { drawnSignatureAt, requireProfessionalSignature } from "./professional-profiles.js"
 
 /**
@@ -135,6 +136,8 @@ export async function createPrescription(
     if (enc.status === "anulada") throw new ServiceError("VOIDED", 409, "La atención está anulada")
     if (enc.status !== "borrador")
       throw new ServiceError("FINALIZED", 409, "La atención está finalizada")
+    // La receta va dentro de la atención: solo la emite quien la lleva (ADR 0002).
+    assertAttending(enc, actorUserId)
   }
   if (input.planItemId) {
     const [item] = await tx
