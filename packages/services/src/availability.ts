@@ -18,6 +18,7 @@ import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, eq, gt, gte, inArray, isNull, lt, ne, or } from "drizzle-orm"
 import { branchNotFound, invalidField, roomNotFound, notFound, ServiceError, validation } from "./errors.js"
+import { looksLikeId } from "./ids.js"
 import { NEUTRAL_TIMEZONE, roomWord } from "./locale.js"
 import { requireCanAttend } from "./attending.js"
 import { type AttendingRule, attendingRule } from "./specialties.js"
@@ -442,6 +443,7 @@ export async function deleteScheduleBlock(
   /** Quién lo quita: queda en Actividad del equipo. */
   actorUserId: string | null = null,
 ): Promise<void> {
+  if (!looksLikeId(id)) throw notFound("Bloqueo")
   const [deleted] = await tx
     .delete(scheduleBlock)
     .where(and(eq(scheduleBlock.organizationId, orgId), eq(scheduleBlock.id, id)))

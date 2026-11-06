@@ -100,7 +100,17 @@ export function ScheduleHost() {
         initialMode={request.mode}
         canWrite={canWrite}
         onClose={() => setRequest(null)}
-        onRebook={(patient) => setRequest({ kind: "reserva", seed: { patient, lockedPatient: true } })}
+        onRebook={(patient, from) =>
+          setRequest({
+            kind: "reserva",
+            seed: {
+              patient,
+              lockedPatient: true,
+              ...(from?.serviceId ? { serviceId: from.serviceId } : {}),
+              ...(from?.professionalUserId ? { professionalUserId: from.professionalUserId } : {}),
+            },
+          })
+        }
       />
     )
   if (!canWrite) return null
@@ -119,7 +129,7 @@ function AppointmentHost({
   initialMode?: "move"
   canWrite: boolean
   onClose: () => void
-  onRebook: (patient: { id: string; name: string }) => void
+  onRebook: (patient: { id: string; name: string }, from?: { serviceId?: string | null; professionalUserId?: string | null }) => void
 }) {
   const client = useQueryClient()
   const appointment = useQuery({

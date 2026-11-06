@@ -70,9 +70,9 @@ let branchId = ""
 let roomId = ""
 let patientId = ""
 
-const START = "2026-10-12T14:00:00Z"
-const FROM = "2026-10-12T05:00:00Z"
-const TO = "2026-10-13T05:00:00Z"
+const START = "2027-10-11T14:00:00Z"
+const FROM = "2027-10-11T05:00:00Z"
+const TO = "2027-10-12T05:00:00Z"
 
 beforeAll(async () => {
   container = await new GenericContainer(IMAGE)
@@ -218,7 +218,7 @@ it("cita: crear, listar con filtro, mover, conflicto 409 y cancelar", async () =
       patientId,
       professionalUserId: PROFESSIONAL,
       roomId,
-      startsAt: "2026-10-12T14:30:00Z",
+      startsAt: "2027-10-11T14:30:00Z",
       durationMin: 30,
     }),
   })
@@ -230,14 +230,14 @@ it("cita: crear, listar con filtro, mover, conflicto 409 y cancelar", async () =
     headers: json,
     body: JSON.stringify({
       expectedVersion: cita.version,
-      startsAt: "2026-10-12T16:00:00Z",
+      startsAt: "2027-10-11T16:00:00Z",
     }),
   })
   expect(moved.status).toBe(200)
   const movedBody = (await moved.json()) as {
     data: { startsAt: string; endsAt: string; version: number }
   }
-  expect(movedBody.data.endsAt).toBe("2026-10-12T16:45:00.000Z")
+  expect(movedBody.data.endsAt).toBe("2027-10-11T16:45:00.000Z")
   expect(movedBody.data.version).toBe(2)
 
   // Versión vieja: 409 STALE_VERSION.
@@ -246,7 +246,7 @@ it("cita: crear, listar con filtro, mover, conflicto 409 y cancelar", async () =
     headers: json,
     body: JSON.stringify({
       expectedVersion: 1,
-      startsAt: "2026-10-12T17:00:00Z",
+      startsAt: "2027-10-11T17:00:00Z",
     }),
   })
   expect(stale.status).toBe(409)
@@ -268,7 +268,7 @@ it("cita: crear, listar con filtro, mover, conflicto 409 y cancelar", async () =
       patientId,
       professionalUserId: PROFESSIONAL,
       roomId,
-      startsAt: "2026-10-12T16:00:00Z",
+      startsAt: "2027-10-11T16:00:00Z",
       durationMin: 30,
     }),
   })
@@ -280,7 +280,7 @@ it("el cajón de la cita: a quién se le escribe y de dónde salió, para quien 
   const created = await owner.request("/appointments", {
     method: "POST",
     headers: json,
-    body: JSON.stringify({ branchId, patientId, professionalUserId: PROFESSIONAL, roomId, startsAt: "2026-10-12T15:00:00Z", durationMin: 15, outsideSchedule: true }),
+    body: JSON.stringify({ branchId, patientId, professionalUserId: PROFESSIONAL, roomId, startsAt: "2027-10-11T15:00:00Z", durationMin: 15, outsideSchedule: true }),
   })
   expect(created.status).toBe(201)
   const cita = ((await created.json()) as { data: { id: string; notice?: unknown } }).data
@@ -351,6 +351,24 @@ it("unidades dentales: administrarlas exige configuración; desactivada sale de 
   expect(((await again.json()) as { data: { rooms: Array<{ label: string }> } }).data.rooms).toEqual([
     { id: roomId, label: "Unidad dental Uno" },
   ])
+})
+
+it("una cita nueva no nace en una hora que ya pasó ni ya cerrada, como en la Agenda", async () => {
+  const owner = buildApp("owner")
+  const create = (extra: Record<string, unknown>) =>
+    owner.request("/appointments", {
+      method: "POST",
+      headers: json,
+      body: JSON.stringify({ branchId, patientId, professionalUserId: PROFESSIONAL, roomId, durationMin: 15, outsideSchedule: true, ...extra }),
+    })
+  const yesterday = await create({ startsAt: new Date(Date.now() - 24 * 60 * 60_000).toISOString() })
+  expect(yesterday.status).toBe(400)
+  expect(await yesterday.json()).toMatchObject({ error: { fields: { startsAt: "Esa hora ya pasó. Elige una hora de ahora en adelante." } } })
+  const closed = await create({ startsAt: new Date(Date.now() + 3 * 24 * 60 * 60_000).toISOString(), status: "atendida" })
+  expect(closed.status).toBe(400)
+  expect(await closed.json()).toMatchObject({ error: { fields: { status: expect.stringContaining("Atendida") } } })
+  // Un enlace con un id roto dice que no existe, no un error del servidor.
+  expect((await owner.request("/appointments/no-es-un-id")).status).toBe(404)
 })
 
 it("«Llegó»: lo marcan recepción y el odontólogo, caja no; el estado no se cambia por PATCH", async () => {
