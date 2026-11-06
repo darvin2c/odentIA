@@ -482,7 +482,8 @@ test("agenda: lo que falta se dice con su acción, y la sede se elige en un solo
   await page.getByRole("button", { name: "Sede Central" }).click()
   await page.getByRole("menuitem", { name: "Sede Norte" }).click()
   await expect(page.getByRole("button", { name: "Sede Norte" })).toBeVisible()
-  await expect(page.getByText("Esta sede aún no tiene unidades dentales")).toBeVisible()
+  // Cada sede nueva nace con su primera unidad (ADR 0141); la sede sin unidades la prueba otro caso.
+  await expect(page.getByText("Unidad dental 1").first()).toBeVisible()
   await shot("sede-elegida")
   await gotoHydrated(page, tenant(owner.org.slug, "/settings/availability"))
   await expect(page.getByRole("button", { name: "Sede Norte" })).toBeVisible()

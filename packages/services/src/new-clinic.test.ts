@@ -14,7 +14,8 @@ import { upsertAgentConfig } from "./agentConfig.js"
 import { setLine } from "./automation.js"
 import { refreshSuggestedNotice, SUGGESTED_NOTICE_ACTION, setUpNewClinic, suggestedPrivacyNotice } from "./new-clinic.js"
 import { getPatientRegistrationConfig, registrationNoticeSuggested, savePatientRegistrationConfig } from "./patient-registration.js"
-import { createSaasPlan } from "./saas-billing.js"
+import { chooseSaasPlan, createSaasPlan } from "./saas-billing.js"
+import { privacyNoticeOf } from "./privacy-notice.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -162,6 +163,19 @@ describe("una clínica nueva nace con todo encendido (ADR 0141)", () => {
     const otherConfig = await other.run((tx) => getPatientRegistrationConfig(tx, other.orgId))
     await other.run((tx) => savePatientRegistrationConfig(tx, other.orgId, other.ownerId, { expectedVersion: otherConfig.version, enabled: false, fields: otherConfig.fields, privacyNotice: otherConfig.privacyNotice }))
     expect(await other.run((tx) => registrationNoticeSuggested(tx, other.orgId))).toBe(true)
+  })
+
+  it("una clínica de antes que elige plan no recibe un tope que no eligió", async () => {
+    const c = await newClinic()
+    await c.run((tx) => chooseSaasPlan(tx, c.orgId, c.ownerId, "nueva-lista"))
+    const [sub] = await ownerDb.select({ cap: saasSubscription.spendCapCents }).from(saasSubscription).where(eq(saasSubscription.organizationId, c.orgId))
+    expect(sub?.cap).toBeNull()
+  })
+
+  it("sin aviso propio, el que ve el paciente es el sugerido y Configuración lo marca sin revisar", async () => {
+    const c = await newClinic()
+    expect(await c.run((tx) => registrationNoticeSuggested(tx, c.orgId))).toBe(true)
+    expect(await c.run((tx) => privacyNoticeOf(tx, c.orgId))).toMatch(/^Clínica Sonríe \(Sonríe S\.A\.C\., 20123456789\) usará tus datos/)
   })
 })
 

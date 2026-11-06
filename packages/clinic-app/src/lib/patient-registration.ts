@@ -26,7 +26,7 @@ export interface PublicRegistrationInfo {
 export interface RegistrationConfigResponse {
   data: RegistrationConfig
   /** `noticeSuggested`: el aviso es aún el que armó odentIA al nacer la clínica (ADR 0141). */
-  meta: { today: string; noticeSuggested?: boolean }
+  meta: { today: string; noticeSuggested?: boolean; noticeShown?: string }
 }
 
 export interface SaveRegistrationConfigInput {

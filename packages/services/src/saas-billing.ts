@@ -1063,6 +1063,7 @@ export async function assertSaasCurrencyChange(
  * antes; después se cambia en Plan y pagos.
  */
 async function defaultSpendCap(tx: Db, orgId: string, actorUserId: string, capCents: number): Promise<void> {
+  // Solo al nacer (`setNewClinicSpendCap`): una clínica de antes no recibe un tope que no eligió.
   const [sub] = await tx
     .select({ capCents: saasSubscription.spendCapCents })
     .from(saasSubscription)
@@ -1075,6 +1076,26 @@ async function defaultSpendCap(tx: Db, orgId: string, actorUserId: string, capCe
     .where(and(eq(auditEvent.organizationId, orgId), inArray(auditEvent.action, ["saas.spend_cap_set", "saas.spend_cap_default"])))
     .limit(1)
   if (decided) return
+  await tx.update(saasSubscription).set({ spendCapCents: capCents, updatedAt: new Date() }).where(eq(saasSubscription.organizationId, orgId))
+  await audit(tx, orgId, actorUserId, "saas_subscription", orgId, "saas.spend_cap_default", { capCents })
+}
+
+/**
+ * El presupuesto que puso el sistema al nacer sigue la cuota del plan elegido, mientras nadie de
+ * la clínica lo haya cambiado. Lo que fijó o quitó una persona, y el de una clínica de antes (sin
+ * ninguno), no se tocan.
+ */
+async function followPlanSpendCap(tx: Db, orgId: string, actorUserId: string, capCents: number): Promise<void> {
+  if (capCents <= 0) return
+  const [last] = await tx
+    .select({ action: auditEvent.action })
+    .from(auditEvent)
+    .where(and(eq(auditEvent.organizationId, orgId), inArray(auditEvent.action, ["saas.spend_cap_set", "saas.spend_cap_default"])))
+    .orderBy(desc(auditEvent.createdAt))
+    .limit(1)
+  if (last?.action !== "saas.spend_cap_default") return
+  const [sub] = await tx.select({ capCents: saasSubscription.spendCapCents }).from(saasSubscription).where(eq(saasSubscription.organizationId, orgId)).limit(1)
+  if (!sub || sub.capCents === capCents) return
   await tx.update(saasSubscription).set({ spendCapCents: capCents, updatedAt: new Date() }).where(eq(saasSubscription.organizationId, orgId))
   await audit(tx, orgId, actorUserId, "saas_subscription", orgId, "saas.spend_cap_default", { capCents })
 }
@@ -1134,7 +1155,7 @@ export async function chooseSaasPlan(
   }
   if (!current) {
     const started = await startSaasTrial(tx, orgId, { planCode }, now)
-    await defaultSpendCap(tx, orgId, actorUserId, plan.priceCents)
+    await followPlanSpendCap(tx, orgId, actorUserId, plan.priceCents)
     return started
   }
   await assertSaasCurrencyChange(tx, orgId, plan.currency)
@@ -1158,7 +1179,7 @@ export async function chooseSaasPlan(
   await audit(tx, orgId, actorUserId, "saas_subscription", orgId, "saas.plan_changed", {
     planCode: plan.code,
   })
-  await defaultSpendCap(tx, orgId, actorUserId, plan.priceCents)
+  await followPlanSpendCap(tx, orgId, actorUserId, plan.priceCents)
   await notifyOrg(tx, orgId, "saas.subscription.updated")
   const updated = await getSaasSubscription(tx, orgId)
   if (!updated) throw new ServiceError("INTERNAL", 409, "No se pudo leer la suscripción")

@@ -1,6 +1,6 @@
 import { Button, buttonVariants, cn } from "@odentia/ui"
 import { Link } from "@tanstack/react-router"
-import { Check, ExternalLink } from "lucide-react"
+import { Check, ExternalLink, Info } from "lucide-react"
 import { useEffect, useRef } from "react"
 import { useReceptionName } from "../../../lib/agent-names"
 import { useAgentSummary } from "../../../lib/agent-work"
@@ -71,7 +71,11 @@ export function ConnectedNotice({
         </li>
         {receptionOn !== undefined ? (
           <li className="flex gap-2.5">
-            <Check aria-hidden className="mt-0.5 size-4 shrink-0 text-primary-soft-foreground" />
+            {receptionOn ? (
+              <Check aria-hidden className="mt-0.5 size-4 shrink-0 text-primary-soft-foreground" />
+            ) : (
+              <Info aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+            )}
             <span>
               {receptionOn ? (
                 <>

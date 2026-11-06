@@ -18,12 +18,13 @@ El usuario lo decidió el 2026-11-05 (ronda de QA del 2026-11-04): «todo encend
   - el portal con todo su alcance;
   - el resumen del lunes de quien la crea;
   - el presupuesto del mes, con la cuota del plan (o la del plan de lista de su producto durante la prueba).
+- **Una clínica que quedó a medias antes de este cambio** (con perfil y sin sede) nace encendida al terminar su alta: es una clínica que nace.
 - **Solo lo que aún no tiene estado:** repetirlo no cambia lo que alguien ya decidió, y una clínica que ya tenía sede no cambia. No cambia ningún valor por defecto de la base ni del código: «sin fila = apagado» sigue valiendo para las de antes.
 - **El aviso de privacidad sugerido** se arma con los datos de la clínica: quién es, para qué usa los datos, quién más los trata y que algunos están fuera del país, cuánto se guardan y cómo pedir verlos o borrarlos; en Perú, la Ley 29733. Como los consentimientos de 0117:
   - dice «Sugerido, sin revisar» (`patient_registration_config.notice_suggested_at`) hasta que alguien de la clínica lo cambia o marca «Lo revisé»;
   - mientras tanto, se vuelve a armar si cambian la razón social, el RUC o la dirección.
   No se presenta como cumplimiento legal.
-- **Cada sede nueva nace con su primera unidad** («Unidad dental 1», «Consultorio 1»): sin ella no se reserva.
+- **Cada sede nueva nace con su primera unidad** («Unidad dental 1» en odentIA, «Sala 1» en latidIA): sin ella no se reserva.
 - **Se dice donde se decide**, con su enlace para apagarlo:
   - Inicio, recién creada: «Tu clínica viene con esto encendido», solo lo que está encendido de verdad;
   - al conectar un canal: «Sofi responde desde ahora»;

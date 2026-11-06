@@ -828,8 +828,9 @@ export function createApp(deps: AppDeps) {
         // asistida, cuyo perfil ya existía: allí antes no nacía ni «Recordar la cita».
         const [anyBranch] = await tx.select({ id: branch.id }).from(branch).where(eq(branch.organizationId, orgId)).limit(1)
         if (!anyBranch) await setUpNewClinic(tx, orgId, userId)
-        // Y su aviso sugerido, mientras nadie lo revisó, dice los datos nuevos.
-        else await refreshSuggestedNotice(tx, orgId, userId)
+        // Y su aviso sugerido, mientras nadie lo revisó, dice los datos nuevos (también si el alta
+        // se repite antes de crear la sede).
+        await refreshSuggestedNotice(tx, orgId, userId)
         // Y nace con las especialidades de su país, que puede renombrar (ADR 0039 y 0069).
         if (!current) await ensureClinicSpecialties(tx, orgId)
         // Y con sus consentimientos activos, para firmar por la web desde el primer día.

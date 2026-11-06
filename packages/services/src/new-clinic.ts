@@ -23,6 +23,7 @@ import { portalPolicy } from "@odentia/db/schema/portal-access"
 import { reportDigest } from "@odentia/db/schema/reports"
 import { and, eq } from "drizzle-orm"
 import { ADMIN_LINES } from "./admin-lines.js"
+import { ServiceError } from "./errors.js"
 import { updateAdminSettings } from "./agent-admin.js"
 import { upsertAgentConfig } from "./agentConfig.js"
 import { turnOnNewClinicLines } from "./automation.js"
@@ -52,13 +53,19 @@ export async function refreshSuggestedNotice(tx: Db, orgId: string, actorUserId:
   if (!clinic) return
   const notice = suggestedPrivacyNotice(clinic)
   if (notice === row.privacyNotice) return
-  await savePatientRegistrationConfig(tx, orgId, actorUserId, {
-    expectedVersion: row.version,
-    enabled: row.enabled,
-    fields: { ...DEFAULT_REGISTRATION_CONFIG.fields, ...row.fields },
-    privacyNotice: notice,
-    suggested: true,
-  })
+  try {
+    await savePatientRegistrationConfig(tx, orgId, actorUserId, {
+      expectedVersion: row.version,
+      enabled: row.enabled,
+      fields: { ...DEFAULT_REGISTRATION_CONFIG.fields, ...row.fields },
+      privacyNotice: notice,
+      suggested: true,
+    })
+  } catch (error) {
+    // Otra sesión guardó el registro en el medio: lo suyo gana y guardar los datos de la clínica sigue.
+    if (error instanceof ServiceError && error.code === "STALE_REGISTRATION_CONFIG") return
+    throw error
+  }
   await audit(tx, orgId, actorUserId, SUGGESTED_NOTICE_ACTION, { refreshed: true })
 }
 

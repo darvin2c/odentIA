@@ -43,17 +43,19 @@ export function needsSetup(data: WorkspaceHome): boolean {
  */
 function bornOn(on: SetupOn, receptionName: string) {
   return [
-    on.reception ? { text: `${receptionName} responde a quien escriba, desde que conectes un canal.`, href: "/agent/recepcion", action: "Ver o apagar" } : null,
+    on.reception ? { name: receptionName, text: `${receptionName} responde a quien escriba, desde que conectes un canal.`, href: "/agent/recepcion", action: "Ver o apagar" } : null,
     on.admin
       ? {
+          name: ADMIN_NAME,
           text: `${ADMIN_NAME}, con ${on.lines === 1 ? "1 línea" : `${on.lines} líneas`}: recuerda las citas, sigue los presupuestos y avisa lo pendiente.`,
           href: "/agent/administrador",
           action: "Ver o apagar",
         }
       : null,
-    on.clio ? { text: `${CLINICAL_NAME}, para dictar la atención.`, href: "/agent/asistente-clinico", action: "Ver o apagar" } : null,
+    on.clio ? { name: CLINICAL_NAME, text: `${CLINICAL_NAME}, para dictar la atención.`, href: "/agent/asistente-clinico", action: "Ver o apagar" } : null,
     on.registration
       ? {
+          name: "el registro en línea",
           text: on.noticeSuggested
             ? "El registro en línea, con un aviso de privacidad sugerido, sin revisar."
             : "El registro en línea de pacientes.",
@@ -61,9 +63,9 @@ function bornOn(on: SetupOn, receptionName: string) {
           action: on.noticeSuggested ? "Revisar el aviso" : "Ver o apagar",
         }
       : null,
-    on.portal ? { text: "El portal del paciente: el acceso lo da recepción a cada persona.", href: "/settings/patient-access", action: "Ver o apagar" } : null,
-    on.digest ? { text: "Tu resumen del lunes, por correo.", href: "/reports", action: "Ver o apagar" } : null,
-  ].filter((item): item is { text: string; href: string; action: string } => item !== null)
+    on.portal ? { name: "el portal del paciente", text: "El portal del paciente: el acceso lo da recepción a cada persona.", href: "/settings/patient-access", action: "Ver o apagar" } : null,
+    on.digest ? { name: "tu resumen del lunes", text: "Tu resumen del lunes, por correo.", href: "/reports", action: "Ver o apagar" } : null,
+  ].filter((item): item is { name: string; text: string; href: string; action: string } => item !== null)
 }
 
 /** «Prepara tu primera atención»: orienta el primer uso sin convertir una jornada activa en un tutorial. */
@@ -92,7 +94,7 @@ export function HomeStart({ setup }: { setup: NonNullable<WorkspaceHome["setup"]
       <ul aria-label="Viene encendido" className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
         {born.map(item => <li key={item.href} className="flex flex-col gap-0.5">
           <span>{item.text}</span>
-          <Link to={item.href} className="inline-flex min-h-11 items-center font-semibold text-primary-soft-foreground underline-offset-2 hover:underline sm:min-h-0">{item.action}</Link>
+          <Link to={item.href} aria-label={`${item.action}: ${item.name}`} className="inline-flex min-h-11 items-center font-semibold text-primary-soft-foreground underline-offset-2 hover:underline sm:min-h-0">{item.action}</Link>
         </li>)}
       </ul>
     </div> : null}

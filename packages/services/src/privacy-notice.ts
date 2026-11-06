@@ -32,11 +32,11 @@ export function suggestedPrivacyNotice(clinic: SuggestedNoticeClinic): string {
       : `${name}${clinic.fiscalDocNumber ? ` (${clinic.fiscalDocNumber})` : ""}`
   const where = clinic.fiscalAddress?.trim() ? `, con domicilio en ${clinic.fiscalAddress.trim()},` : ""
   return [
-    `${who}${where} usará tus datos solo para registrarte como paciente, atenderte, recordarte tus citas y cobrarte lo atendido.`,
+    `${who}${where} usará tus datos para registrarte como paciente, atenderte, recordarte tus citas, hacer el seguimiento de tu tratamiento y tus presupuestos, y cobrarte lo atendido; y, solo si lo aceptas, para enviarte novedades.`,
     `Los guarda en ${clinic.productName ?? "su sistema"} y los tratan los proveedores con que la clínica te atiende y te escribe; algunos están fuera del país.`,
     "Tu historia clínica se guarda el tiempo que pide la norma de salud; lo demás, mientras seas paciente o hasta que pidas borrarlo.",
     "No los vende ni los comparte con otros fines.",
-    "Puedes pedir verlos, corregirlos o eliminarlos, o que dejen de usarse para algo, en recepción o por este mismo medio.",
+    "Puedes pedir verlos, corregirlos o eliminarlos, o que dejen de usarse para algo, escribiendo a la clínica o en recepción.",
     // En Perú, la ley y a quién reclamar; no afirma cumplirla.
     clinic.countryCode === "PE"
       ? "Lo regula la Ley 29733 de Protección de Datos Personales: si no te responden, puedes reclamar ante la Autoridad Nacional de Protección de Datos Personales."

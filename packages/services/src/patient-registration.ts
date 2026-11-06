@@ -361,14 +361,18 @@ export interface SaveRegistrationConfigInput {
   suggested?: boolean
 }
 
-/** Si el aviso de privacidad es aún el sugerido, sin revisar por nadie de la clínica (ADR 0141). */
+/**
+ * Si el aviso de privacidad que ve el paciente es aún el sugerido, sin revisar por nadie de la
+ * clínica (ADR 0141): el que se publicó al nacer, o el que «Tus datos» muestra a una clínica que
+ * nunca escribió el suyo (`privacyNoticeOf`).
+ */
 export async function registrationNoticeSuggested(tx: Db, orgId: string): Promise<boolean> {
   const [row] = await tx
-    .select({ at: patientRegistrationConfig.noticeSuggestedAt })
+    .select({ at: patientRegistrationConfig.noticeSuggestedAt, notice: patientRegistrationConfig.privacyNotice })
     .from(patientRegistrationConfig)
     .where(eq(patientRegistrationConfig.organizationId, orgId))
     .limit(1)
-  return !!row?.at
+  return !!row?.at || !row?.notice.trim()
 }
 
 export async function savePatientRegistrationConfig(

@@ -6,6 +6,7 @@ import {
   createBookingLink,
   createPatientRegistrationLink,
   getPatientRegistrationConfig,
+  privacyNoticeOf,
   registrationNoticeSuggested,
   patientOrganizationToday,
   personalLinkUrl,
@@ -54,7 +55,12 @@ export function createPatientRegistrationRoute(deps: CrmDeps & { cookieDomain: s
     try {
       const result = await withOrgContext(deps.db, orgId, async tx => ({
         data: await getPatientRegistrationConfig(tx, orgId),
-        meta: { today: await patientOrganizationToday(tx, orgId), noticeSuggested: await registrationNoticeSuggested(tx, orgId) },
+        meta: {
+          today: await patientOrganizationToday(tx, orgId),
+          noticeSuggested: await registrationNoticeSuggested(tx, orgId),
+          // El aviso que ve quien completa sus datos: el de la clínica o, sin uno, el sugerido.
+          noticeShown: await privacyNoticeOf(tx, orgId),
+        },
       }))
       c.header("Cache-Control", "no-store")
       return c.json(result)

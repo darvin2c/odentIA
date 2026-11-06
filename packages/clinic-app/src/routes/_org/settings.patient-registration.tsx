@@ -213,6 +213,7 @@ function RegistrationSettings() {
 
   const today = configQuery.data?.meta.today ?? ""
   const noticeSuggested = configQuery.data?.meta.noticeSuggested === true
+  const noticeShown = configQuery.data?.meta.noticeShown ?? ""
   const { fields, enabled, privacyNotice, askReminders, askMessages } = values
   const published = loaded?.enabled ?? false
 
@@ -370,10 +371,22 @@ function RegistrationSettings() {
                   Lo armamos con los datos de tu clínica.
                 </span>
                 <span className="text-muted-foreground">
-                  Ya lo ve quien se registra. Tu clínica responde por lo que dice: revísalo y cámbialo si hace falta.
-                  Mientras no lo revises, se vuelve a armar si cambias la razón social, el RUC o la dirección.
+                  Ya lo ve quien se registra o completa sus datos desde su enlace. Tu clínica responde por lo que dice:
+                  revísalo y cámbialo si hace falta. Mientras no lo revises, se vuelve a armar si cambias la razón social,
+                  el RUC o la dirección.
                 </span>
-                {canWrite ? (
+                {/* Sin aviso propio, el paciente ve el sugerido en «Tus datos»: aquí se ve el mismo texto. */}
+                {!privacyNotice.trim() && noticeShown ? (
+                  <>
+                    <blockquote className="rounded-xl bg-muted/60 p-3 text-muted-foreground whitespace-pre-wrap">{noticeShown}</blockquote>
+                    {canWrite ? (
+                      <Button type="button" variant="outline" size="sm" className="min-h-11 self-start sm:min-h-8" onClick={() => form.setFieldValue("privacyNotice", noticeShown)}>
+                        Usarlo como base
+                      </Button>
+                    ) : null}
+                  </>
+                ) : null}
+                {canWrite && privacyNotice.trim() ? (
                   <label htmlFor="registro-aviso-revisado" className="flex min-h-11 items-center gap-2 sm:min-h-0">
                     <Checkbox id="registro-aviso-revisado" checked={reviewed} onCheckedChange={(value) => setReviewed(value === true)} />
                     Lo revisé: guardarlo como el aviso de la clínica
@@ -385,8 +398,8 @@ function RegistrationSettings() {
               <label htmlFor="registro-habilitado" className="flex min-w-0 flex-col">
                 <span className="text-sm font-medium">Que se registren solos</span>
                 <span className="text-sm text-muted-foreground">
-                  Con el enlace de la clínica o el código QR de recepción. {receptionName} también lo usa para registrar
-                  por el chat a quien aún no es paciente y mandarle el enlace para reservar.
+                  Con el enlace de la clínica o el código QR de recepción. {receptionName} manda este enlace a quien aún
+                  no es paciente para que se registre y reserve.
                 </span>
               </label>
               <Switch
