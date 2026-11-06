@@ -2115,6 +2115,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   const sendReceipt = tool(
     async ({ patientId }: { patientId: string }) => {
       if (ctx.dryRun) return "[SIMULACIÓN] Se le enviaría aquí el comprobante de su último pago."
+      // Si el equipo tomó la conversación, Sofi no le envía nada más (como `send_reply`).
+      const takenOver = await teamTookOver()
+      if (takenOver) return takenOver
       if (!ctx.storage) return "No se pudo preparar el comprobante: pasa el caso a una persona."
       const storage = ctx.storage
       const sent = await inOrg((tx) =>
@@ -2140,6 +2143,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       if (ctx.dryRun) {
         return "[SIMULACIÓN] Se le reenviaría el último presupuesto que la clínica le entregó; si aún no estuviera listo, quedaría una tarea a recepción para enviárselo."
       }
+      const takenOver = await teamTookOver()
+      if (takenOver) return takenOver
       // Reentregar el mismo mensaje no lo envía ni deja la tarea dos veces.
       const requestId = stableUuid(
         buildAgentProposalKey({

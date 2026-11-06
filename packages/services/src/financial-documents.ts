@@ -24,7 +24,7 @@ import {
   paymentTicket,
   treatmentBudget,
 } from "@odentia/db/schema/clinical"
-import { channelConnection, contact, contactIdentity, conversation } from "@odentia/db/schema/crm"
+import { channelConnection, contact, contactIdentity, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, desc, eq, isNull, sql } from "drizzle-orm"
 import { NOTICE_PURPOSE } from "./automation-messages.js"
@@ -1309,7 +1309,7 @@ export async function sendFinancialDocument(
 
 export type TicketReceiptOutcome =
   | { sent: "correo"; email: string; conversationId: string; messageId: string }
-  /** Lo que dice Caja: «Sin correo: entrégalo impreso o pídele su correo». */
+  /** Lo que dice Caja: «Sin correo: entrégalo impreso, o agrégale su correo en «Enviar al paciente» del ticket». */
   | {
       sent: null
       reason: "sin_correo" | "sin_conexion" | "correo_ajeno" | "sin_permiso"
@@ -1320,7 +1320,7 @@ const RECEIPT_WORDS: Record<
   "sin_correo" | "sin_conexion" | "correo_ajeno" | "sin_permiso",
   string
 > = {
-  sin_correo: "Sin correo: entrégalo impreso o pídele su correo",
+  sin_correo: "Sin correo: entrégalo impreso, o agrégale su correo en «Enviar al paciente» del ticket",
   sin_conexion: "La clínica no tiene un correo conectado: entrégalo impreso",
   correo_ajeno: "Su correo está vinculado a otra persona: entrégalo impreso",
   sin_permiso: "Pidió no recibir ningún mensaje de la clínica: entrégalo impreso",
@@ -1356,9 +1356,7 @@ export async function sendTicketReceiptByEmail(
     reason,
     text: RECEIPT_WORDS[reason],
   })
-  if (!recipient.email?.trim()) return no("sin_correo")
-  if (!(await mayWriteFirst(tx, orgId, recipient.contactId, NOTICE_PURPOSE)))
-    return no("sin_permiso")
+  // Primero lo de la clínica: sin buzón conectado, pedirle el correo no serviría de nada.
   const [mailbox] = await tx
     .select()
     .from(channelConnection)
@@ -1372,6 +1370,9 @@ export async function sendTicketReceiptByEmail(
     .orderBy(channelConnection.createdAt)
     .limit(1)
   if (!mailbox) return no("sin_conexion")
+  if (!recipient.email?.trim()) return no("sin_correo")
+  if (!(await mayWriteFirst(tx, orgId, recipient.contactId, NOTICE_PURPOSE)))
+    return no("sin_permiso")
   const conn = await requireDocumentConnection(tx, orgId, mailbox.id)
   const snap = await buildTicketSnapshot(tx, orgId, patientId, ticketId)
   const pdf = await renderTicketPdf(snap, null)
@@ -1460,8 +1461,28 @@ export async function sendReceiptInConversation(
     .limit(1)
   if (!ticket) return null
   const snap = await buildTicketSnapshot(tx, orgId, input.patientId, ticket.id)
-  const pdf = await renderTicketPdf(snap, null)
   const label = `Comprobante N.º ${snap.numberLabel}`
+  // Si la misma corrida se repite, el comprobante recién enviado aquí no sale otra vez. Pero sí si
+  // el anterior no salió, o si la persona volvió a escribir («no me llegó»): eso es otro pedido.
+  const [recent] = await tx
+    .select({ id: message.id })
+    .from(message)
+    .where(
+      and(
+        eq(message.organizationId, orgId),
+        eq(message.conversationId, input.conversationId),
+        eq(message.direction, "out"),
+        eq(message.senderKind, "agent"),
+        eq(message.body, label),
+        sql`${message.status} not in ('failed', 'unknown')`,
+        sql`${message.createdAt} >= now() - interval '10 minutes'`,
+        sql`not exists (select 1 from message i where i.organization_id = ${message.organizationId}
+          and i.conversation_id = ${message.conversationId} and i.direction = 'in' and i.created_at > ${message.createdAt})`,
+      ),
+    )
+    .limit(1)
+  if (recent) return { label, messageId: recent.id }
+  const pdf = await renderTicketPdf(snap, null)
   const delivered = await deliverDocumentPdf(
     tx,
     orgId,
