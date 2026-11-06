@@ -33,13 +33,13 @@ import {
   inventoryKeys,
   inventoryUnconfirmedMessage,
   moneyText,
+  newKey,
   type ProductDetail,
   type ProductInputBody,
   parseWhole,
   updateProduct,
 } from "../../lib/inventory"
 import { appWords } from "../../lib/product-words"
-import { isAmbiguousMutationError } from "../../lib/query-error"
 import { MoneyInput, Optional, QuantityInput, UnitSelect } from "./fields"
 import { useInventory } from "./inventory-scope"
 
@@ -152,16 +152,17 @@ export function ProductFormDrawer({
     [currency, locale, priced],
   )
 
+  // La clave de este formulario abierto (X13): si se corta la red, reintentar no crea otro producto.
+  const [createKey] = React.useState(newKey)
   const mutation = useMutation({
-    mutationFn: (body: ProductInputBody) => (product ? updateProduct(product.id, body) : createProduct(body)),
+    mutationFn: (body: ProductInputBody) =>
+      product ? updateProduct(product.id, body) : createProduct({ ...body, idempotencyKey: createKey }),
     onSuccess: (saved) => {
       toast.success(product ? "Cambios guardados" : `${saved.name} quedó en el inventario`)
       void queryClient.invalidateQueries({ queryKey: inventoryKeys.all })
       onSaved(saved.id)
     },
   })
-  // Crear sin respuesta del servidor puede haber guardado: no se repite a ciegas.
-  const blocked = !product && isAmbiguousMutationError(mutation.error)
 
   const form = useAppForm({
     defaultValues: initial,
@@ -194,7 +195,8 @@ export function ProductFormDrawer({
   })
   const surface = useFormSurface(form, {
     fieldMap: SERVER_FIELDS,
-    formMessage: (error) => inventoryUnconfirmedMessage(error, { repeatable: Boolean(product) }),
+    // Crear y editar llevan su clave o su id: reintentar no repite nada.
+    formMessage: (error) => inventoryUnconfirmedMessage(error, { repeatable: true }),
   })
 
   const values = useStore(form.store, (state) => state.values)
@@ -235,11 +237,9 @@ export function ProductFormDrawer({
       onClose={onClose}
       title={product ? "Editar producto" : "Nuevo producto"}
       description={branchName}
-      submitDisabled={blocked}
-      // Mientras no se pueda volver a guardar, el porqué sigue a la vista aunque se escriba.
-      error={blocked ? inventoryUnconfirmedMessage(mutation.error, { repeatable: false }) : surface.error}
-      // Enter tampoco reenvía: el aviso de que no se pudo confirmar sigue a la vista.
-      onSubmit={(event) => (blocked ? event.preventDefault() : surface.onSubmit(event))}
+      // El aviso sigue a la vista hasta que se vuelva a guardar; reintentar no repite el producto (X13).
+      error={surface.error}
+      onSubmit={surface.onSubmit}
       submitLabel="Guardar"
       cancelLabel="Cancelar"
     >
