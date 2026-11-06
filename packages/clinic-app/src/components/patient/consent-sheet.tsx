@@ -1,39 +1,20 @@
 import { CONSENT_SECTION_LABELS, type ConsentSections } from "@odentia/clinical"
 import { cn } from "@odentia/ui"
 import { type ReactNode, type Ref, useId } from "react"
+import type { ConsentLetterhead } from "../../lib/clinical-forms"
 
-/** El membrete del papel: nombre, «razón social · RUC» y logo. */
-export interface ConsentSheetClinic {
-  name: string
-  fiscalLine: string | null
-  logo: string | null
-}
+/** El membrete del papel: nombre, «razón social · RUC», logo y, con una sola sede, su dirección. */
+export type ConsentSheetClinic = ConsentLetterhead
 
-/**
- * «Dental Smile S.A.C. · RUC 20601234567», como el membrete del PDF: la razón
- * social solo si no es el nombre que ven los pacientes.
- */
-export function consentFiscalLine(profile: {
-  tradeName?: string | null
-  legalName?: string | null
-  fiscalDocType?: string | null
-  fiscalDocNumber?: string | null
-}): string | null {
-  const name = profile.tradeName || profile.legalName
-  const fiscal = profile.fiscalDocNumber
-    ? [profile.fiscalDocType, profile.fiscalDocNumber].filter(Boolean).join(" ")
-    : null
-  return (
-    [profile.legalName && profile.legalName !== name ? profile.legalName : null, fiscal]
-      .filter(Boolean)
-      .join(" · ") || null
-  )
-}
-
-/** Iniciales del membrete cuando la clínica no subió su logo, como el cuadro del PDF. */
+/** Iniciales del membrete sin logo: la primera letra de las dos primeras palabras, como el PDF (`document-kit`). */
 function initialsOf(name: string): string {
-  const [first = "", second = ""] = name.trim().split(/\s+/)
-  return (second ? `${first.charAt(0)}${second.charAt(0)}` : first.slice(0, 2)).toUpperCase()
+  return name
+    .split(/\s+/)
+    .filter((word) => /[\p{L}\p{N}]/u.test(word))
+    .slice(0, 2)
+    .map((word) => [...(word.match(/[\p{L}\p{N}]/u)?.[0] ?? "")][0] ?? "")
+    .join("")
+    .toLocaleUpperCase("es")
 }
 
 export interface ConsentSheetProps {
@@ -122,7 +103,7 @@ export function ConsentSheet({
       )}
     >
       {clinic ? (
-        <header className="flex items-center gap-3 border-b-2 border-foreground pb-3">
+        <header className="flex flex-wrap items-center gap-3 border-b-2 border-foreground pb-3">
           {clinic.logo ? (
             <img src={clinic.logo} alt="" className="h-12 max-w-32 object-contain" />
           ) : (
@@ -141,6 +122,13 @@ export function ConsentSheet({
               <span className="text-sm text-muted-foreground">{clinic.fiscalLine}</span>
             ) : null}
           </div>
+          {clinic.branchName || clinic.address || clinic.phone ? (
+            <div className="ml-auto flex min-w-0 flex-col text-right text-sm text-muted-foreground">
+              {clinic.branchName ? <span className="font-medium">{clinic.branchName}</span> : null}
+              {clinic.address ? <span>{clinic.address}</span> : null}
+              {clinic.phone ? <span>{clinic.phone}</span> : null}
+            </div>
+          ) : null}
         </header>
       ) : null}
 

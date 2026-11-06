@@ -3,7 +3,9 @@ import {
   CONSENT_DECLARATION,
   CONSENT_SECTION_LABELS,
   type ConsentSections,
+  clinicalProfileFor,
   consentSectionsToText,
+  consentSignatureNote,
   normalizeDrugText,
   parseConsentSections,
 } from "@odentia/clinical"
@@ -36,6 +38,7 @@ import { crmTask } from "@odentia/db/schema/crm"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm"
 import { foldedWordsMatch } from "./search-text.js"
+import { type DocumentLetterhead, loadDocumentLetterhead } from "./document-clinic.js"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { requireCanAttend } from "./attending.js"
 import { fieldsError, invalidField, isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
@@ -2818,24 +2821,51 @@ export async function consentDiagnosisTitles(
   tx: Db,
   docs: { id: string; diagnosisCode: string | null; diagnosisSystem: string | null }[],
 ): Promise<Map<string, string>> {
-  const coded = docs.filter((doc) => doc.diagnosisCode && doc.diagnosisSystem)
+  const keyOf = (system: string, code: string) => `${system}|${code}`
+  // Cada código una vez: un paciente puede tener varios consentimientos del mismo diagnóstico.
+  const wanted = new Map<string, { system: string; code: string }>()
+  for (const doc of docs)
+    if (doc.diagnosisCode && doc.diagnosisSystem)
+      wanted.set(keyOf(doc.diagnosisSystem, doc.diagnosisCode), { system: doc.diagnosisSystem, code: doc.diagnosisCode })
   const titles = new Map<string, string>()
-  if (coded.length === 0) return titles
+  if (wanted.size === 0) return titles
   const rows = await tx
     .select({ systemKey: diagnosisCatalog.systemKey, code: diagnosisCatalog.code, title: diagnosisCatalog.title })
     .from(diagnosisCatalog)
     .where(
       or(
-        ...coded.map((doc) =>
-          and(eq(diagnosisCatalog.systemKey, doc.diagnosisSystem ?? ""), eq(diagnosisCatalog.code, doc.diagnosisCode ?? "")),
+        ...[...wanted.values()].map((item) =>
+          and(eq(diagnosisCatalog.systemKey, item.system), eq(diagnosisCatalog.code, item.code)),
         ),
       ),
     )
-  for (const doc of coded) {
-    const found = rows.find((row) => row.systemKey === doc.diagnosisSystem && row.code === doc.diagnosisCode)
-    if (found) titles.set(doc.id, found.title)
+  const byKey = new Map(rows.map((row) => [keyOf(row.systemKey, row.code), row.title]))
+  for (const doc of docs) {
+    const title = doc.diagnosisCode && doc.diagnosisSystem ? byKey.get(keyOf(doc.diagnosisSystem, doc.diagnosisCode)) : undefined
+    if (title) titles.set(doc.id, title)
   }
   return titles
+}
+
+/**
+ * Lo fijo de la hoja que se firma en la tablet (ADR 0148): el membrete del papel, la
+ * declaración que se guarda al firmar y la nota del nivel de firma de su país. Llega
+ * del servidor para que lo que se lee sea lo que se guarda.
+ */
+export async function getConsentSheetFrame(
+  tx: Db,
+  orgId: string,
+): Promise<{ clinic: DocumentLetterhead; declaration: string; signatureNote: string }> {
+  const [profile] = await tx
+    .select({ country: orgProfile.countryCode })
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, orgId))
+    .limit(1)
+  return {
+    clinic: await loadDocumentLetterhead(tx, orgId),
+    declaration: CONSENT_DECLARATION,
+    signatureNote: consentSignatureNote(clinicalProfileFor(profile?.country).signatureLaw),
+  }
 }
 
 export async function listConsentDocuments(

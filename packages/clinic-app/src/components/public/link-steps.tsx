@@ -91,6 +91,7 @@ export function LinkConsentStep({ slug, token, consentId, onBack }: { slug: stri
         sections={consent.sections}
         body={consent.body}
         declaration={consent.declaration}
+        minor={consent.minor}
         accept={(declarationId) => (
           <form.AppField name="comprehensionConfirmed">
             {(field) => (
@@ -116,6 +117,7 @@ export function LinkConsentStep({ slug, token, consentId, onBack }: { slug: stri
         signer={{
           heading: consent.signer.asRepresentative ? "Representante legal" : "Paciente",
           name: consent.signer.name,
+          detail: consent.signer.asRepresentative ? "Representante legal" : null,
           children: (
             <>
               <form.AppField name="docNumber">

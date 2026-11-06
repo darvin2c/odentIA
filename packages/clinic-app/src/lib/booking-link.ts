@@ -1,4 +1,5 @@
 import type { RegistrationAnswers, RegistrationConfig } from "@odentia/clinical"
+import type { ConsentLetterhead } from "./clinical-forms"
 import { ApiError, saveDownload } from "./api"
 import { API_URL } from "./auth-client"
 import type { PortalBudget } from "./portal"
@@ -351,8 +352,10 @@ export interface LinkConsent {
   declaration: string
   signatureWords: string
   signatureNote: string
-  clinic: { name: string; fiscalLine: string | null; logo: string | null }
+  clinic: ConsentLetterhead
   patient: { name: string; chartNumber: string }
+  /** Menor de edad: firma su representante legal. */
+  minor: boolean
   /** Quién firma y el tipo de documento que escribe (nunca el número guardado). */
   signer: { name: string; asRepresentative: boolean; documentLabel: string | null }
 }

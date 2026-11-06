@@ -312,7 +312,9 @@ it("el consentimiento se firma en su enlace con su documento y el profesional lo
     signatureNote: expect.stringMatching(/^Firma electrónica simple/),
     patient: { name: "Lucía Fernández", chartNumber: expect.stringMatching(/^HC-\d{6}$/) },
     signer: { name: "Lucía Fernández", asRepresentative: false, documentLabel: "DNI" },
+    minor: false,
   })
+  // El membrete es el del papel.
   expect(sheet.clinic.name).not.toBe("")
   // El número de su documento no viaja: lo escribe al firmar.
   expect(JSON.stringify(sheet)).not.toContain("40000004")

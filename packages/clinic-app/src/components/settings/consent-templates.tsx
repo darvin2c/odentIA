@@ -48,6 +48,7 @@ import { z } from "zod"
 import {
   type ConsentTemplate,
   fetchConsentPreview,
+  fetchConsentSheetFrame,
   fetchConsentTemplates,
   markConsentTemplateReviewed,
   saveConsentTemplate,
@@ -58,8 +59,7 @@ import { fetchConsentTemplateServices, saveConsentTemplateServices } from "../..
 import { sameDraft, usePageDraftGuard } from "../../lib/page-draft-guard"
 import { fetchServices } from "../../lib/services"
 import { usePdfUrl } from "../patient/document-paper-panel"
-import { useOrgProfile } from "../../lib/org"
-import { consentFiscalLine, ConsentSheet as PatientConsentSheet } from "../patient/consent-sheet"
+import { ConsentSheet as PatientConsentSheet } from "../patient/consent-sheet"
 import { TemplatesSkeleton } from "../skeletons/settings"
 import { SettingsLoadError } from "./load-error"
 
@@ -344,7 +344,7 @@ interface ConsentPreviewDraft {
  */
 function ConsentPreviewDrawer({ draft, onClose }: { draft: ConsentPreviewDraft; onClose: () => void }) {
   const mobile = useIsMobile() === true
-  const org = useOrgProfile().data
+  const frame = useQuery({ queryKey: ["consent-sheet"], queryFn: fetchConsentSheetFrame, staleTime: 5 * 60_000 })
   const pdf = useQuery({
     queryKey: ["consent-preview", draft],
     queryFn: () => fetchConsentPreview(draft),
@@ -395,14 +395,14 @@ function ConsentPreviewDrawer({ draft, onClose }: { draft: ConsentPreviewDraft; 
         <TabsContent value="telefono">
           <div className="mx-auto flex max-w-[24rem] flex-col gap-4 rounded-[2rem] border-8 border-foreground/80 bg-muted/40 px-1 py-4">
             <PatientConsentSheet
-              clinic={org ? { name: org.tradeName || org.legalName, fiscalLine: consentFiscalLine(org), logo: org.logo ?? null } : null}
+              clinic={frame.data?.data.clinic ?? null}
               title={draft.title}
               facts={[
                 { label: "Paciente", value: "Se completa solo", strong: true },
                 { label: "Historia clínica", value: "Se completa solo" },
               ]}
               sections={draft.sections}
-              declaration={CONSENT_DECLARATION}
+              declaration={frame.data?.data.declaration ?? CONSENT_DECLARATION}
               signer={{
                 heading: "Paciente",
                 name: "Nombre del paciente",

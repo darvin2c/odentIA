@@ -67,7 +67,6 @@ import {
   getPatientHealth,
   initializeDeclaredPatientHealth,
 } from "./clinical.js"
-import { getClinicLogo } from "./clinic-identity.js"
 import {
   CONSENT_SIGNATURE_WORDS,
   consentDiagnosisTitles,
@@ -75,6 +74,7 @@ import {
   signConsentByLink,
 } from "./clinical-forms.js"
 import { sendOutbound, sendTemplateOutbound } from "./conversations.js"
+import { type DocumentLetterhead, loadDocumentLetterhead } from "./document-clinic.js"
 import { chartNumber } from "./document-kit.js"
 import { createContactNote } from "./crm-workspace.js"
 import { notFound, ServiceError, validation } from "./errors.js"
@@ -103,7 +103,7 @@ import {
 } from "./portal.js"
 import { pendingQuestionnaire, submitQuestionnaireFromLink } from "./portal-questionnaire.js"
 import { personalLinkMessageUrl, personalLinkUrl } from "./public-links.js"
-import { contactDecides } from "./responsibilities.js"
+import { contactDecides, patientIsMinor } from "./responsibilities.js"
 import { createTask } from "./tasks.js"
 
 /**
@@ -1334,8 +1334,10 @@ export interface PersonalLinkConsentView {
   /** El nivel de firma, dicho como en el pie del papel. */
   signatureWords: string
   signatureNote: string
-  clinic: { name: string; fiscalLine: string | null; logo: string | null }
+  clinic: DocumentLetterhead
   patient: { name: string; chartNumber: string }
+  /** Menor de edad: firma su representante legal, como avisa el papel. */
+  minor: boolean
   /** Quién firma y el tipo de documento que escribe (nunca el número guardado). */
   signer: { name: string; asRepresentative: boolean; documentLabel: string | null }
 }
@@ -1380,25 +1382,10 @@ export async function getPersonalLinkConsent(
     .where(and(eq(patient.organizationId, orgId), eq(patient.id, doc.patientId)))
     .limit(1)
   const [profile] = await tx
-    .select({
-      tradeName: orgProfile.tradeName,
-      legalName: orgProfile.legalName,
-      fiscalDocType: orgProfile.fiscalDocType,
-      fiscalDocNumber: orgProfile.fiscalDocNumber,
-      country: orgProfile.countryCode,
-    })
+    .select({ country: orgProfile.countryCode })
     .from(orgProfile)
     .where(eq(orgProfile.organizationId, orgId))
     .limit(1)
-  const clinicName = profile?.tradeName || profile?.legalName || (await findClinicName(tx, orgId))
-  // El membrete del papel: razón social (si no es el nombre) y documento fiscal.
-  const fiscal = profile?.fiscalDocNumber
-    ? [profile.fiscalDocType, profile.fiscalDocNumber].filter(Boolean).join(" ")
-    : null
-  const fiscalLine =
-    [profile?.legalName && profile.legalName !== clinicName ? profile.legalName : null, fiscal]
-      .filter(Boolean)
-      .join(" · ") || null
   const diagnosisTitle = (await consentDiagnosisTitles(tx, [doc])).get(doc.id)
   const diagnosisCode = doc.diagnosisCode ? diagnosisCodeLabel(doc.diagnosisSystem, doc.diagnosisCode) : null
   return {
@@ -1411,8 +1398,9 @@ export async function getPersonalLinkConsent(
     declaration: doc.declarationSnapshot ?? CONSENT_DECLARATION,
     signatureWords: CONSENT_SIGNATURE_WORDS.enlace,
     signatureNote: consentSignatureNote(clinicalProfileFor(profile?.country).signatureLaw),
-    clinic: { name: clinicName, fiscalLine, logo: await getClinicLogo(tx, orgId) },
+    clinic: await loadDocumentLetterhead(tx, orgId),
     patient: { name: person?.name ?? "", chartNumber: person ? chartNumber(person.patientNumber) : "" },
+    minor: await patientIsMinor(tx, orgId, doc.patientId),
     signer: {
       name: signer?.name ?? "",
       asRepresentative: !self,

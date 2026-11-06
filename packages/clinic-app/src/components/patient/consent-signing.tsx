@@ -1,4 +1,4 @@
-import { CONSENT_DECLARATION, clinicalProfileFor, consentSignatureNote, diagnosisCodeLabel } from "@odentia/clinical"
+import { diagnosisCodeLabel } from "@odentia/clinical"
 import {
   Button,
   Checkbox,
@@ -11,6 +11,7 @@ import {
 } from "@odentia/ui"
 import {
   applySubmitError,
+  ErrorState,
   FormChoiceField,
   FormDrawer,
   focusFirstInvalid,
@@ -29,6 +30,7 @@ import { apiFetch } from "../../lib/api"
 import {
   CONSENT_SIGNATURE_WORDS,
   type ConsentDocument,
+  fetchConsentSheetFrame,
   generateConsentPdf,
   signConsent,
 } from "../../lib/clinical-forms"
@@ -36,9 +38,8 @@ import { fetchResponsibilities } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { uploadPatientFile } from "../../lib/encounter-documents"
 import { fetchMyProfessionalProfile, registrationLabel } from "../../lib/encounters"
-import { useOrgProfile } from "../../lib/org"
 import { hcLabel, type PatientFull } from "../../lib/patients"
-import { ConsentSheet, consentFiscalLine } from "./consent-sheet"
+import { ConsentSheet } from "./consent-sheet"
 import { FirmaPad } from "./firma-pad"
 
 export interface SignerChoice {
@@ -168,7 +169,8 @@ function SigningFlow({
   const rootRef = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
   const { choices, isMinor, patient, loading } = useSignerChoices(patientId)
-  const org = useOrgProfile().data
+  // El membrete, la declaración y la nota de firma vienen del servidor: lo que se lee es lo que se guarda.
+  const frame = useQuery({ queryKey: ["consent-sheet"], queryFn: fetchConsentSheetFrame, staleTime: 5 * 60_000 })
   const titleRef = useRef<HTMLHeadingElement>(null)
   const [step, setStep] = useState<Step>({ kind: "sign", index: 0 })
   // Con más de una persona habilitada, primero se elige quién firma.
@@ -348,8 +350,14 @@ function SigningFlow({
 
         <div ref={rootRef} className="flex w-full flex-1 flex-col bg-muted/40">
           <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-3 py-6 text-lg sm:px-6">
-          {loading ? (
-            <LoadingState message="Buscando quién puede firmar…" />
+          {loading || frame.isPending ? (
+            <LoadingState message="Preparando la hoja…" />
+          ) : frame.isError ? (
+            <ErrorState
+              title="No pudimos preparar la hoja"
+              message="Revisa tu conexión y vuelve a intentarlo."
+              onRetry={() => void frame.refetch()}
+            />
           ) : !signer ? (
             <p role="alert" className="rounded-md bg-warning-soft p-4 text-base">
               {isMinor
@@ -375,11 +383,7 @@ function SigningFlow({
             <ConsentSheet
               large
               titleRef={titleRef}
-              clinic={
-                org
-                  ? { name: org.tradeName || org.legalName, fiscalLine: consentFiscalLine(org), logo: org.logo ?? null }
-                  : null
-              }
+              clinic={frame.data.data.clinic}
               title={current.titleSnapshot}
               procedureRef={current.procedureRef}
               facts={
@@ -394,7 +398,7 @@ function SigningFlow({
               diagnosis={diagnosisOf(current)}
               sections={current.sectionsSnapshot}
               body={current.bodySnapshot}
-              declaration={CONSENT_DECLARATION}
+              declaration={frame.data.data.declaration}
               minor={isMinor}
               accept={(declarationId) => (
                 <form.AppField key={`${current.id}-understood`} name={`docs[${step.index}].understood`}>
@@ -421,10 +425,13 @@ function SigningFlow({
               signer={{
                 heading: signer.kind === "representante" ? "Representante legal" : "Paciente",
                 name: signer.name,
+                // Como el papel: su documento si firma la persona; si no, que firma como representante.
                 detail:
-                  signer.kind === "paciente" && patient?.docNumber
-                    ? `${patient.docType ?? "Documento"} ${patient.docNumber}`
-                    : null,
+                  signer.kind === "representante"
+                    ? "Representante legal"
+                    : patient?.docNumber
+                      ? `${patient.docType ?? "Documento"} ${patient.docNumber}`
+                      : null,
                 children: (
                   <form.AppField key={`${current.id}-strokes`} name={`docs[${step.index}].strokes`}>
                     {(field) => (
@@ -453,7 +460,7 @@ function SigningFlow({
                 note: "Falta su confirmación: lo confirma al terminar, con su perfil.",
               }}
               signatureWords={CONSENT_SIGNATURE_WORDS.clinica}
-              signatureNote={consentSignatureNote(clinicalProfileFor(org?.countryCode).signatureLaw)}
+              signatureNote={frame.data.data.signatureNote}
             />
           ) : step.kind === "confirm" ? (
             <div className="flex flex-col gap-4">
