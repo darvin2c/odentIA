@@ -129,6 +129,8 @@ export async function getReportSummary(tx: Db, orgId: string, query: ReportQuery
     ),
   ]
   const nth = <T>(list: T[], index: number): T => list[index] as T
+  /** Las citas con desenlace: la base de «No vinieron» en todas las pestañas. */
+  const marked = (item: { attended: number; noShow: number; cancelled: number }) => item.attended + item.noShow + item.cancelled
   const monthsOf = <T, V>(list: T[], pick: (item: T) => V): V[] => list.slice(2).map(pick)
   const cents = (list: Array<{ currency: string; cents: number }> | undefined): number => inCurrency(list, currency)?.cents ?? 0
   // Lo cobrado en las citas del agente solo se dice del periodo (Reportes › Agente, decisión 5).
@@ -167,10 +169,12 @@ export async function getReportSummary(tx: Db, orgId: string, query: ReportQuery
     },
     newPatients: { current: nth(fresh, 0), previous: nth(fresh, 1), months: fresh.slice(2) },
     acceptance: { current: nth(acceptance, 0), previous: nth(acceptance, 1), months: acceptance.slice(2) },
+    // «No vinieron» sobre las citas con desenlace (vino, no vino o se canceló), como en Agenda:
+    // las que pasaron sin que nadie las marcara no cuentan en ninguna pestaña.
     noShow: {
-      current: { noShow: nth(appointments, 0).noShow, total: nth(appointments, 0).total },
-      previous: { noShow: nth(appointments, 1).noShow, total: nth(appointments, 1).total },
-      months: monthsOf(appointments, (item) => ({ noShow: item.noShow, total: item.total })),
+      current: { noShow: nth(appointments, 0).noShow, total: marked(nth(appointments, 0)) },
+      previous: { noShow: nth(appointments, 1).noShow, total: marked(nth(appointments, 1)) },
+      months: monthsOf(appointments, (item) => ({ noShow: item.noShow, total: marked(item) })),
     },
     agent: {
       /** `collectedCents`: lo cobrado en esas citas, en la moneda de la clínica. */
@@ -212,7 +216,8 @@ export async function getReportProfessionals(tx: Db, orgId: string, query: Repor
     select a.professional_user_id as "userId", u.name,
       count(*) filter (where a.status = 'atendida')::int as attended,
       count(*) filter (where a.status = 'no_asistio')::int as "noShow",
-      count(*)::int as total
+      -- La misma base de «No vinieron» en Agenda: las citas con desenlace.
+      count(*) filter (where a.status in ('atendida','no_asistio','cancelada'))::int as total
     from appointment a join "user" u on u.id = a.professional_user_id
     where a.organization_id = ${orgId} and not a.is_test and a.starts_at >= ${at(window.start)} and a.starts_at < ${at(window.end)}
       and (a.status in ('atendida','no_asistio','cancelada') or (a.status in ('programada','confirmada') and a.ends_at < ${at(now)}))

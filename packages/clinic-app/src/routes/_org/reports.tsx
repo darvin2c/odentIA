@@ -274,6 +274,7 @@ function ReportsPage() {
                   onOpenList={openList}
                   onShowCurrentMonth={showCurrentMonth}
                   advice={adviceNote("finanzas")}
+                  argosEnabled={argosEnabled}
                 />
               ) : tab === "agenda" ? (
                 <AgendaTab query={query} onOpenList={openList} advice={adviceNote("agenda")} />

@@ -17,6 +17,7 @@ import { type AdminRecommendation, getAdminRecommendations } from "./agent-admin
 import { budgetValueOptionSql } from "./budgets.js"
 import { getAgentReportList } from "./report-agent.js"
 import { OVERDUE_DAYS, overdueDebtSql } from "./report-debts.js"
+import { firstVisitSql } from "./report-visits.js"
 import { FINANCE_LISTS, financeListRows, isFinanceList } from "./report-finance.js"
 import type { ReportSpan } from "./report-periods.js"
 import { at, bySpan, type ReportQuery, type ReportScope, reportHead, reportScope, safeCents, type Span, spansSql } from "./report-scope.js"
@@ -131,14 +132,7 @@ export async function waitInRoom(tx: Db, orgId: string, scope: Pick<ReportScope,
 
 // --- Pacientes ------------------------------------------------------------------------------
 
-/** La primera cita atendida de cada persona: `first_visit(id, patient_id, starts_at, branch_id, service_name, professional_user_id)`. */
-export function firstVisitSql(orgId: string): SQL {
-  return sql`first_visit as (
-      select distinct on (patient_id) id, patient_id, starts_at, branch_id, service_name, professional_user_id
-      from appointment where organization_id=${orgId} and status='atendida'
-      order by patient_id, starts_at, id
-    )`
-}
+export { firstVisitSql } from "./report-visits.js"
 
 /** Personas atendidas por primera vez en cada tramo (su primera cita atendida cae dentro). */
 export async function newPatientsMany(tx: Db, orgId: string, scope: Pick<ReportScope, "branch">, spans: Span[]): Promise<number[]> {
@@ -356,7 +350,7 @@ export async function getReportList(
           null::text as cents, null::text as currency, count(*) over()::int as total
         from first_visit v
         join patient p on p.id=v.patient_id and p.organization_id=${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
-        join branch b on b.id=v.branch_id and b.organization_id=${orgId}
+        left join branch b on b.id=v.branch_id and b.organization_id=${orgId}
         join "user" u on u.id=v.professional_user_id
         where v.starts_at >= ${start} and v.starts_at < ${end}
           ${scope.branch ? sql`and v.branch_id=${scope.branch.id}` : sql``}

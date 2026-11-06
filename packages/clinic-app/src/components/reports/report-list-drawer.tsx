@@ -247,7 +247,7 @@ const LISTS: Record<ReportListKey, ListCopy> = {
     title: "Pasaron al equipo",
     noun: { one: "conversación", many: "conversaciones" },
     how: (period) =>
-      `De quienes escribieron por primera vez ${during(period)}, las conversaciones que el agente pasó al equipo hasta hoy, con el motivo que dejó. Cada una se abre en la Bandeja.`,
+      `De las conversaciones que empezaron ${during(period)}, las que el agente pasó al equipo hasta hoy, con el motivo que dejó. Cada una se abre en la Bandeja.`,
     where: { to: "/inbox", label: "Abrir la Bandeja" },
     showNext: false,
   },

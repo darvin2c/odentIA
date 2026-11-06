@@ -8,7 +8,7 @@
 import type { Db } from "@odentia/db"
 import { reportPin, reportQuestion, REPORT_PIN_LIMIT } from "@odentia/db/schema/reports"
 import { and, eq, isNotNull, sql } from "drizzle-orm"
-import { argosColumnLabel, isArgosHiddenColumn } from "./argos-answer.js"
+import { argosColumnLabels, isArgosHiddenColumn } from "./argos-answer.js"
 import { type ArgosPeriodSpec, type ArgosResolvedPeriod, bindArgosPeriod, findArgosBranch, listArgosBranches, resolveArgosPeriod } from "./argos-period.js"
 import type { ArgosQueryResult } from "./argos-query.js"
 import { isCheckViolation, isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
@@ -153,7 +153,7 @@ export function argosAnswerCsv(title: string, day: string, result: ArgosQueryRes
   return {
     filename: csvFileName(title, day),
     body: toCsv(
-      columns.map((column) => argosColumnLabel(column.name)),
+      argosColumnLabels(columns.map((column) => column.name)),
       result.rows.map((row) => columns.map((column) => cell(row[column.name], column.kind))),
     ),
   }

@@ -78,7 +78,7 @@ export function SummaryTab({
   const [goalMetric, setGoalMetric] = useState<ReportGoalMetric | null>(null)
 
   if (report.isError)
-    return <QueryErrorState error={report.error} onRetry={() => void report.refetch()} notFound="La sede elegida ya no está disponible. Elige otra sede." />
+    return <QueryErrorState error={report.error} onRetry={() => void report.refetch()} notFound="La sede elegida ya no está disponible. Elige otra sede." invalid="Ese periodo no se puede mostrar: elige otro arriba." />
 
   const data = report.data?.data
   // «Sin movimiento» se dice de lo pedido, no de lo que aún muestra la sede o el periodo anterior.

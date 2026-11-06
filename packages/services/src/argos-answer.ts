@@ -247,6 +247,21 @@ export function argosColumnLabel(name: string): string {
 }
 
 /**
+ * Las etiquetas de varias columnas, sin dos iguales: si dos cálculos juntados
+ * traen la misma cifra («Cobrado» y `c2_cobrado_dinero`), la segunda dice
+ * «Cobrado (2)». El nombre de la columna no cambia: lo usan los huecos de la frase.
+ */
+export function argosColumnLabels(names: readonly string[]): string[] {
+  const seen = new Map<string, number>()
+  return names.map((name) => {
+    const label = argosColumnLabel(name)
+    const count = (seen.get(label) ?? 0) + 1
+    seen.set(label, count)
+    return count === 1 ? label : `${label} (${count})`
+  })
+}
+
+/**
  * El valor con el formato de la clínica. El nombre de la columna dice qué es:
  * `_dinero` en la moneda de la clínica, `_otra_moneda` en su otra moneda, `_pct` un
  * porcentaje de 0 a 100 y `_mes` un mes (así se le pide al modelo); el tipo de la

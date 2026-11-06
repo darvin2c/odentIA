@@ -23,6 +23,7 @@ import { collectedNetMany, EXPENSE_CATEGORIES } from "./finance.js"
 import { orgTaxes } from "./clinic-taxes.js"
 import { unpaidPurchasesMany } from "./purchase-balance.js"
 import { debtDaysSql, debtZoneSql, overdueDebtSql, valuedDebtSql } from "./report-debts.js"
+import { firstVisitSql } from "./report-visits.js"
 import { addMonths, currentMonthIn, lastMonths, monthStart, type ReportBucket } from "./report-periods.js"
 import {
   at,
@@ -472,11 +473,7 @@ export const PATIENT_VALUE_MONTHS = 6
  */
 export async function newPatientValue(tx: Db, orgId: string, end: Date, options: { currency: string; branchId?: string }) {
   const [row] = await tx.execute<{ patients: number; cents: string }>(sql`
-    with first_visit as (
-      select distinct on (patient_id) patient_id, starts_at, branch_id
-      from appointment where organization_id = ${orgId} and status = 'atendida'
-      order by patient_id, starts_at, id
-    ), cohort as (
+    with ${firstVisitSql(orgId)}, cohort as (
       select patient_id, starts_at from first_visit
       where starts_at >= ${at(end)} - interval '9 months' and starts_at < ${at(end)} - interval '6 months'
         ${options.branchId ? sql`and branch_id = ${options.branchId}` : sql``}

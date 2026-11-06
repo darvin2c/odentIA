@@ -28,6 +28,7 @@ import {
   argosChoiceOf,
   argosEmptyHoleProblem,
   argosColumnLabel,
+  argosColumnLabels,
   argosAheadOf,
   argosFigure,
   argosFiguresText,
@@ -588,7 +589,8 @@ function tableOf(result: ArgosQueryResult, zone: Parameters<typeof fillArgosSent
   // Los ids siguen en las filas (para abrir a la persona desde la pantalla), pero no son una columna que se muestre;
   // un total que la frase ya dice tampoco se repite en cada fila.
   const shownColumns = result.columns.filter((column) => !isArgosHiddenColumn(column.name) && !repeated.has(column.name))
-  const columns = shownColumns.map((column) => ({ ...column, label: argosColumnLabel(column.name) }))
+  const labels = argosColumnLabels(shownColumns.map((column) => column.name))
+  const columns = shownColumns.map((column, index) => ({ ...column, label: labels[index] ?? argosColumnLabel(column.name) }))
   const display = result.rows.map((row) => Object.fromEntries(shownColumns.map((column) => [column.name, formatArgosValue(row[column.name] ?? null, column, zone)])))
   return { columns, rows: result.rows, display, truncated: result.truncated }
 }
@@ -851,7 +853,20 @@ export async function askArgos(
     const sql = `with ${parts.map((calc) => `${calc.id} as (${calc.sql})`).join(", ")} select ${[`${main.id}.*`, ...extra].join(", ")} from ${main.id}${joins.join("")}`
     // Una cifra oficial sigue siéndolo si todas lo son; «Así lo calculé» las nombra a todas.
     const official = parts.every((calc) => calc.figure)
-    const how = parts.map((calc) => calc.how).filter(Boolean).join(" ")
+    // Cada frase una vez: dos cálculos de la misma cifra no repiten su regla. Lo que
+    // solo dice uno (su filtro) va con la columna que lo lleva, con su etiqueta de pantalla.
+    const shownLabels = argosColumnLabels(columns.map((column) => column.name))
+    const labelOf = new Map(columns.map((column, index) => [column.name, shownLabels[index] ?? column.name]))
+    const sentences: string[] = []
+    const sentencesOf = (text: string | null) => (text ?? "").split(/(?<=\.)\s+/).filter(Boolean)
+    for (const sentence of sentencesOf(main.how)) if (!sentences.includes(sentence)) sentences.push(sentence)
+    for (const calc of rest) {
+      const own = sentencesOf(calc.how).filter((sentence) => !sentences.includes(sentence))
+      if (own.length === 0) continue
+      const label = labelOf.get(columns.find((column) => column.name.startsWith(`${calc.id}_`))?.name ?? "")
+      sentences.push(label ? `En «${label}»: ${own.join(" ")}` : own.join(" "))
+    }
+    const how = sentences.join(" ")
     return { ...main, id: parts.map((calc) => calc.id).join("+"), base: main.id, sql, result: { ...main.result, columns, rows }, figure: official ? main.figure : null, how: how || null }
   }
 
