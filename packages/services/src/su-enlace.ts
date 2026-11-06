@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto"
 import {
+  CONSENT_DECLARATION,
   clinicalProfileFor,
+  consentSignatureNote,
+  diagnosisCodeLabel,
   documentIssuerCountry,
   documentText,
   documentTypeProfile,
@@ -17,6 +20,7 @@ import type { Db } from "@odentia/db"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { automationLinkToken } from "@odentia/db/schema/automation"
 import {
+  patient,
   patientDataConsent,
   patientResponsibility,
   paymentTicket,
@@ -24,7 +28,7 @@ import {
 } from "@odentia/db/schema/clinical"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { contact } from "@odentia/db/schema/crm"
-import { auditEvent } from "@odentia/db/schema/org"
+import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gte, isNotNull, isNull, lte, or, sql } from "drizzle-orm"
 import { getMessagePermissions, setConsent, setMessageChoice } from "./automation.js"
 import {
@@ -63,8 +67,15 @@ import {
   getPatientHealth,
   initializeDeclaredPatientHealth,
 } from "./clinical.js"
-import { type SignatureEvidence, signConsentByLink } from "./clinical-forms.js"
+import { getClinicLogo } from "./clinic-identity.js"
+import {
+  CONSENT_SIGNATURE_WORDS,
+  consentDiagnosisTitles,
+  type SignatureEvidence,
+  signConsentByLink,
+} from "./clinical-forms.js"
 import { sendOutbound, sendTemplateOutbound } from "./conversations.js"
+import { chartNumber } from "./document-kit.js"
 import { createContactNote } from "./crm-workspace.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { buildTicketSnapshot, renderTicketPdf } from "./financial-document-pdf.js"
@@ -73,6 +84,7 @@ import type { PaperStorage } from "./issued-papers.js"
 import { findOrgCountry, findOrgLocale, orgProduct } from "./locale.js"
 import { openRoute, previewRoute } from "./message-gate.js"
 import { consentStatusOf } from "./message-permission.js"
+import { joinPatientPerson } from "./patient-identity.js"
 import { clinicAsksHealth, getPatientMissingData, getPatientRegistrationConfig } from "./patient-registration.js"
 import { privacyNoticeOf } from "./privacy-notice.js"
 import {
@@ -1301,12 +1313,29 @@ export async function decidePersonalLinkBudget(
 
 // ------------------------------------------------------ consentimiento ---
 
+/**
+ * Lo que lee antes de firmar: la misma hoja que el PDF que recibe (membrete, paciente,
+ * pieza, diagnóstico, secciones y declaración), para que firme lo que ve. Solo para
+ * quien decide por el paciente (`consentsOf`); el número de su documento nunca viaja:
+ * lo escribe y se compara al firmar (ADR 0148).
+ */
 export interface PersonalLinkConsentView {
   id: string
   title: string
+  /** La pieza o zona, como en el papel: «Exodoncia pieza 38». */
+  procedureRef: string | null
+  /** «CIE-10 MINSA · K04.0 · Pulpitis», o sin descripción si el catálogo no la tiene. */
+  diagnosis: string | null
   /** Lo que se explica, por secciones (qué se hará, beneficios, riesgos y alternativas). */
   sections: unknown
   body: string
+  /** La declaración que acepta al firmar: la misma que queda en el papel. */
+  declaration: string
+  /** El nivel de firma, dicho como en el pie del papel. */
+  signatureWords: string
+  signatureNote: string
+  clinic: { name: string; fiscalLine: string | null; logo: string | null }
+  patient: { name: string; chartNumber: string }
   /** Quién firma y el tipo de documento que escribe (nunca el número guardado). */
   signer: { name: string; asRepresentative: boolean; documentLabel: string | null }
 }
@@ -1344,11 +1373,46 @@ export async function getPersonalLinkConsent(
     .where(and(eq(contact.organizationId, orgId), eq(contact.id, link.row.contactId)))
     .limit(1)
   const self = (await patientPersonId(tx, orgId, link.patientId)) === link.row.contactId
+  const [person] = await tx
+    .select({ name: contact.displayName, patientNumber: patient.patientNumber })
+    .from(patient)
+    .innerJoin(contact, joinPatientPerson())
+    .where(and(eq(patient.organizationId, orgId), eq(patient.id, doc.patientId)))
+    .limit(1)
+  const [profile] = await tx
+    .select({
+      tradeName: orgProfile.tradeName,
+      legalName: orgProfile.legalName,
+      fiscalDocType: orgProfile.fiscalDocType,
+      fiscalDocNumber: orgProfile.fiscalDocNumber,
+      country: orgProfile.countryCode,
+    })
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, orgId))
+    .limit(1)
+  const clinicName = profile?.tradeName || profile?.legalName || (await findClinicName(tx, orgId))
+  // El membrete del papel: razón social (si no es el nombre) y documento fiscal.
+  const fiscal = profile?.fiscalDocNumber
+    ? [profile.fiscalDocType, profile.fiscalDocNumber].filter(Boolean).join(" ")
+    : null
+  const fiscalLine =
+    [profile?.legalName && profile.legalName !== clinicName ? profile.legalName : null, fiscal]
+      .filter(Boolean)
+      .join(" · ") || null
+  const diagnosisTitle = (await consentDiagnosisTitles(tx, [doc])).get(doc.id)
+  const diagnosisCode = doc.diagnosisCode ? diagnosisCodeLabel(doc.diagnosisSystem, doc.diagnosisCode) : null
   return {
     id: doc.id,
     title: doc.titleSnapshot,
+    procedureRef: doc.procedureRef,
+    diagnosis: diagnosisCode ? (diagnosisTitle ? `${diagnosisCode} · ${diagnosisTitle}` : diagnosisCode) : null,
     sections: doc.sectionsSnapshot,
     body: doc.bodySnapshot,
+    declaration: doc.declarationSnapshot ?? CONSENT_DECLARATION,
+    signatureWords: CONSENT_SIGNATURE_WORDS.enlace,
+    signatureNote: consentSignatureNote(clinicalProfileFor(profile?.country).signatureLaw),
+    clinic: { name: clinicName, fiscalLine, logo: await getClinicLogo(tx, orgId) },
+    patient: { name: person?.name ?? "", chartNumber: person ? chartNumber(person.patientNumber) : "" },
     signer: {
       name: signer?.name ?? "",
       asRepresentative: !self,

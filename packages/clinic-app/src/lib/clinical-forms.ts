@@ -149,6 +149,8 @@ export interface ConsentDocument {
   diagnosisCode: string | null
   /** Lista del código («ICD-10», «ICD-11»). */
   diagnosisSystem?: string | null
+  /** Su descripción en la lista, para decirlo como el papel. */
+  diagnosisDescription?: string | null
   informedAt: string | null
   informerName: string | null
   informerTitle: string | null

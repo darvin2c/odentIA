@@ -337,13 +337,22 @@ export interface ConsentSection {
   risks?: string[]
   alternatives?: string[]
   consequences?: string
+  notes?: string | null
 }
 
+/** Lo que lee antes de firmar: la misma hoja que el PDF (sin el número de su documento). */
 export interface LinkConsent {
   id: string
   title: string
+  procedureRef: string | null
+  diagnosis: string | null
   sections: ConsentSection | null
   body: string
+  declaration: string
+  signatureWords: string
+  signatureNote: string
+  clinic: { name: string; fiscalLine: string | null; logo: string | null }
+  patient: { name: string; chartNumber: string }
   /** Quién firma y el tipo de documento que escribe (nunca el número guardado). */
   signer: { name: string; asRepresentative: boolean; documentLabel: string | null }
 }

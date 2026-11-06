@@ -2801,27 +2801,48 @@ export async function getConsentPrint(tx: Db, orgId: string, documentId: string)
     })
     .from(orgProfile)
     .where(eq(orgProfile.organizationId, orgId))
-  const [dx] =
-    doc.diagnosisCode && doc.diagnosisSystem
-      ? await tx
-          .select({ description: diagnosisCatalog.title })
-          .from(diagnosisCatalog)
-          .where(and(eq(diagnosisCatalog.systemKey, doc.diagnosisSystem), eq(diagnosisCatalog.code, doc.diagnosisCode)))
-      : []
   const minor = await patientIsMinor(tx, orgId, doc.patientId)
   return {
     document: doc,
-    diagnosisDescription: dx?.description ?? null,
+    diagnosisDescription: (await consentDiagnosisTitles(tx, [doc])).get(doc.id) ?? null,
     patient: { ...person, minor },
     establishment: org ?? null,
   }
+}
+
+/**
+ * La descripción del diagnóstico de cada consentimiento, por id: el papel dice
+ * «K04.0 · Pulpitis» y la hoja que se firma, lo mismo.
+ */
+export async function consentDiagnosisTitles(
+  tx: Db,
+  docs: { id: string; diagnosisCode: string | null; diagnosisSystem: string | null }[],
+): Promise<Map<string, string>> {
+  const coded = docs.filter((doc) => doc.diagnosisCode && doc.diagnosisSystem)
+  const titles = new Map<string, string>()
+  if (coded.length === 0) return titles
+  const rows = await tx
+    .select({ systemKey: diagnosisCatalog.systemKey, code: diagnosisCatalog.code, title: diagnosisCatalog.title })
+    .from(diagnosisCatalog)
+    .where(
+      or(
+        ...coded.map((doc) =>
+          and(eq(diagnosisCatalog.systemKey, doc.diagnosisSystem ?? ""), eq(diagnosisCatalog.code, doc.diagnosisCode ?? "")),
+        ),
+      ),
+    )
+  for (const doc of coded) {
+    const found = rows.find((row) => row.systemKey === doc.diagnosisSystem && row.code === doc.diagnosisCode)
+    if (found) titles.set(doc.id, found.title)
+  }
+  return titles
 }
 
 export async function listConsentDocuments(
   tx: Db,
   orgId: string,
   query: { patientId: string; status?: string },
-): Promise<ConsentDocumentRow[]> {
+): Promise<(ConsentDocumentRow & { diagnosisDescription: string | null })[]> {
   await requirePatient(tx, orgId, query.patientId)
   const conditions = [
     eq(consentDocument.organizationId, orgId),
@@ -2842,7 +2863,15 @@ export async function listConsentDocuments(
     .from(consentDocument)
     .where(and(...conditions))
     .orderBy(desc(consentDocument.createdAt))
-  return rows.map((row) => ({ ...row, signatureData: null, professionalSignature: null, revokeSignature: null }))
+  // La hoja que se firma muestra el diagnóstico como el papel: código y descripción.
+  const titles = await consentDiagnosisTitles(tx, rows)
+  return rows.map((row) => ({
+    ...row,
+    diagnosisDescription: titles.get(row.id) ?? null,
+    signatureData: null,
+    professionalSignature: null,
+    revokeSignature: null,
+  }))
 }
 
 /** Paciente dueño de un consentimiento: para dejar traza de su lectura (404 si no existe). */
