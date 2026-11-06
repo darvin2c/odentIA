@@ -1,6 +1,7 @@
 import { Badge, Button, ScrollArea, Spinner } from "@odentia/ui"
 import { DataRefreshMarker, EmptyState, personInitials, SkeletonRegion } from "@odentia/ui-patterns"
 import { Bot } from "lucide-react"
+import { useState } from "react"
 import { ConversationRowsSkeleton } from "../skeletons/inbox"
 import { useReceptionName } from "../../lib/agent-names"
 import { channelIcon } from "../../lib/channels"
@@ -131,6 +132,23 @@ export function ConversationList({
   onBackToTabs?: () => void
 }) {
   const receptionName = useReceptionName()
+  // Propuesta UX 3: lo que no salió va junto, plegado, debajo de lo que espera respuesta.
+  const failed = sideView ? [] : items.filter((item) => item.attention?.sendFailed)
+  const waiting = failed.length > 0 ? items.filter((item) => !failed.includes(item)) : items
+  const [showFailed, setShowFailed] = useState(false)
+  const failedOpen = showFailed || failed.some((item) => isRowOf(item, selectedId))
+  const failedHeader = (
+    <button
+      key="no-salieron"
+      type="button"
+      aria-expanded={failedOpen}
+      onClick={() => setShowFailed((open) => !open)}
+      className="flex min-h-11 items-center justify-between gap-2 px-3.5 py-2 text-left text-sm font-semibold text-muted-foreground hover:bg-muted/70"
+    >
+      <span>No salieron · {failed.length}</span>
+      <span className="text-xs font-normal">{failedOpen ? "Ocultar" : "Ver"}</span>
+    </button>
+  )
   return (
     // El desplazamiento de la lista es el de la aplicación (ScrollArea), no la barra nativa.
     <ScrollArea className="elevated min-h-0 flex-1 rounded-xl border bg-card">
@@ -145,7 +163,7 @@ export function ConversationList({
             </span>
           </div>
         ) : null}
-        {items.map((item) => {
+        {[...waiting, ...(failedOpen ? failed : [])].map((item, index) => {
           const selected = isRowOf(item, selectedId)
           const initials = personInitials(item.contact.displayName)
           // La fila es la persona: un icono por canal, primero el de la conversación que muestra.
@@ -204,7 +222,7 @@ export function ConversationList({
               </span>
             </button>
           )
-          if (!sideView || !screen || !onRowAction) return row
+          if (!sideView || !screen || !onRowAction) return index === waiting.length && failedOpen ? [failedHeader, row] : row
           return (
             <div key={item.id} className="flex items-center gap-2 pr-3">
               {row}
@@ -214,6 +232,7 @@ export function ConversationList({
             </div>
           )
         })}
+        {failed.length > 0 && !failedOpen ? failedHeader : null}
         {isRefreshing && hasItems ? (
           <div className="p-2">
             <DataRefreshMarker />

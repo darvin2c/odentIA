@@ -785,6 +785,20 @@ function RealAppointmentDrawer({
               />
             )}
           </cancelForm.AppField>
+          {/* Propuesta UX 5: si lo pidió el paciente, quizá quiere otro día. Mover conserva el servicio
+              y el profesional, y no deja una cita cancelada. */}
+          <cancelForm.Subscribe selector={(state) => state.values.cancelReason}>
+            {(reason) =>
+              reason === "paciente" && canWrite ? (
+                <p className="flex flex-wrap items-center gap-2 text-sm">
+                  ¿Quiere otro día?
+                  <Button type="button" variant="outline" size="sm" className="min-h-11 sm:min-h-8" onClick={() => setMode("move")}>
+                    Reprogramar
+                  </Button>
+                </p>
+              ) : null
+            }
+          </cancelForm.Subscribe>
         </div>
       </ConfirmDialog>
     </>
