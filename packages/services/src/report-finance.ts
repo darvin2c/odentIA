@@ -22,7 +22,7 @@ import { budgetLineUnitsSql, budgetValueOptionSql } from "./budgets.js"
 import { collectedNetMany, EXPENSE_CATEGORIES } from "./finance.js"
 import { orgTaxes } from "./clinic-taxes.js"
 import { unpaidPurchasesMany } from "./purchase-balance.js"
-import { overdueDebtSql, valuedDebtSql } from "./report-debts.js"
+import { debtDaysSql, debtZoneSql, overdueDebtSql, valuedDebtSql } from "./report-debts.js"
 import { addMonths, currentMonthIn, lastMonths, monthStart, type ReportBucket } from "./report-periods.js"
 import {
   at,
@@ -307,14 +307,14 @@ export type DebtAge = (typeof DEBT_AGES)[number]["key"]
 
 /**
  * El tramo de lo que se anotó en `since`, visto en `moment`, con la misma
- * cuenta que «Saldo vencido» del Resumen (`overdueDebtSql`): pasa al tramo
- * siguiente cuando se anotó antes de hace 30, 60 o 90 días exactos, no de días
- * enteros. Así «más de 30 días» suma lo mismo que esa cifra, y la tarjeta y su
+ * cuenta que «Saldo vencido» del Resumen (`overdueDebtSql`) y que Finanzas ›
+ * Deudas: días de calendario en la zona de la sede o de la clínica. Así «más
+ * de 30 días» suma lo mismo que esa cifra a cualquier hora, y la tarjeta y su
  * lista usan esta sola expresión.
  */
-function debtAgeSql(since: SQL, moment: SQL): SQL {
+function debtAgeSql(since: SQL, moment: SQL, zone: SQL): SQL {
   const steps = DEBT_AGES.filter((age) => age.upTo !== null).map(
-    (age) => sql`when ${since} >= ${moment} - make_interval(days => ${age.upTo}) then ${age.key}::text`,
+    (age) => sql`when ${debtDaysSql(since, moment, zone)} <= ${age.upTo} then ${age.key}::text`,
   )
   return sql`case ${sql.join(steps, sql` `)} else ${DEBT_AGES[DEBT_AGES.length - 1]!.key}::text end`
 }
@@ -346,7 +346,7 @@ export async function debtAgingMany(
     people: number
   }>(sql`
     ${valuedDebtSql(orgId, moments, 0, options.branchId)}, aged as (
-      select valued.*, ${debtAgeSql(sql`valued.since`, sql`m.at_moment`)} as age from valued join m on m.idx = valued.idx
+      select valued.*, ${debtAgeSql(sql`valued.since`, sql`m.at_moment`, debtZoneSql(orgId, options.branchId))} as age from valued join m on m.idx = valued.idx
     )
     select idx, age, currency, sum(owed)::text as owed, round(sum(value))::text as cents, count(distinct patient_id)::int as people
     from aged where value is not null
@@ -1176,7 +1176,7 @@ export async function financeListRows(tx: Db, orgId: string, scope: ReportScope,
         o.owed::text as cents, o.currency::text as currency, count(*) over()::int as total
       from overdue o
       join patient p on p.id = o.patient_id and p.organization_id = ${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
-      where o.currency in (${scope.currency}, ${scope.money.secondCurrency ?? scope.currency}) and ${debtAgeSql(sql`o.since`, at(end))} = ${AGE_OF_LIST[list]}
+      where o.currency in (${scope.currency}, ${scope.money.secondCurrency ?? scope.currency}) and ${debtAgeSql(sql`o.since`, at(end), debtZoneSql(orgId, scope.branch?.id))} = ${AGE_OF_LIST[list]}
       order by o.since, o.patient_id limit ${limit}`)),
   ]
 }

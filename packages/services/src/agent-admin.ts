@@ -69,6 +69,7 @@ import { patientCreditSql } from "./payments.js"
 import { getPatientRegistrationConfig } from "./patient-registration.js"
 import { formatOrgMoneyToday, getOrgLocale, type OrgLocale, orgProduct } from "./locale.js"
 import { productHooks } from "./products.js"
+import { debtZoneSql } from "./report-debts.js"
 import { lapsedToInvite } from "./return-invites.js"
 import { getWritingHours, type WritingWeek } from "./writing-hours.js"
 import type { Storage } from "./storage.js"
@@ -467,7 +468,8 @@ async function overdueCollections(tx: Db, orgId: string, zone: OrgLocale, days: 
       where c.organization_id = ${orgId} and c.voided_at is null and c.amount_cents > coalesce(a.applied, 0)
         and pp.record_locked_at is null
       group by p.id, pp.display_name, p.organization_id, c.currency
-      having min(c.created_at) < now() - make_interval(days => ${days})
+      -- Días de calendario en la zona de la clínica, como Finanzas › Deudas y Reportes.
+      having ((now() at time zone ${debtZoneSql(orgId)})::date - (min(c.created_at) at time zone ${debtZoneSql(orgId)})::date) > ${days}
         ${fresh(scope, sql`(p.id::text || ':' || c.currency || ':' || to_char(min(c.created_at), 'YYYY-MM-DD'))`, sql`min(c.created_at) + make_interval(days => ${days})`)}
     ), owed as materialized (
       select d.*, ${credit} as credit from debt d

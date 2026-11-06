@@ -862,6 +862,8 @@ function DebtsCard({ data, onOpenList, advice }: { data: ReportFinance; onOpenLi
             : debts.byCurrency
               ? `${amountsWords(debts.byCurrency, locale)} de ${debts.people} ${debts.people === 1 ? "persona" : "personas"} ${at}. ${aboutToday(debts.totalCents, data)}. Cuenta desde el día del cargo; en cada moneda, quien debe varios va en el tramo del más antiguo.`
               : `${money(debts.totalCents)} de ${debts.people} ${debts.people === 1 ? "persona" : "personas"} ${at}. Cuenta desde el día del cargo; quien debe varios va en el tramo del más antiguo.`}
+          {/* Finanzas › Deudas muestra en cada sede lo que nació sin sede; aquí se cuenta una sola vez, en toda la clínica. */}
+          {data.branch ? ` Solo lo de ${data.branch.name}: lo que se anotó sin sede (un concepto sin atención) se ve en toda la clínica.` : null}
         </p>
       </div>
       {debts.people > 0 ? (

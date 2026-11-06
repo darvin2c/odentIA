@@ -4237,9 +4237,11 @@ export async function listDebts(tx: Db, orgId: string, query: DebtListQuery) {
         .where(and(eq(patient.organizationId, orgId), inArray(patient.id, patientIds)))
     : []
   const docOf = new Map(docs.map((row) => [row.id, row]))
-  const all: DebtListRow[] = debts.map((row) => {
+  // Quien tiene a favor todo lo que debe no debe (decisión 22, como Reportes): no entra en la lista ni en la cuenta.
+  const all: DebtListRow[] = debts.flatMap((row) => {
     const creditUsedCents = Math.max(0, Math.min(row.creditCents, row.totalCents))
-    return {
+    if (row.totalCents - creditUsedCents <= 0) return []
+    return [{
       ...row,
       dueCents: row.totalCents - creditUsedCents,
       creditUsedCents,
@@ -4247,7 +4249,7 @@ export async function listDebts(tx: Db, orgId: string, query: DebtListQuery) {
       docType: docOf.get(row.patientId)?.docType ?? null,
       docNumber: docOf.get(row.patientId)?.docNumber ?? null,
       nextAppointmentAt: null,
-    }
+    }]
   })
   const olderThan = (days: number) => all.filter((row) => (row.ageDays ?? 0) > days)
 
