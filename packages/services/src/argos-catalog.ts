@@ -128,7 +128,8 @@ const ONE_CURRENCY_CATALOG: readonly ArgosView[] = [
   },
   {
     name: "controles",
-    about: "Controles clínicos programados a los pacientes (sin el texto de las indicaciones).",
+    about:
+      "Controles clínicos programados a los pacientes (sin el texto de las indicaciones). tiene_cita = el control tiene su propia cita (se reservó desde él); no dice si el paciente tiene otra cita. Un control vencido sin cita es el pendiente cuyo vence_dia ya pasó, de un paciente activo sin ninguna cita por venir (pacientes.proxima_cita is null): a un control le sirve cualquier visita.",
     columns: "paciente, paciente_id, tipo ('tratamiento'|'mantenimiento'), vence_en (timestamptz), vence_dia, estado ('pendiente'|'programado'|'realizado'|'cancelado'), tiene_cita (bool), hecho_en",
     keys: ["gestion", "recepcion", "clinico"],
   },
@@ -278,12 +279,24 @@ const WITH_OTHER_CURRENCY: Readonly<Record<string, { columns: string; about?: st
   },
 }
 
-export const ARGOS_CATALOG: readonly ArgosView[] = ONE_CURRENCY_CATALOG.map((view) => {
+/**
+ * Columnas que una migración agregó al final de una vista (`CREATE OR REPLACE VIEW` solo
+ * agrega al final, y así la vista conserva su dueño y sus GRANT): van después de las de
+ * otra moneda, con una o con dos monedas.
+ */
+const TRAILING_COLUMNS: Partial<Record<string, string>> = {
+  lineas_presupuesto:
+    "cita_lo_lleva (bool: una cita por venir lleva ese tratamiento; lo aceptado sin cita es decision 'aceptado', estado_presupuesto 'aceptado'|'parcial', estado_tratamiento 'pendiente'|'programado'|'en_curso' y not cita_lo_lleva, de un paciente no archivado, aunque tenga otra cita)",
+}
+
+export const ARGOS_CATALOG: readonly ArgosView[] = ONE_CURRENCY_CATALOG.map((base) => {
+  const trailing = TRAILING_COLUMNS[base.name]
+  const view = trailing ? { ...base, columns: `${base.columns}, ${trailing}` } : base
   const other = WITH_OTHER_CURRENCY[view.name]
   return other
     ? {
         ...view,
-        columns: `${view.columns}, ${other.columns}`,
+        columns: [base.columns, other.columns, trailing].filter(Boolean).join(", "),
         oneCurrencyColumns: view.columns,
         ...(other.about ? { twoCurrenciesAbout: other.about } : {}),
       }

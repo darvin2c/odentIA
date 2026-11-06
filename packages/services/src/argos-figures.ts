@@ -487,8 +487,8 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
   {
     key: "lo_que_viene_sin_cita",
     name: "Lo aceptado sin cita",
-    describes: "De lo aceptado que falta hacer, lo de pacientes sin una cita por venir, hoy.",
-    how: "Lo aceptado que todavía no se hizo, de pacientes que no tienen una cita por venir.{al_cambio_de_hoy}",
+    describes: "De lo aceptado que falta hacer, lo que ninguna cita por venir lleva, aunque el paciente tenga otra cita, hoy.",
+    how: "Lo aceptado que todavía no se hizo (por empezar, programado o en curso) y que ninguna cita por venir lleva, aunque el paciente tenga otra cita; de pacientes activos. Es la regla de Pacientes › «Por agendar».{al_cambio_de_hoy}",
     unit: "dinero",
     column: "sin_cita_dinero",
     time: "a_hoy",
@@ -497,7 +497,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     sources: [
       {
         views: ["lineas_presupuesto", "pacientes"],
-        rows: "select l.importe as v, l.tratamiento as servicio from lineas_presupuesto l join pacientes p on p.paciente_id = l.paciente_id where l.decision = 'aceptado' and l.estado_presupuesto in ('aceptado', 'parcial') and (l.estado_tratamiento is null or l.estado_tratamiento not in ('realizado', 'cancelado')) and p.proxima_cita is null",
+        rows: "select l.importe as v, l.tratamiento as servicio from lineas_presupuesto l join pacientes p on p.paciente_id = l.paciente_id where l.decision = 'aceptado' and l.estado_presupuesto in ('aceptado', 'parcial') and l.estado_tratamiento in ('pendiente', 'programado', 'en_curso') and not l.cita_lo_lleva and not p.archivado",
         cuts: ["servicio"],
       },
     ],

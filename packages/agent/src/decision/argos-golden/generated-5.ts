@@ -620,7 +620,8 @@ export function generatedSolvers5(h: GoldenHelpers): GoldenSolvers {
         where pi.organization_id = ${org} and pi.decision_status = 'aceptado' and pi.status not in ('realizado','cancelado','reemplazado')`)
       return {
         respuesta: `Hoy falta hacer ${h.show(coming)} de lo aceptado en los planes que siguen abiertos, al precio acordado en su presupuesto, de ${plural(work.patients, "paciente", "pacientes")}; ${
-          work.unbooked.patients === work.patients
+          // Lo que se dice es del dinero: se comparan importes, no personas (una persona puede tener una parte con cita).
+          work.unbooked.cents === work.cents
             ? `nada de eso tiene una cita por venir que lo lleve`
             : `de eso, ${money(work.unbooked.cents)} es de ${plural(work.unbooked.patients, "paciente", "pacientes")} y ninguna cita por venir lo lleva`
         }.`,

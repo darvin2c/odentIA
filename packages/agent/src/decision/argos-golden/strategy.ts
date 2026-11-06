@@ -9,6 +9,7 @@ import {
   type FigureResult,
   getAgendaReport,
   getPatientReportList,
+  patientsWithOverdueControl,
   reportDayOf,
   reportScope,
   type Span,
@@ -308,9 +309,8 @@ export function strategySolvers(h: GoldenHelpers): GoldenSolvers {
           and a.starts_at >= ${weekStart.toISOString()}::timestamptz and a.starts_at < ${weekEnd.toISOString()}::timestamptz`)
       const waiting = await awaiting()
       const overdue = await h.fig("deuda_vencida")
-      const [controls] = await h.tx.execute<{ overdue: number }>(sql`
-        select count(distinct f.patient_id)::int as overdue from clinical_follow_up f ${h.joinPerson(sql`f.patient_id`)}
-        where f.organization_id = ${h.org} and f.status = 'pendiente' and f.due_at < ${nowIso}::timestamptz and pp.is_active`)
+      // La regla de Pacientes › «Control vencido», Inicio y Argos (ADR 0145): su día ya pasó y ninguna cita por venir.
+      const controls = { overdue: (await patientsWithOverdueControl(h.tx, h.org, h.tz)).length }
       const coming = await upcomingWork(h.tx, h.org, h.scope.currency, h.now)
       const lapsed = await h.fig("sin_venir")
       const sunday = new Intl.DateTimeFormat(h.scope.locale, { day: "numeric", month: "long", timeZone: "UTC" }).format(new Date(`${addDays(monday, 6)}T12:00:00Z`))
