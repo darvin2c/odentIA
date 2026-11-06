@@ -1,12 +1,12 @@
 # La mesa
 
-Cuatro voces critican el cambio. Sirve para encontrar a tiempo lo que sería caro corregir después, no para aprobar: una voz simulada no es una clínica real ni prueba que algo sea fácil o seguro. Lo que diga la mesa nunca se presenta como evidencia.
+Cinco voces critican el cambio. Sirve para encontrar a tiempo lo que sería caro corregir después, no para aprobar: una voz simulada no es una clínica real ni prueba que algo sea fácil o seguro. Lo que diga la mesa nunca se presenta como evidencia.
 
 Su lugar es decidir qué construir y mirar la pantalla real. Para buscar errores en código ya escrito no rindió más que un solo revisor: eso es la etapa 6.
 
 ## Cada voz por separado
 
-Si una sola cabeza escribe las cuatro seguidas, termina de acuerdo consigo misma, y el novato ya entiende lo que el experto explicó. Por eso cada voz corre como subagente aparte, sin ver a las otras. Sin subagentes: escribir cada voz completa antes de empezar la siguiente, y el novato primero.
+Si una sola cabeza escribe las cinco seguidas, termina de acuerdo consigo misma, y el novato ya entiende lo que el experto explicó. Por eso cada voz corre como subagente aparte, sin ver a las otras. Sin subagentes: escribir cada voz completa antes de empezar la siguiente, y el novato primero.
 
 La mesa no debe costar más que el cambio. El novato no lee el repositorio, clínica lee solo lo que necesite, y las voces corren con menos esfuerzo si la herramienta lo permite (`effort: "lower"`). Desarrollo es quien lee el código a fondo. Hay un tope de subagentes a la vez: si la mesa corre junto a otros trabajos largos, lanzar las voces cuando haya lugar y no reemplazarlas escribiéndolas seguidas.
 
@@ -37,6 +37,19 @@ Odontólogo en odentIA, médico en latidIA, los dos si el cambio es común. Pien
 - ¿Los términos son los que se usan? ¿Hay un estándar internacional o nacional?
 
 Marca como **supuesto** lo que depende de cómo trabaja una clínica y no tiene fuente: lo tendrá que confirmar una persona real. Lo legal lo deja como pendiente, no da visto bueno jurídico.
+
+### Experto en UX
+
+Diseñador de producto con experiencia en software clínico. Lee el objetivo de la UX del `AGENTS.md` raíz y `.claude/skills/odentia-ux/SKILL.md`, mira el lienzo o las capturas y puede consultar los componentes que ya existen en `packages/ui-patterns`. No lee servicios ni permisos: eso es de desarrollo.
+
+Juzga si el cambio es fluido e intuitivo para quien lo va a usar (el odontólogo o el médico, recepción, caja o el paciente) y dice para quién.
+
+- **Fluido:** ¿cuántos pasos hay hasta el resultado? ¿Algo interrumpe la atención, obliga a cambiar de pantalla o pide decidir sin necesidad?
+- **Intuitivo:** ¿lo frecuente se descubre sin que nadie lo explique? ¿Lo poco frecuente está a mano sin estorbar? ¿Las palabras son las de quien lo usa, no las técnicas?
+- **Qué se puede y qué no:** ¿cada límite se dice donde ocurre y con la salida, en vez de un botón que desaparece sin motivo?
+- **Coherente:** ¿se comporta como el resto de odentIA? ¿Funciona en el celular, con teclado y con lector de pantalla?
+
+A diferencia del novato, propone cómo resolverlo: qué quitar, mover, agrupar o decir, y con qué patrón existente.
 
 ### Novato
 
@@ -82,8 +95,9 @@ Se le muestra al usuario, en lo posible en menos de 8 líneas, y va como tablero
 
 ## La segunda mesa
 
-Después de implementar, sobre la pantalla real (etapa 7). Solo novato y auditor, y clínica si el cambio es clínico.
+Después de implementar, sobre la pantalla real (etapa 7). Solo experto en UX, novato y auditor, y clínica si el cambio es clínico.
 
+- **Experto en UX:** recibe las capturas de escritorio y móvil, la tarea y el acta. ¿Quedó fluido e intuitivo en la pantalla real, no solo en el lienzo? ¿Cada límite se dice donde ocurre?
 - **Novato:** recibe las capturas de escritorio y móvil y la tarea, otra vez sin explicación, y cuenta qué haría.
 - **Auditor:** recibe las capturas, el acta y el diff. ¿Volvió algo que se quitó? ¿Entrega el valor prometido? ¿Entró algo sin motivo?
 

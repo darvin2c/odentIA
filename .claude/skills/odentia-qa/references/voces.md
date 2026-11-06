@@ -1,6 +1,6 @@
 # Las voces del QA
 
-Las cuatro primeras son las de `.claude/skills/odentia-entrega/references/mesa.md`. Ahí critican un cambio; aquí usan la app. La quinta, diseño UX, es solo del QA: no busca errores, propone cómo simplificar lo que costó. Cada una recibe el área, su cuenta, su producto y su ancho de pantalla, y devuelve hasta 8 hallazgos con el formato de la etapa 3. Si no encuentra nada serio, lo dice: inventar un problema para cumplir hace más daño que no decir nada.
+Las cinco son las de `.claude/skills/odentia-entrega/references/mesa.md`. Ahí critican un cambio; aquí usan la app. Diseño UX es el experto en UX de la mesa, en su versión de QA: no busca errores, propone cómo simplificar lo que costó. Cada una recibe el área, su cuenta, su producto y su ancho de pantalla, y devuelve hasta 8 hallazgos con el formato de la etapa 3. Si no encuentra nada serio, lo dice: inventar un problema para cumplir hace más daño que no decir nada.
 
 Todas reciben `comun.md` de la ronda y miran capturas, no solo el árbol de accesibilidad: lo que cuenta es lo que ve la persona. Crean sus propios datos con el prefijo `QA` para no pisar los de las otras, con teléfonos de `+44 7700 900000` a `+44 7700 900999` y correos `@example.com`, nunca otros. Ninguna toca la configuración de canales.
 

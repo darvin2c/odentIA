@@ -1,6 +1,6 @@
 ---
 name: odentia-entrega
-description: Llevar un cambio de odentIA o latidIA de punta a punta en un solo PR, hasta que esté unido y desplegado en producción. Cubre discutirlo con cuatro voces (desarrollo, clínica, novato y auditor), hacer el lienzo si hace falta, simplificar, implementar, probar, revisar, abrir el PR, pedir el sí, unir y seguir el despliegue. Usar cuando se aprueba un lienzo («aprobado», «empieza», «implementa el lienzo»), cuando piden construir una función nueva o corregir un error reportado, aunque no mencionen PR ni merge. No usar para preguntas, ideas o estudios sin construir, ni para una etapa suelta como «corre las pruebas» o «revisa este diff».
+description: Llevar un cambio de odentIA o latidIA de punta a punta en un solo PR, hasta que esté unido y desplegado en producción. Cubre discutirlo con cinco voces (desarrollo, clínica, experto en UX, novato y auditor), hacer el lienzo si hace falta, simplificar, implementar, probar, revisar, abrir el PR, pedir el sí, unir y seguir el despliegue. Usar cuando se aprueba un lienzo («aprobado», «empieza», «implementa el lienzo»), cuando piden construir una función nueva o corregir un error reportado, aunque no mencionen PR ni merge. No usar para preguntas, ideas o estudios sin construir, ni para una etapa suelta como «corre las pruebas» o «revisa este diff».
 ---
 
 # Entregar un cambio
@@ -30,9 +30,9 @@ Cada parada pide una sola cosa, con una recomendación, para que se pueda respon
 
 | Qué llega | Mesa | Lienzo |
 |---|---|---|
-| Lienzo aprobado | Las cuatro voces, para buscar lo que falta o choca; lo ya decidido no se reabre | Ya está |
-| Función nueva que cambia una pantalla o un recorrido | Las cuatro voces | Si hay más de una forma razonable |
-| Función pequeña dentro de un patrón que ya existe | Novato y auditor | No |
+| Lienzo aprobado | Las cinco voces, para buscar lo que falta o choca; lo ya decidido no se reabre | Ya está |
+| Función nueva que cambia una pantalla o un recorrido | Las cinco voces | Si hay más de una forma razonable |
+| Función pequeña dentro de un patrón que ya existe | Experto en UX, novato y auditor | No |
 | Error | Solo si el arreglo cambia lo que ve o hace la persona: las voces a las que afecte | No |
 | Cambio interno, sin efecto visible | Ninguna | No |
 
@@ -46,7 +46,7 @@ Cada etapa aplica solo si el cambio la necesita; la que se salta se dice en el P
 
 ### 1. La mesa
 
-Cuatro voces critican el cambio por separado, antes de dibujar o programar. Cómo se hace, en `references/mesa.md`. Sale un acta corta que se le muestra al usuario y alimenta las etapas siguientes.
+Cinco voces critican el cambio por separado, antes de dibujar o programar. Cómo se hace, en `references/mesa.md`. Sale un acta corta que se le muestra al usuario y alimenta las etapas siguientes.
 
 ### 2. El lienzo
 
