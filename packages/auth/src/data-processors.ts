@@ -118,7 +118,7 @@ export const DATA_PROCESSORS: readonly DataProcessor[] = [
     name: "TypeSafe AI («Jev»)",
     short: "Jev",
     purpose: "Modelo de decisión: entender qué pide cada mensaje para dirigirlo y qué respuesta de la guía busca quien pregunta en la Ayuda.",
-    data: "Texto de los mensajes recibidos y de las preguntas que el equipo hace en la Ayuda, con el nombre de la pantalla.",
+    data: "Texto de los mensajes recibidos, y la pregunta que el equipo escribe en la Ayuda con el nombre de la pantalla (la Ayuda pide no escribir datos de pacientes y no le envía números, documentos ni correos).",
     receives: "El texto de los mensajes que llegan y las preguntas a la Ayuda, para entender qué piden",
     country: "Estados Unidos",
     // La Ayuda lo usa en toda clínica, con los agentes apagados también (ADR 0146).

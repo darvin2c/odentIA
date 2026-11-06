@@ -94,7 +94,7 @@ export const ENCARGO: LegalDoc = {
       id: "subencargados",
       title: "Subencargados",
       blocks: [
-        "La Clínica autoriza a odentIA a recurrir a los subencargados indicados en la página de [subencargados](/subencargados). Los proveedores de canales y de modelos de inteligencia artificial solo intervienen si la Clínica conecta el canal o usa los agentes.",
+        "La Clínica autoriza a odentIA a recurrir a los subencargados indicados en la página de [subencargados](/subencargados). Los proveedores de canales y de modelos de inteligencia artificial solo intervienen si la Clínica conecta el canal o usa los agentes, salvo el modelo de decisión con el que la Ayuda de la plataforma elige su respuesta (TypeSafe, Jev): interviene siempre y recibe solo la pregunta que escribe el equipo y el nombre de la pantalla. La Ayuda pide no escribir datos de pacientes y no le envía números, documentos ni correos.",
         "odentIA impone a cada subencargado obligaciones de protección de datos equivalentes a las de este contrato y responde ante la Clínica por su cumplimiento.",
         "odentIA avisará a la Clínica de cualquier alta o sustitución de subencargados con al menos 15 días de anticipación, por correo electrónico y dentro de la aplicación. La Clínica puede oponerse por motivos razonables relacionados con la protección de datos dentro de ese plazo. Si no se llega a una solución, la Clínica puede cancelar el servicio sin penalización.",
       ],
