@@ -813,10 +813,17 @@ async function requireQuotableItems(
       ),
     )
   if (items.length !== sorted.length) throw notFound("Ítem del plan")
+  const budgetRequired = (await productHooks(tx, orgId)).budgetRequired
   for (const item of items) {
     if (item.planId !== planId) throw validation("Todos los ítems deben pertenecer al plan")
     if (["realizado", "cancelado", "reemplazado"].includes(item.status)) {
       throw conflict("ITEM_CLOSED", "El tratamiento está cerrado y no puede cotizarse")
+    }
+    // Donde lo indicado pide presupuesto (odentIA), lo aceptado sin presupuesto se
+    // aceptó al hacerlo en una atención (una endodoncia en dos sesiones, en curso):
+    // ya está decidido y cobrado, no vuelve a cotizarse ni a decidirse.
+    if (budgetRequired && !item.budgetId && item.decisionStatus === "aceptado") {
+      throw conflict("ITEM_CLOSED", "El tratamiento ya fue aceptado y no puede recotizarse")
     }
     // Histórico ambiguo heredado: un nuevo presupuesto nunca cotiza varias
     // equivalencias como actos; se pide una nueva indicación exacta.
