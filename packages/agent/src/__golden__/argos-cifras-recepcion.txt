@@ -1,5 +1,5 @@
 - lo_que_viene: Lo que viene. Lo aceptado en presupuestos que todavía no se hizo (el valor de los tratamientos pendientes), hoy; por tratamiento. (a hoy, sin periodo; se separa y filtra por servicio)
-- lo_que_viene_sin_cita: Lo aceptado sin cita. De lo aceptado que falta hacer, lo de pacientes sin una cita por venir, hoy. (a hoy, sin periodo; se separa y filtra por servicio)
+- lo_que_viene_sin_cita: Lo aceptado sin cita. De lo aceptado que falta hacer, lo que ninguna cita por venir lleva, aunque el paciente tenga otra cita, hoy. (a hoy, sin periodo; se separa y filtra por servicio)
 - pacientes_nuevos: Pacientes nuevos. Pacientes atendidos por primera vez; de una sede, los que tuvieron su primera cita en ella; por cómo nos conocieron. (en un periodo; se separa y filtra por mes, semana, dia, dia_semana, sede, como_nos_conocio)
 - pacientes_atendidos: Pacientes atendidos. Cuántos pacientes distintos se atendieron; por tipo: nuevo (vino por primera vez en el periodo) o recurrente. (en un periodo; se separa y filtra por mes, semana, dia, dia_semana, hora, sede, profesional, servicio, tipo)
 - nos_buscaron: Nos buscaron por primera vez. Personas que escribieron o se registraron por primera vez (prospectos), por canal. (en un periodo; se separa y filtra por mes, semana, dia, dia_semana, canal)

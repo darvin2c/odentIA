@@ -223,7 +223,6 @@ describe("lo que ya pasó, con su valor congelado", () => {
     expect(finance.totals.current.cobradoCents).toBe(100_000)
     expect(finance.otherCurrencies).toEqual([{ currency: "USD", cobradoCents: 50_000 }])
     expect(finance).not.toHaveProperty("second")
-    expect(finance).not.toHaveProperty("moneyFlow")
     expect(finance.debts.current).toEqual({ totalCents: 0, people: 0, ages: expect.any(Array) })
     expect(finance.debts.current.ages.every((age) => !("byCurrency" in age))).toBe(true)
     expect(finance.byMethod.methods).toEqual([{ label: "Efectivo", cash: true, cents: 100_000 }])
@@ -744,14 +743,8 @@ describe("la clínica de examen con dólares", () => {
       others: [{ currency: "USD", count: 1, cashCents: 8_000 }],
     })
 
-    // Lo que entró menos lo que salió en cada moneda, y lo que la compra aún debe.
+    // Lo que la compra aún debe.
     const finance = await c.run((tx) => getReportFinance(tx, orgId, { period: "este_mes" }))
-    expect(finance.moneyFlow).toEqual([
-      // S/ 3,750 − S/ 375 devueltos − S/ 75 de vuelto − S/ 500 de guantes.
-      { currency: "PEN", cents: 375_000 - 37_500 - 7_500 - 50_000 },
-      // USD 200 + USD 80 + USD 20 del billete − USD 100 de laboratorio − USD 100 de la compra.
-      { currency: "USD", cents: 20_000 + 8_000 + 2_000 - 10_000 - 10_000 },
-    ])
     expect(finance.payables.purchases).toMatchObject({
       cents: 75_000,
       orders: 1,

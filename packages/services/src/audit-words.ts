@@ -636,3 +636,66 @@ export function describeAuditEvent(action: string, origin?: string | null): Audi
     areaLabel: AUDIT_AREA_LABELS[area],
   }
 }
+
+/**
+ * Una acción deja a veces varios registros en el mismo momento: un cobro, su
+ * pago, su aplicación a cada concepto, su ticket y su movimiento de caja. La
+ * fila de «Actividad del equipo» lleva el nombre de lo que la persona hizo, y
+ * lo demás va como consecuencia (issue #112). Primero lo que nombra la acción
+ * (firmar o anular una atención deja su cargo; cobrar, su pago y su caja);
+ * nunca lo que solo la acompaña, si hay otra cosa.
+ */
+const LEAD_ACTIONS = [
+  "encounter.finalized",
+  "encounter.voided",
+  "ticket.voided",
+  "ticket.created",
+  "payment.refunded",
+  "payment.voided",
+  "payment.created",
+  "charge.voided",
+  "charge.created",
+] as const
+
+/** Lo que solo acompaña a otro registro de la misma acción: no nombra la fila si hay otra cosa. */
+const FOLLOWER_ACTIONS: ReadonlySet<string> = new Set([
+  "payment.applied",
+  "payment.application_voided",
+  "cash.payment_registered",
+  "cash.movement_voided",
+  "charge.returned",
+])
+
+/** Cuál de los registros de una misma acción la nombra (su índice). */
+export function leadAuditIndex(actions: readonly string[]): number {
+  for (const lead of LEAD_ACTIONS) {
+    const index = actions.indexOf(lead)
+    if (index >= 0) return index
+  }
+  // Entre los demás, siempre el mismo: los registros de un instante no tienen orden propio.
+  let lead = -1
+  actions.forEach((action, index) => {
+    if (FOLLOWER_ACTIONS.has(action)) return
+    if (lead < 0 || action.localeCompare(actions[lead]!) < 0) lead = index
+  })
+  return lead >= 0 ? lead : 0
+}
+
+/** Cuántos registros de esa acción dicen lo mismo que el que la nombra: dos pagos sin ticket son «Registró un pago», 2 veces. */
+export function leadAuditCount(actions: readonly string[], lead: number): number {
+  const leadWhat = phraseOf(actions[lead] ?? "").what
+  return actions.filter((action) => phraseOf(action).what === leadWhat).length
+}
+
+/** Lo demás de esa acción, con palabras, sin repetir y en un orden fijo: «Aplicó un pago a un cargo», 2 veces. */
+export function alsoAuditWords(actions: readonly string[], lead: number): Array<{ what: string; count: number }> {
+  const leadWhat = phraseOf(actions[lead] ?? "").what
+  const counts = new Map<string, number>()
+  actions.forEach((action) => {
+    const what = phraseOf(action).what
+    // Lo que dice lo mismo que la fila va en su cuenta (`leadAuditCount`), no aquí.
+    if (what === leadWhat) return
+    counts.set(what, (counts.get(what) ?? 0) + 1)
+  })
+  return [...counts].map(([what, count]) => ({ what, count })).sort((a, b) => a.what.localeCompare(b.what, "es"))
+}

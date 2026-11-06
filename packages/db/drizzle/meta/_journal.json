@@ -351,6 +351,13 @@
       "when": 1793989463321,
       "tag": "0049_avisos_de_la_receta",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1793989523321,
+      "tag": "0050_argos_cita_lo_lleva",
+      "breakpoints": true
     }
   ]
 }

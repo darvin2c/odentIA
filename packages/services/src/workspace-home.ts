@@ -278,11 +278,25 @@ export interface WaitingUnclosed {
   branchName: string
 }
 
-/** Quienes aceptaron un presupuesto y no tienen cita por venir: la lista se trabaja desde Inicio. */
+/**
+ * Quienes tienen algo aceptado sin una cita que lo lleve (`patientsToSchedule`):
+ * los mismos de Pacientes › «Por agendar», adonde lleva la fila.
+ */
 export interface WaitingAcceptedUnbooked {
   patients: number
+  /** Lo que suma lo aceptado sin cita, en `currency` (0 sin presupuestos con precio). */
   cents: number
   currency: string
+}
+
+/**
+ * Los controles vencidos sin ninguna cita por venir: la consulta de la línea de
+ * Argos «Avisar un control», y la fila abre su misma lista. Si Argos ya la
+ * recomienda en «Te espera», es esa fila y esta no sale (ADR 0025 y 0127).
+ */
+export interface WaitingOverdueControls {
+  controls: number
+  patients: number
 }
 
 /** Conversaciones que siguen abiertas con una persona a cargo y sin mensajes desde hace horas. */
@@ -352,6 +366,7 @@ export type WaitingRow =
   | ({ kind: "unconfirmed" } & WaitingUnconfirmed)
   | ({ kind: "unclosed" } & WaitingUnclosed)
   | ({ kind: "acceptedUnbooked" } & WaitingAcceptedUnbooked)
+  | ({ kind: "overdueControls" } & WaitingOverdueControls)
   | ({ kind: "unsentBudget" } & WaitingUnsentBudget)
   | ({ kind: "possibleDuplicate" } & WaitingPossibleDuplicate)
   | ({ kind: "portalReentry" } & WaitingPortalReentry)
@@ -383,8 +398,10 @@ export interface WaitingParts {
   unconfirmed?: { items: WaitingUnconfirmed[]; total: number } | null
   /** Citas de días anteriores sin cerrar, de la más antigua a la más reciente, y cuántas son. */
   unclosed?: { items: WaitingUnclosed[]; total: number; nextAt?: string | null } | null
-  /** Quienes aceptaron y no tienen cita, con lo que suma (null o 0: nadie). */
+  /** Quienes tienen algo aceptado sin cita, con lo que suma (null o 0: nadie). */
   acceptedUnbooked?: WaitingAcceptedUnbooked | null
+  /** Los controles vencidos sin cita, si Argos no los recomienda ya (null o 0: ninguno). */
+  overdueControls?: WaitingOverdueControls | null
   /** Presupuestos armados y sin enviar desde el día anterior, del más antiguo al más reciente. */
   unsentBudgets?: { items: WaitingUnsentBudget[]; total: number } | null
   /** Lo que «Su enlace» encontró repetido, del más antiguo al más reciente. */
@@ -437,6 +454,7 @@ function bandOf(row: WaitingRow, today: string | undefined): WaitingBand {
     case "unconfirmed":
     case "unclosed":
     case "acceptedUnbooked":
+    case "overdueControls":
     case "unsentBudget":
     case "possibleDuplicate":
     case "portalReentry":
@@ -547,8 +565,10 @@ export function composeWaiting(parts: WaitingParts): WaitingEntry[] {
     if (left > 0) rows.push({ kind: "more", of: "unsentBudgets", count: left })
   }
 
-  // Trabajo ya vendido sin cita: una sola fila que abre la lista para agendarlos desde Inicio.
+  // Trabajo ya vendido sin cita: una sola fila que lleva a Pacientes › «Por agendar».
   if (parts.acceptedUnbooked && parts.acceptedUnbooked.patients > 0) rows.push({ kind: "acceptedUnbooked", ...parts.acceptedUnbooked })
+  // Los controles vencidos sin cita: una sola fila que abre la lista de Argos.
+  if (parts.overdueControls && parts.overdueControls.controls > 0) rows.push({ kind: "overdueControls", ...parts.overdueControls })
 
   // Lo que dejaron «Su enlace» y el portal para recepción (ADR 0037).
   // Esta es su única lista (no están en Tareas): van todos.

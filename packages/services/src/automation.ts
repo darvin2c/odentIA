@@ -61,6 +61,7 @@ import { permissionRefusal, writingTimeFor } from "./message-gate.js"
 import { consentStatusOf, mayWriteFirst } from "./message-permission.js"
 import { issuePersonalLink } from "./booking-links.js"
 import { answerBudgetButton } from "./budget-send.js"
+import { TO_SCHEDULE_STATUSES, toScheduleSql } from "./to-schedule.js"
 import { applyTemplateStatuses, reviewConnectionTemplates, type TemplateDeps } from "./channel-templates.js"
 import {
   currentAutomationMessage,
@@ -1680,9 +1681,19 @@ async function stillValid(
     if (!budget || !["aceptado", "parcial"].includes(budget.status)) {
       return { valid: false, reason: "El presupuesto ya no está aceptado" }
     }
-    if (job.patientId && (await hasFutureAppointment(tx, orgId, job.patientId, now))) {
-      return { valid: false, reason: "Ya tiene una cita reservada" }
-    }
+    // La misma regla que abrió el caso (Pacientes › «Por agendar»): otra cita de la persona no lo
+    // agenda. El caso es de la persona: sigue mientras le quede algo aceptado sin cita, de este
+    // presupuesto o de otro. Si no, el motivo dice por qué: una cita lo lleva, o ya no está por hacer.
+    const at = sql`${now.toISOString()}::timestamptz`
+    const item = { id: sql`i.id`, organizationId: sql`i.organization_id`, status: sql`i.status`, decisionStatus: sql`i.decision_status` }
+    const whose = job.patientId
+      ? sql`i.organization_id = ${orgId} and i.patient_id = ${job.patientId}::uuid`
+      : sql`i.organization_id = ${orgId} and i.id in (select l.plan_item_id from treatment_budget_item l where l.organization_id = ${orgId} and l.budget_id = ${job.budgetId}::uuid and l.decision = 'aceptado')`
+    const [state] = await tx.execute<{ open: boolean; pending: boolean }>(sql`
+      select exists (select 1 from treatment_plan_item i where ${whose} and ${toScheduleSql(item, at)}) as open,
+        exists (select 1 from treatment_plan_item i where ${whose} and i.decision_status = 'aceptado'
+          and i.status in (${sql.join(TO_SCHEDULE_STATUSES.map((status) => sql`${status}`), sql`, `)})) as pending`)
+    if (!state?.open) return { valid: false, reason: state?.pending ? "Lo aceptado ya tiene cita" : "Lo aceptado ya no está por hacer" }
     return { valid: true }
   }
   if (job.kind === "seguimiento_comercial" && job.opportunityId) {
@@ -2161,7 +2172,10 @@ const settleCursors = new Map<string, { createdAt: string; id: string }>()
 function settledWords(reason: string | undefined, name: string | null): string {
   const who = name?.trim() || "La persona"
   if (reason === "La cita ya está confirmada") return `${who} confirmó su cita`
-  if (reason === "Ya tiene otra cita reservada" || reason === "Ya tiene una cita reservada") return `${who} ya tiene otra cita reservada`
+  if (reason === "Ya tiene otra cita reservada") return `${who} ya tiene otra cita reservada`
+  if (reason === "Lo aceptado ya tiene cita") return `${who} ya tiene cita para lo aceptado`
+  if (reason === "Lo aceptado ya no está por hacer")
+    return `lo aceptado${name?.trim() ? ` de ${who}` : ""} ya se hizo, se suspendió o se canceló`
   if (reason === "Ya pagó lo que debía") return `${who} ya pagó lo que debía`
   const text = reason ?? "ya no hacía falta"
   // Un nombre de agente se queda con su mayúscula: «Sofi le escribió…».

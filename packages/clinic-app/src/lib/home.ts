@@ -155,10 +155,24 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): WaitingT
       }
     }
     case "acceptedUnbooked":
+      // El mismo número de Pacientes › «Por agendar», adonde lleva: ahí cada fila tiene «Reservar cita».
       return {
-        title: plural(row.patients, "persona aceptó su presupuesto y no tiene cita", "personas aceptaron su presupuesto y no tienen cita"),
-        detail: `${formatMoney(row.cents, row.currency, context.locale)} por hacer`,
-        action: "Agendar",
+        title: plural(row.patients, "persona tiene algo aceptado sin cita", "personas tienen algo aceptado sin cita"),
+        detail: joined([
+          row.cents > 0 ? `${formatMoney(row.cents, row.currency, context.locale)} por hacer` : null,
+          "ninguna cita por venir lo lleva",
+        ]),
+        action: "Ver en Pacientes",
+      }
+    case "overdueControls":
+      // La misma lista de la línea de Argos «Avisar un control».
+      return {
+        title:
+          row.controls === row.patients
+            ? plural(row.controls, "control vencido sin cita", "controles vencidos sin cita")
+            : `${row.controls} controles vencidos de ${plural(row.patients, "persona", "personas")} sin cita`,
+        detail: "Ya pasó su día y no tienen ninguna cita por venir",
+        action: "Ver",
       }
     case "stillOpen":
       return row.total === 1 && row.contactName

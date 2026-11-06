@@ -58,6 +58,7 @@ import { advanceForAppointment, returnForCancelledAppointment } from "./opportun
 import { listPatients } from "./patients.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { scheduledItems } from "./plan-next.js"
+import { TO_SCHEDULE_STATUSES } from "./to-schedule.js"
 import { countAgendaUpgrade, countRecoveredAppointment, refreshConversationTier } from "./saas-actions.js"
 
 function conflict(code: string, message: string): ServiceError {
@@ -892,9 +893,8 @@ export interface CreateAppointmentInput {
   planItemIds?: string[]
 }
 
-/** Los tratamientos que se agendan con una cita: aceptados, sin terminar y del mismo paciente. */
-/** Lo que una cita puede traer: aceptado y todavía por hacer. */
-export const SCHEDULABLE_ITEM_STATUSES = ["pendiente", "programado", "en_curso"]
+/** Lo que una cita puede traer: aceptado y todavía por hacer (la regla de «Por agendar», `to-schedule.ts`). */
+export const SCHEDULABLE_ITEM_STATUSES: string[] = [...TO_SCHEDULE_STATUSES]
 
 /**
  * Lo aceptado de ese servicio que aún no tiene cita. Una cita que no dice qué

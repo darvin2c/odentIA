@@ -58,6 +58,8 @@ function iconOf(row: WaitingRow, title: string): ReactNode {
     case "budgets":
     case "consentToPublish":
       return <TypeIcon icon={FileText} />
+    case "overdueControls":
+      return <TypeIcon icon={CalendarClock} />
     case "stillOpen":
       return <TypeIcon icon={MessagesSquare} />
     case "advice":
@@ -98,6 +100,9 @@ function linkOf(row: WaitingRow, context: HomeTextContext, props: { className: s
       return <Link to="/patients/$patientId" params={{ patientId: row.patientId }} search={{ tab: "portal" }} {...props} />
     case "consentToPublish":
       return <Link to="/settings/forms" search={{ tab: "consentimientos" }} {...props} />
+    case "acceptedUnbooked":
+      // La lista entera, con «Reservar cita» en cada fila: la misma regla y el mismo número.
+      return <Link to="/people" search={{ atajo: "por_agendar" }} {...props} />
     case "inventory":
       // Inventario de esa sede con su filtro: lo que hace falta o, si solo hay vencidos, lo que vence.
       return <Link to="/inventory" search={{ branch: row.branchId, ver: row.needed > 0 ? "hacen_falta" : "por_vencer" }} {...props} />
