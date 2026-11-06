@@ -32,6 +32,7 @@ import {
   resendPortalAccessApi,
   revokePortalAccessApi,
 } from "../../lib/portal"
+import { PersonalLinkDrawer } from "../patient/send-personal-link"
 import { PortalAccessSkeleton } from "../skeletons/person-sections"
 
 /** «Citas, presupuestos y documentos»: lo que verá, dicho como en la fila. */
@@ -64,6 +65,7 @@ export function PatientPortalAccessSection({ patientId }: { patientId: string })
   const query = useQuery({ queryKey: key, queryFn: () => fetchPortalAccessApi(patientId), enabled: canManage, retry: false })
   const [drawer, setDrawer] = useState<{ kind: "give" } | { kind: "change" | "resend"; row: PortalAccessRow } | null>(null)
   const [revoking, setRevoking] = useState<PortalAccessRow | null>(null)
+  const [linkOpen, setLinkOpen] = useState(false)
   const revoke = useMutation({
     mutationFn: (grantId: string) => revokePortalAccessApi(grantId),
     onSuccess: () => {
@@ -82,19 +84,42 @@ export function PatientPortalAccessSection({ patientId }: { patientId: string })
     )
   if (query.isError) return <ErrorState title="No pudimos cargar el acceso al portal" error={query.error} onRetry={() => void query.refetch()} />
   const summary = query.data
+  // «Su enlace» va siempre primero: es lo que ya tiene, sin clave, y no depende del portal.
+  const linkBlock = (
+    <section aria-label="Su enlace" className="flex flex-col gap-2 rounded-lg border p-3">
+      <p className="text-sm font-medium">Su enlace</p>
+      <p className="text-sm text-muted-foreground">
+        Le llega con cada aviso: ve su cita, sus presupuestos, lo que tiene por firmar y sus comprobantes, sin clave.
+      </p>
+      <span className="flex flex-wrap gap-2">
+        <Button type="button" variant="outline" size="sm" onClick={() => setLinkOpen(true)}>
+          Ver su enlace
+        </Button>
+      </span>
+      <PersonalLinkDrawer patientId={patientId} open={linkOpen} onClose={() => setLinkOpen(false)} />
+    </section>
+  )
   if (!summary.enabled) {
     return (
-      <EmptyState
-        title="El portal está apagado"
-        description="«Su enlace» cubre la cita, los datos y el presupuesto. Encienda el portal si sus pacientes piden ver sus documentos cuando quieran."
-        actionLabel={canConfigure ? "Encender el portal" : undefined}
-        onAction={canConfigure ? () => void navigate({ to: "/settings/patient-access" }) : undefined}
-      />
+      <div className="flex flex-col gap-3">
+        {linkBlock}
+        <EmptyState
+          title="El portal está apagado"
+          description={
+            canConfigure
+              ? "El portal es para que vea además sus documentos cuando quiera, con su clave. Está apagado para toda la clínica."
+              : "El portal es para que vea además sus documentos cuando quiera, con su clave. Lo enciende quien administra la clínica."
+          }
+          actionLabel={canConfigure ? "Ir a Configuración" : undefined}
+          onAction={canConfigure ? () => void navigate({ to: "/settings/patient-access" }) : undefined}
+        />
+      </div>
     )
   }
   const pendingCandidates = summary.candidates.filter((candidate) => !summary.access.some((row) => row.contactId === candidate.contactId))
   return (
     <section aria-label="Acceso al portal" className="flex flex-col gap-3">
+      {linkBlock}
       {summary.access.length === 0 ? (
         <EmptyState
           title="Sin acceso al portal"

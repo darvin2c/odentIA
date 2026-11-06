@@ -611,7 +611,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo le doy acceso al portal?",
-        a: "En su página › Datos › Acceso al portal, «Dar acceso al portal»: quién entra (la persona, o su representante si es menor), qué verá, «Comprobé su identidad: vi su documento» y cómo le llega (QR si está aquí, o su WhatsApp). El código de 6 dígitos se lo dices tú, en persona o por llamada: nunca va con el enlace.",
+        a: "Su enlace ya le muestra su cita, sus presupuestos, lo que tiene por firmar y sus comprobantes, sin clave: está en el «…» de su página, «Su enlace». El portal es para que vea además sus documentos cuando quiera. En su página › Datos › Enlace y portal, «Dar acceso al portal»: quién entra (la persona, o su representante si es menor), qué verá, «Comprobé su identidad: vi su documento» y cómo le llega (QR si está aquí, o su WhatsApp). El código de 6 dígitos se lo dices tú, en persona o por llamada: nunca va con el enlace.",
       },
       {
         q: "¿Qué hago si cambió de teléfono y no entra al portal?",

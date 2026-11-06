@@ -158,7 +158,11 @@ export function ShowPersonalCodeButton({
         open={open}
         onClose={() => setOpen(false)}
         title="Mostrar su código"
-        description="Gira la pantalla: lo escanea con su celular y completa sus datos mientras espera."
+        description={
+          missing.trim()
+            ? "Gira la pantalla: lo escanea con su celular y completa sus datos mientras espera."
+            : "Gira la pantalla: lo escanea con su celular y ve lo que tiene pendiente con la clínica."
+        }
         closeLabel="Listo"
         error={link.isError ? submitErrorMessage(link.error) : null}
         actions={
@@ -300,5 +304,63 @@ export function SendPersonalLinkButton({ patientId, size = "sm" }: { patientId: 
         ) : null}
       </ConfirmDialog>
     </>
+  )
+}
+
+/** Lo que su enlace le muestra (`getPersonalLinkView`), en palabras para quien atiende. */
+const LINK_SHOWS = [
+  "su próxima cita, para confirmarla o cambiarla",
+  "los datos que le faltan, para completarlos",
+  "los presupuestos que se le enviaron, para responderlos",
+  "lo que tiene por firmar",
+  "sus comprobantes de los últimos 30 días",
+  "sus mensajes: qué avisos quiere recibir",
+]
+
+/**
+ * «Su enlace», siempre a mano en la ficha (decisión del 2026-11-05), falten o
+ * no datos: qué le muestra, hasta cuándo sirve y cómo dárselo. Es el mismo
+ * enlace que le llega con cada aviso; no hace falta el portal.
+ */
+export function PersonalLinkDrawer({
+  patientId,
+  open,
+  onClose,
+  missing = "",
+}: {
+  patientId: string
+  open: boolean
+  onClose: () => void
+  /** Lo que le falta, en palabras; vacío si no le falta nada. */
+  missing?: string
+}) {
+  const preview = usePersonalLinkPreview(patientId, open)
+  const liveUntil = preview.data?.data.liveUntil ?? null
+  return (
+    <DetailDrawer
+      open={open}
+      onClose={onClose}
+      title="Su enlace"
+      description="Una página suya, sin clave, que le llega con cada aviso de la clínica."
+      closeLabel="Listo"
+    >
+      <div className="flex flex-col gap-3 text-sm">
+        <div className="flex flex-col gap-1">
+          <p className="font-medium">Con su enlace ve:</p>
+          <ul className="list-disc pl-5 text-muted-foreground">
+            {LINK_SHOWS.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+          <p className="text-muted-foreground">Solo aparece lo que tiene pendiente hoy.</p>
+        </div>
+        <p>
+          {liveUntil
+            ? `El que tiene sirve hasta el ${new Intl.DateTimeFormat("es", { day: "numeric", month: "long" }).format(new Date(liveUntil))}. Enviarlo o mostrarlo lo renueva.`
+            : "Aún no tiene uno vigente: al enviarlo o mostrarlo, sirve 7 días."}
+        </p>
+        <PersonalLinkActions patientId={patientId} missing={missing} />
+      </div>
+    </DetailDrawer>
   )
 }
