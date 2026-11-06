@@ -208,6 +208,10 @@ export function useDictationSession({
 
   const recognition = useRef<SpeechLike | null>(null)
   const wanted = useRef(false)
+  // Ya se reabrió tras un corte de red y aún no se oyó nada: otro corte significa que la red no volvió.
+  const reopenedAfterCut = useRef(false)
+  // Lo que se va oyendo sin cerrar: si el servicio de voz corta con «network» en medio de una frase, no se pierde.
+  const partialHeard = useRef("")
   const text = useRef("")
   const sent = useRef(0)
   const queue = useRef<Segment[]>([])
@@ -350,6 +354,8 @@ export function useDictationSession({
     const Recognition = speechRecognition()
     if (!Recognition) return
     setMicError(null)
+    reopenedAfterCut.current = false
+    partialHeard.current = ""
     const instance = new Recognition()
     // Idioma del dictado: el formato de la clínica; sin él, español sin país.
     instance.lang = activeOrgLocale() ?? "es"
@@ -366,6 +372,8 @@ export function useDictationSession({
       }
       if (heard.trim()) append(heard)
       setInterim(partial.trim())
+      partialHeard.current = partial.trim()
+      reopenedAfterCut.current = false
       // Mientras siga hablando no se ordena nada: se espera a la pausa.
       clearSilence()
       silence.current = window.setTimeout(() => cut(false), SILENCE_MS)
@@ -373,6 +381,19 @@ export function useDictationSession({
     instance.onerror = (event) => {
       // Un silencio largo no es un fallo: el navegador corta y `onend` reanuda.
       if (event.error === "no-speech" || event.error === "aborted") return
+      if (event.error === "network") {
+        // Lo que se estaba oyendo no llega a cerrarse: entra a lo dictado, como al pausar.
+        append(partialHeard.current)
+        partialHeard.current = ""
+        setInterim("")
+        // El servicio de voz de Chrome cierra la conexión tras unos 5 minutos de habla seguida y avisa
+        // «network» (en Chrome 156, a los 300 s): `onend` la reabre. Si la escucha reabierta vuelve a
+        // cortarse sin haber oído nada, la red no volvió y se pausa con el aviso.
+        if (!reopenedAfterCut.current) {
+          reopenedAfterCut.current = true
+          return
+        }
+      }
       wanted.current = false
       setMode("paused")
       setMicError(
