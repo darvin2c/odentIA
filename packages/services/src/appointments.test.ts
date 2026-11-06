@@ -19,6 +19,7 @@ import {
 } from "./appointments.js"
 import {
   createScheduleBlock,
+  deleteScheduleBlock,
   getAgendaAvailability,
   listAvailableSlots,
   setProfessionalSchedule,
@@ -368,6 +369,27 @@ it("«Editar» revisa la agenda igual que «Mover»: unidad bloqueada, quien no 
   // Otro servicio, otra duración: la cita pasa a durar lo del servicio.
   const edited = await run((tx) => updateAppointment(tx, ORG, ACTOR, created.id, { expectedVersion: created.version, serviceId }))
   expect(new Date(edited.endsAt).getTime() - new Date(edited.startsAt).getTime()).toBe(45 * 60_000)
+})
+
+it("crear y quitar una ausencia queda en la actividad del equipo, con quién lo hizo", async () => {
+  const absence = await run((tx) =>
+    createScheduleBlock(tx, ORG, ACTOR, {
+      branchId,
+      professionalUserId: PROFESSIONAL,
+      startsAt: "2027-03-01T14:00:00Z",
+      endsAt: "2027-03-01T16:00:00Z",
+      kind: "ausencia",
+      reason: "Curso",
+    }),
+  )
+  await run((tx) => deleteScheduleBlock(tx, ORG, absence.id, ACTOR))
+  const trail = await ownerDb.execute<{ action: string; actor_user_id: string | null }>(
+    sql`select action, actor_user_id from audit_event where organization_id = ${ORG} and entity = 'schedule_block' and entity_id = ${absence.id} order by created_at, id`,
+  )
+  expect([...trail]).toEqual([
+    { action: "schedule_block.absence_created", actor_user_id: ACTOR },
+    { action: "schedule_block.absence_removed", actor_user_id: ACTOR },
+  ])
 })
 
 it("listScheduleResources devuelve quienes pueden atender, unidades dentales y la zona de la sede", async () => {

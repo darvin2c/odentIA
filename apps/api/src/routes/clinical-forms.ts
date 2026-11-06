@@ -411,7 +411,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     }
   app.use("/consents/:id", paperLock(consentDocumentPatientId, "Consentimiento no encontrado"))
   app.use("/consents/:id/*", paperLock(consentDocumentPatientId, "Consentimiento no encontrado"))
-  app.use("/orders/:id/*", paperLock(clinicalOrderPatientId, "Orden no encontrado"))
+  app.use("/orders/:id/*", paperLock(clinicalOrderPatientId, "Orden no encontrada"))
   app.use("/form-responses/:id", paperLock(formResponsePatientId, "Formulario no encontrado"))
   app.use("/form-responses/:id/*", paperLock(formResponsePatientId, "Formulario no encontrado"))
 

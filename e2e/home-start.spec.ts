@@ -78,6 +78,21 @@ async function activeDay(db: Db, owner: OwnerFixture) {
   await db.insert(agentHandoff).values({ organizationId, contactId, reason: "Pide hablar con una persona", summary: "Prefiere atención humana.", priority: "alta" })
 }
 
+/**
+ * Cuántas citas de `activeDay` siguen «por venir» ahora: solo cuenta lo que aún
+ * no terminó (la de la otra profesional termina a las 18:30 de Lima y la propia
+ * a las 19:30), así que la prueba vale a cualquier hora en que corra.
+ */
+function upcomingOfActiveDay(): { all: number; mine: number } {
+  const [hour, minute] = new Intl.DateTimeFormat("en-GB", { timeZone: "America/Lima", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+    .format(new Date())
+    .split(":")
+    .map(Number)
+  const now = (hour ?? 0) * 60 + (minute ?? 0)
+  const mine = now < 19 * 60 + 30 ? 1 : 0
+  return { all: (now < 18 * 60 + 30 ? 1 : 0) + mine, mine }
+}
+
 const setRole = (db: Db, owner: OwnerFixture, role: string) =>
   db.update(member).set({ role }).where(and(eq(member.organizationId, owner.org.id), eq(member.userId, owner.user.id)))
 
@@ -168,14 +183,16 @@ for (const width of [1440, 390]) {
       // La tarea se marca hecha desde la propia fila.
       await expect(rows.nth(1).getByRole("button", { name: /^Hecha/ })).toBeVisible()
 
-      // Hoy atiende: «Mis pacientes de hoy», también siendo la dueña (tablero 7); su cita va en «Más tarde».
+      // Hoy atiende: «Mis pacientes de hoy», también siendo la dueña (tablero 7); su cita va en «Más tarde»
+      // (o, si ya pasó su hora sin que llegara, aparte).
+      const upcoming = upcomingOfActiveDay()
       const mine = page.getByRole("region", { name: "Mis pacientes de hoy" })
-      await expect(mine.getByRole("list", { name: "Más tarde" })).toContainText("Paciente con cita")
+      await expect(mine.getByRole("list", { name: upcoming.mine ? "Más tarde" : "Pasó su hora sin llegar" })).toContainText("Paciente con cita")
       await expect(mine).not.toContainText("Paciente de otra profesional")
       await expect(page.getByRole("region", { name: "Agenda de hoy" })).toHaveCount(0)
       // La agenda de la sede, en una línea con su resumen, igual al de la Agenda de ese día.
       const agendaLine = page.getByRole("link", { name: /^Agenda de / })
-      await expect(agendaLine).toContainText("2 citas · 0 en sala · 0 atendidas · 2 por venir")
+      await expect(agendaLine).toContainText(`2 citas · 0 en sala · 0 atendidas · ${upcoming.all} por venir`)
       // La caja del día, en una línea que lleva a Finanzas.
       const cash = page.getByRole("link", { name: /^Caja de hoy/ })
       await expect(cash).toContainText("1 persona por cobrar")
@@ -191,8 +208,8 @@ for (const width of [1440, 390]) {
 
       const home = await call<WorkspaceHome>(page, "GET", "/api/workspace/home", owner.org.slug)
       expect(home.waiting.map(row => row.kind)).toEqual(["case", "task"])
-      expect(home.today).toMatchObject({ scope: "mine", summary: { total: 1, attended: 0, upcoming: 1, unconfirmed: 1 } })
-      expect(home.agendaLine).toMatchObject({ branch: { id: owner.branchId }, summary: { total: 2, waiting: 0, attended: 0, upcoming: 2, unconfirmed: 1 } })
+      expect(home.today).toMatchObject({ scope: "mine", summary: { total: 1, attended: 0, upcoming: upcoming.mine, unconfirmed: 1 } })
+      expect(home.agendaLine).toMatchObject({ branch: { id: owner.branchId }, summary: { total: 2, waiting: 0, attended: 0, upcoming: upcoming.all, unconfirmed: 1 } })
       expect(home.cash?.toCollect.map(row => row.displayName)).toEqual(["Paciente con cita"])
       // Una sede que no existe no rompe Inicio ni mezcla sedes: vale la primera activa.
       const fallback = await call<WorkspaceHome>(page, "GET", `/api/workspace/home?branch=${randomUUID()}`, owner.org.slug)
@@ -215,15 +232,16 @@ for (const width of [1440, 390]) {
       const page = owner.page
       await page.setViewportSize({ width, height: 844 })
       const home = await call<WorkspaceHome>(page, "GET", "/api/workspace/home", owner.org.slug)
+      const upcoming = upcomingOfActiveDay()
       // El servidor no entrega citas de otro profesional, caja ni lo que decide recepción.
-      expect(home.today).toMatchObject({ scope: "mine", summary: { total: 1, attended: 0, upcoming: 1, unconfirmed: 1 } })
+      expect(home.today).toMatchObject({ scope: "mine", summary: { total: 1, attended: 0, upcoming: upcoming.mine, unconfirmed: 1 } })
       expect(home.today?.appointments.map(row => row.patientName)).toEqual(["Paciente con cita"])
       expect(home.cash).toBeNull()
       expect(home.waiting.some(row => row.kind === "case")).toBe(false)
 
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
       const mine = page.getByRole("region", { name: "Mis pacientes de hoy" })
-      await expect(mine).toContainText("1 paciente · 0 atendidos · 1 por venir")
+      await expect(mine).toContainText(`1 paciente · 0 atendidos · ${upcoming.mine} por venir`)
       await expect(mine).not.toContainText("Paciente de otra profesional")
       await expect(page.getByRole("region", { name: "Agenda de hoy" })).toHaveCount(0)
       await expect(page.getByRole("link", { name: /^Caja de hoy/ })).toHaveCount(0)

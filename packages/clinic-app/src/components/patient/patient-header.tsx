@@ -214,7 +214,7 @@ export function PersonHeader({
   const facts = [
     patient ? hcLabel(patient.patientNumber) : null,
     docLabel,
-    age ? `${age} años` : null,
+    age ? `${age} ${Number(age) === 1 ? "año" : "años"}` : null,
     person.sex ? sexLabel(person.sex) : null,
   ].filter(Boolean)
   // «Nueva cita» al lado, sin ir a la Agenda. Para quien aún no es paciente crea

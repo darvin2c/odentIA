@@ -60,13 +60,30 @@ export function issueFields(issues: readonly z.core.$ZodIssue[], prefix?: string
   return fields
 }
 
-export function notFound(entity: string): ServiceError {
-  return new ServiceError("NOT_FOUND", 404, `${entity} no encontrado`)
+/** Masculinas aunque terminen en «-a»: «Tema no encontrado», «Odontograma…». */
+const MASCULINE_IN_A = new Set(["tema", "problema", "sistema", "programa", "esquema", "día", "mapa", "idioma", "clima"])
+/** Femeninas aunque no terminen en «-a»: «Sede no encontrada», «Orden…». */
+const FEMININE_OTHERS = new Set(["sede", "orden", "anamnesis", "clave", "imagen", "red", "base", "llave"])
+
+/**
+ * «Cita no encontrada», «Paciente no encontrado»: concuerda con la primera
+ * palabra. Las terminadas en -a, -ión, -dad o -tud son femeninas, salvo las de
+ * `MASCULINE_IN_A` y las de «-grama».
+ */
+function foundWord(entity: string): string {
+  const first = (entity.trim().split(/\s+/)[0] ?? "").toLowerCase()
+  if (FEMININE_OTHERS.has(first)) return "encontrada"
+  if (MASCULINE_IN_A.has(first) || first.endsWith("grama")) return "encontrado"
+  return /(a|ión|dad|tud)$/.test(first) ? "encontrada" : "encontrado"
 }
 
-/** La sede no existe (o no es de la organización): `notFound` concuerda en masculino. */
+export function notFound(entity: string): ServiceError {
+  return new ServiceError("NOT_FOUND", 404, `${entity} no ${foundWord(entity)}`)
+}
+
+/** La sede no existe (o no es de la organización). */
 export function branchNotFound(): ServiceError {
-  return new ServiceError("NOT_FOUND", 404, "Sede no encontrada")
+  return notFound("Sede")
 }
 
 /**

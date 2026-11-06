@@ -26,6 +26,7 @@ import {
   type PersonalLinkView,
 } from "../../lib/booking-link"
 import { orgSlugFromHostname, requestHostname } from "../../lib/host"
+import { useHydrated } from "../../lib/hydrated"
 import { activeOrgLocale, activeOrgTimeZone, setOrgLocale } from "../../lib/locale"
 import { portalTotalsText } from "../../lib/portal"
 
@@ -109,7 +110,9 @@ function PersonalLinkPage() {
   const [pick] = useState(() => pickOf(search))
   const queryClient = useQueryClient()
   const slug = orgSlugFromHostname(requestHostname())
-  const ready = typeof window !== "undefined" && slug !== null && token !== undefined
+  // Hasta hidratar se pinta lo mismo que en el servidor («Abriendo tu enlace…»), sin decidir nada (#418).
+  const hydrated = useHydrated()
+  const ready = hydrated && slug !== null && token !== undefined
   const viewKey = ["booking-link", slug, token ?? null]
   const fetchView = () => fetchBookingLink(slug ?? "", token ?? "")
   const viewQuery = useQuery({
@@ -181,7 +184,7 @@ function PersonalLinkPage() {
     },
   })
 
-  if (!ready && typeof window !== "undefined") return <Expired />
+  if (!ready && hydrated) return <Expired />
   if (viewQuery.isPending || landing) {
     return (
       <PageShell maxWidth="md">

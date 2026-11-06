@@ -335,9 +335,10 @@ function ReceptionPage() {
   // Los interruptores guardan al momento; mientras viaja se muestra lo pedido.
   const toggleFunction = useMutation({
     retry: false,
-    // `fnId` solo dice qué fila se tocó: su error se pinta en ella.
-    mutationFn: ({ disabledFunctions }: { fnId: string; disabledFunctions: string[] }) =>
-      apiFetch("/api/agent/config", { method: "PUT", body: JSON.stringify({ disabledFunctions }) }),
+    // `fnId` dice qué fila se tocó (su error se pinta en ella) y `disabledFunctions` es lo que se muestra
+    // mientras viaja. Solo viaja ese interruptor: otra ventana pudo tocar otro.
+    mutationFn: ({ fnId, on }: { fnId: string; on: boolean; disabledFunctions: string[] }) =>
+      apiFetch("/api/agent/config", { method: "PUT", body: JSON.stringify({ functionSwitch: { id: fnId, on } }) }),
     onSettled: refresh,
   })
   const turnOff = useMutation({
@@ -546,6 +547,7 @@ function ReceptionPage() {
                   onToggle={(next) =>
                     toggleFunction.mutate({
                       fnId: fn.id,
+                      on: next,
                       disabledFunctions: next
                         ? config.disabledFunctions.filter((id) => id !== fn.id)
                         : [...config.disabledFunctions, fn.id],

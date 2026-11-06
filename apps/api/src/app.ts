@@ -21,6 +21,7 @@ import {
   getClinicLogo,
   getOrganizationBillingSummary,
   initialOrgRegion,
+  invalidField,
   type MailboxEnv,
   onDomain,
   productOfHost,
@@ -202,7 +203,8 @@ const taxRateInput = z
   .strict()
 
 const orgProfileInput = z.object({
-  legalName: z.string().trim().min(1, "Escribe la razón social").max(200),
+  // Obligatoria al crear la clínica; después, ausente queda como estaba.
+  legalName: z.string().trim().min(1, "Escribe la razón social").max(200).optional(),
   // El nombre que ve la persona en todo (decisión 19): obligatorio; ausente, queda como estaba.
   tradeName: z
     .string()
@@ -796,12 +798,14 @@ export function createApp(deps: AppDeps) {
             .set({ ...identity, updatedAt: new Date() })
             .where(eq(orgProfile.organizationId, orgId))
         } else {
+          if (!identity.legalName) throw invalidField("legalName", "Escribe la razón social")
           // El perfil nace con su región explícita: la base no asume ningún país. Y
           // con el producto del dominio donde se creó la clínica, que ya no cambia.
           await tx.insert(orgProfile).values({
             organizationId: orgId,
             product: productOfRequest(c),
             ...identity,
+            legalName: identity.legalName,
             ...initialOrgRegion({ countryCode, currency, timezone, locale, sheetSize }),
           })
         }

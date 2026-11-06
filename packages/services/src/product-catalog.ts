@@ -25,6 +25,11 @@ export interface ProductCatalog {
   kinds: readonly CatalogKind[]
   /** Con qué palabras pide la gente cada tipo, para el índice del agente («limpieza, flúor»). */
   kindWords: Readonly<Record<string, string>>
+  /**
+   * Cómo lo dicen los pacientes y cómo se llama en el catálogo, para buscar un
+   * servicio («limpieza» → profilaxis). Claves plegadas (sin tildes ni mayúsculas).
+   */
+  everydayWords: Readonly<Record<string, readonly string[]>>
   /** Las especialidades con que nace una clínica del país (null: aún sin país). */
   specialties(country: string | null): readonly CatalogSpecialty[]
 }
@@ -33,6 +38,7 @@ export interface ProductCatalog {
 export const NO_CATALOG: ProductCatalog = {
   kinds: [],
   kindWords: {},
+  everydayWords: {},
   specialties: () => [],
 }
 

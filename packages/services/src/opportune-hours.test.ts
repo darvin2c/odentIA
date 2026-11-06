@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  addOpportuneMinutes,
   isOpportune,
   lastOpportuneAtOrBefore,
   nextOpportuneFrom,
@@ -47,5 +48,20 @@ describe("horario oportuno", () => {
     expect(isOpportune(at("2026-10-11T17:00:00Z"), clinic)).toBe(false) // domingo 12:00
     expect(nextOpportuneFrom(sundayEarly, clinic)?.toISOString()).toBe("2026-10-12T14:00:00.000Z") // lunes 9:00
     expect(lastOpportuneAtOrBefore(sundayEarly, clinic)?.toISOString()).toBe("2026-10-10T23:59:00.000Z") // sábado 18:59
+  })
+})
+
+describe("dos horas de clínica abierta, sin contar los cierres", () => {
+  it("un tema del lunes a las 12:00 pasa a «Ahora» a las 16:00: el almuerzo no cuenta", () => {
+    // 12:00–13:00 cuenta una hora; la otra, de 15:00 a 16:00.
+    expect(addOpportuneMinutes(at("2026-10-12T17:00:00Z"), 120, clinic)?.toISOString()).toBe("2026-10-12T21:00:00.000Z")
+  })
+  it("un feriado no cuenta: el tema del lunes a las 18:00 pasa a «Ahora» el miércoles", () => {
+    const holiday = { start: at("2026-10-13T05:00:00Z"), end: at("2026-10-14T05:00:00Z") } // el martes entero en Lima
+    const withHoliday: OpportuneSchedule = { ...clinic, closed: [holiday] }
+    // Lunes 18:00–19:00: una hora; el martes no cuenta; el miércoles, de 9:00 a 10:00.
+    expect(addOpportuneMinutes(at("2026-10-12T23:00:00Z"), 120, withHoliday)?.toISOString()).toBe("2026-10-14T15:00:00.000Z")
+    // Sin el feriado, el martes a las 10:00.
+    expect(addOpportuneMinutes(at("2026-10-12T23:00:00Z"), 120, clinic)?.toISOString()).toBe("2026-10-13T15:00:00.000Z")
   })
 })

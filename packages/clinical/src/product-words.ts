@@ -52,6 +52,10 @@ export interface ProductWords {
   }
   /** Lo que hace estándar y completa una consulta de Clío (`consultationTierOf` en services). */
   clioTiers: { estandar: string; completa: string }
+  /** Las dos clases de control: de un tratamiento en curso o el periódico («Mantenimiento» en odontología). */
+  followUpKinds: { tratamiento: string; mantenimiento: string }
+  /** Cómo se cobra un servicio: una vez por todo o en cada sesión. */
+  billingModes: { treatment: string; session: string }
   /** Cómo se llaman las partes de la hoja del presupuesto. */
   budgetPaper: {
     title: string
@@ -68,6 +72,8 @@ export interface ProductWords {
 
 const WORDS: Record<ClinicalProduct, ProductWords> = {
   dental: {
+    followUpKinds: { tratamiento: "Seguimiento del tratamiento", mantenimiento: "Mantenimiento" },
+    billingModes: { treatment: "Por tratamiento", session: "Por sesión" },
     name: "odentIA",
     brand: "odentia",
     place: { one: "clínica", indefinite: "una clínica" },
@@ -103,6 +109,8 @@ const WORDS: Record<ClinicalProduct, ProductWords> = {
     },
   },
   medical: {
+    followUpKinds: { tratamiento: "Seguimiento del tratamiento", mantenimiento: "Control periódico" },
+    billingModes: { treatment: "Por todo el tratamiento", session: "Por sesión" },
     name: "latidIA",
     brand: "latidia",
     place: { one: "consultorio", indefinite: "un consultorio" },

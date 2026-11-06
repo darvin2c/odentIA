@@ -30,6 +30,8 @@ export interface WaitingTask {
   href: string
   mine: boolean
   assigneeName: string | null
+  /** Sin persona, el área que la tiene (recepción, clínico, caja). */
+  area?: string | null
   /** La oportunidad de la que sale, si el rol puede verla. */
   opportunityTitle: string | null
 }

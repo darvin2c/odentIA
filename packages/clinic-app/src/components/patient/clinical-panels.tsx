@@ -532,7 +532,7 @@ export function ControlesPanel({
                     if (next === "mantenimiento") createForm.setFieldValue("planItemId", "")
                   }}
                 >
-                  <option value="mantenimiento">Mantenimiento</option>
+                  <option value="mantenimiento">{FOLLOW_UP_KIND_LABELS.mantenimiento}</option>
                   <option value="tratamiento">Seguimiento de un tratamiento</option>
                 </ChoiceField>
               )}

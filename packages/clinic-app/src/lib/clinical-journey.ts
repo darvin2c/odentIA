@@ -13,6 +13,7 @@ import type { AppointmentStatus } from "./agenda"
 import { apiFetch } from "./api"
 import type { BudgetLine, BudgetWithTotals } from "./budgets"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
+import { appWords } from "./product-words"
 import type {
   Encounter,
   PatientDocument,
@@ -92,9 +93,14 @@ export const FOLLOW_UP_STATUS_LABELS: Record<FollowUpStatus, string> = {
   cancelado: "Cancelado",
 }
 
+/** Las clases de control con las palabras del producto (latidIA: «Control periódico»). */
 export const FOLLOW_UP_KIND_LABELS: Record<string, string> = {
-  tratamiento: "Seguimiento del tratamiento",
-  mantenimiento: "Mantenimiento",
+  get tratamiento() {
+    return appWords().followUpKinds.tratamiento
+  },
+  get mantenimiento() {
+    return appWords().followUpKinds.mantenimiento
+  },
 }
 
 /** Control longitudinal: una cita programada no equivale a un control realizado. */
