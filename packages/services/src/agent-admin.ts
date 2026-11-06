@@ -170,8 +170,13 @@ interface Fresh {
   kind: AdminLineKey
 }
 
-const dayOf = (value: Date | string, zone: OrgLocale) =>
-  new Date(value).toLocaleDateString(zone.locale, { timeZone: zone.timezone, day: "numeric", month: "long" })
+/** «12 de marzo»; de otro año, con el año: una deuda de hace un año no parece de ayer. */
+const dayOf = (value: Date | string, zone: OrgLocale) => {
+  const date = new Date(value)
+  const yearOf = (at: Date) => at.toLocaleDateString("en-CA", { timeZone: zone.timezone, year: "numeric" })
+  const otherYear = yearOf(date) !== yearOf(new Date())
+  return date.toLocaleDateString(zone.locale, { timeZone: zone.timezone, day: "numeric", month: "long", ...(otherYear ? { year: "numeric" } : {}) })
+}
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many)
 const blank = { patientId: null, contactId: null, opportunityId: null, appointmentId: null, budgetId: null, controlId: null, ownerUserId: null }
 

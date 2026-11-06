@@ -233,7 +233,7 @@ test("agente sin panel: el caso en Inicio, la cita en «Esperan su sí» y lo he
   await gotoHydrated(page, tenant(org.slug, "/home"))
   const menu = page.getByRole("button", { name: "Alternar menú lateral" })
   const menuBox = await menu.boundingBox()
-  // El número es el del icono: en horario de la clínica, el grupo «Ahora» de la lista dice lo mismo.
+  // El número es el del icono; el grupo de la lista cuenta asuntos («1 asunto»), no personas.
   const number = menu.locator("..").getByText("1 persona espera")
   await expect(number).toBeVisible()
   const numberBox = await number.boundingBox()
