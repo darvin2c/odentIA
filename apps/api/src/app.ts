@@ -486,6 +486,8 @@ export function createApp(deps: AppDeps) {
       ownerDb: deps.ownerDb,
       storage: deps.storage,
       webURL: deps.webURL,
+      // La dirección de quien entra, como en las otras rutas públicas: cada persona tiene su límite de intentos.
+      ...(deps.registrationRemoteAddress ? { remoteAddress: deps.registrationRemoteAddress } : {}),
     }),
   )
   // Oferta de prueba y versión de los documentos, para la pantalla de crear cuenta.

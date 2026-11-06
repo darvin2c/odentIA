@@ -53,18 +53,24 @@ import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { invalidField, isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { clinicToday } from "./inventory-stock.js"
 import { requirePatient } from "./patients.js"
+import { assertAttending } from "./encounter-attending.js"
 import { type ProductSite, type SiteColumns, withSite } from "./product-hooks.js"
 import { productHooks } from "./products.js"
 
 /** El «dónde» del producto de la clínica (odentIA: piezas y caras). */
 const siteOf = async (tx: Db, orgId: string): Promise<ProductSite> => (await productHooks(tx, orgId)).site
 
-/** La atención en borrador de este paciente, bloqueada para escribir en ella. */
+/**
+ * La atención en borrador de este paciente, bloqueada para escribir en ella.
+ * Con `actorUserId`, además la lleva quien escribe (ADR 0002); sin él (adjuntar
+ * un documento, que puede subir otra persona del equipo), solo se une.
+ */
 export async function requireDraftLink(
   tx: Db,
   orgId: string,
   patientId: string,
   encounterId: string,
+  actorUserId?: string,
 ): Promise<typeof encounter.$inferSelect> {
   const [row] = await tx
     .select()
@@ -80,6 +86,7 @@ export async function requireDraftLink(
   if (!row) throw notFound("Atención")
   if (row.status === "anulada") throw conflict("VOIDED", "La atención está anulada")
   if (row.status !== "borrador") throw conflict("FINALIZED", "La atención está finalizada")
+  if (actorUserId !== undefined) assertAttending(row, actorUserId)
   return row
 }
 
@@ -1226,7 +1233,7 @@ export async function addClinicalNote(
   },
 ) {
   await requirePatient(tx, orgId, patientId)
-  if (input.encounterId) await requireDraftLink(tx, orgId, patientId, input.encounterId)
+  if (input.encounterId) await requireDraftLink(tx, orgId, patientId, input.encounterId, actorUserId)
   const note = input.note?.trim() ?? ""
   if (note.length < 1 || note.length > 4000) throw validation("note debe tener 1–4000 caracteres")
   // Una sola vía para diagnosticar: el diagnóstico es una entidad de la
