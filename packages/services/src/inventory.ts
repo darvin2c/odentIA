@@ -777,9 +777,34 @@ export async function createProduct(
   tx: Db,
   orgId: string,
   actorUserId: string,
-  input: ProductInput & { unitReview?: boolean },
+  input: ProductInput & {
+    unitReview?: boolean
+    /**
+     * La clave del formulario abierto (X13): si se corta la red y se vuelve a
+     * guardar, el producto ya creado con esa clave se devuelve y no se repite.
+     */
+    idempotencyKey?: string
+  },
 ) {
   const name = textRequired(input.name, "El nombre del producto", 200, "name")
+  if (input.idempotencyKey) {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('product:' || ${orgId} || ':' || ${input.idempotencyKey}))`)
+    const [prior] = await tx
+      .select({ id: auditEvent.entityId })
+      .from(auditEvent)
+      .where(
+        and(
+          eq(auditEvent.organizationId, orgId),
+          eq(auditEvent.action, "product.created"),
+          sql`${auditEvent.metadata}->>'requestKey' = ${input.idempotencyKey}`,
+        ),
+      )
+      .limit(1)
+    if (prior?.id) {
+      const done = await requireProduct(tx, orgId, prior.id)
+      return { ...done, minimums: await minimumsOf(tx, orgId, done.id) }
+    }
+  }
   const unitCurrency = input.salePriceCents != null ? await requireOrgCurrency(tx, orgId) : null
   const values = resolveProduct(input, null, unitCurrency)
   const sku = await skuFor(tx, orgId, input.sku, name)
@@ -790,7 +815,15 @@ export async function createProduct(
       .returning()
     if (!row) throw new ServiceError("INTERNAL", 500, "No se pudo guardar el producto")
     if (input.minimums?.length) await setMinimums(tx, orgId, row.id, input.minimums)
-    await audit(tx, orgId, actorUserId, "product", row.id, "product.created")
+    // La clave del formulario queda con el alta: así se reconoce el reintento.
+    await tx.insert(auditEvent).values({
+      organizationId: orgId,
+      actorUserId,
+      entity: "product",
+      entityId: row.id,
+      action: "product.created",
+      metadata: input.idempotencyKey ? { requestKey: input.idempotencyKey } : null,
+    })
     return { ...row, minimums: await minimumsOf(tx, orgId, row.id) }
   } catch (e) {
     if (isUniqueViolation(e)) throw conflict("Ese código ya lo usa otro producto. Elige otro.", "sku")

@@ -141,7 +141,7 @@ function TodayCashSkeleton() {
           </li>
         ))}
       </ul>
-      <span className="inline-flex min-h-11 items-center self-start font-semibold text-primary underline underline-offset-4 sm:min-h-8">Abrir la Caja</span>
+      <span className="inline-flex min-h-11 items-center self-start font-semibold text-primary underline underline-offset-4 sm:min-h-8">Ir a la Caja</span>
     </section>
   )
 }
@@ -156,7 +156,7 @@ function CashLineSkeleton() {
           <Skeleton className="h-3.5 w-3/4" />
         </span>
       </span>
-      <span className="shrink-0 font-semibold text-primary">Abrir la Caja</span>
+      <span className="shrink-0 font-semibold text-primary">Ir a la Caja</span>
     </div>
   )
 }

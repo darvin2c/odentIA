@@ -85,17 +85,32 @@ function rankOf(view: ConversationView): number {
 export async function listPersonRows(
   tx: Db,
   orgId: string,
-  input: ConversationFilters & { view?: ConversationView; cursor?: string; limit?: number },
+  input: ConversationFilters & {
+    view?: ConversationView
+    cursor?: string
+    limit?: number
+    /**
+     * «reciente» (por defecto): lo último que se movió, primero. «espera»: quien
+     * lleva más tiempo sin un movimiento, primero (X7: en «Por atender», quien
+     * espera más).
+     */
+    sort?: "reciente" | "espera"
+  },
 ): Promise<{ rows: PersonRow[]; nextCursor: string | null }> {
   const limit = Math.min(Math.max(input.limit ?? 30, 1), 100)
-  const { view, cursor, limit: _limit, ...rest } = input
+  const { view, cursor, limit: _limit, sort, ...rest } = input
+  const oldestFirst = sort === "espera"
   const filters = view === undefined ? rest : { ...rest, status: undefined }
   const conditions: SQL[] = []
   if (view !== undefined) conditions.push(sql`l.rank = ${sql.raw(String(rankOf(view)))}`)
   if (cursor) {
     const decoded = conversationCursor(cursor)
     const ts = sql`${decoded.ts}::timestamptz`
-    conditions.push(sql`(g.at < ${ts} or (g.at = ${ts} and l.person_key < ${decoded.id}::uuid))`)
+    conditions.push(
+      oldestFirst
+        ? sql`(g.at > ${ts} or (g.at = ${ts} and l.person_key > ${decoded.id}::uuid))`
+        : sql`(g.at < ${ts} or (g.at = ${ts} and l.person_key < ${decoded.id}::uuid))`,
+    )
   }
   const found = await tx.execute<{
     id: string
@@ -122,7 +137,7 @@ export async function listPersonRows(
     from l join g on g.person_key = l.person_key
     ${conditions.length > 0 ? sql`where ${and(...conditions)}` : sql``}
     -- La persona es la fila: el cursor sigue a la persona, aunque cambie la conversación que la muestra.
-    order by g.at desc, l.person_key desc
+    ${oldestFirst ? sql`order by g.at asc, l.person_key asc` : sql`order by g.at desc, l.person_key desc`}
     limit ${limit + 1}`)
   const page = found.slice(0, limit)
   const rows = page.map((row) => ({

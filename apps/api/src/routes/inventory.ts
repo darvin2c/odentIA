@@ -133,11 +133,13 @@ const productInput = z.object(
       .optional(),
     minimums: minimumsInput.optional(),
     salePriceCents: cents("El precio de venta").nullish(),
+    /** La clave del formulario abierto: reintentar el alta no repite el producto. */
+    idempotencyKey: formKey.optional(),
   },
   NO_FORM,
 )
 
-const productPatch = productInput.partial()
+const productPatch = productInput.omit({ idempotencyKey: true }).partial()
 
 const sheetValue = z.union([z.number("«Hay» no es un número"), words("Un número de la lista", 40)], "Un número de la lista no es válido").nullish()
 

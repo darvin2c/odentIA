@@ -737,3 +737,14 @@ it("proveedor: el tipo de documento es un código de la lista del país de la cl
     message: "El tipo de documento del proveedor tiene que ser uno de la lista: Documento tributario, Documento nacional, Pasaporte u Otro",
   })
 })
+
+it("crear un producto con la clave del formulario: el reintento tras un corte devuelve el mismo, sin repetirlo (X13)", async () => {
+  const c = await clinic()
+  const key = crypto.randomUUID()
+  const first = await c.run((tx) => createProduct(tx, c.orgId, c.actor, { name: "Hilo de sutura", unit: "sobre", idempotencyKey: key }))
+  const again = await c.run((tx) => createProduct(tx, c.orgId, c.actor, { name: "Hilo de sutura", unit: "sobre", idempotencyKey: key }))
+  expect(again.id).toBe(first.id)
+  // Otra clave es otro alta: el código propio se distingue solo.
+  const other = await c.run((tx) => createProduct(tx, c.orgId, c.actor, { name: "Hilo de sutura", unit: "sobre", idempotencyKey: crypto.randomUUID() }))
+  expect(other.id).not.toBe(first.id)
+})

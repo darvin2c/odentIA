@@ -20,6 +20,7 @@ import {
   listConsentTemplates,
   publishConsentTemplate,
   revokeConsentDocument,
+  listConsentDocuments,
   signConsentDocument,
 } from "./clinical-forms.js"
 import { createContact } from "./contacts.js"
@@ -265,6 +266,10 @@ it("consentimiento: firma verificada del paciente o de su representante legal vi
     comprehensionConfirmed: true,
     witnessName: "Luis Testigo",
   })
+  // La lista dice que está firmado sin traer las firmas dibujadas; el documento sí las tiene.
+  const listed = await run((tx) => listConsentDocuments(tx, "org_a", { patientId: child.id }))
+  expect(listed.find((doc) => doc.id === first.id)).toMatchObject({ status: "firmado", signatureData: null, professionalSignature: null })
+  expect(signed.signatureData).not.toBeNull()
   // La persona que firmó no se reemplaza después (trigger).
   await expect(
     run((tx) =>

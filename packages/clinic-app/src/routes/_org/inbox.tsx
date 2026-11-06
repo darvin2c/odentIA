@@ -236,8 +236,10 @@ function InboxPage() {
     // Spam y Bloqueados muestran todo lo de esas personas, abierto o cerrado.
     if (!isSideView(activeView)) params.set("status", activeView === "closed" ? "closed" : "open")
     params.set("view", activeView)
+    // «Quien espera más»: lo más antiguo primero (X7). Sin elegir, lo último que se movió.
+    if (listSearch.get("sort")?.replace(/^-/, "") === "espera") params.set("sort", "espera")
     return params.toString()
-  }, [filterParams, activeView])
+  }, [filterParams, activeView, listSearch])
 
   // La clave empieza por `conversations`: se invalida junto con la lista.
   const summaryQuery = useQuery({
@@ -546,7 +548,10 @@ function InboxPage() {
                 },
               ]}
               className="min-w-0 flex-1 bg-transparent p-0 [&>[data-filter-row=desktop]]:justify-end [&_[data-filter-row=desktop]>div:first-child]:w-52 [&_[data-filter-row=desktop]>div:first-child]:min-w-28 [&_[data-filter-row=desktop]>div:first-child]:shrink [&_[data-filter-row=desktop]>div:first-child]:focus-within:w-72"
-              sortOptions={[]}
+              sortOptions={[
+                { value: "reciente", label: "Lo último primero" },
+                { value: "espera", label: "Quien espera más" },
+              ]}
               searchPlaceholder="Nombre, teléfono, documento o lo que escribió" searchLabel="Buscar en la Bandeja"
               searchPending={listQuery.isFetching && !listQuery.isFetchingNextPage}
               resetKeys={["channel", "q"]}
