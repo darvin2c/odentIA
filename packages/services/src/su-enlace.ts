@@ -37,6 +37,7 @@ import {
 } from "./automation-messages.js"
 import { clinicName as findClinicName, firstName } from "./automation-routing.js"
 import {
+  PERSONAL_LINK_TTL_DAYS,
   appointmentView,
   type BookingLinkAppointment,
   type BookingLinkBranch,
@@ -1478,6 +1479,8 @@ export interface PersonalLinkSendPreview {
   text: string
   /** Hasta cuándo sirve el enlace que ya tiene, si tiene uno: «Quitar enlace» lo deja sin efecto. */
   liveUntil: string | null
+  /** Cuántos días sirve desde que se envía o se muestra (`PERSONAL_LINK_TTL_DAYS`). */
+  ttlDays: number
 }
 
 /** Hasta cuándo sirve el enlace vivo de un paciente, de quien sea; nulo si no tiene. */
@@ -1521,6 +1524,7 @@ export async function previewPersonalLinkSend(
     },
     text,
     liveUntil: await liveLinkUntil(tx, orgId, patientId),
+    ttlDays: PERSONAL_LINK_TTL_DAYS,
     canShow: true,
   }
   if ((await personalLinkUrl(tx, orgId, "0".repeat(64))) === null) {
