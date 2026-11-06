@@ -77,7 +77,7 @@ export function AgendaTab({ query, onOpenList, advice }: { query: ReportQuery; o
       </SkeletonRegion>
     )
   if (report.isError)
-    return <QueryErrorState error={report.error} onRetry={() => void report.refetch()} notFound="La sede elegida ya no está disponible. Elige otra sede." />
+    return <QueryErrorState error={report.error} onRetry={() => void report.refetch()} notFound="La sede elegida ya no está disponible. Elige otra sede." invalid="Ese periodo no se puede mostrar: elige otro arriba." />
   const data = report.data.data
   const current = data.appointments.current
   if (current.total === 0 && data.occupancy.current.availMin === 0 && data.appointments.months.every((month) => month.total === 0))

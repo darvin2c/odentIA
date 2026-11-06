@@ -243,7 +243,7 @@ export function FunnelCard({ query, onOpenList }: { query: ReportQuery; onOpenLi
         <FunnelBodySkeleton />
       </SkeletonRegion>,
     )
-  if (report.isError) return card(<QueryErrorState error={report.error} onRetry={() => void report.refetch()} />)
+  if (report.isError) return card(<QueryErrorState error={report.error} onRetry={() => void report.refetch()} invalid="Ese periodo no se puede mostrar: elige otro arriba." />)
   const data = report.data.data
   const { funnel, locale } = data
   const period = spanLabel(data.period, locale)

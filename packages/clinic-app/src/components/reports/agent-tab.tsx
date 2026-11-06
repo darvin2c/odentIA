@@ -97,7 +97,7 @@ export function AgentTab({ query, onOpenList }: { query: ReportQuery; onOpenList
       </SkeletonRegion>
     )
   if (report.isError)
-    return <QueryErrorState error={report.error} onRetry={() => void report.refetch()} notFound="La sede elegida ya no está disponible. Elige otra sede." />
+    return <QueryErrorState error={report.error} onRetry={() => void report.refetch()} notFound="La sede elegida ya no está disponible. Elige otra sede." invalid="Ese periodo no se puede mostrar: elige otro arriba." />
 
   const data = report.data.data
   const { locale } = data
@@ -434,12 +434,13 @@ function Responses({ data, period, phrase, onOpenList }: { data: ReportAgent; pe
   return (
     <ReportCard title="Cómo respondimos a quien escribió" note={data.wholeClinic.includes("responses") ? WHOLE_CLINIC : undefined}>
       {current.conversations === 0 ? (
-        <EmptyLine>Nadie escribió por primera vez {during(period)}.</EmptyLine>
+        <EmptyLine>No empezó ninguna conversación nueva {during(period)}.</EmptyLine>
       ) : (
         <>
           <div className="flex min-w-0 flex-col gap-1">
             <p className="text-sm">
-              {current.conversations} {current.conversations === 1 ? "persona escribió" : "personas escribieron"} por primera vez; {respondedRate} % recibió respuesta.
+              {/* Cuenta conversaciones que empezaron sin un mensaje anterior, no personas: Pacientes cuenta personas. */}
+              {current.conversations} {current.conversations === 1 ? "conversación empezó" : "conversaciones empezaron"} {during(period)}; {respondedRate} % recibió respuesta.
             </p>
             <ChangeLine change={absoluteChange(respondedRate ?? 0, previousRate, phrase, locale, POINTS)} better="up" />
           </div>

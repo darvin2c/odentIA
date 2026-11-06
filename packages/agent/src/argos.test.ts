@@ -539,6 +539,23 @@ describe("Argos sobre las vistas", () => {
     expect(again.text).toBe(answer.text)
   })
 
+  it("dos cálculos de la misma cifra no se rotulan igual ni repiten «Así lo calculé»", async () => {
+    const figure = (clave: string) => ({ clave, por: [], filtros: [], parte_del_total: false, limite: null, orden: "mayor" })
+    const calc = (id: string, clave: string) => ({ name: "calcular", args: { id, cifra: figure(clave), sql: "", periodo: "este_mes", compara: "no", otro_periodo: "", sede: "" } })
+    const model = new ScriptedModel([
+      { tools: [calc("c1", "cobrado"), calc("c2", "cobrado")] },
+      { calculo: "c1, c2", frase: "Se cobró {cobrado_dinero} y {c2_cobrado_dinero}.", frase_vacia: "Nada.", titulo: "Lo cobrado" },
+    ])
+    const answer = await ask(model, "¿Cuánto cobramos?")
+    if (answer.kind !== "respuesta") throw new Error(answer.kind)
+    const labels = answer.table?.columns.map((column) => column.label) ?? []
+    expect(new Set(labels).size).toBe(labels.length)
+    expect(labels).toEqual(expect.arrayContaining(["Cobrado", "Cobrado (2)"]))
+    // La regla de la cifra se dice una vez.
+    const rule = (answer.how ?? "").split(/(?<=\.)\s+/)
+    expect(new Set(rule).size).toBe(rule.length)
+  })
+
   it("la respuesta que falla en el último turno tiene su corrección, y el id del cálculo delante de su columna se entiende", async () => {
     const figure = (clave: string) => ({ clave, por: [], filtros: [], parte_del_total: false, limite: null, orden: "mayor" })
     const calc = (id: string, clave: string) => ({ name: "calcular", args: { id, cifra: figure(clave), sql: "", periodo: "a_hoy", compara: "no", otro_periodo: "", sede: "" } })

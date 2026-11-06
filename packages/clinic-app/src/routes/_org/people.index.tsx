@@ -138,6 +138,7 @@ function PeoplePage() {
   const atajoParam = listSearch.get("atajo")
   const atajo = view === "pacientes" && isPeopleShortcut(atajoParam) ? atajoParam : undefined
   const atajoLabel = PEOPLE_SHORTCUTS.find((item) => item.id === atajo)?.label ?? ""
+  const atajoRule = PEOPLE_SHORTCUTS.find((item) => item.id === atajo)?.rule ?? ""
   const [cursors, setCursors] = useState<string[]>([])
   const cursor = cursors.at(-1) ?? null
   const [creating, setCreating] = useState(false)
@@ -382,7 +383,9 @@ function PeoplePage() {
           searchPlaceholder="Buscar por nombre, teléfono o documento" searchLabel="Buscar en pacientes"
           searchPending={query.isFetching && filtered}
         />
-        <p className="text-xs text-muted-foreground">Una sola búsqueda en toda la clínica.</p>
+        <p className="text-xs text-muted-foreground">
+          {atajoRule ? `«${atajoLabel}»: ${atajoRule.charAt(0).toLowerCase()}${atajoRule.slice(1)} ` : ""}Una sola búsqueda en toda la clínica.
+        </p>
       </div>
       {query.isPending && rows.length === 0 ? (
         <SkeletonRegion message="Cargando personas…">
