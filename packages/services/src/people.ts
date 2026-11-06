@@ -50,6 +50,7 @@ import {
 } from "./people-shortcuts.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import {
+  assertUnchangedSince,
   assertDocumentFree,
   birthDateIsMinor,
   patientOrganizationToday,
@@ -888,6 +889,8 @@ export async function updatePersonIdentity(
   actor: { userId: string | null; origin?: "agent" },
   contactId: string,
   patch: PersonIdentityPatch,
+  /** Lo que se vio guardado de cada dato que cambia: otra sesión no se pisa (`STALE_DATA`). */
+  base?: Record<string, unknown>,
 ): Promise<void> {
   const keys = Object.keys(patch) as PersonIdentityField[]
   if (keys.length === 0) return
@@ -898,6 +901,7 @@ export async function updatePersonIdentity(
     .for("update")
     .limit(1)
   if (!locked) throw notFound("Contacto")
+  assertUnchangedSince(locked as unknown as Record<string, unknown>, base)
   const patientId = await selfPatientOf(tx, orgId, contactId)
   if (patientId) {
     if (actor.origin === "agent")
