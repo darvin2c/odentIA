@@ -70,6 +70,7 @@ import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { useOrgProfile } from "../../lib/org"
 import { usePageDraftGuard } from "../../lib/page-draft-guard"
+import { untilWritten } from "../../lib/write-barrier"
 import { ageFrom, type Encounter, type EncounterDetail, hcLabel, type PatientFull } from "../../lib/patients"
 import { productUi } from "../../product/product-ui"
 import { AttendingForNotice } from "../agenda/attending-for-notice"
@@ -521,6 +522,8 @@ export function EncounterEditor({
   const latestWriteAtRef = useRef(new Date(encounter.updatedAt).getTime())
   // Los textos que otra pestaña cambió: no se vuelven a enviar hasta recargar, y lo demás sigue guardándose.
   const conflictRef = useRef<Set<DraftKey>>(new Set())
+  /** El último aviso de otra pestaña: con él corta la barrera si solo queda lo en conflicto. */
+  const staleRef = useRef<unknown>(null)
   // Lo último guardado de cada texto, como lo devolvió el servidor: viaja como `base`.
   const savedTextRef = useRef<Record<TextKey, string | null>>({
     reason: encounter.reason ?? null,
@@ -690,6 +693,7 @@ export function EncounterEditor({
               for (const key of sendable) if (fields.includes(key)) conflictRef.current.add(key)
               for (const key of sendable) dirtyRef.current.add(key)
               stale = err
+              staleRef.current = err
               continue
             }
             for (const key of sendable) dirtyRef.current.add(key)
@@ -738,10 +742,13 @@ export function EncounterEditor({
   /** Barrera de escritura: la consumen hijos, guardado, finalizar y volver. */
   const flush = async (): Promise<void> => {
     clearTimer()
-    for (;;) {
-      await drain()
-      if (dirtyRef.current.size === 0) return
-    }
+    await untilWritten({
+      drain,
+      pending: () => [...dirtyRef.current],
+      inConflict: (key) => conflictRef.current.has(key),
+      conflictError: () =>
+        staleRef.current ?? new Error("Otra pestaña o persona cambió lo marcado: copia lo tuyo si lo necesitas y recarga para ver lo último."),
+    })
   }
 
   const markEdited = (key: DraftKey) => {
