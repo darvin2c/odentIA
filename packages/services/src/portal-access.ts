@@ -1058,8 +1058,11 @@ export interface PortalAccessGiven {
   grantId: string
   /** Para el QR, una sola vez. */
   activationUrlOnce: string | null
-  /** El código de 6 dígitos, que se le dice en persona o por teléfono: nunca va con el enlace. */
-  pinOnce: string
+  /**
+   * El código de 6 dígitos, que se le dice en persona o por teléfono: nunca va con
+   * el enlace. Nulo cuando lo envió recepción: le llegó a la persona en otro mensaje.
+   */
+  pinOnce: string | null
   /** A quién se le envió el enlace por WhatsApp. */
   sentTo: string | null
 }
@@ -1069,7 +1072,7 @@ async function deliverPortalAccess(
   orgId: string,
   actorUserId: string,
   input: { patientId: string; contactId: string; delivery: "qr" | "whatsapp" },
-  deliver: { linkUrl: (rawLinkToken: string) => string },
+  deliver: { linkUrl: (rawLinkToken: string) => string; pinInChat?: boolean },
 ): Promise<{ activationUrlOnce: string | null; pinOnce: string; sentTo: string | null }> {
   if (input.delivery === "qr") {
     const issued = await issuePortalActivationQr(tx, orgId, actorUserId, {
@@ -1148,9 +1151,18 @@ export async function resendPortalAccess(
   orgId: string,
   actorUserId: string,
   grantId: string,
-  input: { delivery: "qr" | "whatsapp" },
+  /**
+   * `staffSees: false` (recepción, ADR 0150): solo por su WhatsApp, el código en
+   * otro mensaje a la persona, y ni el enlace ni el código vuelven en la respuesta.
+   */
+  input: { delivery: "qr" | "whatsapp"; staffSees?: boolean },
   deliver: { linkUrl: (rawLinkToken: string) => string },
 ): Promise<PortalAccessGiven> {
+  const staffSees = input.staffSees !== false
+  if (!staffSees && input.delivery !== "whatsapp") {
+    const message = "Mostrar el QR es de quien puede ver la historia: envíaselo por su WhatsApp"
+    throw new ServiceError("PORTAL_FORBIDDEN", 403, message, { delivery: message })
+  }
   const policy = await getPortalPolicy(tx, orgId)
   if (!policy.enabled) throw portalDisabled()
   const [grant] = await tx
@@ -1167,12 +1179,25 @@ export async function resendPortalAccess(
       "Ya no puede entrar al portal por este paciente: quita este acceso y, si corresponde, dale uno a quien decide por él",
     )
   }
+  // El enlace nuevo es para volver a entrar (otro teléfono, uno perdido): las sesiones
+  // abiertas con el anterior se cierran. Las llaves guardadas siguen; «Quitar acceso» cierra todo.
+  const closedAt = new Date()
+  await tx
+    .update(portalSession)
+    .set({ revokedAt: closedAt, revokedBy: actorUserId, updatedAt: closedAt })
+    .where(
+      and(
+        eq(portalSession.organizationId, orgId),
+        eq(portalSession.grantId, grant.id),
+        isNull(portalSession.revokedAt),
+      ),
+    )
   const delivered = await deliverPortalAccess(
     tx,
     orgId,
     actorUserId,
     { patientId: grant.patientId, contactId: grant.contactId, delivery: input.delivery },
-    deliver,
+    { ...deliver, ...(staffSees ? {} : { pinInChat: true }) },
   )
   const pending = await tx
     .select({ id: crmTask.id })
@@ -1191,8 +1216,12 @@ export async function resendPortalAccess(
     patientId: grant.patientId,
     contactId: grant.contactId,
     delivery: input.delivery,
+    ...(staffSees ? {} : { pinInChat: true }),
   })
-  return { grantId: grant.id, ...delivered }
+  // A recepción no le vuelve ni el enlace ni el código: ya le llegaron a la persona.
+  return staffSees
+    ? { grantId: grant.id, ...delivered }
+    : { grantId: grant.id, activationUrlOnce: null, pinOnce: null, sentTo: delivered.sentTo }
 }
 
 /**

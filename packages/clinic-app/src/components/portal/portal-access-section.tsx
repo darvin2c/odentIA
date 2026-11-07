@@ -48,7 +48,11 @@ export function PatientPortalAccessSection({
   /** Sin «Su enlace»: abierta desde «Portal del paciente» del «…», que ya tiene el suyo. */
   withLink?: boolean
 }) {
-  const canManage = usePermission("patients.write")
+  // Dar el acceso, mostrar el QR, decir el código y quitarlo es de quien ve la historia
+  // (ADR 0150); recepción solo envía el enlace de un acceso ya dado por su WhatsApp.
+  const canGive = usePermission("clinical.read")
+  const canEditRecord = usePermission("patients.write")
+  const canManage = canGive || canEditRecord
   const canConfigure = usePermission("settings.write")
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -68,7 +72,7 @@ export function PatientPortalAccessSection({
     return <EmptyState title="Enlace y portal" description="Su enlace y su acceso al portal los gestiona quien puede editar su ficha." />
   }
   // «Su enlace» va siempre primero: es lo que ya tiene y no depende del portal (ni de que cargue).
-  const linkBlock = !withLink ? null : (
+  const linkBlock = !withLink || !canEditRecord ? null : (
     <section aria-labelledby={`${uid}-enlace`} className="flex flex-col gap-2 rounded-lg border p-3">
       <h3 id={`${uid}-enlace`} className="text-sm font-medium">
         Su enlace
@@ -125,8 +129,8 @@ export function PatientPortalAccessSection({
           <EmptyState
             title="Sin acceso al portal"
             description="Con el portal ve lo suyo cuando quiera, desde su teléfono. Se da en persona, con su documento."
-            actionLabel={summary.candidates.length > 0 ? "Dar acceso al portal" : undefined}
-            onAction={summary.candidates.length > 0 ? () => setDrawer({ kind: "give" }) : undefined}
+            actionLabel={canGive && summary.candidates.length > 0 ? "Dar acceso al portal" : undefined}
+            onAction={canGive && summary.candidates.length > 0 ? () => setDrawer({ kind: "give" }) : undefined}
           />
         ) : (
           <ul className="flex flex-col divide-y rounded-lg border">
@@ -153,16 +157,23 @@ export function PatientPortalAccessSection({
                   <Button type="button" variant={row.reentryRequested ? "default" : "outline"} size="sm" onClick={() => setDrawer({ kind: "resend", row })}>
                     Enviar nuevo enlace
                   </Button>
-                  <Button type="button" variant="ghost" size="sm" className="text-destructive" onClick={() => setRevoking(row)}>
-                    Quitar acceso
-                  </Button>
+                  {canGive ? (
+                    <Button type="button" variant="ghost" size="sm" className="text-destructive" onClick={() => setRevoking(row)}>
+                      Quitar acceso
+                    </Button>
+                  ) : null}
                 </div>
               </li>
             ))}
           </ul>
         )}
         <p className="text-sm text-muted-foreground">{portalSeesText(summary.allowedScope)}</p>
-        {summary.access.length > 0 && pendingCandidates.length > 0 ? (
+        {!canGive ? (
+          <p className="text-sm text-muted-foreground">
+            El acceso lo da quien puede ver la historia, porque el portal muestra sus documentos. Tú puedes enviarle el enlace por su WhatsApp.
+          </p>
+        ) : null}
+        {canGive && summary.access.length > 0 && pendingCandidates.length > 0 ? (
           <Button type="button" variant="outline" className="self-start" onClick={() => setDrawer({ kind: "give" })}>
             Dar acceso a otra persona
           </Button>
@@ -222,13 +233,19 @@ function Delivered({ given }: { given: PortalAccessGiven }) {
           <p className="text-center text-sm text-muted-foreground">Que lo escanee con la cámara de su teléfono. Sirve una sola vez y vale 3 días.</p>
         </div>
       ) : (
-        <p className="text-sm">Le enviamos el enlace por WhatsApp{given.sentTo ? ` a ${given.sentTo}` : ""}. Vale 3 días.</p>
+        <p className="text-sm">
+          {given.pinOnce
+            ? `Le enviamos el enlace por WhatsApp${given.sentTo ? ` a ${given.sentTo}` : ""}. Vale 3 días.`
+            : `Le enviamos el enlace y su código por WhatsApp${given.sentTo ? ` a ${given.sentTo}` : ""}, en dos mensajes. Vale 3 días.`}
+        </p>
       )}
-      <div className="flex flex-col items-center gap-1 rounded-xl bg-muted p-4">
-        <p className="text-sm text-muted-foreground">Su código</p>
-        <p className="font-mono text-3xl font-semibold tracking-widest">{given.pinOnce}</p>
-        <p className="text-center text-sm text-muted-foreground">Díselo en persona o por llamada. Nunca va con el enlace: tener su chat no prueba que sea ella.</p>
-      </div>
+      {given.pinOnce ? (
+        <div className="flex flex-col items-center gap-1 rounded-xl bg-muted p-4">
+          <p className="text-sm text-muted-foreground">Su código</p>
+          <p className="font-mono text-3xl font-semibold tracking-widest">{given.pinOnce}</p>
+          <p className="text-center text-sm text-muted-foreground">Díselo en persona o por llamada. Nunca va con el enlace: tener su chat no prueba que sea ella.</p>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -302,6 +319,7 @@ function AccessDrawer({
   mode: AccessMode
   onClose: () => void
 }) {
+  const canGive = usePermission("clinical.read")
   const free = summary.candidates.filter((candidate) => !summary.access.some((row) => row.contactId === candidate.contactId))
   const navigate = useNavigate()
   const [given, setGiven] = useState<PortalAccessGiven | null>(null)
@@ -315,7 +333,8 @@ function AccessDrawer({
     defaultValues: {
       contactId: mode.kind === "give" ? (free[0]?.contactId ?? "") : mode.row.contactId,
       identityChecked: false,
-      delivery: "qr" as "qr" | "whatsapp",
+      // Recepción solo envía por su WhatsApp: el QR y el código no van a su pantalla.
+      delivery: (canGive ? "qr" : "whatsapp") as "qr" | "whatsapp",
     },
     validators: { onSubmit: accessSchema(mode, summary) },
     onSubmit: async ({ value }) => {
@@ -343,7 +362,9 @@ function AccessDrawer({
       title={title}
       description={
         mode.kind === "resend"
-          ? "Para volver a entrar. Su acceso sigue vigente: no hace falta volver a comprobar su identidad. El enlace anterior deja de servir."
+          ? canGive
+            ? "Para volver a entrar. Su acceso sigue vigente: no hace falta volver a comprobar su identidad. El enlace anterior y las sesiones abiertas dejan de servir."
+            : "Le llegan por su WhatsApp el enlace y, en otro mensaje, su código: no los verás. El enlace anterior y las sesiones abiertas dejan de servir."
           : undefined
       }
       submitLabel={mode.kind === "give" ? "Dar acceso" : "Enviar"}
@@ -435,10 +456,12 @@ function AccessDrawer({
                       field.handleBlur()
                     }}
                   >
-                    <label htmlFor="portal-delivery-qr" className="flex min-h-11 cursor-pointer items-center gap-3 text-sm">
-                      <RadioGroupItem id="portal-delivery-qr" value="qr" />
-                      Está aquí: mostrar QR
-                    </label>
+                      {canGive ? (
+                        <label htmlFor="portal-delivery-qr" className="flex min-h-11 cursor-pointer items-center gap-3 text-sm">
+                          <RadioGroupItem id="portal-delivery-qr" value="qr" />
+                          Está aquí: mostrar QR
+                        </label>
+                      ) : null}
                     <label htmlFor="portal-delivery-whatsapp" className="flex min-h-11 cursor-pointer items-start gap-3 text-sm">
                       <RadioGroupItem id="portal-delivery-whatsapp" value="whatsapp" disabled={!whatsappReady} className="mt-0.5" />
                       <span className="flex flex-col gap-0.5">
@@ -449,7 +472,11 @@ function AccessDrawer({
                       </span>
                     </label>
                   </RadioGroup>
-                  <FieldDescription>El código de 6 dígitos se lo dices tú, en persona o por llamada.</FieldDescription>
+                    <FieldDescription>
+                      {canGive
+                        ? "El código de 6 dígitos se lo dices tú, en persona o por llamada."
+                        : "El código de 6 dígitos le llega en otro mensaje de su WhatsApp."}
+                    </FieldDescription>
                 </>
               )}
             </field.Group>

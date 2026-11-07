@@ -645,7 +645,8 @@ export interface PortalAccessGiven {
   /** Para mostrar el QR, una sola vez. */
   activationUrlOnce: string | null
   /** El código que se le dice en persona o por teléfono: nunca va con el enlace. */
-  pinOnce: string
+  /** Nulo si lo envió recepción: el código le llegó a la persona en otro mensaje. */
+  pinOnce: string | null
   /** A quién se le envió el enlace por WhatsApp. */
   sentTo: string | null
 }

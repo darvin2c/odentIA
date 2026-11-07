@@ -176,6 +176,8 @@ export function PersonHeader({
   const canReadChats = usePermission("conversations.read")
   const canCrm = usePermission("crm.read")
   const canRegisterResponsible = usePermission("patients.write")
+  // El portal lo da quien ve la historia y lo envía también recepción (ADR 0150).
+  const canPortal = usePermission("clinical.read") || canRegisterResponsible
   const openWide = useOpenWide()
   const openPanel = useOpenRecordPanel()
   const patient = person.patient
@@ -337,7 +339,7 @@ export function PersonHeader({
                 openFromSearch
               />
             ) : null}
-            {canEdit ? (
+            {canEdit || (canPortal && patient && !person.archived && openWide) ? (
               <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
                 <DropdownMenuTrigger
                   render={<Button variant="outline" size="icon" aria-label="Más acciones" />}
@@ -345,6 +347,7 @@ export function PersonHeader({
                   <MoreHorizontal aria-hidden />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
+                  {canEdit ? (
                   <DropdownMenuItem
                     // Sin la ficha cargada el cajón no tendría qué mostrar.
                     disabled={Boolean(patient) && !detail}
@@ -355,7 +358,8 @@ export function PersonHeader({
                   >
                     Editar datos personales
                   </DropdownMenuItem>
-                  {patient && !person.archived ? (
+                  ) : null}
+                  {canEdit && patient && !person.archived ? (
                     <DropdownMenuItem
                       onClick={() => {
                         setMenuOpen(false)
@@ -365,7 +369,7 @@ export function PersonHeader({
                       Su enlace
                     </DropdownMenuItem>
                   ) : null}
-                  {patient && !person.archived && openWide ? (
+                  {canPortal && patient && !person.archived && openWide ? (
                     <DropdownMenuItem
                       onClick={() => {
                         setMenuOpen(false)
@@ -376,15 +380,17 @@ export function PersonHeader({
                       Portal del paciente
                     </DropdownMenuItem>
                   ) : null}
-                  <DropdownMenuItem
-                    onClick={() => {
-                      setMenuOpen(false)
-                      setArchiveError(null)
-                      setArchiveOpen(true)
-                    }}
-                  >
-                    {person.archived ? "Recuperar" : "Archivar"}
-                  </DropdownMenuItem>
+                  {canEdit ? (
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setMenuOpen(false)
+                        setArchiveError(null)
+                        setArchiveOpen(true)
+                      }}
+                    >
+                      {person.archived ? "Recuperar" : "Archivar"}
+                    </DropdownMenuItem>
+                  ) : null}
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : null}

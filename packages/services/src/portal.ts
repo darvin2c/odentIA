@@ -341,7 +341,14 @@ export async function issuePortalLink(
   orgId: string,
   actorUserId: string,
   input: IssuePortalLinkInput,
-  deliver: { linkUrl: (rawLinkToken: string) => string },
+  deliver: {
+    linkUrl: (rawLinkToken: string) => string
+    /**
+     * El código va a la persona en otro mensaje de su chat (lo envió recepción,
+     * que no lo ve, ADR 0150). Sin esto, el código se lo dice en persona quien da el acceso.
+     */
+    pinInChat?: boolean
+  },
 ): Promise<IssuedPortalLink> {
   const policy = await getPortalPolicy(tx, orgId)
   if (!policy.enabled) throw portalDisabled()
@@ -451,7 +458,9 @@ export async function issuePortalLink(
   // Mensaje genérico y discreto: sin nombres, sin datos clínicos ni PIN.
   const text =
     `Tienes un acceso al portal del paciente: ${url}\nVence el ${vence}. Al abrirlo te pedirá un código ` +
-    `de 6 dígitos: pídelo a quien te envió este mensaje. No lo compartas: es personal y vence pronto.`
+    (deliver.pinInChat
+      ? `de 6 dígitos: te lo enviamos en el mensaje siguiente. No lo compartas: es personal y vence pronto.`
+      : `de 6 dígitos: pídelo a quien te envió este mensaje. No lo compartas: es personal y vence pronto.`)
   const sent = await sendOutbound(tx, orgId, {
     conversationId: conv.id,
     senderKind: "user",
@@ -459,6 +468,16 @@ export async function issuePortalLink(
     fromAction: true,
     content: { type: "text", text },
   })
+  if (deliver.pinInChat) {
+    // Aparte del enlace, en su propio mensaje, y sin nada más.
+    await sendOutbound(tx, orgId, {
+      conversationId: conv.id,
+      senderKind: "user",
+      senderUserId: actorUserId,
+      fromAction: true,
+      content: { type: "text", text: `Tu código para entrar al portal del paciente es ${pin}. No lo compartas con nadie.` },
+    })
+  }
   const [updated] = await tx
     .update(portalLink)
     .set({ deliveryConversationId: conv.id, deliveryMessageId: sent.id, updatedAt: new Date() })
@@ -876,7 +895,17 @@ export async function requirePortalSession(
   // acceso guardan ya una elección propia que lo recorte.
   const effective = portalScopeOf(policy)
   let effectiveRow = session
-  if (JSON.stringify(effective) !== JSON.stringify(session.scope)) {
+  // Campo por campo: jsonb guarda las claves en otro orden, y comparar el texto
+  // reescribía la sesión (y dejaba actividad a nombre de quien dio el acceso) en cada uso.
+  const stored = session.scope
+  const same =
+    !!stored &&
+    stored.appointments === effective.appointments &&
+    stored.budgets === effective.budgets &&
+    stored.account === effective.account &&
+    (stored.papers ?? false) === (effective.papers ?? false) &&
+    (stored.documents ?? []).length === 0
+  if (!same) {
     const [refreshed] = await tx
       .update(portalSession)
       .set({ scope: effective, lastSeenAt: new Date(), updatedAt: new Date() })
@@ -890,9 +919,7 @@ export async function requirePortalSession(
       "portal.session_scope_refreshed",
       "portal_session",
       session.id,
-      {
-        grantId: grant.id,
-      },
+      { grantId: grant.id, before: stored ?? null, after: effective },
     )
   } else {
     await tx

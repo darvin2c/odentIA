@@ -27,6 +27,7 @@ import type { CrmDeps } from "./helpers.js"
 import { createOpportunitiesRoute } from "./opportunities.js"
 import { createPipelinesRoute } from "./pipelines.js"
 import { createTasksRoute } from "./tasks.js"
+import { createPortalRoute } from "./portal.js"
 
 const IMAGE = "dentalagent-postgres:18.6"
 const KEY = secretsKeyFromEnv("ee".repeat(32))
@@ -84,6 +85,7 @@ function buildApp(role: string, llm: PlatformLlm = { fake: true }): Hono {
   app.route("/agent", createAgentRoute({ ...deps, llm, ownerDb }))
   app.route("/agent", createAgentOpsRoute({ ...deps, llm, ownerDb }))
   app.route("/tasks", createTasksRoute(deps))
+  app.route("/portal", createPortalRoute({ db: appDb, webURL: "https://app.example.com" }))
   return app
 }
 
@@ -1200,4 +1202,34 @@ it("Spam y Bloquear: «Es spam» lo usa quien escribe en conversaciones; bloquea
     data: { agentReplies: boolean; topic: boolean }
   }
   expect(back.data).toEqual({ agentReplies: false, topic: false })
+})
+
+it("el acceso al portal lo da quien ve la historia; recepción solo lo envía por WhatsApp, sin ver el enlace ni el código", async () => {
+  const someone = randomUUID()
+  const json = { "content-type": "application/json" }
+  const give = (app: Hono) =>
+    app.request("/portal/access", {
+      method: "POST",
+      headers: json,
+      body: JSON.stringify({ patientId: someone, contactId: someone, identityChecked: true, delivery: "qr" }),
+    })
+  const resend = (app: Hono, delivery: "qr" | "whatsapp") =>
+    app.request(`/portal/access/${someone}/resend`, { method: "POST", headers: json, body: JSON.stringify({ delivery }) })
+  // Caja no lo ve ni lo envía.
+  const cashier = buildApp("cashier")
+  expect((await cashier.request(`/portal/access?patientId=${someone}`)).status).toBe(403)
+  expect((await resend(cashier, "whatsapp")).status).toBe(403)
+  // Recepción: ve la fila y envía por WhatsApp; no da el acceso, no muestra el QR ni lo quita.
+  const reception = buildApp("reception")
+  expect((await reception.request(`/portal/access?patientId=${someone}`)).status).not.toBe(403)
+  expect((await give(reception)).status).toBe(403)
+  expect((await resend(reception, "qr")).status).toBe(403)
+  expect((await resend(reception, "whatsapp")).status).not.toBe(403)
+  expect((await reception.request(`/portal/access/${someone}/revoke`, { method: "POST" })).status).toBe(403)
+  // Quien lee la historia (odontólogo, médico o la dueña) lo da y muestra el QR: llega al servicio.
+  for (const role of ["clinician", "owner"]) {
+    const app = buildApp(role)
+    expect((await give(app)).status).not.toBe(403)
+    expect((await resend(app, "qr")).status).not.toBe(403)
+  }
 })
