@@ -139,6 +139,19 @@ function useArch(volume: CbctVolume, saved: SavedArch["arch"]) {
   return { proposal, stored, control, setControl, axialZ, setAxialZ, curve }
 }
 
+/**
+ * Dónde está el corte elegido: la pieza y los mm a lo largo del arco de los
+ * dientes. La prolongación hacia la rama no cuenta: ahí se dice «hacia la rama».
+ */
+export function describeArcPosition(curve: readonly CurveSample[], at: number, tooth: number | null): string {
+  const coreStart = curve.find((c) => !c.beyond)?.s ?? 0
+  const coreEnd = curve.findLast((c) => !c.beyond)?.s ?? 0
+  const total = coreEnd - coreStart
+  const along = Math.min(total, Math.max(0, (curve[at]?.s ?? 0) - coreStart))
+  const locale = activeOrgLocale()
+  return `${tooth ? `Pieza ${tooth} · ` : ""}${Math.round(along).toLocaleString(locale)} de ${Math.round(total).toLocaleString(locale)} mm del arco${curve[at]?.beyond ? " · hacia la rama" : ""}`
+}
+
 /** Pinta una imagen de plano en un lienzo fuera de pantalla (para «Guardar vista»). */
 function paint(image: PlaneImage, window: WindowLevel): HTMLCanvasElement {
   const canvas = document.createElement("canvas")
@@ -522,12 +535,9 @@ export function PanoramicView({
   const noArch = !control || control.length < 5
   // Dónde está el corte elegido: la pieza y los mm a lo largo del arco (no la cantidad de cortes del archivo).
   // Los mm son del arco de los dientes: la prolongación hacia la rama no cuenta.
-  const coreStart = curve.find((c) => !c.beyond)?.s ?? 0
-  const coreEnd = curve.findLast((c) => !c.beyond)?.s ?? 0
-  const arcMm = curve.length ? Math.min(coreEnd, Math.max(0, curve[clampIndex(index)]!.s - coreStart)) : 0
-  const arcPosition = curve.length
-    ? `${teethLabel ? `Pieza ${teethLabel} · ` : ""}${Math.round(arcMm).toLocaleString(activeOrgLocale())} de ${Math.round(coreEnd - coreStart).toLocaleString(activeOrgLocale())} mm del arco`
-    : ""
+  // En la prolongación (detrás de la última pieza, donde cae una tercera molar) se
+  // dice «hacia la rama» en vez de contar más mm de los que tiene el arco.
+  const arcPosition = curve.length ? describeArcPosition(curve, clampIndex(index), teethLabel) : ""
   if (phoneView) {
     const chosen = crosses[CROSS_OFFSETS.indexOf(0)]
     const step = (delta: number) => setIndex((i) => clampIndex(i + delta * perMm))
