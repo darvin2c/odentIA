@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto"
+import { mkdirSync, writeFileSync } from "node:fs"
+import path from "node:path"
+import { encodeDemoCtSlice } from "@odentia/clinical"
 import { LEGAL } from "@odentia/auth/legal"
 import type { Db } from "@odentia/db"
 import { agentKnowledgeGap } from "@odentia/db/schema/agent"
@@ -1367,5 +1370,159 @@ test("latidIA: Clío anota el material dicho, al firmar se ve lo que salió del 
   await page.screenshot({ path: testInfo.outputPath("latidia-atencion-finalizada-corregida.png"), fullPage: true })
   await done.getByRole("button", { name: "Listo" }).click()
   await expect(page.getByRole("region", { name: "Materiales usados" })).toContainText("Mascarilla quirúrgica")
+  await context.close()
+})
+
+/**
+ * Un CD de tomografía médica de prueba (no es de un paciente): un cuerpo en HU
+ * (aire, partes blandas y una columna de hueso) en tres series del mismo
+ * estudio, la venosa de 1 mm, la arterial de 1,5 mm y el topograma, que es una
+ * sola imagen de guía.
+ */
+function writeMedicalCd(dir: string, patientName: string) {
+  const size = 64
+  const uid = "2.25.35123"
+  mkdirSync(path.join(dir, "DICOM"), { recursive: true })
+  const body = (voxelMm: number) => {
+    const pixels = new Uint16Array(size * size)
+    for (let y = 0; y < size; y++)
+      for (let x = 0; x < size; x++) {
+        const r = Math.hypot(x - size / 2, y - size / 2) * voxelMm
+        const spine = Math.hypot(x - size / 2, y - size * 0.7) * voxelMm < 6
+        // HU + 1000: el codificador de la demo declara Rescale Intercept −1000.
+        pixels[y * size + x] = (spine ? 700 : r < 28 ? 40 : -1000) + 1000
+      }
+    return pixels
+  }
+  const series = [
+    { key: "2", description: "Fase venosa", number: 4, slices: 40, voxelMm: 1, localizer: false },
+    { key: "5", description: "Fase arterial", number: 3, slices: 20, voxelMm: 1.5, localizer: false },
+    { key: "7", description: "Topograma", number: 1, slices: 1, voxelMm: 1, localizer: true },
+  ]
+  let n = 0
+  for (const item of series)
+    for (let k = 0; k < item.slices; k++) {
+      n++
+      const bytes = encodeDemoCtSlice({
+        width: size,
+        height: size,
+        pixels: body(item.voxelMm),
+        voxelMm: item.voxelMm,
+        window: { center: 40, width: 400 },
+        position: [0, 0, k * item.voxelMm],
+        instanceNumber: k + 1,
+        studyUid: uid,
+        seriesUid: `${uid}.${item.key}`,
+        frameOfReferenceUid: `${uid}.3`,
+        sopUid: `${uid}.${item.key}.${k + 1}`,
+        patientName,
+        institution: "Clínica de Imágenes San Borja",
+        seriesDescription: item.description,
+        seriesNumber: item.number,
+        localizer: item.localizer,
+      })
+      writeFileSync(path.join(dir, "DICOM", `IMG${String(n).padStart(4, "0")}`), bytes)
+    }
+  return n
+}
+
+test("latidIA: la tomografía del CD se guarda con su tipo y se ve en cortes, con su serie y sus ventanas", async ({
+  browser,
+  fixtureDb,
+  passwordHash,
+}, testInfo) => {
+  test.setTimeout(240_000)
+  const vela = await createVela(fixtureDb, passwordHash)
+  const context = await browser.newContext({ ignoreHTTPSErrors: true })
+  const page = await context.newPage()
+  await gotoHydrated(page, latidiaUrl("app", "/login"))
+  const { api, slug } = await openConsultorio(page, vela, fixtureDb)
+  const patient = await request<{ data: { id: string } }>(page, api, "POST", "/api/patients", slug, {
+    submissionId: randomUUID(),
+    answers: {
+      demographics: { displayName: "Rosa Paredes", docType: "DNI", docNumber: "40112233", birthDate: "1980-03-14" },
+      respondent: "staff",
+      privacyAccepted: false,
+    },
+  })
+  expect(patient.status).toBe(201)
+  const patientId = patient.body.data.id
+  const cd = testInfo.outputPath("cd-medico")
+  const files = writeMedicalCd(cd, "PAREDES^ROSA")
+
+  await gotoHydrated(page, latidiaUrl(slug, `/patients/${patientId}?tab=documentos&tipo=imagenes`))
+  await page.getByRole("button", { name: /^Nuevo/ }).and(page.locator("[aria-haspopup=menu]")).click()
+  await page.getByRole("menuitem", { name: "Imagen o archivo" }).click()
+  const upload = surface(page, { name: "Subir imágenes o documentos" })
+  await expect(upload).toBeVisible()
+  await upload.getByLabel("Carpeta").setInputFiles(cd)
+  const found = surface(page, { name: "Subir a la ficha" })
+  await expect(found.getByRole("heading", { name: "Encontramos una tomografía" })).toBeVisible()
+  // Su tipo es el del consultorio, y no pide piezas.
+  await expect(found.getByText("Tomografía computarizada", { exact: true })).toBeVisible()
+  await expect(found.getByLabel("Escribir pieza FDI")).toHaveCount(0)
+  await found.getByRole("button", { name: "Subir tomografía" }).click()
+  await expect(found.getByRole("heading", { name: "La tomografía quedó en la ficha" })).toBeVisible({ timeout: 90_000 })
+  await found.getByRole("button", { name: "Cerrar" }).first().click()
+
+  // Un solo documento con las tres series, del tipo de latidIA.
+  const docs = await request<{ data: Array<{ imageType: string; imaging: { fileCount: number; completedAt: string | null } | null }> }>(
+    page,
+    api,
+    "GET",
+    `/api/patients/${patientId}/documents`,
+    slug,
+  )
+  const study = docs.body.data.find((doc) => doc.imaging)
+  expect(study).toMatchObject({ imageType: "tomografia_computarizada", imaging: { fileCount: files } })
+  expect(study?.imaging?.completedAt).not.toBeNull()
+
+  await page.reload()
+  await page.getByRole("button", { name: /Ver Tomografía computarizada/ }).click()
+  const viewer = page.getByRole("dialog", { name: /Tomografía/ })
+  // Abre en «Cortes», sin panorámica, con la serie mayor y la ventana del archivo.
+  await expect(viewer.getByRole("tab", { name: "Cortes", exact: true })).toHaveAttribute("aria-selected", "true", {
+    timeout: 60_000,
+  })
+  await expect(viewer.getByRole("tab", { name: "Panorámica" })).toHaveCount(0)
+  const windows = viewer.getByRole("group", { name: "Ventana" })
+  for (const name of ["Del archivo", "Pulmón", "Partes blandas", "Hueso", "Cerebro", "Ajuste fino"])
+    await expect(windows.getByRole("button", { name, exact: true })).toBeVisible()
+  await expect(windows.getByRole("button", { name: "Del archivo", exact: true })).toHaveAttribute("aria-pressed", "true")
+  await expect(
+    viewer.getByText("Visor de consulta: medidas orientativas con la escala del archivo. El diagnóstico es el informe del radiólogo."),
+  ).toBeVisible()
+  const seriesButton = viewer.getByRole("button", { name: /^Serie / })
+  await expect(seriesButton).toHaveText(/Fase venosa · 1 mm · 40 cortes/)
+  await page.keyboard.press("2")
+  await expect(windows.getByRole("button", { name: "Pulmón", exact: true })).toHaveAttribute("aria-pressed", "true")
+  await page.screenshot({ path: testInfo.outputPath("latidia-tomografia-cortes.png") })
+
+  // El topograma se ve en la lista y no se elige; la arterial, sí.
+  await seriesButton.click()
+  await expect(page.getByRole("menuitemradio", { name: /Topograma/ })).toHaveAttribute("aria-disabled", "true")
+  await expect(page.getByRole("menuitemradio", { name: /Topograma/ })).toContainText("1 imagen · no se arma")
+  await page.screenshot({ path: testInfo.outputPath("latidia-tomografia-series.png") })
+  await page.getByRole("menuitemradio", { name: /Fase arterial/ }).click()
+  await expect(seriesButton).toHaveText(/Fase arterial · 1[.,]5 mm · 20 cortes/, { timeout: 60_000 })
+  // Elegir cierra la lista: lo que queda a la vista es la serie.
+  await expect(page.getByRole("menuitemradio", { name: /Fase venosa/ })).toBeHidden()
+
+  // Una medida queda con su serie: en otra serie no se ve.
+  const axial = viewer.getByRole("img", { name: /^Desde arriba/ })
+  await axial.focus()
+  await page.keyboard.press("m")
+  await page.keyboard.press("Enter")
+  for (let k = 0; k < 10; k++) await page.keyboard.press("ArrowRight")
+  await page.keyboard.press("Enter")
+  await expect(viewer.getByText(/Distancia · desde arriba/)).toBeVisible()
+  await page.keyboard.press("Escape")
+  await seriesButton.click()
+  await page.getByRole("menuitemradio", { name: /Fase venosa/ }).click()
+  await expect(seriesButton).toHaveText(/Fase venosa/, { timeout: 60_000 })
+  await expect(viewer.getByText(/^Sin medidas todavía/)).toBeVisible()
+  await seriesButton.click()
+  await page.getByRole("menuitemradio", { name: /Fase arterial/ }).click()
+  await expect(viewer.getByText(/Distancia · desde arriba/)).toBeVisible({ timeout: 60_000 })
   await context.close()
 })

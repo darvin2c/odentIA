@@ -25,7 +25,7 @@ El ADR 0056 armó la tomografía en la CPU, sin WebGL, y dejó el 3D fuera porqu
 
 - El 3D depende de la tarjeta gráfica y usa otra copia del volumen en ella; el resto del visor sigue sin depender de la GPU.
 - El tope de memoria del volumen supone poca memoria en un celular o una tablet cuando el navegador no la dice (Safari y Firefox), para que salga el aviso en vez de cerrarse la pestaña.
-- latidIA todavía no guarda la tomografía: al reconocerla en una carpeta o un ZIP se dice antes de subir.
+- latidIA todavía no guardaba la tomografía: al reconocerla en una carpeta o un ZIP se decía antes de subir. Desde el ADR 0151 la guarda y la ve en cortes.
 
 ## Referencias
 
