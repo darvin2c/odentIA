@@ -24,7 +24,8 @@ El consentimiento se firmaba en dos pantallas, la tablet de la clínica y «Su e
 
 - Lo que se firma y lo que se guarda dicen lo mismo en odentIA y en latidIA, porque la hoja vive en el paquete común.
 - La hoja de pantalla y el PDF son dos dibujos de lo mismo: un dato nuevo del consentimiento se agrega en los dos.
-- Fuera de esto: el nombre común de la pieza junto al número FDI, impedir salir de la tablet a la ficha y lo que pida la norma peruana sobre el formato (huella), pendiente legal.
+- Después, en la misma línea: la pieza lleva su nombre para quien firma («pieza 38 (tercer molar inferior izquierdo, muela del juicio)», forma `patient` del sitio del producto); la tablet pregunta antes de salir sin guardar las firmas; y, donde la norma lo pide (Perú: quien no sabe firmar imprime su huella), la hoja para firmar en papel trae el recuadro de la huella (`consentFingerprint` del perfil del país). En pantalla no se captura huella: quien no sabe firmar firma en papel.
+- Fuera de esto: impedir de verdad que el paciente salga de la tablet a la ficha. Salir pregunta, pero no bloquea; bloquear pediría volver a identificarse, y en la práctica se resuelve con el modo de acceso guiado del propio equipo (iPad, Android).
 
 ## Referencias
 
