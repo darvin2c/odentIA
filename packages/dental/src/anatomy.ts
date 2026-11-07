@@ -183,3 +183,19 @@ export function toothNameOf(toothNumber: number): string {
   }
   return `${base} ${arcada}`
 }
+
+/**
+ * La pieza como la lee quien firma: el número FDI (ISO 3950) y el diente que es.
+ * «pieza 38 (tercer molar inferior izquierdo, muela del juicio)»; un temporal dice
+ * que lo es: «pieza 75 (segundo molar temporal inferior izquierdo, de leche)». Un
+ * número que no es pieza queda solo con su número.
+ */
+export function toothForPatient(toothNumber: number): string {
+  if (!isValidTooth(toothNumber)) return `pieza ${toothNumber}`
+  const words = toothNameOf(toothNumber).split(" ")
+  const arch = words.slice(-2).join(" ")
+  const kind = words.slice(0, -2).join(" ").toLocaleLowerCase("es")
+  const primary = isPrimaryTooth(toothNumber)
+  const extra = primary ? ", de leche" : toothNumber % 10 === 8 ? ", muela del juicio" : ""
+  return `pieza ${toothNumber} (${kind}${primary ? " temporal" : ""} ${arch}${extra})`
+}

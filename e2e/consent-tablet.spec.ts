@@ -96,7 +96,7 @@ test("firma en la tablet: lee la hoja del papel, firma donde va su firma y el pr
   await drawSignature(page, sheet.getByRole("img", { name: "Firma de Rosa Mamani" }))
   // Salir con lo firmado sin guardar lo pregunta, y «Seguir firmando» no pierde nada.
   await page.keyboard.press("Escape")
-  const leaving = page.getByRole("alertdialog", { name: "¿Salir sin guardar las firmas?" })
+  const leaving = page.getByRole("alertdialog", { name: "¿Salir sin guardar?" })
   await expect(leaving).toBeVisible()
   await leaving.getByRole("button", { name: "Seguir firmando" }).click()
   await expect(leaving).toBeHidden()
@@ -185,6 +185,8 @@ test("firma en la tablet de una menor: firma su representante legal y la hoja tr
   await expect(sheet.getByText(/K02\.1/)).toBeVisible()
   await expect(sheet.getByText("Firma su representante legal.", { exact: false })).toBeVisible()
   await expect(sheet.getByRole("heading", { name: "Representante legal" })).toBeVisible()
+  // Bajo quien firma, su documento, como en el papel firmado.
+  await expect(sheet.getByText("DNI 41529978", { exact: true })).toBeVisible()
   await page.screenshot({ path: info.outputPath("3-menor-arriba.png") })
   await sheet.getByRole("img", { name: "Firma de Marta Quispe" }).scrollIntoViewIfNeeded()
   await page.screenshot({ path: info.outputPath("4-menor-firma.png") })

@@ -9,7 +9,7 @@ import {
   surfaceLabel,
   surfacesForTooth,
   TREATMENT_SCOPES,
-  toothNameOf,
+  toothForPatient,
   type TreatmentScope,
   toothNumbersOfCodes,
   toothSiteCode,
@@ -230,12 +230,8 @@ export const dentalProductSite: ProductSite = {
       return null
     }
     if (site.toothNumber === null) return null
-    if (form === "patient") {
-      // El número FDI (ISO 3950) y su nombre: quien firma reconoce qué diente es.
-      const name = toothNameOf(site.toothNumber)
-      const wisdom = site.toothNumber % 10 === 8 ? ", muela del juicio" : ""
-      return `pieza ${site.toothNumber} (${name.charAt(0).toLocaleLowerCase("es")}${name.slice(1)}${wisdom})`
-    }
+    // El número FDI (ISO 3950) y su nombre: quien firma reconoce qué diente es.
+    if (form === "patient") return toothForPatient(site.toothNumber)
     if (form === "short" || !site.surfaces.length) return `pieza ${site.toothNumber}`
     return `pieza ${site.toothNumber} (${surfaceWords(site.surfaces)})`
   },

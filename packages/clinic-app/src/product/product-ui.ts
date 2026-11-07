@@ -432,6 +432,8 @@ export interface ProductSiteUi {
   isPlace(value: number): boolean
   /** El nombre de un lugar en una lista («Pieza 16»). */
   placeName(place: number): string
+  /** El lugar como lo lee quien firma un consentimiento («pieza 38 (tercer molar inferior izquierdo, muela del juicio)»). */
+  placeForPatient(place: number): string
   /** Elegir uno o varios lugares (documentos, imágenes, el plan). */
   PlacesPicker(props: PlacesPickerProps): ReactNode
   /** Elegir un lugar y sus partes (el diagnóstico y el procedimiento). */

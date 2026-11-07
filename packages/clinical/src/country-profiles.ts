@@ -323,7 +323,7 @@ const PERU: Omit<ClinicalCountryProfile, "country"> = {
   },
   // Ley de Firmas y Certificados Digitales.
   signatureLaw: "Ley 27269",
-  // Ley 26842 (art. 15) y la NTS 139-MINSA/2018: quien no sabe firmar imprime su huella.
+  // Ley 26842, art. 15.4 (modificado por la Ley 29414): «si la persona no supiere firmar, imprimirá su huella digital».
   consentFingerprint: true,
 }
 

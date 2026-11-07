@@ -289,6 +289,8 @@ export interface PenSignature {
   lines: Array<{ text: string; strong?: boolean }>
   /** Sin trazo: una línea para firmar a mano en lugar del recuadro de una hoja por firmar. */
   handLine?: boolean
+  /** Ancho fijo de su columna (la huella); sin él, las columnas se reparten lo que queda. */
+  width?: number
 }
 
 /** Lo que mide el lugar de la firma de quien emite, sobre su línea. */
@@ -1399,25 +1401,37 @@ export class DocumentKit {
     return [...heading, ...lines].reduce((sum, line) => sum + line.height, 0) + boxHeight + 10
   }
 
+  /** El ancho de cada columna de firmas: las fijas, el suyo; las demás se reparten lo que queda. */
+  private penWidths(signatures: PenSignature[], gapX: number): number[] {
+    const columns = Math.max(signatures.length, 1)
+    const fixed = signatures.reduce((sum, signature) => sum + (signature.width ?? 0), 0)
+    const free = signatures.filter((signature) => signature.width === undefined).length
+    const each = free > 0 ? (this.width - gapX * (columns - 1) - fixed) / free : 0
+    return signatures.map((signature) => signature.width ?? each)
+  }
+
   /** Lo que ocuparán `penSignatures`: para no dejar una firma separada de lo que se firma. */
   penSignaturesHeight(signatures: PenSignature[], options: { boxHeight?: number } = {}): number {
-    const columns = Math.max(signatures.length, 1)
-    const width = (this.width - 21 * (columns - 1)) / columns
+    const widths = this.penWidths(signatures, 21)
     const boxHeight = options.boxHeight ?? 66
-    return Math.max(...signatures.map((signature) => this.penColumnHeight(signature, width, boxHeight)))
+    return Math.max(
+      ...signatures.map((signature, index) => this.penColumnHeight(signature, widths[index] ?? 0, boxHeight)),
+    )
   }
 
   /** Firmas con su trazo en columnas; un trazo vacío deja el recuadro para firmar en papel. */
   penSignatures(signatures: PenSignature[], options: { boxHeight?: number } = {}): void {
-    const columns = Math.max(signatures.length, 1)
     const gapX = 21
-    const width = (this.width - gapX * (columns - 1)) / columns
+    const widths = this.penWidths(signatures, gapX)
     const boxHeight = options.boxHeight ?? 66
     const height = this.penSignaturesHeight(signatures, options)
     this.ensure(height)
     const top = this.y
+    let left = this.left
     signatures.forEach((signature, index) => {
-      const x = this.left + (width + gapX) * index
+      const width = widths[index] ?? 0
+      const x = left
+      left += width + gapX
       let cursor = top
       for (const line of this.lay(signature.heading, width, {
         face: "sansSemi",

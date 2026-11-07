@@ -178,6 +178,9 @@ it("la hoja para firmar en papel trae el recuadro de la huella de quien no sabe 
     "Huella digital",
     "Profesional que informa",
   ])
+  // La vista previa de la plantilla es la misma hoja que se imprime.
+  await renderConsentPreviewPdf(clinic, { title: "Exodoncia", sections: base, body: "" }, "PE")
+  expect(penSignatures.mock.lastCall?.[0]?.map((signature) => signature.heading)).toContain("Huella digital")
   await renderConsentPaperPdf(paper(null), clinic)
   expect(penSignatures.mock.lastCall?.[0]?.map((signature) => signature.heading)).toEqual([
     "Paciente",

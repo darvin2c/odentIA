@@ -137,9 +137,10 @@ export function LinkConsentStep({ slug, token, consentId, onBack }: { slug: stri
               </form.AppField>
               <form.AppField name="signatureData">
                 {(field) => (
-                  // En el teléfono el recuadro toma también el margen de la hoja: más alto para el dedo.
-                  <field.Group legend="Firma aquí con el dedo" className="-mx-3 sm:mx-0">
+                  <field.Group legend="Firma aquí con el dedo">
                     {(control) => (
+                      // En el teléfono el recuadro toma también el margen de la hoja: más alto para el dedo.
+                      <div className="-mx-3 sm:mx-0">
                       <FirmaPad
                         label="Tu firma"
                         id={control.id}
@@ -147,6 +148,7 @@ export function LinkConsentStep({ slug, token, consentId, onBack }: { slug: stri
                         describedBy={control.describedBy}
                         onChange={(strokes) => field.handleChange(strokes)}
                       />
+                      </div>
                     )}
                   </field.Group>
                 )}

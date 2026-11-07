@@ -1,4 +1,4 @@
-import { CONSENT_DECLARATION, diagnosisCodeLabel } from "@odentia/clinical"
+import { CONSENT_DECLARATION, diagnosisCodeLabel, documentText, documentTypeLabel } from "@odentia/clinical"
 import {
   Button,
   Checkbox,
@@ -88,7 +88,7 @@ export function useSignerChoices(patientId: string) {
         contactId: row.contact.id,
         name: row.contact.displayName,
         label: `${row.contact.displayName} · representante legal`,
-        doc: row.contact.docNumber ? `${row.contact.docType ?? "Documento"} ${row.contact.docNumber}` : null,
+        doc: row.contact.docNumber ? documentText(row.contact.docType, row.contact.docNumber) : null,
       }),
     ),
   ]
@@ -266,6 +266,7 @@ function SigningFlow({
   const saving = useStore(form.store, (state) => state.isSubmitting)
   // Lo marcado o firmado aquí no se guarda hasta que el profesional confirma: salir lo pide confirmar.
   const drawn = useStore(form.store, (state) => state.values.docs.some((doc) => doc.understood || doc.strokes.length > 0))
+  const hasStrokes = useStore(form.store, (state) => state.values.docs.some((doc) => doc.strokes.length > 0))
   const [leaving, setLeaving] = useState(false)
   const error = useFormSubmitError(form)
 
@@ -392,7 +393,9 @@ function SigningFlow({
                 patient
                   ? [
                       { label: "Paciente", value: patient.displayName, strong: true },
-                      ...(patient.docNumber ? [{ label: patient.docType ?? "Documento", value: patient.docNumber }] : []),
+                      ...(patient.docNumber
+                        ? [{ label: patient.docType ? documentTypeLabel(patient.docType) : "Documento", value: patient.docNumber }]
+                        : []),
                       { label: "Historia clínica", value: hcLabel(patient.patientNumber) },
                     ]
                   : []
@@ -432,7 +435,7 @@ function SigningFlow({
                   signer.kind === "representante"
                     ? (signer.doc ?? null)
                     : patient?.docNumber
-                      ? `${patient.docType ?? "Documento"} ${patient.docNumber}`
+                      ? documentText(patient.docType, patient.docNumber)
                       : null,
                 children: (
                   <form.AppField key={`${current.id}-strokes`} name={`docs[${step.index}].strokes`}>
@@ -528,13 +531,24 @@ function SigningFlow({
         <ConfirmDialog
           open={leaving}
           variant="default"
-          title="¿Salir sin guardar las firmas?"
-          description="Lo que se marcó y se firmó aquí todavía no se guardó: se guarda cuando el profesional confirma al final."
+          title="¿Salir sin guardar?"
+          description={
+            signed.size > 0
+              ? `Quedaron guardados ${signed.size} de ${total}; el resto se pierde si sales.`
+              : `${hasStrokes ? "Lo marcado y firmado" : "Lo marcado"} aquí todavía no se guardó: se guarda cuando el profesional confirma al final.`
+          }
           confirmLabel="Salir sin guardar"
-          cancelLabel="Seguir firmando"
+          cancelLabel={step.kind === "confirm" ? "Volver" : "Seguir firmando"}
           onClose={() => setLeaving(false)}
-          onConfirm={() => {
+          onConfirm={async () => {
             setLeaving(false)
+            // Lo que ya quedó firmado se ve como firmado al volver a la ficha.
+            if (signed.size > 0)
+              await Promise.all(
+                [["consents", patientId], ["consent-needs", patientId], ["patient-documents", patientId]].map((queryKey) =>
+                  queryClient.invalidateQueries({ queryKey }),
+                ),
+              )
             onClose()
           }}
         />
