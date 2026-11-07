@@ -198,7 +198,10 @@ export interface MonthlyCommissions extends Omit<CommissionSummary, "collections
   locale: string
   lines: CommissionLine[]
   adjustments: CommissionAdjustment[]
+  /** Lo que queda por descontarle de cobros anulados después de pagados, de cualquier mes. */
   adjustmentCents: number
+  /** Lo que el próximo pago de este mes descuenta. */
+  discountCents: number
 }
 
 /** Lo propio: el mes pedido y hasta tres meses anteriores con cobros. */

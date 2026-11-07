@@ -114,7 +114,8 @@ function StatusBadge({ status, baseCents }: { status: CommissionStatus; baseCent
     )
   }
   if (status === "por_pagar") return <Badge variant="warning">{label}</Badge>
-  if (status === "por_descontar") return <Badge variant="destructive">{label}</Badge>
+  // Se descuenta de lo ya pagado: no es una alarma, es lo que pasa con un cobro anulado.
+  if (status === "por_descontar") return <Badge variant="secondary">{label}</Badge>
   return <Badge variant="secondary">{label}</Badge>
 }
 
@@ -192,6 +193,22 @@ export function CommissionsAdminPanel({
         />
       ) : null}
 
+      {rows.some((row) => row.pendingCents > 0) ? (
+        // Una línea, no otra tarjeta: cuánto falta pagar del mes entre todos.
+        <p className="text-sm text-muted-foreground">
+          Falta pagar{" "}
+          <span className="font-semibold text-foreground tabular-nums">
+            {formatMoney(
+              rows.reduce((total, row) => total + Math.max(0, row.pendingCents), 0),
+              rows[0]?.currency ?? "",
+              locale,
+            )}
+          </span>{" "}
+          de {formatMoney(rows.reduce((total, row) => total + row.commissionCents, 0), rows[0]?.currency ?? "", locale)}{" "}
+          · {rows.filter((row) => row.pendingCents > 0).length === 1 ? "1 profesional" : `${rows.filter((row) => row.pendingCents > 0).length} profesionales`}
+        </p>
+      ) : null}
+
       {rows.length > 0 ? (
         <section aria-label="Profesionales" className="elevated min-w-0 rounded-xl border bg-card">
           <ul className="flex min-w-0 flex-col divide-y">
@@ -219,8 +236,11 @@ export function CommissionsAdminPanel({
                       </span>
                     </span>
                     <span className="flex shrink-0 flex-col items-end gap-1">
+                      {/* Con un pago a cuenta, lo que importa es lo que falta. */}
                       <span className="text-base font-semibold text-foreground tabular-nums">
-                        {formatMoney(row.commissionCents, row.currency, locale)}
+                        {row.status === "por_pagar" && row.paidCents > 0
+                          ? `Falta ${formatMoney(row.pendingCents, row.currency, locale)}`
+                          : formatMoney(row.commissionCents, row.currency, locale)}
                       </span>
                       <StatusBadge status={row.status} baseCents={row.baseCents} />
                     </span>
@@ -365,13 +385,19 @@ function ProfessionalDetailBody({
   const sorted = byAmount(detail.lines)
   const visible = showAll ? sorted : sorted.slice(0, PREVIEW_ROWS)
   const payments = paymentsQuery.data?.data ?? []
-  const payable = detail.pendingCents > 0
-  const partial = detail.paidCents > 0 || detail.adjustmentCents > 0
-  // El botón deshabilitado siempre dice por qué.
-  const payHint = payable
-    ? null
-    : detail.status === "por_descontar"
-      ? `Quedan ${money(-detail.pendingCents)} por descontar: se pagó la comisión de cobros que después se anularon y eso supera lo de este mes. Se descontará cuando haya más cobros.`
+  // Se puede registrar mientras el mes tenga cobros sin pagar; si el descuento los cubre, no sale dinero.
+  const payable = detail.pendingCents > 0 || detail.discountCents > 0
+  const discountOnly = detail.pendingCents === 0 && detail.discountCents > 0
+  const partial = detail.paidCents > 0 || detail.discountCents > 0
+  // Lo que queda por descontar después de este pago, para el siguiente.
+  const discountLeft = detail.adjustmentCents - detail.discountCents
+  // El botón deshabilitado siempre dice por qué; el de solo descontar, qué va a pasar.
+  const payHint = discountOnly
+    ? `Lo de este mes (${money(detail.discountCents)}) se descuenta de comisiones ya pagadas de cobros que después se anularon: no sale dinero.${discountLeft > 0 ? ` Quedan ${money(discountLeft)} por descontar en los próximos pagos.` : ""}`
+    : payable
+      ? discountLeft > 0
+        ? `Quedan ${money(discountLeft)} por descontar en los próximos pagos.`
+        : null
       : detail.status === "pagado"
         ? "Ya se pagó todo lo de este mes."
         : detail.rateBps === 0 && detail.baseCents > 0
@@ -528,10 +554,10 @@ function ProfessionalDetailBody({
             <dd className="tabular-nums">{plain(detail.paidCents)}</dd>
           </div>
         ) : null}
-        {detail.adjustmentCents > 0 ? (
+        {detail.discountCents > 0 ? (
           <div className="flex items-baseline justify-between gap-3">
-            <dt className="text-muted-foreground">Por descontar</dt>
-            <dd className="tabular-nums">−{plain(detail.adjustmentCents)}</dd>
+            <dt className="text-muted-foreground">Se descuenta</dt>
+            <dd className="tabular-nums">−{plain(detail.discountCents)}</dd>
           </div>
         ) : null}
         {partial && payable ? (
@@ -551,7 +577,11 @@ function ProfessionalDetailBody({
             aria-describedby={payHint ? payHintId : undefined}
             onClick={() => setPayOpen(true)}
           >
-            {payable ? `Registrar el pago de ${money(detail.pendingCents)}` : "Registrar el pago"}
+            {discountOnly
+              ? "Registrar el descuento"
+              : payable
+                ? `Registrar el pago de ${money(detail.pendingCents)}`
+                : "Registrar el pago"}
           </Button>
           {payHint ? (
             <p id={payHintId} className="text-sm text-muted-foreground">
@@ -835,16 +865,21 @@ function PayDrawer({
       dock={false}
       open={open}
       onClose={onClose}
-      title="Registrar el pago"
-      description={`${amount} a ${name} por ${monthLabel(period, detail.locale).toLocaleLowerCase(detail.locale)}.`}
-      submitLabel={`Registrar el pago de ${amount}`}
+      title={detail.pendingCents === 0 ? "Registrar el descuento" : "Registrar el pago"}
+      description={
+        detail.pendingCents === 0
+          ? `Lo de ${monthLabel(period, detail.locale).toLocaleLowerCase(detail.locale)} de ${name} se descuenta de comisiones ya pagadas: no sale dinero.`
+          : `${amount} a ${name} por ${monthLabel(period, detail.locale).toLocaleLowerCase(detail.locale)}.`
+      }
+      submitLabel={detail.pendingCents === 0 ? "Registrar el descuento" : `Registrar el pago de ${amount}`}
       // Sin ninguna sede no hay dónde registrar el gasto; el motivo está a la vista.
       submitDisabled={!pickBranch && !branchId}
     >
       <div className="flex flex-col gap-4">
         <p className="text-sm text-muted-foreground">
-          Queda como gasto de Personal y los cobros de este pago dejan de estar por pagar. Si te
-          equivocas, puedes anular el pago con su motivo.
+          {detail.pendingCents === 0
+            ? "Los cobros de este mes dejan de estar por pagar y lo descontado deja de estar pendiente. No se registra ningún gasto. Si te equivocas, puedes anularlo con su motivo."
+            : "Queda como gasto de Personal y los cobros de este pago dejan de estar por pagar. Si te equivocas, puedes anular el pago con su motivo."}
         </p>
         {pickBranch ? (
           <form.AppField name="branchId">
@@ -1029,12 +1064,12 @@ export function MyCommissionsPanel({
     mine.status === "pagado" && mine.lastPaidAt
       ? `Pagado el ${dayLabel(mine.lastPaidAt, format, zone, period.year)}.`
       : mine.status === "por_descontar"
-        ? `Ya se te pagó la comisión de cobros que después se anularon: quedan ${money(-mine.pendingCents)} por descontar de tus próximos pagos.`
-        : mine.status === "por_pagar" && (mine.paidCents > 0 || mine.adjustmentCents > 0)
+        ? `Lo de este mes se descuenta de comisiones que ya se te pagaron de cobros que después se anularon: ${money(mine.discountCents)}.`
+        : mine.status === "por_pagar" && (mine.paidCents > 0 || mine.discountCents > 0)
           ? [
               mine.paidCents > 0 ? `Ya te pagaron ${money(mine.paidCents)}.` : "",
-              mine.adjustmentCents > 0
-                ? `Se descuentan ${money(mine.adjustmentCents)} de comisiones ya pagadas de cobros que después se anularon.`
+              mine.discountCents > 0
+                ? `Se descuentan ${money(mine.discountCents)} de comisiones ya pagadas de cobros que después se anularon.`
                 : "",
               `Falta pagarte ${money(mine.pendingCents)}.`,
             ]
