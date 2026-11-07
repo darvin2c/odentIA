@@ -26,6 +26,11 @@ export function hasLiveAppointment(control: SchedulableControl): boolean {
   return control.appointment?.status === "programada" || control.appointment?.status === "confirmada"
 }
 
+/** Los controles que faltan reservar: pendientes y sin una cita en pie. */
+export function controlsToReserve<T extends SchedulableControl>(controls: readonly T[]): T[] {
+  return controls.filter((control) => control.status === "pendiente" && !hasLiveAppointment(control))
+}
+
 export function useTreatmentCoordination(patientId: string, enabled: boolean) {
   return useQuery({
     queryKey: ["treatment-coordination", patientId],
@@ -68,18 +73,28 @@ export function CoordinationTreatments({ patientId }: { patientId: string }): Re
 export function CoordinationControls({
   patientId,
   scheduleFollowUpId,
+  pendingOnly = false,
 }: {
   patientId: string
   /** «Reservar» desde «Qué sigue»: abre la reserva de ese control. */
   scheduleFollowUpId?: string | null
-}): React.JSX.Element {
+  /**
+   * Solo los que faltan reservar, y nada si no falta ninguno: el cajón de una
+   * cita atendida dice lo que queda, sin afirmar que los controles se hicieron.
+   */
+  pendingOnly?: boolean
+}): React.JSX.Element | null {
   const canRead = usePermission("appointments.read")
   const canBook = usePermission("appointments.write")
   const query = useTreatmentCoordination(patientId, canRead)
   const [scheduling, setScheduling] = useState<SchedulableControl | null>(null)
   // El pedido de «Qué sigue» se atiende una vez: cerrar la reserva no la vuelve a abrir.
   const [handled, setHandled] = useState<string | null>(null)
-  const followUps = query.data?.data.followUps ?? []
+  const all = query.data?.data.followUps ?? []
+  const followUps = pendingOnly ? controlsToReserve(all) : all
+  // Sin nada por reservar (o sin poder leerlo) no hay qué decir; la reserva abierta sigue a la vista.
+  if (pendingOnly && !scheduling && (!canRead || query.isPending || query.isError || followUps.length === 0))
+    return null
   const requested =
     scheduleFollowUpId && scheduleFollowUpId !== handled
       ? (followUps.find((row) => row.id === scheduleFollowUpId) ?? null)
@@ -94,6 +109,7 @@ export function CoordinationControls({
   if (query.isError) return <QueryErrorState error={query.error} onRetry={() => void query.refetch()} />
   return (
     <>
+      {pendingOnly ? <span className="text-[13px] font-medium">Falta reservar</span> : null}
       {followUps.length === 0 ? (
         <p className="text-sm text-muted-foreground">Sin controles por reservar.</p>
       ) : (
