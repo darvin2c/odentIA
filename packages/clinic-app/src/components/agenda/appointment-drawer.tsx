@@ -55,6 +55,7 @@ import { usePermission } from "../../lib/crm"
 import { attendWord } from "../../lib/patient-overview"
 import { filiationGapsText, type PatientFull } from "../../lib/patients"
 import { FiliacionSectionDrawer } from "../patient/filiacion-section-drawer"
+import { CoordinationControls } from "../patient/plan/plan-coordination"
 import { useAttendAppointment } from "../patient/new-encounter-button"
 import { WriteToPersonDialog } from "../write-to-person"
 import { announceVisitStatus, useAppointmentArrival } from "./arrival"
@@ -512,8 +513,9 @@ function RealAppointmentDrawer({
                     ? visitLabel(appointment, { now, timeZone }).replace(/^Llegó /, "Llegó a las ")
                     : visitLabel(appointment, { now, timeZone })}
               </span>
+              {/* Lo que queda por reservar, no una frase fija: un control indicado hoy sigue pendiente. */}
               {appointment.visit === "atendida" ? (
-                <span className="text-[13px] text-muted-foreground">Sus controles quedaron hechos.</span>
+                <CoordinationControls patientId={appointment.patientId} branchId={appointment.branchId} pendingOnly />
               ) : null}
               {appointment.visit === "en_atencion" ? (
                 <span className="text-[13px] text-muted-foreground">
