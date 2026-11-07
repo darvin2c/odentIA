@@ -26,5 +26,7 @@ ALTER TABLE "commission_rate" ADD CONSTRAINT "commission_rate_created_by_user_id
 CREATE UNIQUE INDEX "commission_rate_general_uidx" ON "commission_rate" USING btree ("organization_id","professional_user_id","effective_from") WHERE "commission_rate"."service_id" IS NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX "commission_rate_service_uidx" ON "commission_rate" USING btree ("organization_id","professional_user_id","service_id","effective_from") WHERE "commission_rate"."service_id" IS NOT NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX "commission_rate_org_id_uidx" ON "commission_rate" USING btree ("organization_id","id");--> statement-breakpoint
+CREATE INDEX "encounter_procedure_plan_item_idx" ON "encounter_procedure" USING btree ("organization_id","plan_item_id") WHERE "encounter_procedure"."plan_item_id" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX "patient_charge_commission_sessions_idx" ON "patient_charge" USING btree ("organization_id") WHERE "patient_charge"."commission_sessions" IS NOT NULL;--> statement-breakpoint
 CREATE INDEX "commission_line_org_application_idx" ON "commission_settlement_line" USING btree ("organization_id","application_id");--> statement-breakpoint
 ALTER TABLE "patient_charge" ADD CONSTRAINT "patient_charge_commission_sessions_check" CHECK ("patient_charge"."commission_sessions" IS NULL OR "patient_charge"."commission_sessions" BETWEEN 2 AND 60);

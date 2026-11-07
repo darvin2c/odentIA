@@ -22,7 +22,7 @@ import {
   setCommissionRate,
 } from "./finance.js"
 import { createPaymentMethod } from "./payment-methods.js"
-import { collectCharge, createCharge } from "./payments.js"
+import { collectCharge, createCharge, getTicketReturnable, returnFromTicket } from "./payments.js"
 import { addPlanItem } from "./plan.js"
 import { commissionsMany } from "./report-finance.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
@@ -204,4 +204,37 @@ it("lo pagado antes del cambio, sin parte, cubre el cobro entero: no se paga dos
   const view = await f.run((tx) => getMonthlyCommissions(tx, "org_a", { professionalUserId: f.actor, ...currentPeriod() }))
   expect(view.lines.every((line) => line.settled)).toBe(true)
   expect(view.pendingCents).toBe(0)
+})
+
+it("lo que queda tras devolver una parte conserva la regla del día en que se cobró", async () => {
+  const f = await clinicalFixture()
+  const branchId = await seedBranch()
+  const cash = await f.run((tx) => createPaymentMethod(tx, "org_a", f.actor, { name: "Efectivo", typeCode: "10" }))
+  const [procedure] = await ownerDb
+    .insert(encounterProcedure)
+    .values({ organizationId: "org_a", encounterId: f.encounter.id, serviceId: f.service.id, description: "Corona", priceCents: 30000, currency: "PEN", createdBy: f.actor })
+    .returning()
+  await ownerDb
+    .update(encounter)
+    .set({ status: "finalizada", finalizedAt: new Date(), branchId, signerName: "Clínico", signerRegistration: "12345" })
+    .where(eq(encounter.id, f.encounter.id))
+  const charge = await f.run((tx) => createCharge(tx, ...f.args, { encounterProcedureId: procedure!.id }))
+  await f.run((tx) => setCommissionRate(tx, "org_a", f.actor, { professionalUserId: f.actor, rateBps: 3000 }))
+  const paid = await f.run((tx) =>
+    collectCharge(tx, ...f.args, { branchId, chargeIds: [charge.id], payments: [{ paymentMethodId: cash.id, amountCents: 30000 }], requestId: randomUUID() }),
+  )
+  // Después baja al 20 %, y se devuelven 10 000: lo que queda (20 000) sigue al 30 % de su día.
+  await f.run((tx) => setCommissionRate(tx, "org_a", f.actor, { professionalUserId: f.actor, rateBps: 2000 }))
+  const { lines } = await f.run((tx) => getTicketReturnable(tx, "org_a", f.patient.id, paid.ticket.id))
+  await f.run((tx) =>
+    returnFromTicket(tx, "org_a", f.actor, f.patient.id, paid.ticket.id, {
+      branchId,
+      lines: [{ chargeId: lines[0]!.chargeId, amountCents: 10000 }],
+      paymentMethodId: cash.id,
+      reason: "Reclamo",
+      requestId: randomUUID(),
+    }),
+  )
+  const view = await f.run((tx) => getMonthlyCommissions(tx, "org_a", { professionalUserId: f.actor, ...currentPeriod() }))
+  expect(view.lines.map((line) => [line.rateBps, line.baseCents, line.commissionCents])).toEqual([[3000, 20000, 6000]])
 })

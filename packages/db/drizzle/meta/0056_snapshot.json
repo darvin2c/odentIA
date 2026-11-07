@@ -1,5 +1,5 @@
 {
-  "id": "55e57192-f1e3-41e5-acfc-b8cc652a239a",
+  "id": "1b3305e1-0d23-4430-a32a-d48c41df2d14",
   "prevId": "bdb67288-d3e1-4dcf-82ee-3a0507b9ddca",
   "version": "7",
   "dialect": "postgresql",
@@ -13991,7 +13991,30 @@
           "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "encounter_procedure_plan_item_idx": {
+          "name": "encounter_procedure_plan_item_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "plan_item_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"encounter_procedure\".\"plan_item_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "encounter_procedure_organization_id_organization_id_fk": {
           "name": "encounter_procedure_organization_id_organization_id_fk",
@@ -15940,6 +15963,22 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "patient_charge_commission_sessions_idx": {
+          "name": "patient_charge_commission_sessions_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"patient_charge\".\"commission_sessions\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}

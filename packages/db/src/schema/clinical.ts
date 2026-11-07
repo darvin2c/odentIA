@@ -1312,6 +1312,10 @@ export const encounterProcedure = pgTable(
   },
   (table) => [
     ...diagnosisCodeRef("encounter_procedure", table),
+    // Las sesiones de un tratamiento (la comisión por sesión, ADR 0151).
+    index("encounter_procedure_plan_item_idx")
+      .on(table.organizationId, table.planItemId)
+      .where(sql`${table.planItemId} IS NOT NULL`),
     check("encounter_procedure_quantity_check", sql`${table.quantity} BETWEEN 1 AND 99`),
     check(
       "encounter_procedure_void_check",
@@ -2292,6 +2296,10 @@ export const patientCharge = pgTable(
       .where(sql`"request_key" IS NOT NULL`),
     index("patient_charge_org_patient_idx").on(table.organizationId, table.patientId),
     index("patient_charge_item_idx").on(table.organizationId, table.planItemId),
+    // Los cargos que reparten su comisión por sesión (pocos): se leen aparte del resto.
+    index("patient_charge_commission_sessions_idx")
+      .on(table.organizationId)
+      .where(sql`${table.commissionSessions} IS NOT NULL`),
     index("patient_charge_budget_item_idx").on(table.organizationId, table.budgetItemId),
     // Lo que se cobró de cada procedimiento (comisiones y Reportes › Finanzas).
     index("patient_charge_encounter_procedure_idx")

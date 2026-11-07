@@ -152,6 +152,8 @@ export interface CommissionSummary {
   currency: string
   /** Porcentaje vigente en puntos básicos (4000 = 40 %). */
   rateBps: number
+  /** Cuántos servicios tienen otro porcentaje o un monto fijo. */
+  exceptionCount?: number
   /** Cobros del mes de lo que atendió (sin lo anulado). */
   collections: number
   /** Lo cobrado en el mes de lo que atendió. */
@@ -219,6 +221,8 @@ export interface MonthlyCommissions extends Omit<CommissionSummary, "collections
   salary?: { cents: number; paidCents: number; dueCents: number; paidAt: string | null } | null
   /** Desde cuándo vale el porcentaje general (nulo si desde siempre) y el anterior. */
   rateSince?: string | null
+  /** Ya tiene un porcentaje general (cambiarlo vale desde hoy; el primero, también para lo ya cobrado). */
+  hasRate?: boolean
   previousRateBps?: number | null
   /** Otro porcentaje o un monto fijo para un servicio, lo que rige hoy. */
   exceptions?: CommissionException[]

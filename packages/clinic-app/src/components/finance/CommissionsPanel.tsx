@@ -146,7 +146,7 @@ function lineFacts(line: CommissionLine, day: (iso: string) => string, locale: s
 /** La regla que usó la línea: «35 %», «45 % · para este servicio» o «monto fijo de 150.00 por cada uno». */
 function ruleWords(line: CommissionLine, locale: string, currency: string): string {
   if (line.fixedCents !== null) return `monto fijo de ${plainAmount(line.fixedCents, currency, locale)} por cada uno`
-  if (line.rateBps === null || line.rateBps === 0) return "sin porcentaje"
+  if (line.rateBps === null || (line.rateBps === 0 && !line.forService)) return "sin porcentaje"
   return line.forService ? `${percentLabel(line.rateBps, locale)} · para este servicio` : percentLabel(line.rateBps, locale)
 }
 
@@ -342,6 +342,7 @@ export function CommissionsAdminPanel({
                         atendió
                         {" · "}
                         {row.rateBps > 0 ? percentLabel(row.rateBps, locale) : "sin porcentaje"}
+                        {row.exceptionCount ? ` (+${row.exceptionCount === 1 ? "1 servicio aparte" : `${row.exceptionCount} servicios aparte`})` : ""}
                         {row.inTeam ? null : " · Ya no está en el equipo"}
                       </span>
                     </span>
@@ -820,6 +821,7 @@ function ProfessionalDetailBody({
         onClose={() => setRateOpen(false)}
         professional={{ userId: detail.professionalUserId, name }}
         currentRateBps={detail.rateBps}
+        firstRate={!detail.hasRate}
         locale={locale}
       />
       <ExceptionDrawer
@@ -879,15 +881,23 @@ function ExceptionList({
   onAdd: () => void
 }) {
   const queryClient = useQueryClient()
+  const [removing, setRemoving] = useState<string | null>(null)
   const exceptions = detail.exceptions ?? []
   if (exceptions.length === 0 && !(canWrite && detail.rateBps > 0)) return null
   const remove = async (exception: CommissionException) => {
+    setRemoving(exception.serviceId)
     try {
       await setCommissionExceptionApi({ professionalUserId: detail.professionalUserId, serviceId: exception.serviceId })
       void queryClient.invalidateQueries({ queryKey: commissionKeys.all })
-      toast.success(`${exception.serviceName}: vuelve a su porcentaje general desde hoy`)
+      toast.success(
+        detail.rateBps > 0
+          ? `${exception.serviceName}: desde hoy vuelve a su ${percentLabel(detail.rateBps, locale)}`
+          : `${exception.serviceName}: desde hoy ya no tiene una regla aparte`,
+      )
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo quitar")
+    } finally {
+      setRemoving(null)
     }
   }
   return (
@@ -897,23 +907,28 @@ function ExceptionList({
           <p className="text-xs font-medium text-muted-foreground">Para estos servicios</p>
           <ul className="mt-1 flex flex-col">
             {exceptions.map((exception) => (
-              <li key={exception.serviceId} className="flex min-w-0 items-center gap-2 py-1 text-sm">
-                <span className="min-w-0 flex-1 break-words">{exception.serviceName}</span>
-                <span className="shrink-0 tabular-nums">
-                  {exceptionWords(exception, locale, detail.currency)}
-                  {exception.effectiveFrom ? (
-                    <span className="text-xs text-muted-foreground">
-                      {" "}
-                      · desde el {dayLabel(exception.effectiveFrom, locale, zone, year)}
+              <li key={exception.serviceId} className="flex min-w-0 items-start gap-2 py-1.5 text-sm">
+                {/* El servicio arriba y la regla debajo: en el teléfono el nombre no se aplasta. */}
+                <span className="min-w-0 flex-1">
+                  <span className="block break-words">{exception.serviceName}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground tabular-nums">
+                      {exceptionWords(exception, locale, detail.currency)}
                     </span>
-                  ) : null}
+                    {exception.effectiveFrom ? ` · desde el ${dayLabel(exception.effectiveFrom, locale, zone, year)}` : ""}
+                  </span>
                 </span>
                 {canWrite ? (
                   <RowActions
                     label={`Más acciones de ${exception.serviceName}`}
                     items={[
                       { key: "cambiar", label: "Cambiar", onSelect: () => onEdit(exception) },
-                      { key: "quitar", label: "Quitar", onSelect: () => void remove(exception) },
+                      {
+                        key: "quitar",
+                        label: removing === exception.serviceId ? "Quitando…" : "Quitar",
+                        disabled: removing !== null,
+                        onSelect: () => void remove(exception),
+                      },
                     ]}
                   />
                 ) : null}
@@ -1080,6 +1095,7 @@ function RateDrawer({
   professional,
   candidates = [],
   currentRateBps,
+  firstRate = false,
   locale,
 }: {
   open: boolean
@@ -1088,6 +1104,8 @@ function RateDrawer({
   professional: { userId: string; name: string } | null
   candidates?: Array<{ userId: string; name: string }>
   currentRateBps: number
+  /** Aún no tiene ningún porcentaje: el primero vale también para lo ya cobrado. */
+  firstRate?: boolean
   locale: string
 }) {
   const queryClient = useQueryClient()
@@ -1171,9 +1189,9 @@ function RateDrawer({
             <field.TextField
               label="Porcentaje de lo cobrado (%)"
               description={
-                currentRateBps > 0
-                  ? `Vale para lo que se cobre desde hoy. Lo cobrado antes conserva el ${percentLabel(currentRateBps, locale)}.`
-                  : "Vale también para lo ya cobrado que aún no se paga."
+                firstRate
+                  ? "Es su primer porcentaje: vale también para lo ya cobrado que aún no se paga."
+                  : `Vale para lo que se cobre desde hoy. Lo cobrado antes conserva el ${percentLabel(currentRateBps, locale)}.`
               }
               inputMode="decimal"
               autoComplete="off"

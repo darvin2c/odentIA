@@ -2159,7 +2159,8 @@ export async function setCommissionRate(
       organizationId: orgId,
       professionalUserId: input.professionalUserId,
       serviceId: null,
-      effectiveFrom: anyGeneral ? sql`now()` : sql`'-infinity'::timestamptz`,
+      // La hora de ahora, ya con el turno tomado: dos cambios seguidos quedan en el orden en que se guardaron.
+      effectiveFrom: anyGeneral ? sql`clock_timestamp()` : sql`'-infinity'::timestamptz`,
       rateBps: input.rateBps,
       createdBy: actorUserId,
     })
@@ -2210,7 +2211,10 @@ export async function setCommissionException(
   actorUserId: string,
   input: CommissionExceptionInput,
 ) {
-  await requireCanAttend(tx, orgId, input.professionalUserId, "professionalUserId")
+  const removing = (input.rateBps ?? null) === null && (input.fixedCents ?? null) === null
+  // Quitar se le puede hacer a cualquiera del equipo (como volver a 0 el general); poner, a quien atiende.
+  if (removing) await requireProfessional(tx, orgId, input.professionalUserId)
+  else await requireCanAttend(tx, orgId, input.professionalUserId, "professionalUserId")
   if (!looksLikeId(input.serviceId)) throw invalidField("serviceId", "Elige el servicio.")
   const [service] = await tx
     .select({ id: serviceCatalog.id, name: serviceCatalog.name })
@@ -2237,7 +2241,7 @@ export async function setCommissionException(
       organizationId: orgId,
       professionalUserId: input.professionalUserId,
       serviceId: service.id,
-      effectiveFrom: sql`now()`,
+      effectiveFrom: sql`clock_timestamp()`,
       rateBps,
       fixedCents,
       createdBy: actorUserId,
@@ -2318,6 +2322,8 @@ export async function commissionRulesOf(tx: Db, orgId: string, professionalUserI
   const since = now && Number.isFinite(now.effectiveFrom.getTime()) ? now.effectiveFrom : null
   return {
     rateBps: now?.rateBps ?? 0,
+    /** Ya tiene un porcentaje general: cambiarlo vale desde ahora (el primero vale desde siempre). */
+    hasRate: Boolean(now),
     since,
     previousRateBps: before?.rateBps ?? null,
     exceptions: [...exceptions].map((row) => ({
@@ -2325,6 +2331,22 @@ export async function commissionRulesOf(tx: Db, orgId: string, professionalUserI
       effectiveFrom: Number.isFinite(new Date(row.effectiveFrom).getTime()) ? row.effectiveFrom : null,
     })),
   }
+}
+
+/**
+ * Las líneas de `commission_live` de una clínica en un tramo, como subconsulta. Lo de una sola
+ * parte (casi todo) cuenta el día del cobro y se filtra por `cobro_at`, que la base lleva hasta la
+ * tabla; lo repartido por sesiones (pocos cargos, con su índice) se filtra aparte por `at`, el día
+ * de la sesión. Filtrar todo por `at`, o con un `or`, calculaba la historia entera cada vez.
+ */
+export function commissionLiveIn(orgId: string, start: Date, end: Date, extra: SQL = sql``): SQL {
+  const from = sql`${start.toISOString()}::timestamptz`
+  const to = sql`${end.toISOString()}::timestamptz`
+  return sql`(select * from commission_live
+      where organization_id = ${orgId} and split_sessions is null and cobro_at >= ${from} and cobro_at < ${to} ${extra}
+    union all
+    select * from commission_live
+      where organization_id = ${orgId} and split_sessions is not null and at >= ${from} and at < ${to} ${extra})`
 }
 
 /** Un decimal de la base («123.4500…») como fracción exacta, sin pasar por `number`. */
@@ -2350,6 +2372,8 @@ interface LiveCommissionLine {
   rateBps: number | null
   fixedCents: number | null
   forService: boolean
+  /** Tuvo alguna regla (general o del servicio): sin ninguna da 0 y no se congela al pagar. */
+  hasRule: boolean
   commissionCents: number
 }
 
@@ -2372,14 +2396,13 @@ async function liveCommissionLines(
     rateBps: number | null
     fixedCents: number | null
     forService: boolean
+    hasRule: boolean
     commission: string
   }>(sql`
     select l.application_id as "applicationId", l.slice, l.sessions, l.charge_id as "chargeId", l.payment_id as "paymentId",
       l.patient_id as "patientId", l.description, l.promotion_name as "promotionName", l.at, l.value::text as value,
-      l.rate_bps as "rateBps", l.fixed_cents as "fixedCents", l.for_service as "forService", l.commission::text as commission
-    from commission_live l
-    where l.organization_id = ${orgId} and l.professional_user_id = ${query.professionalUserId}
-      and l.at >= ${query.start.toISOString()}::timestamptz and l.at < ${query.end.toISOString()}::timestamptz`)
+      l.rate_bps as "rateBps", l.fixed_cents as "fixedCents", l.for_service as "forService", l.has_rule as "hasRule", l.commission::text as commission
+    from ${commissionLiveIn(orgId, query.start, query.end, sql`and professional_user_id = ${query.professionalUserId}`)} l`)
   return [...rows].map((row) => ({
     ...row,
     at: new Date(row.at),
@@ -2638,6 +2661,8 @@ export interface CommissionLine {
   fixedCents: number | null
   /** El porcentaje o el monto fue una excepción para el servicio. */
   forService: boolean
+  /** Sin ninguna regla aún: da 0 y un pago no lo congela (cuando se fije, se calcula). */
+  unruled?: boolean
   /** Ya entró en un pago registrado: su porcentaje e importe quedaron congelados. */
   settled: boolean
   /** Cuándo se pagó (nulo si aún no). */
@@ -2807,7 +2832,7 @@ export async function getMonthlyCommissions(
       patientName: f.line.patientId ? (names.get(f.line.patientId) ?? "") : "",
       description: f.line.description,
       baseCents: f.line.baseCents,
-      rateBps: f.line.fixedCents !== null ? null : (f.line.rateBps ?? rateBps),
+      rateBps: f.line.fixedCents !== null ? null : f.line.rateBps,
       commissionCents: f.line.commissionCents,
       occurredAt: f.line.occurredAt,
       promotionName: f.promotionName ?? null,
@@ -2839,6 +2864,7 @@ export async function getMonthlyCommissions(
       sessions: app.slice ? app.sessions : null,
       fixedCents: app.fixedCents,
       forService: app.forService,
+      ...(app.hasRule ? {} : { unruled: true }),
       settled: false,
       paidAt: null,
       voidedAfterPaid: false,
@@ -2918,6 +2944,7 @@ export async function getMonthlyCommissions(
     rateBps,
     /** Desde cuándo vale (nulo si desde siempre) y el anterior. */
     rateSince: rules.since,
+    hasRate: rules.hasRate,
     previousRateBps: rules.previousRateBps,
     /** Las excepciones por servicio que siguen en pie. */
     exceptions: rules.exceptions,
@@ -2955,6 +2982,8 @@ function commissionSummary(view: MonthlyCommissions) {
     month: view.month,
     currency: view.currency,
     rateBps: view.rateBps,
+    /** Cuántos servicios tienen otro porcentaje o un monto fijo. */
+    exceptionCount: view.exceptions.length,
     collections: view.lines.filter((line) => !line.voidedAfterPaid).length,
     baseCents: view.baseCents,
     commissionCents: view.commissionCents,
@@ -2984,8 +3013,7 @@ export async function listMonthCommissions(
     .where(and(eq(commissionRate.organizationId, orgId), isNull(commissionRate.serviceId)))
   // Quien tiene algo nuevo del mes (también la sesión de un tratamiento que empezó otro) o algo ya pagado.
   const active = await tx.execute<{ userId: string }>(sql`
-    select distinct l.professional_user_id as "userId" from commission_live l
-    where l.organization_id = ${orgId} and l.at >= ${start.toISOString()}::timestamptz and l.at < ${end.toISOString()}::timestamptz
+    select distinct l.professional_user_id as "userId" from ${commissionLiveIn(orgId, start, end)} l
     union
     select distinct s.professional_user_id from commission_settlement_line l
     join commission_settlement s on s.organization_id = l.organization_id and s.id = l.settlement_id and s.voided_at is null
@@ -3083,7 +3111,8 @@ export async function payMonthCommission(
     throw error
   })
   const view = await getMonthlyCommissions(tx, orgId, input)
-  const fresh = view.lines.filter((line) => !line.settled)
+  // Lo que aún no tiene ninguna regla no se congela: cuando se fije, se calcula con ella.
+  const fresh = view.lines.filter((line) => !line.settled && !line.unruled)
   // Lo que hay que descontar no se paga solo: viaja con los cobros de un mes (de este o de otro).
   // Sin nada que pagar ni descontar (por ejemplo, sin porcentaje fijado) no se registra nada: congelar
   // esos cobros a 0 % los dejaría sin comisión aunque después se fije el porcentaje.

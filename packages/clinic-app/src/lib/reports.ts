@@ -744,7 +744,10 @@ export interface ReportCommissions extends ReportHead {
     attendedCents: number
     unpaidCents: number
     collectedCents: number
+    /** El porcentaje general de hoy. */
     rateBps: number
+    /** Cuántos servicios tienen otro porcentaje o un monto fijo. */
+    exceptions?: number
     commissionCents: number
     paidCents: number
     pendingCents: number

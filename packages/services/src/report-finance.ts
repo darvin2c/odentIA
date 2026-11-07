@@ -20,7 +20,7 @@ import { fixedOwedAt } from "./expense-recurring.js"
 import type { Db } from "@odentia/db"
 import { sql, type SQL } from "drizzle-orm"
 import { budgetLineUnitsSql, budgetValueOptionSql } from "./budgets.js"
-import { collectedNetMany, EXPENSE_CATEGORIES } from "./finance.js"
+import { commissionLiveIn, collectedNetMany, EXPENSE_CATEGORIES } from "./finance.js"
 import { orgTaxes } from "./clinic-taxes.js"
 import { unpaidPurchasesMany } from "./purchase-balance.js"
 import { debtDaysSql, debtZoneSql, overdueDebtSql, valuedDebtSql } from "./report-debts.js"
@@ -95,8 +95,8 @@ function commissionLinesSql(orgId: string, hull: Span, currency: string, branchI
       from frozen f
       union all
       select cl.professional_user_id, cl.at, cl.value, cl.commission, 0, cl.commission
-      from commission_live cl
-      where cl.organization_id = ${orgId} and cl.at >= ${at(hull.start)} and cl.at < ${at(hull.end)}
+      from ${commissionLiveIn(orgId, hull.start, hull.end)} cl
+      where true
         ${branchId ? sql`and cl.branch_id = ${branchId}` : sql``}
     ), counted_line as (
       -- Quien dejó la clínica sigue contando: lo que ganó es de los meses en que atendió, y
