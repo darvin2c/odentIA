@@ -132,9 +132,14 @@ function Stage({
   onPoint: (point: Point) => void
   measurement: string | null
 }) {
-  const zoom = useZoomPan({ arrowPan: true, canToggle: () => !measuring })
+  // Midiendo, las flechas mueven la mira y no la imagen ampliada.
+  const zoom = useZoomPan({ arrowPan: !measuring, canToggle: () => !measuring })
   const ref = useRef<HTMLCanvasElement | null>(null)
   const size = orientedSize(source.width, source.height, view.orientation)
+  // La mira del teclado, en la imagen tal como se ve (girada o volteada).
+  const [aim, setAim] = useState<Point | null>(null)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: dejar de medir, girar o voltear empiezan sin mira.
+  useEffect(() => setAim(null), [measuring, view.orientation, size.width, size.height])
   // La ventana del DICOM se calcula solo cuando cambian el cuadro, el brillo, el contraste o el negativo:
   // girar, voltear o marcar un punto vuelven a dibujar sin recorrer los píxeles.
   const flat = useMemo(() => {
@@ -186,7 +191,43 @@ function Stage({
         ctx.stroke()
       }
     }
-  }, [source, flat, view.orientation, points, size.width, size.height])
+    if (aim && measuring) {
+      const unit = Math.max(1, size.width / 400)
+      const r = unit * 12
+      ctx.strokeStyle = "#67e8f9"
+      ctx.lineWidth = unit * 1.5
+      ctx.beginPath()
+      ctx.moveTo(aim.x - r, aim.y)
+      ctx.lineTo(aim.x - r / 3, aim.y)
+      ctx.moveTo(aim.x + r / 3, aim.y)
+      ctx.lineTo(aim.x + r, aim.y)
+      ctx.moveTo(aim.x, aim.y - r)
+      ctx.lineTo(aim.x, aim.y - r / 3)
+      ctx.moveTo(aim.x, aim.y + r / 3)
+      ctx.lineTo(aim.x, aim.y + r)
+      ctx.stroke()
+    }
+  }, [source, flat, view.orientation, points, size.width, size.height, aim, measuring])
+  const onAimKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    // Las teclas de «Acercar» y «Alejar», que viven dentro del marco, siguen siendo suyas.
+    if (!measuring || event.target !== event.currentTarget) return
+    const unit = Math.max(1, Math.round(size.width / 400))
+    const step = event.shiftKey ? unit * 10 : unit
+    const move = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[event.key]
+    const from = aim ?? { x: size.width / 2, y: size.height / 2 }
+    if (move) {
+      event.preventDefault()
+      event.stopPropagation()
+      setAim({
+        x: Math.max(0, Math.min(size.width - 1, from.x + move[0]!)),
+        y: Math.max(0, Math.min(size.height - 1, from.y + move[1]!)),
+      })
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault()
+      setAim(from)
+      onPoint(fromOriented(from, source.width, source.height, view.orientation))
+    }
+  }
 
   // En una foto, brillo, contraste y negativo los pone el navegador; en un DICOM, la ventana.
   const filter = source.kind === "image" ? filterOf(view) : undefined
@@ -197,7 +238,12 @@ function Stage({
       // biome-ignore lint/a11y/noNoninteractiveTabindex: la imagen ampliada se recorre con el teclado.
       tabIndex={0}
       role="group"
-      aria-label={`${label}. Dos dedos, Ctrl + rueda o doble clic acercan; con la imagen ampliada, arrastra o usa las flechas.`}
+      aria-label={
+        measuring
+          ? `${label}. Flechas mueven la mira (Mayús, más rápido) y Enter marca el punto.`
+          : `${label}. Dos dedos, Ctrl + rueda o doble clic acercan; con la imagen ampliada, arrastra o usa las flechas.`
+      }
+      onKeyDown={onAimKey}
       className="relative min-h-0 flex-1 touch-none overflow-hidden bg-black outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-inset"
     >
       <div className="absolute inset-0" style={zoom.contentStyle}>

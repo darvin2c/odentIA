@@ -195,6 +195,17 @@ it("recepción sube la tomografía y ve el avance, pero no la abre ni la descarg
   expect((await reception.request(`/patients/${id}/imaging/studies/${documentId}/download`)).status).toBe(403)
   expect((await reception.request(`/patients/${id}/documents`)).status).toBe(403)
 
+  // La miniatura la pone quien sube el CD una vez; cambiarla después es de quien escribe en la ficha.
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52])
+  const thumbnail = (app: ReturnType<typeof buildApp>) => {
+    const form = new FormData()
+    form.append("file", new File([png], "miniatura.png", { type: "image/png" }))
+    return app.request(`/patients/${id}/imaging/uploads/${documentId}/thumbnail`, { method: "PUT", body: form })
+  }
+  expect((await thumbnail(reception)).status).toBe(200)
+  expect((await thumbnail(reception)).status).toBe(409)
+  expect((await thumbnail(buildApp("clinician"))).status).toBe(200)
+
   // Si vuelve con el mismo CD, la respuesta trae solo el avance: nada del documento clínico.
   const again = await post(reception, `/patients/${id}/imaging/uploads`, start)
   const againBody = (await again.json()) as { data: { state: string; document: Record<string, unknown> } }

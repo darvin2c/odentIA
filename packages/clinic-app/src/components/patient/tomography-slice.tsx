@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { type PlaneImage, type WindowLevel, windowToRgba } from "../../lib/cbct-volume"
 import { activeOrgLocale } from "../../lib/locale"
 import { useZoomPan } from "../../lib/use-zoom-pan"
@@ -30,6 +30,21 @@ export function formatMeasure(measure: Pick<PlaneMeasure, "kind" | "value">): st
     : `${measure.value.toLocaleString(activeOrgLocale(), { maximumFractionDigits: 1 })} mm`
 }
 
+/** Lo que dice la ayuda de abajo mientras se mide: con el teclado también se marca. */
+export const MEASURE_KEYS_HINT = "Flechas mueven la mira (Mayús, más rápido) · Enter marca el punto · RePág y AvPág cambian el corte · Esc termina"
+
+/**
+ * Cuánto se estira cada eje para que el corte tenga la forma de los mm, no la de
+ * los píxeles: con un vóxel que no es cúbico (0,25 × 0,25 × 0,5 mm) una fila
+ * mide más que una columna.
+ */
+export function physicalScale(image: Pick<PlaneImage, "colMm" | "rowMm">): { kx: number; ky: number } {
+  const col = image.colMm > 0 ? image.colMm : 1
+  const row = image.rowMm > 0 ? image.rowMm : 1
+  const min = Math.min(col, row)
+  return { kx: col / min, ky: row / min }
+}
+
 /** Una imagen de corte en un lienzo, con su retícula y sus medidas. */
 export function SliceCanvas({
   image,
@@ -51,6 +66,7 @@ export function SliceCanvas({
   className,
   zoomControls = true,
   onSwipe,
+  onEscape,
 }: {
   image: PlaneImage
   window: WindowLevel
@@ -75,6 +91,8 @@ export function SliceCanvas({
   className?: string
   /** «− 100 % +» sobre el corte; en los cortes chicos solo quedan los gestos. */
   zoomControls?: boolean
+  /** Esc mientras se mide: termina de medir. */
+  onEscape?: () => void
   /** Deslizar con el corte ajustado (en el celular: el corte siguiente). */
   onSwipe?: (direction: -1 | 1) => void
 }) {
@@ -87,14 +105,29 @@ export function SliceCanvas({
     onSwipe,
   })
   const rgba = useMemo(() => windowToRgba(image.values, window), [image, window])
+  const { kx, ky } = physicalScale(image)
+  // La mira del teclado: con «Medir» o «Ángulo», las flechas la mueven un vóxel y Enter marca el punto.
+  const [aim, setAim] = useState<Point | null>(null)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: otra herramienta u otro corte empiezan sin mira.
+  useEffect(() => setAim(null), [tool, image])
   useEffect(() => {
     const canvas = ref.current
     if (!canvas) return
-    canvas.width = image.width
-    canvas.height = image.height
+    canvas.width = Math.round(image.width * kx)
+    canvas.height = Math.round(image.height * ky)
     const ctx = canvas.getContext("2d")
     if (!ctx) return
-    ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), image.width, image.height), 0, 0)
+    const pixels = new ImageData(new Uint8ClampedArray(rgba), image.width, image.height)
+    if (kx === 1 && ky === 1) ctx.putImageData(pixels, 0, 0)
+    else {
+      // Se pinta en píxeles y se estira a los mm; lo de encima sigue en coordenadas de la imagen.
+      const flat = document.createElement("canvas")
+      flat.width = image.width
+      flat.height = image.height
+      flat.getContext("2d")?.putImageData(pixels, 0, 0)
+      ctx.setTransform(kx, 0, 0, ky, 0, 0)
+      ctx.drawImage(flat, 0, 0)
+    }
     const unit = Math.max(1, image.width / 320)
     if (cross) {
       ctx.lineWidth = unit
@@ -134,12 +167,26 @@ export function SliceCanvas({
       ctx.fillText(formatMeasure(measure), last.x + unit * 5, last.y - unit * 5)
     }
     if (draft?.length) drawPath(draft, "#fbbf24")
-  }, [image, rgba, cross, measures, draft, overlay])
+    if (aim && tool !== "ninguna") {
+      ctx.strokeStyle = "#67e8f9"
+      ctx.lineWidth = unit * 1.5
+      const r = unit * 9
+      ctx.beginPath()
+      ctx.moveTo(aim.x - r, aim.y)
+      ctx.lineTo(aim.x - r / 3, aim.y)
+      ctx.moveTo(aim.x + r / 3, aim.y)
+      ctx.lineTo(aim.x + r, aim.y)
+      ctx.moveTo(aim.x, aim.y - r)
+      ctx.lineTo(aim.x, aim.y - r / 3)
+      ctx.moveTo(aim.x, aim.y + r / 3)
+      ctx.lineTo(aim.x, aim.y + r)
+      ctx.stroke()
+    }
+  }, [image, rgba, cross, measures, draft, overlay, aim, tool, kx, ky])
 
   // `object-contain` centra la imagen dentro del lienzo con su proporción en
-  // píxeles: el clic se convierte con esa área, no con la caja entera. (En una
-  // tomografía el vóxel es isótropo: la proporción en píxeles es la de los mm.)
-  const aspect = image.width / image.height
+  // mm: el clic se convierte con esa área, no con la caja entera.
+  const aspect = (image.width * kx) / (image.height * ky)
   const toImage = (event: React.MouseEvent<HTMLCanvasElement> | React.PointerEvent<HTMLCanvasElement>): Point => {
     const rect = event.currentTarget.getBoundingClientRect()
     let width = rect.width
@@ -166,7 +213,9 @@ export function SliceCanvas({
         <canvas
           ref={ref}
           role="img"
-          aria-label={`${label}${measures?.length ? `; ${measures.map(formatMeasure).join(", ")}` : ""}`}
+          aria-label={`${label}${measures?.length ? `; ${measures.map(formatMeasure).join(", ")}` : ""}${
+            tool !== "ninguna" ? `; ${MEASURE_KEYS_HINT}` : ""
+          }`}
           // biome-ignore lint/a11y/noNoninteractiveTabindex: el corte se recorre con las flechas del teclado.
           tabIndex={0}
           className={`mx-auto block max-h-full w-full max-w-full object-contain focus-visible:outline-2 focus-visible:outline-cyan-400 ${tool === "ninguna" ? "cursor-crosshair" : "cursor-cell"}`}
@@ -186,6 +235,41 @@ export function SliceCanvas({
           onKeyDown={(event) => {
             if (onKey?.(event.key)) {
               event.preventDefault()
+              return
+            }
+            // Midiendo, las flechas son de la mira y los cortes pasan a RePág y AvPág.
+            if (tool !== "ninguna" && onMark) {
+              const step = event.shiftKey ? 10 : 1
+              const move = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[
+                event.key
+              ]
+              const from = aim ?? { x: image.width / 2, y: image.height / 2 }
+              if (move) {
+                event.preventDefault()
+                setAim({
+                  x: Math.max(0, Math.min(image.width - 1, from.x + move[0]!)),
+                  y: Math.max(0, Math.min(image.height - 1, from.y + move[1]!)),
+                })
+                return
+              }
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault()
+                setAim(from)
+                onMark(from)
+                return
+              }
+              // Esc termina de medir sin cerrar el visor (el diálogo también escucha Esc).
+              if (event.key === "Escape" && onEscape) {
+                event.preventDefault()
+                event.stopPropagation()
+                onEscape()
+                return
+              }
+              const page = { PageUp: -1, PageDown: 1 }[event.key]
+              if (page && onStep) {
+                event.preventDefault()
+                onStep(page)
+              }
               return
             }
             if (!onStep) return
