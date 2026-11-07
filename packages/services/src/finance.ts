@@ -72,6 +72,7 @@ import {
   paymentValueSql,
 } from "./report-value.js"
 import { createWorkspaceNotification } from "./workspace.js"
+import { salaryOfMonth } from "./expense-recurring-occurrences.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import type { TicketFrozen } from "./payments.js"
 import { digitsContain, foldedWordsMatch, referenceNumber, searchDigits, textMatchesWords } from "./search-text.js"
@@ -1233,10 +1234,13 @@ export async function createExpense(
   input: CreateExpenseInput,
   /**
    * Solo `payPurchaseOrder`: el gasto es el pago de esa compra y, si se pagó en
-   * otra moneda, lo que salió. Un gasto suelto no cruza monedas.
+   * otra moneda, lo que salió. Un gasto suelto no cruza monedas. Solo
+   * `expense-recurring.ts`: el gasto es el pago de ese mes de un gasto que se repite.
    */
-  link: { purchaseOrderId?: string; tender?: ExpenseTender } = {},
+  link: { purchaseOrderId?: string; tender?: ExpenseTender; recurringId?: string; recurringMonth?: string } = {},
 ) {
+  if (Boolean(link.recurringId) !== Boolean(link.recurringMonth))
+    throw validation("El pago de un gasto que se repite lleva su plantilla y su mes")
   const branchRow = await requireBranch(tx, orgId, input.branchId)
   const profile = await lockOrgMoney(tx, orgId)
   if (!input.currency && !profile) throw orgProfileRequired()
@@ -1296,6 +1300,8 @@ export async function createExpense(
       notes: input.notes?.trim() ? input.notes.trim().slice(0, 2000) : null,
       purchaseOrderId: link.purchaseOrderId ?? null,
       salesTax,
+      recurringId: link.recurringId ?? null,
+      recurringMonth: link.recurringMonth ?? null,
       createdBy: actorUserId,
     })
     .returning()
@@ -2631,6 +2637,9 @@ export async function getMonthlyCommissions(
           ? "pagado"
           : "sin_cobros"
   const professionalNames = await userNames(tx, [query.professionalUserId])
+  // El sueldo del mes (decisión 6): sus gastos que se repiten de ese mes, pagados o no. Va aparte de la
+  // comisión: se paga en Gastos y la fila de la lista sigue diciendo solo la comisión.
+  const salary = await salaryOfMonth(tx, orgId, query.professionalUserId, query, money)
   return {
     professionalUserId: query.professionalUserId,
     professionalName: professionalNames.get(query.professionalUserId) ?? null,
@@ -2660,6 +2669,8 @@ export async function getMonthlyCommissions(
     discountedCents,
     lastPaidAt,
     status,
+    /** Su sueldo del mes, si tiene uno anotado como gasto que se repite (`null` si no). */
+    salary,
   }
 }
 
