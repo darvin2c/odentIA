@@ -2721,11 +2721,19 @@ if (cbct) {
   const studyUid = `${root}.1`
   const seriesUid = `${root}.2`
   const plane = volume.nx * volume.ny
+  // Los grises de 3D Slicer no son unidades Hounsfield: el archivo no las declara, y
+  // su ventana sale de los grises del propio estudio (del 50 % al 99,5 %).
+  const sample = Uint16Array.from({ length: Math.floor(volume.data.length / 97) }, (_, i) => volume.data[i * 97]!).sort()
+  const grayLow = sample[Math.floor(sample.length * 0.5)]!
+  const grayHigh = sample[Math.floor(sample.length * 0.995)]!
+  const window = { center: (grayLow + grayHigh) / 2, width: Math.max(1, grayHigh - grayLow) }
   const slices = Array.from({ length: volume.nz }, (_, k) =>
     encodeDemoCtSlice({
       width: volume.nx,
       height: volume.ny,
       pixels: volume.data.subarray(k * plane, (k + 1) * plane),
+      hounsfield: false,
+      window,
       voxelMm: volume.voxelMm,
       position: [0, 0, k * volume.voxelMm],
       instanceNumber: k + 1,

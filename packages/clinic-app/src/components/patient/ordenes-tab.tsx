@@ -1,10 +1,10 @@
 import { canAttend } from "@odentia/auth/permissions"
 import { diagnosisCodeLabel } from "@odentia/clinical"
-import { Badge, Button, Input, toast } from "@odentia/ui"
+import { Badge, Button, FieldLabel, Input, RadioGroup, RadioGroupItem, toast } from "@odentia/ui"
 import { FormDrawer, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { useRef, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { z } from "zod"
 import {
   advanceOrder,
@@ -16,7 +16,13 @@ import {
   ORDER_KIND_TITLES,
   ORDER_STATUS_LABELS,
 } from "../../lib/clinical-forms"
+import { apiFetch } from "../../lib/api"
 import { useMyUserId, useOrgMembers } from "../../lib/crm"
+import { isImageCategory } from "../../lib/document-list"
+import { activeOrgLocale } from "../../lib/locale"
+import type { PatientDocument } from "../../lib/patients"
+import { ChoiceButtons } from "../choice-buttons"
+import { formatTakenAt, imageTypeLabel, storesTomography, takenAt } from "./document-labels"
 import { uploadPatientFile } from "../../lib/encounter-documents"
 import { appWords } from "../../lib/product-words"
 import { DiagnosisSearch } from "./diagnosis-search"
@@ -69,20 +75,41 @@ export function OrderRow({
   )
 }
 
-/** El resultado se sube a la propia orden: el archivo, el texto o ambos. */
+/**
+ * El resultado se guarda en la propia orden: un archivo nuevo, una imagen que ya
+ * está en la ficha (la tomografía que llegó en el CD), el texto, o varios.
+ */
 const resultSchema = z
   .object({
+    source: z.enum(["ficha", "archivo"]),
+    documentId: z.string().nullable(),
     file: z.custom<File | null>(),
     text: z.string().max(10000, "Escribe como mucho 10000 caracteres."),
   })
   .superRefine((value, ctx) => {
-    if (!value.file && !value.text.trim())
+    const chosen = value.source === "ficha" ? value.documentId : value.file
+    if (!chosen && !value.text.trim())
       ctx.addIssue({
         code: "custom",
-        path: ["file"],
-        message: "Sube el archivo o escribe el resultado",
+        path: [value.source === "ficha" ? "documentId" : "file"],
+        message: value.source === "ficha" ? "Elige la imagen o escribe el resultado" : "Sube el archivo o escribe el resultado",
       })
   })
+
+/** Lo que reconoce una imagen de la ficha sin abrirla: tipo, fecha y, en una tomografía, sus cortes. */
+function resultCandidateLabel(doc: PatientDocument): { title: string; detail: string } {
+  return {
+    title: doc.label,
+    detail: [
+      imageTypeLabel(doc.imageType),
+      formatTakenAt(doc),
+      doc.imaging?.completedAt ? `${doc.imaging.sliceCount.toLocaleString(activeOrgLocale())} cortes` : null,
+      doc.toothNumbers.length ? `Pieza${doc.toothNumbers.length > 1 ? "s" : ""} ${doc.toothNumbers.join(", ")}` : null,
+    ]
+      .filter(Boolean)
+      .join(" · "),
+  }
+}
 
 export function OrderResultDrawer({
   order,
@@ -93,6 +120,18 @@ export function OrderResultDrawer({
   onClose: () => void
   onSaved: () => void
 }) {
+  // Una orden de imagen se cierra con la imagen que ya está en la ficha: vigente
+  // y, si es una tomografía, completa (la que subió recepción del CD).
+  const fromRecord = order.kind === "imagen"
+  const documents = useQuery({
+    queryKey: ["patient-documents", order.patientId, "con-retirados"],
+    queryFn: () =>
+      apiFetch<{ data: PatientDocument[] }>(`/api/patients/${order.patientId}/documents?includeRetired=true`),
+    enabled: fromRecord,
+  })
+  const candidates = (documents.data?.data ?? [])
+    .filter((doc) => !doc.retiredAt && isImageCategory(doc.category) && (!doc.imaging || doc.imaging.completedAt))
+    .sort((a, b) => takenAt(b).localeCompare(takenAt(a)))
   // El archivo ya subido no se sube otra vez si lo que falla es guardar el resultado.
   const uploaded = useRef<{ file: File; id: string } | null>(null)
   const save = useMutation({
@@ -100,11 +139,17 @@ export function OrderResultDrawer({
       advanceOrder(order.id, { toStatus: "completado", ...body }),
   })
   const form = useAppForm({
-    defaultValues: { file: null as File | null, text: "" },
+    defaultValues: {
+      source: (fromRecord ? "ficha" : "archivo") as "ficha" | "archivo",
+      documentId: null as string | null,
+      file: null as File | null,
+      text: "",
+    },
     validators: { onSubmit: resultSchema },
     onSubmit: async ({ value }) => {
       let resultDocumentId: string | null = null
-      if (value.file) {
+      if (value.source === "ficha") resultDocumentId = value.documentId
+      else if (value.file) {
         resultDocumentId = uploaded.current?.file === value.file ? uploaded.current.id : null
         if (!resultDocumentId) {
           const document = await uploadPatientFile(order.patientId, value.file, {
@@ -117,14 +162,29 @@ export function OrderResultDrawer({
         }
       }
       await save.mutateAsync({ resultText: value.text.trim() || null, resultDocumentId })
-      toast.success("Resultado guardado en la orden")
+      toast.success("Listo: la orden quedó con su resultado")
       onSaved()
       onClose()
     },
   })
   const surface = useFormSurface(form, {
-    fieldMap: { resultDocumentId: "file", resultText: "text" },
+    // El rechazo del documento va al campo que se ve: la imagen de la ficha o el archivo nuevo.
+    fieldMap: (key) =>
+      key === "resultDocumentId"
+        ? form.getFieldValue("source") === "ficha"
+          ? "documentId"
+          : "file"
+        : key === "resultText"
+          ? "text"
+          : undefined,
   })
+  const source = useStore(form.store, (state) => state.values.source)
+  // Sin imágenes en la ficha, la orden de imagen abre directo en «Archivo nuevo».
+  const empty = fromRecord && documents.isSuccess && candidates.length === 0
+  useEffect(() => {
+    if (empty && form.getFieldValue("source") === "ficha") form.setFieldValue("source", "archivo")
+  }, [empty, form])
+  const sourceId = useId()
   return (
     <FormDrawer
       {...surface}
@@ -137,23 +197,109 @@ export function OrderResultDrawer({
       submitLabel="Guardar resultado"
     >
       <div className="flex flex-col gap-4">
-        <form.AppField name="file">
-          {(field) => (
-            <field.Control
-              label="Archivo del resultado"
-              description="Queda en Documentos, unido a esta orden."
-            >
-              {(control) => (
-                <Input
-                  {...control.props}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp,application/pdf"
-                  onChange={(event) => field.handleChange(event.target.files?.[0] ?? null)}
+        {fromRecord && (
+          <form.AppField name="source">
+            {(field) => (
+              <div className="flex flex-col gap-2">
+                <span id={sourceId} className="text-sm font-medium">
+                  El resultado
+                </span>
+                <ChoiceButtons
+                  aria-labelledby={sourceId}
+                  value={field.state.value}
+                  tone="primary"
+                  options={[
+                    { value: "ficha", label: "Ya está en la ficha" },
+                    { value: "archivo", label: "Archivo nuevo" },
+                  ]}
+                  onChange={(next) => field.handleChange(next)}
                 />
-              )}
-            </field.Control>
-          )}
-        </form.AppField>
+              </div>
+            )}
+          </form.AppField>
+        )}
+        {fromRecord && source === "ficha" ? (
+          <form.AppField name="documentId">
+            {(field) => (
+              <field.Control
+                label="Imagen de la ficha"
+                description={
+                  storesTomography()
+                    ? "La tomografía o radiografía que ya se subió. Queda unida a esta orden, sin copiarla."
+                    : "La imagen que ya se subió. Queda unida a esta orden, sin copiarla."
+                }
+              >
+                {(control) =>
+                  documents.isPending ? (
+                    <p className="text-sm text-muted-foreground">Buscando las imágenes de la ficha…</p>
+                  ) : documents.isError ? (
+                    <div role="alert" className="flex flex-wrap items-center gap-2 text-sm">
+                      No se pudieron leer las imágenes de la ficha.
+                      <Button type="button" size="sm" variant="outline" onClick={() => void documents.refetch()}>
+                        Reintentar
+                      </Button>
+                    </div>
+                  ) : empty ? (
+                    <p className="text-sm text-muted-foreground">
+                      {storesTomography()
+                        ? "Esta ficha todavía no tiene imágenes. Elige «Archivo nuevo», o sube la tomografía en Documentos y vuelve aquí."
+                        : "Esta ficha todavía no tiene imágenes. Elige «Archivo nuevo» para subir el resultado."}
+                    </p>
+                  ) : (
+                    <RadioGroup
+                      id={control.props.id}
+                      aria-describedby={control.props["aria-describedby"]}
+                      aria-invalid={control.props["aria-invalid"]}
+                      value={field.state.value ?? ""}
+                      onValueChange={(value) => field.handleChange(String(value))}
+                      className="flex flex-col gap-1"
+                    >
+                      {candidates.map((doc) => {
+                        const { title, detail } = resultCandidateLabel(doc)
+                        return (
+                          <FieldLabel
+                            key={doc.id}
+                            className="flex min-h-11 cursor-pointer items-center gap-2.5 rounded-lg border px-3 py-2 font-normal"
+                          >
+                            <RadioGroupItem value={doc.id} />
+                            <span className="flex min-w-0 flex-1 flex-col">
+                              <span className="font-medium">{title}</span>
+                              <span className="text-xs text-muted-foreground">{detail}</span>
+                            </span>
+                          </FieldLabel>
+                        )
+                      })}
+                    </RadioGroup>
+                  )
+                }
+              </field.Control>
+            )}
+          </form.AppField>
+        ) : (
+          <form.AppField name="file">
+            {(field) => (
+              <field.Control
+                label="Archivo del resultado"
+                description={
+                  !fromRecord
+                    ? "Queda en Documentos, unido a esta orden."
+                    : storesTomography()
+                      ? "Una imagen, un PDF o el archivo DICOM de una radiografía. Queda en Documentos, unido a esta orden. Una tomografía (la carpeta del CD) se sube en Documentos y después se elige en «Ya está en la ficha»."
+                      : "Una imagen, un PDF o el archivo DICOM de una radiografía. Queda en Documentos, unido a esta orden. De una tomografía, sube su informe en PDF."
+                }
+              >
+                {(control) => (
+                  <Input
+                    {...control.props}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,application/pdf,application/dicom,.dcm"
+                    onChange={(event) => field.handleChange(event.target.files?.[0] ?? null)}
+                  />
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
+        )}
         <form.AppField name="text">
           {(field) => (
             <field.TextareaField label="Resultado escrito (opcional)" rows={3} maxLength={10000} />

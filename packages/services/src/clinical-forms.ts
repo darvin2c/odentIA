@@ -14,6 +14,7 @@ import {
   encounter,
   encounterDiagnosis,
   encounterProcedure,
+  imagingStudy,
   patient,
   patientDocument,
   serviceCatalog,
@@ -3668,12 +3669,24 @@ export async function advanceClinicalOrder(
   let resultDocumentId: string | null = current.resultDocumentId
   if (options.resultDocumentId) {
     const [document] = await tx
-      .select({ patientId: patientDocument.patientId, retiredAt: patientDocument.retiredAt })
+      .select({
+        patientId: patientDocument.patientId,
+        retiredAt: patientDocument.retiredAt,
+        studyId: imagingStudy.documentId,
+        studyCompletedAt: imagingStudy.completedAt,
+      })
       .from(patientDocument)
+      .leftJoin(
+        imagingStudy,
+        and(eq(imagingStudy.organizationId, patientDocument.organizationId), eq(imagingStudy.documentId, patientDocument.id)),
+      )
       .where(and(eq(patientDocument.id, options.resultDocumentId), eq(patientDocument.organizationId, orgId)))
       .limit(1)
     if (!document || document.patientId !== current.patientId || document.retiredAt)
       throw invalidField("resultDocumentId", "El resultado debe ser un documento vigente de esta persona")
+    // Una tomografía a medio subir no es todavía un resultado: la orden quedaría «con resultado» sin él.
+    if (document.studyId && !document.studyCompletedAt)
+      throw invalidField("resultDocumentId", "La tomografía aún no termina de subirse: complétala y vuelve a elegirla")
     resultDocumentId = options.resultDocumentId
   }
   if (toStatus === "completado" && !result && !resultDocumentId) {

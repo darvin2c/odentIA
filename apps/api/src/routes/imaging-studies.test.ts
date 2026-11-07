@@ -195,6 +195,12 @@ it("recepción sube la tomografía y ve el avance, pero no la abre ni la descarg
   expect((await reception.request(`/patients/${id}/imaging/studies/${documentId}/download`)).status).toBe(403)
   expect((await reception.request(`/patients/${id}/documents`)).status).toBe(403)
 
+  // Si vuelve con el mismo CD, la respuesta trae solo el avance: nada del documento clínico.
+  const again = await post(reception, `/patients/${id}/imaging/uploads`, start)
+  const againBody = (await again.json()) as { data: { state: string; document: Record<string, unknown> } }
+  expect(againBody.data.state).toBe("exists")
+  expect(againBody.data.document).toEqual({ id: documentId })
+
   // Caja no sube tomografías.
   expect((await post(buildApp("cashier"), `/patients/${id}/imaging/uploads`, start)).status).toBe(403)
 })
@@ -226,6 +232,27 @@ it("quien lee la ficha la abre y la descarga como ZIP con los archivos tal como 
   const entries = unzipSync(bytes)
   expect(Object.keys(entries).sort()).toEqual(["DICOM/00001.dcm", "DICOM/00002.dcm", "DICOM/00003.dcm"])
   expect(entries["DICOM/00002.dcm"]).toEqual(dicomBytes(500))
+
+  // El arco ajustado a mano queda con la tomografía, con quién y cuándo; recepción no lo cambia.
+  const put = (app: ReturnType<typeof buildApp>, body: unknown) =>
+    app.request(`/patients/${id}/imaging/studies/${data.document.id}/arch`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  const arch = { points: [[10, 40], [25, 20], [40, 12], [55, 20], [70, 40]], z: 30 }
+  expect((await put(professional, { arch: { points: [[1, 2]], z: 3 } })).status).toBe(400)
+  expect((await put(professional, { arch: { ...arch, z: -1 } })).status).toBe(400)
+  const savedArch = await put(professional, { arch })
+  expect(savedArch.status).toBe(200)
+  expect(((await savedArch.json()) as { data: { arch: unknown; updatedAt: string | null } }).data).toMatchObject({ arch })
+  const withArch = await professional.request(`/patients/${id}/imaging/studies/${data.document.id}/files`)
+  expect(((await withArch.json()) as { data: { arch: { arch: unknown; updatedByName: string | null } } }).data.arch).toMatchObject({
+    arch,
+  })
+  expect((await put(buildApp("reception"), { arch })).status).toBe(403)
+  const reset = await put(professional, { arch: null })
+  expect(((await reset.json()) as { data: { arch: unknown } }).data.arch).toBeNull()
 
   // Medidas: la odontóloga las guarda; recepción ni las lee ni las escribe.
   const measure = { kind: "distancia", view: "transversal", points: [[1, 2, 3], [1, 2, 14.8]], value: 11.8, toothNumber: 36 }

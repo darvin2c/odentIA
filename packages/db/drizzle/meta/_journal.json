@@ -365,6 +365,13 @@
       "when": 1793989583321,
       "tag": "0051_ayuda_con_jev",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1794008281441,
+      "tag": "0052_arco_de_la_tomografia",
+      "breakpoints": true
     }
   ]
 }
