@@ -579,6 +579,23 @@ function DocumentViewer({
       setActionPending(false)
     }
   }
+  // «No mostrar en su portal» (ADR 0150): reversible y sin confirmar; vale para todo acceso.
+  const setPortalHidden = (hidden: boolean) =>
+    runAction(
+      () =>
+        apiFetch(`/api/patients/${patientId}/documents/${doc.id}/portal`, {
+          method: "PATCH",
+          body: JSON.stringify({ hidden }),
+        }),
+      onChanged,
+    )
+  const portalWords = doc.portalHiddenAt
+    ? "Oculto en su portal"
+    : doc.imageType === "tomografia"
+      ? "La tomografía no va a su portal"
+      : doc.reportStatus === "pendiente"
+        ? "Se verá en su portal cuando tenga su informe"
+        : "Se ve en su portal"
   const setReport = (reportStatus: string) =>
     runAction(
       () =>
@@ -764,6 +781,24 @@ function DocumentViewer({
                   El informe va como resultado de su orden o en la evolución de la atención.
                 </p>
               )}
+            </div>
+          )}
+          {!doc.retiredAt && (
+            <div>
+              <dt className="text-xs text-muted-foreground">Su portal</dt>
+              <dd className="flex flex-wrap items-center gap-2">
+                {portalWords}
+                {canEdit && doc.imageType !== "tomografia" && (
+                  <Button
+                    size="sm"
+                    variant={doc.portalHiddenAt ? "outline" : "ghost"}
+                    disabled={actionPending}
+                    onClick={() => void setPortalHidden(!doc.portalHiddenAt)}
+                  >
+                    {doc.portalHiddenAt ? "Mostrar en su portal" : "No mostrar en su portal"}
+                  </Button>
+                )}
+              </dd>
             </div>
           )}
           {teeth.length > 0 && (

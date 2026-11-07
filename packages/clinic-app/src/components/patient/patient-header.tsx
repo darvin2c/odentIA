@@ -365,6 +365,17 @@ export function PersonHeader({
                       Su enlace
                     </DropdownMenuItem>
                   ) : null}
+                  {patient && !person.archived && openWide ? (
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setMenuOpen(false)
+                        // La misma sección de Datos, con su estado primero (ADR 0150).
+                        openWide({ id: "portal" })
+                      }}
+                    >
+                      Portal del paciente
+                    </DropdownMenuItem>
+                  ) : null}
                   <DropdownMenuItem
                     onClick={() => {
                       setMenuOpen(false)
