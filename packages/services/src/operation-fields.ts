@@ -199,13 +199,13 @@ export const OPERATIONS = {
     fields: {
       patientId: { kind: "uuid", label: "Paciente", description: "El paciente del presupuesto, de ver_presupuesto.", body: "path", agent: "requires" },
       budgetId: { kind: "uuid", label: "Presupuesto", description: "El presupuesto que responde, de ver_presupuesto.", body: "path", agent: "requires" },
-      optionId: { kind: "uuid", label: "Opción elegida", description: "La opción que eligió, de ver_presupuesto; obligatoria si el presupuesto tiene varias.", body: "optional", nullable: true, agent: "fills" },
+      optionId: { kind: "uuid", label: "Opción elegida", description: "La opción que eligió, de ver_presupuesto. Con varias opciones y sin elegir todavía, va vacía: se responde lo que está en todas y lo de cada opción queda para después o no lo acepta.", body: "optional", nullable: true, agent: "fills" },
       decisions: {
         kind: "decisionList",
         maxItems: 200,
         values: ["aceptado", "pospuesto", "rechazado"],
         label: "Respuesta por tratamiento",
-        description: "Lo que responde por cada tratamiento de la opción elegida, con su id de ver_presupuesto: aceptado, pospuesto (lo deja para después) o rechazado. Lo que ya había decidido antes no cambia.",
+        description: "Lo que responde por cada tratamiento de la opción elegida (sin opción elegida, de cada tratamiento), con su id de ver_presupuesto: aceptado, pospuesto (lo deja para después) o rechazado. Lo de una sola opción se acepta solo eligiendo esa opción. Lo que ya había decidido antes no cambia y puede omitirse.",
         body: "required",
         agent: "requires",
       },

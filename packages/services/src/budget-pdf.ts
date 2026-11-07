@@ -10,6 +10,7 @@
 
 import { canAccess } from "@odentia/auth/permissions"
 import {
+  type BudgetChange,
   budgetAnswerText,
   formatMoney,
   moneyTotalsText,
@@ -264,6 +265,23 @@ function beforeDeciding(kit: DocumentKit, snap: BudgetSnapshot, lines: BudgetPri
     kit.gap(6)
     kit.subheading("Notas", { size: SIZE.dense })
     kit.text(snap.notes, { size: SIZE.dense })
+  }
+}
+
+/** «La corona sube de S/ 900.00 a S/ 1,000.00.» */
+function changeWords(change: BudgetChange, money: Money): string {
+  switch (change.kind) {
+    case "precio": {
+      const verb =
+        change.fromCents != null && change.toCents != null && change.toCents < change.fromCents ? "baja" : "sube"
+      return `${change.title} ${verb} de ${money(change.fromCents, change.currency)} a ${money(change.toCents, change.currency)}.`
+    }
+    case "condiciones":
+      return `${change.title} cambia cómo se cobra.`
+    case "nuevo":
+      return `Se agrega ${change.title}.`
+    case "quitado":
+      return `Se quita ${change.title}.`
   }
 }
 
@@ -932,6 +950,16 @@ export async function renderBudgetPdf(
     2,
     { pad: 7.5 },
   )
+  // Una revisión dice arriba qué cambió: solo eso pide respuesta.
+  if (snap.changes.length > 0) {
+    kit.gap(8)
+    kit.panel({
+      title: "Qué cambió en esta revisión",
+      body: `${snap.changes.map((change) => changeWords(change, money)).join(" ")} Lo demás sigue como lo aceptó.`,
+      thickness: 1,
+      size: SIZE.dense,
+    })
+  }
   const lines =
     snap.options.length > 1 ? snap.options.flatMap((option) => option.lines) : snap.lines
   if (snap.options.length > 1) manyOptions(kit, snap, money)

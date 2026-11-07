@@ -116,12 +116,11 @@ it("traza la propuesta versionada, el representante, las sesiones y la evidencia
     "parcial",
   )
   await f.run((tx) => deliverBudget(tx, ...f.args, revision.id))
-  await f.run((tx) =>
-    decideBudget(tx, ...f.args, revision.id, {
-      decisions: [decisions[0]],
-      decidedByContactId: representative.id,
-    }),
-  )
+  // Lo aceptado no cambió: la revisión lo conserva, con quien decidió, sin preguntar otra vez.
+  expect(await f.run((tx) => getBudgetDetail(tx, "org_a", f.patient.id, revision.id))).toMatchObject({
+    status: "aceptado",
+    decisionContactId: representative.id,
+  })
   expect((await f.run((tx) => getBudgetDetail(tx, "org_a", f.patient.id, budget.id))).status).toBe(
     "sustituido",
   )
