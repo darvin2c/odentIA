@@ -215,6 +215,9 @@ it("comisiones: porcentaje sobre lo cobrado de lo atendido, pago en un paso y aj
     getMonthExpenses(tx, "org_a", { ...period, branchId }, { seesCommissions: true }),
   )
   expect(forAdmin.expenses.filter((e) => e.commission)).toHaveLength(2)
+  // El total del mes separa el pago de comisiones de «Personal», como Reportes.
+  expect(forAdmin.byCategory.find((c) => c.category === "Pago de comisiones")?.cents).toBe(1600)
+  expect(forAdmin.byCategory.find((c) => c.category === "Personal")).toBeUndefined()
   expect(forAdmin.expenses.find((e) => e.id === first.expense!.id)?.commissionPayment).toEqual({
     professionalUserId: f.actor,
     ...period,

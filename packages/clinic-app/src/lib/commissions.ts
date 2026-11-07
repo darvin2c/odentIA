@@ -277,7 +277,7 @@ export function setCommissionRateApi(body: {
 
 /**
  * Registra el pago de lo pendiente del mes en un solo paso: congela los cobros,
- * descuenta lo anulado después de pagado y deja el gasto de Personal en la sede.
+ * descuenta lo anulado después de pagado y deja el pago de comisiones en Gastos, en la sede.
  */
 export function payMonthCommissionApi(
   body: YearMonth & {
