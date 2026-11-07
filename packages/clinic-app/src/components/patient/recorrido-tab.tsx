@@ -662,7 +662,7 @@ export function RecorridoClinicoTab({
           <ControlesPanel
             patientId={patientId}
             itemId={selectedId}
-            encounterId={openEncounterId ?? undefined}
+            encounterId={ownEncounterId ?? undefined}
             items={items}
           />
 
