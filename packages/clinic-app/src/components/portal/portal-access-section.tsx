@@ -420,41 +420,41 @@ function AccessDrawer({
         {mode.kind === "give" ? (
           <p className="rounded-lg bg-muted/60 px-3 py-2 text-sm">{portalSeesText(summary.allowedScope)}</p>
         ) : null}
-          <form.AppField name="delivery">
-            {(field) => (
-              <field.Group legend="¿Cómo le llega?">
-                {(control) => (
-                  <>
-                    <RadioGroup
-                      name={control.name}
-                      aria-invalid={control.invalid || undefined}
-                      aria-describedby={control.describedBy}
-                      value={field.state.value}
-                      onValueChange={(value) => {
-                        field.handleChange(value === "whatsapp" ? "whatsapp" : "qr")
-                        field.handleBlur()
-                      }}
-                    >
-                      <label htmlFor="portal-delivery-qr" className="flex min-h-11 cursor-pointer items-center gap-3 text-sm">
-                        <RadioGroupItem id="portal-delivery-qr" value="qr" />
-                        Está aquí: mostrar QR
-                      </label>
-                      <label htmlFor="portal-delivery-whatsapp" className="flex min-h-11 cursor-pointer items-start gap-3 text-sm">
-                        <RadioGroupItem id="portal-delivery-whatsapp" value="whatsapp" disabled={!whatsappReady} className="mt-0.5" />
-                        <span className="flex flex-col gap-0.5">
-                          Por su WhatsApp
-                          {!whatsappReady ? (
-                            <span className="text-muted-foreground">No sale: no te escribió en las últimas 24 horas. Muéstrale el QR, o pídele que te escriba.</span>
-                          ) : null}
-                        </span>
-                      </label>
-                    </RadioGroup>
-                    <FieldDescription>El código de 6 dígitos se lo dices tú, en persona o por llamada.</FieldDescription>
-                  </>
-                )}
-              </field.Group>
-            )}
-          </form.AppField>
+        <form.AppField name="delivery">
+          {(field) => (
+            <field.Group legend="¿Cómo le llega?">
+              {(control) => (
+                <>
+                  <RadioGroup
+                    name={control.name}
+                    aria-invalid={control.invalid || undefined}
+                    aria-describedby={control.describedBy}
+                    value={field.state.value}
+                    onValueChange={(value) => {
+                      field.handleChange(value === "whatsapp" ? "whatsapp" : "qr")
+                      field.handleBlur()
+                    }}
+                  >
+                    <label htmlFor="portal-delivery-qr" className="flex min-h-11 cursor-pointer items-center gap-3 text-sm">
+                      <RadioGroupItem id="portal-delivery-qr" value="qr" />
+                      Está aquí: mostrar QR
+                    </label>
+                    <label htmlFor="portal-delivery-whatsapp" className="flex min-h-11 cursor-pointer items-start gap-3 text-sm">
+                      <RadioGroupItem id="portal-delivery-whatsapp" value="whatsapp" disabled={!whatsappReady} className="mt-0.5" />
+                      <span className="flex flex-col gap-0.5">
+                        Por su WhatsApp
+                        {!whatsappReady ? (
+                          <span className="text-muted-foreground">No sale: no te escribió en las últimas 24 horas. Muéstrale el QR, o pídele que te escriba.</span>
+                        ) : null}
+                      </span>
+                    </label>
+                  </RadioGroup>
+                  <FieldDescription>El código de 6 dígitos se lo dices tú, en persona o por llamada.</FieldDescription>
+                </>
+              )}
+            </field.Group>
+          )}
+        </form.AppField>
       </div>
     </FormDrawer>
   )

@@ -2133,7 +2133,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "enviar_comprobante",
       description:
-        "Envía aquí el comprobante (el ticket) del último pago de un paciente, cuando la persona lo pide en el chat. Solo de un paciente que el interlocutor puede ver (de ver_contexto_paciente) y de los últimos 30 días. Al cobrar ya le llegó por correo y está en su enlace, en «Tus papeles».",
+        "Envía aquí el comprobante (el ticket) del último pago de un paciente, cuando la persona lo pide en el chat. Solo de un paciente que el interlocutor puede ver (de ver_contexto_paciente) y de los últimos 30 días. Al cobrar ya le llegó por correo y, si tiene acceso, está en su portal.",
       schema: z.object({ patientId: z.string().uuid() }),
     },
   )

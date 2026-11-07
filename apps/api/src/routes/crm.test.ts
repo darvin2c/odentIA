@@ -943,6 +943,8 @@ it("mensajes de WhatsApp: ver es de quien abre Configuración; comprobar, cambia
     ["ver_respuesta", "plan"],
     // «Recibido desde su enlace» lo envía el sistema cuando WhatsApp ya no deja responderle (ADR 0129).
     ["enlace_recibido", "plan"],
+    // «Documento listo» lleva el PDF de un papel a quien no escribió en 24 horas (ADR 0150).
+    ["documento_listo", "plan"],
   ])
   expect((await reception.request(base)).status).toBe(403)
 

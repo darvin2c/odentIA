@@ -107,6 +107,12 @@ function fakeMeta(override?: (call: Call) => { status?: number; json: unknown } 
     if (call.url.includes("fields=quality_rating")) {
       return { json: { id: "PNID", quality_rating: "GREEN", whatsapp_business_manager_messaging_limit: "TIER_2K" } }
     }
+    // La muestra del mensaje con documento (ADR 0150): la app de la clave y la carga reanudable.
+    if (call.url.includes("/app?fields=id")) return { json: { id: "APP-PROPIA" } }
+    // La revisión de la clave de la app propia queda sin comprobar, como sin esa respuesta.
+    if (call.url.includes("/debug_token")) return { json: { data: { is_valid: false } } }
+    if (call.url.includes("/uploads?")) return { json: { id: "upload:SESION" } }
+    if (call.url.includes("/upload:SESION")) return { json: { h: "4::MUESTRA" } }
     if (call.url.includes("/message_templates")) {
       if (call.method === "POST") {
         const body = call.body as { category: string }
@@ -215,6 +221,7 @@ describe("los mensajes vienen escritos y son de la clínica", () => {
       ["su_enlace", "plan", "Su enlace", "en_revision"],
       ["ver_respuesta", "plan", "Ver respuesta", "en_revision"],
       ["enlace_recibido", "plan", "Recibido desde su enlace", "en_revision"],
+      ["documento_listo", "plan", "Documento listo", "en_revision"],
     ])
     const reminder = items[0]!
     expect(reminder).toMatchObject({
@@ -596,7 +603,7 @@ describe("mensajes creados por la clínica", () => {
         { type: "BUTTONS", buttons: [{ type: "QUICK_REPLY", text: "Quiero mi cita" }] },
       ],
     })
-    expect((await messages(c)).map((item) => item.id)).toHaveLength(20)
+    expect((await messages(c)).map((item) => item.id)).toHaveLength(21)
     await expect(create(c, { title: "tu trabajo ya está listo", body: "Otro texto." })).rejects.toMatchObject({
       status: 409,
       message: "Ya hay un mensaje con ese nombre.",
@@ -633,7 +640,7 @@ describe("mensajes creados por la clínica", () => {
     expect(meta.of("DELETE", "/message_templates").map((call) => call.url)).toEqual([
       `https://graph.facebook.com/v25.0/WABA/message_templates?name=${names[0]}`,
     ])
-    expect((await messages(c)).map((item) => item.origin)).toEqual([...Array(14).fill("agente"), "bandeja", "plan", "plan", "plan", "plan"])
+    expect((await messages(c)).map((item) => item.origin)).toEqual([...Array(14).fill("agente"), "bandeja", "plan", "plan", "plan", "plan", "plan"])
     const [row] = await ownerDb.select().from(clinicMessage).where(eq(clinicMessage.id, created.id))
     expect(row?.archivedAt).not.toBeNull()
     // La plantilla deja de servir, pero la fila se conserva: los mensajes que la usaron siguen diciendo cuál fue.
@@ -836,7 +843,7 @@ describe("la conexión de WhatsApp", () => {
       ),
     )
 
-  it("al conectar dice lo que encontró, guarda la salud del número y pide los diecinueve mensajes de una vez", async () => {
+  it("al conectar dice lo que encontró, guarda la salud del número y pide los veinte mensajes de una vez", async () => {
     const { orgId } = await organization()
     const meta = fakeMeta((call) => (call.url.includes("fields=display_phone_number") ? { json: { id: `PNID-${orgId}`, display_phone_number: "+51 999 888 777", verified_name: "Clínica Sonríe" } } : undefined))
     const created = await connect(orgId, meta)
@@ -846,7 +853,7 @@ describe("la conexión de WhatsApp", () => {
       externalId: `PNID-${orgId}`,
       status: "active",
       account: { name: "Clínica Sonríe", number: "+51 999 888 777" },
-      templates: { canManage: true, requested: 19, error: null },
+      templates: { canManage: true, requested: 20, error: null },
       health: { quality: "alta", dailyLimit: 2000, unlimited: false, number: "+51 999 888 777", name: "Clínica Sonríe" },
     })
     expect(created.webhookSecret).toBeTruthy()
@@ -871,7 +878,16 @@ describe("la conexión de WhatsApp", () => {
       "odentia_su_enlace_v1",
       "odentia_ver_respuesta_v1",
       "odentia_enlace_recibido_v1",
+      "odentia_documento_listo_v1",
     ])
+    // El de documentos se pide con su PDF de muestra, subido con la app que dice la clave (app propia).
+    expect(meta.of("POST", "/APP-PROPIA/uploads")).toHaveLength(1)
+    const documentRequest = meta
+      .of("POST", "/message_templates")
+      .find((call) => (call.body as { name: string }).name === "odentia_documento_listo_v1")
+    expect(documentRequest?.body).toMatchObject({
+      components: [{ type: "HEADER", format: "DOCUMENT", example: { header_handle: ["4::MUESTRA"] } }, { type: "BODY" }],
+    })
     const c: Clinic = { orgId, ownerId: `owner-${orgId}`, whatsappId: created.id }
     await whatsappSays(c, "odentia_recordatorio_cita_v2", "aprobada")
     await whatsappSays(c, "odentia_cita_cancelada_v1", "rechazada", "INVALID_FORMAT")
@@ -881,7 +897,7 @@ describe("la conexión de WhatsApp", () => {
       id: created.id,
       webhookVerifiedAt: null,
       health: { quality: "alta", dailyLimit: 2000 },
-      messages: { aprobados: 1, enRevision: 17, rechazados: 1, pausados: 0, retirados: 0, sinPedir: 0 },
+      messages: { aprobados: 1, enRevision: 18, rechazados: 1, pausados: 0, retirados: 0, sinPedir: 0 },
     })
     expect(Date.now() - new Date(overview!.lastInboundAt!).getTime()).toBeLessThan(4 * HOUR)
     expect(JSON.stringify(overview)).not.toContain("clave-1")
@@ -949,12 +965,12 @@ describe("la conexión de WhatsApp", () => {
     expect(created.templates).toEqual({
       canManage: false,
       requested: 0,
-      error: "WhatsApp no aceptó la solicitud de 19 mensajes: WhatsApp no aceptó la solicitud de plantilla: (#200) Permissions error. Dale a la clave el permiso para administrar mensajes (whatsapp_business_management) y vuelve a comprobar.",
+      error: "WhatsApp no aceptó la solicitud de 20 mensajes: WhatsApp no aceptó la solicitud de plantilla: (#200) Permissions error. Dale a la clave el permiso para administrar mensajes (whatsapp_business_management) y vuelve a comprobar.",
     })
     expect(created.templatesError).toBe(created.templates?.error)
     const c: Clinic = { orgId, ownerId: `owner-${orgId}`, whatsappId: created.id }
-    expect((await messages(c)).map((item) => item.current.status)).toEqual(Array(19).fill("sin_pedir"))
-    expect((await run(c, (tx) => listConnectionsOverview(tx, orgId)))[0]?.messages).toMatchObject({ sinPedir: 19, enRevision: 0 })
+    expect((await messages(c)).map((item) => item.current.status)).toEqual(Array(20).fill("sin_pedir"))
+    expect((await run(c, (tx) => listConnectionsOverview(tx, orgId)))[0]?.messages).toMatchObject({ sinPedir: 20, enRevision: 0 })
 
     // Con la clave corregida se piden los que faltaban, sin crear otra conexión.
     const fixed = fakeMeta((call) => (call.url.includes("fields=display_phone_number") ? { json: { id: `PNID-${orgId}`, display_phone_number: "+51 922 333 444", verified_name: "Clínica Sonríe" } } : undefined))
@@ -962,12 +978,12 @@ describe("la conexión de WhatsApp", () => {
     const changed = await run(c, (tx) =>
       changeConnectionCredentials(tx, orgId, created.id, KEY, { config: { accessToken: "clave-2" } }, { fetch: fixed.fetch, webhookBaseUrl: "https://api.clinica.test" }),
     )
-    expect(changed).toMatchObject({ id: created.id, account: { name: "Clínica Sonríe" }, templates: { canManage: true, requested: 19, error: null } })
+    expect(changed).toMatchObject({ id: created.id, account: { name: "Clínica Sonríe" }, templates: { canManage: true, requested: 20, error: null } })
     const after = (await ownerDb.select().from(channelConnection).where(eq(channelConnection.id, created.id)))[0]!
     // Solo cambia la clave: la conexión, su dirección y su clave de verificación siguen siendo las mismas.
     expect(decryptConfig(KEY, after.configEncrypted)).toEqual({ ...WA_CONFIG, accessToken: "clave-2" })
     expect(after).toMatchObject({ id: before.id, webhookSecret: before.webhookSecret, externalId: before.externalId, displayName: before.displayName, status: "active" })
-    expect((await messages(c)).map((item) => item.current.status)).toEqual(Array(19).fill("en_revision"))
+    expect((await messages(c)).map((item) => item.current.status)).toEqual(Array(20).fill("en_revision"))
 
     // La clave de otra cuenta no entra aquí.
     const foreign = fakeMeta((call) => (call.url.includes("fields=display_phone_number") ? { json: { id: "PNID-otra", display_phone_number: "+51 900 000 000" } } : undefined))
