@@ -2784,6 +2784,11 @@ export interface PayMonthCommissionInput {
   notes?: string | null
   /** Importe que la pantalla mostró al confirmar: si ya no es ese, no se paga otra cifra. */
   expectedCents?: number
+  /**
+   * Se pagó con el efectivo de la caja de esa sede: sale de la caja como cualquier
+   * gasto, para que el cierre cuadre. Sin esto queda «fuera de la caja».
+   */
+  fromCash?: boolean
 }
 
 /**
@@ -2905,11 +2910,16 @@ export async function payMonthCommission(
       })
     return { settlement, expense: null }
   }
+  // Como un gasto de la caja (`createExpense`): la abre si hace falta y no la deja en negativo.
+  const shift = input.fromCash
+    ? await ensureOpenShift(tx, orgId, actorUserId, branchRow.id, view.currency)
+    : null
   const [paidExpense] = await tx
     .insert(expense)
     .values({
       organizationId: orgId,
       branchId: branchRow.id,
+      shiftId: shift?.id ?? null,
       concept: `Comisión de ${monthLabel} — ${professionalName}`.slice(0, 500),
       amountCents: view.pendingCents,
       currency: view.currency,
@@ -2920,6 +2930,16 @@ export async function payMonthCommission(
     })
     .returning()
   if (!paidExpense) throw new ServiceError("INTERNAL", 409, "No se pudo registrar el gasto")
+  if (shift)
+    await recordCashEgreso(tx, orgId, actorUserId, shift.id, {
+      kind: "gasto",
+      amountCents: view.pendingCents,
+      currency: view.currency,
+      concept: paidExpense.concept,
+      expenseId: paidExpense.id,
+      amountField: "fromCash",
+    })
+  if (shift) await notifyCash(tx, orgId)
   const [paid] = await tx
     .update(commissionSettlement)
     .set({ expenseId: paidExpense.id, updatedAt: paidAt })

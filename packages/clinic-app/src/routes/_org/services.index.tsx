@@ -100,7 +100,7 @@ import {
   materialsChanged,
   materialsToSave,
 } from "../../lib/materials"
-import { useClinicalProfile, useOrgProfile } from "../../lib/org"
+import { orgTaxesOf, useClinicalProfile, useOrgProfile } from "../../lib/org"
 import { PageDraftGuard } from "../../lib/page-draft-guard"
 import {
   BILLING_MODE_LABELS,
@@ -1686,6 +1686,11 @@ function OfferFields({
   const idPrefix = offer?.id ?? "nueva"
   const currency = useStore(form.store, (state) => state.values.currency)
   const language = displayLanguage(locale)
+  // El precio es lo que paga el paciente, con el impuesto dentro (ADR 0083):
+  // decirlo aquí evita preguntarse si después se suma o se resta.
+  const tax = orgTaxesOf(useOrgProfile().data)?.servicios
+  const priceHelp =
+    tax?.category === "S" ? `Incluye ${tax.label}. Usa 0 si no tiene costo.` : "Usa 0 si no tiene costo."
   return (
     <>
       <form.AppField name="name">
@@ -1752,7 +1757,7 @@ function OfferFields({
             <field.TextField
               id={`${idPrefix}-precio`}
               label={`Precio (${currency})`}
-              description="Usa 0 si no tiene costo."
+              description={priceHelp}
               inputMode="decimal"
               placeholder={formatMoneyInput(0, currency, locale)}
             />
