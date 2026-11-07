@@ -28,12 +28,13 @@ import {
   createConsentDocument,
   createConsentTemplate,
   createFormTemplate,
+  listConsentDocuments,
   listConsentEvents,
   markConsentSentByLink,
   publishConsentTemplate,
   publishFormTemplate,
 } from "./clinical-forms.js"
-import { clinicalFixture } from "./clinical-test-fixture.js"
+import { clinicalFixture, seedDiagnosisCodes } from "./clinical-test-fixture.js"
 import { getPatientHealth } from "./clinical.js"
 import { DocumentKit } from "./document-kit.js"
 import { renderHealthDocumentPdf } from "./health-documents.js"
@@ -46,6 +47,7 @@ import { getWorkspaceHome, type WorkspaceAccess } from "./workspace.js"
 import {
   decidePersonalLinkBudget,
   bookedDataLink,
+  getPersonalLinkConsent,
   getPersonalLinkDataForm,
   getPersonalLinkView,
   personalLinkForEmailToken,
@@ -291,12 +293,34 @@ it("el consentimiento se firma en su enlace con su documento y el profesional lo
     }),
   )
   const template = await f.run((tx) => publishConsentTemplate(tx, ORG, f.actor, draft.id))
-  const consent = await f.run((tx) => createConsentDocument(tx, ORG, f.actor, { templateId: template.id, patientId: lucia.id, procedureRef: "Exodoncia de la pieza 38" }))
+  await seedDiagnosisCodes([{ code: "K02.1", title: "Caries de la dentina" }])
+  const consent = await f.run((tx) =>
+    createConsentDocument(tx, ORG, f.actor, { templateId: template.id, patientId: lucia.id, procedureRef: "Exodoncia de la pieza 38", diagnosisCode: "K02.1" }),
+  )
   const link = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: personId, patientId: lucia.id }, { secretsKey: KEY }))
   // Sin enviarlo a firmar, no aparece en su enlace (solo «Tus mensajes», ADR 0040).
   expect((await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).consents).toEqual([])
   await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, consent.id))
   expect((await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).consents).toEqual([{ id: consent.id, title: "Exodoncia" }])
+  // Lee la misma hoja que el papel: la pieza, el diagnóstico, la declaración que acepta y el pie de firma.
+  const sheet = await f.run((tx) => getPersonalLinkConsent(tx, ORG, link.token, consent.id))
+  expect(sheet).toMatchObject({
+    procedureRef: "Exodoncia de la pieza 38",
+    diagnosis: "CIE-10 MINSA · K02.1 · Caries de la dentina",
+    declaration: expect.stringMatching(/^He leído y comprendido/),
+    signatureWords: "Firma simple · por enlace",
+    signatureNote: expect.stringMatching(/^Firma electrónica simple/),
+    patient: { name: "Lucía Fernández", chartNumber: expect.stringMatching(/^HC-\d{6}$/) },
+    signer: { name: "Lucía Fernández", asRepresentative: false, documentLabel: "DNI" },
+    minor: false,
+  })
+  // El membrete es el del papel.
+  expect(sheet.clinic.name).not.toBe("")
+  // El número de su documento no viaja: lo escribe al firmar.
+  expect(JSON.stringify(sheet)).not.toContain("40000004")
+  // En la clínica, la lista trae la descripción del diagnóstico para la hoja de la tablet.
+  const [listed] = await f.run((tx) => listConsentDocuments(tx, ORG, { patientId: lucia.id }))
+  expect(listed?.diagnosisDescription).toBe("Caries de la dentina")
   // El Resumen distingue «espera su firma» de «por confirmar»: no todo pendiente está sin firmar.
   const pendingInSummary = async () => (await f.run((tx) => getPatientSummary(tx, ORG, lucia.id))).pendingConsents.find((row) => row.id === consent.id)
   expect(await pendingInSummary()).toMatchObject({ personSignedAt: null, linkSentAt: expect.any(Date) })

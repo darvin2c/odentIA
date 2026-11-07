@@ -154,3 +154,58 @@ export async function loadFrozenDocumentClinic(
     timezone: clinic.timezone,
   }
 }
+
+/** El membrete de una hoja en pantalla: el mismo del papel, con el logo por su dirección pública. */
+export interface DocumentLetterhead {
+  name: string
+  /** «Dental Smile S.A.C. · RUC 20601234567»: la razón social solo si no es el nombre. */
+  fiscalLine: string | null
+  logo: string | null
+  /** Con una sola sede, su nombre, dirección y teléfono, como el papel. */
+  branchName: string | null
+  address: string | null
+  phone: string | null
+}
+
+/**
+ * El membrete de la hoja que se firma en pantalla (ADR 0148): los mismos datos que
+ * `loadDocumentClinic` pone en el PDF, sin leer el logo del almacenamiento.
+ */
+export async function loadDocumentLetterhead(tx: Db, orgId: string): Promise<DocumentLetterhead> {
+  const [profile] = await tx
+    .select({
+      tradeName: orgProfile.tradeName,
+      legalName: orgProfile.legalName,
+      fiscalDocType: orgProfile.fiscalDocType,
+      fiscalDocNumber: orgProfile.fiscalDocNumber,
+      fiscalAddress: orgProfile.fiscalAddress,
+    })
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, orgId))
+    .limit(1)
+  const [org] = await tx
+    .select({ name: organization.name, logo: organization.logo })
+    .from(organization)
+    .where(eq(organization.id, orgId))
+    .limit(1)
+  const branches = await tx
+    .select({ name: branch.name, address: branchAddressColumns, phone: branch.phone })
+    .from(branch)
+    .where(and(eq(branch.organizationId, orgId), eq(branch.isActive, true)))
+    .limit(2)
+  const only = branches.length === 1 ? branches[0] : undefined
+  const name = profile?.tradeName || profile?.legalName || org?.name || ""
+  const fiscal = profile?.fiscalDocNumber
+    ? [profile.fiscalDocType, profile.fiscalDocNumber].filter(Boolean).join(" ")
+    : null
+  return {
+    name,
+    fiscalLine:
+      [profile?.legalName && profile.legalName !== name ? profile.legalName : null, fiscal].filter(Boolean).join(" · ") ||
+      null,
+    logo: org?.logo ?? null,
+    branchName: only?.name ?? null,
+    address: (only ? (await branchAddressWriter(tx, orgId))(only.address) : null) ?? profile?.fiscalAddress ?? null,
+    phone: only?.phone ?? null,
+  }
+}

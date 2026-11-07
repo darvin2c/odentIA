@@ -1129,11 +1129,19 @@ async function getOrCreateDirectPlan(
 /**
  * El tratamiento abierto y aceptado del plan con ese servicio, si lo hay. Si
  * existe, registrar el servicio lo ejecuta: no crea otra indicación en el plan
- * (ADR 0100, QA CT: la resina se presupuestaba otra vez).
+ * (ADR 0100, QA CT: la resina se presupuestaba otra vez). Con la pieza dicha,
+ * solo el de esa pieza o el que aún no la tiene: la endodoncia de la 21 no es
+ * una sesión de la que sigue en curso en la 11.
  */
-async function openAcceptedPlanItemFor(tx: Db, orgId: string, patientId: string, serviceId: string): Promise<string | null> {
-  const [row] = await tx
-    .select({ id: treatmentPlanItem.id })
+async function openAcceptedPlanItemFor(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  serviceId: string,
+  siteCode: string | null,
+): Promise<string | null> {
+  const rows = await tx
+    .select({ id: treatmentPlanItem.id, siteCode: treatmentPlanItem.siteCode })
     .from(treatmentPlanItem)
     .where(
       and(
@@ -1148,8 +1156,19 @@ async function openAcceptedPlanItemFor(tx: Db, orgId: string, patientId: string,
       ),
     )
     .orderBy(asc(treatmentPlanItem.id))
-    .limit(1)
+  const row = rows.find((item) => !siteCode || !item.siteCode || item.siteCode === siteCode)
   return row?.id ?? null
+}
+
+/** La pieza (o el sitio) que trae lo pedido, si se dijo; sin ella, ninguna. */
+async function requestedSiteCode(tx: Db, orgId: string, input: AddEncounterProcedureInput): Promise<string | null> {
+  const site = await siteOf(tx, orgId)
+  try {
+    return site.columns(siteInputOf(site, input)).siteCode
+  } catch {
+    // Un sitio mal dicho se rechaza más adelante con su campo; aquí no decide nada.
+    return null
+  }
 }
 
 export async function addEncounterProcedure(
@@ -1166,7 +1185,7 @@ export async function addEncounterProcedure(
   const requestedServiceId = input.serviceId?.trim() ? input.serviceId.trim() : null
   const linkedPlanItemId =
     requestedServiceId && !input.planItemId
-      ? await openAcceptedPlanItemFor(tx, orgId, patientId, requestedServiceId)
+      ? await openAcceptedPlanItemFor(tx, orgId, patientId, requestedServiceId, await requestedSiteCode(tx, orgId, input))
       : null
   const serviceIdParam = linkedPlanItemId ? null : requestedServiceId
   const planItemIdParam = input.planItemId ?? linkedPlanItemId
@@ -1201,8 +1220,12 @@ export async function addEncounterProcedure(
   let planCodings: Array<{ system: string; code: string; version: string; display: string }> = []
   let planPriceCents: number | null = null
   let planCurrency: string | null = null
-  /** Esperaba respuesta y se acepta al hacerlo (`acceptWhenDone`): se cierra como el servicio directo. */
+  /**
+   * Esperaba respuesta y se acepta al hacerlo (`acceptWhenDone`). Con una sola
+   * sesión prevista se cierra como el servicio directo; con más, queda en curso.
+   */
   let acceptedNow = false
+  let acceptedPlannedSessions = 1
   let draftBudgetId: string | null = null
   if (planItemIdParam) {
     const { item: plan, budget } = await lockPlanItemForExecution(
@@ -1229,6 +1252,7 @@ export async function addEncounterProcedure(
         )
       }
       acceptedNow = true
+      acceptedPlannedSessions = plan.plannedSessions
       draftBudgetId = budget?.id ?? null
     }
     // Histórico ambiguo heredado: nunca se factura como múltiples actos ni se
@@ -1388,18 +1412,23 @@ export async function addEncounterProcedure(
         ),
       )
     if (acceptedNow) {
-      // Lo hizo, así que lo aceptó: ya no espera en el borrador y se cierra como el servicio directo.
+      // Lo hizo, así que lo aceptó: ya no espera en el borrador. Con una sesión
+      // prevista se cierra como el servicio directo. Con más (una endodoncia en
+      // dos), queda en curso como cualquier tratamiento aceptado: la sesión
+      // siguiente es del mismo tratamiento, se cobra una vez y se cierra con
+      // «Completar» (QA del 6 nov: se cerraba en la primera y se cobraba otra vez).
       if (draftBudgetId) await removeBudgetItems(tx, orgId, actorUserId, patientId, draftBudgetId, { itemIds: [planItemIdParam] })
       const now = new Date()
+      const done = acceptedPlannedSessions <= 1
       await tx
         .update(treatmentPlanItem)
         .set({
-          status: "realizado",
+          status: done ? "realizado" : "en_curso",
           decisionStatus: "aceptado",
           decisionNote: "Aceptado al hacerlo en la atención",
           decidedAt: now,
           startedAt: now,
-          completedAt: now,
+          completedAt: done ? now : null,
           updatedAt: now,
         })
         .where(and(eq(treatmentPlanItem.id, planItemIdParam), eq(treatmentPlanItem.organizationId, orgId)))
@@ -1407,8 +1436,10 @@ export async function addEncounterProcedure(
         patientId,
         encounterId,
         procedureId: row.id,
+        plannedSessions: acceptedPlannedSessions,
       })
-      await (await productHooks(tx, orgId)).treatmentDone(tx, { orgId, actorUserId, patientId, encounterId, planItemId: planItemIdParam })
+      if (done)
+        await (await productHooks(tx, orgId)).treatmentDone(tx, { orgId, actorUserId, patientId, encounterId, planItemId: planItemIdParam })
     } else if (item && (item.status === "pendiente" || item.status === "programado")) {
       await setPlanItemStatus(tx, orgId, actorUserId, patientId, planItemIdParam, {
         status: "en_curso",

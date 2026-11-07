@@ -469,7 +469,7 @@ export function useDictationSession({
         toast.success(`Entró al plan. Su presupuesto en borrador quedó con ${options === 1 ? "las dos opciones" : "las tres opciones"}.`)
       }
       if (input.item.kind === "procedimiento" && input.item.payload["acceptOnDo"] === true) {
-        toast.success("Quedó hecho y el tratamiento, aceptado. Se cobra al cerrar la atención.")
+        toast.success("Quedó registrado y el tratamiento, aceptado. Se cobra al cerrar la atención.")
       }
       // El material no deja nada a la vista hasta firmar: se dice cuándo sale.
       if (input.item.kind === "material") toast.success("Anotado. Sale de la sede al firmar; lo ves en el cierre.")

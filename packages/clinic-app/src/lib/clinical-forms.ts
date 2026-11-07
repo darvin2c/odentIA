@@ -149,6 +149,8 @@ export interface ConsentDocument {
   diagnosisCode: string | null
   /** Lista del código («ICD-10», «ICD-11»). */
   diagnosisSystem?: string | null
+  /** Su descripción en la lista, para decirlo como el papel. */
+  diagnosisDescription?: string | null
   informedAt: string | null
   informerName: string | null
   informerTitle: string | null
@@ -223,6 +225,27 @@ export interface ClinicalOrder {
 }
 
 const BASE = "/api/clinical-forms"
+
+/** El membrete del papel (ADR 0148): nombre, «razón social · RUC», logo y, con una sola sede, su dirección. */
+export interface ConsentLetterhead {
+  name: string
+  fiscalLine: string | null
+  logo: string | null
+  branchName: string | null
+  address: string | null
+  phone: string | null
+}
+
+/** Lo fijo de la hoja que se firma: el membrete, la declaración que se guarda y la nota del nivel de firma. */
+export interface ConsentSheetFrame {
+  clinic: ConsentLetterhead
+  declaration: string
+  signatureNote: string
+}
+
+export function fetchConsentSheetFrame(): Promise<{ data: ConsentSheetFrame }> {
+  return apiFetch<{ data: ConsentSheetFrame }>(`${BASE}/consent-sheet`)
+}
 
 function toSearch(params: Record<string, string | undefined>): string {
   const search = new URLSearchParams()

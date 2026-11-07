@@ -108,6 +108,8 @@ export function quotableItems(
   return items.filter((item) => {
     if (["realizado", "cancelado", "reemplazado"].includes(item.status)) return false
     if (item.priceCents == null) return false
+    // Aceptado al hacerlo y aún en curso (una endodoncia en dos sesiones): ya está decidido.
+    if (!item.budgetId && item.decision === "aceptado" && item.status === "en_curso") return false
     if (!item.budgetId) return true
     if (item.decision === "rechazado" || item.decision === "no_elegida") return true
     return budgetsById.get(item.budgetId)?.status === "cancelado"

@@ -154,7 +154,7 @@ import {
   verifyDataRequest,
 } from "../data-requests.js"
 import { buildDemo, DEMO_BUILD_STEPS, purgeDemoOrganization } from "../demo-build.js"
-import { seedDemoSignature } from "../demo-signature.js"
+import { demoSignatureStrokes, seedDemoSignature } from "../demo-signature.js"
 import { addEncounterDiagnosis, voidEncounterDiagnosis } from "../encounter-diagnoses.js"
 import {
   addEncounterAddendum,
@@ -4403,7 +4403,7 @@ if (pedroRiosPerson) {
       await signConsentByLink(tx, ORG_A, domainSeed.contactId, signed.id, {
         docNumber: rosaDocument.docNumber ?? "",
         comprehensionConfirmed: true,
-        signatureData: { strokes: [[[90, 580], [240, 340], [360, 620], [520, 380], [680, 600]]] },
+        signatureData: { strokes: demoSignatureStrokes("Rosa Quispe") },
       }, { ip: "190.235.10.20", userAgent: "Mozilla/5.0 (Linux; Android 14) Chrome/128 Mobile" })
     })
   }

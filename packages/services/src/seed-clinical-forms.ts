@@ -3,6 +3,7 @@ import type { Db } from "@odentia/db"
 import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { clinicalFormResponse } from "@odentia/db/schema/clinical-forms"
 import { orgProfile } from "@odentia/db/schema/org"
+import { demoSignatureStrokes } from "./demo-signature.js"
 import { and, eq, ilike } from "drizzle-orm"
 import {
   advanceClinicalOrder,
@@ -256,8 +257,8 @@ export async function seedClinicalForms(
       signerKind: "paciente",
       signerContactId: input.contactId,
       comprehensionConfirmed: true,
-      signatureData: { strokes: [[[80, 600], [200, 380], [320, 640], [460, 360], [600, 620]]] },
-      professionalSignature: { strokes: [[[100, 500], [300, 300], [500, 520], [700, 320]]] },
+      // Un trazo con forma de firma; la del profesional se copia de la que guardó en su perfil (ADR 0131).
+      signatureData: { strokes: demoSignatureStrokes(input.contactId) },
     })
     // Pendiente de firma para la exodoncia planificada: aparece en el Resumen.
     await createConsentDocument(tx, orgId, ownerUserId, {
