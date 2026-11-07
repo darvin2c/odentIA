@@ -154,7 +154,7 @@ export function createCommissionsRoute(deps: Pick<CrmDeps, "db">) {
         month: z.number().int().min(1).max(12),
         branchId: z.uuid("Elige la sede del gasto."),
         notes: z.string().max(2000).nullish(),
-        expectedCents: z.number().int().positive().optional(),
+        expectedCents: z.number().int().nonnegative().optional(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))

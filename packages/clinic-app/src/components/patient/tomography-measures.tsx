@@ -4,6 +4,7 @@ import { X } from "lucide-react"
 import { useId, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { formatDateTime } from "../../lib/clinical-journey"
+import { useMyUserId } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
 import { formatMeasure } from "./tomography-slice"
 
@@ -24,6 +25,8 @@ export interface SavedMeasure {
   value: number
   toothNumber: number | null
   createdAt: string
+  /** Quien la guardó (sin guardar: null). */
+  createdBy?: string | null
   createdByName: string | null
 }
 
@@ -39,6 +42,7 @@ export const VIEW_WORDS: Record<string, string> = {
 
 export function useSavedMeasures(patientId: string, documentId: string, canWrite: boolean) {
   const queryClient = useQueryClient()
+  const myUserId = useMyUserId()
   const key = ["imaging-measurements", patientId, documentId]
   const saved = useQuery({
     queryKey: key,
@@ -47,13 +51,14 @@ export function useSavedMeasures(patientId: string, documentId: string, canWrite
   })
   const [local, setLocal] = useState<SavedMeasure[]>([])
   const [error, setError] = useState<string | null>(null)
-  const keep = async (measure: NewMeasure) => {
+  /** Guarda la medida; true si quedó guardada. */
+  const keep = async (measure: NewMeasure): Promise<boolean> => {
     if (!canWrite) {
       setLocal((prev) => [
         ...prev,
         { ...measure, id: crypto.randomUUID(), createdAt: new Date().toISOString(), createdByName: null },
       ])
-      return
+      return true
     }
     try {
       setError(null)
@@ -62,13 +67,19 @@ export function useSavedMeasures(patientId: string, documentId: string, canWrite
         body: JSON.stringify(measure),
       })
       await queryClient.invalidateQueries({ queryKey: key })
+      return true
     } catch (e) {
       setError(e instanceof ApiError ? (e.shape.message ?? "No se pudo guardar la medida.") : "No se pudo guardar la medida.")
+      return false
     }
   }
+  // La última quitada, para «Deshacer» ahí mismo: el visor es un diálogo y un aviso de fuera no se alcanza.
+  const [removed, setRemoved] = useState<SavedMeasure | null>(null)
   const retire = async (id: string) => {
+    const measure = [...(saved.data?.data ?? []), ...local].find((m) => m.id === id) ?? null
     if (local.some((m) => m.id === id)) {
       setLocal((prev) => prev.filter((m) => m.id !== id))
+      setRemoved(measure)
       return
     }
     try {
@@ -78,11 +89,31 @@ export function useSavedMeasures(patientId: string, documentId: string, canWrite
         body: "{}",
       })
       await queryClient.invalidateQueries({ queryKey: key })
+      setRemoved(measure)
     } catch {
       setError("No se pudo quitar la medida.")
     }
   }
-  return { measures: [...(saved.data?.data ?? []), ...local], keep, retire, error }
+  /**
+   * La vuelve a guardar igual; la quitada queda en el registro con quién y cuándo.
+   * Solo la propia (o una sin guardar): la de un colega volvería con otro autor.
+   */
+  const undo = async () => {
+    if (!removed) return
+    const { kind, view, points, value, toothNumber } = removed
+    if (await keep({ kind, view, points, value, toothNumber })) setRemoved(null)
+  }
+  const canUndo = (measure: SavedMeasure) => !measure.createdBy || measure.createdBy === myUserId
+  return {
+    measures: [...(saved.data?.data ?? []), ...local],
+    keep,
+    retire,
+    error,
+    removed,
+    canUndoRemoved: removed ? canUndo(removed) : false,
+    undo,
+    dismissRemoved: () => setRemoved(null),
+  }
 }
 
 export type SavedMeasures = ReturnType<typeof useSavedMeasures>
@@ -144,6 +175,23 @@ export function MeasureList({
             </li>
           ))}
         </ul>
+      )}
+      {saved.removed && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-900 px-2.5 py-1.5 text-xs text-slate-300">
+          <span role="status" className="min-w-0 flex-1">
+            Quitaste {saved.removed.kind === "angulo" ? "el ángulo" : "la distancia"} de {formatMeasure(saved.removed)}
+            {saved.removed.createdByName && !saved.canUndoRemoved ? ` de ${saved.removed.createdByName}` : ""}.
+          </span>
+          {saved.canUndoRemoved && (
+            // El foco pasa aquí al quitar: la «X» ya no existe.
+            <Button type="button" size="sm" variant="outline" autoFocus onClick={() => void saved.undo()}>
+              Deshacer
+            </Button>
+          )}
+          <Button type="button" size="sm" variant="ghost" onClick={saved.dismissRemoved}>
+            Listo
+          </Button>
+        </div>
       )}
       {saved.error && (
         <p role="alert" className="text-xs text-red-300">

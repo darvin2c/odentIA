@@ -1,5 +1,6 @@
 import { Button, Slider } from "@odentia/ui"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { ChevronDown, ChevronUp } from "lucide-react"
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { API_URL } from "../../lib/auth-client"
@@ -36,7 +37,7 @@ import { useMyUserId } from "../../lib/crm"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import type { PatientDocument } from "../../lib/patients"
 import { MeasureList, type SavedMeasure, type SavedMeasures, type Vec3 } from "./tomography-measures"
-import { formatMeasure, type PlaneMeasure, SliceCanvas, type Tool } from "./tomography-slice"
+import { formatMeasure, MEASURE_KEYS_HINT, type PlaneMeasure, SliceCanvas, type Tool } from "./tomography-slice"
 
 /**
  * «Panorámica y cortes» (tablero 5 del lienzo): la panorámica reconstruida, cinco
@@ -333,7 +334,8 @@ export function PanoramicView({
   const nearest = (p: Point) => {
     if (!control) return null
     let best: number | null = null
-    let bestD = 8 / volume.sx
+    // Un dedo o el cursor agarran el punto a 12 mm: el corte de arriba es chico y los puntos están a unos 25 mm.
+    let bestD = 12 / volume.sx
     control.forEach((c, i) => {
       const d = Math.hypot(c.x - p.x, c.y - p.y)
       if (d < bestD) {
@@ -422,6 +424,8 @@ export function PanoramicView({
     if (at !== null) setIndex(clampIndex(at))
   }
   const panelId = useId()
+  // En el celular, la pieza y las medidas van en una hoja abajo, cerrada al abrir.
+  const [sheetOpen, setSheetOpen] = useState(false)
   // La columna derecha, en el orden del trabajo: ir a la pieza, medir y guardar lo visto.
   const toothSection = teeth.length > 0 && curve.length > 0 && (
     <fieldset className="flex flex-col gap-2">
@@ -520,12 +524,17 @@ export function PanoramicView({
       points.forEach((p, i) => {
         ctx.fillStyle = selected === i ? "#fde68a" : "#22d3ee"
         ctx.beginPath()
-        ctx.arc(p.x, p.y, (adjusting ? 4.5 : 3) * unit, 0, Math.PI * 2)
+        // Al ajustar, cada punto se ve grande y con su número, para elegirlo y arrastrarlo.
+        ctx.arc(p.x, p.y, (adjusting ? 9 : 3) * unit, 0, Math.PI * 2)
         ctx.fill()
         if (adjusting) {
           ctx.fillStyle = "#03252e"
-          ctx.font = `${Math.round(6 * unit)}px system-ui, sans-serif`
-          ctx.fillText(String(i + 1), p.x - 2 * unit, p.y + 2 * unit)
+          ctx.font = `bold ${Math.round(11 * unit)}px system-ui, sans-serif`
+          ctx.textAlign = "center"
+          ctx.textBaseline = "middle"
+          ctx.fillText(String(i + 1), p.x, p.y)
+          ctx.textAlign = "start"
+          ctx.textBaseline = "alphabetic"
         }
       })
     },
@@ -547,6 +556,7 @@ export function PanoramicView({
         {phoneView === "panoramica" ? (
           pano ? (
             <SliceCanvas
+              onEscape={() => onTool("ninguna")}
               className="flex items-center"
               image={pano}
               window={window}
@@ -570,6 +580,7 @@ export function PanoramicView({
           )
         ) : chosen ? (
           <SliceCanvas
+            onEscape={() => onTool("ninguna")}
             className="flex min-h-[55dvh] items-center"
             image={chosen.image}
             window={window}
@@ -611,9 +622,33 @@ export function PanoramicView({
             )}
           </div>
         )}
-        <div className="flex flex-col gap-4 bg-[#0d131b] p-4 text-sm">
-          {toothSection}
-          <MeasureList saved={saved} canWrite={canWrite} viewOnly={viewOnly} note={note} />
+        {/* Una hoja abajo: cerrada dice la pieza y cuántas medidas hay, y no tapa la imagen. */}
+        <div className="sticky bottom-0 z-10 mt-auto border-t border-slate-800 bg-[#0d131b] text-sm">
+          <button
+            type="button"
+            aria-expanded={sheetOpen}
+            aria-controls={`${panelId}-sheet`}
+            onClick={() => setSheetOpen((open) => !open)}
+            className="flex min-h-12 w-full items-center gap-2 px-4 text-left font-medium text-slate-100"
+          >
+            <span className="min-w-0 flex-1 truncate">
+              {[
+                tooth ? `Pieza ${tooth}` : null,
+                saved.measures.length === 1 ? "1 medida" : `${saved.measures.length} medidas`,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+            {sheetOpen ? <ChevronDown aria-hidden="true" className="size-4" /> : <ChevronUp aria-hidden="true" className="size-4" />}
+            <span className="sr-only">{sheetOpen ? "Cerrar" : "Abrir"} la pieza y las medidas</span>
+          </button>
+          {sheetOpen && (
+            // scroll-nativo: la hoja del celular sobre el visor oscuro, desplazable con el dedo y sin barra propia.
+            <div id={`${panelId}-sheet`} className="flex max-h-[50dvh] flex-col gap-4 overflow-y-auto px-4 pb-4">
+              {toothSection}
+              <MeasureList saved={saved} canWrite={canWrite} viewOnly={viewOnly} note={note} />
+            </div>
+          )}
         </div>
       </div>
     )
@@ -626,6 +661,7 @@ export function PanoramicView({
       <div className="flex min-w-0 flex-col gap-px bg-slate-800 lg:min-h-0 lg:flex-1">
         {pano ? (
           <SliceCanvas
+            onEscape={() => onTool("ninguna")}
             className="flex items-center lg:min-h-0 lg:flex-[3]"
             image={pano}
             window={window}
@@ -658,6 +694,7 @@ export function PanoramicView({
               const k = CROSS_OFFSETS[i]!
               return (
                 <SliceCanvas
+                  onEscape={() => onTool("ninguna")}
                   key={k}
                   zoomControls={false}
                   className={k === 0 ? "ring-2 ring-amber-500 ring-inset" : ""}
@@ -695,12 +732,17 @@ export function PanoramicView({
             <output className="min-w-40 font-semibold text-slate-100 tabular-nums">
               {arcPosition}
             </output>
-            <span>Cada corte: 1 mm · Rueda o ↑ ↓ avanzan · Ctrl + rueda acerca</span>
+            <span aria-live="polite">
+              {tool !== "ninguna" && !viewOnly
+                ? MEASURE_KEYS_HINT
+                : "Cada corte: 1 mm · Rueda o ↑ ↓ avanzan · Ctrl + rueda acerca"}
+            </span>
           </div>
         )}
       </div>
       <aside className="flex w-full shrink-0 flex-col gap-px border-slate-800 bg-slate-800 lg:w-80 lg:border-l">
         <SliceCanvas
+          onEscape={() => onTool("ninguna")}
           className="flex items-center"
           image={axial}
           window={window}

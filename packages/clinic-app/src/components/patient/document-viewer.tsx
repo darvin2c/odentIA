@@ -364,7 +364,7 @@ export function DocumentViewerHost({
                 aria-pressed={detailsOpen}
                 onClick={() => setDetailsOpen((open) => !open)}
               >
-                Detalles
+                Informe y datos
               </Button>
             </>
           }
