@@ -3,7 +3,8 @@
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/manrope";
 
-@custom-variant dark (&:is(.dark *));
+/* Dentro de `.theme-light` (una hoja de papel en pantalla) no rige el oscuro. */
+@custom-variant dark (&:is(.dark *):not(:is(.theme-light, .theme-light *)));
 
 @theme inline {
     --font-heading: var(--font-sans);
@@ -83,8 +84,11 @@
  * Tema clínico: primario cian-teal sobre neutros fríos. Los pares de texto y
  * fondo cumplen WCAG 2.2 AA (4,5:1). Un tema de color alternativo solo redefine
  * el bloque «Marca»; superficies, neutros y estados no cambian con él.
+ * `.theme-light` vuelve a este tema dentro de la app en oscuro: lo que se ve como
+ * papel (la hoja del consentimiento) es claro siempre, con sus campos y controles.
  */
-:root {
+:root,
+.theme-light {
     /* Superficies y neutros */
     --canvas: #f6f8fb;
     --background: #ffffff;
@@ -241,7 +245,8 @@
  * los estados y los colores de los gráficos significan lo mismo en las dos
  * marcas. Cada app pone su marca en `<html data-brand>`.
  */
-:root[data-brand="latidia"] {
+:root[data-brand="latidia"],
+:root[data-brand="latidia"] .theme-light {
     --identity-accent: #6d3fc0;
     --primary: #6d3fc0;
     --primary-soft: #ece4fb;
@@ -465,4 +470,9 @@
   }
   .brand-loading-numbers { opacity: 1; }
   .brand-loading-scan { display: none; }
+}
+
+/* El papel en pantalla: los controles nativos (barras, campos) también en claro. */
+.theme-light {
+    color-scheme: light;
 }

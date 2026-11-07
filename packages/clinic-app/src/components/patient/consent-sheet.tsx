@@ -52,7 +52,7 @@ export interface ConsentSheetProps {
  * La hoja del consentimiento en pantalla: lo mismo y en el mismo orden que su PDF
  * (`consent-pdf.ts`), para que quien firma lea lo que queda guardado. En pantalla
  * las firmas van una debajo de otra y el texto se acomoda al ancho; el papel las
- * pone lado a lado y pagina. Sigue el tema; el recuadro de firma es blanco.
+ * pone lado a lado y pagina. Es papel: claro siempre, también con la app en oscuro.
  */
 export function ConsentSheet({
   clinic,
@@ -97,7 +97,8 @@ export function ConsentSheet({
     <article
       aria-labelledby={titleId}
       className={cn(
-        "flex flex-col rounded-sm border bg-card px-5 py-6 text-card-foreground shadow-sm sm:px-10 sm:py-10",
+        // Es el papel: claro siempre, también con la app en oscuro (`theme-light`).
+        "theme-light flex flex-col rounded-sm border bg-card px-5 py-6 text-card-foreground shadow-sm sm:px-10 sm:py-10",
         large ? "text-lg leading-relaxed" : "text-base leading-normal",
         className,
       )}
