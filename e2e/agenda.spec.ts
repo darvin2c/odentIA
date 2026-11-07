@@ -62,8 +62,9 @@ async function prepareAppointment(owner: OwnerFixture): Promise<{
     201,
   )
   const { date, startsAt, endsAt } = limaToday()
-  // Horario explícito del profesional (la reserva estricta lo exige): el día
-  // de hoy en Lima, entero, cubre la cita aunque sea tarde.
+  // Horario explícito del profesional (la reserva estricta lo exige): hoy y mañana en
+  // Lima, enteros. En la última hora del día la cita cruza la medianoche, y el servidor
+  // pide un turno para cada tramo.
   const weekday = new Date(`${date}T17:00:00Z`).getUTCDay()
   await call(
     owner.page,
@@ -73,7 +74,10 @@ async function prepareAppointment(owner: OwnerFixture): Promise<{
     {
       branchId: owner.branchId,
       professionalUserId: owner.user.id,
-      rules: [{ weekday, startMin: 0, endMin: 24 * 60 }],
+      rules: [
+        { weekday, startMin: 0, endMin: 24 * 60 },
+        { weekday: (weekday + 1) % 7, startMin: 0, endMin: 24 * 60 },
+      ],
     },
     200,
   )

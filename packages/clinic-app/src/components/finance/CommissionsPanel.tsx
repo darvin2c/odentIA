@@ -127,6 +127,91 @@ function byAmount(lines: CommissionLine[]): CommissionLine[] {
 }
 
 /** Cobros que cuentan para el mes: los anulados después de pagados ya no. */
+/**
+ * La cuenta de una línea, en una frase: cuándo se cobró, con qué porcentaje y con qué promoción.
+ * Con esto se comprueba cada comisión sin salir de la pantalla.
+ */
+function lineFacts(line: CommissionLine, day: (iso: string) => string, locale: string): string {
+  return [day(line.occurredAt), line.rateBps > 0 ? percentLabel(line.rateBps, locale) : "sin porcentaje", line.promotionName]
+    .filter(Boolean)
+    .join(" · ")
+}
+
+const LIQUIDATION_HOLDER_ID = "liquidacion-para-imprimir"
+
+/**
+ * La liquidación del mes de un profesional, para entregarle (y que haga su recibo): cada cobro con
+ * su fecha, paciente, servicio, lo cobrado, el porcentaje y la comisión, y al pie lo que le
+ * corresponde, lo pagado, lo descontado y lo que falta. Se arma con texto (nunca HTML del dato) y se
+ * imprime como la hoja de un cierre de caja; desde ahí el navegador también la guarda en PDF.
+ */
+function printLiquidation(detail: MonthlyCommissions, name: string, period: YearMonth, locale: string, zone: string): void {
+  document.getElementById(LIQUIDATION_HOLDER_ID)?.remove()
+  document.getElementById(`${LIQUIDATION_HOLDER_ID}-estilo`)?.remove()
+  const plain = (cents: number) => plainAmount(cents, detail.currency, locale)
+  const el = <K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLElementTagNameMap[K] => {
+    const node = document.createElement(tag)
+    if (text !== undefined) node.textContent = text
+    return node
+  }
+  const holder = el("div")
+  holder.id = LIQUIDATION_HOLDER_ID
+  holder.append(el("h1", `Liquidación de comisiones · ${monthLabel(period, locale)}`))
+  holder.append(el("p", name))
+  const table = el("table")
+  const head = el("tr")
+  for (const title of ["Fecha", "Paciente", "Servicio", "Cobrado", "%", "Comisión"]) head.append(el("th", title))
+  table.append(head)
+  for (const line of [...detail.lines].sort((a, b) => a.occurredAt.localeCompare(b.occurredAt))) {
+    const row = el("tr")
+    for (const text of [
+      dayLabel(line.occurredAt, locale, zone, period.year),
+      line.patientName || "Paciente",
+      [line.description, line.promotionName].filter(Boolean).join(" · ") + (line.voidedAfterPaid ? " (anulado después de pagado)" : ""),
+      plain(line.baseCents),
+      line.rateBps > 0 ? percentLabel(line.rateBps, locale) : "—",
+      plain(line.commissionCents),
+    ])
+      row.append(el("td", text))
+    table.append(row)
+  }
+  holder.append(table)
+  const totals = el("dl")
+  for (const [label, cents] of [
+    ["Le corresponde", detail.commissionCents],
+    ["Ya pagado", detail.paidCents],
+    ["Ya descontado", detail.discountedCents],
+    ["Se descuenta en el próximo pago", detail.discountCents],
+    ["Falta pagar", detail.pendingCents],
+  ] as const) {
+    if (cents === 0 && label !== "Le corresponde" && label !== "Falta pagar") continue
+    totals.append(el("dt", label), el("dd", plain(cents)))
+  }
+  holder.append(totals)
+  const style = el("style")
+  style.id = `${LIQUIDATION_HOLDER_ID}-estilo`
+  style.textContent = `
+    #${LIQUIDATION_HOLDER_ID} { display: none; }
+    @media print {
+      body > *:not(#${LIQUIDATION_HOLDER_ID}) { display: none !important; }
+      #${LIQUIDATION_HOLDER_ID} { display: block; font: 11pt system-ui, sans-serif; color: #000; }
+      #${LIQUIDATION_HOLDER_ID} h1 { font-size: 14pt; margin: 0 0 4pt; }
+      #${LIQUIDATION_HOLDER_ID} table { width: 100%; border-collapse: collapse; margin: 8pt 0; }
+      #${LIQUIDATION_HOLDER_ID} th, #${LIQUIDATION_HOLDER_ID} td { border-bottom: 1px solid #000; padding: 2pt 4pt; text-align: left; }
+      #${LIQUIDATION_HOLDER_ID} dl { display: grid; grid-template-columns: auto auto; gap: 2pt 12pt; justify-content: end; }
+      #${LIQUIDATION_HOLDER_ID} dd { margin: 0; text-align: right; font-weight: 600; }
+    }`
+  const cleanup = () => {
+    holder.remove()
+    style.remove()
+    window.removeEventListener("afterprint", cleanup)
+  }
+  window.addEventListener("afterprint", cleanup)
+  document.head.append(style)
+  document.body.append(holder)
+  window.print()
+}
+
 function countedLines(detail: MonthlyCommissions): CommissionLine[] {
   return detail.lines.filter((line) => !line.voidedAfterPaid)
 }
@@ -414,7 +499,8 @@ function ProfessionalDetailBody({
             <span className="text-lg font-semibold tabular-nums">
               {percentLabel(detail.rateBps, locale)}
             </span>{" "}
-            <span className="text-muted-foreground">de lo cobrado</span>
+            {/* Es el de hoy: cada línea dice el suyo, que en lo ya pagado puede ser otro. */}
+            <span className="text-muted-foreground">de lo cobrado, vigente</span>
           </p>
         ) : (
           <p className="text-sm font-medium">Sin porcentaje fijado</p>
@@ -462,13 +548,14 @@ function ProfessionalDetailBody({
                   <TableCell className="py-2 pl-0 whitespace-normal">
                     <span className="font-medium">{line.patientName || "Paciente"}</span>
                     <span className="text-muted-foreground"> · {line.description}</span>
+                    <span className="block text-xs text-muted-foreground">{lineFacts(line, day, locale)}</span>
                     {line.voidedAfterPaid ? (
                       <Badge variant="destructive" className="ml-2">
                         Anulado después de pagado
                       </Badge>
                     ) : line.settled ? (
                       <Badge variant="success" className="ml-2">
-                        {line.paidAt ? `Pagado el ${day(line.paidAt)}` : "Pagado"}
+                        {line.paidAt ? `Liquidado el ${day(line.paidAt)}` : "Liquidado"}
                       </Badge>
                     ) : null}
                   </TableCell>
@@ -594,6 +681,11 @@ function ProfessionalDetailBody({
             <p id={payHintId} className="text-sm text-muted-foreground">
               {payHint}
             </p>
+          ) : null}
+          {detail.lines.length > 0 ? (
+            <Button type="button" variant="outline" className="w-full" onClick={() => printLiquidation(detail, name, period, locale, zone)}>
+              Imprimir la liquidación
+            </Button>
           ) : null}
         </div>
       ) : null}
@@ -1051,6 +1143,11 @@ export function MyCommissionsPanel({
     queryKey: commissionKeys.mine(period),
     queryFn: () => fetchMyCommissions(period),
   })
+  // Sus pagos del mes, también los anulados: el servidor da solo los propios a quien no administra.
+  const myPayments = useQuery({
+    queryKey: [...commissionKeys.mine(period), "pagos"],
+    queryFn: () => fetchCommissionPayments({ ...period, includeVoided: true }),
+  })
   useOrgEvents(COMMISSION_EVENT_KINDS, () => {
     void queryClient.invalidateQueries({ queryKey: commissionKeys.all })
   })
@@ -1085,7 +1182,7 @@ export function MyCommissionsPanel({
       : ""
   const statusNote =
     mine.status === "pagado" && mine.lastPaidAt
-      ? `Pagado el ${dayLabel(mine.lastPaidAt, format, zone, period.year)}.${pendingDiscount}`
+      ? `Liquidado el ${dayLabel(mine.lastPaidAt, format, zone, period.year)}.${pendingDiscount}`
       : mine.status === "por_descontar"
         ? `Lo de este mes se descuenta de comisiones que ya se te pagaron de cobros que después se anularon: ${money(mine.discountCents)}.`
         : mine.status === "por_pagar" && (mine.paidCents > 0 || mine.discountCents > 0)
@@ -1121,6 +1218,23 @@ export function MyCommissionsPanel({
           </span>
         </div>
         {statusNote ? <p className="mt-2 text-sm text-muted-foreground">{statusNote}</p> : null}
+        {(myPayments.data?.data ?? []).length > 0 ? (
+          <ul aria-label="Mis pagos de este mes" className="mt-3 flex flex-col gap-1 border-t pt-3 text-sm">
+            {(myPayments.data?.data ?? []).map((payment) => (
+              <li key={payment.id} className="flex min-w-0 items-baseline justify-between gap-3">
+                <span className={payment.voidedAt ? "text-muted-foreground line-through" : ""}>
+                  {payment.commissionCents === 0
+                    ? `Descuento del ${payment.settledAt ? dayLabel(payment.settledAt, format, zone, period.year) : "mes"}`
+                    : `Pago del ${payment.settledAt ? dayLabel(payment.settledAt, format, zone, period.year) : "mes"}`}
+                  {payment.voidedAt ? `, anulado el ${dayLabel(payment.voidedAt, format, zone, period.year)}` : ""}
+                </span>
+                <span className={`shrink-0 tabular-nums ${payment.voidedAt ? "text-muted-foreground line-through" : "font-medium"}`}>
+                  {plain(payment.commissionCents)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </section>
 
       <section aria-labelledby="mis-comisiones-detalle" className="flex min-w-0 flex-col gap-2">
@@ -1144,6 +1258,9 @@ export function MyCommissionsPanel({
                     <p className="text-sm text-muted-foreground">
                       {line.description} · cobrado {plain(line.baseCents)}
                     </p>
+                    <p className="text-xs text-muted-foreground">
+                      {lineFacts(line, (iso) => dayLabel(iso, format, zone, period.year), format)}
+                    </p>
                     {line.voidedAfterPaid ? (
                       <p className="mt-1 text-sm text-destructive">
                         El cobro se anuló después de pagarte: se descuenta de tu siguiente pago.
@@ -1151,8 +1268,8 @@ export function MyCommissionsPanel({
                     ) : line.settled ? (
                       <p className="mt-1 text-sm text-muted-foreground">
                         {line.paidAt
-                          ? `Pagado el ${dayLabel(line.paidAt, format, zone, period.year)}`
-                          : "Pagado"}
+                          ? `Liquidado el ${dayLabel(line.paidAt, format, zone, period.year)}`
+                          : "Liquidado"}
                       </p>
                     ) : null}
                   </div>
@@ -1212,7 +1329,7 @@ export function MyCommissionsPanel({
                       <span className="font-medium text-foreground">{title}</span>
                       <span className="text-sm text-muted-foreground">
                         {previous.status === "pagado" && previous.lastPaidAt
-                          ? `Pagado el ${dayLabel(previous.lastPaidAt, format, zone, period.year)}`
+                          ? `Liquidado el ${dayLabel(previous.lastPaidAt, format, zone, period.year)}`
                           : commissionStatusLabel(previous.status, previous.baseCents)}
                       </span>
                     </span>

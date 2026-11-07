@@ -3047,6 +3047,26 @@ export async function voidCommissionSettlement(
   if (current.expenseId)
     await voidExpense(tx, orgId, actorUserId, current.expenseId, { reason: input.reason }, { fromCommission: true })
   await audit(tx, orgId, actorUserId, "commission_settlement", settlementId, "finance.commission_payment_voided")
+  // Al profesional se le avisa, como al pagarle: si no, ve su mes «por pagar» otra vez sin saber por qué.
+  const [inTeam] = await tx
+    .select({ id: member.id })
+    .from(member)
+    .where(and(eq(member.organizationId, orgId), eq(member.userId, current.professionalUserId)))
+  if (inTeam && current.periodYear && current.periodMonth) {
+    const { locale } = await getOrgLocale(tx, orgId)
+    const monthLabel = new Intl.DateTimeFormat(locale, { month: "long", year: "numeric", timeZone: "UTC" }).format(
+      new Date(Date.UTC(current.periodYear, current.periodMonth - 1, 15)),
+    )
+    await createWorkspaceNotification(tx, orgId, {
+      userId: current.professionalUserId,
+      dedupeKey: `commission-voided:${settlementId}`,
+      title: current.commissionCents > 0 ? "Se anuló un pago de tu comisión" : "Se anuló un descuento de tu comisión",
+      body: `${monthLabel}: ${formatMoney(current.commissionCents, current.currency, locale)}. Motivo: ${voidReason}`.slice(0, 500),
+      href: `/commissions?year=${current.periodYear}&month=${current.periodMonth}`,
+      permission: "commissions.read",
+      actorUserId,
+    })
+  }
   return row
 }
 
