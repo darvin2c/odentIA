@@ -287,12 +287,15 @@ export async function renderConsentPaperPdf(
   const { document: doc, patient } = data
   const kit = await consentKit(data, clinic)
   const minor = "minor" in patient && patient.minor === true
+  const fingerprint = clinicalProfileFor(data.establishment?.country).consentFingerprint
   const signatures = [
     {
       heading: minor ? "Representante legal" : "Paciente",
       strokes: null,
       lines: [{ text: "Nombre, documento y firma" }, { text: "Fecha y hora" }],
     },
+    // Donde la norma lo pide, la huella de quien no sabe firmar, junto a su firma.
+    ...(fingerprint ? [{ heading: "Huella digital", strokes: null, lines: [{ text: "Si no sabe firmar" }] }] : []),
     {
       heading: "Profesional que informa",
       strokes: null,

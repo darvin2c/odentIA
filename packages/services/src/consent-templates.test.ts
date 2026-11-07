@@ -240,11 +240,17 @@ it("las clínicas de hoy quedan igual que una nueva, sin tocar lo que ya decidie
     createConsentTemplate(tx, orgId, ACTOR, { key: "implante", title: "Mi implante", sections }),
   )
   await run((tx) => setConsentTemplateActive(tx, orgId, ACTOR, own.id, true))
-  const suggested = SUGGESTED_CONSENT_TEMPLATES.find((row) => row.key === "exodoncia")!
-  await run((tx) =>
-    createConsentTemplate(tx, orgId, ACTOR, { key: "exodoncia", title: suggested.title, sections: suggested.sections }),
-  )
   const file = readFileSync(new URL("../../db/drizzle/0028_consentimientos_activos.sql", import.meta.url), "utf8")
+  // El borrador sugerido como era cuando corrió la migración: la biblioteca de hoy puede haber mejorado su texto.
+  const atMigration = file.match(/\('dental', 'exodoncia', \$s\$(.+?)\$s\$, \$s\$(\{.+?\})\$s\$::jsonb/)
+  if (!atMigration?.[1] || !atMigration[2]) throw new Error("La migración 0028 no trae la exodoncia sugerida")
+  await run((tx) =>
+    createConsentTemplate(tx, orgId, ACTOR, {
+      key: "exodoncia",
+      title: atMigration[1] ?? "",
+      sections: JSON.parse(atMigration[2] ?? "{}"),
+    }),
+  )
   await ownerDb.transaction(async (tx) => {
     for (const statement of file.split("--> statement-breakpoint")) await tx.execute(sql.raw(statement))
   })

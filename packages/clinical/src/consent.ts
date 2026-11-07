@@ -145,8 +145,9 @@ export const SUGGESTED_CONSENT_TEMPLATES: readonly SuggestedConsentTemplate[] = 
       risks: [
         "Dolor, inflamación y limitación de la apertura bucal por algunos días",
         "Sangrado, infección o alveolitis (inflamación del alvéolo)",
-        "Alteración de la sensibilidad del labio o la lengua, generalmente temporal",
+        "Alteración de la sensibilidad del labio, el mentón o la lengua, generalmente temporal; en los terceros molares inferiores puede ser permanente, aunque es poco frecuente",
         "Fractura de raíces o de la pieza, comunicación con el seno maxilar en piezas superiores",
+        "Reacción al anestésico local, poco frecuente",
       ],
       alternatives: [
         "Tratamiento conservador de la pieza cuando sea posible (endodoncia, restauración)",

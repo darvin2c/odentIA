@@ -1,6 +1,6 @@
 import { consentSectionsToText, SUGGESTED_CONSENT_TEMPLATES } from "@odentia/clinical"
 import { afterEach, expect, it, vi } from "vitest"
-import { renderConsentPdf, renderConsentPreviewPdf } from "./consent-pdf.js"
+import { renderConsentPaperPdf, renderConsentPdf, renderConsentPreviewPdf } from "./consent-pdf.js"
 import { type DocumentClinic, DocumentKit, documentFormat } from "./document-kit.js"
 
 const clinic = {
@@ -150,4 +150,37 @@ it("lo que se calcula de antemano es lo que de verdad ocupa", async () => {
   const beforeSignatures = kit.y
   kit.penSignatures(list)
   expect(beforeSignatures - kit.y).toBeCloseTo(kit.penSignaturesHeight(list))
+})
+
+it("la hoja para firmar en papel trae el recuadro de la huella de quien no sabe firmar donde la norma lo pide", async () => {
+  const penSignatures = vi.spyOn(DocumentKit.prototype, "penSignatures")
+  const paper = (country: string | null) =>
+    ({
+      document: {
+        status: "pendiente",
+        titleSnapshot: "Exodoncia",
+        procedureRef: null,
+        sectionsSnapshot: base,
+        bodySnapshot: "",
+        diagnosisCode: null,
+        declarationSnapshot: null,
+        informerName: null,
+        informerTitle: null,
+        informerRegistration: null,
+      },
+      patient: { displayName: "Rosa Rojas", docType: "DNI", docNumber: "40000004", patientNumber: 7, minor: false },
+      diagnosisDescription: null,
+      establishment: country ? { country } : null,
+    }) as never
+  await renderConsentPaperPdf(paper("PE"), clinic)
+  expect(penSignatures.mock.lastCall?.[0]?.map((signature) => signature.heading)).toEqual([
+    "Paciente",
+    "Huella digital",
+    "Profesional que informa",
+  ])
+  await renderConsentPaperPdf(paper(null), clinic)
+  expect(penSignatures.mock.lastCall?.[0]?.map((signature) => signature.heading)).toEqual([
+    "Paciente",
+    "Profesional que informa",
+  ])
 })
