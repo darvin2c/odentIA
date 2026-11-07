@@ -181,6 +181,7 @@ function printLiquidation(detail: MonthlyCommissions, name: string, period: Year
   holder.append(table)
   const totals = el("dl")
   for (const [label, cents] of [
+    ...(detail.salary ? ([["Sueldo del mes", detail.salary.cents]] as const) : []),
     ["Le corresponde", detail.commissionCents],
     ["Ya pagado", detail.paidCents],
     ["Ya descontado", detail.discountedCents],
@@ -634,8 +635,20 @@ function ProfessionalDetailBody({
           <dt className="text-muted-foreground">Cobrado de lo que atendió</dt>
           <dd className="tabular-nums">{plain(detail.baseCents)}</dd>
         </div>
+        {detail.salary ? (
+          // El sueldo se paga en Gastos; aquí solo se ve junto a la comisión.
+          <div className="flex items-baseline justify-between gap-3">
+            <dt className="text-muted-foreground">Sueldo del mes</dt>
+            <dd className="tabular-nums">
+              {plain(detail.salary.cents)}
+              <span className="ml-2 text-xs text-muted-foreground">
+                {detail.salary.dueCents > 0 ? "por pagar en Gastos" : detail.salary.paidAt ? `pagado el ${day(detail.salary.paidAt)}` : "pagado"}
+              </span>
+            </dd>
+          </div>
+        ) : null}
         <div className="flex items-baseline justify-between gap-3">
-          <dt className="font-semibold">Le corresponde</dt>
+          <dt className="font-semibold">{detail.salary ? "Comisión" : "Le corresponde"}</dt>
           <dd className="text-xl font-bold tabular-nums">{money(detail.commissionCents)}</dd>
         </div>
         {detail.paidCents > 0 ? (
@@ -1254,8 +1267,26 @@ export function MyCommissionsPanel({
       >
         <p className="text-sm font-medium text-muted-foreground">Me corresponde</p>
         <p className="mt-1 text-3xl leading-tight font-bold tracking-tight tabular-nums">
-          {money(mine.commissionCents)}
+          {money(mine.commissionCents + (mine.salary?.cents ?? 0))}
         </p>
+        {mine.salary ? (
+          // Solo quien tiene un sueldo anotado: sueldo + comisión.
+          <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 text-sm">
+            <dt className="text-muted-foreground">Sueldo</dt>
+            <dd className="tabular-nums">
+              {plain(mine.salary.cents)}
+              <span className="ml-2 text-muted-foreground">
+                {mine.salary.dueCents > 0
+                  ? "por pagar"
+                  : mine.salary.paidAt
+                    ? `pagado el ${dayLabel(mine.salary.paidAt, format, zone, period.year)}`
+                    : "pagado"}
+              </span>
+            </dd>
+            <dt className="text-muted-foreground">Comisión</dt>
+            <dd className="tabular-nums">{plain(mine.commissionCents)}</dd>
+          </dl>
+        ) : null}
         <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
           <StatusBadge status={mine.status} baseCents={mine.baseCents} />
           <span className="text-muted-foreground">

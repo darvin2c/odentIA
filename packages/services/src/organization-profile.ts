@@ -352,6 +352,7 @@ const CURRENCY_COLUMNS = [
   ["cash_shift", "currency"],
   ["expense", "currency"],
   ["expense", "tender_currency"],
+  ["expense_recurring", "currency"],
   ["service_catalog", "currency"],
   ["treatment_plan_item", "currency"],
   ["opportunity", "currency"],
