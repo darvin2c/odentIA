@@ -1,6 +1,6 @@
 /**
  * Los caminos de un presupuesto: «conservar o extraer la 46» se marca donde el
- * odontólogo lo decide, en la atención (ADR 0150). No es otro registro: cada
+ * odontólogo lo decide, en la atención (ADR 0151). No es otro registro: cada
  * camino es una opción del borrador de la persona, como las arma Clío al dictar
  * «resina, o si no corona», y lo común va en todas. Un presupuesto lleva un solo
  * grupo de caminos (hasta tres opciones): con dos piezas dudosas saldrían

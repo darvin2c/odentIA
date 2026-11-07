@@ -2,7 +2,7 @@
 
 Fecha: 2026-11-06 · Estado: aceptada · Precisa a [0028](0028-ventas-que-se-mueven-solas.md)
 
-Precisada por [0150](0150-presupuesto-con-caminos.md): aceptado en parte con algo que espera respuesta, la oportunidad sigue abierta; se decide al final.
+Precisada por [0151](0151-presupuesto-con-caminos.md): aceptado en parte con algo que espera respuesta, la oportunidad sigue abierta; se decide al final.
 
 ## Problema
 

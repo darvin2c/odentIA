@@ -541,7 +541,7 @@ it("presupuestos: reception lee, envía y anota sin cambiar precios; cashier dec
   expect((await buildApp("cashier", CASH).request(listPath)).status).toBe(200)
   expect((await buildApp("cashier", CASH).request(detailPath)).status).toBe(200)
   expect((await buildApp("clinician", DENT1).request(listPath)).status).toBe(200)
-  // Plan de DENT1 (ADR 0150): DENT2 lee el presupuesto de su colega, que es
+  // Plan de DENT1 (ADR 0151): DENT2 lee el presupuesto de su colega, que es
   // contexto de su paciente, pero no lo cambia ni lo envía (`canChange`).
   const dent2List = await buildApp("clinician", DENT2).request(listPath)
   expect(dent2List.status).toBe(200)
