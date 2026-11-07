@@ -65,7 +65,17 @@ export function useSavedMeasures(
   const [error, setError] = useState<string | null>(null)
   /** Guarda la medida; true si quedó guardada. */
   const keep = async (input: NewMeasure): Promise<boolean> => {
-    const measure: NewMeasure = { ...input, seriesInstanceUid: input.seriesInstanceUid ?? series?.shown ?? null }
+    // En la serie mayor no se manda la serie (null = la mayor, como las de antes): así lo que se
+    // guarda en una CBCT de una sola serie es lo mismo de siempre. «Deshacer» trae la suya.
+    const measure: NewMeasure = {
+      ...input,
+      seriesInstanceUid:
+        input.seriesInstanceUid !== undefined
+          ? input.seriesInstanceUid
+          : series && series.shown !== series.main
+            ? series.shown
+            : null,
+    }
     if (!canWrite) {
       setLocal((prev) => [
         ...prev,

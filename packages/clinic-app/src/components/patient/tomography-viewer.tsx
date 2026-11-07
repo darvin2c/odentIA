@@ -342,18 +342,24 @@ export function useCbctVolume(patientId: string, documentId: string, seriesUid: 
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [error, setError] = useState<unknown>(null)
   const [attempt, setAttempt] = useState(0)
+  /** La serie del volumen que se ve: volver a pedir los archivos (URL firmadas nuevas) no la cambia. */
+  const loadedKey = useRef<string | null>(null)
   // `attempt` vuelve a cargar al pedir «Reintentar».
   // biome-ignore lint/correctness/useExhaustiveDependencies: `attempt` es la señal de reintento.
   useEffect(() => {
     if (!shown) return
     const controller = new AbortController()
+    const key = `${documentId}:${shown.uid}`
     // Otra serie es otro volumen: mientras se arma, no se ve la anterior con el nombre de la nueva.
-    setVolume(null)
+    // La misma serie vuelve de la caché sin desmontar el corte, la pieza ni la medida a medias.
+    if (loadedKey.current !== key) setVolume(null)
     setError(null)
     setProgress({ done: 0, total: shown.files.length })
-    loadCbctVolume(`${documentId}:${shown.uid}`, shown.files, { onProgress: setProgress, signal: controller.signal })
+    loadCbctVolume(key, shown.files, { onProgress: setProgress, signal: controller.signal })
       .then((loaded) => {
-        if (!controller.signal.aborted) setVolume(loaded)
+        if (controller.signal.aborted) return
+        loadedKey.current = key
+        setVolume(loaded)
       })
       .catch((e) => {
         if (!controller.signal.aborted) setError(e)
@@ -725,6 +731,9 @@ export function TomographyViewer({
               shown={loaded.shown}
               onChoose={(uid) => {
                 setSeriesUid(uid)
+                // El ajuste fino es de los valores de otra serie; «Deshacer» de una medida, también.
+                if (preset === "mas") setPreset(null)
+                saved.dismissRemoved()
                 setSingle(false)
                 setTool("ninguna")
                 setAdjusting(false)

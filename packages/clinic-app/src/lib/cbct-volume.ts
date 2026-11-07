@@ -235,6 +235,9 @@ export async function loadCbctVolume(
   options: { onProgress?: (progress: LoadProgress) => void; signal?: AbortSignal } = {},
 ): Promise<CbctVolume> {
   if (cached?.key === key) return cached.volume
+  // Otra serie u otra tomografía: la anterior no se queda en memoria mientras se arma esta.
+  cached = null
+  const aborted = () => options.signal?.aborted === true
   const bySeries = new Map<string, VolumeSource[]>()
   for (const source of sources)
     bySeries.set(source.seriesInstanceUid, [...(bySeries.get(source.seriesInstanceUid) ?? []), source])
@@ -299,7 +302,8 @@ export async function loadCbctVolume(
       if (v > max) max = v
     }
     filled++
-    options.onProgress?.({ done: filled, total: nz })
+    // Lo que se dejó de cargar no pisa el avance de lo que se carga ahora.
+    if (!aborted()) options.onProgress?.({ done: filled, total: nz })
   }
 
   const fetchBuffer = async (source: VolumeSource) => {
@@ -312,7 +316,10 @@ export async function loadCbctVolume(
     // Un solo archivo de muchos cuadros (CT mejorado).
     const file = openDicom(await fetchBuffer(series[0]!))
     nz = file.frames
-    for (let frame = 0; frame < file.frames; frame++) await place(file, frame, frame)
+    for (let frame = 0; frame < file.frames; frame++) {
+      if (aborted()) throw new DOMException("Se dejó de cargar", "AbortError")
+      await place(file, frame, frame)
+    }
   } else {
     nz = series.length
     let next = 0
@@ -361,7 +368,7 @@ export async function loadCbctVolume(
     hounsfield,
     fileWindow,
   }
-  cached = { key, volume: result }
+  if (!aborted()) cached = { key, volume: result }
   return result
 }
 

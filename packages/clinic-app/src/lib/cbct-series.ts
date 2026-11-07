@@ -72,8 +72,10 @@ export async function readSeriesInfo(series: StudySeries, signal?: AbortSignal):
   try {
     const ds = dicomParser.parseDicom(bytes, { ...DICOM_PARSE_OPTIONS, untilTag: "x7fe00010" })
     return seriesInfoOf(ds, series.files.length)
-  } catch {
-    return null
+  } catch (error) {
+    // La cabecera no cupo (un CT de varios cuadros): dicom-parser deja lo que alcanzó a leer.
+    const partial = (error as { dataSet?: dicomParser.DataSet } | null)?.dataSet
+    return partial ? seriesInfoOf(partial, series.files.length) : null
   }
 }
 

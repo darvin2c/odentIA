@@ -713,7 +713,11 @@ async function seedDemoTomography(db: Db, storage: Storage, patientId: string): 
   )
   // Miniatura: el corte del medio de la fase venosa con la ventana de partes blandas (40/400 HU).
   // Los archivos son Implicit VR Little Endian, sin comprimir, de 16 bits sin signo.
-  const middle = loaded[0]![Math.floor(venousSlices / 2)]!
+  // Los nombres del ZIP no siguen la altura del corte: se ordena por Image Position (0020,0032).
+  const height = (bytes: Uint8Array) =>
+    dicomParser.parseDicom(bytes, { untilTag: "x7fe00010" }).floatString("x00200032", 2) ?? 0
+  const byHeight = [...loaded[0]!].sort((a, b) => height(a) - height(b))
+  const middle = byHeight[Math.floor(venousSlices / 2)]!
   const ds = dicomParser.parseDicom(middle)
   const pixel = ds.elements.x7fe00010!
   const rows = ds.uint16("x00280010")!
