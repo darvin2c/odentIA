@@ -393,6 +393,13 @@
       "when": 1794026627265,
       "tag": "0055_gastos_que_se_repiten_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1794063048101,
+      "tag": "0056_serie_de_la_medida",
+      "breakpoints": true
     }
   ]
 }

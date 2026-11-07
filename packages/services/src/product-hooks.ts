@@ -344,10 +344,10 @@ export interface ProductHooks {
   /** Los tipos de imagen que se suben (odentIA: los de la boca; latidIA: ecografía, tomografía…). */
   imaging: readonly ImagingType[]
   /**
-   * Si guarda la tomografía como estudio (ADR 0055) y la abre en su visor. odentIA sí; latidIA
-   * todavía no (ADR 0147): su visor es dental (arco, panorámica, piezas).
+   * El tipo de imagen con que guarda la tomografía como estudio (ADR 0055), uno de `imaging`:
+   * odentIA, «tomografia» (CBCT); latidIA, «tomografia_computarizada». null: no la guarda.
    */
-  imagingStudies: boolean
+  imagingStudy: string | null
   /** Los consentimientos que sugiere a la clínica, como borrador (odentIA: anestesia, exodoncia…). */
   consentSuggestions: readonly SuggestedConsentTemplate[]
   /** La «Entrevista de salud»: lo del producto. */
@@ -467,7 +467,7 @@ export const NO_PRODUCT_HOOKS: ProductHooks = {
   site: NO_SITE,
   prescribing: DENTAL_PRESCRIBING,
   imaging: DENTAL_IMAGING_TYPES,
-  imagingStudies: true,
+  imagingStudy: "tomografia",
   consentSuggestions: SUGGESTED_CONSENT_TEMPLATES,
   interview: COMMON_INTERVIEW,
   examination: NO_EXAMINATION,

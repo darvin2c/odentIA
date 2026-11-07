@@ -4924,7 +4924,7 @@ await db.transaction(async (tx) => {
 })
 
 // --- latidIA: el consultorio de la demo médica (issue 229) ---
-await seedMedicalDemo(db, { anaId: ANA_ID, passwordHash })
+await seedMedicalDemo(db, { anaId: ANA_ID, passwordHash, storage })
 
 // --- Resumen ---
 async function summary(orgId: string, label: string): Promise<string> {

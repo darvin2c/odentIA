@@ -1,0 +1,1 @@
+ALTER TABLE "imaging_measurement" ADD COLUMN "series_instance_uid" text;

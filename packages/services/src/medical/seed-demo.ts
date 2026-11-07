@@ -29,7 +29,9 @@ import {
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { saasSubscription } from "@odentia/db/schema/saas-billing"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
+import * as dicomParser from "dicom-parser"
 import { and, eq, inArray } from "drizzle-orm"
+import sharp from "sharp"
 import { upsertAgentConfig } from "../agentConfig.js"
 import { createAppointment, createRoom } from "../appointments.js"
 import { setProfessionalSchedule } from "../availability.js"
@@ -49,6 +51,14 @@ import { seedOperation, seedPromotions } from "../seed-operation.js"
 import { fromTemplates, updateService } from "../service-catalog.js"
 import { ensureClinicConsents } from "../clinical-forms.js"
 import { ensureClinicSpecialties } from "../specialties.js"
+import {
+  markImagingFilesUploaded,
+  pendingImagingFiles,
+  setImagingThumbnail,
+  startImagingStudyUpload,
+} from "../imaging-studies.js"
+import type { Storage } from "../storage.js"
+import { DEMO_CT, demoCtSeries } from "./demo-imaging.js"
 import { MEDICAL_DEMO_KINDS } from "./demo-kinds.js"
 
 export const MEDICAL_DEMO_ORG = "seed-org-consultorio-san-martin"
@@ -72,7 +82,7 @@ function openDay(from: number): number {
 
 export async function seedMedicalDemo(
   db: Db,
-  input: { anaId: string; passwordHash: string },
+  input: { anaId: string; passwordHash: string; storage?: Storage },
 ): Promise<void> {
   const ORG = MEDICAL_DEMO_ORG
   await db.transaction(async (tx) => {
@@ -649,4 +659,80 @@ export async function seedMedicalDemo(
     await seedPromotions(tx, operation)
     await seedOperation(tx, operation)
   })
+
+  if (input.storage) await seedDemoTomography(db, input.storage, luis)
+}
+
+/**
+ * La tomografía de abdomen real (`DEMO_CT`, ADR 0151) en la ficha de Luis, por el
+ * mismo camino que la de un CD: sus tres series, la venosa primero, que es la
+ * que abre el visor. Lleva el nombre que trae el archivo (anonimizado por TCIA);
+ * el aviso de nombre es de la pantalla de subir, no de la ficha.
+ */
+async function seedDemoTomography(db: Db, storage: Storage, patientId: string): Promise<void> {
+  const [topogram, venous, arterial] = DEMO_CT.series
+  const loaded = await Promise.all([venous!, arterial!, topogram!].map((series) => demoCtSeries(series)))
+  if (loaded.some((files) => !files)) return
+  const files = (loaded as Uint8Array[][]).flat().map((bytes) => {
+    const ds = dicomParser.parseDicom(bytes, { untilTag: "x7fe00010" })
+    return {
+      bytes,
+      sopInstanceUid: ds.string("x00080018")!,
+      seriesInstanceUid: ds.string("x0020000e")!,
+      patientName: ds.string("x00100010") ?? null,
+    }
+  })
+  const venousSlices = loaded[0]!.length
+  const started = await startImagingStudyUpload(db, MEDICAL_DEMO_ORG, VELA_ID, patientId, {
+    label: "[DEMO] Tomografía de abdomen con contraste",
+    studyInstanceUid: DEMO_CT.studyUid,
+    dicomPatientName: files[0]?.patientName ?? null,
+    modality: "CT",
+    capturedAt: new Date(Date.now() - 12 * 86_400_000),
+    source: DEMO_CT.credit,
+    sliceCount: venousSlices,
+    voxelMm: 0.86,
+    files: files.map((file) => ({
+      sopInstanceUid: file.sopInstanceUid,
+      seriesInstanceUid: file.seriesInstanceUid,
+      sizeBytes: file.bytes.byteLength,
+    })),
+  })
+  const documentId = started.document.id
+  const pending = await pendingImagingFiles(db, MEDICAL_DEMO_ORG, patientId, documentId)
+  for (const file of pending) {
+    await storage.putAttachmentAt?.(file.storageKey, files[file.index]!.bytes, "application/dicom")
+  }
+  await markImagingFilesUploaded(
+    db,
+    MEDICAL_DEMO_ORG,
+    VELA_ID,
+    patientId,
+    documentId,
+    pending.map((file) => file.index),
+  )
+  // Miniatura: el corte del medio de la fase venosa con la ventana de partes blandas (40/400 HU).
+  // Los archivos son Implicit VR Little Endian, sin comprimir, de 16 bits sin signo.
+  const middle = loaded[0]![Math.floor(venousSlices / 2)]!
+  const ds = dicomParser.parseDicom(middle)
+  const pixel = ds.elements.x7fe00010!
+  const rows = ds.uint16("x00280010")!
+  const cols = ds.uint16("x00280011")!
+  const slope = ds.floatString("x00281053") ?? 1
+  const intercept = ds.floatString("x00281052") ?? 0
+  const view = new DataView(middle.buffer, middle.byteOffset + pixel.dataOffset, rows * cols * 2)
+  const gray = Buffer.alloc(rows * cols)
+  for (let i = 0; i < rows * cols; i++) {
+    const hu = view.getUint16(i * 2, true) * slope + intercept
+    gray[i] = Math.max(0, Math.min(255, Math.round(((hu - (40 - 200)) / 400) * 255)))
+  }
+  const thumb = await sharp(gray, { raw: { width: cols, height: rows, channels: 1 } }).resize(320).webp().toBuffer()
+  const thumbRef = await storage.putPatientDocument({
+    orgId: MEDICAL_DEMO_ORG,
+    patientId,
+    bytes: thumb,
+    contentType: "image/webp",
+    ext: "webp",
+  })
+  await setImagingThumbnail(db, MEDICAL_DEMO_ORG, patientId, documentId, thumbRef.objectKey, { replace: true })
 }

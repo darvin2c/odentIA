@@ -143,7 +143,7 @@ it("cancelar retira la subida a medias con su motivo y deja subirla de nuevo", a
 
 it("valida tope, archivos repetidos y UID de DICOM", async () => {
   const patient = await seed()
-  const tooBig = { ...input(1), files: [{ ...files(1)[0]!, sizeBytes: 1024 ** 3 + 1 }] }
+  const tooBig = { ...input(1), files: [{ ...files(1)[0]!, sizeBytes: 1.5 * 1024 ** 3 + 1 }] }
   await expect(
     withOrgContext(appDb, "org_a", (tx) => startImagingStudyUpload(tx, "org_a", ACTOR, patient.id, tooBig)),
   ).rejects.toMatchObject({ code: "VALIDATION" })
@@ -263,9 +263,22 @@ it("guarda medidas con quién y cuándo, y quitarlas las retira sin borrarlas", 
         addImagingMeasurement(tx, "org_a", ACTOR, patient.id, document.id, { ...measure, toothNumber }),
       ),
     ).rejects.toMatchObject({ code: "VALIDATION" })
+  // Cada serie es otro volumen: la medida queda con la suya, y una serie que no es del estudio no entra.
+  const inSeries = await withOrgContext(appDb, "org_a", (tx) =>
+    addImagingMeasurement(tx, "org_a", ACTOR, patient.id, document.id, { ...measure, seriesInstanceUid: `${STUDY}.2` }),
+  )
+  expect(inSeries).toMatchObject({ seriesInstanceUid: `${STUDY}.2` })
+  expect(primary).toMatchObject({ seriesInstanceUid: null })
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      addImagingMeasurement(tx, "org_a", ACTOR, patient.id, document.id, { ...measure, seriesInstanceUid: "2.25.999" }),
+    ),
+  ).rejects.toMatchObject({ code: "VALIDATION" })
+  const listed = await withOrgContext(appDb, "org_a", (tx) => listImagingMeasurements(tx, "org_a", patient.id, document.id))
+  expect(listed.find((row) => row.id === inSeries.id)?.seriesInstanceUid).toBe(`${STUDY}.2`)
 })
 
-it("latidIA no guarda la tomografía y lo dice, aunque la pida otro cliente que no es la pantalla", async () => {
+it("latidIA guarda la tomografía con su propio tipo, la tomografía computarizada, y la lista como estudio", async () => {
   await seed()
   const medical = randomUUID()
   await insertOrg(ownerDb, medical, medical)
@@ -273,7 +286,14 @@ it("latidIA no guarda la tomografía y lo dice, aunque la pida otro cliente que 
   const patient = await withOrgContext(appDb, medical, (tx) =>
     createPatient(tx, medical, ACTOR, { displayName: "Rosa Quispe" }),
   )
-  await expect(
-    withOrgContext(appDb, medical, (tx) => startImagingStudyUpload(tx, medical, ACTOR, patient.id, input())),
-  ).rejects.toMatchObject({ code: "IMAGING_STUDIES_UNSUPPORTED", status: 400 })
+  const started = await withOrgContext(appDb, medical, (tx) =>
+    startImagingStudyUpload(tx, medical, ACTOR, patient.id, {
+      ...input(),
+      label: "Tomografía computarizada",
+      toothNumbers: null,
+    }),
+  )
+  expect(started.document).toMatchObject({ category: "radiografia", imageType: "tomografia_computarizada" })
+  const listed = await withOrgContext(appDb, medical, (tx) => listPatientDocuments(tx, medical, patient.id))
+  expect(listed.find((doc) => doc.id === started.document.id)?.imaging).toMatchObject({ fileCount: 3 })
 })
