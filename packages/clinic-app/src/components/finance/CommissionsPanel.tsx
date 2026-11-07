@@ -267,7 +267,12 @@ export function CommissionsAdminPanel({
   const queryClient = useQueryClient()
   const canWrite = usePermission("commissions.write")
   // Lo que falta pagar de todos los meses: cada mes se mira solo, y lo de antes no debe perderse.
-  const owedQuery = useQuery({ queryKey: commissionKeys.owed, queryFn: fetchCommissionsOwed })
+  const owedQuery = useQuery({
+    queryKey: commissionKeys.owed,
+    queryFn: fetchCommissionsOwed,
+    enabled: canWrite,
+    staleTime: 60_000,
+  })
   const owed = owedQuery.data?.data ?? null
   const otherMonths = (owed?.months ?? []).filter((item) => compareMonths(item, period) !== 0)
   const members = useOrgMembers()
@@ -335,21 +340,29 @@ export function CommissionsAdminPanel({
           <span>
             Falta pagar en total{" "}
             <span className="font-semibold text-foreground tabular-nums">{formatMoney(owed.owedCents, owed.currency, locale)}</span>
-            . Con cobros sin pagar también en:
+            . Hay cobros sin pagar en:
           </span>
-          {otherMonths.slice(0, 6).map((item) => (
-            <Button
-              key={`${item.year}-${item.month}`}
-              type="button"
-              variant="link"
-              size="sm"
-              className="h-auto px-0"
-              disabled={!onPeriodChange}
-              onClick={() => onPeriodChange?.({ year: item.year, month: item.month })}
-            >
-              {monthLabel(item, locale)} ({plainAmount(item.cents, owed.currency, locale)})
-            </Button>
-          ))}
+          {otherMonths.slice(0, 6).map((item) =>
+            onPeriodChange ? (
+              <Button
+                key={`${item.year}-${item.month}`}
+                type="button"
+                variant="link"
+                size="sm"
+                className="h-auto px-0"
+                onClick={() => onPeriodChange({ year: item.year, month: item.month })}
+              >
+                {monthLabel(item, locale)} ({plainAmount(item.cents, owed.currency, locale)})
+              </Button>
+            ) : (
+              <span key={`${item.year}-${item.month}`}>
+                {monthLabel(item, locale)} ({plainAmount(item.cents, owed.currency, locale)})
+              </span>
+            ),
+          )}
+          {otherMonths.length > 6 ? (
+            <span>y {otherMonths.length - 6 === 1 ? "1 mes más" : `${otherMonths.length - 6} meses más`}</span>
+          ) : null}
         </div>
       ) : null}
 
@@ -1623,11 +1636,12 @@ export function MyCommissionsPanel({
           </span>
         </div>
         {statusNote ? <p className="mt-2 text-sm text-muted-foreground">{statusNote}</p> : null}
-        {mine.attended && mine.attended.unpaidCents > 0 ? (
-          // Lo atendido que aún no se cobra: no se perdió, su comisión llega cuando se cobre.
+        {mine.hasRate && mine.attended && mine.attended.unpaidCents > 0 ? (
+          // Lo atendido que aún no se cobra: no se perdió; comisiona en el mes en que se cobre.
           <p className="mt-2 text-sm text-muted-foreground">
-            Atendiste y aún no se cobra: <span className="font-medium text-foreground tabular-nums">{plain(mine.attended.unpaidCents)}</span>.
-            Tu comisión de eso llega cuando se cobre.
+            De lo que atendiste este mes, aún no se cobra:{" "}
+            <span className="font-medium text-foreground tabular-nums">{plain(mine.attended.unpaidCents)}</span>. Su comisión
+            cuenta en el mes en que se cobre.
           </p>
         ) : null}
         {(myPayments.data?.data ?? []).length > 0 ? (

@@ -12,15 +12,13 @@ import { setCommissionRate } from "./finance.js"
 import { createPaymentMethod } from "./payment-methods.js"
 import { collectCharge, createCharge } from "./payments.js"
 import { commissionsOwedByMonth, myAttendedUnpaid } from "./report-finance.js"
+import { currentMonthIn } from "./report-periods.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
 
-function currentPeriod(): { year: number; month: number } {
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima", year: "numeric", month: "2-digit" }).formatToParts(new Date())
-  const get = (type: string): number => Number(parts.find((p) => p.type === type)?.value ?? 0)
-  return { year: get("year"), month: get("month") }
-}
+// La zona de la clínica de las pruebas (`org_a`, del Perú).
+const currentPeriod = () => currentMonthIn("America/Lima")
 
 it("dice cuánto falta pagar en total y en qué meses, y lo atendido que aún no se cobra", async () => {
   const f = await clinicalFixture()
@@ -50,6 +48,6 @@ it("dice cuánto falta pagar en total y en qué meses, y lo atendido que aún no
   expect((await f.run((tx) => myAttendedUnpaid(tx, "org_a", f.actor, currentPeriod()))).unpaidCents).toBe(20000)
   const owed = await f.run((tx) => commissionsOwedByMonth(tx, "org_a"))
   const month = owed.months.find((item) => item.year === currentPeriod().year && item.month === currentPeriod().month)
-  expect(month?.cents).toBeGreaterThanOrEqual(1000)
-  expect(owed.owedCents).toBeGreaterThanOrEqual(1000)
+  expect(month).toMatchObject({ cents: 1000, professionals: 1 })
+  expect(owed.owedCents).toBe(1000)
 })
