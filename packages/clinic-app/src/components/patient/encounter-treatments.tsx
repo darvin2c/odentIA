@@ -8,6 +8,7 @@
  * de hoy (un procedimiento suyo en esta atención) no se ofrece «Completar»: el
  * botón es «Registrar la sesión», que abre el registro con ese tratamiento puesto.
  */
+import { sessionWords, showsSession } from "@odentia/clinical"
 import { Badge, Button } from "@odentia/ui"
 import { submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
@@ -92,8 +93,7 @@ export function EncounterTreatments({
       <div className="flex flex-col gap-1.5">
         <h3 className="font-heading text-base font-medium">Hecho hoy</h3>
         <p className="text-sm text-muted-foreground">
-          «Registrar la sesión» lo deja en curso; con la sesión de hoy, «Completar» lo cierra. Un
-          servicio directo queda realizado al registrarlo.
+          ¿Hiciste la sesión de hoy? Regístrala. «Completar» solo cuando terminaste el tratamiento.
         </p>
       </div>
 
@@ -110,6 +110,10 @@ export function EncounterTreatments({
               ["pendiente", "programado", "en_curso"].includes(item.status)
             // Completar pide la sesión de hoy; sin ella, se registra primero.
             const hasSession = sessionItemIds.has(item.id)
+            // Mientras falten sesiones previstas, «Completar» no es la acción principal.
+            const planned = item.plannedSessions ?? 1
+            const done = item.sessionsDone ?? 0
+            const session = showsSession(Math.max(done, 1), planned) ? ` · ${sessionWords(Math.max(done, 1), planned)}` : ""
             return (
               <li key={item.id} className="flex flex-col gap-2 py-3">
                 <div className="flex flex-wrap items-center gap-2">
@@ -122,7 +126,7 @@ export function EncounterTreatments({
                     {item.completedAt
                       ? `Completado el ${formatDate(item.completedAt)}`
                       : item.startedAt
-                        ? `En curso desde ${formatDate(item.startedAt)}`
+                        ? `En curso desde ${formatDate(item.startedAt)}${session}`
                         : ""}
                   </span>
                 </div>
@@ -144,6 +148,7 @@ export function EncounterTreatments({
                     <Button
                       type="button"
                       size="sm"
+                      variant={done < planned ? "outline" : "default"}
                       disabled={completingId != null}
                       onClick={() => void complete(item.id)}
                     >

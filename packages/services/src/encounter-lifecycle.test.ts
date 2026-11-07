@@ -264,7 +264,7 @@ it("cerrar exige motivo, diagnóstico, evolución y colegiatura, y firma con su 
     // Sin sede ni servicios con materiales, no anuncia ningún descuento.
     materials: null,
     // Sin tratamientos trabajados hoy, no pregunta «¿Terminaste?».
-    sessions: { finishing: [], continuing: [] },
+    sessions: { finishing: [], continuing: [], notRegistered: [] },
   })
   await expect(f.run((tx) => finalizeEncounter(tx, ...f.args, encounterId))).rejects.toMatchObject({
     code: "CLOSING_INCOMPLETE",

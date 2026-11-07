@@ -35,8 +35,9 @@ export interface ClosingCheck {
    * Lo trabajado hoy de un tratamiento de varias sesiones que sigue abierto:
    * `finishing` llega con esta atención a sus sesiones previstas (el cierre
    * pregunta «¿Terminaste?»); `continuing` queda en curso. `n` cuenta esta.
+   * `notRegistered`: lo que traía la cita y hoy no tiene sesión registrada.
    */
-  sessions?: { finishing: ClosingSession[]; continuing: ClosingSession[] }
+  sessions?: { finishing: ClosingSession[]; continuing: ClosingSession[]; notRegistered?: ClosingSession[] }
 }
 
 /** Un tratamiento trabajado en la atención, con su sesión. */

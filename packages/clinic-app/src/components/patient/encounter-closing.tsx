@@ -172,13 +172,14 @@ function ClosingSessions({
   onAnswer,
   disabled,
 }: {
-  sessions: { finishing: ClosingSession[]; continuing: ClosingSession[] }
+  sessions: { finishing: ClosingSession[]; continuing: ClosingSession[]; notRegistered?: ClosingSession[] }
   labelOf: (session: ClosingSession) => string
   answers: SessionAnswers
   onAnswer: (planItemId: string, answer: "terminar" | "otra" | null) => void
   disabled: boolean
 }): React.JSX.Element | null {
-  if (sessions.finishing.length === 0 && sessions.continuing.length === 0) return null
+  const notRegistered = sessions.notRegistered ?? []
+  if (sessions.finishing.length === 0 && sessions.continuing.length === 0 && notRegistered.length === 0) return null
   const line = (session: ClosingSession) => `${labelOf(session)} · ${sessionWords(session.n, session.m)}`
   return (
     <ul aria-label="Tratamientos de hoy" className="flex flex-col gap-2 rounded-lg border p-3">
@@ -218,6 +219,12 @@ function ClosingSessions({
       {sessions.continuing.map((session) => (
         <li key={session.planItemId} className="text-muted-foreground">
           Sigue en curso: {line(session)}
+        </li>
+      ))}
+      {/* Avisa, no frena: quizá hoy no se pudo hacer. */}
+      {notRegistered.map((session) => (
+        <li key={session.planItemId} className="text-muted-foreground">
+          La cita traía {line(session)} y no registraste su sesión: si la hiciste, regístrala en «Hecho hoy».
         </li>
       ))}
     </ul>

@@ -1764,8 +1764,10 @@ export interface ClosingCheckBase {
    * (nada se termina solo). `finishing`: con esta atención llega a sus sesiones
    * previstas, o las pasa; el cierre pregunta «¿Terminaste?». `continuing`: le
    * faltan sesiones y queda en curso. `n` cuenta esta atención; `m`, las previstas.
+   * `notRegistered`: lo que traía la cita y hoy no tiene sesión registrada; el
+   * cierre lo avisa sin frenar la firma (`n` es la sesión que le tocaba).
    */
-  sessions: { finishing: ClosingSession[]; continuing: ClosingSession[] }
+  sessions: { finishing: ClosingSession[]; continuing: ClosingSession[]; notRegistered: ClosingSession[] }
 }
 
 /** Un tratamiento trabajado en la atención, con su sesión: «Endodoncia · sesión 2 de 2». */
@@ -1784,6 +1786,7 @@ async function closingSessionsOf(
   tx: Db,
   orgId: string,
   encounterId: string,
+  appointmentId: string | null,
 ): Promise<ClosingCheckBase["sessions"]> {
   const rows = await tx.execute<{ id: string; title: string; m: number; done: number }>(sql`
     select worked.id, worked.title, worked.planned_sessions as m,
@@ -1801,7 +1804,23 @@ async function closingSessionsOf(
     const session = { planItemId: row.id, title: row.title, n: Number(row.done), m: Number(row.m) }
     ;(session.n >= session.m ? finishing : continuing).push(session)
   }
-  return { finishing, continuing }
+  // Lo que la cita traía y hoy no se registró: la sesión que le tocaba.
+  const notRegistered: ClosingSession[] = []
+  if (appointmentId) {
+    const carried = await tx.execute<{ id: string; title: string; m: number; done: number }>(sql`
+      select carried.id, carried.title, carried.planned_sessions as m,
+        ${sessionsDoneSql({ id: sql`carried.id`, organizationId: sql`carried.organization_id` })} as done
+      from appointment_plan_item brought
+      join treatment_plan_item carried on carried.organization_id = brought.organization_id and carried.id = brought.plan_item_id
+      where brought.organization_id = ${orgId} and brought.appointment_id = ${appointmentId}
+        and carried.decision_status = 'aceptado' and carried.status in ('pendiente', 'programado', 'en_curso')
+        and not exists (select 1 from encounter_procedure today
+          where today.organization_id = carried.organization_id and today.plan_item_id = carried.id
+            and today.encounter_id = ${encounterId} and today.voided_at is null)
+      order by carried.sort_order, carried.created_at, carried.id`)
+    for (const row of carried) notRegistered.push({ planItemId: row.id, title: row.title, n: Number(row.done) + 1, m: Number(row.m) })
+  }
+  return { finishing, continuing, notRegistered }
 }
 
 const CLOSING_MESSAGES: Record<ClosingRequirement, string> = {
@@ -1852,7 +1871,7 @@ export async function checkEncounterClosing(
     (need) => need.status !== "firmado",
   )
   const materials = await closingMaterialsOf(tx, orgId, row)
-  const sessions = await closingSessionsOf(tx, orgId, row.id)
+  const sessions = await closingSessionsOf(tx, orgId, row.id, row.appointmentId ?? null)
   const product = await (await productHooks(tx, orgId)).closingParts(tx, { orgId, patientId: row.patientId, encounterId: row.id })
   return { ready: missing.length === 0, missing, consents, materials, sessions, ...product }
 }

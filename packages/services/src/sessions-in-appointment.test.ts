@@ -223,6 +223,7 @@ it("D4: el cierre pregunta por lo trabajado hoy; sin elección no cierra nada, �
   expect((await f.run((tx) => getEncounterClosing(tx, ...f.args, f.encounter.id))).sessions).toEqual({
     finishing: [],
     continuing: [{ planItemId: item.id, title: "Tratamiento propio", n: 1, m: 2 }],
+    notRegistered: [],
   })
   // Lo que no se trabajó en esta atención no se responde.
   await expect(
@@ -284,4 +285,26 @@ it("D5: el servicio directo avisa si ya se hizo en esa pieza: en curso se ofrece
   )
   await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: planned.id, acceptWhenDone: true }))
   expect(await earlier(36)).toMatchObject({ planItemId: planned.id, status: "en_curso", n: 2, m: 2 })
+})
+
+it("D4: si la cita traía el tratamiento y no se registró su sesión, el cierre lo avisa sin frenar la firma", async () => {
+  const f = await clinicalFixture()
+  const item = await acceptedTreatment(f, 2)
+  const { book } = await agenda(f)
+  const visit = await book(1, { planItemIds: [item.id] })
+  // La atención abierta de la persona viene de esa cita.
+  await ownerDb.update(encounter).set({ appointmentId: visit.id }).where(eq(encounter.id, f.encounter.id))
+  await f.ready(f.encounter.id)
+  const today = f.encounter.id
+  expect((await f.run((tx) => getEncounterClosing(tx, ...f.args, today))).sessions).toEqual({
+    finishing: [],
+    continuing: [],
+    notRegistered: [{ planItemId: item.id, title: "Tratamiento propio", n: 1, m: 2 }],
+  })
+  // Registrada la sesión, ya no es un aviso: sigue en curso.
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, today, { planItemId: item.id }))
+  expect((await f.run((tx) => getEncounterClosing(tx, ...f.args, today))).sessions).toMatchObject({
+    continuing: [{ planItemId: item.id, n: 1, m: 2 }],
+    notRegistered: [],
+  })
 })

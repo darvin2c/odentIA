@@ -77,7 +77,8 @@ test("sesiones: la reserva lleva la segunda, cada cita dice cuál es y el cierre
   ])
   await grid.getByRole("button", { name: /^Cita de Lucía Quispe/ }).first().click()
   const appointmentDrawer = surface(page, { name: /Lucía Quispe/ }).last()
-  await expect(appointmentDrawer.getByText("Endodoncia unirradicular · sesión 2 de 2")).toBeVisible()
+  // El servicio ya dice qué es: la fila «Sesión» solo dice cuál.
+  await expect(appointmentDrawer.getByText("sesión 2 de 2", { exact: true })).toBeVisible()
   await views("cita-sesion-2")
 
   // 3. Se atiende la cita 1: su atención trae la endodoncia y «Hecho hoy» pide registrar la sesión.
@@ -109,4 +110,21 @@ test("sesiones: la reserva lleva la segunda, cada cita dice cuál es y el cierre
   await expect(page.getByRole("dialog", { name: "Atención finalizada" })).toBeVisible()
   const items = await call<Array<{ id: string; status: string; sessionsDone: number }>>(page, "GET", `${apiPath}/plan`, slug)
   expect(items.find((item) => item.id === ids.itemId)).toMatchObject({ status: "en_curso", sessionsDone: 1 })
+
+  // 4. La cita 2: con su sesión registrada llega a las previstas y el cierre pregunta «¿Terminaste?».
+  const visit2 = await call<{ id: string }>(page, "POST", `${apiPath}/encounters`, slug, { appointmentId: booked[1]!.id, reason: "Sesión 2 de la endodoncia" }, 201)
+  await call(page, "PATCH", `${apiPath}/encounters/${visit2.id}`, slug, { evolution: "Obturación de conductos de la 36." })
+  await call(page, "POST", `${apiPath}/encounters/${visit2.id}/diagnoses`, slug, { diagnosisCode: "K04.0", diagnosisType: "confirmed", toothNumber: 36 }, 201)
+  await call(page, "POST", `${apiPath}/encounters/${visit2.id}/procedures`, slug, { planItemId: ids.itemId }, 201)
+  await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}/encounters/${visit2.id}`))
+  await page.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
+  const signing2 = page.getByRole("dialog", { name: "Finalizar y firmar" })
+  await expect(signing2.getByText("¿Terminaste?", { exact: false })).toBeVisible()
+  await expect(signing2.getByRole("button", { name: "Sí, terminar" })).toHaveAttribute("aria-pressed", "false")
+  await views("cierre-terminaste")
+  await signing2.getByRole("button", { name: "Sí, terminar" }).click()
+  await signing2.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
+  await expect(page.getByRole("dialog", { name: "Atención finalizada" })).toBeVisible()
+  const after = await call<Array<{ id: string; status: string; sessionsDone: number }>>(page, "GET", `${apiPath}/plan`, slug)
+  expect(after.find((item) => item.id === ids.itemId)).toMatchObject({ status: "realizado", sessionsDone: 2 })
 })

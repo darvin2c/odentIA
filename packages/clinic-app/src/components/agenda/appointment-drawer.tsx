@@ -664,7 +664,7 @@ function RealAppointmentDrawer({
               {/* Lo que viene a hacer de un tratamiento de varias sesiones: «Endodoncia · sesión 2 de 2». */}
               {appointment.sessions?.length ? (
                 <DetailField label={appointment.sessions.length === 1 ? "Sesión" : "Sesiones"}>
-                  {appointmentSessionsText(appointment.sessions)}
+                  {appointmentSessionsText(appointment.sessions, appointment.serviceName)}
                 </DetailField>
               ) : null}
               <DetailField label="Profesional">{appointment.professionalName}</DetailField>
