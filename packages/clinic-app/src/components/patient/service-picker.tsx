@@ -61,6 +61,9 @@ export function ServicePicker({
   const [query, setQuery] = useState("")
   const [open, setOpen] = useState(false)
   const [specialty, setSpecialty] = useState<string>(NO_SPECIALTY)
+  // El servicio elegido se recuerda aquí: la búsqueda trae a lo más 30 y, al vaciarse para seguir
+  // eligiendo, lo elegido puede no estar entre ellos (con un tarifario grande no se veía).
+  const [chosen, setChosen] = useState<ServiceCatalogItem | null>(null)
   const canRead = usePermission("clinical.read")
   const canAdmin = usePermission("settings.write")
   const orgLocale = useOrgProfile().data?.locale
@@ -83,7 +86,7 @@ export function ServicePicker({
   const items = useMemo(() => servicesQuery.data?.data ?? [], [servicesQuery.data])
   const total = servicesQuery.data?.total ?? 0
 
-  const selectedItem = items.find((row) => row.id === value) ?? null
+  const selectedItem = items.find((row) => row.id === value) ?? (chosen?.id === value ? chosen : null)
 
   // `onBlur` solo al salir del selector entero, no al pasar de la especialidad al buscador.
   const handleBlur = (event: FocusEvent<HTMLDivElement>) => {
@@ -140,6 +143,7 @@ export function ServicePicker({
           }}
           onValueChange={(item) => {
             if (item) {
+              setChosen(item)
               onChange(item)
               setQuery("")
               setOpen(true)
