@@ -1,38 +1,31 @@
-import { useSyncExternalStore } from "react"
+import { toast } from "@odentia/ui"
 
 /**
- * Una versión nueva desplegada mientras la pestaña seguía abierta. Vite pone la
- * huella de cada archivo en su nombre y el despliegue deja solo los nuevos: lo
- * que baja recién al abrirse (las piezas, el 3D, los lectores de imágenes) ya no
- * existe para la versión vieja. No se recarga sola: cortaría la subida de un CD
- * o borraría lo que alguien está escribiendo. Se avisa una sola vez, con la salida.
+ * Una parte de la app que no bajó: casi siempre, una versión nueva desplegada
+ * con la pestaña abierta (Vite pone la huella de cada archivo en su nombre y el
+ * despliegue deja solo los nuevos), a veces un corte de la conexión. Lo que
+ * baja recién al abrirse (las piezas, el 3D, los lectores de imágenes) no se
+ * encuentra. No se recarga sola: cortaría la subida de un CD o borraría lo que
+ * alguien está escribiendo. Se avisa una vez, con la salida.
  */
 
-const listeners = new Set<() => void>()
-let stale = false
+let warned = false
+
+export const NEW_VERSION_TEXT =
+  "No se pudo cargar una parte de la página: puede haber una versión nueva o se cortó la conexión. Recarga para seguir; lo que ya guardaste no se pierde."
 
 export function markNewVersion(): void {
-  if (stale) return
-  stale = true
-  for (const listener of listeners) listener()
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => listeners.delete(listener)
-}
-
-/** true desde que alguna parte no bajó por una versión nueva. */
-export function useNewVersion(): boolean {
-  return useSyncExternalStore(
-    subscribe,
-    () => stale,
-    () => false,
-  )
+  if (warned || typeof window === "undefined") return
+  warned = true
+  toast(NEW_VERSION_TEXT, {
+    id: "version-nueva",
+    duration: Number.POSITIVE_INFINITY,
+    action: { label: "Recargar", onClick: () => window.location.reload() },
+  })
 }
 
 /**
- * ¿El error es de un archivo de la app que ya no está? Cada navegador lo dice
+ * ¿El error es de un archivo de la app que no bajó? Cada navegador lo dice
  * distinto (Chrome, Safari, Firefox) y Vite agrega el suyo al precargar.
  */
 export function isChunkLoadError(error: unknown): boolean {

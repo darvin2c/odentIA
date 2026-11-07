@@ -22,7 +22,7 @@ import { isImageCategory } from "../../lib/document-list"
 import { activeOrgLocale } from "../../lib/locale"
 import type { PatientDocument } from "../../lib/patients"
 import { ChoiceButtons } from "../choice-buttons"
-import { formatTakenAt, imageTypeLabel, takenAt } from "./document-labels"
+import { formatTakenAt, imageTypeLabel, storesTomography, takenAt } from "./document-labels"
 import { uploadPatientFile } from "../../lib/encounter-documents"
 import { appWords } from "../../lib/product-words"
 import { DiagnosisSearch } from "./diagnosis-search"
@@ -168,7 +168,15 @@ export function OrderResultDrawer({
     },
   })
   const surface = useFormSurface(form, {
-    fieldMap: { resultDocumentId: "documentId", resultText: "text" },
+    // El rechazo del documento va al campo que se ve: la imagen de la ficha o el archivo nuevo.
+    fieldMap: (key) =>
+      key === "resultDocumentId"
+        ? form.getFieldValue("source") === "ficha"
+          ? "documentId"
+          : "file"
+        : key === "resultText"
+          ? "text"
+          : undefined,
   })
   const source = useStore(form.store, (state) => state.values.source)
   // Sin imágenes en la ficha, la orden de imagen abre directo en «Archivo nuevo».
@@ -215,14 +223,27 @@ export function OrderResultDrawer({
             {(field) => (
               <field.Control
                 label="Imagen de la ficha"
-                description="La tomografía o radiografía que ya se subió. Queda unida a esta orden, sin copiarla."
+                description={
+                  storesTomography()
+                    ? "La tomografía o radiografía que ya se subió. Queda unida a esta orden, sin copiarla."
+                    : "La imagen que ya se subió. Queda unida a esta orden, sin copiarla."
+                }
               >
                 {(control) =>
                   documents.isPending ? (
                     <p className="text-sm text-muted-foreground">Buscando las imágenes de la ficha…</p>
+                  ) : documents.isError ? (
+                    <div role="alert" className="flex flex-wrap items-center gap-2 text-sm">
+                      No se pudieron leer las imágenes de la ficha.
+                      <Button type="button" size="sm" variant="outline" onClick={() => void documents.refetch()}>
+                        Reintentar
+                      </Button>
+                    </div>
                   ) : empty ? (
                     <p className="text-sm text-muted-foreground">
-                      Esta ficha todavía no tiene imágenes. Elige «Archivo nuevo», o sube la tomografía en Documentos y vuelve aquí.
+                      {storesTomography()
+                        ? "Esta ficha todavía no tiene imágenes. Elige «Archivo nuevo», o sube la tomografía en Documentos y vuelve aquí."
+                        : "Esta ficha todavía no tiene imágenes. Elige «Archivo nuevo» para subir el resultado."}
                     </p>
                   ) : (
                     <RadioGroup
@@ -260,9 +281,11 @@ export function OrderResultDrawer({
               <field.Control
                 label="Archivo del resultado"
                 description={
-                  fromRecord
-                    ? "Una imagen, un PDF o el archivo DICOM de una radiografía. Queda en Documentos, unido a esta orden. Una tomografía (la carpeta del CD) se sube en Documentos y después se elige en «Ya está en la ficha»."
-                    : "Queda en Documentos, unido a esta orden."
+                  !fromRecord
+                    ? "Queda en Documentos, unido a esta orden."
+                    : storesTomography()
+                      ? "Una imagen, un PDF o el archivo DICOM de una radiografía. Queda en Documentos, unido a esta orden. Una tomografía (la carpeta del CD) se sube en Documentos y después se elige en «Ya está en la ficha»."
+                      : "Una imagen, un PDF o el archivo DICOM de una radiografía. Queda en Documentos, unido a esta orden. De una tomografía, sube su informe en PDF."
                 }
               >
                 {(control) => (

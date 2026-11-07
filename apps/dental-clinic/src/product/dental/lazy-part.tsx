@@ -6,7 +6,7 @@ function PartFailed() {
   return (
     <ErrorState
       title="No se pudo abrir esta parte"
-      message="Puede que haya una versión nueva. Recarga la página para abrirla: lo que ya guardaste no se pierde."
+      message="Puede haber una versión nueva o se cortó la conexión. Recarga la página para abrirla: lo que ya guardaste no se pierde."
       retryLabel="Recargar"
       onRetry={() => window.location.reload()}
     />

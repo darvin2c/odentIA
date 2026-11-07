@@ -77,6 +77,11 @@ describe("visor DICOM", () => {
     expect(raw.window).toEqual({ center: 1400, width: 2200 })
     const hu = await decodeDicom(arrayBuffer(slice(true)))
     expect(Array.from(hu.values ?? [])).toEqual([-700, 1500])
+    // Rescale Type (0028,1054) «US» solo cuando no son unidades Hounsfield.
+    const header = (bytes: Uint8Array) => new TextDecoder("latin1").decode(bytes)
+    const tag = "\x28\x00\x54\x10LO"
+    expect(header(slice(false))).toContain(`${tag}\x02\x00US`)
+    expect(header(slice(true))).not.toContain(tag)
   })
   it("descarta los bits que quedan fuera de Bits Stored", async () => {
     const pixels = new Uint16Array([0xf00f, 4095])

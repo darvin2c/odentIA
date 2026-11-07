@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+
+vi.mock("@odentia/ui", () => ({ toast: vi.fn() }))
 import { isChunkLoadError } from "./new-version"
 
 describe("versión nueva", () => {

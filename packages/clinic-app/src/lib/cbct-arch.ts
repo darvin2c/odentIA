@@ -117,7 +117,17 @@ export function occlusalSample(samples: readonly Int16Array[]): { index: number;
  * proyecta su máximo y ajusta una parábola a lo brillante, dos veces para
  * descartar lo que queda lejos. Devuelve null si no hay un arco claro.
  */
+const proposals = new WeakMap<CbctVolume, ArchProposal | null>()
+
 export function detectArch(volume: CbctVolume): ArchProposal | null {
+  // Recorre el volumen entero: «Panorámica» y «Cortes» lo piden al montarse, una vez por volumen.
+  if (proposals.has(volume)) return proposals.get(volume) ?? null
+  const proposal = findArch(volume)
+  proposals.set(volume, proposal)
+  return proposal
+}
+
+function findArch(volume: CbctVolume): ArchProposal | null {
   const { nx, ny, nz, data } = volume
   const threshold = enamelThreshold(volume.presets)
   const plane = nx * ny

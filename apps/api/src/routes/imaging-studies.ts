@@ -72,7 +72,8 @@ const measurementInput = z
   })
   .strict()
 const indexesInput = z.object({ indexes: z.array(z.number().int().min(0)).min(1).max(BATCH) }).strict()
-const mm = z.number().finite().gt(-2000).lt(2000)
+// mm dentro del volumen: nunca negativos, y una tomografía no llega a un metro.
+const mm = z.number().finite().min(0).max(1000)
 const archInput = z
   .object({
     arch: z.object({ points: z.array(z.tuple([mm, mm])).length(5), z: mm }).strict().nullable(),

@@ -337,7 +337,7 @@ export function useCbctVolume(patientId: string, documentId: string) {
         if (!controller.signal.aborted) setError(e)
       })
     return () => controller.abort()
-  }, [files.data, documentId, attempt])
+  }, [files.data?.data.files, documentId, attempt])
   return {
     files,
     volume,

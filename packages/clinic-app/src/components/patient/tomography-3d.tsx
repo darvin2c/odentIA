@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState } from "react"
 import { cbctNifti } from "../../lib/cbct-nifti"
 import type { CbctVolume, WindowLevel } from "../../lib/cbct-volume"
 import { sliderValue } from "../../lib/view-transform"
-import { isChunkLoadError, markNewVersion } from "../../lib/new-version"
+import { isChunkLoadError, markNewVersion, NEW_VERSION_TEXT } from "../../lib/new-version"
 
 /**
  * La tomografía en 3D, solo para mostrar (ADR 0147): se gira con el dedo o el
@@ -77,7 +77,7 @@ export function Tomography3D({
   const id = useId()
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const nvRef = useRef<NiivueInstance | null>(null)
-  const [state, setState] = useState<"cargando" | "listo" | "sin-3d" | "error">(() =>
+  const [state, setState] = useState<"cargando" | "listo" | "sin-3d" | "error" | "sin-cargar">(() =>
     canRender3d() ? "cargando" : "sin-3d",
   )
   const [cut, setCut] = useState(0)
@@ -113,9 +113,11 @@ export function Tomography3D({
       await nv.setVolumeRenderIllumination(0.4).catch(() => {})
       if (alive) setState("listo")
     })().catch((error: unknown) => {
-      // El 3D baja al abrirse: con una versión nueva desplegada, lo dice el aviso de la app.
-      if (isChunkLoadError(error)) markNewVersion()
-      if (alive) setState("error")
+      // El 3D baja al abrirse: si no bajó (versión nueva o sin conexión), se dice con la salida ahí mismo,
+      // porque el aviso general queda detrás del visor.
+      const chunk = isChunkLoadError(error)
+      if (chunk) markNewVersion()
+      if (alive) setState(chunk ? "sin-cargar" : "error")
     })
     return () => {
       alive = false
@@ -169,6 +171,13 @@ export function Tomography3D({
         <p role="status" className="m-auto max-w-xs p-6 text-center text-sm text-slate-300">
           No se pudo armar el 3D; los cortes siguen igual.
         </p>
+      ) : state === "sin-cargar" ? (
+        <div role="status" className="m-auto flex max-w-xs flex-col items-center gap-3 p-6 text-center text-sm text-slate-300">
+          {NEW_VERSION_TEXT}
+          <Button type="button" size="sm" variant="outline" onClick={() => globalThis.location.reload()}>
+            Recargar
+          </Button>
+        </div>
       ) : (
         <>
           <div className="relative min-h-48 flex-1 touch-none">

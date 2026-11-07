@@ -242,6 +242,7 @@ it("quien lee la ficha la abre y la descarga como ZIP con los archivos tal como 
     })
   const arch = { points: [[10, 40], [25, 20], [40, 12], [55, 20], [70, 40]], z: 30 }
   expect((await put(professional, { arch: { points: [[1, 2]], z: 3 } })).status).toBe(400)
+  expect((await put(professional, { arch: { ...arch, z: -1 } })).status).toBe(400)
   const savedArch = await put(professional, { arch })
   expect(savedArch.status).toBe(200)
   expect(((await savedArch.json()) as { data: { arch: unknown; updatedAt: string | null } }).data).toMatchObject({ arch })

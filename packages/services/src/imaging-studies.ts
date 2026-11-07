@@ -510,7 +510,8 @@ export async function setImagingStudyArch(
   if (retiredAt) throw new ServiceError("DOCUMENT_RETIRED", 409, "La tomografía está retirada")
   if (!study.completedAt)
     throw new ServiceError("IMAGING_UPLOAD_PENDING", 409, "La tomografía aún no termina de subirse")
-  const valid = (v: unknown) => typeof v === "number" && Number.isFinite(v) && Math.abs(v) < 2000
+  // mm dentro del volumen: nunca negativos, y una tomografía no llega a un metro.
+  const valid = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1000
   if (
     arch !== null &&
     (!Array.isArray(arch.points) ||

@@ -29,7 +29,9 @@ import {
   windowToRgba,
 } from "../../lib/cbct-volume"
 import { orgSlugFromHostname, requestHostname } from "../../lib/host"
+import { dayKey } from "../../lib/booking-days"
 import { formatDate } from "../../lib/clinical-journey"
+import { formatTimeShortLocale } from "../../lib/finance-collect"
 import { useMyUserId } from "../../lib/crm"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import type { PatientDocument } from "../../lib/patients"
@@ -110,20 +112,31 @@ export interface SavedArch {
  * El arco: el guardado con la tomografía, el que propone el visor o el marcado
  * a mano (cinco puntos sobre el corte desde arriba).
  */
+/**
+ * El arco guardado en vóxeles, si cabe en el volumen: uno que sale de él (otro
+ * estudio, un valor absurdo) se descarta y vale el que propone el visor.
+ */
+function savedControl(volume: CbctVolume, saved: SavedArch["arch"]): Point[] | null {
+  if (!saved || saved.points.length !== 5) return null
+  const inside = saved.points.every(
+    ([x, y]) => x >= 0 && y >= 0 && x <= volume.nx * volume.sx && y <= volume.ny * volume.sy,
+  )
+  return inside ? saved.points.map(([x, y]) => ({ x: x / volume.sx, y: y / volume.sy })) : null
+}
+
 function useArch(volume: CbctVolume, saved: SavedArch["arch"]) {
   const proposal = useMemo(() => detectArch(volume), [volume])
-  const [control, setControl] = useState<Point[] | null>(
-    saved ? saved.points.map(([x, y]) => ({ x: x / volume.sx, y: y / volume.sy })) : (proposal?.control ?? null),
-  )
+  const stored = useMemo(() => savedControl(volume, saved), [volume, saved])
+  const [control, setControl] = useState<Point[] | null>(stored ?? proposal?.control ?? null)
   const [axialZ, setAxialZ] = useState(
-    saved ? Math.round(saved.z / volume.sz) : (proposal?.z ?? Math.floor(volume.nz / 2)),
+    stored && saved ? Math.max(0, Math.min(volume.nz - 1, Math.round(saved.z / volume.sz))) : (proposal?.z ?? Math.floor(volume.nz / 2)),
   )
   // El arco llega hasta el último esmalte; se prolonga hacia la rama para ver las terceras molares.
   const curve = useMemo(
     () => (control && control.length >= 5 ? sampleCurve(volume, control, undefined, ARCH_BEYOND_MM) : []),
     [volume, control],
   )
-  return { proposal, control, setControl, axialZ, setAxialZ, curve }
+  return { proposal, stored, control, setControl, axialZ, setAxialZ, curve }
 }
 
 /** Pinta una imagen de plano en un lienzo fuera de pantalla (para «Guardar vista»). */
@@ -173,12 +186,11 @@ export function PanoramicView({
   phoneView?: "panoramica" | "corte"
 }) {
   const queryClient = useQueryClient()
-  const { proposal, control, setControl, axialZ, setAxialZ, curve } = useArch(volume, savedArch?.arch ?? null)
-  // El arco que vale al terminar o cancelar el ajuste: el guardado o el propuesto.
-  const [archState, setArchState] = useState<{ baseline: Point[] | null; info: SavedArch | null }>(() => ({
-    baseline: control,
-    info: savedArch?.arch ? savedArch : null,
-  }))
+  const { proposal, stored, control, setControl, axialZ, setAxialZ, curve } = useArch(volume, savedArch?.arch ?? null)
+  // El arco que vale al terminar o cancelar el ajuste: el guardado (en la caché de
+  // los archivos, que comparte quien vuelve a abrir la vista) o el propuesto.
+  const baseline = stored ?? proposal?.control ?? null
+  const archInfo = stored ? savedArch : null
   const [archMessage, setArchMessage] = useState<string | null>(null)
   const saveArch = async (next: Point[] | null) => {
     if (!canWrite || viewOnly) return
@@ -191,11 +203,26 @@ export function PanoramicView({
             : null,
         }),
       })
-      setArchState({ baseline: next ?? proposal?.control ?? null, info: data.arch ? data : null })
+      // Solo el arco cambia: la lista de archivos sigue siendo la misma y el volumen no se vuelve a armar.
+      queryClient.setQueryData<{ data: { arch?: SavedArch } }>(["imaging-study-files", patientId, doc.id], (old) =>
+        old ? { ...old, data: { ...old.data, arch: data } } : old,
+      )
       setArchMessage(next ? "Arco guardado con la tomografía." : "Vuelve el arco que propone el visor.")
     } catch {
       setArchMessage("No se pudo guardar el arco. Vuelve a intentarlo.")
     }
+  }
+  // Salir del ajuste sin «Terminar» (otra herramienta, otra vista) lo deshace: lo que se ve es lo guardado.
+  const finishing = useRef(false)
+  const wasAdjusting = useRef(adjusting)
+  useEffect(() => {
+    if (wasAdjusting.current && !adjusting && !finishing.current) setControl(baseline)
+    wasAdjusting.current = adjusting
+    finishing.current = false
+  }, [adjusting, baseline, setControl])
+  const finishAdjust = () => {
+    finishing.current = true
+    onAdjustDone()
   }
   const occlusalZ = proposal?.z ?? axialZ
   const pano = useMemo(
@@ -210,14 +237,13 @@ export function PanoramicView({
   // La pieza que se nombra al medir es de la dentición de la pieza elegida: un niño da «55».
   const dentition = tooth ? dentitionOf(tooth) : "permanent"
   const [index, setIndex] = useState(0)
-  // La pieza pedida que no cae sobre el arco: se dice en vez de marcarla como elegida.
-  const [missing, setMissing] = useState<number | null>(null)
+  // La pieza pedida que no cae sobre el arco (tampoco tras ajustarlo): se dice en vez de marcarla como elegida.
+  const missing = tooth !== null && curve.length > 0 && toothIndex(curve, tooth) === null ? tooth : null
   const placed = useRef(false)
   useEffect(() => {
     if (!curve.length || placed.current) return
     placed.current = true
     const at = tooth ? toothIndex(curve, tooth) : null
-    if (tooth && at === null) setMissing(tooth)
     setIndex(at ?? Math.floor(curve.length / 2))
   }, [curve, tooth])
   const clampIndex = useCallback(
@@ -316,18 +342,11 @@ export function PanoramicView({
     queryFn: () => apiFetch<{ data: Encounter[] }>(`/api/patients/${patientId}/encounters?status=borrador&limit=5`),
     enabled: canWrite && !viewOnly,
   })
-  const today = formatDate(new Date().toISOString())
+  const timeZone = activeOrgTimeZone()
+  const today = dayKey(new Date(), timeZone)
   const draftEncounter =
-    encounters.data?.data.find(
-      (e) => e.status === "borrador" && e.professionalUserId === myUserId && formatDate(e.createdAt) === today,
-    ) ?? null
-  const draftTime = draftEncounter
-    ? new Date(draftEncounter.createdAt).toLocaleTimeString(activeOrgLocale(), {
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone: activeOrgTimeZone(),
-      })
-    : null
+    encounters.data?.data.find((e) => e.professionalUserId === myUserId && dayKey(e.createdAt, timeZone) === today) ?? null
+  const draftTime = draftEncounter ? formatTimeShortLocale(draftEncounter.createdAt, activeOrgLocale() ?? "es", timeZone) : null
   const [saving, setSaving] = useState<"idle" | "saving" | "saved" | "error">("idle")
   const saveView = async () => {
     if (!pano || !draftEncounter) return
@@ -387,7 +406,6 @@ export function PanoramicView({
   const goToTooth = (t: number) => {
     setTooth(t)
     const at = toothIndex(curve, t)
-    setMissing(at === null ? t : null)
     if (at !== null) setIndex(clampIndex(at))
   }
   const panelId = useId()
@@ -412,7 +430,9 @@ export function PanoramicView({
       </div>
       <p id={`${panelId}-tooth`} className="text-xs text-slate-400" aria-live="polite">
         {missing
-          ? `La ${missing} no cae sobre el arco: llega con la barra de cortes o ajusta el arco en «Más».`
+          ? phoneView
+            ? `La ${missing} no cae sobre el arco: llega con la barra de cortes.`
+            : `La ${missing} no cae sobre el arco: llega con la barra de cortes o ajusta el arco en «Más».`
           : "Lleva la panorámica y los cortes a esa pieza."}
       </p>
     </fieldset>
@@ -501,8 +521,12 @@ export function PanoramicView({
 
   const noArch = !control || control.length < 5
   // Dónde está el corte elegido: la pieza y los mm a lo largo del arco (no la cantidad de cortes del archivo).
+  // Los mm son del arco de los dientes: la prolongación hacia la rama no cuenta.
+  const coreStart = curve.find((c) => !c.beyond)?.s ?? 0
+  const coreEnd = curve.findLast((c) => !c.beyond)?.s ?? 0
+  const arcMm = curve.length ? Math.min(coreEnd, Math.max(0, curve[clampIndex(index)]!.s - coreStart)) : 0
   const arcPosition = curve.length
-    ? `${teethLabel ? `Pieza ${teethLabel} · ` : ""}${Math.round(curve[clampIndex(index)]!.s).toLocaleString(activeOrgLocale())} de ${Math.round(curve[curve.length - 1]!.s).toLocaleString(activeOrgLocale())} mm del arco`
+    ? `${teethLabel ? `Pieza ${teethLabel} · ` : ""}${Math.round(arcMm).toLocaleString(activeOrgLocale())} de ${Math.round(coreEnd - coreStart).toLocaleString(activeOrgLocale())} mm del arco`
     : ""
   if (phoneView) {
     const chosen = crosses[CROSS_OFFSETS.indexOf(0)]
@@ -747,8 +771,10 @@ export function PanoramicView({
                   type="button"
                   size="sm"
                   onClick={() => {
-                    if (control) void saveArch(control)
-                    onAdjustDone()
+                    // Sin cambios no se guarda nada: el arco propuesto no pasa a ser «ajustado a mano».
+                    const changed = JSON.stringify(control) !== JSON.stringify(baseline)
+                    if (control && changed) void saveArch(control)
+                    finishAdjust()
                   }}
                 >
                   {canWrite ? "Terminar y guardar" : "Terminar"}
@@ -758,14 +784,14 @@ export function PanoramicView({
                   size="sm"
                   variant="outline"
                   onClick={() => {
-                    setControl(archState.baseline)
+                    setControl(baseline)
                     setArchMessage(null)
-                    onAdjustDone()
+                    finishAdjust()
                   }}
                 >
                   Cancelar
                 </Button>
-                {canWrite && archState.info && proposal && (
+                {canWrite && archInfo && proposal && (
                   <Button
                     type="button"
                     size="sm"
@@ -773,7 +799,7 @@ export function PanoramicView({
                     onClick={() => {
                       setControl(proposal.control)
                       void saveArch(null)
-                      onAdjustDone()
+                      finishAdjust()
                     }}
                   >
                     Volver al arco propuesto
@@ -782,11 +808,11 @@ export function PanoramicView({
               </div>
             </div>
           ) : (
-            (archMessage || archState.info) && (
+            (archMessage || archInfo) && (
               <p className="text-xs text-slate-400" aria-live="polite">
                 {archMessage ??
-                  `Arco ajustado a mano${archState.info?.updatedByName ? ` por ${archState.info.updatedByName}` : ""}${
-                    archState.info?.updatedAt ? `, ${formatDate(archState.info.updatedAt)}` : ""
+                  `Arco ajustado a mano${archInfo?.updatedByName ? ` por ${archInfo.updatedByName}` : ""}${
+                    archInfo?.updatedAt ? `, ${formatDate(archInfo.updatedAt)}` : ""
                   }.`}
               </p>
             )

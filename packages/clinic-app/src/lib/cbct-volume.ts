@@ -181,11 +181,14 @@ export function computePresets(data: Int16Array, range: { min: number; max: numb
   })
   const softMid = classPercentile(t1, t2, 0.5) ?? value(t1)
   const hard = (p: number) => classPercentile(t2, bins, p) ?? range.max
+  const hardMid = hard(0.5)
+  const hardTop = hard(0.999)
   return {
     blando: window(value(t1), value(t2)),
     hueso: window(softMid, hard(0.85)),
-    diente: window(hard(0.5), hard(0.99)),
-    enamel: (hard(0.5) + hard(0.999)) / 2 + (hard(0.999) - hard(0.5)) / 4,
+    diente: window(hardMid, hard(0.99)),
+    // Tres cuartos del camino hacia lo más brillante (con el metal): el umbral con que se busca el arco.
+    enamel: 0.25 * hardMid + 0.75 * hardTop,
   }
 }
 

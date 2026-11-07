@@ -13,7 +13,6 @@
     "./components/patient/service-picker": "./src/components/patient/service-picker.tsx",
     "./components/professional-profile-drawer": "./src/components/professional-profile-drawer.tsx",
     "./components/ui/choice-select": "./src/components/ui/choice-select.tsx",
-    "./components/new-version-notice": "./src/components/new-version-notice.tsx",
     "./lib/api": "./src/lib/api.ts",
     "./lib/branded-qr": "./src/lib/branded-qr.ts",
     "./lib/budgets": "./src/lib/budgets.ts",

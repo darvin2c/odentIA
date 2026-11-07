@@ -1,5 +1,4 @@
 import { BrandProvider, Toaster } from "@odentia/ui"
-import { NewVersionNotice } from "@odentia/clinic-app/components/new-version-notice"
 import { watchNewVersion } from "@odentia/clinic-app/lib/new-version"
 import { createQueryClient } from "@odentia/clinic-app/lib/query-client"
 import { QueryClientProvider } from "@tanstack/react-query"
@@ -57,7 +56,6 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
       <body>
         <BrandProvider brand="latidia">{children}</BrandProvider>
         <Toaster position="top-center" richColors />
-        <NewVersionNotice />
         <Scripts />
       </body>
     </html>
