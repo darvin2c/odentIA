@@ -1033,6 +1033,23 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "mis comisiones",
       "cuánto le toca",
     ],
+    faqs: [
+      {
+        q: "¿Si cambio el porcentaje, cambia lo que ya se cobró?",
+        a: "No. El porcentaje nuevo vale para lo que se cobre desde ese día; lo cobrado antes conserva el que tenía, aunque aún no se haya pagado. En el detalle se ve desde cuándo vale y el anterior, cada línea dice el porcentaje que usó y al profesional se le avisa del cambio.",
+        forms: ["cambiar porcentaje de comisión", "subir la comisión", "desde cuándo vale la comisión"],
+      },
+      {
+        q: "¿Puedo pagar distinto por un servicio?",
+        a: "Sí. En el detalle del profesional, «Otro porcentaje o monto para un servicio»: elige el servicio y si es otro porcentaje o un monto fijo por cada uno. El monto fijo se gana en proporción a lo cobrado: si el paciente pagó la mitad, la mitad. Vale desde hoy, y «Quitar» lo devuelve a su porcentaje general.",
+        forms: ["comisión por servicio", "monto fijo por corona", "comisión distinta por tratamiento", "porcentaje por procedimiento"],
+      },
+      {
+        q: "¿Cómo se reparte un tratamiento que hacen dos doctores?",
+        a: "Un tratamiento de varias sesiones reparte cada cobro en partes iguales, una por sesión prevista, y cada parte es de quien hizo esa sesión, el día que la hace. Lo cobrado de sesiones que aún no se hacen todavía no es de nadie. La línea dice «sesión 2 de 3».",
+        forms: ["comisión por sesión", "tratamiento compartido", "dos doctores un tratamiento", "ortodoncia dos doctores"],
+      },
+    ],
     writePermission: "commissions.write",
   },
   {

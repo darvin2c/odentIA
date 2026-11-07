@@ -170,12 +170,20 @@ export interface CommissionLine {
   patientId: string
   patientName: string
   description: string
-  /** Lo cobrado de ese concepto en ese cobro. */
+  /** Lo cobrado de ese concepto en ese cobro (su parte, si se reparte por sesiones). */
   baseCents: number
-  rateBps: number
+  /** El porcentaje que usó; nulo si fue un monto fijo. */
+  rateBps: number | null
   commissionCents: number
   occurredAt: string
   promotionName: string | null
+  /** Sesión `slice` de `sessions` de un tratamiento compartido; nulas si es una sola parte. */
+  slice: number | null
+  sessions: number | null
+  /** El monto fijo por procedimiento que usó, si fue una excepción con monto. */
+  fixedCents: number | null
+  /** El porcentaje o el monto fue una excepción para ese servicio. */
+  forService: boolean
   /** Ya entró en un pago registrado. */
   settled: boolean
   paidAt: string | null
@@ -209,6 +217,19 @@ export interface MonthlyCommissions extends Omit<CommissionSummary, "collections
    * Gastos y va aparte de la comisión.
    */
   salary?: { cents: number; paidCents: number; dueCents: number; paidAt: string | null } | null
+  /** Desde cuándo vale el porcentaje general (nulo si desde siempre) y el anterior. */
+  rateSince?: string | null
+  previousRateBps?: number | null
+  /** Otro porcentaje o un monto fijo para un servicio, lo que rige hoy. */
+  exceptions?: CommissionException[]
+}
+
+export interface CommissionException {
+  serviceId: string
+  serviceName: string
+  rateBps: number | null
+  fixedCents: number | null
+  effectiveFrom: string | null
 }
 
 /** Lo propio: el mes pedido y hasta tres meses anteriores con cobros. */
@@ -268,6 +289,16 @@ export function fetchMyCommissions(query: YearMonth): Promise<{ data: MyCommissi
 
 export function fetchCommissionRates(): Promise<{ data: CommissionRate[] }> {
   return apiFetch<{ data: CommissionRate[] }>("/api/commissions/rates")
+}
+
+/** Otro porcentaje o un monto fijo para un servicio; sin los dos, se quita. */
+export function setCommissionExceptionApi(body: {
+  professionalUserId: string
+  serviceId: string
+  rateBps?: number | null
+  fixedCents?: number | null
+}): Promise<{ data: unknown }> {
+  return apiFetch("/api/commissions/exceptions", { method: "PUT", body: JSON.stringify(body) })
 }
 
 export function setCommissionRateApi(body: {

@@ -644,7 +644,8 @@ export function blindSolvers4(h: GoldenHelpers): GoldenSolvers {
           rate: number | null
         }>(sql`
           select u.id, u.name, sum(ep.quantity)::int as times, coalesce(sum(ch.cents), 0)::text as charged,
-            (select r.rate_bps from commission_rule r where r.organization_id = ${org} and r.professional_user_id = u.id) as rate
+            (select r.rate_bps from commission_rate r where r.organization_id = ${org} and r.professional_user_id = u.id
+              and r.service_id is null and r.effective_from <= now() order by r.effective_from desc limit 1) as rate
           from encounter_procedure ep
           join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id and e.status = 'finalizada' and e.voided_at is null
           join "user" u on u.id = e.professional_user_id
@@ -655,8 +656,12 @@ export function blindSolvers4(h: GoldenHelpers): GoldenSolvers {
       ]
       const rates = [
         ...(await tx.execute<{ name: string; rate: number }>(sql`
-          select u.name, r.rate_bps as rate from commission_rule r join "user" u on u.id = r.professional_user_id
-          where r.organization_id = ${org} order by (u.name ilike '%ana torres%') desc, r.rate_bps desc, u.name`)),
+          select u.name, r.rate_bps as rate from (
+            select distinct on (x.professional_user_id) x.professional_user_id, x.rate_bps from commission_rate x
+            where x.organization_id = ${org} and x.service_id is null and x.effective_from <= now()
+            order by x.professional_user_id, x.effective_from desc
+          ) r join "user" u on u.id = r.professional_user_id
+          order by (u.name ilike '%ana torres%') desc, r.rate_bps desc, u.name`)),
       ]
       const [materials] = await tx.execute<{ moves: number }>(sql`
         select count(*)::int as moves from stock_movement m

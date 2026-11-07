@@ -67,30 +67,16 @@ export interface CommissionTotals {
 }
 
 /**
- * Las líneas de comisión de un tramo como las cuenta Finanzas › Comisiones:
- * cada cobro de lo que atendió un profesional (aplicación en pie hoy, sobre un
- * cargo de un procedimiento de una atención finalizada) con su porcentaje
- * vigente; lo ya pagado, con el porcentaje y el importe con que se pagó; lo
- * pagado cuyo cobro se anuló después ya no cuenta. También de quien ya dejó la clínica.
- * Lo nuevo va con el valor congelado de su pago; lo pagado no se toca. La base no se
- * redondea por línea: la suma es la que se redondea.
+ * Las líneas de comisión de un tramo como las cuenta Finanzas › Comisiones: lo
+ * aún sin pagar sale de `commission_live` (la misma vista que leen Finanzas y
+ * Argos: la regla del día del cobro, la excepción del servicio y la parte de
+ * cada sesión); lo ya pagado, con lo que se pagó, y si su cobro se anuló después
+ * ya no cuenta. También de quien ya dejó la clínica. La base no se redondea por
+ * línea: la suma es la que se redondea.
  */
 function commissionLinesSql(orgId: string, hull: Span, currency: string, branchId: string | undefined): SQL {
   const branch = branchId ? sql`and p.branch_id = ${branchId}` : sql``
-  const line = sql`la.cents, la.payment_cents, la.business_cents, la.currency, op.currency, op.second_currency, op.exchange_factor`
-  const commission = sql`money_commission(${line}, coalesce(r.rate_bps, 0))`
-  return sql`live_app as materialized (
-      select a.id, a.amount_cents::bigint as cents, a.created_at as at, e.professional_user_id as user_id,
-        p.amount_cents as payment_cents, p.business_cents, p.currency::text as currency
-      from patient_payment_application a
-      join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id
-      join patient_charge c on c.organization_id = a.organization_id and c.id = a.charge_id
-      join encounter_procedure ep on ep.organization_id = a.organization_id and ep.id = c.encounter_procedure_id
-      join encounter e on e.organization_id = a.organization_id and e.id = ep.encounter_id
-      where a.organization_id = ${orgId} and a.created_at >= ${at(hull.start)} and a.created_at < ${at(hull.end)}
-        and a.voided_at is null and p.voided_at is null and c.voided_at is null and ep.voided_at is null
-        and e.status = 'finalizada' and e.voided_at is null ${branch}
-    ), frozen as materialized (
+  return sql`frozen as materialized (
       -- Lo ya pagado, con lo que se pagó. Si el cobro se anuló después, se pagó igual
       -- (cuenta en lo pagado) pero ya no es comisión del mes: se descuenta del próximo pago.
       select l.application_id, l.base_cents::bigint as base, l.commission_cents::bigint as commission, l.occurred_at as at,
@@ -108,15 +94,13 @@ function commissionLinesSql(orgId: string, hull: Span, currency: string, branchI
         f.commission::numeric as paid, 0::numeric as fresh
       from frozen f
       union all
-      select la.user_id, la.at, org_money_value(${line}), ${commission}, 0, ${commission}
-      from live_app la
-      left join commission_rule r on r.organization_id = ${orgId} and r.professional_user_id = la.user_id
-      cross join ${orgMoneySql(orgId)}
-      where not exists (select 1 from frozen f where f.application_id = la.id)
+      select cl.professional_user_id, cl.at, cl.value, cl.commission, 0, cl.commission
+      from commission_live cl
+      where cl.organization_id = ${orgId} and cl.at >= ${at(hull.start)} and cl.at < ${at(hull.end)}
+        ${branchId ? sql`and cl.branch_id = ${branchId}` : sql``}
     ), counted_line as (
-      -- Lo viejo en otra moneda, sin valor ni factor, no tiene base: no entra. Quien dejó la
-      -- clínica sigue contando: lo que ganó es de los meses en que atendió, y sacarlo del equipo
-      -- no reescribe esos meses ni lo que se le debe (igual que la vista de Argos).
+      -- Quien dejó la clínica sigue contando: lo que ganó es de los meses en que atendió, y
+      -- sacarlo del equipo no reescribe esos meses ni lo que se le debe (igual que la vista de Argos).
       select cl.* from commission_line cl
       where cl.base is not null
     )`
@@ -175,6 +159,7 @@ async function pendingCommissionAdjustments(
       select sum(l2.commission_cents) as cents from commission_settlement_line l2
       join commission_settlement s2 on s2.organization_id = l2.organization_id and s2.id = l2.settlement_id and s2.voided_at is null
       where l2.organization_id = l.organization_id and l2.kind = 'ajuste' and l2.voided_at is null and l2.application_id = l.application_id
+        and l2.slice is not distinct from l.slice
     ) d on true
     where l.organization_id = ${orgId} and l.kind = 'cobro' and l.voided_at is null and l.commission_cents > 0 and s.currency = ${currency}
       and (a.voided_at is not null or p.voided_at is not null or c.voided_at is not null)
@@ -902,10 +887,21 @@ export async function getReportCommissions(tx: Db, orgId: string, query: ReportQ
       and e.finalized_at >= ${at(window.start)} and e.finalized_at < ${at(window.end)}
       ${branchId ? sql`and e.branch_id = ${branchId}` : sql``}
     group by e.professional_user_id, u.name`)
-  const rates = await tx.execute<{ userId: string; name: string; rateBps: number }>(sql`
-    select r.professional_user_id as "userId", u.name, r.rate_bps as "rateBps" from commission_rule r
-    join "user" u on u.id = r.professional_user_id
-    where r.organization_id = ${orgId}`)
+  // El porcentaje general de hoy de cada uno; las excepciones se cuentan aparte.
+  const rates = await tx.execute<{ userId: string; name: string; rateBps: number; exceptions: number }>(sql`
+    select g.professional_user_id as "userId", u.name, g.rate_bps as "rateBps",
+      (select count(*)::int from (
+        select distinct on (x.service_id) x.rate_bps, x.fixed_cents from commission_rate x
+        where x.organization_id = ${orgId} and x.professional_user_id = g.professional_user_id and x.service_id is not null
+          and x.effective_from <= now()
+        order by x.service_id, x.effective_from desc
+      ) e where e.rate_bps is not null or e.fixed_cents is not null) as exceptions
+    from (
+      select distinct on (r.professional_user_id) r.professional_user_id, r.rate_bps from commission_rate r
+      where r.organization_id = ${orgId} and r.service_id is null and r.effective_from <= now()
+      order by r.professional_user_id, r.effective_from desc
+    ) g
+    join "user" u on u.id = g.professional_user_id`)
   const ids = [...new Set([...(current ?? []).map((row) => row.userId), ...attended.map((row) => row.userId), ...rates.map((row) => row.userId)])]
   const names = new Map<string, string>([...attended, ...rates].map((row) => [row.userId, row.name]))
   const missing = ids.filter((id) => !names.has(id))
@@ -924,6 +920,8 @@ export async function getReportCommissions(tx: Db, orgId: string, query: ReportQ
         unpaidCents: safeCents(work?.unpaid),
         collectedCents: own?.baseCents ?? 0,
         rateBps: rates.find((row) => row.userId === userId)?.rateBps ?? 0,
+        /** Cuántos servicios tienen otro porcentaje o un monto fijo. */
+        exceptions: rates.find((row) => row.userId === userId)?.exceptions ?? 0,
         commissionCents: own?.commissionCents ?? 0,
         paidCents: own?.paidCents ?? 0,
         pendingCents: own ? pendingOf(own, adjustments) : 0,

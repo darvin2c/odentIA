@@ -326,11 +326,11 @@ it("comisiones: porcentaje sobre lo cobrado de lo atendido, pago en un paso y aj
   expect(afterVoidCashier.expenses.filter((e) => e.commission)).toEqual([
     expect.objectContaining({ concept: "Pago de comisiones", amountCents: paidLive }),
   ])
-  // El cobro liberado se calcula con el porcentaje vigente (20 % de 10 000).
-  // y lo que quedaba por descontar se descuenta de ellos.
+  // El cobro liberado vuelve con el porcentaje del día en que se cobró (10 % de 10 000): el cambio
+  // al 20 % vale para lo cobrado desde entonces. Lo que quedaba por descontar se descuenta de él.
   const freed = await view()
-  expect(freed.discountCents).toBe(Math.min(2000, 2200 - fresh))
-  expect(freed).toMatchObject({ pendingCents: 2000 - freed.discountCents, status: freed.discountCents === 2000 ? "por_descontar" : "por_pagar" })
+  expect(freed.discountCents).toBe(Math.min(1000, 2200 - fresh))
+  expect(freed).toMatchObject({ pendingCents: 1000 - freed.discountCents, status: freed.discountCents === 1000 ? "por_descontar" : "por_pagar" })
 })
 
 it("a quien deja el equipo se le paga lo pendiente, y sus meses no cambian en Reportes ni en Argos", async () => {
