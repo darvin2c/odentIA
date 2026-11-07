@@ -321,9 +321,20 @@ async function documentSample(tx: Db, orgId: string): Promise<{ bytes: Uint8Arra
   return { bytes: await kit.finish(), filename: "Documento.pdf" }
 }
 
-/** La muestra solo para el mensaje que la lleva: los demás no la necesitan. */
+/**
+ * La muestra solo para el mensaje que la lleva: los demás no la necesitan.
+ * Sin los datos de la clínica para el membrete todavía no se puede armar: el
+ * mensaje queda sin pedir y se pide en el ciclo siguiente, como el de «Su
+ * enlace» sin dirección pública (no es un rechazo de WhatsApp).
+ */
 async function sampleFor(tx: Db, orgId: string, def: MessageDef) {
-  return def.catalog?.header === "documento" ? documentSample(tx, orgId) : null
+  if (def.catalog?.header !== "documento") return null
+  try {
+    return await tx.transaction((inner) => documentSample(inner, orgId))
+  } catch (error) {
+    if (error instanceof ServiceError) return null
+    throw error
+  }
 }
 
 /**
@@ -341,6 +352,13 @@ function orderOf(
   const { body, variables } = positionalBody(text.body)
   if (def.link && !linkUrl) {
     throw new ServiceError("NO_PUBLIC_URL", 409, "Falta la dirección pública de la clínica para el botón de su enlace")
+  }
+  if (def.catalog?.header === "documento" && !sample) {
+    throw new ServiceError(
+      "NO_DOCUMENT_SAMPLE",
+      409,
+      "Faltan los datos de la clínica (Configuración › Datos de la clínica) para el PDF de muestra del mensaje de documentos",
+    )
   }
   return {
     name: text.templateName,
@@ -814,8 +832,9 @@ export async function requestMissingTemplates(
       // rechazo de WhatsApp ni un permiso que falte. Queda sin pedir y se pide
       // en el ciclo siguiente a que la dirección esté configurada.
       if (def.link && !linkUrl) continue
+      const sample = await sampleFor(tx, orgId, def)
+      if (def.catalog?.header === "documento" && !sample) continue
       try {
-        const sample = await sampleFor(tx, orgId, def)
         // Punto de retorno: un rechazo del proveedor no debe abortar lo demás.
         const item = await tx.transaction((inner) =>
           requestConnectionTemplate(
