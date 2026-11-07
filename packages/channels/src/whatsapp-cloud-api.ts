@@ -608,6 +608,17 @@ function bodyOf(to: string, kind: OutboundMessage["kind"]): Record<string, unkno
         name: kind.name,
         language: { code: kind.language },
         components: [
+          // El documento va en el encabezado: Meta lo descarga de la URL firmada al enviar.
+          ...(kind.document
+            ? [
+                {
+                  type: "header",
+                  parameters: [
+                    { type: "document", document: { link: kind.document.url, filename: kind.document.filename } },
+                  ],
+                },
+              ]
+            : []),
           // Sin variables no se envía el componente: Meta rechaza uno vacío.
           ...(kind.params.length > 0
             ? [{ type: "body", parameters: kind.params.map((text) => ({ type: "text", text })) }]
@@ -643,6 +654,71 @@ function bodyOf(to: string, kind: OutboundMessage["kind"]): Record<string, unkno
       ...(waType === "document" ? { filename: media.filename } : {}),
     },
   }
+}
+
+/**
+ * El id de la app de Meta que sube la muestra: el de odentIA en una conexión
+ * hecha con «Conectar con Facebook» (`deps.metaAppId`) o, con la app propia de
+ * la clínica, el que Meta dice de su clave (`GET /app`). Supuesto sin probar con
+ * Meta: si no responde, la solicitud no se hace y se dice por qué.
+ */
+async function sampleAppId(cfg: WhatsAppCloudConfig, deps: ChannelAdapterDeps): Promise<string> {
+  const given = deps.metaAppId?.trim()
+  if (given) return given
+  const { status, json } = await graphFetch(cfg, "app?fields=id", {}, deps)
+  const id = json && typeof json === "object" && "id" in json ? text(json.id) : null
+  if (status >= 400 || !id) {
+    const error = new Error(
+      "WhatsApp no aceptó la solicitud de plantilla: no se pudo saber la app de Meta de la conexión para subir el PDF de muestra",
+    ) as Error & { providerStatus?: number }
+    error.providerStatus = status >= 400 ? status : 400
+    throw error
+  }
+  return id
+}
+
+/**
+ * Sube el PDF de muestra con la carga reanudable de Meta y devuelve su
+ * `header_handle`: primero se abre la sesión de carga en la app
+ * (`POST /{app-id}/uploads`) y luego se manda el archivo entero
+ * (`POST /{upload-session-id}`, `file_offset: 0`).
+ * https://developers.facebook.com/docs/graph-api/guides/upload
+ */
+export async function uploadTemplateSample(
+  cfg: Pick<WhatsAppCloudConfig, "accessToken"> & Partial<WhatsAppCloudConfig>,
+  file: { bytes: Uint8Array; filename: string },
+  deps: ChannelAdapterDeps,
+): Promise<string> {
+  const appId = await sampleAppId(cfg as WhatsAppCloudConfig, deps)
+  const base = `https://graph.facebook.com/${metaGraphVersion()}`
+  const query = new URLSearchParams({
+    file_name: file.filename,
+    file_length: String(file.bytes.byteLength),
+    file_type: "application/pdf",
+  })
+  const fail = (step: string, status: number, json: unknown): never => {
+    const error = new Error(
+      `WhatsApp no aceptó la solicitud de plantilla: no se pudo subir el PDF de muestra (${step}: ${graphUserMessage(json) ?? graphError(status, json)})`,
+    ) as Error & { providerStatus?: number }
+    error.providerStatus = status
+    throw error
+  }
+  const opened = await deps.fetch(`${base}/${encodeURIComponent(appId)}/uploads?${query}`, {
+    method: "POST",
+    headers: { Authorization: `OAuth ${cfg.accessToken}` },
+  })
+  const session: unknown = await opened.json().catch(() => null)
+  const sessionId = session && typeof session === "object" && "id" in session ? text(session.id) : null
+  if (!opened.ok || !sessionId) return fail("sesión", opened.status, session)
+  const sent = await deps.fetch(`${base}/${sessionId}`, {
+    method: "POST",
+    headers: { Authorization: `OAuth ${cfg.accessToken}`, file_offset: "0" },
+    body: new Blob([new Uint8Array(file.bytes)], { type: "application/pdf" }),
+  })
+  const uploaded: unknown = await sent.json().catch(() => null)
+  const handle = uploaded && typeof uploaded === "object" && "h" in uploaded ? text(uploaded.h) : null
+  if (!sent.ok || !handle) return fail("archivo", sent.status, uploaded)
+  return handle
 }
 
 function connectionInfo(json: unknown): { id?: string; displayName?: string; account: ProviderAccount } {
@@ -730,9 +806,11 @@ function toProviderTemplate(raw: unknown): ProviderTemplate | null {
   let body = ""
   const buttons: string[] = []
   let link: { title: string; url: string } | null = null
-  // odentIA envía el cuerpo por posición, sin encabezado: un encabezado con
-  // datos o con un archivo pide un parámetro que no se manda.
+  // odentIA envía el cuerpo por posición: un encabezado con datos, una imagen o
+  // un video pide un parámetro que no se manda. El de documento sí lo sabe
+  // enviar, pero solo con el documento de cada envío.
   let header = false
+  let documentHeader = false
   const components = "components" in raw && Array.isArray(raw.components) ? raw.components : []
   for (const component of components) {
     if (!component || typeof component !== "object" || !("type" in component)) continue
@@ -741,7 +819,8 @@ function toProviderTemplate(raw: unknown): ProviderTemplate | null {
     if (type === "HEADER") {
       const format = "format" in component && typeof component.format === "string" ? component.format.toUpperCase() : "TEXT"
       const headerText = "text" in component && typeof component.text === "string" ? component.text : ""
-      if (format !== "TEXT" || /\{\{[^{}]+\}\}/.test(headerText)) header = true
+      if (format === "DOCUMENT") documentHeader = true
+      else if (format !== "TEXT" || /\{\{[^{}]+\}\}/.test(headerText)) header = true
     }
     if (type === "BUTTONS" && "buttons" in component && Array.isArray(component.buttons)) {
       for (const button of component.buttons) {
@@ -765,7 +844,13 @@ function toProviderTemplate(raw: unknown): ProviderTemplate | null {
   const named =
     ("parameter_format" in raw && typeof raw.parameter_format === "string" && raw.parameter_format.toUpperCase() === "NAMED") ||
     /\{\{\s*[^{}\d\s][^{}]*\}\}/.test(body)
-  const unsupported: TemplateUnsupported | null = header ? "encabezado" : named ? "datos_por_nombre" : null
+  const unsupported: TemplateUnsupported | null = header
+    ? "encabezado"
+    : named
+      ? "datos_por_nombre"
+      : documentHeader
+        ? "encabezado_documento"
+        : null
   return {
     externalId: "id" in raw ? text(raw.id) : null,
     name,
@@ -1148,6 +1233,10 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
 
   async requestTemplate(config, request, deps) {
     const cfg = getConfig(config)
+    // Una plantilla con documento se aprueba con un PDF de muestra ya subido (`header_handle`).
+    const headerHandle = request.header
+      ? await uploadTemplateSample(cfg, request.header.example, deps)
+      : null
     const { status, json } = await graphFetch(
       cfg,
       `${cfg.wabaId}/message_templates`,
@@ -1158,6 +1247,9 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
           language: request.language,
           category: request.category.toUpperCase(),
           components: [
+            ...(headerHandle
+              ? [{ type: "HEADER", format: "DOCUMENT", example: { header_handle: [headerHandle] } }]
+              : []),
             {
               type: "BODY",
               text: request.body,
