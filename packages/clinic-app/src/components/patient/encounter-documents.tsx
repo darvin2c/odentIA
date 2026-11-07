@@ -305,9 +305,12 @@ export function EncounterDocumentsBlock({
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">
-          Receta, consentimiento, orden, formulario o imagen, llenos con lo de esta atención.
+          {/* Firmada, la atención ya no crea documentos: se dice dónde, en vez de un «Nuevo» apagado. */}
+          {signed && canWrite
+            ? "Para un documento nuevo, créalo desde Documentos de la ficha."
+            : "Receta, consentimiento, orden, formulario o imagen, llenos con lo de esta atención."}
         </p>
-        {canWrite ? (
+        {canWrite && !signed ? (
           <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
             <DropdownMenuTrigger
               render={

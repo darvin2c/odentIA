@@ -4,11 +4,50 @@ import { type FocusEvent, useId } from "react"
 import { apiFetch } from "../../lib/api"
 import { type DiagnosisOption, DiagnosisSearch } from "./diagnosis-search"
 
-/** Lo que propone un hallazgo del odontograma de esta atención. */
+/**
+ * Lo que propone la atención: un hallazgo (odentIA: del odontograma) o un
+ * tratamiento que continúa, con su pieza si el producto la registra.
+ */
 export interface ProposedDiagnosis extends DiagnosisOption {
+  source: "hallazgo" | "tratamiento"
+  /** El hallazgo («Lesión de caries dental») o el tratamiento con su pieza («Endodoncia posterior vital · 46»). */
   finding: string
-  toothNumber: number | null
-  surfaces: string[]
+  /** El tipo con que se registró la última vez para la persona; null si no hay o si lo propone un hallazgo. */
+  diagnosisType: string | null
+  toothNumber?: number | null
+  surfaces?: string[]
+}
+
+/** De dónde sale una propuesta, para decirlo junto a ella. */
+export function proposalOrigin(item: ProposedDiagnosis): string {
+  if (item.source === "tratamiento") return `Del tratamiento «${item.finding}»`
+  return `Propuesto por el hallazgo «${item.finding}»${item.toothNumber != null ? ` en la pieza ${item.toothNumber}` : ""}`
+}
+
+/** Las propuestas de la atención: las mismas en su tarjeta, en su bloque y en el formulario. */
+export function useDiagnosisSuggestions(
+  patientId: string,
+  encounterId: string | null,
+  finding: PickerFinding | null = null,
+  enabled = true,
+) {
+  const params = new URLSearchParams()
+  params.set("patientId", patientId)
+  if (encounterId) params.set("encounterId", encounterId)
+  if (finding?.condition) {
+    params.set("condition", finding.condition)
+    if (finding.variant) params.set("variant", finding.variant)
+    if (finding.toothNumber != null) params.set("toothNumber", String(finding.toothNumber))
+  }
+  return useQuery({
+    queryKey: diagnosisSuggestionsKey(patientId, encounterId, finding),
+    queryFn: () =>
+      apiFetch<{ data: DiagnosisSuggestions }>(`/api/diagnosis-codes/suggestions?${params}`).then(
+        (r) => r.data,
+      ),
+    staleTime: 30_000,
+    enabled,
+  })
 }
 
 export interface DiagnosisSuggestions {
@@ -42,8 +81,8 @@ export function diagnosisSuggestionsKey(
 
 /**
  * Elegir el diagnóstico en tres pasos (tablero 6, decisión 26): lo que propone
- * el odontograma, los más usados en la clínica y el buscador de toda la lista
- * de la clínica. En la mayoría de las atenciones basta el paso 1 o el 2. Lo
+ * la atención (el odontograma o el tratamiento que continúa), los más usados en
+ * la clínica y el buscador de toda la lista de la clínica. En la mayoría de las atenciones basta el paso 1 o el 2. Lo
  * que se propone lo decide el servidor (`/api/diagnosis-codes/suggestions`).
  * Elegir una propuesta devuelve también su pieza y sus caras. No pinta título
  * propio: la pantalla lo nombra (`FieldSet` + `FieldLegend` o `field.Group`).
@@ -80,22 +119,7 @@ export function DiagnosisPicker({
 }) {
   const fallbackId = useId()
   const searchId = idProp ?? fallbackId
-  const params = new URLSearchParams()
-  params.set("patientId", patientId)
-  if (encounterId) params.set("encounterId", encounterId)
-  if (finding?.condition) {
-    params.set("condition", finding.condition)
-    if (finding.variant) params.set("variant", finding.variant)
-    if (finding.toothNumber != null) params.set("toothNumber", String(finding.toothNumber))
-  }
-  const suggestions = useQuery({
-    queryKey: diagnosisSuggestionsKey(patientId, encounterId, finding),
-    queryFn: () =>
-      apiFetch<{ data: DiagnosisSuggestions }>(`/api/diagnosis-codes/suggestions?${params}`).then(
-        (r) => r.data,
-      ),
-    staleTime: 30_000,
-  })
+  const suggestions = useDiagnosisSuggestions(patientId, encounterId, finding)
   const data = suggestions.data
   const proposed = data?.proposed ?? []
   const mostUsed = data?.mostUsed ?? []
@@ -135,22 +159,19 @@ export function DiagnosisPicker({
       {proposed.length > 0 ? (
         <div className="flex flex-col gap-2">
           <span className="text-xs font-medium text-muted-foreground">
-            1 · Desde el odontograma
+            1 · Lo que propone la atención
           </span>
           <ul className="flex flex-col gap-2">
             {proposed.map((item) => (
               <li
-                key={`${item.code}-${item.toothNumber ?? ""}`}
+                key={`${item.source}-${item.code}-${item.toothNumber ?? ""}`}
                 className="flex flex-wrap items-center justify-between gap-3 rounded-lg border px-3 py-2"
               >
                 <div className="flex min-w-0 flex-col">
                   <span className="text-sm font-medium">
                     {item.code} · {item.description}
                   </span>
-                  <span className="text-xs text-muted-foreground">
-                    Propuesto por el hallazgo «{item.finding}»
-                    {item.toothNumber != null ? ` en la pieza ${item.toothNumber}` : ""}
-                  </span>
+                  <span className="text-xs text-muted-foreground">{proposalOrigin(item)}</span>
                 </div>
                 <Button
                   type="button"
@@ -161,7 +182,7 @@ export function DiagnosisPicker({
                   onClick={() =>
                     onChange(
                       { code: item.code, description: item.description, system: item.system },
-                      { toothNumber: item.toothNumber, surfaces: item.surfaces },
+                      { toothNumber: item.toothNumber ?? null, surfaces: item.surfaces ?? [] },
                     )
                   }
                 >

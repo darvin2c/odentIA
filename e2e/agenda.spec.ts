@@ -152,7 +152,7 @@ test("agenda: «Llegó» con un clic, «Deshacer» y «Atender» sin formulario"
   expect(attending.arrivedAt).not.toBeNull()
   // El motivo de la reserva se ofrece y no cuenta hasta usarlo: la atención nace sin él.
   const consulta = page.getByRole("region", { name: "Consulta", exact: true })
-  await expect(consulta.getByText("Se agendó como «Control de ortodoncia» · falta el motivo")).toBeVisible()
+  await expect(consulta.getByText("Se agendó como «Control de ortodoncia»")).toBeVisible()
   await consulta.getByRole("button", { name: "Usar como motivo", exact: true }).click()
   await expect(consulta.getByText("Control de ortodoncia", { exact: true })).toBeVisible()
   await expect(consulta.getByRole("button", { name: "Usar como motivo", exact: true })).toHaveCount(0)

@@ -578,16 +578,16 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Se guarda lo que escribo en la atención?",
-        a: "Sí, solo, mientras escribes: arriba dice «Guardado» con la hora o «Guardando…». Sin conexión, lo escrito se queda en la pantalla y se guarda al volver; mientras tanto no se puede firmar.",
+        a: "Sí, solo, mientras escribes: arriba dice «Guardado» con la hora o «Guardando…». «Listo» guarda lo último y cierra el bloque; si no se pudo guardar, el bloque sigue abierto y dice por qué. Sin conexión, lo escrito se queda en la pantalla y se guarda al volver; mientras tanto no se puede firmar.",
       },
       {
         q: "¿Qué va en cada campo de «Consulta»?",
-        a: "El motivo de consulta es lo que trae a la persona, en una línea y en sus palabras, por ejemplo: vengo porque me duele. Es lo único de «Consulta» que se pide para cerrar. El tiempo de enfermedad es cuánto lleva así, por ejemplo, 3 días. El relato de la enfermedad cuenta cómo empezó, cómo siguió, qué lo alivia o empeora y qué tomó. En un control o una revisión sin molestias, el tiempo y el relato quedan vacíos. Si viene de una cita, abajo del motivo se ve para qué se agendó: «Usar como motivo» lo toma si es lo que trae; si escribes o dictas otro, queda ese.",
+        a: "El motivo de consulta es lo que trae a la persona, en una línea y en sus palabras, por ejemplo: vengo porque me duele. Es lo único de «Consulta» que se pide para cerrar. El tiempo de enfermedad es cuánto lleva así, por ejemplo, 3 días. El relato de la enfermedad cuenta cómo empezó, cómo siguió, qué lo alivia o empeora y qué tomó. En un control o una revisión sin molestias, el tiempo y el relato quedan vacíos. Si viene de una cita, abajo del motivo se ve para qué se agendó: lo que se escribió al reservarla o, si no se escribió nada, el control o el tratamiento que continúa. «Usar como motivo» lo toma si es lo que trae; si escribes o dictas otro, queda ese.",
         forms: ["que va en el motivo de consulta", "que pongo en enfermedad actual", "que va en el relato de la enfermedad", "tiempo de enfermedad"],
       },
       {
         q: "¿Cómo atiendo a un paciente?",
-        a: "Con «Atender»: en la cabecera de su página, en la cita de la Agenda o en «Mis pacientes de hoy» de Inicio. Abre la atención en un clic y, si tiene una cita hoy, queda unida a ella. Solo lo ve quien escribe en la historia clínica.",
+        a: "Con «Atender»: en la cabecera de su página, en la cita de la Agenda o en «Mis pacientes de hoy» de Inicio. Abre la atención en un clic y, si tiene una cita hoy, queda unida a ella. Lo que falta para firmar lo dice «Cierre de la atención», cada cosa con «Registrar»; cuando no falta nada, dice «Lista para firmar». Solo lo ve quien escribe en la historia clínica.",
         forms: ["como empiezo una atencion", "como inicio una atencion", "como abro una atencion", "nueva atencion"],
       },
       {
@@ -1274,7 +1274,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo elijo el diagnóstico de una atención?",
-        a: "En tres pasos: lo que propone el odontograma (una caries en la 16 propone su código), los más usados en tu clínica o el buscador de toda la lista, que no distingue tildes ni mayúsculas y muestra primero lo odontológico. «Presuntivo» basta para cerrar. Si la persona ya tenía ese diagnóstico, el sistema lo anota solo como «Ya diagnosticado antes».",
+        a: "En tres pasos: lo que propone la atención, los más usados en tu clínica o el buscador de toda la lista, que no distingue tildes ni mayúsculas y muestra primero lo odontológico. Propone el odontograma (una caries en la 16 propone su código) y, en una sesión o un control, el diagnóstico del tratamiento que continúa. Nada entra solo: «Usar» lo registra con el tipo de la última vez o, si nunca se registró, te pide el tipo. «Presuntivo» basta para cerrar. Si la persona ya tenía ese diagnóstico, el sistema lo anota solo como «Ya diagnosticado antes».",
       },
       {
         q: "¿Cómo activo la otra moneda?",

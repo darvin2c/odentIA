@@ -5,6 +5,7 @@ import {
   ConfirmDialog,
   FormDrawer,
   type ServerFieldMap,
+  submitErrorMessage,
   submitForm,
   useAppForm,
   useFormSubmitError,
@@ -12,13 +13,13 @@ import {
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useQueryClient } from "@tanstack/react-query"
-import { useId, useState } from "react"
+import { useEffect, useId, useState } from "react"
 import { z } from "zod"
 import { usePermission } from "../../lib/crm"
 import { addDiagnosisApi, type EncounterDiagnosis, voidDiagnosisApi } from "../../lib/encounters"
 import { DIAGNOSIS_TYPE_LABELS, type EncounterDetail } from "../../lib/patients"
 import { ChoiceButtons } from "../choice-buttons"
-import { DiagnosisPicker } from "./diagnosis-picker"
+import { DiagnosisPicker, type ProposedDiagnosis, proposalOrigin, useDiagnosisSuggestions } from "./diagnosis-picker"
 import type { PlaceWithParts } from "../../product/product-ui"
 import { partNames, SiteField } from "../../product/site-fields"
 
@@ -63,6 +64,111 @@ export function diagnosisSiteSuffix(dx: Pick<EncounterDiagnosis, "toothNumber" |
 }
 
 /**
+ * Lo que propone la atención para su diagnóstico (el odontograma, el
+ * tratamiento que continúa), cada propuesta con «Usar». Nada entra solo: con
+ * el tipo de la última vez, «Usar» lo registra con el alta de siempre; sin
+ * tipo, pide al clínico que lo elija (`onChoose` abre el formulario lleno).
+ * Respeta la barrera del editor como el resto de escrituras del bloque.
+ */
+export function DiagnosisProposals({
+  patientId,
+  encounterId,
+  disabled = false,
+  beforeWrite,
+  onChanged,
+  onPendingChange,
+  onChoose,
+}: {
+  patientId: string
+  encounterId: string
+  disabled?: boolean
+  beforeWrite: () => Promise<void>
+  onChanged: () => Promise<void>
+  onPendingChange: (pending: boolean) => void
+  onChoose: (item: ProposedDiagnosis) => void
+}): React.JSX.Element | null {
+  const queryClient = useQueryClient()
+  const suggestions = useDiagnosisSuggestions(patientId, encounterId)
+  const [using, setUsing] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const proposed = suggestions.data?.proposed ?? []
+  if (proposed.length === 0) return null
+  const keyOf = (item: ProposedDiagnosis) => `${item.source}-${item.system}-${item.code}-${item.toothNumber ?? ""}`
+
+  const use = async (item: ProposedDiagnosis) => {
+    setError(null)
+    if (!item.diagnosisType) {
+      onChoose(item)
+      return
+    }
+    setUsing(keyOf(item))
+    onPendingChange(true)
+    try {
+      await beforeWrite()
+      await addDiagnosisApi(patientId, encounterId, {
+        diagnosisCode: item.code,
+        diagnosisSystem: item.system,
+        diagnosisType: item.diagnosisType,
+        toothNumber: item.toothNumber ?? null,
+        surfaces: item.surfaces ?? [],
+      })
+      await queryClient.invalidateQueries({ queryKey: ["diagnosis-suggestions", patientId] })
+      await queryClient.invalidateQueries({ queryKey: ["timeline", patientId] })
+      await queryClient.invalidateQueries({ queryKey: ["patient-diagnoses", patientId] })
+      await onChanged()
+    } catch (err) {
+      setError(submitErrorMessage(err))
+    } finally {
+      setUsing(null)
+      onPendingChange(false)
+    }
+  }
+
+  return (
+    <div className="flex w-full flex-col gap-2">
+      <ul className="flex flex-col gap-2" aria-label="Diagnósticos propuestos">
+        {proposed.map((item) => {
+          const type = item.diagnosisType ? (DIAGNOSIS_TYPE_LABELS[item.diagnosisType] ?? item.diagnosisType) : null
+          return (
+            <li
+              key={keyOf(item)}
+              className="flex flex-wrap items-center justify-between gap-3 rounded-lg border px-3 py-2"
+            >
+              <div className="flex min-w-0 flex-col">
+                <span className="text-sm font-medium">
+                  {item.description}
+                  <span className="font-normal text-muted-foreground"> · {item.code}</span>
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {proposalOrigin(item)}
+                  {/* Lo que hará «Usar»: con el tipo de la última vez, o se elige al usarlo. */}
+                  {type ? ` · se registra ${type.toLowerCase()}, como la última vez` : " · eliges el tipo al usarlo"}
+                </span>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={disabled || using !== null}
+                aria-label={`Usar ${item.description}${item.toothNumber != null ? ` de la ${item.toothNumber}` : ""}`}
+                onClick={() => void use(item)}
+              >
+                {using === keyOf(item) ? "Registrando…" : "Usar"}
+              </Button>
+            </li>
+          )
+        })}
+      </ul>
+      {error ? (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+/**
  * Diagnósticos de la atención (lista de la clínica, su certeza y sitio dental;
  * ADR 0041). Se eligen en tres pasos (`DiagnosisPicker`). Toda
  * escritura respeta la barrera del editor: avisa pending, espera
@@ -77,6 +183,8 @@ export function EncounterDiagnoses({
   onChanged,
   onPendingChange,
   autoOpen = false,
+  prefill = null,
+  onPrefillUsed,
 }: {
   patientId: string
   detail: EncounterDetail
@@ -86,6 +194,9 @@ export function EncounterDiagnoses({
   onPendingChange: (pending: boolean) => void
   /** Recién agregado el bloque: el formulario de agregar ya viene abierto. */
   autoOpen?: boolean
+  /** Una propuesta que se usó desde la tarjeta sin tipo: el formulario se abre con ella. */
+  prefill?: ProposedDiagnosis | null
+  onPrefillUsed?: () => void
 }): React.JSX.Element {
   const canWrite = usePermission("clinical.write")
   const queryClient = useQueryClient()
@@ -106,6 +217,8 @@ export function EncounterDiagnoses({
       await operation()
       await queryClient.invalidateQueries({ queryKey: ["timeline", patientId] })
       await queryClient.invalidateQueries({ queryKey: ["patient-diagnoses", patientId] })
+      // Lo registrado o anulado cambia lo que se propone.
+      await queryClient.invalidateQueries({ queryKey: ["diagnosis-suggestions", patientId] })
       await onChanged()
     } finally {
       onPendingChange(false)
@@ -155,6 +268,23 @@ export function EncounterDiagnoses({
   const voidError = useFormSubmitError(voidForm)
 
   const busy = disabled || surface.isSubmitting || voidSubmitting
+
+  /** Una propuesta sin tipo: el formulario se abre lleno y el clínico elige el tipo. */
+  const choose = (item: ProposedDiagnosis) => {
+    form.reset()
+    form.setFieldValue("diagnosisCode", item.code)
+    form.setFieldValue("diagnosisSystem", item.system)
+    form.setFieldValue("description", item.description)
+    form.setFieldValue("site", { toothNumber: item.toothNumber ?? null, surfaces: item.surfaces ?? [] })
+    setOpen(true)
+  }
+  // Lo que se eligió en la tarjeta de la atención, antes de abrir el bloque.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: se usa una vez por propuesta elegida.
+  useEffect(() => {
+    if (!prefill || !canWrite || !editable) return
+    choose(prefill)
+    onPrefillUsed?.()
+  }, [prefill])
 
   return (
     <section
@@ -234,6 +364,18 @@ export function EncounterDiagnoses({
             ))}
           </ul>
         </details>
+      ) : null}
+
+      {canWrite && editable ? (
+        <DiagnosisProposals
+          patientId={patientId}
+          encounterId={encounter.id}
+          disabled={busy}
+          beforeWrite={beforeWrite}
+          onChanged={onChanged}
+          onPendingChange={onPendingChange}
+          onChoose={choose}
+        />
       ) : null}
 
       {canWrite && editable ? (
