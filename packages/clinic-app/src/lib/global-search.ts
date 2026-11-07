@@ -40,7 +40,7 @@ export type SearchTarget =
   | { screen: "producto"; productId: string }
   | { screen: "compra"; purchaseOrderId: string }
   | { screen: "proveedores" }
-  | { screen: "gastos"; spentAt: string }
+  | { screen: "gastos"; spentAt: string; q?: string }
   | { screen: "ticket"; ticketId: string; branchId: string }
   | { screen: "comisiones"; professionalUserId: string; year: number; month: number }
   | { screen: "agenda"; professionalUserId?: string; branchId?: string }
@@ -224,7 +224,7 @@ export function targetHref(target: SearchTarget, timeZone?: string): string {
       const [year = "", month = ""] = new Date(target.spentAt)
         .toLocaleDateString("en-CA", { timeZone })
         .split("-")
-      return `/finance${query({ tab: "gastos", year, month: String(Number(month)) })}`
+      return `/finance${query({ tab: "gastos", year, month: String(Number(month)), q: target.q })}`
     }
     case "ticket":
       return `/finance${query({ tab: "cobros", branch: target.branchId, ticket: target.ticketId })}`

@@ -741,8 +741,13 @@ export interface ExpenseRow {
   purchaseOrderNumber: number | null
   /** El proveedor de esa compra. */
   supplierName: string | null
-  /** Es el pago de una comisión. */
+  /**
+   * Es el pago de una comisión. Quien no administra comisiones recibe una sola
+   * fila «Pago de comisiones» por sede, sin nombres.
+   */
   commission: boolean
+  /** El pago de comisión al que lleva la fila (solo para quien administra comisiones). */
+  commissionPayment?: { professionalUserId: string; year: number; month: number } | null
 }
 
 export interface MonthExpenses {
