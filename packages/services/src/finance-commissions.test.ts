@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto"
 import { member } from "@odentia/db/schema/auth"
 import { encounter, encounterProcedure } from "@odentia/db/schema/clinical"
 import { branch } from "@odentia/db/schema/org"
-import { eq, sql } from "drizzle-orm"
+import { and, eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import {
@@ -248,6 +248,47 @@ it("comisiones: porcentaje sobre lo cobrado de lo atendido, pago en un paso y aj
   expect(expenses.find((e) => e.id === first.expense.id)).toBeUndefined()
   // El cobro liberado se calcula con el porcentaje vigente (20 % de 10 000).
   expect(await view()).toMatchObject({ pendingCents: 2000, status: "por_pagar" })
+})
+
+it("a quien deja el equipo se le paga lo pendiente, y sus meses no cambian en Reportes", async () => {
+  const f = await clinicalFixture()
+  await ownerDb.insert(member).values({ id: randomUUID(), organizationId: "org_a", userId: f.actor, role: "clinician", createdAt: new Date() })
+  const branchId = await seedBranch()
+  const cash = await f.run((tx) => createPaymentMethod(tx, "org_a", f.actor, { name: "Efectivo", typeCode: "10" }))
+  const [procedure] = await ownerDb
+    .insert(encounterProcedure)
+    .values({ organizationId: "org_a", encounterId: f.encounter.id, serviceId: f.service.id, description: "Corona", priceCents: 50000, currency: "PEN", createdBy: f.actor })
+    .returning()
+  await ownerDb
+    .update(encounter)
+    .set({ status: "finalizada", finalizedAt: new Date(), branchId, signerName: "Clínico", signerRegistration: "12345" })
+    .where(eq(encounter.id, f.encounter.id))
+  const charge = await f.run((tx) => createCharge(tx, ...f.args, { encounterProcedureId: procedure!.id }))
+  await f.run((tx) =>
+    collectCharge(tx, ...f.args, { branchId, chargeIds: [charge.id], payments: [{ paymentMethodId: cash.id, amountCents: 50000 }], requestId: randomUUID() }),
+  )
+  await f.run((tx) => setCommissionRate(tx, "org_a", f.actor, { professionalUserId: f.actor, rateBps: 4000 }))
+  const period = currentPeriod()
+  const report = async () => (await f.run((tx) => getReportFinance(tx, "org_a", { period: "este_mes", branchId }))).commissions
+  const before = await report()
+  expect(before).toMatchObject({ generatedCents: 20000, pendingCents: 20000 })
+
+  // Deja la clínica con su comisión del mes por pagar.
+  await ownerDb.delete(member).where(and(eq(member.organizationId, "org_a"), eq(member.userId, f.actor)))
+  const view = await f.run((tx) => getMonthlyCommissions(tx, "org_a", { professionalUserId: f.actor, ...period }))
+  expect(view).toMatchObject({ inTeam: false, commissionCents: 20000, pendingCents: 20000, status: "por_pagar" })
+  const month = await f.run((tx) => listMonthCommissions(tx, "org_a", period))
+  expect(month.find((row) => row.professionalUserId === f.actor)).toMatchObject({ inTeam: false, pendingCents: 20000 })
+  // Lo que ganó mientras atendía no se borra de Reportes por haberse ido.
+  expect(await report()).toEqual(before)
+  // Y se le paga igual.
+  const paid = await f.run((tx) => payMonthCommission(tx, "org_a", f.actor, { professionalUserId: f.actor, ...period, branchId }))
+  expect(paid.expense.amountCents).toBe(20000)
+  expect(await report()).toMatchObject({ generatedCents: 20000, paidCents: 20000, pendingCents: 0 })
+  // Quien nunca estuvo en la clínica sigue sin existir para Comisiones.
+  await expect(
+    f.run((tx) => getMonthlyCommissions(tx, "org_a", { professionalUserId: randomUUID(), ...period })),
+  ).rejects.toMatchObject({ code: "NOT_FOUND" })
 })
 
 it("el mes en Reportes concilia cobrado, gastos y deuda de la sede, y el cobro con promoción cuenta en ella", async () => {

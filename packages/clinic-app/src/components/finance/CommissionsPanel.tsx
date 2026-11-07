@@ -215,6 +215,7 @@ export function CommissionsAdminPanel({
                         atendió
                         {" · "}
                         {row.rateBps > 0 ? percentLabel(row.rateBps, locale) : "sin porcentaje"}
+                        {row.inTeam ? null : " · Ya no está en el equipo"}
                       </span>
                     </span>
                     <span className="flex shrink-0 flex-col items-end gap-1">
@@ -390,11 +391,17 @@ function ProfessionalDetailBody({
         ) : (
           <p className="text-sm font-medium">Sin porcentaje fijado</p>
         )}
-        {canWrite ? (
+        {canWrite && detail.inTeam ? (
           <Button type="button" variant="outline" size="sm" onClick={() => setRateOpen(true)}>
             {detail.rateBps > 0 ? "Cambiar" : "Fijar un porcentaje"}
           </Button>
         ) : null}
+        {detail.inTeam ? null : (
+          // Su porcentaje ya no cambia (solo se fija a quien puede atender); lo que ganó se le paga igual.
+          <p className="w-full text-sm text-muted-foreground">
+            Ya no está en el equipo. Lo que ganó mientras atendía se le paga igual.
+          </p>
+        )}
       </div>
 
       {sorted.length === 0 ? (

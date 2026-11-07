@@ -113,9 +113,11 @@ function commissionLinesSql(orgId: string, hull: Span, currency: string, branchI
       cross join ${orgMoneySql(orgId)}
       where not exists (select 1 from frozen f where f.application_id = la.id)
     ), member_line as (
-      -- Lo viejo en otra moneda, sin valor ni factor, no tiene base: no entra.
+      -- Lo viejo en otra moneda, sin valor ni factor, no tiene base: no entra. Quien dejó la
+      -- clínica sigue contando: lo que ganó es de los meses en que atendió, y sacarlo del equipo
+      -- no reescribe esos meses ni lo que se le debe (igual que la vista de Argos).
       select cl.* from commission_line cl
-      where cl.base is not null and exists (select 1 from member m where m.organization_id = ${orgId} and m.user_id = cl.user_id)
+      where cl.base is not null
     )`
 }
 
@@ -765,7 +767,7 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
     (debts[index]?.ages ?? [])
       .filter((age) => age.key !== "0_30")
       .reduce((total, age) => total + age.cents, 0)
-  // Por profesional y solo de quienes siguen en la clínica (`commissionsMany`), como la tabla de Comisiones.
+  // Por profesional (`commissionsMany`), también de quien ya dejó la clínica, como la tabla de Comisiones.
   const pending = (commissions[0] ?? []).map((item) => pendingOf(item, adjustments))
 
   return {
@@ -862,8 +864,7 @@ export async function getReportCommissions(tx: Db, orgId: string, query: ReportQ
   const rates = await tx.execute<{ userId: string; name: string; rateBps: number }>(sql`
     select r.professional_user_id as "userId", u.name, r.rate_bps as "rateBps" from commission_rule r
     join "user" u on u.id = r.professional_user_id
-    where r.organization_id = ${orgId}
-      and exists (select 1 from member m where m.organization_id = r.organization_id and m.user_id = r.professional_user_id)`)
+    where r.organization_id = ${orgId}`)
   const ids = [...new Set([...(current ?? []).map((row) => row.userId), ...attended.map((row) => row.userId), ...rates.map((row) => row.userId)])]
   const names = new Map<string, string>([...attended, ...rates].map((row) => [row.userId, row.name]))
   const missing = ids.filter((id) => !names.has(id))
