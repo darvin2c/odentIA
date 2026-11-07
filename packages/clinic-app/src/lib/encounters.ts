@@ -5,6 +5,7 @@
  */
 import { apiFetch } from "./api"
 import type { ConsentNeed } from "./encounter-documents"
+import { activeOrgLocale, activeOrgTimeZone } from "./locale"
 import type { Encounter, ProcedureItem } from "./patients"
 
 export type ClosingRequirement = "reason" | "diagnosis" | "evolution" | "signature"
@@ -31,6 +32,39 @@ export interface ClosingCheck {
    * tiene sede o no hay nada que descontar (ADR 0067).
    */
   materials: ClosingMaterials | null
+  /** «¿Cuándo vuelve?» y los controles que esta visita cumple al firmar. */
+  controls: ClosingControls
+}
+
+/** Un control pendiente que ya toca: esta visita lo cumple si queda marcado. */
+export interface ClosingDueControl {
+  id: string
+  title: string
+  kind: string
+  dueAt: string
+  /** Quien firma atendió la atención donde se indicó: viene marcado. */
+  mine: boolean
+  repeatEveryMonths: number | null
+}
+
+/** El próximo control que ya tiene la persona: en vez de preguntar, se dice cuándo vuelve. */
+export interface ClosingNextControl {
+  id: string
+  title: string
+  dueAt: string
+  status: string
+  scheduledAt: string | null
+  /** Se indicó en esta atención. */
+  own: boolean
+}
+
+export interface ClosingControls {
+  /** Los meses de «En N meses» del producto. */
+  recallMonths: number
+  /** El día de cada atajo («2026-11-14»), en la zona de la clínica. */
+  shortcuts: { week: string; month: string; recall: string }
+  due: ClosingDueControl[]
+  next: ClosingNextControl | null
 }
 
 /** Cuánto de un producto, en su unidad de uso («2 guantes»). */
@@ -55,6 +89,38 @@ export interface FinalizedMaterials {
   items: Array<MaterialQuantity & { shortage: number }>
   /** No se pudo descontar: la atención se firmó igual y lo usado se registra con «Corregir». */
   failed: boolean
+}
+
+/** Lo que el cierre hizo con los controles: el que indicó «¿Cuándo vuelve?» y los que cumplió. */
+export interface FinalizedControls {
+  next: { id: string; title: string; dueAt: string } | null
+  fulfilled: Array<{ id: string; title: string }>
+}
+
+/**
+ * «Recepción verá: reservar su control de mayo.» y lo que quedó cumplido, para
+ * el aviso de «Atención finalizada».
+ */
+export function finalizedControlsWords(controls: FinalizedControls, now = new Date()): string {
+  const words: string[] = []
+  if (controls.next) {
+    const timeZone = activeOrgTimeZone()
+    const due = new Date(controls.next.dueAt)
+    const sameYear =
+      new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric" }).format(due) ===
+      new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric" }).format(now)
+    const month = new Intl.DateTimeFormat(activeOrgLocale() ?? "es", {
+      month: "long",
+      ...(sameYear ? {} : { year: "numeric" }),
+      timeZone,
+    }).format(due)
+    words.push(`Recepción verá: reservar su control de ${month}.`)
+  }
+  if (controls.fulfilled.length > 0) {
+    const titles = controls.fulfilled.map((control) => `«${control.title}»`).join(", ")
+    words.push(`${controls.fulfilled.length === 1 ? "Quedó cumplido" : "Quedaron cumplidos"}: ${titles}.`)
+  }
+  return words.join(" ")
 }
 
 /** «Materiales usados» de una atención firmada. */

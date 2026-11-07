@@ -1,14 +1,21 @@
 import {
   Button,
+  Checkbox,
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
   Input,
 } from "@odentia/ui"
-import { TimeSelect, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
+import { DatePickerButton, TimeSelect, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useId, useRef } from "react"
 import { clinicDateTimeValue } from "../../lib/clinical-journey"
@@ -16,12 +23,16 @@ import type { ConsentNeed } from "../../lib/encounter-documents"
 import {
   CLOSING_REQUIREMENT_LABELS,
   type ClosingCheck,
+  type ClosingControls,
+  type ClosingDueControl,
   type ClosingMaterials,
+  type ClosingNextControl,
   type ClosingRequirement,
   type SignatureRegistration,
   signatureRegistrationErrors,
 } from "../../lib/encounters"
 import { activeOrgLocale } from "../../lib/locale"
+import { ChoiceButtons } from "../choice-buttons"
 import { closingMaterialsWords } from "../../lib/materials"
 import { productUi } from "../../product/product-ui"
 
@@ -44,19 +55,31 @@ export function endTimeBounds(
   return { min, max }
 }
 
+/** «¿Cuándo vuelve?»: nada elegido, uno de los atajos, «Otra fecha» o «No hace falta». */
+export type NextControlChoice = "" | "week" | "month" | "recall" | "date" | "none"
+
 /**
  * Lo que se escribe al cerrar: la hora de fin («HH:MM»; vacía = ahora), por qué
- * se sigue sin el consentimiento y, si el perfil no la tiene, la colegiatura.
- * Los nombres son los del cuerpo de `/finalize` y del perfil profesional, para
- * que cada rechazo del servidor caiga en su campo (`endedAt` → `endTime`).
+ * se sigue sin el consentimiento, si el perfil no la tiene, la colegiatura, y
+ * cuándo vuelve la persona. Los nombres son los del cuerpo de `/finalize` y del
+ * perfil profesional, para que cada rechazo del servidor caiga en su campo
+ * (`endedAt` → `endTime`).
  */
 export interface ClosingValues extends SignatureRegistration {
   endTime: string
   consentSkipReason: string
+  /** «¿Cuándo vuelve?»: ninguno viene marcado. */
+  nextControl: NextControlChoice
+  /** El día de «Otra fecha» (`yyyy-MM-dd`). */
+  nextControlDate: string
+  /** «Cambiar» sobre el control que ya tiene: vuelven los atajos. */
+  nextControlChange: boolean
+  /** Lo que se cambió de lo que viene marcado en «Cumple su control…», por control. */
+  fulfill: Record<string, boolean>
 }
 
-/** El dato de `/finalize` que la pantalla llama de otro modo. */
-export const CLOSING_FIELD_MAP = { endedAt: "endTime" } as const
+/** Los datos de `/finalize` que la pantalla llama de otro modo. */
+export const CLOSING_FIELD_MAP = { endedAt: "endTime", "nextControl.dueAt": "nextControlDate" } as const
 
 const EMPTY_CLOSING: ClosingValues = {
   endTime: "",
@@ -64,6 +87,262 @@ const EMPTY_CLOSING: ClosingValues = {
   professionalTitle: "",
   registrationBody: "",
   registrationNumber: "",
+  nextControl: "",
+  nextControlDate: "",
+  nextControlChange: false,
+  fulfill: {},
+}
+
+/** Un control de Clío marcado para entrar con la firma: ya dice cuándo vuelve. */
+export interface DictatedControl {
+  id: string
+  /** Su día (`yyyy-MM-dd`) en la zona de la clínica. */
+  day: string
+}
+
+/** El control por cumplir queda cumplido con esta visita: lo marcado, o lo que viene marcado si nadie lo tocó. */
+export function fulfills(value: Pick<ClosingValues, "fulfill">, control: ClosingDueControl): boolean {
+  return value.fulfill[control.id] ?? control.mine
+}
+
+/** Lo que ya dice cuándo vuelve, sin preguntar: así no quedan dos controles. */
+type KnownReturn =
+  | { kind: "dictated"; id: string; day: string }
+  | { kind: "repeats"; months: number }
+  | { kind: "control"; control: ClosingNextControl }
+  | { kind: "stays"; control: ClosingDueControl }
+
+function knownReturn(
+  value: Pick<ClosingValues, "fulfill">,
+  controls: ClosingControls,
+  dictated: DictatedControl | null,
+): KnownReturn | null {
+  if (dictated) return { kind: "dictated", ...dictated }
+  const repeating = controls.due.find((control) => fulfills(value, control) && control.repeatEveryMonths)
+  if (repeating?.repeatEveryMonths) return { kind: "repeats", months: repeating.repeatEveryMonths }
+  if (controls.next) return { kind: "control", control: controls.next }
+  const stays = controls.due.find((control) => !fulfills(value, control))
+  return stays ? { kind: "stays", control: stays } : null
+}
+
+/** Se pregunta «¿Cuándo vuelve?»: no tiene otro control, o pidió «Cambiar» el que tiene. */
+function asksNextControl(
+  value: Pick<ClosingValues, "fulfill" | "nextControlChange">,
+  known: KnownReturn | null,
+): boolean {
+  return !known || (known.kind === "control" && known.control.status === "pendiente" && value.nextControlChange)
+}
+
+/** Falta el día de «Otra fecha»: lo dice su campo. */
+export function needsNextControlDay(
+  value: ClosingValues,
+  controls: ClosingControls | null,
+  dictated: DictatedControl | null,
+): boolean {
+  if (!controls || value.nextControl !== "date" || value.nextControlDate) return false
+  return asksNextControl(value, knownReturn(value, controls, dictated))
+}
+
+/**
+ * Lo que el cierre manda de los controles: cuáles cumple esta visita y, si se
+ * preguntó, cuándo vuelve (con «Cambiar», el día nuevo del control que ya tiene).
+ */
+export function closingControlsBody(
+  value: ClosingValues,
+  controls: ClosingControls | null,
+  dictated: DictatedControl | null,
+): { followUpIds?: string[]; nextControl?: { dueAt: string; followUpId?: string } | { none: true } } {
+  if (!controls) return {}
+  const followUpIds = controls.due.filter((control) => fulfills(value, control)).map((control) => control.id)
+  const known = knownReturn(value, controls, dictated)
+  if (!asksNextControl(value, known)) return { followUpIds }
+  if (value.nextControl === "none" && !known) return { followUpIds, nextControl: { none: true } }
+  const day =
+    value.nextControl === "date"
+      ? value.nextControlDate
+      : value.nextControl === "week" || value.nextControl === "month" || value.nextControl === "recall"
+        ? controls.shortcuts[value.nextControl]
+        : ""
+  if (!day) return { followUpIds }
+  return { followUpIds, nextControl: { dueAt: day, ...(known?.kind === "control" ? { followUpId: known.control.id } : {}) } }
+}
+
+/** «6 may 2027», o «3 may» si es de este año: un día civil, sin corrimiento de zona. */
+export function controlDaySaid(day: string): string {
+  const [year, month, date] = day.split("-").map(Number) as [number, number, number]
+  const thisYear = clinicDateTimeValue(new Date().toISOString()).slice(0, 4) === day.slice(0, 4)
+  return new Intl.DateTimeFormat(activeOrgLocale() ?? "es", {
+    day: "numeric",
+    month: "short",
+    ...(thisYear ? {} : { year: "numeric" }),
+    timeZone: "UTC",
+  })
+    .format(new Date(Date.UTC(year, month - 1, date, 12)))
+    .replace(".", "")
+}
+
+/** El día de un instante en la zona de la clínica. */
+const dayOf = (iso: string): string => clinicDateTimeValue(iso).slice(0, 10)
+
+/** «Control de mantenimiento» → «control de mantenimiento», para decirlo en una frase. */
+const inSentence = (title: string): string => (/^\p{Lu}\p{Ll}/u.test(title) ? title.charAt(0).toLowerCase() + title.slice(1) : title)
+
+/**
+ * «¿Cuándo vuelve?» al firmar (ADR 0152), justo antes de firmar: los controles
+ * que esta visita cumple, como casillas, y los atajos para el próximo. Ninguno
+ * viene marcado y se firma igual sin elegir. Si ya tiene un control (o Clío
+ * dictó uno), en vez de preguntar dice cuándo vuelve, con «Cambiar».
+ */
+export function ClosingNextVisit({
+  form,
+  controls,
+  dictated = null,
+  busy,
+  onChangeDictated,
+}: {
+  form: ClosingForm
+  controls: ClosingControls | null | undefined
+  /** El control de Clío marcado para entrar con la firma, si hay. */
+  dictated?: DictatedControl | null
+  busy: boolean
+  /** «Cambiar» sobre lo que dictó Clío: abre la sugerencia para corregirla. */
+  onChangeDictated?: (id: string) => void
+}): React.JSX.Element | null {
+  const ids = useId()
+  const values = useStore(form.store, (state) => state.values)
+  if (!controls) return null
+  const known = knownReturn(values, controls, dictated)
+  const asking = asksNextControl(values, known)
+  const recall = controls.recallMonths
+  const options: Array<{ value: Exclude<NextControlChoice, "">; label: string }> = [
+    { value: "week", label: "En 1 semana" },
+    { value: "month", label: "En 1 mes" },
+    { value: "recall", label: recall === 12 ? "En 1 año" : `En ${recall} meses` },
+    { value: "date", label: "Otra fecha" },
+    // Cambiar el que ya tiene no es quitarlo: eso se hace en «Plan y controles».
+    ...(known ? [] : [{ value: "none" as const, label: "No hace falta" }]),
+  ]
+  const tomorrow = dayOf(new Date(Date.now() + 86_400_000).toISOString())
+  const set = <K extends keyof ClosingValues>(name: K, value: ClosingValues[K]) => form.setFieldValue(name, value as never)
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border p-3">
+      {controls.due.length > 0 ? (
+        <FieldSet className="gap-2">
+          <FieldLegend variant="label" className="mb-0">
+            {controls.due.length === 1 ? "Su control" : "Sus controles"}
+          </FieldLegend>
+          <FieldGroup className="gap-2">
+            {controls.due.map((control) => (
+              <Field key={control.id} orientation="horizontal">
+                <Checkbox
+                  id={`${ids}-cumple-${control.id}`}
+                  checked={fulfills(values, control)}
+                  disabled={busy}
+                  onCheckedChange={(checked) => set("fulfill", { ...values.fulfill, [control.id]: checked === true })}
+                />
+                <FieldLabel htmlFor={`${ids}-cumple-${control.id}`} className="font-normal">
+                  Cumple su {inSentence(control.title)} del {controlDaySaid(dayOf(control.dueAt))}
+                </FieldLabel>
+              </Field>
+            ))}
+          </FieldGroup>
+          <FieldDescription>Por qué: cualquier atención desde unos días antes de su fecha le sirve.</FieldDescription>
+        </FieldSet>
+      ) : null}
+      <div className="flex flex-col gap-2">
+        <p id={`${ids}-cuando`} className="font-medium">
+          ¿Cuándo vuelve?
+        </p>
+        {known && !asking ? (
+          <p className="text-sm">
+            {known.kind === "dictated" ? (
+              <>
+                Vuelve el {controlDaySaid(known.day)}, como dictaste
+                {onChangeDictated ? (
+                  <>
+                    {" · "}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="link"
+                      className="h-auto p-0"
+                      disabled={busy}
+                      onClick={() => onChangeDictated(known.id)}
+                    >
+                      Cambiar
+                    </Button>
+                  </>
+                ) : null}
+              </>
+            ) : known.kind === "repeats" ? (
+              `Su control se repite: el siguiente queda para ${recallWords(known.months)}.`
+            ) : known.kind === "stays" ? (
+              `Sigue pendiente su ${inSentence(known.control.title)} del ${controlDaySaid(dayOf(known.control.dueAt))}: recepción lo verá.`
+            ) : known.control.scheduledAt ? (
+              `Vuelve el ${controlDaySaid(dayOf(known.control.scheduledAt))}, con su cita.`
+            ) : (
+              <>
+                Vuelve el {controlDaySaid(dayOf(known.control.dueAt))}
+                {" · "}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="link"
+                  className="h-auto p-0"
+                  disabled={busy}
+                  onClick={() => set("nextControlChange", true)}
+                >
+                  Cambiar
+                </Button>
+              </>
+            )}
+          </p>
+        ) : (
+          <>
+            <ChoiceButtons
+              aria-labelledby={`${ids}-cuando`}
+              value={values.nextControl || null}
+              options={options}
+              disabled={busy}
+              onChange={(next) => set("nextControl", next)}
+              onClear={() => set("nextControl", "")}
+            />
+            {values.nextControl === "date" ? (
+              <form.AppField name="nextControlDate">
+                {(field) => (
+                  <field.Control label="Día en que vuelve">
+                    {(control) => (
+                      <DatePickerButton
+                        {...control.props}
+                        className="w-56"
+                        min={tomorrow}
+                        openAt={controls.shortcuts.recall}
+                        disabled={busy}
+                        value={field.state.value}
+                        onChange={field.handleChange}
+                      />
+                    )}
+                  </field.Control>
+                )}
+              </form.AppField>
+            ) : null}
+            {values.nextControl === "" ? (
+              <p className="text-xs text-muted-foreground">
+                {known?.kind === "control"
+                  ? `Si no eliges, sigue el ${controlDaySaid(dayOf(known.control.dueAt))}.`
+                  : "No indicaste cuándo vuelve: recepción no lo verá"}
+              </p>
+            ) : null}
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** «dentro de 6 meses», «dentro de 1 año». */
+function recallWords(months: number): string {
+  return months === 12 ? "dentro de 1 año" : months === 1 ? "dentro de 1 mes" : `dentro de ${months} meses`
 }
 
 /**
@@ -79,6 +358,8 @@ export function useClosingForm(options: {
   needsReason: () => boolean
   /** El perfil no tiene colegiatura: se pide aquí. */
   needsRegistration: boolean
+  /** «Otra fecha» sin día: se pide en su campo. Se lee al enviar. */
+  needsNextDay?: (value: ClosingValues) => boolean
   onSubmit: (value: ClosingValues) => Promise<void>
 }) {
   const latest = useRef(options)
@@ -91,6 +372,7 @@ export function useClosingForm(options: {
         if (latest.current.needsReason() && !value.consentSkipReason.trim())
           fields.consentSkipReason = "Escribe por qué sigues sin el consentimiento, o fírmalo ahora"
         if (latest.current.needsRegistration) Object.assign(fields, signatureRegistrationErrors(value))
+        if (latest.current.needsNextDay?.(value)) fields.nextControlDate = "Elige el día en que vuelve, o uno de los atajos"
         return Object.keys(fields).length > 0 ? { fields } : undefined
       },
     },
@@ -176,6 +458,7 @@ export function EncounterClosingDialog({
   confirmLabel = null,
   initialFocus,
   children,
+  nextVisit = null,
 }: {
   open: boolean
   form: ClosingForm
@@ -214,6 +497,8 @@ export function EncounterClosingDialog({
   initialFocus?: React.RefObject<HTMLElement | null>
   /** Lo que se suma al cierre (el aviso del dictado, por ejemplo). */
   children?: React.ReactNode
+  /** «¿Cuándo vuelve?», justo encima de firmar. */
+  nextVisit?: React.ReactNode
 }): React.JSX.Element {
   const ids = useId()
   const ProductClosing = productUi().encounter.Closing
@@ -339,6 +624,7 @@ export function EncounterClosingDialog({
             <p className="text-xs text-muted-foreground">
               Después: lo que quedó por cobrar, para avisar a caja.
             </p>
+            {nextVisit}
           </div>
           {formError ? (
             <p role="alert" className="text-sm text-destructive">

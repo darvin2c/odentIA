@@ -135,6 +135,10 @@ export interface FollowUp {
   completedAt: string | null
   cancelledAt: string | null
   createdAt: string
+  /** La sede de la atención donde se indicó; nula: se reserva en la sede activa. */
+  branchId: string | null
+  /** Desde cuándo una visita lo cumple: «Usar esa cita» ofrece las citas desde ahí. */
+  windowFrom: string
 }
 
 /** Situación de la reserva, independiente del cierre clínico del control. */
@@ -210,7 +214,7 @@ export function scheduleFollowUpApi(
 /** Lo mínimo de un control para reservar su cita (vía clínica o coordinación). */
 export type SchedulableControl = Pick<
   FollowUp,
-  "id" | "patientId" | "title" | "dueAt" | "status" | "appointment" | "legacyScheduledAt"
+  "id" | "patientId" | "title" | "dueAt" | "status" | "appointment" | "legacyScheduledAt" | "branchId" | "windowFrom"
 >
 
 /** Vista de coordinación: títulos, estados y fechas; sin detalle clínico ni importes. */
