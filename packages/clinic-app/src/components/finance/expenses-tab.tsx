@@ -169,7 +169,8 @@ export function ExpensesTab({
           )
         },
       },
-      { id: "tipo", header: "Tipo", cell: ({ row }) => <span>{row.original.category}</span> },
+      // En el teléfono también se ve el tipo y de dónde salió: son lo que se busca al revisar un gasto.
+      { id: "tipo", header: "Tipo", meta: { view: { primary: true } }, cell: ({ row }) => <span>{row.original.category}</span> },
       {
         id: "comprobante",
         header: "Comprobante",
@@ -178,6 +179,7 @@ export function ExpensesTab({
       {
         id: "salio",
         header: "Salió de",
+        meta: { view: { primary: true } },
         cell: ({ row }) => (
           <span>
             {!row.original.fromCash
