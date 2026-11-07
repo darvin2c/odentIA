@@ -204,6 +204,11 @@ export interface MonthlyCommissions extends Omit<CommissionSummary, "collections
   discountCents: number
   /** Lo que los pagos de este mes ya descontaron de cobros anulados. */
   discountedCents: number
+  /**
+   * Su sueldo del mes, si tiene uno anotado como gasto que se repite (`null` si no): se paga en
+   * Gastos y va aparte de la comisión.
+   */
+  salary?: { cents: number; paidCents: number; dueCents: number; paidAt: string | null } | null
 }
 
 /** Lo propio: el mes pedido y hasta tres meses anteriores con cobros. */

@@ -464,7 +464,10 @@ async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USER
     "cash_movement",
     "supplier_credit_use",
     "expense_gap_dismissal",
+    // El gasto que se repite: su «este mes no» y sus pagos van antes que la plantilla.
+    "expense_recurring_skip",
     "expense",
+    "expense_recurring",
     "cash_shift",
     "stock_movement",
     // Inventario por sede (ADR 0067): faltante, mínimos y materiales antes que sus productos.
