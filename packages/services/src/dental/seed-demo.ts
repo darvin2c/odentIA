@@ -2960,14 +2960,19 @@ await updateBudgetPresentation(
 await deliverBudget(db, ORG_A, ANA_ID, rosaPatientId, opciones46.id)
 
 // El cierre clínico requiere atención finalizada, no una reserva retrospectiva.
+// Lo indicó en esa atención, que ya está firmada: la semilla escribe el vínculo
+// aparte, porque el equipo solo indica en una atención abierta.
 const controlObt = await createFollowUp(db, ORG_A, ANA_ID, rosaPatientId, {
   kind: "tratamiento",
   planItemId: obt36.id,
-  originEncounterId: draft.id,
   title: "Control post-obturación pieza 36",
   instructions: "Verificar oclusión y sensibilidad.",
   dueAt: tomorrowIso(),
 })
+await db
+  .update(clinicalFollowUp)
+  .set({ originEncounterId: draft.id })
+  .where(and(eq(clinicalFollowUp.id, controlObt.id), eq(clinicalFollowUp.organizationId, ORG_A)))
 await completeFollowUp(db, ORG_A, ANA_ID, rosaPatientId, controlObt.id, {
   encounterId: draft.id,
   outcome: "Sin dolor; oclusión estable.",

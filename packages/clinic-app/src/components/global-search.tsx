@@ -531,9 +531,13 @@ function GlobalSearchDialog({
                 {owner.badge}
               </span>
             </span>
-            {owner.detail || owner.amount ? (
+            {owner.detail || owner.amount || owner.at ? (
               <span className="truncate text-xs text-muted-foreground">
-                {[owner.detail, owner.amount ? formatSearchMoney(owner.amount, locale) : null]
+                {[
+                  owner.detail,
+                  owner.amount ? formatSearchMoney(owner.amount, locale) : null,
+                  owner.at ? formatSearchWhen(owner.at, locale, timeZone) : null,
+                ]
                   .filter(Boolean)
                   .join(" · ")}
               </span>
