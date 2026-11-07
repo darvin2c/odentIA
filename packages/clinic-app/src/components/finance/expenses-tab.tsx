@@ -233,7 +233,33 @@ export function ExpensesTab({
         id: "actions",
         header: () => <span className="sr-only">Acciones</span>,
         cell: ({ row }) =>
-          row.original.voidedAt === null && canWrite ? (
+          row.original.commission ? (
+            // El pago de una comisión se anula con su pago, en Comisiones: aquí solo lleva a él.
+            row.original.commissionPayment && row.original.voidedAt === null ? (
+              <div className="flex justify-end">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-label={`Ver el pago: ${row.original.concept}`}
+                  render={
+                    <Link
+                      to="/finance"
+                      search={{
+                        tab: "comisiones",
+                        // Un pago antiguo sin mes abre Comisiones con la persona elegida.
+                        ...(row.original.commissionPayment.year && row.original.commissionPayment.month
+                          ? { year: row.original.commissionPayment.year, month: row.original.commissionPayment.month }
+                          : {}),
+                        profesional: row.original.commissionPayment.professionalUserId,
+                      }}
+                    />
+                  }
+                >
+                  Ver el pago
+                </Button>
+              </div>
+            ) : null
+          ) : row.original.voidedAt === null && canWrite ? (
             <div className="flex justify-end">
               <Button
                 type="button"

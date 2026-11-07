@@ -1297,6 +1297,7 @@ export async function listExpenses(
   tx: Db,
   orgId: string,
   query: { branchId?: string; category?: string; from?: string; to?: string; limit?: number },
+  viewer: { seesCommissions: boolean } = { seesCommissions: false },
 ) {
   const filters = [eq(expense.organizationId, orgId), isNull(expense.voidedAt)]
   if (query.branchId) filters.push(eq(expense.branchId, query.branchId))
@@ -1304,15 +1305,97 @@ export async function listExpenses(
   if (query.from) filters.push(gte(expense.spentAt, instant(`${query.from}T00:00:00.000Z`)))
   if (query.to) filters.push(lte(expense.spentAt, instant(`${query.to}T23:59:59.999Z`)))
   const limit = Math.min(Math.max(query.limit ?? 50, 1), 200)
-  return tx
+  const rows = await tx
     .select()
     .from(expense)
     .where(and(...filters))
     .orderBy(desc(expense.spentAt), desc(expense.id))
     .limit(limit)
+  if (viewer.seesCommissions || rows.length === 0) return rows
+  // Quien no administra comisiones no lee a quién se pagó ni cuánto a cada uno (ver `getMonthExpenses`).
+  const paid = await commissionPaymentsOf(tx, orgId, rows.map((row) => row.id))
+  return withoutCommissionNames(rows.map((row) => ({ ...row, commission: paid.has(row.id) }))).map(
+    ({ commission: _commission, ...row }) => row,
+  )
+}
+
+/** El pago de comisión de cada gasto que lo es, con su profesional y su mes. */
+async function commissionPaymentsOf(tx: Db, orgId: string, expenseIds: string[]) {
+  if (expenseIds.length === 0) return new Map<string, { professionalUserId: string; year: number | null; month: number | null }>()
+  const rows = await tx
+    .select({
+      expenseId: commissionSettlement.expenseId,
+      professionalUserId: commissionSettlement.professionalUserId,
+      year: commissionSettlement.periodYear,
+      month: commissionSettlement.periodMonth,
+    })
+    .from(commissionSettlement)
+    .where(and(eq(commissionSettlement.organizationId, orgId), inArray(commissionSettlement.expenseId, expenseIds)))
+  return new Map(rows.flatMap(({ expenseId, ...rest }) => (expenseId ? [[expenseId, rest] as const] : [])))
 }
 
 
+
+/** Concepto con que ve el pago de comisiones quien no administra comisiones. */
+export const COMMISSION_PAYMENTS_CONCEPT = "Pago de comisiones"
+
+/**
+ * Los pagos de comisión en una sola fila por sede y moneda, sin a quién ni de
+ * qué pago: el total suma lo mismo y la lista no dice a quién se pagó. Los
+ * anulados no se muestran (su anulación la ve Comisiones). El gasto de una
+ * comisión se crea siempre en moneda del negocio, sin caja ni comprobante
+ * (`payMonthCommission`), así que la fila no hereda cambio ni moneda de pago.
+ */
+function withoutCommissionNames<
+  T extends {
+    id: string
+    branchId: string
+    concept: string
+    currency: string
+    amountCents: number
+    businessCents: number | null
+    tenderCents: number | null
+    tenderCurrency: string | null
+    exchangeRate: string | null
+    notes: string | null
+    receiptNumber: string | null
+    createdBy: string | null
+    voidedAt: Date | null
+    commission: boolean
+  },
+>(rows: T[]): T[] {
+  const merged = new Map<string, T>()
+  const out: T[] = []
+  for (const row of rows) {
+    if (!row.commission) {
+      out.push(row)
+      continue
+    }
+    if (row.voidedAt) continue
+    const key = `${row.branchId}|${row.currency}`
+    const seen = merged.get(key)
+    if (!seen) {
+      // Las filas llegan de la más reciente a la más antigua: la fecha es la del último pago.
+      const first: T = {
+        ...row,
+        id: `comisiones:${row.branchId}:${row.currency}`,
+        concept: COMMISSION_PAYMENTS_CONCEPT,
+        businessCents: null,
+        tenderCents: null,
+        tenderCurrency: null,
+        exchangeRate: null,
+        notes: null,
+        receiptNumber: null,
+        createdBy: null,
+      }
+      merged.set(key, first)
+      out.push(first)
+      continue
+    }
+    seen.amountCents += row.amountCents
+  }
+  return out
+}
 
 /**
  * Gastos de un mes (el de la zona horaria de la clínica) con su total por
@@ -1324,6 +1407,12 @@ export async function getMonthExpenses(
   tx: Db,
   orgId: string,
   query: { year: number; month: number; branchId?: string; q?: string; category?: string },
+  /**
+   * Lo que cada profesional cobra de comisión solo lo ve quien administra
+   * comisiones (`commissions.write`). Los demás ven el total del mes, sin
+   * nombres: el gasto existe y suma, pero no dice a quién se pagó.
+   */
+  viewer: { seesCommissions: boolean } = { seesCommissions: false },
 ) {
   const zone = await getOrgLocale(tx, orgId)
   const { timezone, currency: unit } = zone
@@ -1361,27 +1450,21 @@ export async function getMonthExpenses(
         .leftJoin(supplier, and(eq(supplier.organizationId, purchaseOrder.organizationId), eq(supplier.id, purchaseOrder.supplierId)))
         .where(and(eq(purchaseOrder.organizationId, orgId), inArray(purchaseOrder.id, orderIds)))
     : []
-  const commissionExpenses = rows.length
-    ? new Set(
-        (
-          await tx
-            .select({ expenseId: commissionSettlement.expenseId })
-            .from(commissionSettlement)
-            .where(and(eq(commissionSettlement.organizationId, orgId), inArray(commissionSettlement.expenseId, rows.map((row) => row.id))))
-        ).map((row) => row.expenseId),
-      )
-    : new Set<string | null>()
-  const expenses = rows
-    .map((row) => {
-      const order = orders.find((item) => item.id === row.purchaseOrderId)
-      return {
-        ...row,
-        fromCash: row.shiftId !== null,
-        purchaseOrderNumber: order?.orderNumber ?? null,
-        supplierName: order?.supplierName ?? null,
-        commission: commissionExpenses.has(row.id),
-      }
-    })
+  const settlementOf = await commissionPaymentsOf(tx, orgId, rows.map((row) => row.id))
+  const detailed = rows.map((row) => {
+    const order = orders.find((item) => item.id === row.purchaseOrderId)
+    const settlement = settlementOf.get(row.id)
+    return {
+      ...row,
+      fromCash: row.shiftId !== null,
+      purchaseOrderNumber: order?.orderNumber ?? null,
+      supplierName: order?.supplierName ?? null,
+      commission: settlement !== undefined,
+      /** A qué pago de comisión lleva la fila; solo para quien administra comisiones. */
+      commissionPayment: viewer.seesCommissions && settlement ? settlement : null,
+    }
+  })
+  const expenses = (viewer.seesCommissions ? detailed : withoutCommissionNames(detailed))
     .filter((row) => !query.category || row.category === query.category)
     .filter((row) => !query.q?.trim() || textMatchesWords([row.concept, row.supplierName, row.receiptNumber, row.notes], query.q))
   const shownLive = expenses.filter((row) => !row.voidedAt && valueOf(row) !== null)
