@@ -23,6 +23,15 @@ export interface CbctVolume {
   data: Int16Array
   range: { min: number; max: number }
   presets: StudyPresets
+  /**
+   * ¿Los valores son unidades Hounsfield? Un CT (modalidad CT) lo es salvo que su
+   * Rescale Type (0028,1054) diga otra cosa (PS3.3 C.8.2.1.1, C.11.1.1.2): las CBCT
+   * que exportan «US» no están calibradas. Con HU valen las ventanas fijas de la
+   * tomografía médica; sin ellas, solo las del estudio.
+   */
+  hounsfield: boolean
+  /** La ventana que trae el archivo (0028,1050 y 0028,1051), si trae. */
+  fileWindow: WindowLevel | null
 }
 
 export type BrightnessPreset = "hueso" | "diente" | "blando"
@@ -241,6 +250,8 @@ export async function loadCbctVolume(
   const positions: (number | null)[] = []
   const instance: number[] = []
   let filled = 0
+  let hounsfield = false
+  let fileWindow: WindowLevel | null = null
   let min = Number.POSITIVE_INFINITY
   let max = Number.NEGATIVE_INFINITY
 
@@ -250,6 +261,16 @@ export async function loadCbctVolume(
     if (!volume) {
       nx = image.width
       ny = image.height
+      const ds = file.dataset
+      const rescaleType = ds.string("x00281054")?.trim().toUpperCase()
+      hounsfield =
+        ds.string("x00080060")?.trim() === "CT" &&
+        ds.floatString("x00281052") !== undefined &&
+        (rescaleType === undefined || rescaleType === "" || rescaleType === "HU")
+      const center = ds.floatString("x00281050", 0)
+      const width = ds.floatString("x00281051", 0)
+      fileWindow =
+        center !== undefined && width !== undefined && Number.isFinite(center) && width > 0 ? { center, width } : null
       const bytes = nx * ny * nz * 2
       if (bytes > memoryBudget()) throw new CbctTooLargeError("La tomografía no cabe en la memoria de este dispositivo")
       try {
@@ -337,6 +358,8 @@ export async function loadCbctVolume(
     data,
     range,
     presets: computePresets(data, range),
+    hounsfield,
+    fileWindow,
   }
   cached = { key, volume: result }
   return result
@@ -430,6 +453,7 @@ export function planeAngleDeg(
 export function volumeFromSlices(
   slices: readonly Int16Array[],
   geometry: { nx: number; ny: number; sx: number; sy: number; sz: number },
+  calibration: { hounsfield?: boolean; fileWindow?: WindowLevel | null } = {},
 ): CbctVolume {
   const plane = geometry.nx * geometry.ny
   const data = new Int16Array(plane * slices.length)
@@ -443,5 +467,13 @@ export function volumeFromSlices(
     }
   })
   const range = { min, max }
-  return { ...geometry, nz: slices.length, data, range, presets: computePresets(data, range) }
+  return {
+    ...geometry,
+    nz: slices.length,
+    data,
+    range,
+    presets: computePresets(data, range),
+    hounsfield: calibration.hounsfield ?? false,
+    fileWindow: calibration.fileWindow ?? null,
+  }
 }

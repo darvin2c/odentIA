@@ -12,6 +12,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@odentia/ui"
+import { DropdownMenuRadioGroup, DropdownMenuRadioItem } from "@odentia/ui/components/dropdown-menu"
 import { ToggleGroup, ToggleGroupItem } from "@odentia/ui/components/toggle-group"
 import { LoadingState, ViewTabs } from "@odentia/ui-patterns"
 import { keepPreviousData, useQuery } from "@tanstack/react-query"
@@ -19,7 +20,6 @@ import { ChevronDown, ChevronLeft } from "lucide-react"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import {
-  type BrightnessPreset,
   CbctTooLargeError,
   type CbctVolume,
   loadCbctVolume,
@@ -30,9 +30,11 @@ import {
   planeImage,
   type WindowLevel,
 } from "../../lib/cbct-volume"
+import { canReconstruct, readSeriesInfo, seriesDetail, seriesName, type StudySeries, studySeries } from "../../lib/cbct-series"
+import { cbctWindows, ctWindows, type ViewWindow } from "../../lib/ct-windows"
 import { DicomUnsupportedError, decodeDicom, renderDicom } from "../../lib/dicom"
 import { tomographyDownloadUrl } from "../../lib/imaging-upload"
-import { MEASURE_NOTE, MeasureList, type SavedMeasures, useSavedMeasures, type Vec3 } from "./tomography-measures"
+import { CT_MEASURE_NOTE, MEASURE_NOTE, MeasureList, type SavedMeasures, useSavedMeasures, type Vec3 } from "./tomography-measures"
 import { detectArch } from "../../lib/cbct-arch"
 import { PanoramicView, type SavedArch } from "./tomography-panoramic"
 import { MEASURE_KEYS_HINT, type PlaneMeasure, type Point, SliceCanvas, type Tool } from "./tomography-slice"
@@ -40,7 +42,7 @@ import { Tomography3D } from "./tomography-3d"
 import { usePatientName, ViewerShell } from "./viewer-shell"
 import { formatDate } from "../../lib/clinical-journey"
 import { activeOrgLocale } from "../../lib/locale"
-import { categoryLabel, imageTypeLabel, reportStatusLabel, takenAt } from "./document-labels"
+import { categoryLabel, imageTypeLabel, reportStatusLabel, takenAt, tomographyKind } from "./document-labels"
 import type { PatientDocument } from "../../lib/patients"
 
 /**
@@ -56,12 +58,6 @@ export interface StudyFiles {
   files: { index: number; url: string; sizeBytes: number; seriesInstanceUid: string }[]
   /** El arco ajustado a mano, si alguien lo guardó. */
   arch?: SavedArch
-}
-
-const PRESET_LABELS: Record<BrightnessPreset, string> = {
-  hueso: "Hueso",
-  diente: "Diente",
-  blando: "Tejido blando",
 }
 
 const PLANE_NAMES: Record<Plane, { label: string; technical: string }> = {
@@ -83,17 +79,26 @@ export function useViewOnly(): boolean {
   return viewOnly
 }
 
-/** Brillo: los tres del estudio y el ajuste fino en «Más». */
+/**
+ * Brillo o ventana: los del estudio en la CBCT, las ventanas en HU en la tomografía médica
+ * (`lib/ct-windows.ts`), y el ajuste fino.
+ */
 export function BrightnessControls({
   volume,
+  label,
+  options,
   preset,
   onPreset,
   window,
   onWindow,
 }: {
   volume: CbctVolume
-  preset: BrightnessPreset | "mas"
-  onPreset: (preset: BrightnessPreset | "mas") => void
+  /** «Brillo» en la CBCT; «Ventana» en la tomografía médica, como se dice en radiología. */
+  label: string
+  options: readonly ViewWindow[]
+  /** La clave de una opción, o «mas» para el ajuste fino. */
+  preset: string
+  onPreset: (preset: string) => void
   window: WindowLevel
   onWindow: (window: WindowLevel) => void
 }) {
@@ -101,21 +106,21 @@ export function BrightnessControls({
   const span = Math.max(1, volume.range.max - volume.range.min)
   return (
     <div className="flex flex-wrap items-center gap-3">
-      <span className="text-xs font-semibold tracking-wide text-slate-400 uppercase">Brillo</span>
+      <span className="text-xs font-semibold tracking-wide text-slate-400 uppercase">{label}</span>
       <ToggleGroup
         value={[preset]}
         onValueChange={(value: string[]) => {
-          const next = value[0] as BrightnessPreset | "mas" | undefined
+          const next = value[0]
           if (next) onPreset(next)
         }}
         variant="outline"
         size="sm"
         spacing={0}
-        aria-label="Brillo"
+        aria-label={label}
       >
-        {(Object.keys(PRESET_LABELS) as BrightnessPreset[]).map((key, i) => (
-          <ToggleGroupItem key={key} value={key} aria-keyshortcuts={String(i + 1)}>
-            {PRESET_LABELS[key]}
+        {options.map((option, i) => (
+          <ToggleGroupItem key={option.key} value={option.key} aria-keyshortcuts={i < 9 ? String(i + 1) : undefined}>
+            {option.label}
           </ToggleGroupItem>
         ))}
         <ToggleGroupItem value="mas">Ajuste fino</ToggleGroupItem>
@@ -167,10 +172,13 @@ function ThreePlanes({
   show3d,
   onExpand3d,
   onStopTool,
+  atTeeth,
 }: {
   volume: CbctVolume
   window: WindowLevel
   tool: Tool
+  /** La CBCT abre a la altura de los dientes; la tomografía médica, en el corte del medio. */
+  atTeeth: boolean
   /** Esc mientras se mide: termina de medir. */
   onStopTool: () => void
   saved: SavedMeasures
@@ -184,7 +192,7 @@ function ThreePlanes({
   const [point, setPoint] = useState(() => ({
     x: Math.floor(volume.nx / 2),
     y: Math.floor(volume.ny / 2),
-    z: detectArch(volume)?.z ?? Math.floor(volume.nz / 2),
+    z: (atTeeth ? detectArch(volume)?.z : undefined) ?? Math.floor(volume.nz / 2),
   }))
   // El borrador es de un corte: cambiar de corte a mitad de una medida la empieza de nuevo.
   const [draft, setDraft] = useState<{ plane: Plane; at: number; points: Point[] } | null>(null)
@@ -318,13 +326,18 @@ function ThreePlanes({
   )
 }
 
-/** Carga de los archivos y del volumen, con su avance y sus fallos. */
-export function useCbctVolume(patientId: string, documentId: string) {
+/**
+ * Carga de los archivos y del volumen de una serie, con su avance y sus fallos.
+ * `seriesUid`: la serie elegida; sin elegir, la mayor (`studySeries`).
+ */
+export function useCbctVolume(patientId: string, documentId: string, seriesUid: string | null = null) {
   const files = useQuery({
     queryKey: ["imaging-study-files", patientId, documentId],
     queryFn: () => apiFetch<{ data: StudyFiles }>(`/api/patients/${patientId}/imaging/studies/${documentId}/files`),
     staleTime: 30 * 60 * 1000,
   })
+  const series = useMemo(() => studySeries(files.data?.data.files ?? []), [files.data?.data.files])
+  const shown = series.find((item) => item.uid === seriesUid) ?? series[0] ?? null
   const [volume, setVolume] = useState<CbctVolume | null>(null)
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [error, setError] = useState<unknown>(null)
@@ -332,12 +345,13 @@ export function useCbctVolume(patientId: string, documentId: string) {
   // `attempt` vuelve a cargar al pedir «Reintentar».
   // biome-ignore lint/correctness/useExhaustiveDependencies: `attempt` es la señal de reintento.
   useEffect(() => {
-    const sources = files.data?.data.files
-    if (!sources) return
+    if (!shown) return
     const controller = new AbortController()
+    // Otra serie es otro volumen: mientras se arma, no se ve la anterior con el nombre de la nueva.
+    setVolume(null)
     setError(null)
-    setProgress({ done: 0, total: sources.length })
-    loadCbctVolume(documentId, sources, { onProgress: setProgress, signal: controller.signal })
+    setProgress({ done: 0, total: shown.files.length })
+    loadCbctVolume(`${documentId}:${shown.uid}`, shown.files, { onProgress: setProgress, signal: controller.signal })
       .then((loaded) => {
         if (!controller.signal.aborted) setVolume(loaded)
       })
@@ -345,9 +359,11 @@ export function useCbctVolume(patientId: string, documentId: string) {
         if (!controller.signal.aborted) setError(e)
       })
     return () => controller.abort()
-  }, [files.data?.data.files, documentId, attempt])
+  }, [shown, documentId, attempt])
   return {
     files,
+    series,
+    shown,
     volume,
     progress,
     error: error ?? files.error,
@@ -359,16 +375,11 @@ export function useCbctVolume(patientId: string, documentId: string) {
 }
 
 /**
- * Sin memoria para el volumen (tablero 9): los cortes de la serie mayor de a
- * uno, decodificados al pedirlos, con su propia ventana.
+ * Sin memoria para el volumen (tablero 9): los cortes de la serie que se ve, de
+ * a uno, decodificados al pedirlos, con su propia ventana.
  */
-function SingleSlices({ files, onRetry }: { files: StudyFiles["files"]; onRetry: () => void }) {
-  const series = useMemo(() => {
-    const counts = new Map<string, number>()
-    for (const f of files) counts.set(f.seriesInstanceUid, (counts.get(f.seriesInstanceUid) ?? 0) + 1)
-    const main = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0]
-    return files.filter((f) => f.seriesInstanceUid === main)
-  }, [files])
+function SingleSlices({ series: shown, onRetry }: { series: StudySeries; onRetry: () => void }) {
+  const series = shown.files
   const [index, setIndex] = useState(Math.floor(series.length / 2))
   const ref = useRef<HTMLCanvasElement | null>(null)
   const file = series[index]
@@ -504,6 +515,69 @@ const PHONE_VIEWS: { value: TomographyView; label: string }[] = [
   { value: "3d", label: "3D" },
 ]
 
+/**
+ * La serie que se ve, en la barra (ADR 0151): un estudio médico trae varias y
+ * medir en la equivocada (el topograma, una reconstrucción gruesa) es el riesgo
+ * mayor. Solo aparece si hay más de una; el topograma se ve y no se elige.
+ */
+function SeriesPicker({
+  documentId,
+  series,
+  shown,
+  onChoose,
+}: {
+  documentId: string
+  series: readonly StudySeries[]
+  shown: StudySeries
+  onChoose: (uid: string) => void
+}) {
+  const info = useQuery({
+    queryKey: ["imaging-series-info", documentId],
+    queryFn: async ({ signal }) =>
+      Object.fromEntries(
+        await Promise.all(
+          series.map(async (item) => [item.uid, await readSeriesInfo(item, signal).catch(() => null)] as const),
+        ),
+      ),
+    staleTime: Number.POSITIVE_INFINITY,
+  })
+  const locale = activeOrgLocale() ?? "es"
+  const infoOf = (item: StudySeries) => info.data?.[item.uid] ?? null
+  // En el orden del centro (su número de serie); sin número, como llegaron.
+  const listed = [...series].sort(
+    (a, b) => (infoOf(a)?.number ?? Number.POSITIVE_INFINITY) - (infoOf(b)?.number ?? Number.POSITIVE_INFINITY),
+  )
+  const nameOf = (item: StudySeries) => seriesName(infoOf(item), series.indexOf(item))
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<Button type="button" size="sm" variant="outline" className="max-w-full min-w-0" />}>
+        <span className="text-slate-400">Serie</span>
+        <span className="min-w-0 truncate font-semibold">
+          {nameOf(shown)} · {seriesDetail(shown, infoOf(shown), locale)}
+        </span>
+        <ChevronDown aria-hidden="true" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-80 max-w-[calc(100vw-2rem)]">
+        <DropdownMenuRadioGroup value={shown.uid} onValueChange={(uid) => onChoose(String(uid))}>
+          {listed.map((item) => (
+            <DropdownMenuRadioItem
+              key={item.uid}
+              value={item.uid}
+              disabled={!canReconstruct(item, infoOf(item))}
+              // Elegir es todo lo que se hace aquí: la lista se cierra y se ve la serie.
+              closeOnClick
+              className="flex items-baseline justify-between gap-3"
+            >
+              <span className="min-w-0 truncate">{nameOf(item)}</span>
+              <span className="shrink-0 text-xs text-muted-foreground">{seriesDetail(item, infoOf(item), locale)}</span>
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 const VIEW_ONLY_NOTICE =
   "En el celular la tomografía es para mirar. Para medir, ábrela en una computadora o una tablet."
 
@@ -525,32 +599,38 @@ export function TomographyViewer({
   /** Escribe en la ficha: guarda medidas y la vista en la atención. */
   canWrite?: boolean
 }) {
-  const loaded = useCbctVolume(patientId, doc.id)
+  // La dental (CBCT) abre en la panorámica, con sus brillos; la médica, en cortes y con sus ventanas.
+  const ct = tomographyKind() === "ct"
+  const [seriesUid, setSeriesUid] = useState<string | null>(null)
+  const loaded = useCbctVolume(patientId, doc.id, seriesUid)
   const volume = loaded.volume
   const viewOnly = useViewOnly()
   const patientName = usePatientName(patientId)
-  const [preset, setPreset] = useState<BrightnessPreset | "mas">("hueso")
+  /** La opción elegida (null: la primera, con la que abre) o «mas», el ajuste fino. */
+  const [preset, setPreset] = useState<string | null>(null)
   const [custom, setCustom] = useState<WindowLevel | null>(null)
   const [tool, setTool] = useState<Tool>("ninguna")
-  const saved = useSavedMeasures(patientId, doc.id, canWrite)
-  const [view, setView] = useState<TomographyView>("panoramica")
+  const mainSeries = loaded.series[0]?.uid ?? null
+  const shownSeries = loaded.shown?.uid ?? null
+  const onMainSeries = shownSeries === mainSeries
+  const saved = useSavedMeasures(
+    patientId,
+    doc.id,
+    canWrite,
+    shownSeries && mainSeries ? { shown: shownSeries, main: mainSeries } : null,
+  )
+  const [view, setView] = useState<TomographyView>(ct ? "cortes" : "panoramica")
   const [adjusting, setAdjusting] = useState(false)
   const [facts, setFacts] = useState(false)
   const factsButton = useRef<HTMLButtonElement | null>(null)
   const [single, setSingle] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
-  const window = volume
-    ? preset === "mas"
-      ? (custom ?? volume.presets.hueso)
-      : volume.presets[preset]
-    : null
+  const options = useMemo(() => (volume ? (ct ? ctWindows(volume) : cbctWindows(volume)) : []), [volume, ct])
+  // Otra serie puede no traer la ventana elegida (la «Del archivo»): queda la primera.
+  const active = options.find((option) => option.key === preset) ?? options[0] ?? null
+  const window = volume && active ? (preset === "mas" ? (custom ?? active.window) : active.window) : null
   // En la computadora, «Pieza» es parte de la panorámica; el 3D tiene su pestaña, para mostrarlo grande.
   const shown: TomographyView = !viewOnly && view === "corte" ? "panoramica" : view
-  const files = loaded.files.data?.data.files
-  const otherSeries = useMemo(
-    () => new Set(files?.map((f) => f.seriesInstanceUid)).size > 1,
-    [files],
-  )
 
   // Al cambiar de vista, el aviso de la anterior ya no aplica.
   // Al llegar con «Ver grande», el foco pasa al 3D: el botón deja de existir.
@@ -569,7 +649,7 @@ export function TomographyViewer({
     }
     // El 3D es solo para mostrar: M y A dicen dónde se mide en vez de encender una herramienta oculta.
     if (view === "3d" && next !== "ninguna") {
-      setNotice("El 3D es para mostrar. Para medir, usa la panorámica o los cortes.")
+      setNotice(`El 3D es para mostrar. Para medir, usa ${ct ? "los cortes" : "la panorámica o los cortes"}.`)
       return
     }
     setNotice(null)
@@ -578,19 +658,18 @@ export function TomographyViewer({
   }
 
   // Los atajos leen la herramienta de ahora sin volver a registrarse en cada render.
-  const keys = useRef({ tool, chooseTool })
-  keys.current = { tool, chooseTool }
+  const keys = useRef({ tool, chooseTool, options })
+  keys.current = { tool, chooseTool, options }
   useEffect(() => {
     if (!open || !volume) return
     const onKey = (event: KeyboardEvent) => {
-      const { tool, chooseTool } = keys.current
+      const { tool, chooseTool, options } = keys.current
       // Lo que ya atendió un corte (1–5 al ajustar el arco, las flechas) no cambia el brillo.
       if (event.defaultPrevented) return
       if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)
         return
-      if (event.key === "1") setPreset("hueso")
-      else if (event.key === "2") setPreset("diente")
-      else if (event.key === "3") setPreset("blando")
+      const digit = /^[1-9]$/.test(event.key) ? Number(event.key) : 0
+      if (digit && digit <= options.length) setPreset(options[digit - 1]!.key)
       else if (event.key === "m" || event.key === "M")
         chooseTool(tool === "medir" ? "ninguna" : "medir")
       else if (event.key === "a" || event.key === "A")
@@ -627,19 +706,36 @@ export function TomographyViewer({
               Retirada{doc.retireReason ? ` · ${doc.retireReason}` : ""} ·{" "}
             </span>
           ) : null}
-          {doc.imaging
-            ? `${doc.imaging.sliceCount.toLocaleString(activeOrgLocale())} imágenes en el estudio`
-            : ""}
+          {/* Con varias series, los cortes de cada una los dice «Serie»; el total del estudio no. */}
+          {loaded.series.length > 1
+            ? `${loaded.series.length} series en el estudio`
+            : doc.imaging
+              ? `${doc.imaging.sliceCount.toLocaleString(activeOrgLocale())} imágenes en el estudio`
+              : ""}
           {/* El centro no se repite si ya está en el nombre. */}
           {doc.source && !doc.label.includes(doc.source) ? ` · ${doc.source}` : ""}
         </>
       }
       actions={
         <>
+          {loaded.shown && loaded.series.length > 1 && (
+            <SeriesPicker
+              documentId={doc.id}
+              series={loaded.series}
+              shown={loaded.shown}
+              onChoose={(uid) => {
+                setSeriesUid(uid)
+                setSingle(false)
+                setTool("ninguna")
+                setAdjusting(false)
+                setNotice(null)
+              }}
+            />
+          )}
           {ready && !viewOnly && (
             <Tabs value={shown} onValueChange={(next) => changeView(next as TomographyView)}>
               <TabsList aria-label="Vista">
-                <TabsTrigger value="panoramica">Panorámica</TabsTrigger>
+                {!ct && <TabsTrigger value="panoramica">Panorámica</TabsTrigger>}
                 <TabsTrigger value="cortes">Cortes</TabsTrigger>
                 <TabsTrigger value="3d">3D</TabsTrigger>
               </TabsList>
@@ -666,14 +762,16 @@ export function TomographyViewer({
                 <ViewTabs
                   label="Vista"
                   value={view}
-                  options={PHONE_VIEWS}
+                  options={ct ? PHONE_VIEWS.filter((item) => item.value === "cortes" || item.value === "3d") : PHONE_VIEWS}
                   onValueChange={changeView}
                 />
               </div>
             )}
             <BrightnessControls
               volume={volume}
-              preset={preset}
+              label={ct ? "Ventana" : "Brillo"}
+              options={options}
+              preset={preset === "mas" ? "mas" : (active?.key ?? "")}
               onPreset={(next) => {
                 if (next === "mas") setCustom(window)
                 setPreset(next)
@@ -707,7 +805,8 @@ export function TomographyViewer({
                 <ChevronDown aria-hidden="true" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start">
-                {shown === "panoramica" && !viewOnly && !adjusting && (
+                {/* El arco guardado es de la serie mayor: en otra serie no se ajusta. */}
+                {shown === "panoramica" && !viewOnly && !adjusting && onMainSeries && (
                   <DropdownMenuItem
                     onClick={() => {
                       setAdjusting(true)
@@ -719,7 +818,7 @@ export function TomographyViewer({
                 )}
                 <DropdownMenuItem
                   onClick={() => {
-                    setPreset("hueso")
+                    setPreset(null)
                     setTool("ninguna")
                     setAdjusting(false)
                     setNotice(null)
@@ -729,10 +828,11 @@ export function TomographyViewer({
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={download} className="flex-col items-start gap-0.5">
-                  <span>Descargar para el programa del tomógrafo</span>
+                  <span>{ct ? "Descargar para el programa de imágenes" : "Descargar para el programa del tomógrafo"}</span>
                   <span className="text-xs text-muted-foreground">
-                    Para planificar el implante o seguir el nervio, ábrela en el programa del centro
-                    de imágenes o del tomógrafo.
+                    {ct
+                      ? "Para reconstrucciones y otras herramientas, ábrela en el programa del centro de imágenes."
+                      : "Para planificar el implante o seguir el nervio, ábrela en el programa del centro de imágenes o del tomógrafo."}
                   </span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -743,11 +843,6 @@ export function TomographyViewer({
             >
               {notice ?? ""}
             </p>
-            {otherSeries && (
-              <p className="min-w-0 basis-full text-xs text-slate-400">
-                Este estudio trae otra serie además de la que se ve; para verla, descárgalo.
-              </p>
-            )}
           </>
         ) : undefined
       }
@@ -764,15 +859,15 @@ export function TomographyViewer({
           onEdit={onDetails}
         />
       )}
-      {single && loaded.files.data ? (
-        <SingleSlices files={loaded.files.data.data.files} onRetry={() => void loaded.files.refetch()} />
+      {single && loaded.shown ? (
+        <SingleSlices key={loaded.shown.uid} series={loaded.shown} onRetry={() => void loaded.files.refetch()} />
       ) : loaded.error ? (
         <VolumeLoadError
           error={loaded.error}
           patientId={patientId}
           documentId={doc.id}
           onRetry={loaded.retry}
-          onSingle={loaded.files.data ? () => setSingle(true) : undefined}
+          onSingle={loaded.shown ? () => setSingle(true) : undefined}
         />
       ) : !volume || !window ? (
         <div className="m-auto w-full max-w-sm">
@@ -797,7 +892,7 @@ export function TomographyViewer({
               doc={doc}
               adjusting={adjusting}
               onAdjustDone={() => setAdjusting(false)}
-              savedArch={loaded.files.data?.data.arch ?? null}
+              savedArch={onMainSeries ? (loaded.files.data?.data.arch ?? null) : null}
               onTool={setTool}
               saved={saved}
               note={MEASURE_NOTE(voxel)}
@@ -808,23 +903,31 @@ export function TomographyViewer({
           ) : (
             <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
               <ThreePlanes
+                key={shownSeries ?? undefined}
+                atTeeth={!ct}
                 volume={volume}
                 window={window}
                 tool={viewOnly ? "ninguna" : tool}
                 onStopTool={() => setTool("ninguna")}
                 saved={saved}
-                show3d={!viewOnly}
+                // En la médica, el 3D solo se arma al tocar su pestaña: es lo más pesado.
+                show3d={!viewOnly && !ct}
                 onExpand3d={() => {
                   setExpanded3d(true)
                   changeView("3d")
                 }}
               />
               <aside className="flex w-full shrink-0 flex-col gap-3 border-t border-slate-800 bg-[#0d131b] p-4 text-sm lg:w-72 lg:border-t-0 lg:border-l">
-                <MeasureList saved={saved} canWrite={canWrite} viewOnly={viewOnly} note={MEASURE_NOTE(voxel)} />
+                <MeasureList
+                  saved={saved}
+                  canWrite={canWrite}
+                  viewOnly={viewOnly}
+                  note={ct ? CT_MEASURE_NOTE : MEASURE_NOTE(voxel)}
+                />
                 <p className="text-xs text-slate-500" aria-live="polite">
                   {tool !== "ninguna" && !viewOnly
                     ? MEASURE_KEYS_HINT
-                    : `Rueda o ↑ ↓ avanzan el corte · Ctrl + rueda o dos dedos acercan · doble clic ajusta · 1, 2 y 3 cambian el brillo${viewOnly ? "" : " · M mide · A ángulo"}`}
+                    : `Rueda o ↑ ↓ avanzan el corte · Ctrl + rueda o dos dedos acercan · doble clic ajusta · ${ct ? `del 1 al ${options.length} cambian la ventana` : "1, 2 y 3 cambian el brillo"}${viewOnly ? "" : " · M mide · A ángulo"}`}
                 </p>
               </aside>
             </div>

@@ -24,6 +24,8 @@ export interface SavedMeasure {
   points: Vec3[]
   value: number
   toothNumber: number | null
+  /** La serie donde se marcó; null: la serie mayor (las de antes de poder elegirla). */
+  seriesInstanceUid?: string | null
   createdAt: string
   /** Quien la guardó (sin guardar: null). */
   createdBy?: string | null
@@ -40,7 +42,17 @@ export const VIEW_WORDS: Record<string, string> = {
   sagital: "de lado",
 }
 
-export function useSavedMeasures(patientId: string, documentId: string, canWrite: boolean) {
+/**
+ * `series`: la serie que se ve y la mayor del estudio. Cada serie tiene su volumen y sus mm
+ * cuentan desde su primer corte: solo se muestran las medidas de la que se ve, y una medida
+ * nueva queda con ella.
+ */
+export function useSavedMeasures(
+  patientId: string,
+  documentId: string,
+  canWrite: boolean,
+  series: { shown: string; main: string } | null = null,
+) {
   const queryClient = useQueryClient()
   const myUserId = useMyUserId()
   const key = ["imaging-measurements", patientId, documentId]
@@ -52,7 +64,8 @@ export function useSavedMeasures(patientId: string, documentId: string, canWrite
   const [local, setLocal] = useState<SavedMeasure[]>([])
   const [error, setError] = useState<string | null>(null)
   /** Guarda la medida; true si quedó guardada. */
-  const keep = async (measure: NewMeasure): Promise<boolean> => {
+  const keep = async (input: NewMeasure): Promise<boolean> => {
+    const measure: NewMeasure = { ...input, seriesInstanceUid: input.seriesInstanceUid ?? series?.shown ?? null }
     if (!canWrite) {
       setLocal((prev) => [
         ...prev,
@@ -100,12 +113,13 @@ export function useSavedMeasures(patientId: string, documentId: string, canWrite
    */
   const undo = async () => {
     if (!removed) return
-    const { kind, view, points, value, toothNumber } = removed
-    if (await keep({ kind, view, points, value, toothNumber })) setRemoved(null)
+    const { kind, view, points, value, toothNumber, seriesInstanceUid } = removed
+    if (await keep({ kind, view, points, value, toothNumber, seriesInstanceUid })) setRemoved(null)
   }
   const canUndo = (measure: SavedMeasure) => !measure.createdBy || measure.createdBy === myUserId
+  const inShown = (m: SavedMeasure) => !series || (m.seriesInstanceUid ?? series.main) === series.shown
   return {
-    measures: [...(saved.data?.data ?? []), ...local],
+    measures: [...(saved.data?.data ?? []), ...local].filter(inShown),
     keep,
     retire,
     error,
@@ -202,6 +216,13 @@ export function MeasureList({
     </section>
   )
 }
+
+/**
+ * Lo que dice junto a las medidas de la tomografía médica (ADR 0151): el visor sirve para
+ * ver el estudio junto a su informe, no para diagnosticar.
+ */
+export const CT_MEASURE_NOTE =
+  "Visor de consulta: medidas orientativas con la escala del archivo. El diagnóstico es el informe del radiólogo."
 
 /** Lo que dice junto a cada medida (decisión 9). */
 export const MEASURE_NOTE = (voxelMm: number | null) =>
