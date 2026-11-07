@@ -747,7 +747,7 @@ export interface ExpenseRow {
    */
   commission: boolean
   /** El pago de comisión al que lleva la fila (solo para quien administra comisiones). */
-  commissionPayment?: { professionalUserId: string; year: number; month: number } | null
+  commissionPayment?: { professionalUserId: string; year: number | null; month: number | null } | null
 }
 
 export interface MonthExpenses {

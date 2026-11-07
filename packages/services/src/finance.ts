@@ -1312,16 +1312,26 @@ export async function listExpenses(
     .orderBy(desc(expense.spentAt), desc(expense.id))
     .limit(limit)
   if (viewer.seesCommissions || rows.length === 0) return rows
-  // Quien no administra comisiones no lee a quién se pagó (ver `getMonthExpenses`).
-  const paid = new Set(
-    (
-      await tx
-        .select({ expenseId: commissionSettlement.expenseId })
-        .from(commissionSettlement)
-        .where(and(eq(commissionSettlement.organizationId, orgId), inArray(commissionSettlement.expenseId, rows.map((row) => row.id))))
-    ).map((row) => row.expenseId),
+  // Quien no administra comisiones no lee a quién se pagó ni cuánto a cada uno (ver `getMonthExpenses`).
+  const paid = await commissionPaymentsOf(tx, orgId, rows.map((row) => row.id))
+  return withoutCommissionNames(rows.map((row) => ({ ...row, commission: paid.has(row.id) }))).map(
+    ({ commission: _commission, ...row }) => row,
   )
-  return rows.map((row) => (paid.has(row.id) ? { ...row, concept: COMMISSION_PAYMENTS_CONCEPT, notes: null } : row))
+}
+
+/** El pago de comisión de cada gasto que lo es, con su profesional y su mes. */
+async function commissionPaymentsOf(tx: Db, orgId: string, expenseIds: string[]) {
+  if (expenseIds.length === 0) return new Map<string, { professionalUserId: string; year: number | null; month: number | null }>()
+  const rows = await tx
+    .select({
+      expenseId: commissionSettlement.expenseId,
+      professionalUserId: commissionSettlement.professionalUserId,
+      year: commissionSettlement.periodYear,
+      month: commissionSettlement.periodMonth,
+    })
+    .from(commissionSettlement)
+    .where(and(eq(commissionSettlement.organizationId, orgId), inArray(commissionSettlement.expenseId, expenseIds)))
+  return new Map(rows.flatMap(({ expenseId, ...rest }) => (expenseId ? [[expenseId, rest] as const] : [])))
 }
 
 
@@ -1330,18 +1340,26 @@ export async function listExpenses(
 export const COMMISSION_PAYMENTS_CONCEPT = "Pago de comisiones"
 
 /**
- * Los pagos de comisión del mes en una sola fila por sede y moneda, sin a quién
- * ni cuánto a cada uno: el total suma lo mismo y la lista no dice lo que gana
- * cada profesional. Los anulados no se muestran (su anulación la ve Comisiones).
+ * Los pagos de comisión en una sola fila por sede y moneda, sin a quién ni de
+ * qué pago: el total suma lo mismo y la lista no dice a quién se pagó. Los
+ * anulados no se muestran (su anulación la ve Comisiones). El gasto de una
+ * comisión se crea siempre en moneda del negocio, sin caja ni comprobante
+ * (`payMonthCommission`), así que la fila no hereda cambio ni moneda de pago.
  */
 function withoutCommissionNames<
   T extends {
     id: string
     branchId: string
+    concept: string
     currency: string
     amountCents: number
     businessCents: number | null
-    spentAt: Date
+    tenderCents: number | null
+    tenderCurrency: string | null
+    exchangeRate: string | null
+    notes: string | null
+    receiptNumber: string | null
+    createdBy: string | null
     voidedAt: Date | null
     commission: boolean
   },
@@ -1357,10 +1375,15 @@ function withoutCommissionNames<
     const key = `${row.branchId}|${row.currency}`
     const seen = merged.get(key)
     if (!seen) {
-      const first = {
+      // Las filas llegan de la más reciente a la más antigua: la fecha es la del último pago.
+      const first: T = {
         ...row,
         id: `comisiones:${row.branchId}:${row.currency}`,
         concept: COMMISSION_PAYMENTS_CONCEPT,
+        businessCents: null,
+        tenderCents: null,
+        tenderCurrency: null,
+        exchangeRate: null,
         notes: null,
         receiptNumber: null,
         createdBy: null,
@@ -1370,9 +1393,6 @@ function withoutCommissionNames<
       continue
     }
     seen.amountCents += row.amountCents
-    if (seen.businessCents !== null || row.businessCents !== null)
-      seen.businessCents = (seen.businessCents ?? 0) + (row.businessCents ?? 0)
-    if (row.spentAt > seen.spentAt) seen.spentAt = row.spentAt
   }
   return out
 }
@@ -1430,18 +1450,7 @@ export async function getMonthExpenses(
         .leftJoin(supplier, and(eq(supplier.organizationId, purchaseOrder.organizationId), eq(supplier.id, purchaseOrder.supplierId)))
         .where(and(eq(purchaseOrder.organizationId, orgId), inArray(purchaseOrder.id, orderIds)))
     : []
-  const settlements = rows.length
-    ? await tx
-        .select({
-          expenseId: commissionSettlement.expenseId,
-          professionalUserId: commissionSettlement.professionalUserId,
-          year: commissionSettlement.periodYear,
-          month: commissionSettlement.periodMonth,
-        })
-        .from(commissionSettlement)
-        .where(and(eq(commissionSettlement.organizationId, orgId), inArray(commissionSettlement.expenseId, rows.map((row) => row.id))))
-    : []
-  const settlementOf = new Map(settlements.map((row) => [row.expenseId, row]))
+  const settlementOf = await commissionPaymentsOf(tx, orgId, rows.map((row) => row.id))
   const detailed = rows.map((row) => {
     const order = orders.find((item) => item.id === row.purchaseOrderId)
     const settlement = settlementOf.get(row.id)
@@ -1452,10 +1461,7 @@ export async function getMonthExpenses(
       supplierName: order?.supplierName ?? null,
       commission: settlement !== undefined,
       /** A qué pago de comisión lleva la fila; solo para quien administra comisiones. */
-      commissionPayment:
-        viewer.seesCommissions && settlement?.year && settlement.month
-          ? { professionalUserId: settlement.professionalUserId, year: settlement.year, month: settlement.month }
-          : null,
+      commissionPayment: viewer.seesCommissions && settlement ? settlement : null,
     }
   })
   const expenses = (viewer.seesCommissions ? detailed : withoutCommissionNames(detailed))

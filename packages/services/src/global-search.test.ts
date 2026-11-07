@@ -303,6 +303,7 @@ describe("cada rol ve lo de su pantalla", () => {
       title: "Alquiler del local · Alquiler",
       items: [],
       amount: { cents: 350000, currency: "PEN" },
+      at: "2026-10-01T15:00:00.000Z",
       target: { screen: "gastos", q: "Alquiler del local" },
     })
   })

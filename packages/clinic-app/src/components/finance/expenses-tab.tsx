@@ -240,13 +240,16 @@ export function ExpensesTab({
                 <Button
                   variant="ghost"
                   size="sm"
+                  aria-label={`Ver el pago: ${row.original.concept}`}
                   render={
                     <Link
                       to="/finance"
                       search={{
                         tab: "comisiones",
-                        year: row.original.commissionPayment.year,
-                        month: row.original.commissionPayment.month,
+                        // Un pago antiguo sin mes abre Comisiones con la persona elegida.
+                        ...(row.original.commissionPayment.year && row.original.commissionPayment.month
+                          ? { year: row.original.commissionPayment.year, month: row.original.commissionPayment.month }
+                          : {}),
                         profesional: row.original.commissionPayment.professionalUserId,
                       }}
                     />

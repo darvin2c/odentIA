@@ -896,7 +896,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Por qué en Gastos sale «Pago de comisiones» sin decir a quién?",
-        a: "Porque lo que gana cada profesional solo lo ve quien administra las comisiones. Los demás ven en Gastos una sola fila por sede con lo pagado de comisiones en el mes: suma igual que antes, pero no dice a quién ni cuánto a cada uno. Quien administra ve cada pago con «Ver el pago», que lo lleva a Comisiones; el pago de una comisión se anula allí, no en Gastos.",
+        a: "Porque lo que gana cada profesional solo lo ve quien administra las comisiones. Los demás ven en Gastos una sola fila por sede con el total pagado en comisiones ese mes: suma igual que antes, pero no dice a quién se pagó. Quien administra ve cada pago con «Ver el pago», que lo lleva a Comisiones; el pago de una comisión se anula allí, no en Gastos.",
         forms: ["pago de comisiones en gastos", "por que no veo a quien se pago la comision", "anular el gasto de una comision"],
       },
       {

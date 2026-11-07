@@ -218,7 +218,14 @@ it("comisiones: porcentaje sobre lo cobrado de lo atendido, pago en un paso y aj
     professionalUserId: f.actor,
     ...period,
   })
-  expect(forCashier.totalCents).toBe(forAdmin.totalCents)
+  // La fila suma lo mismo que los dos pagos, y lo que se ve cuenta una fila menos.
+  expect(forCashier.shown.totalCents).toBe(forAdmin.shown.totalCents)
+  expect(forCashier.shown.count).toBe(forAdmin.shown.count - 1)
+  // La lista cruda de la API tampoco da cada pago.
+  const raw = await f.run((tx) => listExpenses(tx, "org_a", { branchId, limit: 200 }))
+  expect(raw.filter((e) => e.category === "Personal")).toEqual([
+    expect.objectContaining({ concept: "Pago de comisiones", amountCents: 1600, notes: null }),
+  ])
   // Ni buscando el nombre en la lista del mes.
   const named = forAdmin.expenses.find((e) => e.id === first.expense.id)?.concept ?? ""
   const who = named.split("—").pop()?.trim() ?? ""
@@ -269,8 +276,16 @@ it("comisiones: porcentaje sobre lo cobrado de lo atendido, pago en un paso y aj
   ).rejects.toMatchObject({ code: "EXPENSE_IS_COMMISSION" })
   // …se anula con el pago: el gasto desaparece y sus cobros vuelven a quedar por pagar.
   await f.run((tx) => voidCommissionSettlement(tx, "org_a", f.actor, first.settlement.id, { reason: "Pago mal registrado" }))
-  const expenses = await f.run((tx) => listExpenses(tx, "org_a", { branchId, limit: 200 }))
+  const expenses = await f.run((tx) => listExpenses(tx, "org_a", { branchId, limit: 200 }, { seesCommissions: true }))
   expect(expenses.find((e) => e.id === first.expense.id)).toBeUndefined()
+  // Para caja, el pago anulado deja de sumar en la fila del mes.
+  const afterVoidCashier = await f.run((tx) => getMonthExpenses(tx, "org_a", { ...period, branchId }))
+  const paidLive = (await f.run((tx) => getMonthExpenses(tx, "org_a", { ...period, branchId }, { seesCommissions: true })))
+    .expenses.filter((e) => e.commission && !e.voidedAt)
+    .reduce((sum, e) => sum + e.amountCents, 0)
+  expect(afterVoidCashier.expenses.filter((e) => e.commission)).toEqual([
+    expect.objectContaining({ concept: "Pago de comisiones", amountCents: paidLive }),
+  ])
   // El cobro liberado se calcula con el porcentaje vigente (20 % de 10 000).
   expect(await view()).toMatchObject({ pendingCents: 2000, status: "por_pagar" })
 })

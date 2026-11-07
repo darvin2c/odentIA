@@ -66,7 +66,7 @@ export type SearchTarget =
   | { screen: "producto"; productId: string }
   | { screen: "compra"; purchaseOrderId: string }
   | { screen: "proveedores" }
-  | { screen: "gastos"; spentAt: string; q?: string }
+  | { screen: "gastos"; spentAt: string; q?: string; branchId?: string }
   | { screen: "ticket"; ticketId: string; branchId: string }
   | { screen: "comisiones"; professionalUserId: string; year: number; month: number }
   | { screen: "agenda"; professionalUserId?: string; branchId?: string }
@@ -141,8 +141,10 @@ export interface SearchOwner {
   items: SearchItem[]
   /** Cuántas cosas más tiene, además de las que se muestran. */
   more: number
-  /** Precio de un servicio, cuando lo tiene. */
+  /** Precio de un servicio, cuando lo tiene; el monto de un gasto suelto. */
   amount?: SearchMoney | null
+  /** Cuándo pasó, si el dueño es una cosa con fecha (un gasto suelto). */
+  at?: string | null
   /** El texto de una respuesta del agente, para copiarlo a quien no abre Conocimiento. */
   text?: string
 }
@@ -512,7 +514,7 @@ export async function searchEverything(
   const seesAllCommissions = can("commissions.write")
   if (can("finance.read") && on("dinero") && !digits) {
     const expenses = await rows(sql`
-      select e.id, e.concept, e.category, e.amount_cents, e.currency, e.spent_at, s.id as supplier_id, s.name as supplier
+      select e.id, e.concept, e.category, e.amount_cents, e.currency, e.spent_at, e.branch_id, s.id as supplier_id, s.name as supplier
       from expense e
       left join purchase_order po on po.organization_id = e.organization_id and po.id = e.purchase_order_id
       left join supplier s on s.organization_id = po.organization_id and s.id = po.supplier_id
@@ -531,8 +533,13 @@ export async function searchEverything(
         at: iso(row.spent_at),
         amount: { cents: num(row.amount_cents), currency: String(row.currency) },
         matched: true,
-        // Abre el mes con la búsqueda puesta: la lista queda en ese gasto.
-        target: { screen: "gastos", spentAt: iso(row.spent_at) ?? now.toISOString(), q: str(row.concept) ?? undefined },
+        // Abre el mes y la sede del gasto con la búsqueda puesta: la lista queda en ese gasto.
+        target: {
+          screen: "gastos",
+          spentAt: iso(row.spent_at) ?? now.toISOString(),
+          q: str(row.concept) ?? undefined,
+          branchId: str(row.branch_id) ?? undefined,
+        },
       }
       if (row.supplier_id && can("inventory.read"))
         addOwner(supplierOwner({ id: row.supplier_id, name: row.supplier }, false, [item]))
@@ -551,6 +558,7 @@ export async function searchEverything(
           items: [],
           more: 0,
           amount: item.amount,
+          at: item.at,
         })
     }
   }
