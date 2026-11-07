@@ -22,6 +22,7 @@ import { sql, type SQL } from "drizzle-orm"
 import { budgetLineUnitsSql, budgetValueOptionSql } from "./budgets.js"
 import { commissionLiveIn, collectedNetMany, EXPENSE_CATEGORIES } from "./finance.js"
 import { orgTaxes } from "./clinic-taxes.js"
+import { getOrgLocale } from "./locale.js"
 import { unpaidPurchasesMany } from "./purchase-balance.js"
 import { debtDaysSql, debtZoneSql, overdueDebtSql, valuedDebtSql } from "./report-debts.js"
 import { firstVisitSql } from "./report-visits.js"
@@ -856,14 +857,17 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
  * cobró de eso, su porcentaje, su comisión y lo que falta pagarle; y lo que
  * atendió sin cobrar todavía. Cuadra con Finanzas › Comisiones.
  */
-export async function getReportCommissions(tx: Db, orgId: string, query: ReportQuery, now: Date = new Date()) {
-  const scope = await reportScope(tx, orgId, query, now)
-  const { window, currency } = scope
-  const branchId = scope.branch?.id
-  const [current] = await commissionsMany(tx, orgId, [window], { currency, branchId })
-  const adjustments = await pendingCommissionAdjustments(tx, orgId, currency, branchId)
-  // Lo que atendió en el periodo (precio × cantidad) y lo que de eso sigue sin cobrar hoy.
-  const attended = await tx.execute<{ userId: string; name: string; cents: string; unpaid: string }>(sql`
+/**
+ * Lo que atendió cada profesional en un tramo (precio × cantidad, al cambio de hoy) y lo que de
+ * eso sigue sin cobrar hoy. Lo usan Reportes › Comisiones y «Mis comisiones» (lo propio).
+ */
+export async function attendedMany(
+  tx: Db,
+  orgId: string,
+  { start, end }: { start: Date; end: Date },
+  { branchId, professionalUserId }: { branchId?: string; professionalUserId?: string } = {},
+) {
+  return tx.execute<{ userId: string; name: string; cents: string; unpaid: string }>(sql`
     select e.professional_user_id as "userId", u.name,
       round(sum(${todayValueSql(sql`ep.price_cents::bigint * ep.quantity`, sql`ep.currency`)}))::text as cents,
       round(sum(${todayValueSql(sql`case when ch.charges > 0 then ch.unpaid else ep.price_cents::bigint * ep.quantity end`, sql`ep.currency`)}))::text as unpaid
@@ -884,9 +888,68 @@ export async function getReportCommissions(tx: Db, orgId: string, query: ReportQ
     where ep.organization_id = ${orgId} and ep.voided_at is null and ep.price_cents is not null
       and (ep.currency = op.currency or ep.currency = op.second_currency)
       and e.status = 'finalizada' and e.voided_at is null
-      and e.finalized_at >= ${at(window.start)} and e.finalized_at < ${at(window.end)}
+      and e.finalized_at >= ${at(start)} and e.finalized_at < ${at(end)}
       ${branchId ? sql`and e.branch_id = ${branchId}` : sql``}
+      ${professionalUserId ? sql`and e.professional_user_id = ${professionalUserId}` : sql``}
     group by e.professional_user_id, u.name`)
+}
+
+/**
+ * «Mis comisiones»: lo que la persona atendió en el mes y aún no se cobra. Su comisión llega
+ * cuando se cobre; se dice para que no parezca que lo atendido se perdió.
+ */
+export async function myAttendedUnpaid(
+  tx: Db,
+  orgId: string,
+  userId: string,
+  period: { year: number; month: number },
+): Promise<{ attendedCents: number; unpaidCents: number }> {
+  const zone = await getOrgLocale(tx, orgId)
+  const next = addMonths(period, 1)
+  const [row] = await attendedMany(
+    tx,
+    orgId,
+    { start: monthStart(zone.timezone, period.year, period.month), end: monthStart(zone.timezone, next.year, next.month) },
+    { professionalUserId: userId },
+  )
+  return { attendedCents: safeCents(row?.cents), unpaidCents: safeCents(row?.unpaid) }
+}
+
+/**
+ * Lo que falta pagar de comisiones, de todos los meses: el total de hoy (lo nuevo menos lo que se
+ * descuenta, por profesional, como «Lo que debes») y cada mes que tiene cobros sin pagar, con
+ * cuánto suma lo nuevo y de cuántos profesionales. Para no mirar un mes por vez.
+ */
+export async function commissionsOwedByMonth(tx: Db, orgId: string, now: Date = new Date()) {
+  const zone = await getOrgLocale(tx, orgId)
+  const [owed] = await commissionsOwedMany(tx, orgId, [now], { currency: zone.currency })
+  const from = new Date(Date.UTC(2000, 0, 1))
+  const months = await tx.execute<{ month: string; cents: string; professionals: number }>(sql`
+    select to_char(l.at at time zone ${zone.timezone}, 'YYYY-MM') as month, round(sum(l.commission))::text as cents,
+      count(distinct l.professional_user_id)::int as professionals
+    from ${commissionLiveIn(orgId, from, now)} l
+    where l.has_rule and l.commission > 0
+    group by 1 order by 1 desc`)
+  return {
+    currency: zone.currency,
+    owedCents: owed?.cents ?? 0,
+    months: [...months].map((row) => ({
+      year: Number(row.month.slice(0, 4)),
+      month: Number(row.month.slice(5, 7)),
+      cents: safeCents(row.cents),
+      professionals: row.professionals,
+    })),
+  }
+}
+
+export async function getReportCommissions(tx: Db, orgId: string, query: ReportQuery, now: Date = new Date()) {
+  const scope = await reportScope(tx, orgId, query, now)
+  const { window, currency } = scope
+  const branchId = scope.branch?.id
+  const [current] = await commissionsMany(tx, orgId, [window], { currency, branchId })
+  const adjustments = await pendingCommissionAdjustments(tx, orgId, currency, branchId)
+  // Lo que atendió en el periodo (precio × cantidad) y lo que de eso sigue sin cobrar hoy.
+  const attended = await attendedMany(tx, orgId, window, { branchId })
   // El porcentaje general de hoy de cada uno; las excepciones se cuentan aparte.
   const rates = await tx.execute<{ userId: string; name: string; rateBps: number; exceptions: number }>(sql`
     select g.professional_user_id as "userId", u.name, g.rate_bps as "rateBps",

@@ -20,6 +20,8 @@ import {
   listCommissionSettlements,
   listMonthCommissions,
   payMonthCommission,
+  commissionsOwedByMonth,
+  myAttendedUnpaid,
   setCommissionException,
   setCommissionRate,
   voidCommissionSettlement,
@@ -165,8 +167,20 @@ export function createCommissionsRoute(deps: Pick<CrmDeps, "db">) {
     const parsed = period.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => getMyCommissions(tx, orgId, userId, parsed.data)),
+      withOrgContext(deps.db, orgId, async (tx) => ({
+        ...(await getMyCommissions(tx, orgId, userId, parsed.data)),
+        // Lo atendido que aún no se cobra: su comisión llega cuando se cobre.
+        attended: await myAttendedUnpaid(tx, orgId, userId, parsed.data),
+      })),
     )
+  })
+
+  // --- Lo que falta pagar de todos los meses (administración) ------------------------
+  app.get("/owed", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "commissions.write"))
+      return forbid(c, "Solo administración ve las comisiones de todos")
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => commissionsOwedByMonth(tx, orgId)))
   })
 
   // --- Registrar el pago: un solo paso (congela los cobros y deja el gasto) ----------

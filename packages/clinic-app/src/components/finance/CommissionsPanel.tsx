@@ -53,6 +53,7 @@ import {
   compareMonths,
   dayLabel,
   fetchCommissionPayments,
+  fetchCommissionsOwed,
   fetchMonthCommissions,
   fetchMyCommissions,
   fetchProfessionalCommissions,
@@ -103,6 +104,7 @@ const commissionKeys = {
   payments: (userId: string, period: YearMonth) =>
     ["commissions", "payments", userId, period.year, period.month] as const,
   mine: (period: YearMonth) => ["commissions", "mine", period.year, period.month] as const,
+  owed: ["commissions", "owed"] as const,
 }
 
 function countLabel(count: number, one: string, many: string): string {
@@ -251,6 +253,7 @@ export function CommissionsAdminPanel({
   timeZone,
   selectedId,
   onSelect,
+  onPeriodChange,
 }: {
   period: YearMonth
   locale: string
@@ -258,9 +261,15 @@ export function CommissionsAdminPanel({
   /** Profesional con el detalle abierto. */
   selectedId: string | null
   onSelect: (professionalUserId: string | null) => void
+  /** Ir a otro mes (desde «Falta pagar de otros meses»). */
+  onPeriodChange?: (period: YearMonth) => void
 }) {
   const queryClient = useQueryClient()
   const canWrite = usePermission("commissions.write")
+  // Lo que falta pagar de todos los meses: cada mes se mira solo, y lo de antes no debe perderse.
+  const owedQuery = useQuery({ queryKey: commissionKeys.owed, queryFn: fetchCommissionsOwed })
+  const owed = owedQuery.data?.data ?? null
+  const otherMonths = (owed?.months ?? []).filter((item) => compareMonths(item, period) !== 0)
   const members = useOrgMembers()
   const [newRateOpen, setNewRateOpen] = useState(false)
 
@@ -319,6 +328,29 @@ export function CommissionsAdminPanel({
           de {formatMoney(rows.reduce((total, row) => total + row.commissionCents, 0), rows[0]?.currency ?? "", locale)}{" "}
           · {rows.filter((row) => row.pendingCents > 0).length === 1 ? "1 profesional" : `${rows.filter((row) => row.pendingCents > 0).length} profesionales`}
         </p>
+      ) : null}
+
+      {owed && otherMonths.length > 0 ? (
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm text-muted-foreground">
+          <span>
+            Falta pagar en total{" "}
+            <span className="font-semibold text-foreground tabular-nums">{formatMoney(owed.owedCents, owed.currency, locale)}</span>
+            . Con cobros sin pagar también en:
+          </span>
+          {otherMonths.slice(0, 6).map((item) => (
+            <Button
+              key={`${item.year}-${item.month}`}
+              type="button"
+              variant="link"
+              size="sm"
+              className="h-auto px-0"
+              disabled={!onPeriodChange}
+              onClick={() => onPeriodChange?.({ year: item.year, month: item.month })}
+            >
+              {monthLabel(item, locale)} ({plainAmount(item.cents, owed.currency, locale)})
+            </Button>
+          ))}
+        </div>
       ) : null}
 
       {rows.length > 0 ? (
@@ -1591,6 +1623,13 @@ export function MyCommissionsPanel({
           </span>
         </div>
         {statusNote ? <p className="mt-2 text-sm text-muted-foreground">{statusNote}</p> : null}
+        {mine.attended && mine.attended.unpaidCents > 0 ? (
+          // Lo atendido que aún no se cobra: no se perdió, su comisión llega cuando se cobre.
+          <p className="mt-2 text-sm text-muted-foreground">
+            Atendiste y aún no se cobra: <span className="font-medium text-foreground tabular-nums">{plain(mine.attended.unpaidCents)}</span>.
+            Tu comisión de eso llega cuando se cobre.
+          </p>
+        ) : null}
         {(myPayments.data?.data ?? []).length > 0 ? (
           <ul aria-label="Mis pagos de este mes" className="mt-3 flex flex-col gap-1 border-t pt-3 text-sm">
             {(myPayments.data?.data ?? []).map((payment) => (
