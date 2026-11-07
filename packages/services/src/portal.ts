@@ -23,7 +23,6 @@ import { appointmentCalendarDownload } from "./appointment-calendar.js"
 import { type BookingLinkSlot, listWeekSlots } from "./booking-links.js"
 import { branchAddressColumns, branchAddressWriter, branchDirectionsWriter } from "./branches.js"
 import { type BudgetWithTotals, decideBudget, getBudgetDetail, listBudgets } from "./budgets.js"
-import { getPatientDocument, listPatientDocuments } from "./clinical.js"
 import { sendOutbound } from "./conversations.js"
 import { invalidField, isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgLocale, getOrgLocale } from "./locale.js"
@@ -38,6 +37,7 @@ import { requirePatient } from "./patients.js"
 import { getPatientAccount } from "./payments.js"
 import {
   getPortalPolicy,
+  type PortalAllowedScope,
   PORTAL_FIXED,
   portalDisabled,
   requireActivePortalGrant,
@@ -45,38 +45,6 @@ import {
 import { contactDecides } from "./responsibilities.js"
 import type { Storage } from "./storage.js"
 import { createWorkspaceNotification } from "./workspace.js"
-
-/**
- * Quién puede compartir qué en el portal: los presupuestos, quien los envía
- * (recepción incluida, decisión 4); la cuenta, quien ve la caja; los
- * documentos, quien lee la historia.
- */
-export interface PortalShareRights {
-  canShareBudgets: boolean
-  canShareAccount: boolean
-  canShareDocuments: boolean
-}
-
-export function assertShareRights(scope: PortalScope, rights: PortalShareRights): void {
-  if (scope.budgets && !rights.canShareBudgets)
-    throw new ServiceError(
-      "PORTAL_FORBIDDEN",
-      404,
-      "Dar acceso a los presupuestos requiere poder enviarlos",
-    )
-  if (scope.account && !rights.canShareAccount)
-    throw new ServiceError(
-      "PORTAL_FORBIDDEN",
-      404,
-      "Dar acceso a la cuenta requiere permiso de caja",
-    )
-  if (scope.documents.length > 0 && !rights.canShareDocuments)
-    throw new ServiceError(
-      "PORTAL_FORBIDDEN",
-      404,
-      "Dar acceso a los documentos requiere leer la historia",
-    )
-}
 
 /**
  * Portal del paciente: enlaces de un solo uso + sesiones revocables.
@@ -218,7 +186,11 @@ export interface IssuePortalLinkInput {
   patientId: string
   contactId: string
   conversationId: string
-  scope: {
+  /**
+   * Ya no se elige (ADR 0150): el portal muestra todo lo suyo con el límite de
+   * la clínica. Se acepta y se ignora, para los clientes de antes.
+   */
+  scope?: {
     appointments?: boolean
     budgets?: boolean
     account?: boolean
@@ -261,45 +233,64 @@ export async function requireActiveGrant(
   }
 }
 
-export async function assertScope(
+/**
+ * Lo que ve un acceso al portal: todo lo suyo, con el límite que fija la
+ * clínica en Configuración (ADR 0150). Ya no lo elige quien da el acceso, ni
+ * lo recortan sus permisos: el paciente ve lo suyo porque es suyo, y lo que
+ * protege es la identidad comprobada en persona y la regla de lo terminado.
+ */
+export function portalScopeOf(policy: { allowedScope: PortalAllowedScope }): PortalScope {
+  return {
+    appointments: policy.allowedScope.appointments,
+    budgets: policy.allowedScope.budgets,
+    account: policy.allowedScope.account,
+    documents: [],
+    papers: policy.allowedScope.documents,
+  }
+}
+
+/** El alcance de un acceso nuevo; si la clínica no deja ver nada, no hay portal que dar. */
+export async function assertScope(tx: Db, orgId: string): Promise<PortalScope> {
+  const scope = portalScopeOf(await getPortalPolicy(tx, orgId))
+  if (!scope.appointments && !scope.budgets && !scope.account && !scope.papers) {
+    throw validation("El portal no muestra nada", {
+      scope: "En Configuración › Portal del paciente la clínica no deja ver nada: elige qué se ve",
+    })
+  }
+  return scope
+}
+
+/**
+ * Un enlace nuevo deja sin efecto los pendientes del mismo par (quien entra y
+ * su paciente): un QR o un mensaje viejo ya no abre el portal.
+ */
+async function revokePendingLinks(
   tx: Db,
   orgId: string,
+  actorUserId: string,
   patientId: string,
-  scope: IssuePortalLinkInput["scope"],
-): Promise<PortalScope> {
-  const appointments = scope?.appointments === true
-  const budgets = scope?.budgets === true
-  const account = scope?.account === true
-  const raw = Array.isArray(scope?.documentIds) ? scope.documentIds : []
-  const documentIds = [...new Set(raw.filter((id) => typeof id === "string" && id.length > 0))]
-  // Los rechazos son de «Qué verá» (`scope` en el cuerpo de todas las rutas que lo llaman).
-  if (documentIds.length > 100)
-    throw validation("Demasiados documentos autorizados (máximo 100)", {
-      scope: "Elige como mucho 100 documentos",
-    })
-  if (!appointments && !budgets && !account && documentIds.length === 0) {
-    throw validation("El alcance no puede estar vacío", {
-      scope: "Elige al menos una cosa que verá",
+  contactId: string,
+): Promise<void> {
+  const now = new Date()
+  const revoked = await tx
+    .update(portalLink)
+    .set({ status: "revocado", revokedAt: now, revokedBy: actorUserId, updatedAt: now })
+    .where(
+      and(
+        eq(portalLink.organizationId, orgId),
+        eq(portalLink.patientId, patientId),
+        eq(portalLink.contactId, contactId),
+        eq(portalLink.status, "pendiente"),
+      ),
+    )
+    .returning({ id: portalLink.id })
+  for (const row of revoked) {
+    await auditPortal(tx, orgId, actorUserId, "portal.link_revoked", "portal_link", row.id, {
+      patientId,
+      contactId,
+      reason: "enlace_nuevo",
     })
   }
-  if (documentIds.length > 0) {
-    const found = await tx
-      .select({ id: patientDocument.id })
-      .from(patientDocument)
-      .where(
-        and(
-          eq(patientDocument.organizationId, orgId),
-          eq(patientDocument.patientId, patientId),
-          inArray(patientDocument.id, documentIds),
-        ),
-      )
-    if (found.length !== documentIds.length) {
-      throw new ServiceError("NOT_FOUND", 404, "Documento no encontrado", {
-        scope: "Uno de los documentos ya no está: vuelve a elegirlos",
-      })
-    }
-  }
-  return { appointments, budgets, account, documents: documentIds }
 }
 
 async function linkView(tx: Db, orgId: string, row: PortalLinkRow): Promise<PortalLinkView> {
@@ -350,7 +341,7 @@ export async function issuePortalLink(
   orgId: string,
   actorUserId: string,
   input: IssuePortalLinkInput,
-  deliver: { linkUrl: (rawLinkToken: string) => string } & PortalShareRights,
+  deliver: { linkUrl: (rawLinkToken: string) => string },
 ): Promise<IssuedPortalLink> {
   const policy = await getPortalPolicy(tx, orgId)
   if (!policy.enabled) throw portalDisabled()
@@ -369,20 +360,7 @@ export async function issuePortalLink(
   if (!contactRow) throw notFound("Contacto")
   if (!contactRow.isActive) throw validation("El contacto está inactivo")
   await requirePatientLink(tx, orgId, input.patientId, input.contactId)
-  const scope = await assertScope(tx, orgId, input.patientId, input.scope)
-  if (scope.appointments && !policy.allowedScope.appointments) {
-    throw validation("Las citas no están permitidas por la política del portal")
-  }
-  if (scope.budgets && !policy.allowedScope.budgets) {
-    throw validation("Los presupuestos no están permitidos por la política del portal")
-  }
-  if (scope.account && !policy.allowedScope.account) {
-    throw validation("La cuenta no está permitida por la política del portal")
-  }
-  if (scope.documents.length > 0 && !policy.allowedScope.documents) {
-    throw validation("Los documentos no están permitidos por la política del portal")
-  }
-  assertShareRights(scope, deliver)
+  const scope = await assertScope(tx, orgId)
   if (idempotencyKey) {
     const [existing] = await tx
       .select()
@@ -433,6 +411,7 @@ export async function issuePortalLink(
     )
   }
 
+  await revokePendingLinks(tx, orgId, actorUserId, input.patientId, input.contactId)
   const token = rawToken()
   const pin = String(randomInt(0, 1_000_000)).padStart(6, "0")
   const now = new Date()
@@ -503,7 +482,8 @@ export async function issuePortalLink(
 export interface IssuePortalActivationQrInput {
   patientId: string
   contactId: string
-  scope: IssuePortalLinkInput["scope"]
+  /** Ya no se elige (ADR 0150): se acepta y se ignora. */
+  scope?: IssuePortalLinkInput["scope"]
   idempotencyKey?: string
 }
 
@@ -544,23 +524,12 @@ export async function issuePortalActivationQr(
   if (!contactRow) throw notFound("Contacto")
   if (!contactRow.isActive) throw validation("El contacto está inactivo")
   await requirePatientLink(tx, orgId, input.patientId, input.contactId)
-  const scope = await assertScope(tx, orgId, input.patientId, input.scope)
-  if (scope.appointments && !policy.allowedScope.appointments) {
-    throw validation("Las citas no están permitidas por la política del portal")
-  }
-  if (scope.budgets && !policy.allowedScope.budgets) {
-    throw validation("Los presupuestos no están permitidos por la política del portal")
-  }
-  if (scope.account && !policy.allowedScope.account) {
-    throw validation("La cuenta no está permitida por la política del portal")
-  }
-  if (scope.documents.length > 0 && !policy.allowedScope.documents) {
-    throw validation("Los documentos no están permitidos por la política del portal")
-  }
+  const scope = await assertScope(tx, orgId)
   if (idempotencyKey) {
     throw conflict("PORTAL_REPLAY", "La activación QR no admite reintentos con la misma clave")
   }
   await requireActivePortalGrant(tx, orgId, input.patientId, input.contactId)
+  await revokePendingLinks(tx, orgId, actorUserId, input.patientId, input.contactId)
   const token = rawToken()
   const pin = String(randomInt(0, 1_000_000)).padStart(6, "0")
   const now = new Date()
@@ -857,8 +826,7 @@ export interface PortalContext {
  * Valida el token de sesión en cada lectura: portal habilitado, revocación,
  * expiración, fichas activas, vínculo + grant vigente, sesión atada al grant
  * vigente (nunca a uno anterior reemitido), passkey no revocada y alcance
- * efectivo como intersección (solo reduce: grant y política solo recortan,
- * jamás amplían el alcance congelado de la sesión).
+ * efectivo: el que deja ver la clínica hoy (ADR 0150).
  */
 export async function requirePortalSession(
   tx: Db,
@@ -904,31 +872,9 @@ export async function requirePortalSession(
       throw conflict("PORTAL_REVOKED", "Esta sesión fue revocada")
     }
   }
-  const stored = session.scope ?? {
-    appointments: false,
-    budgets: false,
-    account: false,
-    documents: [],
-  }
-  const granted = grant.scope ?? {
-    appointments: false,
-    budgets: false,
-    account: false,
-    documents: [],
-  }
-  const storedDocs = Array.isArray(stored.documents) ? stored.documents : []
-  const grantedDocs = Array.isArray(granted.documents) ? granted.documents : []
-  const effective: PortalScope = {
-    appointments:
-      stored.appointments === true &&
-      granted.appointments === true &&
-      policy.allowedScope.appointments,
-    budgets: stored.budgets === true && granted.budgets === true && policy.allowedScope.budgets,
-    account: stored.account === true && granted.account === true && policy.allowedScope.account,
-    documents: policy.allowedScope.documents
-      ? storedDocs.filter((id) => grantedDocs.includes(id))
-      : [],
-  }
+  // Todo lo suyo, con el límite de la clínica (ADR 0150): ni el enlace ni el
+  // acceso guardan ya una elección propia que lo recorte.
+  const effective = portalScopeOf(policy)
   let effectiveRow = session
   if (JSON.stringify(effective) !== JSON.stringify(session.scope)) {
     const [refreshed] = await tx
@@ -964,17 +910,6 @@ export function requireScope(
   if (session.scope?.[key] !== true) {
     throw new ServiceError("PORTAL_FORBIDDEN", 404, "Esta sección no está autorizada en tu acceso")
   }
-}
-
-function requireDocumentInScope(session: PortalSessionRow, documentId: string): void {
-  const allowed =
-    Array.isArray(session.scope?.documents) && session.scope.documents.includes(documentId)
-  if (!allowed)
-    throw new ServiceError(
-      "PORTAL_FORBIDDEN",
-      404,
-      "Este documento no está autorizado en tu acceso",
-    )
 }
 
 /**
@@ -1764,66 +1699,6 @@ export async function budgetsSeenInPortal(
       .filter((row) => row.budgetId && row.at)
       .map((row) => [row.budgetId as string, row.at as Date]),
   )
-}
-
-export interface PortalDocumentView {
-  id: string
-  category: string
-  label: string
-  contentType: string
-  sizeBytes: number
-  createdAt: Date
-}
-
-/** Solo documentos explícitamente autorizados en el alcance (sin storageKey). */
-export async function listPortalDocuments(
-  tx: Db,
-  ctx: PortalContext,
-): Promise<PortalDocumentView[]> {
-  const authorized = ctx.session.scope?.documents ?? []
-  if (authorized.length === 0) return []
-  const docs = await listPatientDocuments(tx, ctx.orgId, ctx.session.patientId)
-  await logAccess(tx, ctx.orgId, ctx.session.id, "documents.listed")
-  return docs
-    .filter((doc) => authorized.includes(doc.id))
-    .map((doc) => ({
-      id: doc.id,
-      category: doc.category,
-      label: doc.label,
-      contentType: doc.contentType,
-      sizeBytes: doc.sizeBytes,
-      createdAt: doc.createdAt,
-    }))
-}
-
-/**
- * URL firmada de lectura (5 min) con control en cada acceso: verifica alcance
- * + pertenencia y registra la lectura antes de firmar.
- */
-export async function getPortalDocumentUrl(
-  tx: Db,
-  ctx: PortalContext,
-  documentId: string,
-  storage: Pick<Storage, "attachmentUrl">,
-): Promise<{ url: string; expiresInSeconds: number }> {
-  requireDocumentInScope(ctx.session, documentId)
-  const doc = await getPatientDocument(tx, ctx.orgId, ctx.session.patientId, documentId)
-  await auditPortal(
-    tx,
-    ctx.orgId,
-    portalActor(ctx.session),
-    "portal.document_read",
-    "patient_document",
-    documentId,
-    {
-      sessionId: ctx.session.id,
-      contactId: ctx.session.contactId,
-    },
-  )
-  await logAccess(tx, ctx.orgId, ctx.session.id, "document.read", "patient_document", documentId)
-  const expiresInSeconds = 300
-  const url = await storage.attachmentUrl(doc.storageKey, expiresInSeconds)
-  return { url, expiresInSeconds }
 }
 
 export interface PortalAccountView {

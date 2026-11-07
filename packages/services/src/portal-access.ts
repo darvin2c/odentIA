@@ -31,7 +31,6 @@ import {
 } from "./portal-policy.js"
 import {
   assertScope,
-  assertShareRights,
   issuePortalActivationQr,
   issuePortalLink,
   requireActiveGrant,
@@ -39,7 +38,6 @@ import {
   type IssuePortalLinkInput,
   type PortalContext,
   type PortalSessionView,
-  type PortalShareRights,
 } from "./portal.js"
 import { contactDecides } from "./responsibilities.js"
 import { createTask, settleTask } from "./tasks.js"
@@ -250,7 +248,8 @@ export interface CreatePortalGrantInput {
   patientId: string
   contactId: string
   relationship?: "self" | "guardian" | "family" | "other"
-  scope: IssuePortalLinkInput["scope"]
+  /** Ya no se elige (ADR 0150): se acepta y se ignora. */
+  scope?: IssuePortalLinkInput["scope"]
   verifiedMethod: string
   evidenceNote?: string | null
 }
@@ -278,7 +277,7 @@ export async function createPortalGrant(
   if (!contactRow.isActive) throw validation("El contacto está inactivo")
   const evidenceNote = input.evidenceNote?.trim()?.slice(0, 500) || null
   await ensurePatientLink(tx, orgId, actorUserId, input.patientId, input.contactId, input.relationship ?? "other")
-  const scope = await assertScope(tx, orgId, input.patientId, input.scope)
+  const scope = await assertScope(tx, orgId)
   const ensured = await ensurePortalGrant(tx, orgId, actorUserId, {
     patientId: input.patientId,
     contactId: input.contactId,
@@ -881,13 +880,6 @@ export async function revokePortalPasskey(
 
 // ------------------------------------------------- el portal en un paso ---
 
-/** «4•••••04»: el documento a la vista sin decirlo entero. */
-function maskedDocument(docNumber: string): string {
-  const clean = docNumber.trim()
-  if (clean.length <= 3) return "•".repeat(clean.length)
-  return `${clean.slice(0, 1)}${"•".repeat(Math.max(clean.length - 3, 1))}${clean.slice(-2)}`
-}
-
 export interface PortalAccessCandidate {
   contactId: string
   name: string
@@ -895,7 +887,8 @@ export interface PortalAccessCandidate {
   relation: "self" | "representante"
   /**
    * Lo que recepción comprueba en persona: el tipo de su documento y el número
-   * enmascarado («DNI 4•••••04»). Nulo si su ficha no tiene documento.
+   * entero («DNI 47120836»), para compararlo con el que tiene en la mano.
+   * Nulo si su ficha no tiene documento.
    */
   document: string | null
   /** Escribió por WhatsApp en las últimas 24 horas: el enlace puede ir por ahí. */
@@ -971,7 +964,7 @@ async function portalCandidates(tx: Db, orgId: string, patientId: string): Promi
       contactId: row.contactId,
       name: row.name,
       relation,
-      document: row.docNumber ? `${documentText(row.docType, "").trim() || "Documento"} ${maskedDocument(row.docNumber)}` : null,
+      document: row.docNumber ? `${documentText(row.docType, "").trim() || "Documento"} ${row.docNumber.trim()}` : null,
       whatsappReady: !!(await whatsappReady(tx, orgId, row.contactId)),
     })
   }
@@ -1053,8 +1046,8 @@ export async function getPortalAccessSummary(tx: Db, orgId: string, patientId: s
 export interface GivePortalAccessInput {
   /** ¿Quién entra? La persona o su representante legal. */
   contactId: string
-  /** ¿Qué verá? */
-  scope: { appointments?: boolean; budgets?: boolean; account?: boolean; documentIds?: string[] }
+  /** Ya no se pregunta «Qué verá» (ADR 0150): se acepta y se ignora. */
+  scope?: { appointments?: boolean; budgets?: boolean; account?: boolean; documentIds?: string[] }
   /** «Comprobé su identidad: vi su DNI 4•••••04». */
   identityChecked: boolean
   /** ¿Cómo le llega? Está aquí (QR) o por su WhatsApp. */
@@ -1075,14 +1068,13 @@ async function deliverPortalAccess(
   tx: Db,
   orgId: string,
   actorUserId: string,
-  input: { patientId: string; contactId: string; scope: GivePortalAccessInput["scope"]; delivery: "qr" | "whatsapp" },
-  deliver: { linkUrl: (rawLinkToken: string) => string } & PortalShareRights,
+  input: { patientId: string; contactId: string; delivery: "qr" | "whatsapp" },
+  deliver: { linkUrl: (rawLinkToken: string) => string },
 ): Promise<{ activationUrlOnce: string | null; pinOnce: string; sentTo: string | null }> {
   if (input.delivery === "qr") {
     const issued = await issuePortalActivationQr(tx, orgId, actorUserId, {
       patientId: input.patientId,
       contactId: input.contactId,
-      scope: input.scope,
     })
     return { activationUrlOnce: deliver.linkUrl(issued.rawTokenOnce), pinOnce: issued.pinOnce, sentTo: null }
   }
@@ -1096,7 +1088,7 @@ async function deliverPortalAccess(
     tx,
     orgId,
     actorUserId,
-    { patientId: input.patientId, contactId: input.contactId, conversationId: ready.conversationId, scope: input.scope },
+    { patientId: input.patientId, contactId: input.contactId, conversationId: ready.conversationId },
     deliver,
   )
   if (!issued.pinOnce) throw new Error("No se pudo emitir el código")
@@ -1104,11 +1096,12 @@ async function deliverPortalAccess(
 }
 
 /**
- * «Dar acceso al portal» en un paso (decisión 9): quién entra, qué verá, la
- * comprobación en persona con su documento y cómo le llega, en una sola
- * transacción. El grant se crea con el método que corresponde (su documento,
- * o la representación de un menor), el enlace vale 3 días y el código de 6
- * dígitos se le dice aparte. Recepción puede dar acceso a los presupuestos.
+ * «Dar acceso al portal» en un paso (decisión 9): quién entra, la comprobación
+ * en persona con su documento y cómo le llega, en una sola transacción. Lo que
+ * verá no se elige (ADR 0150): todo lo suyo, con el límite de la clínica. El
+ * grant se crea con el método que corresponde (su documento, o la
+ * representación de un menor), el enlace vale 3 días y el código de 6 dígitos
+ * se le dice aparte.
  */
 export async function givePortalAccess(
   tx: Db,
@@ -1116,7 +1109,7 @@ export async function givePortalAccess(
   actorUserId: string,
   patientId: string,
   input: GivePortalAccessInput,
-  deliver: { linkUrl: (rawLinkToken: string) => string } & PortalShareRights,
+  deliver: { linkUrl: (rawLinkToken: string) => string },
 ): Promise<PortalAccessGiven> {
   const policy = await getPortalPolicy(tx, orgId)
   if (!policy.enabled) throw portalDisabled()
@@ -1127,17 +1120,14 @@ export async function givePortalAccess(
   if (!candidate.document) throw invalidField("contactId", "Primero completa su documento")
   if (input.identityChecked !== true)
     throw invalidField("identityChecked", "Marca que comprobaste su identidad con su documento")
-  const scope = await assertScope(tx, orgId, patientId, input.scope)
-  assertShareRights(scope, deliver)
   const grant = await createPortalGrant(tx, orgId, actorUserId, {
     patientId,
     contactId: input.contactId,
-    scope: input.scope,
     verifiedMethod: candidate.relation === "self" ? "presencial_documento" : "representacion_verificada",
     // El tipo de documento que vio, sin su número.
     evidenceNote: `Vio su ${candidate.document.split(" ")[0] ?? "documento"} en persona`,
   })
-  const delivered = await deliverPortalAccess(tx, orgId, actorUserId, { patientId, contactId: input.contactId, scope: input.scope, delivery: input.delivery }, deliver)
+  const delivered = await deliverPortalAccess(tx, orgId, actorUserId, { patientId, contactId: input.contactId, delivery: input.delivery }, deliver)
   await auditPortal(tx, orgId, actorUserId, "portal.access_given", "portal_grant", grant.id, {
     patientId,
     contactId: input.contactId,
@@ -1146,40 +1136,12 @@ export async function givePortalAccess(
   return { grantId: grant.id, ...delivered }
 }
 
-/** «Cambiar»: lo que verá. No vuelve a comprobar su identidad ni le envía nada. */
-export async function changePortalAccess(
-  tx: Db,
-  orgId: string,
-  actorUserId: string,
-  grantId: string,
-  input: { scope: GivePortalAccessInput["scope"] },
-  rights: PortalShareRights,
-): Promise<PortalGrant> {
-  const policy = await getPortalPolicy(tx, orgId)
-  if (!policy.enabled) throw portalDisabled()
-  const [grant] = await tx
-    .select()
-    .from(portalGrant)
-    .where(and(eq(portalGrant.organizationId, orgId), eq(portalGrant.id, grantId)))
-    .limit(1)
-  if (!grant || !isGrantUsable(grant)) throw notFound("Acceso del portal")
-  const scope = await assertScope(tx, orgId, grant.patientId, input.scope)
-  assertShareRights(scope, rights)
-  const ensured = await ensurePortalGrant(tx, orgId, actorUserId, {
-    patientId: grant.patientId,
-    contactId: grant.contactId,
-    scope,
-    verifiedMethod: grant.verifiedMethod,
-    audit: (action, entityId, metadata) => auditPortal(tx, orgId, actorUserId, action, "portal_grant", entityId, metadata),
-  })
-  return grantView(tx, orgId, ensured.grant)
-}
-
 /**
  * «Enviar nuevo enlace» (volver a entrar, decisión 9): lo hace una persona del
  * equipo, sin volver a comprobar su identidad, para un acceso que sigue
  * vigente. El enlace sale por su WhatsApp o en QR, y el código se le dice
- * aparte: nunca juntos. Atiende el pedido que dejó el agente en «Te espera».
+ * aparte: nunca juntos. El enlace nuevo deja sin efecto los anteriores que no
+ * se usaron. Atiende el pedido que dejó el agente en «Te espera».
  */
 export async function resendPortalAccess(
   tx: Db,
@@ -1187,7 +1149,7 @@ export async function resendPortalAccess(
   actorUserId: string,
   grantId: string,
   input: { delivery: "qr" | "whatsapp" },
-  deliver: { linkUrl: (rawLinkToken: string) => string } & PortalShareRights,
+  deliver: { linkUrl: (rawLinkToken: string) => string },
 ): Promise<PortalAccessGiven> {
   const policy = await getPortalPolicy(tx, orgId)
   if (!policy.enabled) throw portalDisabled()
@@ -1205,19 +1167,12 @@ export async function resendPortalAccess(
       "Ya no puede entrar al portal por este paciente: quita este acceso y, si corresponde, dale uno a quien decide por él",
     )
   }
-  const scope = grant.scope
   const delivered = await deliverPortalAccess(
     tx,
     orgId,
     actorUserId,
-    {
-      patientId: grant.patientId,
-      contactId: grant.contactId,
-      scope: { appointments: scope.appointments, budgets: scope.budgets, account: scope.account, documentIds: scope.documents },
-      delivery: input.delivery,
-    },
-    // El acceso ya existe: el enlace nuevo lleva lo mismo que ya veía.
-    { linkUrl: deliver.linkUrl, canShareBudgets: true, canShareAccount: true, canShareDocuments: true },
+    { patientId: grant.patientId, contactId: grant.contactId, delivery: input.delivery },
+    deliver,
   )
   const pending = await tx
     .select({ id: crmTask.id })

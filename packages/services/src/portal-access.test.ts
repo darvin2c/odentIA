@@ -493,7 +493,7 @@ async function adultWithDocument(number: number, doc: string | null): Promise<{ 
   return { patientId: created!.id, personId }
 }
 
-it("dar acceso en un paso: su documento a la vista, recepción comparte presupuestos y el código va aparte", async () => {
+it("dar acceso en un paso: su documento entero a la vista, ve todo lo suyo sin elegir y el código va aparte", async () => {
   const sin = await adultWithDocument(9301, null)
   // Sin documento no se puede comprobar su identidad.
   expect(
@@ -513,11 +513,12 @@ it("dar acceso en un paso: su documento a la vista, recepción comparte presupue
 
   const con = await adultWithDocument(9302, "47120836")
   const summary = await withOrgContext(appDb, ORG, (tx) => getPortalAccessSummary(tx, ORG, con.patientId))
-  // El documento se dice con su tipo y sin el número entero.
+  // El documento se dice con su tipo y su número entero, para compararlo con el que tiene en la mano.
   expect(summary.candidates).toEqual([
-    expect.objectContaining({ contactId: con.personId, relation: "self", document: "DNI 4•••••36", whatsappReady: false }),
+    expect.objectContaining({ contactId: con.personId, relation: "self", document: "DNI 47120836", whatsappReady: false }),
   ])
-  const rights = { canShareBudgets: true, canShareAccount: false, canShareDocuments: false }
+  // Lo que verá ya no depende de los permisos de quien da el acceso (ADR 0150).
+  const rights = NO_RIGHTS
   // Sin marcar la comprobación no se da.
   expect(
     await errorCode(
@@ -533,21 +534,6 @@ it("dar acceso en un paso: su documento a la vista, recepción comparte presupue
       ),
     ),
   ).toBe("VALIDATION")
-  // La cuenta pide caja: recepción no la comparte.
-  expect(
-    await errorCode(
-      withOrgContext(appDb, ORG, (tx) =>
-        givePortalAccess(
-          tx,
-          ORG,
-          ACTOR,
-          con.patientId,
-          { contactId: con.personId, scope: { appointments: true, account: true }, identityChecked: true, delivery: "qr" },
-          { linkUrl: (token) => `https://portal.test/a/${token}`, ...rights },
-        ),
-      ),
-    ),
-  ).toBe("PORTAL_FORBIDDEN")
   const given = await withOrgContext(appDb, ORG, (tx) =>
     givePortalAccess(
       tx,
@@ -566,7 +552,38 @@ it("dar acceso en un paso: su documento a la vista, recepción comparte presupue
   expect(after.access).toEqual([
     expect.objectContaining({ contactId: con.personId, relation: "self", saved: false, lastEntryAt: null }),
   ])
-  expect(after.access[0]?.scope).toMatchObject({ appointments: true, budgets: true, account: false })
+  // Todo lo suyo, con el límite de la clínica: también la cuenta y sus documentos, sin elegirlos.
+  expect(after.access[0]?.scope).toMatchObject({ appointments: true, budgets: true, account: true, papers: true })
+})
+
+it("«Enviar nuevo enlace» deja sin efecto el enlace anterior que no se usó", async () => {
+  const rosa = await adultWithDocument(9304, "40000005")
+  const grant = await withOrgContext(appDb, ORG, (tx) =>
+    createPortalGrant(tx, ORG, ACTOR, {
+      patientId: rosa.patientId,
+      contactId: rosa.personId,
+      verifiedMethod: "presencial_documento",
+    }),
+  )
+  const deliver = { linkUrl: (token: string) => `https://portal.test/a/${token}` }
+  const first = await withOrgContext(appDb, ORG, (tx) => resendPortalAccess(tx, ORG, ACTOR, grant.id, { delivery: "qr" }, deliver))
+  const second = await withOrgContext(appDb, ORG, (tx) => resendPortalAccess(tx, ORG, ACTOR, grant.id, { delivery: "qr" }, deliver))
+  const tokenOf = (url: string | null) => url?.split("/a/")[1] ?? ""
+  const links = await withOrgContext(appDb, ORG, (tx) =>
+    tx
+      .select({ status: portalLink.status, tokenHash: portalLink.tokenHash })
+      .from(portalLink)
+      .where(and(eq(portalLink.patientId, rosa.patientId), eq(portalLink.contactId, rosa.personId))),
+  )
+  const hash = (value: string) => createHash("sha256").update(value, "utf8").digest("hex")
+  expect(links.find((row) => row.tokenHash === hash(tokenOf(first.activationUrlOnce)))?.status).toBe("revocado")
+  expect(links.find((row) => row.tokenHash === hash(tokenOf(second.activationUrlOnce)))?.status).toBe("pendiente")
+  // El QR viejo ya no abre el portal, aunque se escriba bien el código.
+  expect(
+    await errorCode(
+      withOrgContext(appDb, ORG, (tx) => exchangePortalToken(tx, ORG, tokenOf(first.activationUrlOnce), { pin: first.pinOnce })),
+    ),
+  ).not.toBe("OK")
 })
 
 it("pedir volver al portal por el chat deja el pedido en «Te espera» y lo atiende una persona", async () => {

@@ -9,11 +9,13 @@ import {
   getPortalAppointmentCalendar,
   getPortalQuestionnaire,
   getPortalAppointments,
-  getPortalDocumentUrl,
+  getPortalPaperFileUrl,
+  getPortalPaperPdf,
   getPortalRescheduleSlots,
   getPortalSessionInfo,
   listPortalBudgets,
-  listPortalDocuments,
+  listPortalPapers,
+  PORTAL_PAPER_KINDS,
   markPortalBudgetSeen,
   rememberPortalSession,
   requirePortalSession,
@@ -71,7 +73,8 @@ const MAX_BUCKETS = 10000
 export function createPublicPortalRoute(deps: {
   db: Db
   ownerDb: Db
-  storage: Pick<Storage, "attachmentUrl">
+  /** Firmar archivos y leer lo emitido (el mismo PDF que ve el equipo). */
+  storage: Pick<Storage, "attachmentUrl"> & Partial<Pick<Storage, "getAttachment" | "putPatientDocument" | "deleteAttachment">>
   webURL: string
   remoteAddress?: (c: Context) => string | undefined
 }) {
@@ -321,12 +324,36 @@ export function createPublicPortalRoute(deps: {
     return portalCall(c, (tx, ctx) => decidePortalBudget(tx, ctx, params.data.id, parsed.data))
   })
 
-  app.get("/documents", async (c) => portalCall(c, (tx, ctx) => listPortalDocuments(tx, ctx)))
+  // «Tus documentos»: todo lo suyo, con las reglas del servidor (ADR 0150).
+  app.get("/papers", async (c) => portalCall(c, (tx, ctx) => listPortalPapers(tx, ctx)))
 
-  app.get("/documents/:id/url", async (c) => {
+  // Un archivo subido o una imagen: una dirección firmada de 5 minutos.
+  app.get("/papers/archivo/:id/url", async (c) => {
     const params = z.object({ id: z.uuid() }).safeParse(c.req.param())
     if (!params.success) return validationError(c, params.error.issues)
-    return portalCall(c, (tx, ctx) => getPortalDocumentUrl(tx, ctx, params.data.id, deps.storage))
+    return portalCall(c, (tx, ctx) => getPortalPaperFileUrl(tx, ctx, params.data.id, deps.storage))
+  })
+
+  // Lo que emite la clínica (receta, orden, descanso, hoja, consentimiento, comprobante), en PDF.
+  app.get("/papers/:kind/:id/pdf", async (c) => {
+    const params = z
+      .object({ kind: z.enum(PORTAL_PAPER_KINDS), id: z.uuid() })
+      .safeParse(c.req.param())
+    if (!params.success) return validationError(c, params.error.issues)
+    return portalCall(
+      c,
+      (tx, ctx) => getPortalPaperPdf(tx, ctx, params.data.kind, params.data.id, deps.storage),
+      (pdf) =>
+        new Response(Buffer.from(pdf.bytes), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/pdf",
+            "Content-Disposition": `inline; filename="${pdf.filename.replace(/[^A-Za-z0-9._-]+/g, "-")}"`,
+            "Cache-Control": "no-store",
+            "Referrer-Policy": "no-referrer",
+          },
+        }),
+    )
   })
 
   app.get("/account", async (c) => portalCall(c, (tx, ctx) => getPortalAccount(tx, ctx)))
