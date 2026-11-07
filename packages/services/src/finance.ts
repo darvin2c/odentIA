@@ -2490,9 +2490,11 @@ export async function getMonthlyCommissions(
   const liveById = new Map(live.map((app) => [app.appId, app]))
   const frozen = await frozenLines(tx, orgId, query.professionalUserId)
   const frozenCobros = frozen.filter((f) => f.line.kind === "cobro" && f.line.applicationId)
-  const adjusted = new Set(
-    frozen.filter((f) => f.line.kind === "ajuste" && f.line.applicationId).map((f) => f.line.applicationId as string),
-  )
+  // Lo ya descontado de cada cobro anulado después de pagado: un descuento puede repartirse en varios pagos.
+  const discounted = new Map<string, number>()
+  for (const f of frozen)
+    if (f.line.kind === "ajuste" && f.line.applicationId)
+      discounted.set(f.line.applicationId, (discounted.get(f.line.applicationId) ?? 0) + f.line.commissionCents)
   // Cobros pagados cuya aplicación ya no está en pie (cualquier mes).
   const paidIds = frozenCobros.map((f) => f.line.applicationId as string)
   const stillLive = new Set<string>()
@@ -2571,32 +2573,56 @@ export async function getMonthlyCommissions(
     })
   }
   lines.sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime() || (a.applicationId < b.applicationId ? -1 : 1))
+  // Lo que queda por descontar es del profesional, no de un mes: se cuenta una sola vez, de cualquier
+  // mes, y cada pago descuenta lo que alcance (el más antiguo primero).
   const adjustments: CommissionAdjustment[] = frozenCobros
-    .filter((f) => {
+    .filter((f) => !stillLive.has(f.line.applicationId as string) && f.line.commissionCents > 0)
+    .map((f) => {
       const appId = f.line.applicationId as string
-      return !stillLive.has(appId) && !adjusted.has(appId) && f.line.commissionCents > 0
+      return {
+        applicationId: appId,
+        patientId: f.line.patientId ?? "",
+        patientName: f.line.patientId ? (names.get(f.line.patientId) ?? "") : "",
+        description: f.line.description,
+        commissionCents: f.line.commissionCents - (discounted.get(appId) ?? 0),
+        paidAt: f.settledAt,
+      }
     })
-    .map((f) => ({
-      applicationId: f.line.applicationId as string,
-      patientId: f.line.patientId ?? "",
-      patientName: f.line.patientId ? (names.get(f.line.patientId) ?? "") : "",
-      description: f.line.description,
-      commissionCents: f.line.commissionCents,
-      paidAt: f.settledAt,
-    }))
+    .filter((adjustment) => adjustment.commissionCents > 0)
+    .sort((a, b) => (a.paidAt?.getTime() ?? 0) - (b.paidAt?.getTime() ?? 0) || (a.applicationId < b.applicationId ? -1 : 1))
   const counted = lines.filter((line) => !line.voidedAfterPaid)
   const fresh = lines.filter((line) => !line.settled)
   const paid = lines.filter((line) => line.settled)
   const adjustmentCents = sumCents(adjustments.map((a) => ({ amountCents: a.commissionCents })))
   const freshCents = sumCents(fresh.map((l) => ({ amountCents: l.commissionCents })))
-  const pendingCents = freshCents - adjustmentCents
-  const paidCents = sumCents(paid.map((l) => ({ amountCents: l.commissionCents })))
+  /** Lo que el próximo pago de este mes descuenta: nunca más de lo nuevo del mes. */
+  const discountCents = Math.min(freshCents, adjustmentCents)
+  const pendingCents = freshCents - discountCents
+  // Lo pagado es el dinero que salió por los cobros de este mes: cada pago que congeló alguno, con lo
+  // que descontó. Se buscan por sus líneas (no por su mes), así cuentan también los pagos históricos.
+  const [settledMonth] = await tx.execute<{ paid: string; discounted: string }>(sql`
+    select coalesce(sum(s.commission_cents), 0)::text as paid,
+      coalesce(sum((select sum(a.commission_cents) from commission_settlement_line a
+        where a.organization_id = s.organization_id and a.settlement_id = s.id and a.kind = 'ajuste' and a.voided_at is null)), 0)::text as discounted
+    from commission_settlement s
+    where s.organization_id = ${orgId} and s.professional_user_id = ${query.professionalUserId}
+      and s.voided_at is null and s.currency = ${unit}
+      and exists (select 1 from commission_settlement_line l where l.organization_id = s.organization_id and l.settlement_id = s.id
+        and l.kind = 'cobro' and l.voided_at is null and l.occurred_at >= ${start.toISOString()}::timestamptz and l.occurred_at < ${end.toISOString()}::timestamptz)`)
+  const paidCents = Number(settledMonth?.paid ?? 0)
+  const discountedCents = Number(settledMonth?.discounted ?? 0)
   const lastPaidAt = paid.reduce<Date | null>(
     (latest, line) => (line.paidAt && (!latest || line.paidAt > latest) ? line.paidAt : latest),
     null,
   )
   const status: CommissionStatus =
-    pendingCents > 0 ? "por_pagar" : pendingCents < 0 ? "por_descontar" : paidCents > 0 ? "pagado" : "sin_cobros"
+    pendingCents > 0
+      ? "por_pagar"
+      : discountCents > 0
+        ? "por_descontar"
+        : paid.length > 0
+          ? "pagado"
+          : "sin_cobros"
   const professionalNames = await userNames(tx, [query.professionalUserId])
   return {
     professionalUserId: query.professionalUserId,
@@ -2617,9 +2643,14 @@ export async function getMonthlyCommissions(
     /** Lo que le corresponde por el mes. */
     commissionCents: sumCents(counted.map((l) => ({ amountCents: l.commissionCents }))),
     paidCents,
-    /** Lo que falta pagarle hoy: lo nuevo del mes menos lo que haya que descontar. */
+    /** Lo que falta pagarle hoy: lo nuevo del mes menos lo que se descuenta en este pago. */
     pendingCents,
+    /** Lo que queda por descontarle de cobros anulados después de pagados, de cualquier mes. */
     adjustmentCents,
+    /** Lo que el próximo pago de este mes descuenta (lo demás queda para otro pago). */
+    discountCents,
+    /** Lo que los pagos de este mes ya descontaron de cobros anulados. */
+    discountedCents,
     lastPaidAt,
     status,
   }
@@ -2762,13 +2793,11 @@ export async function payMonthCommission(
   })
   const view = await getMonthlyCommissions(tx, orgId, input)
   const fresh = view.lines.filter((line) => !line.settled)
-  if (fresh.length === 0 && view.adjustments.length === 0)
+  // Lo que hay que descontar no se paga solo: viaja con los cobros de un mes (de este o de otro).
+  // Sin nada que pagar ni descontar (por ejemplo, sin porcentaje fijado) no se registra nada: congelar
+  // esos cobros a 0 % los dejaría sin comisión aunque después se fije el porcentaje.
+  if (fresh.length === 0 || (view.pendingCents === 0 && view.discountCents === 0))
     throw conflict("COMMISSION_NOTHING_TO_PAY", "No hay nada por pagar de ese mes")
-  if (view.pendingCents <= 0)
-    throw conflict(
-      "COMMISSION_NOT_POSITIVE",
-      "Lo que se anuló después de pagado cubre lo de este mes: se descontará cuando haya más cobros",
-    )
   if (input.expectedCents !== undefined && input.expectedCents !== view.pendingCents)
     throw conflict(
       "COMMISSION_AMOUNT_CHANGED",
@@ -2812,22 +2841,28 @@ export async function payMonthCommission(
         occurredAt: line.occurredAt,
       })
     }
+    // El descuento de este pago, del cobro anulado más antiguo al más nuevo; el último puede ir en parte.
+    let left = view.discountCents
     for (const adjustment of view.adjustments) {
+      if (left <= 0) break
+      const cents = Math.min(left, adjustment.commissionCents)
+      left -= cents
       await tx.insert(commissionSettlementLine).values({
         organizationId: orgId,
         settlementId: settlement.id,
         kind: "ajuste",
-        sourceKey: `adj:${adjustment.applicationId}`,
+        sourceKey: `adj:${adjustment.applicationId}:${settlement.id}`,
         applicationId: adjustment.applicationId,
         patientId: adjustment.patientId || null,
         description: adjustment.description,
         baseCents: 0,
-        commissionCents: adjustment.commissionCents,
+        commissionCents: cents,
         occurredAt: paidAt,
       })
     }
   } catch (e) {
-    // La unicidad por fuente respalda al bloqueo: un cobro nunca entra dos veces.
+    // La unicidad por fuente respalda al bloqueo: un cobro nunca entra dos veces. Los descuentos sí
+    // pueden ir en partes, y los ordena el turno por profesional (también al anular).
     if (isUniqueViolation(e))
       throw conflict("COMMISSION_ALREADY_PAID", "Parte de esos cobros ya está en otro pago registrado")
     throw e
@@ -2837,6 +2872,21 @@ export async function payMonthCommission(
   const monthLabel = new Intl.DateTimeFormat(view.locale, { month: "long", year: "numeric", timeZone: "UTC" }).format(
     new Date(Date.UTC(input.year, input.month - 1, 15)),
   )
+  await audit(tx, orgId, actorUserId, "commission_settlement", settlement.id, "finance.commission_paid")
+  // Si el descuento cubre todo lo del mes, no sale dinero: queda el registro, sin gasto, y se le avisa.
+  if (view.pendingCents === 0) {
+    if (view.inTeam)
+      await createWorkspaceNotification(tx, orgId, {
+        userId: input.professionalUserId,
+        dedupeKey: `commission-paid:${settlement.id}`,
+        title: "Se registró un descuento en tu comisión",
+        body: `${monthLabel}: ${formatMoney(view.discountCents, view.currency, view.locale)} de comisiones ya pagadas de cobros que después se anularon.`,
+        href: `/commissions?year=${input.year}&month=${input.month}`,
+        permission: "commissions.read",
+        actorUserId,
+      })
+    return { settlement, expense: null }
+  }
   const [paidExpense] = await tx
     .insert(expense)
     .values({
@@ -2857,19 +2907,18 @@ export async function payMonthCommission(
     .set({ expenseId: paidExpense.id, updatedAt: paidAt })
     .where(and(eq(commissionSettlement.id, settlement.id), eq(commissionSettlement.organizationId, orgId)))
     .returning()
-  await audit(tx, orgId, actorUserId, "commission_settlement", settlement.id, "finance.commission_paid")
   await audit(tx, orgId, actorUserId, "expense", paidExpense.id, "finance.expense_created")
   // Quien ya no está en el equipo no entra a la clínica: no se le deja un aviso que no verá.
   if (view.inTeam)
     await createWorkspaceNotification(tx, orgId, {
-    userId: input.professionalUserId,
-    dedupeKey: `commission-paid:${settlement.id}`,
-    title: "Se registró el pago de tu comisión",
-    body: `${monthLabel}: ${formatMoney(view.pendingCents, view.currency, view.locale)}.`,
-    href: `/commissions?year=${input.year}&month=${input.month}`,
-    permission: "commissions.read",
-    actorUserId,
-  })
+      userId: input.professionalUserId,
+      dedupeKey: `commission-paid:${settlement.id}`,
+      title: "Se registró el pago de tu comisión",
+      body: `${monthLabel}: ${formatMoney(view.pendingCents, view.currency, view.locale)}.`,
+      href: `/commissions?year=${input.year}&month=${input.month}`,
+      permission: "commissions.read",
+      actorUserId,
+    })
   return { settlement: paid ?? settlement, expense: paidExpense }
 }
 
@@ -2915,6 +2964,16 @@ export async function voidCommissionSettlement(
   settlementId: string,
   input: { reason: string },
 ) {
+  // El mismo turno que el pago: anular mientras se registra otro pago del profesional no debe dejar
+  // un descuento hecho sobre un pago que se está anulando.
+  const [owner] = await tx
+    .select({ professionalUserId: commissionSettlement.professionalUserId })
+    .from(commissionSettlement)
+    .where(and(eq(commissionSettlement.id, settlementId), eq(commissionSettlement.organizationId, orgId)))
+  if (owner)
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`commission:${orgId}:${owner.professionalUserId}`}, 0))`,
+    )
   const [current] = await tx
     .select()
     .from(commissionSettlement)
@@ -2928,6 +2987,21 @@ export async function voidCommissionSettlement(
   if (!voidReason) throw invalidField("reason", "Indica el motivo de la anulación.")
   if (voidReason.length > 2000)
     throw invalidField("reason", "Escribe el motivo en 2000 caracteres como máximo.")
+  // Si otro pago ya descontó un cobro de este (porque después se anuló), anular este primero
+  // dejaría ese descuento sin el pago que lo respaldaba: se anula antes el que descontó.
+  const [later] = await tx.execute<{ settledAt: Date | null }>(sql`
+    select s2.settled_at as "settledAt"
+    from commission_settlement_line l
+    join commission_settlement_line a on a.organization_id = l.organization_id and a.kind = 'ajuste'
+      and a.application_id = l.application_id and a.voided_at is null and a.settlement_id <> l.settlement_id
+    join commission_settlement s2 on s2.organization_id = a.organization_id and s2.id = a.settlement_id and s2.voided_at is null
+    where l.organization_id = ${orgId} and l.settlement_id = ${settlementId} and l.kind = 'cobro' and l.voided_at is null
+    order by s2.settled_at desc limit 1`)
+  if (later)
+    throw conflict(
+      "COMMISSION_DISCOUNTED_LATER",
+      "Un pago posterior descontó un cobro de este pago: anula primero ese pago y después este",
+    )
   const [row] = await tx
     .update(commissionSettlement)
     .set({

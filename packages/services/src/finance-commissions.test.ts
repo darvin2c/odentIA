@@ -201,7 +201,7 @@ it("comisiones: porcentaje sobre lo cobrado de lo atendido, pago en un paso y aj
   expect(later.creditAppliedCents).toBe(1000)
   expect(await view()).toMatchObject({ commissionCents: 1600, paidCents: 1000, pendingCents: 600, status: "por_pagar" })
   const second = await pay()
-  expect(second.expense.amountCents).toBe(600)
+  expect(second.expense!.amountCents).toBe(600)
   expect(await view()).toMatchObject({ paidCents: 1600, pendingCents: 0, status: "pagado" })
 
   // En Gastos, quien no administra comisiones ve el total del mes en una fila, sin a quién se pagó;
@@ -215,7 +215,7 @@ it("comisiones: porcentaje sobre lo cobrado de lo atendido, pago en un paso y aj
     getMonthExpenses(tx, "org_a", { ...period, branchId }, { seesCommissions: true }),
   )
   expect(forAdmin.expenses.filter((e) => e.commission)).toHaveLength(2)
-  expect(forAdmin.expenses.find((e) => e.id === first.expense.id)?.commissionPayment).toEqual({
+  expect(forAdmin.expenses.find((e) => e.id === first.expense!.id)?.commissionPayment).toEqual({
     professionalUserId: f.actor,
     ...period,
   })
@@ -228,7 +228,7 @@ it("comisiones: porcentaje sobre lo cobrado de lo atendido, pago en un paso y aj
     expect.objectContaining({ concept: "Pago de comisiones", amountCents: 1600, notes: null }),
   ])
   // Ni buscando el nombre en la lista del mes.
-  const named = forAdmin.expenses.find((e) => e.id === first.expense.id)?.concept ?? ""
+  const named = forAdmin.expenses.find((e) => e.id === first.expense!.id)?.concept ?? ""
   const who = named.split("—").pop()?.trim() ?? ""
   expect(who).not.toBe("")
   expect(
@@ -251,17 +251,24 @@ it("comisiones: porcentaje sobre lo cobrado de lo atendido, pago en un paso y aj
   const owing = await view()
   // Sus dos partes (dinero nuevo y saldo a favor) ya tenían comisión pagada: 500 + 100.
   expect(owing.adjustments.map((a) => a.commissionCents).sort((x, y) => x - y)).toEqual([100, 500])
-  expect(owing).toMatchObject({ commissionCents: 1000, pendingCents: -600, status: "por_descontar" })
-  await expect(pay()).rejects.toMatchObject({ code: "COMMISSION_NOT_POSITIVE" })
+  // El descuento es del profesional, no del mes: este mes ya no tiene nada nuevo, así que no queda
+  // en negativo ni «por descontar»; los 600 esperan al próximo pago, de este mes o de otro.
+  expect(owing).toMatchObject({ commissionCents: 1000, pendingCents: 0, adjustmentCents: 600, discountCents: 0, status: "pagado" })
+  await expect(pay()).rejects.toMatchObject({ code: "COMMISSION_NOTHING_TO_PAY" })
   // Llega un cobro nuevo de 10 000 más los 1 000 a favor que volvieron: al 20 %
   // son 2 200, y el pago descuenta los 600.
   await collectMore(10000)
   expect(await view()).toMatchObject({ pendingCents: 1600, status: "por_pagar" })
   const third = await pay()
-  expect(third.expense.amountCents).toBe(1600)
+  expect(third.expense!.amountCents).toBe(1600)
   const settledUp = await view()
   expect(settledUp.adjustments).toHaveLength(0)
-  expect(settledUp).toMatchObject({ pendingCents: 0, status: "pagado" })
+  // «Ya pagado» es el dinero que salió: 1 000 + 600 + 1 600, no la comisión de cobros ya descontados.
+  expect(settledUp).toMatchObject({ pendingCents: 0, paidCents: 3200, status: "pagado" })
+  // El segundo pago no se anula mientras el tercero tenga descontado un cobro suyo.
+  await expect(
+    f.run((tx) => voidCommissionSettlement(tx, "org_a", f.actor, second.settlement.id, { reason: "Prueba" })),
+  ).rejects.toMatchObject({ code: "COMMISSION_DISCOUNTED_LATER" })
 
   // El mes de la clínica lista al profesional con su estado.
   const month = await f.run((tx) => listMonthCommissions(tx, "org_a", period))
@@ -271,14 +278,34 @@ it("comisiones: porcentaje sobre lo cobrado de lo atendido, pago en un paso y aj
     rateBps: 2000,
   })
 
+  // Un descuento más grande que lo nuevo no bloquea el pago: se descuenta lo que alcanza y el resto
+  // espera. Se anula el cobro grande (su comisión de 2 200 ya se pagó en el tercer pago)…
+  const lastTicket = (await f.run((tx) =>
+    ownerDb.execute<{ id: string }>(sql`select id from payment_ticket where organization_id = 'org_a' and patient_id = ${f.patient.id} and voided_at is null order by created_at desc limit 1`),
+  ))[0]!
+  await f.run((tx) => voidTicket(tx, "org_a", f.actor, f.patient.id, lastTicket.id, { reason: "Cobro errado", allowPostClose: false }))
+  expect(await view()).toMatchObject({ adjustmentCents: 2200, pendingCents: 0 })
+  // …y llega un cobro de 5 000 que, con lo que volvió a favor, deja menos comisión que el descuento.
+  await collectMore(5000)
+  const partial = await view()
+  const fresh = partial.lines.filter((line) => !line.settled).reduce((sum, line) => sum + line.commissionCents, 0)
+  expect(fresh).toBeGreaterThan(0)
+  expect(fresh).toBeLessThan(2200)
+  expect(partial).toMatchObject({ discountCents: fresh, pendingCents: 0, status: "por_descontar" })
+  // Se registra el descuento sin que salga dinero, y queda lo demás por descontar.
+  const discountOnly = await pay()
+  expect(discountOnly.expense).toBeNull()
+  expect(discountOnly.settlement.commissionCents).toBe(0)
+  expect(await view()).toMatchObject({ adjustmentCents: 2200 - fresh, pendingCents: 0, status: "pagado" })
+
   // El gasto de un pago de comisión no se anula suelto…
   await expect(
-    f.run((tx) => voidExpense(tx, "org_a", f.actor, first.expense.id, { reason: "Prueba" })),
+    f.run((tx) => voidExpense(tx, "org_a", f.actor, first.expense!.id, { reason: "Prueba" })),
   ).rejects.toMatchObject({ code: "EXPENSE_IS_COMMISSION" })
   // …se anula con el pago: el gasto desaparece y sus cobros vuelven a quedar por pagar.
   await f.run((tx) => voidCommissionSettlement(tx, "org_a", f.actor, first.settlement.id, { reason: "Pago mal registrado" }))
   const expenses = await f.run((tx) => listExpenses(tx, "org_a", { branchId, limit: 200 }, { seesCommissions: true }))
-  expect(expenses.find((e) => e.id === first.expense.id)).toBeUndefined()
+  expect(expenses.find((e) => e.id === first.expense!.id)).toBeUndefined()
   // Para caja, el pago anulado deja de sumar en la fila del mes.
   const afterVoidCashier = await f.run((tx) => getMonthExpenses(tx, "org_a", { ...period, branchId }))
   const paidLive = (await f.run((tx) => getMonthExpenses(tx, "org_a", { ...period, branchId }, { seesCommissions: true })))
@@ -288,7 +315,10 @@ it("comisiones: porcentaje sobre lo cobrado de lo atendido, pago en un paso y aj
     expect.objectContaining({ concept: "Pago de comisiones", amountCents: paidLive }),
   ])
   // El cobro liberado se calcula con el porcentaje vigente (20 % de 10 000).
-  expect(await view()).toMatchObject({ pendingCents: 2000, status: "por_pagar" })
+  // y lo que quedaba por descontar se descuenta de ellos.
+  const freed = await view()
+  expect(freed.discountCents).toBe(Math.min(2000, 2200 - fresh))
+  expect(freed).toMatchObject({ pendingCents: 2000 - freed.discountCents, status: freed.discountCents === 2000 ? "por_descontar" : "por_pagar" })
 })
 
 it("a quien deja el equipo se le paga lo pendiente, y sus meses no cambian en Reportes ni en Argos", async () => {
@@ -343,12 +373,99 @@ it("a quien deja el equipo se le paga lo pendiente, y sus meses no cambian en Re
   expect(await argos()).toBe(argosBefore)
   // Y se le paga igual.
   const paid = await f.run((tx) => payMonthCommission(tx, "org_a", f.actor, { professionalUserId: f.actor, ...period, branchId }))
-  expect(paid.expense.amountCents).toBe(20000)
+  expect(paid.expense!.amountCents).toBe(20000)
   expect(await report()).toMatchObject({ generatedCents: 20000, paidCents: 20000, pendingCents: 0 })
   // Quien nunca estuvo en la clínica sigue sin existir para Comisiones.
   await expect(
     f.run((tx) => getMonthlyCommissions(tx, "org_a", { professionalUserId: randomUUID(), ...period })),
   ).rejects.toMatchObject({ code: "NOT_FOUND" })
+})
+
+it("un descuento de un mes anterior se descuenta en el mes que se paga, sin dejar a ninguno en negativo", async () => {
+  const f = await clinicalFixture()
+  const branchId = await seedBranch()
+  const cash = await f.run((tx) => createPaymentMethod(tx, "org_a", f.actor, { name: "Efectivo", typeCode: "10" }))
+  // Tres tratamientos de la misma atención (se registran antes de cerrarla) que se cobran en días distintos.
+  const procedures = await ownerDb
+    .insert(encounterProcedure)
+    .values([100000, 50000, 100000].map((priceCents) => ({ organizationId: "org_a", encounterId: f.encounter.id, serviceId: f.service.id, description: "Tratamiento", priceCents, currency: "PEN", createdBy: f.actor })))
+    .returning()
+  await ownerDb
+    .update(encounter)
+    .set({ status: "finalizada", finalizedAt: new Date(), branchId, signerName: "Clínico", signerRegistration: "12345" })
+    .where(eq(encounter.id, f.encounter.id))
+  let next = 0
+  const procedureOf = async (priceCents: number) => {
+    const row = procedures[next++]
+    expect(row!.priceCents).toBe(priceCents)
+    const charge = await f.run((tx) => createCharge(tx, ...f.args, { encounterProcedureId: row!.id }))
+    return f.run((tx) =>
+      collectCharge(tx, ...f.args, { branchId, chargeIds: [charge.id], payments: [{ paymentMethodId: cash.id, amountCents: priceCents }], requestId: randomUUID() }),
+    )
+  }
+  const now = currentPeriod()
+  // Sin porcentaje no hay nada que pagar: no se congela nada a 0 %.
+  const first = await procedureOf(100000)
+  await expect(
+    f.run((tx) => payMonthCommission(tx, "org_a", f.actor, { professionalUserId: f.actor, ...now, branchId })),
+  ).rejects.toMatchObject({ code: "COMMISSION_NOTHING_TO_PAY" })
+  await f.run((tx) => setCommissionRate(tx, "org_a", f.actor, { professionalUserId: f.actor, rateBps: 3000 }))
+  // Ese cobro fue del mes anterior y se pagó (300).
+  const before = now.month === 1 ? { year: now.year - 1, month: 12 } : { year: now.year, month: now.month - 1 }
+  const lastMonth = new Date(Date.UTC(before.year, before.month - 1, 15, 15))
+  await ownerDb.execute(sql`update patient_payment_application set created_at = ${lastMonth.toISOString()}::timestamptz
+    where organization_id = 'org_a' and payment_id in (select id from patient_payment where ticket_id = ${first.ticket.id})`)
+  const paidBefore = await f.run((tx) => payMonthCommission(tx, "org_a", f.actor, { professionalUserId: f.actor, ...before, branchId }))
+  expect(paidBefore.expense!.amountCents).toBe(30000)
+  // Después se anula: hay 300 por descontar, pero ningún mes queda en negativo.
+  await f.run((tx) => voidTicket(tx, "org_a", f.actor, f.patient.id, first.ticket.id, { reason: "Cobro errado", allowPostClose: true }))
+  const viewOf = (period: { year: number; month: number }) =>
+    f.run((tx) => getMonthlyCommissions(tx, "org_a", { professionalUserId: f.actor, ...period }))
+  expect(await viewOf(before)).toMatchObject({ paidCents: 30000, pendingCents: 0, adjustmentCents: 30000, status: "pagado" })
+  // Este mes, un cobro de 500 (150): se descuenta todo y no sale dinero; quedan 150 por descontar.
+  await procedureOf(50000)
+  expect(await viewOf(now)).toMatchObject({ commissionCents: 15000, discountCents: 15000, pendingCents: 0, status: "por_descontar" })
+  const discount = await f.run((tx) => payMonthCommission(tx, "org_a", f.actor, { professionalUserId: f.actor, ...now, branchId, expectedCents: 0 }))
+  expect(discount.expense).toBeNull()
+  expect(await viewOf(now)).toMatchObject({ paidCents: 0, discountedCents: 15000, adjustmentCents: 15000, status: "pagado" })
+  // Otro cobro de 1 000 (300): se descuentan los 150 que quedaban y se pagan 150.
+  await procedureOf(100000)
+  expect(await viewOf(now)).toMatchObject({ discountCents: 15000, pendingCents: 15000, status: "por_pagar" })
+  const rest = await f.run((tx) => payMonthCommission(tx, "org_a", f.actor, { professionalUserId: f.actor, ...now, branchId }))
+  expect(rest.expense!.amountCents).toBe(15000)
+  // Le corresponden 450; se pagaron 150 y se descontaron 300: cuadra.
+  expect(await viewOf(now)).toMatchObject({ commissionCents: 45000, paidCents: 15000, discountedCents: 30000, adjustmentCents: 0, pendingCents: 0 })
+  // El pago del mes anterior no se anula mientras haya descuentos hechos sobre él.
+  await expect(
+    f.run((tx) => voidCommissionSettlement(tx, "org_a", f.actor, paidBefore.settlement.id, { reason: "Prueba" })),
+  ).rejects.toMatchObject({ code: "COMMISSION_DISCOUNTED_LATER" })
+})
+
+it("pagar la comisión anotando el gasto en otra sede baja lo que se debe en la sede del cobro", async () => {
+  const f = await clinicalFixture()
+  const cobroSede = await seedBranch()
+  const gastoSede = await seedBranch()
+  const cash = await f.run((tx) => createPaymentMethod(tx, "org_a", f.actor, { name: "Efectivo", typeCode: "10" }))
+  const [procedure] = await ownerDb
+    .insert(encounterProcedure)
+    .values({ organizationId: "org_a", encounterId: f.encounter.id, serviceId: f.service.id, description: "Corona", priceCents: 50000, currency: "PEN", createdBy: f.actor })
+    .returning()
+  await ownerDb
+    .update(encounter)
+    .set({ status: "finalizada", finalizedAt: new Date(), branchId: cobroSede, signerName: "Clínico", signerRegistration: "12345" })
+    .where(eq(encounter.id, f.encounter.id))
+  const charge = await f.run((tx) => createCharge(tx, ...f.args, { encounterProcedureId: procedure!.id }))
+  await f.run((tx) =>
+    collectCharge(tx, ...f.args, { branchId: cobroSede, chargeIds: [charge.id], payments: [{ paymentMethodId: cash.id, amountCents: 50000 }], requestId: randomUUID() }),
+  )
+  await f.run((tx) => setCommissionRate(tx, "org_a", f.actor, { professionalUserId: f.actor, rateBps: 4000 }))
+  const owed = async (branchId: string) =>
+    (await f.run((tx) => getReportFinance(tx, "org_a", { period: "este_mes", branchId }))).payables.commissions.cents
+  expect(await owed(cobroSede)).toBe(20000)
+  await f.run((tx) => payMonthCommission(tx, "org_a", f.actor, { professionalUserId: f.actor, ...currentPeriod(), branchId: gastoSede }))
+  // La deuda era de la sede del cobro: ahí baja; en la sede del gasto nunca hubo deuda.
+  expect(await owed(cobroSede)).toBe(0)
+  expect(await owed(gastoSede)).toBe(0)
 })
 
 it("el mes en Reportes concilia cobrado, gastos y deuda de la sede, y el cobro con promoción cuenta en ella", async () => {

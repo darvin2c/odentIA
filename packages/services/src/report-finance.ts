@@ -152,23 +152,33 @@ export async function commissionsMany(
   )
 }
 
-/** Lo pagado de comisiones cuyo cobro se anuló después: se descuenta del próximo pago (por profesional). */
-async function pendingCommissionAdjustments(tx: Db, orgId: string, currency: string): Promise<Map<string, number>> {
+/**
+ * Lo pagado de comisiones cuyo cobro se anuló después y aún no se descontó (por profesional): lo
+ * que se le descontará en sus próximos pagos. Un descuento puede ir en partes; con sede, el de los
+ * cobros anulados de esa sede.
+ */
+async function pendingCommissionAdjustments(
+  tx: Db,
+  orgId: string,
+  currency: string,
+  branchId?: string,
+): Promise<Map<string, number>> {
   const rows = await tx.execute<{ userId: string; cents: string }>(sql`
-    select s.professional_user_id as "userId", sum(l.commission_cents)::text as cents
+    select s.professional_user_id as "userId", sum(l.commission_cents - coalesce(d.cents, 0))::text as cents
     from commission_settlement_line l
     join commission_settlement s on s.organization_id = l.organization_id and s.id = l.settlement_id and s.voided_at is null
+    join patient_payment_application a on a.organization_id = l.organization_id and a.id = l.application_id
+    join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id
+    join patient_charge c on c.organization_id = a.organization_id and c.id = a.charge_id
+    left join lateral (
+      select sum(l2.commission_cents) as cents from commission_settlement_line l2
+      join commission_settlement s2 on s2.organization_id = l2.organization_id and s2.id = l2.settlement_id and s2.voided_at is null
+      where l2.organization_id = l.organization_id and l2.kind = 'ajuste' and l2.voided_at is null and l2.application_id = l.application_id
+    ) d on true
     where l.organization_id = ${orgId} and l.kind = 'cobro' and l.voided_at is null and l.commission_cents > 0 and s.currency = ${currency}
-      and exists (
-        select 1 from patient_payment_application a
-        join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id
-        join patient_charge c on c.organization_id = a.organization_id and c.id = a.charge_id
-        where a.organization_id = l.organization_id and a.id = l.application_id
-          and (a.voided_at is not null or p.voided_at is not null or c.voided_at is not null))
-      and not exists (
-        select 1 from commission_settlement_line l2
-        join commission_settlement s2 on s2.organization_id = l2.organization_id and s2.id = l2.settlement_id and s2.voided_at is null
-        where l2.organization_id = l.organization_id and l2.kind = 'ajuste' and l2.voided_at is null and l2.application_id = l.application_id)
+      and (a.voided_at is not null or p.voided_at is not null or c.voided_at is not null)
+      and l.commission_cents > coalesce(d.cents, 0)
+      ${branchId ? sql`and p.branch_id = ${branchId}` : sql``}
     group by s.professional_user_id`)
   return new Map(rows.map((row) => [row.userId, safeCents(row.cents)]))
 }
@@ -186,7 +196,7 @@ function pendingOf(row: CommissionTotals, adjustments: Map<string, number>): num
 /**
  * Comisiones por pagar en cada momento: lo generado hasta ahí menos lo pagado
  * hasta ahí, por profesional y nunca menos de cero (lo que hay que descontar
- * no se debe). El pago cuenta en la sede de su gasto.
+ * no se debe). En una sede, lo pagado cuenta en la sede de cada cobro.
  */
 export async function commissionsOwedMany(
   tx: Db,
@@ -204,11 +214,23 @@ export async function commissionsOwedMany(
     )}), generated as (
       select m.idx, ml.user_id, sum(ml.commission) as cents from m join counted_line ml on ml.at < m.at_moment group by m.idx, ml.user_id
     ), paid as (
-      select m.idx, s.professional_user_id as user_id, sum(s.commission_cents) as cents
-      from m join commission_settlement s on s.organization_id = ${orgId} and s.voided_at is null and s.currency = ${options.currency}
-        and s.settled_at < m.at_moment
-      ${options.branchId ? sql`join expense x on x.organization_id = s.organization_id and x.id = s.expense_id and x.branch_id = ${options.branchId}` : sql``}
-      group by m.idx, s.professional_user_id
+      ${
+        options.branchId
+          ? // En una sede, lo pagado es lo de sus cobros menos lo descontado de sus cobros anulados,
+            // como lo generado: la sede donde se anotó el gasto del pago no cambia de quién es la deuda.
+            sql`select m.idx, s.professional_user_id as user_id,
+              sum(case when l.kind = 'cobro' then l.commission_cents else -l.commission_cents end) as cents
+            from m join commission_settlement s on s.organization_id = ${orgId} and s.voided_at is null and s.currency = ${options.currency}
+              and s.settled_at < m.at_moment
+            join commission_settlement_line l on l.organization_id = s.organization_id and l.settlement_id = s.id and l.voided_at is null
+            join patient_payment_application a on a.organization_id = l.organization_id and a.id = l.application_id
+            join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id and p.branch_id = ${options.branchId}
+            group by m.idx, s.professional_user_id`
+          : sql`select m.idx, s.professional_user_id as user_id, sum(s.commission_cents) as cents
+            from m join commission_settlement s on s.organization_id = ${orgId} and s.voided_at is null and s.currency = ${options.currency}
+              and s.settled_at < m.at_moment
+            group by m.idx, s.professional_user_id`
+      }
     )
     select coalesce(g.idx, p.idx) as idx, coalesce(g.user_id, p.user_id) as "userId",
       round(coalesce(g.cents, 0) - coalesce(p.cents, 0))::text as owed
@@ -736,7 +758,7 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
   const debts = await debtAgingMany(tx, orgId, [window.end, window.previous.end], { currency, branchId })
   const [owedCommissions] = await commissionsOwedMany(tx, orgId, [window.end], { currency, branchId })
   const [unpaid] = await unpaidPurchasesMany(tx, orgId, [window.end], { branchId })
-  const adjustments = await pendingCommissionAdjustments(tx, orgId, currency)
+  const adjustments = await pendingCommissionAdjustments(tx, orgId, currency, branchId)
   const taxName = (await orgTaxes(tx, orgId))?.name ?? null
 
   const cobrado = (index: number): number => inCurrency(collected[index], currency)?.cents ?? 0
@@ -835,7 +857,7 @@ export async function getReportCommissions(tx: Db, orgId: string, query: ReportQ
   const { window, currency } = scope
   const branchId = scope.branch?.id
   const [current] = await commissionsMany(tx, orgId, [window], { currency, branchId })
-  const adjustments = await pendingCommissionAdjustments(tx, orgId, currency)
+  const adjustments = await pendingCommissionAdjustments(tx, orgId, currency, branchId)
   // Lo que atendió en el periodo (precio × cantidad) y lo que de eso sigue sin cobrar hoy.
   const attended = await tx.execute<{ userId: string; name: string; cents: string; unpaid: string }>(sql`
     select e.professional_user_id as "userId", u.name,

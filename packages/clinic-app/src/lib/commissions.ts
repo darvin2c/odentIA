@@ -198,7 +198,12 @@ export interface MonthlyCommissions extends Omit<CommissionSummary, "collections
   locale: string
   lines: CommissionLine[]
   adjustments: CommissionAdjustment[]
+  /** Lo que queda por descontarle de cobros anulados después de pagados, de cualquier mes. */
   adjustmentCents: number
+  /** Lo que el próximo pago de este mes descuenta. */
+  discountCents: number
+  /** Lo que los pagos de este mes ya descontaron de cobros anulados. */
+  discountedCents: number
 }
 
 /** Lo propio: el mes pedido y hasta tres meses anteriores con cobros. */
@@ -282,7 +287,7 @@ export function payMonthCommissionApi(
     /** Lo que se le mostró a quien confirma; si cambió, el servidor no paga otra cifra. */
     expectedCents?: number
   },
-): Promise<{ data: { settlement: CommissionPayment; expense: { id: string } } }> {
+): Promise<{ data: { settlement: CommissionPayment; expense: { id: string } | null } }> {
   return apiFetch("/api/commissions/pay", { method: "POST", body: JSON.stringify(body) })
 }
 
