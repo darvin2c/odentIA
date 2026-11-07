@@ -503,7 +503,7 @@ export function EncounterClosingDialog({
         if (!value && !busy) onClose()
       }}
     >
-      <DialogContent aria-describedby={`${ids}-desc`} className="sm:max-w-lg" initialFocus={initialFocus}>
+      <DialogContent scrollable aria-describedby={`${ids}-desc`} className="max-h-[90dvh] sm:max-w-lg" initialFocus={initialFocus}>
         <form noValidate onSubmit={onSubmit} className="flex flex-col gap-4">
           <DialogHeader>
             <DialogTitle>Finalizar y firmar</DialogTitle>

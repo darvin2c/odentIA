@@ -76,7 +76,7 @@ export function DictationSignDialog({
       }}
     >
       {/* Ancho de siempre: la lista y «Firmar con N marcadas» caben sin cortarse. */}
-      <AlertDialogContent>
+      <AlertDialogContent className="max-h-[90dvh] overflow-y-auto">
         <AlertDialogHeader>
           <AlertDialogTitle>Firmar la atención</AlertDialogTitle>
           <AlertDialogDescription>Lo que dictaste y está marcado entra con la firma. Desmarca lo que no va.</AlertDialogDescription>
