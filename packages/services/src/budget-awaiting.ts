@@ -5,20 +5,27 @@ import { type SQL, type SQLWrapper, sql } from "drizzle-orm"
  * coordinación de recepción, Inicio y la cuenta. Espera respuesta lo que se le
  * envió a la persona («Enviado · espera respuesta», `presentado`) y lo que «lo
  * está pensando»: respondió que lo piensa (`pospuesto`) o aceptó una parte y
- * dejó otra para después (`parcial` con alguna línea `pospuesto`). Un borrador
- * nunca cuenta: nadie se lo envió.
+ * le falta responder el resto (`parcial` con alguna línea `pospuesto` o
+ * `pendiente`: lo dejó para después, o la revisión le pregunta solo por lo que
+ * cambió). Un borrador nunca cuenta: nadie se lo envió.
  *
  * La misma regla existe en código (`budgetAwaitsAnswer`) y en SQL
  * (`budgetAwaitsAnswerSql`); cambian juntas y su prueba las compara.
  */
 export const BUDGET_AWAITING_STATUSES = ["presentado", "pospuesto"] as const
 
+/** Lo que de una línea todavía espera respuesta: nadie la respondió o lo está pensando. */
+export const OPEN_LINE_DECISIONS = ["pendiente", "pospuesto"] as const
+
 export function budgetAwaitsAnswer(budget: {
   status: string
   items: ReadonlyArray<{ decision: string | null }>
 }): boolean {
   if ((BUDGET_AWAITING_STATUSES as readonly string[]).includes(budget.status)) return true
-  return budget.status === "parcial" && budget.items.some((line) => line.decision === "pospuesto")
+  return (
+    budget.status === "parcial" &&
+    budget.items.some((line) => (OPEN_LINE_DECISIONS as readonly (string | null)[]).includes(line.decision))
+  )
 }
 
 /**
@@ -61,5 +68,5 @@ export function budgetAwaitsAnswerSql(budget: {
   // confundirían con las de la línea.
   return sql`(${budget.status} in (${statuses}) or (${budget.status} = 'parcial' and (${budget.organizationId}, ${budget.id}) in (
     select awaiting_line.organization_id, awaiting_line.budget_id from treatment_budget_item awaiting_line
-    where awaiting_line.decision = 'pospuesto')))`
+    where awaiting_line.decision in ('pendiente', 'pospuesto'))))`
 }

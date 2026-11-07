@@ -4,7 +4,7 @@
  * precios; el dictado sigue agregando tratamientos al plan.
  */
 import { formatMoneyInput, parseMoney } from "@odentia/clinical"
-import { Button, Checkbox, cn, FieldGroup, FieldLabel } from "@odentia/ui"
+import { Badge, Button, Checkbox, cn, FieldGroup, FieldLabel } from "@odentia/ui"
 import {
   applySubmitError,
   clearSubmitErrors,
@@ -24,6 +24,7 @@ import type { AdjustBudgetLineBody, BudgetLine, BudgetOption, BudgetWithTotals }
 import type { PlanItem } from "../../../lib/patients"
 import type { Promotion } from "../../../lib/promotions"
 import {
+  type BadgeTone,
   BudgetTotals,
   billingNote,
   hasFixedPromotion,
@@ -89,6 +90,15 @@ function lineReference(line: BudgetLine, promotions: Promotion[]): number | null
 }
 
 /**
+ * Ya se hizo (o se está haciendo): su precio, sus visitas y su promoción no
+ * cambian, porque se cobró así. Lo cobrado sin hacer lo rechaza el servidor
+ * (`BUDGET_LINE_USED`) y se dice en su línea.
+ */
+function isUsedLine(line: BudgetLine): boolean {
+  return line.itemStatus === "realizado" || line.itemStatus === "en_curso"
+}
+
+/**
  * Borrador de una opción del presupuesto (tableros 6, 13b y 22; decisión 13):
  * precio acordado por línea, visitas previstas de lo que se cobra por sesión,
  * promociones ofrecidas y un motivo común para lo que baja de su referencia.
@@ -106,6 +116,7 @@ export function BudgetDraftEditor({
   onRetryPromotions,
   locale,
   money: baseMoney,
+  lineNote,
   disabled,
   delivering,
   saveLines,
@@ -126,6 +137,8 @@ export function BudgetDraftEditor({
   onRetryPromotions: () => void
   locale: string
   money: Money
+  /** En una revisión, qué pasa con la línea frente a la versión anterior («Pide respuesta»). */
+  lineNote?: (line: BudgetLine) => { text: string; tone: BadgeTone } | null
   disabled: boolean
   delivering: boolean
   saveLines: (lines: AdjustBudgetLineBody[]) => Promise<unknown>
@@ -183,7 +196,8 @@ export function BudgetDraftEditor({
     for (const line of lines) {
       const index = values.lines.findIndex((row) => row.planItemId === line.planItemId)
       const row = values.lines[index]
-      if (!row) continue
+      // Lo ya hecho no se ajusta: no viaja en los ajustes.
+      if (!row || isUsedLine(line)) continue
       const body: AdjustBudgetLineBody = { planItemId: line.planItemId, optionId: option.id }
       let changed = false
       let price = line.priceCents
@@ -334,7 +348,7 @@ export function BudgetDraftEditor({
       // motivo común y devuelve los totales.
       const discounted: AdjustBudgetLineBody[] = lines.flatMap((line) => {
         const base = line.tariffPriceCents ?? line.priceCents
-        if (line.promotionId != null || base == null) return []
+        if (line.promotionId != null || base == null || isUsedLine(line)) return []
         return [
           {
             planItemId: line.planItemId,
@@ -345,7 +359,9 @@ export function BudgetDraftEditor({
         ]
       })
       if (discounted.length === 0) {
-        throw new Error("Ningún tratamiento admite el descuento: todos tienen una promoción o les falta el precio.")
+        throw new Error(
+          "Ningún tratamiento admite el descuento: todos tienen una promoción, ya se hicieron o les falta el precio.",
+        )
       }
       await saveLines(discounted)
       setDiscountOpen(false)
@@ -422,11 +438,14 @@ export function BudgetDraftEditor({
           {lines.map((line) => {
             const index = values.lines.findIndex((row) => row.planItemId === line.planItemId)
             const fixed = hasFixedPromotion(line)
+            const used = isUsedLine(line)
+            // Lo hecho ya lo dice su texto; el resto, cómo queda frente a la versión anterior.
+            const note = used ? null : (lineNote?.(line) ?? null)
             const session = isSessionLine(line)
             const below = isBelowTariff(line)
             const reference = lineReference(line, promotions)
             const offers =
-              line.promotionId != null || line.serviceId == null
+              used || line.promotionId != null || line.serviceId == null
                 ? []
                 : promotions.flatMap((promo) => {
                     const item = promo.items.find(
@@ -475,10 +494,19 @@ export function BudgetDraftEditor({
                           : `Menos que el precio normal de ${money.plain(line.tariffPriceCents, line.currency)}`}
                       </span>
                     ) : null}
-                    {line.priceCents == null ? (
+                    {used ? (
+                      <span className="text-xs text-muted-foreground">
+                        Ya se hizo o se cobró: su precio no cambia.
+                      </span>
+                    ) : line.priceCents == null ? (
                       <span className="text-xs text-muted-foreground">
                         Sin precio normal: escribe el precio acordado.
                       </span>
+                    ) : null}
+                    {note ? (
+                      <Badge variant={note.tone} className="mt-1 self-start">
+                        {note.text}
+                      </Badge>
                     ) : null}
                   </div>
                   </div>
@@ -490,9 +518,10 @@ export function BudgetDraftEditor({
                         : money.plain(line.tariffPriceCents, line.currency)}
                     </span>
                   </span>
-                  {fixed ? (
+                  {fixed || used ? (
                     <span className="justify-self-end text-right font-semibold tabular-nums">
-                      {money.plain(line.priceCents, line.currency)}
+                      <span className="sr-only">{priceLabel}: </span>
+                      {line.priceCents == null ? "sin precio" : money.plain(line.priceCents, line.currency)}
                     </span>
                   ) : index >= 0 ? (
                     <form.AppField name={`lines[${index}].priceCents`}>
@@ -513,18 +542,27 @@ export function BudgetDraftEditor({
 
                 {session && index >= 0 ? (
                   <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
-                    <form.AppField name={`lines[${index}].sessionsPlanned`}>
-                      {(field) => (
-                        <field.TextField
-                          label="Visitas previstas"
-                          inputMode="numeric"
-                          autoComplete="off"
-                          className="w-auto"
-                          inputClassName="w-16 text-center font-semibold tabular-nums"
-                          disabled={blocked}
-                        />
-                      )}
-                    </form.AppField>
+                    {used ? (
+                      <span className="text-sm">
+                        <span className="text-muted-foreground">Visitas previstas </span>
+                        <span className="font-semibold tabular-nums">
+                          {line.sessionsPlanned ?? "—"}
+                        </span>
+                      </span>
+                    ) : (
+                      <form.AppField name={`lines[${index}].sessionsPlanned`}>
+                        {(field) => (
+                          <field.TextField
+                            label="Visitas previstas"
+                            inputMode="numeric"
+                            autoComplete="off"
+                            className="w-auto"
+                            inputClassName="w-16 text-center font-semibold tabular-nums"
+                            disabled={blocked}
+                          />
+                        )}
+                      </form.AppField>
+                    )}
                     <span className="ml-auto text-sm">
                       <span className="text-muted-foreground">Total de la línea </span>
                       <span className="font-semibold tabular-nums">
@@ -542,6 +580,7 @@ export function BudgetDraftEditor({
                       <span className="min-w-0 flex-1">
                         Promoción: {line.promotionName ?? "sin nombre"}
                       </span>
+                      {used ? null : (
                       <SubmitButton
                         size="sm"
                         variant="outline"
@@ -556,8 +595,9 @@ export function BudgetDraftEditor({
                         Quitar
                         <span className="sr-only"> la promoción de {line.title}</span>
                       </SubmitButton>
+                      )}
                     </div>
-                    {fixed ? (
+                    {used ? null : fixed ? (
                       <span className="text-xs text-muted-foreground">
                         El precio de esta promoción es fijo.
                       </span>

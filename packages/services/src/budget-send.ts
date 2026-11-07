@@ -33,7 +33,7 @@ import {
 import { clinicName, firstName } from "./automation-routing.js"
 import { issuePersonalLink } from "./booking-links.js"
 import { buildBudgetSnapshot, renderBudgetPdf } from "./budget-pdf.js"
-import { type BudgetWithTotals, deliverBudget, getBudgetDetail, valueOptionOf } from "./budgets.js"
+import { type BudgetWithTotals, deliverBudget, getBudgetDetail, requireOwnBudget, valueOptionOf } from "./budgets.js"
 import { currentCatalogMessage } from "./clinic-messages.js"
 import { sendTemplateOutbound } from "./conversations.js"
 import { notFound, ServiceError } from "./errors.js"
@@ -168,6 +168,16 @@ export async function previewBudgetSend(
       blocked: "Este presupuesto ya no se envía.",
     }
   }
+  // El de una colega se lee, pero lo envía quien lo preparó (o recepción).
+  if (!budget.canChange) {
+    return {
+      ...base,
+      channel: null,
+      via: null,
+      label: null,
+      blocked: "Lo preparó otro profesional: lo envía quien lo preparó o recepción.",
+    }
+  }
   // La puerta para escribirle a alguien (ADR 0042): un aviso que manda el equipo.
   const route = await previewRoute(tx, orgId, recipient.contactId, spec, {
     purpose: NOTICE_PURPOSE,
@@ -286,8 +296,9 @@ export async function sendBudget(
       }
     }
   }
-  const scope = { actorUserId: actor.userId ?? undefined, memberRole: actor.memberRole }
-  let budget = await getBudgetDetail(tx, orgId, input.patientId, input.budgetId, scope)
+  // Enviar es de quien lo preparó cuando es odontólogo; leerlo, de cualquiera.
+  if (actor.userId) await requireOwnBudget(tx, orgId, input.budgetId, actor.userId, actor.memberRole)
+  let budget = await getBudgetDetail(tx, orgId, input.patientId, input.budgetId)
   if (!(SENDABLE as readonly string[]).includes(budget.status)) {
     throw new ServiceError("BUDGET_STATUS", 409, "Este presupuesto ya no se envía")
   }

@@ -493,7 +493,8 @@ it("con dos opciones hay que elegir una; lo incompleto no se propone y corregir 
       ...(optionId ? { optionId } : {}),
       decisions: decisions.map(([planItemId, decision]) => ({ planItemId, decision })),
     })
-  expect(await answer([[tooth[16]!, "aceptado"], [tooth[26]!, "aceptado"], [crown!, "aceptado"]])).toContain("Tiene 2 opciones (Opción A, Opción B): pregunta cuál elige")
+  // Sin elegir, lo de una sola opción no se acepta: es elegirla.
+  expect(await answer([[tooth[16]!, "aceptado"], [tooth[26]!, "aceptado"], [crown!, "aceptado"]])).toContain("es de una sola opción (Opción A, Opción B): para aceptarlo, pregunta cuál elige")
   expect(await answer([[tooth[16]!, "aceptado"]], options[1])).toContain("Falta saber qué hace con Resina compuesta de la pieza 26 y Corona de la pieza 36")
   const pendingNow = () => inOrg((tx) => listProposals(tx, ORG, { conversationId, status: "propuesta" }))
   expect(await pendingNow()).toEqual([])
@@ -510,6 +511,27 @@ it("con dos opciones hay que elegir una; lo incompleto no se propone y corregir 
   const all = await inOrg((tx) => listProposals(tx, ORG, { conversationId }))
   expect(all.map((item) => item.status).sort()).toEqual(["expirada", "propuesta"])
   expect((await getBudgetDetailOf(patientId, budgetId)).status).toBe("presentado")
+})
+
+it("sin elegir opción anota lo que está en las dos y deja para después lo de una sola", async () => {
+  const { conversationId } = await byTelegram("tg:comun", "evt-comun", "Las resinas sí, la corona lo pienso")
+  const contactId = await contactOf(conversationId)
+  const patientId = await patientOf(contactId, "Lucía Común")
+  const { budgetId, tooth, crown } = await budgetOf(patientId, { deliver: true, crown: true })
+  const ctx = toolCtx(conversationId, contactId)
+  const said = await call(ctx, "anotar_respuesta_presupuesto", {
+    patientId,
+    budgetId,
+    decisions: [
+      { planItemId: tooth[16]!, decision: "aceptado" },
+      { planItemId: tooth[26]!, decision: "aceptado" },
+      { planItemId: tooth[36]!, decision: "pospuesto" },
+      { planItemId: crown!, decision: "pospuesto" },
+    ],
+  })
+  expect(said).toContain("aceptas Resina compuesta de la pieza 16 y Resina compuesta de la pieza 26")
+  expect(said).toContain("dejas para después Resina compuesta de la pieza 36 y Corona de la pieza 36")
+  expect(said).not.toContain("eliges")
 })
 
 it("con quien solo está autorizado a recibir información no se habla del presupuesto, y la respuesta la da la persona o su representante", async () => {

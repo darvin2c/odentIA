@@ -2326,14 +2326,29 @@ export async function decideBudgetOpportunity(
     budgetId: string
     status: string
     serviceIds: string[]
+    /**
+     * Le queda algo por responder (`budgetAwaitsAnswer`): aceptó una parte y lo
+     * demás lo está pensando. Entonces no se decide todavía y sigue abierta.
+     */
+    awaitsAnswer?: boolean
     /** Lo aceptado, en la moneda del presupuesto: el valor de la oportunidad ganada. */
     accepted?: { cents: number | null; currency: string }
+    /** Lo que sigue esperando respuesta: el valor de la que queda abierta. */
+    waiting?: { cents: number | null; currency: string }
     /** Los tratamientos de la opción elegida: el nombre de la que nació del presupuesto (ADR 0144). */
     title?: string
   },
 ): Promise<string | null> {
-  const outcome = input.status === "aceptado" || input.status === "parcial" ? "won" : input.status === "rechazado" ? "lost" : null
-  if (!outcome && input.status !== "pospuesto") return null
+  // Mientras quede algo por responder no se gana ni se pierde: se decide al final.
+  const waits = input.awaitsAnswer ?? input.status === "pospuesto"
+  const outcome = waits
+    ? null
+    : input.status === "aceptado" || input.status === "parcial"
+      ? "won"
+      : input.status === "rechazado"
+        ? "lost"
+        : null
+  if (!outcome && !waits) return null
   const family = await budgetFamily(tx, orgId, input.budgetId)
   // Con su fila tomada: si el ciclo de «lo que nadie respondió» la está cerrando, se espera y se ve cerrada.
   const linked = await tx
@@ -2350,9 +2365,18 @@ export async function decideBudgetOpportunity(
       open = { id: expired, status: "open" }
     }
   }
-  if (!outcome) return open?.id ?? null
-  // Completar una respuesta (lo pospuesto de un parcial) no vuelve a decidir una
-  // oportunidad que ya se cerró con este presupuesto, ni busca otra.
+  if (!outcome) {
+    // Sigue abierta por lo que falta: vale lo que sigue esperando respuesta.
+    if (open && input.waiting && input.waiting.cents !== null && input.status === "parcial") {
+      await tx
+        .update(opportunity)
+        .set({ amountCents: input.waiting.cents, currency: input.waiting.currency, updatedAt: new Date() })
+        .where(and(eq(opportunity.id, open.id), eq(opportunity.organizationId, orgId)))
+    }
+    return open?.id ?? null
+  }
+  // Completar una respuesta no vuelve a decidir una oportunidad que ya se cerró
+  // con este presupuesto (las de antes de esperar a lo pendiente), ni busca otra.
   if (!open && linked.length > 0) return null
   const id = open?.id ?? (await linkPresentedBudget(tx, orgId, input))
   if (!id) return null
