@@ -10,7 +10,7 @@ import {
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, eq, sql } from "drizzle-orm"
 import { type CreateAppointmentInput, createAppointment } from "./appointments.js"
-import { requireEncounter } from "./encounters.js"
+import { assertOpenDraft, requireEncounter } from "./encounters.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgLocale } from "./locale.js"
 import { requirePatient } from "./patients.js"
@@ -152,7 +152,9 @@ export async function createFollowUp(
       )
     if (!item) throw new ServiceError("NOT_FOUND", 404, "Tratamiento no encontrado", { planItemId: "Ese tratamiento ya no está en su plan: elige otro." })
   }
-  if (input.originEncounterId) await requireEncounter(tx, orgId, patientId, input.originEncounterId)
+  // Un control «de» una atención se indica en ella: abierta y por quien la lleva,
+  // como la receta, la nota o el plan (ADR 0002). Firmada, solo admite correcciones.
+  if (input.originEncounterId) assertOpenDraft(await requireEncounter(tx, orgId, patientId, input.originEncounterId), actorUserId)
   if (input.encounterProcedureId) {
     const [procedure] = await tx
       .select({ procedure: encounterProcedure })
