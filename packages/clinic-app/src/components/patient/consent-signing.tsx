@@ -11,6 +11,7 @@ import {
 } from "@odentia/ui"
 import {
   applySubmitError,
+  ConfirmDialog,
   FormChoiceField,
   FormDrawer,
   focusFirstInvalid,
@@ -46,6 +47,8 @@ export interface SignerChoice {
   contactId: string
   name: string
   label: string
+  /** «DNI 41529978»: el documento de quien firma, como lo pone el papel. */
+  doc?: string | null
 }
 
 /** Quién puede firmar o revocar: la propia persona (mayor de edad) o su representante legal vigente. */
@@ -85,6 +88,7 @@ export function useSignerChoices(patientId: string) {
         contactId: row.contact.id,
         name: row.contact.displayName,
         label: `${row.contact.displayName} · representante legal`,
+        doc: row.contact.docNumber ? `${row.contact.docType ?? "Documento"} ${row.contact.docNumber}` : null,
       }),
     ),
   ]
@@ -260,6 +264,9 @@ function SigningFlow({
   const signerContactId = useStore(form.store, (state) => state.values.signerContactId)
   const signer: SignerChoice | null = choices.find((c) => c.contactId === signerContactId) ?? choices[0] ?? null
   const saving = useStore(form.store, (state) => state.isSubmitting)
+  // Lo marcado o firmado aquí no se guarda hasta que el profesional confirma: salir lo pide confirmar.
+  const drawn = useStore(form.store, (state) => state.values.docs.some((doc) => doc.understood || doc.strokes.length > 0))
+  const [leaving, setLeaving] = useState(false)
   const error = useFormSubmitError(form)
 
   // Quien firma por defecto es el primero habilitado, cuando se sabe (no cambia lo ya elegido).
@@ -319,7 +326,9 @@ function SigningFlow({
     <Dialog
       open
       onOpenChange={(value) => {
-        if (!value && !saving) onClose()
+        if (value || saving) return
+        if (drawn) setLeaving(true)
+        else onClose()
       }}
     >
       <DialogContent
@@ -418,11 +427,13 @@ function SigningFlow({
               signer={{
                 heading: signer.kind === "representante" ? "Representante legal" : "Paciente",
                 name: signer.name,
-                // Como el papel: bajo la persona, su documento; el representante ya lo dice el título.
+                // Como el papel: bajo quien firma, su documento.
                 detail:
-                  signer.kind === "paciente" && patient?.docNumber
-                    ? `${patient.docType ?? "Documento"} ${patient.docNumber}`
-                    : null,
+                  signer.kind === "representante"
+                    ? (signer.doc ?? null)
+                    : patient?.docNumber
+                      ? `${patient.docType ?? "Documento"} ${patient.docNumber}`
+                      : null,
                 children: (
                   <form.AppField key={`${current.id}-strokes`} name={`docs[${step.index}].strokes`}>
                     {(field) => (
@@ -514,6 +525,19 @@ function SigningFlow({
             )}
           </div>
         </footer>
+        <ConfirmDialog
+          open={leaving}
+          variant="default"
+          title="¿Salir sin guardar las firmas?"
+          description="Lo que se marcó y se firmó aquí todavía no se guardó: se guarda cuando el profesional confirma al final."
+          confirmLabel="Salir sin guardar"
+          cancelLabel="Seguir firmando"
+          onClose={() => setLeaving(false)}
+          onConfirm={() => {
+            setLeaving(false)
+            onClose()
+          }}
+        />
       </DialogContent>
     </Dialog>
   )
