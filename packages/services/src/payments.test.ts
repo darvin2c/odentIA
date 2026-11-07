@@ -113,10 +113,8 @@ it("no vuelve a cobrar el mismo tratamiento al revisar la propuesta", async () =
   const revision = await f.run((tx) =>
     reviseBudget(tx, ...f.args, original.id, { itemIds: [item.id], reason: "Revisión sin cambios" }),
   )
+  // Sin cambios, la revisión conserva lo aceptado al entregarse: no se pregunta otra vez.
   await f.run((tx) => deliverBudget(tx, ...f.args, revision.id))
-  await f.run((tx) => decideBudget(tx, ...f.args, revision.id, {
-    decisions: [{ planItemId: item.id, decision: "aceptado" }],
-  }))
   await expect(
     f.run((tx) => createCharge(tx, ...f.args, { budgetItemId: revision.items[0].id })),
   ).rejects.toMatchObject({ code: "CHARGE_EXCEEDS_BUDGET" })

@@ -21,6 +21,7 @@ import {
   createBudget,
   decideBudget,
   deliverBudget,
+  getBudgetDetail,
   duplicateBudgetOption,
   removeBudgetItems,
   reviseBudget,
@@ -261,7 +262,8 @@ it("la revisión de un presupuesto ya ganado no toma otra oportunidad abierta ni
   const revision = await f.run((tx) => reviseBudget(tx, ...f.args, budget.id, { itemIds: [item.id], reason: "Cambio" }))
   await f.run((tx) => deliverBudget(tx, ...f.args, revision.id))
   expect(await f.run((tx) => getOpportunity(tx, "org_a", asked.id))).toMatchObject({ budgetId: null, moment: "interesado" })
-  await f.run((tx) => decideBudget(tx, ...f.args, revision.id, { decisions: [{ planItemId: item.id, decision: "aceptado" }] }))
+  // Nada cambió de precio: la revisión conserva lo aceptado y no se pregunta otra vez.
+  expect((await f.run((tx) => getBudgetDetail(tx, "org_a", f.patient.id, revision.id))).status).toBe("aceptado")
   const all = await opportunitiesOf(f, { contactId: person })
   expect(all.filter((row) => row.status === "won").map((row) => row.id)).toEqual([opp!.id])
   expect(all.find((row) => row.id === asked.id)).toMatchObject({ status: "open", moment: "interesado" })
