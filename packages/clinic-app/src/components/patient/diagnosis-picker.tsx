@@ -16,11 +16,47 @@ export interface ProposedDiagnosis extends DiagnosisOption {
   diagnosisType: string | null
   toothNumber?: number | null
   surfaces?: string[]
+  /** Un tratamiento por cuadrante o arcada propone su diagnóstico en esa área. */
+  quadrant?: number | null
+  arch?: string | null
+}
+
+/** El sitio que propone una propuesta y se registra al usarla: su pieza y caras, o su área. */
+export type ProposedSite = {
+  toothNumber: number | null
+  surfaces: string[]
+  quadrant: number | null
+  arch: string | null
+}
+
+export function proposedSite(item: ProposedDiagnosis): ProposedSite {
+  return {
+    toothNumber: item.toothNumber ?? null,
+    surfaces: item.surfaces ?? [],
+    quadrant: item.toothNumber == null ? (item.quadrant ?? null) : null,
+    arch: item.toothNumber == null && item.quadrant == null ? (item.arch ?? null) : null,
+  }
+}
+
+/** «Cuadrante 1», «Arcada superior»; null si no es un área. */
+export function areaWords(site: { quadrant?: number | null; arch?: string | null }): string | null {
+  if (site.quadrant != null) return `Cuadrante ${site.quadrant}`
+  if (site.arch === "upper") return "Arcada superior"
+  if (site.arch === "lower") return "Arcada inferior"
+  return null
+}
+
+/** Una clave por propuesta: el servidor no repite el mismo código en el mismo sitio. */
+export function proposalKey(item: ProposedDiagnosis): string {
+  return [item.system, item.code, item.toothNumber ?? "", item.quadrant ?? "", item.arch ?? ""].join("-")
 }
 
 /** De dónde sale una propuesta, para decirlo junto a ella. */
 export function proposalOrigin(item: ProposedDiagnosis): string {
-  if (item.source === "tratamiento") return `Del tratamiento «${item.finding}»`
+  if (item.source === "tratamiento") {
+    const area = areaWords(item)
+    return `Del tratamiento «${item.finding}»${area ? ` · ${area.toLowerCase()}` : ""}`
+  }
   return `Propuesto por el hallazgo «${item.finding}»${item.toothNumber != null ? ` en la pieza ${item.toothNumber}` : ""}`
 }
 
@@ -107,7 +143,7 @@ export function DiagnosisPicker({
   system?: string | null
   onChange: (
     choice: { code: string; description: string; system: string | null },
-    site?: { toothNumber: number | null; surfaces: string[] },
+    site?: ProposedSite,
   ) => void
   disabled?: boolean
   /** Va al buscador, el enfocable principal. */
@@ -164,7 +200,7 @@ export function DiagnosisPicker({
           <ul className="flex flex-col gap-2">
             {proposed.map((item) => (
               <li
-                key={`${item.source}-${item.code}-${item.toothNumber ?? ""}`}
+                key={proposalKey(item)}
                 className="flex flex-wrap items-center justify-between gap-3 rounded-lg border px-3 py-2"
               >
                 <div className="flex min-w-0 flex-col">
@@ -182,11 +218,12 @@ export function DiagnosisPicker({
                   onClick={() =>
                     onChange(
                       { code: item.code, description: item.description, system: item.system },
-                      { toothNumber: item.toothNumber ?? null, surfaces: item.surfaces ?? [] },
+                      proposedSite(item),
                     )
                   }
                 >
-                  {isChosen(item) ? "Elegido" : "Usar"}
+                  {/* Aquí solo llena el formulario: «Usar» queda para lo que registra al tocarlo. */}
+                  {isChosen(item) ? "Elegido" : "Elegir"}
                 </Button>
               </li>
             ))}

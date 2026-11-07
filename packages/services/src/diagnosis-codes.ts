@@ -35,10 +35,13 @@ import {
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm"
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne, notInArray, or, sql } from "drizzle-orm"
 import { notFound, validation } from "./errors.js"
 import type { DiagnosisCandidate, SiteFields } from "./product-hooks.js"
 import { productHooks } from "./products.js"
+
+/** Un tratamiento cancelado o reemplazado ya no se continúa: ni propone su diagnóstico ni es motivo de una cita. */
+export const DROPPED_PLAN_ITEM_STATUSES = ["cancelado", "reemplazado"]
 
 /** Un código del catálogo, como se ofrece y se guarda. */
 export interface DiagnosisCodeOption {
@@ -323,6 +326,8 @@ async function treatmentCandidates(
         eq(treatmentPlanItem.patientId, patientId),
         eq(treatmentPlanItem.diagnosisSystem, system),
         isNotNull(treatmentPlanItem.diagnosisCode),
+        // Lo cancelado o reemplazado ya no se continúa: no propone su diagnóstico.
+        notInArray(treatmentPlanItem.status, DROPPED_PLAN_ITEM_STATUSES),
         fromControl
           ? or(inArray(treatmentPlanItem.id, joined), inArray(treatmentPlanItem.id, fromControl))
           : inArray(treatmentPlanItem.id, joined),
@@ -345,7 +350,16 @@ async function treatmentCandidates(
   })
 }
 
-/** El tipo con que se registró por última vez cada código para la persona, en esa lista. */
+/** Un código en un sitio (pieza, cuadrante o arcada; sin las caras), como se compara un diagnóstico con otro. */
+const placeKey = (code: string, site: { siteSystem: string | null; siteCode: string | null }) =>
+  `${code}|${site.siteSystem ?? ""}|${site.siteCode ?? ""}`
+
+/**
+ * El tipo con que se registró por última vez cada código en el mismo sitio
+ * para la persona, en esa lista (por `placeKey`): el de la 46 no vale para la
+ * 36, y sin pieza solo cuentan los registros sin pieza. Lo de una atención
+ * anulada no cuenta, como en `wasDiagnosedBefore`.
+ */
 async function lastTypes(
   tx: Db,
   orgId: string,
@@ -355,11 +369,17 @@ async function lastTypes(
 ): Promise<Map<string, string>> {
   if (codes.length === 0) return new Map()
   const rows = await tx
-    .selectDistinctOn([encounterDiagnosis.diagnosisCode], {
+    .selectDistinctOn([encounterDiagnosis.diagnosisCode, encounterDiagnosis.siteSystem, encounterDiagnosis.siteCode], {
       code: encounterDiagnosis.diagnosisCode,
+      siteSystem: encounterDiagnosis.siteSystem,
+      siteCode: encounterDiagnosis.siteCode,
       type: encounterDiagnosis.diagnosisType,
     })
     .from(encounterDiagnosis)
+    .leftJoin(
+      encounter,
+      and(eq(encounter.id, encounterDiagnosis.encounterId), eq(encounter.organizationId, encounterDiagnosis.organizationId)),
+    )
     .where(
       and(
         eq(encounterDiagnosis.organizationId, orgId),
@@ -368,10 +388,17 @@ async function lastTypes(
         inArray(encounterDiagnosis.diagnosisCode, [...new Set(codes)]),
         isNull(encounterDiagnosis.voidedAt),
         isNotNull(encounterDiagnosis.diagnosisType),
+        or(isNull(encounter.status), ne(encounter.status, "anulada")),
       ),
     )
-    .orderBy(encounterDiagnosis.diagnosisCode, desc(encounterDiagnosis.createdAt), desc(encounterDiagnosis.id))
-  return new Map(rows.flatMap((row) => (row.type ? [[row.code, row.type] as const] : [])))
+    .orderBy(
+      encounterDiagnosis.diagnosisCode,
+      encounterDiagnosis.siteSystem,
+      encounterDiagnosis.siteCode,
+      desc(encounterDiagnosis.createdAt),
+      desc(encounterDiagnosis.id),
+    )
+  return new Map(rows.flatMap((row) => (row.type ? [[placeKey(row.code, row), row.type] as const] : [])))
 }
 
 /**
@@ -415,13 +442,15 @@ export async function getDiagnosisSuggestions(
     input.patientId && treatments.length > 0
       ? await lastTypes(tx, orgId, input.patientId, system, treatments.map((candidate) => candidate.code))
       : new Map<string, string>()
+  // Primero lo de los tratamientos: si un hallazgo propone lo mismo en el mismo sitio,
+  // queda la propuesta del tratamiento, que trae el tipo de la última vez y se usa desde la tarjeta.
   const candidates = [
-    ...found.map((candidate) => ({ ...candidate, source: "hallazgo" as const, diagnosisType: null })),
     ...treatments.map((candidate) => ({
       ...candidate,
       source: "tratamiento" as const,
-      diagnosisType: types.get(candidate.code) ?? null,
+      diagnosisType: types.get(placeKey(candidate.code, candidate.site)) ?? null,
     })),
+    ...found.map((candidate) => ({ ...candidate, source: "hallazgo" as const, diagnosisType: null })),
   ]
   const already = new Set<string>()
   if (input.patientId && input.encounterId) {
@@ -436,7 +465,8 @@ export async function getDiagnosisSuggestions(
           isNull(encounterDiagnosis.voidedAt),
         ),
       )
-    for (const row of diagnosed) already.add(`${row.code}|${row.siteSystem ?? ""}|${row.siteCode ?? ""}`)
+    // Con la misma clave con que el alta reconoce un diagnóstico ya registrado (`recordEncounterDiagnosis`).
+    for (const row of diagnosed) already.add(placeKey(row.code, row))
   }
   const known = await codesIn(
     tx,
@@ -447,7 +477,7 @@ export async function getDiagnosisSuggestions(
   const seen = new Set<string>()
   for (const candidate of candidates) {
     const row = known.get(candidate.code)
-    const key = `${candidate.code}|${candidate.site.siteSystem ?? ""}|${candidate.site.siteCode ?? ""}`
+    const key = placeKey(candidate.code, candidate.site)
     if (!row || row.isCategory || already.has(key) || seen.has(key)) continue
     seen.add(key)
     proposed.push({

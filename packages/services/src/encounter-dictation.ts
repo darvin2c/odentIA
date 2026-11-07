@@ -11,11 +11,9 @@ import {
   DIAGNOSIS_VERIFICATION_LABELS,
   type DiagnosisSystemKey,
   findMedication,
-  isDiagnosisSystem,
   isDiagnosisVerification,
   type MedicationCatalog,
   moneyTotalsText,
-  normalizeDiagnosisCode,
   sumByCurrency,
   normalizeDrugText,
   quantityWords,
@@ -26,7 +24,6 @@ import {
   DICTATION_KINDS,
   type DictationKind,
   encounter,
-  encounterDiagnosis,
   encounterDictationSuggestion,
   encounterProcedure,
   patientAllergy,
@@ -40,13 +37,13 @@ import { medicalLeave } from "@odentia/db/schema/clinical-forms"
 import { product } from "@odentia/db/schema/inventory"
 import { appointment } from "@odentia/db/schema/agenda"
 import { auditEvent, branch } from "@odentia/db/schema/org"
-import { and, asc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm"
+import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm"
 import { getAgentConfig } from "./agentConfig.js"
 import { addPatientAllergy, markAllergiesReviewed, removePatientAllergy } from "./allergies.js"
 import { createAppointment } from "./appointments.js"
 import { listAvailableSlots, zonedTimeToUtc } from "./availability.js"
 import { findDiagnosisCode, orgDiagnosisSystem } from "./diagnosis-codes.js"
-import { addEncounterDiagnosis, voidEncounterDiagnosis } from "./encounter-diagnoses.js"
+import { recordEncounterDiagnosis, voidEncounterDiagnosis } from "./encounter-diagnoses.js"
 import { addEncounterProcedure, assertOpenDraft, lockEncounter, updateEncounterDraft, type UpdateEncounterDraftPatch, voidEncounterProcedure } from "./encounters.js"
 import { fieldsError, invalidField, issueFields, notFound, ServiceError, validation } from "./errors.js"
 import { cancelFollowUp, createFollowUp } from "./follow-ups.js"
@@ -157,6 +154,11 @@ interface SuggestionMeta {
   removal?: { status: "lista" | "por_revisar"; said: string } | undefined
   /** «Quita la endodoncia» sobre una ya confirmada: nunca se quita sola, se propone. */
   undoRequest?: { said: string } | undefined
+  /**
+   * Confirmada sobre un diagnóstico que ya estaba registrado: su id. No es un
+   * `entityId` propio porque no lo creó el dictado.
+   */
+  onFile?: string | undefined
 }
 const META = "_meta"
 
@@ -1451,6 +1453,9 @@ export async function saveDictationSegment(
             eq(encounterDictationSuggestion.id, removal.suggestionId),
             eq(encounterDictationSuggestion.status, "confirmada"),
             inArray(encounterDictationSuggestion.kind, UNDOABLE_KINDS),
+            // Solo lo que creó el dictado, como en `listConfirmedDictation`: un diagnóstico que
+            // ya estaba (confirmada sin `entityId`) no se propone quitar desde aquí.
+            isNotNull(encounterDictationSuggestion.entityId),
           ),
         )
         .for("update")
@@ -1906,6 +1911,11 @@ export async function undoConfirmedDictation(
   const dictation = await requireDictatingProduct(tx, orgId)
   const { row, data, meta, undoRequest } = await lockUndoRequest(tx, orgId, patientId, encounterId, id)
   const reason = `Se quitó al dictar: «${undoRequest.said}»`.slice(0, 2000)
+  // Confirmada sobre lo que ya estaba (sin `entityId` propio): el dictado no lo creó y no lo
+  // anula. Queda el pedido para «Dejarla»; si sobra, se anula desde su bloque, con su motivo.
+  if (!row.entityId && row.kind === "diagnostico") {
+    throw conflict("NOT_FROM_DICTATION", "Ese diagnóstico ya estaba registrado antes de dictarlo: si sobra, anúlalo desde Diagnósticos.")
+  }
   const entityId = String(row.entityId)
   if (row.kind === "plan") {
     const [item] = await tx
@@ -1988,37 +1998,25 @@ const pick = <T extends string>(payload: Record<string, unknown>, keys: readonly
   Object.fromEntries(keys.filter((key) => payload[key] !== undefined).map((key) => [key, payload[key]])) as Partial<Record<T, unknown>>
 
 /**
- * El diagnóstico vigente de la atención con ese código y esa pieza, si ya está:
- * el código se lee en su lista como al registrarlo y la pieza, como el sitio
- * suelto del producto (latidIA no tiene).
+ * La nota de un diagnóstico dictado que ya estaba registrado: quedó el que
+ * había y, si lo dictado decía otro tipo u otra nota, qué no entró. Un
+ * diagnóstico registrado no se modifica (la base lo impide): la nota dictada no
+ * se le agrega; se dice aquí para que no se pierda en silencio.
  */
-async function activeEncounterDiagnosis(
-  tx: Db,
-  orgId: string,
-  encounterId: string,
-  input: { diagnosisCode: string; diagnosisSystem: string | null; toothNumber: number | null },
-): Promise<string | null> {
-  const system = input.diagnosisSystem?.trim() || (await orgDiagnosisSystem(tx, orgId))
-  if (!isDiagnosisSystem(system)) return null
-  const code = normalizeDiagnosisCode(system, input.diagnosisCode.trim())
-  if (!code) return null
-  const { site } = await productHooks(tx, orgId)
-  const siteCode = input.toothNumber != null ? site.code(input.toothNumber) : null
-  const [row] = await tx
-    .select({ id: encounterDiagnosis.id })
-    .from(encounterDiagnosis)
-    .where(
-      and(
-        eq(encounterDiagnosis.organizationId, orgId),
-        eq(encounterDiagnosis.encounterId, encounterId),
-        eq(encounterDiagnosis.diagnosisSystem, system),
-        eq(encounterDiagnosis.diagnosisCode, code),
-        isNull(encounterDiagnosis.voidedAt),
-        siteCode ? eq(encounterDiagnosis.siteCode, siteCode) : isNull(encounterDiagnosis.siteCode),
-      ),
-    )
-    .limit(1)
-  return row?.id ?? null
+function alreadyOnFileNote(
+  existing: { diagnosisType: string | null; note: string | null },
+  dictated: { diagnosisType: string; note: string | null },
+): string {
+  const label = (type: string | null) => (isDiagnosisVerification(type) ? DIAGNOSIS_VERIFICATION_LABELS[type].toLowerCase() : "sin tipo")
+  const parts = ["Ya estaba registrado en esta atención: quedó el que había."]
+  if (existing.diagnosisType !== dictated.diagnosisType) {
+    parts.push(`Sigue ${label(existing.diagnosisType)}; lo dictado decía ${label(dictated.diagnosisType)}.`)
+  }
+  const said = dictated.note?.trim()
+  if (said && said !== existing.note?.trim()) {
+    parts.push(`La nota dictada «${said.slice(0, 300)}» no se agregó: un diagnóstico registrado no se cambia; anúlalo y regístralo de nuevo si la necesitas.`)
+  }
+  return parts.join(" ")
 }
 
 /**
@@ -2046,6 +2044,8 @@ export async function confirmDictationSuggestion(
   // La operación recibe los campos de la sugerencia, no sus metadatos.
   const payload = splitMeta(row.payload).data
   let entityId: string | null = null
+  // Un diagnóstico dictado que ya estaba registrado: a cuál apunta y qué se le dice al clínico.
+  let onFile: { id: string; note: string } | null = null
   // Cómo quedó cada texto de la nota: la pantalla lo adopta, porque su borrador puede ir por detrás.
   let joined: Record<string, string> | undefined
   if (row.kind === "nota") {
@@ -2068,11 +2068,16 @@ export async function confirmDictationSuggestion(
       surfaces: (payload["surfaces"] as string[] | undefined) ?? null,
       note: (payload["note"] as string | undefined) ?? null,
     }
-    // Ya está en la atención con la misma pieza (lo usó el clínico desde lo que proponía el
-    // tratamiento, o se registró a mano): confirmar no lo registra dos veces.
-    entityId =
-      (await activeEncounterDiagnosis(tx, orgId, encounterId, input)) ??
-      (await addEncounterDiagnosis(tx, orgId, actorUserId, patientId, encounterId, input)).id
+    const recorded = await recordEncounterDiagnosis(tx, orgId, actorUserId, patientId, encounterId, input)
+    if (recorded.existing) {
+      // Ya estaba en la atención en el mismo sitio (lo usó el clínico desde lo que proponía el
+      // tratamiento, o se registró a mano): confirmar no lo registra dos veces ni se lo apropia.
+      // Sin `entityId` propio, «quítalo» por voz no anula lo que no vino del dictado; a cuál
+      // apunta queda en sus metadatos, y lo que no entró se dice en su nota.
+      onFile = { id: recorded.row.id, note: alreadyOnFileNote(recorded.row, input) }
+    } else {
+      entityId = recorded.row.id
+    }
   } else if (row.kind === "plan" && Array.isArray(payload["options"]) && payload["options"].length) {
     entityId = await confirmPlanChoice(tx, orgId, actorUserId, patientId, encounterId, row.id, payload)
   } else if (row.kind === "plan") {
@@ -2124,9 +2129,17 @@ export async function confirmDictationSuggestion(
     })
     entityId = created.id
   }
+  const parts = splitMeta(row.payload)
   const [updated] = await tx
     .update(encounterDictationSuggestion)
-    .set({ status: "confirmada", entityId, decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
+    .set({
+      status: "confirmada",
+      entityId,
+      ...(onFile ? { payload: withMeta(parts.data, { ...parts.meta, onFile: onFile.id }), note: onFile.note } : {}),
+      decidedBy: actorUserId,
+      decidedAt: new Date(),
+      updatedAt: new Date(),
+    })
     .where(eq(encounterDictationSuggestion.id, id))
     .returning()
   if (!updated) throw new Error("No se pudo confirmar la sugerencia")

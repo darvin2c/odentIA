@@ -9,6 +9,7 @@ import {
 } from "@odentia/ui"
 import { DetailDrawer, RowActions } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
 import { ChevronDown } from "lucide-react"
 import { useEffect, useState } from "react"
 import { ApiError } from "../../lib/api"
@@ -306,9 +307,22 @@ export function EncounterDocumentsBlock({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">
           {/* Firmada, la atención ya no crea documentos: se dice dónde, en vez de un «Nuevo» apagado. */}
-          {signed && canWrite
-            ? "Para un documento nuevo, créalo desde Documentos de la ficha."
-            : "Receta, consentimiento, orden, formulario o imagen, llenos con lo de esta atención."}
+          {signed && canWrite ? (
+            <>
+              Para un documento nuevo, créalo desde{" "}
+              <Link
+                to="/patients/$patientId"
+                params={{ patientId }}
+                search={{ tab: "documentos" }}
+                className="font-medium text-primary underline-offset-4 hover:underline"
+              >
+                Documentos de la ficha
+              </Link>
+              .
+            </>
+          ) : (
+            "Receta, consentimiento, orden, formulario o imagen, llenos con lo de esta atención."
+          )}
         </p>
         {canWrite && !signed ? (
           <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>

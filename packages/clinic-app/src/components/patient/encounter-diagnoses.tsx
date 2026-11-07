@@ -19,7 +19,15 @@ import { usePermission } from "../../lib/crm"
 import { addDiagnosisApi, type EncounterDiagnosis, voidDiagnosisApi } from "../../lib/encounters"
 import { DIAGNOSIS_TYPE_LABELS, type EncounterDetail } from "../../lib/patients"
 import { ChoiceButtons } from "../choice-buttons"
-import { DiagnosisPicker, type ProposedDiagnosis, proposalOrigin, useDiagnosisSuggestions } from "./diagnosis-picker"
+import {
+  areaWords,
+  DiagnosisPicker,
+  type ProposedDiagnosis,
+  proposalKey,
+  proposalOrigin,
+  proposedSite,
+  useDiagnosisSuggestions,
+} from "./diagnosis-picker"
 import type { PlaceWithParts } from "../../product/product-ui"
 import { partNames, SiteField } from "../../product/site-fields"
 
@@ -39,6 +47,8 @@ const diagnosisSchema = z.object({
   description: z.string(),
   diagnosisType: z.string().min(1, "Elige si el diagnóstico es presuntivo o definitivo"),
   site: z.custom<PlaceWithParts>(),
+  /** El cuadrante o la arcada de una propuesta de un tratamiento por área; sin pieza, se registra con él. */
+  area: z.custom<{ quadrant: number | null; arch: string | null } | null>(),
   note: z.string().max(MAX_TEXT, `Escribe como mucho ${MAX_TEXT} caracteres.`),
 })
 
@@ -49,23 +59,28 @@ const reasonSchema = z.object({
   reason: z.string().trim().min(1, "Escribe el motivo.").max(MAX_TEXT, `Escribe como mucho ${MAX_TEXT} caracteres.`),
 })
 
-/** «36 · Oclusal, Mesial» o «Sin pieza»; nada si el producto no registra el «dónde» (latidIA). */
-export function diagnosisSiteLabel(dx: Pick<EncounterDiagnosis, "toothNumber" | "surfaces">): string | null {
+/** «36 · Oclusal, Mesial», «Cuadrante 1» o «Sin pieza»; nada si el producto no registra el «dónde» (latidIA). */
+export function diagnosisSiteLabel(
+  dx: Pick<EncounterDiagnosis, "toothNumber" | "surfaces" | "quadrant" | "arch">,
+): string | null {
   // Un producto sin «dónde» no manda la pieza ni las caras: ni null.
-  if (dx.toothNumber == null) return productUi().site ? "Sin pieza" : null
+  if (dx.toothNumber == null) return productUi().site ? (areaWords(dx) ?? "Sin pieza") : null
   const surfaces = partNames(dx.surfaces)
   return surfaces ? `${dx.toothNumber} · ${surfaces}` : String(dx.toothNumber)
 }
 
 /** « · 36 · Oclusal» para seguir a otro dato, o nada. */
-export function diagnosisSiteSuffix(dx: Pick<EncounterDiagnosis, "toothNumber" | "surfaces">): string {
+export function diagnosisSiteSuffix(
+  dx: Pick<EncounterDiagnosis, "toothNumber" | "surfaces" | "quadrant" | "arch">,
+): string {
   const site = diagnosisSiteLabel(dx)
   return site ? ` · ${site}` : ""
 }
 
 /**
- * Lo que propone la atención para su diagnóstico (el odontograma, el
- * tratamiento que continúa), cada propuesta con «Usar». Nada entra solo: con
+ * Lo que proponen los tratamientos que la atención continúa, cada propuesta
+ * con «Usar». Lo que propone el odontograma sigue en el buscador del
+ * formulario («Elegir»), como antes. Nada entra solo: con
  * el tipo de la última vez, «Usar» lo registra con el alta de siempre; sin
  * tipo, pide al clínico que lo elija (`onChoose` abre el formulario lleno).
  * Respeta la barrera del editor como el resto de escrituras del bloque.
@@ -91,9 +106,9 @@ export function DiagnosisProposals({
   const suggestions = useDiagnosisSuggestions(patientId, encounterId)
   const [using, setUsing] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const proposed = suggestions.data?.proposed ?? []
+  const proposed = (suggestions.data?.proposed ?? []).filter((item) => item.source === "tratamiento")
   if (proposed.length === 0) return null
-  const keyOf = (item: ProposedDiagnosis) => `${item.source}-${item.system}-${item.code}-${item.toothNumber ?? ""}`
+  const keyOf = proposalKey
 
   const use = async (item: ProposedDiagnosis) => {
     setError(null)
@@ -105,12 +120,13 @@ export function DiagnosisProposals({
     onPendingChange(true)
     try {
       await beforeWrite()
+      // El sitio entero, como lo propuso el servidor (también el cuadrante o la arcada):
+      // así lo registrado coincide con la propuesta y deja de proponerse.
       await addDiagnosisApi(patientId, encounterId, {
         diagnosisCode: item.code,
         diagnosisSystem: item.system,
         diagnosisType: item.diagnosisType,
-        toothNumber: item.toothNumber ?? null,
-        surfaces: item.surfaces ?? [],
+        ...proposedSite(item),
       })
       await queryClient.invalidateQueries({ queryKey: ["diagnosis-suggestions", patientId] })
       await queryClient.invalidateQueries({ queryKey: ["timeline", patientId] })
@@ -150,7 +166,7 @@ export function DiagnosisProposals({
                 size="sm"
                 variant="outline"
                 disabled={disabled || using !== null}
-                aria-label={`Usar ${item.description}${item.toothNumber != null ? ` de la ${item.toothNumber}` : ""}`}
+                aria-label={`Usar ${item.description}${item.toothNumber != null ? ` de la ${item.toothNumber}` : areaWords(item) ? ` · ${areaWords(item)?.toLowerCase()}` : ""}`}
                 onClick={() => void use(item)}
               >
                 {using === keyOf(item) ? "Registrando…" : "Usar"}
@@ -233,6 +249,7 @@ export function EncounterDiagnoses({
       // Sin valor por defecto: afirmar la certeza es una decisión explícita del clínico.
       diagnosisType: "",
       site: NO_SITE,
+      area: null as { quadrant: number | null; arch: string | null } | null,
       note: "",
     },
     validators: { onSubmit: diagnosisSchema },
@@ -244,6 +261,9 @@ export function EncounterDiagnoses({
           diagnosisType: value.diagnosisType,
           toothNumber: value.site.toothNumber,
           surfaces: value.site.surfaces,
+          // El área de la propuesta solo cuenta mientras no se eligió una pieza.
+          quadrant: value.site.toothNumber == null ? (value.area?.quadrant ?? null) : null,
+          arch: value.site.toothNumber == null ? (value.area?.arch ?? null) : null,
           note: value.note.trim() || null,
         }),
       )
@@ -254,6 +274,7 @@ export function EncounterDiagnoses({
   const surface = useFormSurface(form, { fieldMap: SERVER_FIELDS })
   const codeSystem = useStore(form.store, (state) => state.values.diagnosisSystem)
   const description = useStore(form.store, (state) => state.values.description)
+  const area = useStore(form.store, (state) => (state.values.site.toothNumber == null ? areaWords(state.values.area ?? {}) : null))
 
   const voidForm = useAppForm({
     defaultValues: { reason: "" },
@@ -275,7 +296,9 @@ export function EncounterDiagnoses({
     form.setFieldValue("diagnosisCode", item.code)
     form.setFieldValue("diagnosisSystem", item.system)
     form.setFieldValue("description", item.description)
-    form.setFieldValue("site", { toothNumber: item.toothNumber ?? null, surfaces: item.surfaces ?? [] })
+    const site = proposedSite(item)
+    form.setFieldValue("site", { toothNumber: site.toothNumber, surfaces: site.surfaces })
+    form.setFieldValue("area", site.quadrant != null || site.arch != null ? { quadrant: site.quadrant, arch: site.arch } : null)
     setOpen(true)
   }
   // Lo que se eligió en la tarjeta de la atención, antes de abrir el bloque.
@@ -418,13 +441,20 @@ export function EncounterDiagnoses({
                       invalid={control.invalid}
                       aria-describedby={control.describedBy}
                       onBlur={control.onBlur}
-                      onChange={(choice, proposedSite) => {
+                      onChange={(choice, site) => {
                         field.handleChange(choice.code)
                         form.setFieldValue("diagnosisSystem", choice.code ? choice.system : null)
                         form.setFieldValue("description", choice.code ? choice.description : "")
-                        // Lo que propone un hallazgo trae su pieza y sus caras, si aún no se eligió otra.
-                        if (proposedSite && form.getFieldValue("site").toothNumber === null)
-                          form.setFieldValue("site", proposedSite)
+                        // Lo que propone un hallazgo o un tratamiento trae su pieza y sus caras (o su área),
+                        // si aún no se eligió otra pieza. Otro código del buscador no hereda el área.
+                        const noTooth = form.getFieldValue("site").toothNumber === null
+                        if (site && noTooth) form.setFieldValue("site", { toothNumber: site.toothNumber, surfaces: site.surfaces })
+                        form.setFieldValue(
+                          "area",
+                          site && noTooth && (site.quadrant != null || site.arch != null)
+                            ? { quadrant: site.quadrant, arch: site.arch }
+                            : null,
+                        )
                       }}
                     />
                   )}
@@ -432,6 +462,7 @@ export function EncounterDiagnoses({
               )}
             </form.AppField>
             {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
+            {area ? <p className="text-sm text-muted-foreground">Se registra en {area.toLowerCase()}, como el tratamiento.</p> : null}
             <form.AppField name="diagnosisType">
               {(field) => (
                 <field.Group

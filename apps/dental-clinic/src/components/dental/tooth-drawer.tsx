@@ -487,6 +487,8 @@ export function ToothDrawer({
             "plan-next",
             "encounter",
             "encounter-closing",
+            // El diagnóstico registrado con el hallazgo deja de proponerse.
+            "diagnosis-suggestions",
           ].map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
         )
         setChoosingFinding(true)

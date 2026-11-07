@@ -508,7 +508,7 @@ describe("dictado en la atención", () => {
     const fx = await openSession("Obturación sin repetir")
     const [same, other] = await fx.run((tx) =>
       saveDictationSuggestions(tx, ...fx.args, fx.encounter.id, [
-        { kind: "diagnostico", payload: { diagnosisCode: "K02.1", diagnosisType: "provisional", toothNumber: 16 } },
+        { kind: "diagnostico", payload: { diagnosisCode: "K02.1", diagnosisType: "provisional", toothNumber: 16, note: "Profunda" } },
         { kind: "diagnostico", payload: { diagnosisCode: "K02.1", diagnosisType: "provisional", toothNumber: 26 } },
       ]),
     )
@@ -518,8 +518,13 @@ describe("dictado en la atención", () => {
     )
     const confirmed = await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, same!.id))
     expect(confirmed.status).toBe("confirmada")
+    // No se lo apropia: sin `entityId` propio, apunta al que ya estaba y dice lo que no entró.
     const [suggestion] = await ownerDb.select().from(encounterDictationSuggestion).where(eq(encounterDictationSuggestion.id, same!.id))
-    expect(suggestion?.entityId).toBe(used.id)
+    expect(suggestion?.entityId).toBeNull()
+    expect(suggestion?.payload).toMatchObject({ _meta: { onFile: used.id } })
+    expect(confirmed.note).toMatch(/^Ya estaba registrado en esta atención/)
+    expect(confirmed.note).toContain("Sigue definitivo; lo dictado decía presuntivo.")
+    expect(confirmed.note).toContain("«Profunda»")
     // En otra pieza sí es otro diagnóstico.
     await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, other!.id))
     const rows = await ownerDb.select().from(encounterDiagnosis).where(eq(encounterDiagnosis.encounterId, fx.encounter.id))
@@ -527,6 +532,41 @@ describe("dictado en la atención", () => {
       ["16", "confirmed"],
       ["26", "provisional"],
     ])
+    await enable(false)
+  })
+
+  it("«quítalo» por voz no anula un diagnóstico que ya estaba y no vino del dictado", async () => {
+    await enable(true)
+    const fx = await openSession("Quitar lo que ya estaba")
+    const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
+    const [dictated] = await fx.run((tx) =>
+      saveDictationSuggestions(tx, ...fx.args, fx.encounter.id, [
+        { kind: "diagnostico", payload: { diagnosisCode: "K02.1", diagnosisType: "confirmed", toothNumber: 16 } },
+      ]),
+    )
+    const manual = await fx.run((tx) =>
+      addEncounterDiagnosis(tx, ...fx.args, fx.encounter.id, { diagnosisCode: "K02.1", diagnosisType: "confirmed", toothNumber: 16 }),
+    )
+    const confirmed = await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, dictated!.id))
+    // El mismo tipo y sin nota: solo dice que quedó el que había.
+    expect(confirmed.note).toBe("Ya estaba registrado en esta atención: quedó el que había.")
+    // No se le ofrece al asistente como algo que quitar, y «quítalo» no deja pedido.
+    expect(await fx.run((tx) => listConfirmedDictation(tx, ORG, fx.patient.id, fx.encounter.id))).toEqual([])
+    const asked = await segment({ drafts: [], segmentId: randomUUID(), removals: [{ suggestionId: dictated!.id, said: "quita la caries de la 16" }] })
+    expect(asked.undoRequested).toEqual([])
+    // Aunque llegara un pedido (de antes de este cambio), quitarlo no anula lo que no creó el dictado.
+    const [stored] = await ownerDb.select().from(encounterDictationSuggestion).where(eq(encounterDictationSuggestion.id, dictated!.id))
+    const meta = (stored!.payload["_meta"] ?? {}) as Record<string, unknown>
+    await ownerDb
+      .update(encounterDictationSuggestion)
+      .set({ payload: { ...stored!.payload, _meta: { ...meta, undoRequest: { said: "quita la caries de la 16" } } } })
+      .where(eq(encounterDictationSuggestion.id, dictated!.id))
+    await expect(fx.run((tx) => undoConfirmedDictation(tx, ...fx.args, fx.encounter.id, dictated!.id))).rejects.toMatchObject({
+      code: "NOT_FROM_DICTATION",
+      status: 409,
+    })
+    const [row] = await ownerDb.select().from(encounterDiagnosis).where(eq(encounterDiagnosis.id, manual.id))
+    expect(row?.voidedAt).toBeNull()
     await enable(false)
   })
 

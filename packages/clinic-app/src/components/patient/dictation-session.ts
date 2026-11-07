@@ -461,6 +461,8 @@ export function useDictationSession({
         return
       }
       onApplied({ ...input.item, joined: input.result?.joined })
+      // Un diagnóstico que ya estaba registrado: quedó el que había, y lo dictado que no entró se dice.
+      if (input.item.kind === "diagnostico" && input.result?.note) toast(input.result.note)
       if (input.item.kind === "cita") toast.success(input.item.payload["existing"] ? "Queda la cita que ya tenía." : "Cita reservada. Le llega el aviso como cuando reserva recepción.")
       if (input.item.kind === "presupuesto") toast.success("Presupuesto armado. Muéstralo, imprímelo o envíalo desde «Plan y controles».")
       // Lo que cambia fuera de la tarjeta se dice al confirmar, no antes.
@@ -483,12 +485,14 @@ export function useDictationSession({
       const updated = await apiFetch<{ data: DictationSuggestion }>(`${base}/${input.item.id}`, { method: "PATCH", body: JSON.stringify(input.patch) })
       if (!input.confirm || updated.data.status !== "lista") return { item: updated.data, confirmed: false }
       const confirmed = await apiFetch<{ data?: DictationSuggestion } | undefined>(`${base}/${input.item.id}/confirm`, { method: "POST" })
-      return { item: { ...updated.data, joined: confirmed?.data?.joined }, confirmed: true }
+      return { item: { ...updated.data, joined: confirmed?.data?.joined }, confirmed: true, note: confirmed?.data?.note ?? null }
     },
     onSuccess: (result) => {
       // Lo que falló antes con esta sugerencia ya no vale: se acaba de corregir.
       if (act.variables?.item.id === result.item.id) act.reset()
       if (result.confirmed) onApplied(result.item)
+      // Como al confirmar con un toque: lo que no entró de un diagnóstico que ya estaba se dice.
+      if (result.confirmed && result.item.kind === "diagnostico" && "note" in result && result.note) toast(result.note)
     },
     onSettled: () => void refresh(),
   })

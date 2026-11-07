@@ -579,6 +579,7 @@ export function EncounterEditor({
   const timerRef = useRef<number | undefined>(undefined)
   const mountedRef = useRef(true)
   const childCountRef = useRef(0)
+  const idleWaitersRef = useRef<Array<() => void>>([])
   const latestWriteAtRef = useRef(new Date(encounter.updatedAt).getTime())
   // Los textos que otra pestaña cambió: no se vuelven a enviar hasta recargar, y lo demás sigue guardándose.
   const conflictRef = useRef<Set<DraftKey>>(new Set())
@@ -913,6 +914,11 @@ export function EncounterEditor({
       void queryClient.invalidateQueries({ queryKey: ["patient-vitals", patientId] })
     }
     if (item.kind === "examen" && exam.withDictated) editExamination(exam.withDictated(valuesRef.current.examination, item.payload))
+    // Un diagnóstico confirmado (o quitado) cambia la lista de problemas y lo que se propone.
+    if (item.kind === "diagnostico") {
+      void queryClient.invalidateQueries({ queryKey: ["patient-diagnoses", patientId] })
+      void queryClient.invalidateQueries({ queryKey: ["diagnosis-suggestions", patientId] })
+    }
     // La alergia confirmada se ve al momento en la franja de alertas, como al agregarla a mano.
     if (item.kind === "alergia") {
       void queryClient.invalidateQueries({ queryKey: ["patient-health", patientId] })
@@ -1096,7 +1102,10 @@ export function EncounterEditor({
     addSection(
       requirement === "reason" ? "consulta" : requirement === "diagnosis" ? "hallazgos" : requirement === "vitals" ? "examen" : "evolucion",
     )
-    if (requirement !== "diagnosis") void submitForm(draftForm)
+    // Con el motivo de la cita a la vista («De la cita: … · Usar»), el campo no se marca en rojo:
+    // lo primero que se ve es cómo usarlo en un toque.
+    if (requirement === "diagnosis" || (requirement === "reason" && offeredReason)) return
+    void submitForm(draftForm)
   }
 
   /**
@@ -1135,7 +1144,12 @@ export function EncounterEditor({
   const handlePendingChange = (pending: boolean) => {
     childCountRef.current = Math.max(0, childCountRef.current + (pending ? 1 : -1))
     if (mountedRef.current) setChildCount(childCountRef.current)
+    // Terminó la última escritura en curso: sigue quien esperaba (`whenIdle`).
+    if (childCountRef.current === 0) for (const resume of idleWaitersRef.current.splice(0)) resume()
   }
+  /** Espera a que terminen las escrituras en curso (un diagnóstico, la sede, un documento). */
+  const whenIdle = (): Promise<void> =>
+    childCountRef.current === 0 ? Promise.resolve() : new Promise((resolve) => idleWaitersRef.current.push(resolve))
 
   const handleChildChanged = async (): Promise<void> => {
     await onChanged()
@@ -1169,8 +1183,14 @@ export function EncounterEditor({
   const mode = useDetailMode()
 
   const locked = !canWrite || !attending || childCount > 0 || finalizing || voiding
-  // El motivo de la reserva se ofrece solo a quien puede usarlo y mientras no haya otro.
-  const offeredReason = !locked && reason.trim() === "" ? detail.bookedReason : null
+  // El motivo de la reserva se ofrece solo a quien puede usarlo y mientras no haya otro. No
+  // depende de `locked`: durante una escritura en curso sigue a la vista (con «Usar» apagado),
+  // sin parpadear a «Sin motivo».
+  const offeredReason =
+    canWrite && attending && !finalizing && !voiding && reason.trim() === "" ? detail.bookedReason : null
+  const takeOfferedReason = () => {
+    if (offeredReason && !locked) editText("reason", offeredReason)
+  }
   // Los bloques del producto (odentIA: Odontograma y Periodontograma), después del examen.
   const product = productUi().encounter.useBlocks({
     patientId,
@@ -1226,12 +1246,8 @@ export function EncounterEditor({
         ? "Motivo de consulta, tiempo y relato de la enfermedad, sede y piezas evaluadas."
         : "Motivo de consulta, tiempo y relato de la enfermedad, y sede.",
       // La tarjeta dice lo que tiene; lo que falta para firmar se dice en «Cierre de la atención» y en el pie.
-      summary:
-        reason.trim() !== ""
-          ? reason.trim()
-          : offeredReason
-            ? `Se agendó como «${offeredReason}»`
-            : "Sin motivo",
+      // Sin motivo propio dice «Sin motivo», aunque la cita traiga uno: ese se ofrece debajo, con «Usar».
+      summary: reason.trim() !== "" ? reason.trim() : "Sin motivo",
       empty: reason.trim() === "",
     },
     {
@@ -1384,16 +1400,20 @@ export function EncounterEditor({
 
   /**
    * «Listo» en Consulta, Examen y Evolución: guarda lo pendiente (la barrera de
-   * escritura) y cierra. Si no se pudo guardar, el bloque sigue abierto y dice
-   * por qué; la «×» cierra igual, y el autoguardado sigue intentándolo.
+   * escritura) y cierra. Si hay otra escritura en curso (registrar un
+   * diagnóstico, cambiar la sede), «Listo» queda en «Guardando…» y espera a que
+   * termine, en vez de no hacer nada. Si no se pudo guardar, el bloque sigue
+   * abierto y dice por qué; la «×» cierra igual, y el autoguardado sigue intentándolo.
    */
   const finishSection = async (event: React.FormEvent) => {
     event.preventDefault()
-    if (explicitSaving || finalizing || childCountRef.current > 0) return
+    if (explicitSaving || finalizing) return
     const section = openSection
     setExplicitSaving(true)
     setDoneError(null)
     try {
+      await whenIdle()
+      if (!mountedRef.current) return
       await flush()
       if (!mountedRef.current) return
       setOpenSection(null)
@@ -1409,6 +1429,14 @@ export function EncounterEditor({
     } finally {
       if (mountedRef.current) setExplicitSaving(false)
     }
+  }
+
+  /** Enter en un campo de una línea no envía el formulario del bloque (ver `sectionDetail`). */
+  const keepOpenOnEnter = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const target = event.target
+    if (event.key !== "Enter" || !(target instanceof HTMLInputElement)) return
+    if (["submit", "button", "reset", "image"].includes(target.type)) return
+    event.preventDefault()
   }
 
   /** Al dictar, la atención queda a la vista: se cierra el bloque abierto y, si cabe, se muestra el respaldo al lado. */
@@ -1448,7 +1476,9 @@ export function EncounterEditor({
         ? "Guardando lo último que escribiste…"
         : saveState === "error"
           ? "No se pudo guardar lo último: revisa el aviso y vuelve a intentarlo."
-          : null
+          : childCount > 0 || explicitSaving
+            ? "Guardando lo último que registraste…"
+            : null
   const openSign = () => {
     signIdsRef.current = null
     // Lo escrito en un cierre que falló se conserva; la primera vez, la colegiatura
@@ -1607,15 +1637,17 @@ export function EncounterEditor({
       {offeredReason ? (
         <div className="-mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
           <span id={`${uid}-booked-reason`} className="text-muted-foreground">
-            Se agendó como «{offeredReason}».
+            De la cita: «{offeredReason}»
           </span>
           <Button
             type="button"
             size="sm"
-            variant="ghost"
-            onClick={() => editText("reason", offeredReason)}
+            variant="outline"
+            disabled={locked}
+            aria-label={`Usar «${offeredReason}» como motivo`}
+            onClick={takeOfferedReason}
           >
-            Usar como motivo
+            Usar
           </Button>
         </div>
       ) : null}
@@ -1893,7 +1925,12 @@ export function EncounterEditor({
       // Solo guardado automático: el bloque no lleva botón de guardar.
       const form = {
         ...surface,
-        children: body,
+        children: (
+          // Enter en un campo de una línea (un signo vital, el tiempo de enfermedad) no envía el
+          // bloque: «Listo» lo cierra, y cerrarlo así, a mitad de escribir, sorprende.
+          // biome-ignore lint/a11y/noStaticElementInteractions: solo evita el envío implícito del formulario; cada campo sigue con su teclado.
+          <div onKeyDown={keepOpenOnEnter}>{body}</div>
+        ),
         onSubmit: finishSection,
         isSubmitting: explicitSaving,
         // Lo que no guardó «Listo», en los dos modos; el rechazo del autoguardado, dentro del
@@ -1902,7 +1939,8 @@ export function EncounterEditor({
           (doneError?.section === openSection && saveState !== "saved" ? doneError.message : null) ??
           (target === "drawer" && saveState === "error" ? saveError : null),
         // Se guarda solo: «Listo» guarda lo último y cierra; «Cancelar» no tenía qué cancelar.
-        submitLabel: "Listo",
+        // Mientras espera otra escritura en curso, lo dice en el mismo botón.
+        submitLabel: explicitSaving ? "Guardando…" : "Listo",
         cancelLabel: common.actions.close,
       }
       return target === "panel" ? <FormPanel {...form} /> : <FormDrawer open {...form} />
@@ -1953,14 +1991,19 @@ export function EncounterEditor({
         : saveState === "error"
           ? { text: "No se guardó", tone: "border-destructive/40 text-destructive" }
           : { text: `Guardado ${formatClock(savedAt)}`, tone: "border-success/40 bg-success-soft text-success" }
-  // Pie fijo: lo que falta y «Finalizar y firmar», también en la tablet y el teléfono.
+  // Pie fijo: lo que falta y «Finalizar y firmar», también en la tablet y el teléfono. Mientras
+  // se guarda o se comprueba, dice por qué aún no se firma: la lista de faltantes podría estar vieja.
+  const footerWait =
+    signBlockedReason ?? (closingQuery.isSuccess && closingQuery.isFetching ? "Comprobando lo que falta…" : null)
   const footerMissing =
-    !dictation.busy && closingQuery.isSuccess && !onlyRegistrationMissing && !closingReady
+    !dictation.busy && !footerWait && closingQuery.isSuccess && !onlyRegistrationMissing && !closingReady
       ? CLOSING_ORDER.filter((requirement) => missing.includes(requirement))
       : []
   const footerText = dictation.busy
     ? "Termina el dictado para poder firmar"
-    : !closingQuery.isSuccess
+    : footerWait
+      ? footerWait
+      : !closingQuery.isSuccess
       ? "Comprobando lo que falta…"
       : onlyRegistrationMissing
         ? "Listo para firmar · falta tu colegiatura, se pide al firmar"
@@ -2101,8 +2144,24 @@ export function EncounterEditor({
                     ? `${(section.empty && dictationOf(section.key)?.onlySuggested) || section.summary} · ${dictationCount(section.key)} ${dictationCount(section.key) === 1 ? "sugerencia" : "sugerencias"}`
                     : section.summary}
                 </p>
+                {/* Lo que dice la cita no es el motivo hasta que alguien lo usa: se ofrece aparte. */}
+                {section.key === "consulta" && offeredReason && openSection !== "consulta" ? (
+                  <p className="text-sm">De la cita: «{offeredReason}»</p>
+                ) : null}
               </div>
               <div className="flex flex-wrap gap-2">
+                {/* En un control en serie, el motivo de la reserva se usa sin abrir el bloque: es la acción principal. */}
+                {section.key === "consulta" && offeredReason && openSection !== "consulta" ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={locked}
+                    aria-label={`Usar «${offeredReason}» como motivo`}
+                    onClick={takeOfferedReason}
+                  >
+                    Usar
+                  </Button>
+                ) : null}
                 <Button
                   type="button"
                   size="sm"
@@ -2112,12 +2171,6 @@ export function EncounterEditor({
                 >
                   {openSection === section.key ? "En edición" : "Abrir"}
                 </Button>
-                {/* En un control en serie, el motivo de la reserva se usa sin abrir el bloque. */}
-                {section.key === "consulta" && offeredReason && openSection !== "consulta" ? (
-                  <Button type="button" size="sm" variant="ghost" onClick={() => editText("reason", offeredReason)}>
-                    Usar como motivo
-                  </Button>
-                ) : null}
                 {!REQUIRED_SECTIONS.includes(section.key) && section.empty && dictationCount(section.key) === 0 ? (
                   <Button
                     type="button"
@@ -2217,30 +2270,54 @@ export function EncounterEditor({
             missing.length > 0 ? (
               <ul className="flex flex-col gap-1.5 text-sm" aria-label="Lo que falta para firmar">
                 {CLOSING_ORDER.filter((requirement) => missing.includes(requirement)).map((requirement) => (
-                  <li key={requirement} className="flex flex-wrap items-center gap-2">
+                  // El «!» va con su texto: en un teléfono angosto el texto envuelve a su lado, no debajo.
+                  <li key={requirement} className="flex items-start gap-2">
                     <span
                       aria-hidden="true"
-                      className="inline-flex size-5 items-center justify-center rounded-full bg-warning-soft text-xs font-bold text-warning"
+                      className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-warning-soft text-xs font-bold text-warning"
                     >
                       !
                     </span>
-                    <span>
-                      {requirement === "diagnosis" && pendingDiagnoses > 0
-                        ? pendingDiagnoses === 1
-                          ? "Diagnóstico: hay uno sugerido, sin confirmar"
-                          : `Diagnóstico: hay ${pendingDiagnoses} sugeridos, sin confirmar`
-                        : CLOSING_REQUIREMENT_LABELS[requirement]}
+                    <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-1">
+                      <span className="min-w-0">
+                        {requirement === "diagnosis" && pendingDiagnoses > 0
+                          ? pendingDiagnoses === 1
+                            ? "Diagnóstico: hay uno sugerido, sin confirmar"
+                            : `Diagnóstico: hay ${pendingDiagnoses} sugeridos, sin confirmar`
+                          : CLOSING_REQUIREMENT_LABELS[requirement]}
+                        {/* El motivo que trae la cita se usa aquí mismo, en un toque. */}
+                        {requirement === "reason" && offeredReason ? (
+                          <span className="text-muted-foreground"> · de la cita: «{offeredReason}»</span>
+                        ) : null}
+                      </span>
+                      {requirement === "reason" && offeredReason ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="link"
+                          className="h-auto p-0"
+                          disabled={locked}
+                          aria-label={`Usar «${offeredReason}» como motivo`}
+                          onClick={takeOfferedReason}
+                        >
+                          Usar
+                        </Button>
+                      ) : null}
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="link"
+                        className="h-auto p-0"
+                        disabled={!attending}
+                        onClick={() => requireBlock(requirement)}
+                      >
+                        {requirement === "signature"
+                          ? "Completar perfil"
+                          : requirement === "reason" && offeredReason
+                            ? "Escribir otro"
+                            : "Registrar"}
+                      </Button>
                     </span>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="link"
-                      className="h-auto p-0"
-                      disabled={!attending}
-                      onClick={() => requireBlock(requirement)}
-                    >
-                      {requirement === "signature" ? "Completar perfil" : "Registrar"}
-                    </Button>
                   </li>
                 ))}
               </ul>

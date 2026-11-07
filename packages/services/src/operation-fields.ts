@@ -307,6 +307,9 @@ export const OPERATIONS = {
       diagnosisType: { kind: "enum", values: ["provisional", "confirmed"], label: "Tipo", description: "provisional si el odontólogo aún no lo confirma (presuntivo); confirmed si lo da por seguro (definitivo). Si ya lo tenía antes lo anota el sistema: no lo indiques.", body: "required", agent: "requires" },
       toothNumber: { kind: "int", min: 11, max: 85, label: "Pieza", description: "La pieza en numeración FDI (dieciséis = 16).", body: "optional", nullable: true, agent: "fills" },
       surfaces: { kind: "textList", maxItems: 5, maxLength: 20, label: "Superficies", description: "Caras de la pieza, como las dijo: oclusal o incisal, mesial, distal, vestibular, palatina o lingual.", body: "optional", nullable: true, agent: "fills" },
+      // El área de un tratamiento por cuadrante o arcada: «Usar» la propuesta la manda tal cual. Clío no la llena.
+      quadrant: { kind: "int", min: 1, max: 8, label: "Cuadrante", description: "El cuadrante (FDI, 1 a 8) cuando el diagnóstico es de un área y no de una pieza.", body: "optional", nullable: true, agent: "person" },
+      arch: { kind: "enum", values: ["upper", "lower"], label: "Arcada", description: "La arcada (superior o inferior) cuando el diagnóstico es de un área y no de una pieza.", body: "optional", nullable: true, agent: "person" },
       note: { kind: "text", max: 2000, label: "Nota", description: "Una precisión que dijo el odontólogo sobre el diagnóstico.", body: "optional", nullable: true, agent: "fills" },
     },
   },

@@ -127,6 +127,9 @@ export interface EncounterDiagnosis {
   previouslyDiagnosed: boolean
   toothNumber: number | null
   surfaces: string[]
+  /** Un área en vez de una pieza (odentIA: el cuadrante o la arcada); no viene donde no hay «dónde». */
+  quadrant?: number | null
+  arch?: string | null
   note: string | null
   status: "activo" | "resuelto"
   resolvedAt: string | null
@@ -217,6 +220,8 @@ export function addDiagnosisApi(
     diagnosisType: string
     toothNumber?: number | null
     surfaces?: string[]
+    quadrant?: number | null
+    arch?: string | null
     note?: string | null
   },
 ) {

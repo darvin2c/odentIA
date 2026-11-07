@@ -13,8 +13,8 @@ import { afterEach, expect, it } from "vitest"
 import { createRoom } from "./appointments.js"
 import { clinicalFixture, seedDiagnosisCodes } from "./clinical-test-fixture.js"
 import { getDiagnosisSuggestions } from "./diagnosis-codes.js"
-import { addEncounterDiagnosis } from "./encounter-diagnoses.js"
-import { createEncounter, finalizeEncounter, updateEncounterDraft } from "./encounters.js"
+import { addEncounterDiagnosis, voidEncounterDiagnosis } from "./encounter-diagnoses.js"
+import { createEncounter, finalizeEncounter, updateEncounterDraft, voidEncounter } from "./encounters.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
 /**
@@ -160,11 +160,16 @@ it("el tratamiento unido a la atención y el del control de su cita proponen su 
 it("trae el tipo de la última vez que se registró ese código y deja de proponerlo cuando ya está en la atención", async () => {
   await seedLists()
   const f = await clinicalFixture()
-  // La primera consulta: la pulpitis quedó presuntiva y después definitiva, y se firmó.
-  for (const diagnosisType of ["provisional", "confirmed"])
-    await f.run((tx) =>
-      addEncounterDiagnosis(tx, ...f.args, f.encounter.id, { diagnosisCode: "K04.0", diagnosisType }),
-    )
+  // La primera consulta: la pulpitis de la 46 quedó presuntiva, se corrigió a definitiva, y se firmó.
+  const first = await f.run((tx) =>
+    addEncounterDiagnosis(tx, ...f.args, f.encounter.id, { diagnosisCode: "K04.0", diagnosisType: "provisional", toothNumber: 46 }),
+  )
+  await f.run((tx) =>
+    voidEncounterDiagnosis(tx, ...f.args, f.encounter.id, first.id, { reason: "Se confirmó con la radiografía" }),
+  )
+  await f.run((tx) =>
+    addEncounterDiagnosis(tx, ...f.args, f.encounter.id, { diagnosisCode: "K04.0", diagnosisType: "confirmed", toothNumber: 46 }),
+  )
   await f.run((tx) => updateEncounterDraft(tx, ...f.args, f.encounter.id, { evolution: "Se indicó la endodoncia." }))
   await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
   // La sesión siguiente continúa los tratamientos.
@@ -208,4 +213,123 @@ it("latidIA recibe solo lo que propone el tratamiento, sin pieza", async () => {
     expect.objectContaining({ code: "I10.X", source: "tratamiento", finding: "Control de presión", diagnosisType: null }),
   ])
   expect(proposed[0]).not.toHaveProperty("toothNumber")
+})
+
+it("un tratamiento cancelado o reemplazado no propone su diagnóstico", async () => {
+  await seedLists()
+  const f = await clinicalFixture()
+  const endo = await treatment(f, { title: "Endodoncia posterior vital", code: "K04.0", tooth: 46 })
+  const cancelled = await treatment(f, { title: "Resina cancelada", code: "K02.1", tooth: 16 })
+  const replaced = await treatment(f, { title: "Necropulpectomía reemplazada", code: "K04.1", tooth: 36 })
+  await ownerDb.update(treatmentPlanItem).set({ status: "cancelado" }).where(eq(treatmentPlanItem.id, cancelled.id))
+  await ownerDb.update(treatmentPlanItem).set({ status: "reemplazado" }).where(eq(treatmentPlanItem.id, replaced.id))
+  for (const item of [endo, cancelled, replaced]) await join(f, item.id)
+  expect((await suggestions(f)).proposed.map((item) => item.finding)).toEqual(["Endodoncia posterior vital · 46"])
+})
+
+it("el tipo de la última vez es el del mismo código en la misma pieza, sin contar atenciones anuladas", async () => {
+  await seedLists()
+  const f = await clinicalFixture()
+  // Lo firmado: la caries de la 26 definitiva, la pulpitis sin pieza presuntiva y la necrosis sin pieza definitiva.
+  for (const input of [
+    { diagnosisCode: "K02.1", diagnosisType: "confirmed", toothNumber: 26 },
+    { diagnosisCode: "K04.0", diagnosisType: "provisional" },
+    { diagnosisCode: "K04.1", diagnosisType: "confirmed" },
+  ])
+    await f.run((tx) => addEncounterDiagnosis(tx, ...f.args, f.encounter.id, input))
+  await f.run((tx) => updateEncounterDraft(tx, ...f.args, f.encounter.id, { evolution: "Se indicó el plan." }))
+  await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
+  // Una atención anulada: lo que tenía no cuenta.
+  const voided = await f.run((tx) => createEncounter(tx, ...f.args, {}))
+  for (const input of [
+    { diagnosisCode: "K02.1", diagnosisType: "provisional", toothNumber: 16 },
+    { diagnosisCode: "K04.1", diagnosisType: "provisional" },
+  ])
+    await f.run((tx) => addEncounterDiagnosis(tx, ...f.args, voided.id, input))
+  await f.run((tx) => voidEncounter(tx, ...f.args, voided.id, { reason: "Se abrió por error" }))
+
+  const session = await f.run((tx) => createEncounter(tx, ...f.args, {}))
+  for (const input of [
+    { title: "Resina de la 16", code: "K02.1", tooth: 16 },
+    { title: "Resina de la 26", code: "K02.1", tooth: 26 },
+    { title: "Endodoncia de la 46", code: "K04.0", tooth: 46 },
+    { title: "Control de la necrosis", code: "K04.1", tooth: null },
+  ]) {
+    const item = await treatment(f, input)
+    await join(f, item.id, session.id)
+  }
+  const types = Object.fromEntries((await suggestions(f, session.id)).proposed.map((item) => [item.finding, item.diagnosisType]))
+  expect(types).toEqual({
+    // En la 16 solo estaba en la atención anulada.
+    "Resina de la 16 · 16": null,
+    "Resina de la 26 · 26": "confirmed",
+    // La pulpitis sin pieza no dice el tipo de la 46.
+    "Endodoncia de la 46 · 46": null,
+    // Sin pieza, la definitiva firmada; no la presuntiva de la anulada.
+    "Control de la necrosis": "confirmed",
+  })
+})
+
+it("un tratamiento por cuadrante propone su diagnóstico con el cuadrante, y al usarlo deja de proponerlo", async () => {
+  await seedLists()
+  const f = await clinicalFixture()
+  const [scaling] = await ownerDb
+    .insert(treatmentPlanItem)
+    .values({
+      organizationId: "org_a",
+      patientId: f.patient.id,
+      planId: f.plan.id,
+      title: "Destartraje por cuadrante",
+      currency: "PEN",
+      decisionStatus: "aceptado",
+      status: "en_curso",
+      diagnosisSystem: "ICD-10-PE",
+      diagnosisCode: "K02.1",
+      siteSystem: "ISO-3950",
+      siteCode: "10",
+    })
+    .returning()
+  await join(f, scaling!.id)
+  const [proposal] = (await suggestions(f)).proposed
+  expect(proposal).toMatchObject({ code: "K02.1", source: "tratamiento", quadrant: 1, toothNumber: null })
+  // «Usar» manda el sitio entero, como lo propuso: con el cuadrante, ya no se propone.
+  const used = await f.run((tx) =>
+    addEncounterDiagnosis(tx, ...f.args, f.encounter.id, {
+      diagnosisCode: proposal!.code,
+      diagnosisSystem: proposal!.system,
+      diagnosisType: "confirmed",
+      toothNumber: null,
+      surfaces: [],
+      quadrant: 1,
+      arch: null,
+    }),
+  )
+  expect(used).toMatchObject({ siteCode: "10", quadrant: 1 })
+  expect((await suggestions(f)).proposed).toEqual([])
+  // Usarlo otra vez (otra pestaña, una propuesta vieja en pantalla) no lo duplica.
+  const again = await f.run((tx) =>
+    addEncounterDiagnosis(tx, ...f.args, f.encounter.id, { diagnosisCode: "K02.1", diagnosisType: "confirmed", quadrant: 1 }),
+  )
+  expect(again.id).toBe(used.id)
+})
+
+it("el alta no repite el mismo código en el mismo sitio de la atención: devuelve el que está", async () => {
+  await seedLists()
+  const f = await clinicalFixture()
+  const add = (input: { diagnosisCode: string; diagnosisType: string; toothNumber?: number | null; surfaces?: string[] }) =>
+    f.run((tx) => addEncounterDiagnosis(tx, ...f.args, f.encounter.id, input))
+  const first = await add({ diagnosisCode: "K02.1", diagnosisType: "provisional", toothNumber: 16, surfaces: ["occlusal"] })
+  // Las caras no cuentan: la misma pieza es el mismo diagnóstico, y queda como estaba.
+  const same = await add({ diagnosisCode: "k02.1", diagnosisType: "confirmed", toothNumber: 16, surfaces: ["mesial"] })
+  expect(same).toMatchObject({ id: first.id, diagnosisType: "provisional", surfaces: ["occlusal"] })
+  // En otra pieza, o sin pieza, es otro.
+  const other = await add({ diagnosisCode: "K02.1", diagnosisType: "provisional", toothNumber: 26 })
+  const noTooth = await add({ diagnosisCode: "K02.1", diagnosisType: "provisional" })
+  expect(new Set([first.id, other.id, noTooth.id]).size).toBe(3)
+  // Lo anulado no cuenta: se puede registrar de nuevo.
+  await f.run((tx) => voidEncounterDiagnosis(tx, ...f.args, f.encounter.id, first.id, { reason: "Era otra cara" }))
+  const again = await add({ diagnosisCode: "K02.1", diagnosisType: "confirmed", toothNumber: 16 })
+  expect(again.id).not.toBe(first.id)
+  const rows = await ownerDb.select().from(encounterDiagnosis).where(eq(encounterDiagnosis.encounterId, f.encounter.id))
+  expect(rows.filter((row) => row.voidedAt === null)).toHaveLength(3)
 })

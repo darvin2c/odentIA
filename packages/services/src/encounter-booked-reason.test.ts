@@ -117,3 +117,35 @@ it("sin motivo ni control, dice qué tratamientos continúa, con su pieza si la 
   ])
   expect(await bookedReason(f)).toBe("Continúa: Endodoncia posterior vital de la 46 y Profilaxis")
 })
+
+it("con dos controles reservados con la cita, los nombra a los dos", async () => {
+  const f = await clinicalFixture()
+  const visit = await visitFor(f, null)
+  const endo = await treatment(f, "Endodoncia posterior vital", 46)
+  const resin = await treatment(f, "Resina compuesta", 16)
+  await controlFor(f, visit, { title: "Control de evolución endodóntica", planItemId: endo.id })
+  await controlFor(f, visit, { title: "Control de la resina", planItemId: resin.id })
+  expect(await bookedReason(f)).toBe("Control de evolución endodóntica y Control de la resina")
+})
+
+it("lo cancelado o reemplazado después de agendar no se nombra en «Continúa»", async () => {
+  const f = await clinicalFixture()
+  const visit = await visitFor(f, null)
+  const endo = await treatment(f, "Endodoncia posterior vital", 46)
+  const cancelled = await treatment(f, "Resina cancelada", 16)
+  const replaced = await treatment(f, "Corona reemplazada", 36)
+  await ownerDb.update(treatmentPlanItem).set({ status: "cancelado" }).where(eq(treatmentPlanItem.id, cancelled.id))
+  await ownerDb.update(treatmentPlanItem).set({ status: "reemplazado" }).where(eq(treatmentPlanItem.id, replaced.id))
+  await ownerDb.insert(appointmentPlanItem).values(
+    [endo, cancelled, replaced].map((item) => ({
+      organizationId: "org_a",
+      patientId: f.patient.id,
+      appointmentId: visit.id,
+      planItemId: item.id,
+    })),
+  )
+  expect(await bookedReason(f)).toBe("Continúa: Endodoncia posterior vital de la 46")
+  // Si todo lo agendado se cayó, no hay motivo que ofrecer.
+  await ownerDb.update(treatmentPlanItem).set({ status: "cancelado" }).where(eq(treatmentPlanItem.id, endo.id))
+  expect(await bookedReason(f)).toBeNull()
+})
