@@ -24,6 +24,7 @@ import {
   generateConsentPdf as generateConsentPdfService,
   keepIssuedPaper,
   getConsentPrint,
+  getConsentSheetFrame,
   getEncounterConsentNeeds,
   getOrderPrint,
   getOwnProfessionalProfile,
@@ -974,6 +975,13 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
       userId,
       consentId,
     })
+
+  // Lo fijo de la hoja que se firma en la tablet: membrete, declaración y nivel de firma.
+  app.get("/consent-sheet", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.read")) return forbidden(c, "Sin acceso clínico")
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getConsentSheetFrame(tx, orgId)))
+  })
 
   app.get("/consents", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
