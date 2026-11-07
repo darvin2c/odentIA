@@ -908,19 +908,13 @@ it("propuestas: revisión versionada, decisión por línea y cargo posterior", a
     data: { status: "sustituido" },
   })
 
-  // Decidir exige cubrir cada línea exactamente una vez.
-  const incomplete = await post(
-    app,
-    `/patients/${patientId}/budgets/${revision.data.id}/decision`,
-    {
-      decisions: [],
-    },
-  )
-  expect(incomplete.status).toBe(400)
-  const decided = await post(app, `/patients/${patientId}/budgets/${revision.data.id}/decision`, {
+  // Nada cambió de precio: la revisión conserva lo aceptado y no se pregunta otra vez (ADR 0150).
+  const carried = await app.request(`/patients/${patientId}/budgets/${revision.data.id}`)
+  expect(await json<{ data: { status: string } }>(carried)).toMatchObject({ data: { status: "aceptado" } })
+  const again = await post(app, `/patients/${patientId}/budgets/${revision.data.id}/decision`, {
     decisions: [{ planItemId: itemId, decision: "aceptado" }],
   })
-  expect(decided.status).toBe(200)
+  expect(again.status).toBe(409)
 
   // Generar el cargo de la revisión aceptada es un acto explícito.
   const detail = await app.request(`/patients/${patientId}/budgets/${revision.data.id}`)
