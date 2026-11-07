@@ -34,6 +34,14 @@ import {
   dismissExpenseGap,
   EXPENSE_CATEGORIES,
   EXPENSE_FILTER_TYPES,
+  endRecurringExpense,
+  getRecurringMonth,
+  listRecurringPeople,
+  payRecurringOccurrence,
+  registerRecurringExpense,
+  skipRecurringOccurrence,
+  unskipRecurringOccurrence,
+  updateRecurringExpense,
   getMonthExpenses,
   getPurchasesToPay,
   listClosures,
@@ -347,14 +355,108 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
         fromCash: z.boolean().optional(),
         // El pago del impuesto de lo cobrado (ADR 0083): solo con el tipo «Impuestos».
         salesTax: z.boolean().optional(),
+        // «Se repite»: la plantilla, y este gasto queda como su primera ocurrencia.
+        repeat: z
+          .object({
+            everyMonths: z.union([z.literal(1), z.literal(6), z.literal(12)]),
+            day: z.number().int().min(1).max(31),
+            memberUserId: z.string().max(200).nullish(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const { repeat, ...expenseInput } = parsed.data
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        repeat
+          ? registerRecurringExpense(tx, orgId, userId, { ...expenseInput, repeat })
+          : createExpense(tx, orgId, userId, expenseInput),
+      ),
+    )
+  })
+
+  // --- Gastos que se repiten: lo por pagar del mes, pagar con un toque, «este mes no» ------------
+  const recurringMonthKey = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "El mes debe tener formato AAAA-MM")
+  app.get("/expenses/recurring", async (c) => {
+    const { orgId } = orgContextOf(c)
+    const parsed = z
+      .object({
+        year: z.coerce.number().int().min(2000).max(2100),
+        month: z.coerce.number().int().min(1).max(12),
+        branchId: z.uuid().optional(),
+      })
+      .safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getRecurringMonth(tx, orgId, parsed.data)))
+  })
+  app.get("/expenses/recurring/people", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => listRecurringPeople(tx, orgId)))
+  })
+  app.patch("/expenses/recurring/:id", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    const parsed = z
+      .object({
+        concept: z.string().trim().min(1, "Escribe en qué se gasta.").max(500).optional(),
+        amountCents: cents.optional(),
+        day: z.number().int().min(1).max(31).optional(),
+        memberUserId: z.string().max(200).nullish(),
+        fromCash: z.boolean().optional(),
+        lastMonth: recurringMonthKey.nullish(),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => updateRecurringExpense(tx, orgId, userId, c.req.param("id"), parsed.data)),
+    )
+  })
+  app.post("/expenses/recurring/:id/end", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => endRecurringExpense(tx, orgId, userId, c.req.param("id"))),
+    )
+  })
+  app.post("/expenses/recurring/:id/pay", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    const parsed = z
+      .object({
+        month: recurringMonthKey,
+        amountCents: cents.optional(),
+        fromCash: z.boolean().optional(),
+        spentAt: isoDateTime.nullish(),
+        receiptKind: z.string().trim().min(1).max(60).optional(),
+        receiptNumber: z.string().max(60).nullish(),
+        notes: z.string().max(2000).nullish(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) => createExpense(tx, orgId, userId, parsed.data)),
+      withOrgContext(deps.db, orgId, (tx) => payRecurringOccurrence(tx, orgId, userId, c.req.param("id"), parsed.data)),
     )
   })
+  for (const [path, action] of [
+    ["skip", skipRecurringOccurrence],
+    ["unskip", unskipRecurringOccurrence],
+  ] as const) {
+    app.post(`/expenses/recurring/:id/${path}`, async (c) => {
+      const { orgId, userId, memberRole } = orgContextOf(c)
+      if (!canAccess(memberRole, "finance.write")) return forbid(c)
+      const parsed = z.object({ month: recurringMonthKey }).strict().safeParse(await c.req.json().catch(() => null))
+      if (!parsed.success) return validationError(c, parsed.error.issues)
+      return runService(c, 200, () =>
+        withOrgContext(deps.db, orgId, (tx) => action(tx, orgId, userId, c.req.param("id"), parsed.data)),
+      )
+    })
+  }
 
   // --- Compras de Inventario (ADR 0061): pagarlas es un gasto de Materiales enlazado ---------
   // Lo que hay que pagar: recibidas sin pagar, lo que aún no llega y lo que se tiene a favor.

@@ -51,6 +51,7 @@ import {
   EXPENSE_CATEGORIES,
   type ExpenseCategory,
   fetchPurchasesToPay,
+  fetchRecurringPeople,
   financeKeys,
   formatDayKey,
   invalidateFinance,
@@ -82,6 +83,8 @@ export interface ExpenseDraft {
   amountCents: number
   /** Día del gasto, `YYYY-MM-DD`. */
   day?: string
+  /** Llega con «Se repite» marcado («Que se repita»). */
+  repeat?: boolean
 }
 
 const CATEGORY_OPTIONS = EXPENSE_CATEGORIES.map((value) => ({ value, label: value }))
@@ -106,7 +109,20 @@ interface ExpenseValues {
   receiptKind: string
   receiptNumber: string
   spentDay: string
+  /** «Se repite»: queda anotado y aparece «por pagar» cada vez que toca. */
+  repeats: boolean
+  every: "1" | "6" | "12"
+  /** Día del mes en que se paga (1–31). */
+  repeatDay: string
+  /** De quién es un sueldo (solo con el tipo «Personal»). */
+  member: string
 }
+
+const EVERY_CHOICES = [
+  { value: "1", label: "Cada mes" },
+  { value: "6", label: "Cada 6 meses" },
+  { value: "12", label: "Cada año" },
+]
 
 /** «¿Es el pago de una compra de Inventario?»: el grupo con su error debajo. */
 function PurchaseChoice({
@@ -212,6 +228,10 @@ export function ExpenseFormDrawer({
       receiptKind: "",
       receiptNumber: "",
       spentDay: today,
+      repeats: false,
+      every: "1",
+      repeatDay: String(Number(today.slice(8, 10))),
+      member: "",
     } as ExpenseValues,
     validators: {
       onSubmit: ({ value }) => {
@@ -227,6 +247,10 @@ export function ExpenseFormDrawer({
         if (paid.tenderError) fields.tender = paid.tenderError
         if (paid.rateError) fields.rate = paid.rateError
         if (value.spentDay > today) fields.spentDay = "La fecha del gasto no puede ser futura."
+        if (value.repeats && !chosen) {
+          const day = Number(value.repeatDay)
+          if (!Number.isInteger(day) || day < 1 || day > 31) fields.repeatDay = "Escribe un día del 1 al 31."
+        }
         return Object.keys(fields).length > 0 ? { fields } : undefined
       },
     },
@@ -266,6 +290,15 @@ export function ExpenseFormDrawer({
         ...(asksSalesTax ? { salesTax: value.salesTax === "cobros" } : {}),
         ...receipt,
         ...spentAt,
+        ...(value.repeats && !(asksSalesTax && value.salesTax === "cobros")
+          ? {
+              repeat: {
+                everyMonths: Number(value.every) as 1 | 6 | 12,
+                day: Number(value.repeatDay),
+                memberUserId: value.category === "Personal" && value.member ? value.member : null,
+              },
+            }
+          : {}),
       })
     },
   })
@@ -307,6 +340,11 @@ export function ExpenseFormDrawer({
       receiptKind: "",
       receiptNumber: "",
       spentDay: initial?.day && initial.day <= day ? initial.day : day,
+      // «Que se repita» desde el aviso de un gasto que falta llega con la casilla marcada.
+      repeats: initial?.repeat === true,
+      every: "1",
+      repeatDay: String(Number((initial?.day && initial.day <= day ? initial.day : day).slice(8, 10))),
+      member: "",
     })
     setSeen(null)
     setMoreOpen(Boolean(initial?.day && initial.day !== day))
@@ -389,6 +427,14 @@ export function ExpenseFormDrawer({
     return { chosen, asksSalesTax, onlyBusiness, currency, cents, after, paid }
   }
   const { chosen, asksSalesTax, onlyBusiness, after, paid } = derive(values)
+  const asksSalesTaxNow = asksSalesTax
+  // De quién puede ser un sueldo: el equipo de hoy (solo se pide con «Se repite» y el tipo Personal).
+  const people = useQuery({
+    queryKey: ["finance", "recurring-people"],
+    queryFn: fetchRecurringPeople,
+    enabled: open && values.repeats && values.category === "Personal",
+    staleTime: 60_000,
+  })
   // Sin nada recibido por pagar, lo que se paga es un adelanto de lo que falta que llegue.
   const advance = chosen !== null && chosen.dueCents === 0
   const asksPurchase = values.category === "Materiales" && orders.length > 0
@@ -401,7 +447,7 @@ export function ExpenseFormDrawer({
   }
   const createMutation = useMutation({
     mutationFn: createExpenseApi,
-    onSuccess: () => done("Gasto registrado"),
+    onSuccess: (_result, input) => done(input.repeat ? "Gasto registrado: aparecerá «por pagar» cada vez que toque" : "Gasto registrado"),
   })
   const payMutation = useMutation({
     mutationFn: (input: { orderId: string; body: Parameters<typeof payPurchaseApi>[1] }) => payPurchaseApi(input.orderId, input.body),
@@ -659,6 +705,76 @@ export function ExpenseFormDrawer({
             </FormChoiceField>
           )}
         </form.AppField>
+        {!chosen && !(asksSalesTaxNow && values.salesTax === "cobros") ? (
+          <>
+            <form.AppField name="repeats">
+              {(field) => (
+                <FormChoiceField
+                  label="Se repite"
+                  description="El alquiler, un sueldo, la luz: queda anotado y aparece «por pagar» en Gastos cada vez que toca. Nunca se paga solo."
+                >
+                  {(control) => (
+                    <Checkbox
+                      id={control.id}
+                      aria-describedby={control.describedBy}
+                      checked={field.state.value}
+                      onCheckedChange={(checked) => {
+                        field.handleChange(checked === true)
+                        control.onBlur()
+                      }}
+                    />
+                  )}
+                </FormChoiceField>
+              )}
+            </form.AppField>
+            {values.repeats ? (
+              <div className="flex flex-col gap-4 rounded-lg border bg-muted/30 p-3">
+                <form.AppField name="every">
+                  {(field) => (
+                    <field.Group legend="Cada cuánto" className="gap-3">
+                      {(control) => (
+                        <ChoiceButtons
+                          id={control.id}
+                          invalid={control.invalid}
+                          aria-describedby={control.describedBy}
+                          onBlur={control.onBlur}
+                          tone="primary"
+                          value={field.state.value}
+                          options={EVERY_CHOICES}
+                          onChange={(next) => field.handleChange(next as ExpenseValues["every"])}
+                        />
+                      )}
+                    </field.Group>
+                  )}
+                </form.AppField>
+                <form.AppField name="repeatDay">
+                  {(field) => (
+                    <field.TextField
+                      label="El día"
+                      description="Si el mes no tiene ese día, el último del mes."
+                      inputMode="numeric"
+                      inputClassName="w-24"
+                    />
+                  )}
+                </form.AppField>
+                {values.category === "Personal" ? (
+                  <form.AppField name="member">
+                    {(field) => (
+                      <field.SelectField
+                        label="De quién es el sueldo (opcional)"
+                        placeholder="De nadie en particular"
+                        options={[
+                          { value: "", label: "De nadie en particular" },
+                          ...(people.data?.data ?? []).map((person) => ({ value: person.userId, label: person.name })),
+                        ]}
+                      />
+                    )}
+                  </form.AppField>
+                ) : null}
+              </div>
+            ) : null}
+          </>
+        ) : null}
         <Collapsible open={moreOpen} onOpenChange={setMoreOpen}>
           <CollapsibleTrigger render={<Button type="button" variant="link" className="h-auto p-0" />}>
             Más detalles: comprobante recibido y fecha

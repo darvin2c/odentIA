@@ -16,6 +16,7 @@
  * - «Te deben» por antigüedad es la regla del saldo vencido (`report-debts.ts`):
  *   cada persona cuenta entera en el tramo de su concepto sin pagar más antiguo.
  */
+import { fixedOwedAt } from "./expense-recurring.js"
 import type { Db } from "@odentia/db"
 import { sql, type SQL } from "drizzle-orm"
 import { budgetLineUnitsSql, budgetValueOptionSql } from "./budgets.js"
@@ -688,6 +689,11 @@ async function missingExpenses(tx: Db, orgId: string, scope: ReportScope) {
       -- El pago de una compra tampoco: depende de lo que se compró, y «Copiar el de…» no debe copiarlo.
       and e.purchase_order_id is null
     group by 1, 2, 3, 4`)
+  // Lo que ya se repite (sede y tipo con una plantilla en pie) se avisa en Gastos como «por pagar»:
+  // aquí solo queda de respaldo para lo que nadie marcó.
+  const repeating = await tx.execute<{ category: string; branchId: string }>(sql`
+    select distinct category, branch_id as "branchId" from expense_recurring
+    where organization_id = ${orgId} and (last_month is null or last_month >= ${key(month)})`)
   const dismissed = await tx.execute<{ category: string; branchId: string | null }>(sql`
     select category, branch_id as "branchId" from expense_gap_dismissal
     where organization_id = ${orgId} and month = ${key(month)}`)
@@ -709,6 +715,7 @@ async function missingExpenses(tx: Db, orgId: string, scope: ReportScope) {
     const previous = before.map(of)
     if (previous.some((row) => !row) || of(key(month))) continue
     if (dismissed.some((row) => row.category === pair.category && (row.branchId === null || row.branchId === pair.branchId))) continue
+    if (repeating.some((row) => row.category === pair.category && row.branchId === pair.branchId)) continue
     const last = previous[1] as (typeof rows)[number]
     if (running && today <= last.lastDay) continue
     out.push({
@@ -758,6 +765,8 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
   const debts = await debtAgingMany(tx, orgId, [window.end, window.previous.end], { currency, branchId })
   // Lo que se debía al cerrar el periodo y lo que se debe hoy: la misma cuenta en dos momentos.
   const [owedCommissions, owedNow] = await commissionsOwedMany(tx, orgId, [window.end, now], { currency, branchId })
+  // Lo fijo vencido sin pagar al cierre (gastos que se repiten).
+  const fixedOwed = await fixedOwedAt(tx, orgId, window.end < now ? window.end : now, { branchId })
   const [unpaid] = await unpaidPurchasesMany(tx, orgId, [window.end], { branchId })
   const adjustments = await pendingCommissionAdjustments(tx, orgId, currency, branchId)
   const taxName = (await orgTaxes(tx, orgId))?.name ?? null
@@ -846,6 +855,8 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
         nowCents: owedNow?.cents ?? 0,
       },
       salesTax: { cents: Math.max(0, taxOf(0)) },
+      /** Gastos que se repiten, vencidos y sin pagar. */
+      fixed: fixedOwed,
       purchases: purchasesDueOf(unpaid, scope.money),
     },
     missing: await missingExpenses(tx, orgId, scope),
