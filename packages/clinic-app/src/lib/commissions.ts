@@ -239,6 +239,19 @@ export interface CommissionException {
 /** Lo propio: el mes pedido y hasta tres meses anteriores con cobros. */
 export interface MyCommissions extends MonthlyCommissions {
   previous: CommissionSummary[]
+  /** Lo que atendió en el mes y lo que de eso aún no se cobra (su comisión llega al cobrarse). */
+  attended?: { attendedCents: number; unpaidCents: number }
+}
+
+/** Lo que falta pagar de todos los meses: el total de hoy y cada mes con cobros sin pagar. */
+export interface CommissionsOwed {
+  currency: string
+  owedCents: number
+  months: Array<YearMonth & { cents: number; professionals: number }>
+}
+
+export function fetchCommissionsOwed(): Promise<{ data: CommissionsOwed }> {
+  return apiFetch("/api/commissions/owed")
 }
 
 export interface CommissionRate {

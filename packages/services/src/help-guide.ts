@@ -1052,12 +1052,12 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     faqs: [
       {
         q: "¿Cómo se calcula la comisión?",
-        a: "Es el porcentaje de cada profesional (o el de un servicio con regla aparte) sobre lo que se cobró de lo que atendió, con el impuesto incluido: el precio que pagó el paciente. Cuenta el mes en que se cobró, no el de la atención, y lo atendido que aún no se cobra no comisiona. Una venta suelta, sin atención, no es de ningún profesional. Cada línea dice su fecha, la regla que usó y si tuvo promoción.",
+        a: "Es el porcentaje de cada profesional (o el de un servicio con regla aparte) sobre lo que se cobró de lo que atendió, con el impuesto incluido: el precio que pagó el paciente. Cuenta el mes en que se cobró, no el de la atención, y lo atendido que aún no se cobra no comisiona todavía: «Mis comisiones» dice cuánto de lo atendido del mes falta cobrar. Una venta suelta, sin atención, no es de ningún profesional. Cada línea dice su fecha, la regla que usó y si tuvo promoción.",
         forms: ["cómo se calcula la comisión", "sobre qué se paga la comisión", "comisión con IGV", "por qué no aparece una atención"],
       },
       {
         q: "¿Cómo registro el pago de una comisión?",
-        a: "Abre al profesional en el mes y elige «Registrar el pago»: los cobros de ese pago dejan de estar por pagar y queda en Gastos como pago de comisiones. Si se pagó en efectivo, marca «Se pagó con el efectivo de la caja» para que el cierre cuadre; si la caja no alcanza, te dice qué hacer. Si te equivocas, «Anular pago» con su motivo lo deshace y devuelve el efectivo. «Imprimir la liquidación» la saca en papel.",
+        a: "Abre al profesional en el mes y elige «Registrar el pago»: los cobros de ese pago dejan de estar por pagar y queda en Gastos como pago de comisiones. Si se pagó en efectivo, marca «Se pagó con el efectivo de la caja» para que el cierre cuadre; si la caja no alcanza, te dice qué hacer. Si te equivocas, «Anular pago» con su motivo lo deshace y devuelve el efectivo. «Imprimir la liquidación» la saca en papel. Si otros meses tienen cobros sin pagar, arriba de la lista se dice cuánto falta en total y cada mes lleva a su lista.",
         forms: ["pagar comisión", "pagar al doctor", "liquidar comisiones", "anular pago de comisión", "imprimir liquidación"],
       },
       {

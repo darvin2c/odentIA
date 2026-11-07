@@ -176,6 +176,7 @@ function OwnCommissionsPage() {
               search: (previous) => ({ ...previous, profesional: professionalUserId ?? undefined }),
             })
           }
+          onPeriodChange={setPeriod}
         />
       ) : (
         <MyCommissionsPanel
