@@ -13,6 +13,7 @@ import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import {
+  getMonthExpenses,
   getMonthlyCommissions,
   listExpenses,
   listMonthCommissions,
@@ -202,6 +203,37 @@ it("comisiones: porcentaje sobre lo cobrado de lo atendido, pago en un paso y aj
   expect(second.expense.amountCents).toBe(600)
   expect(await view()).toMatchObject({ paidCents: 1600, pendingCents: 0, status: "pagado" })
 
+  // En Gastos, quien no administra comisiones ve el total del mes en una fila, sin a quién se pagó;
+  // quien las administra ve cada pago y lo que lo lleva a él.
+  const forCashier = await f.run((tx) => getMonthExpenses(tx, "org_a", { ...period, branchId }))
+  expect(forCashier.expenses.filter((e) => e.commission)).toEqual([
+    expect.objectContaining({ concept: "Pago de comisiones", amountCents: 1600, commissionPayment: null }),
+  ])
+  expect(forCashier.expenses.some((e) => e.concept.startsWith("Comisión de"))).toBe(false)
+  const forAdmin = await f.run((tx) =>
+    getMonthExpenses(tx, "org_a", { ...period, branchId }, { seesCommissions: true }),
+  )
+  expect(forAdmin.expenses.filter((e) => e.commission)).toHaveLength(2)
+  expect(forAdmin.expenses.find((e) => e.id === first.expense.id)?.commissionPayment).toEqual({
+    professionalUserId: f.actor,
+    ...period,
+  })
+  // La fila suma lo mismo que los dos pagos, y lo que se ve cuenta una fila menos.
+  expect(forCashier.shown.totalCents).toBe(forAdmin.shown.totalCents)
+  expect(forCashier.shown.count).toBe(forAdmin.shown.count - 1)
+  // La lista cruda de la API tampoco da cada pago.
+  const raw = await f.run((tx) => listExpenses(tx, "org_a", { branchId, limit: 200 }))
+  expect(raw.filter((e) => e.category === "Personal")).toEqual([
+    expect.objectContaining({ concept: "Pago de comisiones", amountCents: 1600, notes: null }),
+  ])
+  // Ni buscando el nombre en la lista del mes.
+  const named = forAdmin.expenses.find((e) => e.id === first.expense.id)?.concept ?? ""
+  const who = named.split("—").pop()?.trim() ?? ""
+  expect(who).not.toBe("")
+  expect(
+    (await f.run((tx) => getMonthExpenses(tx, "org_a", { ...period, branchId, q: who }))).expenses.filter((e) => e.commission),
+  ).toEqual([])
+
   // Cambiar el porcentaje no reescribe lo ya pagado.
   await f.run((tx) =>
     setCommissionRate(tx, "org_a", f.actor, { professionalUserId: f.actor, rateBps: 2000 }),
@@ -244,8 +276,16 @@ it("comisiones: porcentaje sobre lo cobrado de lo atendido, pago en un paso y aj
   ).rejects.toMatchObject({ code: "EXPENSE_IS_COMMISSION" })
   // …se anula con el pago: el gasto desaparece y sus cobros vuelven a quedar por pagar.
   await f.run((tx) => voidCommissionSettlement(tx, "org_a", f.actor, first.settlement.id, { reason: "Pago mal registrado" }))
-  const expenses = await f.run((tx) => listExpenses(tx, "org_a", { branchId, limit: 200 }))
+  const expenses = await f.run((tx) => listExpenses(tx, "org_a", { branchId, limit: 200 }, { seesCommissions: true }))
   expect(expenses.find((e) => e.id === first.expense.id)).toBeUndefined()
+  // Para caja, el pago anulado deja de sumar en la fila del mes.
+  const afterVoidCashier = await f.run((tx) => getMonthExpenses(tx, "org_a", { ...period, branchId }))
+  const paidLive = (await f.run((tx) => getMonthExpenses(tx, "org_a", { ...period, branchId }, { seesCommissions: true })))
+    .expenses.filter((e) => e.commission && !e.voidedAt)
+    .reduce((sum, e) => sum + e.amountCents, 0)
+  expect(afterVoidCashier.expenses.filter((e) => e.commission)).toEqual([
+    expect.objectContaining({ concept: "Pago de comisiones", amountCents: paidLive }),
+  ])
   // El cobro liberado se calcula con el porcentaje vigente (20 % de 10 000).
   expect(await view()).toMatchObject({ pendingCents: 2000, status: "por_pagar" })
 })

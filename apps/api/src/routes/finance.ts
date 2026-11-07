@@ -291,7 +291,7 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
   // --- Gastos cortos (los proveedores quedan solo en Inventario) -------------------------
   // Gastos de un mes con su total por tipo (el mes es el de la clínica).
   app.get("/expenses/month", async (c) => {
-    const { orgId } = orgContextOf(c)
+    const { orgId, memberRole } = orgContextOf(c)
     const parsed = z
       .object({
         year: z.coerce.number().int().min(2000).max(2100),
@@ -303,12 +303,14 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
       .safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => getMonthExpenses(tx, orgId, parsed.data)),
+      withOrgContext(deps.db, orgId, (tx) =>
+        getMonthExpenses(tx, orgId, parsed.data, { seesCommissions: canAccess(memberRole, "commissions.write") }),
+      ),
     )
   })
 
   app.get("/expenses", async (c) => {
-    const { orgId } = orgContextOf(c)
+    const { orgId, memberRole } = orgContextOf(c)
     const parsed = z
       .object({
         branchId: z.uuid().optional(),
@@ -320,7 +322,9 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
       .safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => listExpenses(tx, orgId, parsed.data)),
+      withOrgContext(deps.db, orgId, (tx) =>
+        listExpenses(tx, orgId, parsed.data, { seesCommissions: canAccess(memberRole, "commissions.write") }),
+      ),
     )
   })
 
