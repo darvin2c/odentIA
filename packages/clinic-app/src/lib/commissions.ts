@@ -291,6 +291,8 @@ export function payMonthCommissionApi(
     notes?: string
     /** Lo que se le mostró a quien confirma; si cambió, el servidor no paga otra cifra. */
     expectedCents?: number
+    /** Salió del efectivo de la caja de la sede. */
+    fromCash?: boolean
   },
 ): Promise<{ data: { settlement: CommissionPayment; expense: { id: string } | null } }> {
   return apiFetch("/api/commissions/pay", { method: "POST", body: JSON.stringify(body) })

@@ -155,10 +155,13 @@ export function createCommissionsRoute(deps: Pick<CrmDeps, "db">) {
         branchId: z.uuid("Elige la sede del gasto."),
         notes: z.string().max(2000).nullish(),
         expectedCents: z.number().int().nonnegative().optional(),
+        fromCash: z.boolean().optional(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
+    // Sacar de la caja es mover efectivo: pide lo mismo que un gasto de la caja.
+    if (parsed.data.fromCash && !canAccess(memberRole, "finance.write")) return forbid(c)
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) => payMonthCommission(tx, orgId, userId, parsed.data)),
     )
