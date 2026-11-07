@@ -18,7 +18,7 @@ import {
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { z } from "zod"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
@@ -36,7 +36,7 @@ import { DiagnosisSearch } from "./diagnosis-search"
 import { ServicePicker } from "./service-picker"
 import { type PlaceWithParts, productUi } from "../../product/product-ui"
 import { partNames, SiteField } from "../../product/site-fields"
-import { activeOrgLocale } from "../../lib/locale"
+import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 
 const NO_PLAN = "__sin-plan__"
 const NO_SITE: PlaceWithParts = { toothNumber: null, surfaces: [] }
@@ -138,6 +138,29 @@ function procedureSchema(planById: Record<string, PlanItem>) {
     })
 }
 
+/**
+ * Lo mismo de ese servicio en esa pieza que ya se hizo (`findEarlierTreatment`):
+ * un tratamiento en curso, o realizado en los últimos 60 días.
+ */
+interface EarlierTreatment {
+  planItemId: string
+  title: string
+  status: "en_curso" | "realizado"
+  lastDoneAt: string
+  n: number
+  m: number
+  site: { toothNumber?: number | null }
+}
+
+/** «Ya se registró «Endodoncia · 46» el 6 nov». */
+function earlierWords(earlier: EarlierTreatment): string {
+  const tooth = earlier.site.toothNumber != null ? ` · ${earlier.site.toothNumber}` : ""
+  const day = new Date(earlier.lastDoneAt)
+    .toLocaleDateString(activeOrgLocale(), { day: "numeric", month: "short", timeZone: activeOrgTimeZone() })
+    .replace(".", "")
+  return `Ya se registró «${earlier.title}${tooth}» el ${day}`
+}
+
 function planOptionLabel(item: PlanItem, locale: string | undefined): string {
   const price =
     item.priceCents == null
@@ -172,6 +195,8 @@ export function EncounterProcedures({
   onChanged,
   onPendingChange,
   autoOpen = false,
+  prefillPlanItemId = null,
+  onPrefillUsed,
 }: {
   patientId: string
   detail: EncounterDetail
@@ -181,6 +206,9 @@ export function EncounterProcedures({
   onPendingChange: (pending: boolean) => void
   /** Recién agregado el bloque: el formulario de agregar ya viene abierto. */
   autoOpen?: boolean
+  /** «Registrar la sesión» desde «Hecho hoy»: el formulario se abre con ese tratamiento puesto. */
+  prefillPlanItemId?: string | null
+  onPrefillUsed?: () => void
 }): React.JSX.Element {
   const canWrite = usePermission("clinical.write")
   const canRead = usePermission("clinical.read")
@@ -341,6 +369,30 @@ export function EncounterProcedures({
   const needsTooth = scope === "tooth" || scope === "surfaces"
   const planPending = isPlanPending(selectedPlan)
 
+  // Un servicio directo que ya se hizo en esa pieza: se avisa antes de guardar, sin
+  // bloquear, para no abrir otro tratamiento que se cobraría completo otra vez.
+  const earlierService = !selectedPlan && !freeMode ? values.service : null
+  const earlierReady =
+    earlierService != null &&
+    (!needsTooth || values.site.toothNumber != null) &&
+    (scope !== "quadrant" || values.quadrant !== "") &&
+    (scope !== "arch" || values.arch !== "")
+  const earlierQuery = useQuery({
+    queryKey: ["earlier-treatment", patientId, encounter.id, earlierService?.id, values.site.toothNumber, values.quadrant, values.arch],
+    queryFn: () => {
+      const params = new URLSearchParams({ serviceId: earlierService!.id })
+      if (needsTooth && values.site.toothNumber != null) params.set("toothNumber", String(values.site.toothNumber))
+      if (scope === "quadrant" && values.quadrant) params.set("quadrant", values.quadrant)
+      if (scope === "arch" && values.arch) params.set("arch", values.arch)
+      return apiFetch<{ data: EarlierTreatment | null }>(
+        `/api/patients/${patientId}/encounters/${encounter.id}/procedures/earlier?${params}`,
+      )
+    },
+    enabled: open && canWrite && !finalized && earlierReady,
+    retry: false,
+  })
+  const earlier = earlierReady ? (earlierQuery.data?.data ?? null) : null
+
   const onPlanChange = (value: string | null) => {
     const next = value ?? NO_PLAN
     if (next === NO_PLAN) {
@@ -355,6 +407,16 @@ export function EncounterProcedures({
     form.setFieldValue("diagnosisSystem", linked.diagnosisSystem ?? null)
     form.setFieldValue("site", { toothNumber: linked.toothNumber, surfaces: linked.surfaces ?? [] })
   }
+
+  // Lo que se eligió en «Hecho hoy», en cuanto se conoce el plan: una sola vez por pedido.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: corre al pedirlo y al llegar el plan.
+  useEffect(() => {
+    if (!prefillPlanItemId || !canWrite || finalized || !planById[prefillPlanItemId]) return
+    form.reset()
+    onPlanChange(prefillPlanItemId)
+    setOpen(true)
+    onPrefillUsed?.()
+  }, [prefillPlanItemId, planQuery.data])
 
   const handleClose = () => {
     // Durante el guardado no se cierra: el error y lo elegido se conservan
@@ -632,6 +694,33 @@ export function EncounterProcedures({
                     />
                   )}
                 </form.AppField>
+              ) : null}
+
+              {earlier ? (
+                <div role="status" className="flex flex-col gap-2 rounded-lg border border-warning/50 bg-warning-soft p-3 text-sm">
+                  <p className="font-medium">{earlierWords(earlier)}</p>
+                  {earlier.status === "en_curso" ? (
+                    <>
+                      <p className="text-muted-foreground">
+                        Sigue en curso: si hoy es su sesión siguiente, regístrala en ese tratamiento y no se abre ni se cobra otro.
+                      </p>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="self-start"
+                        disabled={busy || !planById[earlier.planItemId]}
+                        onClick={() => onPlanChange(earlier.planItemId)}
+                      >
+                        {`Registrarlo como su sesión ${earlier.n}`}
+                      </Button>
+                    </>
+                  ) : (
+                    <p className="text-muted-foreground">
+                      Ya se cobró; si es otra sesión del mismo tratamiento, no la registres como nueva.
+                    </p>
+                  )}
+                </div>
               ) : null}
 
               {!selectedPlan ? (

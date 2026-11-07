@@ -43,6 +43,7 @@ import {
   type AgendaResources,
   type AppointmentContext,
   type AppointmentStatus,
+  appointmentSessionsText,
   professionalSaid,
   visitLabel,
   visitState,
@@ -660,6 +661,12 @@ function RealAppointmentDrawer({
                 </DetailField>
               ) : null}
               <DetailField label="Servicio">{appointment.serviceName ?? "Sin servicio"}</DetailField>
+              {/* Lo que viene a hacer de un tratamiento de varias sesiones: «Endodoncia · sesión 2 de 2». */}
+              {appointment.sessions?.length ? (
+                <DetailField label={appointment.sessions.length === 1 ? "Sesión" : "Sesiones"}>
+                  {appointmentSessionsText(appointment.sessions)}
+                </DetailField>
+              ) : null}
               <DetailField label="Profesional">{appointment.professionalName}</DetailField>
               <DetailField label={upperFirst(appWords().room.one)}>{appointment.roomName}</DetailField>
               {appointment.reason ? (

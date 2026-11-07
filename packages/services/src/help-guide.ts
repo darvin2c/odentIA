@@ -289,7 +289,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo elijo qué tratamientos trae la cita?",
-        a: "En «Nueva cita», «Para esta cita» muestra lo que la persona aceptó y aún no tiene cita. Vienen marcados los del primer servicio; los demás se suman con un toque, y elegir otro servicio marca los de ese. Puedes desmarcarlos todos: la cita queda sin ninguno. Los marcados quedan listos en la atención de esa cita. Cuando reservan Sofi o la persona desde su enlace, la cita trae lo aceptado de su servicio que aún no tenía cita.",
+        a: "En «Nueva cita», «Para esta cita» muestra lo que la persona aceptó y aún no tiene cita, y lo que tiene sesiones por reservar, con la que sería esta («sesión 2 de 2»). Vienen marcados los del primer servicio; los demás se suman con un toque, y elegir otro servicio marca los de ese. Puedes desmarcarlos todos: la cita queda sin ninguno. Los marcados quedan listos en la atención de esa cita. Cuando reservan Sofi o la persona desde su enlace, la cita trae lo aceptado de su servicio que aún no tenía cita o al que le faltan sesiones por reservar.",
       },
       {
         q: "¿Cómo le reservo una cita desde la conversación?",
@@ -486,6 +486,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         q: "¿Dónde quedaron Atenciones, Recetas u Órdenes?",
         a: "Clínica tiene cuatro secciones: Antecedentes, Odontograma, Historia y Documentos. Historia es lo que pasó y cuándo, con las atenciones (también las anuladas, con su motivo) y lo que se firmó o se pidió. Documentos es para buscar un papel: una sola lista con «Requieren acción» y un filtro por tipo (recetas, órdenes, consentimientos, formularios, imágenes y, en clínicas de Perú, odontogramas firmados); «Nuevo» abre directo el formulario.",
+      },
+      {
+        q: "¿Cómo llevo un tratamiento de varias sesiones?",
+        a: "Con sus sesiones previstas en el Plan, por ejemplo una endodoncia en dos. Cada cita que lo lleva dice en qué sesión va («sesión 1 de 2») en la Agenda, en la cita y en «Qué sigue», y al reservar la siguiente, «Para esta cita» lo ofrece mientras le falten sesiones. En la atención, «Hecho hoy» dice «Registrar la sesión» hasta que registras su procedimiento; con la sesión de hoy, «Completar» lo cierra. Nada se termina solo: al firmar, lo que llega a sus sesiones previstas pregunta «¿Terminaste?», con «Sí, terminar» y «Falta otra sesión» (le suma una); sin elegir, sigue en curso. Si registras como servicio algo que ya se hizo en esa pieza, te avisa antes de guardar y te ofrece registrarlo como su sesión, para no cobrarlo otra vez.",
+        forms: ["endodoncia en dos sesiones", "segunda sesion", "sesion 2 de 2", "completar tratamiento", "no me deja completar", "tratamiento por sesiones"],
       },
       {
         q: "¿La atención queda unida a su cita?",

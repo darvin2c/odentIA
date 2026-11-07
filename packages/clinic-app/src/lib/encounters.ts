@@ -31,6 +31,20 @@ export interface ClosingCheck {
    * tiene sede o no hay nada que descontar (ADR 0067).
    */
   materials: ClosingMaterials | null
+  /**
+   * Lo trabajado hoy de un tratamiento de varias sesiones que sigue abierto:
+   * `finishing` llega con esta atención a sus sesiones previstas (el cierre
+   * pregunta «¿Terminaste?»); `continuing` queda en curso. `n` cuenta esta.
+   */
+  sessions?: { finishing: ClosingSession[]; continuing: ClosingSession[] }
+}
+
+/** Un tratamiento trabajado en la atención, con su sesión. */
+export interface ClosingSession {
+  planItemId: string
+  title: string
+  n: number
+  m: number
 }
 
 /** Cuánto de un producto, en su unidad de uso («2 guantes»). */

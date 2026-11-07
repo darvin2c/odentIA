@@ -41,6 +41,8 @@ const COMPOSED = new Set([
   "Atender (10:00)",
   "Enviárselo ahora",
   "Aceptó 2 de 3",
+  "sesión 1 de 2",
+  "sesión 2 de 2",
   "Necesita consentimiento · Preparar",
   "Debe: 100 · A favor: 100 · Saldo: 0",
   "sí, ahí estaré",

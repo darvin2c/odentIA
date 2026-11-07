@@ -4108,6 +4108,8 @@ const agendaSeed: Array<{
     end: "09:45",
     service: "ENDODONCIA",
   },
+  // La endodoncia de la 46 en dos sesiones, con sus dos citas: la Agenda dice
+  // «sesión 1 de 2» y «sesión 2 de 2», y la segunda la lleva igual que la primera.
   {
     patient: "Rosa Quispe",
     professional: ANA_ID,
@@ -4117,6 +4119,18 @@ const agendaSeed: Array<{
     end: "10:00",
     service: "ENDODONCIA",
     status: "programada",
+    planItemIds: [endo46.id],
+  },
+  {
+    patient: "Rosa Quispe",
+    professional: ANA_ID,
+    room: 0,
+    day: 8,
+    start: "09:00",
+    end: "10:00",
+    service: "ENDODONCIA",
+    status: "programada",
+    planItemIds: [endo46.id],
   },
   // Ayer, sin cerrar: nadie marcó si vinieron. Inicio las pide en «Te espera» con «No vino».
   {

@@ -72,6 +72,9 @@ it("coordinación: expone títulos, estados y fechas, nunca el detalle clínico 
       decision: "pendiente",
       serviceId: expect.any(String),
       toSchedule: false,
+      // Sin aceptar, no tiene sesiones por reservar.
+      sessionsLeft: 0,
+      nextSession: { n: 1, m: 1 },
     },
   ])
   expect(view.followUps).toHaveLength(1)

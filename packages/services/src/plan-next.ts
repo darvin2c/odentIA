@@ -9,7 +9,9 @@
  * 1. Un presupuesto armado y sin enviar: «Enviar el presupuesto a Lucía».
  * 2. Lo aceptado que aún no tiene cita: «Aceptó 2 de 3: falta su cita».
  * 3. Lo que espera respuesta: «Enviado · espera respuesta» o «Lo está pensando».
- * 4. Un tratamiento en curso sin cita para su próxima sesión.
+ * 4. Un tratamiento en curso sin cita para su próxima sesión, o uno que ya
+ *    tiene su primera cita y le faltan sesiones por reservar (`canBookAnother`):
+ *    «Falta la cita de la próxima sesión: Endodoncia · sesión 2 de 2».
  * 5. El próximo control: «Control de las resinas · por reservar · Toca el 20 nov»,
  *    o «tiene cita el 22 nov» si ya tiene una cita desde ese día.
  *
@@ -19,7 +21,7 @@
  * Recibe `can`: el botón solo se ofrece a quien puede hacerlo. La frase nunca
  * lleva diagnósticos, piezas ni notas: también la lee recepción.
  */
-import { formatMoney, moneyTotalsText } from "@odentia/clinical"
+import { formatMoney, moneyTotalsText, sessionWords, showsSession } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import {
@@ -35,7 +37,16 @@ import { notFound } from "./errors.js"
 import { findOrgLocale } from "./locale.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { productHooks } from "./products.js"
-import { dayKeyIn, isOverdueControl, isToSchedule, LIVE_APPOINTMENT_STATUSES } from "./to-schedule.js"
+import {
+  canBookAnother,
+  dayKeyIn,
+  isOverdueControl,
+  isToSchedule,
+  LIVE_APPOINTMENT_STATUSES,
+  type SessionCount,
+  sessionCountsOf,
+  TO_SCHEDULE_STATUSES,
+} from "./to-schedule.js"
 
 export type PlanNextKind = "enviar" | "agendar" | "respuesta" | "continuar" | "control" | "ninguno"
 
@@ -131,6 +142,7 @@ export async function getPlanNextStep(
     .where(and(eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.patientId, patientId)))
     .orderBy(asc(treatmentPlanItem.sortOrder), asc(treatmentPlanItem.createdAt), asc(treatmentPlanItem.id))
   const withAppointment = await scheduledItems(tx, orgId, patientId, items.map((item) => item.id))
+  const sessions = await sessionCountsOf(tx, orgId, items.filter(mayTakeSessions).map((item) => item.id))
   const [control] = await tx
     .select()
     .from(clinicalFollowUp)
@@ -162,6 +174,7 @@ export async function getPlanNextStep(
       budgets,
       items,
       withAppointment,
+      sessions,
       control,
       nextAppointmentAt: next?.startsAt ?? null,
       nextAppointmentId: next?.id ?? null,
@@ -215,6 +228,7 @@ export async function planNextStepsOf(
       ),
     )
   const withAppointment = new Set(scheduled.map((row) => row.planItemId))
+  const sessions = await sessionCountsOf(tx, orgId, items.filter(mayTakeSessions).map((item) => item.id))
   // La próxima cita de cada uno, lleve o no lo aceptado: «falta su cita» no se dice a quien ya tiene una.
   const nextAppointments = await tx
     .selectDistinctOn([appointment.patientId], { patientId: appointment.patientId, id: appointment.id, startsAt: appointment.startsAt })
@@ -257,6 +271,7 @@ export async function planNextStepsOf(
           budgets: budgets.get(person.id) ?? [],
           items: itemsOf.get(person.id) ?? [],
           withAppointment,
+          sessions,
           control: controlOf.get(person.id),
           nextAppointmentAt: nextAppointmentOf.get(person.id)?.startsAt ?? null,
           nextAppointmentId: nextAppointmentOf.get(person.id)?.id ?? null,
@@ -271,6 +286,15 @@ export async function planNextStepsOf(
 
 type PlanItemRow = typeof treatmentPlanItem.$inferSelect
 type FollowUpRow = typeof clinicalFollowUp.$inferSelect
+
+/** Lo que puede pedir otra sesión: aceptado, por hacer y de más de una prevista. Solo de esos se cuentan. */
+function mayTakeSessions(item: PlanItemRow): boolean {
+  return (
+    item.decisionStatus === "aceptado" &&
+    (TO_SCHEDULE_STATUSES as readonly string[]).includes(item.status) &&
+    item.plannedSessions > 1
+  )
+}
 
 /** Lo de la clínica que necesita la frase: formato de fechas y si su producto pide presupuesto. */
 interface PlanContext {
@@ -290,6 +314,8 @@ interface PlanFacts {
   budgets: BudgetWithTotals[]
   items: PlanItemRow[]
   withAppointment: Set<string>
+  /** Sesiones hechas y en pie de lo que puede pedir otra (`sessionCountsOf`). */
+  sessions: Map<string, SessionCount>
   control: FollowUpRow | undefined
   /** Su próxima cita, aunque no lleve lo aceptado. */
   nextAppointmentAt?: Date | null
@@ -298,7 +324,7 @@ interface PlanFacts {
 
 /** La regla de «Qué sigue», en el orden fijo de arriba. Sin consultas: decide con lo cargado. */
 function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): PlanNextStep {
-  const { name, budgets, items, withAppointment, control, nextAppointmentAt, nextAppointmentId } = facts
+  const { name, budgets, items, withAppointment, sessions, control, nextAppointmentAt, nextAppointmentId } = facts
   const { locale, timezone } = context
   const day = (date: Date) => dayWords(date, locale, timezone)
   const dayKey = (date: Date) => dayKeyIn(date, timezone)
@@ -364,12 +390,20 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
     }
   }
 
-  // 4. Un tratamiento en curso sin cita para su próxima sesión.
-  const continuing = toSchedule.find((item) => item.status === "en_curso")
+  // 4. Un tratamiento en curso sin cita para su próxima sesión, o uno que ya tiene
+  // su primera cita (o sesión) y le faltan otras por reservar.
+  const countOf = (item: PlanItemRow) => sessions.get(item.id) ?? { done: 0, booked: 0 }
+  const continuing = items.find(
+    (item) =>
+      (isToSchedule(item, withAppointment) && item.status === "en_curso") ||
+      (canBookAnother(item, countOf(item)) && countOf(item).done + countOf(item).booked > 0),
+  )
   if (continuing) {
+    const n = countOf(continuing).done + countOf(continuing).booked + 1
+    const session = showsSession(n, continuing.plannedSessions) ? ` · ${sessionWords(n, continuing.plannedSessions)}` : ""
     return {
       kind: "continuar",
-      text: `Falta la cita de la próxima sesión: ${continuing.title}`,
+      text: `Falta la cita de la próxima sesión: ${continuing.title}${session}`,
       detail: null,
       action: can("appointments.write")
         ? { label: "Reservar cita", planItemIds: [continuing.id], serviceId: continuing.serviceId }

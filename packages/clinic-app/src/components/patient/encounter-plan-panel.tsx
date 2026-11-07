@@ -158,9 +158,15 @@ export function EncounterPlanPanel({
   onChanged,
   onPendingChange,
   patientName,
+  sessionItemIds,
+  onRegisterSession,
 }: {
   patientId: string
   encounterId: string
+  /** Tratamientos con un procedimiento vigente en esta atención: ya tienen la sesión de hoy. */
+  sessionItemIds: ReadonlySet<string>
+  /** «Registrar la sesión»: abre «Registrar procedimiento» con ese tratamiento puesto. */
+  onRegisterSession: (itemId: string) => void
   /** Para «Mostrar a Rosa» el presupuesto en borrador. */
   patientName: string
   /** Tratamientos vinculados a esta atención (sesión registrada o traídos por la cita). */
@@ -346,6 +352,8 @@ export function EncounterPlanPanel({
         patientId={patientId}
         encounterId={encounterId}
         items={plannedItems}
+        sessionItemIds={sessionItemIds}
+        onRegisterSession={onRegisterSession}
         disabled={disabled}
         beforeWrite={beforeWrite}
         onChanged={() => void onChanged()}

@@ -39,6 +39,15 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
         return []
       // latidIA todavía no guarda la tomografía en la ficha.
       if (/tomografía/.test(faq.q)) return []
+      // Las sesiones de un consultorio son de una terapia, sin pieza.
+      if (faq.q === "¿Cómo llevo un tratamiento de varias sesiones?")
+        return [
+          {
+            ...faq,
+            a: "Con sus sesiones previstas en el Plan, por ejemplo una terapia de diez. Cada cita que lo lleva dice en qué sesión va («sesión 1 de 2») en la Agenda, en la cita y en «Qué sigue», y al reservar la siguiente, «Para esta cita» lo ofrece mientras le falten sesiones. En la atención, «Hecho hoy» dice «Registrar la sesión» hasta que registras su procedimiento; con la sesión de hoy, «Completar» lo cierra. Nada se termina solo: al firmar, lo que llega a sus sesiones previstas pregunta «¿Terminaste?», con «Sí, terminar» y «Falta otra sesión» (le suma una); sin elegir, sigue en curso. Si registras como servicio algo que ya está en curso, te avisa antes de guardar y te ofrece registrarlo como su sesión, para no cobrarlo otra vez.",
+            ...(faq.forms ? { forms: faq.forms.filter((form) => form !== "endodoncia en dos sesiones") } : {}),
+          },
+        ]
       // Las preguntas de los caminos hablan de la pieza: en un consultorio, de la opción.
       if (faq.q === "¿Cómo anoto que aceptó una parte y lo otro lo está pensando?")
         return [
