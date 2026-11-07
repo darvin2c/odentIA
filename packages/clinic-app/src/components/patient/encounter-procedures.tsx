@@ -700,24 +700,13 @@ export function EncounterProcedures({
                 <div role="status" className="flex flex-col gap-2 rounded-lg border border-warning/50 bg-warning-soft p-3 text-sm">
                   <p className="font-medium">{earlierWords(earlier)}</p>
                   {earlier.status === "en_curso" ? (
-                    <>
-                      <p className="text-muted-foreground">
-                        Sigue en curso: si hoy es su sesión siguiente, regístrala en ese tratamiento y no se abre ni se cobra otro.
-                      </p>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="self-start"
-                        disabled={busy || !planById[earlier.planItemId]}
-                        onClick={() => onPlanChange(earlier.planItemId)}
-                      >
-                        {`Registrarlo como su sesión ${earlier.n}`}
-                      </Button>
-                    </>
+                    // Guardarlo ya lo une a ese tratamiento (`openAcceptedPlanItemFor`): no abre otro.
+                    <p className="text-muted-foreground">
+                      {`Sigue en curso: al guardarlo queda como su sesión ${earlier.n}, no como un tratamiento nuevo.`}
+                    </p>
                   ) : (
                     <p className="text-muted-foreground">
-                      Ya se cobró; si es otra sesión del mismo tratamiento, no la registres como nueva.
+                      Ya está realizado: si lo registras, es un acto nuevo y se cobra aparte.
                     </p>
                   )}
                 </div>

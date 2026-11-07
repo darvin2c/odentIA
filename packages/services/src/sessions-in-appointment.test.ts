@@ -256,7 +256,7 @@ it("D4: el cierre pregunta por lo trabajado hoy; sin elección no cierra nada, �
   expect(link!.n).toBe(1)
 })
 
-it("D5: el servicio directo avisa si ya se hizo en esa pieza: en curso se ofrece como su sesión; realizado hace poco, que ya se cobró", async () => {
+it("D5: el servicio directo avisa si ya se hizo en esa pieza: en curso queda como su sesión; realizado hace poco, que es un acto nuevo; una consulta sin pieza no avisa", async () => {
   const f = await clinicalFixture()
   const [endo] = await ownerDb
     .insert(serviceCatalog)
@@ -285,6 +285,14 @@ it("D5: el servicio directo avisa si ya se hizo en esa pieza: en curso se ofrece
   )
   await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: planned.id, acceptWhenDone: true }))
   expect(await earlier(36)).toMatchObject({ planItemId: planned.id, status: "en_curso", n: 2, m: 2 })
+
+  // Una consulta sin pieza se repite sin ser otra sesión: no avisa.
+  const [consult] = await ownerDb
+    .insert(serviceCatalog)
+    .values({ organizationId: "org_a", name: "Consulta", scope: "general", source: "custom", priceCents: 5_000, currency: "PEN" })
+    .returning()
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { serviceId: consult!.id }))
+  expect(await f.run((tx) => findEarlierTreatment(tx, "org_a", f.patient.id, f.encounter.id, { serviceId: consult!.id }))).toBeNull()
 })
 
 it("D4: si la cita traía el tratamiento y no se registró su sesión, el cierre lo avisa sin frenar la firma", async () => {
@@ -307,4 +315,25 @@ it("D4: si la cita traía el tratamiento y no se registró su sesión, el cierre
     continuing: [{ planItemId: item.id, n: 1, m: 2 }],
     notRegistered: [],
   })
+})
+
+it("D4: «Falta otra sesión» no cambia lo que se cobra en esa firma: por sesión y sin presupuesto, la de más no se cobra", async () => {
+  const f = await clinicalFixture()
+  await ownerDb.update(serviceCatalog).set({ billingMode: "session", priceCents: 15_000 }).where(eq(serviceCatalog.id, f.service.id))
+  const item = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id, plannedSessions: 2 }),
+  )
+  // Aceptado sin presupuesto: el tope son sus sesiones previstas.
+  await ownerDb.update(treatmentPlanItem).set({ decisionStatus: "aceptado" }).where(eq(treatmentPlanItem.id, item.id))
+  await ownerDb.execute(sql`update encounter set status = 'finalizada', signer_name = 'Clínico', signer_registration = 'COP 1' where id = ${f.encounter.id}`)
+  const charged = []
+  for (const answer of [{}, {}, { addSessionPlanItemIds: [item.id] }]) {
+    const visit = await attention(f)
+    await f.run((tx) => addEncounterProcedure(tx, ...f.args, visit, { planItemId: item.id }))
+    const closed = await f.run((tx) => finalizeEncounter(tx, ...f.args, visit, answer))
+    charged.push(closed.billing.lines.map((line) => line.reason ?? line.amountCents))
+  }
+  expect(charged).toEqual([[15_000], [15_000], ["sessions_complete"]])
+  const [after] = await ownerDb.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.id, item.id))
+  expect(after).toMatchObject({ status: "en_curso", plannedSessions: 4 })
 })

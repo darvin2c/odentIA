@@ -30,7 +30,7 @@ import { member, user } from "@odentia/db/schema/auth"
 import { clinicalOrder, consentDocument, consentEvent, medicalLeave } from "@odentia/db/schema/clinical-forms"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { canAttend } from "@odentia/auth/permissions"
-import { and, asc, desc, eq, getTableColumns, gte, inArray, isNotNull, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, getTableColumns, gt, gte, inArray, isNotNull, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm"
 import { markArrivedOnAttend, notifyAppointmentChanged, setAppointmentStatus } from "./appointments.js"
 import { listEncounterDocuments, type PatientDocumentWithContext } from "./clinical.js"
 import { assertAttending } from "./encounter-attending.js"
@@ -1561,8 +1561,8 @@ export async function addEncounterProcedure(
  * procedimiento» antes de guardar un servicio directo, para no abrir otro
  * tratamiento ni cobrarlo completo otra vez cuando es su sesión siguiente (QA
  * del 6 nov: la sesión 2 de una endodoncia registrada como servicio se cobraba
- * de nuevo). Avisa y no bloquea; si está en curso, la pantalla ofrece
- * registrarlo como su sesión. `n` es la sesión que sería (hechas + 1).
+ * de nuevo). Avisa y no bloquea; si está en curso, la pantalla avisa
+ * que guardarlo lo une a él. `n` es la sesión que sería (hechas + 1).
  */
 export interface EarlierTreatment {
   planItemId: string
@@ -1610,7 +1610,13 @@ export async function findEarlierTreatment(
         siteCode ? eq(treatmentPlanItem.siteCode, siteCode) : isNull(treatmentPlanItem.siteCode),
         or(
           eq(treatmentPlanItem.status, "en_curso"),
-          and(eq(treatmentPlanItem.status, "realizado"), gte(treatmentPlanItem.completedAt, since)),
+          // Lo realizado, si fue en un sitio (una pieza) o era de varias sesiones: una
+          // consulta o un control sin sitio se repiten sin ser otra sesión.
+          and(
+            eq(treatmentPlanItem.status, "realizado"),
+            gte(treatmentPlanItem.completedAt, since),
+            or(isNotNull(treatmentPlanItem.siteCode), gt(treatmentPlanItem.plannedSessions, 1)),
+          ),
         ),
       ),
     )
@@ -1907,6 +1913,9 @@ export interface FinalizeEncounterInput {
 /**
  * «Sí, terminar» y «Falta otra sesión» del cierre. Solo de lo trabajado en esta
  * atención (`closing.sessions`); un mismo tratamiento no puede ir en las dos.
+ * Completa aquí y devuelve la sesión que falta para sumarla después de los
+ * cobros: lo que se cobra hoy se mide con lo que se había previsto, no con la
+ * sesión que se acaba de agregar.
  */
 async function applySessionAnswers(
   tx: Db,
@@ -1916,10 +1925,10 @@ async function applySessionAnswers(
   encounterId: string,
   input: FinalizeEncounterInput,
   sessions: ClosingCheckBase["sessions"],
-): Promise<void> {
+): Promise<() => Promise<void>> {
   const complete = [...new Set(input.completePlanItemIds ?? [])]
   const addSession = [...new Set(input.addSessionPlanItemIds ?? [])]
-  if (complete.length === 0 && addSession.length === 0) return
+  if (complete.length === 0 && addSession.length === 0) return async () => {}
   if (complete.some((id) => addSession.includes(id)))
     throw validation("Un tratamiento se termina o le falta otra sesión, no las dos")
   const worked = new Set([...sessions.finishing, ...sessions.continuing].map((session) => session.planItemId))
@@ -1931,17 +1940,19 @@ async function applySessionAnswers(
   field(addSession, "addSessionPlanItemIds")
   for (const itemId of complete)
     await setPlanItemStatus(tx, orgId, actorUserId, patientId, itemId, { status: "realizado", encounterId })
-  for (const itemId of addSession) {
-    const [current] = await tx
-      .select({ plannedSessions: treatmentPlanItem.plannedSessions })
-      .from(treatmentPlanItem)
-      .where(and(eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.id, itemId)))
-    if (!current) throw notFound("Tratamiento")
-    // Lo previsto pasa a lo hecho más una: «Falta otra sesión» cuando ya iba por la tercera de dos.
-    const done = [...sessions.finishing, ...sessions.continuing].find((session) => session.planItemId === itemId)?.n ?? 0
-    await updatePlanItemPlanning(tx, orgId, actorUserId, patientId, itemId, {
-      plannedSessions: Math.max(current.plannedSessions, done) + 1,
-    })
+  return async () => {
+    for (const itemId of addSession) {
+      const [current] = await tx
+        .select({ plannedSessions: treatmentPlanItem.plannedSessions })
+        .from(treatmentPlanItem)
+        .where(and(eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.id, itemId)))
+      if (!current) throw notFound("Tratamiento")
+      // Lo previsto pasa a lo hecho más una: «Falta otra sesión» cuando ya iba por la tercera de dos.
+      const done = [...sessions.finishing, ...sessions.continuing].find((session) => session.planItemId === itemId)?.n ?? 0
+      await updatePlanItemPlanning(tx, orgId, actorUserId, patientId, itemId, {
+        plannedSessions: Math.max(current.plannedSessions, done) + 1,
+      })
+    }
   }
 }
 
@@ -1999,7 +2010,7 @@ export async function finalizeEncounter(
   // Lo que se respondió a «¿Terminaste?», en la misma transacción y con la atención
   // aún en borrador: completar lo exige y deja dibujado lo tratado antes del
   // cierre del producto (odentIA: el odontograma que se firma ya lo trae).
-  await applySessionAnswers(tx, orgId, actorUserId, patientId, encounterId, input, closing.sessions)
+  const addSessions = await applySessionAnswers(tx, orgId, actorUserId, patientId, encounterId, input, closing.sessions)
   const procedures = await tx
     .select()
     .from(encounterProcedure)
@@ -2226,6 +2237,8 @@ export async function finalizeEncounter(
       reason: null,
     })
   }
+  // «Falta otra sesión», ya con los cobros de hoy medidos contra lo previsto.
+  await addSessions()
   const chargedCents = billingLines.reduce((sum, line) => sum + (line.amountCents ?? 0), 0)
   // Entre monedas no se suma: cada una con su total.
   const chargedTotals = sumByCurrency(

@@ -8,7 +8,7 @@ import {
   DialogTitle,
   Input,
 } from "@odentia/ui"
-import { sessionWords } from "@odentia/clinical"
+import { sessionWords, showsSession } from "@odentia/clinical"
 import { TimeSelect, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useId, useRef } from "react"
@@ -180,7 +180,9 @@ function ClosingSessions({
 }): React.JSX.Element | null {
   const notRegistered = sessions.notRegistered ?? []
   if (sessions.finishing.length === 0 && sessions.continuing.length === 0 && notRegistered.length === 0) return null
-  const line = (session: ClosingSession) => `${labelOf(session)} · ${sessionWords(session.n, session.m)}`
+  // Una resina de una sesión no dice «sesión 1 de 1»: solo su nombre.
+  const line = (session: ClosingSession) =>
+    showsSession(session.n, session.m) ? `${labelOf(session)} · ${sessionWords(session.n, session.m)}` : labelOf(session)
   return (
     <ul aria-label="Tratamientos de hoy" className="flex flex-col gap-2 rounded-lg border p-3">
       {sessions.finishing.map((session) => {
