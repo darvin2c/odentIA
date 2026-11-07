@@ -549,7 +549,23 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Puedo ofrecer dos opciones, por ejemplo resina o corona?",
-        a: "Sí, en el mismo presupuesto: «Duplicar como otra opción» copia la opción y cambias lo que haga falta. Cada opción tiene su total (nunca se suman) y una es la recomendada. Cuando la persona elige una, las otras quedan «No elegida» y dentro de la elegida puede dejar algo para después.",
+        a: "Sí. Lo más simple es en la atención: al indicar otro tratamiento de la misma pieza, la fila pregunta si es otro camino; con «Es otro camino», el presupuesto tiene dos opciones, y lo demás (por ejemplo la limpieza) va en las dos. También se puede en su Plan con «Duplicar como otra opción». Cada camino tiene su total (nunca se suman) y uno es el recomendado. En el plan, los caminos se ven juntos y fuera de las fases hasta que elija.",
+        forms: ["dos caminos", "conservar o extraer", "otro camino para la pieza", "alternativas de tratamiento"],
+      },
+      {
+        q: "¿Cómo anoto que aceptó una parte y lo otro lo está pensando?",
+        a: "En su Plan, «¿Qué respondió?»: no hace falta que elija un camino. Lo que va en todos los caminos se marca Acepta, Para después o No; en la pieza con caminos eliges el camino, «Lo piensa» o «Ninguno». Si lo piensa, sigue esperando respuesta y su oportunidad sigue abierta hasta que decida; después se completa ahí mismo, también eligiendo el camino. Lo que ya respondió no se vuelve a preguntar.",
+        forms: ["acepta una parte", "aceptación parcial", "lo piensa con la muela", "no eligió opción"],
+      },
+      {
+        q: "¿Qué pasa si cambio un precio después de enviarlo?",
+        a: "Se crea una revisión con el mismo número. Arriba dice qué cambió, por ejemplo que la corona sube de S/ 900 a S/ 1,000, y al enviarla, solo eso pide respuesta: lo que ya aceptó y no cambió sigue aceptado, y lo que ya se hizo o se cobró no cambia de precio. Mientras no responda, se cobra lo que ya había aceptado.",
+        forms: ["revisión del presupuesto", "subir un precio", "cambiar el precio", "nuevo precio"],
+      },
+      {
+        q: "¿Puedo ver el presupuesto que preparó una colega?",
+        a: "Sí, completo, para leer: el de cualquier profesional del paciente. Cambiar precios, enviarlo o anularlo es de quien lo preparó (o de recepción, que lo envía y anota la respuesta).",
+        forms: ["presupuesto de otro doctor", "presupuesto de una colega", "no veo el presupuesto"],
       },
       {
         q: "¿Un presupuesto puede tener líneas en dólares y en soles?",
@@ -558,7 +574,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Qué quiere decir cada estado del presupuesto?",
-        a: "«Por enviar»: armado y sin enviar. «Enviado · espera respuesta». «Lo está pensando». «Aceptó todo» o «Aceptó 2 de 3». «No aceptó». «Reemplazado», cuando se hizo una revisión, y «Anulado». Son las mismas palabras en toda la aplicación.",
+        a: "«Por enviar»: armado y sin enviar. «Enviado · espera respuesta». «Lo está pensando». «Aceptó todo» o «Aceptó 2 de 3»; con caminos sin elegir, dice que falta elegir el camino. «No aceptó». «Reemplazado», cuando se hizo una revisión, y «Anulado». Si pasó su vigencia sin respuesta, dice «Venció el…». Son las mismas palabras en toda la aplicación.",
       },
       {
         q: "¿Se guarda lo que escribo en la atención?",
