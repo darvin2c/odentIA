@@ -65,17 +65,9 @@ export function useSavedMeasures(
   const [error, setError] = useState<string | null>(null)
   /** Guarda la medida; true si quedó guardada. */
   const keep = async (input: NewMeasure): Promise<boolean> => {
-    // En la serie mayor no se manda la serie (null = la mayor, como las de antes): así lo que se
-    // guarda en una CBCT de una sola serie es lo mismo de siempre. «Deshacer» trae la suya.
-    const measure: NewMeasure = {
-      ...input,
-      seriesInstanceUid:
-        input.seriesInstanceUid !== undefined
-          ? input.seriesInstanceUid
-          : series && series.shown !== series.main
-            ? series.shown
-            : null,
-    }
+    // En la serie mayor no se manda la serie: el servidor la pone (las de antes ya la tienen), y una
+    // API anterior aceptaría la medida igual.
+    const measure: NewMeasure = { ...input, seriesInstanceUid: series && series.shown !== series.main ? series.shown : null }
     if (!canWrite) {
       setLocal((prev) => [
         ...prev,
@@ -123,8 +115,8 @@ export function useSavedMeasures(
    */
   const undo = async () => {
     if (!removed) return
-    const { kind, view, points, value, toothNumber, seriesInstanceUid } = removed
-    if (await keep({ kind, view, points, value, toothNumber, seriesInstanceUid })) setRemoved(null)
+    const { kind, view, points, value, toothNumber } = removed
+    if (await keep({ kind, view, points, value, toothNumber })) setRemoved(null)
   }
   const canUndo = (measure: SavedMeasure) => !measure.createdBy || measure.createdBy === myUserId
   const inShown = (m: SavedMeasure) => !series || (m.seriesInstanceUid ?? series.main) === series.shown

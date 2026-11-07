@@ -1,6 +1,7 @@
 import * as dicomParser from "dicom-parser"
 import type { VolumeSource } from "./cbct-volume"
 import { DICOM_PARSE_OPTIONS } from "./dicom"
+import { VOLUME_MIN_SLICES } from "./imaging-scan"
 
 /**
  * Las series de una tomografía (ADR 0151). Un CD médico trae varias (sin
@@ -41,8 +42,6 @@ export interface SeriesInfo {
   localizer: boolean
 }
 
-/** Menos cortes que esto no arman un volumen que se pueda recorrer de frente y de lado. */
-export const SERIES_MIN_SLICES = 10
 
 /** Lo que se lee de una cabecera DICOM ya abierta. */
 export function seriesInfoOf(ds: dicomParser.DataSet, files: number): SeriesInfo {
@@ -66,9 +65,9 @@ export function seriesInfoOf(ds: dicomParser.DataSet, files: number): SeriesInfo
 export async function readSeriesInfo(series: StudySeries, signal?: AbortSignal): Promise<SeriesInfo | null> {
   const first = series.files[0]
   if (!first) return null
-  const response = await fetch(first.url, { headers: { Range: "bytes=0-262143" }, signal })
+  const response = await fetch(first.url, { headers: { Range: `bytes=0-${HEAD_BYTES - 1}` }, signal })
   if (!response.ok) return null
-  const bytes = new Uint8Array(await response.arrayBuffer())
+  const bytes = await firstBytes(response)
   try {
     const ds = dicomParser.parseDicom(bytes, { ...DICOM_PARSE_OPTIONS, untilTag: "x7fe00010" })
     return seriesInfoOf(ds, series.files.length)
@@ -79,10 +78,33 @@ export async function readSeriesInfo(series: StudySeries, signal?: AbortSignal):
   }
 }
 
+/** Lo que se lee de cada serie: la cabecera cabe ahí casi siempre. */
+const HEAD_BYTES = 256 * 1024
+
+/**
+ * Los primeros bytes de la respuesta. Si el almacenamiento ignora el Range y manda
+ * el archivo entero (200), se deja de leer al llegar a ellos.
+ */
+async function firstBytes(response: Response): Promise<Uint8Array> {
+  if (response.status === 206 || !response.body) return new Uint8Array(await response.arrayBuffer())
+  const reader = response.body.getReader()
+  const out = new Uint8Array(HEAD_BYTES)
+  let length = 0
+  while (length < HEAD_BYTES) {
+    const { done, value } = await reader.read()
+    if (done) break
+    const take = Math.min(value.length, HEAD_BYTES - length)
+    out.set(value.subarray(0, take), length)
+    length += take
+  }
+  await reader.cancel().catch(() => undefined)
+  return out.subarray(0, length)
+}
+
 /** ¿Se puede armar como volumen? El topograma y las series de pocos cortes, no. */
-export function canReconstruct(series: StudySeries, info: SeriesInfo | null | undefined): boolean {
+export function canReconstruct(info: SeriesInfo | null | undefined): boolean {
   if (!info) return true
-  return !info.localizer && info.slices >= SERIES_MIN_SLICES
+  return !info.localizer && info.slices >= VOLUME_MIN_SLICES
 }
 
 const mm = (value: number, locale: string) =>
@@ -97,6 +119,6 @@ export function seriesName(info: SeriesInfo | null | undefined, position: number
 export function seriesDetail(series: StudySeries, info: SeriesInfo | null | undefined, locale: string): string {
   const slices = info?.slices ?? series.files.length
   const count = `${slices.toLocaleString(locale)} ${slices === 1 ? "imagen" : "cortes"}`
-  if (!canReconstruct(series, info)) return `${count} · no se arma`
+  if (!canReconstruct(info)) return `${count} · no se arma`
   return info?.thicknessMm ? `${mm(info.thicknessMm, locale)} · ${count}` : count
 }

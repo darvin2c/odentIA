@@ -338,6 +338,10 @@ export function useCbctVolume(patientId: string, documentId: string, seriesUid: 
   })
   const series = useMemo(() => studySeries(files.data?.data.files ?? []), [files.data?.data.files])
   const shown = series.find((item) => item.uid === seriesUid) ?? series[0] ?? null
+  // Los archivos de la serie, con sus URL de ahora: pedirlos otra vez no vuelve a armar el volumen.
+  const shownRef = useRef(shown)
+  shownRef.current = shown
+  const shownKey = shown ? `${documentId}:${shown.uid}` : null
   const [volume, setVolume] = useState<CbctVolume | null>(null)
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [error, setError] = useState<unknown>(null)
@@ -345,11 +349,12 @@ export function useCbctVolume(patientId: string, documentId: string, seriesUid: 
   /** La serie del volumen que se ve: volver a pedir los archivos (URL firmadas nuevas) no la cambia. */
   const loadedKey = useRef<string | null>(null)
   // `attempt` vuelve a cargar al pedir «Reintentar».
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `attempt` es la señal de reintento.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: depende de la serie y del reintento, no de sus URL.
   useEffect(() => {
-    if (!shown) return
+    const shown = shownRef.current
+    if (!shown || !shownKey) return
     const controller = new AbortController()
-    const key = `${documentId}:${shown.uid}`
+    const key = shownKey
     // Otra serie es otro volumen: mientras se arma, no se ve la anterior con el nombre de la nueva.
     // La misma serie vuelve de la caché sin desmontar el corte, la pieza ni la medida a medias.
     if (loadedKey.current !== key) setVolume(null)
@@ -365,7 +370,7 @@ export function useCbctVolume(patientId: string, documentId: string, seriesUid: 
         if (!controller.signal.aborted) setError(e)
       })
     return () => controller.abort()
-  }, [shown, documentId, attempt])
+  }, [shownKey, attempt])
   return {
     files,
     series,
@@ -373,10 +378,8 @@ export function useCbctVolume(patientId: string, documentId: string, seriesUid: 
     volume,
     progress,
     error: error ?? files.error,
-    retry: () => {
-      setAttempt((n) => n + 1)
-      void files.refetch()
-    },
+    // Las URL firmadas vencen: se piden de nuevo y después se vuelve a armar.
+    retry: () => void files.refetch().then(() => setAttempt((n) => n + 1)),
   }
 }
 
@@ -384,8 +387,7 @@ export function useCbctVolume(patientId: string, documentId: string, seriesUid: 
  * Sin memoria para el volumen (tablero 9): los cortes de la serie que se ve, de
  * a uno, decodificados al pedirlos, con su propia ventana.
  */
-function SingleSlices({ series: shown, onRetry }: { series: StudySeries; onRetry: () => void }) {
-  const series = shown.files
+function SingleSlices({ files: series, onRetry }: { files: StudySeries["files"]; onRetry: () => void }) {
   const [index, setIndex] = useState(Math.floor(series.length / 2))
   const ref = useRef<HTMLCanvasElement | null>(null)
   const file = series[index]
@@ -522,6 +524,59 @@ const PHONE_VIEWS: { value: TomographyView; label: string }[] = [
 ]
 
 /**
+ * Lo que cambia entre la CBCT dental y la tomografía médica (ADR 0151), en un
+ * solo lugar: el visor lee su perfil en vez de preguntar por el tipo en cada parte.
+ */
+interface TomographyProfile {
+  /** La vista con que abre; «Panorámica» solo existe en la dental. */
+  initialView: TomographyView
+  panoramic: boolean
+  /** La CBCT abre «Cortes» a la altura de los dientes; la médica, en el corte del medio. */
+  atTeeth: boolean
+  /** El 3D como cuarto cuadro de «Cortes». En la médica solo se arma en su pestaña: es lo más pesado. */
+  inline3d: boolean
+  windows: (volume: CbctVolume) => ViewWindow[]
+  windowLabel: string
+  keysHint: (count: number) => string
+  measureNote: (voxelMm: number | null) => string
+  measureWhere: string
+  download: { title: string; hint: string }
+}
+
+const PROFILES: Record<"cbct" | "ct", TomographyProfile> = {
+  cbct: {
+    initialView: "panoramica",
+    panoramic: true,
+    atTeeth: true,
+    inline3d: true,
+    windows: cbctWindows,
+    windowLabel: "Brillo",
+    keysHint: () => "1, 2 y 3 cambian el brillo",
+    measureNote: MEASURE_NOTE,
+    measureWhere: "la panorámica o los cortes",
+    download: {
+      title: "Descargar para el programa del tomógrafo",
+      hint: "Para planificar el implante o seguir el nervio, ábrela en el programa del centro de imágenes o del tomógrafo.",
+    },
+  },
+  ct: {
+    initialView: "cortes",
+    panoramic: false,
+    atTeeth: false,
+    inline3d: false,
+    windows: ctWindows,
+    windowLabel: "Ventana",
+    keysHint: (count) => `del 1 al ${count} cambian la ventana`,
+    measureNote: () => CT_MEASURE_NOTE,
+    measureWhere: "los cortes",
+    download: {
+      title: "Descargar para el programa de imágenes",
+      hint: "Para reconstrucciones y otras herramientas, ábrela en el programa del centro de imágenes.",
+    },
+  },
+}
+
+/**
  * La serie que se ve, en la barra (ADR 0151): un estudio médico trae varias y
  * medir en la equivocada (el topograma, una reconstrucción gruesa) es el riesgo
  * mayor. Solo aparece si hay más de una; el topograma se ve y no se elige.
@@ -530,14 +585,18 @@ function SeriesPicker({
   documentId,
   series,
   shown,
+  ready,
   onChoose,
 }: {
   documentId: string
   series: readonly StudySeries[]
   shown: StudySeries
+  /** El volumen ya está: las cabeceras se piden después, sin competir con su descarga. */
+  ready: boolean
   onChoose: (uid: string) => void
 }) {
   const info = useQuery({
+    enabled: ready,
     queryKey: ["imaging-series-info", documentId],
     queryFn: async ({ signal }) =>
       Object.fromEntries(
@@ -569,7 +628,7 @@ function SeriesPicker({
             <DropdownMenuRadioItem
               key={item.uid}
               value={item.uid}
-              disabled={!canReconstruct(item, infoOf(item))}
+              disabled={!canReconstruct(infoOf(item))}
               // Elegir es todo lo que se hace aquí: la lista se cierra y se ve la serie.
               closeOnClick
               className="flex items-baseline justify-between gap-3"
@@ -605,8 +664,7 @@ export function TomographyViewer({
   /** Escribe en la ficha: guarda medidas y la vista en la atención. */
   canWrite?: boolean
 }) {
-  // La dental (CBCT) abre en la panorámica, con sus brillos; la médica, en cortes y con sus ventanas.
-  const ct = tomographyKind() === "ct"
+  const profile = PROFILES[tomographyKind()]
   const [seriesUid, setSeriesUid] = useState<string | null>(null)
   const loaded = useCbctVolume(patientId, doc.id, seriesUid)
   const volume = loaded.volume
@@ -625,13 +683,13 @@ export function TomographyViewer({
     canWrite,
     shownSeries && mainSeries ? { shown: shownSeries, main: mainSeries } : null,
   )
-  const [view, setView] = useState<TomographyView>(ct ? "cortes" : "panoramica")
+  const [view, setView] = useState<TomographyView>(profile.initialView)
   const [adjusting, setAdjusting] = useState(false)
   const [facts, setFacts] = useState(false)
   const factsButton = useRef<HTMLButtonElement | null>(null)
   const [single, setSingle] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
-  const options = useMemo(() => (volume ? (ct ? ctWindows(volume) : cbctWindows(volume)) : []), [volume, ct])
+  const options = useMemo(() => (volume ? profile.windows(volume) : []), [volume, profile])
   // Otra serie puede no traer la ventana elegida (la «Del archivo»): queda la primera.
   const active = options.find((option) => option.key === preset) ?? options[0] ?? null
   const window = volume && active ? (preset === "mas" ? (custom ?? active.window) : active.window) : null
@@ -655,7 +713,7 @@ export function TomographyViewer({
     }
     // El 3D es solo para mostrar: M y A dicen dónde se mide en vez de encender una herramienta oculta.
     if (view === "3d" && next !== "ninguna") {
-      setNotice(`El 3D es para mostrar. Para medir, usa ${ct ? "los cortes" : "la panorámica o los cortes"}.`)
+      setNotice(`El 3D es para mostrar. Para medir, usa ${profile.measureWhere}.`)
       return
     }
     setNotice(null)
@@ -729,6 +787,7 @@ export function TomographyViewer({
               documentId={doc.id}
               series={loaded.series}
               shown={loaded.shown}
+              ready={Boolean(volume) || Boolean(loaded.error)}
               onChoose={(uid) => {
                 setSeriesUid(uid)
                 // El ajuste fino es de los valores de otra serie; «Deshacer» de una medida, también.
@@ -744,7 +803,7 @@ export function TomographyViewer({
           {ready && !viewOnly && (
             <Tabs value={shown} onValueChange={(next) => changeView(next as TomographyView)}>
               <TabsList aria-label="Vista">
-                {!ct && <TabsTrigger value="panoramica">Panorámica</TabsTrigger>}
+                {profile.panoramic && <TabsTrigger value="panoramica">Panorámica</TabsTrigger>}
                 <TabsTrigger value="cortes">Cortes</TabsTrigger>
                 <TabsTrigger value="3d">3D</TabsTrigger>
               </TabsList>
@@ -771,14 +830,14 @@ export function TomographyViewer({
                 <ViewTabs
                   label="Vista"
                   value={view}
-                  options={ct ? PHONE_VIEWS.filter((item) => item.value === "cortes" || item.value === "3d") : PHONE_VIEWS}
+                  options={profile.panoramic ? PHONE_VIEWS : PHONE_VIEWS.filter((item) => item.value === "cortes" || item.value === "3d")}
                   onValueChange={changeView}
                 />
               </div>
             )}
             <BrightnessControls
               volume={volume}
-              label={ct ? "Ventana" : "Brillo"}
+              label={profile.windowLabel}
               options={options}
               preset={preset === "mas" ? "mas" : (active?.key ?? "")}
               onPreset={(next) => {
@@ -837,12 +896,8 @@ export function TomographyViewer({
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={download} className="flex-col items-start gap-0.5">
-                  <span>{ct ? "Descargar para el programa de imágenes" : "Descargar para el programa del tomógrafo"}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {ct
-                      ? "Para reconstrucciones y otras herramientas, ábrela en el programa del centro de imágenes."
-                      : "Para planificar el implante o seguir el nervio, ábrela en el programa del centro de imágenes o del tomógrafo."}
-                  </span>
+                  <span>{profile.download.title}</span>
+                  <span className="text-xs text-muted-foreground">{profile.download.hint}</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -869,7 +924,7 @@ export function TomographyViewer({
         />
       )}
       {single && loaded.shown ? (
-        <SingleSlices key={loaded.shown.uid} series={loaded.shown} onRetry={() => void loaded.files.refetch()} />
+        <SingleSlices key={loaded.shown.uid} files={loaded.shown.files} onRetry={() => void loaded.files.refetch()} />
       ) : loaded.error ? (
         <VolumeLoadError
           error={loaded.error}
@@ -913,14 +968,13 @@ export function TomographyViewer({
             <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
               <ThreePlanes
                 key={shownSeries ?? undefined}
-                atTeeth={!ct}
+                atTeeth={profile.atTeeth}
                 volume={volume}
                 window={window}
                 tool={viewOnly ? "ninguna" : tool}
                 onStopTool={() => setTool("ninguna")}
                 saved={saved}
-                // En la médica, el 3D solo se arma al tocar su pestaña: es lo más pesado.
-                show3d={!viewOnly && !ct}
+                show3d={!viewOnly && profile.inline3d}
                 onExpand3d={() => {
                   setExpanded3d(true)
                   changeView("3d")
@@ -931,12 +985,12 @@ export function TomographyViewer({
                   saved={saved}
                   canWrite={canWrite}
                   viewOnly={viewOnly}
-                  note={ct ? CT_MEASURE_NOTE : MEASURE_NOTE(voxel)}
+                  note={profile.measureNote(voxel)}
                 />
                 <p className="text-xs text-slate-500" aria-live="polite">
                   {tool !== "ninguna" && !viewOnly
                     ? MEASURE_KEYS_HINT
-                    : `Rueda o ↑ ↓ avanzan el corte · Ctrl + rueda o dos dedos acercan · doble clic ajusta · ${ct ? `del 1 al ${options.length} cambian la ventana` : "1, 2 y 3 cambian el brillo"}${viewOnly ? "" : " · M mide · A ángulo"}`}
+                    : `Rueda o ↑ ↓ avanzan el corte · Ctrl + rueda o dos dedos acercan · doble clic ajusta · ${profile.keysHint(options.length)}${viewOnly ? "" : " · M mide · A ángulo"}`}
                 </p>
               </aside>
             </div>

@@ -76,11 +76,11 @@ describe("series de la tomografía", () => {
 
   it("el topograma y las series de pocos cortes se ven en la lista y no se arman", () => {
     const [series] = studySeries([source(0, "t")])
-    expect(canReconstruct(series!, info({ localizer: true, slices: 1 }))).toBe(false)
-    expect(canReconstruct(series!, info({ slices: 4 }))).toBe(false)
-    expect(canReconstruct(series!, info({ slices: 412 }))).toBe(true)
+    expect(canReconstruct(info({ localizer: true, slices: 1 }))).toBe(false)
+    expect(canReconstruct(info({ slices: 4 }))).toBe(false)
+    expect(canReconstruct(info({ slices: 412 }))).toBe(true)
     // Sin cabecera todavía, se ofrece: no se adivina.
-    expect(canReconstruct(series!, null)).toBe(true)
+    expect(canReconstruct(null)).toBe(true)
     expect(seriesDetail(series!, info({ localizer: true, slices: 1 }), "es")).toBe("1 imagen · no se arma")
   })
 

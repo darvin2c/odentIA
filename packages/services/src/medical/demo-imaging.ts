@@ -11,8 +11,9 @@ import { unzipSync } from "fflate"
  * CC BY 4.0, que permite el uso comercial con atribución: va en el «Origen» del
  * documento. Licencia verificada en los metadatos de la serie el 2026-11-07.
  *
- * Tres de sus series, para recorrer el selector: el topograma (que se ve y no se
- * arma), la fase venosa y la arterial, de 5 mm. No viven en el repositorio: la
+ * Tres de sus series, para recorrer el selector, en el orden en que se suben: la
+ * fase venosa (la primera, que abre el visor), la arterial, de 5 mm, y el
+ * topograma, que se ve y no se arma. No viven en el repositorio: la
  * semilla las descarga la primera vez de la API pública de TCIA y las guarda en
  * `.cache/demo-imaging/`. El ZIP que arma TCIA cambia con la hora, así que la
  * huella es la de sus archivos DICOM (cada nombre con su SHA-256, en orden).
@@ -31,11 +32,6 @@ export const DEMO_CT = {
   credit: "The Cancer Imaging Archive, CPTAC-CCRCC (C3N-01905) · CC BY 4.0",
   series: [
     {
-      // Topogram 0.6 T20s: 2 imágenes.
-      seriesUid: "1.3.6.1.4.1.14519.5.2.1.3320.3273.847486010655151746931875626900",
-      contentSha256: "b03ef74e9bc089e12c8b2e967edb9d59c00996ed2ad9348dacf75f543ad104ff",
-    },
-    {
       // Faza zylna 5.0 (fase venosa): 61 cortes.
       seriesUid: "1.3.6.1.4.1.14519.5.2.1.3320.3273.865562650966317615534062854390",
       contentSha256: "ccf0185d5216532b2c18dab5608b6e3b92f08a629ecd5e1a8ff1668e6aa3e3ba",
@@ -44,6 +40,11 @@ export const DEMO_CT = {
       // Faza tetnicza 5.0 (fase arterial): 61 cortes.
       seriesUid: "1.3.6.1.4.1.14519.5.2.1.3320.3273.268919275408368382579814996834",
       contentSha256: "c625a297e2f18d81ced58c49f9a47d72d3d994aba0fff47b9599d3f59bf70b75",
+    },
+    {
+      // Topogram 0.6 T20s: 2 imágenes.
+      seriesUid: "1.3.6.1.4.1.14519.5.2.1.3320.3273.847486010655151746931875626900",
+      contentSha256: "b03ef74e9bc089e12c8b2e967edb9d59c00996ed2ad9348dacf75f543ad104ff",
     },
   ] satisfies DemoCtSeries[],
 }

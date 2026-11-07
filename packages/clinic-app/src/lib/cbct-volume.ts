@@ -238,10 +238,8 @@ export async function loadCbctVolume(
   // Otra serie u otra tomografía: la anterior no se queda en memoria mientras se arma esta.
   cached = null
   const aborted = () => options.signal?.aborted === true
-  const bySeries = new Map<string, VolumeSource[]>()
-  for (const source of sources)
-    bySeries.set(source.seriesInstanceUid, [...(bySeries.get(source.seriesInstanceUid) ?? []), source])
-  const series = [...bySeries.values()].sort((a, b) => b.length - a.length)[0] ?? []
+  // Una serie (la que eligió el visor, `studySeries`): cada archivo es un corte o, uno solo, varios cuadros.
+  const series = sources
   if (!series.length) throw new DicomUnsupportedError("La tomografía no tiene cortes")
 
   let volume: Int16Array | null = null

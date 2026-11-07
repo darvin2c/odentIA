@@ -3,7 +3,7 @@ import { productHooks } from "./products.js"
 import { imagingMeasurement, imagingStudy, imagingStudyFile, patientDocument } from "@odentia/db/schema/clinical"
 import { user } from "@odentia/db/schema/auth"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, count, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm"
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm"
 import {
   getPatientDocument,
   type PatientDocumentWithContext,
@@ -690,21 +690,24 @@ export async function addImagingMeasurement(
   const tooth = input.toothNumber ?? null
   const code = tooth === null ? null : site.code(tooth)
   if (tooth !== null && code === null) throw validation(site.invalid(tooth))
-  const series = input.seriesInstanceUid == null ? null : dicomUid(input.seriesInstanceUid, "La serie")
-  if (series) {
-    const [found] = await tx
-      .select({ index: imagingStudyFile.fileIndex })
-      .from(imagingStudyFile)
-      .where(
-        and(
-          eq(imagingStudyFile.organizationId, orgId),
-          eq(imagingStudyFile.documentId, documentId),
-          eq(imagingStudyFile.seriesInstanceUid, series),
-        ),
-      )
-      .limit(1)
-    if (!found) throw validation("La serie no es de esta tomografía")
-  }
+  // La serie donde se marcó, de esta tomografía; sin decirla, la mayor (la de más archivos y, si
+  // empatan, la del primer archivo, como la elige el visor). Siempre queda guardada.
+  const asked = input.seriesInstanceUid == null ? null : dicomUid(input.seriesInstanceUid, "La serie")
+  const [found] = await tx
+    .select({ series: imagingStudyFile.seriesInstanceUid })
+    .from(imagingStudyFile)
+    .where(
+      and(
+        eq(imagingStudyFile.organizationId, orgId),
+        eq(imagingStudyFile.documentId, documentId),
+        ...(asked ? [eq(imagingStudyFile.seriesInstanceUid, asked)] : []),
+      ),
+    )
+    .groupBy(imagingStudyFile.seriesInstanceUid)
+    .orderBy(desc(count()), asc(sql`min(${imagingStudyFile.fileIndex})`))
+    .limit(1)
+  if (!found) throw validation("La serie no es de esta tomografía")
+  const series = found.series
   const [row] = await tx
     .insert(imagingMeasurement)
     .values({

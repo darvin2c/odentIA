@@ -268,7 +268,8 @@ it("guarda medidas con quién y cuándo, y quitarlas las retira sin borrarlas", 
     addImagingMeasurement(tx, "org_a", ACTOR, patient.id, document.id, { ...measure, seriesInstanceUid: `${STUDY}.2` }),
   )
   expect(inSeries).toMatchObject({ seriesInstanceUid: `${STUDY}.2` })
-  expect(primary).toMatchObject({ seriesInstanceUid: null })
+  // Sin decirla, queda la serie mayor: lo guardado nunca depende de recalcularla.
+  expect(primary).toMatchObject({ seriesInstanceUid: `${STUDY}.2` })
   await expect(
     withOrgContext(appDb, "org_a", (tx) =>
       addImagingMeasurement(tx, "org_a", ACTOR, patient.id, document.id, { ...measure, seriesInstanceUid: "2.25.999" }),

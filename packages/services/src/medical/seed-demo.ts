@@ -670,8 +670,7 @@ export async function seedMedicalDemo(
  * el aviso de nombre es de la pantalla de subir, no de la ficha.
  */
 async function seedDemoTomography(db: Db, storage: Storage, patientId: string): Promise<void> {
-  const [topogram, venous, arterial] = DEMO_CT.series
-  const loaded = await Promise.all([venous!, arterial!, topogram!].map((series) => demoCtSeries(series)))
+  const loaded = await Promise.all(DEMO_CT.series.map((series) => demoCtSeries(series)))
   if (loaded.some((files) => !files)) return
   const files = (loaded as Uint8Array[][]).flat().map((bytes) => {
     const ds = dicomParser.parseDicom(bytes, { untilTag: "x7fe00010" })
@@ -680,6 +679,8 @@ async function seedDemoTomography(db: Db, storage: Storage, patientId: string): 
       sopInstanceUid: ds.string("x00080018")!,
       seriesInstanceUid: ds.string("x0020000e")!,
       patientName: ds.string("x00100010") ?? null,
+      // Altura del corte (Image Position, 0020,0032): los nombres del ZIP no la siguen.
+      height: ds.floatString("x00200032", 2) ?? 0,
     }
   })
   const venousSlices = loaded[0]!.length
@@ -713,11 +714,8 @@ async function seedDemoTomography(db: Db, storage: Storage, patientId: string): 
   )
   // Miniatura: el corte del medio de la fase venosa con la ventana de partes blandas (40/400 HU).
   // Los archivos son Implicit VR Little Endian, sin comprimir, de 16 bits sin signo.
-  // Los nombres del ZIP no siguen la altura del corte: se ordena por Image Position (0020,0032).
-  const height = (bytes: Uint8Array) =>
-    dicomParser.parseDicom(bytes, { untilTag: "x7fe00010" }).floatString("x00200032", 2) ?? 0
-  const byHeight = [...loaded[0]!].sort((a, b) => height(a) - height(b))
-  const middle = byHeight[Math.floor(venousSlices / 2)]!
+  const venous = files.slice(0, venousSlices).sort((a, b) => a.height - b.height)
+  const middle = venous[Math.floor(venousSlices / 2)]!.bytes
   const ds = dicomParser.parseDicom(middle)
   const pixel = ds.elements.x7fe00010!
   const rows = ds.uint16("x00280010")!
