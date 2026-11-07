@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto"
+import { user } from "@odentia/db/schema/auth"
 import { expect, it } from "vitest"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { finalizeEncounter } from "./encounters.js"
@@ -8,7 +10,7 @@ import {
   repeatFollowUp,
   stopFollowUpRepeat,
 } from "./follow-ups.js"
-import { setupTestDb } from "./test-setup.js"
+import { ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
 
@@ -74,4 +76,31 @@ it("un control que se repite deja indicado el siguiente al completarlo, uno solo
     }),
   )
   expect(await open()).toHaveLength(0)
+})
+
+// QA del 6 nov (S1): otro profesional indicaba un control «de» la atención que
+// lleva un colega, o de una ya firmada, y el servidor lo aceptaba.
+it("un control de una atención solo lo indica quien la lleva y mientras está abierta", async () => {
+  const f = await clinicalFixture()
+  const [orgId, , patientId] = f.args
+  const colleague = randomUUID()
+  await ownerDb.insert(user).values({ id: colleague, name: "Colega", email: `${colleague}@example.test` })
+  const tomorrow = new Date(Date.now() + DAY).toISOString()
+  const indicate = (actor: string) =>
+    f.run((tx) =>
+      createFollowUp(tx, orgId, actor, patientId, {
+        kind: "mantenimiento",
+        title: "Control de mantenimiento",
+        dueAt: tomorrow,
+        originEncounterId: f.encounter.id,
+      }),
+    )
+
+  await expect(indicate(colleague)).rejects.toMatchObject({ code: "NOT_ATTENDING" })
+  await indicate(f.actor)
+
+  await f.ready(f.encounter.id)
+  await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id, {}))
+  await expect(indicate(f.actor)).rejects.toMatchObject({ code: "FINALIZED" })
+  await expect(indicate(colleague)).rejects.toMatchObject({ code: "FINALIZED" })
 })
