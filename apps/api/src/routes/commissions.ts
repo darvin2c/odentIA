@@ -20,6 +20,7 @@ import {
   listCommissionSettlements,
   listMonthCommissions,
   payMonthCommission,
+  setCommissionException,
   setCommissionRate,
   voidCommissionSettlement,
 } from "@odentia/services"
@@ -97,6 +98,31 @@ export function createCommissionsRoute(deps: Pick<CrmDeps, "db">) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => setCommissionRate(tx, orgId, userId, parsed.data)),
+    )
+  })
+
+  // --- Otro porcentaje o un monto fijo para un servicio (ADR 0151) -------------------
+  // Sin `rateBps` ni `fixedCents`, se quita: vuelve al porcentaje general.
+  app.put("/exceptions", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "commissions.write")) return forbid(c)
+    const parsed = z
+      .object({
+        professionalUserId: z.string().min(1, "Elige a la persona."),
+        serviceId: z.string().min(1, "Elige el servicio."),
+        rateBps: z
+          .number()
+          .int("Escribe un porcentaje con dos decimales como máximo.")
+          .min(0, "Escribe un porcentaje entre 0 y 100.")
+          .max(10000, "Escribe un porcentaje entre 0 y 100.")
+          .nullish(),
+        fixedCents: z.number().int().positive("Escribe un monto mayor que cero.").max(2147483647).nullish(),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => setCommissionException(tx, orgId, userId, parsed.data)),
     )
   })
 

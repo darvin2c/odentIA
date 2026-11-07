@@ -460,6 +460,7 @@ async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USER
     "commission_settlement_line",
     "commission_settlement",
     "commission_rule",
+    "commission_rate",
     "cash_closure",
     "cash_movement",
     "supplier_credit_use",

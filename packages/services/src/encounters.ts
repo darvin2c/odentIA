@@ -1928,10 +1928,16 @@ export async function finalizeEncounter(
       // Por tratamiento se cobra lo acordado completo en la primera
       // atención, también cuando lo acordado supera la tarifa del acto.
       const amount = remaining
+      // Con varias sesiones previstas, la comisión de cada cobro se reparte por sesión (ADR 0151).
+      const [planned] = await tx
+        .select({ sessions: treatmentPlanItem.plannedSessions })
+        .from(treatmentPlanItem)
+        .where(and(eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.id, proc.planItemId)))
       const charge = await createCharge(tx, orgId, actorUserId, patientId, {
         encounterProcedureId: proc.id,
         amountCents: amount,
         frozenPromotion,
+        commissionSessions: planned && planned.sessions > 1 ? planned.sessions : null,
       })
       charges.push(charge)
       billingLines.push({

@@ -1052,7 +1052,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     faqs: [
       {
         q: "¿Cómo se calcula la comisión?",
-        a: "Es el porcentaje de cada profesional sobre lo que se cobró de lo que atendió, con el impuesto incluido: el precio que pagó el paciente. Cuenta el mes en que se cobró, no el de la atención, y lo atendido que aún no se cobra no comisiona. Una venta suelta, sin atención, no es de ningún profesional. Cada línea dice su fecha, el porcentaje y si tuvo promoción.",
+        a: "Es el porcentaje de cada profesional (o el de un servicio con regla aparte) sobre lo que se cobró de lo que atendió, con el impuesto incluido: el precio que pagó el paciente. Cuenta el mes en que se cobró, no el de la atención, y lo atendido que aún no se cobra no comisiona. Una venta suelta, sin atención, no es de ningún profesional. Cada línea dice su fecha, la regla que usó y si tuvo promoción.",
         forms: ["cómo se calcula la comisión", "sobre qué se paga la comisión", "comisión con IGV", "por qué no aparece una atención"],
       },
       {
@@ -1069,6 +1069,21 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         q: "¿Quién ve las comisiones?",
         a: "Quien administra ve las de todos y las paga. Cada profesional ve solo las suyas en «Mis comisiones», con sus pagos y descuentos. Caja no ve cuánto gana cada uno: en Gastos ve una sola fila por sede con el total pagado en comisiones.",
         forms: ["quién ve mis comisiones", "caja ve comisiones", "ver comisiones de otro doctor"],
+      },
+      {
+        q: "¿Si cambio el porcentaje, cambia lo que ya se cobró?",
+        a: "No. El porcentaje nuevo vale para lo que se cobre desde ese día; lo cobrado antes conserva el que tenía, aunque aún no se haya pagado. En el detalle se ve desde cuándo vale y el anterior, cada línea dice el porcentaje que usó y al profesional se le avisa del cambio.",
+        forms: ["cambiar porcentaje de comisión", "subir la comisión", "desde cuándo vale la comisión"],
+      },
+      {
+        q: "¿Puedo pagar distinto por un servicio?",
+        a: "Sí. En el detalle del profesional, «Otro porcentaje o monto para un servicio»: elige el servicio y si es otro porcentaje o un monto fijo por cada uno. El monto fijo se gana en proporción a lo cobrado: si el paciente pagó la mitad, la mitad. Vale desde hoy, y «Quitar» lo devuelve a su porcentaje general.",
+        forms: ["comisión por servicio", "monto fijo por procedimiento", "comisión distinta por tratamiento", "porcentaje por procedimiento"],
+      },
+      {
+        q: "¿Cómo se reparte un tratamiento que hacen dos doctores?",
+        a: "Un tratamiento de varias sesiones reparte cada cobro en partes iguales, una por sesión prevista, y cada parte es de quien hizo esa sesión, el día que la hace. Lo cobrado de sesiones que aún no se hacen todavía no es de nadie. Cada línea dice qué sesión es y de cuántas.",
+        forms: ["comisión por sesión", "tratamiento compartido", "dos doctores un tratamiento"],
       },
     ],
     writePermission: "commissions.write",

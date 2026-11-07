@@ -32,7 +32,7 @@ import {
 } from "drizzle-orm/pg-core"
 import { user } from "./auth.js"
 import { orgFk, timestamps } from "./crm.js"
-import { patient, patientCharge, patientPayment, patientPaymentApplication } from "./clinical.js"
+import { patient, patientCharge, patientPayment, patientPaymentApplication, serviceCatalog } from "./clinical.js"
 import { purchaseOrder } from "./inventory.js"
 import { branch } from "./org.js"
 
@@ -427,6 +427,55 @@ export const commissionRule = pgTable(
 )
 
 /**
+ * Las reglas de comisión de un profesional, por versiones (QA de comisiones,
+ * entrega 7; ADR 0151): cada cambio es una fila nueva que vale para lo que se
+ * cobra desde `effectiveFrom`, y lo cobrado antes conserva la regla de su día.
+ * Nada se edita ni se borra.
+ *
+ * - Sin servicio: el porcentaje general (`rateBps` obligatorio).
+ * - Con servicio: una excepción, con otro porcentaje o un monto fijo por cada
+ *   procedimiento (en moneda del negocio, en proporción a lo cobrado), o sin
+ *   ninguno de los dos, que es «vuelve al general».
+ * - La primera versión general de alguien vale desde siempre (`-infinity`):
+ *   fijar el porcentaje tarde no deja en cero lo ya cobrado.
+ *
+ * Reemplaza a `commission_rule`, que ya no se lee ni se escribe.
+ */
+export const commissionRate = pgTable(
+  "commission_rate",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    professionalUserId: text("professional_user_id")
+      .notNull()
+      .references(() => user.id),
+    serviceId: uuid("service_id").references(() => serviceCatalog.id),
+    effectiveFrom: timestamp("effective_from", { withTimezone: true }).notNull(),
+    rateBps: integer("rate_bps"),
+    fixedCents: integer("fixed_cents"),
+    createdBy: text("created_by").references(() => user.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Una versión por momento: la general y la de cada servicio.
+    uniqueIndex("commission_rate_general_uidx")
+      .on(table.organizationId, table.professionalUserId, table.effectiveFrom)
+      .where(sql`${table.serviceId} IS NULL`),
+    uniqueIndex("commission_rate_service_uidx")
+      .on(table.organizationId, table.professionalUserId, table.serviceId, table.effectiveFrom)
+      .where(sql`${table.serviceId} IS NOT NULL`),
+    uniqueIndex("commission_rate_org_id_uidx").on(table.organizationId, table.id),
+    check("commission_rate_rate_check", sql`${table.rateBps} IS NULL OR ${table.rateBps} BETWEEN 0 AND 10000`),
+    check("commission_rate_fixed_check", sql`${table.fixedCents} IS NULL OR ${table.fixedCents} > 0`),
+    check("commission_rate_one_check", sql`${table.rateBps} IS NULL OR ${table.fixedCents} IS NULL`),
+    check(
+      "commission_rate_general_check",
+      sql`${table.serviceId} IS NOT NULL OR (${table.rateBps} IS NOT NULL AND ${table.fixedCents} IS NULL)`,
+    ),
+  ],
+)
+
+/**
  * Liquidación de comisiones de un profesional en una moneda. Se liquida por
  * mes (`periodYear`/`periodMonth`). `base` conserva 'cobrado'/'produccion'
  * previos; `rateBps` null = histórico multirregla. `expenseId` enlaza el pago
@@ -512,6 +561,16 @@ export const commissionSettlementLine = pgTable(
     baseCents: integer("base_cents").notNull(),
     commissionCents: integer("commission_cents").notNull(),
     rateBps: integer("rate_bps"),
+    /**
+     * La parte de un cobro de un tratamiento de varias sesiones (1 a `sessions`).
+     * Nula en lo de una sola parte y en lo pagado antes: cubre el cobro entero.
+     */
+    slice: smallint("slice"),
+    sessions: smallint("sessions"),
+    /** El monto fijo por procedimiento que se usó, si fue una excepción con monto. */
+    fixedCents: integer("fixed_cents"),
+    /** El porcentaje o el monto fue una excepción para el servicio. */
+    forService: boolean("for_service").notNull().default(false),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
     voidedAt: timestamp("voided_at", { withTimezone: true }),
     voidedBy: text("voided_by").references(() => user.id),
@@ -519,6 +578,7 @@ export const commissionSettlementLine = pgTable(
   },
   (table) => [
     index("commission_line_org_settlement_idx").on(table.organizationId, table.settlementId),
+    index("commission_line_org_application_idx").on(table.organizationId, table.applicationId),
     uniqueIndex("commission_line_source_uidx")
       .on(table.organizationId, table.sourceKey)
       .where(sql`${table.voidedAt} IS NULL`),
