@@ -11,6 +11,7 @@ import type { Db } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
+import sharp from "sharp"
 import { branchAddressColumns, branchAddressWriter } from "./branches.js"
 import type { DocumentClinic, DocumentLogo } from "./document-kit.js"
 import { validation } from "./errors.js"
@@ -36,7 +37,7 @@ export function configureDocumentLogos(reader: LogoReader | null): void {
   logoCache.clear()
 }
 
-/** PNG o JPG por su firma, no por la extensión. Otro formato (WebP) no se embebe. */
+/** PNG o JPG por su firma, no por la extensión. Otro formato (WebP) se convierte antes de embeberlo. */
 export function logoKindOf(bytes: Uint8Array): DocumentLogo["kind"] | null {
   if (
     bytes.length > 8 &&
@@ -50,6 +51,21 @@ export function logoKindOf(bytes: Uint8Array): DocumentLogo["kind"] | null {
   return null
 }
 
+/** El logo como lo embebe el papel: PNG o JPG tal cual; otro formato, como PNG de membrete; null si no es una imagen. */
+export async function logoForPaper(bytes: Uint8Array): Promise<DocumentLogo | null> {
+  const kind = logoKindOf(bytes)
+  if (kind) return { bytes, kind }
+  try {
+    const png = await sharp(bytes, { failOn: "error", limitInputPixels: 40_000_000 })
+      .resize({ width: 600, height: 600, fit: "inside", withoutEnlargement: true })
+      .png()
+      .toBuffer()
+    return { bytes: new Uint8Array(png), kind: "png" }
+  } catch {
+    return null
+  }
+}
+
 async function readLogo(orgId: string, url: string | null): Promise<DocumentLogo | null> {
   if (!url || !logoReader?.readPublicObject) return null
   const cached = logoCache.get(url)
@@ -61,8 +77,9 @@ async function readLogo(orgId: string, url: string | null): Promise<DocumentLogo
       clinicLogoFolder(orgId),
       AbortSignal.timeout(LOGO_TIMEOUT_MS),
     )
-    const kind = bytes ? logoKindOf(bytes) : null
-    logo = bytes && kind ? { bytes, kind } : null
+    // El papel solo embebe PNG o JPG: otro formato (WebP, SVG) se pasa a PNG para que el
+    // papel lleve el mismo logo que la pantalla (ADR 0148), no las iniciales.
+    logo = bytes ? await logoForPaper(bytes) : null
   } catch {
     logo = null
   }
