@@ -4253,6 +4253,84 @@ if (!luciaToday || !rosaToday) throw new Error("Faltan las citas de hoy de la se
 await setAppointmentArrival(db, ORG_A, ANA_ID, luciaToday, true)
 await createEncounter(db, ORG_A, ANA_ID, rosaPatientId, { appointmentId: rosaToday })
 
+// El control se cumple con la visita que toca (ADR 0152).
+// - Sofía Ramírez: su control de mantenimiento de 6 meses, indicado hace 5, ya
+//   está en su ventana, y mañana tiene una limpieza dada desde la Agenda, sin
+//   unir al control. Al firmar esa atención, el cierre ofrece «Cumple su control
+//   de mantenimiento». Mientras, «Avisar un control» no le escribe: ya tiene cita.
+// - Jorge Salinas: vino hace dos años, su control venció hace casi dos y no
+//   volvió. Está en «Por invitar a volver»: un control olvidado ya no lo saca.
+{
+  const [limpieza] = await db
+    .select({ name: serviceCatalog.name })
+    .from(serviceCatalog)
+    .where(and(eq(serviceCatalog.id, serviceIdA("LIMPIEZA")), eq(serviceCatalog.organizationId, ORG_A)))
+  const sofia = await createPatient(db, ORG_A, ANA_ID, {
+    displayName: "Sofía Ramírez",
+    givenNames: "Sofía",
+    familyName: "Ramírez",
+    birthDate: "1988-07-03",
+    phone: "+51987650710",
+    registeredBranchId: miraflores.id,
+  })
+  await db.insert(clinicalFollowUp).values({
+    organizationId: ORG_A,
+    patientId: sofia.id,
+    kind: "mantenimiento",
+    title: "Control de mantenimiento",
+    dueAt: new Date(lima(30, "09:00")),
+    createdBy: ANA_ID,
+    createdAt: new Date(lima(-150, "10:00")),
+  })
+  // La cita va directo a la base: la semilla no depende del día de la semana en que corre.
+  await db.insert(appointment).values({
+    organizationId: ORG_A,
+    branchId: miraflores.id,
+    patientId: sofia.id,
+    professionalUserId: ANA_ID,
+    roomId: roomA(2),
+    serviceId: serviceIdA("LIMPIEZA"),
+    serviceName: limpieza?.name ?? null,
+    startsAt: new Date(lima(1, "17:00")),
+    endsAt: new Date(lima(1, "17:45")),
+    durationMin: 45,
+    status: "programada",
+    createdBy: ANA_ID,
+  })
+  const jorge = await createPatient(db, ORG_A, ANA_ID, {
+    displayName: "Jorge Salinas",
+    givenNames: "Jorge",
+    familyName: "Salinas",
+    birthDate: "1979-11-21",
+    phone: "+51987650711",
+    registeredBranchId: miraflores.id,
+  })
+  // Antes de que abra la sede: no choca con la historia de Reportes.
+  await db.insert(appointment).values({
+    organizationId: ORG_A,
+    branchId: miraflores.id,
+    patientId: jorge.id,
+    professionalUserId: ANA_ID,
+    roomId: roomA(2),
+    serviceId: serviceIdA("LIMPIEZA"),
+    serviceName: limpieza?.name ?? null,
+    startsAt: new Date(lima(-730, "07:10")),
+    endsAt: new Date(lima(-730, "07:40")),
+    durationMin: 30,
+    status: "atendida",
+    createdBy: ANA_ID,
+  })
+  await db.insert(clinicalFollowUp).values({
+    organizationId: ORG_A,
+    patientId: jorge.id,
+    kind: "mantenimiento",
+    title: "Control de mantenimiento",
+    dueAt: new Date(lima(-550, "09:00")),
+    createdBy: ANA_ID,
+    createdAt: new Date(lima(-730, "08:00")),
+  })
+}
+
 // «Llamar» en «Te espera» de recepción: a Carmen se le recordó su cita de mañana y no confirmó.
 const carmenTomorrow = reservedAt.get("Carmen Rojas|1|09:00")
 if (!carmenTomorrow) throw new Error("Falta la cita de mañana de la semilla")
