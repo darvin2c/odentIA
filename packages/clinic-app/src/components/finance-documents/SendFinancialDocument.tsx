@@ -755,25 +755,24 @@ export function DocumentSendDrawer({
             </div>
           )}
 
-          {canSend && recipient ? (
+          {canSend && recipient && selected?.viaTemplate ? (
+            // Pasadas 24 horas sale el mensaje aprobado con el PDF: no se escribe otro texto.
+            <p className="text-sm text-muted-foreground">
+              Le llega el mensaje aprobado para documentos, con el PDF adjunto. No se le puede escribir otro texto hasta
+              que te escriba.
+            </p>
+          ) : canSend && recipient ? (
             <>
               <form.AppField name="message">
                 {(field) => (
-                  <field.Control
-                    label="Mensaje"
-                    description={
-                      selected?.viaTemplate
-                        ? "Pasaron 24 horas: le llega el mensaje aprobado para documentos, con el PDF. Este texto queda en la conversación."
-                        : undefined
-                    }
-                  >
+                  <field.Control label="Mensaje">
                     {(control) => (
                       <Textarea
                         {...control.props}
                         rows={4}
                         maxLength={MAX_MESSAGE}
                         value={field.state.value ?? proposedMessage}
-                        disabled={busy || !!selected?.viaTemplate}
+                        disabled={busy}
                         onChange={(event) => field.handleChange(event.target.value)}
                       />
                     )}

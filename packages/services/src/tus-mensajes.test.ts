@@ -25,7 +25,8 @@ import { issuePersonalLink } from "./booking-links.js"
 import { applyTemplateCategories, assertTemplateSendable } from "./channel-templates.js"
 import { listRecategorizedMessages, resumeConversationBySystem } from "./clinic-messages.js"
 import { createConnection } from "./connections.js"
-import { getDocumentSendOptions, sendFinancialDocument, sendTicketReceiptByEmail } from "./financial-documents.js"
+import { documentChannelsFor, getDocumentSendOptions, sendFinancialDocument, sendTicketReceiptByEmail } from "./financial-documents.js"
+import { saveHealthRecipientEmail } from "./health-documents.js"
 import { nextPatientNumber } from "./patients.js"
 import { configurePublicLinks } from "./public-links.js"
 import { secretsKeyFromEnv } from "./secrets.js"
@@ -446,7 +447,8 @@ describe("el comprobante por correo, sin «Tus papeles»", () => {
     const { c, p } = await withTicket()
     const own = await run(c, (tx) => issuePersonalLink(tx, c.orgId, { contactId: p.contactId, patientId: p.patientId }, { secretsKey: KEY }))
     const view = await run(c, (tx) => getPersonalLinkView(tx, c.orgId, own.token))
-    expect(view).not.toHaveProperty("papers")
+    // Solo queda el campo vacío, para la página anterior mientras dura el despliegue.
+    expect(view.papers).toEqual([])
     // Le sigue sirviendo «Tus mensajes», no un papel para descargar.
     expect(view.messages).not.toBeNull()
   })
@@ -493,5 +495,30 @@ describe("el comprobante por correo, sin «Tus papeles»", () => {
     expect(out).toMatchObject({ contentType: "template", templateName: "odentia_documento_listo_v1", status: "queued" })
     expect(out?.attachments).toEqual([expect.objectContaining({ mimeType: "application/pdf", filename: "Comprobante-000007.pdf" })])
     expect(out?.templateParams).toEqual(["Lucía", "Clínica Sonríe"])
+  })
+
+  it("«Documento listo» es solo para los papeles decididos: lo demás (presupuesto, historia) sigue sin salir pasadas 24 horas", async () => {
+    const { c, p } = await withTicket(undefined, { approved: ["odentia_documento_listo_v1"], wroteHoursAgo: 30 })
+    // Sin pedirlo, el canal es el de siempre: pasadas 24 horas, WhatsApp no sirve.
+    const plain = await run(c, (tx) => documentChannelsFor(tx, c.orgId, { contactId: p.contactId, email: null }))
+    expect(plain.channels.find((item) => item.channel === "whatsapp")).toMatchObject({ usable: false })
+    const papers = await run(c, (tx) =>
+      documentChannelsFor(tx, c.orgId, { contactId: p.contactId, email: null }, { documentTemplate: true }),
+    )
+    expect(papers.channels.find((item) => item.channel === "whatsapp")).toMatchObject({ usable: true, viaTemplate: true })
+  })
+
+  it("«Agregar correo» de un papel de salud no reemplaza el correo que ya tiene", async () => {
+    const c = await clinic({ email: true })
+    const p = await person(c, "Lucía Paredes", { email: "lucia@example.com" })
+    await expect(
+      run(c, (tx) => saveHealthRecipientEmail(tx, c.orgId, c.professionalId, p.patientId, { recipientContactId: p.contactId, email: "otra@example.com" })),
+    ).rejects.toMatchObject({ code: "RECIPIENT_HAS_EMAIL" })
+    const [row] = await ownerDb.select({ email: contact.email }).from(contact).where(eq(contact.id, p.contactId))
+    expect(row?.email).toBe("lucia@example.com")
+    // Sin correo, sí se agrega.
+    const q = await person(c, "Rosa Paredes")
+    const saved = await run(c, (tx) => saveHealthRecipientEmail(tx, c.orgId, c.professionalId, q.patientId, { recipientContactId: q.contactId, email: "rosa@example.com" }))
+    expect(saved.email).toBe("rosa@example.com")
   })
 })

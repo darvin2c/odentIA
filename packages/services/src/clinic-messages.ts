@@ -814,16 +814,6 @@ export async function requestMissingTemplates(
   const outcome: RequestOutcome = { requested: 0, failed: [] }
   const linkUrl = await personalLinkButtonUrl(tx, orgId)
   const examples = await exampleValues(tx, orgId)
-  // La muestra de una plantilla con documento se sube con la app de odentIA solo
-  // si la conexión se hizo con «Conectar con Facebook»; con la app propia de la
-  // clínica, el adaptador la lee de su clave.
-  const [connectionRow] = await tx
-    .select({ signup: channelConnection.signup })
-    .from(channelConnection)
-    .where(and(eq(channelConnection.organizationId, orgId), eq(channelConnection.id, connectionId)))
-    .limit(1)
-  const { metaAppId, ...rest } = deps
-  const requestDeps: TemplateDeps = connectionRow?.signup && metaAppId ? { ...rest, metaAppId } : rest
   for (const def of defs) {
     const texts = [currentText(def), pendingText(def)].filter((text): text is MessageText => !!text)
     for (const text of texts) {
@@ -843,7 +833,7 @@ export async function requestMissingTemplates(
             connectionId,
             orderOf(def, text, def.link ? linkUrl : null, examples, sample),
             secretsKey,
-            requestDeps,
+            deps,
           ),
         )
         have.set(item.name, item)

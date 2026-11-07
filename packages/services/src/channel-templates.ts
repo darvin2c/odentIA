@@ -456,7 +456,10 @@ export async function requestConnectionTemplate(
   const language = AUTOMATION_MESSAGE_LANGUAGE
   const existing = await findTemplateByName(tx, orgId, connectionId, order.name, language)
   if (existing) return existing
-  const { adapter, config } = await connectionWithAdapter(tx, orgId, connectionId, secretsKey)
+  const { row: connection, adapter, config } = await connectionWithAdapter(tx, orgId, connectionId, secretsKey)
+  // La muestra de un encabezado se sube con la app de odentIA solo en «Conectar con Facebook»;
+  // con la app propia de la clínica, el adaptador la lee de su clave. Un solo lugar para todas las rutas.
+  const metaAppId = connection.signup && deps.metaAppId ? deps.metaAppId : undefined
   let answer: { externalId: string | null; status: TemplateStatus; category: string } = {
     externalId: null,
     status: "en_revision",
@@ -477,7 +480,7 @@ export async function requestConnectionTemplate(
           ...(order.link ? { link: order.link } : {}),
           ...(order.header ? { header: order.header } : {}),
         },
-        { fetch: deps.fetch, ...(deps.metaAppId ? { metaAppId: deps.metaAppId } : {}) },
+        { fetch: deps.fetch, ...(metaAppId ? { metaAppId } : {}) },
       )
     } catch (error) {
       // Si el proveedor rechaza el pedido (un 4xx de Meta: el texto, un permiso), es un 400

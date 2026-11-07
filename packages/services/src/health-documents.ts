@@ -202,7 +202,7 @@ export async function getHealthDocumentSendOptions(
       printOnly: "Es menor de edad y no tiene representante legal vigente: solo se puede imprimir",
     }
   }
-  const { channels: all } = await documentChannelsFor(tx, orgId, recipient)
+  const { channels: all } = await documentChannelsFor(tx, orgId, recipient, { documentTemplate: true })
   const channels = all.filter((option) => option.channel === "whatsapp" || option.channel === "email")
   const proposed = proposeHealthChannel(channels)
   if (proposed) proposed.isProposed = true
@@ -248,6 +248,11 @@ export async function saveHealthRecipientEmail(
     const message = "Un papel de salud solo se envía a la propia persona o a su representante legal"
     throw new ServiceError("DOCUMENT_RECIPIENT_NOT_AUTHORIZED", 403, message, { recipientContactId: message })
   }
+  // Agregar, no reemplazar: cambiar el correo de alguien es de quien edita sus datos.
+  if (recipient.email?.trim()) {
+    const message = `${recipient.displayName} ya tiene correo: cambiarlo es de quien edita sus datos`
+    throw new ServiceError("RECIPIENT_HAS_EMAIL", 409, message, { email: message })
+  }
   const email = input.email.trim().toLowerCase()
   if (email.length > 200 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
     throw invalidField("email", "El correo no tiene un formato válido")
@@ -281,7 +286,7 @@ export async function renderHealthDocumentPdf(
   storage: PaperStorage = {},
   /** Para verlo: lo que no se pudo guardar se genera al vuelo, sin trabar a quien lo abre. */
   options: { viewing?: boolean } = {},
-): Promise<{ bytes: Uint8Array; filename: string; label: string }> {
+): Promise<{ bytes: Uint8Array; filename: string; label: string; noticeLabel: string }> {
   const paper = { orgId, patientId, documentId }
   if (type === "prescription") {
     const data = await getPrescriptionPrint(tx, orgId, patientId, documentId)
@@ -301,6 +306,7 @@ export async function renderHealthDocumentPdf(
       ),
       filename: `Receta-${rx.prescriptionNumber}.pdf`,
       label: `Receta N.º ${rx.prescriptionNumber}`,
+      noticeLabel: `Receta N.º ${rx.prescriptionNumber}`,
     }
   }
   if (type === "medical_leave") {
@@ -321,6 +327,7 @@ export async function renderHealthDocumentPdf(
       ),
       filename: `Descanso-${leave.leaveNumber}.pdf`,
       label: `Descanso médico N.º ${leave.leaveNumber}`,
+      noticeLabel: `Descanso médico N.º ${leave.leaveNumber}`,
     }
   }
   if (type === "attention_sheet") {
@@ -341,6 +348,7 @@ export async function renderHealthDocumentPdf(
       ),
       filename: "Hoja-de-atencion.pdf",
       label: ATTENTION_SHEET_LABEL,
+      noticeLabel: ATTENTION_SHEET_LABEL,
     }
   }
   if (type === "order") {
@@ -363,6 +371,7 @@ export async function renderHealthDocumentPdf(
       // Sin el título: «Orden-Biopsia….pdf» diría en la notificación lo que se estudia.
       filename: `Orden-${dateOfName(order.createdAt)}.pdf`,
       label: `${ORDER_KIND_WORDS[order.kind] ?? "Orden"} · ${order.title}`,
+      noticeLabel: "Orden",
     }
   }
   const data = await getConsentPrint(tx, orgId, documentId)
@@ -376,11 +385,13 @@ export async function renderHealthDocumentPdf(
         : await renderConsentPaperPdf(data, clinic),
       filename: `Consentimiento-${dateOfName(doc.signedAt ?? doc.createdAt)}.pdf`,
       label: `Consentimiento · ${doc.titleSnapshot}`,
+      noticeLabel: "Consentimiento",
     }
   }
   const named = {
     filename: `Consentimiento-${dateOfName(doc.signedAt ?? doc.createdAt)}.pdf`,
     label: `Consentimiento · ${doc.titleSnapshot}`,
+    noticeLabel: "Consentimiento",
   }
   // Revocado, el que se ve es el de la revocación: dice que ya no vale.
   const revoked = options.viewing && doc.status === "revocado"
@@ -419,6 +430,7 @@ export async function renderHealthDocumentPdf(
     bytes,
     filename: `Consentimiento-${dateOfName(doc.signedAt ?? doc.createdAt)}.pdf`,
     label: `Consentimiento · ${doc.titleSnapshot}`,
+    noticeLabel: "Consentimiento",
   }
 }
 
@@ -494,7 +506,7 @@ export async function lastHealthDocumentSend(
   patientId: string,
   input: { documentType: string; documentId: string },
 ): Promise<{ at: Date; channel: string; recipientName: string } | null> {
-  assertHealthType(input.documentType)
+  const type = assertHealthType(input.documentType)
   const [row] = await tx
     .select({ at: auditEvent.createdAt, metadata: auditEvent.metadata })
     .from(auditEvent)
@@ -504,6 +516,7 @@ export async function lastHealthDocumentSend(
         eq(auditEvent.action, "health_document.sent"),
         sql`${auditEvent.metadata}->>'documentId' = ${input.documentId}`,
         sql`${auditEvent.metadata}->>'patientId' = ${patientId}`,
+        sql`${auditEvent.metadata}->>'documentType' = ${type}`,
       ),
     )
     .orderBy(sql`${auditEvent.createdAt} desc`)
@@ -625,8 +638,10 @@ export async function sendHealthDocument(
       conn,
       pdf: rendered.bytes,
       filename: rendered.filename,
-      // La primera línea es el asunto del correo en frío.
-      caption: `${rendered.label}${clinic ? ` · ${clinic}` : ""}\n\n${body}`,
+      // La primera línea es el asunto del correo en frío. Ni el pie de WhatsApp ni el asunto dicen
+      // el título clínico: se ven en la notificación del teléfono, como el nombre del archivo.
+      caption: `${rendered.noticeLabel}${clinic ? ` · ${clinic}` : ""}\n\n${body}`,
+      allowTemplate: true,
     },
     deps,
   )

@@ -484,6 +484,8 @@ export async function getDocumentSendOptions(
     tx,
     orgId,
     recipient,
+    // De los documentos de cobro, solo el comprobante sale con «Documento listo» (ADR 0150).
+    { documentTemplate: documentType === "ticket" },
   )
   const proposed = proposeChannel(channels, {
     email: recipient.email,
@@ -517,6 +519,12 @@ export async function documentChannelsFor(
   tx: Db,
   orgId: string,
   recipient: Pick<DocumentRecipient, "contactId" | "email">,
+  /**
+   * `documentTemplate`: pasadas las 24 horas, WhatsApp sirve con «Documento
+   * listo» (ADR 0150). Solo los papeles decididos lo piden: receta, orden,
+   * descanso, hoja de atención, consentimiento firmado y comprobante.
+   */
+  sendOptions: { documentTemplate?: boolean } = {},
 ): Promise<{
   channels: DocumentChannelOption[]
   preferredChannel: string | null
@@ -613,7 +621,7 @@ export async function documentChannelsFor(
       }
       if (!withinWindow) {
         const state =
-          conn.provider === "whatsapp_cloud_api"
+          conn.provider === "whatsapp_cloud_api" && sendOptions.documentTemplate
             ? await documentTemplateState(tx, orgId, conn.id, recipient.contactId)
             : {
                 usable: false as const,
@@ -1116,6 +1124,8 @@ export async function deliverDocumentPdf(
     exactAddress?: boolean
     /** Quién lo deja en el hilo: una persona del equipo o el agente. */
     senderKind?: "user" | "agent"
+    /** Pasadas las 24 horas, con «Documento listo» (solo los papeles decididos, ADR 0150). */
+    allowTemplate?: boolean
   },
   deps: SendDeps,
 ): Promise<{ conversationId: string; messageId: string }> {
@@ -1156,6 +1166,19 @@ export async function deliverDocumentPdf(
       recipientContactId: DOCUMENT_OPTED_OUT,
     })
   }
+  // Pasadas las 24 horas de WhatsApp: el PDF va en el encabezado de «Documento listo» (ADR 0150).
+  // Se decide antes de subir el PDF: si no puede salir, no queda un archivo suelto en el almacenamiento.
+  const outside = input.allowTemplate ? await whatsappOutsideWindow(tx, orgId, conversationId) : null
+  const template = outside
+    ? await (async () => {
+        const state = await documentTemplateState(tx, orgId, outside.connectionId, input.recipient.contactId)
+        if (!state.usable)
+          throw new ServiceError("WINDOW_CLOSED", 409, state.reason, { connectionId: state.reason })
+        const found = await findMessageTemplate(tx, orgId, outside.connectionId, DOCUMENT_READY_MESSAGE_KEY)
+        if (!found) throw new ServiceError("WINDOW_CLOSED", 409, "El mensaje para enviar documentos no está en la cuenta")
+        return found
+      })()
+    : null
   const ref = await deps.storage.putAttachment({
     orgId,
     conversationId,
@@ -1165,14 +1188,7 @@ export async function deliverDocumentPdf(
   })
   const senderKind = input.senderKind ?? (actorUserId ? "user" : "agent")
   const attachment = { ...ref, filename: asciiFilename(input.filename) }
-  // Pasaron 24 horas de WhatsApp: el PDF va en el encabezado de «Documento listo» (ADR 0150).
-  const outside = await whatsappOutsideWindow(tx, orgId, conversationId)
-  if (outside) {
-    const state = await documentTemplateState(tx, orgId, outside.connectionId, input.recipient.contactId)
-    if (!state.usable)
-      throw new ServiceError("WINDOW_CLOSED", 409, state.reason, { connectionId: state.reason })
-    const template = await findMessageTemplate(tx, orgId, outside.connectionId, DOCUMENT_READY_MESSAGE_KEY)
-    if (!template) throw new ServiceError("WINDOW_CLOSED", 409, "El mensaje para enviar documentos no está en la cuenta")
+  if (template) {
     const spec = await currentCatalogMessage(tx, orgId, DOCUMENT_READY_MESSAGE_KEY)
     const [person] = await tx
       .select({ givenNames: contact.givenNames, displayName: contact.displayName })
@@ -1392,6 +1408,7 @@ export async function sendFinancialDocument(
       filename,
       caption: captionWithSubject(subject, `${body}\n${meta.label}`),
       exactAddress: !!otherEmail,
+      allowTemplate: documentType === "ticket",
     },
     deps,
   )
@@ -1625,6 +1642,7 @@ export async function sendReceiptInConversation(
       filename: asciiFilename(`Comprobante-${snap.numberLabel}.pdf`),
       caption: label,
       senderKind: "agent",
+      allowTemplate: true,
     },
     deps,
   )

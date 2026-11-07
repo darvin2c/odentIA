@@ -190,8 +190,16 @@ export function PrescriptionPaper({
     queryFn: () => fetchPrescriptions(patientId),
     enabled: canWrite && !issued && !!sentWarning,
   })
+  // La que la reemplaza: emitida después en la misma atención o para el mismo tratamiento; no
+  // cualquier receta posterior (la de otro problema no es «la nueva»).
   const newer = (others.data?.data ?? [])
-    .filter((item) => item.status === "emitida" && item.issuedAt > prescription.issuedAt)
+    .filter(
+      (item) =>
+        item.status === "emitida" &&
+        item.issuedAt > prescription.issuedAt &&
+        ((prescription.encounterId !== null && item.encounterId === prescription.encounterId) ||
+          (prescription.planItemId !== null && item.planItemId === prescription.planItemId)),
+    )
     .sort((a, b) => b.issuedAt.localeCompare(a.issuedAt))[0]
   const menu: RowActionItem[] =
     canWrite && issued

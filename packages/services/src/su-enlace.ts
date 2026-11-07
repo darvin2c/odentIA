@@ -183,6 +183,11 @@ export interface PersonalLinkView {
    * llegan en PDF por su chat o su correo, y están en su portal.
    */
   messages: PersonalLinkMessages | null
+  /**
+   * Siempre vacío: solo para la página anterior, que lo lee mientras dura el
+   * despliegue (las pantallas y la API no cambian a la vez). Se quita en la entrega siguiente.
+   */
+  papers: never[]
 }
 
 /*
@@ -400,6 +405,7 @@ export async function getPersonalLinkView(
     consents: [],
     questionnaire: null,
     messages: null,
+    papers: [],
   }
   if (!link.live) return empty
   const appointment = link.appointment
@@ -459,6 +465,7 @@ export async function getPersonalLinkView(
     consents,
     questionnaire,
     messages,
+    papers: [],
   }
 }
 

@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto"
-import { patientDocument, paymentTicket, prescription } from "@odentia/db/schema/clinical"
-import { consentDocument, consentTemplate, issuedPaper, medicalLeave } from "@odentia/db/schema/clinical-forms"
+import { patientDocument, patientResponsibility, paymentTicket, prescription } from "@odentia/db/schema/clinical"
+import { clinicalOrder, consentDocument, consentTemplate, issuedPaper, medicalLeave } from "@odentia/db/schema/clinical-forms"
 import { sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { clinicalFixture } from "./clinical-test-fixture.js"
-import { collectPortalPapers } from "./portal-papers.js"
+import { setDocumentPortalVisibility } from "./clinical.js"
+import { renderHealthDocumentPdf } from "./health-documents.js"
+import { collectPortalPapers, documentPortalState } from "./portal-papers.js"
+import { upsertPortalPolicy } from "./portal-policy.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -50,6 +53,11 @@ it("el portal muestra cada papel una vez: el PDF del consentimiento y su hoja es
     signatureMethod: "papel",
     paperDocumentId: paper,
   })
+  // Ocultar el PDF de un consentimiento no lo sacaría del portal: se rechaza y se dice por qué.
+  await expect(
+    f.run((tx) => setDocumentPortalVisibility(tx, "org_a", f.actor, f.patient.id, pdf, { hidden: true })),
+  ).rejects.toMatchObject({ code: "DOCUMENT_INSIDE_PAPER" })
+  expect(await f.run((tx) => documentPortalState(tx, "org_a", f.patient.id, pdf))).toMatchObject({ state: "no_va", canHide: false })
   const papers = await f.run((tx) => collectPortalPapers(tx, "org_a", f.patient.id, { account: true }))
   expect(papers.filter((item) => item.type === "Consentimiento")).toEqual([
     expect.objectContaining({ kind: "consentimiento", title: "Exodoncia", stateWord: null }),
@@ -165,4 +173,87 @@ it("solo lo terminado: lo anulado marcado, la imagen con su informe y nada ocult
   const times = papers.map((item) => item.at)
   expect([...times].sort().reverse()).toEqual(times)
   expect(papers.some((item) => /_/.test(item.type))).toBe(false)
+})
+
+it("el resultado de una orden se ve en su portal; lo de otra persona y la radiografía DICOM, no", async () => {
+  const f = await clinicalFixture()
+  const result = await file(f.patient.id, { category: "informe", label: "Hemograma (laboratorio)" })
+  await ownerDb.insert(clinicalOrder).values({
+    organizationId: "org_a",
+    kind: "laboratorio",
+    patientId: f.patient.id,
+    recipient: "Laboratorio",
+    title: "Hemograma completo",
+    status: "completado",
+    resultDocumentId: result,
+  })
+  // La prueba de la representación es un papel de otra persona (su DNI, una resolución).
+  const evidence = await file(f.patient.id, { category: "otro", label: "DNI de la madre" })
+  const [mother] = (await ownerDb.execute<{ id: string }>(
+    sql`insert into contact (organization_id, display_name) values ('org_a', 'Madre de prueba') returning id`,
+  )) as unknown as Array<{ id: string }>
+  await ownerDb.execute(
+    sql`insert into patient_contact (organization_id, patient_id, contact_id, relationship) values ('org_a', ${f.patient.id}, ${mother!.id}, 'guardian')`,
+  )
+  await ownerDb.insert(patientResponsibility).values({
+    organizationId: "org_a",
+    patientId: f.patient.id,
+    contactId: mother!.id,
+    kind: "representante_legal",
+    startsAt: "2020-01-01",
+    evidenceDocumentId: evidence,
+  })
+  const dicom = await file(f.patient.id, {
+    category: "radiografia",
+    label: "Periapical DICOM",
+    contentType: "application/dicom",
+    reportStatus: "informado",
+  })
+  // Tomada hace un año y subida hoy: es nueva para la persona.
+  const old = await file(f.patient.id, {
+    category: "radiografia",
+    label: "Panorámica antigua",
+    contentType: "image/jpeg",
+    reportStatus: "informado",
+    capturedAt: new Date(Date.now() - 365 * 86_400_000),
+  })
+  const papers = await f.run((tx) =>
+    collectPortalPapers(tx, "org_a", f.patient.id, { account: true, since: new Date(Date.now() - 3_600_000) }),
+  )
+  expect(papers.find((item) => item.kind === "orden")).toMatchObject({ title: "Hemograma completo" })
+  expect(papers.find((item) => item.id === result)).toMatchObject({ kind: "archivo", type: "Informe" })
+  const ids = papers.map((item) => item.id)
+  expect(ids).not.toContain(evidence)
+  expect(ids).not.toContain(dicom)
+  expect(papers.find((item) => item.id === old)).toMatchObject({ isNew: true })
+  // La ficha dice lo mismo que el portal, con la misma regla (con el portal encendido).
+  await f.run((tx) =>
+    upsertPortalPolicy(tx, "org_a", f.actor, {
+      enabled: true,
+      allowedScope: { appointments: true, budgets: true, account: true, documents: true },
+    }),
+  )
+  expect(await f.run((tx) => documentPortalState(tx, "org_a", f.patient.id, result))).toMatchObject({ state: "visible", canHide: true })
+  expect(await f.run((tx) => documentPortalState(tx, "org_a", f.patient.id, evidence))).toMatchObject({ state: "no_va" })
+  expect(await f.run((tx) => documentPortalState(tx, "org_a", f.patient.id, dicom))).toMatchObject({ state: "no_va" })
+})
+
+it("lo que acompaña al PDF no dice el título clínico: solo el tipo, como el nombre del archivo", async () => {
+  const f = await clinicalFixture()
+  const [order] = await ownerDb
+    .insert(clinicalOrder)
+    .values({
+      organizationId: "org_a",
+      kind: "laboratorio",
+      patientId: f.patient.id,
+      recipient: "Laboratorio",
+      title: "Prueba de VIH",
+    })
+    .returning({ id: clinicalOrder.id })
+  const rendered = await f.run((tx) =>
+    renderHealthDocumentPdf(tx, "org_a", f.patient.id, "order", order!.id, {}, { viewing: true }),
+  )
+  expect(rendered.filename).not.toContain("VIH")
+  expect(rendered.noticeLabel).not.toContain("VIH")
+  expect(rendered.noticeLabel).toBe("Orden")
 })

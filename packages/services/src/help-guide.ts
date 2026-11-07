@@ -637,21 +637,22 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo le doy acceso al portal?",
-        a: "En el «…» de su página, «Portal del paciente» (también en Datos › Enlace y portal), «Dar acceso al portal»: quién entra (la persona, o su representante si es menor), comprobaste su identidad comparando el número de su documento con el que tiene en la mano, y cómo le llega (QR si está aquí, o su WhatsApp si te escribió en las últimas 24 horas). Lo que verá no se elige: todo lo suyo que la clínica deja ver. El código de 6 dígitos se lo dices tú, en persona o por llamada: nunca va con el enlace. Su enlace es otra cosa: lo que tiene pendiente (su cita, sus datos, su presupuesto, lo que tiene por firmar) sin crear una cuenta.",
+        a: "Lo da quien puede ver su historia (el odontólogo, el administrador o la dueña), porque el portal le muestra sus documentos. En el «…» de su página, «Portal del paciente» (también en Datos › Enlace y portal), «Dar acceso al portal»: quién entra (la persona, o su representante si es menor), comprobaste su identidad comparando el número de su documento con el que tiene en la mano, y cómo le llega (QR si está aquí, o su WhatsApp si te escribió en las últimas 24 horas). Lo que verá no se elige: todo lo suyo que la clínica deja ver. El código de 6 dígitos se lo dices tú, en persona o por llamada: nunca va con el enlace. Recepción no da el acceso: cuando ya lo tiene, le envía el enlace por su WhatsApp y el código le llega en otro mensaje, sin verlo. Su enlace es otra cosa: lo que tiene pendiente (su cita, sus datos, su presupuesto, lo que tiene por firmar) sin crear una cuenta.",
+        forms: ["recepcion no puede dar acceso al portal", "quien da acceso al portal"],
       },
       {
         q: "¿Qué ve el paciente en su portal?",
-        a: "Todo lo suyo, sin que nadie lo elija: sus citas, sus presupuestos, su cuenta y sus documentos terminados. Recetas, órdenes y descansos desde que se emiten; la hoja de atención si se emitió; los consentimientos firmados; los comprobantes; y las radiografías y fotos con su informe o que no lo requieren. Lo anulado se ve marcado («Anulada», «Revocado») y una receta vencida dice «Vencida». No ve las notas de sus atenciones ni la tomografía. Si representa a un menor, ve lo de su representado.",
+        a: "Todo lo suyo, sin que nadie lo elija: sus citas, sus presupuestos, su cuenta y sus documentos terminados. Recetas, órdenes (con su resultado) y descansos desde que se emiten; la hoja de atención si se emitió; los consentimientos firmados; los comprobantes; los archivos subidos; y las radiografías y fotos con su informe o que no lo requieren. Lo anulado se ve marcado («Anulada», «Revocado») y una receta vencida dice «Vencida». No ve las notas de sus atenciones, la tomografía ni los archivos DICOM (no se abren en el teléfono), ni lo que es de otra persona o de un pago (la prueba de una representación, un voucher). Si representa a un menor, ve lo de su representado. Cada archivo dice en «Su portal» si se ve.",
         forms: ["que ve el paciente en el portal", "que documentos ve en el portal", "el paciente ve sus radiografias"],
       },
       {
         q: "¿Cómo oculto una imagen o un archivo de su portal?",
-        a: "Abre el archivo en Documentos y, en «Su portal», toca «No mostrar en su portal». Vale para cualquier archivo subido, también un documento escaneado, y para todo acceso, de hoy y de mañana. La fila dice «Oculto en su portal» y se vuelve a mostrar con «Mostrar en su portal». Lo cambia quien escribe en la historia.",
+        a: "Abre el archivo en Documentos y, en «Su portal», toca «No mostrar en su portal». Vale para cualquier archivo subido, también un documento escaneado, y para todo acceso, de hoy y de mañana. La fila dice «Oculto en su portal» y se vuelve a mostrar con «Mostrar en su portal». Lo cambia quien escribe en la historia. El PDF de un consentimiento no se oculta suelto: en su portal se ve el consentimiento.",
         forms: ["no mostrar en su portal", "ocultar una foto del portal", "que no vea una radiografia"],
       },
       {
         q: "¿Qué hago si cambió de teléfono y no entra al portal?",
-        a: "Si lo pide por el chat, Sofi lo deja en «Te espera». En su página, «…» › «Portal del paciente», «Enviar nuevo enlace»: no hace falta volver a comprobar su identidad, y el enlace anterior que no usó deja de servir. El código se lo dices aparte.",
+        a: "Si lo pide por el chat, Sofi lo deja en «Te espera». En su página, «…» › «Portal del paciente», «Enviar nuevo enlace»: no hace falta volver a comprobar su identidad; el enlace anterior y las sesiones que tenía abiertas dejan de servir. Quien ve la historia puede mostrarle el QR y decirle el código; recepción se lo envía por su WhatsApp, con el código en otro mensaje que no ve. «Quitar acceso» (quien ve la historia) cierra todo, también su acceso guardado.",
       },
     ],
   },

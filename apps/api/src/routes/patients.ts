@@ -63,6 +63,7 @@ import {
   registerPatientDocument,
   retirePatientDocument,
   setDocumentPortalVisibility,
+  documentPortalState,
   setDocumentReportStatus,
   removePatientAllergy,
   removePatientContact,
@@ -1187,6 +1188,15 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           c.req.param("documentId"),
           parsed.data,
         ),
+      ),
+    )
+  })
+  // Si el archivo se ve en su portal, con la misma regla que «Tus documentos» (ADR 0150).
+  app.get("/:id/documents/:documentId/portal", async (c) => {
+    const { orgId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        documentPortalState(tx, orgId, c.req.param("id"), c.req.param("documentId")),
       ),
     )
   })

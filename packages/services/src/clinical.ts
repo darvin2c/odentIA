@@ -1991,6 +1991,28 @@ export async function setDocumentPortalVisibility(
   const current = await requireDocumentRow(tx, orgId, patientId, documentId)
   if (current.retiredAt)
     throw new ServiceError("DOCUMENT_RETIRED", 409, "El archivo está retirado")
+  // El PDF de un consentimiento (y su revocación o su hoja escaneada) va dentro del
+  // consentimiento: ocultar el archivo no lo sacaría del portal, así que no se promete.
+  const [inside] = await tx
+    .select({ id: consentDocument.id })
+    .from(consentDocument)
+    .where(
+      and(
+        eq(consentDocument.organizationId, orgId),
+        or(
+          eq(consentDocument.pdfDocumentId, documentId),
+          eq(consentDocument.revokePdfDocumentId, documentId),
+          eq(consentDocument.paperDocumentId, documentId),
+        ),
+      ),
+    )
+    .limit(1)
+  if (inside)
+    throw new ServiceError(
+      "DOCUMENT_INSIDE_PAPER",
+      409,
+      "Este archivo va dentro de su consentimiento: en su portal se ve el consentimiento, no el archivo suelto",
+    )
   const hiddenNow = current.portalHiddenAt !== null
   if (hiddenNow === input.hidden) return getPatientDocument(tx, orgId, patientId, documentId)
   await tx

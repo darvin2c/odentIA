@@ -589,13 +589,16 @@ function DocumentViewer({
         }),
       onChanged,
     )
-  const portalWords = doc.portalHiddenAt
-    ? "Oculto en su portal"
-    : doc.imageType === "tomografia"
-      ? "La tomografía no va a su portal"
-      : doc.reportStatus === "pendiente"
-        ? "Se verá en su portal cuando tenga su informe"
-        : "Se ve en su portal"
+  // Si se ve en su portal lo dice el servidor, con la misma regla que «Tus documentos».
+  const portalQuery = useQuery({
+    queryKey: ["patient-document-portal", patientId, doc.id, doc.portalHiddenAt ?? "", doc.reportStatus ?? ""],
+    queryFn: () =>
+      apiFetch<{ data: { state: string; words: string; canHide: boolean } }>(
+        `/api/patients/${patientId}/documents/${doc.id}/portal`,
+      ),
+    enabled: canRead && !doc.retiredAt,
+  })
+  const portal = portalQuery.data?.data ?? null
   const setReport = (reportStatus: string) =>
     runAction(
       () =>
@@ -783,12 +786,12 @@ function DocumentViewer({
               )}
             </div>
           )}
-          {!doc.retiredAt && (
+          {!doc.retiredAt && portal && (
             <div>
               <dt className="text-xs text-muted-foreground">Su portal</dt>
               <dd className="flex flex-wrap items-center gap-2">
-                {portalWords}
-                {canEdit && doc.imageType !== "tomografia" && (
+                {portal.words}
+                {canEdit && portal.canHide && (
                   <Button
                     size="sm"
                     variant={doc.portalHiddenAt ? "outline" : "ghost"}

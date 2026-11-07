@@ -22,6 +22,8 @@
 import type { Db } from "@odentia/db"
 import {
   patientDocument,
+  patientDocumentContext,
+  patientResponsibility,
   paymentTicket,
   prescription,
 } from "@odentia/db/schema/clinical"
@@ -33,7 +35,7 @@ import {
 } from "@odentia/db/schema/clinical-forms"
 import { auditEvent } from "@odentia/db/schema/org"
 import { portalAccessLog, portalSession } from "@odentia/db/schema/portal"
-import { and, eq, isNull, lt, max } from "drizzle-orm"
+import { and, desc, eq, inArray, isNotNull, isNull, lt, max } from "drizzle-orm"
 import { ATTENTION_SHEET_LABEL } from "./attention-sheet.js"
 import { ORDER_KIND_WORDS } from "./clinical-papers.js"
 import { ServiceError } from "./errors.js"
@@ -41,6 +43,7 @@ import { buildTicketSnapshot, renderTicketPdf } from "./financial-document-pdf.j
 import { renderHealthDocumentPdf } from "./health-documents.js"
 import type { PaperStorage } from "./issued-papers.js"
 import { getOrgLocale } from "./locale.js"
+import { getPortalPolicy } from "./portal-policy.js"
 import type { PortalContext } from "./portal.js"
 import type { Storage } from "./storage.js"
 
@@ -133,7 +136,9 @@ export async function collectPortalPapers(
 ): Promise<PortalPaper[]> {
   const since = options.since ?? null
   const fresh = (at: Date) => (since ? at.getTime() > since.getTime() : false)
-  const papers: Array<Omit<PortalPaper, "at" | "isNew"> & { at: Date }> = []
+  // `arrived`: cuándo llegó a su portal; «Nuevo» se cuenta con ella, no con la fecha que se muestra
+  // (una radiografía tomada hace un año y subida hoy es nueva para la persona).
+  const papers: Array<Omit<PortalPaper, "at" | "isNew"> & { at: Date; arrived?: Date }> = []
 
   const recipes = await tx
     .select({
@@ -290,6 +295,7 @@ export async function collectPortalPapers(
       label: patientDocument.label,
       imageType: patientDocument.imageType,
       reportStatus: patientDocument.reportStatus,
+      contentType: patientDocument.contentType,
       at: patientDocument.createdAt,
       capturedAt: patientDocument.capturedAt,
     })
@@ -302,17 +308,13 @@ export async function collectPortalPapers(
         isNull(patientDocument.portalHiddenAt),
       ),
     )
-  const categoryOf = new Map(files.map((file) => [file.id, file.category]))
-  for (const order of orders) {
-    const id = order.resultDocumentId
-    const category = id ? categoryOf.get(id) : undefined
-    // El informe que es resultado de una orden va con ella; la radiografía que llegó así, sí sale.
-    if (id && category && !IMAGE_CATEGORIES.has(category)) inside.add(id)
-  }
+  // El resultado de una orden sale como archivo propio: el PDF de la orden es la
+  // solicitud guardada al emitirla y no lo lleva.
+  const foreign = await filesOfOthers(tx, orgId, patientId, files.map((file) => file.id))
   for (const file of files) {
-    if (inside.has(file.id)) continue
-    // La tomografía no va al portal en esta entrega: no se abre en el teléfono.
-    if (file.imageType === "tomografia") continue
+    if (inside.has(file.id) || foreign.has(file.id)) continue
+    // La tomografía y el DICOM no van al portal en esta entrega: no se abren en el teléfono.
+    if (notForPhone(file)) continue
     const image = IMAGE_CATEGORIES.has(file.category)
     // Una imagen se ve con su informe terminado o si no lo requiere: el hallazgo, primero con quien lo explica.
     if (image && file.reportStatus === "pendiente") continue
@@ -322,6 +324,7 @@ export async function collectPortalPapers(
       type: FILE_TYPE_WORDS[file.category] ?? "Archivo",
       title: file.label,
       at: file.capturedAt ?? file.at,
+      arrived: file.at,
       stateWord: null,
       image,
     })
@@ -329,7 +332,112 @@ export async function collectPortalPapers(
 
   return papers
     .sort((a, b) => b.at.getTime() - a.at.getTime())
-    .map((paper) => ({ ...paper, at: paper.at.toISOString(), isNew: fresh(paper.at) }))
+    .map(({ arrived, ...paper }) => ({ ...paper, at: paper.at.toISOString(), isNew: fresh(arrived ?? paper.at) }))
+}
+
+/** La tomografía y el DICOM: el teléfono no los abre. */
+function notForPhone(file: { imageType: string | null; contentType: string }): boolean {
+  return file.imageType === "tomografia" || /dicom/i.test(file.contentType)
+}
+
+/**
+ * Archivos de la ficha que no son de la persona para su portal: la prueba de
+ * una representación (el DNI del representante, una resolución) y lo ligado a
+ * un pago (un voucher). Los ve el equipo, no el portal.
+ */
+async function filesOfOthers(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  ids: string[],
+): Promise<Set<string>> {
+  if (ids.length === 0) return new Set()
+  const evidence = await tx
+    .select({ id: patientResponsibility.evidenceDocumentId })
+    .from(patientResponsibility)
+    .where(
+      and(
+        eq(patientResponsibility.organizationId, orgId),
+        eq(patientResponsibility.patientId, patientId),
+        isNotNull(patientResponsibility.evidenceDocumentId),
+      ),
+    )
+  const contexts = await tx
+    .selectDistinctOn([patientDocumentContext.documentId], {
+      documentId: patientDocumentContext.documentId,
+      paymentId: patientDocumentContext.paymentId,
+    })
+    .from(patientDocumentContext)
+    .where(
+      and(
+        eq(patientDocumentContext.organizationId, orgId),
+        eq(patientDocumentContext.patientId, patientId),
+        inArray(patientDocumentContext.documentId, ids),
+      ),
+    )
+    .orderBy(patientDocumentContext.documentId, desc(patientDocumentContext.version))
+  return new Set([
+    ...evidence.map((row) => row.id).filter((id): id is string => !!id),
+    ...contexts.filter((row) => row.paymentId).map((row) => row.documentId),
+  ])
+}
+
+/** Cómo está un archivo de la ficha respecto de su portal: lo dice el servidor, con la misma regla. */
+export type DocumentPortalStateKind = "visible" | "oculto" | "espera_informe" | "no_va" | "apagado" | "retirado"
+
+export interface DocumentPortalState {
+  state: DocumentPortalStateKind
+  /** Lo que dice la ficha, en palabras de la clínica. */
+  words: string
+  /** Tiene sentido «No mostrar en su portal» / «Mostrar en su portal». */
+  canHide: boolean
+}
+
+/**
+ * Si un archivo de la ficha se ve en el portal de la persona, con la misma
+ * regla que arma «Tus documentos» (`collectPortalPapers`): la ficha no lo
+ * deduce por su cuenta.
+ */
+export async function documentPortalState(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  documentId: string,
+): Promise<DocumentPortalState> {
+  const [file] = await tx
+    .select()
+    .from(patientDocument)
+    .where(
+      and(
+        eq(patientDocument.organizationId, orgId),
+        eq(patientDocument.patientId, patientId),
+        eq(patientDocument.id, documentId),
+      ),
+    )
+    .limit(1)
+  if (!file) throw new ServiceError("NOT_FOUND", 404, "Documento no encontrado")
+  if (file.retiredAt) return { state: "retirado", words: "Retirado: no va a su portal", canHide: false }
+  const consents = await tx
+    .select({
+      pdf: consentDocument.pdfDocumentId,
+      revoke: consentDocument.revokePdfDocumentId,
+      paper: consentDocument.paperDocumentId,
+    })
+    .from(consentDocument)
+    .where(and(eq(consentDocument.organizationId, orgId), eq(consentDocument.patientId, patientId)))
+  if (consents.some((row) => [row.pdf, row.revoke, row.paper].includes(file.id)))
+    return { state: "no_va", words: "Va dentro de su consentimiento, no suelto", canHide: false }
+  if ((await filesOfOthers(tx, orgId, patientId, [file.id])).has(file.id))
+    return { state: "no_va", words: "Es de otra persona o de un pago: no va a su portal", canHide: false }
+  if (notForPhone(file))
+    return { state: "no_va", words: "No va a su portal: no se abre en el teléfono", canHide: false }
+  if (file.portalHiddenAt) return { state: "oculto", words: "Oculto en su portal", canHide: true }
+  const policy = await getPortalPolicy(tx, orgId)
+  if (!policy.enabled || !policy.allowedScope.documents)
+    return { state: "apagado", words: "La clínica no muestra documentos en el portal", canHide: true }
+  if (IMAGE_CATEGORIES.has(file.category) && file.reportStatus === "pendiente")
+    return { state: "espera_informe", words: "Se verá en su portal cuando tenga su informe", canHide: true }
+  return { state: "visible", words: "Se ve en su portal", canHide: true }
 }
 
 function papersAllowed(ctx: PortalContext): boolean {
@@ -378,7 +486,13 @@ async function tracePaperRead(tx: Db, ctx: PortalContext, paper: PortalPaper): P
     action: "portal.document_read",
     entity: paper.kind === "archivo" ? "patient_document" : `portal_paper:${paper.kind}`,
     entityId: paper.id,
-    metadata: { sessionId: ctx.session.id, contactId: ctx.session.contactId, kind: paper.kind },
+    // Quién emitió el acceso con el que se leyó: la lectura es de la persona, pero se sabe por dónde entró.
+    metadata: {
+      sessionId: ctx.session.id,
+      contactId: ctx.session.contactId,
+      kind: paper.kind,
+      issuedBy: ctx.session.issuedBy,
+    },
   })
   await tx.insert(portalAccessLog).values({
     organizationId: ctx.orgId,
