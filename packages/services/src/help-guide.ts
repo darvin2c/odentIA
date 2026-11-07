@@ -1042,12 +1042,12 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         q: "¿Puedo pagar distinto por un servicio?",
         a: "Sí. En el detalle del profesional, «Otro porcentaje o monto para un servicio»: elige el servicio y si es otro porcentaje o un monto fijo por cada uno. El monto fijo se gana en proporción a lo cobrado: si el paciente pagó la mitad, la mitad. Vale desde hoy, y «Quitar» lo devuelve a su porcentaje general.",
-        forms: ["comisión por servicio", "monto fijo por corona", "comisión distinta por tratamiento", "porcentaje por procedimiento"],
+        forms: ["comisión por servicio", "monto fijo por procedimiento", "comisión distinta por tratamiento", "porcentaje por procedimiento"],
       },
       {
         q: "¿Cómo se reparte un tratamiento que hacen dos doctores?",
         a: "Un tratamiento de varias sesiones reparte cada cobro en partes iguales, una por sesión prevista, y cada parte es de quien hizo esa sesión, el día que la hace. Lo cobrado de sesiones que aún no se hacen todavía no es de nadie. Cada línea dice qué sesión es y de cuántas.",
-        forms: ["comisión por sesión", "tratamiento compartido", "dos doctores un tratamiento", "ortodoncia dos doctores"],
+        forms: ["comisión por sesión", "tratamiento compartido", "dos doctores un tratamiento"],
       },
     ],
     writePermission: "commissions.write",

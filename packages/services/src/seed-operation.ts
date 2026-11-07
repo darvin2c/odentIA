@@ -721,6 +721,9 @@ async function seedCommissionsOf(ctx: Context): Promise<number> {
     group by e.professional_user_id
     order by first, e.professional_user_id`)
   let settlements = 0
+  // Lo nuevo de las comisiones sale de `commission_live`, que respeta la clínica de la sesión
+  // (ADR 0151). Una demo se arma con la conexión de dueño, sin clínica: se fija aquí.
+  await tx.execute(sql`select set_config('app.org_id', ${orgId}, true)`)
   for (const [index, professional] of [...professionals].entries()) {
     await setCommissionRate(tx, orgId, ownerUserId, {
       professionalUserId: professional.userId,
