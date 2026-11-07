@@ -20,6 +20,7 @@ import {
   payMonthCommission,
   setCommissionRate,
   getCashState,
+  getShiftDetail,
   voidCommissionSettlement,
   voidExpense,
 } from "./finance.js"
@@ -659,6 +660,10 @@ it("el pago de una comisión puede salir del efectivo de la caja, y anularlo lo 
   )
   expect(paid.expense?.shiftId).not.toBeNull()
   expect(await inDrawer()).toBe(30000)
+  // Caja ve los movimientos: el pago sale como «Pago de comisiones», sin a quién se pagó.
+  const shiftId = paid.expense!.shiftId!
+  const moves = (await f.run((tx) => getShiftDetail(tx, "org_a", shiftId))).movements.filter((m) => m.expenseId === paid.expense!.id)
+  expect(moves.map((m) => m.concept)).toEqual(["Pago de comisiones"])
   // Anular el pago devuelve el efectivo a la caja.
   await f.run((tx) => voidCommissionSettlement(tx, "org_a", f.actor, paid.settlement.id, { reason: "Prueba" }))
   expect(await inDrawer()).toBe(50000)
