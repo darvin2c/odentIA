@@ -515,7 +515,7 @@ function RealAppointmentDrawer({
               </span>
               {/* Lo que queda por reservar, no una frase fija: un control indicado hoy sigue pendiente. */}
               {appointment.visit === "atendida" ? (
-                <CoordinationControls patientId={appointment.patientId} pendingOnly />
+                <CoordinationControls patientId={appointment.patientId} branchId={appointment.branchId} pendingOnly />
               ) : null}
               {appointment.visit === "en_atencion" ? (
                 <span className="text-[13px] text-muted-foreground">

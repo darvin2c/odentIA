@@ -74,6 +74,7 @@ export function CoordinationControls({
   patientId,
   scheduleFollowUpId,
   pendingOnly = false,
+  branchId,
 }: {
   patientId: string
   /** «Reservar» desde «Qué sigue»: abre la reserva de ese control. */
@@ -83,6 +84,8 @@ export function CoordinationControls({
    * cita atendida dice lo que queda, sin afirmar que los controles se hicieron.
    */
   pendingOnly?: boolean
+  /** La sede donde se reserva (la de la cita, desde la agenda). */
+  branchId?: string
 }): React.JSX.Element | null {
   const canRead = usePermission("appointments.read")
   const canBook = usePermission("appointments.write")
@@ -149,6 +152,7 @@ export function CoordinationControls({
           patientId={patientId}
           control={open}
           scope="coordination"
+          branchId={branchId}
           onClose={() => {
             setScheduling(null)
             if (requested) setHandled(requested.id)
