@@ -14,6 +14,7 @@
  * compra, cuándo se gastó un material) se fecha después, como escribe su
  * historia `seedReports`. No envía mensajes ni activa nada.
  */
+import { ServiceError } from "./errors.js"
 import { randomUUID } from "node:crypto"
 import { supplierDocumentTypes } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
@@ -794,6 +795,8 @@ async function seedOpportunitiesOf(ctx: Context): Promise<number> {
       (item) => item.kind !== "ginecologia" || person.sex !== "M",
     )
     if (!service) continue
+    // Quien ya tiene una abierta (por ejemplo, la de un presupuesto entregado) no recibe otra: el
+    // producto no lo deja, y depende de quién escribió último, así que la semilla lo salta.
     const opportunity = await createOpportunity(
       tx,
       orgId,
@@ -805,7 +808,11 @@ async function seedOpportunitiesOf(ctx: Context): Promise<number> {
         conversationId: person.conversationId,
       },
       actor,
-    )
+    ).catch((error: unknown) => {
+      if (error instanceof ServiceError && error.code === "OPPORTUNITY_EXISTS") return null
+      throw error
+    })
+    if (!opportunity) continue
     created += 1
     if (index === 0) {
       await setOpportunityTask(
