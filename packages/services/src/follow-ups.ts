@@ -8,12 +8,13 @@ import {
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, eq, sql } from "drizzle-orm"
+import { and, asc, eq, inArray, sql } from "drizzle-orm"
 import { type CreateAppointmentInput, createAppointment } from "./appointments.js"
 import { assertOpenDraft, requireEncounter } from "./encounters.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgLocale } from "./locale.js"
 import { requirePatient } from "./patients.js"
+import { controlWindowStart } from "./to-schedule.js"
 
 export type ScheduleFollowUpInput =
   | { appointmentId: string }
@@ -40,6 +41,8 @@ function selectFollowUps(tx: Db) {
         endsAt: appointment.endsAt,
         status: appointment.status,
       },
+      // La sede del control es la de la atención donde se indicó (ADR 0152).
+      branchId: encounter.branchId,
     })
     .from(clinicalFollowUp)
     .leftJoin(
@@ -50,15 +53,27 @@ function selectFollowUps(tx: Db) {
         eq(appointment.patientId, clinicalFollowUp.patientId),
       ),
     )
+    .leftJoin(
+      encounter,
+      and(
+        eq(encounter.id, clinicalFollowUp.originEncounterId),
+        eq(encounter.organizationId, clinicalFollowUp.organizationId),
+      ),
+    )
 }
 
 function present(row: {
   control: typeof clinicalFollowUp.$inferSelect
   appointment: { id: string; startsAt: Date; endsAt: Date; status: string } | null
+  branchId: string | null
 }) {
   return {
     ...row.control,
     appointment: row.appointment,
+    /** La sede de la atención donde se indicó; nula si no tiene: se reserva en la sede activa. */
+    branchId: row.branchId,
+    /** Desde cuándo una visita lo cumple (`controlWindowStart`): «Usar esa cita» busca desde ahí. */
+    windowFrom: controlWindowStart(row.control),
     scheduledAt:
       row.appointment && ["programada", "confirmada"].includes(row.appointment.status)
         ? row.appointment.startsAt
@@ -312,8 +327,24 @@ export async function repeatFollowUp(
   orgId: string,
   actorUserId: string,
   done: typeof clinicalFollowUp.$inferSelect,
+  /** `unlessOpen`: al firmar (ADR 0152), no se repite si la persona ya tiene otro control abierto. */
+  options: { unlessOpen?: boolean } = {},
 ): Promise<void> {
   if (!done.repeatEveryMonths || done.status !== "realizado") return
+  if (options.unlessOpen) {
+    const [open] = await tx
+      .select({ id: clinicalFollowUp.id })
+      .from(clinicalFollowUp)
+      .where(
+        and(
+          eq(clinicalFollowUp.organizationId, orgId),
+          eq(clinicalFollowUp.patientId, done.patientId),
+          inArray(clinicalFollowUp.status, ["pendiente", "programado"]),
+        ),
+      )
+      .limit(1)
+    if (open) return
+  }
   const { timezone } = await findOrgLocale(tx, orgId)
   const at = (done.completedAt ?? new Date()).toISOString()
   const [next] = await tx.execute<{ due: Date | string }>(sql`

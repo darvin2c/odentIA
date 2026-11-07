@@ -60,8 +60,10 @@ import { type ConsentNeed, prepareConsents } from "../../lib/encounter-documents
 import {
   CLOSING_REQUIREMENT_LABELS,
   type ClosingRequirement,
+  type FinalizedControls,
   type FinalizedMaterials,
   fetchEncounterClosing,
+  finalizedControlsWords,
   fetchMyProfessionalProfile,
   saveProfessionalProfileApi,
   takeOverEncounterApi,
@@ -86,10 +88,14 @@ import { DictationBlockSuggestions, DictationEditDrawer } from "./dictation-sugg
 import { EncounterBreadcrumb } from "./encounter-breadcrumb"
 import {
   CLOSING_FIELD_MAP,
+  ClosingNextVisit,
   ClosingSignatureHint,
   type ClosingValues,
+  closingControlsBody,
+  type DictatedControl,
   EncounterClosingDialog,
   type SessionAnswers,
+  needsNextControlDay,
   SignatureRegistrationFields,
   useClosingForm,
 } from "./encounter-closing"
@@ -495,6 +501,8 @@ export function EncounterEditor({
   const [finalizedBudget, setFinalizedBudget] = useState<FinalizedBudget | null>(null)
   // Lo que descontó el cierre (ADR 0067): «Atención finalizada» lo dice, con lo que no había.
   const [finalizedMaterials, setFinalizedMaterials] = useState<FinalizedMaterials | null>(null)
+  // Lo que el cierre hizo con sus controles: «Atención finalizada» dice qué verá recepción.
+  const [finalizedControls, setFinalizedControls] = useState<FinalizedControls | null>(null)
   // «Corregir» desde «Atención finalizada»: el formulario se abre encima del aviso, que queda abierto debajo.
   const [correctingMaterials, setCorrectingMaterials] = useState(false)
   const [materialsCorrected, setMaterialsCorrected] = useState(false)
@@ -548,10 +556,20 @@ export function EncounterEditor({
   const missingConsentSignatures = unsignedConsents.filter((need) => !need.personSigned).length
   // Firmar con lo dictado: las sugerencias marcadas se confirman dentro del mismo envío del cierre.
   const signIdsRef = useRef<string[] | null>(null)
+  const closingControls = closingQuery.data?.data.controls ?? null
+  /** El control que dictó Clío y entra con la firma: ya dice cuándo vuelve. */
+  const dictatedControl = (marked: readonly string[] | null): DictatedControl | null => {
+    const item = marked
+      ? dictation.suggestions.find((candidate) => candidate.kind === "control" && marked.includes(candidate.id))
+      : undefined
+    const dueAt = item?.payload["dueAt"]
+    return item && typeof dueAt === "string" ? { id: item.id, day: clinicDateTimeValue(dueAt).slice(0, 10) } : null
+  }
   const closingForm = useClosingForm({
     // Firmar con lo dictado no lo pide: con consentimientos por firmar, sigue al cierre (`finalizeWith`).
     needsReason: () => unsignedConsents.length > 0 && signIdsRef.current === null,
     needsRegistration,
+    needsNextDay: (value) => needsNextControlDay(value, closingControls, dictatedControl(signIdsRef.current)),
     onSubmit: (value) => finalizeWith(value),
   })
   const closingError = useFormSubmitError(closingForm)
@@ -1023,6 +1041,7 @@ export function EncounterEditor({
     setFinalizedBilling(null)
     setFinalizedBudget(null)
     setFinalizedMaterials(null)
+    setFinalizedControls(null)
     setCorrectingMaterials(false)
     setMaterialsCorrected(false)
     setBudgetSent(false)
@@ -1069,6 +1088,8 @@ export function EncounterEditor({
         await dictation.refresh()
         // Con consentimientos por firmar, sigue al cierre para firmarlos o decir por qué se sigue sin ellos.
         if (unsignedConsents.length > 0) {
+          // El control dictado ya es suyo: el cierre lo dice en vez de preguntar cuándo vuelve.
+          await refreshClosing()
           setConfirmWithDictation(false)
           return
         }
@@ -1083,6 +1104,7 @@ export function EncounterEditor({
           billing: FinalizeBilling
           budget: FinalizedBudget | null
           materials?: FinalizedMaterials | null
+          controls?: FinalizedControls
         }
       }>(`/api/patients/${patientId}/encounters/${encounterId}/finalize`, {
         method: "POST",
@@ -1092,6 +1114,8 @@ export function EncounterEditor({
           ...(unsignedConsents.length > 0 ? { consentSkipReason: value.consentSkipReason.trim() } : {}),
           // «¿Terminaste?»: solo lo que se respondió; lo demás queda en curso.
           ...sessionAnswerBody(sessionAnswers, closingQuery.data?.data.sessions),
+          // «¿Cuándo vuelve?» y los controles que cumple esta visita (ADR 0152).
+          ...closingControlsBody(value, closingControls, dictatedControl(signIds)),
         }),
       })
       setConfirmOpen(false)
@@ -1100,7 +1124,11 @@ export function EncounterEditor({
       setBudgetSent(false)
       setFinalizedBudget(result.data.budget ?? null)
       setFinalizedMaterials(result.data.materials ?? null)
+      setFinalizedControls(result.data.controls ?? null)
       setFinalizedBilling(result.data.billing)
+      // El control nuevo o cumplido cambia su Plan y lo que falta agendar.
+      if (result.data.controls?.next || result.data.controls?.fulfilled.length)
+        void queryClient.invalidateQueries({ queryKey: ["follow-ups", patientId] })
       // En Perú, el cierre que cambió el gráfico firmó el odontograma.
       void queryClient.invalidateQueries({ queryKey: ["odontogram-assessments", patientId] })
       // Lo que salió de la sede cambia lo que hay en Inventario.
@@ -1374,13 +1402,14 @@ export function EncounterEditor({
   const onlyRegistrationMissing = needsRegistration && missing.every((requirement) => requirement === "signature")
   const closingSections = sections.filter((section) => section.key !== "consulta")
   const recorded = closingSections.filter((section) => !section.empty).map((s) => s.summary)
+  // Con «¿Cuándo vuelve?» en el mismo cierre, «plan y controles» no se dice como algo sin registrar.
   const unrecorded = closingSections
-    .filter((section) => section.empty)
+    .filter((section) => section.empty && !(section.key === "plan" && closingControls))
     .map((section) => section.title.toLowerCase())
+  // Lo de las adendas ya lo dice el subtítulo del cierre: una sola vez.
   const finalizeDescription = [
     recorded.length > 0 ? `Registrado: ${recorded.join("; ")}.` : "",
     unrecorded.length > 0 ? `Sin registrar: ${unrecorded.join(", ")}.` : "",
-    "Después del cierre solo se agregan adendas. Si vino de una cita, la cita queda atendida.",
   ]
     .filter(Boolean)
     .join(" ")
@@ -1593,6 +1622,12 @@ export function EncounterEditor({
   const signFromBar = () => {
     if (canSign) void requestSign()
     else document.getElementById(closingId)?.scrollIntoView({ block: "start" })
+  }
+  /** Desde el cierre, una sugerencia de Clío que se completa o se corrige: se abre para eso. */
+  const openSuggestion = (id: string) => {
+    setConfirmOpen(false)
+    const item = dictation.suggestions.find((candidate) => candidate.id === id)
+    if (item) dictation.openEdit(item)
   }
   const pendingDiagnoses = dictationCount("hallazgos")
 
@@ -2566,8 +2601,9 @@ export function EncounterEditor({
             return next
           })
         }
+        nextVisit={<ClosingNextVisit form={closingForm} controls={closingControls} busy={finalizing} />}
       >
-        <p className="text-xs text-muted-foreground">{finalizeDescription}</p>
+        {finalizeDescription ? <p className="text-xs text-muted-foreground">{finalizeDescription}</p> : null}
       </EncounterClosingDialog>
       {product.overlay}
       <ConsentSigningScreen
@@ -2586,12 +2622,15 @@ export function EncounterEditor({
         signing={finalizing}
         error={closingError}
         onClose={() => setConfirmOpen(false)}
-        onComplete={(id) => {
-          setConfirmOpen(false)
-          // Lo que no se puede confirmar tal cual se abre para completarlo.
-          const item = dictation.suggestions.find((candidate) => candidate.id === id)
-          if (item) dictation.openEdit(item)
-        }}
+        onComplete={(id) => openSuggestion(id)}
+        nextVisit={(marked) => (
+          <ClosingNextVisit
+            form={closingForm}
+            controls={closingControls}
+            dictated={dictatedControl(marked)}
+            busy={finalizing}
+          />
+        )}
         onSign={(ids) => {
           // Un solo envío: la colegiatura se valida en su campo, luego se confirma lo marcado y se firma.
           signIdsRef.current = ids
@@ -2650,6 +2689,9 @@ export function EncounterEditor({
                 </p>
               ) : null}
             </section>
+          ) : null}
+          {finalizedControls && (finalizedControls.next || finalizedControls.fulfilled.length > 0) ? (
+            <p className="text-sm">{finalizedControlsWords(finalizedControls)}</p>
           ) : null}
           {skippedLines.length > 0 ? (
             <ul className="flex flex-col gap-1 text-sm text-muted-foreground">

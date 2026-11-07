@@ -179,7 +179,8 @@ export async function seedPeriodontalCase(
     evolution:
       "Periodontitis estadio III, grado B, generalizada (AAP/EFP 2017). Mucositis en el implante de la 46. Se indica raspado y alisado radicular por cuadrantes e higiene con cepillo interdental.",
   })
-  await finalizeEncounter(db, orgId, actor, patientId, first.id)
+  // La semilla dice qué controles cumple la firma (ADR 0152): ninguno.
+  await finalizeEncounter(db, orgId, actor, patientId, first.id, { followUpIds: [] })
 
   // Reevaluación a las siete semanas del último raspado.
   const second = await createEncounter(db, orgId, actor, patientId, { reason: "Reevaluación periodontal", branchId })
@@ -202,5 +203,5 @@ export async function seedPeriodontalCase(
     evolution:
       "Reevaluación: el sangrado bajó del 31 % al 10 % y la placa del 49 % al 19 %. La 37 por dentro, distal, empeoró de 5 a 7 mm: se pide radiografía.",
   })
-  await finalizeEncounter(db, orgId, actor, patientId, second.id)
+  await finalizeEncounter(db, orgId, actor, patientId, second.id, { followUpIds: [] })
 }

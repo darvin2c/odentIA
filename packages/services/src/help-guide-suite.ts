@@ -39,6 +39,7 @@ const COMPOSED = new Set([
   "Pregúntale a Argos",
   "Comprobé su identidad: vi su documento",
   "Atender (10:00)",
+  "En 6 meses",
   "Enviárselo ahora",
   "Aceptó 2 de 3",
   "sesión 1 de 2",

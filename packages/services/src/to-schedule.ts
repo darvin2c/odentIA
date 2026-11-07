@@ -12,6 +12,9 @@ import { type SQL, type SQLWrapper, sql } from "drizzle-orm"
  * - **Control vencido sin cita**: un control pendiente cuyo día ya pasó, de una
  *   persona sin ninguna cita por venir. A un control le sirve cualquier visita:
  *   la cita no tiene que llevarlo.
+ * - **La ventana de un control** (`controlWindowStart`): desde cuándo una
+ *   visita lo cumple al firmarse, y desde cuándo una cita por venir cuenta en
+ *   «Qué sigue» y en «Usar esa cita».
  *
  * Cada regla existe en código y en SQL; cambian juntas y su prueba las compara.
  */
@@ -234,6 +237,70 @@ export function isOverdueControl(
   now: Date = new Date(),
 ): boolean {
   return control.status === "pendiente" && dayKeyIn(control.dueAt, timezone) < dayKeyIn(now, timezone) && !nextAppointmentAt
+}
+
+const DAY_MS = 86_400_000
+
+/**
+ * Desde cuándo una visita cumple un control (ADR 0152): su ventana abre
+ * `max(2 días, 25 % del intervalo)` antes de su día, donde el intervalo va de
+ * cuando se indicó a su día, y nunca antes de que se indicara. Un control a 6
+ * meses abre unos 45 días antes; uno a 7 días, 2 días antes. No tiene fin: un
+ * control vencido sigue cumpliéndose con la próxima visita. Cambia junto con
+ * `controlWindowStartSql`.
+ */
+export function controlWindowStart(control: { dueAt: Date; createdAt: Date }): Date {
+  const interval = control.dueAt.getTime() - control.createdAt.getTime()
+  const opens = control.dueAt.getTime() - Math.max(2 * DAY_MS, interval / 4)
+  return new Date(Math.max(control.createdAt.getTime(), opens))
+}
+
+/**
+ * La ventana del control ya abrió hoy, en días de la zona de la clínica. Un
+ * control indicado hoy no se cumple hoy: la visita en que se indicó no es la
+ * que lo cumple.
+ */
+export function isControlWindowOpen(
+  control: { dueAt: Date; createdAt: Date },
+  timezone: string,
+  now: Date = new Date(),
+): boolean {
+  const today = dayKeyIn(now, timezone)
+  return dayKeyIn(controlWindowStart(control), timezone) <= today && dayKeyIn(control.createdAt, timezone) < today
+}
+
+/** `controlWindowStart` en SQL, sobre una fila de `clinical_follow_up` (o un alias). */
+export function controlWindowStartSql(control: { dueAt: SQLWrapper; createdAt: SQLWrapper }): SQL {
+  return sql`greatest(${control.createdAt}, ${control.dueAt} - greatest(interval '2 days', (${control.dueAt} - ${control.createdAt}) * 0.25))`
+}
+
+/** `isControlWindowOpen` en SQL: el día en que abre su ventana ya llegó y no se indicó hoy. */
+export function controlWindowOpenSql(
+  control: { dueAt: SQLWrapper; createdAt: SQLWrapper },
+  timezone: string,
+  now: SQLWrapper = sql`now()`,
+): SQL {
+  return sql`((${controlWindowStartSql(control)} at time zone ${timezone})::date <= (${now} at time zone ${timezone})::date
+    and (${control.createdAt} at time zone ${timezone})::date < (${now} at time zone ${timezone})::date)`
+}
+
+/** Hasta cuántos días después de su fecha una cita por venir todavía le sirve a un control. */
+export const CONTROL_SERVED_DAYS_AFTER = 30
+
+/**
+ * Una cita por venir le sirve al control (ADR 0152): cae desde que abre su
+ * ventana hasta 30 días después de su fecha. «Avisar un control» calla solo
+ * entonces; una cita mucho más lejana no lo cumple a tiempo.
+ */
+export function appointmentServesControlSql(
+  control: { organizationId: SQLWrapper; patientId: SQLWrapper; dueAt: SQLWrapper; createdAt: SQLWrapper },
+  now: SQLWrapper = sql`now()`,
+): SQL {
+  return sql`exists (select 1 from appointment serving
+    where serving.organization_id = ${control.organizationId} and serving.patient_id = ${control.patientId}
+      and serving.status in (${list(LIVE_APPOINTMENT_STATUSES)}) and serving.starts_at > ${now}
+      and serving.starts_at >= ${controlWindowStartSql(control)}
+      and serving.starts_at <= ${control.dueAt} + make_interval(days => ${CONTROL_SERVED_DAYS_AFTER}))`
 }
 
 /** Control vencido sin cita, en SQL, sobre una fila de `clinical_follow_up` (o un alias). */

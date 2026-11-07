@@ -13,7 +13,8 @@
  *    tiene su primera cita y le faltan sesiones por reservar (`canBookAnother`):
  *    «Falta la cita de la próxima sesión: Endodoncia · sesión 2 de 2».
  * 5. El próximo control: «Control de las resinas · por reservar · Toca el 20 nov»,
- *    o «tiene cita el 22 nov» si ya tiene una cita desde ese día.
+ *    o «tiene cita el 22 nov» si ya tiene una cita desde que abre su ventana
+ *    (`controlWindowStart`: la visita que lo cumple).
  *
  * «Falta su cita» y «por reservar» siguen las reglas de `to-schedule.ts`: lo
  * aceptado sin una cita que lo lleve y el control sin ninguna cita por venir.
@@ -39,6 +40,7 @@ import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { productHooks } from "./products.js"
 import {
   canBookAnother,
+  controlWindowStart,
   dayKeyIn,
   isOverdueControl,
   isToSchedule,
@@ -413,8 +415,9 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
 
   // 5. El próximo control.
   if (control) {
-    // A un control le sirve cualquier visita: con una cita por venir desde su día, no está «por reservar».
-    if (control.status === "pendiente" && nextAppointmentAt && dayKey(nextAppointmentAt) >= dayKey(control.dueAt)) {
+    // A un control le sirve cualquier visita desde que abre su ventana (ADR 0152): con una cita por venir
+    // desde ahí, no está «por reservar», porque al firmar esa atención se cumple.
+    if (control.status === "pendiente" && nextAppointmentAt && dayKey(nextAppointmentAt) >= dayKey(controlWindowStart(control))) {
       return {
         kind: "control",
         text: `${control.title} · tiene cita el ${day(nextAppointmentAt)}`,

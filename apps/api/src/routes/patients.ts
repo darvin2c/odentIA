@@ -414,6 +414,15 @@ const finalizeInput = z
     // «¿Terminaste?» de lo trabajado hoy: «Sí, terminar» o «Falta otra sesión».
     completePlanItemIds: z.array(z.uuid()).max(52).optional(),
     addSessionPlanItemIds: z.array(z.uuid()).max(52).optional(),
+    // «¿Cuándo vuelve?» (ADR 0152): el día del próximo control, o que no hace falta.
+    nextControl: z
+      .union([
+        z.object({ dueAt: z.iso.date({ error: "Elige un día del calendario" }) }).strict(),
+        z.object({ none: z.literal(true) }).strict(),
+      ])
+      .nullish(),
+    // Los controles que esta visita cumple; sin él, todos los que tocan.
+    followUpIds: z.array(z.uuid()).max(50).nullish(),
   })
   .strict()
 /** Lo que se va a registrar como servicio directo, para avisar si ya se hizo (`findEarlierTreatment`). */

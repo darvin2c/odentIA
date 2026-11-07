@@ -32,8 +32,9 @@ import { rangeSaid, shortName, whenSaid } from "../agenda/shared"
 import { EMPTY_WHEN, useWhen, WHEN_FIELD_MAP, WhenFields } from "../agenda/when"
 import { ServiceSelect } from "../service-select"
 
-/** Hasta cuándo se miran las citas en pie del paciente para ofrecer «Usar esa cita». */
+/** Hasta cuántos días después de su fecha se miran las citas en pie para ofrecer «Usar esa cita». */
 const STANDING_DAYS = 90
+const DAY_MS = 86_400_000
 
 /** Quién reserva: el clínico desde la ficha clínica o quien agenda desde la coordinación. */
 export type FollowUpSchedulerScope = "clinical" | "coordination"
@@ -50,9 +51,10 @@ export function FollowUpScheduler({
   onClose: () => void
   scope?: FollowUpSchedulerScope
   /**
-   * La sede donde se reserva. Desde una cita, la de esa cita; si no, la sede con
-   * la que se trabaja, la misma de la Agenda (antes siempre la primera de la
-   * clínica, aunque no tuviera horarios: QA del 6 nov).
+   * La sede donde se reserva. Desde una cita, la de esa cita; si no, la de la
+   * atención donde se indicó el control y, sin ella, la sede con la que se
+   * trabaja, la misma de la Agenda (antes siempre la primera de la clínica,
+   * aunque no tuviera horarios: QA del 6 nov).
    */
   branchId?: string
 }) {
@@ -61,7 +63,7 @@ export function FollowUpScheduler({
   const canSchedule =
     canWriteAppointments && (scope === "coordination" || canWriteClinical)
   const active = useActiveBranch()
-  const sede = branchId ?? active.branchId
+  const sede = branchId ?? control.branchId ?? active.branchId
   const resources = useQuery({
     queryKey: ["agenda-resources", sede ?? null],
     queryFn: () =>
@@ -151,16 +153,18 @@ function ScheduleForm({
     // Con servicio, la agenda ofrece solo a quien lo atiende (ADR 0039).
     serviceId: service?.id || undefined,
   })
-  // Si ya tiene citas en pie, se ofrece usar una en vez de reservar otra.
-  const [range] = useState(() => ({
-    from: new Date().toISOString(),
-    to: new Date(Date.now() + STANDING_DAYS * 86_400_000).toISOString(),
-  }))
+  // Si ya tiene una cita en pie desde que el control toca (su ventana), se ofrece usarla en vez
+  // de reservar otra, en cualquier sede: esa visita lo cumple (ADR 0152).
+  const [range] = useState(() => {
+    const now = Date.now()
+    const from = Math.max(now, Date.parse(control.windowFrom) || now)
+    const until = Math.max(now, Date.parse(control.dueAt) || now) + STANDING_DAYS * DAY_MS
+    return { from: new Date(from).toISOString(), to: new Date(until).toISOString() }
+  })
   const standing = useQuery({
-    queryKey: ["follow-up-appointments", patientId, resources.branchId, range.from],
+    queryKey: ["follow-up-appointments", patientId, range.from],
     queryFn: () => {
       const params = new URLSearchParams({
-        branchId: resources.branchId,
         from: range.from,
         to: range.to,
         status: "programada,confirmada",

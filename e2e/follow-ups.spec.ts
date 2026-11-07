@@ -109,7 +109,7 @@ test("control clínico: reserva real, mover reprograma y cancelaciones coherente
   expect(movido.appointmentId).toBe(programado.appointmentId)
   expect(movido.scheduledAt).toBe(startsAt)
 
-  // Cancelar la cita devuelve el control a pendiente y conserva la traza.
+  // Cancelar la cita devuelve el control a pendiente y suelta la cita (ADR 0152); la traza queda en la auditoría.
   await call(page, "POST", `/api/appointments/${programado.appointmentId}/status`, slug, {
     status: "cancelada",
   })
@@ -117,7 +117,7 @@ test("control clínico: reserva real, mover reprograma y cancelaciones coherente
   expect(liberado).toMatchObject({
     status: "pendiente",
     scheduledAt: null,
-    appointmentId: programado.appointmentId,
+    appointmentId: null,
   })
 
   // El control pendiente admite una nueva reserva transaccional.

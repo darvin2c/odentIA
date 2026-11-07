@@ -29,6 +29,10 @@ export interface CoordinationFollowUp {
   status: string
   legacyScheduledAt: Date | null
   appointment: { id: string; startsAt: Date; endsAt: Date; status: string } | null
+  /** La sede donde se indicó, para reservar ahí (ADR 0152); nula: la sede activa. */
+  branchId: string | null
+  /** Desde cuándo una visita lo cumple: «Usar esa cita» ofrece las citas desde ahí. */
+  windowFrom: Date
 }
 
 export interface TreatmentCoordination {
@@ -66,6 +70,8 @@ function toCoordinationFollowUp(
     status: row.status,
     legacyScheduledAt: row.legacyScheduledAt,
     appointment: row.appointment,
+    branchId: row.branchId,
+    windowFrom: row.windowFrom,
   }
 }
 

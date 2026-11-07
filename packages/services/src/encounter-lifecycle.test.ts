@@ -265,6 +265,8 @@ it("cerrar exige motivo, diagnóstico, evolución y colegiatura, y firma con su 
     materials: null,
     // Sin tratamientos trabajados hoy, no pregunta «¿Terminaste?».
     sessions: { finishing: [], continuing: [], notRegistered: [] },
+    // Sin controles: pregunta «¿Cuándo vuelve?» con los atajos del producto.
+    controls: { recallMonths: 6, byAppointment: [], shortcuts: expect.any(Object), due: [], next: null },
   })
   await expect(f.run((tx) => finalizeEncounter(tx, ...f.args, encounterId))).rejects.toMatchObject({
     code: "CLOSING_INCOMPLETE",

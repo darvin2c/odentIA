@@ -305,7 +305,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Dónde quedó «Atendida»?",
-        a: "La cita se cierra con su atención: al firmarla pasa a «Atendida» y sus controles quedan hechos. Si una cita ya pasó y nadie la cerró, aparece en «Ya pasaron · sin cerrar» con «Registrar la atención» o «No vino».",
+        a: "La cita se cierra con su atención: al firmarla pasa a «Atendida» y quedan hechos el control reservado en ella y el que ya le tocaba, si quien firma lo deja marcado. Cancelar una cita o marcar «No vino» devuelve su control a estar por reservar. Si una cita ya pasó y nadie la cerró, aparece en «Ya pasaron · sin cerrar» con «Registrar la atención» o «No vino».",
       },
       {
         q: "¿Y si llega tarde después de marcar «No vino»?",
@@ -494,7 +494,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿La atención queda unida a su cita?",
-        a: "Sí. Si el paciente tiene una cita hoy, el botón de la cabecera dice «Atender (10:00)» y la atención se une a ella; al firmarla, la cita queda atendida y sus controles hechos. Si ya hay una atención en curso, el botón dice «Continuar la atención» y te lleva a ella, sin perder lo escrito. Sin cita, «Atender» la abre en un clic: el motivo se escribe dentro, en «Consulta», y lo pide el cierre.",
+        a: "Sí. Si el paciente tiene una cita hoy, el botón de la cabecera dice «Atender (10:00)» y la atención se une a ella; al firmarla, la cita queda atendida y su control, hecho. Si ya hay una atención en curso, el botón dice «Continuar la atención» y te lleva a ella, sin perder lo escrito. Sin cita, «Atender» la abre en un clic: el motivo se escribe dentro, en «Consulta», y lo pide el cierre.",
       },
       {
         q: "¿Dónde registro un hallazgo del odontograma?",
@@ -531,6 +531,14 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         q: "¿Por qué la atención me dice «Necesita consentimiento»?",
         a: "Porque registraste o indicaste un servicio para el que tu clínica pide un consentimiento (Configuración › Consentimientos › «Se pide para»). «Preparar» lo genera lleno. Si la clínica aún no lo activó, fírmalo en papel; quien configura lo verá en «Te espera».",
+      },
+      {
+        q: "¿Cómo dejo dicho cuándo vuelve?",
+        a: "Al firmar, en «¿Cuándo vuelve?»: «En 1 semana», «En 1 mes», «En 6 meses», «Otra fecha» o «No hace falta». Con uno de ellos queda su control, con el nombre de lo que hiciste hoy o de mantenimiento, y recepción lo ve para reservarlo. Si no eliges, se firma igual y el cierre te avisa: «No indicaste cuándo vuelve: recepción no lo verá». Si ya tiene un control, dice cuándo vuelve; para cambiarlo, en «Plan y controles».",
+      },
+      {
+        q: "¿Cuándo queda hecho un control si vino por otra cosa?",
+        a: "Cualquier atención desde unos días antes de su fecha le sirve, aunque la cita no fuera la del control: al firmar, el cierre muestra su control como casilla, marcada solo si lo indicaste tú. Desmárcala antes de firmar si esta visita no lo cumple y sigue pendiente. Si se cumplió por error, indica otro control.",
       },
       {
         q: "¿Puedo cerrar sin el consentimiento firmado?",
@@ -638,7 +646,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Qué son «Por agendar», «Deben» y los demás atajos?",
-        a: "Filtros de la lista de Pacientes con lo que hay que mover: «Por agendar», «Presupuesto sin enviar», «Presupuesto sin respuesta», «Control vencido», «Faltan datos», «Por invitar a volver» y «Deben». Cada uno dice su regla al elegirlo. «Por agendar» es quien tiene algo aceptado sin una cita que lo lleve, aunque tenga otra cita, y «Control vencido» quien tiene un control cuyo día ya pasó y ninguna cita por venir: son las mismas cuentas de Inicio y de Argos. En «Por invitar a volver», «Ya la invité» anota que la invitaste por teléfono o en persona.",
+        a: "Filtros de la lista de Pacientes con lo que hay que mover: «Por agendar», «Presupuesto sin enviar», «Presupuesto sin respuesta», «Control vencido», «Faltan datos», «Por invitar a volver» y «Deben». Cada uno dice su regla al elegirlo. «Por agendar» es quien tiene algo aceptado sin una cita que lo lleve, aunque tenga otra cita, y «Control vencido» quien tiene un control cuyo día ya pasó y ninguna cita por venir: son las mismas cuentas de Inicio y de Argos. «Por invitar a volver» es quien no vino en 6 meses y no tiene cita, presupuesto por responder ni un control de ese tiempo: entra también quien tiene un control vencido hace más de 6 meses. Ahí, «Ya la invité» anota que la invitaste por teléfono o en persona.",
       },
       {
         q: "¿Qué hago si no se le puede enviar su enlace?",
