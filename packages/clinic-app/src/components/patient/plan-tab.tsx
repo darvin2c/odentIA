@@ -27,7 +27,7 @@ import { ChevronDown, ClipboardList } from "lucide-react"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { fetchTreatmentPlans } from "../../lib/budgets"
-import { usePermission } from "../../lib/crm"
+import { useMyUserId, usePermission } from "../../lib/crm"
 import type { PatientSummary, PlanItem } from "../../lib/patients"
 import { QueryErrorState } from "../../lib/query-error"
 import { PlanPhasesSkeleton } from "../skeletons/person-sections"
@@ -101,6 +101,7 @@ export function PlanTab({
     queryFn: () => apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan`),
     enabled: canClinical,
   })
+  const myUserId = useMyUserId()
   const summaryQuery = useQuery({
     queryKey: ["patient-summary", patientId],
     queryFn: () => apiFetch<{ data: PatientSummary }>(`/api/patients/${patientId}/summary`),
@@ -125,6 +126,12 @@ export function PlanTab({
 
   const journeyItem = items.find((item) => item.id === journeyItemId) ?? null
   const summary = summaryQuery.data?.data ?? null
+  // Un control «de» la atención en curso solo lo indica quien la lleva; si es de otro
+  // profesional, se indica desde la ficha, sin unirlo a esa atención (ADR 0002).
+  const ownEncounterId =
+    summary?.openEncounterId && (!summary.openEncounter || summary.openEncounter.professionalUserId === myUserId)
+      ? summary.openEncounterId
+      : undefined
 
   return (
     <div className="flex flex-col gap-6">
@@ -199,7 +206,7 @@ export function PlanTab({
           <ControlesPanel
             patientId={patientId}
             items={items}
-            encounterId={summary?.openEncounterId ?? undefined}
+            encounterId={ownEncounterId}
           />
         </section>
       ) : canAgenda ? (

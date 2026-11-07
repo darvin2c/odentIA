@@ -288,7 +288,6 @@ export async function setupAggregation(
     instructions: null,
     planItemId: ids.itemId,
     encounterProcedureId: null,
-    originEncounterId: ids.encounterId,
   }, 201)
   // Programar un control reserva una cita real del mismo paciente.
   await call(page, "POST", `${apiPath}/follow-ups/${followUp.id}/schedule`, slug, {

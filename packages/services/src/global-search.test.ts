@@ -155,6 +155,15 @@ beforeAll(async () => {
     values (${ORG}, ${luciaPatientId}, 1, '2026-10-19', 3, '2026-10-21')`)
   await ownerDb.execute(sql`insert into clinical_order (organization_id, kind, patient_id, recipient, title)
     values (${ORG}, 'imagen', ${luciaPatientId}, 'Centro de imágenes', 'Radiografía panorámica')`)
+  // Un gasto suelto y el pago de la comisión de la Dra. Pruebas, que deja su propio gasto de Personal.
+  await ownerDb.execute(sql`insert into expense (organization_id, branch_id, concept, category, amount_cents, currency, spent_at)
+    values (${ORG}, ${sede!.id}, 'Alquiler del local', 'Alquiler', 350000, 'PEN', '2026-10-01T15:00:00Z')`)
+  await ownerDb.execute(sql`with paid as (
+      insert into expense (organization_id, branch_id, concept, category, amount_cents, currency, spent_at)
+      values (${ORG}, ${sede!.id}, 'Comisión de setiembre de 2026 — Dra. Ana Pruebas', 'Personal', 123400, 'PEN', '2026-10-10T15:00:00Z')
+      returning id)
+    insert into commission_settlement (organization_id, professional_user_id, period_year, period_month, currency, rate_bps, base_cents, commission_cents, expense_id, status, settled_at)
+    select ${ORG}, ${PROFESSIONAL}, 2026, 9, 'PEN', 4000, 308500, 123400, paid.id, 'liquidada', '2026-10-10T15:00:00Z' from paid`)
 }, 180_000)
 
 describe("buscar sin tildes y con su dueño", () => {
@@ -272,6 +281,31 @@ describe("cada rol ve lo de su pantalla", () => {
       kind: "presupuesto",
     })
     expect(await as("clinician", "ortodoncia")).toMatchObject({ owners: [] })
+  })
+
+  it("lo que cobra cada profesional solo lo encuentra quien administra comisiones", async () => {
+    // Caja tiene Finanzas, no Comisiones: ni el pago ni su gasto, por la palabra o por el nombre.
+    for (const q of ["comision", "pruebas", "personal"]) {
+      const cashier = await as("cashier", q)
+      expect(cashier.owners.flatMap((o) => o.items).some((item) => item.kind === "comision")).toBe(false)
+      expect(cashier.owners.some((o) => o.kind === "gasto" && o.title.includes("Pruebas"))).toBe(false)
+      expect(cashier.owners.some((o) => o.kind === "gasto" && o.title.startsWith("Comisión"))).toBe(false)
+    }
+    // Quien administra comisiones los encuentra: el pago, bajo su profesional, y su gasto.
+    const admin = await as("owner", "comision")
+    expect(admin.owners.flatMap((o) => o.items).some((item) => item.kind === "comision")).toBe(true)
+    expect(admin.owners.some((o) => o.kind === "gasto" && o.title.includes("Dra. Ana Pruebas"))).toBe(true)
+  })
+
+  it("un gasto suelto sale una sola vez, con su monto, y abre el mes en ese gasto", async () => {
+    const rent = (await as("cashier", "alquiler")).owners.find((o) => o.kind === "gasto")
+    expect(rent).toMatchObject({
+      title: "Alquiler del local · Alquiler",
+      items: [],
+      amount: { cents: 350000, currency: "PEN" },
+      at: "2026-10-01T15:00:00.000Z",
+      target: { screen: "gastos", q: "Alquiler del local" },
+    })
   })
 
   it("el filtro quita un tipo entero", async () => {
