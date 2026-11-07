@@ -72,6 +72,9 @@ test("tomografía: la carpeta del CD se sube, queda en la ficha y se abre en pan
   await expect(found.getByText("El archivo dice «QUISPE^ROSA»")).toBeVisible()
   await expect(found.getByText(/No se suben 1 archivo/)).toBeVisible()
   await page.screenshot({ path: test.info().outputPath("tomografia-encontrada.png") })
+  // La pidieron por el tercer molar: «Ir a la pieza» tiene que llegar a la 38.
+  await found.getByLabel("Escribir pieza FDI").fill("38")
+  await found.getByRole("button", { name: "Agregar" }).click()
   await found.getByRole("button", { name: /Sí, es de Carmen/ }).click()
 
   await expect(found.getByRole("heading", { name: "La tomografía quedó en la ficha" })).toBeVisible({ timeout: 90_000 })
@@ -96,7 +99,11 @@ test("tomografía: la carpeta del CD se sube, queda en la ficha y se abre en pan
     timeout: 60_000,
   })
   await expect(viewer.getByText("Panorámica reconstruida")).toBeVisible()
-  await expect(viewer.getByText(/\d+ de \d+ mm del arco/)).toBeVisible()
+  // Abre en la 38, con el arco prolongado hacia la rama.
+  await expect(viewer.getByText(/Pieza 38 · \d+ de \d+ mm del arco/)).toBeVisible()
+  await expect(viewer.getByRole("button", { name: "38", exact: true })).toHaveAttribute("aria-pressed", "true")
+  // Sin atención propia abierta hoy, dice cómo guardar la vista en vez de un botón apagado.
+  await expect(viewer.getByText("Para guardar esta imagen en la nota, abre tu atención de hoy con este paciente.")).toBeVisible()
   await page.screenshot({ path: test.info().outputPath("tomografia-visor.png") })
   // La tomografía se acerca en cada vista, con el porcentaje a la vista.
   await viewer.getByRole("button", { name: "Acercar", exact: true }).first().click()
@@ -111,6 +118,37 @@ test("tomografía: la carpeta del CD se sube, queda en la ficha y se abre en pan
   await expect(viewer.getByRole("tab", { name: "3D", exact: true })).toHaveAttribute("aria-selected", "true")
   await expect(viewer.getByText("El hueso fino puede no verse en 3D", { exact: false })).toBeVisible()
   await page.screenshot({ path: test.info().outputPath("tomografia-3d.png") })
+
+  // La orden de la tomografía se cierra con la que ya está en la ficha, sin volver a subirla.
+  await call(page, "PUT", "/api/clinical-forms/professionals/me/profile", slug, {
+    professionalTitle: "Cirujano dentista",
+    registrationBody: "COP",
+    registrationNumber: "12345",
+  })
+  await call(page, "POST", "/api/clinical-forms/orders", slug, {
+    patientId: patient.id,
+    kind: "imagen",
+    recipient: "Centro de Imágenes San Borja",
+    title: "Tomografía (CBCT) de la pieza 38",
+  }, 201)
+  await gotoHydrated(page, tenant(slug, `/patients/${patient.id}?tab=documentos&tipo=ordenes`))
+  await page.getByRole("button", { name: /Subir resultado de .*Tomografía/ }).click()
+  const result = surface(page, { name: "Subir el resultado" })
+  await expect(result.getByRole("button", { name: "Ya está en la ficha" })).toHaveAttribute("aria-pressed", "true")
+  await result.getByRole("radio", { name: /Tomografía/ }).click()
+  await page.screenshot({ path: test.info().outputPath("orden-de-la-ficha.png") })
+  await result.getByRole("button", { name: "Guardar resultado" }).click()
+  await expect(page.getByText("Con resultado").first()).toBeVisible()
+  const orders = await call<Array<{ title: string; status: string; resultDocumentId: string | null }>>(
+    page,
+    "GET",
+    `/api/clinical-forms/orders?patientId=${patient.id}`,
+    slug,
+  )
+  expect(orders.find((order) => order.title.includes("CBCT"))).toMatchObject({
+    status: "completado",
+    resultDocumentId: study!.id,
+  })
 
   // En el celular: una vista grande a la vez y, al intentar medir, por qué no.
   const phone = await page.context().browser()!.newContext({

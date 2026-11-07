@@ -117,8 +117,16 @@ const CT_SOP_CLASS = "1.2.840.10008.5.1.4.1.1.2"
 export interface DemoCtSliceInput {
   width: number
   height: number
-  /** HU + 1000 en 12 bits, fila por fila (Rescale Intercept −1000). */
+  /** HU + 1000 en 12 bits, fila por fila (Rescale Intercept −1000); o grises sin escala, con `hounsfield: false`. */
   pixels: Uint16Array
+  /**
+   * false: los grises no son unidades Hounsfield (una CBCT real casi nunca las
+   * calibra). Se declara Rescale Type «US» (sin especificar, PS3.3 C.11.1.1.2)
+   * en vez de fingir HU con el Intercept −1000.
+   */
+  hounsfield?: boolean
+  /** La ventana que trae el archivo; por omisión, la de hueso en HU. */
+  window?: { center: number; width: number }
   voxelMm: number
   /** Esquina superior izquierda del corte en mm (Image Position Patient). */
   position: [number, number, number]
@@ -150,6 +158,8 @@ export function encodeDemoCtSlice(input: DemoCtSliceInput): Uint8Array {
   new DataView(groupLength.buffer).setUint32(0, metaBody.byteLength, true)
   const meta = concat([element(0x0002, 0x0000, { vr: "UL", bytes: groupLength }), metaBody])
   const [px, py, pz] = input.position
+  const hounsfield = input.hounsfield !== false
+  const win = input.window ?? (hounsfield ? { center: 700, width: 3000 } : { center: 2048, width: 4096 })
   const dataset = concat([
     // Los textos van en UTF-8 (PS3.5 §6.1.2.3): el origen puede llevar tildes.
     element(0x0008, 0x0005, text("CS", "ISO_IR 192")),
@@ -176,10 +186,11 @@ export function encodeDemoCtSlice(input: DemoCtSliceInput): Uint8Array {
     element(0x0028, 0x0101, us(12)),
     element(0x0028, 0x0102, us(11)),
     element(0x0028, 0x0103, us(0)),
-    element(0x0028, 0x1050, text("DS", "700")),
-    element(0x0028, 0x1051, text("DS", "3000")),
-    element(0x0028, 0x1052, text("DS", "-1000")),
+    element(0x0028, 0x1050, text("DS", ds(win.center))),
+    element(0x0028, 0x1051, text("DS", ds(win.width))),
+    element(0x0028, 0x1052, text("DS", hounsfield ? "-1000" : "0")),
     element(0x0028, 0x1053, text("DS", "1")),
+    ...(hounsfield ? [] : [element(0x0028, 0x1054, text("LO", "US"))]),
     element(0x7fe0, 0x0010, { vr: "OW", bytes: pixelBytes }),
   ])
   const preamble = new Uint8Array(132)

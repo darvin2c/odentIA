@@ -10,6 +10,7 @@ import {
   decodeJpegLs,
 } from "./dicom-codecs"
 import { decodeRleFrame } from "./dicom-rle"
+import { isChunkLoadError, markNewVersion } from "./new-version"
 
 /**
  * Lectura de imágenes DICOM 2D para el visor (PS3.5/PS3.3): sintaxis nativas
@@ -343,6 +344,11 @@ async function decodeFrame(ds: dicomParser.DataSet, frame: number): Promise<Dico
       decoded = await codec(new Uint8Array(encapsulatedFrame(ds, pixel, frame, frames)))
     } catch (error) {
       if (error instanceof DicomUnsupportedError) throw error
+      // El lector baja al abrir la imagen: si no bajó, no es culpa del archivo.
+      if (isChunkLoadError(error)) {
+        markNewVersion()
+        throw new DicomUnsupportedError("No se pudo cargar el lector de esta imagen. Recarga la página para verla.")
+      }
       throw new DicomUnsupportedError(`No se pudo descomprimir la imagen: ${DOWNLOAD_HINT}`)
     }
     // Lo que entrega el códec debe coincidir con lo que declara el archivo.

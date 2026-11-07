@@ -253,7 +253,8 @@ export function DocumentViewerHost({
         patientId={patientId}
         doc={doc}
         open
-        canWrite={canWrite}
+        // Una tomografía retirada se abre solo para mirar: no se mide ni se guarda una vista de ella.
+        canWrite={canWrite && !doc.retiredAt}
         onClose={onClose}
         onDetails={() => setDetails(true)}
       />

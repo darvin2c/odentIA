@@ -13,6 +13,7 @@ import {
   MEASUREMENT_VIEWS,
   pendingImagingFiles,
   retireImagingMeasurement,
+  setImagingStudyArch,
   setImagingThumbnail,
   startImagingStudyUpload,
 } from "@odentia/services"
@@ -71,6 +72,13 @@ const measurementInput = z
   })
   .strict()
 const indexesInput = z.object({ indexes: z.array(z.number().int().min(0)).min(1).max(BATCH) }).strict()
+// mm dentro del volumen: nunca negativos, y una tomografía no llega a un metro.
+const mm = z.number().finite().min(0).max(1000)
+const archInput = z
+  .object({
+    arch: z.object({ points: z.array(z.tuple([mm, mm])).length(5), z: mm }).strict().nullable(),
+  })
+  .strict()
 
 async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
   const out = new Array<R>(items.length)
@@ -121,9 +129,11 @@ export function createImagingStudiesRoute(deps: CrmDeps) {
           url: await deps.storage.uploadUrl!(file.storageKey, DICOM),
         })),
       )
+      // Solo el avance: quien recibe el CD sin leer la historia (clinical.receive)
+      // no debe recibir las piezas, etiquetas ni vínculos del documento clínico.
       return {
         state: started.state,
-        document: started.document,
+        document: { id: started.document.id },
         files: started.files,
         pending: pending.map((file) => file.index),
         targets,
@@ -227,12 +237,13 @@ export function createImagingStudiesRoute(deps: CrmDeps) {
   app.get("/:id/imaging/studies/:documentId/files", async (c) => {
     const { orgId } = orgContextOf(c)
     return runService(c, 200, async () => {
-      const { study, files } = await withOrgContext(deps.db, orgId, (tx) =>
+      const { study, files, arch } = await withOrgContext(deps.db, orgId, (tx) =>
         getImagingStudyFiles(tx, orgId, c.req.param("id"), c.req.param("documentId")),
       )
       return {
         sliceCount: study.sliceCount,
         voxelMm: study.voxelMm,
+        arch,
         files: await Promise.all(
           files.map(async (file) => ({
             index: file.index,
@@ -243,6 +254,18 @@ export function createImagingStudiesRoute(deps: CrmDeps) {
         ),
       }
     })
+  })
+
+  // El arco ajustado a mano: uno por tomografía; `null` vuelve al que propone el visor.
+  app.put("/:id/imaging/studies/:documentId/arch", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = archInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        setImagingStudyArch(tx, orgId, userId, c.req.param("id"), c.req.param("documentId"), parsed.data.arch),
+      ),
+    )
   })
 
   // Medidas guardadas (decisión 3): leerlas es clínico; guardarlas y quitarlas, escribir en la ficha.

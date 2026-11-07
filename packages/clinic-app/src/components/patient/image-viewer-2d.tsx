@@ -298,7 +298,7 @@ function failureText(error: unknown): string {
     ? error.message
     : error instanceof ApiError
       ? (error.shape.message ?? "No se pudo leer el archivo.")
-      : "El archivo no es un DICOM legible. Descárgalo para abrirlo en el programa del equipo."
+      : "El archivo no es un DICOM legible. Descárgalo para abrirlo en el programa del tomógrafo."
 }
 
 export function ImageViewer2D({

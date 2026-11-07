@@ -1782,6 +1782,13 @@ export const imagingStudy = pgTable(
     thumbnailKey: text("thumbnail_key"),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * El arco ajustado a mano para la panorámica: cinco puntos del corte axial y
+     * ese corte, en mm del volumen. Uno por tomografía; nulo es el que propone el visor.
+     */
+    archControl: jsonb("arch_control").$type<{ points: [number, number][]; z: number }>(),
+    archUpdatedBy: text("arch_updated_by").references(() => user.id),
+    archUpdatedAt: timestamp("arch_updated_at", { withTimezone: true }),
   },
   (table) => [
     foreignKey({
