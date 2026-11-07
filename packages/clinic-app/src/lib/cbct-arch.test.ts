@@ -11,6 +11,7 @@ import {
   toothAt,
   toothIndex,
 } from "./cbct-arch"
+import { describeArcPosition } from "../components/patient/tomography-panoramic"
 import { volumeFromSlices } from "./cbct-volume"
 
 const V = 0.5
@@ -124,6 +125,17 @@ describe("terceras molares y la prolongación hacia la rama", () => {
       expect(Math.abs(extended[at!]!.s - sMid)).toBeGreaterThan(Math.abs(sSecond - sMid))
       expect(toothAt(extended, at!, third < 30 ? "upper" : "lower")).toBe(third)
     }
+  })
+
+  it("en la prolongación, los mm no pasan del largo del arco y dicen «hacia la rama»", () => {
+    const last = extended.length - 1
+    const text = describeArcPosition(extended, last, 38)
+    const [along, total] = text.match(/(\d+) de (\d+) mm/)!.slice(1).map(Number)
+    expect(along).toBe(total)
+    expect(text).toMatch(/hacia la rama$/)
+    expect(describeArcPosition(extended, 0, 48)).toMatch(/^Pieza 48 · 0 de \d+ mm del arco · hacia la rama$/)
+    const middle = extended.findIndex((c) => !c.beyond) + 10
+    expect(describeArcPosition(extended, middle, null)).not.toMatch(/rama/)
   })
 
   it("en la rama, pasada la última pieza, no nombra ninguna", () => {
