@@ -19,6 +19,9 @@ jobs:
   # sus salidas. Si no se puede calcular, corre todo: falla hacia lo seguro.
   alcance:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: read
     outputs:
       solo_docs: ${{ steps.calcular.outputs.solo_docs }}
       afectados: ${{ steps.calcular.outputs.afectados }}
@@ -32,10 +35,31 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # En main se compara contra lo último que quedó en producción (estado `ci/desplegado`,
+      # que anota el job `desplegado`), no contra el commit anterior: los commits que no eran
+      # la punta al terminar sus pruebas no despliegan, y la punta solo miraba su propio cambio,
+      # así que una API cambiada en un commit intermedio quedaba sin desplegar. Sin un commit
+      # anotado entre los últimos 60, la base queda vacía y corre todo: falla hacia lo seguro.
+      - name: Buscar lo último desplegado
+        id: desplegado
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for commit in $(git rev-list --first-parent --max-count=60 "$GITHUB_SHA^" 2>/dev/null); do
+            estado=$(gh api "repos/$GITHUB_REPOSITORY/commits/$commit/statuses" \
+              --jq '[.[] | select(.context == "ci/desplegado")][0].state // empty' 2>/dev/null || true)
+            if [ "$estado" = "success" ]; then
+              echo "Lo último en producción es $commit."
+              echo "base=$commit" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "No se encontró lo último desplegado: corre todo."
       - name: Calcular qué corre
         id: calcular
         env:
-          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || steps.desplegado.outputs.base }}
           SHA: ${{ github.sha }}
         run: |
           npm install --global turbo@2.10.12
@@ -467,3 +491,32 @@ jobs:
           arbol=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$GITHUB_SHA" --jq .tree.sha)
           gh api "repos/$GITHUB_REPOSITORY/statuses/$CABEZA" -f state=success             -f context=ci/codigo-probado -f description="$arbol"             -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           echo "Probado: $arbol"
+
+  # Anota en el commit que lo que trae ya está en producción (`ci/desplegado`): el VPS y
+  # Cloudflare desplegaron, o este cambio no los tocaba. Solo en la punta de main: si main
+  # avanzó, la corrida del commit más nuevo despliega y anota. `alcance` compara contra este.
+  desplegado:
+    if: >-
+      ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      needs.alcance.result == 'success' &&
+      (needs.deploy.result == 'success' || (needs.deploy.result == 'skipped' && needs.alcance.outputs.vps != 'true')) &&
+      (needs.deploy-web.result == 'success' || (needs.deploy-web.result == 'skipped' && needs.alcance.outputs.cloudflare == '[]')) }}
+    needs: [alcance, deploy, deploy-web]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
+    steps:
+      - name: Anotar lo desplegado
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          punta=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          if [ "$punta" != "$GITHUB_SHA" ]; then
+            echo "main ya avanzó a $punta: ese commit desplegará y anotará."
+            exit 0
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=success \
+            -f context=ci/desplegado -f description="En producción" \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          echo "En producción: $GITHUB_SHA"
