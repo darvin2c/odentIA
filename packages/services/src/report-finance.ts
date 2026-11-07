@@ -693,7 +693,8 @@ async function missingExpenses(tx: Db, orgId: string, scope: ReportScope) {
   // aquí solo queda de respaldo para lo que nadie marcó.
   const repeating = await tx.execute<{ category: string; branchId: string }>(sql`
     select distinct category, branch_id as "branchId" from expense_recurring
-    where organization_id = ${orgId} and (last_month is null or last_month >= ${key(month)})`)
+    where organization_id = ${orgId} and first_month <= ${key(month)}
+      and (last_month is null or last_month >= ${key(month)})`)
   const dismissed = await tx.execute<{ category: string; branchId: string | null }>(sql`
     select category, branch_id as "branchId" from expense_gap_dismissal
     where organization_id = ${orgId} and month = ${key(month)}`)

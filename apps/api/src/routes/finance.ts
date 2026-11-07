@@ -337,6 +337,8 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
     )
   })
 
+  const recurringMonthKey = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "El mes debe tener formato AAAA-MM")
+
   app.post("/expenses", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "finance.write")) return forbid(c)
@@ -361,6 +363,8 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
             everyMonths: z.union([z.literal(1), z.literal(6), z.literal(12)]),
             day: z.number().int().min(1).max(31),
             memberUserId: z.string().max(200).nullish(),
+            // El mes que paga (el sueldo de octubre pagado en noviembre).
+            month: recurringMonthKey.nullish(),
           })
           .strict()
           .optional(),
@@ -379,7 +383,6 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
   })
 
   // --- Gastos que se repiten: lo por pagar del mes, pagar con un toque, «este mes no» ------------
-  const recurringMonthKey = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "El mes debe tener formato AAAA-MM")
   app.get("/expenses/recurring", async (c) => {
     const { orgId } = orgContextOf(c)
     const parsed = z

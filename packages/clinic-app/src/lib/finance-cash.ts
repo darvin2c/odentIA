@@ -798,7 +798,8 @@ export function createExpenseApi(body: {
   receiptNumber?: string
   spentAt?: string
   /** «Se repite»: queda la plantilla y este gasto es su primera ocurrencia. */
-  repeat?: { everyMonths: 1 | 6 | 12; day: number; memberUserId?: string | null }
+  /** `month`: el mes que paga (`YYYY-MM`), este o el anterior. */
+  repeat?: { everyMonths: 1 | 6 | 12; day: number; memberUserId?: string | null; month?: string }
 }): Promise<{ data: { id: string } }> {
   return apiFetch<{ data: { id: string } }>("/api/finance/expenses", {
     method: "POST",
@@ -813,6 +814,8 @@ export interface RecurringDue {
   recurringId: string
   /** `YYYY-MM`. */
   month: string
+  /** El día de la plantilla (puede ser 31); `dueDay` es el de este mes. */
+  day: number
   dueDay: number
   dueOn: string
   overdue: boolean
@@ -886,7 +889,10 @@ export function updateRecurringApi(
   return apiFetch(`/api/finance/expenses/recurring/${id}`, { method: "PATCH", body: JSON.stringify(body) })
 }
 
-export function endRecurringApi(id: string): Promise<unknown> {
+/** `stillDue`: los meses de antes del fin que quedaron sin pagar y siguen por pagar. */
+export function endRecurringApi(
+  id: string,
+): Promise<{ data: { previousLastMonth: string | null; stillDue: string[] } }> {
   return apiFetch(`/api/finance/expenses/recurring/${id}/end`, { method: "POST" })
 }
 

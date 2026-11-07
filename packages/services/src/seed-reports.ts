@@ -1017,7 +1017,10 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
           ]
       for (const item of monthly) {
         const spentAt = new Date(start + (item.day - 1) * 86_400_000 + 15 * 3_600_000)
-        if (item.cents <= 0 || spentAt.getTime() > historyEnd) continue
+        // Lo que se repite se paga hasta hoy: cortarlo en la historia (dos días antes)
+        // dejaría «vencido» lo del día 1, 18 o 28 recién sembrado.
+        const until = REPEATING.has(item.concept) ? Date.now() : historyEnd
+        if (item.cents <= 0 || spentAt.getTime() > until) continue
         const month = spentAt.toISOString().slice(0, 7)
         let link: { recurringId: string; recurringMonth: string } | Record<string, never> = {}
         if (REPEATING.has(item.concept)) {

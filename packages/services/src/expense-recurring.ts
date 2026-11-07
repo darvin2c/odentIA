@@ -124,12 +124,19 @@ export interface RepeatInput {
   day: number
   /** De quién es: solo con el tipo «Personal». */
   memberUserId?: string | null
+  /**
+   * El mes que paga este gasto (`YYYY-MM`): el sueldo de octubre pagado el 2 de
+   * noviembre es de octubre. Sin él, el de la fecha del gasto.
+   */
+  month?: string | null
 }
 
 /**
  * Registrar un gasto que se repite: la plantilla y este gasto como su primera
- * ocurrencia, en un solo paso. El mes de la primera ocurrencia es el de la fecha
- * del gasto en la zona de la clínica (cada 6 meses y cada año toman ese mes).
+ * ocurrencia, en un solo paso. El mes de la primera ocurrencia es el que paga
+ * (cada 6 meses y cada año toman ese mes), y solo puede ser este mes o el
+ * anterior: empezar antes dejaría por pagar meses que quizá ya se pagaron como
+ * gastos sueltos, y se pagarían dos veces.
  */
 export async function registerRecurringExpense(
   tx: Db,
@@ -154,7 +161,15 @@ export async function registerRecurringExpense(
   const { timezone } = await getOrgLocale(tx, orgId)
   const spentAt = expenseInput.spentAt ? new Date(expenseInput.spentAt) : new Date()
   if (!Number.isFinite(spentAt.getTime())) throw invalidField("spentAt", "Fecha ISO inválida")
-  const firstMonth = reportDayOf(timezone, spentAt).slice(0, 7)
+  const firstMonth = repeat.month?.trim() || reportDayOf(timezone, spentAt).slice(0, 7)
+  if (!isMonthKey(firstMonth)) throw invalidField("repeat.month", "El mes debe tener formato AAAA-MM")
+  const now = currentMonthIn(timezone)
+  const current = monthKey(now.year, now.month)
+  if (firstMonth !== current && firstMonth !== addMonthKey(current, -1))
+    throw invalidField(
+      "repeat.month",
+      "Para que se repita, registra el pago de este mes o del anterior. Lo de antes, anótalo como gasto suelto.",
+    )
   const [template] = await tx
     .insert(expenseRecurring)
     .values({
@@ -184,16 +199,32 @@ export interface UpdateRecurringInput {
   concept?: string
   amountCents?: number
   day?: number
+  /** Solo para confirmar la misma: la persona de un sueldo no se cambia (sería cambiar el pasado). */
   memberUserId?: string | null
   fromCash?: boolean
   /** El último mes con ocurrencia (`YYYY-MM`) o `null` para que vuelva a repetirse («Deshacer»). */
   lastMonth?: string | null
 }
 
+/** El último mes ya resuelto (pagado o «este mes no»), o null si ninguno. */
+async function lastResolvedMonth(tx: Db, orgId: string, id: string): Promise<string | null> {
+  const [settled] = await tx.execute<{ month: string | null }>(sql`
+    select max(month) as month from (
+      select recurring_month as month from expense
+        where organization_id = ${orgId} and recurring_id = ${id} and voided_at is null
+      union all
+      select month from expense_recurring_skip
+        where organization_id = ${orgId} and recurring_id = ${id} and voided_at is null
+    ) resolved`)
+  return settled?.month ?? null
+}
+
 /**
  * «Cambiar lo que se repite»: vale desde el próximo pago; lo ya pagado son gastos
- * y no cambia. Cada cuánto, la moneda, el tipo y la sede no se cambian: es dejar
- * de repetir esta y crear otra. La auditoría guarda antes y después.
+ * y no cambia. Cada cuánto, la moneda, el tipo, la sede y la persona no se
+ * cambian: es dejar de repetir esta y crear otra (la persona del sueldo de un mes
+ * pagado se lee de la plantilla). El fin no queda antes de un mes ya resuelto.
+ * La auditoría guarda antes y después.
  */
 export async function updateRecurringExpense(
   tx: Db,
@@ -208,16 +239,18 @@ export async function updateRecurringExpense(
   if (input.amountCents !== undefined) next.amountCents = centsOf(input.amountCents)
   if (input.day !== undefined) next.day = dayOf(input.day, "day")
   if (input.fromCash !== undefined) next.fromCash = input.fromCash
-  if (input.memberUserId !== undefined) {
-    const memberUserId = input.memberUserId?.trim() || null
-    if (memberUserId && current.category !== SALARY_CATEGORY)
-      throw invalidField("memberUserId", "Solo un gasto de Personal es de una persona")
-    if (memberUserId && memberUserId !== current.memberUserId)
-      await requireTeamMember(tx, orgId, memberUserId, "memberUserId")
-    next.memberUserId = memberUserId
-  }
+  if (input.memberUserId !== undefined && (input.memberUserId?.trim() || null) !== current.memberUserId)
+    throw invalidField(
+      "memberUserId",
+      "La persona no se cambia: deja de repetir este gasto y anota otro con la persona nueva",
+    )
   if (input.lastMonth !== undefined) {
     if (input.lastMonth !== null && !isMonthKey(input.lastMonth)) throw invalidField("lastMonth", "El mes debe tener formato AAAA-MM")
+    const resolved = input.lastMonth === null ? null : await lastResolvedMonth(tx, orgId, id)
+    if (input.lastMonth !== null && resolved && input.lastMonth < resolved)
+      throw invalidField("lastMonth", "Ya hay meses pagados después: el fin no puede quedar antes")
+    if (input.lastMonth !== null && input.lastMonth < addMonthKey(current.firstMonth, -1))
+      throw invalidField("lastMonth", "El fin no puede quedar antes del primer mes")
     next.lastMonth = input.lastMonth
   }
   const before: Record<string, unknown> = {}
@@ -230,9 +263,17 @@ export async function updateRecurringExpense(
     }
   }
   if (Object.keys(after).length === 0) return current
+  // Lo que se propone pagar es el último pago hecho después del último cambio. Un cambio
+  // que no toca el importe (el concepto, el día, el fin) deja fijo el que se proponía,
+  // para que «Pagar» no vuelva al importe con que se creó.
+  if (next.amountCents === undefined) {
+    const suggested = (await suggestedAmounts(tx, orgId, [current])).get(current.id) ?? current.amountCents
+    if (suggested !== current.amountCents) next.amountCents = suggested
+  }
   const [row] = await tx
     .update(expenseRecurring)
-    .set({ ...next, updatedAt: new Date() })
+    // La hora de la base, como la del gasto con que se compara.
+    .set({ ...next, updatedAt: sql`now()` })
     .where(and(eq(expenseRecurring.organizationId, orgId), eq(expenseRecurring.id, id)))
     .returning()
   await audit(tx, orgId, actorUserId, id, "finance.expense_recurring_updated", { before, after })
@@ -246,17 +287,24 @@ export async function updateRecurringExpense(
  */
 export async function endRecurringExpense(tx: Db, orgId: string, actorUserId: string, id: string) {
   const current = await lockTemplate(tx, orgId, id)
-  const [settled] = await tx.execute<{ month: string | null }>(sql`
-    select max(month) as month from (
-      select recurring_month as month from expense
-        where organization_id = ${orgId} and recurring_id = ${id} and voided_at is null
-      union all
-      select month from expense_recurring_skip
-        where organization_id = ${orgId} and recurring_id = ${id} and voided_at is null
-    ) resolved`)
-  const lastMonth = settled?.month ?? addMonthKey(current.firstMonth, -1)
+  const lastMonth = (await lastResolvedMonth(tx, orgId, id)) ?? addMonthKey(current.firstMonth, -1)
   const row = await updateRecurringExpense(tx, orgId, actorUserId, id, { lastMonth })
-  return { id, lastMonth: row.lastMonth, previousLastMonth: current.lastMonth }
+  // Lo de antes del fin que quedó sin pagar sigue por pagar: se dice, no se borra.
+  const { timezone } = await getOrgLocale(tx, orgId)
+  const now = currentMonthIn(timezone)
+  const stillDue =
+    row.lastMonth === null
+      ? []
+      : (
+          await loadOccurrences(tx, orgId, {
+            from: addMonthKey(monthKey(now.year, now.month), -RECURRING_OVERDUE_MONTHS),
+            to: row.lastMonth,
+            templateIds: [id],
+          })
+        )
+          .filter((item) => !item.paid && !item.skipped)
+          .map((item) => item.month)
+  return { id, lastMonth: row.lastMonth, previousLastMonth: current.lastMonth, stillDue }
 }
 
 async function paymentOf(tx: Db, orgId: string, id: string, month: string) {
@@ -423,6 +471,8 @@ export async function unskipRecurringOccurrence(
 export interface RecurringDue {
   recurringId: string
   month: string
+  /** El día de la plantilla (puede ser 31); `dueDay` es el de este mes. */
+  day: number
   dueDay: number
   dueOn: string
   /** Pasó su día sin pagarse (o es de un mes anterior). */
@@ -481,6 +531,13 @@ export async function getRecurringMonth(
     )
     .orderBy(asc(expenseRecurring.day), asc(expenseRecurring.concept))
   const suggested = await suggestedAmounts(tx, orgId, active)
+  // «Toca en…»: si lo de este mes ya se pagó o no hubo, el siguiente.
+  const thisMonth = isCurrent
+    ? occurrences.filter((item) => item.month === currentKey)
+    : await loadOccurrences(tx, orgId, { from: currentKey, to: currentKey, branchId: query.branchId })
+  const settledNow = new Set(thisMonth.filter((item) => item.paid || item.skipped).map((item) => item.template.id))
+  const nextOf = (template: RecurringTemplate) =>
+    nextOccurrence(template, settledNow.has(template.id) ? addMonthKey(currentKey, 1) : currentKey)
   const names = await userNamesOf(tx, [
     ...occurrences.map((item) => item.template.memberUserId),
     ...active.map((template) => template.memberUserId),
@@ -490,6 +547,7 @@ export async function getRecurringMonth(
     .map((item) => ({
       recurringId: item.template.id,
       month: item.month,
+      day: item.template.day,
       dueDay: item.dueDay,
       dueOn: item.dueOn,
       overdue: overdue(item),
@@ -539,7 +597,7 @@ export async function getRecurringMonth(
       memberUserId: template.memberUserId,
       memberName: template.memberUserId ? (names.get(template.memberUserId) ?? null) : null,
       fromCash: template.fromCash,
-      nextMonth: nextOccurrence(template, currentKey),
+      nextMonth: nextOf(template),
     })),
   }
 }

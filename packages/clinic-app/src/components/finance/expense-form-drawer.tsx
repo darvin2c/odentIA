@@ -83,8 +83,6 @@ export interface ExpenseDraft {
   amountCents: number
   /** Día del gasto, `YYYY-MM-DD`. */
   day?: string
-  /** Llega con «Se repite» marcado («Que se repita»). */
-  repeat?: boolean
 }
 
 const CATEGORY_OPTIONS = EXPENSE_CATEGORIES.map((value) => ({ value, label: value }))
@@ -114,6 +112,8 @@ interface ExpenseValues {
   every: "1" | "6" | "12"
   /** Día del mes en que se paga (1–31). */
   repeatDay: string
+  /** El mes que paga (`YYYY-MM`): este o el anterior (el sueldo de octubre pagado en noviembre). */
+  repeatMonth: string
   /** De quién es un sueldo (solo con el tipo «Personal»). */
   member: string
 }
@@ -123,6 +123,20 @@ const EVERY_CHOICES = [
   { value: "6", label: "Cada 6 meses" },
   { value: "12", label: "Cada año" },
 ]
+
+const MONTH_NAMES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "setiembre", "octubre", "noviembre", "diciembre"]
+
+/** Este mes y el anterior (`YYYY-MM`), los dos que puede pagar un gasto que empieza a repetirse. */
+function payableMonths(today: string): Array<{ value: string; label: string }> {
+  const year = Number(today.slice(0, 4))
+  const month = Number(today.slice(5, 7))
+  const prev = month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 }
+  const key = (value: { year: number; month: number }) => `${value.year}-${String(value.month).padStart(2, "0")}`
+  return [
+    { value: key({ year, month }), label: MONTH_NAMES[month - 1] ?? "" },
+    { value: key(prev), label: MONTH_NAMES[prev.month - 1] ?? "" },
+  ]
+}
 
 /** «¿Es el pago de una compra de Inventario?»: el grupo con su error debajo. */
 function PurchaseChoice({
@@ -231,6 +245,7 @@ export function ExpenseFormDrawer({
       repeats: false,
       every: "1",
       repeatDay: String(Number(today.slice(8, 10))),
+      repeatMonth: today.slice(0, 7),
       member: "",
     } as ExpenseValues,
     validators: {
@@ -295,6 +310,7 @@ export function ExpenseFormDrawer({
               repeat: {
                 everyMonths: Number(value.every) as 1 | 6 | 12,
                 day: Number(value.repeatDay),
+                month: value.repeatMonth,
                 memberUserId: value.category === "Personal" && value.member ? value.member : null,
               },
             }
@@ -310,6 +326,10 @@ export function ExpenseFormDrawer({
       tenderCents: "tender",
       tenderCurrency: "payIn",
       exchangeRate: "rate",
+      "repeat.month": "repeatMonth",
+      "repeat.day": "repeatDay",
+      "repeat.everyMonths": "every",
+      "repeat.memberUserId": "member",
     },
     formMessage: cashFormMessage,
   })
@@ -340,10 +360,10 @@ export function ExpenseFormDrawer({
       receiptKind: "",
       receiptNumber: "",
       spentDay: initial?.day && initial.day <= day ? initial.day : day,
-      // «Que se repita» desde el aviso de un gasto que falta llega con la casilla marcada.
-      repeats: initial?.repeat === true,
+      repeats: false,
       every: "1",
       repeatDay: String(Number((initial?.day && initial.day <= day ? initial.day : day).slice(8, 10))),
+      repeatMonth: day.slice(0, 7),
       member: "",
     })
     setSeen(null)
@@ -742,6 +762,28 @@ export function ExpenseFormDrawer({
                           value={field.state.value}
                           options={EVERY_CHOICES}
                           onChange={(next) => field.handleChange(next as ExpenseValues["every"])}
+                        />
+                      )}
+                    </field.Group>
+                  )}
+                </form.AppField>
+                <form.AppField name="repeatMonth">
+                  {(field) => (
+                    <field.Group
+                      legend="Este gasto es el pago de"
+                      description="El sueldo de octubre pagado en noviembre es de octubre. Desde ahí aparece por pagar cada vez que toca."
+                      className="gap-3"
+                    >
+                      {(control) => (
+                        <ChoiceButtons
+                          id={control.id}
+                          invalid={control.invalid}
+                          aria-describedby={control.describedBy}
+                          onBlur={control.onBlur}
+                          tone="primary"
+                          value={field.state.value}
+                          options={payableMonths(today)}
+                          onChange={(next) => field.handleChange(next)}
                         />
                       )}
                     </field.Group>
