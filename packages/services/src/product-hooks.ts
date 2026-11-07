@@ -87,9 +87,11 @@ export interface ProductSite {
    * El sitio en palabras, para papeles y resúmenes; null sin sitio. Corto: lo
    * que se hace («pieza 16»); largo, con sus calificadores («pieza 16 (occlusal)»);
    * entero, como título y también para las áreas («Pieza 16 (occlusal)»,
-   * «Cuadrante 1», «Arcada superior»).
+   * «Cuadrante 1», «Arcada superior»); para el paciente, el corto con su nombre
+   * común («pieza 38 (tercer molar inferior izquierdo, muela del juicio)»), como lo
+   * lee en el consentimiento.
    */
-  words(row: SiteColumns, form?: "short" | "long" | "full"): string | null
+  words(row: SiteColumns, form?: "short" | "long" | "full" | "patient"): string | null
   /**
    * Las marcas de estos sitios en la grilla del producto, para la hoja del presupuesto
    * (odentIA: las piezas FDI). Sin él, o sin ninguna marca, no hay grilla.

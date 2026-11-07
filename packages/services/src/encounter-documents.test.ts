@@ -125,7 +125,7 @@ it("el consentimiento se propone por el servicio, se prepara lleno y el cierre p
   expect(need).toMatchObject({
     templateKey: exodoncia.key,
     status: "sin_preparar",
-    procedureRef: "Exodoncia simple · pieza 38",
+    procedureRef: "Exodoncia simple · pieza 38 (tercer molar inferior izquierdo, muela del juicio)",
     diagnosisCode: "K01.1",
     services: ["Exodoncia simple"],
   })
@@ -135,7 +135,7 @@ it("el consentimiento se propone por el servicio, se prepara lleno y el cierre p
   expect(prepared.created).toHaveLength(1)
   expect(prepared.created[0]).toMatchObject({
     encounterId: v.draft.id,
-    procedureRef: "Exodoncia simple · pieza 38",
+    procedureRef: "Exodoncia simple · pieza 38 (tercer molar inferior izquierdo, muela del juicio)",
     diagnosisCode: "K01.1",
     status: "pendiente",
   })

@@ -251,7 +251,7 @@ export async function seedClinicalForms(
     const document = await createConsentDocument(tx, orgId, ownerUserId, {
       templateId: consentTpl.id,
       patientId,
-      procedureRef: "Tratamiento de conducto pieza 36",
+      procedureRef: "Tratamiento de conducto pieza 36 (primer molar inferior izquierdo)",
     })
     await signConsentDocument(tx, orgId, ownerUserId, document.id, {
       signerKind: "paciente",
@@ -264,7 +264,7 @@ export async function seedClinicalForms(
     await createConsentDocument(tx, orgId, ownerUserId, {
       templateId: consentTemplates.get("exodoncia")!.id,
       patientId,
-      procedureRef: "Exodoncia pieza 38",
+      procedureRef: "Exodoncia pieza 38 (tercer molar inferior izquierdo, muela del juicio)",
     })
   }
 

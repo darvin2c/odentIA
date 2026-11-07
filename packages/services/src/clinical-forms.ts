@@ -3068,7 +3068,7 @@ interface NeedSource {
   label: string
   /** El sitio suelto (odentIA: la pieza), para unir el diagnóstico de esa misma pieza. */
   toothNumber: number | null
-  /** El sitio en palabras («pieza 16»). */
+  /** El sitio en palabras, con su nombre para quien firma («pieza 16 (primer molar superior derecho)»). */
   where: string | null
   planItemId: string | null
   diagnosis: { code: string; system: string | null } | null
@@ -3150,7 +3150,7 @@ export async function getEncounterConsentNeeds(
       serviceName: proc.serviceName,
       label: proc.description,
       toothNumber: loose(proc),
-      where: site.words(proc, "short"),
+      where: site.words(proc, "patient"),
       planItemId: proc.planItemId,
       diagnosis: proc.diagnosisCode ? { code: proc.diagnosisCode, system: proc.diagnosisSystem } : null,
     })
@@ -3164,7 +3164,7 @@ export async function getEncounterConsentNeeds(
       serviceName: item.serviceName,
       label: item.title,
       toothNumber: loose(item),
-      where: site.words(item, "short"),
+      where: site.words(item, "patient"),
       planItemId: item.id,
       diagnosis: item.diagnosisCode ? { code: item.diagnosisCode, system: item.diagnosisSystem } : null,
     })
