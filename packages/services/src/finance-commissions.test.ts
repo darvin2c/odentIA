@@ -271,7 +271,9 @@ it("a quien deja el equipo se le paga lo pendiente, y sus meses no cambian en Re
   await f.run((tx) => setCommissionRate(tx, "org_a", f.actor, { professionalUserId: f.actor, rateBps: 4000 }))
   const period = currentPeriod()
   const report = async () => (await f.run((tx) => getReportFinance(tx, "org_a", { period: "este_mes", branchId }))).commissions
-  const wholeReport = () => f.run((tx) => getReportFinance(tx, "org_a", { period: "este_mes", branchId }))
+  // El mes en curso termina «ahora»: las dos lecturas usan la misma hora.
+  const asOf = new Date()
+  const wholeReport = () => f.run((tx) => getReportFinance(tx, "org_a", { period: "este_mes", branchId }, asOf))
   // Argos lee la misma cuenta en su vista: lo de esta sede (solo de esta prueba).
   const [sede] = await ownerDb.select({ name: branch.name }).from(branch).where(eq(branch.id, branchId))
   const argos = async () =>
