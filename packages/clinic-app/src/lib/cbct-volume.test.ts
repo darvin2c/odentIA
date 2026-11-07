@@ -83,6 +83,19 @@ describe("volumen de la tomografía", () => {
     expect(moved.hueso.center).toBeCloseTo(hueso.center + 1000, -1)
   })
 
+  it("el metal (brackets, coronas) no deja la dentina en gris oscuro con «Diente»", () => {
+    const volume = volumeFromSlices(phantom.data.map(toHu), { nx: 80, ny: 80, sx: 1, sy: 1, sz: 1 })
+    // Unos pocos vóxeles de metal muy brillante, como los brackets de la tomografía de la demo.
+    const metal = Int16Array.from(volume.data)
+    for (let i = 0; i < metal.length; i += 20011) metal[i] = 12000
+    const withMetal = computePresets(metal, { min: volume.range.min, max: 12000 })
+    const top = withMetal.diente.center + withMetal.diente.width / 2
+    expect(top).toBeLessThan(4000)
+    // El esmalte (~2850 HU) sigue cerca de lo más claro, y el arco se sigue buscando con lo más brillante.
+    expect(top).toBeGreaterThan(2000)
+    expect(withMetal.enamel).toBeGreaterThan(withMetal.hueso.center + withMetal.hueso.width / 2)
+  })
+
   it("mide distancias y ángulos con el espaciado del plano", () => {
     const image = { colMm: 0.2, rowMm: 0.4 }
     expect(planeDistanceMm(image, { x: 0, y: 0 }, { x: 10, y: 0 })).toBeCloseTo(2)

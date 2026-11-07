@@ -7,7 +7,7 @@
  */
 import { createHash, randomUUID } from "node:crypto"
 import { member, user } from "@odentia/db/schema/auth"
-import { encounter, patientDocument, serviceCatalog } from "@odentia/db/schema/clinical"
+import { encounter, imagingStudy, patientDocument, serviceCatalog } from "@odentia/db/schema/clinical"
 import { crmTask } from "@odentia/db/schema/crm"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
@@ -409,6 +409,48 @@ it("órdenes: imagen con el diagnóstico de la atención, resultado y cancelaci�
     advanceClinicalOrder(tx, "org_a", v.actor, image.id, "completado", null, { resultDocumentId: result!.id }),
   )
   expect(done).toMatchObject({ status: "completado", resultDocumentId: result!.id })
+
+  // La tomografía de la ficha cierra su orden solo cuando terminó de subirse.
+  const cbct = await v.run((tx) =>
+    createClinicalOrder(tx, "org_a", v.actor, {
+      kind: "imagen",
+      patientId: v.lucia.id,
+      encounterId: v.draft.id,
+      recipient: "Centro de imágenes",
+      title: "Tomografía (CBCT) de la pieza 38",
+    }),
+  )
+  const [tomography] = await ownerDb
+    .insert(patientDocument)
+    .values({
+      organizationId: "org_a",
+      patientId: v.lucia.id,
+      category: "radiografia",
+      imageType: "tomografia",
+      label: "Tomografía (CBCT)",
+      storageKey: `org_a/${randomUUID()}/`,
+      contentType: "application/dicom",
+      sizeBytes: 4096,
+    })
+    .returning()
+  await ownerDb.insert(imagingStudy).values({
+    documentId: tomography!.id,
+    organizationId: "org_a",
+    patientId: v.lucia.id,
+    studyInstanceUid: "2.25.38",
+    fileCount: 2,
+    totalBytes: 4096,
+    sliceCount: 2,
+  })
+  await expect(
+    v.run((tx) => advanceClinicalOrder(tx, "org_a", v.actor, cbct.id, "completado", null, { resultDocumentId: tomography!.id })),
+  ).rejects.toMatchObject({ status: 400 })
+  await ownerDb.update(imagingStudy).set({ completedAt: new Date() }).where(eq(imagingStudy.documentId, tomography!.id))
+  expect(
+    await v.run((tx) =>
+      advanceClinicalOrder(tx, "org_a", v.actor, cbct.id, "completado", null, { resultDocumentId: tomography!.id }),
+    ),
+  ).toMatchObject({ status: "completado", resultDocumentId: tomography!.id })
 
   const lab = await v.run((tx) =>
     createClinicalOrder(tx, "org_a", v.actor, {

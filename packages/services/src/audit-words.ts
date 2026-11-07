@@ -234,6 +234,8 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "imaging_study.started": say("Empezó a subir una tomografía a la ficha de un paciente"),
   "imaging_study.completed": say("Terminó de subir una tomografía a la ficha de un paciente"),
   "imaging_study.measured": say("Guardó una medida en la tomografía de un paciente"),
+  "imaging_study.arch_set": say("Ajustó el arco de la tomografía de un paciente"),
+  "imaging_study.arch_reset": say("Volvió al arco propuesto en la tomografía de un paciente"),
   // Agenda
   "appointment.created": say("Reservó una cita"),
   "appointment.moved": say("Movió una cita"),

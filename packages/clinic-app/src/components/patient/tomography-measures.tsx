@@ -1,7 +1,7 @@
 import { Button } from "@odentia/ui"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { X } from "lucide-react"
-import { useState } from "react"
+import { useId, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { formatDateTime } from "../../lib/clinical-journey"
 import { activeOrgLocale } from "../../lib/locale"
@@ -92,21 +92,27 @@ export function MeasureList({
   saved,
   canWrite,
   viewOnly,
+  note,
 }: {
   saved: SavedMeasures
   canWrite: boolean
   viewOnly: boolean
+  /** Lo orientativo de las medidas, una sola vez, debajo de la lista. */
+  note: string
 }) {
+  const titleId = useId()
   return (
-    <>
-      <h3 className="text-xs font-semibold tracking-wide text-slate-400 uppercase">Medidas guardadas</h3>
+    <section aria-labelledby={titleId} className="flex flex-col gap-2">
+      <h3 id={titleId} className="text-xs font-semibold tracking-wide text-slate-400 uppercase">
+        Medidas
+      </h3>
       {saved.measures.length === 0 ? (
         <p className="text-slate-400">
           {viewOnly
-            ? "Para medir, abre la tomografía en una computadora o una tablet."
+            ? "Sin medidas. Para medir, abre la tomografía en una computadora o una tablet."
             : canWrite
-              ? "Elige «Medir» y marca dos puntos, o «Ángulo» y marca tres; queda guardada con tu nombre."
-              : "Elige «Medir» y marca dos puntos, o «Ángulo» y marca tres."}
+              ? "Sin medidas todavía. «Medir» marca dos puntos y «Ángulo», tres; quedan guardadas con tu nombre."
+              : "Sin medidas todavía. «Medir» marca dos puntos y «Ángulo», tres."}
         </p>
       ) : (
         <ul className="flex flex-col gap-1.5">
@@ -124,7 +130,7 @@ export function MeasureList({
                       type="button"
                       size="icon-sm"
                       variant="ghost"
-                      aria-label="Quitar la medida"
+                      aria-label={`Quitar ${m.kind === "angulo" ? "el ángulo" : "la distancia"} de ${formatMeasure(m)}`}
                       onClick={() => void saved.retire(m.id)}
                     >
                       <X aria-hidden="true" />
@@ -144,10 +150,11 @@ export function MeasureList({
           {saved.error}
         </p>
       )}
-    </>
+      <p className="text-xs text-slate-400">{note}</p>
+    </section>
   )
 }
 
 /** Lo que dice junto a cada medida (decisión 9). */
 export const MEASURE_NOTE = (voxelMm: number | null) =>
-  `Medidas orientativas${voxelMm ? `, con el tamaño de vóxel del archivo (${voxelMm.toLocaleString(activeOrgLocale(), { maximumFractionDigits: 2 })} mm)` : ""}. Para planificar una cirugía, confírmalas en el programa del equipo.`
+  `Medidas orientativas${voxelMm ? `, con el tamaño de vóxel del archivo (${voxelMm.toLocaleString(activeOrgLocale(), { maximumFractionDigits: 2 })} mm)` : ""}. Para planificar una cirugía, confírmalas en el programa del tomógrafo.`
