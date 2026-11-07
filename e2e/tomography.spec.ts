@@ -111,7 +111,6 @@ test("tomografía: la carpeta del CD se sube, queda en la ficha y se abre en pan
   await page.keyboard.press("m")
   await expect(viewer.getByText(/Flechas mueven la mira/).first()).toBeVisible()
   await page.keyboard.press("Enter")
-  await page.keyboard.press("Enter")
   for (let k = 0; k < 20; k++) await page.keyboard.press("ArrowDown")
   await page.keyboard.press("Enter")
   await expect(viewer.getByText(/Distancia · corte transversal/)).toBeVisible()
@@ -126,7 +125,8 @@ test("tomografía: la carpeta del CD se sube, queda en la ficha y se abre en pan
   await expect(viewer.getByRole("complementary", { name: "Informe y datos" })).toBeVisible()
   await page.screenshot({ path: test.info().outputPath("tomografia-informe-y-datos.png") })
   await viewer.getByRole("button", { name: "Volver a la imagen" }).click()
-  await expect(viewer.getByText("Panorámica reconstruida")).toBeVisible()
+  await expect(viewer.getByRole("complementary", { name: "Informe y datos" })).toBeHidden()
+  await expect(viewer.getByRole("button", { name: "Informe y datos" })).toBeFocused()
   // La tomografía se acerca en cada vista, con el porcentaje a la vista.
   await viewer.getByRole("button", { name: "Acercar", exact: true }).first().click()
   await expect(viewer.getByRole("button", { name: /ahora al 125 %/ }).first()).toBeVisible()

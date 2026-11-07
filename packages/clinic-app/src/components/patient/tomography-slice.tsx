@@ -66,6 +66,7 @@ export function SliceCanvas({
   className,
   zoomControls = true,
   onSwipe,
+  onEscape,
 }: {
   image: PlaneImage
   window: WindowLevel
@@ -90,6 +91,8 @@ export function SliceCanvas({
   className?: string
   /** «− 100 % +» sobre el corte; en los cortes chicos solo quedan los gestos. */
   zoomControls?: boolean
+  /** Esc mientras se mide: termina de medir. */
+  onEscape?: () => void
   /** Deslizar con el corte ajustado (en el celular: el corte siguiente). */
   onSwipe?: (direction: -1 | 1) => void
 }) {
@@ -106,7 +109,7 @@ export function SliceCanvas({
   // La mira del teclado: con «Medir» o «Ángulo», las flechas la mueven un vóxel y Enter marca el punto.
   const [aim, setAim] = useState<Point | null>(null)
   // biome-ignore lint/correctness/useExhaustiveDependencies: otra herramienta u otro corte empiezan sin mira.
-  useEffect(() => setAim(null), [tool, image.width, image.height])
+  useEffect(() => setAim(null), [tool, image])
   useEffect(() => {
     const canvas = ref.current
     if (!canvas) return
@@ -251,8 +254,15 @@ export function SliceCanvas({
               }
               if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault()
-                if (!aim) setAim(from)
-                else onMark(aim)
+                setAim(from)
+                onMark(from)
+                return
+              }
+              // Esc termina de medir sin cerrar el visor (el diálogo también escucha Esc).
+              if (event.key === "Escape" && onEscape) {
+                event.preventDefault()
+                event.stopPropagation()
+                onEscape()
                 return
               }
               const page = { PageUp: -1, PageDown: 1 }[event.key]

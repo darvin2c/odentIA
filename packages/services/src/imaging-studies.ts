@@ -371,6 +371,24 @@ export async function markImagingFilesUploaded(
 }
 
 /** Guarda la miniatura que armó el navegador con el corte del medio. */
+/**
+ * ¿Se puede poner la miniatura? Quien escribe en la ficha puede cambiarla; quien
+ * solo recibe el CD, ponerla una vez. Se pregunta antes de subir la imagen, para
+ * no dejar en el almacenamiento una que se rechaza.
+ */
+export async function assertImagingThumbnail(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  documentId: string,
+  options: { replace: boolean },
+): Promise<void> {
+  const { study, retiredAt } = await requireStudy(tx, orgId, patientId, documentId)
+  if (retiredAt) throw new ServiceError("DOCUMENT_RETIRED", 409, "La tomografía está retirada")
+  if (study.thumbnailKey && !options.replace)
+    throw new ServiceError("THUMBNAIL_EXISTS", 409, "La tomografía ya tiene su miniatura")
+}
+
 export async function setImagingThumbnail(
   tx: Db,
   orgId: string,
@@ -380,10 +398,7 @@ export async function setImagingThumbnail(
   /** Quien escribe en la ficha puede cambiarla; quien solo recibe el CD, ponerla una vez. */
   options: { replace: boolean },
 ): Promise<void> {
-  const { study, retiredAt } = await requireStudy(tx, orgId, patientId, documentId)
-  if (retiredAt) throw new ServiceError("DOCUMENT_RETIRED", 409, "La tomografía está retirada")
-  if (study.thumbnailKey && !options.replace)
-    throw new ServiceError("THUMBNAIL_EXISTS", 409, "La tomografía ya tiene su miniatura")
+  await assertImagingThumbnail(tx, orgId, patientId, documentId, options)
   await tx
     .update(imagingStudy)
     .set({ thumbnailKey })

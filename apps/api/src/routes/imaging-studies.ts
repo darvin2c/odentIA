@@ -2,6 +2,7 @@ import { sniffDocumentMime } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
 import {
   addImagingMeasurement,
+  assertImagingThumbnail,
   cancelImagingUpload,
   getImagingStudyFiles,
   getPatientDocument,
@@ -206,9 +207,13 @@ export function createImagingStudiesRoute(deps: CrmDeps) {
     const mime = sniffDocumentMime(bytes)
     if (mime !== "image/webp" && mime !== "image/png" && mime !== "image/jpeg")
       return c.json(errorBody(c, "VALIDATION", "La miniatura debe ser una imagen"), 400)
+    const replace = canAccess(memberRole, "clinical.write")
     return runService(c, 200, async () => {
-      // Comprueba antes de guardar nada que la tomografía es de esta ficha.
-      await withOrgContext(deps.db, orgId, (tx) => getPatientDocument(tx, orgId, patientId, documentId))
+      // Comprueba antes de guardar nada que la tomografía es de esta ficha y que se le puede poner.
+      await withOrgContext(deps.db, orgId, async (tx) => {
+        await getPatientDocument(tx, orgId, patientId, documentId)
+        await assertImagingThumbnail(tx, orgId, patientId, documentId, { replace })
+      })
       const ref = await deps.storage.putPatientDocument({
         orgId,
         patientId,
@@ -217,9 +222,7 @@ export function createImagingStudiesRoute(deps: CrmDeps) {
         ext: mime === "image/webp" ? "webp" : mime === "image/png" ? "png" : "jpg",
       })
       await withOrgContext(deps.db, orgId, (tx) =>
-        setImagingThumbnail(tx, orgId, patientId, documentId, ref.objectKey, {
-          replace: canAccess(memberRole, "clinical.write"),
-        }),
+        setImagingThumbnail(tx, orgId, patientId, documentId, ref.objectKey, { replace }),
       )
       return { ok: true }
     })

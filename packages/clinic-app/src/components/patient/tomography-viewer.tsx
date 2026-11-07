@@ -38,7 +38,7 @@ import { PanoramicView, type SavedArch } from "./tomography-panoramic"
 import { MEASURE_KEYS_HINT, type PlaneMeasure, type Point, SliceCanvas, type Tool } from "./tomography-slice"
 import { Tomography3D } from "./tomography-3d"
 import { usePatientName, ViewerShell } from "./viewer-shell"
-import { formatDateTime } from "../../lib/clinical-journey"
+import { formatDate } from "../../lib/clinical-journey"
 import { activeOrgLocale } from "../../lib/locale"
 import { categoryLabel, imageTypeLabel, reportStatusLabel, takenAt } from "./document-labels"
 import type { PatientDocument } from "../../lib/patients"
@@ -166,10 +166,13 @@ function ThreePlanes({
   saved,
   show3d,
   onExpand3d,
+  onStopTool,
 }: {
   volume: CbctVolume
   window: WindowLevel
   tool: Tool
+  /** Esc mientras se mide: termina de medir. */
+  onStopTool: () => void
   saved: SavedMeasures
   /** El cuarto cuadro: el 3D para mostrar (en la computadora). */
   show3d: boolean
@@ -183,7 +186,8 @@ function ThreePlanes({
     y: Math.floor(volume.ny / 2),
     z: detectArch(volume)?.z ?? Math.floor(volume.nz / 2),
   }))
-  const [draft, setDraft] = useState<{ plane: Plane; points: Point[] } | null>(null)
+  // El borrador es de un corte: cambiar de corte a mitad de una medida la empieza de nuevo.
+  const [draft, setDraft] = useState<{ plane: Plane; at: number; points: Point[] } | null>(null)
   // Cambiar de herramienta descarta los puntos a medio marcar.
   // biome-ignore lint/correctness/useExhaustiveDependencies: depende solo de la herramienta a propósito.
   useEffect(() => setDraft(null), [tool])
@@ -221,9 +225,10 @@ function ThreePlanes({
     )
   const mark = (plane: Plane, p: Point) => {
     const needed = tool === "angulo" ? 3 : 2
-    const current = draft?.plane === plane ? draft.points : []
+    const at = indexOf(plane)
+    const current = draft?.plane === plane && draft.at === at ? draft.points : []
     const points = [...current, p]
-    if (points.length < needed) return setDraft({ plane, points })
+    if (points.length < needed) return setDraft({ plane, at, points })
     const image = images[plane]
     // Puntos en mm dentro del volumen, como se guardan.
     const toMm = (q: Point): Vec3 => {
@@ -278,6 +283,7 @@ function ThreePlanes({
       {(["axial", "coronal", "sagittal"] as const).map((plane) => (
         <div key={plane} className="flex min-h-0 min-w-0 flex-col bg-black">
           <SliceCanvas
+            onEscape={onStopTool}
             className="flex min-h-0 flex-1 items-center"
             image={images[plane]}
             window={window}
@@ -285,7 +291,7 @@ function ThreePlanes({
             technical={PLANE_NAMES[plane].technical}
             cross={crossOf(plane)}
             measures={shown(plane)}
-            draft={draft?.plane === plane ? draft.points : undefined}
+            draft={draft?.plane === plane && draft.at === indexOf(plane) ? draft.points : undefined}
             tool={tool}
             onPick={(p) => pick(plane, p)}
             onMark={(p) => mark(plane, p)}
@@ -530,6 +536,7 @@ export function TomographyViewer({
   const [view, setView] = useState<TomographyView>("panoramica")
   const [adjusting, setAdjusting] = useState(false)
   const [facts, setFacts] = useState(false)
+  const factsButton = useRef<HTMLButtonElement | null>(null)
   const [single, setSingle] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const window = volume
@@ -639,6 +646,7 @@ export function TomographyViewer({
             </Tabs>
           )}
           <Button
+            ref={factsButton}
             type="button"
             size="sm"
             variant={facts ? "secondary" : "ghost"}
@@ -746,7 +754,16 @@ export function TomographyViewer({
     >
       {/* «Informe y datos» se abre encima de la columna derecha: la imagen, la pestaña y la pieza quedan igual. */}
       <div className="relative flex min-h-0 flex-1 flex-col">
-      {facts && <TomographyFacts doc={doc} onClose={() => setFacts(false)} onEdit={onDetails} />}
+      {facts && (
+        <TomographyFacts
+          doc={doc}
+          onClose={() => {
+            setFacts(false)
+            factsButton.current?.focus()
+          }}
+          onEdit={onDetails}
+        />
+      )}
       {single && loaded.files.data ? (
         <SingleSlices files={loaded.files.data.data.files} onRetry={() => void loaded.files.refetch()} />
       ) : loaded.error ? (
@@ -794,6 +811,7 @@ export function TomographyViewer({
                 volume={volume}
                 window={window}
                 tool={viewOnly ? "ninguna" : tool}
+                onStopTool={() => setTool("ninguna")}
                 saved={saved}
                 show3d={!viewOnly}
                 onExpand3d={() => {
@@ -826,7 +844,8 @@ export function TomographyViewer({
 function TomographyFacts({ doc, onClose, onEdit }: { doc: PatientDocument; onClose: () => void; onEdit?: () => void }) {
   const rows: [string, string][] = [
     ["Tipo", imageTypeLabel(doc.imageType) ?? categoryLabel(doc.category)],
-    [doc.capturedAt ? "Tomada" : "Subida", formatDateTime(takenAt(doc))],
+    // La fecha del estudio DICOM no trae hora: se dice solo el día, como en el resto de la ficha.
+    [doc.capturedAt ? "Tomada" : "Subida", formatDate(takenAt(doc))],
     ...(doc.imaging
       ? ([
           [

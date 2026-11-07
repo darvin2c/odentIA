@@ -556,6 +556,7 @@ export function PanoramicView({
         {phoneView === "panoramica" ? (
           pano ? (
             <SliceCanvas
+              onEscape={() => onTool("ninguna")}
               className="flex items-center"
               image={pano}
               window={window}
@@ -579,6 +580,7 @@ export function PanoramicView({
           )
         ) : chosen ? (
           <SliceCanvas
+            onEscape={() => onTool("ninguna")}
             className="flex min-h-[55dvh] items-center"
             image={chosen.image}
             window={window}
@@ -659,6 +661,7 @@ export function PanoramicView({
       <div className="flex min-w-0 flex-col gap-px bg-slate-800 lg:min-h-0 lg:flex-1">
         {pano ? (
           <SliceCanvas
+            onEscape={() => onTool("ninguna")}
             className="flex items-center lg:min-h-0 lg:flex-[3]"
             image={pano}
             window={window}
@@ -691,6 +694,7 @@ export function PanoramicView({
               const k = CROSS_OFFSETS[i]!
               return (
                 <SliceCanvas
+                  onEscape={() => onTool("ninguna")}
                   key={k}
                   zoomControls={false}
                   className={k === 0 ? "ring-2 ring-amber-500 ring-inset" : ""}
@@ -738,6 +742,7 @@ export function PanoramicView({
       </div>
       <aside className="flex w-full shrink-0 flex-col gap-px border-slate-800 bg-slate-800 lg:w-80 lg:border-l">
         <SliceCanvas
+          onEscape={() => onTool("ninguna")}
           className="flex items-center"
           image={axial}
           window={window}

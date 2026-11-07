@@ -209,7 +209,8 @@ function Stage({
     }
   }, [source, flat, view.orientation, points, size.width, size.height, aim, measuring])
   const onAimKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (!measuring) return
+    // Las teclas de «Acercar» y «Alejar», que viven dentro del marco, siguen siendo suyas.
+    if (!measuring || event.target !== event.currentTarget) return
     const unit = Math.max(1, Math.round(size.width / 400))
     const step = event.shiftKey ? unit * 10 : unit
     const move = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[event.key]
@@ -223,8 +224,8 @@ function Stage({
       })
     } else if (event.key === "Enter" || event.key === " ") {
       event.preventDefault()
-      if (!aim) setAim(from)
-      else onPoint(fromOriented(aim, source.width, source.height, view.orientation))
+      setAim(from)
+      onPoint(fromOriented(from, source.width, source.height, view.orientation))
     }
   }
 
