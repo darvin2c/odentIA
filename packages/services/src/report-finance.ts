@@ -756,7 +756,8 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
   const commissions = await commissionsMany(tx, orgId, spans, { currency, branchId })
   const expenses = await expensesMany(tx, orgId, spans, { branchId })
   const debts = await debtAgingMany(tx, orgId, [window.end, window.previous.end], { currency, branchId })
-  const [owedCommissions] = await commissionsOwedMany(tx, orgId, [window.end], { currency, branchId })
+  // Lo que se debía al cerrar el periodo y lo que se debe hoy: la misma cuenta en dos momentos.
+  const [owedCommissions, owedNow] = await commissionsOwedMany(tx, orgId, [window.end, now], { currency, branchId })
   const [unpaid] = await unpaidPurchasesMany(tx, orgId, [window.end], { branchId })
   const adjustments = await pendingCommissionAdjustments(tx, orgId, currency, branchId)
   const taxName = (await orgTaxes(tx, orgId))?.name ?? null
@@ -809,6 +810,8 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
       /** Lo del periodo que aún no se paga, menos lo que hay que descontarle a cada uno. */
       pendingCents: pending.reduce((total, cents) => total + cents, 0),
       professionals: pending.filter((cents) => cents > 0).length,
+      /** Lo nuevo del periodo aún sin registrar, antes de descuentos: si hay, algo queda por hacer en Comisiones. */
+      freshCents: sumOf(commissions[0], (item) => item.freshCents),
     },
     /** La cascada: lo cobrado, las comisiones generadas y cada tipo de gasto que tuvo algo (sin el pago de comisiones). */
     cascade: {
@@ -837,7 +840,11 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
      * siguiente (antes de descontarle el de las compras; no se acumula).
      */
     payables: {
-      commissions: owedCommissions ?? { cents: 0, professionals: 0 },
+      commissions: {
+        ...(owedCommissions ?? { cents: 0, professionals: 0 }),
+        /** Lo que se debe hoy (igual a `cents` en un periodo en curso). */
+        nowCents: owedNow?.cents ?? 0,
+      },
       salesTax: { cents: Math.max(0, taxOf(0)) },
       purchases: purchasesDueOf(unpaid, scope.money),
     },

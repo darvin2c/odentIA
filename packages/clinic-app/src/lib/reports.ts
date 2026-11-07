@@ -617,7 +617,14 @@ export interface ReportFinance extends ReportHead {
   trend: FinanceSpan[]
   /** Lo cobrado en otra moneda sin valor ni factor (filas viejas): no se puede sumar. */
   otherCurrencies: Array<{ currency: string; cobradoCents: number }>
-  commissions: { generatedCents: number; paidCents: number; pendingCents: number; professionals: number }
+  commissions: {
+    generatedCents: number
+    paidCents: number
+    pendingCents: number
+    professionals: number
+    /** Lo nuevo del periodo aún sin registrar, antes de descuentos. */
+    freshCents: number
+  }
   cascade: {
     cobradoCents: number
     taxCents: number
@@ -642,7 +649,8 @@ export interface ReportFinance extends ReportHead {
     overdueCents: number
   }
   payables: {
-    commissions: { cents: number; professionals: number }
+    /** Lo que se debía al cerrar el periodo y, en `nowCents`, lo que se debe hoy. */
+    commissions: { cents: number; professionals: number; nowCents: number }
     /** El impuesto de lo cobrado en el periodo, que se paga el mes siguiente. */
     salesTax: { cents: number }
     purchases: {

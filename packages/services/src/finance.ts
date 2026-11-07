@@ -77,6 +77,8 @@ import type { TicketFrozen } from "./payments.js"
 import { digitsContain, foldedWordsMatch, referenceNumber, searchDigits, textMatchesWords } from "./search-text.js"
 export const MOVEMENT_DIRECTIONS = ["ingreso", "egreso"] as const
 export const EXPENSE_CATEGORIES = ["Personal", "Alquiler", "Laboratorio", "Materiales", "Servicios", "Impuestos", "Otros"] as const
+/** Los tipos con que se filtra Gastos: los de un gasto y el pago de comisiones, que va aparte de «Personal». */
+export const EXPENSE_FILTER_TYPES = [...EXPENSE_CATEGORIES, "Pago de comisiones"] as const
 /** El tipo del pago del impuesto de lo cobrado (ADR 0083): solo un gasto de «Impuestos» puede serlo. */
 export const SALES_TAX_EXPENSE_CATEGORY = "Impuestos"
 
@@ -1448,11 +1450,15 @@ export async function getMonthExpenses(
   const valueOf = (row: { amountCents: number; businessCents: number | null; currency: string }) =>
     orgPartValue(row.amountCents, row, money)
   const live = rows.filter((row) => !row.voidedAt && valueOf(row) !== null)
+  const settlementOf = await commissionPaymentsOf(tx, orgId, rows.map((row) => row.id))
+  // El pago de comisiones va aparte de «Personal», como en Reportes: así «Personal» dice lo mismo en
+  // las dos pantallas (los sueldos) y el pago de comisiones tiene su propia cifra.
   const byCategoryValues = new Map<string, Array<MoneyFraction | null>>()
   for (const row of live) {
-    const list = byCategoryValues.get(row.category) ?? []
+    const key = settlementOf.has(row.id) ? COMMISSION_PAYMENTS_CONCEPT : row.category
+    const list = byCategoryValues.get(key) ?? []
     list.push(valueOf(row))
-    byCategoryValues.set(row.category, list)
+    byCategoryValues.set(key, list)
   }
   const byCategory = new Map(
     [...byCategoryValues].map(([category, values]) => [
@@ -1469,12 +1475,13 @@ export async function getMonthExpenses(
         .leftJoin(supplier, and(eq(supplier.organizationId, purchaseOrder.organizationId), eq(supplier.id, purchaseOrder.supplierId)))
         .where(and(eq(purchaseOrder.organizationId, orgId), inArray(purchaseOrder.id, orderIds)))
     : []
-  const settlementOf = await commissionPaymentsOf(tx, orgId, rows.map((row) => row.id))
   const detailed = rows.map((row) => {
     const order = orders.find((item) => item.id === row.purchaseOrderId)
     const settlement = settlementOf.get(row.id)
     return {
       ...row,
+      // El tipo con que se ve y se filtra: el mismo que su cifra del mes (`byCategory`).
+      category: settlement !== undefined ? COMMISSION_PAYMENTS_CONCEPT : row.category,
       fromCash: row.shiftId !== null,
       purchaseOrderNumber: order?.orderNumber ?? null,
       supplierName: order?.supplierName ?? null,
