@@ -69,6 +69,7 @@ import {
 import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { useOrgProfile } from "../../lib/org"
+import { usePageDraftGuard } from "../../lib/page-draft-guard"
 import { ageFrom, type Encounter, type EncounterDetail, hcLabel, type PatientFull } from "../../lib/patients"
 import { productUi } from "../../product/product-ui"
 import { AttendingForNotice } from "../agenda/attending-for-notice"
@@ -404,6 +405,10 @@ export function EncounterEditor({
 
   const [saveState, setSaveState] = useState<SaveState>("saved")
   const [saveError, setSaveError] = useState<string | null>(null)
+  // Sin conexión o con el guardado fallido, lo escrito vive solo en esta pantalla:
+  // salir por la miga, recargar o cerrar pregunta antes (QA del 6 nov: se perdía
+  // la evolución sin aviso). Mientras guarda normalmente no pregunta nada.
+  const unsavedGuard = usePageDraftGuard(saveState === "offline" || saveState === "error")
   const [childCount, setChildCount] = useState(0)
   const [explicitSaving, setExplicitSaving] = useState(false)
   const [finalizing, setFinalizing] = useState(false)
@@ -2505,6 +2510,7 @@ export function EncounterEditor({
           onSaved={() => void refreshClosing()}
         />
       ) : null}
+      {unsavedGuard.dialog}
     </div>
   )
 }
