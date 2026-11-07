@@ -1,4 +1,4 @@
-import type { Db } from "@odentia/db"
+import { type Db, withOrgContext } from "@odentia/db"
 import {
   CONSENT_DECLARATION,
   CONSENT_SECTION_LABELS,
@@ -1999,6 +1999,33 @@ export async function ensureClinicConsents(
   }
   await linkServicesToSuggestedConsents(tx, orgId, actorUserId, { templateKeys: created.map((row) => row.key) })
   return created
+}
+
+/**
+ * A cada clínica, las plantillas sugeridas que le falten (por clave), con su texto por
+ * defecto, activas y unidas a sus servicios, como al nacer. Lo que ya tiene —también lo
+ * editado, apagado o archivado— no se toca: un texto sugerido mejorado es solo para las
+ * clínicas nuevas; una plantilla sugerida nueva entra a todas. Lo corre el worker; una
+ * clínica que falla no frena a las demás.
+ */
+export async function ensureSuggestedConsentsEverywhere(
+  ownerDb: Db,
+  appDb: Db,
+): Promise<{ clinics: number; created: number; failed: number }> {
+  // Solo las clínicas ya dadas de alta (con su perfil): las demás nacen con todo.
+  const rows = await ownerDb.select({ orgId: orgProfile.organizationId }).from(orgProfile)
+  const summary = { clinics: 0, created: 0, failed: 0 }
+  for (const { orgId } of rows) {
+    try {
+      const created = await withOrgContext(appDb, orgId, (tx) => ensureClinicConsents(tx, orgId, null))
+      summary.clinics++
+      summary.created += created.length
+    } catch (error) {
+      summary.failed++
+      console.error("consentimientos sugeridos", orgId, error)
+    }
+  }
+  return summary
 }
 
 export interface CreateConsentDocumentInput {
