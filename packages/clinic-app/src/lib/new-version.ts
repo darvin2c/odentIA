@@ -6,7 +6,7 @@ import { toast } from "@odentia/ui"
  * despliegue deja solo los nuevos), a veces un corte de la conexión. Lo que
  * baja recién al abrirse (las piezas, el 3D, los lectores de imágenes) no se
  * encuentra. No se recarga sola: cortaría la subida de un CD o borraría lo que
- * alguien está escribiendo. Se avisa una vez, con la salida (ADR 0148).
+ * alguien está escribiendo. Se avisa una vez, con la salida (ADR 0149).
  */
 
 let warned = false
