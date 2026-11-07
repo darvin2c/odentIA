@@ -323,7 +323,7 @@ function PathChoice({
   disabled: boolean
 }): React.JSX.Element {
   const field = useFieldContext<string>()
-  const item = "flex min-h-11 cursor-pointer items-start gap-3 rounded-xl border bg-card p-3 text-sm font-normal has-[[data-checked]]:border-primary has-[[data-checked]]:bg-primary-soft"
+  const item = "flex w-full min-h-11 cursor-pointer items-start gap-3 rounded-xl border bg-card p-3 text-sm font-normal has-[[data-checked]]:border-primary has-[[data-checked]]:bg-primary-soft"
   return (
     <RadioGroup
       id={control.id}
@@ -717,7 +717,10 @@ export function BudgetResponse({
     return (
       <li key={line.id} className="flex flex-col gap-2 px-3 py-3">
         <div className="flex gap-3 text-sm">
-          <span className="min-w-0 flex-1 font-medium">{line.title}</span>
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="font-medium">{line.title}</span>
+            {treatmentSiteLabel(line) ? (<span className="text-xs text-muted-foreground">{treatmentSiteLabel(line)}</span>) : null}
+          </span>
           <span className="whitespace-nowrap tabular-nums">
             {line.lineTotalCents == null ? "Sin precio" : money.plain(line.lineTotalCents, line.currency)}
           </span>

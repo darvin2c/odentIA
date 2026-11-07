@@ -2057,6 +2057,23 @@ export async function deliverBudget(
       ),
     },
   })
+  // Lo que la revisión ya trae respondido decide su oportunidad como una respuesta.
+  if (delivered.status !== "presentado") {
+    const carriedLines = await listBudgetLines(tx, orgId, patientId, budgetId)
+    const valuedNow = valueOptionOf(await listOptions(tx, orgId, [budgetId]))
+    const own = carriedLines.filter((line) => !valuedNow || line.optionId === valuedNow.id)
+    const finals = new Map(own.map((line) => [line.planItemId, line.decision] as const))
+    await decideBudgetOpportunity(tx, orgId, {
+      patientId,
+      budgetId,
+      status: delivered.status,
+      awaitsAnswer: budgetAwaitsAnswer({ status: delivered.status, items: carriedLines }),
+      serviceIds: [...new Set(own.map((line) => line.serviceId).filter((id): id is string => !!id))],
+      accepted: await acceptedValueOf(tx, orgId, own, finals),
+      waiting: await waitingValueOf(tx, orgId, own, finals),
+      title: budgetInterest(own, delivered.title).title,
+    })
+  }
   await notifyBudget(tx, orgId)
   return withoutFindings(delivered)
 }
@@ -2288,12 +2305,7 @@ async function adjustOneLine(
     }
   }
   lineTotal({ billingMode: line.billingMode, sessionsPlanned }, priceCents)
-  if (
-    locked &&
-    (priceCents !== line.priceCents ||
-      promotionId !== line.promotionId ||
-      sessionsPlanned !== line.sessionsPlanned)
-  ) {
+  if (locked && (priceCents !== line.priceCents || promotionId !== line.promotionId)) {
     const message = `«${line.title}» ya se hizo o se cobró: su precio no cambia`
     throw new ServiceError("BUDGET_LINE_USED", 409, message, { [`${at}.priceCents`]: message })
   }
@@ -2468,6 +2480,10 @@ export async function decideBudget(
     .orderBy(asc(treatmentPlanItem.id))
     .for("update")
   const chosenItems = new Set(lines.map((line) => line.planItemId))
+  if (chosen && !already && options.length > 1 && !lines.some((line) => isOpen(line.decision))) {
+    const message = "Ese camino ya no tiene nada por responder"
+    throw new ServiceError("BUDGET_DECISION_FINAL", 409, message, { optionId: message })
+  }
   // Lo que se escribe ahora: solo lo que esperaba respuesta.
   const answering = new Map(
     lines
@@ -2645,9 +2661,10 @@ export async function decideBudget(
   })
   // Lo que vale: el camino elegido o, mientras decide, el recomendado.
   const own = chosen ? lines : allLines.filter((line) => line.optionId === valued?.id)
+  // Espera respuesta si algo de lo respondido sigue abierto, de cualquier camino.
   const awaitsAnswer = budgetAwaitsAnswer({
     status,
-    items: own.map((line) => ({ decision: finalOf(line) })),
+    items: lines.map((line) => ({ decision: finalOf(line) })),
   })
   // Aceptarlo gana su oportunidad y rechazarlo la pierde cuando ya no le queda
   // nada por responder; mientras algo espera (lo está pensando), sigue abierta.
@@ -3027,6 +3044,8 @@ async function insertRevisionLine(
     carried: BudgetLineWithStatus | null
     billingModes: Record<string, string>
     revisedAt: Date
+    /** Ya se hizo o se cobró: lo acordado no cambia, ni por una promoción que terminó. */
+    keepTerms?: boolean
   },
 ): Promise<void> {
   const { item, carried } = input
@@ -3036,7 +3055,7 @@ async function insertRevisionLine(
     : null
   let priceCents = snapshot.priceCents
   let priceReason = carried?.priceReason ?? null
-  if (promotion) {
+  if (promotion && !input.keepTerms) {
     const [promo] = await tx
       .select()
       .from(promotionTable)
@@ -3136,8 +3155,9 @@ function sameTerms(
  * Al entregar una revisión, lo que ya estaba aceptado y no cambió de
  * condiciones queda aceptado, y lo hecho o cobrado también: solo se vuelve a
  * preguntar por lo que cambió, lo nuevo y lo que no tenía respuesta. La versión
- * anterior no se toca. Si no queda nada por preguntar, la revisión queda
- * aceptada como la anterior.
+ * anterior no se toca. Con algo aceptado y algo por preguntar, la revisión queda
+ * «parcial» (lo aceptado se agenda y se atiende mientras tanto); si no queda nada
+ * por preguntar, aceptada como la anterior.
  */
 async function carryRevisionAnswers(
   tx: Db,
@@ -3174,11 +3194,11 @@ async function carryRevisionAnswers(
         ),
       ),
     )
-  if (carried.length < lines.length) return revision
   const [settled] = await tx
     .update(treatmentBudget)
     .set({
-      status: "aceptado",
+      // Algo aceptado y algo por responder: «parcial», como quien respondió una parte.
+      status: carried.length < lines.length ? "parcial" : "aceptado",
       acceptedByName: previous.acceptedByName,
       decisionContactId: previous.decisionContactId,
       decisionNote: previous.decisionNote,
@@ -3301,9 +3321,18 @@ export async function reviseBudget(
     }
   }
   // Cada camino que conserva algún tratamiento; lo nuevo entra a todos.
+  // Un camino se conserva si algo propio suyo (no lo común) sigue en la revisión.
+  const common = commonPlanItems(oldLines, sources.length)
   const kept = sources.filter((source) =>
-    oldLines.some((line) => line.optionId === source.id && input.itemIds.includes(line.planItemId)),
+    oldLines.some(
+      (line) =>
+        line.optionId === source.id &&
+        input.itemIds.includes(line.planItemId) &&
+        (sources.length === 1 || !common.has(line.planItemId)),
+    ),
   )
+  // Lo hecho o cobrado conserva lo acordado tal cual (también una promoción que ya terminó).
+  const used = await usedPlanItems(tx, orgId, patientId, input.itemIds)
   const plan = kept.length > 0 ? kept : sources.slice(0, 1)
   const recommended = plan.find((source) => source.isRecommended) ?? plan[0] ?? null
   // Un tratamiento que entra nuevo a la revisión toma el modo de cobro de su servicio.
@@ -3342,6 +3371,7 @@ export async function reviseBudget(
         carried: snapshot ?? null,
         billingModes,
         revisedAt,
+        keepTerms: used.has(item.id),
       })
     }
   }

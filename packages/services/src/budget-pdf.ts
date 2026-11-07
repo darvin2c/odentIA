@@ -955,7 +955,7 @@ export async function renderBudgetPdf(
     kit.gap(8)
     kit.panel({
       title: "Qué cambió en esta revisión",
-      body: `${snap.changes.map((change) => changeWords(change, money)).join(" ")} Lo demás sigue como lo aceptó.`,
+      body: `${snap.changes.map((change) => changeWords(change, money)).join(" ")} Lo demás no cambió.`,
       thickness: 1,
       size: SIZE.dense,
     })

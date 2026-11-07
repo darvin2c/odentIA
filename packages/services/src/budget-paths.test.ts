@@ -23,6 +23,7 @@ import {
 } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { addEncounterProcedure } from "./encounters.js"
+import { getPatientAccount } from "./payments.js"
 import { addPlanItem, listPlanItems } from "./plan.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 import { withOrgContext } from "@odentia/db"
@@ -116,6 +117,9 @@ it("sin elegir camino se acepta lo común y lo de la 46 queda pensándolo; la op
   expect(partial.options.map((option) => option.decision)).toEqual(["pendiente", "pendiente"])
   const [open] = await ownerDb.select().from(opportunity).where(eq(opportunity.budgetId, draft.id))
   expect(open).toMatchObject({ status: "open", amountCents: 155000 })
+  // Lo acordado de la cuenta cuenta lo común una vez, aunque esté aceptado en los dos caminos.
+  const account = await f.run((tx) => getPatientAccount(tx, "org_a", f.patient.id))
+  expect(account.byCurrency.find((row) => row.currency === "PEN")?.agreedCents).toBe(30000)
   const plan = await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id))
   expect(plan.find((item) => item.id === exodoncia.id)).toMatchObject({ decisionStatus: "pospuesto" })
   // Una semana después elige conservar: lo ya respondido no se repite.
@@ -166,7 +170,9 @@ it("la revisión de un precio pregunta solo por lo que cambió, conserva lo acep
   await f.run((tx) => deliverBudget(tx, ...f.args, revision.id))
   const sent = await f.run((tx) => getBudgetDetail(tx, "org_a", f.patient.id, revision.id))
   const decisionOf = (id: string) => sent.items.find((line) => line.planItemId === id)!.decision
-  expect(sent.status).toBe("presentado")
+  // Algo aceptado y algo por responder: «parcial», y lo aceptado se puede atender mientras tanto.
+  expect(sent.status).toBe("parcial")
+  expect(sent.awaitsAnswer).toBe(true)
   expect([resina, profilaxis, endodoncia].map((item) => decisionOf(item.id))).toEqual(["aceptado", "aceptado", "aceptado"])
   expect(decisionOf(corona.id)).toBe("pendiente")
   const plan = await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id))
@@ -177,6 +183,34 @@ it("la revisión de un precio pregunta solo por lo que cambió, conserva lo acep
     decideBudget(tx, ...f.args, revision.id, { decisions: [{ planItemId: corona.id, decision: "aceptado" }] }),
   )
   expect(answered.status).toBe("aceptado")
+})
+
+it("con un camino rechazado y otro pensándolo, la oportunidad sigue abierta; elegir un camino sin nada abierto no se puede", async () => {
+  const { f, resina, profilaxis, endodoncia, corona, exodoncia } = await ana()
+  const draft = await f.run((tx) =>
+    placeBudgetPath(tx, ...f.args, f.encounter.id, { planItemId: exodoncia.id, path: "nuevo" }),
+  )
+  await f.run((tx) => deliverBudget(tx, ...f.args, draft.id))
+  const answered = await f.run((tx) =>
+    decideBudget(tx, ...f.args, draft.id, {
+      decisions: [
+        { planItemId: resina.id, decision: "aceptado" },
+        { planItemId: profilaxis.id, decision: "aceptado" },
+        { planItemId: endodoncia.id, decision: "rechazado" },
+        { planItemId: corona.id, decision: "rechazado" },
+        { planItemId: exodoncia.id, decision: "pospuesto" },
+      ],
+    }),
+  )
+  expect(answered.awaitsAnswer).toBe(true)
+  const [open] = await ownerDb.select().from(opportunity).where(eq(opportunity.budgetId, draft.id))
+  expect(open).toMatchObject({ status: "open" })
+  // El camino de la endodoncia ya no tiene nada abierto: no se elige sin responder.
+  await expect(
+    f.run((tx) =>
+      decideBudget(tx, ...f.args, draft.id, { optionId: draft.options[0]!.id, decisions: [] }),
+    ),
+  ).rejects.toMatchObject({ code: "BUDGET_DECISION_FINAL" })
 })
 
 it("la revisión de un presupuesto con caminos sin elegir lleva los dos caminos", async () => {

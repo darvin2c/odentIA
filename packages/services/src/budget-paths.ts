@@ -154,16 +154,15 @@ export async function placeBudgetPath(
     await add(target.id)
     for (const option of options) if (option.id !== target.id && has(option.id, item.id)) await remove(option.id, [item.id])
   }
-  // Un camino que se quedó sin nada propio deja de ser camino.
-  const now = [...budget.options].sort((a, b) => a.position - b.position)
-  if (now.length > 1) {
-    const common = commonPlanItems(budget.items, now.length)
-    for (const option of now) {
-      const own = linesOf(option.id).filter((line) => !common.has(line.planItemId))
-      if (own.length === 0 && budget.options.length > 1) {
-        budget = await removeBudgetOption(tx, orgId, actorUserId, patientId, budget.id, option.id, opts)
-      }
-    }
+  // Un camino que se quedó sin nada propio deja de ser camino (lo común se mira de nuevo cada vez).
+  for (;;) {
+    if (budget.options.length < 2) break
+    const common = commonPlanItems(budget.items, budget.options.length)
+    const empty = budget.options.find(
+      (option) => !linesOf(option.id).some((line) => !common.has(line.planItemId)),
+    )
+    if (!empty) break
+    budget = await removeBudgetOption(tx, orgId, actorUserId, patientId, budget.id, empty.id, opts)
   }
   return getBudgetDetail(tx, orgId, patientId, budget.id)
 }

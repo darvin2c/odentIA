@@ -1305,8 +1305,10 @@ export async function decidePersonalLinkBudget(
   const context = await portalBudgetContext(tx, orgId, [budgetId], true)
   return {
     budget: toPortalBudget(result.budget, context),
+    // Lo común aceptado está en cada camino: cada tratamiento una vez.
     toSchedule: result.budget.items
       .filter((line) => line.decision === "aceptado" && line.itemStatus === "pendiente")
+      .filter((line, index, all) => all.findIndex((other) => other.planItemId === line.planItemId) === index)
       .map((line) => ({ planItemId: line.planItemId, title: line.title })),
   }
 }
