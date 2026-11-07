@@ -166,7 +166,7 @@ export function CommissionsAdminPanel({
     .filter((member) => canAttend(member.role))
     .filter((member) => (rateById.get(member.userId) ?? 0) === 0)
     .map((member) => ({ userId: member.userId, name: member.user.name }))
-  const nobodyHasRate = rows.every((row) => row.rateBps === 0)
+  const nobodyHasRate = rows.filter((row) => row.inTeam).every((row) => row.rateBps === 0)
   const selectedRow = rows.find((row) => row.professionalUserId === selectedId) ?? null
   const selectedName =
     selectedRow?.professionalName ??
@@ -310,7 +310,7 @@ function ProfessionalDetail({
         <QueryErrorState
           error={detailQuery.error}
           onRetry={() => void detailQuery.refetch()}
-          notFound="Esta persona ya no forma parte del equipo de la clínica."
+          notFound="Esta persona no atiende ni atendió en la clínica."
         />
       ) : detail ? (
         // Otro profesional u otro mes: el cuerpo nace de nuevo, con su lista resumida.
@@ -375,7 +375,9 @@ function ProfessionalDetailBody({
       : detail.status === "pagado"
         ? "Ya se pagó todo lo de este mes."
         : detail.rateBps === 0 && detail.baseCents > 0
-          ? "No tiene un porcentaje fijado: fíjalo para calcular lo que le corresponde."
+          ? detail.inTeam
+            ? "No tiene un porcentaje fijado: fíjalo para calcular lo que le corresponde."
+            : "Ya no está en el equipo y no tenía un porcentaje fijado: no le corresponde comisión."
           : "No hay nada por pagar: aún no se cobró nada de lo que atendió este mes."
 
   return (
@@ -399,7 +401,8 @@ function ProfessionalDetailBody({
         {detail.inTeam ? null : (
           // Su porcentaje ya no cambia (solo se fija a quien puede atender); lo que ganó se le paga igual.
           <p className="w-full text-sm text-muted-foreground">
-            Ya no está en el equipo. Lo que ganó mientras atendía se le paga igual.
+            Ya no está en el equipo. Lo que le corresponde por lo que atendió se le paga igual; su
+            porcentaje ya no cambia.
           </p>
         )}
       </div>

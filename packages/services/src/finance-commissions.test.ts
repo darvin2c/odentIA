@@ -26,7 +26,8 @@ import { createPromotion } from "./promotions.js"
 import { getReportFinance, getReportPromotions } from "./report-finance.js"
 import { getReportProfessionals } from "./report-summary.js"
 import { createPaymentMethod } from "./payment-methods.js"
-import { ownerDb, setupTestDb } from "./test-setup.js"
+import { runArgosQuery } from "./argos-query.js"
+import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 setupTestDb()
 
 async function seedBranch(): Promise<string> {
@@ -250,9 +251,9 @@ it("comisiones: porcentaje sobre lo cobrado de lo atendido, pago en un paso y aj
   expect(await view()).toMatchObject({ pendingCents: 2000, status: "por_pagar" })
 })
 
-it("a quien deja el equipo se le paga lo pendiente, y sus meses no cambian en Reportes", async () => {
+it("a quien deja el equipo se le paga lo pendiente, y sus meses no cambian en Reportes ni en Argos", async () => {
+  // El fixture ya lo hace miembro del equipo (firma como clínico).
   const f = await clinicalFixture()
-  await ownerDb.insert(member).values({ id: randomUUID(), organizationId: "org_a", userId: f.actor, role: "clinician", createdAt: new Date() })
   const branchId = await seedBranch()
   const cash = await f.run((tx) => createPaymentMethod(tx, "org_a", f.actor, { name: "Efectivo", typeCode: "10" }))
   const [procedure] = await ownerDb
@@ -270,8 +271,24 @@ it("a quien deja el equipo se le paga lo pendiente, y sus meses no cambian en Re
   await f.run((tx) => setCommissionRate(tx, "org_a", f.actor, { professionalUserId: f.actor, rateBps: 4000 }))
   const period = currentPeriod()
   const report = async () => (await f.run((tx) => getReportFinance(tx, "org_a", { period: "este_mes", branchId }))).commissions
+  const wholeReport = () => f.run((tx) => getReportFinance(tx, "org_a", { period: "este_mes", branchId }))
+  // Argos lee la misma cuenta en su vista: lo de esta sede (solo de esta prueba).
+  const [sede] = await ownerDb.select({ name: branch.name }).from(branch).where(eq(branch.id, branchId))
+  const argos = async () =>
+    Number(
+      (
+        await runArgosQuery(appDb, {
+          orgId: "org_a",
+          memberRole: "owner",
+          query: `select sum(comision) * 100 as v from comisiones where sede = '${sede!.name}'`,
+        })
+      ).rows[0]?.v ?? 0,
+    )
   const before = await report()
   expect(before).toMatchObject({ generatedCents: 20000, pendingCents: 20000 })
+  const wholeBefore = await wholeReport()
+  const argosBefore = await argos()
+  expect(argosBefore).toBe(20000)
 
   // Deja la clínica con su comisión del mes por pagar.
   await ownerDb.delete(member).where(and(eq(member.organizationId, "org_a"), eq(member.userId, f.actor)))
@@ -279,8 +296,9 @@ it("a quien deja el equipo se le paga lo pendiente, y sus meses no cambian en Re
   expect(view).toMatchObject({ inTeam: false, commissionCents: 20000, pendingCents: 20000, status: "por_pagar" })
   const month = await f.run((tx) => listMonthCommissions(tx, "org_a", period))
   expect(month.find((row) => row.professionalUserId === f.actor)).toMatchObject({ inTeam: false, pendingCents: 20000 })
-  // Lo que ganó mientras atendía no se borra de Reportes por haberse ido.
-  expect(await report()).toEqual(before)
+  // Lo que ganó mientras atendía no se borra de Reportes ni de Argos por haberse ido.
+  expect(await wholeReport()).toEqual(wholeBefore)
+  expect(await argos()).toBe(argosBefore)
   // Y se le paga igual.
   const paid = await f.run((tx) => payMonthCommission(tx, "org_a", f.actor, { professionalUserId: f.actor, ...period, branchId }))
   expect(paid.expense.amountCents).toBe(20000)

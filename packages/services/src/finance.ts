@@ -2388,8 +2388,13 @@ export async function getMonthlyCommissions(
   query: MonthlyCommissionsQuery,
   /** La clínica, si quien llama ya la leyó. */
   known?: OrgLocale,
+  /** Si sigue en el equipo, cuando quien llama ya lo sabe (la lista del mes). */
+  knownInTeam?: boolean,
 ) {
-  const { inTeam } = await requireCommissionPerson(tx, orgId, query.professionalUserId)
+  const { inTeam } =
+    knownInTeam === undefined
+      ? await requireCommissionPerson(tx, orgId, query.professionalUserId)
+      : { inTeam: knownInTeam }
   const zone = known ?? (await getOrgLocale(tx, orgId))
   const { timezone, locale, currency: unit } = zone
   const money = orgMoneyOf(zone)
@@ -2579,15 +2584,28 @@ export async function listMonthCommissions(
   const active = await collectedApplications(tx, orgId, start, end, orgMoneyOf(zone), {
     liveNow: true,
   })
-  const ids = [
+  const candidates = [
     ...new Set([...withRate.map((r) => r.userId), ...active.map((a) => a.professionalUserId)]),
   ]
-  // Quien sigue en el equipo, y quien ya no está pero tiene cobros de ese mes: lo que ganó
-  // se le paga igual. A quien salió y no tiene nada en el mes no se le lista.
+  const team = new Set(
+    candidates.length
+      ? (
+          await tx
+            .select({ userId: member.userId })
+            .from(member)
+            .where(and(eq(member.organizationId, orgId), inArray(member.userId, candidates)))
+        ).map((row) => row.userId)
+      : [],
+  )
+  // Quien sigue en el equipo, y quien ya no está pero tiene cobros de ese mes (sin cobros del mes
+  // no puede tener nada por pagar en él): lo que le corresponde se le paga igual.
+  const exMembers = new Set(active.map((a) => a.professionalUserId).filter((id) => !team.has(id)))
   const rows: CommissionSummary[] = []
-  for (const userId of ids) {
-    const view = await getMonthlyCommissions(tx, orgId, { ...query, professionalUserId: userId }, zone)
-    if (view.inTeam || view.lines.length > 0) rows.push(commissionSummary(view))
+  for (const userId of candidates) {
+    if (!team.has(userId) && !exMembers.has(userId)) continue
+    const view = await getMonthlyCommissions(tx, orgId, { ...query, professionalUserId: userId }, zone, team.has(userId))
+    // Quien salió sin comisión en el mes (por ejemplo, sin porcentaje) no se lista.
+    if (view.inTeam || view.commissionCents > 0 || view.paidCents > 0 || view.pendingCents !== 0) rows.push(commissionSummary(view))
   }
   return rows.sort(
     (a, b) => b.commissionCents - a.commissionCents || (a.professionalName ?? "").localeCompare(b.professionalName ?? ""),

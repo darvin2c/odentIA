@@ -70,7 +70,7 @@ export interface CommissionTotals {
  * cada cobro de lo que atendió un profesional (aplicación en pie hoy, sobre un
  * cargo de un procedimiento de una atención finalizada) con su porcentaje
  * vigente; lo ya pagado, con el porcentaje y el importe con que se pagó; lo
- * pagado cuyo cobro se anuló después ya no cuenta. Solo quien sigue en la clínica.
+ * pagado cuyo cobro se anuló después ya no cuenta. También de quien ya dejó la clínica.
  * Lo nuevo va con el valor congelado de su pago; lo pagado no se toca. La base no se
  * redondea por línea: la suma es la que se redondea.
  */
@@ -112,7 +112,7 @@ function commissionLinesSql(orgId: string, hull: Span, currency: string, branchI
       left join commission_rule r on r.organization_id = ${orgId} and r.professional_user_id = la.user_id
       cross join ${orgMoneySql(orgId)}
       where not exists (select 1 from frozen f where f.application_id = la.id)
-    ), member_line as (
+    ), counted_line as (
       -- Lo viejo en otra moneda, sin valor ni factor, no tiene base: no entra. Quien dejó la
       -- clínica sigue contando: lo que ganó es de los meses en que atendió, y sacarlo del equipo
       -- no reescribe esos meses ni lo que se le debe (igual que la vista de Argos).
@@ -133,7 +133,7 @@ export async function commissionsMany(
     with ${commissionLinesSql(orgId, hull, options.currency, options.branchId)}
     select s.idx, ml.user_id as "userId", round(sum(ml.base))::text as base, round(sum(ml.commission))::text as commission,
       round(sum(ml.paid))::text as paid, round(sum(ml.fresh))::text as fresh
-    from member_line ml join ${spansSql(spans, "s")} on ml.at >= s.start_at and ml.at < s.end_at
+    from counted_line ml join ${spansSql(spans, "s")} on ml.at >= s.start_at and ml.at < s.end_at
     group by s.idx, ml.user_id`)
   return bySpan(
     spans,
@@ -202,7 +202,7 @@ export async function commissionsOwedMany(
       moments.map((moment, index) => sql`(${index}::int, ${at(moment)})`),
       sql`, `,
     )}), generated as (
-      select m.idx, ml.user_id, sum(ml.commission) as cents from m join member_line ml on ml.at < m.at_moment group by m.idx, ml.user_id
+      select m.idx, ml.user_id, sum(ml.commission) as cents from m join counted_line ml on ml.at < m.at_moment group by m.idx, ml.user_id
     ), paid as (
       select m.idx, s.professional_user_id as user_id, sum(s.commission_cents) as cents
       from m join commission_settlement s on s.organization_id = ${orgId} and s.voided_at is null and s.currency = ${options.currency}
