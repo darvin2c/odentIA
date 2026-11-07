@@ -895,6 +895,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         a: "Porque descuenta lo que la persona tiene a favor (un adelanto o un cobro de más): «Debe: 100 · A favor: 100 · Saldo: 0». Así se ve en su cuenta, en su Resumen, en el portal y en los avisos. «Aplicar lo que tiene a favor» te dice el importe y la sede antes de hacerlo; al confirmar cancela la deuda y deja el movimiento registrado, sin dinero nuevo. Si no alcanza, te dice lo que falta.",
       },
       {
+        q: "¿Cómo dejo el alquiler o los sueldos de cada mes?",
+        a: "Al registrar el gasto, marca «Se repite» y elige cada cuánto (cada mes, cada 6 meses o cada año) y el día. Desde entonces aparece en Gastos, en «Por pagar», cada vez que toca: «Pagar» lo registra con un toque con el último importe, y «Pagar otro importe» sirve para lo que cambia, como la luz. Nunca se paga solo. En su menú puedes marcar «No hubo este mes», cambiarlo o dejar de repetirlo. Un sueldo puede llevar de quién es: se ve junto a su comisión. «Lo fijo del mes» suma lo que se repite y cae en ese mes.",
+        forms: ["gasto fijo", "gastos fijos", "pago mensual", "alquiler cada mes", "sueldo de la recepcionista", "gasto que se repite", "gasto recurrente"],
+      },
+      {
         q: "¿Por qué en Gastos sale «Pago de comisiones» sin decir a quién?",
         a: "Porque lo que gana cada profesional solo lo ve quien administra las comisiones. Los demás ven en Gastos una sola fila por sede con el total pagado en comisiones ese mes: suma igual que antes, pero no dice a quién se pagó. Quien administra ve cada pago con «Ver el pago», que lo lleva a Comisiones; el pago de una comisión se anula allí, no en Gastos.",
         forms: ["pago de comisiones en gastos", "por que no veo a quien se pago la comision", "anular el gasto de una comision"],

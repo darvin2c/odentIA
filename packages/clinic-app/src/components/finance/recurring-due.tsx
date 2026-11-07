@@ -22,6 +22,7 @@ import {
   type RecurringMonth,
   skipRecurringApi,
   updateRecurringApi,
+  voidExpenseApi,
 } from "../../lib/finance-cash"
 
 const MONTHS = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "setiembre", "octubre", "noviembre", "diciembre"]
@@ -77,6 +78,13 @@ export function RecurringDueSection({
       refresh()
       toast.success(
         `${row.concept} registrado · ${money(result.data.amountCents, result.data.currency)} · ${result.data.fromCash ? "Efectivo de la caja" : "Fuera de la caja"}`,
+        {
+          // Deshacer anula ese gasto: vuelve a quedar por pagar.
+          action: {
+            label: "Deshacer",
+            onClick: () => void voidExpenseApi(result.data.id, "Se deshizo el pago recién registrado").then(refresh),
+          },
+        },
       )
     },
     onError: (error, row) => {
