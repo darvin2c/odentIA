@@ -710,7 +710,9 @@ export function EncounterEditor({
           if (sentAny) setSavedAt(new Date().toISOString())
           // Un campo que cambió otra pestaña se dice junto a él, y el estado no dice «Guardado».
           if (stale || [...dirtyRef.current].some((key) => conflictRef.current.has(key))) {
-            if (stale) setSaveError(placeAutosaveError(stale))
+            // El aviso se vuelve a decir aunque se haya seguido escribiendo después del conflicto.
+            const shown = stale ?? staleRef.current
+            if (shown) setSaveError(placeAutosaveError(shown))
             setSaveState("error")
           }
         }
