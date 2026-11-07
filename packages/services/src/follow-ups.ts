@@ -14,6 +14,7 @@ import { assertOpenDraft, requireEncounter } from "./encounters.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgLocale } from "./locale.js"
 import { requirePatient } from "./patients.js"
+import { controlWindowStart } from "./to-schedule.js"
 
 export type ScheduleFollowUpInput =
   | { appointmentId: string }
@@ -40,6 +41,8 @@ function selectFollowUps(tx: Db) {
         endsAt: appointment.endsAt,
         status: appointment.status,
       },
+      // La sede del control es la de la atención donde se indicó (ADR 0152).
+      branchId: encounter.branchId,
     })
     .from(clinicalFollowUp)
     .leftJoin(
@@ -50,15 +53,27 @@ function selectFollowUps(tx: Db) {
         eq(appointment.patientId, clinicalFollowUp.patientId),
       ),
     )
+    .leftJoin(
+      encounter,
+      and(
+        eq(encounter.id, clinicalFollowUp.originEncounterId),
+        eq(encounter.organizationId, clinicalFollowUp.organizationId),
+      ),
+    )
 }
 
 function present(row: {
   control: typeof clinicalFollowUp.$inferSelect
   appointment: { id: string; startsAt: Date; endsAt: Date; status: string } | null
+  branchId: string | null
 }) {
   return {
     ...row.control,
     appointment: row.appointment,
+    /** La sede de la atención donde se indicó; nula si no tiene: se reserva en la sede activa. */
+    branchId: row.branchId,
+    /** Desde cuándo una visita lo cumple (`controlWindowStart`): «Usar esa cita» busca desde ahí. */
+    windowFrom: controlWindowStart(row.control),
     scheduledAt:
       row.appointment && ["programada", "confirmada"].includes(row.appointment.status)
         ? row.appointment.startsAt

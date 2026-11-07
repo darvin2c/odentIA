@@ -12,6 +12,9 @@ import { type SQL, type SQLWrapper, sql } from "drizzle-orm"
  * - **Control vencido sin cita**: un control pendiente cuyo día ya pasó, de una
  *   persona sin ninguna cita por venir. A un control le sirve cualquier visita:
  *   la cita no tiene que llevarlo.
+ * - **La ventana de un control** (`controlWindowStart`): desde cuándo una
+ *   visita lo cumple al firmarse, y desde cuándo una cita por venir cuenta en
+ *   «Qué sigue» y en «Usar esa cita».
  *
  * Cada regla existe en código y en SQL; cambian juntas y su prueba las compara.
  */
@@ -113,6 +116,43 @@ export function isOverdueControl(
   now: Date = new Date(),
 ): boolean {
   return control.status === "pendiente" && dayKeyIn(control.dueAt, timezone) < dayKeyIn(now, timezone) && !nextAppointmentAt
+}
+
+const DAY_MS = 86_400_000
+
+/**
+ * Desde cuándo una visita cumple un control (ADR 0152): su ventana abre
+ * `max(2 días, 25 % del intervalo)` antes de su día, donde el intervalo va de
+ * cuando se indicó a su día. Un control a 6 meses abre unos 45 días antes; uno
+ * a 7 días, 2 días antes. No tiene fin: un control vencido sigue cumpliéndose
+ * con la próxima visita. Cambia junto con `controlWindowStartSql`.
+ */
+export function controlWindowStart(control: { dueAt: Date; createdAt: Date }): Date {
+  const interval = control.dueAt.getTime() - control.createdAt.getTime()
+  return new Date(control.dueAt.getTime() - Math.max(2 * DAY_MS, interval / 4))
+}
+
+/** La ventana del control ya abrió hoy, en días de la zona de la clínica. */
+export function isControlWindowOpen(
+  control: { dueAt: Date; createdAt: Date },
+  timezone: string,
+  now: Date = new Date(),
+): boolean {
+  return dayKeyIn(controlWindowStart(control), timezone) <= dayKeyIn(now, timezone)
+}
+
+/** `controlWindowStart` en SQL, sobre una fila de `clinical_follow_up` (o un alias). */
+export function controlWindowStartSql(control: { dueAt: SQLWrapper; createdAt: SQLWrapper }): SQL {
+  return sql`(${control.dueAt} - greatest(interval '2 days', (${control.dueAt} - ${control.createdAt}) * 0.25))`
+}
+
+/** `isControlWindowOpen` en SQL: el día en que abre su ventana, en la zona de la clínica, ya llegó. */
+export function controlWindowOpenSql(
+  control: { dueAt: SQLWrapper; createdAt: SQLWrapper },
+  timezone: string,
+  now: SQLWrapper = sql`now()`,
+): SQL {
+  return sql`((${controlWindowStartSql(control)} at time zone ${timezone})::date <= (${now} at time zone ${timezone})::date)`
 }
 
 /** Control vencido sin cita, en SQL, sobre una fila de `clinical_follow_up` (o un alias). */

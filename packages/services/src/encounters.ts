@@ -29,7 +29,7 @@ import { member, user } from "@odentia/db/schema/auth"
 import { clinicalOrder, consentDocument, consentEvent, medicalLeave } from "@odentia/db/schema/clinical-forms"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { canAttend } from "@odentia/auth/permissions"
-import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm"
 import { markArrivedOnAttend, notifyAppointmentChanged, setAppointmentStatus } from "./appointments.js"
 import { listEncounterDocuments, type PatientDocumentWithContext } from "./clinical.js"
 import { assertAttending } from "./encounter-attending.js"
@@ -44,7 +44,9 @@ import {
   ServiceError,
   validation,
 } from "./errors.js"
-import { repeatFollowUp } from "./follow-ups.js"
+import { createFollowUp, repeatFollowUp } from "./follow-ups.js"
+import { zonedTimeToUtc } from "./availability.js"
+import { controlWindowOpenSql, dayKeyIn } from "./to-schedule.js"
 import { requirePatient } from "./patients.js"
 import { createCharge } from "./payments.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
@@ -57,7 +59,7 @@ import {
 } from "./plan.js"
 import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
 import { requireServiceForIndication } from "./service-catalog.js"
-import { orgClinicalProfile } from "./locale.js"
+import { findOrgLocale, orgClinicalProfile } from "./locale.js"
 import {
   type ClosingMaterials,
   closingMaterialsOf,
@@ -1543,6 +1545,14 @@ export interface FinalizeEncounterBase {
    * faltante. Null si la atención no tiene sede o no usó nada configurado.
    */
   materials: DiscountedMaterials | null
+  /**
+   * Lo que el cierre hizo con los controles (ADR 0152): el que indicó
+   * «¿Cuándo vuelve?» y los que esta visita cumplió.
+   */
+  controls: {
+    next: { id: string; title: string; dueAt: Date } | null
+    fulfilled: Array<{ id: string; title: string }>
+  }
 }
 
 /** Aviso en vivo (`org_events`): solo `{ orgId, kind, at }`, sin datos clínicos. */
@@ -1627,6 +1637,41 @@ export interface ClosingCheckBase {
    * atención no tiene sede o no hay nada que descontar.
    */
   materials: ClosingMaterials | null
+  /** «¿Cuándo vuelve?» y los controles que esta visita cumple (ADR 0152). */
+  controls: ClosingControls
+}
+
+/** Un control pendiente cuya ventana ya abrió: esta visita lo cumple al firmar (ADR 0152). */
+export interface ClosingDueControl {
+  id: string
+  title: string
+  kind: string
+  dueAt: Date
+  /** Quien firma es quien atendió la atención donde se indicó: viene marcado. */
+  mine: boolean
+  /** Si se repite, cumplirlo deja indicado el siguiente. */
+  repeatEveryMonths: number | null
+}
+
+/** El próximo control que ya tiene la persona (o la atención): no se pregunta «¿Cuándo vuelve?». */
+export interface ClosingNextControl {
+  id: string
+  title: string
+  dueAt: Date
+  status: string
+  /** La hora de su cita, si está reservado. */
+  scheduledAt: Date | null
+  /** Se indicó en esta misma atención. */
+  own: boolean
+}
+
+export interface ClosingControls {
+  /** Los meses de «En N meses»: los del producto (6 en odentIA, 12 en latidIA). */
+  recallMonths: number
+  /** Los días civiles de cada atajo, en la zona de la clínica: lo que se manda en `nextControl.dueAt`. */
+  shortcuts: { week: string; month: string; recall: string }
+  due: ClosingDueControl[]
+  next: ClosingNextControl | null
 }
 
 const CLOSING_MESSAGES: Record<ClosingRequirement, string> = {
@@ -1677,8 +1722,250 @@ export async function checkEncounterClosing(
     (need) => need.status !== "firmado",
   )
   const materials = await closingMaterialsOf(tx, orgId, row)
+  const controls = await closingControlsOf(tx, orgId, actorUserId, row)
   const product = await (await productHooks(tx, orgId)).closingParts(tx, { orgId, patientId: row.patientId, encounterId: row.id })
-  return { ready: missing.length === 0, missing, consents, materials, ...product }
+  return { ready: missing.length === 0, missing, consents, materials, controls, ...product }
+}
+
+/** Un día civil («2026-11-07») más N meses; el 31 cae en el último día del mes que no lo tiene. */
+function addMonthsToDay(day: string, months: number): string {
+  const [year, month, date] = day.split("-").map(Number) as [number, number, number]
+  const total = month - 1 + months
+  const y = year + Math.floor(total / 12)
+  const m = ((total % 12) + 12) % 12
+  const last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate()
+  return `${y}-${String(m + 1).padStart(2, "0")}-${String(Math.min(date, last)).padStart(2, "0")}`
+}
+
+function addDaysToDay(day: string, days: number): string {
+  const [year, month, date] = day.split("-").map(Number) as [number, number, number]
+  return new Date(Date.UTC(year, month - 1, date + days)).toISOString().slice(0, 10)
+}
+
+/** Los controles por cumplir de la persona: pendientes, con su ventana abierta y no indicados en esta atención. */
+async function dueControlsOf(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  row: EncounterRow,
+  timezone: string,
+): Promise<ClosingDueControl[]> {
+  const rows = await tx
+    .select({
+      id: clinicalFollowUp.id,
+      title: clinicalFollowUp.title,
+      kind: clinicalFollowUp.kind,
+      dueAt: clinicalFollowUp.dueAt,
+      repeatEveryMonths: clinicalFollowUp.repeatEveryMonths,
+      originProfessional: encounter.professionalUserId,
+    })
+    .from(clinicalFollowUp)
+    .leftJoin(
+      encounter,
+      and(eq(encounter.id, clinicalFollowUp.originEncounterId), eq(encounter.organizationId, clinicalFollowUp.organizationId)),
+    )
+    .where(
+      and(
+        eq(clinicalFollowUp.organizationId, orgId),
+        eq(clinicalFollowUp.patientId, row.patientId),
+        eq(clinicalFollowUp.status, "pendiente"),
+        sql`${clinicalFollowUp.originEncounterId} is distinct from ${row.id}`,
+        controlWindowOpenSql({ dueAt: clinicalFollowUp.dueAt, createdAt: clinicalFollowUp.createdAt }, timezone),
+      ),
+    )
+    .orderBy(asc(clinicalFollowUp.dueAt), asc(clinicalFollowUp.id))
+  return rows.map(({ originProfessional, ...control }) => ({ ...control, mine: originProfessional === actorUserId }))
+}
+
+/**
+ * «¿Cuándo vuelve?» al firmar (ADR 0152): los atajos en días de la clínica,
+ * los controles que esta visita cumple y el próximo que ya tiene la persona
+ * (pendiente o reservado, también el indicado aquí). Con uno así no se
+ * pregunta: no se crean dos.
+ */
+async function closingControlsOf(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  row: EncounterRow,
+): Promise<ClosingControls> {
+  const { timezone } = await findOrgLocale(tx, orgId)
+  const { recallMonths } = await productHooks(tx, orgId)
+  const today = dayKeyIn(new Date(), timezone)
+  const due = await dueControlsOf(tx, orgId, actorUserId, row, timezone)
+  const dueIds = new Set(due.map((control) => control.id))
+  const open = await tx
+    .select({
+      id: clinicalFollowUp.id,
+      title: clinicalFollowUp.title,
+      dueAt: clinicalFollowUp.dueAt,
+      status: clinicalFollowUp.status,
+      originEncounterId: clinicalFollowUp.originEncounterId,
+      startsAt: appointment.startsAt,
+      appointmentStatus: appointment.status,
+    })
+    .from(clinicalFollowUp)
+    .leftJoin(
+      appointment,
+      and(eq(appointment.id, clinicalFollowUp.appointmentId), eq(appointment.organizationId, clinicalFollowUp.organizationId)),
+    )
+    .where(
+      and(
+        eq(clinicalFollowUp.organizationId, orgId),
+        eq(clinicalFollowUp.patientId, row.patientId),
+        inArray(clinicalFollowUp.status, ["pendiente", "programado"]),
+      ),
+    )
+    .orderBy(asc(clinicalFollowUp.dueAt), asc(clinicalFollowUp.id))
+  const first = open.find((control) => !dueIds.has(control.id))
+  return {
+    recallMonths,
+    shortcuts: { week: addDaysToDay(today, 7), month: addMonthsToDay(today, 1), recall: addMonthsToDay(today, recallMonths) },
+    due,
+    next: first
+      ? {
+          id: first.id,
+          title: first.title,
+          dueAt: first.dueAt,
+          status: first.status,
+          scheduledAt:
+            first.startsAt && first.appointmentStatus && ["programada", "confirmada"].includes(first.appointmentStatus)
+              ? first.startsAt
+              : null,
+          own: first.originEncounterId === row.id,
+        }
+      : null,
+  }
+}
+
+/** La hora a la que se anota el día de un control, como «Indicar control» en la pantalla. */
+const CONTROL_MINUTES = 9 * 60
+
+/**
+ * El control de «¿Cuándo vuelve?»: con «En N meses», de mantenimiento; si no,
+ * el del primer procedimiento de hoy («Control de resina simple»), y si no hubo
+ * ninguno, «Control». El tipo y el título los pone el sistema.
+ */
+async function createNextControl(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  row: EncounterRow,
+  day: string,
+  controls: ClosingControls,
+  timezone: string,
+): Promise<{ id: string; title: string; dueAt: Date }> {
+  const dueAt = zonedTimeToUtc(day, CONTROL_MINUTES, timezone).toISOString()
+  if (day === controls.shortcuts.recall) {
+    const created = await createFollowUp(tx, orgId, actorUserId, row.patientId, {
+      kind: "mantenimiento",
+      title: "Control de mantenimiento",
+      dueAt,
+      originEncounterId: row.id,
+    })
+    return { id: created.id, title: created.title, dueAt: created.dueAt }
+  }
+  const [procedure] = await tx
+    .select({ id: encounterProcedure.id, description: encounterProcedure.description, planItemId: encounterProcedure.planItemId })
+    .from(encounterProcedure)
+    .where(
+      and(
+        eq(encounterProcedure.organizationId, orgId),
+        eq(encounterProcedure.encounterId, row.id),
+        isNull(encounterProcedure.voidedAt),
+      ),
+    )
+    .orderBy(asc(encounterProcedure.createdAt), asc(encounterProcedure.id))
+    .limit(1)
+  const name = procedure?.description.trim()
+  // «Resina simple» → «Control de resina simple»; una sigla («RX») queda como está.
+  const said = name && /^\p{Lu}\p{Ll}/u.test(name) ? name.charAt(0).toLowerCase() + name.slice(1) : name
+  const created = await createFollowUp(tx, orgId, actorUserId, row.patientId, {
+    kind: procedure?.planItemId ? "tratamiento" : "mantenimiento",
+    title: said ? `Control de ${said}`.slice(0, 200) : "Control",
+    dueAt,
+    originEncounterId: row.id,
+    planItemId: procedure?.planItemId ?? null,
+    encounterProcedureId: procedure?.id ?? null,
+  })
+  return { id: created.id, title: created.title, dueAt: created.dueAt }
+}
+
+/**
+ * «Cambiar» en «Vuelve el 6 may»: el control pendiente que ya tenía pasa al día
+ * nuevo, con su tipo y su título. Solo el que el cierre mostró y sigue
+ * pendiente; uno reservado se mueve moviendo su cita.
+ */
+async function moveNextControl(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  row: EncounterRow,
+  followUpId: string,
+  day: string,
+  controls: ClosingControls,
+  timezone: string,
+): Promise<{ id: string; title: string; dueAt: Date }> {
+  if (controls.next?.id !== followUpId || controls.next.status !== "pendiente")
+    throw invalidField("nextControl.dueAt", "Su control cambió mientras firmabas: vuelve a abrir el cierre.")
+  const dueAt = zonedTimeToUtc(day, CONTROL_MINUTES, timezone)
+  const [moved] = await tx
+    .update(clinicalFollowUp)
+    .set({ dueAt, updatedAt: new Date() })
+    .where(
+      and(
+        eq(clinicalFollowUp.organizationId, orgId),
+        eq(clinicalFollowUp.patientId, row.patientId),
+        eq(clinicalFollowUp.id, followUpId),
+        eq(clinicalFollowUp.status, "pendiente"),
+      ),
+    )
+    .returning({ id: clinicalFollowUp.id, title: clinicalFollowUp.title, dueAt: clinicalFollowUp.dueAt })
+  if (!moved) throw invalidField("nextControl.dueAt", "Su control cambió mientras firmabas: vuelve a abrir el cierre.")
+  await audit(tx, orgId, actorUserId, "follow_up.rescheduled", "clinical_follow_up", moved.id, {
+    patientId: row.patientId,
+    encounterId: row.id,
+    from: controls.next.dueAt.toISOString(),
+    to: dueAt.toISOString(),
+  })
+  return moved
+}
+
+/**
+ * Cumple los controles por cumplir con esta atención ya firmada (ADR 0152): la
+ * misma marca que la cita del control (`closeAppointment`), con `by: "ventana"`
+ * en la auditoría, y el que se repite deja indicado el siguiente.
+ */
+async function fulfillDueControls(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  row: EncounterRow,
+  ids: string[],
+  at: Date,
+): Promise<Array<{ id: string; title: string }>> {
+  if (ids.length === 0) return []
+  const completed = await tx
+    .update(clinicalFollowUp)
+    .set({ status: "realizado", completedEncounterId: row.id, completedAt: at, updatedAt: at })
+    .where(
+      and(
+        eq(clinicalFollowUp.organizationId, orgId),
+        eq(clinicalFollowUp.patientId, row.patientId),
+        inArray(clinicalFollowUp.id, ids),
+        eq(clinicalFollowUp.status, "pendiente"),
+      ),
+    )
+    .returning()
+  for (const followUp of completed) {
+    await audit(tx, orgId, actorUserId, "follow_up.completed", "clinical_follow_up", followUp.id, {
+      patientId: row.patientId,
+      encounterId: row.id,
+      by: "ventana",
+    })
+    await repeatFollowUp(tx, orgId, actorUserId, followUp)
+  }
+  return completed.map((followUp) => ({ id: followUp.id, title: followUp.title }))
 }
 
 export async function getEncounterClosing(
@@ -1700,6 +1987,17 @@ export interface FinalizeEncounterInput {
    * pide solo si falta alguno; queda en la atención como el resto.
    */
   consentSkipReason?: string | null
+  /**
+   * «¿Cuándo vuelve?» (ADR 0152): el día civil del próximo control, o que no
+   * hace falta. Sin él, no se indicó: recepción no lo verá. Con `followUpId`
+   * («Cambiar»), es el día nuevo del control pendiente que ya tenía.
+   */
+  nextControl?: { dueAt: string; followUpId?: string | null } | { none: true } | null
+  /**
+   * Los controles por cumplir que esta visita cumple (`ClosingControls.due`).
+   * Sin él (semillas, API sin pantalla), los cumple todos.
+   */
+  followUpIds?: string[] | null
 }
 
 export async function finalizeEncounter(
@@ -1744,6 +2042,13 @@ export async function finalizeEncounter(
   }
   const signature = await requireProfessionalSignature(tx, orgId, actorUserId)
   const now = new Date()
+  // «¿Cuándo vuelve?» y los controles que cumple esta visita (ADR 0152).
+  const { timezone } = await findOrgLocale(tx, orgId)
+  const wanted = input.followUpIds ? new Set(input.followUpIds) : null
+  const fulfilling = closing.controls.due.filter((control) => !wanted || wanted.has(control.id))
+  const nextDay = input.nextControl && "dueAt" in input.nextControl ? input.nextControl.dueAt : null
+  if (nextDay !== null && (!/^\d{4}-\d{2}-\d{2}$/.test(nextDay) || nextDay <= dayKeyIn(now, timezone)))
+    throw invalidField("nextControl.dueAt", "Elige un día desde mañana.")
   let endedAt = now
   if (input.endedAt) {
     endedAt = new Date(input.endedAt)
@@ -1763,6 +2068,20 @@ export async function finalizeEncounter(
         isNull(encounterProcedure.voidedAt),
       ),
     )
+  // El control nuevo se indica con la atención aún abierta, como «Indicar control». Si la persona ya
+  // tiene uno (también el que esta visita no cumple), o el que se cumple se repite, no se crea otro:
+  // dos controles no son dos visitas.
+  const repeats = fulfilling.some((control) => control.repeatEveryMonths)
+  const stays = closing.controls.due.some((control) => !fulfilling.includes(control))
+  const moving = input.nextControl && "dueAt" in input.nextControl ? (input.nextControl.followUpId ?? null) : null
+  const nextControl =
+    nextDay === null
+      ? null
+      : moving
+        ? await moveNextControl(tx, orgId, actorUserId, locked, moving, nextDay, closing.controls, timezone)
+        : !closing.controls.next && !repeats && !stays
+          ? await createNextControl(tx, orgId, actorUserId, locked, nextDay, closing.controls, timezone)
+          : null
   const [row] = await tx
     .update(encounter)
     .set({
@@ -1790,6 +2109,7 @@ export async function finalizeEncounter(
     signer: signature,
   })
   if (row.appointmentId) await closeAppointment(tx, orgId, actorUserId, patientId, row, now)
+  const fulfilled = await fulfillDueControls(tx, orgId, actorUserId, row, fulfilling.map((control) => control.id), now)
   // Con lo dictado confirmado, el Asistente clínico ordenó esta consulta (ADR 0031).
   await countConsultationAction(tx, orgId, { patientId, encounterId, at: now })
   // Los cargos caen solos al finalizar, con el precio final acordado:
@@ -1998,6 +2318,17 @@ export async function finalizeEncounter(
     // Cuántos consentimientos quedaron sin firmar; el motivo vive en la atención.
     consentsUnsigned: closing.consents.length,
     materials: materials?.items.length ?? 0,
+    // La constancia de «¿Cuándo vuelve?»: lo que se eligió, o que no se indicó.
+    nextControl: nextControl
+      ? moving
+        ? "cambio"
+        : "fecha"
+      : input.nextControl && "none" in input.nextControl
+        ? "no_hace_falta"
+        : closing.controls.next || repeats || stays
+          ? "ya_tenia"
+          : "sin_indicar",
+    controlsFulfilled: fulfilled.length,
   })
   // Al firmar queda armado el presupuesto con lo indicado aquí: crece el
   // borrador de la persona o nace uno. No se envía solo.
@@ -2010,6 +2341,7 @@ export async function finalizeEncounter(
     skippedCharges,
     budget,
     materials,
+    controls: { next: nextControl, fulfilled },
     billing: {
       chargedCents: chargedTotals.length > 1 ? null : chargedCents,
       currency: charges[0]?.currency ?? procedures[0]?.currency ?? null,
@@ -2378,6 +2710,62 @@ async function undoCompletionsOf(
   }
 }
 
+/**
+ * Lo que la atención anulada cumplió vuelve a «pendiente» (ADR 0152): sus
+ * controles realizados con ella. El siguiente que nació al repetirse se
+ * cancela si aún no tiene cita; si ya la tiene, sigue en pie y se devuelve
+ * para que la anulación no lo cancele por haber nacido aquí.
+ */
+async function reopenFollowUpsOf(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+  reason: string,
+  at: Date,
+): Promise<string[]> {
+  const reopened = await tx
+    .update(clinicalFollowUp)
+    .set({ status: "pendiente", completedEncounterId: null, completedAt: null, outcome: null, updatedAt: at })
+    .where(
+      and(
+        eq(clinicalFollowUp.organizationId, orgId),
+        eq(clinicalFollowUp.patientId, patientId),
+        eq(clinicalFollowUp.completedEncounterId, encounterId),
+        eq(clinicalFollowUp.status, "realizado"),
+      ),
+    )
+    .returning({ id: clinicalFollowUp.id })
+  if (reopened.length === 0) return []
+  for (const followUp of reopened) {
+    await audit(tx, orgId, actorUserId, "follow_up.reopened", "clinical_follow_up", followUp.id, { patientId, encounterId, reason })
+  }
+  const repeated = await tx
+    .select({ id: clinicalFollowUp.id, status: clinicalFollowUp.status, appointmentId: clinicalFollowUp.appointmentId })
+    .from(clinicalFollowUp)
+    .where(
+      and(
+        eq(clinicalFollowUp.organizationId, orgId),
+        inArray(clinicalFollowUp.repeatsFromId, reopened.map((followUp) => followUp.id)),
+      ),
+    )
+  const kept: string[] = []
+  for (const next of repeated) {
+    if (next.status !== "pendiente" || next.appointmentId) {
+      kept.push(next.id)
+      continue
+    }
+    // Sin `repeats_from_id`: al cumplirse otra vez, el control vuelve a dejar su siguiente.
+    await tx
+      .update(clinicalFollowUp)
+      .set({ status: "cancelado", cancelledReason: reason, cancelledAt: at, repeatsFromId: null, updatedAt: at })
+      .where(and(eq(clinicalFollowUp.organizationId, orgId), eq(clinicalFollowUp.id, next.id)))
+    await audit(tx, orgId, actorUserId, "follow_up.cancelled", "clinical_follow_up", next.id, { patientId, encounterId, reason })
+  }
+  return kept
+}
+
 export async function voidEncounter(
   tx: Db,
   orgId: string,
@@ -2467,6 +2855,7 @@ export async function voidEncounter(
         eq(prescription.status, "emitida"),
       ),
     )
+  const kept = await reopenFollowUpsOf(tx, orgId, actorUserId, patientId, encounterId, cascade, at)
   await tx
     .update(clinicalFollowUp)
     .set({ status: "cancelado", cancelledReason: cascade, cancelledAt: at, updatedAt: at })
@@ -2476,6 +2865,7 @@ export async function voidEncounter(
         eq(clinicalFollowUp.patientId, patientId),
         eq(clinicalFollowUp.originEncounterId, encounterId),
         inArray(clinicalFollowUp.status, ["pendiente", "programado"]),
+        kept.length > 0 ? notInArray(clinicalFollowUp.id, kept) : undefined,
       ),
     )
   await voidEncounterPapers(tx, orgId, actorUserId, patientId, encounterId, cascade, at)

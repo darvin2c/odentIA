@@ -385,7 +385,7 @@ async function lapsedInvites(tx: Db, orgId: string, zone: OrgLocale, limit: numb
     })),
     title: `${total} ${plural(total, "persona", "personas")} sin venir hace ${months} meses ${plural(total, "le toca", "les toca")} una invitación`,
     detail: "Ordenadas de la visita más antigua a la más reciente.",
-    how: `Pacientes cuya última cita atendida fue hace más de ${months} meses, sin cita, presupuesto que espere respuesta ni control pendiente. Quien ya recibió una invitación en los últimos ${months} meses, o pidió no recibir mensajes de seguimiento, no aparece.`,
+    how: `Pacientes cuya última cita atendida fue hace más de ${months} meses, sin cita, presupuesto que espere respuesta ni un control pendiente de esos ${months} meses (un control vencido hace más no la saca). Quien ya recibió una invitación en los últimos ${months} meses, o pidió no recibir mensajes de seguimiento, no aparece.`,
   }
 }
 

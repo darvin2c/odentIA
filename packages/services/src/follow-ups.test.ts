@@ -91,11 +91,12 @@ it("reserva, mueve y libera el control sin confundir asistencia con cierre clín
     if (status === "atendida") await ownerDb.update(appointment).set({ status }).where(eq(appointment.id, id))
     else await f.run((tx) => setAppointmentStatus(tx, "org_a", f.actor, id, status))
     const [row] = await f.run((tx) => listFollowUps(tx, "org_a", f.patient.id))
+    // Cancelar la cita suelta el control (ADR 0152): vuelve a estar por reservar, sin cita.
     expect(row).toMatchObject({
       status: "pendiente",
       scheduledAt: null,
-      appointmentId: id,
-      appointment: { status },
+      appointmentId: null,
+      appointment: null,
     })
     await expect(
       f.run((tx) => scheduleFollowUp(tx, ...f.args, control.id, { appointmentId: id })),

@@ -1002,6 +1002,32 @@ describe("una historia bloqueada", () => {
   })
 })
 
+describe("«Avisar un control» (ADR 0152)", () => {
+  it("toma solo el control por reservar de quien no tiene ninguna cita por venir", async () => {
+    const c = await clinic()
+    await ruleOn(c, "recordatorio_control", new Date(NOW.getTime() - HOUR))
+    const control = (patientId: string, values: { status?: string; appointmentId?: string } = {}) =>
+      ownerDb.insert(clinicalFollowUp).values({
+        organizationId: c.orgId, patientId, kind: "mantenimiento", title: "Control de ortodoncia", dueAt: new Date(NOW.getTime() + DAY), ...values,
+      })
+    const free = await person(c, "Sin cita", { consent: ["recordatorio", "seguimiento"] })
+    const booked = await person(c, "Con otra cita", { consent: ["recordatorio", "seguimiento"] })
+    const reserved = await person(c, "Con su cita", { consent: ["recordatorio", "seguimiento"] })
+    await control(free.patientId)
+    // Otra cita por venir le cumple el control: no se le pide agendar.
+    await control(booked.patientId)
+    await appointmentFor(c, booked.patientId, new Date(NOW.getTime() + 3 * DAY))
+    // El reservado ya tiene su cita, que se recuerda sola.
+    const own = await appointmentFor(c, reserved.patientId, new Date(NOW.getTime() + 2 * DAY))
+    await control(reserved.patientId, { status: "programado", appointmentId: own })
+    await run(c, (tx) => syncCheckupReminders(tx, c.orgId, NOW))
+    expect((await jobsOf(c)).map((job) => job.patientId)).toEqual([free.patientId])
+    // Si reserva antes de que salga el aviso, ya no se envía.
+    await appointmentFor(c, free.patientId, new Date(NOW.getTime() + 4 * DAY))
+    expect(await deliver(c)).toMatchObject([{ outcome: "cancelado", detail: "Ya tiene una cita reservada" }])
+  })
+})
+
 describe("retirar un permiso", () => {
   it("cancela lo que estaba por salir de ese tipo y deja lo demás", async () => {
     const c = await clinic()

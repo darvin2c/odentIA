@@ -17,6 +17,7 @@ import {
 import { member, user } from "@odentia/db/schema/auth"
 import {
   appointmentPlanItem,
+  clinicalFollowUp,
   encounter,
   patient,
   patientContact,
@@ -1583,6 +1584,8 @@ export async function setAppointmentStatus(
   // La palabra va antes del intento: si la base lo rechaza, la transacción ya no admite consultas.
   const roomName = (await roomWord(tx, orgId)).one
   try {
+    // Antes que la cita: el disparador de la base devolvería el control sin soltar la cita.
+    if (next === "cancelada" || next === "no_asistio") await releaseFollowUps(tx, orgId, actorUserId, id, next)
     const [updated] = await tx
       .update(appointment)
       .set({ status: next, version: current.version + 1, updatedAt: new Date() })
@@ -1621,6 +1624,41 @@ export async function setAppointmentStatus(
       throw appointmentConflict(exclusionTarget(error), roomName)
     }
     throw error
+  }
+}
+
+/**
+ * Una cita que se cancela o a la que no vino deja de ser la del control
+ * (ADR 0152): sus controles reservados vuelven a «pendiente», sin la cita, y
+ * así salen otra vez en lo que falta agendar. La auditoría guarda cuál era.
+ */
+async function releaseFollowUps(
+  tx: Db,
+  orgId: string,
+  actorUserId: string | null,
+  appointmentId: string,
+  next: "cancelada" | "no_asistio",
+): Promise<void> {
+  const released = await tx
+    .update(clinicalFollowUp)
+    .set({ status: "pendiente", appointmentId: null, updatedAt: new Date() })
+    .where(
+      and(
+        eq(clinicalFollowUp.organizationId, orgId),
+        eq(clinicalFollowUp.appointmentId, appointmentId),
+        eq(clinicalFollowUp.status, "programado"),
+      ),
+    )
+    .returning({ id: clinicalFollowUp.id, patientId: clinicalFollowUp.patientId })
+  for (const row of released) {
+    await tx.insert(auditEvent).values({
+      organizationId: orgId,
+      actorUserId,
+      entity: "clinical_follow_up",
+      entityId: row.id,
+      action: "follow_up.unscheduled",
+      metadata: { patientId: row.patientId, appointmentId, by: next === "cancelada" ? "cita_cancelada" : "no_vino" },
+    })
   }
 }
 

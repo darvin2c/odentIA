@@ -26,6 +26,10 @@ import { upcomingWork } from "./report-finance.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 import { insertTestPatients } from "./test-patient.js"
 import {
+  controlWindowOpenSql,
+  controlWindowStart,
+  controlWindowStartSql,
+  isControlWindowOpen,
   isOverdueControl,
   isToSchedule,
   overdueControlSql,
@@ -206,6 +210,28 @@ it("«aceptó y no tiene cita» es una sola regla: código, SQL, Pacientes, Inic
   const both = await c.run((tx) => peopleShortcutMembers(tx, c.orgId, all, LIMA, new Date()))
   expect(both.por_agendar).toContain(ana)
   expect(both.presupuesto_sin_enviar).toContain(ana)
+})
+
+it("la ventana de un control abre max(2 días, 25 % del intervalo) antes de su día, igual en código y en SQL (ADR 0152)", async () => {
+  const c = await clinic()
+  // A 6 meses (184 días): abre 46 días antes. A una semana: 2 días antes, no 1,75.
+  const sixMonths = { createdAt: new Date("2026-05-01T14:00:00Z"), dueAt: new Date("2026-11-01T14:00:00Z") }
+  const oneWeek = { createdAt: new Date("2026-11-01T14:00:00Z"), dueAt: new Date("2026-11-08T14:00:00Z") }
+  expect((sixMonths.dueAt.getTime() - controlWindowStart(sixMonths).getTime()) / DAY).toBe(46)
+  expect((oneWeek.dueAt.getTime() - controlWindowStart(oneWeek).getTime()) / DAY).toBe(2)
+  const at = (date: Date) => sql`${date.toISOString()}::timestamptz`
+  for (const control of [sixMonths, oneWeek]) {
+    const row = { dueAt: at(control.dueAt), createdAt: at(control.createdAt) }
+    const [start] = await c.run((tx) => tx.execute<{ start: Date | string }>(sql`select ${controlWindowStartSql(row)} as start`))
+    expect(new Date(start!.start).getTime()).toBe(controlWindowStart(control).getTime())
+    // El día antes de abrir no toca; el día en que abre (en Lima), sí; y no cierra.
+    for (const now of [new Date(controlWindowStart(control).getTime() - DAY), controlWindowStart(control), new Date("2030-01-01T15:00:00Z")]) {
+      const [open] = await c.run((tx) => tx.execute<{ open: boolean }>(sql`select ${controlWindowOpenSql(row, LIMA, at(now))} as open`))
+      expect(open!.open).toBe(isControlWindowOpen(control, LIMA, now))
+    }
+    expect(isControlWindowOpen(control, LIMA, new Date(controlWindowStart(control).getTime() - DAY))).toBe(false)
+    expect(isControlWindowOpen(control, LIMA, new Date("2030-01-01T15:00:00Z"))).toBe(true)
+  }
 })
 
 it("«control vencido sin cita»: su día ya pasó y la persona no tiene ninguna cita; Pacientes, Inicio y Argos dicen lo mismo", async () => {
