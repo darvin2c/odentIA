@@ -17,6 +17,7 @@ import {
   type AgendaResources,
   invalidateAppointmentQueries,
 } from "../../lib/agenda"
+import { useActiveBranch } from "../../lib/active-branch"
 import { apiFetch } from "../../lib/api"
 import {
   formatDateTime,
@@ -42,19 +43,29 @@ export function FollowUpScheduler({
   control,
   onClose,
   scope = "clinical",
+  branchId,
 }: {
   patientId: string
   control: SchedulableControl
   onClose: () => void
   scope?: FollowUpSchedulerScope
+  /**
+   * La sede donde se reserva. Desde una cita, la de esa cita; si no, la sede con
+   * la que se trabaja, la misma de la Agenda (antes siempre la primera de la
+   * clínica, aunque no tuviera horarios: QA del 6 nov).
+   */
+  branchId?: string
 }) {
   const canWriteClinical = usePermission("clinical.write")
   const canWriteAppointments = usePermission("appointments.write")
   const canSchedule =
     canWriteAppointments && (scope === "coordination" || canWriteClinical)
+  const active = useActiveBranch()
+  const sede = branchId ?? active.branchId
   const resources = useQuery({
-    queryKey: ["agenda-resources"],
-    queryFn: () => apiFetch<{ data: AgendaResources }>("/api/agenda/resources"),
+    queryKey: ["agenda-resources", sede ?? null],
+    queryFn: () =>
+      apiFetch<{ data: AgendaResources }>(`/api/agenda/resources${sede ? `?branchId=${encodeURIComponent(sede)}` : ""}`),
     enabled: canSchedule,
   })
   if (canSchedule && resources.data)

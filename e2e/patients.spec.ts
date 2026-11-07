@@ -609,7 +609,6 @@ test("recepción coordina el control sin leer la ficha clínica", async ({ owner
     {
       kind: "tratamiento",
       planItemId: ids.itemId,
-      originEncounterId: ids.encounterId,
       title: "Control de evolución",
       instructions: "Indicación clínica reservada",
       dueAt: new Date(Date.now() + 86_400_000).toISOString(),

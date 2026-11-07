@@ -53,7 +53,6 @@ test("control clínico: reserva real, mover reprograma y cancelaciones coherente
     {
       kind: "tratamiento",
       planItemId: ids.itemId,
-      originEncounterId: ids.encounterId,
       title: "Control de evolución",
       dueAt: new Date(Date.now() + 86400000).toISOString(),
     },

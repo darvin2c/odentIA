@@ -20,6 +20,7 @@ import { DEFAULT_REGISTRATION_CONFIG, type PatientGuide } from "@odentia/clinica
 import type { Db } from "@odentia/db"
 import { account, member, organization, user } from "@odentia/db/schema/auth"
 import {
+  clinicalFollowUp,
   encounter,
   orgSpecialty,
   serviceCatalog,
@@ -505,16 +506,22 @@ export async function seedMedicalDemo(
 
   // El próximo control de presión se repite cada 3 meses (entrega 7, decisión 16):
   // al completarlo queda indicado el siguiente, hasta que la doctora lo detenga.
-  await db.transaction((tx) =>
+  // Lo indicó en el último control, que ya está firmado: la semilla escribe ese
+  // vínculo histórico aparte, porque el equipo solo indica en una atención abierta.
+  const nextControl = await db.transaction((tx) =>
     createFollowUp(tx, ORG, VELA_ID, luis, {
       kind: "mantenimiento",
       title: "Control de presión arterial",
       instructions: "Traer el registro de presión de la casa.",
       dueAt: lima(openDay(30), "09:00"),
-      originEncounterId: lastControl,
       repeatEveryMonths: 3,
     }),
   )
+  if (lastControl)
+    await db
+      .update(clinicalFollowUp)
+      .set({ originEncounterId: lastControl })
+      .where(and(eq(clinicalFollowUp.id, nextControl.id), eq(clinicalFollowUp.organizationId, ORG)))
 
   // El presupuesto de atención de Julia, embarazada (el papel de latidIA, sin etapas): un
   // consultorio no lo necesita para atender (`budgetRequired: false`), pero puede entregarlo.
