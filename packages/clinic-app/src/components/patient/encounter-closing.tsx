@@ -14,6 +14,7 @@ import {
   FieldLegend,
   FieldSet,
   Input,
+  ScrollArea,
 } from "@odentia/ui"
 import { DatePickerButton, TimeSelect, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
 import { ToggleGroup, ToggleGroupItem } from "@odentia/ui/components/toggle-group"
@@ -503,116 +504,119 @@ export function EncounterClosingDialog({
         if (!value && !busy) onClose()
       }}
     >
-      <DialogContent scrollable aria-describedby={`${ids}-desc`} className="max-h-[90dvh] sm:max-w-lg" initialFocus={initialFocus}>
-        <form noValidate onSubmit={onSubmit} className="flex flex-col gap-4">
+      {/* Lo de en medio se desplaza; el título y «Finalizar y firmar» quedan siempre a la vista, también en un teléfono. */}
+      <DialogContent aria-describedby={`${ids}-desc`} className="flex max-h-[90dvh] flex-col sm:max-w-lg" initialFocus={initialFocus}>
+        <form noValidate onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col gap-4">
           <DialogHeader>
             <DialogTitle>Finalizar y firmar</DialogTitle>
             <DialogDescription id={`${ids}-desc`}>
               Después del cierre solo se agregan adendas. Si vino de una cita, la cita queda atendida.
             </DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col gap-4 text-sm">
-            {registration ?? (
-              <div className="rounded-lg border p-3">
-                <p className="font-medium">Firmarás como {signAs ?? "—"}</p>
-                <p className="text-xs text-muted-foreground">De tu perfil profesional</p>
-                {signatureHint}
-              </div>
-            )}
-            {toRegister.length > 0 ? (
-              <ul aria-label="Falta para cerrar" className="flex flex-col gap-1.5 rounded-lg border border-destructive/50 p-3">
-                {toRegister.map((requirement) => (
-                  <li key={requirement} className="flex flex-wrap items-center justify-between gap-2">
-                    <span>
-                      Falta: {CLOSING_REQUIREMENT_LABELS[requirement]}
-                    </span>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="link"
-                      className="h-auto p-0"
-                      disabled={busy}
-                      onClick={() => onRegister(requirement)}
-                    >
-                      Registrar
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-            {closing ? <ProductClosing closing={closing} pending={busy} openBlock={onOpenBlock} /> : null}
-            {materials && materials.items.length > 0 ? (
-              <p className="rounded-lg border p-3">
-                <span className="font-medium">Materiales</span>
-                {" · "}
-                {closingMaterialsWords(materials, activeOrgLocale() ?? "es")}
-              </p>
-            ) : null}
-            {consents.map((need) => {
-              const line = consentLine(need, who)
-              return (
-                <div
-                  key={`${need.templateKey}-${need.documentId ?? ""}`}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/50 p-3"
-                >
-                  <div className="flex min-w-0 flex-col">
-                    <span className="font-medium">{line.title}</span>
-                    <span className="text-xs text-muted-foreground">{line.detail}</span>
-                  </div>
-                  {need.status !== "sin_publicar" ? (
-                    <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => onSignNow(need)}>
-                      {need.personSigned ? "Confirmar" : "Firmar ahora"}
-                    </Button>
-                  ) : null}
+          <ScrollArea className="-mx-6 flex min-h-0 flex-1 flex-col">
+            <div className="flex flex-col gap-4 px-6 text-sm">
+              {registration ?? (
+                <div className="rounded-lg border p-3">
+                  <p className="font-medium">Firmarás como {signAs ?? "—"}</p>
+                  <p className="text-xs text-muted-foreground">De tu perfil profesional</p>
+                  {signatureHint}
                 </div>
-              )
-            })}
-            {needsReason ? (
-              <form.AppField name="consentSkipReason">
-                {(field) => (
-                  <field.TextareaField
-                    label="Seguir sin él: ¿por qué?"
-                    rows={2}
-                    maxLength={2000}
-                    required
-                    placeholder="Ej.: urgencia, se firmará en la próxima visita"
-                  />
-                )}
-              </form.AppField>
-            ) : null}
-            <form.AppField name="endTime">
-              {(field) => (
-                <field.Control label="Hora de fin">
-                  {(control) => (
-                    <TimeSelect
-                      id={control.id}
-                      invalid={control.invalid}
-                      aria-describedby={control.describedBy}
-                      className="w-44"
-                      min={bounds.min}
-                      max={bounds.max}
-                      emptyLabel={`Ahora (${bounds.max})`}
-                      value={field.state.value}
-                      onChange={(value) => {
-                        field.handleChange(value)
-                        field.handleBlur()
-                      }}
+              )}
+              {toRegister.length > 0 ? (
+                <ul aria-label="Falta para cerrar" className="flex flex-col gap-1.5 rounded-lg border border-destructive/50 p-3">
+                  {toRegister.map((requirement) => (
+                    <li key={requirement} className="flex flex-wrap items-center justify-between gap-2">
+                      <span>
+                        Falta: {CLOSING_REQUIREMENT_LABELS[requirement]}
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="link"
+                        className="h-auto p-0"
+                        disabled={busy}
+                        onClick={() => onRegister(requirement)}
+                      >
+                        Registrar
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {closing ? <ProductClosing closing={closing} pending={busy} openBlock={onOpenBlock} /> : null}
+              {materials && materials.items.length > 0 ? (
+                <p className="rounded-lg border p-3">
+                  <span className="font-medium">Materiales</span>
+                  {" · "}
+                  {closingMaterialsWords(materials, activeOrgLocale() ?? "es")}
+                </p>
+              ) : null}
+              {consents.map((need) => {
+                const line = consentLine(need, who)
+                return (
+                  <div
+                    key={`${need.templateKey}-${need.documentId ?? ""}`}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/50 p-3"
+                  >
+                    <div className="flex min-w-0 flex-col">
+                      <span className="font-medium">{line.title}</span>
+                      <span className="text-xs text-muted-foreground">{line.detail}</span>
+                    </div>
+                    {need.status !== "sin_publicar" ? (
+                      <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => onSignNow(need)}>
+                        {need.personSigned ? "Confirmar" : "Firmar ahora"}
+                      </Button>
+                    ) : null}
+                  </div>
+                )
+              })}
+              {needsReason ? (
+                <form.AppField name="consentSkipReason">
+                  {(field) => (
+                    <field.TextareaField
+                      label="Seguir sin él: ¿por qué?"
+                      rows={2}
+                      maxLength={2000}
+                      required
+                      placeholder="Ej.: urgencia, se firmará en la próxima visita"
                     />
                   )}
-                </field.Control>
-              )}
-            </form.AppField>
-            {children}
-            {blockedReason ? (
-              <p id={`${ids}-blocked`} role="status" className="text-xs text-muted-foreground">
-                {blockedReason}
+                </form.AppField>
+              ) : null}
+              <form.AppField name="endTime">
+                {(field) => (
+                  <field.Control label="Hora de fin">
+                    {(control) => (
+                      <TimeSelect
+                        id={control.id}
+                        invalid={control.invalid}
+                        aria-describedby={control.describedBy}
+                        className="w-44"
+                        min={bounds.min}
+                        max={bounds.max}
+                        emptyLabel={`Ahora (${bounds.max})`}
+                        value={field.state.value}
+                        onChange={(value) => {
+                          field.handleChange(value)
+                          field.handleBlur()
+                        }}
+                      />
+                    )}
+                  </field.Control>
+                )}
+              </form.AppField>
+              {children}
+              {blockedReason ? (
+                <p id={`${ids}-blocked`} role="status" className="text-xs text-muted-foreground">
+                  {blockedReason}
+                </p>
+              ) : null}
+              <p className="text-xs text-muted-foreground">
+                Después: lo que quedó por cobrar, para avisar a caja.
               </p>
-            ) : null}
-            <p className="text-xs text-muted-foreground">
-              Después: lo que quedó por cobrar, para avisar a caja.
-            </p>
-            {nextVisit}
-          </div>
+              {nextVisit}
+            </div>
+          </ScrollArea>
           {formError ? (
             <p role="alert" className="text-sm text-destructive">
               {formError}
