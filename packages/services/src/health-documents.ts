@@ -43,6 +43,7 @@ import {
 } from "./financial-documents.js"
 import { type IssuedPaperType, issuedPaperBytes, type PaperStorage } from "./issued-papers.js"
 import { getMedicalLeavePrint } from "./medical-leaves.js"
+import { updateContact } from "./contacts.js"
 import { requirePatient } from "./patients.js"
 import { getPrescriptionPrint } from "./prescriptions.js"
 import { type DecisionRecipient, listDecisionRecipients } from "./responsibilities.js"
@@ -227,6 +228,31 @@ export async function getHealthDocumentSendOptions(
       ? null
       : `Por ahora no hay por dónde enviárselo a ${recipient.displayName}: imprímelo, o agrégale un correo`,
   }
+}
+
+/**
+ * «Agregar correo» del cajón de un papel de salud: lo guarda en los datos de
+ * quien lo recibe, solo si es la propia persona o su representante legal
+ * vigente, con las reglas y la traza de editar el contacto.
+ */
+export async function saveHealthRecipientEmail(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  input: { recipientContactId: string; email: string },
+): Promise<HealthDocumentRecipient> {
+  const recipients = await listHealthDocumentRecipients(tx, orgId, patientId)
+  const recipient = recipients.find((r) => r.contactId === input.recipientContactId)
+  if (!recipient) {
+    const message = "Un papel de salud solo se envía a la propia persona o a su representante legal"
+    throw new ServiceError("DOCUMENT_RECIPIENT_NOT_AUTHORIZED", 403, message, { recipientContactId: message })
+  }
+  const email = input.email.trim().toLowerCase()
+  if (email.length > 200 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+    throw invalidField("email", "El correo no tiene un formato válido")
+  await updateContact(tx, orgId, recipient.contactId, { email }, { userId: actorUserId })
+  return { ...recipient, email }
 }
 
 // --- PDF -----------------------------------------------------------------------
@@ -455,6 +481,36 @@ export async function healthDocumentPatientOfMessage(
     .limit(1)
   const patientId = (row?.metadata as { patientId?: unknown } | null | undefined)?.patientId
   return typeof patientId === "string" ? patientId : null
+}
+
+/**
+ * La última vez que este papel salió hacia la persona: cuándo, por dónde y a
+ * quién. Sirve para avisar, al anular una receta ya enviada, que el PDF que
+ * tiene en su chat ya no vale (ADR 0150). Nulo si nunca se envió.
+ */
+export async function lastHealthDocumentSend(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  input: { documentType: string; documentId: string },
+): Promise<{ at: Date; channel: string; recipientName: string } | null> {
+  assertHealthType(input.documentType)
+  const [row] = await tx
+    .select({ at: auditEvent.createdAt, metadata: auditEvent.metadata })
+    .from(auditEvent)
+    .where(
+      and(
+        eq(auditEvent.organizationId, orgId),
+        eq(auditEvent.action, "health_document.sent"),
+        sql`${auditEvent.metadata}->>'documentId' = ${input.documentId}`,
+        sql`${auditEvent.metadata}->>'patientId' = ${patientId}`,
+      ),
+    )
+    .orderBy(sql`${auditEvent.createdAt} desc`)
+    .limit(1)
+  if (!row) return null
+  const sent = row.metadata as { channel?: string; recipientName?: string }
+  return { at: row.at, channel: sent.channel ?? "", recipientName: sent.recipientName ?? "" }
 }
 
 // --- Envío ---------------------------------------------------------------------

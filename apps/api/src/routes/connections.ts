@@ -67,6 +67,7 @@ export function createConnectionsRoute(deps: CrmDeps) {
     fetch,
     validateExternal: deps.validateExternal,
     webhookBaseUrl: deps.webhookBaseUrl,
+    ...(deps.metaAppId ? { metaAppId: deps.metaAppId } : {}),
   }
   const writeDeps = { fetch, validateExternal: deps.validateExternal, secretsKey: deps.secretsKey }
 

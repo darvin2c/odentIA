@@ -1353,6 +1353,8 @@ export interface PatientDocumentWithContext {
   retiredAt: Date | null
   retiredBy: string | null
   retireReason: string | null
+  /** «No mostrar en su portal» (ADR 0150): desde cuándo está oculto; nulo, se ve. */
+  portalHiddenAt: Date | null
   encounterId: string | null
   planItemId: string | null
   budgetId: string | null
@@ -1563,6 +1565,7 @@ function mergeDocumentContext(
     retiredAt: doc.retiredAt,
     retiredBy: doc.retiredBy,
     retireReason: doc.retireReason,
+    portalHiddenAt: doc.portalHiddenAt,
     encounterId: ctx?.encounterId ?? null,
     planItemId: ctx?.planItemId ?? null,
     budgetId: ctx?.budgetId ?? null,
@@ -1967,6 +1970,47 @@ export async function setDocumentReportStatus(
     row!,
     await currentDocumentContext(tx, orgId, patientId, documentId, false),
   )
+}
+
+/**
+ * «No mostrar en su portal» (ADR 0150): la clínica oculta un archivo subido o
+ * una imagen del portal del paciente, para todo acceso de hoy y de mañana, y lo
+ * vuelve a mostrar sin pedir nada. Lo cambia quien escribe en la historia
+ * (`clinical.write`, en la ruta) y queda su traza. Retirado, ya no cambia.
+ */
+export async function setDocumentPortalVisibility(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  documentId: string,
+  input: { hidden: boolean },
+): Promise<PatientDocumentWithContext> {
+  await requirePatient(tx, orgId, patientId)
+  if (typeof input.hidden !== "boolean") throw invalidField("hidden", "Di si se oculta o se muestra")
+  const current = await requireDocumentRow(tx, orgId, patientId, documentId)
+  if (current.retiredAt)
+    throw new ServiceError("DOCUMENT_RETIRED", 409, "El archivo está retirado")
+  const hiddenNow = current.portalHiddenAt !== null
+  if (hiddenNow === input.hidden) return getPatientDocument(tx, orgId, patientId, documentId)
+  await tx
+    .update(patientDocument)
+    .set(
+      input.hidden
+        ? { portalHiddenAt: new Date(), portalHiddenBy: actorUserId }
+        : { portalHiddenAt: null, portalHiddenBy: null },
+    )
+    .where(and(eq(patientDocument.id, documentId), eq(patientDocument.organizationId, orgId)))
+  await audit(
+    tx,
+    orgId,
+    actorUserId,
+    input.hidden ? "document.portal_hidden" : "document.portal_shown",
+    "patient_document",
+    documentId,
+    { patientId },
+  )
+  return getPatientDocument(tx, orgId, patientId, documentId)
 }
 
 export async function getPatientDocument(

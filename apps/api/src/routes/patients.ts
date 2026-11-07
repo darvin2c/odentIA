@@ -62,6 +62,7 @@ import {
   makeImageThumbnail,
   registerPatientDocument,
   retirePatientDocument,
+  setDocumentPortalVisibility,
   setDocumentReportStatus,
   removePatientAllergy,
   removePatientContact,
@@ -1179,6 +1180,27 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         setDocumentReportStatus(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("documentId"),
+          parsed.data,
+        ),
+      ),
+    )
+  })
+  // «No mostrar en su portal» (ADR 0150): quien escribe en la historia (`clinical.write`, la guarda de arriba).
+  app.patch("/:id/documents/:documentId/portal", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = z
+      .object({ hidden: z.boolean({ error: "Di si se oculta o se muestra." }) })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        setDocumentPortalVisibility(
           tx,
           orgId,
           userId,
