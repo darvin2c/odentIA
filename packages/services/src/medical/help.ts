@@ -126,7 +126,7 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
       faq.q === "¿Cómo elijo el diagnóstico de una atención?"
         ? {
             q: faq.q,
-            a: "Con los más usados en tu clínica o con el buscador de toda la lista, que no distingue tildes ni mayúsculas y muestra primero los de la atención primaria. La parte del cuerpo se escribe en la nota del diagnóstico. «Presuntivo» basta para cerrar. Si la persona ya tenía ese diagnóstico, el sistema lo anota solo como «Ya diagnosticado antes».",
+            a: "Con lo que propone la atención, con los más usados en tu clínica o con el buscador de toda la lista, que no distingue tildes ni mayúsculas y muestra primero los de la atención primaria. En una sesión o un control, propone el diagnóstico del tratamiento que continúa; nada entra solo: «Usar» lo registra con el tipo de la última vez o, si nunca se registró, te pide el tipo. La parte del cuerpo se escribe en la nota del diagnóstico. «Presuntivo» basta para cerrar. Si la persona ya tenía ese diagnóstico, el sistema lo anota solo como «Ya diagnosticado antes».",
           }
         : faq,
     ),

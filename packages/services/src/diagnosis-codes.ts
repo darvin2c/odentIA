@@ -26,12 +26,22 @@ import {
   type SelectableDiagnosisSystem,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
-import { diagnosisCatalog, encounter, encounterDiagnosis } from "@odentia/db/schema/clinical"
+import {
+  clinicalFollowUp,
+  diagnosisCatalog,
+  encounter,
+  encounterDiagnosis,
+  encounterPlanItem,
+  treatmentPlanItem,
+} from "@odentia/db/schema/clinical"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, count, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm"
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne, notInArray, or, sql } from "drizzle-orm"
 import { notFound, validation } from "./errors.js"
-import type { SiteFields } from "./product-hooks.js"
+import type { DiagnosisCandidate, SiteFields } from "./product-hooks.js"
 import { productHooks } from "./products.js"
+
+/** Un tratamiento cancelado o reemplazado ya no se continúa: ni propone su diagnóstico ni es motivo de una cita. */
+export const DROPPED_PLAN_ITEM_STATUSES = ["cancelado", "reemplazado"]
 
 /** Un código del catálogo, como se ofrece y se guarda. */
 export interface DiagnosisCodeOption {
@@ -215,11 +225,25 @@ export async function searchDiagnosisCodes(
   }))
 }
 
-/** Lo que el odontograma propone: un código por hallazgo, en la lista de la clínica. */
-/** Un diagnóstico propuesto, con lo que lo propone y su sitio como lo dice el producto. */
+/**
+ * Un diagnóstico propuesto, con lo que lo propone y su sitio como lo dice el
+ * producto: un hallazgo de la atención (odentIA: el odontograma) o un
+ * tratamiento que la atención continúa.
+ */
 export type ProposedDiagnosis = DiagnosisCodeOption & {
-  /** «Lesión de caries dental»: el hallazgo que lo propone. */
+  /** Qué lo propone: un hallazgo o un tratamiento. */
+  source: "hallazgo" | "tratamiento"
+  /**
+   * Lo que lo propone, en palabras: el hallazgo («Lesión de caries dental») o
+   * el tratamiento con su pieza («Endodoncia posterior vital · 46»).
+   */
   finding: string
+  /**
+   * El tipo con que se registró la última vez ese código para la persona
+   * (FHIR verificationStatus); null si nunca se registró o si lo propone un
+   * hallazgo, que es una observación nueva.
+   */
+  diagnosisType: string | null
 } & SiteFields
 
 export interface DiagnosisSuggestions {
@@ -249,10 +273,140 @@ async function codesIn(tx: Db, system: DiagnosisSystemKey, codes: string[]) {
 }
 
 /**
+ * Los tratamientos que esta atención continúa y su diagnóstico: los unidos a
+ * la atención y el del control reservado con su cita. En una sesión o un
+ * control el diagnóstico ya está en el tratamiento: se ofrece, no se registra
+ * solo (el clínico lo usa o no). Lo de otra lista no se propone.
+ */
+async function treatmentCandidates(
+  tx: Db,
+  orgId: string,
+  system: DiagnosisSystemKey,
+  patientId: string,
+  encounterId: string,
+): Promise<DiagnosisCandidate[]> {
+  const [visit] = await tx
+    .select({ appointmentId: encounter.appointmentId })
+    .from(encounter)
+    .where(
+      and(eq(encounter.id, encounterId), eq(encounter.organizationId, orgId), eq(encounter.patientId, patientId)),
+    )
+    .limit(1)
+  if (!visit) return []
+  const joined = tx
+    .select({ id: encounterPlanItem.planItemId })
+    .from(encounterPlanItem)
+    .where(and(eq(encounterPlanItem.organizationId, orgId), eq(encounterPlanItem.encounterId, encounterId)))
+  const fromControl = visit.appointmentId
+    ? tx
+        .select({ id: clinicalFollowUp.planItemId })
+        .from(clinicalFollowUp)
+        .where(
+          and(
+            eq(clinicalFollowUp.organizationId, orgId),
+            eq(clinicalFollowUp.patientId, patientId),
+            eq(clinicalFollowUp.appointmentId, visit.appointmentId),
+            isNotNull(clinicalFollowUp.planItemId),
+            ne(clinicalFollowUp.status, "cancelado"),
+          ),
+        )
+    : null
+  const rows = await tx
+    .select({
+      title: treatmentPlanItem.title,
+      code: treatmentPlanItem.diagnosisCode,
+      siteSystem: treatmentPlanItem.siteSystem,
+      siteCode: treatmentPlanItem.siteCode,
+      siteQualifiers: treatmentPlanItem.siteQualifiers,
+    })
+    .from(treatmentPlanItem)
+    .where(
+      and(
+        eq(treatmentPlanItem.organizationId, orgId),
+        eq(treatmentPlanItem.patientId, patientId),
+        eq(treatmentPlanItem.diagnosisSystem, system),
+        isNotNull(treatmentPlanItem.diagnosisCode),
+        // Lo cancelado o reemplazado ya no se continúa: no propone su diagnóstico.
+        notInArray(treatmentPlanItem.status, DROPPED_PLAN_ITEM_STATUSES),
+        fromControl
+          ? or(inArray(treatmentPlanItem.id, joined), inArray(treatmentPlanItem.id, fromControl))
+          : inArray(treatmentPlanItem.id, joined),
+      ),
+    )
+    .orderBy(asc(treatmentPlanItem.sortOrder), asc(treatmentPlanItem.createdAt), asc(treatmentPlanItem.id))
+  const { site } = await productHooks(tx, orgId)
+  return rows.flatMap((row) => {
+    if (!row.code) return []
+    // «Endodoncia posterior vital · 46»: la pieza como la dice el producto (latidIA no tiene).
+    const where = site.value(row.siteCode)
+    const treatment = where != null ? `${row.title} · ${where}` : row.title
+    return [
+      {
+        code: row.code,
+        finding: treatment,
+        site: { siteSystem: row.siteSystem, siteCode: row.siteCode, siteQualifiers: row.siteQualifiers },
+      },
+    ]
+  })
+}
+
+/** Un código en un sitio (pieza, cuadrante o arcada; sin las caras), como se compara un diagnóstico con otro. */
+const placeKey = (code: string, site: { siteSystem: string | null; siteCode: string | null }) =>
+  `${code}|${site.siteSystem ?? ""}|${site.siteCode ?? ""}`
+
+/**
+ * El tipo con que se registró por última vez cada código en el mismo sitio
+ * para la persona, en esa lista (por `placeKey`): el de la 46 no vale para la
+ * 36, y sin pieza solo cuentan los registros sin pieza. Lo de una atención
+ * anulada no cuenta, como en `wasDiagnosedBefore`.
+ */
+async function lastTypes(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  system: DiagnosisSystemKey,
+  codes: string[],
+): Promise<Map<string, string>> {
+  if (codes.length === 0) return new Map()
+  const rows = await tx
+    .selectDistinctOn([encounterDiagnosis.diagnosisCode, encounterDiagnosis.siteSystem, encounterDiagnosis.siteCode], {
+      code: encounterDiagnosis.diagnosisCode,
+      siteSystem: encounterDiagnosis.siteSystem,
+      siteCode: encounterDiagnosis.siteCode,
+      type: encounterDiagnosis.diagnosisType,
+    })
+    .from(encounterDiagnosis)
+    .leftJoin(
+      encounter,
+      and(eq(encounter.id, encounterDiagnosis.encounterId), eq(encounter.organizationId, encounterDiagnosis.organizationId)),
+    )
+    .where(
+      and(
+        eq(encounterDiagnosis.organizationId, orgId),
+        eq(encounterDiagnosis.patientId, patientId),
+        eq(encounterDiagnosis.diagnosisSystem, system),
+        inArray(encounterDiagnosis.diagnosisCode, [...new Set(codes)]),
+        isNull(encounterDiagnosis.voidedAt),
+        isNotNull(encounterDiagnosis.diagnosisType),
+        or(isNull(encounter.status), ne(encounter.status, "anulada")),
+      ),
+    )
+    .orderBy(
+      encounterDiagnosis.diagnosisCode,
+      encounterDiagnosis.siteSystem,
+      encounterDiagnosis.siteCode,
+      desc(encounterDiagnosis.createdAt),
+      desc(encounterDiagnosis.id),
+    )
+  return new Map(rows.flatMap((row) => (row.type ? [[placeKey(row.code, row), row.type] as const] : [])))
+}
+
+/**
  * Los pasos 1 y 2 del diagnóstico (tablero 6): lo que proponen los hallazgos
  * de esta atención (o el hallazgo que se está marcando en la pieza) y los
+ * tratamientos que la atención continúa (con el tipo de la última vez), y los
  * códigos que más usa la clínica en su lista. Un código que la lista cargada
- * no trae, o que es una categoría, no se propone.
+ * no trae, que es una categoría o que ya está en la atención, no se propone.
  */
 export async function getDiagnosisSuggestions(
   tx: Db,
@@ -272,13 +426,32 @@ export async function getDiagnosisSuggestions(
   // Lo que propone lo registrado lo dice el producto (odentIA: los hallazgos del
   // odontograma de esta atención y el que se está marcando en la pieza).
   const hooks = await productHooks(tx, orgId)
-  const candidates = await hooks.diagnosisCandidates(tx, {
+  const found = await hooks.diagnosisCandidates(tx, {
     orgId,
     system,
     patientId: input.patientId,
     encounterId: input.encounterId,
     finding: input.finding ?? null,
   })
+  // Lo de los tratamientos es común a todos los productos (latidIA también, sin pieza).
+  const treatments =
+    input.patientId && input.encounterId
+      ? await treatmentCandidates(tx, orgId, system, input.patientId, input.encounterId)
+      : []
+  const types =
+    input.patientId && treatments.length > 0
+      ? await lastTypes(tx, orgId, input.patientId, system, treatments.map((candidate) => candidate.code))
+      : new Map<string, string>()
+  // Primero lo de los tratamientos: si un hallazgo propone lo mismo en el mismo sitio,
+  // queda la propuesta del tratamiento, que trae el tipo de la última vez y se usa desde la tarjeta.
+  const candidates = [
+    ...treatments.map((candidate) => ({
+      ...candidate,
+      source: "tratamiento" as const,
+      diagnosisType: types.get(placeKey(candidate.code, candidate.site)) ?? null,
+    })),
+    ...found.map((candidate) => ({ ...candidate, source: "hallazgo" as const, diagnosisType: null })),
+  ]
   const already = new Set<string>()
   if (input.patientId && input.encounterId) {
     const diagnosed = await tx
@@ -292,7 +465,8 @@ export async function getDiagnosisSuggestions(
           isNull(encounterDiagnosis.voidedAt),
         ),
       )
-    for (const row of diagnosed) already.add(`${row.code}|${row.siteSystem ?? ""}|${row.siteCode ?? ""}`)
+    // Con la misma clave con que el alta reconoce un diagnóstico ya registrado (`recordEncounterDiagnosis`).
+    for (const row of diagnosed) already.add(placeKey(row.code, row))
   }
   const known = await codesIn(
     tx,
@@ -303,7 +477,7 @@ export async function getDiagnosisSuggestions(
   const seen = new Set<string>()
   for (const candidate of candidates) {
     const row = known.get(candidate.code)
-    const key = `${candidate.code}|${candidate.site.siteSystem ?? ""}|${candidate.site.siteCode ?? ""}`
+    const key = placeKey(candidate.code, candidate.site)
     if (!row || row.isCategory || already.has(key) || seen.has(key)) continue
     seen.add(key)
     proposed.push({
@@ -311,7 +485,9 @@ export async function getDiagnosisSuggestions(
       code: candidate.code,
       description: row.title,
       isCategory: false,
+      source: candidate.source,
       finding: candidate.finding,
+      diagnosisType: candidate.diagnosisType,
       ...hooks.site.fields(candidate.site),
     })
   }

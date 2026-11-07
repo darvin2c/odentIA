@@ -34,7 +34,16 @@ export interface AddDiagnosisInput {
   diagnosisType: string
   toothNumber?: number | null
   surfaces?: string[] | null
+  /** Un área en vez de una pieza (odentIA: el cuadrante o la arcada de un tratamiento). */
+  quadrant?: number | null
+  arch?: string | null
   note?: string | null
+}
+
+/** Lo que dejó el alta: el diagnóstico y si ya estaba (`existing`) en vez de uno nuevo. */
+export interface RecordedDiagnosis {
+  row: EncounterDiagnosisRow
+  existing: boolean
 }
 
 export interface PatientDiagnosis extends EncounterDiagnosisRow {
@@ -69,6 +78,27 @@ export async function addEncounterDiagnosis(
   encounterId: string,
   input: AddDiagnosisInput,
 ): Promise<EncounterDiagnosisRow> {
+  return (await recordEncounterDiagnosis(tx, orgId, actorUserId, patientId, encounterId, input)).row
+}
+
+/**
+ * El alta de un diagnóstico, diciendo si ya estaba. El mismo código en el mismo
+ * sitio (pieza, cuadrante o arcada; las caras no cuentan) no se registra dos
+ * veces en una atención: se devuelve el vigente, sin tocarlo (un diagnóstico
+ * registrado no se modifica). No es un 409 a propósito: el panel de la pieza y
+ * el periodontograma registran el diagnóstico junto con otra cosa, y un
+ * rechazo les impediría guardar lo suyo; «Usar» dos veces, o una propuesta
+ * vieja en pantalla, tampoco duplica. Clío mira `existing` para no apropiarse
+ * de un diagnóstico que no vino del dictado.
+ */
+export async function recordEncounterDiagnosis(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+  input: AddDiagnosisInput,
+): Promise<RecordedDiagnosis> {
   await requirePatient(tx, orgId, patientId)
   const locked = await lockEncounter(tx, orgId, patientId, encounterId)
   assertOpenDraft(locked, actorUserId)
@@ -80,12 +110,35 @@ export async function addEncounterDiagnosis(
   )
   if (!(DIAGNOSIS_TYPES as readonly string[]).includes(input.diagnosisType))
     throw invalidField("diagnosisType", "Elige si el diagnóstico es presuntivo o definitivo")
-  const previouslyDiagnosed = await wasDiagnosedBefore(tx, orgId, patientId, found, encounterId)
-  // Dónde, como lo valida el producto (odentIA: una pieza FDI y sus caras).
+  // Dónde, como lo valida el producto (odentIA: una pieza FDI y sus caras, o un cuadrante o una arcada).
   const site = await siteOf(tx, orgId)
-  const columns = site.columns({ toothNumber: input.toothNumber ?? null, surfaces: input.surfaces ?? [] })
+  const columns = site.columns({
+    toothNumber: input.toothNumber ?? null,
+    surfaces: input.surfaces ?? [],
+    quadrant: input.quadrant ?? null,
+    arch: input.arch ?? null,
+  })
   const note = input.note?.trim() || null
   if (note && note.length > 2000) throw invalidField("note", "La nota admite hasta 2000 caracteres")
+  // La atención está bloqueada (`lockEncounter`): dos altas a la vez no pasan las dos esta mirada.
+  const [already] = await tx
+    .select()
+    .from(encounterDiagnosis)
+    .where(
+      and(
+        eq(encounterDiagnosis.organizationId, orgId),
+        eq(encounterDiagnosis.encounterId, encounterId),
+        eq(encounterDiagnosis.diagnosisSystem, found.system),
+        eq(encounterDiagnosis.diagnosisCode, found.code),
+        isNull(encounterDiagnosis.voidedAt),
+        columns.siteSystem ? eq(encounterDiagnosis.siteSystem, columns.siteSystem) : isNull(encounterDiagnosis.siteSystem),
+        columns.siteCode ? eq(encounterDiagnosis.siteCode, columns.siteCode) : isNull(encounterDiagnosis.siteCode),
+      ),
+    )
+    .orderBy(asc(encounterDiagnosis.createdAt))
+    .limit(1)
+  if (already) return { row: withSite(site, already), existing: true }
+  const previouslyDiagnosed = await wasDiagnosedBefore(tx, orgId, patientId, found, encounterId)
   const [row] = await tx
     .insert(encounterDiagnosis)
     .values({
@@ -108,7 +161,7 @@ export async function addEncounterDiagnosis(
     diagnosisSystem: found.system,
     diagnosisCode: found.code,
   })
-  return withSite(await siteOf(tx, orgId), row)
+  return { row: withSite(site, row), existing: false }
 }
 
 export async function voidEncounterDiagnosis(
