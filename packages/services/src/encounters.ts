@@ -8,6 +8,7 @@ import {
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import {
+  appointmentPlanItem,
   clinicalFollowUp,
   clinicalNote,
   diagnosisCatalog,
@@ -29,13 +30,13 @@ import { member, user } from "@odentia/db/schema/auth"
 import { clinicalOrder, consentDocument, consentEvent, medicalLeave } from "@odentia/db/schema/clinical-forms"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { canAttend } from "@odentia/auth/permissions"
-import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm"
 import { markArrivedOnAttend, notifyAppointmentChanged, setAppointmentStatus } from "./appointments.js"
 import { listEncounterDocuments, type PatientDocumentWithContext } from "./clinical.js"
 import { assertAttending } from "./encounter-attending.js"
 import { cancelDerivationTask, type ConsentNeed, getEncounterConsentNeeds } from "./clinical-forms.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
-import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
+import { DROPPED_PLAN_ITEM_STATUSES, resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import {
   branchNotFound,
   invalidField,
@@ -914,7 +915,12 @@ export async function getEncounterDetail(
   }
 }
 
-/** El motivo escrito al reservar la cita de la atención, para ofrecerlo, nunca para darlo por firmado. */
+/**
+ * Para qué se agendó la cita de la atención, para ofrecerlo como motivo, nunca
+ * para darlo por firmado (ADR 0139). En orden: el motivo escrito al reservarla;
+ * si no hay, los controles que se reservaron con ella; si tampoco, los tratamientos
+ * que se agendaron con ella («Continúa: Endodoncia posterior vital de la 46»).
+ */
 async function bookedReasonOf(tx: Db, orgId: string, appointmentId: string | null): Promise<string | null> {
   if (!appointmentId) return null
   const [booked] = await tx
@@ -922,7 +928,55 @@ async function bookedReasonOf(tx: Db, orgId: string, appointmentId: string | nul
     .from(appointment)
     .where(and(eq(appointment.id, appointmentId), eq(appointment.organizationId, orgId)))
     .limit(1)
-  return booked?.reason?.trim() || null
+  if (!booked) return null
+  const written = booked.reason?.trim()
+  if (written) return written
+  // Un motivo es una línea: con muchos, los tres primeros y cuántos más.
+  const oneLine = (words: string[]) => {
+    const shown = words.length > 3 ? [...words.slice(0, 3), `${words.length - 3} más`] : words
+    return shown.length <= 1 ? (shown[0] ?? "") : `${shown.slice(0, -1).join(", ")} y ${shown.at(-1)}`
+  }
+  // Todos los controles reservados con la cita («Control A y Control B»), no solo el primero.
+  const controls = await tx
+    .select({ title: clinicalFollowUp.title })
+    .from(clinicalFollowUp)
+    .where(
+      and(
+        eq(clinicalFollowUp.organizationId, orgId),
+        eq(clinicalFollowUp.appointmentId, appointmentId),
+        ne(clinicalFollowUp.status, "cancelado"),
+      ),
+    )
+    .orderBy(asc(clinicalFollowUp.createdAt), asc(clinicalFollowUp.id))
+  const controlTitles = [...new Set(controls.map((control) => control.title.trim()).filter(Boolean))]
+  if (controlTitles.length > 0) return oneLine(controlTitles)
+  const items = await tx
+    .select({ title: treatmentPlanItem.title, siteCode: treatmentPlanItem.siteCode })
+    .from(appointmentPlanItem)
+    .innerJoin(
+      treatmentPlanItem,
+      and(
+        eq(treatmentPlanItem.id, appointmentPlanItem.planItemId),
+        eq(treatmentPlanItem.organizationId, appointmentPlanItem.organizationId),
+      ),
+    )
+    .where(
+      and(
+        eq(appointmentPlanItem.organizationId, orgId),
+        eq(appointmentPlanItem.appointmentId, appointmentId),
+        // Lo cancelado o reemplazado después de agendar ya no se continúa.
+        notInArray(treatmentPlanItem.status, DROPPED_PLAN_ITEM_STATUSES),
+      ),
+    )
+    .orderBy(asc(treatmentPlanItem.sortOrder), asc(treatmentPlanItem.createdAt), asc(treatmentPlanItem.id))
+  if (items.length === 0) return null
+  const { site } = await productHooks(tx, orgId)
+  // «de la 46», como se dice la pieza en el resto de textos; sin pieza (o en latidIA), solo el título.
+  const words = items.map((item) => {
+    const where = site.value(item.siteCode)
+    return where != null ? `${item.title.trim()} de la ${where}` : item.title.trim()
+  })
+  return `Continúa: ${oneLine(words)}`
 }
 
 /** Atención en la lista del paciente, con lo necesario para reconocerla. */
