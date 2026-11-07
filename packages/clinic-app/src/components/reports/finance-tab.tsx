@@ -461,7 +461,7 @@ function Cascade({ data }: { data: ReportFinance }) {
               ? `${taxLead ?? `De lo cobrado en ${period}, el`} ${commissionShare} % fueron comisiones, el ${otherShare} % otros gastos y quedó el ${leavesShare} %.`
               : `En ${period} las comisiones (${commissionShare} %) y los otros gastos (${otherShare} %) pasaron lo cobrado: faltaron ${money(-current.leavesCents)}.${
                   // A mitad de mes el alquiler y los sueldos ya están y lo cobrado sigue entrando.
-                  data.period.partial ? " El periodo aún no termina: lo cobrado sigue entrando y varios gastos del mes ya se pagaron." : ""
+                  data.period.partial ? " El periodo aún no termina: lo cobrado sigue entrando." : ""
                 }`
             : `En ${period} no se cobró nada.`}
         </p>
@@ -827,8 +827,8 @@ function CommissionsSection({ query, data, argosEnabled }: { query: ReportQuery;
         <div className="flex flex-wrap items-center gap-2">
           {report.data && report.data.data.rows.length > 0 ? <DownloadButton onDownload={() => downloadReportTable("commissions", query)} /> : null}
           {/* Solo cuando hay algo que pagar: sin comisiones por pagar, el botón sería ruido. */}
-          {/* Solo si hoy queda algo por pagar del periodo: un mes cerrado y ya pagado no lo ofrece. */}
-          {canPay && data.commissions.pendingCents > 0 ? payLink : null}
+          {/* Solo si queda algo por registrar de este periodo (un pago o un descuento). */}
+          {canPay && data.commissions.freshCents > 0 ? payLink : null}
         </div>
       </div>
       {body()}
@@ -951,11 +951,12 @@ function PayablesCard({ data }: { data: ReportFinance }) {
           </span>
           <span className="text-[13px] text-muted-foreground">
             {commissions.professionals === 0 ? "Nadie espera pago" : `De ${commissions.professionals} ${commissions.professionals === 1 ? "profesional" : "profesionales"}`}
-            {/* Lo de un mes cerrado es lo que se debía al cerrarlo; pagar solo se ofrece si hoy falta algo. */}
-            {canPay && commissions.cents > 0 && !data.period.partial && data.commissions.pendingCents === 0 ? (
-              <> · ya se pagaron después</>
+            {/* Lo de un mes cerrado es lo que se debía al cerrarlo; pagar solo se ofrece si hoy se debe algo. */}
+            {commissions.cents > 0 && !data.period.partial && commissions.nowCents === 0 ? <> · hoy ya no se debe nada</> : null}
+            {!data.period.partial && commissions.nowCents > 0 && commissions.nowCents !== commissions.cents ? (
+              <> · hoy {money(commissions.nowCents)}</>
             ) : null}
-            {canPay && commissions.cents > 0 && (data.period.partial || data.commissions.pendingCents > 0) ? (
+            {canPay && commissions.nowCents > 0 ? (
               <>
                 {" · "}
                 <Link to="/finance" search={{ tab: "comisiones" }} className="font-bold text-primary-soft-foreground">

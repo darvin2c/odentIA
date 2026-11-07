@@ -77,6 +77,8 @@ import type { TicketFrozen } from "./payments.js"
 import { digitsContain, foldedWordsMatch, referenceNumber, searchDigits, textMatchesWords } from "./search-text.js"
 export const MOVEMENT_DIRECTIONS = ["ingreso", "egreso"] as const
 export const EXPENSE_CATEGORIES = ["Personal", "Alquiler", "Laboratorio", "Materiales", "Servicios", "Impuestos", "Otros"] as const
+/** Los tipos con que se filtra Gastos: los de un gasto y el pago de comisiones, que va aparte de «Personal». */
+export const EXPENSE_FILTER_TYPES = [...EXPENSE_CATEGORIES, "Pago de comisiones"] as const
 /** El tipo del pago del impuesto de lo cobrado (ADR 0083): solo un gasto de «Impuestos» puede serlo. */
 export const SALES_TAX_EXPENSE_CATEGORY = "Impuestos"
 
@@ -1478,6 +1480,8 @@ export async function getMonthExpenses(
     const settlement = settlementOf.get(row.id)
     return {
       ...row,
+      // El tipo con que se ve y se filtra: el mismo que su cifra del mes (`byCategory`).
+      category: settlement !== undefined ? COMMISSION_PAYMENTS_CONCEPT : row.category,
       fromCash: row.shiftId !== null,
       purchaseOrderNumber: order?.orderNumber ?? null,
       supplierName: order?.supplierName ?? null,

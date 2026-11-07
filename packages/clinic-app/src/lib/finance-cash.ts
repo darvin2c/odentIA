@@ -710,6 +710,8 @@ export const EXPENSE_CATEGORIES = [
   "Otros",
 ] as const
 export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number]
+/** Los tipos con que se filtra Gastos: los de un gasto y el pago de comisiones (`EXPENSE_FILTER_TYPES`). */
+export const EXPENSE_FILTER_TYPES = [...EXPENSE_CATEGORIES, "Pago de comisiones"] as const
 
 /** Valor con que el servidor guarda «sin comprobante». */
 export const NO_RECEIPT = "ninguno"

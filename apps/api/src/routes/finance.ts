@@ -33,6 +33,7 @@ import {
   TICKET_STATES,
   dismissExpenseGap,
   EXPENSE_CATEGORIES,
+  EXPENSE_FILTER_TYPES,
   getMonthExpenses,
   getPurchasesToPay,
   listClosures,
@@ -298,7 +299,7 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
         month: z.coerce.number().int().min(1).max(12),
         branchId: z.uuid().optional(),
         q: z.string().max(200).optional(),
-        category: z.enum(EXPENSE_CATEGORIES).optional(),
+        category: z.enum(EXPENSE_FILTER_TYPES).optional(),
       })
       .safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)

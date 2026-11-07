@@ -31,7 +31,7 @@ import { useOrgSecondCurrency } from "../../lib/org"
 import {
   daysBetween,
   dayKeyOf,
-  EXPENSE_CATEGORIES,
+  EXPENSE_FILTER_TYPES,
   type ExpenseRow,
   fetchMonthExpenses,
   fetchPurchasesToPay,
@@ -86,7 +86,7 @@ export function ExpensesTab({
   const [voiding, setVoiding] = useState<ExpenseRow | null>(null)
   const q = listSearch.get("q") ?? ""
   const tipo = listSearch.get("tipo") ?? ""
-  const category = (EXPENSE_CATEGORIES as readonly string[]).includes(tipo) ? tipo : ""
+  const category = (EXPENSE_FILTER_TYPES as readonly string[]).includes(tipo) ? tipo : ""
   const filtered = EXPENSE_LIST_KEYS.some((key) => !!listSearch.get(key))
 
   const expenses = useQuery({
@@ -117,7 +117,7 @@ export function ExpensesTab({
       key: "tipo",
       label: "Tipo",
       type: "select",
-      options: EXPENSE_CATEGORIES.map((item) => ({ value: item, label: item })),
+      options: EXPENSE_FILTER_TYPES.map((item) => ({ value: item, label: item })),
     },
   ]
 

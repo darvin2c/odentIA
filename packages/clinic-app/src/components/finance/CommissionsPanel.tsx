@@ -1004,7 +1004,7 @@ function VoidPaymentDrawer({
     >
       <div className="flex flex-col gap-4">
         <p className="text-sm text-muted-foreground">
-          Se anula el pago y su gasto. Sus cobros vuelven a quedar por pagar. La
+          Se anula el pago (y su gasto, si salió dinero). Sus cobros vuelven a quedar por pagar. La
           anulación queda registrada con su motivo.
         </p>
         <form.AppField name="reason">
