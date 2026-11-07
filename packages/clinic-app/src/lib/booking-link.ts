@@ -1,4 +1,5 @@
 import type { RegistrationAnswers, RegistrationConfig } from "@odentia/clinical"
+import type { ConsentLetterhead } from "./clinical-forms"
 import { ApiError, saveDownload } from "./api"
 import { API_URL } from "./auth-client"
 import type { PortalBudget } from "./portal"
@@ -337,13 +338,24 @@ export interface ConsentSection {
   risks?: string[]
   alternatives?: string[]
   consequences?: string
+  notes?: string | null
 }
 
+/** Lo que lee antes de firmar: la misma hoja que el PDF (sin el número de su documento). */
 export interface LinkConsent {
   id: string
   title: string
+  procedureRef: string | null
+  diagnosis: string | null
   sections: ConsentSection | null
   body: string
+  declaration: string
+  signatureWords: string
+  signatureNote: string
+  clinic: ConsentLetterhead
+  patient: { name: string; chartNumber: string }
+  /** Menor de edad: firma su representante legal. */
+  minor: boolean
   /** Quién firma y el tipo de documento que escribe (nunca el número guardado). */
   signer: { name: string; asRepresentative: boolean; documentLabel: string | null }
 }

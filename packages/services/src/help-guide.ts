@@ -465,7 +465,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Qué es «Su enlace»?",
-        a: "Una página personal de cada persona, sin contraseña, con lo que tiene pendiente: su cita (confirmar, cambiar, cancelar), sus datos por completar, el presupuesto que se le envió, el consentimiento por firmar y el cuestionario antes de su cita. Nunca muestra su historia ni lo guardado. Le llega con el aviso de su cita cuando le faltan datos, o con «Enviarle su enlace» junto a «Completar». Lo que no es su cita (sus datos, el presupuesto, el consentimiento y el cuestionario) solo lo ve la propia persona si es mayor de edad o su representante legal; un familiar ve solo la cita. Cada cosa deja de servir cuando ya no hace falta; si lo abre después, le pide responder el mensaje para recibir uno nuevo. Para dejarlo sin efecto antes, «Enviarle su enlace» ofrece «Quitar enlace».",
+        a: "Una página personal de cada persona, sin contraseña, con lo que tiene pendiente: su cita (confirmar, cambiar, cancelar), sus datos por completar, el presupuesto que se le envió, el consentimiento por firmar y el cuestionario antes de su cita. Nunca muestra su historia ni lo guardado; el consentimiento se lee igual que su hoja en papel, con el diagnóstico que lo motiva. Le llega con el aviso de su cita cuando le faltan datos, o con «Enviarle su enlace» junto a «Completar». Lo que no es su cita (sus datos, el presupuesto, el consentimiento y el cuestionario) solo lo ve la propia persona si es mayor de edad o su representante legal; un familiar ve solo la cita. Cada cosa deja de servir cuando ya no hace falta; si lo abre después, le pide responder el mensaje para recibir uno nuevo. Para dejarlo sin efecto antes, «Enviarle su enlace» ofrece «Quitar enlace».",
       },
       {
         q: "¿Qué pasa si el documento que escribió ya es de otra persona?",
@@ -521,7 +521,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo firma la persona su consentimiento?",
-        a: "Con «Firmar ahora» se abre una pantalla completa para pasarle la tablet: lee en letra grande, marca que entendió y firma con el dedo; si son dos, van seguidos. Al final confirmas tú con tu perfil profesional, sin dibujar otra firma. Si firmó en papel, «Firmado en papel» pide la foto de la hoja y cierra el pendiente. Con «Enviar para firmar» lo lee y lo firma desde su teléfono, en «Su enlace», antes de llegar; queda pendiente hasta que tú lo confirmes con «Confirmar». Siempre se dice el nivel real: «Firma simple · en la clínica», «en papel» o «por enlace».",
+        a: "Con «Firmar ahora» se abre una pantalla completa para pasarle la tablet: lee la hoja como queda en el papel, en letra grande, marca que entendió y firma con el dedo donde va su firma; si son dos, van seguidos. Al final confirmas tú con tu perfil profesional, sin dibujar otra firma. Si firmó en papel, «Firmado en papel» pide la foto de la hoja y cierra el pendiente. Con «Enviar para firmar» lee la misma hoja y la firma desde su teléfono, en «Su enlace», antes de llegar; queda pendiente hasta que tú lo confirmes con «Confirmar». Siempre se dice el nivel real, al pie de la hoja: «Firma simple · en la clínica», «en papel» o «por enlace».",
       },
       {
         q: "¿Por qué la atención me dice «Necesita consentimiento»?",

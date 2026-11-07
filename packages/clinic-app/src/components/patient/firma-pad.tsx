@@ -97,7 +97,7 @@ export function FirmaPad({
       />
       <div className="mt-2 flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
-          {empty ? "Firma con el dedo o el mouse en el recuadro." : `${strokes.length} trazo(s) capturados.`}
+          {empty ? "Firma dentro del recuadro." : "¿No quedó bien? Usa «Limpiar» y vuelve a firmar."}
         </p>
         <Button
           type="button"

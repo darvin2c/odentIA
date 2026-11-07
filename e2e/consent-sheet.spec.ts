@@ -20,11 +20,14 @@ test("consentimientos: nacen activos; se leen, se cambian sobre la hoja, se ve e
   await row.getByRole("button", { name: "Vista previa de Exodoncia simple o quirúrgica" }).click()
   await expect(page.getByTitle("Hoja de Exodoncia simple o quirúrgica")).toHaveAttribute("src", /^blob:/)
   await shot("vista-previa-pdf")
+  // En el teléfono, la misma hoja que el papel: los títulos de la plantilla y la declaración.
   await page.getByRole("tab", { name: "En el teléfono del paciente" }).click()
-  await expect(page.getByText("Qué te van a hacer")).toBeVisible()
+  const phoneSheet = page.getByRole("article", { name: "Exodoncia simple o quirúrgica" })
+  await expect(phoneSheet.getByRole("heading", { name: "Consecuencias de no tratarse" })).toBeVisible()
+  await expect(phoneSheet.getByRole("heading", { name: "Declaración" })).toBeVisible()
   await shot("vista-previa-telefono")
   await page.getByRole("button", { name: "Cerrar" }).click()
-  await expect(page.getByText("Qué te van a hacer")).toBeHidden()
+  await expect(phoneSheet).toBeHidden()
 
   // Editar es tocar el texto sobre la hoja; Enter agrega otra línea.
   await row.getByRole("button", { name: "Editar Exodoncia simple o quirúrgica" }).click()
