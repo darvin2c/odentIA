@@ -16,6 +16,7 @@ import { formatMoney } from "@odentia/clinical"
 import {
   Badge,
   Button,
+  Checkbox,
   cn,
   Skeleton,
   Table,
@@ -29,6 +30,7 @@ import {
 import {
   DetailDrawer,
   EmptyState,
+  FormChoiceField,
   FormDrawer,
   PersonAvatar,
   useAppForm,
@@ -67,6 +69,7 @@ import {
 } from "../../lib/commissions"
 import { useOrgMembers, usePermission } from "../../lib/crm"
 import { financeFormMessage } from "../../lib/finance"
+import { invalidateFinance, useCashState } from "../../lib/finance-cash"
 import { useOrgEvents } from "../../lib/org-events"
 import { QueryErrorState } from "../../lib/query-error"
 import { ChoiceSelect } from "../ui/choice-select"
@@ -755,9 +758,9 @@ function ProfessionalDetailBody({
       ) : null}
 
       <p className="text-xs text-muted-foreground">
-        {discountOnly ? "Un descuento no registra gasto." : "El pago queda en Gastos como pago de comisiones."} Lo que
-        agrega caja sin atención, como vender{" "}
-        {appWords().examples.soldItem}, no cuenta para ningún profesional.
+        {discountOnly ? "Un descuento no registra gasto." : "El pago queda en Gastos como pago de comisiones."} Solo
+        comisiona lo cobrado de una atención; una venta suelta, como{" "}
+        {appWords().examples.soldItem}, no es de ningún profesional.
       </p>
 
       <RateDrawer
@@ -921,13 +924,19 @@ function PayDrawer({
     void queryClient.invalidateQueries({ queryKey: ["finance-expenses"] })
     void queryClient.invalidateQueries({ queryKey: ["monthly-finance-result"] })
   }
+  // Salir de la caja es mover efectivo: lo ofrece solo a quien registra gastos.
+  const canUseCash = usePermission("finance.write") && detail.pendingCents > 0
   const form = useAppForm({
-    defaultValues: { branchId: "", notes: "" },
+    defaultValues: { branchId: "", notes: "", fromCash: false },
     validators: {
-      onSubmit: ({ value }) =>
-        pickBranch && !value.branchId
-          ? { fields: { branchId: "Elige la sede del gasto." } }
-          : undefined,
+      onSubmit: ({ value }) => {
+        const fields: Record<string, string> = {}
+        if (pickBranch && !value.branchId) fields.branchId = "Elige la sede del gasto."
+        // Mismo freno que en un gasto: el efectivo nunca queda negativo, y se dice qué hacer.
+        if (value.fromCash && cashState && cashState.cashOnHandCents < detail.pendingCents)
+          fields.fromCash = `En la caja solo hay ${formatMoney(cashState.cashOnHandCents, detail.currency, detail.locale)}: no alcanza para pagarlo con el efectivo. Si el dinero está en el cajón, regístralo antes en Finanzas con «Ingresar o retirar efectivo». Si se pagó por transferencia, deja la casilla sin marcar.`
+        return Object.keys(fields).length > 0 ? { fields } : undefined
+      },
     },
     onSubmit: async ({ value }) => {
       try {
@@ -938,8 +947,10 @@ function PayDrawer({
           branchId: value.branchId || defaultBranch,
           expectedCents: detail.pendingCents,
           ...(notes ? { notes } : {}),
+          ...(value.fromCash && canUseCash ? { fromCash: true } : {}),
         })
         refresh()
+        if (value.fromCash) invalidateFinance(queryClient)
         // Se dice lo que el servidor pagó de verdad, no lo que mostraba la pantalla.
         toast.success(
           result.data.settlement.commissionCents === 0
@@ -955,6 +966,11 @@ function PayDrawer({
   })
   const surface = useFormSurface(form, { formMessage: financeFormMessage })
   const branchId = useStore(form.store, (state) => state.values.branchId)
+  const fromCash = useStore(form.store, (state) => state.values.fromCash)
+  const cashBranch = branchId || defaultBranch
+  const cash = useCashState(cashBranch, open && canUseCash, detail.currency)
+  const cashState = cash.data?.data ?? null
+  const cashAfter = cashState ? cashState.cashOnHandCents - detail.pendingCents : null
 
   // La sede activa es la propuesta; si llega tarde no pisa lo ya elegido.
   useEffect(() => {
@@ -963,7 +979,7 @@ function PayDrawer({
   }, [open, defaultBranch, form])
   useEffect(() => {
     if (open) return
-    form.reset({ branchId: "", notes: "" })
+    form.reset({ branchId: "", notes: "", fromCash: false })
   }, [open, form])
 
   const amount = formatMoney(detail.pendingCents, detail.currency, detail.locale)
@@ -1024,6 +1040,35 @@ function PayDrawer({
             No hay una sede activa donde registrar el gasto.
           </p>
         )}
+        {canUseCash ? (
+          <form.AppField name="fromCash">
+            {(field) => (
+              <FormChoiceField
+                label="Se pagó con el efectivo de la caja"
+                description={
+                  !fromCash
+                    ? "Déjala sin marcar si se pagó por transferencia u otro medio: no toca la caja."
+                    : cashAfter === null || cashAfter < 0
+                      ? "Se descuenta del efectivo que debe haber al cerrar."
+                      : `Se descuenta del efectivo que debe haber al cerrar: la caja queda en ${formatMoney(cashAfter, detail.currency, detail.locale)}.`
+                }
+              >
+                {(control) => (
+                  <Checkbox
+                    id={control.id}
+                    aria-invalid={control.invalid || undefined}
+                    aria-describedby={control.describedBy}
+                    checked={field.state.value}
+                    onCheckedChange={(checked) => {
+                      field.handleChange(checked === true)
+                      control.onBlur()
+                    }}
+                  />
+                )}
+              </FormChoiceField>
+            )}
+          </form.AppField>
+        ) : null}
         <form.AppField name="notes">
           {(field) => <field.TextareaField label="Nota (opcional)" rows={2} maxLength={2000} />}
         </form.AppField>
@@ -1062,6 +1107,8 @@ function VoidPaymentDrawer({
       try {
         await voidCommissionPaymentApi(payment?.id ?? "", value.reason.trim())
         refresh()
+        // Si salió de la caja, anularlo la devuelve.
+        invalidateFinance(queryClient)
         toast.success("Pago anulado: sus cobros vuelven a quedar por pagar")
         onClose()
       } catch (err) {

@@ -2374,7 +2374,7 @@ for (const tpl of consultaTemplates) {
 // el índice por especialidad, la búsqueda y el cambio en bloque de «Cómo dice
 // el precio». Las tres formas, por tercios; precios y duraciones deterministas.
 const libraryForSeed = await db
-  .select({ id: treatmentTemplate.id })
+  .select({ id: treatmentTemplate.id, name: treatmentTemplate.name })
   .from(treatmentTemplate)
   // Dental Smile es del Perú: sin las variantes que solo separa la norma de otro
   // país (`coded_only`), que aquí no tienen código CPMS y no se ofrecen.
@@ -2390,7 +2390,17 @@ const libraryForSeed = await db
   .orderBy(desc(treatmentTemplate.isCommon), asc(treatmentTemplate.key))
   .limit(140)
 const ownedTemplates = new Set(catalogA.map((service) => service.templateId).filter(Boolean))
-const extraTemplates = libraryForSeed.filter((row) => !ownedTemplates.has(row.id)).slice(0, 96)
+// Lo que la clínica ya tiene con nombre propio no se repite de la biblioteca: si
+// no, la demo tendría «Limpieza dental (profilaxis)» a S/ 120 y otra «Profilaxis»
+// con el precio inventado de abajo, y no se sabría cuál cobrar.
+const ownedNames = catalogA.map((service) => service.name.toLocaleLowerCase("es"))
+const extraTemplates = libraryForSeed
+  .filter((row) => !ownedTemplates.has(row.id))
+  .filter((row) => {
+    const name = row.name.toLocaleLowerCase("es")
+    return !ownedNames.some((owned) => owned.includes(name) || name.includes(owned))
+  })
+  .slice(0, 96)
 if (extraTemplates.length < 90)
   throw new Error("La biblioteca tiene pocas prestaciones: ejecuta seed:procedures")
 for (const [index, priceDisclosure] of (["exacto", "desde", "evaluacion"] as const).entries()) {
