@@ -47,7 +47,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useId, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
-import { PLAN_QUERY_KEYS } from "../../lib/budgets"
+import { fetchBudgetDetail, PLAN_QUERY_KEYS, totalsOf } from "../../lib/budgets"
 import { type ConsentDocument, confirmLinkSignedConsent, fetchConsents } from "../../lib/clinical-forms"
 import {
   clinicDateTimeValue,
@@ -305,6 +305,57 @@ interface FinalizedBudget {
   totalCents: number | null
   currency: string
   added: number
+}
+
+/**
+ * «Presupuesto listo: …» del cierre. Con caminos (varias opciones), cada uno
+ * con su total y unidos con «o»: las opciones nunca se suman. El cierre no
+ * trae las opciones; se leen del presupuesto. Mientras tanto no se dice un
+ * total, para no mostrar una suma de caminos.
+ */
+function FinalizedBudgetSummary({
+  patientId,
+  budget,
+  locale,
+}: {
+  patientId: string
+  budget: FinalizedBudget
+  locale: string | undefined
+}): React.JSX.Element {
+  const detailQuery = useQuery({
+    queryKey: ["budget", patientId, budget.id],
+    queryFn: () => fetchBudgetDetail(patientId, budget.id),
+  })
+  const detail = detailQuery.data?.data
+  const money = (cents: number, currency: string) => (locale ? formatMoney(cents, currency, locale) : "…")
+  const options = detail?.options ?? []
+  if (detail && options.length > 1) {
+    const count = options.length === 2 ? "dos" : options.length === 3 ? "tres" : String(options.length)
+    const words = [...options]
+      .sort((a, b) => a.position - b.position)
+      .map(
+        (option) =>
+          `${option.name?.trim() || option.label} ${moneyTotalsText(totalsOf(option, detail.currency), money, "con un precio por definir")}`,
+      )
+    return (
+      <p className="text-sm">
+        Presupuesto listo con {count} caminos: {words.join(" o ")}. Nunca se suman.
+      </p>
+    )
+  }
+  const treatments = budget.itemCount === 1 ? "1 tratamiento" : `${budget.itemCount} tratamientos`
+  return (
+    <p className="text-sm">
+      Presupuesto listo: {treatments}
+      {detail && locale && (budget.totalCents != null || budget.totals?.length)
+        ? ` por ${moneyTotalsText(
+            budget.totals?.length ? budget.totals : [{ currency: budget.currency, totalCents: budget.totalCents }],
+            money,
+            "un precio por definir",
+          )}`
+        : ""}
+    </p>
+  )
 }
 
 export interface FinalizeBilling {
@@ -2429,21 +2480,7 @@ export function EncounterEditor({
               aria-label="Presupuesto listo"
               className="flex flex-col gap-3 rounded-lg border border-primary/40 bg-primary/5 p-3"
             >
-              <p className="text-sm">
-                Presupuesto listo:{" "}
-                {finalizedBudget.itemCount === 1
-                  ? "1 tratamiento"
-                  : `${finalizedBudget.itemCount} tratamientos`}
-                {orgLocale && (finalizedBudget.totalCents != null || finalizedBudget.totals?.length)
-                  ? ` por ${moneyTotalsText(
-                      finalizedBudget.totals?.length
-                        ? finalizedBudget.totals
-                        : [{ currency: finalizedBudget.currency, totalCents: finalizedBudget.totalCents }],
-                      (cents, currency) => formatMoney(cents, currency, orgLocale),
-                      "un precio por definir",
-                    )}`
-                  : ""}
-              </p>
+              <FinalizedBudgetSummary patientId={patientId} budget={finalizedBudget} locale={orgLocale} />
               {budgetSent ? (
                 <p role="status" className="text-sm font-medium">
                   Enviado. Queda «Enviado · espera respuesta» en su Plan.

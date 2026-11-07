@@ -493,6 +493,24 @@ export interface PlanItem {
   createdBy?: string | null
   createdAt: string
   updatedAt?: string
+  /**
+   * Su camino: el presupuesto tiene varias opciones y él no está en todas (lo
+   * común no tiene camino). Lo dice el servidor; el plan agrupa lo que compite.
+   */
+  path?: PlanItemPath | null
+  /** Aceptado, y la revisión entregada le pregunta de nuevo por su precio: vale lo aceptado mientras tanto. */
+  newTermsPending?: boolean
+}
+
+export interface PlanItemPath {
+  budgetId: string
+  /** Sus opciones (1 = «Opción A»): casi siempre una. */
+  positions: number[]
+  /** El nombre que le puso quien lo preparó, si lo hay. */
+  name: string | null
+  pathCount: number
+  /** Ya eligió un camino (este u otro). */
+  chosen: boolean
 }
 
 /** Plan clínico longitudinal con estado derivado. */

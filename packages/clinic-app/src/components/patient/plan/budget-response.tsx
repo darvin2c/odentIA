@@ -1,10 +1,12 @@
 /**
  * «¿Qué respondió?»: la respuesta de la persona a un presupuesto entregado.
- * Con varias opciones, primero se elige una (las demás quedan «No elegida»
- * solas); dentro de ella, cada tratamiento se acepta, se deja para después o no
- * se acepta. Nada queda anotado hasta guardar, porque lo aceptado o no aceptado
- * no se reescribe después. Sirve a quien tenga `budgets.decide`: el odontólogo
- * de lo que indicó, recepción y caja (decisión 4).
+ * Cada tratamiento se acepta, se deja para después o no se acepta. Con varios
+ * caminos (opciones) sin elegir, lo común a todos se responde sin elegir y la
+ * pieza en duda pregunta qué camino: uno, «Lo piensa» o «Ninguno». Aceptar lo de
+ * un camino es elegirlo (las otras quedan «No elegida» solas). Nada queda
+ * anotado hasta guardar, porque lo aceptado o no aceptado no se reescribe
+ * después. Sirve a quien tenga `budgets.decide`: el odontólogo de lo que indicó,
+ * recepción y caja (decisión 4).
  */
 import { budgetStateText, moneyTotalsText, sumAcceptedByCurrency } from "@odentia/clinical"
 import {
@@ -37,7 +39,7 @@ import {
 import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { Check } from "lucide-react"
+import { Check, Lock } from "lucide-react"
 import { useId, useMemo, useRef, useState } from "react"
 import { z } from "zod"
 import { useReceptionName } from "../../../lib/agent-names"
@@ -45,17 +47,29 @@ import { ApiError, apiFetch } from "../../../lib/api"
 import {
   BUDGET_ANSWERABLE_STATUSES,
   type BudgetLine,
+  type BudgetOption,
+  type BudgetPaths,
   type BudgetWithTotals,
   budgetAnswerLabel,
   budgetNumberLabel,
+  budgetPaths,
   decideBudgetApi,
+  lineAwaitsAnswer,
   optionLines,
 } from "../../../lib/budgets"
 import { fetchResponsibilities } from "../../../lib/clinical-journey"
 import { usePermission } from "../../../lib/crm"
 import type { PatientFull } from "../../../lib/patients"
 import { ChoiceSelect } from "../../ui/choice-select"
-import { acceptedWords, AMOUNT_PENDING, budgetStatusTone, type Money, moneyForLines, totalsWords } from "./budget-parts"
+import {
+  acceptedWords,
+  AMOUNT_PENDING,
+  budgetStatusTone,
+  type Money,
+  moneyForLines,
+  totalsWords,
+  treatmentSiteLabel,
+} from "./budget-parts"
 import { appWords } from "../../../lib/product-words"
 
 type Answer = "aceptado" | "pospuesto" | "rechazado"
@@ -66,13 +80,25 @@ const ANSWER_OPTIONS: ReadonlyArray<{ value: Answer; label: string }> = [
   { value: "rechazado", label: "No" },
 ]
 
-/** Lo que la persona ya aceptó o no aceptó no se reescribe al completar la respuesta. */
-function isAnswerFinal(line: BudgetLine): boolean {
-  return line.decision === "aceptado" || line.decision === "rechazado"
+/**
+ * Lo que se marca en «¿qué camino?» cuando no es una opción (las opciones van
+ * por su id, que nunca coincide con estas palabras).
+ */
+const PATH_THINK = "lo-piensa"
+const PATH_NONE = "ninguno"
+
+/** Lo que ya tiene respuesta: se ve, pero no se pregunta ni se envía. */
+function finalAnswerText(line: BudgetLine, budgetStatus: string): string {
+  // Una revisión entregada trae aceptado lo que no cambió: no se vuelve a preguntar.
+  if (budgetStatus === "presentado" && line.decision === "aceptado") return "Aceptado · sin cambios"
+  return `Ya respondió: ${budgetAnswerLabel(line.decision).toLowerCase()}`
 }
 
-/** Cómo quedará, con las palabras de siempre: misma derivación que `decideBudget`. */
-function expectedState(answers: Answer[]): string {
+/**
+ * Cómo quedará, con las palabras de siempre: misma derivación que `decideBudget`.
+ * Con caminos sin elegir, `options` hace decir «falta elegir el camino».
+ */
+function expectedState(answers: string[], options?: readonly BudgetOption[]): string {
   const accepted = answers.filter((answer) => answer === "aceptado").length
   const status =
     accepted === answers.length
@@ -82,7 +108,31 @@ function expectedState(answers: Answer[]): string {
         : answers.includes("pospuesto")
           ? "pospuesto"
           : "rechazado"
-  return budgetStateText({ status, items: answers.map((decision) => ({ decision })) })
+  return budgetStateText({ status, items: answers.map((decision) => ({ decision })), options })
+}
+
+/**
+ * La pieza de lo que es de un camino («Pieza 46», «la 46»), si es una sola:
+ * es la que está en duda. Sin una pieza común, la pregunta es solo «¿Qué camino?».
+ */
+function pathSite(lines: readonly BudgetLine[]): { label: string; short: string | null } | null {
+  const [first] = lines
+  if (!first) return null
+  const tooth = first.toothNumber
+  if (
+    tooth != null &&
+    lines.every((line) => line.toothNumber === tooth && (line.scope === "tooth" || line.scope === "surfaces"))
+  ) {
+    return { label: `Pieza ${tooth}`, short: `la ${tooth}` }
+  }
+  const labels = new Set(lines.map((line) => treatmentSiteLabel(line)))
+  const [label] = labels
+  return labels.size === 1 && label && label !== "General" ? { label, short: null } : null
+}
+
+/** Cómo se llama un camino: su nombre en la clínica o «Opción A». */
+function pathName(option: BudgetOption): string {
+  return option.name?.trim() || option.label
 }
 
 interface Decider {
@@ -98,33 +148,35 @@ function deciderRole(kind: Decider["kind"]): string {
 }
 
 interface ResponseValues {
-  /** La opción elegida (vacía mientras no se marca, con varias). */
+  /**
+   * El camino, con caminos sin elegir: el id de una opción, «Lo piensa» o
+   * «Ninguno» (vacío mientras no se marca). Es el campo `optionId` del servidor.
+   */
   optionId: string
   /** Quién decide, si se cambió; vacío: el de siempre (paciente o su representante). */
   decidedByContactId: string
-  /** Una respuesta por tratamiento de la opción, en el orden en que se envían. */
+  /**
+   * Una respuesta por tratamiento que espera respuesta. Con caminos sin elegir:
+   * primero lo común y después lo de cada camino (que solo se envía si se elige).
+   */
   decisions: Array<{ planItemId: string; decision: Answer | "" }>
   decisionNote: string
 }
 
-const responseSchema = z.object({
-  optionId: z.string().min(1, "Elige una de las opciones del presupuesto."),
-  decidedByContactId: z.string(),
-  decisions: z.array(
-    z.object({
-      planItemId: z.string(),
-      decision: z.enum(["aceptado", "pospuesto", "rechazado"], "Marca la respuesta de este tratamiento."),
-    }),
-  ),
-  decisionNote: z.string().max(4000, "Escribe como mucho 4000 caracteres."),
-})
-
-/** Cada tratamiento con su respuesta: la ya anotada si es definitiva; si no, `preset` o ninguna. */
-function decisionsOf(lines: BudgetLine[], preset: Answer | null): ResponseValues["decisions"] {
-  return lines.map((line) => ({
-    planItemId: line.planItemId,
-    decision: line.decision === "aceptado" || line.decision === "rechazado" ? line.decision : (preset ?? ""),
-  }))
+/** El esquema del envío; `needsPath` dice si falta marcar el camino. */
+function responseSchema(needsPath: () => boolean) {
+  return z.object({
+    // En el campo y no en el objeto: así se dice a la vez que lo que falte marcar.
+    optionId: z.string().refine((value) => !needsPath() || value !== "", "Elige un camino, «Lo piensa» o «Ninguno»."),
+    decidedByContactId: z.string(),
+    decisions: z.array(
+      z.object({
+        planItemId: z.string(),
+        decision: z.enum(["aceptado", "pospuesto", "rechazado"], "Marca la respuesta de este tratamiento."),
+      }),
+    ),
+    decisionNote: z.string().max(4000, "Escribe como mucho 4000 caracteres."),
+  })
 }
 
 /**
@@ -253,45 +305,68 @@ function AnswerButtons({ title, disabled }: { title: string; disabled: boolean }
   )
 }
 
-/** «¿Qué opción eligió?» (`optionId`): con varias opciones, antes de responder. */
-function OptionChoice({
-  budget,
+/**
+ * «Pieza 46 · ¿qué camino?» (`optionId`): un botón por camino con su total, «Lo
+ * piensa» y «Ninguno». Con flechas se pasa de uno a otro, como todo grupo de opciones.
+ */
+function PathChoice({
+  paths,
   money,
+  currency,
   control,
+  disabled,
 }: {
-  budget: BudgetWithTotals
+  paths: BudgetPaths["paths"]
   money: Money
+  currency: string
   control: FieldControl
+  disabled: boolean
 }): React.JSX.Element {
   const field = useFieldContext<string>()
+  const item = "flex min-h-11 cursor-pointer items-start gap-3 rounded-xl border bg-card p-3 text-sm font-normal has-[[data-checked]]:border-primary has-[[data-checked]]:bg-primary-soft"
   return (
     <RadioGroup
       id={control.id}
       aria-invalid={control.invalid || undefined}
       aria-describedby={control.describedBy}
       value={field.state.value}
+      disabled={disabled}
       onValueChange={(value) => {
         field.handleChange(typeof value === "string" ? value : "")
         field.handleBlur()
       }}
     >
-      {budget.options.map((option) => (
-        <FieldLabel key={option.id} className="flex items-start gap-3 rounded-lg border p-3 text-sm font-normal">
-          <RadioGroupItem value={option.id} className="mt-0.5" aria-label={option.label} />
-          <span className="flex min-w-0 flex-1 flex-col">
-            <span className="font-medium">
-              {option.label}
-              {option.isRecommended ? " · recomendada" : ""}
+      {paths.map(({ option, own }) => {
+        const name = pathName(option)
+        const total = totalsWords(option, currency, money)
+        return (
+          <FieldLabel key={option.id} className={item}>
+            <RadioGroupItem value={option.id} className="mt-0.5" aria-label={`${name}, ${total}`} />
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="font-medium">
+                {name}
+                {option.isRecommended ? " · recomendada" : ""}
+              </span>
+              <span className="text-xs text-muted-foreground">{own.map((line) => line.title).join(" · ")}</span>
             </span>
-            <span className="text-xs text-muted-foreground">
-              {optionLines(budget, option.id)
-                .map((line) => line.title)
-                .join(" · ")}
-            </span>
-          </span>
-          <span className="font-semibold tabular-nums">{totalsWords(option, budget.currency, money)}</span>
-        </FieldLabel>
-      ))}
+            <span className="font-semibold whitespace-nowrap tabular-nums">{total}</span>
+          </FieldLabel>
+        )
+      })}
+      <FieldLabel className={item}>
+        <RadioGroupItem value={PATH_THINK} className="mt-0.5" aria-label="Lo piensa" />
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="font-medium">Lo piensa</span>
+          <span className="text-xs text-muted-foreground">Lo de los caminos queda para después.</span>
+        </span>
+      </FieldLabel>
+      <FieldLabel className={item}>
+        <RadioGroupItem value={PATH_NONE} className="mt-0.5" aria-label="Ninguno" />
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="font-medium">Ninguno</span>
+          <span className="text-xs text-muted-foreground">No acepta lo de ningún camino.</span>
+        </span>
+      </FieldLabel>
     </RadioGroup>
   )
 }
@@ -341,19 +416,37 @@ export function BudgetResponse({
     enabled: active && canPatients,
   })
 
-  // La opción elegida: la que ya eligió o, mientras decide, la que se marca aquí.
   const chosenOption = budget.options.find((option) => option.decision === "elegida") ?? null
   const several = budget.options.length > 1
+  // Varios caminos y ninguno elegido: lo común se responde sin elegir y la pieza pregunta qué camino.
+  const choosing = several && !chosenOption
+  const paths = useMemo(() => (choosing ? budgetPaths(budget) : null), [choosing, budget])
+  // Con un camino elegido (o uno solo), sus líneas; con caminos sin elegir, cada tratamiento una vez.
+  const fixedOption = choosing ? null : (chosenOption ?? budget.options[0] ?? null)
+  const lines = paths ? [...paths.common, ...paths.exclusive] : fixedOption ? optionLines(budget, fixedOption.id) : []
+  const openLines = lines.filter(lineAwaitsAnswer)
+  const openCommon = paths ? paths.common.filter(lineAwaitsAnswer) : []
+  const openExclusive = paths ? paths.exclusive.filter(lineAwaitsAnswer) : []
+  /** Hay que marcar el camino: algo de los caminos espera respuesta. */
+  const pathOpen = openExclusive.length > 0
+  const site = paths ? pathSite(paths.exclusive) : null
 
   const [changingDecider, setChangingDecider] = useState(false)
   /** El panel «Acepta una parte» abierto. */
-  const [drawerOpen, setDrawerOpen] = useState(() => openOnMount && active && !several)
+  const [drawerOpen, setDrawerOpen] = useState(() => openOnMount && active)
+  /** Se abrió con «Acepta todo» y falta el camino: el panel lo dice. */
+  const [acceptAllIntent, setAcceptAllIntent] = useState(false)
   const [confirming, setConfirming] = useState<"aceptado" | "rechazado" | null>(null)
   /**
    * Qué se guarda: una misma respuesta para lo pendiente (los botones y su
    * confirmación) o lo marcado en el panel, con su nota.
    */
   const mode = useRef<Answer | "panel">("panel")
+  /** El campo del formulario de cada respuesta enviada, para decir el rechazo del servidor junto a ella. */
+  const sentFields = useRef<string[]>([])
+  const needsPath = useRef(false)
+  needsPath.current = choosing && pathOpen
+  const [schema] = useState(() => responseSchema(() => mode.current === "panel" && needsPath.current))
 
   const patient = patientQuery.data?.data
   const responsibilities = responsibilitiesQuery.data?.data
@@ -395,23 +488,75 @@ export function BudgetResponse({
         })
       : (deciders.find((entry) => entry.id === chosenId) ?? defaultDecider)
 
+  /**
+   * Lo que se marca en el panel: solo lo que espera respuesta. Con caminos, lo
+   * común sin marcar (o aceptado, si se llegó por «Acepta todo») y lo de cada
+   * camino aceptado, que es lo que se espera al elegirlo.
+   */
+  const panelDecisions = (commonPreset: Answer | null): ResponseValues["decisions"] =>
+    paths
+      ? [
+          ...openCommon.map((line) => ({ planItemId: line.planItemId, decision: commonPreset ?? ("" as const) })),
+          ...openExclusive.map((line) => ({ planItemId: line.planItemId, decision: "aceptado" as const })),
+        ]
+      : openLines.map((line) => ({ planItemId: line.planItemId, decision: "" as const }))
+
   // Los valores de partida se fijan al abrir (no los pisa un dato que llega tarde).
-  const [defaults, setDefaults] = useState<ResponseValues>(() => {
-    const optionId = chosenOption?.id ?? (several ? "" : (budget.options[0]?.id ?? ""))
-    return {
-      optionId,
-      decidedByContactId: "",
-      decisions: optionId ? decisionsOf(optionLines(budget, optionId), null) : [],
-      decisionNote: budget.decisionNote ?? "",
+  const [defaults, setDefaults] = useState<ResponseValues>(() => ({
+    optionId: "",
+    decidedByContactId: "",
+    decisions: panelDecisions(null),
+    decisionNote: budget.decisionNote ?? "",
+  }))
+
+  /** Lo que se envía y, de cada respuesta, el campo donde se dice si el servidor la rechaza. */
+  const buildDecisions = (
+    value: ResponseValues,
+  ): { optionId: string | null; entries: Array<{ planItemId: string; decision: Answer; field: string }> } => {
+    const marked = new Map(
+      value.decisions.map((entry, index) => [
+        entry.planItemId,
+        { decision: entry.decision as Answer, field: `decisions[${index}].decision` },
+      ]),
+    )
+    const fromForm = (line: BudgetLine) => ({ planItemId: line.planItemId, ...marked.get(line.planItemId)! })
+    const answer = mode.current
+    if (answer !== "panel") {
+      // Lo mismo para todo lo que espera; con caminos sin elegir, sin elegir ninguno.
+      return {
+        optionId: fixedOption?.id ?? null,
+        entries: openLines.map((line) => ({ planItemId: line.planItemId, decision: answer, field: "decisions" })),
+      }
     }
-  })
+    if (!paths) return { optionId: fixedOption?.id ?? null, entries: openLines.map(fromForm) }
+    const picked = paths.paths.find((path) => path.option.id === value.optionId)
+    if (picked) {
+      // Elige ese camino: se responde cada línea abierta de esa opción, lo común incluido.
+      return {
+        optionId: picked.option.id,
+        entries: optionLines(budget, picked.option.id).filter(lineAwaitsAnswer).map(fromForm),
+      }
+    }
+    // «Lo piensa» o «Ninguno»: lo de los caminos va igual, y su rechazo se dice en la pregunta del camino.
+    const forPaths: Answer = value.optionId === PATH_NONE ? "rechazado" : "pospuesto"
+    return {
+      optionId: null,
+      entries: [
+        ...openCommon.map(fromForm),
+        ...openExclusive.map((line) => ({ planItemId: line.planItemId, decision: forPaths, field: "optionId" })),
+      ],
+    }
+  }
+
   const form = useAppForm({
     defaultValues: defaults,
-    validators: { onSubmit: responseSchema },
+    validators: { onSubmit: schema },
     onSubmit: async ({ value }) => {
+      const { optionId, entries } = buildDecisions(value)
+      sentFields.current = entries.map((entry) => entry.field)
       const body = {
-        optionId: chosenOption?.id ?? value.optionId,
-        decisions: value.decisions.map((entry) => ({ planItemId: entry.planItemId, decision: entry.decision as Answer })),
+        optionId,
+        decisions: entries.map((entry) => ({ planItemId: entry.planItemId, decision: entry.decision })),
         decidedByContactId: deciderFor(value.decidedByContactId)?.id ?? null,
         decisionNote: mode.current === "panel" ? value.decisionNote.trim() || null : (budget.decisionNote ?? null),
       }
@@ -431,13 +576,11 @@ export function BudgetResponse({
     },
   })
   const saving = useStore(form.store, (state) => state.isSubmitting)
-  const pickedOptionId = useStore(form.store, (state) => state.values.optionId)
+  const pickedPath = useStore(form.store, (state) => state.values.optionId)
   const chosenDeciderId = useStore(form.store, (state) => state.values.decidedByContactId)
   const decisionValues = useStore(form.store, (state) => state.values.decisions)
   const formError = useFormSubmitError(form)
 
-  const optionId = chosenOption?.id ?? (pickedOptionId || null)
-  const lines = optionId ? optionLines(budget, optionId) : []
   const decider = deciderFor(chosenDeciderId)
   const deciderNotice = lockedId
     ? "Completa la respuesta quien la dio la primera vez."
@@ -445,53 +588,95 @@ export function BudgetResponse({
       ? "Es menor de edad y no tiene representante legal registrado."
       : null
 
-  const openLines = lines.filter((line) => !isAnswerFinal(line))
-
-  // «Debe decidir cada línea…» del servidor se dice en el primer tratamiento por responder.
-  const firstOpen = decisionValues.findIndex((entry) => entry.decision !== "aceptado" && entry.decision !== "rechazado")
-  const fieldMap = (key: string): string | undefined =>
-    key === "decisions" ? `decisions[${Math.max(0, firstOpen)}].decision` : undefined
+  // El rechazo de una respuesta se dice junto a ella (el servidor la nombra por su lugar en el envío);
+  // «Debe decidir cada línea…», en la primera sin marcar.
+  const fieldMap = (key: string): string | undefined => {
+    const match = /^decisions\[(\d+)\]\.decision$/.exec(key)
+    if (match) return sentFields.current[Number(match[1])] ?? "decisions"
+    if (key === "decisions") {
+      const empty = decisionValues.findIndex((entry) => entry.decision === "")
+      return decisionValues.length > 0 ? `decisions[${Math.max(0, empty)}].decision` : undefined
+    }
+    return undefined
+  }
   const surface = useFormSurface(form, { fieldMap })
 
-  /** Responder lo pendiente de una vez: misma respuesta para todo lo que no es definitivo. */
+  /** Responder lo pendiente de una vez: misma respuesta para todo lo que espera, sin elegir camino. */
   const answerAll = (answer: Answer): Promise<boolean> => {
     mode.current = answer
-    form.setFieldValue("decisions", decisionsOf(lines, answer))
+    form.setFieldValue("optionId", "")
+    form.setFieldValue(
+      "decisions",
+      openLines.map((line) => ({ planItemId: line.planItemId, decision: answer })),
+    )
     return submitForm(form, { fieldMap })
   }
 
-  /** «Acepta todo» y «No acepta» piden confirmación; sin opción elegida, primero se dice que falta. */
-  const askConfirm = (answer: "aceptado" | "rechazado") => {
-    if (optionId == null) {
-      void answerAll(answer)
-      return
-    }
-    setConfirming(answer)
-  }
-
-  const openPanel = () => {
+  const openPanel = (intent: "todo" | "parte") => {
     const values: ResponseValues = {
       ...form.state.values,
-      decisions: decisionsOf(lines, null),
+      optionId: "",
+      decisions: panelDecisions(intent === "todo" ? "aceptado" : null),
       decisionNote: budget.decisionNote ?? "",
     }
     mode.current = "panel"
+    setAcceptAllIntent(intent === "todo")
     setDefaults(values)
     form.reset(values)
     setDrawerOpen(true)
   }
 
-  /** Respuesta de la línea: la ya anotada si es definitiva; si no, la marcada en el panel. */
+  /**
+   * «Acepta todo» y «No acepta» piden confirmación. Con caminos sin elegir no se
+   * acepta todo sin elegir uno: se abre el panel en la pregunta del camino.
+   */
+  const askConfirm = (answer: "aceptado" | "rechazado") => {
+    if (answer === "aceptado" && choosing && pathOpen) {
+      openPanel("todo")
+      return
+    }
+    setConfirming(answer)
+  }
+
+  /** Respuesta de la línea: la ya anotada si no espera; si no, la marcada en el panel. */
   const answerOf = (line: BudgetLine): Answer | undefined => {
-    if (line.decision === "aceptado" || line.decision === "rechazado") return line.decision
+    if (!lineAwaitsAnswer(line)) return line.decision as Answer
     const marked = decisionValues.find((entry) => entry.planItemId === line.planItemId)?.decision
     return marked || undefined
   }
 
-  /** Lo marcado como «Acepta» mientras se elige: la misma regla del servidor (`sumAcceptedByCurrency`). */
+  const picked = paths?.paths.find((path) => path.option.id === pickedPath) ?? null
+  /**
+   * Lo que se responde en el panel, con la respuesta que lleva: con caminos, lo
+   * común una vez y lo del camino elegido; «Lo piensa» y «Ninguno» marcan lo de
+   * los caminos de una vez.
+   */
+  const panelAnswers: Array<{ line: BudgetLine; answer: string | undefined }> = !paths
+    ? lines.map((line) => ({ line, answer: answerOf(line) }))
+    : picked
+      ? optionLines(budget, picked.option.id).map((line) => ({ line, answer: answerOf(line) }))
+      : [
+          ...paths.common.map((line) => ({ line, answer: answerOf(line) })),
+          ...(pathOpen && !pickedPath
+            ? []
+            : paths.exclusive.map((line) => ({
+                line,
+                answer: lineAwaitsAnswer(line)
+                  ? pickedPath === PATH_NONE
+                    ? "rechazado"
+                    : "pospuesto"
+                  : line.decision,
+              }))),
+        ]
+
+  /** Lo marcado como «Acepta» mientras se elige, sin contar dos veces lo común (`sumAcceptedByCurrency`). */
   const acceptingWords = (): string => {
     const accepting = sumAcceptedByCurrency(
-      lines.map((line) => ({ lineTotalCents: line.lineTotalCents, decision: answerOf(line), currency: line.currency })),
+      panelAnswers.map(({ line, answer }) => ({
+        lineTotalCents: line.lineTotalCents,
+        decision: answer,
+        currency: line.currency,
+      })),
     )
     if (accepting.length === 0) return money(0, budget.currency)
     return moneyTotalsText(accepting, (cents, unit) => money(cents, unit), AMOUNT_PENDING)
@@ -507,8 +692,7 @@ export function BudgetResponse({
   const decidersLoading = active && canPatients && (patientQuery.isPending || responsibilitiesQuery.isPending)
   const decidersError = patientQuery.error ?? responsibilitiesQuery.error
   const blocked = disabled || saving || decidersLoading
-  // Sin opción elegida los botones siguen activos: al pulsarlos se dice que falta elegirla.
-  const nothingOpen = optionId != null && openLines.length === 0
+  const nothingOpen = openLines.length === 0
 
   const picker = (selectId: string) => (
     <form.AppField name="decidedByContactId">
@@ -527,10 +711,39 @@ export function BudgetResponse({
     </form.AppField>
   )
 
-  const answers = lines.flatMap((line) => answerOf(line) ?? [])
-  const unanswered = lines.length - answers.length
+  /** Un tratamiento del panel: su precio y sus tres botones, o lo que ya respondió. */
+  const lineRow = (line: BudgetLine) => {
+    const index = decisionValues.findIndex((entry) => entry.planItemId === line.planItemId)
+    return (
+      <li key={line.id} className="flex flex-col gap-2 px-3 py-3">
+        <div className="flex gap-3 text-sm">
+          <span className="min-w-0 flex-1 font-medium">{line.title}</span>
+          <span className="whitespace-nowrap tabular-nums">
+            {line.lineTotalCents == null ? "Sin precio" : money.plain(line.lineTotalCents, line.currency)}
+          </span>
+        </div>
+        {!lineAwaitsAnswer(line) ? (
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Lock aria-hidden="true" className="size-3.5 shrink-0" />
+            {finalAnswerText(line, budget.status)}
+          </p>
+        ) : index >= 0 ? (
+          <form.AppField name={`decisions[${index}].decision`}>
+            {() => <AnswerButtons title={line.title} disabled={saving} />}
+          </form.AppField>
+        ) : null}
+      </li>
+    )
+  }
+
+  const panelAnswered = panelAnswers.flatMap(({ answer }) => answer ?? [])
+  const unanswered = panelAnswers.length - panelAnswered.length
+  const pathMissing = choosing && pathOpen && !pickedPath
+  // Con caminos, si no se elige uno, la pieza queda por decidir.
+  const pathPending = choosing && pathOpen && (!pickedPath || pickedPath === PATH_THINK)
   const patientShortName = patient?.patient.givenNames?.trim().split(/\s+/)[0] ?? patient?.patient.displayName ?? null
-  const chosen = budget.options.find((option) => option.id === optionId) ?? null
+  const pathQuestion = site ? `${site.label} · ¿qué camino?` : "¿Qué camino?"
+  const commonTitle = budget.options.length === 2 ? "Va en los dos caminos" : "Va en todos los caminos"
 
   return (
     <section
@@ -547,7 +760,7 @@ export function BudgetResponse({
       {budget.decidedAt ? (
         <dl className="flex flex-col gap-1.5 rounded-xl bg-muted/50 p-4 text-sm">
           <div className="flex gap-3">
-            <dt className="flex-1 text-muted-foreground">{several && chosen ? chosen.label : "Presupuestado"}</dt>
+            <dt className="flex-1 text-muted-foreground">{several && chosenOption ? chosenOption.label : "Presupuestado"}</dt>
             <dd className="text-right tabular-nums">
               {totalsWords(budget, budget.currency, plainMoney)}
             </dd>
@@ -584,18 +797,6 @@ export function BudgetResponse({
         />
       ) : (
         <>
-          {several && !chosenOption ? (
-            <form.AppField name="optionId">
-              {(field) => (
-                <field.Group
-                  legend="¿Qué opción eligió?"
-                  description="Al elegir una, las otras quedan «No elegida»."
-                >
-                  {(control) => <OptionChoice budget={budget} money={money} control={control} />}
-                </field.Group>
-              )}
-            </form.AppField>
-          ) : null}
           {followUp ? (
             <p className="text-sm">
               {openLines.length === 1
@@ -614,8 +815,8 @@ export function BudgetResponse({
               <Check aria-hidden="true" />
               Acepta todo
             </Button>
-            {openLines.length > 1 ? (
-              <Button type="button" variant="outline" disabled={blocked} onClick={openPanel}>
+            {openLines.length > 1 || (choosing && pathOpen) ? (
+              <Button type="button" variant="outline" disabled={blocked} onClick={() => openPanel("parte")}>
                 Acepta una parte
               </Button>
             ) : null}
@@ -659,17 +860,14 @@ export function BudgetResponse({
       {/*
         Aceptar o no aceptar todo no se reescribe después: una confirmación corta.
         Si el servidor lo rechaza, el diálogo se cierra y el motivo queda junto a
-        su campo (quién decide, la opción) o bajo los botones, nunca detrás.
+        su campo (quién decide) o bajo los botones, nunca detrás.
       */}
       <ConfirmDialog
         open={confirming != null}
         title={confirming === "rechazado" ? "¿Anotar que no acepta?" : "¿Anotar que acepta todo?"}
-        description={`${decider ? `Decide ${decider.name}, ${deciderRole(decider.kind)}. ` : ""}${
-          several && chosen ? `Elige la ${chosen.label.toLowerCase()}; las demás quedan «No elegida». ` : ""
-        }Quedará como «${expectedState(
-          lines.map((line) =>
-            line.decision === "aceptado" || line.decision === "rechazado" ? line.decision : (confirming ?? "pospuesto"),
-          ),
+        description={`${decider ? `Decide ${decider.name}, ${deciderRole(decider.kind)}. ` : ""}Quedará como «${expectedState(
+          lines.map((line) => (lineAwaitsAnswer(line) ? (confirming ?? "pospuesto") : line.decision)),
+          choosing ? budget.options : undefined,
         )}» y ya no se cambia: para corregirlo se crea una revisión.`}
         confirmLabel={confirming === "rechazado" ? "Anotar que no acepta" : "Anotar que acepta todo"}
         variant={confirming === "rechazado" ? "destructive" : "default"}
@@ -690,9 +888,17 @@ export function BudgetResponse({
           {...surface}
           open
           title={patientShortName ? `¿Qué acepta ${patientShortName}?` : "¿Qué acepta la persona?"}
-          description={`${budgetNumberLabel(budget.budgetNumber)}${
-            several && chosen ? ` · ${chosen.label}` : ""
-          }. Marca la respuesta de cada tratamiento.`}
+          description={
+            paths
+              ? `${budgetNumberLabel(budget.budgetNumber)}. ${
+                  acceptAllIntent && pathOpen
+                    ? "Para aceptarlo todo, elige el camino."
+                    : `Marca la respuesta de cada tratamiento${pathOpen ? " y el camino" : ""}.`
+                }`
+              : `${budgetNumberLabel(budget.budgetNumber)}${
+                  several && fixedOption ? ` · ${fixedOption.label}` : ""
+                }. Marca la respuesta de cada tratamiento.`
+          }
           submitLabel="Guardar la respuesta"
           onSubmit={(event) => {
             mode.current = "panel"
@@ -702,42 +908,65 @@ export function BudgetResponse({
             if (!saving) setDrawerOpen(false)
           }}
         >
-          <ul className="flex flex-col divide-y rounded-xl border">
-            {lines.map((line) => {
-              const final = isAnswerFinal(line)
-              const index = decisionValues.findIndex((entry) => entry.planItemId === line.planItemId)
-              return (
-                <li key={line.id} className="flex flex-col gap-2 px-3 py-3">
-                  <div className="flex gap-3 text-sm">
-                    <span className="min-w-0 flex-1 font-medium">{line.title}</span>
-                    <span className="whitespace-nowrap tabular-nums">
-                      {line.lineTotalCents == null ? "Sin precio" : money.plain(line.lineTotalCents, line.currency)}
-                    </span>
-                  </div>
-                  {final ? (
-                    <p className="text-xs text-muted-foreground">
-                      Ya respondió: {budgetAnswerLabel(line.decision).toLowerCase()}. No se cambia desde aquí.
-                    </p>
-                  ) : index >= 0 ? (
-                    <form.AppField name={`decisions[${index}].decision`}>
-                      {() => <AnswerButtons title={line.title} disabled={saving} />}
-                    </form.AppField>
-                  ) : null}
-                </li>
-              )
-            })}
-          </ul>
+          {paths ? (
+            <>
+              {paths.common.length > 0 ? (
+                <section aria-labelledby={`${uid}-common`} className="flex flex-col gap-2">
+                  <h3 id={`${uid}-common`} className="text-sm font-semibold">
+                    {commonTitle}
+                  </h3>
+                  <ul className="flex flex-col divide-y rounded-xl border">{paths.common.map(lineRow)}</ul>
+                </section>
+              ) : null}
+              {pathOpen ? (
+                <form.AppField name="optionId">
+                  {(field) => (
+                    <field.Group legend={pathQuestion}>
+                      {(control) => (
+                        <PathChoice
+                          paths={paths.paths}
+                          money={money}
+                          currency={budget.currency}
+                          control={control}
+                          disabled={saving}
+                        />
+                      )}
+                    </field.Group>
+                  )}
+                </form.AppField>
+              ) : null}
+              {picked && picked.own.length > 0 ? (
+                <section aria-labelledby={`${uid}-path`} className="flex flex-col gap-2">
+                  <h3 id={`${uid}-path`} className="text-sm font-semibold">
+                    {`Lo de ${pathName(picked.option)}`}
+                  </h3>
+                  <ul className="flex flex-col divide-y rounded-xl border">{picked.own.map(lineRow)}</ul>
+                </section>
+              ) : null}
+            </>
+          ) : (
+            <ul className="flex flex-col divide-y rounded-xl border">{lines.map(lineRow)}</ul>
+          )}
 
           <dl className="flex flex-col gap-1.5 rounded-xl bg-muted/50 p-4 text-sm">
-            <div className="flex gap-3">
-              <dt className="flex-1 text-muted-foreground">Presupuestado</dt>
-              <dd className="text-right tabular-nums">
-                {chosen ? totalsWords(chosen, budget.currency, plainMoney) : AMOUNT_PENDING}
-              </dd>
-            </div>
+            {paths ? null : (
+              <div className="flex gap-3">
+                <dt className="flex-1 text-muted-foreground">Presupuestado</dt>
+                <dd className="text-right tabular-nums">
+                  {fixedOption ? totalsWords(fixedOption, budget.currency, plainMoney) : AMOUNT_PENDING}
+                </dd>
+              </div>
+            )}
             <div className="flex items-baseline gap-3">
               <dt className="flex-1 font-semibold">Acepta</dt>
-              <dd className="text-right text-lg font-semibold tabular-nums">{acceptingWords()}</dd>
+              <dd className="text-right">
+                <span className="text-lg font-semibold tabular-nums">{acceptingWords()}</span>
+                {pathPending ? (
+                  <span className="text-sm text-muted-foreground">
+                    {site?.short ? ` · ${site.short} sigue por decidir` : " · falta elegir el camino"}
+                  </span>
+                ) : null}
+              </dd>
             </div>
           </dl>
 
@@ -748,17 +977,23 @@ export function BudgetResponse({
           </form.AppField>
 
           <p role="status" className="text-sm text-muted-foreground">
-            {unanswered > 0
-              ? unanswered === 1
-                ? "Falta marcar la respuesta de 1 tratamiento."
-                : `Falta marcar la respuesta de ${unanswered} tratamientos.`
-              : `Quedará como «${expectedState(answers)}».${
-                  answers.includes("pospuesto") ? " Lo que deja para después se puede responder luego." : ""
-                }${
-                  answers.some((answer) => answer !== "pospuesto")
-                    ? " Lo que acepta o no acepta ya no se cambia: para corregirlo se crea una revisión."
-                    : ""
+            {unanswered > 0 || pathMissing
+              ? [
+                  unanswered === 1
+                    ? "Falta marcar la respuesta de 1 tratamiento."
+                    : unanswered > 1
+                      ? `Falta marcar la respuesta de ${unanswered} tratamientos.`
+                      : null,
+                  pathMissing ? "Falta elegir el camino." : null,
+                ]
+                  .filter(Boolean)
+                  .join(" ")
+              : `Quedará como «${expectedState(panelAnswered, paths && !picked ? budget.options : undefined)}».${
+                  panelAnswered.includes("pospuesto") ? " Lo que deja para después se puede responder luego." : ""
                 }`}
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Lo que acepta ya no se cambia: si te equivocas, el {appWords().clinician.one} crea una revisión.
           </p>
         </FormDrawer>
       ) : null}
