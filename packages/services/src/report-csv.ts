@@ -195,13 +195,14 @@ export async function reportProfessionalsCsv(tx: Db, orgId: string, query: Repor
 export async function reportCommissionsCsv(tx: Db, orgId: string, query: ReportQuery, now: Date = new Date()): Promise<CsvFile> {
   const report = await getReportCommissions(tx, orgId, query, now)
   const money = (cents: number) => amount(cents, report.currency)
-  const header = ["Profesional", "Atendió", "Atendido sin cobrar", "Se cobró", "Porcentaje", "Comisión", "Pagado", "Por pagar", "A descontar", "Moneda"]
+  const header = ["Profesional", "Atendió", "Atendido sin cobrar", "Se cobró", "Porcentaje general", "Servicios aparte", "Comisión", "Pagado", "Por pagar", "A descontar", "Moneda"]
   const body = report.rows.map((row) => [
     row.name,
     money(row.attendedCents),
     money(row.unpaidCents),
     money(row.collectedCents),
     row.rateBps / 100,
+    row.exceptions,
     money(row.commissionCents),
     money(row.paidCents),
     money(row.pendingCents),

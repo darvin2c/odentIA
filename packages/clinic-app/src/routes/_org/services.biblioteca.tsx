@@ -50,7 +50,7 @@ import { useReceptionName } from "../../lib/agent-names"
 import { ApiError } from "../../lib/api"
 import { useCan, usePermission } from "../../lib/crm"
 import { libraryHeading, libraryPrimary } from "../../lib/screen-rules"
-import { useClinicalProfile, useOrgProfile } from "../../lib/org"
+import { orgTaxesOf, useClinicalProfile, useOrgProfile } from "../../lib/org"
 import {
   BILLING_MODE_LABELS,
   type BillingMode,
@@ -1106,6 +1106,10 @@ function OwnServiceDrawer({
   const surface = useFormSurface(form, { fieldMap: OWN_SERVICE_FIELDS })
   const scope = useStore(form.store, (state) => state.values.scope)
   const billingMode = useStore(form.store, (state) => state.values.billingMode)
+  // El precio lleva el impuesto dentro (ADR 0083); se dice para no dudar.
+  const tax = orgTaxesOf(useOrgProfile().data)?.servicios
+  const priceHelp =
+    tax?.category === "S" ? `Incluye ${tax.label}. Usa 0 si no tiene costo.` : "Usa 0 si no tiene costo."
   const specialtyOptions = (specialtiesQuery.data?.data ?? []).map((option) => ({
     value: option.id,
     label: option.name,
@@ -1231,7 +1235,7 @@ function OwnServiceDrawer({
             {(field) => (
               <field.Control
                 label={billingMode === "session" ? "Precio por sesión" : "Precio"}
-                description="Usa 0 si no tiene costo."
+                description={priceHelp}
               >
                 {(control) => (
                   <InputGroup>

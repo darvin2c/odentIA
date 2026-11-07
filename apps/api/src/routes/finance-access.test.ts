@@ -541,20 +541,19 @@ it("presupuestos: reception lee, envía y anota sin cambiar precios; cashier dec
   expect((await buildApp("cashier", CASH).request(listPath)).status).toBe(200)
   expect((await buildApp("cashier", CASH).request(detailPath)).status).toBe(200)
   expect((await buildApp("clinician", DENT1).request(listPath)).status).toBe(200)
-  // Plan de DENT1: DENT2 no ve ajenos en lista (200 filtrada a planes propios:
-  // vacía, sin importes de otro) ni lee detalle aunque tenga budgets.*.
+  // Plan de DENT1 (ADR 0151): DENT2 lee el presupuesto de su colega, que es
+  // contexto de su paciente, pero no lo cambia ni lo envía (`canChange`).
   const dent2List = await buildApp("clinician", DENT2).request(listPath)
   expect(dent2List.status).toBe(200)
-  const dent2Budgets = IdList.parse(await dent2List.json())
-  expect(dent2Budgets.data).toEqual([])
-  expect(dent2Budgets.data.map((b) => b.id)).not.toContain(BUDGET1)
-  expect((await buildApp("clinician", DENT2).request(detailPath)).status).toBe(403)
+  const dent2Budgets = (await dent2List.json()) as { data: Array<{ id: string; canChange: boolean }> }
+  expect(dent2Budgets.data.find((b) => b.id === BUDGET1)?.canChange).toBe(false)
+  expect((await buildApp("clinician", DENT2).request(detailPath)).status).toBe(200)
 
-  // La hoja en PDF y las opciones de envío respetan la misma frontera que la
-  // pantalla: un odontólogo no obtiene el presupuesto de un plan ajeno.
+  // La hoja en PDF se lee como el presupuesto; preparar su envío sigue siendo
+  // de quien lo preparó: un odontólogo no envía el presupuesto de un plan ajeno.
   const pdfPath = `/patients/${PAT_A}/financial-document-pdf?documentType=budget&documentId=${BUDGET1}`
   const optionsPath = `/patients/${PAT_A}/financial-document-options?documentType=budget&documentId=${BUDGET1}`
-  expect((await buildApp("clinician", DENT2).request(pdfPath)).status).toBe(403)
+  expect((await buildApp("clinician", DENT2).request(pdfPath)).status).toBe(200)
   expect((await buildApp("clinician", DENT2).request(optionsPath)).status).toBe(403)
   expect((await buildApp("reception", RECEP).request(pdfPath)).status).toBe(200)
   // Enviar es `budgets.send`: recepción sí, caja no (caja solo lee y anota).

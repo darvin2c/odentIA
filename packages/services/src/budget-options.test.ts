@@ -112,17 +112,18 @@ it("dos opciones: cada una con su total, nunca sumadas; al elegir una, la otra q
   const recommended = await f.run((tx) => recommendBudgetOption(tx, ...f.args, draft.id, optionB.id))
   expect(recommended.totalCents).toBe(210000)
   await f.run((tx) => deliverBudget(tx, ...f.args, draft.id))
-  // Con varias opciones hay que elegir una.
+  // Con varias opciones, aceptar lo de una sola es elegirla: sin elegir, solo lo común.
   await expect(
     f.run((tx) =>
       decideBudget(tx, ...f.args, draft.id, {
         decisions: [
           { planItemId: resinas.id, decision: "aceptado" },
+          { planItemId: resina46.id, decision: "pospuesto" },
           { planItemId: corona46.id, decision: "aceptado" },
         ],
       }),
     ),
-  ).rejects.toMatchObject({ code: "VALIDATION" })
+  ).rejects.toMatchObject({ code: "BUDGET_OPTION_REQUIRED" })
   // Elige la B y deja la corona para después.
   const decided = await f.run((tx) =>
     decideBudget(tx, ...f.args, draft.id, {
@@ -236,9 +237,14 @@ it("el odontólogo actúa sobre lo que él indicó, aunque el plan lo haya abier
       addBudgetItems(tx, "org_a", other, f.patient.id, budget.id, { itemIds: [items[0]!.id] }, asProfessional),
     ),
   ).rejects.toMatchObject({ code: "BUDGET_NOT_OWN_PLAN" })
+  // Otro odontólogo lo lee (contexto de su paciente), pero no lo cambia.
+  const read = await withOrgContext(appDb, "org_a", (tx) =>
+    getBudgetDetail(tx, "org_a", f.patient.id, budget.id, { actorUserId: third, memberRole: "clinician" }),
+  )
+  expect(read.canChange).toBe(false)
   await expect(
     withOrgContext(appDb, "org_a", (tx) =>
-      getBudgetDetail(tx, "org_a", f.patient.id, budget.id, { actorUserId: third, memberRole: "clinician" }),
+      addBudgetItems(tx, "org_a", third, f.patient.id, budget.id, { itemIds: [own.id] }, asProfessional),
     ),
   ).rejects.toMatchObject({ code: "BUDGET_NOT_OWN_PLAN" })
   const seen = await withOrgContext(appDb, "org_a", (tx) =>
@@ -459,7 +465,7 @@ it("enviar a quien pidió no recibir ningún mensaje pasa por la puerta única: 
   }
 })
 
-it("la revisión no junta las alternativas: sigue con la opción que vale", async () => {
+it("la revisión no junta las alternativas: sin elegir lleva cada camino aparte; elegido, sigue con ese", async () => {
   const { f, items } = await withItems(2)
   const [resina, corona] = items as [(typeof items)[number], (typeof items)[number]]
   const draft = await f.run((tx) => createBudget(tx, ...f.args, { itemIds: [resina.id] }))
@@ -468,7 +474,30 @@ it("la revisión no junta las alternativas: sigue con la opción que vale", asyn
   await f.run((tx) => removeBudgetItems(tx, ...f.args, draft.id, { itemIds: [resina.id], optionId: optionB.id }))
   await f.run((tx) => addBudgetItems(tx, ...f.args, draft.id, { itemIds: [corona.id], optionId: optionB.id }))
   await f.run((tx) => deliverBudget(tx, ...f.args, draft.id))
+  // Sin elegir: la revisión lleva los dos caminos, cada uno en su opción.
+  const both = await f.run((tx) => reviseBudget(tx, ...f.args, draft.id, { itemIds: [resina.id, corona.id], reason: "Cambio" }))
+  expect(both.options.map((option) => both.items.filter((line) => line.optionId === option.id).map((line) => line.planItemId))).toEqual([
+    [resina.id],
+    [corona.id],
+  ])
+  expect(both.totalCents).toBe(120000)
+})
 
+it("la revisión de un camino elegido sigue con ese y no suma el otro", async () => {
+  const { f, items } = await withItems(2)
+  const [resina, corona] = items as [(typeof items)[number], (typeof items)[number]]
+  const draft = await f.run((tx) => createBudget(tx, ...f.args, { itemIds: [resina.id] }))
+  const two = await f.run((tx) => duplicateBudgetOption(tx, ...f.args, draft.id, draft.options[0]!.id))
+  const optionB = two.options[1]!
+  await f.run((tx) => removeBudgetItems(tx, ...f.args, draft.id, { itemIds: [resina.id], optionId: optionB.id }))
+  await f.run((tx) => addBudgetItems(tx, ...f.args, draft.id, { itemIds: [corona.id], optionId: optionB.id }))
+  await f.run((tx) => deliverBudget(tx, ...f.args, draft.id))
+  await f.run((tx) =>
+    decideBudget(tx, ...f.args, draft.id, {
+      optionId: draft.options[0]!.id,
+      decisions: [{ planItemId: resina.id, decision: "aceptado" }],
+    }),
+  )
   await expect(
     f.run((tx) => reviseBudget(tx, ...f.args, draft.id, { itemIds: [resina.id, corona.id], reason: "Cambio" })),
   ).rejects.toMatchObject({ code: "BUDGET_REVISION_ALTERNATIVE" })

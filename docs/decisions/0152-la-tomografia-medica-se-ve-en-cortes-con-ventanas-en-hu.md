@@ -1,4 +1,4 @@
-# 0151. La tomografía médica se ve en cortes, con su serie y sus ventanas en HU
+# 0152. La tomografía médica se ve en cortes, con su serie y sus ventanas en HU
 
 - **Fecha:** 2026-11-07
 - **Estado:** aceptada (lienzo «La tomografía del paciente, en su ficha», latidIA, decisiones 1 a 7). Amplía los ADR 0055, 0056 y 0147 a latidIA.

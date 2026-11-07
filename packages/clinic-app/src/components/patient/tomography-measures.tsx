@@ -220,7 +220,7 @@ export function MeasureList({
 }
 
 /**
- * Lo que dice junto a las medidas de la tomografía médica (ADR 0151): el visor sirve para
+ * Lo que dice junto a las medidas de la tomografía médica (ADR 0152): el visor sirve para
  * ver el estudio junto a su informe, no para diagnosticar.
  */
 export const CT_MEASURE_NOTE =

@@ -12,7 +12,7 @@ import {
   treatmentTemplate,
 } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, sql } from "drizzle-orm"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
@@ -85,8 +85,33 @@ export type BudgetHeaderRow = typeof treatmentBudget.$inferSelect
 /** Ítem con decisión vigente explícita. */
 export type PlanItemWithDecision = PlanItemRow & { decision: PlanItemDecision }
 
+/**
+ * El camino de un tratamiento: su presupuesto tiene varias opciones y él no está
+ * en todas (lo común va en todas y no tiene camino). Lo dice el presupuesto, no
+ * se guarda aparte: el plan agrupa lo que compite mientras la persona elige.
+ */
+export interface PlanItemPath {
+  budgetId: string
+  /** Sus opciones (1 = «Opción A»): casi siempre una. */
+  positions: number[]
+  /** El nombre que le puso quien lo preparó a esa opción, si lo hay. */
+  name: string | null
+  /** Cuántos caminos tiene el presupuesto. */
+  pathCount: number
+  /** Ya eligió un camino (este u otro). */
+  chosen: boolean
+}
+
 /** Ítem listado con su progreso: sesiones hechas = procedimientos no anulados. */
-export type PlanItemWithProgress = PlanItemWithDecision & { sessionsDone: number }
+export type PlanItemWithProgress = PlanItemWithDecision & {
+  sessionsDone: number
+  path: PlanItemPath | null
+  /**
+   * Aceptado, y la revisión entregada de su presupuesto le pregunta de nuevo
+   * (cambió su precio o sus condiciones): sigue valiendo lo aceptado mientras tanto.
+   */
+  newTermsPending: boolean
+}
 
 export type TreatmentPlanStatus = "Sin tratamientos" | "En curso" | "Completado" | "Cancelado"
 
@@ -230,7 +255,7 @@ export async function surfaceLimits(
 }
 
 /** Lock de la atención borrador (contexto de mutación clínica), llevada por quien escribe. */
-async function lockDraftEncounter(
+export async function lockDraftEncounter(
   tx: Db,
   orgId: string,
   patientId: string,
@@ -406,11 +431,89 @@ async function withDecisions(
         .groupBy(encounterProcedure.planItemId)
     : []
   const sessions = new Map(done.map((row) => [row.id, row.n]))
+  const paths = await pathsOf(tx, orgId, items)
+  const accepted = items.filter((item) => item.decisionStatus === "aceptado" && item.budgetId)
+  const asked = accepted.length
+    ? await tx
+        .selectDistinct({ planItemId: treatmentBudgetItem.planItemId })
+        .from(treatmentBudgetItem)
+        .innerJoin(
+          treatmentBudget,
+          and(
+            eq(treatmentBudget.id, treatmentBudgetItem.budgetId),
+            eq(treatmentBudget.organizationId, treatmentBudgetItem.organizationId),
+          ),
+        )
+        .where(
+          and(
+            eq(treatmentBudgetItem.organizationId, orgId),
+            inArray(
+              treatmentBudgetItem.planItemId,
+              accepted.map((item) => item.id),
+            ),
+            eq(treatmentBudgetItem.decision, "pendiente"),
+            ne(treatmentBudget.status, "borrador"),
+            sql`${treatmentBudgetItem.budgetId} = (select own.budget_id from treatment_plan_item own where own.id = ${treatmentBudgetItem.planItemId} and own.organization_id = ${treatmentBudgetItem.organizationId})`,
+          ),
+        )
+    : []
+  const newTerms = new Set(asked.map((row) => row.planItemId))
   return items.map((item) => ({
     ...item,
     decision: item.decisionStatus as PlanItemDecision,
     sessionsDone: sessions.get(item.id) ?? 0,
+    path: paths.get(item.id) ?? null,
+    newTermsPending: newTerms.has(item.id),
   }))
+}
+
+/** El camino de cada tratamiento según las opciones de su presupuesto vigente. */
+async function pathsOf(
+  tx: Db,
+  orgId: string,
+  items: ReadonlyArray<{ id: string; budgetId: string | null }>,
+): Promise<Map<string, PlanItemPath>> {
+  const out = new Map<string, PlanItemPath>()
+  const budgetIds = [...new Set(items.map((item) => item.budgetId).filter((id): id is string => !!id))]
+  if (budgetIds.length === 0) return out
+  const options = await tx
+    .select({
+      id: treatmentBudgetOption.id,
+      budgetId: treatmentBudgetOption.budgetId,
+      position: treatmentBudgetOption.position,
+      name: treatmentBudgetOption.name,
+      decision: treatmentBudgetOption.decision,
+    })
+    .from(treatmentBudgetOption)
+    .where(and(eq(treatmentBudgetOption.organizationId, orgId), inArray(treatmentBudgetOption.budgetId, budgetIds)))
+  const several = new Set(
+    budgetIds.filter((id) => options.filter((option) => option.budgetId === id).length > 1),
+  )
+  if (several.size === 0) return out
+  const lines = await tx
+    .select({
+      planItemId: treatmentBudgetItem.planItemId,
+      budgetId: treatmentBudgetItem.budgetId,
+      optionId: treatmentBudgetItem.optionId,
+    })
+    .from(treatmentBudgetItem)
+    .where(and(eq(treatmentBudgetItem.organizationId, orgId), inArray(treatmentBudgetItem.budgetId, [...several])))
+  for (const item of items) {
+    if (!item.budgetId || !several.has(item.budgetId)) continue
+    const own = options.filter((option) => option.budgetId === item.budgetId)
+    const mine = own.filter((option) =>
+      lines.some((line) => line.planItemId === item.id && line.optionId === option.id),
+    )
+    if (mine.length === 0 || mine.length === own.length) continue
+    out.set(item.id, {
+      budgetId: item.budgetId,
+      positions: mine.map((option) => option.position).sort((a, b) => a - b),
+      name: mine.length === 1 ? (mine[0]?.name ?? null) : null,
+      pathCount: own.length,
+      chosen: own.some((option) => option.decision === "elegida"),
+    })
+  }
+  return out
 }
 
 /** Siguiente posición al final del plan: el orden de indicación es el de partida. */

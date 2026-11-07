@@ -19,7 +19,13 @@ import {
   CollapsibleTrigger,
   FieldLabel,
 } from "@odentia/ui"
-import { LoadingState, submitForm, useAppForm, useFormSubmitError } from "@odentia/ui-patterns"
+import {
+  LoadingState,
+  submitErrorMessage,
+  submitForm,
+  useAppForm,
+  useFormSubmitError,
+} from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
@@ -32,6 +38,7 @@ import { type PlanItem, planStatusLabel } from "../../lib/patients"
 import { type ServiceCatalogItem, TREATMENT_SCOPE_LABELS } from "../../lib/services"
 import { productUi } from "../../product/product-ui"
 import { partNames } from "../../product/site-fields"
+import { ChoiceSelect } from "../ui/choice-select"
 import { ControlesPanel } from "./clinical-panels"
 import { DiagnosisSearch } from "./diagnosis-search"
 import { EncounterTreatments } from "./encounter-treatments"
@@ -39,6 +46,17 @@ import { treatmentSiteLabel } from "./plan/budget-parts"
 import { BudgetSendButton } from "./plan/budget-send"
 import { BudgetShowActions } from "./plan/budget-show"
 import { usePlanNextStep } from "./plan/plan-next"
+import {
+  groupPlanPaths,
+  inAllPathsLabel,
+  isOpenPath,
+  joinTitles,
+  lowerFirst,
+  type PathTarget,
+  type PlanPathGroup,
+  pathCountWord,
+  usePlacePath,
+} from "./plan/plan-paths"
 import { ServicePicker } from "./service-picker"
 
 const QUADRANT_LABELS: Record<string, string> = {
@@ -179,6 +197,30 @@ export function EncounterPlanPanel({
     .sort((a, b) => Number(today.has(b.id)) - Number(today.has(a.id)))
   const [indicating, setIndicating] = useState(autoOpen)
 
+  // Caminos (conservar la 46 o extraerla): lo que compite va en su recuadro; lo común, en filas.
+  const canBudget = usePermission("budgets.write")
+  const canPlace = canWrite && canBudget && !disabled
+  const pathGroups = groupPlanPaths(brief)
+  const rows = brief.filter((item) => !isOpenPath(item))
+  // «Va también» o «En los dos»: solo deja de preguntar aquí; no cambia nada.
+  const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() => new Set())
+  const [placeError, setPlaceError] = useState<{ itemId: string; message: string } | null>(null)
+  const place = usePlacePath({ patientId, encounterId, beforeWrite, onChanged })
+  const placeIn = (planItemId: string, path: PathTarget) => {
+    if (place.isPending) return
+    setPlaceError(null)
+    onPendingChange(true)
+    place.mutate(
+      { planItemId, path },
+      {
+        onError: (cause) => setPlaceError({ itemId: planItemId, message: submitErrorMessage(cause) }),
+        onSettled: () => onPendingChange(false),
+      },
+    )
+  }
+  const dismiss = (itemId: string) => setDismissed((prev) => new Set(prev).add(itemId))
+  const chooser = (patientName.trim().split(/\s+/)[0] ?? "") || "la persona"
+
   return (
     <div className="flex flex-col gap-4">
       <BlockPart title="Plan">
@@ -189,41 +231,79 @@ export function EncounterPlanPanel({
             Todavía no hay tratamientos por hacer. El primero que indiques abre el plan.
           </p>
         ) : (
-          <ul className="flex flex-col divide-y">
-            {brief.map((item) => (
-              <li
-                key={item.id}
-                className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"
-              >
-                <span className="flex min-w-0 flex-col">
-                  <span className="font-medium">
-                    {item.title}
-                    {today.has(item.id) ? (
-                      <Badge variant="default" className="ml-2 align-middle">
-                        Hoy
-                      </Badge>
-                    ) : null}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {[
-                      treatmentSiteLabel(item),
-                      item.priceCents != null && orgLocale
-                        ? formatMoney(item.priceCents, item.currency, orgLocale)
-                        : "",
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </span>
-                </span>
-                <span className="flex gap-1">
-                  <Badge variant={item.decisionStatus === "aceptado" ? "success" : "secondary"}>
-                    {planDecisionLabel(item.decisionStatus)}
-                  </Badge>
-                  <Badge variant="outline">{planStatusLabel(item.status)}</Badge>
-                </span>
-              </li>
+          <>
+            {rows.length > 0 ? (
+              <ul className="flex flex-col divide-y">
+                {rows.map((item) => {
+                  const question =
+                    canPlace && !dismissed.has(item.id)
+                      ? pathQuestion(item, brief, today, pathGroups)
+                      : null
+                  const error = placeError?.itemId === item.id ? placeError.message : null
+                  return (
+                    <li
+                      key={item.id}
+                      className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"
+                    >
+                      <span className="flex min-w-0 flex-col">
+                        <span className="font-medium">
+                          {item.title}
+                          {today.has(item.id) ? (
+                            <Badge variant="default" className="ml-2 align-middle">
+                              Hoy
+                            </Badge>
+                          ) : null}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {[
+                            treatmentSiteLabel(item),
+                            item.priceCents != null && orgLocale
+                              ? formatMoney(item.priceCents, item.currency, orgLocale)
+                              : "",
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </span>
+                      </span>
+                      <span className="flex gap-1">
+                        <Badge variant={item.decisionStatus === "aceptado" ? "success" : "secondary"}>
+                          {planDecisionLabel(item.decisionStatus)}
+                        </Badge>
+                        <Badge variant="outline">{planStatusLabel(item.status)}</Badge>
+                      </span>
+                      {question ? (
+                        <PathQuestionRow
+                          item={item}
+                          question={question}
+                          pending={place.isPending}
+                          onPlace={(path) => placeIn(item.id, path)}
+                          onDismiss={() => dismiss(item.id)}
+                        />
+                      ) : null}
+                      {error ? (
+                        <p role="alert" className="basis-full text-sm text-destructive">
+                          {error}
+                        </p>
+                      ) : null}
+                    </li>
+                  )
+                })}
+              </ul>
+            ) : null}
+            {pathGroups.map((group) => (
+              <PathsBox
+                key={group.budgetId}
+                group={group}
+                chooser={chooser}
+                today={today}
+                locale={orgLocale}
+                editable={canPlace}
+                pending={place.isPending}
+                errorFor={(itemId) => (placeError?.itemId === itemId ? placeError.message : null)}
+                onPlace={placeIn}
+              />
             ))}
-          </ul>
+          </>
         )}
         {canWrite ? (
           <Collapsible
@@ -285,6 +365,232 @@ export function EncounterPlanPanel({
         beforeWrite={beforeWrite}
       />
     </div>
+  )
+}
+
+/** Lo que se le pregunta a un tratamiento de hoy sobre los caminos de su pieza. */
+type PathQuestion =
+  | { kind: "nuevo"; tooth: number; others: PlanItem[] }
+  | { kind: "elegir"; group: PlanPathGroup }
+
+/**
+ * Si lo indicado hoy compite con otro de la misma pieza (endodoncia o
+ * exodoncia de la 46), se pregunta en su fila. No es obligatorio: sin respuesta,
+ * va en todas las opciones, como hasta ahora, y no traba firmar. El servidor
+ * vuelve a comprobarlo todo.
+ */
+function pathQuestion(
+  item: PlanItem,
+  brief: PlanItem[],
+  today: ReadonlySet<string>,
+  groups: PlanPathGroup[],
+): PathQuestion | null {
+  if (!today.has(item.id) || item.decisionStatus !== "pendiente" || item.path) return null
+  if (item.toothNumber == null || item.priceCents == null) return null
+  const tooth = item.toothNumber
+  const siblings = brief.filter(
+    (other) =>
+      other.id !== item.id &&
+      today.has(other.id) &&
+      other.decisionStatus === "pendiente" &&
+      other.toothNumber === tooth,
+  )
+  if (siblings.length === 0) return null
+  // Un presupuesto lleva caminos de una sola pieza: si son de otra, esta se decide aparte.
+  const mine = groups.filter((group) => item.budgetId == null || group.budgetId === item.budgetId)
+  if (mine.some((group) => group.items.some((other) => other.toothNumber != null && other.toothNumber !== tooth)))
+    return null
+  const same = mine.find((group) => group.toothNumber === tooth)
+  if (same) return { kind: "elegir", group: same }
+  // Aún sin caminos: se pregunta una vez, en el último que se indicó de la pieza.
+  const latest = [item, ...siblings]
+    .filter((row) => !row.path)
+    .reduce((a, b) => (b.createdAt > a.createdAt ? b : a))
+  if (latest.id !== item.id) return null
+  return { kind: "nuevo", tooth, others: siblings }
+}
+
+function PathQuestionRow({
+  item,
+  question,
+  pending,
+  onPlace,
+  onDismiss,
+}: {
+  item: PlanItem
+  question: PathQuestion
+  pending: boolean
+  onPlace: (path: PathTarget) => void
+  onDismiss: () => void
+}): React.JSX.Element {
+  // La pregunta es la leyenda del grupo: quien usa lector de pantalla la oye con sus botones.
+  const box = "min-w-0 basis-full rounded-md bg-muted/60 px-3 py-2"
+  const legend = "float-left mb-2 w-full text-sm"
+  if (question.kind === "nuevo") {
+    const others = lowerFirst(joinTitles(question.others.map((other) => other.title)))
+    return (
+      <fieldset className={box}>
+        <legend className={legend}>
+          Para la {question.tooth} ya indicaste {others}. ¿{item.title} es otro camino o va también?
+        </legend>
+        <div className="clear-both flex flex-wrap gap-2">
+          <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => onPlace("nuevo")}>
+            Es otro camino
+          </Button>
+          <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={onDismiss}>
+            Va también
+          </Button>
+        </div>
+      </fieldset>
+    )
+  }
+  const { group } = question
+  return (
+    <fieldset className={box}>
+      <legend className={legend}>¿En qué camino va {lowerFirst(item.title)}?</legend>
+      <div className="clear-both flex flex-wrap gap-2">
+        {group.paths.map((path) => (
+          <Button
+            key={path.position}
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={pending}
+            onClick={() => onPlace(path.position as PathTarget)}
+          >
+            {path.title || `Camino ${path.position}`}
+          </Button>
+        ))}
+        <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={onDismiss}>
+          {inAllPathsLabel(group.pathCount)}
+        </Button>
+      </div>
+    </fieldset>
+  )
+}
+
+/**
+ * Los caminos de una pieza, uno al lado del otro (apilados en el teléfono). Lo
+ * indicado hoy y sin respuesta se puede pasar de un camino a otro.
+ */
+function PathsBox({
+  group,
+  chooser,
+  today,
+  locale,
+  editable,
+  pending,
+  errorFor,
+  onPlace,
+}: {
+  group: PlanPathGroup
+  /** «Ana» o «la persona». */
+  chooser: string
+  today: ReadonlySet<string>
+  locale: string | undefined
+  editable: boolean
+  pending: boolean
+  errorFor: (itemId: string) => string | null
+  onPlace: (planItemId: string, path: PathTarget) => void
+}): React.JSX.Element {
+  const count = pathCountWord(group.pathCount)
+  const heading = group.site
+    ? `${group.site} · ${count} caminos: ${chooser} elegirá uno`
+    : `${count.charAt(0).toUpperCase()}${count.slice(1)} caminos: ${chooser} elegirá uno`
+  // Lo que va en más de un camino se mueve desde el primero en que aparece.
+  const withSelect = new Set<string>()
+  return (
+    <section aria-label={heading} className="flex flex-col gap-3 rounded-lg border border-dashed bg-muted/30 p-3">
+      <h4 className="text-sm font-medium">{heading}</h4>
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(12rem,1fr))] gap-3">
+        {group.paths.map((path) => {
+          const title = path.title || `Camino ${path.position}`
+          return (
+            <section
+              key={path.position}
+              aria-label={`Camino ${path.position}: ${title}`}
+              className="flex min-w-0 flex-col gap-2 rounded-md border bg-card p-3"
+            >
+              <div className="flex flex-col">
+                <span className="text-xs text-muted-foreground">Camino {path.position}</span>
+                <h5 className="text-sm font-medium">{title}</h5>
+              </div>
+              {path.items.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Sin tratamientos.</p>
+              ) : (
+                <ul className="flex flex-col gap-2">
+                  {path.items.map((item) => {
+                    const first = !withSelect.has(item.id)
+                    withSelect.add(item.id)
+                    const movable =
+                      editable && first && today.has(item.id) && item.decisionStatus === "pendiente"
+                    const positions = item.path?.positions ?? []
+                    const current =
+                      positions.length === group.pathCount
+                        ? "todos"
+                        : positions.length === 1
+                          ? String(positions[0])
+                          : ""
+                    const error = errorFor(item.id)
+                    return (
+                      <li key={item.id} className="flex flex-col gap-1 text-sm">
+                        <span className="flex flex-wrap items-baseline justify-between gap-x-2">
+                          <span className="min-w-0">
+                            {item.title}
+                            {today.has(item.id) ? (
+                              <Badge variant="default" className="ml-2 align-middle">
+                                Hoy
+                              </Badge>
+                            ) : null}
+                          </span>
+                          <span className="tabular-nums">
+                            {item.priceCents != null && locale
+                              ? formatMoney(item.priceCents, item.currency, locale)
+                              : item.priceCents == null
+                                ? "Sin precio"
+                                : "…"}
+                          </span>
+                        </span>
+                        {item.decisionStatus !== "pendiente" ? (
+                          <span className="text-xs text-muted-foreground">
+                            {planDecisionLabel(item.decisionStatus)}
+                          </span>
+                        ) : null}
+                        {movable ? (
+                          <ChoiceSelect
+                            aria-label={`Camino de ${item.title}`}
+                            value={current}
+                            disabled={pending}
+                            onChange={(event) => {
+                              const next = event.target.value
+                              if (next === "" || next === current) return
+                              onPlace(item.id, next === "todos" ? "todos" : (Number(next) as PathTarget))
+                            }}
+                          >
+                            {group.paths.map((option) => (
+                              <option key={option.position} value={String(option.position)}>
+                                {`Camino ${option.position}${option.title ? `: ${option.title}` : ""}`}
+                              </option>
+                            ))}
+                            <option value="todos">{inAllPathsLabel(group.pathCount)}</option>
+                          </ChoiceSelect>
+                        ) : null}
+                        {error ? (
+                          <p role="alert" className="text-sm text-destructive">
+                            {error}
+                          </p>
+                        ) : null}
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </section>
+          )
+        })}
+      </div>
+      <p className="text-xs text-muted-foreground">Cada camino tiene su total: nunca se suman.</p>
+    </section>
   )
 }
 

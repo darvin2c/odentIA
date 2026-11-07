@@ -664,7 +664,7 @@ export async function seedMedicalDemo(
 }
 
 /**
- * La tomografía de abdomen real (`DEMO_CT`, ADR 0151) en la ficha de Luis, por el
+ * La tomografía de abdomen real (`DEMO_CT`, ADR 0152) en la ficha de Luis, por el
  * mismo camino que la de un CD: sus tres series, la venosa primero, que es la
  * que abre el visor. Lleva el nombre que trae el archivo (anonimizado por TCIA);
  * el aviso de nombre es de la pantalla de subir, no de la ficha.

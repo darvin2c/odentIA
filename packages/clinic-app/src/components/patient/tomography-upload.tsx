@@ -26,7 +26,7 @@ import { PlacesField } from "../../product/site-fields"
 import { appWords } from "../../lib/product-words"
 import { tomographyTypeLabel } from "./document-labels"
 
-/** Tope por tomografía, 1,5 GB (ADR 0151; lo valida también la API). */
+/** Tope por tomografía, 1,5 GB (ADR 0152; lo valida también la API). */
 export const TOMOGRAPHY_MAX_BYTES = 1.5 * 1024 ** 3
 
 export function formatBytes(bytes: number): string {

@@ -524,7 +524,7 @@ const PHONE_VIEWS: { value: TomographyView; label: string }[] = [
 ]
 
 /**
- * Lo que cambia entre la CBCT dental y la tomografía médica (ADR 0151), en un
+ * Lo que cambia entre la CBCT dental y la tomografía médica (ADR 0152), en un
  * solo lugar: el visor lee su perfil en vez de preguntar por el tipo en cada parte.
  */
 interface TomographyProfile {
@@ -577,7 +577,7 @@ const PROFILES: Record<"cbct" | "ct", TomographyProfile> = {
 }
 
 /**
- * La serie que se ve, en la barra (ADR 0151): un estudio médico trae varias y
+ * La serie que se ve, en la barra (ADR 0152): un estudio médico trae varias y
  * medir en la equivocada (el topograma, una reconstrucción gruesa) es el riesgo
  * mayor. Solo aparece si hay más de una; el topograma se ve y no se elige.
  */

@@ -1,5 +1,5 @@
 {
-  "id": "ac2fffdf-f7e9-4e34-a9b7-0d1878ed2b89",
+  "id": "1b3305e1-0d23-4430-a32a-d48c41df2d14",
   "prevId": "bdb67288-d3e1-4dcf-82ee-3a0507b9ddca",
   "version": "7",
   "dialect": "postgresql",
@@ -13991,7 +13991,30 @@
           "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "encounter_procedure_plan_item_idx": {
+          "name": "encounter_procedure_plan_item_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "plan_item_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"encounter_procedure\".\"plan_item_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "encounter_procedure_organization_id_organization_id_fk": {
           "name": "encounter_procedure_organization_id_organization_id_fk",
@@ -14263,12 +14286,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "series_instance_uid": {
-          "name": "series_instance_uid",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "points": {
           "name": "points",
@@ -15797,6 +15814,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "commission_sessions": {
+          "name": "commission_sessions",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_by": {
           "name": "created_by",
           "type": "text",
@@ -15940,6 +15963,22 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "patient_charge_commission_sessions_idx": {
+          "name": "patient_charge_commission_sessions_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"patient_charge\".\"commission_sessions\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -16103,6 +16142,10 @@
         "patient_charge_returned_check": {
           "name": "patient_charge_returned_check",
           "value": "\"patient_charge\".\"returned_cents\" >= 0"
+        },
+        "patient_charge_commission_sessions_check": {
+          "name": "patient_charge_commission_sessions_check",
+          "value": "\"patient_charge\".\"commission_sessions\" IS NULL OR \"patient_charge\".\"commission_sessions\" BETWEEN 2 AND 60"
         },
         "patient_charge_amount_check": {
           "name": "patient_charge_amount_check",
@@ -28933,6 +28976,231 @@
       },
       "isRLSEnabled": false
     },
+    "public.commission_rate": {
+      "name": "commission_rate",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "professional_user_id": {
+          "name": "professional_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "service_id": {
+          "name": "service_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "effective_from": {
+          "name": "effective_from",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rate_bps": {
+          "name": "rate_bps",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fixed_cents": {
+          "name": "fixed_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "commission_rate_general_uidx": {
+          "name": "commission_rate_general_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "professional_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "effective_from",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"commission_rate\".\"service_id\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "commission_rate_service_uidx": {
+          "name": "commission_rate_service_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "professional_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "service_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "effective_from",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"commission_rate\".\"service_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "commission_rate_org_id_uidx": {
+          "name": "commission_rate_org_id_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "commission_rate_organization_id_organization_id_fk": {
+          "name": "commission_rate_organization_id_organization_id_fk",
+          "tableFrom": "commission_rate",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "commission_rate_professional_user_id_user_id_fk": {
+          "name": "commission_rate_professional_user_id_user_id_fk",
+          "tableFrom": "commission_rate",
+          "tableTo": "user",
+          "schemaTo": "auth",
+          "columnsFrom": [
+            "professional_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "commission_rate_service_id_service_catalog_id_fk": {
+          "name": "commission_rate_service_id_service_catalog_id_fk",
+          "tableFrom": "commission_rate",
+          "tableTo": "service_catalog",
+          "columnsFrom": [
+            "service_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "commission_rate_created_by_user_id_fk": {
+          "name": "commission_rate_created_by_user_id_fk",
+          "tableFrom": "commission_rate",
+          "tableTo": "user",
+          "schemaTo": "auth",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "commission_rate_rate_check": {
+          "name": "commission_rate_rate_check",
+          "value": "\"commission_rate\".\"rate_bps\" IS NULL OR \"commission_rate\".\"rate_bps\" BETWEEN 0 AND 10000"
+        },
+        "commission_rate_fixed_check": {
+          "name": "commission_rate_fixed_check",
+          "value": "\"commission_rate\".\"fixed_cents\" IS NULL OR \"commission_rate\".\"fixed_cents\" > 0"
+        },
+        "commission_rate_one_check": {
+          "name": "commission_rate_one_check",
+          "value": "\"commission_rate\".\"rate_bps\" IS NULL OR \"commission_rate\".\"fixed_cents\" IS NULL"
+        },
+        "commission_rate_general_check": {
+          "name": "commission_rate_general_check",
+          "value": "\"commission_rate\".\"service_id\" IS NOT NULL OR (\"commission_rate\".\"rate_bps\" IS NOT NULL AND \"commission_rate\".\"fixed_cents\" IS NULL)"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.commission_rule": {
       "name": "commission_rule",
       "schema": "",
@@ -29404,6 +29672,31 @@
           "primaryKey": false,
           "notNull": false
         },
+        "slice": {
+          "name": "slice",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sessions": {
+          "name": "sessions",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fixed_cents": {
+          "name": "fixed_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "for_service": {
+          "name": "for_service",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "occurred_at": {
           "name": "occurred_at",
           "type": "timestamp with time zone",
@@ -29441,6 +29734,27 @@
             },
             {
               "expression": "settlement_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "commission_line_org_application_idx": {
+          "name": "commission_line_org_application_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "application_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

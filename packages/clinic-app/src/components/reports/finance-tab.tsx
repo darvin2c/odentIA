@@ -747,7 +747,10 @@ function CommissionsSection({ query, data, argosEnabled }: { query: ReportQuery;
               <span className="flex flex-wrap gap-x-3 text-[13px] text-muted-foreground">
                 <span>Atendió {plain(row.attendedCents)}</span>
                 <span>Se cobró {plain(row.collectedCents)}</span>
-                <span>{row.rateBps / 100} %</span>
+                <span>
+                  {row.rateBps / 100} %
+                  {row.exceptions ? ` · ${row.exceptions === 1 ? "1 servicio aparte" : `${row.exceptions} servicios aparte`}` : ""}
+                </span>
                 <span className="font-semibold text-warning">Por pagar {plain(row.pendingCents)}</span>
               </span>
               {bar(row)}
@@ -789,7 +792,15 @@ function CommissionsSection({ query, data, argosEnabled }: { query: ReportQuery;
                   <TableCell className="text-right tabular-nums">
                     <ApartMoney value={row.unpaidCents} text={plain(row.collectedCents)} share={rateOf(row.unpaidCents, row.attendedCents)} clinic={clinicUnpaid} />
                   </TableCell>
-                  <TableCell className="text-right tabular-nums">{row.rateBps / 100}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {row.rateBps / 100}
+                    {/* El general; los servicios con otro porcentaje o un monto, aparte (cada cobro dice el suyo). */}
+                    {row.exceptions ? (
+                      <span className="block text-xs font-normal text-muted-foreground">
+                        {row.exceptions === 1 ? "+1 servicio" : `+${row.exceptions} servicios`}
+                      </span>
+                    ) : null}
+                  </TableCell>
                   <TableCell className="text-right font-extrabold tabular-nums">{plain(row.commissionCents)}</TableCell>
                   <TableCell className="text-right font-bold tabular-nums text-warning">{plain(row.pendingCents)}</TableCell>
                   <TableCell>{bar(row)}</TableCell>

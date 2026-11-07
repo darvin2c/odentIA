@@ -190,6 +190,11 @@ export interface BudgetWithTotals extends Budget {
   awaitsAnswer: boolean
   /** El estado con su nombre de siempre («Por enviar», «Aceptó 2 de 3»…), del servidor. */
   stateText: string
+  /**
+   * Quien mira puede cambiarlo, enviarlo o anularlo: el odontólogo lee los de sus
+   * colegas, pero solo cambia lo suyo. Lo dice el servidor.
+   */
+  canChange?: boolean
 }
 
 /** La opción que vale: la elegida o, mientras decide, la recomendada. */
@@ -208,6 +213,80 @@ export function optionLines(
   optionId: string,
 ): BudgetLine[] {
   return budget.items.filter((line) => line.optionId === optionId)
+}
+
+/** La línea espera respuesta: nadie la respondió o lo está pensando (lo demás no se reescribe). */
+export function lineAwaitsAnswer(line: Pick<BudgetLine, "decision">): boolean {
+  return line.decision === "pendiente" || line.decision === "pospuesto"
+}
+
+type CommonLine = Pick<
+  BudgetLine,
+  "planItemId" | "optionId" | "priceCents" | "billingMode" | "sessionsPlanned" | "promotionId"
+>
+
+/**
+ * Lo común a todas las opciones: el mismo tratamiento en cada una, con el mismo
+ * precio, cobro, sesiones y promoción. Es la regla del servidor
+ * (`commonPlanItems` en servicios), que la aplica al anotar: aquí solo decide
+ * qué se pregunta sin elegir camino.
+ */
+export function commonPlanItemIds(lines: readonly CommonLine[], optionCount: number): Set<string> {
+  const byItem = new Map<string, CommonLine[]>()
+  for (const line of lines) byItem.set(line.planItemId, [...(byItem.get(line.planItemId) ?? []), line])
+  const out = new Set<string>()
+  for (const [planItemId, own] of byItem) {
+    if (new Set(own.map((line) => line.optionId)).size !== optionCount) continue
+    const [first] = own
+    if (
+      first &&
+      own.every(
+        (line) =>
+          line.priceCents === first.priceCents &&
+          line.billingMode === first.billingMode &&
+          line.sessionsPlanned === first.sessionsPlanned &&
+          line.promotionId === first.promotionId,
+      )
+    ) {
+      out.add(planItemId)
+    }
+  }
+  return out
+}
+
+/** Un presupuesto con caminos: lo común una vez y lo propio de cada camino. */
+export interface BudgetPaths {
+  /** Lo que va en todos los caminos, un tratamiento una vez. */
+  common: BudgetLine[]
+  /** Cada camino (opción), en su orden, con lo que solo está en él. */
+  paths: Array<{ option: BudgetOption; own: BudgetLine[] }>
+  /** Lo que es de algún camino, un tratamiento una vez. */
+  exclusive: BudgetLine[]
+}
+
+/**
+ * Reparte las líneas en lo común y lo de cada camino. Un tratamiento que está en
+ * varias opciones cuenta una vez, con la línea de la opción que vale (como el
+ * servidor al anotar sin elegir camino).
+ */
+export function budgetPaths(budget: Pick<BudgetWithTotals, "items" | "options">): BudgetPaths {
+  const options = [...budget.options].sort((a, b) => a.position - b.position)
+  const common = commonPlanItemIds(budget.items, options.length)
+  const valued = valueOption(budget)?.id ?? null
+  const unique = new Map<string, BudgetLine>()
+  for (const line of budget.items) {
+    const seen = unique.get(line.planItemId)
+    if (!seen || (seen.optionId !== valued && line.optionId === valued)) unique.set(line.planItemId, line)
+  }
+  const lines = [...unique.values()]
+  return {
+    common: lines.filter((line) => common.has(line.planItemId)),
+    paths: options.map((option) => ({
+      option,
+      own: budget.items.filter((line) => line.optionId === option.id && !common.has(line.planItemId)),
+    })),
+    exclusive: lines.filter((line) => !common.has(line.planItemId)),
+  }
 }
 
 /**

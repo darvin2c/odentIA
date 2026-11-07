@@ -31,6 +31,7 @@ import { formatDate } from "../../../lib/clinical-journey"
 import { usePermission } from "../../../lib/crm"
 import { fetchPatientDiagnoses, type PatientDiagnosis } from "../../../lib/encounters"
 import type { PlanItem } from "../../../lib/patients"
+import { appWords } from "../../../lib/product-words"
 import { productUi } from "../../../product/product-ui"
 import {
   type GuideDraft,
@@ -240,6 +241,58 @@ export function BudgetReviewDrawer({
   )
 }
 
+/**
+ * Las opciones para quien no las escribe: lo que tienen, como texto; lo vacío no
+ * aparece. En el borrador dice quién las escribe, para que no parezca un olvido.
+ */
+function OptionsText({
+  options,
+  draft,
+}: {
+  options: BudgetPresentation["options"]
+  draft: boolean
+}): React.JSX.Element | null {
+  const filled = options.filter((option) => option.name || option.pros || option.cons)
+  if (filled.length === 0 && !draft) return null
+  return (
+    <div className="flex flex-col gap-3 text-sm">
+      {filled.map((option) => (
+        <section
+          key={option.id}
+          aria-label={option.label}
+          className="flex flex-col gap-1.5 rounded-lg border p-3"
+        >
+          <h3 className="font-medium">
+            {option.label}
+            {option.name ? ` · ${option.name}` : ""}
+          </h3>
+          {option.pros || option.cons ? (
+            <dl className="flex flex-col gap-1.5">
+              {option.pros ? (
+                <div>
+                  <dt className="text-muted-foreground">A favor</dt>
+                  <dd className="break-words whitespace-pre-line">{option.pros}</dd>
+                </div>
+              ) : null}
+              {option.cons ? (
+                <div>
+                  <dt className="text-muted-foreground">A considerar</dt>
+                  <dd className="break-words whitespace-pre-line">{option.cons}</dd>
+                </div>
+              ) : null}
+            </dl>
+          ) : null}
+        </section>
+      ))}
+      {draft ? (
+        <p className="text-muted-foreground">
+          {`El nombre de cada opción y lo que conviene pesar los escribe el ${appWords().clinician.one}.`}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
 function ReviewForm({
   patientId,
   budgetId,
@@ -263,8 +316,10 @@ function ReviewForm({
   const canClinical = usePermission("clinical.read")
   const canEditService = usePermission("settings.write")
   const draft = data.status === "borrador"
-  const editable = canWrite && draft
-  const sendable = canSend && draft
+  // El de una colega se lee; solo quien lo preparó lo cambia o lo envía (lo dice el servidor).
+  const own = budget.canChange !== false
+  const editable = canWrite && draft && own
+  const sendable = canSend && draft && own
   // Los diagnósticos que ya conoce el Plan: los lee quien lee la clínica.
   const planItems = useQuery({
     queryKey: ["plan-items", patientId],
@@ -391,7 +446,13 @@ function ReviewForm({
         open
         dock={false}
         className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(48rem,calc(100vw-2rem))]"
-        title={draft ? "Revisar y enviar" : "Lo que se le explicó"}
+        title={
+          !draft
+            ? "Lo que se le explicó"
+            : sendable || editable
+              ? "Revisar y enviar"
+              : "Lo que se le explicará"
+        }
         description={`${budgetNumberLabel(budget.budgetNumber)} · ${budget.stateText}`}
         hideSubmit={!(sendable || editable)}
         cancelLabel={sendable || editable ? undefined : "Cerrar"}
@@ -555,34 +616,21 @@ function ReviewForm({
             </ul>
           </FieldSet>
 
-          {several
+          {several && !editable ? <OptionsText options={data.options} draft={draft} /> : null}
+          {several && editable
             ? data.options.map((option, index) => (
                 <FieldSet key={option.id}>
                   <FieldLegend>{option.label}</FieldLegend>
                   <FieldGroup>
                     <form.AppField name={`options[${index}].name`}>
-                      {(field) => (
-                        <field.TextField label="Nombre" maxLength={120} readOnly={!editable} />
-                      )}
+                      {(field) => <field.TextField label="Nombre" maxLength={120} />}
                     </form.AppField>
                     <form.AppField name={`options[${index}].pros`}>
-                      {(field) => (
-                        <field.TextareaField
-                          label="A favor"
-                          rows={2}
-                          maxLength={1000}
-                          readOnly={!editable}
-                        />
-                      )}
+                      {(field) => <field.TextareaField label="A favor" rows={2} maxLength={1000} />}
                     </form.AppField>
                     <form.AppField name={`options[${index}].cons`}>
                       {(field) => (
-                        <field.TextareaField
-                          label="A considerar"
-                          rows={2}
-                          maxLength={1000}
-                          readOnly={!editable}
-                        />
+                        <field.TextareaField label="A considerar" rows={2} maxLength={1000} />
                       )}
                     </form.AppField>
                   </FieldGroup>
@@ -590,7 +638,7 @@ function ReviewForm({
               ))
             : null}
 
-          {draft ? (
+          {draft && (sendable || editable) ? (
             <section
               aria-label="Antes de enviar"
               className="flex flex-col gap-2 rounded-lg border bg-muted/30 p-3 text-sm"

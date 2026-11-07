@@ -460,6 +460,7 @@ async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USER
     "commission_settlement_line",
     "commission_settlement",
     "commission_rule",
+    "commission_rate",
     "cash_closure",
     "cash_movement",
     "supplier_credit_use",
@@ -2377,7 +2378,7 @@ for (const tpl of consultaTemplates) {
 // el índice por especialidad, la búsqueda y el cambio en bloque de «Cómo dice
 // el precio». Las tres formas, por tercios; precios y duraciones deterministas.
 const libraryForSeed = await db
-  .select({ id: treatmentTemplate.id })
+  .select({ id: treatmentTemplate.id, name: treatmentTemplate.name })
   .from(treatmentTemplate)
   // Dental Smile es del Perú: sin las variantes que solo separa la norma de otro
   // país (`coded_only`), que aquí no tienen código CPMS y no se ofrecen.
@@ -2393,7 +2394,17 @@ const libraryForSeed = await db
   .orderBy(desc(treatmentTemplate.isCommon), asc(treatmentTemplate.key))
   .limit(140)
 const ownedTemplates = new Set(catalogA.map((service) => service.templateId).filter(Boolean))
-const extraTemplates = libraryForSeed.filter((row) => !ownedTemplates.has(row.id)).slice(0, 96)
+// Lo que la clínica ya tiene con nombre propio no se repite de la biblioteca: si
+// no, la demo tendría «Limpieza dental (profilaxis)» a S/ 120 y otra «Profilaxis»
+// con el precio inventado de abajo, y no se sabría cuál cobrar.
+const ownedNames = catalogA.map((service) => service.name.toLocaleLowerCase("es"))
+const extraTemplates = libraryForSeed
+  .filter((row) => !ownedTemplates.has(row.id))
+  .filter((row) => {
+    const name = row.name.toLocaleLowerCase("es")
+    return !ownedNames.some((owned) => owned.includes(name) || name.includes(owned))
+  })
+  .slice(0, 96)
 if (extraTemplates.length < 90)
   throw new Error("La biblioteca tiene pocas prestaciones: ejecuta seed:procedures")
 for (const [index, priceDisclosure] of (["exacto", "desde", "evaluacion"] as const).entries()) {
@@ -2894,8 +2905,9 @@ if (docRx) {
 }
 // Dos opciones en un mismo presupuesto (decisión 13): la 46 se arregla con una
 // resina o con una corona, y Rosa elige una. La B nace como copia de la A y se
-// cambia lo que hace falta; cada una con su total, nunca sumadas. Queda enviado,
-// esperando que elija.
+// cambia lo que hace falta; cada una con su total, nunca sumadas. La limpieza va
+// en los dos caminos (ADR 0151): se puede aceptar sin elegir. Queda enviado,
+// esperando que elija; el plan muestra la 46 «por decidir entre dos caminos».
 const resinaOpcion46 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   serviceId: serviceIdA("OBTURACION"),
   planId: planRestaurador.id,
@@ -2910,9 +2922,15 @@ const coronaOpcion46 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   toothNumber: 46,
   detail: "Corona cerámica pieza 46",
 })
+const limpiezaComun46 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
+  serviceId: serviceIdA("LIMPIEZA"),
+  planId: planRestaurador.id,
+  sourceEncounterId: evaluacion46.id,
+  detail: "Limpieza antes de restaurar",
+})
 const opciones46 = await createBudget(db, ORG_A, ANA_ID, rosaPatientId, {
   planId: planRestaurador.id,
-  itemIds: [resinaOpcion46.id],
+  itemIds: [limpiezaComun46.id, resinaOpcion46.id],
   title: "Restauración definitiva pieza 46",
   notes: "Dos caminos para la 46: elige uno.",
 })

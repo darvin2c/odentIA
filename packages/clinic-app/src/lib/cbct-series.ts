@@ -4,7 +4,7 @@ import { DICOM_PARSE_OPTIONS } from "./dicom"
 import { VOLUME_MIN_SLICES } from "./imaging-scan"
 
 /**
- * Las series de una tomografía (ADR 0151). Un CD médico trae varias (sin
+ * Las series de una tomografía (ADR 0152). Un CD médico trae varias (sin
  * contraste, fases, reconstrucciones gruesas, el topograma); una CBCT, casi
  * siempre una. El visor abre la mayor, como siempre, y deja elegir otra. Lo que
  * se dice de cada una se lee de la cabecera de su primer archivo: no se guarda
