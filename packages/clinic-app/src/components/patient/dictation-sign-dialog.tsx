@@ -76,14 +76,14 @@ export function DictationSignDialog({
       }}
     >
       {/* Ancho de siempre: la lista y «Firmar con N marcadas» caben sin cortarse. */}
-      <AlertDialogContent className="max-h-[90dvh] overflow-y-auto">
+      <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Firmar la atención</AlertDialogTitle>
           <AlertDialogDescription>Lo que dictaste y está marcado entra con la firma. Desmarca lo que no va.</AlertDialogDescription>
         </AlertDialogHeader>
         <div className="flex flex-col gap-3">
           {children}
-          <ScrollArea className="flex max-h-[45vh] flex-col">
+          <ScrollArea className="flex max-h-[35vh] flex-col">
             <ul aria-label="Lo dictado sin confirmar" className="flex flex-col gap-2">
               {items.map((item) => {
                 const { title } = suggestionText(item)
