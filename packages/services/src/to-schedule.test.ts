@@ -232,6 +232,20 @@ it("la ventana de un control abre max(2 días, 25 % del intervalo) antes de su d
     expect(isControlWindowOpen(control, LIMA, new Date(controlWindowStart(control).getTime() - DAY))).toBe(false)
     expect(isControlWindowOpen(control, LIMA, new Date("2030-01-01T15:00:00Z"))).toBe(true)
   }
+  // Indicado hoy para mañana: la ventana no abre antes de indicarse, y hoy no se cumple; mañana sí.
+  const tomorrow = { createdAt: new Date("2026-11-07T14:00:00Z"), dueAt: new Date("2026-11-08T14:00:00Z") }
+  expect(controlWindowStart(tomorrow).getTime()).toBe(tomorrow.createdAt.getTime())
+  const row = { dueAt: at(tomorrow.dueAt), createdAt: at(tomorrow.createdAt) }
+  const [start] = await c.run((tx) => tx.execute<{ start: Date | string }>(sql`select ${controlWindowStartSql(row)} as start`))
+  expect(new Date(start!.start).getTime()).toBe(tomorrow.createdAt.getTime())
+  for (const [now, open] of [
+    [new Date("2026-11-07T20:00:00Z"), false],
+    [new Date("2026-11-08T15:00:00Z"), true],
+  ] as const) {
+    expect(isControlWindowOpen(tomorrow, LIMA, now)).toBe(open)
+    const [sqlOpen] = await c.run((tx) => tx.execute<{ open: boolean }>(sql`select ${controlWindowOpenSql(row, LIMA, at(now))} as open`))
+    expect(sqlOpen!.open).toBe(open)
+  }
 })
 
 it("«control vencido sin cita»: su día ya pasó y la persona no tiene ninguna cita; Pacientes, Inicio y Argos dicen lo mismo", async () => {

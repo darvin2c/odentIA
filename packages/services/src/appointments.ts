@@ -1475,6 +1475,7 @@ export async function setAppointmentArrival(
       throw error
     }
     await audit(tx, orgId, actorUserId, "appointment.arrived", id, { from: current.status })
+    if (current.status === "no_asistio") await relinkFollowUps(tx, orgId, actorUserId, id)
     await cancelPendingForAppointment(tx, orgId, id, "llegó a la cita")
     await invalidateAppointmentTokens(tx, orgId, id)
   } else {
@@ -1501,6 +1502,8 @@ export async function setAppointmentArrival(
       .limit(1)
     const before = (arrival?.metadata as { from?: string } | null)?.from
     const status = before === "programada" || before === "no_asistio" ? before : current.status
+    // Vuelve a «No vino»: el control se suelta otra vez, como al marcarlo.
+    if (status === "no_asistio") await releaseFollowUps(tx, orgId, actorUserId, id, "no_asistio")
     const [updated] = await tx
       .update(appointment)
       .set({ status, arrivedAt: null, arrivedBy: null, version: current.version + 1, updatedAt: new Date() })
@@ -1658,6 +1661,58 @@ async function releaseFollowUps(
       entityId: row.id,
       action: "follow_up.unscheduled",
       metadata: { patientId: row.patientId, appointmentId, by: next === "cancelada" ? "cita_cancelada" : "no_vino" },
+    })
+  }
+}
+
+/**
+ * «No vino» y después «Llegó» (el mismo día, porque la llegada es de hoy): el
+ * control que soltó ese «No vino» vuelve a esta cita. Se elige así, y no
+ * esperar al día siguiente para soltarlo, porque no hace falta un trabajo
+ * aparte: la auditoría ya dice qué control soltó y la cita vuelve a estar en pie.
+ * Solo el que sigue pendiente y sin otra cita.
+ */
+async function relinkFollowUps(tx: Db, orgId: string, actorUserId: string | null, appointmentId: string): Promise<void> {
+  const released = await tx
+    .select({ id: auditEvent.entityId })
+    .from(auditEvent)
+    .where(
+      and(
+        eq(auditEvent.organizationId, orgId),
+        eq(auditEvent.entity, "clinical_follow_up"),
+        eq(auditEvent.action, "follow_up.unscheduled"),
+        sql`${auditEvent.metadata}->>'appointmentId' = ${appointmentId}`,
+        sql`${auditEvent.metadata}->>'by' = 'no_vino'`,
+      ),
+    )
+  const ids = [...new Set(released.flatMap((row) => (row.id ? [row.id] : [])))]
+  if (ids.length === 0) return
+  const [visit] = await tx
+    .select({ patientId: appointment.patientId })
+    .from(appointment)
+    .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, appointmentId)))
+  if (!visit) return
+  const relinked = await tx
+    .update(clinicalFollowUp)
+    .set({ status: "programado", appointmentId, updatedAt: new Date() })
+    .where(
+      and(
+        eq(clinicalFollowUp.organizationId, orgId),
+        eq(clinicalFollowUp.patientId, visit.patientId),
+        inArray(clinicalFollowUp.id, ids),
+        eq(clinicalFollowUp.status, "pendiente"),
+        sql`${clinicalFollowUp.appointmentId} is null`,
+      ),
+    )
+    .returning({ id: clinicalFollowUp.id })
+  for (const row of relinked) {
+    await tx.insert(auditEvent).values({
+      organizationId: orgId,
+      actorUserId,
+      entity: "clinical_follow_up",
+      entityId: row.id,
+      action: "follow_up.scheduled",
+      metadata: { patientId: visit.patientId, appointmentId, by: "llego" },
     })
   }
 }

@@ -413,13 +413,7 @@ const finalizeInput = z
     // «¿Cuándo vuelve?» (ADR 0152): el día del próximo control, o que no hace falta.
     nextControl: z
       .union([
-        z
-          .object({
-            dueAt: z.iso.date({ error: "Elige un día del calendario" }),
-            // «Cambiar»: el control pendiente que ya tenía pasa a ese día.
-            followUpId: z.uuid().nullish(),
-          })
-          .strict(),
+        z.object({ dueAt: z.iso.date({ error: "Elige un día del calendario" }) }).strict(),
         z.object({ none: z.literal(true) }).strict(),
       ])
       .nullish(),

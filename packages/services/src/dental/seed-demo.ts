@@ -2871,7 +2871,8 @@ await addEncounterProcedure(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
   planItemId: obt36.id,
 })
 // El cierre cobra el acto ejecutado (cargo automático, una sola vez).
-const cierreRosa = await finalizeEncounter(db, ORG_A, ANA_ID, rosaPatientId, draft.id)
+// La semilla dice qué controles cumple la firma (ADR 0152): ninguno.
+const cierreRosa = await finalizeEncounter(db, ORG_A, ANA_ID, rosaPatientId, draft.id, { followUpIds: [] })
 await addEncounterAddendum(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
   text: "Adenda demo: la paciente toleró bien la obturación; sin sangrado posterior.",
 })
@@ -3201,7 +3202,7 @@ await createClinicalOrder(db, ORG_A, ANA_ID, {
   recipient: "Centro de imágenes",
   diagnosisCode: DX.caries,
 })
-const cierreLucia = await finalizeEncounter(db, ORG_A, ANA_ID, luciaPatientId, luciaEval.id)
+const cierreLucia = await finalizeEncounter(db, ORG_A, ANA_ID, luciaPatientId, luciaEval.id, { followUpIds: [] })
 if (!cierreLucia.budget) throw new Error("La evaluación de Lucía debía dejar armado su presupuesto")
 // Al firmar, el odontograma quedó firmado como «Inicio del plan de tratamiento».
 if ((cierreLucia.odontogram as DentalFinalizeParts["odontogram"])?.purpose !== "initial")

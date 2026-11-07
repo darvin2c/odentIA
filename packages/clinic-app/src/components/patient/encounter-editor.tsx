@@ -1371,13 +1371,14 @@ export function EncounterEditor({
   const onlyRegistrationMissing = needsRegistration && missing.every((requirement) => requirement === "signature")
   const closingSections = sections.filter((section) => section.key !== "consulta")
   const recorded = closingSections.filter((section) => !section.empty).map((s) => s.summary)
+  // Con «¿Cuándo vuelve?» en el mismo cierre, «plan y controles» no se dice como algo sin registrar.
   const unrecorded = closingSections
-    .filter((section) => section.empty)
+    .filter((section) => section.empty && !(section.key === "plan" && closingControls))
     .map((section) => section.title.toLowerCase())
+  // Lo de las adendas ya lo dice el subtítulo del cierre: una sola vez.
   const finalizeDescription = [
     recorded.length > 0 ? `Registrado: ${recorded.join("; ")}.` : "",
     unrecorded.length > 0 ? `Sin registrar: ${unrecorded.join(", ")}.` : "",
-    "Después del cierre solo se agregan adendas. Si vino de una cita, la cita queda atendida.",
   ]
     .filter(Boolean)
     .join(" ")
@@ -2551,7 +2552,7 @@ export function EncounterEditor({
         signatureHint={signatureHint}
         nextVisit={<ClosingNextVisit form={closingForm} controls={closingControls} busy={finalizing} />}
       >
-        <p className="text-xs text-muted-foreground">{finalizeDescription}</p>
+        {finalizeDescription ? <p className="text-xs text-muted-foreground">{finalizeDescription}</p> : null}
       </EncounterClosingDialog>
       {product.overlay}
       <ConsentSigningScreen
@@ -2577,7 +2578,6 @@ export function EncounterEditor({
             controls={closingControls}
             dictated={dictatedControl(marked)}
             busy={finalizing}
-            onChangeDictated={(id) => openSuggestion(id)}
           />
         )}
         onSign={(ids) => {

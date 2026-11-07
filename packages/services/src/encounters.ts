@@ -1719,9 +1719,18 @@ export interface ClosingNextControl {
   own: boolean
 }
 
+/** Un control reservado en la cita de esta atención: se cumple al firmarla (`closeAppointment`). */
+export interface ClosingAppointmentControl {
+  id: string
+  title: string
+  repeatEveryMonths: number | null
+}
+
 export interface ClosingControls {
   /** Los meses de «En N meses»: los del producto (6 en odentIA, 12 en latidIA). */
   recallMonths: number
+  /** Los controles que cumple la cita de esta atención: no son «el próximo». */
+  byAppointment: ClosingAppointmentControl[]
   /** Los días civiles de cada atajo, en la zona de la clínica: lo que se manda en `nextControl.dueAt`. */
   shortcuts: { week: string; month: string; recall: string }
   due: ClosingDueControl[]
@@ -1855,6 +1864,8 @@ async function closingControlsOf(
       dueAt: clinicalFollowUp.dueAt,
       status: clinicalFollowUp.status,
       originEncounterId: clinicalFollowUp.originEncounterId,
+      appointmentId: clinicalFollowUp.appointmentId,
+      repeatEveryMonths: clinicalFollowUp.repeatEveryMonths,
       startsAt: appointment.startsAt,
       appointmentStatus: appointment.status,
     })
@@ -1871,9 +1882,14 @@ async function closingControlsOf(
       ),
     )
     .orderBy(asc(clinicalFollowUp.dueAt), asc(clinicalFollowUp.id))
-  const first = open.find((control) => !dueIds.has(control.id))
+  // El reservado en la cita de esta atención lo cumple su cierre: no dice cuándo vuelve.
+  const byAppointment = open.filter(
+    (control) => row.appointmentId !== null && control.status === "programado" && control.appointmentId === row.appointmentId,
+  )
+  const first = open.find((control) => !dueIds.has(control.id) && !byAppointment.includes(control))
   return {
     recallMonths,
+    byAppointment: byAppointment.map(({ id, title, repeatEveryMonths }) => ({ id, title, repeatEveryMonths })),
     shortcuts: { week: addDaysToDay(today, 7), month: addMonthsToDay(today, 1), recall: addMonthsToDay(today, recallMonths) },
     due,
     next: first
@@ -1913,7 +1929,8 @@ async function createNextControl(
   if (day === controls.shortcuts.recall) {
     const created = await createFollowUp(tx, orgId, actorUserId, row.patientId, {
       kind: "mantenimiento",
-      title: "Control de mantenimiento",
+      // «Control de mantenimiento» en odentIA, «Control anual» en latidIA.
+      title: (await productHooks(tx, orgId)).recallControlTitle,
       dueAt,
       originEncounterId: row.id,
     })
@@ -1943,46 +1960,6 @@ async function createNextControl(
     encounterProcedureId: procedure?.id ?? null,
   })
   return { id: created.id, title: created.title, dueAt: created.dueAt }
-}
-
-/**
- * «Cambiar» en «Vuelve el 6 may»: el control pendiente que ya tenía pasa al día
- * nuevo, con su tipo y su título. Solo el que el cierre mostró y sigue
- * pendiente; uno reservado se mueve moviendo su cita.
- */
-async function moveNextControl(
-  tx: Db,
-  orgId: string,
-  actorUserId: string,
-  row: EncounterRow,
-  followUpId: string,
-  day: string,
-  controls: ClosingControls,
-  timezone: string,
-): Promise<{ id: string; title: string; dueAt: Date }> {
-  if (controls.next?.id !== followUpId || controls.next.status !== "pendiente")
-    throw invalidField("nextControl.dueAt", "Su control cambió mientras firmabas: vuelve a abrir el cierre.")
-  const dueAt = zonedTimeToUtc(day, CONTROL_MINUTES, timezone)
-  const [moved] = await tx
-    .update(clinicalFollowUp)
-    .set({ dueAt, updatedAt: new Date() })
-    .where(
-      and(
-        eq(clinicalFollowUp.organizationId, orgId),
-        eq(clinicalFollowUp.patientId, row.patientId),
-        eq(clinicalFollowUp.id, followUpId),
-        eq(clinicalFollowUp.status, "pendiente"),
-      ),
-    )
-    .returning({ id: clinicalFollowUp.id, title: clinicalFollowUp.title, dueAt: clinicalFollowUp.dueAt })
-  if (!moved) throw invalidField("nextControl.dueAt", "Su control cambió mientras firmabas: vuelve a abrir el cierre.")
-  await audit(tx, orgId, actorUserId, "follow_up.rescheduled", "clinical_follow_up", moved.id, {
-    patientId: row.patientId,
-    encounterId: row.id,
-    from: controls.next.dueAt.toISOString(),
-    to: dueAt.toISOString(),
-  })
-  return moved
 }
 
 /**
@@ -2017,7 +1994,8 @@ async function fulfillDueControls(
       encounterId: row.id,
       by: "ventana",
     })
-    await repeatFollowUp(tx, orgId, actorUserId, followUp)
+    // Si ya queda otro control abierto (el de «¿Cuándo vuelve?» u otro), no se repite: nunca dos.
+    await repeatFollowUp(tx, orgId, actorUserId, followUp, { unlessOpen: true })
   }
   return completed.map((followUp) => ({ id: followUp.id, title: followUp.title }))
 }
@@ -2043,13 +2021,13 @@ export interface FinalizeEncounterInput {
   consentSkipReason?: string | null
   /**
    * «¿Cuándo vuelve?» (ADR 0152): el día civil del próximo control, o que no
-   * hace falta. Sin él, no se indicó: recepción no lo verá. Con `followUpId`
-   * («Cambiar»), es el día nuevo del control pendiente que ya tenía.
+   * hace falta. Sin él, no se indicó: recepción no lo verá.
    */
-  nextControl?: { dueAt: string; followUpId?: string | null } | { none: true } | null
+  nextControl?: { dueAt: string } | { none: true } | null
   /**
    * Los controles por cumplir que esta visita cumple (`ClosingControls.due`).
-   * Sin él (semillas, API sin pantalla), los cumple todos.
+   * Sin él (API sin pantalla), solo los de quien firma (`mine`), los que la
+   * pantalla trae marcados.
    */
   followUpIds?: string[] | null
 }
@@ -2099,7 +2077,7 @@ export async function finalizeEncounter(
   // «¿Cuándo vuelve?» y los controles que cumple esta visita (ADR 0152).
   const { timezone } = await findOrgLocale(tx, orgId)
   const wanted = input.followUpIds ? new Set(input.followUpIds) : null
-  const fulfilling = closing.controls.due.filter((control) => !wanted || wanted.has(control.id))
+  const fulfilling = closing.controls.due.filter((control) => (wanted ? wanted.has(control.id) : control.mine))
   const nextDay = input.nextControl && "dueAt" in input.nextControl ? input.nextControl.dueAt : null
   if (nextDay !== null && (!/^\d{4}-\d{2}-\d{2}$/.test(nextDay) || nextDay <= dayKeyIn(now, timezone)))
     throw invalidField("nextControl.dueAt", "Elige un día desde mañana.")
@@ -2123,19 +2101,17 @@ export async function finalizeEncounter(
       ),
     )
   // El control nuevo se indica con la atención aún abierta, como «Indicar control». Si la persona ya
-  // tiene uno (también el que esta visita no cumple), o el que se cumple se repite, no se crea otro:
-  // dos controles no son dos visitas.
-  const repeats = fulfilling.some((control) => control.repeatEveryMonths)
-  const stays = closing.controls.due.some((control) => !fulfilling.includes(control))
-  const moving = input.nextControl && "dueAt" in input.nextControl ? (input.nextControl.followUpId ?? null) : null
+  // tiene uno, si el que se cumple (por la ventana o por su cita) se repite, o si quien firma deja sin
+  // marcar uno suyo, no se crea otro: dos controles no son dos visitas. Uno de un colega sin marcar no
+  // lo impide: quien firma decide cuándo vuelve.
+  const repeats =
+    fulfilling.some((control) => control.repeatEveryMonths) ||
+    closing.controls.byAppointment.some((control) => control.repeatEveryMonths)
+  const stays = closing.controls.due.some((control) => control.mine && !fulfilling.includes(control))
   const nextControl =
-    nextDay === null
-      ? null
-      : moving
-        ? await moveNextControl(tx, orgId, actorUserId, locked, moving, nextDay, closing.controls, timezone)
-        : !closing.controls.next && !repeats && !stays
-          ? await createNextControl(tx, orgId, actorUserId, locked, nextDay, closing.controls, timezone)
-          : null
+    nextDay !== null && !closing.controls.next && !repeats && !stays
+      ? await createNextControl(tx, orgId, actorUserId, locked, nextDay, closing.controls, timezone)
+      : null
   const [row] = await tx
     .update(encounter)
     .set({
@@ -2374,9 +2350,7 @@ export async function finalizeEncounter(
     materials: materials?.items.length ?? 0,
     // La constancia de «¿Cuándo vuelve?»: lo que se eligió, o que no se indicó.
     nextControl: nextControl
-      ? moving
-        ? "cambio"
-        : "fecha"
+      ? "fecha"
       : input.nextControl && "none" in input.nextControl
         ? "no_hace_falta"
         : closing.controls.next || repeats || stays
@@ -2482,8 +2456,9 @@ async function closeAppointment(
       patientId,
       encounterId: row.id,
     })
-    // El que se repite deja indicado el siguiente (issue 229, decisión 16).
-    await repeatFollowUp(tx, orgId, actorUserId, followUp)
+    // El que se repite deja indicado el siguiente (issue 229, decisión 16), si no
+    // queda ya otro control abierto: la firma nunca deja dos (ADR 0152).
+    await repeatFollowUp(tx, orgId, actorUserId, followUp, { unlessOpen: true })
   }
   await setAppointmentStatus(tx, orgId, actorUserId, row.appointmentId, "atendida")
 }
@@ -2764,62 +2739,6 @@ async function undoCompletionsOf(
   }
 }
 
-/**
- * Lo que la atención anulada cumplió vuelve a «pendiente» (ADR 0152): sus
- * controles realizados con ella. El siguiente que nació al repetirse se
- * cancela si aún no tiene cita; si ya la tiene, sigue en pie y se devuelve
- * para que la anulación no lo cancele por haber nacido aquí.
- */
-async function reopenFollowUpsOf(
-  tx: Db,
-  orgId: string,
-  actorUserId: string,
-  patientId: string,
-  encounterId: string,
-  reason: string,
-  at: Date,
-): Promise<string[]> {
-  const reopened = await tx
-    .update(clinicalFollowUp)
-    .set({ status: "pendiente", completedEncounterId: null, completedAt: null, outcome: null, updatedAt: at })
-    .where(
-      and(
-        eq(clinicalFollowUp.organizationId, orgId),
-        eq(clinicalFollowUp.patientId, patientId),
-        eq(clinicalFollowUp.completedEncounterId, encounterId),
-        eq(clinicalFollowUp.status, "realizado"),
-      ),
-    )
-    .returning({ id: clinicalFollowUp.id })
-  if (reopened.length === 0) return []
-  for (const followUp of reopened) {
-    await audit(tx, orgId, actorUserId, "follow_up.reopened", "clinical_follow_up", followUp.id, { patientId, encounterId, reason })
-  }
-  const repeated = await tx
-    .select({ id: clinicalFollowUp.id, status: clinicalFollowUp.status, appointmentId: clinicalFollowUp.appointmentId })
-    .from(clinicalFollowUp)
-    .where(
-      and(
-        eq(clinicalFollowUp.organizationId, orgId),
-        inArray(clinicalFollowUp.repeatsFromId, reopened.map((followUp) => followUp.id)),
-      ),
-    )
-  const kept: string[] = []
-  for (const next of repeated) {
-    if (next.status !== "pendiente" || next.appointmentId) {
-      kept.push(next.id)
-      continue
-    }
-    // Sin `repeats_from_id`: al cumplirse otra vez, el control vuelve a dejar su siguiente.
-    await tx
-      .update(clinicalFollowUp)
-      .set({ status: "cancelado", cancelledReason: reason, cancelledAt: at, repeatsFromId: null, updatedAt: at })
-      .where(and(eq(clinicalFollowUp.organizationId, orgId), eq(clinicalFollowUp.id, next.id)))
-    await audit(tx, orgId, actorUserId, "follow_up.cancelled", "clinical_follow_up", next.id, { patientId, encounterId, reason })
-  }
-  return kept
-}
-
 export async function voidEncounter(
   tx: Db,
   orgId: string,
@@ -2909,7 +2828,6 @@ export async function voidEncounter(
         eq(prescription.status, "emitida"),
       ),
     )
-  const kept = await reopenFollowUpsOf(tx, orgId, actorUserId, patientId, encounterId, cascade, at)
   await tx
     .update(clinicalFollowUp)
     .set({ status: "cancelado", cancelledReason: cascade, cancelledAt: at, updatedAt: at })
@@ -2919,7 +2837,6 @@ export async function voidEncounter(
         eq(clinicalFollowUp.patientId, patientId),
         eq(clinicalFollowUp.originEncounterId, encounterId),
         inArray(clinicalFollowUp.status, ["pendiente", "programado"]),
-        kept.length > 0 ? notInArray(clinicalFollowUp.id, kept) : undefined,
       ),
     )
   await voidEncounterPapers(tx, orgId, actorUserId, patientId, encounterId, cascade, at)

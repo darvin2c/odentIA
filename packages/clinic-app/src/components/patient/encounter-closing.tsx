@@ -16,7 +16,9 @@ import {
   Input,
 } from "@odentia/ui"
 import { DatePickerButton, TimeSelect, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
+import { ToggleGroup, ToggleGroupItem } from "@odentia/ui/components/toggle-group"
 import { useStore } from "@tanstack/react-form"
+import { Check } from "lucide-react"
 import { useId, useRef } from "react"
 import { clinicDateTimeValue } from "../../lib/clinical-journey"
 import type { ConsentNeed } from "../../lib/encounter-documents"
@@ -28,11 +30,11 @@ import {
   type ClosingMaterials,
   type ClosingNextControl,
   type ClosingRequirement,
+  controlDaySaid,
   type SignatureRegistration,
   signatureRegistrationErrors,
 } from "../../lib/encounters"
 import { activeOrgLocale } from "../../lib/locale"
-import { ChoiceButtons } from "../choice-buttons"
 import { closingMaterialsWords } from "../../lib/materials"
 import { productUi } from "../../product/product-ui"
 
@@ -72,8 +74,6 @@ export interface ClosingValues extends SignatureRegistration {
   nextControl: NextControlChoice
   /** El día de «Otra fecha» (`yyyy-MM-dd`). */
   nextControlDate: string
-  /** «Cambiar» sobre el control que ya tiene: vuelven los atajos. */
-  nextControlChange: boolean
   /** Lo que se cambió de lo que viene marcado en «Cumple su control…», por control. */
   fulfill: Record<string, boolean>
 }
@@ -89,7 +89,6 @@ const EMPTY_CLOSING: ClosingValues = {
   registrationNumber: "",
   nextControl: "",
   nextControlDate: "",
-  nextControlChange: false,
   fulfill: {},
 }
 
@@ -100,7 +99,10 @@ export interface DictatedControl {
   day: string
 }
 
-/** El control por cumplir queda cumplido con esta visita: lo marcado, o lo que viene marcado si nadie lo tocó. */
+/**
+ * El control por cumplir queda cumplido con esta visita: lo marcado, o lo que
+ * viene marcado si nadie lo tocó (solo el que indicó quien firma).
+ */
 export function fulfills(value: Pick<ClosingValues, "fulfill">, control: ClosingDueControl): boolean {
   return value.fulfill[control.id] ?? control.mine
 }
@@ -112,25 +114,33 @@ type KnownReturn =
   | { kind: "control"; control: ClosingNextControl }
   | { kind: "stays"; control: ClosingDueControl }
 
+/**
+ * La misma regla que el servidor (`finalizeEncounter`): se pregunta «¿Cuándo
+ * vuelve?» salvo que Clío ya lo dictó, que el control que se cumple (por la
+ * ventana o por la cita de esta atención) se repite, que ya tiene otro, o que
+ * quien firma deja sin marcar uno suyo. Uno de un colega sin marcar no frena.
+ */
 function knownReturn(
   value: Pick<ClosingValues, "fulfill">,
   controls: ClosingControls,
   dictated: DictatedControl | null,
 ): KnownReturn | null {
   if (dictated) return { kind: "dictated", ...dictated }
-  const repeating = controls.due.find((control) => fulfills(value, control) && control.repeatEveryMonths)
+  const repeating =
+    controls.due.find((control) => fulfills(value, control) && control.repeatEveryMonths) ??
+    controls.byAppointment.find((control) => control.repeatEveryMonths)
   if (repeating?.repeatEveryMonths) return { kind: "repeats", months: repeating.repeatEveryMonths }
   if (controls.next) return { kind: "control", control: controls.next }
-  const stays = controls.due.find((control) => !fulfills(value, control))
+  const stays = controls.due.find((control) => control.mine && !fulfills(value, control))
   return stays ? { kind: "stays", control: stays } : null
 }
 
-/** Se pregunta «¿Cuándo vuelve?»: no tiene otro control, o pidió «Cambiar» el que tiene. */
-function asksNextControl(
-  value: Pick<ClosingValues, "fulfill" | "nextControlChange">,
-  known: KnownReturn | null,
-): boolean {
-  return !known || (known.kind === "control" && known.control.status === "pendiente" && value.nextControlChange)
+/** El día que queda con lo elegido (`yyyy-MM-dd`), o vacío. */
+function chosenDay(value: Pick<ClosingValues, "nextControl" | "nextControlDate">, controls: ClosingControls): string {
+  if (value.nextControl === "date") return value.nextControlDate
+  if (value.nextControl === "week" || value.nextControl === "month" || value.nextControl === "recall")
+    return controls.shortcuts[value.nextControl]
+  return ""
 }
 
 /** Falta el día de «Otra fecha»: lo dice su campo. */
@@ -140,45 +150,21 @@ export function needsNextControlDay(
   dictated: DictatedControl | null,
 ): boolean {
   if (!controls || value.nextControl !== "date" || value.nextControlDate) return false
-  return asksNextControl(value, knownReturn(value, controls, dictated))
+  return !knownReturn(value, controls, dictated)
 }
 
-/**
- * Lo que el cierre manda de los controles: cuáles cumple esta visita y, si se
- * preguntó, cuándo vuelve (con «Cambiar», el día nuevo del control que ya tiene).
- */
+/** Lo que el cierre manda de los controles: cuáles cumple esta visita y, si se preguntó, cuándo vuelve. */
 export function closingControlsBody(
   value: ClosingValues,
   controls: ClosingControls | null,
   dictated: DictatedControl | null,
-): { followUpIds?: string[]; nextControl?: { dueAt: string; followUpId?: string } | { none: true } } {
+): { followUpIds?: string[]; nextControl?: { dueAt: string } | { none: true } } {
   if (!controls) return {}
   const followUpIds = controls.due.filter((control) => fulfills(value, control)).map((control) => control.id)
-  const known = knownReturn(value, controls, dictated)
-  if (!asksNextControl(value, known)) return { followUpIds }
-  if (value.nextControl === "none" && !known) return { followUpIds, nextControl: { none: true } }
-  const day =
-    value.nextControl === "date"
-      ? value.nextControlDate
-      : value.nextControl === "week" || value.nextControl === "month" || value.nextControl === "recall"
-        ? controls.shortcuts[value.nextControl]
-        : ""
-  if (!day) return { followUpIds }
-  return { followUpIds, nextControl: { dueAt: day, ...(known?.kind === "control" ? { followUpId: known.control.id } : {}) } }
-}
-
-/** «6 may 2027», o «3 may» si es de este año: un día civil, sin corrimiento de zona. */
-export function controlDaySaid(day: string): string {
-  const [year, month, date] = day.split("-").map(Number) as [number, number, number]
-  const thisYear = clinicDateTimeValue(new Date().toISOString()).slice(0, 4) === day.slice(0, 4)
-  return new Intl.DateTimeFormat(activeOrgLocale() ?? "es", {
-    day: "numeric",
-    month: "short",
-    ...(thisYear ? {} : { year: "numeric" }),
-    timeZone: "UTC",
-  })
-    .format(new Date(Date.UTC(year, month - 1, date, 12)))
-    .replace(".", "")
+  if (knownReturn(value, controls, dictated)) return { followUpIds }
+  if (value.nextControl === "none") return { followUpIds, nextControl: { none: true } }
+  const day = chosenDay(value, controls)
+  return day ? { followUpIds, nextControl: { dueAt: day } } : { followUpIds }
 }
 
 /** El día de un instante en la zona de la clínica. */
@@ -188,42 +174,46 @@ const dayOf = (iso: string): string => clinicDateTimeValue(iso).slice(0, 10)
 const inSentence = (title: string): string => (/^\p{Lu}\p{Ll}/u.test(title) ? title.charAt(0).toLowerCase() + title.slice(1) : title)
 
 /**
+ * Un atajo: botón con borde, que se lee como botón también a 390 px; lo
+ * elegido lleva el fondo de la acción y un check, no solo otro relieve.
+ */
+const CHIP =
+  "h-auto min-h-11 gap-1.5 rounded-full border border-input bg-background px-3.5 py-1.5 text-sm font-normal text-foreground shadow-none hover:bg-muted aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground aria-pressed:hover:bg-primary sm:min-h-9"
+
+/**
  * «¿Cuándo vuelve?» al firmar (ADR 0152), justo antes de firmar: los controles
- * que esta visita cumple, como casillas, y los atajos para el próximo. Ninguno
- * viene marcado y se firma igual sin elegir. Si ya tiene un control (o Clío
- * dictó uno), en vez de preguntar dice cuándo vuelve, con «Cambiar».
+ * que esta visita cumple, como casillas (marcado solo el de quien firma), y los
+ * atajos para el próximo. Ninguno viene marcado y se firma igual sin elegir.
+ * Si ya tiene un control (o Clío dictó uno), dice cuándo vuelve, sin cambiarlo
+ * aquí: eso se hace en «Plan y controles».
  */
 export function ClosingNextVisit({
   form,
   controls,
   dictated = null,
   busy,
-  onChangeDictated,
 }: {
   form: ClosingForm
   controls: ClosingControls | null | undefined
   /** El control de Clío marcado para entrar con la firma, si hay. */
   dictated?: DictatedControl | null
   busy: boolean
-  /** «Cambiar» sobre lo que dictó Clío: abre la sugerencia para corregirla. */
-  onChangeDictated?: (id: string) => void
 }): React.JSX.Element | null {
   const ids = useId()
   const values = useStore(form.store, (state) => state.values)
   if (!controls) return null
   const known = knownReturn(values, controls, dictated)
-  const asking = asksNextControl(values, known)
   const recall = controls.recallMonths
-  const options: Array<{ value: Exclude<NextControlChoice, "">; label: string }> = [
+  const options: Array<{ value: Exclude<NextControlChoice, "" | "none">; label: string }> = [
     { value: "week", label: "En 1 semana" },
     { value: "month", label: "En 1 mes" },
     { value: "recall", label: recall === 12 ? "En 1 año" : `En ${recall} meses` },
     { value: "date", label: "Otra fecha" },
-    // Cambiar el que ya tiene no es quitarlo: eso se hace en «Plan y controles».
-    ...(known ? [] : [{ value: "none" as const, label: "No hace falta" }]),
   ]
   const tomorrow = dayOf(new Date(Date.now() + 86_400_000).toISOString())
   const set = <K extends keyof ClosingValues>(name: K, value: ClosingValues[K]) => form.setFieldValue(name, value as never)
+  const day = chosenDay(values, controls)
+  const none = values.nextControl === "none"
   return (
     <div className="flex flex-col gap-3 rounded-lg border p-3">
       {controls.due.length > 0 ? (
@@ -246,67 +236,62 @@ export function ClosingNextVisit({
               </Field>
             ))}
           </FieldGroup>
-          <FieldDescription>Por qué: cualquier atención desde unos días antes de su fecha le sirve.</FieldDescription>
+          <FieldDescription>
+            Por qué: cualquier atención desde unos días antes de su fecha le sirve. Viene marcado si lo indicaste tú.
+          </FieldDescription>
         </FieldSet>
       ) : null}
       <div className="flex flex-col gap-2">
         <p id={`${ids}-cuando`} className="font-medium">
           ¿Cuándo vuelve?
         </p>
-        {known && !asking ? (
+        {known ? (
           <p className="text-sm">
-            {known.kind === "dictated" ? (
-              <>
-                Vuelve el {controlDaySaid(known.day)}, como dictaste
-                {onChangeDictated ? (
-                  <>
-                    {" · "}
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="link"
-                      className="h-auto p-0"
-                      disabled={busy}
-                      onClick={() => onChangeDictated(known.id)}
-                    >
-                      Cambiar
-                    </Button>
-                  </>
-                ) : null}
-              </>
-            ) : known.kind === "repeats" ? (
-              `Su control se repite: el siguiente queda para ${recallWords(known.months)}.`
-            ) : known.kind === "stays" ? (
-              `Sigue pendiente su ${inSentence(known.control.title)} del ${controlDaySaid(dayOf(known.control.dueAt))}: recepción lo verá.`
-            ) : known.control.scheduledAt ? (
-              `Vuelve el ${controlDaySaid(dayOf(known.control.scheduledAt))}, con su cita.`
-            ) : (
-              <>
-                Vuelve el {controlDaySaid(dayOf(known.control.dueAt))}
-                {" · "}
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="link"
-                  className="h-auto p-0"
-                  disabled={busy}
-                  onClick={() => set("nextControlChange", true)}
-                >
-                  Cambiar
-                </Button>
-              </>
-            )}
+            {known.kind === "dictated"
+              ? `Vuelve el ${controlDaySaid(known.day)}, como dictaste.`
+              : known.kind === "repeats"
+                ? `Su control se repite: el siguiente queda para ${recallWords(known.months)}.`
+                : known.kind === "stays"
+                  ? `Sigue pendiente su ${inSentence(known.control.title)} del ${controlDaySaid(dayOf(known.control.dueAt))}: recepción lo verá.`
+                  : known.control.scheduledAt
+                    ? `Vuelve el ${controlDaySaid(dayOf(known.control.scheduledAt))}, con su cita.`
+                    : `Vuelve el ${controlDaySaid(dayOf(known.control.dueAt))} · Para cambiarlo, en Plan y controles.`}
           </p>
         ) : (
           <>
-            <ChoiceButtons
-              aria-labelledby={`${ids}-cuando`}
-              value={values.nextControl || null}
-              options={options}
-              disabled={busy}
-              onChange={(next) => set("nextControl", next)}
-              onClear={() => set("nextControl", "")}
-            />
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+              <ToggleGroup
+                aria-labelledby={`${ids}-cuando`}
+                value={values.nextControl && !none ? [values.nextControl] : []}
+                onValueChange={(next: unknown[]) => {
+                  const picked = next[0]
+                  set("nextControl", typeof picked === "string" ? (picked as NextControlChoice) : "")
+                }}
+                disabled={busy}
+                spacing={2}
+                className="flex-wrap"
+              >
+                {options.map((option) => (
+                  <ToggleGroupItem key={option.value} value={option.value} className={CHIP}>
+                    {values.nextControl === option.value ? <Check aria-hidden className="size-4" /> : null}
+                    {option.label}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+              {/* «No hace falta» no es una fecha: va aparte. */}
+              <span aria-hidden className="hidden h-6 w-px bg-border sm:block" />
+              <Button
+                type="button"
+                variant="outline"
+                aria-pressed={none}
+                disabled={busy}
+                className={`${CHIP} self-start`}
+                onClick={() => set("nextControl", none ? "" : "none")}
+              >
+                {none ? <Check aria-hidden className="size-4" /> : null}
+                No hace falta
+              </Button>
+            </div>
             {values.nextControl === "date" ? (
               <form.AppField name="nextControlDate">
                 {(field) => (
@@ -326,13 +311,15 @@ export function ClosingNextVisit({
                 )}
               </form.AppField>
             ) : null}
-            {values.nextControl === "" ? (
-              <p className="text-xs text-muted-foreground">
-                {known?.kind === "control"
-                  ? `Si no eliges, sigue el ${controlDaySaid(dayOf(known.control.dueAt))}.`
-                  : "No indicaste cuándo vuelve: recepción no lo verá"}
-              </p>
-            ) : null}
+            <p className="text-xs text-muted-foreground" aria-live="polite">
+              {day
+                ? `Vuelve hacia el ${controlDaySaid(day)} · recepción lo verá para reservarlo`
+                : none
+                  ? "Queda dicho que no hace falta otro control."
+                  : values.nextControl === "date"
+                    ? "Elige el día en el calendario."
+                    : "No indicaste cuándo vuelve: recepción no lo verá"}
+            </p>
           </>
         )}
       </div>

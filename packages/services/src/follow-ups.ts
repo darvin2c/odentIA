@@ -8,7 +8,7 @@ import {
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, eq, sql } from "drizzle-orm"
+import { and, asc, eq, inArray, sql } from "drizzle-orm"
 import { type CreateAppointmentInput, createAppointment } from "./appointments.js"
 import { assertOpenDraft, requireEncounter } from "./encounters.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
@@ -327,8 +327,24 @@ export async function repeatFollowUp(
   orgId: string,
   actorUserId: string,
   done: typeof clinicalFollowUp.$inferSelect,
+  /** `unlessOpen`: al firmar (ADR 0152), no se repite si la persona ya tiene otro control abierto. */
+  options: { unlessOpen?: boolean } = {},
 ): Promise<void> {
   if (!done.repeatEveryMonths || done.status !== "realizado") return
+  if (options.unlessOpen) {
+    const [open] = await tx
+      .select({ id: clinicalFollowUp.id })
+      .from(clinicalFollowUp)
+      .where(
+        and(
+          eq(clinicalFollowUp.organizationId, orgId),
+          eq(clinicalFollowUp.patientId, done.patientId),
+          inArray(clinicalFollowUp.status, ["pendiente", "programado"]),
+        ),
+      )
+      .limit(1)
+    if (open) return
+  }
   const { timezone } = await findOrgLocale(tx, orgId)
   const at = (done.completedAt ?? new Date()).toISOString()
   const [next] = await tx.execute<{ due: Date | string }>(sql`

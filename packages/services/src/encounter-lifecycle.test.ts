@@ -264,7 +264,7 @@ it("cerrar exige motivo, diagnóstico, evolución y colegiatura, y firma con su 
     // Sin sede ni servicios con materiales, no anuncia ningún descuento.
     materials: null,
     // Sin controles: pregunta «¿Cuándo vuelve?» con los atajos del producto.
-    controls: { recallMonths: 6, shortcuts: expect.any(Object), due: [], next: null },
+    controls: { recallMonths: 6, byAppointment: [], shortcuts: expect.any(Object), due: [], next: null },
   })
   await expect(f.run((tx) => finalizeEncounter(tx, ...f.args, encounterId))).rejects.toMatchObject({
     code: "CLOSING_INCOMPLETE",

@@ -61,7 +61,7 @@ import { permissionRefusal, writingTimeFor } from "./message-gate.js"
 import { consentStatusOf, mayWriteFirst } from "./message-permission.js"
 import { issuePersonalLink } from "./booking-links.js"
 import { answerBudgetButton } from "./budget-send.js"
-import { noUpcomingAppointmentSql, TO_SCHEDULE_STATUSES, toScheduleSql } from "./to-schedule.js"
+import { appointmentServesControlSql, TO_SCHEDULE_STATUSES, toScheduleSql } from "./to-schedule.js"
 import { applyTemplateStatuses, reviewConnectionTemplates, type TemplateDeps } from "./channel-templates.js"
 import {
   currentAutomationMessage,
@@ -1460,9 +1460,9 @@ export const CHECKUP_REMINDER_WINDOW_HOURS = 48
 
 /**
  * Casos de «Avisar un control»: los controles por reservar que vencen en las
- * próximas horas, de quien no tiene ninguna cita por venir (ADR 0152). Al
- * control reservado lo recuerda su cita; a quien ya tiene otra cita, esa
- * visita le cumple el control.
+ * próximas horas, salvo que una cita por venir le sirva (ADR 0152: desde que
+ * abre su ventana hasta 30 días después de su fecha). Al control reservado lo
+ * recuerda su cita; una cita mucho más lejana no lo calla.
  */
 export async function syncCheckupReminders(tx: Db, orgId: string, now: Date): Promise<SyncSummary> {
   const rule = await enabledLine(tx, orgId, "recordatorio_control")
@@ -1479,10 +1479,15 @@ export async function syncCheckupReminders(tx: Db, orgId: string, now: Date): Pr
         eq(clinicalFollowUp.status, "pendiente"),
         gte(clinicalFollowUp.dueAt, now),
         lte(clinicalFollowUp.dueAt, horizon),
-        noUpcomingAppointmentSql(
-          { id: clinicalFollowUp.patientId, organizationId: clinicalFollowUp.organizationId },
+        sql`not ${appointmentServesControlSql(
+          {
+            organizationId: clinicalFollowUp.organizationId,
+            patientId: clinicalFollowUp.patientId,
+            dueAt: clinicalFollowUp.dueAt,
+            createdAt: clinicalFollowUp.createdAt,
+          },
           sql`${now.toISOString()}::timestamptz`,
-        ),
+        )}`,
         notYetQueued(orgId, "recordatorio_control", clinicalFollowUp.id),
         patientNotLocked(clinicalFollowUp.patientId),
       ),
@@ -1661,7 +1666,19 @@ async function stillValid(
     const { controlId } = jobPayloadOf(job.payload)
     if (controlId) {
       const [control] = await tx
-        .select({ status: clinicalFollowUp.status, appointmentStatus: appointment.status })
+        .select({
+          status: clinicalFollowUp.status,
+          appointmentStatus: appointment.status,
+          served: appointmentServesControlSql(
+            {
+              organizationId: clinicalFollowUp.organizationId,
+              patientId: clinicalFollowUp.patientId,
+              dueAt: clinicalFollowUp.dueAt,
+              createdAt: clinicalFollowUp.createdAt,
+            },
+            sql`${now.toISOString()}::timestamptz`,
+          ).mapWith(Boolean),
+        })
         .from(clinicalFollowUp)
         .leftJoin(
           appointment,
@@ -1678,10 +1695,8 @@ async function stillValid(
       }
       if (control.appointmentStatus === "atendida")
         return { valid: false, reason: "El control está pendiente de cierre clínico" }
-    }
-    // Con una cita por venir, esa visita le cumple el control (ADR 0152): no se le pide agendar otra.
-    if (job.patientId && (await hasFutureAppointment(tx, orgId, job.patientId, now))) {
-      return { valid: false, reason: "Ya tiene una cita reservada" }
+      // Con una cita por venir que le sirve, esa visita le cumple el control (ADR 0152).
+      if (control.served) return { valid: false, reason: "Ya tiene una cita reservada" }
     }
     return { valid: true }
   }

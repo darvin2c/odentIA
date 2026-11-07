@@ -61,6 +61,8 @@ export interface ClosingNextControl {
 export interface ClosingControls {
   /** Los meses de «En N meses» del producto. */
   recallMonths: number
+  /** Los controles reservados en la cita de esta atención: se cumplen al firmarla. */
+  byAppointment: Array<{ id: string; title: string; repeatEveryMonths: number | null }>
   /** El día de cada atajo («2026-11-14»), en la zona de la clínica. */
   shortcuts: { week: string; month: string; recall: string }
   due: ClosingDueControl[]
@@ -97,24 +99,29 @@ export interface FinalizedControls {
   fulfilled: Array<{ id: string; title: string }>
 }
 
+/** «6 may 2027», o «3 may» si es de este año: un día civil (`yyyy-MM-dd`), sin corrimiento de zona. */
+export function controlDaySaid(day: string, now = new Date()): string {
+  const [year, month, date] = day.split("-").map(Number) as [number, number, number]
+  const thisYear = new Intl.DateTimeFormat("en-CA", { timeZone: activeOrgTimeZone(), year: "numeric" }).format(now) === day.slice(0, 4)
+  return new Intl.DateTimeFormat(activeOrgLocale() ?? "es", {
+    day: "numeric",
+    month: "short",
+    ...(thisYear ? {} : { year: "numeric" }),
+    timeZone: "UTC",
+  })
+    .format(new Date(Date.UTC(year, month - 1, date, 12)))
+    .replace(".", "")
+}
+
 /**
- * «Recepción verá: reservar su control de mayo.» y lo que quedó cumplido, para
- * el aviso de «Atención finalizada».
+ * «Vuelve hacia el 7 may 2027 · recepción lo verá para reservarlo.» (la misma
+ * forma que el cierre) y lo que quedó cumplido, para «Atención finalizada».
  */
 export function finalizedControlsWords(controls: FinalizedControls, now = new Date()): string {
   const words: string[] = []
   if (controls.next) {
-    const timeZone = activeOrgTimeZone()
-    const due = new Date(controls.next.dueAt)
-    const sameYear =
-      new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric" }).format(due) ===
-      new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric" }).format(now)
-    const month = new Intl.DateTimeFormat(activeOrgLocale() ?? "es", {
-      month: "long",
-      ...(sameYear ? {} : { year: "numeric" }),
-      timeZone,
-    }).format(due)
-    words.push(`Recepción verá: reservar su control de ${month}.`)
+    const day = new Intl.DateTimeFormat("en-CA", { timeZone: activeOrgTimeZone() }).format(new Date(controls.next.dueAt))
+    words.push(`Vuelve hacia el ${controlDaySaid(day, now)} · recepción lo verá para reservarlo.`)
   }
   if (controls.fulfilled.length > 0) {
     const titles = controls.fulfilled.map((control) => `«${control.title}»`).join(", ")
