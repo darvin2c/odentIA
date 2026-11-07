@@ -1,4 +1,4 @@
-# 0151 · Presupuesto con caminos: lo común se responde sin elegir y la revisión pregunta solo lo que cambió
+# 0153 · Presupuesto con caminos: lo común se responde sin elegir y la revisión pregunta solo lo que cambió
 
 Fecha: 2026-11-07 · **Estado:** aceptada · Precisa [0034](0034-un-plan-una-seccion.md) (opciones, lo propio del odontólogo) y [0144](0144-el-presupuesto-enviado-abre-su-oportunidad.md) (ganar en parte)
 

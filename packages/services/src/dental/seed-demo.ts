@@ -2906,7 +2906,7 @@ if (docRx) {
 // Dos opciones en un mismo presupuesto (decisión 13): la 46 se arregla con una
 // resina o con una corona, y Rosa elige una. La B nace como copia de la A y se
 // cambia lo que hace falta; cada una con su total, nunca sumadas. La limpieza va
-// en los dos caminos (ADR 0151): se puede aceptar sin elegir. Queda enviado,
+// en los dos caminos (ADR 0153): se puede aceptar sin elegir. Queda enviado,
 // esperando que elija; el plan muestra la 46 «por decidir entre dos caminos».
 const resinaOpcion46 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   serviceId: serviceIdA("OBTURACION"),
