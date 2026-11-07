@@ -74,6 +74,8 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
           },
         ]
       }
+      if (faq.q === "¿A quién se le envía una receta o una orden?")
+        return [{ ...faq, q: "¿A quién se le envía una receta, una orden o un descanso médico?" }]
       if (faq.q.startsWith("¿Dónde hago la receta, el consentimiento o la orden")) {
         return [
           {
