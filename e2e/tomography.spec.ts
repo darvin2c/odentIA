@@ -105,6 +105,28 @@ test("tomografía: la carpeta del CD se sube, queda en la ficha y se abre en pan
   // Sin atención propia abierta hoy, dice cómo guardar la vista en vez de un botón apagado.
   await expect(viewer.getByText("Para guardar esta imagen en la nota, abre tu atención de hoy con este paciente.")).toBeVisible()
   await page.screenshot({ path: test.info().outputPath("tomografia-visor.png") })
+  // Se mide con el teclado: M enciende «Medir», Enter muestra la mira y marca, las flechas la mueven.
+  const chosen = viewer.getByRole("img", { name: /^Corte elegido/ })
+  await chosen.focus()
+  await page.keyboard.press("m")
+  await expect(viewer.getByText(/Flechas mueven la mira/).first()).toBeVisible()
+  await page.keyboard.press("Enter")
+  await page.keyboard.press("Enter")
+  for (let k = 0; k < 20; k++) await page.keyboard.press("ArrowDown")
+  await page.keyboard.press("Enter")
+  await expect(viewer.getByText(/Distancia · corte transversal/)).toBeVisible()
+  // Quitarla se deshace ahí mismo.
+  await viewer.getByRole("button", { name: /Quitar la distancia de/ }).click()
+  await expect(viewer.getByText(/Quitaste la distancia de/)).toBeVisible()
+  await viewer.getByRole("button", { name: "Deshacer" }).click()
+  await expect(viewer.getByText(/Distancia · corte transversal/)).toBeVisible()
+  await viewer.getByRole("button", { name: "Terminar de medir" }).click()
+  // «Informe y datos» se abre encima de la columna derecha, sin salir de la tomografía.
+  await viewer.getByRole("button", { name: "Informe y datos" }).click()
+  await expect(viewer.getByRole("complementary", { name: "Informe y datos" })).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("tomografia-informe-y-datos.png") })
+  await viewer.getByRole("button", { name: "Volver a la imagen" }).click()
+  await expect(viewer.getByText("Panorámica reconstruida")).toBeVisible()
   // La tomografía se acerca en cada vista, con el porcentaje a la vista.
   await viewer.getByRole("button", { name: "Acercar", exact: true }).first().click()
   await expect(viewer.getByRole("button", { name: /ahora al 125 %/ }).first()).toBeVisible()
@@ -166,6 +188,12 @@ test("tomografía: la carpeta del CD se sube, queda en la ficha y se abre en pan
     })
     await small.getByRole("tab", { name: "Pieza", exact: true }).click()
     await expect(small.getByText(/Desliza con el dedo/)).toBeVisible()
+    // La pieza y las medidas van en una hoja abajo que no tapa la imagen.
+    const sheet = small.getByRole("button", { name: /Pieza 38 · \d+ medidas?/ })
+    await expect(sheet).toHaveAttribute("aria-expanded", "false")
+    await sheet.click()
+    await expect(small.getByText("Ir a la pieza")).toBeVisible()
+    await mobile.screenshot({ path: test.info().outputPath("tomografia-celular-hoja.png") })
     await small.getByRole("button", { name: "Medir" }).click()
     await expect(small.getByText(/En el celular la tomografía es para mirar/)).toBeVisible()
     await mobile.screenshot({ path: test.info().outputPath("tomografia-celular.png") })

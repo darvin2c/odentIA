@@ -15,7 +15,7 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@odentia/ui/components/toggle-group"
 import { LoadingState, ViewTabs } from "@odentia/ui-patterns"
 import { keepPreviousData, useQuery } from "@tanstack/react-query"
-import { ChevronDown } from "lucide-react"
+import { ChevronDown, ChevronLeft } from "lucide-react"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import {
@@ -35,10 +35,12 @@ import { tomographyDownloadUrl } from "../../lib/imaging-upload"
 import { MEASURE_NOTE, MeasureList, type SavedMeasures, useSavedMeasures, type Vec3 } from "./tomography-measures"
 import { detectArch } from "../../lib/cbct-arch"
 import { PanoramicView, type SavedArch } from "./tomography-panoramic"
-import { type PlaneMeasure, type Point, SliceCanvas, type Tool } from "./tomography-slice"
+import { MEASURE_KEYS_HINT, type PlaneMeasure, type Point, SliceCanvas, type Tool } from "./tomography-slice"
 import { Tomography3D } from "./tomography-3d"
 import { usePatientName, ViewerShell } from "./viewer-shell"
+import { formatDateTime } from "../../lib/clinical-journey"
 import { activeOrgLocale } from "../../lib/locale"
+import { categoryLabel, imageTypeLabel, reportStatusLabel, takenAt } from "./document-labels"
 import type { PatientDocument } from "../../lib/patients"
 
 /**
@@ -527,6 +529,7 @@ export function TomographyViewer({
   const saved = useSavedMeasures(patientId, doc.id, canWrite)
   const [view, setView] = useState<TomographyView>("panoramica")
   const [adjusting, setAdjusting] = useState(false)
+  const [facts, setFacts] = useState(false)
   const [single, setSingle] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const window = volume
@@ -635,11 +638,15 @@ export function TomographyViewer({
               </TabsList>
             </Tabs>
           )}
-          {onDetails && (
-            <Button type="button" size="sm" variant="ghost" onClick={onDetails}>
-              Detalles
-            </Button>
-          )}
+          <Button
+            type="button"
+            size="sm"
+            variant={facts ? "secondary" : "ghost"}
+            aria-pressed={facts}
+            onClick={() => setFacts((open) => !open)}
+          >
+            Informe y datos
+          </Button>
         </>
       }
       toolbar={
@@ -737,6 +744,9 @@ export function TomographyViewer({
         ) : undefined
       }
     >
+      {/* «Informe y datos» se abre encima de la columna derecha: la imagen, la pestaña y la pieza quedan igual. */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+      {facts && <TomographyFacts doc={doc} onClose={() => setFacts(false)} onEdit={onDetails} />}
       {single && loaded.files.data ? (
         <SingleSlices files={loaded.files.data.data.files} onRetry={() => void loaded.files.refetch()} />
       ) : loaded.error ? (
@@ -793,16 +803,77 @@ export function TomographyViewer({
               />
               <aside className="flex w-full shrink-0 flex-col gap-3 border-t border-slate-800 bg-[#0d131b] p-4 text-sm lg:w-72 lg:border-t-0 lg:border-l">
                 <MeasureList saved={saved} canWrite={canWrite} viewOnly={viewOnly} note={MEASURE_NOTE(voxel)} />
-                <p className="text-xs text-slate-500">
-                  Rueda o ↑ ↓ avanzan el corte · Ctrl + rueda o dos dedos acercan · doble clic
-                  ajusta · 1, 2 y 3 cambian el brillo
-                  {viewOnly ? "" : " · M mide · A ángulo"}
+                <p className="text-xs text-slate-500" aria-live="polite">
+                  {tool !== "ninguna" && !viewOnly
+                    ? MEASURE_KEYS_HINT
+                    : `Rueda o ↑ ↓ avanzan el corte · Ctrl + rueda o dos dedos acercan · doble clic ajusta · 1, 2 y 3 cambian el brillo${viewOnly ? "" : " · M mide · A ángulo"}`}
                 </p>
               </aside>
             </div>
           )}
         </>
       )}
+      </div>
     </ViewerShell>
+  )
+}
+
+/**
+ * Lo que se sabe del archivo, sin salir de la tomografía: tipo, toma, origen,
+ * informe, piezas y etiquetas. Editarlo, informarlo o retirarlo se hace en su
+ * tarjeta, que abre «Editar, informar o retirar».
+ */
+function TomographyFacts({ doc, onClose, onEdit }: { doc: PatientDocument; onClose: () => void; onEdit?: () => void }) {
+  const rows: [string, string][] = [
+    ["Tipo", imageTypeLabel(doc.imageType) ?? categoryLabel(doc.category)],
+    [doc.capturedAt ? "Tomada" : "Subida", formatDateTime(takenAt(doc))],
+    ...(doc.imaging
+      ? ([
+          [
+            "Estudio",
+            `${doc.imaging.sliceCount.toLocaleString(activeOrgLocale())} cortes${
+              doc.imaging.voxelMm ? ` · vóxel de ${doc.imaging.voxelMm.toLocaleString(activeOrgLocale())} mm` : ""
+            }`,
+          ],
+        ] as [string, string][])
+      : []),
+    ...(doc.source ? ([["Origen", doc.source]] as [string, string][]) : []),
+    ...(doc.reportStatus ? ([["Informe", reportStatusLabel(doc.reportStatus) ?? doc.reportStatus]] as [string, string][]) : []),
+    ...(doc.toothNumbers.length
+      ? ([[doc.toothNumbers.length === 1 ? "Pieza" : "Piezas", doc.toothNumbers.join(", ")]] as [string, string][])
+      : []),
+    ...(doc.tags.length ? ([["Etiquetas", doc.tags.join(", ")]] as [string, string][]) : []),
+    ...(doc.retiredAt ? ([["Retirada", doc.retireReason ?? "Sí"]] as [string, string][]) : []),
+  ]
+  return (
+    // scroll-nativo: panel sobre el visor oscuro, como la columna derecha que reemplaza.
+    <aside
+      aria-label="Informe y datos"
+      className="absolute inset-y-0 right-0 z-20 flex w-full flex-col gap-4 overflow-y-auto border-l border-slate-800 bg-[#0d131b] p-4 text-sm sm:w-80"
+    >
+      <Button type="button" size="sm" variant="outline" className="self-start" autoFocus onClick={onClose}>
+        <ChevronLeft aria-hidden="true" />
+        Volver a la imagen
+      </Button>
+      <dl className="grid grid-cols-1 gap-y-2.5">
+        {rows.map(([term, value]) => (
+          <div key={term}>
+            <dt className="text-xs text-slate-400">{term}</dt>
+            <dd className="text-slate-100">{value}</dd>
+          </div>
+        ))}
+      </dl>
+      {doc.reportStatus === "pendiente" && (
+        <p className="text-xs text-slate-400">El informe va como resultado de su orden o en la evolución de la atención.</p>
+      )}
+      {onEdit && (
+        <div className="flex flex-col gap-1">
+          <Button type="button" size="sm" variant="outline" className="self-start" onClick={onEdit}>
+            Editar, informar o retirar
+          </Button>
+          <p className="text-xs text-slate-400">Abre la tarjeta del archivo; vuelves aquí con «Abrir visor».</p>
+        </div>
+      )}
+    </aside>
   )
 }

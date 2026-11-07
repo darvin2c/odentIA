@@ -66,9 +66,13 @@ export function useSavedMeasures(patientId: string, documentId: string, canWrite
       setError(e instanceof ApiError ? (e.shape.message ?? "No se pudo guardar la medida.") : "No se pudo guardar la medida.")
     }
   }
+  // La última quitada, para «Deshacer» ahí mismo: el visor es un diálogo y un aviso de fuera no se alcanza.
+  const [removed, setRemoved] = useState<SavedMeasure | null>(null)
   const retire = async (id: string) => {
+    const measure = [...(saved.data?.data ?? []), ...local].find((m) => m.id === id) ?? null
     if (local.some((m) => m.id === id)) {
       setLocal((prev) => prev.filter((m) => m.id !== id))
+      setRemoved(measure)
       return
     }
     try {
@@ -78,11 +82,27 @@ export function useSavedMeasures(patientId: string, documentId: string, canWrite
         body: "{}",
       })
       await queryClient.invalidateQueries({ queryKey: key })
+      setRemoved(measure)
     } catch {
       setError("No se pudo quitar la medida.")
     }
   }
-  return { measures: [...(saved.data?.data ?? []), ...local], keep, retire, error }
+  /** La vuelve a guardar igual; la quitada queda en el registro con quién y cuándo. */
+  const undo = async () => {
+    if (!removed) return
+    const { kind, view, points, value, toothNumber } = removed
+    setRemoved(null)
+    await keep({ kind, view, points, value, toothNumber })
+  }
+  return {
+    measures: [...(saved.data?.data ?? []), ...local],
+    keep,
+    retire,
+    error,
+    removed,
+    undo,
+    dismissRemoved: () => setRemoved(null),
+  }
 }
 
 export type SavedMeasures = ReturnType<typeof useSavedMeasures>
@@ -144,6 +164,19 @@ export function MeasureList({
             </li>
           ))}
         </ul>
+      )}
+      {saved.removed && (
+        <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-900 px-2.5 py-1.5 text-xs text-slate-300">
+          <span className="min-w-0 flex-1">
+            Quitaste {saved.removed.kind === "angulo" ? "el ángulo" : "la distancia"} de {formatMeasure(saved.removed)}.
+          </span>
+          <Button type="button" size="sm" variant="outline" onClick={() => void saved.undo()}>
+            Deshacer
+          </Button>
+          <Button type="button" size="sm" variant="ghost" onClick={saved.dismissRemoved}>
+            Listo
+          </Button>
+        </div>
       )}
       {saved.error && (
         <p role="alert" className="text-xs text-red-300">

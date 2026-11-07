@@ -597,12 +597,12 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Dónde subo una radiografía?",
-        a: "En su página › Clínica › Documentos, con «Nuevo», o en el bloque «Documentos» de la atención: imagen o archivo, con su tipo y la fecha de toma. Es una fila más de la lista y «Ver» la abre a toda la ventana: dos dedos, Ctrl + rueda o doble clic la acercan, «Más» la gira, la voltea o la pone en negativo, y «Detalles» trae «Comparar con».",
+        a: "En su página › Clínica › Documentos, con «Nuevo», o en el bloque «Documentos» de la atención: imagen o archivo, con su tipo y la fecha de toma. Es una fila más de la lista y «Ver» la abre a toda la ventana: dos dedos, Ctrl + rueda o doble clic la acercan, «Más» la gira, la voltea o la pone en negativo, y «Informe y datos» trae «Comparar con».",
         forms: ["donde subo una radiografia", "subir imagen", "subir radiografia", "subir examen"],
       },
       {
         q: "¿Cómo veo una tomografía?",
-        a: "En su página › Clínica › Documentos, «Ver» la abre a toda la ventana. «Panorámica» arma la panorámica con cinco cortes de la pieza: «Ir a la pieza» lleva a la pieza de la orden, también a las terceras molares, y la barra «Cortes» recorre el arco. «Cortes» la muestra desde arriba, de frente y de lado, y «3D» sirve para explicarla, no para medir. «Medir» marca dos puntos y «Ángulo», tres: quedan con tu nombre y son orientativas; para planificar una cirugía, confírmalas en el programa del tomógrafo. Si el arco no sigue los dientes, «Más» › «Ajustar el arco» y «Terminar y guardar»: queda guardado con la tomografía.",
+        a: "En su página › Clínica › Documentos, «Ver» la abre a toda la ventana. «Panorámica» arma la panorámica con cinco cortes de la pieza: «Ir a la pieza» lleva a la pieza de la orden, también a las terceras molares, y la barra «Cortes» recorre el arco. «Cortes» la muestra desde arriba, de frente y de lado, y «3D» sirve para explicarla, no para medir. «Medir» marca dos puntos y «Ángulo», tres, con un clic o con el teclado (las flechas mueven la mira y Enter marca): quedan con tu nombre y son orientativas; para planificar una cirugía, confírmalas en el programa del tomógrafo. Si quitas una medida, «Deshacer» la vuelve a poner. Si el arco no sigue los dientes, «Más» › «Ajustar el arco» y «Terminar y guardar»: queda guardado con la tomografía. «Informe y datos» muestra el informe, la toma y las piezas sin salir de la imagen. En el celular, la pieza y las medidas van en la hoja de abajo.",
         forms: ["como veo una tomografia", "tomografia en 3d", "ir a la pieza", "como mido en la tomografia", "ajustar el arco", "cbct"],
       },
       {

@@ -2796,7 +2796,7 @@ if (cbct) {
     contentType: "image/webp",
     ext: "webp",
   })
-  await setImagingThumbnail(db, ORG_A, rosaPatientId, documentId, thumbRef.objectKey)
+  await setImagingThumbnail(db, ORG_A, rosaPatientId, documentId, thumbRef.objectKey, { replace: true })
 }
 // Una imagen subida al paciente equivocado se retira con motivo; no se borra.
 const erradaRef = await putDemoImage(rosaPatientId, DEMO_IMAGES.periapicalRadiolucidez)

@@ -377,9 +377,13 @@ export async function setImagingThumbnail(
   patientId: string,
   documentId: string,
   thumbnailKey: string,
+  /** Quien escribe en la ficha puede cambiarla; quien solo recibe el CD, ponerla una vez. */
+  options: { replace: boolean },
 ): Promise<void> {
-  const { retiredAt } = await requireStudy(tx, orgId, patientId, documentId)
+  const { study, retiredAt } = await requireStudy(tx, orgId, patientId, documentId)
   if (retiredAt) throw new ServiceError("DOCUMENT_RETIRED", 409, "La tomografía está retirada")
+  if (study.thumbnailKey && !options.replace)
+    throw new ServiceError("THUMBNAIL_EXISTS", 409, "La tomografía ya tiene su miniatura")
   await tx
     .update(imagingStudy)
     .set({ thumbnailKey })
