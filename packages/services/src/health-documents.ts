@@ -6,10 +6,13 @@
  * - Solo a la propia persona (si es mayor de edad) o a su representante legal
  *   vigente, nunca a otro número ni a un responsable económico: es información
  *   de salud.
- * - WhatsApp primero (el de su ficha, con la conversación abierta); sin
- *   WhatsApp, por correo; sin ninguno de los dos, solo se imprime y se dice.
- *   Una receta pasadas las 24 horas de WhatsApp sale con «Su enlace», la
- *   plantilla ya aprobada, y se descarga en «Tus papeles» (decisión 8).
+ * - WhatsApp primero (el de su ficha); sin WhatsApp, por correo; sin ninguno
+ *   de los dos, solo se imprime y se dice. Cada envío entrega lo que dice: el
+ *   PDF. Pasadas las 24 horas de WhatsApp sale con «Documento listo», el
+ *   mensaje aprobado con el PDF en su encabezado; si aún no está aprobado, el
+ *   cajón lo dice y queda el correo o imprimir (ADR 0150).
+ * - El nombre del archivo es neutro («Receta-12.pdf»): se ve en la
+ *   notificación del teléfono y no debe decir nada clínico.
  * - El envío es el mismo de los documentos de cobro (`deliverDocumentPdf`): el
  *   PDF queda en la conversación de la persona y vuelve encolado; el worker lo
  *   entrega. Encolado nunca se presenta como entregado.
@@ -43,7 +46,6 @@ import { getMedicalLeavePrint } from "./medical-leaves.js"
 import { requirePatient } from "./patients.js"
 import { getPrescriptionPrint } from "./prescriptions.js"
 import { type DecisionRecipient, listDecisionRecipients } from "./responsibilities.js"
-import { sendPersonalLink } from "./su-enlace.js"
 
 export const HEALTH_DOCUMENT_TYPES = [
   "prescription",
@@ -77,24 +79,6 @@ export function listHealthDocumentRecipients(
 }
 
 /** WhatsApp primero; sin WhatsApp, el correo. Ningún otro canal lleva papeles de salud. */
-/** Lo que dice la opción de WhatsApp de una receta pasadas las 24 horas. */
-export const RECIPE_BY_LINK =
-  "Pasaron 24 horas: le llega «Su enlace» y descarga la receta en «Tus papeles»"
-
-/**
- * Una receta fuera de las 24 horas de WhatsApp no espera a que la persona
- * escriba: sale «Su enlace» (ya aprobado) y la receta queda en «Tus papeles».
- */
-function viaPersonalLink(option: DocumentChannelOption): DocumentChannelOption {
-  if (
-    option.channel !== "whatsapp" ||
-    option.usable ||
-    !option.reason?.startsWith("Fuera de la ventana")
-  )
-    return option
-  return { ...option, usable: true, reason: RECIPE_BY_LINK }
-}
-
 export function proposeHealthChannel<T extends { channel: string; usable: boolean }>(
   options: T[],
 ): T | null {
@@ -218,9 +202,7 @@ export async function getHealthDocumentSendOptions(
     }
   }
   const { channels: all } = await documentChannelsFor(tx, orgId, recipient)
-  const channels = all
-    .filter((option) => option.channel === "whatsapp" || option.channel === "email")
-    .map((option) => (type === "prescription" ? viaPersonalLink(option) : option))
+  const channels = all.filter((option) => option.channel === "whatsapp" || option.channel === "email")
   const proposed = proposeHealthChannel(channels)
   if (proposed) proposed.isProposed = true
   const person = await requirePatient(tx, orgId, patientId)
@@ -243,14 +225,20 @@ export async function getHealthDocumentSendOptions(
     ),
     printOnly: proposed
       ? null
-      : `${recipient.displayName} no tiene WhatsApp ni correo por donde enviarlo: solo se puede imprimir`,
+      : `Por ahora no hay por dónde enviárselo a ${recipient.displayName}: imprímelo, o agrégale un correo`,
   }
 }
 
 // --- PDF -----------------------------------------------------------------------
 
+/** La fecha de un papel sin número en el nombre de su archivo (AAAA-MM-DD). */
+function dateOfName(value: Date | string | null | undefined): string {
+  const at = value ? new Date(value) : new Date()
+  return Number.isNaN(at.getTime()) ? "documento" : at.toISOString().slice(0, 10)
+}
+
 /**
- * El PDF de un papel de salud: el mismo para enviarlo, para «Tus papeles» y para
+ * El PDF de un papel de salud: el mismo para enviarlo, para su portal y para
  * que el equipo lo vea. Receta, orden y descanso son el archivo guardado al emitirse
  * (`issuedPaperBytes`), con «ANULADA» encima si se anularon (enviarlos sigue prohibido:
  * `loadHealthMeta`). El consentimiento firmado es el guardado, el de la huella; el
@@ -305,7 +293,7 @@ export async function renderHealthDocumentPdf(
         storage,
         options,
       ),
-      filename: `Descanso-medico-${leave.leaveNumber}.pdf`,
+      filename: `Descanso-${leave.leaveNumber}.pdf`,
       label: `Descanso médico N.º ${leave.leaveNumber}`,
     }
   }
@@ -346,7 +334,8 @@ export async function renderHealthDocumentPdf(
         storage,
         options,
       ),
-      filename: `Orden-${order.title}.pdf`,
+      // Sin el título: «Orden-Biopsia….pdf» diría en la notificación lo que se estudia.
+      filename: `Orden-${dateOfName(order.createdAt)}.pdf`,
       label: `${ORDER_KIND_WORDS[order.kind] ?? "Orden"} · ${order.title}`,
     }
   }
@@ -359,12 +348,12 @@ export async function renderHealthDocumentPdf(
       bytes: doc.personSignedAt
         ? await renderConsentPdf(data, clinic)
         : await renderConsentPaperPdf(data, clinic),
-      filename: `Consentimiento-${doc.titleSnapshot}.pdf`,
+      filename: `Consentimiento-${dateOfName(doc.signedAt ?? doc.createdAt)}.pdf`,
       label: `Consentimiento · ${doc.titleSnapshot}`,
     }
   }
   const named = {
-    filename: `Consentimiento-${doc.titleSnapshot}.pdf`,
+    filename: `Consentimiento-${dateOfName(doc.signedAt ?? doc.createdAt)}.pdf`,
     label: `Consentimiento · ${doc.titleSnapshot}`,
   }
   // Revocado, el que se ve es el de la revocación: dice que ya no vale.
@@ -402,7 +391,7 @@ export async function renderHealthDocumentPdf(
     )
   return {
     bytes,
-    filename: `Consentimiento-${doc.titleSnapshot}.pdf`,
+    filename: `Consentimiento-${dateOfName(doc.signedAt ?? doc.createdAt)}.pdf`,
     label: `Consentimiento · ${doc.titleSnapshot}`,
   }
 }
@@ -496,8 +485,7 @@ export async function sendHealthDocument(
   orgId: string,
   actorUserId: string,
   input: SendHealthDocumentInput,
-  /** `secretsKey`: para «Su enlace» cuando una receta sale pasadas las 24 horas. */
-  deps: SendDeps & { secretsKey?: Buffer },
+  deps: SendDeps,
 ): Promise<SendHealthDocumentResult> {
   const type = assertHealthType(input.documentType)
   if (!input.connectionId) throw invalidField("connectionId", "Elige por dónde enviarlo")
@@ -553,46 +541,6 @@ export async function sendHealthDocument(
   const conn = await requireDocumentConnection(tx, orgId, input.connectionId)
   if (conn.channel !== "whatsapp" && conn.channel !== "email")
     throw invalidField("connectionId", "Un papel de salud se envía por WhatsApp o por correo")
-  // Receta pasadas las 24 horas: «Su enlace» y la descarga en «Tus papeles» (decisión 8).
-  if (type === "prescription" && conn.channel === "whatsapp" && deps.secretsKey) {
-    const { channels } = await documentChannelsFor(tx, orgId, recipient)
-    const option = channels.find((item) => item.connectionId === conn.id)
-    if (option && viaPersonalLink(option).reason === RECIPE_BY_LINK) {
-      const sent = await sendPersonalLink(
-        tx,
-        orgId,
-        actorUserId,
-        { patientId: input.patientId, ...(input.requestId ? { requestId: input.requestId } : {}) },
-        { secretsKey: deps.secretsKey },
-      )
-      await tx.insert(auditEvent).values({
-        organizationId: orgId,
-        actorUserId,
-        action: "health_document.sent",
-        entity: "message",
-        entityId: sent.messageId,
-        metadata: {
-          patientId: input.patientId,
-          documentType: type,
-          documentId: input.documentId,
-          recipientContactId: sent.recipientName ? recipient.contactId : null,
-          recipientName: sent.recipientName,
-          conversationId: sent.conversationId,
-          channel: sent.channel,
-          via: "su_enlace",
-          ...(input.requestId ? { requestId: input.requestId } : {}),
-        },
-      })
-      return {
-        conversationId: sent.conversationId,
-        messageId: sent.messageId,
-        status: "queued",
-        channel: sent.channel,
-        documentLabel: meta.label,
-        recipientName: sent.recipientName,
-      }
-    }
-  }
   const rendered = await renderHealthDocumentPdf(
     tx,
     orgId,

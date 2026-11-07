@@ -54,6 +54,13 @@ export interface TemplateDeps {
   fetch: typeof fetch
   /** false en desarrollo y pruebas: no se llama al proveedor. */
   validateExternal?: boolean
+  /**
+   * El id de la app de Meta de odentIA (`META_APP_ID`), para subir la muestra
+   * de una plantilla con documento en las conexiones de «Conectar con
+   * Facebook». Con la app propia de la clínica no se pasa: el adaptador lo lee
+   * de su clave.
+   */
+  metaAppId?: string
 }
 
 function toItem(row: ChannelTemplateRow): TemplateItem {
@@ -145,6 +152,7 @@ export function isPromotionFor(template: Pick<TemplateItem, "category">, expecte
 export const UNSUPPORTED_WORDS: Record<string, string> = {
   encabezado: "lleva un encabezado con datos o con un archivo",
   datos_por_nombre: "sus datos van por nombre",
+  encabezado_documento: "lleva un documento como encabezado y solo sale con él",
 }
 
 /**
@@ -153,12 +161,22 @@ export const UNSUPPORTED_WORDS: Record<string, string> = {
  * está aprobada, lleva tantos datos como variables tiene y la categoría manda
  * (ADR 0040): lo que WhatsApp cuenta como promoción, si se pidió como otra
  * cosa, solo sale a quien aceptó novedades (`contactId`, la persona del hilo).
+ * Una con documento en el encabezado solo sale con el documento (`document`,
+ * ADR 0150); las de terceros con otro encabezado, nunca.
  */
 export async function assertTemplateSendable(
   tx: Db,
   orgId: string,
   connectionId: string,
-  input: { name: string; language: string; params: number; category: TemplateCategory; contactId: string | null },
+  input: {
+    name: string
+    language: string
+    params: number
+    category: TemplateCategory
+    contactId: string | null
+    /** Lleva el documento del encabezado. */
+    document?: boolean
+  },
 ): Promise<TemplateItem> {
   const [row] = await tx
     .select()
@@ -173,7 +191,7 @@ export async function assertTemplateSendable(
     )
     .limit(1)
   if (!row) throw validation("Plantilla no autorizada en esta conexión")
-  if (row.unsupported) {
+  if (row.unsupported && !(row.unsupported === "encabezado_documento" && input.document)) {
     throw validation(
       `La plantilla «${row.name}» ${UNSUPPORTED_WORDS[row.unsupported] ?? "tiene partes"} que odentIA no sabe enviar`,
     )
@@ -393,6 +411,8 @@ export interface TemplateOrder {
   buttons: string[]
   /** Botón que abre «Su enlace»: su dirección con el token al final (`{{1}}`) y un ejemplo. */
   link?: { title: string; url: string; example: string }
+  /** Encabezado de documento, con el PDF de muestra que pide el proveedor para aprobarla. */
+  header?: { format: "document"; example: { bytes: Uint8Array; filename: string } }
   /** Mensaje del catálogo al que sirve; nulo si es un mensaje propio de la clínica. */
   messageKey: string | null
 }
@@ -455,8 +475,9 @@ export async function requestConnectionTemplate(
           examples: order.examples,
           buttons: order.buttons,
           ...(order.link ? { link: order.link } : {}),
+          ...(order.header ? { header: order.header } : {}),
         },
-        { fetch: deps.fetch },
+        { fetch: deps.fetch, ...(deps.metaAppId ? { metaAppId: deps.metaAppId } : {}) },
       )
     } catch (error) {
       // Si el proveedor rechaza el pedido (un 4xx de Meta: el texto, un permiso), es un 400
@@ -486,6 +507,8 @@ export async function requestConnectionTemplate(
       buttons: order.buttons,
       externalId: answer.externalId,
       messageKey: order.messageKey,
+      // Como la lee después la cuenta: solo sale con su documento.
+      unsupported: order.header ? "encabezado_documento" : null,
       requestedAt: now,
       statusSince: now,
     })

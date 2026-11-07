@@ -25,12 +25,12 @@ import { issuePersonalLink } from "./booking-links.js"
 import { applyTemplateCategories, assertTemplateSendable } from "./channel-templates.js"
 import { listRecategorizedMessages, resumeConversationBySystem } from "./clinic-messages.js"
 import { createConnection } from "./connections.js"
-import { sendTicketReceiptByEmail } from "./financial-documents.js"
+import { getDocumentSendOptions, sendFinancialDocument, sendTicketReceiptByEmail } from "./financial-documents.js"
 import { nextPatientNumber } from "./patients.js"
 import { configurePublicLinks } from "./public-links.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import type { Storage } from "./storage.js"
-import { getPersonalLinkPaper, getPersonalLinkView, setPersonalLinkMessages } from "./su-enlace.js"
+import { getPersonalLinkView, setPersonalLinkMessages } from "./su-enlace.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 import { setWritingHours } from "./writing-hours.js"
 import { insertTestPatients } from "./test-patient.js"
@@ -388,10 +388,13 @@ const noStorage: Storage = {
   },
 }
 
-describe("«Tus papeles» y el comprobante por correo", () => {
-  async function withTicket(email?: string) {
-    const c = await clinic({ email: true })
-    const p = await person(c, "Lucía Paredes", email ? { email } : {})
+describe("el comprobante por correo, sin «Tus papeles»", () => {
+  async function withTicket(email?: string, options: { approved?: string[]; wroteHoursAgo?: number } = {}) {
+    const c = await clinic({ email: true, ...(options.approved ? { approved: options.approved } : {}) })
+    const p = await person(c, "Lucía Paredes", {
+      ...(email ? { email } : {}),
+      ...(options.wroteHoursAgo ? { wroteHoursAgo: options.wroteHoursAgo } : {}),
+    })
     const [ticket] = await ownerDb
       .insert(paymentTicket)
       .values({
@@ -420,6 +423,8 @@ describe("«Tus papeles» y el comprobante por correo", () => {
     const [mail] = await ownerDb.select().from(message).where(eq(message.id, sent.messageId))
     expect(mail).toMatchObject({ contentType: "document" })
     expect(mail?.body).toMatch(/^Comprobante N\.º 000007 · /)
+    // El correo no manda a «Su enlace»: el comprobante ya no está ahí.
+    expect(mail?.body).not.toMatch(/Tus papeles|tu enlace/)
     // Nunca por WhatsApp sin que lo pida: su conversación de WhatsApp queda igual.
     expect(await lastOut(p.conversationId)).toBeUndefined()
 
@@ -437,28 +442,56 @@ describe("«Tus papeles» y el comprobante por correo", () => {
     })
   })
 
-  it("«Tus papeles» es solo de quien decide por el paciente, y dura 30 días", async () => {
-    const { c, p, ticketId } = await withTicket()
+  it("«Su enlace» ya no lleva la receta ni el comprobante: con solo eso no tiene nada pendiente", async () => {
+    const { c, p } = await withTicket()
     const own = await run(c, (tx) => issuePersonalLink(tx, c.orgId, { contactId: p.contactId, patientId: p.patientId }, { secretsKey: KEY }))
     const view = await run(c, (tx) => getPersonalLinkView(tx, c.orgId, own.token))
-    expect(view.papers).toEqual([expect.objectContaining({ kind: "comprobante", id: ticketId, title: "Comprobante N.º 000007" })])
-    const paper = await run(c, (tx) => getPersonalLinkPaper(tx, c.orgId, own.token, { kind: "comprobante", id: ticketId }))
-    expect(paper.filename).toMatch(/^Comprobante-.*\.pdf$/)
-    expect(paper.bytes.byteLength).toBeGreaterThan(100)
+    expect(view).not.toHaveProperty("papers")
+    // Le sigue sirviendo «Tus mensajes», no un papel para descargar.
+    expect(view.messages).not.toBeNull()
+  })
 
-    // Un familiar ve su cita, no sus papeles.
-    const [relative] = await ownerDb.insert(contact).values({ organizationId: c.orgId, displayName: "Su hermana" }).returning({ id: contact.id })
-    await ownerDb.insert(patientContact).values({ organizationId: c.orgId, patientId: p.patientId, contactId: relative!.id, relationship: "family" })
-    const theirs = await run(c, (tx) => issuePersonalLink(tx, c.orgId, { contactId: relative!.id, patientId: p.patientId }, { secretsKey: KEY }))
-    expect((await run(c, (tx) => getPersonalLinkView(tx, c.orgId, theirs.token))).papers).toEqual([])
-    await expect(run(c, (tx) => getPersonalLinkPaper(tx, c.orgId, theirs.token, { kind: "comprobante", id: ticketId }))).rejects.toBeDefined()
+  it("pasadas 24 horas el comprobante sale por WhatsApp con su PDF en «Documento listo»; sin aprobar, se dice por qué", async () => {
+    const none = await withTicket(undefined, { wroteHoursAgo: 30 })
+    const blocked = await run(none.c, (tx) =>
+      getDocumentSendOptions(tx, none.c.orgId, none.p.patientId, { documentType: "ticket", documentId: none.ticketId }),
+    )
+    const closed = blocked.channels.find((item) => item.channel === "whatsapp")
+    expect(closed).toMatchObject({ usable: false, reason: expect.stringMatching(/aún no aprobó el mensaje para enviar documentos/) })
+    // Dice lo que sí se puede hacer, no solo por qué no.
+    expect(closed?.reason).toMatch(/pídele que te escriba, o envíalo por correo o impreso/)
 
-    // Uno de hace 31 días ya no está aquí: se le pide a la clínica.
-    const [old] = await ownerDb
-      .insert(paymentTicket)
-      .values({ organizationId: c.orgId, patientId: p.patientId, branchId: c.branchId, ticketNumber: 3, currency: "PEN", totalCents: 100, snapshot: {}, createdAt: new Date(Date.now() - 31 * 24 * HOUR) })
-      .returning({ id: paymentTicket.id })
-    expect((await run(c, (tx) => getPersonalLinkView(tx, c.orgId, own.token))).papers.map((item) => item.id)).toEqual([ticketId])
-    await expect(run(c, (tx) => getPersonalLinkPaper(tx, c.orgId, own.token, { kind: "comprobante", id: old!.id }))).rejects.toMatchObject({ code: "PAPER_UNAVAILABLE" })
+    const ready = await withTicket(undefined, { approved: ["odentia_documento_listo_v1"], wroteHoursAgo: 30 })
+    // Su teléfono es el de su WhatsApp: el envío busca su conversación por él.
+    const [identity] = await ownerDb
+      .select({ externalUserId: contactIdentity.externalUserId })
+      .from(contactIdentity)
+      .where(eq(contactIdentity.contactId, ready.p.contactId))
+    await ownerDb.update(contact).set({ phone: `+${identity!.externalUserId}` }).where(eq(contact.id, ready.p.contactId))
+    await ownerDb
+      .update(contactIdentity)
+      .set({ externalUserId: `wa:${identity!.externalUserId}` })
+      .where(eq(contactIdentity.contactId, ready.p.contactId))
+    const options = await run(ready.c, (tx) =>
+      getDocumentSendOptions(tx, ready.c.orgId, ready.p.patientId, { documentType: "ticket", documentId: ready.ticketId }),
+    )
+    const whatsapp = options.channels.find((item) => item.channel === "whatsapp")
+    expect(whatsapp).toMatchObject({ usable: true, viaTemplate: true, note: expect.stringMatching(/mensaje aprobado/) })
+    const sent = await run(ready.c, (tx) =>
+      sendFinancialDocument(
+        tx,
+        ready.c.orgId,
+        ready.c.ownerId,
+        "owner",
+        { patientId: ready.p.patientId, documentType: "ticket", documentId: ready.ticketId, connectionId: whatsapp!.connectionId },
+        { storage: noStorage },
+      ),
+    )
+    expect(sent.status).toBe("queued")
+    const [out] = await ownerDb.select().from(message).where(eq(message.id, sent.messageId))
+    // El mensaje aprobado, con el PDF como su adjunto y un nombre de archivo neutro.
+    expect(out).toMatchObject({ contentType: "template", templateName: "odentia_documento_listo_v1", status: "queued" })
+    expect(out?.attachments).toEqual([expect.objectContaining({ mimeType: "application/pdf", filename: "Comprobante-000007.pdf" })])
+    expect(out?.templateParams).toEqual(["Lucía", "Clínica Sonríe"])
   })
 })

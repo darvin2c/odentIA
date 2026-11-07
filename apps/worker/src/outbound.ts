@@ -96,6 +96,11 @@ async function buildOutbound(
   const to = row.conversation.externalThreadId
   const m = row.message
   if (m.contentType === "template") {
+    // Una plantilla con documento lleva su PDF en el encabezado (ADR 0150), firmado como un adjunto.
+    const [doc] = Array.isArray(m.attachments) ? m.attachments : []
+    const document = isMediaAttachment(doc)
+      ? { url: await deps.storage.attachmentUrl(doc.objectKey, 3600), filename: doc.filename }
+      : null
     return {
       to,
       kind: {
@@ -110,6 +115,7 @@ async function buildOutbound(
         ...(replyButtonsOf(m.replyButtons) ? { buttons: replyButtonsOf(m.replyButtons)! } : {}),
         // «Su enlace» no se guarda: el token se pone aquí, al entregarlo.
         ...(m.templateLink ? { link: resolvePersonalLinkRefs(m.templateLink, deps.secretsKey) } : {}),
+        ...(document ? { document } : {}),
       },
     }
   }

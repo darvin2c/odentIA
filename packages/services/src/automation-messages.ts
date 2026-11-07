@@ -62,6 +62,11 @@ export interface MessageSpec {
    * dirección va escrita al final del texto. Lo pone el sistema al enviar.
    */
   link?: { title: string }
+  /**
+   * Encabezado con el documento de cada envío (`documento_listo`): el PDF va
+   * en el mensaje aprobado. Para pedirlo, WhatsApp exige un PDF de muestra.
+   */
+  header?: "documento"
 }
 
 export interface AutomationMessage extends MessageSpec {
@@ -457,9 +462,8 @@ export const BUDGET_READY_SUBJECT = "Tu presupuesto está listo"
  * «Su enlace» (ADR 0037): lo envía recepción con «Enviarle su enlace» (datos
  * por completar, un consentimiento por firmar) y lleva solo el botón que lo
  * abre. Es un aviso, como el de su cita (ADR 0040): no pide permiso y solo
- * deja de salir con «No quiero ningún mensaje». También avisa de sus papeles
- * fuera de las 24 horas («Tus papeles», decisión 8): el texto ya aprobado dice
- * «te dejamos aquí lo que tienes pendiente».
+ * deja de salir con «No quiero ningún mensaje». Los papeles ya no salen por
+ * aquí: van con «Documento listo» (ADR 0150).
  */
 export const PERSONAL_LINK_MESSAGE_KEY = "su_enlace"
 export const PERSONAL_LINK_MESSAGE: MessageSpec = {
@@ -492,13 +496,32 @@ export const LINK_RECEIVED_MESSAGE: MessageSpec = {
 }
 
 /**
+ * «Documento listo» (ADR 0150): el papel que envía el equipo (receta, orden,
+ * descanso, hoja de atención, consentimiento firmado o comprobante) a quien no
+ * escribió en las últimas 24 horas, con el PDF en el encabezado. Dentro de las
+ * 24 horas o por correo sale el PDF con su texto, sin plantilla. El texto no
+ * dice qué papel es ni nada clínico: se ve en la notificación del teléfono.
+ * Es un aviso de lo que pasó: solo lo frena «No quiero ningún mensaje».
+ */
+export const DOCUMENT_READY_MESSAGE_KEY = "documento_listo"
+export const DOCUMENT_READY_MESSAGE: MessageSpec = {
+  key: DOCUMENT_READY_MESSAGE_KEY,
+  category: "utility",
+  template: "odentia_documento_listo_v1",
+  body: "Hola, {{1}}. Te enviamos el documento que te preparó {{2}}. Lo tienes adjunto en este mensaje.",
+  variables: ["persona", "clinica"],
+  buttons: [],
+  header: "documento",
+}
+
+/**
  * El tipo de los avisos que no son de una línea: «Presupuesto listo», «Su
- * enlace», «Retomar la conversación» y los papeles (receta y comprobante).
+ * enlace», «Retomar la conversación» y los papeles («Documento listo»).
  * Salen siempre y solo los frena «No quiero ningún mensaje» (ADR 0040).
  */
 export const NOTICE_PURPOSE = "avisos" satisfies ConsentPurpose
 
-/** Los mensajes con los que viene cada clínica: los que envía el agente, el de la Bandeja, el del presupuesto y «Su enlace». */
+/** Los mensajes con los que viene cada clínica: los que envía el agente, el de la Bandeja, el del presupuesto, «Su enlace» y el de los documentos. */
 export const CATALOG_MESSAGE_KEYS = [
   ...AUTOMATION_MESSAGE_KEYS,
   RESUME_MESSAGE_KEY,
@@ -506,6 +529,7 @@ export const CATALOG_MESSAGE_KEYS = [
   PERSONAL_LINK_MESSAGE_KEY,
   ANSWER_READY_MESSAGE_KEY,
   LINK_RECEIVED_MESSAGE_KEY,
+  DOCUMENT_READY_MESSAGE_KEY,
 ] as const
 export type CatalogMessageKey = (typeof CATALOG_MESSAGE_KEYS)[number]
 
@@ -515,6 +539,7 @@ export function catalogMessageOf(key: string, product: ClinicalProduct = "dental
   if (key === PERSONAL_LINK_MESSAGE_KEY) return PERSONAL_LINK_MESSAGE
   if (key === ANSWER_READY_MESSAGE_KEY) return ANSWER_READY_MESSAGE
   if (key === LINK_RECEIVED_MESSAGE_KEY) return LINK_RECEIVED_MESSAGE
+  if (key === DOCUMENT_READY_MESSAGE_KEY) return DOCUMENT_READY_MESSAGE
   return automationMessageOf(key, product)
 }
 
@@ -750,7 +775,7 @@ export const MESSAGE_KIND_WORDS: Record<ConsentPurpose, { title: string; detail:
   avisos: {
     title: "Avisos de tus citas y papeles",
     detail:
-      "Si tu cita se reserva, cambia o se cancela, y cuando tu presupuesto o tu receta están listos. Siempre te llegan, porque son parte de tu atención.",
+      "Si tu cita se reserva, cambia o se cancela, y cuando tu presupuesto, tu receta u otro documento están listos. Siempre te llegan, porque son parte de tu atención.",
     stops: "ningún mensaje de la clínica",
   },
 }
