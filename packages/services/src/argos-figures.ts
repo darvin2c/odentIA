@@ -664,7 +664,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     name: "Sin venir hace más de {meses} meses",
     describes:
       "Pacientes que dejaron de venir: más de {meses} meses sin una cita atendida y sin cita, presupuesto ni control pendiente, hoy.",
-    how: "Pacientes no archivados con más de {meses} meses desde su última cita atendida, sin cita por venir, presupuesto esperando ni control pendiente.",
+    how: "Pacientes no archivados con más de {meses} meses desde su última cita atendida, sin cita por venir, presupuesto esperando ni un control pendiente de esos meses: un control vencido hace más de {meses} meses no los saca.",
     unit: "cantidad",
     column: "pacientes",
     time: "a_hoy",

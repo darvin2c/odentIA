@@ -2871,7 +2871,8 @@ await addEncounterProcedure(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
   planItemId: obt36.id,
 })
 // El cierre cobra el acto ejecutado (cargo automático, una sola vez).
-const cierreRosa = await finalizeEncounter(db, ORG_A, ANA_ID, rosaPatientId, draft.id)
+// La semilla dice qué controles cumple la firma (ADR 0152): ninguno.
+const cierreRosa = await finalizeEncounter(db, ORG_A, ANA_ID, rosaPatientId, draft.id, { followUpIds: [] })
 await addEncounterAddendum(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
   text: "Adenda demo: la paciente toleró bien la obturación; sin sangrado posterior.",
 })
@@ -2906,7 +2907,7 @@ if (docRx) {
 // Dos opciones en un mismo presupuesto (decisión 13): la 46 se arregla con una
 // resina o con una corona, y Rosa elige una. La B nace como copia de la A y se
 // cambia lo que hace falta; cada una con su total, nunca sumadas. La limpieza va
-// en los dos caminos (ADR 0151): se puede aceptar sin elegir. Queda enviado,
+// en los dos caminos (ADR 0153): se puede aceptar sin elegir. Queda enviado,
 // esperando que elija; el plan muestra la 46 «por decidir entre dos caminos».
 const resinaOpcion46 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   serviceId: serviceIdA("OBTURACION"),
@@ -3201,7 +3202,7 @@ await createClinicalOrder(db, ORG_A, ANA_ID, {
   recipient: "Centro de imágenes",
   diagnosisCode: DX.caries,
 })
-const cierreLucia = await finalizeEncounter(db, ORG_A, ANA_ID, luciaPatientId, luciaEval.id)
+const cierreLucia = await finalizeEncounter(db, ORG_A, ANA_ID, luciaPatientId, luciaEval.id, { followUpIds: [] })
 if (!cierreLucia.budget) throw new Error("La evaluación de Lucía debía dejar armado su presupuesto")
 // Al firmar, el odontograma quedó firmado como «Inicio del plan de tratamiento».
 if ((cierreLucia.odontogram as DentalFinalizeParts["odontogram"])?.purpose !== "initial")
@@ -4252,6 +4253,84 @@ const rosaToday = reservedAt.get("Rosa Quispe|0|09:00")
 if (!luciaToday || !rosaToday) throw new Error("Faltan las citas de hoy de la semilla")
 await setAppointmentArrival(db, ORG_A, ANA_ID, luciaToday, true)
 await createEncounter(db, ORG_A, ANA_ID, rosaPatientId, { appointmentId: rosaToday })
+
+// El control se cumple con la visita que toca (ADR 0152).
+// - Sofía Ramírez: su control de mantenimiento de 6 meses, indicado hace 5, ya
+//   está en su ventana, y mañana tiene una limpieza dada desde la Agenda, sin
+//   unir al control. Al firmar esa atención, el cierre ofrece «Cumple su control
+//   de mantenimiento». Mientras, «Avisar un control» no le escribe: ya tiene cita.
+// - Jorge Salinas: vino hace dos años, su control venció hace casi dos y no
+//   volvió. Está en «Por invitar a volver»: un control olvidado ya no lo saca.
+{
+  const [limpieza] = await db
+    .select({ name: serviceCatalog.name })
+    .from(serviceCatalog)
+    .where(and(eq(serviceCatalog.id, serviceIdA("LIMPIEZA")), eq(serviceCatalog.organizationId, ORG_A)))
+  const sofia = await createPatient(db, ORG_A, ANA_ID, {
+    displayName: "Sofía Ramírez",
+    givenNames: "Sofía",
+    familyName: "Ramírez",
+    birthDate: "1988-07-03",
+    phone: "+51987650710",
+    registeredBranchId: miraflores.id,
+  })
+  await db.insert(clinicalFollowUp).values({
+    organizationId: ORG_A,
+    patientId: sofia.id,
+    kind: "mantenimiento",
+    title: "Control de mantenimiento",
+    dueAt: new Date(lima(30, "09:00")),
+    createdBy: ANA_ID,
+    createdAt: new Date(lima(-150, "10:00")),
+  })
+  // La cita va directo a la base: la semilla no depende del día de la semana en que corre.
+  await db.insert(appointment).values({
+    organizationId: ORG_A,
+    branchId: miraflores.id,
+    patientId: sofia.id,
+    professionalUserId: ANA_ID,
+    roomId: roomA(2),
+    serviceId: serviceIdA("LIMPIEZA"),
+    serviceName: limpieza?.name ?? null,
+    startsAt: new Date(lima(1, "17:00")),
+    endsAt: new Date(lima(1, "17:45")),
+    durationMin: 45,
+    status: "programada",
+    createdBy: ANA_ID,
+  })
+  const jorge = await createPatient(db, ORG_A, ANA_ID, {
+    displayName: "Jorge Salinas",
+    givenNames: "Jorge",
+    familyName: "Salinas",
+    birthDate: "1979-11-21",
+    phone: "+51987650711",
+    registeredBranchId: miraflores.id,
+  })
+  // Antes de que abra la sede: no choca con la historia de Reportes.
+  await db.insert(appointment).values({
+    organizationId: ORG_A,
+    branchId: miraflores.id,
+    patientId: jorge.id,
+    professionalUserId: ANA_ID,
+    roomId: roomA(2),
+    serviceId: serviceIdA("LIMPIEZA"),
+    serviceName: limpieza?.name ?? null,
+    startsAt: new Date(lima(-730, "07:10")),
+    endsAt: new Date(lima(-730, "07:40")),
+    durationMin: 30,
+    status: "atendida",
+    createdBy: ANA_ID,
+  })
+  await db.insert(clinicalFollowUp).values({
+    organizationId: ORG_A,
+    patientId: jorge.id,
+    kind: "mantenimiento",
+    title: "Control de mantenimiento",
+    dueAt: new Date(lima(-550, "09:00")),
+    createdBy: ANA_ID,
+    createdAt: new Date(lima(-730, "08:00")),
+  })
+}
 
 // «Llamar» en «Te espera» de recepción: a Carmen se le recordó su cita de mañana y no confirmó.
 const carmenTomorrow = reservedAt.get("Carmen Rojas|1|09:00")

@@ -410,6 +410,15 @@ const finalizeInput = z
     endedAt: z.iso.datetime({ offset: true, error: "Elige la hora de fin de la lista" }).nullish(),
     // «Seguir sin él»: por qué se cierra con un consentimiento sin firmar.
     consentSkipReason: z.string().trim().max(2000).nullish(),
+    // «¿Cuándo vuelve?» (ADR 0152): el día del próximo control, o que no hace falta.
+    nextControl: z
+      .union([
+        z.object({ dueAt: z.iso.date({ error: "Elige un día del calendario" }) }).strict(),
+        z.object({ none: z.literal(true) }).strict(),
+      ])
+      .nullish(),
+    // Los controles que esta visita cumple; sin él, todos los que tocan.
+    followUpIds: z.array(z.uuid()).max(50).nullish(),
   })
   .strict()
 /**

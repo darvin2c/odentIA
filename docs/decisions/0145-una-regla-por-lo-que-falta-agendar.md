@@ -1,6 +1,8 @@
 # 0145 · Lo que falta agendar: una regla por pregunta, en todas las pantallas
 
-Fecha: 2026-11-06 · Estado: aceptada · Sigue a [0118](0118-cada-numero-donde-se-resuelve.md) (cada número donde se resuelve) · Ajusta a [0025](0025-un-pendiente-un-lugar.md) y [0127](0127-inicio-por-grupos-y-un-solo-panel.md) (la fila de Inicio de los controles)
+Fecha: 2026-11-06 · Estado: aceptada · Sigue a [0118](0118-cada-numero-donde-se-resuelve.md) (cada número donde se resuelve) · Ajusta a [0025](0025-un-pendiente-un-lugar.md) y [0127](0127-inicio-por-grupos-y-un-solo-panel.md) (la fila de Inicio de los controles) · Precisada por [0152](0152-el-control-se-pide-al-firmar-y-se-cumple-con-la-visita-que-toca.md)
+
+> Precisión (0152): «a un control le sirve cualquier visita» se cumple al firmar, no al reservar. La visita cumple los controles pendientes cuya ventana ya abrió, si quien firma lo deja marcado; una cita de la Agenda no toma el control. Queda descartada la revisión de «Consecuencias» que proponía que una cita del mismo día lo tomara.
 
 ## Problema
 

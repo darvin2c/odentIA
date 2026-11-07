@@ -18,6 +18,7 @@ import { randomUUID } from "node:crypto"
 import { LEGAL } from "@odentia/auth/legal"
 import { DEFAULT_REGISTRATION_CONFIG, type PatientGuide } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
+import { appointment } from "@odentia/db/schema/agenda"
 import { account, member, organization, user } from "@odentia/db/schema/auth"
 import {
   clinicalFollowUp,
@@ -508,20 +509,65 @@ export async function seedMedicalDemo(
   // al completarlo queda indicado el siguiente, hasta que la doctora lo detenga.
   // Lo indicó en el último control, que ya está firmado: la semilla escribe ese
   // vínculo histórico aparte, porque el equipo solo indica en una atención abierta.
+  // Le toca en dos semanas y ya está en su ventana (ADR 0152): la cita de hoy de la
+  // Agenda no lo lleva, y al firmar esa atención el cierre ofrece cumplirlo, marcado
+  // porque lo indicó la misma doctora; cumplirlo deja indicado el siguiente.
   const nextControl = await db.transaction((tx) =>
     createFollowUp(tx, ORG, VELA_ID, luis, {
       kind: "mantenimiento",
       title: "Control de presión arterial",
       instructions: "Traer el registro de presión de la casa.",
-      dueAt: lima(openDay(30), "09:00"),
+      dueAt: lima(openDay(14), "09:00"),
       repeatEveryMonths: 3,
     }),
   )
   if (lastControl)
     await db
       .update(clinicalFollowUp)
-      .set({ originEncounterId: lastControl })
+      .set({ originEncounterId: lastControl, createdAt: new Date(lima(-60, "10:20")) })
       .where(and(eq(clinicalFollowUp.id, nextControl.id), eq(clinicalFollowUp.organizationId, ORG)))
+
+  // Jorge Ramos vino hace dos años y su control venció hace más de uno: está en «Por
+  // invitar a volver», porque un control olvidado ya no lo saca de la lista (ADR 0152).
+  {
+    const contact = await createContact(
+      db,
+      ORG,
+      { displayName: "Jorge Ramos", givenNames: "Jorge", familyName: "Ramos", phone: "+51987650820" },
+      { userId: VELA_ID },
+    )
+    const jorge = await createPatient(db, ORG, VELA_ID, {
+      displayName: "Jorge Ramos",
+      givenNames: "Jorge",
+      familyName: "Ramos",
+      contacts: [{ contactId: contact.id, relationship: "self", isPreferred: true }],
+      birthDate: "1972-04-18",
+      sex: "M",
+    })
+    // Directo a la base, antes de que abra: una visita de hace dos años.
+    await db.insert(appointment).values({
+      organizationId: ORG,
+      branchId: sede.id,
+      patientId: jorge.id,
+      professionalUserId: VELA_ID,
+      roomId: sala2.id,
+      reason: "Chequeo general",
+      startsAt: new Date(lima(-730, "07:10")),
+      endsAt: new Date(lima(-730, "07:30")),
+      durationMin: 20,
+      status: "atendida",
+      createdBy: VELA_ID,
+    })
+    await db.insert(clinicalFollowUp).values({
+      organizationId: ORG,
+      patientId: jorge.id,
+      kind: "mantenimiento",
+      title: "Control anual",
+      dueAt: new Date(lima(-365, "09:00")),
+      createdBy: VELA_ID,
+      createdAt: new Date(lima(-730, "08:00")),
+    })
+  }
 
   // El presupuesto de atención de Julia, embarazada (el papel de latidIA, sin etapas): un
   // consultorio no lo necesita para atender (`budgetRequired: false`), pero puede entregarlo.

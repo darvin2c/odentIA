@@ -10,6 +10,8 @@ const control = (over: Partial<SchedulableControl>): SchedulableControl => ({
   status: "pendiente",
   appointment: null,
   legacyScheduledAt: null,
+  branchId: null,
+  windowFrom: "2027-03-22T14:00:00.000Z",
   ...over,
 })
 

@@ -372,6 +372,8 @@ export interface ProductHooks {
    * latidIA 12, decisión 16 del issue 229). Es también «Sin venir» de Reportes.
    */
   recallMonths: number
+  /** El título del control de «¿Cuándo vuelve?» a `recallMonths` (ADR 0152). */
+  recallControlTitle: string
   /**
    * «¿Se puede cerrar?»: lo que el producto informa antes de firmar (odentIA:
    * el odontograma que se firmará y el periodontograma). Informa, no bloquea.
@@ -476,6 +478,7 @@ export const NO_PRODUCT_HOOKS: ProductHooks = {
   dictation: null,
   budgetRequired: true,
   recallMonths: 6,
+  recallControlTitle: "Control de mantenimiento",
   closingParts: async () => ({}),
   encounterDetailParts: async () => ({}),
   encounterFinalized: async () => ({}),

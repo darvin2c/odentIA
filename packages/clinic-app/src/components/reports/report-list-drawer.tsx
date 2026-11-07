@@ -214,7 +214,7 @@ const LISTS: Record<ReportListKey, ListCopy> = {
     titleOf: (list) => `Sin venir hace más de ${months(list.rules?.lapsedMonths)}`,
     noun: { one: "persona", many: "personas" },
     how: (_, list) =>
-      `A hoy: su última cita atendida fue hace más de ${months(list.rules?.lapsedMonths)} y no tienen cita por venir, presupuesto que espere respuesta ni control pendiente. La fecha es la de su última cita.`,
+      `A hoy: su última cita atendida fue hace más de ${months(list.rules?.lapsedMonths)} y no tienen cita por venir, presupuesto que espere respuesta ni control pendiente de ese tiempo. Entra también quien tiene un control vencido hace más de ${months(list.rules?.lapsedMonths)}. La fecha es la de su última cita.`,
     where: { to: "/people", label: "Ir a Pacientes" },
     showNext: false,
     asOfToday: true,

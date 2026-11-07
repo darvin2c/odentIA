@@ -1,23 +1,37 @@
 import {
   Button,
+  Checkbox,
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
   Input,
+  ScrollArea,
 } from "@odentia/ui"
-import { TimeSelect, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
+import { DatePickerButton, TimeSelect, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
+import { ToggleGroup, ToggleGroupItem } from "@odentia/ui/components/toggle-group"
 import { useStore } from "@tanstack/react-form"
+import { Check } from "lucide-react"
 import { useId, useRef } from "react"
 import { clinicDateTimeValue } from "../../lib/clinical-journey"
 import type { ConsentNeed } from "../../lib/encounter-documents"
 import {
   CLOSING_REQUIREMENT_LABELS,
   type ClosingCheck,
+  type ClosingControls,
+  type ClosingDueControl,
   type ClosingMaterials,
+  type ClosingNextControl,
   type ClosingRequirement,
+  controlDaySaid,
   type SignatureRegistration,
   signatureRegistrationErrors,
 } from "../../lib/encounters"
@@ -44,19 +58,29 @@ export function endTimeBounds(
   return { min, max }
 }
 
+/** «¿Cuándo vuelve?»: nada elegido, uno de los atajos, «Otra fecha» o «No hace falta». */
+export type NextControlChoice = "" | "week" | "month" | "recall" | "date" | "none"
+
 /**
  * Lo que se escribe al cerrar: la hora de fin («HH:MM»; vacía = ahora), por qué
- * se sigue sin el consentimiento y, si el perfil no la tiene, la colegiatura.
- * Los nombres son los del cuerpo de `/finalize` y del perfil profesional, para
- * que cada rechazo del servidor caiga en su campo (`endedAt` → `endTime`).
+ * se sigue sin el consentimiento, si el perfil no la tiene, la colegiatura, y
+ * cuándo vuelve la persona. Los nombres son los del cuerpo de `/finalize` y del
+ * perfil profesional, para que cada rechazo del servidor caiga en su campo
+ * (`endedAt` → `endTime`).
  */
 export interface ClosingValues extends SignatureRegistration {
   endTime: string
   consentSkipReason: string
+  /** «¿Cuándo vuelve?»: ninguno viene marcado. */
+  nextControl: NextControlChoice
+  /** El día de «Otra fecha» (`yyyy-MM-dd`). */
+  nextControlDate: string
+  /** Lo que se cambió de lo que viene marcado en «Cumple su control…», por control. */
+  fulfill: Record<string, boolean>
 }
 
-/** El dato de `/finalize` que la pantalla llama de otro modo. */
-export const CLOSING_FIELD_MAP = { endedAt: "endTime" } as const
+/** Los datos de `/finalize` que la pantalla llama de otro modo. */
+export const CLOSING_FIELD_MAP = { endedAt: "endTime", "nextControl.dueAt": "nextControlDate" } as const
 
 const EMPTY_CLOSING: ClosingValues = {
   endTime: "",
@@ -64,6 +88,249 @@ const EMPTY_CLOSING: ClosingValues = {
   professionalTitle: "",
   registrationBody: "",
   registrationNumber: "",
+  nextControl: "",
+  nextControlDate: "",
+  fulfill: {},
+}
+
+/** Un control de Clío marcado para entrar con la firma: ya dice cuándo vuelve. */
+export interface DictatedControl {
+  id: string
+  /** Su día (`yyyy-MM-dd`) en la zona de la clínica. */
+  day: string
+}
+
+/**
+ * El control por cumplir queda cumplido con esta visita: lo marcado, o lo que
+ * viene marcado si nadie lo tocó (solo el que indicó quien firma).
+ */
+export function fulfills(value: Pick<ClosingValues, "fulfill">, control: ClosingDueControl): boolean {
+  return value.fulfill[control.id] ?? control.mine
+}
+
+/** Lo que ya dice cuándo vuelve, sin preguntar: así no quedan dos controles. */
+type KnownReturn =
+  | { kind: "dictated"; id: string; day: string }
+  | { kind: "repeats"; months: number }
+  | { kind: "control"; control: ClosingNextControl }
+  | { kind: "stays"; control: ClosingDueControl }
+
+/**
+ * La misma regla que el servidor (`finalizeEncounter`): se pregunta «¿Cuándo
+ * vuelve?» salvo que Clío ya lo dictó, que el control que se cumple (por la
+ * ventana o por la cita de esta atención) se repite, que ya tiene otro, o que
+ * quien firma deja sin marcar uno suyo. Uno de un colega sin marcar no frena.
+ */
+function knownReturn(
+  value: Pick<ClosingValues, "fulfill">,
+  controls: ClosingControls,
+  dictated: DictatedControl | null,
+): KnownReturn | null {
+  if (dictated) return { kind: "dictated", ...dictated }
+  const repeating =
+    controls.due.find((control) => fulfills(value, control) && control.repeatEveryMonths) ??
+    controls.byAppointment.find((control) => control.repeatEveryMonths)
+  if (repeating?.repeatEveryMonths) return { kind: "repeats", months: repeating.repeatEveryMonths }
+  if (controls.next) return { kind: "control", control: controls.next }
+  const stays = controls.due.find((control) => control.mine && !fulfills(value, control))
+  return stays ? { kind: "stays", control: stays } : null
+}
+
+/** El día que queda con lo elegido (`yyyy-MM-dd`), o vacío. */
+function chosenDay(value: Pick<ClosingValues, "nextControl" | "nextControlDate">, controls: ClosingControls): string {
+  if (value.nextControl === "date") return value.nextControlDate
+  if (value.nextControl === "week" || value.nextControl === "month" || value.nextControl === "recall")
+    return controls.shortcuts[value.nextControl]
+  return ""
+}
+
+/** Falta el día de «Otra fecha»: lo dice su campo. */
+export function needsNextControlDay(
+  value: ClosingValues,
+  controls: ClosingControls | null,
+  dictated: DictatedControl | null,
+): boolean {
+  if (!controls || value.nextControl !== "date" || value.nextControlDate) return false
+  return !knownReturn(value, controls, dictated)
+}
+
+/** Lo que el cierre manda de los controles: cuáles cumple esta visita y, si se preguntó, cuándo vuelve. */
+export function closingControlsBody(
+  value: ClosingValues,
+  controls: ClosingControls | null,
+  dictated: DictatedControl | null,
+): { followUpIds?: string[]; nextControl?: { dueAt: string } | { none: true } } {
+  if (!controls) return {}
+  const followUpIds = controls.due.filter((control) => fulfills(value, control)).map((control) => control.id)
+  if (knownReturn(value, controls, dictated)) return { followUpIds }
+  if (value.nextControl === "none") return { followUpIds, nextControl: { none: true } }
+  const day = chosenDay(value, controls)
+  return day ? { followUpIds, nextControl: { dueAt: day } } : { followUpIds }
+}
+
+/** El día de un instante en la zona de la clínica. */
+const dayOf = (iso: string): string => clinicDateTimeValue(iso).slice(0, 10)
+
+/** «Control de mantenimiento» → «control de mantenimiento», para decirlo en una frase. */
+const inSentence = (title: string): string => (/^\p{Lu}\p{Ll}/u.test(title) ? title.charAt(0).toLowerCase() + title.slice(1) : title)
+
+/**
+ * Un atajo: botón con borde, que se lee como botón también a 390 px; lo
+ * elegido lleva el fondo de la acción y un check, no solo otro relieve.
+ */
+const CHIP =
+  "h-auto min-h-11 gap-1.5 rounded-full border border-input bg-background px-3.5 py-1.5 text-sm font-normal text-foreground shadow-none hover:bg-muted aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground aria-pressed:hover:bg-primary sm:min-h-9"
+
+/**
+ * «¿Cuándo vuelve?» al firmar (ADR 0152), justo antes de firmar: los controles
+ * que esta visita cumple, como casillas (marcado solo el de quien firma), y los
+ * atajos para el próximo. Ninguno viene marcado y se firma igual sin elegir.
+ * Si ya tiene un control (o Clío dictó uno), dice cuándo vuelve, sin cambiarlo
+ * aquí: eso se hace en «Plan y controles».
+ */
+export function ClosingNextVisit({
+  form,
+  controls,
+  dictated = null,
+  busy,
+}: {
+  form: ClosingForm
+  controls: ClosingControls | null | undefined
+  /** El control de Clío marcado para entrar con la firma, si hay. */
+  dictated?: DictatedControl | null
+  busy: boolean
+}): React.JSX.Element | null {
+  const ids = useId()
+  const values = useStore(form.store, (state) => state.values)
+  if (!controls) return null
+  const known = knownReturn(values, controls, dictated)
+  const recall = controls.recallMonths
+  const options: Array<{ value: Exclude<NextControlChoice, "" | "none">; label: string }> = [
+    { value: "week", label: "En 1 semana" },
+    { value: "month", label: "En 1 mes" },
+    { value: "recall", label: recall === 12 ? "En 1 año" : `En ${recall} meses` },
+    { value: "date", label: "Otra fecha" },
+  ]
+  const tomorrow = dayOf(new Date(Date.now() + 86_400_000).toISOString())
+  const set = <K extends keyof ClosingValues>(name: K, value: ClosingValues[K]) => form.setFieldValue(name, value as never)
+  const day = chosenDay(values, controls)
+  const none = values.nextControl === "none"
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border p-3">
+      {controls.due.length > 0 ? (
+        <FieldSet className="gap-2">
+          <FieldLegend variant="label" className="mb-0">
+            {controls.due.length === 1 ? "Su control" : "Sus controles"}
+          </FieldLegend>
+          <FieldGroup className="gap-2">
+            {controls.due.map((control) => (
+              <Field key={control.id} orientation="horizontal">
+                <Checkbox
+                  id={`${ids}-cumple-${control.id}`}
+                  checked={fulfills(values, control)}
+                  disabled={busy}
+                  onCheckedChange={(checked) => set("fulfill", { ...values.fulfill, [control.id]: checked === true })}
+                />
+                <FieldLabel htmlFor={`${ids}-cumple-${control.id}`} className="font-normal">
+                  Cumple su {inSentence(control.title)} del {controlDaySaid(dayOf(control.dueAt))}
+                </FieldLabel>
+              </Field>
+            ))}
+          </FieldGroup>
+          <FieldDescription>
+            Por qué: cualquier atención desde unos días antes de su fecha le sirve. Viene marcado si lo indicaste tú.
+          </FieldDescription>
+        </FieldSet>
+      ) : null}
+      <div className="flex flex-col gap-2">
+        <p id={`${ids}-cuando`} className="font-medium">
+          ¿Cuándo vuelve?
+        </p>
+        {known ? (
+          <p className="text-sm">
+            {known.kind === "dictated"
+              ? `Vuelve el ${controlDaySaid(known.day)}, como dictaste.`
+              : known.kind === "repeats"
+                ? `Su control se repite: el siguiente queda para ${recallWords(known.months)}.`
+                : known.kind === "stays"
+                  ? `Sigue pendiente su ${inSentence(known.control.title)} del ${controlDaySaid(dayOf(known.control.dueAt))}: recepción lo verá.`
+                  : known.control.scheduledAt
+                    ? `Vuelve el ${controlDaySaid(dayOf(known.control.scheduledAt))}, con su cita.`
+                    : `Vuelve el ${controlDaySaid(dayOf(known.control.dueAt))} · Para cambiarlo, en Plan y controles.`}
+          </p>
+        ) : (
+          <>
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+              <ToggleGroup
+                aria-labelledby={`${ids}-cuando`}
+                value={values.nextControl && !none ? [values.nextControl] : []}
+                onValueChange={(next: unknown[]) => {
+                  const picked = next[0]
+                  set("nextControl", typeof picked === "string" ? (picked as NextControlChoice) : "")
+                }}
+                disabled={busy}
+                spacing={2}
+                className="flex-wrap"
+              >
+                {options.map((option) => (
+                  <ToggleGroupItem key={option.value} value={option.value} className={CHIP}>
+                    {values.nextControl === option.value ? <Check aria-hidden className="size-4" /> : null}
+                    {option.label}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+              {/* «No hace falta» no es una fecha: va aparte. */}
+              <span aria-hidden className="hidden h-6 w-px bg-border sm:block" />
+              <Button
+                type="button"
+                variant="outline"
+                aria-pressed={none}
+                disabled={busy}
+                className={`${CHIP} self-start`}
+                onClick={() => set("nextControl", none ? "" : "none")}
+              >
+                {none ? <Check aria-hidden className="size-4" /> : null}
+                No hace falta
+              </Button>
+            </div>
+            {values.nextControl === "date" ? (
+              <form.AppField name="nextControlDate">
+                {(field) => (
+                  <field.Control label="Día en que vuelve">
+                    {(control) => (
+                      <DatePickerButton
+                        {...control.props}
+                        className="w-56"
+                        min={tomorrow}
+                        openAt={controls.shortcuts.recall}
+                        disabled={busy}
+                        value={field.state.value}
+                        onChange={field.handleChange}
+                      />
+                    )}
+                  </field.Control>
+                )}
+              </form.AppField>
+            ) : null}
+            <p className="text-xs text-muted-foreground" aria-live="polite">
+              {day
+                ? `Vuelve hacia el ${controlDaySaid(day)} · recepción lo verá para reservarlo`
+                : none
+                  ? "Queda dicho que no hace falta otro control."
+                  : values.nextControl === "date"
+                    ? "Elige el día en el calendario."
+                    : "No indicaste cuándo vuelve: recepción no lo verá"}
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** «dentro de 6 meses», «dentro de 1 año». */
+function recallWords(months: number): string {
+  return months === 12 ? "dentro de 1 año" : months === 1 ? "dentro de 1 mes" : `dentro de ${months} meses`
 }
 
 /**
@@ -79,6 +346,8 @@ export function useClosingForm(options: {
   needsReason: () => boolean
   /** El perfil no tiene colegiatura: se pide aquí. */
   needsRegistration: boolean
+  /** «Otra fecha» sin día: se pide en su campo. Se lee al enviar. */
+  needsNextDay?: (value: ClosingValues) => boolean
   onSubmit: (value: ClosingValues) => Promise<void>
 }) {
   const latest = useRef(options)
@@ -91,6 +360,7 @@ export function useClosingForm(options: {
         if (latest.current.needsReason() && !value.consentSkipReason.trim())
           fields.consentSkipReason = "Escribe por qué sigues sin el consentimiento, o fírmalo ahora"
         if (latest.current.needsRegistration) Object.assign(fields, signatureRegistrationErrors(value))
+        if (latest.current.needsNextDay?.(value)) fields.nextControlDate = "Elige el día en que vuelve, o uno de los atajos"
         return Object.keys(fields).length > 0 ? { fields } : undefined
       },
     },
@@ -176,6 +446,7 @@ export function EncounterClosingDialog({
   confirmLabel = null,
   initialFocus,
   children,
+  nextVisit = null,
 }: {
   open: boolean
   form: ClosingForm
@@ -214,6 +485,8 @@ export function EncounterClosingDialog({
   initialFocus?: React.RefObject<HTMLElement | null>
   /** Lo que se suma al cierre (el aviso del dictado, por ejemplo). */
   children?: React.ReactNode
+  /** «¿Cuándo vuelve?», justo encima de firmar. */
+  nextVisit?: React.ReactNode
 }): React.JSX.Element {
   const ids = useId()
   const ProductClosing = productUi().encounter.Closing
@@ -231,115 +504,119 @@ export function EncounterClosingDialog({
         if (!value && !busy) onClose()
       }}
     >
-      <DialogContent aria-describedby={`${ids}-desc`} className="sm:max-w-lg" initialFocus={initialFocus}>
-        <form noValidate onSubmit={onSubmit} className="flex flex-col gap-4">
+      {/* Lo de en medio se desplaza; el título y «Finalizar y firmar» quedan siempre a la vista, también en un teléfono. */}
+      <DialogContent aria-describedby={`${ids}-desc`} className="flex max-h-[90dvh] flex-col sm:max-w-lg" initialFocus={initialFocus}>
+        <form noValidate onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col gap-4">
           <DialogHeader>
             <DialogTitle>Finalizar y firmar</DialogTitle>
             <DialogDescription id={`${ids}-desc`}>
               Después del cierre solo se agregan adendas. Si vino de una cita, la cita queda atendida.
             </DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col gap-4 text-sm">
-            {registration ?? (
-              <div className="rounded-lg border p-3">
-                <p className="font-medium">Firmarás como {signAs ?? "—"}</p>
-                <p className="text-xs text-muted-foreground">De tu perfil profesional</p>
-                {signatureHint}
-              </div>
-            )}
-            {toRegister.length > 0 ? (
-              <ul aria-label="Falta para cerrar" className="flex flex-col gap-1.5 rounded-lg border border-destructive/50 p-3">
-                {toRegister.map((requirement) => (
-                  <li key={requirement} className="flex flex-wrap items-center justify-between gap-2">
-                    <span>
-                      Falta: {CLOSING_REQUIREMENT_LABELS[requirement]}
-                    </span>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="link"
-                      className="h-auto p-0"
-                      disabled={busy}
-                      onClick={() => onRegister(requirement)}
-                    >
-                      Registrar
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-            {closing ? <ProductClosing closing={closing} pending={busy} openBlock={onOpenBlock} /> : null}
-            {materials && materials.items.length > 0 ? (
-              <p className="rounded-lg border p-3">
-                <span className="font-medium">Materiales</span>
-                {" · "}
-                {closingMaterialsWords(materials, activeOrgLocale() ?? "es")}
-              </p>
-            ) : null}
-            {consents.map((need) => {
-              const line = consentLine(need, who)
-              return (
-                <div
-                  key={`${need.templateKey}-${need.documentId ?? ""}`}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/50 p-3"
-                >
-                  <div className="flex min-w-0 flex-col">
-                    <span className="font-medium">{line.title}</span>
-                    <span className="text-xs text-muted-foreground">{line.detail}</span>
-                  </div>
-                  {need.status !== "sin_publicar" ? (
-                    <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => onSignNow(need)}>
-                      {need.personSigned ? "Confirmar" : "Firmar ahora"}
-                    </Button>
-                  ) : null}
+          <ScrollArea className="-mx-6 flex min-h-0 flex-1 flex-col">
+            <div className="flex flex-col gap-4 px-6 text-sm">
+              {registration ?? (
+                <div className="rounded-lg border p-3">
+                  <p className="font-medium">Firmarás como {signAs ?? "—"}</p>
+                  <p className="text-xs text-muted-foreground">De tu perfil profesional</p>
+                  {signatureHint}
                 </div>
-              )
-            })}
-            {needsReason ? (
-              <form.AppField name="consentSkipReason">
-                {(field) => (
-                  <field.TextareaField
-                    label="Seguir sin él: ¿por qué?"
-                    rows={2}
-                    maxLength={2000}
-                    required
-                    placeholder="Ej.: urgencia, se firmará en la próxima visita"
-                  />
-                )}
-              </form.AppField>
-            ) : null}
-            <form.AppField name="endTime">
-              {(field) => (
-                <field.Control label="Hora de fin">
-                  {(control) => (
-                    <TimeSelect
-                      id={control.id}
-                      invalid={control.invalid}
-                      aria-describedby={control.describedBy}
-                      className="w-44"
-                      min={bounds.min}
-                      max={bounds.max}
-                      emptyLabel={`Ahora (${bounds.max})`}
-                      value={field.state.value}
-                      onChange={(value) => {
-                        field.handleChange(value)
-                        field.handleBlur()
-                      }}
+              )}
+              {toRegister.length > 0 ? (
+                <ul aria-label="Falta para cerrar" className="flex flex-col gap-1.5 rounded-lg border border-destructive/50 p-3">
+                  {toRegister.map((requirement) => (
+                    <li key={requirement} className="flex flex-wrap items-center justify-between gap-2">
+                      <span>
+                        Falta: {CLOSING_REQUIREMENT_LABELS[requirement]}
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="link"
+                        className="h-auto p-0"
+                        disabled={busy}
+                        onClick={() => onRegister(requirement)}
+                      >
+                        Registrar
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {closing ? <ProductClosing closing={closing} pending={busy} openBlock={onOpenBlock} /> : null}
+              {materials && materials.items.length > 0 ? (
+                <p className="rounded-lg border p-3">
+                  <span className="font-medium">Materiales</span>
+                  {" · "}
+                  {closingMaterialsWords(materials, activeOrgLocale() ?? "es")}
+                </p>
+              ) : null}
+              {consents.map((need) => {
+                const line = consentLine(need, who)
+                return (
+                  <div
+                    key={`${need.templateKey}-${need.documentId ?? ""}`}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/50 p-3"
+                  >
+                    <div className="flex min-w-0 flex-col">
+                      <span className="font-medium">{line.title}</span>
+                      <span className="text-xs text-muted-foreground">{line.detail}</span>
+                    </div>
+                    {need.status !== "sin_publicar" ? (
+                      <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => onSignNow(need)}>
+                        {need.personSigned ? "Confirmar" : "Firmar ahora"}
+                      </Button>
+                    ) : null}
+                  </div>
+                )
+              })}
+              {needsReason ? (
+                <form.AppField name="consentSkipReason">
+                  {(field) => (
+                    <field.TextareaField
+                      label="Seguir sin él: ¿por qué?"
+                      rows={2}
+                      maxLength={2000}
+                      required
+                      placeholder="Ej.: urgencia, se firmará en la próxima visita"
                     />
                   )}
-                </field.Control>
-              )}
-            </form.AppField>
-            {children}
-            {blockedReason ? (
-              <p id={`${ids}-blocked`} role="status" className="text-xs text-muted-foreground">
-                {blockedReason}
+                </form.AppField>
+              ) : null}
+              <form.AppField name="endTime">
+                {(field) => (
+                  <field.Control label="Hora de fin">
+                    {(control) => (
+                      <TimeSelect
+                        id={control.id}
+                        invalid={control.invalid}
+                        aria-describedby={control.describedBy}
+                        className="w-44"
+                        min={bounds.min}
+                        max={bounds.max}
+                        emptyLabel={`Ahora (${bounds.max})`}
+                        value={field.state.value}
+                        onChange={(value) => {
+                          field.handleChange(value)
+                          field.handleBlur()
+                        }}
+                      />
+                    )}
+                  </field.Control>
+                )}
+              </form.AppField>
+              {children}
+              {blockedReason ? (
+                <p id={`${ids}-blocked`} role="status" className="text-xs text-muted-foreground">
+                  {blockedReason}
+                </p>
+              ) : null}
+              <p className="text-xs text-muted-foreground">
+                Después: lo que quedó por cobrar, para avisar a caja.
               </p>
-            ) : null}
-            <p className="text-xs text-muted-foreground">
-              Después: lo que quedó por cobrar, para avisar a caja.
-            </p>
-          </div>
+              {nextVisit}
+            </div>
+          </ScrollArea>
           {formError ? (
             <p role="alert" className="text-sm text-destructive">
               {formError}

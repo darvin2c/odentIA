@@ -147,7 +147,7 @@ export const PEOPLE_SHORTCUTS = [
   // El id sigue siendo `control_por_reservar`: así siguen sirviendo los enlaces guardados.
   { id: "control_por_reservar", label: "Control vencido", rule: "Quien tiene un control cuyo día ya pasó y ninguna cita por venir. Es la misma lista de Inicio y de Argos." },
   { id: "faltan_datos", label: "Faltan datos", rule: "Pacientes a los que les falta un dato de su ficha." },
-  { id: "por_invitar_a_volver", label: "Por invitar a volver", rule: "Quien pasó el tiempo de su control sin volver y no se invitó en ese tiempo." },
+  { id: "por_invitar_a_volver", label: "Por invitar a volver", rule: "Quien pasó el tiempo de su control sin volver y no se invitó en ese tiempo. Entra también quien tiene un control vencido hace más de ese tiempo: un control olvidado no la saca de la lista." },
   { id: "deben", label: "Deben", rule: "Quien debe más de lo que tiene a favor, de cualquier fecha." },
 ] as const
 export type PeopleShortcut = (typeof PEOPLE_SHORTCUTS)[number]["id"]
