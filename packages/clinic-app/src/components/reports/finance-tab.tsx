@@ -459,7 +459,10 @@ function Cascade({ data }: { data: ReportFinance }) {
           {current.cobradoCents > 0 && commissionShare !== null && otherShare !== null && leavesShare !== null
             ? leavesShare >= 0
               ? `${taxLead ?? `De lo cobrado en ${period}, el`} ${commissionShare} % fueron comisiones, el ${otherShare} % otros gastos y quedó el ${leavesShare} %.`
-              : `En ${period} las comisiones (${commissionShare} %) y los otros gastos (${otherShare} %) pasaron lo cobrado: faltaron ${money(-current.leavesCents)}.`
+              : `En ${period} las comisiones (${commissionShare} %) y los otros gastos (${otherShare} %) pasaron lo cobrado: faltaron ${money(-current.leavesCents)}.${
+                  // A mitad de mes el alquiler y los sueldos ya están y lo cobrado sigue entrando.
+                  data.period.partial ? " El periodo aún no termina: lo cobrado sigue entrando y varios gastos del mes ya se pagaron." : ""
+                }`
             : `En ${period} no se cobró nada.`}
         </p>
       </div>
@@ -700,12 +703,16 @@ function CommissionsSection({ query, data, argosEnabled }: { query: ReportQuery;
           <div className="flex flex-col gap-0.5 rounded-xl bg-muted/50 px-3.5 py-3">
             <span className="text-[13px] font-bold text-muted-foreground">Generadas en {spanLabel(data.period, locale)}</span>
             <strong className="text-[22px] tabular-nums">{money(data.commissions.generatedCents)}</strong>
-            <span className="text-[13px] text-muted-foreground">{percentOf(data.commissions.generatedCents, data.totals.current.cobradoCents)} de lo cobrado</span>
+            {/* La misma base que la tarjeta de arriba: lo cobrado sin el impuesto, que no es de la clínica. */}
+            <span className="text-[13px] text-muted-foreground">
+              {percentOf(data.commissions.generatedCents, data.totals.current.cobradoCents - data.totals.current.taxCents)} de lo cobrado
+              {data.totals.current.taxCents > 0 && data.taxName ? ` sin ${data.taxName}` : ""}
+            </span>
           </div>
           <div className="flex flex-col gap-0.5 rounded-xl bg-muted/50 px-3.5 py-3">
-            <span className="text-[13px] font-bold text-muted-foreground">Ya pagadas</span>
+            <span className="text-[13px] font-bold text-muted-foreground">Ya liquidadas</span>
             <strong className="text-[22px] tabular-nums">{money(data.commissions.paidCents)}</strong>
-            <span className="text-[13px] text-muted-foreground">Registradas como gasto de comisiones</span>
+            <span className="text-[13px] text-muted-foreground">Pagadas, o cubiertas con lo descontado de cobros anulados</span>
           </div>
           <div className="flex flex-col gap-0.5 rounded-xl bg-warning-soft px-3.5 py-3">
             <span className="text-[13px] font-bold text-warning">Por pagar</span>
@@ -820,7 +827,8 @@ function CommissionsSection({ query, data, argosEnabled }: { query: ReportQuery;
         <div className="flex flex-wrap items-center gap-2">
           {report.data && report.data.data.rows.length > 0 ? <DownloadButton onDownload={() => downloadReportTable("commissions", query)} /> : null}
           {/* Solo cuando hay algo que pagar: sin comisiones por pagar, el botón sería ruido. */}
-          {canPay && data.payables.commissions.cents > 0 ? payLink : null}
+          {/* Solo si hoy queda algo por pagar del periodo: un mes cerrado y ya pagado no lo ofrece. */}
+          {canPay && data.commissions.pendingCents > 0 ? payLink : null}
         </div>
       </div>
       {body()}
@@ -943,7 +951,11 @@ function PayablesCard({ data }: { data: ReportFinance }) {
           </span>
           <span className="text-[13px] text-muted-foreground">
             {commissions.professionals === 0 ? "Nadie espera pago" : `De ${commissions.professionals} ${commissions.professionals === 1 ? "profesional" : "profesionales"}`}
-            {canPay && commissions.cents > 0 ? (
+            {/* Lo de un mes cerrado es lo que se debía al cerrarlo; pagar solo se ofrece si hoy falta algo. */}
+            {canPay && commissions.cents > 0 && !data.period.partial && data.commissions.pendingCents === 0 ? (
+              <> · ya se pagaron después</>
+            ) : null}
+            {canPay && commissions.cents > 0 && (data.period.partial || data.commissions.pendingCents > 0) ? (
               <>
                 {" · "}
                 <Link to="/finance" search={{ tab: "comisiones" }} className="font-bold text-primary-soft-foreground">

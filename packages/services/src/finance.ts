@@ -1448,11 +1448,15 @@ export async function getMonthExpenses(
   const valueOf = (row: { amountCents: number; businessCents: number | null; currency: string }) =>
     orgPartValue(row.amountCents, row, money)
   const live = rows.filter((row) => !row.voidedAt && valueOf(row) !== null)
+  const settlementOf = await commissionPaymentsOf(tx, orgId, rows.map((row) => row.id))
+  // El pago de comisiones va aparte de «Personal», como en Reportes: así «Personal» dice lo mismo en
+  // las dos pantallas (los sueldos) y el pago de comisiones tiene su propia cifra.
   const byCategoryValues = new Map<string, Array<MoneyFraction | null>>()
   for (const row of live) {
-    const list = byCategoryValues.get(row.category) ?? []
+    const key = settlementOf.has(row.id) ? COMMISSION_PAYMENTS_CONCEPT : row.category
+    const list = byCategoryValues.get(key) ?? []
     list.push(valueOf(row))
-    byCategoryValues.set(row.category, list)
+    byCategoryValues.set(key, list)
   }
   const byCategory = new Map(
     [...byCategoryValues].map(([category, values]) => [
@@ -1469,7 +1473,6 @@ export async function getMonthExpenses(
         .leftJoin(supplier, and(eq(supplier.organizationId, purchaseOrder.organizationId), eq(supplier.id, purchaseOrder.supplierId)))
         .where(and(eq(purchaseOrder.organizationId, orgId), inArray(purchaseOrder.id, orderIds)))
     : []
-  const settlementOf = await commissionPaymentsOf(tx, orgId, rows.map((row) => row.id))
   const detailed = rows.map((row) => {
     const order = orders.find((item) => item.id === row.purchaseOrderId)
     const settlement = settlementOf.get(row.id)

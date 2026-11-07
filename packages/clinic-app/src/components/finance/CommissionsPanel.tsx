@@ -663,7 +663,7 @@ function ProfessionalDetailBody({
       ) : null}
 
       <p className="text-xs text-muted-foreground">
-        {discountOnly ? "Un descuento no registra gasto." : "El pago queda como gasto de Personal."} Lo que
+        {discountOnly ? "Un descuento no registra gasto." : "El pago queda en Gastos como pago de comisiones."} Lo que
         agrega caja sin atención, como vender{" "}
         {appWords().examples.soldItem}, no cuenta para ningún profesional.
       </p>
@@ -897,7 +897,7 @@ function PayDrawer({
         <p className="text-sm text-muted-foreground">
           {detail.pendingCents === 0
             ? "Los cobros de este mes dejan de estar por pagar y lo descontado deja de estar pendiente. No se registra ningún gasto. Si te equivocas, puedes anularlo con su motivo."
-            : "Queda como gasto de Personal y los cobros de este pago dejan de estar por pagar. Si te equivocas, puedes anular el pago con su motivo."}
+            : "Queda en Gastos como pago de comisiones y los cobros de este pago dejan de estar por pagar. Si te equivocas, puedes anular el pago con su motivo."}
         </p>
         {pickBranch ? (
           <form.AppField name="branchId">
@@ -1004,7 +1004,7 @@ function VoidPaymentDrawer({
     >
       <div className="flex flex-col gap-4">
         <p className="text-sm text-muted-foreground">
-          Se anula el pago y su gasto de Personal. Sus cobros vuelven a quedar por pagar. La
+          Se anula el pago y su gasto. Sus cobros vuelven a quedar por pagar. La
           anulación queda registrada con su motivo.
         </p>
         <form.AppField name="reason">
