@@ -407,7 +407,7 @@ export interface Responsibility {
   revokedAt: string | null
   revokeReason: string | null
   isCurrent: boolean
-  contact: { id: string; displayName: string; isActive: boolean }
+  contact: { id: string; displayName: string; isActive: boolean; docType?: string | null; docNumber?: string | null }
   evidenceDocument: Pick<PatientDocument, "id" | "label" | "category"> | null
 }
 

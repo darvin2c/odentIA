@@ -9,6 +9,7 @@ import {
   surfaceLabel,
   surfacesForTooth,
   TREATMENT_SCOPES,
+  toothForPatient,
   type TreatmentScope,
   toothNumbersOfCodes,
   toothSiteCode,
@@ -229,6 +230,8 @@ export const dentalProductSite: ProductSite = {
       return null
     }
     if (site.toothNumber === null) return null
+    // El número FDI (ISO 3950) y su nombre: quien firma reconoce qué diente es.
+    if (form === "patient") return toothForPatient(site.toothNumber)
     if (form === "short" || !site.surfaces.length) return `pieza ${site.toothNumber}`
     return `pieza ${site.toothNumber} (${surfaceWords(site.surfaces)})`
   },

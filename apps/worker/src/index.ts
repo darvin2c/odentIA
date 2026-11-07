@@ -16,6 +16,7 @@ import {
   configureDocumentLogos,
   configurePublicLinks,
   createStorage,
+  ensureSuggestedConsentsEverywhere,
   type Storage,
   secretsKeyFromEnv,
 } from "@odentia/services"
@@ -241,6 +242,7 @@ let nextSupportPoll = 0
 let nextLegalPoll = 0
 let nextDigestPoll = 0
 let nextDemoPoll = 0
+let nextSuggestedConsentsPoll = 0
 queues.push(
   {
     name: "saas_billing",
@@ -282,6 +284,17 @@ queues.push(
         webUrl: env.WEB_URL,
       })
       return result.mailed > 0
+    },
+  },
+  {
+    // Una plantilla de consentimiento sugerida nueva entra a las clínicas de hoy, con su
+    // texto por defecto (ADR 0117); lo que cada una ya tiene no se toca. Al arrancar y cada 6 h.
+    name: "suggested_consents",
+    poll: async () => {
+      if (Date.now() < nextSuggestedConsentsPoll) return false
+      nextSuggestedConsentsPoll = Date.now() + 6 * 3_600_000
+      const result = await ensureSuggestedConsentsEverywhere(ownerDb, db)
+      return result.created > 0
     },
   },
   {

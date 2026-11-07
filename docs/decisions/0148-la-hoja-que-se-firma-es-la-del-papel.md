@@ -9,7 +9,7 @@ El consentimiento se firmaba en dos pantallas, la tablet de la clínica y «Su e
 ## Decisión y motivo
 
 - **Una sola hoja en pantalla** (`ConsentSheet`) con el contenido y el orden del PDF (`consentBody`): membrete, «Consentimiento informado», título, pieza, paciente y documento, historia clínica, diagnóstico que lo motiva, las secciones con los títulos de la plantilla (`CONSENT_SECTION_LABELS`), información adicional, la declaración en su recuadro, quien firma («Paciente» o «Representante legal») y el nivel de firma al pie. La usan la tablet, el enlace y la vista previa de Configuración.
-- **Se ve como el papel, se comporta como una página:** el texto se acomoda al ancho y no pagina; las firmas van una debajo de otra para que el recuadro de firma tenga el ancho de la hoja. La casilla y el recuadro van dentro de la hoja, donde el papel lleva la declaración y la firma. Sigue el tema; el recuadro de firma es blanco.
+- **Se ve como el papel, se comporta como una página:** el texto se acomoda al ancho y no pagina; las firmas van una debajo de otra para que el recuadro de firma tenga el ancho de la hoja. La casilla y el recuadro van dentro de la hoja, donde el papel lleva la declaración y la firma. Es papel: se ve claro siempre, también con la app en oscuro (`.theme-light`), con sus campos y controles.
 - **La declaración es la estándar en todos los canales.** Firmar por el enlace no quiere decir que no se le explicó: se le puede enviar para que lo revise con calma. La que se muestra es la que se guarda (`declarationSnapshot`) y llega del servidor.
 - **El enlace muestra el diagnóstico y el número de historia** del consentimiento que firma. Precisa la regla de 0037 («nunca la historia»): no es la historia, es el documento que la persona firma y que ya recibe en PDF por su chat; solo lo ve quien decide por el paciente (`consentsOf`). El número de su documento sigue sin viajar: lo escribe y se compara al firmar.
 - **Lo pendiente se dice como pendiente:** el bloque del profesional dice que falta su confirmación; en el enlace va sin nombre, porque en la cita puede confirmar otro profesional.
@@ -24,7 +24,8 @@ El consentimiento se firmaba en dos pantallas, la tablet de la clínica y «Su e
 
 - Lo que se firma y lo que se guarda dicen lo mismo en odentIA y en latidIA, porque la hoja vive en el paquete común.
 - La hoja de pantalla y el PDF son dos dibujos de lo mismo: un dato nuevo del consentimiento se agrega en los dos.
-- Fuera de esto: el nombre común de la pieza junto al número FDI, impedir salir de la tablet a la ficha y lo que pida la norma peruana sobre el formato (huella), pendiente legal.
+- Después, en la misma línea: la pieza lleva su nombre para quien firma («pieza 38 (tercer molar inferior izquierdo, muela del juicio)», forma `patient` del sitio del producto); la tablet pregunta antes de salir sin guardar las firmas; y, donde la norma lo pide (Perú: quien no sabe firmar imprime su huella), la hoja para firmar en papel trae el recuadro de la huella (`consentFingerprint` del perfil del país). En pantalla no se captura huella: quien no sabe firmar firma en papel.
+- Fuera de esto: impedir de verdad que el paciente salga de la tablet a la ficha. Salir pregunta, pero no bloquea; bloquear pediría volver a identificarse, y en la práctica se resuelve con el modo de acceso guiado del propio equipo (iPad, Android).
 
 ## Referencias
 

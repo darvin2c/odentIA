@@ -36,6 +36,8 @@ type ConsentPrint = Awaited<ReturnType<typeof getConsentPrint>>
 
 /** Entre la declaración y las firmas. */
 const SIGNATURES_GAP = 20
+/** La columna de la huella: lo justo para un dedo, sin achicar la firma de al lado. */
+const FINGERPRINT_WIDTH = 84
 /** Lo que ocupa el aviso «Menor de edad» con su separación, de sobra. */
 const MINOR_NOTE_HEIGHT = 60
 
@@ -287,12 +289,17 @@ export async function renderConsentPaperPdf(
   const { document: doc, patient } = data
   const kit = await consentKit(data, clinic)
   const minor = "minor" in patient && patient.minor === true
+  const fingerprint = clinicalProfileFor(data.establishment?.country).consentFingerprint
   const signatures = [
     {
       heading: minor ? "Representante legal" : "Paciente",
       strokes: null,
       lines: [{ text: "Nombre, documento y firma" }, { text: "Fecha y hora" }],
     },
+    // Donde la norma lo pide, la huella de quien no sabe firmar, junto a su firma.
+    ...(fingerprint
+      ? [{ heading: "Huella digital", strokes: null, lines: [{ text: "Si no sabe firmar" }], width: FINGERPRINT_WIDTH }]
+      : []),
     {
       heading: "Profesional que informa",
       strokes: null,
@@ -323,6 +330,8 @@ export async function renderConsentPaperPdf(
 export async function renderConsentPreviewPdf(
   clinic: DocumentClinic,
   draft: { title: string; sections: ConsentSections; body: string },
+  /** El país de la clínica: lo que su norma pide en la hoja (la huella), como al imprimirla. */
+  country: string | null = null,
 ): Promise<Uint8Array> {
   const sample = {
     document: {
@@ -338,6 +347,7 @@ export async function renderConsentPreviewPdf(
       signedAt: null,
     },
     patient: { displayName: "Paciente de ejemplo", docType: null, docNumber: null, patientNumber: 1 },
+    establishment: country ? { country } : null,
   } as unknown as ConsentPrint
   return renderConsentPaperPdf(sample, clinic)
 }

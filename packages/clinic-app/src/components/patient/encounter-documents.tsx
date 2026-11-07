@@ -274,12 +274,14 @@ export function EncounterDocumentsBlock({
 
   // Lo registrado y su diagnóstico, para llenar lo que se crea desde aquí.
   const activeProcedures = detail.procedures.filter((proc) => !proc.voidedAt)
+  // Como lo prepara el servidor: cada uno con su lugar en palabras del paciente, separados por «; ».
+  const site = productUi().site
   const procedureRef = activeProcedures
     .map(
       (proc) =>
-        `${proc.description}${proc.toothNumber != null ? ` · pieza ${proc.toothNumber}` : ""}`,
+        `${proc.description}${proc.toothNumber != null && site ? ` · ${site.placeForPatient(proc.toothNumber)}` : ""}`,
     )
-    .join(", ")
+    .join("; ")
     .slice(0, 500)
   const firstActive = (detail.diagnoses ?? []).find((dx) => !dx.voidedAt)
   const firstDiagnosis = firstActive?.diagnosisCode

@@ -17,6 +17,7 @@ import {
   createConsentDocument,
   createConsentTemplate,
   ensureClinicConsents,
+  ensureSuggestedConsentsEverywhere,
   getEncounterConsentNeeds,
   linkServicesToSuggestedConsents,
   listConsentsToPublish,
@@ -127,6 +128,36 @@ it("lo que la clínica apagó o cambió no se vuelve a crear, y lo que ella uni�
   expect(await run((tx) => ensureClinicConsents(tx, orgId, ACTOR))).toEqual([])
   const rows = await run((tx) => listConsentTemplates(tx, orgId))
   expect(rows.filter((row) => row.key === "implante").map((row) => row.status)).toEqual(["archivado"])
+})
+
+it("una plantilla sugerida nueva entra a las clínicas de hoy con su texto; lo que cada una ya tiene, cambiado o no, se queda", async () => {
+  const { orgId, run } = await newClinic()
+  await run((tx) => ensureClinicConsents(tx, orgId, ACTOR))
+  // La clínica cambió su exodoncia.
+  await run((tx) => saveConsentTemplate(tx, orgId, ACTOR, { key: "exodoncia", title: "Mi exodoncia", sections }))
+  // Como si la endodoncia sugerida hubiera llegado después de que la clínica naciera.
+  await ownerDb
+    .delete(consentTemplateService)
+    .where(and(eq(consentTemplateService.organizationId, orgId), eq(consentTemplateService.templateKey, "endodoncia")))
+  await ownerDb
+    .delete(consentTemplate)
+    .where(and(eq(consentTemplate.organizationId, orgId), eq(consentTemplate.key, "endodoncia")))
+
+  const summary = await ensureSuggestedConsentsEverywhere(ownerDb, appDb)
+  expect(summary.failed).toBe(0)
+  const rows = await run((tx) => listConsentTemplates(tx, orgId))
+  const suggested = SUGGESTED_CONSENT_TEMPLATES.find((row) => row.key === "endodoncia")!
+  expect(rows.find((row) => row.key === "endodoncia")).toMatchObject({
+    title: suggested.title,
+    status: "publicado",
+    reviewedAt: null,
+  })
+  expect(rows.filter((row) => row.key === "exodoncia" && row.status === "publicado").map((row) => row.title)).toEqual([
+    "Mi exodoncia",
+  ])
+  // Otra vuelta no crea nada más.
+  await ensureSuggestedConsentsEverywhere(ownerDb, appDb)
+  expect((await run((tx) => listConsentTemplates(tx, orgId))).filter((row) => row.key === "endodoncia")).toHaveLength(1)
 })
 
 it("guardar crea la versión y la deja en uso; lo firmado conserva su texto", async () => {
@@ -240,11 +271,17 @@ it("las clínicas de hoy quedan igual que una nueva, sin tocar lo que ya decidie
     createConsentTemplate(tx, orgId, ACTOR, { key: "implante", title: "Mi implante", sections }),
   )
   await run((tx) => setConsentTemplateActive(tx, orgId, ACTOR, own.id, true))
-  const suggested = SUGGESTED_CONSENT_TEMPLATES.find((row) => row.key === "exodoncia")!
-  await run((tx) =>
-    createConsentTemplate(tx, orgId, ACTOR, { key: "exodoncia", title: suggested.title, sections: suggested.sections }),
-  )
   const file = readFileSync(new URL("../../db/drizzle/0028_consentimientos_activos.sql", import.meta.url), "utf8")
+  // El borrador sugerido como era cuando corrió la migración: la biblioteca de hoy puede haber mejorado su texto.
+  const atMigration = file.match(/\('dental', 'exodoncia', \$s\$(.+?)\$s\$, \$s\$(\{.+?\})\$s\$::jsonb/)
+  if (!atMigration?.[1] || !atMigration[2]) throw new Error("La migración 0028 no trae la exodoncia sugerida")
+  await run((tx) =>
+    createConsentTemplate(tx, orgId, ACTOR, {
+      key: "exodoncia",
+      title: atMigration[1] ?? "",
+      sections: JSON.parse(atMigration[2] ?? "{}"),
+    }),
+  )
   await ownerDb.transaction(async (tx) => {
     for (const statement of file.split("--> statement-breakpoint")) await tx.execute(sql.raw(statement))
   })

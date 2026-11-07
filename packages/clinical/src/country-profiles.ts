@@ -139,6 +139,12 @@ export interface ClinicalCountryProfile {
    * null: se dice sin nombrar ley (#47).
    */
   signatureLaw: string | null
+  /**
+   * La hoja para firmar en papel lleva un recuadro para la huella digital de quien
+   * no sabe firmar, como pide la norma del país (Perú: «si la persona no supiere
+   * firmar, imprimirá su huella digital»). En pantalla no se captura huella.
+   */
+  consentFingerprint: boolean
 }
 
 export interface ServiceListProfile {
@@ -221,6 +227,7 @@ const CORE: Omit<ClinicalCountryProfile, "country"> = {
   diagnosis: CORE_DIAGNOSIS,
   services: null,
   signatureLaw: null,
+  consentFingerprint: false,
 }
 
 /**
@@ -316,6 +323,8 @@ const PERU: Omit<ClinicalCountryProfile, "country"> = {
   },
   // Ley de Firmas y Certificados Digitales.
   signatureLaw: "Ley 27269",
+  // Ley 26842, art. 15.4 (modificado por la Ley 29414): «si la persona no supiere firmar, imprimirá su huella digital».
+  consentFingerprint: true,
 }
 
 const PROFILES: Record<string, Omit<ClinicalCountryProfile, "country">> = { PE: PERU }

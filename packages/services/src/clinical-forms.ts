@@ -1,4 +1,4 @@
-import type { Db } from "@odentia/db"
+import { type Db, withOrgContext } from "@odentia/db"
 import {
   CONSENT_DECLARATION,
   CONSENT_SECTION_LABELS,
@@ -2001,6 +2001,33 @@ export async function ensureClinicConsents(
   return created
 }
 
+/**
+ * A cada clínica, las plantillas sugeridas que le falten (por clave), con su texto por
+ * defecto, activas y unidas a sus servicios, como al nacer. Lo que ya tiene —también lo
+ * editado, apagado o archivado— no se toca: un texto sugerido mejorado es solo para las
+ * clínicas nuevas; una plantilla sugerida nueva entra a todas. Lo corre el worker; una
+ * clínica que falla no frena a las demás.
+ */
+export async function ensureSuggestedConsentsEverywhere(
+  ownerDb: Db,
+  appDb: Db,
+): Promise<{ clinics: number; created: number; failed: number }> {
+  // Solo las clínicas ya dadas de alta (con su perfil): las demás nacen con todo.
+  const rows = await ownerDb.select({ orgId: orgProfile.organizationId }).from(orgProfile)
+  const summary = { clinics: 0, created: 0, failed: 0 }
+  for (const { orgId } of rows) {
+    try {
+      const created = await withOrgContext(appDb, orgId, (tx) => ensureClinicConsents(tx, orgId, null))
+      summary.clinics++
+      summary.created += created.length
+    } catch (error) {
+      summary.failed++
+      console.error("consentimientos sugeridos", orgId, error)
+    }
+  }
+  return summary
+}
+
 export interface CreateConsentDocumentInput {
   templateId: string
   patientId: string
@@ -3068,10 +3095,35 @@ interface NeedSource {
   label: string
   /** El sitio suelto (odentIA: la pieza), para unir el diagnóstico de esa misma pieza. */
   toothNumber: number | null
-  /** El sitio en palabras («pieza 16»). */
+  /** El sitio en palabras, con su nombre para quien firma («pieza 16 (primer molar superior derecho)»). */
   where: string | null
+  /** El mismo sitio, corto («pieza 16»): cuando con nombres no cabe. */
+  whereShort: string | null
   planItemId: string | null
   diagnosis: { code: string; system: string | null } | null
+}
+
+/**
+ * Lo que se consiente, en una línea: cada procedimiento con su sitio, separados por
+ * «; » (el nombre de la pieza lleva su propia coma). Si no cabe en 500, sin el nombre
+ * de la pieza; y si aún no cabe, hasta el último procedimiento entero.
+ */
+function consentReference(sources: { label: string; where: string | null; whereShort: string | null }[]): string {
+  const join = (short: boolean) =>
+    sources
+      .map((source) => {
+        const where = short ? source.whereShort : source.where
+        return `${source.label}${where ? ` · ${where}` : ""}`
+      })
+      .filter((label, index, all) => all.indexOf(label) === index)
+      .join("; ")
+  const full = join(false)
+  if (full.length <= 500) return full
+  const short = join(true)
+  if (short.length <= 500) return short
+  const cut = short.slice(0, 500)
+  const last = cut.lastIndexOf("; ")
+  return last > 0 ? cut.slice(0, last) : cut
 }
 
 const NEED_RANK: Record<ConsentNeedStatus, number> = {
@@ -3150,7 +3202,8 @@ export async function getEncounterConsentNeeds(
       serviceName: proc.serviceName,
       label: proc.description,
       toothNumber: loose(proc),
-      where: site.words(proc, "short"),
+      where: site.words(proc, "patient"),
+      whereShort: site.words(proc, "short"),
       planItemId: proc.planItemId,
       diagnosis: proc.diagnosisCode ? { code: proc.diagnosisCode, system: proc.diagnosisSystem } : null,
     })
@@ -3164,7 +3217,8 @@ export async function getEncounterConsentNeeds(
       serviceName: item.serviceName,
       label: item.title,
       toothNumber: loose(item),
-      where: site.words(item, "short"),
+      where: site.words(item, "patient"),
+      whereShort: site.words(item, "short"),
       planItemId: item.id,
       diagnosis: item.diagnosisCode ? { code: item.diagnosisCode, system: item.diagnosisSystem } : null,
     })
@@ -3273,14 +3327,7 @@ export async function getEncounterConsentNeeds(
           ? "sin_preparar"
           : "sin_publicar"
     const first = mine[0]
-    const procedureRef =
-      doc?.procedureRef ??
-      (mine
-        .map((source) => `${source.label}${source.where ? ` · ${source.where}` : ""}`)
-        .filter((label, index, all) => all.indexOf(label) === index)
-        .join(", ")
-        .slice(0, 500) ||
-        null)
+    const procedureRef = doc?.procedureRef ?? (consentReference(mine) || null)
     needs.push({
       templateKey: key,
       title: doc?.title ?? published?.title ?? latest?.title ?? key,

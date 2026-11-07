@@ -34,6 +34,7 @@ import {
   listConsentEvents,
   listConsentTemplateServices,
   listConsentTemplates,
+  findOrgCountry,
   loadDocumentClinic,
   markConsentTemplateReviewed,
   parseConsentDraft,
@@ -867,8 +868,11 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     try {
       const draft = parseConsentDraft(parsed.data)
-      const clinic = await withOrgContext(deps.db, orgId, (tx) => loadDocumentClinic(tx, orgId))
-      const bytes = await renderConsentPreviewPdf(clinic, draft)
+      const { clinic, country } = await withOrgContext(deps.db, orgId, async (tx) => ({
+        clinic: await loadDocumentClinic(tx, orgId),
+        country: await findOrgCountry(tx, orgId),
+      }))
+      const bytes = await renderConsentPreviewPdf(clinic, draft, country)
       return new Response(Buffer.from(bytes), {
         status: 200,
         headers: {

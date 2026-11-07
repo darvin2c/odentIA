@@ -4402,7 +4402,7 @@ if (pedroRiosPerson) {
       const signed = await createConsentDocument(tx, ORG_A, ANA_ID, {
         templateId: implant.id,
         patientId: domainSeed.patientId,
-        procedureRef: "Implante pieza 36",
+        procedureRef: "Implante pieza 36 (primer molar inferior izquierdo)",
       })
       await markConsentSentByLink(tx, ORG_A, ANA_ID, signed.id)
       await signConsentByLink(tx, ORG_A, domainSeed.contactId, signed.id, {

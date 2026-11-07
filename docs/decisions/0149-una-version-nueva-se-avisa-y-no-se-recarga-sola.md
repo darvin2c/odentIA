@@ -1,4 +1,4 @@
-# 0148. Una versión nueva se avisa y no se recarga sola
+# 0149. Una versión nueva se avisa y no se recarga sola
 
 - **Fecha:** 2026-11-06
 - **Estado:** aceptada
