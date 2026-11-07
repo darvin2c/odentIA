@@ -245,6 +245,25 @@ function requireOpenShift(row: typeof cashShift.$inferSelect) {
   return row
 }
 
+/**
+ * Alguien cuyas comisiones se pueden mirar y pagar: quien está en el equipo, o
+ * quien estuvo y dejó algo en la clínica (atendió, tuvo porcentaje o se le
+ * pagó). Lo que ganó mientras atendía sigue siendo suyo aunque ya no esté.
+ */
+async function requireCommissionPerson(tx: Db, orgId: string, userId: string): Promise<{ inTeam: boolean }> {
+  const [inTeam] = await tx
+    .select({ id: member.id })
+    .from(member)
+    .where(and(eq(member.userId, userId), eq(member.organizationId, orgId)))
+  if (inTeam) return { inTeam: true }
+  const [was] = await tx.execute<{ found: number }>(sql`
+    select 1 as found where exists (select 1 from encounter e where e.organization_id = ${orgId} and e.professional_user_id = ${userId})
+      or exists (select 1 from commission_settlement s where s.organization_id = ${orgId} and s.professional_user_id = ${userId})
+      or exists (select 1 from commission_rule r where r.organization_id = ${orgId} and r.professional_user_id = ${userId})`)
+  if (!was) throw notFound("Profesional")
+  return { inTeam: false }
+}
+
 /** Profesional de la organización (regla de comisión y liquidaciones). */
 async function requireProfessional(tx: Db, orgId: string, userId: string) {
   const [row] = await tx
@@ -2452,8 +2471,13 @@ export async function getMonthlyCommissions(
   query: MonthlyCommissionsQuery,
   /** La clínica, si quien llama ya la leyó. */
   known?: OrgLocale,
+  /** Si sigue en el equipo, cuando quien llama ya lo sabe (la lista del mes). */
+  knownInTeam?: boolean,
 ) {
-  await requireProfessional(tx, orgId, query.professionalUserId)
+  const { inTeam } =
+    knownInTeam === undefined
+      ? await requireCommissionPerson(tx, orgId, query.professionalUserId)
+      : { inTeam: knownInTeam }
   const zone = known ?? (await getOrgLocale(tx, orgId))
   const { timezone, locale, currency: unit } = zone
   const money = orgMoneyOf(zone)
@@ -2577,6 +2601,8 @@ export async function getMonthlyCommissions(
   return {
     professionalUserId: query.professionalUserId,
     professionalName: professionalNames.get(query.professionalUserId) ?? null,
+    /** Sigue en el equipo; si no, lo que ganó se le puede pagar igual. */
+    inTeam,
     year: query.year,
     month: query.month,
     currency: unit,
@@ -2606,6 +2632,7 @@ function commissionSummary(view: MonthlyCommissions) {
   return {
     professionalUserId: view.professionalUserId,
     professionalName: view.professionalName,
+    inTeam: view.inTeam,
     year: view.year,
     month: view.month,
     currency: view.currency,
@@ -2640,23 +2667,28 @@ export async function listMonthCommissions(
   const active = await collectedApplications(tx, orgId, start, end, orgMoneyOf(zone), {
     liveNow: true,
   })
-  const ids = [
+  const candidates = [
     ...new Set([...withRate.map((r) => r.userId), ...active.map((a) => a.professionalUserId)]),
   ]
-  // Solo quienes siguen en la clínica; el histórico de un ex miembro se ve en sus pagos.
-  const members = ids.length
-    ? await tx
-        .select({ userId: member.userId })
-        .from(member)
-        .where(and(eq(member.organizationId, orgId), inArray(member.userId, ids)))
-    : []
+  const team = new Set(
+    candidates.length
+      ? (
+          await tx
+            .select({ userId: member.userId })
+            .from(member)
+            .where(and(eq(member.organizationId, orgId), inArray(member.userId, candidates)))
+        ).map((row) => row.userId)
+      : [],
+  )
+  // Quien sigue en el equipo, y quien ya no está pero tiene cobros de ese mes (sin cobros del mes
+  // no puede tener nada por pagar en él): lo que le corresponde se le paga igual.
+  const exMembers = new Set(active.map((a) => a.professionalUserId).filter((id) => !team.has(id)))
   const rows: CommissionSummary[] = []
-  for (const { userId } of members) {
-    rows.push(
-      commissionSummary(
-        await getMonthlyCommissions(tx, orgId, { ...query, professionalUserId: userId }, zone),
-      ),
-    )
+  for (const userId of candidates) {
+    if (!team.has(userId) && !exMembers.has(userId)) continue
+    const view = await getMonthlyCommissions(tx, orgId, { ...query, professionalUserId: userId }, zone, team.has(userId))
+    // Quien salió sin comisión en el mes (por ejemplo, sin porcentaje) no se lista.
+    if (view.inTeam || view.commissionCents > 0 || view.paidCents > 0 || view.pendingCents !== 0) rows.push(commissionSummary(view))
   }
   return rows.sort(
     (a, b) => b.commissionCents - a.commissionCents || (a.professionalName ?? "").localeCompare(b.professionalName ?? ""),
@@ -2827,7 +2859,9 @@ export async function payMonthCommission(
     .returning()
   await audit(tx, orgId, actorUserId, "commission_settlement", settlement.id, "finance.commission_paid")
   await audit(tx, orgId, actorUserId, "expense", paidExpense.id, "finance.expense_created")
-  await createWorkspaceNotification(tx, orgId, {
+  // Quien ya no está en el equipo no entra a la clínica: no se le deja un aviso que no verá.
+  if (view.inTeam)
+    await createWorkspaceNotification(tx, orgId, {
     userId: input.professionalUserId,
     dedupeKey: `commission-paid:${settlement.id}`,
     title: "Se registró el pago de tu comisión",

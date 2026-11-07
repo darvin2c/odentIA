@@ -166,7 +166,7 @@ export function CommissionsAdminPanel({
     .filter((member) => canAttend(member.role))
     .filter((member) => (rateById.get(member.userId) ?? 0) === 0)
     .map((member) => ({ userId: member.userId, name: member.user.name }))
-  const nobodyHasRate = rows.every((row) => row.rateBps === 0)
+  const nobodyHasRate = rows.filter((row) => row.inTeam).every((row) => row.rateBps === 0)
   const selectedRow = rows.find((row) => row.professionalUserId === selectedId) ?? null
   const selectedName =
     selectedRow?.professionalName ??
@@ -215,6 +215,7 @@ export function CommissionsAdminPanel({
                         atendió
                         {" · "}
                         {row.rateBps > 0 ? percentLabel(row.rateBps, locale) : "sin porcentaje"}
+                        {row.inTeam ? null : " · Ya no está en el equipo"}
                       </span>
                     </span>
                     <span className="flex shrink-0 flex-col items-end gap-1">
@@ -309,7 +310,7 @@ function ProfessionalDetail({
         <QueryErrorState
           error={detailQuery.error}
           onRetry={() => void detailQuery.refetch()}
-          notFound="Esta persona ya no forma parte del equipo de la clínica."
+          notFound="Esta persona no atiende ni atendió en la clínica."
         />
       ) : detail ? (
         // Otro profesional u otro mes: el cuerpo nace de nuevo, con su lista resumida.
@@ -374,7 +375,9 @@ function ProfessionalDetailBody({
       : detail.status === "pagado"
         ? "Ya se pagó todo lo de este mes."
         : detail.rateBps === 0 && detail.baseCents > 0
-          ? "No tiene un porcentaje fijado: fíjalo para calcular lo que le corresponde."
+          ? detail.inTeam
+            ? "No tiene un porcentaje fijado: fíjalo para calcular lo que le corresponde."
+            : "Ya no está en el equipo y no tenía un porcentaje fijado: no le corresponde comisión."
           : "No hay nada por pagar: aún no se cobró nada de lo que atendió este mes."
 
   return (
@@ -390,11 +393,18 @@ function ProfessionalDetailBody({
         ) : (
           <p className="text-sm font-medium">Sin porcentaje fijado</p>
         )}
-        {canWrite ? (
+        {canWrite && detail.inTeam ? (
           <Button type="button" variant="outline" size="sm" onClick={() => setRateOpen(true)}>
             {detail.rateBps > 0 ? "Cambiar" : "Fijar un porcentaje"}
           </Button>
         ) : null}
+        {detail.inTeam ? null : (
+          // Su porcentaje ya no cambia (solo se fija a quien puede atender); lo que ganó se le paga igual.
+          <p className="w-full text-sm text-muted-foreground">
+            Ya no está en el equipo. Lo que le corresponde por lo que atendió se le paga igual; su
+            porcentaje ya no cambia.
+          </p>
+        )}
       </div>
 
       {sorted.length === 0 ? (

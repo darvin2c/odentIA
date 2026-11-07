@@ -145,6 +145,8 @@ export function commissionStatusLabel(status: CommissionStatus, baseCents = 0): 
 export interface CommissionSummary {
   professionalUserId: string
   professionalName: string | null
+  /** Sigue en el equipo. Quien salió aparece si tiene cobros del mes, y se le paga igual. */
+  inTeam: boolean
   year: number
   month: number
   currency: string
