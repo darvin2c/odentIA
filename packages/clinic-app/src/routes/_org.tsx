@@ -53,6 +53,7 @@ import {
 } from "lucide-react"
 import { useEffect } from "react"
 import { NoticesColumnProvider } from "../components/notices-column"
+import { noAccessSection } from "../lib/no-access"
 import { AGENT_WORK_EVENTS, invalidateAgentWork, useAgentSummary } from "../lib/agent-work"
 import { GlobalSearchButton, GlobalSearchProvider, type GlobalSearchScreen } from "../components/global-search"
 import { ArgosPanel } from "../components/argos/argos-panel"
@@ -154,7 +155,9 @@ export const Route = createFileRoute("/_org")({
     const { session, org: data } = await checkOrgAccess(location)
     const role = data.members.find((member) => member.userId === session.userId)?.role ?? "member"
     const permissions = platformPathPermission(location.pathname)
-    if (permissions && !canAccessAny(role, permissions)) throw redirect({ to: "/home" })
+    // A Inicio, diciendo por qué: sin el aviso parecía un error de la app.
+    if (permissions && !canAccessAny(role, permissions))
+      throw redirect({ to: "/home", search: { sinAcceso: noAccessSection(location.pathname) } })
     const region = await regionLoad
     // Una clínica de otro producto se abre en su dominio, con su app (decisión 9 del
     // issue 229). Sin ese dominio configurado el destino es este mismo: no se redirige.

@@ -258,7 +258,9 @@ export function ExpenseFormDrawer({
         if (value.amount.trim() !== "" && cents === null) fields.amount = "Ese importe no se entiende. Revísalo."
         else if (cents === null || cents <= 0) fields.amount = "Escribe un importe mayor que cero."
         else if (after !== null && after < 0 && state)
-          fields.fromCash = `En la caja solo hay ${formatMoney(state.cashOnHandCents, paid.payIn, locale)}: no alcanza para pagar este gasto con el efectivo.`
+          // El freno se queda (el efectivo nunca queda negativo), pero dice qué
+          // hacer: quitar la casilla dejaría «fuera de la caja» lo que salió de ella.
+          fields.fromCash = `En la caja solo hay ${formatMoney(state.cashOnHandCents, paid.payIn, locale)}: no alcanza para pagarlo todo con el efectivo. Si el dinero está en el cajón, regístralo antes en Finanzas con «Ingresar o retirar efectivo». Si una parte se pagó por otro medio, anótala como otro gasto.`
         if (paid.tenderError) fields.tender = paid.tenderError
         if (paid.rateError) fields.rate = paid.rateError
         if (value.spentDay > today) fields.spentDay = "La fecha del gasto no puede ser futura."

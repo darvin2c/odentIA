@@ -21,7 +21,7 @@ import {
 import { clinicalFormResponse, clinicalOrder, consentDocument } from "@odentia/db/schema/clinical-forms"
 import { orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, inArray, isNull, notInArray, type SQL, sql } from "drizzle-orm"
-import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
+import { budgetAwaitsAnswerSql, budgetValueOptionSql } from "./budget-awaiting.js"
 import { valueOptionOf } from "./budgets.js"
 import { getCurrentDocumentContexts, listPatientDocuments } from "./clinical.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
@@ -327,7 +327,8 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
         eq(treatmentBudgetItem.planItemId, treatmentPlanItem.id),
         eq(treatmentBudgetItem.budgetId, treatmentPlanItem.budgetId),
         eq(treatmentBudgetItem.organizationId, treatmentPlanItem.organizationId),
-        // Con opciones, el tratamiento está una vez por opción: cuenta la línea aceptada.
+        // Con opciones, el tratamiento está una vez por opción: cuenta la línea aceptada
+        // de la opción que vale (lo común aceptado sin elegir camino está en todas).
         eq(treatmentBudgetItem.decision, "aceptado"),
       ),
     )
@@ -345,6 +346,7 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
         inArray(treatmentPlanItem.status, ["pendiente", "programado", "en_curso", "suspendido"]),
         eq(treatmentPlanItem.decisionStatus, "aceptado"),
         notInArray(treatmentBudget.status, [...RETIRED_BUDGETS]),
+        sql`${treatmentBudgetItem.optionId} = ${budgetValueOptionSql(treatmentBudget)}`,
       ),
     )
     .orderBy(asc(treatmentPlanItem.createdAt), asc(treatmentPlanItem.id))

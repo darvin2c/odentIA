@@ -549,7 +549,23 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Puedo ofrecer dos opciones, por ejemplo resina o corona?",
-        a: "Sí, en el mismo presupuesto: «Duplicar como otra opción» copia la opción y cambias lo que haga falta. Cada opción tiene su total (nunca se suman) y una es la recomendada. Cuando la persona elige una, las otras quedan «No elegida» y dentro de la elegida puede dejar algo para después.",
+        a: "Sí. Lo más simple es en la atención: al indicar otro tratamiento de la misma pieza, la fila pregunta si es otro camino; con «Es otro camino», el presupuesto tiene dos opciones, y lo demás (por ejemplo la limpieza) va en las dos. También se puede en su Plan con «Duplicar como otra opción». Cada camino tiene su total (nunca se suman) y uno es el recomendado. En el plan, los caminos se ven juntos y fuera de las fases hasta que elija.",
+        forms: ["dos caminos", "conservar o extraer", "otro camino para la pieza", "alternativas de tratamiento"],
+      },
+      {
+        q: "¿Cómo anoto que aceptó una parte y lo otro lo está pensando?",
+        a: "En su Plan, «¿Qué respondió?»: no hace falta que elija un camino. Lo que va en todos los caminos se marca Acepta, Para después o No; en la pieza con caminos eliges el camino, «Lo piensa» o «Ninguno». Si lo piensa, sigue esperando respuesta y su oportunidad sigue abierta hasta que decida; después se completa ahí mismo, también eligiendo el camino. Lo que ya respondió no se vuelve a preguntar.",
+        forms: ["acepta una parte", "aceptación parcial", "lo piensa con la muela", "no eligió opción"],
+      },
+      {
+        q: "¿Qué pasa si cambio un precio después de enviarlo?",
+        a: "Se crea una revisión con el mismo número. Arriba dice qué cambió, por ejemplo que la corona sube de S/ 900 a S/ 1,000, y al enviarla, solo eso pide respuesta: lo que ya aceptó y no cambió sigue aceptado, y lo que ya se hizo o se cobró no cambia de precio. Mientras no responda, se cobra lo que ya había aceptado.",
+        forms: ["revisión del presupuesto", "subir un precio", "cambiar el precio", "nuevo precio"],
+      },
+      {
+        q: "¿Puedo ver el presupuesto que preparó una colega?",
+        a: "Sí, completo, para leer: el de cualquier profesional del paciente. Cambiar precios, enviarlo o anularlo es de quien lo preparó (o de recepción, que lo envía y anota la respuesta).",
+        forms: ["presupuesto de otro doctor", "presupuesto de una colega", "no veo el presupuesto"],
       },
       {
         q: "¿Un presupuesto puede tener líneas en dólares y en soles?",
@@ -558,7 +574,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Qué quiere decir cada estado del presupuesto?",
-        a: "«Por enviar»: armado y sin enviar. «Enviado · espera respuesta». «Lo está pensando». «Aceptó todo» o «Aceptó 2 de 3». «No aceptó». «Reemplazado», cuando se hizo una revisión, y «Anulado». Son las mismas palabras en toda la aplicación.",
+        a: "«Por enviar»: armado y sin enviar. «Enviado · espera respuesta». «Lo está pensando». «Aceptó todo» o «Aceptó 2 de 3»; con caminos sin elegir, dice que falta elegir el camino. «No aceptó». «Reemplazado», cuando se hizo una revisión, y «Anulado». Si pasó su vigencia sin respuesta, dice «Venció el…». Son las mismas palabras en toda la aplicación.",
       },
       {
         q: "¿Se guarda lo que escribo en la atención?",
@@ -1034,6 +1050,26 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "cuánto le toca",
     ],
     faqs: [
+      {
+        q: "¿Cómo se calcula la comisión?",
+        a: "Es el porcentaje de cada profesional (o el de un servicio con regla aparte) sobre lo que se cobró de lo que atendió, con el impuesto incluido: el precio que pagó el paciente. Cuenta el mes en que se cobró, no el de la atención, y lo atendido que aún no se cobra no comisiona. Una venta suelta, sin atención, no es de ningún profesional. Cada línea dice su fecha, la regla que usó y si tuvo promoción.",
+        forms: ["cómo se calcula la comisión", "sobre qué se paga la comisión", "comisión con IGV", "por qué no aparece una atención"],
+      },
+      {
+        q: "¿Cómo registro el pago de una comisión?",
+        a: "Abre al profesional en el mes y elige «Registrar el pago»: los cobros de ese pago dejan de estar por pagar y queda en Gastos como pago de comisiones. Si se pagó en efectivo, marca «Se pagó con el efectivo de la caja» para que el cierre cuadre; si la caja no alcanza, te dice qué hacer. Si te equivocas, «Anular pago» con su motivo lo deshace y devuelve el efectivo. «Imprimir la liquidación» la saca en papel.",
+        forms: ["pagar comisión", "pagar al doctor", "liquidar comisiones", "anular pago de comisión", "imprimir liquidación"],
+      },
+      {
+        q: "¿Qué pasa si se anula un cobro cuya comisión ya pagué?",
+        a: "Lo que se pagó de más se descuenta del próximo pago de ese profesional, de este mes o de otro, sin dejarlo nunca en negativo. Si el descuento cubre todo, se registra el descuento sin gasto y se le avisa.",
+        forms: ["descuento de comisión", "devolución y comisión", "cobro anulado comisión"],
+      },
+      {
+        q: "¿Quién ve las comisiones?",
+        a: "Quien administra ve las de todos y las paga. Cada profesional ve solo las suyas en «Mis comisiones», con sus pagos y descuentos. Caja no ve cuánto gana cada uno: en Gastos ve una sola fila por sede con el total pagado en comisiones.",
+        forms: ["quién ve mis comisiones", "caja ve comisiones", "ver comisiones de otro doctor"],
+      },
       {
         q: "¿Si cambio el porcentaje, cambia lo que ya se cobró?",
         a: "No. El porcentaje nuevo vale para lo que se cobre desde ese día; lo cobrado antes conserva el que tenía, aunque aún no se haya pagado. En el detalle se ve desde cuándo vale y el anterior, cada línea dice el porcentaje que usó y al profesional se le avisa del cambio.",

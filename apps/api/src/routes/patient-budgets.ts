@@ -16,6 +16,7 @@ import {
   getBudgetDetail,
   getBudgetPresentation,
   listBudgets,
+  placeBudgetPath,
   operationBodySchema,
   previewBudgetSend,
   recommendBudgetOption,
@@ -56,6 +57,8 @@ function forbid(c: Context) {
  * - POST /:id/budgets/:budgetId/send { requestId?, recipientContactId? } (WhatsApp primero;
  *   si era borrador, lo entrega)
  * - POST /:id/budgets/:budgetId/options/:optionId/duplicate | recommend | remove (solo borrador)
+ * - POST /:id/budgets/paths { encounterId, planItemId, path: "nuevo" | "todos" | 1 | 2 | 3 }
+ *   (en la atención: el camino de lo indicado hoy; `clinical.write` y `budgets.write`)
  * - POST /:id/budgets/:budgetId/decision { optionId?, decisions, decidedByContactId?, decisionNote? }
  * - POST /:id/budgets/:budgetId/cancel {}
  * - POST /:id/budgets/:budgetId/revise { itemIds, title?, notes?, reason }
@@ -468,6 +471,28 @@ export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db" | "storage" |
           },
           { storage: deps.storage, secretsKey: deps.secretsKey },
         ),
+      ),
+    )
+  })
+
+  // El camino de lo indicado hoy, desde la atención: es una opción del borrador.
+  const budgetPathInput = z
+    .object({
+      encounterId: z.uuid(),
+      planItemId: z.uuid(),
+      path: z.union([z.literal("nuevo"), z.literal("todos"), z.literal(1), z.literal(2), z.literal(3)]),
+    })
+    .strict()
+  app.post("/:id/budgets/paths", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "budgets.write") || !canAccess(memberRole, "clinical.write")) return forbid(c)
+    const parsed = budgetPathInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        placeBudgetPath(tx, orgId, userId, c.req.param("id"), parsed.data.encounterId, parsed.data, {
+          memberRole,
+        }),
       ),
     )
   })

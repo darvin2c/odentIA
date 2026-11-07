@@ -2,6 +2,8 @@
 
 Fecha: 2026-11-06 · Estado: aceptada · Precisa a [0028](0028-ventas-que-se-mueven-solas.md)
 
+Precisada por [0151](0151-presupuesto-con-caminos.md): aceptado en parte con algo que espera respuesta, la oportunidad sigue abierta; se decide al final.
+
 ## Problema
 
 Con la 0028, una oportunidad nace cuando la persona pide algo concreto (la anota el agente) o cuando el equipo la crea, y avanza sola con la cita, el presupuesto y su respuesta. Lo que se vende en el sillón quedaba fuera: el odontólogo indica, arma y entrega el presupuesto sin que nadie haya preguntado antes, y el tablero no se enteraba. Oportunidades decía que había menos ventas en curso de las que había.

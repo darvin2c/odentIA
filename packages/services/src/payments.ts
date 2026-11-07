@@ -42,7 +42,7 @@ import {
   type SQLWrapper,
   sql,
 } from "drizzle-orm"
-import { budgetLineUnits } from "./budgets.js"
+import { budgetLineUnits, budgetValueOptionSql } from "./budgets.js"
 import {
   chargeTaxOf,
   orgTaxes,
@@ -3600,6 +3600,8 @@ export async function getPatientAccount(tx: Db, orgId: string, patientId: string
         eq(treatmentBudgetItem.patientId, patientId),
         eq(treatmentPlanItem.decisionStatus, "aceptado"),
         eq(treatmentBudgetItem.decision, "aceptado"),
+        // Lo común a varios caminos está aceptado en cada uno: cuenta la opción que vale.
+        sql`${treatmentBudgetItem.optionId} = ${budgetValueOptionSql(treatmentBudget)}`,
       ),
     )
   // Los mismos montos que Caja (`accountBalances`); lo aceptado cuenta todas

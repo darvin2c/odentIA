@@ -7,6 +7,7 @@
  * arma el borrador y cambia precios, y recepción lo envía, anota la respuesta
  * y agenda (decisión 4).
  */
+import { type BudgetChange, budgetChanges } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -22,6 +23,7 @@ import {
   ErrorState,
   FormDrawer,
   LoadingState,
+  regionToday,
   SubmitButton,
   submitErrorMessage,
   useAppForm,
@@ -36,6 +38,8 @@ import { ApiError, apiFetchBytes } from "../../../lib/api"
 import {
   type AdjustBudgetLineBody,
   addBudgetItemsApi,
+  type BudgetLine,
+  budgetAnswerLabel,
   adjustBudgetLinesApi,
   BUDGET_ANSWERABLE_STATUSES,
   BUDGET_SENDABLE_STATUSES,
@@ -56,6 +60,7 @@ import {
   valueOption,
 } from "../../../lib/budgets"
 import { useMemberName, usePermission } from "../../../lib/crm"
+import { label as glossaryLabel } from "../../../lib/glossary"
 import { useOrgEvents } from "../../../lib/org-events"
 import type { PlanItem } from "../../../lib/patients"
 import { appWords } from "../../../lib/product-words"
@@ -65,9 +70,13 @@ import { openBookingAnywhere } from "../../agenda/schedule-host"
 import { BudgetDraftEditor } from "./budget-draft-editor"
 import {
   acceptedWords,
+  answerTone,
+  type BadgeTone,
   BudgetLinesList,
   BudgetTotals,
+  billingNote,
   budgetStatusTone,
+  isBelowTariff,
   type Money,
   moneyForLines,
   SessionNote,
@@ -82,6 +91,69 @@ import { BudgetListSkeleton } from "../../skeletons/person-sections"
 
 /** Lo que ya no es vigente: se ve en «Anteriores». */
 const PAST = ["cancelado", "sustituido"]
+
+/** Entregado y esperando respuesta: puede vencer. */
+const EXPIRABLE = ["presentado", "pospuesto", "parcial"]
+
+/**
+ * Un borrador sin tratamientos no es un presupuesto que mostrar: no tiene nada
+ * que revisar ni enviar. «Preparar presupuesto» lo vuelve a llenar.
+ */
+function isEmptyDraft(budget: BudgetWithTotals): boolean {
+  return budget.status === "borrador" && budget.items.length === 0
+}
+
+/** Lo que trae una revisión frente a la versión que reemplaza. */
+interface RevisionView {
+  changes: BudgetChange[]
+  /** De la anterior: las del camino elegido si había uno; si no, todas. */
+  previousLines: BudgetLine[]
+  /** Tratamientos que cambiaron o son nuevos: lo único que pide respuesta. */
+  changed: Set<string>
+}
+
+function revisionOf(budget: BudgetWithTotals, previous: BudgetWithTotals): RevisionView {
+  const chosen = previous.options.find((option) => option.decision === "elegida")
+  const previousLines = chosen ? optionLines(previous, chosen.id) : previous.items
+  const changes = budgetChanges(previousLines, budget.items)
+  return {
+    changes,
+    previousLines,
+    changed: new Set(
+      changes.filter((change) => change.kind !== "quitado").map((change) => change.planItemId),
+    ),
+  }
+}
+
+/** Cómo queda cada línea de una revisión frente a la versión anterior. */
+function revisionNote(
+  line: BudgetLine,
+  view: RevisionView,
+): { text: string; tone: BadgeTone } | null {
+  if (line.itemStatus === "realizado" || line.itemStatus === "en_curso")
+    return { text: "Hecho · no se cambia", tone: "outline" }
+  if (view.changed.has(line.planItemId)) return { text: "Pide respuesta", tone: "warning" }
+  const acceptedBefore = view.previousLines.some(
+    (row) => row.planItemId === line.planItemId && row.decision === "aceptado",
+  )
+  if (acceptedBefore || line.decision === "aceptado")
+    return { text: "Aceptado · sin cambios", tone: "success" }
+  return null
+}
+
+/** «3 feb», con el año si no es el de hoy, de una fecha civil `AAAA-MM-DD`. */
+function civilDayShort(day: string, locale: string | undefined, today: string): string {
+  const [year, month, date] = day.slice(0, 10).split("-").map(Number)
+  if (!year || !month || !date) return day
+  return new Intl.DateTimeFormat(locale, {
+    day: "numeric",
+    month: "short",
+    ...(day.slice(0, 4) === today.slice(0, 4) ? {} : { year: "numeric" }),
+    timeZone: "UTC",
+  })
+    .format(new Date(Date.UTC(year, month - 1, date, 12)))
+    .replace(".", "")
+}
 
 /** Escrituras del presupuesto con sus invalidaciones (y la guarda de la atención, si la hay). */
 function useBudgetWrites(
@@ -155,7 +227,7 @@ export function PlanBudgets({
   const budgets = useMemo(() => budgetsQuery.data?.data ?? [], [budgetsQuery.data])
   const budgetsById = useMemo(() => new Map(budgets.map((b) => [b.id, b])), [budgets])
   const current = budgets
-    .filter((budget) => !PAST.includes(budget.status))
+    .filter((budget) => !PAST.includes(budget.status) && !isEmptyDraft(budget))
     .sort((a, b) => order(a) - order(b) || b.budgetNumber - a.budgetNumber)
   const past = budgets
     .filter((budget) => PAST.includes(budget.status))
@@ -193,7 +265,13 @@ export function PlanBudgets({
     <div className="flex flex-col gap-3">
       {current.length === 0 ? (
         <EmptyState
-          title={budgetRequired ? "Todavía no tiene presupuesto" : "Sin presupuesto"}
+          title={
+            !budgetRequired
+              ? "Sin presupuesto"
+              : past.length > 0
+                ? "Sin presupuesto vigente"
+                : "Todavía no tiene presupuesto"
+          }
           description={
             !budgetRequired
               ? "No hace falta para agendar ni para atender."
@@ -210,6 +288,7 @@ export function PlanBudgets({
             key={budget.id}
             patientId={patientId}
             budget={budget}
+            previous={previousOf(budget, budgetsById)}
             money={format.money}
             day={format.day}
             locale={format.locale}
@@ -266,6 +345,7 @@ export function PlanBudgets({
                 key={budget.id}
                 patientId={patientId}
                 budget={budget}
+                previous={previousOf(budget, budgetsById)}
                 money={format.money}
                 day={format.day}
                 locale={format.locale}
@@ -289,6 +369,14 @@ export function PlanBudgets({
   )
 }
 
+/** La versión que reemplaza una revisión, de la misma lista. */
+function previousOf(
+  budget: BudgetWithTotals,
+  budgetsById: Map<string, BudgetWithTotals>,
+): BudgetWithTotals | null {
+  return budget.supersedesBudgetId ? (budgetsById.get(budget.supersedesBudgetId) ?? null) : null
+}
+
 /** Primero lo que espera algo de la clínica: por enviar, lo que espera respuesta, lo decidido. */
 function order(budget: BudgetWithTotals): number {
   if (budget.status === "borrador") return 0
@@ -309,6 +397,7 @@ function quotableForDraft(
 function BudgetCard({
   patientId,
   budget,
+  previous,
   money: baseMoney,
   day,
   locale,
@@ -326,6 +415,8 @@ function BudgetCard({
 }: {
   patientId: string
   budget: BudgetWithTotals
+  /** Si es una revisión, la versión que reemplaza (para decir qué cambió). */
+  previous: BudgetWithTotals | null
   money: Money
   day: (iso: string | null | undefined) => string
   locale: string | undefined
@@ -355,7 +446,21 @@ function BudgetCard({
     cardRef.current?.scrollIntoView({ block: "start", behavior: "smooth" })
   }, [defaultOpen])
   const isDraft = budget.status === "borrador"
-  const editable = isDraft && canWrite
+  // El odontólogo lee el de su colega, pero solo quien lo preparó lo cambia o lo envía.
+  const own = budget.canChange !== false
+  const mayWrite = canWrite && own
+  const maySend = canSend && own
+  const editable = isDraft && mayWrite
+  const revision = useMemo(
+    () => (previous ? revisionOf(budget, previous) : null),
+    [budget, previous],
+  )
+  const today = regionToday()
+  const expiredText =
+    EXPIRABLE.includes(budget.status) && budget.validUntil && budget.validUntil.slice(0, 10) < today
+      ? `Venció el ${civilDayShort(budget.validUntil, locale, today)} · sin respuesta`
+      : null
+  const preparedBy = budget.createdBy ? memberName(budget.createdBy) : "otra persona del equipo"
   const value = valueOption(budget)
   const [optionId, setOptionId] = useState<string | null>(null)
   const option =
@@ -445,12 +550,12 @@ function BudgetCard({
 
   // La acción principal según el estado (tablero 3, «Un solo nombre para cada estado»).
   const primary = isDraft ? (
-    canSend || canWrite ? (
+    maySend || mayWrite ? (
       <Button type="button" size="sm" onClick={() => setReviewOpen(true)}>
         Revisar y enviar
       </Button>
     ) : null
-  ) : answerable && budget.awaitsAnswer ? (
+  ) : answerable && budget.awaitsAnswer && own ? (
     <Button
       type="button"
       size="sm"
@@ -482,11 +587,13 @@ function BudgetCard({
       className="flex flex-col gap-4 rounded-xl border bg-card p-4"
     >
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
+        {/* En el teléfono, los botones van debajo: no tapan el estado. */}
+        <div className="flex min-w-0 flex-1 basis-full flex-col gap-1 sm:basis-0">
           <span className="font-medium">{summary}</span>
           <span className="flex flex-wrap items-center gap-2 text-sm">
             <Badge variant={budgetStatusTone(budget.status)}>{stateLine}</Badge>
-            {budget.createdBy ? (
+            {expiredText ? <span className="text-xs font-medium">{expiredText}</span> : null}
+            {budget.createdBy && own ? (
               <span className="text-xs text-muted-foreground">
                 Preparó {memberName(budget.createdBy)}
               </span>
@@ -497,6 +604,11 @@ function BudgetCard({
               </span>
             ) : null}
           </span>
+          {own ? null : (
+            <span className="text-xs text-muted-foreground">
+              Lo preparó {preparedBy}: solo quien lo preparó cambia precios o lo envía.
+            </span>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {primary}
@@ -593,6 +705,10 @@ function BudgetCard({
               </div>
             ) : null}
 
+            {revision ? (
+              <RevisionChanges view={revision} lines={budget.items} money={money} />
+            ) : null}
+
             {!locale ? (
               localePending ? (
                 <LoadingState />
@@ -614,6 +730,7 @@ function BudgetCard({
                 onRetryPromotions={onRetryPromotions}
                 locale={locale}
                 money={money}
+                lineNote={revision ? (line) => revisionNote(line, revision) : undefined}
                 disabled={printing || optionMutation.isPending}
                 delivering={printing}
                 saveLines={(patch) =>
@@ -641,7 +758,7 @@ function BudgetCard({
                   ) : null
                 }
                 sendAction={
-                  canSend
+                  maySend
                     ? (beforeSend) => (
                         <BudgetSendButton
                           patientId={patientId}
@@ -675,16 +792,30 @@ function BudgetCard({
               />
             ) : (
               <>
-                <BudgetLinesList
-                  lines={lines}
-                  money={money}
-                  showAnswers={!isDraft}
-                  label={
-                    several && option
-                      ? `Tratamientos de la ${option.label.toLowerCase()}`
-                      : undefined
-                  }
-                />
+                {revision ? (
+                  <RevisionLinesList
+                    lines={lines}
+                    money={money}
+                    view={revision}
+                    delivered={!isDraft}
+                    label={
+                      several && option
+                        ? `Tratamientos de la ${option.label.toLowerCase()}`
+                        : "Tratamientos del presupuesto"
+                    }
+                  />
+                ) : (
+                  <BudgetLinesList
+                    lines={lines}
+                    money={money}
+                    showAnswers={!isDraft}
+                    label={
+                      several && option
+                        ? `Tratamientos de la ${option.label.toLowerCase()}`
+                        : undefined
+                    }
+                  />
+                )}
                 {option ? (
                   <BudgetTotals
                     option={option}
@@ -701,14 +832,15 @@ function BudgetCard({
                   </p>
                 ) : null}
                 <div className="flex flex-wrap items-start gap-2 border-t pt-4">
-                  {canSend && BUDGET_SENDABLE_STATUSES.includes(budget.status) ? (
+                  {maySend && BUDGET_SENDABLE_STATUSES.includes(budget.status) ? (
                     <BudgetSendButton
                       patientId={patientId}
                       budgetId={budget.id}
                       variant={isDraft ? "default" : "outline"}
                     />
                   ) : null}
-                  {canSend ? (
+                  {/* Imprimir lo entregado es solo mirarlo; un borrador queda entregado al imprimirlo. */}
+                  {canSend && (!isDraft || own) ? (
                     <SubmitButton
                       variant="outline"
                       pending={printing}
@@ -718,15 +850,15 @@ function BudgetCard({
                     </SubmitButton>
                   ) : null}
                   <Button type="button" variant="outline" onClick={() => setReviewOpen(true)}>
-                    Lo que se le explicó
+                    {isDraft ? "Lo que se le explicará" : "Lo que se le explicó"}
                   </Button>
-                  {canWrite &&
+                  {mayWrite &&
                   ["presentado", "aceptado", "parcial", "pospuesto"].includes(budget.status) ? (
                     <Button type="button" variant="outline" onClick={() => setReviseOpen(true)}>
                       Crear revisión
                     </Button>
                   ) : null}
-                  {canWrite && budget.status === "presentado" ? (
+                  {mayWrite && budget.status === "presentado" ? (
                     <Button type="button" variant="outline" onClick={() => setCancelOpen(true)}>
                       Anular presupuesto
                     </Button>
@@ -734,7 +866,7 @@ function BudgetCard({
                 </div>
               </>
             )}
-            {isDraft ? (
+            {isDraft && (maySend || mayWrite) ? (
               <p className="text-xs text-muted-foreground">
                 Sale por WhatsApp si la persona lo tiene; si no, por correo. Al enviarlo o
                 imprimirlo queda entregado, y aquí mismo se anota qué respondió.
@@ -800,6 +932,146 @@ function BudgetCard({
         }}
       />
     </section>
+  )
+}
+
+/** «Qué cambió:», arriba de las líneas de una revisión: una frase por cambio. */
+function RevisionChanges({
+  view,
+  lines,
+  money,
+}: {
+  view: RevisionView
+  lines: BudgetLine[]
+  money: Money
+}): React.JSX.Element {
+  const site = (planItemId: string): string => {
+    const line =
+      lines.find((row) => row.planItemId === planItemId) ??
+      view.previousLines.find((row) => row.planItemId === planItemId)
+    const text = line ? treatmentSiteLabel(line) : ""
+    return text && text !== "General" ? ` (${text})` : ""
+  }
+  const sentence = (change: BudgetChange): string => {
+    const name = `«${change.title}»${site(change.planItemId)}`
+    switch (change.kind) {
+      case "precio": {
+        const before = view.previousLines.find((row) => row.planItemId === change.planItemId)
+        const fromCurrency = before?.currency ?? change.currency
+        const from = change.fromCents == null ? "sin precio" : money(change.fromCents, fromCurrency)
+        const to = change.toCents == null ? "sin precio" : money(change.toCents, change.currency)
+        if (change.fromCents == null || change.toCents == null || fromCurrency !== change.currency)
+          return `${name} pasa de ${from} a ${to}`
+        return `${name} ${change.toCents > change.fromCents ? "sube" : "baja"} de ${from} a ${to}`
+      }
+      case "condiciones":
+        return `${name} cambia su forma de cobro, sus sesiones o su promoción`
+      case "nuevo":
+        return `Se agrega ${name}`
+      case "quitado":
+        return `Se quita ${name}`
+    }
+  }
+  return (
+    <section
+      aria-label="Qué cambió"
+      className="flex flex-col gap-1.5 rounded-lg border bg-muted/30 p-3 text-sm"
+    >
+      <h3 className="font-medium">Qué cambió:</h3>
+      {view.changes.length === 0 ? (
+        <p>No cambió ningún precio.</p>
+      ) : (
+        <>
+          <ul className="flex list-disc flex-col gap-1 pl-5">
+            {view.changes.map((change) => (
+              <li key={`${change.kind}:${change.planItemId}`}>{sentence(change)}.</li>
+            ))}
+          </ul>
+          <p className="text-muted-foreground">Solo eso pide respuesta.</p>
+        </>
+      )}
+    </section>
+  )
+}
+
+/**
+ * Las líneas de una revisión: las de `BudgetLinesList` con lo que pasa con cada
+ * una frente a la versión anterior. En el borrador, como anticipo; entregada,
+ * lo aceptado que no cambió lo dice en vez de su respuesta.
+ */
+function RevisionLinesList({
+  lines,
+  money,
+  view,
+  delivered,
+  label,
+}: {
+  lines: BudgetLine[]
+  money: Money
+  view: RevisionView
+  delivered: boolean
+  label: string
+}): React.JSX.Element {
+  const badgeOf = (line: BudgetLine): { text: string; tone: BadgeTone } | null => {
+    const note = revisionNote(line, view)
+    if (!delivered) return note
+    // Entregada, lo que pide respuesta dice su respuesta («Por responder», «Aceptado»…).
+    if (
+      note &&
+      note.text !== "Pide respuesta" &&
+      (note.tone !== "success" || line.decision === "aceptado")
+    )
+      return note
+    return { text: budgetAnswerLabel(line.decision), tone: answerTone(line.decision) }
+  }
+  return (
+    <ul aria-label={label} className="flex flex-col divide-y rounded-xl border">
+      {lines.map((line) => {
+        const site = treatmentSiteLabel(line)
+        const badge = badgeOf(line)
+        return (
+          <li key={line.id} className="flex flex-col gap-2 px-3 py-3">
+            <div className="flex items-start gap-3">
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span className="font-medium">{line.title}</span>
+                <span className="text-xs text-muted-foreground">
+                  {[site, billingNote(line, money, true)].filter(Boolean).join(" · ")}
+                </span>
+                {line.promotionName ? (
+                  <span className="text-xs text-muted-foreground">
+                    Promoción: {line.promotionName}
+                  </span>
+                ) : null}
+                {line.priceReason ? (
+                  <span className="text-xs text-muted-foreground">
+                    Motivo del ajuste: {line.priceReason}
+                  </span>
+                ) : null}
+              </div>
+              <div className="flex shrink-0 flex-col items-end">
+                <span className="font-semibold whitespace-nowrap tabular-nums">
+                  {line.lineTotalCents == null
+                    ? "Sin precio"
+                    : money.plain(line.lineTotalCents, line.currency)}
+                </span>
+                {isBelowTariff(line) && line.tariffLineTotalCents != null ? (
+                  <span className="text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+                    <span className="sr-only">Precio normal: </span>
+                    <span className="line-through">
+                      {money.plain(line.tariffLineTotalCents, line.currency)}
+                    </span>
+                  </span>
+                ) : null}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {badge ? <Badge variant={badge.tone}>{badge.text}</Badge> : null}
+              <Badge variant="outline">{glossaryLabel("tratamiento", line.itemStatus)}</Badge>
+            </div>
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 
