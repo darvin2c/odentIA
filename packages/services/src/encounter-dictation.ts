@@ -11,9 +11,11 @@ import {
   DIAGNOSIS_VERIFICATION_LABELS,
   type DiagnosisSystemKey,
   findMedication,
+  isDiagnosisSystem,
   isDiagnosisVerification,
   type MedicationCatalog,
   moneyTotalsText,
+  normalizeDiagnosisCode,
   sumByCurrency,
   normalizeDrugText,
   quantityWords,
@@ -24,6 +26,7 @@ import {
   DICTATION_KINDS,
   type DictationKind,
   encounter,
+  encounterDiagnosis,
   encounterDictationSuggestion,
   encounterProcedure,
   patientAllergy,
@@ -1985,6 +1988,40 @@ const pick = <T extends string>(payload: Record<string, unknown>, keys: readonly
   Object.fromEntries(keys.filter((key) => payload[key] !== undefined).map((key) => [key, payload[key]])) as Partial<Record<T, unknown>>
 
 /**
+ * El diagnóstico vigente de la atención con ese código y esa pieza, si ya está:
+ * el código se lee en su lista como al registrarlo y la pieza, como el sitio
+ * suelto del producto (latidIA no tiene).
+ */
+async function activeEncounterDiagnosis(
+  tx: Db,
+  orgId: string,
+  encounterId: string,
+  input: { diagnosisCode: string; diagnosisSystem: string | null; toothNumber: number | null },
+): Promise<string | null> {
+  const system = input.diagnosisSystem?.trim() || (await orgDiagnosisSystem(tx, orgId))
+  if (!isDiagnosisSystem(system)) return null
+  const code = normalizeDiagnosisCode(system, input.diagnosisCode.trim())
+  if (!code) return null
+  const { site } = await productHooks(tx, orgId)
+  const siteCode = input.toothNumber != null ? site.code(input.toothNumber) : null
+  const [row] = await tx
+    .select({ id: encounterDiagnosis.id })
+    .from(encounterDiagnosis)
+    .where(
+      and(
+        eq(encounterDiagnosis.organizationId, orgId),
+        eq(encounterDiagnosis.encounterId, encounterId),
+        eq(encounterDiagnosis.diagnosisSystem, system),
+        eq(encounterDiagnosis.diagnosisCode, code),
+        isNull(encounterDiagnosis.voidedAt),
+        siteCode ? eq(encounterDiagnosis.siteCode, siteCode) : isNull(encounterDiagnosis.siteCode),
+      ),
+    )
+    .limit(1)
+  return row?.id ?? null
+}
+
+/**
  * Confirmar es lo único que lleva una sugerencia a la historia, y lo hace con
  * la operación de siempre: la misma validación, el mismo permiso y la misma
  * auditoría que si el profesional lo hubiera escrito. Si la operación rechaza
@@ -2023,15 +2060,19 @@ export async function confirmDictationSuggestion(
     }
     await updateEncounterDraft(tx, orgId, actorUserId, patientId, encounterId, joined as UpdateEncounterDraftPatch)
   } else if (row.kind === "diagnostico") {
-    const created = await addEncounterDiagnosis(tx, orgId, actorUserId, patientId, encounterId, {
+    const input = {
       diagnosisCode: String(payload["diagnosisCode"]),
       diagnosisSystem: typeof payload["diagnosisSystem"] === "string" ? payload["diagnosisSystem"] : null,
       diagnosisType: String(payload["diagnosisType"]),
       toothNumber: (payload["toothNumber"] as number | undefined) ?? null,
       surfaces: (payload["surfaces"] as string[] | undefined) ?? null,
       note: (payload["note"] as string | undefined) ?? null,
-    })
-    entityId = created.id
+    }
+    // Ya está en la atención con la misma pieza (lo usó el clínico desde lo que proponía el
+    // tratamiento, o se registró a mano): confirmar no lo registra dos veces.
+    entityId =
+      (await activeEncounterDiagnosis(tx, orgId, encounterId, input)) ??
+      (await addEncounterDiagnosis(tx, orgId, actorUserId, patientId, encounterId, input)).id
   } else if (row.kind === "plan" && Array.isArray(payload["options"]) && payload["options"].length) {
     entityId = await confirmPlanChoice(tx, orgId, actorUserId, patientId, encounterId, row.id, payload)
   } else if (row.kind === "plan") {

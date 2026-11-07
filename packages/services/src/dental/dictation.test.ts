@@ -43,6 +43,7 @@ import {
   updateDictationSuggestion,
 } from "../encounter-dictation.js"
 import { DENTAL_DICTATION } from "./dictation.js"
+import { addEncounterDiagnosis } from "../encounter-diagnoses.js"
 import { addEncounterProcedure, voidEncounterProcedure } from "../encounters.js"
 import { appDb, ownerDb, setupTestDb } from "../test-setup.js"
 import { nextPatientNumber } from "../patients.js"
@@ -499,6 +500,33 @@ describe("dictado en la atención", () => {
     expect((await session()).evolution).toBe(full)
     const pending = await fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))
     expect(pending.find((item) => item.id === third!.id)).toMatchObject({ status: "lista" })
+    await enable(false)
+  })
+
+  it("confirmar un diagnóstico que ya está en la atención con la misma pieza no lo registra dos veces", async () => {
+    await enable(true)
+    const fx = await openSession("Obturación sin repetir")
+    const [same, other] = await fx.run((tx) =>
+      saveDictationSuggestions(tx, ...fx.args, fx.encounter.id, [
+        { kind: "diagnostico", payload: { diagnosisCode: "K02.1", diagnosisType: "provisional", toothNumber: 16 } },
+        { kind: "diagnostico", payload: { diagnosisCode: "K02.1", diagnosisType: "provisional", toothNumber: 26 } },
+      ]),
+    )
+    // Mientras tanto, el odontólogo lo usó desde lo que proponía el tratamiento.
+    const used = await fx.run((tx) =>
+      addEncounterDiagnosis(tx, ...fx.args, fx.encounter.id, { diagnosisCode: "k02.1", diagnosisType: "confirmed", toothNumber: 16 }),
+    )
+    const confirmed = await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, same!.id))
+    expect(confirmed.status).toBe("confirmada")
+    const [suggestion] = await ownerDb.select().from(encounterDictationSuggestion).where(eq(encounterDictationSuggestion.id, same!.id))
+    expect(suggestion?.entityId).toBe(used.id)
+    // En otra pieza sí es otro diagnóstico.
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, other!.id))
+    const rows = await ownerDb.select().from(encounterDiagnosis).where(eq(encounterDiagnosis.encounterId, fx.encounter.id))
+    expect(rows.map((row) => [row.siteCode, row.diagnosisType]).sort()).toEqual([
+      ["16", "confirmed"],
+      ["26", "provisional"],
+    ])
     await enable(false)
   })
 
