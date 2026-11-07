@@ -248,7 +248,7 @@ export interface CreatePortalGrantInput {
   patientId: string
   contactId: string
   relationship?: "self" | "guardian" | "family" | "other"
-  /** Ya no se elige (ADR 0150): se acepta y se ignora. */
+  /** Ya no se elige (ADR 0152): se acepta y se ignora. */
   scope?: IssuePortalLinkInput["scope"]
   verifiedMethod: string
   evidenceNote?: string | null
@@ -1046,7 +1046,7 @@ export async function getPortalAccessSummary(tx: Db, orgId: string, patientId: s
 export interface GivePortalAccessInput {
   /** ¿Quién entra? La persona o su representante legal. */
   contactId: string
-  /** Ya no se pregunta «Qué verá» (ADR 0150): se acepta y se ignora. */
+  /** Ya no se pregunta «Qué verá» (ADR 0152): se acepta y se ignora. */
   scope?: { appointments?: boolean; budgets?: boolean; account?: boolean; documentIds?: string[] }
   /** «Comprobé su identidad: vi su DNI 4•••••04». */
   identityChecked: boolean
@@ -1101,7 +1101,7 @@ async function deliverPortalAccess(
 /**
  * «Dar acceso al portal» en un paso (decisión 9): quién entra, la comprobación
  * en persona con su documento y cómo le llega, en una sola transacción. Lo que
- * verá no se elige (ADR 0150): todo lo suyo, con el límite de la clínica. El
+ * verá no se elige (ADR 0152): todo lo suyo, con el límite de la clínica. El
  * grant se crea con el método que corresponde (su documento, o la
  * representación de un menor), el enlace vale 3 días y el código de 6 dígitos
  * se le dice aparte.
@@ -1152,7 +1152,7 @@ export async function resendPortalAccess(
   actorUserId: string,
   grantId: string,
   /**
-   * `staffSees: false` (recepción, ADR 0150): solo por su WhatsApp, el código en
+   * `staffSees: false` (recepción, ADR 0152): solo por su WhatsApp, el código en
    * otro mensaje a la persona, y ni el enlace ni el código vuelven en la respuesta.
    */
   input: { delivery: "qr" | "whatsapp"; staffSees?: boolean },

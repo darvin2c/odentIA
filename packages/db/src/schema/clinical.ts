@@ -1322,6 +1322,10 @@ export const encounterProcedure = pgTable(
   },
   (table) => [
     ...diagnosisCodeRef("encounter_procedure", table),
+    // Las sesiones de un tratamiento (la comisión por sesión, ADR 0151).
+    index("encounter_procedure_plan_item_idx")
+      .on(table.organizationId, table.planItemId)
+      .where(sql`${table.planItemId} IS NOT NULL`),
     check("encounter_procedure_quantity_check", sql`${table.quantity} BETWEEN 1 AND 99`),
     check(
       "encounter_procedure_void_check",
@@ -2274,6 +2278,13 @@ export const patientCharge = pgTable(
      */
     taxCategory: text("tax_category"),
     taxBps: integer("tax_bps"),
+    /**
+     * Comisión de un tratamiento de varias sesiones (QA de comisiones,
+     * entrega 7): en cuántas partes iguales se reparte cada cobro, una por
+     * sesión. Se congela al crear el cargo con las sesiones previstas, para
+     * que editarlas después no reescriba lo ya pagado. Nulo es una sola parte.
+     */
+    commissionSessions: smallint("commission_sessions"),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
     voidedAt: timestamp("voided_at", { withTimezone: true }),
@@ -2286,11 +2297,19 @@ export const patientCharge = pgTable(
       .on(table.organizationId, table.originalChargeId)
       .where(sql`"original_charge_id" IS NOT NULL`),
     check("patient_charge_returned_check", sql`${table.returnedCents} >= 0`),
+    check(
+      "patient_charge_commission_sessions_check",
+      sql`${table.commissionSessions} IS NULL OR ${table.commissionSessions} BETWEEN 2 AND 60`,
+    ),
     uniqueIndex("patient_charge_org_request_key_uidx")
       .on(table.organizationId, table.requestKey)
       .where(sql`"request_key" IS NOT NULL`),
     index("patient_charge_org_patient_idx").on(table.organizationId, table.patientId),
     index("patient_charge_item_idx").on(table.organizationId, table.planItemId),
+    // Los cargos que reparten su comisión por sesión (pocos): se leen aparte del resto.
+    index("patient_charge_commission_sessions_idx")
+      .on(table.organizationId)
+      .where(sql`${table.commissionSessions} IS NOT NULL`),
     index("patient_charge_budget_item_idx").on(table.organizationId, table.budgetItemId),
     // Lo que se cobró de cada procedimiento (comisiones y Reportes › Finanzas).
     index("patient_charge_encounter_procedure_idx")

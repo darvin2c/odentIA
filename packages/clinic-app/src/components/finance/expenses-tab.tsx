@@ -22,6 +22,7 @@ import { Link } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { useMemo, useState } from "react"
 import { ExpenseRowsSkeleton, ExpensesTotalSkeleton } from "../skeletons/finance"
+import { FixedOfMonth, RecurringDueSection, useRecurringMonth } from "./recurring-due"
 import { VoidDrawer } from "./void-drawer"
 import { plainAmount } from "../../lib/commissions"
 import { usePermission } from "../../lib/crm"
@@ -98,6 +99,8 @@ export function ExpensesTab({
     queryKey: financeKeys.purchases(branchId),
     queryFn: () => fetchPurchasesToPay(branchId),
   })
+  // Lo que se repite: «Por pagar» y «Lo fijo del mes».
+  const recurring = useRecurringMonth(branchId, month, true)
   const voidMutation = useMutation({
     mutationFn: (input: { id: string; reason: string }) => voidExpenseApi(input.id, input.reason),
     onSuccess: () => {
@@ -166,7 +169,8 @@ export function ExpensesTab({
           )
         },
       },
-      { id: "tipo", header: "Tipo", cell: ({ row }) => <span>{row.original.category}</span> },
+      // En el teléfono también se ve el tipo y de dónde salió: son lo que se busca al revisar un gasto.
+      { id: "tipo", header: "Tipo", meta: { view: { primary: true } }, cell: ({ row }) => <span>{row.original.category}</span> },
       {
         id: "comprobante",
         header: "Comprobante",
@@ -175,6 +179,7 @@ export function ExpensesTab({
       {
         id: "salio",
         header: "Salió de",
+        meta: { view: { primary: true } },
         cell: ({ row }) => (
           <span>
             {!row.original.fromCash
@@ -301,6 +306,7 @@ export function ExpensesTab({
           <p className="mt-1 text-3xl leading-tight font-bold tracking-tight tabular-nums">
             {formatMoney(data.totalCents, data.currency || currency, locale)}
           </p>
+          <FixedOfMonth data={recurring.data?.data} locale={locale} />
           {data.byCategory.length > 0 ? (
             <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-3 border-t pt-4 sm:grid-cols-3 lg:grid-cols-5">
               {data.byCategory.map((entry) => (
@@ -317,6 +323,8 @@ export function ExpensesTab({
       ) : expenses.isPending ? (
         <ExpensesTotalSkeleton />
       ) : null}
+
+      <RecurringDueSection data={recurring.data?.data} locale={locale} canWrite={canWrite} />
 
       {unpaid && (unpaid.orders > 0 || unpaid.otherCurrencies.length > 0) ? (
         <Alert className="border-warning/40 bg-warning-soft">

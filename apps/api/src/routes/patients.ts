@@ -1191,7 +1191,7 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
       ),
     )
   })
-  // Si el archivo se ve en su portal, con la misma regla que «Tus documentos» (ADR 0150).
+  // Si el archivo se ve en su portal, con la misma regla que «Tus documentos» (ADR 0152).
   app.get("/:id/documents/:documentId/portal", async (c) => {
     const { orgId } = orgContextOf(c)
     return runService(c, 200, () =>
@@ -1200,7 +1200,7 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
       ),
     )
   })
-  // «No mostrar en su portal» (ADR 0150): quien escribe en la historia (`clinical.write`, la guarda de arriba).
+  // «No mostrar en su portal» (ADR 0152): quien escribe en la historia (`clinical.write`, la guarda de arriba).
   app.patch("/:id/documents/:documentId/portal", async (c) => {
     const { orgId, userId } = orgContextOf(c)
     const parsed = z

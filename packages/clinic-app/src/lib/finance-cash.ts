@@ -797,11 +797,103 @@ export function createExpenseApi(body: {
   receiptKind?: string
   receiptNumber?: string
   spentAt?: string
+  /** «Se repite»: queda la plantilla y este gasto es su primera ocurrencia. */
+  /** `month`: el mes que paga (`YYYY-MM`), este o el anterior. */
+  repeat?: { everyMonths: 1 | 6 | 12; day: number; memberUserId?: string | null; month?: string }
 }): Promise<{ data: { id: string } }> {
   return apiFetch<{ data: { id: string } }>("/api/finance/expenses", {
     method: "POST",
     body: JSON.stringify(body),
   })
+}
+
+// --- Gastos que se repiten ------------------------------------------------------------------
+
+/** Una ocurrencia por pagar: la de este mes o una vencida de meses anteriores. */
+export interface RecurringDue {
+  recurringId: string
+  /** `YYYY-MM`. */
+  month: string
+  /** El día de la plantilla (puede ser 31); `dueDay` es el de este mes. */
+  day: number
+  dueDay: number
+  dueOn: string
+  overdue: boolean
+  concept: string
+  category: string
+  memberUserId: string | null
+  memberName: string | null
+  amountCents: number
+  currency: string
+  fromCash: boolean
+  everyMonths: number
+}
+
+export interface RecurringTemplate {
+  id: string
+  branchId: string
+  category: string
+  concept: string
+  amountCents: number
+  currency: string
+  everyMonths: number
+  day: number
+  firstMonth: string
+  lastMonth: string | null
+  memberUserId: string | null
+  memberName: string | null
+  fromCash: boolean
+  nextMonth: string | null
+}
+
+export interface RecurringMonth {
+  year: number
+  month: number
+  currency: string
+  timezone: string
+  today: string
+  /** «Lo fijo del mes»: lo que cae en el mes, lo pagado y lo que falta. */
+  fixed: { totalCents: number; paidCents: number; dueCents: number; count: number }
+  due: RecurringDue[]
+  templates: RecurringTemplate[]
+}
+
+export function fetchRecurringMonth(query: { year: number; month: number; branchId?: string }): Promise<{ data: RecurringMonth }> {
+  const params = new URLSearchParams({ year: String(query.year), month: String(query.month) })
+  if (query.branchId) params.set("branchId", query.branchId)
+  return apiFetch<{ data: RecurringMonth }>(`/api/finance/expenses/recurring?${params}`)
+}
+
+export function fetchRecurringPeople(): Promise<{ data: Array<{ userId: string; name: string }> }> {
+  return apiFetch<{ data: Array<{ userId: string; name: string }> }>("/api/finance/expenses/recurring/people")
+}
+
+export function payRecurringApi(
+  id: string,
+  body: { month: string; amountCents?: number; fromCash?: boolean },
+): Promise<{ data: { id: string; amountCents: number; currency: string; fromCash: boolean } }> {
+  return apiFetch(`/api/finance/expenses/recurring/${id}/pay`, { method: "POST", body: JSON.stringify(body) })
+}
+
+export function skipRecurringApi(id: string, month: string, undo = false): Promise<unknown> {
+  return apiFetch(`/api/finance/expenses/recurring/${id}/${undo ? "unskip" : "skip"}`, {
+    method: "POST",
+    body: JSON.stringify({ month }),
+  })
+}
+
+export function updateRecurringApi(
+  id: string,
+  body: { concept?: string; amountCents?: number; day?: number; memberUserId?: string | null; fromCash?: boolean; lastMonth?: string | null },
+): Promise<unknown> {
+  return apiFetch(`/api/finance/expenses/recurring/${id}`, { method: "PATCH", body: JSON.stringify(body) })
+}
+
+/** `stillDue`: los meses de antes del fin que quedaron sin pagar y siguen por pagar. */
+export function endRecurringApi(
+  id: string,
+): Promise<{ data: { previousLastMonth: string | null; stillDue: string[] } }> {
+  return apiFetch(`/api/finance/expenses/recurring/${id}/end`, { method: "POST" })
 }
 
 /** Compras por pagar, lo que aún no llega y lo que se tiene a favor con cada proveedor. */

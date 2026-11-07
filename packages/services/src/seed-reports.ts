@@ -35,7 +35,7 @@ import {
 } from "@odentia/db/schema/clinical"
 import { medicalLeave } from "@odentia/db/schema/clinical-forms"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
-import { expense } from "@odentia/db/schema/finance"
+import { expense, expenseRecurring } from "@odentia/db/schema/finance"
 import { and, eq, inArray, sql } from "drizzle-orm"
 import { getOrgLocale } from "./locale.js"
 import { chargeTaxOf, orgTaxes } from "./clinic-taxes.js"
@@ -985,6 +985,10 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
     income.set(key, (income.get(key) ?? 0) + payment.amountCents)
   }
   const expenses: Array<typeof expense.$inferInsert> = []
+  // El alquiler, la planilla y los servicios se anotan como gastos que se repiten, con su historia
+  // enlazada mes a mes: así la demo muestra «por pagar» solo lo que de verdad falta este mes.
+  const REPEATING = new Set(["Planilla del mes", "Alquiler del local", "Luz, agua e internet"])
+  const templates = new Map<string, typeof expenseRecurring.$inferInsert & { id: string }>()
   // Del mes en curso, solo lo que ya se pagó (hasta donde llega la historia).
   for (let back = monthsBack; back >= 0; back -= 1) {
     const month: YearMonth = addMonths(current, -back)
@@ -1013,7 +1017,33 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
           ]
       for (const item of monthly) {
         const spentAt = new Date(start + (item.day - 1) * 86_400_000 + 15 * 3_600_000)
-        if (item.cents <= 0 || spentAt.getTime() > historyEnd) continue
+        // Lo que se repite se paga hasta hoy: cortarlo en la historia (dos días antes)
+        // dejaría «vencido» lo del día 1, 18 o 28 recién sembrado.
+        const until = REPEATING.has(item.concept) ? Date.now() : historyEnd
+        if (item.cents <= 0 || spentAt.getTime() > until) continue
+        const month = spentAt.toISOString().slice(0, 7)
+        let link: { recurringId: string; recurringMonth: string } | Record<string, never> = {}
+        if (REPEATING.has(item.concept)) {
+          const key = `${branch.id}|${item.concept}`
+          const template = templates.get(key) ?? {
+            id: randomUUID(),
+            organizationId: input.orgId,
+            branchId: branch.id,
+            category: item.category,
+            concept: item.concept,
+            amountCents: item.cents,
+            currency,
+            everyMonths: 1,
+            day: item.day,
+            firstMonth: month,
+            fromCash: false,
+            createdBy: input.ownerUserId,
+          }
+          // Se propone el último importe pagado.
+          template.amountCents = item.cents
+          templates.set(key, template)
+          link = { recurringId: template.id, recurringMonth: month }
+        }
         expenses.push({
           organizationId: input.orgId,
           branchId: branch.id,
@@ -1023,10 +1053,12 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
           currency,
           spentAt,
           createdBy: input.ownerUserId,
+          ...link,
         })
       }
     }
   }
+  if (templates.size > 0) await tx.insert(expenseRecurring).values([...templates.values()])
   for (const batch of chunks(expenses)) await tx.insert(expense).values(batch)
 
   // --- Feriados: la sede cerrada ese día ------------------------------------------------------

@@ -871,7 +871,7 @@ it("conexiones: la lista dice cómo está cada una; el alta a mano, la clave y l
     webhookVerifiedAt: null,
     health: null,
     // Los cinco con el botón de «Su enlace» no se piden sin la dirección pública de la clínica,
-    // y «Documento listo» espera el perfil de la clínica para armar su PDF de muestra (ADR 0150).
+    // y «Documento listo» espera el perfil de la clínica para armar su PDF de muestra (ADR 0152).
     messages: { aprobados: 0, enRevision: 14, rechazados: 0, pausados: 0, retirados: 0, sinPedir: 6 },
   })
   expect(typeof wa?.["lastInboundAt"]).toBe("string")
@@ -946,7 +946,7 @@ it("mensajes de WhatsApp: ver es de quien abre Configuración; comprobar, cambia
     ["ver_respuesta", "plan"],
     // «Recibido desde su enlace» lo envía el sistema cuando WhatsApp ya no deja responderle (ADR 0129).
     ["enlace_recibido", "plan"],
-    // «Documento listo» lleva el PDF de un papel a quien no escribió en 24 horas (ADR 0150).
+    // «Documento listo» lleva el PDF de un papel a quien no escribió en 24 horas (ADR 0152).
     ["documento_listo", "plan"],
   ])
   expect((await reception.request(base)).status).toBe(403)

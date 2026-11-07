@@ -2,6 +2,8 @@
 
 Fecha: 2026-10-16 · **Estado:** aceptada (fase 3, paso 3; tablero 3 y decisiones 2, 4, 5, 12 y 13 del lienzo) · Ajusta [0029](0029-una-persona-una-pagina.md): las secciones de la página de la persona.
 
+Precisada por [0151](0151-presupuesto-con-caminos.md): los caminos se marcan en la atención, lo común se responde sin elegir y el odontólogo lee el presupuesto de su colega.
+
 ## Problema
 
 Lo que la clínica propone a una persona estaba repartido en cuatro sitios: Plan (planes y presupuestos), Clínica › Tratamientos (el recorrido), Clínica › Controles y Citas › Tratamiento (la coordinación de recepción), más los presupuestos dentro de Cobros para caja. Cada uno decía el estado con otras palabras («Pospuesto», «Lo piensa», «Lo está pensando»). Un mismo plan podía tener varios borradores de presupuesto que nadie enviaba, y «Te espera» no avisaba de ninguno. Las alternativas («resina o corona») se sumaban como si fueran dos tratamientos y la persona nunca las veía. Recepción no podía enviar ni anotar la respuesta, y enviar dependía de quien podía cambiar precios.

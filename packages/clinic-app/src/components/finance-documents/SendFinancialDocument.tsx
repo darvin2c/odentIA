@@ -27,7 +27,7 @@ import { ChoiceSelect } from "../ui/choice-select"
  * Qué se envía: un documento de cobro (ticket, presupuesto, devolución), con
  * las rutas y permisos de caja y presupuestos, o un papel de salud (receta,
  * orden, descanso, hoja de atención, consentimiento firmado), con los de la
- * historia. El cajón es el mismo para todos (ADR 0150): a quién, por dónde y
+ * historia. El cajón es el mismo para todos (ADR 0152): a quién, por dónde y
  * qué le llega, y si nada sirve, imprimir.
  */
 export type SendDocumentSource =
@@ -185,7 +185,7 @@ function printPdf(bytes: ArrayBuffer | Uint8Array): void {
 }
 
 /**
- * «Enviar»: el mismo cajón para todos los papeles (ADR 0150). Dice a quién va,
+ * «Enviar»: el mismo cajón para todos los papeles (ADR 0152). Dice a quién va,
  * por dónde y qué le llega por cada canal, con el motivo de los que no sirven
  * en palabras de la clínica. Manda el PDF (el mismo que se imprime) y lo deja
  * en la conversación de la persona; pasadas las 24 horas de WhatsApp, con el

@@ -20,6 +20,9 @@ import {
   listCommissionSettlements,
   listMonthCommissions,
   payMonthCommission,
+  commissionsOwedByMonth,
+  myAttendedUnpaid,
+  setCommissionException,
   setCommissionRate,
   voidCommissionSettlement,
 } from "@odentia/services"
@@ -100,6 +103,31 @@ export function createCommissionsRoute(deps: Pick<CrmDeps, "db">) {
     )
   })
 
+  // --- Otro porcentaje o un monto fijo para un servicio (ADR 0151) -------------------
+  // Sin `rateBps` ni `fixedCents`, se quita: vuelve al porcentaje general.
+  app.put("/exceptions", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "commissions.write")) return forbid(c)
+    const parsed = z
+      .object({
+        professionalUserId: z.string().min(1, "Elige a la persona."),
+        serviceId: z.string().min(1, "Elige el servicio."),
+        rateBps: z
+          .number()
+          .int("Escribe un porcentaje con dos decimales como máximo.")
+          .min(0, "Escribe un porcentaje entre 0 y 100.")
+          .max(10000, "Escribe un porcentaje entre 0 y 100.")
+          .nullish(),
+        fixedCents: z.number().int().positive("Escribe un monto mayor que cero.").max(2147483647).nullish(),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => setCommissionException(tx, orgId, userId, parsed.data)),
+    )
+  })
+
   // --- El mes de toda la clínica (administración) ----------------------------------
   app.get("/month", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
@@ -139,8 +167,20 @@ export function createCommissionsRoute(deps: Pick<CrmDeps, "db">) {
     const parsed = period.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => getMyCommissions(tx, orgId, userId, parsed.data)),
+      withOrgContext(deps.db, orgId, async (tx) => ({
+        ...(await getMyCommissions(tx, orgId, userId, parsed.data)),
+        // Lo atendido que aún no se cobra: su comisión llega cuando se cobre.
+        attended: await myAttendedUnpaid(tx, orgId, userId, parsed.data),
+      })),
     )
+  })
+
+  // --- Lo que falta pagar de todos los meses (administración) ------------------------
+  app.get("/owed", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "commissions.write"))
+      return forbid(c, "Solo administración ve las comisiones de todos")
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => commissionsOwedByMonth(tx, orgId)))
   })
 
   // --- Registrar el pago: un solo paso (congela los cobros y deja el gasto) ----------
@@ -155,10 +195,13 @@ export function createCommissionsRoute(deps: Pick<CrmDeps, "db">) {
         branchId: z.uuid("Elige la sede del gasto."),
         notes: z.string().max(2000).nullish(),
         expectedCents: z.number().int().nonnegative().optional(),
+        fromCash: z.boolean().optional(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
+    // Sacar de la caja es mover efectivo: pide lo mismo que un gasto de la caja.
+    if (parsed.data.fromCash && !canAccess(memberRole, "finance.write")) return forbid(c)
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) => payMonthCommission(tx, orgId, userId, parsed.data)),
     )

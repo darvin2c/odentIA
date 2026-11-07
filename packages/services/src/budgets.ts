@@ -11,6 +11,8 @@ import {
   productWords,
   type SignatureStrokes,
   sumAcceptedByCurrency,
+  type BudgetChange,
+  budgetChanges,
   sumAcceptedCents,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
@@ -37,7 +39,7 @@ import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { promotion as promotionTable } from "@odentia/db/schema/promotions"
 import { and, asc, desc, eq, inArray, isNull, type SQL, type SQLWrapper, sql } from "drizzle-orm"
 import { livePersonalLinkToken } from "./booking-links.js"
-import { budgetAwaitsAnswer } from "./budget-awaiting.js"
+import { budgetAwaitsAnswer, OPEN_LINE_DECISIONS } from "./budget-awaiting.js"
 import { documentSecretsKey } from "./document-check.js"
 import { type DocumentClinic, loadDocumentClinic } from "./document-clinic.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
@@ -208,6 +210,11 @@ export type BudgetWithTotals = Omit<BudgetPublicRow, "currency"> & {
   awaitsAnswer: boolean
   /** El estado dicho con un solo nombre en toda la aplicación (`budgetStateText`). */
   stateText: string
+  /**
+   * Quien pregunta puede cambiarlo, enviarlo o anularlo. El odontólogo lee los de
+   * sus colegas, pero solo cambia lo suyo (`ownBudgetSql`); el resto, según su permiso.
+   */
+  canChange: boolean
 }
 
 /** Quién actúa en la ruta: el servidor limita al odontólogo a lo que indicó. */
@@ -689,13 +696,16 @@ function withTotals(
     items,
     options,
     totalCents: value ? value.totalCents : 0,
-    // Regla compartida con la vista previa de la interfaz (`@odentia/clinical`):
-    // solo la opción elegida tiene líneas aceptadas.
-    acceptedCents: one ? sumAcceptedCents(items) : null,
+    // Lo aceptado de la opción que vale: lo común aceptado sin elegir camino
+    // está en todas las opciones y se cuenta una vez.
+    acceptedCents: one
+      ? sumAcceptedCents(value ? items.filter((line) => line.optionId === value.id) : items)
+      : null,
     tariffTotalCents: value ? value.tariffTotalCents : 0,
     discountCents: value ? value.discountCents : 0,
     awaitsAnswer: budgetAwaitsAnswer({ status: budget.status, items }),
     stateText: budgetStateText({ status: budget.status, items, options }),
+    canChange: true,
   }
 }
 
@@ -1207,9 +1217,10 @@ async function insertDraftBudget(
   plan: typeof treatmentPlan.$inferSelect,
   input: { title?: string | null; notes?: string | null },
 ): Promise<{ budget: BudgetRow; option: BudgetOptionRow }> {
-  const title = assertTitle(input.title, plan.title)
   const notes = assertNotes(input.notes) ?? null
   const budgetNumber = await nextBudgetNumber(tx, orgId)
+  // Sin título propio se llama por su número: no repite el nombre del plan.
+  const title = assertTitle(input.title, `Presupuesto N.º ${budgetNumber}`)
   const [budget] = await tx
     .insert(treatmentBudget)
     .values({
@@ -1583,17 +1594,8 @@ export async function getBudgetPresentation(
   budgetId: string,
   opts: BudgetActorOpts & { actorUserId?: string; clinicalAccess: boolean },
 ): Promise<BudgetPresentation> {
+  // Se lee como el presupuesto: el odontólogo también el de su colega.
   const budget = await requireBudget(tx, orgId, patientId, budgetId)
-  if (opts.actorUserId) {
-    await assertOwnBudget(
-      tx,
-      orgId,
-      budgetId,
-      opts.actorUserId,
-      opts.memberRole,
-      "Solo puedes ver presupuestos de lo que indicaste tú",
-    )
-  }
   const lines = await listBudgetLines(tx, orgId, patientId, budgetId)
   const options = await listOptions(tx, orgId, [budgetId])
   const services = await servicesOf(
@@ -1982,7 +1984,7 @@ export async function deliverBudget(
     orgId,
     lines.map((line) => line.serviceId),
   )
-  const [updated] = await tx
+  const [presented] = await tx
     .update(treatmentBudget)
     .set({ status: "presentado", presentedAt: new Date(), updatedAt: new Date(), validUntil, deliveredSnapshot })
     .where(
@@ -1993,7 +1995,8 @@ export async function deliverBudget(
       ),
     )
     .returning()
-  if (!updated) throw notFound("Presupuesto")
+  if (!presented) throw notFound("Presupuesto")
+  let delivered = presented
   if (current.supersedesBudgetId) {
     const previous = await lockBudgetRow(tx, orgId, patientId, current.supersedesBudgetId)
     if (!["presentado", "aceptado", "parcial", "pospuesto"].includes(previous.status)) {
@@ -2010,6 +2013,8 @@ export async function deliverBudget(
       .update(treatmentBudget)
       .set({ status: "sustituido", updatedAt: new Date() })
       .where(and(eq(treatmentBudget.id, previous.id), eq(treatmentBudget.organizationId, orgId)))
+    // Solo se vuelve a preguntar por lo que cambió (lo hecho y lo aceptado igual siguen).
+    delivered = await carryRevisionAnswers(tx, orgId, patientId, delivered, previous)
     await tx
       .update(treatmentPlanItem)
       .set({ budgetId, updatedAt: new Date() })
@@ -2035,7 +2040,7 @@ export async function deliverBudget(
   // que pasa a «Presupuesto enviado» (ADR 0028); sin ninguna, abre la suya a
   // nombre de quien lo entregó (ADR 0144). Mientras decide, vale lo de la
   // opción recomendada (decisión 13).
-  const full = withTotals(updated, lines, options, "")
+  const full = withTotals(delivered, lines, options, "")
   await linkPresentedBudget(tx, orgId, {
     patientId,
     budgetId,
@@ -2048,12 +2053,29 @@ export async function deliverBudget(
       userId: actorUserId,
       ...budgetInterest(
         lines.filter((line) => line.optionId === (valueOptionOf(options)?.id ?? line.optionId)),
-        updated.title,
+        delivered.title,
       ),
     },
   })
+  // Lo que la revisión ya trae respondido decide su oportunidad como una respuesta.
+  if (delivered.status !== "presentado") {
+    const carriedLines = await listBudgetLines(tx, orgId, patientId, budgetId)
+    const valuedNow = valueOptionOf(await listOptions(tx, orgId, [budgetId]))
+    const own = carriedLines.filter((line) => !valuedNow || line.optionId === valuedNow.id)
+    const finals = new Map(own.map((line) => [line.planItemId, line.decision] as const))
+    await decideBudgetOpportunity(tx, orgId, {
+      patientId,
+      budgetId,
+      status: delivered.status,
+      awaitsAnswer: budgetAwaitsAnswer({ status: delivered.status, items: carriedLines }),
+      serviceIds: [...new Set(own.map((line) => line.serviceId).filter((id): id is string => !!id))],
+      accepted: await acceptedValueOf(tx, orgId, own, finals),
+      waiting: await waitingValueOf(tx, orgId, own, finals),
+      title: budgetInterest(own, delivered.title).title,
+    })
+  }
   await notifyBudget(tx, orgId)
-  return withoutFindings(updated)
+  return withoutFindings(delivered)
 }
 
 /**
@@ -2156,6 +2178,13 @@ export async function adjustBudgetLines(
     seen[key] = true
   }
   const lines = await listBudgetLines(tx, orgId, patientId, budgetId)
+  // Lo ya hecho o cobrado conserva su precio: se cobró así (una revisión no lo cambia).
+  const used = await usedPlanItems(
+    tx,
+    orgId,
+    patientId,
+    lines.map((line) => line.planItemId),
+  )
   const now = new Date()
   const changes: Array<Record<string, unknown>> = []
   for (const [index, patch] of input.lines.entries()) {
@@ -2166,7 +2195,9 @@ export async function adjustBudgetLines(
     )
     if (targets.length === 0) throw notFound("Línea del presupuesto")
     for (const line of targets)
-      changes.push(await adjustOneLine(tx, orgId, line, patch, now, `lines[${index}]`))
+      changes.push(
+        await adjustOneLine(tx, orgId, line, patch, now, `lines[${index}]`, used.has(line.planItemId)),
+      )
   }
   await audit(tx, orgId, actorUserId, "budget.prices_adjusted", budgetId, {
     patientId,
@@ -2185,6 +2216,8 @@ async function adjustOneLine(
   patch: AdjustBudgetLineInput,
   now: Date,
   at: string,
+  /** Ya se hizo o se cobró: nada de su precio cambia. */
+  locked = false,
 ): Promise<Record<string, unknown>> {
   let priceCents = line.priceCents
   let priceReason = line.priceReason
@@ -2272,6 +2305,10 @@ async function adjustOneLine(
     }
   }
   lineTotal({ billingMode: line.billingMode, sessionsPlanned }, priceCents)
+  if (locked && (priceCents !== line.priceCents || promotionId !== line.promotionId)) {
+    const message = `«${line.title}» ya se hizo o se cobró: su precio no cambia`
+    throw new ServiceError("BUDGET_LINE_USED", 409, message, { [`${at}.priceCents`]: message })
+  }
   await tx
     .update(treatmentBudgetItem)
     .set({
@@ -2304,11 +2341,15 @@ async function adjustOneLine(
 // ----------------------------------------------------------------- decidir ---
 
 /**
- * Anota la respuesta de quien decide. Con varias opciones, primero se elige
- * una (`optionId`): las demás quedan «No elegida» solas, y lo que solo estaba
- * en ellas también. Dentro de la elegida, cada tratamiento se acepta, se deja
- * para después o no se acepta. Un parcial o pospuesto admite completar lo que
- * quedó para después sin reescribir lo ya decidido.
+ * Anota la respuesta de quien decide. Con varias opciones (los caminos), se
+ * puede elegir una (`optionId`): las demás quedan «No elegida» solas, y lo que
+ * solo estaba en ellas también. Sin elegir, se responde lo común a todas (el
+ * mismo tratamiento con las mismas condiciones en cada una: se sabe qué precio
+ * vale) y lo de cada camino solo se deja para después o se rechaza: aceptarlo
+ * es elegir su camino. Cada tratamiento se acepta, se deja para después o no se
+ * acepta. Lo que ya tiene respuesta no se reescribe; lo que espera (nadie lo
+ * respondió o lo está pensando) se completa después, y entonces también se
+ * puede elegir el camino.
  *
  * `actorUserId` es quien del equipo anota la respuesta; `null` cuando decide la
  * propia persona (el portal) o el agente con su confirmación: el presupuesto no
@@ -2333,8 +2374,8 @@ export async function decideBudget(
     await assertOwnBudget(tx, orgId, budgetId, actorUserId, opts.memberRole)
   }
   const current = await lockBudgetRow(tx, orgId, patientId, budgetId)
-  // Responder después: un parcial/pospuesto admite completar lo pospuesto sin
-  // reescribir lo ya decidido; otra autoridad no pisa la decisión registrada.
+  // Responder después: un parcial/pospuesto admite completar lo que espera
+  // sin reescribir lo ya decidido; otra autoridad no pisa la decisión registrada.
   const isFollowUp = current.status === "parcial" || current.status === "pospuesto"
   if (current.status !== "presentado" && !isFollowUp) {
     throw conflict("BUDGET_STATUS", "Solo un presupuesto presentado puede decidirse")
@@ -2342,7 +2383,7 @@ export async function decideBudget(
   const decisionNote = assertNotes(input.decisionNote, "decisionNote") ?? null
   const options = await listOptions(tx, orgId, [budgetId])
   const already = options.find((option) => option.decision === "elegida") ?? null
-  let chosen: BudgetOptionRow
+  let chosen: BudgetOptionRow | null
   if (already) {
     if (input.optionId && input.optionId !== already.id) {
       const message = "Ya eligió otra opción: para cambiarla se crea una revisión"
@@ -2351,20 +2392,30 @@ export async function decideBudget(
     chosen = already
   } else if (options.length === 1) {
     chosen = options[0]!
-  } else {
+  } else if (input.optionId) {
     const picked = options.find((option) => option.id === input.optionId)
     if (!picked) throw invalidField("optionId", "Elige una de las opciones del presupuesto")
     chosen = picked
+  } else {
+    // Sin elegir camino: se responde lo común y lo de cada camino espera.
+    chosen = null
   }
   const allLines = await listBudgetLines(tx, orgId, patientId, budgetId)
-  const lines = allLines.filter((line) => line.optionId === chosen.id)
-  if (!Array.isArray(input.decisions) || input.decisions.length !== lines.length) {
+  // Lo que se responde: las líneas de la opción elegida o, sin elegir, cada
+  // tratamiento una vez (con la línea de la opción que vale, si la tiene).
+  const valued = valueOptionOf(options)
+  const lines = chosen
+    ? allLines.filter((line) => line.optionId === chosen.id)
+    : uniqueByItem(allLines, valued?.id ?? null)
+  const common = commonPlanItems(allLines, options.length)
+  const isOpen = (decision: string) => (OPEN_LINE_DECISIONS as readonly string[]).includes(decision)
+  if (!Array.isArray(input.decisions) || input.decisions.length > lines.length) {
     throw invalidField("decisions", "Debe decidir cada línea exactamente una vez")
   }
   const decisions = new Map(input.decisions.map((d) => [d.planItemId, d.decision]))
   if (
-    decisions.size !== lines.length ||
-    lines.some((l) => !decisions.has(l.planItemId)) ||
+    decisions.size !== input.decisions.length ||
+    input.decisions.some((d) => !lines.some((line) => line.planItemId === d.planItemId)) ||
     input.decisions.some((d) => !["aceptado", "rechazado", "pospuesto"].includes(d.decision))
   ) {
     throw invalidField("decisions", "Debe decidir cada línea exactamente una vez")
@@ -2372,6 +2423,31 @@ export async function decideBudget(
   // La respuesta de un tratamiento en el cuerpo (`decisions[1].decision`), para decir el rechazo junto a ella.
   const decisionField = (planItemId: string) =>
     `decisions[${input.decisions.findIndex((d) => d.planItemId === planItemId)}].decision`
+  for (const line of lines) {
+    const next = decisions.get(line.planItemId)
+    if (isOpen(line.decision)) {
+      if (!next) throw invalidField("decisions", "Debe decidir cada línea exactamente una vez")
+      continue
+    }
+    // Lo ya respondido no se reescribe: puede repetirse igual u omitirse.
+    if (next && next !== line.decision) {
+      const message = "Lo ya decidido no se reescribe al completar"
+      throw new ServiceError("BUDGET_DECISION_FINAL", 409, message, {
+        [decisionField(line.planItemId)]: message,
+      })
+    }
+  }
+  if (!chosen) {
+    // Aceptar lo de un solo camino es elegirlo: sin elegir, solo lo común se acepta.
+    for (const line of lines) {
+      if (decisions.get(line.planItemId) === "aceptado" && isOpen(line.decision) && !common.has(line.planItemId)) {
+        const message = `«${line.title}» es de un camino: para aceptarlo, elige ese camino`
+        throw new ServiceError("BUDGET_OPTION_REQUIRED", 409, message, {
+          [decisionField(line.planItemId)]: message,
+        })
+      }
+    }
+  }
   const representative = input.decidedByContactId
     ? await requireDecisionContact(
         tx,
@@ -2390,17 +2466,6 @@ export async function decideBudget(
       const message = "Solo quien decidió puede completar su respuesta"
       throw new ServiceError("BUDGET_DECISION_OWNER", 409, message, { decidedByContactId: message })
     }
-    for (const line of lines) {
-      if (line.decision !== "pospuesto") {
-        const next = decisions.get(line.planItemId)
-        if (next !== line.decision) {
-          const message = "Lo ya decidido no se reescribe al completar"
-          throw new ServiceError("BUDGET_DECISION_FINAL", 409, message, {
-            [decisionField(line.planItemId)]: message,
-          })
-        }
-      }
-    }
   }
   const items = await tx
     .select()
@@ -2415,8 +2480,18 @@ export async function decideBudget(
     .orderBy(asc(treatmentPlanItem.id))
     .for("update")
   const chosenItems = new Set(lines.map((line) => line.planItemId))
+  if (chosen && !already && options.length > 1 && !lines.some((line) => isOpen(line.decision))) {
+    const message = "Ese camino ya no tiene nada por responder"
+    throw new ServiceError("BUDGET_DECISION_FINAL", 409, message, { optionId: message })
+  }
+  // Lo que se escribe ahora: solo lo que esperaba respuesta.
+  const answering = new Map(
+    lines
+      .filter((line) => isOpen(line.decision))
+      .map((line) => [line.planItemId, decisions.get(line.planItemId)!] as const),
+  )
   for (const item of items) {
-    const decision = decisions.get(item.id)
+    const decision = answering.get(item.id)
     if (!decision) continue
     if (["cancelado", "reemplazado"].includes(item.status)) {
       const message = "La indicación está cerrada"
@@ -2439,26 +2514,35 @@ export async function decideBudget(
     decidedByContactId: representative?.id ?? null,
     decidedByName: representative?.displayName ?? null,
   }
-  for (const line of lines) {
-    const decision = decisions.get(line.planItemId)!
+  for (const [planItemId, decision] of answering) {
+    // Con un camino elegido, la línea de esa opción; sin elegir, la del
+    // tratamiento en cada camino: la misma respuesta en todos.
+    const targets = (chosen ? lines : allLines).filter((line) => line.planItemId === planItemId)
     await tx
       .update(treatmentBudgetItem)
       .set({ decision, updatedAt: now })
       .where(
-        and(eq(treatmentBudgetItem.id, line.id), eq(treatmentBudgetItem.organizationId, orgId)),
+        and(
+          eq(treatmentBudgetItem.organizationId, orgId),
+          inArray(
+            treatmentBudgetItem.id,
+            targets.map((line) => line.id),
+          ),
+        ),
       )
+    // Una sola escritura de la decisión del tratamiento: la de quien anota la respuesta.
     await tx
       .update(treatmentPlanItem)
       .set({ decisionStatus: decision, decisionNote, ...who, updatedAt: now })
       .where(
         and(
-          eq(treatmentPlanItem.id, line.planItemId),
+          eq(treatmentPlanItem.id, planItemId),
           eq(treatmentPlanItem.organizationId, orgId),
           eq(treatmentPlanItem.patientId, patientId),
         ),
       )
   }
-  if (!already) {
+  if (chosen && !already) {
     // Elegir una opción: las demás quedan «No elegida» solas, y lo que solo
     // estaba en ellas también (no es un «no»: nunca lo vio como su camino).
     await tx
@@ -2528,22 +2612,29 @@ export async function decideBudget(
       }
     }
   }
-  const acceptedCount = input.decisions.filter((d) => d.decision === "aceptado").length
+  // La respuesta de cada tratamiento después de anotar: lo de antes y lo de ahora.
+  const finals = new Map(
+    lines.map((line) => [line.planItemId, answering.get(line.planItemId) ?? line.decision] as const),
+  )
+  const finalOf = (line: { planItemId: string; decision: string }) =>
+    finals.get(line.planItemId) ?? line.decision
+  const answers = [...finals.values()]
+  const acceptedCount = answers.filter((d) => d === "aceptado").length
   const status: BudgetStatus =
-    acceptedCount === lines.length
+    acceptedCount === answers.length
       ? "aceptado"
       : acceptedCount > 0
         ? "parcial"
-        : input.decisions.some((d) => d.decision === "pospuesto")
+        : answers.some((d) => d === "pospuesto")
           ? "pospuesto"
           : "rechazado"
   const [updated] = await tx
     .update(treatmentBudget)
     .set({
       status,
-      acceptedByName: representative?.displayName ?? null,
-      decisionContactId: representative?.id ?? null,
-      decisionNote,
+      acceptedByName: representative?.displayName ?? (isFollowUp ? current.acceptedByName : null),
+      decisionContactId: representative?.id ?? (isFollowUp ? current.decisionContactId : null),
+      decisionNote: decisionNote ?? (isFollowUp ? current.decisionNote : null),
       decidedAt: now,
       decidedBy: actorUserId,
       // Sin canal y con alguien del equipo: lo anotó la clínica.
@@ -2565,24 +2656,110 @@ export async function decideBudget(
     status,
     acceptedCount,
     decisionContactId: representative?.id ?? null,
-    ...(options.length > 1 ? { option: chosen.position } : {}),
+    ...(options.length > 1 ? { option: chosen?.position ?? null } : {}),
     ...(opts.via ? { via: opts.via } : {}),
   })
-  // Aceptarlo, aunque sea en parte, gana su oportunidad; rechazarlo la pierde.
+  // Lo que vale: el camino elegido o, mientras decide, el recomendado.
+  const own = chosen ? lines : allLines.filter((line) => line.optionId === valued?.id)
+  // Espera respuesta si algo de lo respondido sigue abierto, de cualquier camino.
+  const awaitsAnswer = budgetAwaitsAnswer({
+    status,
+    items: lines.map((line) => ({ decision: finalOf(line) })),
+  })
+  // Aceptarlo gana su oportunidad y rechazarlo la pierde cuando ya no le queda
+  // nada por responder; mientras algo espera (lo está pensando), sigue abierta.
   await decideBudgetOpportunity(tx, orgId, {
     patientId,
     budgetId,
     status,
+    awaitsAnswer,
     serviceIds: [
-      ...new Set(lines.map((line) => line.serviceId).filter((id): id is string => !!id)),
+      ...new Set(own.map((line) => line.serviceId).filter((id): id is string => !!id)),
     ],
     // Lo que de verdad aceptó: el valor de la oportunidad ganada (en parte, lo aceptado).
-    accepted: await acceptedValueOf(tx, orgId, lines, decisions),
+    accepted: await acceptedValueOf(tx, orgId, own, finals),
+    // Lo que sigue esperando: el valor de la que queda abierta.
+    waiting: await waitingValueOf(tx, orgId, own, finals),
     // La que nació de él lleva por nombre lo de la opción elegida (ADR 0144).
-    title: budgetInterest(lines, current.title).title,
+    title: budgetInterest(own, current.title).title,
   })
   await notifyBudget(tx, orgId)
   return loadBudget(tx, orgId, patientId, updated)
+}
+
+/**
+ * Lo común a todas las opciones: el mismo tratamiento en cada una, con las
+ * mismas condiciones (precio, cobro, sesiones y promoción). Se acepta sin
+ * elegir camino porque se sabe qué precio vale.
+ */
+export function commonPlanItems(
+  lines: ReadonlyArray<{
+    planItemId: string
+    optionId: string
+    priceCents: number | null
+    billingMode: string
+    sessionsPlanned: number | null
+    promotionId: string | null
+  }>,
+  optionCount: number,
+): Set<string> {
+  type Line = (typeof lines)[number]
+  const byItem = new Map<string, Line[]>()
+  for (const line of lines) byItem.set(line.planItemId, [...(byItem.get(line.planItemId) ?? []), line])
+  const out = new Set<string>()
+  for (const [planItemId, own] of byItem) {
+    if (new Set(own.map((line) => line.optionId)).size !== optionCount) continue
+    const [first] = own
+    if (
+      first &&
+      own.every(
+        (line) =>
+          line.priceCents === first.priceCents &&
+          line.billingMode === first.billingMode &&
+          line.sessionsPlanned === first.sessionsPlanned &&
+          line.promotionId === first.promotionId,
+      )
+    )
+      out.add(planItemId)
+  }
+  return out
+}
+
+/** Una línea por tratamiento: la de la opción que vale si la tiene; si no, la primera. */
+function uniqueByItem<T extends { planItemId: string; optionId: string }>(
+  lines: readonly T[],
+  valuedOptionId: string | null,
+): T[] {
+  const out = new Map<string, T>()
+  for (const line of lines) {
+    const seen = out.get(line.planItemId)
+    if (!seen || (seen.optionId !== valuedOptionId && line.optionId === valuedOptionId))
+      out.set(line.planItemId, line)
+  }
+  return [...out.values()]
+}
+
+/** Lo que sigue esperando respuesta, como valor de la oportunidad que queda abierta. */
+async function waitingValueOf(
+  tx: Db,
+  orgId: string,
+  lines: BudgetLineWithStatus[],
+  decisions: ReadonlyMap<string, string>,
+): Promise<{ cents: number | null; currency: string } | undefined> {
+  const waiting = lines.filter((line) =>
+    (OPEN_LINE_DECISIONS as readonly string[]).includes(
+      decisions.get(line.planItemId) ?? line.decision,
+    ),
+  )
+  if (waiting.length === 0) return undefined
+  const totals = sumAcceptedByCurrency(
+    waiting.map((line) => ({
+      lineTotalCents: line.lineTotalCents,
+      decision: "aceptado",
+      currency: line.currency,
+    })),
+  )
+  return totals.length > 0 ? opportunityValueOf(tx, orgId, totals) : undefined
 }
 
 /** Lo aceptado como valor de la oportunidad; si solo se aceptó una moneda, esa tal cual. */
@@ -2720,8 +2897,9 @@ export async function listBudgets(
     eq(treatmentBudget.organizationId, orgId),
   ]
   if (planId) conditions.push(eq(treatmentBudget.planId, planId))
-  if (isProfessional(opts.memberRole) && opts.actorUserId)
-    conditions.push(ownBudgetSql(opts.actorUserId))
+  // El odontólogo lee también los de sus colegas: es contexto de su paciente.
+  // Cambiarlos, enviarlos o anularlos sigue siendo de quien los preparó.
+  const own = await ownBudgetIds(tx, orgId, patientId, opts)
   const budgets = await tx
     .select()
     .from(treatmentBudget)
@@ -2735,16 +2913,38 @@ export async function listBudgets(
   const result: BudgetWithTotals[] = []
   for (const budget of budgets) {
     const lines = await listBudgetLines(tx, orgId, patientId, budget.id)
-    result.push(
-      withTotals(
+    result.push({
+      ...withTotals(
         budget,
         lines,
         options.filter((option) => option.budgetId === budget.id),
         await emptyCurrencyOf(tx, orgId, lines),
       ),
-    )
+      canChange: own === null || own.has(budget.id),
+    })
   }
   return result
+}
+
+/** Los presupuestos propios del odontólogo de esa persona; `null` si no tiene esa restricción. */
+async function ownBudgetIds(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  opts: BudgetActorOpts & { actorUserId?: string },
+): Promise<Set<string> | null> {
+  if (!isProfessional(opts.memberRole) || !opts.actorUserId) return null
+  const rows = await tx
+    .select({ id: treatmentBudget.id })
+    .from(treatmentBudget)
+    .where(
+      and(
+        eq(treatmentBudget.organizationId, orgId),
+        eq(treatmentBudget.patientId, patientId),
+        ownBudgetSql(opts.actorUserId),
+      ),
+    )
+  return new Set(rows.map((row) => row.id))
 }
 
 export async function getBudgetDetail(
@@ -2755,17 +2955,8 @@ export async function getBudgetDetail(
   opts: BudgetActorOpts & { actorUserId?: string } = {},
 ): Promise<BudgetWithTotals> {
   const budget = await requireBudget(tx, orgId, patientId, budgetId)
-  if (opts.actorUserId) {
-    await assertOwnBudget(
-      tx,
-      orgId,
-      budgetId,
-      opts.actorUserId,
-      opts.memberRole,
-      "Solo puedes ver presupuestos de lo que indicaste tú",
-    )
-  }
-  return loadBudget(tx, orgId, patientId, budget)
+  const own = await ownBudgetIds(tx, orgId, patientId, opts)
+  return { ...(await loadBudget(tx, orgId, patientId, budget)), canChange: own === null || own.has(budgetId) }
 }
 
 /**
@@ -2836,9 +3027,197 @@ async function assertRetainedExecutedItems(
 }
 
 /**
+ * Una línea de la revisión: conserva lo acordado del tratamiento en la versión
+ * anterior, salvo una promoción que ya terminó (esa línea vuelve a su tarifa y
+ * queda a la vista en el borrador). Lo nuevo toma su precio y su modo de cobro.
+ */
+async function insertRevisionLine(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  input: {
+    planId: string
+    budgetId: string
+    optionId: string
+    item: typeof treatmentPlanItem.$inferSelect
+    carried: BudgetLineWithStatus | null
+    billingModes: Record<string, string>
+    revisedAt: Date
+    /** Ya se hizo o se cobró: lo acordado no cambia, ni por una promoción que terminó. */
+    keepTerms?: boolean
+  },
+): Promise<void> {
+  const { item, carried } = input
+  const snapshot = carried ?? item
+  let promotion = carried?.promotionId
+    ? { id: carried.promotionId, name: carried.promotionName, mode: carried.promotionMode }
+    : null
+  let priceCents = snapshot.priceCents
+  let priceReason = carried?.priceReason ?? null
+  if (promotion && !input.keepTerms) {
+    const [promo] = await tx
+      .select()
+      .from(promotionTable)
+      .where(and(eq(promotionTable.id, promotion.id), eq(promotionTable.organizationId, orgId)))
+      .limit(1)
+    if (!promo || !isPromotionLive(promo, input.revisedAt)) {
+      promotion = null
+      priceCents = carried?.tariffPriceCents ?? item.priceCents
+      priceReason = null
+    }
+  }
+  await tx.insert(treatmentBudgetItem).values({
+    organizationId: orgId,
+    patientId,
+    planId: input.planId,
+    budgetId: input.budgetId,
+    optionId: input.optionId,
+    planItemId: item.id,
+    serviceId: snapshot.serviceId,
+    title: snapshot.title,
+    scope: snapshot.scope,
+    siteSystem: snapshot.siteSystem,
+    siteCode: snapshot.siteCode,
+    siteQualifiers: snapshot.siteQualifiers,
+    codings: snapshot.codings,
+    priceCents,
+    tariffPriceCents: carried?.tariffPriceCents ?? item.priceCents,
+    priceReason,
+    promotionId: promotion?.id ?? null,
+    promotionName: promotion?.name ?? null,
+    promotionMode: promotion?.mode ?? null,
+    billingMode:
+      carried?.billingMode ??
+      (item.serviceId ? (input.billingModes[item.serviceId] ?? "treatment") : "treatment"),
+    sessionsPlanned: carried?.sessionsPlanned ?? item.plannedSessions,
+    patientGuide: carried?.patientGuide ?? null,
+    currency: snapshot.currency,
+    createdBy: actorUserId,
+  })
+}
+
+/**
+ * Los tratamientos que ya se hicieron o se cobraron: tienen un procedimiento
+ * vigente o un cargo o pago sin anular. Su precio ya no cambia en una revisión
+ * ni se vuelve a preguntar.
+ */
+export async function usedPlanItems(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  planItemIds: string[],
+): Promise<Set<string>> {
+  const ids = [...new Set(planItemIds)]
+  if (ids.length === 0) return new Set()
+  const procedures = await tx
+    .selectDistinct({ planItemId: encounterProcedure.planItemId })
+    .from(encounterProcedure)
+    .where(
+      and(
+        eq(encounterProcedure.organizationId, orgId),
+        inArray(encounterProcedure.planItemId, ids),
+        isNull(encounterProcedure.voidedAt),
+      ),
+    )
+  const charges = await tx
+    .selectDistinct({ planItemId: patientCharge.planItemId })
+    .from(patientCharge)
+    .where(
+      and(
+        eq(patientCharge.organizationId, orgId),
+        eq(patientCharge.patientId, patientId),
+        inArray(patientCharge.planItemId, ids),
+        isNull(patientCharge.voidedAt),
+      ),
+    )
+  return new Set(
+    [...procedures, ...charges]
+      .map((row) => row.planItemId)
+      .filter((id): id is string => !!id),
+  )
+}
+
+/** Mismas condiciones: lo que no cambió en la revisión conserva su respuesta. */
+function sameTerms(
+  a: { priceCents: number | null; billingMode: string; sessionsPlanned: number | null; promotionId: string | null },
+  b: { priceCents: number | null; billingMode: string; sessionsPlanned: number | null; promotionId: string | null },
+): boolean {
+  return (
+    a.priceCents === b.priceCents &&
+    a.billingMode === b.billingMode &&
+    a.sessionsPlanned === b.sessionsPlanned &&
+    a.promotionId === b.promotionId
+  )
+}
+
+/**
+ * Al entregar una revisión, lo que ya estaba aceptado y no cambió de
+ * condiciones queda aceptado, y lo hecho o cobrado también: solo se vuelve a
+ * preguntar por lo que cambió, lo nuevo y lo que no tenía respuesta. La versión
+ * anterior no se toca. Con algo aceptado y algo por preguntar, la revisión queda
+ * «parcial» (lo aceptado se agenda y se atiende mientras tanto); si no queda nada
+ * por preguntar, aceptada como la anterior.
+ */
+async function carryRevisionAnswers(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  revision: BudgetRow,
+  previous: BudgetRow,
+): Promise<BudgetRow> {
+  const lines = await listBudgetLines(tx, orgId, patientId, revision.id)
+  const before = await listBudgetLines(tx, orgId, patientId, previous.id)
+  const used = await usedPlanItems(
+    tx,
+    orgId,
+    patientId,
+    lines.map((line) => line.planItemId),
+  )
+  const carried = lines.filter((line) => {
+    if (used.has(line.planItemId)) return true
+    return before.some(
+      (old) => old.planItemId === line.planItemId && old.decision === "aceptado" && sameTerms(old, line),
+    )
+  })
+  if (carried.length === 0) return revision
+  const now = new Date()
+  await tx
+    .update(treatmentBudgetItem)
+    .set({ decision: "aceptado", updatedAt: now })
+    .where(
+      and(
+        eq(treatmentBudgetItem.organizationId, orgId),
+        inArray(
+          treatmentBudgetItem.id,
+          carried.map((line) => line.id),
+        ),
+      ),
+    )
+  const [settled] = await tx
+    .update(treatmentBudget)
+    .set({
+      // Algo aceptado y algo por responder: «parcial», como quien respondió una parte.
+      status: carried.length < lines.length ? "parcial" : "aceptado",
+      acceptedByName: previous.acceptedByName,
+      decisionContactId: previous.decisionContactId,
+      decisionNote: previous.decisionNote,
+      decidedAt: now,
+      decidedBy: previous.decidedBy,
+      decidedVia: previous.decidedVia,
+      updatedAt: now,
+    })
+    .where(and(eq(treatmentBudget.id, revision.id), eq(treatmentBudget.organizationId, orgId)))
+    .returning()
+  return settled ?? revision
+}
+
+/**
  * Nueva revisión de una propuesta entregada: conserva el número y versiona el
- * documento. Nace con una sola opción, con lo acordado de la opción que valía
- * (la elegida o la recomendada) para los tratamientos que se mantienen.
+ * documento, con lo acordado para los tratamientos que se mantienen. Con un
+ * camino elegido (o una sola opción) nace con esa opción; sin elegir, con todos
+ * los caminos. Al entregarla, lo aceptado que no cambió sigue aceptado
+ * (`carryRevisionAnswers`).
  */
 export async function reviseBudget(
   tx: Db,
@@ -2922,23 +3301,16 @@ export async function reviseBudget(
     })
     .returning()
   if (!revision) throw new Error("No se pudo crear la revisión")
-  const [option] = await tx
-    .insert(treatmentBudgetOption)
-    .values({
-      organizationId: orgId,
-      patientId,
-      budgetId: revision.id,
-      position: 1,
-      isRecommended: true,
-      createdBy: actorUserId,
-    })
-    .returning()
-  if (!option) throw new Error("No se pudo crear la opción de la revisión")
   const previousOptions = await listOptions(tx, orgId, [current.id])
   const valued = valueOptionOf(previousOptions)
   const previousLines = await listBudgetLines(tx, orgId, patientId, current.id)
-  const oldLines = previousLines.filter((line) => !valued || line.optionId === valued.id)
-  // La revisión es de una sola opción: las alternativas no se suman como si se hicieran todas.
+  // Sin camino elegido, la revisión lleva todos los caminos: nadie descartó
+  // ninguno. Con uno elegido (o una sola opción), solo ese.
+  const keepsPaths =
+    previousOptions.length > 1 && !previousOptions.some((option) => option.decision === "elegida")
+  const sources = keepsPaths ? previousOptions : valued ? [valued] : []
+  const oldLines = previousLines.filter((line) => sources.some((option) => option.id === line.optionId))
+  // La revisión de un camino elegido es de una sola opción: las alternativas no se suman.
   for (const [index, itemId] of input.itemIds.entries()) {
     const alternative = previousLines.find((line) => line.planItemId === itemId)
     if (alternative && !oldLines.some((line) => line.planItemId === itemId)) {
@@ -2948,6 +3320,21 @@ export async function reviseBudget(
       })
     }
   }
+  // Cada camino que conserva algún tratamiento; lo nuevo entra a todos.
+  // Un camino se conserva si algo propio suyo (no lo común) sigue en la revisión.
+  const common = commonPlanItems(oldLines, sources.length)
+  const kept = sources.filter((source) =>
+    oldLines.some(
+      (line) =>
+        line.optionId === source.id &&
+        input.itemIds.includes(line.planItemId) &&
+        (sources.length === 1 || !common.has(line.planItemId)),
+    ),
+  )
+  // Lo hecho o cobrado conserva lo acordado tal cual (también una promoción que ya terminó).
+  const used = await usedPlanItems(tx, orgId, patientId, input.itemIds)
+  const plan = kept.length > 0 ? kept : sources.slice(0, 1)
+  const recommended = plan.find((source) => source.isRecommended) ?? plan[0] ?? null
   // Un tratamiento que entra nuevo a la revisión toma el modo de cobro de su servicio.
   const billingModes = await readBillingModes(
     tx,
@@ -2955,56 +3342,38 @@ export async function reviseBudget(
     items.map((item) => item.serviceId).filter((id): id is string => !!id),
   )
   const revisedAt = new Date()
-  for (const item of items) {
-    const snapshot = oldLines.find((l) => l.planItemId === item.id) ?? item
-    const carried = "tariffPriceCents" in snapshot ? (snapshot as BudgetLineWithStatus) : null
-    // La revisión conserva lo acordado, salvo una promoción que ya terminó:
-    // esa línea vuelve a su tarifa y queda a la vista en el borrador.
-    let promotion = carried?.promotionId
-      ? { id: carried.promotionId, name: carried.promotionName, mode: carried.promotionMode }
-      : null
-    let priceCents = snapshot.priceCents
-    let priceReason = carried?.priceReason ?? null
-    if (promotion) {
-      const [promo] = await tx
-        .select()
-        .from(promotionTable)
-        .where(and(eq(promotionTable.id, promotion.id), eq(promotionTable.organizationId, orgId)))
-        .limit(1)
-      if (!promo || !isPromotionLive(promo, revisedAt)) {
-        promotion = null
-        priceCents = carried?.tariffPriceCents ?? item.priceCents
-        priceReason = null
-      }
+  for (const [index, source] of (plan.length > 0 ? plan : [null]).entries()) {
+    const [option] = await tx
+      .insert(treatmentBudgetOption)
+      .values({
+        organizationId: orgId,
+        patientId,
+        budgetId: revision.id,
+        position: index + 1,
+        isRecommended: plan.length > 0 ? source?.id === recommended?.id : true,
+        name: keepsPaths ? (source?.name ?? null) : null,
+        pros: keepsPaths ? (source?.pros ?? null) : null,
+        cons: keepsPaths ? (source?.cons ?? null) : null,
+        createdBy: actorUserId,
+      })
+      .returning()
+    if (!option) throw new Error("No se pudo crear la opción de la revisión")
+    const ownOld = oldLines.filter((line) => line.optionId === source?.id)
+    for (const item of items) {
+      const snapshot = ownOld.find((l) => l.planItemId === item.id)
+      // Lo de otro camino no entra a este; lo nuevo, a todos.
+      if (!snapshot && oldLines.some((line) => line.planItemId === item.id)) continue
+      await insertRevisionLine(tx, orgId, actorUserId, patientId, {
+        planId: current.planId,
+        budgetId: revision.id,
+        optionId: option.id,
+        item,
+        carried: snapshot ?? null,
+        billingModes,
+        revisedAt,
+        keepTerms: used.has(item.id),
+      })
     }
-    await tx.insert(treatmentBudgetItem).values({
-      organizationId: orgId,
-      patientId,
-      planId: current.planId,
-      budgetId: revision.id,
-      optionId: option.id,
-      planItemId: item.id,
-      serviceId: snapshot.serviceId,
-      title: snapshot.title,
-      scope: snapshot.scope,
-      siteSystem: snapshot.siteSystem,
-      siteCode: snapshot.siteCode,
-      siteQualifiers: snapshot.siteQualifiers,
-      codings: snapshot.codings,
-      priceCents,
-      tariffPriceCents: carried?.tariffPriceCents ?? item.priceCents,
-      priceReason,
-      promotionId: promotion?.id ?? null,
-      promotionName: promotion?.name ?? null,
-      promotionMode: promotion?.mode ?? null,
-      billingMode:
-        carried?.billingMode ??
-        (item.serviceId ? (billingModes[item.serviceId] ?? "treatment") : "treatment"),
-      sessionsPlanned: carried?.sessionsPlanned ?? item.plannedSessions,
-      patientGuide: carried?.patientGuide ?? null,
-      currency: snapshot.currency,
-      createdBy: actorUserId,
-    })
   }
   await audit(tx, orgId, actorUserId, "budget.revised", revision.id, {
     patientId,
@@ -3114,6 +3483,8 @@ export interface BudgetPrintPayload {
   } | null
   /** Las líneas de la opción que vale (con una sola opción, todas). */
   lines: BudgetPrintLine[]
+  /** En una revisión, qué cambió frente a la versión que reemplaza (`budgetChanges`); vacío si no es revisión. */
+  changes: BudgetChange[]
   /** Con más de una opción, cada una con su total; vacío con una sola. */
   options: BudgetPrintOption[]
   /** Un total por moneda de la opción que vale; con dos, las cifras de abajo son nulas. */
@@ -3309,6 +3680,23 @@ function decisionWordsOf(
  * `clinicalAccess` decide si lleva lo encontrado, los diagnósticos y las alergias: solo
  * quien lee lo clínico, o el papel que va a la propia persona o a su representante.
  */
+/**
+ * Qué cambió una revisión frente a la versión que reemplaza: de la anterior, las
+ * líneas del camino elegido si había uno; si no, todas (`budgetChanges`).
+ */
+async function revisionChangesOf(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  budget: BudgetWithTotals,
+): Promise<BudgetChange[]> {
+  if (!budget.supersedesBudgetId) return []
+  const previous = await getBudgetDetail(tx, orgId, patientId, budget.supersedesBudgetId)
+  const chosen = previous.options.find((option) => option.decision === "elegida")
+  const before = chosen ? previous.items.filter((line) => line.optionId === chosen.id) : previous.items
+  return budgetChanges(before, budget.items)
+}
+
 export async function getBudgetPrintPayload(
   tx: Db,
   orgId: string,
@@ -3518,6 +3906,7 @@ export async function getBudgetPrintPayload(
     if (token) personalLinkUrlOf = await personalLinkUrl(tx, orgId, token)
   }
   return {
+    changes: await revisionChangesOf(tx, orgId, patientId, budget),
     quotationCode: "310",
     paper: profile.sheetSize,
     budgetNumber: budget.budgetNumber,

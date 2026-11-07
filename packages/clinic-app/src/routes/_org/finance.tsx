@@ -537,6 +537,7 @@ function FinanceWorkspace() {
                   onSelect={(professionalUserId) =>
                     setSearch({ profesional: professionalUserId ?? undefined })
                   }
+                  onPeriodChange={setPeriod}
                 />
               ) : (
                 <MyCommissionsPanel

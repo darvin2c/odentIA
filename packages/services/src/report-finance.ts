@@ -16,11 +16,13 @@
  * - «Te deben» por antigüedad es la regla del saldo vencido (`report-debts.ts`):
  *   cada persona cuenta entera en el tramo de su concepto sin pagar más antiguo.
  */
+import { fixedOwedAt } from "./expense-recurring.js"
 import type { Db } from "@odentia/db"
 import { sql, type SQL } from "drizzle-orm"
 import { budgetLineUnitsSql, budgetValueOptionSql } from "./budgets.js"
-import { collectedNetMany, EXPENSE_CATEGORIES } from "./finance.js"
+import { commissionLiveIn, collectedNetMany, EXPENSE_CATEGORIES } from "./finance.js"
 import { orgTaxes } from "./clinic-taxes.js"
+import { getOrgLocale } from "./locale.js"
 import { unpaidPurchasesMany } from "./purchase-balance.js"
 import { debtDaysSql, debtZoneSql, overdueDebtSql, valuedDebtSql } from "./report-debts.js"
 import { firstVisitSql } from "./report-visits.js"
@@ -66,30 +68,16 @@ export interface CommissionTotals {
 }
 
 /**
- * Las líneas de comisión de un tramo como las cuenta Finanzas › Comisiones:
- * cada cobro de lo que atendió un profesional (aplicación en pie hoy, sobre un
- * cargo de un procedimiento de una atención finalizada) con su porcentaje
- * vigente; lo ya pagado, con el porcentaje y el importe con que se pagó; lo
- * pagado cuyo cobro se anuló después ya no cuenta. También de quien ya dejó la clínica.
- * Lo nuevo va con el valor congelado de su pago; lo pagado no se toca. La base no se
- * redondea por línea: la suma es la que se redondea.
+ * Las líneas de comisión de un tramo como las cuenta Finanzas › Comisiones: lo
+ * aún sin pagar sale de `commission_live` (la misma vista que leen Finanzas y
+ * Argos: la regla del día del cobro, la excepción del servicio y la parte de
+ * cada sesión); lo ya pagado, con lo que se pagó, y si su cobro se anuló después
+ * ya no cuenta. También de quien ya dejó la clínica. La base no se redondea por
+ * línea: la suma es la que se redondea.
  */
 function commissionLinesSql(orgId: string, hull: Span, currency: string, branchId: string | undefined): SQL {
   const branch = branchId ? sql`and p.branch_id = ${branchId}` : sql``
-  const line = sql`la.cents, la.payment_cents, la.business_cents, la.currency, op.currency, op.second_currency, op.exchange_factor`
-  const commission = sql`money_commission(${line}, coalesce(r.rate_bps, 0))`
-  return sql`live_app as materialized (
-      select a.id, a.amount_cents::bigint as cents, a.created_at as at, e.professional_user_id as user_id,
-        p.amount_cents as payment_cents, p.business_cents, p.currency::text as currency
-      from patient_payment_application a
-      join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id
-      join patient_charge c on c.organization_id = a.organization_id and c.id = a.charge_id
-      join encounter_procedure ep on ep.organization_id = a.organization_id and ep.id = c.encounter_procedure_id
-      join encounter e on e.organization_id = a.organization_id and e.id = ep.encounter_id
-      where a.organization_id = ${orgId} and a.created_at >= ${at(hull.start)} and a.created_at < ${at(hull.end)}
-        and a.voided_at is null and p.voided_at is null and c.voided_at is null and ep.voided_at is null
-        and e.status = 'finalizada' and e.voided_at is null ${branch}
-    ), frozen as materialized (
+  return sql`frozen as materialized (
       -- Lo ya pagado, con lo que se pagó. Si el cobro se anuló después, se pagó igual
       -- (cuenta en lo pagado) pero ya no es comisión del mes: se descuenta del próximo pago.
       select l.application_id, l.base_cents::bigint as base, l.commission_cents::bigint as commission, l.occurred_at as at,
@@ -107,15 +95,13 @@ function commissionLinesSql(orgId: string, hull: Span, currency: string, branchI
         f.commission::numeric as paid, 0::numeric as fresh
       from frozen f
       union all
-      select la.user_id, la.at, org_money_value(${line}), ${commission}, 0, ${commission}
-      from live_app la
-      left join commission_rule r on r.organization_id = ${orgId} and r.professional_user_id = la.user_id
-      cross join ${orgMoneySql(orgId)}
-      where not exists (select 1 from frozen f where f.application_id = la.id)
+      select cl.professional_user_id, cl.at, cl.value, cl.commission, 0, cl.commission
+      from ${commissionLiveIn(orgId, hull.start, hull.end)} cl
+      where true
+        ${branchId ? sql`and cl.branch_id = ${branchId}` : sql``}
     ), counted_line as (
-      -- Lo viejo en otra moneda, sin valor ni factor, no tiene base: no entra. Quien dejó la
-      -- clínica sigue contando: lo que ganó es de los meses en que atendió, y sacarlo del equipo
-      -- no reescribe esos meses ni lo que se le debe (igual que la vista de Argos).
+      -- Quien dejó la clínica sigue contando: lo que ganó es de los meses en que atendió, y
+      -- sacarlo del equipo no reescribe esos meses ni lo que se le debe (igual que la vista de Argos).
       select cl.* from commission_line cl
       where cl.base is not null
     )`
@@ -174,6 +160,7 @@ async function pendingCommissionAdjustments(
       select sum(l2.commission_cents) as cents from commission_settlement_line l2
       join commission_settlement s2 on s2.organization_id = l2.organization_id and s2.id = l2.settlement_id and s2.voided_at is null
       where l2.organization_id = l.organization_id and l2.kind = 'ajuste' and l2.voided_at is null and l2.application_id = l.application_id
+        and l2.slice is not distinct from l.slice
     ) d on true
     where l.organization_id = ${orgId} and l.kind = 'cobro' and l.voided_at is null and l.commission_cents > 0 and s.currency = ${currency}
       and (a.voided_at is not null or p.voided_at is not null or c.voided_at is not null)
@@ -688,6 +675,12 @@ async function missingExpenses(tx: Db, orgId: string, scope: ReportScope) {
       -- El pago de una compra tampoco: depende de lo que se compró, y «Copiar el de…» no debe copiarlo.
       and e.purchase_order_id is null
     group by 1, 2, 3, 4`)
+  // Lo que ya se repite (sede y tipo con una plantilla en pie) se avisa en Gastos como «por pagar»:
+  // aquí solo queda de respaldo para lo que nadie marcó.
+  const repeating = await tx.execute<{ category: string; branchId: string }>(sql`
+    select distinct category, branch_id as "branchId" from expense_recurring
+    where organization_id = ${orgId} and first_month <= ${key(month)}
+      and (last_month is null or last_month >= ${key(month)})`)
   const dismissed = await tx.execute<{ category: string; branchId: string | null }>(sql`
     select category, branch_id as "branchId" from expense_gap_dismissal
     where organization_id = ${orgId} and month = ${key(month)}`)
@@ -709,6 +702,7 @@ async function missingExpenses(tx: Db, orgId: string, scope: ReportScope) {
     const previous = before.map(of)
     if (previous.some((row) => !row) || of(key(month))) continue
     if (dismissed.some((row) => row.category === pair.category && (row.branchId === null || row.branchId === pair.branchId))) continue
+    if (repeating.some((row) => row.category === pair.category && row.branchId === pair.branchId)) continue
     const last = previous[1] as (typeof rows)[number]
     if (running && today <= last.lastDay) continue
     out.push({
@@ -758,6 +752,8 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
   const debts = await debtAgingMany(tx, orgId, [window.end, window.previous.end], { currency, branchId })
   // Lo que se debía al cerrar el periodo y lo que se debe hoy: la misma cuenta en dos momentos.
   const [owedCommissions, owedNow] = await commissionsOwedMany(tx, orgId, [window.end, now], { currency, branchId })
+  // Lo fijo vencido sin pagar al cierre (gastos que se repiten).
+  const fixedOwed = await fixedOwedAt(tx, orgId, window.end < now ? window.end : now, { branchId })
   const [unpaid] = await unpaidPurchasesMany(tx, orgId, [window.end], { branchId })
   const adjustments = await pendingCommissionAdjustments(tx, orgId, currency, branchId)
   const taxName = (await orgTaxes(tx, orgId))?.name ?? null
@@ -846,6 +842,8 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
         nowCents: owedNow?.cents ?? 0,
       },
       salesTax: { cents: Math.max(0, taxOf(0)) },
+      /** Gastos que se repiten, vencidos y sin pagar. */
+      fixed: fixedOwed,
       purchases: purchasesDueOf(unpaid, scope.money),
     },
     missing: await missingExpenses(tx, orgId, scope),
@@ -859,17 +857,24 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
  * cobró de eso, su porcentaje, su comisión y lo que falta pagarle; y lo que
  * atendió sin cobrar todavía. Cuadra con Finanzas › Comisiones.
  */
-export async function getReportCommissions(tx: Db, orgId: string, query: ReportQuery, now: Date = new Date()) {
-  const scope = await reportScope(tx, orgId, query, now)
-  const { window, currency } = scope
-  const branchId = scope.branch?.id
-  const [current] = await commissionsMany(tx, orgId, [window], { currency, branchId })
-  const adjustments = await pendingCommissionAdjustments(tx, orgId, currency, branchId)
-  // Lo que atendió en el periodo (precio × cantidad) y lo que de eso sigue sin cobrar hoy.
-  const attended = await tx.execute<{ userId: string; name: string; cents: string; unpaid: string }>(sql`
+/**
+ * Lo que atendió cada profesional en un tramo (precio × cantidad, al cambio de hoy) y lo que de
+ * eso sigue sin cobrar hoy. Lo usan Reportes › Comisiones y «Mis comisiones» (lo propio).
+ */
+export async function attendedMany(
+  tx: Db,
+  orgId: string,
+  { start, end }: { start: Date; end: Date },
+  { branchId, professionalUserId }: { branchId?: string; professionalUserId?: string } = {},
+) {
+  return tx.execute<{ userId: string; name: string; cents: string; unpaid: string }>(sql`
     select e.professional_user_id as "userId", u.name,
       round(sum(${todayValueSql(sql`ep.price_cents::bigint * ep.quantity`, sql`ep.currency`)}))::text as cents,
-      round(sum(${todayValueSql(sql`case when ch.charges > 0 then ch.unpaid else ep.price_cents::bigint * ep.quantity end`, sql`ep.currency`)}))::text as unpaid
+      -- Una sesión de un tratamiento ya cargado (el cargo es de todo el tratamiento) no queda por cobrar aparte.
+      round(sum(${todayValueSql(sql`case when ch.charges > 0 then ch.unpaid
+        when ep.plan_item_id is not null and exists (select 1 from patient_charge c2 where c2.organization_id = ep.organization_id
+          and c2.plan_item_id = ep.plan_item_id and c2.voided_at is null) then 0
+        else ep.price_cents::bigint * ep.quantity end`, sql`ep.currency`)}))::text as unpaid
     from encounter_procedure ep
     join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id
     join "user" u on u.id = e.professional_user_id
@@ -887,13 +892,93 @@ export async function getReportCommissions(tx: Db, orgId: string, query: ReportQ
     where ep.organization_id = ${orgId} and ep.voided_at is null and ep.price_cents is not null
       and (ep.currency = op.currency or ep.currency = op.second_currency)
       and e.status = 'finalizada' and e.voided_at is null
-      and e.finalized_at >= ${at(window.start)} and e.finalized_at < ${at(window.end)}
+      and e.finalized_at >= ${at(start)} and e.finalized_at < ${at(end)}
       ${branchId ? sql`and e.branch_id = ${branchId}` : sql``}
+      ${professionalUserId ? sql`and e.professional_user_id = ${professionalUserId}` : sql``}
     group by e.professional_user_id, u.name`)
-  const rates = await tx.execute<{ userId: string; name: string; rateBps: number }>(sql`
-    select r.professional_user_id as "userId", u.name, r.rate_bps as "rateBps" from commission_rule r
-    join "user" u on u.id = r.professional_user_id
-    where r.organization_id = ${orgId}`)
+}
+
+/**
+ * «Mis comisiones»: lo que la persona atendió en el mes y aún no se cobra. Su comisión llega
+ * cuando se cobre; se dice para que no parezca que lo atendido se perdió.
+ */
+export async function myAttendedUnpaid(
+  tx: Db,
+  orgId: string,
+  userId: string,
+  period: { year: number; month: number },
+): Promise<{ attendedCents: number; unpaidCents: number }> {
+  const zone = await getOrgLocale(tx, orgId)
+  const next = addMonths(period, 1)
+  const [row] = await attendedMany(
+    tx,
+    orgId,
+    { start: monthStart(zone.timezone, period.year, period.month), end: monthStart(zone.timezone, next.year, next.month) },
+    { professionalUserId: userId },
+  )
+  return { attendedCents: safeCents(row?.cents), unpaidCents: safeCents(row?.unpaid) }
+}
+
+/**
+ * Lo que falta pagar de comisiones, de todos los meses, en una sola pasada por `commission_live`:
+ * cada mes con lo que la lista de ese mes dice que falta (lo nuevo de cada profesional menos lo
+ * que se le descuenta, nunca menos de cero) y el total, con lo que se descuenta una sola vez por
+ * profesional. Para no mirar un mes por vez.
+ */
+export async function commissionsOwedByMonth(tx: Db, orgId: string, now: Date = new Date()) {
+  const zone = await getOrgLocale(tx, orgId)
+  const from = new Date(Date.UTC(2000, 0, 1))
+  const rows = await tx.execute<{ month: string; userId: string; cents: string }>(sql`
+    select to_char(l.at at time zone ${zone.timezone}, 'YYYY-MM') as month, l.professional_user_id as "userId",
+      round(sum(l.commission))::text as cents
+    from ${commissionLiveIn(orgId, from, now)} l
+    where l.has_rule and l.commission > 0
+    group by 1, 2`)
+  const adjustments = await pendingCommissionAdjustments(tx, orgId, zone.currency)
+  const byMonth = new Map<string, { cents: number; professionals: number }>()
+  const byUser = new Map<string, number>()
+  for (const row of rows) {
+    const fresh = safeCents(row.cents)
+    byUser.set(row.userId, (byUser.get(row.userId) ?? 0) + fresh)
+    // Como la lista del mes: lo que se le descuenta a alguien baja lo suyo de ese mes, nunca de otro.
+    const due = Math.max(0, fresh - (adjustments.get(row.userId) ?? 0))
+    if (due === 0) continue
+    const month = byMonth.get(row.month) ?? { cents: 0, professionals: 0 }
+    byMonth.set(row.month, { cents: month.cents + due, professionals: month.professionals + 1 })
+  }
+  const owedCents = [...byUser].reduce((total, [userId, fresh]) => total + Math.max(0, fresh - (adjustments.get(userId) ?? 0)), 0)
+  return {
+    currency: zone.currency,
+    owedCents,
+    months: [...byMonth]
+      .sort(([a], [b]) => b.localeCompare(a))
+      .map(([key, value]) => ({ year: Number(key.slice(0, 4)), month: Number(key.slice(5, 7)), ...value })),
+  }
+}
+
+export async function getReportCommissions(tx: Db, orgId: string, query: ReportQuery, now: Date = new Date()) {
+  const scope = await reportScope(tx, orgId, query, now)
+  const { window, currency } = scope
+  const branchId = scope.branch?.id
+  const [current] = await commissionsMany(tx, orgId, [window], { currency, branchId })
+  const adjustments = await pendingCommissionAdjustments(tx, orgId, currency, branchId)
+  // Lo que atendió en el periodo (precio × cantidad) y lo que de eso sigue sin cobrar hoy.
+  const attended = await attendedMany(tx, orgId, window, { branchId })
+  // El porcentaje general de hoy de cada uno; las excepciones se cuentan aparte.
+  const rates = await tx.execute<{ userId: string; name: string; rateBps: number; exceptions: number }>(sql`
+    select g.professional_user_id as "userId", u.name, g.rate_bps as "rateBps",
+      (select count(*)::int from (
+        select distinct on (x.service_id) x.rate_bps, x.fixed_cents from commission_rate x
+        where x.organization_id = ${orgId} and x.professional_user_id = g.professional_user_id and x.service_id is not null
+          and x.effective_from <= now()
+        order by x.service_id, x.effective_from desc
+      ) e where e.rate_bps is not null or e.fixed_cents is not null) as exceptions
+    from (
+      select distinct on (r.professional_user_id) r.professional_user_id, r.rate_bps from commission_rate r
+      where r.organization_id = ${orgId} and r.service_id is null and r.effective_from <= now()
+      order by r.professional_user_id, r.effective_from desc
+    ) g
+    join "user" u on u.id = g.professional_user_id`)
   const ids = [...new Set([...(current ?? []).map((row) => row.userId), ...attended.map((row) => row.userId), ...rates.map((row) => row.userId)])]
   const names = new Map<string, string>([...attended, ...rates].map((row) => [row.userId, row.name]))
   const missing = ids.filter((id) => !names.has(id))
@@ -912,6 +997,8 @@ export async function getReportCommissions(tx: Db, orgId: string, query: ReportQ
         unpaidCents: safeCents(work?.unpaid),
         collectedCents: own?.baseCents ?? 0,
         rateBps: rates.find((row) => row.userId === userId)?.rateBps ?? 0,
+        /** Cuántos servicios tienen otro porcentaje o un monto fijo. */
+        exceptions: rates.find((row) => row.userId === userId)?.exceptions ?? 0,
         commissionCents: own?.commissionCents ?? 0,
         paidCents: own?.paidCents ?? 0,
         pendingCents: own ? pendingOf(own, adjustments) : 0,

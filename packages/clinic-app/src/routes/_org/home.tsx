@@ -15,7 +15,7 @@ import {
 import { useStore } from "@tanstack/react-form"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, createFileRoute } from "@tanstack/react-router"
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { z } from "zod"
 import { AdminRecommendationDrawer, AdminUnreachedDrawer } from "../../components/agent/admin-recommendation"
 import { openAppointmentAnywhere } from "../../components/agenda/schedule-host"
@@ -39,6 +39,7 @@ import { WaitingList } from "../../components/home/waiting-list"
 import { HomePageSkeleton, HomeSkeleton } from "../../components/skeletons/home"
 import { HomeStart, needsSetup } from "../../components/home-start"
 import { useActiveBranch } from "../../lib/active-branch"
+import { noAccessName } from "../../lib/no-access"
 import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { createReorderDrafts } from "../../lib/inventory"
@@ -52,8 +53,10 @@ import type { WaitingEntry, WaitingRow, WorkspaceCash, WorkspaceHome } from "../
 
 export const Route = createFileRoute("/_org/home")({
   /** La sede de la agenda y la caja viaja en el enlace, como en las demás pantallas por sede. */
-  validateSearch: (search: Record<string, unknown>): { branch?: string } => ({
+  validateSearch: (search: Record<string, unknown>): { branch?: string; sinAcceso?: string } => ({
     ...(typeof search.branch === "string" && search.branch ? { branch: search.branch } : {}),
+    // La sección que se intentó abrir sin permiso (lo pone el guardia de `_org`).
+    ...(typeof search.sinAcceso === "string" && search.sinAcceso ? { sinAcceso: search.sinAcceso } : {}),
   }),
   pendingComponent: HomePageSkeleton,
   component: HomePage,
@@ -92,12 +95,31 @@ const voidReasonSchema = z.object({
     .max(VOID_REASON_MAX, `Escribe como mucho ${VOID_REASON_MAX} caracteres.`),
 })
 
+/**
+ * Si se llegó aquí por abrir una pantalla sin permiso, se dice cuál y qué hacer,
+ * y se quita del enlace para que no se repita al recargar.
+ */
+function useNoAccessNotice() {
+  const { sinAcceso } = Route.useSearch()
+  const navigate = Route.useNavigate()
+  useEffect(() => {
+    if (!sinAcceso) return
+    const name = noAccessName(sinAcceso)
+    toast.info(name ? `No tienes acceso a ${name}` : "No tienes acceso a esa pantalla", {
+      id: "sin-acceso",
+      description: "Te trajimos a Inicio. Si la necesitas para tu trabajo, pídela a quien administra la clínica.",
+    })
+    void navigate({ search: ({ sinAcceso: _, ...rest }) => rest, replace: true })
+  }, [sinAcceso, navigate])
+}
+
 /** Tiene al menos un dominio de trabajo; sin ninguno no hay nada que mostrarle. */
 function hasWork(access: WorkspaceHome["access"]): boolean {
   return access.patients || access.appointments || access.conversations || access.tasks || access.finance || access.clinical || access.crm || access.agent
 }
 
 function HomePage() {
+  useNoAccessNotice()
   const queryClient = useQueryClient()
   const myUserId = useMyUserId()
   const sede = useActiveBranch()

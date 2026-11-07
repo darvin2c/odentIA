@@ -5,13 +5,17 @@
  * / Lo piensa», «Pospuesto», «Lo está pensando», «Lo pienso»).
  *
  * Los estados del código no cambian (`borrador`, `presentado`…); aquí solo se
- * dicen. «Aceptó N de M» cuenta las líneas de la opción elegida.
+ * dicen. «Aceptó N de M» cuenta las líneas de la opción elegida. Con varios
+ * caminos y ninguno elegido, cada tratamiento cuenta una vez y lo que falta es
+ * elegir el camino («Aceptó 2 · falta elegir el camino»).
  */
 
 /** Lo mínimo de una línea para decir el estado. */
 interface WordLine {
   decision: string | null | undefined
   optionId?: string | null
+  /** El tratamiento de la línea: lo común a varias opciones cuenta una vez. */
+  planItemId?: string | null
 }
 
 /** Lo mínimo de una opción para decir el estado. */
@@ -24,7 +28,19 @@ interface WordOption {
 function decidedLines(lines: readonly WordLine[], options: readonly WordOption[] | undefined): WordLine[] {
   const chosen = options?.find((option) => option.decision === "elegida")
   if (chosen) return lines.filter((line) => line.optionId === chosen.id)
-  return lines.filter((line) => line.decision !== "no_elegida")
+  const seen = new Set<string>()
+  return lines.filter((line) => {
+    if (line.decision === "no_elegida") return false
+    if (!line.planItemId) return true
+    if (seen.has(line.planItemId)) return false
+    seen.add(line.planItemId)
+    return true
+  })
+}
+
+/** Varios caminos y ninguno elegido todavía. */
+function choosingPath(options: readonly WordOption[] | undefined): boolean {
+  return !!options && options.length > 1 && !options.some((option) => option.decision === "elegida")
 }
 
 /** «Por enviar», «Enviado · espera respuesta», «Aceptó 2 de 3»… */
@@ -45,6 +61,12 @@ export function budgetStateText(budget: {
     case "parcial": {
       const lines = decidedLines(budget.items, budget.options)
       const accepted = lines.filter((line) => line.decision === "aceptado").length
+      // Sin camino elegido y con algo de los caminos por responder (no si dijo «ninguno»).
+      if (choosingPath(budget.options) && lines.some((line) => line.decision === "pendiente" || line.decision === "pospuesto"))
+        return `Aceptó ${accepted} · falta elegir el camino`
+      // Una revisión pregunta por lo que cambió: eso no es un «no», está por responder.
+      const asked = lines.filter((line) => line.decision === "pendiente").length
+      if (asked > 0) return `Aceptó ${accepted} · ${asked} por responder`
       return `Aceptó ${accepted} de ${lines.length}`
     }
     case "rechazado":

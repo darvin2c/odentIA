@@ -747,7 +747,10 @@ function CommissionsSection({ query, data, argosEnabled }: { query: ReportQuery;
               <span className="flex flex-wrap gap-x-3 text-[13px] text-muted-foreground">
                 <span>Atendió {plain(row.attendedCents)}</span>
                 <span>Se cobró {plain(row.collectedCents)}</span>
-                <span>{row.rateBps / 100} %</span>
+                <span>
+                  {row.rateBps / 100} %
+                  {row.exceptions ? ` · ${row.exceptions === 1 ? "1 servicio aparte" : `${row.exceptions} servicios aparte`}` : ""}
+                </span>
                 <span className="font-semibold text-warning">Por pagar {plain(row.pendingCents)}</span>
               </span>
               {bar(row)}
@@ -789,7 +792,15 @@ function CommissionsSection({ query, data, argosEnabled }: { query: ReportQuery;
                   <TableCell className="text-right tabular-nums">
                     <ApartMoney value={row.unpaidCents} text={plain(row.collectedCents)} share={rateOf(row.unpaidCents, row.attendedCents)} clinic={clinicUnpaid} />
                   </TableCell>
-                  <TableCell className="text-right tabular-nums">{row.rateBps / 100}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {row.rateBps / 100}
+                    {/* El general; los servicios con otro porcentaje o un monto, aparte (cada cobro dice el suyo). */}
+                    {row.exceptions ? (
+                      <span className="block text-xs font-normal text-muted-foreground">
+                        {row.exceptions === 1 ? "+1 servicio" : `+${row.exceptions} servicios`}
+                      </span>
+                    ) : null}
+                  </TableCell>
                   <TableCell className="text-right font-extrabold tabular-nums">{plain(row.commissionCents)}</TableCell>
                   <TableCell className="text-right font-bold tabular-nums text-warning">{plain(row.pendingCents)}</TableCell>
                   <TableCell>{bar(row)}</TableCell>
@@ -925,8 +936,9 @@ function PayablesCard({ data }: { data: ReportFinance }) {
   const canPay = usePermission("commissions.write")
   const canInventory = usePermission("inventory.read")
   const { commissions, purchases, salesTax } = data.payables
+  const fixed = data.payables.fixed ?? { cents: 0, count: 0 }
   const taxName = data.taxName ?? "Impuesto"
-  const total = commissions.cents + purchases.cents + salesTax.cents
+  const total = commissions.cents + purchases.cents + salesTax.cents + fixed.cents
   const daysSince = purchases.oldestReceivedAt ? Math.max(0, Math.floor((new Date(data.period.end).getTime() - new Date(purchases.oldestReceivedAt).getTime()) / 86_400_000)) : null
   return (
     <ReportCard title="Lo que debes">
@@ -940,6 +952,7 @@ function PayablesCard({ data }: { data: ReportFinance }) {
             { key: "comisiones", label: "Comisiones", value: commissions.cents, tone: "series-2" },
             { key: "compras", label: "Compras", value: purchases.cents, tone: "series-3" },
             ...(salesTax.cents > 0 ? [{ key: "impuesto", label: taxName, value: salesTax.cents, tone: "muted" as const }] : []),
+            ...(fixed.cents > 0 ? [{ key: "fijos", label: "Gastos fijos", value: fixed.cents, tone: "series-1" as const }] : []),
           ]}
         />
       ) : null}
@@ -966,6 +979,20 @@ function PayablesCard({ data }: { data: ReportFinance }) {
             ) : null}
           </span>
         </li>
+        {fixed.cents > 0 ? (
+          <li className="flex min-w-0 flex-col">
+            <span className="flex justify-between gap-2">
+              <strong>Gastos fijos vencidos</strong>
+              <strong className="tabular-nums">{money(fixed.cents)}</strong>
+            </span>
+            <span className="text-[13px] text-muted-foreground">
+              {fixed.count === 1 ? "1 sin pagar" : `${fixed.count} sin pagar`} ·{" "}
+              <Link to="/finance" search={{ tab: "gastos" }} className="font-bold text-primary-soft-foreground">
+                Pagar en Gastos
+              </Link>
+            </span>
+          </li>
+        ) : null}
         <li className="flex min-w-0 flex-col">
           <span className="flex justify-between gap-2">
             <strong>Compras recibidas sin pagar</strong>

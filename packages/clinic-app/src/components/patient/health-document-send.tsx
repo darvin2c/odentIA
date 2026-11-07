@@ -3,7 +3,7 @@ import { DocumentSendDrawer } from "../finance-documents/SendFinancialDocument"
 
 /**
  * «Enviar» de un papel de salud (receta, orden, descanso, hoja de atención,
- * consentimiento firmado): el mismo cajón que el comprobante (ADR 0150). Va solo
+ * consentimiento firmado): el mismo cajón que el comprobante (ADR 0152). Va solo
  * a la propia persona o a su representante legal, por WhatsApp o por correo;
  * le llega el PDF, también pasadas las 24 horas con el mensaje aprobado para
  * documentos. Si nada sirve, se imprime. Lo enviado queda encolado en su

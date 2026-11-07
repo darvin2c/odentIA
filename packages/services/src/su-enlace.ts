@@ -179,7 +179,7 @@ export interface PersonalLinkView {
   questionnaire: { title: string } | null
   /**
    * «Tus mensajes»: solo para quien recibe los mensajes de este paciente (quien
-   * decide por él). La receta y el comprobante ya no están aquí (ADR 0150): le
+   * decide por él). La receta y el comprobante ya no están aquí (ADR 0152): le
    * llegan en PDF por su chat o su correo, y están en su portal.
    */
   messages: PersonalLinkMessages | null
@@ -1176,8 +1176,10 @@ export async function decidePersonalLinkBudget(
   const context = await portalBudgetContext(tx, orgId, [budgetId], true)
   return {
     budget: toPortalBudget(result.budget, context),
+    // Lo común aceptado está en cada camino: cada tratamiento una vez.
     toSchedule: result.budget.items
       .filter((line) => line.decision === "aceptado" && line.itemStatus === "pendiente")
+      .filter((line, index, all) => all.findIndex((other) => other.planItemId === line.planItemId) === index)
       .map((line) => ({ planItemId: line.planItemId, title: line.title })),
   }
 }

@@ -1,10 +1,10 @@
 import {
   diagnosisCodeLabel,
 } from "@odentia/clinical"
-import { Badge, Button } from "@odentia/ui"
+import { Badge, Button, Collapsible, CollapsibleContent, CollapsibleTrigger } from "@odentia/ui"
 import { FormDrawer, submitErrorMessage, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowDown, ArrowUp } from "lucide-react"
+import { ArrowDown, ArrowUp, ChevronDown } from "lucide-react"
 import { useId, useState } from "react"
 import { z } from "zod"
 import { apiFetch } from "../../lib/api"
@@ -14,6 +14,15 @@ import { usePermission } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
 import { type PlanItem, planStatusLabel, type TreatmentJourneySummary } from "../../lib/patients"
 import { productUi } from "../../product/product-ui"
+import { useBudgetFormat } from "./plan/budget-parts"
+import {
+  groupPlanPaths,
+  joinTitles,
+  lowerFirst,
+  type PlanPathGroup,
+  pathCountWord,
+  pathTotal,
+} from "./plan/plan-paths"
 
 const CLOSED = ["realizado", "cancelado", "reemplazado"]
 
@@ -129,15 +138,38 @@ function PlanPhasesGroup({
     onError: (cause) => setError(submitErrorMessage(cause)),
   })
 
-  const active = items.filter((item) => !["cancelado", "reemplazado"].includes(item.status))
+  // Lo que compite entre caminos espera a que elija: fuera de las fases y del avance.
+  const undecidedPaths = items.filter(
+    (item) =>
+      item.path != null &&
+      !item.path.chosen &&
+      (item.decisionStatus === "pendiente" || item.decisionStatus === "pospuesto"),
+  )
+  const pathGroups = groupPlanPaths(undecidedPaths)
+  const inPaths = new Set(undecidedPaths.map((item) => item.id))
+  // El camino que no eligió queda plegado al final, por si se quiere consultar.
+  const notChosen = items.filter((item) => item.decisionStatus === "no_elegida")
+  const phased = items.filter(
+    (item) => !inPaths.has(item.id) && item.decisionStatus !== "no_elegida",
+  )
+  // El avance cuenta solo lo que se hará.
+  const active = phased.filter(
+    (item) =>
+      !["cancelado", "reemplazado"].includes(item.status) &&
+      !["rechazado", "reemplazado"].includes(item.decisionStatus),
+  )
   const done = active.filter((item) => item.status === "realizado").length
   const inProgress = active.filter((item) => item.status === "en_curso").length
-  const undecided = active.filter((item) => item.decisionStatus === "pendiente").length
+  // Por decidir: lo que espera respuesta y cada pieza con caminos (una decisión, no un tratamiento).
+  const undecided =
+    active.filter(
+      (item) => item.decisionStatus === "pendiente" || item.decisionStatus === "pospuesto",
+    ).length + pathGroups.length
   // Las fases del producto, en orden (odentIA: de la urgencia al mantenimiento).
   const { phases, defaultPhase } = productUi().plan
   const byPhase = phases.map((phase) => ({
     phase,
-    rows: items
+    rows: phased
       .filter((item) => (item.phase ?? defaultPhase) === phase.key)
       .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)),
   }))
@@ -163,6 +195,9 @@ function PlanPhasesGroup({
           {error}
         </p>
       ) : null}
+      {pathGroups.map((group) => (
+        <PathsPending key={group.budgetId} group={group} />
+      ))}
       <div className="flex flex-col gap-5">
         {byPhase.map(({ phase, rows }, phaseIndex) =>
           rows.length === 0 ? null : (
@@ -201,7 +236,8 @@ function PlanPhasesGroup({
                             item.diagnosisCode
                               ? diagnosisCodeLabel(item.diagnosisSystem, item.diagnosisCode)
                               : null,
-                            planDecisionLabel(item.decisionStatus),
+                            // Con una revisión enviada, lo que espera es el precio nuevo.
+                            item.newTermsPending ? "Precio nuevo por responder" : planDecisionLabel(item.decisionStatus),
                             `${sessions} de ${plural(planned, "sesión", "sesiones")}`,
                             !closed && next ? NEXT_ACTION_LABELS[next] : null,
                           ]
@@ -263,6 +299,7 @@ function PlanPhasesGroup({
           ),
         )}
       </div>
+      {notChosen.length > 0 ? <NotChosenPath items={notChosen} /> : null}
       {planning ? (
         <PlanningDrawer
           key={planning.id}
@@ -272,6 +309,86 @@ function PlanPhasesGroup({
         />
       ) : null}
     </section>
+  )
+}
+
+/**
+ * Una pieza por decidir entre dos o tres caminos (conservar o extraer): cada
+ * camino en una línea, con su suma si se puede sumar. No se agenda ni cuenta
+ * en el avance hasta que elija.
+ */
+function PathsPending({ group }: { group: PlanPathGroup }): React.JSX.Element {
+  const { money } = useBudgetFormat()
+  const headingId = useId()
+  const thinking = group.items.some((item) => item.decisionStatus === "pospuesto")
+  const count = pathCountWord(group.pathCount)
+  const heading = group.site
+    ? `${group.site} · por decidir entre ${count} caminos`
+    : `Por decidir entre ${count} caminos`
+  return (
+    <section
+      aria-labelledby={headingId}
+      className="flex flex-col gap-2 rounded-lg border border-dashed bg-muted/30 p-3"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 id={headingId} className="text-sm font-medium">
+          {heading}
+        </h3>
+        <Badge variant={thinking ? "warning" : "secondary"}>
+          {thinking ? "Lo está pensando" : "Por responder"}
+        </Badge>
+      </div>
+      <ul className="flex flex-col gap-1 text-sm">
+        {group.paths.map((path) => {
+          const titles = joinTitles(path.items.map((item) => item.title))
+          const words = path.name
+            ? `${path.name}: ${lowerFirst(titles)}`
+            : titles || `Camino ${path.position}`
+          const total = pathTotal(path.items)
+          return (
+            <li key={path.position}>
+              {words}
+              {total ? (
+                <span className="tabular-nums"> · {money(total.cents, total.currency)}</span>
+              ) : null}
+            </li>
+          )
+        })}
+      </ul>
+      <p className="text-xs text-muted-foreground">
+        Fuera de las fases hasta que elija: no se agenda ni cuenta en el avance.
+      </p>
+    </section>
+  )
+}
+
+/** Lo del camino que no eligió: no se hará, pero se puede consultar. */
+function NotChosenPath({ items }: { items: PlanItem[] }): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="flex flex-col gap-2">
+      <CollapsibleTrigger
+        render={
+          <Button type="button" variant="ghost" size="sm" className="group self-start">
+            El camino que no eligió · {open ? "Ocultar" : "Ver"}
+            <ChevronDown
+              aria-hidden
+              className="transition-transform group-data-[panel-open]:rotate-180 motion-reduce:transition-none"
+            />
+          </Button>
+        }
+      />
+      <CollapsibleContent>
+        <ul className="flex flex-col divide-y rounded-lg border text-sm text-muted-foreground">
+          {items.map((item) => (
+            <li key={item.id} className="px-3 py-2">
+              {item.title}
+              {site(item)}
+            </li>
+          ))}
+        </ul>
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 

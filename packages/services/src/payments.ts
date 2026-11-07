@@ -42,7 +42,7 @@ import {
   type SQLWrapper,
   sql,
 } from "drizzle-orm"
-import { budgetLineUnits } from "./budgets.js"
+import { budgetLineUnits, budgetValueOptionSql } from "./budgets.js"
 import {
   chargeTaxOf,
   orgTaxes,
@@ -191,6 +191,11 @@ export interface CreateChargeInput {
    * vigente: lo aceptado a tiempo se cobra aunque la promoción haya terminado.
    */
   frozenPromotion?: { id: string; name: string } | null
+  /**
+   * El cargo de todo un tratamiento de varias sesiones: en cuántas partes se
+   * reparte la comisión de cada cobro, una por sesión (ADR 0151). Se congela aquí.
+   */
+  commissionSessions?: number | null
   description?: string
   amountCents?: number
   currency?: string
@@ -509,6 +514,10 @@ export async function createCharge(
       requestKey: sale ? (input.requestKey?.trim() ?? null) : null,
       taxCategory: tax?.taxCategory ?? null,
       taxBps: tax?.taxBps ?? null,
+      commissionSessions:
+        input.commissionSessions && input.commissionSessions > 1 && planItemId && input.encounterProcedureId
+          ? Math.min(60, Math.trunc(input.commissionSessions))
+          : null,
       createdBy: actorUserId,
     })
     .returning()
@@ -2884,9 +2893,10 @@ export async function returnFromTicket(
           productQuantity: keptQuantity,
           originalChargeId: original,
           returnedCents: charge.returnedCents + item.amountCents,
-          // Lo que queda conserva el impuesto con que se vendió.
+          // Lo que queda conserva el impuesto con que se vendió y cómo se reparte su comisión.
           taxCategory: charge.taxCategory,
           taxBps: charge.taxBps,
+          commissionSessions: charge.commissionSessions,
           createdBy: actorUserId,
         })
         .returning()
@@ -3590,6 +3600,8 @@ export async function getPatientAccount(tx: Db, orgId: string, patientId: string
         eq(treatmentBudgetItem.patientId, patientId),
         eq(treatmentPlanItem.decisionStatus, "aceptado"),
         eq(treatmentBudgetItem.decision, "aceptado"),
+        // Lo común a varios caminos está aceptado en cada uno: cuenta la opción que vale.
+        sql`${treatmentBudgetItem.optionId} = ${budgetValueOptionSql(treatmentBudget)}`,
       ),
     )
   // Los mismos montos que Caja (`accountBalances`); lo aceptado cuenta todas

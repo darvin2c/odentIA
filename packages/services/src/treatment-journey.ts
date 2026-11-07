@@ -234,7 +234,7 @@ export async function getTreatmentJourney(
     .select()
     .from(treatmentPlanItem)
     .where(and(scope, eq(treatmentPlanItem.supersedesItemId, item.id)))
-  const budgetHistory = await tx
+  const budgetLines = await tx
     .select({ budget: treatmentBudget, line: treatmentBudgetItem })
     .from(treatmentBudgetItem)
     .innerJoin(
@@ -253,6 +253,15 @@ export async function getTreatmentJourney(
       ),
     )
     .orderBy(asc(treatmentBudget.budgetNumber), asc(treatmentBudget.revisionNumber))
+  // Una línea por versión del presupuesto: lo común a varias opciones está en
+  // cada una, y la que dice su respuesta es la del camino que vale (no «No elegida»).
+  const budgetHistory: typeof budgetLines = []
+  for (const row of budgetLines) {
+    const at = budgetHistory.findIndex((seen) => seen.budget.id === row.budget.id)
+    if (at === -1) budgetHistory.push(row)
+    else if (budgetHistory[at]!.line.decision === "no_elegida" && row.line.decision !== "no_elegida")
+      budgetHistory[at] = row
+  }
   const procedures = await tx
     .select({ procedure: encounterProcedure, encounter })
     .from(encounterProcedure)

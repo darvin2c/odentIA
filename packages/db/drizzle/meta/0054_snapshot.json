@@ -1,5 +1,5 @@
 {
-  "id": "63daf234-537e-4e54-b14b-825769a5b51d",
+  "id": "caf6f82a-f3f4-4cfe-8a6b-96828320ec61",
   "prevId": "a54b8e99-44bc-446f-acd7-e6a949a1c95d",
   "version": "7",
   "dialect": "postgresql",
@@ -17149,18 +17149,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
-        },
-        "portal_hidden_at": {
-          "name": "portal_hidden_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "portal_hidden_by": {
-          "name": "portal_hidden_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -17261,30 +17249,12 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
-        },
-        "patient_document_portal_hidden_by_user_id_fk": {
-          "name": "patient_document_portal_hidden_by_user_id_fk",
-          "tableFrom": "patient_document",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "portal_hidden_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "patient_document_portal_hidden_check": {
-          "name": "patient_document_portal_hidden_check",
-          "value": "(\"patient_document\".\"portal_hidden_at\" IS NULL) = (\"patient_document\".\"portal_hidden_by\" IS NULL)"
-        },
         "patient_document_image_type_check": {
           "name": "patient_document_image_type_check",
           "value": "\"patient_document\".\"image_type\" IS NULL OR \"patient_document\".\"category\" IN ('radiografia','foto_clinica')"
@@ -29728,6 +29698,18 @@
           "notNull": true,
           "default": false
         },
+        "recurring_id": {
+          "name": "recurring_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "recurring_month": {
+          "name": "recurring_month",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_by": {
           "name": "created_by",
           "type": "text",
@@ -29768,6 +29750,34 @@
         }
       },
       "indexes": {
+        "expense_recurring_month_uidx": {
+          "name": "expense_recurring_month_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "recurring_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "recurring_month",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"expense\".\"recurring_id\" IS NOT NULL AND \"expense\".\"voided_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "expense_org_branch_spent_idx": {
           "name": "expense_org_branch_spent_idx",
           "columns": [
@@ -29886,6 +29896,21 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
+        "expense_recurring_id_org_fk": {
+          "name": "expense_recurring_id_org_fk",
+          "tableFrom": "expense",
+          "tableTo": "expense_recurring",
+          "columnsFrom": [
+            "organization_id",
+            "recurring_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "expense_organization_id_purchase_order_id_purchase_order_organization_id_id_fk": {
           "name": "expense_organization_id_purchase_order_id_purchase_order_organization_id_id_fk",
           "tableFrom": "expense",
@@ -29906,6 +29931,10 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
+        "expense_recurring_link_check": {
+          "name": "expense_recurring_link_check",
+          "value": "(\"expense\".\"recurring_id\" IS NULL) = (\"expense\".\"recurring_month\" IS NULL) AND (\"expense\".\"recurring_month\" IS NULL OR \"expense\".\"recurring_month\" ~ '^[0-9]{4}-(0[1-9]|1[0-2])$')"
+        },
         "expense_amount_check": {
           "name": "expense_amount_check",
           "value": "\"expense\".\"amount_cents\" > 0"
@@ -30028,6 +30057,414 @@
         "expense_gap_dismissal_month_check": {
           "name": "expense_gap_dismissal_month_check",
           "value": "\"expense_gap_dismissal\".\"month\" ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.expense_recurring": {
+      "name": "expense_recurring",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "branch_id": {
+          "name": "branch_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "category": {
+          "name": "category",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "concept": {
+          "name": "concept",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount_cents": {
+          "name": "amount_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "currency": {
+          "name": "currency",
+          "type": "char(3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "every_months": {
+          "name": "every_months",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "day": {
+          "name": "day",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "first_month": {
+          "name": "first_month",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_month": {
+          "name": "last_month",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "member_user_id": {
+          "name": "member_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "from_cash": {
+          "name": "from_cash",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "expense_recurring_org_id_uidx": {
+          "name": "expense_recurring_org_id_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "expense_recurring_org_branch_idx": {
+          "name": "expense_recurring_org_branch_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "branch_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "expense_recurring_org_member_idx": {
+          "name": "expense_recurring_org_member_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "member_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"expense_recurring\".\"member_user_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "expense_recurring_organization_id_organization_id_fk": {
+          "name": "expense_recurring_organization_id_organization_id_fk",
+          "tableFrom": "expense_recurring",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "expense_recurring_branch_id_branch_id_fk": {
+          "name": "expense_recurring_branch_id_branch_id_fk",
+          "tableFrom": "expense_recurring",
+          "tableTo": "branch",
+          "columnsFrom": [
+            "branch_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "expense_recurring_member_user_id_user_id_fk": {
+          "name": "expense_recurring_member_user_id_user_id_fk",
+          "tableFrom": "expense_recurring",
+          "tableTo": "user",
+          "schemaTo": "auth",
+          "columnsFrom": [
+            "member_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "expense_recurring_created_by_user_id_fk": {
+          "name": "expense_recurring_created_by_user_id_fk",
+          "tableFrom": "expense_recurring",
+          "tableTo": "user",
+          "schemaTo": "auth",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "expense_recurring_every_check": {
+          "name": "expense_recurring_every_check",
+          "value": "\"expense_recurring\".\"every_months\" IN (1, 6, 12)"
+        },
+        "expense_recurring_day_check": {
+          "name": "expense_recurring_day_check",
+          "value": "\"expense_recurring\".\"day\" BETWEEN 1 AND 31"
+        },
+        "expense_recurring_amount_check": {
+          "name": "expense_recurring_amount_check",
+          "value": "\"expense_recurring\".\"amount_cents\" > 0"
+        },
+        "expense_recurring_month_check": {
+          "name": "expense_recurring_month_check",
+          "value": "\"expense_recurring\".\"first_month\" ~ '^[0-9]{4}-(0[1-9]|1[0-2])$' AND (\"expense_recurring\".\"last_month\" IS NULL OR \"expense_recurring\".\"last_month\" ~ '^[0-9]{4}-(0[1-9]|1[0-2])$')"
+        },
+        "expense_recurring_member_check": {
+          "name": "expense_recurring_member_check",
+          "value": "\"expense_recurring\".\"member_user_id\" IS NULL OR \"expense_recurring\".\"category\" = 'Personal'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.expense_recurring_skip": {
+      "name": "expense_recurring_skip",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "recurring_id": {
+          "name": "recurring_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "month": {
+          "name": "month",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "voided_at": {
+          "name": "voided_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "voided_by": {
+          "name": "voided_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "expense_recurring_skip_uidx": {
+          "name": "expense_recurring_skip_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "recurring_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "month",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"expense_recurring_skip\".\"voided_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "expense_recurring_skip_organization_id_organization_id_fk": {
+          "name": "expense_recurring_skip_organization_id_organization_id_fk",
+          "tableFrom": "expense_recurring_skip",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "expense_recurring_skip_created_by_user_id_fk": {
+          "name": "expense_recurring_skip_created_by_user_id_fk",
+          "tableFrom": "expense_recurring_skip",
+          "tableTo": "user",
+          "schemaTo": "auth",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "expense_recurring_skip_voided_by_user_id_fk": {
+          "name": "expense_recurring_skip_voided_by_user_id_fk",
+          "tableFrom": "expense_recurring_skip",
+          "tableTo": "user",
+          "schemaTo": "auth",
+          "columnsFrom": [
+            "voided_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "expense_recurring_skip_recurring_org_fk": {
+          "name": "expense_recurring_skip_recurring_org_fk",
+          "tableFrom": "expense_recurring_skip",
+          "tableTo": "expense_recurring",
+          "columnsFrom": [
+            "organization_id",
+            "recurring_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "expense_recurring_skip_month_check": {
+          "name": "expense_recurring_skip_month_check",
+          "value": "\"expense_recurring_skip\".\"month\" ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'"
         }
       },
       "isRLSEnabled": false

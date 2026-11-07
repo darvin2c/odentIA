@@ -24,6 +24,7 @@ import {
   jsonb,
   numeric,
   pgTable,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -31,7 +32,7 @@ import {
 } from "drizzle-orm/pg-core"
 import { user } from "./auth.js"
 import { orgFk, timestamps } from "./crm.js"
-import { patient, patientCharge, patientPayment, patientPaymentApplication } from "./clinical.js"
+import { patient, patientCharge, patientPayment, patientPaymentApplication, serviceCatalog } from "./clinical.js"
 import { purchaseOrder } from "./inventory.js"
 import { branch } from "./org.js"
 
@@ -141,6 +142,97 @@ export const cashMovement = pgTable(
 // Proveedores: catálogo único en schema/inventory.ts (`supplier`, compartido
 // con Inventario). Los gastos referencian ese catálogo; no duplicar.
 
+/** Cada cuántos meses puede repetirse un gasto: cada mes, cada 6 meses o cada año. */
+export const RECURRING_EVERY_MONTHS = [1, 6, 12] as const
+
+/**
+ * Un gasto que se repite (el alquiler, un sueldo, la luz): la plantilla, no el
+ * pago. Lo que hay por pagar se calcula al leer: un mes M tiene su ocurrencia si
+ * M ≥ `first_month`, (M − `first_month`) es múltiplo de `every_months` y M ≤
+ * `last_month`. Vence el día `min(day, último día de M)`: se guarda el día y no
+ * la fecha, para que el 31 no se corra al 28 para siempre. Nunca se registra
+ * solo: pagar es crear el gasto con `recurring_id` y `recurring_month`.
+ * Se cambian importe, concepto, día, persona, si sale de la caja y el fin;
+ * cada cuánto, la moneda, el tipo y la sede no (es terminarla y crear otra).
+ */
+export const expenseRecurring = pgTable(
+  "expense_recurring",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    branchId: uuid("branch_id")
+      .notNull()
+      .references(() => branch.id),
+    /** Un tipo de `EXPENSE_CATEGORIES` (lo valida el servicio, como en `expense`). */
+    category: text("category").notNull(),
+    concept: text("concept").notNull(),
+    /** Lo que suele pagarse; cada pago puede llevar otro importe. */
+    amountCents: integer("amount_cents").notNull(),
+    currency: char("currency", { length: 3 }).notNull(),
+    everyMonths: smallint("every_months").notNull(),
+    /** Día del mes en que vence (1–31); si el mes no lo tiene, el último. */
+    day: smallint("day").notNull(),
+    /** Mes de la primera ocurrencia, `YYYY-MM`. */
+    firstMonth: text("first_month").notNull(),
+    /** Último mes con ocurrencia, `YYYY-MM`; nulo mientras se repita. Antes del primero: ya no tiene ninguna. */
+    lastMonth: text("last_month"),
+    /** De quién es un sueldo: solo con el tipo «Personal». */
+    memberUserId: text("member_user_id").references(() => user.id),
+    /** Cómo suele pagarse: con el efectivo de la caja o fuera de ella. */
+    fromCash: boolean("from_cash").notNull().default(false),
+    createdBy: text("created_by").references(() => user.id),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("expense_recurring_org_id_uidx").on(table.organizationId, table.id),
+    index("expense_recurring_org_branch_idx").on(table.organizationId, table.branchId),
+    index("expense_recurring_org_member_idx")
+      .on(table.organizationId, table.memberUserId)
+      .where(sql`${table.memberUserId} IS NOT NULL`),
+    check("expense_recurring_every_check", sql`${table.everyMonths} IN (1, 6, 12)`),
+    check("expense_recurring_day_check", sql`${table.day} BETWEEN 1 AND 31`),
+    check("expense_recurring_amount_check", sql`${table.amountCents} > 0`),
+    check(
+      "expense_recurring_month_check",
+      sql`${table.firstMonth} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$' AND (${table.lastMonth} IS NULL OR ${table.lastMonth} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$')`,
+    ),
+    check(
+      "expense_recurring_member_check",
+      sql`${table.memberUserId} IS NULL OR ${table.category} = 'Personal'`,
+    ),
+  ],
+)
+
+/**
+ * «No hubo este mes»: la ocurrencia de ese mes deja de estar por pagar sin un
+ * gasto. Una por plantilla y mes mientras siga en pie; «Deshacer» la anula.
+ */
+export const expenseRecurringSkip = pgTable(
+  "expense_recurring_skip",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    recurringId: uuid("recurring_id").notNull(),
+    /** Mes de la ocurrencia, `YYYY-MM`. */
+    month: text("month").notNull(),
+    createdBy: text("created_by").references(() => user.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    voidedBy: text("voided_by").references(() => user.id),
+  },
+  (table) => [
+    uniqueIndex("expense_recurring_skip_uidx")
+      .on(table.organizationId, table.recurringId, table.month)
+      .where(sql`${table.voidedAt} IS NULL`),
+    foreignKey({
+      name: "expense_recurring_skip_recurring_org_fk",
+      columns: [table.organizationId, table.recurringId],
+      foreignColumns: [expenseRecurring.organizationId, expenseRecurring.id],
+    }),
+    check("expense_recurring_skip_month_check", sql`${table.month} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
+  ],
+)
+
 /** Gasto de la organización; enlazado a caja chica cuando pasa por un turno. */
 export const expense = pgTable(
   "expense",
@@ -183,6 +275,13 @@ export const expense = pgTable(
      * porque ese impuesto ya salió de lo cobrado.
      */
     salesTax: boolean("sales_tax").notNull().default(false),
+    /**
+     * El pago de una ocurrencia de un gasto que se repite: la plantilla y el mes
+     * (`YYYY-MM`), los dos o ninguno, escritos al insertar. Un mes se paga una
+     * sola vez mientras su gasto siga en pie: anularlo lo deja por pagar.
+     */
+    recurringId: uuid("recurring_id"),
+    recurringMonth: text("recurring_month"),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
     voidedAt: timestamp("voided_at", { withTimezone: true }),
@@ -190,6 +289,18 @@ export const expense = pgTable(
     voidReason: text("void_reason"),
   },
   (table) => [
+    uniqueIndex("expense_recurring_month_uidx")
+      .on(table.organizationId, table.recurringId, table.recurringMonth)
+      .where(sql`${table.recurringId} IS NOT NULL AND ${table.voidedAt} IS NULL`),
+    foreignKey({
+      name: "expense_recurring_id_org_fk",
+      columns: [table.organizationId, table.recurringId],
+      foreignColumns: [expenseRecurring.organizationId, expenseRecurring.id],
+    }),
+    check(
+      "expense_recurring_link_check",
+      sql`(${table.recurringId} IS NULL) = (${table.recurringMonth} IS NULL) AND (${table.recurringMonth} IS NULL OR ${table.recurringMonth} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$')`,
+    ),
     index("expense_org_branch_spent_idx").on(
       table.organizationId,
       table.branchId,
@@ -316,6 +427,55 @@ export const commissionRule = pgTable(
 )
 
 /**
+ * Las reglas de comisión de un profesional, por versiones (QA de comisiones,
+ * entrega 7; ADR 0151): cada cambio es una fila nueva que vale para lo que se
+ * cobra desde `effectiveFrom`, y lo cobrado antes conserva la regla de su día.
+ * Nada se edita ni se borra.
+ *
+ * - Sin servicio: el porcentaje general (`rateBps` obligatorio).
+ * - Con servicio: una excepción, con otro porcentaje o un monto fijo por cada
+ *   procedimiento (en moneda del negocio, en proporción a lo cobrado), o sin
+ *   ninguno de los dos, que es «vuelve al general».
+ * - La primera versión general de alguien vale desde siempre (`-infinity`):
+ *   fijar el porcentaje tarde no deja en cero lo ya cobrado.
+ *
+ * Reemplaza a `commission_rule`, que ya no se lee ni se escribe.
+ */
+export const commissionRate = pgTable(
+  "commission_rate",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    professionalUserId: text("professional_user_id")
+      .notNull()
+      .references(() => user.id),
+    serviceId: uuid("service_id").references(() => serviceCatalog.id),
+    effectiveFrom: timestamp("effective_from", { withTimezone: true }).notNull(),
+    rateBps: integer("rate_bps"),
+    fixedCents: integer("fixed_cents"),
+    createdBy: text("created_by").references(() => user.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Una versión por momento: la general y la de cada servicio.
+    uniqueIndex("commission_rate_general_uidx")
+      .on(table.organizationId, table.professionalUserId, table.effectiveFrom)
+      .where(sql`${table.serviceId} IS NULL`),
+    uniqueIndex("commission_rate_service_uidx")
+      .on(table.organizationId, table.professionalUserId, table.serviceId, table.effectiveFrom)
+      .where(sql`${table.serviceId} IS NOT NULL`),
+    uniqueIndex("commission_rate_org_id_uidx").on(table.organizationId, table.id),
+    check("commission_rate_rate_check", sql`${table.rateBps} IS NULL OR ${table.rateBps} BETWEEN 0 AND 10000`),
+    check("commission_rate_fixed_check", sql`${table.fixedCents} IS NULL OR ${table.fixedCents} > 0`),
+    check("commission_rate_one_check", sql`${table.rateBps} IS NULL OR ${table.fixedCents} IS NULL`),
+    check(
+      "commission_rate_general_check",
+      sql`${table.serviceId} IS NOT NULL OR (${table.rateBps} IS NOT NULL AND ${table.fixedCents} IS NULL)`,
+    ),
+  ],
+)
+
+/**
  * Liquidación de comisiones de un profesional en una moneda. Se liquida por
  * mes (`periodYear`/`periodMonth`). `base` conserva 'cobrado'/'produccion'
  * previos; `rateBps` null = histórico multirregla. `expenseId` enlaza el pago
@@ -401,6 +561,16 @@ export const commissionSettlementLine = pgTable(
     baseCents: integer("base_cents").notNull(),
     commissionCents: integer("commission_cents").notNull(),
     rateBps: integer("rate_bps"),
+    /**
+     * La parte de un cobro de un tratamiento de varias sesiones (1 a `sessions`).
+     * Nula en lo de una sola parte y en lo pagado antes: cubre el cobro entero.
+     */
+    slice: smallint("slice"),
+    sessions: smallint("sessions"),
+    /** El monto fijo por procedimiento que se usó, si fue una excepción con monto. */
+    fixedCents: integer("fixed_cents"),
+    /** El porcentaje o el monto fue una excepción para el servicio. */
+    forService: boolean("for_service").notNull().default(false),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
     voidedAt: timestamp("voided_at", { withTimezone: true }),
     voidedBy: text("voided_by").references(() => user.id),
@@ -408,6 +578,7 @@ export const commissionSettlementLine = pgTable(
   },
   (table) => [
     index("commission_line_org_settlement_idx").on(table.organizationId, table.settlementId),
+    index("commission_line_org_application_idx").on(table.organizationId, table.applicationId),
     uniqueIndex("commission_line_source_uidx")
       .on(table.organizationId, table.sourceKey)
       .where(sql`${table.voidedAt} IS NULL`),

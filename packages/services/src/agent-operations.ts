@@ -61,7 +61,7 @@ import { confirmationReply } from "./appointment-confirm-words.js"
 import { firstName } from "./automation-routing.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { type SendBudgetDeps, sendBudget } from "./budget-send.js"
-import { type BudgetLineWithStatus, type BudgetWithTotals, decideBudget, getBudgetDetail, listBudgets } from "./budgets.js"
+import { type BudgetLineWithStatus, type BudgetWithTotals, commonPlanItems, decideBudget, getBudgetDetail, listBudgets, valueOptionOf } from "./budgets.js"
 import { OPERATIONS } from "./operation-fields.js"
 import { listPatientsByContact, requirePatient } from "./patients.js"
 import {
@@ -944,7 +944,8 @@ export async function resendBudgetByContact(
 /** La respuesta de la persona, leída contra el presupuesto vivo. */
 export interface BudgetAnswer {
   budget: BudgetWithTotals
-  option: { id: string; label: string; /** Elige ahora entre varias. */ choosing: boolean }
+  /** La opción que responde; `id` nulo si todavía no elige y responde lo común a todas. */
+  option: { id: string | null; label: string; /** Elige ahora entre varias. */ choosing: boolean }
   accepted: AgentBudgetLine[]
   postponed: AgentBudgetLine[]
   rejected: AgentBudgetLine[]
@@ -983,22 +984,41 @@ async function budgetAnswerOf(tx: Db, orgId: string, input: BudgetAnswerInput): 
     option = chosen
   } else if (budget.options.length === 1) {
     option = budget.options[0]
-  } else {
+  } else if (input.optionId) {
     option = budget.options.find((item) => item.id === input.optionId)
-    if (!option) {
-      throw new ServiceError(
-        "BUDGET_OPTION_REQUIRED",
-        409,
-        `Tiene ${budget.options.length} opciones (${budget.options.map((item) => item.label).join(", ")}): pregunta cuál elige`,
-      )
-    }
+    if (!option) throw notFound("Opción del presupuesto")
   }
-  if (!option) throw notFound("Opción del presupuesto")
-  const lines = budget.items.filter((line) => line.optionId === option.id)
+  // Sin elegir entre varias: se responde lo que está en todas, y lo de cada
+  // opción solo se deja para después o se rechaza (la misma regla de decideBudget).
+  const choosingNone = !option
+  if (!option && budget.options.length < 2) throw notFound("Opción del presupuesto")
+  const common = commonPlanItems(budget.items, budget.options.length)
+  const valued = valueOptionOf(budget.options)
+  const lines = option
+    ? budget.items.filter((line) => line.optionId === option.id)
+    : budget.items.filter(
+        (line, index, all) =>
+          all.findIndex((other) => other.planItemId === line.planItemId) === index,
+      )
+  const where = option ? `la ${option.label}` : "el presupuesto"
   const said = new Map(input.decisions.map((item) => [item.planItemId, item.decision]))
   if (said.size !== input.decisions.length) throw validation("Un tratamiento aparece dos veces en la respuesta")
   if (input.decisions.some((item) => !lines.some((line) => line.planItemId === item.planItemId))) {
-    throw new ServiceError("BUDGET_ANSWER_UNKNOWN", 409, `Hay tratamientos que no están en la ${option.label}: usa los ids de ver_presupuesto`)
+    throw new ServiceError("BUDGET_ANSWER_UNKNOWN", 409, `Hay tratamientos que no están en ${where}: usa los ids de ver_presupuesto`)
+  }
+  if (choosingNone) {
+    const only = input.decisions.find(
+      (item) => item.decision === "aceptado" && !common.has(item.planItemId),
+    )
+    if (only) {
+      const line = lines.find((item) => item.planItemId === only.planItemId)!
+      const options = budget.options.map((item) => item.label).join(", ")
+      throw new ServiceError(
+        "BUDGET_OPTION_REQUIRED",
+        409,
+        `${budgetLineWords(agentBudgetLine(line))} es de una sola opción (${options}): para aceptarlo, pregunta cuál elige`,
+      )
+    }
   }
   const open = lines.filter((line) => line.decision === "pendiente" || line.decision === "pospuesto")
   if (open.length === 0) throw new ServiceError("BUDGET_STATUS", 409, "Ya respondió todo ese presupuesto")
@@ -1027,7 +1047,9 @@ async function budgetAnswerOf(tx: Db, orgId: string, input: BudgetAnswerInput): 
   }))
   return {
     budget,
-    option: { id: option.id, label: option.label, choosing: !chosen && budget.options.length > 1 },
+    option: option
+      ? { id: option.id, label: option.label, choosing: !chosen && budget.options.length > 1 }
+      : { id: null, label: valued?.label ?? "", choosing: false },
     accepted,
     postponed: answered.filter((item) => item.decision === "pospuesto").map((item) => item.line),
     rejected: answered.filter((item) => item.decision === "rechazado").map((item) => item.line),
@@ -1075,7 +1097,13 @@ export async function planBudgetAnswer(
   }
   return {
     answer,
-    payload: { patientId: input.patientId, budgetId: input.budgetId, optionId: answer.option.id, decisions: answer.decisions },
+    // Sin opción elegida (responde lo común), la propuesta va sin `optionId`.
+    payload: {
+      patientId: input.patientId,
+      budgetId: input.budgetId,
+      ...(answer.option.id ? { optionId: answer.option.id } : {}),
+      decisions: answer.decisions,
+    },
   }
 }
 

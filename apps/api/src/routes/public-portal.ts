@@ -324,7 +324,7 @@ export function createPublicPortalRoute(deps: {
     return portalCall(c, (tx, ctx) => decidePortalBudget(tx, ctx, params.data.id, parsed.data))
   })
 
-  // «Tus documentos»: todo lo suyo, con las reglas del servidor (ADR 0150).
+  // «Tus documentos»: todo lo suyo, con las reglas del servidor (ADR 0152).
   app.get("/papers", async (c) => portalCall(c, (tx, ctx) => listPortalPapers(tx, ctx)))
 
   // Compatibilidad con la página anterior mientras dura el despliegue (las pantallas y la API no

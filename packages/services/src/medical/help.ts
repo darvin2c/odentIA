@@ -39,6 +39,24 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
         return []
       // latidIA todavía no guarda la tomografía en la ficha.
       if (/tomografía/.test(faq.q)) return []
+      // Las preguntas de los caminos hablan de la pieza: en un consultorio, de la opción.
+      if (faq.q === "¿Cómo anoto que aceptó una parte y lo otro lo está pensando?")
+        return [
+          {
+            ...faq,
+            a: "En su Plan, «¿Qué respondió?»: no hace falta que elija una opción. Lo que va en todas se marca Acepta, Para después o No; para lo demás eliges la opción, «Lo piensa» o «Ninguno». Si lo piensa, sigue esperando respuesta y su oportunidad sigue abierta hasta que decida; después se completa ahí mismo. Lo que ya respondió no se vuelve a preguntar.",
+            ...(faq.forms ? { forms: faq.forms.filter((form) => form !== "lo piensa con la muela") } : {}),
+          },
+        ]
+      // Lo indicado nace aceptado: los caminos no se marcan en la atención, solo en el presupuesto.
+      if (faq.q.startsWith("¿Puedo ofrecer dos opciones"))
+        return [
+          {
+            q: "¿Puedo ofrecer dos opciones en un presupuesto?",
+            a: "Sí, en su Plan, con «Duplicar como otra opción»: copias la opción y cambias lo que haga falta. Cada opción tiene su total (nunca se suman) y una es la recomendada. Al anotar la respuesta no hace falta que elija: lo que va en todas se acepta y lo de cada opción puede quedar para después.",
+            ...(faq.forms ? { forms: faq.forms.filter((form) => form !== "otro camino para la pieza" && form !== "conservar o extraer") } : {}),
+          },
+        ]
       if (faq.q === "¿Cómo cierro una orden de imagen con su resultado?")
         return [
           {

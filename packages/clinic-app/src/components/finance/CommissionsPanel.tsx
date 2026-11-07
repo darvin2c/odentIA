@@ -12,10 +12,11 @@ import { appWords } from "../../lib/product-words"
  * La moneda y el formato son los de la clínica y llegan en cada respuesta.
  */
 import { canAttend } from "@odentia/auth/permissions"
-import { formatMoney } from "@odentia/clinical"
+import { formatMoney, formatMoneyInput } from "@odentia/clinical"
 import {
   Badge,
   Button,
+  Checkbox,
   cn,
   Skeleton,
   Table,
@@ -29,7 +30,9 @@ import {
 import {
   DetailDrawer,
   EmptyState,
+  FormChoiceField,
   FormDrawer,
+  RowActions,
   PersonAvatar,
   useAppForm,
   useFormSurface,
@@ -50,6 +53,7 @@ import {
   compareMonths,
   dayLabel,
   fetchCommissionPayments,
+  fetchCommissionsOwed,
   fetchMonthCommissions,
   fetchMyCommissions,
   fetchProfessionalCommissions,
@@ -61,15 +65,20 @@ import {
   percentLabel,
   plainAmount,
   rateBpsFromPercent,
+  type CommissionException,
+  setCommissionExceptionApi,
   setCommissionRateApi,
   voidCommissionPaymentApi,
   type YearMonth,
 } from "../../lib/commissions"
 import { useOrgMembers, usePermission } from "../../lib/crm"
 import { financeFormMessage } from "../../lib/finance"
+import { invalidateFinance, parseAmount, useCashState } from "../../lib/finance-cash"
 import { useOrgEvents } from "../../lib/org-events"
 import { QueryErrorState } from "../../lib/query-error"
 import { ChoiceSelect } from "../ui/choice-select"
+import { ChoiceButtons } from "../choice-buttons"
+import { ServiceSelect } from "../service-select"
 
 // La ruta de Comisiones lo importa desde aquí.
 export { MonthPicker } from "./MonthPicker"
@@ -95,6 +104,7 @@ const commissionKeys = {
   payments: (userId: string, period: YearMonth) =>
     ["commissions", "payments", userId, period.year, period.month] as const,
   mine: (period: YearMonth) => ["commissions", "mine", period.year, period.month] as const,
+  owed: ["commissions", "owed"] as const,
 }
 
 function countLabel(count: number, one: string, many: string): string {
@@ -131,10 +141,27 @@ function byAmount(lines: CommissionLine[]): CommissionLine[] {
  * La cuenta de una línea, en una frase: cuándo se cobró, con qué porcentaje y con qué promoción.
  * Con esto se comprueba cada comisión sin salir de la pantalla.
  */
-function lineFacts(line: CommissionLine, day: (iso: string) => string, locale: string): string {
-  return [day(line.occurredAt), line.rateBps > 0 ? percentLabel(line.rateBps, locale) : "sin porcentaje", line.promotionName]
+function lineFacts(line: CommissionLine, day: (iso: string) => string, locale: string, currency: string): string {
+  return [day(line.occurredAt), ruleWords(line, locale, currency), sessionWords(line), line.promotionName]
     .filter(Boolean)
     .join(" · ")
+}
+
+/** La regla que usó la línea: «35 %», «45 % · para este servicio» o «monto fijo de 150.00 por cada uno». */
+function ruleWords(line: CommissionLine, locale: string, currency: string): string {
+  if (line.fixedCents !== null) return `monto fijo de ${plainAmount(line.fixedCents, currency, locale)} por cada uno`
+  if (line.rateBps === null || (line.rateBps === 0 && !line.forService)) return "sin porcentaje"
+  return line.forService ? `${percentLabel(line.rateBps, locale)} · para este servicio` : percentLabel(line.rateBps, locale)
+}
+
+/** «sesión 2 de 3» en un tratamiento compartido: lo cobrado se reparte igual entre sus sesiones. */
+function sessionWords(line: CommissionLine): string | null {
+  return line.slice && line.sessions ? `sesión ${line.slice} de ${line.sessions}` : null
+}
+
+/** La clave de una línea: el cobro y, si se reparte por sesiones, su parte. */
+function lineKey(line: CommissionLine): string {
+  return line.slice ? `${line.applicationId}:${line.slice}` : line.applicationId
 }
 
 const LIQUIDATION_HOLDER_ID = "liquidacion-para-imprimir"
@@ -160,16 +187,17 @@ function printLiquidation(detail: MonthlyCommissions, name: string, period: Year
   holder.append(el("p", name))
   const table = el("table")
   const head = el("tr")
-  for (const title of ["Fecha", "Paciente", "Servicio", "Cobrado", "%", "Comisión"]) head.append(el("th", title))
+  for (const title of ["Fecha", "Paciente", "Servicio", "Cobrado", "Regla", "Comisión"]) head.append(el("th", title))
   table.append(head)
   for (const line of [...detail.lines].sort((a, b) => a.occurredAt.localeCompare(b.occurredAt))) {
     const row = el("tr")
     for (const text of [
       dayLabel(line.occurredAt, locale, zone, period.year),
       line.patientName || "Paciente",
-      [line.description, line.promotionName].filter(Boolean).join(" · ") + (line.voidedAfterPaid ? " (anulado después de pagado)" : ""),
+      [line.description, sessionWords(line), line.promotionName].filter(Boolean).join(" · ") +
+        (line.voidedAfterPaid ? " (anulado después de pagado)" : ""),
       plain(line.baseCents),
-      line.rateBps > 0 ? percentLabel(line.rateBps, locale) : "—",
+      ruleWords(line, locale, detail.currency),
       plain(line.commissionCents),
     ])
       row.append(el("td", text))
@@ -178,6 +206,7 @@ function printLiquidation(detail: MonthlyCommissions, name: string, period: Year
   holder.append(table)
   const totals = el("dl")
   for (const [label, cents] of [
+    ...(detail.salary ? ([["Sueldo del mes", detail.salary.cents]] as const) : []),
     ["Le corresponde", detail.commissionCents],
     ["Ya pagado", detail.paidCents],
     ["Ya descontado", detail.discountedCents],
@@ -224,6 +253,7 @@ export function CommissionsAdminPanel({
   timeZone,
   selectedId,
   onSelect,
+  onPeriodChange,
 }: {
   period: YearMonth
   locale: string
@@ -231,9 +261,20 @@ export function CommissionsAdminPanel({
   /** Profesional con el detalle abierto. */
   selectedId: string | null
   onSelect: (professionalUserId: string | null) => void
+  /** Ir a otro mes (desde «Falta pagar de otros meses»). */
+  onPeriodChange?: (period: YearMonth) => void
 }) {
   const queryClient = useQueryClient()
   const canWrite = usePermission("commissions.write")
+  // Lo que falta pagar de todos los meses: cada mes se mira solo, y lo de antes no debe perderse.
+  const owedQuery = useQuery({
+    queryKey: commissionKeys.owed,
+    queryFn: fetchCommissionsOwed,
+    enabled: canWrite,
+    staleTime: 60_000,
+  })
+  const owed = owedQuery.data?.data ?? null
+  const otherMonths = (owed?.months ?? []).filter((item) => compareMonths(item, period) !== 0)
   const members = useOrgMembers()
   const [newRateOpen, setNewRateOpen] = useState(false)
 
@@ -294,6 +335,37 @@ export function CommissionsAdminPanel({
         </p>
       ) : null}
 
+      {owed && otherMonths.length > 0 ? (
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm text-muted-foreground">
+          <span>
+            Falta pagar en total{" "}
+            <span className="font-semibold text-foreground tabular-nums">{formatMoney(owed.owedCents, owed.currency, locale)}</span>
+            . Hay cobros sin pagar en:
+          </span>
+          {otherMonths.slice(0, 6).map((item) =>
+            onPeriodChange ? (
+              <Button
+                key={`${item.year}-${item.month}`}
+                type="button"
+                variant="link"
+                size="sm"
+                className="h-auto px-0"
+                onClick={() => onPeriodChange({ year: item.year, month: item.month })}
+              >
+                {monthLabel(item, locale)} ({plainAmount(item.cents, owed.currency, locale)})
+              </Button>
+            ) : (
+              <span key={`${item.year}-${item.month}`}>
+                {monthLabel(item, locale)} ({plainAmount(item.cents, owed.currency, locale)})
+              </span>
+            ),
+          )}
+          {otherMonths.length > 6 ? (
+            <span>y {otherMonths.length - 6 === 1 ? "1 mes más" : `${otherMonths.length - 6} meses más`}</span>
+          ) : null}
+        </div>
+      ) : null}
+
       {rows.length > 0 ? (
         <section aria-label="Profesionales" className="elevated min-w-0 rounded-xl border bg-card">
           <ul className="flex min-w-0 flex-col divide-y">
@@ -317,6 +389,7 @@ export function CommissionsAdminPanel({
                         atendió
                         {" · "}
                         {row.rateBps > 0 ? percentLabel(row.rateBps, locale) : "sin porcentaje"}
+                        {row.exceptionCount ? ` (+${row.exceptionCount === 1 ? "1 servicio aparte" : `${row.exceptionCount} servicios aparte`})` : ""}
                         {row.inTeam ? null : " · Ya no está en el equipo"}
                       </span>
                     </span>
@@ -448,6 +521,8 @@ function ProfessionalDetailBody({
   const payHintId = useId()
   const [showAll, setShowAll] = useState(false)
   const [rateOpen, setRateOpen] = useState(false)
+  // La excepción que se cambia (`null`: una nueva); cerrado si no hay nada.
+  const [exceptionOpen, setExceptionOpen] = useState<{ exception: CommissionException | null } | null>(null)
   const [payOpen, setPayOpen] = useState(false)
   const [voiding, setVoiding] = useState<CommissionPayment | null>(null)
   const paymentsQuery = useQuery({
@@ -495,13 +570,20 @@ function ProfessionalDetailBody({
     <div className="flex min-w-0 flex-col gap-5">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/40 px-4 py-3">
         {detail.rateBps > 0 ? (
-          <p className="text-sm">
-            <span className="text-lg font-semibold tabular-nums">
-              {percentLabel(detail.rateBps, locale)}
-            </span>{" "}
-            {/* Es el de hoy: cada línea dice el suyo, que en lo ya pagado puede ser otro. */}
-            <span className="text-muted-foreground">de lo cobrado, vigente</span>
-          </p>
+          <div className="text-sm">
+            <p>
+              <span className="text-lg font-semibold tabular-nums">
+                {percentLabel(detail.rateBps, locale)}
+              </span>{" "}
+              {/* Es el de hoy: cada línea dice el suyo, que en lo cobrado antes puede ser otro. */}
+              <span className="text-muted-foreground">
+                de lo cobrado{detail.rateSince ? ` · desde el ${dayLabel(detail.rateSince, locale, zone, period.year)}` : ""}
+              </span>
+            </p>
+            {detail.previousRateBps !== null && detail.previousRateBps !== undefined ? (
+              <p className="text-xs text-muted-foreground">Antes: {percentLabel(detail.previousRateBps, locale)}</p>
+            ) : null}
+          </div>
         ) : (
           <p className="text-sm font-medium">Sin porcentaje fijado</p>
         )}
@@ -510,6 +592,15 @@ function ProfessionalDetailBody({
             {detail.rateBps > 0 ? "Cambiar" : "Fijar un porcentaje"}
           </Button>
         ) : null}
+        <ExceptionList
+          detail={detail}
+          locale={locale}
+          zone={zone}
+          year={period.year}
+          canWrite={canWrite && detail.inTeam}
+          onEdit={(exception) => setExceptionOpen({ exception })}
+          onAdd={() => setExceptionOpen({ exception: null })}
+        />
         {detail.inTeam ? null : (
           // Su porcentaje ya no cambia (solo se fija a quien puede atender); lo que ganó se le paga igual.
           <p className="w-full text-sm text-muted-foreground">
@@ -544,11 +635,11 @@ function ProfessionalDetailBody({
             </TableHeader>
             <TableBody>
               {visible.map((line) => (
-                <TableRow key={line.applicationId}>
+                <TableRow key={lineKey(line)}>
                   <TableCell className="py-2 pl-0 whitespace-normal">
                     <span className="font-medium">{line.patientName || "Paciente"}</span>
                     <span className="text-muted-foreground"> · {line.description}</span>
-                    <span className="block text-xs text-muted-foreground">{lineFacts(line, day, locale)}</span>
+                    <span className="block text-xs text-muted-foreground">{lineFacts(line, day, locale, detail.currency)}</span>
                     {line.voidedAfterPaid ? (
                       <Badge variant="destructive" className="ml-2">
                         Anulado después de pagado
@@ -631,8 +722,20 @@ function ProfessionalDetailBody({
           <dt className="text-muted-foreground">Cobrado de lo que atendió</dt>
           <dd className="tabular-nums">{plain(detail.baseCents)}</dd>
         </div>
+        {detail.salary ? (
+          // El sueldo se paga en Gastos; aquí solo se ve junto a la comisión.
+          <div className="flex items-baseline justify-between gap-3">
+            <dt className="text-muted-foreground">Sueldo del mes</dt>
+            <dd className="tabular-nums">
+              {plain(detail.salary.cents)}
+              <span className="ml-2 text-xs text-muted-foreground">
+                {detail.salary.dueCents > 0 ? "por pagar en Gastos" : detail.salary.paidAt ? `pagado el ${day(detail.salary.paidAt)}` : "pagado"}
+              </span>
+            </dd>
+          </div>
+        ) : null}
         <div className="flex items-baseline justify-between gap-3">
-          <dt className="font-semibold">Le corresponde</dt>
+          <dt className="font-semibold">{detail.salary ? "Comisión" : "Le corresponde"}</dt>
           <dd className="text-xl font-bold tabular-nums">{money(detail.commissionCents)}</dd>
         </div>
         {detail.paidCents > 0 ? (
@@ -755,9 +858,9 @@ function ProfessionalDetailBody({
       ) : null}
 
       <p className="text-xs text-muted-foreground">
-        {discountOnly ? "Un descuento no registra gasto." : "El pago queda en Gastos como pago de comisiones."} Lo que
-        agrega caja sin atención, como vender{" "}
-        {appWords().examples.soldItem}, no cuenta para ningún profesional.
+        {discountOnly ? "Un descuento no registra gasto." : "El pago queda en Gastos como pago de comisiones."} Solo
+        comisiona lo cobrado de una atención; una venta suelta, como{" "}
+        {appWords().examples.soldItem}, no es de ningún profesional.
       </p>
 
       <RateDrawer
@@ -765,6 +868,15 @@ function ProfessionalDetailBody({
         onClose={() => setRateOpen(false)}
         professional={{ userId: detail.professionalUserId, name }}
         currentRateBps={detail.rateBps}
+        firstRate={!detail.hasRate}
+        locale={locale}
+      />
+      <ExceptionDrawer
+        open={exceptionOpen !== null}
+        exception={exceptionOpen?.exception ?? null}
+        onClose={() => setExceptionOpen(null)}
+        professional={{ userId: detail.professionalUserId, name }}
+        currency={detail.currency}
         locale={locale}
       />
       <PayDrawer
@@ -785,6 +897,243 @@ function ProfessionalDetailBody({
   )
 }
 
+// --- Otro porcentaje o un monto para un servicio ---------------------------------------
+
+/** «45 %» o «S/ 150.00 por cada uno». */
+function exceptionWords(exception: CommissionException, locale: string, currency: string): string {
+  return exception.fixedCents !== null
+    ? `${formatMoney(exception.fixedCents, currency, locale)} por cada uno`
+    : percentLabel(exception.rateBps ?? 0, locale)
+}
+
+/**
+ * Las excepciones del profesional, dentro de la caja de su porcentaje: un acuerdo
+ * con la persona, que se busca en su detalle. Cada una vale desde que se guardó.
+ */
+function ExceptionList({
+  detail,
+  locale,
+  zone,
+  year,
+  canWrite,
+  onEdit,
+  onAdd,
+}: {
+  detail: MonthlyCommissions
+  locale: string
+  zone: string
+  year: number
+  canWrite: boolean
+  onEdit: (exception: CommissionException) => void
+  onAdd: () => void
+}) {
+  const queryClient = useQueryClient()
+  const [removing, setRemoving] = useState<string | null>(null)
+  const exceptions = detail.exceptions ?? []
+  if (exceptions.length === 0 && !(canWrite && detail.rateBps > 0)) return null
+  const remove = async (exception: CommissionException) => {
+    setRemoving(exception.serviceId)
+    try {
+      await setCommissionExceptionApi({ professionalUserId: detail.professionalUserId, serviceId: exception.serviceId })
+      void queryClient.invalidateQueries({ queryKey: commissionKeys.all })
+      toast.success(
+        detail.rateBps > 0
+          ? `${exception.serviceName}: desde hoy vuelve a su ${percentLabel(detail.rateBps, locale)}`
+          : `${exception.serviceName}: desde hoy ya no tiene una regla aparte`,
+      )
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo quitar")
+    } finally {
+      setRemoving(null)
+    }
+  }
+  return (
+    <div className="w-full border-t pt-3">
+      {exceptions.length > 0 ? (
+        <>
+          <p className="text-xs font-medium text-muted-foreground">Para estos servicios</p>
+          <ul className="mt-1 flex flex-col">
+            {exceptions.map((exception) => (
+              <li key={exception.serviceId} className="flex min-w-0 items-start gap-2 py-1.5 text-sm">
+                {/* El servicio arriba y la regla debajo: en el teléfono el nombre no se aplasta. */}
+                <span className="min-w-0 flex-1">
+                  <span className="block break-words">{exception.serviceName}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground tabular-nums">
+                      {exceptionWords(exception, locale, detail.currency)}
+                    </span>
+                    {exception.effectiveFrom ? ` · desde el ${dayLabel(exception.effectiveFrom, locale, zone, year)}` : ""}
+                  </span>
+                </span>
+                {canWrite ? (
+                  <RowActions
+                    label={`Más acciones de ${exception.serviceName}`}
+                    items={[
+                      { key: "cambiar", label: "Cambiar", onSelect: () => onEdit(exception) },
+                      {
+                        key: "quitar",
+                        label: removing === exception.serviceId ? "Quitando…" : "Quitar",
+                        disabled: removing !== null,
+                        onSelect: () => void remove(exception),
+                      },
+                    ]}
+                  />
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+      {canWrite ? (
+        <Button type="button" variant="link" size="sm" className="h-auto px-0" onClick={onAdd}>
+          <Plus aria-hidden />
+          Otro porcentaje o monto para un servicio
+        </Button>
+      ) : null}
+    </div>
+  )
+}
+
+const EXCEPTION_KINDS = [
+  { value: "percent", label: "Otro porcentaje" },
+  { value: "fixed", label: "Monto fijo por cada uno" },
+]
+
+function ExceptionDrawer({
+  open,
+  exception,
+  onClose,
+  professional,
+  currency,
+  locale,
+}: {
+  open: boolean
+  /** La que se cambia; `null` es una nueva. */
+  exception: CommissionException | null
+  onClose: () => void
+  professional: { userId: string; name: string }
+  currency: string
+  locale: string
+}) {
+  const queryClient = useQueryClient()
+  const initial = {
+    serviceId: exception?.serviceId ?? "",
+    kind: exception?.fixedCents !== null && exception?.fixedCents !== undefined ? "fixed" : "percent",
+    percent: exception?.rateBps !== null && exception?.rateBps !== undefined ? percentInput(exception.rateBps, locale) : "",
+    amount: exception?.fixedCents ? formatMoneyInput(exception.fixedCents, currency, locale) : "",
+  }
+  const form = useAppForm({
+    defaultValues: initial,
+    validators: {
+      onSubmit: ({ value }) => {
+        const fields: Record<string, string> = {}
+        if (!value.serviceId) fields.serviceId = "Elige el servicio."
+        if (value.kind === "percent" && rateBpsFromPercent(value.percent) === null)
+          fields.percent = "Escribe un porcentaje entre 0 y 100, con dos decimales como máximo."
+        const amount = parseAmount(value.amount, currency, locale)
+        if (value.kind === "fixed" && (amount === null || amount <= 0)) fields.amount = "Escribe un monto mayor que cero."
+        return Object.keys(fields).length > 0 ? { fields } : undefined
+      },
+    },
+    onSubmit: async ({ value }) => {
+      await setCommissionExceptionApi({
+        professionalUserId: professional.userId,
+        serviceId: value.serviceId,
+        ...(value.kind === "fixed"
+          ? { fixedCents: parseAmount(value.amount, currency, locale) ?? 0 }
+          : { rateBps: rateBpsFromPercent(value.percent) ?? 0 }),
+      })
+      void queryClient.invalidateQueries({ queryKey: commissionKeys.all })
+      toast.success("Guardado: vale para lo que se cobre desde hoy")
+      onClose()
+    },
+  })
+  const surface = useFormSurface(form, {
+    formMessage: financeFormMessage,
+    fieldMap: { rateBps: "percent", fixedCents: "amount" },
+  })
+  const kind = useStore(form.store, (state) => state.values.kind)
+  const key = `${exception?.serviceId ?? ""}:${exception?.rateBps ?? ""}:${exception?.fixedCents ?? ""}`
+  useEffect(() => {
+    if (open) form.reset(initial)
+    // Cada apertura parte de la excepción elegida (o de nada).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, key, form])
+  return (
+    <FormDrawer
+      {...surface}
+      open={open}
+      onClose={onClose}
+      title={exception ? `Cambiar · ${exception.serviceName}` : "Otro porcentaje o monto para un servicio"}
+      description={`Para ${professional.name}. Vale para lo que se cobre desde hoy: lo ya cobrado conserva lo que tenía.`}
+      submitLabel="Guardar"
+    >
+      <div className="flex flex-col gap-4">
+        {exception ? null : (
+          <form.AppField name="serviceId">
+            {(field) => (
+              <field.Control label="Servicio">
+                {(control) => (
+                  <ServiceSelect
+                    id={control.id}
+                    value={field.state.value}
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    onChange={(service) => field.handleChange(service?.id ?? "")}
+                    placeholder="Busca el servicio"
+                  />
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
+        )}
+        <form.AppField name="kind">
+          {(field) => (
+            <field.Group legend="Cómo se le paga" className="gap-3">
+              {(control) => (
+                <ChoiceButtons
+                  id={control.id}
+                  invalid={control.invalid}
+                  aria-describedby={control.describedBy}
+                  onBlur={control.onBlur}
+                  tone="primary"
+                  value={field.state.value}
+                  options={EXCEPTION_KINDS}
+                  onChange={(next) => field.handleChange(next)}
+                />
+              )}
+            </field.Group>
+          )}
+        </form.AppField>
+        {kind === "fixed" ? (
+          <form.AppField name="amount">
+            {(field) => (
+              <field.TextField
+                label={`Monto (${currency})`}
+                description="Lo mismo por cada uno, sin importar el precio. Si se cobra en partes, en proporción a lo cobrado."
+                inputMode="decimal"
+                inputClassName="w-40"
+              />
+            )}
+          </form.AppField>
+        ) : (
+          <form.AppField name="percent">
+            {(field) => (
+              <field.TextField
+                label="Porcentaje de lo cobrado (%)"
+                description="De lo cobrado de ese servicio, en vez de su porcentaje general."
+                inputMode="decimal"
+                inputClassName="w-28"
+              />
+            )}
+          </form.AppField>
+        )}
+      </div>
+    </FormDrawer>
+  )
+}
+
 // --- Fijar o cambiar el porcentaje ----------------------------------------------------
 
 function RateDrawer({
@@ -793,6 +1142,7 @@ function RateDrawer({
   professional,
   candidates = [],
   currentRateBps,
+  firstRate = false,
   locale,
 }: {
   open: boolean
@@ -801,6 +1151,8 @@ function RateDrawer({
   professional: { userId: string; name: string } | null
   candidates?: Array<{ userId: string; name: string }>
   currentRateBps: number
+  /** Aún no tiene ningún porcentaje: el primero vale también para lo ya cobrado. */
+  firstRate?: boolean
   locale: string
 }) {
   const queryClient = useQueryClient()
@@ -883,7 +1235,11 @@ function RateDrawer({
           {(field) => (
             <field.TextField
               label="Porcentaje de lo cobrado (%)"
-              description="Se aplica a lo que aún no se ha pagado. Lo ya pagado conserva el porcentaje con que se pagó."
+              description={
+                firstRate
+                  ? "Es su primer porcentaje: vale también para lo ya cobrado que aún no se paga."
+                  : `Vale para lo que se cobre desde hoy. Lo cobrado antes conserva el ${percentLabel(currentRateBps, locale)}.`
+              }
               inputMode="decimal"
               autoComplete="off"
               inputClassName="w-32"
@@ -921,13 +1277,19 @@ function PayDrawer({
     void queryClient.invalidateQueries({ queryKey: ["finance-expenses"] })
     void queryClient.invalidateQueries({ queryKey: ["monthly-finance-result"] })
   }
+  // Salir de la caja es mover efectivo: lo ofrece solo a quien registra gastos.
+  const canUseCash = usePermission("finance.write") && detail.pendingCents > 0
   const form = useAppForm({
-    defaultValues: { branchId: "", notes: "" },
+    defaultValues: { branchId: "", notes: "", fromCash: false },
     validators: {
-      onSubmit: ({ value }) =>
-        pickBranch && !value.branchId
-          ? { fields: { branchId: "Elige la sede del gasto." } }
-          : undefined,
+      onSubmit: ({ value }) => {
+        const fields: Record<string, string> = {}
+        if (pickBranch && !value.branchId) fields.branchId = "Elige la sede del gasto."
+        // Mismo freno que en un gasto: el efectivo nunca queda negativo, y se dice qué hacer.
+        if (value.fromCash && cashState && cashState.cashOnHandCents < detail.pendingCents)
+          fields.fromCash = `En la caja solo hay ${formatMoney(cashState.cashOnHandCents, detail.currency, detail.locale)}: no alcanza para pagarlo con el efectivo. Si el dinero está en el cajón, regístralo antes en Finanzas con «Ingresar o retirar efectivo». Si se pagó por transferencia, deja la casilla sin marcar.`
+        return Object.keys(fields).length > 0 ? { fields } : undefined
+      },
     },
     onSubmit: async ({ value }) => {
       try {
@@ -938,8 +1300,10 @@ function PayDrawer({
           branchId: value.branchId || defaultBranch,
           expectedCents: detail.pendingCents,
           ...(notes ? { notes } : {}),
+          ...(value.fromCash && canUseCash ? { fromCash: true } : {}),
         })
         refresh()
+        if (value.fromCash) invalidateFinance(queryClient)
         // Se dice lo que el servidor pagó de verdad, no lo que mostraba la pantalla.
         toast.success(
           result.data.settlement.commissionCents === 0
@@ -955,6 +1319,11 @@ function PayDrawer({
   })
   const surface = useFormSurface(form, { formMessage: financeFormMessage })
   const branchId = useStore(form.store, (state) => state.values.branchId)
+  const fromCash = useStore(form.store, (state) => state.values.fromCash)
+  const cashBranch = branchId || defaultBranch
+  const cash = useCashState(cashBranch, open && canUseCash, detail.currency)
+  const cashState = cash.data?.data ?? null
+  const cashAfter = cashState ? cashState.cashOnHandCents - detail.pendingCents : null
 
   // La sede activa es la propuesta; si llega tarde no pisa lo ya elegido.
   useEffect(() => {
@@ -963,7 +1332,7 @@ function PayDrawer({
   }, [open, defaultBranch, form])
   useEffect(() => {
     if (open) return
-    form.reset({ branchId: "", notes: "" })
+    form.reset({ branchId: "", notes: "", fromCash: false })
   }, [open, form])
 
   const amount = formatMoney(detail.pendingCents, detail.currency, detail.locale)
@@ -1024,6 +1393,35 @@ function PayDrawer({
             No hay una sede activa donde registrar el gasto.
           </p>
         )}
+        {canUseCash ? (
+          <form.AppField name="fromCash">
+            {(field) => (
+              <FormChoiceField
+                label="Se pagó con el efectivo de la caja"
+                description={
+                  !fromCash
+                    ? "Déjala sin marcar si se pagó por transferencia u otro medio: no toca la caja."
+                    : cashAfter === null || cashAfter < 0
+                      ? "Se descuenta del efectivo que debe haber al cerrar."
+                      : `Se descuenta del efectivo que debe haber al cerrar: la caja queda en ${formatMoney(cashAfter, detail.currency, detail.locale)}.`
+                }
+              >
+                {(control) => (
+                  <Checkbox
+                    id={control.id}
+                    aria-invalid={control.invalid || undefined}
+                    aria-describedby={control.describedBy}
+                    checked={field.state.value}
+                    onCheckedChange={(checked) => {
+                      field.handleChange(checked === true)
+                      control.onBlur()
+                    }}
+                  />
+                )}
+              </FormChoiceField>
+            )}
+          </form.AppField>
+        ) : null}
         <form.AppField name="notes">
           {(field) => <field.TextareaField label="Nota (opcional)" rows={2} maxLength={2000} />}
         </form.AppField>
@@ -1062,6 +1460,8 @@ function VoidPaymentDrawer({
       try {
         await voidCommissionPaymentApi(payment?.id ?? "", value.reason.trim())
         refresh()
+        // Si salió de la caja, anularlo la devuelve.
+        invalidateFinance(queryClient)
         toast.success("Pago anulado: sus cobros vuelven a quedar por pagar")
         onClose()
       } catch (err) {
@@ -1207,8 +1607,26 @@ export function MyCommissionsPanel({
       >
         <p className="text-sm font-medium text-muted-foreground">Me corresponde</p>
         <p className="mt-1 text-3xl leading-tight font-bold tracking-tight tabular-nums">
-          {money(mine.commissionCents)}
+          {money(mine.commissionCents + (mine.salary?.cents ?? 0))}
         </p>
+        {mine.salary ? (
+          // Solo quien tiene un sueldo anotado: sueldo + comisión.
+          <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 text-sm">
+            <dt className="text-muted-foreground">Sueldo</dt>
+            <dd className="tabular-nums">
+              {plain(mine.salary.cents)}
+              <span className="ml-2 text-muted-foreground">
+                {mine.salary.dueCents > 0
+                  ? "por pagar"
+                  : mine.salary.paidAt
+                    ? `pagado el ${dayLabel(mine.salary.paidAt, format, zone, period.year)}`
+                    : "pagado"}
+              </span>
+            </dd>
+            <dt className="text-muted-foreground">Comisión</dt>
+            <dd className="tabular-nums">{plain(mine.commissionCents)}</dd>
+          </dl>
+        ) : null}
         <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
           <StatusBadge status={mine.status} baseCents={mine.baseCents} />
           <span className="text-muted-foreground">
@@ -1218,6 +1636,14 @@ export function MyCommissionsPanel({
           </span>
         </div>
         {statusNote ? <p className="mt-2 text-sm text-muted-foreground">{statusNote}</p> : null}
+        {mine.hasRate && mine.attended && mine.attended.unpaidCents > 0 ? (
+          // Lo atendido que aún no se cobra: no se perdió; comisiona en el mes en que se cobre.
+          <p className="mt-2 text-sm text-muted-foreground">
+            De lo que atendiste este mes, aún no se cobra:{" "}
+            <span className="font-medium text-foreground tabular-nums">{plain(mine.attended.unpaidCents)}</span>. Su comisión
+            cuenta en el mes en que se cobre.
+          </p>
+        ) : null}
         {(myPayments.data?.data ?? []).length > 0 ? (
           <ul aria-label="Mis pagos de este mes" className="mt-3 flex flex-col gap-1 border-t pt-3 text-sm">
             {(myPayments.data?.data ?? []).map((payment) => (
@@ -1252,14 +1678,14 @@ export function MyCommissionsPanel({
           <>
             <ul className="elevated flex min-w-0 flex-col divide-y rounded-xl border bg-card">
               {visible.map((line) => (
-                <li key={line.applicationId} className="flex min-w-0 items-start gap-3 px-4 py-3">
+                <li key={lineKey(line)} className="flex min-w-0 items-start gap-3 px-4 py-3">
                   <div className="min-w-0 flex-1">
                     <p className="font-medium">{line.patientName || "Paciente"}</p>
                     <p className="text-sm text-muted-foreground">
                       {line.description} · cobrado {plain(line.baseCents)}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      {lineFacts(line, (iso) => dayLabel(iso, format, zone, period.year), format)}
+                      {lineFacts(line, (iso) => dayLabel(iso, format, zone, period.year), format, mine.currency)}
                     </p>
                     {line.voidedAfterPaid ? (
                       <p className="mt-1 text-sm text-destructive">

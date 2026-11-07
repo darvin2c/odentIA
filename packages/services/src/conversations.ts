@@ -774,7 +774,7 @@ export type OutboundContent =
       /** Token de «Su enlace» para el botón que lo abre (ADR 0037). */
       link?: string
       preview?: string
-      /** El PDF del encabezado de una plantilla con documento (ADR 0150): queda como su adjunto. */
+      /** El PDF del encabezado de una plantilla con documento (ADR 0152): queda como su adjunto. */
       document?: AttachmentRef
     }
   | { type: "media"; attachment: AttachmentRef; caption?: string }
@@ -1063,7 +1063,7 @@ export async function sendTemplateOutbound(
     preview?: string
     /** Sale de un botón, sin que nadie lo escriba (`sendOutbound`). */
     fromAction?: boolean
-    /** El PDF del encabezado, si la plantilla lleva documento (ADR 0150). */
+    /** El PDF del encabezado, si la plantilla lleva documento (ADR 0152). */
     document?: AttachmentRef
   },
 ): Promise<MessageItem> {

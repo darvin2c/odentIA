@@ -33,13 +33,14 @@ import {
   patientPaymentRefund,
   paymentReturn,
   paymentTicket,
+  serviceCatalog,
 } from "@odentia/db/schema/clinical"
 import { requireCanAttend } from "./attending.js"
 import {
   cashClosure,
   cashMovement,
   cashShift,
-  commissionRule,
+  commissionRate,
   commissionSettlement,
   commissionSettlementLine,
   expense,
@@ -72,6 +73,7 @@ import {
   paymentValueSql,
 } from "./report-value.js"
 import { createWorkspaceNotification } from "./workspace.js"
+import { salaryOfMonth } from "./expense-recurring-occurrences.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import type { TicketFrozen } from "./payments.js"
 import { digitsContain, foldedWordsMatch, referenceNumber, searchDigits, textMatchesWords } from "./search-text.js"
@@ -160,10 +162,11 @@ async function audit(
   entity: string,
   id: string,
   action: string,
+  metadata?: Record<string, unknown>,
 ): Promise<void> {
   await tx
     .insert(auditEvent)
-    .values({ organizationId: orgId, actorUserId, entity, entityId: id, action })
+    .values({ organizationId: orgId, actorUserId, entity, entityId: id, action, metadata: metadata ?? null })
 }
 
 export async function requireBranch(tx: Db, orgId: string, branchId: string) {
@@ -261,7 +264,7 @@ async function requireCommissionPerson(tx: Db, orgId: string, userId: string): P
   const [was] = await tx.execute<{ found: number }>(sql`
     select 1 as found where exists (select 1 from encounter e where e.organization_id = ${orgId} and e.professional_user_id = ${userId})
       or exists (select 1 from commission_settlement s where s.organization_id = ${orgId} and s.professional_user_id = ${userId})
-      or exists (select 1 from commission_rule r where r.organization_id = ${orgId} and r.professional_user_id = ${userId})`)
+      or exists (select 1 from commission_rate r where r.organization_id = ${orgId} and r.professional_user_id = ${userId})`)
   if (!was) throw notFound("Profesional")
   return { inTeam: false }
 }
@@ -1233,10 +1236,13 @@ export async function createExpense(
   input: CreateExpenseInput,
   /**
    * Solo `payPurchaseOrder`: el gasto es el pago de esa compra y, si se pagó en
-   * otra moneda, lo que salió. Un gasto suelto no cruza monedas.
+   * otra moneda, lo que salió. Un gasto suelto no cruza monedas. Solo
+   * `expense-recurring.ts`: el gasto es el pago de ese mes de un gasto que se repite.
    */
-  link: { purchaseOrderId?: string; tender?: ExpenseTender } = {},
+  link: { purchaseOrderId?: string; tender?: ExpenseTender; recurringId?: string; recurringMonth?: string } = {},
 ) {
+  if (Boolean(link.recurringId) !== Boolean(link.recurringMonth))
+    throw validation("El pago de un gasto que se repite lleva su plantilla y su mes")
   const branchRow = await requireBranch(tx, orgId, input.branchId)
   const profile = await lockOrgMoney(tx, orgId)
   if (!input.currency && !profile) throw orgProfileRequired()
@@ -1296,6 +1302,8 @@ export async function createExpense(
       notes: input.notes?.trim() ? input.notes.trim().slice(0, 2000) : null,
       purchaseOrderId: link.purchaseOrderId ?? null,
       salesTax,
+      recurringId: link.recurringId ?? null,
+      recurringMonth: link.recurringMonth ?? null,
       createdBy: actorUserId,
     })
     .returning()
@@ -2071,6 +2079,44 @@ async function paymentTotalsOf(
 }
 
 /** Fija o actualiza el porcentaje único de un profesional (puntos básicos). */
+/**
+ * La regla vigente de un profesional para algo cobrado en `at` (la general o la
+ * de un servicio): la última versión que ya valía.
+ */
+async function latestRate(
+  tx: Db,
+  orgId: string,
+  professionalUserId: string,
+  serviceId: string | null,
+  at: Date | "now" = "now",
+) {
+  const [row] = await tx
+    .select()
+    .from(commissionRate)
+    .where(
+      and(
+        eq(commissionRate.organizationId, orgId),
+        eq(commissionRate.professionalUserId, professionalUserId),
+        serviceId ? eq(commissionRate.serviceId, serviceId) : isNull(commissionRate.serviceId),
+        at === "now" ? sql`${commissionRate.effectiveFrom} <= now()` : lte(commissionRate.effectiveFrom, at),
+      ),
+    )
+    .orderBy(desc(commissionRate.effectiveFrom))
+    .limit(1)
+  return row ?? null
+}
+
+/** «8 de noviembre», en la zona y el idioma de la clínica. */
+function dayWords(at: Date, zone: { locale: string; timezone: string }): string {
+  return new Intl.DateTimeFormat(zone.locale, { day: "numeric", month: "long", timeZone: zone.timezone }).format(at)
+}
+
+/**
+ * Cambiar el porcentaje general (ADR 0151): una versión nueva que vale para lo
+ * que se cobre desde ahora; lo cobrado antes conserva el de su día. La primera
+ * de alguien vale desde siempre, para que fijarlo tarde no deje en cero lo ya
+ * cobrado. La auditoría guarda antes y después, y se le avisa al profesional.
+ */
 export async function setCommissionRate(
   tx: Db,
   orgId: string,
@@ -2090,50 +2136,139 @@ export async function setCommissionRate(
   }
   if (!Number.isInteger(input.rateBps) || input.rateBps < 0 || input.rateBps > 10000)
     throw invalidField("rateBps", "Escribe un porcentaje entre 0 y 100, con dos decimales como máximo.")
-  const [existing] = await tx
-    .select()
-    .from(commissionRule)
+  // Dos cambios del mismo profesional a la vez no deben pisarse la versión.
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`commission-rate:${orgId}:${input.professionalUserId}`}, 0))`,
+  )
+  const [anyGeneral] = await tx
+    .select({ id: commissionRate.id })
+    .from(commissionRate)
     .where(
       and(
-        eq(commissionRule.organizationId, orgId),
-        eq(commissionRule.professionalUserId, input.professionalUserId),
+        eq(commissionRate.organizationId, orgId),
+        eq(commissionRate.professionalUserId, input.professionalUserId),
+        isNull(commissionRate.serviceId),
       ),
     )
-  if (existing) {
-    const [row] = await tx
-      .update(commissionRule)
-      .set({ rateBps: input.rateBps, updatedAt: new Date() })
-      .where(eq(commissionRule.id, existing.id))
-      .returning()
-    await audit(tx, orgId, actorUserId, "commission_rule", row.id, "finance.rule_updated")
-    return row
-  }
+    .limit(1)
+  const current = await latestRate(tx, orgId, input.professionalUserId, null)
+  if (current && current.rateBps === input.rateBps) return current
   const [row] = await tx
-    .insert(commissionRule)
+    .insert(commissionRate)
     .values({
       organizationId: orgId,
       professionalUserId: input.professionalUserId,
+      serviceId: null,
+      // La hora de ahora, ya con el turno tomado: dos cambios seguidos quedan en el orden en que se guardaron.
+      effectiveFrom: anyGeneral ? sql`clock_timestamp()` : sql`'-infinity'::timestamptz`,
       rateBps: input.rateBps,
       createdBy: actorUserId,
     })
     .returning()
-  await audit(tx, orgId, actorUserId, "commission_rule", row.id, "finance.rule_created")
+  await audit(tx, orgId, actorUserId, "commission_rate", row.id, "finance.rule_updated", {
+    professionalUserId: input.professionalUserId,
+    before: current?.rateBps ?? null,
+    after: input.rateBps,
+  })
+  // Al profesional se le dice, sin pedirle nada: es lo que va a ver en «Mis comisiones».
+  if (anyGeneral && input.professionalUserId !== actorUserId) {
+    const zone = await getOrgLocale(tx, orgId)
+    await createWorkspaceNotification(tx, orgId, {
+      userId: input.professionalUserId,
+      dedupeKey: `commission-rate:${row.id}`,
+      title: "Cambió tu porcentaje de comisión",
+      body: `Pasó a ${percentWords(input.rateBps, zone.locale)} para lo que se cobre desde el ${dayWords(new Date(), zone)}. Lo cobrado antes conserva el de su día.`,
+      href: "/commissions",
+      permission: "commissions.read",
+      actorUserId,
+    })
+  }
   return row
 }
 
+/** «40 %», «12,5 %». */
+function percentWords(rateBps: number, locale: string): string {
+  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(rateBps / 100)} %`
+}
+
+export interface CommissionExceptionInput {
+  professionalUserId: string
+  serviceId: string
+  /** Otro porcentaje para el servicio. */
+  rateBps?: number | null
+  /** O un monto fijo por cada procedimiento, en moneda del negocio. */
+  fixedCents?: number | null
+}
+
+/**
+ * Una excepción para un servicio: otro porcentaje, un monto fijo por cada uno o,
+ * sin ninguno de los dos, quitarla (vuelve al general). Vale desde ahora, como
+ * el porcentaje general.
+ */
+export async function setCommissionException(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  input: CommissionExceptionInput,
+) {
+  const removing = (input.rateBps ?? null) === null && (input.fixedCents ?? null) === null
+  // Quitar se le puede hacer a cualquiera del equipo (como volver a 0 el general); poner, a quien atiende.
+  if (removing) await requireProfessional(tx, orgId, input.professionalUserId)
+  else await requireCanAttend(tx, orgId, input.professionalUserId, "professionalUserId")
+  if (!looksLikeId(input.serviceId)) throw invalidField("serviceId", "Elige el servicio.")
+  const [service] = await tx
+    .select({ id: serviceCatalog.id, name: serviceCatalog.name })
+    .from(serviceCatalog)
+    .where(and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.id, input.serviceId)))
+  if (!service) throw invalidField("serviceId", "Ese servicio no es de la clínica.")
+  const rateBps = input.rateBps ?? null
+  const fixedCents = input.fixedCents ?? null
+  if (rateBps !== null && fixedCents !== null) throw invalidField("rateBps", "Elige un porcentaje o un monto, no los dos.")
+  if (rateBps !== null && (!Number.isInteger(rateBps) || rateBps < 0 || rateBps > 10000))
+    throw invalidField("rateBps", "Escribe un porcentaje entre 0 y 100, con dos decimales como máximo.")
+  if (fixedCents !== null && (!Number.isSafeInteger(fixedCents) || fixedCents <= 0 || fixedCents > 2147483647))
+    throw invalidField("fixedCents", "Escribe un monto mayor que cero.")
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`commission-rate:${orgId}:${input.professionalUserId}`}, 0))`,
+  )
+  const current = await latestRate(tx, orgId, input.professionalUserId, service.id)
+  const same = (current?.rateBps ?? null) === rateBps && (current?.fixedCents ?? null) === fixedCents
+  // Quitar lo que no había, o repetir lo mismo, no agrega una versión.
+  if (same || (!current && rateBps === null && fixedCents === null)) return current
+  const [row] = await tx
+    .insert(commissionRate)
+    .values({
+      organizationId: orgId,
+      professionalUserId: input.professionalUserId,
+      serviceId: service.id,
+      effectiveFrom: sql`clock_timestamp()`,
+      rateBps,
+      fixedCents,
+      createdBy: actorUserId,
+    })
+    .returning()
+  await audit(tx, orgId, actorUserId, "commission_rate", row.id, "finance.rule_exception", {
+    professionalUserId: input.professionalUserId,
+    serviceId: service.id,
+    before: current ? { rateBps: current.rateBps, fixedCents: current.fixedCents } : null,
+    after: { rateBps, fixedCents },
+  })
+  return row
+}
+
+/** El porcentaje general de hoy de cada profesional que tiene uno. */
 export async function listCommissionRates(
   tx: Db,
   orgId: string,
   query: { professionalUserId?: string } = {},
 ) {
-  const filters = [eq(commissionRule.organizationId, orgId)]
-  if (query.professionalUserId)
-    filters.push(eq(commissionRule.professionalUserId, query.professionalUserId))
-  const rows = await tx
-    .select()
-    .from(commissionRule)
-    .where(and(...filters))
-    .orderBy(asc(commissionRule.professionalUserId))
+  const rows = await tx.execute<{ professionalUserId: string; rateBps: number; effectiveFrom: Date }>(sql`
+    select distinct on (r.professional_user_id) r.professional_user_id as "professionalUserId", r.rate_bps as "rateBps",
+      r.effective_from as "effectiveFrom"
+    from commission_rate r
+    where r.organization_id = ${orgId} and r.service_id is null and r.effective_from <= now()
+      ${query.professionalUserId ? sql`and r.professional_user_id = ${query.professionalUserId}` : sql``}
+    order by r.professional_user_id, r.effective_from desc`)
   const names = await userNames(
     tx,
     rows.map((r) => r.professionalUserId),
@@ -2142,16 +2277,138 @@ export async function listCommissionRates(
 }
 
 async function commissionRateOf(tx: Db, orgId: string, professionalUserId: string): Promise<number> {
-  const [rule] = await tx
-    .select({ rateBps: commissionRule.rateBps })
-    .from(commissionRule)
+  return (await latestRate(tx, orgId, professionalUserId, null))?.rateBps ?? 0
+}
+
+/**
+ * Lo que rige hoy para un profesional, para su detalle: el porcentaje general,
+ * desde cuándo y el anterior, y cada excepción por servicio que sigue en pie.
+ */
+export async function commissionRulesOf(tx: Db, orgId: string, professionalUserId: string) {
+  const general = await tx
+    .select({ rateBps: commissionRate.rateBps, effectiveFrom: commissionRate.effectiveFrom })
+    .from(commissionRate)
     .where(
       and(
-        eq(commissionRule.organizationId, orgId),
-        eq(commissionRule.professionalUserId, professionalUserId),
+        eq(commissionRate.organizationId, orgId),
+        eq(commissionRate.professionalUserId, professionalUserId),
+        isNull(commissionRate.serviceId),
+        sql`${commissionRate.effectiveFrom} <= now()`,
       ),
     )
-  return rule?.rateBps ?? 0
+    .orderBy(desc(commissionRate.effectiveFrom))
+    .limit(2)
+  const exceptions = await tx.execute<{
+    serviceId: string
+    serviceName: string
+    rateBps: number | null
+    fixedCents: number | null
+    effectiveFrom: Date
+  }>(sql`
+    select x.service_id as "serviceId", sc.name as "serviceName", x.rate_bps as "rateBps", x.fixed_cents as "fixedCents",
+      x.effective_from as "effectiveFrom"
+    from (
+      select distinct on (r.service_id) r.service_id, r.rate_bps, r.fixed_cents, r.effective_from
+      from commission_rate r
+      where r.organization_id = ${orgId} and r.professional_user_id = ${professionalUserId} and r.service_id is not null
+        and r.effective_from <= now()
+      order by r.service_id, r.effective_from desc
+    ) x
+    join service_catalog sc on sc.organization_id = ${orgId} and sc.id = x.service_id
+    where x.rate_bps is not null or x.fixed_cents is not null
+    order by sc.name`)
+  const [now, before] = general
+  // Desde siempre (`-infinity`) no tiene día que decir.
+  const since = now && Number.isFinite(now.effectiveFrom.getTime()) ? now.effectiveFrom : null
+  return {
+    rateBps: now?.rateBps ?? 0,
+    /** Ya tiene un porcentaje general: cambiarlo vale desde ahora (el primero vale desde siempre). */
+    hasRate: Boolean(now),
+    since,
+    previousRateBps: before?.rateBps ?? null,
+    exceptions: [...exceptions].map((row) => ({
+      ...row,
+      effectiveFrom: Number.isFinite(new Date(row.effectiveFrom).getTime()) ? row.effectiveFrom : null,
+    })),
+  }
+}
+
+/**
+ * Las líneas de `commission_live` de una clínica en un tramo, como subconsulta. Lo de una sola
+ * parte (casi todo) cuenta el día del cobro y se filtra por `cobro_at`, que la base lleva hasta la
+ * tabla; lo repartido por sesiones (pocos cargos, con su índice) se filtra aparte por `at`, el día
+ * de la sesión. Filtrar todo por `at`, o con un `or`, calculaba la historia entera cada vez.
+ */
+export function commissionLiveIn(orgId: string, start: Date, end: Date, extra: SQL = sql``): SQL {
+  const from = sql`${start.toISOString()}::timestamptz`
+  const to = sql`${end.toISOString()}::timestamptz`
+  return sql`(select * from commission_live
+      where organization_id = ${orgId} and split_sessions is null and cobro_at >= ${from} and cobro_at < ${to} ${extra}
+    union all
+    select * from commission_live
+      where organization_id = ${orgId} and split_sessions is not null and at >= ${from} and at < ${to} ${extra})`
+}
+
+/** Un decimal de la base («123.4500…») como fracción exacta, sin pasar por `number`. */
+function fractionOfDecimal(text: string): MoneyFraction {
+  const negative = text.startsWith("-")
+  const [whole = "0", decimals = ""] = (negative ? text.slice(1) : text).split(".")
+  const num = BigInt(`${whole}${decimals}` || "0")
+  return { num: negative ? -num : num, den: 10n ** BigInt(decimals.length) }
+}
+
+/** Una línea aún sin pagar, como la da `commission_live` (la misma cuenta de Reportes y Argos). */
+interface LiveCommissionLine {
+  applicationId: string
+  slice: number | null
+  sessions: number
+  chargeId: string
+  paymentId: string
+  patientId: string
+  description: string
+  promotionName: string | null
+  at: Date
+  value: MoneyFraction
+  rateBps: number | null
+  fixedCents: number | null
+  forService: boolean
+  /** Tuvo alguna regla (general o del servicio): sin ninguna da 0 y no se congela al pagar. */
+  hasRule: boolean
+  commissionCents: number
+}
+
+async function liveCommissionLines(
+  tx: Db,
+  orgId: string,
+  query: { professionalUserId: string; start: Date; end: Date },
+): Promise<LiveCommissionLine[]> {
+  const rows = await tx.execute<{
+    applicationId: string
+    slice: number | null
+    sessions: number
+    chargeId: string
+    paymentId: string
+    patientId: string
+    description: string
+    promotionName: string | null
+    at: Date
+    value: string
+    rateBps: number | null
+    fixedCents: number | null
+    forService: boolean
+    hasRule: boolean
+    commission: string
+  }>(sql`
+    select l.application_id as "applicationId", l.slice, l.sessions, l.charge_id as "chargeId", l.payment_id as "paymentId",
+      l.patient_id as "patientId", l.description, l.promotion_name as "promotionName", l.at, l.value::text as value,
+      l.rate_bps as "rateBps", l.fixed_cents as "fixedCents", l.for_service as "forService", l.has_rule as "hasRule", l.commission::text as commission
+    from ${commissionLiveIn(orgId, query.start, query.end, sql`and professional_user_id = ${query.professionalUserId}`)} l`)
+  return [...rows].map((row) => ({
+    ...row,
+    at: new Date(row.at),
+    value: fractionOfDecimal(row.value),
+    commissionCents: Number(row.commission),
+  }))
 }
 
 interface CollectedApp {
@@ -2390,12 +2647,22 @@ export interface CommissionLine {
   patientId: string
   patientName: string
   description: string
-  /** Lo cobrado de ese concepto en ese cobro. */
+  /** Lo cobrado de ese concepto en ese cobro (su parte, si se reparte por sesiones). */
   baseCents: number
-  rateBps: number
+  /** El porcentaje que usó; nulo si fue un monto fijo. */
+  rateBps: number | null
   commissionCents: number
   occurredAt: Date
   promotionName: string | null
+  /** La parte de un tratamiento de varias sesiones (sesión `slice` de `sessions`); nula si es una sola. */
+  slice: number | null
+  sessions: number | null
+  /** El monto fijo por procedimiento que usó, si fue una excepción con monto. */
+  fixedCents: number | null
+  /** El porcentaje o el monto fue una excepción para el servicio. */
+  forService: boolean
+  /** Sin ninguna regla aún: da 0 y un pago no lo congela (cuando se fije, se calcula). */
+  unruled?: boolean
   /** Ya entró en un pago registrado: su porcentaje e importe quedaron congelados. */
   settled: boolean
   /** Cuándo se pagó (nulo si aún no). */
@@ -2407,6 +2674,8 @@ export interface CommissionLine {
 /** Comisión ya pagada por un cobro que después se anuló. */
 export interface CommissionAdjustment {
   applicationId: string
+  /** La parte del cobro, si era de un tratamiento de varias sesiones. */
+  slice: number | null
   patientId: string
   patientName: string
   description: string
@@ -2420,12 +2689,17 @@ export type CommissionStatus = "por_pagar" | "pagado" | "sin_cobros" | "por_desc
 interface FrozenLine {
   line: typeof commissionSettlementLine.$inferSelect
   settledAt: Date | null
+  promotionName: string | null
 }
 
 /** Líneas ya pagadas del profesional (pagos vigentes), con la fecha del pago. */
 async function frozenLines(tx: Db, orgId: string, professionalUserId: string): Promise<FrozenLine[]> {
   const rows = await tx
-    .select({ line: commissionSettlementLine, settledAt: commissionSettlement.settledAt })
+    .select({
+      line: commissionSettlementLine,
+      settledAt: commissionSettlement.settledAt,
+      promotionName: patientCharge.promotionName,
+    })
     .from(commissionSettlementLine)
     .innerJoin(
       commissionSettlement,
@@ -2435,6 +2709,10 @@ async function frozenLines(tx: Db, orgId: string, professionalUserId: string): P
         isNull(commissionSettlement.voidedAt),
       ),
     )
+    .leftJoin(
+      patientCharge,
+      and(eq(patientCharge.organizationId, orgId), eq(patientCharge.id, commissionSettlementLine.chargeId)),
+    )
     .where(
       and(
         eq(commissionSettlementLine.organizationId, orgId),
@@ -2443,6 +2721,11 @@ async function frozenLines(tx: Db, orgId: string, professionalUserId: string): P
       ),
     )
   return rows
+}
+
+/** La clave de una línea: el cobro y, si se reparte por sesiones, su parte. */
+function lineKey(applicationId: string, slice: number | null | undefined): string {
+  return slice ? `${applicationId}:${slice}` : applicationId
 }
 
 async function patientNames(tx: Db, orgId: string, ids: string[]): Promise<Map<string, string>> {
@@ -2465,8 +2748,10 @@ export interface MonthlyCommissionsQuery {
 /**
  * Mes de un profesional: cada cobro de lo que atendió, con su comisión.
  *
- * - Lo aún no pagado usa el porcentaje vigente y solo cuenta mientras el
- *   cobro siga en pie: si se anula antes de pagar, deja de deberse.
+ * - Lo aún no pagado sale de `commission_live` (la misma cuenta de Reportes y
+ *   Argos): la regla del día del cobro, la excepción del servicio si hay, y
+ *   la parte de cada sesión en un tratamiento compartido. Solo cuenta mientras
+ *   el cobro siga en pie: si se anula antes de pagar, deja de deberse.
  * - Lo ya pagado conserva el porcentaje y el importe con que se pagó, aunque
  *   el porcentaje cambie después.
  * - Un cobro anulado después de pagada su comisión queda como ajuste: se
@@ -2489,19 +2774,19 @@ export async function getMonthlyCommissions(
   const { timezone, locale, currency: unit } = zone
   const money = orgMoneyOf(zone)
   const { start, end } = monthBounds(timezone, query.year, query.month)
-  const rateBps = await commissionRateOf(tx, orgId, query.professionalUserId)
-  const live = await collectedApplications(tx, orgId, start, end, money, {
-    professionalUserId: query.professionalUserId,
-    liveNow: true,
-  })
-  const liveById = new Map(live.map((app) => [app.appId, app]))
+  void money
+  const rules = await commissionRulesOf(tx, orgId, query.professionalUserId)
+  const rateBps = rules.rateBps
+  const live = await liveCommissionLines(tx, orgId, { professionalUserId: query.professionalUserId, start, end })
   const frozen = await frozenLines(tx, orgId, query.professionalUserId)
   const frozenCobros = frozen.filter((f) => f.line.kind === "cobro" && f.line.applicationId)
   // Lo ya descontado de cada cobro anulado después de pagado: un descuento puede repartirse en varios pagos.
   const discounted = new Map<string, number>()
   for (const f of frozen)
-    if (f.line.kind === "ajuste" && f.line.applicationId)
-      discounted.set(f.line.applicationId, (discounted.get(f.line.applicationId) ?? 0) + f.line.commissionCents)
+    if (f.line.kind === "ajuste" && f.line.applicationId) {
+      const key = lineKey(f.line.applicationId, f.line.slice)
+      discounted.set(key, (discounted.get(key) ?? 0) + f.line.commissionCents)
+    }
   // Cobros pagados cuya aplicación ya no está en pie (cualquier mes).
   const paidIds = frozenCobros.map((f) => f.line.applicationId as string)
   const stillLive = new Set<string>()
@@ -2536,11 +2821,9 @@ export async function getMonthlyCommissions(
   const lines: CommissionLine[] = []
   // La base del mes se redondea una vez, sobre la suma; lo ya pagado quedó con su base.
   const baseValues: MoneyFraction[] = []
-  const paidThisMonth = new Set<string>()
   for (const f of frozenCobros) {
     const appId = f.line.applicationId as string
     if (!inMonth(f.line.occurredAt)) continue
-    paidThisMonth.add(appId)
     lines.push({
       applicationId: appId,
       chargeId: f.line.chargeId ?? "",
@@ -2549,10 +2832,14 @@ export async function getMonthlyCommissions(
       patientName: f.line.patientId ? (names.get(f.line.patientId) ?? "") : "",
       description: f.line.description,
       baseCents: f.line.baseCents,
-      rateBps: f.line.rateBps ?? rateBps,
+      rateBps: f.line.fixedCents !== null ? null : f.line.rateBps,
       commissionCents: f.line.commissionCents,
       occurredAt: f.line.occurredAt,
-      promotionName: liveById.get(appId)?.chargePromotionName ?? null,
+      promotionName: f.promotionName ?? null,
+      slice: f.line.slice,
+      sessions: f.line.sessions,
+      fixedCents: f.line.fixedCents,
+      forService: f.line.forService,
       settled: true,
       paidAt: f.settledAt,
       voidedAfterPaid: !stillLive.has(appId),
@@ -2560,26 +2847,34 @@ export async function getMonthlyCommissions(
     if (stillLive.has(appId)) baseValues.push({ num: BigInt(f.line.baseCents), den: 1n })
   }
   for (const app of live) {
-    if (paidThisMonth.has(app.appId)) continue
-    baseValues.push(app.appValue)
+    baseValues.push(app.value)
     lines.push({
-      applicationId: app.appId,
+      applicationId: app.applicationId,
       chargeId: app.chargeId,
       paymentId: app.paymentId,
       patientId: app.patientId,
       patientName: names.get(app.patientId) ?? "",
-      description: app.chargeDescription,
-      baseCents: roundMoneyValue(app.appValue),
-      rateBps,
-      commissionCents: commissionOfValue(app.appValue, rateBps),
-      occurredAt: app.appCreatedAt,
-      promotionName: app.chargePromotionName,
+      description: app.description,
+      baseCents: roundMoneyValue(app.value),
+      rateBps: app.rateBps,
+      commissionCents: app.commissionCents,
+      occurredAt: app.at,
+      promotionName: app.promotionName,
+      slice: app.slice,
+      sessions: app.slice ? app.sessions : null,
+      fixedCents: app.fixedCents,
+      forService: app.forService,
+      ...(app.hasRule ? {} : { unruled: true }),
       settled: false,
       paidAt: null,
       voidedAfterPaid: false,
     })
   }
-  lines.sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime() || (a.applicationId < b.applicationId ? -1 : 1))
+  lines.sort(
+    (a, b) =>
+      a.occurredAt.getTime() - b.occurredAt.getTime() ||
+      (a.applicationId < b.applicationId ? -1 : a.applicationId > b.applicationId ? 1 : (a.slice ?? 0) - (b.slice ?? 0)),
+  )
   // Lo que queda por descontar es del profesional, no de un mes: se cuenta una sola vez, de cualquier
   // mes, y cada pago descuenta lo que alcance (el más antiguo primero).
   const adjustments: CommissionAdjustment[] = frozenCobros
@@ -2588,10 +2883,11 @@ export async function getMonthlyCommissions(
       const appId = f.line.applicationId as string
       return {
         applicationId: appId,
+        slice: f.line.slice,
         patientId: f.line.patientId ?? "",
         patientName: f.line.patientId ? (names.get(f.line.patientId) ?? "") : "",
         description: f.line.description,
-        commissionCents: f.line.commissionCents - (discounted.get(appId) ?? 0),
+        commissionCents: f.line.commissionCents - (discounted.get(lineKey(appId, f.line.slice)) ?? 0),
         paidAt: f.settledAt,
       }
     })
@@ -2631,6 +2927,9 @@ export async function getMonthlyCommissions(
           ? "pagado"
           : "sin_cobros"
   const professionalNames = await userNames(tx, [query.professionalUserId])
+  // El sueldo del mes (decisión 6): sus gastos que se repiten de ese mes, pagados o no. Va aparte de la
+  // comisión: se paga en Gastos y la fila de la lista sigue diciendo solo la comisión.
+  const salary = await salaryOfMonth(tx, orgId, query.professionalUserId, query, money)
   return {
     professionalUserId: query.professionalUserId,
     professionalName: professionalNames.get(query.professionalUserId) ?? null,
@@ -2641,8 +2940,14 @@ export async function getMonthlyCommissions(
     currency: unit,
     timezone,
     locale,
-    /** Porcentaje vigente (lo aún no pagado se calcula con él). */
+    /** Porcentaje general de hoy (cada línea dice el que usó). */
     rateBps,
+    /** Desde cuándo vale (nulo si desde siempre) y el anterior. */
+    rateSince: rules.since,
+    hasRate: rules.hasRate,
+    previousRateBps: rules.previousRateBps,
+    /** Las excepciones por servicio que siguen en pie. */
+    exceptions: rules.exceptions,
     lines,
     adjustments,
     /** Lo cobrado en el mes de lo que atendió (sin lo anulado), en moneda del negocio. */
@@ -2660,6 +2965,8 @@ export async function getMonthlyCommissions(
     discountedCents,
     lastPaidAt,
     status,
+    /** Su sueldo del mes, si tiene uno anotado como gasto que se repite (`null` si no). */
+    salary,
   }
 }
 
@@ -2675,6 +2982,8 @@ function commissionSummary(view: MonthlyCommissions) {
     month: view.month,
     currency: view.currency,
     rateBps: view.rateBps,
+    /** Cuántos servicios tienen otro porcentaje o un monto fijo. */
+    exceptionCount: view.exceptions.length,
     collections: view.lines.filter((line) => !line.voidedAfterPaid).length,
     baseCents: view.baseCents,
     commissionCents: view.commissionCents,
@@ -2699,15 +3008,18 @@ export async function listMonthCommissions(
   const zone = await getOrgLocale(tx, orgId)
   const { start, end } = monthBounds(zone.timezone, query.year, query.month)
   const withRate = await tx
-    .select({ userId: commissionRule.professionalUserId })
-    .from(commissionRule)
-    .where(eq(commissionRule.organizationId, orgId))
-  const active = await collectedApplications(tx, orgId, start, end, orgMoneyOf(zone), {
-    liveNow: true,
-  })
-  const candidates = [
-    ...new Set([...withRate.map((r) => r.userId), ...active.map((a) => a.professionalUserId)]),
-  ]
+    .selectDistinct({ userId: commissionRate.professionalUserId })
+    .from(commissionRate)
+    .where(and(eq(commissionRate.organizationId, orgId), isNull(commissionRate.serviceId)))
+  // Quien tiene algo nuevo del mes (también la sesión de un tratamiento que empezó otro) o algo ya pagado.
+  const active = await tx.execute<{ userId: string }>(sql`
+    select distinct l.professional_user_id as "userId" from ${commissionLiveIn(orgId, start, end)} l
+    union
+    select distinct s.professional_user_id from commission_settlement_line l
+    join commission_settlement s on s.organization_id = l.organization_id and s.id = l.settlement_id and s.voided_at is null
+    where l.organization_id = ${orgId} and l.kind = 'cobro' and l.voided_at is null
+      and l.occurred_at >= ${start.toISOString()}::timestamptz and l.occurred_at < ${end.toISOString()}::timestamptz`)
+  const candidates = [...new Set([...withRate.map((r) => r.userId), ...[...active].map((a) => a.userId)])]
   const team = new Set(
     candidates.length
       ? (
@@ -2720,7 +3032,7 @@ export async function listMonthCommissions(
   )
   // Quien sigue en el equipo, y quien ya no está pero tiene cobros de ese mes (sin cobros del mes
   // no puede tener nada por pagar en él): lo que le corresponde se le paga igual.
-  const exMembers = new Set(active.map((a) => a.professionalUserId).filter((id) => !team.has(id)))
+  const exMembers = new Set([...active].map((a) => a.userId).filter((id) => !team.has(id)))
   const rows: CommissionSummary[] = []
   for (const userId of candidates) {
     if (!team.has(userId) && !exMembers.has(userId)) continue
@@ -2773,6 +3085,11 @@ export interface PayMonthCommissionInput {
   notes?: string | null
   /** Importe que la pantalla mostró al confirmar: si ya no es ese, no se paga otra cifra. */
   expectedCents?: number
+  /**
+   * Se pagó con el efectivo de la caja de esa sede: sale de la caja como cualquier
+   * gasto, para que el cierre cuadre. Sin esto queda «fuera de la caja».
+   */
+  fromCash?: boolean
 }
 
 /**
@@ -2799,7 +3116,8 @@ export async function payMonthCommission(
     throw error
   })
   const view = await getMonthlyCommissions(tx, orgId, input)
-  const fresh = view.lines.filter((line) => !line.settled)
+  // Lo que aún no tiene ninguna regla no se congela: cuando se fije, se calcula con ella.
+  const fresh = view.lines.filter((line) => !line.settled && !line.unruled)
   // Lo que hay que descontar no se paga solo: viaja con los cobros de un mes (de este o de otro).
   // Sin nada que pagar ni descontar (por ejemplo, sin porcentaje fijado) no se registra nada: congelar
   // esos cobros a 0 % los dejaría sin comisión aunque después se fije el porcentaje.
@@ -2820,7 +3138,8 @@ export async function payMonthCommission(
       periodMonth: input.month,
       base: "cobrado",
       currency: view.currency,
-      rateBps: view.rateBps,
+      // Un solo porcentaje si todo el pago lo usó; si mezcla (un cambio, una excepción, un monto), nulo.
+      rateBps: new Set(fresh.map((l) => l.rateBps)).size === 1 ? (fresh[0]?.rateBps ?? null) : null,
       baseCents: sumCents(fresh.map((l) => ({ amountCents: l.baseCents }))),
       commissionCents: view.pendingCents,
       status: "liquidada",
@@ -2836,7 +3155,8 @@ export async function payMonthCommission(
         organizationId: orgId,
         settlementId: settlement.id,
         kind: "cobro",
-        sourceKey: `app:${line.applicationId}`,
+        // Una parte por sesión tiene su clave; lo de una sola parte, la de siempre.
+        sourceKey: line.slice ? `app:${line.applicationId}:${line.slice}` : `app:${line.applicationId}`,
         applicationId: line.applicationId,
         chargeId: line.chargeId,
         paymentId: line.paymentId,
@@ -2845,6 +3165,10 @@ export async function payMonthCommission(
         baseCents: line.baseCents,
         commissionCents: line.commissionCents,
         rateBps: line.rateBps,
+        slice: line.slice,
+        sessions: line.sessions,
+        fixedCents: line.fixedCents,
+        forService: line.forService,
         occurredAt: line.occurredAt,
       })
     }
@@ -2858,8 +3182,9 @@ export async function payMonthCommission(
         organizationId: orgId,
         settlementId: settlement.id,
         kind: "ajuste",
-        sourceKey: `adj:${adjustment.applicationId}:${settlement.id}`,
+        sourceKey: `adj:${lineKey(adjustment.applicationId, adjustment.slice)}:${settlement.id}`,
         applicationId: adjustment.applicationId,
+        slice: adjustment.slice,
         patientId: adjustment.patientId || null,
         description: adjustment.description,
         baseCents: 0,
@@ -2894,11 +3219,16 @@ export async function payMonthCommission(
       })
     return { settlement, expense: null }
   }
+  // Como un gasto de la caja (`createExpense`): la abre si hace falta y no la deja en negativo.
+  const shift = input.fromCash
+    ? await ensureOpenShift(tx, orgId, actorUserId, branchRow.id, view.currency)
+    : null
   const [paidExpense] = await tx
     .insert(expense)
     .values({
       organizationId: orgId,
       branchId: branchRow.id,
+      shiftId: shift?.id ?? null,
       concept: `Comisión de ${monthLabel} — ${professionalName}`.slice(0, 500),
       amountCents: view.pendingCents,
       currency: view.currency,
@@ -2909,6 +3239,16 @@ export async function payMonthCommission(
     })
     .returning()
   if (!paidExpense) throw new ServiceError("INTERNAL", 409, "No se pudo registrar el gasto")
+  if (shift)
+    await recordCashEgreso(tx, orgId, actorUserId, shift.id, {
+      kind: "gasto",
+      amountCents: view.pendingCents,
+      currency: view.currency,
+      concept: paidExpense.concept,
+      expenseId: paidExpense.id,
+      amountField: "fromCash",
+    })
+  if (shift) await notifyCash(tx, orgId)
   const [paid] = await tx
     .update(commissionSettlement)
     .set({ expenseId: paidExpense.id, updatedAt: paidAt })
@@ -3000,7 +3340,8 @@ export async function voidCommissionSettlement(
     select s2.settled_at as "settledAt"
     from commission_settlement_line l
     join commission_settlement_line a on a.organization_id = l.organization_id and a.kind = 'ajuste'
-      and a.application_id = l.application_id and a.voided_at is null and a.settlement_id <> l.settlement_id
+      and a.application_id = l.application_id and (l.slice is null or a.slice is null or a.slice = l.slice)
+      and a.voided_at is null and a.settlement_id <> l.settlement_id
     join commission_settlement s2 on s2.organization_id = a.organization_id and s2.id = a.settlement_id and s2.voided_at is null
     where l.organization_id = ${orgId} and l.settlement_id = ${settlementId} and l.kind = 'cobro' and l.voided_at is null
     order by s2.settled_at desc limit 1`)

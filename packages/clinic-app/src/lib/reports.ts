@@ -653,6 +653,8 @@ export interface ReportFinance extends ReportHead {
     commissions: { cents: number; professionals: number; nowCents: number }
     /** El impuesto de lo cobrado en el periodo, que se paga el mes siguiente. */
     salesTax: { cents: number }
+    /** Gastos que se repiten, vencidos y sin pagar. */
+    fixed?: { cents: number; count: number }
     purchases: {
       cents: number
       orders: number
@@ -742,7 +744,10 @@ export interface ReportCommissions extends ReportHead {
     attendedCents: number
     unpaidCents: number
     collectedCents: number
+    /** El porcentaje general de hoy. */
     rateBps: number
+    /** Cuántos servicios tienen otro porcentaje o un monto fijo. */
+    exceptions?: number
     commissionCents: number
     paidCents: number
     pendingCents: number

@@ -383,15 +383,43 @@
     {
       "idx": 54,
       "version": "7",
-      "when": 1794062255613,
-      "tag": "0054_oculto_en_su_portal",
+      "when": 1794026619684,
+      "tag": "0054_gastos_que_se_repiten",
       "breakpoints": true
     },
     {
       "idx": 55,
       "version": "7",
-      "when": 1794063202489,
-      "tag": "0055_plantilla_con_documento",
+      "when": 1794026627265,
+      "tag": "0055_gastos_que_se_repiten_reglas",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1794063561886,
+      "tag": "0056_comision_por_servicio",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1794063564556,
+      "tag": "0057_comision_por_servicio_reglas",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1794086097583,
+      "tag": "0058_oculto_en_su_portal",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1794086100547,
+      "tag": "0059_plantilla_con_documento",
       "breakpoints": true
     }
   ]
