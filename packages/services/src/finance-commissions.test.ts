@@ -6,7 +6,7 @@
  * mes concilia cobrado, devoluciones, gastos y deuda.
  */
 import { randomUUID } from "node:crypto"
-import { member } from "@odentia/db/schema/auth"
+import { member, user } from "@odentia/db/schema/auth"
 import { encounter, encounterProcedure } from "@odentia/db/schema/clinical"
 import { branch } from "@odentia/db/schema/org"
 import { and, eq, sql } from "drizzle-orm"
@@ -306,7 +306,16 @@ it("comisiones: porcentaje sobre lo cobrado de lo atendido, pago en un paso y aj
     f.run((tx) => voidExpense(tx, "org_a", f.actor, first.expense!.id, { reason: "Prueba" })),
   ).rejects.toMatchObject({ code: "EXPENSE_IS_COMMISSION" })
   // …se anula con el pago: el gasto desaparece y sus cobros vuelven a quedar por pagar.
-  await f.run((tx) => voidCommissionSettlement(tx, "org_a", f.actor, first.settlement.id, { reason: "Pago mal registrado" }))
+  // Lo anula otra persona (a quien lo hace no se le avisa de lo que hizo él mismo).
+  const admin = randomUUID()
+  await ownerDb.insert(user).values({ id: admin, name: "Administración", email: `${admin}@example.test` })
+  await f.run((tx) => voidCommissionSettlement(tx, "org_a", admin, first.settlement.id, { reason: "Pago mal registrado" }))
+  // El profesional se entera de que se le anuló el pago, con el motivo.
+  const voidNotice = await ownerDb.execute<{ title: string; body: string }>(
+    sql`select title, body from workspace_notification where organization_id = 'org_a' and dedupe_key = ${`commission-voided:${first.settlement.id}`}`,
+  )
+  expect(voidNotice[0]).toMatchObject({ title: "Se anuló un pago de tu comisión" })
+  expect(voidNotice[0]!.body).toContain("Pago mal registrado")
   const expenses = await f.run((tx) => listExpenses(tx, "org_a", { branchId, limit: 200 }, { seesCommissions: true }))
   expect(expenses.find((e) => e.id === first.expense!.id)).toBeUndefined()
   // Para caja, el pago anulado deja de sumar en la fila del mes.
