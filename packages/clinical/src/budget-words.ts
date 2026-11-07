@@ -64,6 +64,9 @@ export function budgetStateText(budget: {
       // Sin camino elegido y con algo de los caminos por responder (no si dijo «ninguno»).
       if (choosingPath(budget.options) && lines.some((line) => line.decision === "pendiente" || line.decision === "pospuesto"))
         return `Aceptó ${accepted} · falta elegir el camino`
+      // Una revisión pregunta por lo que cambió: eso no es un «no», está por responder.
+      const asked = lines.filter((line) => line.decision === "pendiente").length
+      if (asked > 0) return `Aceptó ${accepted} · ${asked} por responder`
       return `Aceptó ${accepted} de ${lines.length}`
     }
     case "rechazado":

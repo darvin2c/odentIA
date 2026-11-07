@@ -587,7 +587,8 @@ function BudgetCard({
       className="flex flex-col gap-4 rounded-xl border bg-card p-4"
     >
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
+        {/* En el teléfono, los botones van debajo: no tapan el estado. */}
+        <div className="flex min-w-0 flex-1 basis-full flex-col gap-1 sm:basis-0">
           <span className="font-medium">{summary}</span>
           <span className="flex flex-wrap items-center gap-2 text-sm">
             <Badge variant={budgetStatusTone(budget.status)}>{stateLine}</Badge>
@@ -964,7 +965,7 @@ function RevisionChanges({
         return `${name} ${change.toCents > change.fromCents ? "sube" : "baja"} de ${from} a ${to}`
       }
       case "condiciones":
-        return `${name} cambia cómo se cobra`
+        return `${name} cambia su forma de cobro, sus sesiones o su promoción`
       case "nuevo":
         return `Se agrega ${name}`
       case "quitado":

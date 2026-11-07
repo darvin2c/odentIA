@@ -131,8 +131,9 @@ function pathSite(lines: readonly BudgetLine[]): { label: string; short: string 
 }
 
 /** Cómo se llama un camino: su nombre en la clínica o «Opción A». */
+/** El nombre del camino: el que le puso el odontólogo o «Camino 1», como en el plan y la atención. */
 function pathName(option: BudgetOption): string {
-  return option.name?.trim() || option.label
+  return option.name?.trim() || `Camino ${option.position}`
 }
 
 interface Decider {
@@ -338,16 +339,21 @@ function PathChoice({
     >
       {paths.map(({ option, own }) => {
         const name = pathName(option)
-        const total = totalsWords(option, currency, money)
+        // Lo del camino, como en el plan; con lo común, de dato aparte.
+        const ownTotals = sumAcceptedByCurrency(
+          own.map((line) => ({ lineTotalCents: line.lineTotalCents, decision: "aceptado", currency: line.currency })),
+        )
+        const total = ownTotals.length > 0 ? moneyTotalsText(ownTotals, (cents, unit) => money(cents, unit)) : totalsWords(option, currency, money)
+        const withCommon = totalsWords(option, currency, money)
         return (
           <FieldLabel key={option.id} className={item}>
             <RadioGroupItem value={option.id} className="mt-0.5" aria-label={`${name}, ${total}`} />
             <span className="flex min-w-0 flex-1 flex-col">
-              <span className="font-medium">
-                {name}
-                {option.isRecommended ? " · recomendada" : ""}
-              </span>
+              <span className="font-medium">{name}</span>
               <span className="text-xs text-muted-foreground">{own.map((line) => line.title).join(" · ")}</span>
+              {withCommon !== total ? (
+                <span className="text-xs text-muted-foreground">Con lo común: {withCommon}</span>
+              ) : null}
             </span>
             <span className="font-semibold whitespace-nowrap tabular-nums">{total}</span>
           </FieldLabel>

@@ -2256,7 +2256,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "anotar_respuesta_presupuesto",
       description:
-        "Cuando la persona responde a su presupuesto por escrito («la 16 y la 26 ahora, la 36 después», «prefiero la opción de la corona»), prepara la lista para confirmarla con ella: no anota nada todavía. Con los ids de ver_presupuesto, una respuesta por cada tratamiento de la opción que eligió: aceptado, pospuesto si lo deja para después, o rechazado. Con varias opciones, indica optionId si eligió una; si todavía no elige («acepto la limpieza, lo de la muela lo pienso»), va sin optionId: lo que está en todas se responde y lo de cada opción queda pospuesto o rechazado. Te devuelve la pregunta para pedirle el sí; con su sí, usa confirmar_propuesta.",
+        "Cuando la persona responde a su presupuesto por escrito («la 16 y la 26 ahora, la 36 después», «prefiero la opción de la corona»), prepara la lista para confirmarla con ella: no anota nada todavía. Con los ids de ver_presupuesto, una respuesta por cada tratamiento de la opción que eligió: aceptado, pospuesto si lo deja para después, o rechazado. Con varias opciones, indica optionId. Te devuelve la pregunta para pedirle el sí; con su sí, usa confirmar_propuesta.",
       schema: operationAgentSchema("presupuesto.respuesta"),
     },
   )

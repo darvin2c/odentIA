@@ -277,7 +277,7 @@ function changeWords(change: BudgetChange, money: Money): string {
       return `${change.title} ${verb} de ${money(change.fromCents, change.currency)} a ${money(change.toCents, change.currency)}.`
     }
     case "condiciones":
-      return `${change.title} cambia cómo se cobra.`
+      return `${change.title} cambia su forma de cobro, sus sesiones o su promoción.`
     case "nuevo":
       return `Se agrega ${change.title}.`
     case "quitado":

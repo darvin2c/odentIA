@@ -160,9 +160,11 @@ function PlanPhasesGroup({
   )
   const done = active.filter((item) => item.status === "realizado").length
   const inProgress = active.filter((item) => item.status === "en_curso").length
-  const undecided = active.filter(
-    (item) => item.decisionStatus === "pendiente" || item.decisionStatus === "pospuesto",
-  ).length
+  // Por decidir: lo que espera respuesta y cada pieza con caminos (una decisión, no un tratamiento).
+  const undecided =
+    active.filter(
+      (item) => item.decisionStatus === "pendiente" || item.decisionStatus === "pospuesto",
+    ).length + pathGroups.length
   // Las fases del producto, en orden (odentIA: de la urgencia al mantenimiento).
   const { phases, defaultPhase } = productUi().plan
   const byPhase = phases.map((phase) => ({
@@ -234,8 +236,8 @@ function PlanPhasesGroup({
                             item.diagnosisCode
                               ? diagnosisCodeLabel(item.diagnosisSystem, item.diagnosisCode)
                               : null,
-                            planDecisionLabel(item.decisionStatus),
-                            item.newTermsPending ? "precio nuevo por responder" : null,
+                            // Con una revisión enviada, lo que espera es el precio nuevo.
+                            item.newTermsPending ? "Precio nuevo por responder" : planDecisionLabel(item.decisionStatus),
                             `${sessions} de ${plural(planned, "sesión", "sesiones")}`,
                             !closed && next ? NEXT_ACTION_LABELS[next] : null,
                           ]

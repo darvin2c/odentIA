@@ -431,8 +431,7 @@ function PathQuestionRow({
     return (
       <fieldset className={box}>
         <legend className={legend}>
-          La {question.tooth} ya tiene {others}. ¿{item.title} es otro camino para la{" "}
-          {question.tooth}?
+          Para la {question.tooth} ya indicaste {others}. ¿{item.title} es otro camino o va también?
         </legend>
         <div className="clear-both flex flex-wrap gap-2">
           <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => onPlace("nuevo")}>

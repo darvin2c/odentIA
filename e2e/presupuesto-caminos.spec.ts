@@ -60,7 +60,7 @@ test("caminos: se marcan en la atención, lo común se acepta sin elegir y la re
     .getByRole("button", { name: "Abrir", exact: true })
     .click()
   const panel = page
-  const question = panel.getByRole("group", { name: /otro camino para la/ })
+  const question = panel.getByRole("group", { name: /es otro camino o va también/ })
   await expect(question).toBeVisible()
   await shot("atencion-pregunta")
   await question.getByRole("button", { name: "Es otro camino", exact: true }).click()
@@ -96,8 +96,11 @@ test("caminos: se marcan en la atención, lo común se acepta sin elegir y la re
   await drawer.getByRole("radio", { name: /Lo piensa/ }).click()
   await views("respuesta-sin-elegir")
   await drawer.getByRole("button", { name: /Guardar la respuesta/ }).click()
+  await expect(drawer).toBeHidden()
+  // Guardado: la 46 sigue agrupada por decidir y el presupuesto dice que falta elegir.
   await expect(page.getByText(/falta elegir el camino/).first()).toBeVisible()
-  await shot("respondio-lo-comun")
+  await expect(page.getByText(/por decidir entre dos caminos/).first()).toBeVisible()
+  await views("respondio-lo-comun")
 
   // El servidor: la limpieza aceptada, lo de la 46 pensándolo, sin opción elegida.
   const answered = await call<{ status: string; awaitsAnswer: boolean; options: Array<{ decision: string }>; items: Array<{ planItemId: string; decision: string }> }>(
@@ -142,6 +145,6 @@ test("caminos: se marcan en la atención, lo común se acepta sin elegir y la re
   expect(sent.items.find((line) => line.planItemId === coronaItem.id)?.decision).toBe("pendiente")
   expect(sent.items.find((line) => line.planItemId === endoItem.id)?.decision).toBe("aceptado")
   await gotoHydrated(page, tenant(slug, `/people/${person.personId}?tab=plan`))
-  await expect(page.getByText(/precio nuevo por responder/).first()).toBeVisible()
+  await expect(page.getByText(/precio nuevo por responder/i).first()).toBeVisible()
   await views("plan-tras-revision")
 })
