@@ -381,6 +381,66 @@ it("a quien deja el equipo se le paga lo pendiente, y sus meses no cambian en Re
   ).rejects.toMatchObject({ code: "NOT_FOUND" })
 })
 
+it("un descuento de un mes anterior se descuenta en el mes que se paga, sin dejar a ninguno en negativo", async () => {
+  const f = await clinicalFixture()
+  const branchId = await seedBranch()
+  const cash = await f.run((tx) => createPaymentMethod(tx, "org_a", f.actor, { name: "Efectivo", typeCode: "10" }))
+  // Tres tratamientos de la misma atención (se registran antes de cerrarla) que se cobran en días distintos.
+  const procedures = await ownerDb
+    .insert(encounterProcedure)
+    .values([100000, 50000, 100000].map((priceCents) => ({ organizationId: "org_a", encounterId: f.encounter.id, serviceId: f.service.id, description: "Tratamiento", priceCents, currency: "PEN", createdBy: f.actor })))
+    .returning()
+  await ownerDb
+    .update(encounter)
+    .set({ status: "finalizada", finalizedAt: new Date(), branchId, signerName: "Clínico", signerRegistration: "12345" })
+    .where(eq(encounter.id, f.encounter.id))
+  let next = 0
+  const procedureOf = async (priceCents: number) => {
+    const row = procedures[next++]
+    expect(row!.priceCents).toBe(priceCents)
+    const charge = await f.run((tx) => createCharge(tx, ...f.args, { encounterProcedureId: row!.id }))
+    return f.run((tx) =>
+      collectCharge(tx, ...f.args, { branchId, chargeIds: [charge.id], payments: [{ paymentMethodId: cash.id, amountCents: priceCents }], requestId: randomUUID() }),
+    )
+  }
+  const now = currentPeriod()
+  // Sin porcentaje no hay nada que pagar: no se congela nada a 0 %.
+  const first = await procedureOf(100000)
+  await expect(
+    f.run((tx) => payMonthCommission(tx, "org_a", f.actor, { professionalUserId: f.actor, ...now, branchId })),
+  ).rejects.toMatchObject({ code: "COMMISSION_NOTHING_TO_PAY" })
+  await f.run((tx) => setCommissionRate(tx, "org_a", f.actor, { professionalUserId: f.actor, rateBps: 3000 }))
+  // Ese cobro fue del mes anterior y se pagó (300).
+  const before = now.month === 1 ? { year: now.year - 1, month: 12 } : { year: now.year, month: now.month - 1 }
+  const lastMonth = new Date(Date.UTC(before.year, before.month - 1, 15, 15))
+  await ownerDb.execute(sql`update patient_payment_application set created_at = ${lastMonth.toISOString()}::timestamptz
+    where organization_id = 'org_a' and payment_id in (select id from patient_payment where ticket_id = ${first.ticket.id})`)
+  const paidBefore = await f.run((tx) => payMonthCommission(tx, "org_a", f.actor, { professionalUserId: f.actor, ...before, branchId }))
+  expect(paidBefore.expense!.amountCents).toBe(30000)
+  // Después se anula: hay 300 por descontar, pero ningún mes queda en negativo.
+  await f.run((tx) => voidTicket(tx, "org_a", f.actor, f.patient.id, first.ticket.id, { reason: "Cobro errado", allowPostClose: true }))
+  const viewOf = (period: { year: number; month: number }) =>
+    f.run((tx) => getMonthlyCommissions(tx, "org_a", { professionalUserId: f.actor, ...period }))
+  expect(await viewOf(before)).toMatchObject({ paidCents: 30000, pendingCents: 0, adjustmentCents: 30000, status: "pagado" })
+  // Este mes, un cobro de 500 (150): se descuenta todo y no sale dinero; quedan 150 por descontar.
+  await procedureOf(50000)
+  expect(await viewOf(now)).toMatchObject({ commissionCents: 15000, discountCents: 15000, pendingCents: 0, status: "por_descontar" })
+  const discount = await f.run((tx) => payMonthCommission(tx, "org_a", f.actor, { professionalUserId: f.actor, ...now, branchId, expectedCents: 0 }))
+  expect(discount.expense).toBeNull()
+  expect(await viewOf(now)).toMatchObject({ paidCents: 0, discountedCents: 15000, adjustmentCents: 15000, status: "pagado" })
+  // Otro cobro de 1 000 (300): se descuentan los 150 que quedaban y se pagan 150.
+  await procedureOf(100000)
+  expect(await viewOf(now)).toMatchObject({ discountCents: 15000, pendingCents: 15000, status: "por_pagar" })
+  const rest = await f.run((tx) => payMonthCommission(tx, "org_a", f.actor, { professionalUserId: f.actor, ...now, branchId }))
+  expect(rest.expense!.amountCents).toBe(15000)
+  // Le corresponden 450; se pagaron 150 y se descontaron 300: cuadra.
+  expect(await viewOf(now)).toMatchObject({ commissionCents: 45000, paidCents: 15000, discountedCents: 30000, adjustmentCents: 0, pendingCents: 0 })
+  // El pago del mes anterior no se anula mientras haya descuentos hechos sobre él.
+  await expect(
+    f.run((tx) => voidCommissionSettlement(tx, "org_a", f.actor, paidBefore.settlement.id, { reason: "Prueba" })),
+  ).rejects.toMatchObject({ code: "COMMISSION_DISCOUNTED_LATER" })
+})
+
 it("pagar la comisión anotando el gasto en otra sede baja lo que se debe en la sede del cobro", async () => {
   const f = await clinicalFixture()
   const cobroSede = await seedBranch()

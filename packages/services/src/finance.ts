@@ -2598,20 +2598,19 @@ export async function getMonthlyCommissions(
   /** Lo que el próximo pago de este mes descuenta: nunca más de lo nuevo del mes. */
   const discountCents = Math.min(freshCents, adjustmentCents)
   const pendingCents = freshCents - discountCents
-  // Lo pagado es el dinero que salió por este mes: cada pago registrado, ya con lo que descontó.
-  const [settledMonth] = await tx
-    .select({ cents: sql<string>`coalesce(sum(${commissionSettlement.commissionCents}), 0)::text` })
-    .from(commissionSettlement)
-    .where(
-      and(
-        eq(commissionSettlement.organizationId, orgId),
-        eq(commissionSettlement.professionalUserId, query.professionalUserId),
-        eq(commissionSettlement.periodYear, query.year),
-        eq(commissionSettlement.periodMonth, query.month),
-        isNull(commissionSettlement.voidedAt),
-      ),
-    )
-  const paidCents = Number(settledMonth?.cents ?? 0)
+  // Lo pagado es el dinero que salió por los cobros de este mes: cada pago que congeló alguno, con lo
+  // que descontó. Se buscan por sus líneas (no por su mes), así cuentan también los pagos históricos.
+  const [settledMonth] = await tx.execute<{ paid: string; discounted: string }>(sql`
+    select coalesce(sum(s.commission_cents), 0)::text as paid,
+      coalesce(sum((select sum(a.commission_cents) from commission_settlement_line a
+        where a.organization_id = s.organization_id and a.settlement_id = s.id and a.kind = 'ajuste' and a.voided_at is null)), 0)::text as discounted
+    from commission_settlement s
+    where s.organization_id = ${orgId} and s.professional_user_id = ${query.professionalUserId}
+      and s.voided_at is null and s.currency = ${unit}
+      and exists (select 1 from commission_settlement_line l where l.organization_id = s.organization_id and l.settlement_id = s.id
+        and l.kind = 'cobro' and l.voided_at is null and l.occurred_at >= ${start.toISOString()}::timestamptz and l.occurred_at < ${end.toISOString()}::timestamptz)`)
+  const paidCents = Number(settledMonth?.paid ?? 0)
+  const discountedCents = Number(settledMonth?.discounted ?? 0)
   const lastPaidAt = paid.reduce<Date | null>(
     (latest, line) => (line.paidAt && (!latest || line.paidAt > latest) ? line.paidAt : latest),
     null,
@@ -2650,6 +2649,8 @@ export async function getMonthlyCommissions(
     adjustmentCents,
     /** Lo que el próximo pago de este mes descuenta (lo demás queda para otro pago). */
     discountCents,
+    /** Lo que los pagos de este mes ya descontaron de cobros anulados. */
+    discountedCents,
     lastPaidAt,
     status,
   }
@@ -2793,7 +2794,9 @@ export async function payMonthCommission(
   const view = await getMonthlyCommissions(tx, orgId, input)
   const fresh = view.lines.filter((line) => !line.settled)
   // Lo que hay que descontar no se paga solo: viaja con los cobros de un mes (de este o de otro).
-  if (fresh.length === 0)
+  // Sin nada que pagar ni descontar (por ejemplo, sin porcentaje fijado) no se registra nada: congelar
+  // esos cobros a 0 % los dejaría sin comisión aunque después se fije el porcentaje.
+  if (fresh.length === 0 || (view.pendingCents === 0 && view.discountCents === 0))
     throw conflict("COMMISSION_NOTHING_TO_PAY", "No hay nada por pagar de ese mes")
   if (input.expectedCents !== undefined && input.expectedCents !== view.pendingCents)
     throw conflict(
@@ -2858,7 +2861,8 @@ export async function payMonthCommission(
       })
     }
   } catch (e) {
-    // La unicidad por fuente respalda al bloqueo: un cobro nunca entra dos veces.
+    // La unicidad por fuente respalda al bloqueo: un cobro nunca entra dos veces. Los descuentos sí
+    // pueden ir en partes, y los ordena el turno por profesional (también al anular).
     if (isUniqueViolation(e))
       throw conflict("COMMISSION_ALREADY_PAID", "Parte de esos cobros ya está en otro pago registrado")
     throw e
@@ -2869,8 +2873,20 @@ export async function payMonthCommission(
     new Date(Date.UTC(input.year, input.month - 1, 15)),
   )
   await audit(tx, orgId, actorUserId, "commission_settlement", settlement.id, "finance.commission_paid")
-  // Si el descuento cubre todo lo del mes, no sale dinero: queda el registro, sin gasto.
-  if (view.pendingCents === 0) return { settlement, expense: null }
+  // Si el descuento cubre todo lo del mes, no sale dinero: queda el registro, sin gasto, y se le avisa.
+  if (view.pendingCents === 0) {
+    if (view.inTeam)
+      await createWorkspaceNotification(tx, orgId, {
+        userId: input.professionalUserId,
+        dedupeKey: `commission-paid:${settlement.id}`,
+        title: "Se registró un descuento en tu comisión",
+        body: `${monthLabel}: ${formatMoney(view.discountCents, view.currency, view.locale)} de comisiones ya pagadas de cobros que después se anularon.`,
+        href: `/commissions?year=${input.year}&month=${input.month}`,
+        permission: "commissions.read",
+        actorUserId,
+      })
+    return { settlement, expense: null }
+  }
   const [paidExpense] = await tx
     .insert(expense)
     .values({
@@ -2948,6 +2964,16 @@ export async function voidCommissionSettlement(
   settlementId: string,
   input: { reason: string },
 ) {
+  // El mismo turno que el pago: anular mientras se registra otro pago del profesional no debe dejar
+  // un descuento hecho sobre un pago que se está anulando.
+  const [owner] = await tx
+    .select({ professionalUserId: commissionSettlement.professionalUserId })
+    .from(commissionSettlement)
+    .where(and(eq(commissionSettlement.id, settlementId), eq(commissionSettlement.organizationId, orgId)))
+  if (owner)
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`commission:${orgId}:${owner.professionalUserId}`}, 0))`,
+    )
   const [current] = await tx
     .select()
     .from(commissionSettlement)

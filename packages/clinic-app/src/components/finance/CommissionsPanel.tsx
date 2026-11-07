@@ -399,7 +399,7 @@ function ProfessionalDetailBody({
         ? `Quedan ${money(discountLeft)} por descontar en los próximos pagos.`
         : null
       : detail.status === "pagado"
-        ? "Ya se pagó todo lo de este mes."
+        ? "No queda nada por pagar de este mes."
         : detail.rateBps === 0 && detail.baseCents > 0
           ? detail.inTeam
             ? "No tiene un porcentaje fijado: fíjalo para calcular lo que le corresponde."
@@ -513,8 +513,8 @@ function ProfessionalDetailBody({
         <section aria-label="Por descontar" className="flex min-w-0 flex-col gap-2">
           <h3 className="text-sm font-semibold">Por descontar</h3>
           <p className="text-sm text-muted-foreground">
-            Comisiones ya pagadas de cobros que después se anularon. Se descuentan del siguiente
-            pago.
+            Comisiones ya pagadas de cobros que después se anularon. Se descuentan de los próximos
+            pagos que registres, de este mes o de otro, hasta completarse.
           </p>
           <ul className="flex min-w-0 flex-col divide-y rounded-lg border">
             {detail.adjustments.map((adjustment) => (
@@ -552,6 +552,13 @@ function ProfessionalDetailBody({
           <div className="flex items-baseline justify-between gap-3">
             <dt className="text-muted-foreground">Ya pagado</dt>
             <dd className="tabular-nums">{plain(detail.paidCents)}</dd>
+          </div>
+        ) : null}
+        {detail.discountedCents > 0 ? (
+          // Lo que los pagos de este mes ya descontaron: sin esto, «Le corresponde − Ya pagado» no cuadra.
+          <div className="flex items-baseline justify-between gap-3">
+            <dt className="text-muted-foreground">Ya descontado</dt>
+            <dd className="tabular-nums">−{plain(detail.discountedCents)}</dd>
           </div>
         ) : null}
         {detail.discountCents > 0 ? (
@@ -611,7 +618,14 @@ function ProfessionalDetailBody({
                       payment.voidedAt && "text-muted-foreground line-through",
                     )}
                   >
-                    {payment.settledAt ? `Pagado el ${day(payment.settledAt)}` : "Pago registrado"}
+                    {payment.commissionCents === 0
+                      ? // Un descuento que cubrió todo lo del mes: no salió dinero.
+                        payment.settledAt
+                        ? `Descontado el ${day(payment.settledAt)}, sin pago`
+                        : "Descuento registrado, sin pago"
+                      : payment.settledAt
+                        ? `Pagado el ${day(payment.settledAt)}`
+                        : "Pago registrado"}
                   </span>
                   {payment.notes ? (
                     <span className="block text-muted-foreground">{payment.notes}</span>
@@ -649,7 +663,8 @@ function ProfessionalDetailBody({
       ) : null}
 
       <p className="text-xs text-muted-foreground">
-        El pago queda como gasto de Personal. Lo que agrega caja sin atención, como vender{" "}
+        {discountOnly ? "Un descuento no registra gasto." : "El pago queda como gasto de Personal."} Lo que
+        agrega caja sin atención, como vender{" "}
         {appWords().examples.soldItem}, no cuenta para ningún profesional.
       </p>
 
@@ -806,7 +821,8 @@ function PayDrawer({
   const queryClient = useQueryClient()
   const sede = useActiveBranch()
   const defaultBranch = sede.branchId ?? sede.branches[0]?.id ?? ""
-  const pickBranch = sede.branches.length > 1
+  // Un descuento no registra gasto: no hay sede que elegir.
+  const pickBranch = sede.branches.length > 1 && detail.pendingCents > 0
 
   const refresh = (): void => {
     void queryClient.invalidateQueries({ queryKey: commissionKeys.all })
@@ -827,14 +843,16 @@ function PayDrawer({
         const result = await payMonthCommissionApi({
           ...period,
           professionalUserId: detail.professionalUserId,
-          branchId: value.branchId,
+          branchId: value.branchId || defaultBranch,
           expectedCents: detail.pendingCents,
           ...(notes ? { notes } : {}),
         })
         refresh()
         // Se dice lo que el servidor pagó de verdad, no lo que mostraba la pantalla.
         toast.success(
-          `Pago registrado: ${formatMoney(result.data.settlement.commissionCents, result.data.settlement.currency, detail.locale)}`,
+          result.data.settlement.commissionCents === 0
+            ? "Descuento registrado: no salió dinero"
+            : `Pago registrado: ${formatMoney(result.data.settlement.commissionCents, result.data.settlement.currency, detail.locale)}`,
         )
         onClose()
       } catch (err) {
@@ -1060,9 +1078,14 @@ export function MyCommissionsPanel({
   const rates = new Set(counted.map((line) => line.rateBps))
   const singleRate = rates.size === 1 ? [...rates][0] : rates.size === 0 ? mine.rateBps : null
   const isCurrent = compareMonths(period, currentMonth) === 0
+  // Lo que falta descontarle es suyo, no del mes: se le dice aunque este mes ya esté saldado.
+  const pendingDiscount =
+    mine.adjustmentCents > mine.discountCents
+      ? ` Quedan ${money(mine.adjustmentCents - mine.discountCents)} por descontar de tus próximos pagos.`
+      : ""
   const statusNote =
     mine.status === "pagado" && mine.lastPaidAt
-      ? `Pagado el ${dayLabel(mine.lastPaidAt, format, zone, period.year)}.`
+      ? `Pagado el ${dayLabel(mine.lastPaidAt, format, zone, period.year)}.${pendingDiscount}`
       : mine.status === "por_descontar"
         ? `Lo de este mes se descuenta de comisiones que ya se te pagaron de cobros que después se anularon: ${money(mine.discountCents)}.`
         : mine.status === "por_pagar" && (mine.paidCents > 0 || mine.discountCents > 0)

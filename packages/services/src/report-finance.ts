@@ -102,23 +102,10 @@ function commissionLinesSql(orgId: string, hull: Span, currency: string, branchI
       join patient_charge c on c.organization_id = a.organization_id and c.id = a.charge_id
       where l.organization_id = ${orgId} and l.kind = 'cobro' and l.voided_at is null and s.currency = ${currency}
         and l.occurred_at >= ${at(hull.start)} and l.occurred_at < ${at(hull.end)} ${branch}
-    ), discounted as materialized (
-      -- Lo que un pago descontó de un cobro anulado después de pagado: ese dinero no salió, así que
-      -- resta de lo pagado el día del pago, en la sede del cobro anulado.
-      select l.occurred_at as at, s.professional_user_id as user_id, l.commission_cents::bigint as commission
-      from commission_settlement_line l
-      join commission_settlement s on s.organization_id = l.organization_id and s.id = l.settlement_id and s.voided_at is null
-      join patient_payment_application a on a.organization_id = l.organization_id and a.id = l.application_id
-      join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id
-      where l.organization_id = ${orgId} and l.kind = 'ajuste' and l.voided_at is null and s.currency = ${currency}
-        and l.occurred_at >= ${at(hull.start)} and l.occurred_at < ${at(hull.end)} ${branch}
     ), commission_line as materialized (
       select f.user_id, f.at, (case when f.live then f.base else 0 end)::numeric as base, (case when f.live then f.commission else 0 end)::numeric as commission,
         f.commission::numeric as paid, 0::numeric as fresh
       from frozen f
-      union all
-      select d.user_id, d.at, 0::numeric, 0::numeric, -d.commission::numeric, 0::numeric
-      from discounted d
       union all
       select la.user_id, la.at, org_money_value(${line}), ${commission}, 0, ${commission}
       from live_app la
