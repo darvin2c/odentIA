@@ -9,6 +9,7 @@ import {
   CLINIC_LOGO_MAX_BYTES,
   CLINIC_LOGO_MIME_EXT,
   CONVERSATION_STATE_ACTIONS,
+  clinicLogoColors,
   clinicLogoFolder,
   configureDocumentChecks,
   configureDocumentLogos,
@@ -33,6 +34,7 @@ import {
   exchangeRateAuthor,
   getCurrencyUsage,
   setBranchActive,
+  setClinicBrandColor,
   setClinicLogo,
   setOrgDiagnosisSystem,
   setOrgExchangeRate,
@@ -99,6 +101,7 @@ import { createPeopleRoute } from "./routes/people.js"
 import { createPipelinesRoute } from "./routes/pipelines.js"
 import { createPortalRoute } from "./routes/portal.js"
 import { createPromotionsRoute } from "./routes/promotions.js"
+import { createPublicAppearanceRoute } from "./routes/public-appearance.js"
 import { createPublicBookingRoute } from "./routes/public-booking.js"
 import { createPublicConsumerComplaintsRoute } from "./routes/public-consumer-complaints.js"
 import { createPublicDocumentsRoute } from "./routes/public-documents.js"
@@ -473,6 +476,8 @@ export function createApp(deps: AppDeps) {
     c.json(errorBody(c, "NOT_FOUND", "Recurso de cuenta no encontrado"), 404),
   )
 
+  // El color de la marca de cada clínica, para pintar su app y sus páginas públicas (ADR 0162).
+  app.route("/api/public/appearance", createPublicAppearanceRoute({ db: deps.db }))
   app.route(
     "/api/public/patient-registration",
     createPublicPatientRegistrationRoute({
@@ -761,6 +766,43 @@ export function createApp(deps: AppDeps) {
         await deps.storage.deleteByUrl(saved.previous, clinicLogoFolder(orgId)).catch(() => {})
       return { logo: null }
     })
+  })
+
+  // El color de la marca (ADR 0162): se guarda solo, como el logo, porque cambia al
+  // instante lo que ven los pacientes. Quitarlo vuelve al color del producto.
+  guarded.put("/org-profile/brand-color", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para cambiar el color de la marca"), 403)
+    }
+    const parsed = z
+      .object({ color: z.string().max(16) })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(db, orgId, (tx) => setClinicBrandColor(tx, orgId, userId, parsed.data.color)),
+    )
+  })
+
+  guarded.delete("/org-profile/brand-color", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para cambiar el color de la marca"), 403)
+    }
+    return runService(c, 200, () =>
+      withOrgContext(db, orgId, (tx) => setClinicBrandColor(tx, orgId, userId, null)),
+    )
+  })
+
+  // «De tu logo»: los colores del logo ya subido, para elegir sin saber el código.
+  guarded.get("/org-profile/logo-colors", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para cambiar el color de la marca"), 403)
+    }
+    const colors = await withOrgContext(db, orgId, (tx) => clinicLogoColors(tx, orgId))
+    return c.json({ data: { colors } })
   })
 
   guarded.put("/org-profile", async (c) => {

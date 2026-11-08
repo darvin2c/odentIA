@@ -274,9 +274,9 @@ export function BleedingSparkline({ first, last }: { first: number | null; last:
     <div className="flex items-center gap-2 text-sm text-muted-foreground">
       <svg width="96" height="26" viewBox="0 0 96 26" aria-hidden="true">
         <line x1="8" y1="22" x2="88" y2="22" stroke="var(--border)" />
-        <polyline points={`8,${y(first)} 88,${y(last)}`} fill="none" stroke="var(--primary)" strokeWidth="2" strokeLinecap="round" />
-        <circle cx="8" cy={y(first)} r="3" fill="var(--card)" stroke="var(--primary)" strokeWidth="2" />
-        <circle cx="88" cy={y(last)} r="3.5" fill="var(--primary)" />
+        <polyline points={`8,${y(first)} 88,${y(last)}`} fill="none" stroke="var(--series-1)" strokeWidth="2" strokeLinecap="round" />
+        <circle cx="8" cy={y(first)} r="3" fill="var(--card)" stroke="var(--series-1)" strokeWidth="2" />
+        <circle cx="88" cy={y(last)} r="3.5" fill="var(--series-1)" />
       </svg>
       <span>
         Sangrado:{" "}

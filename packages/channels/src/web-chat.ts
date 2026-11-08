@@ -43,9 +43,8 @@ export function isWebchatTestSession(value: string): boolean {
   return value.startsWith("webchat:prueba:")
 }
 
+/** El color del chat ya no se guarda aquí: es el de la marca de la clínica (ADR 0162); uno viejo se descarta. */
 export type WebchatConnectionConfig = {
-  /** Color del botón y de la cabecera del chat (#rrggbb). */
-  widgetColor?: string
   /** El saludo: la primera burbuja de Sofi. */
   greeting?: string
   /** Aviso opcional al sitio: POST firmado al responder el equipo o Sofi. */
@@ -102,12 +101,7 @@ export function assertValidWebchatConfig(config: Record<string, unknown>): Webch
     }
   }
   const out: WebchatConnectionConfig = {}
-  const color = pickString(config, "widgetColor")
   const greeting = pickString(config, "greeting")
-  if (color !== null) {
-    if (!/^#[0-9a-fA-F]{6}$/.test(color)) throw new Error("Elige un color de la lista")
-    out.widgetColor = color
-  }
   if (greeting !== null) {
     if (greeting.length > 500) throw new Error("El saludo admite hasta 500 caracteres")
     out.greeting = greeting

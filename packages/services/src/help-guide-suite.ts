@@ -180,7 +180,7 @@ export function describeHelpSearch(product: string, topics: readonly HelpTopic[]
 
     it("una palabra dentro de otra no cuenta", () => {
       // «ia» en gracias y Francia, «bot» en botón, «pin» en pintar, «tema» en sistema.
-      for (const question of ["gracias", "¿Cuál es la capital de Francia?", "¿Para qué sirve este botón?", "¿Puedo pintar el fondo de otro color?", "el sistema está lento"]) {
+      for (const question of ["gracias", "¿Cuál es la capital de Francia?", "¿Para qué sirve este botón?", "¿Puedo pintar el fondo?", "el sistema está lento"]) {
         expect(all(question), question).toEqual([])
       }
       // «roles» en controles, «áreas» en tareas, «logo» en odontólogo, «log» en logo.
