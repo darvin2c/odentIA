@@ -145,10 +145,6 @@ export function isUnclosed(item: { visit: AppointmentVisit; endsAt: string }, no
   return (item.visit === "por_confirmar" || item.visit === "confirmada") && Date.parse(item.endsAt) <= Date.parse(now)
 }
 
-/** Lo que se dice de una cita fuera de la Agenda: «Sin cerrar» si ya pasó sin cerrarse; si no, su momento. */
-export function visitWord(item: { visit: AppointmentVisit; endsAt: string }, now: string): string {
-  return isUnclosed(item, now) ? "Sin cerrar" : visitName(item.visit)
-}
 
 /** El estado para el icono y el color de la rejilla, la lista y el cajón. */
 export function visitState(visit: AppointmentVisit): ScheduleState {
