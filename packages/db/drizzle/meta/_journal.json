@@ -428,6 +428,13 @@
       "when": 1794114514693,
       "tag": "0060_comision_en_su_moneda_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1794118527699,
+      "tag": "0061_descuento_del_concepto",
+      "breakpoints": true
     }
   ]
 }
