@@ -60,6 +60,7 @@ import { type ConsentNeed, prepareConsents } from "../../lib/encounter-documents
 import {
   CLOSING_REQUIREMENT_LABELS,
   type ClosingRequirement,
+  type ClosingSession,
   type FinalizedControls,
   type FinalizedMaterials,
   fetchEncounterClosing,
@@ -89,6 +90,7 @@ import { EncounterBreadcrumb } from "./encounter-breadcrumb"
 import {
   CLOSING_FIELD_MAP,
   ClosingNextVisit,
+  ClosingSessions,
   ClosingSignatureHint,
   type ClosingValues,
   closingControlsBody,
@@ -401,22 +403,18 @@ function skippedReasonLabel(reason: string | null): string {
 }
 
 /**
- * Lo respondido a «¿Terminaste?» en el cuerpo de `/finalize`, solo de lo que el
- * cierre pregunta hoy: lo que ya no está (se anuló su sesión) no se manda.
+ * Lo respondido a «¿Terminaste?» en el cuerpo de `/finalize`: solo «Falta otra
+ * sesión», de lo que el cierre pregunta hoy (lo que ya no está, porque se anuló
+ * su sesión, no se manda). Lo demás que llega a sus previstas lo termina el
+ * servidor al firmar: «Sí, terminar» es lo que viene elegido (ADR 0161).
  */
 function sessionAnswerBody(
   answers: SessionAnswers,
   sessions: { finishing: Array<{ planItemId: string }> } | undefined,
-): { completePlanItemIds?: string[]; addSessionPlanItemIds?: string[] } {
+): { addSessionPlanItemIds?: string[] } {
   const asked = new Set((sessions?.finishing ?? []).map((session) => session.planItemId))
-  const ids = (answer: "terminar" | "otra") =>
-    Object.entries(answers).flatMap(([id, chosen]) => (chosen === answer && asked.has(id) ? [id] : []))
-  const complete = ids("terminar")
-  const addSession = ids("otra")
-  return {
-    ...(complete.length ? { completePlanItemIds: complete } : {}),
-    ...(addSession.length ? { addSessionPlanItemIds: addSession } : {}),
-  }
+  const addSession = Object.entries(answers).flatMap(([id, chosen]) => (chosen === "otra" && asked.has(id) ? [id] : []))
+  return addSession.length ? { addSessionPlanItemIds: addSession } : {}
 }
 
 export function EncounterEditor({
@@ -527,7 +525,7 @@ export function EncounterEditor({
   const [diagnosisPrefill, setDiagnosisPrefill] = useState<ProposedDiagnosis | null>(null)
   /** «Registrar la sesión» desde «Hecho hoy»: el tratamiento con que se abre «Registrar procedimiento». */
   const [sessionPrefill, setSessionPrefill] = useState<string | null>(null)
-  /** «¿Terminaste?» del cierre: lo que se eligió de cada tratamiento de hoy (sin elegir, queda en curso). */
+  /** «¿Terminaste?» del cierre: lo que se cambió de cada tratamiento de hoy (sin cambiar, se termina). */
   const [sessionAnswers, setSessionAnswers] = useState<SessionAnswers>({})
   // Sede de la atención: se guarda al elegirla; si no, el error va en su campo.
   const [branchError, setBranchError] = useState<string | null>(null)
@@ -603,6 +601,13 @@ export function EncounterEditor({
       return true
     })
   })()
+  /** «Resina… · 36»: el tratamiento de «¿Terminaste?» con su pieza, si la tiene. */
+  const sessionLabelOf = (session: ClosingSession) => {
+    const tooth = attentionItems.find((item) => item.id === session.planItemId)?.toothNumber
+    return tooth != null ? `${session.title} · ${tooth}` : session.title
+  }
+  const answerSession = (planItemId: string, answer: "terminar" | "otra") =>
+    setSessionAnswers((current) => ({ ...current, [planItemId]: answer }))
 
   const valuesRef = useRef<DraftValues>({
     presentIllness: encounter.presentIllness ?? "",
@@ -1086,10 +1091,19 @@ export function EncounterEditor({
         // Lo que quedó sugerido sin confirmar no entra a la historia: se descarta.
         await apiFetch(`/api/patients/${patientId}/encounters/${encounterId}/dictation/discard-pending`, { method: "POST" })
         await dictation.refresh()
-        // Con consentimientos por firmar, sigue al cierre para firmarlos o decir por qué se sigue sin ellos.
-        if (unsignedConsents.length > 0) {
-          // El control dictado ya es suyo: el cierre lo dice en vez de preguntar cuándo vuelve.
-          await refreshClosing()
+        // Lo confirmado cambia el cierre: el control dictado ya es suyo y un tratamiento
+        // dictado puede llegar hoy a sus sesiones previstas.
+        const shown = new Set((closingQuery.data?.data.sessions?.finishing ?? []).map((session) => session.planItemId))
+        const fresh = await queryClient.fetchQuery({
+          queryKey: ["encounter-closing", patientId, encounterId],
+          queryFn: () => fetchEncounterClosing(patientId, encounterId),
+          staleTime: 0,
+        })
+        const newlyFinishing = (fresh.data.sessions?.finishing ?? []).some((session) => !shown.has(session.planItemId))
+        // Con consentimientos por firmar, o algo que la firma terminaría sin haberlo
+        // mostrado, sigue al cierre: ahí se firman o se dice por qué no, y «¿Terminaste?»
+        // viene en «Sí, terminar» con «Falta otra sesión» a un toque.
+        if (unsignedConsents.length > 0 || newlyFinishing) {
           setConfirmWithDictation(false)
           return
         }
@@ -1112,7 +1126,7 @@ export function EncounterEditor({
           ...(endedAt ? { endedAt } : {}),
           // «Seguir sin él»: solo si falta algún consentimiento.
           ...(unsignedConsents.length > 0 ? { consentSkipReason: value.consentSkipReason.trim() } : {}),
-          // «¿Terminaste?»: solo lo que se respondió; lo demás queda en curso.
+          // «¿Terminaste?»: «Falta otra sesión»; lo demás que llega a sus previstas se termina.
           ...sessionAnswerBody(sessionAnswers, closingQuery.data?.data.sessions),
           // «¿Cuándo vuelve?» y los controles que cumple esta visita (ADR 0152).
           ...closingControlsBody(value, closingControls, dictatedControl(signIds)),
@@ -2588,19 +2602,9 @@ export function EncounterEditor({
           if (!finalizing) setConfirmOpen(false)
         }}
         signatureHint={signatureHint}
-        sessionLabel={(session) => {
-          const tooth = attentionItems.find((item) => item.id === session.planItemId)?.toothNumber
-          return tooth != null ? `${session.title} · ${tooth}` : session.title
-        }}
+        sessionLabel={sessionLabelOf}
         sessionAnswers={sessionAnswers}
-        onSessionAnswer={(planItemId, answer) =>
-          setSessionAnswers((current) => {
-            const next = { ...current }
-            if (answer) next[planItemId] = answer
-            else delete next[planItemId]
-            return next
-          })
-        }
+        onSessionAnswer={answerSession}
         nextVisit={<ClosingNextVisit form={closingForm} controls={closingControls} busy={finalizing} />}
       >
         {finalizeDescription ? <p className="text-xs text-muted-foreground">{finalizeDescription}</p> : null}
@@ -2641,6 +2645,15 @@ export function EncounterEditor({
         }}
       >
         {signFields}
+        {closingQuery.data?.data.sessions ? (
+          <ClosingSessions
+            sessions={closingQuery.data.data.sessions}
+            labelOf={sessionLabelOf}
+            answers={sessionAnswers}
+            onAnswer={answerSession}
+            disabled={finalizing}
+          />
+        ) : null}
       </DictationSignDialog>
 
       {/* Cierre de la atención: qué quedó por cobrar y qué no, con su porqué. */}
