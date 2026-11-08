@@ -1,6 +1,6 @@
 /**
  * Comisiones. Quien administra (`commissions.write`) ve el mes de toda la
- * clínica; quien solo tiene `commissions.read` ve «Mis comisiones». El mes vive
+ * clínica; quien solo tiene `commissions.read` ve lo suyo, «Mis honorarios». El mes vive
  * en el enlace (`?year=&month=`), así el aviso de pago lleva al mes pagado; sin
  * él se muestra el mes en curso de la clínica.
  */
@@ -54,7 +54,7 @@ export const Route = createFileRoute("/_org/commissions")({
 /**
  * Comisiones es una sección de Finanzas: quien ve Finanzas llega ahí con el
  * mismo mes y profesional (el aviso de pago enlaza a esta ruta). Quien solo
- * tiene «Mis comisiones» no entra a Finanzas y conserva aquí su vista.
+ * tiene «Mis honorarios» no entra a Finanzas y conserva aquí su vista.
  */
 function CommissionsPage() {
   const canFinance = usePermission("finance.read")
@@ -102,7 +102,7 @@ function OwnCommissionsPage() {
             </>
           }
         />
-        <SkeletonRegion message="Cargando comisiones…">
+        <SkeletonRegion message={canWrite ? "Cargando comisiones…" : "Cargando honorarios…"}>
           {canWrite ? <CommissionsMonthSkeleton /> : <MyCommissionsSkeleton />}
         </SkeletonRegion>
       </PageShell>
