@@ -494,8 +494,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo llevo un tratamiento de varias sesiones?",
-        a: "Con sus sesiones previstas en el Plan, por ejemplo una endodoncia en dos. Cada cita que lo lleva dice en qué sesión va («sesión 1 de 2») en la Agenda, en la cita y en «Qué sigue», y al reservar la siguiente, «Para esta cita» lo ofrece mientras le falten sesiones. En la atención, «Hecho hoy» dice «Registrar la sesión» hasta que registras su procedimiento; con la sesión de hoy, «Completar» lo cierra. Al firmar, lo que llega a sus sesiones previstas pregunta «¿Terminaste?» con «Sí, terminar» ya elegido: si firmas sin cambiarlo, queda realizado. Si no terminaste, elige «Falta otra sesión»: le suma una y sigue en curso. Si registras como servicio algo que sigue en curso en esa pieza, te avisa antes de guardar que queda como su sesión siguiente, no como un tratamiento nuevo.",
-        forms: ["endodoncia en dos sesiones", "segunda sesion", "sesion 2 de 2", "completar tratamiento", "no me deja completar", "tratamiento por sesiones"],
+        a: "Con sus sesiones previstas en el Plan, por ejemplo una corona en dos: al indicarlo nace con las sesiones habituales de su servicio, y las cambias ahí mismo o después con «Planificar…». Cada cita que lo lleva dice en qué sesión va («sesión 1 de 2») en la Agenda, en la cita y en «Qué sigue», y al reservar la siguiente, «Para esta cita» lo ofrece mientras le falten sesiones. En la atención, «Hecho hoy» dice «Registrar la sesión» hasta que registras su procedimiento; con la sesión de hoy, «Completar» lo cierra. Al firmar, lo que llega a sus sesiones previstas pregunta «¿Terminaste?» con «Sí, terminar» ya elegido: si firmas sin cambiarlo, queda realizado. Si no terminaste, elige «Falta otra sesión»: le suma una y sigue en curso. Si ya quedó realizado y le falta otra, en el Plan toca «Falta otra sesión»: vuelve a en curso con una sesión más y sale en «Por agendar»; lo firmado y lo cobrado no cambian. Si terminaste antes de lo previsto, «Completar» en «Hecho hoy». Si registras como servicio algo que sigue en curso en esa pieza, te avisa antes de guardar que queda como su sesión siguiente, no como un tratamiento nuevo.",
+        forms: ["endodoncia en dos sesiones", "segunda sesion", "sesion 2 de 2", "completar tratamiento", "no me deja completar", "tratamiento por sesiones", "se termino y faltaba otra sesion", "reabrir un tratamiento"],
       },
       {
         q: "¿La atención queda unida a su cita?",
@@ -1062,6 +1062,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         a: "Cada servicio dice su precio de una de tres formas: «Precio exacto», «Desde» (como mínimo, y el final se define en la evaluación) o «Solo con evaluación» (no dice ningún número y ofrece la evaluación). Al agregar servicios de la biblioteca se pregunta una vez «¿Cómo dice Sofi estos precios?», con «Precio exacto» marcado; un servicio propio nace «Solo con evaluación». Para cambiar varios a la vez, márcalos en la lista y elige «Cómo dice el precio». Caja y presupuesto usan siempre la tarifa.",
       },
       {
+        q: "¿Qué son las sesiones habituales de un servicio?",
+        a: "Con cuántas sesiones suele hacerse, por ejemplo una corona en dos. Al indicarlo, el tratamiento nace en el plan con ese número, y en cada paciente se cambia al indicarlo o con «Planificar…». Lo de la biblioteca trae las que suele llevar y las cambias en el formulario del servicio; cambiarlas no toca lo ya indicado. Si se cobra por sesión, el presupuesto suma el precio de cada sesión prevista.",
+        forms: ["sesiones habituales", "cuantas sesiones lleva un servicio", "sesiones por defecto de un tratamiento"],
+      },
+      {
         q: "¿Cómo pongo un precio en dólares?",
         a: "Primero activa la otra moneda en Datos de la clínica; después, el formulario del servicio trae «Moneda del precio». Al cambiarla escribes el precio de nuevo: no se convierte solo, y lo que ya se indicó o se presupuestó sigue con su moneda y su precio. Un servicio tiene un solo precio. Sofi lo dice en esa moneda y agrega, como aproximado, cuánto es hoy en tu moneda: nunca promete ese cambio para un pago futuro.",
         forms: ["precio en dolares", "servicio en dolares", "como cobro un servicio en dolares", "cobrar un servicio en dolares"],
@@ -1144,7 +1149,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo se reparte un tratamiento que hacen dos doctores?",
-        a: "Desde el plan de tratamiento, con sus sesiones previstas: cada cobro se reparte en partes iguales, una por sesión prevista, y cada parte es de quien hizo esa sesión, el día que la hace. Lo cobrado por adelantado de un tratamiento se reparte igual. Lo cobrado de sesiones que aún no se hacen todavía no es de nadie: la lista del mes lo dice aparte, y lo de un tratamiento cancelado antes de terminar no es comisión de nadie. Cada línea dice qué sesión es y de cuántas. Un servicio registrado directo en la atención, sin plan, se cobra entero y su comisión es toda de quien lo registró: para repartirlo, ponlo en el plan con sus sesiones antes de atender.",
+        a: "Desde el plan de tratamiento, con sus sesiones previstas: cada cobro se reparte en partes iguales, una por sesión prevista, y cada parte es de quien hizo esa sesión, el día que la hace. Lo cobrado por adelantado de un tratamiento se reparte igual. Lo cobrado de sesiones que aún no se hacen todavía no es de nadie: la lista del mes lo dice aparte, y lo de un tratamiento cancelado antes de terminar no es comisión de nadie. Cada línea dice qué sesión es y de cuántas. Un servicio registrado directo en la atención, sin plan, se cobra entero; si su servicio es de una sesión, su comisión es toda de quien lo registró, y si suele llevar varias, queda en curso con ellas y se reparte igual.",
         forms: ["comisión por sesión", "tratamiento compartido", "dos doctores un tratamiento", "repartir un tratamiento entre doctores"],
       },
     ],
