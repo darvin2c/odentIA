@@ -94,6 +94,7 @@ import {
   closingControlsBody,
   type DictatedControl,
   EncounterClosingDialog,
+  type SessionAnswers,
   needsNextControlDay,
   SignatureRegistrationFields,
   useClosingForm,
@@ -399,6 +400,25 @@ function skippedReasonLabel(reason: string | null): string {
   }
 }
 
+/**
+ * Lo respondido a «¿Terminaste?» en el cuerpo de `/finalize`, solo de lo que el
+ * cierre pregunta hoy: lo que ya no está (se anuló su sesión) no se manda.
+ */
+function sessionAnswerBody(
+  answers: SessionAnswers,
+  sessions: { finishing: Array<{ planItemId: string }> } | undefined,
+): { completePlanItemIds?: string[]; addSessionPlanItemIds?: string[] } {
+  const asked = new Set((sessions?.finishing ?? []).map((session) => session.planItemId))
+  const ids = (answer: "terminar" | "otra") =>
+    Object.entries(answers).flatMap(([id, chosen]) => (chosen === answer && asked.has(id) ? [id] : []))
+  const complete = ids("terminar")
+  const addSession = ids("otra")
+  return {
+    ...(complete.length ? { completePlanItemIds: complete } : {}),
+    ...(addSession.length ? { addSessionPlanItemIds: addSession } : {}),
+  }
+}
+
 export function EncounterEditor({
   patientId,
   detail,
@@ -505,6 +525,10 @@ export function EncounterEditor({
   const [doneError, setDoneError] = useState<{ section: SectionKey; message: string } | null>(null)
   /** Una propuesta de diagnóstico sin tipo, usada desde la tarjeta: el bloque abre su formulario con ella. */
   const [diagnosisPrefill, setDiagnosisPrefill] = useState<ProposedDiagnosis | null>(null)
+  /** «Registrar la sesión» desde «Hecho hoy»: el tratamiento con que se abre «Registrar procedimiento». */
+  const [sessionPrefill, setSessionPrefill] = useState<string | null>(null)
+  /** «¿Terminaste?» del cierre: lo que se eligió de cada tratamiento de hoy (sin elegir, queda en curso). */
+  const [sessionAnswers, setSessionAnswers] = useState<SessionAnswers>({})
   // Sede de la atención: se guarda al elegirla; si no, el error va en su campo.
   const [branchError, setBranchError] = useState<string | null>(null)
   const registrationNumberRef = useRef<HTMLInputElement>(null)
@@ -1088,11 +1112,14 @@ export function EncounterEditor({
           ...(endedAt ? { endedAt } : {}),
           // «Seguir sin él»: solo si falta algún consentimiento.
           ...(unsignedConsents.length > 0 ? { consentSkipReason: value.consentSkipReason.trim() } : {}),
+          // «¿Terminaste?»: solo lo que se respondió; lo demás queda en curso.
+          ...sessionAnswerBody(sessionAnswers, closingQuery.data?.data.sessions),
           // «¿Cuándo vuelve?» y los controles que cumple esta visita (ADR 0152).
           ...closingControlsBody(value, closingControls, dictatedControl(signIds)),
         }),
       })
       setConfirmOpen(false)
+      setSessionAnswers({})
       closingForm.reset()
       setBudgetSent(false)
       setFinalizedBudget(result.data.budget ?? null)
@@ -1259,6 +1286,10 @@ export function EncounterEditor({
         .join("; ")
     : ""
   const activeProcedures = detail.procedures.filter((proc) => !proc.voidedAt).length
+  // Los tratamientos con la sesión de hoy: un procedimiento vigente suyo en esta atención.
+  const sessionItemIds = new Set(
+    detail.procedures.flatMap((proc) => (!proc.voidedAt && proc.planItemId ? [proc.planItemId] : [])),
+  )
   const sections: Array<{
     key: SectionKey
     title: string
@@ -1905,6 +1936,8 @@ export function EncounterEditor({
         onChanged={handleChildChanged}
         onPendingChange={handlePendingChange}
         autoOpen={justAdded === "procedimientos"}
+        prefillPlanItemId={sessionPrefill}
+        onPrefillUsed={() => setSessionPrefill(null)}
       />
     ),
     plan: (
@@ -1920,6 +1953,11 @@ export function EncounterEditor({
         beforeWrite={flush}
         onChanged={handleChildChanged}
         onPendingChange={handlePendingChange}
+        sessionItemIds={sessionItemIds}
+        onRegisterSession={(itemId) => {
+          setSessionPrefill(itemId)
+          addSection("procedimientos")
+        }}
       />
     ),
     documentos: (
@@ -2550,6 +2588,19 @@ export function EncounterEditor({
           if (!finalizing) setConfirmOpen(false)
         }}
         signatureHint={signatureHint}
+        sessionLabel={(session) => {
+          const tooth = attentionItems.find((item) => item.id === session.planItemId)?.toothNumber
+          return tooth != null ? `${session.title} · ${tooth}` : session.title
+        }}
+        sessionAnswers={sessionAnswers}
+        onSessionAnswer={(planItemId, answer) =>
+          setSessionAnswers((current) => {
+            const next = { ...current }
+            if (answer) next[planItemId] = answer
+            else delete next[planItemId]
+            return next
+          })
+        }
         nextVisit={<ClosingNextVisit form={closingForm} controls={closingControls} busy={finalizing} />}
       >
         {finalizeDescription ? <p className="text-xs text-muted-foreground">{finalizeDescription}</p> : null}

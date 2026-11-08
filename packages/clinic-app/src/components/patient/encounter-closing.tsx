@@ -16,6 +16,7 @@ import {
   Input,
   ScrollArea,
 } from "@odentia/ui"
+import { sessionWords, showsSession } from "@odentia/clinical"
 import { DatePickerButton, TimeSelect, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
 import { ToggleGroup, ToggleGroupItem } from "@odentia/ui/components/toggle-group"
 import { useStore } from "@tanstack/react-form"
@@ -31,6 +32,7 @@ import {
   type ClosingMaterials,
   type ClosingNextControl,
   type ClosingRequirement,
+  type ClosingSession,
   controlDaySaid,
   type SignatureRegistration,
   signatureRegistrationErrors,
@@ -424,6 +426,83 @@ export function ClosingSignatureHint({
   )
 }
 
+/** Lo que se respondió a «¿Terminaste?» de cada tratamiento (sin elegir, no está). */
+export type SessionAnswers = Record<string, "terminar" | "otra">
+
+/**
+ * Lo trabajado hoy de un tratamiento de varias sesiones, una línea por cada uno.
+ * Lo que con esta atención llega a sus sesiones previstas pregunta «¿Terminaste?»
+ * con dos botones sin marcar; lo demás dice que sigue en curso. Nada se termina
+ * solo: sin elegir, queda en curso y se completa después.
+ */
+function ClosingSessions({
+  sessions,
+  labelOf,
+  answers,
+  onAnswer,
+  disabled,
+}: {
+  sessions: { finishing: ClosingSession[]; continuing: ClosingSession[]; notRegistered?: ClosingSession[] }
+  labelOf: (session: ClosingSession) => string
+  answers: SessionAnswers
+  onAnswer: (planItemId: string, answer: "terminar" | "otra" | null) => void
+  disabled: boolean
+}): React.JSX.Element | null {
+  const notRegistered = sessions.notRegistered ?? []
+  if (sessions.finishing.length === 0 && sessions.continuing.length === 0 && notRegistered.length === 0) return null
+  // Una resina de una sesión no dice «sesión 1 de 1»: solo su nombre.
+  const line = (session: ClosingSession) =>
+    showsSession(session.n, session.m) ? `${labelOf(session)} · ${sessionWords(session.n, session.m)}` : labelOf(session)
+  return (
+    <ul aria-label="Tratamientos de hoy" className="flex flex-col gap-2 rounded-lg border p-3">
+      {sessions.finishing.map((session) => {
+        const answer = answers[session.planItemId] ?? null
+        const choose = (next: "terminar" | "otra") => onAnswer(session.planItemId, answer === next ? null : next)
+        return (
+          <li key={session.planItemId} className="flex flex-col gap-2">
+            <span>
+              <span className="font-medium">{line(session)}</span> · ¿Terminaste?
+            </span>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant={answer === "terminar" ? "default" : "outline"}
+                aria-pressed={answer === "terminar"}
+                disabled={disabled}
+                onClick={() => choose("terminar")}
+              >
+                Sí, terminar
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={answer === "otra" ? "default" : "outline"}
+                aria-pressed={answer === "otra"}
+                disabled={disabled}
+                onClick={() => choose("otra")}
+              >
+                Falta otra sesión
+              </Button>
+            </div>
+          </li>
+        )
+      })}
+      {sessions.continuing.map((session) => (
+        <li key={session.planItemId} className="text-muted-foreground">
+          Sigue en curso: {line(session)}
+        </li>
+      ))}
+      {/* Avisa, no frena: quizá hoy no se pudo hacer. */}
+      {notRegistered.map((session) => (
+        <li key={session.planItemId} className="text-muted-foreground">
+          La cita traía {line(session)} y no registraste su sesión: si la hiciste, regístrala en «Hecho hoy».
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 export function EncounterClosingDialog({
   open,
   form,
@@ -445,6 +524,9 @@ export function EncounterClosingDialog({
   registration = null,
   confirmLabel = null,
   initialFocus,
+  sessionLabel = (session) => session.title,
+  sessionAnswers = {},
+  onSessionAnswer,
   children,
   nextVisit = null,
 }: {
@@ -483,6 +565,11 @@ export function EncounterClosingDialog({
   confirmLabel?: string | null
   /** Dónde empieza el foco al abrir (el número de colegiatura, si se pide). */
   initialFocus?: React.RefObject<HTMLElement | null>
+  /** Cómo se nombra un tratamiento de hoy («Endodoncia · 46»). */
+  sessionLabel?: (session: ClosingSession) => string
+  /** Lo respondido a «¿Terminaste?»; sin `onSessionAnswer` solo se informa. */
+  sessionAnswers?: SessionAnswers
+  onSessionAnswer?: (planItemId: string, answer: "terminar" | "otra" | null) => void
   /** Lo que se suma al cierre (el aviso del dictado, por ejemplo). */
   children?: React.ReactNode
   /** «¿Cuándo vuelve?», justo encima de firmar. */
@@ -544,6 +631,15 @@ export function EncounterClosingDialog({
                 </ul>
               ) : null}
               {closing ? <ProductClosing closing={closing} pending={busy} openBlock={onOpenBlock} /> : null}
+              {closing?.sessions && onSessionAnswer ? (
+                <ClosingSessions
+                  sessions={closing.sessions}
+                  labelOf={sessionLabel}
+                  answers={sessionAnswers}
+                  onAnswer={onSessionAnswer}
+                  disabled={busy}
+                />
+              ) : null}
               {materials && materials.items.length > 0 ? (
                 <p className="rounded-lg border p-3">
                   <span className="font-medium">Materiales</span>

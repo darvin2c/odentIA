@@ -15,7 +15,7 @@ import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
 import { listFollowUps, type ScheduleFollowUpInput, scheduleFollowUp } from "./follow-ups.js"
 import { scheduledItems } from "./plan-next.js"
 import { listPlanItems } from "./plan.js"
-import { isToSchedule } from "./to-schedule.js"
+import { isToSchedule, sessionCountsOf, sessionsLeft } from "./to-schedule.js"
 
 const OPEN_TREATMENT_STATUSES = ["pendiente", "programado", "en_curso", "suspendido"]
 // Lo que no aceptó, lo reemplazado y lo que estaba solo en una opción no elegida.
@@ -42,9 +42,21 @@ export interface TreatmentCoordination {
   followUps: CoordinationFollowUp[]
   /**
    * Tratamientos abiertos, solo nombre y estado operativo. `toSchedule`: aceptado
-   * y sin cita por venir, lo que «Nueva cita» ofrece para traer.
+   * y sin cita por venir, lo que «Nueva cita» ofrece para traer. `sessionsLeft`:
+   * cuántas sesiones le faltan reservar (`canBookAnother`); con alguna, «Nueva
+   * cita» también lo ofrece, como «sesión 2 de 2» (`nextSession`).
    */
-  treatments: Array<{ id: string; title: string; status: string; decision: string; serviceId: string | null; toSchedule: boolean }>
+  treatments: Array<{
+    id: string
+    title: string
+    status: string
+    decision: string
+    serviceId: string | null
+    toSchedule: boolean
+    sessionsLeft: number
+    /** La sesión que sería una cita nueva al final: hechas + en pie + 1, de las previstas. */
+    nextSession: { n: number; m: number }
+  }>
 }
 
 function toCoordinationFollowUp(
@@ -95,6 +107,8 @@ export async function getTreatmentCoordination(
   const schedulable = open.filter((item) => item.decisionStatus === "aceptado" && SCHEDULABLE_ITEM_STATUSES.includes(item.status))
   const withAppointment = await scheduledItems(tx, orgId, patientId, schedulable.map((item) => item.id))
   const toSchedule = new Set(open.filter((item) => isToSchedule(item, withAppointment)).map((item) => item.id))
+  const counts = await sessionCountsOf(tx, orgId, schedulable.map((item) => item.id))
+  const countOf = (id: string) => counts.get(id) ?? { done: 0, booked: 0 }
   return {
     budgetsAwaitingDecision: budgets,
     followUps: followUps
@@ -107,6 +121,8 @@ export async function getTreatmentCoordination(
       decision: item.decision,
       serviceId: item.serviceId,
       toSchedule: toSchedule.has(item.id),
+      sessionsLeft: sessionsLeft(item, countOf(item.id)),
+      nextSession: { n: countOf(item.id).done + countOf(item.id).booked + 1, m: item.plannedSessions },
     })),
   }
 }

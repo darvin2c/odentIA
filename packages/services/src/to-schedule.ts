@@ -90,6 +90,127 @@ export function budgetToScheduleSql(
       )})`
 }
 
+/**
+ * Las sesiones de un tratamiento de varias (una endodoncia en dos, la
+ * ortodoncia mensual, una terapia). Se calculan, no se guardan:
+ *
+ * - **Hechas**: atenciones distintas, no anuladas, con un procedimiento vigente
+ *   del tratamiento. Una atención es una sesión aunque lo registre dos veces,
+ *   como en las comisiones.
+ * - **En pie**: citas programadas o confirmadas que lo llevan y cuya atención
+ *   todavía no lo registró (si ya lo registró, es una sesión hecha y no se
+ *   cuenta dos veces). Una que ya pasó sin llegada ni atención no cuenta: nadie
+ *   marcó «No vino», pero tampoco va a ocurrir.
+ * - **Puede llevar otra cita**: aceptado y por hacer (`TO_SCHEDULE_STATUSES`),
+ *   con más sesiones previstas que hechas y en pie. Es una regla aparte de
+ *   «Aceptó y no tiene cita» (`isToSchedule`), que no cambia: Inicio, Pacientes,
+ *   Reportes y Argos siguen contando lo mismo. La usan la reserva («Para esta
+ *   cita»), la cita que no dice qué trae (Sofi, «Su enlace», Clío) y «Qué sigue».
+ *
+ * Cada regla existe en código y en SQL, y su prueba las compara.
+ */
+export interface SessionCount {
+  /** Atenciones distintas con un procedimiento vigente del tratamiento. */
+  done: number
+  /** Citas en pie que lo llevan y aún no lo registraron. */
+  booked: number
+}
+
+/** Puede llevar otra cita, en código, con lo que cuenta `sessionCountsOf`. */
+export function canBookAnother(
+  item: { status: string; decisionStatus: string; plannedSessions: number },
+  count: SessionCount,
+): boolean {
+  return (
+    item.decisionStatus === "aceptado" &&
+    (TO_SCHEDULE_STATUSES as readonly string[]).includes(item.status) &&
+    item.plannedSessions > count.done + count.booked
+  )
+}
+
+/** Cuántas sesiones quedan por reservar (0 si no puede llevar otra cita). */
+export function sessionsLeft(
+  item: { status: string; decisionStatus: string; plannedSessions: number },
+  count: SessionCount,
+): number {
+  return canBookAnother(item, count) ? item.plannedSessions - count.done - count.booked : 0
+}
+
+/**
+ * Sesiones hechas del tratamiento, en SQL. `exceptAppointment` deja fuera la
+ * atención de esa cita: la sesión que la cita viene a hacer no es «anterior».
+ */
+export function sessionsDoneSql(
+  item: { id: SQLWrapper; organizationId: SQLWrapper },
+  exceptAppointment?: SQLWrapper,
+): SQL {
+  return sql`(select count(distinct done_procedure.encounter_id)::int from encounter_procedure done_procedure
+    join encounter done_encounter on done_encounter.organization_id = done_procedure.organization_id
+      and done_encounter.id = done_procedure.encounter_id
+    where done_procedure.organization_id = ${item.organizationId} and done_procedure.plan_item_id = ${item.id}
+      and done_procedure.voided_at is null and done_encounter.status <> 'anulada'
+      ${exceptAppointment ? sql`and done_encounter.appointment_id is distinct from ${exceptAppointment}` : sql``})`
+}
+
+/** La cita está en pie para el tratamiento (ver arriba), sobre una fila de `appointment` (o un alias). */
+export function standingForSql(
+  appointment: { id: SQLWrapper; organizationId: SQLWrapper; status: SQLWrapper; startsAt: SQLWrapper; arrivedAt: SQLWrapper },
+  itemId: SQLWrapper,
+  now: SQLWrapper = sql`now()`,
+): SQL {
+  return sql`(${appointment.status} in (${list(LIVE_APPOINTMENT_STATUSES)})
+    and (${appointment.startsAt} > ${now} or ${appointment.arrivedAt} is not null
+      or exists (select 1 from encounter standing_encounter
+        where standing_encounter.organization_id = ${appointment.organizationId}
+          and standing_encounter.appointment_id = ${appointment.id} and standing_encounter.status <> 'anulada'))
+    and not exists (select 1 from encounter standing_done
+      join encounter_procedure standing_procedure on standing_procedure.organization_id = standing_done.organization_id
+        and standing_procedure.encounter_id = standing_done.id
+      where standing_done.organization_id = ${appointment.organizationId}
+        and standing_done.appointment_id = ${appointment.id} and standing_done.status <> 'anulada'
+        and standing_procedure.plan_item_id = ${itemId} and standing_procedure.voided_at is null))`
+}
+
+/** Citas en pie que llevan el tratamiento, en SQL. */
+export function bookedSessionsSql(item: { id: SQLWrapper; organizationId: SQLWrapper }, now: SQLWrapper = sql`now()`): SQL {
+  return sql`(select count(*)::int from appointment_plan_item booked
+    join appointment booked_appointment on booked_appointment.organization_id = booked.organization_id
+      and booked_appointment.id = booked.appointment_id
+    where booked.organization_id = ${item.organizationId} and booked.plan_item_id = ${item.id}
+      and ${standingForSql(
+        {
+          id: sql`booked_appointment.id`,
+          organizationId: sql`booked_appointment.organization_id`,
+          status: sql`booked_appointment.status`,
+          startsAt: sql`booked_appointment.starts_at`,
+          arrivedAt: sql`booked_appointment.arrived_at`,
+        },
+        item.id,
+        now,
+      )})`
+}
+
+/** Puede llevar otra cita, en SQL, sobre una fila de `treatment_plan_item` (o un alias). */
+export function canBookAnotherSql(
+  item: { id: SQLWrapper; organizationId: SQLWrapper; status: SQLWrapper; decisionStatus: SQLWrapper; plannedSessions: SQLWrapper },
+  now: SQLWrapper = sql`now()`,
+): SQL {
+  return sql`(${item.decisionStatus} = 'aceptado' and ${item.status} in (${list(TO_SCHEDULE_STATUSES)})
+    and ${item.plannedSessions} > ${sessionsDoneSql(item)} + ${bookedSessionsSql(item, now)})`
+}
+
+/** Hechas y en pie de cada tratamiento, en una sola consulta. Los que no existen no aparecen. */
+export async function sessionCountsOf(tx: Db, orgId: string, itemIds: readonly string[]): Promise<Map<string, SessionCount>> {
+  const ids = [...new Set(itemIds)]
+  if (ids.length === 0) return new Map()
+  const item = { id: sql`counted.id`, organizationId: sql`counted.organization_id` }
+  const rows = await tx.execute<{ id: string; done: number; booked: number }>(sql`
+    select counted.id, ${sessionsDoneSql(item)} as done, ${bookedSessionsSql(item)} as booked
+    from treatment_plan_item counted
+    where counted.organization_id = ${orgId} and counted.id in (${list(ids)})`)
+  return new Map(rows.map((row) => [row.id, { done: Number(row.done), booked: Number(row.booked) }]))
+}
+
 /** La persona no tiene ninguna cita por venir. */
 export function noUpcomingAppointmentSql(
   patient: { id: SQLWrapper; organizationId: SQLWrapper },

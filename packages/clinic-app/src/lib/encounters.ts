@@ -34,6 +34,21 @@ export interface ClosingCheck {
   materials: ClosingMaterials | null
   /** «¿Cuándo vuelve?» y los controles que esta visita cumple al firmar. */
   controls: ClosingControls
+  /**
+   * Lo trabajado hoy de un tratamiento de varias sesiones que sigue abierto:
+   * `finishing` llega con esta atención a sus sesiones previstas (el cierre
+   * pregunta «¿Terminaste?»); `continuing` queda en curso. `n` cuenta esta.
+   * `notRegistered`: lo que traía la cita y hoy no tiene sesión registrada.
+   */
+  sessions?: { finishing: ClosingSession[]; continuing: ClosingSession[]; notRegistered?: ClosingSession[] }
+}
+
+/** Un tratamiento trabajado en la atención, con su sesión. */
+export interface ClosingSession {
+  planItemId: string
+  title: string
+  n: number
+  m: number
 }
 
 /** Un control pendiente que ya toca: esta visita lo cumple si queda marcado. */

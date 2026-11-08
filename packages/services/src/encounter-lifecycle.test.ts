@@ -263,6 +263,8 @@ it("cerrar exige motivo, diagnóstico, evolución y colegiatura, y firma con su 
     periodontal: null,
     // Sin sede ni servicios con materiales, no anuncia ningún descuento.
     materials: null,
+    // Sin tratamientos trabajados hoy, no pregunta «¿Terminaste?».
+    sessions: { finishing: [], continuing: [], notRegistered: [] },
     // Sin controles: pregunta «¿Cuándo vuelve?» con los atajos del producto.
     controls: { recallMonths: 6, byAppointment: [], shortcuts: expect.any(Object), due: [], next: null },
   })

@@ -59,7 +59,8 @@ import { advanceForAppointment, returnForCancelledAppointment } from "./opportun
 import { listPatients } from "./patients.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { scheduledItems } from "./plan-next.js"
-import { TO_SCHEDULE_STATUSES } from "./to-schedule.js"
+import { showsSession } from "@odentia/clinical"
+import { canBookAnother, sessionCountsOf, sessionsDoneSql, standingForSql, TO_SCHEDULE_STATUSES } from "./to-schedule.js"
 import { countAgendaUpgrade, countRecoveredAppointment, refreshConversationTier } from "./saas-actions.js"
 
 function conflict(code: string, message: string): ServiceError {
@@ -180,6 +181,25 @@ export interface AppointmentItem {
    * (nulo en la del chat web) y cuándo se borra sola. Null en una cita real.
    */
   test: { conversationId: string | null; byUserId: string | null; byName: string | null; deletesAt: string | null } | null
+  /**
+   * En qué sesión va cada tratamiento que la cita lleva (`appointmentSessionsOf`):
+   * «Endodoncia · sesión 2 de 2». Solo en las lecturas (`listAppointments`,
+   * `getAppointment`); vacío si no lleva ninguno de varias sesiones.
+   */
+  sessions: AppointmentSession[]
+}
+
+/**
+ * La sesión que viene a hacer una cita, calculada (no se guarda): `n` son las
+ * sesiones hechas del tratamiento sin la atención de esta cita, más las citas en
+ * pie que lo llevan y empiezan antes, más esta; `m`, las previstas. Solo se dice
+ * si `m` > 1 o si ya va por una de más (`showsSession`).
+ */
+export interface AppointmentSession {
+  planItemId: string
+  title: string
+  n: number
+  m: number
 }
 
 export interface ScheduleResources {
@@ -415,7 +435,69 @@ export async function getAppointment(tx: Db, orgId: string, id: string): Promise
     .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, id)))
     .limit(1)
   if (!row) throw notFound("Cita")
-  return toItem(row)
+  const item = toItem(row)
+  item.sessions = (await appointmentSessionsOf(tx, orgId, [item.id])).get(item.id) ?? []
+  return item
+}
+
+/**
+ * La sesión de cada tratamiento que llevan esas citas, en una sola consulta.
+ * Solo citas en pie (programadas o confirmadas) sin atención firmada: una
+ * atendida ya no «viene a hacer» nada. Las sesiones hechas y las citas en pie
+ * siguen las reglas de `to-schedule.ts`; dos citas a la misma hora se ordenan
+ * por su id, para que no digan las dos «sesión 2».
+ */
+export async function appointmentSessionsOf(
+  tx: Db,
+  orgId: string,
+  appointmentIds: readonly string[],
+): Promise<Map<string, AppointmentSession[]>> {
+  const out = new Map<string, AppointmentSession[]>()
+  const ids = [...new Set(appointmentIds)]
+  if (ids.length === 0) return out
+  const item = { id: sql`session_item.id`, organizationId: sql`session_item.organization_id` }
+  const rows = await tx.execute<{ appointment_id: string; plan_item_id: string; title: string; done: number; before: number; m: number }>(sql`
+    select session_link.appointment_id, session_item.id as plan_item_id, session_item.title,
+      session_item.planned_sessions as m,
+      ${sessionsDoneSql(item, sql`session_appointment.id`)} as done,
+      (select count(*)::int from appointment_plan_item earlier_link
+        join appointment earlier on earlier.organization_id = earlier_link.organization_id and earlier.id = earlier_link.appointment_id
+        where earlier_link.organization_id = session_item.organization_id and earlier_link.plan_item_id = session_item.id
+          and earlier.id <> session_appointment.id
+          and (earlier.starts_at, earlier.id) < (session_appointment.starts_at, session_appointment.id)
+          and ${standingForSql(
+            {
+              id: sql`earlier.id`,
+              organizationId: sql`earlier.organization_id`,
+              status: sql`earlier.status`,
+              startsAt: sql`earlier.starts_at`,
+              arrivedAt: sql`earlier.arrived_at`,
+            },
+            sql`session_item.id`,
+          )}) as before
+    from appointment_plan_item session_link
+    join appointment session_appointment on session_appointment.organization_id = session_link.organization_id
+      and session_appointment.id = session_link.appointment_id
+    join treatment_plan_item session_item on session_item.organization_id = session_link.organization_id
+      and session_item.id = session_link.plan_item_id
+    where session_link.organization_id = ${orgId}
+      and session_link.appointment_id in (${sql.join(
+        ids.map((id) => sql`${id}`),
+        sql`, `,
+      )})
+      and session_appointment.status in ('programada', 'confirmada')
+      and not exists (select 1 from encounter signed where signed.organization_id = session_appointment.organization_id
+        and signed.appointment_id = session_appointment.id and signed.status = 'finalizada')
+    order by session_item.sort_order, session_item.created_at, session_item.id`)
+  for (const row of rows) {
+    const n = Number(row.done) + Number(row.before) + 1
+    const m = Number(row.m)
+    if (!showsSession(n, m)) continue
+    const list = out.get(row.appointment_id) ?? []
+    list.push({ planItemId: row.plan_item_id, title: row.title, n, m })
+    out.set(row.appointment_id, list)
+  }
+  return out
 }
 
 /** Lo que el cajón de la cita dice de la persona y de dónde salió la cita. */
@@ -571,6 +653,7 @@ function toItem(row: {
           professionalName: row.encounterProfessionalName ?? "",
         }
       : null,
+    sessions: [],
   }
 }
 
@@ -622,7 +705,10 @@ export async function listAppointments(
   const rows = await appointmentRows(tx, orgId)
     .where(and(...conditions))
     .orderBy(asc(appointment.startsAt))
-  return rows.map(toItem)
+  const items = rows.map(toItem)
+  const sessions = await appointmentSessionsOf(tx, orgId, items.map((item) => item.id))
+  for (const item of items) item.sessions = sessions.get(item.id) ?? []
+  return items
 }
 
 const SEARCH_PEOPLE = 6
@@ -898,14 +984,21 @@ export interface CreateAppointmentInput {
 export const SCHEDULABLE_ITEM_STATUSES: string[] = [...TO_SCHEDULE_STATUSES]
 
 /**
- * Lo aceptado de ese servicio que aún no tiene cita. Una cita que no dice qué
- * tratamientos trae (Sofi, el enlace de reserva) lleva estos, la misma regla de
- * Clío: así no queda «falta su cita» de algo que ya se reservó. Quien elige en
- * «Nueva cita» manda su lista, aunque sea vacía.
+ * Lo aceptado de ese servicio que aún no tiene cita o que puede llevar otra (le
+ * faltan sesiones por reservar: la segunda de una endodoncia en dos,
+ * `canBookAnother`). Una cita que no dice qué tratamientos trae (Sofi, el enlace
+ * de reserva) lleva estos, la misma regla de Clío: así no queda «falta su cita»
+ * de algo que ya se reservó, y la segunda sesión se une al mismo tratamiento.
+ * Quien elige en «Nueva cita» manda su lista, aunque sea vacía.
  */
 async function acceptedOfService(tx: Db, orgId: string, patientId: string, serviceId: string): Promise<string[]> {
   const rows = await tx
-    .select({ id: treatmentPlanItem.id })
+    .select({
+      id: treatmentPlanItem.id,
+      status: treatmentPlanItem.status,
+      decisionStatus: treatmentPlanItem.decisionStatus,
+      plannedSessions: treatmentPlanItem.plannedSessions,
+    })
     .from(treatmentPlanItem)
     .where(
       and(
@@ -920,7 +1013,13 @@ async function acceptedOfService(tx: Db, orgId: string, patientId: string, servi
     .limit(52)
   const ids = rows.map((row) => row.id)
   const withAppointment = await scheduledItems(tx, orgId, patientId, ids)
-  return ids.filter((id) => !withAppointment.has(id))
+  const counts = await sessionCountsOf(tx, orgId, ids.filter((id) => withAppointment.has(id)))
+  return rows
+    .filter(
+      (row) =>
+        !withAppointment.has(row.id) || canBookAnother(row, counts.get(row.id) ?? { done: 0, booked: 0 }),
+    )
+    .map((row) => row.id)
 }
 
 async function requireSchedulableItems(tx: Db, orgId: string, patientId: string, ids: string[]): Promise<string[]> {
