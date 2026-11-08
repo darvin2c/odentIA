@@ -1,0 +1,2 @@
+ALTER TABLE "org_profile" ADD COLUMN "brand_color" text;--> statement-breakpoint
+ALTER TABLE "org_profile" ADD CONSTRAINT "org_profile_brand_color_check" CHECK ("org_profile"."brand_color" IS NULL OR "org_profile"."brand_color" ~ '^#[0-9a-f]{6}$');

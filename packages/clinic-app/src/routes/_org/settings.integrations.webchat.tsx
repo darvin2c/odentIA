@@ -20,6 +20,7 @@ import { IntegrationsCrumbWithText } from "../../components/integrations/integra
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
+import { RouterLink } from "../../lib/router-link"
 import { WebchatPageSkeleton, WebchatSkeleton } from "../../components/skeletons/settings"
 
 export const Route = createFileRoute("/_org/settings/integrations/webchat")({
@@ -37,7 +38,6 @@ interface ClinicWebchat {
   id: string
   active: boolean
   script: string | null
-  color: string
   greeting: string
   notifyUrl: string | null
   installedOn: string | null
@@ -51,16 +51,6 @@ interface ClinicWebchat {
     first: boolean
   }>
 }
-
-/** Colores del botón y la cabecera: todos con buen contraste para el texto blanco. */
-const COLORS = [
-  { value: "#0f766e", label: "Turquesa" },
-  { value: "#1d4ed8", label: "Azul" },
-  { value: "#6d28d9", label: "Morado" },
-  { value: "#be185d", label: "Rosa" },
-  { value: "#c2410c", label: "Naranja" },
-  { value: "#334155", label: "Gris" },
-] as const
 
 const hostOf = (origin: string) => {
   try {
@@ -268,7 +258,7 @@ function Install({ chat, clinicName }: { chat: ClinicWebchat; clinicName: string
         <h2 id="chat-instalar" className="font-semibold">
           Instalar en tu sitio
         </h2>
-        <p className="text-sm text-muted-foreground">Copia esta línea y pégala en tu sitio, antes de &lt;/body&gt;. Cambiar el color o el saludo no obliga a volver a pegarla.</p>
+        <p className="text-sm text-muted-foreground">Copia esta línea y pégala en tu sitio, antes de &lt;/body&gt;. Cambiar el saludo o el color de tu marca no obliga a volver a pegarla.</p>
       </div>
       {/* La línea se parte en renglones: se lee entera también en el celular, sin barra. */}
       <pre className="whitespace-pre-wrap break-all rounded-xl border bg-muted px-4 py-3 font-mono text-sm">{script}</pre>
@@ -301,7 +291,6 @@ const NOTIFY_URL_CHARS = 500
 
 /** Lo mismo que comprueba la ruta: el aviso al sitio va a una dirección https. */
 const advancedSchema = z.object({
-  color: z.string(),
   greeting: z.string().max(500, "El saludo admite hasta 500 caracteres"),
   notifyUrl: z
     .string()
@@ -317,20 +306,23 @@ const advancedSchema = z.object({
     }, "La dirección del aviso al sitio debe empezar con https://"),
 })
 
-/** «Opciones avanzadas»: color, saludo, aviso al sitio y el código. Un formulario con su «Guardar». */
+/**
+ * «Opciones avanzadas»: saludo, aviso al sitio y el código. Un formulario con su «Guardar».
+ * El color no es del chat: es el de la marca de la clínica (ADR 0162), y aquí se dice de dónde sale.
+ */
 function Advanced({ chat, onSaved }: { chat: ClinicWebchat; onSaved: (data: { data: ClinicWebchat }) => void }) {
   const [code, setCode] = useState<string | null>(null)
   const [rotating, setRotating] = useState(false)
+  const canChangeColor = usePermission("settings.write")
   const save = useMutation({
-    mutationFn: (body: { color: string; greeting: string | null; notifyUrl: string | null }) =>
+    mutationFn: (body: { greeting: string | null; notifyUrl: string | null }) =>
       apiFetch<{ data: ClinicWebchat }>("/api/channels/webchat", { method: "PATCH", body: JSON.stringify(body) }),
   })
   const form = useAppForm({
-    defaultValues: { color: chat.color, greeting: chat.greeting, notifyUrl: chat.notifyUrl ?? "" },
+    defaultValues: { greeting: chat.greeting, notifyUrl: chat.notifyUrl ?? "" },
     validators: { onSubmit: advancedSchema },
     onSubmit: async ({ value }) => {
       const data = await save.mutateAsync({
-        color: value.color,
         greeting: value.greeting.trim() || null,
         notifyUrl: value.notifyUrl.trim() || null,
       })
@@ -365,24 +357,19 @@ function Advanced({ chat, onSaved }: { chat: ClinicWebchat; onSaved: (data: { da
       </CollapsibleTrigger>
       <CollapsibleContent>
         <form noValidate className="mt-3 flex flex-col gap-4 rounded-xl border bg-card p-4" onSubmit={onSubmit}>
-          <form.AppField name="color">
-            {(field) => (
-              <field.Group legend="Color del chat">
-                {(control) => (
-                  <ChoiceButtons
-                    id={control.id}
-                    invalid={control.invalid}
-                    aria-describedby={control.describedBy}
-                    onBlur={control.onBlur}
-                    value={field.state.value}
-                    options={COLORS}
-                    onChange={(next) => field.handleChange(next)}
-                    tone="primary"
-                  />
-                )}
-              </field.Group>
-            )}
-          </form.AppField>
+          <div className="flex items-center gap-3 rounded-xl bg-muted p-3">
+            <span aria-hidden className="size-8 shrink-0 rounded-lg bg-primary-fill" />
+            <div className="flex flex-col gap-0.5 text-sm">
+              <span className="font-semibold">Usa el color de tu marca</span>
+              {canChangeColor ? (
+                <RouterLink to="/settings" className="font-medium text-primary underline-offset-2 hover:underline">
+                  Cambiarlo en Datos de la clínica
+                </RouterLink>
+              ) : (
+                <span className="text-muted-foreground">Lo cambia quien administra la clínica, en Datos de la clínica.</span>
+              )}
+            </div>
+          </div>
           <form.AppField name="greeting">
             {(field) => (
               <field.TextareaField

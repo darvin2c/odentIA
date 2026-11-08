@@ -29,7 +29,7 @@ export async function seedWebchat(
   const now = new Date()
 
   const chat = await getClinicWebchat(tx, orgId, deps.secretsKey, ownerUserId)
-  await updateClinicWebchat(tx, orgId, deps.secretsKey, ownerUserId, { color: "#0f766e", greeting: "Hola, ¿en qué podemos ayudarte?" })
+  await updateClinicWebchat(tx, orgId, deps.secretsKey, ownerUserId, { greeting: "Hola, ¿en qué podemos ayudarte?" })
   const connectionId = chat.id
   if (chat.sites.length === 0) {
     await tx.insert(webchatSite).values([
