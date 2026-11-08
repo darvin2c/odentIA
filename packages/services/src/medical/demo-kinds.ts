@@ -14,8 +14,9 @@ const GENERAL_EXPENSES: DemoKindRecipe["expenses"] = [
   {
     category: "Personal",
     concept: "Planilla del mes",
-    cents: 3_200_00,
-    perStaffCents: 1_800_00,
+    cents: 2_400_00,
+    // El sueldo base de cada médico, con su nombre (va junto a su comisión).
+    perStaffCents: 800_00,
     day: 28,
   },
   { category: "Alquiler", concept: "Alquiler del local", rent: true, day: 1 },
