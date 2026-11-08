@@ -254,7 +254,12 @@ function PlanPhasesGroup({
                             // Con una revisión enviada, lo que espera es el precio nuevo.
                             item.newTermsPending ? "Precio nuevo por responder" : planDecisionLabel(item.decisionStatus),
                             // Lo de una sola sesión no dice «0 de 1 sesión»: solo lo de varias.
-                            planned > 1 || sessions > planned ? `${sessions} de ${plural(planned, "sesión", "sesiones")}` : null,
+                            // Lo que se terminó antes de sus previstas lo dice: por eso no ofrece «Falta otra sesión».
+                            item.status === "realizado" && sessions < planned
+                              ? `Se terminó en la sesión ${sessions} de ${planned}`
+                              : planned > 1 || sessions > planned
+                                ? `${sessions} de ${plural(planned, "sesión", "sesiones")}`
+                                : null,
                             !closed && next ? NEXT_ACTION_LABELS[next] : null,
                           ]
                             .filter(Boolean)
@@ -299,8 +304,14 @@ function PlanPhasesGroup({
                         ) : null}
                         {/* Lo que se terminó al llegar a sus sesiones previstas puede necesitar otra (ADR 0164). */}
                         {canWrite && item.status === "realizado" && sessions >= planned && sessions > 0 ? (
-                          <Button type="button" size="sm" variant="ghost" onClick={() => setReopening(item)}>
-                            Falta otra sesión
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            aria-label={`Falta otra sesión en «${item.title}»`}
+                            onClick={() => setReopening(item)}
+                          >
+                            Falta otra sesión…
                           </Button>
                         ) : null}
                         <Button
@@ -456,7 +467,7 @@ function AnotherSessionDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>¿Le falta otra sesión?</AlertDialogTitle>
           <AlertDialogDescription>
-            {`${item.title}${site(item)} vuelve a «En curso» y queda la sesión ${next} por hacer: sale en «Por agendar» para darle la cita. Lo firmado y lo cobrado no cambian.`}
+            {`${item.title}${site(item)} vuelve a «En curso» y queda la sesión ${next} por agendar. Lo firmado y lo cobrado no cambian.`}
           </AlertDialogDescription>
         </AlertDialogHeader>
         {reopen.error ? (

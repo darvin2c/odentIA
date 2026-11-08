@@ -1790,20 +1790,21 @@ function OfferFields({
           )}
         </form.AppField>
       </div>
-      <form.AppField name="usualSessions">
-        {(field) => (
-          <field.TextField
-            id={`${idPrefix}-sesiones`}
-            label="Sesiones habituales"
-            description="Con cuántas nace en el plan al indicarlo; en cada paciente se pueden cambiar. Lo ya indicado no cambia."
-            type="number"
-            inputMode="numeric"
-            min={1}
-            max={60}
-            inputClassName="w-28"
-          />
-        )}
-      </form.AppField>
+      <div className="grid grid-cols-2 gap-3">
+        <form.AppField name="usualSessions">
+          {(field) => (
+            <field.TextField
+              id={`${idPrefix}-sesiones`}
+              label="Sesiones habituales"
+              description="Con cuántas nace al indicarlo; lo ya indicado no cambia."
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={60}
+            />
+          )}
+        </form.AppField>
+      </div>
       <form.AppField name="billingMode">
         {(field) => (
           <field.Group

@@ -622,7 +622,7 @@ function AddServicesPage() {
       },
       {
         id: "duracion",
-        header: "Duración",
+        header: "Duración y sesiones",
         // Principal: en teléfono también se pone la duración, junto al precio.
         meta: { view: { primary: true } },
         cell: ({ row }) => {
