@@ -3,6 +3,7 @@ import { and, eq, inArray, notInArray, sql } from "drizzle-orm"
 import type { Db } from "../client.js"
 import {
   type CatalogLibrary,
+  librarySessions,
   type ProcedureLists,
   splitHead,
   strictLines,
@@ -13,7 +14,8 @@ import { treatmentTemplate } from "../schema/clinical.js"
  * La biblioteca de latidIA (issue 229, entrega 8): `seeds/biblioteca_medica.csv`,
  * los servicios de un consultorio de atención primaria con nombre propio, su
  * tipo y si van en «Más usados»; `seeds/biblioteca_medica_codigos.csv`, el
- * código de cada uno en cada lista. Todo es de ámbito general: la parte del
+ * código de cada uno en cada lista; `seeds/biblioteca_medica_sesiones.csv`, las
+ * sesiones habituales de los que suelen llevar más de una (ADR 0164). Todo es de ámbito general: la parte del
  * cuerpo se escribe (decisión 4). Solo toca lo suyo (`product = 'medical'`):
  * la biblioteca de odentIA se siembra en la misma transacción.
  */
@@ -72,6 +74,7 @@ export const medicalLibrary: CatalogLibrary = {
     }
 
     const ownKeys = templates.map((t) => t.key)
+    const sessions = librarySessions("biblioteca_medica_sesiones.csv", keys)
     const ours = eq(treatmentTemplate.product, "medical")
     return {
       keys: ownKeys,
@@ -81,8 +84,8 @@ export const medicalLibrary: CatalogLibrary = {
         for (const t of templates) {
           await tx.execute(
             sql`insert into "treatment_template"
-            ("key", "name", "specialty", "scope", "product", "is_common", "coded_only", "is_active", "version")
-            values (${t.key}, ${t.name}, ${t.kind}, 'general', 'medical', ${t.common}, false, true, 1)
+            ("key", "name", "specialty", "scope", "product", "is_common", "coded_only", "usual_sessions", "is_active", "version")
+            values (${t.key}, ${t.name}, ${t.kind}, 'general', 'medical', ${t.common}, false, ${sessions.get(t.key) ?? 1}, true, 1)
             on conflict ("key") do update set
               "name" = excluded."name",
               "specialty" = excluded."specialty",
@@ -90,6 +93,8 @@ export const medicalLibrary: CatalogLibrary = {
               "product" = excluded."product",
               "is_common" = excluded."is_common",
               "coded_only" = excluded."coded_only",
+              -- Las sesiones habituales son una sugerencia: no suben la versión.
+              "usual_sessions" = excluded."usual_sessions",
               "is_active" = true,
               "version" = "treatment_template"."version" + (
                 ("treatment_template"."name", "treatment_template"."specialty", "treatment_template"."scope")

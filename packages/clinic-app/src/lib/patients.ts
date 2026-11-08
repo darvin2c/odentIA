@@ -536,6 +536,8 @@ export interface PlanItem {
   path?: PlanItemPath | null
   /** Aceptado, y la revisión entregada le pregunta de nuevo por su precio: vale lo aceptado mientras tanto. */
   newTermsPending?: boolean
+  /** Realizado al que le puede faltar otra sesión: el Plan ofrece «Falta otra sesión…». */
+  canAddSession?: boolean
 }
 
 export interface PlanItemPath {

@@ -111,6 +111,46 @@ export type PlanItemWithProgress = PlanItemWithDecision & {
    * (cambió su precio o sus condiciones): sigue valiendo lo aceptado mientras tanto.
    */
   newTermsPending: boolean
+  /**
+   * Realizado y le puede faltar otra sesión (ADR 0164): llegó en atenciones firmadas
+   * a sus previstas y a las sesiones con que se repartió su comisión. La pantalla
+   * ofrece «Falta otra sesión» solo entonces (`reopenPlanItemForSession`).
+   */
+  canAddSession: boolean
+}
+
+/**
+ * Lo que decide si un realizado puede volver a en curso con otra sesión: sus
+ * sesiones en atenciones firmadas (las que cuenta la comisión) y las sesiones
+ * con que se repartió la comisión de sus cargos (`commission_sessions`).
+ */
+async function sessionsForAnother(
+  tx: Db,
+  orgId: string,
+  ids: string[],
+): Promise<Map<string, { signed: number; frozen: number }>> {
+  const out = new Map<string, { signed: number; frozen: number }>()
+  if (ids.length === 0) return out
+  const rows = await tx.execute<{ id: string; signed: number; frozen: number }>(sql`
+    select item.id,
+      (select count(distinct e.id)::int from encounter_procedure ep
+        join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id
+        where ep.organization_id = item.organization_id and ep.plan_item_id = item.id and ep.voided_at is null
+          and e.status = 'finalizada' and e.voided_at is null) as signed,
+      (select coalesce(max(c.commission_sessions), 0)::int from patient_charge c
+        where c.organization_id = item.organization_id and c.plan_item_id = item.id and c.voided_at is null) as frozen
+    from treatment_plan_item item
+    where item.organization_id = ${orgId} and item.id in (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})`)
+  for (const row of rows) out.set(row.id, { signed: Number(row.signed), frozen: Number(row.frozen) })
+  return out
+}
+
+/** Si un realizado puede volver a en curso: lo firmado llega a sus previstas y a lo que repartió su comisión. */
+function anotherSessionAllowed(
+  item: { status: string; plannedSessions: number },
+  money: { signed: number; frozen: number } | undefined,
+): boolean {
+  return item.status === "realizado" && !!money && money.signed > 0 && money.signed >= Math.max(item.plannedSessions, money.frozen)
 }
 
 export type TreatmentPlanStatus = "Sin tratamientos" | "En curso" | "Completado" | "Cancelado"
@@ -148,7 +188,7 @@ export interface AddPlanItemInput {
   odontogramEntryId?: string | null
   /** Fase del plan; por defecto, la que propone la especialidad del servicio. */
   phase?: string | null
-  /** Sesiones previstas (1–60); por defecto, una. */
+  /** Sesiones previstas (1–60); por defecto, las habituales de su servicio (ADR 0164). */
   plannedSessions?: number | null
 }
 
@@ -465,12 +505,18 @@ async function withDecisions(
         )
     : []
   const newTerms = new Set(asked.map((row) => row.planItemId))
+  const another = await sessionsForAnother(
+    tx,
+    orgId,
+    items.filter((item) => item.status === "realizado").map((item) => item.id),
+  )
   return items.map((item) => ({
     ...item,
     decision: item.decisionStatus as PlanItemDecision,
     sessionsDone: sessions.get(item.id) ?? 0,
     path: paths.get(item.id) ?? null,
     newTermsPending: newTerms.has(item.id),
+    canAddSession: anotherSessionAllowed(item, another.get(item.id)),
   }))
 }
 
@@ -831,7 +877,9 @@ export async function addPlanItem(
   // La fase la propone la especialidad de la clínica por su clave de la biblioteca.
   const phase =
     assertPhase(hooks, input.phase) ?? hooks.phaseFor(await serviceKindOf(tx, orgId, service))
-  const plannedSessions = assertPlannedSessions(input.plannedSessions) ?? 1
+  // Nace con las sesiones habituales de su servicio (ADR 0164): una endodoncia
+  // de dos no se termina en su primera firma (ADR 0161).
+  const plannedSessions = assertPlannedSessions(input.plannedSessions) ?? service.usualSessions
   const sortOrder = await nextSortOrder(tx, orgId, plan.id)
   const [row] = await tx
     .insert(treatmentPlanItem)
@@ -936,6 +984,8 @@ export async function addPlanItemsBatch(
         serviceId: service.id,
         budgetId: null,
         phase,
+        // Cada pieza nace con las sesiones habituales de su servicio, como al indicar una (ADR 0164).
+        plannedSessions: service.usualSessions,
         sortOrder: sortOrder++,
         scope,
         ...itemSite,
@@ -1041,6 +1091,8 @@ export async function updatePlanItem(
       // vigente; los históricos (presupuestos presentados/decididos,
       // atenciones) nunca se mutan.
       set.codings = await resolveServiceCodings(tx, (await orgClinicalProfile(tx, orgId)).services, service)
+      // Sin sesiones hechas, también las sesiones previstas son las del servicio nuevo (ADR 0164).
+      if (current.status === "pendiente" || current.status === "programado") set.plannedSessions = service.usualSessions
       fields.push("serviceId")
     }
   }
@@ -1272,6 +1324,83 @@ export async function setPlanItemStatus(
       planItemId: updated.id,
     })
   return { ...(await withPlanItemParts(tx, orgId, updated)), decision: updated.decisionStatus as PlanItemDecision }
+}
+
+/**
+ * «Falta otra sesión» sobre lo ya realizado (ADR 0164): la salida de un
+ * tratamiento que se terminó al firmar porque llegó a sus sesiones previstas
+ * («Sí, terminar» viene elegido, ADR 0161) y necesita otra. Vuelve a en curso
+ * con una sesión prevista más que las hechas. No toca lo firmado ni lo cobrado:
+ * no hay cargo nuevo, el presupuesto aceptado sigue con su tope y lo que dejó
+ * en el odontograma se queda (se dibuja una sola vez por tratamiento). Solo si
+ * llegó a sus previstas: uno que se terminó antes («Completar») se terminó a
+ * propósito, y reabrirlo devolvería a «por asignar» la comisión que ya se dio a
+ * su última sesión (`unassignedCommissionSessions`).
+ */
+export async function reopenPlanItemForSession(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  itemId: string,
+): Promise<PlanItemWithProgress> {
+  await requirePatient(tx, orgId, patientId)
+  const [found] = await tx
+    .select({ planId: treatmentPlanItem.planId })
+    .from(treatmentPlanItem)
+    .where(
+      and(
+        eq(treatmentPlanItem.id, itemId),
+        eq(treatmentPlanItem.organizationId, orgId),
+        eq(treatmentPlanItem.patientId, patientId),
+      ),
+    )
+  if (!found) throw notFound("Tratamiento")
+  await lockPlanRow(tx, orgId, patientId, found.planId)
+  const [item] = await tx
+    .select()
+    .from(treatmentPlanItem)
+    .where(and(eq(treatmentPlanItem.id, itemId), eq(treatmentPlanItem.organizationId, orgId)))
+    .for("update")
+  if (!item) throw notFound("Tratamiento")
+  if (item.status !== "realizado")
+    throw conflict("ITEM_NOT_DONE", "Solo a un tratamiento realizado le puede faltar otra sesión")
+  const [progress] = await withDecisions(tx, orgId, [item])
+  const done = progress?.sessionsDone ?? 0
+  // La comisión cuenta solo atenciones firmadas y se reparte con las sesiones que su
+  // cargo congeló (`commission_sessions`): si lo firmado no llega a ellas, lo que sobró
+  // ya se le dio a la última sesión y reabrir lo devolvería a «por asignar».
+  const money = (await sessionsForAnother(tx, orgId, [item.id])).get(item.id) ?? { signed: 0, frozen: 0 }
+  if (money.signed < done)
+    throw conflict(
+      "ITEM_SESSION_UNSIGNED",
+      "Su última sesión está en una atención sin firmar: fírmala y vuelve a intentarlo",
+    )
+  if (!anotherSessionAllowed(item, money)) {
+    const planned = Math.max(item.plannedSessions, money.frozen)
+    throw conflict(
+      "ITEM_FINISHED_EARLY",
+      `Se terminó en la sesión ${money.signed}, antes de sus ${planned} previstas: no se reabre para no mover lo ya repartido`,
+    )
+  }
+  if (done + 1 > 60) throw invalidField("plannedSessions", "Las sesiones previstas van de 1 a 60")
+  const now = new Date()
+  await tx
+    .update(treatmentPlanItem)
+    .set({ status: "en_curso", completedAt: null, plannedSessions: done + 1, updatedAt: now })
+    .where(eq(treatmentPlanItem.id, item.id))
+  await audit(tx, orgId, actorUserId, "plan.item_reopened_for_session", "treatment_plan_item", item.id, {
+    patientId,
+    planId: item.planId,
+    sessionsDone: done,
+    from: item.plannedSessions,
+    to: done + 1,
+    completedAt: item.completedAt?.toISOString() ?? null,
+  })
+  const [updated] = await tx.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.id, item.id))
+  if (!updated) throw notFound("Tratamiento")
+  const [listed] = await withDecisions(tx, orgId, [updated])
+  return listed as PlanItemWithProgress
 }
 
 export async function revisePlanItem(

@@ -2141,6 +2141,11 @@ const seedOffers: Array<{
   priceCents: number
   durationMin: number
   billingMode?: "treatment" | "session"
+  /**
+   * Sesiones habituales (ADR 0164): con cuántas nace al indicarlo. La biblioteca
+   * sugiere 1 para la endodoncia; esta clínica hace la de molar en dos.
+   */
+  usualSessions?: number
   /** Cómo dice el precio el agente: la semilla muestra las tres formas (ADR 0021). */
   priceDisclosure: "exacto" | "desde" | "evaluacion"
   /** Qué deja en la pieza al completarse: lo tratado queda dibujado (fase 3, paso 5). */
@@ -2188,6 +2193,7 @@ const seedOffers: Array<{
     scope: "tooth",
     priceCents: 65000,
     durationMin: 90,
+    usualSessions: 2,
     priceDisclosure: "desde",
     leavesFinding: { condition: "root_canal_treatment", variant: "root_canal" },
   },
@@ -2199,6 +2205,8 @@ const seedOffers: Array<{
     scope: "tooth",
     priceCents: 90000,
     durationMin: 60,
+    // Tallado e impresión, y después el cementado.
+    usualSessions: 2,
     priceDisclosure: "evaluacion",
     leavesFinding: { condition: "crown", variant: "metal_free" },
   },
@@ -2478,8 +2486,7 @@ const endo46 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   toothNumber: 46,
   diagnosisCode: DX.pulpitis,
   detail: "Endodoncia pieza 46",
-  // Endodoncia en dos sesiones (apertura y obturación): ejercita el progreso.
-  plannedSessions: 2,
+  // Nace en dos sesiones (apertura y obturación), las habituales de su servicio: ejercita el progreso.
 })
 const corona46 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   serviceId: serviceIdA("CORONA"),
