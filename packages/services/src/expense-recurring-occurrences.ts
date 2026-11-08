@@ -262,6 +262,9 @@ export interface MonthSalary {
   dueCents: number
   /** Cuándo se pagó lo último del mes (nulo si falta algo o nada se pagó). */
   paidAt: Date | null
+  /** Cuándo vence lo que falta pagar (`YYYY-MM-DD`, lo más próximo) y en qué sede se paga. */
+  dueOn: string | null
+  dueBranchId: string | null
   items: Array<{ recurringId: string; concept: string; cents: number; paidAt: Date | null }>
 }
 
@@ -296,6 +299,8 @@ export async function salaryOfMonth(
             return at && (!latest || at > latest) ? at : latest
           }, null)
         : null,
+    dueOn: due.map((item) => item.dueOn).sort()[0] ?? null,
+    dueBranchId: due.sort((a, b) => a.dueOn.localeCompare(b.dueOn))[0]?.template.branchId ?? null,
     items: list.map((item) => ({
       recurringId: item.template.id,
       concept: item.template.concept,
