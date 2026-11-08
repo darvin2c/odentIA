@@ -260,17 +260,18 @@ export function pendingItems(view: PersonalLinkView): PendingItem[] {
       abre: "firma",
       id: consent.id,
       title: name ? `Consentimiento de ${name}` : "Tu consentimiento",
-      badge: consent.signable ? "Por firmar" : "Para leer",
+      badge: consent.signable || consent.why === "sin-documento" ? "Por firmar" : "Para leer",
       // U6: lo que se consiente y para qué cita, solo aquí, detrás del enlace.
       text:
         consent.procedureRef && consent.procedureRef !== consent.title
           ? `${consent.title} · ${consent.procedureRef}`
           : consent.title,
-      detail: consent.appointment
-        ? `${name ? "Para su cita" : "Para tu cita"} del ${withPeriod(whenText(consent.appointment))}${consent.signable ? "" : " Lo firmas en la cita."}`
-        : consent.signable
-          ? null
-          : "Lo firmas en la cita.",
+      detail: [
+        consent.appointment ? `${name ? "Para su cita" : "Para tu cita"} del ${withPeriod(whenText(consent.appointment))}` : null,
+        consent.signable ? null : consent.why === "sin-documento" ? "Primero completa tus datos." : "Lo firmas en la cita.",
+      ]
+        .filter(Boolean)
+        .join(" ") || null,
       action: consent.signable ? "Leer y firmar" : "Leer",
       next: consent.signable ? `Leer y firmar: ${consent.title}` : `Leer: ${consent.title}`,
       at: consent.appointment?.startsAt ?? cita,
@@ -812,6 +813,7 @@ export function PersonalLinkPage({
           slug={slug}
           token={token}
           consentId={consent.id}
+          completeData={screenLink(token, { abre: "datos" })}
           onSigned={() => {
             refresh()
             setDone({

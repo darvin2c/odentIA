@@ -1,4 +1,4 @@
-import { Checkbox } from "@odentia/ui"
+import { Button, Checkbox } from "@odentia/ui"
 import {
   ErrorState,
   FormChoiceField,
@@ -10,6 +10,7 @@ import {
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery } from "@tanstack/react-query"
+import type { ReactElement } from "react"
 import { z } from "zod"
 import { ApiError } from "../../lib/api"
 import { fetchLinkConsent, fetchLinkQuestionnaire, type LinkConsent, signLinkConsent, submitLinkQuestionnaire } from "../../lib/booking-link"
@@ -29,6 +30,10 @@ function problemOf(error: unknown, fallback: string): string {
  * menor, que lo firma su madre, padre o tutor; a la persona, «Este lo firmas en tu cita».
  */
 export function unsignableWords(consent: Pick<LinkConsent, "why" | "speaksTo" | "patientFirstName">): { notice: string; inPlace: string } {
+  // Sin documento en su ficha: lo pone en «Tus datos» y después firma aquí (decidido el 8 nov).
+  if (consent.why === "sin-documento") {
+    return { notice: "Para firmar desde aquí, primero completa tus datos.", inPlace: "Firmas aquí cuando completes tus datos" }
+  }
   if (consent.speaksTo === "representante") {
     const name = consent.patientFirstName || "tu familiar"
     return { notice: `Este lo firmas tú en la cita de ${name}, antes de empezar.`, inPlace: `Este lo firmas tú en la cita de ${name}` }
@@ -56,7 +61,20 @@ export function appointmentWords(appointment: { startsAt: string; timeZone: stri
  * dice «Lo firmas en tu cita»: es la misma hoja, nunca otra dibujada aparte.
  * Al firmar avisa a la página (`onSigned`), que dice «Listo» y lo que sigue.
  */
-export function LinkConsentStep({ slug, token, consentId, onSigned }: { slug: string; token: string; consentId: string; onSigned: () => void }) {
+export function LinkConsentStep({
+  slug,
+  token,
+  consentId,
+  onSigned,
+  completeData,
+}: {
+  slug: string
+  token: string
+  consentId: string
+  onSigned: () => void
+  /** El enlace a «Tus datos», para quien no puede firmar porque a su ficha le falta el documento. */
+  completeData?: ReactElement
+}) {
   const query = useQuery({ queryKey: ["link-consent", slug, token, consentId], queryFn: () => fetchLinkConsent(slug, token, consentId), retry: false })
   const sign = useMutation({
     retry: false,
@@ -105,9 +123,15 @@ export function LinkConsentStep({ slug, token, consentId, onSigned }: { slug: st
         <div className="flex flex-col gap-1 rounded-xl border border-warning/30 bg-warning-soft px-4 py-3">
           <p className="font-semibold">{words.notice}</p>
           <p className="text-sm">
-            Puedes leerlo ahora con calma.
-            {consent.why === "sin-fecha" || consent.why === "sin-documento" ? " Los datos que nos faltan los completamos contigo en la clínica." : ""}
+            {consent.why === "sin-documento"
+              ? "Te pedimos tu documento una vez en «Tus datos»; al firmar lo vuelves a escribir para comprobar que eres tú."
+              : `Puedes leerlo ahora con calma.${consent.why === "sin-fecha" ? " Los datos que nos faltan los completamos contigo en la clínica." : ""}`}
           </p>
+          {consent.why === "sin-documento" && completeData ? (
+            <Button className="mt-2 min-h-11 self-start" render={completeData}>
+              Completar mis datos
+            </Button>
+          ) : null}
         </div>
         <ConsentSheet
           className="-mx-2 sm:mx-0"
