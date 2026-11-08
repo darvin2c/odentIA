@@ -21,7 +21,6 @@ import {
   type ConsentSource,
 } from "@odentia/db/schema/automation"
 import { clinicalFollowUp, patient, patientContact, treatmentBudget } from "@odentia/db/schema/clinical"
-import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import {
   agentConfig,
   channelConnection,
@@ -32,7 +31,7 @@ import {
 } from "@odentia/db/schema/crm"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lte, or, type SQL, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gte, inArray, isNull, lte, or, type SQL, sql } from "drizzle-orm"
 import { adminLineOf, DEFAULT_HOURS_BEFORE, type LineTiming, lineOfJobKind } from "./admin-lines.js"
 import { confirmationReply, type ConfirmedItem } from "./appointment-confirm-words.js"
 import { APPOINTMENT_CALENDAR_FILENAME, APPOINTMENT_CALENDAR_MIME, appointmentCalendarInvite } from "./appointment-calendar.js"
@@ -63,8 +62,7 @@ import { clinicName, type ComposedMessage, composeJobMessage, previewMessageRout
 import { permissionRefusal, writingTimeFor } from "./message-gate.js"
 import { consentStatusOf, mayWriteFirst } from "./message-permission.js"
 import { issuePersonalLink } from "./booking-links.js"
-import { listBudgets } from "./budgets.js"
-import { pendingQuestionnaire } from "./portal-questionnaire.js"
+import { patientTodo, remoteTodoCount } from "./patient-todo.js"
 import { answerBudgetButton } from "./budget-send.js"
 import { appointmentServesControlSql, TO_SCHEDULE_STATUSES, toScheduleSql } from "./to-schedule.js"
 import { applyTemplateStatuses, reviewConnectionTemplates, type TemplateDeps } from "./channel-templates.js"
@@ -83,7 +81,6 @@ import { patientCreditSql } from "./payments.js"
 import { findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
 import { lapsedToInvite, recordInvitation } from "./return-invites.js"
 import { updateOpportunity } from "./opportunities.js"
-import { getPatientMissingData, patientHealthToAsk } from "./patient-registration.js"
 import { personalLinkRef } from "./personal-link-token.js"
 import { contactDecides, listDecisionRecipients, patientAge, representationEnded } from "./responsibilities.js"
 import { clinicOriginOf, personalLinkMessageUrl, personalLinkUrl, publicLinksConfigured } from "./public-links.js"
@@ -1055,13 +1052,17 @@ async function enabledLine(tx: Db, orgId: string, kind: AutomationKind): Promise
  * B2: por dónde le llegarán a esta persona los recordatorios de su cita, solo si de verdad
  * salen: «Recordar la cita» prendida, Sofi y Argos encendidos y sin pausa, sin haberlos
  * apagado y con una vía (`previewMessageRoute`, la misma regla de cada envío). Nulo: no le
- * llegarán, y ni la página ni recepción lo prometen.
+ * llegarán, y ni la página ni recepción lo prometen. Con `patientId`, los recordatorios
+ * salen a quien los recibe por el paciente (`preferredContact`): si no es esta persona (el
+ * padre abre el enlace y le llegan a la madre), a ella no le llegan y es nulo.
  */
 export async function appointmentRemindersVia(
   tx: Db,
   orgId: string,
   contactId: string,
+  patientId: string | null = null,
 ): Promise<"whatsapp" | "correo" | null> {
+  if (patientId && (await preferredContact(tx, orgId, patientId)) !== contactId) return null
   if (!(await enabledLine(tx, orgId, "recordatorio_cita"))) return null
   const runtime = await adminRuntime(tx, orgId)
   if (!runtime.receptionOn || !runtime.adminOn || runtime.agentsPaused) return null
@@ -1887,36 +1888,19 @@ async function hasFutureAppointment(tx: Db, orgId: string, patientId: string, no
 
 /**
  * Lo que tiene por hacer antes de su cita quien decide por el paciente (entrega 2,
- * decisión 4): sus datos, los consentimientos que se le enviaron a firmar, el
- * cuestionario y los presupuestos que esperan su respuesta. Solo se cuentan.
+ * decisión 4), con la definición de la página (`patientTodo`): solo se cuenta lo que se
+ * hace desde el teléfono (`remoteTodoCount`). Un consentimiento que se firma en la cita no.
  */
 export async function pendingBeforeAppointment(
   tx: Db,
   orgId: string,
   patientId: string,
+  contactId: string,
   options: { health?: boolean } = {},
 ): Promise<{ data: boolean; total: number }> {
   // La salud es opcional: se pregunta al reservar, y el recordatorio no insiste por ella.
-  const data =
-    (await getPatientMissingData(tx, orgId, patientId)).length > 0 ||
-    (options.health === true && (await patientHealthToAsk(tx, orgId, patientId)))
-  const [consents] = await tx
-    .select({ n: sql<number>`count(*)::int` })
-    .from(consentDocument)
-    .where(
-      and(
-        eq(consentDocument.organizationId, orgId),
-        eq(consentDocument.patientId, patientId),
-        eq(consentDocument.status, "pendiente"),
-        isNotNull(consentDocument.linkSentAt),
-        isNull(consentDocument.personSignedAt),
-      ),
-    )
-  const questionnaire = (await pendingQuestionnaire(tx, orgId, patientId)) ? 1 : 0
-  const budgets = (await listBudgets(tx, orgId, patientId)).filter(
-    (budget) => budget.status !== "borrador" && budget.awaitsAnswer,
-  ).length
-  return { data, total: (data ? 1 : 0) + (consents?.n ?? 0) + questionnaire + budgets }
+  const todo = await patientTodo(tx, orgId, { patientId, contactId, withAppointment: true })
+  return remoteTodoCount(todo, options)
 }
 
 /** «3 cosas», «1 cosa». */
@@ -1956,7 +1940,7 @@ async function pendingNoticesFor(
   if (!row) return []
   // Solo a quien puede hacerlo: a otro, su enlace no le mostraría nada que hacer.
   if (!(await contactDecides(tx, orgId, row.patientId, contactId))) return []
-  const pending = await pendingBeforeAppointment(tx, orgId, row.patientId, {
+  const pending = await pendingBeforeAppointment(tx, orgId, row.patientId, contactId, {
     health: key === APPOINTMENT_DATA_NOTICE_KEY,
   })
   // Un aviso por cita: solo el recordatorio los cuenta (los envíos del equipo salen al momento).

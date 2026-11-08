@@ -28,7 +28,7 @@ import {
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { contact } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, or, sql } from "drizzle-orm"
 import { appointmentRemindersVia, getMessagePermissions, setConsent, setMessageChoice } from "./automation.js"
 import {
   CONSENT_TO_SIGN_MESSAGE_KEY,
@@ -53,7 +53,6 @@ import {
   clinicNameOf,
   contactHandlesAppointment,
   linkReplyVia,
-  schedulableItemsOf,
   issuePersonalLink,
   linkContactFirstName,
   linkExpired,
@@ -66,7 +65,7 @@ import {
   tellConversation,
 } from "./booking-links.js"
 import { serviceRecipient } from "./budget-send.js"
-import { listBudgets } from "./budgets.js"
+import type { BudgetWithTotals } from "./budgets.js"
 import { currentCatalogMessage } from "./clinic-messages.js"
 import {
   type DeclaredPatientHealthInput,
@@ -90,7 +89,8 @@ import { findOrgCountry, findOrgLocale, orgProduct } from "./locale.js"
 import { openRoute, previewRoute } from "./message-gate.js"
 import { consentStatusOf } from "./message-permission.js"
 import { joinPatientPerson } from "./patient-identity.js"
-import { clinicAsksHealth, getPatientMissingData, getPatientRegistrationConfig } from "./patient-registration.js"
+import { getPatientMissingData, getPatientRegistrationConfig, patientHealthToAsk } from "./patient-registration.js"
+import { consentsToSign, hasTodo, type PatientTodo, patientTodo } from "./patient-todo.js"
 import { privacyNoticeOf } from "./privacy-notice.js"
 import {
   patientOrganizationToday,
@@ -269,8 +269,9 @@ async function missingOf(
 }
 
 /**
- * Su salud se le pregunta (opcional) solo si la clínica la pregunta y nadie la
- * registró en su ficha, y solo a quien decide por el paciente.
+ * Su salud se le pregunta (opcional) solo si la clínica la pregunta, nadie la registró en su
+ * ficha y nunca envió «Tus datos» (`patientHealthToAsk`, la misma regla que el recordatorio),
+ * y solo a quien decide por el paciente.
  */
 async function healthPendingOf(
   tx: Db,
@@ -278,8 +279,22 @@ async function healthPendingOf(
   link: ResolvedPersonalLink,
 ): Promise<boolean> {
   if (!link.patientId || !link.decides || link.row.dataSubmittedAt || link.expired) return false
-  if (!(await clinicAsksHealth(tx, orgId))) return false
-  return healthNeverRecorded(tx, orgId, link.patientId)
+  return patientHealthToAsk(tx, orgId, link.patientId)
+}
+
+/**
+ * Lo que tiene por hacer (`patientTodo`, la definición que comparten la página, el recordatorio
+ * y «Enviarme uno nuevo»), con lo que sabe este enlace: quién lo abre, si ya envió sus datos y
+ * si muestra una cita por venir. Solo para quien decide por el paciente.
+ */
+async function todoOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<PatientTodo | null> {
+  if (!link.patientId || !link.decides || link.expired) return null
+  return patientTodo(tx, orgId, {
+    patientId: link.patientId,
+    contactId: link.row.contactId,
+    dataSubmitted: link.row.dataSubmittedAt !== null,
+    withAppointment: link.appointment !== null && link.appointment.status !== "cancelada",
+  })
 }
 
 /** «DNI ••••8912»: el documento abreviado, para que reconozca el suyo sin mostrarlo entero. */
@@ -350,44 +365,15 @@ async function pendingOf(
   }
 }
 
-async function budgetsOf(
-  tx: Db,
-  orgId: string,
-  link: ResolvedPersonalLink,
-): Promise<PortalBudgetView[]> {
-  if (!link.patientId || !link.decides || link.expired) return []
-  const budgets = (await listBudgets(tx, orgId, link.patientId)).filter(
-    (budget) => budget.status !== "borrador" && budget.awaitsAnswer,
-  )
+async function budgetViews(tx: Db, orgId: string, budgets: BudgetWithTotals[]): Promise<PortalBudgetView[]> {
   if (budgets.length === 0) return []
-  // El último enviado primero: es el que abre `abre=presupuesto` sin `id` (el botón fijo de la
-  // plantilla aprobada). Lo enviado se sabe por su traza (`financial_document.sent`); lo que nunca
-  // se envió (entregado en mano) va después, el último presentado primero.
-  const ids = budgets.map((budget) => budget.id)
-  const sentRows = await tx
-    .select({
-      id: sql<string>`${auditEvent.metadata}->>'documentId'`,
-      at: sql<Date>`max(${auditEvent.createdAt})`.mapWith(auditEvent.createdAt),
-    })
-    .from(auditEvent)
-    .where(
-      and(
-        eq(auditEvent.organizationId, orgId),
-        eq(auditEvent.action, "financial_document.sent"),
-        sql`${auditEvent.metadata}->>'documentType' = 'budget'`,
-        inArray(sql<string>`${auditEvent.metadata}->>'documentId'`, ids),
-      ),
-    )
-    .groupBy(sql`${auditEvent.metadata}->>'documentId'`)
-  const sentAt = new Map(sentRows.map((row) => [row.id, row.at.getTime()]))
-  const presented = (budget: (typeof budgets)[number]) =>
-    (budget.presentedAt ?? budget.createdAt).getTime()
-  budgets.sort(
-    (a, b) =>
-      (sentAt.get(b.id) ?? -1) - (sentAt.get(a.id) ?? -1) || presented(b) - presented(a),
-  )
   // `link.decides` ya dijo que es la propia persona o su representante.
-  const context = await portalBudgetContext(tx, orgId, ids, true)
+  const context = await portalBudgetContext(
+    tx,
+    orgId,
+    budgets.map((budget) => budget.id),
+    true,
+  )
   return budgets.map((budget) => toPortalBudget(budget, context))
 }
 
@@ -431,28 +417,21 @@ async function consentsOf(
   link: ResolvedPersonalLink,
 ): Promise<PersonalLinkConsent[]> {
   if (!link.patientId || !link.decides || link.expired) return []
-  const rows = await tx
-    .select({
-      id: consentDocument.id,
-      title: consentDocument.titleSnapshot,
-      procedureRef: consentDocument.procedureRef,
-      planItemId: consentDocument.planItemId,
-    })
-    .from(consentDocument)
-    .where(
-      and(
-        eq(consentDocument.organizationId, orgId),
-        eq(consentDocument.patientId, link.patientId),
-        eq(consentDocument.status, "pendiente"),
-        isNotNull(consentDocument.linkSentAt),
-        isNull(consentDocument.personSignedAt),
-      ),
-    )
-    // El último enviado primero: es el que abre `abre=firma` sin `id` (el botón fijo de la plantilla).
-    .orderBy(desc(consentDocument.linkSentAt), desc(consentDocument.createdAt))
+  const rows = await consentsToSign(tx, orgId, link.patientId)
   if (rows.length === 0) return []
-  // Quién firma y qué le falta no cambia de un consentimiento a otro.
-  const why = await remoteSignBlock(tx, orgId, link.patientId, link.row.contactId)
+  return consentViews(tx, orgId, link, rows, await remoteSignBlock(tx, orgId, link.patientId, link.row.contactId))
+}
+
+/** Cada consentimiento por firmar con la cita para la que es (U6) y si se firma desde aquí. */
+async function consentViews(
+  tx: Db,
+  orgId: string,
+  link: ResolvedPersonalLink,
+  rows: PatientTodo["consents"],
+  /** Quién firma y qué le falta no cambia de un consentimiento a otro. */
+  why: RemoteSignBlock | null,
+): Promise<PersonalLinkConsent[]> {
+  if (rows.length === 0) return []
   const next = link.appointment
     ? await appointmentView(tx, orgId, link.appointment.id).then((view) =>
         view && !view.cancelled ? { startsAt: view.startsAt, timeZone: view.timeZone } : null,
@@ -556,17 +535,16 @@ export async function getPersonalLinkView(
   const appointment = link.appointment
     ? await appointmentView(tx, orgId, link.appointment.id)
     : null
-  const missing = await missingOf(tx, orgId, link)
-  const health = await healthPendingOf(tx, orgId, link)
-  const budgets = await budgetsOf(tx, orgId, link)
-  const consents = await consentsOf(tx, orgId, link)
-  const questionnaire = await questionnaireOf(tx, orgId, link)
+  // Lo que tiene por hacer: la misma definición que el recordatorio y «Enviarme uno nuevo».
+  const todo = await todoOf(tx, orgId, link)
+  const missing = todo && todo.missing.length > 0 ? todo.missing : null
+  const health = todo?.health ?? false
+  const budgets = todo ? await budgetViews(tx, orgId, todo.budgets) : []
+  const consents = todo ? await consentViews(tx, orgId, link, todo.consents, todo.signBlock) : []
+  const questionnaire = todo?.questionnaire ?? null
   const messages = await messagesOf(tx, orgId, link)
   // M3: lo aceptado y sin cita, a quien decide por el paciente.
-  const toSchedule =
-    link.patientId !== null && link.decides && !link.expired
-      ? await schedulableItemsOf(tx, orgId, link.patientId)
-      : []
+  const toSchedule = todo?.toSchedule ?? []
   const another = appointment ? await bookAnotherOf(tx, orgId, link) : null
   // Las sedes, para reservar, para agendar lo aceptado de su presupuesto (también después de responderlo) o para otra cita.
   const context =
@@ -612,7 +590,10 @@ export async function getPersonalLinkView(
     toSchedule,
     another,
     confirmVia: await linkReplyVia(tx, orgId, link.row),
-    remindersVia: link.handlesAppointment ? await appointmentRemindersVia(tx, orgId, link.row.contactId) : null,
+    // A quien abre solo se le promete si los recordatorios le llegan a él (`preferredContact`).
+    remindersVia: link.handlesAppointment
+      ? await appointmentRemindersVia(tx, orgId, link.row.contactId, link.patientId)
+      : null,
     closed: null,
     messages,
   }
@@ -1991,13 +1972,9 @@ async function ownAppointmentPassed(tx: Db, orgId: string, link: ResolvedPersona
 
 /** Le queda algo por hacer si el enlace siguiera vivo: si no, pedir otro no sirve de nada. */
 async function pendingIfFresh(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<boolean> {
-  if (!link.patientId || !link.decides) return false
-  const fresh: ResolvedPersonalLink = { ...link, expired: false }
-  if (await missingOf(tx, orgId, fresh)) return true
-  if (await healthPendingOf(tx, orgId, fresh)) return true
-  if ((await budgetsOf(tx, orgId, fresh)).length > 0) return true
-  if ((await consentsOf(tx, orgId, fresh)).length > 0) return true
-  return (await schedulableItemsOf(tx, orgId, link.patientId)).length > 0
+  // Lo mismo que la página le mostraría (`hasTodo`), como si el enlace siguiera vivo.
+  const todo = await todoOf(tx, orgId, { ...link, expired: false })
+  return todo !== null && hasTodo(todo)
 }
 
 /** Por qué ya no sirve (la página lo dice con su `EmptyState`) y si puede pedir uno nuevo. */

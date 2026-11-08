@@ -23,6 +23,7 @@ import { confirmAppointmentByContact, confirmProposalByPhone, createProposal } f
 import { AUTOMATION_MESSAGES, type AutomationMessageKey, LINK_RECEIVED_MESSAGE, replyId } from "./automation-messages.js"
 import {
   applyTemplateUpdates,
+  appointmentRemindersVia,
   automationReplyOf,
   BUDGET_HOLD,
   cancelAppointmentByToken,
@@ -32,6 +33,7 @@ import {
   getMessagePermissions,
   getPublicLinkInfo,
   handleAutomationReply,
+  pendingBeforeAppointment,
   preferredContact,
   listBudgetHeldJobs,
   reconcileDeliveries,
@@ -413,6 +415,8 @@ describe("por dónde le llega a cada persona", () => {
     const c = await clinic({ approved: ["recordatorio_cita", "recordatorio_cita_pendientes"] })
     await ruleOn(c, "recordatorio_cita", new Date(NOW.getTime() - HOUR), { hoursBefore: [24] })
     const p = await person(c, "Lucía Paredes", { consent: ["recordatorio"] })
+    // Con su fecha de nacimiento y su documento: los consentimientos los firma desde su teléfono.
+    await ownerDb.update(contact).set({ birthDate: "1990-03-03", docType: "DNI", docNumber: "41234567" }).where(eq(contact.id, p.contactId))
     await appointmentFor(c, p.patientId, new Date(NOW.getTime() + 24 * HOUR))
     await consentSentToSign(c, p.patientId)
     await run(c, (tx) => syncAppointmentReminders(tx, c.orgId, NOW))
@@ -420,10 +424,24 @@ describe("por dónde le llega a cada persona", () => {
     const [job] = await jobsOf(c)
     const sent = await messageOf(job!.sentMessageId)
     expect(sent).toMatchObject({ contentType: "template", templateName: "odentia_antes_de_tu_cita_v1" })
-    // Sus datos y el consentimiento: dos cosas, sin decir cuáles.
+    // Lo que le falta de sus datos y el consentimiento: dos cosas, sin decir cuáles.
     expect((sent.templateParams as string[])[3]).toBe("2 cosas")
     expect(sent.body).toMatch(/tienes 2 cosas por hacer\. Lo ves todo aquí/)
     expect(sent.body).not.toMatch(/consentimiento|Exodoncia|38/i)
+  })
+
+  it("«Antes de tu cita» no cuenta el consentimiento que solo se firma en la cita: sin fecha ni documento, solo sus datos", async () => {
+    const c = await clinic({ approved: ["recordatorio_cita", "recordatorio_cita_pendientes", "recordatorio_cita_datos"] })
+    await ruleOn(c, "recordatorio_cita", new Date(NOW.getTime() - HOUR), { hoursBefore: [24] })
+    const p = await person(c, "Pedro Ríos", { consent: ["recordatorio"] })
+    await appointmentFor(c, p.patientId, new Date(NOW.getTime() + 24 * HOUR))
+    await consentSentToSign(c, p.patientId)
+    expect(await run(c, (tx) => pendingBeforeAppointment(tx, c.orgId, p.patientId, p.contactId))).toEqual({ data: true, total: 1 })
+    await run(c, (tx) => syncAppointmentReminders(tx, c.orgId, NOW))
+    await deliver(c)
+    const [job] = await jobsOf(c)
+    // No le dice «2 cosas por hacer»: el consentimiento lo lee en su enlace y lo firma en la cita.
+    expect(await messageOf(job!.sentMessageId)).toMatchObject({ contentType: "template", templateName: "odentia_recordatorio_cita_datos_v1" })
   })
 
   it("«Antes de tu cita» sin aprobar: sale el de sus datos y, si no, el de siempre", async () => {
@@ -763,6 +781,24 @@ describe("como mucho un mensaje al día por persona", () => {
     await ownerDb.update(patientContact).set({ isPreferred: false }).where(eq(patientContact.contactId, grandma.contactId))
     await ownerDb.update(contact).set({ birthDate: "2000-05-01" }).where(eq(contact.id, kid.contactId))
     expect(await run(c, (tx) => preferredContact(tx, c.orgId, kid.patientId))).toBe(kid.contactId)
+  })
+
+  it("«Te escribiremos por WhatsApp» solo a quien le llegan los recordatorios del paciente, no al otro representante", async () => {
+    const c = await clinic({ approved: ["recordatorio_cita"] })
+    await ruleOn(c, "recordatorio_cita", new Date(NOW.getTime() - HOUR), { hoursBefore: [24] })
+    const mother = await person(c, "Carla Ramos", { openWindow: true })
+    const father = await person(c, "Luis Ramos", { openWindow: true })
+    const kid = await person(c, "Mateo Ramos", { whatsapp: false })
+    await ownerDb.update(contact).set({ birthDate: "2018-05-01" }).where(eq(contact.id, kid.contactId))
+    await ownerDb.update(patientContact).set({ isPreferred: false }).where(eq(patientContact.patientId, kid.patientId))
+    await ownerDb.insert(patientContact).values([
+      { organizationId: c.orgId, patientId: kid.patientId, contactId: mother.contactId, relationship: "guardian", isPreferred: true },
+      { organizationId: c.orgId, patientId: kid.patientId, contactId: father.contactId, relationship: "guardian", isPreferred: false },
+    ])
+    expect(await run(c, (tx) => preferredContact(tx, c.orgId, kid.patientId))).toBe(mother.contactId)
+    expect(await run(c, (tx) => appointmentRemindersVia(tx, c.orgId, mother.contactId, kid.patientId))).toBe("whatsapp")
+    // El padre tiene WhatsApp, pero los recordatorios de Mateo le llegan a la madre: a él no se le promete.
+    expect(await run(c, (tx) => appointmentRemindersVia(tx, c.orgId, father.contactId, kid.patientId))).toBeNull()
   })
 
   it("un seguimiento espera a mañana si la persona ya recibió algo hoy; el recordatorio de cita no espera", async () => {
