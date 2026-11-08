@@ -1,11 +1,12 @@
 /**
- * El Resumen de la ficha dice lo que pasa (QA del 6 nov y su revisión del 7):
- * el próximo control en su propia fila con «Reservar cita» aunque «Qué sigue»
- * hable del presupuesto; vencido, en «Pendientes»; a quien está hoy en la sala,
- * su cita con «Llegó» y su control cumpliéndose con la atención de hoy; una
- * atención de otro día no es «Hoy» ni tapa la reserva que viene; lo que pasó sin
- * cerrarse dice «Sin cerrar»; la cuenta dice lo devuelto; y recepción ve lo
- * suyo. Capturas a 1280 y 390 px.
+ * El Resumen de la ficha dice lo que pasa (QA del 6 nov, su revisión del 7 y la
+ * propuesta 5 de la QA del 8): «Qué sigue» es una sola lista, con su próxima
+ * cita arriba y, debajo, el presupuesto y el próximo control, cada uno con su
+ * botón; el control vencido va primero; a quien está hoy en la sala, su cita
+ * con «Llegó» y su control cumpliéndose con la atención de hoy; una atención de
+ * otro día no es «Hoy» ni tapa la reserva que viene; lo que pasó sin cerrarse
+ * dice «Sin cerrar»; la cuenta dice lo devuelto; y recepción ve lo suyo.
+ * Capturas a 1280 y 390 px.
  */
 import { randomUUID } from "node:crypto"
 import { appointment } from "@odentia/db/schema/agenda"
@@ -51,7 +52,7 @@ async function bookAppointment(owner: OwnerFixture, patientId: string, roomId: s
   }, 201)
 }
 
-test("ficha: el próximo control en el Resumen, vencido en Pendientes, y el de quien está hoy en la sala", async ({ owner, fixtureDb }, testInfo) => {
+test("ficha: «Qué sigue» junta la próxima cita, el presupuesto y el control; el vencido primero, y el de quien está hoy en la sala", async ({ owner, fixtureDb }, testInfo) => {
   test.setTimeout(180_000)
   const { page } = owner
   const slug = owner.org.slug
@@ -72,36 +73,40 @@ test("ficha: el próximo control en el Resumen, vencido en Pendientes, y el de q
     dueAt: due.toISOString(),
   }, 201)
 
-  // 1. «Qué sigue» dice el presupuesto y el control va en su propia fila, con «Reservar cita».
+  // 1. Una sola lista: arriba, que no tiene cita; debajo, el presupuesto y el control, cada uno con su botón.
   await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}`))
-  await expect(page.getByText("Entregado · espera respuesta")).toBeVisible()
-  const next = card(page, "Próximo control")
-  await expect(next).toContainText("Profilaxis semestral")
-  await expect(next).toContainText(/Toca el \d{1,2} \S+ · falta reservar la cita/)
+  const next = card(page, "Qué sigue")
+  const rows = next.getByRole("listitem")
+  await expect(next).toContainText("Sin cita por venir")
+  await expect(rows).toHaveCount(2)
+  await expect(rows.nth(0)).toContainText("Entregado · espera respuesta")
+  await expect(rows.nth(1)).toContainText("Profilaxis semestral · por reservar")
+  await expect(rows.nth(1)).toContainText(/Toca el \d{1,2} \S+/)
+  // Ya no hay tarjetas sueltas de la cita y el control, ni un «Reservar cita» repetido.
+  await expect(page.getByRole("heading", { name: "Próxima cita", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("heading", { name: "Próximo control", exact: true })).toHaveCount(0)
+  await expect(next.getByRole("button", { name: "Reservar cita", exact: true })).toHaveCount(0)
   const pending = card(page, "Pendientes")
-  await expect(pending).not.toContainText("Control vencido")
-  // «Reservar cita» no se repite en «Próxima cita»: va en la fila del control.
-  const upcoming = card(page, "Próxima cita")
-  await expect(upcoming).toContainText("Sin cita por venir")
-  await expect(upcoming.getByRole("button", { name: "Reservar cita" })).toHaveCount(0)
-  await views("resumen-proximo-control")
-  // «Reservar cita» abre la reserva del control ahí mismo.
-  await next.getByRole("button", { name: "Reservar cita" }).click()
+  await expect(pending).not.toContainText("Profilaxis semestral")
+  await views("resumen-que-sigue")
+  // «Reservar el control» abre su reserva ahí mismo.
+  await rows.nth(1).getByRole("button", { name: "Reservar el control" }).click()
   const scheduling = surface(page, { name: "Programar control" })
   await expect(scheduling).toBeVisible()
   await scheduling.getByRole("button", { name: /cerrar|cancelar/i }).first().click()
   await expect(scheduling).toBeHidden()
 
-  // 2. Vencido y sin cita: sale en «Pendientes» y ya no en su fila; el Plan dice «Vencido».
+  // 2. Vencido y sin cita: va primero en la lista, dicho en palabras, y no en «Pendientes»; el Plan dice «Vencido».
   await fixtureDb
     .update(clinicalFollowUp)
     .set({ dueAt: new Date(Date.now() - 3 * DAY), createdAt: new Date(Date.now() - 40 * DAY) })
     .where(eq(clinicalFollowUp.id, control.id))
   await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}`))
-  await expect(pending).toContainText("Control vencido: Profilaxis semestral")
-  await expect(pending).toContainText(/Tocaba el \d{1,2} \S+ · sin cita por venir/)
-  await expect(pending.getByRole("button", { name: "Reservar cita" })).toBeVisible()
-  await expect(next).toHaveCount(0)
+  await expect(rows.nth(0)).toContainText("Profilaxis semestral · vencido")
+  await expect(rows.nth(0)).toContainText(/Tocaba el \d{1,2} \S+/)
+  await expect(rows.nth(0).getByRole("button", { name: "Reservar el control" })).toBeVisible()
+  await expect(rows.nth(1)).toContainText("Entregado · espera respuesta")
+  await expect(pending).not.toContainText("Profilaxis semestral")
   await views("resumen-control-vencido")
   await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}?tab=plan`))
   await expect(page.getByLabel("Controles").getByText("Vencido", { exact: true })).toBeVisible()
@@ -127,12 +132,14 @@ test("ficha: el próximo control en el Resumen, vencido en Pendientes, y el de q
     })
     .where(eq(appointment.id, visit.id))
   await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}`))
-  await expect(upcoming).toContainText(/Hoy \d\d:\d\d · Llegó \d\d:\d\d · espera/)
-  await expect(upcoming).not.toContainText("Sin cita por venir")
-  await expect(next).toContainText(/se cumple con su atención de hoy/)
-  await expect(next.getByRole("button", { name: "Ver la cita" })).toBeVisible()
-  await expect(next.getByRole("button", { name: "Reservar cita" })).toHaveCount(0)
-  await expect(pending).not.toContainText("Control vencido")
+  await expect(next).toContainText(/Próxima cita: Hoy \d\d:\d\d · Llegó \d\d:\d\d · espera/)
+  await expect(next).not.toContainText("Sin cita por venir")
+  const today = rows.filter({ hasText: "Profilaxis semestral" })
+  await expect(today).toContainText(/se cumple con su atención de hoy/)
+  // Su cita ya está arriba, con «Ver la cita»: la fila del control no la repite ni ofrece reservar otra.
+  await expect(next.getByRole("button", { name: "Ver la cita" })).toHaveCount(1)
+  await expect(today.getByRole("button")).toHaveCount(0)
+  await expect(next).not.toContainText("vencido")
   await views("resumen-en-sala-con-control")
   // En Citas está entre las próximas, con «Llegó».
   await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}?tab=citas`))
@@ -175,7 +182,8 @@ test("ficha: una atención de otro día no es «Hoy» ni tapa la reserva, y lo q
   await bookAppointment(owner, ids.patientId, roomId, 20)
 
   await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}`))
-  const upcoming = card(page, "Próxima cita")
+  const upcoming = card(page, "Qué sigue")
+  await expect(upcoming).toContainText("Próxima cita: ")
   await expect(upcoming.getByRole("button", { name: "Ver la cita" })).toBeVisible()
   await expect(upcoming).not.toContainText("Hoy")
   await expect(upcoming).not.toContainText("En atención")
@@ -220,10 +228,15 @@ test("ficha: la cuenta dice lo devuelto y recepción ve su Resumen y su Plan", a
   await expect(page.getByText(/Se devolvieron S\/\s*50\.00 el .* · Devolución parcial del adelanto/)).toBeVisible()
   await views("cuenta-con-devolucion")
 
-  // Recepción: su Resumen dice el próximo control y su Plan, los controles por reservar.
+  // Recepción: su «Qué sigue» dice el próximo control con su botón, y su Plan, los controles por reservar.
   await fixtureDb.update(member).set({ role: "reception" }).where(and(eq(member.organizationId, owner.org.id), eq(member.userId, owner.user.id)))
   await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}`))
-  await expect(card(page, "Próximo control")).toContainText("Profilaxis semestral")
+  const next = card(page, "Qué sigue")
+  await expect(next).toContainText("Profilaxis semestral · por reservar")
+  await expect(next).toContainText("Sin cita por venir")
+  await expect(next.getByRole("button", { name: "Reservar el control" })).toBeVisible()
+  // El teléfono está en los datos de la persona, para todos.
+  await expect(page.getByRole("region", { name: "Resumen" })).toContainText("Teléfono")
   await views("recepcion-resumen")
   await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}?tab=plan`))
   await expect(page.getByText("Profilaxis semestral")).toBeVisible()
