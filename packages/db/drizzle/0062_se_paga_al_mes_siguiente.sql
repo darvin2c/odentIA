@@ -1,0 +1,1 @@
+ALTER TABLE "expense_recurring" ADD COLUMN "due_next_month" boolean DEFAULT false NOT NULL;

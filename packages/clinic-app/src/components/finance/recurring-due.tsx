@@ -201,7 +201,10 @@ export function RecurringDueSection({
           </div>
           <ul className="flex min-w-0 flex-col divide-y">
             {data.due.map((row) => {
-              const when = row.overdue ? `venció el ${row.dueDay}` : `el ${row.dueDay}`
+              // Lo que se paga al mes siguiente dice su mes: el sueldo de noviembre, «el 2 de diciembre».
+              const dueMonth = row.dueOn.slice(0, 7)
+              const dueWords = dueMonth !== row.month ? `${row.dueDay} de ${monthWord(dueMonth)}` : `${row.dueDay}`
+              const when = row.overdue ? `venció el ${dueWords}` : `el ${dueWords}`
               const before = row.month !== current ? `De ${monthWord(row.month)}: ` : ""
               const paying = pay.isPending && pay.variables?.recurringId === row.recurringId && pay.variables.month === row.month
               const named = `${row.concept} de ${monthWord(row.month)}`

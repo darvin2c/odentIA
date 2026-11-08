@@ -367,6 +367,10 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
             memberUserId: z.string().max(200).nullish(),
             // El mes que paga (el sueldo de octubre pagado en noviembre).
             month: recurringMonthKey.nullish(),
+            // `false`: se anota sin pagar; queda por pagar desde ese mes, sin ningún gasto.
+            paid: z.boolean().optional(),
+            // Se paga al mes siguiente (el sueldo de noviembre, el 2 de diciembre).
+            dueNextMonth: z.boolean().optional(),
           })
           .strict()
           .optional(),
@@ -376,7 +380,7 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const { repeat, ...expenseInput } = parsed.data
     return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
+      withOrgContext(deps.db, orgId, (tx): Promise<unknown> =>
         repeat
           ? registerRecurringExpense(tx, orgId, userId, { ...expenseInput, repeat })
           : createExpense(tx, orgId, userId, expenseInput),
