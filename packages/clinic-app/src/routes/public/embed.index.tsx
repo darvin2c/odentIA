@@ -325,7 +325,6 @@ function WebchatWindow() {
     }
   }
 
-  const accent = appearance?.color ?? "#0f766e"
   if (loadError || (appearance && !appearance.active && !test)) {
     return (
       <div className="flex h-dvh flex-col items-center justify-center gap-2 bg-background p-6 text-center">
@@ -339,10 +338,7 @@ function WebchatWindow() {
   const lastMine = [...shown].reverse().find((item) => item.from === "visitante")
   return (
     <div className="flex h-dvh flex-col bg-background text-foreground">
-      <header
-        className="flex items-center gap-3 px-4 py-3 text-white"
-        style={{ backgroundColor: accent }}
-      >
+      <header className="flex items-center gap-3 bg-primary-fill px-4 py-3 text-primary-fill-foreground">
         <div className="min-w-0 flex-1">
           <p className="truncate font-semibold">{appearance?.clinicName ?? "Chat"}</p>
           <p className="truncate text-sm opacity-90">{appearance?.subtitle ?? ""}</p>
@@ -352,7 +348,7 @@ function WebchatWindow() {
             type="button"
             variant="ghost"
             size="icon"
-            className="text-white hover:bg-white/15 hover:text-white"
+            className="text-primary-fill-foreground hover:bg-primary-fill-foreground/15 hover:text-primary-fill-foreground"
             aria-label="Cerrar el chat"
             onClick={close}
           >
@@ -377,14 +373,12 @@ function WebchatWindow() {
                 at: "",
               }}
               showAuthor
-              accent={accent}
             />
           ) : null}
           {shown.map((message, index) => (
             <Bubble
               key={message.key}
               message={message}
-              accent={accent}
               showAuthor={
                 message.from === "clinica" &&
                 (index === 0
@@ -404,7 +398,6 @@ function WebchatWindow() {
             <ContactCard
               slug={slug ?? ""}
               token={token}
-              accent={accent}
               onSaved={(contact) =>
                 setPoll((current) => ({ ...current, contact, askContact: false }))
               }
@@ -441,8 +434,7 @@ function WebchatWindow() {
           <Button
             type="submit"
             size="icon"
-            className="size-11 shrink-0 text-white"
-            style={{ backgroundColor: accent }}
+            className="size-11 shrink-0"
             aria-label="Enviar"
             disabled={sending || !ready}
           >
@@ -461,12 +453,10 @@ function WebchatWindow() {
 
 function Bubble({
   message,
-  accent,
   showAuthor,
   state = null,
 }: {
   message: ChatMessage
-  accent: string
   showAuthor: boolean
   state?: string | null
 }) {
@@ -479,8 +469,7 @@ function Bubble({
         <span className="px-1 text-xs font-semibold text-muted-foreground">{message.author}</span>
       ) : null}
       <p
-        className={`whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2 text-[15px] ${mine ? "text-white" : "bg-muted"}`}
-        style={mine ? { backgroundColor: accent } : undefined}
+        className={`whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2 text-[15px] ${mine ? "bg-primary-fill text-primary-fill-foreground" : "bg-muted"}`}
       >
         {message.text}
       </p>
@@ -501,12 +490,10 @@ function Bubble({
 function ContactCard({
   slug,
   token,
-  accent,
   onSaved,
 }: {
   slug: string
   token: string | null
-  accent: string
   onSaved: (contact: Poll["contact"]) => void
 }) {
   const form = useAppForm({
@@ -569,8 +556,6 @@ function ContactCard({
         ) : null}
         <Button
           type="submit"
-          className="text-white"
-          style={{ backgroundColor: accent }}
           disabled={saving}
         >
           {saving ? "Guardando…" : "Avisarme ahí"}

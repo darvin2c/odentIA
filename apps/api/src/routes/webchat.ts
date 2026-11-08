@@ -150,6 +150,7 @@ export function createWebchatPublicRoute(deps: WebchatPublicDeps) {
       return {
         available,
         color: appearance.color,
+        textColor: appearance.textColor,
         clinicName: appearance.clinicName,
         ...(available && origin ? { ticket: webchatSiteTicket(found.sessionKey, origin) } : {}),
       }
@@ -263,7 +264,6 @@ export function createWebchatPublicRoute(deps: WebchatPublicDeps) {
 
 const adminPatchInput = z
   .object({
-    color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
     greeting: z.string().trim().max(500).nullable().optional(),
     // El aviso al sitio: el mismo motivo que da el canal, dicho junto al campo.
     notifyUrl: z
