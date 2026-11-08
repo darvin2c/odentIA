@@ -2,8 +2,9 @@
  * Reportes › Finanzas: las comisiones son las de Finanzas › Comisiones, la
  * comisión cuenta al cobrar y su pago no se suma dos veces; pagar una compra es
  * un gasto de Materiales enlazado con sus reglas (en partes, adelanto, a favor,
- * cancelar); «Te deben» por antigüedad es el saldo vencido; y «Puede faltar un
- * gasto» se calla cuando la clínica dice que no hubo.
+ * cancelar); «Te deben» por antigüedad es el saldo vencido; «Puede faltar un
+ * gasto» se calla cuando la clínica dice que no hubo; y un gasto anulado baja el
+ * mes del gasto, como en Finanzas › Gastos.
  */
 import { randomUUID } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
@@ -17,6 +18,7 @@ import { clinicalFixture } from "./clinical-test-fixture.js"
 import {
   createExpense,
   dismissExpenseGap,
+  getMonthExpenses,
   getPurchasesToPay,
   listMonthCommissions,
   payMonthCommission,
@@ -416,4 +418,33 @@ it("puede faltar un gasto: se avisa el tipo que tuvo los dos meses anteriores y 
   // Repetirlo no hace nada.
   await run((tx) => dismissExpenseGap(tx, orgId, actor, { category: "Impuestos", month: "2026-09", branchId: site!.id }))
   expect((await run((tx) => getReportFinance(tx, orgId, { period: "2026-09" }, now))).missing).toEqual([])
+})
+
+it("un gasto de septiembre anulado en octubre baja septiembre y no toca octubre, como en Finanzas › Gastos", async () => {
+  const orgId = randomUUID()
+  await insertOrg(ownerDb, orgId, `gasto-anulado-${orgId}`)
+  const actor = randomUUID()
+  await ownerDb.execute(`insert into "user" (id, name, email) values ('${actor}', 'Caja', '${actor}@example.com')`)
+  const [site] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro" }).returning()
+  const run = <T>(fn: (tx: typeof appDb) => Promise<T>) => withOrgContext(appDb, orgId, fn)
+  const spend = (category: string, amountCents: number) =>
+    run((tx) => createExpense(tx, orgId, actor, { branchId: site!.id, category, concept: `${category} de septiembre`, amountCents, spentAt: "2026-09-10T15:00:00Z" }))
+  await spend("Alquiler", 500_000)
+  const lab = await spend("Laboratorio", 80_000)
+  await run((tx) => voidExpense(tx, orgId, actor, lab.id, { reason: "Se registró dos veces" }))
+  // Se anuló el 15 de octubre: anular es decir que no ocurrió.
+  await ownerDb.update(expense).set({ voidedAt: new Date("2026-10-15T15:00:00Z") }).where(eq(expense.id, lab.id))
+  const now = new Date("2026-11-08T15:00:00Z")
+
+  const gastos = await run((tx) => getMonthExpenses(tx, orgId, { year: 2026, month: 9 }))
+  expect(gastos.totalCents).toBe(500_000)
+  const september = await run((tx) => getReportFinance(tx, orgId, { period: "2026-09" }, now))
+  // Reportes dice lo mismo que Gastos para septiembre…
+  expect(september.totals.current.otherExpensesCents).toBe(gastos.totalCents)
+  expect(september.cascade.categories).toEqual([{ category: "Alquiler", cents: 500_000 }])
+  // …y octubre no se lleva una anulación de un gasto que no es suyo.
+  const october = await run((tx) => getReportFinance(tx, orgId, { period: "2026-10" }, now))
+  expect(october.totals.current.otherExpensesCents).toBe(0)
+  expect(october.cascade.categories).toEqual([])
+  expect(october.totals.previous.otherExpensesCents).toBe(500_000)
 })

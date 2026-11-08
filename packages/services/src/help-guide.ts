@@ -1271,6 +1271,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         forms: ["dolares en reportes", "reportes con dos monedas", "cuanto vale lo cobrado en dolares"],
       },
       {
+        q: "¿En qué mes cuenta un gasto que anulo después?",
+        a: "En ninguno: anular un gasto es decir que no ocurrió. Deja de contar en el mes de su fecha aunque lo anules meses después, y Gastos y Reportes dicen lo mismo de ese mes, también en «Lo que deja». Si salió del efectivo de una caja ya cerrada, ese efectivo vuelve a la caja del día en que lo anulas.",
+        forms: ["gasto anulado en reportes", "anule un gasto del mes pasado", "por que cambio lo que deja de un mes pasado"],
+      },
+      {
         q: "¿Qué es el resumen del lunes?",
         a: "Un correo que te llega cada lunes a las 8:00, hora de la clínica, con cuatro cifras de la semana anterior, lo que cambió y lo que recomienda Argos. A quien crea la clínica le llega desde el primer lunes; cada otra persona que ve Reportes lo prende para sí al final del Resumen. Si la semana no tuvo movimientos, no se envía, y para dejar de recibirlo basta el enlace del propio correo.",
       },
