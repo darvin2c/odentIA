@@ -270,7 +270,7 @@ it("«Agendar» une lo aceptado a la cita, su atención lo trae y «Qué sigue»
   await f.run((tx) => deliverBudget(tx, ...f.args, draft.id))
   expect(await nextStep()).toMatchObject({
     kind: "respuesta",
-    text: "Enviado · espera respuesta",
+    text: "Entregado · espera respuesta",
     action: { label: "¿Qué respondió?", budgetId: draft.id },
   })
   await f.run((tx) =>

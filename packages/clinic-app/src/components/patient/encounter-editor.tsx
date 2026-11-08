@@ -2878,7 +2878,7 @@ export function EncounterEditor({
               <FinalizedBudgetSummary patientId={patientId} budget={finalizedBudget} locale={orgLocale} />
               {budgetSent ? (
                 <p role="status" className="text-sm font-medium">
-                  Enviado. Queda «Enviado · espera respuesta» en su Plan.
+                  Enviado. Queda «Entregado · espera respuesta» en su Plan.
                 </p>
               ) : (
                 <>

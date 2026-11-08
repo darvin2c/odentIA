@@ -3,6 +3,7 @@ import {
   CONSENT_DECLARATION,
   CONSENT_SECTION_LABELS,
   type ConsentSections,
+  BUDGET_SIGN_DECLARATION,
   clinicalProfileFor,
   consentSectionsToText,
   consentSignatureNote,
@@ -2894,6 +2895,18 @@ export async function getConsentSheetFrame(
     declaration: CONSENT_DECLARATION,
     signatureNote: consentSignatureNote(clinicalProfileFor(profile?.country).signatureLaw),
   }
+}
+
+/**
+ * Lo fijo de la hoja del presupuesto que se firma en la tablet: el mismo membrete
+ * y la misma nota del nivel de firma que el consentimiento, con la declaración del
+ * presupuesto. No lleva nada clínico: lo lee quien anota la respuesta.
+ */
+export async function getBudgetSignFrame(
+  tx: Db,
+  orgId: string,
+): Promise<{ clinic: DocumentLetterhead; declaration: string; signatureNote: string }> {
+  return { ...(await getConsentSheetFrame(tx, orgId)), declaration: BUDGET_SIGN_DECLARATION }
 }
 
 export async function listConsentDocuments(

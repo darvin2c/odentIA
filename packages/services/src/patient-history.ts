@@ -1024,7 +1024,7 @@ export async function getTimeline(
         title: `Presupuesto N.º ${row.budgetNumber} · ${row.title}`,
         detail: `Revisión ${row.revisionNumber} · ${total} tratamiento(s) · ${currency ?? row.currency}`,
         status: row.status,
-        // Los mismos nombres que Plan (ADR 0034): «Enviado · espera respuesta», «Aceptó 2 de 3»…
+        // Los mismos nombres que Plan (ADR 0034): «Entregado · espera respuesta», «Aceptó 2 de 3»…
         statusText: budgetStateText({ status: row.status, items: lines, options }),
         authorId: row.createdBy,
         planId: row.planId,

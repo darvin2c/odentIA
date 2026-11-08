@@ -5,7 +5,7 @@ describe("un solo nombre para cada estado del presupuesto", () => {
   it("dice cada estado con las palabras del tablero 3", () => {
     const said = (status: string) => budgetStateText({ status, items: [] })
     expect(said("borrador")).toBe("Por enviar")
-    expect(said("presentado")).toBe("Enviado · espera respuesta")
+    expect(said("presentado")).toBe("Entregado · espera respuesta")
     expect(said("pospuesto")).toBe("Lo está pensando")
     expect(said("aceptado")).toBe("Aceptó todo")
     expect(said("rechazado")).toBe("No aceptó")

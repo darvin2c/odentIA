@@ -25,7 +25,7 @@ const plain: PortalBudget = {
   decidedAt: null,
   acceptedByName: null,
   decisionNote: null,
-  stateText: "Enviado · espera respuesta",
+  stateText: "Entregado · espera respuesta",
   options: [
     { id: "o1", label: "Opción A", isRecommended: true, decision: "pendiente", totalCents: 65000 },
   ],
