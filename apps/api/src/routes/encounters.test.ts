@@ -1062,6 +1062,11 @@ it("encounters: cierre guiado por requisitos, diagnósticos anulables, anulació
     "diagnosis",
     "evolution",
   ])
+  // «Falta otra sesión» elegido viaja en la consulta; lo que no es un id se rechaza.
+  const kept = await app.request(`/patients/${patientId}/encounters/${encounterId}/closing?addSession=${crypto.randomUUID()}`)
+  expect(kept.status).toBe(200)
+  const badKept = await app.request(`/patients/${patientId}/encounters/${encounterId}/closing?addSession=no-es-id`)
+  expect(badKept.status).toBe(400)
   const early = await app.request(`/patients/${patientId}/encounters/${encounterId}/finalize`, {
     method: "POST",
   })

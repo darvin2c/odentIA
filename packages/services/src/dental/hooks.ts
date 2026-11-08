@@ -186,10 +186,10 @@ export const dentalHooks: ProductHooks = {
   recallMonths: 6,
   recallControlTitle: "Control de mantenimiento",
 
-  async closingParts(tx, { orgId, patientId, encounterId }) {
+  async closingParts(tx, { orgId, patientId, encounterId, finishingPlanItemIds }) {
     const parts: DentalClosingParts = {
-      // En clínicas de Perú, el odontograma que firmará este cierre.
-      odontogram: await closingOdontogramOf(tx, orgId, patientId, encounterId),
+      // En clínicas de Perú, el odontograma que firmará este cierre, con lo que se termina al firmar.
+      odontogram: await closingOdontogramOf(tx, orgId, patientId, encounterId, finishingPlanItemIds),
       // A medias no bloquea: se firma como parcial (ADR 0054).
       periodontal: await closingPeriodontalOf(tx, orgId, encounterId),
     }

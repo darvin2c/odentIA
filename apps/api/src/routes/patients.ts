@@ -408,6 +408,9 @@ const reasonInput = z
     reason: z.string().trim().min(1, "Escribe el motivo").max(2000, "El motivo admite hasta 2000 caracteres"),
   })
   .strict()
+/** `/closing?addSession=a,b`: lo marcado «Falta otra sesión» en el cierre. */
+const closingQuery = z.array(z.uuid()).max(52)
+
 const finalizeInput = z
   .object({
     endedAt: z.iso.datetime({ offset: true, error: "Elige la hora de fin de la lista" }).nullish(),
@@ -1463,9 +1466,12 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
   })
   app.get("/:id/encounters/:encounterId/closing", async (c) => {
     const { orgId, userId } = orgContextOf(c)
+    // «Falta otra sesión» ya elegido en el cierre: el odontograma que se anuncia no lo cuenta como terminado.
+    const parsed = closingQuery.safeParse((c.req.query("addSession") ?? "").split(",").filter(Boolean))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        getEncounterClosing(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId")),
+        getEncounterClosing(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId"), parsed.data),
       ),
     )
   })

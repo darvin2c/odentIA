@@ -41,6 +41,8 @@ import {
   cashMovement,
   cashShift,
   commissionRate,
+  COMMISSION_RETURN_TYPE_CODES,
+  type CommissionReturnTypeCode,
   commissionSettlement,
   commissionSettlementLine,
   expense,
@@ -1390,6 +1392,12 @@ async function commissionPaymentsOf(tx: Db, orgId: string, expenseIds: string[])
 export const COMMISSION_PAYMENTS_CONCEPT = "Pago de comisiones"
 
 /**
+ * Concepto del efectivo que devuelve un profesional de comisiones ya pagadas (ADR 0157): como el
+ * pago, la caja no dice de quién es.
+ */
+export const COMMISSION_RETURNS_CONCEPT = "Devolución de comisiones"
+
+/**
  * Los pagos de comisión en una sola fila por sede y moneda, sin a quién ni de
  * qué pago: el total suma lo mismo y la lista no dice a quién se pagó. Los
  * anulados no se muestran (su anulación la ve Comisiones). El gasto de una
@@ -2722,6 +2730,15 @@ export interface CommissionLine {
   paidAt: Date | null
   /** El cobro se anuló después de pagada su comisión: se descuenta del siguiente pago. */
   voidedAfterPaid: boolean
+  /** Anulado después de pagado: lo que de su comisión aún debe (0 si ya no debe nada). */
+  owedLeftCents: number
+  /**
+   * Anulado después de pagado y ya sin deuda: cómo se cerró la última parte. `pago`, descontado de
+   * un pago; `devuelto`, lo devolvió; `saldado`, la clínica lo dio por saldado. Nulo mientras deba.
+   */
+  owedClosedBy: "pago" | "devuelto" | "saldado" | null
+  /** Lo devuelto o saldado cerró solo lo que quedaba: antes, una parte se descontó de un pago. */
+  owedPartlyDiscounted: boolean
 }
 
 /** Comisión ya pagada por un cobro que después se anuló. */
@@ -2744,6 +2761,8 @@ interface FrozenLine {
   settledAt: Date | null
   /** La moneda de su pago: la de lo cobrado (lo pagado antes del cambio, la del negocio). */
   currency: string
+  /** Un pago, o lo que cerró una deuda: devuelto o saldado (ADR 0157). */
+  kind: string
   promotionName: string | null
 }
 
@@ -2754,6 +2773,7 @@ async function frozenLines(tx: Db, orgId: string, professionalUserId: string): P
       line: commissionSettlementLine,
       settledAt: commissionSettlement.settledAt,
       currency: commissionSettlement.currency,
+      kind: commissionSettlement.kind,
       promotionName: patientCharge.promotionName,
     })
     .from(commissionSettlementLine)
@@ -2867,12 +2887,15 @@ async function monthView(
   const frozen = allFrozen.filter((f) => f.currency === unit)
   const allFrozenCobros = allFrozen.filter((f) => f.line.kind === "cobro" && f.line.applicationId)
   const frozenCobros = allFrozenCobros.filter((f) => f.currency === unit)
-  // Lo ya descontado de cada cobro anulado después de pagado: un descuento puede repartirse en varios pagos.
+  // Lo ya descontado de cada cobro anulado después de pagado: un descuento puede repartirse en varios pagos,
+  // y lo que queda puede cerrarse porque lo devolvió o porque la clínica lo dio por saldado (ADR 0157).
   const discounted = new Map<string, number>()
+  const closedBy = new Map<string, Set<string>>()
   for (const f of frozen)
     if (f.line.kind === "ajuste" && f.line.applicationId) {
       const key = lineKey(f.line.applicationId, f.line.slice)
       discounted.set(key, (discounted.get(key) ?? 0) + f.line.commissionCents)
+      closedBy.set(key, (closedBy.get(key) ?? new Set<string>()).add(f.kind))
     }
   // Cobros pagados cuya aplicación ya no está en pie (cualquier mes y moneda).
   const paidIds = allFrozenCobros.map((f) => f.line.applicationId as string)
@@ -2911,6 +2934,12 @@ async function monthView(
   for (const f of frozenCobros) {
     const appId = f.line.applicationId as string
     if (!inMonth(f.line.occurredAt)) continue
+    const voidedAfterPaid = !stillLive.has(appId)
+    const key = lineKey(appId, f.line.slice)
+    const owedLeftCents = voidedAfterPaid ? Math.max(0, f.line.commissionCents - (discounted.get(key) ?? 0)) : 0
+    // Cómo se cerró: lo devuelto o lo saldado manda; si además una parte se descontó de un pago, se dice.
+    const kinds = closedBy.get(key) ?? new Set<string>()
+    const closer = kinds.has("devuelto") ? "devuelto" : kinds.has("saldado") ? "saldado" : "pago"
     lines.push({
       applicationId: appId,
       chargeId: f.line.chargeId ?? "",
@@ -2929,7 +2958,10 @@ async function monthView(
       forService: f.line.forService,
       settled: true,
       paidAt: f.settledAt,
-      voidedAfterPaid: !stillLive.has(appId),
+      voidedAfterPaid,
+      owedLeftCents,
+      owedClosedBy: voidedAfterPaid && owedLeftCents === 0 && f.line.commissionCents > 0 ? closer : null,
+      owedPartlyDiscounted: closer !== "pago" && kinds.has("pago"),
     })
     if (stillLive.has(appId)) baseValues.push({ num: BigInt(f.line.baseCents), den: 1n })
   }
@@ -2955,6 +2987,9 @@ async function monthView(
       settled: false,
       paidAt: null,
       voidedAfterPaid: false,
+      owedLeftCents: 0,
+      owedClosedBy: null,
+      owedPartlyDiscounted: false,
     })
   }
   lines.sort(
@@ -2996,7 +3031,7 @@ async function monthView(
         where a.organization_id = s.organization_id and a.settlement_id = s.id and a.kind = 'ajuste' and a.voided_at is null)), 0)::text as discounted
     from commission_settlement s
     where s.organization_id = ${orgId} and s.professional_user_id = ${query.professionalUserId}
-      and s.voided_at is null and s.currency = ${unit}
+      and s.voided_at is null and s.currency = ${unit} and s.kind = 'pago'
       and exists (select 1 from commission_settlement_line l where l.organization_id = s.organization_id and l.settlement_id = s.id
         and l.kind = 'cobro' and l.voided_at is null and l.occurred_at >= ${start.toISOString()}::timestamptz and l.occurred_at < ${end.toISOString()}::timestamptz)`)
   const paidCents = Number(settledMonth?.paid ?? 0)
@@ -3026,6 +3061,12 @@ async function monthView(
       .map((f) => f.currency),
   ]
   const otherCurrencies = [...new Set(inMonthCurrencies)].filter((c) => c !== unit).sort()
+  const owedCents = adjustmentCents - discountCents
+  // Lo que este mes no alcanza a descontar se descuenta del pago de otro mes con cobros por pagar en esta
+  // moneda: se dice cuál (el más antiguo). Sin ninguno, espera cobros nuevos.
+  const toPay = owedCents > 0 ? await otherMonthToPay(tx, orgId, query.professionalUserId, unit, timezone, { start, end }) : null
+  // Lo que ese pago alcanza a descontar: si es menos de lo que debe, el resto espera a los siguientes.
+  const discountFrom = toPay ? { year: toPay.year, month: toPay.month, cents: Math.min(owedCents, toPay.freshCents) } : null
   return {
     professionalUserId: query.professionalUserId,
     professionalName: professionalNames.get(query.professionalUserId) ?? null,
@@ -3062,7 +3103,12 @@ async function monthView(
      * se devolvieron, sin cobros nuevos en esta moneda de donde descontarlas. Se descuenta del
      * próximo pago en esta moneda.
      */
-    owedCents: adjustmentCents - discountCents,
+    owedCents,
+    /**
+     * Con algo que deber después de este mes: el mes más antiguo con cobros por pagar de donde se descuenta,
+     * y cuánto alcanza a descontar ese pago (`cents`, menos que `owedCents` si no alcanza para todo).
+     */
+    discountFrom,
     /** Lo que los pagos de este mes ya descontaron de cobros anulados. */
     discountedCents,
     lastPaidAt,
@@ -3072,6 +3118,29 @@ async function monthView(
     /** Otras monedas con algo de este mes o por descontar. */
     otherCurrencies,
   }
+}
+
+/**
+ * El mes más antiguo, fuera del que se mira, con cobros por pagar de un profesional en una moneda: el
+ * pago de donde se descuenta lo que este mes no alcanza (con la regla de `commissionsOwedByMonth`).
+ */
+async function otherMonthToPay(
+  tx: Db,
+  orgId: string,
+  professionalUserId: string,
+  unit: string,
+  timezone: string,
+  skip: { start: Date; end: Date },
+): Promise<{ year: number; month: number; freshCents: number } | null> {
+  const [row] = await tx.execute<{ month: string; fresh: string }>(sql`
+    select to_char(l.at at time zone ${timezone}, 'YYYY-MM') as month, round(sum(l.own_commission))::text as fresh
+    from ${commissionLiveIn(orgId, new Date(Date.UTC(2000, 0, 1)), new Date(), sql`and professional_user_id = ${professionalUserId} and currency = ${unit}`)} l
+    where l.has_rule and l.own_commission > 0
+      and not (l.at >= ${skip.start.toISOString()}::timestamptz and l.at < ${skip.end.toISOString()}::timestamptz)
+    group by 1 order by 1 limit 1`)
+  return row
+    ? { year: Number(row.month.slice(0, 4)), month: Number(row.month.slice(5, 7)), freshCents: Number(row.fresh) }
+    : null
 }
 
 export type MonthCommissionsView = Awaited<ReturnType<typeof monthView>>
@@ -3135,7 +3204,11 @@ function commissionSummary(view: MonthCommissionsView) {
     commissionCents: view.commissionCents,
     paidCents: view.paidCents,
     pendingCents: view.pendingCents,
+    /** Lo que el próximo pago de este mes descuenta de comisiones ya pagadas de cobros anulados. */
+    discountCents: view.discountCents,
     owedCents: view.owedCents,
+    /** De qué pago se descuenta lo que debe después de este mes (el mismo dato del detalle). */
+    discountFrom: view.discountFrom,
     lastPaidAt: view.lastPaidAt,
     status: view.status,
   }
@@ -3496,6 +3569,210 @@ export async function payMonthCommission(
   return { settlement: paid ?? settlement, expense: paidExpense }
 }
 
+/** Lo que se escribe al cerrar una deuda: el motivo de darla por saldada es corto (ADR 0157). */
+export const COMMISSION_FORGIVE_REASON_MAX = 200
+
+export interface SettleCommissionDebtInput {
+  professionalUserId: string
+  /** El mes desde donde se registra: queda entre sus pagos. La deuda es del profesional, de cualquier mes. */
+  year: number
+  month: number
+  /** La moneda de la deuda (cada una aparte); sin ella, la del negocio. */
+  currency?: string
+  /** `devuelto`: el profesional entregó ese dinero. `saldado`: la clínica lo perdona, sin mover dinero. */
+  kind: "devuelto" | "saldado"
+  /** Lo devuelto: su medio, UN/CEFACT 4461 (10 efectivo, 30 transferencia, 48 tarjeta). */
+  methodTypeCode?: CommissionReturnTypeCode
+  /** En efectivo: la sede de la caja donde entra. */
+  branchId?: string
+  /** Saldado: el motivo, obligatorio. Devuelto: una nota opcional. */
+  notes?: string | null
+  /** Lo que la pantalla mostró al confirmar: si ya no es eso, no se registra otra cifra. */
+  expectedCents?: number
+}
+
+/**
+ * Cierra lo que un profesional le debe a la clínica en una moneda (comisiones ya pagadas de cobros que
+ * después se anularon), en un solo paso y sin esperar a descontarlo de un pago (ADR 0157):
+ *
+ * - `devuelto`: lo devolvió. En efectivo entra a la caja de la sede como «Devolución de comisiones»,
+ *   sin su nombre (caja no ve a quién se le paga cada comisión); por transferencia o tarjeta no toca
+ *   la caja.
+ * - `saldado`: la clínica lo perdona, con su motivo. No mueve dinero.
+ *
+ * Las dos dejan una liquidación de su tipo con una línea `ajuste` por cobro anulado: todas las cuentas
+ * (Finanzas, Mis honorarios, Reportes) ya restan los ajustes, así que la deuda queda en cero en todas a
+ * la vez. Quién y cuándo quedan en la liquidación y en la auditoría. Se anula como un pago.
+ */
+export async function settleCommissionDebt(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  input: SettleCommissionDebtInput,
+) {
+  // El mismo turno que pagar y anular: un pago simultáneo no descuenta lo que esto ya cerró.
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`commission:${orgId}:${input.professionalUserId}`}, 0))`,
+  )
+  if (input.kind !== "devuelto" && input.kind !== "saldado") throw invalidField("kind", "Elige qué pasó con lo que debe.")
+  const notes = input.notes?.trim() ?? ""
+  if (input.kind === "saldado") {
+    if (!notes) throw invalidField("notes", "Escribe el motivo.")
+    if (notes.length > COMMISSION_FORGIVE_REASON_MAX)
+      throw invalidField("notes", `Escribe el motivo en ${COMMISSION_FORGIVE_REASON_MAX} caracteres como máximo.`)
+  } else if (notes.length > 2000) throw invalidField("notes", "Escribe la nota en 2000 caracteres como máximo.")
+  const method = input.kind === "devuelto" ? input.methodTypeCode : undefined
+  if (input.kind === "devuelto" && !(COMMISSION_RETURN_TYPE_CODES as readonly string[]).includes(method ?? ""))
+    throw invalidField("methodTypeCode", "Elige cómo lo devolvió.")
+  const inCash = method === "10"
+  const view = await monthView(tx, orgId, input)
+  if (view.adjustmentCents <= 0)
+    throw conflict("COMMISSION_NOTHING_OWED", "No debe nada en esa moneda: no hay nada que registrar")
+  if (input.expectedCents !== undefined && input.expectedCents !== view.adjustmentCents)
+    throw conflict(
+      "COMMISSION_AMOUNT_CHANGED",
+      "Lo que debe cambió mientras lo revisabas: vuelve a mirarlo antes de registrarlo",
+    )
+  const at = new Date()
+  // En efectivo, entra a la caja de la sede en su moneda: la abre si hace falta, como un cobro.
+  let movementId: string | null = null
+  if (inCash) {
+    if (!input.branchId) throw invalidField("branchId", "Elige la sede de la caja.")
+    const branchRow = await requireBranch(tx, orgId, input.branchId).catch((error: unknown) => {
+      if (error instanceof ServiceError && error.code === "NOT_FOUND")
+        throw new ServiceError("NOT_FOUND", 404, error.message, { branchId: error.message })
+      throw error
+    })
+    const shift = await ensureOpenShift(tx, orgId, actorUserId, branchRow.id, view.currency)
+    requireOpenShift(await lockShift(tx, orgId, shift.id))
+    // Vuelve lo que salió como un gasto (el pago de la comisión): `gasto` de entrada, que el cierre resta
+    // de los gastos, como la compensación de un gasto anulado. Sin a quién: caja lo ve.
+    const [movement] = await tx
+      .insert(cashMovement)
+      .values({
+        organizationId: orgId,
+        shiftId: shift.id,
+        direction: "ingreso",
+        kind: "gasto",
+        amountCents: assertCents(view.adjustmentCents),
+        currency: view.currency,
+        method: null,
+        methodTypeCode: "10",
+        concept: COMMISSION_RETURNS_CONCEPT,
+        createdBy: actorUserId,
+      })
+      .returning()
+    if (!movement) throw new ServiceError("INTERNAL", 409, "No se pudo registrar el ingreso a la caja")
+    movementId = movement.id
+    await audit(tx, orgId, actorUserId, "cash_movement", movement.id, "cash.commission_returned")
+  }
+  const [settlement] = await tx
+    .insert(commissionSettlement)
+    .values({
+      organizationId: orgId,
+      professionalUserId: input.professionalUserId,
+      periodYear: input.year,
+      periodMonth: input.month,
+      base: "cobrado",
+      currency: view.currency,
+      rateBps: null,
+      baseCents: 0,
+      commissionCents: view.adjustmentCents,
+      status: "liquidada",
+      kind: input.kind,
+      methodTypeCode: method ?? null,
+      cashMovementId: movementId,
+      notes: notes ? notes.slice(0, 2000) : null,
+      settledBy: actorUserId,
+      settledAt: at,
+    })
+    .returning()
+  if (!settlement) throw new ServiceError("INTERNAL", 409, "No se pudo registrar")
+  try {
+    for (const adjustment of view.adjustments)
+      await tx.insert(commissionSettlementLine).values({
+        organizationId: orgId,
+        settlementId: settlement.id,
+        kind: "ajuste",
+        sourceKey: `adj:${lineKey(adjustment.applicationId, adjustment.slice)}:${settlement.id}`,
+        applicationId: adjustment.applicationId,
+        slice: adjustment.slice,
+        patientId: adjustment.patientId || null,
+        description: adjustment.description,
+        baseCents: 0,
+        commissionCents: adjustment.commissionCents,
+        occurredAt: at,
+      })
+  } catch (e) {
+    if (isUniqueViolation(e)) throw conflict("COMMISSION_AMOUNT_CHANGED", "Eso ya se registró: vuelve a mirarlo")
+    throw e
+  }
+  await audit(
+    tx,
+    orgId,
+    actorUserId,
+    "commission_settlement",
+    settlement.id,
+    input.kind === "devuelto" ? "finance.commission_debt_returned" : "finance.commission_debt_forgiven",
+    { cents: view.adjustmentCents, currency: view.currency, ...(method ? { methodTypeCode: method } : {}) },
+  )
+  if (inCash) await notifyCash(tx, orgId)
+  const amount = formatMoney(view.adjustmentCents, view.currency, view.locale)
+  // Como al pagarle: se le avisa, salvo a quien ya no está en el equipo.
+  if (view.inTeam)
+    await createWorkspaceNotification(tx, orgId, {
+      userId: input.professionalUserId,
+      dedupeKey: `commission-debt:${settlement.id}`,
+      title: input.kind === "devuelto" ? "Se registró lo que devolviste" : "Se dio por saldado lo que debías",
+      body:
+        input.kind === "devuelto"
+          ? `${amount} de comisiones ya pagadas de cobros que después se anularon. Ya no debes nada en esa moneda.`
+          : `${amount} de comisiones ya pagadas de cobros que después se anularon. Ya no debes nada en esa moneda. Motivo: ${notes}`.slice(0, 500),
+      href: `/commissions?year=${input.year}&month=${input.month}`,
+      permission: "commissions.read",
+      actorUserId,
+    })
+  return { settlement, movementId }
+}
+
+/**
+ * Revierte el efectivo que entró al registrar una devolución que se anula. Con la caja abierta se anula
+ * el movimiento; cerrada (no se toca), sale lo mismo en la caja de hoy como «Compensación por
+ * anulación», como al anular un cobro. Bloquea la caja antes que su fila, en el orden de siempre.
+ */
+async function reverseCommissionReturn(tx: Db, orgId: string, actorUserId: string, movementId: string, voidReason: string) {
+  const [movement] = await tx
+    .select()
+    .from(cashMovement)
+    .where(and(eq(cashMovement.organizationId, orgId), eq(cashMovement.id, movementId)))
+  if (!movement || movement.voidedAt) return
+  const [where] = await tx
+    .select({ branchId: cashShift.branchId, currency: cashShift.currency })
+    .from(cashShift)
+    .where(and(eq(cashShift.organizationId, orgId), eq(cashShift.id, movement.shiftId)))
+  if (where) await lockCashWindows(tx, orgId, [{ branchId: where.branchId, unit: where.currency }])
+  const shift = await lockShift(tx, orgId, movement.shiftId)
+  if (shift.status === "abierta") {
+    await tx
+      .update(cashMovement)
+      .set({ voidedAt: new Date(), voidedBy: actorUserId, voidReason: reason(voidReason) })
+      .where(and(eq(cashMovement.organizationId, orgId), eq(cashMovement.id, movement.id)))
+    await audit(tx, orgId, actorUserId, "cash_movement", movement.id, "cash.movement_voided")
+  } else {
+    const today = await ensureOpenShift(tx, orgId, actorUserId, shift.branchId, movement.currency)
+    await recordCashEgreso(tx, orgId, actorUserId, today.id, {
+      kind: "gasto",
+      amountCents: movement.amountCents,
+      currency: movement.currency,
+      methodTypeCode: movement.methodTypeCode,
+      concept: "Compensación por anulación",
+      // Lo cerrado no se reescribe: si ese efectivo ya no está, lo dirá el arqueo.
+      allowNegative: true,
+    })
+  }
+  await notifyCash(tx, orgId)
+}
+
 /**
  * Pagos registrados de un profesional o de un mes. Vigentes por defecto; con
  * `includeVoided` también los anulados, con quién los anuló.
@@ -3519,10 +3796,13 @@ export async function listCommissionSettlements(
   const names = await userNames(tx, [
     ...rows.map((r) => r.professionalUserId),
     ...rows.map((r) => r.voidedBy).filter((id): id is string => !!id),
+    ...rows.map((r) => r.settledBy).filter((id): id is string => !!id),
   ])
   return rows.map((r) => ({
     ...r,
     professionalName: names.get(r.professionalUserId) ?? null,
+    /** Quién lo registró: de lo que se dio por saldado, quién lo decidió. */
+    settledByName: r.settledBy ? (names.get(r.settledBy) ?? null) : null,
     voidedByName: r.voidedBy ? (names.get(r.voidedBy) ?? null) : null,
   }))
 }
@@ -3575,7 +3855,7 @@ export async function voidCommissionSettlement(
   if (later)
     throw conflict(
       "COMMISSION_DISCOUNTED_LATER",
-      "Un pago posterior descontó un cobro de este pago: anula primero ese pago y después este",
+      "Después se descontó, se devolvió o se dio por saldado un cobro de este pago: anula primero ese registro y después este",
     )
   const [row] = await tx
     .update(commissionSettlement)
@@ -3600,10 +3880,19 @@ export async function voidCommissionSettlement(
         isNull(commissionSettlementLine.voidedAt),
       ),
     )
-  // El gasto del pago se anula con él (misma transacción).
+  // El gasto del pago se anula con él (misma transacción); lo devuelto en efectivo sale de la caja.
   if (current.expenseId)
     await voidExpense(tx, orgId, actorUserId, current.expenseId, { reason: input.reason }, { fromCommission: true })
-  await audit(tx, orgId, actorUserId, "commission_settlement", settlementId, "finance.commission_payment_voided")
+  if (current.cashMovementId) await reverseCommissionReturn(tx, orgId, actorUserId, current.cashMovementId, voidReason)
+  const debt = current.kind === "devuelto" || current.kind === "saldado"
+  await audit(
+    tx,
+    orgId,
+    actorUserId,
+    "commission_settlement",
+    settlementId,
+    debt ? "finance.commission_debt_voided" : "finance.commission_payment_voided",
+  )
   // Al profesional se le avisa, como al pagarle: si no, ve su mes «por pagar» otra vez sin saber por qué.
   const [inTeam] = await tx
     .select({ id: member.id })
@@ -3617,7 +3906,14 @@ export async function voidCommissionSettlement(
     await createWorkspaceNotification(tx, orgId, {
       userId: current.professionalUserId,
       dedupeKey: `commission-voided:${settlementId}`,
-      title: current.commissionCents > 0 ? "Se anuló un pago de tu comisión" : "Se anuló un descuento de tu comisión",
+      title:
+        current.kind === "devuelto"
+          ? "Se anuló el registro de lo que devolviste"
+          : current.kind === "saldado"
+            ? "Se anuló lo que se dio por saldado"
+            : current.commissionCents > 0
+              ? "Se anuló un pago de tu comisión"
+              : "Se anuló un descuento de tu comisión",
       body: `${monthLabel}: ${formatMoney(current.commissionCents, current.currency, locale)}. Motivo: ${voidReason}`.slice(0, 500),
       href: `/commissions?year=${current.periodYear}&month=${current.periodMonth}`,
       permission: "commissions.read",

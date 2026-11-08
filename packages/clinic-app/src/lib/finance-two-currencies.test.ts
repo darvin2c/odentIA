@@ -152,6 +152,9 @@ describe("la caja con dos monedas", () => {
     expect(cashTermLeaves(expenses, 0)).toBe(true)
     expect(cashTermLabel(change, -7500)).not.toBe(cashTermLabel(change, 2000))
     expect(cashTermLabel(expenses, 500)).toBe(expenses.label)
+    // Lo que volvió de gastos (o una comisión devuelta) más de lo gastado entra, con su nombre.
+    expect(cashTermLeaves(expenses, -30000)).toBe(false)
+    expect(cashTermLabel(expenses, -30000)).toBe("Volvió de gastos y comisiones")
   })
 
   it("el vuelto cruzado dice sus dos monedas, en la caja y en su tarjeta", () => {

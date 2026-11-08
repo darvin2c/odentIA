@@ -158,6 +158,18 @@ it("el odontólogo ve solo las suyas y no administra", async () => {
     }),
   })
   expect(pay.status).toBe(403)
+  // Lo que debe tampoco lo cierra él: ni lo da por devuelto ni por saldado.
+  for (const body of [
+    { kind: "devuelto", methodTypeCode: "30" },
+    { kind: "saldado", notes: "Me lo perdono" },
+  ]) {
+    const debt = await app.request("/commissions/debt", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ professionalUserId: PROFESSIONAL, year: 2026, month: 9, ...body }),
+    })
+    expect(debt.status).toBe(403)
+  }
   // El mes de toda la clínica es de administración, también lo cobrado de sesiones que nadie hizo.
   expect((await app.request("/commissions/month?year=2026&month=9")).status).toBe(403)
   expect((await app.request("/commissions/unassigned")).status).toBe(403)
@@ -217,4 +229,32 @@ it("administración fija el porcentaje y ve el mes; caja no ve comisiones ni el 
   expect(result.status).toBe(403)
   const commissions = await cashier.request("/commissions/my?year=2026&month=9&currency=PEN")
   expect(commissions.status).toBe(403)
+  // Caja tampoco cierra lo que debe un profesional, aunque registre lo que entra a la caja.
+  const cashierDebt = await cashier.request("/commissions/debt", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ professionalUserId: PROFESSIONAL, year: 2026, month: 9, kind: "devuelto", methodTypeCode: "10", branchId: "00000000-0000-4000-8000-000000000001" }),
+  })
+  expect(cashierDebt.status).toBe(403)
+})
+
+it("administración cierra lo que debe un profesional: con su motivo si lo perdona, y solo si debe algo", async () => {
+  const admin = buildApp("admin", OWNER)
+  const debt = (body: Record<string, unknown>) =>
+    admin.request("/commissions/debt", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ professionalUserId: PROFESSIONAL, year: 2026, month: 9, ...body }),
+    })
+  // Darlo por saldado pide el motivo, junto a su campo.
+  const noReason = await debt({ kind: "saldado" })
+  expect(noReason.status).toBe(400)
+  expect(((await noReason.json()) as { error: { fields?: Record<string, string> } }).error.fields).toMatchObject({ notes: "Escribe el motivo." })
+  // Solo dos salidas y tres medios.
+  expect((await debt({ kind: "descontado" })).status).toBe(400)
+  expect((await debt({ kind: "devuelto", methodTypeCode: "68" })).status).toBe(400)
+  // Sin nada que deber no se registra nada.
+  const nothing = await debt({ kind: "devuelto", methodTypeCode: "30" })
+  expect(nothing.status).toBe(409)
+  expect(((await nothing.json()) as { error: { code: string } }).error.code).toBe("COMMISSION_NOTHING_OWED")
 })

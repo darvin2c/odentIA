@@ -494,7 +494,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo llevo un tratamiento de varias sesiones?",
-        a: "Con sus sesiones previstas en el Plan, por ejemplo una endodoncia en dos. Cada cita que lo lleva dice en qué sesión va («sesión 1 de 2») en la Agenda, en la cita y en «Qué sigue», y al reservar la siguiente, «Para esta cita» lo ofrece mientras le falten sesiones. En la atención, «Hecho hoy» dice «Registrar la sesión» hasta que registras su procedimiento; con la sesión de hoy, «Completar» lo cierra. Nada se termina solo: al firmar, lo que llega a sus sesiones previstas pregunta «¿Terminaste?», con «Sí, terminar» y «Falta otra sesión» (le suma una); sin elegir, sigue en curso. Si registras como servicio algo que sigue en curso en esa pieza, te avisa antes de guardar que queda como su sesión siguiente, no como un tratamiento nuevo.",
+        a: "Con sus sesiones previstas en el Plan, por ejemplo una endodoncia en dos. Cada cita que lo lleva dice en qué sesión va («sesión 1 de 2») en la Agenda, en la cita y en «Qué sigue», y al reservar la siguiente, «Para esta cita» lo ofrece mientras le falten sesiones. En la atención, «Hecho hoy» dice «Registrar la sesión» hasta que registras su procedimiento; con la sesión de hoy, «Completar» lo cierra. Al firmar, lo que llega a sus sesiones previstas pregunta «¿Terminaste?» con «Sí, terminar» ya elegido: si firmas sin cambiarlo, queda realizado. Si no terminaste, elige «Falta otra sesión»: le suma una y sigue en curso. Si registras como servicio algo que sigue en curso en esa pieza, te avisa antes de guardar que queda como su sesión siguiente, no como un tratamiento nuevo.",
         forms: ["endodoncia en dos sesiones", "segunda sesion", "sesion 2 de 2", "completar tratamiento", "no me deja completar", "tratamiento por sesiones"],
       },
       {
@@ -1105,8 +1105,15 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Qué pasa si se anula un cobro cuya comisión ya pagué?",
-        a: "Lo que se pagó de más se descuenta del próximo pago de ese profesional en esa moneda, de este mes o de otro, sin dejarlo nunca en negativo. Si el descuento cubre todo, se registra el descuento sin gasto y se le avisa. Si no tiene cobros nuevos de donde descontarlo, su fila dice cuánto queda «por descontar del próximo pago»: se descuenta solo, sin hacer nada.",
-        forms: ["descuento de comisión", "devolución y comisión", "cobro anulado comisión"],
+        a: "Lo que se pagó de más se descuenta del próximo pago de ese profesional en esa moneda, de este mes o de otro, sin dejarlo nunca en negativo. Si el descuento cubre todo, se registra el descuento sin gasto y se le avisa. Su fila dice cuánto queda «por descontar» y, si otro mes tiene cobros por pagar, de qué pago se descuenta: se descuenta solo, sin hacer nada. Si ya lo devolvió o ya no trabaja en la clínica, abre su detalle y, en «Por descontar», elige «Registrar que lo devolvió», con cómo lo devolvió (en efectivo entra a la caja como «Devolución de comisiones», sin su nombre; por transferencia o tarjeta no toca la caja), o «Darlo por saldado», con un motivo corto y sin mover dinero. Las dos dejan lo que debe en cero, también en «Mis honorarios» y en Reportes; queda quién y cuándo, se le avisa y se anulan con su motivo como un pago.",
+        forms: [
+          "descuento de comisión",
+          "devolución y comisión",
+          "cobro anulado comisión",
+          "el doctor devolvió la comisión",
+          "perdonar lo que debe el doctor",
+          "dar por saldada la comisión",
+        ],
       },
       {
         q: "¿Quién ve las comisiones?",
