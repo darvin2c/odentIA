@@ -114,6 +114,10 @@ interface ExpenseValues {
   repeatDay: string
   /** El mes que paga (`YYYY-MM`): este o el anterior (el sueldo de octubre pagado en noviembre). */
   repeatMonth: string
+  /** «¿Ya se pagó?»: con «no» se anota sin registrar ningún gasto y queda por pagar. */
+  paidNow: "si" | "no"
+  /** Se paga en ese mes o al mes siguiente (el sueldo de noviembre, el 2 de diciembre). */
+  dueNext: "mismo" | "siguiente"
   /** De quién es un sueldo (solo con el tipo «Personal»). */
   member: string
 }
@@ -123,6 +127,21 @@ const EVERY_CHOICES = [
   { value: "6", label: "Cada 6 meses" },
   { value: "12", label: "Cada año" },
 ]
+
+const PAID_CHOICES = [
+  { value: "si", label: "Sí, ahora" },
+  { value: "no", label: "Todavía no" },
+]
+
+const DUE_CHOICES = [
+  { value: "mismo", label: "En ese mes" },
+  { value: "siguiente", label: "Al mes siguiente" },
+]
+
+/** Se anota sin pagar: no hay gasto, ni caja, ni fecha. */
+function annotatesOnly(value: Pick<ExpenseValues, "repeats" | "paidNow">): boolean {
+  return value.repeats && value.paidNow === "no"
+}
 
 const MONTH_NAMES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "setiembre", "octubre", "noviembre", "diciembre"]
 
@@ -246,6 +265,8 @@ export function ExpenseFormDrawer({
       every: "1",
       repeatDay: String(Number(today.slice(8, 10))),
       repeatMonth: today.slice(0, 7),
+      paidNow: "si",
+      dueNext: "mismo",
       member: "",
     } as ExpenseValues,
     validators: {
@@ -257,13 +278,13 @@ export function ExpenseFormDrawer({
         if (!chosen && !value.concept.trim()) fields.concept = "Escribe en qué se gastó."
         if (value.amount.trim() !== "" && cents === null) fields.amount = "Ese importe no se entiende. Revísalo."
         else if (cents === null || cents <= 0) fields.amount = "Escribe un importe mayor que cero."
-        else if (after !== null && after < 0 && state)
+        else if (after !== null && after < 0 && state && !annotatesOnly(value))
           // El freno se queda (el efectivo nunca queda negativo), pero dice qué
           // hacer: quitar la casilla dejaría «fuera de la caja» lo que salió de ella.
           fields.fromCash = `En la caja solo hay ${formatMoney(state.cashOnHandCents, paid.payIn, locale)}: no alcanza para pagarlo todo con el efectivo. Si el dinero está en el cajón, regístralo antes en Finanzas con «Ingresar o retirar efectivo». Si una parte se pagó por otro medio, anótala como otro gasto.`
         if (paid.tenderError) fields.tender = paid.tenderError
         if (paid.rateError) fields.rate = paid.rateError
-        if (value.spentDay > today) fields.spentDay = "La fecha del gasto no puede ser futura."
+        if (value.spentDay > today && !annotatesOnly(value)) fields.spentDay = "La fecha del gasto no puede ser futura."
         if (value.repeats && !chosen) {
           const day = Number(value.repeatDay)
           if (!Number.isInteger(day) || day < 1 || day > 31) fields.repeatDay = "Escribe un día del 1 al 31."
@@ -275,7 +296,8 @@ export function ExpenseFormDrawer({
       const { chosen, asksSalesTax, cents, currency, paid } = derive(value)
       if (cents === null || value.category === "") return
       // Hoy lleva la hora real; otro día, su mediodía en la zona de la clínica.
-      const spentAt = value.spentDay === today ? {} : { spentAt: noonOf(value.spentDay, orgTimeZone) }
+      const unpaid = annotatesOnly(value)
+      const spentAt = value.spentDay === today || unpaid ? {} : { spentAt: noonOf(value.spentDay, orgTimeZone) }
       const receipt = {
         ...(value.receiptKind.trim() ? { receiptKind: value.receiptKind.trim() } : {}),
         ...(value.receiptNumber.trim() ? { receiptNumber: value.receiptNumber.trim() } : {}),
@@ -303,7 +325,7 @@ export function ExpenseFormDrawer({
         ...(second && currency !== place.currency ? { currency } : {}),
         ...paid.body,
         category: value.category,
-        fromCash: value.fromCash,
+        fromCash: value.fromCash && !unpaid,
         ...(asksSalesTax ? { salesTax: value.salesTax === "cobros" } : {}),
         ...receipt,
         ...spentAt,
@@ -314,6 +336,8 @@ export function ExpenseFormDrawer({
                 day: Number(value.repeatDay),
                 month: value.repeatMonth,
                 memberUserId: value.category === "Personal" && value.member ? value.member : null,
+                ...(unpaid ? { paid: false } : {}),
+                dueNextMonth: value.dueNext === "siguiente",
               },
             }
           : {}),
@@ -366,6 +390,8 @@ export function ExpenseFormDrawer({
       every: "1",
       repeatDay: String(Number((initial?.day && initial.day <= day ? initial.day : day).slice(8, 10))),
       repeatMonth: day.slice(0, 7),
+      paidNow: "si",
+      dueNext: "mismo",
       member: "",
     })
     setSeen(null)
@@ -440,6 +466,7 @@ export function ExpenseFormDrawer({
     // Con la caja a la vista se avisa antes de guardar si el efectivo no alcanza.
     const after =
       value.fromCash &&
+      !annotatesOnly(value) &&
       state &&
       state.currency === paid.payIn &&
       paid.outCents !== null &&
@@ -469,7 +496,14 @@ export function ExpenseFormDrawer({
   }
   const createMutation = useMutation({
     mutationFn: createExpenseApi,
-    onSuccess: (_result, input) => done(input.repeat ? "Gasto registrado: aparecerá «por pagar» cada vez que toque" : "Gasto registrado"),
+    onSuccess: (_result, input) =>
+      done(
+        input.repeat?.paid === false
+          ? `Anotado: queda por pagar el de ${MONTH_NAMES[Number(input.repeat.month?.slice(5, 7)) - 1] ?? "ese mes"}, sin registrar ningún pago`
+          : input.repeat
+            ? "Gasto registrado: aparecerá «por pagar» cada vez que toque"
+            : "Gasto registrado",
+      ),
   })
   const payMutation = useMutation({
     mutationFn: (input: { orderId: string; body: Parameters<typeof payPurchaseApi>[1] }) => payPurchaseApi(input.orderId, input.body),
@@ -522,7 +556,7 @@ export function ExpenseFormDrawer({
       open={open}
       title="Registrar gasto"
       description={chosen ? `Pago de una compra de ${chosen.branchName}.` : place.branchName ? `Gasto de ${place.branchName}.` : undefined}
-      submitLabel={chosen ? (advance ? "Registrar adelanto" : "Registrar pago") : "Registrar gasto"}
+      submitLabel={chosen ? (advance ? "Registrar adelanto" : "Registrar pago") : annotatesOnly(values) ? "Anotar" : "Registrar gasto"}
       submitDisabled={!canWrite}
       onClose={() => {
         if (!surface.isSubmitting) onClose()
@@ -693,6 +727,8 @@ export function ExpenseFormDrawer({
             field={(name, control) => <form.AppField name={name}>{() => control}</form.AppField>}
           />
         ) : null}
+        {annotatesOnly(values) ? null : (
+          <>
         <form.AppField name="fromCash">
           {(field) => (
             <FormChoiceField
@@ -727,6 +763,8 @@ export function ExpenseFormDrawer({
             </FormChoiceField>
           )}
         </form.AppField>
+          </>
+        )}
         {!chosen && !(asksSalesTaxNow && values.salesTax === "cobros") ? (
           <>
             <form.AppField name="repeats">
@@ -751,6 +789,37 @@ export function ExpenseFormDrawer({
             </form.AppField>
             {values.repeats ? (
               <div className="flex flex-col gap-4 rounded-lg border bg-muted/30 p-3">
+                <form.AppField name="paidNow">
+                  {(field) => (
+                    <field.Group
+                      legend={`¿Ya se pagó el de ${MONTH_NAMES[Number(values.repeatMonth.slice(5, 7)) - 1] ?? "este mes"}?`}
+                      description={
+                        field.state.value === "no"
+                          ? "Se anota sin registrar ningún pago: queda «por pagar» y lo pagas desde Gastos cuando toque."
+                          : "Se registra este pago y desde ahí aparece por pagar cada vez que toca."
+                      }
+                      className="gap-3"
+                    >
+                      {(control) => (
+                        <ChoiceButtons
+                          id={control.id}
+                          invalid={control.invalid}
+                          aria-describedby={control.describedBy}
+                          onBlur={control.onBlur}
+                          tone="primary"
+                          value={field.state.value}
+                          options={PAID_CHOICES}
+                          onChange={(next) => {
+                            field.handleChange(next as ExpenseValues["paidNow"])
+                            // Lo que se anota sin pagar parte de hoy, no de la fecha de un pago.
+                            if (next === "no" && !payableMonths(today).some((item) => item.value === values.repeatMonth))
+                              form.setFieldValue("repeatMonth", today.slice(0, 7))
+                          }}
+                        />
+                      )}
+                    </field.Group>
+                  )}
+                </form.AppField>
                 <form.AppField name="every">
                   {(field) => (
                     <field.Group legend="Cada cuánto" className="gap-3">
@@ -784,7 +853,7 @@ export function ExpenseFormDrawer({
                           onBlur={control.onBlur}
                           tone="primary"
                           value={field.state.value}
-                          options={payableMonths(today)}
+                          options={payableMonths(annotatesOnly(values) ? today : values.spentDay)}
                           onChange={(next) => field.handleChange(next)}
                         />
                       )}
@@ -799,6 +868,28 @@ export function ExpenseFormDrawer({
                       inputMode="numeric"
                       inputClassName="w-24"
                     />
+                  )}
+                </form.AppField>
+                <form.AppField name="dueNext">
+                  {(field) => (
+                    <field.Group
+                      legend="Se paga"
+                      description="El sueldo de noviembre que se paga el 2 de diciembre: «Al mes siguiente». Así no sale vencido antes de tiempo."
+                      className="gap-3"
+                    >
+                      {(control) => (
+                        <ChoiceButtons
+                          id={control.id}
+                          invalid={control.invalid}
+                          aria-describedby={control.describedBy}
+                          onBlur={control.onBlur}
+                          tone="primary"
+                          value={field.state.value}
+                          options={DUE_CHOICES}
+                          onChange={(next) => field.handleChange(next as ExpenseValues["dueNext"])}
+                        />
+                      )}
+                    </field.Group>
                   )}
                 </form.AppField>
                 {values.category === "Personal" ? (
@@ -819,6 +910,8 @@ export function ExpenseFormDrawer({
             ) : null}
           </>
         ) : null}
+        {annotatesOnly(values) ? null : (
+          <>
         <Collapsible open={moreOpen} onOpenChange={setMoreOpen}>
           <CollapsibleTrigger render={<Button type="button" variant="link" className="h-auto p-0" />}>
             Más detalles: comprobante recibido y fecha
@@ -844,7 +937,14 @@ export function ExpenseFormDrawer({
                         className="justify-start font-normal"
                         value={field.state.value}
                         max={today}
-                        onChange={(day) => field.handleChange(day)}
+                        onChange={(day) => {
+                          field.handleChange(day)
+                          // El mes que paga sigue a la fecha: su mes o el anterior. El día, si no se escribió otro.
+                          if (!payableMonths(day).some((item) => item.value === form.getFieldValue("repeatMonth")))
+                            form.setFieldValue("repeatMonth", day.slice(0, 7))
+                          if (!form.getFieldMeta("repeatDay")?.isTouched)
+                            form.setFieldValue("repeatDay", String(Number(day.slice(8, 10))))
+                        }}
                       >
                         {formatDayKey(field.state.value, locale, today)}
                       </DatePickerButton>
@@ -855,6 +955,8 @@ export function ExpenseFormDrawer({
             </div>
           </CollapsibleContent>
         </Collapsible>
+          </>
+        )}
         {!canWrite ? (
           <p className="text-sm font-medium">
             Tu rol no puede registrar gastos. Pídeselo a quien cobra o a administración.

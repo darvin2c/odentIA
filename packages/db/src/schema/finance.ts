@@ -180,6 +180,11 @@ export const expenseRecurring = pgTable(
     memberUserId: text("member_user_id").references(() => user.id),
     /** Cómo suele pagarse: con el efectivo de la caja o fuera de ella. */
     fromCash: boolean("from_cash").notNull().default(false),
+    /**
+     * Se paga al mes siguiente: el sueldo de noviembre que se paga el 2 de diciembre vence el 2 de
+     * diciembre, no el 2 de noviembre. Lo elige quien lo anota.
+     */
+    dueNextMonth: boolean("due_next_month").notNull().default(false),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
   },

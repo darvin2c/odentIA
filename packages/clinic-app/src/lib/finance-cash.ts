@@ -738,6 +738,8 @@ export interface ExpenseRow {
   voidReason: string | null
   /** Salió del efectivo de la caja. */
   fromCash: boolean
+  /** El mes de un gasto que se repite del que es el pago (`YYYY-MM`); anularlo lo deja otra vez por pagar. */
+  recurringMonth?: string | null
   /** Es el pago de una compra de Inventario (ADR 0061). */
   purchaseOrderId: string | null
   purchaseOrderNumber: number | null
@@ -799,7 +801,16 @@ export function createExpenseApi(body: {
   spentAt?: string
   /** «Se repite»: queda la plantilla y este gasto es su primera ocurrencia. */
   /** `month`: el mes que paga (`YYYY-MM`), este o el anterior. */
-  repeat?: { everyMonths: 1 | 6 | 12; day: number; memberUserId?: string | null; month?: string }
+  repeat?: {
+    everyMonths: 1 | 6 | 12
+    day: number
+    memberUserId?: string | null
+    month?: string
+    /** `false`: se anota sin pagar, sin ningún gasto. */
+    paid?: boolean
+    /** Se paga al mes siguiente (el sueldo de noviembre, el 2 de diciembre). */
+    dueNextMonth?: boolean
+  }
 }): Promise<{ data: { id: string } }> {
   return apiFetch<{ data: { id: string } }>("/api/finance/expenses", {
     method: "POST",
