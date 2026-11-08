@@ -1426,7 +1426,8 @@ async function withImaging(
   orgId: string,
   docs: PatientDocumentWithContext[],
 ): Promise<PatientDocumentWithContext[]> {
-  const candidates = docs.filter((doc) => doc.imageType === "tomografia").map((doc) => doc.id)
+  // Una tomografía es el documento que tiene su estudio, del tipo que sea en cada producto.
+  const candidates = docs.filter((doc) => doc.imageType).map((doc) => doc.id)
   const summaries = await imagingSummaries(tx, orgId, candidates)
   return docs.map((doc) => ({ ...doc, imaging: summaries.get(doc.id) ?? null }))
 }

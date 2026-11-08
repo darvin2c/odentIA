@@ -86,6 +86,8 @@ describe("la tomografía en el celular y en 3D", () => {
       data,
       range: { min: 0, max: 999 },
       presets: {} as never,
+      hounsfield: false,
+      fileWindow: null,
     }
     const { buffer, factor } = cbctNifti(volume, 256)
     expect(factor).toBe(3)

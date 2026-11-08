@@ -1856,6 +1856,11 @@ export const imagingMeasurement = pgTable(
     kind: text("kind").notNull(),
     /** Vista donde se marcó: panorámica, transversal, axial, coronal o sagital. */
     view: text("view").notNull(),
+    /**
+     * La serie donde se marcó (Series Instance UID): cada serie tiene su propio volumen y los mm
+     * cuentan desde su primer corte. Sin ella, la serie mayor, la única que se veía antes.
+     */
+    seriesInstanceUid: text("series_instance_uid"),
     /** Puntos [[x, y, z], …] en mm dentro del volumen. */
     points: jsonb("points").$type<[number, number, number][]>().notNull(),
     /** mm en una distancia, grados en un ángulo. */

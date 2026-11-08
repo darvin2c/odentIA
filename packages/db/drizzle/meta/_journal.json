@@ -407,6 +407,13 @@
       "when": 1794063564556,
       "tag": "0057_comision_por_servicio_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1794080912386,
+      "tag": "0058_serie_de_la_medida",
+      "breakpoints": true
     }
   ]
 }

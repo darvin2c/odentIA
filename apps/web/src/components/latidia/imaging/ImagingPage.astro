@@ -29,7 +29,7 @@ const steps = [
 const can = [
   { title: "Cada imagen con su tipo", text: "Radiografía, ecografía, tomografía computarizada, resonancia magnética, mamografía y foto clínica, cada una con su fecha de toma." },
   { title: "Zoom, brillo y contraste", text: "Acercas, aclaras u oscureces hasta ver el detalle. En DICOM también inviertes la imagen y mides en milímetros." },
-  { title: "Tomografía por cortes", text: "Se arma en el navegador y la recorres desde arriba, de frente y de lado, con la rueda o las flechas." },
+  { title: "Tomografía por cortes", text: "Se arma en el navegador: eliges la serie y la ventana (pulmón, partes blandas, hueso o cerebro) y la recorres desde arriba, de frente y de lado." },
   { title: "Comparar con la anterior", text: "La imagen de hoy al lado de la del control pasado, para ver si cambió." },
   { title: "Sin programa ni CD", text: "La carpeta del CD o un ZIP se sube a la historia. Si quieres verla en el programa del equipo de imágenes, la descargas." },
   { title: "Cada rol ve lo suyo", text: "El médico abre la imagen; recepción sube la tomografía y ve que llegó, sin abrirla." },
@@ -46,11 +46,11 @@ const faq: FaqItem[] = [
   },
   {
     q: "¿Puedo subir la carpeta del CD de una tomografía?",
-    a: "Sí: la carpeta entera, un ZIP o los archivos DICOM. La app reconoce el estudio y, si el nombre del archivo no es el del paciente, te avisa antes de guardarlo.",
+    a: "Sí: la carpeta entera, un ZIP o los archivos DICOM, hasta 1,5 GB por estudio. La app reconoce el estudio con todas sus series y, si el nombre del archivo no es el del paciente, te avisa antes de guardarlo.",
   },
   {
     q: "¿Las medidas sirven para decidir un tratamiento?",
-    a: "Son orientativas: sirven para conversar el caso y dejarlo anotado. Para una decisión que dependa de la medida, confírmala en el programa de tu equipo de imágenes.",
+    a: "Son orientativas, con la escala del archivo: sirven para ver la tomografía junto a su informe y explicársela al paciente. El diagnóstico es el informe del radiólogo.",
   },
   {
     q: "¿Quién puede ver las imágenes?",

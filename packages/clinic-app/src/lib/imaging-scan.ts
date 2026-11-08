@@ -58,7 +58,7 @@ export interface ScanResult {
 /** Media Storage Directory Storage (PS3.4 Anexo F): el índice del CD, no una imagen. */
 const DICOMDIR_CLASS = "1.2.840.10008.1.3.10"
 /** Cortes a partir de los cuales una serie se trata como volumen. */
-const VOLUME_MIN_SLICES = 10
+export const VOLUME_MIN_SLICES = 10
 
 function text(ds: dicomParser.DataSet, tag: string): string | null {
   const value = ds.string(tag)?.trim()

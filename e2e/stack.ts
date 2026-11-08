@@ -270,10 +270,10 @@ async function inspectVolumes(client: ContainerRuntimeClient, id: string): Promi
 /**
  * Buckets del run como en producción (`infra/dev/storage-init.sh`): avatares
  * públicos solo bajo `/avatars/*` y con versiones, adjuntos privados con la
- * regla CORS de R2 para el dominio del run. RustFS no da CORS por defecto y
+ * regla CORS de R2 para los dominios del run (odentIA y, si corre, latidIA). RustFS no da CORS por defecto y
  * sin ella el navegador no sube ni lee adjuntos firmados.
  */
-async function prepareBuckets(endpoint: string, origin: string): Promise<void> {
+async function prepareBuckets(endpoint: string, origins: string[]): Promise<void> {
   const client = new S3Client({
     endpoint,
     region: "auto",
@@ -335,7 +335,7 @@ async function prepareBuckets(endpoint: string, origin: string): Promise<void> {
           CORSConfiguration: {
             CORSRules: [
               {
-                AllowedOrigins: [origin],
+                AllowedOrigins: origins,
                 AllowedMethods: ["GET", "PUT", "HEAD"],
                 AllowedHeaders: ["content-type", "range"],
                 ExposeHeaders: ["content-length", "content-range", "etag"],
@@ -543,7 +543,11 @@ export async function startStack(runtime: HarnessRuntime): Promise<HarnessStack>
     })
     await prepareBuckets(
       `http://${runtime.storage.host}:${runtime.storage.port}`,
-      `https://*.${runtime.baseDomain}:${runtime.proxyPort}`,
+      // Las dos marcas, como el bucket de producción: latidIA sube y lee desde su dominio.
+      [
+        `https://*.${runtime.baseDomain}:${runtime.proxyPort}`,
+        ...(runtime.medicalDomain ? [`https://*.${runtime.medicalDomain}:${runtime.proxyPort}`] : []),
+      ],
     )
   } catch (error) {
     await fail(error)

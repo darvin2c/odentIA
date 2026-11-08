@@ -3,7 +3,7 @@ import { productHooks } from "./products.js"
 import { imagingMeasurement, imagingStudy, imagingStudyFile, patientDocument } from "@odentia/db/schema/clinical"
 import { user } from "@odentia/db/schema/auth"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, count, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm"
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm"
 import {
   getPatientDocument,
   type PatientDocumentWithContext,
@@ -22,8 +22,12 @@ import { requirePatient } from "./patients.js"
  * nunca el contenido.
  */
 
-/** Tope por tomografía (decisión 4 del lienzo). */
-export const IMAGING_STUDY_MAX_BYTES = 1024 ** 3
+/**
+ * Tope por tomografía: 1,5 GB. Con 1 GB quedaban fuera 2 de 35 tomografías médicas recientes
+ * medidas en The Cancer Imaging Archive (tórax y páncreas de 1,1 a 1,2 GB); el visor arma una
+ * serie a la vez, así que la memoria no depende del total.
+ */
+export const IMAGING_STUDY_MAX_BYTES = 1.5 * 1024 ** 3
 export const IMAGING_STUDY_MAX_FILES = 5000
 /** Motivo con que se retira una subida que nadie va a terminar. */
 export const IMAGING_UPLOAD_CANCEL_REASON = "Subida cancelada"
@@ -191,8 +195,9 @@ export async function startImagingStudyUpload(
   files: { index: number; sopInstanceUid: string }[]
 }> {
   await requirePatient(tx, orgId, patientId)
-  // La misma regla que la pantalla de subir: no basta con que el producto no tenga el tipo «tomografia».
-  if (!(await productHooks(tx, orgId)).imagingStudies)
+  // La misma regla que la pantalla de subir; el tipo con que se guarda es el del producto.
+  const imageType = (await productHooks(tx, orgId)).imagingStudy
+  if (!imageType)
     throw new ServiceError(
       "IMAGING_STUDIES_UNSUPPORTED",
       400,
@@ -215,7 +220,7 @@ export async function startImagingStudyUpload(
     total += file.sizeBytes
   }
   if (total > IMAGING_STUDY_MAX_BYTES)
-    throw validation("La tomografía supera 1 GB: descárgala del centro de imágenes sin el visor")
+    throw validation("La tomografía supera 1,5 GB: pide al centro de imágenes las series principales, sin su visor")
   if (!Number.isInteger(input.sliceCount) || input.sliceCount < 1 || input.sliceCount > 20000)
     throw validation("La cantidad de cortes no es válida")
   const voxel =
@@ -277,7 +282,7 @@ export async function startImagingStudyUpload(
     storageKey: folder,
     contentType: "application/dicom",
     sizeBytes: total,
-    imageType: "tomografia",
+    imageType,
     capturedAt: input.capturedAt ?? undefined,
     source: input.source ?? undefined,
     toothNumbers: input.toothNumbers ?? undefined,
@@ -597,12 +602,16 @@ export interface ImagingMeasurementInput {
   points: [number, number, number][]
   value: number
   toothNumber?: number | null
+  /** La serie donde se marcó (cada serie tiene su volumen). Sin ella, la serie mayor. */
+  seriesInstanceUid?: string | null
 }
 
 export interface ImagingMeasurementRow {
   id: string
   kind: string
   view: string
+  /** null: la serie mayor (las medidas de antes de poder elegir la serie). */
+  seriesInstanceUid: string | null
   points: [number, number, number][]
   value: number
   toothNumber: number | null
@@ -625,6 +634,7 @@ export async function listImagingMeasurements(
       id: imagingMeasurement.id,
       kind: imagingMeasurement.kind,
       view: imagingMeasurement.view,
+      seriesInstanceUid: imagingMeasurement.seriesInstanceUid,
       points: imagingMeasurement.points,
       value: imagingMeasurement.value,
       siteSystem: imagingMeasurement.siteSystem,
@@ -680,6 +690,24 @@ export async function addImagingMeasurement(
   const tooth = input.toothNumber ?? null
   const code = tooth === null ? null : site.code(tooth)
   if (tooth !== null && code === null) throw validation(site.invalid(tooth))
+  // La serie donde se marcó, de esta tomografía; sin decirla, la mayor (la de más archivos y, si
+  // empatan, la del primer archivo, como la elige el visor). Siempre queda guardada.
+  const asked = input.seriesInstanceUid == null ? null : dicomUid(input.seriesInstanceUid, "La serie")
+  const [found] = await tx
+    .select({ series: imagingStudyFile.seriesInstanceUid })
+    .from(imagingStudyFile)
+    .where(
+      and(
+        eq(imagingStudyFile.organizationId, orgId),
+        eq(imagingStudyFile.documentId, documentId),
+        ...(asked ? [eq(imagingStudyFile.seriesInstanceUid, asked)] : []),
+      ),
+    )
+    .groupBy(imagingStudyFile.seriesInstanceUid)
+    .orderBy(desc(count()), asc(sql`min(${imagingStudyFile.fileIndex})`))
+    .limit(1)
+  if (!found) throw validation("La serie no es de esta tomografía")
+  const series = found.series
   const [row] = await tx
     .insert(imagingMeasurement)
     .values({
@@ -688,6 +716,7 @@ export async function addImagingMeasurement(
       documentId,
       kind: input.kind,
       view: input.view,
+      seriesInstanceUid: series,
       points: input.points.map((p) => [p[0], p[1], p[2]] as [number, number, number]),
       value: input.value,
       siteSystem: code === null ? null : site.system,
@@ -707,6 +736,7 @@ export async function addImagingMeasurement(
     id: row.id,
     kind: row.kind,
     view: row.view,
+    seriesInstanceUid: row.seriesInstanceUid,
     points: row.points,
     value: row.value,
     toothNumber: site.value(row.siteCode),
