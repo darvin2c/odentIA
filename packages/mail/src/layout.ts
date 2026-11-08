@@ -105,7 +105,7 @@ const MAIL_BRANDS: Record<
   },
   vistia: {
     name: "vistIA",
-    marca: "#15803d",
+    marca: "#147c3b",
     marcaTinta: "#166534",
     oscuro: { boton: "#4ade80", botonTinta: "#052e16", enlace: "#bbf7d0" },
   },

@@ -299,13 +299,13 @@
  */
 :root[data-brand="vistia"],
 :root[data-brand="vistia"] .theme-light {
-    --identity-accent: #15803d;
-    --primary: #15803d;
+    --identity-accent: #147c3b;
+    --primary: #147c3b;
     --primary-soft: #dcfce7;
     --primary-soft-foreground: #166534;
-    --ring: #15803d;
-    --sidebar-primary: #15803d;
-    --sidebar-ring: #15803d;
+    --ring: #147c3b;
+    --sidebar-primary: #147c3b;
+    --sidebar-ring: #147c3b;
     --agent-soft: #f0fdf4;
     --agent-border: #bbf7d0;
 }
@@ -370,7 +370,7 @@
     --product-medical: #6d3fc0;
     --product-medical-soft: #ece4fb;
     --product-medical-foreground: #4c2a8a;
-    --product-optical: #15803d;
+    --product-optical: #147c3b;
     --product-optical-soft: #dcfce7;
     --product-optical-foreground: #166534;
 }

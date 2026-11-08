@@ -53,7 +53,11 @@ describe("los dos dominios de una instalación (decisión 9 del issue 229)", () 
 
 describe("el pie de los correos de cada marca", () => {
   it("lleva la web de la marca de cada producto con dominio propio, y nada sin dominio", () => {
-    expect(mailBrandDomains({ medical: "latidia72.com" })).toEqual({ latidia: "latidia72.com" })
-    expect(mailBrandDomains({ medical: undefined })).toEqual({})
+    expect(mailBrandDomains({ medical: "latidia72.com", optical: "vistia20.com" })).toEqual({
+      latidia: "latidia72.com",
+      vistia: "vistia20.com",
+    })
+    expect(mailBrandDomains({ medical: "latidia72.com", optical: undefined })).toEqual({ latidia: "latidia72.com" })
+    expect(mailBrandDomains({ medical: undefined, optical: undefined })).toEqual({})
   })
 })

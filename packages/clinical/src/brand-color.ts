@@ -23,7 +23,7 @@ import type { ClinicalProduct } from "./products.js"
 export const BRAND_COLOR_PATTERN = /^#[0-9a-f]{6}$/
 
 /** El color de fábrica de cada producto: el primario de odentIA, el de latidIA y el de vistIA en `globals.css`. */
-export const PRODUCT_BRAND_COLORS = { dental: "#0e7490", medical: "#6d3fc0", optical: "#15803d" } as const satisfies Record<ClinicalProduct, string>
+export const PRODUCT_BRAND_COLORS = { dental: "#0e7490", medical: "#6d3fc0", optical: "#147c3b" } as const satisfies Record<ClinicalProduct, string>
 
 /** Cómo se llama el color de fábrica de cada producto entre los sugeridos. */
 const FACTORY_COLOR_NAME: Record<ClinicalProduct, string> = { dental: "Turquesa", medical: "Morado", optical: "Verde" }

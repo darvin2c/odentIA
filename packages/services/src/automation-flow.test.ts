@@ -73,7 +73,7 @@ import { agentTextsFor } from "./products.js"
 setupTestDb()
 // Los mensajes con «Su enlace» llevan un botón con la dirección de la clínica.
 // latidIA en su propio dominio (decisión 9 del lienzo del issue 229).
-configurePublicLinks({ webURL: "https://app.odentia.test", cookieDomain: "odentia.test", productDomains: { medical: "latidia.test" } })
+configurePublicLinks({ webURL: "https://app.odentia.test", cookieDomain: "odentia.test", productDomains: { medical: "latidia.test", optical: "vistia.test" } })
 const KEY = secretsKeyFromEnv("ab".repeat(32))
 const HOUR = 3_600_000
 const DAY = 24 * HOUR

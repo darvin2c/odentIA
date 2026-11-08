@@ -484,6 +484,13 @@
       "when": 1794164867778,
       "tag": "0068_firma_del_presupuesto",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1794181069139,
+      "tag": "0069_vistia_opticas",
+      "breakpoints": true
     }
   ]
 }

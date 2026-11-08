@@ -16,7 +16,7 @@ const QUIET = 2
 const LOGO_SHARE = 0.22
 
 /** El color del isotipo sobre el blanco del código: el de cada marca en claro. */
-const ISOTIPO_COLOR: Record<BrandId, string> = { odentia: "#0e7490", latidia: "#6d3fc0", vistia: "#15803d" }
+const ISOTIPO_COLOR: Record<BrandId, string> = { odentia: "#0e7490", latidia: "#6d3fc0", vistia: "#147c3b" }
 
 /** El isotipo de la marca en su caja de 128 × 112: los dos dígitos y los corchetes. */
 function isotipo(brand: BrandId): string {

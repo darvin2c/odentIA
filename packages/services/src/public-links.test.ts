@@ -4,7 +4,7 @@ import { clinicOrigin, panelOrigin, productDomainOf } from "./public-links.js"
 const config = {
   webURL: "https://app.odentia32.com",
   cookieDomain: "odentia32.com",
-  productDomains: { medical: "latidia72.com" },
+  productDomains: { medical: "latidia72.com", optical: "vistia20.com" },
 }
 
 describe("la dirección de cada clínica, en el dominio de su producto (decisión 9 del issue 229)", () => {

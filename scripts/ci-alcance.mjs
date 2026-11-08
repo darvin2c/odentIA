@@ -30,6 +30,7 @@ const INTERFAZ = [
   "@odentia/ui-patterns",
   "@odentia/dental-clinic",
   "@odentia/medical-clinic",
+  "@odentia/optical-clinic",
   "@odentia/clinic-app",
 ]
 const API = ["@odentia/api"]
@@ -43,6 +44,7 @@ const SIN_BASE_DE_DATOS = [
   "@odentia/admin",
   "@odentia/dental-clinic",
   "@odentia/medical-clinic",
+  "@odentia/optical-clinic",
   "@odentia/clinic-app",
   "@odentia/ui",
   "@odentia/ui-patterns",
@@ -55,6 +57,7 @@ const CLOUDFLARE = [
   "@odentia/admin",
   "@odentia/dental-clinic",
   "@odentia/medical-clinic",
+  "@odentia/optical-clinic",
 ]
 // Apps del VPS: la imagen de producción sirve api y worker.
 const VPS = ["@odentia/api", "@odentia/worker"]

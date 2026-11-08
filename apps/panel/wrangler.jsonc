@@ -1,5 +1,5 @@
-// El panel en Cloudflare Workers (ADR 0137): el de odentIA y, con `CLOUDFLARE_ENV=latidia` al
-// compilar, el de latidIA. El build con `WEB_TARGET=cloudflare` arma desde aquí el
+// El panel en Cloudflare Workers (ADR 0137): el de odentIA y, con `CLOUDFLARE_ENV=latidia` o
+// `CLOUDFLARE_ENV=vistia` al compilar, el de latidIA o el de vistIA. El build con `WEB_TARGET=cloudflare` arma desde aquí el
 // `dist/server/wrangler.json` que publica `wrangler deploy`. Sin `routes`: la ruta de `app.<dominio>`
 // vive en el panel de Cloudflare (docs/deployment.md).
 {
@@ -14,6 +14,12 @@
   "env": {
     "latidia": {
       "name": "latidia-panel",
+      "workers_dev": false,
+      "preview_urls": false,
+      "observability": { "enabled": true }
+    },
+    "vistia": {
+      "name": "vistia-panel",
       "workers_dev": false,
       "preview_urls": false,
       "observability": { "enabled": true }
