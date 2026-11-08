@@ -100,17 +100,17 @@ CREATE OR REPLACE VIEW public.commission_live AS
         ), ruled AS (
          SELECT sl.*,
             g.rate_bps AS general_bps,
-            sv.rate_bps AS service_bps,
-            sv.fixed_cents AS service_fixed,
+            ex.rate_bps AS service_bps,
+            ex.fixed_cents AS service_fixed,
             -- El monto fijo vale solo en su moneda (lo guardado antes, sin moneda, es del negocio).
-            ((sv.fixed_cents IS NOT NULL) AND (COALESCE(sv.fixed_currency, op.currency::text) = sl.currency)) AS fixed_ok,
-            ((sv.fixed_cents IS NOT NULL) AND (COALESCE(sv.fixed_currency, op.currency::text) <> sl.currency)) AS fixed_other,
+            ((ex.fixed_cents IS NOT NULL) AND (COALESCE(ex.fixed_currency, op.currency::text) = sl.currency)) AS fixed_ok,
+            ((ex.fixed_cents IS NOT NULL) AND (COALESCE(ex.fixed_currency, op.currency::text) <> sl.currency)) AS fixed_other,
             (sl.app_cents / (sl.sessions)::numeric) AS own_value,
             (public.org_money_value(sl.app_cents, (sl.payment_cents)::numeric, (sl.business_cents)::numeric, sl.currency, op.currency, op.second_currency, op.exchange_factor) / (sl.sessions)::numeric) AS value,
             op.currency AS business_currency,
             op.second_currency,
             op.exchange_factor
-           FROM (((sliced sl
+           FROM (((((sliced sl
              LEFT JOIN public.org_profile op ON ((op.organization_id = sl.organization_id)))
              LEFT JOIN LATERAL ( SELECT r.rate_bps
                    FROM public.commission_rate r
@@ -119,11 +119,27 @@ CREATE OR REPLACE VIEW public.commission_live AS
                  LIMIT 1) g ON (true))
              LEFT JOIN LATERAL ( SELECT r.rate_bps,
                     r.fixed_cents,
-                    r.fixed_currency
+                    r.fixed_currency,
+                    r.effective_from
                    FROM public.commission_rate r
                   WHERE ((r.organization_id = sl.organization_id) AND (r.professional_user_id = sl.user_id) AND (r.service_id = sl.service_id) AND (r.effective_from <= sl.rule_at))
                   ORDER BY r.effective_from DESC
                  LIMIT 1) sv ON (true))
+             -- Un monto en otra moneda no vale: la versión que se escribió después para corregirlo
+             -- (en esta moneda, un porcentaje o quitarlo) vale también para lo atendido antes. Sin
+             -- esto, esa línea quedaría sin regla para siempre.
+             LEFT JOIN LATERAL ( SELECT true AS found,
+                    r.rate_bps,
+                    r.fixed_cents,
+                    r.fixed_currency
+                   FROM public.commission_rate r
+                  WHERE ((sv.fixed_cents IS NOT NULL) AND (COALESCE(sv.fixed_currency, op.currency::text) <> sl.currency) AND (r.organization_id = sl.organization_id) AND (r.professional_user_id = sl.user_id) AND (r.service_id = sl.service_id) AND (r.effective_from > sv.effective_from) AND ((r.fixed_cents IS NULL) OR (COALESCE(r.fixed_currency, op.currency::text) = sl.currency)))
+                  ORDER BY r.effective_from
+                 LIMIT 1) fx ON (true))
+             CROSS JOIN LATERAL ( SELECT
+                        CASE WHEN (fx.found IS TRUE) THEN fx.rate_bps ELSE sv.rate_bps END AS rate_bps,
+                        CASE WHEN (fx.found IS TRUE) THEN fx.fixed_cents ELSE sv.fixed_cents END AS fixed_cents,
+                        CASE WHEN (fx.found IS TRUE) THEN fx.fixed_currency ELSE sv.fixed_currency END AS fixed_currency) ex)
         ), computed AS (
          SELECT r.*,
                 CASE

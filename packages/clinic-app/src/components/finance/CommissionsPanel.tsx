@@ -467,7 +467,7 @@ export function CommissionsAdminPanel({
               const views = summaryCurrencies(row)
               const owes = views.filter((view) => (view.owedCents ?? 0) > 0 && view.pendingCents <= 0)
               // Lo que pide atención primero: lo que falta pagar en alguna moneda.
-              const status = views.find((view) => view.status === "por_pagar")?.status ?? views[0]?.status ?? row.status
+              const leading = views.find((view) => view.status === "por_pagar") ?? views[0] ?? row
               return (
                 <li key={row.professionalUserId} className="min-w-0">
                   <Button
@@ -501,13 +501,14 @@ export function CommissionsAdminPanel({
                             : formatMoney(view.commissionCents, view.currency, locale)}
                         </span>
                       ))}
+                      {owes.length === 0 || leading.status === "por_pagar" ? (
+                        <StatusBadge status={leading.status} baseCents={leading.baseCents} />
+                      ) : null}
                       {owes.length > 0 ? (
                         <Badge variant="secondary">
                           Debe a la clínica {amountsWords(owes.map((view) => ({ cents: view.owedCents ?? 0, currency: view.currency })), locale)}
                         </Badge>
-                      ) : (
-                        <StatusBadge status={status} baseCents={row.baseCents} />
-                      )}
+                      ) : null}
                     </span>
                   </Button>
                 </li>
@@ -646,7 +647,9 @@ function ProfessionalDetailBody({
   // la clínica no se muestra vacía si solo hubo cobros en la otra.
   const others = detail.others ?? []
   const blocks =
-    others.length > 0 && detail.lines.length === 0 && detail.adjustmentCents === 0 ? others : [detail, ...others]
+    others.length > 0 && detail.lines.length === 0 && detail.adjustmentCents === 0 && !detail.salary
+      ? others
+      : [detail, ...others]
   const titled = blocks.length > 1 || blocks[0]?.currency !== detail.currency
   const discountOnly = blocks.every((view) => view.pendingCents === 0 && view.discountCents > 0)
 

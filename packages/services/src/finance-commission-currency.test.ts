@@ -106,6 +106,9 @@ it("lo cobrado en dólares da su comisión en dólares, que se paga en dólares 
   expect(rows).toHaveLength(1)
   expect(rows[0]).toMatchObject({ currency: "PEN", pendingCents: 9_000 })
   expect(rows[0]!.others).toMatchObject([{ currency: "USD", owedCents: 30_000 }])
+  // Reportes tampoco cruza monedas: lo de soles se sigue debiendo entero.
+  const [owedAfter] = await c.run((tx) => commissionsOwedMany(tx, c.orgId, [new Date(Date.now() + 1000)], { currency: "PEN" }))
+  expect(owedAfter).toEqual({ cents: 9_000, professionals: 1 })
 })
 
 it("el monto fijo va en la moneda del servicio, nunca paga más de lo cobrado y no vale en otra moneda", async () => {
@@ -139,6 +142,32 @@ it("el monto fijo va en la moneda del servicio, nunca paga más de lo cobrado y 
   const mixed = await c.run((tx) => getMonthlyCommissions(tx, c.orgId, { professionalUserId: c.actor, ...currentPeriod() }))
   const crownLine = mixed.others[0]!.lines.find((line) => line.chargeId === crown.id)
   expect(crownLine).toMatchObject({ commissionCents: 0, unruled: true })
+
+  // El servicio pasa a dólares y se escribe el monto de nuevo: vale también para lo atendido antes,
+  // que se había quedado sin regla. Lo que no tenía regla nunca quedó sin poder pagarse.
+  await ownerDb.update(serviceCatalog).set({ currency: "USD", priceCents: 20_000 }).where(eq(serviceCatalog.id, penService!.id))
+  await c.run((tx) =>
+    setCommissionException(tx, c.orgId, c.actor, { professionalUserId: c.actor, serviceId: penService!.id, fixedCents: 5_000 }),
+  )
+  const fixedUp = await c.run((tx) => getMonthlyCommissions(tx, c.orgId, { professionalUserId: c.actor, ...currentPeriod() }))
+  const fixedLine = fixedUp.others[0]!.lines.find((line) => line.chargeId === crown.id)
+  expect(fixedLine).toMatchObject({ fixedCents: 5_000, commissionCents: 5_000 })
+  expect(fixedLine?.unruled).toBeUndefined()
+})
+
+it("lo adelantado de un servicio que se cobra por sesión no comisiona: comisiona el cobro de cada visita", async () => {
+  const f = await clinicalFixture()
+  await f.run((tx) =>
+    tx.execute(sql`update "service_catalog" set "price_cents" = 15000, "billing_mode" = 'session' where "id" = ${f.service.id}`),
+  )
+  const item = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id, plannedSessions: 4 }),
+  )
+  const budget = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [item.id] }))
+  await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
+  await f.run((tx) => decideBudget(tx, ...f.args, budget.id, { decisions: [{ planItemId: item.id, decision: "aceptado" }] }))
+  const prepaid = await f.run((tx) => createCharge(tx, ...f.args, { budgetItemId: budget.items[0]!.id }))
+  expect(prepaid.commissionSessions).toBeNull()
 })
 
 it("lo cobrado por adelantado de un tratamiento es de quien haga cada sesión; mientras tanto se ve aparte", async () => {

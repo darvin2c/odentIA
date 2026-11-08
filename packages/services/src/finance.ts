@@ -2812,6 +2812,22 @@ export interface MonthlyCommissionsQuery {
  * - Un cobro anulado después de pagada su comisión queda como ajuste: se
  *   descuenta del siguiente pago al profesional, sea del mes que sea.
  */
+interface MonthPreload {
+  rules: Awaited<ReturnType<typeof commissionRulesOf>>
+  allLive: LiveCommissionLine[]
+  allFrozen: FrozenLine[]
+}
+
+/** Lo que un mes de un profesional lee, de todas sus monedas a la vez. */
+async function loadMonth(tx: Db, orgId: string, query: MonthlyCommissionsQuery, timezone: string): Promise<MonthPreload> {
+  const { start, end } = monthBounds(timezone, query.year, query.month)
+  return {
+    rules: await commissionRulesOf(tx, orgId, query.professionalUserId),
+    allLive: await liveCommissionLines(tx, orgId, { professionalUserId: query.professionalUserId, start, end }),
+    allFrozen: await frozenLines(tx, orgId, query.professionalUserId),
+  }
+}
+
 async function monthView(
   tx: Db,
   orgId: string,
@@ -2820,6 +2836,8 @@ async function monthView(
   known?: OrgLocale,
   /** Si sigue en el equipo, cuando quien llama ya lo sabe (la lista del mes). */
   knownInTeam?: boolean,
+  /** Lo ya leído para otra moneda del mismo mes: no se vuelve a leer. */
+  preload?: MonthPreload,
 ) {
   const { inTeam } =
     knownInTeam === undefined
@@ -2832,11 +2850,10 @@ async function monthView(
   const money = orgMoneyOf(zone)
   const { start, end } = monthBounds(timezone, query.year, query.month)
   void money
-  const rules = await commissionRulesOf(tx, orgId, query.professionalUserId)
+  const loaded = preload ?? (await loadMonth(tx, orgId, query, timezone))
+  const { rules, allLive, allFrozen } = loaded
   const rateBps = rules.rateBps
-  const allLive = await liveCommissionLines(tx, orgId, { professionalUserId: query.professionalUserId, start, end })
   const live = allLive.filter((app) => app.currency === unit)
-  const allFrozen = await frozenLines(tx, orgId, query.professionalUserId)
   const frozen = allFrozen.filter((f) => f.currency === unit)
   const allFrozenCobros = allFrozen.filter((f) => f.line.kind === "cobro" && f.line.applicationId)
   const frozenCobros = allFrozenCobros.filter((f) => f.currency === unit)
@@ -3066,11 +3083,13 @@ export async function getMonthlyCommissions(
   knownInTeam?: boolean,
 ) {
   const zone = known ?? (await getOrgLocale(tx, orgId))
-  const view = await monthView(tx, orgId, query, zone, knownInTeam)
+  // Se lee una vez y se arma cada moneda con lo mismo.
+  const preload = await loadMonth(tx, orgId, query, zone.timezone)
+  const view = await monthView(tx, orgId, query, zone, knownInTeam, preload)
   const others: MonthCommissionsView[] = []
   if (!query.currency)
     for (const currency of view.otherCurrencies) {
-      const other = await monthView(tx, orgId, { ...query, currency }, zone, view.inTeam)
+      const other = await monthView(tx, orgId, { ...query, currency }, zone, view.inTeam, preload)
       if (hasActivity(other)) others.push(other)
     }
   return { ...view, others }

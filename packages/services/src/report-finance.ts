@@ -65,6 +65,11 @@ export interface CommissionTotals {
   paidCents: number
   /** La parte que aún no entra en ningún pago. */
   freshCents: number
+  /**
+   * Lo mismo por la moneda de lo cobrado, en moneda del negocio: lo que se descuenta en una
+   * moneda solo baja lo de esa moneda (ADR 0155).
+   */
+  freshByCurrency?: Record<string, number>
 }
 
 /**
@@ -92,7 +97,7 @@ function commissionLinesSql(orgId: string, hull: Span, currency: string, branchI
   return sql`frozen as materialized (
       -- Lo ya pagado, con lo que se pagó. Si el cobro se anuló después, se pagó igual
       -- (cuenta en lo pagado) pero ya no es comisión del mes: se descuenta del próximo pago.
-      select l.application_id, ${frozenValueSql(sql`l.base_cents`, currency)} as base,
+      select l.application_id, s.currency::text as currency, ${frozenValueSql(sql`l.base_cents`, currency)} as base,
         ${frozenValueSql(sql`l.commission_cents`, currency)} as commission, l.occurred_at as at,
         s.professional_user_id as user_id,
         (a.voided_at is null and p.voided_at is null and c.voided_at is null) as live
@@ -106,10 +111,10 @@ function commissionLinesSql(orgId: string, hull: Span, currency: string, branchI
         and l.occurred_at >= ${at(hull.start)} and l.occurred_at < ${at(hull.end)} ${branch}
     ), commission_line as materialized (
       select f.user_id, f.at, (case when f.live then f.base else 0 end)::numeric as base, (case when f.live then f.commission else 0 end)::numeric as commission,
-        f.commission::numeric as paid, 0::numeric as fresh
+        f.commission::numeric as paid, 0::numeric as fresh, f.currency
       from frozen f
       union all
-      select cl.professional_user_id, cl.at, cl.value, cl.commission, 0, cl.commission
+      select cl.professional_user_id, cl.at, cl.value, cl.commission, 0, cl.commission, cl.currency
       from ${commissionLiveIn(orgId, hull.start, hull.end)} cl
       where true
         ${branchId ? sql`and cl.branch_id = ${branchId}` : sql``}
@@ -135,6 +140,17 @@ export async function commissionsMany(
       round(sum(ml.paid))::text as paid, round(sum(ml.fresh))::text as fresh
     from counted_line ml join ${spansSql(spans, "s")} on ml.at >= s.start_at and ml.at < s.end_at
     group by s.idx, ml.user_id`)
+  // Lo nuevo por moneda: para descontar en cada una lo suyo.
+  const fresh = await tx.execute<{ idx: number; userId: string; currency: string; fresh: string }>(sql`
+    with ${commissionLinesSql(orgId, hull, options.currency, options.branchId)}
+    select s.idx, ml.user_id as "userId", ml.currency, round(sum(ml.fresh))::text as fresh
+    from counted_line ml join ${spansSql(spans, "s")} on ml.at >= s.start_at and ml.at < s.end_at
+    where ml.fresh <> 0
+    group by s.idx, ml.user_id, ml.currency`)
+  const freshOf = (idx: number, userId: string): Record<string, number> =>
+    Object.fromEntries(
+      fresh.filter((row) => Number(row.idx) === Number(idx) && row.userId === userId).map((row) => [row.currency, safeCents(row.fresh)]),
+    )
   return bySpan(
     spans,
     [...rows],
@@ -147,6 +163,7 @@ export async function commissionsMany(
         commissionCents: safeCents(row.commission),
         paidCents: safeCents(row.paid),
         freshCents: safeCents(row.fresh),
+        freshByCurrency: freshOf(row.idx, row.userId),
       },
     ],
   )
@@ -185,13 +202,55 @@ async function pendingCommissionAdjustments(
 }
 
 /**
+ * Lo que queda por descontar a cada profesional en cada moneda, en moneda del negocio con el
+ * cambio de su pago: la misma cuenta de `pendingCommissionAdjustments`, para Reportes.
+ */
+async function pendingAdjustmentsValued(
+  tx: Db,
+  orgId: string,
+  business: string,
+  branchId?: string,
+): Promise<Map<string, Map<string, number>>> {
+  const rows = await tx.execute<{ userId: string; currency: string; cents: string }>(sql`
+    select s.professional_user_id as "userId", s.currency::text as currency,
+      round(sum(${frozenValueSql(sql`l.commission_cents - coalesce(d.cents, 0)`, business)}))::text as cents
+    from commission_settlement_line l
+    join commission_settlement s on s.organization_id = l.organization_id and s.id = l.settlement_id and s.voided_at is null
+    join patient_payment_application a on a.organization_id = l.organization_id and a.id = l.application_id
+    join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id
+    join patient_charge c on c.organization_id = a.organization_id and c.id = a.charge_id
+    left join org_profile op on op.organization_id = l.organization_id
+    left join lateral (
+      select sum(l2.commission_cents) as cents from commission_settlement_line l2
+      join commission_settlement s2 on s2.organization_id = l2.organization_id and s2.id = l2.settlement_id and s2.voided_at is null
+      where l2.organization_id = l.organization_id and l2.kind = 'ajuste' and l2.voided_at is null and l2.application_id = l.application_id
+        and l2.slice is not distinct from l.slice
+    ) d on true
+    where l.organization_id = ${orgId} and l.kind = 'cobro' and l.voided_at is null and l.commission_cents > 0
+      and (a.voided_at is not null or p.voided_at is not null or c.voided_at is not null)
+      and l.commission_cents > coalesce(d.cents, 0)
+      ${branchId ? sql`and p.branch_id = ${branchId}` : sql``}
+    group by s.professional_user_id, s.currency`)
+  const byUser = new Map<string, Map<string, number>>()
+  for (const row of rows) {
+    const own = byUser.get(row.userId) ?? new Map<string, number>()
+    own.set(row.currency, safeCents(row.cents))
+    byUser.set(row.userId, own)
+  }
+  return byUser
+}
+
+/**
  * Lo que falta pagarle a un profesional del tramo: lo nuevo menos lo que hay
- * que descontarle, nunca menos de cero. Se cuenta por profesional: lo que se le
+ * que descontarle, nunca menos de cero, en cada moneda por separado (un descuento
+ * en dólares no baja lo de soles). Se cuenta por profesional: lo que se le
  * descuenta a uno no baja lo que se le debe a otro. La tarjeta y la tabla de
  * Comisiones usan esta misma cuenta.
  */
-function pendingOf(row: CommissionTotals, adjustments: Map<string, number>): number {
-  return Math.max(0, row.freshCents - (adjustments.get(row.userId) ?? 0))
+function pendingOf(row: CommissionTotals, adjustments: Map<string, Map<string, number>>): number {
+  const own = adjustments.get(row.userId)
+  const fresh = row.freshByCurrency ?? {}
+  return Object.entries(fresh).reduce((total, [currency, cents]) => total + Math.max(0, cents - (own?.get(currency) ?? 0)), 0)
 }
 
 /**
@@ -213,12 +272,13 @@ export async function commissionsOwedMany(
       moments.map((moment, index) => sql`(${index}::int, ${at(moment)})`),
       sql`, `,
     )}), generated as (
-      select m.idx, ml.user_id, sum(ml.commission) as cents from m join counted_line ml on ml.at < m.at_moment group by m.idx, ml.user_id
+      select m.idx, ml.user_id, ml.currency, sum(ml.commission) as cents from m join counted_line ml on ml.at < m.at_moment
+      group by m.idx, ml.user_id, ml.currency
     ), paid as (
       -- Lo pagado es lo de sus cobros menos lo descontado de sus cobros anulados, como lo generado y
       -- en moneda del negocio. En una sede, lo de sus cobros: la sede donde se anotó el gasto del pago
       -- no cambia de quién es la deuda.
-      select m.idx, s.professional_user_id as user_id,
+      select m.idx, s.professional_user_id as user_id, s.currency::text as currency,
         sum(case when l.kind = 'cobro' then 1 else -1 end * ${frozenValueSql(sql`l.commission_cents`, options.currency)}) as cents
       from m join commission_settlement s on s.organization_id = ${orgId} and s.voided_at is null and s.settled_at < m.at_moment
       join commission_settlement_line l on l.organization_id = s.organization_id and l.settlement_id = s.id and l.voided_at is null
@@ -226,13 +286,17 @@ export async function commissionsOwedMany(
       join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id
         ${options.branchId ? sql`and p.branch_id = ${options.branchId}` : sql``}
       left join org_profile op on op.organization_id = s.organization_id
-      group by m.idx, s.professional_user_id
+      group by m.idx, s.professional_user_id, s.currency
     )
     select coalesce(g.idx, p.idx) as idx, coalesce(g.user_id, p.user_id) as "userId",
       round(coalesce(g.cents, 0) - coalesce(p.cents, 0))::text as owed
-    from generated g full join paid p on p.idx = g.idx and p.user_id = g.user_id`)
+    from generated g full join paid p on p.idx = g.idx and p.user_id = g.user_id and p.currency = g.currency`)
+  // Cada moneda nunca menos de cero: lo que se descuenta en dólares no baja lo de soles.
   return moments.map((_, index) => {
-    const own = rows.filter((row) => Number(row.idx) === index).map((row) => Math.max(0, safeCents(row.owed)))
+    const byUser = new Map<string, number>()
+    for (const row of rows)
+      if (Number(row.idx) === index) byUser.set(row.userId, (byUser.get(row.userId) ?? 0) + Math.max(0, safeCents(row.owed)))
+    const own = [...byUser.values()]
     return { cents: own.reduce((total, cents) => total + cents, 0), professionals: own.filter((cents) => cents > 0).length }
   })
 }
@@ -764,7 +828,7 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
   // Lo fijo vencido sin pagar al cierre (gastos que se repiten).
   const fixedOwed = await fixedOwedAt(tx, orgId, window.end < now ? window.end : now, { branchId })
   const [unpaid] = await unpaidPurchasesMany(tx, orgId, [window.end], { branchId })
-  const adjustments = await pendingCommissionAdjustments(tx, orgId, currency, branchId)
+  const adjustments = await pendingAdjustmentsValued(tx, orgId, currency, branchId)
   const taxName = (await orgTaxes(tx, orgId))?.name ?? null
 
   const cobrado = (index: number): number => inCurrency(collected[index], currency)?.cents ?? 0
@@ -981,7 +1045,7 @@ export async function getReportCommissions(tx: Db, orgId: string, query: ReportQ
   const { window, currency } = scope
   const branchId = scope.branch?.id
   const [current] = await commissionsMany(tx, orgId, [window], { currency, branchId })
-  const adjustments = await pendingCommissionAdjustments(tx, orgId, currency, branchId)
+  const adjustments = await pendingAdjustmentsValued(tx, orgId, currency, branchId)
   // Lo que atendió en el periodo (precio × cantidad) y lo que de eso sigue sin cobrar hoy.
   const attended = await attendedMany(tx, orgId, window, { branchId })
   // El porcentaje general de hoy de cada uno; las excepciones se cuentan aparte.
@@ -1023,7 +1087,7 @@ export async function getReportCommissions(tx: Db, orgId: string, query: ReportQ
         paidCents: own?.paidCents ?? 0,
         pendingCents: own ? pendingOf(own, adjustments) : 0,
         /** Lo pagado de más que se descontará del próximo pago. */
-        discountCents: adjustments.get(userId) ?? 0,
+        discountCents: [...(adjustments.get(userId)?.values() ?? [])].reduce((total, cents) => total + cents, 0),
       }
     })
     // También quien solo cobró un pago del periodo (su cobro se anuló después): explica «Ya pagadas».

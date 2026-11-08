@@ -363,8 +363,9 @@ export async function createCharge(
         ),
       )
     const itemPrice = pricedItem?.priceCents ?? null
-    // Por sesión, cada cobro es el de una visita; por tratamiento, se reparte entre sus sesiones.
-    prepaidSessions = source.line.billingMode === "session" ? 1 : Math.max(1, pricedItem?.plannedSessions ?? 1)
+    // Por tratamiento, se reparte entre sus sesiones. Por sesión no: firmar cada visita genera su
+    // propio cargo, que es el que comisiona; darle comisión también al adelanto la pagaría dos veces.
+    prepaidSessions = source.line.billingMode === "session" ? null : Math.max(1, pricedItem?.plannedSessions ?? 1)
     description = source.line.title
     unit = source.line.currency
     if (input.currency && input.currency !== unit)
