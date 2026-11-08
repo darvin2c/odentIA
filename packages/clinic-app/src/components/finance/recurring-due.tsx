@@ -14,7 +14,7 @@ import { Button, Collapsible, CollapsibleContent, CollapsibleTrigger, cn, toast 
 import { FormDrawer, RowActions, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { plainAmount } from "../../lib/commissions"
 import {
   endRecurringApi,
@@ -123,6 +123,8 @@ export function RecurringDueSection({
       .finally(refresh)
   }
 
+  // Las filas que se están pagando, al instante (el estado de la mutación llega un render tarde).
+  const payingNow = useRef(new Set<string>())
   const pay = useMutation({
     mutationFn: (row: RecurringDue) => payRecurringApi(row.recurringId, { month: row.month }),
     onSuccess: (result, row) => {
@@ -225,7 +227,13 @@ export function RecurringDueSection({
                         size="sm"
                         disabled={paying}
                         aria-label={`Pagar ${named}, ${money(row.amountCents, row.currency)}`}
-                        onClick={() => pay.mutate(row)}
+                        onClick={() => {
+                          // El botón se desactiva un render tarde: el segundo clic no debe salir.
+                          const key = `${row.recurringId}:${row.month}`
+                          if (payingNow.current.has(key)) return
+                          payingNow.current.add(key)
+                          pay.mutate(row, { onSettled: () => payingNow.current.delete(key) })
+                        }}
                       >
                         {paying ? "Pagando…" : "Pagar"}
                       </Button>

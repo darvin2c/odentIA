@@ -463,7 +463,9 @@ it("finanzas: cada ruta rechaza a quien no es caja ni administración", async ()
         (await postJson(buildApp(role, userId), path, body)).status,
         `${role} POST ${path}`,
       ).toBe(403)
-  }
+  }  // Un id que no es uuid no existe: 404, no un error interno.
+  for (const path of ["/finance/expenses/no-es-un-id/void", "/finance/movements/no-es-un-id/void"])
+    expect((await postJson(buildApp("cashier", CASH), path, { reason: "x" })).status, path).toBe(404)
 })
 
 it("cuenta y cobro: reception/professional 403, cashier cobra con ticket, tenancy", async () => {

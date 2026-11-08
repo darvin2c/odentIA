@@ -288,6 +288,8 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
   app.post("/movements/:id/void", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    // Un id que no es uuid no existe: se dice, no se convierte en un error interno.
+    if (!z.uuid().safeParse(c.req.param("id")).success) return c.json(errorBody(c, "NOT_FOUND", "No existe"), 404)
     const parsed = reasonInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
@@ -537,6 +539,8 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
   app.post("/expenses/:id/void", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    // Un id que no es uuid no existe: se dice, no se convierte en un error interno.
+    if (!z.uuid().safeParse(c.req.param("id")).success) return c.json(errorBody(c, "NOT_FOUND", "No existe"), 404)
     const parsed = reasonInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
