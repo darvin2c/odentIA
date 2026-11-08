@@ -126,9 +126,16 @@ export interface RepeatInput {
   memberUserId?: string | null
   /**
    * El mes que paga este gasto (`YYYY-MM`): el sueldo de octubre pagado el 2 de
-   * noviembre es de octubre. Sin él, el de la fecha del gasto.
+   * noviembre es de octubre. Sin él, el de la fecha del gasto (o el de hoy, si aún no se pagó).
    */
   month?: string | null
+  /**
+   * Ya se pagó el de ese mes (lo de siempre). `false` lo anota sin registrar ningún gasto: queda
+   * por pagar desde ese mes. Nunca se registra dinero que nadie pagó (ADR 0150).
+   */
+  paid?: boolean
+  /** Se paga al mes siguiente (el sueldo de noviembre, el 2 de diciembre). */
+  dueNextMonth?: boolean
 }
 
 /**
@@ -159,9 +166,12 @@ export async function registerRecurringExpense(
   const branchRow = await requireBranch(tx, orgId, expenseInput.branchId)
   const unit = await lockOrgUnit(tx, orgId, expenseInput.currency)
   const { timezone } = await getOrgLocale(tx, orgId)
-  const spentAt = expenseInput.spentAt ? new Date(expenseInput.spentAt) : new Date()
+  const paid = repeat.paid !== false
+  const spentAt = paid && expenseInput.spentAt ? new Date(expenseInput.spentAt) : new Date()
   if (!Number.isFinite(spentAt.getTime())) throw invalidField("spentAt", "Fecha ISO inválida")
-  const firstMonth = repeat.month?.trim() || reportDayOf(timezone, spentAt).slice(0, 7)
+  // El mes de la fecha del gasto (o de hoy, si aún no se paga): el pago es de ese mes o del anterior.
+  const spentMonth = reportDayOf(timezone, spentAt).slice(0, 7)
+  const firstMonth = repeat.month?.trim() || spentMonth
   if (!isMonthKey(firstMonth)) throw invalidField("repeat.month", "El mes debe tener formato AAAA-MM")
   const now = currentMonthIn(timezone)
   const current = monthKey(now.year, now.month)
@@ -169,6 +179,11 @@ export async function registerRecurringExpense(
     throw invalidField(
       "repeat.month",
       "Para que se repita, registra el pago de este mes o del anterior. Lo de antes, anótalo como gasto suelto.",
+    )
+  if (paid && firstMonth !== spentMonth && firstMonth !== addMonthKey(spentMonth, -1))
+    throw invalidField(
+      "repeat.month",
+      "Un gasto pagado ese día es el pago de su mes o del anterior: revisa la fecha o el mes.",
     )
   const [template] = await tx
     .insert(expenseRecurring)
@@ -184,15 +199,24 @@ export async function registerRecurringExpense(
       firstMonth,
       memberUserId,
       fromCash: expenseInput.fromCash === true,
+      dueNextMonth: repeat.dueNextMonth === true,
       createdBy: actorUserId,
     })
     .returning()
+  await audit(tx, orgId, actorUserId, template.id, "finance.expense_recurring_created", {
+    firstMonth,
+    everyMonths,
+    day,
+    paid,
+    dueNextMonth: template.dueNextMonth,
+  })
+  // Aún no se paga: queda anotado y por pagar desde ese mes, sin ningún gasto.
+  if (!paid) return { expense: null, recurring: template }
   const row = await createExpense(tx, orgId, actorUserId, { ...expenseInput, category }, {
     recurringId: template.id,
     recurringMonth: firstMonth,
   })
-  await audit(tx, orgId, actorUserId, template.id, "finance.expense_recurring_created", { firstMonth, everyMonths, day })
-  return { ...row, recurring: template }
+  return { ...row, expense: row, recurring: template }
 }
 
 export interface UpdateRecurringInput {
@@ -516,7 +540,8 @@ export async function getRecurringMonth(
   const occurrences = await loadOccurrences(tx, orgId, { from, to: key, branchId: query.branchId })
   const ofMonth = occurrences.filter((item) => item.month === key && !item.skipped)
   const pending = occurrences.filter((item) => !item.paid && !item.skipped)
-  const overdue = (item: Occurrence) => item.month < currentKey || (item.month === currentKey && item.dueOn < today)
+  // Vencido es lo que ya pasó su día: lo que se paga al mes siguiente no vence en su propio mes.
+  const overdue = (item: Occurrence) => item.dueOn < today
 
   // Lo que sigue repitiéndose en la sede, para «Ver todo lo que se repite».
   const active = await tx
