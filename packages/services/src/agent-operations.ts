@@ -718,7 +718,7 @@ export interface AgentBudgetView {
   budgetId: string
   budgetNumber: number
   status: string
-  /** El estado con el nombre de toda la aplicación («Enviado · espera respuesta»). */
+  /** El estado con el nombre de toda la aplicación («Entregado · espera respuesta»). */
   stateText: string
   currency: string
   /** Se le puede anotar una respuesta. */

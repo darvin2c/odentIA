@@ -402,7 +402,9 @@ export function ControlesPanel({
                     : ""}
                 </span>
               </div>
-              <p className="text-sm text-muted-foreground">{followUpAppointmentLabel(row)}</p>
+              {followUpAppointmentLabel(row) ? (
+                <p className="text-sm text-muted-foreground">{followUpAppointmentLabel(row)}</p>
+              ) : null}
               {row.repeatEveryMonths &&
               (row.status === "pendiente" || row.status === "programado") ? (
                 <p className="text-sm text-muted-foreground">

@@ -1122,6 +1122,12 @@ export const treatmentTemplate = catalogSchema.table(
      * código, para no repetir el tratamiento general en los demás.
      */
     codedOnly: boolean("coded_only").notNull().default(false),
+    /**
+     * Sesiones habituales que sugiere la biblioteca (ADR 0164): con cuántas
+     * nace en el plan, si la clínica no le puso otras a su servicio. No sube la
+     * versión: no cambia qué es el tratamiento.
+     */
+    usualSessions: smallint("usual_sessions").notNull().default(1),
     isActive: boolean("is_active").notNull().default(true),
     version: integer("version").notNull().default(1),
     /**
@@ -1134,6 +1140,7 @@ export const treatmentTemplate = catalogSchema.table(
   (table) => [
     uniqueIndex("treatment_template_key_uidx").on(table.key),
     check("treatment_template_product_check", sql`${table.product} IN ('dental','medical')`),
+    check("treatment_template_usual_sessions_check", sql`${table.usualSessions} BETWEEN 1 AND 60`),
   ],
 )
 
@@ -1226,6 +1233,13 @@ export const serviceCatalog = pgTable(
     // Cómo se cobra: 'treatment' una vez por tratamiento, 'session' en cada visita atendida.
     billingMode: text("billing_mode").notNull().default("treatment"),
     /**
+     * Sesiones habituales que puso la clínica (ADR 0164): con cuántas nace un
+     * tratamiento al indicarlo. Nulo es «las de la biblioteca» (las de su
+     * tratamiento, o 1 si es propio): así un servicio que nadie tocó toma lo
+     * sugerido sin reescribir lo de la clínica. Se lee con `usualSessionsSql`.
+     */
+    ownUsualSessions: smallint("usual_sessions"),
+    /**
      * Cómo dice el precio el agente (`PRICE_DISCLOSURES`). Solo cambia lo que
      * se le dice a una persona: caja y presupuesto usan siempre la tarifa.
      * Un servicio nuevo nace «solo con evaluación».
@@ -1272,6 +1286,10 @@ export const serviceCatalog = pgTable(
     check(
       "service_catalog_billing_mode_check",
       sql`${table.billingMode} IN ('treatment','session')`,
+    ),
+    check(
+      "service_catalog_usual_sessions_check",
+      sql`${table.ownUsualSessions} IS NULL OR ${table.ownUsualSessions} BETWEEN 1 AND 60`,
     ),
     check(
       "service_catalog_price_disclosure_check",
@@ -1375,6 +1393,23 @@ export interface BudgetDeliveredSnapshot {
   consents: Array<{ title: string; risks: string[]; alternatives: string[]; consequences: string }>
 }
 
+/**
+ * La firma de quien decide al aceptar en la clínica: trazos en el recuadro de
+ * 0 a 1000, como los del consentimiento; su nombre, en calidad de qué decide y la
+ * declaración que aceptó, copiados al firmar (el PDF no depende de lo de hoy).
+ */
+export interface BudgetDecisionSignature {
+  strokes: number[][][]
+  signerName: string
+  /** 'paciente' o 'representante'. */
+  signerKind: string
+  declaration: string
+  /** Lo que aceptó al firmar: lo que se responda después no queda bajo esta firma. */
+  accepted: string[]
+  /** El alcance de la firma («Firma electrónica simple…»), como se leyó al firmar. */
+  note: string
+}
+
 export const treatmentBudget = pgTable(
   "treatment_budget",
   {
@@ -1414,10 +1449,21 @@ export const treatmentBudget = pgTable(
     decidedBy: text("decided_by").references(() => user.id),
     /** Por dónde respondió: 'enlace', 'portal', 'conversacion' o 'clinica'. Nulo en lo decidido antes. */
     decidedVia: text("decided_via"),
+    /**
+     * La firma de quien decide sobre lo que aceptó en la clínica (opcional): sus
+     * trazos, su nombre y la declaración que aceptó, copiada al firmar. Sin ella,
+     * la respuesta anotada por el equipo es su palabra, no la de la persona.
+     */
+    decisionSignature: jsonb("decision_signature").$type<BudgetDecisionSignature>(),
+    decisionSignedAt: timestamp("decision_signed_at", { withTimezone: true }),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
   },
   (table) => [
+    check(
+      "treatment_budget_decision_signature_check",
+      sql`(${table.decisionSignature} IS NULL) = (${table.decisionSignedAt} IS NULL)`,
+    ),
     check(
       "treatment_budget_decided_via_check",
       sql`${table.decidedVia} IS NULL OR ${table.decidedVia} IN ('enlace','portal','conversacion','clinica')`,

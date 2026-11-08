@@ -499,7 +499,7 @@ function PersonCrop({
           <span
             key={size}
             className={cn(
-              "flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary-soft font-semibold text-primary-soft-foreground",
+              "flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted font-semibold text-muted-foreground",
               size,
               text,
             )}

@@ -94,7 +94,8 @@ export function columnLabel<TData>(column: Column<TData, unknown>): string | nul
   return viewMeta(column)?.label ?? null
 }
 
-const INTERACTIVE_SELECTOR = "button, a, input, select, textarea, [role='menuitem']"
+const INTERACTIVE_SELECTOR =
+  "button, a, input, select, textarea, label, [role='menuitem'], [role='option'], [role='checkbox'], [role='switch']"
 
 /**
  * Un click sobre un control interno (RowActions, Link, Checkbox) no debe abrir
@@ -102,6 +103,21 @@ const INTERACTIVE_SELECTOR = "button, a, input, select, textarea, [role='menuite
  */
 export function isInteractiveTarget(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest(INTERACTIVE_SELECTOR) !== null
+}
+
+/**
+ * Si un click sobre la fila abre el registro. No lo abre: sobre un control interno; desde
+ * fuera de la fila (un cajón o un diálogo que una celda abre en un portal hace subir sus
+ * clicks por React hasta la fila, aunque se vea en otro lado); al soltar una selección de
+ * texto (copiar un teléfono); con una tecla modificadora o un botón que no es el principal.
+ */
+export function opensRow(event: React.MouseEvent<Element>): boolean {
+  const target = event.target
+  if (!(target instanceof Node) || !event.currentTarget.contains(target)) return false
+  if (isInteractiveTarget(target)) return false
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return false
+  const selection = typeof window === "undefined" ? null : window.getSelection()
+  return !selection || selection.isCollapsed
 }
 
 // Mismo corte que `useIsMobile` de @odentia/ui (768) y que el `md:` de FilterBar.

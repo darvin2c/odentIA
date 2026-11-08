@@ -117,7 +117,7 @@ export function LibraryRowsSkeleton({ canIncorporate = true }: { canIncorporate?
         { label: " ", cell: <Skeleton className="size-4 rounded-sm" /> },
         { label: "Servicio, con el nombre que usará la clínica", cell: <ServiceCell /> },
         { label: "Se cobra", cell: <TextLine width="w-24" /> },
-        { label: "Duración", cell: <TextLine width="w-14" /> },
+        { label: "Duración y sesiones", cell: <TextLine width="w-14" /> },
         { label: "Precio", cell: <Skeleton className="h-9 w-28" /> },
       ]}
       title={

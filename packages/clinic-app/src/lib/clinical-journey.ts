@@ -143,31 +143,29 @@ export interface FollowUp {
   overdue?: boolean
   /** La cita viva de hoy con la que se cumple al firmarse; nula si no. */
   servedToday?: { id: string; startsAt: string } | null
+  /**
+   * Su próxima cita, si le sirve sin ser la suya (la regla del servidor:
+   * desde que abre su ventana hasta 30 días después de su fecha).
+   */
+  servedBy?: { id: string; startsAt: string } | null
 }
 
 /**
- * Una fecha de control en el formato corto de la ficha: «18 nov» y, si no es de
- * este año, «18 nov 2027», en la zona de la clínica (revisión del 7 nov).
+ * Situación de la reserva, independiente del cierre clínico del control. Sin
+ * cita propia, la próxima cita que le sirve, como «Qué sigue» y el Resumen (QA
+ * del 8 nov, M6); un control ya realizado o cancelado sin cita no dice nada de
+ * reservas (B5).
  */
-export function controlDay(iso: string, now: Date = new Date()): string {
-  const timeZone = activeOrgTimeZone()
-  const yearOf = (date: Date) => new Intl.DateTimeFormat("en-CA", { year: "numeric", timeZone }).format(date)
-  const date = new Date(iso)
-  return date
-    .toLocaleDateString(activeOrgLocale(), {
-      day: "numeric",
-      month: "short",
-      ...(yearOf(date) !== yearOf(now) ? { year: "numeric" } : {}),
-      timeZone,
-    })
-    .replace(".", "")
-}
-
-/** Situación de la reserva, independiente del cierre clínico del control. */
-export function followUpAppointmentLabel(control: FollowUp): string {
+export function followUpAppointmentLabel(
+  control: Pick<FollowUp, "appointment" | "legacyScheduledAt" | "status" | "servedBy">,
+): string | null {
   const appointment = control.appointment
-  if (!appointment)
+  if (!appointment) {
+    if (control.status !== "pendiente" && control.status !== "programado") return null
+    if (control.servedBy)
+      return `Sin cita propia · se puede hacer en su cita del ${formatDateTime(control.servedBy.startsAt)}`
     return control.legacyScheduledAt ? "Sin reserva verificada" : "Sin cita reservada"
+  }
   if (appointment.status === "atendida") {
     return control.status === "pendiente" || control.status === "programado"
       ? "Pendiente de cierre clínico"
@@ -236,7 +234,7 @@ export function scheduleFollowUpApi(
 /** Lo mínimo de un control para reservar su cita (vía clínica o coordinación). */
 export type SchedulableControl = Pick<
   FollowUp,
-  "id" | "patientId" | "title" | "dueAt" | "status" | "appointment" | "legacyScheduledAt" | "branchId" | "windowFrom" | "overdue"
+  "id" | "patientId" | "title" | "dueAt" | "status" | "appointment" | "legacyScheduledAt" | "branchId" | "windowFrom" | "overdue" | "servedBy"
 >
 
 /**
@@ -259,8 +257,8 @@ export function encounterControls<T extends Pick<FollowUp, "status" | "originEnc
 
 /**
  * El próximo control de la persona, con lo que decide el servidor: si venció
- * sin cita (`overdue`) y qué cita lo cumple (la suya, o la próxima que cae
- * desde que abre su ventana). La pantalla no deduce ninguna de las dos.
+ * sin cita (`overdue`) y qué cita lo cumple. El Resumen lo dice con «Qué sigue»
+ * (`/next-steps`); aquí queda el contrato de la coordinación.
  */
 export interface NextControl {
   id: string
@@ -271,27 +269,6 @@ export interface NextControl {
   /** Se cumple con su atención de hoy: está hoy en la clínica o tiene su cita de hoy. */
   today?: boolean
   appointment: { id: string; startsAt: string } | null
-}
-
-/** Falta reservarle la cita: no tiene una que lo cumpla, ni la de hoy. */
-export function controlNeedsBooking(control: NextControl): boolean {
-  return !control.appointment && (control.status === "pendiente" || control.status === "programado")
-}
-
-/** Dónde dice el Resumen el próximo control (QA del 6 nov, X3). */
-export type NextControlPlace = "fila" | "pendientes" | null
-
-/**
- * El control va en su propia fila del Resumen y, si venció sin cita, en
- * «Pendientes». Si «Qué sigue» ya habla del control, no se repite: es el mismo
- * control (el servidor lo elige con el mismo orden).
- */
-export function nextControlPlace(
-  control: NextControl | null | undefined,
-  nextStepKind: string | null | undefined,
-): NextControlPlace {
-  if (!control || nextStepKind === "control") return null
-  return control.overdue ? "pendientes" : "fila"
 }
 
 /** Vista de coordinación: títulos, estados y fechas; sin detalle clínico ni importes. */
@@ -550,7 +527,9 @@ export const NEXT_ACTION_LABELS: Record<TreatmentNextAction, string> = {
   decidir: "Registrar la decisión",
   iniciar: "Iniciar la primera sesión",
   reanudar: "Reanudar el tratamiento",
-  continuar: "Continuar en la atención abierta",
+  // En curso y sin una atención abierta que lo trabaje: va por su próxima sesión. No dice si ya
+  // tiene cita (eso lo cruza «Qué sigue»), así que no promete «falta».
+  continuar: "Sigue en su próxima sesión",
   completar: "Completar el tratamiento",
   controlar: "Revisar el control",
 }

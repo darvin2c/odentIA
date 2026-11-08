@@ -13,6 +13,9 @@ import { gotoHydrated } from "./hydration"
 const serverHtml = (page: Page, url: string) =>
   page.evaluate((target) => fetch(target, { credentials: "include", cache: "no-store" }).then((r) => r.text()), url)
 
+/** Los colores de los enlaces se animan: la captura espera a que terminen. */
+const settled = (page: Page) => page.evaluate(() => Promise.all(document.getAnimations().map((animation) => animation.finished)))
+
 /** El valor del token en la raíz, ya resuelto. */
 const token = (page: Page, name: string) =>
   page.evaluate((property) => getComputedStyle(document.documentElement).getPropertyValue(property).trim(), name)
@@ -81,6 +84,13 @@ test("elegir el color de la marca: vista previa, guardar, primer pintado, color 
   await testInfo.attach("chat-web", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
   await gotoHydrated(page, tenant(org.slug, "/settings"))
 
+  // Un naranja fuerte lleva letra blanca: el botón se tuesta apenas en vez de cambiar a letra oscura.
+  await block.getByRole("button", { name: "Naranja", exact: true }).click()
+  const atender = block.getByText("Atender", { exact: true })
+  expect(await atender.evaluate((el) => getComputedStyle(el).color)).toBe("rgb(255, 255, 255)")
+  expect(await atender.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgb(204, 77, 10)")
+  await testInfo.attach("naranja", { body: await block.screenshot(), contentType: "image/png" })
+
   // Un celeste claro: el botón lo conserva exacto con letra oscura y el texto usa un tono legible.
   await block.getByRole("button", { name: "Elegir otro color" }).click()
   const code = block.getByLabel("Código, si lo tienes")
@@ -88,7 +98,7 @@ test("elegir el color de la marca: vista previa, guardar, primer pintado, color 
   await expect(block.getByText(/Tu color es claro/)).toBeVisible()
   await block.getByRole("button", { name: "Usar este color" }).click()
   await expect.poll(() => token(page, "--primary-fill")).toBe("#7cc4ec")
-  expect(await token(page, "--primary-fill-foreground")).toBe("#0f172a")
+  expect(await token(page, "--primary-fill-foreground")).toBe("#181818")
   expect(await token(page, "--primary")).not.toBe("#7cc4ec")
 
   // Un código mal escrito se dice junto al campo al salir de él, y el color guardado no cambia.
@@ -115,6 +125,24 @@ test("elegir el color de la marca: vista previa, guardar, primer pintado, color 
   await testInfo.attach("app-oscuro", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
   await page.evaluate(() => document.documentElement.classList.remove("dark"))
   await testInfo.attach("app-claro", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+
+  // Los grises no siguen al color: con naranja quedan sin tono, ni rosados ni azulados,
+  // el menú es blanco en claro y en oscuro el fondo es carbón neutro.
+  await block.getByRole("button", { name: "Naranja", exact: true }).click()
+  await block.getByRole("button", { name: "Usar este color" }).click()
+  await expect.poll(() => token(page, "--primary-fill")).toBe("#cc4d0a")
+  expect(await token(page, "--canvas")).toBe("#f8f8f8")
+  // La hoja compilada escribe el blanco corto.
+  expect(["#fff", "#ffffff"]).toContain(await token(page, "--card"))
+  expect(["#fff", "#ffffff"]).toContain(await token(page, "--sidebar"))
+  expect(await token(page, "--muted-foreground")).toBe("#545454")
+  await settled(page)
+  await testInfo.attach("naranja-claro", { body: await page.screenshot(), contentType: "image/png" })
+  await page.evaluate(() => document.documentElement.classList.add("dark"))
+  expect(await token(page, "--card")).toBe("#1e1e1e")
+  await settled(page)
+  await testInfo.attach("naranja-oscuro", { body: await page.screenshot(), contentType: "image/png" })
+  await page.evaluate(() => document.documentElement.classList.remove("dark"))
 
   // Volver al de fábrica quita el color: la cabecera ya no lo escribe.
   await block.getByRole("button", { name: "Volver al turquesa de odentIA" }).click()

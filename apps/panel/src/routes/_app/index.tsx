@@ -1,4 +1,4 @@
-import { Avatar, AvatarFallback, AvatarImage, Button, Input, toast } from "@odentia/ui"
+import { Avatar, AvatarFallback, AvatarImage, Button, buttonVariants, Input, toast } from "@odentia/ui"
 import { ConfirmDialog, EmptyState, ErrorState, LoadingState, RowActions, type RowActionItem, submitErrorMessage, SkeletonRegion } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react-router"
@@ -346,13 +346,14 @@ function OrganizationItem({ org, abiertaEl, userId, onLeave }: { org: AccountOrg
       </div>
       <div className="relative flex shrink-0 items-center gap-1 max-sm:basis-full max-sm:justify-end">
         {incomplete && canManage ? (
-          <Button className={boton} render={<Link to="/onboarding" search={{ continue: org.organizationId }} onClick={() => recordarClinica(userId, org.organizationId)} />}>
+          // Son enlaces con forma de botón: `buttonVariants` sobre el enlace, sin `role="button"`.
+          <Link to="/onboarding" search={{ continue: org.organizationId }} onClick={() => recordarClinica(userId, org.organizationId)} className={buttonVariants({ className: boton })}>
             Terminar el alta
-          </Button>
+          </Link>
         ) : accionPlan ? (
-          <Button variant="outline" className={boton} render={<a href={tenantUrl(org.slug, "/settings/plan", org.product)} onClick={() => recordarClinica(userId, org.organizationId)} />}>
+          <a href={tenantUrl(org.slug, "/settings/plan", org.product)} onClick={() => recordarClinica(userId, org.organizationId)} className={buttonVariants({ variant: "outline", className: boton })}>
             {accionPlan.kind === "pagar" ? "Pagar" : accionPlan.label}
-          </Button>
+          </a>
         ) : null}
         {!incomplete && <ChevronRight className="size-5 shrink-0 text-muted-foreground max-sm:hidden" aria-hidden />}
         {acciones.length > 0 && <RowActions label={`Acciones de ${org.organizationName}`} items={acciones} />}
@@ -410,7 +411,7 @@ function NoInvitation({ email }: { email: string }) {
             {answerDays ? `; te respondemos en ${answerDays} ${answerDays === 1 ? "día hábil" : "días hábiles"}` : ""}.
           </p>
         </div>
-        <Button render={<a href={webUrl("/solicitar-invitacion")} />}>Solicitar invitación</Button>
+        <a href={webUrl("/solicitar-invitacion")} className={buttonVariants()}>Solicitar invitación</a>
       </div>
       <div className="rounded-lg border p-4">
         <p className="font-medium">Trabajo en {panelWords.place.indefinite} que ya usa {panelWords.name}</p>

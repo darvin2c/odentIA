@@ -44,6 +44,8 @@ export interface CoordinationFollowUp {
   windowFrom: Date
   /** Vencido sin cita y sin cumplirse hoy: el Plan lo dice «Vencido», como el Resumen. */
   overdue: boolean
+  /** Su próxima cita, si le sirve sin ser la suya: el Plan lo dice como «Qué sigue» (M6). */
+  servedBy: { id: string; startsAt: Date } | null
 }
 
 /**
@@ -107,6 +109,7 @@ function toCoordinationFollowUp(
     branchId: row.branchId,
     windowFrom: row.windowFrom,
     overdue: "overdue" in row ? Boolean(row.overdue) : false,
+    servedBy: "servedBy" in row ? row.servedBy : null,
   }
 }
 

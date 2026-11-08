@@ -17,6 +17,47 @@ function initialsOf(name: string): string {
     .toLocaleUpperCase("es")
 }
 
+/**
+ * El membrete del papel, el mismo de su PDF: logo o iniciales, nombre, «razón
+ * social · RUC» y, con una sola sede, su dirección. Lo usan las hojas que se firman.
+ */
+export function SheetLetterhead({ clinic }: { clinic: ConsentSheetClinic }): React.JSX.Element {
+  return (
+    <header
+      className="flex flex-wrap items-center gap-3 border-b-2 border-foreground pb-3"
+      // La línea y las iniciales llevan el color de la marca, como el PDF (ADR 0162).
+      style={clinic.brandInk ? { borderColor: clinic.brandInk } : undefined}
+    >
+      {clinic.logo ? (
+        <img src={clinic.logo} alt="" className="h-12 max-w-32 object-contain" />
+      ) : (
+        <span
+          aria-hidden
+          className="flex size-11 shrink-0 items-center justify-center bg-foreground font-serif text-base font-semibold text-background"
+          style={clinic.brandInk ? { backgroundColor: clinic.brandInk, color: "#ffffff" } : undefined}
+        >
+          {initialsOf(clinic.name)}
+        </span>
+      )}
+      <div className="flex min-w-0 flex-col">
+        <span className="font-serif text-xl leading-tight font-semibold break-words">
+          {clinic.name}
+        </span>
+        {clinic.fiscalLine ? (
+          <span className="text-sm text-muted-foreground">{clinic.fiscalLine}</span>
+        ) : null}
+      </div>
+      {clinic.branchName || clinic.address || clinic.phone ? (
+        <div className="ml-auto flex min-w-0 flex-col text-right text-sm text-muted-foreground">
+          {clinic.branchName ? <span className="font-medium">{clinic.branchName}</span> : null}
+          {clinic.address ? <span>{clinic.address}</span> : null}
+          {clinic.phone ? <span>{clinic.phone}</span> : null}
+        </div>
+      ) : null}
+    </header>
+  )
+}
+
 export interface ConsentSheetProps {
   clinic: ConsentSheetClinic | null
   title: string
@@ -103,40 +144,7 @@ export function ConsentSheet({
         className,
       )}
     >
-      {clinic ? (
-        <header
-          className="flex flex-wrap items-center gap-3 border-b-2 border-foreground pb-3"
-          // La línea y las iniciales llevan el color de la marca, como el PDF (ADR 0162).
-          style={clinic.brandInk ? { borderColor: clinic.brandInk } : undefined}
-        >
-          {clinic.logo ? (
-            <img src={clinic.logo} alt="" className="h-12 max-w-32 object-contain" />
-          ) : (
-            <span
-              aria-hidden
-              className="flex size-11 shrink-0 items-center justify-center bg-foreground font-serif text-base font-semibold text-background"
-              style={clinic.brandInk ? { backgroundColor: clinic.brandInk, color: "#ffffff" } : undefined}
-            >
-              {initialsOf(clinic.name)}
-            </span>
-          )}
-          <div className="flex min-w-0 flex-col">
-            <span className="font-serif text-xl leading-tight font-semibold break-words">
-              {clinic.name}
-            </span>
-            {clinic.fiscalLine ? (
-              <span className="text-sm text-muted-foreground">{clinic.fiscalLine}</span>
-            ) : null}
-          </div>
-          {clinic.branchName || clinic.address || clinic.phone ? (
-            <div className="ml-auto flex min-w-0 flex-col text-right text-sm text-muted-foreground">
-              {clinic.branchName ? <span className="font-medium">{clinic.branchName}</span> : null}
-              {clinic.address ? <span>{clinic.address}</span> : null}
-              {clinic.phone ? <span>{clinic.phone}</span> : null}
-            </div>
-          ) : null}
-        </header>
-      ) : null}
+      {clinic ? <SheetLetterhead clinic={clinic} /> : null}
 
       <p className="mt-5 text-sm font-semibold text-muted-foreground">Consentimiento informado</p>
       <h2

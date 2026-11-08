@@ -110,11 +110,11 @@ export function AdminRecommendationDrawer({ recommendationKey, onClose }: { reco
                   {rows.map((row) => (
                     <li key={row.id} className="flex flex-col px-3 py-2 text-sm">
                       {row.patientId || row.contactId ? (
-                        <PersonLink patientId={row.patientId} contactId={row.contactId} className="font-semibold text-primary hover:underline">
+                        <PersonLink patientId={row.patientId} contactId={row.contactId}>
                           {row.personName}
                         </PersonLink>
                       ) : row.opportunityId ? (
-                        <Link to="/pipeline" search={{ oportunidad: row.opportunityId }} className="font-semibold text-primary hover:underline">
+                        <Link to="/pipeline" search={{ oportunidad: row.opportunityId }} className="font-semibold text-foreground underline-offset-4 hover:underline">
                           {row.personName}
                         </Link>
                       ) : (

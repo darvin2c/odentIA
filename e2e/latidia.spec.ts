@@ -699,8 +699,8 @@ test("latidIA: lo indicado queda aceptado y se agenda sin presupuesto; Reportes 
   await views("plan-sin-presupuesto")
   // Sin «dónde» en un consultorio: lo indicado no dice «Boca completa» (revisión final).
   expect(await page.locator("main").innerText()).not.toMatch(/Boca completa|odontograma|Pieza/i)
-  // «Reservar cita» abre «Nueva cita» al lado, con lo indicado: nadie sale del Plan.
-  await page.getByRole("button", { name: "Reservar cita", exact: true }).first().click()
+  // «Reservar lo indicado» abre «Nueva cita» al lado, con lo indicado: nadie sale del Plan.
+  await page.getByRole("button", { name: "Reservar lo indicado", exact: true }).first().click()
   await expect(surface(page, { name: "Nueva cita" })).toBeVisible()
   await expect(page).toHaveURL(/tab=plan/)
   await page.keyboard.press("Escape")

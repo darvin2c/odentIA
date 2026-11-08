@@ -67,10 +67,10 @@ test("paciente: ficha inicial y hallazgo visibles en el recorrido", async ({ own
   await expect(page.getByText("Alergia severa: Penicilina")).toBeVisible()
 
   // Para quien atiende el Resumen es el clínico (ADR 0035): alergias y alertas,
-  // «Qué sigue», última atención y próxima cita, más lo pendiente.
+  // «Qué sigue» (con su próxima cita) y última atención, más lo pendiente.
   await expect(page.getByRole("heading", { name: "Alergias y alertas" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Qué sigue" })).toBeVisible()
   await expect(page.getByRole("heading", { name: "Última atención" })).toBeVisible()
-  await expect(page.getByRole("heading", { name: "Próxima cita" })).toBeVisible()
   await expect(page.getByRole("heading", { name: "Pendientes" })).toBeVisible()
   // Clínica en cuatro secciones.
   await openSection(page, "Clínica")

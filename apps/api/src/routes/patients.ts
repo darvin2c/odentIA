@@ -42,6 +42,7 @@ import {
   getPatientSummary,
   getTimeline,
   getPlanNextStep,
+  getPlanNextSteps,
   getTreatmentCoordination,
   getTreatmentPlanDetail,
   grantDataConsent,
@@ -89,6 +90,7 @@ import {
   updateEncounterDraft,
   updatePatient,
   updatePlanItem,
+  reopenPlanItemForSession,
   updatePlanItemPlanning,
   voidEncounter,
   voidEncounterDiagnosis,
@@ -919,6 +921,20 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
       ),
     )
   })
+  // Todo lo que sigue, en una lista (el Resumen): la misma regla y el mismo permiso.
+  app.get("/:id/next-steps", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!["clinical.read", "budgets.read", "appointments.read"].some((permission) => canAccess(memberRole, permission))) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver este recurso"), 403)
+    }
+    return runService(c, 200, async () =>
+      (
+        await withOrgContext(deps.db, orgId, (tx) =>
+          getPlanNextSteps(tx, orgId, c.req.param("id"), (permission) => canAccess(memberRole, permission)),
+        )
+      ).steps,
+    )
+  })
 
   // --- Coordinación del tratamiento (vista mínima para quien agenda) ---
   app.get("/:id/coordination", async (c) => {
@@ -1744,6 +1760,15 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           c.req.param("itemId"),
           parsed.data,
         ),
+      ),
+    )
+  })
+  // «Falta otra sesión» de lo que se terminó al llegar a sus sesiones previstas (ADR 0164).
+  app.post("/:id/plan/items/:itemId/another-session", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        reopenPlanItemForSession(tx, orgId, userId, c.req.param("id"), c.req.param("itemId")),
       ),
     )
   })

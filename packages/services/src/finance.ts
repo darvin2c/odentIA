@@ -2752,6 +2752,22 @@ export interface CommissionAdjustment {
   commissionCents: number
   /** Cuándo se pagó la comisión que ahora se descuenta. */
   paidAt: Date | null
+  /** Cuándo fue el cobro anulado: su mes es el del pago que lo pagó, donde se explica lo que cierre la deuda. */
+  occurredAt: Date
+}
+
+/**
+ * Lo que cerró, en un mes, la deuda de sus cobros anulados después de pagados: lo devolvió o la clínica lo
+ * dio por saldado (ADR 0157). Explica por qué «Ya pagado» es mayor que la comisión del mes. `cents` es la
+ * parte de los cobros de ese mes: una deuda de varios meses se explica en cada uno con la suya.
+ */
+export interface CommissionDebtClosure {
+  settlementId: string
+  kind: "devuelto" | "saldado"
+  cents: number
+  settledAt: Date | null
+  /** De lo saldado, el motivo. */
+  notes: string | null
 }
 
 export type CommissionStatus = "por_pagar" | "pagado" | "sin_cobros" | "por_descontar"
@@ -2763,6 +2779,8 @@ interface FrozenLine {
   currency: string
   /** Un pago, o lo que cerró una deuda: devuelto o saldado (ADR 0157). */
   kind: string
+  /** La nota del registro: de lo saldado, su motivo. */
+  notes: string | null
   promotionName: string | null
 }
 
@@ -2774,6 +2792,7 @@ async function frozenLines(tx: Db, orgId: string, professionalUserId: string): P
       settledAt: commissionSettlement.settledAt,
       currency: commissionSettlement.currency,
       kind: commissionSettlement.kind,
+      notes: commissionSettlement.notes,
       promotionName: patientCharge.promotionName,
     })
     .from(commissionSettlementLine)
@@ -3011,10 +3030,33 @@ async function monthView(
         description: f.line.description,
         commissionCents: f.line.commissionCents - (discounted.get(lineKey(appId, f.line.slice)) ?? 0),
         paidAt: f.settledAt,
+        occurredAt: f.line.occurredAt,
       }
     })
     .filter((adjustment) => adjustment.commissionCents > 0)
     .sort((a, b) => (a.paidAt?.getTime() ?? 0) - (b.paidAt?.getTime() ?? 0) || (a.applicationId < b.applicationId ? -1 : 1))
+  // Lo devuelto o saldado de los cobros anulados de este mes: por sus líneas, no por el mes en que se
+  // archivó, así cada mes explica su parte aunque la deuda juntara cobros de varios meses.
+  const monthCobroKeys = new Set(
+    frozenCobros.filter((f) => inMonth(f.line.occurredAt)).map((f) => lineKey(f.line.applicationId as string, f.line.slice)),
+  )
+  const closures = new Map<string, CommissionDebtClosure>()
+  for (const f of frozen) {
+    if (f.line.kind !== "ajuste" || !f.line.applicationId || (f.kind !== "devuelto" && f.kind !== "saldado")) continue
+    if (!monthCobroKeys.has(lineKey(f.line.applicationId, f.line.slice))) continue
+    const closure = closures.get(f.line.settlementId) ?? {
+      settlementId: f.line.settlementId,
+      kind: f.kind,
+      cents: 0,
+      settledAt: f.settledAt,
+      notes: f.notes,
+    }
+    closure.cents += f.line.commissionCents
+    closures.set(f.line.settlementId, closure)
+  }
+  const debtClosures = [...closures.values()].sort(
+    (a, b) => (a.settledAt?.getTime() ?? 0) - (b.settledAt?.getTime() ?? 0) || (a.settlementId < b.settlementId ? -1 : 1),
+  )
   const counted = lines.filter((line) => !line.voidedAfterPaid)
   const fresh = lines.filter((line) => !line.settled)
   const paid = lines.filter((line) => line.settled)
@@ -3111,6 +3153,8 @@ async function monthView(
     discountFrom,
     /** Lo que los pagos de este mes ya descontaron de cobros anulados. */
     discountedCents,
+    /** Lo devuelto o saldado de los cobros anulados de este mes: por qué «Ya pagado» supera la comisión. */
+    debtClosures,
     lastPaidAt,
     status,
     /** Su sueldo del mes, si tiene uno anotado como gasto que se repite (`null` si no). */
@@ -3574,7 +3618,10 @@ export const COMMISSION_FORGIVE_REASON_MAX = 200
 
 export interface SettleCommissionDebtInput {
   professionalUserId: string
-  /** El mes desde donde se registra: queda entre sus pagos. La deuda es del profesional, de cualquier mes. */
+  /**
+   * El mes desde donde se mira: solo sirve para leer la deuda, que es del profesional y de cualquier mes. El
+   * registro se archiva en el mes de los cobros anulados que la originaron, mire desde donde se mire.
+   */
   year: number
   month: number
   /** La moneda de la deuda (cada una aparte); sin ella, la del negocio. */
@@ -3634,6 +3681,10 @@ export async function settleCommissionDebt(
       "Lo que debe cambió mientras lo revisabas: vuelve a mirarlo antes de registrarlo",
     )
   const at = new Date()
+  // Se archiva en el mes de los cobros anulados que originaron la deuda (el del pago que los pagó), no en
+  // el que se tenía abierto: ahí se explica por qué «Ya pagado» supera la comisión. Si la deuda junta
+  // cobros de varios meses, en el del más reciente; cada mes igual explica su parte (`debtClosures`).
+  const period = debtPeriod(view.adjustments, view.timezone)
   // En efectivo, entra a la caja de la sede en su moneda: la abre si hace falta, como un cobro.
   let movementId: string | null = null
   if (inCash) {
@@ -3671,8 +3722,8 @@ export async function settleCommissionDebt(
     .values({
       organizationId: orgId,
       professionalUserId: input.professionalUserId,
-      periodYear: input.year,
-      periodMonth: input.month,
+      periodYear: period.year,
+      periodMonth: period.month,
       base: "cobrado",
       currency: view.currency,
       rateBps: null,
@@ -3728,11 +3779,21 @@ export async function settleCommissionDebt(
         input.kind === "devuelto"
           ? `${amount} de comisiones ya pagadas de cobros que después se anularon. Ya no debes nada en esa moneda.`
           : `${amount} de comisiones ya pagadas de cobros que después se anularon. Ya no debes nada en esa moneda. Motivo: ${notes}`.slice(0, 500),
-      href: `/commissions?year=${input.year}&month=${input.month}`,
+      href: `/commissions?year=${period.year}&month=${period.month}`,
       permission: "commissions.read",
       actorUserId,
     })
   return { settlement, movementId }
+}
+
+/** El mes de los cobros anulados de una deuda, en la zona de la clínica: el del más reciente. */
+function debtPeriod(adjustments: CommissionAdjustment[], timezone: string): { year: number; month: number } {
+  const latest = adjustments.reduce<Date | null>(
+    (last, adjustment) => (!last || adjustment.occurredAt > last ? adjustment.occurredAt : last),
+    null,
+  )
+  const key = dayKeyIn(latest ?? new Date(), timezone)
+  return { year: Number(key.slice(0, 4)), month: Number(key.slice(5, 7)) }
 }
 
 /**
@@ -3804,6 +3865,45 @@ export async function listCommissionSettlements(
     /** Quién lo registró: de lo que se dio por saldado, quién lo decidió. */
     settledByName: r.settledBy ? (names.get(r.settledBy) ?? null) : null,
     voidedByName: r.voidedBy ? (names.get(r.voidedBy) ?? null) : null,
+  }))
+}
+
+/** La comisión ya pagada de un cobro, por profesional y moneda: lo que quedaría por descontar si se anula. */
+export interface TicketPaidCommission {
+  professionalUserId: string
+  professionalName: string | null
+  currency: string
+  cents: number
+}
+
+/**
+ * Las comisiones ya pagadas de los cobros de un ticket que siguen en pie: si el ticket se anula, el
+ * profesional las debe y se descuentan de su próximo pago (ADR 0157). Para el aviso de «Anular ticket»;
+ * quién puede ver nombres e importes lo decide quien llama (solo administra comisiones).
+ */
+export async function paidCommissionsOfTicket(tx: Db, orgId: string, ticketId: string): Promise<TicketPaidCommission[]> {
+  const rows = await tx.execute<{ userId: string; currency: string; cents: string }>(sql`
+    select s.professional_user_id as "userId", s.currency::text as currency, sum(l.commission_cents)::text as cents
+    from commission_settlement_line l
+    join commission_settlement s on s.organization_id = l.organization_id and s.id = l.settlement_id
+      and s.voided_at is null and s.kind = 'pago'
+    join patient_payment_application a on a.organization_id = l.organization_id and a.id = l.application_id
+      and a.voided_at is null
+    join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id
+      and p.voided_at is null
+      -- Lo mismo que deshace anularlo: lo que el ticket aplicó (también con saldo a favor de otro) y lo que
+      -- sus pagos cubrieron en otros tickets.
+      and (a.ticket_id = ${ticketId} or p.ticket_id = ${ticketId})
+    join patient_charge c on c.organization_id = a.organization_id and c.id = a.charge_id and c.voided_at is null
+    where l.organization_id = ${orgId} and l.kind = 'cobro' and l.voided_at is null and l.commission_cents > 0
+    group by 1, 2
+    order by 1, 2`)
+  const names = await userNames(tx, [...new Set([...rows].map((row) => row.userId))])
+  return [...rows].map((row) => ({
+    professionalUserId: row.userId,
+    professionalName: names.get(row.userId) ?? null,
+    currency: row.currency,
+    cents: Number(row.cents),
   }))
 }
 
@@ -4400,7 +4500,13 @@ export interface DayMovementsQuery {
 }
 
 /** Movimientos del día en la zona horaria de la sede (tickets, gastos, efectivo). */
-export async function getDayMovements(tx: Db, orgId: string, query: DayMovementsQuery) {
+export async function getDayMovements(
+  tx: Db,
+  orgId: string,
+  query: DayMovementsQuery,
+  /** Administra comisiones: ve el motivo con que se anuló lo devuelto, que puede nombrar al profesional. */
+  options: { seesCommissions?: boolean } = {},
+) {
   const branchRow = await requireBranch(tx, orgId, query.branchId)
   const timezone = query.timezone ?? (await branchTimezone(tx, orgId, branchRow))
   const { start, end } = dayBoundsUTC(query.day, timezone)
@@ -4415,7 +4521,7 @@ export async function getDayMovements(tx: Db, orgId: string, query: DayMovements
     .where(and(...shiftFilters))
   const voidedTickets = await voidedTicketsOfDay(tx, orgId, branchRow.id, start, end, query.currency)
   if (shifts.length === 0)
-    return { branchId: branchRow.id, day: query.day, timezone, movements: [], voidedTickets }
+    return { branchId: branchRow.id, day: query.day, timezone, movements: [], voidedTickets, voidedMovements: [] }
   const shiftIds = shifts.map((s) => s.id)
   const movements = await tx
     .select()
@@ -4436,8 +4542,70 @@ export async function getDayMovements(tx: Db, orgId: string, query: DayMovements
     timezone,
     movements: await withTicketOrigin(tx, orgId, await withoutCommissionPayees(tx, orgId, movements)),
     voidedTickets,
+    voidedMovements: await voidedCommissionReturnsOfDay(tx, orgId, shiftIds, start, end, options.seesCommissions ?? false),
   }
 }
+
+/**
+ * Lo devuelto de comisiones en efectivo que entró ese día y después se anuló, con la caja aún abierta: como
+ * un ticket anulado, sigue a la vista, tachado y con su motivo, sin sumar. Quien contó ese efectivo ve por
+ * qué ya no está. Sin a quién (caja no lo ve): el concepto es el mismo de la caja.
+ */
+export interface VoidedMovementOfDay {
+  id: string
+  kind: string
+  direction: string
+  concept: string
+  currency: string
+  amountCents: number
+  createdAt: Date
+  voidedAt: Date
+  voidReason: string | null
+}
+
+async function voidedCommissionReturnsOfDay(
+  tx: Db,
+  orgId: string,
+  shiftIds: string[],
+  start: Date,
+  end: Date,
+  seesCommissions: boolean,
+): Promise<VoidedMovementOfDay[]> {
+  if (shiftIds.length === 0) return []
+  const rows = await tx
+    .select({ movement: cashMovement })
+    .from(cashMovement)
+    .innerJoin(
+      commissionSettlement,
+      and(eq(commissionSettlement.organizationId, orgId), eq(commissionSettlement.cashMovementId, cashMovement.id)),
+    )
+    .where(
+      and(
+        eq(cashMovement.organizationId, orgId),
+        inArray(cashMovement.shiftId, shiftIds),
+        isNotNull(cashMovement.voidedAt),
+        gte(cashMovement.createdAt, start),
+        lte(cashMovement.createdAt, end),
+      ),
+    )
+    .orderBy(asc(cashMovement.createdAt), asc(cashMovement.id))
+  return rows.map(({ movement }) => ({
+    id: movement.id,
+    kind: movement.kind,
+    direction: movement.direction,
+    concept: COMMISSION_RETURNS_CONCEPT,
+    currency: movement.currency,
+    amountCents: movement.amountCents,
+    createdAt: movement.createdAt,
+    voidedAt: movement.voidedAt as Date,
+    // El motivo es texto libre de Comisiones y puede nombrar a quién era: caja, que no lo ve, lee solo de
+    // dónde se anuló, como en Gastos lee las comisiones sin su nota.
+    voidReason: seesCommissions ? movement.voidReason : COMMISSION_RETURN_VOIDED_REASON,
+  }))
+}
+
+/** Lo que caja lee como motivo de una devolución de comisiones anulada. */
+export const COMMISSION_RETURN_VOIDED_REASON = "Se anuló en Comisiones"
 
 /**
  * Ticket, número y persona de cada cobro: la pantalla muestra un renglón por

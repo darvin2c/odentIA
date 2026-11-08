@@ -84,36 +84,40 @@
 }
 
 /*
- * Tema clínico: primario cian-teal sobre neutros fríos. Los pares de texto y
- * fondo cumplen WCAG 2.2 AA (4,5:1). Un tema de color alternativo solo redefine
- * el bloque «Marca»; superficies, neutros y estados no cambian con él.
+ * Tema clínico: primario cian-teal sobre grises sin tono (croma 0, la misma luz del
+ * slate de antes), así ningún color de marca los vuelve azulados ni rosados; el menú
+ * lateral es blanco en claro. Los pares de texto y fondo cumplen WCAG 2.2 AA (4,5:1).
+ * Un tema de color alternativo solo redefine el bloque «Marca»: el color de una clínica
+ * (ADR 0162) no toca los grises, los estados, el papel ni los gráficos. Son los grises
+ * contra los que `@odentia/clinical` mide ese color (`APP_SURFACES`); una prueba lo cuida.
  * `.theme-light` vuelve a este tema dentro de la app en oscuro: lo que se ve como
  * papel (la hoja del consentimiento) es claro siempre, con sus campos y controles.
  */
 :root,
 .theme-light {
     /* Superficies y neutros */
-    --canvas: #f6f8fb;
+    --canvas: #f8f8f8;
     --background: #ffffff;
-    --foreground: #0f172a;
+    --foreground: #181818;
     --card: #ffffff;
-    --card-foreground: #0f172a;
+    --card-foreground: #181818;
     --popover: #ffffff;
-    --popover-foreground: #0f172a;
-    --secondary: #e8eef4;
-    --secondary-foreground: #0f172a;
-    --muted: #f1f5f9;
-    --muted-foreground: #475569;
-    --accent: #e8eef4;
-    --accent-foreground: #0f172a;
-    --border: #e2e8f0;
-    --input: #cbd5e1;
+    --popover-foreground: #181818;
+    --secondary: #ededed;
+    --secondary-foreground: #181818;
+    --muted: #f4f4f4;
+    --muted-foreground: #545454;
+    --accent: #ededed;
+    --accent-foreground: #181818;
+    --border: #e7e7e7;
+    --input: #d4d4d4;
     --radius: 0.875rem;
-    --sidebar: #f8fafc;
-    --sidebar-foreground: #1e293b;
-    --sidebar-accent: #e8eef4;
-    --sidebar-accent-foreground: #0f172a;
-    --sidebar-border: #e2e8f0;
+    /* Blanco, como las tarjetas: el ítem activo se lee más limpio (lienzo «menos saturado»). */
+    --sidebar: #ffffff;
+    --sidebar-foreground: #292929;
+    --sidebar-accent: #ededed;
+    --sidebar-accent-foreground: #181818;
+    --sidebar-border: #e7e7e7;
     --surface: var(--card);
     --surface-muted: var(--muted);
 
@@ -190,26 +194,26 @@
     --primary-fill: var(--primary);
     --primary-fill-foreground: var(--primary-foreground);
     --primary-fill-hover: color-mix(in oklab, var(--primary-fill), black 12%);
-    --canvas: #0c1118;
-    --background: #0c1118;
-    --foreground: #f1f5f9;
-    --card: #171e2b;
-    --card-foreground: #f1f5f9;
-    --popover: #171e2b;
-    --popover-foreground: #f1f5f9;
-    --secondary: #263041;
-    --secondary-foreground: #f1f5f9;
-    --muted: #1e2633;
-    --muted-foreground: #94a3b8;
-    --accent: #263041;
-    --accent-foreground: #f1f5f9;
-    --border: #263041;
-    --input: #3b475a;
-    --sidebar: #111722;
-    --sidebar-foreground: #e2e8f0;
-    --sidebar-accent: #263041;
-    --sidebar-accent-foreground: #f1f5f9;
-    --sidebar-border: #263041;
+    --canvas: #111111;
+    --background: #111111;
+    --foreground: #f4f4f4;
+    --card: #1e1e1e;
+    --card-foreground: #f4f4f4;
+    --popover: #1e1e1e;
+    --popover-foreground: #f4f4f4;
+    --secondary: #303030;
+    --secondary-foreground: #f4f4f4;
+    --muted: #262626;
+    --muted-foreground: #a2a2a2;
+    --accent: #303030;
+    --accent-foreground: #f4f4f4;
+    --border: #303030;
+    --input: #464646;
+    --sidebar: #171717;
+    --sidebar-foreground: #e7e7e7;
+    --sidebar-accent: #303030;
+    --sidebar-accent-foreground: #f4f4f4;
+    --sidebar-border: #303030;
 
     --identity-accent: #4fc3d7;
     --identity-ink: #f1f5f9;

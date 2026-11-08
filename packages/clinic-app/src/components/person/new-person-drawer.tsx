@@ -115,7 +115,8 @@ export function NewPersonDrawer({ open, onClose }: { open: boolean; onClose: () 
                   <Link
                     to="/people/$personId"
                     params={{ personId: row.id }}
-                    className="font-medium text-primary hover:underline"
+                    // Un nombre, en tinta (ADR 0162); con su subrayado, porque es lo único que se toca aquí.
+                    className="font-semibold text-foreground underline decoration-muted-foreground/50 underline-offset-4 hover:decoration-foreground"
                     onClick={onClose}
                   >
                     {row.displayName}

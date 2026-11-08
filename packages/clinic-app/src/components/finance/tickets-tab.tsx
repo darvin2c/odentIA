@@ -197,7 +197,7 @@ export function TicketsTab({
         cell: ({ row }) => {
           const ticket = row.original
           return (
-            <div className={`flex min-w-0 flex-col gap-0.5 ${ticket.voided ? "text-muted-foreground" : ""}`}>
+            <div className={`flex min-w-48 flex-col gap-0.5 ${ticket.voided ? "text-muted-foreground" : ""}`}>
               {ticket.lines.map((line, index) => (
                 <span key={`${line.description}-${index}`} className="flex justify-between gap-3">
                   <span className="min-w-0 break-words">{line.description}</span>
@@ -330,8 +330,10 @@ export function TicketsTab({
         )
       ) : (
         <div className="flex flex-col gap-2">
+          {/* Las celdas bajan de línea entre palabras, nunca dentro de una: con el cajón de Cobrar abierto,
+              lo que no entra se recorre a lo ancho (la tabla ya tiene su barra horizontal). */}
           <DataTable
-            className="[&_td]:align-top [&_td]:whitespace-normal [&_td]:[overflow-wrap:anywhere]"
+            className="[&_td]:align-top [&_td]:whitespace-normal"
             table={table}
             isFetching={tickets.isFetching && !tickets.isFetchingNextPage}
             onRowClick={(ticket: TicketListRow) => onOpenTicket(ticket.id)}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { discountFromWords, returnMethodWords, showAllLabel } from "./commissions"
+import { debtClosureWords, discountFromWords, previousMonthsDiscounts, returnMethodWords, showAllLabel, summaryAmountWords, summaryDiscountWords } from "./commissions"
 
 const lines = (counted: number, voided: number) => [
   ...Array.from({ length: counted }, () => ({ voidedAfterPaid: false })),
@@ -35,4 +35,69 @@ it("el medio de lo devuelto, para una frase", () => {
   expect(returnMethodWords("30")).toBe("por transferencia")
   expect(returnMethodWords("48")).toBe("con tarjeta")
   expect(returnMethodWords(null)).toBe("")
+})
+
+describe("el mes que le descuenta lo que debe dice lo mismo en la clínica y en «Mis honorarios»", () => {
+  const october = {
+    status: "por_pagar" as const,
+    currency: "PEN",
+    commissionCents: 555100,
+    paidCents: 0,
+    discountCents: 21000,
+    pendingCents: 534100,
+    owedCents: 0,
+    discountFrom: null,
+  }
+
+  it("lo que se le pagará y el descuento, no la comisión entera", () => {
+    expect(summaryAmountWords(october, "es-PE")).toMatch(/^Falta S\/\s?5,341\.00$/)
+    expect(summaryDiscountWords(october, "es-PE")).toMatch(/^S\/\s?210\.00 por descontar$/)
+  })
+
+  it("sin descuento ni pago a cuenta, la comisión", () => {
+    const plain = { ...october, discountCents: 0, pendingCents: 555100 }
+    expect(summaryAmountWords(plain, "es-PE")).toMatch(/^S\/\s?5,551\.00$/)
+    expect(summaryDiscountWords(plain, "es-PE")).toBeNull()
+  })
+})
+
+it("por qué «Ya pagado» supera la comisión: lo devolvió o se dio por saldado, con su día", () => {
+  const day = () => "8 de noviembre"
+  expect(debtClosureWords({ settlementId: "s", kind: "devuelto", cents: 21000, settledAt: "2026-11-08T15:00:00Z", notes: "Lo trajo" }, "PEN", "es-PE", day)).toMatch(
+    /^Devolvió S\/\s?210\.00 el 8 de noviembre$/,
+  )
+  expect(debtClosureWords({ settlementId: "s", kind: "saldado", cents: 21000, settledAt: "2026-11-08T15:00:00Z", notes: "Ya no trabaja aquí" }, "PEN", "es-PE", day)).toMatch(
+    /^Se dio por saldado S\/\s?210\.00 el 8 de noviembre: Ya no trabaja aquí$/,
+  )
+})
+
+describe("«Meses anteriores» reparte lo que debe una sola vez", () => {
+  const month = (m: number, pendingCents: number, discountCents: number) => ({
+    professionalUserId: "u",
+    professionalName: "Luis",
+    inTeam: true,
+    year: 2026,
+    month: m,
+    currency: "PEN",
+    rateBps: 3500,
+    collections: 1,
+    baseCents: 0,
+    commissionCents: pendingCents + discountCents,
+    paidCents: 0,
+    pendingCents,
+    discountCents,
+    lastPaidAt: null,
+    status: "por_pagar" as const,
+  })
+
+  it("del mes más antiguo al más nuevo: dos meses no descuentan la misma deuda", () => {
+    // Cada mes, mirado solo, descontaría los 210 que debe: 100 de septiembre y 210 de octubre.
+    const split = previousMonthsDiscounts([month(10, 34000, 21000), month(9, 0, 10000)], new Map([["PEN", 21000]]))
+    expect(split.get("2026-9-PEN")).toEqual({ discountCents: 10000, pendingCents: 0 })
+    expect(split.get("2026-10-PEN")).toEqual({ discountCents: 11000, pendingCents: 44000 })
+  })
+
+  it("sin deuda, nada que descontar", () => {
+    expect(previousMonthsDiscounts([month(10, 555100, 0)], new Map()).get("2026-10-PEN")).toEqual({ discountCents: 0, pendingCents: 555100 })
+  })
 })

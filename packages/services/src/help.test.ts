@@ -470,3 +470,23 @@ describe("enviar a odentIA", () => {
     expect((await run((tx) => sendHelpRequest(tx, ORG, reception, { question, screen: "/agenda" }))).id).toBe(second.id)
   })
 })
+
+// Al final: cada pregunta queda anotada, y las pruebas de arriba cuentan las de esta persona.
+describe("el nombre de la pantalla", () => {
+  it("a quien solo ve lo suyo le nombra la pantalla como su menú: «Mis honorarios», no «Comisiones»", async () => {
+    const clinician: HelpAsker = {
+      userId: USER,
+      roleLabel: "Clínico",
+      canOpen: (path) => path.startsWith("/commissions"),
+      can: (permission) => permission === "commissions.read",
+      whoCan: () => ["Propietario", "Administrador"],
+    }
+    const question = { question: "¿Cómo se calcula la comisión?", screen: "/commissions" }
+    const mine = await askHelp(appDb, ORG, clinician, question)
+    expect(mine.answers[0]).toMatchObject({ topicId: "comisiones", where: "Gestión › Mis honorarios" })
+    expect(mine.basedOn).toBe("El mapa del sistema: Gestión › Mis honorarios.")
+    // Quien administra comisiones las ve de todos: sigue siendo Comisiones.
+    const admin = await askHelp(appDb, ORG, owner, question)
+    expect(admin.answers[0]).toMatchObject({ topicId: "comisiones", where: "Gestión › Comisiones" })
+  })
+})

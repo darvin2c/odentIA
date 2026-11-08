@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  APP_SURFACES,
   brandColorName,
   brandPalette,
   contrastRatio,
@@ -24,11 +25,14 @@ describe("brandPalette", () => {
     for (const hex of sampleColors()) {
       const { light, dark, paper } = brandPalette(hex)
       expect(contrastRatio(light.primary, "#ffffff"), `${hex} texto en claro`).toBeGreaterThanOrEqual(4.5)
+      // También sobre lo secundario (botón secundario, menú al pasar el mouse), lo más exigente.
+      expect(contrastRatio(light.primary, APP_SURFACES.light.secondary), `${hex} texto sobre secundario`).toBeGreaterThanOrEqual(4.5)
+      expect(contrastRatio(dark.primary, APP_SURFACES.dark.secondary), `${hex} texto oscuro sobre secundario`).toBeGreaterThanOrEqual(4.5)
       expect(contrastRatio(light.fill, light.fillForeground), `${hex} botón en claro`).toBeGreaterThanOrEqual(4.5)
       expect(contrastRatio(light.fillHover, light.fillForeground), `${hex} botón al pasar el mouse`).toBeGreaterThanOrEqual(4.5)
       expect(contrastRatio(dark.fillHover, dark.fillForeground), `${hex} botón oscuro al pasar el mouse`).toBeGreaterThanOrEqual(4.5)
       expect(contrastRatio(light.softForeground, light.soft), `${hex} tinte en claro`).toBeGreaterThanOrEqual(4.5)
-      expect(contrastRatio(dark.primary, "#171e2b"), `${hex} texto en oscuro`).toBeGreaterThanOrEqual(4.5)
+      expect(contrastRatio(dark.primary, APP_SURFACES.dark.card), `${hex} texto en oscuro`).toBeGreaterThanOrEqual(4.5)
       expect(contrastRatio(dark.primaryForeground, dark.primary), `${hex} sobre el primario oscuro`).toBeGreaterThanOrEqual(4.5)
       expect(contrastRatio(dark.fill, dark.fillForeground), `${hex} botón en oscuro`).toBeGreaterThanOrEqual(4.5)
       expect(contrastRatio(dark.softForeground, dark.soft), `${hex} tinte en oscuro`).toBeGreaterThanOrEqual(4.5)
@@ -40,7 +44,7 @@ describe("brandPalette", () => {
     for (const hex of ["#7cc4ec", "#6ee7b7", "#facc15", "#1d5fa8", "#1e3a8a"]) {
       const { light, dark } = brandPalette(hex)
       expect(contrastRatio(light.soft, "#ffffff"), `${hex} en claro`).toBeGreaterThanOrEqual(1.18)
-      expect(contrastRatio(dark.soft, "#0c1118"), `${hex} en oscuro`).toBeGreaterThanOrEqual(1.4)
+      expect(contrastRatio(dark.soft, APP_SURFACES.dark.background), `${hex} en oscuro`).toBeGreaterThanOrEqual(1.4)
     }
   })
 
@@ -57,10 +61,40 @@ describe("brandPalette", () => {
   it("un color claro conserva el relleno exacto con letra oscura y oscurece solo el texto", () => {
     const palette = brandPalette("#facc15")
     expect(palette.light.fill).toBe("#facc15")
-    expect(palette.light.fillForeground).toBe("#0f172a")
+    expect(palette.light.fillForeground).toBe(APP_SURFACES.light.foreground)
     expect(palette.light.primary).not.toBe("#facc15")
     expect(palette.lightened).toBe(true)
     expect(palette.nearWhite).toBe(false)
+  })
+
+  it("un color fuerte lleva letra blanca: el naranja se oscurece apenas, no se cambia a letra oscura", () => {
+    for (const hex of ["#ea580c", "#f97316", "#ef4444", "#ec4899"]) {
+      const { light, dark } = brandPalette(hex)
+      expect(light.fillForeground, hex).toBe("#ffffff")
+      expect(dark.fillForeground, `${hex} en oscuro`).toBe("#ffffff")
+      expect(contrastRatio(light.fill, "#ffffff"), hex).toBeGreaterThanOrEqual(4.5)
+    }
+    // Sigue siendo naranja: un punto más tostado.
+    expect(brandPalette("#ea580c").light.fill).toBe("#cc4d0a")
+  })
+
+  it("un color claro, que habría que cambiar demasiado, sigue exacto con letra oscura", () => {
+    for (const hex of ["#facc15", "#38bdf8", "#6ee7b7", "#a78bfa", "#14b8a6"]) {
+      const { light } = brandPalette(hex)
+      expect(light.fill, hex).toBe(hex)
+      expect(light.fillForeground, hex).toBe(APP_SURFACES.light.foreground)
+    }
+  })
+
+  it("letra oscura solo cuando la blanca pediría cambiar el color más de una cuarta parte", () => {
+    for (const hex of sampleColors()) {
+      const { light, nearWhite } = brandPalette(hex)
+      if (nearWhite || light.fillForeground === "#ffffff") continue
+      const value = Number.parseInt(hex.slice(1), 16)
+      const darker = [(value >> 16) & 255, (value >> 8) & 255, value & 255].map((c) => Math.round(c * 0.76))
+      const darkerHex = `#${darker.map((c) => c.toString(16).padStart(2, "0")).join("")}`
+      expect(contrastRatio(darkerHex, "#ffffff"), hex).toBeLessThan(4.5)
+    }
   })
 
   it("casi blanco no se usa como relleno: sale el tono legible y se avisa", () => {
@@ -76,6 +110,19 @@ describe("brandPalette", () => {
     expect(brandPalette("#ea580c").reddish).toBe(false)
     expect(brandPalette("#db2777").reddish).toBe(false)
     expect(brandPalette("#808080").reddish).toBe(false)
+  })
+})
+
+describe("los grises de la app", () => {
+  it("no siguen a la marca: el color elegido no trae grises propios", () => {
+    for (const hex of ["#ea580c", "#db2777", "#1d5fa8", "#666666"]) expect(Object.keys(brandPalette(hex)), hex).not.toContain("neutrals")
+  })
+
+  it("son grises sin tono: ni azulados ni del color de la marca", () => {
+    for (const hex of [...Object.values(APP_SURFACES.light), ...Object.values(APP_SURFACES.dark)]) {
+      expect(hex.slice(1, 3), hex).toBe(hex.slice(3, 5))
+      expect(hex.slice(3, 5), hex).toBe(hex.slice(5, 7))
+    }
   })
 })
 

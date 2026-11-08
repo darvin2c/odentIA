@@ -63,15 +63,34 @@ async function onField<T>(field: string, run: () => Promise<T>): Promise<T> {
 /** El servicio con lo que deja en la pieza, que vive en lo dental (ADR 0079). */
 export type ServiceRow = typeof serviceCatalog.$inferSelect & {
   leavesFinding: ServiceLeaves | null
+  /** Sus sesiones habituales: las que puso la clínica o las de la biblioteca (`usualSessionsSql`). */
+  usualSessions: number
 }
 /** El servicio como lo lee una pantalla: con el nombre de su especialidad de la clínica. */
 export type ServiceListItem = ServiceRow & { specialtyName: string | null }
 /** El tratamiento de la biblioteca con su parte dental (caras y lo que deja en la pieza). */
 export type TreatmentTemplateRow = typeof treatmentTemplate.$inferSelect & TemplateProduct
 
+/**
+ * Las sesiones habituales de un servicio (ADR 0164): con cuántas nace un
+ * tratamiento al indicarlo. Las que puso la clínica; si no puso ninguna, las
+ * que sugiere la biblioteca para su tratamiento, y un servicio propio, 1.
+ */
+export const usualSessionsSql = sql<number>`coalesce("service_catalog"."usual_sessions",
+  (select tpl."usual_sessions" from "treatment_template" tpl where tpl."id" = "service_catalog"."template_id"), 1)`.mapWith(Number)
+
+/** Las sesiones habituales que se escriben: 1 a 60, o nulo para volver a las de la biblioteca. */
+function assertUsualSessions(value: number | null | undefined): number | null {
+  if (value === undefined || value === null) return null
+  if (!Number.isInteger(value) || value < 1 || value > 60)
+    throw invalidField("usualSessions", "Sesiones habituales: un número entero entre 1 y 60")
+  return value
+}
+
 const serviceRowColumns = () => ({
   ...getTableColumns(serviceCatalog),
   leavesFinding: serviceLeavesFinding,
+  usualSessions: usualSessionsSql,
 })
 const templateRowColumns = () => ({
   ...getTableColumns(treatmentTemplate),
@@ -461,6 +480,7 @@ const templateColumns = () => ({
   ...templateProductColumns,
   isCommon: treatmentTemplate.isCommon,
   codedOnly: treatmentTemplate.codedOnly,
+  usualSessions: treatmentTemplate.usualSessions,
   isActive: treatmentTemplate.isActive,
   version: treatmentTemplate.version,
 })
@@ -671,6 +691,8 @@ const serviceListColumns = () => ({
   currency: serviceCatalog.currency,
   durationMin: serviceCatalog.durationMin,
   billingMode: serviceCatalog.billingMode,
+  ownUsualSessions: serviceCatalog.ownUsualSessions,
+  usualSessions: usualSessionsSql,
   priceDisclosure: serviceCatalog.priceDisclosure,
   evaluationServiceId: serviceCatalog.evaluationServiceId,
   patientGuide: serviceCatalog.patientGuide,
@@ -819,6 +841,11 @@ export interface CreateServiceInput {
   currency?: string | null
   durationMin?: number | null
   billingMode?: string | null
+  /**
+   * Sesiones habituales (ADR 0164): con cuántas nace al indicarlo. Sin
+   * indicarlas, las de la biblioteca (o 1 si es propio).
+   */
+  usualSessions?: number | null
   /** Cómo dice el precio el agente; por defecto «evaluacion». */
   priceDisclosure?: string | null
   evaluationServiceId?: string | null
@@ -848,10 +875,13 @@ export async function createService(
   const currency = assertPriceCurrency(input.currency ?? allowed.business, allowed)
   let values: typeof serviceCatalog.$inferInsert
   let leaves: ServiceLeaves | null
+  /** Las sesiones que sugiere la biblioteca: las de su tratamiento, o 1 si es propio. */
+  let librarySessions = 1
   const list = await orgServiceList(tx, orgId)
   if (input.templateId) {
     const tpl = await requireTemplate(tx, orgId, input.templateId)
     await assertTemplateUsable(tx, list, tpl)
+    librarySessions = tpl.usualSessions
     if (input.officialCode)
       throw invalidField(
         "officialCode",
@@ -878,6 +908,7 @@ export async function createService(
       currency,
       durationMin: assertDuration(input.durationMin),
       billingMode: assertBillingMode(input.billingMode),
+      ownUsualSessions: assertUsualSessions(input.usualSessions),
       priceDisclosure: assertPriceDisclosure(input.priceDisclosure),
       evaluationServiceId: await assertEvaluationService(
         tx,
@@ -905,6 +936,7 @@ export async function createService(
       currency,
       durationMin: assertDuration(input.durationMin),
       billingMode: assertBillingMode(input.billingMode),
+      ownUsualSessions: assertUsualSessions(input.usualSessions),
       priceDisclosure: assertPriceDisclosure(input.priceDisclosure),
       evaluationServiceId: await assertEvaluationService(
         tx,
@@ -921,7 +953,7 @@ export async function createService(
   try {
     const [created] = await tx.insert(serviceCatalog).values(values).returning()
     if (!created) throw new Error("No se pudo crear el servicio")
-    row = { ...created, leavesFinding: leaves }
+    row = { ...created, leavesFinding: leaves, usualSessions: created.ownUsualSessions ?? librarySessions }
   } catch (e) {
     if (!isUniqueViolation(e)) throw e
     const message = "Ya existe una prestación con ese código interno"
@@ -951,6 +983,8 @@ export interface UpdateServicePatch {
   currency?: string
   durationMin?: number | null
   billingMode?: string
+  /** Sesiones habituales; `null` vuelve a las de la biblioteca (o 1 si es propio). */
+  usualSessions?: number | null
   priceDisclosure?: string
   evaluationServiceId?: string | null
   /** Qué deja en la pieza al completarse; `null` = nada. */
@@ -1000,6 +1034,8 @@ export async function updateService(
       }
       set.templateId = null
       set.source = "custom"
+      // Sin su tratamiento ya no hay biblioteca que sugiera: se queda con las que tenía.
+      if (current.ownUsualSessions === null) set.ownUsualSessions = current.usualSessions
       set.name = name
       set.specialtyId = specialtyId
       set.scope = scope
@@ -1110,6 +1146,10 @@ export async function updateService(
     set.billingMode = assertBillingMode(patch.billingMode)
     fields.push("billingMode")
   }
+  if (patch.usualSessions !== undefined) {
+    set.ownUsualSessions = assertUsualSessions(patch.usualSessions)
+    fields.push("usualSessions")
+  }
   if (patch.priceDisclosure !== undefined) {
     set.priceDisclosure = assertPriceDisclosure(patch.priceDisclosure)
     fields.push("priceDisclosure")
@@ -1172,9 +1212,13 @@ export async function updateService(
       .set({ ...set, updatedAt: new Date() })
       .where(and(eq(serviceCatalog.id, serviceId), eq(serviceCatalog.organizationId, orgId)))
       .returning()
+    const [sessions] = row
+      ? await tx.select({ usualSessions: usualSessionsSql }).from(serviceCatalog).where(eq(serviceCatalog.id, row.id))
+      : []
     updated = row && {
       ...row,
       leavesFinding: leaves !== undefined ? leaves : current.leavesFinding,
+      usualSessions: sessions?.usualSessions ?? 1,
     }
   } catch (e) {
     if (!isUniqueViolation(e)) throw e
@@ -1334,7 +1378,7 @@ export async function fromTemplates(
     // Lo tratado queda dibujado: odentIA lo deja puesto en su biblioteca.
     const leaves = libraryServiceFinding(tpl)
     await saveServiceFinding(tx, row, leaves)
-    created.push({ ...row, leavesFinding: leaves })
+    created.push({ ...row, leavesFinding: leaves, usualSessions: row.ownUsualSessions ?? tpl.usualSessions })
     await audit(tx, orgId, actorUserId, "catalog.service_created", row.id, {
       source: "template",
       templateId: tpl.id,
@@ -1358,6 +1402,8 @@ export interface CustomServiceItem {
   priceCents: number
   billingMode?: string | null
   durationMin?: number | null
+  /** Sesiones habituales; sin indicarlas, 1. */
+  usualSessions?: number | null
   /** Qué deja en la pieza al completarse; sin indicarlo, nada. */
   leavesFinding?: ServiceLeaves | null
   /** Código oficial en la lista del país; obligatorio donde la lista lo es. */
@@ -1419,6 +1465,7 @@ export async function quickAddServices(
           priceCents: item.priceCents,
           billingMode: item.billingMode,
           durationMin: item.durationMin,
+          usualSessions: item.usualSessions ?? null,
           priceDisclosure: options.priceDisclosure,
           leavesFinding: item.leavesFinding ?? null,
           officialCode: item.officialCode ?? null,

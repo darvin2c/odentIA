@@ -8,6 +8,7 @@ import {
   type DayMovement,
   financeKeys,
   groupDayMovements,
+  voidedCashNote,
 } from "./finance-cash"
 import { accountBalances, accountBalanceTitle, amountHelpText, sentence } from "./finance-collect"
 import { cashCollectedText, type WorkspaceCash } from "./workspace"
@@ -173,5 +174,33 @@ describe("la caja con dos monedas", () => {
   it("cada caja se pide y se invalida aparte: sin moneda, la clave de siempre", () => {
     expect(financeKeys.cash("sede")).toEqual(["finance-cash", "sede"])
     expect(financeKeys.cash("sede", "USD")).toEqual(["finance-cash", "sede", "USD"])
+  })
+})
+
+describe("lo devuelto de comisiones que se anuló, en Caja", () => {
+  const voided = {
+    id: "v1",
+    kind: "gasto",
+    direction: "ingreso",
+    concept: "Devolución de comisiones",
+    currency: "PEN",
+    amountCents: 21000,
+    createdAt: "2026-11-08T15:00:00.000Z",
+    voidedAt: "2026-11-08T16:00:00.000Z",
+    voidReason: "Era de otro",
+  }
+
+  it("no desaparece: queda tachado con su motivo, como un ticket anulado, y no cuenta como gasto", () => {
+    const entries = groupDayMovements([], [], [voided])
+    expect(entries).toEqual([
+      expect.objectContaining({ type: "gasto", concept: "Devolución de comisiones", leaves: false, amountCents: 21000, voided: { reason: "Era de otro" } }),
+    ])
+  })
+
+  it("el desglose del efectivo lo explica, en su caja", () => {
+    const money = (cents: number) => `S/ ${(cents / 100).toFixed(2)}`
+    expect(voidedCashNote([voided], "PEN", money)).toBe("La devolución de comisiones de S/ 210.00 se anuló: ya no suma en la caja.")
+    expect(voidedCashNote([voided], "USD", money)).toBeNull()
+    expect(voidedCashNote(undefined, "PEN", money)).toBeNull()
   })
 })

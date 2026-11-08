@@ -330,7 +330,7 @@ it("ver_presupuesto muestra lo que recibió la persona, nunca lo que la clínica
   await inOrg((tx) => createBudget(tx, ORG, clinic.actor, patientId, { itemIds: [crown.id] }))
   const ctx = toolCtx(conversationId, contactId)
   const seen = await call(ctx, "ver_presupuesto", { patientId })
-  expect(seen).toContain("Enviado · espera respuesta. Puede responderlo.")
+  expect(seen).toContain("Entregado · espera respuesta. Puede responderlo.")
   expect(seen).toContain(`[budgetId ${delivered.budgetId}]`)
   expect(seen).toContain(`Resina compuesta de la pieza 16: ${S}180.00 — sin responder [planItemId ${delivered.tooth[16]}]`)
   expect(seen).toContain(`Total ${S}540.00`)

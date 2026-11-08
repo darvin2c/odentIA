@@ -6,10 +6,10 @@ import { orgSlugFromHostname, requestHostname } from "./host"
  * El color de la marca de la clínica en su app y en sus páginas públicas (ADR 0162).
  *
  * La raíz de cada app lo pide al servidor y lo escribe en el `<head>` del primer
- * pintado, así nada parpadea en el color del producto. Solo redefine el bloque
- * «Marca» de `globals.css` (y el tinte del agente, que sigue a la clínica): estados,
- * gráficos y la identidad de odentIA o latidIA no cambian. Sin color elegido no se
- * escribe nada y queda el del producto.
+ * pintado, así nada parpadea en el color del producto. Redefine el bloque «Marca» de
+ * `globals.css` (y el tinte del agente, que sigue a la clínica): los grises, los estados,
+ * los gráficos, el papel y la identidad de odentIA o latidIA no cambian. Sin color elegido
+ * no se escribe nada y queda el del producto.
  */
 
 export interface ClinicAppearance {
@@ -70,13 +70,18 @@ function tokens(t: BrandTokens): string {
 
 /**
  * Las reglas del color de la clínica. `:root:root:root` pesa más que `[data-brand]` y
- * que `.dark`, así no depende del orden de las hojas. Lo que se ve como papel
- * (`.theme-light`) queda claro también con la app en oscuro: `.dark` solo va en la raíz.
+ * que `.dark`, así no depende del orden de las hojas. Solo el color: los grises son los
+ * de `globals.css`, sin tono, iguales para toda clínica. Lo que se ve como papel
+ * (`.theme-light`) lleva el color en claro también con la app en oscuro.
  */
 export function clinicColorCss(brandColor: string | null | undefined): string | null {
   if (!brandColor || !BRAND_COLOR_PATTERN.test(brandColor)) return null
   const { light, dark } = brandPalette(brandColor)
-  return `:root:root:root,:root:root:root .theme-light{${tokens(light)}}:root:root:root.dark{${tokens(dark)}}`
+  return (
+    `:root:root:root{${tokens(light)}}` +
+    `:root:root:root .theme-light{${tokens(light)}}` +
+    `:root:root:root.dark{${tokens(dark)}}`
+  )
 }
 
 /** Para el `head` de la raíz: el `<style>` del color, o nada. */
