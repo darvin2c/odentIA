@@ -2485,6 +2485,37 @@ const corona46 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   diagnosisCode: DX.pulpitis,
   detail: "Corona cerámica pieza 46 (diferida)",
 })
+// Estética, en el mismo plan + presupuesto presentado, pendiente de decisión (nada aceptado aún).
+// Se entrega primero: toma la oportunidad «Blanqueamiento» que anotó el agente (la abierta más
+// reciente sin otro presupuesto), y el restaurador abre la suya.
+const planEstetica = planRestaurador
+const blaq = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
+  serviceId: serviceIdA("BLANQUEAMIENTO"),
+  planId: planEstetica.id,
+  sourceEncounterId: draft.id,
+  arch: "upper",
+  detail: "Blanqueamiento dental",
+})
+const limp = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
+  serviceId: serviceIdA("LIMPIEZA"),
+  planId: planEstetica.id,
+  sourceEncounterId: draft.id,
+  detail: "Limpieza dental (profilaxis)",
+})
+const budgetEstetica = await createBudget(db, ORG_A, ANA_ID, rosaPatientId, {
+  planId: planEstetica.id,
+  itemIds: [blaq.id, limp.id],
+  title: "Plan estética dental",
+  notes: "Pendiente de decisión de la paciente.",
+})
+await deliverBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetEstetica.id)
+// Tratamiento suspendido con motivo y sin decisión: demuestra que suspender no es
+// un callejón (el recorrido ofrece «Reanudar tratamiento») y que la suspensión es
+// independiente del carril económico.
+await setPlanItemStatus(db, ORG_A, ANA_ID, rosaPatientId, blaq.id, {
+  status: "suspendido",
+  statusReason: "La paciente posterga el blanqueamiento hasta terminar la restauración.",
+})
 // Presupuesto 1 de Rosa: 3 ítems del plan, aceptación parcial (corona diferida
 // por la paciente; NUNCA se infiere aceptación histórica, todo pasa por decisión).
 const budgetRestaurador = await createBudget(db, ORG_A, ANA_ID, rosaPatientId, {
@@ -2519,35 +2550,6 @@ await decideBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetRestaurador.id, {
 })
 // Decisión aceptada pero estado clínico programado: van por carriles separados.
 await setPlanItemStatus(db, ORG_A, ANA_ID, rosaPatientId, endo46.id, { status: "programado" })
-// Estética, en el mismo plan + presupuesto presentado, pendiente de decisión (nada aceptado aún).
-const planEstetica = planRestaurador
-const blaq = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
-  serviceId: serviceIdA("BLANQUEAMIENTO"),
-  planId: planEstetica.id,
-  sourceEncounterId: draft.id,
-  arch: "upper",
-  detail: "Blanqueamiento dental",
-})
-const limp = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
-  serviceId: serviceIdA("LIMPIEZA"),
-  planId: planEstetica.id,
-  sourceEncounterId: draft.id,
-  detail: "Limpieza dental (profilaxis)",
-})
-const budgetEstetica = await createBudget(db, ORG_A, ANA_ID, rosaPatientId, {
-  planId: planEstetica.id,
-  itemIds: [blaq.id, limp.id],
-  title: "Plan estética dental",
-  notes: "Pendiente de decisión de la paciente.",
-})
-await deliverBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetEstetica.id)
-// Tratamiento suspendido con motivo y sin decisión: demuestra que suspender no es
-// un callejón (el recorrido ofrece «Reanudar tratamiento») y que la suspensión es
-// independiente del carril económico.
-await setPlanItemStatus(db, ORG_A, ANA_ID, rosaPatientId, blaq.id, {
-  status: "suspendido",
-  statusReason: "La paciente posterga el blanqueamiento hasta terminar la restauración.",
-})
 // Ortodoncia, en el mismo plan + presupuesto presentado y rechazado en su totalidad.
 const planOrto = planRestaurador
 const ctrlOrto = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {

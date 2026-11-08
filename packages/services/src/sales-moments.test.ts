@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
 import { scheduleRoom } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
-import { patientContact, serviceCatalog } from "@odentia/db/schema/clinical"
+import { patientContact, serviceCatalog, treatmentBudget } from "@odentia/db/schema/clinical"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
@@ -111,29 +111,37 @@ it("el presupuesto se une solo a la del mismo tratamiento y la mueve; aceptarlo 
   })
 })
 
-// QA del 6 nov (X7): el presupuesto restaurador se unía a la oportunidad
-// «Blanqueamiento», la más reciente, y al aceptarse la ganaba. Una de otro
-// tratamiento no lo toma: se abre la suya y el blanqueamiento sigue abierto.
-it("el presupuesto no toma la oportunidad de otro tratamiento: abre la suya", async () => {
+// QA del 6 nov (X7) y revisión del 7 nov: el presupuesto no toma la oportunidad
+// unida a otro presupuesto, y sí la del interés que anotó el agente aunque lo
+// presentado no repita su servicio («Ortodoncia» y «Brackets metálicos»): no
+// queda una abierta de más.
+it("el presupuesto toma la abierta más reciente que no es de otro presupuesto, sea cual sea su servicio", async () => {
   const f = await clinicalFixture()
   const contactId = await ownContact(f.patient.id)
-  const [whitening] = await ownerDb
+  const [orthodontics] = await ownerDb
     .insert(serviceCatalog)
-    .values({ organizationId: "org_a", name: "Blanqueamiento", scope: "general", source: "custom", priceCents: 50000, currency: "PEN" })
+    .values({ organizationId: "org_a", name: "Ortodoncia", scope: "general", source: "custom", priceCents: 50000, currency: "PEN" })
     .returning({ id: serviceCatalog.id })
   const interest = await f.run((tx) =>
-    createOpportunity(tx, "org_a", { contactId, title: "Blanqueamiento", serviceId: whitening!.id }, { userId: null, origin: "agente" }),
+    createOpportunity(tx, "org_a", { contactId, title: "Ortodoncia", serviceId: orthodontics!.id }, { userId: null, origin: "agente" }),
   )
+  // Una más reciente, unida a otro presupuesto ya decidido: no le corresponde.
+  const first = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }),
+  )
+  const other = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [first.id] }))
+  const ofOther = await f.run((tx) => createOpportunity(tx, "org_a", { contactId, title: "Otro presupuesto" }))
+  // Decidido fuera de esta prueba: ya no es un borrador ni espera respuesta.
+  await ownerDb.update(treatmentBudget).set({ status: "aceptado", presentedAt: new Date(), decidedAt: new Date() }).where(eq(treatmentBudget.id, other.id))
+  await ownerDb.update(opportunity).set({ budgetId: other.id }).where(eq(opportunity.id, ofOther.id))
   const item = await f.run((tx) =>
     addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }),
   )
   const budget = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [item.id] }))
   await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
-  await f.run((tx) => decideBudget(tx, ...f.args, budget.id, { decisions: [{ planItemId: item.id, decision: "aceptado" }] }))
-  expect(await f.run((tx) => getOpportunity(tx, "org_a", interest.id))).toMatchObject({ budgetId: null, status: "open", moment: "interesado" })
-  const own = await ownerDb.select().from(opportunity).where(eq(opportunity.budgetId, budget.id))
-  expect(own).toHaveLength(1)
-  expect(own[0]).toMatchObject({ status: "won", contactId })
+  expect(await f.run((tx) => getOpportunity(tx, "org_a", interest.id))).toMatchObject({ budgetId: budget.id, moment: "presupuesto_enviado" })
+  const linked = await ownerDb.select().from(opportunity).where(eq(opportunity.budgetId, budget.id))
+  expect(linked.map((row) => row.id)).toEqual([interest.id])
 })
 
 it("cancelar la evaluación la devuelve sola a «Interesado» si no le queda otra cita; con otra por venir, no", async () => {
