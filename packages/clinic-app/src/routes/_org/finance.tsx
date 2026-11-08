@@ -234,11 +234,12 @@ interface CollectTarget {
   currency?: string
 }
 
-type Panel =
-  | { kind: "cobrar"; patient: CollectTarget | null }
-  | { kind: "gasto" }
-  | { kind: "cerrar" }
-  | { kind: "efectivo" }
+/**
+ * Los cajones de la página, cada uno con su propio estado: abrir uno no cierra otro. Con uno a
+ * medio escribir en la columna, el siguiente se abre encima como cajón (la regla de la columna
+ * lateral) y el primero queda como estaba.
+ */
+type PanelKind = "gasto" | "cerrar" | "efectivo"
 
 function plural(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`
@@ -283,7 +284,18 @@ function FinanceWorkspace() {
   const isMobile = useIsMobile()
   const access = financeAccess(useCan())
   const { write: canWrite, close: canClose, commissions: canCommissions, commissionsWrite: canCommissionsWrite, settings: canSettings, reports: canReports } = access
-  const [panel, setPanel] = useState<Panel | null>(null)
+  const [collecting, setCollecting] = useState<{ patient: CollectTarget | null } | null>(null)
+  const [openPanels, setOpenPanels] = useState<ReadonlySet<PanelKind>>(new Set())
+  const openPanel = useCallback((kind: PanelKind) => setOpenPanels((current) => new Set(current).add(kind)), [])
+  const closePanel = useCallback(
+    (kind: PanelKind) =>
+      setOpenPanels((current) => {
+        const next = new Set(current)
+        next.delete(kind)
+        return next
+      }),
+    [],
+  )
   const [ticket, setTicket] = useState<{ result: CollectResultBody; patientId: string } | null>(null)
   // Cierre recién hecho: la hoja que se abre lo dice (y si ya estaba cerrada).
   const [justClosed, setJustClosed] = useState<{
@@ -328,7 +340,7 @@ function FinanceWorkspace() {
     [navigate, view, ticketOpen],
   )
   const collect = useCallback(
-    (patient: CollectTarget | null = null) => setPanel({ kind: "cobrar", patient }),
+    (patient: CollectTarget | null = null) => setCollecting({ patient }),
     [],
   )
   const ws: Workspace | null =
@@ -364,8 +376,8 @@ function FinanceWorkspace() {
 
   const runAction = {
     collect: () => collect(),
-    close: () => setPanel({ kind: "cerrar" }),
-    expense: () => setPanel({ kind: "gasto" }),
+    close: () => openPanel("cerrar"),
+    expense: () => openPanel("gasto"),
   }
   // Acciones de la sección: en el teléfono, en una barra siempre a la vista (cobrar y cerrar sin desplazarse).
   const phoneActions = isMobile && ws ? financePhoneActions(view, access) : []
@@ -497,9 +509,9 @@ function FinanceWorkspace() {
                 canClose={canClose}
                 expenseShortcut={isMobile}
                 onCollect={collect}
-                onExpense={() => setPanel({ kind: "gasto" })}
-                onCloseCash={() => setPanel({ kind: "cerrar" })}
-                onCashMove={() => setPanel({ kind: "efectivo" })}
+                onExpense={() => openPanel("gasto")}
+                onCloseCash={() => openPanel("cerrar")}
+                onCashMove={() => openPanel("efectivo")}
                 onShowDebts={() => showView("deudas")}
                 onShowTickets={(from) => showView("cobros", { fecha_from: from, fecha_to: todayIn(ws.timeZone) })}
                 onShowClosures={() => showView("cierres")}
@@ -560,7 +572,7 @@ function FinanceWorkspace() {
                   setSearch({ cierre: id })
                 }}
                 onBack={() => showView("caja")}
-                onCloseCash={() => setPanel({ kind: "cerrar" })}
+                onCloseCash={() => openPanel("cerrar")}
               />
             ) : null}
             {view === "deudas" ? (
@@ -582,7 +594,7 @@ function FinanceWorkspace() {
                 currency={ws.currency}
                 month={period}
                 canWrite={canWrite}
-                onExpense={() => setPanel({ kind: "gasto" })}
+                onExpense={() => openPanel("gasto")}
               />
             ) : null}
           </TabsContent>
@@ -598,14 +610,14 @@ function FinanceWorkspace() {
       {ws ? (
         <>
           <CollectDrawer
-            patientId={panel?.kind === "cobrar" ? (panel.patient?.id ?? null) : null}
-            patientName={panel?.kind === "cobrar" ? panel.patient?.name : undefined}
+            patientId={collecting?.patient?.id ?? null}
+            patientName={collecting?.patient?.name}
             branchId={ws.branchId}
             currency={ws.currency}
-            debtCurrency={panel?.kind === "cobrar" ? panel.patient?.currency : undefined}
+            debtCurrency={collecting?.patient?.currency}
             locale={ws.locale}
-            open={panel?.kind === "cobrar"}
-            onClose={() => setPanel(null)}
+            open={collecting !== null}
+            onClose={() => setCollecting(null)}
             onCollected={(result, patientId) => {
               invalidateFinance(queryClient)
               setTicket({ result, patientId })
@@ -613,15 +625,15 @@ function FinanceWorkspace() {
           />
           <ExpenseFormDrawer
             place={ws}
-            open={panel?.kind === "gasto"}
-            onClose={() => setPanel(null)}
+            open={openPanels.has("gasto")}
+            onClose={() => closePanel("gasto")}
           />
           <CashMoveDrawer
             branchId={ws.branchId}
             currency={ws.currency}
             locale={ws.locale}
-            open={panel?.kind === "efectivo"}
-            onClose={() => setPanel(null)}
+            open={openPanels.has("efectivo")}
+            onClose={() => closePanel("efectivo")}
           />
           <CashCloseDrawer
             branchId={ws.branchId}
@@ -629,8 +641,8 @@ function FinanceWorkspace() {
             currency={ws.currency}
             locale={ws.locale}
             timeZone={ws.timeZone}
-            open={panel?.kind === "cerrar"}
-            onClose={() => setPanel(null)}
+            open={openPanels.has("cerrar")}
+            onClose={() => closePanel("cerrar")}
             onClosed={(windowId, alreadyClosed, words) => {
               setJustClosed({ id: windowId, alreadyClosed, words })
               setSearch({ cierre: windowId })
