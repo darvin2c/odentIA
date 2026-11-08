@@ -128,7 +128,10 @@ export function CoordinationControls({
                       ? `Con cita · ${formatDateTime(control.appointment.startsAt)}`
                       : control.overdue
                         ? `Vencido · tocaba el ${formatDate(control.dueAt)}`
-                        : `Por reservar · desde el ${formatDate(control.dueAt)}`}
+                        : control.servedBy
+                          ? // La misma cita que dicen «Qué sigue» y el Resumen (QA del 8 nov, M6).
+                            `Sin cita propia · se puede hacer en su cita del ${formatDateTime(control.servedBy.startsAt)}`
+                          : `Por reservar · desde el ${formatDate(control.dueAt)}`}
                   </span>
                 </div>
                 {live && control.appointment ? (

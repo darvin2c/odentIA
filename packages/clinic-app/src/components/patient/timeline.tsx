@@ -18,7 +18,7 @@ import {
   Field,
   FieldLabel,
 } from "@odentia/ui"
-import { SkeletonRegion, ViewTabs } from "@odentia/ui-patterns"
+import { SkeletonRegion, ViewTabs, zonedDateOf } from "@odentia/ui-patterns"
 import { TimelineItemsSkeleton } from "../skeletons/person-sections"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { ClipboardList, FileText, Image as ImageIcon } from "lucide-react"
@@ -350,11 +350,16 @@ function JourneyCard({
       ) : null}
       <div className="flex flex-wrap items-center gap-2">
         {item.status ? (
-          <Badge variant="secondary">{item.statusText ?? STATUS_LABELS[item.status] ?? item.status}</Badge>
+          // «Vencido» lo decide el servidor con la regla del Plan y del Resumen (QA del 8 nov, B4).
+          <Badge variant={item.type === "follow_up" && item.statusText === "Vencido" ? "destructive" : "secondary"}>
+            {item.statusText ?? STATUS_LABELS[item.status] ?? item.status}
+          </Badge>
         ) : null}
-        {item.dueAt ? (
+        {/* La fecha del control mientras sigue abierto: «Toca el» o, si ya pasó, «Tocaba el». */}
+        {item.dueAt && (item.status === "pendiente" || item.status === "programado") ? (
           <span className="text-xs text-muted-foreground">
-            Vence {new Date(item.dueAt).toLocaleDateString(locale, { timeZone: timezone })}
+            {zonedDateOf(item.dueAt, timezone) < zonedDateOf(new Date().toISOString(), timezone) ? "Tocaba el" : "Toca el"}{" "}
+            {new Date(item.dueAt).toLocaleDateString(locale, { timeZone: timezone })}
           </span>
         ) : null}
         {item.toothNumbers.length > 0 ? (

@@ -15,11 +15,7 @@ import {
 import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { conversationStatusLabel } from "../../lib/glossary"
 import { useReceptionName } from "../../lib/agent-names"
-import {
-  appointmentLine,
-  nextAppointment,
-  usePatientAppointments,
-} from "../../lib/patient-appointments"
+import { nextAppointment, usePatientAppointments } from "../../lib/patient-appointments"
 import {
   ageFrom,
   fetchPatientHealth,
@@ -29,20 +25,12 @@ import {
 } from "../../lib/patients"
 import { QueryErrorState } from "../../lib/query-error"
 import { type PersonConversation, type PersonPage, RELATIONSHIP_WORDS, relationshipText } from "../../lib/people"
-import { openAppointmentAnywhere } from "../agenda/schedule-host"
 import { OpportunityDrawer } from "../crm/opportunity-drawer"
 import { TaskDrawer } from "../crm/task-drawer"
 import { storesTomography } from "../patient/document-labels"
 import { NewPatientDrawer, type NewPatientTarget } from "../patient/new-patient-drawer"
-import { NextControlCard, useNextControl } from "../patient/next-control"
-import { controlNeedsBooking } from "../../lib/clinical-journey"
-import { PlanNextCard } from "../patient/plan/plan-next"
-import {
-  ClinicalAlertsCard,
-  LastVisitCard,
-  OpenEncounterCard,
-  UpcomingCard,
-} from "../patient/resumen-clinico"
+import { NextUpCard, type UpcomingState } from "../patient/next-up"
+import { ClinicalAlertsCard, LastVisitCard, OpenEncounterCard } from "../patient/resumen-clinico"
 import { PatientPendingCard, SummaryCard } from "../patient/resumen-tab"
 import { useOpenWide } from "../patient/wide-section"
 import { PersonLink } from "../person-link"
@@ -82,12 +70,12 @@ export function usePersonConversations(personId: string) {
  * permiso.
  *
  * Para quien lee la clínica es el Resumen clínico (ADR 0035): arriba la
- * atención en curso, alergias y alertas, «Qué sigue» del plan, y última atención
- * con próxima cita; recepción y caja ven el de siempre.
+ * atención en curso, alergias y alertas, «Qué sigue» y la última atención;
+ * recepción y caja ven el de siempre, con su «Qué sigue» arriba.
  *
- * Va por filas alineadas, nunca en columnas sueltas: lo que puede crecer va solo
- * en su fila, y solo comparten fila dos tarjetas de tamaño limitado (última
- * atención y próxima cita, con cada dato en 2 líneas como máximo).
+ * «Qué sigue» es una sola lista con la próxima cita, lo del plan y el control
+ * (QA del 8 nov, propuesta 5). Va por filas alineadas, nunca en columnas
+ * sueltas: cada tarjeta en su fila.
  */
 export function PersonSummary({
   person,
@@ -109,6 +97,8 @@ export function PersonSummary({
   // Quien recibe el CD sin leer la historia (recepción) sube aquí la tomografía.
   const receivesTomography = can("clinical.receive") && !can("clinical.read") && storesTomography()
   const canAppointments = usePermission("appointments.read")
+  // «Qué sigue» lo pide quien ve alguna parte del plan (la misma condición del servidor).
+  const canPlan = can("clinical.read") || can("budgets.read") || canAppointments
   const canFinance = usePermission("finance.read")
   const canChats = usePermission("conversations.read")
   const canCrm = usePermission("crm.read")
@@ -160,9 +150,16 @@ export function PersonSummary({
   // El reloj de la Agenda: quien está en la sala sigue en la sala y su espera avanza.
   const now = useScheduleNow()
   const upcoming = appointments.data ? nextAppointment(appointments.data.data, Date.parse(now)) : null
-  // Con un control por reservar, «Reservar cita» va en su fila (o en «Qué sigue»), no también aquí.
-  const nextControl = useNextControl(patientId ?? "", Boolean(patientId))
-  const controlToBook = nextControl.control !== null && controlNeedsBooking(nextControl.control)
+  // La próxima cita va arriba de «Qué sigue»; sin la agenda (caja), no se dice.
+  const upcomingState: UpcomingState | null = canAppointments
+    ? {
+        appointment: upcoming,
+        loading: appointments.isPending,
+        failed: appointments.isError,
+        onRetry: () => void appointments.refetch(),
+        now,
+      }
+    : null
   const outstanding = (account.data?.data.byCurrency ?? []).filter(
     (balance) => balance.porCobrar > 0,
   )
@@ -176,22 +173,9 @@ export function PersonSummary({
   // Sin teléfono propio, el de quien habla por ella (la preferida primero, como la entrega el servidor).
   const spokenPhone = phoneText ? null : (person.spokenForBy.find((other) => other.phone) ?? null)
 
-  const phoneLine = phoneText
-    ? `Teléfono ${phoneText}${person.channels.includes("whatsapp") ? " · WhatsApp" : ""}`
-    : spokenPhone?.phone
-      ? `Teléfono de ${spokenPhone.displayName} (${relationshipText(spokenPhone.relationship, spokenPhone.relationshipDetail).toLowerCase()}) · ${internationalText(spokenPhone.phone)}`
-      : "Sin teléfono"
   const clinicalData = summary?.data?.data
   // Lo que debe ya lo dice Pendientes, con su botón: aquí, que no debe nada o, si Pendientes no llegó, que algo debe.
   const showSaldo = Boolean(patientId) && canFinance && (outstanding.length === 0 || !detail)
-  // Lo que ya dicen las tarjetas clínicas no se repite en los datos de abajo.
-  const showFacts =
-    !clinical ||
-    person.responsibleFor.length > 0 ||
-    ((canChats || canCrm) && person.channels.length > 0) ||
-    showSaldo ||
-    canChats ||
-    canCrm
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
@@ -212,42 +196,29 @@ export function PersonSummary({
           )}
           {/* Lo del producto debajo de las alertas (latidIA: la lista de problemas, issue 229). */}
           <ProductClinicalCards patientId={patientId} onSection={(section) => openWide?.({ id: section })} />
-          <PlanNextCard patientId={patientId} patientName={person.displayName} />
-          <div className="grid min-w-0 gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(100%,20rem),1fr))]">
-            {clinicalData ? (
-              <LastVisitCard
-                patientId={patientId}
-                summary={clinicalData}
-                onPeriodontal={(chartId) => openWide?.({ id: "periodontograma", opened: chartId })}
-              />
-            ) : summary?.isError ? (
-              <QueryErrorState error={summary.error} onRetry={() => void summary.refetch()} />
-            ) : (
-              <SummaryCard title="Última atención">
-                <SkeletonRegion message="Consultando…">
-                  <LastVisitLinesSkeleton />
-                </SkeletonRegion>
-              </SummaryCard>
-            )}
-            <UpcomingCard
+          <NextUpCard patientId={patientId} patientName={person.displayName} upcoming={upcomingState} />
+          {clinicalData ? (
+            <LastVisitCard
               patientId={patientId}
-              patientName={person.displayName}
-              upcoming={upcoming}
-              loading={canAppointments && appointments.isPending}
-              failed={!canAppointments || appointments.isError}
-              phone={phoneLine}
-              bookElsewhere={controlToBook}
-              now={now}
+              summary={clinicalData}
+              onPeriodontal={(chartId) => openWide?.({ id: "periodontograma", opened: chartId })}
             />
-          </div>
-          {/* El próximo control en su propia fila: «Qué sigue» dice una sola cosa (QA del 6 nov). */}
-          <NextControlCard patientId={patientId} />
+          ) : summary?.isError ? (
+            <QueryErrorState error={summary.error} onRetry={() => void summary.refetch()} />
+          ) : (
+            <SummaryCard title="Última atención">
+              <SkeletonRegion message="Consultando…">
+                <LastVisitLinesSkeleton />
+              </SkeletonRegion>
+            </SummaryCard>
+          )}
         </>
+      ) : patientId && canPlan ? (
+        <NextUpCard patientId={patientId} patientName={person.displayName} upcoming={upcomingState} />
       ) : null}
       {patientId && receivesTomography && !person.archived ? (
         <PersonTomographies patientId={patientId} />
       ) : null}
-      {showFacts ? (
       <section aria-label="Resumen" className="elevated rounded-xl border bg-card p-6">
         <dl className="grid min-w-0 grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
           {person.responsibleFor.length > 0 ? (
@@ -276,7 +247,7 @@ export function PersonSummary({
               </span>
             </Fact>
           ) : null}
-          {clinical ? null : (
+          {/* Para todos: antes, quien lee la clínica lo veía en «Próxima cita». */}
           <Fact label="Teléfono">
             {phoneText
               ? `${phoneText}${person.channels.includes("whatsapp") ? " · WhatsApp" : ""}`
@@ -284,7 +255,6 @@ export function PersonSummary({
                 ? `el de ${spokenPhone.displayName} (${relationshipText(spokenPhone.relationship, spokenPhone.relationshipDetail).toLowerCase()}) · ${internationalText(spokenPhone.phone)}`
                 : "Sin teléfono"}
           </Fact>
-          )}
           {(canChats || canCrm) && person.channels.length > 0 ? (
             <Fact label="Canales">
               {person.channels.map((channel) => channelLabel(channel)).join(", ")}
@@ -297,32 +267,8 @@ export function PersonSummary({
                 : allergies.map((allergy) => allergyName(allergy)).join(", ")}
             </Fact>
           ) : null}
-          {canAppointments && !clinical ? (
-            <Fact label="Próxima cita">
-              {!patientId
-                ? "Ninguna"
-                : appointments.isPending
-                  ? "Consultando…"
-                  : appointments.isError
-                    ? "No disponible"
-                    : upcoming
-                      ? (
-                          <>
-                            {appointmentLine(upcoming, new Date(now))}
-                            {" · "}
-                            <Button
-                              type="button"
-                              variant="link"
-                              className="h-auto p-0"
-                              onClick={() => openAppointmentAnywhere(upcoming.id)}
-                            >
-                              Ver la cita
-                            </Button>
-                          </>
-                        )
-                      : "Ninguna"}
-            </Fact>
-          ) : null}
+          {/* Sin ficha no tiene «Qué sigue»: su próxima cita se dice aquí. */}
+          {canAppointments && !patientId ? <Fact label="Próxima cita">Ninguna</Fact> : null}
           {showSaldo ? (
             <Fact label="Saldo">
               {account.isPending
@@ -378,8 +324,6 @@ export function PersonSummary({
           ) : null}
         </dl>
       </section>
-      ) : null}
-      {patientId && !clinical && canAppointments ? <NextControlCard patientId={patientId} /> : null}
 
       {person.kind === "por_registrar" && !person.archived ? (
         <Alert>

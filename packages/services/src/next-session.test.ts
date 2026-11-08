@@ -81,7 +81,7 @@ it("X5: «Qué sigue» pone lo empezado sin cita antes de lo aceptado sin empeza
     kind: "continuar",
     text: "Falta la cita de la próxima sesión: Tratamiento propio · sesión 2 de 2",
     detail: "También falta la cita de lo aceptado sin empezar",
-    action: { label: "Reservar cita", planItemIds: [endo.id], serviceId: f.service.id },
+    action: { label: "Reservar la sesión 2", planItemIds: [endo.id], serviceId: f.service.id },
   })
   // La corona sigue «por agendar»: el presupuesto del Plan conserva su «Reservar cita».
   expect(next.alsoToSchedule).toHaveLength(1)

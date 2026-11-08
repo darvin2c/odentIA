@@ -482,7 +482,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Dónde veo sus alergias, qué le toca y su última atención?",
-        a: "En el Resumen de su página: si lees la historia clínica, es el resumen clínico, con sus alergias y alertas, «Qué sigue» de su plan, su última atención, su próxima cita (si ya llegó, dice que está en la sala de espera) y su próximo control con «Reservar cita»; un control vencido sale en «Pendientes». Abrir la página queda en «Consultas a la historia», como cualquier lectura de la historia. Recepción y caja ven el Resumen de siempre, sin nada clínico.",
+        a: "En el Resumen de su página, en «Qué sigue»: arriba su próxima cita (si ya llegó, dice que está en la sala de espera) y debajo, en una sola lista, todo lo que le toca: el presupuesto por enviar o que espera respuesta, la cita de lo aceptado (con sus nombres) o de su próxima sesión, y su próximo control, con quién lo indicó y cuándo. El control vencido va primero. Cada fila tiene su botón y lo hace ahí mismo: «Reservar la sesión» con su número, «Reservar el control» o «¿Qué respondió?». Si lees la historia clínica, arriba están además sus alergias y alertas y, debajo, su última atención; abrir la página queda en «Consultas a la historia», como cualquier lectura de la historia. Recepción ve la misma lista, sin nada clínico; caja ve lo del presupuesto, sin citas ni controles.",
       },
       {
         q: "¿Tengo que cambiar de pestaña para revisar, firmar o cobrar desde el Resumen?",
@@ -570,7 +570,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Dónde está el plan de tratamiento?",
-        a: "En su página, en la pestaña Plan: arriba «Qué sigue» (lo próximo que hay que hacer, con su botón), los tratamientos por fases (con «Ver» se abre su recorrido al lado), el presupuesto, los controles con «Reservar» (el que ya pasó su día sin cita dice «Vencido», y el de quien vino hoy se cumple al firmar su atención) y, plegados, los planes ya terminados. Recepción ve los tratamientos con su título y estado, el presupuesto como lo recibe la persona y los controles; caja, el presupuesto y lo aceptado.",
+        a: "En su página, en la pestaña Plan: arriba «Qué sigue» (lo próximo que hay que hacer, con su botón), los tratamientos por fases (con «Ver» se abre su recorrido al lado), el presupuesto, los controles con «Reservar» (el que ya pasó su día sin cita dice «Vencido»; el de quien vino hoy se cumple al firmar su atención; y si su próxima cita cae cerca de su fecha, dice que se puede hacer en esa cita) y, plegados, los planes ya terminados. Recepción ve los tratamientos con su título y estado, el presupuesto como lo recibe la persona y los controles; caja, el presupuesto y lo aceptado.",
       },
       {
         q: "¿Cómo se arma y se envía el presupuesto?",

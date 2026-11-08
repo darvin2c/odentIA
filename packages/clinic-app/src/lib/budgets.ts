@@ -763,6 +763,11 @@ export function fetchPlanNextStep(patientId: string): Promise<{ data: PlanNextSt
   return apiFetch<{ data: PlanNextStep }>(`/api/patients/${patientId}/next-step`)
 }
 
+/** Todo lo que sigue, en una lista (el Resumen): la misma regla, con el control vencido primero. */
+export function fetchPlanNextSteps(patientId: string): Promise<{ data: PlanNextStep[] }> {
+  return apiFetch<{ data: PlanNextStep[] }>(`/api/patients/${patientId}/next-steps`)
+}
+
 /** Lo que se invalida cuando cambia un presupuesto o el plan. */
 export const PLAN_QUERY_KEYS = [
   "budgets",
