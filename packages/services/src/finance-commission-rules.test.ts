@@ -254,3 +254,15 @@ it("lo que queda tras devolver una parte conserva la regla del día de la atenci
   const view = await f.run((tx) => getMonthlyCommissions(tx, "org_a", { professionalUserId: f.actor, ...currentPeriod() }))
   expect(view.lines.map((line) => [line.rateBps, line.baseCents, line.commissionCents])).toEqual([[3000, 20000, 6000]])
 })
+
+it("un mes ya cerrado dice las reglas con que terminó, no las de hoy", async () => {
+  const f = await clinicalFixture()
+  await f.run((tx) => setCommissionRate(tx, "org_a", f.actor, { professionalUserId: f.actor, rateBps: 1000 }))
+  await f.run((tx) => setCommissionRate(tx, "org_a", f.actor, { professionalUserId: f.actor, rateBps: 2000 }))
+  const now = currentPeriod()
+  const last = now.month === 1 ? { year: now.year - 1, month: 12 } : { year: now.year, month: now.month - 1 }
+  const past = await f.run((tx) => getMonthlyCommissions(tx, "org_a", { professionalUserId: f.actor, ...last }))
+  const current = await f.run((tx) => getMonthlyCommissions(tx, "org_a", { professionalUserId: f.actor, ...now }))
+  expect(past.rateBps).toBe(1000)
+  expect(current.rateBps).toBe(2000)
+})

@@ -1393,8 +1393,9 @@ export const COMMISSION_PAYMENTS_CONCEPT = "Pago de comisiones"
  * Los pagos de comisión en una sola fila por sede y moneda, sin a quién ni de
  * qué pago: el total suma lo mismo y la lista no dice a quién se pagó. Los
  * anulados no se muestran (su anulación la ve Comisiones). El gasto de una
- * comisión se crea siempre en moneda del negocio, sin caja ni comprobante
- * (`payMonthCommission`), así que la fila no hereda cambio ni moneda de pago.
+ * comisión va en la moneda de lo cobrado (ADR 0155), puede salir de la caja y
+ * no lleva comprobante (`payMonthCommission`); su movimiento de caja se llama
+ * igual que esta fila, sin a quién se pagó.
  */
 function withoutCommissionNames<
   T extends {
@@ -2315,7 +2316,14 @@ async function commissionRateOf(tx: Db, orgId: string, professionalUserId: strin
  * Lo que rige hoy para un profesional, para su detalle: el porcentaje general,
  * desde cuándo y el anterior, y cada excepción por servicio que sigue en pie.
  */
-export async function commissionRulesOf(tx: Db, orgId: string, professionalUserId: string) {
+export async function commissionRulesOf(
+  tx: Db,
+  orgId: string,
+  professionalUserId: string,
+  /** Las que valían a ese momento (el fin de un mes pasado); sin él, las de hoy. */
+  at?: Date,
+) {
+  const upTo = at ? sql`${at.toISOString()}::timestamptz` : sql`now()`
   const general = await tx
     .select({ rateBps: commissionRate.rateBps, effectiveFrom: commissionRate.effectiveFrom })
     .from(commissionRate)
@@ -2324,7 +2332,7 @@ export async function commissionRulesOf(tx: Db, orgId: string, professionalUserI
         eq(commissionRate.organizationId, orgId),
         eq(commissionRate.professionalUserId, professionalUserId),
         isNull(commissionRate.serviceId),
-        sql`${commissionRate.effectiveFrom} <= now()`,
+        sql`${commissionRate.effectiveFrom} <= ${upTo}`,
       ),
     )
     .orderBy(desc(commissionRate.effectiveFrom))
@@ -2349,7 +2357,7 @@ export async function commissionRulesOf(tx: Db, orgId: string, professionalUserI
       select distinct on (r.service_id) r.service_id, r.rate_bps, r.fixed_cents, r.fixed_currency, r.effective_from
       from commission_rate r
       where r.organization_id = ${orgId} and r.professional_user_id = ${professionalUserId} and r.service_id is not null
-        and r.effective_from <= now()
+        and r.effective_from <= ${upTo}
       order by r.service_id, r.effective_from desc
     ) x
     join service_catalog sc on sc.organization_id = ${orgId} and sc.id = x.service_id
@@ -2821,8 +2829,10 @@ interface MonthPreload {
 /** Lo que un mes de un profesional lee, de todas sus monedas a la vez. */
 async function loadMonth(tx: Db, orgId: string, query: MonthlyCommissionsQuery, timezone: string): Promise<MonthPreload> {
   const { start, end } = monthBounds(timezone, query.year, query.month)
+  // Un mes ya cerrado dice las reglas con que terminó, no las de hoy (cada línea dice la suya).
+  const closed = end.getTime() <= Date.now()
   return {
-    rules: await commissionRulesOf(tx, orgId, query.professionalUserId),
+    rules: await commissionRulesOf(tx, orgId, query.professionalUserId, closed ? new Date(end.getTime() - 1) : undefined),
     allLive: await liveCommissionLines(tx, orgId, { professionalUserId: query.professionalUserId, start, end }),
     allFrozen: await frozenLines(tx, orgId, query.professionalUserId),
   }

@@ -1079,18 +1079,20 @@ export async function getReportCommissions(tx: Db, orgId: string, query: ReportQ
   const adjustments = await pendingAdjustmentsValued(tx, orgId, currency, branchId)
   // Lo que atendió en el periodo (precio × cantidad) y lo que de eso sigue sin cobrar hoy.
   const attended = await attendedMany(tx, orgId, window, { branchId })
+  // Las reglas con que terminó el periodo (las de hoy si aún no termina): un mes pasado no dice las de hoy.
+  const rulesAt = sql`${(window.end < now ? new Date(window.end.getTime() - 1) : now).toISOString()}::timestamptz`
   // El porcentaje general de hoy de cada uno; las excepciones se cuentan aparte.
   const rates = await tx.execute<{ userId: string; name: string; rateBps: number; exceptions: number }>(sql`
     select g.professional_user_id as "userId", u.name, g.rate_bps as "rateBps",
       (select count(*)::int from (
         select distinct on (x.service_id) x.rate_bps, x.fixed_cents from commission_rate x
         where x.organization_id = ${orgId} and x.professional_user_id = g.professional_user_id and x.service_id is not null
-          and x.effective_from <= now()
+          and x.effective_from <= ${rulesAt}
         order by x.service_id, x.effective_from desc
       ) e where e.rate_bps is not null or e.fixed_cents is not null) as exceptions
     from (
       select distinct on (r.professional_user_id) r.professional_user_id, r.rate_bps from commission_rate r
-      where r.organization_id = ${orgId} and r.service_id is null and r.effective_from <= now()
+      where r.organization_id = ${orgId} and r.service_id is null and r.effective_from <= ${rulesAt}
       order by r.professional_user_id, r.effective_from desc
     ) g
     join "user" u on u.id = g.professional_user_id`)
