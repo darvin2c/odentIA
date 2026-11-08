@@ -4508,7 +4508,27 @@ if (pedroRiosPerson) {
       { secretsKey },
     ),
   )
-  console.log(`«Su enlace» de Pedro Ríos (dental-smile): /reserva?token=${pedroLink.token}`)
+  console.log(`«Tus pendientes» de Pedro Ríos (dental-smile): /pendientes?token=${pedroLink.token}`)
+}
+// Un familiar sin autorización (ADR 0157): Jorge, hermano de Rosa, quedó vinculado
+// a ella sin ninguna facultad y tiene un enlace de antes. Abierto, no le muestra la
+// cita de Rosa ni le deja tocarla; Sofi tampoco le daría uno.
+{
+  const [brother] = await db
+    .insert(contact)
+    .values({ organizationId: ORG_A, displayName: "Jorge Quispe", givenNames: "Jorge", familyName: "Quispe", phone: "+51987650011" })
+    .returning({ id: contact.id })
+  await db.insert(patientContact).values({
+    organizationId: ORG_A,
+    patientId: domainSeed.patientId,
+    contactId: brother!.id,
+    relationship: "family",
+    createdBy: ANA_ID,
+  })
+  const brotherLink = await db.transaction((tx) =>
+    issuePersonalLink(tx, ORG_A, { contactId: brother!.id, patientId: domainSeed.patientId, createdBy: ANA_ID }, { secretsKey }),
+  )
+  console.log(`El enlace de Jorge Quispe, familiar sin autorización (dental-smile): /pendientes?token=${brotherLink.token}`)
 }
 {
   const [exodonciaPending] = await db
@@ -4526,7 +4546,8 @@ if (pedroRiosPerson) {
     .limit(1)
   if (exodonciaPending)
     await db.transaction((tx) => markConsentSentByLink(tx, ORG_A, ANA_ID, exodonciaPending.id))
-  // Y otro que ya firmó desde su teléfono: se ve con su firma y falta confirmarlo.
+  // Y otro que ya firmó desde su teléfono: se ve con su firma y falta confirmarlo. Rosa
+  // está hoy en atención (su borrador de hoy): al abrirla, arriba sale para confirmarlo ahí.
   const [implant] = await db
     .select({ id: consentTemplate.id })
     .from(consentTemplate)
