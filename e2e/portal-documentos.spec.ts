@@ -66,6 +66,12 @@ test("el portal muestra sus recetas sin que nadie las elija, la anulada marcada"
     reason: "Dosis equivocada",
   })
 
+  // La clínica tiene el portal encendido en Configuración.
+  await call(page, "PUT", "/api/portal/policy", org.slug, {
+    enabled: true,
+    allowedScope: { appointments: true, budgets: true, account: true, documents: true },
+  })
+
   // Dar acceso: quién entra, la comprobación y cómo le llega. No se elige qué verá.
   const summary = await call<{ candidates: Array<{ contactId: string; document: string | null }> }>(
     page,
