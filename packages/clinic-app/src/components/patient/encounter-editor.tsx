@@ -75,7 +75,14 @@ import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { useOrgProfile } from "../../lib/org"
 import { usePageDraftGuard } from "../../lib/page-draft-guard"
 import { untilWritten } from "../../lib/write-barrier"
-import { ageFrom, type Encounter, type EncounterDetail, hcLabel, type PatientFull } from "../../lib/patients"
+import {
+  ageFrom,
+  type Encounter,
+  type EncounterDetail,
+  hcLabel,
+  type PatientFull,
+} from "../../lib/patients"
+import type { HealthGap } from "../../lib/encounters"
 import { productUi } from "../../product/product-ui"
 import { AttendingForNotice } from "../agenda/attending-for-notice"
 import { useNoticesColumnDockBlocker } from "../notices-column"
@@ -96,12 +103,14 @@ import {
   closingControlsBody,
   type DictatedControl,
   EncounterClosingDialog,
+  healthGapWords,
   type SessionAnswers,
   needsNextControlDay,
   SignatureRegistrationFields,
   useClosingForm,
 } from "./encounter-closing"
-import { DeclaredQuestionnaireNotice, EncounterAllergyReview, EncounterContextBody } from "./encounter-context"
+import { DeclaredQuestionnaireNotice, EncounterContextBody, EncounterHealthReview } from "./encounter-context"
+import { useOpenWide } from "./wide-section"
 import type { ProposedDiagnosis } from "./diagnosis-picker"
 import { DiagnosisProposals, EncounterDiagnoses } from "./encounter-diagnoses"
 import { EncounterDocumentsBlock, useEncounterDocuments } from "./encounter-documents"
@@ -556,6 +565,10 @@ export function EncounterEditor({
     queryFn: fetchMyProfessionalProfile,
     enabled: canWrite,
   })
+  // Lo que falta saber de su salud, como lo dice el servidor (la misma regla que guarda la firma;
+  // odentIA también cuenta la ASA). Guardar Antecedentes o responder el aviso refresca el cierre.
+  const healthGaps: HealthGap[] = closingQuery.data?.data.health?.gaps ?? []
+  const openWide = useOpenWide()
   const needsRegistration = closingQuery.isSuccess && closingQuery.data.data.missing.includes("signature")
   const unsignedConsents: ConsentNeed[] = closingQuery.data?.data.consents ?? []
   const missingConsentSignatures = unsignedConsents.filter((need) => !need.personSigned).length
@@ -1433,10 +1446,16 @@ export function EncounterEditor({
   const unrecorded = closingSections
     .filter((section) => section.empty && !(section.key === "plan" && closingControls))
     .map((section) => section.title.toLowerCase())
+  // Lo que nunca se le preguntó de su salud también es algo sin registrar; con anestesia lo dice
+  // aparte, junto a los materiales, y no se repite aquí. La ASA solo cuenta con anestesia.
+  const withAnesthesia = (closingQuery.data?.data.health?.anesthetics.length ?? 0) > 0
+  const unaskedHealth = healthGaps.filter((gap) => gap !== "asa")
+  const unrecordedAll =
+    !withAnesthesia && unaskedHealth.length > 0 ? [...unrecorded, healthGapWords(unaskedHealth)] : unrecorded
   // Lo de las adendas ya lo dice el subtítulo del cierre: una sola vez.
   const finalizeDescription = [
     recorded.length > 0 ? `Registrado: ${recorded.join("; ")}.` : "",
-    unrecorded.length > 0 ? `Sin registrar: ${unrecorded.join(", ")}.` : "",
+    unrecordedAll.length > 0 ? `Sin registrar: ${unrecordedAll.join(", ")}.` : "",
   ]
     .filter(Boolean)
     .join(" ")
@@ -1541,7 +1560,7 @@ export function EncounterEditor({
   }
   const contextSurface = {
     title: "Antecedentes y última atención",
-    description: "Solo lectura: se editan en Clínica.",
+    description: "Solo lectura: se editan en Antecedentes de su ficha.",
     onClose: () => setContextOpen(false),
     children: <EncounterContextBody patientId={patientId} encounterId={encounterId} />,
   }
@@ -2171,7 +2190,7 @@ export function EncounterEditor({
 
       <DeclaredQuestionnaireNotice patientId={patientId} patient={patient} disabled={locked} />
 
-      {attending ? <EncounterAllergyReview patientId={patientId} patient={patient} disabled={locked} /> : null}
+      {attending ? <EncounterHealthReview patientId={patientId} patient={patient} disabled={locked} /> : null}
       {/* La alergia dictada (o «niega alergias») va donde se pide revisarlas, junto a las alertas (issue 109). */}
       {attending ? <DictationBlockSuggestions session={dictation} kind="alergia" /> : null}
 
@@ -2593,6 +2612,15 @@ export function EncounterEditor({
         consents={unsignedConsents}
         closing={closingQuery.data?.data ?? null}
         materials={closingQuery.data?.data.materials ?? null}
+        healthGaps={healthGaps}
+        onCompleteHealth={
+          openWide
+            ? () => {
+                setConfirmOpen(false)
+                openWide({ id: "antecedentes", review: true })
+              }
+            : undefined
+        }
         missing={missing}
         onRegister={(requirement) => {
           setConfirmOpen(false)

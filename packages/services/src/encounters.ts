@@ -1,4 +1,4 @@
-import { parseVitals, sumByCurrency, vitalsErrors } from "@odentia/clinical"
+import { isLocalAnestheticName, parseVitals, sumByCurrency, vitalsErrors } from "@odentia/clinical"
 import {
   type AssembledBudget,
   assembleEncounterBudget,
@@ -32,7 +32,7 @@ import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { canAttend } from "@odentia/auth/permissions"
 import { and, asc, desc, eq, getTableColumns, gt, gte, inArray, isNotNull, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm"
 import { markArrivedOnAttend, notifyAppointmentChanged, setAppointmentStatus } from "./appointments.js"
-import { listEncounterDocuments, type PatientDocumentWithContext } from "./clinical.js"
+import { type HealthGap, healthGapsOf, listEncounterDocuments, type PatientDocumentWithContext } from "./clinical.js"
 import { assertAttending } from "./encounter-attending.js"
 import { cancelDerivationTask, type ConsentNeed, getEncounterConsentNeeds } from "./clinical-forms.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
@@ -1785,6 +1785,13 @@ export interface ClosingCheckBase {
    * atención no tiene sede o no hay nada que descontar.
    */
   materials: ClosingMaterials | null
+  /**
+   * Lo que falta saber de su salud (enfermedades o medicación sin preguntar,
+   * ASA sin clasificar) y los anestésicos locales que se descontarán: con
+   * anestesia y algo por saber, el cierre lo avisa junto a los materiales. No
+   * bloquea; la firma deja constancia de que se firmó así.
+   */
+  health: { gaps: HealthGap[]; anesthetics: string[] }
   /** «¿Cuándo vuelve?» y los controles que esta visita cumple (ADR 0152). */
   controls: ClosingControls
   /**
@@ -1943,6 +1950,10 @@ export async function checkEncounterClosing(
     (need) => need.status !== "firmado",
   )
   const materials = await closingMaterialsOf(tx, orgId, row)
+  const health = {
+    gaps: await healthGapsOf(tx, orgId, row.patientId),
+    anesthetics: (materials?.items ?? []).filter((item) => isLocalAnestheticName(item.name)).map((item) => item.name),
+  }
   const sessions = await closingSessionsOf(tx, orgId, row.id, row.appointmentId ?? null)
   const controls = await closingControlsOf(tx, orgId, actorUserId, row)
   const product = await (await productHooks(tx, orgId)).closingParts(tx, {
@@ -1953,7 +1964,7 @@ export async function checkEncounterClosing(
       .map((session) => session.planItemId)
       .filter((id) => !keepOpenPlanItemIds.includes(id)),
   })
-  return { ready: missing.length === 0, missing, consents, materials, sessions, controls, ...product }
+  return { ready: missing.length === 0, missing, consents, materials, health, sessions, controls, ...product }
 }
 
 /** Un día civil («2026-11-07») más N meses; el 31 cae en el último día del mes que no lo tiene. */
@@ -2609,6 +2620,9 @@ export async function finalizeEncounter(
     // Cuántos consentimientos quedaron sin firmar; el motivo vive en la atención.
     consentsUnsigned: closing.consents.length,
     materials: materials?.items.length ?? 0,
+    // Lo que faltaba saber de su salud al firmar, y si se usó anestesia: la constancia del aviso.
+    healthGaps: closing.health.gaps,
+    anesthetics: closing.health.anesthetics.length,
     // La constancia de «¿Cuándo vuelve?»: lo que se eligió, o que no se indicó.
     nextControl: nextControl
       ? "fecha"

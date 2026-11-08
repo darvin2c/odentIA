@@ -367,6 +367,12 @@ export interface ProductHooks {
    */
   budgetRequired: boolean
   /**
+   * Si la clasificación ASA (riesgo anestésico) cuenta como algo que falta
+   * saber antes de anestesiar (odentIA anestesia en el sillón; la consulta de
+   * latidIA no suele hacerlo). Lo mismo que `showsAsa` en la pantalla.
+   */
+  asksAsa: boolean
+  /**
    * «Invitar a volver»: los meses sin venir que lo disparan y los que pasan
    * entre una invitación y la siguiente (odentIA 6, como la limpieza dental;
    * latidIA 12, decisión 16 del issue 229). Es también «Sin venir» de Reportes.
@@ -482,6 +488,7 @@ export const NO_PRODUCT_HOOKS: ProductHooks = {
   catalog: NO_CATALOG,
   dictation: null,
   budgetRequired: true,
+  asksAsa: true,
   recallMonths: 6,
   recallControlTitle: "Control de mantenimiento",
   closingParts: async () => ({}),

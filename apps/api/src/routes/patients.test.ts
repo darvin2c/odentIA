@@ -1018,6 +1018,23 @@ it("las alergias se agregan y se quitan una por una, solo quien escribe en la hi
   expect(data).toMatchObject({ allergyReviewDue: false, allergiesReviewedBy: "u-1" })
 })
 
+it("«Niega enfermedades» y «No toma medicación» desde la atención: solo quien escribe en la historia", async () => {
+  const fresh = await withOrgContext(appDb, "org_a", (tx) => createPatient(tx, "org_a", "u-1", { displayName: "Antecedentes" }))
+  const deny = (role: string, body: unknown) =>
+    buildApp(role).request(`/patients/${fresh.id}/health/denied`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  expect((await deny("reception", { groups: ["conditions"] })).status).toBe(403)
+  expect((await deny("clinician", { groups: [] })).status).toBe(400)
+  expect((await deny("clinician", { groups: ["allergies"] })).status).toBe(400)
+  const denied = await deny("clinician", { groups: ["conditions", "medications"] })
+  expect(denied.status).toBe(200)
+  const data = ((await denied.json()) as { data: { reviewStatus: Record<string, string> } }).data
+  expect(data.reviewStatus).toMatchObject({ conditions: "none", medications: "none", allergies: "unknown" })
+})
+
 it("pedidos sobre sus datos: Recepción los registra y envía; la historia completa solo la descarga quien lee la clínica (ADR 0080)", async () => {
   const detail = (await (await buildApp("reception").request(`/patients/${patientId}`)).json()) as {
     data: { contacts: Array<{ contactId: string; relationship: string }> }

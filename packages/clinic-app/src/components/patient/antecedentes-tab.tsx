@@ -37,6 +37,8 @@ import { ApiError, apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { clinicToday } from "../../lib/inventory"
 import {
+  ASA_OPTIONS,
+  asaLabel,
   type AnamnesisAnswers,
   fetchAnamnesisHistory,
   fetchPatientHealth,
@@ -155,21 +157,6 @@ function legacyTexts(
 
 /** Parentesco con HL7 v3 RoleCode, con las palabras de siempre (decisión 28). */
 const FAMILY_RELATIONSHIP_OPTIONS = Object.entries(FAMILY_KINSHIP_LABELS)
-
-/** Clasificación ASA del estado físico. */
-const ASA_OPTIONS: Array<[string, string]> = [
-  ["I", "ASA I · sano"],
-  ["II", "ASA II · enfermedad sistémica leve"],
-  ["III", "ASA III · enfermedad sistémica grave"],
-  ["IV", "ASA IV · amenaza constante para la vida"],
-  ["V", "ASA V · moribundo"],
-  ["VI", "ASA VI · muerte cerebral (donante)"],
-]
-
-/** «ASA II · enfermedad sistémica leve» de lo guardado; null sin clasificar (QA del 6 nov: no salía en ningún resumen). */
-export function asaLabel(value: string | null | undefined): string | null {
-  return ASA_OPTIONS.find(([key]) => key === value)?.[1] ?? null
-}
 
 /** Embarazo con su nombre; sin `items`, Base UI mostraría la clave («sin-responder»). */
 const PREGNANCY_ITEMS: Record<string, string> = { "sin-responder": "Sin responder", si: "Sí", no: "No" }
@@ -533,6 +520,8 @@ export function AntecedentesTab({
         queryClient.invalidateQueries({ queryKey: ["anamnesis-history", patientId] }),
         queryClient.invalidateQueries({ queryKey: ["patient", patientId] }),
         queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] }),
+        // Lo que falta saber de su salud lo dice también el cierre de una atención abierta.
+        queryClient.invalidateQueries({ queryKey: ["encounter-closing", patientId] }),
       ])
     },
   })
@@ -765,31 +754,6 @@ export function AntecedentesTab({
                 declared={saved.bloodGroup !== "" && pendingReview}
               />
             </div>
-            <form.AppField name="asaClass">
-              {(field) => (
-                <field.Control id={fid("asa")} label="Clasificación ASA">
-                  {(control) => (
-                    <ChoiceSelect
-                      id={control.id}
-                      aria-invalid={control.invalid || undefined}
-                      aria-describedby={control.describedBy}
-                      onBlur={control.onBlur}
-                      className="max-w-md"
-                      value={field.state.value}
-                      disabled={readOnly}
-                      onChange={(e) => field.handleChange(e.target.value)}
-                    >
-                      <option value="">Sin clasificar</option>
-                      {ASA_OPTIONS.map(([value, optionLabel]) => (
-                        <option key={value} value={value}>
-                          {optionLabel}
-                        </option>
-                      ))}
-                    </ChoiceSelect>
-                  )}
-                </field.Control>
-              )}
-            </form.AppField>
           </section>
 
           {/* Las alergias se agregan y quitan una por una en su tarjeta, fuera de este formulario (tablero 7). */}
@@ -830,6 +794,38 @@ export function AntecedentesTab({
               }
             </form.Subscribe>
           </ClinicalGroupCard>
+
+          <section
+            aria-label="Riesgo anestésico (ASA)"
+            className="flex flex-col gap-4 elevated rounded-xl border bg-card p-4 sm:p-6"
+          >
+            <div className="font-heading text-base font-medium">Riesgo anestésico (ASA)</div>
+            <form.AppField name="asaClass">
+              {(field) => (
+                <field.Control id={fid("asa")} label="Clasificación ASA" description="Su riesgo ante la anestesia, según sus enfermedades y su medicación.">
+                  {(control) => (
+                    <ChoiceSelect
+                      id={control.id}
+                      aria-invalid={control.invalid || undefined}
+                      aria-describedby={control.describedBy}
+                      onBlur={control.onBlur}
+                      className="max-w-md"
+                      value={field.state.value}
+                      disabled={readOnly}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                    >
+                      <option value="">Sin clasificar</option>
+                      {ASA_OPTIONS.map(([value, optionLabel]) => (
+                        <option key={value} value={value}>
+                          {optionLabel}
+                        </option>
+                      ))}
+                    </ChoiceSelect>
+                  )}
+                </field.Control>
+              )}
+            </form.AppField>
+          </section>
 
           <section
             aria-label="Entrevista de salud"
@@ -1088,11 +1084,17 @@ function AntecedentesSummary({
 }): React.JSX.Element {
   const { conditions, medications, reviewStatus: review, bloodGroup, asaClass } = saved
   const activeCon = conditions.filter((r) => r.status === "activa")
-  const activeMed = medications.filter((r) => r.endDate === "")
-  const rows: Array<{ title: string; state: HealthReviewState; detail: string }> = [
+  // La que toma: sin fin o con fin desde hoy, como en la receta y en la atención.
+  const today = clinicToday()
+  const activeMed = medications.filter((r) => r.endDate === "" || r.endDate >= today)
+  // La ASA va con sus enfermedades, de donde sale (QA del 8 nov: estaba bajo el grupo sanguíneo).
+  const asa = asaLabel(asaClass)
+  const rows: Array<{ title: string; state: HealthReviewState; detail: string; extra?: string }> = [
     {
       title: "Condiciones",
       state: review.conditions,
+      extra:
+        asa || productUi().health.showsAsa ? `Riesgo anestésico: ${asa ?? "ASA sin clasificar"}` : undefined,
       detail:
         activeCon.length > 0
           ? activeCon.map((row) => row.name).join(", ")
@@ -1127,14 +1129,12 @@ function AntecedentesSummary({
             Declarado · pendiente
           </Badge>
         ) : null}
-        <span className="text-sm text-muted-foreground">
-          Clasificación ASA: {asaLabel(asaClass) ?? "sin clasificar"}
-        </span>
       </div>
       {rows.map((row) => (
         <div key={row.title} className="flex flex-col gap-1 elevated rounded-xl border bg-card p-4">
           <span className="font-heading text-sm font-medium">{row.title}</span>
           <span className="text-sm text-muted-foreground">{row.detail}</span>
+          {row.extra ? <span className="text-sm text-muted-foreground">{row.extra}</span> : null}
           <Badge
             variant={
               row.state === "recorded" ? "default" : row.state === "none" ? "secondary" : "outline"

@@ -10,6 +10,9 @@ import type { Encounter, ProcedureItem } from "./patients"
 
 export type ClosingRequirement = "reason" | "diagnosis" | "evolution" | "signature"
 
+/** Lo que falta saber de su salud: alergias, enfermedades o medicación nunca preguntadas, o la ASA. */
+export type HealthGap = "allergies" | "conditions" | "medications" | "asa"
+
 export interface ClosingCheck {
   ready: boolean
   missing: ClosingRequirement[]
@@ -32,6 +35,12 @@ export interface ClosingCheck {
    * tiene sede o no hay nada que descontar (ADR 0067).
    */
   materials: ClosingMaterials | null
+  /**
+   * Lo que falta saber de su salud (enfermedades o medicación sin preguntar,
+   * ASA sin clasificar) y los anestésicos locales de esos materiales: con
+   * anestesia y algo por saber, el cierre lo avisa. No bloquea.
+   */
+  health?: { gaps: HealthGap[]; anesthetics: string[] }
   /** «¿Cuándo vuelve?» y los controles que esta visita cumple al firmar. */
   controls: ClosingControls
   /**
