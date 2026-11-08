@@ -111,6 +111,46 @@ export type PlanItemWithProgress = PlanItemWithDecision & {
    * (cambió su precio o sus condiciones): sigue valiendo lo aceptado mientras tanto.
    */
   newTermsPending: boolean
+  /**
+   * Realizado y le puede faltar otra sesión (ADR 0164): llegó en atenciones firmadas
+   * a sus previstas y a las sesiones con que se repartió su comisión. La pantalla
+   * ofrece «Falta otra sesión» solo entonces (`reopenPlanItemForSession`).
+   */
+  canAddSession: boolean
+}
+
+/**
+ * Lo que decide si un realizado puede volver a en curso con otra sesión: sus
+ * sesiones en atenciones firmadas (las que cuenta la comisión) y las sesiones
+ * con que se repartió la comisión de sus cargos (`commission_sessions`).
+ */
+async function sessionsForAnother(
+  tx: Db,
+  orgId: string,
+  ids: string[],
+): Promise<Map<string, { signed: number; frozen: number }>> {
+  const out = new Map<string, { signed: number; frozen: number }>()
+  if (ids.length === 0) return out
+  const rows = await tx.execute<{ id: string; signed: number; frozen: number }>(sql`
+    select item.id,
+      (select count(distinct e.id)::int from encounter_procedure ep
+        join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id
+        where ep.organization_id = item.organization_id and ep.plan_item_id = item.id and ep.voided_at is null
+          and e.status = 'finalizada' and e.voided_at is null) as signed,
+      (select coalesce(max(c.commission_sessions), 0)::int from patient_charge c
+        where c.organization_id = item.organization_id and c.plan_item_id = item.id and c.voided_at is null) as frozen
+    from treatment_plan_item item
+    where item.organization_id = ${orgId} and item.id in (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})`)
+  for (const row of rows) out.set(row.id, { signed: Number(row.signed), frozen: Number(row.frozen) })
+  return out
+}
+
+/** Si un realizado puede volver a en curso: lo firmado llega a sus previstas y a lo que repartió su comisión. */
+function anotherSessionAllowed(
+  item: { status: string; plannedSessions: number },
+  money: { signed: number; frozen: number } | undefined,
+): boolean {
+  return item.status === "realizado" && !!money && money.signed > 0 && money.signed >= Math.max(item.plannedSessions, money.frozen)
 }
 
 export type TreatmentPlanStatus = "Sin tratamientos" | "En curso" | "Completado" | "Cancelado"
@@ -465,12 +505,18 @@ async function withDecisions(
         )
     : []
   const newTerms = new Set(asked.map((row) => row.planItemId))
+  const another = await sessionsForAnother(
+    tx,
+    orgId,
+    items.filter((item) => item.status === "realizado").map((item) => item.id),
+  )
   return items.map((item) => ({
     ...item,
     decision: item.decisionStatus as PlanItemDecision,
     sessionsDone: sessions.get(item.id) ?? 0,
     path: paths.get(item.id) ?? null,
     newTermsPending: newTerms.has(item.id),
+    canAddSession: anotherSessionAllowed(item, another.get(item.id)),
   }))
 }
 
@@ -1324,21 +1370,19 @@ export async function reopenPlanItemForSession(
   // La comisión cuenta solo atenciones firmadas y se reparte con las sesiones que su
   // cargo congeló (`commission_sessions`): si lo firmado no llega a ellas, lo que sobró
   // ya se le dio a la última sesión y reabrir lo devolvería a «por asignar».
-  const [money] = await tx.execute<{ signed: number; frozen: number }>(sql`
-    select
-      (select count(distinct e.id)::int from encounter_procedure ep
-        join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id
-        where ep.organization_id = ${orgId} and ep.plan_item_id = ${item.id} and ep.voided_at is null
-          and e.status = 'finalizada' and e.voided_at is null) as signed,
-      (select coalesce(max(c.commission_sessions), 0)::int from patient_charge c
-        where c.organization_id = ${orgId} and c.plan_item_id = ${item.id} and c.voided_at is null) as frozen`)
-  const signed = Number(money?.signed ?? 0)
-  const frozen = Number(money?.frozen ?? 0)
-  if (done < item.plannedSessions || signed < Math.max(item.plannedSessions, frozen))
+  const money = (await sessionsForAnother(tx, orgId, [item.id])).get(item.id) ?? { signed: 0, frozen: 0 }
+  if (money.signed < done)
+    throw conflict(
+      "ITEM_SESSION_UNSIGNED",
+      "Su última sesión está en una atención sin firmar: fírmala y vuelve a intentarlo",
+    )
+  if (!anotherSessionAllowed(item, money)) {
+    const planned = Math.max(item.plannedSessions, money.frozen)
     throw conflict(
       "ITEM_FINISHED_EARLY",
-      `Se terminó antes de sus ${Math.max(item.plannedSessions, frozen)} sesiones previstas: si necesita más, indícalo de nuevo`,
+      `Se terminó en la sesión ${money.signed}, antes de sus ${planned} previstas: no se reabre para no mover lo ya repartido`,
     )
+  }
   if (done + 1 > 60) throw invalidField("plannedSessions", "Las sesiones previstas van de 1 a 60")
   const now = new Date()
   await tx

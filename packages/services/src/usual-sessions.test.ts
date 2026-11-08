@@ -9,7 +9,7 @@ import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { addEncounterProcedure, finalizeEncounter, getEncounterClosing } from "./encounters.js"
-import { addPlanItem, addPlanItemsBatch, reopenPlanItemForSession, setPlanItemStatus, updatePlanItem } from "./plan.js"
+import { addPlanItem, addPlanItemsBatch, listPlanItems, reopenPlanItemForSession, setPlanItemStatus, updatePlanItem } from "./plan.js"
 import { fromTemplates, getService, listServices, updateService } from "./service-catalog.js"
 import { ensureClinicSpecialties } from "./specialties.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
@@ -117,8 +117,10 @@ it("«Falta otra sesión» desde el Plan: lo que se terminó al llegar a sus pre
   const charges = async () => (await ownerDb.select().from(patientCharge).where(eq(patientCharge.planItemId, item.id))).length
   const before = await charges()
   expect(before).toBe(1)
+  // El Plan lo ofrece: llegó en una atención firmada a su sesión prevista.
+  expect((await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id))).find((row) => row.id === item.id)?.canAddSession).toBe(true)
   const reopened = await f.run((tx) => reopenPlanItemForSession(tx, ...f.args, item.id))
-  expect(reopened).toMatchObject({ status: "en_curso", plannedSessions: 2, sessionsDone: 1, completedAt: null })
+  expect(reopened).toMatchObject({ status: "en_curso", plannedSessions: 2, sessionsDone: 1, completedAt: null, canAddSession: false })
   expect(await charges()).toBe(before)
   await expect(f.run((tx) => reopenPlanItemForSession(tx, ...f.args, item.id))).rejects.toMatchObject({ code: "ITEM_NOT_DONE" })
 })
@@ -131,9 +133,14 @@ it("lo que se terminó antes de sus previstas no se reabre: se terminó a propó
   await ownerDb.update(treatmentPlanItem).set({ decisionStatus: "aceptado" }).where(eq(treatmentPlanItem.id, item.id))
   await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: item.id }))
   await f.run((tx) => setPlanItemStatus(tx, ...f.args, item.id, { status: "realizado", encounterId: f.encounter.id }))
+  // Sin firmar todavía: lo dice, en vez de ofrecer otra indicación.
+  await expect(f.run((tx) => reopenPlanItemForSession(tx, ...f.args, item.id))).rejects.toMatchObject({ code: "ITEM_SESSION_UNSIGNED" })
+  await f.ready(f.encounter.id)
+  await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
+  expect((await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id))).find((row) => row.id === item.id)?.canAddSession).toBe(false)
   await expect(f.run((tx) => reopenPlanItemForSession(tx, ...f.args, item.id))).rejects.toMatchObject({
     code: "ITEM_FINISHED_EARLY",
-    message: "Se terminó antes de sus 3 sesiones previstas: si necesita más, indícalo de nuevo",
+    message: "Se terminó en la sesión 1, antes de sus 3 previstas: no se reabre para no mover lo ya repartido",
   })
 })
 

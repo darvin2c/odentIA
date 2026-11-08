@@ -303,12 +303,12 @@ function PlanPhasesGroup({
                           </>
                         ) : null}
                         {/* Lo que se terminó al llegar a sus sesiones previstas puede necesitar otra (ADR 0164). */}
-                        {canWrite && item.status === "realizado" && sessions >= planned && sessions > 0 ? (
+                        {canWrite && item.canAddSession ? (
                           <Button
                             type="button"
                             size="sm"
                             variant="outline"
-                            aria-label={`Falta otra sesión en «${item.title}»`}
+                            aria-label={`Falta otra sesión en «${item.title}${site(item)}»`}
                             onClick={() => setReopening(item)}
                           >
                             Falta otra sesión…
@@ -454,7 +454,7 @@ function AnotherSessionDialog({
       apiFetch(`/api/patients/${patientId}/plan/items/${item.id}/another-session`, { method: "POST" }),
     onSuccess: async () => {
       await Promise.all(
-        ["plan-items", "treatment-plans", "treatment-plan", "patient-summary", "plan-next"].map((key) =>
+        ["plan-items", "treatment-plans", "treatment-plan", "patient-summary", "plan-next", "treatment-coordination"].map((key) =>
           queryClient.invalidateQueries({ queryKey: [key, patientId] }),
         ),
       )
@@ -467,7 +467,7 @@ function AnotherSessionDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>¿Le falta otra sesión?</AlertDialogTitle>
           <AlertDialogDescription>
-            {`${item.title}${site(item)} vuelve a «En curso» y queda la sesión ${next} por agendar. Lo firmado y lo cobrado no cambian.`}
+            {`${item.title}${site(item)} vuelve a «En curso» y queda la sesión ${next} por agendar. Lo firmado y lo cobrado hasta hoy no cambian; esa sesión se cobra como las demás de este tratamiento.`}
           </AlertDialogDescription>
         </AlertDialogHeader>
         {reopen.error ? (

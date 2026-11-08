@@ -1116,7 +1116,8 @@ function OwnServiceDrawer({
         priceCents: price.cents,
         billingMode: value.billingMode,
         durationMin: checkDuration(value.durationMin).minutes,
-        usualSessions: Number(value.usualSessions.trim()),
+        // Solo si no es 1: un servicio propio sin ellas ya vale 1.
+        ...(Number(value.usualSessions.trim()) !== 1 ? { usualSessions: Number(value.usualSessions.trim()) } : {}),
         leavesFinding: leaves?.body(value.leavesCondition, value.leavesVariant) ?? null,
         officialCode: value.officialCode?.code ?? null,
       })
