@@ -47,7 +47,7 @@ import {
 } from "@odentia/db/schema/clinical"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm"
 import { allergyReviewDue } from "./allergies.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
@@ -652,6 +652,136 @@ export async function savePatientHealth(
   input: SavePatientHealthInput,
 ): Promise<PatientHealth> {
   return persistPatientHealth(tx, orgId, { kind: "staff", userId: actorUserId }, patientId, input)
+}
+
+/** Lo que falta saber de su salud: alergias, enfermedades o medicación nunca preguntadas, y la ASA sin clasificar. */
+export type HealthGap = "allergies" | "conditions" | "medications" | "asa"
+
+/**
+ * Lo que falta saber de su salud antes de atenderla, en especial antes de una
+ * anestesia: un grupo falta si sigue «no preguntado» y no tiene filas vigentes
+ * (con una fila ya se sabe algo; las alergias, además, si nadie las revisó con
+ * el paciente; la medicación vigente es la de la receta: sin
+ * fin o con fin desde hoy); la ASA, si no se clasificó y el producto la pide
+ * (`asksAsa`: odentIA). La anamnesis con
+ * los antecedentes personales es parte de la historia (NTS 139-MINSA/2018/DGAIN);
+ * la clasificación es la del estado físico de la ASA. Avisa, nunca frena.
+ */
+export async function healthGapsOf(tx: Db, orgId: string, patientId: string): Promise<HealthGap[]> {
+  const [header] = await tx
+    .select({
+      reviewStatus: patient.healthReviewStatus,
+      asaClass: patient.asaClass,
+      allergiesReviewedAt: patient.allergiesReviewedAt,
+    })
+    .from(patient)
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+    .limit(1)
+  if (!header) throw notFound("Paciente")
+  const review = (header.reviewStatus ?? {}) as Record<string, unknown>
+  const asked = (value: unknown) => value === "none" || value === "recorded"
+  const today = await clinicToday(tx, orgId)
+  const [allergies, conditions, medications, hooks] = await Promise.all([
+    tx
+      .select({ id: patientAllergy.id })
+      .from(patientAllergy)
+      .where(
+        and(
+          eq(patientAllergy.organizationId, orgId),
+          eq(patientAllergy.patientId, patientId),
+          eq(patientAllergy.isActive, true),
+        ),
+      )
+      .limit(1),
+    tx
+      .select({ id: patientCondition.id })
+      .from(patientCondition)
+      .where(
+        and(
+          eq(patientCondition.organizationId, orgId),
+          eq(patientCondition.patientId, patientId),
+          eq(patientCondition.status, "activa"),
+        ),
+      )
+      .limit(1),
+    tx
+      .select({ id: patientMedication.id })
+      .from(patientMedication)
+      .where(
+        and(
+          eq(patientMedication.organizationId, orgId),
+          eq(patientMedication.patientId, patientId),
+          or(isNull(patientMedication.endDate), gte(patientMedication.endDate, today)),
+        ),
+      )
+      .limit(1),
+    productHooks(tx, orgId),
+  ])
+  const gaps: HealthGap[] = []
+  if (!asked(review["allergies"]) && !header.allergiesReviewedAt && allergies.length === 0) gaps.push("allergies")
+  if (!asked(review["conditions"]) && conditions.length === 0) gaps.push("conditions")
+  if (!asked(review["medications"]) && medications.length === 0) gaps.push("medications")
+  if (hooks.asksAsa && !header.asaClass) gaps.push("asa")
+  return gaps
+}
+
+/**
+ * «Niega enfermedades» y «No toma medicación» desde la atención: deja esos
+ * grupos en «niega», sin rearmar el resto de los antecedentes; quién y cuándo
+ * quedan en la auditoría. No marca revisado todo el agregado: lo que declaró
+ * el paciente y nadie revisó sigue pendiente de revisión. Con una fila vigente
+ * no se puede negar: eso ya se registró. Avanza la revisión, así una edición
+ * abierta de Antecedentes recarga.
+ */
+export async function markHealthDenied(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  groups: ReadonlyArray<"conditions" | "medications">,
+): Promise<PatientHealth> {
+  if (groups.length === 0) throw validation("Elige qué niega")
+  await requirePatient(tx, orgId, patientId)
+  const [locked] = await tx
+    .select({ revision: patient.healthRevision, reviewStatus: patient.healthReviewStatus })
+    .from(patient)
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+    .limit(1)
+    .for("update")
+  if (!locked) throw notFound("Paciente")
+  const gaps = await healthGapsOf(tx, orgId, patientId)
+  const stored = (locked.reviewStatus ?? {}) as Record<string, unknown>
+  const state = (value: unknown) => (value === "none" || value === "recorded" ? value : "unknown")
+  const next: Record<string, unknown> = {
+    allergies: state(stored["allergies"]),
+    conditions: state(stored["conditions"]),
+    medications: state(stored["medications"]),
+  }
+  for (const group of groups) {
+    // Ya registrado (con filas o «registrados»): negarlo contradiría lo que hay.
+    if (!gaps.includes(group) && next[group] !== "none")
+      throw invalidField(
+        `reviewStatus.${group}`,
+        group === "conditions"
+          ? "Ya tiene enfermedades registradas: revísalas en Antecedentes."
+          : "Ya tiene medicación registrada: revísala en Antecedentes.",
+      )
+    next[group] = "none"
+  }
+  const now = new Date()
+  await tx
+    .update(patient)
+    .set({
+      healthRevision: locked.revision + 1,
+      healthReviewStatus: next,
+      updatedAt: now,
+    })
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+  await audit(tx, orgId, actorUserId, "health.denied", "patient", patientId, {
+    groups: [...groups],
+    revision: { before: locked.revision, after: locked.revision + 1 },
+  })
+  return getPatientHealth(tx, orgId, patientId)
 }
 
 /** Una alergia que declaró la persona (o quien habla por ella), sin verificar. */

@@ -14,7 +14,7 @@
 import { randomUUID } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
-import { encounter, encounterProcedure, serviceCatalog, treatmentTemplate } from "@odentia/db/schema/clinical"
+import { encounter, encounterProcedure, patient, serviceCatalog, treatmentTemplate } from "@odentia/db/schema/clinical"
 import {
   product,
   productLot,
@@ -28,6 +28,7 @@ import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { upsertAgentConfig } from "./agentConfig.js"
+import { getPatientHealth, markHealthDenied, savePatientHealth } from "./clinical.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import {
   confirmDictationSuggestion,
@@ -349,6 +350,72 @@ it("«Empieza por estos 5» en latidIA: las consultas de su biblioteca no se sug
   }
   const top = await withOrgContext(appDb, "org_lat", (tx) => topServicesWithoutMaterials(tx, "org_lat"))
   expect(top.services).toEqual([{ serviceId: nebulization.id, name: "Nebulización", times: 2 }])
+})
+
+it("con anestesia y sin sus antecedentes, el cierre lo dice; «niega» lo deja dicho y la firma guarda lo que faltaba", async () => {
+  const f = await clinicalFixture()
+  const site = await newBranch()
+  const lidocaine = await newProduct({ name: "Lidocaína 2 % con epinefrina", unit: "cartucho" })
+  const gloves = await newProduct({ name: "Guantes de nitrilo", unit: "guante" })
+  await f.run((tx) =>
+    setServiceMaterials(tx, "org_a", f.actor, f.service.id, [
+      { productId: lidocaine.id, quantity: 1 },
+      { productId: gloves.id, quantity: 2 },
+    ], { prices: false }),
+  )
+  await f.run((tx) => updateEncounterDraft(tx, ...f.args, f.encounter.id, { branchId: site.id }))
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { serviceId: f.service.id }))
+  await f.ready(f.encounter.id)
+
+  // Nunca se le preguntó: el cierre sabe que hay anestesia y lo que falta.
+  const before = await f.run((tx) => getEncounterClosing(tx, "org_a", f.actor, f.patient.id, f.encounter.id))
+  expect(before.health).toEqual({
+    gaps: ["allergies", "conditions", "medications", "asa"],
+    anesthetics: ["Lidocaína 2 % con epinefrina"],
+  })
+
+  // «Niega enfermedades» desde la atención: quién y cuándo en la auditoría, sin tocar lo demás
+  // ni dar por revisado lo que la persona pudo declarar.
+  const health = await f.run((tx) => markHealthDenied(tx, "org_a", f.actor, f.patient.id, ["conditions"]))
+  expect(health.reviewStatus).toMatchObject({ conditions: "none", medications: "unknown" })
+  expect(health.reviewedAt).toBeNull()
+  const [denied] = await ownerDb
+    .select({ actor: auditEvent.actorUserId, metadata: auditEvent.metadata })
+    .from(auditEvent)
+    .where(and(eq(auditEvent.entityId, f.patient.id), eq(auditEvent.action, "health.denied")))
+  expect(denied).toMatchObject({ actor: f.actor, metadata: { groups: ["conditions"] } })
+  const after = await f.run((tx) => getEncounterClosing(tx, "org_a", f.actor, f.patient.id, f.encounter.id))
+  expect(after.health.gaps).toEqual(["allergies", "medications", "asa"])
+
+  // Con medicación registrada no se puede negar: eso ya se sabe. La que termina más adelante sigue vigente.
+  const current = await f.run((tx) => getPatientHealth(tx, "org_a", f.patient.id))
+  await f.run((tx) =>
+    savePatientHealth(tx, "org_a", f.actor, f.patient.id, {
+      expectedRevision: current.revision,
+      reviewStatus: { allergies: "none", conditions: "none", medications: "recorded" },
+      conditions: [],
+      medications: [{ name: "Warfarina", dose: "5 mg", endDate: "2099-12-31" }],
+      asaClass: "II",
+    }),
+  )
+  // Aunque el grupo quedara «no preguntado», la fila que termina más adelante ya dice algo.
+  await ownerDb
+    .update(patient)
+    .set({ healthReviewStatus: { allergies: "none", conditions: "none", medications: "unknown" } })
+    .where(eq(patient.id, f.patient.id))
+  const known = await f.run((tx) => getEncounterClosing(tx, "org_a", f.actor, f.patient.id, f.encounter.id))
+  expect(known.health.gaps).toEqual([])
+  await expect(
+    f.run((tx) => markHealthDenied(tx, "org_a", f.actor, f.patient.id, ["medications"])),
+  ).rejects.toMatchObject({ status: 400 })
+
+  // Firmar no se frena, y la firma deja constancia de lo que faltaba saber al firmar.
+  await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
+  const [signed] = await ownerDb
+    .select({ metadata: auditEvent.metadata })
+    .from(auditEvent)
+    .where(and(eq(auditEvent.entityId, f.encounter.id), eq(auditEvent.action, "encounter.finalized")))
+  expect(signed?.metadata).toMatchObject({ healthGaps: [], anesthetics: 1 })
 })
 
 /** Atención en una sede con materiales y lotes: 2 guantes y 1 sobre por vez. */

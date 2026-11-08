@@ -183,6 +183,7 @@ export const dentalHooks: ProductHooks = {
   catalog: dentalCatalog,
   dictation: DENTAL_DICTATION,
   budgetRequired: true,
+  asksAsa: true,
   recallMonths: 6,
   recallControlTitle: "Control de mantenimiento",
 

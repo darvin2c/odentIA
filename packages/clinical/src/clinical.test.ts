@@ -8,6 +8,7 @@ import {
   whatsappNumberProblem,
   allergyConflicts,
   allergyWarnings,
+  isLocalAnestheticName,
   codeAllergySubstance,
   medicationGroupOfAtc,
   searchAllergens,
@@ -108,6 +109,21 @@ describe("signos vitales", () => {
       glucosaCapilar: "Signo vital desconocido: glucosaCapilar",
     })
     expect(vitalsErrors(null)).toEqual({})
+  })
+})
+
+describe("anestésico local por el nombre del producto", () => {
+  it("reconoce la DCI, la marca y la palabra, sin confundir otros materiales", () => {
+    expect(isLocalAnestheticName("Lidocaína 2 % con epinefrina")).toBe(true)
+    expect(isLocalAnestheticName("ARTICAINA 4% 1:100.000")).toBe(true)
+    expect(isLocalAnestheticName("Xylocaína spray")).toBe(true)
+    expect(isLocalAnestheticName("Anestesia tópica (gel)")).toBe(true)
+    expect(isLocalAnestheticName("Resina compuesta A2")).toBe(false)
+    expect(isLocalAnestheticName("Aguja dental corta 30G")).toBe(false)
+    expect(isLocalAnestheticName("Aguja para anestesia 30G")).toBe(false)
+    expect(isLocalAnestheticName("Jeringa carpule para anestesia")).toBe(false)
+    expect(isLocalAnestheticName("Carpule de lidocaína")).toBe(true)
+    expect(isLocalAnestheticName("")).toBe(false)
   })
 })
 
