@@ -1280,6 +1280,72 @@ export async function setPlanItemStatus(
   return { ...(await withPlanItemParts(tx, orgId, updated)), decision: updated.decisionStatus as PlanItemDecision }
 }
 
+/**
+ * «Falta otra sesión» sobre lo ya realizado (ADR 0164): la salida de un
+ * tratamiento que se terminó al firmar porque llegó a sus sesiones previstas
+ * («Sí, terminar» viene elegido, ADR 0161) y necesita otra. Vuelve a en curso
+ * con una sesión prevista más que las hechas. No toca lo firmado ni lo cobrado:
+ * no hay cargo nuevo, el presupuesto aceptado sigue con su tope y lo que dejó
+ * en el odontograma se queda (se dibuja una sola vez por tratamiento). Solo si
+ * llegó a sus previstas: uno que se terminó antes («Completar») se terminó a
+ * propósito, y reabrirlo devolvería a «por asignar» la comisión que ya se dio a
+ * su última sesión (`unassignedCommissionSessions`).
+ */
+export async function reopenPlanItemForSession(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  itemId: string,
+): Promise<PlanItemWithProgress> {
+  await requirePatient(tx, orgId, patientId)
+  const [found] = await tx
+    .select({ planId: treatmentPlanItem.planId })
+    .from(treatmentPlanItem)
+    .where(
+      and(
+        eq(treatmentPlanItem.id, itemId),
+        eq(treatmentPlanItem.organizationId, orgId),
+        eq(treatmentPlanItem.patientId, patientId),
+      ),
+    )
+  if (!found) throw notFound("Tratamiento")
+  await lockPlanRow(tx, orgId, patientId, found.planId)
+  const [item] = await tx
+    .select()
+    .from(treatmentPlanItem)
+    .where(and(eq(treatmentPlanItem.id, itemId), eq(treatmentPlanItem.organizationId, orgId)))
+    .for("update")
+  if (!item) throw notFound("Tratamiento")
+  if (item.status !== "realizado")
+    throw conflict("ITEM_NOT_DONE", "Solo a un tratamiento realizado le puede faltar otra sesión")
+  const [progress] = await withDecisions(tx, orgId, [item])
+  const done = progress?.sessionsDone ?? 0
+  if (done < item.plannedSessions)
+    throw conflict(
+      "ITEM_FINISHED_EARLY",
+      `Se terminó antes de sus ${item.plannedSessions} sesiones previstas: si necesita más, indícalo de nuevo`,
+    )
+  if (done + 1 > 60) throw invalidField("plannedSessions", "Las sesiones previstas van de 1 a 60")
+  const now = new Date()
+  await tx
+    .update(treatmentPlanItem)
+    .set({ status: "en_curso", completedAt: null, plannedSessions: done + 1, updatedAt: now })
+    .where(eq(treatmentPlanItem.id, item.id))
+  await audit(tx, orgId, actorUserId, "plan.item_reopened_for_session", "treatment_plan_item", item.id, {
+    patientId,
+    planId: item.planId,
+    sessionsDone: done,
+    from: item.plannedSessions,
+    to: done + 1,
+    completedAt: item.completedAt?.toISOString() ?? null,
+  })
+  const [updated] = await tx.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.id, item.id))
+  if (!updated) throw notFound("Tratamiento")
+  const [listed] = await withDecisions(tx, orgId, [updated])
+  return listed as PlanItemWithProgress
+}
+
 export async function revisePlanItem(
   tx: Db,
   orgId: string,
