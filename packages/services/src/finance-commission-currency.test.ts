@@ -161,7 +161,7 @@ it("el monto fijo va en la moneda del servicio, nunca paga más de lo cobrado y 
   expect(fixedLine?.unruled).toBeUndefined()
 })
 
-it("lo adelantado de un servicio que se cobra por sesión no comisiona: comisiona el cobro de cada visita", async () => {
+it("lo pagado antes de un servicio que se cobra por sesión es un adelanto: la sesión comisiona una vez, de quien la hizo", async () => {
   const f = await clinicalFixture()
   await f.run((tx) =>
     tx.execute(sql`update "service_catalog" set "price_cents" = 15000, "billing_mode" = 'session' where "id" = ${f.service.id}`),
@@ -172,8 +172,32 @@ it("lo adelantado de un servicio que se cobra por sesión no comisiona: comision
   const budget = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [item.id] }))
   await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
   await f.run((tx) => decideBudget(tx, ...f.args, budget.id, { decisions: [{ planItemId: item.id, decision: "aceptado" }] }))
-  const prepaid = await f.run((tx) => createCharge(tx, ...f.args, { budgetItemId: budget.items[0]!.id }))
-  expect(prepaid.commissionSessions).toBeNull()
+  await f.run((tx) => setCommissionRate(tx, "org_a", f.actor, { professionalUserId: f.actor, rateBps: 1000 }))
+  // Su línea no se carga antes: la visita ya genera el cargo de esa sesión.
+  await expect(f.run((tx) => createCharge(tx, ...f.args, { budgetItemId: budget.items[0]!.id }))).rejects.toMatchObject({
+    code: "CHARGED_PER_VISIT",
+    fields: { budgetItemId: expect.any(String) },
+  })
+  const [site] = await ownerDb.insert(branch).values({ organizationId: "org_a", name: `Sede ${randomUUID()}` }).returning()
+  const cash = await f.run((tx) => createPaymentMethod(tx, "org_a", f.actor, { name: "Efectivo", typeCode: "10" }))
+  await f.run((tx) =>
+    collectCharge(tx, ...f.args, { branchId: site!.id, advanceCents: 15000, payments: [{ paymentMethodId: cash.id, amountCents: 15000 }], requestId: randomUUID() }),
+  )
+  const view = () => f.run((tx) => getMonthlyCommissions(tx, "org_a", { professionalUserId: f.actor, ...currentPeriod() }))
+  // El adelanto no es de nadie todavía, ni se ve como sesión sin hacer.
+  expect((await view()).lines).toEqual([])
+  expect(await f.run((tx) => unassignedCommissionSessions(tx, "org_a"))).toEqual([])
+
+  // La visita se carga al firmar y el adelanto la cancela: una sola comisión, la de su cobro.
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: item.id }))
+  await f.ready(f.encounter.id)
+  const closed = await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
+  expect(closed.charges.map((charge) => charge.amountCents)).toEqual([15000])
+  await f.run((tx) =>
+    collectCharge(tx, ...f.args, { branchId: site!.id, chargeIds: [closed.charges[0]!.id], payments: [], requestId: randomUUID() }),
+  )
+  expect((await view()).lines.map((line) => [line.slice, line.baseCents, line.commissionCents])).toEqual([[null, 15000, 1500]])
+  expect(await f.run((tx) => unassignedCommissionSessions(tx, "org_a"))).toEqual([])
 })
 
 it("lo cobrado por adelantado de un tratamiento es de quien haga cada sesión; mientras tanto se ve aparte", async () => {
