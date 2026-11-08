@@ -58,7 +58,7 @@ export function ClinicBrandColorSettings({
   const id = useId()
   const queryClient = useQueryClient()
   const router = useRouter()
-  const product = productUi().product === "medical" ? "medical" : "dental"
+  const product = productUi().product
   const factory = PRODUCT_BRAND_COLORS[product]
   const saved = brandColor ?? factory
   const [chosen, setChosen] = useState(saved)
