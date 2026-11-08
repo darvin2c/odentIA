@@ -171,6 +171,8 @@ export interface BrandPalette {
   nearWhite: boolean
   /** Se parece al rojo de los errores. */
   reddish: boolean
+  /** Los grises de la app en el tono de la marca (`canvas`, `muted`, `border`…), por modo, con sus nombres de `globals.css`. */
+  neutrals: { light: Record<string, string>; dark: Record<string, string> }
 }
 
 function hueAndSaturation(color: Rgb): { hue: number; saturation: number } {
@@ -205,8 +207,8 @@ function fillWithText(base: Rgb, dark: Rgb): { fill: Rgb; text: string } | null 
   return contrastOf(base, dark) >= TEXT ? { fill: base, text: hexOf(dark) } : null
 }
 
-function lightTokens(base: Rgb, nearWhite: boolean): BrandTokens {
-  const primary = shiftUntil(base, BLACK, LIGHT_SECONDARY, TEXT)
+function lightTokens(base: Rgb, nearWhite: boolean, secondary: Rgb = LIGHT_SECONDARY): BrandTokens {
+  const primary = shiftUntil(base, BLACK, secondary, TEXT)
   const chosen = nearWhite ? null : fillWithText(base, INK)
   const fill = chosen?.fill ?? primary
   const fillForeground = chosen?.text ?? hexOf(WHITE)
@@ -225,15 +227,25 @@ function lightTokens(base: Rgb, nearWhite: boolean): BrandTokens {
   }
 }
 
-function darkTokens(base: Rgb): BrandTokens {
+/** Las superficies del modo oscuro contra las que se mide el color: las de la clínica, si se tiñeron. */
+interface DarkSurfaces {
+  background: Rgb
+  card: Rgb
+  secondary: Rgb
+}
+
+const SLATE_DARK_SURFACES: DarkSurfaces = { background: DARK_BG, card: DARK_CARD, secondary: DARK_SECONDARY }
+
+function darkTokens(base: Rgb, surfaces: DarkSurfaces = SLATE_DARK_SURFACES): BrandTokens {
+  const { background, card, secondary } = surfaces
   // Legible también sobre lo secundario, la superficie más clara del modo oscuro.
-  const primary = shiftUntil(base, WHITE, DARK_SECONDARY, TEXT)
+  const primary = shiftUntil(base, WHITE, secondary, TEXT)
   const onPrimary = shiftUntil(mix(primary, BLACK, 0.82), BLACK, primary, TEXT)
   // El color de la clínica solo si se distingue del fondo oscuro y tiene una letra que se lea;
   // si no, el tono claro del primario con su letra oscura.
-  const chosen = contrastOf(base, DARK_BG) >= 3 ? fillWithText(base, DARK_BG) : null
-  const usable = chosen && contrastOf(chosen.fill, DARK_BG) >= 3 ? chosen : null
-  const soft = tintUntil(base, DARK_BG, 1.4)
+  const chosen = contrastOf(base, background) >= 3 ? fillWithText(base, background) : null
+  const usable = chosen && contrastOf(chosen.fill, background) >= 3 ? chosen : null
+  const soft = tintUntil(base, background, 1.4)
   const fill = usable?.fill ?? primary
   const fillForeground = usable?.text ?? hexOf(onPrimary)
   return {
@@ -244,8 +256,8 @@ function darkTokens(base: Rgb): BrandTokens {
     fillHover: hoverOf(fill, fillForeground),
     soft: hexOf(soft),
     softForeground: hexOf(shiftUntil(primary, WHITE, soft, TEXT)),
-    agentSoft: hexOf(tintUntil(base, DARK_CARD, 1.15)),
-    agentBorder: hexOf(tintUntil(base, DARK_BG, 1.6)),
+    agentSoft: hexOf(tintUntil(base, card, 1.15)),
+    agentBorder: hexOf(tintUntil(base, background, 1.6)),
   }
 }
 
@@ -269,15 +281,163 @@ export function brandColorName(hex: string): string {
   return "Rosa"
 }
 
+// --- Los grises en el tono de la marca ---------------------------------------
+//
+// Los grises de la app (slate) son un azul con muy poco color: con un naranja, los
+// botones secundarios, los bordes y el texto gris se ven azulados. Toman el tono exacto
+// de la marca con un tope de color muy bajo, y cada uno conserva su luz, así los
+// contrastes no cambian. En claro, las tarjetas, el fondo de las ventanas y el papel
+// siguen blancos. Es la regla del estudio de diseño (tablero 12 del lienzo, ADR 0162):
+//   gris = oklch(luz de hoy, min(croma de hoy, 0,012) × min(1, croma de la marca / 0,08), tono de la marca)
+
+/** Los grises de `globals.css` (slate) que siguen a la marca en claro, con su valor de hoy. */
+const SLATE_LIGHT: Readonly<Record<string, string>> = {
+  canvas: "#f6f8fb",
+  sidebar: "#f8fafc",
+  muted: "#f1f5f9",
+  secondary: "#e8eef4",
+  accent: "#e8eef4",
+  "sidebar-accent": "#e8eef4",
+  border: "#e2e8f0",
+  "sidebar-border": "#e2e8f0",
+  input: "#cbd5e1",
+  "muted-foreground": "#475569",
+  "sidebar-foreground": "#1e293b",
+  foreground: "#0f172a",
+  "card-foreground": "#0f172a",
+  "popover-foreground": "#0f172a",
+  "secondary-foreground": "#0f172a",
+  "accent-foreground": "#0f172a",
+  "sidebar-accent-foreground": "#0f172a",
+}
+
+/** En oscuro el fondo, la tarjeta y las ventanas también son slate: también siguen a la marca. */
+const SLATE_DARK: Readonly<Record<string, string>> = {
+  canvas: "#0c1118",
+  background: "#0c1118",
+  card: "#171e2b",
+  popover: "#171e2b",
+  sidebar: "#111722",
+  muted: "#1e2633",
+  secondary: "#263041",
+  accent: "#263041",
+  "sidebar-accent": "#263041",
+  border: "#263041",
+  "sidebar-border": "#263041",
+  input: "#3b475a",
+  "muted-foreground": "#94a3b8",
+  "sidebar-foreground": "#e2e8f0",
+  foreground: "#f1f5f9",
+  "card-foreground": "#f1f5f9",
+  "popover-foreground": "#f1f5f9",
+  "secondary-foreground": "#f1f5f9",
+  "accent-foreground": "#f1f5f9",
+  "sidebar-accent-foreground": "#f1f5f9",
+}
+
+const NEUTRAL_CHROMA_MAX = 0.012
+/** Desde este color de la marca, los grises llevan todo su tono; una marca gris da grises puros. */
+const BRAND_CHROMA_FULL = 0.08
+
+function toLinear(channel: number): number {
+  const value = channel / 255
+  return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+}
+
+function fromLinear(value: number): number {
+  const clamped = Math.min(1, Math.max(0, value))
+  return Math.round((clamped <= 0.0031308 ? clamped * 12.92 : 1.055 * clamped ** (1 / 2.4) - 0.055) * 255)
+}
+
+/** sRGB a OKLCH (Ottosson, 2020). */
+function oklchOf(color: Rgb): { l: number; c: number; h: number } {
+  const r = toLinear(color[0])
+  const g = toLinear(color[1])
+  const b = toLinear(color[2])
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
+  const lightness = 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s
+  const a = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s
+  const bb = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s
+  return { l: lightness, c: Math.hypot(a, bb), h: (Math.atan2(bb, a) * 180) / Math.PI }
+}
+
+function rgbOfOklch(lightness: number, chroma: number, hue: number): Rgb {
+  const a = chroma * Math.cos((hue * Math.PI) / 180)
+  const b = chroma * Math.sin((hue * Math.PI) / 180)
+  const l = (lightness + 0.3963377774 * a + 0.2158037573 * b) ** 3
+  const m = (lightness - 0.1055613458 * a - 0.0638541728 * b) ** 3
+  const s = (lightness - 0.0894841775 * a - 1.291485548 * b) ** 3
+  return [
+    fromLinear(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
+    fromLinear(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
+    fromLinear(-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s),
+  ]
+}
+
+function tintSlate(slate: Readonly<Record<string, string>>, share: number, hue: number): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [name, hex] of Object.entries(slate)) {
+    const { l, c } = oklchOf(rgbOf(hex))
+    out[name] = hexOf(rgbOfOklch(l, Math.min(c, NEUTRAL_CHROMA_MAX) * share, hue))
+  }
+  return out
+}
+
+/**
+ * El texto gris se lee (4,5:1) sobre todo fondo donde va: si no llega, se corre su luz de
+ * a poco, hacia la tinta en claro y hacia el blanco en oscuro.
+ */
+function readableMutedText(muted: string, backgrounds: string[], dark: boolean): string {
+  const surfaces = backgrounds.map(rgbOf)
+  const { c, h } = oklchOf(rgbOf(muted))
+  let { l } = oklchOf(rgbOf(muted))
+  for (let step = 0; step < 80; step++) {
+    const color = rgbOfOklch(l, c, h)
+    if (surfaces.every((surface) => contrastOf(color, surface) >= TEXT)) return hexOf(color)
+    l += dark ? 0.005 : -0.005
+  }
+  return muted
+}
+
+/** Los grises de la clínica en claro y en oscuro: el tono de la marca, muy suave. */
+function brandNeutrals(base: Rgb): BrandPalette["neutrals"] {
+  const { c, h } = oklchOf(base)
+  const share = Math.min(1, c / BRAND_CHROMA_FULL)
+  const light = tintSlate(SLATE_LIGHT, share, h)
+  const dark = tintSlate(SLATE_DARK, share, h)
+  const pick = (tokens: Record<string, string>, names: string[], fallback: string) =>
+    names.map((name) => tokens[name] ?? fallback)
+  light["muted-foreground"] = readableMutedText(
+    light["muted-foreground"] ?? "#475569",
+    [...pick(light, ["canvas", "muted", "secondary"], "#ffffff"), "#ffffff"],
+    false,
+  )
+  dark["muted-foreground"] = readableMutedText(
+    dark["muted-foreground"] ?? "#94a3b8",
+    pick(dark, ["canvas", "muted", "card", "secondary"], "#0c1118"),
+    true,
+  )
+  return { light, dark }
+}
+
 /** Todo lo que sale del color elegido (ya normalizado con `normalizeBrandColor`). */
 export function brandPalette(hex: string): BrandPalette {
   const base = rgbOf(hex)
   const nearWhite = contrastOf(base, WHITE) < 1.25
-  const light = lightTokens(base, nearWhite)
+  const neutrals = brandNeutrals(base)
+  // Los tonos de la marca se miden contra los grises de la clínica, no contra los de fábrica.
+  const light = lightTokens(base, nearWhite, rgbOf(neutrals.light.secondary ?? "#e8eef4"))
   const { hue, saturation } = hueAndSaturation(base)
   return {
     light,
-    dark: darkTokens(base),
+    dark: darkTokens(base, {
+      background: rgbOf(neutrals.dark.background ?? "#0c1118"),
+      card: rgbOf(neutrals.dark.card ?? "#171e2b"),
+      secondary: rgbOf(neutrals.dark.secondary ?? "#263041"),
+    }),
+    neutrals,
     paper: light.primary,
     // Solo se avisa cuando se nota: un color claro, que no sostiene la letra blanca.
     lightened: !nearWhite && contrastOf(base, WHITE) < TEXT,

@@ -13,6 +13,9 @@ import { gotoHydrated } from "./hydration"
 const serverHtml = (page: Page, url: string) =>
   page.evaluate((target) => fetch(target, { credentials: "include", cache: "no-store" }).then((r) => r.text()), url)
 
+/** Los colores de los enlaces se animan: la captura espera a que terminen. */
+const settled = (page: Page) => page.evaluate(() => Promise.all(document.getAnimations().map((animation) => animation.finished)))
+
 /** El valor del token en la raíz, ya resuelto. */
 const token = (page: Page, name: string) =>
   page.evaluate((property) => getComputedStyle(document.documentElement).getPropertyValue(property).trim(), name)
@@ -122,6 +125,22 @@ test("elegir el color de la marca: vista previa, guardar, primer pintado, color 
   await testInfo.attach("app-oscuro", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
   await page.evaluate(() => document.documentElement.classList.remove("dark"))
   await testInfo.attach("app-claro", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+
+  // Los grises acompañan al color: con naranja se entibian, en claro las tarjetas siguen blancas
+  // y en oscuro el fondo es carbón cálido, no azul marino.
+  await block.getByRole("button", { name: "Naranja", exact: true }).click()
+  await block.getByRole("button", { name: "Usar este color" }).click()
+  await expect.poll(() => token(page, "--canvas")).toBe("#fbf7f6")
+  // La hoja compilada escribe el blanco corto.
+  expect(["#fff", "#ffffff"]).toContain(await token(page, "--card"))
+  expect(await token(page, "--muted-foreground")).toBe("#5a524f")
+  await settled(page)
+  await testInfo.attach("naranja-claro", { body: await page.screenshot(), contentType: "image/png" })
+  await page.evaluate(() => document.documentElement.classList.add("dark"))
+  expect(await token(page, "--card")).toBe("#231c1a")
+  await settled(page)
+  await testInfo.attach("naranja-oscuro", { body: await page.screenshot(), contentType: "image/png" })
+  await page.evaluate(() => document.documentElement.classList.remove("dark"))
 
   // Volver al de fábrica quita el color: la cabecera ya no lo escribe.
   await block.getByRole("button", { name: "Volver al turquesa de odentIA" }).click()

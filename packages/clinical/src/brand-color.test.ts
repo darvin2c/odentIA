@@ -24,9 +24,10 @@ describe("brandPalette", () => {
     for (const hex of sampleColors()) {
       const { light, dark, paper } = brandPalette(hex)
       expect(contrastRatio(light.primary, "#ffffff"), `${hex} texto en claro`).toBeGreaterThanOrEqual(4.5)
-      // También sobre lo secundario (botón secundario, menú al pasar el mouse), lo más exigente.
-      expect(contrastRatio(light.primary, "#e8eef4"), `${hex} texto sobre secundario`).toBeGreaterThanOrEqual(4.5)
-      expect(contrastRatio(dark.primary, "#263041"), `${hex} texto oscuro sobre secundario`).toBeGreaterThanOrEqual(4.5)
+      // También sobre lo secundario de la clínica (botón secundario, menú al pasar el mouse), lo más exigente.
+      const { neutrals } = brandPalette(hex)
+      expect(contrastRatio(light.primary, neutrals.light.secondary ?? ""), `${hex} texto sobre secundario`).toBeGreaterThanOrEqual(4.5)
+      expect(contrastRatio(dark.primary, neutrals.dark.secondary ?? ""), `${hex} texto oscuro sobre secundario`).toBeGreaterThanOrEqual(4.5)
       expect(contrastRatio(light.fill, light.fillForeground), `${hex} botón en claro`).toBeGreaterThanOrEqual(4.5)
       expect(contrastRatio(light.fillHover, light.fillForeground), `${hex} botón al pasar el mouse`).toBeGreaterThanOrEqual(4.5)
       expect(contrastRatio(dark.fillHover, dark.fillForeground), `${hex} botón oscuro al pasar el mouse`).toBeGreaterThanOrEqual(4.5)
@@ -109,6 +110,37 @@ describe("brandPalette", () => {
     expect(brandPalette("#ea580c").reddish).toBe(false)
     expect(brandPalette("#db2777").reddish).toBe(false)
     expect(brandPalette("#808080").reddish).toBe(false)
+  })
+})
+
+describe("los grises en el tono de la marca", () => {
+  it("el texto gris se lee sobre todo fondo donde va, en claro y en oscuro", () => {
+    for (const hex of sampleColors()) {
+      const { light, dark } = brandPalette(hex).neutrals
+      for (const surface of [light.canvas, light.muted, light.secondary, "#ffffff"])
+        expect(contrastRatio(light["muted-foreground"] ?? "", surface ?? ""), `${hex} claro sobre ${surface}`).toBeGreaterThanOrEqual(4.5)
+      for (const surface of [dark.canvas, dark.muted, dark.card, dark.secondary])
+        expect(contrastRatio(dark["muted-foreground"] ?? "", surface ?? ""), `${hex} oscuro sobre ${surface}`).toBeGreaterThanOrEqual(4.5)
+      expect(contrastRatio(light.foreground ?? "", "#ffffff"), hex).toBeGreaterThanOrEqual(12)
+      expect(contrastRatio(dark.foreground ?? "", dark.card ?? ""), hex).toBeGreaterThanOrEqual(12)
+    }
+  })
+
+  it("un naranja entibia los grises, y en claro las tarjetas y las ventanas siguen blancas", () => {
+    const { light, dark } = brandPalette("#ea580c").neutrals
+    expect(light).toMatchObject({ canvas: "#fbf7f6", secondary: "#f4ebe8", "muted-foreground": "#5a524f" })
+    expect(dark).toMatchObject({ background: "#150f0d", card: "#231c1a", secondary: "#352e2b" })
+    expect(Object.keys(light)).not.toContain("card")
+    expect(Object.keys(light)).not.toContain("background")
+    expect(Object.keys(light)).not.toContain("popover")
+  })
+
+  it("una marca gris da grises puros, sin tono", () => {
+    const { light, dark } = brandPalette("#666666").neutrals
+    for (const hex of [...Object.values(light), ...Object.values(dark)]) {
+      expect(hex.slice(1, 3), hex).toBe(hex.slice(3, 5))
+      expect(hex.slice(3, 5), hex).toBe(hex.slice(5, 7))
+    }
   })
 })
 

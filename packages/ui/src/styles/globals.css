@@ -86,7 +86,8 @@
 /*
  * Tema clínico: primario cian-teal sobre neutros fríos. Los pares de texto y
  * fondo cumplen WCAG 2.2 AA (4,5:1). Un tema de color alternativo solo redefine
- * el bloque «Marca»; superficies, neutros y estados no cambian con él.
+ * el bloque «Marca». El color de una clínica (ADR 0162) además tiñe apenas los neutros
+ * con su tono, sin cambiar su luz; estados, papel y gráficos no cambian con él.
  * `.theme-light` vuelve a este tema dentro de la app en oscuro: lo que se ve como
  * papel (la hoja del consentimiento) es claro siempre, con sus campos y controles.
  */
