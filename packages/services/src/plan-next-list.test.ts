@@ -12,6 +12,7 @@ import { expect, it } from "vitest"
 import { createAppointment, createRoom } from "./appointments.js"
 import { createBudget, decideBudget, deliverBudget } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
+import { addEncounterProcedure, finalizeEncounter } from "./encounters.js"
 import { createFollowUp, listFollowUps } from "./follow-ups.js"
 import { getTimeline } from "./patient-history.js"
 import { addPlanItem } from "./plan.js"
@@ -156,4 +157,27 @@ it("B4: la Historia dice «Vencido» del control que el Plan llama así", async 
     (await f.run((tx) => getTimeline(tx, "org_a", f.patient.id, { types: ["follow_up"] }))).data.find((row) => row.followUpId === overdue.id),
   ).toMatchObject({ statusText: null })
   await ownerDb.delete(appointment).where(eq(appointment.id, visit.id))
+})
+
+it("la lista dice cada tratamiento que sigue en curso sin cita, una vez cada uno", async () => {
+  const f = await clinicalFixture()
+  const accepted = async () => {
+    const item = await f.run((tx) =>
+      addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id, plannedSessions: 2 }),
+    )
+    const budget = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [item.id] }))
+    await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
+    await f.run((tx) => decideBudget(tx, ...f.args, budget.id, { decisions: [{ planItemId: item.id, decision: "aceptado" }] }))
+    return item
+  }
+  const first = await accepted()
+  const second = await accepted()
+  // La sesión 1 de los dos, firmada: los dos quedan en curso y sin cita para la sesión 2.
+  await f.ready(f.encounter.id)
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: first.id }))
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: second.id }))
+  await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
+  const { step, steps } = await f.run((tx) => getPlanNextSteps(tx, "org_a", f.patient.id, all))
+  expect(step).toMatchObject({ kind: "continuar", action: { label: "Reservar la sesión 2", planItemIds: [first.id] } })
+  expect(steps.map((row) => row.action?.planItemIds)).toEqual([[first.id], [second.id]])
 })

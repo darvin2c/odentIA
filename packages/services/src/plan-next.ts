@@ -422,6 +422,15 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
   // su primera cita (o sesión) y le faltan otras por reservar.
   const continuing =
     started ?? items.find((item) => canBookAnother(item, countOf(item)) && countOf(item).done + countOf(item).booked > 0) ?? null
+  // Para la lista, todos los que siguen así, sin lo que ya va en «lo aceptado sin cita»: el
+  // mismo tratamiento no sale dos veces (uno ya empezado, con su cita de hoy pasada, también
+  // queda «por agendar»).
+  const allContinuing = items.filter(
+    (item) =>
+      !toStart.some((other) => other.id === item.id) &&
+      ((item.status === "en_curso" && isToSchedule(item, withAppointment)) ||
+        (canBookAnother(item, countOf(item)) && countOf(item).done + countOf(item).booked > 0)),
+  )
 
   /** «Falta la cita de la próxima sesión: Endodoncia · sesión 2 de 2», con «Reservar la sesión 2». */
   const continueStep = (item: PlanItemRow): PlanNextStep => {
@@ -561,6 +570,7 @@ function planPieces(facts: PlanFacts, context: PlanContext, can: Can) {
     toStart,
     awaiting,
     continuing,
+    allContinuing,
     continueStep,
     sendStep,
     scheduleStep,
@@ -622,7 +632,12 @@ function planStepsFrom(facts: PlanFacts, context: PlanContext, can: Can): PlanNe
   if (sessionFirst) steps.push(p.continueStep(sessionFirst))
   if (p.toStart.length > 0) steps.push(p.scheduleStep())
   if (p.awaiting) steps.push(p.answerStep(p.awaiting))
-  if (p.continuing && p.continuing.id !== sessionFirst?.id) steps.push(p.continueStep(p.continuing))
+  // Cada tratamiento que sigue en curso, una vez: primero el de la regla, después los demás.
+  const ordered = p.continuing ? [p.continuing, ...p.allContinuing.filter((item) => item.id !== p.continuing?.id)] : p.allContinuing
+  for (const item of ordered) {
+    if (item.id === sessionFirst?.id || p.toStart.some((other) => other.id === item.id)) continue
+    steps.push(p.continueStep(item))
+  }
   const control = p.controlStep()
   if (control) {
     if (control.overdue) steps.unshift(bare(control))

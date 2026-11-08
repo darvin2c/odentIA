@@ -42,10 +42,15 @@ export function PlanNextSkeleton() {
 /** `NextUpCard`: «Qué sigue» del Resumen, con la línea de la próxima cita y dos filas. */
 export function NextUpSkeleton({ agenda }: { agenda: boolean }) {
   return (
-    <SummaryCardShape title="Qué sigue">
-      {agenda ? <Line className="w-64" /> : null}
+    <section className="elevated flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-6">
+      <div className="flex min-w-0 flex-col gap-1">
+        <div className="flex min-h-8 items-center">
+          <h2 className="font-heading text-base font-medium">Qué sigue</h2>
+        </div>
+        {agenda ? <Line className="w-64" /> : null}
+      </div>
       <RowsShape rows={2} />
-    </SummaryCardShape>
+    </section>
   )
 }
 

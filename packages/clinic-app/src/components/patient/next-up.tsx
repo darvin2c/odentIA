@@ -58,8 +58,11 @@ export function NextUpCard({
   const titleId = useId()
   const query = usePlanNextSteps(patientId)
   const steps = query.data?.data ?? []
-  // El color llama a actuar: solo si la primera fila tiene algo que hacer aquí.
-  const actionable = Boolean(steps[0]?.action)
+  // «Ver la cita» de la próxima cita ya está arriba: la fila que diría lo mismo no lo repite.
+  const shownAction = (step: (typeof steps)[number]) =>
+    step.action && !(step.action.appointmentId && step.action.appointmentId === upcoming?.appointment?.id) ? step.action : null
+  // El color llama a actuar: solo si la primera fila tiene algo que hacer aquí, y ese botón va destacado.
+  const actionable = Boolean(steps[0] && shownAction(steps[0]))
   return (
     <section
       aria-labelledby={titleId}
@@ -97,15 +100,14 @@ export function NextUpCard({
                 <p className="text-sm font-medium">{step.text}</p>
                 {step.detail ? <p className="text-sm text-muted-foreground">{step.detail}</p> : null}
               </div>
-              {/* «Ver la cita» de la próxima cita ya está arriba: no se repite en la fila. */}
-              {step.action?.appointmentId && step.action.appointmentId === upcoming?.appointment?.id ? null : (
+              {shownAction(step) ? (
                 <NextStepButton
                   patient={{ id: patientId, name: patientName }}
                   step={step}
                   size="sm"
                   variant={index === 0 ? "default" : "outline"}
                 />
-              )}
+              ) : null}
             </li>
           ))}
         </ul>
