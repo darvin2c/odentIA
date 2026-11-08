@@ -3371,13 +3371,19 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
           (ticketPayments[ticket.id] ?? []).some((payment) => payment.id === refund.paymentId),
       )
       .sort((a, b) => a.refundedAt.getTime() - b.refundedAt.getTime())
-      .map((refund) => ({
-        id: refund.id,
-        amountCents: refund.amountCents,
-        currency: (ticketPayments[ticket.id] ?? []).find((payment) => payment.id === refund.paymentId)?.currency ?? ticket.currency,
-        refundedAt: refund.refundedAt,
-        reason: refund.reason,
-      })),
+      .map((refund) => {
+        // Lo que salió de la caja: en la moneda en que entró el pago, si fue otra
+        // que la que cancela (`tenderCents`). El saldo no cambia por esto.
+        const payment = (ticketPayments[ticket.id] ?? []).find((row) => row.id === refund.paymentId)
+        const tendered = refund.tenderCents !== null && payment?.tenderCurrency
+        return {
+          id: refund.id,
+          amountCents: tendered ? (refund.tenderCents as number) : refund.amountCents,
+          currency: tendered ? (payment?.tenderCurrency as string) : (payment?.currency ?? ticket.currency),
+          refundedAt: refund.refundedAt,
+          reason: refund.reason,
+        }
+      }),
   }))
   // Historial anterior sin ticket (nunca se borra ni se inventa sede): filas
   // de solo lectura, marcadas como histórico. Solo se imprimen con evidencia.
