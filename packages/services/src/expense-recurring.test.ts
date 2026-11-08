@@ -193,6 +193,13 @@ it("el mes que paga, lo que se propone tras un cambio y lo que no se puede cambi
     (row) => row.recurringId === id,
   )
   expect(after).toMatchObject({ amountCents: 270000, concept: "Sueldo de recepción (turno mañana)" })
+  // Volver al importe de siempre (el de la plantilla) sí guarda: se compara con lo que se propone.
+  const back = await f.run((tx) => updateRecurringExpense(tx, "org_a", f.actor, id, { amountCents: 250000 }))
+  expect(back.amountCents).toBe(250000)
+  const backDue = (await f.run((tx) => getRecurringMonth(tx, "org_a", { ...current, branchId }))).due.find(
+    (row) => row.recurringId === id,
+  )
+  expect(backDue).toMatchObject({ amountCents: 250000 })
 
   // La persona no se cambia y el fin no queda antes de un mes pagado.
   await expect(

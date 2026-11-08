@@ -262,6 +262,15 @@ export async function updateRecurringExpense(
       after[key] = value
     }
   }
+  // El importe se compara con lo que se propone pagar, no con la plantilla: después de «Pagar otro
+  // importe» se propone ese, y volver al de siempre (el de la plantilla) sí es un cambio.
+  if (next.amountCents !== undefined && after.amountCents === undefined) {
+    const suggested = (await suggestedAmounts(tx, orgId, [current])).get(current.id) ?? current.amountCents
+    if (suggested !== next.amountCents) {
+      before.amountCents = suggested
+      after.amountCents = next.amountCents
+    }
+  }
   if (Object.keys(after).length === 0) return current
   // Lo que se propone pagar es el último pago hecho después del último cambio. Un cambio
   // que no toca el importe (el concepto, el día, el fin) deja fijo el que se proponía,
