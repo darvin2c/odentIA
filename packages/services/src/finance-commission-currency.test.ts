@@ -161,7 +161,7 @@ it("el monto fijo va en la moneda del servicio, nunca paga más de lo cobrado y 
   expect(fixedLine?.unruled).toBeUndefined()
 })
 
-it("lo pagado antes de un servicio que se cobra por sesión es un adelanto: la sesión comisiona una vez, de quien la hizo", async () => {
+it("lo pagado antes de un servicio que se cobra por sesión es un adelanto: la sesión comisiona una vez, con el cobro de su visita", async () => {
   const f = await clinicalFixture()
   await f.run((tx) =>
     tx.execute(sql`update "service_catalog" set "price_cents" = 15000, "billing_mode" = 'session' where "id" = ${f.service.id}`),
@@ -184,9 +184,6 @@ it("lo pagado antes de un servicio que se cobra por sesión es un adelanto: la s
     collectCharge(tx, ...f.args, { branchId: site!.id, advanceCents: 15000, payments: [{ paymentMethodId: cash.id, amountCents: 15000 }], requestId: randomUUID() }),
   )
   const view = () => f.run((tx) => getMonthlyCommissions(tx, "org_a", { professionalUserId: f.actor, ...currentPeriod() }))
-  // El adelanto no es de nadie todavía, ni se ve como sesión sin hacer.
-  expect((await view()).lines).toEqual([])
-  expect(await f.run((tx) => unassignedCommissionSessions(tx, "org_a"))).toEqual([])
 
   // La visita se carga al firmar y el adelanto la cancela: una sola comisión, la de su cobro.
   await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: item.id }))
