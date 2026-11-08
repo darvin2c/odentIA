@@ -8,7 +8,8 @@ import { randomUUID } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
 import { scheduleRoom } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
-import { patientContact } from "@odentia/db/schema/clinical"
+import { patientContact, serviceCatalog } from "@odentia/db/schema/clinical"
+import { opportunity } from "@odentia/db/schema/opportunities"
 import { branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
@@ -108,6 +109,31 @@ it("el presupuesto se une solo a la del mismo tratamiento y la mueve; aceptarlo 
   expect(await g.run((tx) => getOpportunity(tx, "org_a", recent.id))).toMatchObject({
     status: "lost", closeReason: "rechazo_presupuesto", why: "Perdida: «Rechazó el presupuesto»",
   })
+})
+
+// QA del 6 nov (X7): el presupuesto restaurador se unía a la oportunidad
+// «Blanqueamiento», la más reciente, y al aceptarse la ganaba. Una de otro
+// tratamiento no lo toma: se abre la suya y el blanqueamiento sigue abierto.
+it("el presupuesto no toma la oportunidad de otro tratamiento: abre la suya", async () => {
+  const f = await clinicalFixture()
+  const contactId = await ownContact(f.patient.id)
+  const [whitening] = await ownerDb
+    .insert(serviceCatalog)
+    .values({ organizationId: "org_a", name: "Blanqueamiento", scope: "general", source: "custom", priceCents: 50000, currency: "PEN" })
+    .returning({ id: serviceCatalog.id })
+  const interest = await f.run((tx) =>
+    createOpportunity(tx, "org_a", { contactId, title: "Blanqueamiento", serviceId: whitening!.id }, { userId: null, origin: "agente" }),
+  )
+  const item = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }),
+  )
+  const budget = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [item.id] }))
+  await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
+  await f.run((tx) => decideBudget(tx, ...f.args, budget.id, { decisions: [{ planItemId: item.id, decision: "aceptado" }] }))
+  expect(await f.run((tx) => getOpportunity(tx, "org_a", interest.id))).toMatchObject({ budgetId: null, status: "open", moment: "interesado" })
+  const own = await ownerDb.select().from(opportunity).where(eq(opportunity.budgetId, budget.id))
+  expect(own).toHaveLength(1)
+  expect(own[0]).toMatchObject({ status: "won", contactId })
 })
 
 it("cancelar la evaluación la devuelve sola a «Interesado» si no le queda otra cita; con otra por venir, no", async () => {
