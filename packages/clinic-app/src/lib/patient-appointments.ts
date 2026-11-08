@@ -1,5 +1,5 @@
 /** Citas de un paciente para su ficha: la agenda es la fuente, no la última atención. */
-import { SCHEDULE_AGENDA_LABELS } from "@odentia/ui-patterns"
+import { dayMinutesIn, hourLabel, SCHEDULE_AGENDA_LABELS } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { type AgendaAppointment, type AppointmentStatus, visitLabel } from "./agenda"
 import { apiFetch } from "./api"
@@ -79,9 +79,12 @@ export function appointmentWhen(appointment: Pick<AgendaAppointment, "startsAt">
  * en la clínica, su momento como en la Agenda («Llegó 12:26 · espera 6 min»).
  */
 export function appointmentLine(appointment: AgendaAppointment, now: Date = new Date()): string {
+  const timeZone = activeOrgTimeZone()
+  // En la clínica, la hora como en la Agenda: «Hoy 21:30 · Llegó 23:07 · espera 10 min».
+  const here = isInClinic(appointment)
   return [
-    appointmentWhen(appointment),
-    isInClinic(appointment) ? visitLabel(appointment, { now: now.toISOString(), timeZone: activeOrgTimeZone() }) : null,
+    here ? `Hoy ${hourLabel(dayMinutesIn(appointment.startsAt, timeZone))}` : appointmentWhen(appointment),
+    here ? visitLabel(appointment, { now: now.toISOString(), timeZone }) : null,
     appointment.serviceName ?? appointment.reason,
     appointment.professionalName,
   ]

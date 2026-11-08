@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { type AgendaAppointment, isUnclosed, visitWord } from "./agenda"
-import { isUpcoming, nextAppointment } from "./patient-appointments"
+import { setOrgLocale } from "./locale"
+import { appointmentLine, isUpcoming, nextAppointment } from "./patient-appointments"
 
 const at = (over: Partial<AgendaAppointment>): AgendaAppointment =>
   ({
@@ -44,5 +45,22 @@ describe("una cita que ya pasó sin cerrarse", () => {
     expect(visitWord(at({ visit: "llego" }), iso)).toBe("Llegó")
     expect(visitWord(at({ status: "atendida", visit: "atendida" }), iso)).toBe("Atendida")
     expect(visitWord(at({ status: "no_asistio", visit: "no_vino" }), iso)).toBe("No vino")
+  })
+})
+
+describe("lo que dice la ficha de la cita de quien ya llegó", () => {
+  it("su hora y su momento con el reloj de la Agenda", () => {
+    setOrgLocale("es-PE", "America/Lima")
+    const waiting = at({
+      status: "confirmada",
+      visit: "llego",
+      arrivedAt: "2026-11-07T17:26:00.000Z",
+      serviceName: "Limpieza dental",
+      professionalName: "Dra. Ana Torres",
+    })
+    expect(appointmentLine(waiting, new Date("2026-11-07T17:36:00.000Z"))).toBe(
+      "Hoy 11:00 · Llegó 12:26 · espera 10 min · Limpieza dental · Dra. Ana Torres",
+    )
+    setOrgLocale(undefined, undefined)
   })
 })
