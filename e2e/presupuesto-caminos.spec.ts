@@ -148,3 +148,84 @@ test("caminos: se marcan en la atención, lo común se acepta sin elegir y la re
   await expect(page.getByText(/precio nuevo por responder/i).first()).toBeVisible()
   await views("plan-tras-revision")
 })
+
+test("caminos: la revisión sin camino elegido lleva los dos caminos", async ({ owner }, testInfo) => {
+  const { page } = owner
+  const slug = owner.org.slug
+  const shot = (name: string) => page.screenshot({ path: testInfo.outputPath(`${name}.png`), fullPage: true })
+  const ids = await buildClinicalBase(owner)
+  const apiPath = patientApiPath(ids.patientId)
+  const specialties = await call<Array<{ id: string; key: string }>>(page, "GET", "/api/clinical-forms/specialties", slug)
+  const specialtyId = (specialties.find((item) => item.key === "odontologia_general") ?? specialties[0])!.id
+  const service = (name: string, priceCents: number) =>
+    call<{ id: string }>(page, "POST", "/api/services", slug, {
+      name,
+      specialtyId,
+      scope: "tooth",
+      priceCents,
+      currency: "PEN",
+      officialCode: "D3310",
+    }, 201)
+  const [endodoncia, exodoncia] = await Promise.all([
+    service("Endodoncia molar", 65000),
+    service("Exodoncia simple", 15000),
+  ])
+  // La 46 se conserva o se extrae; nadie eligió todavía.
+  const visit = await call<{ id: string }>(page, "POST", `${apiPath}/encounters`, slug, { reason: "Molestia en la 46" }, 201)
+  const indicate = (serviceId: string) =>
+    call<{ id: string }>(page, "POST", `${apiPath}/plan/items`, slug, { serviceId, sourceEncounterId: visit.id, toothNumber: 46 }, 201)
+  const endoItem = await indicate(endodoncia.id)
+  const exoItem = await indicate(exodoncia.id)
+  await call(page, "POST", `${apiPath}/budgets/paths`, slug, { encounterId: visit.id, planItemId: exoItem.id, path: "nuevo" })
+  const budgets = await call<Array<{ id: string; status: string; options: Array<{ id: string }> }>>(page, "GET", `${apiPath}/budgets`, slug)
+  const draft = budgets.find((budget) => budget.status === "borrador")!
+  expect(draft.options).toHaveLength(2)
+  await call(page, "POST", `${apiPath}/budgets/${draft.id}/deliver`, slug, {})
+
+  // «Crear revisión» desde el Plan: el cajón lista lo de los dos caminos y lo manda todo.
+  const person = await call<{ personId: string }>(page, "GET", `/api/people/by-patient/${ids.patientId}`, slug)
+  await gotoHydrated(page, tenant(slug, `/people/${person.personId}?tab=plan&budgetId=${draft.id}`))
+  await page.getByRole("button", { name: "Crear revisión", exact: true }).click()
+  // En escritorio el cajón es el panel lateral; en el teléfono, un diálogo.
+  const title = "Crear revisión del presupuesto"
+  const drawer = page.getByRole("region", { name: title }).or(page.getByRole("dialog", { name: title }))
+  await expect(drawer.getByRole("checkbox", { name: /Endodoncia molar/ })).toBeChecked()
+  await expect(drawer.getByRole("checkbox", { name: /Exodoncia simple/ })).toBeChecked()
+  await shot("revision-dos-caminos")
+  // Desmarcar lo único de la Opción B la quitaría: se dice ahí mismo, sin frenar.
+  const exo = drawer.getByRole("checkbox", { name: /Exodoncia simple/ })
+  await exo.click()
+  await expect(drawer.getByRole("status").filter({ hasText: /Opción B/ })).toBeVisible()
+  await shot("revision-sin-opcion-b")
+  await exo.click()
+  await expect(drawer.getByRole("status").filter({ hasText: /Opción B/ })).toHaveCount(0)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(drawer.getByRole("checkbox", { name: /Exodoncia simple/ })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath("revision-dos-caminos-telefono.png") })
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await drawer.getByLabel("Motivo de la revisión").fill("Cambia la fecha de vigencia")
+  const revised = page.waitForResponse(
+    (response) => response.url().endsWith(`/budgets/${draft.id}/revise`) && response.request().method() === "POST",
+  )
+  await drawer.getByRole("button", { name: "Crear revisión", exact: true }).click()
+  expect((await revised).status()).toBe(201)
+  await expect(drawer).toBeHidden()
+
+  // La revisión conserva los dos caminos y no dice que se quitó nada.
+  const after = await call<Array<{ id: string; status: string; supersedesBudgetId: string | null; options: Array<{ id: string }>; items: Array<{ planItemId: string; optionId: string }> }>>(
+    page,
+    "GET",
+    `${apiPath}/budgets`,
+    slug,
+  )
+  const revision = after.find((budget) => budget.supersedesBudgetId === draft.id)!
+  expect(revision.options).toHaveLength(2)
+  const optionOf = (planItemId: string) => revision.items.filter((line) => line.planItemId === planItemId).map((line) => line.optionId)
+  expect(optionOf(endoItem.id)).toHaveLength(1)
+  expect(optionOf(exoItem.id)).toHaveLength(1)
+  expect(optionOf(endoItem.id)[0]).not.toBe(optionOf(exoItem.id)[0])
+  await gotoHydrated(page, tenant(slug, `/people/${person.personId}?tab=plan&budgetId=${revision.id}`))
+  await expect(page.getByRole("button", { name: /^Opción B/ }).first()).toBeVisible()
+  await expect(page.getByText(/Se quita/)).toHaveCount(0)
+  await shot("revision-creada")
+})

@@ -16,6 +16,8 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
   FieldGroup,
+  FieldLegend,
+  FieldSet,
 } from "@odentia/ui"
 import {
   ConfirmDialog,
@@ -30,6 +32,7 @@ import {
   useFormSurface,
   SkeletonRegion,
 } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -55,6 +58,8 @@ import {
   PLAN_QUERY_KEYS,
   removeBudgetItemsApi,
   reviseBudgetApi,
+  revisionDroppedOptions,
+  revisionScope,
   updateBudgetApi,
   totalsOf,
   valueOption,
@@ -1154,9 +1159,10 @@ function ReviseBudgetDrawer({
   onClose: () => void
   onSubmit: (itemIds: string[], reason: string) => Promise<unknown>
 }): React.JSX.Element {
-  const value = valueOption(budget)
-  // Las líneas y lo marcado se fijan al abrir.
-  const [lines] = useState(() => (value ? optionLines(budget, value.id) : budget.items))
+  // Las líneas y lo marcado se fijan al abrir. Sin opción elegida van todas.
+  const [{ lines, groups }] = useState(() => revisionScope(budget))
+  const byPath = groups.some((group) => group.options.length > 0)
+  const all = budget.options.length === 2 ? "las dos" : "todas las"
   const [initial] = useState(() => ({
     items: lines.map((line) => ({ planItemId: line.planItemId, include: true })),
     reason: "",
@@ -1186,6 +1192,17 @@ function ReviseBudgetDrawer({
       return index === undefined ? "items" : `items[${index}].include`
     },
   })
+  // La opción de la que se desmarcó todo lo suyo sale de la revisión: se dice
+  // junto a ella, sin frenar.
+  const included = useStore(form.store, (state) => state.values.items)
+  const leaving = useMemo(
+    () =>
+      revisionDroppedOptions(
+        budget,
+        new Set(included.filter((item) => item.include).map((item) => item.planItemId)),
+      ),
+    [budget, included],
+  )
   return (
     <FormDrawer
       {...surface}
@@ -1197,24 +1214,61 @@ function ReviseBudgetDrawer({
         if (!surface.isSubmitting) onClose()
       }}
     >
+      <FieldGroup>
       <form.AppField name="items" mode="array">
         {(list) => (
-          <list.Group legend="Tratamientos de la revisión">
+          <list.Group
+            legend="Tratamientos de la revisión"
+            description={
+              byPath
+                ? `La persona aún no elige opción: la revisión lleva ${all} opciones. Desmarca solo lo que ya no se le ofrece.`
+                : undefined
+            }
+          >
             {() =>
-              lines.map((line, index) => {
-                const site = treatmentSiteLabel(line)
-                // Ya se atendió (o se está atendiendo): la revisión no la retira.
-                const executed = line.itemStatus === "en_curso" || line.itemStatus === "realizado"
+              groups.map((group) => {
+                const checks = group.lines.map((line) => {
+                  const index = lines.indexOf(line)
+                  const site = treatmentSiteLabel(line)
+                  // Ya se atendió (o se está atendiendo): la revisión no la retira.
+                  const executed = line.itemStatus === "en_curso" || line.itemStatus === "realizado"
+                  return (
+                    <form.AppField key={line.id} name={`items[${index}].include`}>
+                      {(field) => (
+                        <field.CheckboxField
+                          label={`${line.title}${site ? ` · ${site}` : ""}`}
+                          description={executed ? "Ya se atendió: no se puede retirar." : undefined}
+                          disabled={executed || surface.isSubmitting}
+                        />
+                      )}
+                    </form.AppField>
+                  )
+                })
+                if (group.options.length === 0) return checks
+                const [only] = group.options
+                // Desmarcar quita el tratamiento de todos los caminos que nombra el grupo.
+                const legend =
+                  group.options.length === budget.options.length
+                    ? `Va en ${all} opciones`
+                    : group.options.length === 1 && only
+                      ? `${only.label}${only.name?.trim() ? ` · ${only.name.trim()}` : ""}`
+                      : `Va en ${group.options.map((option) => option.label).join(" y ")}`
                 return (
-                  <form.AppField key={line.id} name={`items[${index}].include`}>
-                    {(field) => (
-                      <field.CheckboxField
-                        label={`${line.title}${site ? ` · ${site}` : ""}`}
-                        description={executed ? "Ya se atendió: no se puede retirar." : undefined}
-                        disabled={executed || surface.isSubmitting}
-                      />
-                    )}
-                  </form.AppField>
+                  <FieldSet
+                    key={group.options.map((option) => option.id).join("|")}
+                    className="gap-3"
+                  >
+                    <FieldLegend variant="label" className="mb-0">
+                      {legend}
+                    </FieldLegend>
+                    {checks}
+                    {only && group.options.length === 1 && leaving.has(only.id) ? (
+                      <p role="status" className="text-sm text-warning">
+                        La {only.label} sale de la revisión: la persona ya no la verá como
+                        alternativa.
+                      </p>
+                    ) : null}
+                  </FieldSet>
                 )
               })
             }
@@ -1224,6 +1278,7 @@ function ReviseBudgetDrawer({
       <form.AppField name="reason">
         {(field) => <field.TextareaField label="Motivo de la revisión" maxLength={2000} />}
       </form.AppField>
+      </FieldGroup>
     </FormDrawer>
   )
 }
