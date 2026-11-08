@@ -4,11 +4,13 @@ import {
   getDocumentSendOptions,
   getFinancialDocumentPdf,
   getHealthDocumentSendOptions,
+  lastHealthDocumentSend,
   getRefundReceiptPdf,
   HEALTH_DOCUMENT_TYPES,
   keepIssuedPaper,
   recordLockState,
   renderHealthDocumentPdf,
+  saveHealthRecipientEmail,
   saveRecipientEmail,
   sendFinancialDocument,
   sendHealthDocument,
@@ -315,6 +317,19 @@ export function createFinancialDocumentsRoute(
     return response
   })
 
+  // Si ya se le envió y cuándo: al anular una receta enviada, el aviso lo dice.
+  app.get("/:id/health-document-sent", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.read")) return forbidClinical(c)
+    const locked = await lockedRecord(c, false)
+    if (locked) return locked
+    const parsed = healthPdfQuery.safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => lastHealthDocumentSend(tx, orgId, c.req.param("id"), parsed.data)),
+    )
+  })
+
   app.post("/:id/health-documents/send", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "clinical.write")) return forbidClinical(c)
@@ -362,6 +377,22 @@ export function createFinancialDocumentsRoute(
         ),
       )
     })
+  })
+
+  // «Agregar correo» del papel de salud: el mismo permiso que enviarlo (`clinical.write`),
+  // y solo a la propia persona o a su representante legal (lo comprueba el servicio).
+  app.post("/:id/health-documents/recipient-email", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.write")) return forbidClinical(c)
+    const locked = await lockedRecord(c, true)
+    if (locked) return locked
+    const parsed = recipientEmailInput.omit({ documentType: true }).safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        saveHealthRecipientEmail(tx, orgId, userId, c.req.param("id"), parsed.data),
+      ),
+    )
   })
 
   // «Agregar correo»: lo guarda en los datos de quien recibe. Mismo permiso que enviar.

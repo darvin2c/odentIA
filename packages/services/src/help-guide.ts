@@ -546,11 +546,22 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿A quién se le envía una receta o una orden?",
-        a: "Solo a la propia persona o, si es menor, a su representante legal: nunca a otro número. Va por WhatsApp; sin WhatsApp, por correo; sin ninguno de los dos, solo se imprime. Queda en su conversación. Si pasaron 24 horas desde su último mensaje, la receta sale con su enlace y la descarga en «Tus papeles», durante 30 días.",
+        a: "Solo a la propia persona o, si es menor, a su representante legal: nunca a otro número. «Enviar» le manda el PDF por WhatsApp o, si no, por correo, y queda en su conversación. El cajón dice por cada canal qué le llega y, si ninguno sirve, el botón pasa a «Imprimir» y puedes agregarle un correo. El nombre del archivo no dice nada clínico: se ve en la notificación de su teléfono.",
+        forms: ["enviar la receta", "mandar la orden", "enviar el pdf", "como le mando su receta"],
+      },
+      {
+        q: "¿Le llega el documento si no me escribió en las últimas 24 horas?",
+        a: "Sí, si WhatsApp ya aprobó el mensaje de la clínica para enviar documentos: le llega con el PDF aunque hoy no haya escrito. Mientras no esté aprobado, el cajón lo dice y te deja enviarlo por correo o imprimirlo; si te escribe, ya sale por su chat. El estado del mensaje está en Configuración › Integraciones › WhatsApp, «Documento listo».",
+        forms: ["pasaron 24 horas y no sale la receta", "no puedo enviar el documento por whatsapp", "documento listo"],
+      },
+      {
+        q: "¿Qué hago si anulo una receta que ya le envié?",
+        a: "Al anularla, la pantalla te dice cuándo y por dónde se le envió: avísale que no la use, porque el PDF que tiene en su chat no lleva el sello. Si ya emitiste la nueva, la receta anulada te ofrece «Enviar la receta N.º …». En su portal la anulada se ve marcada como «Anulada».",
+        forms: ["anule una receta que ya envie", "receta anulada enviada"],
       },
       {
         q: "¿Cómo le llega el comprobante de su pago?",
-        a: "Al cobrar, sale solo por su correo y queda 30 días en su enlace, en «Tus papeles». Si no tiene correo, la caja te lo dice: entrégalo impreso o agrégale su correo en «Enviar al paciente» del ticket. Si la clínica no tiene un correo conectado, solo puede ir impreso. Por WhatsApp se le envía solo si lo pide en el chat.",
+        a: "Al cobrar, sale solo por su correo, y si tiene acceso al portal también lo ve ahí. Si no tiene correo, la caja te lo dice: entrégalo impreso o agrégale su correo en «Enviar al paciente» del ticket. Desde «Enviar al paciente» también sale por WhatsApp con su PDF, aunque hayan pasado 24 horas, si WhatsApp ya aprobó el mensaje para documentos. Si la clínica no tiene un correo conectado, solo puede ir impreso.",
       },
       {
         q: "¿Dónde está el plan de tratamiento?",
@@ -655,11 +666,22 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo le doy acceso al portal?",
-        a: "Su enlace ya le muestra su cita, lo que le falta completar, sus presupuestos, lo que tiene por firmar, sus recetas y comprobantes, y sus mensajes, sin crear una cuenta: está en el «…» de su página, «Su enlace», y en Datos › Enlace y portal. El portal es para que entre cuando quiera a ver además sus documentos. En su página › Datos › Enlace y portal, «Dar acceso al portal»: quién entra (la persona, o su representante si es menor), qué verá, «Comprobé su identidad: vi su documento» y cómo le llega (QR si está aquí, o su WhatsApp). El código de 6 dígitos se lo dices tú, en persona o por llamada: nunca va con el enlace.",
+        a: "Lo da quien puede ver su historia (el odontólogo, el administrador o la dueña), porque el portal le muestra sus documentos. En el «…» de su página, «Portal del paciente» (también en Datos › Enlace y portal), «Dar acceso al portal»: quién entra (la persona, o su representante si es menor), comprobaste su identidad comparando el número de su documento con el que tiene en la mano, y cómo le llega (QR si está aquí, o su WhatsApp si te escribió en las últimas 24 horas). Lo que verá no se elige: todo lo suyo que la clínica deja ver. El código de 6 dígitos se lo dices tú, en persona o por llamada: nunca va con el enlace. Recepción no da el acceso: cuando ya lo tiene, le envía el enlace por su WhatsApp y el código le llega en otro mensaje, sin verlo. Su enlace es otra cosa: lo que tiene pendiente (su cita, sus datos, su presupuesto, lo que tiene por firmar) sin crear una cuenta.",
+        forms: ["recepcion no puede dar acceso al portal", "quien da acceso al portal"],
+      },
+      {
+        q: "¿Qué ve el paciente en su portal?",
+        a: "Todo lo suyo, sin que nadie lo elija: sus citas, sus presupuestos, su cuenta y sus documentos terminados. Recetas, órdenes (con su resultado) y descansos desde que se emiten; la hoja de atención si se emitió; los consentimientos firmados; los comprobantes; los archivos subidos; y las radiografías y fotos con su informe o que no lo requieren. Lo anulado se ve marcado («Anulada», «Revocado») y una receta vencida dice «Vencida». No ve las notas de sus atenciones, la tomografía ni los archivos DICOM (no se abren en el teléfono), ni lo que es de otra persona o de un pago (la prueba de una representación, un voucher). Si representa a un menor, ve lo de su representado. Cada archivo dice en «Su portal» si se ve.",
+        forms: ["que ve el paciente en el portal", "que documentos ve en el portal", "el paciente ve sus radiografias"],
+      },
+      {
+        q: "¿Cómo oculto una imagen o un archivo de su portal?",
+        a: "Abre el archivo en Documentos y, en «Su portal», toca «No mostrar en su portal». Vale para cualquier archivo subido, también un documento escaneado, y para todo acceso, de hoy y de mañana. La fila dice «Oculto en su portal» y se vuelve a mostrar con «Mostrar en su portal». Lo cambia quien escribe en la historia. El PDF de un consentimiento no se oculta suelto: en su portal se ve el consentimiento.",
+        forms: ["no mostrar en su portal", "ocultar una foto del portal", "que no vea una radiografia"],
       },
       {
         q: "¿Qué hago si cambió de teléfono y no entra al portal?",
-        a: "Si lo pide por el chat, Sofi lo deja en «Te espera». En su página › Datos › Enlace y portal, «Enviar nuevo enlace»: no hace falta volver a comprobar su identidad. El código se lo dices aparte.",
+        a: "Si lo pide por el chat, Sofi lo deja en «Te espera». En su página, «…» › «Portal del paciente», «Enviar nuevo enlace»: no hace falta volver a comprobar su identidad; el enlace anterior y las sesiones que tenía abiertas dejan de servir. Quien ve la historia puede mostrarle el QR y decirle el código; recepción se lo envía por su WhatsApp, con el código en otro mensaje que no ve. «Quitar acceso» (quien ve la historia) cierra todo, también su acceso guardado.",
       },
     ],
   },
@@ -1571,7 +1593,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Portal del paciente",
     parent: SETTINGS,
     purpose:
-      "El portal donde el paciente ve lo suyo cuando quiera: sus citas, presupuestos, documentos y su cuenta. Una clínica nueva lo trae encendido: aquí se apaga o se enciende y se elige lo que puede ver; lo demás son valores fijos. El acceso de cada persona se da en la clínica, con su documento.",
+      "El portal donde el paciente ve lo suyo cuando quiera: sus citas, presupuestos, documentos y su cuenta. Una clínica nueva lo trae encendido: aquí se apaga o se enciende y se elige lo que puede ver toda persona con acceso; lo demás son valores fijos. El acceso de cada persona se da en la clínica, con su documento, y no se elige qué verá.",
     terms: [
       "portal",
       "acceso de pacientes",

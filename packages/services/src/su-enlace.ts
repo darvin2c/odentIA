@@ -23,8 +23,6 @@ import {
   patient,
   patientDataConsent,
   patientResponsibility,
-  paymentTicket,
-  prescription,
 } from "@odentia/db/schema/clinical"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { contact } from "@odentia/db/schema/crm"
@@ -78,9 +76,6 @@ import { type DocumentLetterhead, loadDocumentLetterhead } from "./document-clin
 import { chartNumber } from "./document-kit.js"
 import { createContactNote } from "./crm-workspace.js"
 import { notFound, ServiceError, validation } from "./errors.js"
-import { buildTicketSnapshot, renderTicketPdf } from "./financial-document-pdf.js"
-import { renderHealthDocumentPdf } from "./health-documents.js"
-import type { PaperStorage } from "./issued-papers.js"
 import { findOrgCountry, findOrgLocale, orgProduct } from "./locale.js"
 import { openRoute, previewRoute } from "./message-gate.js"
 import { consentStatusOf } from "./message-permission.js"
@@ -132,19 +127,6 @@ export interface PersonalLinkMessages {
   nothing: boolean
 }
 
-/** Un papel en «Tus papeles» (decisión 8): la receta o el comprobante, para descargar 30 días. */
-export interface PersonalLinkPaper {
-  kind: "receta" | "comprobante"
-  id: string
-  title: string
-  issuedAt: string
-  /** Hasta cuándo se descarga desde aquí; después se le pide a la clínica. */
-  availableUntil: string
-}
-
-/** Cuánto queda un papel en «Tus papeles»: después se le pide a la clínica. */
-export const PAPER_DAYS = 30
-
 export interface PersonalLinkView {
   /** `vencido`: revocado, o ya no le queda nada pendiente. */
   status: "abierto" | "vencido"
@@ -195,10 +177,17 @@ export interface PersonalLinkView {
   consents: PersonalLinkConsent[]
   /** «Antes de tu cita», si hay uno por responder. */
   questionnaire: { title: string } | null
-  /** «Tus mensajes»: solo para quien recibe los mensajes de este paciente (quien decide por él). */
+  /**
+   * «Tus mensajes»: solo para quien recibe los mensajes de este paciente (quien
+   * decide por él). La receta y el comprobante ya no están aquí (ADR 0156): le
+   * llegan en PDF por su chat o su correo, y están en su portal.
+   */
   messages: PersonalLinkMessages | null
-  /** «Tus papeles»: la receta y el comprobante de los últimos 30 días, solo para quien decide. */
-  papers: PersonalLinkPaper[]
+  /**
+   * Siempre vacío: solo para la página anterior, que lo lee mientras dura el
+   * despliegue (las pantallas y la API no cambian a la vez). Se quita en la entrega siguiente.
+   */
+  papers: never[]
 }
 
 /*
@@ -370,69 +359,6 @@ async function messagesOf(
   }
 }
 
-/**
- * «Tus papeles» (decisión 8): la receta emitida y el comprobante (el ticket del
- * cobro, sin anular) de los últimos 30 días, del paciente de quien decide por
- * él (la regla de `requireDecisionContact`). Después se le piden a la clínica.
- */
-async function papersOf(
-  tx: Db,
-  orgId: string,
-  link: ResolvedPersonalLink,
-): Promise<PersonalLinkPaper[]> {
-  if (!link.patientId || !link.decides || link.expired) return []
-  const since = new Date(Date.now() - PAPER_DAYS * 86_400_000)
-  const until = (at: Date) => new Date(at.getTime() + PAPER_DAYS * 86_400_000).toISOString()
-  const recipes = await tx
-    .select({
-      id: prescription.id,
-      number: prescription.prescriptionNumber,
-      at: prescription.issuedAt,
-    })
-    .from(prescription)
-    .where(
-      and(
-        eq(prescription.organizationId, orgId),
-        eq(prescription.patientId, link.patientId),
-        eq(prescription.status, "emitida"),
-        gte(prescription.issuedAt, since),
-      ),
-    )
-    .orderBy(desc(prescription.issuedAt))
-  const tickets = await tx
-    .select({
-      id: paymentTicket.id,
-      number: paymentTicket.ticketNumber,
-      at: paymentTicket.createdAt,
-    })
-    .from(paymentTicket)
-    .where(
-      and(
-        eq(paymentTicket.organizationId, orgId),
-        eq(paymentTicket.patientId, link.patientId),
-        isNull(paymentTicket.voidedAt),
-        gte(paymentTicket.createdAt, since),
-      ),
-    )
-    .orderBy(desc(paymentTicket.createdAt))
-  return [
-    ...recipes.map((row) => ({
-      kind: "receta" as const,
-      id: row.id,
-      title: `Receta N.º ${row.number}`,
-      issuedAt: row.at.toISOString(),
-      availableUntil: until(row.at),
-    })),
-    ...tickets.map((row) => ({
-      kind: "comprobante" as const,
-      id: row.id,
-      title: `Comprobante N.º ${String(row.number).padStart(6, "0")}`,
-      issuedAt: row.at.toISOString(),
-      availableUntil: until(row.at),
-    })),
-  ].sort((a, b) => b.issuedAt.localeCompare(a.issuedAt))
-}
-
 /** El cuestionario sale antes de una cita: con una por venir y mientras no lo haya enviado. */
 async function questionnaireOf(
   tx: Db,
@@ -491,7 +417,6 @@ export async function getPersonalLinkView(
   const consents = await consentsOf(tx, orgId, link)
   const questionnaire = await questionnaireOf(tx, orgId, link)
   const messages = await messagesOf(tx, orgId, link)
-  const papers = await papersOf(tx, orgId, link)
   // Las sedes, para reservar o para agendar lo aceptado de su presupuesto (también después de responderlo).
   const schedulable =
     !link.canBook &&
@@ -513,8 +438,7 @@ export async function getPersonalLinkView(
     budgets.length === 0 &&
     consents.length === 0 &&
     !questionnaire &&
-    !messages &&
-    papers.length === 0
+    !messages
   if (nothing) return empty
   const self = link.patientId
     ? (await patientPersonId(tx, orgId, link.patientId)) === link.row.contactId
@@ -541,7 +465,7 @@ export async function getPersonalLinkView(
     consents,
     questionnaire,
     messages,
-    papers,
+    papers: [],
   }
 }
 
@@ -582,59 +506,6 @@ export async function setPersonalLinkMessages(
   const messages = await messagesOf(tx, orgId, link)
   if (!messages) throw linkExpired()
   return messages
-}
-
-// ----------------------------------------------------------- tus papeles ---
-
-/**
- * Descarga un papel de «Tus papeles»: solo uno de la lista de quien decide
- * por el paciente y de los últimos 30 días. Es el mismo PDF que se imprime.
- */
-export async function getPersonalLinkPaper(
-  tx: Db,
-  orgId: string,
-  token: string,
-  input: { kind: string; id: string },
-  /** Donde vive la receta emitida (ADR 0132). */
-  storage: PaperStorage = {},
-): Promise<{ bytes: Uint8Array; filename: string }> {
-  const link = await requireLiveLink(tx, orgId, token)
-  const patientId = requireLinkDecider(link)
-  const paper = (await papersOf(tx, orgId, link)).find(
-    (item) => item.kind === input.kind && item.id === input.id,
-  )
-  if (!paper) {
-    throw new ServiceError(
-      "PAPER_UNAVAILABLE",
-      409,
-      `Este papel ya no está aquí: pasados ${PAPER_DAYS} días, pídeselo a la clínica.`,
-    )
-  }
-  await tx.insert(auditEvent).values({
-    organizationId: orgId,
-    actorUserId: `contact:${link.row.contactId}`,
-    action: "personal_link.paper_downloaded",
-    entity: paper.kind === "receta" ? "prescription" : "payment_ticket",
-    entityId: paper.id,
-    metadata: { patientId, origin: "paciente" },
-  })
-  if (paper.kind === "receta") {
-    const rendered = await renderHealthDocumentPdf(
-      tx,
-      orgId,
-      patientId,
-      "prescription",
-      paper.id,
-      storage,
-      { viewing: true },
-    )
-    return { bytes: rendered.bytes, filename: rendered.filename }
-  }
-  const snap = await buildTicketSnapshot(tx, orgId, patientId, paper.id)
-  return {
-    bytes: await renderTicketPdf(snap, null),
-    filename: `Comprobante-${snap.numberLabel}.pdf`,
-  }
 }
 
 // ------------------------------------------------------------- tus datos ---

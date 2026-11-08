@@ -131,6 +131,7 @@ import {
   registerPatientDocument,
   retirePatientDocument,
   savePatientHealth,
+  setDocumentPortalVisibility,
 } from "../clinical.js"
 import {
   createClinicalOrder,
@@ -3027,6 +3028,24 @@ const controlEndo = await createFollowUp(db, ORG_A, ANA_ID, rosaPatientId, {
 await cancelFollowUp(db, ORG_A, ANA_ID, rosaPatientId, controlEndo.id, {
   reason: "Se reprogramará tras la primera sesión de endodoncia.",
 })
+
+// Su portal (ADR 0156): Rosa ve sus radiografías informadas, sus recetas (la
+// anulada, marcada) y sus papeles; la foto intraoral se ocultó con «No mostrar
+// en su portal» y la periapical sin informe todavía no se ve.
+{
+  const [foto] = await db
+    .select({ id: patientDocument.id })
+    .from(patientDocument)
+    .where(
+      and(
+        eq(patientDocument.organizationId, ORG_A),
+        eq(patientDocument.patientId, rosaPatientId),
+        eq(patientDocument.label, "[DEMO] Foto intraoral lateral derecha"),
+      ),
+    )
+    .limit(1)
+  if (foto) await setDocumentPortalVisibility(db, ORG_A, ANA_ID, rosaPatientId, foto.id, { hidden: true })
+}
 
 // Recetas inmutables: una vigente ligada al tratamiento y una anulada con
 // motivo (la alergia a penicilina de Rosa obliga a retirar amoxicilina).

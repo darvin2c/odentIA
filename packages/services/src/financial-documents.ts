@@ -27,7 +27,10 @@ import {
 import { channelConnection, contact, contactIdentity, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, desc, eq, isNull, sql } from "drizzle-orm"
-import { NOTICE_PURPOSE } from "./automation-messages.js"
+import { DOCUMENT_READY_MESSAGE_KEY, NOTICE_PURPOSE, renderMessage } from "./automation-messages.js"
+import { clinicName, firstName } from "./automation-routing.js"
+import { assertTemplateSendable } from "./channel-templates.js"
+import { currentCatalogMessage, findMessageTemplate } from "./clinic-messages.js"
 import { issuePersonalLink } from "./booking-links.js"
 import { buildBudgetSnapshot, renderBudgetPdf } from "./budget-pdf.js"
 import { deliverBudget, requireOwnBudget } from "./budgets.js"
@@ -37,7 +40,12 @@ import {
   normalizeChannelIdentity,
   updateContact,
 } from "./contacts.js"
-import { reopenIfClosed, sendOutbound, startContactConversation } from "./conversations.js"
+import {
+  reopenIfClosed,
+  sendOutbound,
+  sendTemplateOutbound,
+  startContactConversation,
+} from "./conversations.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { buildTicketSnapshot, renderReturnPdf, renderTicketPdf } from "./financial-document-pdf.js"
 import { mayWriteFirst, permitsMessage } from "./message-permission.js"
@@ -196,10 +204,66 @@ export interface DocumentChannelOption {
   connectionName: string
   provider: string
   usable: boolean
+  /** Por qué no sale, en palabras de la clínica y con lo que sí se puede hacer. */
   reason: string | null
+  /** Qué le llega si sale por aquí («Le llega el PDF en su chat»). */
+  note?: string | null
+  /** Pasaron 24 horas: sale con el mensaje aprobado para documentos (ADR 0156). */
+  viaTemplate?: boolean
   hasThread: boolean
   isPreferred: boolean
   isProposed: boolean
+}
+
+/** Lo que dice el cajón de cada canal que sirve, para que se sepa qué le llega. */
+const ARRIVES = {
+  whatsapp: "Le llega el PDF en su chat.",
+  template: "No te escribió en las últimas 24 horas: le llega el PDF con el mensaje aprobado para documentos.",
+  email: "Le llega el PDF a su correo.",
+} as const
+
+/**
+ * Pasaron 24 horas de WhatsApp: el documento sale con «Documento listo», el
+ * mensaje aprobado con el PDF en su encabezado (ADR 0156). Lo dice la misma
+ * regla de toda plantilla (`assertTemplateSendable`); si no sirve, por qué, y
+ * qué se puede hacer mientras tanto.
+ */
+async function documentTemplateState(
+  tx: Db,
+  orgId: string,
+  connectionId: string,
+  contactId: string,
+): Promise<{ usable: true } | { usable: false; reason: string }> {
+  const template = await findMessageTemplate(tx, orgId, connectionId, DOCUMENT_READY_MESSAGE_KEY)
+  const meanwhile = "pídele que te escriba, o envíalo por correo o impreso."
+  if (!template || template.status === "en_revision")
+    return {
+      usable: false,
+      reason: `No te escribió en las últimas 24 horas y WhatsApp aún no aprobó el mensaje para enviar documentos: ${meanwhile}`,
+    }
+  if (template.status !== "aprobada")
+    return {
+      usable: false,
+      reason: `No te escribió en las últimas 24 horas y WhatsApp no aprobó el mensaje para enviar documentos: ${meanwhile}`,
+    }
+  try {
+    const spec = await currentCatalogMessage(tx, orgId, DOCUMENT_READY_MESSAGE_KEY)
+    await assertTemplateSendable(tx, orgId, connectionId, {
+      name: template.name,
+      language: template.language,
+      params: spec.variables.length,
+      category: spec.category,
+      contactId,
+      document: true,
+    })
+    return { usable: true }
+  } catch (error) {
+    if (!(error instanceof ServiceError)) throw error
+    return {
+      usable: false,
+      reason: `No te escribió en las últimas 24 horas y el mensaje para enviar documentos no se puede usar con esta persona: ${meanwhile}`,
+    }
+  }
 }
 
 export interface DocumentMeta {
@@ -420,6 +484,8 @@ export async function getDocumentSendOptions(
     tx,
     orgId,
     recipient,
+    // De los documentos de cobro, solo el comprobante sale con «Documento listo» (ADR 0156).
+    { documentTemplate: documentType === "ticket" },
   )
   const proposed = proposeChannel(channels, {
     email: recipient.email,
@@ -453,6 +519,12 @@ export async function documentChannelsFor(
   tx: Db,
   orgId: string,
   recipient: Pick<DocumentRecipient, "contactId" | "email">,
+  /**
+   * `documentTemplate`: pasadas las 24 horas, WhatsApp sirve con «Documento
+   * listo» (ADR 0156). Solo los papeles decididos lo piden: receta, orden,
+   * descanso, hoja de atención, consentimiento firmado y comprobante.
+   */
+  sendOptions: { documentTemplate?: boolean } = {},
 ): Promise<{
   channels: DocumentChannelOption[]
   preferredChannel: string | null
@@ -489,7 +561,9 @@ export async function documentChannelsFor(
   const allowed = await mayWriteFirst(tx, orgId, recipient.contactId, "avisos")
   const refused = (option: DocumentChannelOption): DocumentChannelOption =>
     allowed || !option.usable ? option : { ...option, usable: false, reason: DOCUMENT_OPTED_OUT }
-  const options: DocumentChannelOption[] = connections.map((conn) => {
+  const options: DocumentChannelOption[] = []
+  for (const conn of connections) options.push(await channelOption(conn))
+  async function channelOption(conn: UsableConnection): Promise<DocumentChannelOption> {
     const own = threads.filter((t) => t.conversation.channelConnectionId === conn.id)
     const thread = own[0]
     const lastInboundAt = own.reduce<Date | null>(
@@ -511,7 +585,7 @@ export async function documentChannelsFor(
           connectionName: conn.displayName,
           provider: conn.provider,
           usable: false,
-          reason: "La persona no tiene correo registrado",
+          reason: "No tiene correo registrado: agrégalo y se lo envías por ahí.",
           hasThread,
           isPreferred: recipientRow?.preferredChannel === conn.channel,
           isProposed: false,
@@ -524,6 +598,7 @@ export async function documentChannelsFor(
         provider: conn.provider,
         usable: true,
         reason: null,
+        note: ARRIVES.email,
         hasThread,
         isPreferred: recipientRow?.preferredChannel === conn.channel,
         isProposed: false,
@@ -538,20 +613,29 @@ export async function documentChannelsFor(
           connectionName: conn.displayName,
           provider: conn.provider,
           usable: false,
-          reason: "Esta persona no tiene WhatsApp vinculado",
+          reason: "No tiene WhatsApp vinculado: envíalo por correo o impreso.",
           hasThread: false,
           isPreferred: recipientRow?.preferredChannel === conn.channel,
           isProposed: false,
         }
       }
       if (!withinWindow) {
+        const state =
+          conn.provider === "whatsapp_cloud_api" && sendOptions.documentTemplate
+            ? await documentTemplateState(tx, orgId, conn.id, recipient.contactId)
+            : {
+                usable: false as const,
+                reason: "No te escribió en las últimas 24 horas: pídele que te escriba, o envíalo por correo o impreso.",
+              }
         return {
           channel: conn.channel,
           connectionId: conn.id,
           connectionName: conn.displayName,
           provider: conn.provider,
-          usable: false,
-          reason: "Fuera de la ventana de 24 h de WhatsApp: necesita un mensaje reciente",
+          usable: state.usable,
+          reason: state.usable ? null : state.reason,
+          note: state.usable ? ARRIVES.template : null,
+          viaTemplate: state.usable,
           hasThread: !!thread,
           isPreferred: recipientRow?.preferredChannel === conn.channel,
           isProposed: false,
@@ -564,6 +648,7 @@ export async function documentChannelsFor(
         provider: conn.provider,
         usable: true,
         reason: null,
+        note: ARRIVES.whatsapp,
         hasThread: !!thread,
         isPreferred: recipientRow?.preferredChannel === conn.channel,
         isProposed: false,
@@ -619,7 +704,7 @@ export async function documentChannelsFor(
       isPreferred: recipientRow?.preferredChannel === conn.channel,
       isProposed: false,
     }
-  })
+  }
   const channels = options.map((option, index) => {
     // Dentro de la ventana es una respuesta: sale aunque haya pedido no recibir mensajes.
     const conn = connections[index]
@@ -1039,6 +1124,8 @@ export async function deliverDocumentPdf(
     exactAddress?: boolean
     /** Quién lo deja en el hilo: una persona del equipo o el agente. */
     senderKind?: "user" | "agent"
+    /** Pasadas las 24 horas, con «Documento listo» (solo los papeles decididos, ADR 0156). */
+    allowTemplate?: boolean
   },
   deps: SendDeps,
 ): Promise<{ conversationId: string; messageId: string }> {
@@ -1079,6 +1166,19 @@ export async function deliverDocumentPdf(
       recipientContactId: DOCUMENT_OPTED_OUT,
     })
   }
+  // Pasadas las 24 horas de WhatsApp: el PDF va en el encabezado de «Documento listo» (ADR 0156).
+  // Se decide antes de subir el PDF: si no puede salir, no queda un archivo suelto en el almacenamiento.
+  const outside = input.allowTemplate ? await whatsappOutsideWindow(tx, orgId, conversationId) : null
+  const template = outside
+    ? await (async () => {
+        const state = await documentTemplateState(tx, orgId, outside.connectionId, input.recipient.contactId)
+        if (!state.usable)
+          throw new ServiceError("WINDOW_CLOSED", 409, state.reason, { connectionId: state.reason })
+        const found = await findMessageTemplate(tx, orgId, outside.connectionId, DOCUMENT_READY_MESSAGE_KEY)
+        if (!found) throw new ServiceError("WINDOW_CLOSED", 409, "El mensaje para enviar documentos no está en la cuenta")
+        return found
+      })()
+    : null
   const ref = await deps.storage.putAttachment({
     orgId,
     conversationId,
@@ -1087,6 +1187,32 @@ export async function deliverDocumentPdf(
     ext: "pdf",
   })
   const senderKind = input.senderKind ?? (actorUserId ? "user" : "agent")
+  const attachment = { ...ref, filename: asciiFilename(input.filename) }
+  if (template) {
+    const spec = await currentCatalogMessage(tx, orgId, DOCUMENT_READY_MESSAGE_KEY)
+    const [person] = await tx
+      .select({ givenNames: contact.givenNames, displayName: contact.displayName })
+      .from(contact)
+      .where(and(eq(contact.id, input.recipient.contactId), eq(contact.organizationId, orgId)))
+      .limit(1)
+    const { params, text } = renderMessage(spec, {
+      persona: person ? firstName(person) : "",
+      clinica: await clinicName(tx, orgId),
+    })
+    const created = await sendTemplateOutbound(tx, orgId, Buffer.alloc(0), {
+      conversationId,
+      senderKind,
+      ...(senderKind === "user" && actorUserId ? { senderUserId: actorUserId } : {}),
+      fromAction: true,
+      name: template.name,
+      language: template.language,
+      params,
+      category: spec.category,
+      preview: text,
+      document: attachment,
+    })
+    return { conversationId, messageId: created.id }
+  }
   const created = await sendOutbound(tx, orgId, {
     conversationId,
     senderKind,
@@ -1094,11 +1220,31 @@ export async function deliverDocumentPdf(
     fromAction: true,
     content: {
       type: "media",
-      attachment: { ...ref, filename: asciiFilename(input.filename) },
+      attachment,
       caption: input.caption,
     },
   })
   return { conversationId, messageId: created.id }
+}
+
+/** La conversación es de WhatsApp (Cloud API) y la persona no escribió en las últimas 24 horas. */
+async function whatsappOutsideWindow(
+  tx: Db,
+  orgId: string,
+  conversationId: string,
+): Promise<{ connectionId: string } | null> {
+  const [row] = await tx
+    .select({
+      lastInboundAt: conversation.lastInboundAt,
+      connectionId: conversation.channelConnectionId,
+      provider: channelConnection.provider,
+    })
+    .from(conversation)
+    .innerJoin(channelConnection, eq(channelConnection.id, conversation.channelConnectionId))
+    .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
+    .limit(1)
+  if (!row || row.provider !== "whatsapp_cloud_api" || windowOpen(row.lastInboundAt)) return null
+  return { connectionId: row.connectionId }
 }
 
 export async function sendFinancialDocument(
@@ -1198,7 +1344,8 @@ export async function sendFinancialDocument(
   } else if (documentType === "ticket") {
     const snap = await buildTicketSnapshot(tx, orgId, input.patientId, input.documentId)
     pdf = await renderTicketPdf(snap, input.paper ?? null)
-    filename = asciiFilename(`Ticket-${snap.numberLabel}.pdf`)
+    // Neutro: el nombre del archivo se ve en la notificación del teléfono.
+    filename = asciiFilename(`Comprobante-${snap.numberLabel}.pdf`)
     subject = `Ticket N.º ${snap.numberLabel} · ${snap.org.tradeName}`
     defaultBody = "Te enviamos tu ticket de cobro en PDF."
   } else {
@@ -1261,6 +1408,7 @@ export async function sendFinancialDocument(
       filename,
       caption: captionWithSubject(subject, `${body}\n${meta.label}`),
       exactAddress: !!otherEmail,
+      allowTemplate: documentType === "ticket",
     },
     deps,
   )
@@ -1328,7 +1476,7 @@ const RECEIPT_WORDS: Record<
 
 /**
  * Al cobrar, el comprobante (el ticket) sale solo por correo a quien pagó o a
- * la persona (decisión 20 v2) y queda en «Tus papeles». Por WhatsApp no se
+ * la persona (decisión 20 v2) y queda en su portal (ADR 0156). Por WhatsApp no se
  * envía: solo si la persona lo pide en el chat, y entonces lo manda el agente
  * en esa conversación (`sendReceiptInConversation`). Sin correo no sale nada y
  * Caja lo dice. Es un aviso de lo que pasó: solo lo frena «No quiero ningún mensaje».
@@ -1389,7 +1537,7 @@ export async function sendTicketReceiptByEmail(
         filename: asciiFilename(`Comprobante-${snap.numberLabel}.pdf`),
         caption: captionWithSubject(
           `Comprobante N.º ${snap.numberLabel} · ${snap.org.tradeName}`,
-          "Te enviamos el comprobante de tu pago en PDF. También lo encuentras en tu enlace, en «Tus papeles».",
+          "Te enviamos el comprobante de tu pago en PDF.",
         ),
       },
       deps,
@@ -1426,7 +1574,7 @@ export async function sendTicketReceiptByEmail(
  * 20 v2): el agente lo deja como respuesta en esa misma conversación, sin
  * gastar un mensaje aprobado. Solo de un paciente por el que quien escribe
  * decide (la propia persona o su representante legal) y de los últimos 30
- * días, como «Tus papeles». Sin uno, devuelve null.
+ * días. Sin uno, devuelve null.
  */
 export async function sendReceiptInConversation(
   tx: Db,
@@ -1494,6 +1642,7 @@ export async function sendReceiptInConversation(
       filename: asciiFilename(`Comprobante-${snap.numberLabel}.pdf`),
       caption: label,
       senderKind: "agent",
+      allowTemplate: true,
     },
     deps,
   )
