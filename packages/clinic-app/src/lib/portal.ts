@@ -15,12 +15,17 @@ import { API_URL } from "./auth-client"
 import type { FormSchemaDef } from "./clinical-forms"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
 
-/** Alcance autorizado congelado en enlace/sesión (UX en español, claves estables). */
+/**
+ * Lo que ve una sesión: lo que deja ver la clínica (ADR 0156), no lo que eligió
+ * quien dio el acceso. `documents` es de antes y ya no se lee.
+ */
 export interface PortalScope {
   appointments: boolean
   budgets: boolean
   account: boolean
   documents: string[]
+  /** Ve todos sus documentos terminados. */
+  papers?: boolean
 }
 
 // ---- Lado paciente (sin sesión staff): Bearer del portal ----
@@ -154,13 +159,21 @@ export interface PortalCurrencyTotal {
   totalCents: number | null
 }
 
-export interface PortalDocument {
+export type PortalPaperKind = "receta" | "orden" | "descanso" | "hoja" | "consentimiento" | "comprobante" | "archivo"
+
+/** Un papel de «Tus documentos», dicho con palabras por el servidor. */
+export interface PortalPaper {
+  kind: PortalPaperKind
   id: string
-  category: string
-  label: string
-  contentType: string
-  sizeBytes: number
-  createdAt: string
+  /** «Receta», «Radiografía», «Comprobante». */
+  type: string
+  title: string
+  at: string
+  /** «Anulada», «Vencida», «Revocado»; nulo si vale. */
+  stateWord: string | null
+  /** Apareció desde su visita anterior. */
+  isNew: boolean
+  image: boolean
 }
 
 export interface PortalAccount {
@@ -346,20 +359,46 @@ export async function markPortalBudgetSeenApi(
   await portalFetch(sessionToken, `/budgets/${budgetId}/seen`, { method: "POST" })
 }
 
-export async function fetchPortalDocuments(sessionToken: string): Promise<PortalDocument[]> {
-  const res = await portalFetch<{ data: PortalDocument[] }>(sessionToken, "/documents")
+export async function fetchPortalPapers(sessionToken: string): Promise<PortalPaper[]> {
+  const res = await portalFetch<{ data: PortalPaper[] }>(sessionToken, "/papers")
   return res.data
 }
 
-export async function fetchPortalDocumentUrl(
+/** Un archivo o una imagen: una dirección firmada que vale 5 minutos. */
+export async function fetchPortalPaperFileUrl(
   sessionToken: string,
-  documentId: string,
+  id: string,
 ): Promise<{ url: string; expiresInSeconds: number }> {
   const res = await portalFetch<{ data: { url: string; expiresInSeconds: number } }>(
     sessionToken,
-    `/documents/${documentId}/url`,
+    `/papers/archivo/${id}/url`,
   )
   return res.data
+}
+
+/** El PDF de un papel que emite la clínica, para abrirlo en el teléfono. */
+export async function fetchPortalPaperPdf(
+  sessionToken: string,
+  paper: Pick<PortalPaper, "kind" | "id">,
+): Promise<Blob> {
+  const response = await fetch(`${API_URL}/api/public/portal/papers/${paper.kind}/${paper.id}/pdf`, {
+    headers: { authorization: `Bearer ${sessionToken}` },
+  })
+  if (!response.ok) {
+    let shape: { message?: string; code?: string } = {}
+    try {
+      shape = ((await response.json()) as { error?: { message?: string; code?: string } }).error ?? {}
+    } catch {
+      // respuesta no-JSON: shape vacío
+    }
+    throw new ApiError(response.status, shape)
+  }
+  return response.blob()
+}
+
+/** «… termina el 8 nov 2026, 11:27 p. m.»: una frase que ya acaba en punto no lleva otro. */
+export function sentenceEnd(text: string): string {
+  return /[.!?]$/.test(text.trim()) ? text.trim() : `${text.trim()}.`
 }
 
 export async function fetchPortalAccount(sessionToken: string): Promise<PortalAccount> {
@@ -558,7 +597,7 @@ export interface PortalAccessCandidate {
   contactId: string
   name: string
   relation: "self" | "representante"
-  /** «DNI 4•••••04»: el tipo de su documento y el número enmascarado; nulo sin documento. */
+  /** «DNI 47120836»: el tipo y el número entero, para compararlo con el que tiene en la mano; nulo sin documento. */
   document: string | null
   /** Escribió por WhatsApp en las últimas 24 horas: el enlace puede ir por ahí. */
   whatsappReady: boolean
@@ -583,15 +622,22 @@ export interface PortalAccessSummary {
   allowedScope: PortalPolicy["allowedScope"]
   access: PortalAccessRow[]
   candidates: PortalAccessCandidate[]
-  /** Lo que quien mira puede compartir. */
-  rights: { canShareBudgets: boolean; canShareAccount: boolean; canShareDocuments: boolean }
 }
 
-export interface PortalAccessScopeDraft {
-  appointments?: boolean
-  budgets?: boolean
-  account?: boolean
-  documentIds?: string[]
+/**
+ * Lo que verá quien entra, dicho en una línea: lo que deja ver la clínica
+ * (ADR 0156). Nunca la historia: las notas de cada atención no van al portal.
+ */
+export function portalSeesText(allowed: PortalPolicy["allowedScope"]): string {
+  const parts = [
+    allowed.appointments ? "sus citas" : null,
+    allowed.budgets ? "sus presupuestos" : null,
+    allowed.account ? "su cuenta" : null,
+    allowed.documents ? "sus documentos e imágenes" : null,
+  ].filter((part): part is string => part !== null)
+  if (parts.length === 0) return "Por ahora la clínica no muestra nada en el portal."
+  const list = parts.length === 1 ? (parts[0] ?? "") : `${parts.slice(0, -1).join(", ")} y ${parts[parts.length - 1]}`
+  return `Verá ${list}. No ve las notas de sus atenciones.`
 }
 
 export interface PortalAccessGiven {
@@ -599,7 +645,8 @@ export interface PortalAccessGiven {
   /** Para mostrar el QR, una sola vez. */
   activationUrlOnce: string | null
   /** El código que se le dice en persona o por teléfono: nunca va con el enlace. */
-  pinOnce: string
+  /** Nulo si lo envió recepción: el código le llegó a la persona en otro mensaje. */
+  pinOnce: string | null
   /** A quién se le envió el enlace por WhatsApp. */
   sentTo: string | null
 }
@@ -614,24 +661,12 @@ export async function fetchPortalAccessApi(patientId: string): Promise<PortalAcc
 export async function givePortalAccessApi(input: {
   patientId: string
   contactId: string
-  scope: PortalAccessScopeDraft
   identityChecked: boolean
   delivery: "qr" | "whatsapp"
 }): Promise<PortalAccessGiven> {
   const res = await apiFetch<{ data: PortalAccessGiven }>("/api/portal/access", {
     method: "POST",
     body: JSON.stringify(input),
-  })
-  return res.data
-}
-
-export async function changePortalAccessApi(
-  grantId: string,
-  scope: PortalAccessScopeDraft,
-): Promise<PortalGrant> {
-  const res = await apiFetch<{ data: PortalGrant }>(`/api/portal/access/${grantId}`, {
-    method: "PATCH",
-    body: JSON.stringify({ scope }),
   })
   return res.data
 }

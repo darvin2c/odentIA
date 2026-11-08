@@ -74,8 +74,6 @@ export interface PersonalLinkView {
   questionnaire: { title: string } | null
   /** «Tus mensajes» (ADR 0040): solo para quien recibe los mensajes. */
   messages: PersonalLinkMessages | null
-  /** «Tus papeles»: la receta y el comprobante de los últimos 30 días. */
-  papers: PersonalLinkPaper[]
 }
 
 export interface PersonalLinkMessages {
@@ -87,14 +85,6 @@ export interface PersonalLinkMessages {
 }
 
 export type MessageChoice = "recordatorio" | "seguimiento" | "novedades" | "ninguno"
-
-export interface PersonalLinkPaper {
-  kind: "receta" | "comprobante"
-  id: string
-  title: string
-  issuedAt: string
-  availableUntil: string
-}
 
 export interface BookingSlot {
   startsAt: string
@@ -143,15 +133,6 @@ export function chooseLinkMessages(
   input: { tipo: MessageChoice; recibir: boolean },
 ): Promise<{ data: PersonalLinkMessages }> {
   return post(`${base(slug)}/messages`, { token, ...input })
-}
-
-/**
- * Descarga un papel de «Tus papeles» (PDF). Es un POST con el token en el
- * cuerpo, como lo demás del enlace: el token no queda en la dirección, ni en
- * registros de acceso ni en el Referer.
- */
-export async function downloadLinkPaper(slug: string, token: string, paper: Pick<PersonalLinkPaper, "kind" | "id" | "title">): Promise<void> {
-  await saveDownload(await linkPost(`${base(slug)}/papers/${encodeURIComponent(paper.id)}`, { token, kind: paper.kind }), `${paper.title}.pdf`)
 }
 
 /** «Añadir al calendario» de su cita: el `.ics` que arma el servidor (issue 46). */

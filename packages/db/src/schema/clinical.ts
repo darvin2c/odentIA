@@ -637,9 +637,19 @@ export const patientDocument = pgTable(
     retiredAt: timestamp("retired_at", { withTimezone: true }),
     retiredBy: text("retired_by").references(() => user.id),
     retireReason: text("retire_reason"),
+    /**
+     * «No mostrar en su portal»: la clínica oculta este archivo del portal del
+     * paciente, para todo acceso de hoy y de mañana. Cuándo y quién; nulo, se ve.
+     */
+    portalHiddenAt: timestamp("portal_hidden_at", { withTimezone: true }),
+    portalHiddenBy: text("portal_hidden_by").references(() => user.id),
   },
   (table) => [
     index("patient_document_org_patient_idx").on(table.organizationId, table.patientId),
+    check(
+      "patient_document_portal_hidden_check",
+      sql`(${table.portalHiddenAt} IS NULL) = (${table.portalHiddenBy} IS NULL)`,
+    ),
     // Destino de las claves compuestas que impiden apuntar a otra clínica.
     uniqueIndex("patient_document_org_id_uidx").on(table.organizationId, table.id),
     check(

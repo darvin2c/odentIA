@@ -487,11 +487,14 @@ export function DocumentosSection({
           date: takenAt(doc),
           // Toda radiografía nace sin informar: se dice, pero no cuenta como
           // pendiente (decisión 9); el informe va en la evolución o en la orden.
+          // Con texto, no solo un ícono: así nadie tiene que abrirlo para saber cómo está.
           status: doc.retiredAt
             ? { label: "Retirado", tone: "outline" }
-            : doc.reportStatus === "pendiente"
-              ? { label: "Sin informar", tone: "warning" }
-              : null,
+            : doc.portalHiddenAt
+              ? { label: "Oculto en su portal", tone: "outline" }
+              : doc.reportStatus === "pendiente"
+                ? { label: "Sin informar", tone: "warning" }
+                : null,
           needsAction: false,
           action: { type: "ver" },
           open: { kind: "archivo", document: doc },

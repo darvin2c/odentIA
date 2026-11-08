@@ -579,6 +579,26 @@ function DocumentViewer({
       setActionPending(false)
     }
   }
+  // «No mostrar en su portal» (ADR 0156): reversible y sin confirmar; vale para todo acceso.
+  const setPortalHidden = (hidden: boolean) =>
+    runAction(
+      () =>
+        apiFetch(`/api/patients/${patientId}/documents/${doc.id}/portal`, {
+          method: "PATCH",
+          body: JSON.stringify({ hidden }),
+        }),
+      onChanged,
+    )
+  // Si se ve en su portal lo dice el servidor, con la misma regla que «Tus documentos».
+  const portalQuery = useQuery({
+    queryKey: ["patient-document-portal", patientId, doc.id, doc.portalHiddenAt ?? "", doc.reportStatus ?? ""],
+    queryFn: () =>
+      apiFetch<{ data: { state: string; words: string; canHide: boolean } }>(
+        `/api/patients/${patientId}/documents/${doc.id}/portal`,
+      ),
+    enabled: canRead && !doc.retiredAt,
+  })
+  const portal = portalQuery.data?.data ?? null
   const setReport = (reportStatus: string) =>
     runAction(
       () =>
@@ -764,6 +784,24 @@ function DocumentViewer({
                   El informe va como resultado de su orden o en la evolución de la atención.
                 </p>
               )}
+            </div>
+          )}
+          {!doc.retiredAt && portal && (
+            <div>
+              <dt className="text-xs text-muted-foreground">Su portal</dt>
+              <dd className="flex flex-wrap items-center gap-2">
+                {portal.words}
+                {canEdit && portal.canHide && (
+                  <Button
+                    size="sm"
+                    variant={doc.portalHiddenAt ? "outline" : "ghost"}
+                    disabled={actionPending}
+                    onClick={() => void setPortalHidden(!doc.portalHiddenAt)}
+                  >
+                    {doc.portalHiddenAt ? "Mostrar en su portal" : "No mostrar en su portal"}
+                  </Button>
+                )}
+              </dd>
             </div>
           )}
           {teeth.length > 0 && (

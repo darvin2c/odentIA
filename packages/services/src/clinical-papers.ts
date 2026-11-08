@@ -1,6 +1,6 @@
 /**
  * Los papeles clínicos que firma quien los emite: receta, orden y descanso médico,
- * con el kit único. Son los mismos para enviar, para «Tus papeles» y para que el
+ * con el kit único. Son los mismos para enviar, para su portal y para que el
  * equipo los vea o los imprima. Los datos de firma son los congelados al emitir.
  */
 import { diagnosisCodeLabel, dispensedUnit, medicalLeaveEnd } from "@odentia/clinical"

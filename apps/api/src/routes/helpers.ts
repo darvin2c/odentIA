@@ -12,6 +12,11 @@ export interface CrmDeps {
   validateExternal: boolean
   /** Base pública del API para construir webhookUrl (p.ej. BETTER_AUTH_URL). */
   webhookBaseUrl: string
+  /**
+   * El id de la app de Meta de odentIA, si «Conectar con Facebook» está
+   * configurado: sube el PDF de muestra del mensaje con documento (ADR 0156).
+   */
+  metaAppId?: string
 }
 
 /**
