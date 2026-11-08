@@ -1,4 +1,4 @@
-# 0156 · Un gasto anulado baja el mes del gasto
+# 0160 · Un gasto anulado baja el mes del gasto
 
 Fecha: 2026-11-08 · Estado: aceptada · Decisión del dueño del 8 nov, en la tercera vuelta de QA de comisiones y gastos (A10).
 

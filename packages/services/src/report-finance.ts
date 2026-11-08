@@ -377,7 +377,7 @@ export interface ExpenseTotals {
  * Lo gastado de varios tramos en una consulta, con la regla de Finanzas › Gastos
  * (`getMonthExpenses`): los gastos con fecha en el tramo que no están anulados.
  * Anular es decir que el gasto no ocurrió, así que baja el mes del gasto, no el
- * de la anulación (ADR 0156). Con su valor congelado, en moneda del negocio; solo
+ * de la anulación (ADR 0160). Con su valor congelado, en moneda del negocio; solo
  * lo viejo en otra moneda, sin valor ni factor, va aparte en su moneda.
  */
 export async function expensesMany(tx: Db, orgId: string, spans: Span[], options: { branchId?: string } = {}): Promise<ExpenseTotals[][]> {
