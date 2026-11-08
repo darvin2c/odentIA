@@ -137,7 +137,7 @@ it("«lo devolvió» en efectivo entra a la caja sin su nombre y deja la deuda e
   const previous = await viewOf(before)
   expect(previous).toMatchObject({ adjustmentCents: 0, discountCents: 0, pendingCents: 15000, status: "por_pagar" })
   expect(previous.lines.find((line) => line.voidedAfterPaid)).toMatchObject({ owedLeftCents: 0, owedClosedBy: "devuelto" })
-  // «Mis comisiones» dice lo mismo: es la misma cuenta.
+  // «Mis honorarios» dice lo mismo: es la misma cuenta.
   const mine = await f.run((tx) => getMyCommissions(tx, "org_a", f.actor, before))
   expect(mine).toMatchObject({ adjustmentCents: 0, owedCents: 0 })
   expect(mine.lines.find((line) => line.voidedAfterPaid)).toMatchObject({ owedClosedBy: "devuelto" })

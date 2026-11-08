@@ -3601,7 +3601,7 @@ export interface SettleCommissionDebtInput {
  * - `saldado`: la clínica lo perdona, con su motivo. No mueve dinero.
  *
  * Las dos dejan una liquidación de su tipo con una línea `ajuste` por cobro anulado: todas las cuentas
- * (Finanzas, Mis comisiones, Reportes) ya restan los ajustes, así que la deuda queda en cero en todas a
+ * (Finanzas, Mis honorarios, Reportes) ya restan los ajustes, así que la deuda queda en cero en todas a
  * la vez. Quién y cuándo quedan en la liquidación y en la auditoría. Se anula como un pago.
  */
 export async function settleCommissionDebt(

@@ -299,7 +299,7 @@ function countedLines(detail: MonthlyCommissions): CommissionLine[] {
   return detail.lines.filter((line) => !line.voidedAfterPaid)
 }
 
-/** Lo mismo, dicho al profesional en «Mis comisiones». */
+/** Lo mismo, dicho al profesional en «Mis honorarios». */
 function myPaymentTitle(payment: CommissionPayment, day: (iso: string) => string): string {
   const on = payment.settledAt ? day(payment.settledAt) : null
   if (payment.kind === "devuelto") return on ? `Devolviste el ${on}` : "Devolviste"
