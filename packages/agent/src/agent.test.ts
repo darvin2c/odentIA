@@ -1393,7 +1393,7 @@ it("proponer_cita: si a la clínica le falta algo del paciente, su enlace con es
     }
   })()
   expect(confirmed).toContain("Confirmado y ejecutado")
-  expect(confirmed).toMatch(/«Antes de venir, completa tus datos aquí \(toma 2 minutos\): https:\/\/norte\.odentia\.test\/reserva\?token=[0-9a-f]{64}»/)
+  expect(confirmed).toMatch(/«Antes de venir, completa tus datos aquí \(toma 2 minutos\): https:\/\/norte\.odentia\.test\/pendientes\?abre=datos&token=[0-9a-f]{64}»/)
   expect(confirmed).not.toContain("tu salud")
 })
 
@@ -3139,7 +3139,7 @@ it("a quien pide cambiar su cita también le da su enlace, abierto en esa cita, 
     await makeAgentTools(runCtx(`trig-cambio-${turn}`, extra)).find((item) => item.name === "send_reply")!.invoke({ text: `Respuesta ${turn}` })
     return (await agentMessages(conversationId)).at(-1)!
   }
-  const LINE = /\n\nLa cita( de [^\n]+)? también se puede cambiar o cancelar aquí: https:\/\/norte\.odentia\.test\/reserva\?token=\{\{su-enlace:[0-9a-f-]{36}\}\}$/
+  const LINE = /\n\nLa cita( de [^\n]+)? también se puede cambiar o cancelar aquí: https:\/\/norte\.odentia\.test\/pendientes\?abre=cita&token=\{\{su-enlace:[0-9a-f-]{36}\}\}$/
   const day = upcomingMonday()
   const at = (hour: number) => new Date(day.getTime() + hour * 3_600_000).toISOString()
   const book = (hour: number) => withOrgContext(appDb, "org_a", (tx) =>
@@ -3148,17 +3148,17 @@ it("a quien pide cambiar su cita también le da su enlace, abierto en esa cita, 
     }))
 
   // Sin cita por venir no hay nada que abrir.
-  expect(await reply()).not.toContain("/reserva?")
+  expect(await reply()).not.toMatch(/\/(?:reserva|pendientes)\?/)
   // Con dos, la página podría abrir la que no quiere cambiar: se aclara por el chat.
   const first = await book(10)
   const second = await book(11)
-  expect(await reply()).not.toContain("/reserva?")
+  expect(await reply()).not.toMatch(/\/(?:reserva|pendientes)\?/)
   await ownerDb.update(appointment).set({ status: "cancelada" }).where(eq(appointment.id, first.id))
 
   // Ya con una: no va con un acto de cita en la corrida, con algo esperando su sí ni en otro camino.
-  expect(await reply({ toolsUsed: ["reprogramar_cita"] })).not.toContain("/reserva?")
-  expect(await reply({ casePending: true })).not.toContain("/reserva?")
-  expect(await reply({ route: { ...route, path: "abierto" } })).not.toContain("/reserva?")
+  expect(await reply({ toolsUsed: ["reprogramar_cita"] })).not.toMatch(/\/(?:reserva|pendientes)\?/)
+  expect(await reply({ casePending: true })).not.toMatch(/\/(?:reserva|pendientes)\?/)
+  expect(await reply({ route: { ...route, path: "abierto" } })).not.toMatch(/\/(?:reserva|pendientes)\?/)
 
   // Un enlace que le ofrecía reservar sigue igual, y un mensaje con enlace que no salió no cuenta como dado.
   await withOrgContext(appDb, "org_a", (tx) => createBookingLink(tx, "org_a", { conversationId }, { secretsKey: KEY }))
@@ -3169,7 +3169,7 @@ it("a quien pide cambiar su cita también le da su enlace, abierto en esa cita, 
     tx.select().from(appointmentBookingLink).where(eq(appointmentBookingLink.conversationId, conversationId)))
   expect(await links()).toEqual([expect.objectContaining({ booking: true })])
   // En la misma atención ya lo tiene: no se le repite.
-  expect(await reply()).not.toContain("/reserva?")
+  expect(await reply()).not.toMatch(/\/(?:reserva|pendientes)\?/)
 
   // Aunque el enlace venga apuntando a la cita que canceló, la página abre la que sigue en pie.
   await ownerDb.update(appointmentBookingLink).set({ appointmentId: first.id }).where(eq(appointmentBookingLink.id, (await links())[0]!.id))
@@ -3205,7 +3205,7 @@ it("el enlace para cambiar una cita pide lo mismo que el chat: un familiar sin a
       .find((item) => item.name === "send_reply")!.invoke({ text: `Respuesta ${turn}` })
     return (await agentMessages(conversationId)).at(-1)!
   }
-  expect(await reply()).not.toContain("/reserva?")
+  expect(await reply()).not.toMatch(/\/(?:reserva|pendientes)\?/)
   // Con su autorización vigente, sí, y dice de quién es la cita.
   await ownerDb.insert(patientResponsibility).values({ organizationId: "org_a", patientId: fx.patientId, contactId: thread!.contactId, kind: "autorizado_informacion", startsAt: "2020-01-01" })
   expect(await reply()).toMatch(/\n\nLa cita de Paciente cambio-familiar también se puede cambiar o cancelar aquí: /)

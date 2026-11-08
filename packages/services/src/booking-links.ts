@@ -340,7 +340,7 @@ export async function issueChangeLink(
     join conversation c on c.organization_id = m.organization_id and c.id = m.conversation_id
     where m.organization_id = ${orgId} and m.conversation_id = ${input.conversationId}::uuid
       and m.direction = 'out' and m.status <> 'failed' and m.created_at >= c.attention_started_at
-      and (m.template_link is not null or m.body like '%/reserva?%')
+      and (m.template_link is not null or m.body like '%/reserva?%' or m.body like '%/pendientes?%')
     limit 1`)
   if (given) return null
   return bookingLinkFor(tx, orgId, { conversationId: input.conversationId }, deps, "una-cita")

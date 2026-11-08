@@ -88,6 +88,15 @@ export type PersonalLinkOpens = (typeof PERSONAL_LINK_OPENS)[number]
  */
 export type PersonalLinkTarget = "reserva" | "pendientes" | PersonalLinkOpens
 
+/**
+ * El texto ya lleva «Su enlace», con cualquier destino: la referencia que el worker cambia
+ * por el token (`{{su-enlace:…}}`) o la dirección escrita (`/reserva?…`, `/pendientes?…`).
+ * Para no agregar otro al mismo mensaje.
+ */
+export function carriesPersonalLink(text: string): boolean {
+  return /\{\{su-enlace:|\/(?:reserva|pendientes)\?/.test(text)
+}
+
 export function isPersonalLinkOpens(value: unknown): value is PersonalLinkOpens {
   return typeof value === "string" && (PERSONAL_LINK_OPENS as readonly string[]).includes(value)
 }
