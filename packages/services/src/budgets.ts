@@ -1,8 +1,11 @@
 import {
   BUDGET_OPTIONS_MAX,
+  BUDGET_SIGN_DECLARATION,
   budgetOptionLabel,
   budgetStateText,
+  clinicalProfileFor,
   type ConsentSections,
+  consentSignatureNote,
   diagnosisCodeLabel,
   isClinicalProduct,
   type PatientGuide,
@@ -18,6 +21,7 @@ import {
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import {
+  type BudgetDecisionSignature,
   type BudgetDeliveredSnapshot,
   diagnosisCatalog,
   encounterProcedure,
@@ -57,7 +61,7 @@ import type { PlanItemDecision } from "./plan.js"
 import { assertExecutableCodings } from "./procedure-codings.js"
 import type { ProductSite, SiteFields } from "./product-hooks.js"
 import { productHooks } from "./products.js"
-import { drawnSignatureAt, requireProfessionalSignature } from "./professional-profiles.js"
+import { assertStrokes, drawnSignatureAt, requireProfessionalSignature } from "./professional-profiles.js"
 import { isPromotionLive, requirePromotionPrice } from "./promotions.js"
 import { personalLinkUrl } from "./public-links.js"
 import { orgMoney, todayValueCents } from "./report-value.js"
@@ -178,7 +182,7 @@ function lineTotal(
  * viaja aquí (ni al agente ni a lo público). Se lee con `getBudgetPresentation`, si
  * quien pregunta puede, o sale en su hoja a quien corresponde.
  */
-export type BudgetPublicRow = Omit<BudgetRow, "findings">
+export type BudgetPublicRow = Omit<BudgetRow, "findings" | "decisionSignature">
 
 /** Presupuesto con líneas snapshot y totales enteros (null = precio desconocido). */
 export type BudgetWithTotals = Omit<BudgetPublicRow, "currency"> & {
@@ -210,6 +214,11 @@ export type BudgetWithTotals = Omit<BudgetPublicRow, "currency"> & {
   awaitsAnswer: boolean
   /** El estado dicho con un solo nombre en toda la aplicación (`budgetStateText`). */
   stateText: string
+  /**
+   * Quién del equipo anotó la respuesta (`decidedBy`): sin firma, es su palabra y
+   * no la de la persona. Nulo si respondió la persona o el agente con su sí.
+   */
+  decidedByName: string | null
   /**
    * Quien pregunta puede cambiarlo, enviarlo o anularlo. El odontólogo lee los de
    * sus colegas, pero solo cambia lo suyo (`ownBudgetSql`); el resto, según su permiso.
@@ -361,6 +370,11 @@ export interface DecideBudgetInput {
   decisions: Array<{ planItemId: string; decision: "aceptado" | "rechazado" | "pospuesto" }>
   decidedByContactId?: string | null
   decisionNote?: string | null
+  /**
+   * La firma de quien decide, en la tablet de la clínica (opcional): sus trazos.
+   * Solo con alguien del equipo, con quien decide elegido y algo aceptado ahora.
+   */
+  signature?: { strokes: unknown } | null
 }
 
 export interface ReviseBudgetInput {
@@ -660,8 +674,11 @@ function optionTotals(
 }
 
 /** Sin el texto clínico: lo que puede salir de aquí a cualquiera con `budgets.read`. */
-function withoutFindings<T extends { findings: string | null }>(row: T): Omit<T, "findings"> {
-  const { findings: _clinical, ...rest } = row
+/** Sin lo clínico ni los trazos de la firma (los lee la hoja, `getBudgetPrintPayload`). */
+function withoutFindings<T extends { findings: string | null; decisionSignature: unknown }>(
+  row: T,
+): Omit<T, "findings" | "decisionSignature"> {
+  const { findings: _clinical, decisionSignature: _signature, ...rest } = row
   return rest
 }
 
@@ -674,11 +691,20 @@ async function emptyCurrencyOf(tx: Db, orgId: string, lines: readonly unknown[])
   return lines.length > 0 ? "" : ((await findOrgCurrency(tx, orgId)) ?? "")
 }
 
+/** El nombre de quien anotó cada respuesta, en una consulta. */
+async function notedByNames(tx: Db, budgets: ReadonlyArray<{ decidedBy: string | null }>): Promise<Map<string, string>> {
+  const ids = [...new Set(budgets.flatMap((budget) => (budget.decidedBy ? [budget.decidedBy] : [])))]
+  if (ids.length === 0) return new Map()
+  const rows = await tx.select({ id: user.id, name: user.name }).from(user).where(inArray(user.id, ids))
+  return new Map(rows.map((row) => [row.id, row.name]))
+}
+
 function withTotals(
   fullBudget: BudgetRow,
   items: BudgetLineWithStatus[],
   optionRows: BudgetOptionRow[],
   emptyCurrency: string,
+  names: ReadonlyMap<string, string> = new Map(),
 ): BudgetWithTotals {
   const budget = withoutFindings(fullBudget)
   const hasFindings = !!fullBudget.findings
@@ -705,6 +731,7 @@ function withTotals(
     discountCents: value ? value.discountCents : 0,
     awaitsAnswer: budgetAwaitsAnswer({ status: budget.status, items }),
     stateText: budgetStateText({ status: budget.status, items, options }),
+    decidedByName: budget.decidedBy ? (names.get(budget.decidedBy) ?? null) : null,
     canChange: true,
   }
 }
@@ -721,6 +748,7 @@ async function loadBudget(
     lines,
     await listOptions(tx, orgId, [budget.id]),
     await emptyCurrencyOf(tx, orgId, lines),
+    await notedByNames(tx, [budget]),
   )
 }
 
@@ -2355,6 +2383,14 @@ async function adjustOneLine(
  * propia persona (el portal) o el agente con su confirmación: el presupuesto no
  * queda a nombre de nadie de la clínica y la auditoría lo anota a quien decidió
  * (`contact:<id>`).
+ *
+ * `inPerson`: se le mostró en la atención y respondió ahí. Un borrador se entrega
+ * en la misma transacción (`deliverBudget`, sin enviar nada) y después se anota;
+ * la ruta exige además el permiso de entregar. La revisión de un presupuesto ya
+ * respondido no: se entrega antes, porque lleva respuestas que no se vuelven a pedir.
+ *
+ * Con `signature`, quien decide firmó en la tablet: queda su firma y, en su hoja,
+ * «Aceptó y firmó». Sin ella, la respuesta es la palabra de quien la anotó.
  */
 export async function decideBudget(
   tx: Db,
@@ -2363,9 +2399,35 @@ export async function decideBudget(
   patientId: string,
   budgetId: string,
   input: DecideBudgetInput,
-  opts: BudgetActorOpts & { skipOwnPlan?: boolean; via?: "enlace" | "portal" | "conversacion" } = {},
+  opts: BudgetActorOpts & {
+    skipOwnPlan?: boolean
+    via?: "enlace" | "portal" | "conversacion"
+    inPerson?: boolean
+  } = {},
 ): Promise<BudgetWithTotals> {
   await requirePatient(tx, orgId, patientId)
+  if (opts.inPerson) {
+    if (!actorUserId || opts.via) throw new Error("Responder en consulta es de alguien del equipo")
+    const draft = await requireBudget(tx, orgId, patientId, budgetId)
+    if (draft.status === "borrador") {
+      if (draft.supersedesBudgetId) {
+        throw conflict(
+          "BUDGET_REVISION_IN_PERSON",
+          "Es una revisión: entrégala (imprímela o envíala) y después anota qué respondió",
+        )
+      }
+      try {
+        await deliverBudget(tx, orgId, actorUserId, patientId, budgetId, {
+          memberRole: opts.memberRole,
+          by: "persona",
+        })
+      } catch (error) {
+        // Otra persona lo entregó un instante antes: ya está entregado y se anota igual.
+        const now = await requireBudget(tx, orgId, patientId, budgetId)
+        if (!(error instanceof ServiceError && error.code === "BUDGET_STATUS" && now.status !== "borrador")) throw error
+      }
+    }
+  }
   const prev = await requireBudget(tx, orgId, patientId, budgetId)
   await lockPlan(tx, orgId, patientId, prev.planId)
   if (!opts.skipOwnPlan) {
@@ -2490,6 +2552,24 @@ export async function decideBudget(
       .filter((line) => isOpen(line.decision))
       .map((line) => [line.planItemId, decisions.get(line.planItemId)!] as const),
   )
+  const signature = input.signature != null
+    ? await budgetSignatureOf(tx, orgId, patientId, {
+        input: input.signature,
+        actorUserId,
+        via: opts.via ?? null,
+        representative,
+        alreadySigned: current.decisionSignedAt != null,
+        accepting: [...answering.values()].includes("aceptado"),
+        // Lo aceptado al firmar: lo de antes y lo de ahora, de lo que se responde.
+        accepted: [
+          ...new Set(
+            lines
+              .filter((line) => (answering.get(line.planItemId) ?? line.decision) === "aceptado")
+              .map((line) => line.title),
+          ),
+        ],
+      })
+    : null
   for (const item of items) {
     const decision = answering.get(item.id)
     if (!decision) continue
@@ -2639,6 +2719,7 @@ export async function decideBudget(
       decidedBy: actorUserId,
       // Sin canal y con alguien del equipo: lo anotó la clínica.
       decidedVia: opts.via ?? (actorUserId ? "clinica" : null),
+      ...(signature ? { decisionSignature: signature, decisionSignedAt: now } : {}),
       updatedAt: now,
     })
     .where(
@@ -2658,6 +2739,8 @@ export async function decideBudget(
     decisionContactId: representative?.id ?? null,
     ...(options.length > 1 ? { option: chosen?.position ?? null } : {}),
     ...(opts.via ? { via: opts.via } : {}),
+    ...(opts.inPerson ? { inPerson: true } : {}),
+    ...(signature ? { signed: true } : {}),
   })
   // Lo que vale: el camino elegido o, mientras decide, el recomendado.
   const own = chosen ? lines : allLines.filter((line) => line.optionId === valued?.id)
@@ -2685,6 +2768,60 @@ export async function decideBudget(
   })
   await notifyBudget(tx, orgId)
   return loadBudget(tx, orgId, patientId, updated)
+}
+
+/**
+ * La firma de quien decide al aceptar en la clínica: la toma alguien del equipo en
+ * la tablet, de quien decide (la persona o su representante legal vigente), sobre
+ * algo que acepta ahora, y una sola vez por presupuesto. Se guardan sus trazos, su
+ * nombre, en calidad de qué decide y la declaración de hoy.
+ */
+async function budgetSignatureOf(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  args: {
+    input: { strokes: unknown }
+    actorUserId: string | null
+    via: string | null
+    representative: { id: string; displayName: string } | null
+    alreadySigned: boolean
+    accepting: boolean
+    accepted: string[]
+  },
+): Promise<BudgetDecisionSignature> {
+  if (!args.actorUserId || args.via) {
+    throw invalidField("signature", "La firma se toma en la tablet de la clínica")
+  }
+  if (!args.representative) {
+    const message = "Para firmar, elige quién decide: la persona o su representante legal"
+    throw new ServiceError("BUDGET_SIGNER_REQUIRED", 400, message, { decidedByContactId: message })
+  }
+  if (args.alreadySigned) {
+    throw conflict("BUDGET_ALREADY_SIGNED", "Este presupuesto ya tiene la firma de quien decide")
+  }
+  if (!args.accepting) {
+    throw invalidField("signature", "Se firma lo que acepta: marca al menos un tratamiento como aceptado")
+  }
+  const strokes = assertStrokes(args.input?.strokes, "La firma", "signature")
+  const [own] = await tx
+    .select({ personId: patient.personId })
+    .from(patient)
+    .where(and(eq(patient.organizationId, orgId), eq(patient.id, patientId)))
+    .limit(1)
+  const [profile] = await tx
+    .select({ country: orgProfile.countryCode })
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, orgId))
+    .limit(1)
+  return {
+    strokes,
+    signerName: args.representative.displayName,
+    signerKind: own?.personId === args.representative.id ? "paciente" : "representante",
+    declaration: BUDGET_SIGN_DECLARATION,
+    accepted: args.accepted,
+    note: consentSignatureNote(clinicalProfileFor(profile?.country).signatureLaw),
+  }
 }
 
 /**
@@ -2868,6 +3005,7 @@ export async function listBudgetsForPatients(
   const optionsOf = new Map<string, BudgetOptionRow[]>()
   for (const option of options)
     optionsOf.set(option.budgetId, [...(optionsOf.get(option.budgetId) ?? []), option])
+  const names = await notedByNames(tx, budgets)
   for (const budget of budgets) {
     const list = out.get(budget.patientId) ?? []
     const own = lines.get(budget.id) ?? []
@@ -2877,6 +3015,7 @@ export async function listBudgetsForPatients(
         own,
         optionsOf.get(budget.id) ?? [],
         await emptyCurrencyOf(tx, orgId, own),
+        names,
       ),
     )
     out.set(budget.patientId, list)
@@ -2911,6 +3050,7 @@ export async function listBudgets(
     budgets.map((budget) => budget.id),
   )
   const result: BudgetWithTotals[] = []
+  const names = await notedByNames(tx, budgets)
   for (const budget of budgets) {
     const lines = await listBudgetLines(tx, orgId, patientId, budget.id)
     result.push({
@@ -2919,6 +3059,7 @@ export async function listBudgets(
         lines,
         options.filter((option) => option.budgetId === budget.id),
         await emptyCurrencyOf(tx, orgId, lines),
+        names,
       ),
       canChange: own === null || own.has(budget.id),
     })
@@ -3503,8 +3644,22 @@ export interface BudgetPrintPayload {
   terms: { payment: string | null; change: string | null }
   paymentMethods: string[]
   consents: BudgetConsentFacts[]
-  /** Cómo respondió, si ya respondió: «Aceptó por su enlace». */
-  decisionWords: { text: string; by: string | null; at: Date | null } | null
+  /**
+   * Cómo respondió, si ya respondió: «Aceptó por su enlace». Lo anotado por el
+   * equipo dice quién lo anotó (`notedBy`); lo firmado en la tablet, la firma.
+   */
+  decisionWords: {
+    text: string
+    by: string | null
+    at: Date | null
+    notedBy: string | null
+    signature: BudgetDecisionSignature | null
+    signedAt: Date | null
+    /** La firma cubre la respuesta de hoy; si no, solo lo que aceptó al firmar (`signature.accepted`). */
+    signedAll: boolean
+    /** Con firma: su alcance («Firma electrónica simple…»), como se leyó al firmar. */
+    signatureNote: string | null
+  } | null
   /** Su enlace vivo, si ya tiene uno; generar uno no es algo que haga un papel. */
   personalLinkUrl: string | null
 }
@@ -3645,9 +3800,17 @@ const DECIDED_VIA_WORDS: Record<string, string> = {
   clinica: "en la clínica",
 }
 
+/**
+ * Cómo respondió, para su hoja. Lo que anotó alguien del equipo sin firma es su
+ * palabra: dice quién decide y quién lo anotó, no que la persona lo confirmó. Con la
+ * firma de quien decide, «y firmó en la clínica», su nombre y sus trazos.
+ */
 function decisionWordsOf(
   budget: BudgetWithTotals,
   deciderName: string | null,
+  notedByName: string | null,
+  signature: BudgetDecisionSignature | null,
+  signatureNote: string,
 ): BudgetPrintPayload["decisionWords"] {
   if (
     !budget.decidedAt ||
@@ -3660,12 +3823,46 @@ function decisionWordsOf(
     rechazado: "No aceptó",
     pospuesto: "Lo dejó para después",
   }
+  const said = verb[budget.status] ?? "Respondió"
+  // La firma dice lo de su momento: si respondió algo después, eso se dice con su canal.
+  const signedLast =
+    signature != null &&
+    budget.decisionSignedAt != null &&
+    new Date(budget.decisionSignedAt).getTime() === new Date(budget.decidedAt).getTime()
+  if (signature && signedLast) {
+    return {
+      text: `${said} y firmó en la clínica`,
+      by: signature.signerName,
+      at: budget.decisionSignedAt ?? budget.decidedAt,
+      notedBy: null,
+      signature,
+      signedAt: budget.decisionSignedAt,
+      signedAll: true,
+      signatureNote: signature.note ?? signatureNote,
+    }
+  }
+  const signed = signature
+    ? { signature, signedAt: budget.decisionSignedAt, signedAll: false, signatureNote: signature.note ?? signatureNote }
+    : { signature: null, signedAt: null, signedAll: false, signatureNote: null }
+  // Anotado por el equipo: no se dice «en la clínica», que pudo ser por teléfono.
+  if (budget.decidedVia === "clinica") {
+    const decides = budget.acceptedByName ?? deciderName
+    return {
+      text: said,
+      by: decides ? `decide ${decides}` : null,
+      at: budget.decidedAt,
+      notedBy: notedByName,
+      ...signed,
+    }
+  }
   // Lo decidido antes de guardar por dónde no dice canal: no se supone uno.
   const where = budget.decidedVia ? DECIDED_VIA_WORDS[budget.decidedVia] : null
   return {
-    text: [verb[budget.status] ?? "Respondió", where].filter(Boolean).join(" "),
+    text: [said, where].filter(Boolean).join(" "),
     by: budget.acceptedByName ?? deciderName,
     at: budget.decidedAt,
+    notedBy: null,
+    ...signed,
   }
 }
 
@@ -3883,6 +4080,13 @@ export async function getBudgetPrintPayload(
         return label ? [{ key, label }] : []
       })
     : []
+  // La firma y quien anotó la respuesta: no viajan con el presupuesto, solo a su hoja.
+  const [decisionRow] = await tx
+    .select({ signature: treatmentBudget.decisionSignature, notedBy: user.name })
+    .from(treatmentBudget)
+    .leftJoin(user, eq(user.id, treatmentBudget.decidedBy))
+    .where(and(eq(treatmentBudget.organizationId, orgId), eq(treatmentBudget.id, budget.id)))
+    .limit(1)
   const [decider] = budget.decisionContactId
     ? await tx
         .select({ name: contact.displayName })
@@ -3945,7 +4149,13 @@ export async function getBudgetPrintPayload(
     phases,
     // Lo entregado dice lo que se entregó; lo entregado antes de congelarlo, lo vigente.
     ...(budget.deliveredSnapshot ?? (await budgetDeliveredFacts(tx, orgId, budget.items.map((line) => line.serviceId)))),
-    decisionWords: decisionWordsOf(budget, decider?.name ?? null),
+    decisionWords: decisionWordsOf(
+      budget,
+      decider?.name ?? null,
+      decisionRow?.notedBy ?? null,
+      decisionRow?.signature ?? null,
+      consentSignatureNote(clinicalProfileFor(profile.countryCode).signatureLaw),
+    ),
     personalLinkUrl: personalLinkUrlOf,
   }
 }

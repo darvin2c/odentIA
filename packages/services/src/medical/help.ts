@@ -42,7 +42,7 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
         return [
           {
             ...faq,
-            a: "Con sus sesiones previstas en el Plan, por ejemplo una terapia de diez: al indicarlo nace con las sesiones habituales de su servicio (el control prenatal de 7 o más, con ocho), y las cambias ahí mismo o después con «Planificar…». Cada cita que lo lleva dice en qué sesión va («sesión 1 de 2») en la Agenda, en la cita y en «Qué sigue», y al reservar la siguiente, «Para esta cita» lo ofrece mientras le falten sesiones. En la atención, «Hecho hoy» dice «Registrar la sesión» hasta que registras su procedimiento; con la sesión de hoy, «Completar» lo cierra. Al firmar, lo que llega a sus sesiones previstas pregunta «¿Terminaste?» con «Sí, terminar» ya elegido: si firmas sin cambiarlo, queda realizado. Si no terminaste, elige «Falta otra sesión»: le suma una y sigue en curso. Si ya quedó realizado y le falta otra, en el Plan toca «Falta otra sesión»: vuelve a en curso con una sesión más y sale en «Por agendar»; lo firmado y lo cobrado no cambian. Si terminaste antes de lo previsto, «Completar» en «Hecho hoy». Si registras como servicio algo que sigue en curso, te avisa antes de guardar que queda como su sesión siguiente, no como un tratamiento nuevo.",
+            a: "Con sus sesiones previstas en el Plan, por ejemplo una terapia de diez: al indicarlo nace con las sesiones habituales de su servicio (el control prenatal de 7 o más, con ocho), y las cambias ahí mismo o después con «Planificar…». Cada cita que lo lleva dice en qué sesión va («sesión 1 de 2») en la Agenda, en la cita y en «Qué sigue», y al reservar la siguiente, «Para esta cita» lo ofrece mientras le falten sesiones. En la atención, «Hecho hoy» dice «Registrar la sesión» hasta que registras su procedimiento; con la sesión de hoy, «Completar» lo cierra. Al firmar, lo que llega a sus sesiones previstas pregunta «¿Terminaste?» con «Sí, terminar» ya elegido: si firmas sin cambiarlo, queda realizado. Si no terminaste, elige «Falta otra sesión»: le suma una y sigue en curso. Lo que sigue en curso sale al firmar, en «Atención finalizada», con «Reservar la sesión» y su número: abre «Nueva cita» con el tratamiento y su servicio, sin salir de la atención, y al reservar dice cuándo vuelve. Mientras siga en curso, «¿Cuándo vuelve?» dice su próxima sesión (con su cita, si ya la tiene) y no pide un control. En «Qué sigue», la cita de la sesión que falta va antes que lo aceptado sin empezar. Si ya quedó realizado y le falta otra, en el Plan toca «Falta otra sesión»: vuelve a en curso con una sesión más y sale en «Por agendar»; lo firmado y lo cobrado no cambian. Si terminaste antes de lo previsto, «Completar» en «Hecho hoy». Si registras como servicio algo que sigue en curso, te avisa antes de guardar que queda como su sesión siguiente, no como un tratamiento nuevo.",
             ...(faq.forms ? { forms: faq.forms.filter((form) => form !== "endodoncia en dos sesiones") } : {}),
           },
         ]
@@ -51,8 +51,18 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
         return [
           {
             ...faq,
-            a: "En su Plan, «¿Qué respondió?»: no hace falta que elija una opción. Lo que va en todas se marca Acepta, Para después o No; para lo demás eliges la opción, «Lo piensa» o «Ninguno». Si lo piensa, sigue esperando respuesta y su oportunidad sigue abierta hasta que decida; después se completa ahí mismo. Lo que ya respondió no se vuelve a preguntar.",
+            a: "En su Plan, «¿Qué respondió?»: no hace falta que elija una opción. Lo que va en todas se marca Acepta, Para después o No; para lo demás eliges la opción, «Lo piensa» o «No acepta». Si lo piensa, sigue esperando respuesta y su oportunidad sigue abierta hasta que decida; después se completa ahí mismo. Lo que ya respondió no se vuelve a preguntar.",
             ...(faq.forms ? { forms: faq.forms.filter((form) => form !== "lo piensa con la muela") } : {}),
+          },
+        ]
+      // En un consultorio son opciones, no caminos de una pieza.
+      if (faq.q === "¿Cómo anoto que dijo que sí en la consulta, sin imprimir ni enviar?")
+        return [
+          {
+            ...faq,
+            a: faq.a
+              .replace("con caminos, eliges el camino,", "con opciones, eliges la opción,")
+              .replace("sin caminos,", "sin opciones,"),
           },
         ]
       // Lo indicado nace aceptado: los caminos no se marcan en la atención, solo en el presupuesto.

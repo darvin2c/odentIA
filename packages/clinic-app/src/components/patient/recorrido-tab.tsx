@@ -363,7 +363,7 @@ export function RecorridoClinicoTab({
                     ? ` · control previsto ${formatDate(summaryRow.nextFollowUp.dueAt)}`
                     : ""}
                 </span>
-                {nextFollowUp ? (
+                {nextFollowUp && followUpAppointmentLabel(nextFollowUp) ? (
                   <span className="text-xs text-muted-foreground">
                     {followUpAppointmentLabel(nextFollowUp)}
                   </span>

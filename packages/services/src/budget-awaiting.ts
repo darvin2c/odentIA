@@ -3,7 +3,7 @@ import { type SQL, type SQLWrapper, sql } from "drizzle-orm"
 /**
  * Presupuesto que espera respuesta: una sola regla para el Resumen, la
  * coordinación de recepción, Inicio y la cuenta. Espera respuesta lo que se le
- * envió a la persona («Enviado · espera respuesta», `presentado`) y lo que «lo
+ * envió a la persona («Entregado · espera respuesta», `presentado`) y lo que «lo
  * está pensando»: respondió que lo piensa (`pospuesto`) o aceptó una parte y
  * le falta responder el resto (`parcial` con alguna línea `pospuesto` o
  * `pendiente`: lo dejó para después, o la revisión le pregunta solo por lo que

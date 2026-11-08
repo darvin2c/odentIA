@@ -688,6 +688,15 @@ it("presupuestos: reception lee, envía y anota sin cambiar precios; cashier dec
     decidedByReception.data.items.map((line) => [line.siteCode, line.siteQualifiers, line.codings]),
   ).toEqual([["16", [], []]])
 
+  // En consulta, anotar la respuesta de un borrador lo entrega: caja no entrega, tampoco así.
+  expect(
+    (
+      await postJson(buildApp("cashier", CASH), `/patients/${PAT_A}/budgets/${ownId}/decision`, {
+        decisions: [{ planItemId: ITEM3, decision: "aceptado" }],
+        inPerson: true,
+      })
+    ).status,
+  ).toBe(403)
   // DENT1 entrega su propio presupuesto (budgets.send); caja no entrega y anota la respuesta.
   const deliverPath = `/patients/${PAT_A}/budgets/${ownId}/deliver`
   expect((await postJson(buildApp("cashier", CASH), deliverPath, {})).status).toBe(403)

@@ -17,7 +17,7 @@ import {
   ScrollArea,
 } from "@odentia/ui"
 import { sessionWords, showsSession } from "@odentia/clinical"
-import { DatePickerButton, TimeSelect, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
+import { DatePickerButton, TimeSelect, useAppForm, useFormSubmit, useFormSubmitError, zonedDateOf } from "@odentia/ui-patterns"
 import { ToggleGroup, ToggleGroupItem } from "@odentia/ui/components/toggle-group"
 import { useStore } from "@tanstack/react-form"
 import { Check } from "lucide-react"
@@ -25,6 +25,7 @@ import { useId, useRef } from "react"
 import { clinicDateTimeValue } from "../../lib/clinical-journey"
 import type { ConsentNeed } from "../../lib/encounter-documents"
 import {
+  type BookedSession,
   CLOSING_REQUIREMENT_LABELS,
   type ClosingCheck,
   type ClosingControls,
@@ -35,12 +36,14 @@ import {
   type ClosingSession,
   controlDaySaid,
   type HealthGap,
+  type NextSession,
   type SignatureRegistration,
   signatureRegistrationErrors,
 } from "../../lib/encounters"
-import { activeOrgLocale } from "../../lib/locale"
+import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { closingMaterialsWords } from "../../lib/materials"
 import { productUi } from "../../product/product-ui"
+import { whenSaid } from "../agenda/shared"
 
 /**
  * Entre qué horas puede haber terminado la atención, en la zona de la clínica:
@@ -80,6 +83,12 @@ export interface ClosingValues extends SignatureRegistration {
   nextControlDate: string
   /** Lo que se cambió de lo que viene marcado en «Cumple su control…», por control. */
   fulfill: Record<string, boolean>
+  /**
+   * Con un tratamiento en curso no se pregunta por un control; «Indicar también
+   * un control» lo pregunta igual (una profilaxis terminada hoy junto a una
+   * ortodoncia que sigue).
+   */
+  askControl?: boolean
 }
 
 /** Los datos de `/finalize` que la pantalla llama de otro modo. */
@@ -147,25 +156,82 @@ function chosenDay(value: Pick<ClosingValues, "nextControl" | "nextControlDate">
   return ""
 }
 
-/** Falta el día de «Otra fecha»: lo dice su campo. */
+/**
+ * Un tratamiento que sigue en curso al firmar, con la sesión a la que vuelve:
+ * lo que no llega a sus previstas y lo que se respondió «Falta otra sesión».
+ */
+export interface ContinuingVisit {
+  planItemId: string
+  /** «Endodoncia · 46». */
+  label: string
+  /** La sesión a la que vuelve y las previstas, ya con lo respondido. */
+  n: number
+  m: number
+  booked?: BookedSession
+}
+
+/**
+ * Lo que sigue en curso si se firma con lo respondido (la regla del servidor,
+ * `applySessionAnswers`): mientras algo sigue, «¿Cuándo vuelve?» es su próxima
+ * sesión y no pregunta por un control (QA del 8 nov, X11).
+ */
+export function continuingAfterSign(
+  sessions: { finishing: ClosingSession[]; continuing: ClosingSession[] } | null | undefined,
+  answers: SessionAnswers,
+  labelOf: (session: ClosingSession) => string = (session) => session.title,
+): ContinuingVisit[] {
+  if (!sessions) return []
+  const visit = (session: ClosingSession, m: number): ContinuingVisit => ({
+    planItemId: session.planItemId,
+    label: labelOf(session),
+    n: session.n + 1,
+    m,
+    ...(session.booked ? { booked: session.booked } : {}),
+  })
+  return [
+    ...sessions.continuing.map((session) => visit(session, session.m)),
+    ...sessions.finishing
+      .filter((session) => answers[session.planItemId] === "otra")
+      .map((session) => visit(session, Math.max(session.m, session.n) + 1)),
+  ]
+}
+
+/** «el lun 9 a las 10:45», «mañana a las 17:00», en la zona de la clínica. */
+export function visitWhenSaid(iso: string): string {
+  const timeZone = activeOrgTimeZone()
+  return whenSaid(iso, timeZone, zonedDateOf(new Date().toISOString(), timeZone))
+}
+
+/** «Endodoncia · 46 · sesión 2 de 2»; uno de una sola sesión, solo su nombre. */
+export function sessionLine(label: string, n: number, m: number): string {
+  return showsSession(n, m) ? `${label} · ${sessionWords(n, m)}` : label
+}
+
+/** Falta el día de «Otra fecha»: lo dice su campo. Si sigue en curso, no se pregunta. */
 export function needsNextControlDay(
   value: ClosingValues,
   controls: ClosingControls | null,
   dictated: DictatedControl | null,
+  continuing = false,
 ): boolean {
-  if (!controls || value.nextControl !== "date" || value.nextControlDate) return false
+  if (!controls || (continuing && !value.askControl) || value.nextControl !== "date" || value.nextControlDate) return false
   return !knownReturn(value, controls, dictated)
 }
 
-/** Lo que el cierre manda de los controles: cuáles cumple esta visita y, si se preguntó, cuándo vuelve. */
+/**
+ * Lo que el cierre manda de los controles: cuáles cumple esta visita y, si se
+ * preguntó, cuándo vuelve. Con un tratamiento que sigue en curso no se pregunta:
+ * vuelve a su próxima sesión.
+ */
 export function closingControlsBody(
   value: ClosingValues,
   controls: ClosingControls | null,
   dictated: DictatedControl | null,
+  continuing = false,
 ): { followUpIds?: string[]; nextControl?: { dueAt: string } | { none: true } } {
   if (!controls) return {}
   const followUpIds = controls.due.filter((control) => fulfills(value, control)).map((control) => control.id)
-  if (knownReturn(value, controls, dictated)) return { followUpIds }
+  if ((continuing && !value.askControl) || knownReturn(value, controls, dictated)) return { followUpIds }
   if (value.nextControl === "none") return { followUpIds, nextControl: { none: true } }
   const day = chosenDay(value, controls)
   return day ? { followUpIds, nextControl: { dueAt: day } } : { followUpIds }
@@ -189,24 +255,40 @@ const CHIP =
  * que esta visita cumple, como casillas (marcado solo el de quien firma), y los
  * atajos para el próximo. Ninguno viene marcado y se firma igual sin elegir.
  * Si ya tiene un control (o Clío dictó uno), dice cuándo vuelve, sin cambiarlo
- * aquí: eso se hace en «Plan y controles».
+ * aquí: eso se hace en «Plan y controles». Si un tratamiento sigue en curso,
+ * vuelve a su próxima sesión: la dice (con su cita, si ya la tiene) y no
+ * pregunta por un control, que se indica en la sesión en que termine.
  */
 export function ClosingNextVisit({
   form,
   controls,
   dictated = null,
   busy,
+  continuing = [],
+  canBook = true,
 }: {
   form: ClosingForm
   controls: ClosingControls | null | undefined
   /** El control de Clío marcado para entrar con la firma, si hay. */
   dictated?: DictatedControl | null
   busy: boolean
+  /** Lo que sigue en curso al firmar (`continuingAfterSign`). */
+  continuing?: ContinuingVisit[]
+  /** Quien firma puede reservar la cita: se le dice que la reserva al firmar. */
+  canBook?: boolean
 }): React.JSX.Element | null {
   const ids = useId()
   const values = useStore(form.store, (state) => state.values)
   if (!controls) return null
   const known = knownReturn(values, controls, dictated)
+  const sessionsLines = continuing.map((visit) => {
+    if (visit.booked)
+      return `Vuelve ${visitWhenSaid(visit.booked.startsAt)} para ${sessionLine(visit.label, visit.booked.n, visit.booked.m)}, con su cita.`
+    const line = sessionLine(visit.label, visit.n, visit.m)
+    return canBook
+      ? `Vuelve para ${line}: al firmar puedes reservar su cita aquí mismo.`
+      : `Vuelve para ${line}: recepción la verá en «Qué sigue» para reservarla.`
+  })
   const recall = controls.recallMonths
   const options: Array<{ value: Exclude<NextControlChoice, "" | "none">; label: string }> = [
     { value: "week", label: "En 1 semana" },
@@ -249,7 +331,26 @@ export function ClosingNextVisit({
         <p id={`${ids}-cuando`} className="font-medium">
           ¿Cuándo vuelve?
         </p>
-        {known ? (
+        {sessionsLines.map((line, index) => (
+          <p key={`${index}-${line}`} className="text-sm">
+            {line}
+          </p>
+        ))}
+        {sessionsLines.length > 0 && !known && !values.askControl ? (
+          <p className="text-xs text-muted-foreground">
+            El control se indica en la sesión en que termine.{" "}
+            <Button
+              type="button"
+              size="sm"
+              variant="link"
+              className="h-auto p-0 text-xs"
+              disabled={busy}
+              onClick={() => set("askControl", true)}
+            >
+              Indicar también un control
+            </Button>
+          </p>
+        ) : known ? (
           <p className="text-sm">
             {known.kind === "dictated"
               ? `Vuelve el ${controlDaySaid(known.day)}, como dictaste.`
@@ -495,7 +596,7 @@ export function ClosingSessions({
             <p className="text-xs text-muted-foreground">
               {answer === "terminar"
                 ? "Al firmar queda realizado."
-                : `Sigue en curso y se prevé una sesión más, la ${session.n + 1}.`}
+                : `Sigue en curso con una sesión más, la ${session.n + 1}: al firmar puedes reservarla.`}
             </p>
           </li>
         )
@@ -513,6 +614,67 @@ export function ClosingSessions({
         </li>
       ))}
     </ul>
+  )
+}
+
+/**
+ * En «Atención finalizada», lo que sigue en curso con su próxima sesión, y
+ * «Reservar la sesión 2» ahí mismo (propuesta 2 de la QA del 8 nov): abre
+ * «Nueva cita» con esos tratamientos y su servicio, sin salir de la atención.
+ * Reservar es opcional; lo que quede sin cita lo ve recepción en «Qué sigue».
+ */
+export function FinalizedNextSessions({
+  sessions,
+  labelOf,
+  listRef,
+  canBook,
+  onBook,
+}: {
+  sessions: NextSession[]
+  /** «Endodoncia · 46». */
+  labelOf: (session: NextSession) => string
+  /** Recibe el foco al reservar: el botón que abrió la reserva ya no está. */
+  listRef?: React.Ref<HTMLUListElement>
+  canBook: boolean
+  onBook: (planItemIds: string[]) => void
+}): React.JSX.Element | null {
+  if (sessions.length === 0) return null
+  const toBook = sessions.filter((session) => session.toBook)
+  const only = toBook.length === 1 ? toBook[0]?.toBook : null
+  return (
+    <section aria-label="Próxima sesión" className="flex flex-col gap-2 rounded-lg border border-primary/40 bg-primary/5 p-3">
+      {/* Lo que falta y lo que ya quedó no se dicen igual (segunda mesa). */}
+      <h3 className="text-sm font-semibold">{toBook.length > 0 ? "Falta reservar su próxima sesión" : "Su próxima sesión"}</h3>
+      {/* Lo reservado aquí cambia en su sitio y se anuncia. */}
+      <ul ref={listRef} tabIndex={-1} aria-live="polite" className="flex flex-col gap-1 text-sm outline-none">
+        {sessions.map((session) =>
+          session.booked ? (
+            <li key={session.planItemId} className="flex items-baseline gap-1.5">
+              <Check aria-hidden className="size-4 shrink-0 self-center text-success" />
+              <span>
+                Vuelve {visitWhenSaid(session.booked.startsAt)} para{" "}
+                {sessionLine(labelOf(session), session.booked.n, session.booked.m)}.
+              </span>
+            </li>
+          ) : session.toBook ? (
+            <li key={session.planItemId}>
+              {sessionLine(labelOf(session), session.toBook.n, session.toBook.m)} · sin cita
+            </li>
+          ) : null,
+        )}
+      </ul>
+      {toBook.length > 0 && canBook ? (
+        <Button
+          type="button"
+          className="self-start"
+          onClick={() => onBook(toBook.map((session) => session.planItemId))}
+        >
+          {only && showsSession(only.n, only.m) ? `Reservar la sesión ${only.n}` : "Reservar su próxima cita"}
+        </Button>
+      ) : toBook.length > 0 ? (
+        <p className="text-xs text-muted-foreground">Recepción la verá en «Qué sigue» para reservarla.</p>
+      ) : null}
+    </section>
   )
 }
 

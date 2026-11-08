@@ -482,7 +482,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Dónde veo sus alergias, qué le toca y su última atención?",
-        a: "En el Resumen de su página: si lees la historia clínica, es el resumen clínico, con sus alergias y alertas, «Qué sigue» de su plan, su última atención, su próxima cita (si ya llegó, dice que está en la sala de espera) y su próximo control con «Reservar cita»; un control vencido sale en «Pendientes». Abrir la página queda en «Consultas a la historia», como cualquier lectura de la historia. Recepción y caja ven el Resumen de siempre, sin nada clínico.",
+        a: "En el Resumen de su página, en «Qué sigue»: arriba su próxima cita (si ya llegó, dice que está en la sala de espera) y debajo, en una sola lista, todo lo que le toca: el presupuesto por enviar o que espera respuesta, la cita de lo aceptado (con sus nombres) o de su próxima sesión, y su próximo control, con quién lo indicó y cuándo. El control vencido va primero. Cada fila tiene su botón y lo hace ahí mismo: «Reservar la sesión» con su número, «Reservar el control» o «¿Qué respondió?». Si lees la historia clínica, arriba están además sus alergias y alertas y, debajo, su última atención; abrir la página queda en «Consultas a la historia», como cualquier lectura de la historia. Recepción ve la misma lista, sin nada clínico; caja ve lo del presupuesto, sin citas ni controles.",
       },
       {
         q: "¿Tengo que cambiar de pestaña para revisar, firmar o cobrar desde el Resumen?",
@@ -494,7 +494,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo llevo un tratamiento de varias sesiones?",
-        a: "Con sus sesiones previstas en el Plan, por ejemplo una corona en dos: al indicarlo nace con las sesiones habituales de su servicio, y las cambias ahí mismo o después con «Planificar…». Cada cita que lo lleva dice en qué sesión va («sesión 1 de 2») en la Agenda, en la cita y en «Qué sigue», y al reservar la siguiente, «Para esta cita» lo ofrece mientras le falten sesiones. En la atención, «Hecho hoy» dice «Registrar la sesión» hasta que registras su procedimiento; con la sesión de hoy, «Completar» lo cierra. Al firmar, lo que llega a sus sesiones previstas pregunta «¿Terminaste?» con «Sí, terminar» ya elegido: si firmas sin cambiarlo, queda realizado. Si no terminaste, elige «Falta otra sesión»: le suma una y sigue en curso. Si ya quedó realizado y le falta otra, en el Plan toca «Falta otra sesión»: vuelve a en curso con una sesión más y sale en «Por agendar»; lo firmado y lo cobrado no cambian. Si terminaste antes de lo previsto, «Completar» en «Hecho hoy». Si registras como servicio algo que sigue en curso en esa pieza, te avisa antes de guardar que queda como su sesión siguiente, no como un tratamiento nuevo.",
+        a: "Con sus sesiones previstas en el Plan, por ejemplo una corona en dos: al indicarlo nace con las sesiones habituales de su servicio, y las cambias ahí mismo o después con «Planificar…». Cada cita que lo lleva dice en qué sesión va («sesión 1 de 2») en la Agenda, en la cita y en «Qué sigue», y al reservar la siguiente, «Para esta cita» lo ofrece mientras le falten sesiones. En la atención, «Hecho hoy» dice «Registrar la sesión» hasta que registras su procedimiento; con la sesión de hoy, «Completar» lo cierra. Al firmar, lo que llega a sus sesiones previstas pregunta «¿Terminaste?» con «Sí, terminar» ya elegido: si firmas sin cambiarlo, queda realizado. Si no terminaste, elige «Falta otra sesión»: le suma una y sigue en curso. Lo que sigue en curso sale al firmar, en «Atención finalizada», con «Reservar la sesión» y su número: abre «Nueva cita» con el tratamiento y su servicio, sin salir de la atención, y al reservar dice cuándo vuelve. Mientras siga en curso, «¿Cuándo vuelve?» dice su próxima sesión (con su cita, si ya la tiene) y no pide un control. En «Qué sigue», la cita de la sesión que falta va antes que lo aceptado sin empezar. Si ya quedó realizado y le falta otra, en el Plan toca «Falta otra sesión»: vuelve a en curso con una sesión más y sale en «Por agendar»; lo firmado y lo cobrado no cambian. Si terminaste antes de lo previsto, «Completar» en «Hecho hoy». Si registras como servicio algo que sigue en curso en esa pieza, te avisa antes de guardar que queda como su sesión siguiente, no como un tratamiento nuevo.",
         forms: ["endodoncia en dos sesiones", "segunda sesion", "sesion 2 de 2", "completar tratamiento", "no me deja completar", "tratamiento por sesiones", "se termino y faltaba otra sesion", "reabrir un tratamiento"],
       },
       {
@@ -539,7 +539,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo dejo dicho cuándo vuelve?",
-        a: "Al firmar, en «¿Cuándo vuelve?»: «En 1 semana», «En 1 mes», «En 6 meses», «Otra fecha» o «No hace falta». Con uno de ellos queda su control, con el nombre de lo que hiciste hoy o de mantenimiento, y recepción lo ve para reservarlo. Si no eliges, se firma igual y el cierre te avisa: «No indicaste cuándo vuelve: recepción no lo verá». Si ya tiene un control, dice cuándo vuelve; para cambiarlo, en «Plan y controles».",
+        a: "Al firmar, en «¿Cuándo vuelve?»: «En 1 semana», «En 1 mes», «En 6 meses», «Otra fecha» o «No hace falta». Con uno de ellos queda su control, con el nombre de lo que hiciste hoy o de mantenimiento, y recepción lo ve para reservarlo. Si no eliges, se firma igual y el cierre te avisa: «No indicaste cuándo vuelve: recepción no lo verá». Si ya tiene un control, dice cuándo vuelve; para cambiarlo, en «Plan y controles». Si un tratamiento sigue en curso, dice su próxima sesión y no pide un control: lo indicas en la sesión en que termine.",
       },
       {
         q: "¿Cuándo queda hecho un control si vino por otra cosa?",
@@ -570,7 +570,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Dónde está el plan de tratamiento?",
-        a: "En su página, en la pestaña Plan: arriba «Qué sigue» (lo próximo que hay que hacer, con su botón), los tratamientos por fases (con «Ver» se abre su recorrido al lado), el presupuesto, los controles con «Reservar» (el que ya pasó su día sin cita dice «Vencido», y el de quien vino hoy se cumple al firmar su atención) y, plegados, los planes ya terminados. Recepción ve los tratamientos con su título y estado, el presupuesto como lo recibe la persona y los controles; caja, el presupuesto y lo aceptado.",
+        a: "En su página, en la pestaña Plan: arriba «Qué sigue» (lo próximo que hay que hacer, con su botón), los tratamientos por fases (con «Ver» se abre su recorrido al lado), el presupuesto, los controles con «Reservar» (el que ya pasó su día sin cita dice «Vencido»; el de quien vino hoy se cumple al firmar su atención; y si su próxima cita cae cerca de su fecha, dice que se puede hacer en esa cita) y, plegados, los planes ya terminados. Recepción ve los tratamientos con su título y estado, el presupuesto como lo recibe la persona y los controles; caja, el presupuesto y lo aceptado.",
       },
       {
         q: "¿Cómo se arma y se envía el presupuesto?",
@@ -583,8 +583,13 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo anoto que aceptó una parte y lo otro lo está pensando?",
-        a: "En su Plan, «¿Qué respondió?»: no hace falta que elija un camino. Lo que va en todos los caminos se marca Acepta, Para después o No; en la pieza con caminos eliges el camino, «Lo piensa» o «Ninguno». Si lo piensa, sigue esperando respuesta y su oportunidad sigue abierta hasta que decida; después se completa ahí mismo, también eligiendo el camino. Lo que ya respondió no se vuelve a preguntar.",
+        a: "En su Plan, «¿Qué respondió?»: no hace falta que elija un camino. Lo que va en todos los caminos se marca Acepta, Para después o No; en la pieza con caminos eliges el camino, «Lo piensa» o «No acepta». Si lo piensa, sigue esperando respuesta y su oportunidad sigue abierta hasta que decida; después se completa ahí mismo, también eligiendo el camino. Lo que ya respondió no se vuelve a preguntar.",
         forms: ["acepta una parte", "aceptación parcial", "lo piensa con la muela", "no eligió opción"],
+      },
+      {
+        q: "¿Cómo anoto que dijo que sí en la consulta, sin imprimir ni enviar?",
+        a: "En la atención, el presupuesto por enviar tiene «Anotar su respuesta», también al mostrárselo en pantalla y en su Plan. Abre un solo cajón: con caminos, eliges el camino, «Lo piensa» o «No acepta»; sin caminos, «Acepta todo», «Lo piensa» o «No acepta», y si acepta solo una parte cambias cada tratamiento. Al guardar queda entregado y con su respuesta, sin enviarle nada. Si acepta algo, «Que lo firme en la tablet» es opcional: quien decide (la persona o, si es menor, su representante legal) lee su decisión en pantalla completa y firma con el dedo, y después tú guardas. Con firma, su presupuesto dice que aceptó y firmó en la clínica, con su firma; sin firma, quién decide y quién lo anotó. Lo aceptado no se cambia ahí: se corrige con una revisión, que se entrega primero y después se anota su respuesta.",
+        forms: ["dijo que si en la consulta", "acepto en el sillon", "firmar el presupuesto", "firma del presupuesto en la tablet", "anotar la respuesta sin imprimir"],
       },
       {
         q: "¿Qué pasa si cambio un precio después de enviarlo?",
@@ -603,7 +608,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Qué quiere decir cada estado del presupuesto?",
-        a: "«Por enviar»: armado y sin enviar. «Enviado · espera respuesta». «Lo está pensando». «Aceptó todo» o «Aceptó 2 de 3»; con caminos sin elegir, dice que falta elegir el camino. «No aceptó». «Reemplazado», cuando se hizo una revisión, y «Anulado». Si pasó su vigencia sin respuesta, dice «Venció el…». Son las mismas palabras en toda la aplicación.",
+        a: "«Por enviar»: armado y sin enviar. «Entregado · espera respuesta», impreso, enviado o mostrado en la atención. «Lo está pensando». «Aceptó todo» o «Aceptó 2 de 3»; con caminos sin elegir, dice que falta elegir el camino. «No aceptó». «Reemplazado», cuando se hizo una revisión, y «Anulado». Si pasó su vigencia sin respuesta, dice «Venció el…». Son las mismas palabras en toda la aplicación.",
       },
       {
         q: "¿Se guarda lo que escribo en la atención?",
@@ -1345,7 +1350,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Puedo poner el color de mi clínica?",
-        a: "Sí, en «Datos de la clínica» › «Color de la marca», debajo del logo. Primero salen los colores de tu logo, luego doce sugeridos, y «Elegir otro color» abre la paleta o recibe el código de tu marca. Elegir solo cambia la vista previa: se guarda con «Usar este color» y desde ese momento lo ven tu equipo en la app y tus pacientes en la página de sus citas, la reserva y el chat de tu web; en los documentos va en la línea bajo el logo o, sin logo, en el cuadro de sus iniciales. Cualquier color vale: los botones llevan letra blanca y, si tu color es fuerte como un naranja, uno apenas más oscuro para que se lea; si es claro, como un celeste, lo usan tal cual con letra oscura, y los enlaces van en un tono más oscuro; si se parece al rojo de los errores, te lo dice y puedes usarlo igual. Los fondos grises toman apenas el tono de tu color, sin perder legibilidad. Los colores de error, listo y aviso no cambian, y las recetas, órdenes, descansos y consentimientos ya emitidos quedan como salieron; lo que se vuelve a imprimir, como un presupuesto o un comprobante, sale con el color de hoy, igual que el logo. «Volver al…» quita el tuyo y deja el color con el que viene la app. Lo cambia quien administra la clínica.",
+        a: "Sí, en «Datos de la clínica» › «Color de la marca», debajo del logo. Primero salen los colores de tu logo, luego doce sugeridos, y «Elegir otro color» abre la paleta o recibe el código de tu marca. Elegir solo cambia la vista previa: se guarda con «Usar este color» y desde ese momento lo ven tu equipo en la app y tus pacientes en la página de sus citas, la reserva y el chat de tu web; en los documentos va en la línea bajo el logo o, sin logo, en el cuadro de sus iniciales. Cualquier color vale: los botones llevan letra blanca y, si tu color es fuerte como un naranja, uno apenas más oscuro para que se lea; si es claro, como un celeste, lo usan tal cual con letra oscura, y los enlaces van en un tono más oscuro; si se parece al rojo de los errores, te lo dice y puedes usarlo igual. Tu color va donde actúas: los botones principales, el menú en el que estás y lo que eliges; los nombres, las iniciales y los fondos quedan en negro y gris, para que la pantalla no se cargue. Los colores de error, listo y aviso no cambian, y las recetas, órdenes, descansos y consentimientos ya emitidos quedan como salieron; lo que se vuelve a imprimir, como un presupuesto o un comprobante, sale con el color de hoy, igual que el logo. «Volver al…» quita el tuyo y deja el color con el que viene la app. Lo cambia quien administra la clínica.",
       },
       {
         q: "¿Trabajo con la CIE-10 o con la CIE-11?",

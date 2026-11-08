@@ -28,6 +28,7 @@ import { decodeCursor, encodeCursor } from "./cursors.js"
 import { validation } from "./errors.js"
 import { NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { checkEncounterClosing, type ClosingRequirement } from "./encounters.js"
+import { listFollowUps } from "./follow-ups.js"
 import { requirePatient } from "./patients.js"
 import type { ProductParts, ProductSite, SiteColumns } from "./product-hooks.js"
 import { productHooks } from "./products.js"
@@ -1024,7 +1025,7 @@ export async function getTimeline(
         title: `Presupuesto N.º ${row.budgetNumber} · ${row.title}`,
         detail: `Revisión ${row.revisionNumber} · ${total} tratamiento(s) · ${currency ?? row.currency}`,
         status: row.status,
-        // Los mismos nombres que Plan (ADR 0034): «Enviado · espera respuesta», «Aceptó 2 de 3»…
+        // Los mismos nombres que Plan (ADR 0034): «Entregado · espera respuesta», «Aceptó 2 de 3»…
         statusText: budgetStateText({ status: row.status, items: lines, options }),
         authorId: row.createdBy,
         planId: row.planId,
@@ -1032,6 +1033,11 @@ export async function getTimeline(
       })
     }
   const followUpIds = ids("follow_up")
+  // Vencido con la misma regla del Plan, el Resumen y «Control vencido» (QA del 8 nov, B4:
+  // la Historia decía «Pendiente · Vence 5/5/2026» de un control que el Plan llama «Vencido»).
+  const overdueControls = followUpIds.length
+    ? new Set((await listFollowUps(tx, orgId, patientId)).filter((row) => row.overdue).map((row) => row.id))
+    : new Set<string>()
   if (followUpIds.length)
     for (const row of await tx
       .select()
@@ -1045,6 +1051,7 @@ export async function getTimeline(
         title: row.title,
         detail: row.outcome ?? row.instructions ?? null,
         status: row.status,
+        statusText: overdueControls.has(row.id) ? "Vencido" : null,
         dueAt: row.dueAt,
         authorId: row.createdBy,
         planItemId: row.planItemId,

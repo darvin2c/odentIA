@@ -179,7 +179,8 @@ it("D3: «puede llevar otra cita» es otra regla; «aceptó y no tiene cita» no
   expect(next).toMatchObject({
     kind: "continuar",
     text: "Falta la cita de la próxima sesión: Tratamiento propio · sesión 2 de 2",
-    action: { label: "Reservar cita", planItemIds: [item.id] },
+    // El botón dice qué reserva (QA del 8 nov).
+    action: { label: "Reservar la sesión 2", planItemIds: [item.id] },
   })
   expect((await f.run((tx) => planNextStepsOf(tx, "org_a", [f.patient.id], all))).get(f.patient.id)).toEqual(next)
 

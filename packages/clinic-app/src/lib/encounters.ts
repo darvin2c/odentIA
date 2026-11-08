@@ -59,6 +59,28 @@ export interface ClosingSession {
   title: string
   n: number
   m: number
+  /** La cita por venir que ya lleva su próxima sesión; sin cita, no viene. */
+  booked?: BookedSession
+}
+
+/** Una cita por venir que lleva la próxima sesión de un tratamiento, con la sesión que será. */
+export interface BookedSession {
+  appointmentId: string
+  startsAt: string
+  n: number
+  m: number
+}
+
+/**
+ * Lo trabajado hoy que sigue en curso al firmar, con su próxima sesión: la cita
+ * que ya la lleva o la que falta reservar (`toBook`). Lo dice el servidor al firmar.
+ */
+export interface NextSession {
+  planItemId: string
+  title: string
+  serviceId: string | null
+  booked: BookedSession | null
+  toBook: { n: number; m: number } | null
 }
 
 /** Un control pendiente que ya toca: esta visita lo cumple si queda marcado. */

@@ -92,6 +92,7 @@ import {
 import { BudgetResponse } from "./budget-response"
 import { BudgetReviewDrawer } from "./budget-review"
 import { BudgetSendButton } from "./budget-send"
+import { AnswerInPersonButton } from "./next-step-action"
 import { BudgetListSkeleton } from "../../skeletons/person-sections"
 
 /** Lo que ya no es vigente: se ve en «Anteriores». */
@@ -765,12 +766,21 @@ function BudgetCard({
                 sendAction={
                   maySend
                     ? (beforeSend) => (
-                        <BudgetSendButton
-                          patientId={patientId}
-                          budgetId={budget.id}
-                          beforeSend={beforeSend}
-                          reviewable
-                        />
+                        <>
+                          <BudgetSendButton
+                            patientId={patientId}
+                            budgetId={budget.id}
+                            beforeSend={beforeSend}
+                            reviewable
+                          />
+                          {/* Respondió en la consulta: lo escrito se guarda y se anota, sin enviar. */}
+                          <AnswerInPersonButton
+                            patientId={patientId}
+                            budgetId={budget.id}
+                            size="default"
+                            beforeOpen={beforeSend}
+                          />
+                        </>
                       )
                     : undefined
                 }
@@ -854,6 +864,9 @@ function BudgetCard({
                       {isDraft ? "Imprimir y entregar" : "Imprimir"}
                     </SubmitButton>
                   ) : null}
+                  {isDraft && own ? (
+                    <AnswerInPersonButton patientId={patientId} budgetId={budget.id} size="default" />
+                  ) : null}
                   <Button type="button" variant="outline" onClick={() => setReviewOpen(true)}>
                     {isDraft ? "Lo que se le explicará" : "Lo que se le explicó"}
                   </Button>
@@ -874,7 +887,8 @@ function BudgetCard({
             {isDraft && (maySend || mayWrite) ? (
               <p className="text-xs text-muted-foreground">
                 Sale por WhatsApp si la persona lo tiene; si no, por correo. Al enviarlo o
-                imprimirlo queda entregado, y aquí mismo se anota qué respondió.
+                imprimirlo queda entregado. Si ya respondió en la consulta, anota su respuesta: queda
+                entregado sin enviarle nada.
               </p>
             ) : null}
           </div>

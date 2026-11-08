@@ -25,7 +25,7 @@ function Fact({ label, width = "w-32" }: { label?: string; width?: string }) {
   )
 }
 
-/** `PlanNextCard`: la franja «Qué sigue». */
+/** `PlanNextCard`: la franja «Qué sigue» del Plan. */
 export function PlanNextSkeleton() {
   return (
     <section className="elevated flex flex-wrap items-center gap-3 rounded-xl border bg-card p-4">
@@ -35,6 +35,21 @@ export function PlanNextSkeleton() {
         <Line className="w-1/2" />
       </div>
       <Skeleton className="h-9 w-28 shrink-0 rounded-full" />
+    </section>
+  )
+}
+
+/** `NextUpCard`: «Qué sigue» del Resumen, con la línea de la próxima cita y dos filas. */
+export function NextUpSkeleton({ agenda }: { agenda: boolean }) {
+  return (
+    <section className="elevated flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-6">
+      <div className="flex min-w-0 flex-col gap-1">
+        <div className="flex min-h-8 items-center">
+          <h2 className="font-heading text-base font-medium">Qué sigue</h2>
+        </div>
+        {agenda ? <Line className="w-64" /> : null}
+      </div>
+      <RowsShape rows={2} />
     </section>
   )
 }
@@ -84,7 +99,10 @@ export function PersonSummarySkeleton({
   const chats = can("conversations.read")
   const crm = can("crm.read")
   const finance = can("finance.read")
-  const showFacts = clinical !== "unknown" && (!clinical || finance || chats || crm)
+  const agenda = can("appointments.read")
+  // «Qué sigue» lo pide quien ve alguna parte del plan; sin ficha no hay.
+  const plan = patient !== false && (can("clinical.read") || can("budgets.read") || agenda)
+  const showFacts = clinical !== "unknown"
   return (
     <div className="flex min-w-0 flex-col gap-4">
       {clinical === "unknown" ? (
@@ -105,23 +123,20 @@ export function PersonSummarySkeleton({
               </li>
             </ul>
           </SummaryCardShape>
-          <PlanNextSkeleton />
-          <div className="grid min-w-0 gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(100%,20rem),1fr))]">
-            <SummaryCardShape title="Última atención">
-              <LastVisitLinesSkeleton />
-            </SummaryCardShape>
-            <SummaryCardShape title="Próxima cita">
-              <LastVisitLinesSkeleton />
-            </SummaryCardShape>
-          </div>
+          <NextUpSkeleton agenda={agenda} />
+          <SummaryCardShape title="Última atención">
+            <LastVisitLinesSkeleton />
+          </SummaryCardShape>
         </>
+      ) : plan ? (
+        <NextUpSkeleton agenda={agenda} />
       ) : null}
       {showFacts ? (
         <section className="elevated rounded-xl border bg-card p-6">
           <dl className="grid min-w-0 grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
-            {clinical ? null : <Fact label="Teléfono" />}
+            <Fact label="Teléfono" />
             {!clinical && patient !== false && (can("clinical.alerts") || can("clinical.read")) ? <Fact label={patient ? "Alergias" : undefined} /> : null}
-            {!clinical && can("appointments.read") ? <Fact label="Próxima cita" width="w-48" /> : null}
+            {agenda && patient === false ? <Fact label="Próxima cita" width="w-48" /> : null}
             {/* «Saldo» solo se dice sin deuda (la deuda va en Pendientes): sin nombre hasta saberlo. */}
             {finance && patient !== false ? <Fact /> : null}
             {chats ? <Fact label="Conversación" width="w-44" /> : null}

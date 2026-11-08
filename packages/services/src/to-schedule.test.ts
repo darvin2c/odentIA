@@ -282,7 +282,7 @@ it("«control vencido sin cita»: su día ya pasó y la persona no tiene ninguna
   expect(await c.run((tx) => countOverdueControls(tx, c.orgId))).toEqual({ controls: 1, patients: 1 })
   expect((await c.run((tx) => getAdminRecommendation(tx, c.orgId, all, "recordatorio_control"))).title).toBe("1 control vencido de un paciente sin cita")
   // «Qué sigue»: Iris tiene cita, no está «por reservar»; a Juan le toca hoy.
-  expect(await c.run((tx) => getPlanNextStep(tx, c.orgId, iris, all))).toMatchObject({ text: expect.stringMatching(/^Control de presión · tiene cita el /), action: { label: "Ver la cita" } })
+  expect(await c.run((tx) => getPlanNextStep(tx, c.orgId, iris, all))).toMatchObject({ text: expect.stringMatching(/^Control de presión · se puede hacer en su cita del /), action: { label: "Ver la cita" } })
   expect(await c.run((tx) => getPlanNextStep(tx, c.orgId, juan, all))).toMatchObject({ text: "Control de presión · por reservar", detail: expect.stringMatching(/^Toca el /) })
 
   // Inicio de recepción, con Argos apagado: la fila con la misma cuenta.
