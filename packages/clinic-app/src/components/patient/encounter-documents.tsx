@@ -505,7 +505,14 @@ export function EncounterDocumentsBlock({
                     Ver
                   </Button>
                 ) : null}
-                {canWrite ? <ConsentLinkActions document={doc} onChanged={refresh} /> : null}
+                {canWrite ? (
+                  <ConsentLinkActions
+                    document={doc}
+                    onChanged={refresh}
+                    // Lo firmado por enlace se confirma aquí, mientras la atención siga en curso.
+                    encounterId={detail.encounter.status === "borrador" ? encounterId : null}
+                  />
+                ) : null}
               </div>
             </li>
           ))}

@@ -35,6 +35,7 @@ import {
   cancelPrescriptionApi,
   fetchPrescriptions,
   formatDate,
+  formatDateTime,
   PRESCRIPTION_STATUS_LABELS,
   type Prescription,
 } from "../../lib/clinical-journey"
@@ -72,6 +73,7 @@ function useRefreshPapers(patientId: string, onChanged?: () => void | Promise<vo
         ["medical-leaves", patientId],
         ["clinical-orders", patientId],
         ["consents", patientId],
+        ["consents-to-confirm", patientId],
         ["treatment-journey", patientId],
         ["timeline", patientId],
       ].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
@@ -523,12 +525,39 @@ function ConsentHistoryDrawer({
   )
 }
 
+/** «DNI ••••0004»: el documento de quien firmó, abreviado para el resumen. */
+function shortSignerDoc(signerDoc: string | null): string | null {
+  const parts = signerDoc?.trim().split(/\s+/) ?? []
+  const number = parts.pop()
+  if (!number) return null
+  return `${parts.join(" ") || "Documento"} ••••${number.slice(-4)}`
+}
+
+/** Lo que el profesional mira antes de confirmar lo firmado por enlace: quién, con qué documento, cuándo y qué. */
+export function linkSignedSummary(
+  document: Pick<ConsentDocument, "signerName" | "signerKind" | "representativeRelation" | "signerDoc" | "personSignedAt" | "procedureRef">,
+): string {
+  return [
+    `Firmó ${document.signerName} (${document.signerKind === "representante" ? (document.representativeRelation ?? "representante").toLowerCase() : "paciente"})`,
+    shortSignerDoc(document.signerDoc),
+    document.personSignedAt ? formatDateTime(document.personSignedAt) : null,
+    document.procedureRef,
+  ]
+    .filter(Boolean)
+    .join(" · ")
+}
+
 export function ConsentPaper({
   document,
   page,
   onClose,
   onChanged,
-}: PaperSurface & { document: ConsentDocument }) {
+  confirmIn = null,
+}: PaperSurface & {
+  document: ConsentDocument
+  /** Abierto desde la atención en curso: ahí se confirma lo firmado por enlace. */
+  confirmIn?: string | null
+}) {
   const canWrite = usePermission("clinical.write")
   const refresh = useRefreshPapers(document.patientId, onChanged)
   const [sending, setSending] = useState(false)
@@ -624,17 +653,26 @@ export function ConsentPaper({
       notice={
         canWrite && pending ? (
           <div className="flex flex-col gap-2 rounded-md border p-3">
-            <p>
-              {consentLinkWords(document) ??
-                `Falta la firma. En la ${appWords().room.one}, la persona firma con el dedo en pantalla completa y tú confirmas con tu perfil; si la firmó en papel, sube la foto de la hoja. También puedes enviárselo para que lo firme desde su teléfono.`}
-            </p>
+            {confirmIn && document.personSignedAt ? (
+              <>
+                <p className="font-medium">{linkSignedSummary(document)}</p>
+                <p className="text-muted-foreground">
+                  Revisa con la persona lo que firmó antes de empezar. Al confirmar queda firmado y anotado en esta atención.
+                </p>
+              </>
+            ) : (
+              <p>
+                {consentLinkWords(document) ??
+                  `Falta la firma. En la ${appWords().room.one}, la persona firma con el dedo en pantalla completa y tú confirmas con tu perfil; si la firmó en papel, sube la foto de la hoja. También puedes enviárselo para que lo firme desde su teléfono.`}
+              </p>
+            )}
             <div className="flex flex-wrap gap-2">
               {document.personSignedAt ? null : (
                 <Button type="button" size="sm" onClick={() => setSigning(true)}>
                   Firmar ahora
                 </Button>
               )}
-              <ConsentLinkActions document={document} onChanged={refresh} />
+              <ConsentLinkActions document={document} onChanged={refresh} encounterId={confirmIn} />
             </div>
           </div>
         ) : signatureWords ? (

@@ -39,6 +39,7 @@ import { crmTask } from "@odentia/db/schema/crm"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm"
 import { foldedWordsMatch } from "./search-text.js"
+import { findOrgLocale } from "./locale.js"
 import { type DocumentLetterhead, loadDocumentLetterhead } from "./document-clinic.js"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { requireCanAttend } from "./attending.js"
@@ -2220,7 +2221,7 @@ export async function signConsentDocument(
     throw conflict("SIGNED", "El consentimiento ya no está pendiente")
   }
   if (current.personSignedAt) {
-    throw conflict("LINK_SIGNED", "Ya lo firmó en su enlace: infórmale y confírmalo con «Confirmar»")
+    throw conflict("LINK_SIGNED", "Ya lo firmó en su enlace: infórmale y confírmalo en su atención")
   }
   if (input.signerKind !== "paciente" && input.signerKind !== "representante") {
     throw validation("Firmante inválido: paciente|representante")
@@ -2581,7 +2582,7 @@ export async function signConsentByLink(
     await notifyUser(tx, orgId, row.authorUserId, {
       dedupeKey: `consent-${row.id}-firmo-enlace`,
       title: "Firmaron un consentimiento desde su enlace",
-      body: "Un consentimiento que generaste ya tiene la firma de la persona: confírmalo antes de empezar.",
+      body: "Un consentimiento que generaste ya tiene la firma de la persona: confírmalo en su atención antes de empezar.",
       href: `/patients/${row.patientId}?tab=documentos`,
       actorUserId: `contact:${signerContactId}`,
     })
@@ -2591,13 +2592,16 @@ export async function signConsentByLink(
 
 /**
  * En la cita, el profesional informa a quien firmó en su enlace y lo confirma
- * con su perfil (sin dibujar otra firma): ahí queda firmado.
+ * con su perfil (sin dibujar otra firma): ahí queda firmado. Solo dentro de una
+ * atención en curso de ese paciente (entrega 2), y queda en cuál
+ * (`informed_encounter_id`): el PDF y la historia lo dicen.
  */
 export async function confirmLinkSignedConsent(
   tx: Db,
   orgId: string,
   actorUserId: string,
   documentId: string,
+  input: { encounterId: string },
 ): Promise<ConsentDocumentRow> {
   const [current] = await tx
     .select()
@@ -2609,6 +2613,17 @@ export async function confirmLinkSignedConsent(
   if (current.status !== "pendiente" || current.signatureMethod !== "enlace" || !current.personSignedAt) {
     throw conflict("NOT_LINK_SIGNED", "Este consentimiento no espera tu confirmación")
   }
+  if (!input.encounterId) throw invalidField("encounterId", "Confírmalo dentro de su atención")
+  // La atención es de este paciente y sigue en curso: se confirma delante de la persona, no después.
+  const attention = await requireVisibleEncounter(tx, orgId, current.patientId, input.encounterId).catch(
+    (error: unknown) => {
+      if (error instanceof ServiceError && error.code === "NOT_FOUND")
+        throw invalidField("encounterId", "Esa atención no es de este paciente")
+      throw error
+    },
+  )
+  if (attention.status !== "borrador")
+    throw conflict("ENCOUNTER_CLOSED", "La atención ya está cerrada: confírmalo en su atención de hoy")
   const informer = await requireProfessionalSignature(tx, orgId, actorUserId)
   const savedSignature = await currentDrawnSignature(tx, orgId, actorUserId)
   const now = new Date()
@@ -2623,6 +2638,7 @@ export async function confirmLinkSignedConsent(
       professionalSignature: savedSignature && { strokes: savedSignature },
       status: "firmado",
       signedAt: now,
+      informedEncounterId: attention.id,
       updatedAt: now,
     })
     .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
@@ -2635,7 +2651,7 @@ export async function confirmLinkSignedConsent(
       fromStatus: "pendiente",
       toStatus: "informado",
       actorUserId,
-      reason: `${informer.name} · ${informer.registration}`,
+      reason: `${informer.name} · ${informer.registration} · en la atención del ${await attentionDay(tx, orgId, attention.startedAt)}`,
       createdAt: now,
     },
     {
@@ -2652,8 +2668,82 @@ export async function confirmLinkSignedConsent(
   await audit(tx, orgId, actorUserId, "consent.sign", "consent_document", documentId, {
     signerKind: current.signerKind,
     method: "enlace",
+    encounterId: attention.id,
   })
   return row
+}
+
+/** «8 de noviembre de 2026», con el formato y la zona de la clínica: el día de la atención en la historia. */
+async function attentionDay(tx: Db, orgId: string, at: Date): Promise<string> {
+  const { locale, timezone } = await findOrgLocale(tx, orgId)
+  return new Intl.DateTimeFormat(locale, { timeZone: timezone, day: "numeric", month: "long", year: "numeric" }).format(at)
+}
+
+/** Lo firmado por enlace que espera que el profesional lo confirme, con lo que necesita ver para hacerlo. */
+export interface LinkSignedToConfirm {
+  id: string
+  title: string
+  /** Lo que se consiente y dónde («Exodoncia de la pieza 38»), como lo firmó. */
+  procedureRef: string | null
+  signerName: string
+  signerKind: "paciente" | "representante"
+  /** «Representante legal», si firmó otra persona por el paciente. */
+  representativeRelation: string | null
+  /** «DNI ••••0004»: el documento abreviado, nunca entero. */
+  signerDocument: string | null
+  personSignedAt: Date
+  /** La atención que lo pidió; nula si se envió desde Documentos. */
+  encounterId: string | null
+}
+
+/** «DNI ••••0004» a partir de «DNI 40000004». */
+function shortSignerDocument(signerDoc: string | null): string | null {
+  const text = signerDoc?.trim()
+  if (!text) return null
+  const parts = text.split(/\s+/)
+  const number = parts.pop() ?? ""
+  return `${parts.join(" ") || "Documento"} ••••${number.slice(-4)}`
+}
+
+/**
+ * Lo que la persona firmó en su enlace y nadie confirmó todavía, de cualquier
+ * atención o enviado desde Documentos: la atención en curso lo muestra arriba al
+ * abrirla, sin bloquear nada, y ahí se confirma (`confirmLinkSignedConsent`).
+ */
+export async function listLinkSignedToConfirm(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+): Promise<LinkSignedToConfirm[]> {
+  const rows = await tx
+    .select({
+      id: consentDocument.id,
+      title: consentDocument.titleSnapshot,
+      procedureRef: consentDocument.procedureRef,
+      signerName: consentDocument.signerName,
+      signerKind: consentDocument.signerKind,
+      representativeRelation: consentDocument.representativeRelation,
+      signerDoc: consentDocument.signerDoc,
+      personSignedAt: consentDocument.personSignedAt,
+      encounterId: consentDocument.encounterId,
+    })
+    .from(consentDocument)
+    .where(
+      and(
+        eq(consentDocument.organizationId, orgId),
+        eq(consentDocument.patientId, patientId),
+        eq(consentDocument.status, "pendiente"),
+        eq(consentDocument.signatureMethod, "enlace"),
+        isNotNull(consentDocument.personSignedAt),
+      ),
+    )
+    .orderBy(asc(consentDocument.personSignedAt))
+  return rows.map(({ signerDoc, personSignedAt, signerKind, ...row }) => ({
+    ...row,
+    signerKind: signerKind === "representante" ? "representante" : "paciente",
+    signerDocument: shortSignerDocument(signerDoc),
+    personSignedAt: personSignedAt ?? new Date(0),
+  }))
 }
 
 /** Anula un pendiente: desaparece de los pendientes y no cuenta como consentimiento. */
@@ -2865,8 +2955,17 @@ export async function getConsentPrint(tx: Db, orgId: string, documentId: string)
     .from(orgProfile)
     .where(eq(orgProfile.organizationId, orgId))
   const minor = await patientIsMinor(tx, orgId, doc.patientId)
+  // Lo firmado por enlace dice en qué atención se confirmó.
+  const [informedIn] = doc.informedEncounterId
+    ? await tx
+        .select({ startedAt: encounter.startedAt })
+        .from(encounter)
+        .where(and(eq(encounter.organizationId, orgId), eq(encounter.id, doc.informedEncounterId)))
+        .limit(1)
+    : []
   return {
     document: doc,
+    informedEncounterAt: informedIn?.startedAt ?? null,
     diagnosisDescription: (await consentDiagnosisTitles(tx, [doc])).get(doc.id) ?? null,
     patient: { ...person, minor },
     establishment: org ?? null,

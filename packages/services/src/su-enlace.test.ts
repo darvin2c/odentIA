@@ -6,7 +6,7 @@
 import { randomUUID } from "node:crypto"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { automationLinkToken } from "@odentia/db/schema/automation"
-import { patient, patientContact, patientDataConsent, patientResponsibility } from "@odentia/db/schema/clinical"
+import { encounter, patient, patientContact, patientDataConsent, patientResponsibility } from "@odentia/db/schema/clinical"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { agentActionLog, agentCaseMemory } from "@odentia/db/schema/agent"
 import { agentConfig, channelConnection, channelTemplate, contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
@@ -37,6 +37,7 @@ import { createBudget, deliverBudget } from "./budgets.js"
 import {
   confirmLinkSignedConsent,
   createConsentDocument,
+  listLinkSignedToConfirm,
   createConsentTemplate,
   createFormTemplate,
   listConsentDocuments,
@@ -483,9 +484,42 @@ it("el consentimiento se firma en su enlace con su documento y el profesional lo
   expect(signed?.declarationSnapshot).toMatch(/He leído y comprendido/)
   expect((await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).consents).toEqual([])
   expect(await pendingInSummary()).toMatchObject({ personSignedAt: expect.any(Date) })
-  await f.run((tx) => confirmLinkSignedConsent(tx, ORG, f.actor, consent.id))
+  // Se confirma dentro de una atención en curso de ese paciente, nunca desde la ficha ni en la de otro.
+  await expect(f.run((tx) => confirmLinkSignedConsent(tx, ORG, f.actor, consent.id, { encounterId: f.encounter.id }))).rejects.toMatchObject({
+    code: "VALIDATION",
+    fields: { encounterId: expect.any(String) },
+  })
+  const [closed] = await ownerDb
+    .insert(encounter)
+    .values({ organizationId: ORG, patientId: lucia.id, professionalUserId: f.actor, reason: "Control", status: "finalizada", startedAt: new Date(Date.now() - 7_200_000), endedAt: new Date(Date.now() - 3_600_000) })
+    .returning({ id: encounter.id })
+  await expect(f.run((tx) => confirmLinkSignedConsent(tx, ORG, f.actor, consent.id, { encounterId: closed!.id }))).rejects.toMatchObject({ code: "ENCOUNTER_CLOSED" })
+  const [attention] = await ownerDb
+    .insert(encounter)
+    .values({ organizationId: ORG, patientId: lucia.id, professionalUserId: f.actor, reason: "Exodoncia" })
+    .returning({ id: encounter.id })
+  // La atención lo muestra arriba al abrirla, aunque se haya enviado desde Documentos: quién firmó, su documento abreviado, cuándo y qué.
+  expect(await f.run((tx) => listLinkSignedToConfirm(tx, ORG, lucia.id))).toEqual([
+    expect.objectContaining({
+      id: consent.id,
+      title: "Exodoncia",
+      procedureRef: "Exodoncia de la pieza 38",
+      signerName: "Lucía Fernández",
+      signerKind: "paciente",
+      signerDocument: "DNI ••••0004",
+      personSignedAt: expect.any(Date),
+    }),
+  ])
+  expect(JSON.stringify(await f.run((tx) => listLinkSignedToConfirm(tx, ORG, lucia.id)))).not.toContain("40000004")
+  await f.run((tx) => confirmLinkSignedConsent(tx, ORG, f.actor, consent.id, { encounterId: attention!.id }))
   const [confirmed] = await ownerDb.select().from(consentDocument).where(eq(consentDocument.id, consent.id))
-  expect(confirmed).toMatchObject({ status: "firmado", signatureMethod: "enlace", signatureLevel: "simple", informedBy: f.actor })
+  expect(confirmed).toMatchObject({
+    status: "firmado", signatureMethod: "enlace", signatureLevel: "simple", informedBy: f.actor, informedEncounterId: attention!.id,
+  })
+  expect(await f.run((tx) => listLinkSignedToConfirm(tx, ORG, lucia.id))).toEqual([])
+  // La historia dice en qué atención.
+  const history = await f.run((tx) => listConsentEvents(tx, ORG, consent.id))
+  expect(history.find((event) => event.toStatus === "informado")?.reason).toMatch(/en la atención del /)
   expect(await pendingInSummary()).toBeUndefined()
 })
 
@@ -699,8 +733,19 @@ it("firmar en su enlace: la historia y el PDF lo dicen, se avisa a quien lo gene
   const notices = await ownerDb.select().from(workspaceNotification).where(eq(workspaceNotification.userId, f.actor))
   expect(notices.map((notice) => notice.title)).toContain("Firmaron un consentimiento desde su enlace")
 
-  // La atención lo sabe: no se le pide otra firma, se confirma.
-  await f.run((tx) => confirmLinkSignedConsent(tx, ORG, f.actor, lucia.consentId))
+  // La atención lo sabe: no se le pide otra firma, se confirma ahí, y el PDF dice en cuál.
+  const [attention] = await ownerDb
+    .insert(encounter)
+    .values({ organizationId: ORG, patientId: lucia.patientId, professionalUserId: f.actor, reason: "Exodoncia" })
+    .returning({ id: encounter.id })
+  await f.run((tx) => confirmLinkSignedConsent(tx, ORG, f.actor, lucia.consentId, { encounterId: attention!.id }))
+  const lines = vi.spyOn(DocumentKit.prototype, "text")
+  try {
+    await f.run((tx) => renderHealthDocumentPdf(tx, ORG, lucia.patientId, "consent", lucia.consentId, {}, { viewing: true }))
+    expect(lines.mock.calls.map((call) => call[0])).toContainEqual(expect.stringMatching(/^Confirmado en la atención del /))
+  } finally {
+    lines.mockRestore()
+  }
   const after = await f.run((tx) => listConsentEvents(tx, ORG, lucia.consentId))
   expect(after.map((event) => event.toStatus)).toEqual(["pendiente", "enlace_enviado", "enlace_firmado", "informado", "firmado"])
   expect(await agentTexts(lucia.conversationId)).toHaveLength(1)

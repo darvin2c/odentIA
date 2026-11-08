@@ -217,14 +217,25 @@ export async function consentLinkJourney(input: {
   await page.screenshot({ path: info.outputPath("4-historia.png") })
   await history.getByRole("button", { name: "Cerrar" }).click()
 
-  // Quien atiende lo confirma con su perfil: ahí queda firmado y ya se puede enviar.
+  // Desde la ficha no se confirma: se confirma dentro de su atención.
+  await expect(panel.getByText("Lo confirmas en su atención", { exact: true })).toBeVisible()
+  await expect(panel.getByRole("button", { name: /^Confirmar/ })).toHaveCount(0)
+
+  // Quien atiende abre la atención: arriba ve lo firmado, lo revisa y lo confirma con su perfil.
   await call("PUT", `/api/clinical-forms/professionals/${userId}/profile`, {
     professionalTitle: "Profesional",
     registrationBody: "COL",
     registrationNumber: "12345",
   })
-  await panel.getByRole("button", { name: "Confirmar", exact: true }).click()
-  await expect(panel.getByText(/^Firmado · /)).toBeVisible()
-  await expect(panel.getByRole("button", { name: "Enviar", exact: true })).toBeEnabled()
+  const attention = await call<{ id: string }>("POST", `/api/patients/${patient.id}/encounters`, { reason: "Consulta" }, 201)
+  await gotoHydrated(page, url(`/patients/${patient.id}/encounters/${attention.id}`))
+  const notice = page.getByRole("region", { name: "Firmado en su enlace, por confirmar" })
+  await expect(notice.getByText("Eva Rojas (paciente)", { exact: false })).toBeVisible()
+  await notice.getByRole("button", { name: "Revisar y confirmar" }).click()
+  const sheet = surface(page, { name: paper })
+  await expect(sheet.getByText("Firmó Eva Rojas (paciente)", { exact: false })).toBeVisible()
+  await sheet.getByRole("button", { name: "Confirmar consentimiento", exact: true }).click()
+  await expect(sheet.getByText(/^Firmado · /)).toBeVisible()
+  await expect(sheet.getByRole("button", { name: "Enviar", exact: true })).toBeEnabled()
   await page.screenshot({ path: info.outputPath("5-confirmado.png") })
 }

@@ -653,9 +653,35 @@ export async function sendConsentByLink(
   })
 }
 
-/** El profesional confirma lo que la persona firmó desde su enlace: recién entonces queda firmado. */
+/**
+ * El profesional confirma lo que la persona firmó desde su enlace, dentro de la
+ * atención en curso de ese paciente: recién entonces queda firmado, y en cuál.
+ */
 export async function confirmLinkSignedConsent(
   consentId: string,
+  encounterId: string,
 ): Promise<{ data: ConsentDocument }> {
-  return apiFetch(`${BASE}/consents/${consentId}/confirm`, { method: "POST" })
+  return apiFetch(`${BASE}/consents/${consentId}/confirm`, {
+    method: "POST",
+    body: JSON.stringify({ encounterId }),
+  })
+}
+
+/** Lo firmado por enlace que espera tu confirmación, con lo que hace falta ver para darla. */
+export interface LinkSignedToConfirm {
+  id: string
+  title: string
+  procedureRef: string | null
+  signerName: string
+  signerKind: "paciente" | "representante"
+  representativeRelation: string | null
+  /** «DNI ••••0004». */
+  signerDocument: string | null
+  personSignedAt: string
+  /** La atención que lo pidió; nula si se envió desde Documentos. */
+  encounterId: string | null
+}
+
+export async function fetchLinkSignedToConfirm(patientId: string): Promise<{ data: LinkSignedToConfirm[] }> {
+  return apiFetch(`${BASE}/consents/to-confirm?patientId=${encodeURIComponent(patientId)}`)
 }

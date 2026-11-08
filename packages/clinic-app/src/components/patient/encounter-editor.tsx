@@ -100,6 +100,7 @@ import {
   useClosingForm,
 } from "./encounter-closing"
 import { DeclaredQuestionnaireNotice, EncounterAllergyReview, EncounterContextBody } from "./encounter-context"
+import { LinkSignedNotice } from "./link-signed-notice"
 import type { ProposedDiagnosis } from "./diagnosis-picker"
 import { DiagnosisProposals, EncounterDiagnoses } from "./encounter-diagnoses"
 import { EncounterDocumentsBlock, useEncounterDocuments } from "./encounter-documents"
@@ -1587,10 +1588,11 @@ export function EncounterEditor({
         if (confirmingRef.current) return
         confirmingRef.current = true
         try {
-          await confirmLinkSignedConsent(need.documentId)
+          await confirmLinkSignedConsent(need.documentId, encounterId)
           await Promise.all([
             queryClient.invalidateQueries({ queryKey: ["consent-needs", patientId, encounterId] }),
             queryClient.invalidateQueries({ queryKey: ["consents", patientId] }),
+            queryClient.invalidateQueries({ queryKey: ["consents-to-confirm", patientId] }),
             refreshClosing(),
           ])
           await onChanged()
@@ -2143,6 +2145,20 @@ export function EncounterEditor({
       />
 
       <DeclaredQuestionnaireNotice patientId={patientId} patient={patient} disabled={locked} />
+
+      {/* Lo que firmó en su enlace se confirma aquí, delante de la persona: arriba al abrir, sin frenar nada. */}
+      <LinkSignedNotice
+        patientId={patientId}
+        encounterId={encounterId}
+        disabled={locked}
+        onChanged={async () => {
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ["consent-needs", patientId, encounterId] }),
+            refreshClosing(),
+          ])
+          await onChanged()
+        }}
+      />
 
       {attending ? <EncounterAllergyReview patientId={patientId} patient={patient} disabled={locked} /> : null}
       {/* La alergia dictada (o «niega alergias») va donde se pide revisarlas, junto a las alertas (issue 109). */}
