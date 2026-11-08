@@ -42,7 +42,7 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
         return [
           {
             ...faq,
-            a: "Con sus sesiones previstas en el Plan, por ejemplo una terapia de diez. Cada cita que lo lleva dice en qué sesión va («sesión 1 de 2») en la Agenda, en la cita y en «Qué sigue», y al reservar la siguiente, «Para esta cita» lo ofrece mientras le falten sesiones. En la atención, «Hecho hoy» dice «Registrar la sesión» hasta que registras su procedimiento; con la sesión de hoy, «Completar» lo cierra. Nada se termina solo: al firmar, lo que llega a sus sesiones previstas pregunta «¿Terminaste?», con «Sí, terminar» y «Falta otra sesión» (le suma una); sin elegir, sigue en curso. Si registras como servicio algo que sigue en curso, te avisa antes de guardar que queda como su sesión siguiente, no como un tratamiento nuevo.",
+            a: "Con sus sesiones previstas en el Plan, por ejemplo una terapia de diez. Cada cita que lo lleva dice en qué sesión va («sesión 1 de 2») en la Agenda, en la cita y en «Qué sigue», y al reservar la siguiente, «Para esta cita» lo ofrece mientras le falten sesiones. En la atención, «Hecho hoy» dice «Registrar la sesión» hasta que registras su procedimiento; con la sesión de hoy, «Completar» lo cierra. Al firmar, lo que llega a sus sesiones previstas pregunta «¿Terminaste?» con «Sí, terminar» ya elegido: si firmas sin cambiarlo, queda realizado. Si no terminaste, elige «Falta otra sesión»: le suma una y sigue en curso. Si registras como servicio algo que sigue en curso, te avisa antes de guardar que queda como su sesión siguiente, no como un tratamiento nuevo.",
             ...(faq.forms ? { forms: faq.forms.filter((form) => form !== "endodoncia en dos sesiones") } : {}),
           },
         ]
