@@ -1121,35 +1121,53 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
     const start = monthStart(timezone, month.year, month.month).getTime()
     for (const branch of input.branches) {
       const revenue = income.get(`${branch.id}:${new Date(start + 15 * 86_400_000).toISOString().slice(0, 7)}`) ?? 0
-      const staff = input.professionals.filter((professional) => professional.branchId === branch.id).length
-      const monthly = recipe.expenses
-        ? recipe.expenses.map((item) => ({
-            category: item.category,
-            concept: item.concept,
-            cents:
-              item.revenueShare !== undefined
-                ? Math.round((revenue * item.revenueShare) / 100) * 100
-                : item.rent
-                  ? branch.rent
-                  : (item.cents ?? 0) + staff * (item.perStaffCents ?? 0),
-            day: item.day,
-          }))
-        : [
-            { category: "Personal", concept: "Planilla del mes", cents: 4_200_00 + staff * 2_100_00, day: 28 },
-            { category: "Alquiler", concept: "Alquiler del local", cents: branch.rent, day: 1 },
-            { category: "Laboratorio", concept: "Coronas y prótesis", cents: Math.round((revenue * 0.09) / 100) * 100, day: 20 },
-            { category: "Materiales", concept: "Insumos", cents: Math.round((revenue * 0.06) / 100) * 100, day: 12 },
-            { category: "Servicios", concept: "Luz, agua e internet", cents: 650_00 + random.int(0, 30) * 1_000, day: 18 },
-          ]
+      const staffOf = input.professionals.filter((professional) => professional.branchId === branch.id)
+      // El sueldo base de cada profesional va con su nombre (se ve junto a su comisión); la
+      // planilla es la del resto del equipo.
+      const salaries = (perStaffCents: number, day: number) =>
+        perStaffCents > 0
+          ? staffOf.map((professional) => ({
+              category: "Personal",
+              concept: `Sueldo base de ${professional.signerName}`,
+              cents: perStaffCents,
+              day,
+              memberUserId: professional.userId,
+            }))
+          : []
+      const monthly: Array<{ category: string; concept: string; cents: number; day: number; memberUserId?: string }> =
+        recipe.expenses
+          ? recipe.expenses.flatMap((item) => [
+              {
+                category: item.category,
+                concept: item.concept,
+                cents:
+                  item.revenueShare !== undefined
+                    ? Math.round((revenue * item.revenueShare) / 100) * 100
+                    : item.rent
+                      ? branch.rent
+                      : (item.cents ?? 0),
+                day: item.day,
+              },
+              ...salaries(item.perStaffCents ?? 0, item.day),
+            ])
+          : [
+              { category: "Personal", concept: "Planilla del mes", cents: 3_000_00, day: 28 },
+              ...salaries(900_00, 28),
+              { category: "Alquiler", concept: "Alquiler del local", cents: branch.rent, day: 1 },
+              { category: "Laboratorio", concept: "Coronas y prótesis", cents: Math.round((revenue * 0.09) / 100) * 100, day: 20 },
+              { category: "Materiales", concept: "Insumos", cents: Math.round((revenue * 0.05) / 100) * 100, day: 12 },
+              { category: "Servicios", concept: "Luz, agua e internet", cents: 650_00 + random.int(0, 30) * 1_000, day: 18 },
+            ]
       for (const item of monthly) {
         const spentAt = new Date(start + (item.day - 1) * 86_400_000 + 15 * 3_600_000)
         // Lo que se repite se paga hasta hoy: cortarlo en la historia (dos días antes)
         // dejaría «vencido» lo del día 1, 18 o 28 recién sembrado.
-        const until = REPEATING.has(item.concept) ? Date.now() : historyEnd
+        const repeats = REPEATING.has(item.concept) || item.memberUserId !== undefined
+        const until = repeats ? Date.now() : historyEnd
         if (item.cents <= 0 || spentAt.getTime() > until) continue
         const month = spentAt.toISOString().slice(0, 7)
         let link: { recurringId: string; recurringMonth: string } | Record<string, never> = {}
-        if (REPEATING.has(item.concept)) {
+        if (repeats) {
           const key = `${branch.id}|${item.concept}`
           const template = templates.get(key) ?? {
             id: randomUUID(),
@@ -1163,6 +1181,7 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
             day: item.day,
             firstMonth: month,
             fromCash: false,
+            memberUserId: item.memberUserId ?? null,
             createdBy: input.ownerUserId,
           }
           // Se propone el último importe pagado.
