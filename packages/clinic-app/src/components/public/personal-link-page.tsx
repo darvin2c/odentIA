@@ -193,11 +193,32 @@ export interface PendingItem {
 /**
  * Lo que sigue al terminar algo: lo que falta de esa misma cita (`next`, el primero
  * es el botón principal) y si hay algo más fuera de ella (`more`: «Ver tus pendientes»).
+ * Si esa cita sigue «Por confirmar», confirmarla va primero: abre la cita, donde se
+ * confirma con el mismo botón de siempre.
  */
 export function whatFollows(view: PersonalLinkView, done: { key: string; at: string | null }): { next: PendingItem[]; more: boolean } {
   const rest = pendingItems(view).filter((item) => item.key !== done.key)
-  const next = done.at ? rest.filter((item) => item.at === done.at) : []
-  return { next, more: rest.some((item) => !next.includes(item)) || view.toSchedule.length > 0 }
+  const sameAppointment = done.at ? rest.filter((item) => item.at === done.at) : []
+  const appointment = view.appointment
+  const confirm: PendingItem[] =
+    done.at && done.key !== "cita" && appointment && !appointment.cancelled && appointment.canConfirm && appointment.startsAt === done.at
+      ? [
+          {
+            key: "cita",
+            abre: "cita",
+            title: view.patientFirstName ? `La cita de ${view.patientFirstName}` : "Tu cita",
+            text: capital(whenText(appointment)),
+            badge: "Por confirmar",
+            action: "Confirmar",
+            next: view.patientFirstName ? `Confirmar la cita de ${view.patientFirstName}` : "Confirmar tu cita",
+            at: appointment.startsAt,
+          },
+        ]
+      : []
+  return {
+    next: [...confirm, ...sameAppointment],
+    more: rest.some((item) => !sameAppointment.includes(item)) || view.toSchedule.length > 0,
+  }
 }
 
 export function pendingItems(view: PersonalLinkView): PendingItem[] {
@@ -809,7 +830,8 @@ export function PersonalLinkPage({
           </Button>
         )}
       </>,
-      consent.appointment ?? activeAppointment,
+      // La hoja ya dice «Para la cita del…» (U6): la cabecera no lo repite.
+      consent.appointment ? null : activeAppointment,
     )
   }
 
@@ -956,9 +978,10 @@ export function PersonalLinkPage({
             Reservar otra
           </Button>
         ) : (
+          // Sin el número: nombraría citas que esta página no muestra.
           <p className="text-sm text-muted-foreground">
-            {name ? `${name} ya tiene` : "Ya tienes"} {view.another.upcoming} citas por venir. Para
-            otra, escríbenos por el chat.
+            {name ? `${name} ya tiene` : "Ya tienes"} el máximo de citas por venir que se reservan
+            desde aquí. Para otra, escríbenos por el chat.
           </p>
         )
       ) : null}

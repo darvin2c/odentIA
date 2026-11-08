@@ -58,16 +58,26 @@ function view(patch: Partial<PersonalLinkView> = {}): PersonalLinkView {
 describe("al terminar algo", () => {
   it("sigue lo de esa misma cita y «Ver tus pendientes» solo si hay algo fuera de ella", () => {
     const after = whatFollows(view(), { key: "firma:c1", at: THURSDAY })
-    expect(after.next.map((item) => item.key)).toEqual(["datos"])
+    // Confirmar esa cita va primero: es el botón principal.
+    expect(after.next.map((item) => item.key)).toEqual(["cita", "datos"])
+    expect(after.next[0]).toMatchObject({ abre: "cita", next: "Confirmar tu cita" })
     // El implante es de otra cita: queda para «Ver tus pendientes».
     expect(after.more).toBe(true)
-    const alone = whatFollows(view({ consents: [] }), { key: "datos", at: THURSDAY })
+    const confirmed = view({ consents: [] })
+    const alone = whatFollows({ ...confirmed, appointment: confirmed.appointment && { ...confirmed.appointment, confirmed: true, canConfirm: false } }, { key: "datos", at: THURSDAY })
     expect(alone).toEqual({ next: [], more: false })
+  })
+
+  it("confirmar es solo de la cita de lo que terminó, y con el nombre de quien se atiende", () => {
+    // El implante es de otra cita: confirmar la del jueves no es lo que sigue.
+    expect(whatFollows(view(), { key: "firma:c2", at: LATER }).next).toEqual([])
+    expect(whatFollows(view({ patientFirstName: "Mateo" }), { key: "datos", at: THURSDAY }).next[0]?.next).toBe("Confirmar la cita de Mateo")
   })
 
   it("lo aceptado sin cita también es algo más fuera de esa cita", () => {
     const after = whatFollows(view({ consents: [], data: null, toSchedule: [{ planItemId: "p1", title: "Corona" }] }), { key: "x", at: THURSDAY })
-    expect(after).toEqual({ next: [], more: true })
+    expect(after.next.map((item) => item.key)).toEqual(["cita"])
+    expect(after.more).toBe(true)
   })
 })
 

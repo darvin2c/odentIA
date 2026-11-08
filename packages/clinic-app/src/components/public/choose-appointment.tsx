@@ -20,7 +20,7 @@ import {
   reserveBooking,
 } from "../../lib/booking-link"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
-import { type BookingDataDraft, BookingDataForm, checkYou, emptyBookingDataDraft, PromotionsQuestion, useYouForm, YouReview, youFieldsOf, youInput, youPromotionsId } from "../booking-data-form"
+import { type BookingDataDraft, BookingDataForm, checkYou, emptyBookingDataDraft, PromotionsQuestion, remindersWords, useYouForm, YouReview, youFieldsOf, youInput, youPromotionsId } from "../booking-data-form"
 import { capital, hourOf, longDay, timeLabel, type WeekSlot } from "./week-slots"
 
 /**
@@ -46,13 +46,6 @@ const LINK_ENDED = ["BOOKING_LINK_USED", "BOOKING_LINK_EXPIRED", "BOOKING_NOT_CH
 /** La hora dejó de estar libre mientras elegía (otra cita, la unidad o un bloqueo). */
 const SLOT_TAKEN = ["APPOINTMENT_CONFLICT", "NO_ROOM", "STALE_VERSION", "VALIDATION"]
 const EXPIRED_TEXT = "Este enlace ya no sirve. Responde el mensaje y te enviamos uno nuevo."
-
-/** B2: solo se promete un mensaje por donde de verdad sale. */
-export function remindersWords(via: PersonalLinkView["remindersVia"], what: string): string {
-  if (via === "whatsapp") return ` Te escribiremos por WhatsApp sobre ${what}.`
-  if (via === "correo") return ` Te escribiremos por correo sobre ${what}.`
-  return ""
-}
 
 const slotTaken = (error: unknown): boolean => error instanceof ApiError && SLOT_TAKEN.includes(error.shape.code ?? "")
 
@@ -651,6 +644,7 @@ export function ChooseAppointment({
               countryCode={view.countryCode}
               clinicName={view.clinicName}
               slug={slug}
+              remindersVia={view.remindersVia}
             />
           ) : (
             <>

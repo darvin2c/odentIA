@@ -17,7 +17,7 @@ import { appWords } from "../../lib/product-words"
 import { ConsentSheet } from "../patient/consent-sheet"
 import { FirmaPad } from "../patient/firma-pad"
 import { AnswerAppField, isFieldVisible, missingRequired } from "../patient/form-fields"
-import { capital, longDay, timeLabel } from "./week-slots"
+import { longDay, timeLabel } from "./week-slots"
 
 function problemOf(error: unknown, fallback: string): string {
   return error instanceof ApiError ? (error.shape.message ?? fallback) : `${fallback} Revisa tu conexión y vuelve a intentarlo.`
@@ -39,9 +39,12 @@ export function unsignableWords(consent: Pick<LinkConsent, "why" | "speaksTo" | 
   return { notice: "Este lo firmas en tu cita, antes de empezar.", inPlace: "Lo firmas en tu cita" }
 }
 
-/** «Jueves 13 de noviembre, 10:00 a. m.»: la cita para la que es, en la zona de su sede. */
+/**
+ * «jueves, 13 de noviembre, 10:00 a. m.»: la cita para la que es, en la zona de su sede.
+ * En minúscula: se lee seguido de «Para la cita del». El PDF no lleva esta línea.
+ */
 export function appointmentWords(appointment: { startsAt: string; timeZone: string } | null): string | null {
-  return appointment ? `${capital(longDay(appointment.startsAt, appointment.timeZone))}, ${timeLabel(appointment.startsAt, appointment.timeZone)}` : null
+  return appointment ? `${longDay(appointment.startsAt, appointment.timeZone).toLowerCase()}, ${timeLabel(appointment.startsAt, appointment.timeZone)}` : null
 }
 
 /**
