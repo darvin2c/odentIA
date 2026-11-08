@@ -2,7 +2,7 @@ import { Badge, Button } from "@odentia/ui"
 import { EmptyState, SkeletonRegion } from "@odentia/ui-patterns"
 import { CalendarDays } from "lucide-react"
 import { useId } from "react"
-import { type AgendaAppointment, visitName } from "../../lib/agenda"
+import { type AgendaAppointment, isUnclosed, visitWord } from "../../lib/agenda"
 import { usePermission } from "../../lib/crm"
 import {
   appointmentWhen,
@@ -14,13 +14,16 @@ import { QueryErrorState } from "../../lib/query-error"
 import { openAppointmentAnywhere, openBookingAnywhere } from "../agenda/schedule-host"
 import { CitasSkeleton } from "../skeletons/person-sections"
 
-function statusVariant(appointment: AgendaAppointment): "success" | "warning" | "outline" | "soft" {
+function statusVariant(appointment: AgendaAppointment, now: string): "success" | "warning" | "outline" | "soft" {
+  // Ya pasó sin cerrarse: falta decir si vino (QA del 6 nov, U9).
+  if (isUnclosed(appointment, now)) return "warning"
   if (appointment.status === "confirmada" || appointment.status === "atendida") return "success"
   if (appointment.status === "no_asistio" || appointment.status === "cancelada") return "warning"
   return isUpcoming(appointment) ? "soft" : "outline"
 }
 
 function AppointmentRow({ appointment }: { appointment: AgendaAppointment }) {
+  const now = new Date().toISOString()
   return (
     <li className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm">
       <div className="flex min-w-0 flex-col">
@@ -32,8 +35,8 @@ function AppointmentRow({ appointment }: { appointment: AgendaAppointment }) {
         </span>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        {/* El momento de la cita con el mismo nombre que en la Agenda: también «Llegó» o «En atención». */}
-        <Badge variant={statusVariant(appointment)}>{visitName(appointment.visit)}</Badge>
+        {/* El momento de la cita con el mismo nombre que en la Agenda: también «Llegó» o «En atención», y «Sin cerrar» la que ya pasó sin cerrarse. */}
+        <Badge variant={statusVariant(appointment, now)}>{visitWord(appointment, now)}</Badge>
         {/* La cita se abre al lado, con sus acciones de siempre: la pestaña sigue a la vista. */}
         <Button type="button" size="sm" variant="outline" onClick={() => openAppointmentAnywhere(appointment.id)}>
           Ver la cita

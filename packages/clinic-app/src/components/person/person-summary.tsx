@@ -16,7 +16,7 @@ import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { conversationStatusLabel } from "../../lib/glossary"
 import { useReceptionName } from "../../lib/agent-names"
 import {
-  appointmentWhen,
+  appointmentLine,
   nextAppointment,
   usePatientAppointments,
 } from "../../lib/patient-appointments"
@@ -34,6 +34,7 @@ import { OpportunityDrawer } from "../crm/opportunity-drawer"
 import { TaskDrawer } from "../crm/task-drawer"
 import { storesTomography } from "../patient/document-labels"
 import { NewPatientDrawer, type NewPatientTarget } from "../patient/new-patient-drawer"
+import { NextControlCard } from "../patient/next-control"
 import { PlanNextCard } from "../patient/plan/plan-next"
 import {
   ClinicalAlertsCard,
@@ -231,6 +232,8 @@ export function PersonSummary({
               phone={phoneLine}
             />
           </div>
+          {/* El próximo control en su propia fila: «Qué sigue» dice una sola cosa (QA del 6 nov). */}
+          <NextControlCard patientId={patientId} />
         </>
       ) : null}
       {patientId && receivesTomography && !person.archived ? (
@@ -297,9 +300,7 @@ export function PersonSummary({
                     : upcoming
                       ? (
                           <>
-                            {[appointmentWhen(upcoming), upcoming.serviceName ?? upcoming.reason, upcoming.professionalName]
-                              .filter(Boolean)
-                              .join(" · ")}
+                            {appointmentLine(upcoming)}
                             {" · "}
                             <Button
                               type="button"
@@ -370,6 +371,7 @@ export function PersonSummary({
         </dl>
       </section>
       ) : null}
+      {patientId && !clinical && canAppointments ? <NextControlCard patientId={patientId} /> : null}
 
       {person.kind === "por_registrar" && !person.archived ? (
         <Alert>
@@ -406,7 +408,11 @@ export function PersonSummary({
         <PatientPendingCard
           patientId={patientId}
           detail={detail}
-          clinical={clinical ? { summary: clinicalData, health: health.data?.data } : undefined}
+          clinical={
+            clinical
+              ? { summary: clinicalData, health: health.data?.data, loading: Boolean(summary?.isLoading) || health.isLoading }
+              : undefined
+          }
         />
       ) : !patientId && canTasks && canCrm ? (
         <SummaryCard

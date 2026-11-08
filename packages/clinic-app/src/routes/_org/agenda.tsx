@@ -107,6 +107,7 @@ import {
   type AppointmentStatus,
   appointmentSessionsText,
   invalidateAppointmentQueries,
+  isUnclosed,
   visitLabel,
   visitStage,
   stepBeforeArrival,
@@ -947,7 +948,7 @@ function AgendaPage() {
   const before = (item: AgendaAppointment) => item.visit === "por_confirmar" || item.visit === "confirmada"
   const isToday = (item: AgendaAppointment) => zonedDateOf(item.startsAt, TZ) === today
   /** Su hora pasó sin llegada ni atención: «Ya pasaron · sin cerrar». */
-  const unclosed = (item: AgendaAppointment) => before(item) && Date.parse(item.endsAt) <= Date.parse(now)
+  const unclosed = (item: AgendaAppointment) => isUnclosed(item, now)
   // Reagendar trae el servicio y el profesional de la cita que no fue: solo falta el día.
   const rebook = (patient: { id: string; name: string }, from?: { serviceId?: string | null; professionalUserId?: string | null }) =>
     openBooking({

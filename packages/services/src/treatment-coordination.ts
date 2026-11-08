@@ -8,14 +8,24 @@
  * solo se proyecta lo que estos ya devuelven.
  */
 import type { Db } from "@odentia/db"
+import { appointment } from "@odentia/db/schema/agenda"
 import { treatmentBudget } from "@odentia/db/schema/clinical"
-import { and, desc, eq } from "drizzle-orm"
+import { and, asc, desc, eq, gt, inArray } from "drizzle-orm"
 import { SCHEDULABLE_ITEM_STATUSES } from "./appointments.js"
 import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
 import { listFollowUps, type ScheduleFollowUpInput, scheduleFollowUp } from "./follow-ups.js"
+import { findOrgLocale } from "./locale.js"
 import { scheduledItems } from "./plan-next.js"
 import { listPlanItems } from "./plan.js"
-import { isToSchedule, sessionCountsOf, sessionsLeft } from "./to-schedule.js"
+import {
+  appointmentServesControl,
+  isOverdueControl,
+  isToSchedule,
+  LIVE_APPOINTMENT_STATUSES,
+  nextControlOf,
+  sessionCountsOf,
+  sessionsLeft,
+} from "./to-schedule.js"
 
 const OPEN_TREATMENT_STATUSES = ["pendiente", "programado", "en_curso", "suspendido"]
 // Lo que no aceptó, lo reemplazado y lo que estaba solo en una opción no elegida.
@@ -35,11 +45,32 @@ export interface CoordinationFollowUp {
   windowFrom: Date
 }
 
+/**
+ * El próximo control de la persona para el Resumen (QA del 6 nov, X3), con el
+ * orden y las reglas de «Qué sigue»: `nextControlOf`, `isOverdueControl` y
+ * `appointmentServesControl`. Sin diagnósticos ni indicaciones: lo lee recepción.
+ */
+export interface NextControl {
+  id: string
+  title: string
+  dueAt: Date
+  status: string
+  /** Vencido sin cita: pendiente, su día ya pasó y no tiene ninguna cita por venir. */
+  overdue: boolean
+  /**
+   * La cita que lo cumple: la suya si está reservado, o la próxima cita de la
+   * persona si cae desde que abre su ventana. Nula: falta reservarla.
+   */
+  appointment: { id: string; startsAt: Date } | null
+}
+
 export interface TreatmentCoordination {
   /** Presupuestos que esperan respuesta de quien decide (`budgetAwaitsAnswerSql`). */
   budgetsAwaitingDecision: Array<{ id: string; title: string; presentedAt: Date | null }>
   /** Controles abiertos: por reservar o con cita vigente. */
   followUps: CoordinationFollowUp[]
+  /** El próximo control, el mismo que nombra «Qué sigue»; nulo si no tiene ninguno abierto. */
+  nextControl: NextControl | null
   /**
    * Tratamientos abiertos, solo nombre y estado operativo. `toSchedule`: aceptado
    * y sin cita por venir, lo que «Nueva cita» ofrece para traer. `sessionsLeft`:
@@ -114,6 +145,7 @@ export async function getTreatmentCoordination(
     followUps: followUps
       .filter((row) => row.status === "pendiente" || row.status === "programado")
       .map(toCoordinationFollowUp),
+    nextControl: await nextControlFor(tx, orgId, patientId, followUps),
     treatments: open.map((item) => ({
       id: item.id,
       title: item.title,
@@ -124,6 +156,45 @@ export async function getTreatmentCoordination(
       sessionsLeft: sessionsLeft(item, countOf(item.id)),
       nextSession: { n: countOf(item.id).done + countOf(item.id).booked + 1, m: item.plannedSessions },
     })),
+  }
+}
+
+/** El próximo control con lo que el Resumen dice de él: si venció y qué cita lo cumple. */
+async function nextControlFor(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  followUps: Awaited<ReturnType<typeof listFollowUps>>,
+): Promise<NextControl | null> {
+  const control = nextControlOf(followUps)
+  if (!control) return null
+  const { timezone } = await findOrgLocale(tx, orgId)
+  const [next] = await tx
+    .select({ id: appointment.id, startsAt: appointment.startsAt })
+    .from(appointment)
+    .where(
+      and(
+        eq(appointment.organizationId, orgId),
+        eq(appointment.patientId, patientId),
+        inArray(appointment.status, [...LIVE_APPOINTMENT_STATUSES]),
+        gt(appointment.startsAt, new Date()),
+      ),
+    )
+    .orderBy(asc(appointment.startsAt))
+    .limit(1)
+  const own =
+    control.status === "programado" && control.appointment && control.scheduledAt
+      ? { id: control.appointment.id, startsAt: control.appointment.startsAt }
+      : null
+  const serving =
+    control.status === "pendiente" && next && appointmentServesControl(control, next.startsAt, timezone) ? next : null
+  return {
+    id: control.id,
+    title: control.title,
+    dueAt: control.dueAt,
+    status: control.status,
+    overdue: isOverdueControl(control, next?.startsAt ?? null, timezone),
+    appointment: own ?? serving,
   }
 }
 

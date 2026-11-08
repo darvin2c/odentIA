@@ -217,10 +217,60 @@ export type SchedulableControl = Pick<
   "id" | "patientId" | "title" | "dueAt" | "status" | "appointment" | "legacyScheduledAt" | "branchId" | "windowFrom"
 >
 
+/**
+ * Los controles dentro de una atención: los suyos (indicados o completados en
+ * ella) y, aparte, los que la persona ya tiene abiertos de otras atenciones
+ * (QA del 6 nov, M13: decía «Sin controles» a quien tenía dos e invitaba a
+ * indicar otro). Fuera de una atención, todos son «suyos».
+ */
+export function encounterControls<T extends Pick<FollowUp, "status" | "originEncounterId" | "completedEncounterId">>(
+  rows: readonly T[],
+  encounterId: string | undefined,
+): { own: T[]; others: T[] } {
+  if (encounterId === undefined) return { own: [...rows], others: [] }
+  const mine = (row: T) => row.originEncounterId === encounterId || row.completedEncounterId === encounterId
+  return {
+    own: rows.filter(mine),
+    others: rows.filter((row) => !mine(row) && (row.status === "pendiente" || row.status === "programado")),
+  }
+}
+
+/**
+ * El próximo control de la persona, con lo que decide el servidor: si venció
+ * sin cita (`overdue`) y qué cita lo cumple (la suya, o la próxima que cae
+ * desde que abre su ventana). La pantalla no deduce ninguna de las dos.
+ */
+export interface NextControl {
+  id: string
+  title: string
+  dueAt: string
+  status: string
+  overdue: boolean
+  appointment: { id: string; startsAt: string } | null
+}
+
+/** Dónde dice el Resumen el próximo control (QA del 6 nov, X3). */
+export type NextControlPlace = "fila" | "pendientes" | null
+
+/**
+ * El control va en su propia fila del Resumen y, si venció sin cita, en
+ * «Pendientes». Si «Qué sigue» ya habla del control, no se repite: es el mismo
+ * control (el servidor lo elige con el mismo orden).
+ */
+export function nextControlPlace(
+  control: NextControl | null | undefined,
+  nextStepKind: string | null | undefined,
+): NextControlPlace {
+  if (!control || nextStepKind === "control") return null
+  return control.overdue ? "pendientes" : "fila"
+}
+
 /** Vista de coordinación: títulos, estados y fechas; sin detalle clínico ni importes. */
 export interface TreatmentCoordination {
   budgetsAwaitingDecision: Array<{ id: string; title: string; presentedAt: string | null }>
   followUps: SchedulableControl[]
+  /** El próximo control, el mismo de «Qué sigue»; nulo si no tiene ninguno abierto. */
+  nextControl: NextControl | null
   /**
    * `toSchedule`: aceptado y sin cita por venir. `sessionsLeft`: sesiones que le
    * faltan reservar (la segunda de una endodoncia en dos); `nextSession`, la que

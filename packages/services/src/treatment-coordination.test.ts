@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto"
 import { member } from "@odentia/db/schema/auth"
+import { clinicalFollowUp } from "@odentia/db/schema/clinical"
 import { branch } from "@odentia/db/schema/org"
+import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"
-import { createRoom } from "./appointments.js"
+import { createAppointment, createRoom } from "./appointments.js"
 import { setProfessionalSchedule } from "./availability.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { createFollowUp, listFollowUps } from "./follow-ups.js"
@@ -105,4 +107,51 @@ it("coordinación: expone títulos, estados y fechas, nunca el detalle clínico 
   await expect(
     f.run((tx) => getTreatmentCoordination(tx, "org_b", f.patient.id)),
   ).rejects.toMatchObject({ status: 404 })
+})
+
+// QA del 6 nov (X3): el Resumen no decía el control, tampoco uno vencido. La
+// coordinación dice cuál es el próximo, si venció y qué cita lo cumple, con las
+// reglas de «Qué sigue».
+it("coordinación: el próximo control dice si venció y qué cita lo cumple", async () => {
+  const f = await clinicalFixture()
+  const [site] = await ownerDb
+    .insert(branch)
+    .values({ organizationId: "org_a", name: "Sede próximo control", timezone: "America/Lima" })
+    .returning()
+  const room = await f.run((tx) => createRoom(tx, "org_a", { branchId: site.id, name: "Próximo control" }))
+  expect((await f.run((tx) => getTreatmentCoordination(tx, "org_a", f.patient.id))).nextControl).toBeNull()
+  const date = new Date(Date.now() + 86400000).toISOString().slice(0, 10)
+  const startsAt = `${date}T15:00:00.000Z`
+  const later = await f.run((tx) =>
+    createFollowUp(tx, ...f.args, { kind: "mantenimiento", title: "Control lejano", dueAt: `2099-01-01T15:00:00.000Z` }),
+  )
+  const control = await f.run((tx) =>
+    createFollowUp(tx, ...f.args, { kind: "mantenimiento", title: "Control semestral", dueAt: startsAt }),
+  )
+  // Tocaba hace tres días y se indicó hace seis meses: vencido y sin cita.
+  await ownerDb
+    .update(clinicalFollowUp)
+    .set({ dueAt: new Date(Date.now() - 3 * 86400000), createdAt: new Date(Date.now() - 180 * 86400000) })
+    .where(eq(clinicalFollowUp.id, control.id))
+  const overdue = (await f.run((tx) => getTreatmentCoordination(tx, "org_a", f.patient.id))).nextControl
+  expect(overdue).toMatchObject({ id: control.id, title: "Control semestral", status: "pendiente", overdue: true, appointment: null })
+  expect(overdue?.id).not.toBe(later.id)
+
+  // Una cita por venir le sirve: ya no está vencido y esa es la cita que lo cumple.
+  const visit = await f.run((tx) =>
+    createAppointment(tx, "org_a", f.actor, {
+      branchId: site.id,
+      roomId: room.id,
+      professionalUserId: f.actor,
+      patientId: f.patient.id,
+      startsAt,
+      durationMin: 30,
+      outsideSchedule: true,
+    }),
+  )
+  expect((await f.run((tx) => getTreatmentCoordination(tx, "org_a", f.patient.id))).nextControl).toMatchObject({
+    id: control.id,
+    overdue: false,
+    appointment: { id: visit.id },
+  })
 })

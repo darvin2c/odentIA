@@ -39,8 +39,8 @@ import { findOrgLocale } from "./locale.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { productHooks } from "./products.js"
 import {
+  appointmentServesControl,
   canBookAnother,
-  controlWindowStart,
   dayKeyIn,
   isOverdueControl,
   isToSchedule,
@@ -417,7 +417,7 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
   if (control) {
     // A un control le sirve cualquier visita desde que abre su ventana (ADR 0152): con una cita por venir
     // desde ahí, no está «por reservar», porque al firmar esa atención se cumple.
-    if (control.status === "pendiente" && nextAppointmentAt && dayKey(nextAppointmentAt) >= dayKey(controlWindowStart(control))) {
+    if (control.status === "pendiente" && nextAppointmentAt && appointmentServesControl(control, nextAppointmentAt, timezone)) {
       return {
         kind: "control",
         text: `${control.title} · tiene cita el ${day(nextAppointmentAt)}`,

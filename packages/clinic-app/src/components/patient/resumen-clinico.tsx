@@ -6,7 +6,7 @@ import type { AgendaAppointment } from "../../lib/agenda"
 import { allergyName, allergyRank, allergySeverityWord, bySeverity } from "../../lib/allergies"
 import { useMemberName, useMyUserId, usePermission } from "../../lib/crm"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
-import { appointmentWhen } from "../../lib/patient-appointments"
+import { appointmentLine } from "../../lib/patient-appointments"
 import type { OpenEncounterBrief, PatientHealth, PatientSummary } from "../../lib/patients"
 import { usePersonArchived } from "../../lib/person-archived"
 import { AllergyQuickActions } from "./allergies-card"
@@ -347,9 +347,7 @@ export function UpcomingCard({
           <p className="text-muted-foreground">No disponible</p>
         ) : upcoming ? (
           <p className="line-clamp-2 font-medium">
-            {[appointmentWhen(upcoming), upcoming.serviceName ?? upcoming.reason, upcoming.professionalName]
-              .filter(Boolean)
-              .join(" · ")}
+            {appointmentLine(upcoming)}
           </p>
         ) : (
           <div className="flex flex-wrap items-center justify-between gap-2">

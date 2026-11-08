@@ -269,6 +269,34 @@ export function isControlWindowOpen(
   return dayKeyIn(controlWindowStart(control), timezone) <= today && dayKeyIn(control.createdAt, timezone) < today
 }
 
+/**
+ * Una cita por venir le sirve al control pendiente: cae, en días de la zona de
+ * la clínica, desde que abre su ventana. Al firmar esa atención el control se
+ * cumple, así que no está «por reservar». La usan «Qué sigue» y el Resumen.
+ */
+export function appointmentServesControl(
+  control: { dueAt: Date; createdAt: Date },
+  appointmentAt: Date,
+  timezone: string,
+): boolean {
+  return dayKeyIn(appointmentAt, timezone) >= dayKeyIn(controlWindowStart(control), timezone)
+}
+
+/**
+ * El próximo control de la persona, con el orden de «Qué sigue»: primero el
+ * que falta reservar (pendiente) y, entre iguales, el de fecha más cercana.
+ * Solo cuentan los abiertos (pendiente o programado).
+ */
+export function nextControlOf<T extends { status: string; dueAt: Date }>(controls: readonly T[]): T | null {
+  const open = controls.filter((control) => control.status === "pendiente" || control.status === "programado")
+  return (
+    [...open].sort(
+      (a, b) =>
+        Number(b.status === "pendiente") - Number(a.status === "pendiente") || a.dueAt.getTime() - b.dueAt.getTime(),
+    )[0] ?? null
+  )
+}
+
 /** `controlWindowStart` en SQL, sobre una fila de `clinical_follow_up` (o un alias). */
 export function controlWindowStartSql(control: { dueAt: SQLWrapper; createdAt: SQLWrapper }): SQL {
   return sql`greatest(${control.createdAt}, ${control.dueAt} - greatest(interval '2 days', (${control.dueAt} - ${control.createdAt}) * 0.25))`
