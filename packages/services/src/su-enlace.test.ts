@@ -517,6 +517,18 @@ it("el consentimiento se firma en su enlace con su documento y el profesional lo
     .values({ organizationId: ORG, patientId: lucia.id, professionalUserId: f.actor, reason: "Control", status: "finalizada", startedAt: new Date(Date.now() - 7_200_000), endedAt: new Date(Date.now() - 3_600_000) })
     .returning({ id: encounter.id })
   await expect(f.run((tx) => confirmLinkSignedConsent(tx, ORG, f.actor, consent.id, { encounterId: closed!.id }))).rejects.toMatchObject({ code: "ENCOUNTER_CLOSED" })
+  // El panel de antes (mientras dura el despliegue) confirma sin la atención: se le dice que recargue.
+  await expect(f.run((tx) => confirmLinkSignedConsent(tx, ORG, f.actor, consent.id, {}))).rejects.toMatchObject({
+    code: "CONFIRM_IN_ENCOUNTER",
+    message: "Recarga la página: ahora se confirma dentro de su atención",
+  })
+  // Una atención en borrador de hace semanas no sirve: se confirma con la persona delante, hoy (S2).
+  const [stale] = await ownerDb
+    .insert(encounter)
+    .values({ organizationId: ORG, patientId: lucia.id, professionalUserId: f.actor, reason: "Control", startedAt: new Date(Date.now() - 21 * 86_400_000) })
+    .returning({ id: encounter.id })
+  await expect(f.run((tx) => confirmLinkSignedConsent(tx, ORG, f.actor, consent.id, { encounterId: stale!.id }))).rejects.toMatchObject({ code: "ENCOUNTER_NOT_TODAY" })
+  await ownerDb.delete(encounter).where(eq(encounter.id, stale!.id))
   const [attention] = await ownerDb
     .insert(encounter)
     .values({ organizationId: ORG, patientId: lucia.id, professionalUserId: f.actor, reason: "Exodoncia" })
@@ -756,10 +768,13 @@ it("firmar en su enlace: la historia y el PDF lo dicen, se avisa a quien lo gene
   const notices = await ownerDb.select().from(workspaceNotification).where(eq(workspaceNotification.userId, f.actor))
   expect(notices.map((notice) => notice.title)).toContain("Firmaron un consentimiento desde su enlace")
 
-  // La atención lo sabe: no se le pide otra firma, se confirma ahí, y el PDF dice en cuál.
+  // La atención lo sabe: no se le pide otra firma, se confirma ahí, y el PDF dice en cuál. Vale la
+  // que se abrió antes para su cita de hoy.
+  const today = await upcomingAppointment(f, lucia.patientId)
+  await ownerDb.update(appointment).set({ startsAt: new Date(), endsAt: new Date(Date.now() + 1_800_000) }).where(eq(appointment.id, today))
   const [attention] = await ownerDb
     .insert(encounter)
-    .values({ organizationId: ORG, patientId: lucia.patientId, professionalUserId: f.actor, reason: "Exodoncia" })
+    .values({ organizationId: ORG, patientId: lucia.patientId, professionalUserId: f.actor, reason: "Exodoncia", appointmentId: today, startedAt: new Date(Date.now() - 2 * 86_400_000) })
     .returning({ id: encounter.id })
   await f.run((tx) => confirmLinkSignedConsent(tx, ORG, f.actor, lucia.consentId, { encounterId: attention!.id }))
   const lines = vi.spyOn(DocumentKit.prototype, "text")

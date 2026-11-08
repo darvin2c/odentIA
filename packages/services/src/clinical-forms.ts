@@ -34,6 +34,7 @@ import {
   professionalSpecialty,
 } from "@odentia/db/schema/clinical-forms"
 import { ATTENDING_ROLES, canAttend } from "@odentia/auth/permissions"
+import { appointment } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
 import { crmTask } from "@odentia/db/schema/crm"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
@@ -2474,7 +2475,17 @@ export async function remoteSignBlock(
 ): Promise<RemoteSignBlock | null> {
   const linked = await requireLinkedActiveContact(tx, orgId, patientId, signerContactId)
   const subject = await requirePatient(tx, orgId, patientId)
-  if (linked.relationship === "self" && (await patientIsMinor(tx, orgId, patientId))) return "menor"
+  const minor = linked.relationship === "self" && (await patientIsMinor(tx, orgId, patientId))
+  return signBlockOf(linked, subject, minor)
+}
+
+/** La regla de `remoteSignBlock` con lo ya buscado: el vínculo de quien firma, el paciente y si es menor. */
+function signBlockOf(
+  linked: { relationship: string; contact: { docNumber: string | null } },
+  subject: { birthDate: string | null },
+  minor: boolean,
+): RemoteSignBlock | null {
+  if (linked.relationship === "self" && minor) return "menor"
   if (!subject.birthDate) return "sin-fecha"
   if (!linked.contact.docNumber) return "sin-documento"
   return null
@@ -2530,7 +2541,7 @@ export async function signConsentByLink(
   // Facultad legal vigente sobre este paciente, no un vínculo cualquiera.
   if (signerKind === "representante") await requireDecisionContact(tx, orgId, current.patientId, signerContactId)
   // Sin documento con que comparar, sin fecha de nacimiento o menor: lo firma en la cita.
-  const block = await remoteSignBlock(tx, orgId, current.patientId, signerContactId)
+  const block = signBlockOf(linked, subject, minor)
   if (block) {
     const first = (subject.givenNames ?? subject.displayName).trim().split(/\s+/)[0] ?? ""
     throw remoteSignRefusal(block, signerKind === "representante", first)
@@ -2601,7 +2612,7 @@ export async function confirmLinkSignedConsent(
   orgId: string,
   actorUserId: string,
   documentId: string,
-  input: { encounterId: string },
+  input: { encounterId?: string | null },
 ): Promise<ConsentDocumentRow> {
   const [current] = await tx
     .select()
@@ -2613,7 +2624,9 @@ export async function confirmLinkSignedConsent(
   if (current.status !== "pendiente" || current.signatureMethod !== "enlace" || !current.personSignedAt) {
     throw conflict("NOT_LINK_SIGNED", "Este consentimiento no espera tu confirmación")
   }
-  if (!input.encounterId) throw invalidField("encounterId", "Confírmalo dentro de su atención")
+  // Sin atención llega del panel de antes de esta entrega (mientras dura el despliegue): que recargue.
+  if (!input.encounterId)
+    throw conflict("CONFIRM_IN_ENCOUNTER", "Recarga la página: ahora se confirma dentro de su atención")
   // La atención es de este paciente y sigue en curso: se confirma delante de la persona, no después.
   const attention = await requireVisibleEncounter(tx, orgId, current.patientId, input.encounterId).catch(
     (error: unknown) => {
@@ -2624,6 +2637,9 @@ export async function confirmLinkSignedConsent(
   )
   if (attention.status !== "borrador")
     throw conflict("ENCOUNTER_CLOSED", "La atención ya está cerrada: confírmalo en su atención de hoy")
+  // Delante de la persona: una atención en borrador de hace semanas no sirve (S2).
+  if (!(await attentionIsToday(tx, orgId, attention)))
+    throw conflict("ENCOUNTER_NOT_TODAY", "Esa atención no es de hoy: confírmalo en su atención de hoy, con la persona delante")
   const informer = await requireProfessionalSignature(tx, orgId, actorUserId)
   const savedSignature = await currentDrawnSignature(tx, orgId, actorUserId)
   const now = new Date()
@@ -2673,6 +2689,29 @@ export async function confirmLinkSignedConsent(
   return row
 }
 
+/**
+ * La atención es de hoy en el día de la clínica: empezó hoy o es la de una cita de hoy (una
+ * atención que se abrió antes, para la cita de hoy). Lo firmado por enlace se confirma ahí.
+ */
+async function attentionIsToday(
+  tx: Db,
+  orgId: string,
+  attention: { startedAt: Date; appointmentId: string | null },
+): Promise<boolean> {
+  const { timezone } = await findOrgLocale(tx, orgId)
+  const day = (at: Date) =>
+    new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(at)
+  const today = day(new Date())
+  if (day(attention.startedAt) === today) return true
+  if (!attention.appointmentId) return false
+  const [booked] = await tx
+    .select({ startsAt: appointment.startsAt })
+    .from(appointment)
+    .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, attention.appointmentId)))
+    .limit(1)
+  return booked !== undefined && day(booked.startsAt) === today
+}
+
 /** «8 de noviembre de 2026», con el formato y la zona de la clínica: el día de la atención en la historia. */
 async function attentionDay(tx: Db, orgId: string, at: Date): Promise<string> {
   const { locale, timezone } = await findOrgLocale(tx, orgId)
@@ -2697,12 +2736,20 @@ export interface LinkSignedToConfirm {
 }
 
 /** «DNI ••••0004» a partir de «DNI 40000004». */
+/**
+ * «DNI ••••8912»: el documento abreviado, para que se reconozca sin mostrarlo entero. La única
+ * forma de abreviarlo: la usan «Su enlace» y lo firmado por enlace; el panel lo recibe hecho.
+ */
+export function shortDocument(docType: string | null, docNumber: string | null): string | null {
+  if (!docNumber) return null
+  return `${docType || "Documento"} ••••${docNumber.slice(-4)}`
+}
+
+/** El documento con que firmó («DNI 40000004»), abreviado. */
 function shortSignerDocument(signerDoc: string | null): string | null {
-  const text = signerDoc?.trim()
-  if (!text) return null
-  const parts = text.split(/\s+/)
-  const number = parts.pop() ?? ""
-  return `${parts.join(" ") || "Documento"} ••••${number.slice(-4)}`
+  const parts = signerDoc?.trim().split(/\s+/) ?? []
+  const number = parts.pop()
+  return number ? shortDocument(parts.join(" ") || null, number) : null
 }
 
 /**

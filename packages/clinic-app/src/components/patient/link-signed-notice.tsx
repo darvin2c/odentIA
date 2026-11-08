@@ -10,8 +10,14 @@ import { formatDateTime } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { ConsentPaper } from "./document-papers"
 
-/** «Rosa Ruiz (representante legal) · DNI ••••1111 · 8 nov 9:40 · Exodoncia de la pieza 38». */
-function summaryOf(row: LinkSignedToConfirm): string {
+/**
+ * «Rosa Ruiz (representante legal) · DNI ••••1111 · 8 nov 9:40 · Exodoncia de la pieza 38»: lo que
+ * el profesional mira antes de confirmar, en la lista y en la hoja. El documento llega abreviado
+ * del servidor (`listLinkSignedToConfirm`): aquí no se enmascara nada.
+ */
+export function linkSignedSummary(
+  row: Pick<LinkSignedToConfirm, "signerName" | "signerKind" | "representativeRelation" | "signerDocument" | "personSignedAt" | "procedureRef">,
+): string {
   return [
     `${row.signerName} (${row.signerKind === "representante" ? (row.representativeRelation ?? "representante").toLowerCase() : "paciente"})`,
     row.signerDocument,
@@ -53,12 +59,15 @@ export function LinkSignedNotice({
   })
   const rows = pending.data?.data ?? []
   const open = openId ? consents.data?.data.find((doc) => doc.id === openId) : undefined
+  // El resumen sale de la fila por confirmar, que ya trae el documento abreviado.
+  const openRow = openId ? rows.find((row) => row.id === openId) : undefined
   // Abierta la hoja, sigue a la vista aunque ya no quede nada por confirmar: ahí se ve que quedó firmado.
   if (!canWrite || (rows.length === 0 && !open)) return null
   const paper = open ? (
     <ConsentPaper
       document={open}
       confirmIn={encounterId}
+      signedSummary={openRow ? linkSignedSummary(openRow) : null}
       onClose={() => setOpenId(null)}
       onChanged={async () => {
         await pending.refetch()
@@ -83,7 +92,7 @@ export function LinkSignedNotice({
           <li key={row.id} className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex min-w-0 flex-col">
               <span className="text-sm">{row.title}</span>
-              <span className="text-xs text-muted-foreground">{summaryOf(row)}</span>
+              <span className="text-xs text-muted-foreground">{linkSignedSummary(row)}</span>
             </div>
             <Button
               type="button"

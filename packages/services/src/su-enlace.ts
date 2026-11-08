@@ -78,6 +78,7 @@ import {
   type RemoteSignBlock,
   remoteSignBlock,
   type SignatureEvidence,
+  shortDocument,
   signConsentByLink,
 } from "./clinical-forms.js"
 import { sendOutbound, sendTemplateOutbound } from "./conversations.js"
@@ -296,12 +297,6 @@ async function todoOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promis
     dataSubmitted: link.row.dataSubmittedAt !== null,
     withAppointment: link.appointment !== null && link.appointment.status !== "cancelada",
   })
-}
-
-/** «DNI ••••8912»: el documento abreviado, para que reconozca el suyo sin mostrarlo entero. */
-function shortDocument(docType: string | null, docNumber: string | null): string | null {
-  if (!docNumber) return null
-  return `${docType ?? "Documento"} ••••${docNumber.slice(-4)}`
 }
 
 /**

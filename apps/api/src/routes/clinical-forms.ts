@@ -1082,7 +1082,9 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     if (!canAccess(memberRole, "clinical.write")) {
       return forbidden(c, "Sin permiso para firmar consentimientos")
     }
-    const parsed = z.strictObject({ encounterId: uuid }).safeParse(await c.req.json().catch(() => ({})))
+    // Sin `encounterId` llega del panel anterior mientras dura el despliegue: el servicio le dice
+    // que recargue («ahora se confirma dentro de su atención») en vez de un 400 sin explicación.
+    const parsed = z.strictObject({ encounterId: uuid.optional() }).safeParse(await c.req.json().catch(() => ({})))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const { encounterId } = parsed.data
     return runService(c, 200, async () => {

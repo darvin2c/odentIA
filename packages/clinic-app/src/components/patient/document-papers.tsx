@@ -35,7 +35,6 @@ import {
   cancelPrescriptionApi,
   fetchPrescriptions,
   formatDate,
-  formatDateTime,
   PRESCRIPTION_STATUS_LABELS,
   type Prescription,
 } from "../../lib/clinical-journey"
@@ -525,38 +524,19 @@ function ConsentHistoryDrawer({
   )
 }
 
-/** «DNI ••••0004»: el documento de quien firmó, abreviado para el resumen. */
-function shortSignerDoc(signerDoc: string | null): string | null {
-  const parts = signerDoc?.trim().split(/\s+/) ?? []
-  const number = parts.pop()
-  if (!number) return null
-  return `${parts.join(" ") || "Documento"} ••••${number.slice(-4)}`
-}
-
-/** Lo que el profesional mira antes de confirmar lo firmado por enlace: quién, con qué documento, cuándo y qué. */
-export function linkSignedSummary(
-  document: Pick<ConsentDocument, "signerName" | "signerKind" | "representativeRelation" | "signerDoc" | "personSignedAt" | "procedureRef">,
-): string {
-  return [
-    `Firmó ${document.signerName} (${document.signerKind === "representante" ? (document.representativeRelation ?? "representante").toLowerCase() : "paciente"})`,
-    shortSignerDoc(document.signerDoc),
-    document.personSignedAt ? formatDateTime(document.personSignedAt) : null,
-    document.procedureRef,
-  ]
-    .filter(Boolean)
-    .join(" · ")
-}
-
 export function ConsentPaper({
   document,
   page,
   onClose,
   onChanged,
   confirmIn = null,
+  signedSummary = null,
 }: PaperSurface & {
   document: ConsentDocument
   /** Abierto desde la atención en curso: ahí se confirma lo firmado por enlace. */
   confirmIn?: string | null
+  /** Quién firmó, con qué documento (abreviado en el servidor), cuándo y qué (`linkSignedSummary`). */
+  signedSummary?: string | null
 }) {
   const canWrite = usePermission("clinical.write")
   const refresh = useRefreshPapers(document.patientId, onChanged)
@@ -655,7 +635,7 @@ export function ConsentPaper({
           <div className="flex flex-col gap-2 rounded-md border p-3">
             {confirmIn && document.personSignedAt ? (
               <>
-                <p className="font-medium">{linkSignedSummary(document)}</p>
+                {signedSummary ? <p className="font-medium">Firmó {signedSummary}</p> : null}
                 <p className="text-muted-foreground">
                   Revisa con la persona lo que firmó antes de empezar. Al confirmar queda firmado y anotado en esta atención.
                 </p>
