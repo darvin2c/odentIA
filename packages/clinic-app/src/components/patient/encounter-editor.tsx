@@ -2912,7 +2912,12 @@ export function EncounterEditor({
             </section>
           ) : null}
           <DialogFooter>
-            <Button type="button" onClick={closeFinalized}>
+            {/* Mientras falta reservar la sesión, «Listo» no compite con «Reservar la sesión 2». */}
+            <Button
+              type="button"
+              variant={canBook && finalizedNext.some((session) => session.toBook) ? "outline" : "default"}
+              onClick={closeFinalized}
+            >
               Listo
             </Button>
           </DialogFooter>

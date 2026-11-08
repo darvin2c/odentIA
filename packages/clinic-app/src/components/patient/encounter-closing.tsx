@@ -642,8 +642,9 @@ export function FinalizedNextSessions({
   const toBook = sessions.filter((session) => session.toBook)
   const only = toBook.length === 1 ? toBook[0]?.toBook : null
   return (
-    <section aria-label="Sigue en curso" className="flex flex-col gap-2 rounded-lg border border-primary/40 bg-primary/5 p-3">
-      <h3 className="text-sm font-semibold">Sigue en curso</h3>
+    <section aria-label="Próxima sesión" className="flex flex-col gap-2 rounded-lg border border-primary/40 bg-primary/5 p-3">
+      {/* Lo que falta y lo que ya quedó no se dicen igual (segunda mesa). */}
+      <h3 className="text-sm font-semibold">{toBook.length > 0 ? "Falta reservar su próxima sesión" : "Su próxima sesión"}</h3>
       {/* Lo reservado aquí cambia en su sitio y se anuncia. */}
       <ul ref={listRef} tabIndex={-1} aria-live="polite" className="flex flex-col gap-1 text-sm outline-none">
         {sessions.map((session) =>

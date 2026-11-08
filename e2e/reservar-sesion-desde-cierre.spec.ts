@@ -56,7 +56,8 @@ test("al firmar la sesión 1, la sesión 2 se reserva desde «Atención finaliza
 
   // «Atención finalizada»: la sesión 2 sin cita, con su botón.
   const finalized = page.getByRole("dialog", { name: "Atención finalizada" })
-  const next = finalized.getByRole("region", { name: "Sigue en curso" })
+  const next = finalized.getByRole("region", { name: "Próxima sesión" })
+  await expect(next.getByRole("heading", { name: "Falta reservar su próxima sesión" })).toBeVisible()
   await expect(next.getByText("Endodoncia unirradicular · 36 · sesión 2 de 2 · sin cita")).toBeVisible()
   await views("finalizada-sesion-2-sin-cita")
   // Nada dejó un control aparte para la misma visita.
@@ -79,6 +80,7 @@ test("al firmar la sesión 1, la sesión 2 se reserva desde «Atención finaliza
   await expect(finalized).toBeVisible()
   await expect(next.getByText(/^Vuelve el .+ para Endodoncia unirradicular · 36 · sesión 2 de 2\.$/)).toBeVisible()
   await expect(next.getByRole("button", { name: "Reservar la sesión 2" })).toHaveCount(0)
+  await expect(next.getByRole("heading", { name: "Su próxima sesión" })).toBeVisible()
   // El foco queda en lo reservado: el botón que lo abrió ya no está.
   await expect(next.getByRole("list")).toBeFocused()
   await views("finalizada-sesion-2-reservada")
