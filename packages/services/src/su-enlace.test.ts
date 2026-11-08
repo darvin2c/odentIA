@@ -19,7 +19,18 @@ import { expect, it, onTestFinished, vi } from "vitest"
 import { createRoom } from "./appointments.js"
 import { setMessageChoice } from "./automation.js"
 import { listApprovedMessages } from "./clinic-messages.js"
-import { confirmBookingLinkAppointment, issuePersonalLink, listBookingLinkSlots, reserveBookingLink, revokePersonalLinks } from "./booking-links.js"
+import {
+  cancelBookingLinkAppointment,
+  changeBookingLinkAppointment,
+  confirmBookingLinkAppointment,
+  createBookingLink,
+  issueAgendaLink,
+  issuePersonalLink,
+  listBookingLinkSlots,
+  reserveBookingLink,
+  revokePersonalLinks,
+} from "./booking-links.js"
+import { grantResponsibility } from "./responsibilities.js"
 import { setProfessionalSchedule } from "./availability.js"
 import { hidePersonalLinkRefs, personalLinkRef, personalLinkToken, resolvePersonalLinkRefs } from "./personal-link-token.js"
 import { createBudget, deliverBudget } from "./budgets.js"
@@ -207,7 +218,7 @@ it("si la fecha dice que es menor, desde el enlace no se registra a nadie: queda
   expect(notes.map((note) => note.body).join(" ")).toContain("Rosa Paz, DNI 42345678")
 })
 
-it("la tía: otro vínculo que abre el enlace ve solo la cita; ni presupuesto, ni consentimiento, ni sus datos", async () => {
+it("la tía: otro vínculo que abre el enlace no ve el presupuesto, el consentimiento ni sus datos (y sin autorización, tampoco la cita)", async () => {
   const f = await clinicalFixture()
   const [tia] = await ownerDb.insert(contact).values({ organizationId: ORG, displayName: "Marta Tía", givenNames: "Marta" }).returning({ id: contact.id })
   await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId: f.patient.id, contactId: tia!.id, relationship: "family", createdBy: f.actor })
@@ -227,6 +238,127 @@ it("la tía: otro vínculo que abre el enlace ve solo la cita; ni presupuesto, n
   const personId = (await f.run((tx) => patientPersonId(tx, ORG, f.patient.id)))!
   const own = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: personId, patientId: f.patient.id }, { secretsKey: KEY }))
   expect((await f.run((tx) => getPersonalLinkView(tx, ORG, own.token))).budgets.map((row) => row.id)).toEqual([budget.id])
+})
+
+/** Una cita por venir del paciente, en una sede nueva. */
+async function upcomingAppointment(f: Awaited<ReturnType<typeof clinicalFixture>>, patientId: string) {
+  const [site] = await ownerDb
+    .insert(branch)
+    .values({ organizationId: ORG, name: `Sede ${randomUUID().slice(0, 6)}`, timezone: "America/Lima" })
+    .returning({ id: branch.id })
+  const room = await f.run((tx) => createRoom(tx, ORG, { branchId: site!.id, name: "Unidad dental 1" }))
+  const startsAt = new Date(Date.now() + 3 * 86_400_000)
+  const [booked] = await ownerDb
+    .insert(appointment)
+    .values({
+      organizationId: ORG,
+      branchId: site!.id,
+      patientId,
+      professionalUserId: f.actor,
+      roomId: room.id,
+      startsAt,
+      endsAt: new Date(startsAt.getTime() + 30 * 60_000),
+      durationMin: 30,
+    })
+    .returning({ id: appointment.id })
+  return booked!.id
+}
+
+/** Un token de «confirmar» o «cancelar» de un correo de recordatorio, para esa persona y esa cita. */
+async function emailToken(appointmentId: string, contactId: string, purpose: "confirm" | "cancel" = "confirm") {
+  const raw = randomUUID()
+  await ownerDb.insert(automationLinkToken).values({
+    tokenHash: createHash("sha256").update(raw).digest("hex"),
+    organizationId: ORG,
+    purpose,
+    appointmentId,
+    contactId,
+    expiresAt: new Date(Date.now() + 3 * 86_400_000),
+  })
+  return raw
+}
+
+it("S3: un familiar sin autorización no ve ni maneja la cita, tampoco con un enlace que ya tenía", async () => {
+  const f = await clinicalFixture()
+  const appointmentId = await upcomingAppointment(f, f.patient.id)
+  const [tia] = await ownerDb.insert(contact).values({ organizationId: ORG, displayName: "Marta Tía", givenNames: "Marta" }).returning({ id: contact.id })
+  await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId: f.patient.id, contactId: tia!.id, relationship: "family", createdBy: f.actor })
+  // Un enlace que ya le llegó antes de este cambio: sigue sin mostrarle la cita ni dejarla tocar.
+  const sent = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: tia!.id, patientId: f.patient.id, appointmentId }, { secretsKey: KEY }))
+  expect((await f.run((tx) => getPersonalLinkView(tx, ORG, sent.token))).appointment).toBeNull()
+  await expect(f.run((tx) => confirmBookingLinkAppointment(tx, ORG, sent.token))).rejects.toMatchObject({ code: "BOOKING_LINK_EXPIRED" })
+  await expect(f.run((tx) => cancelBookingLinkAppointment(tx, ORG, sent.token))).rejects.toMatchObject({ code: "BOOKING_LINK_EXPIRED" })
+  await expect(
+    f.run((tx) => changeBookingLinkAppointment(tx, ORG, sent.token, { startsAt: new Date(Date.now() + 4 * 86_400_000).toISOString(), professionalUserId: f.actor })),
+  ).rejects.toMatchObject({ code: "BOOKING_LINK_EXPIRED" })
+  const [still] = await ownerDb.select({ status: appointment.status }).from(appointment).where(eq(appointment.id, appointmentId))
+  expect(still?.status).toBe("programada")
+  // Sofi y la Bandeja tampoco se lo dan: lo mismo que el chat le negaría.
+  const conversationId = await chatOf(tia!.id, new Date())
+  await expect(
+    f.run((tx) => createBookingLink(tx, ORG, { conversationId, patientId: f.patient.id }, { secretsKey: KEY })),
+  ).rejects.toMatchObject({ code: "PATIENT_CONTEXT_FORBIDDEN" })
+  await expect(
+    f.run((tx) => createBookingLink(tx, ORG, { conversationId, patientId: f.patient.id, booking: false }, { secretsKey: KEY })),
+  ).rejects.toMatchObject({ code: "PATIENT_CONTEXT_FORBIDDEN" })
+  await expect(
+    f.run((tx) => issueAgendaLink(tx, ORG, { conversationId, patientId: f.patient.id }, { secretsKey: KEY })),
+  ).rejects.toMatchObject({ code: "PATIENT_CONTEXT_FORBIDDEN" })
+  // Con su autorización vigente sí ve la cita (y nada más que la cita).
+  await f.run((tx) =>
+    grantResponsibility(tx, ORG, f.actor, f.patient.id, { contactId: tia!.id, kind: "autorizado_informacion", startsAt: "2020-01-01" }),
+  )
+  const allowed = await f.run((tx) => createBookingLink(tx, ORG, { conversationId, patientId: f.patient.id, booking: false }, { secretsKey: KEY }))
+  const view = await f.run((tx) => getPersonalLinkView(tx, ORG, allowed.token))
+  expect(view).toMatchObject({ appointment: { canConfirm: true }, budgets: [], consents: [], data: null })
+})
+
+it("S4: «Quitar enlace» y terminar el vínculo vencen los botones del correo; el correo de quien no tiene facultad no emite nada", async () => {
+  configurePublicLinks({ webURL: "https://app.odentia.test", cookieDomain: "odentia.test" })
+  try {
+    const f = await clinicalFixture()
+    const personId = (await f.run((tx) => patientPersonId(tx, ORG, f.patient.id)))!
+    const appointmentId = await upcomingAppointment(f, f.patient.id)
+    const confirm = await emailToken(appointmentId, personId, "confirm")
+    const cancel = await emailToken(appointmentId, personId, "cancel")
+    expect((await f.run((tx) => personalLinkForEmailToken(tx, ORG, confirm, { secretsKey: KEY }))).token).toMatch(/^[0-9a-f]{64}$/)
+    // «Quitar enlace»: el botón del correo ya enviado no lo revive.
+    await f.run((tx) => revokePersonalLinks(tx, ORG, f.actor, f.patient.id))
+    await expect(f.run((tx) => personalLinkForEmailToken(tx, ORG, confirm, { secretsKey: KEY }))).rejects.toMatchObject({ code: "BOOKING_LINK_EXPIRED" })
+    await expect(f.run((tx) => personalLinkForEmailToken(tx, ORG, cancel, { secretsKey: KEY }))).rejects.toMatchObject({ code: "BOOKING_LINK_EXPIRED" })
+    // La baja nunca se toca.
+    const baja = randomUUID()
+    await ownerDb.insert(automationLinkToken).values({
+      tokenHash: createHash("sha256").update(baja).digest("hex"),
+      organizationId: ORG, purpose: "baja", contactId: personId, expiresAt: new Date(Date.now() + 30 * 86_400_000),
+    })
+    await f.run((tx) => revokePersonalLinks(tx, ORG, f.actor, f.patient.id))
+    const [unsubscribe] = await ownerDb.select({ expiresAt: automationLinkToken.expiresAt }).from(automationLinkToken)
+      .where(eq(automationLinkToken.tokenHash, createHash("sha256").update(baja).digest("hex")))
+    expect(unsubscribe!.expiresAt.getTime()).toBeGreaterThan(Date.now())
+
+    // Terminar el vínculo de la madre vence los suyos.
+    const [madre] = await ownerDb.insert(contact).values({ organizationId: ORG, displayName: "Elsa Madre" }).returning({ id: contact.id })
+    await f.run((tx) => setPatientContact(tx, ORG, f.actor, f.patient.id, { contactId: madre!.id, relationship: "guardian", isPreferred: false }))
+    await f.run((tx) =>
+      grantResponsibility(tx, ORG, f.actor, f.patient.id, { contactId: madre!.id, kind: "autorizado_informacion", startsAt: "2020-01-01" }),
+    )
+    const hers = await emailToken(appointmentId, madre!.id)
+    await f.run((tx) => setPatientContact(tx, ORG, f.actor, f.patient.id, { contactId: madre!.id, relationship: "family", isPreferred: false }))
+    const [row] = await ownerDb.select({ expiresAt: automationLinkToken.expiresAt }).from(automationLinkToken)
+      .where(eq(automationLinkToken.tokenHash, createHash("sha256").update(hers).digest("hex")))
+    expect(row!.expiresAt.getTime()).toBeLessThanOrEqual(Date.now())
+
+    // Un correo que llegó a un familiar sin autorización no le da el enlace de esa cita.
+    const [tia] = await ownerDb.insert(contact).values({ organizationId: ORG, displayName: "Marta Tía" }).returning({ id: contact.id })
+    await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId: f.patient.id, contactId: tia!.id, relationship: "family", createdBy: f.actor })
+    const tias = await emailToken(appointmentId, tia!.id)
+    await expect(f.run((tx) => personalLinkForEmailToken(tx, ORG, tias, { secretsKey: KEY }))).rejects.toMatchObject({ code: "BOOKING_LINK_EXPIRED" })
+    const issued = await ownerDb.select({ id: appointmentBookingLink.id }).from(appointmentBookingLink).where(eq(appointmentBookingLink.contactId, tia!.id))
+    expect(issued).toEqual([])
+  } finally {
+    configurePublicLinks(null)
+  }
 })
 
 it("pasada su vigencia solo queda su cita; «Quitar enlace» y cambiar el vínculo lo dejan sin efecto", async () => {

@@ -45,6 +45,7 @@ import {
   type BookingLinkBranch,
   bookingContext,
   clinicNameOf,
+  contactHandlesAppointment,
   hasSchedulableItems,
   issuePersonalLink,
   linkContactFirstName,
@@ -1692,6 +1693,8 @@ export async function personalLinkForEmailToken(
     .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, row.appointmentId)))
     .limit(1)
   if (!appt) throw linkExpired()
+  // Antes de emitir, la facultad de hoy: un vínculo que cambió o que nunca la tuvo no recibe su enlace (S4).
+  if (!(await contactHandlesAppointment(tx, orgId, row.contactId, appt.patientId))) throw linkExpired()
   const link = await issuePersonalLink(
     tx,
     orgId,

@@ -40,6 +40,7 @@ import {
   hasOwnRecord,
   registerPatient,
 } from "./patient-registration.js"
+import { expireEmailAppointmentTokens } from "./pair-access.js"
 import { listPatientsByContact, patientOrganizationToday, personIsTest } from "./patients.js"
 import { personalLinkToken } from "./personal-link-token.js"
 import { scheduledItems } from "./plan-next.js"
@@ -469,6 +470,16 @@ async function bookingLinkFor(
       .limit(1)
     if (!site) throw branchNotFound()
   }
+  // Su enlace muestra y maneja la cita: pide lo mismo que el chat (S3). Un familiar sin
+  // autorización no lo recibe en ningún modo; al cambiar una cita, simplemente no va.
+  if (chosen && !(await contactHandlesAppointment(tx, orgId, conv.contactId, chosen.id))) {
+    if (appointments === "una-cita") return null
+    throw new ServiceError(
+      "PATIENT_CONTEXT_FORBIDDEN",
+      409,
+      "El interlocutor no está autorizado a recibir información de este paciente",
+    )
+  }
   if (
     appointments === "sin-cita" &&
     chosen &&
@@ -477,15 +488,6 @@ async function bookingLinkFor(
     return null
   if (appointments === "una-cita") {
     if (!chosen) return null
-    // Cambiar por el enlace pide lo mismo que por el chat: un familiar sin autorización no recibe ninguna de las dos.
-    const allowed = await resolveAgentPatientContext(tx, orgId, conv.contactId, chosen.id).then(
-      () => true,
-      (error: unknown) => {
-        if (error instanceof ServiceError && error.code === "PATIENT_CONTEXT_FORBIDDEN") return false
-        throw error
-      },
-    )
-    if (!allowed) return null
     const upcoming = await tx
       .select({ id: appointment.id })
       .from(appointment)
@@ -518,6 +520,26 @@ async function bookingLinkFor(
     forName: chosen && chosen.relationship !== "self" ? chosen.displayName : null,
     needsRegistration: !chosen,
   }
+}
+
+/**
+ * Quien abre el enlace puede ver y manejar la cita del paciente: la propia persona, su
+ * representante legal vigente o un autorizado de información vigente, lo mismo que pide el
+ * chat (`resolveAgentPatientContext`). Un vínculo sin autorización (una tía) no.
+ */
+export async function contactHandlesAppointment(
+  tx: Db,
+  orgId: string,
+  contactId: string,
+  patientId: string,
+): Promise<boolean> {
+  return resolveAgentPatientContext(tx, orgId, contactId, patientId).then(
+    () => true,
+    (error: unknown) => {
+      if (error instanceof ServiceError) return false
+      throw error
+    },
+  )
 }
 
 /** El enlace por su huella. Un enlace desconocido no existe: no se distingue de uno mal escrito. */
@@ -657,6 +679,12 @@ export interface ResolvedPersonalLink {
    * y agenda lo aceptado. Otro vínculo (un familiar, un autorizado) ve solo su cita.
    */
   decides: boolean
+  /**
+   * Quien lo abre ve y maneja la cita del paciente (`contactHandlesAppointment`): sin eso el
+   * enlace no muestra ninguna cita ni deja reservar, cambiar, cancelar o confirmar. Se mira
+   * al abrirlo: así corta también los enlaces que ya se enviaron (S3).
+   */
+  handlesAppointment: boolean
   /** Pasó la vigencia de todo lo que no es su propia cita. */
   expired: boolean
 }
@@ -671,14 +699,31 @@ export async function resolvePersonalLink(
   const row = await findLink(tx, orgId, token, lock)
   const live = row.revokedAt === null
   const patientId = live ? await patientOf(tx, orgId, row) : row.patientId
-  const shown = live ? await shownAppointment(tx, orgId, row, patientId) : null
-  const own = shown && shown.id === row.appointmentId ? shown.startsAt : null
-  const deadline = own && own > row.expiresAt ? own : row.expiresAt
-  const canBook = live && row.booking && row.usedAt === null && row.expiresAt.getTime() > Date.now()
   const decides =
     live && patientId !== null && (await contactDecides(tx, orgId, patientId, row.contactId))
+  // Sin paciente aún, la cita que muestra es la que reservó ahí mismo.
+  const handlesAppointment =
+    live &&
+    (patientId === null ||
+      decides ||
+      (await contactHandlesAppointment(tx, orgId, row.contactId, patientId)))
+  const shown = handlesAppointment ? await shownAppointment(tx, orgId, row, patientId) : null
+  const own = shown && shown.id === row.appointmentId ? shown.startsAt : null
+  const deadline = own && own > row.expiresAt ? own : row.expiresAt
+  const canBook =
+    handlesAppointment && row.booking && row.usedAt === null && row.expiresAt.getTime() > Date.now()
   const expired = deadline.getTime() <= Date.now()
-  return { row, patientId, live, appointment: shown, deadline, canBook, decides, expired }
+  return {
+    row,
+    patientId,
+    live,
+    appointment: shown,
+    deadline,
+    canBook,
+    decides,
+    handlesAppointment,
+    expired,
+  }
 }
 
 /**
@@ -732,6 +777,8 @@ export async function revokePersonalLinks(
       ),
     )
     .returning({ id: appointmentBookingLink.id })
+  // Los botones «Confirmar» y «Cancelar» de los correos ya enviados llevan a su enlace: también vencen (S4).
+  await expireEmailAppointmentTokens(tx, orgId, { patientId })
   if (rows.length > 0) {
     await tx.insert(auditEvent).values({
       organizationId: orgId,
