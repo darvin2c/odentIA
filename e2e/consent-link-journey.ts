@@ -137,7 +137,7 @@ export async function consentLinkJourney(input: {
   await gotoHydrated(phone, url(`/pendientes?abre=firma&token=${token}`))
   await expect(phone.getByRole("heading", { level: 1, name: "Firma tu consentimiento" })).toBeVisible()
   // Arriba, siempre, el camino a lo demás: un enlace de verdad, con el mismo token.
-  await expect(phone.getByRole("link", { name: "Tus pendientes" })).toHaveAttribute("href", `/pendientes?token=${token}`)
+  await expect(phone.getByRole("link", { name: "Tus pendientes", exact: true })).toHaveAttribute("href", `/pendientes?token=${token}`)
   // Lee la hoja del papel: la pieza y la declaración que acepta, sin el número de su documento.
   const sheet = phone.getByRole("article", { name: template.title })
   await expect(sheet.getByText("Procedimiento de prueba", { exact: true })).toBeVisible()
@@ -163,8 +163,9 @@ export async function consentLinkJourney(input: {
   expect(await phone.evaluate(() => window.scrollY)).toBe(0)
   expect(await phone.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
   await phone.screenshot({ path: info.outputPath("1-firmado-telefono.png") })
-  // En la lista ya no está por firmar.
-  await phone.getByRole("link", { name: "Tus pendientes" }).click()
+  // En la lista ya no está por firmar. Se vuelve por «‹ Tus pendientes» de arriba (exacto: debajo del
+  // «Listo» puede estar también «Ver tus pendientes», que lleva al mismo lugar).
+  await phone.getByRole("link", { name: "Tus pendientes", exact: true }).click()
   await expect(phone.getByRole("heading", { level: 1, name: "Tus pendientes" })).toBeVisible()
   await expect(phone.getByRole("region", { name: "Tu consentimiento" })).toHaveCount(0)
   await visitor.close()

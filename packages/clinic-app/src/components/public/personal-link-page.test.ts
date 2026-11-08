@@ -93,7 +93,7 @@ describe("sin firmar desde el teléfono", () => {
     expect(unsignableWords({ why: "sin-fecha", speaksTo: "representante", patientFirstName: "Mateo" }).notice).toBe("Este lo firmas tú en la cita de Mateo, antes de empezar.")
     // Sin documento en su ficha: lo completa en «Tus datos» y firma aquí, sea paciente o quien decide por él.
     expect(unsignableWords({ why: "sin-documento", speaksTo: "representante", patientFirstName: "Mateo" }).notice).toBe("Para firmar desde aquí, primero completa tus datos.")
-    expect(unsignableWords({ why: "sin-documento", speaksTo: "paciente", patientFirstName: null }).inPlace).toBe("Firmas aquí cuando completes tus datos")
+    expect(unsignableWords({ why: "sin-documento", speaksTo: "paciente", patientFirstName: "Rosa" }).inPlace).toBe("Firmas aquí cuando completes tus datos")
     expect(unsignableWords({ why: "menor", speaksTo: "paciente", patientFirstName: "Mateo" }).inPlace).toBe("Lo firma tu madre, padre o tutor en tu cita")
     expect(unsignableWords({ why: "sin-fecha", speaksTo: "paciente", patientFirstName: "Rosa" }).inPlace).toBe("Lo firmas en tu cita")
   })
