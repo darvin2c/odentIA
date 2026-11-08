@@ -113,6 +113,8 @@ interface Draft {
   billingMode: BillingMode
   durationMin: string
   scope: string
+  /** Sesiones habituales que sugiere la biblioteca; se cambian después en el servicio. */
+  sessions: number
   /** El nombre en la biblioteca, para nombrar la fila mientras se cambia el propio. */
   libraryName: string
   /** Su código en la lista del país («CPMS D2330»); null donde no hay lista. */
@@ -150,6 +152,7 @@ function templateDraft(template: TreatmentTemplateItem, listLabel: string | null
     billingMode: "treatment",
     durationMin: "",
     scope: template.scope,
+    sessions: template.usualSessions ?? 1,
     libraryName: template.name,
     code: coding && listLabel ? `${listLabel} ${coding.code}` : null,
   }
@@ -625,11 +628,19 @@ function AddServicesPage() {
         cell: ({ row }) => {
           const item = row.original
           if (item.owned) return <span className="text-muted-foreground">—</span>
+          // Lo que suele llevar: se ve aquí y se cambia después en el servicio.
+          const sessions =
+            item.sessions > 1 ? <span className="text-muted-foreground"> · {item.sessions} sesiones</span> : null
           if (!item.chosen) {
             return item.durationMin.trim() !== "" ? (
-              `${item.durationMin.trim()} min`
+              <>
+                {`${item.durationMin.trim()} min`}
+                {sessions}
+              </>
             ) : (
-              <span className="text-muted-foreground">Sin duración</span>
+              <span className="text-muted-foreground">
+                Sin duración{item.sessions > 1 ? ` · ${item.sessions} sesiones` : ""}
+              </span>
             )
           }
           return (
@@ -651,6 +662,7 @@ function AddServicesPage() {
                         onChange={(event) => field.handleChange(event.target.value)}
                       />
                       <span className="text-muted-foreground">min</span>
+                      {sessions}
                     </div>
                   )}
                 </field.Control>
@@ -1009,6 +1021,8 @@ interface OwnServiceValues {
   billingMode: BillingMode
   price: string
   durationMin: string
+  /** Con cuántas sesiones nace en el plan al indicarlo. */
+  usualSessions: string
 }
 
 const OWN_SERVICE_DEFAULTS: OwnServiceValues = {
@@ -1021,6 +1035,7 @@ const OWN_SERVICE_DEFAULTS: OwnServiceValues = {
   billingMode: "treatment",
   price: "",
   durationMin: "",
+  usualSessions: "1",
 }
 
 /** Lo que se revisa antes de crear el servicio propio, con los mismos límites que la API. */
@@ -1042,6 +1057,12 @@ function ownServiceSchema(regional: Regional, codeList: { codeName: string; requ
       else if (price.state === "invalid") ctx.addIssue({ code: "custom", message: price.message })
     }),
     durationMin: z.string().refine((value) => checkDuration(value).ok, "Minutos enteros entre 1 y 1440"),
+    usualSessions: z
+      .string()
+      .refine(
+        (value) => /^\d{1,2}$/.test(value.trim()) && Number(value.trim()) >= 1 && Number(value.trim()) <= 60,
+        "Un número entero entre 1 y 60",
+      ),
   })
 }
 
@@ -1095,6 +1116,7 @@ function OwnServiceDrawer({
         priceCents: price.cents,
         billingMode: value.billingMode,
         durationMin: checkDuration(value.durationMin).minutes,
+        usualSessions: Number(value.usualSessions.trim()),
         leavesFinding: leaves?.body(value.leavesCondition, value.leavesVariant) ?? null,
         officialCode: value.officialCode?.code ?? null,
       })
@@ -1271,6 +1293,18 @@ function OwnServiceDrawer({
                   </InputGroup>
                 )}
               </field.Control>
+            )}
+          </form.AppField>
+          <form.AppField name="usualSessions">
+            {(field) => (
+              <field.TextField
+                label="Sesiones habituales"
+                description="Con cuántas nace en el plan; en cada paciente se pueden cambiar."
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={60}
+              />
             )}
           </form.AppField>
         </div>
