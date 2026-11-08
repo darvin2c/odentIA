@@ -83,9 +83,8 @@ export function LinkSignedNotice({
     >
       <p className="text-sm font-medium">
         {rows.length === 1
-          ? "Firmó un consentimiento en su enlace"
-          : `Firmó ${rows.length} consentimientos en su enlace`}
-        : revísalo con la persona y confírmalo antes de empezar.
+          ? "Firmó un consentimiento en su enlace: revísalo con la persona y confírmalo antes de empezar."
+          : `Firmó ${rows.length} consentimientos en su enlace: revísalos con la persona y confírmalos antes de empezar.`}
       </p>
       <ul className="flex flex-col gap-2">
         {rows.map((row) => (

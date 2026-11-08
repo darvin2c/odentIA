@@ -144,6 +144,11 @@ function whenText(when: PersonalLinkWhen): string {
   return `${longDay(when.startsAt, when.timeZone).toLowerCase()}, ${timeLabel(when.startsAt, when.timeZone)}`
 }
 
+/** Cierra la frase sin repetir el punto de «a. m.». */
+function withPeriod(text: string): string {
+  return text.endsWith(".") ? text : `${text}.`
+}
+
 /** «De Mateo · para su cita del jueves…», o «Para tu cita del jueves…». */
 function contextLine(view: PersonalLinkView, when: PersonalLinkWhen | null): string | null {
   const whose = view.patientFirstName ? `De ${view.patientFirstName}` : null
@@ -241,7 +246,7 @@ export function pendingItems(view: PersonalLinkView): PendingItem[] {
           ? `${consent.title} · ${consent.procedureRef}`
           : consent.title,
       detail: consent.appointment
-        ? `${name ? "Para su cita" : "Para tu cita"} del ${whenText(consent.appointment)}${consent.signable ? "." : ". Lo firmas en la cita."}`
+        ? `${name ? "Para su cita" : "Para tu cita"} del ${withPeriod(whenText(consent.appointment))}${consent.signable ? "" : " Lo firmas en la cita."}`
         : consent.signable
           ? null
           : "Lo firmas en la cita.",
