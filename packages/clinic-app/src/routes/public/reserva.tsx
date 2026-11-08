@@ -3,7 +3,7 @@ import { Switch } from "@odentia/ui/components/switch"
 import { ConfirmDialog, EmptyState, ErrorState, internationalText, LoadingState, PageShell } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { CalendarCheck, ChevronLeft, FileDown } from "lucide-react"
+import { CalendarCheck, ChevronLeft } from "lucide-react"
 import { type ReactNode, useId, useState } from "react"
 import { AppointmentBlock } from "../../components/public/appointment-block"
 import { type BudgetAnswer, BudgetResponder } from "../../components/public/budget-responder"
@@ -19,7 +19,6 @@ import {
   chooseLinkMessages,
   confirmBooking,
   downloadLinkCalendar,
-  downloadLinkPaper,
   fetchBookingLink,
   type MessageChoice,
   type PersonalLinkMessages,
@@ -446,7 +445,6 @@ function PersonalLinkPage() {
             onAction={() => setScreen({ kind: "cuestionario" })}
           />
         ) : null}
-        {view.papers.length > 0 ? <Papers slug={slug} token={token} papers={view.papers} /> : null}
         {view.messages ? (
           <section aria-label="Tus mensajes" className="flex flex-col gap-3 rounded-2xl border bg-card p-4">
             <h2 className="font-semibold">Tus mensajes</h2>
@@ -456,7 +454,7 @@ function PersonalLinkPage() {
             </Button>
           </section>
         ) : null}
-        <p className="text-sm text-muted-foreground">No mostramos nada de lo que ya tenemos guardado. Si te enviamos algo nuevo, aparece aquí mismo.</p>
+        <p className="text-sm text-muted-foreground">Aquí está lo que tienes pendiente con la clínica. Tus recetas, órdenes y comprobantes te llegan en PDF por tu chat o tu correo.</p>
       </div>
     </PageShell>
   )
@@ -497,54 +495,6 @@ function Block({ title, badge, text, action, onAction }: { title: string; badge:
   )
 }
 
-/** «16 de octubre», en el formato y la zona de la clínica. */
-function paperDay(iso: string): string {
-  return new Intl.DateTimeFormat(activeOrgLocale(), { timeZone: activeOrgTimeZone(), day: "numeric", month: "long" }).format(new Date(iso))
-}
-
-/**
- * «Tus papeles» (decisión 8): la receta y el comprobante de los últimos 30
- * días, para descargar. Pasados los 30 días se le piden a la clínica.
- */
-function Papers({ slug, token, papers }: { slug: string; token: string; papers: PersonalLinkView["papers"] }) {
-  const download = useMutation({
-    mutationFn: (paper: PersonalLinkView["papers"][number]) => downloadLinkPaper(slug, token, paper),
-  })
-  const busy = download.isPending ? download.variables : null
-  return (
-    <section aria-label="Tus papeles" className="flex flex-col gap-3 rounded-2xl border bg-card p-4">
-      <h2 className="font-semibold">Tus papeles</h2>
-      <ul className="flex flex-col divide-y">
-        {papers.map((paper) => (
-          <li key={`${paper.kind}:${paper.id}`} className="flex flex-wrap items-center justify-between gap-2 py-2">
-            <span className="flex min-w-0 flex-col">
-              <span className="font-medium">{paper.title}</span>
-              <span className="text-sm text-muted-foreground">
-                {capital(paperDay(paper.issuedAt))} · disponible hasta el {paperDay(paper.availableUntil)}
-              </span>
-            </span>
-            <Button
-              type="button"
-              variant="outline"
-              className="min-h-11"
-              disabled={busy?.id === paper.id && busy.kind === paper.kind}
-              onClick={() => download.mutate(paper)}
-            >
-              <FileDown className="size-4" aria-hidden />
-              {busy?.id === paper.id && busy.kind === paper.kind ? "Descargando…" : "Descargar"}
-            </Button>
-          </li>
-        ))}
-      </ul>
-      {download.isError ? (
-        <p role="alert" className="text-sm text-destructive">
-          No pudimos descargar el papel. Inténtalo de nuevo o pídeselo a la clínica.
-        </p>
-      ) : null}
-      <p className="text-sm text-muted-foreground">Cada papel queda aquí 30 días. Después, pídeselo a la clínica.</p>
-    </section>
-  )
-}
 
 /** Los tres interruptores de «Tus mensajes» y la fila fija de los avisos (ADR 0040). */
 const MESSAGE_SWITCHES: { purpose: Exclude<MessageChoice, "ninguno">; title: string; detail: (clinicName: string) => string }[] = [

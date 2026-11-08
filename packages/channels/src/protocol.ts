@@ -154,15 +154,17 @@ export interface ProviderTemplate {
    */
   link?: { title: string; url: string } | null
   /**
-   * Por qué odentIA no sabe enviarla: lleva un encabezado con datos o con un
-   * archivo (`encabezado`), o sus datos van por nombre (`datos_por_nombre`).
+   * Por qué odentIA no sabe enviarla sola: lleva un encabezado con datos, una
+   * imagen o un video (`encabezado`), sus datos van por nombre
+   * (`datos_por_nombre`), o lleva un documento como encabezado
+   * (`encabezado_documento`): esa solo sale con el documento que la acompaña.
    * Nulo o ausente: se puede enviar.
    */
   unsupported?: TemplateUnsupported | null
 }
 
-/** Lo que odentIA no sabe enviar de una plantilla que ya estaba en la cuenta. */
-export const TEMPLATE_UNSUPPORTED = ["encabezado", "datos_por_nombre"] as const
+/** Lo que odentIA no sabe enviar de una plantilla, o solo envía con su documento. */
+export const TEMPLATE_UNSUPPORTED = ["encabezado", "datos_por_nombre", "encabezado_documento"] as const
 export type TemplateUnsupported = (typeof TEMPLATE_UNSUPPORTED)[number]
 
 /** Lo que se pide aprobar: texto, un ejemplo por variable y botones. */
@@ -178,6 +180,11 @@ export interface TemplateRequest {
    * con un ejemplo de la dirección completa. Va antes de los de respuesta.
    */
   link?: { title: string; url: string; example: string }
+  /**
+   * Encabezado con un documento (el PDF de cada envío). Para aprobarla el
+   * proveedor pide un PDF de muestra, que el adaptador sube antes de pedirla.
+   */
+  header?: { format: "document"; example: { bytes: Uint8Array; filename: string } }
 }
 
 /** Aviso del proveedor: una plantilla cambió de estado. */
@@ -278,7 +285,16 @@ export interface OutboundMessage {
     | { type: "text"; text: string; buttons?: ReplyButton[] }
     // `buttons`: lo que devuelve cada botón de respuesta rápida, por posición.
     // `link`: la parte variable de la dirección del botón que abre un enlace (va primero).
-    | { type: "template"; name: string; language: string; params: string[]; buttons?: ReplyButton[]; link?: string }
+    // `document`: el encabezado de documento, con la URL firmada que el proveedor descarga al enviar.
+    | {
+        type: "template"
+        name: string
+        language: string
+        params: string[]
+        buttons?: ReplyButton[]
+        link?: string
+        document?: { url: string; filename: string }
+      }
     // `url` es una URL firmada que el proveedor descarga al enviar.
     | {
         type: "media"
@@ -330,6 +346,12 @@ export class ConnectionRejectedError extends Error {
 
 export interface ChannelAdapterDeps {
   fetch: typeof fetch
+  /**
+   * El id de la app de Meta de odentIA (`META_APP_ID`): con él se sube la
+   * muestra que pide una plantilla con documento cuando la conexión se hizo con
+   * «Conectar con Facebook». Sin él, el adaptador lo lee de la clave de la conexión.
+   */
+  metaAppId?: string
   /** Clave de la conexión para firmar lo que se envía a un tercero (el aviso al sitio del chat web). */
   webhookSecret?: string
 }

@@ -231,6 +231,8 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "document.retired": say("Retiró un archivo de la ficha de un paciente"),
   "document.context_corrected": say("Corrigió a qué pertenece un archivo de un paciente"),
   "document.report_status": say("Cambió el estado del informe de una imagen"),
+  "document.portal_hidden": say("Ocultó un archivo del portal de un paciente"),
+  "document.portal_shown": say("Volvió a mostrar un archivo en el portal de un paciente"),
   "imaging_study.started": say("Empezó a subir una tomografía a la ficha de un paciente"),
   "imaging_study.completed": say("Terminó de subir una tomografía a la ficha de un paciente"),
   "imaging_study.measured": say("Guardó una medida en la tomografía de un paciente"),
@@ -357,7 +359,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "promotion.updated": say("Cambió una promoción"),
   "promotion.ended": say("Terminó una promoción"),
   "financial_document.sent": say("Envió un documento de cobro"),
-  "health_document.sent": say("Envió una receta, una orden o un consentimiento a la persona"),
+  "health_document.sent": say("Envió un documento de salud a la persona"),
   // Contactos y ventas
   "contact.created": say("Creó un contacto"),
   "contact.updated": say("Cambió los datos de un contacto"),

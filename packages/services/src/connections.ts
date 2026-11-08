@@ -460,6 +460,11 @@ export interface ConnectionDeps {
    * dirección de avisos; sin ella no se puede y la conexión no recibiría nada.
    */
   webhookBaseUrl?: string
+  /**
+   * El id de la app de Meta de odentIA: sube el PDF de muestra del mensaje con
+   * documento en las conexiones de «Conectar con Facebook» (ADR 0156).
+   */
+  metaAppId?: string
 }
 
 /** Cómo quedaron los mensajes de WhatsApp tras conectar o cambiar la clave. */
@@ -624,7 +629,11 @@ async function prepareMessages(
   secretsKey: Buffer,
   deps: ConnectionDeps,
 ): Promise<ConnectionMessagesReport> {
-  const templateDeps = { fetch: deps.fetch, validateExternal: deps.validateExternal }
+  const templateDeps = {
+    fetch: deps.fetch,
+    validateExternal: deps.validateExternal,
+    ...(deps.metaAppId ? { metaAppId: deps.metaAppId } : {}),
+  }
   if (deps.validateExternal === false) {
     await declareConfigTemplates(tx, orgId, row.id, config["templates"])
   } else {
@@ -1251,7 +1260,11 @@ export async function syncConnectionAccount(
 ): Promise<TemplateItem[]> {
   const { row, config } = await getConnectionSecrets(tx, orgId, id, secretsKey)
   const adapter = requireAdapter(row.provider)
-  const templateDeps = { fetch: deps.fetch, validateExternal: deps.validateExternal }
+  const templateDeps = {
+    fetch: deps.fetch,
+    validateExternal: deps.validateExternal,
+    ...(deps.metaAppId ? { metaAppId: deps.metaAppId } : {}),
+  }
   await syncConnectionTemplates(tx, orgId, id, secretsKey, templateDeps)
   if (adapter.capabilities.templates) {
     await requestMissingTemplates(tx, orgId, id, secretsKey, new Date(), templateDeps, {

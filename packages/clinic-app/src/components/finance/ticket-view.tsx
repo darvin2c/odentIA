@@ -408,7 +408,7 @@ export function TicketView({
                 )}
               >
                 {receipt.sent
-                  ? `El comprobante salió por correo a ${receipt.email}. También queda en su enlace, en «Tus papeles».`
+                  ? `El comprobante salió por correo a ${receipt.email}. Si tiene acceso al portal, también lo ve ahí.`
                   : `${receipt.text}.`}
               </p>
             ) : null}

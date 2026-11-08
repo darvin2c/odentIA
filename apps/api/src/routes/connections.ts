@@ -67,8 +67,15 @@ export function createConnectionsRoute(deps: CrmDeps) {
     fetch,
     validateExternal: deps.validateExternal,
     webhookBaseUrl: deps.webhookBaseUrl,
+    ...(deps.metaAppId ? { metaAppId: deps.metaAppId } : {}),
   }
-  const writeDeps = { fetch, validateExternal: deps.validateExternal, secretsKey: deps.secretsKey }
+  // La muestra del mensaje con documento se sube con la misma app en todas las rutas (ADR 0156).
+  const writeDeps = {
+    fetch,
+    validateExternal: deps.validateExternal,
+    secretsKey: deps.secretsKey,
+    ...(deps.metaAppId ? { metaAppId: deps.metaAppId } : {}),
+  }
 
   /** Configuración: leer la ven quienes pueden abrirla; cambiarla, quienes la administran. */
   const forbidden = (c: Context, permission: "settings.read" | "settings.write") => {

@@ -9,11 +9,15 @@ export const portalPolicyInput = z.strictObject({
   enabled: z.boolean(),
   allowedScope: z.strictObject({ appointments: z.boolean(), budgets: z.boolean(), account: z.boolean(), documents: z.boolean() }),
 })
-/** «Dar acceso al portal» en un paso: quién entra, qué verá, la comprobación y cómo le llega. */
+/**
+ * «Dar acceso al portal» en un paso: quién entra, la comprobación y cómo le
+ * llega. Lo que verá ya no se elige (ADR 0156): `scope` se acepta para los
+ * clientes de antes y se ignora.
+ */
 export const portalAccessInput = z.strictObject({
   patientId: z.uuid(),
   contactId: z.uuid(),
-  scope: portalScopeInput,
+  scope: portalScopeInput.optional(),
   identityChecked: z.boolean(),
   delivery: z.enum(["qr", "whatsapp"]),
 })
