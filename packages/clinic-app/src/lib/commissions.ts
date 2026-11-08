@@ -264,8 +264,14 @@ export interface CommissionException {
 /** Lo propio: el mes pedido y hasta tres meses anteriores con cobros. */
 export interface MyCommissions extends MonthlyCommissions {
   previous: CommissionSummary[]
-  /** Lo que atendió en el mes y lo que de eso aún no se cobra (su comisión llega al cobrarse). */
-  attended?: { attendedCents: number; unpaidCents: number }
+  /**
+   * Lo atendido en el mes que aún no se cobra (su parte llega al cobrarse): lo que falta en cada
+   * moneda y cada servicio con su día, sin paciente ni importe.
+   */
+  attended?: {
+    currencies: Array<{ currency: string; unpaidCents: number }>
+    items: Array<{ id: string; description: string; attendedAt: string; currency: string }>
+  }
 }
 
 /** Lo que falta pagar de todos los meses: el total de hoy y cada mes con cobros sin pagar. */
