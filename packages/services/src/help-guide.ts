@@ -1075,7 +1075,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Qué pasa si se anula un cobro cuya comisión ya pagué?",
-        a: "Lo que se pagó de más se descuenta del próximo pago de ese profesional en esa moneda, de este mes o de otro, sin dejarlo nunca en negativo. Si el descuento cubre todo, se registra el descuento sin gasto y se le avisa. Si no tiene cobros nuevos de donde descontarlo, su fila dice «Debe a la clínica» y cuánto: se descuenta solo de su próximo pago.",
+        a: "Lo que se pagó de más se descuenta del próximo pago de ese profesional en esa moneda, de este mes o de otro, sin dejarlo nunca en negativo. Si el descuento cubre todo, se registra el descuento sin gasto y se le avisa. Si no tiene cobros nuevos de donde descontarlo, su fila dice cuánto queda «por descontar del próximo pago»: se descuenta solo, sin hacer nada.",
         forms: ["descuento de comisión", "devolución y comisión", "cobro anulado comisión"],
       },
       {

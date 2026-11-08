@@ -19,7 +19,7 @@ Fecha: 2026-11-08 · Estado: aceptada · Decisiones del dueño del 7 y 8 nov, de
 - **Lo adelantado es de quien haga cada sesión.** El cargo desde una línea de presupuesto de un tratamiento congela sus sesiones previstas (puede ser 1, por eso `commission_sessions` admite 1). Un servicio que se cobra por sesión no: firmar cada visita genera su propio cargo, que es el que comisiona, y darle comisión también al adelanto la pagaría dos veces. Lo creado antes no tenía sesiones y sigue fuera: no reabre meses ya pagados.
 - **Un monto corregido vale hacia atrás solo para lo que se quedó sin regla.** Si el monto que valía el día de la atención está en otra moneda, vale la versión que se escribió después para corregirlo; si no, esa línea quedaría sin poder pagarse nunca.
 - **Lo que no tenía lugar, a la vista:**
-  - La fila del profesional dice «Debe a la clínica» y cuánto, y se descuenta sola de su próximo pago en esa moneda.
+  - La fila del profesional dice cuánto queda «por descontar del próximo pago» en esa moneda, y se descuenta solo.
   - La lista del mes dice lo cobrado de sesiones que aún nadie hace, y aparte lo de tratamientos cancelados, que no es comisión de nadie (`unassignedCommissionSessions`).
 - No se puede quitar la segunda moneda mientras queden comisiones sin pagar en ella. Lo que el profesional debe en esa moneda no lo impide, porque hoy no hay cómo saldarlo a mano (pendiente).
 
