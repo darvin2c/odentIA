@@ -32,6 +32,7 @@ import { medicalPrescribing } from "./prescribing.js"
 export const medicalHooks: ProductHooks = {
   ...NO_PRODUCT_HOOKS,
   budgetRequired: false,
+  asksAsa: false,
   recallMonths: 12,
   recallControlTitle: "Control anual",
   catalog: medicalCatalog,

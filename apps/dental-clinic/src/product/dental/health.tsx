@@ -262,6 +262,7 @@ function DentalInterviewSections({
 /** odentIA en Antecedentes: el embarazo en «Personales» y sus antecedentes odontológicos. */
 export const dentalHealth: ProductHealthUi = {
   asksPregnancy: true,
+  showsAsa: true,
   InterviewSections: (props) => <DentalInterviewSections {...props} />,
   validate: (answers) => dentalInterviewErrors(answers),
   Summary: () => null,

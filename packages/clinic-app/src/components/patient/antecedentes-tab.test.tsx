@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { asaLabel } from "./antecedentes-tab"
+import { asaLabel } from "../../lib/patients"
 
 // QA del 6 nov (B4): la ASA guardada no salía en ningún resumen.
 describe("la clasificación ASA en el resumen de antecedentes", () => {

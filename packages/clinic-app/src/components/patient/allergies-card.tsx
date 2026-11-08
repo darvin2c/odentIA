@@ -15,7 +15,6 @@ import {
   allergyTitle,
   bySeverity,
   REMOVAL_REASON_LABELS,
-  sinceWords,
 } from "../../lib/allergies"
 import { useMemberName, usePermission } from "../../lib/crm"
 import {
@@ -533,95 +532,6 @@ function RemoveAllergyDrawer({
         )}
       </form.AppField>
     </FormDrawer>
-  )
-}
-
-/**
- * En la atención (tablero 7): si nunca se revisaron sus alergias o pasaron 6
- * meses, pide preguntarle por alergias nuevas. «Sin cambios» lo deja dicho
- * con quién y cuándo; agregar o quitar una también cuenta. Sin el aviso las
- * alergias se ven igual, en la franja de la atención.
- */
-export function AllergyReviewNotice({
-  patientId,
-  patientName,
-  health,
-  disabled = false,
-}: {
-  patientId: string
-  patientName: string
-  health: PatientHealth
-  disabled?: boolean
-}) {
-  const queryClient = useQueryClient()
-  const canWrite = usePermission("clinical.write")
-  const memberName = useMemberName()
-  const [adding, setAdding] = useState(false)
-  const reviewed = useMutation({
-    mutationFn: () => markAllergiesReviewedApi(patientId),
-    onSuccess: async () => {
-      await refresh(queryClient, patientId)
-      toast.success("Alergias revisadas")
-    },
-  })
-  if (!canWrite || !health.allergyReviewDue) return null
-  const active = health.allergies.filter((allergy) => allergy.isActive).sort(bySeverity)
-  const asked = active.length > 0 || health.reviewStatus.allergies === "none"
-  const first = patientName.trim().split(/\s+/)[0] ?? patientName
-  return (
-    <section
-      aria-label="Revisar sus alergias"
-      className="flex flex-col gap-3 rounded-lg border border-warning/40 bg-warning-soft p-4"
-    >
-      <div className="flex flex-col gap-0.5">
-        <p className="text-sm font-medium">
-          {asked
-            ? `Pregúntale a ${first} si tiene alergias nuevas`
-            : `Pregúntale a ${first} si tiene alergias`}
-        </p>
-        <p className="text-sm text-muted-foreground">
-          {health.allergiesReviewedAt
-            ? `Última revisión ${sinceWords(health.allergiesReviewedAt)}${health.allergiesReviewedBy ? `, por ${memberName(health.allergiesReviewedBy)}` : ""}.`
-            : "Nadie las revisó todavía con el paciente."}
-        </p>
-      </div>
-      {active.length > 0 ? (
-        <ul className="flex flex-wrap gap-2">
-          {active.map((allergy) => (
-            <li key={allergy.id} className="rounded-full border bg-background px-3 py-1 text-sm">
-              {allergyTitle(allergy)}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      <div className="flex flex-wrap gap-2">
-        <Button
-          type="button"
-          size="sm"
-          disabled={disabled || reviewed.isPending}
-          onClick={() => reviewed.mutate()}
-        >
-          {reviewed.isPending ? "Guardando…" : asked ? "Sin cambios" : "No tiene alergias"}
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={disabled}
-          onClick={() => setAdding(true)}
-        >
-          <Plus aria-hidden />
-          Agregar alergia
-        </Button>
-      </div>
-      <ActionError error={reviewed.error} />
-      <AllergyFormDrawer
-        patientId={patientId}
-        patientName={patientName}
-        open={adding}
-        onClose={() => setAdding(false)}
-      />
-    </section>
   )
 }
 
