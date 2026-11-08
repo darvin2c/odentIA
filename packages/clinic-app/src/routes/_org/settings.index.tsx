@@ -30,6 +30,7 @@ import { createFileRoute, getRouteApi } from "@tanstack/react-router"
 import { useEffect, useMemo, useState } from "react"
 import { z } from "zod"
 import { RateField } from "../../components/finance/rate-input"
+import { ClinicBrandColorSettings } from "../../components/settings/clinic-brand-color"
 import { ClinicLogoSettings } from "../../components/settings/clinic-logo"
 import { DiagnosisListSettings } from "../../components/settings/diagnosis-list"
 import { capitalize } from "../../components/official-code-field"
@@ -267,6 +268,8 @@ function OrgProfilePage() {
   // respondió al servidor—; sólo si tampoco hay dato suyo la pantalla espera.
   const { data } = profileQuery
   const profile = data !== undefined ? data : fetched ? loaded : undefined
+  // Un solo aviso de «sin guardar» para la página: el formulario y el color de la marca.
+  const [colorDirty, setColorDirty] = useState(false)
 
   const saveMutation = useMutation({
     mutationFn: ({ values, baseline }: { values: ProfileValues; baseline: ProfileValues }) =>
@@ -312,12 +315,19 @@ function OrgProfilePage() {
                 : null
             }
             pending={saveMutation.isPending}
+            alsoDirty={colorDirty}
             onSubmit={(values, baseline) => saveMutation.mutateAsync({ values, baseline })}
           />
           {/* Se guardan solos, con su confirmación: no son parte del «Guardar» de arriba. */}
           {profile ? (
             <div className="flex max-w-3xl flex-col gap-4">
               <ClinicLogoSettings logo={profile.logo ?? null} name={profile.tradeName} />
+              <ClinicBrandColorSettings
+                brandColor={profile.brandColor ?? null}
+                logo={profile.logo ?? null}
+                clinicName={profile.tradeName}
+                onDirtyChange={setColorDirty}
+              />
               <DiagnosisListSettings profile={profile} />
             </div>
           ) : null}
@@ -346,12 +356,15 @@ function ProfileForm({
   values,
   exchangeWritten,
   pending,
+  alsoDirty = false,
   onSubmit,
 }: {
   values: ProfileValues
   /** Quién puso el «Cambio de hoy» guardado y cuándo. */
   exchangeWritten: { at: string; byName: string | null } | null
   pending: boolean
+  /** Otro bloque de la página con algo sin guardar (el color de la marca): el aviso es uno solo. */
+  alsoDirty?: boolean
   onSubmit: (values: ProfileValues, baseline: ProfileValues) => Promise<unknown>
 }) {
   const receptionName = useReceptionName()
@@ -424,7 +437,7 @@ function ProfileForm({
 
   return (
     <form className="flex max-w-3xl flex-col gap-4" noValidate onSubmit={submit}>
-      <PageDraftGuard dirty={dirty} />
+      <PageDraftGuard dirty={dirty || alsoDirty} />
       <section aria-labelledby="org-identity" className={CARD}>
         <h2 id="org-identity" className="font-heading text-base font-medium">
           Identidad

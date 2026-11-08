@@ -57,6 +57,7 @@ import {
   listPlanItems,
   listTreatmentPlans,
   markAllergiesReviewed,
+  markHealthDenied,
   PATIENT_AVATAR_MAX_BYTES,
   PATIENT_AVATAR_MIME_EXT,
   registerPatient,
@@ -226,6 +227,9 @@ const allergyAddInput = z
   .object({ ...allergySubstance, severity: z.string().max(20).nullish(), reaction: z.string().max(2000).nullish() })
   .strict()
 const allergyRemoveInput = z.object({ reason: z.string().min(1, "Elige por qué se quita").max(20) }).strict()
+const healthDeniedInput = z
+  .object({ groups: z.array(z.enum(["conditions", "medications"], "Elige qué niega")).min(1, "Elige qué niega").max(2) })
+  .strict()
 const allergyCodeInput = z
   .object({
     substanceSystem: z.string().min(1, "Elige la sustancia de la lista").max(20),
@@ -968,6 +972,17 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) => addPatientAllergy(tx, orgId, userId, c.req.param("id"), parsed.data)),
+    )
+  })
+  // «Niega enfermedades» o «No toma medicación» desde la atención, sin rearmar los antecedentes.
+  app.post("/:id/health/denied", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = healthDeniedInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        markHealthDenied(tx, orgId, userId, c.req.param("id"), [...new Set(parsed.data.groups)]),
+      ),
     )
   })
   app.post("/:id/health/allergies/reviewed", async (c) => {

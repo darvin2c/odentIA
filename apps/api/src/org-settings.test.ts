@@ -456,3 +456,39 @@ it("la otra moneda la activa quien configura y el cambio de hoy también lo escr
   expect(removed.status).toBe(200)
   expect(await data<Record<string, unknown>>(removed)).toMatchObject({ secondCurrency: null, exchangeRate: null })
 })
+
+it("color de la marca: lo cambia quien configura, se guarda aparte y lo leen sus páginas públicas (ADR 0162)", async () => {
+  const region = { countryCode: "PE", currency: "PEN", timezone: "America/Lima", locale: "es-PE" }
+  expect((await request("owner", "PUT", "/org-profile", { legalName: "Clínica Ajustes S.A.C.", ...region })).status).toBe(200)
+  const appearance = async (slug: string) =>
+    data<{ brandColor: string | null }>(await app.request(`/api/public/appearance/${slug}`))
+
+  // Recepción y caja no lo cambian: lo dice el servidor, no solo la pantalla.
+  expect((await request("reception", "PUT", "/org-profile/brand-color", { color: "#1d5fa8" })).status).toBe(403)
+  expect((await request("cashier", "DELETE", "/org-profile/brand-color")).status).toBe(403)
+  expect((await request("reception", "GET", "/org-profile/logo-colors")).status).toBe(403)
+
+  const saved = await request("owner", "PUT", "/org-profile/brand-color", { color: "#1D5FA8" })
+  expect(saved.status).toBe(200)
+  expect(await data(saved)).toEqual({ brandColor: "#1d5fa8" })
+  expect(await data<Record<string, unknown>>(await request("owner", "GET", "/org-profile"))).toMatchObject({ brandColor: "#1d5fa8" })
+  expect(await appearance(SLUG)).toEqual({ brandColor: "#1d5fa8" })
+  // Otra clínica sigue con el suyo, y una dirección que no es de una clínica no dice nada distinto.
+  expect(await appearance(OTHER_SLUG)).toEqual({ brandColor: null })
+  expect(await appearance("no-existe")).toEqual({ brandColor: null })
+  expect(await appearance("..%2Fajustes")).toEqual({ brandColor: null })
+
+  // Guardar los datos de la clínica no lo pisa.
+  expect((await request("owner", "PUT", "/org-profile", { fiscalAddress: "Av. Norte 2" })).status).toBe(200)
+  expect(await appearance(SLUG)).toEqual({ brandColor: "#1d5fa8" })
+
+  const wrong = await request("owner", "PUT", "/org-profile/brand-color", { color: "azul" })
+  expect(wrong.status).toBe(400)
+  expect(((await wrong.json()) as { error: { fields?: Record<string, string> } }).error.fields).toHaveProperty("color")
+
+  // Sin logo legible, «De tu logo» no sugiere nada.
+  expect(await data(await request("owner", "GET", "/org-profile/logo-colors"))).toEqual({ colors: [] })
+
+  expect((await request("owner", "DELETE", "/org-profile/brand-color")).status).toBe(200)
+  expect(await appearance(SLUG)).toEqual({ brandColor: null })
+})

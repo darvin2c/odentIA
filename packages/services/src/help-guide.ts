@@ -620,6 +620,18 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         forms: ["como empiezo una atencion", "como inicio una atencion", "como abro una atencion", "nueva atencion"],
       },
       {
+        q: "¿Por qué la atención me pide sus enfermedades y su medicación?",
+        a: "Porque nunca se le preguntaron, y un problema del corazón, la presión alta, la diabetes, un anticoagulante o un embarazo cambian la anestesia y lo que se receta. Arriba de la atención, «Pregúntale a…» trae una fila por lo que falta: alergias, enfermedades y medicación, cada una con su respuesta a un toque. «Niega enfermedades» y «No toma medicación» lo dejan anotado con quién y cuándo. Lo que sí tiene se escribe con «Registrar enfermedades o medicación», que abre Antecedentes encima de la atención; al cerrar sigues donde estabas. Si se usa un anestésico local (lidocaína, articaína…) y todavía falta algo de eso o su riesgo anestésico (ASA), el cierre lo dice junto a los materiales. Nada de esto impide firmar: queda anotado lo que faltaba. La ASA se ve en «Antecedentes y última atención» y se elige en Antecedentes, en «Riesgo anestésico (ASA)».",
+        forms: [
+          "por que me pide antecedentes",
+          "aviso de enfermedades y medicacion",
+          "asa antes de la anestesia",
+          "donde pongo la clasificacion asa",
+          "niega enfermedades",
+          "no toma medicacion",
+        ],
+      },
+      {
         q: "¿Cómo dicto una atención?",
         a: "Dentro de la atención, pulsa «Dictar» y habla: Clío ordena lo que dices en sugerencias dentro de cada bloque, y tú las confirmas o firmas. Aparece con Clío encendida (una clínica nueva la trae encendida; se apaga en Agente › Clío) y para quien lleva la atención. Si confirmas algo, al cerrar la atención se cuenta como una consulta de Clío de tu plan; si nadie dicta, no cuesta nada. El micrófono solo se enciende con «Dictar» o «Reanudar», y nada entra a la historia sin que lo confirmes. Lo que dictas para la nota se agrega al texto que ya estaba, no lo reemplaza, y la tarjeta lo dice antes de confirmar.",
         forms: ["como uso el dictado", "dictado", "dictar", "como funciona clio", "como funciona el dictado"],
@@ -1295,12 +1307,15 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Datos de la clínica",
     parent: SETTINGS,
     purpose:
-      "Los datos de tu clínica: el nombre comercial (el que ven tus pacientes) y su logo, la razón social, el documento fiscal, el país, la moneda, la zona horaria y el idioma, con los que se leen las fechas, los importes y los documentos, y la lista de diagnósticos (CIE-10 o CIE-11) en la que se eligen los diagnósticos.",
+      "Los datos de tu clínica: el nombre comercial (el que ven tus pacientes), su logo y el color de su marca, la razón social, el documento fiscal, el país, la moneda, la zona horaria y el idioma, con los que se leen las fechas, los importes y los documentos, y la lista de diagnósticos (CIE-10 o CIE-11) en la que se eligen los diagnósticos.",
     terms: [
       "organización",
       "nombre de la clínica",
       "nombre comercial",
       "logo",
+      "color de la marca",
+      "colores de la clínica",
+      "color",
       "ruc",
       "moneda",
       "zona horaria",
@@ -1322,6 +1337,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         q: "¿Qué nombre de la clínica ven mis pacientes?",
         a: "El nombre comercial, en todo: WhatsApp, «Su enlace», el portal, el registro, el chat de la web y los PDF. La razón social va solo en el comprobante y en los papeles legales. El nombre comercial es obligatorio y se cambia en «Datos de la clínica»; ahí mismo subes el logo, que ven al abrir su registro y su enlace.",
+      },
+      {
+        q: "¿Puedo poner el color de mi clínica?",
+        a: "Sí, en «Datos de la clínica» › «Color de la marca», debajo del logo. Primero salen los colores de tu logo, luego doce sugeridos, y «Elegir otro color» abre la paleta o recibe el código de tu marca. Elegir solo cambia la vista previa: se guarda con «Usar este color» y desde ese momento lo ven tu equipo en la app y tus pacientes en la página de sus citas, la reserva y el chat de tu web; en los documentos va en la línea bajo el logo o, sin logo, en el cuadro de sus iniciales. Cualquier color vale: si es claro, los botones lo usan tal cual con letra oscura y los enlaces usan un tono más oscuro para que se lean; si se parece al rojo de los errores, te lo dice y puedes usarlo igual. Los colores de error, listo y aviso no cambian, y las recetas, órdenes, descansos y consentimientos ya emitidos quedan como salieron; lo que se vuelve a imprimir, como un presupuesto o un comprobante, sale con el color de hoy, igual que el logo. «Volver al…» quita el tuyo y deja el color con el que viene la app. Lo cambia quien administra la clínica.",
       },
       {
         q: "¿Trabajo con la CIE-10 o con la CIE-11?",
@@ -1801,7 +1820,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Chat web",
     parent: INTEGRATIONS,
     purpose:
-      "El chat de tu sitio web: lo que escriben llega a la misma Bandeja y Sofi responde al momento. Se instala pegando una sola línea en tu sitio; cambiar el color o el saludo no obliga a volver a pegarla. Responde en el primer sitio donde la pegas y en los que tú permites. Al lado puedes probarlo sin publicar: la prueba no se cobra ni cuenta.",
+      "El chat de tu sitio web: lo que escriben llega a la misma Bandeja y Sofi responde al momento. Se instala pegando una sola línea en tu sitio; cambiar el saludo o el color de tu marca (en «Datos de la clínica») no obliga a volver a pegarla. Responde en el primer sitio donde la pegas y en los que tú permites. Al lado puedes probarlo sin publicar: la prueba no se cobra ni cuenta.",
     terms: [
       "widget",
       "chat en mi página",

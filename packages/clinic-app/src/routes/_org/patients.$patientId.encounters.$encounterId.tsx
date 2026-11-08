@@ -9,6 +9,7 @@ import { EncounterDocumentsBlock } from "../../components/patient/encounter-docu
 import { EncounterDetailView } from "../../components/patient/encounter-detail-view"
 import { EncounterEditor } from "../../components/patient/encounter-editor"
 import { EncounterHandoff } from "../../components/patient/encounter-handoff"
+import { WideSectionProvider } from "../../components/patient/wide-section"
 import { EncounterLoading } from "../../components/person/person-loading"
 import { apiFetch } from "../../lib/api"
 import { useMemberName, usePermission } from "../../lib/crm"
@@ -111,14 +112,17 @@ function EncounterPage() {
   if (detail.encounter.status === "borrador" && canWrite) {
     return (
       <PageShell className="flex flex-col gap-4">
-        <EncounterEditor
-          key={encounterId}
-          patientId={patientId}
-          patient={patient}
-          detail={detail}
-          onChanged={changed}
-          onFinalized={finalized}
-        />
+        {/* Antecedentes se completan encima de la atención, sin salir de ella (QA del 8 nov, A2). */}
+        <WideSectionProvider patientId={patientId} name={patient.patient.displayName} closeLabel="Volver a la atención">
+          <EncounterEditor
+            key={encounterId}
+            patientId={patientId}
+            patient={patient}
+            detail={detail}
+            onChanged={changed}
+            onFinalized={finalized}
+          />
+        </WideSectionProvider>
       </PageShell>
     )
   }

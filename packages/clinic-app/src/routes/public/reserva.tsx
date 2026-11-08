@@ -6,7 +6,7 @@ import {
 } from "../../components/public/personal-link-page"
 
 /**
- * «Elige tu cita» (ADR 0162): el enlace que envía el agente para reservar lleva
+ * «Elige tu cita» (ADR 0164): el enlace que envía el agente para reservar lleva
  * directo a elegir con quién, el día y la hora y, al revisar, sus datos. Si ya
  * eligió la hora en el chat, el enlace la trae (`sede`, `con`, `hora`). Cuando
  * el enlace ya no ofrece reservar (ya reservó, o es el de sus pendientes), lleva

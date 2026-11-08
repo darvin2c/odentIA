@@ -1,6 +1,6 @@
 # 0037 · «Su enlace» para lo del servicio y el portal en un paso
 
-Fecha: 2026-10-16 · Estado: aceptada; su parte de «Su enlace» la sustituye [0162](0162-un-enlace-por-cosa.md) (cada mensaje abre lo suyo, el destino va en la dirección) · Precisa: [0014](0014-reservar-desde-un-enlace-personal.md) · Precisada por [0109](0109-un-solo-formulario-con-lo-que-ya-sabemos.md) (al reservar, quien ya es paciente ve su nombre, su documento abreviado y su celular) y por [0156](0156-cada-envio-manda-el-pdf-y-el-portal-muestra-todo-lo-suyo.md) (el portal muestra todo lo suyo: ya no se elige «Qué verá»)
+Fecha: 2026-10-16 · Estado: aceptada; su parte de «Su enlace» la sustituye [0164](0164-un-enlace-por-cosa.md) (cada mensaje abre lo suyo, el destino va en la dirección) · Precisa: [0014](0014-reservar-desde-un-enlace-personal.md) · Precisada por [0109](0109-un-solo-formulario-con-lo-que-ya-sabemos.md) (al reservar, quien ya es paciente ve su nombre, su documento abreviado y su celular) y por [0156](0156-cada-envio-manda-el-pdf-y-el-portal-muestra-todo-lo-suyo.md) (el portal muestra todo lo suyo: ya no se elige «Qué verá»)
 
 ## Problema
 

@@ -105,6 +105,12 @@ export interface PrescribingRulesUi {
 export interface ProductHealthUi {
   /** «Personales» pregunta el embarazo (odentIA); latidIA lo pregunta en su sección, con fecha y lactancia. */
   asksPregnancy: boolean
+  /**
+   * La clasificación ASA (riesgo anestésico) se pide en la atención: odentIA
+   * anestesia en el sillón; en latidIA la consulta no suele anestesiar y la ASA
+   * solo se ve si alguien la clasificó.
+   */
+  showsAsa: boolean
   /** Sus secciones de la entrevista, después de «Familiares». */
   InterviewSections(props: InterviewSectionsProps): ReactNode
   /**
@@ -540,7 +546,7 @@ export function bareProduct(product: ClinicalProduct): ProductUi {
       imaging: { types: DENTAL_IMAGING_TYPES, categoryLabels: {}, tomography: { imageType: "tomografia", kind: "cbct" } },
       medicalLeave: false,
     },
-    health: { asksPregnancy: true, InterviewSections: () => null, validate: () => ({}), Summary: () => null },
+    health: { asksPregnancy: true, showsAsa: true, InterviewSections: () => null, validate: () => ({}), Summary: () => null },
     summary: { ClinicalCards: () => null },
     prescribing: { catalog: DENTAL_MEDICATION_CATALOG, useRules: () => NO_RULES },
     encounter: {

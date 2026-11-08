@@ -4,7 +4,8 @@
  * actividades salen de aquí, con el mismo membrete, pie, tablas y firma.
  *
  * - El papel es de la clínica: tinta casi negra, gris y reglas finas, sin el
- *   color de odentIA. El color queda solo para ANULADO y REVOCADO.
+ *   color de odentIA. El color queda para ANULADO y REVOCADO y, si la clínica
+ *   eligió el de su marca (ADR 0162), para la línea del membrete y sus iniciales.
  * - Noto Sans y Noto Serif embebidas (OFL en `src/assets/fonts/`): sin red al
  *   imprimir y con nombres reales sin transliterar.
  * - Lo que la fuente no cubre (un emoji, otro alfabeto) sale como `?`: el sistema
@@ -19,7 +20,7 @@
 
 import { readFileSync } from "node:fs"
 import fontkit, { type Font } from "@pdf-lib/fontkit"
-import { type SignatureStrokes, signaturePath } from "@odentia/clinical"
+import { BRAND_COLOR_PATTERN, type SignatureStrokes, signaturePath } from "@odentia/clinical"
 import {
   degrees,
   LineCapStyle,
@@ -49,6 +50,11 @@ export interface DocumentClinic {
   phone: string | null
   branchName: string | null
   logo: DocumentLogo | null
+  /**
+   * El color de la marca en el papel (ADR 0162), ya legible sobre blanco: solo la línea
+   * bajo el membrete y el cuadro de iniciales. Sin él, tinta, como siempre.
+   */
+  brandInk?: string | null
   locale: string
   timezone: string
   sheetSize: string
@@ -1645,7 +1651,7 @@ export class DocumentKit {
         y: boxY,
         width: 39,
         height: 39,
-        color: this.tones.ink,
+        color: this.brandInk,
       })
       const initials = this.lay(initialsOf(clinic.tradeName) || "·", 39, {
         face: "serif",
@@ -1667,7 +1673,19 @@ export class DocumentKit {
       cursor -= line.height
     }
     this.y = bottom - 10.5
-    this.rule({ tone: "ink", thickness: 1.5 })
+    this.page.drawLine({
+      start: { x: this.left, y: this.y },
+      end: { x: this.right, y: this.y },
+      thickness: 1.5,
+      color: this.brandInk,
+    })
+    this.y -= 1.5
+  }
+
+  /** La línea del membrete y el cuadro de iniciales: el color de la marca o, sin él, tinta. */
+  private get brandInk(): RGB {
+    const ink = this.clinic.brandInk
+    return ink && BRAND_COLOR_PATTERN.test(ink) ? hex(Number.parseInt(ink.slice(1), 16)) : this.tones.ink
   }
 
   private thermalLetterhead(): void {

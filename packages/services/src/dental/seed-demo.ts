@@ -875,6 +875,9 @@ await db.insert(orgProfile).values([
     diagnosisSystem: "ICD-10",
     // El que da el agente ante una urgencia (ADR 0050); la clínica B no tiene y ve el aviso.
     emergencyPhone: "+5115550123",
+    // El color de su marca (ADR 0162): la app, lo del paciente, el chat y la línea del papel
+    // salen en su azul. Clínica Norte queda con el de fábrica, para ver los dos casos.
+    brandColor: "#1d5fa8",
   },
   {
     organizationId: ORG_B,
@@ -4606,7 +4609,7 @@ if (pedroRiosPerson) {
   )
   console.log(`«Tus pendientes» de Pedro Ríos (dental-smile): /pendientes?token=${pedroLink.token}`)
   // A Pedro le falta su fecha y su documento: el consentimiento que se le envió se lee
-  // en su teléfono y dice, antes de leer, que lo firma en su cita (ADR 0162).
+  // en su teléfono y dice, antes de leer, que lo firma en su cita (ADR 0164).
   const [endodontics] = await db
     .select({ id: consentTemplate.id })
     .from(consentTemplate)
@@ -4630,7 +4633,7 @@ if (pedroRiosPerson) {
     console.log(`Su consentimiento, para leer y firmar en la cita: /pendientes?abre=firma&token=${pedroLink.token}`)
   }
 }
-// Un familiar sin autorización (ADR 0162): Jorge, hermano de Rosa, quedó vinculado
+// Un familiar sin autorización (ADR 0164): Jorge, hermano de Rosa, quedó vinculado
 // a ella sin ninguna facultad y tiene un enlace de antes. Abierto, no le muestra la
 // cita de Rosa ni le deja tocarla; Sofi tampoco le daría uno.
 {
