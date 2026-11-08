@@ -192,6 +192,13 @@ test("caminos: la revisión sin camino elegido lleva los dos caminos", async ({ 
   await expect(drawer.getByRole("checkbox", { name: /Endodoncia molar/ })).toBeChecked()
   await expect(drawer.getByRole("checkbox", { name: /Exodoncia simple/ })).toBeChecked()
   await shot("revision-dos-caminos")
+  // Desmarcar lo único de la Opción B la quitaría: se dice ahí mismo, sin frenar.
+  const exo = drawer.getByRole("checkbox", { name: /Exodoncia simple/ })
+  await exo.click()
+  await expect(drawer.getByRole("status").filter({ hasText: /Opción B/ })).toBeVisible()
+  await shot("revision-sin-opcion-b")
+  await exo.click()
+  await expect(drawer.getByRole("status").filter({ hasText: /Opción B/ })).toHaveCount(0)
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(drawer.getByRole("checkbox", { name: /Exodoncia simple/ })).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath("revision-dos-caminos-telefono.png") })
