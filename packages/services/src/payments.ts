@@ -3358,6 +3358,26 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
     })),
     /** Devoluciones de este ticket (ADR 0068): con alguna, ya no se anula. */
     returns: returnRows.filter((item) => item.ticketId === ticket.id),
+    /**
+     * Lo que se devolvió de lo que quedó a favor de este cobro («Devolver
+     * dinero»): la cuenta lo dice junto al ticket, que sigue diciendo lo que
+     * dijo al emitirse (QA del 6 nov, M14). Lo devuelto con un ticket ya está
+     * en `returns`. Solo se lee: no cambia ninguna cifra.
+     */
+    refunds: refunds
+      .filter(
+        (refund) =>
+          !refund.returnId &&
+          (ticketPayments[ticket.id] ?? []).some((payment) => payment.id === refund.paymentId),
+      )
+      .sort((a, b) => a.refundedAt.getTime() - b.refundedAt.getTime())
+      .map((refund) => ({
+        id: refund.id,
+        amountCents: refund.amountCents,
+        currency: (ticketPayments[ticket.id] ?? []).find((payment) => payment.id === refund.paymentId)?.currency ?? ticket.currency,
+        refundedAt: refund.refundedAt,
+        reason: refund.reason,
+      })),
   }))
   // Historial anterior sin ticket (nunca se borra ni se inventa sede): filas
   // de solo lectura, marcadas como histórico. Solo se imprimen con evidencia.

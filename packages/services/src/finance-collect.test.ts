@@ -235,6 +235,18 @@ it("devuelve solo el saldo a favor desde el efectivo de la caja", async () => {
   expect(refund.methodName).toBe("Efectivo")
   const summary = await f.run((tx) => getAccountSummary(tx, "org_a", f.patient.id))
   expect(summary.byCurrency.find((c) => c.currency === "PEN")).toMatchObject({ pagado: 0, aFavor: 0 })
+  // QA del 6 nov (M14): el ticket dice «queda a favor», «A favor» está en cero y
+  // la cuenta no decía adónde fue el dinero. La devolución va junto a su cobro.
+  expect(summary.cobros).toHaveLength(1)
+  expect(summary.cobros[0]?.refunds).toEqual([
+    {
+      id: refund.refunds[0]?.id,
+      amountCents: 20000,
+      currency: "PEN",
+      refundedAt: expect.any(Date),
+      reason: "Ya no se atiende",
+    },
+  ])
 })
 
 it("no mezcla monedas y cobra en moneda extranjera", async () => {
