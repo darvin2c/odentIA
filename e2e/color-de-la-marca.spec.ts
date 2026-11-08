@@ -13,6 +13,9 @@ import { gotoHydrated } from "./hydration"
 const serverHtml = (page: Page, url: string) =>
   page.evaluate((target) => fetch(target, { credentials: "include", cache: "no-store" }).then((r) => r.text()), url)
 
+/** Los colores de los enlaces se animan: la captura espera a que terminen. */
+const settled = (page: Page) => page.evaluate(() => Promise.all(document.getAnimations().map((animation) => animation.finished)))
+
 /** El valor del token en la raíz, ya resuelto. */
 const token = (page: Page, name: string) =>
   page.evaluate((property) => getComputedStyle(document.documentElement).getPropertyValue(property).trim(), name)
@@ -131,9 +134,11 @@ test("elegir el color de la marca: vista previa, guardar, primer pintado, color 
   // La hoja compilada escribe el blanco corto.
   expect(["#fff", "#ffffff"]).toContain(await token(page, "--card"))
   expect(await token(page, "--muted-foreground")).toBe("#5a524f")
+  await settled(page)
   await testInfo.attach("naranja-claro", { body: await page.screenshot(), contentType: "image/png" })
   await page.evaluate(() => document.documentElement.classList.add("dark"))
   expect(await token(page, "--card")).toBe("#231c1a")
+  await settled(page)
   await testInfo.attach("naranja-oscuro", { body: await page.screenshot(), contentType: "image/png" })
   await page.evaluate(() => document.documentElement.classList.remove("dark"))
 
