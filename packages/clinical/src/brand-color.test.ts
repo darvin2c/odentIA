@@ -24,6 +24,9 @@ describe("brandPalette", () => {
     for (const hex of sampleColors()) {
       const { light, dark, paper } = brandPalette(hex)
       expect(contrastRatio(light.primary, "#ffffff"), `${hex} texto en claro`).toBeGreaterThanOrEqual(4.5)
+      // También sobre lo secundario (botón secundario, menú al pasar el mouse), lo más exigente.
+      expect(contrastRatio(light.primary, "#e8eef4"), `${hex} texto sobre secundario`).toBeGreaterThanOrEqual(4.5)
+      expect(contrastRatio(dark.primary, "#263041"), `${hex} texto oscuro sobre secundario`).toBeGreaterThanOrEqual(4.5)
       expect(contrastRatio(light.fill, light.fillForeground), `${hex} botón en claro`).toBeGreaterThanOrEqual(4.5)
       expect(contrastRatio(light.fillHover, light.fillForeground), `${hex} botón al pasar el mouse`).toBeGreaterThanOrEqual(4.5)
       expect(contrastRatio(dark.fillHover, dark.fillForeground), `${hex} botón oscuro al pasar el mouse`).toBeGreaterThanOrEqual(4.5)
@@ -61,6 +64,36 @@ describe("brandPalette", () => {
     expect(palette.light.primary).not.toBe("#facc15")
     expect(palette.lightened).toBe(true)
     expect(palette.nearWhite).toBe(false)
+  })
+
+  it("un color fuerte lleva letra blanca: el naranja se oscurece apenas, no se cambia a letra oscura", () => {
+    for (const hex of ["#ea580c", "#f97316", "#ef4444", "#ec4899"]) {
+      const { light, dark } = brandPalette(hex)
+      expect(light.fillForeground, hex).toBe("#ffffff")
+      expect(dark.fillForeground, `${hex} en oscuro`).toBe("#ffffff")
+      expect(contrastRatio(light.fill, "#ffffff"), hex).toBeGreaterThanOrEqual(4.5)
+    }
+    // Sigue siendo naranja: un punto más tostado.
+    expect(brandPalette("#ea580c").light.fill).toBe("#cc4d0a")
+  })
+
+  it("un color claro, que habría que cambiar demasiado, sigue exacto con letra oscura", () => {
+    for (const hex of ["#facc15", "#38bdf8", "#6ee7b7", "#a78bfa", "#14b8a6"]) {
+      const { light } = brandPalette(hex)
+      expect(light.fill, hex).toBe(hex)
+      expect(light.fillForeground, hex).toBe("#0f172a")
+    }
+  })
+
+  it("letra oscura solo cuando la blanca pediría cambiar el color más de una cuarta parte", () => {
+    for (const hex of sampleColors()) {
+      const { light, nearWhite } = brandPalette(hex)
+      if (nearWhite || light.fillForeground === "#ffffff") continue
+      const value = Number.parseInt(hex.slice(1), 16)
+      const darker = [(value >> 16) & 255, (value >> 8) & 255, value & 255].map((c) => Math.round(c * 0.76))
+      const darkerHex = `#${darker.map((c) => c.toString(16).padStart(2, "0")).join("")}`
+      expect(contrastRatio(darkerHex, "#ffffff"), hex).toBeLessThan(4.5)
+    }
   })
 
   it("casi blanco no se usa como relleno: sale el tono legible y se avisa", () => {
