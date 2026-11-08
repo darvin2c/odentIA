@@ -6,8 +6,9 @@
  *
  * - Se puede usar cualquier color: nada se rechaza. Lo que cuida la cuenta es que se
  *   lea (WCAG 2.2, 4,5:1 para el texto).
- * - El relleno de los botones conserva el color exacto, con letra blanca o, si no se
- *   lee, oscura: un amarillo sigue siendo amarillo.
+ * - El relleno de los botones lleva letra blanca siempre que se pueda: un color fuerte
+ *   (un naranja) se oscurece apenas para que se lea; uno claro (un amarillo) queda
+ *   exacto con letra oscura, porque oscurecerlo lo cambiaría demasiado.
  * - Textos, enlaces, foco y la línea del papel van directo sobre el fondo: usan el
  *   tono legible, más oscuro en claro y más claro en oscuro.
  * - Se guarda solo el color elegido; todo lo demás se calcula al mostrarlo, así la
@@ -67,6 +68,13 @@ const INK: Rgb = [15, 23, 42]
 /** Fondo y tarjeta de la app en oscuro (`--background`, `--card`). */
 const DARK_BG: Rgb = [12, 17, 24]
 const DARK_CARD: Rgb = [23, 30, 43]
+/**
+ * La superficie más exigente donde va texto del color: `--secondary` (botón secundario,
+ * menú al pasar el mouse). Es la más oscura en claro y la más clara en oscuro, así que si
+ * se lee ahí, se lee sobre el fondo, la tarjeta y lo apagado.
+ */
+const LIGHT_SECONDARY: Rgb = [232, 238, 244]
+const DARK_SECONDARY: Rgb = [38, 48, 65]
 const TEXT = 4.5
 
 function rgbOf(hex: string): Rgb {
@@ -135,19 +143,13 @@ function hoverOf(fill: Rgb, foreground: string): string {
   return hexOf(foreground === hexOf(WHITE) ? mix(fill, BLACK, 0.12) : mix(fill, WHITE, 0.18))
 }
 
-/** El color de texto que se lee encima de un relleno, o null si ni blanco ni tinta llegan. */
-function textOn(fill: Rgb, light: Rgb, dark: Rgb): string | null {
-  if (contrastOf(fill, light) >= TEXT) return hexOf(light)
-  if (contrastOf(fill, dark) >= TEXT) return hexOf(dark)
-  return null
-}
 
 /** Lo que el color le pone a cada modo: los nombres son los de `globals.css`. */
 export interface BrandTokens {
   /** Textos, enlaces, bordes y foco: legible sobre el fondo. */
   primary: string
   primaryForeground: string
-  /** El relleno de los botones: el color exacto cuando se puede. */
+  /** El relleno de botones, chat y todo lo que lleva el color con letra encima: con letra blanca siempre que se pueda. */
   fill: string
   fillForeground: string
   /** Al pasar el mouse: se aleja de la letra, así el contraste no baja. */
@@ -184,14 +186,30 @@ function hueAndSaturation(color: Rgb): { hue: number; saturation: number } {
   return { hue, saturation: delta / (1 - Math.abs(2 * lightness - 1)) }
 }
 
-function lightTokens(base: Rgb, nearWhite: boolean): BrandTokens {
-  const primary = shiftUntil(base, BLACK, WHITE, TEXT)
-  let fill = base
-  let fillForeground = nearWhite ? null : textOn(base, WHITE, INK)
-  if (!fillForeground) {
-    fill = primary
-    fillForeground = hexOf(WHITE)
+/** Lo más que se oscurece un color para llevar letra blanca: más allá ya no se reconoce. */
+const WHITE_TEXT_MAX_DARKEN = 0.24
+
+/**
+ * El relleno y su letra. Letra blanca siempre que se pueda: si el color exacto no la
+ * sostiene pero oscurecerlo apenas basta, se oscurece. La fórmula de WCAG 2 da por mejor
+ * la letra oscura sobre los naranjas y rojos intensos, y a la vista es al revés (lo mismo
+ * mide APCA, la de WCAG 3). Solo un color claro (amarillo, celeste, menta), que habría que
+ * cambiar demasiado, queda exacto con letra oscura. Null si ninguna letra se lee.
+ */
+function fillWithText(base: Rgb, dark: Rgb): { fill: Rgb; text: string } | null {
+  if (contrastOf(base, WHITE) >= TEXT) return { fill: base, text: hexOf(WHITE) }
+  for (let step = 1; step <= WHITE_TEXT_MAX_DARKEN * 100; step++) {
+    const darker = mix(base, BLACK, step / 100)
+    if (contrastOf(darker, WHITE) >= TEXT) return { fill: darker, text: hexOf(WHITE) }
   }
+  return contrastOf(base, dark) >= TEXT ? { fill: base, text: hexOf(dark) } : null
+}
+
+function lightTokens(base: Rgb, nearWhite: boolean): BrandTokens {
+  const primary = shiftUntil(base, BLACK, LIGHT_SECONDARY, TEXT)
+  const chosen = nearWhite ? null : fillWithText(base, INK)
+  const fill = chosen?.fill ?? primary
+  const fillForeground = chosen?.text ?? hexOf(WHITE)
   // Los mismos contrastes que los tintes de fábrica de odentIA sobre blanco.
   const soft = tintUntil(base, WHITE, 1.18)
   return {
@@ -208,14 +226,16 @@ function lightTokens(base: Rgb, nearWhite: boolean): BrandTokens {
 }
 
 function darkTokens(base: Rgb): BrandTokens {
-  // Legible también sobre la tarjeta, que es un poco más clara que el fondo.
-  const primary = shiftUntil(base, WHITE, DARK_CARD, TEXT)
+  // Legible también sobre lo secundario, la superficie más clara del modo oscuro.
+  const primary = shiftUntil(base, WHITE, DARK_SECONDARY, TEXT)
   const onPrimary = shiftUntil(mix(primary, BLACK, 0.82), BLACK, primary, TEXT)
-  // El color exacto solo si se distingue del fondo oscuro y tiene un texto que se lea.
-  const exactText = contrastOf(base, DARK_BG) >= 3 ? textOn(base, WHITE, DARK_BG) : null
+  // El color de la clínica solo si se distingue del fondo oscuro y tiene una letra que se lea;
+  // si no, el tono claro del primario con su letra oscura.
+  const chosen = contrastOf(base, DARK_BG) >= 3 ? fillWithText(base, DARK_BG) : null
+  const usable = chosen && contrastOf(chosen.fill, DARK_BG) >= 3 ? chosen : null
   const soft = tintUntil(base, DARK_BG, 1.4)
-  const fill = exactText ? base : primary
-  const fillForeground = exactText ?? hexOf(onPrimary)
+  const fill = usable?.fill ?? primary
+  const fillForeground = usable?.text ?? hexOf(onPrimary)
   return {
     primary: hexOf(primary),
     primaryForeground: hexOf(onPrimary),
@@ -259,7 +279,8 @@ export function brandPalette(hex: string): BrandPalette {
     light,
     dark: darkTokens(base),
     paper: light.primary,
-    lightened: !nearWhite && light.primary !== hex,
+    // Solo se avisa cuando se nota: un color claro, que no sostiene la letra blanca.
+    lightened: !nearWhite && contrastOf(base, WHITE) < TEXT,
     nearWhite,
     reddish: saturation > 0.35 && (hue >= 345 || hue <= 15),
   }
