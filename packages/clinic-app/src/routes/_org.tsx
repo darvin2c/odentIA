@@ -222,8 +222,8 @@ const navDefinitions: NavDefinition[] = [
       { label: "Finanzas", to: "/finance", icon: Wallet, permission: "finance.read" },
       { label: "Servicios y precios", to: "/services", icon: Tags, permission: "catalog.read" },
       // Para quien ve Finanzas, Comisiones es una pestaña de allí; la entrada queda
-      // para quien solo consulta las suyas.
-      { label: "Comisiones", to: "/commissions", icon: Percent, permission: "commissions.read", unlessPermission: "finance.read" },
+      // para quien solo consulta las suyas, que para el profesional son sus honorarios.
+      { label: "Mis honorarios", to: "/commissions", icon: Percent, permission: "commissions.read", unlessPermission: "finance.read" },
       // Con precios o sin ellos (recepción, ADR 0067): la misma regla que la ruta.
       { label: "Inventario", to: "/inventory", icon: Package, permissionsAny: ["inventory.read", "inventory.stock"] },
       { label: "Reportes", to: "/reports", icon: BarChart3, permission: "reports.read" },
