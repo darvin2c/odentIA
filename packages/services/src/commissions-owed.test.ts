@@ -11,7 +11,7 @@ import { clinicalFixture } from "./clinical-test-fixture.js"
 import { setCommissionRate } from "./finance.js"
 import { createPaymentMethod } from "./payment-methods.js"
 import { collectCharge, createCharge } from "./payments.js"
-import { commissionsOwedByMonth, myAttendedUnpaid } from "./report-finance.js"
+import { commissionsOwedByMonth, myAttendedUnpaid, owedMonthsOf } from "./report-finance.js"
 import { currentMonthIn } from "./report-periods.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -50,4 +50,20 @@ it("dice cuánto falta pagar en total y en qué meses, y lo atendido que aún no
   const month = owed.months.find((item) => item.year === currentPeriod().year && item.month === currentPeriod().month)
   expect(month).toMatchObject({ cents: 1000, professionals: 1 })
   expect(owed.owedCents).toBe(1000)
+})
+
+it("lo que se descuenta se reparte del mes más antiguo: los meses suman el total", () => {
+  // 50 por descontar; 40 nuevos en septiembre y 60 en octubre: septiembre 0, octubre 50.
+  const { byMonth, owedCents } = owedMonthsOf(
+    [
+      { month: "2026-10", userId: "a", cents: 6000 },
+      { month: "2026-09", userId: "a", cents: 4000 },
+      { month: "2026-10", userId: "b", cents: 1000 },
+    ],
+    new Map([["a", 5000]]),
+  )
+  expect(owedCents).toBe(6000)
+  expect(Object.fromEntries(byMonth)).toEqual({ "2026-10": { cents: 6000, professionals: 2 } })
+  const sum = [...byMonth.values()].reduce((total, month) => total + month.cents, 0)
+  expect(sum).toBe(owedCents)
 })
