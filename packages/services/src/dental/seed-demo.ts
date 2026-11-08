@@ -94,6 +94,7 @@ import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
 import { TREATMENT_KIND_KEYS } from "@odentia/dental"
 import { hashPassword } from "better-auth/crypto"
 import { and, asc, desc, eq, inArray, isNull, like, or, sql } from "drizzle-orm"
+import { opportunity } from "@odentia/db/schema/opportunities"
 import { PDFDocument, StandardFonts } from "pdf-lib"
 import sharp from "sharp"
 import {
@@ -2419,6 +2420,20 @@ for (const [index, priceDisclosure] of (["exacto", "desde", "evaluacion"] as con
     }))
   catalogA.push(...(await quickAddServices(db, ORG_A, ANA_ID, items, { priceDisclosure })).created)
 }
+// El blanqueamiento por el que preguntó Rosa es de ese servicio, como lo anota
+// el agente (`noteServiceInterest`); se anotó antes de que existiera la lista
+// de servicios de la demo. Así su presupuesto restaurador no lo toma como «la
+// más reciente» y no se gana con el dinero de una endodoncia (QA del 6 nov, X7).
+await db
+  .update(opportunity)
+  .set({ serviceId: serviceIdA("BLANQUEAMIENTO") })
+  .where(
+    and(
+      eq(opportunity.organizationId, ORG_A),
+      eq(opportunity.contactId, contactIdByName.get("Rosa Quispe")!),
+      eq(opportunity.title, "Blanqueamiento"),
+    ),
+  )
 // Evaluación inicial (borrador) antes del plan: la indicación nace aquí y la
 // ejecución continúa en la misma atención (un solo borrador por paciente).
 const draft = await createEncounter(db, ORG_A, ANA_ID, rosaPatientId, {
@@ -2426,9 +2441,12 @@ const draft = await createEncounter(db, ORG_A, ANA_ID, rosaPatientId, {
   teeth: [36, 46],
   branchId: miraflores.id,
 })
-// Plan 1 de Rosa: existe antes del presupuesto y continúa en varias visitas.
+// El plan de Rosa: uno solo, como en la aplicación (ADR 0034: la persona tiene
+// un plan abierto). Existe antes del presupuesto y continúa en varias visitas;
+// lo restaurador, la estética y la ortodoncia son presupuestos de ese plan, no
+// tres planes abiertos (QA del 6 nov, D4).
 const planRestaurador = await createTreatmentPlan(db, ORG_A, ANA_ID, rosaPatientId, {
-  title: "Plan restaurador molar",
+  title: "Plan de tratamiento",
   originEncounterId: draft.id,
 })
 const hallazgos36 = await addOdontogramEntries(db, ORG_A, ANA_ID, rosaPatientId, {
@@ -2468,6 +2486,37 @@ const corona46 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   diagnosisCode: DX.pulpitis,
   detail: "Corona cerámica pieza 46 (diferida)",
 })
+// Estética, en el mismo plan + presupuesto presentado, pendiente de decisión (nada aceptado aún).
+// Se entrega primero: toma la oportunidad «Blanqueamiento» que anotó el agente (la abierta más
+// reciente sin otro presupuesto), y el restaurador abre la suya.
+const planEstetica = planRestaurador
+const blaq = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
+  serviceId: serviceIdA("BLANQUEAMIENTO"),
+  planId: planEstetica.id,
+  sourceEncounterId: draft.id,
+  arch: "upper",
+  detail: "Blanqueamiento dental",
+})
+const limp = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
+  serviceId: serviceIdA("LIMPIEZA"),
+  planId: planEstetica.id,
+  sourceEncounterId: draft.id,
+  detail: "Limpieza dental (profilaxis)",
+})
+const budgetEstetica = await createBudget(db, ORG_A, ANA_ID, rosaPatientId, {
+  planId: planEstetica.id,
+  itemIds: [blaq.id, limp.id],
+  title: "Plan estética dental",
+  notes: "Pendiente de decisión de la paciente.",
+})
+await deliverBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetEstetica.id)
+// Tratamiento suspendido con motivo y sin decisión: demuestra que suspender no es
+// un callejón (el recorrido ofrece «Reanudar tratamiento») y que la suspensión es
+// independiente del carril económico.
+await setPlanItemStatus(db, ORG_A, ANA_ID, rosaPatientId, blaq.id, {
+  status: "suspendido",
+  statusReason: "La paciente posterga el blanqueamiento hasta terminar la restauración.",
+})
 // Presupuesto 1 de Rosa: 3 ítems del plan, aceptación parcial (corona diferida
 // por la paciente; NUNCA se infiere aceptación histórica, todo pasa por decisión).
 const budgetRestaurador = await createBudget(db, ORG_A, ANA_ID, rosaPatientId, {
@@ -2502,43 +2551,8 @@ await decideBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetRestaurador.id, {
 })
 // Decisión aceptada pero estado clínico programado: van por carriles separados.
 await setPlanItemStatus(db, ORG_A, ANA_ID, rosaPatientId, endo46.id, { status: "programado" })
-// Plan 2 de Rosa + presupuesto presentado, pendiente de decisión (nada aceptado aún).
-const planEstetica = await createTreatmentPlan(db, ORG_A, ANA_ID, rosaPatientId, {
-  title: "Plan estética dental",
-  originEncounterId: draft.id,
-})
-const blaq = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
-  serviceId: serviceIdA("BLANQUEAMIENTO"),
-  planId: planEstetica.id,
-  sourceEncounterId: draft.id,
-  arch: "upper",
-  detail: "Blanqueamiento dental",
-})
-const limp = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
-  serviceId: serviceIdA("LIMPIEZA"),
-  planId: planEstetica.id,
-  sourceEncounterId: draft.id,
-  detail: "Limpieza dental (profilaxis)",
-})
-const budgetEstetica = await createBudget(db, ORG_A, ANA_ID, rosaPatientId, {
-  planId: planEstetica.id,
-  itemIds: [blaq.id, limp.id],
-  title: "Plan estética dental",
-  notes: "Pendiente de decisión de la paciente.",
-})
-await deliverBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetEstetica.id)
-// Tratamiento suspendido con motivo y sin decisión: demuestra que suspender no es
-// un callejón (el recorrido ofrece «Reanudar tratamiento») y que la suspensión es
-// independiente del carril económico.
-await setPlanItemStatus(db, ORG_A, ANA_ID, rosaPatientId, blaq.id, {
-  status: "suspendido",
-  statusReason: "La paciente posterga el blanqueamiento hasta terminar la restauración.",
-})
-// Plan 3 de Rosa + presupuesto presentado y rechazado en su totalidad.
-const planOrto = await createTreatmentPlan(db, ORG_A, ANA_ID, rosaPatientId, {
-  title: "Plan ortodoncia",
-  originEncounterId: draft.id,
-})
+// Ortodoncia, en el mismo plan + presupuesto presentado y rechazado en su totalidad.
+const planOrto = planRestaurador
 const ctrlOrto = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   serviceId: serviceIdA("ORTODONCIA_CTRL"),
   planId: planOrto.id,
@@ -2895,10 +2909,9 @@ await addClinicalNote(db, ORG_A, ANA_ID, rosaPatientId, {
 const evaluacion46 = await createEncounter(db, ORG_A, ANA_ID, rosaPatientId, {
   reason: "Evaluación de alternativas pieza 46",
 })
-// Segunda sesión de la misma indicación: no completa el tratamiento.
-await addEncounterProcedure(db, ORG_A, ANA_ID, rosaPatientId, evaluacion46.id, {
-  planItemId: obt36.id,
-})
+// La obturación de la 36 es de una sesión y ya se hizo: aquí no se registra
+// otra (decía «2 de 1 sesión», QA del 6 nov, D4). Las varias sesiones las
+// ejercita la endodoncia de la 46, prevista en dos.
 if (docRx) {
   await correctDocumentContext(db, ORG_A, ANA_ID, rosaPatientId, docRx.id, {
     expectedVersion: 2,
@@ -3016,7 +3029,7 @@ await cancelFollowUp(db, ORG_A, ANA_ID, rosaPatientId, controlEndo.id, {
   reason: "Se reprogramará tras la primera sesión de endodoncia.",
 })
 
-// Su portal (ADR 0155): Rosa ve sus radiografías informadas, sus recetas (la
+// Su portal (ADR 0156): Rosa ve sus radiografías informadas, sus recetas (la
 // anulada, marcada) y sus papeles; la foto intraoral se ocultó con «No mostrar
 // en su portal» y la periapical sin informe todavía no se ve.
 {

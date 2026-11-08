@@ -1,8 +1,9 @@
 /**
  * Comisiones de los profesionales: cliente tipado de
  * `/api/commissions`. Los tipos replican las respuestas del servidor (fechas
- * serializadas como ISO). La moneda no se pide: es la de la clínica y viene en
- * cada respuesta; el servidor decide permisos, importes y estados.
+ * serializadas como ISO). La comisión va en la moneda de lo cobrado: cada
+ * respuesta viene en la moneda del negocio, con las otras monedas en `others`;
+ * el servidor decide permisos, importes y estados.
  */
 import { currencyFractionDigits } from "@odentia/clinical"
 import { apiFetch } from "./api"
@@ -154,6 +155,8 @@ export interface CommissionSummary {
   rateBps: number
   /** Cuántos servicios tienen otro porcentaje o un monto fijo. */
   exceptionCount?: number
+  /** Los porcentajes generales que usaron los cobros del mes (más de uno: «varios porcentajes»). */
+  ratesUsed?: number[]
   /** Cobros del mes de lo que atendió (sin lo anulado). */
   collections: number
   /** Lo cobrado en el mes de lo que atendió. */
@@ -163,8 +166,15 @@ export interface CommissionSummary {
   paidCents: number
   /** Lo que falta pagarle hoy; negativo si queda por descontar. */
   pendingCents: number
+  /**
+   * Lo que le debe a la clínica después del próximo pago: comisiones ya pagadas de cobros que
+   * después se devolvieron, sin cobros nuevos en esta moneda de donde descontarlas.
+   */
+  owedCents?: number
   lastPaidAt: string | null
   status: CommissionStatus
+  /** Lo mismo en cada otra moneda con algo del mes (solo en la de la clínica). */
+  others?: CommissionSummary[]
 }
 
 export interface CommissionLine {
@@ -202,8 +212,8 @@ export interface CommissionAdjustment {
   paidAt: string | null
 }
 
-/** Mes de un profesional con cada cobro. */
-export interface MonthlyCommissions extends Omit<CommissionSummary, "collections"> {
+/** Mes de un profesional con cada cobro, en una moneda. */
+export interface MonthlyCommissions extends Omit<CommissionSummary, "collections" | "others"> {
   timezone: string
   locale: string
   lines: CommissionLine[]
@@ -218,7 +228,15 @@ export interface MonthlyCommissions extends Omit<CommissionSummary, "collections
    * Su sueldo del mes, si tiene uno anotado como gasto que se repite (`null` si no): se paga en
    * Gastos y va aparte de la comisión.
    */
-  salary?: { cents: number; paidCents: number; dueCents: number; paidAt: string | null } | null
+  salary?: {
+    cents: number
+    paidCents: number
+    dueCents: number
+    paidAt: string | null
+    /** Cuándo vence lo que falta (`YYYY-MM-DD`) y en qué sede se paga. */
+    dueOn?: string | null
+    dueBranchId?: string | null
+  } | null
   /** Desde cuándo vale el porcentaje general (nulo si desde siempre) y el anterior. */
   rateSince?: string | null
   /** Ya tiene un porcentaje general (cambiarlo vale desde hoy; el primero, también para lo ya cobrado). */
@@ -226,6 +244,8 @@ export interface MonthlyCommissions extends Omit<CommissionSummary, "collections
   previousRateBps?: number | null
   /** Otro porcentaje o un monto fijo para un servicio, lo que rige hoy. */
   exceptions?: CommissionException[]
+  /** El mismo mes en cada otra moneda con algo que mirar (solo en la de la clínica). */
+  others?: MonthlyCommissions[]
 }
 
 export interface CommissionException {
@@ -233,6 +253,11 @@ export interface CommissionException {
   serviceName: string
   rateBps: number | null
   fixedCents: number | null
+  /** La moneda del monto fijo; si ya no es la del servicio, no vale hasta escribirlo de nuevo. */
+  fixedCurrency?: string | null
+  servicePriceCents?: number
+  serviceCurrency?: string
+  billingMode?: string
   effectiveFrom: string | null
 }
 
@@ -248,6 +273,21 @@ export interface CommissionsOwed {
   currency: string
   owedCents: number
   months: Array<YearMonth & { cents: number; professionals: number }>
+  /** Lo mismo en cada otra moneda con algo por pagar. */
+  others?: Array<Omit<CommissionsOwed, "others">>
+}
+
+/** Lo cobrado de sesiones que aún nadie hizo, por moneda: hoy no es de nadie. */
+export interface UnassignedCommissionSessions {
+  currency: string
+  /** De tratamientos que siguen: será de quien haga cada sesión. */
+  pendingCents: number
+  /** De tratamientos cancelados o reemplazados: no se le paga a nadie. */
+  stoppedCents: number
+}
+
+export function fetchUnassignedCommissionSessions(): Promise<{ data: UnassignedCommissionSessions[] }> {
+  return apiFetch("/api/commissions/unassigned")
 }
 
 export function fetchCommissionsOwed(): Promise<{ data: CommissionsOwed }> {
@@ -336,6 +376,8 @@ export function payMonthCommissionApi(
   body: YearMonth & {
     professionalUserId: string
     branchId: string
+    /** La moneda que se paga; sin ella, la de la clínica. */
+    currency?: string
     notes?: string
     /** Lo que se le mostró a quien confirma; si cambió, el servidor no paga otra cifra. */
     expectedCents?: number

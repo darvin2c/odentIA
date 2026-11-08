@@ -193,7 +193,7 @@ it("el ticket se envía por correo con su PDF, queda en la conversación de la p
   expect(messages[0]).toMatchObject({ id: sent.messageId, direction: "out", senderKind: "user", fromAction: true })
   const attachments = messages[0]!.attachments as Array<{ filename?: string; mimeType?: string }>
   expect(attachments).toHaveLength(1)
-  // Neutro: el nombre del archivo se ve en la notificación (ADR 0155).
+  // Neutro: el nombre del archivo se ve en la notificación (ADR 0156).
   expect(attachments[0]?.filename).toMatch(/^Comprobante-\d{6}\.pdf$/)
 
   // Reenviar el mismo intento (doble clic, reintento) no manda otro correo.

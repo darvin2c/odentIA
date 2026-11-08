@@ -9,12 +9,12 @@
  * El servidor decide qué toca, qué venció y si ya se pagó (también si dos
  * personas tocan a la vez): aquí solo se presenta.
  */
-import { formatMoney, formatMoneyInput } from "@odentia/clinical"
+import { currencyWord, formatMoney, formatMoneyInput } from "@odentia/clinical"
 import { Button, Collapsible, CollapsibleContent, CollapsibleTrigger, cn, toast } from "@odentia/ui"
 import { FormDrawer, RowActions, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { plainAmount } from "../../lib/commissions"
 import {
   endRecurringApi,
@@ -57,17 +57,41 @@ export function useRecurringMonth(branchId: string, month: { year: number; month
   })
 }
 
-/** «Lo fijo del mes: S/ 21,350.00 · pagado 14,850.00 · falta 6,500.00», dentro de la tarjeta del total. */
-export function FixedOfMonth({ data, locale }: { data: RecurringMonth | undefined; locale: string }) {
-  if (!data || data.fixed.count === 0) return null
+/**
+ * «Lo fijo del mes en esta sede: S/ 21,350.00 · pagado 14,850.00 · falta 6,500.00», dentro de la
+ * tarjeta del total. Con varias sedes dice también lo de toda la clínica: cuánto cuesta mantenerla.
+ */
+export function FixedOfMonth({
+  data,
+  wholeClinic,
+  locale,
+}: {
+  data: RecurringMonth | undefined
+  /** Lo de todas las sedes, solo si la clínica tiene más de una. */
+  wholeClinic?: RecurringMonth | undefined
+  locale: string
+}) {
+  if (!data || (data.fixed.count === 0 && !wholeClinic?.fixed.count)) return null
   const { totalCents, paidCents, dueCents } = data.fixed
   return (
-    <p className="mt-1 text-sm text-muted-foreground">
-      Lo fijo del mes:{" "}
-      <span className="font-semibold text-foreground tabular-nums">{formatMoney(totalCents, data.currency, locale)}</span>
-      {" · "}pagado {plainAmount(paidCents, data.currency, locale)}
-      {dueCents > 0 ? ` · falta ${plainAmount(dueCents, data.currency, locale)}` : ""}
-    </p>
+    <>
+      {data.fixed.count > 0 ? (
+        <p className="mt-1 text-sm text-muted-foreground">
+          {wholeClinic ? "Lo fijo del mes en esta sede" : "Lo fijo del mes"}:{" "}
+          <span className="font-semibold text-foreground tabular-nums">{formatMoney(totalCents, data.currency, locale)}</span>
+          {" · "}pagado {plainAmount(paidCents, data.currency, locale)}
+          {dueCents > 0 ? ` · falta ${plainAmount(dueCents, data.currency, locale)}` : ""}
+        </p>
+      ) : null}
+      {wholeClinic && wholeClinic.fixed.count > 0 ? (
+        <p className="mt-1 text-sm text-muted-foreground">
+          Toda la clínica:{" "}
+          <span className="font-semibold text-foreground tabular-nums">
+            {formatMoney(wholeClinic.fixed.totalCents, wholeClinic.currency, locale)}
+          </span>
+        </p>
+      ) : null}
+    </>
   )
 }
 
@@ -123,6 +147,8 @@ export function RecurringDueSection({
       .finally(refresh)
   }
 
+  // Las filas que se están pagando, al instante (el estado de la mutación llega un render tarde).
+  const payingNow = useRef(new Set<string>())
   const pay = useMutation({
     mutationFn: (row: RecurringDue) => payRecurringApi(row.recurringId, { month: row.month }),
     onSuccess: (result, row) => {
@@ -199,7 +225,10 @@ export function RecurringDueSection({
           </div>
           <ul className="flex min-w-0 flex-col divide-y">
             {data.due.map((row) => {
-              const when = row.overdue ? `venció el ${row.dueDay}` : `el ${row.dueDay}`
+              // Lo que se paga al mes siguiente dice su mes: el sueldo de noviembre, «el 2 de diciembre».
+              const dueMonth = row.dueOn.slice(0, 7)
+              const dueWords = dueMonth !== row.month ? `${row.dueDay} de ${monthWord(dueMonth)}` : `${row.dueDay}`
+              const when = row.overdue ? `venció el ${dueWords}` : `el ${dueWords}`
               const before = row.month !== current ? `De ${monthWord(row.month)}: ` : ""
               const paying = pay.isPending && pay.variables?.recurringId === row.recurringId && pay.variables.month === row.month
               const named = `${row.concept} de ${monthWord(row.month)}`
@@ -222,7 +251,13 @@ export function RecurringDueSection({
                         size="sm"
                         disabled={paying}
                         aria-label={`Pagar ${named}, ${money(row.amountCents, row.currency)}`}
-                        onClick={() => pay.mutate(row)}
+                        onClick={() => {
+                          // El botón se desactiva un render tarde: el segundo clic no debe salir.
+                          const key = `${row.recurringId}:${row.month}`
+                          if (payingNow.current.has(key)) return
+                          payingNow.current.add(key)
+                          pay.mutate(row, { onSettled: () => payingNow.current.delete(key) })
+                        }}
                       >
                         {paying ? "Pagando…" : "Pagar"}
                       </Button>
@@ -369,7 +404,7 @@ function PayOtherDrawer({
     >
       <div className="flex flex-col gap-4">
         <form.AppField name="amount">
-          {(field) => <field.TextField label={`Importe (${currency})`} inputMode="decimal" inputClassName="w-40" />}
+          {(field) => <field.TextField label={`Importe en ${currencyWord(currency, locale)}`} inputMode="decimal" inputClassName="w-40" />}
         </form.AppField>
         <form.AppField name="fromCash">
           {(field) => (
@@ -456,7 +491,7 @@ function ChangeRecurringDrawer({
         <form.AppField name="amount">
           {(field) => (
             <field.TextField
-              label={`Importe (${currency})`}
+              label={`Importe en ${currencyWord(currency, locale)}`}
               description={row ? `Se propone este importe cada vez. Hoy: ${formatMoney(row.amountCents, row.currency, locale)}.` : undefined}
               inputMode="decimal"
               inputClassName="w-40"

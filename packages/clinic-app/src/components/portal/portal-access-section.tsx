@@ -35,7 +35,7 @@ import { PortalAccessSkeleton } from "../skeletons/person-sections"
  * Datos › Enlace y portal (decisión 9, ADR 0037): primero su enlace; después, una sola fila por quien
  * entra, en lugar de las listas de permisos, sesiones y llaves. «Dar acceso al
  * portal» son tres preguntas en una pantalla (quién entra, comprobé su
- * identidad, cómo le llega); lo que verá no se elige (ADR 0155): es todo lo
+ * identidad, cómo le llega); lo que verá no se elige (ADR 0156): es todo lo
  * suyo, con el límite de la clínica, y se dice en una línea. «Enviar nuevo
  * enlace» para volver a entrar, sin volver a comprobar su identidad (el
  * anterior deja de servir); «Quitar acceso» cierra todo.
@@ -49,7 +49,7 @@ export function PatientPortalAccessSection({
   withLink?: boolean
 }) {
   // Dar el acceso, mostrar el QR, decir el código y quitarlo es de quien ve la historia
-  // (ADR 0155); recepción solo envía el enlace de un acceso ya dado por su WhatsApp.
+  // (ADR 0156); recepción solo envía el enlace de un acceso ya dado por su WhatsApp.
   const canGive = usePermission("clinical.read")
   const canEditRecord = usePermission("patients.write")
   const canManage = canGive || canEditRecord

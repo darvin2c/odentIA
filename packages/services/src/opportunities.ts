@@ -2016,7 +2016,13 @@ async function pickOpportunity(
         .orderBy(desc(opportunity.createdAt), desc(opportunity.id))
         .limit(1)
     : []
-  return ofCarer ? { ...ofCarer, ofCarer: true } : (rows[0] ?? null)
+  if (ofCarer) return { ...ofCarer, ofCarer: true }
+  // Con un presupuesto, «la más reciente» es la abierta que no está unida a otro
+  // presupuesto, sea cual sea su servicio: no toma la de otro presupuesto (QA del
+  // 6 nov, X7) ni abre otra cuando lo presentado no repite el servicio que anotó
+  // el agente («Ortodoncia» y «Brackets metálicos»; revisión del 7 nov).
+  if (input.budget) return rows.find((row) => !row.opp.budgetId) ?? null
+  return rows[0] ?? null
 }
 
 /** La que anotó quien lleva al paciente pasa a llevarlo: desde ahí es de su historia. */
@@ -2236,7 +2242,8 @@ async function openForBudget(
  * Al presentar un presupuesto, se une solo a la oportunidad abierta que ya es
  * suya (o del que reemplaza), a la del mismo tratamiento (también la que anotó
  * su apoderada sin ficha propia) o, si no hay, a la más reciente de la
- * persona, nunca a una que espera la respuesta a otro presupuesto. La
+ * persona que no está unida a otro presupuesto, sea cual sea su servicio,
+ * nunca a una que espera la respuesta a otro presupuesto. La
  * oportunidad adopta al paciente, su valor pasa a ser el total del presupuesto
  * y, si aún no llegaba ahí, pasa sola a «Presupuesto enviado».
  *

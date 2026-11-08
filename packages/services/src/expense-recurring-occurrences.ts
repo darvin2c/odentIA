@@ -174,12 +174,14 @@ export async function loadOccurrences(tx: Db, orgId: string, filter: OccurrenceF
   for (const template of live) {
     for (const month of months.get(template.id) ?? []) {
       const payment = paidOf.get(`${template.id}|${month}`)
-      const dueDay = dueDayIn(template.day, month)
+      // Lo que se paga al mes siguiente vence en el mes siguiente (el sueldo de noviembre, el 2 de diciembre).
+      const dueMonth = template.dueNextMonth ? addMonthKey(month, 1) : month
+      const dueDay = dueDayIn(template.day, dueMonth)
       out.push({
         template,
         month,
         dueDay,
-        dueOn: `${month}-${String(dueDay).padStart(2, "0")}`,
+        dueOn: `${dueMonth}-${String(dueDay).padStart(2, "0")}`,
         paid: payment
           ? {
               expenseId: payment.expenseId,
@@ -262,6 +264,9 @@ export interface MonthSalary {
   dueCents: number
   /** Cuándo se pagó lo último del mes (nulo si falta algo o nada se pagó). */
   paidAt: Date | null
+  /** Cuándo vence lo que falta pagar (`YYYY-MM-DD`, lo más próximo) y en qué sede se paga. */
+  dueOn: string | null
+  dueBranchId: string | null
   items: Array<{ recurringId: string; concept: string; cents: number; paidAt: Date | null }>
 }
 
@@ -296,6 +301,8 @@ export async function salaryOfMonth(
             return at && (!latest || at > latest) ? at : latest
           }, null)
         : null,
+    dueOn: due.map((item) => item.dueOn).sort()[0] ?? null,
+    dueBranchId: due.sort((a, b) => a.dueOn.localeCompare(b.dueOn))[0]?.template.branchId ?? null,
     items: list.map((item) => ({
       recurringId: item.template.id,
       concept: item.template.concept,

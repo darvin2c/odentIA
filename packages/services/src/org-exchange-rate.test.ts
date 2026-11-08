@@ -257,6 +257,7 @@ it("dice lo que ya hay en otra moneda: por cobrar, servicios y efectivo en caja"
     cashCents: 0,
     services: 0,
     pending: 0,
+    commissionsCents: 0,
   })
   await ownService(c.orgId, "USD")
   await ownService(c.orgId, "PEN")

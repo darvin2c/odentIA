@@ -7,11 +7,13 @@
 import { randomUUID } from "node:crypto"
 import { member } from "@odentia/db/schema/auth"
 import { branch } from "@odentia/db/schema/org"
+import { sql } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { dueDayIn, occursIn } from "./expense-recurring-occurrences.js"
 import {
   endRecurringExpense,
+  fixedOwedAt,
   getRecurringMonth,
   payRecurringOccurrence,
   registerRecurringExpense,
@@ -186,13 +188,20 @@ it("el mes que paga, lo que se propone tras un cambio y lo que no se puede cambi
   expect(due).toMatchObject({ month: currentKey, day: 31 })
 
   // Se pagó otro importe; cambiar solo el concepto no hace volver al importe de antes.
-  await f.run((tx) => voidExpense(tx, "org_a", f.actor, created.id, { reason: "Prueba" }))
+  await f.run((tx) => voidExpense(tx, "org_a", f.actor, created.expense!.id, { reason: "Prueba" }))
   await f.run((tx) => payRecurringOccurrence(tx, "org_a", f.actor, id, { month: before.key, amountCents: 270000 }))
   await f.run((tx) => updateRecurringExpense(tx, "org_a", f.actor, id, { concept: "Sueldo de recepción (turno mañana)" }))
   const after = (await f.run((tx) => getRecurringMonth(tx, "org_a", { ...current, branchId }))).due.find(
     (row) => row.recurringId === id,
   )
   expect(after).toMatchObject({ amountCents: 270000, concept: "Sueldo de recepción (turno mañana)" })
+  // Volver al importe de siempre (el de la plantilla) sí guarda: se compara con lo que se propone.
+  const back = await f.run((tx) => updateRecurringExpense(tx, "org_a", f.actor, id, { amountCents: 250000 }))
+  expect(back.amountCents).toBe(250000)
+  const backDue = (await f.run((tx) => getRecurringMonth(tx, "org_a", { ...current, branchId }))).due.find(
+    (row) => row.recurringId === id,
+  )
+  expect(backDue).toMatchObject({ amountCents: 250000 })
 
   // La persona no se cambia y el fin no queda antes de un mes pagado.
   await expect(
@@ -205,4 +214,72 @@ it("el mes que paga, lo que se propone tras un cambio y lo que no se puede cambi
   // Dejar de repetir termina en lo último pagado y dice si quedó algo antes sin pagar.
   const ended = await f.run((tx) => endRecurringExpense(tx, "org_a", f.actor, id))
   expect(ended).toMatchObject({ lastMonth: before.key, stillDue: [] })
+})
+
+it("se anota sin pagar, y el sueldo que se paga al mes siguiente no vence en su propio mes", async () => {
+  const f = await clinicalFixture()
+  const branchId = await seedBranch()
+  const now = new Date()
+  const current = { year: now.getUTCFullYear(), month: now.getUTCMonth() + 1 }
+  const currentKey = `${current.year}-${String(current.month).padStart(2, "0")}`
+  const next = current.month === 12 ? { year: current.year + 1, month: 1 } : { year: current.year, month: current.month + 1 }
+  const nextKey = `${next.year}-${String(next.month).padStart(2, "0")}`
+
+  // El sueldo de este mes se paga el 2 del siguiente, y aún no se paga: se anota sin ningún gasto.
+  const created = await f.run((tx) =>
+    registerRecurringExpense(tx, "org_a", f.actor, {
+      branchId,
+      category: "Personal",
+      concept: "Sueldo de recepción",
+      amountCents: 300000,
+      currency: "PEN",
+      fromCash: false,
+      repeat: { everyMonths: 1, day: 2, month: currentKey, paid: false, dueNextMonth: true },
+    }),
+  )
+  expect(created.expense).toBeNull()
+  expect(created.recurring).toMatchObject({ firstMonth: currentKey, dueNextMonth: true })
+  const spent = await ownerDb.execute<{ n: number }>(
+    sql`select count(*)::int as n from expense where recurring_id = ${created.recurring.id}`,
+  )
+  expect(spent[0]?.n).toBe(0)
+
+  // Este mes queda por pagar, pero no vencido: vence el 2 del mes siguiente.
+  const month = await f.run((tx) => getRecurringMonth(tx, "org_a", { ...current, branchId }))
+  expect(month.due.find((row) => row.recurringId === created.recurring.id)).toMatchObject({
+    month: currentKey,
+    dueOn: `${nextKey}-02`,
+    overdue: false,
+  })
+  expect(await f.run((tx) => fixedOwedAt(tx, "org_a", now, { branchId }))).toMatchObject({ cents: 0, count: 0 })
+
+  // El 5 del mes siguiente, ya venció y se debe.
+  const later = new Date(Date.UTC(next.year, next.month - 1, 5, 17))
+  const nextMonth = await f.run((tx) => getRecurringMonth(tx, "org_a", { ...next, branchId }, later))
+  expect(nextMonth.due.find((row) => row.month === currentKey && row.recurringId === created.recurring.id)).toMatchObject({
+    overdue: true,
+  })
+  expect(await f.run((tx) => fixedOwedAt(tx, "org_a", later, { branchId }))).toMatchObject({ count: 1 })
+})
+
+it("un gasto pagado es el pago de su mes o del anterior, no de uno posterior a su fecha", async () => {
+  const f = await clinicalFixture()
+  const branchId = await seedBranch()
+  const now = new Date()
+  const before = lastMonthOf(now)
+  const currentKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`
+  await expect(
+    f.run((tx) =>
+      registerRecurringExpense(tx, "org_a", f.actor, {
+        branchId,
+        category: "Servicios",
+        concept: "Internet",
+        amountCents: 12000,
+        currency: "PEN",
+        fromCash: false,
+        spentAt: before.spentAt,
+        repeat: { everyMonths: 1, day: 7, month: currentKey },
+      }),
+    ),
+  ).rejects.toMatchObject({ fields: { "repeat.month": expect.any(String) } })
 })

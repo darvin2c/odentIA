@@ -1,6 +1,6 @@
 {
-  "id": "3ade95ca-d28a-4945-ba34-6719eea18245",
-  "prevId": "a95fffbe-5491-4ce3-ae87-c964e414b264",
+  "id": "9d67ef72-8bc3-4d8d-91cc-30721017d07a",
+  "prevId": "6077c077-d460-4596-be66-a26420fdedff",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -16151,7 +16151,7 @@
         },
         "patient_charge_commission_sessions_check": {
           "name": "patient_charge_commission_sessions_check",
-          "value": "\"patient_charge\".\"commission_sessions\" IS NULL OR \"patient_charge\".\"commission_sessions\" BETWEEN 2 AND 60"
+          "value": "\"patient_charge\".\"commission_sessions\" IS NULL OR \"patient_charge\".\"commission_sessions\" BETWEEN 1 AND 60"
         },
         "patient_charge_amount_check": {
           "name": "patient_charge_amount_check",
@@ -17204,18 +17204,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
-        },
-        "portal_hidden_at": {
-          "name": "portal_hidden_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "portal_hidden_by": {
-          "name": "portal_hidden_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -17316,30 +17304,12 @@
           ],
           "onUpdate": "no action",
           "onDelete": "no action"
-        },
-        "patient_document_portal_hidden_by_user_id_fk": {
-          "name": "patient_document_portal_hidden_by_user_id_fk",
-          "tableFrom": "patient_document",
-          "columnsFrom": [
-            "portal_hidden_by"
-          ],
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "patient_document_portal_hidden_check": {
-          "name": "patient_document_portal_hidden_check",
-          "value": "(\"patient_document\".\"portal_hidden_at\" IS NULL) = (\"patient_document\".\"portal_hidden_by\" IS NULL)"
-        },
         "patient_document_image_type_check": {
           "name": "patient_document_image_type_check",
           "value": "\"patient_document\".\"image_type\" IS NULL OR \"patient_document\".\"category\" IN ('radiografia','foto_clinica')"
@@ -29059,6 +29029,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "fixed_currency": {
+          "name": "fixed_currency",
+          "type": "char(3)",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_by": {
           "name": "created_by",
           "type": "text",
@@ -29229,6 +29205,10 @@
         "commission_rate_one_check": {
           "name": "commission_rate_one_check",
           "value": "\"commission_rate\".\"rate_bps\" IS NULL OR \"commission_rate\".\"fixed_cents\" IS NULL"
+        },
+        "commission_rate_fixed_currency_check": {
+          "name": "commission_rate_fixed_currency_check",
+          "value": "\"commission_rate\".\"fixed_currency\" IS NULL OR \"commission_rate\".\"fixed_cents\" IS NOT NULL"
         },
         "commission_rate_general_check": {
           "name": "commission_rate_general_check",

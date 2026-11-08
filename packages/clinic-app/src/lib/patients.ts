@@ -316,7 +316,7 @@ export interface PatientDocument {
   reportStatus?: string | null
   retiredAt?: string | null
   retireReason?: string | null
-  /** «No mostrar en su portal»: desde cuándo está oculto; nulo, se ve (ADR 0155). */
+  /** «No mostrar en su portal»: desde cuándo está oculto; nulo, se ve (ADR 0156). */
   portalHiddenAt?: string | null
   encounterId: string | null
   planItemId: string | null
@@ -533,6 +533,24 @@ export interface TreatmentPlanWithStatus {
   pendingItems: number
   /** El plan abierto de la persona: recibe las indicaciones nuevas (uno por persona). */
   isOpen: boolean
+  /** Le queda algo por hacer: no es un plan anterior aunque no reciba lo nuevo. */
+  active?: boolean
+}
+
+/**
+ * Los planes que se muestran como vigentes y los anteriores (QA del 6 nov, M12):
+ * anterior es solo el que ya no tiene nada por hacer. Lo aceptado y programado
+ * de un segundo plan abierto no se esconde en «Planes anteriores». Los vacíos
+ * no cuentan como anteriores.
+ */
+export function splitPlans<T extends TreatmentPlanWithStatus>(plans: readonly T[]): { current: T[]; previous: T[] } {
+  const current = plans.filter((row) => row.isOpen || row.active)
+  // Sin ninguno abierto, el último sigue a la vista (como antes).
+  const shown = current.length > 0 ? current : plans.slice(-1)
+  return {
+    current: shown,
+    previous: plans.filter((row) => !shown.includes(row) && row.totalItems > 0),
+  }
 }
 
 /** Detalle de una atención: encuentro + piezas, procedimientos, notas, odontograma, documentos y adendas. */

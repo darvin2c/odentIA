@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import { call, expect, test } from "./fixtures"
 
 /**
- * El portal muestra todo lo suyo, sin elegir (ADR 0155): recepción da el
+ * El portal muestra todo lo suyo, sin elegir (ADR 0156): recepción da el
  * acceso sin «Qué verá» y la persona ve sus recetas en «Tus documentos», la
  * anulada marcada como «Anulada» y en palabras, sin códigos. La fila no se sale
  * de la tarjeta a 390 px.

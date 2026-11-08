@@ -370,6 +370,8 @@ export interface CurrencyInUse {
   services: number
   /** Tratamientos por hacer con el precio en esa moneda. */
   pending: number
+  /** Comisiones de lo cobrado en esa moneda aún sin pagar: van en esa moneda. */
+  commissionsCents?: number
 }
 
 /**
@@ -389,6 +391,7 @@ export function currencyRemovalWords(usage: CurrencyInUse, business: string, loc
     usage.pending > 0
       ? `realiza o cancela ${usage.pending === 1 ? "el tratamiento" : `los ${usage.pending} tratamientos`} por hacer en ${word}`
       : null,
+    (usage.commissionsCents ?? 0) > 0 ? `paga las comisiones en ${word}` : null,
   ].filter((step): step is string => step !== null)
   if (steps.length === 0) return null
   const list = steps.length > 1 ? `${steps.slice(0, -1).join(", ")} y ${steps.at(-1)}` : steps[0]

@@ -23,7 +23,15 @@ import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-
 import { useMemo, useState } from "react"
 import { ExpenseRowsSkeleton, ExpensesTotalSkeleton } from "../skeletons/finance"
 import { FixedOfMonth, RecurringDueSection, useRecurringMonth } from "./recurring-due"
+import { useActiveBranch } from "../../lib/active-branch"
 import { VoidDrawer } from "./void-drawer"
+
+const MONTH_WORDS = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "setiembre", "octubre", "noviembre", "diciembre"]
+
+/** «noviembre» de `2026-11`. */
+function monthOfKey(key: string): string {
+  return MONTH_WORDS[Number(key.slice(5, 7)) - 1] ?? key
+}
 import { plainAmount } from "../../lib/commissions"
 import { usePermission } from "../../lib/crm"
 import { expenseRateWords } from "../../lib/expense-exchange"
@@ -101,6 +109,9 @@ export function ExpensesTab({
   })
   // Lo que se repite: «Por pagar» y «Lo fijo del mes».
   const recurring = useRecurringMonth(branchId, month, true)
+  // Con varias sedes, lo fijo de toda la clínica: lo que cuesta mantenerla al mes.
+  const severalBranches = useActiveBranch().branches.length > 1
+  const wholeClinic = useRecurringMonth("", month, severalBranches)
   const voidMutation = useMutation({
     mutationFn: (input: { id: string; reason: string }) => voidExpenseApi(input.id, input.reason),
     onSuccess: () => {
@@ -170,7 +181,7 @@ export function ExpensesTab({
         },
       },
       // En el teléfono también se ve el tipo y de dónde salió: son lo que se busca al revisar un gasto.
-      { id: "tipo", header: "Tipo", meta: { view: { primary: true } }, cell: ({ row }) => <span>{row.original.category}</span> },
+      { id: "tipo", header: "Tipo", meta: { view: { primary: true } }, cell: ({ row }) => <span className="whitespace-nowrap">{row.original.category}</span> },
       {
         id: "comprobante",
         header: "Comprobante",
@@ -306,7 +317,11 @@ export function ExpensesTab({
           <p className="mt-1 text-3xl leading-tight font-bold tracking-tight tabular-nums">
             {formatMoney(data.totalCents, data.currency || currency, locale)}
           </p>
-          <FixedOfMonth data={recurring.data?.data} locale={locale} />
+          <FixedOfMonth
+            data={recurring.data?.data}
+            wholeClinic={severalBranches ? wholeClinic.data?.data : undefined}
+            locale={locale}
+          />
           {data.byCategory.length > 0 ? (
             <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-3 border-t pt-4 sm:grid-cols-3 lg:grid-cols-5">
               {data.byCategory.map((entry) => (
@@ -391,7 +406,7 @@ export function ExpensesTab({
         )
       ) : (
         <DataTable
-          className="[&_td]:align-top [&_td]:whitespace-normal [&_td]:[overflow-wrap:anywhere]"
+          className="[&_td]:align-top [&_td]:whitespace-normal [&_td]:[overflow-wrap:break-word]"
           table={table}
           isFetching={expenses.isFetching}
         />
@@ -402,11 +417,15 @@ export function ExpensesTab({
       <VoidDrawer
         open={voiding !== null}
         title="Anular gasto"
-        description={
+        description={[
           voiding?.fromCash
             ? "Queda en el historial con su motivo, deja de sumar en el mes y el efectivo vuelve a contar en la caja si aún no se cerró."
-            : "Queda en el historial con su motivo y deja de sumar en el mes."
-        }
+            : "Queda en el historial con su motivo y deja de sumar en el mes.",
+          // Es el pago de algo que se repite: ese mes vuelve a quedar por pagar.
+          voiding?.recurringMonth ? `El de ${monthOfKey(voiding.recurringMonth)} vuelve a quedar «por pagar».` : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
         onClose={() => setVoiding(null)}
         onConfirm={async (reason) => {
           if (voiding) await voidMutation.mutateAsync({ id: voiding.id, reason })

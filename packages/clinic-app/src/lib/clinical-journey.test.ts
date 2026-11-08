@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest"
-import { clinicDateTimeValue, formatDate, instantFromClinicValue } from "./clinical-journey"
+import { clinicDateTimeValue, formatDate, instantFromClinicValue, encounterControls, type FollowUp, type NextControl, nextControlPlace } from "./clinical-journey"
 import { setOrgLocale } from "./locale"
 
 afterEach(() => {
@@ -23,5 +23,45 @@ describe("fechas clínicas en la zona de la clínica, no en la del navegador", (
     expect(formatDate("2026-10-22")).toBe("22/10/2026")
     // Un instante se dice en el día de la clínica: las 02:00 UTC aún son el día anterior en Lima.
     expect(formatDate("2026-10-22T02:00:00.000Z")).toBe("21/10/2026")
+  })
+})
+
+// QA del 6 nov (X3): el control, también uno vencido, no aparecía en el Resumen.
+describe("dónde dice el Resumen el próximo control", () => {
+  const control: NextControl = {
+    id: "c",
+    title: "Profilaxis semestral",
+    dueAt: "2026-11-07T14:00:00.000Z",
+    status: "pendiente",
+    overdue: false,
+    appointment: null,
+  }
+  it("va en su propia fila; vencido sin cita, en Pendientes", () => {
+    expect(nextControlPlace(control, "respuesta")).toBe("fila")
+    expect(nextControlPlace({ ...control, overdue: true }, "enviar")).toBe("pendientes")
+  })
+  it("si «Qué sigue» ya habla del control no se repite, y sin control no hay nada", () => {
+    expect(nextControlPlace({ ...control, overdue: true }, "control")).toBeNull()
+    expect(nextControlPlace(null, "respuesta")).toBeNull()
+  })
+})
+
+// QA del 6 nov (M13): dentro de la atención decía «Sin controles» a quien tenía dos abiertos.
+describe("los controles dentro de una atención", () => {
+  const row = (id: string, over: Partial<FollowUp>) =>
+    ({ id, status: "pendiente", originEncounterId: "otra", completedEncounterId: null, ...over }) as FollowUp
+  it("separa los suyos de los que la persona ya tiene abiertos de otras atenciones", () => {
+    const rows = [
+      row("hoy", { originEncounterId: "esta" }),
+      row("endodoncia", { status: "programado" }),
+      row("profilaxis", {}),
+      row("hecho", { status: "realizado" }),
+    ]
+    const { own, others } = encounterControls(rows, "esta")
+    expect(own.map((item) => item.id)).toEqual(["hoy"])
+    expect(others.map((item) => item.id)).toEqual(["endodoncia", "profilaxis"])
+  })
+  it("fuera de una atención, todos son de la lista", () => {
+    expect(encounterControls([row("a", {})], undefined)).toEqual({ own: [row("a", {})], others: [] })
   })
 })

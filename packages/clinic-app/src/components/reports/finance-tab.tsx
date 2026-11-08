@@ -314,6 +314,17 @@ function FinanceCards({ data }: { data: ReportFinance }) {
               : "Sin cobros de lo atendido"}
             <br />
             Por pagar: {money(data.commissions.pendingCents)}
+            {(data.commissions.otherCurrencies ?? []).length > 0 ? (
+              // Se paga en dólares: aquí va sumado en soles con el cambio de su cobro, y se dice.
+              <>
+                <br />
+                Incluye{" "}
+                {(data.commissions.otherCurrencies ?? [])
+                  .map((item) => formatMoney(item.generatedCents, item.currency, data.locale))
+                  .join(" y ")}{" "}
+                al cambio de su cobro
+              </>
+            ) : null}
             {data.commissions.pendingCents > 0 || data.commissions.generatedCents > 0 ? (
               <>
                 {" · "}
@@ -964,6 +975,16 @@ function PayablesCard({ data }: { data: ReportFinance }) {
           </span>
           <span className="text-[13px] text-muted-foreground">
             {commissions.professionals === 0 ? "Nadie espera pago" : `De ${commissions.professionals} ${commissions.professionals === 1 ? "profesional" : "profesionales"}`}
+            {(data.commissions.otherCurrencies ?? []).some((item) => item.pendingCents > 0) ? (
+              <>
+                {" · incluye "}
+                {(data.commissions.otherCurrencies ?? [])
+                  .filter((item) => item.pendingCents > 0)
+                  .map((item) => formatMoney(item.pendingCents, item.currency, data.locale))
+                  .join(" y ")}{" "}
+                al cambio de su cobro
+              </>
+            ) : null}
             {/* Lo de un mes cerrado es lo que se debía al cerrarlo; pagar solo se ofrece si hoy se debe algo. */}
             {commissions.cents > 0 && !data.period.partial && commissions.nowCents === 0 ? <> · hoy ya no se debe nada</> : null}
             {!data.period.partial && commissions.nowCents > 0 && commissions.nowCents !== commissions.cents ? (
@@ -986,10 +1007,34 @@ function PayablesCard({ data }: { data: ReportFinance }) {
               <strong className="tabular-nums">{money(fixed.cents)}</strong>
             </span>
             <span className="text-[13px] text-muted-foreground">
-              {fixed.count === 1 ? "1 sin pagar" : `${fixed.count} sin pagar`} ·{" "}
-              <Link to="/finance" search={{ tab: "gastos" }} className="font-bold text-primary-soft-foreground">
-                Pagar en Gastos
-              </Link>
+              {(fixed.byBranch ?? []).length > 1 ? (
+                // Cada sede con lo suyo: Gastos muestra lo de la sede elegida.
+                (fixed.byBranch ?? []).map((own, index) => (
+                  <span key={own.branchId}>
+                    {index > 0 ? " · " : ""}
+                    {own.count === 1 ? "1 sin pagar" : `${own.count} sin pagar`} en {own.branchName}:{" "}
+                    <Link
+                      to="/finance"
+                      search={{ tab: "gastos", branch: own.branchId }}
+                      className="font-bold text-primary-soft-foreground"
+                    >
+                      Pagar en Gastos
+                    </Link>
+                  </span>
+                ))
+              ) : (
+                <>
+                  {fixed.count === 1 ? "1 sin pagar" : `${fixed.count} sin pagar`}
+                  {fixed.byBranch?.[0] ? ` en ${fixed.byBranch[0].branchName}` : ""} ·{" "}
+                  <Link
+                    to="/finance"
+                    search={{ tab: "gastos", ...(fixed.byBranch?.[0] ? { branch: fixed.byBranch[0].branchId } : {}) }}
+                    className="font-bold text-primary-soft-foreground"
+                  >
+                    Pagar en Gastos
+                  </Link>
+                </>
+              )}
             </span>
           </li>
         ) : null}

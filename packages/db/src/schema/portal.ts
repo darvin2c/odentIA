@@ -31,7 +31,7 @@ export const PORTAL_LINK_STATUSES = ["pendiente", "usado", "revocado"] as const
 export type PortalLinkStatus = (typeof PORTAL_LINK_STATUSES)[number]
 
 /**
- * Lo que ve una sesión. Desde ADR 0155 no lo elige quien da el acceso: es lo
+ * Lo que ve una sesión. Desde ADR 0156 no lo elige quien da el acceso: es lo
  * que deja ver la clínica en Configuración (`portal_policy.allowed_scope`), y
  * la sesión guarda ese alcance efectivo. Los enlaces y accesos de antes
  * conservan lo que se eligió, pero ya no se lee.
@@ -43,7 +43,7 @@ export interface PortalScope {
   budgets: boolean
   /** Ver cuenta real y saldo (solo lectura, sin cobros). */
   account: boolean
-  /** Ids de patient_document que se elegían antes de ADR 0155; ya no se lee. */
+  /** Ids de patient_document que se elegían antes de ADR 0156; ya no se lee. */
   documents: string[]
   /** Ve todos sus documentos terminados (`portal-papers.ts`). */
   papers?: boolean

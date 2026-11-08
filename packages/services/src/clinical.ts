@@ -1353,7 +1353,7 @@ export interface PatientDocumentWithContext {
   retiredAt: Date | null
   retiredBy: string | null
   retireReason: string | null
-  /** «No mostrar en su portal» (ADR 0155): desde cuándo está oculto; nulo, se ve. */
+  /** «No mostrar en su portal» (ADR 0156): desde cuándo está oculto; nulo, se ve. */
   portalHiddenAt: Date | null
   encounterId: string | null
   planItemId: string | null
@@ -1974,7 +1974,7 @@ export async function setDocumentReportStatus(
 }
 
 /**
- * «No mostrar en su portal» (ADR 0155): la clínica oculta un archivo subido o
+ * «No mostrar en su portal» (ADR 0156): la clínica oculta un archivo subido o
  * una imagen del portal del paciente, para todo acceso de hoy y de mañana, y lo
  * vuelve a mostrar sin pedir nada. Lo cambia quien escribe en la historia
  * (`clinical.write`, en la ruta) y queda su traza. Retirado, ya no cambia.

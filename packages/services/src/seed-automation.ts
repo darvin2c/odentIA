@@ -73,7 +73,7 @@ export async function seedChannelTemplates(
     ver_respuesta: { status: "aprobada", since: lastWeek },
     // Aprobado: quien completa algo en su enlace pasadas las 24 horas recibe el agradecimiento.
     enlace_recibido: { status: "aprobada", since: lastWeek },
-    // Aprobado: una receta o un comprobante enviados pasadas las 24 horas salen con su PDF (ADR 0155).
+    // Aprobado: una receta o un comprobante enviados pasadas las 24 horas salen con su PDF (ADR 0156).
     documento_listo: { status: "aprobada", since: lastWeek },
   }
   for (const key of CATALOG_MESSAGE_KEYS) {

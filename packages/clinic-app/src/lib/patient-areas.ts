@@ -244,11 +244,15 @@ export function isDocumentFilter(value: unknown): value is DocumentFilter {
   return documentFilters().some((filter) => filter.id === value)
 }
 
-/** La sección de un `?tab=`, también de los enlaces de la ficha anterior. */
+/**
+ * La sección de un `?tab=`, también de los enlaces de la ficha anterior y del
+ * nombre de un área (`?tab=datos` abre su primera sección, «Datos personales»,
+ * no el Resumen: QA del 6 nov, B8).
+ */
 export function sectionFromSearch(value: unknown): PatientSectionId | undefined {
   if (typeof value !== "string") return undefined
   if (isPatientSectionId(value)) return value
-  return RETIRED_SECTIONS[value]
+  return RETIRED_SECTIONS[value] ?? patientSections().find((section) => section.area === value)?.id
 }
 
 /**

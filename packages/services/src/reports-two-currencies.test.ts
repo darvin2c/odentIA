@@ -100,7 +100,7 @@ describe("lo que ya pasó, con su valor congelado", () => {
     expect(await one(c.orgId, "select sum(base) as v from comisiones")).toBe(3750)
     expect(await one(c.orgId, "select sum(comision) as v from comisiones")).toBe(1124.98)
 
-    // Finanzas › Comisiones: la misma cuenta, con la base redondeada una vez sobre la suma.
+    // Finanzas › Comisiones: en la moneda de lo cobrado, con la base redondeada una vez sobre la suma.
     const now = new Date()
     const view = await c.run((tx) =>
       getMonthlyCommissions(tx, c.orgId, {
@@ -113,8 +113,11 @@ describe("lo que ya pasó, con su valor congelado", () => {
         ),
       }),
     )
-    expect(view).toMatchObject({ currency: "PEN", baseCents: 375_000, commissionCents: 112_498 })
-    expect(view.lines.map((line) => line.baseCents).sort()).toEqual([124_999, 124_999, 125_003])
+    // La comisión va en la moneda de lo cobrado (ADR 0155): en dólares, aparte de los soles.
+    expect(view).toMatchObject({ currency: "PEN", lines: [], commissionCents: 0 })
+    expect(view.others).toHaveLength(1)
+    expect(view.others[0]).toMatchObject({ currency: "USD", baseCents: 100_000, commissionCents: 9_999 + 9_999 + 10_000 })
+    expect(view.others[0]!.lines.map((line) => line.baseCents).sort()).toEqual([33_333, 33_333, 33_334])
   })
 
   it("cambiar el «Cambio de hoy» no altera lo ya cobrado, pero sí el total aproximado de lo que se debe", async () => {

@@ -1393,8 +1393,9 @@ export const COMMISSION_PAYMENTS_CONCEPT = "Pago de comisiones"
  * Los pagos de comisión en una sola fila por sede y moneda, sin a quién ni de
  * qué pago: el total suma lo mismo y la lista no dice a quién se pagó. Los
  * anulados no se muestran (su anulación la ve Comisiones). El gasto de una
- * comisión se crea siempre en moneda del negocio, sin caja ni comprobante
- * (`payMonthCommission`), así que la fila no hereda cambio ni moneda de pago.
+ * comisión va en la moneda de lo cobrado (ADR 0155), puede salir de la caja y
+ * no lleva comprobante (`payMonthCommission`); su movimiento de caja se llama
+ * igual que esta fila, sin a quién se pagó.
  */
 function withoutCommissionNames<
   T extends {
@@ -2133,10 +2134,11 @@ function dayWords(at: Date, zone: { locale: string; timezone: string }): string 
 }
 
 /**
- * Cambiar el porcentaje general (ADR 0151): una versión nueva que vale para lo
- * que se cobre desde ahora; lo cobrado antes conserva el de su día. La primera
- * de alguien vale desde siempre, para que fijarlo tarde no deje en cero lo ya
- * cobrado. La auditoría guarda antes y después, y se le avisa al profesional.
+ * Cambiar el porcentaje general (ADR 0151 y 0155): una versión nueva que vale para
+ * lo que se atienda desde ahora; lo atendido antes conserva el de su día, aunque se
+ * cobre después. La primera de alguien vale desde siempre, para que fijarlo tarde no
+ * deje en cero lo ya cobrado. La auditoría guarda antes y después, y se le avisa al
+ * profesional.
  */
 export async function setCommissionRate(
   tx: Db,
@@ -2198,7 +2200,7 @@ export async function setCommissionRate(
       userId: input.professionalUserId,
       dedupeKey: `commission-rate:${row.id}`,
       title: "Cambió tu porcentaje de comisión",
-      body: `Pasó a ${percentWords(input.rateBps, zone.locale)} para lo que se cobre desde el ${dayWords(new Date(), zone)}. Lo cobrado antes conserva el de su día.`,
+      body: `Pasó a ${percentWords(input.rateBps, zone.locale)} para lo que atiendas desde el ${dayWords(new Date(), zone)}. Lo atendido antes conserva el de su día, aunque se cobre después.`,
       href: "/commissions",
       permission: "commissions.read",
       actorUserId,
@@ -2217,14 +2219,15 @@ export interface CommissionExceptionInput {
   serviceId: string
   /** Otro porcentaje para el servicio. */
   rateBps?: number | null
-  /** O un monto fijo por cada procedimiento, en moneda del negocio. */
+  /** O un monto fijo por cada procedimiento, en la moneda del precio del servicio. */
   fixedCents?: number | null
 }
 
 /**
  * Una excepción para un servicio: otro porcentaje, un monto fijo por cada uno o,
- * sin ninguno de los dos, quitarla (vuelve al general). Vale desde ahora, como
- * el porcentaje general.
+ * sin ninguno de los dos, quitarla (vuelve al general). Vale para lo que se atienda
+ * desde ahora, como el porcentaje general. El monto va en la moneda del precio del
+ * servicio, porque la comisión va en la moneda de lo cobrado (ADR 0155).
  */
 export async function setCommissionException(
   tx: Db,
@@ -2238,10 +2241,11 @@ export async function setCommissionException(
   else await requireCanAttend(tx, orgId, input.professionalUserId, "professionalUserId")
   if (!looksLikeId(input.serviceId)) throw invalidField("serviceId", "Elige el servicio.")
   const [service] = await tx
-    .select({ id: serviceCatalog.id, name: serviceCatalog.name })
+    .select({ id: serviceCatalog.id, name: serviceCatalog.name, currency: serviceCatalog.currency })
     .from(serviceCatalog)
     .where(and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.id, input.serviceId)))
   if (!service) throw invalidField("serviceId", "Ese servicio no es de la clínica.")
+  const fixedCurrency = (input.fixedCents ?? null) === null ? null : service.currency
   const rateBps = input.rateBps ?? null
   const fixedCents = input.fixedCents ?? null
   if (rateBps !== null && fixedCents !== null) throw invalidField("rateBps", "Elige un porcentaje o un monto, no los dos.")
@@ -2253,7 +2257,13 @@ export async function setCommissionException(
     sql`select pg_advisory_xact_lock(hashtextextended(${`commission-rate:${orgId}:${input.professionalUserId}`}, 0))`,
   )
   const current = await latestRate(tx, orgId, input.professionalUserId, service.id)
-  const same = (current?.rateBps ?? null) === rateBps && (current?.fixedCents ?? null) === fixedCents
+  const zone = await getOrgLocale(tx, orgId)
+  // Lo guardado sin moneda es del negocio: el mismo monto en otra moneda es otra regla.
+  const currentCurrency = current?.fixedCents == null ? null : (current.fixedCurrency ?? zone.currency)
+  const same =
+    (current?.rateBps ?? null) === rateBps &&
+    (current?.fixedCents ?? null) === fixedCents &&
+    currentCurrency === fixedCurrency
   // Quitar lo que no había, o repetir lo mismo, no agrega una versión.
   if (same || (!current && rateBps === null && fixedCents === null)) return current
   const [row] = await tx
@@ -2265,14 +2275,15 @@ export async function setCommissionException(
       effectiveFrom: sql`clock_timestamp()`,
       rateBps,
       fixedCents,
+      fixedCurrency,
       createdBy: actorUserId,
     })
     .returning()
   await audit(tx, orgId, actorUserId, "commission_rate", row.id, "finance.rule_exception", {
     professionalUserId: input.professionalUserId,
     serviceId: service.id,
-    before: current ? { rateBps: current.rateBps, fixedCents: current.fixedCents } : null,
-    after: { rateBps, fixedCents },
+    before: current ? { rateBps: current.rateBps, fixedCents: current.fixedCents, fixedCurrency: currentCurrency } : null,
+    after: { rateBps, fixedCents, fixedCurrency },
   })
   return row
 }
@@ -2305,7 +2316,14 @@ async function commissionRateOf(tx: Db, orgId: string, professionalUserId: strin
  * Lo que rige hoy para un profesional, para su detalle: el porcentaje general,
  * desde cuándo y el anterior, y cada excepción por servicio que sigue en pie.
  */
-export async function commissionRulesOf(tx: Db, orgId: string, professionalUserId: string) {
+export async function commissionRulesOf(
+  tx: Db,
+  orgId: string,
+  professionalUserId: string,
+  /** Las que valían a ese momento (el fin de un mes pasado); sin él, las de hoy. */
+  at?: Date,
+) {
+  const upTo = at ? sql`${at.toISOString()}::timestamptz` : sql`now()`
   const general = await tx
     .select({ rateBps: commissionRate.rateBps, effectiveFrom: commissionRate.effectiveFrom })
     .from(commissionRate)
@@ -2314,7 +2332,7 @@ export async function commissionRulesOf(tx: Db, orgId: string, professionalUserI
         eq(commissionRate.organizationId, orgId),
         eq(commissionRate.professionalUserId, professionalUserId),
         isNull(commissionRate.serviceId),
-        sql`${commissionRate.effectiveFrom} <= now()`,
+        sql`${commissionRate.effectiveFrom} <= ${upTo}`,
       ),
     )
     .orderBy(desc(commissionRate.effectiveFrom))
@@ -2324,18 +2342,26 @@ export async function commissionRulesOf(tx: Db, orgId: string, professionalUserI
     serviceName: string
     rateBps: number | null
     fixedCents: number | null
+    fixedCurrency: string | null
+    servicePriceCents: number
+    serviceCurrency: string
+    billingMode: string
     effectiveFrom: Date
   }>(sql`
     select x.service_id as "serviceId", sc.name as "serviceName", x.rate_bps as "rateBps", x.fixed_cents as "fixedCents",
+      -- Lo guardado sin moneda es del negocio.
+      case when x.fixed_cents is not null then coalesce(x.fixed_currency, op.currency) end as "fixedCurrency",
+      sc.price_cents as "servicePriceCents", sc.currency as "serviceCurrency", sc.billing_mode as "billingMode",
       x.effective_from as "effectiveFrom"
     from (
-      select distinct on (r.service_id) r.service_id, r.rate_bps, r.fixed_cents, r.effective_from
+      select distinct on (r.service_id) r.service_id, r.rate_bps, r.fixed_cents, r.fixed_currency, r.effective_from
       from commission_rate r
       where r.organization_id = ${orgId} and r.professional_user_id = ${professionalUserId} and r.service_id is not null
-        and r.effective_from <= now()
+        and r.effective_from <= ${upTo}
       order by r.service_id, r.effective_from desc
     ) x
     join service_catalog sc on sc.organization_id = ${orgId} and sc.id = x.service_id
+    left join org_profile op on op.organization_id = ${orgId}
     where x.rate_bps is not null or x.fixed_cents is not null
     order by sc.name`)
   const [now, before] = general
@@ -2378,7 +2404,10 @@ function fractionOfDecimal(text: string): MoneyFraction {
   return { num: negative ? -num : num, den: 10n ** BigInt(decimals.length) }
 }
 
-/** Una línea aún sin pagar, como la da `commission_live` (la misma cuenta de Reportes y Argos). */
+/**
+ * Una línea aún sin pagar, como la da `commission_live` (la misma cuenta de Reportes y Argos), en
+ * la moneda de lo cobrado: lo cobrado y la comisión en `currency`.
+ */
 interface LiveCommissionLine {
   applicationId: string
   slice: number | null
@@ -2389,6 +2418,7 @@ interface LiveCommissionLine {
   description: string
   promotionName: string | null
   at: Date
+  currency: string
   value: MoneyFraction
   rateBps: number | null
   fixedCents: number | null
@@ -2413,6 +2443,7 @@ async function liveCommissionLines(
     description: string
     promotionName: string | null
     at: Date
+    currency: string
     value: string
     rateBps: number | null
     fixedCents: number | null
@@ -2421,8 +2452,9 @@ async function liveCommissionLines(
     commission: string
   }>(sql`
     select l.application_id as "applicationId", l.slice, l.sessions, l.charge_id as "chargeId", l.payment_id as "paymentId",
-      l.patient_id as "patientId", l.description, l.promotion_name as "promotionName", l.at, l.value::text as value,
-      l.rate_bps as "rateBps", l.fixed_cents as "fixedCents", l.for_service as "forService", l.has_rule as "hasRule", l.commission::text as commission
+      l.patient_id as "patientId", l.description, l.promotion_name as "promotionName", l.at, l.currency,
+      l.own_value::text as value, l.rate_bps as "rateBps", l.fixed_cents as "fixedCents", l.for_service as "forService",
+      l.has_rule as "hasRule", l.own_commission::text as commission
     from ${commissionLiveIn(orgId, query.start, query.end, sql`and professional_user_id = ${query.professionalUserId}`)} l`)
   return [...rows].map((row) => ({
     ...row,
@@ -2710,6 +2742,8 @@ export type CommissionStatus = "por_pagar" | "pagado" | "sin_cobros" | "por_desc
 interface FrozenLine {
   line: typeof commissionSettlementLine.$inferSelect
   settledAt: Date | null
+  /** La moneda de su pago: la de lo cobrado (lo pagado antes del cambio, la del negocio). */
+  currency: string
   promotionName: string | null
 }
 
@@ -2719,6 +2753,7 @@ async function frozenLines(tx: Db, orgId: string, professionalUserId: string): P
     .select({
       line: commissionSettlementLine,
       settledAt: commissionSettlement.settledAt,
+      currency: commissionSettlement.currency,
       promotionName: patientCharge.promotionName,
     })
     .from(commissionSettlementLine)
@@ -2764,21 +2799,46 @@ export interface MonthlyCommissionsQuery {
   professionalUserId: string
   year: number
   month: number
+  /**
+   * La moneda: la comisión va en la moneda de lo cobrado (ADR 0155), y cada una se mira y se
+   * paga aparte. Sin ella, la del negocio, con las otras en `others`.
+   */
+  currency?: string
 }
 
 /**
- * Mes de un profesional: cada cobro de lo que atendió, con su comisión.
+ * Mes de un profesional en una moneda: cada cobro de lo que atendió, con su comisión.
  *
  * - Lo aún no pagado sale de `commission_live` (la misma cuenta de Reportes y
- *   Argos): la regla del día del cobro, la excepción del servicio si hay, y
+ *   Argos): la regla del día de la atención, la excepción del servicio si hay, y
  *   la parte de cada sesión en un tratamiento compartido. Solo cuenta mientras
  *   el cobro siga en pie: si se anula antes de pagar, deja de deberse.
+ * - Cada moneda va aparte, con lo pagado y lo que se descuenta en esa moneda: un
+ *   cobro en dólares se descuenta solo de comisiones en dólares.
  * - Lo ya pagado conserva el porcentaje y el importe con que se pagó, aunque
  *   el porcentaje cambie después.
  * - Un cobro anulado después de pagada su comisión queda como ajuste: se
  *   descuenta del siguiente pago al profesional, sea del mes que sea.
  */
-export async function getMonthlyCommissions(
+interface MonthPreload {
+  rules: Awaited<ReturnType<typeof commissionRulesOf>>
+  allLive: LiveCommissionLine[]
+  allFrozen: FrozenLine[]
+}
+
+/** Lo que un mes de un profesional lee, de todas sus monedas a la vez. */
+async function loadMonth(tx: Db, orgId: string, query: MonthlyCommissionsQuery, timezone: string): Promise<MonthPreload> {
+  const { start, end } = monthBounds(timezone, query.year, query.month)
+  // Un mes ya cerrado dice las reglas con que terminó, no las de hoy (cada línea dice la suya).
+  const closed = end.getTime() <= Date.now()
+  return {
+    rules: await commissionRulesOf(tx, orgId, query.professionalUserId, closed ? new Date(end.getTime() - 1) : undefined),
+    allLive: await liveCommissionLines(tx, orgId, { professionalUserId: query.professionalUserId, start, end }),
+    allFrozen: await frozenLines(tx, orgId, query.professionalUserId),
+  }
+}
+
+async function monthView(
   tx: Db,
   orgId: string,
   query: MonthlyCommissionsQuery,
@@ -2786,21 +2846,27 @@ export async function getMonthlyCommissions(
   known?: OrgLocale,
   /** Si sigue en el equipo, cuando quien llama ya lo sabe (la lista del mes). */
   knownInTeam?: boolean,
+  /** Lo ya leído para otra moneda del mismo mes: no se vuelve a leer. */
+  preload?: MonthPreload,
 ) {
   const { inTeam } =
     knownInTeam === undefined
       ? await requireCommissionPerson(tx, orgId, query.professionalUserId)
       : { inTeam: knownInTeam }
   const zone = known ?? (await getOrgLocale(tx, orgId))
-  const { timezone, locale, currency: unit } = zone
+  const { timezone, locale } = zone
+  const business = zone.currency
+  const unit = query.currency ?? business
   const money = orgMoneyOf(zone)
   const { start, end } = monthBounds(timezone, query.year, query.month)
   void money
-  const rules = await commissionRulesOf(tx, orgId, query.professionalUserId)
+  const loaded = preload ?? (await loadMonth(tx, orgId, query, timezone))
+  const { rules, allLive, allFrozen } = loaded
   const rateBps = rules.rateBps
-  const live = await liveCommissionLines(tx, orgId, { professionalUserId: query.professionalUserId, start, end })
-  const frozen = await frozenLines(tx, orgId, query.professionalUserId)
-  const frozenCobros = frozen.filter((f) => f.line.kind === "cobro" && f.line.applicationId)
+  const live = allLive.filter((app) => app.currency === unit)
+  const frozen = allFrozen.filter((f) => f.currency === unit)
+  const allFrozenCobros = allFrozen.filter((f) => f.line.kind === "cobro" && f.line.applicationId)
+  const frozenCobros = allFrozenCobros.filter((f) => f.currency === unit)
   // Lo ya descontado de cada cobro anulado después de pagado: un descuento puede repartirse en varios pagos.
   const discounted = new Map<string, number>()
   for (const f of frozen)
@@ -2808,8 +2874,8 @@ export async function getMonthlyCommissions(
       const key = lineKey(f.line.applicationId, f.line.slice)
       discounted.set(key, (discounted.get(key) ?? 0) + f.line.commissionCents)
     }
-  // Cobros pagados cuya aplicación ya no está en pie (cualquier mes).
-  const paidIds = frozenCobros.map((f) => f.line.applicationId as string)
+  // Cobros pagados cuya aplicación ya no está en pie (cualquier mes y moneda).
+  const paidIds = allFrozenCobros.map((f) => f.line.applicationId as string)
   const stillLive = new Set<string>()
   if (paidIds.length > 0) {
     const rows = await tx
@@ -2949,8 +3015,17 @@ export async function getMonthlyCommissions(
           : "sin_cobros"
   const professionalNames = await userNames(tx, [query.professionalUserId])
   // El sueldo del mes (decisión 6): sus gastos que se repiten de ese mes, pagados o no. Va aparte de la
-  // comisión: se paga en Gastos y la fila de la lista sigue diciendo solo la comisión.
-  const salary = await salaryOfMonth(tx, orgId, query.professionalUserId, query, money)
+  // comisión: se paga en Gastos y la fila de la lista sigue diciendo solo la comisión. Va con la
+  // moneda del negocio.
+  const salary = unit === business ? await salaryOfMonth(tx, orgId, query.professionalUserId, query, money) : null
+  // Las otras monedas con algo del mes, o con algo que descontar: cada una se mira aparte.
+  const inMonthCurrencies = [
+    ...allLive.map((app) => app.currency),
+    ...allFrozenCobros
+      .filter((f) => inMonth(f.line.occurredAt) || !stillLive.has(f.line.applicationId as string))
+      .map((f) => f.currency),
+  ]
+  const otherCurrencies = [...new Set(inMonthCurrencies)].filter((c) => c !== unit).sort()
   return {
     professionalUserId: query.professionalUserId,
     professionalName: professionalNames.get(query.professionalUserId) ?? null,
@@ -2982,19 +3057,58 @@ export async function getMonthlyCommissions(
     adjustmentCents,
     /** Lo que el próximo pago de este mes descuenta (lo demás queda para otro pago). */
     discountCents,
+    /**
+     * Lo que le debe a la clínica después de este pago: comisiones ya pagadas de cobros que después
+     * se devolvieron, sin cobros nuevos en esta moneda de donde descontarlas. Se descuenta del
+     * próximo pago en esta moneda.
+     */
+    owedCents: adjustmentCents - discountCents,
     /** Lo que los pagos de este mes ya descontaron de cobros anulados. */
     discountedCents,
     lastPaidAt,
     status,
     /** Su sueldo del mes, si tiene uno anotado como gasto que se repite (`null` si no). */
     salary,
+    /** Otras monedas con algo de este mes o por descontar. */
+    otherCurrencies,
   }
+}
+
+export type MonthCommissionsView = Awaited<ReturnType<typeof monthView>>
+
+/** Hay algo que mirar en esa moneda: cobros del mes o algo por descontar. */
+function hasActivity(view: MonthCommissionsView): boolean {
+  return view.lines.length > 0 || view.adjustmentCents > 0
+}
+
+/**
+ * El mes de un profesional: la moneda pedida o, sin ella, la del negocio con cada otra moneda
+ * en `others` (vacío en una clínica de una sola moneda).
+ */
+export async function getMonthlyCommissions(
+  tx: Db,
+  orgId: string,
+  query: MonthlyCommissionsQuery,
+  known?: OrgLocale,
+  knownInTeam?: boolean,
+) {
+  const zone = known ?? (await getOrgLocale(tx, orgId))
+  // Se lee una vez y se arma cada moneda con lo mismo.
+  const preload = await loadMonth(tx, orgId, query, zone.timezone)
+  const view = await monthView(tx, orgId, query, zone, knownInTeam, preload)
+  const others: MonthCommissionsView[] = []
+  if (!query.currency)
+    for (const currency of view.otherCurrencies) {
+      const other = await monthView(tx, orgId, { ...query, currency }, zone, view.inTeam, preload)
+      if (hasActivity(other)) others.push(other)
+    }
+  return { ...view, others }
 }
 
 export type MonthlyCommissions = Awaited<ReturnType<typeof getMonthlyCommissions>>
 
 /** Resumen de un mes para listas: sin el detalle por cobro. */
-function commissionSummary(view: MonthlyCommissions) {
+function commissionSummary(view: MonthCommissionsView) {
   return {
     professionalUserId: view.professionalUserId,
     professionalName: view.professionalName,
@@ -3005,21 +3119,39 @@ function commissionSummary(view: MonthlyCommissions) {
     rateBps: view.rateBps,
     /** Cuántos servicios tienen otro porcentaje o un monto fijo. */
     exceptionCount: view.exceptions.length,
+    /**
+     * Los porcentajes generales que usaron los cobros del mes (sin excepciones ni montos): uno solo
+     * se dice; con más de uno, «varios porcentajes». El de hoy puede no ser el que se usó.
+     */
+    ratesUsed: [
+      ...new Set(
+        view.lines
+          .filter((line) => !line.voidedAfterPaid && !line.forService && line.fixedCents === null && line.rateBps !== null)
+          .map((line) => line.rateBps as number),
+      ),
+    ].sort((a, b) => b - a),
     collections: view.lines.filter((line) => !line.voidedAfterPaid).length,
     baseCents: view.baseCents,
     commissionCents: view.commissionCents,
     paidCents: view.paidCents,
     pendingCents: view.pendingCents,
+    owedCents: view.owedCents,
     lastPaidAt: view.lastPaidAt,
     status: view.status,
   }
 }
 
-export type CommissionSummary = ReturnType<typeof commissionSummary>
+/** El resumen de la moneda del negocio, con el de cada otra moneda. */
+function summaryWithOthers(view: MonthlyCommissions) {
+  return { ...commissionSummary(view), others: view.others.map(commissionSummary) }
+}
+
+export type CommissionSummary = ReturnType<typeof summaryWithOthers>
 
 /**
- * El mes de toda la clínica: una fila por profesional con porcentaje fijado
- * o con cobros de lo que atendió ese mes.
+ * El mes de toda la clínica: una fila por profesional con porcentaje fijado,
+ * con cobros de lo que atendió ese mes o con algo que le debe a la clínica. Cada
+ * fila va en la moneda del negocio, con las otras monedas en `others`.
  */
 export async function listMonthCommissions(
   tx: Db,
@@ -3040,7 +3172,18 @@ export async function listMonthCommissions(
     join commission_settlement s on s.organization_id = l.organization_id and s.id = l.settlement_id and s.voided_at is null
     where l.organization_id = ${orgId} and l.kind = 'cobro' and l.voided_at is null
       and l.occurred_at >= ${start.toISOString()}::timestamptz and l.occurred_at < ${end.toISOString()}::timestamptz`)
-  const candidates = [...new Set([...withRate.map((r) => r.userId), ...[...active].map((a) => a.userId)])]
+  // Quien tiene comisiones ya pagadas de cobros que después se devolvieron: puede deberle a la clínica.
+  const owing = await tx.execute<{ userId: string }>(sql`
+    select distinct s.professional_user_id as "userId" from commission_settlement_line l
+    join commission_settlement s on s.organization_id = l.organization_id and s.id = l.settlement_id and s.voided_at is null
+    join patient_payment_application a on a.organization_id = l.organization_id and a.id = l.application_id
+    join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id
+    join patient_charge c on c.organization_id = a.organization_id and c.id = a.charge_id
+    where l.organization_id = ${orgId} and l.kind = 'cobro' and l.voided_at is null and l.commission_cents > 0
+      and (a.voided_at is not null or p.voided_at is not null or c.voided_at is not null)`)
+  const candidates = [
+    ...new Set([...withRate.map((r) => r.userId), ...[...active].map((a) => a.userId), ...[...owing].map((o) => o.userId)]),
+  ]
   const team = new Set(
     candidates.length
       ? (
@@ -3053,17 +3196,70 @@ export async function listMonthCommissions(
   )
   // Quien sigue en el equipo, y quien ya no está pero tiene cobros de ese mes (sin cobros del mes
   // no puede tener nada por pagar en él): lo que le corresponde se le paga igual.
-  const exMembers = new Set([...active].map((a) => a.userId).filter((id) => !team.has(id)))
+  const exMembers = new Set(
+    [...[...active].map((a) => a.userId), ...[...owing].map((o) => o.userId)].filter((id) => !team.has(id)),
+  )
   const rows: CommissionSummary[] = []
   for (const userId of candidates) {
     if (!team.has(userId) && !exMembers.has(userId)) continue
     const view = await getMonthlyCommissions(tx, orgId, { ...query, professionalUserId: userId }, zone, team.has(userId))
-    // Quien salió sin comisión en el mes (por ejemplo, sin porcentaje) no se lista.
-    if (view.inTeam || view.commissionCents > 0 || view.paidCents > 0 || view.pendingCents !== 0) rows.push(commissionSummary(view))
+    // Quien salió sin comisión en el mes (por ejemplo, sin porcentaje) ni nada que deber no se lista.
+    const shows = (v: MonthCommissionsView) =>
+      v.commissionCents > 0 || v.paidCents > 0 || v.pendingCents !== 0 || v.owedCents > 0
+    if (view.inTeam || shows(view) || view.others.some(shows)) rows.push(summaryWithOthers(view))
   }
   return rows.sort(
     (a, b) => b.commissionCents - a.commissionCents || (a.professionalName ?? "").localeCompare(b.professionalName ?? ""),
   )
+}
+
+/**
+ * Lo cobrado de tratamientos de varias sesiones (o adelantado) cuyas sesiones aún nadie hizo: la
+ * comisión de cada sesión es de quien la haga, así que hoy no es de nadie. En la moneda de lo
+ * cobrado. `pendingCents`, de lo que sigue por hacer; `stoppedCents`, de tratamientos cancelados o
+ * reemplazados, que ya no tendrán esas sesiones: no se le paga a nadie. Un tratamiento realizado
+ * con menos sesiones le da lo que sobra a la última.
+ */
+export async function unassignedCommissionSessions(
+  tx: Db,
+  orgId: string,
+): Promise<Array<{ currency: string; pendingCents: number; stoppedCents: number }>> {
+  const rows = await tx.execute<{ currency: string; pending: string | null; stopped: string | null }>(sql`
+    with apps as (
+      select a.amount_cents::numeric as cents, c.currency::text as currency, c.commission_sessions as n, c.plan_item_id,
+        ti.status
+      from patient_payment_application a
+      join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id and p.voided_at is null
+      join patient_charge c on c.organization_id = a.organization_id and c.id = a.charge_id and c.voided_at is null
+        and c.commission_sessions is not null and c.plan_item_id is not null
+      left join encounter_procedure ep on ep.organization_id = c.organization_id and ep.id = c.encounter_procedure_id
+      left join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id
+      left join treatment_plan_item ti on ti.organization_id = c.organization_id and ti.id = c.plan_item_id
+      where a.organization_id = ${orgId} and a.voided_at is null
+        and (c.encounter_procedure_id is null
+          or (ep.voided_at is null and e.status = 'finalizada' and e.voided_at is null))
+    ), done as (
+      select ep.plan_item_id, count(distinct e.id) as k
+      from encounter_procedure ep
+      join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id
+      where ep.organization_id = ${orgId} and ep.voided_at is null and e.status = 'finalizada' and e.voided_at is null
+        and ep.plan_item_id in (select plan_item_id from apps)
+      group by ep.plan_item_id
+    ), left_over as (
+      select apps.currency, apps.status,
+        apps.cents * (apps.n - least(coalesce(done.k, 0), apps.n)) / apps.n as cents
+      from apps left join done on done.plan_item_id = apps.plan_item_id
+      where coalesce(apps.status, '') <> 'realizado'
+    )
+    select currency,
+      round(sum(cents) filter (where coalesce(status, '') not in ('cancelado', 'reemplazado')))::text as pending,
+      round(sum(cents) filter (where status in ('cancelado', 'reemplazado')))::text as stopped
+    from left_over
+    group by currency
+    order by currency`)
+  return [...rows]
+    .map((row) => ({ currency: row.currency, pendingCents: Number(row.pending ?? 0), stoppedCents: Number(row.stopped ?? 0) }))
+    .filter((row) => row.pendingCents > 0 || row.stoppedCents > 0)
 }
 
 /**
@@ -3092,7 +3288,7 @@ export async function getMyCommissions(
       year,
       month,
     })
-    if (view.lines.length > 0) previous.push(commissionSummary(view))
+    if (view.lines.length > 0 || view.others.some((other) => other.lines.length > 0)) previous.push(summaryWithOthers(view))
   }
   return { ...current, previous }
 }
@@ -3103,6 +3299,8 @@ export interface PayMonthCommissionInput {
   month: number
   /** Sede a la que se imputa el gasto de Personal. */
   branchId: string
+  /** La moneda que se paga (cada una aparte); sin ella, la del negocio. */
+  currency?: string
   notes?: string | null
   /** Importe que la pantalla mostró al confirmar: si ya no es ese, no se paga otra cifra. */
   expectedCents?: number
@@ -3136,7 +3334,7 @@ export async function payMonthCommission(
       throw new ServiceError("NOT_FOUND", 404, error.message, { branchId: error.message })
     throw error
   })
-  const view = await getMonthlyCommissions(tx, orgId, input)
+  const view = await monthView(tx, orgId, input)
   // Lo que aún no tiene ninguna regla no se congela: cuando se fije, se calcula con ella.
   const fresh = view.lines.filter((line) => !line.settled && !line.unruled)
   // Lo que hay que descontar no se paga solo: viaja con los cobros de un mes (de este o de otro).
@@ -3244,6 +3442,12 @@ export async function payMonthCommission(
   const shift = input.fromCash
     ? await ensureOpenShift(tx, orgId, actorUserId, branchRow.id, view.currency)
     : null
+  // En otra moneda, el gasto guarda su valor en la del negocio con el cambio de hoy, como cualquier gasto.
+  const frozen = frozenExpense(await lockOrgMoney(tx, orgId), {
+    amountCents: view.pendingCents,
+    unit: view.currency,
+    isPurchase: false,
+  })
   const [paidExpense] = await tx
     .insert(expense)
     .values({
@@ -3253,6 +3457,7 @@ export async function payMonthCommission(
       concept: `Comisión de ${monthLabel} — ${professionalName}`.slice(0, 500),
       amountCents: view.pendingCents,
       currency: view.currency,
+      ...(frozen ? { exchangeRate: frozen.exchangeRate, businessCents: frozen.businessCents } : {}),
       category: COMMISSION_EXPENSE_CATEGORY,
       spentAt: paidAt,
       receiptKind: "ninguno",

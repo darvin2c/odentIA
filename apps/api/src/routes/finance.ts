@@ -288,6 +288,8 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
   app.post("/movements/:id/void", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    // Un id que no es uuid no existe: se dice, no se convierte en un error interno.
+    if (!z.uuid().safeParse(c.req.param("id")).success) return c.json(errorBody(c, "NOT_FOUND", "No existe"), 404)
     const parsed = reasonInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
@@ -365,6 +367,10 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
             memberUserId: z.string().max(200).nullish(),
             // El mes que paga (el sueldo de octubre pagado en noviembre).
             month: recurringMonthKey.nullish(),
+            // `false`: se anota sin pagar; queda por pagar desde ese mes, sin ningún gasto.
+            paid: z.boolean().optional(),
+            // Se paga al mes siguiente (el sueldo de noviembre, el 2 de diciembre).
+            dueNextMonth: z.boolean().optional(),
           })
           .strict()
           .optional(),
@@ -374,7 +380,7 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const { repeat, ...expenseInput } = parsed.data
     return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
+      withOrgContext(deps.db, orgId, (tx): Promise<unknown> =>
         repeat
           ? registerRecurringExpense(tx, orgId, userId, { ...expenseInput, repeat })
           : createExpense(tx, orgId, userId, expenseInput),
@@ -533,6 +539,8 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
   app.post("/expenses/:id/void", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    // Un id que no es uuid no existe: se dice, no se convierte en un error interno.
+    if (!z.uuid().safeParse(c.req.param("id")).success) return c.json(errorBody(c, "NOT_FOUND", "No existe"), 404)
     const parsed = reasonInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>

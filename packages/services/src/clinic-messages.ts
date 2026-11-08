@@ -307,7 +307,7 @@ function pendingText(def: MessageDef): MessageText | null {
 
 /**
  * El PDF de muestra que WhatsApp pide para aprobar el mensaje con documento
- * (ADR 0155): el membrete de la clínica y nada de ningún paciente.
+ * (ADR 0156): el membrete de la clínica y nada de ningún paciente.
  */
 async function documentSample(tx: Db, orgId: string): Promise<{ bytes: Uint8Array; filename: string }> {
   const clinic = await loadDocumentClinic(tx, orgId)

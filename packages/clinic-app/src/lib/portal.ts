@@ -16,7 +16,7 @@ import type { FormSchemaDef } from "./clinical-forms"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
 
 /**
- * Lo que ve una sesión: lo que deja ver la clínica (ADR 0155), no lo que eligió
+ * Lo que ve una sesión: lo que deja ver la clínica (ADR 0156), no lo que eligió
  * quien dio el acceso. `documents` es de antes y ya no se lee.
  */
 export interface PortalScope {
@@ -626,7 +626,7 @@ export interface PortalAccessSummary {
 
 /**
  * Lo que verá quien entra, dicho en una línea: lo que deja ver la clínica
- * (ADR 0155). Nunca la historia: las notas de cada atención no van al portal.
+ * (ADR 0156). Nunca la historia: las notas de cada atención no van al portal.
  */
 export function portalSeesText(allowed: PortalPolicy["allowedScope"]): string {
   const parts = [

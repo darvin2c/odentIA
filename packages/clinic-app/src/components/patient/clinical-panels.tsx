@@ -45,6 +45,7 @@ import {
   FOLLOW_UP_KIND_LABELS,
   FOLLOW_UP_STATUS_LABELS,
   type FollowUp,
+  encounterControls,
   fetchFollowUps,
   fetchPrescriptionDetail,
   fetchPrescriptions,
@@ -324,14 +325,9 @@ export function ControlesPanel({
   })
   const cancelSurface = useFormSurface(cancelForm)
 
-  const rows = (list.data?.data ?? []).filter(
-    (row) =>
-      (!itemId || row.planItemId === itemId) &&
-      (!encounterOnly ||
-        encounterId === undefined ||
-        row.originEncounterId === encounterId ||
-        row.completedEncounterId === encounterId),
-  )
+  const ofItem = (list.data?.data ?? []).filter((row) => !itemId || row.planItemId === itemId)
+  // Dentro de la atención: los suyos y, aparte, los que ya tiene abiertos de otras.
+  const { own: rows, others } = encounterOnly ? encounterControls(ofItem, encounterId) : { own: ofItem, others: [] }
   const finalized = sessions.data?.data ?? []
   const planItemLabel = (id: string | null) =>
     id ? ((items ?? []).find((item) => item.id === id)?.title ?? id) : null
@@ -377,6 +373,8 @@ export function ControlesPanel({
             Reintentar
           </Button>
         </p>
+      ) : rows.length === 0 && others.length > 0 ? (
+        <p className="text-sm text-muted-foreground">Ninguno indicado en esta atención.</p>
       ) : rows.length === 0 ? (
         // Donde no se indican controles (una atención firmada), no se invita a indicarlos.
         <EmptyState
@@ -393,11 +391,12 @@ export function ControlesPanel({
             <li key={row.id} className="flex flex-col gap-2 py-3">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-medium">{row.title}</span>
-                <Badge variant={statusBadge(row.status)}>
-                  {FOLLOW_UP_STATUS_LABELS[row.status]}
+                {/* Vencido con la misma regla del Resumen y de «Control vencido» (revisión del 7 nov). */}
+                <Badge variant={row.overdue ? "destructive" : statusBadge(row.status)}>
+                  {row.overdue ? "Vencido" : FOLLOW_UP_STATUS_LABELS[row.status]}
                 </Badge>
                 <span className="text-sm text-muted-foreground">
-                  {FOLLOW_UP_KIND_LABELS[row.kind] ?? row.kind} · previsto {formatDate(row.dueAt)}
+                  {FOLLOW_UP_KIND_LABELS[row.kind] ?? row.kind} · {row.overdue ? "tocaba el" : "previsto"} {formatDate(row.dueAt)}
                   {row.legacyScheduledAt && !row.appointment
                     ? ` · fecha histórica ${formatDateTime(row.legacyScheduledAt)}`
                     : ""}
@@ -509,6 +508,26 @@ export function ControlesPanel({
           ))}
         </ul>
       )}
+
+      {others.length > 0 ? (
+        // Los que ya tiene de otras atenciones: se ven para no indicar otro igual; se trabajan en el Plan.
+        <div className="flex flex-col gap-2 border-t pt-3">
+          <p className="text-sm font-medium">Ya tiene</p>
+          <ul className="flex flex-col gap-1.5">
+            {others.map((row) => (
+              <li key={row.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                <span className="font-medium">{row.title}</span>
+                <Badge variant={statusBadge(row.status)}>{FOLLOW_UP_STATUS_LABELS[row.status]}</Badge>
+                <span className="text-muted-foreground">
+                  {row.appointment && row.status === "programado"
+                    ? `cita el ${formatDateTime(row.appointment.startsAt)}`
+                    : `previsto ${formatDate(row.dueAt)}`}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {repeatError ? (
         <p role="alert" className="text-sm text-destructive">
