@@ -102,10 +102,17 @@ export const CASH_TERMS: ReadonlyArray<{
   { key: "cashChangeCents", sign: 1, label: "Vuelto en otra moneda", short: "vuelto" },
 ]
 
-/** El vuelto va con signo; los demás términos, con el signo de su renglón. */
+/**
+ * El vuelto va con signo, y los gastos también: lo que vuelve de un gasto (su anulación tras un
+ * cierre, o la comisión que un profesional devolvió) puede ser más que lo gastado, y entonces entra.
+ * Los demás términos, con el signo de su renglón.
+ */
 export function cashTermLeaves(term: { sign: 1 | -1 }, cents: number): boolean {
-  return term.sign < 0 || cents < 0
+  return term.sign < 0 ? cents >= 0 : cents < 0
 }
+
+/** Los gastos de la ventana, cuando volvió más de lo que se gastó: entra a la caja. */
+const EXPENSES_BACK_LABEL = "Volvió de gastos y comisiones"
 
 /** Las dos monedas del vuelto cruzado: la de esta caja y la otra, si se sabe. */
 export interface ChangeBoxes {
@@ -124,6 +131,7 @@ export function cashTermLabel(
   cents: number,
   boxes?: ChangeBoxes,
 ): string {
+  if (term.key === "cashExpensesCents" && cents < 0) return EXPENSES_BACK_LABEL
   if (term.key !== "cashChangeCents") return term.label
   if (!boxes) return cents < 0 ? "Vuelto de cobros en otra moneda" : "De más por un vuelto dado en otra moneda"
   const box = currencyWord(boxes.box, boxes.locale)
@@ -149,6 +157,7 @@ export function cashTermShort(
   cents: number,
   boxes?: ChangeBoxes,
 ): string {
+  if (term.key === "cashExpensesCents" && cents < 0) return "volvió de gastos"
   if (term.key !== "cashChangeCents" || !boxes) return term.short
   const label = cashTermLabel(term, cents, boxes)
   return label.charAt(0).toLocaleLowerCase(boxes.locale) + label.slice(1)

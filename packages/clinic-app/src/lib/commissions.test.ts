@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { returnMethodWords, showAllLabel } from "./commissions"
+import { discountFromWords, returnMethodWords, showAllLabel } from "./commissions"
 
 const lines = (counted: number, voided: number) => [
   ...Array.from({ length: counted }, () => ({ voidedAfterPaid: false })),
@@ -17,6 +17,17 @@ describe("«Ver los N cobros» cuenta lo mismo que el encabezado", () => {
     expect(showAllLabel(lines(1, 1))).toBe("Ver el cobro y el anulado")
     expect(showAllLabel(lines(0, 5))).toBe("Ver los 5 anulados")
   })
+})
+
+it("lo que debe dice de qué pago se descuenta, y cuánto si no alcanza para todo", () => {
+  const october = { year: 2026, month: 10 }
+  expect(discountFromWords({ owedCents: 12000, currency: "PEN", discountFrom: { ...october, cents: 12000 } }, "es-PE")).toBe(
+    "Se descuenta del pago de octubre de 2026, que tiene cobros por pagar.",
+  )
+  expect(discountFromWords({ owedCents: 30000, currency: "PEN", discountFrom: { ...october, cents: 15000 } }, "es-PE")).toMatch(
+    /^Se descuentan S\/\s?150\.00 del pago de octubre de 2026, que tiene cobros por pagar, y el resto, de los próximos pagos\.$/,
+  )
+  expect(discountFromWords({ owedCents: 12000, currency: "PEN", discountFrom: null }, "es-PE")).toBe("Se descuenta del próximo pago.")
 })
 
 it("el medio de lo devuelto, para una frase", () => {

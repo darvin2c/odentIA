@@ -893,7 +893,10 @@ export function CashClosureSheet({
     { key: "quedo", label: "Quedó del cierre anterior", sign: 1, cents: closure.openingRetainedCents, always: true },
     { key: "cobros", label: "Cobros en efectivo", sign: 1, cents: closure.cashCollectedCents, always: true },
     { key: "ingresado", label: "Efectivo ingresado", sign: 1, cents: closure.cashAddedCents, always: false },
-    { key: "gastos", label: "Gastos", sign: -1, cents: closure.expenseCashCents, always: true },
+    // Si volvió más de lo que se gastó (un gasto anulado o una comisión devuelta), entra.
+    (closure.expenseCashCents ?? 0) < 0
+      ? { key: "gastos", label: "Volvió de gastos y comisiones", sign: 1, cents: -(closure.expenseCashCents ?? 0), always: true }
+      : { key: "gastos", label: "Gastos", sign: -1, cents: closure.expenseCashCents, always: true },
     { key: "retirado", label: "Efectivo retirado", sign: -1, cents: closure.cashWithdrawnCents, always: false },
     { key: "devuelto", label: "Devuelto en efectivo", sign: -1, cents: closure.cashRefundedCents, always: false },
     {

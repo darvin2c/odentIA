@@ -5,7 +5,7 @@
  * respuesta viene en la moneda del negocio, con las otras monedas en `others`;
  * el servidor decide permisos, importes y estados.
  */
-import { currencyFractionDigits } from "@odentia/clinical"
+import { currencyFractionDigits, formatMoney } from "@odentia/clinical"
 import { apiFetch } from "./api"
 import { amountFromCents } from "./workspace"
 
@@ -171,6 +171,8 @@ export interface CommissionSummary {
    * anularon: no es dinero pagado.
    */
   discountCents?: number
+  /** De qué pago se descuenta lo que debe después de este mes (ver `MonthlyCommissions`). */
+  discountFrom?: DiscountFrom | null
   /**
    * Lo que le debe a la clínica después del próximo pago: comisiones ya pagadas de cobros que
    * después se devolvieron, sin cobros nuevos en esta moneda de donde descontarlas.
@@ -213,6 +215,33 @@ export interface CommissionLine {
    * `devuelto`, lo devolvió; `saldado`, la clínica lo dio por saldado. Nulo mientras deba.
    */
   owedClosedBy?: "pago" | "devuelto" | "saldado" | null
+  /** Lo devuelto o saldado cerró solo lo que quedaba: antes, una parte se descontó de un pago. */
+  owedPartlyDiscounted?: boolean
+}
+
+/**
+ * El mes más antiguo con cobros por pagar de donde se descuenta lo que debe, y cuánto alcanza a
+ * descontar ese pago (`cents`): si es menos de lo que debe, el resto espera a los siguientes.
+ */
+export interface DiscountFrom extends YearMonth {
+  cents: number
+}
+
+/**
+ * Lo que debe, dicho con el pago de donde se descuenta: «Se descuenta del pago de octubre de 2026»
+ * o, si ese pago no alcanza, «Se descuentan S/ 150.00 del pago de octubre de 2026 y el resto, de los
+ * próximos pagos». Sin mes, del próximo pago.
+ */
+export function discountFromWords(
+  view: { owedCents?: number; currency: string; discountFrom?: DiscountFrom | null },
+  locale: string,
+): string {
+  const from = view.discountFrom
+  if (!from) return "Se descuenta del próximo pago."
+  const month = monthLabel(from, locale).toLocaleLowerCase(locale)
+  return from.cents >= (view.owedCents ?? 0)
+    ? `Se descuenta del pago de ${month}, que tiene cobros por pagar.`
+    : `Se descuentan ${formatMoney(from.cents, view.currency, locale)} del pago de ${month}, que tiene cobros por pagar, y el resto, de los próximos pagos.`
 }
 
 /** Comisión ya pagada por un cobro que después se anuló. */
@@ -236,8 +265,8 @@ export interface MonthlyCommissions extends Omit<CommissionSummary, "collections
   discountCents: number
   /** Lo que los pagos de este mes ya descontaron de cobros anulados. */
   discountedCents: number
-  /** Con algo que deber después de este mes: el mes más antiguo con cobros por pagar de donde se descuenta. */
-  discountFrom?: YearMonth | null
+  /** Con algo que deber después de este mes: el pago de otro mes de donde se descuenta. */
+  discountFrom?: DiscountFrom | null
   /**
    * Su sueldo del mes, si tiene uno anotado como gasto que se repite (`null` si no): se paga en
    * Gastos y va aparte de la comisión.

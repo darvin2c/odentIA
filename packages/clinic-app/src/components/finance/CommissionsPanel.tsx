@@ -70,6 +70,7 @@ import {
   RETURN_METHODS,
   type ReturnMethod,
   returnMethodWords,
+  discountFromWords,
   FORGIVE_REASON_MAX,
   type CommissionException,
   setCommissionExceptionApi,
@@ -541,8 +542,15 @@ export function CommissionsAdminPanel({
                 const owed = view.owedCents ?? 0
                 const money = (cents: number) => formatMoney(cents, view.currency, locale)
                 if (discount > 0)
-                  return [`${money(discount)} por descontar${owed > 0 ? ` y ${money(owed)} del próximo pago` : ""}`]
-                return owed > 0 && view.pendingCents <= 0 ? [`${money(owed)} por descontar del próximo pago`] : []
+                  return [`${money(discount)} por descontar${owed > 0 ? ` este mes y ${money(owed)} en los próximos pagos` : ""}`]
+                if (owed <= 0 || view.pendingCents > 0) return []
+                // Lo mismo que dice su detalle: de qué pago se descuenta.
+                const from = view.discountFrom
+                return [
+                  from
+                    ? `${money(owed)} por descontar, desde el pago de ${monthLabel(from, locale).toLocaleLowerCase(locale)}`
+                    : `${money(owed)} por descontar del próximo pago`,
+                ]
               })
               // Lo que pide atención primero: lo que falta pagar en alguna moneda.
               const leading = views.find((view) => view.status === "por_pagar") ?? views[0] ?? row
@@ -927,6 +935,7 @@ function CommissionCurrencyBlock({
   const inCurrency = heading ? ` en ${currencyWord(view.currency, locale)}` : ""
   // De qué pago se descuenta lo que este mes no alcanza: el de otro mes con cobros por pagar, si hay.
   const discountMonth = view.discountFrom ? monthLabel(view.discountFrom, locale).toLocaleLowerCase(locale) : null
+  const discountWhole = view.discountFrom ? view.discountFrom.cents >= (view.owedCents ?? 0) : false
   // El botón deshabilitado siempre dice por qué; el de solo descontar, qué va a pasar.
   const payHint = discountOnly
     ? `Lo de este mes (${money(view.discountCents)}) se descuenta de comisiones ya pagadas de cobros que después se anularon: no sale dinero.${discountLeft > 0 ? ` Quedan ${money(discountLeft)} por descontar en los próximos pagos.` : ""}`
@@ -936,7 +945,7 @@ function CommissionCurrencyBlock({
         : null
       : (view.owedCents ?? 0) > 0
         ? discountMonth
-          ? `${money(view.owedCents ?? 0)} por descontar${inCurrency}: se le pagó la comisión de cobros que después se devolvieron. Se descuenta del pago de ${discountMonth}, que tiene cobros por pagar.`
+          ? `${money(view.owedCents ?? 0)} por descontar${inCurrency}: se le pagó la comisión de cobros que después se devolvieron. ${discountFromWords(view, locale)}`
           : `${money(view.owedCents ?? 0)} por descontar del próximo pago${inCurrency}: se le pagó la comisión de cobros que después se devolvieron y aún no hay cobros nuevos de donde descontarla. Se descuenta sola; si ya lo devolvió o la clínica lo perdona, regístralo en «Por descontar».`
         : view.status === "pagado"
         ? `No queda nada por pagar de este mes${heading ? ` en ${currencyWord(view.currency, locale)}` : ""}.`
@@ -1134,7 +1143,11 @@ function CommissionCurrencyBlock({
           // No es un error ni algo que pagar: se descuenta solo del próximo pago.
           <div className="flex items-baseline justify-between gap-3">
             <dt className="font-semibold">
-              {discountMonth ? `Por descontar del pago de ${discountMonth}` : "Por descontar del próximo pago"}
+              {discountMonth
+                ? discountWhole
+                  ? `Por descontar del pago de ${discountMonth}`
+                  : `Por descontar, desde el pago de ${discountMonth}`
+                : "Por descontar del próximo pago"}
             </dt>
             <dd className="font-semibold tabular-nums">{money(view.owedCents ?? 0)}</dd>
           </div>
@@ -2321,9 +2334,13 @@ export function MyCommissionsPanel({
                       // Mientras lo debe, en rojo; ya cerrado, cómo se cerró.
                       <p className={cn("mt-1 text-sm", line.owedClosedBy ? "text-muted-foreground" : "text-destructive")}>
                         {line.owedClosedBy === "devuelto"
-                          ? "El cobro se anuló después de pagarte: ya devolviste esa comisión."
+                          ? line.owedPartlyDiscounted
+                            ? "El cobro se anuló después de pagarte: una parte se descontó de un pago y el resto lo devolviste."
+                            : "El cobro se anuló después de pagarte: ya devolviste esa comisión."
                           : line.owedClosedBy === "saldado"
-                            ? "El cobro se anuló después de pagarte: la clínica lo dio por saldado."
+                            ? line.owedPartlyDiscounted
+                              ? "El cobro se anuló después de pagarte: una parte se descontó de un pago y la clínica dio por saldado el resto."
+                              : "El cobro se anuló después de pagarte: la clínica lo dio por saldado."
                             : line.owedClosedBy === "pago"
                               ? "El cobro se anuló después de pagarte: ya se descontó de un pago."
                               : "El cobro se anuló después de pagarte: se descuenta de tu siguiente pago."}
