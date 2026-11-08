@@ -226,7 +226,15 @@ export interface MonthlyCommissions extends Omit<CommissionSummary, "collections
    * Su sueldo del mes, si tiene uno anotado como gasto que se repite (`null` si no): se paga en
    * Gastos y va aparte de la comisión.
    */
-  salary?: { cents: number; paidCents: number; dueCents: number; paidAt: string | null } | null
+  salary?: {
+    cents: number
+    paidCents: number
+    dueCents: number
+    paidAt: string | null
+    /** Cuándo vence lo que falta (`YYYY-MM-DD`) y en qué sede se paga. */
+    dueOn?: string | null
+    dueBranchId?: string | null
+  } | null
   /** Desde cuándo vale el porcentaje general (nulo si desde siempre) y el anterior. */
   rateSince?: string | null
   /** Ya tiene un porcentaje general (cambiarlo vale desde hoy; el primero, también para lo ya cobrado). */

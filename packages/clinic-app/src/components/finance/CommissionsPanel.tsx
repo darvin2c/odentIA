@@ -41,7 +41,7 @@ import {
 import { z } from "zod"
 import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { useNavigate } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
 import { Check, ChevronRight, Percent, Plus } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
 import { useActiveBranch } from "../../lib/active-branch"
@@ -75,7 +75,7 @@ import {
 } from "../../lib/commissions"
 import { useOrgMembers, usePermission } from "../../lib/crm"
 import { financeFormMessage } from "../../lib/finance"
-import { invalidateFinance, parseAmount, useCashState } from "../../lib/finance-cash"
+import { invalidateFinance, parseAmount, todayIn, useCashState } from "../../lib/finance-cash"
 import { useOrgEvents } from "../../lib/org-events"
 import { QueryErrorState } from "../../lib/query-error"
 import { ChoiceSelect } from "../ui/choice-select"
@@ -234,18 +234,34 @@ function printLiquidation(
   }
   holder.append(table)
   const totals = el("dl")
+  // Con sueldo, la cifra de la hoja es la comisión: el sueldo va aparte, debajo, y se paga en Gastos.
+  const mainLabel = detail.salary ? "Comisión" : "Le corresponde"
   for (const [label, cents] of [
-    ...(detail.salary ? ([["Sueldo del mes", detail.salary.cents]] as const) : []),
-    ["Le corresponde", detail.commissionCents],
+    [mainLabel, detail.commissionCents],
     ["Ya pagado", detail.paidCents],
     ["Ya descontado", detail.discountedCents],
     ["Se descuenta en el próximo pago", detail.discountCents],
     ["Falta pagar", detail.pendingCents],
   ] as const) {
-    if (cents === 0 && label !== "Le corresponde" && label !== "Falta pagar") continue
+    if (cents === 0 && label !== mainLabel && label !== "Falta pagar") continue
     totals.append(el("dt", label), el("dd", plain(cents)))
   }
   holder.append(totals)
+  if (detail.salary) {
+    const salary = detail.salary
+    holder.append(
+      el(
+        "p",
+        `Sueldo del mes (va aparte de la comisión, se paga en Gastos): ${plain(salary.cents)} · ${
+          salary.dueCents > 0
+            ? "por pagar"
+            : salary.paidAt
+              ? `pagado el ${dayLabel(salary.paidAt, locale, zone, period.year)}`
+              : "pagado"
+        }`,
+      ),
+    )
+  }
   const style = el("style")
   style.id = `${LIQUIDATION_HOLDER_ID}-estilo`
   style.textContent = `
@@ -989,8 +1005,23 @@ function CommissionCurrencyBlock({
             <dd className="tabular-nums">
               {plain(view.salary.cents)}
               <span className="ml-2 text-xs text-muted-foreground">
-                {view.salary.dueCents > 0 ? "por pagar en Gastos" : view.salary.paidAt ? `pagado el ${day(view.salary.paidAt)}` : "pagado"}
+                {view.salary.dueCents > 0
+                  ? view.salary.dueOn
+                    ? `${view.salary.dueOn < todayIn(zone) ? "venció" : "vence"} el ${day(`${view.salary.dueOn}T17:00:00Z`)}`
+                    : "por pagar"
+                  : view.salary.paidAt
+                    ? `pagado el ${day(view.salary.paidAt)}`
+                    : "pagado"}
               </span>
+              {view.salary.dueCents > 0 && canFinance ? (
+                <Link
+                  to="/finance"
+                  search={{ tab: "gastos", ...(view.salary.dueBranchId ? { branch: view.salary.dueBranchId } : {}) }}
+                  className="ml-2 text-xs font-medium text-primary underline-offset-2 hover:underline"
+                >
+                  Pagar en Gastos
+                </Link>
+              ) : null}
             </dd>
           </div>
         ) : null}
