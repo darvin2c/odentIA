@@ -1885,10 +1885,13 @@ export function helpTopic(
 }
 
 /** Cómo se llega a la pantalla, dicho como en el menú: «Configuración › Horarios y ausencias». */
-export function helpTopicLabel(topic: HelpTopic): string {
-  return topic.parent && topic.parent !== topic.title
-    ? `${topic.parent} › ${topic.title}`
-    : topic.title
+export function helpTopicLabel(
+  topic: HelpTopic,
+  /** Quien solo ve lo suyo llega por su entrada del menú (`menuLabel`): se nombra como la ve. */
+  options: { own?: boolean } = {},
+): string {
+  const title = options.own && topic.menuLabel ? topic.menuLabel : topic.title
+  return topic.parent && topic.parent !== title ? `${topic.parent} › ${title}` : title
 }
 
 /** El tema de la pantalla donde está la persona: el de la ruta más larga que coincide. */

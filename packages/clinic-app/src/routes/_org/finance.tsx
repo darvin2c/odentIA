@@ -77,7 +77,7 @@ import {
 import { useActiveBranch } from "../../lib/active-branch"
 import { compareMonths, FIRST_YEAR, plainAmount } from "../../lib/commissions"
 import { useCan, usePermission } from "../../lib/crm"
-import { COMMISSIONS_ADMIN_SUBTITLE, financeAccess, financeHeader, financePhoneActions, MY_COMMISSIONS_TITLE } from "../../lib/screen-rules"
+import { financeAccess, financeCommissionsSubtitle, financeHeader, financePhoneActions } from "../../lib/screen-rules"
 import { financeErrorMessage } from "../../lib/finance"
 import {
   CLOSURES_PAGE,
@@ -402,6 +402,8 @@ function FinanceWorkspace() {
       ? financeHeader(view, access)
       : { primary: undefined, menu: [] }
 
+  const commissionsSubtitle = financeCommissionsSubtitle(access)
+
   return (
     <PageShell className="flex flex-col gap-4">
       <PageHeader
@@ -409,9 +411,7 @@ function FinanceWorkspace() {
         subtitle={
           <>
             {view === "comisiones" ? (
-              <p className="min-w-0">
-                {canCommissionsWrite ? COMMISSIONS_ADMIN_SUBTITLE : MY_COMMISSIONS_TITLE}
-              </p>
+              commissionsSubtitle ? <p className="min-w-0">{commissionsSubtitle}</p> : null
             ) : sede.branches.length > 0 && branchId ? (
               <BranchSwitcher
                 branches={sede.branches}
