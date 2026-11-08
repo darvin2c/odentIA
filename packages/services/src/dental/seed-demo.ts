@@ -3458,6 +3458,102 @@ if (marcoPerson) {
   })
 }
 
+// Un tratamiento repartido por sesiones (QA de comisiones del 8 nov, D4): la endodoncia de la
+// 21 de Andrés, prevista en dos sesiones; la primera la hizo Ana y la segunda Luis. Va por los
+// caminos de la app: el cierre de la primera la cobra entera, partida en sus dos sesiones (ADR
+// 0151), y él la paga al terminar. Finanzas › Comisiones muestra «sesión 1 de 2» con Ana y
+// «sesión 2 de 2» con Luis, cada uno con la mitad y su porcentaje.
+const andres = await createPatient(db, ORG_A, ANA_ID, {
+  displayName: "Andrés Vilca",
+  givenNames: "Andrés",
+  familyName: "Vilca",
+  birthDate: "1987-09-03",
+  sex: "M",
+  registeredBranchId: miraflores.id,
+})
+const andresSesion1 = await createEncounter(db, ORG_A, ANA_ID, andres.id, {
+  reason: "Dolor al frío que no se le pasa en un diente de adelante",
+  teeth: [21],
+  branchId: miraflores.id,
+})
+await addEncounterDiagnosis(db, ORG_A, ANA_ID, andres.id, andresSesion1.id, {
+  diagnosisCode: DX.pulpitis,
+  diagnosisType: "confirmed",
+  toothNumber: 21,
+})
+const andresPlan = await createTreatmentPlan(db, ORG_A, ANA_ID, andres.id, {
+  title: "Plan de tratamiento",
+  originEncounterId: andresSesion1.id,
+})
+const endo21 = await addPlanItem(db, ORG_A, ANA_ID, andres.id, {
+  serviceId: serviceIdA("ENDODONCIA"),
+  planId: andresPlan.id,
+  sourceEncounterId: andresSesion1.id,
+  toothNumber: 21,
+  diagnosisCode: DX.pulpitis,
+  detail: "Endodoncia pieza 21",
+  plannedSessions: 2,
+})
+const andresBudget = await createBudget(db, ORG_A, ANA_ID, andres.id, {
+  planId: andresPlan.id,
+  itemIds: [endo21.id],
+  title: "Endodoncia pieza 21",
+})
+await deliverBudget(db, ORG_A, ANA_ID, andres.id, andresBudget.id)
+await decideBudget(db, ORG_A, ANA_ID, andres.id, andresBudget.id, {
+  decisions: [{ planItemId: endo21.id, decision: "aceptado" }],
+})
+await updateEncounterDraft(db, ORG_A, ANA_ID, andres.id, andresSesion1.id, {
+  evolution: "Apertura y conductometría de la 21; medicación entre sesiones y obturación provisional.",
+})
+await addEncounterProcedure(db, ORG_A, ANA_ID, andres.id, andresSesion1.id, {
+  toothNumber: 21,
+  diagnosisCode: DX.pulpitis,
+  planItemId: endo21.id,
+})
+const cierreAndres1 = await finalizeEncounter(db, ORG_A, ANA_ID, andres.id, andresSesion1.id, {
+  followUpIds: [],
+})
+const cargoEndo21 = cierreAndres1.charges[0]
+if (cargoEndo21?.commissionSessions !== 2)
+  throw new Error("La endodoncia de Andrés debía cobrarse partida en sus dos sesiones")
+// Las dos sesiones quedan firmadas hoy, en orden: una atención cerrada no cambia de fecha (la
+// base lo impide) y la parte de cada sesión es de la atención que la firmó, por orden de firma.
+const andresSesion2 = await createEncounter(db, ORG_A, LUIS_ID, andres.id, {
+  reason: "Segunda sesión de la endodoncia de la 21",
+  teeth: [21],
+  branchId: miraflores.id,
+})
+await addEncounterDiagnosis(db, ORG_A, LUIS_ID, andres.id, andresSesion2.id, {
+  diagnosisCode: DX.pulpitis,
+  diagnosisType: "confirmed",
+  toothNumber: 21,
+})
+await updateEncounterDraft(db, ORG_A, LUIS_ID, andres.id, andresSesion2.id, {
+  evolution: "Obturación de conducto de la 21, sin dolor. Queda para la restauración definitiva.",
+})
+await addEncounterProcedure(db, ORG_A, LUIS_ID, andres.id, andresSesion2.id, {
+  toothNumber: 21,
+  diagnosisCode: DX.pulpitis,
+  planItemId: endo21.id,
+})
+// «Sí, terminar»: con la segunda sesión la endodoncia queda realizada. Ya estaba cobrada entera.
+await finalizeEncounter(db, ORG_A, LUIS_ID, andres.id, andresSesion2.id, {
+  followUpIds: [],
+  completePlanItemIds: [endo21.id],
+})
+await db.transaction(async (tx) => {
+  const methods = await listPaymentMethods(tx, ORG_A)
+  const cash = methods.find((method) => method.typeCode === "10")
+  if (!cash) throw new Error("Falta el efectivo en los medios de pago de la clínica demo")
+  await collectCharge(tx, ORG_A, ANA_ID, andres.id, {
+    branchId: miraflores.id,
+    chargeIds: [cargoEndo21.id],
+    requestId: "50206010-0000-4000-8000-000000000107",
+    payments: [{ paymentMethodId: cash.id, amountCents: cargoEndo21.amountCents }],
+  })
+})
+
 // --- Org B mínima (aislamiento visual) ---
 const sofia = await createContact(db, ORG_B, {
   displayName: "Sofía Ramos",
