@@ -476,7 +476,8 @@ export function DocumentSendDrawer({
             ? "Descargar PDF"
             : "Imprimir"
           : selected
-            ? `Enviar por ${channelLabel(selected.channel).toLowerCase()}`
+            ? // «Enviar por correo», pero «Enviar por WhatsApp»: las marcas van como se escriben.
+              `Enviar por ${selected.channel === "email" ? "correo" : channelLabel(selected.channel)}`
             : "Enviar"
       }
       cancelLabel={sent ? "Listo" : undefined}
