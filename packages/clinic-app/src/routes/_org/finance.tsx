@@ -1316,7 +1316,12 @@ function MovementLine({
     leaves = entry.type === "vuelto" ? entry.leaves : entry.type !== "aporte"
     if (entry.type === "gasto") {
       title = `Gasto: ${entry.concept}`
-      subtitle = entry.fromCash ? "Salió del efectivo" : `Pagado con ${entry.method ?? "otro medio"}`
+      // Lo que vuelve de un gasto (su compensación, o lo que un profesional devolvió de su comisión) entra.
+      subtitle = !entry.leaves
+        ? "Entró al efectivo"
+        : entry.fromCash
+          ? "Salió del efectivo"
+          : `Pagado con ${entry.method ?? "otro medio"}`
     } else if (entry.type === "aporte") {
       title = "Ingreso de efectivo"
       subtitle = entry.concept

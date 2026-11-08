@@ -167,6 +167,11 @@ export interface CommissionSummary {
   /** Lo que falta pagarle hoy; negativo si queda por descontar. */
   pendingCents: number
   /**
+   * Lo que el próximo pago de este mes descuenta de comisiones ya pagadas de cobros que después se
+   * anularon: no es dinero pagado.
+   */
+  discountCents?: number
+  /**
    * Lo que le debe a la clínica después del próximo pago: comisiones ya pagadas de cobros que
    * después se devolvieron, sin cobros nuevos en esta moneda de donde descontarlas.
    */
@@ -201,6 +206,13 @@ export interface CommissionLine {
   paidAt: string | null
   /** El cobro se anuló después de pagada su comisión: se descuenta del siguiente pago. */
   voidedAfterPaid: boolean
+  /** Anulado después de pagado: lo que de su comisión aún debe (0 si ya no debe nada). */
+  owedLeftCents?: number
+  /**
+   * Anulado después de pagado y ya sin deuda: cómo se cerró. `pago`, descontado de un pago;
+   * `devuelto`, lo devolvió; `saldado`, la clínica lo dio por saldado. Nulo mientras deba.
+   */
+  owedClosedBy?: "pago" | "devuelto" | "saldado" | null
 }
 
 /** Comisión ya pagada por un cobro que después se anuló. */
@@ -224,6 +236,8 @@ export interface MonthlyCommissions extends Omit<CommissionSummary, "collections
   discountCents: number
   /** Lo que los pagos de este mes ya descontaron de cobros anulados. */
   discountedCents: number
+  /** Con algo que deber después de este mes: el mes más antiguo con cobros por pagar de donde se descuenta. */
+  discountFrom?: YearMonth | null
   /**
    * Su sueldo del mes, si tiene uno anotado como gasto que se repite (`null` si no): se paga en
    * Gastos y va aparte de la comisión.
@@ -301,6 +315,12 @@ export interface CommissionRate {
   rateBps: number
 }
 
+/**
+ * Qué registra cada fila de los pagos: un pago (o un descuento sin pago), o lo que cerró lo que el
+ * profesional debía: `devuelto` (lo devolvió) o `saldado` (la clínica lo perdonó).
+ */
+export type CommissionPaymentKind = "pago" | "devuelto" | "saldado"
+
 /** Pago registrado de una comisión; con `voidedAt`, anulado. */
 export interface CommissionPayment {
   id: string
@@ -313,8 +333,15 @@ export interface CommissionPayment {
   baseCents: number
   commissionCents: number
   expenseId: string | null
+  /** Sin él (respuestas de antes), un pago. */
+  kind?: CommissionPaymentKind
+  /** Lo devuelto: su medio, UN/CEFACT 4461 (10 efectivo, 30 transferencia, 48 tarjeta). */
+  methodTypeCode?: string | null
+  /** De lo que se dio por saldado, su motivo. */
   notes: string | null
   settledAt: string | null
+  /** Quién lo registró. */
+  settledByName?: string | null
   voidedAt: string | null
   voidReason: string | null
   /** Quién lo anuló; solo llega con `includeVoided`. */
@@ -398,6 +425,57 @@ export function fetchCommissionPayments(
   if (query.includeVoided) params.set("includeVoided", "1")
   const suffix = params.size > 0 ? `?${params}` : ""
   return apiFetch<{ data: CommissionPayment[] }>(`/api/commissions/payments${suffix}`)
+}
+
+/** Cómo devolvió el profesional lo que debía (UN/CEFACT 4461). */
+export const RETURN_METHODS = [
+  { value: "10", label: "En efectivo" },
+  { value: "30", label: "Transferencia" },
+  { value: "48", label: "Tarjeta" },
+] as const
+export type ReturnMethod = (typeof RETURN_METHODS)[number]["value"]
+
+/** «en efectivo», «por transferencia», «con tarjeta»: el medio de lo devuelto, para una frase. */
+export function returnMethodWords(typeCode: string | null | undefined): string {
+  if (typeCode === "10") return "en efectivo"
+  if (typeCode === "30") return "por transferencia"
+  if (typeCode === "48") return "con tarjeta"
+  return ""
+}
+
+/** Los mismos límites que `POST /api/commissions/debt`: el motivo de darlo por saldado es corto. */
+export const FORGIVE_REASON_MAX = 200
+
+/**
+ * Cierra lo que el profesional debe en una moneda: lo devolvió (con su medio; en efectivo, a la caja
+ * de una sede) o la clínica lo da por saldado (con su motivo). La deuda queda en cero.
+ */
+export function settleCommissionDebtApi(
+  body: YearMonth & {
+    professionalUserId: string
+    currency?: string
+    kind: "devuelto" | "saldado"
+    methodTypeCode?: ReturnMethod
+    branchId?: string
+    notes?: string
+    /** Lo que se le mostró a quien confirma; si cambió, el servidor no registra otra cifra. */
+    expectedCents?: number
+  },
+): Promise<{ data: { settlement: CommissionPayment; movementId: string | null } }> {
+  return apiFetch("/api/commissions/debt", { method: "POST", body: JSON.stringify(body) })
+}
+
+/**
+ * «Ver los 16 cobros», o con anulados después de pagados, «Ver los 15 cobros y el anulado»: el mismo
+ * número que el encabezado, que no cuenta lo anulado.
+ */
+export function showAllLabel(lines: ReadonlyArray<Pick<CommissionLine, "voidedAfterPaid">>): string {
+  const voided = lines.filter((line) => line.voidedAfterPaid).length
+  const counted = lines.length - voided
+  const cobros = counted === 1 ? "el cobro" : `los ${counted} cobros`
+  if (voided === 0) return `Ver ${cobros}`
+  if (counted === 0) return voided === 1 ? "Ver el anulado" : `Ver los ${voided} anulados`
+  return `Ver ${cobros} y ${voided === 1 ? "el anulado" : `los ${voided} anulados`}`
 }
 
 /** Anula un pago y su gasto; sus cobros vuelven a quedar por pagar. */
