@@ -111,10 +111,20 @@ test("ficha: el próximo control en el Resumen, vencido en Pendientes, y el de q
   //    se cumple con su atención de hoy, sin «Reservar cita» y fuera de «vencido».
   const visit = await bookAppointment(owner, ids.patientId, roomId, 2)
   const now = Date.now()
+  // Siempre dentro de hoy en Lima (UTC−5, sin horario de verano): pasada la medianoche,
+  // «hace hora y media» ya sería ayer y la cita dejaría de ser de hoy.
+  const limaMidnight = Math.floor((now - 5 * 3_600_000) / DAY) * DAY + 5 * 3_600_000
+  const startsAt = Math.max(limaMidnight, now - 90 * 60_000)
   await fixtureDb
     .update(appointment)
     // Llegar confirma la cita, como «Llegó» en la Agenda.
-    .set({ status: "confirmada", arrivedBy: owner.user.id, startsAt: new Date(now - 90 * 60_000), endsAt: new Date(now - 60 * 60_000), arrivedAt: new Date(now - 10 * 60_000) })
+    .set({
+      status: "confirmada",
+      arrivedBy: owner.user.id,
+      startsAt: new Date(startsAt),
+      endsAt: new Date(startsAt + 30 * 60_000),
+      arrivedAt: new Date(Math.max(startsAt, now - 10 * 60_000)),
+    })
     .where(eq(appointment.id, visit.id))
   await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}`))
   await expect(upcoming).toContainText(/Hoy \d\d:\d\d · Llegó \d\d:\d\d · espera/)
