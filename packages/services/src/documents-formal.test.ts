@@ -29,6 +29,8 @@ import {
   updateBudgetPresentation,
 } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
+import { demoSignatureStrokes } from "./demo-signature.js"
+import { assertStrokes } from "./professional-profiles.js"
 import {
   documentCheckToken,
   patientInitials,
@@ -495,6 +497,10 @@ describe("la respuesta en consulta y la firma de quien decide", () => {
     await expect(
       ownerDb.update(treatmentBudget).set({ decisionSignature: null, decisionSignedAt: null }).where(eq(treatmentBudget.id, budget.id)),
     ).rejects.toThrow()
+  })
+
+  it("la firma de la demo es una firma válida", () => {
+    expect(() => assertStrokes(demoSignatureStrokes("Andrés Vilca"), "La firma", "signature")).not.toThrow()
   })
 
   it("el agente y el portal no firman por la persona", async () => {
