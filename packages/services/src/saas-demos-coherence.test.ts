@@ -733,6 +733,30 @@ describe(`una demo de clínica general pequeña (odentIA, semilla ${DENTAL})`, (
     ).toBeGreaterThan(0)
   })
 
+  // QA del 6 nov (D5): la visita que hacía lo aceptado no lo llevaba y el plan decía
+  // «0 de 1 sesión · sin cargos» con su ticket en Cobros.
+  it("la visita que hace lo aceptado lleva su tratamiento, también en su cargo", async () => {
+    expect(
+      await count(
+        sql`select count(*)::int as n from encounter_procedure where organization_id = ${demo.organizationId} and plan_item_id is not null`,
+      ),
+    ).toBeGreaterThan(0)
+    // Ningún procedimiento lleva un tratamiento de otro servicio o de otra persona, ni uno sin aceptar.
+    expect(
+      await count(sql`select count(*)::int as n from encounter_procedure ep
+        join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id
+        join treatment_plan_item pi on pi.organization_id = ep.organization_id and pi.id = ep.plan_item_id
+        where ep.organization_id = ${demo.organizationId}
+          and (pi.service_id <> ep.service_id or pi.patient_id <> e.patient_id or pi.decision_status <> 'aceptado')`),
+    ).toBe(0)
+    // Su cargo dice de qué tratamiento es.
+    expect(
+      await count(sql`select count(*)::int as n from patient_charge c
+        join encounter_procedure ep on ep.organization_id = c.organization_id and ep.id = c.encounter_procedure_id
+        where c.organization_id = ${demo.organizationId} and ep.plan_item_id is not null and c.plan_item_id is distinct from ep.plan_item_id`),
+    ).toBe(0)
+  })
+
   it(`noche tras noche, ${NIGHTS} seguidas, la Bandeja de hoy se llena y quien vuelve a escribir vuelve a su conversación`, async () => {
     const [row] = await ownerDb.select().from(saasDemo).where(eq(saasDemo.id, demo.id))
     if (!row) throw new Error("falta la demo")
