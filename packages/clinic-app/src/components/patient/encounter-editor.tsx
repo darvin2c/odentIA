@@ -63,6 +63,7 @@ import {
   type ClosingSession,
   type FinalizedControls,
   type FinalizedMaterials,
+  type NextSession,
   fetchEncounterClosing,
   finalizedControlsWords,
   fetchMyProfessionalProfile,
@@ -85,6 +86,7 @@ import {
 import type { HealthGap } from "../../lib/encounters"
 import { productUi } from "../../product/product-ui"
 import { AttendingForNotice } from "../agenda/attending-for-notice"
+import { BookingHere } from "../agenda/schedule-host"
 import { useNoticesColumnDockBlocker } from "../notices-column"
 import { ProfessionalProfileDrawer } from "../professional-profile-drawer"
 import { ChoiceSelect } from "../ui/choice-select"
@@ -99,8 +101,10 @@ import {
   ClosingNextVisit,
   ClosingSessions,
   ClosingSignatureHint,
+  FinalizedNextSessions,
   type ClosingValues,
   closingControlsBody,
+  continuingAfterSign,
   type DictatedControl,
   EncounterClosingDialog,
   healthGapWords,
@@ -512,6 +516,14 @@ export function EncounterEditor({
   const [finalizedControls, setFinalizedControls] = useState<FinalizedControls | null>(null)
   /** Lo que la firma iba a terminar y no pudo: sigue en curso, con su motivo. */
   const [finalizedKeptOpen, setFinalizedKeptOpen] = useState<Array<{ planItemId: string; title: string; reason: string }>>([])
+  /** Lo que sigue en curso tras firmar, con su próxima sesión: «Reservar la sesión 2» ahí mismo. */
+  const [finalizedNext, setFinalizedNext] = useState<NextSession[]>([])
+  /** Los tratamientos con que se abrió «Nueva cita» desde «Atención finalizada». */
+  const [bookingNext, setBookingNext] = useState<string[] | null>(null)
+  /** Lo reservado ahí mismo: recibe el foco para que el lector y el teclado lo sepan. */
+  const nextSessionsRef = useRef<HTMLUListElement>(null)
+  /** «Después» del presupuesto con una sesión por reservar: solo pliega el presupuesto. */
+  const [budgetLater, setBudgetLater] = useState(false)
   // «Corregir» desde «Atención finalizada»: el formulario se abre encima del aviso, que queda abierto debajo.
   const [correctingMaterials, setCorrectingMaterials] = useState(false)
   const [materialsCorrected, setMaterialsCorrected] = useState(false)
@@ -587,7 +599,13 @@ export function EncounterEditor({
     // Firmar con lo dictado no lo pide: con consentimientos por firmar, sigue al cierre (`finalizeWith`).
     needsReason: () => unsignedConsents.length > 0 && signIdsRef.current === null,
     needsRegistration,
-    needsNextDay: (value) => needsNextControlDay(value, closingControls, dictatedControl(signIdsRef.current)),
+    needsNextDay: (value) =>
+      needsNextControlDay(
+        value,
+        closingControls,
+        dictatedControl(signIdsRef.current),
+        continuingAfterSign(closingQuery.data?.data.sessions, sessionAnswers).length > 0,
+      ),
     onSubmit: (value) => finalizeWith(value),
   })
   const closingError = useFormSubmitError(closingForm)
@@ -628,6 +646,9 @@ export function EncounterEditor({
   }
   const answerSession = (planItemId: string, answer: "terminar" | "otra") =>
     setSessionAnswers((current) => ({ ...current, [planItemId]: answer }))
+  // Lo que sigue en curso si se firma así: «¿Cuándo vuelve?» es su próxima sesión.
+  const continuingVisits = continuingAfterSign(closingQuery.data?.data.sessions, sessionAnswers, sessionLabelOf)
+  const canBook = usePermission("appointments.write")
 
   const valuesRef = useRef<DraftValues>({
     presentIllness: encounter.presentIllness ?? "",
@@ -1068,6 +1089,9 @@ export function EncounterEditor({
     setFinalizedMaterials(null)
     setFinalizedControls(null)
     setFinalizedKeptOpen([])
+    setFinalizedNext([])
+    setBookingNext(null)
+    setBudgetLater(false)
     setCorrectingMaterials(false)
     setMaterialsCorrected(false)
     setBudgetSent(false)
@@ -1144,6 +1168,7 @@ export function EncounterEditor({
           materials?: FinalizedMaterials | null
           controls?: FinalizedControls
           keptOpen?: Array<{ planItemId: string; title: string; reason: string }>
+          nextSessions?: NextSession[]
         }
       }>(`/api/patients/${patientId}/encounters/${encounterId}/finalize`, {
         method: "POST",
@@ -1154,7 +1179,12 @@ export function EncounterEditor({
           // «¿Terminaste?»: «Falta otra sesión»; lo demás que llega a sus previstas se termina.
           ...sessionAnswerBody(sessionAnswers, askedSessions),
           // «¿Cuándo vuelve?» y los controles que cumple esta visita (ADR 0152).
-          ...closingControlsBody(value, closingControls, dictatedControl(signIds)),
+          ...closingControlsBody(
+            value,
+            closingControls,
+            dictatedControl(signIds),
+            continuingAfterSign(askedSessions, sessionAnswers).length > 0,
+          ),
         }),
       })
       setConfirmOpen(false)
@@ -1165,6 +1195,7 @@ export function EncounterEditor({
       setFinalizedMaterials(result.data.materials ?? null)
       setFinalizedControls(result.data.controls ?? null)
       setFinalizedKeptOpen(result.data.keptOpen ?? [])
+      setFinalizedNext(result.data.nextSessions ?? [])
       setFinalizedBilling(result.data.billing)
       // El control nuevo o cumplido cambia su Plan y lo que falta agendar.
       if (result.data.controls?.next || result.data.controls?.fulfilled.length)
@@ -2646,7 +2677,15 @@ export function EncounterEditor({
         sessionLabel={sessionLabelOf}
         sessionAnswers={sessionAnswers}
         onSessionAnswer={answerSession}
-        nextVisit={<ClosingNextVisit form={closingForm} controls={closingControls} busy={finalizing} />}
+        nextVisit={
+          <ClosingNextVisit
+            form={closingForm}
+            controls={closingControls}
+            busy={finalizing}
+            continuing={continuingVisits}
+            canBook={canBook}
+          />
+        }
       >
         {finalizeDescription ? <p className="text-xs text-muted-foreground">{finalizeDescription}</p> : null}
       </EncounterClosingDialog>
@@ -2674,6 +2713,8 @@ export function EncounterEditor({
             controls={closingControls}
             dictated={dictatedControl(marked)}
             busy={finalizing}
+            continuing={continuingVisits}
+            canBook={canBook}
           />
         )}
         onSign={(ids) => {
@@ -2713,6 +2754,50 @@ export function EncounterEditor({
                 : "Esta atención no dejó nada que cobrar."}
             </DialogDescription>
           </DialogHeader>
+          {finalizedNext.length > 0 ? (
+            <FinalizedNextSessions
+              sessions={finalizedNext}
+              labelOf={(session) => sessionLabelOf({ planItemId: session.planItemId, title: session.title, n: 0, m: 0 })}
+              listRef={nextSessionsRef}
+              canBook={canBook}
+              onBook={(ids) => setBookingNext(ids)}
+            />
+          ) : null}
+          {/* Encima del aviso, dentro de él: al cerrarlo el foco vuelve a «Reservar la sesión 2». */}
+          {bookingNext ? (
+            <BookingHere
+              seed={{
+                patient: { id: patientId, name: patient.patient.displayName },
+                lockedPatient: true,
+                planItemIds: bookingNext,
+                ...(finalizedNext.find((session) => session.planItemId === bookingNext[0])?.serviceId
+                  ? { serviceId: finalizedNext.find((session) => session.planItemId === bookingNext[0])?.serviceId ?? undefined }
+                  : {}),
+                // La sesión siguiente suele hacerla quien atendió hoy: su columna, que se puede cambiar.
+                professionalUserId: encounter.professionalUserId,
+                professionalLabel: memberName(encounter.professionalUserId),
+              }}
+              onClose={() => setBookingNext(null)}
+              onSaved={(appointment) => {
+                // Lo que la cita de verdad lleva (lo que el servidor devolvió), no lo que se pidió.
+                const carried = new Map((appointment.sessions ?? []).map((session) => [session.planItemId, session]))
+                setFinalizedNext((current) =>
+                  current.map((session) => {
+                    const booked = carried.get(session.planItemId)
+                    return booked
+                      ? {
+                          ...session,
+                          booked: { appointmentId: appointment.id, startsAt: appointment.startsAt, n: booked.n, m: booked.m },
+                          toBook: null,
+                        }
+                      : session
+                  }),
+                )
+                // El foco va a lo reservado: el botón que lo abrió ya no está.
+                requestAnimationFrame(() => nextSessionsRef.current?.focus())
+              }}
+            />
+          ) : null}
           {chargedLines.length > 0 ? (
             <section className="flex flex-col gap-2" aria-label="Quedó por cobrar">
               <h3 className="text-sm font-semibold">Quedó por cobrar</h3>
@@ -2785,7 +2870,7 @@ export function EncounterEditor({
             onSaved={() => setMaterialsCorrected(true)}
           />
           {/* Mismo paso de cierre: casi siempre la persona sigue ahí y conviene que se lo lleve. */}
-          {finalizedBudget && finalizedBudget.itemCount > 0 && canSendBudget ? (
+          {finalizedBudget && finalizedBudget.itemCount > 0 && canSendBudget && !budgetLater ? (
             <section
               aria-label="Presupuesto listo"
               className="flex flex-col gap-3 rounded-lg border border-primary/40 bg-primary/5 p-3"
@@ -2807,7 +2892,15 @@ export function EncounterEditor({
                     <Button type="button" variant="outline" onClick={() => reviewBudget(finalizedBudget.id)}>
                       Revisar antes
                     </Button>
-                    <Button type="button" variant="ghost" onClick={closeFinalized}>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => {
+                        // Con una sesión por reservar, «Después» es del presupuesto: el aviso sigue abierto.
+                        if (canBook && finalizedNext.some((session) => session.toBook)) setBudgetLater(true)
+                        else closeFinalized()
+                      }}
+                    >
                       Después
                     </Button>
                   </div>
@@ -2819,7 +2912,12 @@ export function EncounterEditor({
             </section>
           ) : null}
           <DialogFooter>
-            <Button type="button" onClick={closeFinalized}>
+            {/* Mientras falta reservar la sesión, «Listo» no compite con «Reservar la sesión 2». */}
+            <Button
+              type="button"
+              variant={canBook && finalizedNext.some((session) => session.toBook) ? "outline" : "default"}
+              onClick={closeFinalized}
+            >
               Listo
             </Button>
           </DialogFooter>

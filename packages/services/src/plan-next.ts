@@ -6,8 +6,13 @@
  * `isToSchedule` (lo aceptado sin cita) y en los controles.
  *
  * El orden es fijo y sin puntajes:
- * 1. Un presupuesto armado y sin enviar: «Enviar el presupuesto a Lucía».
- * 2. Lo aceptado que aún no tiene cita: «Aceptó 2 de 3: falta su cita».
+ * 1. Un presupuesto armado y sin enviar: «Enviar el presupuesto a Lucía». Si
+ *    además un tratamiento empezado no tiene cita para su próxima sesión, el
+ *    detalle lo dice.
+ * 2. Lo aceptado que aún no tiene cita: «Aceptó 2 de 3: falta su cita». Pero
+ *    lo empezado va antes que lo aceptado sin empezar (QA del 8 nov, X5): con
+ *    una endodoncia a medias sin cita, «Falta la cita de la próxima sesión»
+ *    gana a la corona que va después.
  * 3. Lo que espera respuesta: «Enviado · espera respuesta» o «Lo está pensando».
  * 4. Un tratamiento en curso sin cita para su próxima sesión, o uno que ya
  *    tiene su primera cita y le faltan sesiones por reservar (`canBookAnother`):
@@ -73,6 +78,12 @@ export interface PlanNextStep {
   detail: string | null
   /** Nulo si el rol no puede hacerlo (la frase igual se dice). */
   action: PlanNextAction | null
+  /**
+   * Lo aceptado sin empezar que también falta agendar cuando gana la sesión de
+   * un tratamiento empezado: el presupuesto del Plan conserva su «Reservar cita».
+   * Solo para quien puede reservar.
+   */
+  alsoToSchedule?: string[]
 }
 
 export type Can = (permission: string) => boolean
@@ -341,13 +352,37 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
   // Lo aceptado sin una cita por venir que lo lleve (la regla de «Por agendar»).
   const toSchedule = items.filter((item) => isToSchedule(item, withAppointment))
 
-  // 1. Armado y sin enviar: lo envía recepción (decisión 4).
+  const countOf = (item: PlanItemRow) => sessions.get(item.id) ?? { done: 0, booked: 0 }
+  // Un tratamiento empezado y sin una cita por venir que lo lleve: le falta la cita de su próxima sesión.
+  const started = items.find((item) => item.status === "en_curso" && isToSchedule(item, withAppointment))
+  // El que pasa adelante es el que de verdad tiene una sesión por reservar (`canBookAnother`, la
+  // regla de la firma): uno que ya llegó a sus previstas y quedó abierto sigue en el paso 4.
+  const startedFirst = items.find(
+    (item) =>
+      item.status === "en_curso" &&
+      isToSchedule(item, withAppointment) &&
+      sessions.has(item.id) &&
+      canBookAnother(item, countOf(item)),
+  )
+  const continueStep = (item: PlanItemRow): PlanNextStep => {
+    const n = countOf(item).done + countOf(item).booked + 1
+    const session = showsSession(n, item.plannedSessions) ? ` · ${sessionWords(n, item.plannedSessions)}` : ""
+    return {
+      kind: "continuar",
+      text: `Falta la cita de la próxima sesión: ${item.title}${session}`,
+      detail: null,
+      action: can("appointments.write") ? { label: "Reservar cita", planItemIds: [item.id], serviceId: item.serviceId } : null,
+    }
+  }
+
+  // 1. Armado y sin enviar: lo envía recepción (decisión 4). Sigue primero (es su atajo en
+  // Pacientes), pero no esconde la sesión que falta reservar.
   const unsent = unsentBudgetOf(budgets)
   if (unsent) {
     return {
       kind: "enviar",
       text: `Enviar el presupuesto a ${name}`,
-      detail: `${budgetLine(unsent, locale)} · por enviar desde el ${day(unsent.createdAt)}`,
+      detail: `${budgetLine(unsent, locale)} · por enviar desde el ${day(unsent.createdAt)}${startedFirst ? ` · también falta la cita de la próxima sesión de ${startedFirst.title}` : ""}`,
       action: can("budgets.send") ? { label: "Enviar", budgetId: unsent.id } : null,
     }
   }
@@ -356,6 +391,14 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
   const notStarted = (item: PlanItemRow) => item.status === "pendiente" || item.status === "programado"
   const accepted = items.filter((item) => item.decisionStatus === "aceptado" && notStarted(item))
   const toStart = toSchedule.filter(notStarted)
+  // Lo empezado antes que lo aceptado sin empezar: la sesión 2 de la endodoncia antes que la corona.
+  // Lo aceptado sigue «por agendar» y el presupuesto del Plan conserva su «Reservar cita».
+  if (toStart.length > 0 && startedFirst)
+    return {
+      ...continueStep(startedFirst),
+      detail: "También falta la cita de lo aceptado sin empezar",
+      ...(can("appointments.write") ? { alsoToSchedule: toStart.map((item) => item.id) } : {}),
+    }
   if (toStart.length > 0) {
     const decided = budgets
       .filter((budget) => budget.status === "aceptado" || budget.status === "parcial")
@@ -395,31 +438,18 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
     return {
       kind: "respuesta",
       text: awaiting.status === "presentado" ? "Enviado · espera respuesta" : "Lo está pensando",
-      detail: [budgetLine(awaiting, locale), sent].filter(Boolean).join(" · "),
+      detail: [budgetLine(awaiting, locale), sent, startedFirst ? `también falta la cita de la próxima sesión de ${startedFirst.title}` : null]
+        .filter(Boolean)
+        .join(" · "),
       action: can("budgets.decide") ? { label: "¿Qué respondió?", budgetId: awaiting.id } : null,
     }
   }
 
   // 4. Un tratamiento en curso sin cita para su próxima sesión, o uno que ya tiene
   // su primera cita (o sesión) y le faltan otras por reservar.
-  const countOf = (item: PlanItemRow) => sessions.get(item.id) ?? { done: 0, booked: 0 }
-  const continuing = items.find(
-    (item) =>
-      (isToSchedule(item, withAppointment) && item.status === "en_curso") ||
-      (canBookAnother(item, countOf(item)) && countOf(item).done + countOf(item).booked > 0),
-  )
-  if (continuing) {
-    const n = countOf(continuing).done + countOf(continuing).booked + 1
-    const session = showsSession(n, continuing.plannedSessions) ? ` · ${sessionWords(n, continuing.plannedSessions)}` : ""
-    return {
-      kind: "continuar",
-      text: `Falta la cita de la próxima sesión: ${continuing.title}${session}`,
-      detail: null,
-      action: can("appointments.write")
-        ? { label: "Reservar cita", planItemIds: [continuing.id], serviceId: continuing.serviceId }
-        : null,
-    }
-  }
+  const continuing =
+    started ?? items.find((item) => canBookAnother(item, countOf(item)) && countOf(item).done + countOf(item).booked > 0)
+  if (continuing) return continueStep(continuing)
 
   // 5. El próximo control.
   if (control) {

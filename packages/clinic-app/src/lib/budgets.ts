@@ -745,6 +745,8 @@ export interface PlanNextStep {
     followUpId?: string
     appointmentId?: string
   } | null
+  /** Lo aceptado sin empezar que también falta agendar cuando gana la sesión de un tratamiento empezado. */
+  alsoToSchedule?: string[]
 }
 
 export function fetchPlanNextStep(patientId: string): Promise<{ data: PlanNextStep }> {
