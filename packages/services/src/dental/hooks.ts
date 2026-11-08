@@ -184,6 +184,7 @@ export const dentalHooks: ProductHooks = {
   dictation: DENTAL_DICTATION,
   budgetRequired: true,
   recallMonths: 6,
+  recallControlTitle: "Control de mantenimiento",
 
   async closingParts(tx, { orgId, patientId, encounterId }) {
     const parts: DentalClosingParts = {

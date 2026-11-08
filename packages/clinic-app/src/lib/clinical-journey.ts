@@ -135,6 +135,10 @@ export interface FollowUp {
   completedAt: string | null
   cancelledAt: string | null
   createdAt: string
+  /** La sede de la atención donde se indicó; nula: se reserva en la sede activa. */
+  branchId: string | null
+  /** Desde cuándo una visita lo cumple: «Usar esa cita» ofrece las citas desde ahí. */
+  windowFrom: string
 }
 
 /** Situación de la reserva, independiente del cierre clínico del control. */
@@ -210,14 +214,28 @@ export function scheduleFollowUpApi(
 /** Lo mínimo de un control para reservar su cita (vía clínica o coordinación). */
 export type SchedulableControl = Pick<
   FollowUp,
-  "id" | "patientId" | "title" | "dueAt" | "status" | "appointment" | "legacyScheduledAt"
+  "id" | "patientId" | "title" | "dueAt" | "status" | "appointment" | "legacyScheduledAt" | "branchId" | "windowFrom"
 >
 
 /** Vista de coordinación: títulos, estados y fechas; sin detalle clínico ni importes. */
 export interface TreatmentCoordination {
   budgetsAwaitingDecision: Array<{ id: string; title: string; presentedAt: string | null }>
   followUps: SchedulableControl[]
-  treatments: Array<{ id: string; title: string; status: string; decision: string; serviceId: string | null; toSchedule: boolean }>
+  /**
+   * `toSchedule`: aceptado y sin cita por venir. `sessionsLeft`: sesiones que le
+   * faltan reservar (la segunda de una endodoncia en dos); `nextSession`, la que
+   * sería una cita nueva al final («sesión 2 de 2»).
+   */
+  treatments: Array<{
+    id: string
+    title: string
+    status: string
+    decision: string
+    serviceId: string | null
+    toSchedule: boolean
+    sessionsLeft: number
+    nextSession: { n: number; m: number }
+  }>
 }
 
 export function fetchTreatmentCoordination(

@@ -284,7 +284,7 @@ export interface ProductDocumentsUi {
    * diagnóstica»). `tomography`: con qué tipo de imagen guarda la tomografía como estudio (el mismo
    * que el servidor) y cómo la abre su visor: «cbct», la dental, con panorámica, arco y piezas y
    * los brillos de cada estudio; «ct», la médica, en cortes y con las ventanas en unidades
-   * Hounsfield (ADR 0152). null: no la guarda.
+   * Hounsfield (ADR 0154). null: no la guarda.
    */
   imaging: {
     types: readonly ImagingType[]

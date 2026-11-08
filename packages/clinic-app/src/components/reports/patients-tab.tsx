@@ -603,7 +603,11 @@ function Returns({ data, onOpenList }: { data: ReportPatients; onOpenList: (list
         <Figure
           title={`Sin venir hace más de ${data.lapsed.months} meses`}
           value={data.lapsed.count}
-          note={data.lapsed.count === 0 ? "Todos tienen algo pendiente o vinieron hace poco" : "A hoy: sin cita, presupuesto que espere respuesta ni control pendiente"}
+          note={
+            data.lapsed.count === 0
+              ? "Todos tienen algo pendiente o vinieron hace poco"
+              : `A hoy: sin cita, presupuesto que espere respuesta ni control de los últimos ${data.lapsed.months} meses`
+          }
         >
           {data.lapsed.count > 0 ? <FooterButton onClick={() => onOpenList("lapsed")}>Ver quiénes</FooterButton> : null}
         </Figure>

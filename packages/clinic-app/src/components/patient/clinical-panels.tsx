@@ -378,9 +378,14 @@ export function ControlesPanel({
           </Button>
         </p>
       ) : rows.length === 0 ? (
+        // Donde no se indican controles (una atención firmada), no se invita a indicarlos.
         <EmptyState
           title="Sin controles"
-          description="Indica el próximo control para no perder el seguimiento del tratamiento o del mantenimiento."
+          description={
+            canWrite && allowCreate
+              ? "Indica el próximo control para no perder el seguimiento del tratamiento o del mantenimiento."
+              : undefined
+          }
         />
       ) : (
         <ul className="flex flex-col divide-y">

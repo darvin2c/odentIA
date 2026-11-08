@@ -1,4 +1,10 @@
-import { composeDisplayName, pendingRegistrationFields, type RegistrationConfig } from "@odentia/clinical"
+import {
+  composeDisplayName,
+  pendingRegistrationFields,
+  type RegistrationConfig,
+  sessionWords,
+  showsSession,
+} from "@odentia/clinical"
 import {
   Button,
   Checkbox,
@@ -362,7 +368,8 @@ export function BookingDrawer({
   })
 
   // ----- Para qué -----
-  // Lo aceptado sin cita de esta persona, con su título: el que ve recepción (sin piezas ni precios).
+  // Lo aceptado sin cita de esta persona, o con sesiones por reservar (la segunda de una
+  // endodoncia en dos), con su título: el que ve recepción (sin piezas ni precios).
   const coordinationQuery = useQuery({
     queryKey: ["treatment-coordination", values.patientId],
     queryFn: () => fetchTreatmentCoordination(values.patientId),
@@ -372,16 +379,22 @@ export function BookingDrawer({
   // También lo que pidió el Plan aunque ya tenga otra cita: lo pidió para esta y se ve.
   const seededItems = values.patientId === seed.patient?.id ? seed.planItemIds : undefined
   const toSchedule = React.useMemo(
-    () => coordinationQuery.data?.data.treatments.filter((row) => row.toSchedule || seededItems?.includes(row.id)) ?? [],
+    () =>
+      coordinationQuery.data?.data.treatments.filter(
+        (row) => row.toSchedule || row.sessionsLeft > 0 || seededItems?.includes(row.id),
+      ) ?? [],
     [coordinationQuery.data, seededItems],
   )
   // Dos iguales son una casilla: recepción no ve las piezas y elegir entre ellos sería a ciegas.
+  // Uno solo de varias sesiones dice cuál sería esta cita: «Endodoncia · sesión 2 de 2».
   const toScheduleRows = React.useMemo(() => {
-    const rows = new Map<string, { key: string; title: string; ids: string[] }>()
+    const rows = new Map<string, { key: string; title: string; ids: string[]; session: string | null }>()
     for (const item of toSchedule) {
       const key = `${item.serviceId ?? ""}|${item.title}`
-      const row = rows.get(key) ?? { key, title: item.title, ids: [] }
+      const row = rows.get(key) ?? { key, title: item.title, ids: [], session: null }
       row.ids.push(item.id)
+      const next = item.nextSession
+      row.session = row.ids.length === 1 && next && showsSession(next.n, next.m) ? sessionWords(next.n, next.m) : null
       rows.set(key, row)
     }
     return [...rows.values()]
@@ -725,11 +738,14 @@ export function BookingDrawer({
                     <FieldLabel htmlFor={`cita-tratamiento-${index}`} className="font-normal">
                       {row.title}
                       {row.ids.length > 1 ? ` × ${row.ids.length}` : ""}
+                      {row.session ? ` · ${row.session}` : ""}
                     </FieldLabel>
                   </Field>
                 ))}
               </FieldGroup>
-              <FieldDescription>Aceptó estos tratamientos y aún no tienen cita. Los que marques quedan listos en su atención.</FieldDescription>
+              <FieldDescription>
+                Tratamientos aceptados con sesiones por reservar. Los que marques quedan listos en su atención.
+              </FieldDescription>
             </FieldSet>
           ) : null}
 

@@ -1,5 +1,5 @@
 /**
- * Presupuesto con caminos (ADR 0151): en la atención se marca «otro camino»
+ * Presupuesto con caminos (ADR 0153): en la atención se marca «otro camino»
  * para la misma pieza; el plan los agrupa fuera de las fases; recepción anota
  * «acepta lo común, lo de la 46 lo piensa» sin elegir; y la revisión de un
  * precio dice qué cambió y pregunta solo por eso.

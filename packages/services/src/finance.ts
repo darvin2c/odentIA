@@ -474,10 +474,30 @@ function methodTotals(movements: CashMove[]): MethodTotal[] {
   return Object.values(byMethod)
 }
 
+/**
+ * La caja la ve caja, que no ve a quién se pagó cada comisión (ADR 0018, D-14 de la ronda de
+ * comisiones): el movimiento del pago de una comisión se llama «Pago de comisiones», como su
+ * fila en Gastos. Lo nuevo ya se guarda así; esto cubre lo guardado antes con el nombre.
+ */
+async function withoutCommissionPayees<T extends { expenseId: string | null; concept: string }>(
+  tx: Db,
+  orgId: string,
+  movements: T[],
+): Promise<T[]> {
+  const ids = [...new Set(movements.map((m) => m.expenseId).filter((id): id is string => !!id))]
+  if (ids.length === 0) return movements
+  const rows = await tx
+    .select({ expenseId: commissionSettlement.expenseId })
+    .from(commissionSettlement)
+    .where(and(eq(commissionSettlement.organizationId, orgId), inArray(commissionSettlement.expenseId, ids)))
+  const paid = new Set(rows.map((row) => row.expenseId))
+  return movements.map((m) => (m.expenseId && paid.has(m.expenseId) ? { ...m, concept: COMMISSION_PAYMENTS_CONCEPT } : m))
+}
+
 /** Turno con movimientos vigentes y esperado de efectivo calculado en vivo. */
 export async function getShiftDetail(tx: Db, orgId: string, shiftId: string) {
   const shift = await requireShift(tx, orgId, shiftId)
-  const movements = await tx
+  const stored = await tx
     .select()
     .from(cashMovement)
     .where(
@@ -488,6 +508,7 @@ export async function getShiftDetail(tx: Db, orgId: string, shiftId: string) {
       ),
     )
     .orderBy(asc(cashMovement.createdAt), asc(cashMovement.id))
+  const movements = await withoutCommissionPayees(tx, orgId, stored)
   const cashIn = movements.filter((m) => m.direction === "ingreso" && !isElectronic(m))
   const electronic = movements.filter((m) => m.direction === "ingreso" && isElectronic(m))
   const out = movements.filter(isCashEgreso)
@@ -3244,7 +3265,8 @@ export async function payMonthCommission(
       kind: "gasto",
       amountCents: view.pendingCents,
       currency: view.currency,
-      concept: paidExpense.concept,
+      // Caja ve los movimientos: sin a quién se pagó, como la fila de Gastos que ve caja.
+      concept: COMMISSION_PAYMENTS_CONCEPT,
       expenseId: paidExpense.id,
       amountField: "fromCash",
     })
@@ -3911,7 +3933,7 @@ export async function getDayMovements(tx: Db, orgId: string, query: DayMovements
     branchId: branchRow.id,
     day: query.day,
     timezone,
-    movements: await withTicketOrigin(tx, orgId, movements),
+    movements: await withTicketOrigin(tx, orgId, await withoutCommissionPayees(tx, orgId, movements)),
     voidedTickets,
   }
 }
@@ -4000,7 +4022,7 @@ async function countedMovements(tx: Db, orgId: string, shiftId: string) {
     .where(and(eq(cashMovement.organizationId, orgId), eq(cashMovement.shiftId, shiftId), isNull(cashMovement.voidedAt)))
     .orderBy(asc(cashMovement.createdAt), asc(cashMovement.id))
   const counted = movements.filter((m) => !isElectronic(m) && (m.direction !== "egreso" || isCashEgreso(m)))
-  return withTicketOrigin(tx, orgId, counted)
+  return withTicketOrigin(tx, orgId, await withoutCommissionPayees(tx, orgId, counted))
 }
 
 /** Ticket anulado del día: sigue a la vista, marcado y con su motivo, sin sumar. */

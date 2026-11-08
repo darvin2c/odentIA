@@ -1,4 +1,5 @@
 /** Contratos de la agenda con la API (`/api/agenda` y `/api/appointments`). */
+import { sessionWords } from "@odentia/clinical"
 import {
   dayMinutesIn,
   hourLabel,
@@ -95,6 +96,29 @@ export interface AgendaAppointment {
    * (nulo en la del chat web) y cuándo se borra sola. Null en una cita real.
    */
   test?: { conversationId: string | null; byUserId: string | null; byName: string | null; deletesAt: string | null } | null
+  /** En qué sesión va cada tratamiento de varias que la cita lleva (calculado por el servidor). */
+  sessions?: AppointmentSession[]
+}
+
+/** «Endodoncia · sesión 2 de 2»: lo que la cita viene a hacer de un tratamiento de varias sesiones. */
+export interface AppointmentSession {
+  planItemId: string
+  title: string
+  n: number
+  m: number
+}
+
+/**
+ * Lo que la cita dice de sus sesiones. Si lleva una sola y es del servicio de la
+ * cita, basta «sesión 2 de 2»; si no, cada una con su nombre.
+ */
+export function appointmentSessionsText(
+  sessions: AppointmentSession[] | undefined,
+  serviceName: string | null = null,
+): string | null {
+  if (!sessions?.length) return null
+  if (sessions.length === 1 && sessions[0]!.title === serviceName) return sessionWords(sessions[0]!.n, sessions[0]!.m)
+  return sessions.map((session) => `${session.title} · ${sessionWords(session.n, session.m)}`).join(" · ")
 }
 
 /** El estado de cada momento como lo entiende la rejilla (`ScheduleState`). */

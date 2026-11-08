@@ -1,7 +1,7 @@
 import type { CbctVolume, WindowLevel } from "./cbct-volume"
 
 /**
- * Lo que se elige para ver una tomografía: su nombre y su ventana (ADR 0152).
+ * Lo que se elige para ver una tomografía: su nombre y su ventana (ADR 0154).
  * La CBCT dental usa los brillos de cada estudio (ADR 0056), porque sus grises
  * no tienen una escala común entre equipos. La tomografía médica sí la tiene,
  * las unidades Hounsfield, y se mira con las ventanas de uso común en

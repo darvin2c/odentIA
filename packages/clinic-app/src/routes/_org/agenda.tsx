@@ -105,6 +105,7 @@ import {
   type AgendaAvailability,
   type AgendaResources,
   type AppointmentStatus,
+  appointmentSessionsText,
   invalidateAppointmentQueries,
   visitLabel,
   visitStage,
@@ -116,6 +117,13 @@ import { agendaHeader } from "../../lib/screen-rules"
 import { fetchCrmContext } from "../../lib/crm-workspace"
 import { activeOrgTimeZone } from "../../lib/locale"
 import { appWords, upperFirst } from "../../lib/product-words"
+
+/** Lo que dice el bloque bajo el nombre: el servicio (o el motivo) y, si va por sesiones, «sesión 2 de 2». */
+function blockSubtitle(item: AgendaAppointment): string | undefined {
+  const what = item.serviceName ?? item.reason
+  const sessions = appointmentSessionsText(item.sessions, item.serviceName)
+  return [what, sessions].filter(Boolean).join(" · ") || undefined
+}
 
 /**
  * Por qué no se movió, estiró o cambió de estado una cita: el motivo del
@@ -683,7 +691,7 @@ function AgendaPage() {
       id: item.id,
       columnId: group === "rooms" ? item.roomId : item.professionalUserId,
       title: item.patientName,
-      subtitle: item.serviceName ?? item.reason ?? undefined,
+      subtitle: blockSubtitle(item),
       start: item.startsAt,
       end: item.endsAt,
       status: item.status,
@@ -1039,7 +1047,7 @@ function AgendaPage() {
           id: item.id,
         columnId: item.professionalUserId,
           title: item.patientName,
-          subtitle: item.serviceName ?? item.reason ?? undefined,
+          subtitle: blockSubtitle(item),
           start: item.startsAt,
           end: item.endsAt,
           status: item.status,

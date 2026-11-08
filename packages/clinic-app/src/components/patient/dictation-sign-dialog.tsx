@@ -29,6 +29,7 @@ export function DictationSignDialog({
   signing,
   error: closingError = null,
   children,
+  nextVisit,
   onClose,
   onComplete,
   onSign,
@@ -43,6 +44,11 @@ export function DictationSignDialog({
   error?: string | null
   /** Con quién se firma y la hora de fin: lo mismo que al firmar sin sugerencias. */
   children: ReactNode
+  /**
+   * «¿Cuándo vuelve?», justo encima de firmar, con lo marcado: un control
+   * dictado y marcado ya dice cuándo vuelve.
+   */
+  nextVisit?: (marked: string[]) => ReactNode
   onClose: () => void
   /** Abre una sugerencia que no se puede confirmar tal cual, para completarla. */
   onComplete: (id: string) => void
@@ -77,7 +83,7 @@ export function DictationSignDialog({
         </AlertDialogHeader>
         <div className="flex flex-col gap-3">
           {children}
-          <ScrollArea className="flex max-h-[45vh] flex-col">
+          <ScrollArea className="flex max-h-[35vh] flex-col">
             <ul aria-label="Lo dictado sin confirmar" className="flex flex-col gap-2">
               {items.map((item) => {
                 const { title } = suggestionText(item)
@@ -141,6 +147,7 @@ export function DictationSignDialog({
               })}
             </ul>
           </ScrollArea>
+          {nextVisit?.(marked)}
           {error ? (
             <p role="alert" className="text-sm text-destructive">
               {error}

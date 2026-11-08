@@ -908,7 +908,7 @@ it("propuestas: revisión versionada, decisión por línea y cargo posterior", a
     data: { status: "sustituido" },
   })
 
-  // Nada cambió de precio: la revisión conserva lo aceptado y no se pregunta otra vez (ADR 0151).
+  // Nada cambió de precio: la revisión conserva lo aceptado y no se pregunta otra vez (ADR 0153).
   const carried = await app.request(`/patients/${patientId}/budgets/${revision.data.id}`)
   expect(await json<{ data: { status: string } }>(carried)).toMatchObject({ data: { status: "aceptado" } })
   const again = await post(app, `/patients/${patientId}/budgets/${revision.data.id}/decision`, {
