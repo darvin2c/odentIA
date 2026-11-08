@@ -654,7 +654,12 @@ export interface ReportFinance extends ReportHead {
     /** El impuesto de lo cobrado en el periodo, que se paga el mes siguiente. */
     salesTax: { cents: number }
     /** Gastos que se repiten, vencidos y sin pagar. */
-    fixed?: { cents: number; count: number }
+    fixed?: {
+      cents: number
+      count: number
+      /** Por sede: Gastos se mira por sede y el enlace lleva a la suya. */
+      byBranch?: Array<{ branchId: string; branchName: string; cents: number; count: number }>
+    }
     purchases: {
       cents: number
       orders: number

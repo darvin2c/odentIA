@@ -57,17 +57,41 @@ export function useRecurringMonth(branchId: string, month: { year: number; month
   })
 }
 
-/** «Lo fijo del mes: S/ 21,350.00 · pagado 14,850.00 · falta 6,500.00», dentro de la tarjeta del total. */
-export function FixedOfMonth({ data, locale }: { data: RecurringMonth | undefined; locale: string }) {
-  if (!data || data.fixed.count === 0) return null
+/**
+ * «Lo fijo del mes en esta sede: S/ 21,350.00 · pagado 14,850.00 · falta 6,500.00», dentro de la
+ * tarjeta del total. Con varias sedes dice también lo de toda la clínica: cuánto cuesta mantenerla.
+ */
+export function FixedOfMonth({
+  data,
+  wholeClinic,
+  locale,
+}: {
+  data: RecurringMonth | undefined
+  /** Lo de todas las sedes, solo si la clínica tiene más de una. */
+  wholeClinic?: RecurringMonth | undefined
+  locale: string
+}) {
+  if (!data || (data.fixed.count === 0 && !wholeClinic?.fixed.count)) return null
   const { totalCents, paidCents, dueCents } = data.fixed
   return (
-    <p className="mt-1 text-sm text-muted-foreground">
-      Lo fijo del mes:{" "}
-      <span className="font-semibold text-foreground tabular-nums">{formatMoney(totalCents, data.currency, locale)}</span>
-      {" · "}pagado {plainAmount(paidCents, data.currency, locale)}
-      {dueCents > 0 ? ` · falta ${plainAmount(dueCents, data.currency, locale)}` : ""}
-    </p>
+    <>
+      {data.fixed.count > 0 ? (
+        <p className="mt-1 text-sm text-muted-foreground">
+          {wholeClinic ? "Lo fijo del mes en esta sede" : "Lo fijo del mes"}:{" "}
+          <span className="font-semibold text-foreground tabular-nums">{formatMoney(totalCents, data.currency, locale)}</span>
+          {" · "}pagado {plainAmount(paidCents, data.currency, locale)}
+          {dueCents > 0 ? ` · falta ${plainAmount(dueCents, data.currency, locale)}` : ""}
+        </p>
+      ) : null}
+      {wholeClinic && wholeClinic.fixed.count > 0 ? (
+        <p className="mt-1 text-sm text-muted-foreground">
+          Toda la clínica:{" "}
+          <span className="font-semibold text-foreground tabular-nums">
+            {formatMoney(wholeClinic.fixed.totalCents, wholeClinic.currency, locale)}
+          </span>
+        </p>
+      ) : null}
+    </>
   )
 }
 
