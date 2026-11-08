@@ -6,7 +6,7 @@
  * mes entero. Un gasto se anula con motivo y queda en la lista, tachado.
  */
 import { currencyWord, formatMoney } from "@odentia/clinical"
-import { Alert, AlertDescription, AlertTitle, Badge, Button, cn, toast } from "@odentia/ui"
+import { Alert, AlertDescription, AlertTitle, Badge, Button, buttonVariants, cn, toast } from "@odentia/ui"
 import {
   common,
   DataTable,
@@ -253,26 +253,22 @@ export function ExpensesTab({
             // El pago de una comisión se anula con su pago, en Comisiones: aquí solo lleva a él.
             row.original.commissionPayment && row.original.voidedAt === null ? (
               <div className="flex justify-end">
-                <Button
-                  variant="ghost"
-                  size="sm"
+                {/* Es un enlace: se ve como botón, pero conserva lo de un enlace (sin `role="button"`). */}
+                <Link
+                  className={buttonVariants({ variant: "ghost", size: "sm" })}
                   aria-label={`Ver el pago: ${row.original.concept}`}
-                  render={
-                    <Link
-                      to="/finance"
-                      search={{
-                        tab: "comisiones",
-                        // Un pago antiguo sin mes abre Comisiones con la persona elegida.
-                        ...(row.original.commissionPayment.year && row.original.commissionPayment.month
-                          ? { year: row.original.commissionPayment.year, month: row.original.commissionPayment.month }
-                          : {}),
-                        profesional: row.original.commissionPayment.professionalUserId,
-                      }}
-                    />
-                  }
+                  to="/finance"
+                  search={{
+                    tab: "comisiones",
+                    // Un pago antiguo sin mes abre Comisiones con la persona elegida.
+                    ...(row.original.commissionPayment.year && row.original.commissionPayment.month
+                      ? { year: row.original.commissionPayment.year, month: row.original.commissionPayment.month }
+                      : {}),
+                    profesional: row.original.commissionPayment.professionalUserId,
+                  }}
                 >
                   Ver el pago
-                </Button>
+                </Link>
               </div>
             ) : null
           ) : row.original.voidedAt === null && canWrite ? (

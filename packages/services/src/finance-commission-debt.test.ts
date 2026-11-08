@@ -20,6 +20,7 @@ import {
   getShiftDetail,
   listCommissionSettlements,
   listMonthCommissions,
+  paidCommissionsOfTicket,
   payMonthCommission,
   setCommissionRate,
   settleCommissionDebt,
@@ -148,9 +149,21 @@ it("«lo devolvió» en efectivo entra a la caja sin su nombre y deja la deuda e
   expect(professionals.rows.find((row) => row.userId === f.actor)?.discountCents ?? 0).toBe(0)
   const owedMonths = await f.run((tx) => commissionsOwedByMonth(tx, "org_a"))
   expect(owedMonths.months.find((m) => m.year === before.year && m.month === before.month)?.cents).toBeGreaterThanOrEqual(15000)
-  // Queda entre los pagos del mes, con quién lo registró, y al profesional se le avisa.
-  const payments = await f.run((tx) => listCommissionSettlements(tx, "org_a", { professionalUserId: f.actor, ...now }))
-  expect(payments).toEqual([expect.objectContaining({ id: done.settlement.id, kind: "devuelto", settledByName: "Administración deuda" })])
+  // Se registró mirando este mes, pero queda en el mes de los cobros anulados, el del pago que los pagó: ahí
+  // se explica por qué «Ya pagado» (300) supera la comisión (150). No depende del mes que se tenía abierto.
+  expect(done.settlement).toMatchObject({ periodYear: before.year, periodMonth: before.month })
+  const payments = await f.run((tx) => listCommissionSettlements(tx, "org_a", { professionalUserId: f.actor, ...before }))
+  expect(payments.map((p) => p.kind).sort()).toEqual(["devuelto", "pago"])
+  expect(payments.find((p) => p.kind === "devuelto")).toMatchObject({ id: done.settlement.id, settledByName: "Administración deuda" })
+  expect(await f.run((tx) => listCommissionSettlements(tx, "org_a", { professionalUserId: f.actor, ...now }))).toEqual([])
+  expect(previous).toMatchObject({ paidCents: 30000, commissionCents: 15000 })
+  expect(previous.debtClosures).toEqual([
+    expect.objectContaining({ settlementId: done.settlement.id, kind: "devuelto", cents: 30000, settledAt: expect.any(Date) }),
+  ])
+  // Este mes no tiene esos cobros: no explica nada.
+  expect((await viewOf(now)).debtClosures).toEqual([])
+  // «Mis honorarios» de ese mes lo lista junto a sus pagos (la pantalla pide los registros del mes).
+  expect(mine.debtClosures).toEqual([expect.objectContaining({ kind: "devuelto", cents: 30000 })])
   const notice = await ownerDb.execute<{ title: string }>(
     sql`select title from workspace_notification where organization_id = 'org_a' and dedupe_key = ${`commission-debt:${done.settlement.id}`}`,
   )
@@ -169,6 +182,16 @@ it("«lo devolvió» en efectivo entra a la caja sin su nombre y deja la deuda e
   await f.run((tx) => voidCommissionSettlement(tx, "org_a", admin, done.settlement.id, { reason: "Era de otro" }))
   expect(await inDrawer()).toBe(drawer)
   expect(await viewOf(now)).toMatchObject({ adjustmentCents: 30000, owedCents: 30000 })
+  expect((await viewOf(before)).debtClosures).toEqual([])
+  // En Caja no desaparece: como un ticket anulado, sigue a la vista con su motivo, sin sumar y sin a quién.
+  const afterVoid = await f.run((tx) => getDayMovements(tx, "org_a", { branchId, day: today }))
+  expect(afterVoid.movements.find((m) => m.id === done.movementId)).toBeUndefined()
+  // Caja no lee el motivo libre (puede nombrar a quién era), solo de dónde se anuló; quien administra, el suyo.
+  expect(afterVoid.voidedMovements).toEqual([
+    expect.objectContaining({ id: done.movementId, concept: "Devolución de comisiones", amountCents: 30000, direction: "ingreso", voidReason: "Se anuló en Comisiones" }),
+  ])
+  const forAdmin = await f.run((tx) => getDayMovements(tx, "org_a", { branchId, day: today }, { seesCommissions: true }))
+  expect(forAdmin.voidedMovements).toEqual([expect.objectContaining({ id: done.movementId, voidReason: "Era de otro" })])
   const voidNotice = await ownerDb.execute<{ title: string }>(
     sql`select title from workspace_notification where organization_id = 'org_a' and dedupe_key = ${`commission-voided:${done.settlement.id}`}`,
   )
@@ -185,6 +208,11 @@ it("devuelto por transferencia no toca la caja, y darlo por saldado pide su moti
   await expect(forgive("x".repeat(201))).rejects.toMatchObject({ fields: { notes: expect.stringContaining("200") } })
   const forgiven = await forgive("Ya no trabaja aquí")
   expect(forgiven.settlement).toMatchObject({ kind: "saldado", methodTypeCode: null, cashMovementId: null, notes: "Ya no trabaja aquí" })
+  // Desde el mes que sea, queda en el de los cobros anulados, con su motivo para explicarlo.
+  expect(forgiven.settlement).toMatchObject({ periodYear: before.year, periodMonth: before.month })
+  expect((await viewOf(before)).debtClosures).toEqual([
+    expect.objectContaining({ kind: "saldado", cents: 30000, notes: "Ya no trabaja aquí" }),
+  ])
   expect(forgiven.movementId).toBeNull()
   expect(await inDrawer()).toBe(drawer)
   expect(await viewOf(now)).toMatchObject({ adjustmentCents: 0, owedCents: 0 })
@@ -205,4 +233,35 @@ it("devuelto por transferencia no toca la caja, y darlo por saldado pide su moti
   expect(await viewOf(now)).toMatchObject({ adjustmentCents: 0 })
   // Lo que no es un pago no sale como una comisión pagada en el mes: «Ya pagado» sigue siendo el dinero que salió.
   expect(await viewOf(now)).toMatchObject({ paidCents: 0, lastPaidAt: null })
+})
+
+it("antes de anular un ticket se sabe qué comisión ya se pagó: quedará por descontar", async () => {
+  const f = await clinicalFixture()
+  const [sede] = await ownerDb.insert(branch).values({ organizationId: "org_a", name: `Sede aviso ${randomUUID()}` }).returning()
+  const branchId = sede!.id
+  const cash = await f.run((tx) => createPaymentMethod(tx, "org_a", f.actor, { name: "Efectivo", typeCode: "10" }))
+  const [procedure] = await ownerDb
+    .insert(encounterProcedure)
+    .values({ organizationId: "org_a", encounterId: f.encounter.id, serviceId: f.service.id, description: "Blanqueamiento", priceCents: 60000, currency: "PEN", createdBy: f.actor })
+    .returning()
+  await ownerDb
+    .update(encounter)
+    .set({ status: "finalizada", finalizedAt: new Date(), branchId, signerName: "Clínico", signerRegistration: "12345" })
+    .where(eq(encounter.id, f.encounter.id))
+  await f.run((tx) => setCommissionRate(tx, "org_a", f.actor, { professionalUserId: f.actor, rateBps: 3500 }))
+  const charge = await f.run((tx) => createCharge(tx, ...f.args, { encounterProcedureId: procedure!.id }))
+  const paid = await f.run((tx) =>
+    collectCharge(tx, ...f.args, { branchId, chargeIds: [charge.id], payments: [{ paymentMethodId: cash.id, amountCents: 60000 }], requestId: randomUUID() }),
+  )
+  // Sin pagar la comisión no hay nada que avisar.
+  expect(await f.run((tx) => paidCommissionsOfTicket(tx, "org_a", paid.ticket.id))).toEqual([])
+  await f.run((tx) => payMonthCommission(tx, "org_a", f.actor, { professionalUserId: f.actor, ...currentPeriod(), branchId }))
+  const [who] = await ownerDb.select({ name: user.name }).from(user).where(eq(user.id, f.actor))
+  expect(await f.run((tx) => paidCommissionsOfTicket(tx, "org_a", paid.ticket.id))).toEqual([
+    { professionalUserId: f.actor, professionalName: who!.name, currency: "PEN", cents: 21000 },
+  ])
+  // Ya anulado, ya no hay comisión en pie de ese cobro: es lo que se descuenta.
+  await f.run((tx) => voidTicket(tx, "org_a", f.actor, f.patient.id, paid.ticket.id, { reason: "Cobro errado", allowPostClose: true }))
+  expect(await f.run((tx) => paidCommissionsOfTicket(tx, "org_a", paid.ticket.id))).toEqual([])
+  expect(await f.run((tx) => getMonthlyCommissions(tx, "org_a", { professionalUserId: f.actor, ...currentPeriod() }))).toMatchObject({ adjustmentCents: 21000 })
 })
