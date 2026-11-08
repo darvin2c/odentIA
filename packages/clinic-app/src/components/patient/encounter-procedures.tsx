@@ -811,7 +811,12 @@ export function EncounterProcedures({
                           {selectedPlan && (
                             <p className="text-xs text-muted-foreground">
                               Al guardar, «{selectedPlan.title}» queda en curso y vinculado a esta atención.
-                              Completarlo es una decisión aparte, en Tratamientos.
+                              {/* Con la de hoy llega a sus sesiones previstas: la firma lo termina (ADR 0161). */}
+                              {(selectedPlan.sessionsDone ?? 0) +
+                                (detail.procedures.some((proc) => !proc.voidedAt && proc.planItemId === selectedPlan.id) ? 0 : 1) >=
+                              (selectedPlan.plannedSessions ?? 1)
+                                ? " Al firmar la atención queda realizado; si falta otra sesión, lo indicas al firmar."
+                                : ""}
                             </p>
                           )}
                         </>
