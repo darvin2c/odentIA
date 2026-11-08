@@ -1,6 +1,7 @@
 import { cn, useSidebarOptional } from "@odentia/ui"
 import * as React from "react"
 import { createPortal } from "react-dom"
+import type { KeptInPage } from "./draft-blocker.js"
 
 /**
  * Columna lateral del layout: el único lugar a la derecha de la página donde
@@ -45,21 +46,29 @@ interface SideDockState {
  * `keptInPage`, navegar sin cambiar de ruta (otra pestaña, otro filtro) no
  * pregunta: la pantalla sigue montada y lo escrito sigue ahí.
  */
-export type DraftGuardComponent = React.ComponentType<{ dirty: boolean; keptInPage?: boolean }>
+export type DraftGuardComponent = React.ComponentType<{ dirty: boolean; keptInPage?: KeptInPage | null }>
 
-const DraftKeptInPageContext = React.createContext(false)
+const DraftKeptInPageContext = React.createContext<KeptInPage | null>(null)
 
 /**
  * Para una pantalla que mantiene montadas sus superficies mientras no cambie
  * de ruta: sus pestañas y filtros solo cambian la búsqueda de la dirección.
  * Ahí el aviso de «salir sin guardar» de la columna solo pregunta al salir a
- * otra ruta, que es cuando se perdería lo escrito.
+ * otra ruta, que es cuando se perdería lo escrito. `unlessChanges`: claves de
+ * la búsqueda que cambian lo que se guardaría (la sede) y por eso sí preguntan.
  */
-export function DraftKeptInPage({ children }: { children: React.ReactNode }) {
-  return <DraftKeptInPageContext.Provider value>{children}</DraftKeptInPageContext.Provider>
+export function DraftKeptInPage({
+  unlessChanges,
+  children,
+}: {
+  unlessChanges?: readonly string[]
+  children: React.ReactNode
+}) {
+  const value = React.useMemo(() => ({ unlessChanges }), [unlessChanges])
+  return <DraftKeptInPageContext.Provider value={value}>{children}</DraftKeptInPageContext.Provider>
 }
 
-export function useDraftKeptInPage(): boolean {
+export function useDraftKeptInPage(): KeptInPage | null {
   return React.useContext(DraftKeptInPageContext)
 }
 

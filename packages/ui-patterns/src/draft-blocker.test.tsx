@@ -5,7 +5,7 @@ import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet
 import type * as React from "react"
 import { afterEach, beforeAll, expect, it } from "vitest"
 
-import { useDraftBlocker } from "./draft-blocker.js"
+import { type KeptInPage, useDraftBlocker } from "./draft-blocker.js"
 import { FormDrawer } from "./form/form-drawer.js"
 import { DraftKeptInPage, SideDockProvider, SideDockSlot } from "./side-dock.js"
 
@@ -38,7 +38,7 @@ afterEach(() => {
 })
 
 /** El aviso de la app, como `PageDraftGuard` de clinic-app. */
-function Guard({ dirty, keptInPage }: { dirty: boolean; keptInPage?: boolean }) {
+function Guard({ dirty, keptInPage }: { dirty: boolean; keptInPage?: KeptInPage | null }) {
   const blocker = useDraftBlocker({ disabled: !dirty, enableBeforeUnload: false, shouldBlockFn: () => dirty, keptInPage })
   if (blocker.status !== "blocked") return null
   return (
@@ -76,21 +76,28 @@ const form = (title: string, field: string): React.ReactNode => (
 
 // QA del 8 nov (bajo #5): en Finanzas › Gastos, con un gasto a medias, tocar «Caja» preguntaba
 // «Si sales, se perderán» aunque el cajón sigue abierto en Caja con lo escrito.
-it("con la pantalla que conserva sus cajones, cambiar de pestaña no pregunta y salir a otra ruta sí", async () => {
+it("con la pantalla que conserva sus cajones, cambiar de pestaña no pregunta; cambiar de sede o salir a otra ruta sí", async () => {
   const router = appWith(
     [
-      ["/finance", () => <DraftKeptInPage>{form("Registrar gasto", "Concepto")}</DraftKeptInPage>],
+      ["/finance", () => <DraftKeptInPage unlessChanges={["branch"]}>{form("Registrar gasto", "Concepto")}</DraftKeptInPage>],
       ["/reports", () => <p>Reportes</p>],
     ],
-    "/finance?tab=gastos",
+    "/finance?tab=gastos&branch=centro",
   )
   render(<RouterProvider router={router} />)
   fireEvent.input(await screen.findByLabelText("Concepto"), { target: { value: "Guantes" } })
 
-  await router.navigate({ href: "/finance?tab=caja" })
-  await waitFor(() => expect(router.state.location.searchStr).toBe("?tab=caja"))
+  await router.navigate({ href: "/finance?tab=caja&branch=centro" })
+  await waitFor(() => expect(router.state.location.search).toEqual({ tab: "caja", branch: "centro" }))
   expect(screen.queryByRole("alertdialog")).toBeNull()
   expect((screen.getByLabelText("Concepto") as HTMLInputElement).value).toBe("Guantes")
+
+  // Otra sede sí pregunta: lo escrito se guardaría en ella.
+  void router.navigate({ href: "/finance?tab=caja&branch=norte" })
+  await screen.findByRole("alertdialog")
+  fireEvent.click(screen.getByRole("button", { name: "Continuar editando" }))
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+  expect(router.state.location.search).toEqual({ tab: "caja", branch: "centro" })
 
   void router.navigate({ href: "/reports" })
   await screen.findByRole("alertdialog")
