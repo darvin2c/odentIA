@@ -20,6 +20,7 @@ import {
   listBookingLinkProfessionals,
   listBookingLinkSlots,
   registerFromBookingLink,
+  resendPersonalLink,
   reservePersonalLink,
   ServiceError,
   type Storage,
@@ -412,6 +413,13 @@ export function createPublicBookingRoute(deps: {
     if (!body.success) return c.json(errorBody(c, "VALIDATION", "Revisa lo que elegiste"), 400)
     const { token: linkToken, ...input } = body.data
     return answer(c, 200, () => inOrg(c, (tx, orgId) => setPersonalLinkMessages(tx, orgId, linkToken, input)))
+  })
+
+  // «Enviarme uno nuevo» desde un enlace vencido: a su canal registrado, uno al día (acta 8).
+  app.post("/:slug/resend", async (c) => {
+    const body = z.strictObject({ token }).safeParse(await bodyOf(c))
+    if (!body.success) return unavailable(c)
+    return answer(c, 201, () => inOrg(c, (tx, orgId) => resendPersonalLink(tx, orgId, body.data.token, { secretsKey: deps.secretsKey })))
   })
 
   // «Añadir al calendario» de su cita (issue 46). Es un POST: el token viaja en el cuerpo, nunca en la dirección.

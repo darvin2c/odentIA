@@ -63,6 +63,7 @@ import {
   getPersonalLinkDataForm,
   getPersonalLinkView,
   personalLinkForEmailToken,
+  resendPersonalLink,
   sendConsentToSign,
   sendPersonalLink,
   signPersonalLinkConsent,
@@ -1415,3 +1416,81 @@ it("sin aviso propio, «Tus datos» muestra el sugerido con su casilla y queda a
   expect(consent?.noticeText).toBe(form.registration.privacyNotice)
 })
 
+
+it("«Enviarme uno nuevo»: desde un enlace vencido le llega otro a su canal, uno al día; usado, quitado o sin nada pendiente no se ofrece", async () => {
+  configurePublicLinks({ webURL: "https://app.odentia.test", cookieDomain: "odentia.test" })
+  try {
+    const f = await clinicalFixture()
+    const lucia = await consentInChat(f, new Date())
+    await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, lucia.consentId))
+    const old = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: lucia.personId, patientId: lucia.patientId }, { secretsKey: KEY }))
+    const expire = (linkId: string) =>
+      ownerDb.update(appointmentBookingLink).set({ expiresAt: new Date(Date.now() - 60_000) }).where(eq(appointmentBookingLink.id, linkId))
+    await expire(old.linkId)
+    const [person] = await ownerDb.select({ phone: contact.phone }).from(contact).where(eq(contact.id, lucia.personId))
+    const masked = `•••${person!.phone!.slice(-3)}`
+    // Venció con un consentimiento por firmar: se ofrece otro, por su WhatsApp y enmascarado.
+    expect(await f.run((tx) => getPersonalLinkView(tx, ORG, old.token))).toMatchObject({
+      status: "vencido",
+      consents: [],
+      closed: { reason: "vencido", resend: { channel: "whatsapp", to: masked, sentAt: null } },
+    })
+    const sent = await f.run((tx) => resendPersonalLink(tx, ORG, old.token, { secretsKey: KEY }))
+    expect(sent).toMatchObject({ channel: "whatsapp", to: masked })
+    expect(sent.sentAt).not.toBeNull()
+    // Sale como aviso, sin nadie del equipo, con un enlace nuevo que abre sus pendientes.
+    const out = await ownerDb
+      .select({ senderKind: message.senderKind, senderUserId: message.senderUserId, body: message.body })
+      .from(message)
+      .where(and(eq(message.conversationId, lucia.conversationId), eq(message.direction, "out")))
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ senderKind: "agent", senderUserId: null })
+    expect(out[0]?.body).toMatch(/https:\/\/norte\.odentia\.test\/pendientes\?token=\{\{su-enlace:[0-9a-f-]{36}\}\}/)
+    const links = await ownerDb.select().from(appointmentBookingLink).where(eq(appointmentBookingLink.patientId, lucia.patientId))
+    const fresh = links.find((row) => row.id !== old.linkId)
+    expect(fresh?.revokedAt).toBeNull()
+    expect(fresh?.conversationId).toBe(lucia.conversationId)
+    // El viejo queda sin efecto y dice cuándo salió el nuevo; un doble toque no manda otro.
+    expect((await f.run((tx) => getPersonalLinkView(tx, ORG, old.token))).closed).toMatchObject({
+      reason: "vencido",
+      resend: { channel: "whatsapp", to: masked, sentAt: expect.any(String) },
+    })
+    await expect(f.run((tx) => resendPersonalLink(tx, ORG, old.token, { secretsKey: KEY }))).rejects.toMatchObject({ code: "LINK_RESEND_LIMIT" })
+    // El tope es por persona y día: si el nuevo también vence hoy, tampoco sale otro.
+    const renewed = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: lucia.personId, patientId: lucia.patientId }, { secretsKey: KEY }))
+    expect(renewed.linkId).toBe(fresh!.id)
+    await expire(renewed.linkId)
+    await expect(f.run((tx) => resendPersonalLink(tx, ORG, renewed.token, { secretsKey: KEY }))).rejects.toMatchObject({ code: "LINK_RESEND_LIMIT" })
+    expect(
+      await ownerDb.select({ id: message.id }).from(message).where(and(eq(message.conversationId, lucia.conversationId), eq(message.direction, "out"))),
+    ).toHaveLength(1)
+
+    // «Quitar enlace»: no se ofrece ni se envía otro.
+    const ana = await consentInChat(f, new Date())
+    await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, ana.consentId))
+    const hers = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: ana.personId, patientId: ana.patientId }, { secretsKey: KEY }))
+    await f.run((tx) => revokePersonalLinks(tx, ORG, f.actor, ana.patientId))
+    expect((await f.run((tx) => getPersonalLinkView(tx, ORG, hers.token))).closed).toEqual({ reason: "quitado", resend: null, appointment: null })
+    await expect(f.run((tx) => resendPersonalLink(tx, ORG, hers.token, { secretsKey: KEY }))).rejects.toMatchObject({ code: "LINK_RESEND_UNAVAILABLE" })
+
+    // Vencido sin nada pendiente (ya envió sus datos y no tiene nada más): no sirve pedir otro.
+    const done = await consentInChat(f, new Date())
+    const empty = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: done.personId, patientId: done.patientId }, { secretsKey: KEY }))
+    await ownerDb
+      .update(appointmentBookingLink)
+      .set({ dataSubmittedAt: new Date(), expiresAt: new Date(Date.now() - 60_000) })
+      .where(eq(appointmentBookingLink.id, empty.linkId))
+    expect((await f.run((tx) => getPersonalLinkView(tx, ORG, empty.token))).closed).toEqual({ reason: "hecho", resend: null, appointment: null })
+    await expect(f.run((tx) => resendPersonalLink(tx, ORG, empty.token, { secretsKey: KEY }))).rejects.toMatchObject({ code: "LINK_RESEND_UNAVAILABLE" })
+
+    // Un familiar sin facultad para decidir no pide uno nuevo.
+    const [tia] = await ownerDb.insert(contact).values({ organizationId: ORG, displayName: "Marta Tía", givenNames: "Marta" }).returning({ id: contact.id })
+    await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId: lucia.patientId, contactId: tia!.id, relationship: "family", createdBy: f.actor })
+    const aunt = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: tia!.id, patientId: lucia.patientId }, { secretsKey: KEY }))
+    await expire(aunt.linkId)
+    expect((await f.run((tx) => getPersonalLinkView(tx, ORG, aunt.token))).closed?.resend ?? null).toBeNull()
+    await expect(f.run((tx) => resendPersonalLink(tx, ORG, aunt.token, { secretsKey: KEY }))).rejects.toMatchObject({ code: "LINK_RESEND_UNAVAILABLE" })
+  } finally {
+    configurePublicLinks(null)
+  }
+})

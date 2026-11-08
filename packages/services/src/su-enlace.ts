@@ -150,8 +150,36 @@ export interface PersonalLinkMessages {
   nothing: boolean
 }
 
+/**
+ * Por qué el enlace ya no sirve, para decirlo como es (entrega 2, acta 8): ya no le queda
+ * nada (`hecho`), venció (`vencido`), pasó la cita para la que era (`cita-pasada`) o la
+ * clínica lo quitó o lo reemplazó por otro (`quitado`).
+ */
+export type PersonalLinkClosedReason = "hecho" | "vencido" | "cita-pasada" | "quitado"
+
+/**
+ * «Enviarme uno nuevo» en un enlace vencido: por dónde le llegaría, con el destino
+ * enmascarado («•••701»), y si ya se le envió uno hoy desde su enlace (el tope: uno al
+ * día por persona y paciente, porque fuera de las 24 horas cada envío se cobra).
+ */
+export interface PersonalLinkResend {
+  channel: "whatsapp" | "correo"
+  /** «•••701» o «e•••@gmail.com»; vacío si no hay qué mostrar. */
+  to: string
+  /** Cuándo salió el que se le envió hoy; nulo si aún puede pedir uno. */
+  sentAt: string | null
+}
+
+export interface PersonalLinkClosed {
+  reason: PersonalLinkClosedReason
+  /** Solo en `vencido`, con algo pendiente, quien decide por el paciente y por dónde enviárselo. */
+  resend: PersonalLinkResend | null
+  /** En `cita-pasada`: la cita que ya pasó. */
+  appointment: PersonalLinkWhen | null
+}
+
 export interface PersonalLinkView {
-  /** `vencido`: revocado, o ya no le queda nada pendiente. */
+  /** `vencido`: revocado, o ya no le queda nada pendiente (`closed` dice cuál). */
   status: "abierto" | "vencido"
   clinicName: string
   /** Formato regional de la clínica (BCP 47): la página escribe fechas y horas con él. */
@@ -214,6 +242,8 @@ export interface PersonalLinkView {
   confirmVia: "whatsapp" | "chat" | "correo" | null
   /** B2: por dónde le llegan los recordatorios de su cita; nulo si no le llegarán. */
   remindersVia: "whatsapp" | "correo" | null
+  /** Con `status: "vencido"`: por qué y si puede pedir uno nuevo. Nulo mientras sirve. */
+  closed: PersonalLinkClosed | null
   /**
    * «Tus mensajes»: solo para quien recibe los mensajes de este paciente (quien
    * decide por él). La receta y el comprobante ya no están aquí (ADR 0156): le
@@ -500,7 +530,7 @@ export async function getPersonalLinkView(
     remindersVia: null,
     messages: null,
   }
-  if (!link.live) return empty
+  if (!link.live) return { ...empty, closed: await closedOf(tx, orgId, link) }
   const appointment = link.appointment
     ? await appointmentView(tx, orgId, link.appointment.id)
     : null
@@ -532,7 +562,7 @@ export async function getPersonalLinkView(
     !questionnaire &&
     toSchedule.length === 0 &&
     !messages
-  if (nothing) return empty
+  if (nothing) return { ...empty, closed: await closedOf(tx, orgId, link) }
   const self = link.patientId
     ? (await patientPersonId(tx, orgId, link.patientId)) === link.row.contactId
     : true
@@ -561,6 +591,7 @@ export async function getPersonalLinkView(
     another,
     confirmVia: await linkReplyVia(tx, orgId, link.row),
     remindersVia: link.handlesAppointment ? await appointmentRemindersVia(tx, orgId, link.row.contactId) : null,
+    closed: null,
     messages,
   }
 }
@@ -1687,8 +1718,17 @@ async function appointmentWords(
 async function sendLinkMessage(
   tx: Db,
   orgId: string,
-  actorUserId: string,
-  input: { patientId: string; requestId?: string | null; consentId?: string },
+  /** Nulo: lo pidió la persona desde su enlace vencido («Enviarme uno nuevo»); sale como aviso, sin nadie del equipo. */
+  actorUserId: string | null,
+  input: {
+    patientId: string
+    requestId?: string | null
+    consentId?: string
+    /** A esa persona y no a la de siempre: quien pidió uno nuevo, si sigue decidiendo por el paciente. */
+    recipientContactId?: string
+    /** El enlace vencido desde el que lo pidió: queda en la traza y cuenta para el tope del día. */
+    resentFrom?: string
+  },
   deps: { secretsKey: Buffer },
 ): Promise<PersonalLinkSent> {
   if (input.requestId) {
@@ -1717,8 +1757,9 @@ async function sendLinkMessage(
       }
     }
   }
-  const recipient = await serviceRecipient(tx, orgId, input.patientId)
+  const recipient = await serviceRecipient(tx, orgId, input.patientId, input.recipientContactId)
   const gate = { purpose: NOTICE_PURPOSE, initiative: "equipo" } as const
+  const senderKind = actorUserId ? "user" : "agent"
   let message: {
     spec: MessageSpec
     params: string[]
@@ -1769,7 +1810,7 @@ async function sendLinkMessage(
   if (route.via === "plantilla" && route.template) {
     sent = await sendTemplateOutbound(tx, orgId, deps.secretsKey, {
       conversationId: route.conversationId,
-      senderKind: "user",
+      senderKind,
       senderUserId: actorUserId,
       fromAction: true,
       name: route.template.name,
@@ -1784,7 +1825,7 @@ async function sendLinkMessage(
     const body = withLinkLine(text, spec.link, url)
     sent = await sendOutbound(tx, orgId, {
       conversationId: route.conversationId,
-      senderKind: "user",
+      senderKind,
       senderUserId: actorUserId,
       fromAction: true,
       content: {
@@ -1807,7 +1848,7 @@ async function sendLinkMessage(
   await tx.insert(auditEvent).values({
     organizationId: orgId,
     actorUserId,
-    action: "personal_link.sent",
+    action: input.resentFrom ? RESENT_ACTION : "personal_link.sent",
     entity: "message",
     entityId: sent.id,
     metadata: {
@@ -1820,9 +1861,170 @@ async function sendLinkMessage(
       message: spec.key,
       ...(input.consentId ? { consentId: input.consentId } : {}),
       ...(input.requestId ? { requestId: input.requestId } : {}),
+      ...(input.resentFrom ? { fromLinkId: input.resentFrom } : {}),
     },
   })
   return result
+}
+
+// ------------------------------------------ «Enviarme uno nuevo» (acta 8) ---
+
+/** La traza de «Enviarme uno nuevo»: cuenta para el tope del día y dice cuándo salió. */
+const RESENT_ACTION = "personal_link.resent"
+
+/** «•••701» de un celular o «e•••@gmail.com» de un correo: lo justo para reconocerlo. */
+export function maskedAddress(channel: "whatsapp" | "correo", value: string | null): string {
+  if (!value) return ""
+  if (channel === "whatsapp") {
+    const digits = value.replace(/\D/g, "")
+    return digits.length >= 3 ? `•••${digits.slice(-3)}` : ""
+  }
+  const [user, domain] = value.split("@")
+  return user && domain ? `${user.slice(0, 1)}•••@${domain}` : ""
+}
+
+/** El que se le envió hoy (en el día de la clínica) a esa persona por ese paciente, o el que salió desde ese enlace. */
+async function resentAt(
+  tx: Db,
+  orgId: string,
+  of: { contactId: string; patientId: string } | { fromLinkId: string },
+): Promise<{ at: Date; channel: "whatsapp" | "correo"; recipientContactId: string } | null> {
+  const { timezone } = await findOrgLocale(tx, orgId)
+  const [row] = await tx
+    .select({ at: auditEvent.createdAt, metadata: auditEvent.metadata })
+    .from(auditEvent)
+    .where(
+      and(
+        eq(auditEvent.organizationId, orgId),
+        eq(auditEvent.action, RESENT_ACTION),
+        "fromLinkId" in of
+          ? sql`${auditEvent.metadata}->>'fromLinkId' = ${of.fromLinkId}`
+          : and(
+              sql`${auditEvent.metadata}->>'recipientContactId' = ${of.contactId}`,
+              sql`${auditEvent.metadata}->>'patientId' = ${of.patientId}`,
+              sql`${auditEvent.createdAt} >= (date_trunc('day', now() at time zone ${timezone}) at time zone ${timezone})`,
+            ),
+      ),
+    )
+    .orderBy(desc(auditEvent.createdAt))
+    .limit(1)
+  if (!row) return null
+  const metadata = (row.metadata ?? {}) as { channel?: string; recipientContactId?: string }
+  return {
+    at: row.at,
+    channel: metadata.channel === "email" ? "correo" : "whatsapp",
+    recipientContactId: metadata.recipientContactId ?? "",
+  }
+}
+
+async function addressOf(tx: Db, orgId: string, contactId: string, channel: "whatsapp" | "correo"): Promise<string> {
+  if (!contactId) return ""
+  const [row] = await tx
+    .select({ phone: contact.phone, email: contact.email })
+    .from(contact)
+    .where(and(eq(contact.organizationId, orgId), eq(contact.id, contactId)))
+    .limit(1)
+  return maskedAddress(channel, channel === "whatsapp" ? (row?.phone ?? null) : (row?.email ?? null))
+}
+
+/**
+ * Por dónde le llegaría uno nuevo: solo a quien decide por el paciente, por la regla de
+ * siempre (la de «Enviarle su enlace»). Nulo si no hay por dónde, si pidió no recibir
+ * mensajes o si ya no decide por él: la página le dice que escriba.
+ */
+async function resendOffer(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<PersonalLinkResend | null> {
+  if (!link.patientId || !link.decides) return null
+  if ((await personalLinkUrl(tx, orgId, "0".repeat(64))) === null) return null
+  try {
+    await serviceRecipient(tx, orgId, link.patientId, link.row.contactId)
+  } catch {
+    return null
+  }
+  const spec = await currentCatalogMessage(tx, orgId, PERSONAL_LINK_MESSAGE_KEY)
+  const route = await previewRoute(tx, orgId, link.row.contactId, spec, { purpose: NOTICE_PURPOSE, initiative: "equipo" })
+  if ("cause" in route) return null
+  const channel = route.channel === "email" ? "correo" : "whatsapp"
+  const today = await resentAt(tx, orgId, { contactId: link.row.contactId, patientId: link.patientId })
+  return { channel, to: await addressOf(tx, orgId, link.row.contactId, channel), sentAt: today?.at.toISOString() ?? null }
+}
+
+/** La cita del enlace ya pasó y era lo que lo mantenía vivo. */
+async function ownAppointmentPassed(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<PersonalLinkWhen | null> {
+  if (!link.row.appointmentId) return null
+  const [row] = await tx
+    .select({ startsAt: appointment.startsAt, timeZone: branch.timezone })
+    .from(appointment)
+    .innerJoin(branch, eq(branch.id, appointment.branchId))
+    .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, link.row.appointmentId)))
+    .limit(1)
+  if (!row || row.startsAt.getTime() > Date.now() || row.startsAt <= link.row.expiresAt) return null
+  return { startsAt: row.startsAt.toISOString(), timeZone: row.timeZone ?? (await findOrgLocale(tx, orgId)).timezone }
+}
+
+/** Le queda algo por hacer si el enlace siguiera vivo: si no, pedir otro no sirve de nada. */
+async function pendingIfFresh(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<boolean> {
+  if (!link.patientId || !link.decides) return false
+  const fresh: ResolvedPersonalLink = { ...link, expired: false }
+  if (await missingOf(tx, orgId, fresh)) return true
+  if (await healthPendingOf(tx, orgId, fresh)) return true
+  if ((await budgetsOf(tx, orgId, fresh)).length > 0) return true
+  if ((await consentsOf(tx, orgId, fresh)).length > 0) return true
+  return (await schedulableItemsOf(tx, orgId, link.patientId)).length > 0
+}
+
+/** Por qué ya no sirve (la página lo dice con su `EmptyState`) y si puede pedir uno nuevo. */
+async function closedOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<PersonalLinkClosed> {
+  const none = { resend: null, appointment: null }
+  if (!link.live) {
+    // Si lo dejó sin efecto «Enviarme uno nuevo», se le dice cuándo salió el nuevo; si no, lo quitó la clínica.
+    const resent = await resentAt(tx, orgId, { fromLinkId: link.row.id })
+    if (!resent) return { reason: "quitado", ...none }
+    return {
+      reason: "vencido",
+      resend: {
+        channel: resent.channel,
+        to: await addressOf(tx, orgId, resent.recipientContactId, resent.channel),
+        sentAt: resent.at.toISOString(),
+      },
+      appointment: null,
+    }
+  }
+  if (!link.expired) return { reason: "hecho", ...none }
+  const passed = await ownAppointmentPassed(tx, orgId, link)
+  if (passed) return { reason: "cita-pasada", resend: null, appointment: passed }
+  if (!(await pendingIfFresh(tx, orgId, link))) return { reason: "hecho", ...none }
+  return { reason: "vencido", resend: await resendOffer(tx, orgId, link), appointment: null }
+}
+
+/**
+ * «Enviarme uno nuevo» (acta 8): desde un enlace vencido al que le queda algo por hacer,
+ * quien decide por el paciente pide otro y le llega por su canal registrado, nunca a otro
+ * número. Uno al día por persona y paciente: fuera de las 24 horas cada envío se cobra. El
+ * enlace se bloquea mientras se envía, así un doble toque no manda dos. Responde por dónde
+ * salió; está encolado: la página dice «Te lo enviamos», nunca que llegó.
+ */
+export async function resendPersonalLink(
+  tx: Db,
+  orgId: string,
+  token: string,
+  deps: { secretsKey: Buffer },
+): Promise<PersonalLinkResend> {
+  const link = await resolvePersonalLink(tx, orgId, token, true)
+  const closed = await closedOf(tx, orgId, link)
+  if (closed.resend?.sentAt) {
+    throw new ServiceError("LINK_RESEND_LIMIT", 409, "Ya te enviamos uno nuevo hoy. Búscalo en tu chat o escríbenos.")
+  }
+  if (closed.reason !== "vencido" || !closed.resend || !link.patientId) {
+    throw new ServiceError("LINK_RESEND_UNAVAILABLE", 409, "Desde este enlace no podemos enviarte otro. Escríbenos y te ayudamos.")
+  }
+  await sendLinkMessage(
+    tx,
+    orgId,
+    null,
+    { patientId: link.patientId, recipientContactId: link.row.contactId, resentFrom: link.row.id },
+    deps,
+  )
+  return { ...closed.resend, sentAt: new Date().toISOString() }
 }
 
 export interface PersonalLinkShown {
