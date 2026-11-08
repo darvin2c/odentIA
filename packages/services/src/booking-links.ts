@@ -1057,7 +1057,7 @@ async function linkSlotRules(
   const link = await requireLiveLink(tx, orgId, token, false, { ownAppointment: true })
   const forTest = await personIsTest(tx, orgId, link.row.contactId)
   if (another) {
-    if (!(await bookAnotherOf(tx, orgId, link))?.allowed) throw anotherNotAllowed()
+    await requireBookAnother(tx, orgId, link)
     return { serviceId: null, durationMin: null, forTest, currentProfessionalUserId: null }
   }
   // Al cambiar su cita valen las reglas de su cita, aunque el enlace también ofrezca reservar otra.
@@ -1218,7 +1218,9 @@ export interface BookAnother {
 
 /**
  * «Reservar otra» en «Tu cita»: solo quien decide por el paciente (y lo maneja), con el
- * enlace vigente y por debajo del tope de citas por venir. Nulo si no le corresponde.
+ * enlace vigente, mostrando una cita por venir que sigue en pie y por debajo del tope de
+ * citas por venir. Nulo si no le corresponde: un enlace que no muestra una cita (para
+ * completar datos o firmar) no reserva por esta vía.
  */
 export async function bookAnotherOf(
   tx: Db,
@@ -1226,12 +1228,20 @@ export async function bookAnotherOf(
   link: ResolvedPersonalLink,
 ): Promise<BookAnother | null> {
   if (!link.patientId || !link.decides || !link.handlesAppointment || link.expired) return null
+  if (!link.appointment || link.appointment.status === "cancelada") return null
   const [row] = await tx
     .select({ n: sql<number>`count(*)::int` })
     .from(appointment)
     .where(upcomingAppointmentOf(orgId, link.patientId, new Date()))
   const upcoming = row?.n ?? 0
   return { upcoming, cap: UPCOMING_APPOINTMENTS_CAP, allowed: upcoming < UPCOMING_APPOINTMENTS_CAP }
+}
+
+/** «Reservar otra» le corresponde y le queda cupo; si no, dice cuál de las dos falta. */
+async function requireBookAnother(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<void> {
+  const another = await bookAnotherOf(tx, orgId, link)
+  if (!another) throw linkExpired()
+  if (!another.allowed) throw anotherNotAllowed()
 }
 
 function anotherNotAllowed(): ServiceError {
@@ -1690,7 +1700,7 @@ export async function reserveBookingLink(
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtext(${`su-enlace-agenda:${orgId}:${link.patientId}`}))`,
       )
-    if (!(await bookAnotherOf(tx, orgId, link))?.allowed) throw anotherNotAllowed()
+    await requireBookAnother(tx, orgId, link)
   } else if (!forTreatment) {
     if (link.row.booking && link.row.usedAt)
       throw new ServiceError("BOOKING_LINK_USED", 409, "Con este enlace ya se reservó una cita")
@@ -1738,16 +1748,24 @@ export async function reserveBookingLink(
     // Se le confirma en la página y, si salió de una conversación, por ese chat (`tellConversation`): no se repite.
     notice: false,
   })
-  await tx
-    .update(appointmentBookingLink)
-    // Otra cita o lo aceptado no gastan la reserva que el enlace ofrecía.
-    .set({ appointmentId: created.id, ...(forTreatment || another ? {} : { usedAt: new Date() }) })
-    .where(
-      and(
-        eq(appointmentBookingLink.organizationId, orgId),
-        eq(appointmentBookingLink.id, link.row.id),
-      ),
-    )
+  // Otra cita o lo aceptado no gastan la reserva que el enlace ofrecía, ni reemplazan «Tu cita»:
+  // la que ya tiene sigue siendo la suya («la que ya tienes sigue igual»). Solo si el enlace
+  // no muestra ninguna propia, la nueva pasa a ser la suya.
+  const keepsOwn =
+    (forTreatment || another) &&
+    link.appointment !== null &&
+    link.appointment.id === link.row.appointmentId &&
+    isChangeable(link.appointment)
+  if (!keepsOwn)
+    await tx
+      .update(appointmentBookingLink)
+      .set({ appointmentId: created.id, ...(forTreatment || another ? {} : { usedAt: new Date() }) })
+      .where(
+        and(
+          eq(appointmentBookingLink.organizationId, orgId),
+          eq(appointmentBookingLink.id, link.row.id),
+        ),
+      )
   // La cita que esperaba su sí en el chat ya no se reserva: su «sí» de después reservaría otra.
   if (link.row.conversationId) await expireBookingProposals(tx, orgId, link.row.conversationId)
   // Quien abrió el enlace (la madre que reserva para su hijo) es quien conversó: su conversación pasa a «Gestiona» (ADR 0085).

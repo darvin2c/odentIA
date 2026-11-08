@@ -360,13 +360,34 @@ async function budgetsOf(
     (budget) => budget.status !== "borrador" && budget.awaitsAnswer,
   )
   if (budgets.length === 0) return []
-  // `link.decides` ya dijo que es la propia persona o su representante.
-  const context = await portalBudgetContext(
-    tx,
-    orgId,
-    budgets.map((budget) => budget.id),
-    true,
+  // El último enviado primero: es el que abre `abre=presupuesto` sin `id` (el botón fijo de la
+  // plantilla aprobada). Lo enviado se sabe por su traza (`financial_document.sent`); lo que nunca
+  // se envió (entregado en mano) va después, el último presentado primero.
+  const ids = budgets.map((budget) => budget.id)
+  const sentRows = await tx
+    .select({
+      id: sql<string>`${auditEvent.metadata}->>'documentId'`,
+      at: sql<Date>`max(${auditEvent.createdAt})`.mapWith(auditEvent.createdAt),
+    })
+    .from(auditEvent)
+    .where(
+      and(
+        eq(auditEvent.organizationId, orgId),
+        eq(auditEvent.action, "financial_document.sent"),
+        sql`${auditEvent.metadata}->>'documentType' = 'budget'`,
+        inArray(sql<string>`${auditEvent.metadata}->>'documentId'`, ids),
+      ),
+    )
+    .groupBy(sql`${auditEvent.metadata}->>'documentId'`)
+  const sentAt = new Map(sentRows.map((row) => [row.id, row.at.getTime()]))
+  const presented = (budget: (typeof budgets)[number]) =>
+    (budget.presentedAt ?? budget.createdAt).getTime()
+  budgets.sort(
+    (a, b) =>
+      (sentAt.get(b.id) ?? -1) - (sentAt.get(a.id) ?? -1) || presented(b) - presented(a),
   )
+  // `link.decides` ya dijo que es la propia persona o su representante.
+  const context = await portalBudgetContext(tx, orgId, ids, true)
   return budgets.map((budget) => toPortalBudget(budget, context))
 }
 
@@ -427,7 +448,8 @@ async function consentsOf(
         isNull(consentDocument.personSignedAt),
       ),
     )
-    .orderBy(asc(consentDocument.createdAt))
+    // El último enviado primero: es el que abre `abre=firma` sin `id` (el botón fijo de la plantilla).
+    .orderBy(desc(consentDocument.linkSentAt), desc(consentDocument.createdAt))
   if (rows.length === 0) return []
   // Quién firma y qué le falta no cambia de un consentimiento a otro.
   const why = await remoteSignBlock(tx, orgId, link.patientId, link.row.contactId)
@@ -1804,7 +1826,13 @@ async function sendLinkMessage(
     deps,
   )
   // En el mensaje no queda el token: lo pone el worker al enviarlo. Abre lo suyo.
-  const url = await personalLinkMessageUrl(tx, orgId, link.linkId, message.abre)
+  const url = await personalLinkMessageUrl(
+    tx,
+    orgId,
+    link.linkId,
+    message.abre,
+    message.abre === "firma" ? input.consentId : null,
+  )
   if (!url) throw new ServiceError("NO_PUBLIC_URL", 409, NO_ADDRESS)
   let sent: { id: string }
   if (route.via === "plantilla" && route.template) {

@@ -34,6 +34,8 @@ import { grantResponsibility } from "./responsibilities.js"
 import { setProfessionalSchedule } from "./availability.js"
 import { hidePersonalLinkRefs, personalLinkRef, personalLinkToken, resolvePersonalLinkRefs } from "./personal-link-token.js"
 import { createBudget, deliverBudget } from "./budgets.js"
+import { sendBudget } from "./budget-send.js"
+import type { Storage } from "./storage.js"
 import {
   confirmLinkSignedConsent,
   createConsentDocument,
@@ -1157,8 +1159,17 @@ it("«Firma tu consentimiento»: abre directo la hoja, no dice nada clínico y, 
       .select({ body: message.body })
       .from(message)
       .where(and(eq(message.conversationId, ana.conversationId), eq(message.direction, "out")))
-    expect(text?.body).toMatch(/Leer y firmar: https:\/\/norte\.odentia\.test\/pendientes\?abre=firma&token=\{\{su-enlace:[0-9a-f-]{36}\}\}$/)
+    // Lleva cuál: con otro enviado antes o después, abre este.
+    expect(text?.body).toContain(`/pendientes?abre=firma&id=${ana.consentId}&token={{su-enlace:`)
+    expect(text?.body).toMatch(/&token=\{\{su-enlace:[0-9a-f-]{36}\}\}$/)
     expect(text?.body).not.toContain("Exodoncia")
+    // Sin `id` (el botón fijo de la plantilla) abre el último enviado, no el más antiguo.
+    const later = await f.run((tx) =>
+      createConsentDocument(tx, ORG, f.actor, { templateId: ana.templateId, patientId: ana.patientId, procedureRef: "Exodoncia de la pieza 48" }),
+    )
+    await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, later.id))
+    const hers = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: ana.personId, patientId: ana.patientId }, { secretsKey: KEY }))
+    expect((await f.run((tx) => getPersonalLinkView(tx, ORG, hers.token))).consents.map((row) => row.id)).toEqual([later.id, ana.consentId])
   } finally {
     configurePublicLinks(null)
   }
@@ -1189,6 +1200,49 @@ it("«Ver y responder»: el presupuesto aparece en el mismo enlace, se responde 
   // «Elegir horario» sigue teniendo dónde: las sedes no se van al responder.
   expect(view.branches.length).toBeGreaterThan(0)
   expect(after.branches.map((row) => row.id)).toEqual(view.branches.map((row) => row.id))
+})
+
+it("«Presupuesto listo»: abre ese presupuesto y no una reserva sin usar; sin `id`, el último enviado", async () => {
+  configurePublicLinks({ webURL: "https://app.odentia.test", cookieDomain: "odentia.test" })
+  const f = await clinicalFixture()
+  const personId = (await f.run((tx) => patientPersonId(tx, ORG, f.patient.id)))!
+  await ownerDb.update(contact).set({ email: `persona-${randomUUID().slice(0, 8)}@example.com` }).where(eq(contact.id, personId))
+  const [mailbox] = await ownerDb
+    .insert(channelConnection)
+    .values({
+      organizationId: ORG, channel: "email", provider: "gmail", displayName: "Correo de la clínica",
+      externalId: `clinica-${randomUUID().slice(0, 8)}@example.com`, configEncrypted: "prueba", webhookSecret: "prueba", status: "active",
+    })
+    .returning({ id: channelConnection.id })
+  const storage = {
+    putAttachment: async ({ orgId, conversationId, bytes }: { orgId: string; conversationId: string; bytes: Uint8Array }) => ({
+      objectKey: `${orgId}/${conversationId}/${randomUUID()}.pdf`, mimeType: "application/pdf", filename: "presupuesto.pdf", size: bytes.byteLength,
+    }),
+  } as unknown as Storage
+  try {
+    // Sofi le dio su enlace para reservar y no reservó.
+    const link = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: personId, patientId: f.patient.id, booking: true }, { secretsKey: KEY }))
+    const first = await f.run((tx) => addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }))
+    const budgetA = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [first.id] }))
+    await f.run((tx) => deliverBudget(tx, ...f.args, budgetA.id))
+    const second = await f.run((tx) => addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }))
+    const budgetB = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [second.id] }))
+    const sent = await f.run((tx) =>
+      sendBudget(tx, ORG, { userId: f.actor }, { patientId: f.patient.id, budgetId: budgetB.id, requestId: randomUUID() }, { storage, secretsKey: KEY }),
+    )
+    const [out] = await ownerDb
+      .select({ body: message.body })
+      .from(message)
+      .where(and(eq(message.conversationId, sent.conversationId), eq(message.direction, "out")))
+    expect(out?.body).toContain(`/pendientes?abre=presupuesto&id=${budgetB.id}&token={{su-enlace:${link.linkId}}}`)
+    // El botón fijo de la plantilla (`/reserva`) ya no muestra «Elige tu cita»: lleva al presupuesto.
+    const view = await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))
+    expect(view.booking).toBeNull()
+    expect(view.budgets.map((row) => row.id)).toEqual([budgetB.id, budgetA.id])
+  } finally {
+    await ownerDb.update(channelConnection).set({ status: "disabled" }).where(eq(channelConnection.id, mailbox!.id))
+    configurePublicLinks(null)
+  }
 })
 
 it("revocado no sirve, y el enlace de un correo (/c/) solo lleva a «Su enlace» con esa cita", async () => {
@@ -1293,19 +1347,23 @@ it("«Reservar otra»: quien decide reserva otra cita desde «Tu cita», hasta e
       rules: Array.from({ length: 7 }, (_, weekday) => ({ weekday, startMin: 8 * 60, endMin: 20 * 60 })),
     }),
   )
-  const startsAt = new Date(Date.now() + 5 * 86_400_000)
-  await ownerDb.insert(appointment).values({
-    organizationId: ORG, branchId: site!.id, patientId: f.patient.id, professionalUserId: f.actor, roomId: room.id,
-    startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30,
-  })
-  // Su enlace para ver su cita: no ofrece reservar, pero sí otra cita con tope.
-  const link = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: personId, patientId: f.patient.id, booking: false }, { secretsKey: KEY }))
-  const view = await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))
-  expect(view).toMatchObject({ booking: null, another: { upcoming: 1, cap: 2, allowed: true }, toSchedule: [], confirmVia: null, remindersVia: null })
-  expect(view.branches.map((row) => row.id)).toContain(site!.id)
   const from = new Date(Date.now() + 2 * 86_400_000)
   from.setUTCHours(5, 0, 0, 0)
   const range = { branchId: site!.id, from: from.toISOString(), to: new Date(from.getTime() + 86_400_000).toISOString() }
+  // Sin una cita a la vista, «otra» no reserva: un enlace para completar datos o firmar no ofrece reservar.
+  const bare = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: personId, patientId: f.patient.id, booking: false }, { secretsKey: KEY }))
+  expect((await f.run((tx) => getPersonalLinkView(tx, ORG, bare.token))).another).toBeNull()
+  await expect(f.run((tx) => listBookingLinkSlots(tx, ORG, bare.token, { ...range, another: true }))).rejects.toMatchObject({ code: "BOOKING_LINK_EXPIRED" })
+  const startsAt = new Date(Date.now() + 5 * 86_400_000)
+  const [own] = await ownerDb.insert(appointment).values({
+    organizationId: ORG, branchId: site!.id, patientId: f.patient.id, professionalUserId: f.actor, roomId: room.id,
+    startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30,
+  }).returning({ id: appointment.id })
+  // Su enlace para ver su cita: no ofrece reservar, pero sí otra cita con tope.
+  const link = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: personId, patientId: f.patient.id, appointmentId: own!.id, booking: false }, { secretsKey: KEY }))
+  const view = await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))
+  expect(view).toMatchObject({ booking: null, another: { upcoming: 1, cap: 2, allowed: true }, toSchedule: [], confirmVia: null, remindersVia: null })
+  expect(view.branches.map((row) => row.id)).toContain(site!.id)
   // Sin «otra», el enlace no reserva.
   const { slots } = await f.run((tx) => listBookingLinkSlots(tx, ORG, link.token, { ...range, another: true }))
   const [first, second] = slots
@@ -1313,7 +1371,12 @@ it("«Reservar otra»: quien decide reserva otra cita desde «Tu cita», hasta e
   const pick = (slot: typeof first) => ({ branchId: site!.id, startsAt: slot.startsAt, professionalUserId: slot.professionalUserId, ...(slot.roomId ? { roomId: slot.roomId } : {}) })
   await expect(f.run((tx) => reserveBookingLink(tx, ORG, link.token, pick(first)))).rejects.toMatchObject({ code: "BOOKING_LINK_EXPIRED" })
   await f.run((tx) => reserveBookingLink(tx, ORG, link.token, { ...pick(first), another: true }))
-  expect((await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).another).toEqual({ upcoming: 2, cap: 2, allowed: false })
+  const after = await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))
+  expect(after.another).toEqual({ upcoming: 2, cap: 2, allowed: false })
+  // «La que ya tienes sigue igual»: la otra, aunque sea antes, no pasa a ser «Tu cita».
+  expect(after.appointment?.startsAt).toBe(startsAt.toISOString())
+  const [stored] = await ownerDb.select({ appointmentId: appointmentBookingLink.appointmentId }).from(appointmentBookingLink).where(eq(appointmentBookingLink.id, link.linkId))
+  expect(stored?.appointmentId).toBe(own!.id)
   // Llegó al tope: la tercera la agenda recepción.
   await expect(f.run((tx) => reserveBookingLink(tx, ORG, link.token, { ...pick(second), another: true }))).rejects.toMatchObject({
     code: "BOOKING_ANOTHER_LIMIT",

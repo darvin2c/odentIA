@@ -74,7 +74,7 @@ export type PersonalLinkOpens = (typeof PERSONAL_LINK_OPENS)[number]
 export interface PersonalLinkSearch {
   token?: string
   abre?: PersonalLinkOpens
-  /** Cuál consentimiento o presupuesto, al tocarlo desde la lista; sin él, el más antiguo. */
+  /** Cuál consentimiento o presupuesto (desde la lista o el mensaje); sin él, el último enviado. */
   id?: string
   /** La hora que eligió en el chat (`/reserva`). */
   sede?: string

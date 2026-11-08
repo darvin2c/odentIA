@@ -76,7 +76,8 @@ export function panelOrigin(product: ClinicalProduct = "dental", config: PublicL
 /**
  * Lo que abre directo un enlace (entrega 2, «Un enlace por cosa»): el destino va en la
  * dirección y no en la base, porque el token es uno por persona y paciente y cada envío
- * lo renueva. `firma` abre el consentimiento más antiguo por firmar.
+ * lo renueva. `firma` y `presupuesto` abren el que se envió (`id` en la dirección escrita) o,
+ * sin `id` (el botón fijo de una plantilla), el último enviado.
  */
 export const PERSONAL_LINK_OPENS = ["firma", "presupuesto", "cita", "datos", "mensajes"] as const
 export type PersonalLinkOpens = (typeof PERSONAL_LINK_OPENS)[number]
@@ -104,12 +105,19 @@ export function isPersonalLinkOpens(value: unknown): value is PersonalLinkOpens 
 /**
  * La dirección de «Su enlace» con su token, que va siempre al final: en el botón de una
  * plantilla de WhatsApp es el único dato (`{{1}}`) y la referencia `{{su-enlace:…}}` de un
- * mensaje se escribe tal cual, sin codificar.
+ * mensaje se escribe tal cual, sin codificar. Con `id`, `firma` y `presupuesto` abren ese
+ * consentimiento o ese presupuesto, no el último enviado.
  */
-export function personalLinkAddress(origin: string, token: string, abre: PersonalLinkTarget = "reserva"): string {
+export function personalLinkAddress(
+  origin: string,
+  token: string,
+  abre: PersonalLinkTarget = "reserva",
+  id?: string | null,
+): string {
   if (abre === "reserva") return `${origin}/reserva?token=${token}`
   if (abre === "pendientes") return `${origin}/pendientes?token=${token}`
-  return `${origin}/pendientes?abre=${abre}&token=${token}`
+  const which = id && (abre === "firma" || abre === "presupuesto") ? `&id=${encodeURIComponent(id)}` : ""
+  return `${origin}/pendientes?abre=${abre}${which}&token=${token}`
 }
 
 /** El subdominio y el producto de una clínica (sin perfil, las de hoy son dentales). */
@@ -139,9 +147,10 @@ export async function personalLinkUrl(
   orgId: string,
   token: string,
   abre: PersonalLinkTarget = "reserva",
+  id?: string | null,
 ): Promise<string | null> {
   const origin = await clinicOriginOf(tx, orgId)
-  return origin ? personalLinkAddress(origin, token, abre) : null
+  return origin ? personalLinkAddress(origin, token, abre, id) : null
 }
 
 /**
@@ -153,8 +162,10 @@ export async function personalLinkMessageUrl(
   orgId: string,
   linkId: string,
   abre: PersonalLinkTarget = "reserva",
+  /** El consentimiento o el presupuesto que abre (`firma`, `presupuesto`). */
+  id?: string | null,
 ): Promise<string | null> {
-  return personalLinkUrl(tx, orgId, personalLinkRef(linkId), abre)
+  return personalLinkUrl(tx, orgId, personalLinkRef(linkId), abre, id)
 }
 
 /**
