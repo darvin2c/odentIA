@@ -1072,7 +1072,7 @@ async function deliverPortalAccess(
   orgId: string,
   actorUserId: string,
   input: { patientId: string; contactId: string; delivery: "qr" | "whatsapp" },
-  deliver: { linkUrl: (rawLinkToken: string) => string; pinInChat?: boolean },
+  deliver: { linkUrl: (rawLinkToken: string) => string },
 ): Promise<{ activationUrlOnce: string | null; pinOnce: string; sentTo: string | null }> {
   if (input.delivery === "qr") {
     const issued = await issuePortalActivationQr(tx, orgId, actorUserId, {
@@ -1151,18 +1151,9 @@ export async function resendPortalAccess(
   orgId: string,
   actorUserId: string,
   grantId: string,
-  /**
-   * `staffSees: false` (recepción, ADR 0156): solo por su WhatsApp, el código en
-   * otro mensaje a la persona, y ni el enlace ni el código vuelven en la respuesta.
-   */
-  input: { delivery: "qr" | "whatsapp"; staffSees?: boolean },
+  input: { delivery: "qr" | "whatsapp" },
   deliver: { linkUrl: (rawLinkToken: string) => string },
 ): Promise<PortalAccessGiven> {
-  const staffSees = input.staffSees !== false
-  if (!staffSees && input.delivery !== "whatsapp") {
-    const message = "Mostrar el QR es de quien puede ver la historia: envíaselo por su WhatsApp"
-    throw new ServiceError("PORTAL_FORBIDDEN", 403, message, { delivery: message })
-  }
   const policy = await getPortalPolicy(tx, orgId)
   if (!policy.enabled) throw portalDisabled()
   const [grant] = await tx
@@ -1197,7 +1188,7 @@ export async function resendPortalAccess(
     orgId,
     actorUserId,
     { patientId: grant.patientId, contactId: grant.contactId, delivery: input.delivery },
-    { ...deliver, ...(staffSees ? {} : { pinInChat: true }) },
+    deliver,
   )
   const pending = await tx
     .select({ id: crmTask.id })
@@ -1216,12 +1207,8 @@ export async function resendPortalAccess(
     patientId: grant.patientId,
     contactId: grant.contactId,
     delivery: input.delivery,
-    ...(staffSees ? {} : { pinInChat: true }),
   })
-  // A recepción no le vuelve ni el enlace ni el código: ya le llegaron a la persona.
-  return staffSees
-    ? { grantId: grant.id, ...delivered }
-    : { grantId: grant.id, activationUrlOnce: null, pinOnce: null, sentTo: delivered.sentTo }
+  return { grantId: grant.id, ...delivered }
 }
 
 /**

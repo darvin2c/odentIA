@@ -21,11 +21,9 @@ import { portalAccessInput, portalIdInput, portalPolicyInput } from "./portal-in
  * portal) y su configuración. Un solo paso (decisión 9, ADR 0037): «Dar
  * acceso», «Enviar nuevo enlace» y «Quitar acceso».
  * - Dar el acceso (comprobar su identidad), mostrar el QR, decir el código y
- *   quitarlo es de quien puede ver la historia (`clinical.read`: la dueña, el
- *   administrador, el odontólogo o el médico; ADR 0156): el portal entrega toda
- *   su historia documental. Recepción (`patients.write`) solo envía el enlace de
- *   un acceso ya dado por su WhatsApp, con el código en otro mensaje a la
- *   persona: nunca le llegan a su pantalla.
+ *   quitarlo es de quien edita la ficha (`patients.write`: recepción) o ve la
+ *   historia (`clinical.read`: la dueña, el administrador, el odontólogo o el
+ *   médico). Todos hacen lo mismo.
  * - Lo que verá no lo elige quien da el acceso (ADR 0156): todo lo suyo, con el
  *   límite de la clínica en Configuración.
  * - El token crudo solo viaja en el QR (una vez) o en el mensaje a la persona;
@@ -42,8 +40,7 @@ export function createPortalRoute(deps: Pick<CrmDeps, "db"> & { webURL: string }
   const DENIED: Record<string, string> = {
     "settings.read": "El portal del paciente lo configura quien administra la clínica",
     "settings.write": "El portal del paciente lo configura quien administra la clínica",
-    "patients.write": "El acceso de un paciente al portal lo gestiona quien puede editar su ficha",
-    "clinical.read": "El acceso al portal lo da quien puede ver la historia: el portal muestra sus documentos",
+    "patients.write": "El acceso de un paciente al portal lo gestiona quien puede editar su ficha o ver su historia",
   }
 
   function deny(c: Context, permission: string) {
@@ -75,14 +72,13 @@ export function createPortalRoute(deps: Pick<CrmDeps, "db"> & { webURL: string }
     return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => upsertPortalPolicy(tx, orgId, userId, parsed.data)))
   })
 
-  /** Quien ve la historia da el acceso; recepción solo lo envía por WhatsApp. */
-  const gives = (role: string) => canAccess(role, "clinical.read")
-  const sends = (role: string) => gives(role) || canAccess(role, "patients.write")
+  /** Recepción, la dueña, el administrador y el odontólogo o el médico: todos lo mismo. */
+  const manages = (role: string) => canAccess(role, "patients.write") || canAccess(role, "clinical.read")
 
   // La fila de acceso de la persona y a quién se le puede dar.
   app.get("/access", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
-    if (!sends(memberRole)) return deny(c, "clinical.read")
+    if (!manages(memberRole)) return deny(c, "patients.write")
     const query = z.object({ patientId: z.uuid() }).safeParse(c.req.query())
     if (!query.success) return validationError(c, query.error.issues)
     return runService(c, 200, async () => ({
@@ -95,7 +91,7 @@ export function createPortalRoute(deps: Pick<CrmDeps, "db"> & { webURL: string }
 
   app.post("/access", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!gives(memberRole)) return deny(c, "clinical.read")
+    if (!manages(memberRole)) return deny(c, "patients.write")
     const parsed = portalAccessInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const url = await linkUrl(orgId)
@@ -106,25 +102,19 @@ export function createPortalRoute(deps: Pick<CrmDeps, "db"> & { webURL: string }
     )
   })
 
-  // «Enviar nuevo enlace»: para volver a entrar, sin volver a comprobar su identidad. Recepción
-  // solo por su WhatsApp, con el código en otro mensaje a la persona: nada vuelve a su pantalla.
+  // «Enviar nuevo enlace»: para volver a entrar, sin volver a comprobar su identidad.
   app.post("/access/:id/resend", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!sends(memberRole)) return deny(c, "clinical.read")
+    if (!manages(memberRole)) return deny(c, "patients.write")
     const params = portalIdInput.safeParse(c.req.param())
     if (!params.success) return validationError(c, params.error.issues)
     const parsed = z.strictObject({ delivery: z.enum(["qr", "whatsapp"]) }).safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    const staffSees = gives(memberRole)
-    if (!staffSees && parsed.data.delivery !== "whatsapp") {
-      const message = "Mostrar el QR es de quien puede ver la historia: envíaselo por su WhatsApp"
-      return c.json(errorBody(c, "FORBIDDEN", message, { delivery: message }), 403)
-    }
     const url = await linkUrl(orgId)
     if (!url) return c.json(errorBody(c, "NOT_FOUND", "Organización no disponible"), 404)
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        resendPortalAccess(tx, orgId, userId, params.data.id, { ...parsed.data, staffSees }, { linkUrl: url }),
+        resendPortalAccess(tx, orgId, userId, params.data.id, parsed.data, { linkUrl: url }),
       ),
     )
   })
@@ -138,7 +128,7 @@ export function createPortalRoute(deps: Pick<CrmDeps, "db"> & { webURL: string }
   // «Quitar acceso» cierra todo: sesiones, llaves y enlaces.
   app.post("/access/:id/revoke", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!gives(memberRole)) return deny(c, "clinical.read")
+    if (!manages(memberRole)) return deny(c, "patients.write")
     const params = portalIdInput.safeParse(c.req.param())
     if (!params.success) return validationError(c, params.error.issues)
     return runService(c, 200, () =>

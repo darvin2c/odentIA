@@ -671,8 +671,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo le doy acceso al portal?",
-        a: "Lo da quien puede ver su historia (el odontólogo, el administrador o la dueña), porque el portal le muestra sus documentos. En el «…» de su página, «Portal del paciente» (también en Datos › Enlace y portal), «Dar acceso al portal»: quién entra (la persona, o su representante si es menor), comprobaste su identidad comparando el número de su documento con el que tiene en la mano, y cómo le llega (QR si está aquí, o su WhatsApp si te escribió en las últimas 24 horas). Lo que verá no se elige: todo lo suyo que la clínica deja ver. El código de 6 dígitos se lo dices tú, en persona o por llamada: nunca va con el enlace. Recepción no da el acceso: cuando ya lo tiene, le envía el enlace por su WhatsApp y el código le llega en otro mensaje, sin verlo. Su enlace es otra cosa: lo que tiene pendiente (su cita, sus datos, su presupuesto, lo que tiene por firmar) sin crear una cuenta.",
-        forms: ["recepcion no puede dar acceso al portal", "quien da acceso al portal"],
+        a: "Lo puede dar recepción, el odontólogo, el administrador o la dueña. En el «…» de su página, «Portal del paciente» (también en Datos › Enlace y portal), «Dar acceso al portal»: quién entra (la persona, o su representante si es menor), comprobaste su identidad comparando el número de su documento con el que tiene en la mano, y cómo le llega (QR si está aquí, o su WhatsApp si te escribió en las últimas 24 horas). Lo que verá no se elige: todo lo suyo que la clínica deja ver. El código de 6 dígitos se lo dices tú, en persona o por llamada: nunca va con el enlace. Su enlace es otra cosa: lo que tiene pendiente (su cita, sus datos, su presupuesto, lo que tiene por firmar) sin crear una cuenta.",
+        forms: ["recepcion puede dar acceso al portal", "quien da acceso al portal"],
       },
       {
         q: "¿Qué ve el paciente en su portal?",
@@ -686,7 +686,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Qué hago si cambió de teléfono y no entra al portal?",
-        a: "Si lo pide por el chat, Sofi lo deja en «Te espera». En su página, «…» › «Portal del paciente», «Enviar nuevo enlace»: no hace falta volver a comprobar su identidad; el enlace anterior y las sesiones que tenía abiertas dejan de servir. Quien ve la historia puede mostrarle el QR y decirle el código; recepción se lo envía por su WhatsApp, con el código en otro mensaje que no ve. «Quitar acceso» (quien ve la historia) cierra todo, también su acceso guardado.",
+        a: "Si lo pide por el chat, Sofi lo deja en «Te espera». En su página, «…» › «Portal del paciente», «Enviar nuevo enlace»: no hace falta volver a comprobar su identidad; el enlace anterior y las sesiones que tenía abiertas dejan de servir. Puedes mostrarle el QR o enviárselo por su WhatsApp, y el código se lo dices tú. «Quitar acceso» cierra todo, también su acceso guardado.",
       },
     ],
   },
