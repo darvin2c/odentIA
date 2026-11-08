@@ -8,6 +8,28 @@ import { Brand } from "./brand.js"
  * oscuro. odentIA, la de la portada de la web; latidIA, en morado (tablero
  * «Marca y color»). El logo y los textos del lado usan los colores en oscuro.
  */
+/**
+ * La escena de cada marca bajo su logo: las 32 piezas de la portada de odentIA
+ * (`CalmToothScene`, con su trabajo del día) y el pulso de latidIA
+ * (`CalmPulseScene`). En la computadora ocupa el pie del lado de la marca; en el
+ * celular, la franja de arriba.
+ */
+const SCENE: Record<
+  BrandId,
+  { desktop: (onWork?: (event: DayEvent) => void) => ReactNode; mobile: (onWork?: (event: DayEvent) => void) => ReactNode }
+> = {
+  odentia: {
+    desktop: (onWork) => <CalmToothScene className="absolute inset-x-0 bottom-0 h-[62%] w-full" onWork={onWork} />,
+    mobile: (onWork) => <CalmToothScene className="relative block h-44 w-full" onWork={onWork} />,
+  },
+  latidia: {
+    desktop: () => (
+      <CalmPulseScene className="absolute bottom-14 left-10 h-[30%] w-[calc(100%-5rem)] lg:left-12 lg:w-[calc(100%-6rem)]" />
+    ),
+    mobile: () => <CalmPulseScene className="relative block h-32 w-full px-6 pb-12" />,
+  },
+}
+
 const NIGHT: Record<BrandId, CSSProperties> = {
   odentia: {
     background: "radial-gradient(90% 75% at 50% 0%, #0f3340 0%, #0a2129 50%, #061318 100%)",
@@ -104,11 +126,7 @@ export function AuthSplit({
           <Brand className="w-44" />
           {aside}
         </div>
-        {brand === "latidia" ? (
-          <CalmPulseScene className="absolute bottom-14 left-10 h-[30%] w-[calc(100%-5rem)] lg:left-12 lg:w-[calc(100%-6rem)]" />
-        ) : (
-          <CalmToothScene className="absolute inset-x-0 bottom-0 h-[62%] w-full" onWork={onWork} />
-        )}
+        {SCENE[brand].desktop(onWork)}
         {below ? <div className="relative z-10 mt-auto p-10 lg:p-12">{below}</div> : null}
       </aside>
 
@@ -118,14 +136,7 @@ export function AuthSplit({
             <Brand className="w-36" />
             {mobileAside ? <div className="w-full">{mobileAside}</div> : null}
           </div>
-          {brand === "latidia" ? (
-            <CalmPulseScene className="relative block h-32 w-full px-6 pb-12" />
-          ) : (
-            <CalmToothScene
-              className="relative block h-44 w-full"
-              onWork={mobileAside ? undefined : onWork}
-            />
-          )}
+          {SCENE[brand].mobile(mobileAside ? undefined : onWork)}
         </header>
 
         <main className="relative z-10 -mt-10 flex flex-1 items-start justify-center px-4 pb-6 md:mt-0 md:items-center md:p-10">

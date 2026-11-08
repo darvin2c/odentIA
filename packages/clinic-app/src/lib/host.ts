@@ -1,3 +1,4 @@
+import { type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
 import { createIsomorphicFn } from "@tanstack/react-start"
 import { getRequestHeaders } from "@tanstack/react-start/server"
 
@@ -30,13 +31,13 @@ export function orgSlugFromHostname(hostname: string): string | null {
  * `VITE_BASE_DOMAIN`; una clínica de odentIA abre en `VITE_DENTAL_DOMAIN` y
  * una de latidIA en `VITE_MEDICAL_DOMAIN`. Sin ellos, todo en este.
  */
-const PRODUCT_DOMAINS: Record<string, string | undefined> = {
+const PRODUCT_DOMAINS: Record<ClinicalProduct, string | undefined> = {
   dental: import.meta.env.VITE_DENTAL_DOMAIN || undefined,
   medical: import.meta.env.VITE_MEDICAL_DOMAIN || undefined,
 }
 
 /** El dominio de las clínicas de un producto; sin decir cuál, el de esta app. */
-export const domainOf = (product?: string | null): string => (product && PRODUCT_DOMAINS[product]) || BASE_DOMAIN
+export const domainOf = (product?: string | null): string => (isClinicalProduct(product) && PRODUCT_DOMAINS[product]) || BASE_DOMAIN
 
 /** La dirección de una clínica, en el dominio de su producto. */
 export const tenantUrl = (slug: string, path = "/", product?: string | null) =>

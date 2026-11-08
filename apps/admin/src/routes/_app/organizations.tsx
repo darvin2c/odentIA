@@ -21,7 +21,7 @@ import {
   useFormSurface,
   SkeletonRegion,
 } from "@odentia/ui-patterns"
-import { CLINICAL_PRODUCTS, type ClinicalProduct, productWords } from "@odentia/clinical"
+import { CLINICAL_PRODUCTS, type ClinicalProduct, isClinicalProduct, productWords } from "@odentia/clinical"
 import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router"
@@ -51,7 +51,7 @@ export const Route = createFileRoute("/_app/organizations")({
   // La búsqueda y los filtros viven en la dirección: al volver de una ficha siguen como estaban.
   validateSearch: (search: Record<string, unknown>): ListSearch => ({
     ...(typeof search.q === "string" && search.q ? { q: search.q } : {}),
-    ...(search.producto === "dental" || search.producto === "medical" ? { producto: search.producto } : {}),
+    ...(isClinicalProduct(search.producto) ? { producto: search.producto } : {}),
     ...(search.precio === "negociado" ? { precio: "negociado" as const } : {}),
     ...(search.clase === "real" || search.clase === "demo" ? { clase: search.clase } : {}),
     ...(typeof search.org === "string" ? { org: search.org } : {}),

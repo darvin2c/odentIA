@@ -1,6 +1,6 @@
 import type { PlatformDecisions, PlatformLlm } from "@odentia/agent"
 import type { Auth } from "@odentia/auth"
-import { type ClinicalProduct, configureZodMessages, TAX_CATEGORIES } from "@odentia/clinical"
+import { BASE_PRODUCT, type ClinicalProduct, configureZodMessages, type DomainProduct, type ProductDomains, TAX_CATEGORIES } from "@odentia/clinical"
 import { type Db, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
@@ -147,9 +147,9 @@ export interface AppDeps {
    * El dominio de cada otro producto (latidIA: `MEDICAL_DOMAIN`; decisión 9 del
    * issue 229). Sin él, todo va en el de odentIA (`cookieDomain`).
    */
-  productDomains?: Partial<Record<ClinicalProduct, string>>
+  productDomains?: ProductDomains
   /** La sesión de cada otro producto: la instancia de Better Auth de su dominio. */
-  productAuth?: Partial<Record<ClinicalProduct, Auth>>
+  productAuth?: Partial<Record<DomainProduct, Auth>>
   webURL: string
   adminURL: string
   mailer: Mailer
@@ -307,7 +307,7 @@ export function createApp(deps: AppDeps) {
   configurePublicLinks({
     webURL: deps.webURL,
     cookieDomain: deps.cookieDomain,
-    productDomains: deps.productDomains ?? {},
+    ...(deps.productDomains ? { productDomains: deps.productDomains } : {}),
   })
   configureDocumentChecks(deps.secretsKey)
   configureDocumentLogos(deps.storage)
@@ -341,14 +341,17 @@ export function createApp(deps: AppDeps) {
    * dominios conocidos, odentIA.
    */
   const productOfRequest = (c: Context): ClinicalProduct =>
-    productOfHost(new URL(c.req.url).hostname, domains) ?? "dental"
+    productOfHost(new URL(c.req.url).hostname, domains) ?? BASE_PRODUCT
   /** El panel de un producto: el de odentIA llevado a su dominio. Sin ese dominio, el de odentIA. */
   const panelUrlOf = (product: ClinicalProduct): string => {
     const domain = domains[product]
     return domain ? onDomain(deps.webURL, deps.cookieDomain, domain) : deps.webURL
   }
   /** La sesión del dominio de la petición: el inicio, el registro y la salida ponen la cookie en el suyo. */
-  const authOf = (c: Context): Auth => deps.productAuth?.[productOfRequest(c)] || auth
+  const authOf = (c: Context): Auth => {
+    const product = productOfRequest(c)
+    return (product === BASE_PRODUCT ? undefined : deps.productAuth?.[product]) || auth
+  }
 
   const app = new Hono()
 

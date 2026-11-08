@@ -43,6 +43,20 @@ export { founderInvitationEmail, moneyText, waitlistReceivedEmail } from "./saas
 
 /* ---------- Cómo se abren clínicas ---------- */
 
+type SignupPolicyRow = { mode: string; medicalMode: string }
+
+/**
+ * Dónde guarda cada producto cómo se abren sus clínicas (`saas_signup_policy`,
+ * una columna por producto; ADR 0093): un producto nuevo trae la suya.
+ */
+const SIGNUP_MODE_COLUMN: Record<
+  ClinicalProduct,
+  { read: (row: SignupPolicyRow) => string; write: (mode: SaasSignupMode) => Partial<SignupPolicyRow> }
+> = {
+  dental: { read: (row) => row.mode, write: (mode) => ({ mode }) },
+  medical: { read: (row) => row.medicalMode, write: (mode) => ({ medicalMode: mode }) },
+}
+
 /**
  * Cómo se abren las clínicas de un producto (ADR 0093). «Solo con invitación»
  * si no hay fila: lo seguro mientras no se diga otra cosa.
@@ -53,7 +67,7 @@ export async function getSignupMode(tx: Db, product: ClinicalProduct = "dental")
     .from(saasSignupPolicy)
     .where(eq(saasSignupPolicy.id, 1))
     .limit(1)
-  const mode = product === "medical" ? row?.medicalMode : row?.mode
+  const mode = row ? SIGNUP_MODE_COLUMN[product].read(row) : undefined
   return mode === "abierta" ? "abierta" : "invitacion"
 }
 
@@ -70,7 +84,7 @@ export async function setSignupMode(
 ): Promise<SaasSignupMode> {
   if (actor.role !== "admin") throw new ServiceError("FORBIDDEN", 403, "Solo el rol Administración cambia cómo se abren clínicas")
   if (mode !== "invitacion" && mode !== "abierta") throw validation("Elige «Solo con invitación» o «Abierta»")
-  const column = product === "medical" ? { medicalMode: mode } : { mode }
+  const column = SIGNUP_MODE_COLUMN[product].write(mode)
   await tx
     .insert(saasSignupPolicy)
     .values({ id: 1, ...column, updatedBy: actor.userId })

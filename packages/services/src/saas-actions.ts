@@ -1,3 +1,4 @@
+import type { ClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
 import { appointment } from "@odentia/db/schema/agenda"
@@ -584,6 +585,12 @@ const CLIO_DETAIL_MEDICAL: Partial<typeof CLIO_DETAIL> = {
   completa: "Ordenó la consulta dictada y dejó indicado lo que sigue",
 }
 
+/** Lo que dice cada producto de lo que hizo Clío; lo que no dice, el de `CLIO_DETAIL`. */
+const CLIO_DETAIL_BY_PRODUCT: Record<ClinicalProduct, Partial<typeof CLIO_DETAIL>> = {
+  dental: {},
+  medical: CLIO_DETAIL_MEDICAL,
+}
+
 /**
  * El Asistente clínico ordenó lo dictado y el odontólogo lo confirmó: una
  * consulta por atención, al cerrarla, con el tipo de lo que dejó hecho. Sin
@@ -624,7 +631,7 @@ export async function countConsultationAction(
       ),
     )
     .limit(1)
-  const did = ((await orgProduct(tx, orgId)) === "medical" && CLIO_DETAIL_MEDICAL[tier]) || CLIO_DETAIL[tier]
+  const did = CLIO_DETAIL_BY_PRODUCT[await orgProduct(tx, orgId)][tier] || CLIO_DETAIL[tier]
   return insertAction(tx, orgId, "consulta", {
     tier,
     occurredAt: input.at,

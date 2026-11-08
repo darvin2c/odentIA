@@ -1,3 +1,5 @@
+import { type ClinicalProduct, isClinicalProduct } from "@odentia/clinical"
+
 /**
  * La búsqueda de la lista de organizaciones, recordada en esta pestaña: al
  * volver de la ficha de una clínica con «← Organizaciones», la lista sigue
@@ -6,7 +8,7 @@
  */
 export interface OrganizationsSearch {
   q?: string
-  producto?: "dental" | "medical"
+  producto?: ClinicalProduct
   precio?: "negociado"
   clase?: "real" | "demo"
 }
@@ -26,9 +28,7 @@ export function rememberedOrganizationsSearch(): OrganizationsSearch {
     const raw = JSON.parse(sessionStorage.getItem(KEY) ?? "{}") as Record<string, unknown>
     return {
       ...(typeof raw.q === "string" && raw.q ? { q: raw.q } : {}),
-      ...(raw.producto === "dental" || raw.producto === "medical"
-        ? { producto: raw.producto }
-        : {}),
+      ...(isClinicalProduct(raw.producto) ? { producto: raw.producto } : {}),
       ...(raw.precio === "negociado" ? { precio: "negociado" as const } : {}),
       ...(raw.clase === "real" || raw.clase === "demo" ? { clase: raw.clase } : {}),
     }

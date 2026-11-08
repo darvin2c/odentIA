@@ -6,7 +6,7 @@
  * la pantalla y en el PDF para la autoridad.
  */
 import { DATA_PROCESSORS, type DataProcessor } from "@odentia/auth/data-processors"
-import { productWords } from "@odentia/clinical"
+import { type ClinicalProduct, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
@@ -23,6 +23,9 @@ import {
 } from "./document-kit.js"
 import { clinicToday } from "./inventory-stock.js"
 import { NEUTRAL_LOCALE, NEUTRAL_TIMEZONE, orgProduct } from "./locale.js"
+
+/** Lo de la historia que nombra el registro de tratamiento, en cada producto. */
+const RECORD_DETAIL: Record<ClinicalProduct, string> = { dental: "odontograma", medical: "examen físico" }
 
 export interface DataProtectionActivity {
   id: "atender" | "citas" | "conversar" | "cobrar" | "novedades"
@@ -180,7 +183,7 @@ export async function getDataProtectionView(tx: Db, orgId: string): Promise<Data
     {
       id: "atender",
       purpose: "Atenderla",
-      data: `Identidad, contacto, historia clínica, ${product === "dental" ? "odontograma" : "examen físico"}, imágenes, recetas y consentimientos`,
+      data: `Identidad, contacto, historia clínica, ${RECORD_DETAIL[product]}, imágenes, recetas y consentimientos`,
       basis: "Su atención de salud y la ley",
       keep: "Lo que pide la norma de salud del país",
     },

@@ -9,7 +9,7 @@
  * abren el contexto. Dinero en enteros de la unidad menor, moneda ISO 4217.
  * Sin pasarela ni precios en código: los planes y métodos los configura admin.
  */
-import { type ClinicalProduct, isClinicalProduct, productWords } from "@odentia/clinical"
+import { BASE_PRODUCT, type ClinicalProduct, isClinicalProduct, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import type { MailBrand, MailTemplate } from "@odentia/mail"
 import { agentRunLedger } from "@odentia/db/schema/agent"
@@ -926,7 +926,7 @@ export async function startSaasTrial(
     }
     // La prueba que abre el disparador al crear la clínica dura lo del plan de odentIA (aún no
     // sabe el producto); en otro producto manda su propio plan de lista (ADR 0093).
-    if (existing.status === "prueba" && !existing.planId && !plan && existing.trialStartedAt && product !== "dental") {
+    if (existing.status === "prueba" && !existing.planId && !plan && existing.trialStartedAt && product !== BASE_PRODUCT) {
       const [own] = await tx.select({ trialDays: saasPlan.trialDays }).from(saasPlan).where(defaultPlanOf(product)).limit(1)
       const ends = own ? addDays(existing.trialStartedAt, own.trialDays) : null
       if (ends && ends.getTime() !== existing.trialEndsAt?.getTime()) {
@@ -2929,7 +2929,7 @@ export async function tickSaasBilling(
       .where(eq(organization.id, orgId))
       .limit(1)
     const product = isClinicalProduct(org?.product) ? org.product : "dental"
-    const panel = product === "dental" ? links.panelUrl : (panelOrigin(product) ?? links.panelUrl)
+    const panel = product === BASE_PRODUCT ? links.panelUrl : (panelOrigin(product) ?? links.panelUrl)
     const fields = { clinic: org?.name ?? "tu clínica", url: saasBillingUrl(panel, orgId), brand: productWords(product).brand }
     clinics.set(orgId, fields)
     return fields
