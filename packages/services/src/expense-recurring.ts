@@ -526,7 +526,9 @@ export async function getRecurringMonth(
       and(
         eq(expenseRecurring.organizationId, orgId),
         ...(query.branchId ? [eq(expenseRecurring.branchId, query.branchId)] : []),
-        sql`(${expenseRecurring.lastMonth} is null or ${expenseRecurring.lastMonth} >= ${currentKey})`,
+        // Lo que termina este mes ya no se repite: sale de la lista (lo que falte pagar de este mes
+        // sigue en «Por pagar»).
+        sql`(${expenseRecurring.lastMonth} is null or ${expenseRecurring.lastMonth} > ${currentKey})`,
       ),
     )
     .orderBy(asc(expenseRecurring.day), asc(expenseRecurring.concept))

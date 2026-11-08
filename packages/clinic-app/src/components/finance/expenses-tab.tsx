@@ -170,7 +170,7 @@ export function ExpensesTab({
         },
       },
       // En el teléfono también se ve el tipo y de dónde salió: son lo que se busca al revisar un gasto.
-      { id: "tipo", header: "Tipo", meta: { view: { primary: true } }, cell: ({ row }) => <span>{row.original.category}</span> },
+      { id: "tipo", header: "Tipo", meta: { view: { primary: true } }, cell: ({ row }) => <span className="whitespace-nowrap">{row.original.category}</span> },
       {
         id: "comprobante",
         header: "Comprobante",
@@ -391,7 +391,7 @@ export function ExpensesTab({
         )
       ) : (
         <DataTable
-          className="[&_td]:align-top [&_td]:whitespace-normal [&_td]:[overflow-wrap:anywhere]"
+          className="[&_td]:align-top [&_td]:whitespace-normal [&_td]:[overflow-wrap:break-word]"
           table={table}
           isFetching={expenses.isFetching}
         />
