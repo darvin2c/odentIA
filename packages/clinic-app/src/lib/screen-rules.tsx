@@ -88,12 +88,18 @@ export function financePhoneActions(view: string, access: FinanceAccess): Financ
 
 // --- Comisiones -----------------------------------------------------------------------------
 
+/** Lo del profesional: su pantalla, su entrada del menú y la hoja que se le entrega. */
+export const MY_COMMISSIONS_TITLE = "Mis honorarios"
+
 export const COMMISSIONS_ADMIN_SUBTITLE = "Lo que le corresponde a cada profesional por lo que atendió y ya se cobró"
 
-/** Quien administra ve el mes de toda la clínica; quien solo tiene `commissions.read`, «Mis comisiones». */
+/**
+ * Quien administra ve el mes de toda la clínica («Comisiones»); quien solo tiene `commissions.read`,
+ * lo suyo: «Mis honorarios», como se le dice en Perú a lo que cobra el profesional.
+ */
 export function commissionsHeading(can: Can, myName: string | undefined): { canWrite: boolean; title: string; subtitle: string | undefined } {
   const canWrite = can("commissions.write")
-  return { canWrite, title: canWrite ? "Comisiones" : "Mis comisiones", subtitle: canWrite ? COMMISSIONS_ADMIN_SUBTITLE : myName }
+  return { canWrite, title: canWrite ? "Comisiones" : MY_COMMISSIONS_TITLE, subtitle: canWrite ? COMMISSIONS_ADMIN_SUBTITLE : myName }
 }
 
 // --- Inventario -----------------------------------------------------------------------------
