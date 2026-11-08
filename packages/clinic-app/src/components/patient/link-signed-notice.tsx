@@ -1,7 +1,11 @@
 import { Button } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
-import { fetchConsents, fetchLinkSignedToConfirm, type LinkSignedToConfirm } from "../../lib/clinical-forms"
+import {
+  fetchConsents,
+  fetchLinkSignedToConfirm,
+  type LinkSignedToConfirm,
+} from "../../lib/clinical-forms"
 import { formatDateTime } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { ConsentPaper } from "./document-papers"
@@ -69,7 +73,10 @@ export function LinkSignedNotice({
       className="flex flex-col gap-3 rounded-lg border border-warning/40 bg-warning-soft p-4"
     >
       <p className="text-sm font-medium">
-        {rows.length === 1 ? "Firmó un consentimiento en su enlace" : `Firmó ${rows.length} consentimientos en su enlace`}: revísalo con la persona y confírmalo antes de empezar.
+        {rows.length === 1
+          ? "Firmó un consentimiento en su enlace"
+          : `Firmó ${rows.length} consentimientos en su enlace`}
+        : revísalo con la persona y confírmalo antes de empezar.
       </p>
       <ul className="flex flex-col gap-2">
         {rows.map((row) => (
@@ -78,7 +85,13 @@ export function LinkSignedNotice({
               <span className="text-sm">{row.title}</span>
               <span className="text-xs text-muted-foreground">{summaryOf(row)}</span>
             </div>
-            <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => setOpenId(row.id)}>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={disabled}
+              onClick={() => setOpenId(row.id)}
+            >
               Revisar y confirmar
             </Button>
           </li>
