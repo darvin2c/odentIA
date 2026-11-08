@@ -148,7 +148,7 @@ export interface AddPlanItemInput {
   odontogramEntryId?: string | null
   /** Fase del plan; por defecto, la que propone la especialidad del servicio. */
   phase?: string | null
-  /** Sesiones previstas (1–60); por defecto, una. */
+  /** Sesiones previstas (1–60); por defecto, las habituales de su servicio (ADR 0164). */
   plannedSessions?: number | null
 }
 
@@ -831,7 +831,9 @@ export async function addPlanItem(
   // La fase la propone la especialidad de la clínica por su clave de la biblioteca.
   const phase =
     assertPhase(hooks, input.phase) ?? hooks.phaseFor(await serviceKindOf(tx, orgId, service))
-  const plannedSessions = assertPlannedSessions(input.plannedSessions) ?? 1
+  // Nace con las sesiones habituales de su servicio (ADR 0164): una endodoncia
+  // de dos no se termina en su primera firma (ADR 0161).
+  const plannedSessions = assertPlannedSessions(input.plannedSessions) ?? service.usualSessions
   const sortOrder = await nextSortOrder(tx, orgId, plan.id)
   const [row] = await tx
     .insert(treatmentPlanItem)
@@ -936,6 +938,8 @@ export async function addPlanItemsBatch(
         serviceId: service.id,
         budgetId: null,
         phase,
+        // Cada pieza nace con las sesiones habituales de su servicio, como al indicar una (ADR 0164).
+        plannedSessions: service.usualSessions,
         sortOrder: sortOrder++,
         scope,
         ...itemSite,
@@ -1041,6 +1045,8 @@ export async function updatePlanItem(
       // vigente; los históricos (presupuestos presentados/decididos,
       // atenciones) nunca se mutan.
       set.codings = await resolveServiceCodings(tx, (await orgClinicalProfile(tx, orgId)).services, service)
+      // Sin sesiones hechas, también las sesiones previstas son las del servicio nuevo (ADR 0164).
+      if (current.status === "pendiente" || current.status === "programado") set.plannedSessions = service.usualSessions
       fields.push("serviceId")
     }
   }
