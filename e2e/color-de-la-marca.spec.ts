@@ -9,6 +9,10 @@ import { gotoHydrated } from "./hydration"
  * el primer pintado. Un color claro conserva el relleno exacto con letra oscura.
  */
 
+/** El HTML que entrega el servidor, pedido desde la misma página (mismo sitio y sesión). */
+const serverHtml = (page: Page, url: string) =>
+  page.evaluate((target) => fetch(target, { credentials: "include", cache: "no-store" }).then((r) => r.text()), url)
+
 /** El valor del token en la raíz, ya resuelto. */
 const token = (page: Page, name: string) =>
   page.evaluate((property) => getComputedStyle(document.documentElement).getPropertyValue(property).trim(), name)
@@ -42,9 +46,9 @@ test("elegir el color de la marca: vista previa, guardar, primer pintado, color 
   await expect(block.getByRole("button", { name: "Volver al turquesa de odentIA" })).toBeVisible()
 
   // Desde el primer pintado: el HTML del servidor ya trae el color, también en una página pública.
-  const settingsHtml = await (await page.request.get(tenant(org.slug, "/settings"))).text()
+  const settingsHtml = await serverHtml(page, tenant(org.slug, "/settings"))
   expect(settingsHtml).toContain("--primary-fill:#2563eb")
-  const publicHtml = await (await page.request.get(tenant(org.slug, "/embed"))).text()
+  const publicHtml = await serverHtml(page, tenant(org.slug, "/embed"))
   expect(publicHtml).toContain("--primary-fill:#2563eb")
 
   // Un celeste claro: el botón lo conserva exacto con letra oscura y el texto usa un tono legible.
@@ -77,6 +81,6 @@ test("elegir el color de la marca: vista previa, guardar, primer pintado, color 
   // Volver al de fábrica quita el color: la cabecera ya no lo escribe.
   await block.getByRole("button", { name: "Volver al turquesa de odentIA" }).click()
   await expect.poll(() => token(page, "--primary-fill")).toBe("#0e7490")
-  const clean = await (await page.request.get(tenant(org.slug, "/settings"))).text()
+  const clean = await serverHtml(page, tenant(org.slug, "/settings"))
   expect(clean).not.toContain("--primary-fill:#")
 })

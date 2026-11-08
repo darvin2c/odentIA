@@ -117,6 +117,19 @@ function shiftUntil(color: Rgb, toward: Rgb, against: Rgb, ratio: number): Rgb {
   return toward
 }
 
+/**
+ * Un tinte que se note sobre el fondo: lo más cerca del fondo que llegue al contraste
+ * pedido. Con una mezcla fija, un color claro daba un tinte casi blanco (el menú activo
+ * no se veía) y uno oscuro, en modo oscuro, uno casi negro.
+ */
+function tintUntil(base: Rgb, background: Rgb, ratio: number): Rgb {
+  for (let amount = 0.94; amount >= 0.3; amount -= 0.02) {
+    const tint = mix(base, background, amount)
+    if (contrastOf(tint, background) >= ratio) return tint
+  }
+  return mix(base, background, 0.3)
+}
+
 /** El relleno al pasar el mouse: más oscuro bajo letra blanca, más claro bajo letra oscura. */
 function hoverOf(fill: Rgb, foreground: string): string {
   return hexOf(foreground === hexOf(WHITE) ? mix(fill, BLACK, 0.12) : mix(fill, WHITE, 0.18))
@@ -179,7 +192,8 @@ function lightTokens(base: Rgb, nearWhite: boolean): BrandTokens {
     fill = primary
     fillForeground = hexOf(WHITE)
   }
-  const soft = mix(base, WHITE, 0.86)
+  // Los mismos contrastes que los tintes de fábrica de odentIA sobre blanco.
+  const soft = tintUntil(base, WHITE, 1.18)
   return {
     primary: hexOf(primary),
     primaryForeground: hexOf(WHITE),
@@ -188,8 +202,8 @@ function lightTokens(base: Rgb, nearWhite: boolean): BrandTokens {
     fillHover: hoverOf(fill, fillForeground),
     soft: hexOf(soft),
     softForeground: hexOf(shiftUntil(primary, BLACK, soft, TEXT)),
-    agentSoft: hexOf(mix(base, WHITE, 0.93)),
-    agentBorder: hexOf(mix(base, WHITE, 0.72)),
+    agentSoft: hexOf(tintUntil(base, WHITE, 1.08)),
+    agentBorder: hexOf(tintUntil(base, WHITE, 1.35)),
   }
 }
 
@@ -199,7 +213,7 @@ function darkTokens(base: Rgb): BrandTokens {
   const onPrimary = shiftUntil(mix(primary, BLACK, 0.82), BLACK, primary, TEXT)
   // El color exacto solo si se distingue del fondo oscuro y tiene un texto que se lea.
   const exactText = contrastOf(base, DARK_BG) >= 3 ? textOn(base, WHITE, DARK_BG) : null
-  const soft = mix(base, DARK_BG, 0.78)
+  const soft = tintUntil(base, DARK_BG, 1.4)
   const fill = exactText ? base : primary
   const fillForeground = exactText ?? hexOf(onPrimary)
   return {
@@ -210,8 +224,8 @@ function darkTokens(base: Rgb): BrandTokens {
     fillHover: hoverOf(fill, fillForeground),
     soft: hexOf(soft),
     softForeground: hexOf(shiftUntil(primary, WHITE, soft, TEXT)),
-    agentSoft: hexOf(mix(base, DARK_CARD, 0.86)),
-    agentBorder: hexOf(mix(base, DARK_BG, 0.62)),
+    agentSoft: hexOf(tintUntil(base, DARK_CARD, 1.15)),
+    agentBorder: hexOf(tintUntil(base, DARK_BG, 1.6)),
   }
 }
 

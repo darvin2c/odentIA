@@ -36,6 +36,14 @@ describe("brandPalette", () => {
     }
   })
 
+  it("el tinte del menú activo se nota también con un color claro, en claro y en oscuro", () => {
+    for (const hex of ["#7cc4ec", "#6ee7b7", "#facc15", "#1d5fa8", "#1e3a8a"]) {
+      const { light, dark } = brandPalette(hex)
+      expect(contrastRatio(light.soft, "#ffffff"), `${hex} en claro`).toBeGreaterThanOrEqual(1.18)
+      expect(contrastRatio(dark.soft, "#0c1118"), `${hex} en oscuro`).toBeGreaterThanOrEqual(1.4)
+    }
+  })
+
   it("el color de fábrica de cada producto queda tal cual", () => {
     for (const hex of Object.values(PRODUCT_BRAND_COLORS)) {
       const palette = brandPalette(hex)
