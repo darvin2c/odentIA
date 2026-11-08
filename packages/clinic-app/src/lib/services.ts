@@ -21,6 +21,10 @@ export interface ServiceCatalogItem {
   durationMin: number | null
   /** Cómo se cobra: 'treatment' una vez, 'session' en cada visita atendida. */
   billingMode: "treatment" | "session"
+  /** Con cuántas sesiones nace al indicarlo: las de la clínica o, si no puso, las de la biblioteca. */
+  usualSessions: number
+  /** Las que puso la clínica; null = las que sugiere la biblioteca. */
+  ownUsualSessions?: number | null
   /** Cómo dice el precio el agente; caja y presupuesto usan siempre la tarifa. */
   priceDisclosure: PriceDisclosure
   /** La evaluación que ofrece el agente cuando el precio no es exacto. */
@@ -90,6 +94,8 @@ export interface TreatmentTemplateItem {
   surfaceCountMax: number | null
   leavesFinding: LeavesFindingBody | null
   isCommon: boolean
+  /** Con cuántas sesiones suele hacerse: las que toma el servicio mientras la clínica no ponga otras. */
+  usualSessions?: number
   /** Su código en la lista del país: uno, o ninguno donde no hay lista. */
   codings: OfficialCoding[]
 }
@@ -223,6 +229,8 @@ export interface CreateServiceBody {
   currency?: string | null
   durationMin?: number | null
   billingMode?: "treatment" | "session" | null
+  /** Sesiones habituales; sin ellas, las de la biblioteca (o 1 si es propio). */
+  usualSessions?: number | null
   priceDisclosure?: PriceDisclosure | null
   evaluationServiceId?: string | null
   leavesFinding?: LeavesFindingBody | null
@@ -250,6 +258,8 @@ export interface UpdateServiceBody {
   currency?: string | null
   durationMin?: number | null
   billingMode?: "treatment" | "session"
+  /** Sesiones habituales; null vuelve a las de la biblioteca. */
+  usualSessions?: number | null
   priceDisclosure?: PriceDisclosure
   evaluationServiceId?: string | null
   leavesFinding?: LeavesFindingBody | null

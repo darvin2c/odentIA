@@ -90,6 +90,8 @@ interface IndicationValues {
   quadrant: string
   arch: string
   service: ServiceCatalogItem | null
+  /** Sesiones previstas: al elegir el servicio, sus sesiones habituales. */
+  sessions: string
   odontogramEntryId: string
   detail: string
   diagnosisCode: string
@@ -102,6 +104,7 @@ const EMPTY_INDICATION: IndicationValues = {
   quadrant: "",
   arch: "",
   service: null,
+  sessions: "",
   odontogramEntryId: "",
   detail: "",
   diagnosisCode: "",
@@ -117,11 +120,14 @@ function indicationErrors(value: IndicationValues): Record<string, string> {
     fields.surfaces = "Marca al menos una superficie."
   if (value.scope === "quadrant" && !value.quadrant) fields.quadrant = "Elige el cuadrante."
   if (value.scope === "arch" && !value.arch) fields.arch = "Elige la arcada."
+  const sessions = value.sessions.trim()
+  if (value.service && sessions !== "" && !(/^\d{1,2}$/.test(sessions) && Number(sessions) >= 1 && Number(sessions) <= 60))
+    fields.sessions = "Escribe un número de sesiones entre 1 y 60."
   return fields
 }
 
 /** El servidor nombra el dato como en el cuerpo de la petición. */
-const INDICATION_FIELD_MAP = { serviceId: "service", toothNumber: "teeth" }
+const INDICATION_FIELD_MAP = { serviceId: "service", toothNumber: "teeth", plannedSessions: "sessions" }
 
 function BlockPart({
   title,
@@ -713,6 +719,8 @@ function IndicationForm({
         detail: value.detail.trim() === "" ? null : value.detail.trim(),
         diagnosisCode: value.diagnosisCode.trim() === "" ? null : value.diagnosisCode.trim(),
         odontogramEntryId: value.odontogramEntryId === "" ? null : value.odontogramEntryId,
+        // Vacío: las sesiones habituales del servicio, que pone el servidor.
+        ...(value.sessions.trim() === "" ? {} : { plannedSessions: Number(value.sessions.trim()) }),
       }
       if (value.scope === "tooth" || value.scope === "surfaces") body.toothNumber = tooth
       if (value.scope === "surfaces") body.surfaces = value.surfaces
@@ -735,6 +743,7 @@ function IndicationForm({
         form.reset({
           ...value,
           service: null,
+          sessions: "",
           detail: "",
           diagnosisCode: "",
           odontogramEntryId: "",
@@ -896,6 +905,8 @@ function IndicationForm({
                 onChange={(next) => {
                   field.handleChange(next)
                   if (next.scope) form.setFieldValue("scope", next.scope)
+                  // Nace con las sesiones habituales del servicio; aquí se cambian si este paciente necesita otras.
+                  form.setFieldValue("sessions", String(next.usualSessions ?? 1))
                 }}
               />
             )}
@@ -910,6 +921,23 @@ function IndicationForm({
             ? ` · ${TREATMENT_SCOPE_LABELS[service.scope] ?? service.scope}`
             : ""}
         </p>
+      ) : null}
+      {service ? (
+        <form.AppField name="sessions">
+          {(field) => (
+            <field.TextField
+              id={`${uid}-sessions`}
+              label="Sesiones previstas"
+              description="Las que suele llevar este servicio; cámbialas si este paciente necesita otras."
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={60}
+              inputClassName="w-28"
+              disabled={blocked}
+            />
+          )}
+        </form.AppField>
       ) : null}
 
       <form.AppField name="detail">

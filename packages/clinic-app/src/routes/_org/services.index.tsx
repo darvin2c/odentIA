@@ -855,6 +855,13 @@ function offerSchemaFor(rules: {
       },
       { message: "Duración: minutos enteros entre 1 y 1440" },
     ),
+    usualSessions: z.string().refine(
+      (value) => {
+        const n = Number(value.trim())
+        return /^\d{1,2}$/.test(value.trim()) && n >= 1 && n <= 60
+      },
+      { message: "Sesiones habituales: un número entero entre 1 y 60" },
+    ),
     specialtyId: z.string().min(1, "Elige la especialidad"),
     scope: rules.scopeShown ? z.string().min(1, "Elige dónde se hace") : z.string(),
     billingMode: z.enum(["treatment", "session"]),
@@ -894,6 +901,7 @@ const emptyOfferValues: OfferFormValues = {
   currency: "",
   price: "",
   durationMin: "",
+  usualSessions: "1",
   specialtyId: "",
   scope: "",
   billingMode: "treatment",
@@ -926,6 +934,7 @@ function offerValues(
     currency: offer.currency,
     price: formatMoneyInput(offer.priceCents, offer.currency, locale),
     durationMin: offer.durationMin === null ? "" : String(offer.durationMin),
+    usualSessions: String(offer.usualSessions ?? 1),
     specialtyId: offer.specialtyId ?? "",
     scope,
     billingMode: offer.billingMode ?? "treatment",
@@ -975,6 +984,12 @@ function useOfferForm(
   })
 }
 type OfferForm = ReturnType<typeof useOfferForm>
+
+/** «1 sesión», «2 sesiones»: las habituales de un servicio. */
+function sessionsLabel(sessions: number | undefined): string {
+  const n = sessions ?? 1
+  return n === 1 ? "1 sesión" : `${n} sesiones`
+}
 
 function sourceLabel(offer: ServiceCatalogItem): string {
   return offer.source === "custom" ? "Propio de la clínica" : "De la biblioteca"
@@ -1141,6 +1156,10 @@ function OfferEditor({
       ...(value.currency !== (offer?.currency ?? orgCurrency) ? { currency: value.currency } : {}),
       durationMin: value.durationMin.trim() === "" ? null : Number(value.durationMin),
       billingMode: value.billingMode,
+      // Sin tocarlas siguen siendo las que sugiere la biblioteca (nulas); solo viajan si cambian.
+      ...(Number(value.usualSessions.trim()) !== (offer?.usualSessions ?? 1)
+        ? { usualSessions: Number(value.usualSessions.trim()) }
+        : {}),
       priceDisclosure: value.priceDisclosure,
       evaluationServiceId: value.evaluationServiceId === "" ? null : value.evaluationServiceId,
       // Lo tratado queda dibujado: lo que deja en la pieza al completarse.
@@ -1611,6 +1630,7 @@ function OfferReadOnly({
         <DetailField label="Duración">
           {offer.durationMin === null ? null : `${offer.durationMin} min`}
         </DetailField>
+        <DetailField label="Sesiones habituales">{sessionsLabel(offer.usualSessions)}</DetailField>
         <DetailField label="Especialidad">{offer.specialtyName ?? null}</DetailField>
         {hasPlaces() ? (
           <DetailField label="Ámbito">
@@ -1650,6 +1670,7 @@ function OfferDetails({ offer, official }: { offer: ServiceCatalogItem; official
           <DetailField label="Duración">
             {offer.durationMin === null ? null : `${offer.durationMin} min`}
           </DetailField>
+          <DetailField label="Sesiones habituales">{sessionsLabel(offer.usualSessions)}</DetailField>
           <DetailField label="Moneda">{offer.currency}</DetailField>
           <DetailField label="Especialidad">{offer.specialtyName ?? null}</DetailField>
           {hasPlaces() ? (
@@ -1765,7 +1786,22 @@ function OfferFields({
         </form.AppField>
         <form.AppField name="durationMin">
           {(field) => (
-            <field.TextField id={`${idPrefix}-dur`} label="Duración (min)" inputMode="numeric" />
+            <field.TextField id={`${idPrefix}-dur`} label="Duración por sesión (min)" inputMode="numeric" />
+          )}
+        </form.AppField>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <form.AppField name="usualSessions">
+          {(field) => (
+            <field.TextField
+              id={`${idPrefix}-sesiones`}
+              label="Sesiones habituales"
+              description="Con cuántas nace al indicarlo; lo ya indicado no cambia."
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={60}
+            />
           )}
         </form.AppField>
       </div>
@@ -1774,7 +1810,7 @@ function OfferFields({
           <field.Group
             id={`${idPrefix}-cobro-opciones`}
             legend={<span id={`${idPrefix}-cobro`}>Cómo se cobra</span>}
-            description="Por sesión: se cobra el precio en cada visita atendida."
+            description="Por sesión: se cobra el precio en cada visita atendida, y el presupuesto suma el de cada sesión prevista."
           >
             {(control) => (
               <RadioChips

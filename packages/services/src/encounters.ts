@@ -1403,6 +1403,8 @@ export async function addEncounterProcedure(
   // previa crea la indicación implícita en el plan vigente, ya realizada y
   // aceptada en la misma atención.
   let directPlanItemId: string | null = null
+  /** Sus sesiones previstas: las habituales de su servicio (ADR 0164). */
+  let directPlannedSessions = 1
   if (serviceIdParam) {
     const planId = await getOrCreateDirectPlan(tx, orgId, actorUserId, patientId, encounterId)
     const indicated = await addPlanItem(tx, orgId, actorUserId, patientId, {
@@ -1415,6 +1417,7 @@ export async function addEncounterProcedure(
       odontogramEntryId: input.odontogramEntryId ?? null,
     })
     directPlanItemId = indicated.id
+    directPlannedSessions = indicated.plannedSessions
     if (quantity > 1 && indicated.priceCents !== null) {
       // La indicación implícita refleja lo realizado: todas las unidades.
       await tx
@@ -1507,7 +1510,9 @@ export async function addEncounterProcedure(
   }
   if (directPlanItemId) {
     // Tratamiento directo: la indicación implícita queda enlazada a la sesión
-    // y se cierra como aceptada + realizada en la misma transacción.
+    // y se cierra como aceptada + realizada en la misma transacción. Si su
+    // servicio suele llevar varias sesiones (ADR 0164), queda aceptada y en
+    // curso con ellas, como lo aceptado al hacerlo: hoy fue la primera.
     await tx
       .insert(encounterPlanItem)
       .values({ organizationId: orgId, encounterId, planItemId: directPlanItemId })
@@ -1515,15 +1520,18 @@ export async function addEncounterProcedure(
         target: [encounterPlanItem.encounterId, encounterPlanItem.planItemId],
       })
     const now = new Date()
+    const directDone = directPlannedSessions <= 1
     await tx
       .update(treatmentPlanItem)
       .set({
-        status: "realizado",
+        status: directDone ? "realizado" : "en_curso",
         decisionStatus: "aceptado",
-        decisionNote: "Tratamiento directo: indicado y ejecutado en la misma atención",
+        decisionNote: directDone
+          ? "Tratamiento directo: indicado y ejecutado en la misma atención"
+          : "Tratamiento directo: indicado y empezado en la misma atención",
         decidedAt: now,
         startedAt: now,
-        completedAt: now,
+        completedAt: directDone ? now : null,
         updatedAt: now,
       })
       .where(
@@ -1536,18 +1544,21 @@ export async function addEncounterProcedure(
       tx,
       orgId,
       actorUserId,
-      "plan.item_direct_completed",
+      directDone ? "plan.item_direct_completed" : "plan.item_direct_started",
       "treatment_plan_item",
       directPlanItemId,
       {
         patientId,
         encounterId,
         procedureId: row.id,
+        plannedSessions: directPlannedSessions,
       },
     )
-    // El servicio directo nace realizado: lo que su producto hace con un
-    // tratamiento realizado (odentIA: lo tratado queda dibujado).
-    await (await productHooks(tx, orgId)).treatmentDone(tx, { orgId, actorUserId, patientId, encounterId, planItemId: directPlanItemId })
+    // El servicio directo de una sesión nace realizado: lo que su producto hace con
+    // un tratamiento realizado (odentIA: lo tratado queda dibujado). El de varias se
+    // dibuja al terminarlo.
+    if (directDone)
+      await (await productHooks(tx, orgId)).treatmentDone(tx, { orgId, actorUserId, patientId, encounterId, planItemId: directPlanItemId })
   }
   await audit(tx, orgId, actorUserId, "encounter.procedure_added", "encounter_procedure", row.id, {
     patientId,
