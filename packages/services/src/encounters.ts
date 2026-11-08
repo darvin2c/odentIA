@@ -1778,10 +1778,10 @@ export interface ClosingCheckBase {
   /** «¿Cuándo vuelve?» y los controles que esta visita cumple (ADR 0152). */
   controls: ClosingControls
   /**
-   * Lo trabajado hoy de un tratamiento de varias sesiones, que sigue abierto
-   * (nada se termina solo). `finishing`: con esta atención llega a sus sesiones
-   * previstas, o las pasa; el cierre pregunta «¿Terminaste?». `continuing`: le
-   * faltan sesiones y queda en curso. `n` cuenta esta atención; `m`, las previstas.
+   * Lo trabajado hoy de un tratamiento abierto. `finishing`: con esta atención
+   * llega a sus sesiones previstas, o las pasa; el cierre pregunta «¿Terminaste?»
+   * con «Sí, terminar» ya elegido, y firmar sin cambiarlo lo termina (ADR 0161).
+   * `continuing`: le faltan sesiones y queda en curso. `n` cuenta esta atención; `m`, las previstas.
    * `notRegistered`: lo que traía la cita y hoy no tiene sesión registrada; el
    * cierre lo avisa sin frenar la firma (`n` es la sesión que le tocaba).
    */
@@ -1933,7 +1933,12 @@ export async function checkEncounterClosing(
   const materials = await closingMaterialsOf(tx, orgId, row)
   const sessions = await closingSessionsOf(tx, orgId, row.id, row.appointmentId ?? null)
   const controls = await closingControlsOf(tx, orgId, actorUserId, row)
-  const product = await (await productHooks(tx, orgId)).closingParts(tx, { orgId, patientId: row.patientId, encounterId: row.id })
+  const product = await (await productHooks(tx, orgId)).closingParts(tx, {
+    orgId,
+    patientId: row.patientId,
+    encounterId: row.id,
+    finishingPlanItemIds: sessions.finishing.map((session) => session.planItemId),
+  })
   return { ready: missing.length === 0, missing, consents, materials, sessions, controls, ...product }
 }
 
@@ -2179,19 +2184,25 @@ export interface FinalizeEncounterInput {
   followUpIds?: string[] | null
   /**
    * «Sí, terminar»: los tratamientos trabajados hoy que quedan realizados al
-   * firmar. Sin elección no se cierra nada: nada se termina solo.
+   * firmar. Lo que llega a sus sesiones previstas (`closing.sessions.finishing`)
+   * se termina también sin mencionarlo, salvo que venga en
+   * `addSessionPlanItemIds` (ADR 0161). Aquí sirve para terminar antes uno al
+   * que aún le faltan sesiones.
    */
   completePlanItemIds?: string[]
-  /** «Falta otra sesión»: a cada uno se le prevé una sesión más (`updatePlanItemPlanning`). */
+  /** «Falta otra sesión»: a cada uno se le prevé una sesión más (`updatePlanItemPlanning`) y sigue en curso. */
   addSessionPlanItemIds?: string[]
 }
 
 /**
  * «Sí, terminar» y «Falta otra sesión» del cierre. Solo de lo trabajado en esta
  * atención (`closing.sessions`); un mismo tratamiento no puede ir en las dos.
- * Completa aquí y devuelve la sesión que falta para sumarla después de los
- * cobros: lo que se cobra hoy se mide con lo que se había previsto, no con la
- * sesión que se acaba de agregar.
+ * Lo que llega a sus sesiones previstas se termina sin respuesta: «Sí, terminar»
+ * es lo que viene elegido y solo «Falta otra sesión» lo deja abierto (ADR 0161;
+ * la resina de una sesión hecha y cobrada quedaba «en curso» y fuera del
+ * odontograma firmado). Completa aquí y devuelve la sesión que falta para
+ * sumarla después de los cobros: lo que se cobra hoy se mide con lo que se
+ * había previsto, no con la sesión que se acaba de agregar.
  */
 async function applySessionAnswers(
   tx: Db,
@@ -2202,20 +2213,32 @@ async function applySessionAnswers(
   input: FinalizeEncounterInput,
   sessions: ClosingCheckBase["sessions"],
 ): Promise<() => Promise<void>> {
-  const complete = [...new Set(input.completePlanItemIds ?? [])]
+  const chosen = [...new Set(input.completePlanItemIds ?? [])]
   const addSession = [...new Set(input.addSessionPlanItemIds ?? [])]
-  if (complete.length === 0 && addSession.length === 0) return async () => {}
-  if (complete.some((id) => addSession.includes(id)))
+  if (chosen.some((id) => addSession.includes(id)))
     throw validation("Un tratamiento se termina o le falta otra sesión, no las dos")
   const worked = new Set([...sessions.finishing, ...sessions.continuing].map((session) => session.planItemId))
   const field = (ids: string[], name: string) => {
     if (ids.some((id) => !worked.has(id)))
       throw invalidField(name, "Solo se responde por lo que se trabajó en esta atención")
   }
-  field(complete, "completePlanItemIds")
+  field(chosen, "completePlanItemIds")
   field(addSession, "addSessionPlanItemIds")
-  for (const itemId of complete)
+  for (const itemId of chosen)
     await setPlanItemStatus(tx, orgId, actorUserId, patientId, itemId, { status: "realizado", encounterId })
+  // Lo que llega a sus previstas se termina salvo «Falta otra sesión». Lo que viene
+  // elegido no frena la firma: si algo impide completarlo (un presupuesto anulado
+  // a medias), queda en curso como antes, igual que si se hubiera dicho que sigue.
+  for (const session of sessions.finishing) {
+    if (chosen.includes(session.planItemId) || addSession.includes(session.planItemId)) continue
+    try {
+      await tx.transaction((inner) =>
+        setPlanItemStatus(inner as Db, orgId, actorUserId, patientId, session.planItemId, { status: "realizado", encounterId }),
+      )
+    } catch (error) {
+      if (!(error instanceof ServiceError)) throw error
+    }
+  }
   return async () => {
     for (const itemId of addSession) {
       const [current] = await tx
@@ -2290,9 +2313,9 @@ export async function finalizeEncounter(
     if (endedAt.getTime() > now.getTime() + 5 * 60_000)
       throw invalidField("endedAt", "La hora de fin no puede estar en el futuro")
   }
-  // Lo que se respondió a «¿Terminaste?», en la misma transacción y con la atención
-  // aún en borrador: completar lo exige y deja dibujado lo tratado antes del
-  // cierre del producto (odentIA: el odontograma que se firma ya lo trae).
+  // «¿Terminaste?» (lo respondido, o «Sí, terminar» si nadie lo cambió), en la misma
+  // transacción y con la atención aún en borrador: completar lo exige y deja dibujado
+  // lo tratado antes del cierre del producto (odentIA: el odontograma que se firma ya lo trae).
   const addSessions = await applySessionAnswers(tx, orgId, actorUserId, patientId, encounterId, input, closing.sessions)
   const procedures = await tx
     .select()

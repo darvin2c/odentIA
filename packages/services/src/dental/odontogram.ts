@@ -23,7 +23,7 @@ import {
   type SignedOdontogramPurpose,
   toothSiteCode,
 } from "@odentia/dental"
-import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNull, notInArray, or, sql } from "drizzle-orm"
 import { branchAddressColumns, branchAddressWriter } from "../branches.js"
 import { requireDraftLink } from "../clinical.js"
 import { resolveOptionalDiagnosisCode } from "../diagnosis-codes.js"
@@ -602,6 +602,8 @@ export async function closingOdontogramOf(
   orgId: string,
   patientId: string,
   encounterId: string,
+  /** Antes de firmar: lo que la firma terminará (ADR 0161), contado como ya realizado. */
+  finishingPlanItemIds: string[] = [],
 ): Promise<ClosingOdontogram | null> {
   const official = (await orgDentalProfile(tx, orgId)).odontogram
   if (!official?.signedOdontogram) return null
@@ -644,7 +646,9 @@ export async function closingOdontogramOf(
         eq(encounterPlanItem.organizationId, orgId),
         eq(encounterPlanItem.encounterId, encounterId),
         eq(treatmentPlanItem.patientId, patientId),
-        eq(treatmentPlanItem.status, "realizado"),
+        finishingPlanItemIds.length
+          ? or(eq(treatmentPlanItem.status, "realizado"), inArray(treatmentPlanItem.id, finishingPlanItemIds))
+          : eq(treatmentPlanItem.status, "realizado"),
       ),
     )
   const treatedIds = done.flatMap((item) => (item.entryId ? [item.entryId] : []))
@@ -691,6 +695,7 @@ export async function closingOdontogramOf(
             eq(treatmentPlanItem.patientId, patientId),
             inArray(treatmentPlanItem.planId, planIds),
             sql`${treatmentPlanItem.status} not in ('realizado', 'cancelado', 'reemplazado')`,
+            ...(finishingPlanItemIds.length ? [notInArray(treatmentPlanItem.id, finishingPlanItemIds)] : []),
           ),
         )
     : []

@@ -296,6 +296,62 @@ it("completar un tratamiento cuyo servicio deja algo lo dibuja una sola vez", as
   expect(active).toEqual(["definitive_restoration"])
 })
 
+it("firmar sin responder «¿Terminaste?» termina la resina de una sesión y el odontograma firmado la trae", async () => {
+  const f = await attending("org_a")
+  await seedOdentiaCatalog(ownerDb)
+  const resin = await f.run(async (tx) =>
+    createService(tx, f.orgId, f.actor, {
+      name: "Resina compuesta",
+      officialCode: "D2391",
+      specialtyId: (await librarySpecialtyIds(tx, f.orgId, ["restauradora"])).get("restauradora")!,
+      scope: "surfaces",
+      priceCents: 18000,
+      leavesFinding: { condition: "definitive_restoration", variant: "resin" },
+    }),
+  )
+  // La caries se registró en una atención anterior, ya firmada.
+  const before = await f.open()
+  const [caries] = await f.run((tx) =>
+    addOdontogramEntries(tx, ...f.args, { ...caries16, details: { variant: "dentin" }, encounterId: before }),
+  )
+  const item = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, {
+      serviceId: resin.id,
+      sourceEncounterId: before,
+      toothNumber: 16,
+      surfaces: ["occlusal"],
+      odontogramEntryId: caries!.id,
+    }),
+  )
+  const budget = await f.run((tx) => createBudget(tx, ...f.args, { planId: item.planId, itemIds: [item.id] }))
+  await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
+  await f.run((tx) => decideBudget(tx, ...f.args, budget.id, { decisions: [{ planItemId: item.id, decision: "aceptado" }] }))
+  await readyToClose(f.orgId, f.actor, f.patientId, before)
+  await f.run((tx) => finalizeEncounter(tx, ...f.args, before))
+  // Hoy se hace la resina y se firma sin tocar nada.
+  const draft = await f.open()
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, draft, { planItemId: item.id }))
+  await readyToClose(f.orgId, f.actor, f.patientId, draft)
+  // El cierre ya avisa el odontograma que se firma: con la resina hecha, el plan culmina.
+  const preview = (await f.run((tx) => getEncounterClosing(tx, ...f.args, draft))) as { odontogram?: unknown }
+  expect(preview.odontogram).toMatchObject({ purpose: "completion" })
+  const closed = await f.run((tx) => finalizeEncounter(tx, ...f.args, draft))
+  expect(closed.odontogram).toMatchObject({ purpose: "completion" })
+  const [row] = await ownerDb.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.id, item.id))
+  expect(row).toMatchObject({ status: "realizado" })
+  const [restoration] = await ownerDb
+    .select()
+    .from(odontogramEntry)
+    .where(and(eq(odontogramEntry.leftByPlanItemId, item.id), isNull(odontogramEntry.voidedAt)))
+  expect(restoration).toMatchObject({ toothNumber: 16, condition: "definitive_restoration", encounterId: draft })
+  // El odontograma que se firma con esta atención ya la trae.
+
+  const signed = (await f.run((tx) => listOdontogramAssessments(tx, f.orgId, f.patientId))).find(
+    (assessment) => assessment.encounterId === draft,
+  )
+  expect(JSON.stringify(signed?.entries)).toContain("definitive_restoration")
+})
+
 it("la exodoncia de un servicio directo deja la pieza ausente con su causa en Perú", async () => {
   const f = await attending("org_a")
   const draft = await f.open()

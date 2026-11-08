@@ -47,7 +47,12 @@ async function sessionFixture(plannedSessions: number, priceCents = 15000) {
   return { f, item }
 }
 
-async function attendOnce(f: AttendCtx, itemId: string, encounterId?: string) {
+async function attendOnce(
+  f: AttendCtx,
+  itemId: string,
+  encounterId?: string,
+  answer: Parameters<typeof finalizeEncounter>[5] = {},
+) {
   const encounter = encounterId
     ? { id: encounterId }
     : await f.run((tx) => createEncounter(tx, ...f.args, { reason: "Control" }))
@@ -55,7 +60,7 @@ async function attendOnce(f: AttendCtx, itemId: string, encounterId?: string) {
     addEncounterProcedure(tx, ...f.args, encounter.id, { planItemId: itemId }),
   )
   await f.ready(encounter.id)
-  return f.run((tx) => finalizeEncounter(tx, ...f.args, encounter.id))
+  return f.run((tx) => finalizeEncounter(tx, ...f.args, encounter.id, answer))
 }
 
 it("por sesión genera un cargo por visita sin duplicar y con tope", async () => {
@@ -68,9 +73,10 @@ it("por sesión genera un cargo por visita sin duplicar y con tope", async () =>
   const second = await attendOnce(f, item.id)
   expect(second.charges).toHaveLength(1)
   expect(second.charges[0]?.amountCents).toBe(15000)
-  const third = await attendOnce(f, item.id)
+  // En la tercera llega a sus previstas: «Falta otra sesión» la deja abierta.
+  const third = await attendOnce(f, item.id, undefined, { addSessionPlanItemIds: [item.id] })
   expect(third.charges).toHaveLength(1)
-  // Cuarta visita: tope de sesiones previstas, sin cargo duplicado.
+  // Cuarta visita: tope de las sesiones del presupuesto, sin cargo duplicado.
   const fourth = await attendOnce(f, item.id)
   expect(fourth.charges).toHaveLength(0)
   expect(fourth.skippedCharges).toMatchObject([{ reason: "sessions_complete" }])
