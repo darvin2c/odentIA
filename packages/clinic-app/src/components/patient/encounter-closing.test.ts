@@ -45,5 +45,10 @@ describe("«¿Cuándo vuelve?» mientras un tratamiento sigue en curso (QA del 8
     // «Otra fecha» sin día no frena la firma si no se pregunta.
     expect(needsNextControlDay(values({ nextControl: "date" }), controls, null)).toBe(true)
     expect(needsNextControlDay(values({ nextControl: "date" }), controls, null, true)).toBe(false)
+    // «Indicar también un control»: se pregunta y se manda como siempre.
+    expect(closingControlsBody(values({ nextControl: "week", askControl: true }), controls, null, true)).toEqual({
+      followUpIds: [],
+      nextControl: { dueAt: "2026-11-15" },
+    })
   })
 })

@@ -2,7 +2,8 @@
  * La próxima sesión se reserva donde termina la anterior (propuesta 2 de la QA
  * del 8 nov): el cierre dice si la siguiente sesión ya tiene cita, el resultado
  * de firmar dice qué sigue en curso y qué falta reservar, y «Qué sigue» pone lo
- * empezado antes que el presupuesto por enviar y que lo aceptado sin empezar.
+ * empezado antes que lo aceptado sin empezar (el presupuesto por enviar sigue
+ * primero y lo dice).
  */
 import { randomUUID } from "node:crypto"
 import { scheduleRoom } from "@odentia/db/schema/agenda"
@@ -79,8 +80,11 @@ it("X5: «Qué sigue» pone lo empezado sin cita antes de lo aceptado sin empeza
   expect(next).toMatchObject({
     kind: "continuar",
     text: "Falta la cita de la próxima sesión: Tratamiento propio · sesión 2 de 2",
+    detail: "También falta la cita de lo aceptado sin empezar",
     action: { label: "Reservar cita", planItemIds: [endo.id], serviceId: f.service.id },
   })
+  // La corona sigue «por agendar»: el presupuesto del Plan conserva su «Reservar cita».
+  expect(next.alsoToSchedule).toHaveLength(1)
   expect((await f.run((tx) => planNextStepsOf(tx, "org_a", [f.patient.id], all))).get(f.patient.id)).toEqual(next)
 
   // Algo indicado después, en un presupuesto armado y sin enviar: enviarlo sigue primero
@@ -162,4 +166,19 @@ it("«Falta otra sesión» deja por reservar la que se sumó; lo que se termina 
     sql`select metadata->>'nextControl' as next from audit_event where action = 'encounter.finalized' and entity_id = ${second}`,
   )
   expect(audit!.next).toBe("sesion_en_curso")
+})
+
+it("la cita de la propia atención no es la próxima sesión, aunque su hora sea después", async () => {
+  const f = await clinicalFixture()
+  const endo = await acceptedTreatment(f, 2)
+  const book = await booker(f)
+  // Se atiende antes de la hora de su cita (la cita es en unos días): no cuenta como la sesión 2.
+  const own = await book(1, [endo.id])
+  await ownerDb.update(encounter).set({ appointmentId: own.id }).where(eq(encounter.id, f.encounter.id))
+  await f.ready(f.encounter.id)
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: endo.id }))
+  const closing = await f.run((tx) => getEncounterClosing(tx, ...f.args, f.encounter.id))
+  expect(closing.sessions.continuing).toEqual([{ planItemId: endo.id, title: "Tratamiento propio", n: 1, m: 2 }])
+  const closed = await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
+  expect(closed.nextSessions).toMatchObject([{ planItemId: endo.id, booked: null, toBook: { n: 2, m: 2 } }])
 })

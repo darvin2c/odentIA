@@ -413,11 +413,12 @@ export function BookingDrawer({
   /**
    * Marcar o desmarcar en «Para esta cita»: si todo lo marcado es de un mismo
    * servicio y nadie eligió otro a mano, el servicio (y lo que dura la cita) lo
-   * sigue (QA del 8 nov, B16). Con un hueco tocado en la rejilla no se cambia.
+   * sigue (QA del 8 nov, B16). Con un hueco o un profesional ya elegidos no se
+   * cambia, como al abrir: podría no atenderlo.
    */
   const markItems = (ids: string[]) => {
     setMarked({ patientId: values.patientId, ids })
-    if (serviceByHand.current || seed.startsAt) return
+    if (serviceByHand.current || seed.startsAt || seed.professionalUserId || when.professionalFilter) return
     const services = [...new Set(toSchedule.filter((row) => ids.includes(row.id)).map((row) => row.serviceId ?? ""))]
     const next = services.length === 1 ? services[0] : undefined
     if (!next || next === values.serviceId) return
@@ -435,6 +436,8 @@ export function BookingDrawer({
   // biome-ignore lint/correctness/useExhaustiveDependencies: corre al llegar la lista de cada persona.
   React.useEffect(() => {
     if (!coordinationQuery.data || marked?.patientId === values.patientId) return
+    // Otra persona: el servicio que se eligió a mano era para la anterior.
+    serviceByHand.current = false
     const chosen = values.serviceId === autoService.current ? "" : values.serviceId
     const fromSeed = toSchedule.find((row) => seed.planItemIds?.includes(row.id))
     const first = chosen || (fromSeed ?? toSchedule[0])?.serviceId || ""

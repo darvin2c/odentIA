@@ -49,6 +49,8 @@ test("al firmar la sesión 1, la sesión 2 se reserva desde «Atención finaliza
     signing.getByText("Vuelve para Endodoncia unirradicular · 36 · sesión 2 de 2: al firmar puedes reservar su cita aquí mismo."),
   ).toBeVisible()
   await expect(signing.getByRole("button", { name: "En 1 semana" })).toHaveCount(0)
+  // Si hace falta un control igual (algo terminado hoy), está a un toque.
+  await expect(signing.getByRole("button", { name: "Indicar también un control" })).toBeVisible()
   await views("cierre-vuelve-a-la-sesion-2")
   await signing.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
 
@@ -57,7 +59,7 @@ test("al firmar la sesión 1, la sesión 2 se reserva desde «Atención finaliza
   const next = finalized.getByRole("region", { name: "Sigue en curso" })
   await expect(next.getByText("Endodoncia unirradicular · 36 · sesión 2 de 2 · sin cita")).toBeVisible()
   await views("finalizada-sesion-2-sin-cita")
-  // No se pidió un control: la constancia dice que sigue en curso.
+  // Nada dejó un control aparte para la misma visita.
   const controls = await call<Array<{ id: string }>>(page, "GET", `${apiPath}/follow-ups`, slug)
   expect(controls).toEqual([])
 

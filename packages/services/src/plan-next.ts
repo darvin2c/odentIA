@@ -78,6 +78,12 @@ export interface PlanNextStep {
   detail: string | null
   /** Nulo si el rol no puede hacerlo (la frase igual se dice). */
   action: PlanNextAction | null
+  /**
+   * Lo aceptado sin empezar que también falta agendar cuando gana la sesión de
+   * un tratamiento empezado: el presupuesto del Plan conserva su «Reservar cita».
+   * Solo para quien puede reservar.
+   */
+  alsoToSchedule?: string[]
 }
 
 export type Can = (permission: string) => boolean
@@ -349,6 +355,15 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
   const countOf = (item: PlanItemRow) => sessions.get(item.id) ?? { done: 0, booked: 0 }
   // Un tratamiento empezado y sin una cita por venir que lo lleve: le falta la cita de su próxima sesión.
   const started = items.find((item) => item.status === "en_curso" && isToSchedule(item, withAppointment))
+  // El que pasa adelante es el que de verdad tiene una sesión por reservar (`canBookAnother`, la
+  // regla de la firma): uno que ya llegó a sus previstas y quedó abierto sigue en el paso 4.
+  const startedFirst = items.find(
+    (item) =>
+      item.status === "en_curso" &&
+      isToSchedule(item, withAppointment) &&
+      sessions.has(item.id) &&
+      canBookAnother(item, countOf(item)),
+  )
   const continueStep = (item: PlanItemRow): PlanNextStep => {
     const n = countOf(item).done + countOf(item).booked + 1
     const session = showsSession(n, item.plannedSessions) ? ` · ${sessionWords(n, item.plannedSessions)}` : ""
@@ -367,7 +382,7 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
     return {
       kind: "enviar",
       text: `Enviar el presupuesto a ${name}`,
-      detail: `${budgetLine(unsent, locale)} · por enviar desde el ${day(unsent.createdAt)}${started ? ` · también falta la cita de la próxima sesión de ${started.title}` : ""}`,
+      detail: `${budgetLine(unsent, locale)} · por enviar desde el ${day(unsent.createdAt)}${startedFirst ? ` · también falta la cita de la próxima sesión de ${startedFirst.title}` : ""}`,
       action: can("budgets.send") ? { label: "Enviar", budgetId: unsent.id } : null,
     }
   }
@@ -377,7 +392,13 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
   const accepted = items.filter((item) => item.decisionStatus === "aceptado" && notStarted(item))
   const toStart = toSchedule.filter(notStarted)
   // Lo empezado antes que lo aceptado sin empezar: la sesión 2 de la endodoncia antes que la corona.
-  if (toStart.length > 0 && started) return continueStep(started)
+  // Lo aceptado sigue «por agendar» y el presupuesto del Plan conserva su «Reservar cita».
+  if (toStart.length > 0 && startedFirst)
+    return {
+      ...continueStep(startedFirst),
+      detail: "También falta la cita de lo aceptado sin empezar",
+      ...(can("appointments.write") ? { alsoToSchedule: toStart.map((item) => item.id) } : {}),
+    }
   if (toStart.length > 0) {
     const decided = budgets
       .filter((budget) => budget.status === "aceptado" || budget.status === "parcial")
@@ -417,7 +438,7 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
     return {
       kind: "respuesta",
       text: awaiting.status === "presentado" ? "Enviado · espera respuesta" : "Lo está pensando",
-      detail: [budgetLine(awaiting, locale), sent, started ? `también falta la cita de la próxima sesión de ${started.title}` : null]
+      detail: [budgetLine(awaiting, locale), sent, startedFirst ? `también falta la cita de la próxima sesión de ${startedFirst.title}` : null]
         .filter(Boolean)
         .join(" · "),
       action: can("budgets.decide") ? { label: "¿Qué respondió?", budgetId: awaiting.id } : null,

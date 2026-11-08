@@ -83,6 +83,12 @@ export interface ClosingValues extends SignatureRegistration {
   nextControlDate: string
   /** Lo que se cambió de lo que viene marcado en «Cumple su control…», por control. */
   fulfill: Record<string, boolean>
+  /**
+   * Con un tratamiento en curso no se pregunta por un control; «Indicar también
+   * un control» lo pregunta igual (una profilaxis terminada hoy junto a una
+   * ortodoncia que sigue).
+   */
+  askControl?: boolean
 }
 
 /** Los datos de `/finalize` que la pantalla llama de otro modo. */
@@ -208,7 +214,7 @@ export function needsNextControlDay(
   dictated: DictatedControl | null,
   continuing = false,
 ): boolean {
-  if (!controls || continuing || value.nextControl !== "date" || value.nextControlDate) return false
+  if (!controls || (continuing && !value.askControl) || value.nextControl !== "date" || value.nextControlDate) return false
   return !knownReturn(value, controls, dictated)
 }
 
@@ -225,7 +231,7 @@ export function closingControlsBody(
 ): { followUpIds?: string[]; nextControl?: { dueAt: string } | { none: true } } {
   if (!controls) return {}
   const followUpIds = controls.due.filter((control) => fulfills(value, control)).map((control) => control.id)
-  if (continuing || knownReturn(value, controls, dictated)) return { followUpIds }
+  if ((continuing && !value.askControl) || knownReturn(value, controls, dictated)) return { followUpIds }
   if (value.nextControl === "none") return { followUpIds, nextControl: { none: true } }
   const day = chosenDay(value, controls)
   return day ? { followUpIds, nextControl: { dueAt: day } } : { followUpIds }
@@ -325,13 +331,25 @@ export function ClosingNextVisit({
         <p id={`${ids}-cuando`} className="font-medium">
           ¿Cuándo vuelve?
         </p>
-        {sessionsLines.map((line) => (
-          <p key={line} className="text-sm">
+        {sessionsLines.map((line, index) => (
+          <p key={`${index}-${line}`} className="text-sm">
             {line}
           </p>
         ))}
-        {sessionsLines.length > 0 && !known ? (
-          <p className="text-xs text-muted-foreground">El control se indica en la sesión en que termine.</p>
+        {sessionsLines.length > 0 && !known && !values.askControl ? (
+          <p className="text-xs text-muted-foreground">
+            El control se indica en la sesión en que termine.{" "}
+            <Button
+              type="button"
+              size="sm"
+              variant="link"
+              className="h-auto p-0 text-xs"
+              disabled={busy}
+              onClick={() => set("askControl", true)}
+            >
+              Indicar también un control
+            </Button>
+          </p>
         ) : known ? (
           <p className="text-sm">
             {known.kind === "dictated"

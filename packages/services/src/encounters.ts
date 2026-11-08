@@ -1858,8 +1858,8 @@ export interface NextSession {
 }
 
 /**
- * La próxima sesión de cada tratamiento aceptado y por hacer de `itemIds`, en ese
- * orden; los que no tienen cita ni sesión por reservar no vienen. Cuenta con las
+ * La próxima sesión de cada tratamiento aceptado y por hacer de `itemIds`, en el
+ * orden del plan; los que no tienen cita ni sesión por reservar no vienen. Cuenta con las
  * reglas de `to-schedule.ts` (`sessionCountsOf`, `canBookAnother`) y la sesión de
  * la cita con la de la agenda (`appointmentSessionsOf`). `exceptAppointmentId` es
  * la cita de la atención que se está cerrando: no es la próxima.
@@ -1890,6 +1890,8 @@ export async function nextSessionsOf(
         inArray(treatmentPlanItem.status, [...TO_SCHEDULE_STATUSES]),
       ),
     )
+    // En el orden del plan, antes y después de firmar: el primero pone el servicio de «Nueva cita».
+    .orderBy(asc(treatmentPlanItem.sortOrder), asc(treatmentPlanItem.createdAt), asc(treatmentPlanItem.id))
   if (items.length === 0) return []
   const counts = await sessionCountsOf(tx, orgId, items.map((item) => item.id))
   // La primera cita por venir que lleva cada uno (la regla de «una cita por venir lo lleva»).
@@ -1905,7 +1907,8 @@ export async function nextSessionsOf(
         eq(appointmentPlanItem.organizationId, orgId),
         inArray(appointmentPlanItem.planItemId, items.map((item) => item.id)),
         inArray(appointment.status, [...LIVE_APPOINTMENT_STATUSES]),
-        gt(appointment.startsAt, new Date()),
+        // El mismo «ahora» que las citas en pie de `sessionCountsOf`.
+        sql`${appointment.startsAt} > now()`,
         exceptAppointmentId ? ne(appointment.id, exceptAppointmentId) : undefined,
       ),
     )
@@ -1913,11 +1916,9 @@ export async function nextSessionsOf(
   const firstOf = new Map<string, { appointmentId: string; startsAt: Date }>()
   for (const row of upcoming) if (!firstOf.has(row.planItemId)) firstOf.set(row.planItemId, { appointmentId: row.appointmentId, startsAt: row.startsAt })
   const sessionsOf = await appointmentSessionsOf(tx, orgId, [...new Set([...firstOf.values()].map((row) => row.appointmentId))])
-  const byId = new Map(items.map((item) => [item.id, item]))
   const out: NextSession[] = []
-  for (const id of ids) {
-    const item = byId.get(id)
-    if (!item) continue
+  for (const item of items) {
+    const id = item.id
     const count = counts.get(id) ?? { done: 0, booked: 0 }
     const first = firstOf.get(id)
     const session = first ? sessionsOf.get(first.appointmentId)?.find((row) => row.planItemId === id) : undefined
@@ -2757,8 +2758,10 @@ export async function finalizeEncounter(
         ? "no_hace_falta"
         : closing.controls.next || repeats || stays
           ? "ya_tenia"
-          : // Mientras un tratamiento sigue en curso no se pregunta por un control: vuelve a su próxima sesión.
-            nextSessions.length > 0
+          : // Mientras un tratamiento sigue en curso la pantalla no pregunta por un control (`continuingAfterSign`):
+            // lo que no llega a sus previstas, sin lo que se eligió terminar, y lo de «Falta otra sesión».
+            closing.sessions.continuing.some((session) => !(input.completePlanItemIds ?? []).includes(session.planItemId)) ||
+              (input.addSessionPlanItemIds ?? []).length > 0
             ? "sesion_en_curso"
             : "sin_indicar",
     controlsFulfilled: fulfilled.length,

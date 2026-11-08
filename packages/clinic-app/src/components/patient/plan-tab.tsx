@@ -194,7 +194,9 @@ export function PlanTab({
             patientId={patientId}
             planItems={canClinical ? items : null}
             focusBudgetId={focusBudgetId}
-            scheduleItemIds={nextStep?.kind === "agendar" ? (nextStep.action?.planItemIds ?? []) : []}
+            scheduleItemIds={
+              nextStep?.kind === "agendar" ? (nextStep.action?.planItemIds ?? []) : (nextStep?.alsoToSchedule ?? [])
+            }
             onSchedule={(planItemIds, serviceId) => schedule(planItemIds, serviceId)}
           />
         </Section>
