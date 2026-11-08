@@ -180,3 +180,17 @@ it("cambiar de servicio lo que aún no empieza toma las sesiones del servicio nu
   const changed = await f.run((tx) => updatePlanItem(tx, ...f.args, item.id, { serviceId: four.id, encounterId: f.encounter.id }))
   expect(changed.plannedSessions).toBe(4)
 })
+
+it("no se reabre si lo firmado no llega a las sesiones con que se repartió su comisión", async () => {
+  const f = await clinicalFixture()
+  const item = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }),
+  )
+  await ownerDb.update(treatmentPlanItem).set({ decisionStatus: "aceptado" }).where(eq(treatmentPlanItem.id, item.id))
+  await f.ready(f.encounter.id)
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: item.id }))
+  await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
+  // Se cobró con tres sesiones previstas y después se bajaron: lo que sobró ya es de la última.
+  await ownerDb.update(patientCharge).set({ commissionSessions: 3 }).where(eq(patientCharge.planItemId, item.id))
+  await expect(f.run((tx) => reopenPlanItemForSession(tx, ...f.args, item.id))).rejects.toMatchObject({ code: "ITEM_FINISHED_EARLY" })
+})

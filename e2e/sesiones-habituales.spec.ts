@@ -55,13 +55,27 @@ test("sesiones habituales: la biblioteca las dice, el servicio las guarda, el pl
     toothNumber: 46,
   }, 201)
   expect(indicated.plannedSessions).toBe(2)
+  // Una corona de la biblioteca, que la clínica no tocó, nace con las 2 que sugiere.
+  const templates = await call<Array<{ id: string; key: string }>>(page, "GET", "/api/services/templates?q=corona%20de%20porcelana", slug)
+  const crownService = await call<{ id: string; usualSessions: number }>(page, "POST", "/api/services", slug, {
+    templateId: templates.find((row) => row.key === "corona-de-porcelana")!.id,
+    priceCents: 90000,
+  }, 201)
+  expect(crownService.usualSessions).toBe(2)
+  const crownItem = await call<{ plannedSessions: number }>(page, "POST", `${apiPath}/plan/items`, slug, {
+    serviceId: crownService.id,
+    sourceEncounterId: visit.id,
+    toothNumber: 11,
+  }, 201)
+  expect(crownItem.plannedSessions).toBe(2)
 
   // 4. La endodoncia de la 36 (indicada antes, con 1) se hace hoy y se termina al firmar sin tocar nada.
   await createAcceptedBudget(owner, ids)
   await call(page, "PATCH", `${apiPath}/encounters/${visit.id}`, slug, { evolution: "Endodoncia de la 36." })
   await call(page, "POST", `${apiPath}/encounters/${visit.id}/diagnoses`, slug, { diagnosisCode: "K04.0", diagnosisType: "confirmed", toothNumber: 36 }, 201)
   await call(page, "POST", `${apiPath}/encounters/${visit.id}/procedures`, slug, { planItemId: ids.itemId }, 201)
-  await call(page, "POST", `${apiPath}/encounters/${visit.id}/finalize`, slug, {})
+  // La corona indicada hoy pide su consentimiento: se firma cuando se haga.
+  await call(page, "POST", `${apiPath}/encounters/${visit.id}/finalize`, slug, { consentSkipReason: "Se firma al hacer la corona" })
   const done = await call<Array<{ id: string; status: string; plannedSessions: number }>>(page, "GET", `${apiPath}/plan`, slug)
   expect(done.find((item) => item.id === ids.itemId)).toMatchObject({ status: "realizado", plannedSessions: 1 })
 
@@ -69,6 +83,7 @@ test("sesiones habituales: la biblioteca las dice, el servicio las guarda, el pl
   await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}?tab=plan`))
   const newRow = page.getByRole("listitem").filter({ hasText: "Pieza 46" }).first()
   await expect(newRow).toContainText("0 de 2 sesiones")
+  await expect(page.getByRole("listitem").filter({ hasText: "Corona de porcelana · Pieza 11" }).first()).toContainText("0 de 2 sesiones")
   const doneRow = page.getByRole("listitem").filter({ hasText: "Pieza 36" }).first()
   await expect(doneRow).not.toContainText("de 1 sesión")
   await views("plan-sesiones")

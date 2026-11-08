@@ -1321,10 +1321,23 @@ export async function reopenPlanItemForSession(
     throw conflict("ITEM_NOT_DONE", "Solo a un tratamiento realizado le puede faltar otra sesión")
   const [progress] = await withDecisions(tx, orgId, [item])
   const done = progress?.sessionsDone ?? 0
-  if (done < item.plannedSessions)
+  // La comisión cuenta solo atenciones firmadas y se reparte con las sesiones que su
+  // cargo congeló (`commission_sessions`): si lo firmado no llega a ellas, lo que sobró
+  // ya se le dio a la última sesión y reabrir lo devolvería a «por asignar».
+  const [money] = await tx.execute<{ signed: number; frozen: number }>(sql`
+    select
+      (select count(distinct e.id)::int from encounter_procedure ep
+        join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id
+        where ep.organization_id = ${orgId} and ep.plan_item_id = ${item.id} and ep.voided_at is null
+          and e.status = 'finalizada' and e.voided_at is null) as signed,
+      (select coalesce(max(c.commission_sessions), 0)::int from patient_charge c
+        where c.organization_id = ${orgId} and c.plan_item_id = ${item.id} and c.voided_at is null) as frozen`)
+  const signed = Number(money?.signed ?? 0)
+  const frozen = Number(money?.frozen ?? 0)
+  if (done < item.plannedSessions || signed < Math.max(item.plannedSessions, frozen))
     throw conflict(
       "ITEM_FINISHED_EARLY",
-      `Se terminó antes de sus ${item.plannedSessions} sesiones previstas: si necesita más, indícalo de nuevo`,
+      `Se terminó antes de sus ${Math.max(item.plannedSessions, frozen)} sesiones previstas: si necesita más, indícalo de nuevo`,
     )
   if (done + 1 > 60) throw invalidField("plannedSessions", "Las sesiones previstas van de 1 a 60")
   const now = new Date()
