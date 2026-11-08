@@ -44,7 +44,7 @@ import {
   zonedDateOf,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useId, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
@@ -539,10 +539,15 @@ export function EncounterEditor({
   // Quien lleva la atención es quien la edita y la firma; otro profesional la
   // lee y, para continuarla, toma el relevo.
   const attending = encounter.professionalUserId === myUserId
+  // «Falta otra sesión» cambia lo que el cierre anuncia (el odontograma que se firma): se vuelve a pedir.
+  const keepOpen = Object.entries(sessionAnswers)
+    .flatMap(([id, answer]) => (answer === "otra" ? [id] : []))
+    .sort()
   const closingQuery = useQuery({
-    queryKey: ["encounter-closing", patientId, encounterId],
-    queryFn: () => fetchEncounterClosing(patientId, encounterId),
+    queryKey: ["encounter-closing", patientId, encounterId, keepOpen],
+    queryFn: () => fetchEncounterClosing(patientId, encounterId, keepOpen),
     enabled: canWrite,
+    placeholderData: keepPreviousData,
   })
   const profileQuery = useQuery({
     queryKey: ["professional-profile", "me"],
@@ -1095,8 +1100,8 @@ export function EncounterEditor({
         // dictado puede llegar hoy a sus sesiones previstas.
         const shown = new Set((closingQuery.data?.data.sessions?.finishing ?? []).map((session) => session.planItemId))
         const fresh = await queryClient.fetchQuery({
-          queryKey: ["encounter-closing", patientId, encounterId],
-          queryFn: () => fetchEncounterClosing(patientId, encounterId),
+          queryKey: ["encounter-closing", patientId, encounterId, keepOpen],
+          queryFn: () => fetchEncounterClosing(patientId, encounterId, keepOpen),
           staleTime: 0,
         })
         const newlyFinishing = (fresh.data.sessions?.finishing ?? []).some((session) => !shown.has(session.planItemId))

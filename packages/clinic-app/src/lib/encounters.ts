@@ -276,8 +276,10 @@ function post<T>(url: string, body?: unknown): Promise<{ data: T }> {
   })
 }
 
-export function fetchEncounterClosing(patientId: string, encounterId: string) {
-  return apiFetch<{ data: ClosingCheck }>(`${base(patientId)}/encounters/${encounterId}/closing`)
+/** `addSession`: lo marcado «Falta otra sesión», para que lo anunciado (el odontograma) no lo dé por terminado. */
+export function fetchEncounterClosing(patientId: string, encounterId: string, addSession: readonly string[] = []) {
+  const query = addSession.length ? `?addSession=${addSession.map(encodeURIComponent).join(",")}` : ""
+  return apiFetch<{ data: ClosingCheck }>(`${base(patientId)}/encounters/${encounterId}/closing${query}`)
 }
 
 export function voidEncounterApi(patientId: string, encounterId: string, reason: string) {

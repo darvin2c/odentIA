@@ -125,10 +125,13 @@ test("sesiones: la reserva lleva la segunda, cada cita dice cuál es, el cierre 
   await expect(finished.getByRole("button", { name: "Sí, terminar" })).toHaveAttribute("aria-pressed", "true")
   await expect(finished.getByRole("button", { name: "Falta otra sesión" })).toHaveAttribute("aria-pressed", "false")
   await expect(signing2.getByText("Al firmar queda realizado.")).toBeVisible()
+  // El odontograma que se anuncia ya cuenta lo que la firma termina.
+  await expect(signing2.getByText(/El odontograma queda firmado como «Culminación/)).toBeVisible()
   await views("cierre-terminaste")
   // «Falta otra sesión» dice qué pasará; tocar otra vez la elegida no deja ninguna.
   await finished.getByRole("button", { name: "Falta otra sesión" }).click()
   await expect(signing2.getByText("Sigue en curso y se prevé una sesión más, la 3.")).toBeVisible()
+  await expect(signing2.getByText(/El odontograma queda firmado/)).toHaveCount(0)
   await views("cierre-falta-otra")
   await finished.getByRole("button", { name: "Falta otra sesión" }).click()
   await expect(finished.getByRole("button", { name: "Falta otra sesión" })).toHaveAttribute("aria-pressed", "true")

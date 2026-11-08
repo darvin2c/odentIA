@@ -1902,6 +1902,8 @@ export async function checkEncounterClosing(
   orgId: string,
   actorUserId: string,
   row: EncounterRow,
+  /** «Falta otra sesión» ya elegido en pantalla: no se cuenta como terminado al anunciar lo que se firma. */
+  keepOpenPlanItemIds: readonly string[] = [],
 ): Promise<ClosingCheck> {
   const missing: ClosingRequirement[] = []
   if (!row.reason?.trim()) missing.push("reason")
@@ -1937,7 +1939,9 @@ export async function checkEncounterClosing(
     orgId,
     patientId: row.patientId,
     encounterId: row.id,
-    finishingPlanItemIds: sessions.finishing.map((session) => session.planItemId),
+    finishingPlanItemIds: sessions.finishing
+      .map((session) => session.planItemId)
+      .filter((id) => !keepOpenPlanItemIds.includes(id)),
   })
   return { ready: missing.length === 0, missing, consents, materials, sessions, controls, ...product }
 }
@@ -2158,9 +2162,11 @@ export async function getEncounterClosing(
   actorUserId: string,
   patientId: string,
   encounterId: string,
+  /** Lo que en pantalla ya dice «Falta otra sesión» (ADR 0161). */
+  keepOpenPlanItemIds: readonly string[] = [],
 ): Promise<ClosingCheck> {
   const row = await requireEncounter(tx, orgId, patientId, encounterId)
-  return checkEncounterClosing(tx, orgId, actorUserId, row)
+  return checkEncounterClosing(tx, orgId, actorUserId, row, keepOpenPlanItemIds)
 }
 
 export interface FinalizeEncounterInput {

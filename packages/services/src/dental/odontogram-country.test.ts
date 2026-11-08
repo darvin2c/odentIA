@@ -335,6 +335,9 @@ it("firmar sin responder «¿Terminaste?» termina la resina de una sesión y el
   // El cierre ya avisa el odontograma que se firma: con la resina hecha, el plan culmina.
   const preview = (await f.run((tx) => getEncounterClosing(tx, ...f.args, draft))) as { odontogram?: unknown }
   expect(preview.odontogram).toMatchObject({ purpose: "completion" })
+  // Con «Falta otra sesión» elegido, no lo anuncia: hoy no cambió el gráfico.
+  const kept = (await f.run((tx) => getEncounterClosing(tx, ...f.args, draft, [item.id]))) as { odontogram?: unknown }
+  expect(kept.odontogram).toBeNull()
   const closed = await f.run((tx) => finalizeEncounter(tx, ...f.args, draft))
   expect(closed.odontogram).toMatchObject({ purpose: "completion" })
   const [row] = await ownerDb.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.id, item.id))
