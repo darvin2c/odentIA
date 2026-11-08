@@ -402,12 +402,30 @@ export interface VoidedTicket {
   voidReason: string | null
 }
 
+/**
+ * Lo devuelto de comisiones en efectivo que entró ese día y después se anuló: como un ticket anulado,
+ * sigue a la vista, tachado y con su motivo, sin sumar. Sin a quién: caja no lo ve.
+ */
+export interface VoidedMovement {
+  id: string
+  kind: string
+  direction: string
+  concept: string
+  currency: string
+  amountCents: number
+  createdAt: string
+  voidedAt: string
+  voidReason: string | null
+}
+
 export interface DayMovementsBody {
   branchId: string
   day: string
   timezone: string
   movements: DayMovement[]
   voidedTickets: VoidedTicket[]
+  /** Ausente en una API anterior: nada anulado que mostrar. */
+  voidedMovements?: VoidedMovement[]
 }
 
 export function fetchDayMovements(branchId: string, day: string): Promise<{ data: DayMovementsBody }> {
@@ -458,6 +476,8 @@ export type DayEntry =
       leaves: boolean
       currency: string
       amountCents: number
+      /** Anulado (lo devuelto de comisiones): se muestra tachado con su motivo y no suma. */
+      voided: { reason: string | null } | null
     }
 
 /**
@@ -467,6 +487,7 @@ export type DayEntry =
 export function groupDayMovements(
   movements: DayMovement[],
   voidedTickets: VoidedTicket[] = [],
+  voidedMovements: VoidedMovement[] = [],
 ): DayEntry[] {
   const entries: DayEntry[] = []
   const tickets = new Map<string, Extract<DayEntry, { type: "cobro" }>>()
@@ -535,9 +556,41 @@ export function groupDayMovements(
       leaves: row.direction === "egreso",
       currency: row.currency,
       amountCents: row.amountCents,
+      voided: null,
     })
   }
+  for (const row of voidedMovements)
+    entries.push({
+      type: "gasto",
+      key: `mov:${row.id}`,
+      at: row.createdAt,
+      movementId: row.id,
+      concept: row.concept,
+      method: null,
+      fromCash: true,
+      leaves: row.direction === "egreso",
+      currency: row.currency,
+      amountCents: row.amountCents,
+      voided: { reason: row.voidReason },
+    })
   return entries.sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
+}
+
+/**
+ * Lo que el desglose del efectivo dice de lo anulado en una caja: quien contó ese dinero ve por qué ya no
+ * suma. «La devolución de comisiones de S/ 210.00 se anuló: ya no suma en la caja.»
+ */
+export function voidedCashNote(
+  voidedMovements: VoidedMovement[] | undefined,
+  currency: string,
+  money: (cents: number) => string,
+): string | null {
+  const mine = (voidedMovements ?? []).filter((row) => row.currency === currency)
+  if (mine.length === 0) return null
+  const total = mine.reduce((sum, row) => sum + row.amountCents, 0)
+  return mine.length === 1
+    ? `La devolución de comisiones de ${money(total)} se anuló: ya no suma en la caja.`
+    : `${mine.length} devoluciones de comisiones, ${money(total)} en total, se anularon: ya no suman en la caja.`
 }
 
 /**
