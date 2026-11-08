@@ -201,6 +201,8 @@ export function ClinicBrandColorSettings({
                     id={`${id}-code`}
                     value={code}
                     onChange={(event) => onCode(event.target.value)}
+                    // Al salir del campo con un código que no es un color, se dice ahí mismo.
+                    onBlur={() => setCodeError(normalizeBrandColor(code) ? null : CODE_HINT)}
                     aria-invalid={codeError ? true : undefined}
                     aria-describedby={`${id}-code-help`}
                     autoComplete="off"
