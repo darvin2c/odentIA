@@ -316,7 +316,7 @@ function yourDecision(
   kit.heading("Su decisión", { size: SIZE.h2small, before: 0, after: 6 })
 
   if (snap.decisionWords) {
-    const { text, by, at, notedBy, signature, signatureNote } = snap.decisionWords
+    const { text, by, at, notedBy, signature, signatureNote, signedAt, signedAll } = snap.decisionWords
     kit.panel({
       body: [text, by, notedBy ? `lo anotó ${notedBy}` : null, at ? dayTimeWords(at, zone) : null]
         .filter(Boolean)
@@ -337,7 +337,7 @@ function yourDecision(
         budgetAnswerText(line.decision),
       ]),
     })
-    if (signature) signedDecision(kit, signature, at, zone, signatureNote)
+    if (signature) signedDecision(kit, signature, signedAt ?? at, zone, signatureNote, signedAll)
     return
   }
 
@@ -464,9 +464,16 @@ function signedDecision(
   at: Date | null,
   zone: BudgetSnapshot["org"],
   note: string | null,
+  signedAll: boolean,
 ) {
   kit.ensure(130)
   kit.gap(10)
+  // Respondió algo después: la firma cubre solo lo que aceptó al firmar.
+  if (!signedAll)
+    kit.text(
+      `Firmó en la clínica${at ? ` el ${dayTimeWords(at, zone)}` : ""} lo que aceptó entonces: ${listWords(signature.accepted ?? [])}. Lo respondido después no lleva esta firma.`,
+      { size: SIZE.second, tone: "soft" },
+    )
   kit.text(signature.declaration, { size: SIZE.second, tone: "soft" })
   const half = (kit.width - 21) / 2
   const lineY = kit.y - 44

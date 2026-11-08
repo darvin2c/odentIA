@@ -117,4 +117,4 @@ export const BUDGET_OPTIONS_MAX = 3
  * respuesta es la palabra de quien la anotó.
  */
 export const BUDGET_SIGN_DECLARATION =
-  "Me explicaron este presupuesto, sus precios y sus condiciones. Acepto lo que dice «Aceptado»; lo demás queda como se indica."
+  "Me explicaron este presupuesto, sus precios y sus condiciones. Acepto los tratamientos que dicen «Aceptado»."

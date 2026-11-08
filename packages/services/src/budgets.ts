@@ -2416,10 +2416,16 @@ export async function decideBudget(
           "Es una revisión: entrégala (imprímela o envíala) y después anota qué respondió",
         )
       }
-      await deliverBudget(tx, orgId, actorUserId, patientId, budgetId, {
-        memberRole: opts.memberRole,
-        by: "persona",
-      })
+      try {
+        await deliverBudget(tx, orgId, actorUserId, patientId, budgetId, {
+          memberRole: opts.memberRole,
+          by: "persona",
+        })
+      } catch (error) {
+        // Otra persona lo entregó un instante antes: ya está entregado y se anota igual.
+        const now = await requireBudget(tx, orgId, patientId, budgetId)
+        if (!(error instanceof ServiceError && error.code === "BUDGET_STATUS" && now.status !== "borrador")) throw error
+      }
     }
   }
   const prev = await requireBudget(tx, orgId, patientId, budgetId)
@@ -2554,6 +2560,14 @@ export async function decideBudget(
         representative,
         alreadySigned: current.decisionSignedAt != null,
         accepting: [...answering.values()].includes("aceptado"),
+        // Lo aceptado al firmar: lo de antes y lo de ahora, de lo que se responde.
+        accepted: [
+          ...new Set(
+            lines
+              .filter((line) => (answering.get(line.planItemId) ?? line.decision) === "aceptado")
+              .map((line) => line.title),
+          ),
+        ],
       })
     : null
   for (const item of items) {
@@ -2773,6 +2787,7 @@ async function budgetSignatureOf(
     representative: { id: string; displayName: string } | null
     alreadySigned: boolean
     accepting: boolean
+    accepted: string[]
   },
 ): Promise<BudgetDecisionSignature> {
   if (!args.actorUserId || args.via) {
@@ -2794,11 +2809,18 @@ async function budgetSignatureOf(
     .from(patient)
     .where(and(eq(patient.organizationId, orgId), eq(patient.id, patientId)))
     .limit(1)
+  const [profile] = await tx
+    .select({ country: orgProfile.countryCode })
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, orgId))
+    .limit(1)
   return {
     strokes,
     signerName: args.representative.displayName,
     signerKind: own?.personId === args.representative.id ? "paciente" : "representante",
     declaration: BUDGET_SIGN_DECLARATION,
+    accepted: args.accepted,
+    note: consentSignatureNote(clinicalProfileFor(profile?.country).signatureLaw),
   }
 }
 
@@ -3632,7 +3654,10 @@ export interface BudgetPrintPayload {
     at: Date | null
     notedBy: string | null
     signature: BudgetDecisionSignature | null
-    /** Con firma: su alcance («Firma electrónica simple…»), como en la tablet. */
+    signedAt: Date | null
+    /** La firma cubre la respuesta de hoy; si no, solo lo que aceptó al firmar (`signature.accepted`). */
+    signedAll: boolean
+    /** Con firma: su alcance («Firma electrónica simple…»), como se leyó al firmar. */
     signatureNote: string | null
   } | null
   /** Su enlace vivo, si ya tiene uno; generar uno no es algo que haga un papel. */
@@ -3799,16 +3824,26 @@ function decisionWordsOf(
     pospuesto: "Lo dejó para después",
   }
   const said = verb[budget.status] ?? "Respondió"
-  if (signature) {
+  // La firma dice lo de su momento: si respondió algo después, eso se dice con su canal.
+  const signedLast =
+    signature != null &&
+    budget.decisionSignedAt != null &&
+    new Date(budget.decisionSignedAt).getTime() === new Date(budget.decidedAt).getTime()
+  if (signature && signedLast) {
     return {
       text: `${said} y firmó en la clínica`,
       by: signature.signerName,
       at: budget.decisionSignedAt ?? budget.decidedAt,
       notedBy: null,
       signature,
-      signatureNote,
+      signedAt: budget.decisionSignedAt,
+      signedAll: true,
+      signatureNote: signature.note ?? signatureNote,
     }
   }
+  const signed = signature
+    ? { signature, signedAt: budget.decisionSignedAt, signedAll: false, signatureNote: signature.note ?? signatureNote }
+    : { signature: null, signedAt: null, signedAll: false, signatureNote: null }
   // Anotado por el equipo: no se dice «en la clínica», que pudo ser por teléfono.
   if (budget.decidedVia === "clinica") {
     const decides = budget.acceptedByName ?? deciderName
@@ -3817,8 +3852,7 @@ function decisionWordsOf(
       by: decides ? `decide ${decides}` : null,
       at: budget.decidedAt,
       notedBy: notedByName,
-      signature: null,
-      signatureNote: null,
+      ...signed,
     }
   }
   // Lo decidido antes de guardar por dónde no dice canal: no se supone uno.
@@ -3828,8 +3862,7 @@ function decisionWordsOf(
     by: budget.acceptedByName ?? deciderName,
     at: budget.decidedAt,
     notedBy: null,
-    signature: null,
-    signatureNote: null,
+    ...signed,
   }
 }
 

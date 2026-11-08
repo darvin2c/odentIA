@@ -1404,6 +1404,10 @@ export interface BudgetDecisionSignature {
   /** 'paciente' o 'representante'. */
   signerKind: string
   declaration: string
+  /** Lo que aceptó al firmar: lo que se responda después no queda bajo esta firma. */
+  accepted: string[]
+  /** El alcance de la firma («Firma electrónica simple…»), como se leyó al firmar. */
+  note: string
 }
 
 export const treatmentBudget = pgTable(

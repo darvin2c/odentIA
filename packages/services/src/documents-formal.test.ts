@@ -489,7 +489,7 @@ describe("la respuesta en consulta y la firma de quien decide", () => {
       notedBy: null,
       signature: { strokes, signerName: "Paciente de prueba", signerKind: "paciente" },
     })
-    expect(words?.signature?.declaration).toMatch(/Acepto lo que dice «Aceptado»/)
+    expect(words?.signature?.declaration).toMatch(/Acepto los tratamientos que dicen «Aceptado»/)
     // Su hoja sale con la firma.
     const pdf = await renderBudgetPdf(await f.run((tx) => buildBudgetSnapshot(tx, "org_a", f.patient.id, budget.id)))
     expect(pdf.byteLength).toBeGreaterThan(1000)
@@ -497,6 +497,48 @@ describe("la respuesta en consulta y la firma de quien decide", () => {
     await expect(
       ownerDb.update(treatmentBudget).set({ decisionSignature: null, decisionSignedAt: null }).where(eq(treatmentBudget.id, budget.id)),
     ).rejects.toThrow()
+  })
+
+  it("lo que responde después no queda bajo la firma: la hoja dice qué firmó y cómo respondió lo demás", async () => {
+    const f = await clinicalFixture()
+    const add = () =>
+      f.run((tx) => addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }))
+    const [first, second] = [await add(), await add()]
+    const budget = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [first.id, second.id] }))
+    await f.run((tx) =>
+      decideBudget(
+        tx,
+        ...f.args,
+        budget.id,
+        {
+          decisions: [
+            { planItemId: first.id, decision: "aceptado" },
+            { planItemId: second.id, decision: "pospuesto" },
+          ],
+          decidedByContactId: f.patient.personId,
+          signature: { strokes },
+        },
+        { inPerson: true },
+      ),
+    )
+    const words = async () => (await f.run((tx) => buildBudgetSnapshot(tx, "org_a", f.patient.id, budget.id))).decisionWords
+    expect(await words()).toMatchObject({ text: "Aceptó una parte y firmó en la clínica", signedAll: true })
+    // Días después acepta lo otro por su enlace: eso no lo firmó.
+    await f.run((tx) =>
+      decideBudget(
+        tx,
+        "org_a",
+        null,
+        f.patient.id,
+        budget.id,
+        { decisions: [{ planItemId: second.id, decision: "aceptado" }], decidedByContactId: f.patient.personId },
+        { skipOwnPlan: true, via: "enlace" },
+      ),
+    )
+    const later = await words()
+    expect(later).toMatchObject({ text: "Aceptó por su enlace", signedAll: false })
+    expect(later?.signature?.accepted).toEqual(["Tratamiento propio"])
+    expect(later?.signature?.note).toMatch(/Firma electrónica simple/)
   })
 
   it("la firma de la demo es una firma válida", () => {
