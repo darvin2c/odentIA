@@ -2,17 +2,14 @@ import { diagnosisCodeLabel } from "@odentia/clinical"
 import { Button, buttonVariants } from "@odentia/ui"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
-import type { AgendaAppointment } from "../../lib/agenda"
 import { allergyName, allergyRank, allergySeverityWord, bySeverity } from "../../lib/allergies"
 import { useMemberName, useMyUserId, usePermission } from "../../lib/crm"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
-import { appointmentLine } from "../../lib/patient-appointments"
 import type { OpenEncounterBrief, PatientHealth, PatientSummary } from "../../lib/patients"
 import { usePersonArchived } from "../../lib/person-archived"
 import { AllergyQuickActions } from "./allergies-card"
 import { EncounterReadDrawer } from "./encounter-read-drawer"
 import { SummaryCard } from "./resumen-tab"
-import { openAppointmentAnywhere, openBookingAnywhere } from "../agenda/schedule-host"
 
 /** Lo que le falta a la atención, dicho para quien no necesariamente la lleva. */
 const MISSING_LABELS: Record<OpenEncounterBrief["missing"][number], string> = {
@@ -216,8 +213,8 @@ function dayOf(iso: string): string {
 
 /**
  * La última atención cerrada: cuándo, por qué, quién y qué encontró (los
- * diagnósticos y las piezas), con «Ver» para leerla entera: comparte fila con
- * «Próxima cita» y cada dato llega a 2 líneas como máximo.
+ * diagnósticos y las piezas), con «Ver» para leerla entera; cada dato llega a 2
+ * líneas como máximo.
  */
 export function LastVisitCard({
   patientId,
@@ -301,80 +298,6 @@ export function LastVisitCard({
         // «Atender» ya está en la cabecera, siempre a la vista.
         <p className="text-sm text-muted-foreground">Todavía no tiene atenciones</p>
       )}
-    </SummaryCard>
-  )
-}
-
-/**
- * La próxima cita con el teléfono para avisarle: lo mismo que recepción ve en
- * su Resumen. «Ver la cita» la abre entera, ahí mismo. Sin cita por venir,
- * «Reservar cita».
- */
-export function UpcomingCard({
-  patientId,
-  patientName,
-  upcoming,
-  loading,
-  failed,
-  phone,
-  bookElsewhere = false,
-  now,
-}: {
-  patientId: string
-  /** Para «Nueva cita»: la persona ya puesta. */
-  patientName: string
-  upcoming: AgendaAppointment | null
-  loading: boolean
-  failed: boolean
-  /** «Teléfono +51 987 654 305 · WhatsApp», ya dicho. */
-  phone: string
-  /**
-   * Hay un control por reservar: «Reservar cita» va en su fila y aquí no se repite
-   * (ya está en la cabecera; revisión del 7 nov).
-   */
-  bookElsewhere?: boolean
-  /** El reloj de la Agenda (`useScheduleNow`): «espera N min» avanza solo. */
-  now: string
-}): React.JSX.Element {
-  const canBook = usePermission("appointments.write") && !bookElsewhere
-  const archived = usePersonArchived()
-  return (
-    <SummaryCard
-      title="Próxima cita"
-      action={
-        upcoming && !loading && !failed ? (
-          <Button type="button" size="sm" variant="outline" onClick={() => openAppointmentAnywhere(upcoming.id)}>
-            Ver la cita
-          </Button>
-        ) : undefined
-      }
-    >
-      <div className="flex flex-col gap-1 text-sm">
-        {loading ? (
-          <p className="text-muted-foreground">Consultando…</p>
-        ) : failed ? (
-          <p className="text-muted-foreground">No disponible</p>
-        ) : upcoming ? (
-          <p className="line-clamp-2 font-medium">
-            {appointmentLine(upcoming, new Date(now))}
-          </p>
-        ) : (
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-muted-foreground">Sin cita por venir</p>
-            {canBook && !archived ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => openBookingAnywhere({ patient: { id: patientId, name: patientName }, lockedPatient: true })}
-              >
-                Reservar cita
-              </Button>
-            ) : null}
-          </div>
-        )}
-        <p className="text-muted-foreground">{phone}</p>
-      </div>
     </SummaryCard>
   )
 }

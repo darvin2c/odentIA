@@ -271,15 +271,20 @@ export function isControlWindowOpen(
 
 /**
  * Una cita por venir le sirve al control pendiente: cae, en días de la zona de
- * la clínica, desde que abre su ventana. Al firmar esa atención el control se
- * cumple, así que no está «por reservar». La usan «Qué sigue» y el Resumen.
+ * la clínica, desde que abre su ventana hasta 30 días después de su fecha, como
+ * `appointmentServesControlSql` (ADR 0152). Una cita mucho más lejana no lo
+ * cumple a tiempo: el control sigue «por reservar» (QA del 8 nov, M6: la ficha
+ * decía que una resina de noviembre cumplía un control de mayo y el Plan, que
+ * no tenía cita). La usan «Qué sigue», el Resumen y el Plan.
  */
 export function appointmentServesControl(
   control: { dueAt: Date; createdAt: Date },
   appointmentAt: Date,
   timezone: string,
 ): boolean {
-  return dayKeyIn(appointmentAt, timezone) >= dayKeyIn(controlWindowStart(control), timezone)
+  const day = dayKeyIn(appointmentAt, timezone)
+  const latest = new Date(control.dueAt.getTime() + CONTROL_SERVED_DAYS_AFTER * DAY_MS)
+  return day >= dayKeyIn(controlWindowStart(control), timezone) && appointmentAt.getTime() <= latest.getTime()
 }
 
 /**

@@ -335,6 +335,10 @@ it("cada subruta del paciente exige solo el permiso de su dominio", async () => 
   expect((await get("reception", "/next-step")).status).toBe(200)
   expect((await get("cashier", "/next-step")).status).toBe(200)
   expect((await get("member", "/next-step")).status).toBe(403)
+  // La lista del Resumen, con el mismo permiso.
+  expect((await get("reception", "/next-steps")).status).toBe(200)
+  expect((await get("cashier", "/next-steps")).status).toBe(200)
+  expect((await get("member", "/next-steps")).status).toBe(403)
   // Coordinación: quien agenda la consulta sin leer la ficha; caja no.
   const coordination = await get("reception", "/coordination")
   expect(coordination.status).toBe(200)
