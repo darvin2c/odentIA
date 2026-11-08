@@ -1,5 +1,5 @@
 {
-  "id": "bed08a2b-d286-48c2-af42-23e8c03d65d0",
+  "id": "d394cbc0-f4bd-458d-8283-52ae82ba83cf",
   "prevId": "43d00f38-392c-4ac3-bb06-738fbb345a1c",
   "version": "7",
   "dialect": "postgresql",
@@ -31469,6 +31469,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "brand_color": {
+          "name": "brand_color",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -31541,6 +31547,10 @@
         "org_profile_sheet_size_check": {
           "name": "org_profile_sheet_size_check",
           "value": "\"org_profile\".\"sheet_size\" IN ('A4','Letter')"
+        },
+        "org_profile_brand_color_check": {
+          "name": "org_profile_brand_color_check",
+          "value": "\"org_profile\".\"brand_color\" IS NULL OR \"org_profile\".\"brand_color\" ~ '^#[0-9a-f]{6}$'"
         },
         "org_profile_diagnosis_system_check": {
           "name": "org_profile_diagnosis_system_check",

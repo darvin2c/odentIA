@@ -5,7 +5,7 @@ import { TextDecoder } from "node:util"
 import { SUGGESTED_CONSENT_TEMPLATES, type SuggestedConsentTemplate } from "@odentia/clinical"
 import { TREATMENT_KIND_KEYS, TREATMENT_SCOPES, validateLeavesFinding } from "@odentia/dental"
 import { expect, it } from "vitest"
-import { loadPatientGuides } from "./procedure-codes.js"
+import { librarySessions, loadPatientGuides } from "./procedure-codes.js"
 
 // Los seeds se leen como UTF-8 estricto en runtime: un byte latin-1 suelto
 // se convierte en U+FFFD silencioso (mojibake en pantalla). Estos tests lo
@@ -330,4 +330,30 @@ it("cada consentimiento sugerido de odentIA se une a tratamientos que existen en
     }
   }
   check(keysOf("biblioteca.csv"), SUGGESTED_CONSENT_TEMPLATES)
+})
+
+it("las sesiones habituales: de tratamientos de su biblioteca, de 2 a 60, y nunca más visitas que las que se le explican al paciente", () => {
+  const keysOf = (file: string) =>
+    new Set(
+      strictRead(file)
+        .split("\n")
+        .slice(1)
+        .filter(Boolean)
+        .map((line) => line.split(",")[0]!),
+    )
+  const dental = librarySessions("biblioteca_sesiones.csv", keysOf("biblioteca.csv"))
+  const medical = librarySessions("biblioteca_medica_sesiones.csv", keysOf("biblioteca_medica.csv"))
+  // Una clave de la otra biblioteca no vale: cada una siembra solo lo suyo.
+  expect(() => librarySessions("biblioteca_medica_sesiones.csv", keysOf("biblioteca.csv"))).toThrow(/no está/)
+  // Lo que suele hacerse en una cita no está (vale 1): la endodoncia, por ejemplo (ADR 0164).
+  expect(dental.get("endodoncia-posterior-vital")).toBeUndefined()
+  expect(dental.get("corona-de-porcelana")).toBe(2)
+  expect(medical.get("control-prenatal-7-o-mas")).toBe(8)
+  // Si la explicación sugerida dice cuántas visitas, las sesiones no pasan de su máximo.
+  const guides = loadPatientGuides([...keysOf("biblioteca.csv"), ...keysOf("biblioteca_medica.csv")])
+  for (const [key, sessions] of [...dental, ...medical]) {
+    const visits = guides.get(key)?.visits
+    const most = visits ? Math.max(...(visits.match(/\d+/g) ?? []).map(Number)) : null
+    if (most !== null) expect(sessions, key).toBeLessThanOrEqual(most)
+  }
 })

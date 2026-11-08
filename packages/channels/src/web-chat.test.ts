@@ -12,7 +12,7 @@ import {
   webChatAdapter,
 } from "./web-chat.js"
 
-const config = { widgetColor: "#0f766e", greeting: "Hola, ¿en qué podemos ayudarte?" }
+const config = { greeting: "Hola, ¿en qué podemos ayudarte?" }
 
 function sig(rawBody: string): string {
   return `sha256=${createHmac("sha256", "secreto-webhook").update(rawBody, "utf8").digest("hex")}`

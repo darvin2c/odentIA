@@ -57,6 +57,7 @@ import {
   listPlanItems,
   listTreatmentPlans,
   markAllergiesReviewed,
+  markHealthDenied,
   PATIENT_AVATAR_MAX_BYTES,
   PATIENT_AVATAR_MIME_EXT,
   registerPatient,
@@ -88,6 +89,7 @@ import {
   updateEncounterDraft,
   updatePatient,
   updatePlanItem,
+  reopenPlanItemForSession,
   updatePlanItemPlanning,
   voidEncounter,
   voidEncounterDiagnosis,
@@ -226,6 +228,9 @@ const allergyAddInput = z
   .object({ ...allergySubstance, severity: z.string().max(20).nullish(), reaction: z.string().max(2000).nullish() })
   .strict()
 const allergyRemoveInput = z.object({ reason: z.string().min(1, "Elige por qué se quita").max(20) }).strict()
+const healthDeniedInput = z
+  .object({ groups: z.array(z.enum(["conditions", "medications"], "Elige qué niega")).min(1, "Elige qué niega").max(2) })
+  .strict()
 const allergyCodeInput = z
   .object({
     substanceSystem: z.string().min(1, "Elige la sustancia de la lista").max(20),
@@ -408,6 +413,9 @@ const reasonInput = z
     reason: z.string().trim().min(1, "Escribe el motivo").max(2000, "El motivo admite hasta 2000 caracteres"),
   })
   .strict()
+/** `/closing?addSession=a,b`: lo marcado «Falta otra sesión» en el cierre. */
+const closingQuery = z.array(z.uuid()).max(52)
+
 const finalizeInput = z
   .object({
     endedAt: z.iso.datetime({ offset: true, error: "Elige la hora de fin de la lista" }).nullish(),
@@ -967,6 +975,17 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
       withOrgContext(deps.db, orgId, (tx) => addPatientAllergy(tx, orgId, userId, c.req.param("id"), parsed.data)),
     )
   })
+  // «Niega enfermedades» o «No toma medicación» desde la atención, sin rearmar los antecedentes.
+  app.post("/:id/health/denied", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = healthDeniedInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        markHealthDenied(tx, orgId, userId, c.req.param("id"), [...new Set(parsed.data.groups)]),
+      ),
+    )
+  })
   app.post("/:id/health/allergies/reviewed", async (c) => {
     const { orgId, userId } = orgContextOf(c)
     return runService(c, 200, () =>
@@ -1463,9 +1482,12 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
   })
   app.get("/:id/encounters/:encounterId/closing", async (c) => {
     const { orgId, userId } = orgContextOf(c)
+    // «Falta otra sesión» ya elegido en el cierre: el odontograma que se anuncia no lo cuenta como terminado.
+    const parsed = closingQuery.safeParse((c.req.query("addSession") ?? "").split(",").filter(Boolean))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        getEncounterClosing(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId")),
+        getEncounterClosing(tx, orgId, userId, c.req.param("id"), c.req.param("encounterId"), parsed.data),
       ),
     )
   })
@@ -1723,6 +1745,15 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
           c.req.param("itemId"),
           parsed.data,
         ),
+      ),
+    )
+  })
+  // «Falta otra sesión» de lo que se terminó al llegar a sus sesiones previstas (ADR 0164).
+  app.post("/:id/plan/items/:itemId/another-session", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        reopenPlanItemForSession(tx, orgId, userId, c.req.param("id"), c.req.param("itemId")),
       ),
     )
   })

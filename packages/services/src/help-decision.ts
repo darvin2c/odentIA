@@ -185,7 +185,7 @@ export function readHelpSelection(
 }
 
 /** El texto que se muestra, tal cual está en la guía: la respuesta de la pregunta frecuente o el párrafo de la pantalla. */
-export function helpAnswerText(option: HelpOption): string {
+export function helpAnswerText(option: HelpOption, place: string = helpTopicLabel(option.topic)): string {
   if (option.kind === "faq") return option.faq.a
-  return `En ${helpTopicLabel(option.topic)}. ${option.topic.purpose}`
+  return `En ${place}. ${option.topic.purpose}`
 }

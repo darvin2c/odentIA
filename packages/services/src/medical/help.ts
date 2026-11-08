@@ -42,7 +42,7 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
         return [
           {
             ...faq,
-            a: "Con sus sesiones previstas en el Plan, por ejemplo una terapia de diez. Cada cita que lo lleva dice en qué sesión va («sesión 1 de 2») en la Agenda, en la cita y en «Qué sigue», y al reservar la siguiente, «Para esta cita» lo ofrece mientras le falten sesiones. En la atención, «Hecho hoy» dice «Registrar la sesión» hasta que registras su procedimiento; con la sesión de hoy, «Completar» lo cierra. Nada se termina solo: al firmar, lo que llega a sus sesiones previstas pregunta «¿Terminaste?», con «Sí, terminar» y «Falta otra sesión» (le suma una); sin elegir, sigue en curso. Si registras como servicio algo que sigue en curso, te avisa antes de guardar que queda como su sesión siguiente, no como un tratamiento nuevo.",
+            a: "Con sus sesiones previstas en el Plan, por ejemplo una terapia de diez: al indicarlo nace con las sesiones habituales de su servicio (el control prenatal de 7 o más, con ocho), y las cambias ahí mismo o después con «Planificar…». Cada cita que lo lleva dice en qué sesión va («sesión 1 de 2») en la Agenda, en la cita y en «Qué sigue», y al reservar la siguiente, «Para esta cita» lo ofrece mientras le falten sesiones. En la atención, «Hecho hoy» dice «Registrar la sesión» hasta que registras su procedimiento; con la sesión de hoy, «Completar» lo cierra. Al firmar, lo que llega a sus sesiones previstas pregunta «¿Terminaste?» con «Sí, terminar» ya elegido: si firmas sin cambiarlo, queda realizado. Si no terminaste, elige «Falta otra sesión»: le suma una y sigue en curso. Si ya quedó realizado y le falta otra, en el Plan toca «Falta otra sesión»: vuelve a en curso con una sesión más y sale en «Por agendar»; lo firmado y lo cobrado no cambian. Si terminaste antes de lo previsto, «Completar» en «Hecho hoy». Si registras como servicio algo que sigue en curso, te avisa antes de guardar que queda como su sesión siguiente, no como un tratamiento nuevo.",
             ...(faq.forms ? { forms: faq.forms.filter((form) => form !== "endodoncia en dos sesiones") } : {}),
           },
         ]
@@ -123,6 +123,19 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
       }
       // «¿Cuándo vuelve?» y «Por invitar a volver» van con el año del consultorio, no con los 6 meses de odentIA.
       if (faq.q === "¿Cómo dejo dicho cuándo vuelve?") return [{ ...faq, a: faq.a.replace("«En 6 meses»", "«En 1 año»") }]
+      // En el consultorio la ASA no se pide al anestesiar: solo se ve si alguien la clasificó.
+      if (faq.q === "¿Por qué la atención me pide sus enfermedades y su medicación?")
+        return [
+          {
+            ...faq,
+            a: faq.a
+              .replace(" o su riesgo anestésico (ASA)", "")
+              .replace(
+                "La ASA se ve en «Antecedentes y última atención» y se elige en Antecedentes, en «Riesgo anestésico (ASA)».",
+                "Si alguien clasificó su riesgo anestésico (ASA), se ve en «Antecedentes y última atención»; se elige en Antecedentes.",
+              ),
+          },
+        ]
       if (faq.a.includes("«Por invitar a volver» es quien no vino en 6 meses"))
         return [{ ...faq, a: faq.a.replace("no vino en 6 meses", "no vino en 12 meses").replace("hace más de 6 meses", "hace más de 12 meses") }]
       return [faq]
@@ -131,7 +144,14 @@ const EDITS: Record<string, (topic: HelpTopic) => HelpTopic> = {
   servicios: (topic) => ({
     ...topic,
     terms: topic.terms.filter((term) => term !== "deja en la pieza"),
-    faqs: (topic.faqs ?? []).filter((faq) => !faq.q.includes("Deja en la pieza")),
+    faqs: (topic.faqs ?? [])
+      .filter((faq) => !faq.q.includes("Deja en la pieza"))
+      // Las sesiones habituales de un consultorio: el paquete prenatal, no una corona.
+      .map((faq) =>
+        faq.q === "¿Qué son las sesiones habituales de un servicio?"
+          ? { ...faq, a: faq.a.replaceAll("una corona en dos", "el control prenatal de 7 o más en ocho") }
+          : faq,
+      ),
   }),
   organizacion: (topic) => ({
     ...topic,

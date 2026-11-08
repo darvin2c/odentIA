@@ -34,6 +34,7 @@ import {
   type ClosingRequirement,
   type ClosingSession,
   controlDaySaid,
+  type HealthGap,
   type SignatureRegistration,
   signatureRegistrationErrors,
 } from "../../lib/encounters"
@@ -426,16 +427,20 @@ export function ClosingSignatureHint({
   )
 }
 
-/** Lo que se respondió a «¿Terminaste?» de cada tratamiento (sin elegir, no está). */
+/**
+ * Lo que se respondió a «¿Terminaste?» de cada tratamiento. Sin respuesta vale
+ * «Sí, terminar»: es lo que viene elegido y lo que hace el servidor (ADR 0161).
+ */
 export type SessionAnswers = Record<string, "terminar" | "otra">
 
 /**
- * Lo trabajado hoy de un tratamiento de varias sesiones, una línea por cada uno.
- * Lo que con esta atención llega a sus sesiones previstas pregunta «¿Terminaste?»
- * con dos botones sin marcar; lo demás dice que sigue en curso. Nada se termina
- * solo: sin elegir, queda en curso y se completa después.
+ * Lo trabajado hoy de un tratamiento, una línea por cada uno. Lo que con esta
+ * atención llega a sus sesiones previstas pregunta «¿Terminaste?» con «Sí,
+ * terminar» ya elegido y «Falta otra sesión» a un toque, y dice debajo qué
+ * pasará al firmar; lo demás dice que sigue en curso. El mismo bloque va en el
+ * cierre y al firmar con lo dictado.
  */
-function ClosingSessions({
+export function ClosingSessions({
   sessions,
   labelOf,
   answers,
@@ -445,52 +450,60 @@ function ClosingSessions({
   sessions: { finishing: ClosingSession[]; continuing: ClosingSession[]; notRegistered?: ClosingSession[] }
   labelOf: (session: ClosingSession) => string
   answers: SessionAnswers
-  onAnswer: (planItemId: string, answer: "terminar" | "otra" | null) => void
+  onAnswer: (planItemId: string, answer: "terminar" | "otra") => void
   disabled: boolean
 }): React.JSX.Element | null {
+  const ids = useId()
   const notRegistered = sessions.notRegistered ?? []
   if (sessions.finishing.length === 0 && sessions.continuing.length === 0 && notRegistered.length === 0) return null
   // Una resina de una sesión no dice «sesión 1 de 1»: solo su nombre.
   const line = (session: ClosingSession) =>
     showsSession(session.n, session.m) ? `${labelOf(session)} · ${sessionWords(session.n, session.m)}` : labelOf(session)
+  const choices = [
+    { value: "terminar", label: "Sí, terminar" },
+    { value: "otra", label: "Falta otra sesión" },
+  ] as const
   return (
     <ul aria-label="Tratamientos de hoy" className="flex flex-col gap-2 rounded-lg border p-3">
-      {sessions.finishing.map((session) => {
-        const answer = answers[session.planItemId] ?? null
-        const choose = (next: "terminar" | "otra") => onAnswer(session.planItemId, answer === next ? null : next)
+      {sessions.finishing.map((session, index) => {
+        const answer = answers[session.planItemId] ?? "terminar"
+        const labelId = `${ids}-terminaste-${index}`
         return (
           <li key={session.planItemId} className="flex flex-col gap-2">
-            <span>
+            <span id={labelId}>
               <span className="font-medium">{line(session)}</span> · ¿Terminaste?
             </span>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant={answer === "terminar" ? "default" : "outline"}
-                aria-pressed={answer === "terminar"}
-                disabled={disabled}
-                onClick={() => choose("terminar")}
-              >
-                Sí, terminar
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant={answer === "otra" ? "default" : "outline"}
-                aria-pressed={answer === "otra"}
-                disabled={disabled}
-                onClick={() => choose("otra")}
-              >
-                Falta otra sesión
-              </Button>
-            </div>
+            {/* Siempre hay una elegida: tocar la elegida no la desmarca. */}
+            <ToggleGroup
+              aria-labelledby={labelId}
+              value={[answer]}
+              onValueChange={(next: unknown[]) => {
+                const picked = next[0]
+                if (picked === "terminar" || picked === "otra") onAnswer(session.planItemId, picked)
+              }}
+              disabled={disabled}
+              spacing={2}
+              className="flex-wrap"
+            >
+              {choices.map((choice) => (
+                <ToggleGroupItem key={choice.value} value={choice.value} className={CHIP}>
+                  {answer === choice.value ? <Check aria-hidden className="size-4" /> : null}
+                  {choice.label}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+            <p className="text-xs text-muted-foreground">
+              {answer === "terminar"
+                ? "Al firmar queda realizado."
+                : `Sigue en curso y se prevé una sesión más, la ${session.n + 1}.`}
+            </p>
           </li>
         )
       })}
       {sessions.continuing.map((session) => (
         <li key={session.planItemId} className="text-muted-foreground">
-          Sigue en curso: {line(session)}
+          {/* Si sus sesiones habituales eran más de las que hizo falta, terminarlo es un toque. */}
+          Sigue en curso: {line(session)}. Si ya terminaste, «Completar» en «Hecho hoy».
         </li>
       ))}
       {/* Avisa, no frena: quizá hoy no se pudo hacer. */}
@@ -500,6 +513,61 @@ function ClosingSessions({
         </li>
       ))}
     </ul>
+  )
+}
+
+const HEALTH_GAP_WORDS: Record<Exclude<HealthGap, "asa">, string> = {
+  allergies: "sus alergias",
+  conditions: "sus enfermedades",
+  medications: "su medicación",
+}
+
+function listWords(words: readonly string[]): string {
+  if (words.length <= 1) return words[0] ?? ""
+  return `${words.slice(0, -1).join(", ")} y ${words[words.length - 1]}`
+}
+
+/** «sus alergias, sus enfermedades y su medicación»: lo que se le pregunta (la ASA no se pregunta, se clasifica). */
+export function healthGapWords(gaps: readonly HealthGap[]): string {
+  return listWords(gaps.flatMap((gap) => (gap === "asa" ? [] : [HEALTH_GAP_WORDS[gap]])))
+}
+
+/**
+ * Con anestesia y algo por saber de su salud, el cierre lo dice junto a los
+ * materiales (QA del 8 nov, A2): avisa y deja firmar; la firma guarda lo que
+ * faltaba. Sin anestesia, lo que falta va en «Sin registrar».
+ */
+export function AnesthesiaHealthLine({
+  anesthetics,
+  gaps,
+  onComplete,
+  disabled = false,
+}: {
+  anesthetics: readonly string[]
+  gaps: readonly HealthGap[]
+  /** «Completar en Antecedentes»: los abre encima de la atención. */
+  onComplete?: () => void
+  disabled?: boolean
+}): React.JSX.Element | null {
+  if (anesthetics.length === 0 || gaps.length === 0) return null
+  const asked = healthGapWords(gaps)
+  const missing = [asked ? `preguntarle por ${asked}` : "", gaps.includes("asa") ? "clasificar su riesgo anestésico (ASA)" : ""]
+    .filter(Boolean)
+    .join("; ")
+  return (
+    <div role="note" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning/50 bg-warning-soft p-3">
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <span className="font-medium">Anestesia con su salud por completar</span>
+        <span className="text-xs text-muted-foreground">
+          Se usa {listWords(anesthetics)}. Falta {missing}. Puedes firmar igual: queda anotado lo que faltaba.
+        </span>
+      </div>
+      {onComplete ? (
+        <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={onComplete}>
+          Completar en Antecedentes
+        </Button>
+      ) : null}
+    </div>
   )
 }
 
@@ -529,6 +597,8 @@ export function EncounterClosingDialog({
   onSessionAnswer,
   children,
   nextVisit = null,
+  healthGaps = [],
+  onCompleteHealth,
 }: {
   open: boolean
   form: ClosingForm
@@ -569,11 +639,15 @@ export function EncounterClosingDialog({
   sessionLabel?: (session: ClosingSession) => string
   /** Lo respondido a «¿Terminaste?»; sin `onSessionAnswer` solo se informa. */
   sessionAnswers?: SessionAnswers
-  onSessionAnswer?: (planItemId: string, answer: "terminar" | "otra" | null) => void
+  onSessionAnswer?: (planItemId: string, answer: "terminar" | "otra") => void
   /** Lo que se suma al cierre (el aviso del dictado, por ejemplo). */
   children?: React.ReactNode
   /** «¿Cuándo vuelve?», justo encima de firmar. */
   nextVisit?: React.ReactNode
+  /** Lo que falta saber de su salud, como lo dice el servidor (odentIA también cuenta la ASA). */
+  healthGaps?: HealthGap[]
+  /** «Completar en Antecedentes» desde la línea de anestesia. */
+  onCompleteHealth?: () => void
 }): React.JSX.Element {
   const ids = useId()
   const ProductClosing = productUi().encounter.Closing
@@ -630,7 +704,7 @@ export function EncounterClosingDialog({
                   ))}
                 </ul>
               ) : null}
-              {closing ? <ProductClosing closing={closing} pending={busy} openBlock={onOpenBlock} /> : null}
+              {/* «¿Terminaste?» antes de lo que cambia con su respuesta (el odontograma que se firma). */}
               {closing?.sessions && onSessionAnswer ? (
                 <ClosingSessions
                   sessions={closing.sessions}
@@ -640,6 +714,7 @@ export function EncounterClosingDialog({
                   disabled={busy}
                 />
               ) : null}
+              {closing ? <ProductClosing closing={closing} pending={busy} openBlock={onOpenBlock} /> : null}
               {materials && materials.items.length > 0 ? (
                 <p className="rounded-lg border p-3">
                   <span className="font-medium">Materiales</span>
@@ -647,6 +722,12 @@ export function EncounterClosingDialog({
                   {closingMaterialsWords(materials, activeOrgLocale() ?? "es")}
                 </p>
               ) : null}
+              <AnesthesiaHealthLine
+                anesthetics={closing?.health?.anesthetics ?? []}
+                gaps={healthGaps}
+                onComplete={onCompleteHealth}
+                disabled={busy}
+              />
               {consents.map((need) => {
                 const line = consentLine(need, who)
                 return (

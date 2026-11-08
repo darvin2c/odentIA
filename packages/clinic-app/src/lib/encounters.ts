@@ -10,6 +10,9 @@ import type { Encounter, ProcedureItem } from "./patients"
 
 export type ClosingRequirement = "reason" | "diagnosis" | "evolution" | "signature"
 
+/** Lo que falta saber de su salud: alergias, enfermedades o medicación nunca preguntadas, o la ASA. */
+export type HealthGap = "allergies" | "conditions" | "medications" | "asa"
+
 export interface ClosingCheck {
   ready: boolean
   missing: ClosingRequirement[]
@@ -32,12 +35,19 @@ export interface ClosingCheck {
    * tiene sede o no hay nada que descontar (ADR 0067).
    */
   materials: ClosingMaterials | null
+  /**
+   * Lo que falta saber de su salud (enfermedades o medicación sin preguntar,
+   * ASA sin clasificar) y los anestésicos locales de esos materiales: con
+   * anestesia y algo por saber, el cierre lo avisa. No bloquea.
+   */
+  health?: { gaps: HealthGap[]; anesthetics: string[] }
   /** «¿Cuándo vuelve?» y los controles que esta visita cumple al firmar. */
   controls: ClosingControls
   /**
-   * Lo trabajado hoy de un tratamiento de varias sesiones que sigue abierto:
-   * `finishing` llega con esta atención a sus sesiones previstas (el cierre
-   * pregunta «¿Terminaste?»); `continuing` queda en curso. `n` cuenta esta.
+   * Lo trabajado hoy de un tratamiento abierto: `finishing` llega con esta
+   * atención a sus sesiones previstas (el cierre pregunta «¿Terminaste?» con
+   * «Sí, terminar» elegido y firmar lo termina, ADR 0161); `continuing` queda
+   * en curso. `n` cuenta esta.
    * `notRegistered`: lo que traía la cita y hoy no tiene sesión registrada.
    */
   sessions?: { finishing: ClosingSession[]; continuing: ClosingSession[]; notRegistered?: ClosingSession[] }
@@ -275,8 +285,10 @@ function post<T>(url: string, body?: unknown): Promise<{ data: T }> {
   })
 }
 
-export function fetchEncounterClosing(patientId: string, encounterId: string) {
-  return apiFetch<{ data: ClosingCheck }>(`${base(patientId)}/encounters/${encounterId}/closing`)
+/** `addSession`: lo marcado «Falta otra sesión», para que lo anunciado (el odontograma) no lo dé por terminado. */
+export function fetchEncounterClosing(patientId: string, encounterId: string, addSession: readonly string[] = []) {
+  const query = addSession.length ? `?addSession=${addSession.map(encodeURIComponent).join(",")}` : ""
+  return apiFetch<{ data: ClosingCheck }>(`${base(patientId)}/encounters/${encounterId}/closing${query}`)
 }
 
 export function voidEncounterApi(patientId: string, encounterId: string, reason: string) {

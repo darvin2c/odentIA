@@ -44,7 +44,7 @@ import {
   zonedDateOf,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useId, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
@@ -60,6 +60,7 @@ import { type ConsentNeed, prepareConsents } from "../../lib/encounter-documents
 import {
   CLOSING_REQUIREMENT_LABELS,
   type ClosingRequirement,
+  type ClosingSession,
   type FinalizedControls,
   type FinalizedMaterials,
   fetchEncounterClosing,
@@ -74,7 +75,14 @@ import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { useOrgProfile } from "../../lib/org"
 import { usePageDraftGuard } from "../../lib/page-draft-guard"
 import { untilWritten } from "../../lib/write-barrier"
-import { ageFrom, type Encounter, type EncounterDetail, hcLabel, type PatientFull } from "../../lib/patients"
+import {
+  ageFrom,
+  type Encounter,
+  type EncounterDetail,
+  hcLabel,
+  type PatientFull,
+} from "../../lib/patients"
+import type { HealthGap } from "../../lib/encounters"
 import { productUi } from "../../product/product-ui"
 import { AttendingForNotice } from "../agenda/attending-for-notice"
 import { useNoticesColumnDockBlocker } from "../notices-column"
@@ -89,17 +97,20 @@ import { EncounterBreadcrumb } from "./encounter-breadcrumb"
 import {
   CLOSING_FIELD_MAP,
   ClosingNextVisit,
+  ClosingSessions,
   ClosingSignatureHint,
   type ClosingValues,
   closingControlsBody,
   type DictatedControl,
   EncounterClosingDialog,
+  healthGapWords,
   type SessionAnswers,
   needsNextControlDay,
   SignatureRegistrationFields,
   useClosingForm,
 } from "./encounter-closing"
-import { DeclaredQuestionnaireNotice, EncounterAllergyReview, EncounterContextBody } from "./encounter-context"
+import { DeclaredQuestionnaireNotice, EncounterContextBody, EncounterHealthReview } from "./encounter-context"
+import { useOpenWide } from "./wide-section"
 import type { ProposedDiagnosis } from "./diagnosis-picker"
 import { DiagnosisProposals, EncounterDiagnoses } from "./encounter-diagnoses"
 import { EncounterDocumentsBlock, useEncounterDocuments } from "./encounter-documents"
@@ -401,22 +412,18 @@ function skippedReasonLabel(reason: string | null): string {
 }
 
 /**
- * Lo respondido a «¿Terminaste?» en el cuerpo de `/finalize`, solo de lo que el
- * cierre pregunta hoy: lo que ya no está (se anuló su sesión) no se manda.
+ * Lo respondido a «¿Terminaste?» en el cuerpo de `/finalize`: solo «Falta otra
+ * sesión», de lo que el cierre pregunta hoy (lo que ya no está, porque se anuló
+ * su sesión, no se manda). Lo demás que llega a sus previstas lo termina el
+ * servidor al firmar: «Sí, terminar» es lo que viene elegido (ADR 0161).
  */
 function sessionAnswerBody(
   answers: SessionAnswers,
   sessions: { finishing: Array<{ planItemId: string }> } | undefined,
-): { completePlanItemIds?: string[]; addSessionPlanItemIds?: string[] } {
+): { addSessionPlanItemIds?: string[] } {
   const asked = new Set((sessions?.finishing ?? []).map((session) => session.planItemId))
-  const ids = (answer: "terminar" | "otra") =>
-    Object.entries(answers).flatMap(([id, chosen]) => (chosen === answer && asked.has(id) ? [id] : []))
-  const complete = ids("terminar")
-  const addSession = ids("otra")
-  return {
-    ...(complete.length ? { completePlanItemIds: complete } : {}),
-    ...(addSession.length ? { addSessionPlanItemIds: addSession } : {}),
-  }
+  const addSession = Object.entries(answers).flatMap(([id, chosen]) => (chosen === "otra" && asked.has(id) ? [id] : []))
+  return addSession.length ? { addSessionPlanItemIds: addSession } : {}
 }
 
 export function EncounterEditor({
@@ -503,6 +510,8 @@ export function EncounterEditor({
   const [finalizedMaterials, setFinalizedMaterials] = useState<FinalizedMaterials | null>(null)
   // Lo que el cierre hizo con sus controles: «Atención finalizada» dice qué verá recepción.
   const [finalizedControls, setFinalizedControls] = useState<FinalizedControls | null>(null)
+  /** Lo que la firma iba a terminar y no pudo: sigue en curso, con su motivo. */
+  const [finalizedKeptOpen, setFinalizedKeptOpen] = useState<Array<{ planItemId: string; title: string; reason: string }>>([])
   // «Corregir» desde «Atención finalizada»: el formulario se abre encima del aviso, que queda abierto debajo.
   const [correctingMaterials, setCorrectingMaterials] = useState(false)
   const [materialsCorrected, setMaterialsCorrected] = useState(false)
@@ -527,7 +536,7 @@ export function EncounterEditor({
   const [diagnosisPrefill, setDiagnosisPrefill] = useState<ProposedDiagnosis | null>(null)
   /** «Registrar la sesión» desde «Hecho hoy»: el tratamiento con que se abre «Registrar procedimiento». */
   const [sessionPrefill, setSessionPrefill] = useState<string | null>(null)
-  /** «¿Terminaste?» del cierre: lo que se eligió de cada tratamiento de hoy (sin elegir, queda en curso). */
+  /** «¿Terminaste?» del cierre: lo que se cambió de cada tratamiento de hoy (sin cambiar, se termina). */
   const [sessionAnswers, setSessionAnswers] = useState<SessionAnswers>({})
   // Sede de la atención: se guarda al elegirla; si no, el error va en su campo.
   const [branchError, setBranchError] = useState<string | null>(null)
@@ -541,16 +550,25 @@ export function EncounterEditor({
   // Quien lleva la atención es quien la edita y la firma; otro profesional la
   // lee y, para continuarla, toma el relevo.
   const attending = encounter.professionalUserId === myUserId
+  // «Falta otra sesión» cambia lo que el cierre anuncia (el odontograma que se firma): se vuelve a pedir.
+  const keepOpen = Object.entries(sessionAnswers)
+    .flatMap(([id, answer]) => (answer === "otra" ? [id] : []))
+    .sort()
   const closingQuery = useQuery({
-    queryKey: ["encounter-closing", patientId, encounterId],
-    queryFn: () => fetchEncounterClosing(patientId, encounterId),
+    queryKey: ["encounter-closing", patientId, encounterId, keepOpen],
+    queryFn: () => fetchEncounterClosing(patientId, encounterId, keepOpen),
     enabled: canWrite,
+    placeholderData: keepPreviousData,
   })
   const profileQuery = useQuery({
     queryKey: ["professional-profile", "me"],
     queryFn: fetchMyProfessionalProfile,
     enabled: canWrite,
   })
+  // Lo que falta saber de su salud, como lo dice el servidor (la misma regla que guarda la firma;
+  // odentIA también cuenta la ASA). Guardar Antecedentes o responder el aviso refresca el cierre.
+  const healthGaps: HealthGap[] = closingQuery.data?.data.health?.gaps ?? []
+  const openWide = useOpenWide()
   const needsRegistration = closingQuery.isSuccess && closingQuery.data.data.missing.includes("signature")
   const unsignedConsents: ConsentNeed[] = closingQuery.data?.data.consents ?? []
   const missingConsentSignatures = unsignedConsents.filter((need) => !need.personSigned).length
@@ -603,6 +621,13 @@ export function EncounterEditor({
       return true
     })
   })()
+  /** «Resina… · 36»: el tratamiento de «¿Terminaste?» con su pieza, si la tiene. */
+  const sessionLabelOf = (session: ClosingSession) => {
+    const tooth = attentionItems.find((item) => item.id === session.planItemId)?.toothNumber
+    return tooth != null ? `${session.title} · ${tooth}` : session.title
+  }
+  const answerSession = (planItemId: string, answer: "terminar" | "otra") =>
+    setSessionAnswers((current) => ({ ...current, [planItemId]: answer }))
 
   const valuesRef = useRef<DraftValues>({
     presentIllness: encounter.presentIllness ?? "",
@@ -1042,6 +1067,7 @@ export function EncounterEditor({
     setFinalizedBudget(null)
     setFinalizedMaterials(null)
     setFinalizedControls(null)
+    setFinalizedKeptOpen([])
     setCorrectingMaterials(false)
     setMaterialsCorrected(false)
     setBudgetSent(false)
@@ -1065,6 +1091,8 @@ export function EncounterEditor({
   const finalizeWith = async (value: ClosingValues): Promise<void> => {
     if (childCountRef.current > 0) return
     const signIds = signIdsRef.current
+    // Lo que el cierre pregunta hoy; con lo dictado, el cierre ya confirmado.
+    let askedSessions = closingQuery.data?.data.sessions
     signIdsRef.current = null
     setFinalizing(true)
     try {
@@ -1086,10 +1114,20 @@ export function EncounterEditor({
         // Lo que quedó sugerido sin confirmar no entra a la historia: se descarta.
         await apiFetch(`/api/patients/${patientId}/encounters/${encounterId}/dictation/discard-pending`, { method: "POST" })
         await dictation.refresh()
-        // Con consentimientos por firmar, sigue al cierre para firmarlos o decir por qué se sigue sin ellos.
-        if (unsignedConsents.length > 0) {
-          // El control dictado ya es suyo: el cierre lo dice en vez de preguntar cuándo vuelve.
-          await refreshClosing()
+        // Lo confirmado cambia el cierre: el control dictado ya es suyo y un tratamiento
+        // dictado puede llegar hoy a sus sesiones previstas.
+        const shown = new Set((closingQuery.data?.data.sessions?.finishing ?? []).map((session) => session.planItemId))
+        const fresh = await queryClient.fetchQuery({
+          queryKey: ["encounter-closing", patientId, encounterId, keepOpen],
+          queryFn: () => fetchEncounterClosing(patientId, encounterId, keepOpen),
+          staleTime: 0,
+        })
+        askedSessions = fresh.data.sessions
+        const newlyFinishing = (fresh.data.sessions?.finishing ?? []).some((session) => !shown.has(session.planItemId))
+        // Con consentimientos por firmar, o algo que la firma terminaría sin haberlo
+        // mostrado, sigue al cierre: ahí se firman o se dice por qué no, y «¿Terminaste?»
+        // viene en «Sí, terminar» con «Falta otra sesión» a un toque.
+        if (unsignedConsents.length > 0 || newlyFinishing) {
           setConfirmWithDictation(false)
           return
         }
@@ -1105,6 +1143,7 @@ export function EncounterEditor({
           budget: FinalizedBudget | null
           materials?: FinalizedMaterials | null
           controls?: FinalizedControls
+          keptOpen?: Array<{ planItemId: string; title: string; reason: string }>
         }
       }>(`/api/patients/${patientId}/encounters/${encounterId}/finalize`, {
         method: "POST",
@@ -1112,8 +1151,8 @@ export function EncounterEditor({
           ...(endedAt ? { endedAt } : {}),
           // «Seguir sin él»: solo si falta algún consentimiento.
           ...(unsignedConsents.length > 0 ? { consentSkipReason: value.consentSkipReason.trim() } : {}),
-          // «¿Terminaste?»: solo lo que se respondió; lo demás queda en curso.
-          ...sessionAnswerBody(sessionAnswers, closingQuery.data?.data.sessions),
+          // «¿Terminaste?»: «Falta otra sesión»; lo demás que llega a sus previstas se termina.
+          ...sessionAnswerBody(sessionAnswers, askedSessions),
           // «¿Cuándo vuelve?» y los controles que cumple esta visita (ADR 0152).
           ...closingControlsBody(value, closingControls, dictatedControl(signIds)),
         }),
@@ -1125,6 +1164,7 @@ export function EncounterEditor({
       setFinalizedBudget(result.data.budget ?? null)
       setFinalizedMaterials(result.data.materials ?? null)
       setFinalizedControls(result.data.controls ?? null)
+      setFinalizedKeptOpen(result.data.keptOpen ?? [])
       setFinalizedBilling(result.data.billing)
       // El control nuevo o cumplido cambia su Plan y lo que falta agendar.
       if (result.data.controls?.next || result.data.controls?.fulfilled.length)
@@ -1406,10 +1446,16 @@ export function EncounterEditor({
   const unrecorded = closingSections
     .filter((section) => section.empty && !(section.key === "plan" && closingControls))
     .map((section) => section.title.toLowerCase())
+  // Lo que nunca se le preguntó de su salud también es algo sin registrar; con anestesia lo dice
+  // aparte, junto a los materiales, y no se repite aquí. La ASA solo cuenta con anestesia.
+  const withAnesthesia = (closingQuery.data?.data.health?.anesthetics.length ?? 0) > 0
+  const unaskedHealth = healthGaps.filter((gap) => gap !== "asa")
+  const unrecordedAll =
+    !withAnesthesia && unaskedHealth.length > 0 ? [...unrecorded, healthGapWords(unaskedHealth)] : unrecorded
   // Lo de las adendas ya lo dice el subtítulo del cierre: una sola vez.
   const finalizeDescription = [
     recorded.length > 0 ? `Registrado: ${recorded.join("; ")}.` : "",
-    unrecorded.length > 0 ? `Sin registrar: ${unrecorded.join(", ")}.` : "",
+    unrecordedAll.length > 0 ? `Sin registrar: ${unrecordedAll.join(", ")}.` : "",
   ]
     .filter(Boolean)
     .join(" ")
@@ -1514,7 +1560,7 @@ export function EncounterEditor({
   }
   const contextSurface = {
     title: "Antecedentes y última atención",
-    description: "Solo lectura: se editan en Clínica.",
+    description: "Solo lectura: se editan en Antecedentes de su ficha.",
     onClose: () => setContextOpen(false),
     children: <EncounterContextBody patientId={patientId} encounterId={encounterId} />,
   }
@@ -2144,7 +2190,7 @@ export function EncounterEditor({
 
       <DeclaredQuestionnaireNotice patientId={patientId} patient={patient} disabled={locked} />
 
-      {attending ? <EncounterAllergyReview patientId={patientId} patient={patient} disabled={locked} /> : null}
+      {attending ? <EncounterHealthReview patientId={patientId} patient={patient} disabled={locked} /> : null}
       {/* La alergia dictada (o «niega alergias») va donde se pide revisarlas, junto a las alertas (issue 109). */}
       {attending ? <DictationBlockSuggestions session={dictation} kind="alergia" /> : null}
 
@@ -2566,6 +2612,15 @@ export function EncounterEditor({
         consents={unsignedConsents}
         closing={closingQuery.data?.data ?? null}
         materials={closingQuery.data?.data.materials ?? null}
+        healthGaps={healthGaps}
+        onCompleteHealth={
+          openWide
+            ? () => {
+                setConfirmOpen(false)
+                openWide({ id: "antecedentes", review: true })
+              }
+            : undefined
+        }
         missing={missing}
         onRegister={(requirement) => {
           setConfirmOpen(false)
@@ -2588,19 +2643,9 @@ export function EncounterEditor({
           if (!finalizing) setConfirmOpen(false)
         }}
         signatureHint={signatureHint}
-        sessionLabel={(session) => {
-          const tooth = attentionItems.find((item) => item.id === session.planItemId)?.toothNumber
-          return tooth != null ? `${session.title} · ${tooth}` : session.title
-        }}
+        sessionLabel={sessionLabelOf}
         sessionAnswers={sessionAnswers}
-        onSessionAnswer={(planItemId, answer) =>
-          setSessionAnswers((current) => {
-            const next = { ...current }
-            if (answer) next[planItemId] = answer
-            else delete next[planItemId]
-            return next
-          })
-        }
+        onSessionAnswer={answerSession}
         nextVisit={<ClosingNextVisit form={closingForm} controls={closingControls} busy={finalizing} />}
       >
         {finalizeDescription ? <p className="text-xs text-muted-foreground">{finalizeDescription}</p> : null}
@@ -2641,6 +2686,15 @@ export function EncounterEditor({
         }}
       >
         {signFields}
+        {closingQuery.data?.data.sessions ? (
+          <ClosingSessions
+            sessions={closingQuery.data.data.sessions}
+            labelOf={sessionLabelOf}
+            answers={sessionAnswers}
+            onAnswer={answerSession}
+            disabled={finalizing}
+          />
+        ) : null}
       </DictationSignDialog>
 
       {/* Cierre de la atención: qué quedó por cobrar y qué no, con su porqué. */}
@@ -2692,6 +2746,16 @@ export function EncounterEditor({
           ) : null}
           {finalizedControls && (finalizedControls.next || finalizedControls.fulfilled.length > 0) ? (
             <p className="text-sm">{finalizedControlsWords(finalizedControls)}</p>
+          ) : null}
+          {/* Lo que se iba a terminar al firmar y no se pudo: sigue en curso, y se dice por qué. */}
+          {finalizedKeptOpen.length > 0 ? (
+            <ul role="status" className="flex flex-col gap-1 text-sm text-warning">
+              {finalizedKeptOpen.map((item) => (
+                <li key={item.planItemId}>
+                  «{item.title}» sigue en curso: {item.reason}.
+                </li>
+              ))}
+            </ul>
           ) : null}
           {skippedLines.length > 0 ? (
             <ul className="flex flex-col gap-1 text-sm text-muted-foreground">

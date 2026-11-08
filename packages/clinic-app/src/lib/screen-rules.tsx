@@ -102,6 +102,15 @@ export function commissionsHeading(can: Can, myName: string | undefined): { canW
   return { canWrite, title: canWrite ? "Comisiones" : MY_COMMISSIONS_TITLE, subtitle: canWrite ? COMMISSIONS_ADMIN_SUBTITLE : myName }
 }
 
+/**
+ * El subtítulo de Finanzas en la pestaña de comisiones: quien administra, qué es; quien solo ve lo suyo,
+ * «Mis honorarios». Sin acceso a comisiones (caja) no hay honorarios que nombrar: ninguno.
+ */
+export function financeCommissionsSubtitle(access: Pick<FinanceAccess, "commissions" | "commissionsWrite">): string | null {
+  if (!access.commissions) return null
+  return access.commissionsWrite ? COMMISSIONS_ADMIN_SUBTITLE : MY_COMMISSIONS_TITLE
+}
+
 // --- Inventario -----------------------------------------------------------------------------
 
 export function inventoryAccess(can: Can) {

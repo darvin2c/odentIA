@@ -1,8 +1,9 @@
 /**
  * Un tratamiento de varias sesiones se ve como tal (QA del 6 nov): la reserva
  * ofrece la segunda sesión aunque ya tenga cita, cada cita dice «sesión 1 de 2»
- * o «sesión 2 de 2», «Hecho hoy» pide registrar la sesión antes de completar y
- * el cierre dice que sigue en curso.
+ * o «sesión 2 de 2», «Hecho hoy» pide registrar la sesión antes de completar,
+ * el cierre dice que sigue en curso y, en la última, «¿Terminaste?» viene en
+ * «Sí, terminar»: firmar sin tocarlo lo termina (QA del 8 nov, X1).
  */
 import type { Page } from "@playwright/test"
 import { tenant } from "./env"
@@ -20,7 +21,7 @@ async function bookingFor(page: Page, name: string): Promise<void> {
   await page.getByRole("option", { name: new RegExp(name) }).click()
 }
 
-test("sesiones: la reserva lleva la segunda, cada cita dice cuál es y el cierre dice que sigue en curso", async ({ owner }, testInfo) => {
+test("sesiones: la reserva lleva la segunda, cada cita dice cuál es, el cierre dice que sigue en curso y la última se termina al firmar", async ({ owner }, testInfo) => {
   test.setTimeout(180_000)
   const { page } = owner
   const slug = owner.org.slug
@@ -111,7 +112,8 @@ test("sesiones: la reserva lleva la segunda, cada cita dice cuál es y el cierre
   const items = await call<Array<{ id: string; status: string; sessionsDone: number }>>(page, "GET", `${apiPath}/plan`, slug)
   expect(items.find((item) => item.id === ids.itemId)).toMatchObject({ status: "en_curso", sessionsDone: 1 })
 
-  // 4. La cita 2: con su sesión registrada llega a las previstas y el cierre pregunta «¿Terminaste?».
+  // 4. La cita 2: con su sesión registrada llega a las previstas y el cierre pregunta «¿Terminaste?»,
+  // con «Sí, terminar» ya elegido.
   const visit2 = await call<{ id: string }>(page, "POST", `${apiPath}/encounters`, slug, { appointmentId: booked[1]!.id, reason: "Sesión 2 de la endodoncia" }, 201)
   await call(page, "PATCH", `${apiPath}/encounters/${visit2.id}`, slug, { evolution: "Obturación de conductos de la 36." })
   await call(page, "POST", `${apiPath}/encounters/${visit2.id}/diagnoses`, slug, { diagnosisCode: "K04.0", diagnosisType: "confirmed", toothNumber: 36 }, 201)
@@ -119,10 +121,23 @@ test("sesiones: la reserva lleva la segunda, cada cita dice cuál es y el cierre
   await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}/encounters/${visit2.id}`))
   await page.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
   const signing2 = page.getByRole("dialog", { name: "Finalizar y firmar" })
-  await expect(signing2.getByText("¿Terminaste?", { exact: false })).toBeVisible()
-  await expect(signing2.getByRole("button", { name: "Sí, terminar" })).toHaveAttribute("aria-pressed", "false")
+  const finished = signing2.getByRole("group", { name: /Endodoncia unirradicular · 36 · sesión 2 de 2 · ¿Terminaste\?/ })
+  await expect(finished.getByRole("button", { name: "Sí, terminar" })).toHaveAttribute("aria-pressed", "true")
+  await expect(finished.getByRole("button", { name: "Falta otra sesión" })).toHaveAttribute("aria-pressed", "false")
+  await expect(signing2.getByText("Al firmar queda realizado.")).toBeVisible()
+  // El odontograma que se anuncia ya cuenta lo que la firma termina.
+  await expect(signing2.getByText(/El odontograma queda firmado como «Culminación/)).toBeVisible()
   await views("cierre-terminaste")
-  await signing2.getByRole("button", { name: "Sí, terminar" }).click()
+  // «Falta otra sesión» dice qué pasará; tocar otra vez la elegida no deja ninguna.
+  await finished.getByRole("button", { name: "Falta otra sesión" }).click()
+  await expect(signing2.getByText("Sigue en curso y se prevé una sesión más, la 3.")).toBeVisible()
+  await expect(signing2.getByText(/El odontograma queda firmado/)).toHaveCount(0)
+  await views("cierre-falta-otra")
+  await finished.getByRole("button", { name: "Falta otra sesión" }).click()
+  await expect(finished.getByRole("button", { name: "Falta otra sesión" })).toHaveAttribute("aria-pressed", "true")
+  // Vuelve a «Sí, terminar» y firma: queda realizado sin más.
+  await finished.getByRole("button", { name: "Sí, terminar" }).click()
+  await expect(signing2.getByText("Al firmar queda realizado.")).toBeVisible()
   await signing2.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
   await expect(page.getByRole("dialog", { name: "Atención finalizada" })).toBeVisible()
   const after = await call<Array<{ id: string; status: string; sessionsDone: number }>>(page, "GET", `${apiPath}/plan`, slug)

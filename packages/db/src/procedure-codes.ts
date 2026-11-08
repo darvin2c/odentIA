@@ -86,6 +86,25 @@ export function splitHead(line: string, n: number): string[] {
   return parts
 }
 
+/**
+ * Las sesiones habituales de una biblioteca (ADR 0164): `<archivo>` con
+ * `template_key,sessions`, solo los tratamientos que suelen llevar más de una.
+ * Lo que no está vale 1. Fail closed: una clave que no es de la biblioteca, un
+ * número fuera de 2–60 o una clave repetida fallan antes de tocar la base.
+ */
+export function librarySessions(file: string, keys: ReadonlySet<string>): Map<string, number> {
+  const sessions = new Map<string, number>()
+  for (const line of strictLines(file, "template_key,sessions")) {
+    const [key, raw] = splitHead(line, 2)
+    const value = Number(raw)
+    if (!key || !keys.has(key)) throw new Error(`Sesiones de un tratamiento que no está en ${file}: ${line}`)
+    if (!/^\d+$/.test(raw ?? "") || value < 2 || value > 60) throw new Error(`Sesiones fuera de 2–60 en ${file}: ${line}`)
+    if (sessions.has(key)) throw new Error(`Sesiones repetidas en ${file}: ${key}`)
+    sessions.set(key, value)
+  }
+  return sessions
+}
+
 /** Las listas oficiales leídas de sus CSV, para sembrarlas y para que una biblioteca valide sus códigos. */
 export type ProcedureLists = ReturnType<typeof loadProcedureLists>
 

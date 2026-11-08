@@ -494,8 +494,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo llevo un tratamiento de varias sesiones?",
-        a: "Con sus sesiones previstas en el Plan, por ejemplo una endodoncia en dos. Cada cita que lo lleva dice en qué sesión va («sesión 1 de 2») en la Agenda, en la cita y en «Qué sigue», y al reservar la siguiente, «Para esta cita» lo ofrece mientras le falten sesiones. En la atención, «Hecho hoy» dice «Registrar la sesión» hasta que registras su procedimiento; con la sesión de hoy, «Completar» lo cierra. Nada se termina solo: al firmar, lo que llega a sus sesiones previstas pregunta «¿Terminaste?», con «Sí, terminar» y «Falta otra sesión» (le suma una); sin elegir, sigue en curso. Si registras como servicio algo que sigue en curso en esa pieza, te avisa antes de guardar que queda como su sesión siguiente, no como un tratamiento nuevo.",
-        forms: ["endodoncia en dos sesiones", "segunda sesion", "sesion 2 de 2", "completar tratamiento", "no me deja completar", "tratamiento por sesiones"],
+        a: "Con sus sesiones previstas en el Plan, por ejemplo una corona en dos: al indicarlo nace con las sesiones habituales de su servicio, y las cambias ahí mismo o después con «Planificar…». Cada cita que lo lleva dice en qué sesión va («sesión 1 de 2») en la Agenda, en la cita y en «Qué sigue», y al reservar la siguiente, «Para esta cita» lo ofrece mientras le falten sesiones. En la atención, «Hecho hoy» dice «Registrar la sesión» hasta que registras su procedimiento; con la sesión de hoy, «Completar» lo cierra. Al firmar, lo que llega a sus sesiones previstas pregunta «¿Terminaste?» con «Sí, terminar» ya elegido: si firmas sin cambiarlo, queda realizado. Si no terminaste, elige «Falta otra sesión»: le suma una y sigue en curso. Si ya quedó realizado y le falta otra, en el Plan toca «Falta otra sesión»: vuelve a en curso con una sesión más y sale en «Por agendar»; lo firmado y lo cobrado no cambian. Si terminaste antes de lo previsto, «Completar» en «Hecho hoy». Si registras como servicio algo que sigue en curso en esa pieza, te avisa antes de guardar que queda como su sesión siguiente, no como un tratamiento nuevo.",
+        forms: ["endodoncia en dos sesiones", "segunda sesion", "sesion 2 de 2", "completar tratamiento", "no me deja completar", "tratamiento por sesiones", "se termino y faltaba otra sesion", "reabrir un tratamiento"],
       },
       {
         q: "¿La atención queda unida a su cita?",
@@ -620,6 +620,18 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         forms: ["como empiezo una atencion", "como inicio una atencion", "como abro una atencion", "nueva atencion"],
       },
       {
+        q: "¿Por qué la atención me pide sus enfermedades y su medicación?",
+        a: "Porque nunca se le preguntaron, y un problema del corazón, la presión alta, la diabetes, un anticoagulante o un embarazo cambian la anestesia y lo que se receta. Arriba de la atención, «Pregúntale a…» trae una fila por lo que falta: alergias, enfermedades y medicación, cada una con su respuesta a un toque. «Niega enfermedades» y «No toma medicación» lo dejan anotado con quién y cuándo. Lo que sí tiene se escribe con «Registrar enfermedades o medicación», que abre Antecedentes encima de la atención; al cerrar sigues donde estabas. Si se usa un anestésico local (lidocaína, articaína…) y todavía falta algo de eso o su riesgo anestésico (ASA), el cierre lo dice junto a los materiales. Nada de esto impide firmar: queda anotado lo que faltaba. La ASA se ve en «Antecedentes y última atención» y se elige en Antecedentes, en «Riesgo anestésico (ASA)».",
+        forms: [
+          "por que me pide antecedentes",
+          "aviso de enfermedades y medicacion",
+          "asa antes de la anestesia",
+          "donde pongo la clasificacion asa",
+          "niega enfermedades",
+          "no toma medicacion",
+        ],
+      },
+      {
         q: "¿Cómo dicto una atención?",
         a: "Dentro de la atención, pulsa «Dictar» y habla: Clío ordena lo que dices en sugerencias dentro de cada bloque, y tú las confirmas o firmas. Aparece con Clío encendida (una clínica nueva la trae encendida; se apaga en Agente › Clío) y para quien lleva la atención. Si confirmas algo, al cerrar la atención se cuenta como una consulta de Clío de tu plan; si nadie dicta, no cuesta nada. El micrófono solo se enciende con «Dictar» o «Reanudar», y nada entra a la historia sin que lo confirmes. Lo que dictas para la nota se agrega al texto que ya estaba, no lo reemplaza, y la tarjeta lo dice antes de confirmar.",
         forms: ["como uso el dictado", "dictado", "dictar", "como funciona clio", "como funciona el dictado"],
@@ -671,8 +683,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo le doy acceso al portal?",
-        a: "Lo da quien puede ver su historia (el odontólogo, el administrador o la dueña), porque el portal le muestra sus documentos. En el «…» de su página, «Portal del paciente» (también en Datos › Enlace y portal), «Dar acceso al portal»: quién entra (la persona, o su representante si es menor), comprobaste su identidad comparando el número de su documento con el que tiene en la mano, y cómo le llega (QR si está aquí, o su WhatsApp si te escribió en las últimas 24 horas). Lo que verá no se elige: todo lo suyo que la clínica deja ver. El código de 6 dígitos se lo dices tú, en persona o por llamada: nunca va con el enlace. Recepción no da el acceso: cuando ya lo tiene, le envía el enlace por su WhatsApp y el código le llega en otro mensaje, sin verlo. Su enlace es otra cosa: lo que tiene pendiente (su cita, sus datos, su presupuesto, lo que tiene por firmar) sin crear una cuenta.",
-        forms: ["recepcion no puede dar acceso al portal", "quien da acceso al portal"],
+        a: "Lo puede dar recepción, el odontólogo, el administrador o la dueña. En el «…» de su página, «Portal del paciente» (también en Datos › Enlace y portal), «Dar acceso al portal»: quién entra (la persona, o su representante si es menor), comprobaste su identidad comparando el número de su documento con el que tiene en la mano, y cómo le llega (QR si está aquí, o su WhatsApp si te escribió en las últimas 24 horas). Lo que verá no se elige: todo lo suyo que la clínica deja ver. El código de 6 dígitos se lo dices tú, en persona o por llamada: nunca va con el enlace. Su enlace es otra cosa: lo que tiene pendiente (su cita, sus datos, su presupuesto, lo que tiene por firmar) sin crear una cuenta.",
+        forms: ["recepcion puede dar acceso al portal", "quien da acceso al portal"],
       },
       {
         q: "¿Qué ve el paciente en su portal?",
@@ -686,7 +698,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Qué hago si cambió de teléfono y no entra al portal?",
-        a: "Si lo pide por el chat, Sofi lo deja en «Te espera». En su página, «…» › «Portal del paciente», «Enviar nuevo enlace»: no hace falta volver a comprobar su identidad; el enlace anterior y las sesiones que tenía abiertas dejan de servir. Quien ve la historia puede mostrarle el QR y decirle el código; recepción se lo envía por su WhatsApp, con el código en otro mensaje que no ve. «Quitar acceso» (quien ve la historia) cierra todo, también su acceso guardado.",
+        a: "Si lo pide por el chat, Sofi lo deja en «Te espera». En su página, «…» › «Portal del paciente», «Enviar nuevo enlace»: no hace falta volver a comprobar su identidad; el enlace anterior y las sesiones que tenía abiertas dejan de servir. Puedes mostrarle el QR o enviárselo por su WhatsApp, y el código se lo dices tú. «Quitar acceso» cierra todo, también su acceso guardado.",
       },
     ],
   },
@@ -962,7 +974,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Anulo el ticket o hago una devolución?",
-        a: "«Anular ticket» es para un error al cobrar (otro medio, otro monto, otra persona): deshace la venta y el pago, los productos vuelven a la sede y lo atendido queda por cobrar; después cobras de nuevo y sale otro ticket. Se puede hasta el cierre de caja; después, administración. Si el paciente vuelve otro día, devuelve algo o pide su dinero, abre su ticket y usa «Devolver»: la venta queda, eliges qué devuelve y si vuelve a la sede, y le pagas en el momento o le queda a favor. La devolución tiene su número y se imprime y se envía como el ticket.",
+        a: "«Anular ticket» es para un error al cobrar (otro medio, otro monto, otra persona): deshace la venta y el pago, los productos vuelven a la sede y lo atendido queda por cobrar; después cobras de nuevo y sale otro ticket. Se puede hasta el cierre de caja; después, administración. Si el paciente vuelve otro día, devuelve algo o pide su dinero, abre su ticket y usa «Devolver»: la venta queda, eliges qué devuelve y si vuelve a la sede, y le pagas en el momento o le queda a favor. La devolución tiene su número y se imprime y se envía como el ticket. Si la comisión de ese cobro ya se le pagó al profesional, el aviso de «Anular ticket» lo dice: no frena la anulación, y lo pagado queda por descontar de su próximo pago.",
       },
       {
         q: "¿Dónde busco un ticket de otro día?",
@@ -1050,6 +1062,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         a: "Cada servicio dice su precio de una de tres formas: «Precio exacto», «Desde» (como mínimo, y el final se define en la evaluación) o «Solo con evaluación» (no dice ningún número y ofrece la evaluación). Al agregar servicios de la biblioteca se pregunta una vez «¿Cómo dice Sofi estos precios?», con «Precio exacto» marcado; un servicio propio nace «Solo con evaluación». Para cambiar varios a la vez, márcalos en la lista y elige «Cómo dice el precio». Caja y presupuesto usan siempre la tarifa.",
       },
       {
+        q: "¿Qué son las sesiones habituales de un servicio?",
+        a: "Con cuántas sesiones suele hacerse, por ejemplo una corona en dos. Al indicarlo, el tratamiento nace en el plan con ese número, y en cada paciente se cambia al indicarlo o con «Planificar…». Lo de la biblioteca trae las que suele llevar y las cambias en el formulario del servicio; cambiarlas no toca lo ya indicado. Si se cobra por sesión, el presupuesto suma el precio de cada sesión prevista.",
+        forms: ["sesiones habituales", "cuantas sesiones lleva un servicio", "sesiones por defecto de un tratamiento"],
+      },
+      {
         q: "¿Cómo pongo un precio en dólares?",
         a: "Primero activa la otra moneda en Datos de la clínica; después, el formulario del servicio trae «Moneda del precio». Al cambiarla escribes el precio de nuevo: no se convierte solo, y lo que ya se indicó o se presupuestó sigue con su moneda y su precio. Un servicio tiene un solo precio. Sofi lo dice en esa moneda y agrega, como aproximado, cuánto es hoy en tu moneda: nunca promete ese cambio para un pago futuro.",
         forms: ["precio en dolares", "servicio en dolares", "como cobro un servicio en dolares", "cobrar un servicio en dolares"],
@@ -1105,7 +1122,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Qué pasa si se anula un cobro cuya comisión ya pagué?",
-        a: "Lo que se pagó de más se descuenta del próximo pago de ese profesional en esa moneda, de este mes o de otro, sin dejarlo nunca en negativo. Si el descuento cubre todo, se registra el descuento sin gasto y se le avisa. Su fila dice cuánto queda «por descontar» y, si otro mes tiene cobros por pagar, de qué pago se descuenta: se descuenta solo, sin hacer nada. Si ya lo devolvió o ya no trabaja en la clínica, abre su detalle y, en «Por descontar», elige «Registrar que lo devolvió», con cómo lo devolvió (en efectivo entra a la caja como «Devolución de comisiones», sin su nombre; por transferencia o tarjeta no toca la caja), o «Darlo por saldado», con un motivo corto y sin mover dinero. Las dos dejan lo que debe en cero, también en «Mis honorarios» y en Reportes; queda quién y cuándo, se le avisa y se anulan con su motivo como un pago.",
+        a: "Lo que se pagó de más se descuenta del próximo pago de ese profesional en esa moneda, de este mes o de otro, sin dejarlo nunca en negativo. Si el descuento cubre todo, se registra el descuento sin gasto y se le avisa. Su fila dice cuánto queda «por descontar» y, si otro mes tiene cobros por pagar, de qué pago se descuenta: se descuenta solo, sin hacer nada. Si ya lo devolvió o ya no trabaja en la clínica, abre su detalle y, en «Por descontar», elige «Registrar que lo devolvió», con cómo lo devolvió (en efectivo entra a la caja como «Devolución de comisiones», sin su nombre; por transferencia o tarjeta no toca la caja), o «Darlo por saldado», con un motivo corto y sin mover dinero. Las dos dejan lo que debe en cero, también en «Mis honorarios» y en Reportes; queda quién y cuándo, se le avisa y se anulan con su motivo como un pago. Se guardan en el mes de los cobros anulados, desde el mes que lo registres: ahí, junto a «Ya pagado», se lee «Devolvió …» o «Se dio por saldado …», y en «Mis honorarios» va junto a sus pagos. Si se anula lo devuelto en efectivo con la caja aún abierta, en Caja queda tachado como anulado en Comisiones y deja de sumar; con la caja ya cerrada, sale de la de hoy como «Compensación por anulación».",
         forms: [
           "descuento de comisión",
           "devolución y comisión",
@@ -1132,7 +1149,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo se reparte un tratamiento que hacen dos doctores?",
-        a: "Desde el plan de tratamiento, con sus sesiones previstas: cada cobro se reparte en partes iguales, una por sesión prevista, y cada parte es de quien hizo esa sesión, el día que la hace. Lo cobrado por adelantado de un tratamiento se reparte igual. Lo cobrado de sesiones que aún no se hacen todavía no es de nadie: la lista del mes lo dice aparte, y lo de un tratamiento cancelado antes de terminar no es comisión de nadie. Cada línea dice qué sesión es y de cuántas. Un servicio registrado directo en la atención, sin plan, se cobra entero y su comisión es toda de quien lo registró: para repartirlo, ponlo en el plan con sus sesiones antes de atender.",
+        a: "Desde el plan de tratamiento, con sus sesiones previstas: cada cobro se reparte en partes iguales, una por sesión prevista, y cada parte es de quien hizo esa sesión, el día que la hace. Lo cobrado por adelantado de un tratamiento se reparte igual. Lo cobrado de sesiones que aún no se hacen todavía no es de nadie: la lista del mes lo dice aparte, y lo de un tratamiento cancelado antes de terminar no es comisión de nadie. Cada línea dice qué sesión es y de cuántas. Un servicio registrado directo en la atención, sin plan, se cobra entero; si su servicio es de una sesión, su comisión es toda de quien lo registró, y si suele llevar varias, queda en curso con ellas y se reparte igual.",
         forms: ["comisión por sesión", "tratamiento compartido", "dos doctores un tratamiento", "repartir un tratamiento entre doctores"],
       },
     ],
@@ -1295,12 +1312,15 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Datos de la clínica",
     parent: SETTINGS,
     purpose:
-      "Los datos de tu clínica: el nombre comercial (el que ven tus pacientes) y su logo, la razón social, el documento fiscal, el país, la moneda, la zona horaria y el idioma, con los que se leen las fechas, los importes y los documentos, y la lista de diagnósticos (CIE-10 o CIE-11) en la que se eligen los diagnósticos.",
+      "Los datos de tu clínica: el nombre comercial (el que ven tus pacientes), su logo y el color de su marca, la razón social, el documento fiscal, el país, la moneda, la zona horaria y el idioma, con los que se leen las fechas, los importes y los documentos, y la lista de diagnósticos (CIE-10 o CIE-11) en la que se eligen los diagnósticos.",
     terms: [
       "organización",
       "nombre de la clínica",
       "nombre comercial",
       "logo",
+      "color de la marca",
+      "colores de la clínica",
+      "color",
       "ruc",
       "moneda",
       "zona horaria",
@@ -1322,6 +1342,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       {
         q: "¿Qué nombre de la clínica ven mis pacientes?",
         a: "El nombre comercial, en todo: WhatsApp, «Su enlace», el portal, el registro, el chat de la web y los PDF. La razón social va solo en el comprobante y en los papeles legales. El nombre comercial es obligatorio y se cambia en «Datos de la clínica»; ahí mismo subes el logo, que ven al abrir su registro y su enlace.",
+      },
+      {
+        q: "¿Puedo poner el color de mi clínica?",
+        a: "Sí, en «Datos de la clínica» › «Color de la marca», debajo del logo. Primero salen los colores de tu logo, luego doce sugeridos, y «Elegir otro color» abre la paleta o recibe el código de tu marca. Elegir solo cambia la vista previa: se guarda con «Usar este color» y desde ese momento lo ven tu equipo en la app y tus pacientes en la página de sus citas, la reserva y el chat de tu web; en los documentos va en la línea bajo el logo o, sin logo, en el cuadro de sus iniciales. Cualquier color vale: los botones llevan letra blanca y, si tu color es fuerte como un naranja, uno apenas más oscuro para que se lea; si es claro, como un celeste, lo usan tal cual con letra oscura, y los enlaces van en un tono más oscuro; si se parece al rojo de los errores, te lo dice y puedes usarlo igual. Los fondos grises toman apenas el tono de tu color, sin perder legibilidad. Los colores de error, listo y aviso no cambian, y las recetas, órdenes, descansos y consentimientos ya emitidos quedan como salieron; lo que se vuelve a imprimir, como un presupuesto o un comprobante, sale con el color de hoy, igual que el logo. «Volver al…» quita el tuyo y deja el color con el que viene la app. Lo cambia quien administra la clínica.",
       },
       {
         q: "¿Trabajo con la CIE-10 o con la CIE-11?",
@@ -1801,7 +1825,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Chat web",
     parent: INTEGRATIONS,
     purpose:
-      "El chat de tu sitio web: lo que escriben llega a la misma Bandeja y Sofi responde al momento. Se instala pegando una sola línea en tu sitio; cambiar el color o el saludo no obliga a volver a pegarla. Responde en el primer sitio donde la pegas y en los que tú permites. Al lado puedes probarlo sin publicar: la prueba no se cobra ni cuenta.",
+      "El chat de tu sitio web: lo que escriben llega a la misma Bandeja y Sofi responde al momento. Se instala pegando una sola línea en tu sitio; cambiar el saludo o el color de tu marca (en «Datos de la clínica») no obliga a volver a pegarla. Responde en el primer sitio donde la pegas y en los que tú permites. Al lado puedes probarlo sin publicar: la prueba no se cobra ni cuenta.",
     terms: [
       "widget",
       "chat en mi página",
@@ -1885,10 +1909,13 @@ export function helpTopic(
 }
 
 /** Cómo se llega a la pantalla, dicho como en el menú: «Configuración › Horarios y ausencias». */
-export function helpTopicLabel(topic: HelpTopic): string {
-  return topic.parent && topic.parent !== topic.title
-    ? `${topic.parent} › ${topic.title}`
-    : topic.title
+export function helpTopicLabel(
+  topic: HelpTopic,
+  /** Quien solo ve lo suyo llega por su entrada del menú (`menuLabel`): se nombra como la ve. */
+  options: { own?: boolean } = {},
+): string {
+  const title = options.own && topic.menuLabel ? topic.menuLabel : topic.title
+  return topic.parent && topic.parent !== title ? `${topic.parent} › ${title}` : title
 }
 
 /** El tema de la pantalla donde está la persona: el de la ruta más larga que coincide. */

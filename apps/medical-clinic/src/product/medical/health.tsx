@@ -509,6 +509,7 @@ function MedicalHistorySummary({ answers }: { answers: Rec }) {
 /** latidIA en Antecedentes: el embarazo con fecha en su sección, gineco-obstétricos, hábitos y vacunas. */
 export const medicalHealth: ProductHealthUi = {
   asksPregnancy: false,
+  showsAsa: false,
   InterviewSections: (props) => <MedicalInterviewSections {...props} />,
   Summary: (props) => <MedicalHistorySummary {...props} />,
   validate: (answers, today) => {

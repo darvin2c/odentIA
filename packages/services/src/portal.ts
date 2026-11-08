@@ -343,11 +343,6 @@ export async function issuePortalLink(
   input: IssuePortalLinkInput,
   deliver: {
     linkUrl: (rawLinkToken: string) => string
-    /**
-     * El código va a la persona en otro mensaje de su chat (lo envió recepción,
-     * que no lo ve, ADR 0156). Sin esto, el código se lo dice en persona quien da el acceso.
-     */
-    pinInChat?: boolean
   },
 ): Promise<IssuedPortalLink> {
   const policy = await getPortalPolicy(tx, orgId)
@@ -458,9 +453,7 @@ export async function issuePortalLink(
   // Mensaje genérico y discreto: sin nombres, sin datos clínicos ni PIN.
   const text =
     `Tienes un acceso al portal del paciente: ${url}\nVence el ${vence}. Al abrirlo te pedirá un código ` +
-    (deliver.pinInChat
-      ? `de 6 dígitos: te lo enviamos en el mensaje siguiente. No lo compartas: es personal y vence pronto.`
-      : `de 6 dígitos: pídelo a quien te envió este mensaje. No lo compartas: es personal y vence pronto.`)
+    `de 6 dígitos: pídelo a quien te envió este mensaje. No lo compartas: es personal y vence pronto.`
   const sent = await sendOutbound(tx, orgId, {
     conversationId: conv.id,
     senderKind: "user",
@@ -468,16 +461,6 @@ export async function issuePortalLink(
     fromAction: true,
     content: { type: "text", text },
   })
-  if (deliver.pinInChat) {
-    // Aparte del enlace, en su propio mensaje, y sin nada más.
-    await sendOutbound(tx, orgId, {
-      conversationId: conv.id,
-      senderKind: "user",
-      senderUserId: actorUserId,
-      fromAction: true,
-      content: { type: "text", text: `Tu código para entrar al portal del paciente es ${pin}. No lo compartas con nadie.` },
-    })
-  }
   const [updated] = await tx
     .update(portalLink)
     .set({ deliveryConversationId: conv.id, deliveryMessageId: sent.id, updatedAt: new Date() })

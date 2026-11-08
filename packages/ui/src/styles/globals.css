@@ -44,6 +44,9 @@
     --color-secondary: var(--secondary);
     --color-primary-foreground: var(--primary-foreground);
     --color-primary: var(--primary);
+    --color-primary-fill: var(--primary-fill);
+    --color-primary-fill-foreground: var(--primary-fill-foreground);
+    --color-primary-fill-hover: var(--primary-fill-hover);
     --color-primary-soft: var(--primary-soft);
     --color-primary-soft-foreground: var(--primary-soft-foreground);
     --color-popover-foreground: var(--popover-foreground);
@@ -83,7 +86,8 @@
 /*
  * Tema clínico: primario cian-teal sobre neutros fríos. Los pares de texto y
  * fondo cumplen WCAG 2.2 AA (4,5:1). Un tema de color alternativo solo redefine
- * el bloque «Marca»; superficies, neutros y estados no cambian con él.
+ * el bloque «Marca». El color de una clínica (ADR 0162) además tiñe apenas los neutros
+ * con su tono, sin cambiar su luz; estados, papel y gráficos no cambian con él.
  * `.theme-light` vuelve a este tema dentro de la app en oscuro: lo que se ve como
  * papel (la hoja del consentimiento) es claro siempre, con sus campos y controles.
  */
@@ -121,6 +125,13 @@
     /* Marca */
     --primary: #0e7490;
     --primary-foreground: #ffffff;
+    /* El relleno del botón principal: el primario, salvo un color de clínica claro
+     * (ADR 0162), que se conserva exacto con letra oscura. El primario es siempre el
+     * tono legible para textos, bordes y foco. */
+    --primary-fill: var(--primary);
+    --primary-fill-foreground: var(--primary-foreground);
+    /* Al pasar el mouse se aleja de la letra: más oscuro con letra blanca, más claro con oscura. */
+    --primary-fill-hover: color-mix(in oklab, var(--primary-fill), black 12%);
     --primary-soft: #d9eff5;
     --primary-soft-foreground: #0b5568;
     --ring: #0e7490;
@@ -176,6 +187,10 @@
 }
 
 .dark {
+    /* Un bloque en oscuro dentro de la app (un visor) lleva su relleno con su primario. */
+    --primary-fill: var(--primary);
+    --primary-fill-foreground: var(--primary-foreground);
+    --primary-fill-hover: color-mix(in oklab, var(--primary-fill), black 12%);
     --canvas: #0c1118;
     --background: #0c1118;
     --foreground: #f1f5f9;

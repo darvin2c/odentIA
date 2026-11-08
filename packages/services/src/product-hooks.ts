@@ -367,6 +367,12 @@ export interface ProductHooks {
    */
   budgetRequired: boolean
   /**
+   * Si la clasificación ASA (riesgo anestésico) cuenta como algo que falta
+   * saber antes de anestesiar (odentIA anestesia en el sillón; la consulta de
+   * latidIA no suele hacerlo). Lo mismo que `showsAsa` en la pantalla.
+   */
+  asksAsa: boolean
+  /**
    * «Invitar a volver»: los meses sin venir que lo disparan y los que pasan
    * entre una invitación y la siguiente (odentIA 6, como la limpieza dental;
    * latidIA 12, decisión 16 del issue 229). Es también «Sin venir» de Reportes.
@@ -377,8 +383,13 @@ export interface ProductHooks {
   /**
    * «¿Se puede cerrar?»: lo que el producto informa antes de firmar (odentIA:
    * el odontograma que se firmará y el periodontograma). Informa, no bloquea.
+   * `finishingPlanItemIds`: lo que llega hoy a sus sesiones previstas y la firma
+   * terminará si nadie dice «Falta otra sesión» (ADR 0161); se cuenta como hecho.
    */
-  closingParts(tx: Db, moment: Omit<EncounterMoment, "actorUserId">): Promise<ProductParts>
+  closingParts(
+    tx: Db,
+    moment: Omit<EncounterMoment, "actorUserId"> & { finishingPlanItemIds: string[] },
+  ): Promise<ProductParts>
   /** Lo que el producto agrega al detalle de la atención (odentIA: sus hallazgos del odontograma). */
   encounterDetailParts(tx: Db, moment: Omit<EncounterMoment, "actorUserId">): Promise<ProductParts>
   /** Al firmar la atención, ya cerrada: lo que el producto deja hecho, y lo que el cierre informa. */
@@ -477,6 +488,7 @@ export const NO_PRODUCT_HOOKS: ProductHooks = {
   catalog: NO_CATALOG,
   dictation: null,
   budgetRequired: true,
+  asksAsa: true,
   recallMonths: 6,
   recallControlTitle: "Control de mantenimiento",
   closingParts: async () => ({}),

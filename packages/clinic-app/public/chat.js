@@ -1,6 +1,6 @@
 /*
  * Chat de la clínica para su sitio (fase 6 del pulido de la Bandeja). Se pega
- * una sola línea, que no cambia aunque la clínica cambie el color o el saludo:
+ * una sola línea, que no cambia aunque la clínica cambie el color de su marca o el saludo:
  *
  *   <script src="https://<clínica>.<dominio>/chat.js" async></script>
  *
@@ -37,7 +37,9 @@
     '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>'
 
   function start(info) {
-    var color = /^#[0-9a-fA-F]{6}$/.test(info.color || "") ? info.color : "#0f766e"
+    // El color de la marca de la clínica y la letra que se lee encima, como los calcula el servidor.
+    var color = /^#[0-9a-fA-F]{6}$/.test(info.color || "") ? info.color : "#0e7490"
+    var ink = /^#[0-9a-fA-F]{6}$/.test(info.textColor || "") ? info.textColor : "#fff"
     var name = info.clinicName || "la clínica"
     var small = window.matchMedia("(max-width: 480px)")
     var button = el(
@@ -51,7 +53,7 @@
         borderRadius: "50%",
         border: "0",
         background: color,
-        color: "#fff",
+        color: ink,
         boxShadow: "0 6px 20px rgba(0,0,0,.2)",
         cursor: "pointer",
         zIndex: String(Z),

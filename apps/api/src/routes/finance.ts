@@ -270,7 +270,7 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
   })
 
   app.get("/movements", async (c) => {
-    const { orgId } = orgContextOf(c)
+    const { orgId, memberRole } = orgContextOf(c)
     const parsed = z
       .object({
         branchId: z.uuid(),
@@ -281,7 +281,9 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
       .safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => getDayMovements(tx, orgId, parsed.data)),
+      withOrgContext(deps.db, orgId, (tx) =>
+        getDayMovements(tx, orgId, parsed.data, { seesCommissions: canAccess(memberRole, "commissions.write") }),
+      ),
     )
   })
 

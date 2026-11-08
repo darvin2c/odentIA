@@ -61,6 +61,18 @@ const ALERT_ACTION: Record<SaasAlert["action"], ClinicNoticeAction> = {
   ver_plan: SEE_PLAN,
 }
 
+/**
+ * Cómo se nombra a alguien en «Avísale a …»: su primer nombre, con el tratamiento si lo trae
+ * («Dra. Ana Torres» → «Dra. Ana»), y sin el punto del tratamiento al final, que con el de la
+ * frase quedaría «Dra..».
+ */
+export function callName(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean)
+  const first = words[0] ?? ""
+  const called = first.endsWith(".") && words[1] ? `${first} ${words[1]}` : first
+  return called.replace(/\.+$/, "")
+}
+
 /** Avisos de la franja para esta persona en esta clínica, del más grave al más leve. */
 export async function getClinicNotices(tx: Db, orgId: string, viewer: NoticeViewer, now = new Date()): Promise<ClinicNotice[]> {
   const billing = seesBilling(viewer.role) && viewer.billing !== false
@@ -90,7 +102,7 @@ export async function getClinicNotices(tx: Db, orgId: string, viewer: NoticeView
     .where(and(eq(member.organizationId, orgId), eq(member.role, "owner")))
     .orderBy(asc(member.createdAt))
     .limit(1)
-  const tellOwner = owner?.name ? `Avísale a ${owner.name.split(" ")[0]}.` : "Avísale a quien administra la clínica."
+  const tellOwner = owner?.name ? `Avísale a ${callName(owner.name)}.` : "Avísale a quien administra la clínica."
 
   if (sub && !sub.isDemo) {
     const openCharges = await tx

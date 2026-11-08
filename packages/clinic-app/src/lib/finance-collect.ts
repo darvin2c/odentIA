@@ -443,6 +443,27 @@ export interface TicketReturnable {
   lines: ReturnableLine[]
   methods: CollectSnapshotMethod[]
   returns: TicketReturnSummary[]
+  /** Para quien puede anular: alguna comisión de este cobro ya se pagó y quedará por descontar. */
+  commissionPaid?: boolean
+  /** Solo para quien administra comisiones: de quién y cuánto, en la moneda de lo cobrado. */
+  paidCommissions?: Array<{ professionalUserId: string; professionalName: string | null; currency: string; cents: number }>
+}
+
+/**
+ * Lo que el aviso de «Anular ticket» dice de las comisiones ya pagadas: quien administra comisiones, de
+ * quién y cuánto quedará por descontar; caja, que no ve a quién se le paga cada comisión, solo que se
+ * descontará. Nunca frena la anulación.
+ */
+export function paidCommissionWarnings(
+  returnable: Pick<TicketReturnable, "commissionPaid" | "paidCommissions">,
+  money: (cents: number, currency: string) => string,
+): string[] {
+  if (returnable.paidCommissions && returnable.paidCommissions.length > 0)
+    return returnable.paidCommissions.map(
+      (paid) =>
+        `La comisión de ${paid.professionalName ?? "un profesional que ya no está en el equipo"} ya se pagó: quedará ${money(paid.cents, paid.currency)} por descontar de su próximo pago.`,
+    )
+  return returnable.commissionPaid ? ["Una comisión de este cobro ya se pagó: se descontará del próximo pago."] : []
 }
 
 export function fetchTicketReturnable(patientId: string, ticketId: string): Promise<{ data: TicketReturnable }> {
