@@ -32,6 +32,7 @@ import {
   useFormSurface,
   SkeletonRegion,
 } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -57,6 +58,7 @@ import {
   PLAN_QUERY_KEYS,
   removeBudgetItemsApi,
   reviseBudgetApi,
+  revisionDroppedOptions,
   revisionScope,
   updateBudgetApi,
   totalsOf,
@@ -1157,10 +1159,10 @@ function ReviseBudgetDrawer({
   onClose: () => void
   onSubmit: (itemIds: string[], reason: string) => Promise<unknown>
 }): React.JSX.Element {
-  // Las líneas y lo marcado se fijan al abrir. Sin camino elegido van todos los caminos.
+  // Las líneas y lo marcado se fijan al abrir. Sin opción elegida van todas.
   const [{ lines, groups }] = useState(() => revisionScope(budget))
   const byPath = groups.some((group) => group.options.length > 0)
-  const both = budget.options.length === 2 ? "los dos" : "todos los"
+  const all = budget.options.length === 2 ? "las dos" : "todas las"
   const [initial] = useState(() => ({
     items: lines.map((line) => ({ planItemId: line.planItemId, include: true })),
     reason: "",
@@ -1190,6 +1192,17 @@ function ReviseBudgetDrawer({
       return index === undefined ? "items" : `items[${index}].include`
     },
   })
+  // La opción de la que se desmarcó todo lo suyo sale de la revisión: se dice
+  // junto a ella, sin frenar.
+  const included = useStore(form.store, (state) => state.values.items)
+  const leaving = useMemo(
+    () =>
+      revisionDroppedOptions(
+        budget,
+        new Set(included.filter((item) => item.include).map((item) => item.planItemId)),
+      ),
+    [budget, included],
+  )
   return (
     <FormDrawer
       {...surface}
@@ -1201,13 +1214,14 @@ function ReviseBudgetDrawer({
         if (!surface.isSubmitting) onClose()
       }}
     >
+      <FieldGroup>
       <form.AppField name="items" mode="array">
         {(list) => (
           <list.Group
             legend="Tratamientos de la revisión"
             description={
               byPath
-                ? `No hay camino elegido: la revisión lleva ${both} caminos. Desmarca solo lo que ya no se le ofrece.`
+                ? `La persona aún no elige opción: la revisión lleva ${all} opciones. Desmarca solo lo que ya no se le ofrece.`
                 : undefined
             }
           >
@@ -1235,7 +1249,7 @@ function ReviseBudgetDrawer({
                 // Desmarcar quita el tratamiento de todos los caminos que nombra el grupo.
                 const legend =
                   group.options.length === budget.options.length
-                    ? `Va en ${both} caminos`
+                    ? `Va en ${all} opciones`
                     : group.options.length === 1 && only
                       ? `${only.label}${only.name?.trim() ? ` · ${only.name.trim()}` : ""}`
                       : `Va en ${group.options.map((option) => option.label).join(" y ")}`
@@ -1248,6 +1262,12 @@ function ReviseBudgetDrawer({
                       {legend}
                     </FieldLegend>
                     {checks}
+                    {only && group.options.length === 1 && leaving.has(only.id) ? (
+                      <p role="status" className="text-sm text-warning">
+                        La {only.label} sale de la revisión: la persona ya no la verá como
+                        alternativa.
+                      </p>
+                    ) : null}
                   </FieldSet>
                 )
               })
@@ -1258,6 +1278,7 @@ function ReviseBudgetDrawer({
       <form.AppField name="reason">
         {(field) => <field.TextareaField label="Motivo de la revisión" maxLength={2000} />}
       </form.AppField>
+      </FieldGroup>
     </FormDrawer>
   )
 }

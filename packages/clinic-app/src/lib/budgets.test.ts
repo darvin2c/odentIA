@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { type BudgetLine, type BudgetOption, budgetPaths, commonPlanItemIds, revisionScope } from "./budgets"
+import { type BudgetLine, type BudgetOption, budgetPaths, commonPlanItemIds, revisionDroppedOptions, revisionScope } from "./budgets"
 
 function option(id: string, position: number, extra: Partial<BudgetOption> = {}): BudgetOption {
   return {
@@ -166,5 +166,33 @@ describe("revisionScope", () => {
   it("con una sola opción lleva sus líneas", () => {
     const only = { options: [option("unica", 1, { isRecommended: true })], items: [line("unica", "resina", 150_00)] }
     expect(ids(revisionScope(only).lines)).toEqual(["resina"])
+  })
+})
+
+describe("revisionDroppedOptions", () => {
+  const all = ["resina", "profilaxis", "endodoncia", "corona", "exodoncia", "implante"]
+  const without = (...ids: string[]) => new Set(all.filter((id) => !ids.includes(id)))
+
+  it("con todo marcado no sale ninguna; sin lo propio de un camino, sale ese", () => {
+    expect([...revisionDroppedOptions(ana, new Set(all))]).toEqual([])
+    expect([...revisionDroppedOptions(ana, without("exodoncia"))]).toEqual([])
+    expect([...revisionDroppedOptions(ana, without("exodoncia", "implante"))]).toEqual(["extraer"])
+    // Desmarcar lo común no quita ningún camino.
+    expect([...revisionDroppedOptions(ana, without("resina", "profilaxis"))]).toEqual([])
+  })
+
+  it("el camino que solo lleva lo común sigue mientras vaya algo suyo", () => {
+    const subset = {
+      options: [option("base", 1, { isRecommended: true }), option("mas", 2)],
+      items: [line("base", "resina", 100), line("mas", "resina", 100), line("mas", "exodoncia", 50)],
+    }
+    expect([...revisionDroppedOptions(subset, new Set(["resina", "exodoncia"]))]).toEqual([])
+    expect([...revisionDroppedOptions(subset, new Set(["resina"]))]).toEqual(["mas"])
+  })
+
+  it("si salieran todas no avisa (el servidor deja la primera); con un camino elegido no aplica", () => {
+    expect([...revisionDroppedOptions(ana, new Set(["resina"]))]).toEqual([])
+    const options = ana.options.map((entry) => (entry.id === "extraer" ? { ...entry, decision: "elegida" } : entry))
+    expect([...revisionDroppedOptions({ ...ana, options }, new Set(["resina"]))]).toEqual([])
   })
 })

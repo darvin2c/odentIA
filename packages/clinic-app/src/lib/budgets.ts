@@ -348,6 +348,30 @@ export function revisionScope(budget: Pick<BudgetWithTotals, "items" | "options"
 }
 
 /**
+ * Las opciones que la revisión quitaría con lo marcado (`sent`), con la regla
+ * del servidor (`reviseBudget`): sin camino elegido, sale la opción de la que
+ * se desmarcó todo lo propio suyo; la que solo lleva lo común, si no va nada
+ * suyo. Si salieran todas, el servidor deja la primera: no se avisa nada.
+ */
+export function revisionDroppedOptions(
+  budget: Pick<BudgetWithTotals, "items" | "options">,
+  sent: ReadonlySet<string>,
+): Set<string> {
+  const choosing =
+    budget.options.length > 1 && !budget.options.some((option) => option.decision === "elegida")
+  if (!choosing) return new Set()
+  const common = commonPlanItemIds(budget.items, budget.options.length)
+  const dropped = budget.options.filter((option) => {
+    const mine = optionLines(budget, option.id)
+    const own = mine.filter((line) => !common.has(line.planItemId))
+    return !(own.length > 0 ? own : mine).some((line) => sent.has(line.planItemId))
+  })
+  return dropped.length === budget.options.length
+    ? new Set()
+    : new Set(dropped.map((option) => option.id))
+}
+
+/**
  * El estado de un presupuesto cuando solo se tiene su código (listas de otras
  * pantallas). Con el presupuesto completo, vale su `stateText`, que además dice
  * «Aceptó N de M».
