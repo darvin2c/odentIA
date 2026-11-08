@@ -73,9 +73,23 @@ export function unsupportedFormatMessage(name: string): string {
   return "Solo se admiten JPG, PNG, WebP, PDF o DICOM."
 }
 
-/** ¿El producto guarda la tomografía y la abre en su visor? (odentIA sí; latidIA todavía no.) */
+/** ¿El producto guarda la tomografía y la abre en su visor? (odentIA y latidIA.) */
 export function storesTomography(): boolean {
-  return productUi().documents.imaging.studies
+  return productUi().documents.imaging.tomography !== null
+}
+
+/**
+ * Cómo abre el visor la tomografía del producto: «cbct», la dental (panorámica, arco, piezas);
+ * «ct», la médica (cortes y ventanas en unidades Hounsfield).
+ */
+export function tomographyKind(): "cbct" | "ct" {
+  return productUi().documents.imaging.tomography?.kind ?? "cbct"
+}
+
+/** El nombre de la tomografía en este producto: «Tomografía (CBCT)» o «Tomografía computarizada». */
+export function tomographyTypeLabel(): string {
+  const type = productUi().documents.imaging.tomography?.imageType
+  return imageTypeLabel(type) ?? "Tomografía"
 }
 
 export function categoryLabel(category: string): string {

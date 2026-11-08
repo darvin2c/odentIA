@@ -24,9 +24,10 @@ import type { PatientFull } from "../../lib/patients"
 import { productUi } from "../../product/product-ui"
 import { PlacesField } from "../../product/site-fields"
 import { appWords } from "../../lib/product-words"
+import { tomographyTypeLabel } from "./document-labels"
 
-/** Tope por tomografía (decisión 4 del lienzo; lo valida también la API). */
-export const TOMOGRAPHY_MAX_BYTES = 1024 ** 3
+/** Tope por tomografía, 1,5 GB (ADR 0154; lo valida también la API). */
+export const TOMOGRAPHY_MAX_BYTES = 1.5 * 1024 ** 3
 
 export function formatBytes(bytes: number): string {
   const units = ["B", "KB", "MB", "GB"]
@@ -131,7 +132,7 @@ export function TomographyReview({
       </h3>
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
         <dt className="text-muted-foreground">Tipo</dt>
-        <dd className="font-medium">Tomografía (CBCT)</dd>
+        <dd className="font-medium">{tomographyTypeLabel()}</dd>
         <dt className="text-muted-foreground">Fecha</dt>
         <dd className="font-medium">{dicomDate(candidate.studyDate) ?? "El archivo no la dice"}</dd>
         <dt className="text-muted-foreground">Origen</dt>
@@ -158,8 +159,8 @@ export function TomographyReview({
       ) : null}
       {tooBig && (
         <p role="alert" className="rounded-xl bg-destructive/10 p-3 text-sm text-destructive">
-          Pesa {formatBytes(candidate.totalBytes)} y el máximo por tomografía es 1 GB. Pide al centro
-          de imágenes la tomografía sin su visor.
+          Pesa {formatBytes(candidate.totalBytes)} y el máximo por tomografía es 1,5 GB. Pide al centro
+          de imágenes las series principales, sin su visor.
         </p>
       )}
       {nameCheck === false && candidate.patientName && (
@@ -282,7 +283,8 @@ export function TomographyProgress({
 }
 
 export function tomographyLabel(candidate: StudyCandidate): string {
-  return candidate.institution ? `Tomografía (CBCT) · ${candidate.institution}`.slice(0, 200) : "Tomografía (CBCT)"
+  const type = tomographyTypeLabel()
+  return candidate.institution ? `${type} · ${candidate.institution}`.slice(0, 200) : type
 }
 
 /**
@@ -476,7 +478,7 @@ export function tomographySubmitLabel(flow: TomographyFlow): string {
 export function TomographyDropZone({
   onSelect,
   disabled,
-  hint = "Fotos, PDF, radiografías y tomografías. Hasta 1 GB por tomografía.",
+  hint = "Fotos, PDF, radiografías y tomografías. Hasta 1,5 GB por tomografía.",
 }: {
   onSelect: (selection: SelectedFile[]) => void
   disabled?: boolean
@@ -597,7 +599,7 @@ export function TomographyUploadDrawer({
           <>
             <TomographyDropZone
               onSelect={(selection) => void choose(selection)}
-              hint="Hasta 1 GB por tomografía."
+              hint="Hasta 1,5 GB por tomografía."
             />
             {notFound && (
               <p role="alert" className="text-sm text-destructive">

@@ -73,7 +73,7 @@ export const medicalUi: ProductUi = {
     imaging: {
       types: MEDICAL_IMAGING_TYPES,
       categoryLabels: MEDICAL_CATEGORY_LABELS,
-      studies: false,
+      tomography: { imageType: "tomografia_computarizada", kind: "ct" },
     },
     // El descanso médico, junto a la receta (decisión 8).
     medicalLeave: true,

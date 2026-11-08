@@ -70,6 +70,8 @@ const measurementInput = z
     value: z.number().min(0),
     // La pieza FDI la valida el servicio (también los dientes de leche).
     toothNumber: z.number().int().min(11).max(85).nullish(),
+    // La serie donde se marcó: el servicio comprueba que sea del estudio.
+    seriesInstanceUid: z.string().max(64).nullish(),
   })
   .strict()
 const indexesInput = z.object({ indexes: z.array(z.number().int().min(0)).min(1).max(BATCH) }).strict()

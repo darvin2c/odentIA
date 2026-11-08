@@ -907,7 +907,7 @@ export const PAGES = {
     faq: [
       {
         q: "¿Qué archivos abre?",
-        a: "Radiografías en JPG, PNG o DICOM y tomografías en DICOM: la carpeta del CD del centro de imágenes, un ZIP o los archivos sueltos, hasta 1 GB por estudio. Lee las compresiones JPEG, JPEG-LS, JPEG 2000 y RLE.",
+        a: "Radiografías en JPG, PNG o DICOM y tomografías en DICOM: la carpeta del CD del centro de imágenes, un ZIP o los archivos sueltos, hasta 1,5 GB por estudio. Lee las compresiones JPEG, JPEG-LS, JPEG 2000 y RLE.",
       },
       {
         q: "¿Tengo que instalar un programa?",

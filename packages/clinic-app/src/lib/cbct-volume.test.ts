@@ -43,12 +43,41 @@ describe("volumen de la tomografía", () => {
     )
     expect(volume).toMatchObject({ nx: 80, ny: 80, nz: 72, sx: 1, sy: 1 })
     expect(volume.sz).toBeCloseTo(1)
+    // Un CT con su Rescale Intercept y sin otro Rescale Type está en unidades Hounsfield.
+    expect(volume.hounsfield).toBe(true)
+    expect(volume.fileWindow).toEqual({ center: 700, width: 3000 })
     const plane = 80 * 80
     for (const k of [0, 30, 71]) {
       expect(Array.from(volume.data.subarray(k * plane, k * plane + 40))).toEqual(
         Array.from(toHu(phantom.data[k]!).subarray(0, 40)),
       )
     }
+  })
+
+  it("una CBCT que declara sus grises sin escala («US») no se toma por HU", async () => {
+    const files = phantom.data.slice(0, 12).map((pixels, k) =>
+      encodeDemoCtSlice({
+        width: phantom.size,
+        height: phantom.size,
+        pixels,
+        hounsfield: false,
+        window: { center: 496, width: 992 },
+        voxelMm: phantom.voxelMm,
+        position: [phantom.origin[0], phantom.origin[1], phantom.sliceZ[k]!],
+        instanceNumber: k + 1,
+        studyUid: "2.25.2",
+        seriesUid: "2.25.2.2",
+        frameOfReferenceUid: "2.25.2.3",
+        sopUid: `2.25.2.4.${k + 1}`,
+      }),
+    )
+    vi.stubGlobal("fetch", async (url: string) => new Response(new Uint8Array(files[Number(url.split("/").pop())]!)))
+    const volume = await loadCbctVolume(
+      "prueba-us",
+      files.map((bytes, k) => ({ index: k, url: `memoria/${k}`, sizeBytes: bytes.length, seriesInstanceUid: "2.25.2.2" })),
+    )
+    expect(volume.hounsfield).toBe(false)
+    expect(volume.fileWindow).toEqual({ center: 496, width: 992 })
   })
 
   it("orienta los cortes como el radiólogo: arriba es arriba", () => {
