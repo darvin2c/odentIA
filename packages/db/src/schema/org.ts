@@ -96,6 +96,9 @@ export const orgProfile = pgTable(
     exchangeFactor: numeric("exchange_factor"),
     exchangeRateAt: timestamp("exchange_rate_at", { withTimezone: true }),
     exchangeRateBy: text("exchange_rate_by").references(() => user.id, { onDelete: "set null" }),
+    // El color de la marca (ADR 0157): solo el que eligió la clínica; nulo, el del producto.
+    // Lo escribe solo `setClinicBrandColor`; los tonos legibles se calculan al mostrarlo.
+    brandColor: text("brand_color"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -112,6 +115,7 @@ export const orgProfile = pgTable(
     check("org_profile_budget_valid_days_check", sql`${table.budgetValidDays} BETWEEN 1 AND 365`),
     check("org_profile_product_check", sql`${table.product} IN ('dental','medical')`),
     check("org_profile_sheet_size_check", sql`${table.sheetSize} IN ('A4','Letter')`),
+    check("org_profile_brand_color_check", sql`${table.brandColor} IS NULL OR ${table.brandColor} ~ '^#[0-9a-f]{6}$'`),
     check(
       "org_profile_diagnosis_system_check",
       sql`${table.diagnosisSystem} IS NULL OR ${table.diagnosisSystem} IN ('ICD-10','ICD-11','ICD-10-PE')`,
