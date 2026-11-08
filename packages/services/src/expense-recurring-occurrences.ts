@@ -174,12 +174,14 @@ export async function loadOccurrences(tx: Db, orgId: string, filter: OccurrenceF
   for (const template of live) {
     for (const month of months.get(template.id) ?? []) {
       const payment = paidOf.get(`${template.id}|${month}`)
-      const dueDay = dueDayIn(template.day, month)
+      // Lo que se paga al mes siguiente vence en el mes siguiente (el sueldo de noviembre, el 2 de diciembre).
+      const dueMonth = template.dueNextMonth ? addMonthKey(month, 1) : month
+      const dueDay = dueDayIn(template.day, dueMonth)
       out.push({
         template,
         month,
         dueDay,
-        dueOn: `${month}-${String(dueDay).padStart(2, "0")}`,
+        dueOn: `${dueMonth}-${String(dueDay).padStart(2, "0")}`,
         paid: payment
           ? {
               expenseId: payment.expenseId,
