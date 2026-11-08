@@ -3890,7 +3890,10 @@ export async function paidCommissionsOfTicket(tx: Db, orgId: string, ticketId: s
     join patient_payment_application a on a.organization_id = l.organization_id and a.id = l.application_id
       and a.voided_at is null
     join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id
-      and p.voided_at is null and p.ticket_id = ${ticketId}
+      and p.voided_at is null
+      -- Lo mismo que deshace anularlo: lo que el ticket aplicó (también con saldo a favor de otro) y lo que
+      -- sus pagos cubrieron en otros tickets.
+      and (a.ticket_id = ${ticketId} or p.ticket_id = ${ticketId})
     join patient_charge c on c.organization_id = a.organization_id and c.id = a.charge_id and c.voided_at is null
     where l.organization_id = ${orgId} and l.kind = 'cobro' and l.voided_at is null and l.commission_cents > 0
     group by 1, 2
@@ -4497,7 +4500,13 @@ export interface DayMovementsQuery {
 }
 
 /** Movimientos del día en la zona horaria de la sede (tickets, gastos, efectivo). */
-export async function getDayMovements(tx: Db, orgId: string, query: DayMovementsQuery) {
+export async function getDayMovements(
+  tx: Db,
+  orgId: string,
+  query: DayMovementsQuery,
+  /** Administra comisiones: ve el motivo con que se anuló lo devuelto, que puede nombrar al profesional. */
+  options: { seesCommissions?: boolean } = {},
+) {
   const branchRow = await requireBranch(tx, orgId, query.branchId)
   const timezone = query.timezone ?? (await branchTimezone(tx, orgId, branchRow))
   const { start, end } = dayBoundsUTC(query.day, timezone)
@@ -4533,7 +4542,7 @@ export async function getDayMovements(tx: Db, orgId: string, query: DayMovements
     timezone,
     movements: await withTicketOrigin(tx, orgId, await withoutCommissionPayees(tx, orgId, movements)),
     voidedTickets,
-    voidedMovements: await voidedCommissionReturnsOfDay(tx, orgId, shiftIds, start, end),
+    voidedMovements: await voidedCommissionReturnsOfDay(tx, orgId, shiftIds, start, end, options.seesCommissions ?? false),
   }
 }
 
@@ -4560,6 +4569,7 @@ async function voidedCommissionReturnsOfDay(
   shiftIds: string[],
   start: Date,
   end: Date,
+  seesCommissions: boolean,
 ): Promise<VoidedMovementOfDay[]> {
   if (shiftIds.length === 0) return []
   const rows = await tx
@@ -4588,9 +4598,14 @@ async function voidedCommissionReturnsOfDay(
     amountCents: movement.amountCents,
     createdAt: movement.createdAt,
     voidedAt: movement.voidedAt as Date,
-    voidReason: movement.voidReason,
+    // El motivo es texto libre de Comisiones y puede nombrar a quién era: caja, que no lo ve, lee solo de
+    // dónde se anuló, como en Gastos lee las comisiones sin su nota.
+    voidReason: seesCommissions ? movement.voidReason : COMMISSION_RETURN_VOIDED_REASON,
   }))
 }
+
+/** Lo que caja lee como motivo de una devolución de comisiones anulada. */
+export const COMMISSION_RETURN_VOIDED_REASON = "Se anuló en Comisiones"
 
 /**
  * Ticket, número y persona de cada cobro: la pantalla muestra un renglón por

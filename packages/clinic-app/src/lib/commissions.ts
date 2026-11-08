@@ -276,6 +276,33 @@ export function summaryDiscountWords(
     : `${money(owed)} por descontar del próximo pago`
 }
 
+/**
+ * «Mis honorarios › Meses anteriores»: lo que debe es suyo, no de cada mes, así que se reparte una sola vez
+ * entre los meses con algo por pagar, del más antiguo al más nuevo (el pago de donde se descuenta primero).
+ * Cada mes, cada moneda, lleva lo que le toca: la misma deuda no se repite en cada fila.
+ *
+ * - `owed`: lo que debe hoy en cada moneda (`adjustmentCents` del mes que se mira).
+ * - Devuelve, por `año-mes-moneda`, lo que se descuenta de ese mes y lo que falta pagarle en él.
+ */
+export function previousMonthsDiscounts(
+  previous: ReadonlyArray<CommissionSummary>,
+  owed: ReadonlyMap<string, number>,
+): Map<string, { discountCents: number; pendingCents: number }> {
+  const left = new Map(owed)
+  const out = new Map<string, { discountCents: number; pendingCents: number }>()
+  const views = previous
+    .flatMap((month) => [month, ...(month.others ?? [])])
+    .sort((a, b) => a.year - b.year || a.month - b.month)
+  for (const view of views) {
+    // Lo nuevo del mes, sin pagar: lo que el servidor dice que falta más lo que él ya descontaba.
+    const fresh = Math.max(0, view.pendingCents) + (view.discountCents ?? 0)
+    const discount = Math.min(fresh, left.get(view.currency) ?? 0)
+    left.set(view.currency, (left.get(view.currency) ?? 0) - discount)
+    out.set(`${view.year}-${view.month}-${view.currency}`, { discountCents: discount, pendingCents: fresh - discount })
+  }
+  return out
+}
+
 /** Lo que cerró, en un mes, la deuda de sus cobros anulados después de pagados (ver el servidor). */
 export interface CommissionDebtClosure {
   settlementId: string

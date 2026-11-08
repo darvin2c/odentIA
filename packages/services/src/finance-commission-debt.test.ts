@@ -186,9 +186,12 @@ it("«lo devolvió» en efectivo entra a la caja sin su nombre y deja la deuda e
   // En Caja no desaparece: como un ticket anulado, sigue a la vista con su motivo, sin sumar y sin a quién.
   const afterVoid = await f.run((tx) => getDayMovements(tx, "org_a", { branchId, day: today }))
   expect(afterVoid.movements.find((m) => m.id === done.movementId)).toBeUndefined()
+  // Caja no lee el motivo libre (puede nombrar a quién era), solo de dónde se anuló; quien administra, el suyo.
   expect(afterVoid.voidedMovements).toEqual([
-    expect.objectContaining({ id: done.movementId, concept: "Devolución de comisiones", amountCents: 30000, direction: "ingreso", voidReason: "Era de otro" }),
+    expect.objectContaining({ id: done.movementId, concept: "Devolución de comisiones", amountCents: 30000, direction: "ingreso", voidReason: "Se anuló en Comisiones" }),
   ])
+  const forAdmin = await f.run((tx) => getDayMovements(tx, "org_a", { branchId, day: today }, { seesCommissions: true }))
+  expect(forAdmin.voidedMovements).toEqual([expect.objectContaining({ id: done.movementId, voidReason: "Era de otro" })])
   const voidNotice = await ownerDb.execute<{ title: string }>(
     sql`select title from workspace_notification where organization_id = 'org_a' and dedupe_key = ${`commission-voided:${done.settlement.id}`}`,
   )

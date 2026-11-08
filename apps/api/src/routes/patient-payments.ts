@@ -4,7 +4,7 @@ import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
-import { collectCharge, createCharge, getAccountSummary, getPaymentReturn, getTicketReceipt, getTicketReturnable, paidCommissionsOfTicket, refundCredit, returnFromTicket, sendTicketReceiptByEmail, ServiceError, updateCharge, voidCharge, voidTicket } from "@odentia/services"
+import { collectCharge, createCharge, getAccountSummary, getPaymentReturn, getTicketReceipt, getTicketReturnable, isTicketClosedAfter, paidCommissionsOfTicket, refundCredit, returnFromTicket, sendTicketReceiptByEmail, ServiceError, updateCharge, voidCharge, voidTicket } from "@odentia/services"
 import type { Context } from "hono"
 
 function forbid(c: Context) {
@@ -287,10 +287,13 @@ export function createPatientPaymentsRoute(deps: Pick<CrmDeps, "db" | "storage">
     if (!params.success) return validationError(c, params.error.issues)
     return runService(c, 200, () => withOrgContext(deps.db, orgId, async tx => {
       const returnable = await getTicketReturnable(tx, orgId, params.data.id, params.data.ticketId)
-      // Para el aviso de «Anular ticket»: si su comisión ya se pagó, quedará por descontar. Lo ve quien
-      // puede anular. Con nombres e importes, solo quien administra comisiones; caja, que no ve a quién se
-      // le paga cada comisión, solo que alguna ya se pagó.
-      if (returnable.voided || !canAccess(memberRole, "finance.write")) return returnable
+      // Para el aviso de «Anular ticket»: si su comisión ya se pagó, quedará por descontar. Solo lo ve quien
+      // puede anular ese ticket (con devoluciones ya no se anula; tras un cierre, solo administración): si
+      // no, caja podría mirar cualquier ticket antes y después de un pago y deducir de quién era. Con
+      // nombres e importes, solo quien administra comisiones; caja, solo que alguna ya se pagó.
+      if (returnable.voided || returnable.returns.length > 0 || !canAccess(memberRole, "finance.write")) return returnable
+      if (!canAccess(memberRole, "finance.admin") && (await isTicketClosedAfter(tx, orgId, params.data.ticketId)))
+        return returnable
       const paid = await paidCommissionsOfTicket(tx, orgId, params.data.ticketId)
       return {
         ...returnable,

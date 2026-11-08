@@ -416,7 +416,7 @@ export async function askHelp(
         if (option.kind === "faq" && option.faq.general) return { topicId: option.topic.id, where: "", text: option.faq.a, path: null, restriction: null }
         const access = restrictionFor(option.topic, asker)
         // Quien solo ve lo suyo la encuentra con el nombre de su menú: «Gestión › Mis honorarios».
-        const where = helpTopicLabel(option.topic, { own: !canChange(option.topic, asker) })
+        const where = helpTopicLabel(option.topic, { own: asker.canOpen(option.topic.path) && !canChange(option.topic, asker) })
         return { topicId: option.topic.id, where, text: helpAnswerText(option, where), ...access }
       })
       const places = [...new Set(answers.map((answer) => answer.where).filter(Boolean))]

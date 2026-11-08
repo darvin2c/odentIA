@@ -78,6 +78,7 @@ import {
   settleCommissionDebtApi,
   showAllLabel,
   debtClosureWords,
+  previousMonthsDiscounts,
   summaryAmountWords,
   summaryDiscountWords,
   voidCommissionPaymentApi,
@@ -1880,10 +1881,18 @@ function DebtDrawer({
         })
         refresh()
         if (toCash) invalidateFinance(queryClient)
-        // Se dice lo que el servidor registró de verdad.
-        const done = formatMoney(result.data.settlement.commissionCents, result.data.settlement.currency, detail.locale)
+        // Se dice lo que el servidor registró de verdad, y dónde quedó: en el mes de los cobros anulados,
+        // que puede no ser el que se tiene abierto (ahí se ve entre sus pagos y ahí se anula).
+        const saved = result.data.settlement
+        const done = formatMoney(saved.commissionCents, saved.currency, detail.locale)
+        const where =
+          saved.periodYear && saved.periodMonth
+            ? ` Queda en ${monthLabel({ year: saved.periodYear, month: saved.periodMonth }, detail.locale).toLocaleLowerCase(detail.locale)}, el mes de esos cobros.`
+            : ""
         toast.success(
-          kind === "devuelto" ? `Registrado: devolvió ${done} y ya no debe nada` : `Dado por saldado: ${done}. Ya no debe nada`,
+          kind === "devuelto"
+            ? `Registrado: devolvió ${done} y ya no debe nada.${where}`
+            : `Dado por saldado: ${done}. Ya no debe nada.${where}`,
         )
         onClose()
       } catch (err) {
@@ -2099,10 +2108,7 @@ function VoidPaymentDrawer({
       <div className="flex flex-col gap-4">
         <p className="text-sm text-muted-foreground">
           {kind === "devuelto"
-            ? last?.methodTypeCode === "10"
-              ? // Caja ve la línea tachada con este motivo, sin saber de quién era: que el motivo no lo diga.
-                "Vuelve a deber lo que había devuelto, y se descuenta de sus próximos pagos. Sale de la caja, y caja verá este motivo: no hace falta poner su nombre."
-              : "Vuelve a deber lo que había devuelto, y se descuenta de sus próximos pagos. La anulación queda registrada con su motivo."
+            ? "Vuelve a deber lo que había devuelto, y se descuenta de sus próximos pagos. Si entró a la caja, sale de ella. La anulación queda registrada con su motivo."
             : kind === "saldado"
               ? "Vuelve a deber lo que se había dado por saldado, y se descuenta de sus próximos pagos. La anulación queda registrada con su motivo."
               : "Se anula el pago (y su gasto, si salió dinero). Sus cobros vuelven a quedar por pagar. La anulación queda registrada con su motivo."}
@@ -2195,6 +2201,11 @@ export function MyCommissionsPanel({
   const unpaid = mine.hasRate ? (mine.attended?.currencies ?? []).filter((item) => item.unpaidCents > 0) : []
   const unpaidItems = unpaid.length > 0 ? (mine.attended?.items ?? []) : []
   const firstUnpaid = unpaid[0]
+  // Lo que debe, repartido una sola vez entre los meses anteriores con algo por pagar.
+  const owedSplit = previousMonthsDiscounts(
+    mine.previous,
+    new Map([mine, ...others].map((view) => [view.currency, view.adjustmentCents])),
+  )
   // Lo que falta descontarle es suyo, no del mes: se le dice aunque este mes ya esté saldado.
   const pendingDiscount =
     mine.adjustmentCents > mine.discountCents
@@ -2461,15 +2472,26 @@ export function MyCommissionsPanel({
                           previous.status === "pagado" && previous.lastPaidAt
                             ? `Liquidado el ${dayLabel(previous.lastPaidAt, format, zone, period.year)}`
                             : commissionStatusLabel(previous.status, previous.baseCents),
-                          // Lo mismo que ve la clínica en su fila: lo que se le descuenta de lo ya pagado.
-                          ...summaryCurrencies(previous).flatMap((view) => summaryDiscountWords(view, format) ?? []),
+                          // Como la fila de la clínica: lo que se le descuenta de lo ya pagado, repartido una sola vez.
+                          ...summaryCurrencies(previous).flatMap((view) => {
+                            const cents = owedSplit.get(`${view.year}-${view.month}-${view.currency}`)?.discountCents ?? 0
+                            return cents > 0 ? [`${formatMoney(cents, view.currency, format)} por descontar`] : []
+                          }),
                         ].join(" · ")}
                       </span>
                     </span>
                     <span className="flex shrink-0 flex-col items-end text-base font-semibold text-foreground tabular-nums">
-                      {summaryCurrencies(previous).map((view) => (
-                        <span key={view.currency}>{summaryAmountWords(view, format)}</span>
-                      ))}
+                      {summaryCurrencies(previous).map((view) => {
+                        const split = owedSplit.get(`${view.year}-${view.month}-${view.currency}`)
+                        // Con un descuento o un pago a cuenta, lo que se le pagará; si no, lo que le corresponde.
+                        return (
+                          <span key={view.currency}>
+                            {split && (split.discountCents > 0 || (view.status === "por_pagar" && view.paidCents > 0))
+                              ? `Falta ${formatMoney(split.pendingCents, view.currency, format)}`
+                              : formatMoney(view.commissionCents, view.currency, format)}
+                          </span>
+                        )
+                      })}
                     </span>
                     <ChevronRight aria-hidden className="text-muted-foreground" />
                   </Button>
