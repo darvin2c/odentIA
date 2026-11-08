@@ -845,3 +845,56 @@ it("tenancy: medios, caja y presupuestos aislados por organización", async () =
   expect(PAT_B).toBeTruthy()
   expect(ITEM2).toBeTruthy()
 })
+
+it("anular un ticket con la comisión ya pagada: quien administra comisiones ve de quién y cuánto; caja, solo que se pagó", async () => {
+  const cashier = buildApp("cashier", CASH)
+  const charge = await postJson(cashier, `/patients/${PAT_A}/charges`, {
+    branchId: BRANCH_A,
+    description: "Blanqueamiento",
+    amountCents: 60000,
+  })
+  expect(charge.status, await charge.clone().text()).toBe(201)
+  const chargeId = IdData.parse(await charge.json()).data.id
+  const collected = await postJson(cashier, `/patients/${PAT_A}/collect`, {
+    branchId: BRANCH_A,
+    chargeIds: [chargeId],
+    // El adelanto de la prueba de cobro se aplica solo: se cobra una parte, menos de lo que queda.
+    payments: [{ paymentMethodId: CASH_A, amountCents: 40000 }],
+    requestId: crypto.randomUUID(),
+  })
+  expect(collected.status, await collected.clone().text()).toBe(201)
+  const ticketId = TicketData.parse(await collected.json()).data.ticket.id
+  const returnable = `/patients/${PAT_A}/tickets/${ticketId}/returnable`
+  const Paid = z.object({
+    data: z
+      .object({
+        commissionPaid: z.boolean().optional(),
+        paidCommissions: z.array(z.object({ professionalName: z.string().nullable(), cents: z.number() }).passthrough()).optional(),
+      })
+      .passthrough(),
+  })
+  // Sin comisión pagada, nada que avisar.
+  expect(Paid.parse(await (await cashier.request(returnable)).json()).data.commissionPaid).toBe(false)
+  // La comisión de ese cobro ya se pagó a la odontóloga (un pago vigente que lo congeló).
+  const [application] = await ownerDb.execute<{ id: string }>(sql`
+    select a.id from patient_payment_application a join patient_payment p on p.id = a.payment_id
+    where p.ticket_id = ${ticketId} and a.voided_at is null`)
+  const settlementId = crypto.randomUUID()
+  await ownerDb.execute(sql`
+    insert into commission_settlement (id, organization_id, professional_user_id, period_year, period_month, currency, commission_cents, settled_at)
+    values (${settlementId}, ${ORG_A}, ${DENT1}, 2026, 11, 'PEN', 21000, now())`)
+  await ownerDb.execute(sql`
+    insert into commission_settlement_line (organization_id, settlement_id, kind, source_key, application_id, description, base_cents, commission_cents, occurred_at)
+    values (${ORG_A}, ${settlementId}, 'cobro', ${`app:${application!.id}`}, ${application!.id}, 'Blanqueamiento', 60000, 21000, now())`)
+  // Caja no ve a quién se le paga cada comisión: solo que alguna ya se pagó.
+  const forCashier = Paid.parse(await (await cashier.request(returnable)).json()).data
+  expect(forCashier.commissionPaid).toBe(true)
+  expect(forCashier.paidCommissions).toBeUndefined()
+  expect(JSON.stringify(forCashier)).not.toContain("Odontóloga")
+  // Quien administra comisiones, de quién y cuánto quedará por descontar.
+  const forAdmin = Paid.parse(await (await buildApp("admin", ADMIN).request(returnable)).json()).data
+  expect(forAdmin).toMatchObject({ commissionPaid: true, paidCommissions: [{ professionalName: "Odontóloga Uno", cents: 21000 }] })
+  // Quien no ve la cuenta no llega.
+  expect((await buildApp("clinician", DENT1).request(returnable)).status).toBe(403)
+  expect((await buildApp("reception", RECEP).request(returnable)).status).toBe(403)
+})

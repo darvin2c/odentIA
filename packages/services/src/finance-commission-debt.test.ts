@@ -20,6 +20,7 @@ import {
   getShiftDetail,
   listCommissionSettlements,
   listMonthCommissions,
+  paidCommissionsOfTicket,
   payMonthCommission,
   setCommissionRate,
   settleCommissionDebt,
@@ -229,4 +230,35 @@ it("devuelto por transferencia no toca la caja, y darlo por saldado pide su moti
   expect(await viewOf(now)).toMatchObject({ adjustmentCents: 0 })
   // Lo que no es un pago no sale como una comisión pagada en el mes: «Ya pagado» sigue siendo el dinero que salió.
   expect(await viewOf(now)).toMatchObject({ paidCents: 0, lastPaidAt: null })
+})
+
+it("antes de anular un ticket se sabe qué comisión ya se pagó: quedará por descontar", async () => {
+  const f = await clinicalFixture()
+  const [sede] = await ownerDb.insert(branch).values({ organizationId: "org_a", name: `Sede aviso ${randomUUID()}` }).returning()
+  const branchId = sede!.id
+  const cash = await f.run((tx) => createPaymentMethod(tx, "org_a", f.actor, { name: "Efectivo", typeCode: "10" }))
+  const [procedure] = await ownerDb
+    .insert(encounterProcedure)
+    .values({ organizationId: "org_a", encounterId: f.encounter.id, serviceId: f.service.id, description: "Blanqueamiento", priceCents: 60000, currency: "PEN", createdBy: f.actor })
+    .returning()
+  await ownerDb
+    .update(encounter)
+    .set({ status: "finalizada", finalizedAt: new Date(), branchId, signerName: "Clínico", signerRegistration: "12345" })
+    .where(eq(encounter.id, f.encounter.id))
+  await f.run((tx) => setCommissionRate(tx, "org_a", f.actor, { professionalUserId: f.actor, rateBps: 3500 }))
+  const charge = await f.run((tx) => createCharge(tx, ...f.args, { encounterProcedureId: procedure!.id }))
+  const paid = await f.run((tx) =>
+    collectCharge(tx, ...f.args, { branchId, chargeIds: [charge.id], payments: [{ paymentMethodId: cash.id, amountCents: 60000 }], requestId: randomUUID() }),
+  )
+  // Sin pagar la comisión no hay nada que avisar.
+  expect(await f.run((tx) => paidCommissionsOfTicket(tx, "org_a", paid.ticket.id))).toEqual([])
+  await f.run((tx) => payMonthCommission(tx, "org_a", f.actor, { professionalUserId: f.actor, ...currentPeriod(), branchId }))
+  const [who] = await ownerDb.select({ name: user.name }).from(user).where(eq(user.id, f.actor))
+  expect(await f.run((tx) => paidCommissionsOfTicket(tx, "org_a", paid.ticket.id))).toEqual([
+    { professionalUserId: f.actor, professionalName: who!.name, currency: "PEN", cents: 21000 },
+  ])
+  // Ya anulado, ya no hay comisión en pie de ese cobro: es lo que se descuenta.
+  await f.run((tx) => voidTicket(tx, "org_a", f.actor, f.patient.id, paid.ticket.id, { reason: "Cobro errado", allowPostClose: true }))
+  expect(await f.run((tx) => paidCommissionsOfTicket(tx, "org_a", paid.ticket.id))).toEqual([])
+  expect(await f.run((tx) => getMonthlyCommissions(tx, "org_a", { professionalUserId: f.actor, ...currentPeriod() }))).toMatchObject({ adjustmentCents: 21000 })
 })

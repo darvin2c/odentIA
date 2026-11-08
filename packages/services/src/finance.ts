@@ -3868,6 +3868,42 @@ export async function listCommissionSettlements(
   }))
 }
 
+/** La comisión ya pagada de un cobro, por profesional y moneda: lo que quedaría por descontar si se anula. */
+export interface TicketPaidCommission {
+  professionalUserId: string
+  professionalName: string | null
+  currency: string
+  cents: number
+}
+
+/**
+ * Las comisiones ya pagadas de los cobros de un ticket que siguen en pie: si el ticket se anula, el
+ * profesional las debe y se descuentan de su próximo pago (ADR 0157). Para el aviso de «Anular ticket»;
+ * quién puede ver nombres e importes lo decide quien llama (solo administra comisiones).
+ */
+export async function paidCommissionsOfTicket(tx: Db, orgId: string, ticketId: string): Promise<TicketPaidCommission[]> {
+  const rows = await tx.execute<{ userId: string; currency: string; cents: string }>(sql`
+    select s.professional_user_id as "userId", s.currency::text as currency, sum(l.commission_cents)::text as cents
+    from commission_settlement_line l
+    join commission_settlement s on s.organization_id = l.organization_id and s.id = l.settlement_id
+      and s.voided_at is null and s.kind = 'pago'
+    join patient_payment_application a on a.organization_id = l.organization_id and a.id = l.application_id
+      and a.voided_at is null
+    join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id
+      and p.voided_at is null and p.ticket_id = ${ticketId}
+    join patient_charge c on c.organization_id = a.organization_id and c.id = a.charge_id and c.voided_at is null
+    where l.organization_id = ${orgId} and l.kind = 'cobro' and l.voided_at is null and l.commission_cents > 0
+    group by 1, 2
+    order by 1, 2`)
+  const names = await userNames(tx, [...new Set([...rows].map((row) => row.userId))])
+  return [...rows].map((row) => ({
+    professionalUserId: row.userId,
+    professionalName: names.get(row.userId) ?? null,
+    currency: row.currency,
+    cents: Number(row.cents),
+  }))
+}
+
 /**
  * Anula un pago registrado por error: sus cobros vuelven a quedar por pagar
  * y su gasto de Personal se anula con él.
