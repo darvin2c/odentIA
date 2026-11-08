@@ -155,6 +155,8 @@ export interface CommissionSummary {
   rateBps: number
   /** Cuántos servicios tienen otro porcentaje o un monto fijo. */
   exceptionCount?: number
+  /** Los porcentajes generales que usaron los cobros del mes (más de uno: «varios porcentajes»). */
+  ratesUsed?: number[]
   /** Cobros del mes de lo que atendió (sin lo anulado). */
   collections: number
   /** Lo cobrado en el mes de lo que atendió. */

@@ -624,6 +624,8 @@ export interface ReportFinance extends ReportHead {
     professionals: number
     /** Lo nuevo del periodo aún sin registrar, antes de descuentos. */
     freshCents: number
+    /** Lo que va en otra moneda, en su moneda: las cifras de arriba lo tienen al cambio de su cobro. */
+    otherCurrencies?: Array<{ currency: string; generatedCents: number; pendingCents: number }>
   }
   cascade: {
     cobradoCents: number

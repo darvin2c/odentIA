@@ -26,7 +26,7 @@ import {
 import { createPaymentMethod } from "./payment-methods.js"
 import { collectCharge, createCharge, voidTicket } from "./payments.js"
 import { addPlanItem } from "./plan.js"
-import { commissionsMany, commissionsOwedMany } from "./report-finance.js"
+import { commissionsMany, commissionsOwedMany, getReportFinance } from "./report-finance.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -81,6 +81,12 @@ it("lo cobrado en dólares da su comisión en dólares, que se paga en dólares 
   // Reportes sigue en soles: el implante vale S/ 3,750 con el cambio de su pago.
   const [month] = await c.run((tx) => commissionsMany(tx, c.orgId, [wide()], { currency: "PEN" }))
   expect(month?.[0]).toMatchObject({ baseCents: 375_000 + 30_000, commissionCents: 112_500 + 9_000 })
+  // Y dice cuánto de eso va en dólares, en dólares.
+  const finance = await c.run((tx) => getReportFinance(tx, c.orgId, { period: "este_mes" }))
+  expect(finance.commissions.otherCurrencies).toEqual([{ currency: "USD", generatedCents: 30_000, pendingCents: 30_000 }])
+  // La lista del mes dice el porcentaje que usaron los cobros.
+  const listed = await c.run((tx) => listMonthCommissions(tx, c.orgId, currentPeriod()))
+  expect(listed[0]?.ratesUsed).toEqual([3000])
 
   // Se paga cada moneda aparte: el gasto en dólares guarda su valor en soles.
   const paid = await c.run((tx) =>

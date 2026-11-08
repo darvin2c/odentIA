@@ -314,6 +314,17 @@ function FinanceCards({ data }: { data: ReportFinance }) {
               : "Sin cobros de lo atendido"}
             <br />
             Por pagar: {money(data.commissions.pendingCents)}
+            {(data.commissions.otherCurrencies ?? []).length > 0 ? (
+              // Se paga en dólares: aquí va sumado en soles con el cambio de su cobro, y se dice.
+              <>
+                <br />
+                Incluye{" "}
+                {(data.commissions.otherCurrencies ?? [])
+                  .map((item) => formatMoney(item.generatedCents, item.currency, data.locale))
+                  .join(" y ")}{" "}
+                al cambio de su cobro
+              </>
+            ) : null}
             {data.commissions.pendingCents > 0 || data.commissions.generatedCents > 0 ? (
               <>
                 {" · "}
@@ -964,6 +975,16 @@ function PayablesCard({ data }: { data: ReportFinance }) {
           </span>
           <span className="text-[13px] text-muted-foreground">
             {commissions.professionals === 0 ? "Nadie espera pago" : `De ${commissions.professionals} ${commissions.professionals === 1 ? "profesional" : "profesionales"}`}
+            {(data.commissions.otherCurrencies ?? []).some((item) => item.pendingCents > 0) ? (
+              <>
+                {" · incluye "}
+                {(data.commissions.otherCurrencies ?? [])
+                  .filter((item) => item.pendingCents > 0)
+                  .map((item) => formatMoney(item.pendingCents, item.currency, data.locale))
+                  .join(" y ")}{" "}
+                al cambio de su cobro
+              </>
+            ) : null}
             {/* Lo de un mes cerrado es lo que se debía al cerrarlo; pagar solo se ofrece si hoy se debe algo. */}
             {commissions.cents > 0 && !data.period.partial && commissions.nowCents === 0 ? <> · hoy ya no se debe nada</> : null}
             {!data.period.partial && commissions.nowCents > 0 && commissions.nowCents !== commissions.cents ? (

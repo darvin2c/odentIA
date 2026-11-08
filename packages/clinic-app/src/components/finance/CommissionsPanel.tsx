@@ -74,6 +74,7 @@ import {
   type YearMonth,
 } from "../../lib/commissions"
 import { useOrgMembers, usePermission } from "../../lib/crm"
+import { useOrgSecondCurrency } from "../../lib/org"
 import { financeFormMessage } from "../../lib/finance"
 import { invalidateFinance, parseAmount, todayIn, useCashState } from "../../lib/finance-cash"
 import { useOrgEvents } from "../../lib/org-events"
@@ -341,7 +342,7 @@ export function CommissionsAdminPanel({
   const unassigned = unassignedQuery.data?.data ?? []
   // Con una sola moneda, el importe del mes sin símbolo, como siempre; con dos, cada uno con el suyo.
   const monthAmounts = (amounts: Array<{ cents: number; currency: string }>): string =>
-    owedAll.length > 1
+    owedAll.length > 1 || hasSecond
       ? amountsWords(amounts, locale)
       : plainAmount(amounts[0]?.cents ?? 0, amounts[0]?.currency ?? "", locale)
   const members = useOrgMembers()
@@ -366,8 +367,9 @@ export function CommissionsAdminPanel({
     } else
       monthTotals.push({ currency: view.currency, pendingCents: Math.max(0, view.pendingCents), commissionCents: view.commissionCents })
   }
-  // La clínica cobra en dos monedas este mes: toda cifra lleva su símbolo.
+  // La clínica cobra en dos monedas: toda cifra lleva su símbolo.
   const twoCurrencies = monthTotals.length > 1
+  const hasSecond = useOrgSecondCurrency() !== null
   const owingPeople = rows.filter((row) => [row, ...(row.others ?? [])].some((view) => view.pendingCents > 0)).length
   const rateById = new Map(rows.map((row) => [row.professionalUserId, row.rateBps]))
   // Quien puede atender y aún no tiene porcentaje: decide el permiso, no el nombre del rol.
@@ -501,12 +503,16 @@ export function CommissionsAdminPanel({
                       <span className="truncate font-medium text-foreground">{name}</span>
                       <span className="text-sm text-muted-foreground">
                         Se cobró{" "}
-                        {views.length > 1 || twoCurrencies
+                        {views.length > 1 || twoCurrencies || hasSecond
                           ? amountsWords(views.map((view) => ({ cents: view.baseCents, currency: view.currency })), locale)
                           : plainAmount(views[0]?.baseCents ?? row.baseCents, views[0]?.currency ?? row.currency, locale)}{" "}
                         de lo que atendió
                         {" · "}
-                        {row.rateBps > 0 ? percentLabel(row.rateBps, locale) : "sin porcentaje"}
+                        {row.ratesUsed && row.ratesUsed.length > 1
+                          ? "varios porcentajes"
+                          : (row.ratesUsed?.[0] ?? row.rateBps) > 0
+                            ? percentLabel(row.ratesUsed?.[0] ?? row.rateBps, locale)
+                            : "sin porcentaje"}
                         {row.exceptionCount ? ` (+${row.exceptionCount === 1 ? "1 servicio aparte" : `${row.exceptionCount} servicios aparte`})` : ""}
                         {row.inTeam ? null : " · Ya no está en el equipo"}
                       </span>
@@ -525,6 +531,10 @@ export function CommissionsAdminPanel({
                           {view.status === "por_pagar" && view.paidCents > 0
                             ? `Falta ${formatMoney(view.pendingCents, view.currency, locale)}`
                             : formatMoney(view.commissionCents, view.currency, locale)}
+                          {/* Con dos monedas, la que ya se pagó lo dice: el estado de abajo es el de la que falta. */}
+                          {views.length > 1 && view.status === "pagado" ? (
+                            <span className="ml-1 text-xs font-normal text-muted-foreground">pagado</span>
+                          ) : null}
                         </span>
                       ))}
                       <StatusBadge status={leading.status} baseCents={leading.baseCents} />
@@ -853,8 +863,8 @@ function CommissionCurrencyBlock({
   const locale = view.locale
   const day = (iso: string): string => dayLabel(iso, locale, zone, period.year)
   const money = (cents: number): string => formatMoney(cents, view.currency, locale)
-  // Importes secundarios sin símbolo, como en el tablero; el principal de cada bloque lo conserva.
-  const plain = (cents: number): string => plainAmount(cents, view.currency, locale)
+  // Importes secundarios sin símbolo, como en el tablero; con dos monedas, cada cifra lleva el suyo.
+  const plain = (cents: number): string => (heading ? money(cents) : plainAmount(cents, view.currency, locale))
   const sorted = byAmount(view.lines)
   const visible = showAll ? sorted : sorted.slice(0, PREVIEW_ROWS)
   // Se puede registrar mientras el mes tenga cobros sin pagar; si el descuento los cubre, no sale dinero.
@@ -873,7 +883,7 @@ function CommissionCurrencyBlock({
       : (view.owedCents ?? 0) > 0
         ? `${money(view.owedCents ?? 0)} por descontar del próximo pago${heading ? ` en ${currencyWord(view.currency, locale)}` : ""}: se le pagó la comisión de cobros que después se devolvieron y aún no hay cobros nuevos de donde descontarla. No hay que hacer nada: se descuenta sola.`
         : view.status === "pagado"
-        ? "No queda nada por pagar de este mes."
+        ? `No queda nada por pagar de este mes${heading ? ` en ${currencyWord(view.currency, locale)}` : ""}.`
         : view.rateBps === 0 && view.baseCents > 0
           ? view.inTeam
             ? "No tiene un porcentaje fijado: fíjalo para calcular lo que le corresponde."

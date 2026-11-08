@@ -768,7 +768,12 @@ export function ExpenseFormDrawer({
         </form.AppField>
         {after !== null && after < 0 && !otherBranch && canMoveCash ? (
           // Lo que falta se ingresa encima, sin salir: al guardarlo, el gasto sigue como estaba.
-          <div>
+          <div className="flex flex-col items-start gap-2">
+            <p className="text-sm text-muted-foreground">
+              En la caja hay {formatMoney(after + (paid.outCents ?? 0), paid.payIn, locale)}: faltan{" "}
+              {formatMoney(-after, paid.payIn, locale)} para pagarlo con el efectivo. Si está en el cajón, ingrésalo; si se
+              pagó por otro medio, quita la casilla.
+            </p>
             <Button type="button" variant="outline" size="sm" onClick={() => setCashOpen(true)}>
               Ingresar {formatMoney(-after, paid.payIn, locale)} a la caja
             </Button>
@@ -949,11 +954,13 @@ export function ExpenseFormDrawer({
                         value={field.state.value}
                         max={today}
                         onChange={(day) => {
+                          // El día propuesto con la fecha anterior: si sigue igual, nadie lo cambió.
+                          const proposed = String(Number(field.state.value.slice(8, 10)))
                           field.handleChange(day)
                           // El mes que paga sigue a la fecha: su mes o el anterior. El día, si no se escribió otro.
                           if (!payableMonths(day).some((item) => item.value === form.getFieldValue("repeatMonth")))
                             form.setFieldValue("repeatMonth", day.slice(0, 7))
-                          if (!form.getFieldMeta("repeatDay")?.isTouched)
+                          if (form.getFieldValue("repeatDay") === proposed)
                             form.setFieldValue("repeatDay", String(Number(day.slice(8, 10))))
                         }}
                       >
