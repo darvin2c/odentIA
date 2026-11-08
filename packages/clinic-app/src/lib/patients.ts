@@ -235,6 +235,40 @@ export const CONDITION_STATUS_LABELS: Record<string, string> = {
   inactiva: "Inactiva",
 }
 
+/** Clasificación ASA del estado físico (ASA Physical Status Classification System). */
+export const ASA_OPTIONS: Array<[string, string]> = [
+  ["I", "ASA I · sano"],
+  ["II", "ASA II · enfermedad sistémica leve"],
+  ["III", "ASA III · enfermedad sistémica grave"],
+  ["IV", "ASA IV · amenaza constante para la vida"],
+  ["V", "ASA V · moribundo"],
+  ["VI", "ASA VI · muerte cerebral (donante)"],
+]
+
+/** «ASA II · enfermedad sistémica leve» de lo guardado; null sin clasificar (QA del 6 nov: no salía en ningún resumen). */
+export function asaLabel(value: string | null | undefined): string | null {
+  return ASA_OPTIONS.find(([key]) => key === value)?.[1] ?? null
+}
+
+/**
+ * Enfermedades y medicación que nunca se le preguntaron: el grupo sigue en «no
+ * preguntado» y no tiene filas vigentes (con una ya se sabe algo). Es la misma
+ * regla del cierre en el servidor (`healthGapsOf`). `today`: el día de la clínica.
+ */
+export function unaskedHealthGroups(health: PatientHealth, today: string): Array<"conditions" | "medications"> {
+  const groups: Array<"conditions" | "medications"> = []
+  if (health.reviewStatus.conditions === "unknown" && !health.conditions.some((row) => row.status === "activa"))
+    groups.push("conditions")
+  if (health.reviewStatus.medications === "unknown" && !health.medications.some((row) => isCurrentMedication(row, today)))
+    groups.push("medications")
+  return groups
+}
+
+/** La que toma: sin fecha de fin o con fin desde hoy, como en la receta. */
+export function isCurrentMedication(row: Pick<Medication, "endDate">, today: string): boolean {
+  return !row.endDate || row.endDate >= today
+}
+
 export const HEALTH_REVIEW_LABELS: Record<HealthReviewState, string> = {
   unknown: "No se le preguntó",
   none: "Niega antecedentes de este tipo",
@@ -1040,6 +1074,17 @@ export function codeAllergyApi(
   return apiFetch<{ data: Allergy }>(`/api/patients/${patientId}/health/allergies/${allergyId}/code`, {
     method: "POST",
     body: JSON.stringify(body),
+  })
+}
+
+/** «Niega enfermedades» o «No toma medicación»: deja ese grupo en «niega», con quién y cuándo. */
+export function markHealthDeniedApi(
+  patientId: string,
+  groups: Array<"conditions" | "medications">,
+): Promise<{ data: PatientHealth }> {
+  return apiFetch<{ data: PatientHealth }>(`/api/patients/${patientId}/health/denied`, {
+    method: "POST",
+    body: JSON.stringify({ groups }),
   })
 }
 

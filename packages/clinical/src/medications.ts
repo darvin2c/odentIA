@@ -202,6 +202,27 @@ export function allergyConflicts(
   return conflicts
 }
 
+/** Marcas de anestésico local de uso común en la región, por si el producto lleva solo la marca. */
+const LOCAL_ANESTHETIC_BRANDS = ["xylocaina", "xilocaina", "carbocaina", "scandonest", "septanest", "citanest", "mepivastesin"]
+
+/**
+ * Si un nombre es de un anestésico local (ATC N01B): un producto del
+ * inventario como «Lidocaína 2 % con epinefrina», por su DCI de la lista, una
+ * marca conocida o la palabra «anestesia». El inventario no guarda el código
+ * ATC, así que se lee el nombre: lo que se llama de otro modo no se reconoce.
+ * Las agujas y jeringas «para anestesia» no son el anestésico.
+ */
+export function isLocalAnestheticName(text: string): boolean {
+  const name = normalizeDrugText(text)
+  if (!name || /(^|\s)(aguja|jeringa)s?(\s|$)/.test(name)) return false
+  if (name.includes("anestesi") || LOCAL_ANESTHETIC_BRANDS.some((brand) => name.includes(brand))) return true
+  return DENTAL_MEDICATIONS.some(
+    (med) =>
+      (med.group === "anestesicos_amida" || med.group === "anestesicos_ester") &&
+      name.includes(normalizeDrugText(med.dci)),
+  )
+}
+
 /** Formas farmacéuticas habituales (vocabulario controlado de la receta). */
 export const DOSAGE_FORMS = [
   "tableta",
