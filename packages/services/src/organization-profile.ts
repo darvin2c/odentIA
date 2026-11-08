@@ -700,6 +700,10 @@ export async function getCurrencyUsage(tx: Db, orgId: string, currency: string):
     select count(*) as "total" from "treatment_plan_item"
     where "organization_id" = ${orgId} and "currency" = ${code}
       and "status" in ('pendiente', 'programado', 'en_curso', 'suspendido')`)
+  // Las comisiones de lo cobrado en esa moneda van en esa moneda: sin ella no se podrían pagar.
+  const [commissions] = await tx.execute<{ cents: string | null }>(sql`
+    select round(sum(l."own_commission")) as "cents" from "commission_live" l
+    where l."organization_id" = ${orgId} and l."currency" = ${code} and l."has_rule"`)
   return {
     currency: code,
     dueCents: Number(due?.cents ?? 0),
@@ -707,5 +711,6 @@ export async function getCurrencyUsage(tx: Db, orgId: string, currency: string):
     cashCents: Number(cash?.cents ?? 0),
     services: Number(services?.total ?? 0),
     pending: Number(pending?.total ?? 0),
+    commissionsCents: Number(commissions?.cents ?? 0),
   }
 }

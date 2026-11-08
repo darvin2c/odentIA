@@ -2277,7 +2277,10 @@ export const patientCharge = pgTable(
      * Comisión de un tratamiento de varias sesiones (QA de comisiones,
      * entrega 7): en cuántas partes iguales se reparte cada cobro, una por
      * sesión. Se congela al crear el cargo con las sesiones previstas, para
-     * que editarlas después no reescriba lo ya pagado. Nulo es una sola parte.
+     * que editarlas después no reescriba lo ya pagado. Nulo es una sola parte,
+     * de quien atendió. Un cobro adelantado de un tratamiento (desde su línea de
+     * presupuesto, sin atención todavía) lleva al menos 1: es de quien haga cada
+     * sesión del tratamiento.
      */
     commissionSessions: smallint("commission_sessions"),
     createdBy: text("created_by").references(() => user.id),
@@ -2294,7 +2297,7 @@ export const patientCharge = pgTable(
     check("patient_charge_returned_check", sql`${table.returnedCents} >= 0`),
     check(
       "patient_charge_commission_sessions_check",
-      sql`${table.commissionSessions} IS NULL OR ${table.commissionSessions} BETWEEN 2 AND 60`,
+      sql`${table.commissionSessions} IS NULL OR ${table.commissionSessions} BETWEEN 1 AND 60`,
     ),
     uniqueIndex("patient_charge_org_request_key_uidx")
       .on(table.organizationId, table.requestKey)

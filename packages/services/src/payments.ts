@@ -303,6 +303,9 @@ export async function createCharge(
     unit = item.saleCurrency
     sale = { productId: item.id, quantity, branchId }
   }
+  // Un cobro adelantado de un tratamiento (desde su línea de presupuesto) no tiene atención todavía:
+  // su comisión es de quien haga cada sesión (ADR 0155). Sin esto, no era de nadie.
+  let prepaidSessions: number | null = null
   if (input.budgetItemId) {
     const [source] = await tx
       .select({ line: treatmentBudgetItem, budget: treatmentBudget })
@@ -350,7 +353,7 @@ export async function createCharge(
     promotionId = source.line.promotionId
     promotionName = source.line.promotionName
     const [pricedItem] = await tx
-      .select({ priceCents: treatmentPlanItem.priceCents })
+      .select({ priceCents: treatmentPlanItem.priceCents, plannedSessions: treatmentPlanItem.plannedSessions })
       .from(treatmentPlanItem)
       .where(
         and(
@@ -360,6 +363,8 @@ export async function createCharge(
         ),
       )
     const itemPrice = pricedItem?.priceCents ?? null
+    // Por sesión, cada cobro es el de una visita; por tratamiento, se reparte entre sus sesiones.
+    prepaidSessions = source.line.billingMode === "session" ? 1 : Math.max(1, pricedItem?.plannedSessions ?? 1)
     description = source.line.title
     unit = source.line.currency
     if (input.currency && input.currency !== unit)
@@ -517,7 +522,9 @@ export async function createCharge(
       commissionSessions:
         input.commissionSessions && input.commissionSessions > 1 && planItemId && input.encounterProcedureId
           ? Math.min(60, Math.trunc(input.commissionSessions))
-          : null,
+          : prepaidSessions !== null && planItemId && !input.encounterProcedureId
+            ? Math.min(60, prepaidSessions)
+            : null,
       createdBy: actorUserId,
     })
     .returning()

@@ -1,6 +1,6 @@
 /**
- * Las reglas de comisión (QA de comisiones, entrega 7; ADR 0151): el porcentaje
- * vale desde el cambio por la fecha del cobro, un servicio puede tener otro
+ * Las reglas de comisión (QA de comisiones, entrega 7; ADR 0151 y 0155): el porcentaje
+ * vale desde el cambio por el día de la atención, un servicio puede tener otro
  * porcentaje o un monto fijo por cada uno, y un tratamiento de varias sesiones
  * reparte cada cobro en partes iguales, cada una de quien hizo su sesión.
  * Finanzas, Reportes y Argos dan lo mismo porque leen la misma vista.
@@ -51,35 +51,48 @@ async function reportOf(f: Awaited<ReturnType<typeof clinicalFixture>>, userId: 
   return rows[0]!.find((row) => row.userId === userId)
 }
 
-it("el porcentaje vale desde el cambio; un servicio puede tener otro porcentaje o un monto fijo por cada uno", async () => {
+it("la regla es la del día de la atención; un servicio puede tener otro porcentaje o un monto fijo por cada uno", async () => {
   const f = await clinicalFixture()
   const branchId = await seedBranch()
   const cash = await f.run((tx) => createPaymentMethod(tx, "org_a", f.actor, { name: "Efectivo", typeCode: "10" }))
-  const [procedure] = await ownerDb
-    .insert(encounterProcedure)
-    .values({ organizationId: "org_a", encounterId: f.encounter.id, serviceId: f.service.id, description: "Corona", priceCents: 30000, currency: "PEN", createdBy: f.actor })
-    .returning()
-  await ownerDb
-    .update(encounter)
-    .set({ status: "finalizada", finalizedAt: new Date(), branchId, signerName: "Clínico", signerRegistration: "12345" })
-    .where(eq(encounter.id, f.encounter.id))
-  const charge = await f.run((tx) => createCharge(tx, ...f.args, { encounterProcedureId: procedure!.id }))
-  const collect = (cents: number) =>
+  // Una atención de una corona de 300, finalizada ahora, con su cargo.
+  let first = true
+  const attend = async () => {
+    const encounterId = first
+      ? f.encounter.id
+      : (await f.run((tx) => createEncounter(tx, ...f.args, { reason: "Otra corona" }))).id
+    first = false
+    const [procedure] = await ownerDb
+      .insert(encounterProcedure)
+      .values({ organizationId: "org_a", encounterId, serviceId: f.service.id, description: "Corona", priceCents: 30000, currency: "PEN", createdBy: f.actor })
+      .returning()
+    await ownerDb
+      .update(encounter)
+      .set({ status: "finalizada", finalizedAt: new Date(), branchId, signerName: "Clínico", signerRegistration: "12345" })
+      .where(eq(encounter.id, encounterId))
+    return f.run((tx) => createCharge(tx, ...f.args, { encounterProcedureId: procedure!.id }))
+  }
+  const collect = (chargeId: string, cents: number) =>
     f.run((tx) =>
-      collectCharge(tx, ...f.args, { branchId, chargeIds: [charge.id], payments: [{ paymentMethodId: cash.id, amountCents: cents }], requestId: randomUUID() }),
+      collectCharge(tx, ...f.args, { branchId, chargeIds: [chargeId], payments: [{ paymentMethodId: cash.id, amountCents: cents }], requestId: randomUUID() }),
     )
   const view = () => f.run((tx) => getMonthlyCommissions(tx, "org_a", { professionalUserId: f.actor, ...currentPeriod() }))
 
   // Lo cobrado antes de fijar el primer porcentaje también lo usa: la primera versión vale desde siempre.
-  await collect(10000)
+  const crown = await attend()
+  await collect(crown.id, 10000)
   await f.run((tx) => setCommissionRate(tx, "org_a", f.actor, { professionalUserId: f.actor, rateBps: 1000 }))
   expect((await view()).lines.map((line) => line.commissionCents)).toEqual([1000])
 
-  // Cambiar al 20 % vale para lo que se cobre desde ahora; lo de antes sigue al 10 %.
+  // Cambiar al 20 % vale para lo que se atienda desde ahora: la segunda cuota de la corona ya atendida
+  // sigue al 10 %, aunque se cobre después; una corona atendida después va al 20 %.
   await f.run((tx) => setCommissionRate(tx, "org_a", f.actor, { professionalUserId: f.actor, rateBps: 2000 }))
-  await collect(10000)
+  await collect(crown.id, 10000)
+  const later = await attend()
+  await collect(later.id, 10000)
   const afterChange = await view()
   expect(afterChange.lines.map((line) => [line.rateBps, line.commissionCents])).toEqual([
+    [1000, 1000],
     [1000, 1000],
     [2000, 2000],
   ])
@@ -87,19 +100,21 @@ it("el porcentaje vale desde el cambio; un servicio puede tener otro porcentaje 
   expect(rules).toMatchObject({ rateBps: 2000, previousRateBps: 1000 })
   expect(rules.since).not.toBeNull()
 
-  // Otro porcentaje para este servicio, desde ahora.
+  // Otro porcentaje para este servicio, para lo que se atienda desde ahora.
   await f.run((tx) => setCommissionException(tx, "org_a", f.actor, { professionalUserId: f.actor, serviceId: f.service.id, rateBps: 4500 }))
-  await collect(5000)
+  const third = await attend()
+  await collect(third.id, 5000)
   // Un monto fijo de 150 por cada uno, en proporción a lo cobrado: 5 000 de 30 000 es un sexto.
   await f.run((tx) => setCommissionException(tx, "org_a", f.actor, { professionalUserId: f.actor, serviceId: f.service.id, fixedCents: 15000 }))
-  await collect(5000)
+  const fourth = await attend()
+  await collect(fourth.id, 5000)
   const withService = await view()
-  expect(withService.lines.slice(2).map((line) => [line.rateBps, line.fixedCents, line.forService, line.commissionCents])).toEqual([
+  expect(withService.lines.slice(3).map((line) => [line.rateBps, line.fixedCents, line.forService, line.commissionCents])).toEqual([
     [4500, null, true, 2250],
     [null, 15000, true, 2500],
   ])
   expect((await f.run((tx) => commissionRulesOf(tx, "org_a", f.actor))).exceptions).toMatchObject([
-    { serviceId: f.service.id, rateBps: null, fixedCents: 15000 },
+    { serviceId: f.service.id, rateBps: null, fixedCents: 15000, fixedCurrency: "PEN", serviceCurrency: "PEN" },
   ])
   // Reportes da lo mismo que Finanzas.
   expect((await reportOf(f, f.actor))?.commissionCents).toBe(withService.commissionCents)
@@ -109,6 +124,7 @@ it("el porcentaje vale desde el cambio; un servicio puede tener otro porcentaje 
   expect(paid.settlement.rateBps).toBeNull()
   const settled = await view()
   expect(settled.lines.map((line) => [line.settled, line.rateBps, line.fixedCents, line.commissionCents])).toEqual([
+    [true, 1000, null, 1000],
     [true, 1000, null, 1000],
     [true, 2000, null, 2000],
     [true, 4500, null, 2250],
@@ -206,7 +222,7 @@ it("lo pagado antes del cambio, sin parte, cubre el cobro entero: no se paga dos
   expect(view.pendingCents).toBe(0)
 })
 
-it("lo que queda tras devolver una parte conserva la regla del día en que se cobró", async () => {
+it("lo que queda tras devolver una parte conserva la regla del día de la atención", async () => {
   const f = await clinicalFixture()
   const branchId = await seedBranch()
   const cash = await f.run((tx) => createPaymentMethod(tx, "org_a", f.actor, { name: "Efectivo", typeCode: "10" }))

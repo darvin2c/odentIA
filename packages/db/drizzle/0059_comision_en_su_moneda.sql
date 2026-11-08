@@ -1,0 +1,4 @@
+ALTER TABLE "patient_charge" DROP CONSTRAINT "patient_charge_commission_sessions_check";--> statement-breakpoint
+ALTER TABLE "commission_rate" ADD COLUMN "fixed_currency" char(3);--> statement-breakpoint
+ALTER TABLE "patient_charge" ADD CONSTRAINT "patient_charge_commission_sessions_check" CHECK ("patient_charge"."commission_sessions" IS NULL OR "patient_charge"."commission_sessions" BETWEEN 1 AND 60);--> statement-breakpoint
+ALTER TABLE "commission_rate" ADD CONSTRAINT "commission_rate_fixed_currency_check" CHECK ("commission_rate"."fixed_currency" IS NULL OR "commission_rate"."fixed_cents" IS NOT NULL);

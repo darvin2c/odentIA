@@ -453,6 +453,11 @@ export const commissionRate = pgTable(
     effectiveFrom: timestamp("effective_from", { withTimezone: true }).notNull(),
     rateBps: integer("rate_bps"),
     fixedCents: integer("fixed_cents"),
+    /**
+     * La moneda del monto fijo: la del precio del servicio al guardarlo, porque la comisión va en la
+     * moneda de lo cobrado. Nula en lo guardado antes, que era en moneda del negocio.
+     */
+    fixedCurrency: char("fixed_currency", { length: 3 }),
     createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -468,6 +473,7 @@ export const commissionRate = pgTable(
     check("commission_rate_rate_check", sql`${table.rateBps} IS NULL OR ${table.rateBps} BETWEEN 0 AND 10000`),
     check("commission_rate_fixed_check", sql`${table.fixedCents} IS NULL OR ${table.fixedCents} > 0`),
     check("commission_rate_one_check", sql`${table.rateBps} IS NULL OR ${table.fixedCents} IS NULL`),
+    check("commission_rate_fixed_currency_check", sql`${table.fixedCurrency} IS NULL OR ${table.fixedCents} IS NOT NULL`),
     check(
       "commission_rate_general_check",
       sql`${table.serviceId} IS NOT NULL OR (${table.rateBps} IS NOT NULL AND ${table.fixedCents} IS NULL)`,

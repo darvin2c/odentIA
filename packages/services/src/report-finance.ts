@@ -70,17 +70,30 @@ export interface CommissionTotals {
 /**
  * Las líneas de comisión de un tramo como las cuenta Finanzas › Comisiones: lo
  * aún sin pagar sale de `commission_live` (la misma vista que leen Finanzas y
- * Argos: la regla del día del cobro, la excepción del servicio y la parte de
+ * Argos: la regla del día de la atención, la excepción del servicio y la parte de
  * cada sesión); lo ya pagado, con lo que se pagó, y si su cobro se anuló después
  * ya no cuenta. También de quien ya dejó la clínica. La base no se redondea por
- * línea: la suma es la que se redondea.
+ * línea: la suma es la que se redondea. Todo en moneda del negocio: lo de otra
+ * moneda (su comisión va en esa moneda, ADR 0155) con el cambio de su pago.
  */
+/**
+ * Una cifra de una línea ya pagada, en moneda del negocio: lo pagado en otra moneda, con el cambio
+ * de su pago (una línea es de un solo cobro). Pide `s` (el pago de la comisión), `p` (el del
+ * paciente) y `op` (la clínica).
+ */
+function frozenValueSql(cents: SQL, business: string): SQL {
+  return sql`(case when s.currency = ${business} then (${cents})::numeric
+    else public.org_money_value((${cents})::numeric, p.amount_cents::numeric, p.business_cents::numeric, p.currency::text,
+      op.currency, op.second_currency, op.exchange_factor) end)`
+}
+
 function commissionLinesSql(orgId: string, hull: Span, currency: string, branchId: string | undefined): SQL {
   const branch = branchId ? sql`and p.branch_id = ${branchId}` : sql``
   return sql`frozen as materialized (
       -- Lo ya pagado, con lo que se pagó. Si el cobro se anuló después, se pagó igual
       -- (cuenta en lo pagado) pero ya no es comisión del mes: se descuenta del próximo pago.
-      select l.application_id, l.base_cents::bigint as base, l.commission_cents::bigint as commission, l.occurred_at as at,
+      select l.application_id, ${frozenValueSql(sql`l.base_cents`, currency)} as base,
+        ${frozenValueSql(sql`l.commission_cents`, currency)} as commission, l.occurred_at as at,
         s.professional_user_id as user_id,
         (a.voided_at is null and p.voided_at is null and c.voided_at is null) as live
       from commission_settlement_line l
@@ -88,7 +101,8 @@ function commissionLinesSql(orgId: string, hull: Span, currency: string, branchI
       join patient_payment_application a on a.organization_id = l.organization_id and a.id = l.application_id
       join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id
       join patient_charge c on c.organization_id = a.organization_id and c.id = a.charge_id
-      where l.organization_id = ${orgId} and l.kind = 'cobro' and l.voided_at is null and s.currency = ${currency}
+      left join org_profile op on op.organization_id = l.organization_id
+      where l.organization_id = ${orgId} and l.kind = 'cobro' and l.voided_at is null
         and l.occurred_at >= ${at(hull.start)} and l.occurred_at < ${at(hull.end)} ${branch}
     ), commission_line as materialized (
       select f.user_id, f.at, (case when f.live then f.base else 0 end)::numeric as base, (case when f.live then f.commission else 0 end)::numeric as commission,
@@ -201,23 +215,18 @@ export async function commissionsOwedMany(
     )}), generated as (
       select m.idx, ml.user_id, sum(ml.commission) as cents from m join counted_line ml on ml.at < m.at_moment group by m.idx, ml.user_id
     ), paid as (
-      ${
-        options.branchId
-          ? // En una sede, lo pagado es lo de sus cobros menos lo descontado de sus cobros anulados,
-            // como lo generado: la sede donde se anotó el gasto del pago no cambia de quién es la deuda.
-            sql`select m.idx, s.professional_user_id as user_id,
-              sum(case when l.kind = 'cobro' then l.commission_cents else -l.commission_cents end) as cents
-            from m join commission_settlement s on s.organization_id = ${orgId} and s.voided_at is null and s.currency = ${options.currency}
-              and s.settled_at < m.at_moment
-            join commission_settlement_line l on l.organization_id = s.organization_id and l.settlement_id = s.id and l.voided_at is null
-            join patient_payment_application a on a.organization_id = l.organization_id and a.id = l.application_id
-            join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id and p.branch_id = ${options.branchId}
-            group by m.idx, s.professional_user_id`
-          : sql`select m.idx, s.professional_user_id as user_id, sum(s.commission_cents) as cents
-            from m join commission_settlement s on s.organization_id = ${orgId} and s.voided_at is null and s.currency = ${options.currency}
-              and s.settled_at < m.at_moment
-            group by m.idx, s.professional_user_id`
-      }
+      -- Lo pagado es lo de sus cobros menos lo descontado de sus cobros anulados, como lo generado y
+      -- en moneda del negocio. En una sede, lo de sus cobros: la sede donde se anotó el gasto del pago
+      -- no cambia de quién es la deuda.
+      select m.idx, s.professional_user_id as user_id,
+        sum(case when l.kind = 'cobro' then 1 else -1 end * ${frozenValueSql(sql`l.commission_cents`, options.currency)}) as cents
+      from m join commission_settlement s on s.organization_id = ${orgId} and s.voided_at is null and s.settled_at < m.at_moment
+      join commission_settlement_line l on l.organization_id = s.organization_id and l.settlement_id = s.id and l.voided_at is null
+      join patient_payment_application a on a.organization_id = l.organization_id and a.id = l.application_id
+      join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id
+        ${options.branchId ? sql`and p.branch_id = ${options.branchId}` : sql``}
+      left join org_profile op on op.organization_id = s.organization_id
+      group by m.idx, s.professional_user_id
     )
     select coalesce(g.idx, p.idx) as idx, coalesce(g.user_id, p.user_id) as "userId",
       round(coalesce(g.cents, 0) - coalesce(p.cents, 0))::text as owed
@@ -923,37 +932,48 @@ export async function myAttendedUnpaid(
  * Lo que falta pagar de comisiones, de todos los meses, en una sola pasada por `commission_live`:
  * cada mes con lo que la lista de ese mes dice que falta (lo nuevo de cada profesional menos lo
  * que se le descuenta, nunca menos de cero) y el total, con lo que se descuenta una sola vez por
- * profesional. Para no mirar un mes por vez.
+ * profesional. Para no mirar un mes por vez. Cada moneda aparte (ADR 0155): la del negocio y, en
+ * `others`, las demás; un descuento solo baja lo de su moneda.
  */
 export async function commissionsOwedByMonth(tx: Db, orgId: string, now: Date = new Date()) {
   const zone = await getOrgLocale(tx, orgId)
   const from = new Date(Date.UTC(2000, 0, 1))
-  const rows = await tx.execute<{ month: string; userId: string; cents: string }>(sql`
+  const rows = await tx.execute<{ month: string; userId: string; currency: string; cents: string }>(sql`
     select to_char(l.at at time zone ${zone.timezone}, 'YYYY-MM') as month, l.professional_user_id as "userId",
-      round(sum(l.commission))::text as cents
+      l.currency, round(sum(l.own_commission))::text as cents
     from ${commissionLiveIn(orgId, from, now)} l
-    where l.has_rule and l.commission > 0
-    group by 1, 2`)
-  const adjustments = await pendingCommissionAdjustments(tx, orgId, zone.currency)
-  const byMonth = new Map<string, { cents: number; professionals: number }>()
-  const byUser = new Map<string, number>()
-  for (const row of rows) {
-    const fresh = safeCents(row.cents)
-    byUser.set(row.userId, (byUser.get(row.userId) ?? 0) + fresh)
-    // Como la lista del mes: lo que se le descuenta a alguien baja lo suyo de ese mes, nunca de otro.
-    const due = Math.max(0, fresh - (adjustments.get(row.userId) ?? 0))
-    if (due === 0) continue
-    const month = byMonth.get(row.month) ?? { cents: 0, professionals: 0 }
-    byMonth.set(row.month, { cents: month.cents + due, professionals: month.professionals + 1 })
+    where l.has_rule and l.own_commission > 0
+    group by 1, 2, 3`)
+  const owedIn = async (currency: string) => {
+    const adjustments = await pendingCommissionAdjustments(tx, orgId, currency)
+    const byMonth = new Map<string, { cents: number; professionals: number }>()
+    const byUser = new Map<string, number>()
+    for (const row of rows) {
+      if (row.currency !== currency) continue
+      const fresh = safeCents(row.cents)
+      byUser.set(row.userId, (byUser.get(row.userId) ?? 0) + fresh)
+      // Como la lista del mes: lo que se le descuenta a alguien baja lo suyo de ese mes, nunca de otro.
+      const due = Math.max(0, fresh - (adjustments.get(row.userId) ?? 0))
+      if (due === 0) continue
+      const month = byMonth.get(row.month) ?? { cents: 0, professionals: 0 }
+      byMonth.set(row.month, { cents: month.cents + due, professionals: month.professionals + 1 })
+    }
+    const owedCents = [...byUser].reduce((total, [userId, fresh]) => total + Math.max(0, fresh - (adjustments.get(userId) ?? 0)), 0)
+    return {
+      currency,
+      owedCents,
+      months: [...byMonth]
+        .sort(([a], [b]) => b.localeCompare(a))
+        .map(([key, value]) => ({ year: Number(key.slice(0, 4)), month: Number(key.slice(5, 7)), ...value })),
+    }
   }
-  const owedCents = [...byUser].reduce((total, [userId, fresh]) => total + Math.max(0, fresh - (adjustments.get(userId) ?? 0)), 0)
-  return {
-    currency: zone.currency,
-    owedCents,
-    months: [...byMonth]
-      .sort(([a], [b]) => b.localeCompare(a))
-      .map(([key, value]) => ({ year: Number(key.slice(0, 4)), month: Number(key.slice(5, 7)), ...value })),
+  const business = await owedIn(zone.currency)
+  const others = []
+  for (const currency of [...new Set(rows.map((row) => row.currency))].filter((c) => c !== zone.currency).sort()) {
+    const other = await owedIn(currency)
+    if (other.owedCents > 0) others.push(other)
   }
+  return { ...business, others }
 }
 
 export async function getReportCommissions(tx: Db, orgId: string, query: ReportQuery, now: Date = new Date()) {

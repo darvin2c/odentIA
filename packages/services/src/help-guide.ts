@@ -1065,8 +1065,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     faqs: [
       {
         q: "¿Cómo se calcula la comisión?",
-        a: "Es el porcentaje de cada profesional (o el de un servicio con regla aparte) sobre lo que se cobró de lo que atendió, con el impuesto incluido: el precio que pagó el paciente. Cuenta el mes en que se cobró, no el de la atención, y lo atendido que aún no se cobra no comisiona todavía: «Mis comisiones» dice cuánto de lo atendido del mes falta cobrar. Una venta suelta, sin atención, no es de ningún profesional. Cada línea dice su fecha, la regla que usó y si tuvo promoción.",
-        forms: ["cómo se calcula la comisión", "sobre qué se paga la comisión", "comisión con IGV", "por qué no aparece una atención"],
+        a: "Es el porcentaje de cada profesional (o el de un servicio con regla aparte) sobre lo que se cobró de lo que atendió, con el impuesto incluido: el precio que pagó el paciente. Cuenta el mes en que se cobró, no el de la atención, y lo atendido que aún no se cobra no comisiona todavía: «Mis comisiones» dice cuánto de lo atendido del mes falta cobrar. Una venta suelta, sin atención, no es de ningún profesional. Va en la moneda de lo cobrado: lo que se cobra en dólares le da su comisión en dólares, y se le paga en dólares, aparte de lo de soles. Cada línea dice su fecha, la regla que usó y si tuvo promoción.",
+        forms: ["cómo se calcula la comisión", "sobre qué se paga la comisión", "comisión con IGV", "por qué no aparece una atención", "comisión en dólares"],
       },
       {
         q: "¿Cómo registro el pago de una comisión?",
@@ -1075,7 +1075,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Qué pasa si se anula un cobro cuya comisión ya pagué?",
-        a: "Lo que se pagó de más se descuenta del próximo pago de ese profesional, de este mes o de otro, sin dejarlo nunca en negativo. Si el descuento cubre todo, se registra el descuento sin gasto y se le avisa.",
+        a: "Lo que se pagó de más se descuenta del próximo pago de ese profesional en esa moneda, de este mes o de otro, sin dejarlo nunca en negativo. Si el descuento cubre todo, se registra el descuento sin gasto y se le avisa. Si no tiene cobros nuevos de donde descontarlo, su fila dice «Debe a la clínica» y cuánto: se descuenta solo de su próximo pago.",
         forms: ["descuento de comisión", "devolución y comisión", "cobro anulado comisión"],
       },
       {
@@ -1085,17 +1085,17 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Si cambio el porcentaje, cambia lo que ya se cobró?",
-        a: "No. El porcentaje nuevo vale para lo que se cobre desde ese día; lo cobrado antes conserva el que tenía, aunque aún no se haya pagado. En el detalle se ve desde cuándo vale y el anterior, cada línea dice el porcentaje que usó y al profesional se le avisa del cambio.",
+        a: "No. El porcentaje nuevo vale para lo que se atienda desde ese día; lo atendido antes conserva el que tenía, aunque se cobre después o en cuotas. En el detalle se ve desde cuándo vale y el anterior, cada línea dice el porcentaje que usó y al profesional se le avisa del cambio.",
         forms: ["cambiar porcentaje de comisión", "subir la comisión", "desde cuándo vale la comisión"],
       },
       {
         q: "¿Puedo pagar distinto por un servicio?",
-        a: "Sí. En el detalle del profesional, «Otro porcentaje o monto para un servicio»: elige el servicio y si es otro porcentaje o un monto fijo por cada uno. El monto fijo se gana en proporción a lo cobrado: si el paciente pagó la mitad, la mitad. Vale desde hoy, y «Quitar» lo devuelve a su porcentaje general.",
+        a: "Sí. En el detalle del profesional, «Otro porcentaje o monto para un servicio»: elige el servicio y si es otro porcentaje o un monto fijo por cada uno, en la moneda del precio del servicio. El monto fijo se gana entero aunque se cobre con descuento, y en proporción a lo pagado si se paga en partes: si el paciente pagó la mitad, la mitad. Nunca paga más de lo cobrado. Si el servicio se cobra por sesión, se gana en cada sesión que se cobre. Vale para lo que se atienda desde hoy, y «Quitar» lo devuelve a su porcentaje general. Si el servicio pasa a otra moneda, el monto deja de valer hasta que lo escribas de nuevo.",
         forms: ["comisión por servicio", "monto fijo por procedimiento", "comisión distinta por tratamiento", "porcentaje por procedimiento"],
       },
       {
         q: "¿Cómo se reparte un tratamiento que hacen dos doctores?",
-        a: "Un tratamiento de varias sesiones reparte cada cobro en partes iguales, una por sesión prevista, y cada parte es de quien hizo esa sesión, el día que la hace. Lo cobrado de sesiones que aún no se hacen todavía no es de nadie. Cada línea dice qué sesión es y de cuántas.",
+        a: "Un tratamiento de varias sesiones reparte cada cobro en partes iguales, una por sesión prevista, y cada parte es de quien hizo esa sesión, el día que la hace. Lo cobrado por adelantado de un tratamiento se reparte igual. Lo cobrado de sesiones que aún no se hacen todavía no es de nadie: la lista del mes lo dice aparte, y lo de un tratamiento cancelado antes de terminar no es comisión de nadie. Cada línea dice qué sesión es y de cuántas.",
         forms: ["comisión por sesión", "tratamiento compartido", "dos doctores un tratamiento"],
       },
     ],
@@ -1291,7 +1291,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo activo la otra moneda?",
-        a: "En Datos de la clínica, en «También cobro en» eliges la otra moneda (son dos como máximo) y en «Tipo de cambio de hoy» escribes a cuánto está, en tu moneda por 1 de la otra. Si ya hay algo en esa moneda, te lo dice antes de guardar. Desde ahí puedes poner precios, cobrar, comprar y registrar gastos en ella; tus reportes, metas y comisiones siguen en la «Moneda del negocio». Si no la activas, todo sigue igual. Para dejar de cobrar en ella, antes cobra lo que se debe en esa moneda, usa o devuelve lo que tengan a favor, retira el efectivo de su caja y pasa sus servicios a la moneda del negocio: Datos de la clínica te dice qué falta.",
+        a: "En Datos de la clínica, en «También cobro en» eliges la otra moneda (son dos como máximo) y en «Tipo de cambio de hoy» escribes a cuánto está, en tu moneda por 1 de la otra. Si ya hay algo en esa moneda, te lo dice antes de guardar. Desde ahí puedes poner precios, cobrar, comprar y registrar gastos en ella; tus reportes y metas siguen en la «Moneda del negocio», y la comisión de lo cobrado en la otra moneda va en esa moneda. Si no la activas, todo sigue igual. Para dejar de cobrar en ella, antes cobra lo que se debe en esa moneda, usa o devuelve lo que tengan a favor, retira el efectivo de su caja, paga las comisiones en esa moneda y pasa sus servicios a la moneda del negocio: Datos de la clínica te dice qué falta.",
         forms: ["como activo otra moneda", "como activo los dolares", "quiero cobrar tambien en dolares", "activar segunda moneda", "activar dolares", "cobrar en dos monedas"],
       },
       {

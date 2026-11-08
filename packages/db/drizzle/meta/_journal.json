@@ -414,6 +414,20 @@
       "when": 1794080912386,
       "tag": "0058_serie_de_la_medida",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1794114466279,
+      "tag": "0059_comision_en_su_moneda",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1794114514693,
+      "tag": "0060_comision_en_su_moneda_reglas",
+      "breakpoints": true
     }
   ]
 }
