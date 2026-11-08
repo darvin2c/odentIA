@@ -5,48 +5,65 @@
  * producto (`Record<ClinicalProduct, …>`) o por marca, así el compilador señala
  * cada lugar que tiene que decir algo del nuevo. Lo que es del producto base
  * (odentIA: el dominio de la plataforma, el remitente de siempre) se compara con
- * `BASE_PRODUCT` o `BASE_MAIL_BRAND`, nunca con su nombre escrito.
+ * `BASE_PRODUCT` o `BASE_MAIL_BRAND`, nunca con su nombre escrito (ADR 0164).
  *
- * Quedan fuera las carpetas y apps de cada producto, que sí se nombran a sí
- * mismas, las pruebas, las stories, las mediciones (eligen la clínica de la
- * semilla de cada producto) y la web de marketing, que se arma aparte para cada
- * producto y detiene el armado ante uno que no conoce (`apps/web/src/lib/product.ts`).
+ * Revisa todo paquete y app con `src`, salvo los de cada producto (que sí se
+ * nombran a sí mismos) y la web de marketing, que se arma aparte para cada
+ * producto y detiene el armado ante uno que no conoce (`apps/web/astro.config.mjs`).
+ * Quedan fuera las pruebas, las stories y las mediciones, que eligen la clínica de
+ * la semilla de cada producto.
  */
-import { readdirSync, readFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join, relative } from "node:path"
 import { describe, expect, it } from "vitest"
+import { productWords } from "./product-words.js"
+import { CLINICAL_PRODUCTS } from "./products.js"
 
 const ROOT = join(import.meta.dirname, "..", "..", "..")
 
-/** Carpetas comunes: el código que corre para todos los productos. */
-const COMMON = [
-  "packages/clinical/src",
-  "packages/services/src",
-  "packages/db/src",
-  "packages/agent/src",
-  "packages/auth/src",
-  "packages/channels/src",
-  "packages/mail/src",
-  "packages/ui/src",
-  "packages/ui-patterns/src",
-  "packages/clinic-app/src",
-  "apps/api/src",
-  "apps/worker/src",
-  "apps/panel/src",
-  "apps/admin/src",
-]
+/** Cómo se nombra cada producto en el código: su clave, su marca y su nombre. */
+const NAMES = [
+  ...new Set(CLINICAL_PRODUCTS.flatMap((product) => [product, productWords(product).brand, productWords(product).name])),
+].join("|")
 
-/** Lo que es de un producto dentro de lo común: ahí sí se nombra. */
-const PRODUCT_INSIDE = /\/(dental|medical)\//
-
-/** Pruebas, stories y mediciones: no corren para una clínica. */
-const NOT_RUNTIME =
-  /\.(test|spec|stories)\.tsx?$|\.eval\.ts$|\/(auditoria-[^/]*|eval[^/]*|help-measure|help-guide-suite)\.ts$|\/routeTree\.gen\.ts$/
-
-const NAMES = "dental|medical|odentia|latidia"
+const Q = "[\"'`]"
+/** Una comparación con el nombre escrito: en JavaScript, en un `case`, en drizzle o en SQL a mano. */
 const COMPARES = new RegExp(
-  `(===|!==)\\s*["'](${NAMES})["']|["'](${NAMES})["']\\s*(===|!==)|\\bcase\\s+["'](${NAMES})["']\\s*:`,
+  [
+    `(===?|!==?)\\s*${Q}(${NAMES})${Q}`,
+    `${Q}(${NAMES})${Q}\\s*(===?|!==?)`,
+    `\\bcase\\s+${Q}(${NAMES})${Q}\\s*:`,
+    `\\b(eq|ne)\\([^()]*,\\s*${Q}(${NAMES})${Q}\\s*\\)`,
+    `(=|<>|!=)\\s*'(${NAMES})'`,
+  ].join("|"),
+  "i",
 )
+
+/** Los paquetes y apps de un producto: `packages/<producto>`, `apps/<producto>-clinic` (ADR 0079), y la web. */
+const PRODUCT_OWN = new Set([
+  ...CLINICAL_PRODUCTS.flatMap((product) => [`packages/${product}`, `apps/${product}-clinic`]),
+  "apps/web",
+])
+
+/** Las carpetas de un producto dentro de lo común (`services/src/dental/`). */
+const PRODUCT_INSIDE = new RegExp(`/(${CLINICAL_PRODUCTS.join("|")})/`)
+
+/** Pruebas, stories y lo generado: no corren para una clínica. */
+const NOT_RUNTIME = /\.(test|spec|stories)\.tsx?$|\.eval\.ts$|\/routeTree\.gen\.ts$/
+
+/** Las mediciones, por su nombre: eligen la clínica de la semilla de cada producto. */
+const MEASUREMENTS =
+  /^packages\/agent\/src\/(.*\/)?(auditoria-[^/]+|eval(-[^/]+)?|help-measure)\.ts$|^packages\/services\/src\/help-guide-suite\.ts$/
+
+function commonDirs(): string[] {
+  return ["packages", "apps"].flatMap((group) =>
+    readdirSync(join(ROOT, group), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => `${group}/${entry.name}`)
+      .filter((dir) => !PRODUCT_OWN.has(dir) && existsSync(join(ROOT, dir, "src")))
+      .map((dir) => `${dir}/src`),
+  )
+}
 
 function filesUnder(dir: string): string[] {
   const out: string[] = []
@@ -60,12 +77,37 @@ function filesUnder(dir: string): string[] {
 }
 
 describe("lo común decide por producto con un mapa completo", () => {
+  it("reconoce las comparaciones con el nombre escrito, y no los mapas ni las palabras", () => {
+    const caught = [
+      'if (product === "medical") {',
+      "const x = brand !== 'latidia' ? a : b",
+      "if (product == `dental`) return",
+      'words.name === "latidIA"',
+      '"dental" !== product',
+      'case "odentia":',
+      '.where(eq(orgProfile.product, "medical"))',
+      "sql`select 1 where product = 'medical'`",
+    ]
+    const ignored = [
+      'const WORDS = { dental: "odontograma", medical: "examen físico" }',
+      'productWords("medical")',
+      'product: text("product").notNull().default("dental"),',
+      "check(\"x\", sql`${table.product} IN ('dental','medical')`)",
+      "return product === BASE_PRODUCT ? undefined : domains[product]",
+    ]
+    expect(caught.filter((line) => !COMPARES.test(line))).toEqual([])
+    expect(ignored.filter((line) => COMPARES.test(line))).toEqual([])
+  })
+
   it("ningún código común compara un producto o una marca con su nombre escrito", () => {
+    const dirs = commonDirs()
+    // Lo común de hoy está en la lista: si no, la búsqueda de carpetas se rompió.
+    expect(dirs).toEqual(expect.arrayContaining(["packages/services/src", "packages/clinic-app/src", "apps/api/src"]))
     const found: string[] = []
-    for (const dir of COMMON) {
+    for (const dir of dirs) {
       for (const file of filesUnder(join(ROOT, dir))) {
         const path = relative(ROOT, file).replaceAll("\\", "/")
-        if (PRODUCT_INSIDE.test(`/${path}`) || NOT_RUNTIME.test(`/${path}`)) continue
+        if (PRODUCT_INSIDE.test(`/${path}`) || NOT_RUNTIME.test(path) || MEASUREMENTS.test(path)) continue
         readFileSync(file, "utf8")
           .split(/\r?\n/)
           .forEach((line, index) => {

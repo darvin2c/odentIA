@@ -58,7 +58,7 @@ afterAll(async () => {
 })
 
 describe("lo que la base decide por producto nombra a todos los productos", () => {
-  it("ninguna vista, función o restricción deja un producto en el ELSE sin decirlo", async () => {
+  it("nada de la base deja un producto en el ELSE sin decirlo", async () => {
     const rows = (await ownerDb.execute(sql`
       select 'vista ' || schemaname || '.' || viewname as object, definition as body
         from pg_views where schemaname not in ('pg_catalog', 'information_schema')
@@ -66,19 +66,43 @@ describe("lo que la base decide por producto nombra a todos los productos", () =
       select 'vista ' || schemaname || '.' || matviewname, definition
         from pg_matviews where schemaname not in ('pg_catalog', 'information_schema')
       union all
-      select 'función ' || n.nspname || '.' || p.proname, p.prosrc
+      -- El cuerpo de una función SQL estándar (BEGIN ATOMIC) no está en prosrc.
+      select 'función ' || n.nspname || '.' || p.proname, coalesce(nullif(p.prosrc, ''), pg_get_function_sqlbody(p.oid))
         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
        where n.nspname not in ('pg_catalog', 'information_schema') and p.prokind in ('f', 'p')
       union all
       select 'restricción ' || c.conrelid::regclass::text || '.' || c.conname, pg_get_constraintdef(c.oid)
         from pg_constraint c where c.contype = 'c'
+      union all
+      select 'política ' || schemaname || '.' || tablename || '.' || policyname, concat_ws(' ', qual, with_check)
+        from pg_policies
+      union all
+      select 'disparador ' || t.tgrelid::regclass::text || '.' || t.tgname, pg_get_triggerdef(t.oid)
+        from pg_trigger t where not t.tgisinternal
+      union all
+      select 'índice ' || schemaname || '.' || indexname, indexdef
+        from pg_indexes where schemaname not in ('pg_catalog', 'information_schema')
+      union all
+      select 'columna calculada ' || a.attrelid::regclass::text || '.' || a.attname, pg_get_expr(d.adbin, d.adrelid)
+        from pg_attribute a join pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
+       where a.attgenerated <> ''
     `)) as unknown as { object: string; body: string | null }[]
+    const [cron] = (await ownerDb.execute(sql`select to_regclass('cron.job') is not null as present`)) as unknown as {
+      present: boolean
+    }[]
+    if (cron?.present)
+      rows.push(
+        ...((await ownerDb.execute(sql`select 'tarea ' || jobname as object, command as body from cron.job`)) as unknown as {
+          object: string
+          body: string | null
+        }[]),
+      )
 
+    // Un producto se nombra como texto ('medical') o dentro de un arreglo ('{dental,medical}').
+    const names = (body: string | null, product: ClinicalProduct) =>
+      !!body && new RegExp(`'${product}'|[{,]"?${product}"?[,}]`).test(body)
     const named = rows
-      .map(({ object, body }) => ({
-        object,
-        products: CLINICAL_PRODUCTS.filter((product) => body?.includes(`'${product}'`)),
-      }))
+      .map(({ object, body }) => ({ object, products: CLINICAL_PRODUCTS.filter((product) => names(body, product)) }))
       .filter((row) => row.products.length > 0)
 
     const missing = named.flatMap(({ object, products }) => {
@@ -88,7 +112,13 @@ describe("lo que la base decide por producto nombra a todos los productos", () =
       return absent.length > 0 ? [`${object}: no dice qué pasa en ${absent.join(", ")}`] : []
     })
     expect(missing, "Agrega su rama o decláralo en UNNAMED_ON_PURPOSE con su motivo").toEqual([])
-    // La lista de excepciones no guarda objetos que ya no existen o que ya no nombran productos.
-    expect(Object.keys(UNNAMED_ON_PURPOSE).filter((object) => !named.some((row) => row.object === object))).toEqual([])
+    // Una excepción vencida no se queda: el objeto existe, nombra productos y sigue sin nombrar los declarados.
+    const stale = Object.entries(UNNAMED_ON_PURPOSE).flatMap(([object, declared]) => {
+      const row = named.find((item) => item.object === object)
+      if (!row) return [`${object}: ya no existe o no nombra productos`]
+      const now = declared.filter((product) => row.products.includes(product))
+      return now.length > 0 ? [`${object}: ya nombra ${now.join(", ")}`] : []
+    })
+    expect(stale).toEqual([])
   })
 })

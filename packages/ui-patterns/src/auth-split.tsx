@@ -4,11 +4,6 @@ import type { CSSProperties, ReactNode } from "react"
 import { Brand } from "./brand.js"
 
 /**
- * La noche de cada marca: el lado de la marca se ve igual en tema claro y
- * oscuro. odentIA, la de la portada de la web; latidIA, en morado (tablero
- * «Marca y color»). El logo y los textos del lado usan los colores en oscuro.
- */
-/**
  * La escena de cada marca bajo su logo: las 32 piezas de la portada de odentIA
  * (`CalmToothScene`, con su trabajo del día) y el pulso de latidIA
  * (`CalmPulseScene`). En la computadora ocupa el pie del lado de la marca; en el
@@ -30,6 +25,11 @@ const SCENE: Record<
   },
 }
 
+/**
+ * La noche de cada marca: el lado de la marca se ve igual en tema claro y
+ * oscuro. odentIA, la de la portada de la web; latidIA, en morado (tablero
+ * «Marca y color»). El logo y los textos del lado usan los colores en oscuro.
+ */
 const NIGHT: Record<BrandId, CSSProperties> = {
   odentia: {
     background: "radial-gradient(90% 75% at 50% 0%, #0f3340 0%, #0a2129 50%, #061318 100%)",

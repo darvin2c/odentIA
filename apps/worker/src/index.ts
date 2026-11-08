@@ -11,13 +11,14 @@ import { configureMetaGraphVersion } from "@odentia/channels"
 import type { ProductDomains } from "@odentia/clinical"
 import type { AgentRunJob, InboundMessageJob, OutboundMessageJob, QueueMessage } from "@odentia/db"
 import { createAppDb, createOwnerDb, type Db } from "@odentia/db"
-import { configureMailLinks, createMailer, type MailBrandDomains } from "@odentia/mail"
+import { configureMailLinks, createMailer } from "@odentia/mail"
 import {
   configureDocumentChecks,
   configureDocumentLogos,
   configurePublicLinks,
   createStorage,
   ensureSuggestedConsentsEverywhere,
+  mailBrandDomains,
   type Storage,
   secretsKeyFromEnv,
 } from "@odentia/services"
@@ -56,7 +57,7 @@ configureDocumentChecks(secretsKey)
 configureMetaGraphVersion(env.META_GRAPH_VERSION)
 // Términos, Privacidad y Ayuda del pie de cada correo.
 // El pie de cada correo lleva la web de su marca: la de latidIA, en su dominio (issue 229).
-configureMailLinks(env.WEB_URL, { latidia: env.MEDICAL_DOMAIN || undefined } satisfies MailBrandDomains)
+configureMailLinks(env.WEB_URL, mailBrandDomains(publicLinks.productDomains))
 const mailer = createMailer({
   host: env.SMTP_HOST,
   port: env.SMTP_PORT,

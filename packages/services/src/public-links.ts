@@ -52,7 +52,7 @@ export function productDomainOf(product: ClinicalProduct, config: PublicLinkConf
  */
 export function clinicOrigin(
   slug: string,
-  product: ClinicalProduct = "dental",
+  product: ClinicalProduct = BASE_PRODUCT,
   config: PublicLinkConfig | null = configured,
 ): string | null {
   const domain = productDomainOf(product, config)
@@ -70,7 +70,7 @@ export function clinicOrigin(
  * y desde ahí se entra a Plan y pagos. odentIA, el de `webURL`; sin
  * configurar, ninguno.
  */
-export function panelOrigin(product: ClinicalProduct = "dental", config: PublicLinkConfig | null = configured): string | null {
+export function panelOrigin(product: ClinicalProduct = BASE_PRODUCT, config: PublicLinkConfig | null = configured): string | null {
   if (!config) return null
   const url = new URL(config.webURL)
   const domain = ownDomain(product, config)
@@ -95,7 +95,7 @@ export async function clinicAddressOf(
     .where(eq(organization.id, orgId))
     .limit(1)
   if (!row?.slug) return null
-  return { slug: row.slug, product: isClinicalProduct(row.product) ? row.product : "dental" }
+  return { slug: row.slug, product: isClinicalProduct(row.product) ? row.product : BASE_PRODUCT }
 }
 
 /** Origen público de una clínica por su id; nulo sin dirección pública configurada. */

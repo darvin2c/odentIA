@@ -2928,7 +2928,7 @@ export async function tickSaasBilling(
       .leftJoin(orgProfile, eq(orgProfile.organizationId, organization.id))
       .where(eq(organization.id, orgId))
       .limit(1)
-    const product = isClinicalProduct(org?.product) ? org.product : "dental"
+    const product = isClinicalProduct(org?.product) ? org.product : BASE_PRODUCT
     const panel = product === BASE_PRODUCT ? links.panelUrl : (panelOrigin(product) ?? links.panelUrl)
     const fields = { clinic: org?.name ?? "tu clínica", url: saasBillingUrl(panel, orgId), brand: productWords(product).brand }
     clinics.set(orgId, fields)

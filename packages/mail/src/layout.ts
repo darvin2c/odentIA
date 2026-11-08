@@ -106,7 +106,7 @@ const MAIL_BRANDS: Record<
 }
 
 /** El nombre de la marca, como se escribe: para los textos de cada plantilla. */
-export function mailBrandName(brand: MailBrand = "odentia"): string {
+export function mailBrandName(brand: MailBrand = BASE_MAIL_BRAND): string {
   return MAIL_BRANDS[brand].name
 }
 

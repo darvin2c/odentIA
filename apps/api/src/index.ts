@@ -5,8 +5,8 @@ import { type Auth, createAuth } from "@odentia/auth"
 import { configureMetaGraphVersion } from "@odentia/channels"
 import type { DomainProduct } from "@odentia/clinical"
 import { createAppDb, createOwnerDb } from "@odentia/db"
-import { configureMailLinks, createMailer, type MailBrandDomains } from "@odentia/mail"
-import { createStorage, fakeAddressProvider, geoapifyProvider, googlePlacesProvider, onDomain, secretsKeyFromEnv, trustedOriginsOn } from "@odentia/services"
+import { configureMailLinks, createMailer } from "@odentia/mail"
+import { createStorage, fakeAddressProvider, geoapifyProvider, googlePlacesProvider, mailBrandDomains, onDomain, secretsKeyFromEnv, trustedOriginsOn } from "@odentia/services"
 import { createApp } from "./app.js"
 import { env } from "./env.js"
 import { metaSignupFromEnv } from "./routes/whatsapp-signup.js"
@@ -15,7 +15,7 @@ import { metaSignupFromEnv } from "./routes/whatsapp-signup.js"
 configureMetaGraphVersion(env.META_GRAPH_VERSION)
 // Términos, Privacidad y Ayuda del pie de cada correo.
 // El pie de cada correo lleva la web de su marca: la de latidIA, en su dominio (issue 229).
-configureMailLinks(env.WEB_URL, { latidia: env.MEDICAL_DOMAIN || undefined } satisfies MailBrandDomains)
+configureMailLinks(env.WEB_URL, mailBrandDomains(env.productDomains))
 const db = createAppDb(env.APP_DATABASE_URL)
 const ownerDb = createOwnerDb(env.DATABASE_URL)
 const secretsKey = secretsKeyFromEnv(env.SECRETS_KEY)
