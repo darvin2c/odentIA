@@ -9,7 +9,7 @@
  * El servidor decide qué toca, qué venció y si ya se pagó (también si dos
  * personas tocan a la vez): aquí solo se presenta.
  */
-import { formatMoney, formatMoneyInput } from "@odentia/clinical"
+import { currencyWord, formatMoney, formatMoneyInput } from "@odentia/clinical"
 import { Button, Collapsible, CollapsibleContent, CollapsibleTrigger, cn, toast } from "@odentia/ui"
 import { FormDrawer, RowActions, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -404,7 +404,7 @@ function PayOtherDrawer({
     >
       <div className="flex flex-col gap-4">
         <form.AppField name="amount">
-          {(field) => <field.TextField label={`Importe (${currency})`} inputMode="decimal" inputClassName="w-40" />}
+          {(field) => <field.TextField label={`Importe en ${currencyWord(currency, locale)}`} inputMode="decimal" inputClassName="w-40" />}
         </form.AppField>
         <form.AppField name="fromCash">
           {(field) => (
@@ -491,7 +491,7 @@ function ChangeRecurringDrawer({
         <form.AppField name="amount">
           {(field) => (
             <field.TextField
-              label={`Importe (${currency})`}
+              label={`Importe en ${currencyWord(currency, locale)}`}
               description={row ? `Se propone este importe cada vez. Hoy: ${formatMoney(row.amountCents, row.currency, locale)}.` : undefined}
               inputMode="decimal"
               inputClassName="w-40"

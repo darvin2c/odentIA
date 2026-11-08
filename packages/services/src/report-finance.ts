@@ -143,6 +143,41 @@ function commissionLinesSql(orgId: string, hull: Span, currency: string, branchI
     )`
 }
 
+/**
+ * Lo de las comisiones en otra moneda, en su moneda (ADR 0155): Reportes las suma en la del negocio
+ * con el cambio de su cobro, y lo dice («incluye USD 240.00»). `generatedCents` es lo del tramo;
+ * `pendingCents`, lo que aún no entra en ningún pago.
+ */
+async function commissionsInOtherCurrencies(
+  tx: Db,
+  orgId: string,
+  window: Span,
+  business: string,
+  branchId: string | undefined,
+): Promise<Array<{ currency: string; generatedCents: number; pendingCents: number }>> {
+  const rows = await tx.execute<{ currency: string; generated: string; pending: string }>(sql`
+    with lines as (
+      select l.currency, l.own_commission as cents, true as fresh
+      from ${commissionLiveIn(orgId, window.start, window.end)} l
+      where l.currency <> ${business} ${branchId ? sql`and l.branch_id = ${branchId}` : sql``}
+      union all
+      select s.currency::text, l.commission_cents::numeric, false
+      from commission_settlement_line l
+      join commission_settlement s on s.organization_id = l.organization_id and s.id = l.settlement_id and s.voided_at is null
+      join patient_payment_application a on a.organization_id = l.organization_id and a.id = l.application_id
+      join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id
+      where l.organization_id = ${orgId} and l.kind = 'cobro' and l.voided_at is null and s.currency <> ${business}
+        and a.voided_at is null and p.voided_at is null
+        and l.occurred_at >= ${at(window.start)} and l.occurred_at < ${at(window.end)}
+        ${branchId ? sql`and p.branch_id = ${branchId}` : sql``}
+    )
+    select currency, round(sum(cents))::text as generated, round(sum(cents) filter (where fresh))::text as pending
+    from lines group by currency order by currency`)
+  return [...rows]
+    .map((row) => ({ currency: row.currency, generatedCents: safeCents(row.generated), pendingCents: safeCents(row.pending) }))
+    .filter((row) => row.generatedCents > 0 || row.pendingCents > 0)
+}
+
 /** Las comisiones de varios tramos en una consulta, por profesional (la misma cuenta de Finanzas › Comisiones). */
 export async function commissionsMany(
   tx: Db,
@@ -898,6 +933,8 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
       professionals: pending.filter((cents) => cents > 0).length,
       /** Lo nuevo del periodo aún sin registrar, antes de descuentos: si hay, algo queda por hacer en Comisiones. */
       freshCents: sumOf(commissions[0], (item) => item.freshCents),
+      /** Lo que de esto va en otra moneda, en su moneda: las cifras de arriba lo tienen al cambio de su cobro. */
+      otherCurrencies: await commissionsInOtherCurrencies(tx, orgId, window, currency, branchId),
     },
     /** La cascada: lo cobrado, las comisiones generadas y cada tipo de gasto que tuvo algo (sin el pago de comisiones). */
     cascade: {

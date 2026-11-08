@@ -3119,6 +3119,17 @@ function commissionSummary(view: MonthCommissionsView) {
     rateBps: view.rateBps,
     /** Cuántos servicios tienen otro porcentaje o un monto fijo. */
     exceptionCount: view.exceptions.length,
+    /**
+     * Los porcentajes generales que usaron los cobros del mes (sin excepciones ni montos): uno solo
+     * se dice; con más de uno, «varios porcentajes». El de hoy puede no ser el que se usó.
+     */
+    ratesUsed: [
+      ...new Set(
+        view.lines
+          .filter((line) => !line.voidedAfterPaid && !line.forService && line.fixedCents === null && line.rateBps !== null)
+          .map((line) => line.rateBps as number),
+      ),
+    ].sort((a, b) => b - a),
     collections: view.lines.filter((line) => !line.voidedAfterPaid).length,
     baseCents: view.baseCents,
     commissionCents: view.commissionCents,
