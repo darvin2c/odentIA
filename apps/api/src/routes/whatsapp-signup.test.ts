@@ -76,6 +76,9 @@ function fakeMeta(override?: (call: Call) => Answer) {
     if (call.url.includes("fields=quality_rating")) {
       return { json: { quality_rating: "GREEN", whatsapp_business_manager_messaging_limit: "TIER_250" } }
     }
+    // El PDF de muestra del mensaje con documento, con la carga reanudable de la app de odentIA (ADR 0156).
+    if (path.endsWith("/uploads")) return { json: { id: "upload:SESION" } }
+    if (path.endsWith("/upload:SESION")) return { json: { h: "4::MUESTRA" } }
     if (path.endsWith("/message_templates")) {
       if (call.method === "POST") return { json: { id: String(++created), status: "PENDING", category: (call.body as { category: string }).category } }
       return { json: { data: [] } }
@@ -253,7 +256,7 @@ describe("la configuración de plataforma es opcional", () => {
 })
 
 describe("conectar con Facebook", () => {
-  it("canjea el código, guarda la conexión, suscribe la app, registra el número y pide los catorce mensajes", async () => {
+  it("canjea el código, guarda la conexión, suscribe la app, registra el número y pide los quince mensajes", async () => {
     const meta = fakeMeta()
     const { status, data } = await connect("org_a", meta, { code: "codigo-a", wabaId: "7001", phoneNumberId: "9001" })
     expect(status).toBe(201)
@@ -267,15 +270,22 @@ describe("conectar con Facebook", () => {
       "GET /7001/message_templates",
       // Los once del agente sin «Su enlace», «Retomar la conversación» y «Ver respuesta» (R1 del pulido de la Bandeja).
       ...Array<string>(14).fill("POST /7001/message_templates"),
+      // «Documento listo» sube antes su PDF de muestra con la app de odentIA (ADR 0156).
+      "POST /APP1/uploads",
+      "POST /upload:SESION",
+      "POST /7001/message_templates",
     ])
-    // Todo lo que sigue al canje viaja con la clave de la clínica, no con la de la app.
-    expect(new Set(meta.calls.slice(1).map((call) => call.auth))).toEqual(new Set(["Bearer clave-de-codigo-a"]))
+    // Todo lo que sigue al canje viaja con la clave de la clínica, no con la de la app
+    // (la carga de la muestra la lleva como «OAuth», como pide Meta para subir archivos).
+    expect(new Set(meta.calls.slice(1).map((call) => call.auth))).toEqual(
+      new Set(["Bearer clave-de-codigo-a", "OAuth clave-de-codigo-a"]),
+    )
     expect(data).toMatchObject({
       displayName: "Clínica Sonríe",
       externalId: "9001",
       status: "active",
       account: { name: "Clínica Sonríe", number: "+51 9001" },
-      templates: { canManage: true, requested: 14, error: null },
+      templates: { canManage: true, requested: 15, error: null },
       health: { quality: "alta", dailyLimit: 250, number: "+51 9001" },
       signup: { pending: [] },
     })
@@ -445,7 +455,7 @@ describe("conectar con Facebook", () => {
       ],
     })
     // Lo demás siguió: la salud y los mensajes no dependen del registro.
-    expect(data).toMatchObject({ templates: { requested: 14 }, health: { quality: "alta" } })
+    expect(data).toMatchObject({ templates: { requested: 15 }, health: { quality: "alta" } })
     const pin = decryptConfig(KEY, (await rowOf(data!.id)).configEncrypted)["registrationPin"]
 
     // «Reintentar»: solo el paso que falta, con el permiso y el PIN guardados.

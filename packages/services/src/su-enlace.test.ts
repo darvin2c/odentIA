@@ -113,7 +113,7 @@ it("uno por persona; «Tus datos» pide solo lo que falta, se envía una vez y n
   ).rejects.toMatchObject({ code: "DATA_ALREADY_SENT" })
   // Sin nada pendiente solo le queda «Tus mensajes» (ADR 0040): ni sus datos ni nada de lo guardado.
   expect(await f.run((tx) => getPersonalLinkView(tx, ORG, first.token))).toMatchObject({
-    status: "abierto", data: null, budgets: [], consents: [], questionnaire: null, papers: [],
+    status: "abierto", data: null, budgets: [], consents: [], questionnaire: null,
     messages: { recordatorio: true, seguimiento: true, novedades: false, nothing: false },
   })
   // Su persona guarda una nota con lo que completó.

@@ -128,6 +128,23 @@ export function sendHealthDocument(
   )
 }
 
+/** La última vez que el papel salió hacia la persona; nulo si nunca se envió. */
+export interface HealthDocumentSent {
+  at: string
+  channel: string
+  recipientName: string
+}
+
+export function fetchHealthDocumentSent(
+  patientId: string,
+  input: { documentType: HealthDocumentType; documentId: string },
+) {
+  const search = new URLSearchParams({ documentType: input.documentType, documentId: input.documentId })
+  return apiFetch<{ data: HealthDocumentSent | null }>(
+    `/api/patients/${patientId}/health-document-sent?${search.toString()}`,
+  )
+}
+
 export const CHANNEL_WORDS: Record<string, string> = {
   whatsapp: "WhatsApp",
   email: "correo",

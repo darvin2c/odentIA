@@ -15,6 +15,8 @@ export interface AutomationWorkerDeps {
    * demostración las deja «en revisión» sin llamar a nadie.
    */
   senderMode: "mock" | "live"
+  /** El id de la app de Meta de odentIA: sube el PDF de muestra del mensaje con documento (ADR 0156). */
+  metaAppId?: string
   /** Lee lo último que escribió la persona antes de escribirle por un seguimiento. */
   alreadyTold?: TickDeps["alreadyTold"]
   /** Para la invitación de calendario que va en los avisos de cita por correo. */
@@ -84,7 +86,11 @@ export async function runAutomationTick(deps: AutomationWorkerDeps): Promise<boo
   const summary = await tickAutomations(ownerDb, appDb, now, {
     secretsKey,
     publicBaseUrl,
-    templates: { fetch, validateExternal: senderMode === "live" },
+    templates: {
+      fetch,
+      validateExternal: senderMode === "live",
+      ...(deps.metaAppId ? { metaAppId: deps.metaAppId } : {}),
+    },
     alreadyTold,
     ...(storage ? { storage } : {}),
     // Lo que el agente escribe por su cuenta (insistir, despedirse) sale con el formato del canal.

@@ -1037,6 +1037,7 @@ export function createApp(deps: AppDeps) {
     storage: deps.storage,
     validateExternal: deps.validateExternal,
     webhookBaseUrl: deps.webhookBaseUrl,
+    ...(deps.metaSignup ? { metaAppId: deps.metaSignup.appId } : {}),
   }
   guarded.route(
     "/",

@@ -14,7 +14,6 @@ import {
   getBranchDirections,
   getPersonalLinkConsent,
   getPersonalLinkDataForm,
-  getPersonalLinkPaper,
   getPersonalLinkQuestionnaire,
   getPersonalLinkView,
   issueFields,
@@ -145,7 +144,6 @@ const messagesBody = z.strictObject({
 // Lo escrito en «Calle y número» del registro o de «Tus datos» (issue 36): va en el cuerpo.
 const addressBody = z.strictObject({ q: z.string().max(200), session: z.uuid() })
 // «Tus papeles»: el token va en el cuerpo, nunca en la dirección (registros de acceso, proxies, Referer).
-const paperBody = z.strictObject({ token, kind: z.enum(["receta", "comprobante"]) })
 export type BookingRemoteAddress = (c: Context) => string | undefined
 
 /**
@@ -410,32 +408,7 @@ export function createPublicBookingRoute(deps: {
     return answer(c, 200, () => inOrg(c, (tx, orgId) => setPersonalLinkMessages(tx, orgId, linkToken, input)))
   })
 
-  // «Tus papeles»: la receta o el comprobante de los últimos 30 días, como PDF.
-  // Es un POST, como el resto de lo que hace el enlace: el token viaja en el cuerpo.
-  app.post("/:slug/papers/:paperId", async (c) => {
-    const body = paperBody.safeParse(await bodyOf(c))
-    const params = z.object({ paperId: z.uuid() }).safeParse({ paperId: c.req.param("paperId") })
-    if (!body.success || !params.success) return unavailable(c)
-    try {
-      const paper = await inOrg(c, (tx, orgId) =>
-        getPersonalLinkPaper(tx, orgId, body.data.token, { kind: body.data.kind, id: params.data.paperId }, deps.storage),
-      )
-      return new Response(Buffer.from(paper.bytes), {
-        status: 200,
-        headers: {
-          "Content-Type": "application/pdf",
-          "Content-Disposition": `attachment; filename="${paper.filename.replace(/[^A-Za-z0-9._-]+/g, "-")}"`,
-          "Cache-Control": "no-store",
-          "Referrer-Policy": "no-referrer",
-        },
-      })
-    } catch (error) {
-      if (error instanceof ServiceError) return c.json(errorBody(c, error.code, error.message, error.fields), error.status)
-      throw error
-    }
-  })
-
-  // «Añadir al calendario» de su cita (issue 46). Es un POST por lo mismo que «Tus papeles».
+  // «Añadir al calendario» de su cita (issue 46). Es un POST: el token viaja en el cuerpo, nunca en la dirección.
   app.post("/:slug/calendar", async (c) => {
     const body = z.strictObject({ token }).safeParse(await bodyOf(c))
     if (!body.success) return unavailable(c)

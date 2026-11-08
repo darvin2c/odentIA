@@ -55,6 +55,7 @@ import {
   PERSONAL_LINK_MESSAGE_KEY,
   ANSWER_READY_MESSAGE_KEY,
   LINK_RECEIVED_MESSAGE_KEY,
+  DOCUMENT_READY_MESSAGE_KEY,
   NOTICE_PURPOSE,
   REMINDER_CONFIRMED_KEY,
   renderMessage,
@@ -83,6 +84,8 @@ import { acceptsPromotions, mayWriteFirst } from "./message-permission.js"
 import { nextOpportuneFrom } from "./opportune-hours.js"
 import { isWritingTime, writingScheduleOf } from "./writing-hours.js"
 import { personalLinkButtonUrl } from "./public-links.js"
+import { loadDocumentClinic } from "./document-clinic.js"
+import { DocumentKit, documentFormat } from "./document-kit.js"
 
 /**
  * Los mensajes de WhatsApp de una clínica. Son suyos: viven en su cuenta,
@@ -218,6 +221,7 @@ function catalogTitle(key: CatalogMessageKey): string {
   if (key === PERSONAL_LINK_MESSAGE_KEY) return "Su enlace"
   if (key === ANSWER_READY_MESSAGE_KEY) return "Ver respuesta"
   if (key === LINK_RECEIVED_MESSAGE_KEY) return "Recibido desde su enlace"
+  if (key === DOCUMENT_READY_MESSAGE_KEY) return "Documento listo"
   return NOTICE_TITLES[key] ?? adminLineOf(key)?.name ?? key
 }
 
@@ -238,7 +242,8 @@ function catalogDef(
         : key === BUDGET_READY_MESSAGE_KEY ||
             key === PERSONAL_LINK_MESSAGE_KEY ||
             key === ANSWER_READY_MESSAGE_KEY ||
-            key === LINK_RECEIVED_MESSAGE_KEY
+            key === LINK_RECEIVED_MESSAGE_KEY ||
+            key === DOCUMENT_READY_MESSAGE_KEY
           ? "plan"
           : "agente",
     title: catalogTitle(key),
@@ -301,19 +306,59 @@ function pendingText(def: MessageDef): MessageText | null {
 }
 
 /**
+ * El PDF de muestra que WhatsApp pide para aprobar el mensaje con documento
+ * (ADR 0156): el membrete de la clínica y nada de ningún paciente.
+ */
+async function documentSample(tx: Db, orgId: string): Promise<{ bytes: Uint8Array; filename: string }> {
+  const clinic = await loadDocumentClinic(tx, orgId)
+  const kit = await DocumentKit.open(clinic, documentFormat(clinic), {
+    title: "Documento de ejemplo",
+    docLabel: "Documento de ejemplo",
+  })
+  kit.gap(22)
+  kit.heading("Documento de ejemplo")
+  kit.text("Así llega un documento de la clínica en PDF: una receta, una orden, un consentimiento firmado o un comprobante.")
+  return { bytes: await kit.finish(), filename: "Documento.pdf" }
+}
+
+/**
+ * La muestra solo para el mensaje que la lleva: los demás no la necesitan.
+ * Sin los datos de la clínica para el membrete todavía no se puede armar: el
+ * mensaje queda sin pedir y se pide en el ciclo siguiente, como el de «Su
+ * enlace» sin dirección pública (no es un rechazo de WhatsApp).
+ */
+async function sampleFor(tx: Db, orgId: string, def: MessageDef) {
+  if (def.catalog?.header !== "documento") return null
+  try {
+    return await tx.transaction((inner) => documentSample(inner, orgId))
+  } catch (error) {
+    if (error instanceof ServiceError) return null
+    throw error
+  }
+}
+
+/**
  * Lo que se pide a WhatsApp. Un mensaje con «Su enlace» lleva su botón de
  * dirección, que es la de la clínica con el token al final: sin dirección
- * pública configurada no se puede pedir.
+ * pública configurada no se puede pedir. El de documentos lleva su PDF de muestra.
  */
 function orderOf(
   def: MessageDef,
   text: MessageText,
   linkUrl: { url: string; example: string } | null,
   examples: Record<MessageVariable, string>,
+  sample: { bytes: Uint8Array; filename: string } | null = null,
 ): TemplateOrder {
   const { body, variables } = positionalBody(text.body)
   if (def.link && !linkUrl) {
     throw new ServiceError("NO_PUBLIC_URL", 409, "Falta la dirección pública de la clínica para el botón de su enlace")
+  }
+  if (def.catalog?.header === "documento" && !sample) {
+    throw new ServiceError(
+      "NO_DOCUMENT_SAMPLE",
+      409,
+      "Faltan los datos de la clínica (Configuración › Datos de la clínica) para el PDF de muestra del mensaje de documentos",
+    )
   }
   return {
     name: text.templateName,
@@ -323,6 +368,9 @@ function orderOf(
     examples: variables.map((name) => examples[name]),
     buttons: def.buttons.map((button) => button.title),
     ...(def.link && linkUrl ? { link: { title: def.link.title, ...linkUrl } } : {}),
+    ...(def.catalog?.header === "documento" && sample
+      ? { header: { format: "document" as const, example: sample } }
+      : {}),
     messageKey: def.catalog?.key ?? null,
   }
 }
@@ -774,6 +822,8 @@ export async function requestMissingTemplates(
       // rechazo de WhatsApp ni un permiso que falte. Queda sin pedir y se pide
       // en el ciclo siguiente a que la dirección esté configurada.
       if (def.link && !linkUrl) continue
+      const sample = await sampleFor(tx, orgId, def)
+      if (def.catalog?.header === "documento" && !sample) continue
       try {
         // Punto de retorno: un rechazo del proveedor no debe abortar lo demás.
         const item = await tx.transaction((inner) =>
@@ -781,7 +831,7 @@ export async function requestMissingTemplates(
             inner,
             orgId,
             connectionId,
-            orderOf(def, text, def.link ? linkUrl : null, examples),
+            orderOf(def, text, def.link ? linkUrl : null, examples, sample),
             secretsKey,
             deps,
           ),
@@ -1027,6 +1077,8 @@ function meanwhileOf(
     return "Mientras tanto su enlace sale escrito a quien escribió en las últimas 24 horas, o por correo."
   if (def.id === ANSWER_READY_MESSAGE_KEY)
     return "Mientras tanto la respuesta queda por entregar y sale sola cuando la persona vuelve a escribir."
+  if (def.id === DOCUMENT_READY_MESSAGE_KEY)
+    return "Mientras tanto el documento sale con su PDF a quien escribió en las últimas 24 horas; a los demás, por correo o impreso."
   if (def.id === LINK_RECEIVED_MESSAGE_KEY)
     return "Mientras tanto se le agradece por el chat solo a quien escribió en las últimas 24 horas; a los demás se lo confirma la página de su enlace."
   if (def.origin === "plan")
@@ -1097,6 +1149,8 @@ function itemOf(
         ? "Cuando recepción pulsa «Enviarle su enlace» o envía un consentimiento para firmar antes de la cita."
         : def.id === ANSWER_READY_MESSAGE_KEY
           ? "Cuando alguien del equipo responde un tema pasadas las 24 horas: la respuesta queda por entregar y le llega este aviso para verla."
+        : def.id === DOCUMENT_READY_MESSAGE_KEY
+          ? "Cuando alguien del equipo envía una receta, una orden, un descanso, una hoja de atención, un consentimiento firmado o un comprobante y la persona lleva más de 24 horas sin escribir: le llega con el PDF."
         : def.id === LINK_RECEIVED_MESSAGE_KEY
           ? "Cuando la persona completa algo desde su enlace y lleva más de 24 horas sin escribir, con Sofi encendida. Uno al día, aunque complete varias cosas."
         : def.origin === "plan"
@@ -1405,7 +1459,7 @@ export async function saveMessageText(
     tx,
     orgId,
     connectionId,
-    orderOf(def, text, def.link ? await personalLinkButtonUrl(tx, orgId) : null, await exampleValues(tx, orgId)),
+    orderOf(def, text, def.link ? await personalLinkButtonUrl(tx, orgId) : null, await exampleValues(tx, orgId), await sampleFor(tx, orgId, def)),
     deps.secretsKey,
     deps,
   ).catch(rejectedText)
@@ -1457,7 +1511,7 @@ export async function revertMessageText(
       tx,
       orgId,
       connectionId,
-      orderOf(def, original, def.link ? await personalLinkButtonUrl(tx, orgId) : null, await exampleValues(tx, orgId)),
+      orderOf(def, original, def.link ? await personalLinkButtonUrl(tx, orgId) : null, await exampleValues(tx, orgId), await sampleFor(tx, orgId, def)),
       deps.secretsKey,
       deps,
     )
@@ -1550,7 +1604,7 @@ export async function createClinicMessage(
     tx,
     orgId,
     connectionId,
-    orderOf(def, text, def.link ? await personalLinkButtonUrl(tx, orgId) : null, await exampleValues(tx, orgId)),
+    orderOf(def, text, def.link ? await personalLinkButtonUrl(tx, orgId) : null, await exampleValues(tx, orgId), await sampleFor(tx, orgId, def)),
     deps.secretsKey,
     deps,
   ).catch(rejectedText)

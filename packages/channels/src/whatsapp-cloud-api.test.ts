@@ -490,6 +490,7 @@ it("marca lo que odentIA no sabe enviar: encabezado con datos o archivo, o datos
         { id: "2", name: "con_titulo", language: "es", status: "APPROVED", category: "UTILITY", components: [{ type: "HEADER", format: "TEXT", text: "Tu cita, {{1}}" }, { type: "BODY", text: "Hola." }] },
         { id: "3", name: "titulo_fijo", language: "es", status: "APPROVED", category: "UTILITY", components: [{ type: "HEADER", format: "TEXT", text: "Clínica" }, { type: "BODY", text: "Hola, {{1}}." }] },
         { id: "4", name: "por_nombre", language: "es", status: "APPROVED", category: "UTILITY", parameter_format: "NAMED", components: [{ type: "BODY", text: "Hola, {{nombre}}." }] },
+        { id: "5", name: "con_documento", language: "es", status: "APPROVED", category: "UTILITY", components: [{ type: "HEADER", format: "DOCUMENT" }, { type: "BODY", text: "Hola, {{1}}." }] },
       ],
     },
   })
@@ -500,7 +501,83 @@ it("marca lo que odentIA no sabe enviar: encabezado con datos o archivo, o datos
     // Un encabezado fijo no pide datos: se puede enviar.
     ["titulo_fijo", null],
     ["por_nombre", "datos_por_nombre"],
+    // La de documento solo sale con el documento de cada envío.
+    ["con_documento", "encabezado_documento"],
   ])
+})
+
+it("una plantilla con documento lleva el PDF en su encabezado, antes del cuerpo", () => {
+  const body = buildBody("51999", {
+    type: "template", name: "odentia_documento_listo_v1", language: "es", params: ["Rosa", "Dental Smile"],
+    document: { url: "https://media.test/firmada.pdf", filename: "Receta-12.pdf" },
+  }) as { template: { components: unknown[] } }
+  expect(body.template.components).toEqual([
+    { type: "header", parameters: [{ type: "document", document: { link: "https://media.test/firmada.pdf", filename: "Receta-12.pdf" } }] },
+    { type: "body", parameters: [{ type: "text", text: "Rosa" }, { type: "text", text: "Dental Smile" }] },
+  ])
+})
+
+it("pide la plantilla con documento subiendo antes el PDF de muestra con la app de Meta", async () => {
+  const calls: { url: string; method: string; headers: Record<string, string>; body: unknown }[] = []
+  const answers = [
+    { id: "upload:MTphdHRhY2htZW50" },
+    { h: "4::aW1hZ2UvanBlZw==:ARZ" },
+    { id: "960", status: "PENDING", category: "UTILITY" },
+  ]
+  const fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    calls.push({
+      url: String(url),
+      method: init?.method ?? "GET",
+      headers: (init?.headers ?? {}) as Record<string, string>,
+      body: typeof init?.body === "string" ? JSON.parse(init.body) : init?.body,
+    })
+    return new Response(JSON.stringify(answers.shift() ?? {}), { status: 200 })
+  }) as typeof globalThis.fetch
+  const sample = new TextEncoder().encode("%PDF-1.7 muestra")
+  const result = await whatsappCloudApiAdapter.requestTemplate!(
+    fx.config,
+    {
+      name: "odentia_documento_listo_v1", language: "es", category: "utility",
+      body: "Hola, {{1}}. Te enviamos tu documento de {{2}}.", examples: ["Lucía", "Clínica Sonríe"], buttons: [],
+      header: { format: "document", example: { bytes: sample, filename: "Documento.pdf" } },
+    },
+    { fetch, metaAppId: "1234567890" },
+  )
+  expect(result).toEqual({ externalId: "960", status: "en_revision", category: "utility" })
+  // 1. La sesión de carga en la app de odentIA, con el tamaño y el tipo del archivo.
+  expect(calls[0]?.method).toBe("POST")
+  expect(calls[0]?.url).toMatch(/\/1234567890\/uploads\?/)
+  expect(calls[0]?.url).toContain(`file_length=${sample.byteLength}`)
+  expect(calls[0]?.url).toContain("file_type=application%2Fpdf")
+  expect(calls[0]?.headers.Authorization).toMatch(/^OAuth /)
+  // 2. El archivo entero, desde el principio.
+  expect(calls[1]?.url).toMatch(/\/upload:MTphdHRhY2htZW50$/)
+  expect(calls[1]?.headers.file_offset).toBe("0")
+  // 3. La plantilla, con la muestra subida como ejemplo del encabezado.
+  expect(calls[2]?.url).toMatch(/\/message_templates$/)
+  expect(calls[2]?.body).toMatchObject({
+    components: [
+      { type: "HEADER", format: "DOCUMENT", example: { header_handle: ["4::aW1hZ2UvanBlZw==:ARZ"] } },
+      { type: "BODY", text: "Hola, {{1}}. Te enviamos tu documento de {{2}}.", example: { body_text: [["Lucía", "Clínica Sonríe"]] } },
+    ],
+  })
+})
+
+it("sin el id de la app, lo lee de la clave de la conexión; si Meta no lo dice, no pide la plantilla", async () => {
+  const { calls, fetch } = fakeFetch({ status: 400, json: { error: { message: "Unsupported get request" } } })
+  await expect(
+    whatsappCloudApiAdapter.requestTemplate!(
+      fx.config,
+      {
+        name: "odentia_documento_listo_v1", language: "es", category: "utility",
+        body: "Hola, {{1}}.", examples: ["Lucía"], buttons: [],
+        header: { format: "document", example: { bytes: new Uint8Array([1]), filename: "Documento.pdf" } },
+      },
+      { fetch },
+    ),
+  ).rejects.toMatchObject({ message: expect.stringMatching(/app de Meta/), providerStatus: 400 })
+  expect(calls).toHaveLength(1)
+  expect(calls[0]?.url).toMatch(/\/app\?fields=id$/)
 })
 
 it("el aviso de cambio de categoría llega aparte de los estados, y la dirección de la app lo reparte a su cuenta", () => {
