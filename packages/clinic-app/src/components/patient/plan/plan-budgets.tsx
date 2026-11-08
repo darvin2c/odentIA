@@ -16,6 +16,8 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
   FieldGroup,
+  FieldLegend,
+  FieldSet,
 } from "@odentia/ui"
 import {
   ConfirmDialog,
@@ -55,6 +57,7 @@ import {
   PLAN_QUERY_KEYS,
   removeBudgetItemsApi,
   reviseBudgetApi,
+  revisionScope,
   updateBudgetApi,
   totalsOf,
   valueOption,
@@ -1154,9 +1157,10 @@ function ReviseBudgetDrawer({
   onClose: () => void
   onSubmit: (itemIds: string[], reason: string) => Promise<unknown>
 }): React.JSX.Element {
-  const value = valueOption(budget)
-  // Las líneas y lo marcado se fijan al abrir.
-  const [lines] = useState(() => (value ? optionLines(budget, value.id) : budget.items))
+  // Las líneas y lo marcado se fijan al abrir. Sin camino elegido van todos los caminos.
+  const [{ lines, groups }] = useState(() => revisionScope(budget))
+  const byPath = groups.some((group) => group.options.length > 0)
+  const both = budget.options.length === 2 ? "los dos" : "todos los"
   const [initial] = useState(() => ({
     items: lines.map((line) => ({ planItemId: line.planItemId, include: true })),
     reason: "",
@@ -1199,22 +1203,52 @@ function ReviseBudgetDrawer({
     >
       <form.AppField name="items" mode="array">
         {(list) => (
-          <list.Group legend="Tratamientos de la revisión">
+          <list.Group
+            legend="Tratamientos de la revisión"
+            description={
+              byPath
+                ? `No hay camino elegido: la revisión lleva ${both} caminos. Desmarca solo lo que ya no se le ofrece.`
+                : undefined
+            }
+          >
             {() =>
-              lines.map((line, index) => {
-                const site = treatmentSiteLabel(line)
-                // Ya se atendió (o se está atendiendo): la revisión no la retira.
-                const executed = line.itemStatus === "en_curso" || line.itemStatus === "realizado"
+              groups.map((group) => {
+                const checks = group.lines.map((line) => {
+                  const index = lines.indexOf(line)
+                  const site = treatmentSiteLabel(line)
+                  // Ya se atendió (o se está atendiendo): la revisión no la retira.
+                  const executed = line.itemStatus === "en_curso" || line.itemStatus === "realizado"
+                  return (
+                    <form.AppField key={line.id} name={`items[${index}].include`}>
+                      {(field) => (
+                        <field.CheckboxField
+                          label={`${line.title}${site ? ` · ${site}` : ""}`}
+                          description={executed ? "Ya se atendió: no se puede retirar." : undefined}
+                          disabled={executed || surface.isSubmitting}
+                        />
+                      )}
+                    </form.AppField>
+                  )
+                })
+                if (group.options.length === 0) return checks
+                const [only] = group.options
+                // Desmarcar quita el tratamiento de todos los caminos que nombra el grupo.
+                const legend =
+                  group.options.length === budget.options.length
+                    ? `Va en ${both} caminos`
+                    : group.options.length === 1 && only
+                      ? `${only.label}${only.name?.trim() ? ` · ${only.name.trim()}` : ""}`
+                      : `Va en ${group.options.map((option) => option.label).join(" y ")}`
                 return (
-                  <form.AppField key={line.id} name={`items[${index}].include`}>
-                    {(field) => (
-                      <field.CheckboxField
-                        label={`${line.title}${site ? ` · ${site}` : ""}`}
-                        description={executed ? "Ya se atendió: no se puede retirar." : undefined}
-                        disabled={executed || surface.isSubmitting}
-                      />
-                    )}
-                  </form.AppField>
+                  <FieldSet
+                    key={group.options.map((option) => option.id).join("|")}
+                    className="gap-3"
+                  >
+                    <FieldLegend variant="label" className="mb-0">
+                      {legend}
+                    </FieldLegend>
+                    {checks}
+                  </FieldSet>
                 )
               })
             }

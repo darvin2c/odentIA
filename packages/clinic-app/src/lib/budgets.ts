@@ -289,6 +289,64 @@ export function budgetPaths(budget: Pick<BudgetWithTotals, "items" | "options">)
   }
 }
 
+/** Lo que lleva una revisión, en el orden en que se muestra. */
+export interface RevisionScope {
+  /** Cada tratamiento una vez: es lo que se manda (`itemIds`). */
+  lines: BudgetLine[]
+  /**
+   * Sin camino elegido, un grupo por los caminos en que va cada tratamiento: el
+   * de todos primero, después cada camino con lo suyo y al final lo que va en
+   * algunos. Con un camino elegido o una sola opción, un solo grupo sin caminos.
+   */
+  groups: Array<{ options: BudgetOption[]; lines: BudgetLine[] }>
+}
+
+/**
+ * Lo que lleva la revisión. Sin camino elegido, todos los caminos: nadie
+ * eligió, y el servidor quita el camino del que no llega nada suyo
+ * (`reviseBudget` en servicios, ADR 0153). Con uno elegido (o una sola
+ * opción), solo ese.
+ */
+export function revisionScope(budget: Pick<BudgetWithTotals, "items" | "options">): RevisionScope {
+  const choosing =
+    budget.options.length > 1 && !budget.options.some((option) => option.decision === "elegida")
+  if (!choosing) {
+    const value = valueOption(budget)
+    const lines = value ? optionLines(budget, value.id) : budget.items
+    return { lines, groups: [{ options: [], lines }] }
+  }
+  const options = [...budget.options].sort((a, b) => a.position - b.position)
+  // Cada tratamiento se manda una vez, aunque vaya en varios caminos (también
+  // con otro precio en cada uno: el servidor lo deja en cada camino con lo suyo).
+  // Se muestra bajo los caminos en que va, para que desmarcarlo diga de dónde sale.
+  const valued = valueOption(budget)?.id ?? null
+  const byItem = new Map<string, { line: BudgetLine; in: Set<string> }>()
+  for (const option of options) {
+    for (const line of optionLines(budget, option.id)) {
+      const seen = byItem.get(line.planItemId)
+      if (!seen) byItem.set(line.planItemId, { line, in: new Set([option.id]) })
+      else {
+        seen.in.add(option.id)
+        if (option.id === valued) seen.line = line
+      }
+    }
+  }
+  const groups = new Map<string, { options: BudgetOption[]; lines: BudgetLine[] }>()
+  for (const { line, in: inOptions } of byItem.values()) {
+    const own = options.filter((option) => inOptions.has(option.id))
+    const key = own.map((option) => option.id).join("|")
+    const group = groups.get(key) ?? { options: own, lines: [] }
+    group.lines.push(line)
+    groups.set(key, group)
+  }
+  const rank = (group: { options: BudgetOption[] }) =>
+    group.options.length === options.length ? 0 : group.options.length === 1 ? 1 : 2
+  const ordered = [...groups.values()].sort(
+    (a, b) => rank(a) - rank(b) || (a.options[0]?.position ?? 0) - (b.options[0]?.position ?? 0),
+  )
+  return { lines: ordered.flatMap((group) => group.lines), groups: ordered }
+}
+
 /**
  * El estado de un presupuesto cuando solo se tiene su código (listas de otras
  * pantallas). Con el presupuesto completo, vale su `stateText`, que además dice
