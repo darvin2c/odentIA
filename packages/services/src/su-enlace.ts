@@ -429,18 +429,14 @@ async function consentViews(
   why: RemoteSignBlock | null,
 ): Promise<PersonalLinkConsent[]> {
   if (rows.length === 0) return []
-  const next = link.appointment
-    ? await appointmentView(tx, orgId, link.appointment.id).then((view) =>
-        view && !view.cancelled ? { startsAt: view.startsAt, timeZone: view.timeZone } : null,
-      )
-    : null
   const out: PersonalLinkConsent[] = []
   for (const row of rows) {
     out.push({
       id: row.id,
       title: row.title,
       procedureRef: row.procedureRef,
-      appointment: (row.planItemId ? await appointmentOfPlanItem(tx, orgId, row.planItemId) : null) ?? next,
+      // Solo la cita en que está agendado su tratamiento: otra cita (una limpieza) no es la suya.
+      appointment: row.planItemId ? await appointmentOfPlanItem(tx, orgId, row.planItemId) : null,
       signable: why === null,
       why,
     })
@@ -1681,25 +1677,8 @@ async function appointmentWords(
     .from(consentDocument)
     .where(and(eq(consentDocument.organizationId, orgId), eq(consentDocument.id, input.consentId)))
     .limit(1)
-  let when = consent?.planItemId ? await appointmentOfPlanItem(tx, orgId, consent.planItemId) : null
-  if (!when) {
-    const [next] = await tx
-      .select({ startsAt: appointment.startsAt, timeZone: branch.timezone })
-      .from(appointment)
-      .innerJoin(branch, eq(branch.id, appointment.branchId))
-      .where(
-        and(
-          eq(appointment.organizationId, orgId),
-          eq(appointment.patientId, input.patientId),
-          inArray(appointment.status, ["programada", "confirmada"]),
-          gt(appointment.startsAt, new Date()),
-        ),
-      )
-      .orderBy(asc(appointment.startsAt))
-      .limit(1)
-    const region = await findOrgLocale(tx, orgId)
-    when = next ? { startsAt: next.startsAt.toISOString(), timeZone: next.timeZone ?? region.timezone } : null
-  }
+  // Solo la cita en que está agendado su tratamiento; si no, «tu próxima cita», sin fecha que lo ate a otra.
+  const when = consent?.planItemId ? await appointmentOfPlanItem(tx, orgId, consent.planItemId) : null
   // A quien decide por otro, de quién es: solo su primer nombre.
   const self = (await patientPersonId(tx, orgId, input.patientId)) === input.recipientContactId
   const whose = self ? "tu" : "la"

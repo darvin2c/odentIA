@@ -103,7 +103,7 @@ export function LinkConsentStep({ slug, token, consentId, onSigned }: { slug: st
           <p className="font-semibold">{words.notice}</p>
           <p className="text-sm">
             Puedes leerlo ahora con calma.
-            {consent.why === "sin-fecha" || consent.why === "sin-documento" ? " Lo que falta en la ficha lo completamos contigo en la clínica." : ""}
+            {consent.why === "sin-fecha" || consent.why === "sin-documento" ? " Los datos que nos faltan los completamos contigo en la clínica." : ""}
           </p>
         </div>
         <ConsentSheet

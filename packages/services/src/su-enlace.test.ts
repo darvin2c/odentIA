@@ -460,6 +460,11 @@ it("el consentimiento se firma en su enlace con su documento y el profesional lo
   expect((await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).consents).toEqual([
     { id: consent.id, title: "Exodoncia", procedureRef: "Exodoncia de la pieza 38", appointment: null, signable: true, why: null },
   ])
+  // Otra cita (una limpieza) no es la suya: sin su tratamiento agendado ahí, el consentimiento no lleva fecha.
+  await upcomingAppointment(f, lucia.id)
+  const withVisit = await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))
+  expect(withVisit.appointment).not.toBeNull()
+  expect(withVisit.consents[0]?.appointment).toBeNull()
   // Lee la misma hoja que el papel: la pieza, el diagnóstico, la declaración que acepta y el pie de firma.
   const sheet = await f.run((tx) => getPersonalLinkConsent(tx, ORG, link.token, consent.id))
   expect(sheet).toMatchObject({
