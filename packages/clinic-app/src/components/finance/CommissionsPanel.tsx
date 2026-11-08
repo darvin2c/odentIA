@@ -12,7 +12,7 @@ import { appWords } from "../../lib/product-words"
  * La moneda y el formato son los de la clínica y llegan en cada respuesta.
  */
 import { canAttend } from "@odentia/auth/permissions"
-import { formatMoney, formatMoneyInput } from "@odentia/clinical"
+import { currencyWord, formatMoney, formatMoneyInput } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -57,6 +57,8 @@ import {
   fetchMonthCommissions,
   fetchMyCommissions,
   fetchProfessionalCommissions,
+  fetchUnassignedCommissionSessions,
+  type CommissionSummary,
   type MonthlyCommissions,
   monthLabel,
   monthName,
@@ -105,6 +107,22 @@ const commissionKeys = {
     ["commissions", "payments", userId, period.year, period.month] as const,
   mine: (period: YearMonth) => ["commissions", "mine", period.year, period.month] as const,
   owed: ["commissions", "owed"] as const,
+  unassigned: ["commissions", "unassigned"] as const,
+}
+
+/** Una cifra por moneda, juntas: «S/ 1,200.00 y USD 300.00». */
+function amountsWords(amounts: Array<{ cents: number; currency: string }>, locale: string): string {
+  const words = amounts.map((amount) => formatMoney(amount.cents, amount.currency, locale))
+  return words.length > 1 ? `${words.slice(0, -1).join(", ")} y ${words.at(-1)}` : (words[0] ?? "")
+}
+
+/** El resumen de cada moneda de una fila: la de la clínica y las demás con algo del mes. */
+function summaryCurrencies(row: CommissionSummary): CommissionSummary[] {
+  const all = [row, ...(row.others ?? [])]
+  const active = all.filter(
+    (view) => view.commissionCents > 0 || view.pendingCents > 0 || view.paidCents > 0 || (view.owedCents ?? 0) > 0,
+  )
+  return active.length > 0 ? active : [row]
 }
 
 function countLabel(count: number, one: string, many: string): string {
@@ -149,14 +167,14 @@ function lineFacts(line: CommissionLine, day: (iso: string) => string, locale: s
 
 /** La regla que usó la línea: «35 %», «45 % · para este servicio» o «monto fijo de 150.00 por cada uno». */
 function ruleWords(line: CommissionLine, locale: string, currency: string): string {
-  if (line.fixedCents !== null) return `monto fijo de ${plainAmount(line.fixedCents, currency, locale)} por cada uno`
+  if (line.fixedCents !== null) return `monto fijo de ${formatMoney(line.fixedCents, currency, locale)} por cada uno`
   if (line.rateBps === null || (line.rateBps === 0 && !line.forService)) return "sin porcentaje"
   return line.forService ? `${percentLabel(line.rateBps, locale)} · para este servicio` : percentLabel(line.rateBps, locale)
 }
 
 /** «sesión 2 de 3» en un tratamiento compartido: lo cobrado se reparte igual entre sus sesiones. */
 function sessionWords(line: CommissionLine): string | null {
-  return line.slice && line.sessions ? `sesión ${line.slice} de ${line.sessions}` : null
+  return line.slice && line.sessions && line.sessions > 1 ? `sesión ${line.slice} de ${line.sessions}` : null
 }
 
 /** La clave de una línea: el cobro y, si se reparte por sesiones, su parte. */
@@ -172,7 +190,15 @@ const LIQUIDATION_HOLDER_ID = "liquidacion-para-imprimir"
  * corresponde, lo pagado, lo descontado y lo que falta. Se arma con texto (nunca HTML del dato) y se
  * imprime como la hoja de un cierre de caja; desde ahí el navegador también la guarda en PDF.
  */
-function printLiquidation(detail: MonthlyCommissions, name: string, period: YearMonth, locale: string, zone: string): void {
+function printLiquidation(
+  detail: MonthlyCommissions,
+  name: string,
+  period: YearMonth,
+  locale: string,
+  zone: string,
+  /** «En dólares», si hay más de una moneda: cada una tiene su hoja. */
+  heading: string | null = null,
+): void {
   document.getElementById(LIQUIDATION_HOLDER_ID)?.remove()
   document.getElementById(`${LIQUIDATION_HOLDER_ID}-estilo`)?.remove()
   const plain = (cents: number) => plainAmount(cents, detail.currency, locale)
@@ -183,7 +209,9 @@ function printLiquidation(detail: MonthlyCommissions, name: string, period: Year
   }
   const holder = el("div")
   holder.id = LIQUIDATION_HOLDER_ID
-  holder.append(el("h1", `Liquidación de comisiones · ${monthLabel(period, locale)}`))
+  holder.append(
+    el("h1", `Liquidación de comisiones · ${monthLabel(period, locale)}${heading ? ` · ${heading.toLocaleLowerCase(locale)}` : ""}`),
+  )
   holder.append(el("p", name))
   const table = el("table")
   const head = el("tr")
@@ -274,7 +302,31 @@ export function CommissionsAdminPanel({
     staleTime: 60_000,
   })
   const owed = owedQuery.data?.data ?? null
-  const otherMonths = (owed?.months ?? []).filter((item) => compareMonths(item, period) !== 0)
+  // Cada moneda con lo suyo; un mes con algo en dos monedas sale una vez, con las dos cifras.
+  const owedAll = owed ? [owed, ...(owed.others ?? [])].filter((item) => item.owedCents > 0 || item === owed) : []
+  const owedMonths = new Map<string, YearMonth & { amounts: Array<{ cents: number; currency: string }> }>()
+  for (const item of owedAll)
+    for (const month of item.months) {
+      const key = `${month.year}-${month.month}`
+      const entry = owedMonths.get(key) ?? { year: month.year, month: month.month, amounts: [] }
+      entry.amounts.push({ cents: month.cents, currency: item.currency })
+      owedMonths.set(key, entry)
+    }
+  const otherMonths = [...owedMonths.values()]
+    .filter((item) => compareMonths(item, period) !== 0)
+    .sort((a, b) => compareMonths(b, a))
+  const unassignedQuery = useQuery({
+    queryKey: commissionKeys.unassigned,
+    queryFn: fetchUnassignedCommissionSessions,
+    enabled: canWrite,
+    staleTime: 60_000,
+  })
+  const unassigned = unassignedQuery.data?.data ?? []
+  // Con una sola moneda, el importe del mes sin símbolo, como siempre; con dos, cada uno con el suyo.
+  const monthAmounts = (amounts: Array<{ cents: number; currency: string }>): string =>
+    owedAll.length > 1
+      ? amountsWords(amounts, locale)
+      : plainAmount(amounts[0]?.cents ?? 0, amounts[0]?.currency ?? "", locale)
   const members = useOrgMembers()
   const [newRateOpen, setNewRateOpen] = useState(false)
 
@@ -287,6 +339,19 @@ export function CommissionsAdminPanel({
   })
 
   const rows = monthQuery.data?.data ?? []
+  // Lo del mes entre todos, en cada moneda: nunca se suman monedas distintas.
+  const monthTotals: Array<{ currency: string; pendingCents: number; commissionCents: number }> = []
+  for (const view of rows.flatMap((row) => [row, ...(row.others ?? [])])) {
+    const total = monthTotals.find((item) => item.currency === view.currency)
+    if (total) {
+      total.pendingCents += Math.max(0, view.pendingCents)
+      total.commissionCents += view.commissionCents
+    } else
+      monthTotals.push({ currency: view.currency, pendingCents: Math.max(0, view.pendingCents), commissionCents: view.commissionCents })
+  }
+  // La clínica cobra en dos monedas este mes: toda cifra lleva su símbolo.
+  const twoCurrencies = monthTotals.length > 1
+  const owingPeople = rows.filter((row) => [row, ...(row.others ?? [])].some((view) => view.pendingCents > 0)).length
   const rateById = new Map(rows.map((row) => [row.professionalUserId, row.rateBps]))
   // Quien puede atender y aún no tiene porcentaje: decide el permiso, no el nombre del rol.
   const withoutRate = members
@@ -319,19 +384,18 @@ export function CommissionsAdminPanel({
         />
       ) : null}
 
-      {rows.some((row) => row.pendingCents > 0) ? (
-        // Una línea, no otra tarjeta: cuánto falta pagar del mes entre todos.
+      {monthTotals.some((total) => total.pendingCents > 0) ? (
+        // Una línea, no otra tarjeta: cuánto falta pagar del mes entre todos, en cada moneda.
         <p className="text-sm text-muted-foreground">
           Falta pagar{" "}
           <span className="font-semibold text-foreground tabular-nums">
-            {formatMoney(
-              rows.reduce((total, row) => total + Math.max(0, row.pendingCents), 0),
-              rows[0]?.currency ?? "",
+            {amountsWords(
+              monthTotals.filter((total) => total.pendingCents > 0).map((total) => ({ cents: total.pendingCents, currency: total.currency })),
               locale,
             )}
           </span>{" "}
-          de {formatMoney(rows.reduce((total, row) => total + row.commissionCents, 0), rows[0]?.currency ?? "", locale)}{" "}
-          · {rows.filter((row) => row.pendingCents > 0).length === 1 ? "1 profesional" : `${rows.filter((row) => row.pendingCents > 0).length} profesionales`}
+          de {amountsWords(monthTotals.map((total) => ({ cents: total.commissionCents, currency: total.currency })), locale)} ·{" "}
+          {owingPeople === 1 ? "1 profesional" : `${owingPeople} profesionales`}
         </p>
       ) : null}
 
@@ -339,7 +403,12 @@ export function CommissionsAdminPanel({
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm text-muted-foreground">
           <span>
             Falta pagar en total{" "}
-            <span className="font-semibold text-foreground tabular-nums">{formatMoney(owed.owedCents, owed.currency, locale)}</span>
+            <span className="font-semibold text-foreground tabular-nums">
+              {amountsWords(
+                owedAll.filter((item) => item.owedCents > 0).map((item) => ({ cents: item.owedCents, currency: item.currency })),
+                locale,
+              )}
+            </span>
             . Hay cobros sin pagar en:
           </span>
           {otherMonths.slice(0, 6).map((item) =>
@@ -352,11 +421,11 @@ export function CommissionsAdminPanel({
                 className="h-auto px-0"
                 onClick={() => onPeriodChange({ year: item.year, month: item.month })}
               >
-                {monthLabel(item, locale)} ({plainAmount(item.cents, owed.currency, locale)})
+                {monthLabel(item, locale)} ({monthAmounts(item.amounts)})
               </Button>
             ) : (
               <span key={`${item.year}-${item.month}`}>
-                {monthLabel(item, locale)} ({plainAmount(item.cents, owed.currency, locale)})
+                {monthLabel(item, locale)} ({monthAmounts(item.amounts)})
               </span>
             ),
           )}
@@ -366,12 +435,41 @@ export function CommissionsAdminPanel({
         </div>
       ) : null}
 
+      {unassigned.some((item) => item.pendingCents > 0) ? (
+        <p className="text-sm text-muted-foreground">
+          Cobrado de sesiones que aún nadie hace:{" "}
+          <span className="font-medium text-foreground tabular-nums">
+            {amountsWords(
+              unassigned.filter((item) => item.pendingCents > 0).map((item) => ({ cents: item.pendingCents, currency: item.currency })),
+              locale,
+            )}
+          </span>
+          . No se paga todavía: su comisión será de quien haga cada sesión.
+        </p>
+      ) : null}
+      {unassigned.some((item) => item.stoppedCents > 0) ? (
+        <p className="text-sm text-muted-foreground">
+          Cobrado de tratamientos que se cancelaron antes de hacer todas sus sesiones:{" "}
+          <span className="font-medium text-foreground tabular-nums">
+            {amountsWords(
+              unassigned.filter((item) => item.stoppedCents > 0).map((item) => ({ cents: item.stoppedCents, currency: item.currency })),
+              locale,
+            )}
+          </span>
+          . Esa parte no es comisión de nadie.
+        </p>
+      ) : null}
+
       {rows.length > 0 ? (
         <section aria-label="Profesionales" className="elevated min-w-0 rounded-xl border bg-card">
           <ul className="flex min-w-0 flex-col divide-y">
             {rows.map((row) => {
               const name = row.professionalName ?? "Profesional fuera del equipo"
               const selected = row.professionalUserId === selectedId
+              const views = summaryCurrencies(row)
+              const owes = views.filter((view) => (view.owedCents ?? 0) > 0 && view.pendingCents <= 0)
+              // Lo que pide atención primero: lo que falta pagar en alguna moneda.
+              const leading = views.find((view) => view.status === "por_pagar") ?? views[0] ?? row
               return (
                 <li key={row.professionalUserId} className="min-w-0">
                   <Button
@@ -385,22 +483,34 @@ export function CommissionsAdminPanel({
                     <span className="flex min-w-0 flex-1 flex-col">
                       <span className="truncate font-medium text-foreground">{name}</span>
                       <span className="text-sm text-muted-foreground">
-                        Se cobró {plainAmount(row.baseCents, row.currency, locale)} de lo que
-                        atendió
+                        Se cobró{" "}
+                        {views.length > 1 || twoCurrencies
+                          ? amountsWords(views.map((view) => ({ cents: view.baseCents, currency: view.currency })), locale)
+                          : plainAmount(views[0]?.baseCents ?? row.baseCents, views[0]?.currency ?? row.currency, locale)}{" "}
+                        de lo que atendió
                         {" · "}
                         {row.rateBps > 0 ? percentLabel(row.rateBps, locale) : "sin porcentaje"}
                         {row.exceptionCount ? ` (+${row.exceptionCount === 1 ? "1 servicio aparte" : `${row.exceptionCount} servicios aparte`})` : ""}
                         {row.inTeam ? null : " · Ya no está en el equipo"}
                       </span>
+                      {owes.length > 0 ? (
+                        // No es algo que pagar: se descuenta solo del próximo pago.
+                        <span className="text-sm text-muted-foreground">
+                          {amountsWords(owes.map((view) => ({ cents: view.owedCents ?? 0, currency: view.currency })), locale)} por
+                          descontar del próximo pago
+                        </span>
+                      ) : null}
                     </span>
                     <span className="flex shrink-0 flex-col items-end gap-1">
-                      {/* Con un pago a cuenta, lo que importa es lo que falta. */}
-                      <span className="text-base font-semibold text-foreground tabular-nums">
-                        {row.status === "por_pagar" && row.paidCents > 0
-                          ? `Falta ${formatMoney(row.pendingCents, row.currency, locale)}`
-                          : formatMoney(row.commissionCents, row.currency, locale)}
-                      </span>
-                      <StatusBadge status={row.status} baseCents={row.baseCents} />
+                      {/* Con un pago a cuenta, lo que importa es lo que falta. Una cifra por moneda, apiladas. */}
+                      {views.map((view) => (
+                        <span key={view.currency} className="text-base font-semibold text-foreground tabular-nums">
+                          {view.status === "por_pagar" && view.paidCents > 0
+                            ? `Falta ${formatMoney(view.pendingCents, view.currency, locale)}`
+                            : formatMoney(view.commissionCents, view.currency, locale)}
+                        </span>
+                      ))}
+                      <StatusBadge status={leading.status} baseCents={leading.baseCents} />
                     </span>
                   </Button>
                 </li>
@@ -464,7 +574,9 @@ function ProfessionalDetail({
     enabled: professionalUserId !== null,
   })
   const detail = detailQuery.data?.data ?? null
-  const collections = detail ? countedLines(detail).length : 0
+  const collections = detail
+    ? [detail, ...(detail.others ?? [])].reduce((total, view) => total + countedLines(view).length, 0)
+    : 0
   const name = detail?.professionalName ?? fallbackName
   const monthText = monthLabel(period, locale)
   const description = detail
@@ -515,15 +627,10 @@ function ProfessionalDetailBody({
   period: YearMonth
   timeZone: string
 }) {
-  const navigate = useNavigate()
   const canWrite = usePermission("commissions.write")
-  const canFinance = usePermission("finance.read")
-  const payHintId = useId()
-  const [showAll, setShowAll] = useState(false)
   const [rateOpen, setRateOpen] = useState(false)
   // La excepción que se cambia (`null`: una nueva); cerrado si no hay nada.
   const [exceptionOpen, setExceptionOpen] = useState<{ exception: CommissionException | null } | null>(null)
-  const [payOpen, setPayOpen] = useState(false)
   const [voiding, setVoiding] = useState<CommissionPayment | null>(null)
   const paymentsQuery = useQuery({
     queryKey: commissionKeys.payments(detail.professionalUserId, period),
@@ -538,33 +645,17 @@ function ProfessionalDetailBody({
 
   const locale = detail.locale
   const zone = detail.timezone || timeZone
-  const money = (cents: number): string => formatMoney(cents, detail.currency, locale)
-  // Importes secundarios sin símbolo, como en el tablero; el principal de cada bloque lo conserva.
-  const plain = (cents: number): string => plainAmount(cents, detail.currency, locale)
   const day = (iso: string): string => dayLabel(iso, locale, zone, period.year)
-  const sorted = byAmount(detail.lines)
-  const visible = showAll ? sorted : sorted.slice(0, PREVIEW_ROWS)
   const payments = paymentsQuery.data?.data ?? []
-  // Se puede registrar mientras el mes tenga cobros sin pagar; si el descuento los cubre, no sale dinero.
-  const payable = detail.pendingCents > 0 || detail.discountCents > 0
-  const discountOnly = detail.pendingCents === 0 && detail.discountCents > 0
-  const partial = detail.paidCents > 0 || detail.discountCents > 0
-  // Lo que queda por descontar después de este pago, para el siguiente.
-  const discountLeft = detail.adjustmentCents - detail.discountCents
-  // El botón deshabilitado siempre dice por qué; el de solo descontar, qué va a pasar.
-  const payHint = discountOnly
-    ? `Lo de este mes (${money(detail.discountCents)}) se descuenta de comisiones ya pagadas de cobros que después se anularon: no sale dinero.${discountLeft > 0 ? ` Quedan ${money(discountLeft)} por descontar en los próximos pagos.` : ""}`
-    : payable
-      ? discountLeft > 0
-        ? `Quedan ${money(discountLeft)} por descontar en los próximos pagos.`
-        : null
-      : detail.status === "pagado"
-        ? "No queda nada por pagar de este mes."
-        : detail.rateBps === 0 && detail.baseCents > 0
-          ? detail.inTeam
-            ? "No tiene un porcentaje fijado: fíjalo para calcular lo que le corresponde."
-            : "Ya no está en el equipo y no tenía un porcentaje fijado: no le corresponde comisión."
-          : "No hay nada por pagar: aún no se cobró nada de lo que atendió este mes."
+  // La comisión va en la moneda de lo cobrado (ADR 0155): cada moneda se mira y se paga aparte. La de
+  // la clínica no se muestra vacía si solo hubo cobros en la otra.
+  const others = detail.others ?? []
+  const blocks =
+    others.length > 0 && detail.lines.length === 0 && detail.adjustmentCents === 0 && !detail.salary
+      ? others
+      : [detail, ...others]
+  const titled = blocks.length > 1 || blocks[0]?.currency !== detail.currency
+  const discountOnly = blocks.every((view) => view.pendingCents === 0 && view.discountCents > 0)
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
@@ -610,188 +701,16 @@ function ProfessionalDetailBody({
         )}
       </div>
 
-      {sorted.length === 0 ? (
-        <EmptyState
-          title="Sin cobros este mes"
-          description="Cuando se cobre algo de lo que atendió, aparece aquí con su comisión."
-          actionLabel={canFinance ? "Abrir Finanzas" : undefined}
-          onAction={() => void navigate({ to: "/finance" })}
+      {blocks.map((view) => (
+        <CommissionCurrencyBlock
+          key={view.currency}
+          view={view}
+          heading={titled ? `En ${currencyWord(view.currency, locale)}` : null}
+          name={name}
+          period={period}
+          zone={zone}
         />
-      ) : (
-        <div className="flex min-w-0 flex-col gap-1">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead scope="col" className="h-9 pl-0">
-                  Cobro
-                </TableHead>
-                <TableHead scope="col" className="h-9 text-right">
-                  Cobrado
-                </TableHead>
-                <TableHead scope="col" className="h-9 pr-0 text-right">
-                  Comisión
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {visible.map((line) => (
-                <TableRow key={lineKey(line)}>
-                  <TableCell className="py-2 pl-0 whitespace-normal">
-                    <span className="font-medium">{line.patientName || "Paciente"}</span>
-                    <span className="text-muted-foreground"> · {line.description}</span>
-                    <span className="block text-xs text-muted-foreground">{lineFacts(line, day, locale, detail.currency)}</span>
-                    {line.voidedAfterPaid ? (
-                      <Badge variant="destructive" className="ml-2">
-                        Anulado después de pagado
-                      </Badge>
-                    ) : line.settled ? (
-                      <Badge variant="success" className="ml-2">
-                        {line.paidAt ? `Liquidado el ${day(line.paidAt)}` : "Liquidado"}
-                      </Badge>
-                    ) : null}
-                  </TableCell>
-                  <TableCell
-                    className={cn(
-                      "py-2 text-right text-muted-foreground tabular-nums",
-                      line.voidedAfterPaid && "line-through",
-                    )}
-                  >
-                    {plain(line.baseCents)}
-                  </TableCell>
-                  <TableCell
-                    className={cn(
-                      "py-2 pr-0 text-right font-medium tabular-nums",
-                      line.voidedAfterPaid && "text-muted-foreground line-through",
-                    )}
-                  >
-                    {plain(line.commissionCents)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          {sorted.length > PREVIEW_ROWS ? (
-            <div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="-ml-3"
-                aria-expanded={showAll}
-                onClick={() => setShowAll((value) => !value)}
-              >
-                {showAll ? "Ver menos" : `Ver los ${sorted.length} cobros`}
-              </Button>
-            </div>
-          ) : null}
-        </div>
-      )}
-
-      {detail.adjustments.length > 0 ? (
-        <section aria-label="Por descontar" className="flex min-w-0 flex-col gap-2">
-          <h3 className="text-sm font-semibold">Por descontar</h3>
-          <p className="text-sm text-muted-foreground">
-            Comisiones ya pagadas de cobros que después se anularon. Se descuentan de los próximos
-            pagos que registres, de este mes o de otro, hasta completarse.
-          </p>
-          <ul className="flex min-w-0 flex-col divide-y rounded-lg border">
-            {detail.adjustments.map((adjustment) => (
-              <li
-                key={adjustment.applicationId}
-                className="flex min-w-0 items-baseline gap-3 px-3 py-2 text-sm"
-              >
-                <span className="min-w-0 flex-1">
-                  <span className="font-medium">{adjustment.patientName || "Paciente"}</span>
-                  <span className="text-muted-foreground">
-                    {" · "}
-                    {adjustment.description}
-                    {adjustment.paidAt ? ` · se pagó el ${day(adjustment.paidAt)}` : ""}
-                  </span>
-                </span>
-                <span className="shrink-0 font-medium tabular-nums">
-                  −{plain(adjustment.commissionCents)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
-      <dl className="flex flex-col gap-2 border-t pt-4 text-sm">
-        <div className="flex items-baseline justify-between gap-3">
-          <dt className="text-muted-foreground">Cobrado de lo que atendió</dt>
-          <dd className="tabular-nums">{plain(detail.baseCents)}</dd>
-        </div>
-        {detail.salary ? (
-          // El sueldo se paga en Gastos; aquí solo se ve junto a la comisión.
-          <div className="flex items-baseline justify-between gap-3">
-            <dt className="text-muted-foreground">Sueldo del mes</dt>
-            <dd className="tabular-nums">
-              {plain(detail.salary.cents)}
-              <span className="ml-2 text-xs text-muted-foreground">
-                {detail.salary.dueCents > 0 ? "por pagar en Gastos" : detail.salary.paidAt ? `pagado el ${day(detail.salary.paidAt)}` : "pagado"}
-              </span>
-            </dd>
-          </div>
-        ) : null}
-        <div className="flex items-baseline justify-between gap-3">
-          <dt className="font-semibold">{detail.salary ? "Comisión" : "Le corresponde"}</dt>
-          <dd className="text-xl font-bold tabular-nums">{money(detail.commissionCents)}</dd>
-        </div>
-        {detail.paidCents > 0 ? (
-          <div className="flex items-baseline justify-between gap-3">
-            <dt className="text-muted-foreground">Ya pagado</dt>
-            <dd className="tabular-nums">{plain(detail.paidCents)}</dd>
-          </div>
-        ) : null}
-        {detail.discountedCents > 0 ? (
-          // Lo que los pagos de este mes ya descontaron: sin esto, «Le corresponde − Ya pagado» no cuadra.
-          <div className="flex items-baseline justify-between gap-3">
-            <dt className="text-muted-foreground">Ya descontado</dt>
-            <dd className="tabular-nums">−{plain(detail.discountedCents)}</dd>
-          </div>
-        ) : null}
-        {detail.discountCents > 0 ? (
-          <div className="flex items-baseline justify-between gap-3">
-            <dt className="text-muted-foreground">Se descuenta</dt>
-            <dd className="tabular-nums">−{plain(detail.discountCents)}</dd>
-          </div>
-        ) : null}
-        {partial && payable ? (
-          <div className="flex items-baseline justify-between gap-3">
-            <dt className="font-semibold">Falta pagar</dt>
-            <dd className="font-semibold tabular-nums">{money(detail.pendingCents)}</dd>
-          </div>
-        ) : null}
-      </dl>
-
-      {canWrite ? (
-        <div className="flex flex-col gap-2">
-          <Button
-            type="button"
-            className="w-full"
-            disabled={!payable}
-            aria-describedby={payHint ? payHintId : undefined}
-            onClick={() => setPayOpen(true)}
-          >
-            {discountOnly
-              ? "Registrar el descuento"
-              : payable
-                ? `Registrar el pago de ${money(detail.pendingCents)}`
-                : "Registrar el pago"}
-          </Button>
-          {payHint ? (
-            <p id={payHintId} className="text-sm text-muted-foreground">
-              {payHint}
-            </p>
-          ) : null}
-          {detail.lines.length > 0 ? (
-            <Button type="button" variant="outline" className="w-full" onClick={() => printLiquidation(detail, name, period, locale, zone)}>
-              Imprimir la liquidación
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
+      ))}
 
       {paymentsQuery.isPending ? (
         <Skeleton className="h-12 w-full" />
@@ -879,13 +798,6 @@ function ProfessionalDetailBody({
         currency={detail.currency}
         locale={locale}
       />
-      <PayDrawer
-        open={payOpen}
-        onClose={() => setPayOpen(false)}
-        detail={detail}
-        name={name}
-        period={period}
-      />
       <VoidPaymentDrawer
         payment={voiding}
         onClose={() => setVoiding(null)}
@@ -897,13 +809,284 @@ function ProfessionalDetailBody({
   )
 }
 
+/**
+ * Lo de un mes en una moneda: cada cobro con su comisión, lo que se descuenta, el resumen y el pago.
+ * Con dos monedas va uno por moneda, con su título: cada moneda se paga aparte.
+ */
+function CommissionCurrencyBlock({
+  view,
+  heading,
+  name,
+  period,
+  zone,
+}: {
+  view: MonthlyCommissions
+  /** «En dólares», si hay más de una moneda. */
+  heading: string | null
+  name: string
+  period: YearMonth
+  zone: string
+}) {
+  const navigate = useNavigate()
+  const canWrite = usePermission("commissions.write")
+  const canFinance = usePermission("finance.read")
+  const payHintId = useId()
+  const [showAll, setShowAll] = useState(false)
+  const [payOpen, setPayOpen] = useState(false)
+  const locale = view.locale
+  const day = (iso: string): string => dayLabel(iso, locale, zone, period.year)
+  const money = (cents: number): string => formatMoney(cents, view.currency, locale)
+  // Importes secundarios sin símbolo, como en el tablero; el principal de cada bloque lo conserva.
+  const plain = (cents: number): string => plainAmount(cents, view.currency, locale)
+  const sorted = byAmount(view.lines)
+  const visible = showAll ? sorted : sorted.slice(0, PREVIEW_ROWS)
+  // Se puede registrar mientras el mes tenga cobros sin pagar; si el descuento los cubre, no sale dinero.
+  const payable = view.pendingCents > 0 || view.discountCents > 0
+  const discountOnly = view.pendingCents === 0 && view.discountCents > 0
+  const partial = view.paidCents > 0 || view.discountCents > 0
+  // Lo que queda por descontar después de este pago, para el siguiente.
+  const discountLeft = view.adjustmentCents - view.discountCents
+  // El botón deshabilitado siempre dice por qué; el de solo descontar, qué va a pasar.
+  const payHint = discountOnly
+    ? `Lo de este mes (${money(view.discountCents)}) se descuenta de comisiones ya pagadas de cobros que después se anularon: no sale dinero.${discountLeft > 0 ? ` Quedan ${money(discountLeft)} por descontar en los próximos pagos.` : ""}`
+    : payable
+      ? discountLeft > 0
+        ? `Quedan ${money(discountLeft)} por descontar en los próximos pagos.`
+        : null
+      : (view.owedCents ?? 0) > 0
+        ? `${money(view.owedCents ?? 0)} por descontar del próximo pago${heading ? ` en ${currencyWord(view.currency, locale)}` : ""}: se le pagó la comisión de cobros que después se devolvieron y aún no hay cobros nuevos de donde descontarla. No hay que hacer nada: se descuenta sola.`
+        : view.status === "pagado"
+        ? "No queda nada por pagar de este mes."
+        : view.rateBps === 0 && view.baseCents > 0
+          ? view.inTeam
+            ? "No tiene un porcentaje fijado: fíjalo para calcular lo que le corresponde."
+            : "Ya no está en el equipo y no tenía un porcentaje fijado: no le corresponde comisión."
+          : "No hay nada por pagar: aún no se cobró nada de lo que atendió este mes."
+
+  return (
+    <section aria-label={heading ?? undefined} className="flex min-w-0 flex-col gap-5">
+      {heading ? <h3 className="border-b pb-1 text-base font-semibold">{heading}</h3> : null}
+      {sorted.length === 0 ? (
+        <EmptyState
+          title="Sin cobros este mes"
+          description="Cuando se cobre algo de lo que atendió, aparece aquí con su comisión."
+          actionLabel={canFinance ? "Abrir Finanzas" : undefined}
+          onAction={() => void navigate({ to: "/finance" })}
+        />
+      ) : (
+        <div className="flex min-w-0 flex-col gap-1">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col" className="h-9 pl-0">
+                  Cobro
+                </TableHead>
+                <TableHead scope="col" className="hidden h-9 text-right sm:table-cell">
+                  Cobrado
+                </TableHead>
+                <TableHead scope="col" className="h-9 pr-0 text-right">
+                  Comisión
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {visible.map((line) => (
+                <TableRow key={lineKey(line)}>
+                  <TableCell className="py-2 pl-0 whitespace-normal">
+                    <span className="font-medium">{line.patientName || "Paciente"}</span>
+                    <span className="text-muted-foreground"> · {line.description}</span>
+                    <span className="block text-xs text-muted-foreground">
+                      {lineFacts(line, day, locale, view.currency)}
+                      <span className="sm:hidden"> · cobrado {plain(line.baseCents)}</span>
+                    </span>
+                    {line.voidedAfterPaid ? (
+                      <Badge variant="destructive" className="ml-2">
+                        Anulado después de pagado
+                      </Badge>
+                    ) : line.settled ? (
+                      <Badge variant="success" className="ml-2">
+                        {line.paidAt ? `Liquidado el ${day(line.paidAt)}` : "Liquidado"}
+                      </Badge>
+                    ) : null}
+                  </TableCell>
+                  <TableCell
+                    className={cn(
+                      "hidden py-2 text-right text-muted-foreground tabular-nums sm:table-cell",
+                      line.voidedAfterPaid && "line-through",
+                    )}
+                  >
+                    {plain(line.baseCents)}
+                  </TableCell>
+                  <TableCell
+                    className={cn(
+                      "py-2 pr-0 text-right font-medium tabular-nums",
+                      line.voidedAfterPaid && "text-muted-foreground line-through",
+                    )}
+                  >
+                    {plain(line.commissionCents)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          {sorted.length > PREVIEW_ROWS ? (
+            <div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="-ml-3"
+                aria-expanded={showAll}
+                onClick={() => setShowAll((value) => !value)}
+              >
+                {showAll ? "Ver menos" : `Ver los ${sorted.length} cobros`}
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      )}
+
+      {view.adjustments.length > 0 ? (
+        <section aria-label="Por descontar" className="flex min-w-0 flex-col gap-2">
+          <h3 className="text-sm font-semibold">Por descontar</h3>
+          <p className="text-sm text-muted-foreground">
+            Comisiones ya pagadas de cobros que después se anularon. Se descuentan de los próximos
+            pagos que registres, de este mes o de otro, hasta completarse.
+          </p>
+          <ul className="flex min-w-0 flex-col divide-y rounded-lg border">
+            {view.adjustments.map((adjustment) => (
+              <li
+                key={adjustment.applicationId}
+                className="flex min-w-0 items-baseline gap-3 px-3 py-2 text-sm"
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="font-medium">{adjustment.patientName || "Paciente"}</span>
+                  <span className="text-muted-foreground">
+                    {" · "}
+                    {adjustment.description}
+                    {adjustment.paidAt ? ` · se pagó el ${day(adjustment.paidAt)}` : ""}
+                  </span>
+                </span>
+                <span className="shrink-0 font-medium tabular-nums">
+                  −{plain(adjustment.commissionCents)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      <dl className="flex flex-col gap-2 border-t pt-4 text-sm">
+        <div className="flex items-baseline justify-between gap-3">
+          <dt className="text-muted-foreground">Cobrado de lo que atendió</dt>
+          <dd className="tabular-nums">{heading ? money(view.baseCents) : plain(view.baseCents)}</dd>
+        </div>
+        {view.salary ? (
+          // El sueldo se paga en Gastos; aquí solo se ve junto a la comisión.
+          <div className="flex items-baseline justify-between gap-3">
+            <dt className="text-muted-foreground">Sueldo del mes</dt>
+            <dd className="tabular-nums">
+              {plain(view.salary.cents)}
+              <span className="ml-2 text-xs text-muted-foreground">
+                {view.salary.dueCents > 0 ? "por pagar en Gastos" : view.salary.paidAt ? `pagado el ${day(view.salary.paidAt)}` : "pagado"}
+              </span>
+            </dd>
+          </div>
+        ) : null}
+        <div className="flex items-baseline justify-between gap-3">
+          <dt className="font-semibold">{view.salary ? "Comisión" : "Le corresponde"}</dt>
+          <dd className="text-xl font-bold tabular-nums">{money(view.commissionCents)}</dd>
+        </div>
+        {view.paidCents > 0 ? (
+          <div className="flex items-baseline justify-between gap-3">
+            <dt className="text-muted-foreground">Ya pagado</dt>
+            <dd className="tabular-nums">{plain(view.paidCents)}</dd>
+          </div>
+        ) : null}
+        {view.discountedCents > 0 ? (
+          // Lo que los pagos de este mes ya descontaron: sin esto, «Le corresponde − Ya pagado» no cuadra.
+          <div className="flex items-baseline justify-between gap-3">
+            <dt className="text-muted-foreground">Ya descontado</dt>
+            <dd className="tabular-nums">−{plain(view.discountedCents)}</dd>
+          </div>
+        ) : null}
+        {view.discountCents > 0 ? (
+          <div className="flex items-baseline justify-between gap-3">
+            <dt className="text-muted-foreground">Se descuenta</dt>
+            <dd className="tabular-nums">−{plain(view.discountCents)}</dd>
+          </div>
+        ) : null}
+        {partial && payable ? (
+          <div className="flex items-baseline justify-between gap-3">
+            <dt className="font-semibold">Falta pagar</dt>
+            <dd className="font-semibold tabular-nums">{money(view.pendingCents)}</dd>
+          </div>
+        ) : !payable && (view.owedCents ?? 0) > 0 ? (
+          // No es un error ni algo que pagar: se descuenta solo del próximo pago.
+          <div className="flex items-baseline justify-between gap-3">
+            <dt className="font-semibold">Por descontar del próximo pago</dt>
+            <dd className="font-semibold tabular-nums">{money(view.owedCents ?? 0)}</dd>
+          </div>
+        ) : null}
+      </dl>
+
+      {canWrite ? (
+        <div className="flex flex-col gap-2">
+          <Button
+            type="button"
+            className="w-full"
+            disabled={!payable}
+            aria-describedby={payHint ? payHintId : undefined}
+            onClick={() => setPayOpen(true)}
+          >
+            {discountOnly
+              ? "Registrar el descuento"
+              : payable
+                ? `Registrar el pago de ${money(view.pendingCents)}`
+                : "Registrar el pago"}
+          </Button>
+          {payHint ? (
+            <p id={payHintId} className="text-sm text-muted-foreground">
+              {payHint}
+            </p>
+          ) : null}
+          {view.lines.length > 0 ? (
+            <Button type="button" variant="outline" className="w-full" onClick={() => printLiquidation(view, name, period, locale, zone, heading)}>
+              {heading ? `Imprimir la liquidación ${heading.toLocaleLowerCase(locale)}` : "Imprimir la liquidación"}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+
+      <PayDrawer
+        open={payOpen}
+        onClose={() => setPayOpen(false)}
+        detail={view}
+        name={name}
+        period={period}
+        currencyNamed={heading !== null}
+      />
+    </section>
+  )
+}
+
 // --- Otro porcentaje o un monto para un servicio ---------------------------------------
 
-/** «45 %» o «S/ 150.00 por cada uno». */
+/** «45 %» o «S/ 150.00 por cada uno», en la moneda del monto. */
 function exceptionWords(exception: CommissionException, locale: string, currency: string): string {
   return exception.fixedCents !== null
-    ? `${formatMoney(exception.fixedCents, currency, locale)} por cada uno`
+    ? `${formatMoney(exception.fixedCents, exception.fixedCurrency ?? currency, locale)} por cada uno`
     : percentLabel(exception.rateBps ?? 0, locale)
+}
+
+/** El monto quedó en otra moneda que el precio del servicio: no vale hasta escribirlo de nuevo. */
+function exceptionStale(exception: CommissionException): boolean {
+  return (
+    exception.fixedCents !== null &&
+    Boolean(exception.fixedCurrency) &&
+    Boolean(exception.serviceCurrency) &&
+    exception.fixedCurrency !== exception.serviceCurrency
+  )
 }
 
 /**
@@ -964,6 +1147,13 @@ function ExceptionList({
                     </span>
                     {exception.effectiveFrom ? ` · desde el ${dayLabel(exception.effectiveFrom, locale, zone, year)}` : ""}
                   </span>
+                  {exceptionStale(exception) ? (
+                    // Nunca se convierte: lo atendido desde el cambio queda sin regla hasta escribirlo.
+                    <span className="block text-xs text-destructive">
+                      El servicio ahora tiene su precio en {currencyWord(exception.serviceCurrency ?? "", locale)}: vuelve a
+                      escribir el monto para que valga.
+                    </span>
+                  ) : null}
                 </span>
                 {canWrite ? (
                   <RowActions
@@ -1016,11 +1206,27 @@ function ExceptionDrawer({
   locale: string
 }) {
   const queryClient = useQueryClient()
+  // El monto va en la moneda del precio del servicio: la comisión va en la moneda de lo cobrado.
+  const [picked, setPicked] = useState<{ priceCents: number; currency: string; billingMode: string } | null>(null)
+  const service =
+    picked ??
+    (exception?.serviceCurrency
+      ? {
+          priceCents: exception.servicePriceCents ?? 0,
+          currency: exception.serviceCurrency,
+          billingMode: exception.billingMode ?? "treatment",
+        }
+      : null)
+  const amountCurrency = service?.currency ?? currency
   const initial = {
     serviceId: exception?.serviceId ?? "",
     kind: exception?.fixedCents !== null && exception?.fixedCents !== undefined ? "fixed" : "percent",
     percent: exception?.rateBps !== null && exception?.rateBps !== undefined ? percentInput(exception.rateBps, locale) : "",
-    amount: exception?.fixedCents ? formatMoneyInput(exception.fixedCents, currency, locale) : "",
+    // Un monto que quedó en otra moneda se escribe de nuevo: nunca se convierte.
+    amount:
+      exception?.fixedCents && !exceptionStale(exception)
+        ? formatMoneyInput(exception.fixedCents, exception.fixedCurrency ?? currency, locale)
+        : "",
   }
   const form = useAppForm({
     defaultValues: initial,
@@ -1030,7 +1236,7 @@ function ExceptionDrawer({
         if (!value.serviceId) fields.serviceId = "Elige el servicio."
         if (value.kind === "percent" && rateBpsFromPercent(value.percent) === null)
           fields.percent = "Escribe un porcentaje entre 0 y 100, con dos decimales como máximo."
-        const amount = parseAmount(value.amount, currency, locale)
+        const amount = parseAmount(value.amount, amountCurrency, locale)
         if (value.kind === "fixed" && (amount === null || amount <= 0)) fields.amount = "Escribe un monto mayor que cero."
         return Object.keys(fields).length > 0 ? { fields } : undefined
       },
@@ -1040,11 +1246,11 @@ function ExceptionDrawer({
         professionalUserId: professional.userId,
         serviceId: value.serviceId,
         ...(value.kind === "fixed"
-          ? { fixedCents: parseAmount(value.amount, currency, locale) ?? 0 }
+          ? { fixedCents: parseAmount(value.amount, amountCurrency, locale) ?? 0 }
           : { rateBps: rateBpsFromPercent(value.percent) ?? 0 }),
       })
       void queryClient.invalidateQueries({ queryKey: commissionKeys.all })
-      toast.success("Guardado: vale para lo que se cobre desde hoy")
+      toast.success("Guardado: vale para lo que se atienda desde hoy")
       onClose()
     },
   })
@@ -1053,8 +1259,12 @@ function ExceptionDrawer({
     fieldMap: { rateBps: "percent", fixedCents: "amount" },
   })
   const kind = useStore(form.store, (state) => state.values.kind)
+  const amountText = useStore(form.store, (state) => state.values.amount)
+  const typed = parseAmount(amountText, amountCurrency, locale)
+  const overPrice = service !== null && service.priceCents > 0 && typed !== null && typed > service.priceCents
   const key = `${exception?.serviceId ?? ""}:${exception?.rateBps ?? ""}:${exception?.fixedCents ?? ""}`
   useEffect(() => {
+    if (open) setPicked(null)
     if (open) form.reset(initial)
     // Cada apertura parte de la excepción elegida (o de nada).
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1065,7 +1275,7 @@ function ExceptionDrawer({
       open={open}
       onClose={onClose}
       title={exception ? `Cambiar · ${exception.serviceName}` : "Otro porcentaje o monto para un servicio"}
-      description={`Para ${professional.name}. Vale para lo que se cobre desde hoy: lo ya cobrado conserva lo que tenía.`}
+      description={`Para ${professional.name}. Vale para lo que se atienda desde hoy: lo atendido antes conserva lo que tenía, aunque se cobre después.`}
       submitLabel="Guardar"
     >
       <div className="flex flex-col gap-4">
@@ -1080,7 +1290,12 @@ function ExceptionDrawer({
                     invalid={control.invalid}
                     aria-describedby={control.describedBy}
                     onBlur={control.onBlur}
-                    onChange={(service) => field.handleChange(service?.id ?? "")}
+                    onChange={(chosen) => {
+                      field.handleChange(chosen?.id ?? "")
+                      setPicked(
+                        chosen ? { priceCents: chosen.priceCents, currency: chosen.currency, billingMode: chosen.billingMode } : null,
+                      )
+                    }}
                     placeholder="Busca el servicio"
                   />
                 )}
@@ -1110,8 +1325,22 @@ function ExceptionDrawer({
           <form.AppField name="amount">
             {(field) => (
               <field.TextField
-                label={`Monto (${currency})`}
-                description="Lo mismo por cada uno, sin importar el precio. Si se cobra en partes, en proporción a lo cobrado."
+                label={`Monto en ${currencyWord(amountCurrency, locale)}`}
+                description={
+                  service === null ? (
+                    "Elige primero el servicio: el monto va en la moneda de su precio."
+                  ) : overPrice ? (
+                    <span className="font-medium text-foreground">
+                      Es más que el precio del servicio ({formatMoney(service.priceCents, service.currency, locale)}). Nunca se
+                      paga más de lo cobrado, así que no llegará a pagarse entero.
+                    </span>
+                  ) : service.billingMode === "session" ? (
+                    "Se gana en cada sesión que se cobre, nunca más de lo cobrado."
+                  ) : (
+                    "Lo mismo por cada uno, aunque se cobre con descuento; si se paga en partes, en proporción a lo pagado. Nunca más de lo cobrado."
+                  )
+                }
+                disabled={service === null}
                 inputMode="decimal"
                 inputClassName="w-40"
               />
@@ -1238,7 +1467,7 @@ function RateDrawer({
               description={
                 firstRate
                   ? "Es su primer porcentaje: vale también para lo ya cobrado que aún no se paga."
-                  : `Vale para lo que se cobre desde hoy. Lo cobrado antes conserva el ${percentLabel(currentRateBps, locale)}.`
+                  : `Vale para lo que se atienda desde hoy. Lo atendido antes conserva el ${percentLabel(currentRateBps, locale)}, aunque se cobre después.`
               }
               inputMode="decimal"
               autoComplete="off"
@@ -1259,12 +1488,15 @@ function PayDrawer({
   detail,
   name,
   period,
+  currencyNamed = false,
 }: {
   open: boolean
   onClose: () => void
   detail: MonthlyCommissions
   name: string
   period: YearMonth
+  /** Hay más de una moneda: la caja se dice con la suya. */
+  currencyNamed?: boolean
 }) {
   const queryClient = useQueryClient()
   const sede = useActiveBranch()
@@ -1298,6 +1530,8 @@ function PayDrawer({
           ...period,
           professionalUserId: detail.professionalUserId,
           branchId: value.branchId || defaultBranch,
+          // Cada moneda se paga aparte, en la suya.
+          currency: detail.currency,
           expectedCents: detail.pendingCents,
           ...(notes ? { notes } : {}),
           ...(value.fromCash && canUseCash ? { fromCash: true } : {}),
@@ -1397,7 +1631,11 @@ function PayDrawer({
           <form.AppField name="fromCash">
             {(field) => (
               <FormChoiceField
-                label="Se pagó con el efectivo de la caja"
+                label={
+                  currencyNamed
+                    ? `Se pagó con el efectivo de la caja de ${currencyWord(detail.currency, detail.locale)}`
+                    : "Se pagó con el efectivo de la caja"
+                }
                 description={
                   !fromCash
                     ? "Déjala sin marcar si se pagó por transferencia u otro medio: no toca la caja."
@@ -1568,7 +1806,15 @@ export function MyCommissionsPanel({
   const format = mine.locale || locale
   const money = (cents: number): string => formatMoney(cents, mine.currency, format)
   const plain = (cents: number): string => plainAmount(cents, mine.currency, format)
-  const sorted = byAmount(mine.lines)
+  // Lo cobrado en otra moneda le da su comisión en esa moneda (ADR 0155): cada cifra con su símbolo.
+  const others = mine.others ?? []
+  const currencyOf = new Map<string, string>()
+  for (const view of [mine, ...others]) for (const line of view.lines) currencyOf.set(lineKey(line), view.currency)
+  const lineAmount = (cents: number, line: CommissionLine): string =>
+    others.length > 0
+      ? formatMoney(cents, currencyOf.get(lineKey(line)) ?? mine.currency, format)
+      : plain(cents)
+  const sorted = [...byAmount(mine.lines), ...others.flatMap((view) => byAmount(view.lines))]
   const visible = showAll ? sorted : sorted.slice(0, PREVIEW_ROWS)
   const counted = countedLines(mine)
   // Lo ya pagado conserva su porcentaje: solo se dice uno si todos los cobros comparten el mismo.
@@ -1636,6 +1882,21 @@ export function MyCommissionsPanel({
           </span>
         </div>
         {statusNote ? <p className="mt-2 text-sm text-muted-foreground">{statusNote}</p> : null}
+        {others.map((view) => (
+          // Lo de otra moneda va aparte: se paga en esa moneda.
+          <p key={view.currency} className="mt-2 text-sm">
+            <span className="text-muted-foreground">En {currencyWord(view.currency, format)}: </span>
+            <span className="font-semibold tabular-nums">{formatMoney(view.commissionCents, view.currency, format)}</span>
+            <span className="text-muted-foreground">
+              {" · "}
+              {view.pendingCents > 0
+                ? `falta pagarte ${formatMoney(view.pendingCents, view.currency, format)}`
+                : (view.owedCents ?? 0) > 0
+                  ? `se descuentan ${formatMoney(view.owedCents ?? 0, view.currency, format)} de tu próximo pago en ${currencyWord(view.currency, format)}`
+                  : commissionStatusLabel(view.status, view.baseCents).toLocaleLowerCase(format)}
+            </span>
+          </p>
+        ))}
         {mine.hasRate && mine.attended && mine.attended.unpaidCents > 0 ? (
           // Lo atendido que aún no se cobra: no se perdió; comisiona en el mes en que se cobre.
           <p className="mt-2 text-sm text-muted-foreground">
@@ -1655,7 +1916,7 @@ export function MyCommissionsPanel({
                   {payment.voidedAt ? `, anulado el ${dayLabel(payment.voidedAt, format, zone, period.year)}` : ""}
                 </span>
                 <span className={`shrink-0 tabular-nums ${payment.voidedAt ? "text-muted-foreground line-through" : "font-medium"}`}>
-                  {plain(payment.commissionCents)}
+                  {others.length > 0 ? formatMoney(payment.commissionCents, payment.currency, format) : plain(payment.commissionCents)}
                 </span>
               </li>
             ))}
@@ -1682,10 +1943,15 @@ export function MyCommissionsPanel({
                   <div className="min-w-0 flex-1">
                     <p className="font-medium">{line.patientName || "Paciente"}</p>
                     <p className="text-sm text-muted-foreground">
-                      {line.description} · cobrado {plain(line.baseCents)}
+                      {line.description} · cobrado {lineAmount(line.baseCents, line)}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      {lineFacts(line, (iso) => dayLabel(iso, format, zone, period.year), format, mine.currency)}
+                      {lineFacts(
+                        line,
+                        (iso) => dayLabel(iso, format, zone, period.year),
+                        format,
+                        currencyOf.get(lineKey(line)) ?? mine.currency,
+                      )}
                     </p>
                     {line.voidedAfterPaid ? (
                       <p className="mt-1 text-sm text-destructive">
@@ -1702,7 +1968,7 @@ export function MyCommissionsPanel({
                   <span
                     className={`shrink-0 font-semibold tabular-nums ${line.voidedAfterPaid ? "text-muted-foreground line-through" : ""}`}
                   >
-                    {plain(line.commissionCents)}
+                    {lineAmount(line.commissionCents, line)}
                   </span>
                 </li>
               ))}
@@ -1759,8 +2025,10 @@ export function MyCommissionsPanel({
                           : commissionStatusLabel(previous.status, previous.baseCents)}
                       </span>
                     </span>
-                    <span className="shrink-0 text-base font-semibold text-foreground tabular-nums">
-                      {formatMoney(previous.commissionCents, previous.currency, format)}
+                    <span className="flex shrink-0 flex-col items-end text-base font-semibold text-foreground tabular-nums">
+                      {summaryCurrencies(previous).map((view) => (
+                        <span key={view.currency}>{formatMoney(view.commissionCents, view.currency, format)}</span>
+                      ))}
                     </span>
                     <ChevronRight aria-hidden className="text-muted-foreground" />
                   </Button>

@@ -158,8 +158,9 @@ it("el odontólogo ve solo las suyas y no administra", async () => {
     }),
   })
   expect(pay.status).toBe(403)
-  // El mes de toda la clínica es de administración.
+  // El mes de toda la clínica es de administración, también lo cobrado de sesiones que nadie hizo.
   expect((await app.request("/commissions/month?year=2026&month=9")).status).toBe(403)
+  expect((await app.request("/commissions/unassigned")).status).toBe(403)
 })
 
 it("administración fija el porcentaje y ve el mes; caja no ve comisiones ni el resultado", async () => {
@@ -175,6 +176,12 @@ it("administración fija el porcentaje y ve el mes; caja no ve comisiones ni el 
   const rows = ((await month.json()) as { data: Array<{ professionalUserId: string; rateBps: number }> }).data
   // Con porcentaje fijado aparece en el mes aunque aún no tenga cobros.
   expect(rows.find((row) => row.professionalUserId === PROFESSIONAL)?.rateBps).toBe(4000)
+  // Cada moneda se mira aparte: la pedida, sin otras dentro.
+  const inDollars = await admin.request(`/commissions/monthly?year=2026&month=9&professionalUserId=${PROFESSIONAL}&currency=usd`)
+  expect(inDollars.status).toBe(200)
+  expect(((await inDollars.json()) as { data: { currency: string; others: unknown[] } }).data).toMatchObject({ currency: "USD", others: [] })
+  expect((await admin.request(`/commissions/monthly?year=2026&month=9&professionalUserId=${PROFESSIONAL}&currency=dolares`)).status).toBe(400)
+  expect((await admin.request("/commissions/unassigned")).status).toBe(200)
   expect((await admin.request("/reports/finance?period=2026-09")).status).toBe(200)
   const cashier = buildApp("cashier", CASHIER)
   const result = await cashier.request("/reports/finance?period=2026-09")

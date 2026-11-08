@@ -260,16 +260,16 @@ it("comisiones: porcentaje sobre lo cobrado de lo atendido, pago en un paso y aj
   // en negativo ni «por descontar»; los 600 esperan al próximo pago, de este mes o de otro.
   expect(owing).toMatchObject({ commissionCents: 1000, pendingCents: 0, adjustmentCents: 600, discountCents: 0, status: "pagado" })
   await expect(pay()).rejects.toMatchObject({ code: "COMMISSION_NOTHING_TO_PAY" })
-  // Llega un cobro nuevo de 10 000 más los 1 000 a favor que volvieron: al 20 %
-  // son 2 200, y el pago descuenta los 600.
+  // Llega un cobro nuevo de 10 000 más los 1 000 a favor que volvieron: es de la misma atención, así
+  // que va al 10 % de su día aunque hoy rija el 20 % (ADR 0155): son 1 100, y el pago descuenta los 600.
   await collectMore(10000)
-  expect(await view()).toMatchObject({ pendingCents: 1600, status: "por_pagar" })
+  expect(await view()).toMatchObject({ pendingCents: 500, status: "por_pagar" })
   const third = await pay()
-  expect(third.expense!.amountCents).toBe(1600)
+  expect(third.expense!.amountCents).toBe(500)
   const settledUp = await view()
   expect(settledUp.adjustments).toHaveLength(0)
-  // «Ya pagado» es el dinero que salió: 1 000 + 600 + 1 600, no la comisión de cobros ya descontados.
-  expect(settledUp).toMatchObject({ pendingCents: 0, paidCents: 3200, status: "pagado" })
+  // «Ya pagado» es el dinero que salió: 1 000 + 600 + 500, no la comisión de cobros ya descontados.
+  expect(settledUp).toMatchObject({ pendingCents: 0, paidCents: 2100, status: "pagado" })
   // El segundo pago no se anula mientras el tercero tenga descontado un cobro suyo.
   await expect(
     f.run((tx) => voidCommissionSettlement(tx, "org_a", f.actor, second.settlement.id, { reason: "Prueba" })),
@@ -284,24 +284,24 @@ it("comisiones: porcentaje sobre lo cobrado de lo atendido, pago en un paso y aj
   })
 
   // Un descuento más grande que lo nuevo no bloquea el pago: se descuenta lo que alcanza y el resto
-  // espera. Se anula el cobro grande (su comisión de 2 200 ya se pagó en el tercer pago)…
+  // espera. Se anula el cobro grande (su comisión de 1 100 ya se pagó en el tercer pago)…
   const lastTicket = (await f.run((tx) =>
     ownerDb.execute<{ id: string }>(sql`select id from payment_ticket where organization_id = 'org_a' and patient_id = ${f.patient.id} and voided_at is null order by created_at desc limit 1`),
   ))[0]!
   await f.run((tx) => voidTicket(tx, "org_a", f.actor, f.patient.id, lastTicket.id, { reason: "Cobro errado", allowPostClose: false }))
-  expect(await view()).toMatchObject({ adjustmentCents: 2200, pendingCents: 0 })
+  expect(await view()).toMatchObject({ adjustmentCents: 1100, pendingCents: 0 })
   // …y llega un cobro de 5 000 que, con lo que volvió a favor, deja menos comisión que el descuento.
   await collectMore(5000)
   const partial = await view()
   const fresh = partial.lines.filter((line) => !line.settled).reduce((sum, line) => sum + line.commissionCents, 0)
   expect(fresh).toBeGreaterThan(0)
-  expect(fresh).toBeLessThan(2200)
+  expect(fresh).toBeLessThan(1100)
   expect(partial).toMatchObject({ discountCents: fresh, pendingCents: 0, status: "por_descontar" })
   // Se registra el descuento sin que salga dinero, y queda lo demás por descontar.
   const discountOnly = await pay()
   expect(discountOnly.expense).toBeNull()
   expect(discountOnly.settlement.commissionCents).toBe(0)
-  expect(await view()).toMatchObject({ adjustmentCents: 2200 - fresh, pendingCents: 0, status: "pagado" })
+  expect(await view()).toMatchObject({ adjustmentCents: 1100 - fresh, pendingCents: 0, status: "pagado" })
 
   // El gasto de un pago de comisión no se anula suelto…
   await expect(
@@ -328,10 +328,10 @@ it("comisiones: porcentaje sobre lo cobrado de lo atendido, pago en un paso y aj
   expect(afterVoidCashier.expenses.filter((e) => e.commission)).toEqual([
     expect.objectContaining({ concept: "Pago de comisiones", amountCents: paidLive }),
   ])
-  // El cobro liberado vuelve con el porcentaje del día en que se cobró (10 % de 10 000): el cambio
-  // al 20 % vale para lo cobrado desde entonces. Lo que quedaba por descontar se descuenta de él.
+  // El cobro liberado vuelve con el porcentaje del día de su atención (10 % de 10 000): el cambio
+  // al 20 % vale para lo atendido desde entonces. Lo que quedaba por descontar se descuenta de él.
   const freed = await view()
-  expect(freed.discountCents).toBe(Math.min(1000, 2200 - fresh))
+  expect(freed.discountCents).toBe(Math.min(1000, 1100 - fresh))
   expect(freed).toMatchObject({ pendingCents: 1000 - freed.discountCents, status: freed.discountCents === 1000 ? "por_descontar" : "por_pagar" })
 })
 

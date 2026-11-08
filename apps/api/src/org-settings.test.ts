@@ -449,6 +449,7 @@ it("la otra moneda la activa quien configura y el cambio de hoy también lo escr
     cashCents: 0,
     services: 0,
     pending: 0,
+    commissionsCents: 0,
   })
 
   const removed = await request("owner", "PUT", "/org-profile", { ...body, secondCurrency: null })
