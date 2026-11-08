@@ -123,6 +123,19 @@ test("elegir el color de la marca: vista previa, guardar, primer pintado, color 
   await page.evaluate(() => document.documentElement.classList.remove("dark"))
   await testInfo.attach("app-claro", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
 
+  // Los grises acompañan al color: con naranja se entibian, en claro las tarjetas siguen blancas
+  // y en oscuro el fondo es carbón cálido, no azul marino.
+  await block.getByRole("button", { name: "Naranja", exact: true }).click()
+  await block.getByRole("button", { name: "Usar este color" }).click()
+  await expect.poll(() => token(page, "--canvas")).toBe("#fbf7f6")
+  expect(await token(page, "--card")).toBe("#ffffff")
+  expect(await token(page, "--muted-foreground")).toBe("#5a524f")
+  await testInfo.attach("naranja-claro", { body: await page.screenshot(), contentType: "image/png" })
+  await page.evaluate(() => document.documentElement.classList.add("dark"))
+  expect(await token(page, "--card")).toBe("#231c1a")
+  await testInfo.attach("naranja-oscuro", { body: await page.screenshot(), contentType: "image/png" })
+  await page.evaluate(() => document.documentElement.classList.remove("dark"))
+
   // Volver al de fábrica quita el color: la cabecera ya no lo escribe.
   await block.getByRole("button", { name: "Volver al turquesa de odentIA" }).click()
   await expect.poll(() => token(page, "--primary-fill")).toBe("#0e7490")
