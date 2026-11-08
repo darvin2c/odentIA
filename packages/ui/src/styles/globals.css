@@ -125,7 +125,7 @@
     --primary: #0e7490;
     --primary-foreground: #ffffff;
     /* El relleno del botón principal: el primario, salvo un color de clínica claro
-     * (ADR 0157), que se conserva exacto con letra oscura. El primario es siempre el
+     * (ADR 0162), que se conserva exacto con letra oscura. El primario es siempre el
      * tono legible para textos, bordes y foco. */
     --primary-fill: var(--primary);
     --primary-fill-foreground: var(--primary-foreground);

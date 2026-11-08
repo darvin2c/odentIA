@@ -3,7 +3,7 @@ import { apiFetch } from "./api"
 import { orgSlugFromHostname, requestHostname } from "./host"
 
 /**
- * El color de la marca de la clínica en su app y en sus páginas públicas (ADR 0157).
+ * El color de la marca de la clínica en su app y en sus páginas públicas (ADR 0162).
  *
  * La raíz de cada app lo pide al servidor y lo escribe en el `<head>` del primer
  * pintado, así nada parpadea en el color del producto. Solo redefine el bloque

@@ -1,5 +1,5 @@
 /**
- * El color de la marca de la clínica (ADR 0157): la clínica elige un solo color y de
+ * El color de la marca de la clínica (ADR 0162): la clínica elige un solo color y de
  * él salen el de la app, el de lo que ve el paciente, el del chat de su web y el de
  * la línea del membrete. La cuenta es una sola y vive aquí porque la usan igual la
  * pantalla (`clinic-app`), el chat y el papel (`services`), como la firma dibujada.

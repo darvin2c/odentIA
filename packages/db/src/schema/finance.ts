@@ -493,7 +493,21 @@ export const commissionRate = pgTable(
  * registrado como gasto de Personal (exactamente uno por liquidación).
  * 'borrador' se conserva para filas históricas sin acción real (no se borra
  * dato); lo nuevo siempre nace 'liquidada'.
+ *
+ * `kind` (ADR 0157): 'pago' es un pago (o un descuento sin pago). 'devuelto' y
+ * 'saldado' cierran lo que el profesional le debe a la clínica (comisiones ya
+ * pagadas de cobros que después se anularon): solo llevan líneas 'ajuste', no
+ * mueven gasto y `commissionCents` es lo que cerraron. 'devuelto' lleva su medio
+ * (UN/CEFACT 4461) y, en efectivo, el movimiento con que entró a la caja;
+ * 'saldado' lleva su motivo en `notes`.
  */
+export const COMMISSION_SETTLEMENT_KINDS = ["pago", "devuelto", "saldado"] as const
+export type CommissionSettlementKind = (typeof COMMISSION_SETTLEMENT_KINDS)[number]
+
+/** Cómo devolvió el profesional lo que debía: efectivo, transferencia o tarjeta (UN/CEFACT 4461). */
+export const COMMISSION_RETURN_TYPE_CODES = ["10", "30", "48"] as const
+export type CommissionReturnTypeCode = (typeof COMMISSION_RETURN_TYPE_CODES)[number]
+
 export const commissionSettlement = pgTable(
   "commission_settlement",
   {
@@ -512,6 +526,11 @@ export const commissionSettlement = pgTable(
     commissionCents: integer("commission_cents").notNull().default(0),
     expenseId: uuid("expense_id").references(() => expense.id),
     status: text("status").notNull().default("liquidada"),
+    kind: text("kind").notNull().default("pago"),
+    /** Lo devuelto: el tipo de su medio (10 efectivo, 30 transferencia, 48 tarjeta). Nulo en lo demás. */
+    methodTypeCode: text("method_type_code"),
+    /** Lo devuelto en efectivo: el ingreso a la caja, que se revierte si se anula. */
+    cashMovementId: uuid("cash_movement_id").references(() => cashMovement.id),
     notes: text("notes"),
     settledBy: text("settled_by").references(() => user.id),
     settledAt: timestamp("settled_at", { withTimezone: true }),
@@ -521,6 +540,22 @@ export const commissionSettlement = pgTable(
     voidReason: text("void_reason"),
   },
   (table) => [
+    check("commission_settlement_kind_check", sql`${table.kind} IN ('pago','devuelto','saldado')`),
+    // Solo lo devuelto tiene medio, y solo en efectivo entra a la caja.
+    check(
+      "commission_settlement_method_check",
+      sql`(${table.kind} = 'devuelto') = (${table.methodTypeCode} IS NOT NULL) AND (${table.methodTypeCode} IS NULL OR ${table.methodTypeCode} IN ('10','30','48'))`,
+    ),
+    check(
+      "commission_settlement_cash_check",
+      sql`${table.cashMovementId} IS NULL OR (${table.kind} = 'devuelto' AND ${table.methodTypeCode} = '10')`,
+    ),
+    // Darlo por saldado no mueve dinero y pide su motivo; ninguno de los dos deja un gasto.
+    check(
+      "commission_settlement_forgiven_check",
+      sql`${table.kind} <> 'saldado' OR length(trim(coalesce(${table.notes}, ''))) > 0`,
+    ),
+    check("commission_settlement_debt_expense_check", sql`${table.kind} = 'pago' OR ${table.expenseId} IS NULL`),
     // Un mes admite más de un pago (quincena, pago adelantado): cada pago
     // cubre lo pendiente hasta ese momento. Lo que impide pagar dos veces un
     // cobro es la unicidad por fuente de las líneas.

@@ -203,7 +203,7 @@ async function clinicWebchatView(
 
 /**
  * Saludo y aviso al sitio («Opciones avanzadas»). Cambiarlos no obliga a volver a pegar
- * la línea. El color ya no es del chat: es el de la marca de la clínica (ADR 0157).
+ * la línea. El color ya no es del chat: es el de la marca de la clínica (ADR 0162).
  */
 export async function updateClinicWebchat(
   tx: Db,

@@ -476,7 +476,7 @@ export function createApp(deps: AppDeps) {
     c.json(errorBody(c, "NOT_FOUND", "Recurso de cuenta no encontrado"), 404),
   )
 
-  // El color de la marca de cada clínica, para pintar su app y sus páginas públicas (ADR 0157).
+  // El color de la marca de cada clínica, para pintar su app y sus páginas públicas (ADR 0162).
   app.route("/api/public/appearance", createPublicAppearanceRoute({ db: deps.db }))
   app.route(
     "/api/public/patient-registration",
@@ -768,7 +768,7 @@ export function createApp(deps: AppDeps) {
     })
   })
 
-  // El color de la marca (ADR 0157): se guarda solo, como el logo, porque cambia al
+  // El color de la marca (ADR 0162): se guarda solo, como el logo, porque cambia al
   // instante lo que ven los pacientes. Quitarlo vuelve al color del producto.
   guarded.put("/org-profile/brand-color", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)

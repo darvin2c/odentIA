@@ -35,9 +35,10 @@ export interface ClosingCheck {
   /** «¿Cuándo vuelve?» y los controles que esta visita cumple al firmar. */
   controls: ClosingControls
   /**
-   * Lo trabajado hoy de un tratamiento de varias sesiones que sigue abierto:
-   * `finishing` llega con esta atención a sus sesiones previstas (el cierre
-   * pregunta «¿Terminaste?»); `continuing` queda en curso. `n` cuenta esta.
+   * Lo trabajado hoy de un tratamiento abierto: `finishing` llega con esta
+   * atención a sus sesiones previstas (el cierre pregunta «¿Terminaste?» con
+   * «Sí, terminar» elegido y firmar lo termina, ADR 0161); `continuing` queda
+   * en curso. `n` cuenta esta.
    * `notRegistered`: lo que traía la cita y hoy no tiene sesión registrada.
    */
   sessions?: { finishing: ClosingSession[]; continuing: ClosingSession[]; notRegistered?: ClosingSession[] }
@@ -275,8 +276,10 @@ function post<T>(url: string, body?: unknown): Promise<{ data: T }> {
   })
 }
 
-export function fetchEncounterClosing(patientId: string, encounterId: string) {
-  return apiFetch<{ data: ClosingCheck }>(`${base(patientId)}/encounters/${encounterId}/closing`)
+/** `addSession`: lo marcado «Falta otra sesión», para que lo anunciado (el odontograma) no lo dé por terminado. */
+export function fetchEncounterClosing(patientId: string, encounterId: string, addSession: readonly string[] = []) {
+  const query = addSession.length ? `?addSession=${addSession.map(encodeURIComponent).join(",")}` : ""
+  return apiFetch<{ data: ClosingCheck }>(`${base(patientId)}/encounters/${encounterId}/closing${query}`)
 }
 
 export function voidEncounterApi(patientId: string, encounterId: string, reason: string) {

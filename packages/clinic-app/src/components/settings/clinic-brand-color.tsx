@@ -35,7 +35,7 @@ function codeProblem(text: string): string | null {
 }
 
 /**
- * El color de la marca (ADR 0157, lienzo «Color de la marca»): un solo color para toda
+ * El color de la marca (ADR 0162, lienzo «Color de la marca»): un solo color para toda
  * la clínica. Primero los colores de su logo, porque casi nadie sabe el código de su
  * color; luego los sugeridos, y «Elegir otro color» con la paleta y el código. Elegir
  * solo cambia la vista previa: se guarda con «Usar este color», aparte del «Guardar»

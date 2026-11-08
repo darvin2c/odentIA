@@ -308,7 +308,7 @@ const advancedSchema = z.object({
 
 /**
  * «Opciones avanzadas»: saludo, aviso al sitio y el código. Un formulario con su «Guardar».
- * El color no es del chat: es el de la marca de la clínica (ADR 0157), y aquí se dice de dónde sale.
+ * El color no es del chat: es el de la marca de la clínica (ADR 0162), y aquí se dice de dónde sale.
  */
 function Advanced({ chat, onSaved }: { chat: ClinicWebchat; onSaved: (data: { data: ClinicWebchat }) => void }) {
   const [code, setCode] = useState<string | null>(null)

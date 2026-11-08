@@ -1204,7 +1204,7 @@ it("Spam y Bloquear: «Es spam» lo usa quien escribe en conversaciones; bloquea
   expect(back.data).toEqual({ agentReplies: false, topic: false })
 })
 
-it("el acceso al portal lo da quien ve la historia; recepción solo lo envía por WhatsApp, sin ver el enlace ni el código", async () => {
+it("el acceso al portal lo dan recepción y quien ve la historia, todos igual; caja no", async () => {
   const someone = randomUUID()
   const json = { "content-type": "application/json" }
   const give = (app: Hono) =>
@@ -1219,17 +1219,14 @@ it("el acceso al portal lo da quien ve la historia; recepción solo lo envía po
   const cashier = buildApp("cashier")
   expect((await cashier.request(`/portal/access?patientId=${someone}`)).status).toBe(403)
   expect((await resend(cashier, "whatsapp")).status).toBe(403)
-  // Recepción: ve la fila y envía por WhatsApp; no da el acceso, no muestra el QR ni lo quita.
-  const reception = buildApp("reception")
-  expect((await reception.request(`/portal/access?patientId=${someone}`)).status).not.toBe(403)
-  expect((await give(reception)).status).toBe(403)
-  expect((await resend(reception, "qr")).status).toBe(403)
-  expect((await resend(reception, "whatsapp")).status).not.toBe(403)
-  expect((await reception.request(`/portal/access/${someone}/revoke`, { method: "POST" })).status).toBe(403)
-  // Quien lee la historia (odontólogo, médico o la dueña) lo da y muestra el QR: llega al servicio.
-  for (const role of ["clinician", "owner"]) {
+  // Recepción, el odontólogo o el médico y la dueña: ven la fila, lo dan, muestran el QR,
+  // lo envían por WhatsApp y lo quitan; todo llega al servicio.
+  for (const role of ["reception", "clinician", "owner"]) {
     const app = buildApp(role)
+    expect((await app.request(`/portal/access?patientId=${someone}`)).status).not.toBe(403)
     expect((await give(app)).status).not.toBe(403)
     expect((await resend(app, "qr")).status).not.toBe(403)
+    expect((await resend(app, "whatsapp")).status).not.toBe(403)
+    expect((await app.request(`/portal/access/${someone}/revoke`, { method: "POST" })).status).not.toBe(403)
   }
 })

@@ -96,7 +96,7 @@ export const orgProfile = pgTable(
     exchangeFactor: numeric("exchange_factor"),
     exchangeRateAt: timestamp("exchange_rate_at", { withTimezone: true }),
     exchangeRateBy: text("exchange_rate_by").references(() => user.id, { onDelete: "set null" }),
-    // El color de la marca (ADR 0157): solo el que eligió la clínica; nulo, el del producto.
+    // El color de la marca (ADR 0162): solo el que eligió la clínica; nulo, el del producto.
     // Lo escribe solo `setClinicBrandColor`; los tonos legibles se calculan al mostrarlo.
     brandColor: text("brand_color"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

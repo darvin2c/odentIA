@@ -106,7 +106,7 @@ export function ConsentSheet({
       {clinic ? (
         <header
           className="flex flex-wrap items-center gap-3 border-b-2 border-foreground pb-3"
-          // La línea y las iniciales llevan el color de la marca, como el PDF (ADR 0157).
+          // La línea y las iniciales llevan el color de la marca, como el PDF (ADR 0162).
           style={clinic.brandInk ? { borderColor: clinic.brandInk } : undefined}
         >
           {clinic.logo ? (

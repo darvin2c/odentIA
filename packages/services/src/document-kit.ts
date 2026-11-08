@@ -5,7 +5,7 @@
  *
  * - El papel es de la clínica: tinta casi negra, gris y reglas finas, sin el
  *   color de odentIA. El color queda para ANULADO y REVOCADO y, si la clínica
- *   eligió el de su marca (ADR 0157), para la línea del membrete y sus iniciales.
+ *   eligió el de su marca (ADR 0162), para la línea del membrete y sus iniciales.
  * - Noto Sans y Noto Serif embebidas (OFL en `src/assets/fonts/`): sin red al
  *   imprimir y con nombres reales sin transliterar.
  * - Lo que la fuente no cubre (un emoji, otro alfabeto) sale como `?`: el sistema
@@ -51,7 +51,7 @@ export interface DocumentClinic {
   branchName: string | null
   logo: DocumentLogo | null
   /**
-   * El color de la marca en el papel (ADR 0157), ya legible sobre blanco: solo la línea
+   * El color de la marca en el papel (ADR 0162), ya legible sobre blanco: solo la línea
    * bajo el membrete y el cuadro de iniciales. Sin él, tinta, como siempre.
    */
   brandInk?: string | null

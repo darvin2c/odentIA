@@ -43,7 +43,7 @@ export function isWebchatTestSession(value: string): boolean {
   return value.startsWith("webchat:prueba:")
 }
 
-/** El color del chat ya no se guarda aquí: es el de la marca de la clínica (ADR 0157); uno viejo se descarta. */
+/** El color del chat ya no se guarda aquí: es el de la marca de la clínica (ADR 0162); uno viejo se descarta. */
 export type WebchatConnectionConfig = {
   /** El saludo: la primera burbuja de Sofi. */
   greeting?: string

@@ -1,4 +1,4 @@
-# 0157 · El color de la marca de la clínica
+# 0162 · El color de la marca de la clínica
 
 Fecha: 2026-11-08 · Estado: aceptada · Precisa [0115](0115-documentos-del-paciente-con-un-solo-kit.md) (el color en el papel) y [0076](0076-chat-web-de-la-clinica-y-una-fila-por-persona.md) (el chat ya no tiene color propio)
 
@@ -31,4 +31,4 @@ Todas las clínicas se veían iguales: turquesa en odentIA y morado en latidIA. 
 
 ## Referencias
 
-`packages/clinical/src/brand-color.ts`, `packages/clinic-app/src/lib/clinic-color.ts`, `components/settings/clinic-brand-color.tsx`, `packages/services/src/clinic-identity.ts` (`setClinicBrandColor`), `document-clinic.ts` (`clinicLogoColors`, `brandInk`), `apps/api/src/routes/public-appearance.ts`, migración `0065_color_de_la_marca`. Lienzo: https://claude.ai/artifact/2ua3TmzckN9Gw35nfEYzLe.
+`packages/clinical/src/brand-color.ts`, `packages/clinic-app/src/lib/clinic-color.ts`, `components/settings/clinic-brand-color.tsx`, `packages/services/src/clinic-identity.ts` (`setClinicBrandColor`), `document-clinic.ts` (`clinicLogoColors`, `brandInk`), `apps/api/src/routes/public-appearance.ts`, migración `0066_color_de_la_marca`. Lienzo: https://claude.ai/artifact/2ua3TmzckN9Gw35nfEYzLe.

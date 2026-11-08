@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm"
 import { Hono } from "hono"
 
 /**
- * Cómo se ve la clínica (ADR 0157): el color de su marca, para que su app y sus páginas
+ * Cómo se ve la clínica (ADR 0162): el color de su marca, para que su app y sus páginas
  * públicas (registro, su enlace, el portal, la reserva, el chat) salgan en su color desde
  * el primer pintado. Es un dato público, se ve en cada página suya. Una dirección que no
  * es de una clínica responde igual que una clínica sin color: no dice cuáles existen.

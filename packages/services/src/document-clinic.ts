@@ -99,7 +99,7 @@ async function clinicLogoOf(tx: Db, orgId: string): Promise<DocumentLogo | null>
 }
 
 /**
- * Los colores del logo para «De tu logo» (ADR 0157): hasta dos, del más presente al
+ * Los colores del logo para «De tu logo» (ADR 0162): hasta dos, del más presente al
  * menos, sin blancos, negros ni grises. Un logo en blanco y negro no da ninguno. Se
  * lee como el del papel (del propio almacenamiento) y falla en silencio: sin logo
  * legible, ninguno.

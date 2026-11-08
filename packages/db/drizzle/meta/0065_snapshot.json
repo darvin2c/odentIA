@@ -1,5 +1,5 @@
 {
-  "id": "52a022d3-f503-4483-8d7a-c6410f7c0148",
+  "id": "43d00f38-392c-4ac3-bb06-738fbb345a1c",
   "prevId": "c1fd10a0-e749-4e79-95f1-20a59d5c7aeb",
   "version": "7",
   "dialect": "postgresql",
@@ -29466,6 +29466,25 @@
           "notNull": true,
           "default": "'liquidada'"
         },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pago'"
+        },
+        "method_type_code": {
+          "name": "method_type_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cash_movement_id": {
+          "name": "cash_movement_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "notes": {
           "name": "notes",
           "type": "text",
@@ -29593,6 +29612,19 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
+        "commission_settlement_cash_movement_id_cash_movement_id_fk": {
+          "name": "commission_settlement_cash_movement_id_cash_movement_id_fk",
+          "tableFrom": "commission_settlement",
+          "tableTo": "cash_movement",
+          "columnsFrom": [
+            "cash_movement_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "commission_settlement_settled_by_user_id_fk": {
           "name": "commission_settlement_settled_by_user_id_fk",
           "tableFrom": "commission_settlement",
@@ -29626,6 +29658,26 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
+        "commission_settlement_kind_check": {
+          "name": "commission_settlement_kind_check",
+          "value": "\"commission_settlement\".\"kind\" IN ('pago','devuelto','saldado')"
+        },
+        "commission_settlement_method_check": {
+          "name": "commission_settlement_method_check",
+          "value": "(\"commission_settlement\".\"kind\" = 'devuelto') = (\"commission_settlement\".\"method_type_code\" IS NOT NULL) AND (\"commission_settlement\".\"method_type_code\" IS NULL OR \"commission_settlement\".\"method_type_code\" IN ('10','30','48'))"
+        },
+        "commission_settlement_cash_check": {
+          "name": "commission_settlement_cash_check",
+          "value": "\"commission_settlement\".\"cash_movement_id\" IS NULL OR (\"commission_settlement\".\"kind\" = 'devuelto' AND \"commission_settlement\".\"method_type_code\" = '10')"
+        },
+        "commission_settlement_forgiven_check": {
+          "name": "commission_settlement_forgiven_check",
+          "value": "\"commission_settlement\".\"kind\" <> 'saldado' OR length(trim(coalesce(\"commission_settlement\".\"notes\", ''))) > 0"
+        },
+        "commission_settlement_debt_expense_check": {
+          "name": "commission_settlement_debt_expense_check",
+          "value": "\"commission_settlement\".\"kind\" = 'pago' OR \"commission_settlement\".\"expense_id\" IS NULL"
+        },
         "commission_settlement_base_check": {
           "name": "commission_settlement_base_check",
           "value": "\"commission_settlement\".\"base\" IN ('cobrado','produccion')"
@@ -31417,12 +31469,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "brand_color": {
-          "name": "brand_color",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -31495,10 +31541,6 @@
         "org_profile_sheet_size_check": {
           "name": "org_profile_sheet_size_check",
           "value": "\"org_profile\".\"sheet_size\" IN ('A4','Letter')"
-        },
-        "org_profile_brand_color_check": {
-          "name": "org_profile_brand_color_check",
-          "value": "\"org_profile\".\"brand_color\" IS NULL OR \"org_profile\".\"brand_color\" ~ '^#[0-9a-f]{6}$'"
         },
         "org_profile_diagnosis_system_check": {
           "name": "org_profile_diagnosis_system_check",

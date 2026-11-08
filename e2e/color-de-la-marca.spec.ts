@@ -4,7 +4,7 @@ import { call, expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 
 /**
- * El color de la marca (ADR 0157): quien configura lo elige en Datos de la clínica, se
+ * El color de la marca (ADR 0162): quien configura lo elige en Datos de la clínica, se
  * guarda aparte con «Usar este color», y la app y sus páginas públicas lo muestran desde
  * el primer pintado. Un color claro conserva el relleno exacto con letra oscura.
  */

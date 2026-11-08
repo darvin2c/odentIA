@@ -9,7 +9,7 @@ import favicon from "../../../../assets/brand/latidia/favicon.svg?url"
 import appCss from "../styles/app.css?url"
 
 export const Route = createRootRoute({
-  // El color de la marca de la clínica (ADR 0157): en el navegador se pide una vez por pestaña
+  // El color de la marca de la clínica (ADR 0162): en el navegador se pide una vez por pestaña
   // (`loadClinicAppearance` lo recuerda) y otra vez al cambiarlo o si falló.
   loader: () => loadClinicAppearance(),
   head: ({ loaderData }) => ({

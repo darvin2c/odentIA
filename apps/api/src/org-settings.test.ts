@@ -457,7 +457,7 @@ it("la otra moneda la activa quien configura y el cambio de hoy también lo escr
   expect(await data<Record<string, unknown>>(removed)).toMatchObject({ secondCurrency: null, exchangeRate: null })
 })
 
-it("color de la marca: lo cambia quien configura, se guarda aparte y lo leen sus páginas públicas (ADR 0157)", async () => {
+it("color de la marca: lo cambia quien configura, se guarda aparte y lo leen sus páginas públicas (ADR 0162)", async () => {
   const region = { countryCode: "PE", currency: "PEN", timezone: "America/Lima", locale: "es-PE" }
   expect((await request("owner", "PUT", "/org-profile", { legalName: "Clínica Ajustes S.A.C.", ...region })).status).toBe(200)
   const appearance = async (slug: string) =>

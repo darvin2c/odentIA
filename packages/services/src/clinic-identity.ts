@@ -9,7 +9,7 @@
  * - La razón social va solo en el comprobante y en los papeles legales.
  * - El logo es una imagen pública (la ve quien abre el registro o su enlace):
  *   vive en el bucket público, como los avatares, en `organization.logo`.
- * - El color de la marca (ADR 0157) es uno solo para toda la clínica, en
+ * - El color de la marca (ADR 0162) es uno solo para toda la clínica, en
  *   `org_profile.brand_color`: lo ven el equipo, el paciente y la línea del papel.
  */
 import { brandPalette, normalizeBrandColor, PRODUCT_BRAND_COLORS } from "@odentia/clinical"

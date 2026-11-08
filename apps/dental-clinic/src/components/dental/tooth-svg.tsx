@@ -814,7 +814,7 @@ export function ToothSVG({
 
   // El foco usa contorno y no anillo: así convive con el anillo violeta de la selección.
   // Al pasar el mouse un anillo gris, y el foco en tinta: nunca el color de la clínica, que podría
-  // ser rojo o azul como los hallazgos de la norma (ADR 0157).
+  // ser rojo o azul como los hallazgos de la norma (ADR 0162).
   const archClass = `rounded bg-transparent p-0 transition-shadow focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground ${
     selected ? "ring-2 ring-violet-600" : disabled ? "" : "hover:ring-2 hover:ring-muted-foreground/50"
   } ${disabled ? (isPreview ? "" : "cursor-not-allowed opacity-60") : "cursor-pointer"}`

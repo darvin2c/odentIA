@@ -6,7 +6,7 @@
  */
 import { randomUUID } from "node:crypto"
 import { scheduleRoom } from "@odentia/db/schema/agenda"
-import { appointmentPlanItem, encounter, serviceCatalog, treatmentPlanItem } from "@odentia/db/schema/clinical"
+import { appointmentPlanItem, encounter, serviceCatalog, treatmentBudget, treatmentPlanItem } from "@odentia/db/schema/clinical"
 import { branch } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
@@ -203,10 +203,12 @@ it("D3: el cobro no cambia con dos citas: por tratamiento, la segunda sesión qu
     const two = await book(3, { serviceId: f.service.id })
     await ownerDb.execute(sql`update encounter set status = 'finalizada', signer_name = 'Clínico', signer_registration = 'COP 1' where id = ${f.encounter.id}`)
     const charged = []
-    for (const appointmentId of [one.id, two.id, null]) {
+    // En la segunda «Falta otra sesión»: sin decirlo, llegar a las previstas lo termina.
+    const visits: Array<[string | null, { addSessionPlanItemIds?: string[] }]> = [[one.id, {}], [two.id, { addSessionPlanItemIds: [item.id] }], [null, {}]]
+    for (const [appointmentId, answer] of visits) {
       const visit = await attention(f, appointmentId)
       await f.run((tx) => addEncounterProcedure(tx, ...f.args, visit, { planItemId: item.id }))
-      const closed = await f.run((tx) => finalizeEncounter(tx, ...f.args, visit))
+      const closed = await f.run((tx) => finalizeEncounter(tx, ...f.args, visit, answer))
       charged.push(closed.billing.lines.map((line) => line.reason ?? line.amountCents))
     }
     if (mode === "treatment") expect(charged).toEqual([[120_000], ["covered"], ["covered"]])
@@ -214,7 +216,7 @@ it("D3: el cobro no cambia con dos citas: por tratamiento, la segunda sesión qu
   }
 })
 
-it("D4: el cierre pregunta por lo trabajado hoy; sin elección no cierra nada, «Falta otra sesión» suma una y «Sí, terminar» lo completa", async () => {
+it("D4: el cierre pregunta por lo trabajado hoy; a mitad no cierra nada, «Falta otra sesión» suma una y «Sí, terminar» lo completa", async () => {
   const f = await clinicalFixture()
   const item = await acceptedTreatment(f, 2)
   const statusOf = async () => (await ownerDb.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.id, item.id)))[0]!
@@ -232,7 +234,7 @@ it("D4: el cierre pregunta por lo trabajado hoy; sin elección no cierra nada, �
   await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
   expect((await statusOf()).status).toBe("en_curso")
 
-  // Segunda: llega a las previstas. Sin elección sigue en curso: nada se termina solo.
+  // Segunda: llega a las previstas y pregunta. «Falta otra sesión» la deja en curso con una más.
   const second = await attention(f)
   await f.run((tx) => addEncounterProcedure(tx, ...f.args, second, { planItemId: item.id }))
   expect((await f.run((tx) => getEncounterClosing(tx, ...f.args, second))).sessions.finishing).toEqual([
@@ -327,13 +329,63 @@ it("D4: «Falta otra sesión» no cambia lo que se cobra en esa firma: por sesi�
   await ownerDb.update(treatmentPlanItem).set({ decisionStatus: "aceptado" }).where(eq(treatmentPlanItem.id, item.id))
   await ownerDb.execute(sql`update encounter set status = 'finalizada', signer_name = 'Clínico', signer_registration = 'COP 1' where id = ${f.encounter.id}`)
   const charged = []
-  for (const answer of [{}, {}, { addSessionPlanItemIds: [item.id] }]) {
+  for (const answer of [{}, { addSessionPlanItemIds: [item.id] }, { addSessionPlanItemIds: [item.id] }]) {
     const visit = await attention(f)
     await f.run((tx) => addEncounterProcedure(tx, ...f.args, visit, { planItemId: item.id }))
     const closed = await f.run((tx) => finalizeEncounter(tx, ...f.args, visit, answer))
     charged.push(closed.billing.lines.map((line) => line.reason ?? line.amountCents))
+    // Como quedó lo firmado antes de terminar por omisión: abierto con sus previstas ya hechas.
+    if (charged.length === 2) await ownerDb.update(treatmentPlanItem).set({ plannedSessions: 2 }).where(eq(treatmentPlanItem.id, item.id))
   }
   expect(charged).toEqual([[15_000], [15_000], ["sessions_complete"]])
   const [after] = await ownerDb.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.id, item.id))
   expect(after).toMatchObject({ status: "en_curso", plannedSessions: 4 })
+})
+
+it("X1: lo que llega a sus sesiones previstas se termina al firmar sin responder; lo que no llega sigue en curso", async () => {
+  const f = await clinicalFixture()
+  // Una resina de una sesión y una endodoncia de dos, aceptadas y hechas hoy.
+  const resin = await acceptedTreatment(f, 1)
+  const endo = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id, plannedSessions: 2 }),
+  )
+  await ownerDb.update(treatmentPlanItem).set({ decisionStatus: "aceptado" }).where(eq(treatmentPlanItem.id, endo.id))
+  await f.ready(f.encounter.id)
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: resin.id }))
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: endo.id }))
+  expect((await f.run((tx) => getEncounterClosing(tx, ...f.args, f.encounter.id))).sessions).toMatchObject({
+    finishing: [{ planItemId: resin.id, n: 1, m: 1 }],
+    continuing: [{ planItemId: endo.id, n: 1, m: 2 }],
+  })
+  // Firmar sin tocar «¿Terminaste?»: la resina queda realizada en esta atención.
+  await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
+  const statusOf = async (id: string) => (await ownerDb.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.id, id)))[0]!
+  expect(await statusOf(resin.id)).toMatchObject({ status: "realizado", plannedSessions: 1 })
+  expect((await statusOf(resin.id)).completedAt).toBeInstanceOf(Date)
+  expect(await statusOf(endo.id)).toMatchObject({ status: "en_curso", plannedSessions: 2 })
+  // La traza distingue lo terminado sin respuesta de «Sí, terminar».
+  const [signed] = await ownerDb.execute<{ n: number }>(
+    sql`select count(*)::int as n from audit_event where action = 'plan.item_completed_on_sign' and entity_id = ${resin.id}`,
+  )
+  expect(signed!.n).toBe(1)
+  // Ya no la piden como pendiente: solo falta la segunda sesión de la endodoncia.
+  const next = await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, all))
+  expect(next).toMatchObject({ kind: "continuar", action: { planItemIds: [endo.id] } })
+  const coordination = (await f.run((tx) => getTreatmentCoordination(tx, "org_a", f.patient.id))).treatments
+  expect(coordination.map((t) => t.id)).toEqual([endo.id])
+})
+
+it("X1: si lo que se termina al firmar no se puede terminar, la firma sigue, queda en curso y el resultado dice por qué", async () => {
+  const f = await clinicalFixture()
+  const resin = await acceptedTreatment(f, 1)
+  await f.ready(f.encounter.id)
+  await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: resin.id }))
+  // Su presupuesto se anuló a medias: completarlo ya no se puede.
+  const [row] = await ownerDb.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.id, resin.id))
+  await ownerDb.update(treatmentBudget).set({ status: "cancelado" }).where(eq(treatmentBudget.id, row!.budgetId!))
+  const closed = await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
+  expect(closed.encounter.status).toBe("finalizada")
+  expect(closed.keptOpen).toEqual([{ planItemId: resin.id, title: "Tratamiento propio", reason: expect.any(String) }])
+  const [after] = await ownerDb.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.id, resin.id))
+  expect(after).toMatchObject({ status: "en_curso" })
 })
